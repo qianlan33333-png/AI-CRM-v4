@@ -30,6 +30,12 @@ class BrowserCoverage(unittest.TestCase):
         self.assertFalse(early & later)
         self.assertEqual(early | later, set(select_journeys(listing, "all")))
 
+    def test_focused_selection_requires_only_the_named_discovered_journey(self):
+        name = "TestPostgreSQLMediaRefreshChromiumJourney"
+        self.assertEqual(select_journeys(name + "\nPASS\n", "all", [name]), [name])
+        with self.assertRaisesRegex(ValueError, "selected Chromium tests missing"):
+            select_journeys("PASS\n", "all", [name])
+
     def test_browser_execution_keeps_all_discovered_tests_with_suite_budget(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(dev_preflight.os.environ, {"AICRM_DATABASE_URL": "isolated-test"}):
             check = Preflight(Path(directory))
@@ -43,6 +49,18 @@ class BrowserCoverage(unittest.TestCase):
             pattern = command[command.index("-run") + 1]
             for name in REQUIRED_JOURNEYS | {extra}:
                 self.assertIn(name, pattern)
+
+    def test_browser_execution_accepts_a_focused_registered_journey(self):
+        name = "TestPostgreSQLMediaRefreshChromiumJourney"
+        with tempfile.TemporaryDirectory() as directory, patch.dict(dev_preflight.os.environ, {"AICRM_DATABASE_URL": "isolated-test"}):
+            check = Preflight(Path(directory))
+            listing = Path(directory) / "listing.log"
+            listing.write_text(name + "\nPASS\n")
+            with patch.object(check, "run", return_value=listing) as run, \
+                    patch.object(dev_preflight, "verify_journey_results", return_value={}):
+                check.browser("all", [name])
+            command = run.call_args_list[-1].args[1]
+            self.assertEqual(command[command.index("-run") + 1], "^(" + name + ")$")
 
     def test_missing_existing_test_fails(self):
         for name in REQUIRED_JOURNEYS:

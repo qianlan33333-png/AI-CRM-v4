@@ -372,6 +372,48 @@
       "policy": "verified_release_allowlist",
       "reason": "Root-owned staging build inputs and packages are retained until their matching receipt is promoted or explicitly expired by the release owner."
     },
+    "/opt/aicrm/source": {
+      "owner": "release",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Official GitHub source checkout on the domestic staging host; release cleanup never deletes source objects."
+    },
+    "/opt/aicrm/domestic": {
+      "owner": "release",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Domestic build cache, technical cursor, and exact build receipts require explicit release-owner maintenance."
+    },
+    "/opt/aicrm/cache": {
+      "owner": "release",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Persistent Go and npm build caches require explicit capacity maintenance."
+    },
+    "/opt/aicrm/toolchain": {
+      "owner": "release",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Pinned Go and Node toolchains require explicit release-owner upgrades."
+    },
+    "/opt/aicrm/domestic-incoming": {
+      "owner": "release",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Incoming transfer remains protected until its exact install result is reconciled."
+    },
+    "/opt/aicrm/domestic-receipts": {
+      "owner": "release",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Technical installation receipts are immutable release evidence."
+    },
+    "/opt/aicrm/database-backups": {
+      "owner": "release",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Migration-only database backups require explicit DBA retention decisions."
+    },
     "/run/aicrm-release-retention": {
       "owner": "platform",
       "scope": "subtree",
@@ -401,6 +443,12 @@
       "scope": "subtree",
       "policy": "never_delete_by_retention",
       "reason": "Root-owned fixed helper code; never process-file cleanup input."
+    },
+    "/usr/local/libexec/aicrm": {
+      "owner": "release",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Fixed domestic release helpers are updated only by a verified release change."
     },
     "/var/lib/aicrm-excel": {
       "owner": "platform",
