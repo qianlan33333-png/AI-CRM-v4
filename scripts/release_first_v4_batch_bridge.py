@@ -243,7 +243,7 @@ def validate(path: Path, *, batch_path: Path, queue: dict, merged_main: str | No
             same(pr.get('state'), 'open', 'live PR state')
             same(pr.get('base', {}).get('sha'), base, 'live PR base')
     if aggregate_number in numbers or aggregate_number == 19 or len(set(numbers)) != len(numbers) or \
-       not {3, 13, 15}.issubset(numbers) or not set(numbers).issubset({3, 13, 15, 17}):
+       set(numbers) != {3, 13, 15}:
         raise ValueError('first-v4 bridge member set invalid')
     old = [i for i in queue.get('items', []) if i.get('candidate_id') == OLD_CANDIDATE]
     if len(old) != 1 or old[0].get('status') != 'observing' or old[0].get('candidate_tree_sha') != OLD_TREE or old[0].get('package_sha256') != OLD_PACKAGE:
