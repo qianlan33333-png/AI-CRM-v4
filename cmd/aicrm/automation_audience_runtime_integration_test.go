@@ -524,6 +524,16 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 		}
 		return prior == 1 && added == 1 && complete == 2 && wecomServer.Uploads() == 6
 	})
+	var uniqueReferences, providerReceipts int
+	if err = native.QueryRow(ctx, `SELECT count(DISTINCT content_reference) FROM outbound_message_intents WHERE source_kind='automation_enrollment'`).Scan(&uniqueReferences); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM outbound_message_receipts WHERE message_id<>''`).Scan(&providerReceipts); err != nil {
+		t.Fatal(err)
+	}
+	if uniqueReferences != 2 || providerReceipts != 2 {
+		t.Fatalf("automatic recipient references/receipts=%d/%d, want 2/2", uniqueReferences, providerReceipts)
+	}
 	stopRuntime()
 	var enrollments, automaticEffects int
 	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_enrollments`).Scan(&enrollments); err != nil {
