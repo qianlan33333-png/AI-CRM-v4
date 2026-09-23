@@ -185,9 +185,7 @@ def build_candidate(config: dict, sha: str, base: str, base_release: Path | None
     out.parent.mkdir(parents=True, exist_ok=True)
     git(repo, "worktree", "add", "--detach", str(checkout), sha)
     try:
-        args = ["python3", "scripts/domestic_release_build.py", "build", "--repo", str(checkout), "--base", base, "--target", sha, "--out", str(out)]
-        if base_release is not None:
-            args += ["--base-release", str(base_release)]
+        args = ["python3", "scripts/domestic_release_build.py", "build", "--repo", str(checkout), "--base", base, "--target", sha, "--base-release", str(base_release) if base_release is not None else "none", "--out", str(out)]
         command(*args, cwd=checkout, timeout=7200)
     finally:
         git(repo, "worktree", "remove", "--force", str(checkout))
