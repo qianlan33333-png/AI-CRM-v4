@@ -1,11 +1,15 @@
 import json
 import hashlib
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+from release_coordinator import transition
+
 COORD = ROOT / "release_coordinator.py"
 
 
@@ -110,7 +114,6 @@ class CoordinatorTests(unittest.TestCase):
             {**identity,"candidate_id":"old-runtime","change_class":"runtime","status":"observing","base_main_sha":"f"*40,"events":[]},
             {**identity,"candidate_id":"governance","change_class":"governance_only","status":"handoff_ready","base_main_sha":base,"events":[]},
         ]}
-        from release_coordinator import transition
         transition(state,"governance","integration_check")
         transition(state,"governance","preview_building",main_sha=base)
         self.assertEqual(state["items"][1]["status"],"preview_building")
