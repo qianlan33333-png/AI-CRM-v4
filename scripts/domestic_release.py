@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Poll protected GitHub main and promote exact, locally built commits in order.
 
-Run as the unprivileged staging build account from a systemd timer. The only
-root operation is the fixed domestic-promote helper, via a narrow sudo rule.
+Run as the staging release controller. Source builds execute separately as
+``aicrm-build``; this controller invokes the fixed installer and performs
+read-only privileged host readback.
 """
 from __future__ import annotations
 
@@ -22,23 +23,34 @@ import time
 import urllib.request
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
+FILE_SHA = re.compile(r"^[0-9a-f]{64}$")
 REPO = "qianlan33333-png/AI-CRM-v4"
 BUILD_USER = "aicrm-build"
 BUILD_ROOT = Path("/opt/aicrm/domestic/build-worker")
 HOST_READBACK_CODE = """
-import hashlib, json, pathlib, subprocess, urllib.request
+import hashlib, json, pathlib, re, subprocess, sys, urllib.request
 p = pathlib.Path('/opt/aicrm/current').resolve(strict=True)
+target = sys.argv[1] if len(sys.argv) > 1 else p.name
+if not re.fullmatch(r'[0-9a-f]{40}', target):
+    raise SystemExit('invalid readback SHA')
 units = {}
 for name in ('aicrm.service', 'aicrm-effects-worker.service'):
     active = subprocess.run(('systemctl', 'is-active', '--quiet', name)).returncode == 0
     pid = subprocess.check_output(('systemctl', 'show', name, '-p', 'MainPID', '--value'), text=True).strip()
-    units[name] = {'active': active, 'pid': int(pid) if pid.isdigit() else 0}
+    executable = pathlib.Path(f'/proc/{pid}/exe').resolve(strict=True) if pid.isdigit() and int(pid) > 0 else None
+    units[name] = {'active': active, 'pid': int(pid) if pid.isdigit() else 0, 'executable': str(executable) if executable else None}
+receipt_path = pathlib.Path('/opt/aicrm/domestic-receipts') / f'{target}.json'
+receipt_exists = receipt_path.exists() or receipt_path.is_symlink()
+receipt = json.loads(receipt_path.read_text()) if receipt_exists and receipt_path.is_file() and not receipt_path.is_symlink() else None
 print(json.dumps({
     'current': str(p),
     'release_env': (p / 'release.env').read_text(),
     'manifest_sha256': hashlib.sha256((p / 'release-files.sha256').read_bytes()).hexdigest(),
     'readyz': json.load(urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)),
     'services': units,
+    'receipt_target_sha': target,
+    'receipt_exists': receipt_exists,
+    'receipt': receipt,
 }))
 """
 
@@ -134,13 +146,23 @@ def ssh_args(config: dict) -> list[str]:
     return ["ssh", "-i", config["prod_key"], "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={config['prod_known_hosts']}", "-o", "ConnectTimeout=15", f"{config['prod_user']}@{config['prod_host']}"]
 
 
-def prod_readback(config: dict) -> dict:
+def prod_readback(config: dict, receipt_sha: str | None = None) -> dict:
     # Entirely read-only. Also used after a result-unknown SSH interruption.
-    return json.loads(command(*ssh_args(config), "python3 -c " + shlex.quote(HOST_READBACK_CODE), timeout=30))
+    if receipt_sha is not None and not SHA.fullmatch(receipt_sha):
+        raise ValueError("invalid receipt SHA")
+    args = ["sudo python3 -c " + shlex.quote(HOST_READBACK_CODE)]
+    if receipt_sha is not None:
+        args.append(receipt_sha)
+    return json.loads(command(*ssh_args(config), *args, timeout=30))
 
 
-def stage_readback() -> dict:
-    return json.loads(command("python3", "-c", HOST_READBACK_CODE, timeout=30))
+def stage_readback(receipt_sha: str | None = None) -> dict:
+    if receipt_sha is not None and not SHA.fullmatch(receipt_sha):
+        raise ValueError("invalid receipt SHA")
+    args = ["sudo", "python3", "-c", HOST_READBACK_CODE]
+    if receipt_sha is not None:
+        args.append(receipt_sha)
+    return json.loads(command(*args, timeout=30))
 
 
 def bind_baseline(config: dict, prod_preview_sha: str) -> dict:
@@ -169,7 +191,7 @@ def bind_baseline(config: dict, prod_preview_sha: str) -> dict:
     stage_marker = Path("/opt/aicrm/current/release.env")
     if not stage_marker.is_file() or stage_marker.read_text() != f"AICRM_RELEASE_SHA={main_sha}\n":
         raise RuntimeError("staging baseline is not installed")
-    state = {"schema_version": 1, "status": "ready", "processed_sha": main_sha, "deployed_source_sha": main_sha, "prod_installed_sha": prod_preview_sha, "baseline_tree": main_tree, "baseline_prod_manifest_sha256": manifest_sha, "blocked_sha": None, "failure": None}
+    state = {"schema_version": 1, "status": "ready", "processed_sha": main_sha, "deployed_source_sha": main_sha, "prod_installed_sha": prod_preview_sha, "prod_installed_manifest_sha256": manifest_sha, "baseline_tree": main_tree, "baseline_prod_manifest_sha256": manifest_sha, "blocked_sha": None, "failure": None}
     atomic_json(state_path, state)
     return state
 
@@ -185,6 +207,23 @@ def verify_readback(data: dict, sha: str, manifest_sha256: str | None = None) ->
     for unit in ("aicrm.service", "aicrm-effects-worker.service"):
         if services.get(unit, {}).get("active") is not True or services[unit].get("pid", 0) <= 0:
             raise RuntimeError(f"installed service not active: {unit}")
+        expected_executable = f"/opt/aicrm/releases/{sha}/bin/aicrm"
+        if services[unit].get("executable") != expected_executable:
+            raise RuntimeError(f"installed service executable mismatch: {unit}")
+
+
+def verify_install_receipt(receipt: dict | None, metadata: dict, previous_sha: str) -> None:
+    if not isinstance(receipt, dict):
+        raise RuntimeError("production success receipt is missing or unsafe")
+    expected = {
+        "source_sha": metadata["source_sha"],
+        "source_tree": metadata.get("source_tree"),
+        "manifest_sha256": metadata["release_files_sha256"],
+        "previous_sha": previous_sha,
+        "technical_status": "installed_healthy",
+    }
+    if any(receipt.get(key) != value for key, value in expected.items()):
+        raise RuntimeError("production success receipt mismatch")
 
 
 def copy_payload(config: dict, sha: str, payload: Path, metadata: Path, link_sha: str) -> tuple[str, str]:
@@ -257,11 +296,16 @@ def stage_install(config: dict, sha: str, out: Path, base_sha: str) -> dict:
     if incoming.exists():
         raise RuntimeError("existing staging incoming path needs inspection")
     shutil.copytree(out / "release", incoming, copy_function=shutil.copy2)
-    result = command("sudo", config["stage_helper"], "--incoming", str(incoming), "--metadata", str(out / "domestic-release.json"), "--expected-base", base_sha, timeout=300)
+    metadata_path = out / "domestic-release.json"
+    metadata_bytes = metadata_path.read_bytes()
+    metadata = json.loads(metadata_bytes)
+    if metadata.get("source_sha") != sha or metadata.get("base_sha") != base_sha:
+        raise RuntimeError("staging metadata source or base SHA mismatch")
+    metadata_sha = hashlib.sha256(metadata_bytes).hexdigest()
+    result = command("sudo", config["stage_helper"], "--incoming", str(incoming), "--metadata", str(metadata_path), "--expected-sha", sha, "--metadata-sha256", metadata_sha, "--expected-base", base_sha, timeout=300)
     receipt = json.loads(result.splitlines()[-1])
     if receipt.get("source_sha") != sha or receipt.get("technical_status") != "installed_healthy":
         raise RuntimeError("staging install receipt mismatch")
-    metadata = json.loads((out / "domestic-release.json").read_text())
     expected_manifest = metadata["release_files_sha256"]
     verify_readback(stage_readback(), sha, expected_manifest)
     if metadata.get("frontend_changed"):
@@ -269,6 +313,124 @@ def stage_install(config: dict, sha: str, out: Path, base_sha: str) -> dict:
             if response.status != 200 or "text/html" not in response.headers.get("Content-Type", ""):
                 raise RuntimeError("staging UI route is not serving HTML")
     return receipt
+
+
+def recover(config: dict, *, retry_blocked: bool, expected_sha: str) -> dict:
+    """Explicitly reconcile one outcome-unknown release and retry its verified orphan once."""
+    if not retry_blocked:
+        raise ValueError("recover requires --retry-blocked")
+    if not isinstance(expected_sha, str) or not SHA.fullmatch(expected_sha):
+        raise ValueError("recover requires an exact --sha")
+    started = time.monotonic()
+    repo = Path(config["repo"])
+    work_root = Path(config["work_root"])
+    state_path = Path(config["state"])
+    if not state_path.is_file():
+        raise RuntimeError("release ledger is missing")
+    lock_path = state_path.with_suffix(".lock")
+    with lock_path.open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        state = json.loads(state_path.read_text())
+        sha = state.get("blocked_sha")
+        if state.get("status") != "outcome_unknown" or not isinstance(sha, str) or not SHA.fullmatch(sha):
+            raise RuntimeError("recover requires one blocked outcome_unknown SHA")
+        if sha != expected_sha:
+            raise RuntimeError("explicit --sha does not match blocked outcome_unknown SHA")
+        if not config["production_enabled"]:
+            raise RuntimeError("production publishing is disabled")
+        require_official_origin(repo)
+        git(repo, "fetch", "--no-tags", "origin", "main")
+        head = git(repo, "rev-parse", "refs/remotes/origin/main")
+        queue = first_parent_queue(repo, state["processed_sha"], head)
+        if not queue or queue[0] != sha or not exact_check_success(sha, os.environ.get("GITHUB_TOKEN")):
+            raise RuntimeError("blocked SHA is not the next checked commit on protected main")
+
+        installed = state.get("prod_installed_sha")
+        deployed = state.get("deployed_source_sha")
+        if not all(isinstance(value, str) and SHA.fullmatch(value) for value in (installed, deployed)):
+            raise RuntimeError("invalid prior release cursor")
+        build = work_root / "builds" / sha
+        metadata_path = build / "domestic-release.json"
+        release_path = build / "release"
+        if metadata_path.is_symlink() or not metadata_path.is_file() or release_path.is_symlink() or not release_path.is_dir():
+            raise RuntimeError("verified stage package is missing or unsafe")
+        metadata_bytes = metadata_path.read_bytes()
+        metadata = json.loads(metadata_bytes)
+        metadata_sha = hashlib.sha256(metadata_bytes).hexdigest()
+        if (
+            metadata.get("source_sha") != sha
+            or metadata.get("base_sha") != deployed
+            or metadata.get("source_tree") != git(repo, "rev-parse", f"{sha}^{{tree}}")
+            or type(metadata.get("migrations_changed")) is not bool
+        ):
+            raise RuntimeError("stage metadata does not match the blocked source")
+        if metadata["migrations_changed"]:
+            raise RuntimeError("automatic orphan recovery is disabled for migration releases")
+        manifest_path = release_path / "release-files.sha256"
+        manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+        if manifest_sha != metadata.get("release_files_sha256"):
+            raise RuntimeError("stage package manifest differs from its metadata")
+        stage = stage_readback(sha)
+        verify_readback(stage, sha, manifest_sha)
+        verify_install_receipt(stage.get("receipt"), metadata, deployed)
+
+        production = prod_readback(config, sha)
+        target_receipt_present = production.get("receipt_exists") is True
+        if target_receipt_present:
+            if production.get("receipt_target_sha") != sha:
+                raise RuntimeError("production receipt readback targeted another SHA")
+            verify_readback(production, sha, manifest_sha)
+            verify_install_receipt(production.get("receipt"), metadata, installed)
+            # The install completed but the caller did not record its receipt.
+            # This path is read-only on production and only repairs the ledger.
+        else:
+            if production.get("current") != f"/opt/aicrm/releases/{installed}":
+                raise RuntimeError("production current conflicts with the prior release; refusing retry")
+            previous_manifest = state.get("prod_installed_manifest_sha256")
+            if not isinstance(previous_manifest, str) or not FILE_SHA.fullmatch(previous_manifest):
+                previous_manifest = state.get("baseline_prod_manifest_sha256")
+            if not isinstance(previous_manifest, str) or not FILE_SHA.fullmatch(previous_manifest):
+                raise RuntimeError("prior production manifest digest is missing")
+            verify_readback(production, installed, previous_manifest)
+            if state.get("recovery_attempted_sha") == sha:
+                raise RuntimeError("the one permitted orphan retry was already attempted")
+            remote_metadata = f"{config['prod_incoming'].rstrip('/')}/{sha}.json"
+            remote_metadata_sha = command(*ssh_args(config), "sudo", "sha256sum", remote_metadata, timeout=30).split()[0]
+            if remote_metadata_sha != metadata_sha:
+                raise RuntimeError("production metadata differs from the verified stage package")
+            # Persist the one-time guard before the remote helper can change current.
+            state["recovery_attempted_sha"] = sha
+            state["recovery_attempted_at_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            atomic_json(state_path, state)
+            try:
+                result = command(*ssh_args(config), "sudo", config["prod_helper"], "--retry-existing", "--metadata", remote_metadata, "--expected-sha", sha, "--metadata-sha256", metadata_sha, "--expected-base", installed, timeout=300)
+                helper_receipt = json.loads(result.splitlines()[-1])
+                production = prod_readback(config, sha)
+                verify_readback(production, sha, manifest_sha)
+                verify_install_receipt(production.get("receipt"), metadata, installed)
+                if helper_receipt != production.get("receipt"):
+                    raise RuntimeError("production helper receipt differs from readback")
+            except Exception as exc:
+                state["failure"] = str(exc)[-500:]
+                atomic_json(state_path, state)
+                raise
+
+        commit_time = git(repo, "show", "-s", "--format=%ct", sha)
+        state.update(
+            status="ready",
+            processed_sha=sha,
+            deployed_source_sha=sha,
+            prod_installed_sha=sha,
+            prod_installed_manifest_sha256=manifest_sha,
+            blocked_sha=None,
+            failure=None,
+            last_recovery_sha=sha,
+            last_recovery_status="readback_confirmed" if target_receipt_present else "orphan_reused_healthy",
+            last_duration_seconds=round(time.monotonic() - started, 1),
+            last_merge_to_healthy_seconds=max(0, int(time.time()) - int(commit_time)),
+        )
+        atomic_json(state_path, state)
+        return {"status": "ready", "processed_sha": sha, "recovery": state["last_recovery_status"]}
 
 
 def poll(config: dict) -> dict:
@@ -316,7 +478,13 @@ def poll(config: dict) -> dict:
                 atomic_json(state_path, state)
                 raise
             try:
-                incoming, remote_meta = copy_payload(config, sha, out / "release", out / "domestic-release.json", installed)
+                metadata_path = out / "domestic-release.json"
+                metadata_bytes = metadata_path.read_bytes()
+                copied_metadata = json.loads(metadata_bytes)
+                if copied_metadata != metadata or copied_metadata.get("source_sha") != sha:
+                    raise RuntimeError("staged metadata changed after package verification")
+                metadata_sha = hashlib.sha256(metadata_bytes).hexdigest()
+                incoming, remote_meta = copy_payload(config, sha, out / "release", metadata_path, installed)
             except Exception as exc:
                 state.update(status="transport_failed", blocked_sha=sha, failure=str(exc)[-500:])
                 atomic_json(state_path, state)
@@ -326,17 +494,19 @@ def poll(config: dict) -> dict:
             state.update(status="prod_installing", blocked_sha=sha)
             atomic_json(state_path, state)
             try:
-                result = command(*ssh_args(config), "sudo", config["prod_helper"], "--incoming", incoming, "--metadata", remote_meta, "--expected-base", installed, timeout=300)
-                receipt = json.loads(result.splitlines()[-1])
-                verify_readback(prod_readback(config), sha, metadata["release_files_sha256"])
-                if receipt.get("source_sha") != sha or receipt.get("manifest_sha256") != metadata["release_files_sha256"]:
-                    raise RuntimeError("production receipt mismatch")
+                result = command(*ssh_args(config), "sudo", config["prod_helper"], "--incoming", incoming, "--metadata", remote_meta, "--expected-sha", sha, "--metadata-sha256", metadata_sha, "--expected-base", installed, timeout=300)
+                helper_receipt = json.loads(result.splitlines()[-1])
+                production = prod_readback(config, sha)
+                verify_readback(production, sha, metadata["release_files_sha256"])
+                verify_install_receipt(production.get("receipt"), metadata, installed)
+                if helper_receipt != production.get("receipt"):
+                    raise RuntimeError("production helper receipt differs from readback")
             except Exception as exc:
                 state.update(status="outcome_unknown", failure=str(exc)[-500:])
                 atomic_json(state_path, state)
                 raise
             commit_time = git(repo, "show", "-s", "--format=%ct", sha)
-            state.update(status="ready", processed_sha=sha, deployed_source_sha=sha, prod_installed_sha=sha, blocked_sha=None, failure=None, last_duration_seconds=round(time.monotonic() - started, 1), last_merge_to_healthy_seconds=max(0, int(time.time()) - int(commit_time)))
+            state.update(status="ready", processed_sha=sha, deployed_source_sha=sha, prod_installed_sha=sha, prod_installed_manifest_sha256=metadata["release_files_sha256"], blocked_sha=None, failure=None, last_duration_seconds=round(time.monotonic() - started, 1), last_merge_to_healthy_seconds=max(0, int(time.time()) - int(commit_time)))
             atomic_json(state_path, state)
             processed, deployed, installed = sha, sha, sha
         return {"status": "ready", "processed_sha": processed, "queued_count": len(queue)}
@@ -345,18 +515,30 @@ def poll(config: dict) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("action", choices=("poll", "readback", "bind-baseline"))
+    parser.add_argument("action", choices=("poll", "readback", "bind-baseline", "recover"))
     parser.add_argument("--prod-preview-sha")
+    parser.add_argument("--retry-blocked", action="store_true")
+    parser.add_argument("--sha", help="exact blocked commit SHA required for recovery")
     args = parser.parse_args()
     config = load_config(args.config)
     if args.action == "poll":
+        if args.retry_blocked or args.sha:
+            parser.error("--retry-blocked and --sha are only valid with recover")
         result = poll(config)
     elif args.action == "readback":
+        if args.retry_blocked or args.sha:
+            parser.error("--retry-blocked and --sha are only valid with recover")
         result = prod_readback(config)
-    else:
+    elif args.action == "bind-baseline":
+        if args.retry_blocked or args.sha:
+            parser.error("--retry-blocked and --sha are only valid with recover")
         if not args.prod_preview_sha:
             parser.error("bind-baseline requires --prod-preview-sha")
         result = bind_baseline(config, args.prod_preview_sha)
+    else:
+        if not args.retry_blocked or not args.sha:
+            parser.error("recover requires --retry-blocked --sha <exact-blocked-SHA>")
+        result = recover(config, retry_blocked=True, expected_sha=args.sha)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 
