@@ -18,10 +18,11 @@ import uuid
 from pathlib import Path
 from release_control import prepare_promote
 from release_batch import validate_batch
-from release_handoff import live_remote_main
+from release_handoff import git, live_remote_main
 from release_queue import change, reservation_file
 from release_events import save
-from release_first_v4_batch_bridge import OLD_CANDIDATE, bridge_transition, validate as validate_first_v4_bridge
+from release_first_v4_batch_bridge import (OLD_CANDIDATE, bridge_transition,
+    validate as validate_first_v4_bridge, verify_promotion_freshness)
 
 ACTIVE = {'preview_building','staging_acceptance','frozen','waiting_merge','merged','production','observing'}
 
@@ -62,7 +63,7 @@ def queue_update(queue_file, candidate_id, token, generation, operation):
 
 def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_file,known_hosts_file,
             attempt_file,deploy_script,staging_node_id=Path('/opt/aicrm/staging-node-id.json'),
-            bridge_readback_path=None,readback=ssh_readback,deploy=None):
+            bridge_readback_path=None,bridge_freshness=None,readback=ssh_readback,deploy=None):
     reviewed = Path(__file__).resolve().with_name('deploy-release-local.sh')
     if deploy is None and Path(deploy_script).resolve() != reviewed:
         raise ValueError('only reviewed scripts/deploy-release-local.sh may install production package')
@@ -101,7 +102,7 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
                 return previous
             raise ValueError('existing attempt status cannot be retried')
         prepared=prepare_promote(handoff_path,queue_file,merged_main,production_sha,
-                                 bridge_readback_path=bridge_readback_path)
+                                 bridge_readback_path=bridge_readback_path,bridge_freshness=bridge_freshness)
         receipt_path=Path(handoff['staging_acceptance']['receipt'])
         if not receipt_path.is_absolute(): receipt_path=handoff_path.parent/receipt_path
         accepted=json.loads(receipt_path.read_text())
@@ -122,6 +123,7 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
                 raise ValueError('active production release differs from expected ancestor')
             if bridge_path:
                 if digest_file(bridge_path)!=bridge_digest: raise ValueError('first-v4 bridge changed during promotion')
+                verify_promotion_freshness(handoff_path,merged_main,bridge_freshness)
                 if bridge_readback_path is None: raise ValueError('first-v4 bridge fresh readback missing')
                 current=json.loads(Path(bridge_readback_path).read_text())
                 if current.get('readyz',{}).get('release_sha')!=active.get('release_sha') or current.get('readyz',{}).get('status')!=active.get('status'):
@@ -154,11 +156,14 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
                      'candidate_tree_sha':prepared['candidate_tree_sha'],'package_sha256':prepared['package_sha256'],
                      'previous_active_sha':production_sha,'status':'attempting','attempt_id':str(uuid.uuid4()),
                      'first_v4_bridge_sha256':bridge_digest,'first_v4_readback_sha256':digest_file(bridge_readback_path) if bridge_path else None,
+                     'first_v4_promotion_attestation_sha256':digest_file(bridge_freshness['attestation']) if bridge_path else None,
                      'business_acceptance_status':handoff.get('business_acceptance',{}).get('status','accepted'),
                      'unverified_business_journeys':handoff.get('business_acceptance',{}).get('unverified_business_journeys',[]),
                      'started_at':int(time.time())}
             save(attempt_file,attempt)
-            if live_remote_main(Path(handoff['worktree'])) != merged_main or digest_file(archive) != handoff['package_sha256']:
+            current_main = (git(Path(handoff['worktree']),'rev-parse','refs/remotes/origin/main')
+                            if bridge_path else live_remote_main(Path(handoff['worktree'])))
+            if current_main != merged_main or digest_file(archive) != handoff['package_sha256']:
                 attempt.update(status='outcome_unknown',error='remote main or archive changed after reservation')
                 save(attempt_file,attempt)
                 raise ValueError(attempt['error'])
@@ -201,12 +206,17 @@ def main():
     for name in ('handoff','queue','key','known-hosts','attempt-file','deploy-script'):
         p.add_argument('--'+name,required=True,type=Path)
     p.add_argument('--bridge-readback',type=Path)
+    for name in ('bridge-attestation','bridge-signature','bridge-allowed-signers','bridge-bundle'):
+        p.add_argument('--'+name,type=Path)
     for name in ('merged-main','production-sha','host','user'):
         p.add_argument('--'+name,required=True)
     a=p.parse_args()
     result=promote(handoff_path=a.handoff,queue_file=a.queue,merged_main=a.merged_main,
         production_sha=a.production_sha,host=a.host,user=a.user,key_file=a.key,
         known_hosts_file=a.known_hosts,attempt_file=a.attempt_file,deploy_script=a.deploy_script,
-        bridge_readback_path=a.bridge_readback)
+        bridge_readback_path=a.bridge_readback,
+        bridge_freshness=({'attestation':a.bridge_attestation,'signature':a.bridge_signature,
+                           'allowed_signers':a.bridge_allowed_signers,'bundle':a.bridge_bundle}
+                          if any((a.bridge_attestation,a.bridge_signature,a.bridge_allowed_signers,a.bridge_bundle)) else None))
     print(json.dumps(result,ensure_ascii=False,indent=2))
 if __name__=='__main__':main()

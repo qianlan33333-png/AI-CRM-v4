@@ -55,30 +55,79 @@ def live_pr(number):
         return json.load(response)
 
 
-def decision(record, kind, batch, *, required):
+def live_required_checks(number):
+    result = subprocess.run(['gh', 'pr', 'checks', str(number), '--repo', REPOSITORY,
+                             '--required', '--json', 'name,state,bucket,link'],
+                            text=True, capture_output=True, timeout=30)
+    if not result.stdout.strip():
+        raise ValueError('first-v4 bridge cannot read required GitHub checks')
+    return json.loads(result.stdout)
+
+
+def live_full_ci(run_id):
+    def get(suffix):
+        request = Request(f'https://api.github.com/repos/{REPOSITORY}/actions/runs/{run_id}{suffix}',
+                          headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'aicrm-first-v4-bridge'})
+        with urlopen(request, timeout=20) as response: return json.load(response)
+    run = get('')
+    jobs = get('/jobs?per_page=100')
+    if jobs.get('total_count', 0) > 100: raise ValueError('first-v4 bridge full CI job page overflow')
+    return run, jobs.get('jobs', [])
+
+
+def verify_promotion_freshness(batch_path: Path, merged_main: str, proof: dict):
+    """Use the existing signed GitHub-main attestation on the offline staging node."""
+    from release_freshness import verify
+    if not isinstance(proof, dict) or any(not isinstance(proof.get(k), Path) for k in
+                                          ('attestation', 'signature', 'allowed_signers', 'bundle')):
+        raise ValueError('first-v4 bridge signed promotion freshness proof missing')
+    batch = json.loads(batch_path.read_text())
+    root = Path(batch['worktree'])
+    receipt_ref = (batch.get('technical_acceptance') or {}).get('receipt_ref')
+    if not receipt_ref:
+        receipt_ref = batch['members'][0]['receipt_ref']
+    receipt_path = Path(receipt_ref)
+    if not receipt_path.is_absolute(): receipt_path = batch_path.parent / receipt_path
+    receipt = json.loads(receipt_path.read_text())
+    package = Path(receipt['package_path'])
+    if not package.is_absolute(): package = receipt_path.parent / package
+    expected = {'repository': REPOSITORY, 'branch': 'main', 'stage': 'promotion',
+                'main_sha': merged_main, 'main_tree': git(root, 'rev-parse', merged_main + '^{tree}'),
+                'pr_head_sha': batch['aggregate_head_sha'],
+                'pr_head_tree': git(root, 'rev-parse', batch['aggregate_head_sha'] + '^{tree}'),
+                'merge_preview_sha': batch['merge_preview_sha'],
+                'candidate_tree_sha': batch['candidate_tree_sha']}
+    value = verify(attestation_path=proof['attestation'], signature_path=proof['signature'],
+                   allowed_signers=proof['allowed_signers'], identity='aicrm-release-command-center',
+                   expected=expected, bundle=proof['bundle'], package=package, git_repository=root)
+    same(value.get('package_sha256'), batch['package_sha256'], 'signed package digest')
+    return value
+
+
+def decision(record, kind, batch):
     value = record.get(kind)
-    if value is None and not required:
-        return
     if not isinstance(value, dict):
         raise ValueError(f'first-v4 bridge {kind} missing')
-    for key in ('decision_id', 'user_thread_id', 'user_message_id', 'decision_text'):
+    for key in ('decision_id', 'recorded_by_thread_id', 'authority_message_id', 'decision_text'):
         if not isinstance(value.get(key), str) or not value[key].strip():
             raise ValueError(f'first-v4 bridge {kind} lacks {key}')
     same(value.get('decision'), 'approved', f'{kind} decision')
+    same(value['authority_message_id'], record['user_authorization']['user_message_id'], f'{kind} authority')
     for key in ('candidate_id', 'package_sha256', 'merge_preview_sha'):
         same(value.get(key), batch[key], f'{kind} {key}')
     proof = evidence(value.get('evidence'), f'{kind} evidence')
-    for key in ('user_thread_id', 'user_message_id', 'decision_text', 'candidate_id',
+    for key in ('decision_id', 'recorded_by_thread_id', 'authority_message_id', 'decision_text', 'candidate_id',
                 'package_sha256', 'merge_preview_sha', 'decision'):
         same(proof.get(key), value[key], f'{kind} proof {key}')
-    same(proof.get('source'), 'user_message', f'{kind} proof source')
+    same(proof.get('source'), 'operator_attestation', f'{kind} proof source')
     expires = datetime.fromisoformat(value['expires_at'].replace('Z', '+00:00'))
     if expires.tzinfo is None or expires <= datetime.now(timezone.utc):
         raise ValueError(f'first-v4 bridge {kind} authorization expired')
 
 
 def validate(path: Path, *, batch_path: Path, queue: dict, merged_main: str | None = None,
-             phase: str = 'admission', pr_reader=live_pr, production_readback: dict | None = None) -> dict:
+             phase: str = 'admission', pr_reader=live_pr, check_reader=live_required_checks,
+             ci_reader=live_full_ci, production_readback: dict | None = None) -> dict:
     if phase not in {'admission', 'promotion'}:
         raise ValueError('first-v4 bridge phase invalid')
     raw_bridge = path.read_bytes()
@@ -98,6 +147,46 @@ def validate(path: Path, *, batch_path: Path, queue: dict, merged_main: str | No
     for key in ('candidate_id', 'base_main_sha', 'merge_preview_sha', 'candidate_tree_sha', 'package_sha256'):
         same(record.get('batch', {}).get(key), batch[key], f'batch {key}')
     same(record.get('batch', {}).get('aggregate_head_sha'), batch['aggregate_head_sha'], 'batch aggregate head')
+    aggregate = record.get('aggregate_pr') or {}
+    aggregate_match = PR_URL.fullmatch(aggregate.get('pr_url', ''))
+    if not aggregate_match: raise ValueError('first-v4 bridge aggregate PR URL invalid')
+    aggregate_number = int(aggregate_match.group(1))
+    same(aggregate.get('head_sha'), batch['aggregate_head_sha'], 'aggregate PR head')
+    same(aggregate.get('tree_sha'), git(root, 'rev-parse', batch['aggregate_head_sha'] + '^{tree}'), 'aggregate PR tree')
+    if phase == 'admission':
+        aggregate_live = pr_reader(aggregate_number)
+        same(aggregate_live.get('head', {}).get('sha'), batch['aggregate_head_sha'], 'live aggregate PR head')
+        same(aggregate_live.get('base', {}).get('repo', {}).get('full_name'), REPOSITORY, 'live aggregate PR repository')
+        same(aggregate_live.get('state'), 'open', 'aggregate PR state')
+        same(aggregate_live.get('draft'), False, 'aggregate PR draft state')
+        same(aggregate_live.get('base', {}).get('sha'), base, 'live aggregate PR base')
+    governance = record.get('governance_pr') or {}
+    governance_match = PR_URL.fullmatch(governance.get('pr_url', ''))
+    if not governance_match or int(governance_match.group(1)) != 19:
+        raise ValueError('first-v4 bridge governance PR URL invalid')
+    governance_head = governance.get('head_sha', '')
+    if not SHA.fullmatch(governance_head): raise ValueError('first-v4 bridge governance head invalid')
+    same(governance.get('tree_sha'), git(root, 'rev-parse', governance_head + '^{tree}'), 'governance PR tree')
+    if phase == 'admission':
+        same(pr_reader(19).get('head', {}).get('sha'), governance_head, 'live governance PR head')
+    subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', governance_head,
+                    batch['aggregate_head_sha']], check=True)
+    run_id = record.get('full_ci_run_id')
+    if not isinstance(run_id, int) or run_id <= 0: raise ValueError('first-v4 bridge full CI run ID missing')
+    if phase == 'admission':
+        required = check_reader(aggregate_number)
+        if not isinstance(required, list) or not required or not any(c.get('name') == 'check' for c in required) or \
+           any(c.get('bucket') != 'pass' or c.get('state') != 'SUCCESS' for c in required):
+            raise ValueError('first-v4 bridge aggregate protected required check not green')
+        # A check result may race a head update; re-read the PR before accepting it.
+        same(pr_reader(aggregate_number).get('head', {}).get('sha'), batch['aggregate_head_sha'], 'aggregate PR head after checks')
+        run, jobs = ci_reader(run_id)
+        same(run.get('head_sha'), batch['aggregate_head_sha'], 'full CI head')
+        same(run.get('event'), 'workflow_dispatch', 'full CI event')
+        same(run.get('conclusion'), 'success', 'full CI conclusion')
+        passed_jobs = {j.get('name') for j in jobs if j.get('conclusion') == 'success'}
+        if not {'plan', 'governance', 'preflight', 'backend', 'frontend', 'browser', 'archive-sdk', 'check'}.issubset(passed_jobs):
+            raise ValueError('first-v4 bridge full CI lanes incomplete')
     same(git(root, 'rev-list', '--parents', '-n', '1', preview).split()[1:],
          [base, batch['aggregate_head_sha']], 'preview parents')
     same(git(root, 'rev-parse', preview + '^{tree}'), tree, 'preview tree')
@@ -106,7 +195,7 @@ def validate(path: Path, *, batch_path: Path, queue: dict, merged_main: str | No
     subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', V4_ROOT, preview], check=True)
     current_main = merged_main if phase == 'promotion' else base
     same(git(root, 'rev-parse', 'refs/remotes/origin/main'), current_main, 'tracked main')
-    same(live_remote_main(root), current_main, 'live main')
+    if phase == 'admission': same(live_remote_main(root), current_main, 'live main')
     if phase == 'promotion': same(git(root, 'rev-parse', merged_main + '^{tree}'), tree, 'merged main tree')
     legacy = record.get('legacy', {})
     for key, expected in (('candidate_id', OLD_CANDIDATE), ('release_sha', OLD_RELEASE),
@@ -147,12 +236,14 @@ def validate(path: Path, *, batch_path: Path, queue: dict, merged_main: str | No
         same(bound.get('commit_sha'), member['commit_sha'], 'member head')
         same(bound.get('tree_sha'), member['tree_sha'], 'member tree')
         same(git(root, 'rev-parse', member['commit_sha'] + '^{tree}'), member['tree_sha'], 'actual member tree')
-        pr = pr_reader(number)
-        same(pr.get('state'), 'open', 'live PR state')
-        same(pr.get('head', {}).get('sha'), member['commit_sha'], 'live PR head')
-        same(pr.get('base', {}).get('sha'), base, 'live PR base')
-        same(pr.get('base', {}).get('repo', {}).get('full_name'), REPOSITORY, 'live PR repository')
-    if len(set(numbers)) != len(numbers) or not {3, 13, 15}.issubset(numbers) or not set(numbers).issubset({3, 13, 15, 17}):
+        if phase == 'admission':
+            pr = pr_reader(number)
+            same(pr.get('head', {}).get('sha'), member['commit_sha'], 'live PR head')
+            same(pr.get('base', {}).get('repo', {}).get('full_name'), REPOSITORY, 'live PR repository')
+            same(pr.get('state'), 'open', 'live PR state')
+            same(pr.get('base', {}).get('sha'), base, 'live PR base')
+    if aggregate_number in numbers or aggregate_number == 19 or len(set(numbers)) != len(numbers) or \
+       not {3, 13, 15}.issubset(numbers) or not set(numbers).issubset({3, 13, 15, 17}):
         raise ValueError('first-v4 bridge member set invalid')
     old = [i for i in queue.get('items', []) if i.get('candidate_id') == OLD_CANDIDATE]
     if len(old) != 1 or old[0].get('status') != 'observing' or old[0].get('candidate_tree_sha') != OLD_TREE or old[0].get('package_sha256') != OLD_PACKAGE:
@@ -170,14 +261,20 @@ def validate(path: Path, *, batch_path: Path, queue: dict, merged_main: str | No
         raise ValueError('first-v4 bridge another production candidate active')
     if phase == 'promotion' and owned[0].get('status') != 'waiting_merge':
         raise ValueError('first-v4 bridge candidate not waiting_merge')
-    decision(record, 'queue_authorization', batch, required=True)
-    decision(record, 'production_authorization', batch, required=True)
+    authority = record.get('user_authorization')
+    if not isinstance(authority, dict) or any(not isinstance(authority.get(k), str) or not authority[k].strip()
+                                               for k in ('user_thread_id', 'user_message_id', 'decision_text')):
+        raise ValueError('first-v4 bridge user authorization source missing')
+    source = evidence(authority.get('evidence'), 'user authorization source')
+    same(source.get('source'), 'user_message', 'user authorization source kind')
+    for key in ('user_thread_id', 'user_message_id', 'decision_text'):
+        same(source.get(key), authority[key], f'user authorization {key}')
+    decision(record, 'queue_authorization', batch)
+    decision(record, 'production_authorization', batch)
     queue_decision = record['queue_authorization']
     production_decision = record['production_authorization']
-    if queue_decision['decision_id'] == production_decision['decision_id'] or \
-       (queue_decision['user_thread_id'], queue_decision['user_message_id']) == \
-       (production_decision['user_thread_id'], production_decision['user_message_id']):
-        raise ValueError('first-v4 bridge production needs a separate user decision')
+    if queue_decision['decision_id'] == production_decision['decision_id']:
+        raise ValueError('first-v4 bridge production needs a separate operator decision')
     initial = evidence(record.get('production_readback'), 'admission production readback')
     if phase == 'promotion' and production_readback is None:
         raise ValueError('first-v4 bridge fresh promotion readback required')
@@ -198,6 +295,11 @@ def validate(path: Path, *, batch_path: Path, queue: dict, merged_main: str | No
 
 def admit(path: Path, *, batch_path: Path, queue_path: Path, pr_reader=live_pr):
     """Consume the bridge for one accepted batch; preserve old observation."""
+    batch = json.loads(batch_path.read_text())
+    code_root = Path(__file__).resolve().parents[1]
+    if git(code_root, 'rev-parse', 'HEAD') != batch.get('aggregate_head_sha') or \
+       code_root.resolve() != Path(batch.get('worktree', '')).resolve():
+        raise ValueError('first-v4 bridge admission must run from exact aggregate checkout')
     lock_path = queue_path.with_suffix('.lock')
     with lock_path.open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
