@@ -231,15 +231,15 @@ def build_candidate(config: dict, sha: str, base: str, base_release: Path | None
         f"npm_config_cache={BUILD_ROOT / 'cache/npm'}",
         f"TMPDIR={BUILD_ROOT / 'tmp'}", "PYTHONDONTWRITEBYTECODE=1",
     ]
-    try:
-        args = [*build_prefix, "/usr/bin/env", "-i", *environment, "python3", str(checkout / "scripts/domestic_release_build.py"), "build", "--repo", str(checkout), "--base", base, "--target", sha, "--base-release", str(base_release) if base_release is not None else "none", "--out", str(worker_out)]
-        command(*args, timeout=7200)
-        if worker_out.is_symlink() or any(path.is_symlink() for path in worker_out.rglob("*")):
-            raise RuntimeError("isolated build produced a symlink")
-        shutil.copytree(worker_out, out)
-    except Exception:
-        # Preserve failed isolated output for diagnosis; the queue stops.
-        raise
+    args = [*build_prefix, "/usr/bin/env", "-i", *environment, "python3", str(Path(__file__).with_name("domestic_release_build.py")), "build", "--repo", str(checkout), "--base", base, "--target", sha, "--base-release", str(base_release) if base_release is not None else "none", "--out", str(worker_out)]
+    command(*args, timeout=7200)
+    if worker_out.is_symlink():
+        raise RuntimeError("isolated build produced a symlink")
+    command(*build_prefix, "chmod", "0755", str(worker_out), timeout=30)
+    if any(path.is_symlink() for path in worker_out.rglob("*")):
+        raise RuntimeError("isolated build produced a symlink")
+    shutil.copytree(worker_out, out)
+    out.chmod(0o755)
     metadata = json.loads((out / "domestic-release.json").read_text())
     if metadata.get("source_sha") != sha or metadata.get("base_sha") != base or metadata.get("source_tree") != git(repo, "rev-parse", f"{sha}^{{tree}}"):
         raise RuntimeError("built artifact source mismatch")
