@@ -47,6 +47,8 @@ OPERATOR_ONLY_PREFIXES += (
     "deploy/accept-staging-candidate.sh",
     "scripts/validate-staging-fixture-readback.py",
     "scripts/test_validate_staging_fixture_readback.py",
+    "scripts/release_archive_preflight.py",
+    "scripts/test_release_archive_preflight.py",
 )
 
 
