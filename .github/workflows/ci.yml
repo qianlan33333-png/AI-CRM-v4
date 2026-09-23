@@ -174,15 +174,15 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_DB: aicrm_ci
+          POSTGRES_DB: aicrm_acceptance_test
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         ports: ['5432:5432']
         options: >-
-          --health-cmd "pg_isready -U postgres -d aicrm_ci"
+          --health-cmd "pg_isready -U postgres -d aicrm_acceptance_test"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      AICRM_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/aicrm_ci?sslmode=disable
+      AICRM_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/aicrm_acceptance_test?sslmode=disable
     steps:
       - id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
