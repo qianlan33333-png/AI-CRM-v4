@@ -171,6 +171,17 @@ def validate(path: Path, *, batch_path: Path, queue: dict, merged_main: str | No
         same(pr_reader(19).get('head', {}).get('sha'), governance_head, 'live governance PR head')
     subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', governance_head,
                     batch['aggregate_head_sha']], check=True)
+    staging_lane = record.get('staging_lane_pr') or {}
+    lane_match = PR_URL.fullmatch(staging_lane.get('pr_url', ''))
+    if not lane_match or int(lane_match.group(1)) != 17:
+        raise ValueError('first-v4 bridge staging lane PR URL invalid')
+    lane_head = staging_lane.get('head_sha', '')
+    if not SHA.fullmatch(lane_head): raise ValueError('first-v4 bridge staging lane head invalid')
+    same(staging_lane.get('tree_sha'), git(root, 'rev-parse', lane_head + '^{tree}'), 'staging lane PR tree')
+    if phase == 'admission':
+        same(pr_reader(17).get('head', {}).get('sha'), lane_head, 'live staging lane PR head')
+    subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', lane_head,
+                    batch['aggregate_head_sha']], check=True)
     run_id = record.get('full_ci_run_id')
     if not isinstance(run_id, int) or run_id <= 0: raise ValueError('first-v4 bridge full CI run ID missing')
     if phase == 'admission':
@@ -243,7 +254,7 @@ def validate(path: Path, *, batch_path: Path, queue: dict, merged_main: str | No
             same(pr.get('state'), 'open', 'live PR state')
             same(pr.get('base', {}).get('sha'), base, 'live PR base')
     if aggregate_number in numbers or aggregate_number == 19 or len(set(numbers)) != len(numbers) or \
-       not {3, 13, 15}.issubset(numbers) or not set(numbers).issubset({3, 13, 15, 17}):
+       set(numbers) != {3, 13, 15}:
         raise ValueError('first-v4 bridge member set invalid')
     old = [i for i in queue.get('items', []) if i.get('candidate_id') == OLD_CANDIDATE]
     if len(old) != 1 or old[0].get('status') != 'observing' or old[0].get('candidate_tree_sha') != OLD_TREE or old[0].get('package_sha256') != OLD_PACKAGE:

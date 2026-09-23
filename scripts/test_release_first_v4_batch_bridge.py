@@ -56,6 +56,8 @@ class FirstV4BatchBridgeTests(unittest.TestCase):
                                        'head_sha': aggregate, 'tree_sha': '7'*40},
                       'governance_pr': {'pr_url': 'https://github.com/qianlan33333-png/AI-CRM-v4/pull/19',
                                         'head_sha': '8'*40, 'tree_sha': '9'*40},
+                      'staging_lane_pr': {'pr_url': 'https://github.com/qianlan33333-png/AI-CRM-v4/pull/17',
+                                          'head_sha': 'a'*40, 'tree_sha': 'b'*40},
                       'full_ci_run_id': 100,
                       'batch': {**{key: batch[key] for key in ('candidate_id', 'base_main_sha',
                           'aggregate_head_sha', 'merge_preview_sha', 'candidate_tree_sha', 'package_sha256')},
@@ -91,6 +93,7 @@ class FirstV4BatchBridgeTests(unittest.TestCase):
                           ('rev-parse', V4_ROOT+'^{tree}'): OLD_TREE,
                           ('rev-parse', aggregate+'^{tree}'): '7'*40,
                           ('rev-parse', '8'*40+'^{tree}'): '9'*40,
+                          ('rev-parse', 'a'*40+'^{tree}'): 'b'*40,
                           ('rev-parse', 'refs/remotes/origin/main'): base}
             git_values.update({('rev-parse', head+'^{tree}'): member_tree for head, member_tree in zip(heads, trees)})
             def fake_evidence(_, label):
@@ -101,7 +104,7 @@ class FirstV4BatchBridgeTests(unittest.TestCase):
                 return readback
             def pr_reader(number):
                 return {'state': 'open', 'draft': False,
-                        'head': {'sha': aggregate if number == 20 else '8'*40 if number == 19 else heads[(15, 3, 13).index(number)]},
+                        'head': {'sha': aggregate if number == 20 else '8'*40 if number == 19 else 'a'*40 if number == 17 else heads[(15, 3, 13).index(number)]},
                         'base': {'sha': base, 'repo': {'full_name': 'qianlan33333-png/AI-CRM-v4'}}}
             ci = ({'head_sha': aggregate, 'event': 'workflow_dispatch', 'conclusion': 'success'},
                   [{'name': name, 'conclusion': 'success'} for name in
