@@ -293,6 +293,29 @@ func TestCreatePaymentOrderWithinFreezesProductVersionAndReplays(t *testing.T) {
 	}
 }
 
+func TestCreatePaymentOrderWithinAlipayReplaysWithoutDuplicateOrder(t *testing.T) {
+	store := newMemoryStore()
+	service := NewService(directUOW{}, store)
+	command := orderport.PaymentOrderCommand{
+		Provider: domain.ProviderAlipay, MerchantOrderNo: "v4pay_alipay_1234567890abcdef",
+		PayerCustomerID: 11, BeneficiaryCustomerID: 22,
+		ProductID: 5, ProductCode: "course-5", ProductName: "Course 5", ProductVersion: 3,
+		ProductType: "standard_product", UnitAmountMinor: 8800, Currency: "CNY", ActorScope: "payment-session:alipay-1234567890abcdef", IdempotencyKey: "checkout-alipay-key-0005",
+	}
+	first, err := service.CreatePaymentOrderWithin(context.Background(), command)
+	if err != nil || first.ID < 1 || first.Provider != domain.ProviderAlipay || !first.EffectEligible {
+		t.Fatalf("order=%+v err=%v", first, err)
+	}
+	replay, err := service.CreatePaymentOrderWithin(context.Background(), command)
+	if err != nil || replay.ID != first.ID || len(store.orders) != 1 {
+		t.Fatalf("replay=%+v orders=%d err=%v", replay, len(store.orders), err)
+	}
+	command.UnitAmountMinor++
+	if _, err = service.CreatePaymentOrderWithin(context.Background(), command); !errors.Is(err, orderport.ErrConflict) {
+		t.Fatalf("payload drift err=%v", err)
+	}
+}
+
 func TestCreatePaymentOrderWithinEncryptsRequiredContactSnapshot(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(directUOW{}, store)
