@@ -14,6 +14,12 @@ NON_RUNTIME_PREFIXES = (".github/", "docs/", "scripts/ci/", "scripts/staging-fix
 NON_RUNTIME_FILES = {"AGENTS.md"}
 NON_RUNTIME_FILES.add("internal/adminops/retention_resources.generated.json")
 NON_RUNTIME_FILES.add("deploy/README.md")
+TEST_ONLY_PREFIXES = ("scripts/test-", "scripts/test_", "scripts/ci/test_", "deploy/test_")
+
+
+def is_test_only(path: str) -> bool:
+    return (path.startswith(TEST_ONLY_PREFIXES)
+            or path.endswith(("_test.go", ".test.mjs", ".spec.mjs", "_chromium_journey.mjs")))
 OPERATOR_ONLY_PREFIXES = (
     "scripts/deploy-release-local.sh",
     "deploy/install-release.sh",
@@ -65,6 +71,7 @@ def requires_staging_receipt(current: str) -> bool:
     return any(
         path not in NON_RUNTIME_FILES
         and not path.startswith(NON_RUNTIME_PREFIXES)
+        and not is_test_only(path)
         and path not in OPERATOR_ONLY_PREFIXES
         for path in changed
     )
@@ -78,9 +85,8 @@ def main() -> int:
         mode = needs.get("plan", {}).get("outputs", {}).get("mode", "light")
     except json.JSONDecodeError:
         raise SystemExit("invalid CI_NEEDS while checking staging receipt")
-    if mode != "light":
-        print(json.dumps({"mode": mode, "staging": "superseded by full CI"}, separators=(",", ":")))
-        return 0
+    if mode not in {"light", "targeted", "full"}:
+        raise SystemExit("invalid PR verification mode while checking staging receipt")
     repo = os.environ["GITHUB_REPOSITORY"]
     number = os.environ["PR_NUMBER"]
     body = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/pulls/{number}"], text=True))["body"] or ""
@@ -100,10 +106,12 @@ def main() -> int:
         raise SystemExit("staging receipt head tree does not match the current PR tree")
     if not SHA.fullmatch(values["Staging-Tree"]) or values["Staging-Tree"] != tree:
         raise SystemExit("staging receipt tree does not match the current PR tree")
-    if values["Staging-Receipt"].startswith("<"):
-        raise SystemExit("staging receipt link is missing")
-    print(json.dumps({"head": current, "tree": tree, "receipt": values["Staging-Receipt"]}, separators=(",", ":")))
-    return 0
+    # A PR body is author-controlled. A URL here cannot establish that the
+    # staging host built and accepted this merge preview or that its package
+    # matches the handoff. Until CI can independently verify an immutable,
+    # signed receipt, fail closed; release_handoff validates local receipts
+    # separately but is not part of this GitHub check.
+    raise SystemExit("staging receipt in PR body is not independently verified by CI")
 
 
 if __name__ == "__main__":

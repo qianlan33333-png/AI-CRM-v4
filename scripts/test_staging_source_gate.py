@@ -143,6 +143,38 @@ class StagingSourceGateTests(unittest.TestCase):
                               return_value=changed + "internal/payment/app/service.go\n"):
                 self.assertTrue(gate.requires_staging_receipt("b" * 40))
 
+    def test_test_fixtures_require_ci_but_no_app_receipt(self):
+        gate_spec = importlib.util.spec_from_file_location(
+            "local_first_gate", ROOT / "scripts/ci/local_first_gate.py")
+        gate = importlib.util.module_from_spec(gate_spec)
+        gate_spec.loader.exec_module(gate)
+        changed = ("scripts/test-install-release-ordering.sh\n"
+                   "cmd/aicrm/core_operations_chromium_journey.mjs\n"
+                   "internal/payment/app/service_test.go\n")
+        with patch.dict("os.environ", {"PR_BASE_SHA": "a" * 40}):
+            with patch.object(gate.subprocess, "check_output", return_value=changed):
+                self.assertFalse(gate.requires_staging_receipt("b" * 40))
+            with patch.object(gate.subprocess, "check_output",
+                              return_value=changed + "internal/automation/app/policies.go\n"):
+                self.assertTrue(gate.requires_staging_receipt("b" * 40))
+
+    def test_pr_body_link_cannot_forge_staging_acceptance(self):
+        gate_spec = importlib.util.spec_from_file_location(
+            "local_first_gate", ROOT / "scripts/ci/local_first_gate.py")
+        gate = importlib.util.module_from_spec(gate_spec)
+        gate_spec.loader.exec_module(gate)
+        head, tree = "b" * 40, "c" * 40
+        body = {"body": (f"Staging-Head: {head}\nStaging-Tree: {tree}\n"
+                         "Staging-Receipt: https://example.test/fabricated.json\n")}
+        environment = {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REPOSITORY": "owner/repo",
+                       "PR_NUMBER": "15", "PR_HEAD_SHA": head,
+                       "CI_NEEDS": json.dumps({"plan": {"outputs": {"mode": "full"}}})}
+        with patch.dict("os.environ", environment), patch.object(gate, "requires_staging_receipt", return_value=True):
+            with patch.object(gate.subprocess, "check_output",
+                              side_effect=[json.dumps(body), tree, tree]):
+                with self.assertRaisesRegex(SystemExit, "not independently verified"):
+                    gate.main()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,14 +23,19 @@ def git(ref):
 
 
 def requires_full_pr_verification() -> bool:
-    """Changes to delivery infrastructure must exercise the full CI lanes."""
+    """High-risk code and test/fixture changes must exercise the full CI lanes."""
     base = os.environ.get("GITHUB_BASE_SHA", "")
     if not re.fullmatch(r"[0-9a-f]{40}", base):
         return False
     changed = subprocess.check_output(["git", "diff", "--name-only", f"{base}...HEAD"], text=True).splitlines()
-    critical = (".github/", "deploy/", "scripts/ci/", "skills/aicrm-v3-development-frontdoor/",
-                "AGENTS.md", "scripts/check-install-release-contract.sh")
-    return any(path.startswith(critical) for path in changed)
+    critical = (".github/", "deploy/", "scripts/ci/", "migrations/", "internal/platform/",
+                "internal/identity/", "internal/outbound/", "internal/externaleffects/",
+                "skills/aicrm-v3-development-frontdoor/", "AGENTS.md",
+                "scripts/check-install-release-contract.sh")
+    test_paths = ("scripts/test-", "scripts/test_", "cmd/aicrm/")
+    return any(path.startswith(critical) or path.startswith(test_paths)
+               or path.endswith(("_test.go", ".test.mjs", ".spec.mjs", "_chromium_journey.mjs"))
+               for path in changed)
 
 
 def api(path, raw=False):
@@ -154,7 +159,9 @@ def main():
         # Local and staging verification are authoritative for ordinary
         # changes. GitHub only checks the exact tree, receipt and governance.
         # Full lanes remain an explicit break-glass action.
-        if event in {"pull_request", "workflow_dispatch"} and ref != "refs/heads/main" and os.environ.get("FORCE_FULL") != "true":
+        if (event in {"pull_request", "workflow_dispatch"} and ref != "refs/heads/main"
+                and os.environ.get("FORCE_FULL") != "true"
+                and (event != "pull_request" or not requires_full_pr_verification())):
             mode = "light"
             full = False
             with open(os.environ["GITHUB_OUTPUT"], "a") as output:
