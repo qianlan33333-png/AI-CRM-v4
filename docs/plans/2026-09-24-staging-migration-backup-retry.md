@@ -57,5 +57,5 @@ flowchart TD
 
 ## References
 
-- PostgreSQL documents that `pg_dump` connects to a database and uses libpq connection parameters; use `--dbname` or the corresponding `PG*` environment rather than assigning a connection URI to `PGDATABASE`: [pg_dump](https://www.postgresql.org/docs/17/app-pgdump.html), [libpq environment variables](https://www.postgresql.org/docs/17/libpq-envars.html), [connection URI syntax](https://www.postgresql.org/docs/17/libpq-connect.html).
+- PostgreSQL documents that `pg_dump` connects to a database and uses libpq connection parameters; use `--dbname` or the corresponding `PG*` environment rather than assigning a connection URI to `PGDATABASE`: [pg_dump](https://www.postgresql.org/docs/17/app-pgdump.html), [libpq environment variables](https://www.postgresql.org/docs/17/libpq-envars.html), [connection URI syntax](https://www.postgresql.org/docs/17/libpq-connect.html). libpq's default TLS root certificate is under the effective user's home, so the backup environment preserves the `aicrm` home path as well: [libpq SSL support](https://www.postgresql.org/docs/16/libpq-ssl.html).
 - A GitHub Action example invokes `pg_dump` with `--dbname` and the supplied database URL: [tj-actions/pg-dump](https://github.com/tj-actions/pg-dump/blob/main/entrypoint.sh).

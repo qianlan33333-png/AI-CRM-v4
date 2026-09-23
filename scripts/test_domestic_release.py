@@ -111,7 +111,7 @@ class DomesticReleaseTest(unittest.TestCase):
                 kwargs["stdout"].write(b"x" * 256)
                 return SimpleNamespace(returncode=0)
 
-            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.subprocess, "run", side_effect=fake_dump), mock.patch.object(installer, "run") as restore:
+            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", side_effect=fake_dump), mock.patch.object(installer, "run") as restore:
                 backup = installer.backup_database("b" * 40)
 
             self.assertTrue(backup.is_file())
@@ -120,6 +120,7 @@ class DomesticReleaseTest(unittest.TestCase):
             self.assertNotIn("PGDATABASE=postgres://", repr(args))
             self.assertEqual(kwargs["env"]["PGPASSWORD"], "synthetic-secret")
             self.assertEqual(kwargs["env"]["PGDATABASE"], "aicrm_stage")
+            self.assertEqual(kwargs["env"]["HOME"], "/var/lib/aicrm")
             self.assertNotIn("synthetic-secret", repr(restore.call_args))
 
     def test_backup_failure_does_not_copy_client_stderr_into_error(self):
@@ -134,7 +135,7 @@ class DomesticReleaseTest(unittest.TestCase):
                 self.assertEqual(kwargs["stderr"], subprocess.PIPE)
                 return SimpleNamespace(returncode=1, stderr=b"synthetic-secret")
 
-            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.subprocess, "run", side_effect=failed_dump):
+            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", side_effect=failed_dump):
                 with self.assertRaisesRegex(RuntimeError, "pg_dump failed") as raised:
                     installer.backup_database("b" * 40)
             self.assertNotIn("synthetic-secret", str(raised.exception))
@@ -152,10 +153,11 @@ class DomesticReleaseTest(unittest.TestCase):
                 captured["kwargs"] = kwargs
                 return SimpleNamespace(returncode=0, stdout=f"yes|1|{STAGE_OLD_ORDER_CHECK}\n", stderr="")
 
-            with mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.subprocess, "run", side_effect=fake_psql):
+            with mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", side_effect=fake_psql):
                 self.assertEqual(installer.staging_migration_baseline(), (True, True))
             self.assertNotIn("synthetic-secret", repr(captured["args"]))
             self.assertEqual(captured["kwargs"]["env"]["PGDATABASE"], "aicrm_stage")
+            self.assertEqual(captured["kwargs"]["env"]["HOME"], "/var/lib/aicrm")
             self.assertIn("default_transaction_read_only=on", captured["kwargs"]["env"]["PGOPTIONS"])
             self.assertIn("statement_timeout=5000", captured["kwargs"]["env"]["PGOPTIONS"])
             self.assertIn("version >= '0206'", captured["args"][-1])

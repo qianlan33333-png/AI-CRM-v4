@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import shutil
 import stat
@@ -236,7 +237,7 @@ def backup_database(sha: str) -> Path:
     values = [line.partition("=")[2].strip().strip('"\'') for line in ENV.read_text().splitlines() if line.startswith("AICRM_DATABASE_URL=")]
     if len(values) != 1 or not values[0]:
         raise RuntimeError("exactly one database URL is required for migration backup")
-    database_env = database_environment(values[0])
+    database_env = _database_client_environment(values[0])
     root = database_backup_directory(create=True)
     if root is None:
         raise RuntimeError("database backup directory is missing")
@@ -353,7 +354,16 @@ def _database_environment_from_host_config() -> dict[str, str]:
     values = [line.partition("=")[2].strip().strip('"\'') for line in ENV.read_text().splitlines() if line.startswith("AICRM_DATABASE_URL=")]
     if len(values) != 1 or not values[0]:
         raise RuntimeError("exactly one database URL is required")
-    return database_environment(values[0])
+    return _database_client_environment(values[0])
+
+
+def _database_client_environment(database_url: str) -> dict[str, str]:
+    environment = database_environment(database_url)
+    try:
+        environment["HOME"] = pwd.getpwnam("aicrm").pw_dir
+    except KeyError as exc:
+        raise RuntimeError("database service account is unavailable") from exc
+    return environment
 
 
 def require_staging_role() -> None:
