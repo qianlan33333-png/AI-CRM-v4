@@ -1,0 +1,62 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><span>客户管理后台</span><span>/</span><span>交易</span></div>
+              <div style="font-size:16px;font-weight:600;line-height:22px">交易管理</div>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:14px 16px;display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+              <label style="flex:1 1 180px"><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">单号</span><input id="orderTransactionId" value="{{ orderPage.filters.transactionId }}" placeholder="微信 / 平台单号" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%"></label>
+              <label style="flex:1 1 150px"><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">付款人</span><input id="orderMobile" value="{{ orderPage.filters.payer }}" placeholder="姓名或客户身份" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%"></label>
+              <label style="flex:1 1 150px"><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">商品</span><input id="orderProductCode" value="{{ orderPage.filters.product }}" placeholder="商品名称" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%"></label>
+              <label style="flex:0 1 140px"><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">状态</span><select id="orderStatus" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;font-size:13px;background:#fff;width:100%"><sc-for list="{{ orderPage.statusOptions }}" as="option"><sc-if value="{{ option.selected }}"><option value="{{ option.value }}" selected="selected">{{ option.label }}</option></sc-if><sc-if value="{{ option.unselected }}"><option value="{{ option.value }}">{{ option.label }}</option></sc-if></sc-for></select></label>
+              <label style="flex:1 1 220px"><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">创建时间</span><span style="display:flex;gap:6px"><input id="orderCreatedFrom" value="{{ orderPage.filters.createdFrom }}" type="date" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;font-size:13px;background:#fff;min-width:0"><input id="orderCreatedTo" value="{{ orderPage.filters.createdTo }}" type="date" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;font-size:13px;background:#fff;min-width:0"></span></label>
+              <div style="display:flex;gap:8px;flex:none"><button onClick="{{ orderPage.query }}" style="height:32px;padding:0 14px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">查询</button><button onClick="{{ orderPage.clear }}" style="height:32px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:13px;cursor:pointer">清空</button><button onClick="{{ orderPage.exportWechat }}" disabled="{{ orderPage.saving }}" style="height:32px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:13px;cursor:pointer">导出微信支付 CSV</button></div>
+              <sc-if value="{{ orderPage.serverPaged }}"><p style="flex:1 1 100%;margin:0;font-size:12px;color:#A6AAB0">状态与创建时间由服务端过滤并分页；单号 / 付款人 / 商品仅筛选当前页，OpenAPI 暂不支持这三项的跨页检索。</p></sc-if>
+            </div>
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #EFF0F1">
+                <h2 style="margin:0;font-size:14px;font-weight:600">订单列表</h2>
+              </div>
+              <table style="width:100%;border-collapse:collapse">
+                <thead><tr>
+                  <th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">创建时间</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">微信 / 平台单号</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">付款人 / 客户身份</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">商品名</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:right;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">金额</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">状态</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">支付渠道</th>
+                  <th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:right;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">操作</th>
+                </tr></thead>
+                <tbody>
+                  <sc-for list="{{ rows.orders }}" as="r" hint-placeholder-count="5">
+                    <tr>
+                      <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;font-size:13px;color:#646A73;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">{{ r.time }}</td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5"><div style="font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">{{ r.no }}</div><div style="font-size:12px;color:#A6AAB0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">{{ r.plat }}</div></td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5"><div style="font-size:13px">{{ r.payer }}</div><div style="font-size:12px;color:#A6AAB0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">{{ r.uid }}</div></td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px">{{ r.product }}</td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:right;font-weight:500;font-variant-numeric:tabular-nums">{{ r.amount }}</td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5"><span style="{{ r.cs }}">{{ r.status }}</span></td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;color:#646A73">{{ r.pay }}</td>
+                      <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;text-align:right"><a onClick="{{ r.view }}" style="font-size:13px;color:var(--accent,#3370ff);cursor:pointer">查看详情</a></td>
+                    </tr>
+                  </sc-for>
+                  <sc-if value="{{ orderPage.empty }}"><tr><td colspan="8" style="padding:32px;text-align:center;color:#8F959E;font-size:13px">当前筛选暂无订单</td></tr></sc-if>
+                </tbody>
+              </table>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-top:1px solid #EFF0F1">
+                <span style="font-size:12px;color:#8F959E">{{ orderPage.summary }}</span>
+                <sc-if value="{{ orderPage.serverPaged }}">
+                <span style="display:inline-flex;align-items:center;gap:6px">
+                  <sc-if value="{{ orderPage.loading }}"><span style="font-size:12px;color:#245BDB">正在读取…</span></sc-if>
+                  <button onClick="{{ orderPage.previous }}" style="{{ orderPage.previousStyle }}">上一页</button>
+                  <button onClick="{{ orderPage.next }}" style="{{ orderPage.nextStyle }}">下一页</button>
+                </span>
+                </sc-if>
+                <sc-if value="{{ orderPage.localFilterNote }}"><span style="font-size:12px;color:#A6AAB0">筛选仅作用于当前已加载数据</span></sc-if>
+              </div>
+              <sc-if value="{{ orderPage.error }}"><div role="alert" style="padding:9px 16px;border-top:1px solid #F2B8B5;background:#FFF1F0;color:#D83931;font-size:12px">订单列表读取失败：{{ orderPage.error }}</div></sc-if>
+            </div>
+          </div>

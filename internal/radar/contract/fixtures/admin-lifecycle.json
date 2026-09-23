@@ -1,0 +1,17 @@
+{
+  "name": "admin-lifecycle",
+  "source_commit": "6bfbe5816bb89913c70adaca87d6a486260e016e",
+  "disposition": "donor_real",
+  "capabilities": [
+    "list and filter",
+    "create and edit",
+    "enable and disable",
+    "share path and qr payload"
+  ],
+  "assertions": {
+    "statuses": ["draft", "enabled", "disabled"],
+    "content_types": ["link", "image", "pdf"],
+    "write_idempotency_required": true,
+    "public_code_immutable": true
+  }
+}

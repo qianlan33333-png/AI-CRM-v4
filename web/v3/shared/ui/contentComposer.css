@@ -1,0 +1,169 @@
+/* Shared V3 content draft and readonly presentation.  It is scoped to the
+   component masks so an admin, H5, or sidebar host only opts in by loading it. */
+.aicrm-content-composer-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 9100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: auto;
+  background: rgba(16, 24, 40, .46);
+}
+
+/* A child editor opened from an existing native <dialog> must become its own
+   top-layer dialog; otherwise the parent modal makes a body overlay inert. */
+dialog.aicrm-content-composer-mask[data-v3-content-top-layer="1"] {
+  width: 100vw;
+  max-width: none;
+  height: 100vh;
+  max-height: none;
+  margin: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  outline: 0;
+  background: transparent !important;
+}
+dialog.aicrm-content-composer-mask[data-v3-content-top-layer="1"]::backdrop {
+  background: rgba(16, 24, 40, .46);
+}
+
+.aicrm-content-composer {
+  width: min(960px, 100%);
+  height: min(760px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  overflow: hidden;
+  border: 1px solid #e5eaf1;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 24px 64px rgba(16, 24, 40, .22);
+  color: #182230;
+  font-size: 14px;
+}
+
+.aicrm-content-composer__head,
+.aicrm-content-composer footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-color: #e8edf4;
+}
+
+.aicrm-content-composer__head { border-bottom: 1px solid #e8edf4; }
+.aicrm-content-composer footer { justify-content: flex-end; border-top: 1px solid #e8edf4; }
+.aicrm-content-composer__head h3,
+.aicrm-content-composer__head p { margin: 0; }
+.aicrm-content-composer__head > div { min-width: 0; }
+.aicrm-content-composer__head h3 { font-size: 17px; line-height: 1.4; }
+.aicrm-content-composer__head p,
+.aicrm-content-composer__materials span,
+.aicrm-content-presentation__note { color: #667085; font-size: 13px; line-height: 1.5; }
+
+.aicrm-content-composer__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(260px, .9fr);
+  gap: 20px;
+  padding: 20px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.aicrm-content-composer__body > section,
+.aicrm-content-composer__body > aside,
+.aicrm-content-presentation {
+  min-width: 0;
+  border: 1px solid #e8edf4;
+  border-radius: 12px;
+  background: #fbfcfe;
+}
+
+.aicrm-content-composer__body > section { padding: 14px; }
+.aicrm-content-composer label { display: grid; gap: 8px; color: #344054; font-weight: 700; }
+.aicrm-content-composer textarea {
+  min-height: 132px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #182230;
+  font: inherit;
+  line-height: 1.55;
+}
+
+.aicrm-content-composer button {
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #344054;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.aicrm-content-composer button:hover:not(:disabled),
+.aicrm-content-composer button:focus-visible { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; outline: none; }
+.aicrm-content-composer button:disabled { cursor: not-allowed; opacity: .56; }
+.aicrm-content-composer footer [data-v3-composer-confirm] { border-color: #2563eb; background: #2563eb; color: #fff; }
+.aicrm-content-composer footer [data-v3-composer-confirm]:hover:not(:disabled),
+.aicrm-content-composer footer [data-v3-composer-confirm]:focus-visible { border-color: #1d4ed8; background: #1d4ed8; color: #fff; }
+
+.aicrm-content-composer__variables,
+.aicrm-content-composer__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.aicrm-content-composer__materials { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
+.aicrm-content-composer__materials li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; background: #fff; }
+.aicrm-content-composer__material-info { display: grid; gap: 3px; min-width: 0; }
+.aicrm-content-composer__materials strong { color: #344054; overflow-wrap: anywhere; }
+.aicrm-content-composer__materials span { min-width: 0; color: #667085; font-size: 13px; overflow-wrap: anywhere; }
+.aicrm-content-composer__material-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.aicrm-content-composer__materials button { min-height: 30px; padding: 5px 8px; font-size: 13px; }
+.aicrm-content-composer__status { min-height: 20px; margin: -4px 0 12px; padding-inline: 20px; color: #475467; font-size: 13px; line-height: 1.5; }
+
+.aicrm-content-presentation { display: grid; gap: 10px; padding: 14px; }
+.aicrm-content-presentation h4 { margin: 0; font-size: 15px; }
+.aicrm-content-presentation__note,
+.aicrm-content-presentation__text,
+.aicrm-content-presentation__notice { margin: 0; }
+.aicrm-content-presentation__text { min-height: 48px; padding: 10px; border-radius: 8px; background: #fff; color: #344054; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.aicrm-content-presentation__notice { padding: 8px 10px; border-radius: 8px; background: #fffaeb; color: #93370d; font-size: 13px; line-height: 1.5; }
+.aicrm-content-presentation__materials,
+.aicrm-content-presentation__supplements { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.aicrm-content-presentation__material,
+.aicrm-content-presentation__supplement { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 10px; align-items: center; padding: 9px; border-radius: 8px; background: #fff; }
+.aicrm-content-presentation__material--without-thumbnail,
+.aicrm-content-presentation__supplement--without-thumbnail { grid-template-columns: minmax(0, 1fr); }
+.aicrm-content-presentation__visual { inline-size: 48px; block-size: 48px; min-inline-size: 48px; min-block-size: 48px; overflow: hidden; border-radius: 7px; background: #eef2f6; }
+.aicrm-content-presentation__material img,
+.aicrm-content-presentation__supplement img,
+.aicrm-content-presentation__thumbnail-fallback,
+.aicrm-content-presentation__visual .aicrm-material-thumbnail__loading { display: block; inline-size: 48px !important; block-size: 48px !important; max-inline-size: 48px !important; max-block-size: 48px !important; border-radius: 7px; object-fit: cover; background: #eef2f6; }
+.aicrm-content-presentation__visual [hidden] { display: none !important; }
+.aicrm-material-thumbnail__loading { display: grid; place-items: center; color: #667085; font-size: 12px; text-align: center; }
+.aicrm-content-presentation__thumbnail-fallback { display: grid; place-items: center; color: #667085; font-size: 12px; text-align: center; }
+.aicrm-content-presentation__material-details { display: grid; gap: 3px; min-width: 0; }
+.aicrm-content-presentation__material strong,
+.aicrm-content-presentation__material span { overflow-wrap: anywhere; }
+.aicrm-content-presentation__material span { color: #667085; font-size: 13px; }
+.aicrm-content-composer--readonly { width: min(680px, 100%); height: auto; max-height: min(760px, calc(100vh - 48px)); display: block; overflow: auto; }
+.aicrm-content-composer--readonly > [data-v3-content-readonly-body] { padding: 20px; }
+
+@media (max-width: 640px) {
+  .aicrm-content-composer-mask { align-items: end; padding: 8px; }
+  .aicrm-content-composer { height: calc(100vh - 16px); border-radius: 14px; }
+  .aicrm-content-composer__head,
+  .aicrm-content-composer footer { padding: 14px; }
+  .aicrm-content-composer__body { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 14px; }
+  .aicrm-content-composer__materials li { grid-template-columns: minmax(0, 1fr); }
+  .aicrm-content-composer__material-actions { justify-content: flex-start; }
+  .aicrm-content-presentation__material,
+  .aicrm-content-presentation__supplement { grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .aicrm-content-composer__status { margin: -2px 0 10px; padding-inline: 14px; }
+  .aicrm-content-composer__head p { margin-top: 4px; }
+  .aicrm-content-composer--readonly { height: auto; max-height: calc(100vh - 16px); }
+}

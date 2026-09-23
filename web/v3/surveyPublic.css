@@ -1,0 +1,177 @@
+/* Public Survey H5 only.  It deliberately does not target admin, sidebar, or
+   the other H5 product/service pages that share the frozen donor build. */
+body[data-ui-surface="h5"][data-v3-public-survey] {
+  --v3-survey-canvas: var(--v3-ui-canvas, #f5f6f7);
+  --v3-survey-panel: var(--v3-ui-panel, #fff);
+  --v3-survey-text: var(--v3-ui-text, #1f2329);
+  --v3-survey-muted: var(--v3-ui-muted, #646a73);
+  --v3-survey-line: var(--v3-ui-line, #dee0e3);
+  --v3-survey-primary: var(--v3-ui-primary, #3370ff);
+  --v3-survey-primary-strong: var(--v3-ui-primary-strong, #245bdb);
+  --v3-survey-primary-soft: var(--v3-ui-primary-soft, #eff4ff);
+  --v3-survey-danger: var(--v3-ui-danger, #d83931);
+  --v3-survey-danger-soft: var(--v3-ui-danger-soft, #fff5f5);
+  --v3-survey-radius: var(--v3-ui-radius-lg, 12px);
+  color: var(--v3-survey-text);
+  background: var(--v3-survey-canvas);
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen[data-v3-public-survey-screen] {
+  background: var(--v3-survey-canvas);
+  color: var(--v3-survey-text);
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-stop] {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  padding: 24px 20px;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-stop-card] {
+  background: var(--v3-survey-panel);
+  border: 1px solid color-mix(in srgb, var(--v3-survey-line) 78%, transparent);
+  border-radius: var(--v3-survey-radius);
+  box-shadow: 0 4px 14px rgb(31 35 41 / 5%);
+  max-width: 440px;
+  padding: 28px 24px;
+  text-align: center;
+  width: 100%;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-stop-label] {
+  background: var(--v3-survey-primary-soft);
+  border-radius: 999px;
+  color: var(--v3-survey-primary);
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 28px;
+  padding: 0 12px;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-stop-card] h1 {
+  font-size: 22px;
+  line-height: 30px;
+  margin: 16px 0 8px;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-stop-card] p {
+  color: var(--v3-survey-muted);
+  font-size: 14px;
+  line-height: 22px;
+  margin: 0;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-safe-return] {
+  align-items: center;
+  background: var(--v3-survey-primary);
+  border-radius: 10px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 16px;
+  font-weight: 600;
+  justify-content: center;
+  margin-top: 22px;
+  min-height: 48px;
+  padding: 0 18px;
+  text-decoration: none;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-question] {
+  border: 1px solid color-mix(in srgb, var(--v3-survey-line) 78%, transparent);
+  box-shadow: 0 1px 2px rgb(31 35 41 / 3%);
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen :is(input, textarea) {
+  border-color: var(--v3-survey-line) !important;
+  background: var(--v3-survey-panel);
+  color: var(--v3-survey-text);
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen :is(input, textarea):focus {
+  border-color: var(--v3-survey-primary) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--v3-survey-primary) 16%, transparent);
+  outline: 0;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-option] {
+  border: 1px solid var(--v3-survey-line);
+  min-height: 48px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-option][aria-pressed="true"] {
+  border-color: var(--v3-survey-primary) !important;
+  background: var(--v3-survey-primary-soft) !important;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-action] {
+  min-height: 48px;
+  white-space: nowrap;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-h5-submit][data-v3-survey-action] {
+  background: var(--v3-survey-primary) !important;
+  box-shadow: 0 6px 16px rgb(51 112 255 / 20%);
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-h5-submit][data-v3-survey-action]:not(:disabled):hover {
+  background: var(--v3-survey-primary-strong) !important;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-h5-submit][data-v3-survey-action]:disabled {
+  opacity: .66;
+  box-shadow: none;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-error] {
+  border: 1px solid color-mix(in srgb, var(--v3-survey-danger) 28%, transparent);
+  box-shadow: 0 1px 2px rgb(216 57 49 / 7%);
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-recovery] {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-error-detail] {
+  display: block;
+  margin-top: 8px;
+  color: color-mix(in srgb, var(--v3-survey-danger) 74%, var(--v3-survey-muted));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-receipt] {
+  border: 1px solid color-mix(in srgb, var(--v3-survey-primary) 16%, transparent);
+  box-shadow: 0 4px 14px rgb(31 35 41 / 5%);
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-done]:focus {
+  outline: 0;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-h5-lead-qr] img {
+  border-radius: 8px;
+}
+
+body[data-ui-surface="h5"][data-v3-public-survey] #screen[data-v3-survey-submitting="true"] [data-v3-survey-action] {
+  pointer-events: none;
+}
+
+@media (max-width: 430px) {
+  body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-question] {
+    border-radius: 12px;
+  }
+
+  body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-action] {
+    min-height: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-ui-surface="h5"][data-v3-public-survey] #screen [data-v3-survey-option] { transition: none; }
+}

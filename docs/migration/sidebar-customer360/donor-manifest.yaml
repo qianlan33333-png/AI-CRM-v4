@@ -1,0 +1,27 @@
+schema_version: 1
+donor:
+  repository: https://github.com/qianlan33333-png/AI-CRM
+  commit: dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f
+files:
+  - path: aicrm_next/app/admin_console/templates/sidebar_customer_workbench.html
+    sha256: 5fc78020b14805d4141d5f07a05af193811e1c282d36797ccd8efbf5289a3397
+  - path: aicrm_next/app/admin_console/static/sidebar_workbench/sidebar_workbench.css
+    sha256: a23120e4ce92a37b8001630615d6c42821a3e581e04edab4b52b488bce3d080b
+  - path: aicrm_next/app/admin_console/static/sidebar_workbench/sidebar_workbench.js
+    sha256: f20515f3192f3a11048929c7c7b375e1ae274165ae173c0d8415735ffa25424d
+  - path: aicrm_next/app/admin_console/static/sidebar_workbench/product-card-cover.png
+    sha256: 48722c325a545c0f276aaa44a462adb64993a273b0fd7b1edbc27284eddd3914
+active_host_adapter:
+  template: internal/webshell/templates/sidebar.html
+  css: internal/webshell/static/sidebar_workbench/sidebar_workbench.css
+  javascript: internal/webshell/static/sidebar_workbench/sidebar_workbench.js
+approved_differences:
+  - remove chat and other-staff-message entry points
+  - remove CRM tag and follow-member presentation
+  - remove operations and automation summaries
+  - replace donor network controller with the v3 OAuth JSSDK Context Token and stable-Port adapter
+  - retain exactly six primary tabs: profile questionnaire product order coupon material
+prohibited:
+  - editing donor source files
+  - using donor Python or database as a runtime dependency
+  - returning fixture business data

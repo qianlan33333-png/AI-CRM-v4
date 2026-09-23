@@ -1,0 +1,16 @@
+{
+  "name": "admin-statistics-placeholder",
+  "source_commit": "6bfbe5816bb89913c70adaca87d6a486260e016e",
+  "disposition": "donor_placeholder",
+  "capabilities": [
+    "statistics cards",
+    "event filtering",
+    "csv export"
+  ],
+  "assertions": {
+    "list_total_landings_fixed_zero": true,
+    "list_authorized_users_fixed_zero": true,
+    "list_view_count_fixed_zero": true,
+    "csv_identity_columns_empty": true
+  }
+}

@@ -1,0 +1,6 @@
+# Replaces the old IP-alias backend route; no old checkout bypass remains.
+server {
+    listen 80 default_server;
+    server_name 150.158.82.186.sslip.io _;
+    return 308 https://www.youcangogogo.com$request_uri;
+}

@@ -1,0 +1,20 @@
+[Unit]
+Description=Create AI-CRM v3 daily WeCom customer reconciliation River job
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=aicrm
+Group=aicrm
+WorkingDirectory=/opt/aicrm/current
+EnvironmentFile=/etc/aicrm/aicrm.env
+EnvironmentFile=-/opt/aicrm/current/release.env
+# ExecStart owns the role and trigger; shared environment cannot turn this
+# oneshot into a listener or another worker role.
+ExecStart=/usr/bin/env AICRM_ROLE=worker AICRM_CUSTOMER_SYNC_TRIGGER=daily /opt/aicrm/current/bin/aicrm
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+UMask=0027

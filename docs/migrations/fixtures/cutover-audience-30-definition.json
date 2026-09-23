@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "template_key": "paid_order",
+  "parameters": {
+    "product_codes": [
+      "subscription_trial_month",
+      "prd_20260518095708_9f77db",
+      "prd_20260707050545_291025"
+    ],
+    "paid_at_from": "",
+    "paid_at_to": "",
+    "owner_scope": "all",
+    "owner_staff_ids": [],
+    "require_active_wecom_contact": true
+  }
+}

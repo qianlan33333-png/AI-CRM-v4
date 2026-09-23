@@ -1,0 +1,47 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><span>客户管理后台</span><span>/</span><span>配置及后台</span></div>
+              <div style="font-size:16px;font-weight:600;line-height:22px">自动化话术</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex:none">
+              <button data-agent-create="agent" onClick="{{ agentsPage.createAgent }}" style="height:30px;padding:0 12px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">新增 Agent</button>
+              <button data-agent-create="fixed_script" onClick="{{ agentsPage.createFixedScript }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">新增固定话术</button>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #EFF0F1"><h2 style="margin:0;font-size:14px;font-weight:600">自动化列表</h2></div>
+              <table style="width:100%;border-collapse:collapse">
+                <thead><tr>
+                  <th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">自动化名称</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">自动化类型</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">固定素材</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">状态</th>
+                  <th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:right;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">操作</th>
+                </tr></thead>
+                <tbody>
+                  <sc-for list="{{ rows.agents }}" as="r" hint-placeholder-count="3">
+                    <tr>
+                      <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5">
+                        <div style="font-size:13px;font-weight:600">{{ r.name }}</div>
+                        <div style="font-size:12px;color:#A6AAB0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:2px">{{ r.code }}</div>
+                      </td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5"><span style="{{ r.typeCs }}">{{ r.type }}</span></td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5"><span style="{{ r.matCs }}">{{ r.material }}</span></td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5"><span style="{{ r.cs }}">{{ r.status }}</span></td>
+                      <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;text-align:right">
+                        <div style="display:inline-flex;flex-wrap:wrap;justify-content:flex-end;gap:8px">
+                          <a data-agent-action="edit" onClick="{{ r.edit }}" style="height:28px;padding:0 12px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;color:#1F2329;cursor:pointer">编辑</a>
+                          <a data-agent-action="copy" onClick="{{ r.copy }}" style="height:28px;padding:0 12px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;color:#1F2329;cursor:pointer">复制</a>
+                          <a data-agent-action="precheck" onClick="{{ r.precheck }}" style="height:28px;padding:0 12px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;color:#1F2329;cursor:pointer">校验</a>
+                          <a data-agent-action="pause" onClick="{{ r.pause }}" style="height:28px;padding:0 12px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;color:#1F2329;cursor:pointer">暂停</a>
+                          <a data-agent-action="archive" onClick="{{ r.archive }}" style="height:28px;padding:0 12px;display:inline-flex;align-items:center;border:1px solid #FBC4C2;border-radius:6px;background:#FFF5F5;font-size:13px;color:#D83931;cursor:pointer">归档</a>
+                        </div>
+                      </td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </div>

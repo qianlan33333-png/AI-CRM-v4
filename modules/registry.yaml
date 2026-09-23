@@ -1,0 +1,83 @@
+version: 1
+states: [planned, contracted, implemented, shadow, cutover, retired-source]
+modules:
+  - name: platform
+    status: implemented
+    owner: crm-platform
+    dependencies: []
+  - name: customer
+    status: implemented
+    owner: crm-core
+    dependencies: [platform]
+  - name: identity
+    status: implemented
+    owner: crm-core
+    dependencies: [platform, customer]
+  - name: access
+    status: implemented
+    owner: crm-core
+    dependencies: [platform]
+  - name: wecom
+    status: implemented
+    owner: crm-connectors
+    dependencies: [platform, access, identity]
+  - name: order
+    status: implemented
+    owner: crm-commerce
+    dependencies: [platform, customer, identity]
+  - name: payment
+    status: implemented
+    owner: crm-commerce
+    dependencies: [platform, order, identity]
+  - name: webshell
+    status: implemented
+    owner: crm-product
+    dependencies: [access, customer, identity, wecom]
+  - name: crm-core-modules
+    status: planned
+    owner: crm-core
+    dependencies: [customer, identity, access, wecom]
+  - name: content-commerce-modules
+    status: planned
+    owner: crm-product
+    dependencies: [crm-core-modules, order, payment]
+  - name: operations-modules
+    status: planned
+    owner: crm-operations
+    dependencies: [crm-core-modules, content-commerce-modules]
+  - name: operationcycle
+    status: implemented
+    owner: crm-operations
+    dependencies: [platform, access]
+  - name: automation
+    status: implemented
+    owner: crm-operations
+    dependencies: [platform, access]
+  - name: externaleffects
+    status: implemented
+    owner: crm-platform
+    dependencies: [platform]
+  - name: outbound
+    status: implemented
+    owner: crm-connectors
+    dependencies: [platform, externaleffects]
+  - name: segment
+    status: implemented
+    owner: crm-operations
+    dependencies: [platform, customer, identity, access, automation, outbound]
+  - name: radar
+    status: implemented
+    owner: crm-operations
+    dependencies: [platform, access, customer, identity, media, wecom]
+  - name: aiassistant
+    status: contracted
+    owner: crm-operations
+    dependencies: [platform, customer, identity, access]
+  - name: intelligence-platform-tail
+    status: planned
+    owner: crm-platform
+    dependencies: [operations-modules]
+  - name: hxc-dashboard
+    status: cutover
+    owner: crm-operations
+    dependencies: [platform, access, identity]

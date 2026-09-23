@@ -1,0 +1,136 @@
+/* Public commerce presentation is isolated from the admin shell and frozen
+   service-period body. Existing Owner text and controls remain authoritative. */
+:is(main, body)[data-v3-public-commerce] {
+  --public-canvas: #f5f6f8;
+  --public-panel: #fff;
+  --public-panel-soft: #f8faff;
+  --public-text: #1f2329;
+  --public-muted: #646a73;
+  --public-line: #e2e5ea;
+  --public-primary: #3370ff;
+  --public-primary-strong: #245bdb;
+  --public-primary-soft: #eff4ff;
+  --public-success: #16803c;
+  --public-success-soft: #edf9f0;
+  --public-warning: #9a6700;
+  --public-warning-soft: #fff7e6;
+  color: var(--public-text);
+  max-width: 680px;
+  padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
+}
+
+:is(main, body)[data-v3-public-commerce] :is(.panel, .completion-result) {
+  border: 1px solid var(--public-line);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgb(31 35 41 / 6%);
+}
+
+:is(main, body)[data-v3-public-commerce] :is(.price, .amount, .footer-price strong, .service-period-price) {
+  font-variant-numeric: tabular-nums;
+}
+
+:is(main, body)[data-v3-public-commerce] :is(.buy, .auth-button) {
+  background: var(--public-primary);
+  box-shadow: 0 6px 14px rgb(51 112 255 / 18%);
+  transition: background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+:is(main, body)[data-v3-public-commerce] :is(.buy, .auth-button):not(:disabled):not([aria-disabled="true"]):hover {
+  background: var(--public-primary-strong);
+}
+
+:is(main, body)[data-v3-public-commerce] :is(.buy, .auth-button):focus-visible,
+:is(main, body)[data-v3-public-commerce] :is(.coupon, .mobile):focus-visible {
+  outline: 3px solid rgb(51 112 255 / 35%);
+  outline-offset: 3px;
+}
+
+:is(main, body)[data-v3-public-commerce][data-public-commerce-primary-action="disabled"] #buy {
+  box-shadow: none;
+}
+
+:is(main, body)[data-v3-public-commerce] :is(.buy:disabled, .auth-button[aria-disabled="true"]) {
+  background: #a9bfff;
+  box-shadow: none;
+}
+
+:is(main, body)[data-v3-public-commerce][data-public-commerce-completion="true"] .completion-result {
+  border-color: #b7ebc6;
+  background: var(--public-success-soft);
+}
+
+:is(main, body)[data-v3-public-commerce] :is(.detail-image, .completion-qr, .slice-img)[data-public-media-state="unavailable"] {
+  min-height: 48px;
+  background: var(--public-panel-soft);
+  outline: 1px solid var(--public-line);
+  object-fit: contain;
+}
+
+:is(main, body)[data-v3-public-commerce] .checkout-footer {
+  max-width: 680px;
+  border-top-color: var(--public-line);
+  box-shadow: 0 -8px 24px rgb(31 35 41 / 6%);
+}
+
+:is(main, body)[data-v3-public-commerce] .notice {
+  border: 1px solid #f3d19e;
+  background: var(--public-warning-soft);
+  color: var(--public-warning);
+}
+
+:is(main, body)[data-v3-public-commerce] :is(.status, .auth-message, .desc, .completion-subtitle) {
+  color: var(--public-muted);
+}
+
+:is(main, body)[data-v3-public-commerce] :is(.status, .auth-message, .desc, .completion-subtitle, h1) {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  :is(main, body)[data-v3-public-commerce] {
+    min-height: 100dvh;
+    padding-bottom: calc(126px + env(safe-area-inset-bottom));
+  }
+
+  :is(main, body)[data-v3-public-commerce] :is(.panel, .completion-result) {
+    padding: 18px 16px;
+    border-radius: 14px;
+  }
+
+  :is(main, body)[data-v3-public-commerce] .checkout-footer {
+    gap: 12px;
+    padding-inline: 16px;
+  }
+
+  :is(main, body)[data-v3-public-commerce] .footer-price {
+    min-width: 0;
+  }
+
+  :is(main, body)[data-v3-public-commerce] .buy {
+    min-width: 0;
+    padding-inline: 14px;
+    white-space: nowrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(main, body)[data-v3-public-commerce] :is(.buy, .auth-button) {
+    transition: none;
+  }
+}
+
+:is(main, body)[data-v3-public-commerce].service-period-page .service-period-card {
+  border-color: var(--public-line);
+  box-shadow: 0 8px 24px rgb(31 35 41 / 10%);
+}
+
+:is(main, body)[data-v3-public-commerce].service-period-page .service-period-bar {
+  border-top-color: var(--public-line);
+  box-shadow: 0 -8px 24px rgb(31 35 41 / 6%);
+}
+
+/* The frozen service-period renderer declares unavailability through its
+   disabled owner action. Keep that explicit fact visually neutral. */
+:is(main, body)[data-v3-public-commerce][data-public-commerce-route="service-period-state"][data-public-commerce-primary-action="disabled"] .service-period-tag::before {
+  background: #a8adb5;
+}

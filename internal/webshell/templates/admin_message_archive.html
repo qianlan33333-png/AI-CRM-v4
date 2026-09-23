@@ -1,0 +1,28 @@
+{{define "admin_message_archive"}}
+{{if eq .RequestPath "/admin/message-archive"}}
+<section class="admin-card archive-view" data-message-archive-entry>
+  <div class="admin-card-head">
+    <p>先从现有用户目录选择用户，再查看该用户已入库的企业微信会话存档。</p>
+  </div>
+</section>
+{{else}}
+<section class="admin-card archive-view" data-message-archive-root data-api-base="/api/admin/message-archive/customers/">
+  <div class="admin-card-head">
+    <p>仅显示已入库的企业微信会话存档。读取不会触发企微拉取。</p>
+    <form class="archive-search admin-toolbar" id="archive-search-form">
+      <label>关键词<input name="q" maxlength="300" autocomplete="off" placeholder="搜索已归档文本"></label>
+      <label>开始时间<input name="start_at" type="datetime-local" step="1"></label>
+      <label>结束时间<input name="end_at" type="datetime-local" step="1"></label>
+      <label>会话<select name="chat_type"><option value="">全部</option><option value="private">单聊</option><option value="group">群聊</option></select></label>
+      <label>消息类型<select name="message_type"><option value="">全部</option><option value="text">文本</option><option value="image">图片</option></select></label>
+      <label>方向<select name="direction"><option value="">全部</option><option value="customer_to_staff">用户发出</option><option value="staff_to_customer">员工发出</option></select></label>
+      <label>员工<select name="staff_user_id" id="archive-staff"><option value="">全部员工</option></select></label>
+      <button class="admin-button admin-button--primary" type="submit">搜索</button>
+    </form>
+  </div>
+  <div id="archive-state" class="admin-state admin-state--inline"><strong>正在读取会话存档</strong><span>只读取本地受保护归档。</span></div>
+  <div id="archive-message-list" class="admin-profile-message-list" hidden></div>
+  <div class="archive-actions"><button id="archive-more" class="admin-button admin-button--secondary" type="button" hidden>加载更多</button></div>
+</section>
+{{end}}
+{{end}}

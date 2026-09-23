@@ -1,0 +1,147 @@
+{{define "admin_access"}}
+<section class="admin-card admin-access-card" data-admin-access-root
+  data-users-url="/api/admin/access/users"
+  data-enterprise-employees-url="/api/admin/access/enterprise-employees">
+  <div class="admin-card-head admin-card-head--tight">
+    <div>
+      <h2>员工与权限</h2>
+      <p>选择企业员工，设置后台访问权限。</p>
+    </div>
+  </div>
+
+  <div id="admin-access-alert" class="admin-alert" role="status" aria-live="polite" hidden></div>
+
+  <section id="admin-access-super" class="admin-access-super" aria-labelledby="admin-access-super-title" hidden>
+    <div>
+      <p class="admin-access-eyebrow">唯一超级管理员</p>
+      <h3 id="admin-access-super-title"></h3>
+      <p id="admin-access-super-detail" class="admin-muted"></p>
+    </div>
+    <button class="admin-button admin-button--secondary" id="admin-access-transfer" type="button" hidden>转移超级管理员</button>
+  </section>
+
+  <section class="admin-access-section" aria-labelledby="admin-access-users-title">
+    <div class="admin-access-section__head">
+      <div>
+        <h3 id="admin-access-users-title">员工列表</h3>
+        <p id="admin-access-list-status" class="admin-muted" role="status" aria-live="polite">正在加载员工列表…</p>
+      </div>
+      <button class="admin-button admin-button--ghost" id="admin-access-refresh" type="button">刷新</button>
+    </div>
+
+    <div class="admin-access-toolbar">
+      <label class="admin-access-search" for="admin-access-search">
+        <span class="sr-only">搜索姓名或企微账号</span>
+        <input id="admin-access-search" type="search" autocomplete="off" placeholder="搜索姓名或精确企微账号">
+      </label>
+      <span id="admin-access-search-status" class="admin-muted"></span>
+    </div>
+
+    <div id="admin-access-no-permission" class="admin-access-no-permission" hidden>
+      暂无可用的权限管理操作。
+    </div>
+    <div id="admin-access-loading" class="admin-state admin-state--loading" role="status">
+      <strong>正在加载</strong>
+      <span>正在读取员工权限。</span>
+    </div>
+    <div id="admin-access-empty" class="admin-state" hidden>
+      <strong>暂无已开通员工</strong>
+      <span>可从企业员工目录选择账号并开通后台权限。</span>
+    </div>
+    <div id="admin-access-filter-empty" class="admin-state" hidden>
+      <strong>未找到匹配员工</strong>
+      <span>姓名支持包含搜索；企微账号需完整一致。</span>
+    </div>
+    <div id="admin-access-list-error" class="admin-state admin-state--error" role="alert" hidden>
+      <strong>员工列表不可用</strong>
+      <span id="admin-access-list-error-message">请稍后重试。</span>
+    </div>
+    <div id="admin-access-table-wrap" class="admin-table-wrap" hidden>
+      <table class="admin-table admin-access-table">
+        <thead>
+          <tr>
+            <th scope="col">员工</th>
+            <th scope="col">企微账号</th>
+            <th scope="col">权限</th>
+            <th scope="col">登录状态</th>
+            <th scope="col">最近登录</th>
+            <th scope="col">操作</th>
+          </tr>
+        </thead>
+        <tbody id="admin-access-users-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div id="admin-access-drawer-backdrop" class="admin-access-drawer-backdrop" hidden></div>
+  <aside id="admin-access-drawer" class="admin-access-drawer" aria-labelledby="admin-access-drawer-title" aria-modal="true" role="dialog" hidden>
+    <div class="admin-access-section__head">
+      <div>
+        <h3 id="admin-access-drawer-title">管理员工</h3>
+        <p id="admin-access-drawer-user" class="admin-muted"></p>
+      </div>
+      <button class="admin-button admin-button--ghost" id="admin-access-drawer-close" type="button">关闭</button>
+    </div>
+    <div id="admin-access-drawer-actions" class="admin-access-drawer-actions"></div>
+    <section id="admin-access-role-panel" class="admin-access-drawer-panel" hidden>
+      <h4>调整权限</h4>
+      <p class="admin-muted">权限只能是管理员或只读；超级管理员请使用顶部的独立转移操作。</p>
+      <form id="admin-access-role-form" class="admin-form-grid admin-form-grid--stacked">
+        <label class="admin-access-radio"><input name="role" type="radio" value="admin"><span>管理员</span></label>
+        <label class="admin-access-radio"><input name="role" type="radio" value="viewer"><span>只读</span></label>
+        <div class="admin-form-actions"><button class="admin-button admin-button--secondary" type="submit">保存权限</button></div>
+      </form>
+    </section>
+    <section id="admin-access-advanced-panel" class="admin-access-drawer-panel" hidden>
+      <h4>高级操作</h4>
+      <p class="admin-muted">仅超级管理员可修改他人的企微绑定或重置密码。</p>
+      <form id="admin-access-binding-form" class="admin-form-grid admin-form-grid--stacked" hidden>
+        <label><span>企微账号</span><input id="admin-access-wecom-userid" name="wecom_userid" type="text" maxlength="128" autocomplete="off"></label>
+        <div class="admin-form-actions"><button class="admin-button admin-button--secondary" type="submit">保存绑定</button><button class="admin-button admin-button--ghost" id="admin-access-unbind" type="button">解除绑定</button></div>
+      </form>
+      <form id="admin-access-password-form" class="admin-form-grid admin-form-grid--stacked" hidden>
+        <label><span>重置密码</span><input id="admin-access-new-password" name="password" type="password" autocomplete="new-password" minlength="12" required></label>
+        <div class="admin-form-actions"><button class="admin-button admin-button--secondary" type="submit">重置密码</button></div>
+      </form>
+    </section>
+  </aside>
+
+  <div id="admin-access-provision-dialog" class="admin-access-modal" aria-labelledby="admin-access-provision-title" aria-modal="true" role="dialog" hidden>
+    <div class="admin-access-modal__card">
+      <div class="admin-access-section__head">
+        <div>
+          <p id="admin-access-provision-step" class="admin-access-eyebrow">第 1 步，共 3 步</p>
+          <h3 id="admin-access-provision-title">开通权限</h3>
+          <p id="admin-access-provision-hint" class="admin-muted">从企业员工目录中选择账号。</p>
+        </div>
+        <button class="admin-button admin-button--ghost" id="admin-access-provision-close" type="button">关闭</button>
+      </div>
+      <div id="admin-access-provision-employee-step">
+        <label class="admin-access-search" for="admin-access-employee-search"><span class="sr-only">搜索企业员工</span><input id="admin-access-employee-search" type="search" autocomplete="off" placeholder="输入姓名或完整企微账号"></label>
+        <p id="admin-access-employee-search-status" class="admin-muted"></p>
+        <div id="admin-access-employee-results" class="admin-access-employee-results"></div>
+      </div>
+      <fieldset id="admin-access-provision-role-step" class="admin-access-roles" hidden>
+        <legend>选择权限</legend>
+        <label class="admin-access-radio" data-role-option="admin"><input name="provision-role" type="radio" value="admin"><span>管理员</span><small>可处理日常业务，并可开通或停用只读员工。</small></label>
+        <label class="admin-access-radio" data-role-option="viewer"><input name="provision-role" type="radio" value="viewer"><span>只读</span><small>可查看授权范围内的信息，不能管理权限。</small></label>
+      </fieldset>
+      <div id="admin-access-provision-confirm-step" class="admin-access-confirm" hidden></div>
+      <div class="admin-form-actions admin-access-modal__actions">
+        <button class="admin-button admin-button--ghost" id="admin-access-provision-back" type="button" hidden>上一步</button>
+        <button class="admin-button admin-button--secondary" id="admin-access-provision-next" type="button">下一步</button>
+        <button class="admin-button admin-button--primary" id="admin-access-provision-submit" type="button" hidden>确认开通</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="admin-access-transfer-dialog" class="admin-access-modal" aria-labelledby="admin-access-transfer-title" aria-modal="true" role="dialog" hidden>
+    <div class="admin-access-modal__card admin-access-modal__card--narrow">
+      <div class="admin-access-section__head"><div><h3 id="admin-access-transfer-title">转移超级管理员</h3><p class="admin-muted">只能选择当前有效的管理员。确认后，你会变为管理员并需要重新登录。</p></div><button class="admin-button admin-button--ghost" id="admin-access-transfer-close" type="button">关闭</button></div>
+      <label><span>选择管理员</span><select id="admin-access-transfer-target"></select></label>
+      <div class="admin-form-actions"><button class="admin-button admin-button--primary" id="admin-access-transfer-submit" type="button">确认转移</button></div>
+    </div>
+  </div>
+</section>
+<script defer src="/static/admin_console/admin_access.js?v=operations-staff-names-20260917"></script>
+{{end}}

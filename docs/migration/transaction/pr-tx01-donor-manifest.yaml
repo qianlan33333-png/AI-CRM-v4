@@ -1,0 +1,57 @@
+schema_version: 1
+pr: PR-TX01
+scope: transaction_management
+status: contracted
+v3_base: 723b90914c20fe12bf07507e3683112816cf4fe3
+
+donor:
+  repository: qianlan33333-png/AI-CRM-v2
+  local_audit_checkout: /tmp/aicrm-v2-readonly.OSvgXU
+  commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+  read_only: true
+  runtime_dependency: false
+
+classification:
+  oneid: reads canonical customer through internal/identity/port; payer and beneficiary remain distinct
+  persistence: local PostgreSQL transaction; payment Provider writes are deferred to versioned EER payment effects
+  current_external_effects: none
+
+contract_audit: docs/migration/transaction/pr-tx01-contract-audit.md
+sha256_evidence: docs/migration/transaction/pr-tx01-donor-sha256.txt
+
+frontend:
+  preserved_active_templates:
+    - web/src/admin/templates/orders.html
+    - web/src/admin/templates/orderDetail.html
+  reference_adapter_and_characterization:
+    - web/src/api/admin.ts
+    - web/src/api/admin.test.ts
+  integration_rule: preserve template bytes; v3-owned adapters expose readiness and API behavior
+
+backend_leaf_references:
+  - internal/order/port/port.go
+  - internal/order/app/board.go
+  - internal/order/app/board_test.go
+
+protocol_vectors_deferred_to_payment:
+  - internal/order/provider/callback_test.go
+  - internal/order/provider/wechat_pay_test.go
+  - internal/order/provider/wechat_shop_order_test.go
+  - internal/order/provider/wechat_shop_refund_test.go
+
+provider_scope:
+  wechat_pay: checkout, verified callbacks, refund and original-key reconciliation after Payment/EER delivery
+  wechat_shop: material read, refund, encrypted callback and exact after-sale reconciliation after Payment/EER delivery
+  alipay: persisted transaction read-only; no donor evidence for checkout, refund, callback or reconciliation
+
+forbidden:
+  - v2 Go module, submodule, database, migrations, runtime service or remote data source
+  - direct Order/Payment access to Identity or External Effects tables
+  - browser-asserted verified identity
+  - history rows eligible for Provider effects
+  - a second queue, Worker, retry loop, reconciliation kernel or identity matcher
+
+verification:
+  donor_source_files: 11
+  byte_exact_active_templates: 2
+  checker: scripts/check-pr-tx01-donor-manifest.sh

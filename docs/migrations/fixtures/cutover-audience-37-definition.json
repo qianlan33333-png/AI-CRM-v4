@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "template_key": "paid_order",
+  "parameters": {
+    "product_codes": ["202608121337"],
+    "paid_at_from": "2026-08-12T11:30:00Z",
+    "paid_at_to": "",
+    "owner_scope": "all",
+    "owner_staff_ids": [],
+    "require_active_wecom_contact": true
+  }
+}

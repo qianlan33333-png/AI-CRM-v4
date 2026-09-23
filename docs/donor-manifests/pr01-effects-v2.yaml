@@ -1,0 +1,25 @@
+source:
+  repository: AI-CRM-v2
+  commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+assets:
+  - path: web/src/admin/sections/campaigns.ts
+    sha256: 183e85bdc911c7456a61da81cbbefd021577cc03813f8dce02408ce46896555c
+    classification: BEHAVIOR
+    reason: hidden external-effects workspace; source checksum is a hard gate before exposure
+  - path: web/src/api/external_effects.ts
+    sha256: 8646e9534ca331a107fb2afe80cbb0ec9c50c999a1f8ca6dd57c6be926b6683e
+    classification: BEHAVIOR
+    reason: Push Center local-only DTO and request contract
+  - path: web/src/admin/sections/observability.ts
+    sha256: 333cc2e1e7309ec751c56db402ce1abed0f10bcb859d92dabe84da64065b1ef2
+    classification: BEHAVIOR
+    reason: bundled transitive import of the frozen hidden workspace
+  - path: internal/externaleffects/runtime.go
+    classification: BEHAVIOR
+    reason: closed digest-only state machine and unknown-result rule
+  - path: internal/platform/jobqueue/client.go
+    classification: PORT
+    reason: typed PostgreSQL River transaction boundary
+excluded:
+  - migrations/00044_push_center_read_model.sql
+    reason: contains customer/external identity dimensions and is outside PR01 privacy boundary

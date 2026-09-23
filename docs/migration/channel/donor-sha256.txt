@@ -1,0 +1,14 @@
+# SHA-256 of selected files at AI-CRM-v2@6bfbe5816bb89913c70adaca87d6a486260e016e.
+# Only the two active templates are required to remain byte-exact in v3.
+5deb0030bcaa05626c08763546d7c512aaeb63e154bd1486c6c4ffcfdb19bdb0  source:web/src/admin/templates/channels.html
+732a98d15f14a308e59758e7fdb33c9c74727988565701f807f32dc79cb7674a  source:web/src/admin/templates/channelForm.html
+2c0d51283902b370c431dd04124bcc2215214eac314099fa5d6001ccdb038500  source:web/src/admin/controller.ts
+574293ff7ab6fb0c6d1227ff879649dbc05cf454caaaec6a0fbc1d23727df9ee  source:web/src/api/admin.ts
+4a30e68aa2bf1dc224aada891bd298fef6795957470b27517fae3608cdea3914  source:web/src/api/admin.test.ts
+9c645e15ce60b6a26c898a0bca15a4fcd90580b684292c8ffc189418f01cc361  source:web/src/api/wecomAcquisitionLinks.ts
+8bbad4ef48562cec41dda9a949019e6ec14fc415ae1c3ec3159d51e7143a721f  source:web/src/api/wecomAcquisitionLinks.test.ts
+6fea805d568cf91b7c43292128c2a2b0694cf6515d85c264e048726a270c5a20  source:web/src/shared/api/types.ts
+ee7a9a6629dcdaae4d9792ffcd757cee850bad796edcfb7ff68b6028206f1ed1  source:web/src/admin/nav.json
+df5f131d9b322e435a09fccdc89c4f8269f3ef03f7856ece250d412af71bb145  source:web/src/admin/registry.json
+0f9b719686a8516727ad86fa9475b10cbb059fd10003b3eb6ef041900c7ee3b0  source:web/src/shared/ui/tokens.css
+7c86ba01fa096a951a6cea50d89416d15be24dcfa1c083d0f7e432ebe8108a33  source:web/src/admin/sections/labs.css

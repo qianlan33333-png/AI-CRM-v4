@@ -1,0 +1,104 @@
+name: radar-v2-import
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: radar-v2-production-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_DB: aicrm_radar_rehearsal, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres}
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d aicrm_radar_rehearsal"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AICRM_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/aicrm_radar_rehearsal?sslmode=disable
+      AICRM_RADAR_SOURCE_SSH_HOST: ${{ vars.AICRM_CHANNEL_SOURCE_SSH_HOST }}
+      AICRM_RADAR_SOURCE_SSH_USER: ${{ vars.AICRM_CHANNEL_SOURCE_SSH_USER }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {persist-credentials: false}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with: {go-version-file: go.mod, cache: true}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with: {node-version: '24.18.0'}
+      - name: Configure pinned source SSH host
+        env:
+          SOURCE_SSH_KEY: ${{ secrets.AICRM_CHANNEL_SOURCE_SSH_KEY }}
+          SOURCE_KNOWN_HOSTS: ${{ secrets.AICRM_CHANNEL_SOURCE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ -n "$AICRM_RADAR_SOURCE_SSH_HOST" && -n "$AICRM_RADAR_SOURCE_SSH_USER" ]]
+          install -d -m 0700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$SOURCE_SSH_KEY" > "$HOME/.ssh/radar_source_key"
+          printf '%s\n' "$SOURCE_KNOWN_HOSTS" > "$HOME/.ssh/radar_source_known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/radar_source_key" >/dev/null
+          ssh-keygen -F "$AICRM_RADAR_SOURCE_SSH_HOST" -f "$HOME/.ssh/radar_source_known_hosts" >/dev/null
+      - name: Capture safe source snapshot and dry-run
+        run: |
+          set -euo pipefail
+          export AICRM_RADAR_SOURCE_SSH_KEY_FILE="$HOME/.ssh/radar_source_key"
+          export AICRM_RADAR_SOURCE_KNOWN_HOSTS_FILE="$HOME/.ssh/radar_source_known_hosts"
+          scripts/capture-radar-source.sh "$RUNNER_TEMP/radar.stream"
+          scripts/run-go-with-donor-views.sh go build -trimpath -o "$RUNNER_TEMP/migrate-radar-v2" ./cmd/migrate-radar-v2
+          "$RUNNER_TEMP/migrate-radar-v2" --mode inspect-stream --source-stream "$RUNNER_TEMP/radar.stream" --snapshot "$RUNNER_TEMP/radar.json" > "$RUNNER_TEMP/inspect.json"
+          unlink "$RUNNER_TEMP/radar.stream"
+          "$RUNNER_TEMP/migrate-radar-v2" --mode dry-run --snapshot "$RUNNER_TEMP/radar.json" > "$RUNNER_TEMP/dry-run.json"
+          snapshot_digest="$(jq -er '.snapshot_sha256' "$RUNNER_TEMP/inspect.json")"
+          batch_key="radar-v2-${snapshot_digest:0:24}"
+          [[ "$snapshot_digest" =~ ^[0-9a-f]{64}$ && "$batch_key" =~ ^radar-v2-[0-9a-f]{24}$ ]]
+          printf 'SNAPSHOT_DIGEST=%s\nBATCH_KEY=%s\n' "$snapshot_digest" "$batch_key" >> "$GITHUB_ENV"
+          jq -e '.provider_calls == 0 and .oneid_links_created == 0' "$RUNNER_TEMP/dry-run.json" >/dev/null
+          jq '{snapshot_sha256,report}' "$RUNNER_TEMP/dry-run.json"
+      - name: Rehearse migration and replay on PostgreSQL 16
+        run: |
+          set -euo pipefail
+          scripts/run-go-with-donor-views.sh go run ./cmd/migrate-platform -dir migrations
+          migrator="$RUNNER_TEMP/migrate-radar-v2"
+          snapshot="$RUNNER_TEMP/radar.json"
+          "$migrator" --mode import --snapshot "$snapshot" --snapshot-sha256 "$SNAPSHOT_DIGEST" --batch-key "$BATCH_KEY" --actor-id 1 --confirm > "$RUNNER_TEMP/rehearsal-import.json"
+          "$migrator" --mode reconcile --snapshot "$snapshot" > "$RUNNER_TEMP/rehearsal-reconcile.json"
+          "$migrator" --mode import --snapshot "$snapshot" --snapshot-sha256 "$SNAPSHOT_DIGEST" --batch-key "$BATCH_KEY" --actor-id 1 --confirm > "$RUNNER_TEMP/rehearsal-replay.json"
+          jq -e '.oneid_links_created == 0 and (.source_count == (.imported_count + .quarantined_count))' "$RUNNER_TEMP/rehearsal-reconcile.json" >/dev/null
+          jq -e '.result.replayed == 1' "$RUNNER_TEMP/rehearsal-replay.json" >/dev/null
+          jq '{result}' "$RUNNER_TEMP/rehearsal-import.json"
+      - name: Configure pinned deployment SSH host
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/deploy_known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/deploy_key" >/dev/null
+          test -s "$HOME/.ssh/deploy_known_hosts"
+      - name: Backup, import and reconcile production
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$HOME/.ssh/deploy_known_hosts")
+          remote_snapshot="/tmp/aicrm-radar-v2-${BATCH_KEY}.json"
+          remote_runner="/tmp/run-radar-v2-import-${BATCH_KEY}.sh"
+          cleanup() { ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo unlink '$remote_snapshot' '$remote_runner' 2>/dev/null || true" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          scp "${ssh_flags[@]}" "$RUNNER_TEMP/radar.json" "${DEPLOY_USER}@${DEPLOY_HOST}:$remote_snapshot"
+          scp "${ssh_flags[@]}" deploy/run-radar-v2-import.sh "${DEPLOY_USER}@${DEPLOY_HOST}:$remote_runner"
+          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo /usr/bin/bash '$remote_runner' '$remote_snapshot' '$SNAPSHOT_DIGEST' '$BATCH_KEY' '$GITHUB_SHA'" > "$RUNNER_TEMP/production-result.json"
+          jq -e '.backup_created == true and ."dry-run".provider_calls == 0 and ."dry-run".oneid_links_created == 0 and .reconcile.oneid_links_created == 0 and (.reconcile.source_count == (.reconcile.imported_count + .reconcile.quarantined_count)) and .replay.result.replayed == 1' "$RUNNER_TEMP/production-result.json" >/dev/null
+          jq '{backup_created,import:.import.result,reconcile:.reconcile,replay:.replay.result}' "$RUNNER_TEMP/production-result.json"
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 https://id-dev.youcangogogo.com/readyz

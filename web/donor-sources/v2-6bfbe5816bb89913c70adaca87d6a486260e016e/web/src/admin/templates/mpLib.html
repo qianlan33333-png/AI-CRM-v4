@@ -1,0 +1,91 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><span>客户管理后台</span><span>/</span><span>素材</span></div>
+              <div style="font-size:16px;font-weight:600;line-height:22px">小程序素材库</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex:none"><button onClick="{{ mpPage.openCreate }}" style="height:30px;padding:0 12px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">新建小程序卡片</button></div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:12px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <input id="fMpQuery" value="{{ mpPage.query }}" placeholder="搜索卡片标题" style="height:32px;flex:1 1 240px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px">
+              <button id="mpSearch" onClick="{{ mpPage.search }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">查询</button>
+              <button id="mpReset" onClick="{{ mpPage.clear }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">重置</button>
+              <span style="font-size:12px;color:#646A73">包含已停用的历史素材；不会自动启用或发送</span>
+            </div>
+            <sc-if value="{{ mpPage.error }}"><div style="padding:10px 12px;border:1px solid #FBC4C2;border-radius:6px;background:#FFF5F5;color:#B42318;font-size:13px">{{ mpPage.error }} <button id="mpRetry" onClick="{{ mpPage.retry }}" style="height:26px;margin-left:8px;padding:0 8px;border:1px solid #FBC4C2;border-radius:4px;background:#fff;color:#B42318;font-size:12px;cursor:pointer">重试当前页</button></div></sc-if>
+            <sc-if value="{{ mpPage.loading }}"><div style="padding:10px 0;color:#646A73;font-size:13px">正在读取小程序素材…</div></sc-if>
+            <sc-if value="{{ mpPage.empty }}"><div style="padding:10px 0;color:#646A73;font-size:13px">当前条件下没有小程序素材。</div></sc-if>
+            <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px">
+              <sc-for list="{{ rows.mpItems }}" as="m" hint-placeholder-count="4">
+                <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+                 <div style="{{ m.off }}">
+                  <div onClick="{{ m.edit }}" style="height:112px;cursor:pointer;background:{{ m.bg }}"></div>
+                  <div style="padding:10px 12px;display:grid;gap:6px">
+                    <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ m.name }}</div>
+                    <div style="font-size:12px;color:{{ m.statusColor }}">● {{ m.thumbStatus }}</div>
+                    <div style="font-size:12px;color:#646A73">{{ m.enabledLabel }}</div>
+                    <div style="display:flex;gap:2px"><button onClick="{{ m.edit }}" style="height:24px;padding:0 6px;border:0;border-radius:4px;background:transparent;color:#245BDB;font-size:12px;cursor:pointer;white-space:nowrap">编辑</button><button onClick="{{ m.del }}" style="height:24px;padding:0 6px;border:0;border-radius:4px;background:transparent;color:#D83931;font-size:12px;cursor:pointer;white-space:nowrap">删除</button></div>
+                  </div>
+                 </div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;color:#646A73;font-size:12px">
+              <span>{{ mpPage.rangeLabel }}</span>
+              <button id="mpPrevious" onClick="{{ mpPage.previous }}" style="height:28px;padding:0 10px;border:1px solid #DEE0E3;border-radius:5px;background:#fff;color:#344054;font-size:12px;cursor:pointer">上一页</button>
+              <button id="mpNext" onClick="{{ mpPage.next }}" style="height:28px;padding:0 10px;border:1px solid #DEE0E3;border-radius:5px;background:#fff;color:#344054;font-size:12px;cursor:pointer">下一页</button>
+            </div>
+          </div>
+
+          <!-- 新建小程序卡片弹窗（生产 create 弹窗） -->
+          <sc-if value="{{ mpPage.createOpen }}">
+          <div style="position:fixed;inset:0;background:rgba(15,23,42,.34);z-index:80;display:flex;align-items:center;justify-content:center;padding:24px">
+            <div style="width:min(480px,100%);background:#fff;border-radius:12px;box-shadow:0 24px 64px rgba(15,23,42,.22);overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #EFF0F1"><span style="font-size:15px;font-weight:600;color:#1F2329">新建小程序卡片</span><button onClick="{{ mpPage.closeModal }}" style="width:28px;height:28px;border:0;border-radius:6px;background:#F2F3F5;color:#646A73;cursor:pointer;font-size:14px">×</button></div>
+              <div style="padding:18px;display:grid;gap:14px">
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">素材名称</label><input id="fMpName" placeholder="如：AI 增长陪跑 · 报名" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;box-sizing:border-box"></div>
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">小程序 AppID</label><input id="fMpAppid" placeholder="wx 开头的小程序 AppID" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;font-family:ui-monospace,Menlo,monospace;box-sizing:border-box"></div>
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">页面路径</label><input id="fMpPath" placeholder="pages/xxx?from=crm" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;font-family:ui-monospace,Menlo,monospace;box-sizing:border-box"></div>
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">卡片标题</label><input id="fMpTitle" placeholder="发给客户时卡片上的标题" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;box-sizing:border-box"></div>
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">缩略图</label><button onClick="{{ mpPage.pickThumb }}" style="height:32px;padding:0 12px;border:1px dashed #DEE0E3;border-radius:6px;background:#FAFBFC;color:#646A73;font-size:13px;cursor:pointer">＋ 上传缩略图（将缓存到企微）</button></div>
+              </div>
+              <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #EFF0F1;background:#FAFBFC">
+                <button onClick="{{ mpPage.closeModal }}" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#1F2329;font-size:13px;cursor:pointer">取消</button>
+                <button onClick="{{ mpPage.save }}" style="height:32px;padding:0 16px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">创建</button>
+              </div>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- 编辑小程序卡片弹窗（生产 edit 弹窗） -->
+          <sc-if value="{{ mpPage.editOpen }}">
+          <div style="position:fixed;inset:0;background:rgba(15,23,42,.34);z-index:80;display:flex;align-items:center;justify-content:center;padding:24px">
+            <div style="width:min(480px,100%);background:#fff;border-radius:12px;box-shadow:0 24px 64px rgba(15,23,42,.22);overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #EFF0F1"><span style="font-size:15px;font-weight:600;color:#1F2329">编辑小程序卡片</span><button onClick="{{ mpPage.closeModal }}" style="width:28px;height:28px;border:0;border-radius:6px;background:#F2F3F5;color:#646A73;cursor:pointer;font-size:14px">×</button></div>
+              <div style="padding:18px;display:grid;gap:14px">
+                <div style="display:flex;align-items:center;gap:12px">
+                  <div style="width:72px;height:72px;border-radius:8px;flex:none;background:{{ mpPage.editing.bg }}"></div>
+                  <div style="display:grid;gap:4px;font-size:12px;color:#8F959E;flex:1;min-width:0">
+                    <div>企微缩略图缓存：<span style="color:{{ mpPage.editing.statusColor }}">● {{ mpPage.editing.thumbStatus }}</span></div>
+                    <button onClick="{{ mpPage.resolve }}" style="height:26px;padding:0 10px;border:1px solid #DEE0E3;border-radius:5px;background:#fff;color:#344054;font-size:12px;cursor:pointer;justify-self:start">刷新缩略图缓存</button>
+                  </div>
+                </div>
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">素材名称</label><input id="fMpName" value="{{ mpPage.editing.name }}" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;box-sizing:border-box"></div>
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">小程序 AppID</label><input id="fMpAppid" value="{{ mpPage.editing.appid }}" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;font-family:ui-monospace,Menlo,monospace;box-sizing:border-box"></div>
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">页面路径</label><input id="fMpPath" value="{{ mpPage.editing.pagepath }}" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;font-family:ui-monospace,Menlo,monospace;box-sizing:border-box"></div>
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">卡片标题</label><input id="fMpTitle" value="{{ mpPage.editing.cardTitle }}" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;box-sizing:border-box"></div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 18px;border-top:1px solid #EFF0F1;background:#FAFBFC">
+                <div style="display:flex;gap:8px">
+                  <button onClick="{{ mpPage.del }}" style="height:32px;padding:0 12px;border:1px solid #FBC4C2;border-radius:6px;background:#FFF5F5;color:#D83931;font-size:13px;cursor:pointer">删除</button>
+                  <button onClick="{{ mpPage.toggle }}" style="height:32px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:13px;cursor:pointer">{{ mpPage.toggleText }}</button>
+                </div>
+                <div style="display:flex;gap:8px">
+                  <button onClick="{{ mpPage.closeModal }}" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#1F2329;font-size:13px;cursor:pointer">取消</button>
+                  <button onClick="{{ mpPage.save }}" style="height:32px;padding:0 16px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">保存</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          </sc-if>

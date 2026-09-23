@@ -1,0 +1,101 @@
+# Frozen donor SHA-256 list for PR02 media.
+# Format: <sha256>  <donor-relative-path>
+75c14b85a517431fea88860207c554782ca02f9ee120fdf7c290920544c0f7b4  internal/media/domain/image.go
+a5b41746ed8b4e3c33642bf379df1f2f2473cb893c32b77eeedc9c2151d1c524  internal/media/domain/image_test.go
+2d01e06a178c6c70da95994a65913d8536e9c783b77f1ff7bd5a9c59d5a9b18b  internal/media/domain/attachment.go
+5fb73520064a12ade6fd756d53571ca2e9aed15d7bcfc20ad5c07b8287bbcbaf  internal/media/domain/attachment_test.go
+69637f94e88d9df631902a4720b713f6f2309b527d327952266bf803b1189ad3  internal/media/domain/miniprogram.go
+48a58a6f15b0f558e1dc9c634ce1e7d8e360f933166cb050f4549d98fda16810  internal/media/domain/miniprogram_test.go
+76944f6cf21b24ca207b34a9f63b1b2fa489d4dc5dedd1c845eda5788be4b992  internal/media/domain/group_invite.go
+eff8438b7510e4dbaa3b3159a315978fd46cbd9eea371915f60bc1e1457788ed  internal/media/domain/group_invite_test.go
+80736c381b0278e5722b0bf9abad8a018625aef1c8fd1a28dd2f1c0417466e39  internal/media/port/port.go
+562edd77b6f4fcc23e2c32cdc07cf6b242ead2d5b75b44510b95af15fb040834  internal/media/port/attachment.go
+c21d23361b1dccf2d668b246b1c2ca039e9ed905d4ee8e238b5afa089b27625e  internal/media/port/miniprogram.go
+01d2eb8f51a67d77e5625f995409a33c32fb084b75d83b227cab448f8f89d562  internal/media/port/content_delivery.go
+fb61aa2bb70d2ba902fc9e005bbca148aab8a7a526fbe8c89231274b35d99866  internal/media/port/groupops_material.go
+f24d55d7956703746739a1ff2f8c92ae21e7eea0115c5b65d6128fde9a737a13  internal/media/port/groupops_material_test.go
+dabb54626cfaa3979ed1b2d10e4bcb0b0ebcbfacd1d60eec44082d8bed5205b5  internal/media/groupopsmaterial/freezer.go
+565a7a2829f445cf989606eeb5df276345861bd83230dc5989f2de5f0c173779  internal/media/groupopsmaterial/freezer_test.go
+b51aabc804fe7f61617613ddb11b78d544bf3fdf7d5732ebd127c64fc7c2daf4  internal/media/app/list.go
+21987647b521009d608be248ba6d174209c616ed1d0fe4d895b91b512825f60e  internal/media/app/facets.go
+f7de88cb4e7622bc3f676dbaa97f8b93b03fd16ab1d87bca51fa49e81e873f2c  internal/media/app/detail.go
+88f8853c6e8d6b1039a96b76ab899c7b76c43824930a1f50c1f626a5d0d2d0c6  internal/media/app/variant.go
+841073ca2088441f68ddc29b5892585a4efd2f2249087cc4346b985593629409  internal/media/app/content_delivery.go
+55517a5a937b61f1f02d103d72cf8bfee830a4a80f545462ab77aa6ca1d3a581  web/src/admin/templates/images.html
+744432d6d80b903b2d5084568740f3cf7955f53e65d536eb7c625e140d57011b  web/src/admin/templates/attach.html
+6dd591f4b208483bf76b4678bff728b7e4f4737f8aa4ca2b32b847fc66001a92  web/src/admin/templates/mpLib.html
+2c0d51283902b370c431dd04124bcc2215214eac314099fa5d6001ccdb038500  web/src/admin/controller.ts
+61bc0ef4ff883bb243af79f989813bbe29c3109168544f32d7358a7608514161  web/src/admin/main.ts
+ee7a9a6629dcdaae4d9792ffcd757cee850bad796edcfb7ff68b6028206f1ed1  web/src/admin/nav.json
+df5f131d9b322e435a09fccdc89c4f8269f3ef03f7856ece250d412af71bb145  web/src/admin/registry.json
+2e1bfde0d36f6ab6637da66fddf6b7ee94984364a7175ad787b1da80f98695d5  web/src/shared/api/client.ts
+6fea805d568cf91b7c43292128c2a2b0694cf6515d85c264e048726a270c5a20  web/src/shared/api/types.ts
+d202111695e91432879fb16a3101eae6b7f10ba53237dd493989ffd284c8264c  web/src/shared/api/mockData.ts
+690639bde2fb605024a05fe3196f2ddf8fd5b4ae87c76ef3ff5868a7adf912c0  web/src/shared/ui/picker.ts
+5c16cd3b057663d2b0c5d2a01416e6330ec979513c6754f1f64f6e41f364a546  web/src/shared/ui/feedback.ts
+dda7c727bbad4844749e59095dba4c450cf864efb2caaad3f96209f24348a7bb  web/src/shared/ui/download.ts
+1122c0be280b1f62c1784510459471bd3ffcc6989493f103daf811900411e66a  web/src/shared/ui/runtime.ts
+0f9b719686a8516727ad86fa9475b10cbb059fd10003b3eb6ef041900c7ee3b0  web/src/shared/ui/tokens.css
+574293ff7ab6fb0c6d1227ff879649dbc05cf454caaaec6a0fbc1d23727df9ee  web/src/api/admin.ts
+fc5e4b447d10487f571fdafd953cb51756274bc40b019bb51b6cdd61cfbad885  web/src/api/transport.ts
+bf25e064b42132c8a882c4cfc0381c47fee46124107fcd4fa4686c57794aa2b3  web/src/api/generated/p4-media-compat/p4-media-compat.ts
+e6256f60834715f2639434a4c06738dd9a7fb4206209043327fbb107352e7e81  web/src/api/generated/p4-media-content-delivery/p4-media-content-delivery.ts
+7f1bc1d05b3e012de46b1d53ef7b56319c0bc032a1c0389fa3fd138c7218b40d  web/src/api/generated/health.schemas.ts
+
+# Additional donor source hashes for the write-side behavior adapted in this
+# commit. Paths below are relative to the frozen donor repository.
+93f5605f8dc898c167dd91dca05cb68327cd955a200df4fb62d120df413c98cb  internal/media/app/upload.go
+09a97d72338e0a627896df7f8a132e8d622f301b6513ac010a40787d9feed8b1  internal/media/app/update.go
+c904f4eb90197c7fcf75686525b335a846aa8c15cc8fc123e413024470ceb958  internal/media/app/delete.go
+fc9a41d775f830eaa418d9b99410f1ae75ffa6b24ea692da3bfd8f42961e6a35  internal/media/app/attachment.go
+b3214beb2ccd7bb208deee3ca38606867afbdb7e04a962484f4ac6755803bb02  internal/media/app/group_invite.go
+b548a2a027e30903106dc4e63a88449cee25eb6919ea3f6b9f71d8c632864dc8  internal/media/app/miniprogram.go
+90b2862abeac1b846d58f84c6e1e628307edf31cff2aa1bf537082d4bdaacfca  internal/media/app/upload_test.go
+9da699af2b6deeb8c77bdcbc5b464bb09304c15136b5498aeefb634ea48631a4  internal/media/app/update_test.go
+32a4dc1d5510b66119ba16333a8470f974d9ea9f4418706041376d437a76d870  internal/media/app/delete_test.go
+86fecf0354aeeb4ffc45204ee8daf714cb24b06d5a68a1a2e8c8d65befcfdfc4  internal/media/app/attachment_test.go
+cbced0f40385eb92431d7c38e5cf4021663b0611fb78fb7f9271f877b9c8b78c  internal/media/app/group_invite_test.go
+95e5a27a246fb23e930289a11cf2db204b596059aa91932b77a17bad8602ade9  internal/media/app/miniprogram_test.go
+
+# Target hashes for adapted v3 files. These are not claimed byte-identical;
+# the source-to-target mapping is recorded in pr02-donor-manifest.yaml.
+89a9bca70130bae1e7903288f96e802dda02665420f64cb1afe1757c37c643a7  internal/media/port/mutations.go
+c4f317e96852d3a8fd7f46fff10c5a1b09bcd4e424fc6377b20d64b61b168aeb  internal/media/app/image_upload.go
+699a7817cf8ea581f5fb91b853895898e429aad8a3c837ec67570e9dbfefaa8b  internal/media/app/image_update.go
+f1706c2cc0a9fa02faa96dd6cf86652cbd707cf188aa9eba423de930e2585f57  internal/media/app/image_delete.go
+10e45a2ccfa220a42c8a60b254680f4ccfdb688c5e7a1946b208f3092e72333c  internal/media/app/attachment_library.go
+374333ab62d2ab2be36a00e2b055d781b1505ecdc5c6e0291558cdc00c0debee  internal/media/app/group_invite_library.go
+b7502110499cb25f9116fc5f2e9dd6ad8ddc293c984a06dea4e28e98189bbb2e  internal/media/app/miniprogram_library.go
+a8238e25754e35a72e5696b53ae92844a348c191787874b577e5843e6fe9dd09  internal/media/app/image_upload_test.go
+5552b88a1b1b20629911b9a55fde4076e88656f8d3c86405d346a6b4c609eba1  internal/media/app/image_update_test.go
+fceb63c5caca37fd71332685afa8bd32a20c0117b28ca4cecd59401f1de65784  internal/media/app/image_delete_test.go
+438ba3317754d19390f6ccfb94efa2add3f20402fb4cad042abd778ac0d44bcd  internal/media/app/attachment_library_test.go
+4b5af7209ce6f531a42e63059b9defec648761b4db1f6f76441af20c41e1b050  internal/media/app/group_invite_library_test.go
+e540246d271a72902226e3909d3fbcea700b8a9f56f805b12978b35ca53678e9  internal/media/app/miniprogram_library_test.go
+
+# Target hashes for the 20 staged frontend files (paths below are v3 target
+# paths). Each target row was compared byte-for-byte with its donor source.
+2c0d51283902b370c431dd04124bcc2215214eac314099fa5d6001ccdb038500  web/donors/media-v2/src/admin/controller.ts
+61bc0ef4ff883bb243af79f989813bbe29c3109168544f32d7358a7608514161  web/donors/media-v2/src/admin/main.ts
+ee7a9a6629dcdaae4d9792ffcd757cee850bad796edcfb7ff68b6028206f1ed1  web/donors/media-v2/src/admin/nav.json
+df5f131d9b322e435a09fccdc89c4f8269f3ef03f7856ece250d412af71bb145  web/donors/media-v2/src/admin/registry.json
+744432d6d80b903b2d5084568740f3cf7955f53e65d536eb7c625e140d57011b  web/donors/media-v2/src/admin/templates/attach.html
+55517a5a937b61f1f02d103d72cf8bfee830a4a80f545462ab77aa6ca1d3a581  web/donors/media-v2/src/admin/templates/images.html
+6dd591f4b208483bf76b4678bff728b7e4f4737f8aa4ca2b32b847fc66001a92  web/donors/media-v2/src/admin/templates/mpLib.html
+574293ff7ab6fb0c6d1227ff879649dbc05cf454caaaec6a0fbc1d23727df9ee  web/donors/media-v2/src/api/admin.ts
+7f1bc1d05b3e012de46b1d53ef7b56319c0bc032a1c0389fa3fd138c7218b40d  web/donors/media-v2/src/api/generated/health.schemas.ts
+bf25e064b42132c8a882c4cfc0381c47fee46124107fcd4fa4686c57794aa2b3  web/donors/media-v2/src/api/generated/p4-media-compat/p4-media-compat.ts
+e6256f60834715f2639434a4c06738dd9a7fb4206209043327fbb107352e7e81  web/donors/media-v2/src/api/generated/p4-media-content-delivery/p4-media-content-delivery.ts
+fc5e4b447d10487f571fdafd953cb51756274bc40b019bb51b6cdd61cfbad885  web/donors/media-v2/src/api/transport.ts
+2e1bfde0d36f6ab6637da66fddf6b7ee94984364a7175ad787b1da80f98695d5  web/donors/media-v2/src/shared/api/client.ts
+d202111695e91432879fb16a3101eae6b7f10ba53237dd493989ffd284c8264c  web/donors/media-v2/src/shared/api/mockData.ts
+6fea805d568cf91b7c43292128c2a2b0694cf6515d85c264e048726a270c5a20  web/donors/media-v2/src/shared/api/types.ts
+dda7c727bbad4844749e59095dba4c450cf864efb2caaad3f96209f24348a7bb  web/donors/media-v2/src/shared/ui/download.ts
+5c16cd3b057663d2b0c5d2a01416e6330ec979513c6754f1f64f6e41f364a546  web/donors/media-v2/src/shared/ui/feedback.ts
+690639bde2fb605024a05fe3196f2ddf8fd5b4ae87c76ef3ff5868a7adf912c0  web/donors/media-v2/src/shared/ui/picker.ts
+1122c0be280b1f62c1784510459471bd3ffcc6989493f103daf811900411e66a  web/donors/media-v2/src/shared/ui/runtime.ts
+0f9b719686a8516727ad86fa9475b10cbb059fd10003b3eb6ef041900c7ee3b0  web/donors/media-v2/src/shared/ui/tokens.css
+
+# Verification performed against frozen donor commit:
+# cmp -s /tmp/aicrm-v2-audit.yN3jmr/web/src/<path> web/donors/media-v2/src/<path>
+# PASS: 20/20 frontend files; no donor frontend byte changed.

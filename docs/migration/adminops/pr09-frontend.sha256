@@ -1,0 +1,39 @@
+# SHA-256 evidence for byte-exact PR09 frontend donor files.
+# Source hashes are from donor commit 6bfbe5816bb89913c70adaca87d6a486260e016e.
+# Target hashes are from web/donors/adminops-v2/src in this worktree.
+# This front-only view is retained for compatibility; the canonical combined source/target
+# manifest is docs/migration/adminops/pr09-donor-sha256.txt.
+
+1b6a6d05e3300e3a59fc00068daa987b4e586c57a122f726c1c9abbbc1f34eb3  source:web/src/admin/templates/config.html
+235dcf711ce9965a6862fa5f0b9cc0d967f2fc25c13cd5a19d17ec40e446df14  source:web/src/admin/templates/configDetail.html
+63b1ddcd4a49d70a9c3cd8351138b64efa07a166f3e66f7dbd09277767633a4a  source:web/src/admin/templates/apidocs.html
+4903070814159e3ddd703aa649dd2be9428b6829fcc4164918359fe4ad1b70e6  source:web/src/admin/sections/setupWizard.ts
+7f1bc1d05b3e012de46b1d53ef7b56319c0bc032a1c0389fa3fd138c7218b40d  source:web/src/api/generated/health.schemas.ts
+f86374997bbd6b16e660906222a1b0d5793ce28f30b3eed696eb484611692b04  source:web/src/api/generated/health/health.ts
+d5fdac4633a01d2f175af83f1e9de666db8472f4cb905de7ca46de18dd0f3f80  source:web/src/api/generated/p4-config-settings-compat/p4-config-settings-compat.ts
+8fca747b7a749c1122c15de15c6f53c8abf8dde4d69ad944c2d5734301c6d7cc  source:web/src/api/generated/p4-api-docs-compat/p4-api-docs-compat.ts
+47443ffbf72dfbc1744b434e8e4f913d1c2c6f9a3bc7ec11371edb255593ccd3  source:web/src/api/generated/p4-setup-wizard/p4-setup-wizard.ts
+3efc2b02a6ae0b7953da74bb89d1636f3792aeb7707e4f0e4be5627cde0fe44e  source:web/src/api/generated/p4-adminops-safe/p4-adminops-safe.ts
+b302e46a388250485694557c65db0406abef0d68370f6f4069726fb6dc51763f  source:web/src/api/generated/p4-data-health/p4-data-health.ts
+d1827f386c993e929ac37ad5bcdda68aa8bb5fa948e634435418341b1869f182  source:web/src/api/generated/p4-legacy-health/p4-legacy-health.ts
+00ab5702d1f2d3aed9440010ac5642669634be822726036e95892a155f7b31cd  source:web/src/api/generated/p4-system-health/p4-system-health.ts
+362be88fb99d33a236ce9b288453e7d1eed8e640179c49a1cb9ddfeec6a186ca  source:web/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts
+2685d45c3ab155bfba8f51250e601ab82bd52652758f9595c14e21824149e43c  source:web/src/api/generated/p4-release-plane/p4-release-plane.ts
+fc5e4b447d10487f571fdafd953cb51756274bc40b019bb51b6cdd61cfbad885  source:web/src/api/transport.ts
+
+1b6a6d05e3300e3a59fc00068daa987b4e586c57a122f726c1c9abbbc1f34eb3  target:web/donors/adminops-v2/src/admin/templates/config.html
+235dcf711ce9965a6862fa5f0b9cc0d967f2fc25c13cd5a19d17ec40e446df14  target:web/donors/adminops-v2/src/admin/templates/configDetail.html
+63b1ddcd4a49d70a9c3cd8351138b64efa07a166f3e66f7dbd09277767633a4a  target:web/donors/adminops-v2/src/admin/templates/apidocs.html
+4903070814159e3ddd703aa649dd2be9428b6829fcc4164918359fe4ad1b70e6  target:web/donors/adminops-v2/src/admin/sections/setupWizard.ts
+7f1bc1d05b3e012de46b1d53ef7b56319c0bc032a1c0389fa3fd138c7218b40d  target:web/donors/adminops-v2/src/api/generated/health.schemas.ts
+f86374997bbd6b16e660906222a1b0d5793ce28f30b3eed696eb484611692b04  target:web/donors/adminops-v2/src/api/generated/health/health.ts
+d5fdac4633a01d2f175af83f1e9de666db8472f4cb905de7ca46de18dd0f3f80  target:web/donors/adminops-v2/src/api/generated/p4-config-settings-compat/p4-config-settings-compat.ts
+8fca747b7a749c1122c15de15c6f53c8abf8dde4d69ad944c2d5734301c6d7cc  target:web/donors/adminops-v2/src/api/generated/p4-api-docs-compat/p4-api-docs-compat.ts
+47443ffbf72dfbc1744b434e8e4f913d1c2c6f9a3bc7ec11371edb255593ccd3  target:web/donors/adminops-v2/src/api/generated/p4-setup-wizard/p4-setup-wizard.ts
+3efc2b02a6ae0b7953da74bb89d1636f3792aeb7707e4f0e4be5627cde0fe44e  target:web/donors/adminops-v2/src/api/generated/p4-adminops-safe/p4-adminops-safe.ts
+b302e46a388250485694557c65db0406abef0d68370f6f4069726fb6dc51763f  target:web/donors/adminops-v2/src/api/generated/p4-data-health/p4-data-health.ts
+d1827f386c993e929ac37ad5bcdda68aa8bb5fa948e634435418341b1869f182  target:web/donors/adminops-v2/src/api/generated/p4-legacy-health/p4-legacy-health.ts
+00ab5702d1f2d3aed9440010ac5642669634be822726036e95892a155f7b31cd  target:web/donors/adminops-v2/src/api/generated/p4-system-health/p4-system-health.ts
+362be88fb99d33a236ce9b288453e7d1eed8e640179c49a1cb9ddfeec6a186ca  target:web/donors/adminops-v2/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts
+2685d45c3ab155bfba8f51250e601ab82bd52652758f9595c14e21824149e43c  target:web/donors/adminops-v2/src/api/generated/p4-release-plane/p4-release-plane.ts
+fc5e4b447d10487f571fdafd953cb51756274bc40b019bb51b6cdd61cfbad885  target:web/donors/adminops-v2/src/api/transport.ts

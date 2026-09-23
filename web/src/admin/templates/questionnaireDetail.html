@@ -1,0 +1,108 @@
+
+          <div style="flex:1;min-height:0;display:flex;flex-direction:column;background:#F5F6F7;padding:12px;gap:12px">
+
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;background:#fff;border:1px solid #DEE0E3;border-radius:10px;padding:12px 18px;flex:none">
+              <div style="min-width:0">
+                <a onClick="{{ go.questionnaires }}" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--accent,#3370ff);cursor:pointer">← 返回问卷管理</a>
+                <div style="display:flex;align-items:center;gap:10px;margin-top:3px">
+                  <h1 style="margin:0;font-size:20px;font-weight:600;line-height:26px">{{ questionnaireFormPage.displayName }}</h1>
+                  <span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:#EFF4FF;color:#245BDB;font-size:12px">{{ questionnaireFormPage.title }}</span>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex:none">
+                <button disabled aria-disabled="true" title="请在问卷列表使用已发布 public_path" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;color:#A6AAB0">分享</button>
+                <button disabled aria-disabled="true" title="当前编辑器不提供复制 operation" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;color:#A6AAB0">复制问卷</button>
+                <button disabled aria-disabled="true" title="当前 OpenAPI 没有问卷结果文件导出 operation" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;color:#A6AAB0">下载数据</button>
+                <button onClick="{{ questionnaireFormPage.save }}" style="height:32px;padding:0 14px;border:1px solid #3370ff;border-radius:6px;background:#fff;color:#245BDB;font-size:13px;cursor:pointer">保存定义</button>
+                <button onClick="{{ questionnaireFormPage.publish }}" style="height:32px;padding:0 16px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;font-weight:500;cursor:pointer">保存并发布</button>
+              </div>
+            </div>
+
+            <div style="flex:1;min-height:0;display:grid;grid-template-columns:270px minmax(0,1fr) 340px;gap:12px">
+
+              <div style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;padding:16px;overflow:auto">
+                <h3 style="margin:0;font-size:15px;font-weight:600">添加题目</h3>
+                <p style="margin:4px 0 14px;font-size:12px;color:#8F959E">点击添加到当前问卷。</p>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                  <sc-for list="{{ rows.edTools }}" as="t" hint-placeholder-count="6">
+                    <button disabled aria-disabled="true" title="请在高级配置中编辑真实题目 JSON" style="display:flex;align-items:flex-start;gap:10px;width:100%;padding:11px 12px;border:1px solid #DEE0E3;border-radius:8px;background:#fff;text-align:left;cursor:not-allowed">
+                      <span style="width:28px;height:28px;flex:none;border-radius:7px;background:#EFF4FF;color:#245BDB;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600">{{ t.m }}</span>
+                      <span style="min-width:0">
+                        <span style="display:block;font-size:13px;font-weight:600;color:#1F2329">{{ t.t }}</span>
+                        <span style="display:block;font-size:12px;color:#8F959E;margin-top:2px">{{ t.d }}</span>
+                      </span>
+                    </button>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;display:flex;flex-direction:column;align-items:center;padding:16px;overflow:auto">
+                <div style="width:372px;flex:none;border:1px solid #DEE0E3;border-radius:24px;background:#F5F6F7;padding:10px 10px 14px">
+                  <div style="height:22px;display:flex;align-items:center;justify-content:center"><span style="width:96px;height:6px;border-radius:999px;background:#C4C7CC"></span></div>
+                  <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
+                    <div style="background:#fff;border:1px solid var(--accent,#3370ff);border-radius:12px;padding:14px 16px;box-shadow:0 0 0 3px rgba(51,112,255,.08)">
+                      <span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:#EFF4FF;color:#245BDB;font-size:12px">问卷设置</span>
+                  <div style="font-size:19px;font-weight:600;margin-top:10px;line-height:26px">{{ questionnaireFormPage.item.title }}</div>
+                  <div style="font-size:13px;color:#646A73;margin-top:6px;line-height:20px">{{ questionnaireFormPage.item.description }}</div>
+                    </div>
+                    <sc-for list="{{ questionnaireFormPage.previewQuestions }}" as="q" hint-placeholder-count="3">
+                      <div style="background:#fff;border:1px solid #EFF0F1;border-radius:12px;padding:14px 16px;cursor:pointer">
+                        <span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:#EFF4FF;color:#245BDB;font-size:12px">{{ q.tag }}</span>
+                        <div style="font-size:15px;font-weight:600;margin-top:10px;line-height:22px">{{ q.title }}</div>
+                        <sc-if value="{{ q.input }}" hint-placeholder-val="{{ true }}">
+                          <div style="margin-top:10px;padding:10px 12px;border-radius:8px;background:#F7F8FA;color:#A6AAB0;font-size:13px">{{ q.ph }}</div>
+                        </sc-if>
+                        <sc-if value="{{ q.isOpts }}">
+                          <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+                            <sc-for list="{{ q.opts }}" as="o" hint-placeholder-count="4">
+                              <div style="padding:9px 12px;border-radius:8px;background:#F7F8FA;font-size:13px;color:#1F2329">{{ o }}</div>
+                            </sc-for>
+                          </div>
+                        </sc-if>
+                      </div>
+                    </sc-for>
+                    <sc-if value="{{ questionnaireFormPage.previewEmpty }}"><div style="background:#fff;border:1px dashed #DEE0E3;border-radius:12px;padding:22px 16px;text-align:center;color:#8F959E;font-size:13px">在右侧填写题目 JSON 后保存，真实定义会在这里预览。</div></sc-if>
+                    <div style="text-align:center;font-size:12px;color:#A6AAB0;padding:4px 0 2px">点击预览中的题目或分数规则即可在右侧编辑。</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:12px;overflow:auto">
+                <div style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;padding:16px">
+                  <div style="font-size:12px;color:#8F959E">配置区</div>
+                  <h2 style="margin:6px 0 0;font-size:16px;font-weight:600">问卷设置</h2>
+                  <p style="margin:3px 0 14px;font-size:12px;color:#8F959E">编辑当前问卷的基础信息。</p>
+                  <div style="display:flex;flex-direction:column;gap:12px">
+                    <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">问卷名称</span><input id="questionnaireName" value="{{ questionnaireFormPage.item.internalName }}" style="height:34px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%"></label>
+                    <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">问卷标题</span><input id="questionnaireTitle" value="{{ questionnaireFormPage.item.title }}" style="height:34px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%"></label>
+                    <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">问卷说明</span><textarea id="questionnaireDescription" rows="3" style="border:1px solid #DEE0E3;border-radius:6px;padding:8px 10px;font-size:13px;line-height:20px;background:#fff;width:100%;resize:vertical">{{ questionnaireFormPage.item.description }}</textarea></label>
+                    <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">答题展示方式</span><select id="questionnaireDisplay" style="height:34px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;font-size:13px;background:#fff;width:100%"><sc-if value="{{ questionnaireFormPage.item.allSelected }}"><option value="all_in_one" selected="selected">整页答题</option><option value="one_by_one">逐题答题</option></sc-if><sc-if value="{{ questionnaireFormPage.item.oneSelected }}"><option value="all_in_one">整页答题</option><option value="one_by_one" selected="selected">逐题答题</option></sc-if></select></label>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end">
+                      <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">分享标识</span><input id="questionnaireSlug" value="{{ questionnaireFormPage.item.slug }}" style="height:34px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></label>
+                      <div><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">问卷状态</span><label style="display:flex;align-items:center;gap:8px;height:34px;font-size:13px;cursor:pointer"><sc-if value="{{ questionnaireFormPage.item.off }}"><input id="questionnaireDisabled" type="checkbox" checked="checked"></sc-if><sc-if value="{{ questionnaireFormPage.item.enabledState }}"><input id="questionnaireDisabled" type="checkbox"></sc-if>停用问卷</label></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;padding:16px">
+                  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+                    <div style="min-width:0">
+                      <div style="font-size:14px;font-weight:600">多维测评模板</div>
+                      <p style="margin:5px 0 0;font-size:12px;color:#8F959E;line-height:19px">普通问卷只引用模板，不在这里编辑模板内部题目、维度和结果页。</p>
+                    </div>
+                    <button disabled aria-disabled="true" title="当前 OpenAPI 没有独立测评模板资源" style="height:30px;padding:0 12px;border:0;border-radius:6px;background:#F2F3F5;color:#A6AAB0;font-size:12px;font-weight:500;flex:none">添加多维测评模板</button>
+                  </div>
+                  <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;cursor:pointer"><sc-if value="{{ questionnaireFormPage.item.assessmentEnabled }}"><input id="questionnaireAssessmentEnabled" type="checkbox" checked="checked"></sc-if><sc-if value="{{ questionnaireFormPage.item.assessmentDisabled }}"><input id="questionnaireAssessmentEnabled" type="checkbox"></sc-if>启用多维测评结果页</label>
+                  <div style="margin-top:10px;padding:10px 12px;border-radius:8px;background:#FAFBFC;font-size:12px;color:#8F959E;line-height:19px">从已创建的测评模板中选择，插入后作为一整组题管理。提交后动作与外部推送请在列表的「运营配置」中维护。</div>
+                </div>
+
+                <details style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;padding:14px 16px"><summary style="font-size:13px;font-weight:600;cursor:pointer">题目与测评配置（高级）</summary><label style="display:block;margin-top:12px;font-size:12px;color:#646A73">题目 JSON<textarea id="questionnaireQuestions" rows="12" spellcheck="false" style="display:block;width:100%;margin-top:6px;border:1px solid #DEE0E3;border-radius:6px;padding:9px;font:12px/18px ui-monospace,Menlo,monospace">{{ questionnaireFormPage.item.questionsJson }}</textarea></label><label style="display:block;margin-top:12px;font-size:12px;color:#646A73">测评配置 JSON<textarea id="questionnaireAssessmentConfig" rows="5" spellcheck="false" style="display:block;width:100%;margin-top:6px;border:1px solid #DEE0E3;border-radius:6px;padding:9px;font:12px/18px ui-monospace,Menlo,monospace">{{ questionnaireFormPage.item.assessmentConfigJson }}</textarea></label></details>
+
+                <div style="background:#fff;border:1px solid #F98E8B;border-radius:10px;padding:14px 16px">
+                  <div style="font-size:13px;font-weight:600;color:#D83931">删除此问卷</div>
+                  <div style="font-size:12px;color:#8F959E;margin-top:5px">请先停用问卷后再删除。</div>
+                </div>
+              </div>
+
+            </div>
+          </div>

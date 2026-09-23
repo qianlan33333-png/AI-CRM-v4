@@ -1,0 +1,76 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <a onClick="{{ agentEditPage.back }}" style="width:28px;height:28px;border:1px solid #DEE0E3;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#646A73" stroke-width="1.6"><path d="M10 3.2L5.4 8l4.6 4.8"/></svg></a>
+              <div style="min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><span>客户管理后台</span><span>/</span><a onClick="{{ agentEditPage.back }}" style="cursor:pointer;color:#8F959E">自动化话术</a><span>/</span><span>编辑</span></div>
+                <div style="font-size:16px;font-weight:600;line-height:22px">{{ agentEditItem.name }}</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex:none">
+              <button onClick="{{ agentEditPage.back }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">返回自动化列表</button>
+              <button data-agent-precheck onClick="{{ agentEditPage.precheck }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">校验</button>
+              <button data-agent-save onClick="{{ agentEditPage.save }}" style="height:30px;padding:0 12px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">保存</button>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:16px">
+              <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px">
+                <div style="border:1px solid #EFF0F1;border-radius:8px;padding:12px 14px"><span style="display:block;color:#8F959E;font-size:12px">自动化类型</span><strong style="display:block;margin-top:5px;font-size:16px;font-weight:600">{{ agentEditItem.typeLabel }}</strong></div>
+                <div style="border:1px solid #EFF0F1;border-radius:8px;padding:12px 14px"><span style="display:block;color:#8F959E;font-size:12px">状态</span><strong style="display:block;margin-top:5px;font-size:16px;font-weight:600">{{ agentEditItem.status }}</strong></div>
+                <div style="border:1px solid #EFF0F1;border-radius:8px;padding:12px 14px"><span style="display:block;color:#8F959E;font-size:12px">固定素材</span><strong style="display:block;margin-top:5px;font-size:16px;font-weight:600">{{ agentEditItem.material }}</strong></div>
+                <div style="border:1px solid #EFF0F1;border-radius:8px;padding:12px 14px"><span style="display:block;color:#8F959E;font-size:12px">编码</span><strong style="display:block;margin-top:5px;font-size:13px;font-weight:600;font-family:ui-monospace,Menlo,monospace">{{ agentEditItem.code }}</strong></div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:226px minmax(0,1fr);gap:12px;align-items:start">
+              <nav style="display:grid;gap:2px;padding:8px;border:1px solid #DEE0E3;border-radius:8px;background:#fff;align-self:start">
+                <button onClick="{{ ago.1 }}" style="{{ an.1 }}"><span style="{{ an.dot1 }}">1</span><span>基本信息</span></button>
+                <button onClick="{{ ago.2 }}" style="{{ an.2 }}"><span style="{{ an.dot2 }}">2</span><span>绑定人群包</span></button>
+                <button onClick="{{ ago.3 }}" style="{{ an.3 }}"><span style="{{ an.dot3 }}">3</span><span>Prompt 配置</span></button>
+                <button onClick="{{ ago.4 }}" style="{{ an.4 }}"><span style="{{ an.dot4 }}">4</span><span>固定素材</span></button>
+              </nav>
+              <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:18px">
+                <div style="padding-bottom:14px;margin-bottom:16px;border-bottom:1px solid #EFF0F1"><h3 style="margin:0;font-size:15px;font-weight:600">{{ aTitle }}</h3></div>
+
+                <div style="{{ ap.1 }}">
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                    <div style="display:grid;gap:6px"><label style="color:#646A73;font-size:12px">Agent 名称</label><input id="agentName" value="{{ agentEditItem.name }}" style="width:100%;min-height:36px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;padding:8px 10px;font-size:13px"></div>
+                    <div style="display:grid;gap:6px"><label style="color:#646A73;font-size:12px">自动化编码</label><input id="agentCode" value="{{ agentEditItem.code }}" readonly="{{ agentEditItem.codeReadonly }}" style="width:100%;min-height:36px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;padding:8px 10px;font-size:13px;font-family:ui-monospace,Menlo,monospace"></div>
+                    <div style="display:grid;gap:6px"><label style="color:#646A73;font-size:12px">自动化类型</label><select id="agentType" value="{{ agentEditItem.automationType }}" style="width:100%;min-height:36px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;padding:8px 10px;font-size:13px"><option value="agent">Agent 自动化</option><option value="fixed_script">固定话术</option></select></div>
+                    <div style="display:grid;gap:6px"><label style="color:#646A73;font-size:12px">状态</label><div style="display:flex;align-items:center;min-height:36px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#FAFBFC;font-size:13px">{{ agentEditItem.status }}</div></div>
+                  </div>
+                </div>
+
+                <div style="{{ ap.2 }}">
+                  <div style="display:grid;gap:8px">
+                    <label style="color:#646A73;font-size:12px">当前绑定人群包</label>
+                    <div style="min-height:36px;display:flex;align-items:center;padding:8px 10px;border:1px solid #DEE0E3;border-radius:6px;background:#FAFBFC;font-size:13px;color:#646A73">{{ agentEditItem.bound }}</div>
+                    <p style="margin:2px 0 0;font-size:12px;color:#8F959E;line-height:19px">绑定关系请在人群包详情的「自动化绑定」中管理。</p>
+                  </div>
+                </div>
+
+                <div style="{{ ap.3 }}">
+                  <div style="display:grid;gap:8px">
+                    <label style="color:#646A73;font-size:12px">角色提示词 role_prompt</label><textarea id="agentRolePrompt" rows="4" style="width:100%;border:1px solid #DEE0E3;border-radius:6px;background:#fff;padding:8px 10px;font-size:13px;line-height:20px;resize:vertical">{{ agentEditItem.rolePrompt }}</textarea>
+                  </div>
+                  <div style="display:grid;gap:8px;margin-top:16px">
+                    <label style="color:#646A73;font-size:12px">任务提示词 task_prompt</label><textarea id="agentTaskPrompt" rows="4" style="width:100%;border:1px solid #DEE0E3;border-radius:6px;background:#fff;padding:8px 10px;font-size:13px;line-height:20px;resize:vertical">{{ agentEditItem.taskPrompt }}</textarea>
+                  </div>
+                </div>
+
+                <div style="{{ ap.4 }}">
+                  <div data-agent-materials-readonly style="display:grid;gap:10px;align-content:start">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><label style="color:#646A73;font-size:12px">固定话术内容与素材（只读）</label><span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:#F2F3F5;color:#646A73;font-size:12px;white-space:nowrap">{{ ag.matCountText }}</span></div>
+                    <div style="border:1px solid #FFE1A8;border-radius:8px;background:#FFFBEB;padding:10px 12px;font-size:12px;color:#B54708;line-height:19px">当前普通保存接口无法安全修改 fixed_content_package，本区域仅展示服务端返回内容，不发送任何请求。{{ ag.materialsBlockedReason }}</div>
+                    <sc-if value="{{ ag.hasFixedContent }}"><div style="display:grid;gap:6px"><label style="color:#646A73;font-size:12px">固定话术内容</label><div style="border:1px solid #DEE0E3;border-radius:6px;background:#FAFBFC;padding:8px 10px;font-size:13px;line-height:20px;color:#1F2329;white-space:pre-wrap">{{ ag.fixedContentText }}</div></div></sc-if>
+                    <sc-if value="{{ ag.noFixedContent }}"><div style="border:1px dashed #DEE0E3;border-radius:8px;padding:16px;font-size:13px;color:#A6AAB0">暂无固定话术内容</div></sc-if>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                      <sc-for list="{{ ag.materialGroups }}" as="mg">
+                        <div style="border:1px solid #DEE0E3;border-radius:8px;padding:10px 12px;display:grid;gap:4px"><span style="font-size:12px;color:#8F959E">{{ mg.label }}</span><span style="font-size:13px;font-family:ui-monospace,Menlo,monospace;color:#1F2329;word-break:break-all">{{ mg.value }}</span></div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>

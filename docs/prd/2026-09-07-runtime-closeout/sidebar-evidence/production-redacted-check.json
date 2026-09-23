@@ -1,0 +1,54 @@
+{
+  "checked_at": "2026-09-07T23:39:57.888115+08:00",
+  "basis": "exact external identity from screenshot 9 matched a unique old canonical identity; V3 scoped verified external identity; exact screenshot order queried separately; read-only SQL; no import or update",
+  "order_fingerprint": "e13b652ace661d250b7bd67d64074bc8ddab7d23034091170899674ae6b806e6",
+  "legacy": {
+    "mobile_present": true,
+    "mobile_verified": true,
+    "identity_status": "active",
+    "order_status": "paid",
+    "refund_status": "full_refunded",
+    "amount_minor": 9900,
+    "refunded_minor": 9900,
+    "submissions": 8
+  },
+  "v3": {
+    "exact_verified_customer_count": 1,
+    "identity_kinds": [
+      {
+        "kind": "wecom_external_userid",
+        "assurance": "verified",
+        "status": "active"
+      },
+      {
+        "kind": "phone",
+        "assurance": "declared",
+        "status": "active"
+      },
+      {
+        "kind": "unionid",
+        "assurance": "verified",
+        "status": "active"
+      }
+    ],
+    "profile": {
+      "phone_masked_present": true,
+      "phone_assurance": "declared",
+      "source": "wecom_directory_sync"
+    },
+    "customer_submissions": 0,
+    "same_union_on_customer": 1,
+    "exact_order": [
+      {
+        "status": "paid",
+        "amount_minor": 9900,
+        "refunded_minor": 0,
+        "record_origin": "history",
+        "effect_eligible": false,
+        "customer_matches": true
+      }
+    ],
+    "all_submissions": 1585,
+    "legacy_same_union_rows": 0
+  }
+}

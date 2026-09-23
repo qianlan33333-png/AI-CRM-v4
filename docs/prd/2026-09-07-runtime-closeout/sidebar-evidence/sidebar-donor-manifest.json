@@ -1,0 +1,90 @@
+{
+  "commit": "dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f",
+  "files": [
+    {
+      "path": "aicrm_next/app/admin_console/templates/sidebar_customer_workbench.html",
+      "bytes": 3563,
+      "sha256": "5fc78020b14805d4141d5f07a05af193811e1c282d36797ccd8efbf5289a3397"
+    },
+    {
+      "path": "aicrm_next/app/admin_console/static/sidebar_workbench/sidebar_workbench.css",
+      "bytes": 14995,
+      "sha256": "a23120e4ce92a37b8001630615d6c42821a3e581e04edab4b52b488bce3d080b"
+    },
+    {
+      "path": "aicrm_next/app/admin_console/static/sidebar_workbench/sidebar_workbench.js",
+      "bytes": 95388,
+      "sha256": "f20515f3192f3a11048929c7c7b375e1ae274165ae173c0d8415735ffa25424d"
+    },
+    {
+      "path": "aicrm_next/app/admin_console/static/sidebar_workbench/product-card-cover.png",
+      "bytes": 1833802,
+      "sha256": "48722c325a545c0f276aaa44a462adb64993a273b0fd7b1edbc27284eddd3914"
+    },
+    {
+      "path": "aicrm_next/app/admin_console/static/admin_console/image_resource_loader.js",
+      "bytes": 14096,
+      "sha256": "38090abd86d19b7027841e7035bb8e8b12548487914a98a893fd71a5ec51187d"
+    },
+    {
+      "path": "aicrm_next/crm/sidebar_write/api.py",
+      "bytes": 7037,
+      "sha256": "f0730f9156284d9df0a1fb5d8f724261463c4772b8d404813c3842725cc4ba29"
+    },
+    {
+      "path": "aicrm_next/crm/sidebar_write/application.py",
+      "bytes": 20616,
+      "sha256": "98983fd618977358a01da3249f8cfe696a693f9969fbd090846885414bd12a35"
+    },
+    {
+      "path": "aicrm_next/crm/customer_read_model/sidebar_v2.py",
+      "bytes": 67307,
+      "sha256": "489db1a7e5ff16b64c85663c3a7f4249ceb320b7ef2cebf969b0d2a0e64b2a4c"
+    },
+    {
+      "path": "aicrm_next/crm/customer_read_model/sidebar_profile_repository.py",
+      "bytes": 2108,
+      "sha256": "f51357cdaf593eeb6549b3a691dccbc25278811625769e3e05b4a90e831d0b2d"
+    },
+    {
+      "path": "aicrm_next/crm/customer_read_model/sidebar_customer_resolution.py",
+      "bytes": 3086,
+      "sha256": "beaf012787108bca582cba36c74efa08d357d4438baa8282d950127ae286c675"
+    },
+    {
+      "path": "aicrm_next/crm/identity_contact/sidebar_jssdk.py",
+      "bytes": 23269,
+      "sha256": "48fd34630d69c6363cd68bfb1577a43c43a57fa335ddab587bb6db8e123f14e8"
+    },
+    {
+      "path": "aicrm_next/crm/identity_contact/sidebar_authorization.py",
+      "bytes": 5216,
+      "sha256": "bd8c293bc31d6f2c55913b1054560cd8ad84b9a8e9ce1d00bf324af3d5c65aaa"
+    },
+    {
+      "path": "aicrm_next/extensions/commerce/commerce/coupons/sidebar_api.py",
+      "bytes": 2255,
+      "sha256": "88b66a731c63a63bd411cf38649ba269ce7a5db68c7bdddaeb71f5c4a292ae97"
+    },
+    {
+      "path": "aicrm_next/extensions/commerce/commerce/coupons/application.py",
+      "bytes": 20942,
+      "sha256": "14d7e50f69192852b348b4f550a35a551f0de562bffa9da91f4477bed21c8e3e"
+    },
+    {
+      "path": "tests/frontend/sidebar_jssdk_send.test.mjs",
+      "bytes": 6506,
+      "sha256": "4294214c26da7f1ed397088717c7e29aaef642937b0b63d85d30dc9633f2e410"
+    },
+    {
+      "path": "tests/frontend/sidebar_token_scope_recovery.test.mjs",
+      "bytes": 8154,
+      "sha256": "10255d3ffdcf5ad544000bfc3ae97f70c979ee7777dc0f08d56cdcf85ad79532"
+    },
+    {
+      "path": "tests/frontend/sidebar_material_thumbnails.test.mjs",
+      "bytes": 2288,
+      "sha256": "dd207c56bec8153baa3add178c82977109c65e252029f959bbf679cdadf3893a"
+    }
+  ]
+}

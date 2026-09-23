@@ -1,0 +1,18 @@
+[Unit]
+Description=Import new HXC UUID daily lessons into the AI-CRM media library
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=aicrm
+Group=aicrm
+WorkingDirectory=/opt/aicrm/current
+EnvironmentFile=/etc/aicrm/aicrm.env
+EnvironmentFile=-/opt/aicrm/current/release.env
+ExecStart=/opt/aicrm/current/bin/migrate-hxc-daily-lessons --mode sync --actor-admin-user-id 2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+UMask=0027

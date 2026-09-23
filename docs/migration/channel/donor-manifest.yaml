@@ -1,0 +1,57 @@
+schema_version: 1
+scope: channel_center
+status: contracted
+v3_base: bd401bcc337a70f95f2affa172af36e5a6fa303d
+
+donor:
+  repository: qianlan33333-png/AI-CRM-v2
+  commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+  read_only: true
+  runtime_dependency: false
+
+classification:
+  oneid: resolve only through internal/identity/port; provision only from provider-verified not-found; never infer from State or phone
+  persistence: local PostgreSQL transaction plus shared River/jobqueue; Provider writes through outbound and external effects
+  external_effects: channel stores frozen references and opaque effect_id only; Provider execution disabled by default
+
+contract_audit: docs/migration/channel/contract-audit.md
+behavior_contract: docs/migration/channel/behavior-contract.md
+sha256_evidence: docs/migration/channel/donor-sha256.txt
+
+frontend:
+  byte_exact_active_templates:
+    - web/src/admin/templates/channels.html
+    - web/src/admin/templates/channelForm.html
+  channel_css: inline in the two active templates and therefore covered by their byte gate
+  shared_reference_files:
+    - web/src/admin/controller.ts
+    - web/src/api/admin.ts
+    - web/src/api/admin.test.ts
+    - web/src/api/wecomAcquisitionLinks.ts
+    - web/src/api/wecomAcquisitionLinks.test.ts
+    - web/src/shared/api/types.ts
+    - web/src/admin/nav.json
+    - web/src/admin/registry.json
+    - web/src/shared/ui/tokens.css
+    - web/src/admin/sections/labs.css
+  integration_rule: preserve active template bytes; v3-owned adapters supply authenticated real API behavior
+
+preserved_journeys:
+  - list, search, filter, paging and accurate counts
+  - create, detail, CAS edit, enable, disable and archive
+  - single-owner and multi-staff assignment preview and save
+  - welcome content, media references and entry tag selection
+  - QR code and customer-acquisition-link publish, status, controlled use and reconciliation
+  - recent entrants, historical contacts, historical assignees and attribution receipts
+
+discarded:
+  - donor Go packages, database schema, migrations, queue, worker and Provider client
+  - donor customer key or identity matching
+  - raw State, unionid, openid, external_userid, phone and Provider request or response material
+  - executable historical assets or effects
+  - cutover, continuous sync and dual write
+
+verification:
+  donor_source_files: 12
+  byte_exact_active_templates: 2
+  checker: scripts/check-channel-donor-manifest.sh

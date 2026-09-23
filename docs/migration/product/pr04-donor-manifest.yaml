@@ -1,0 +1,393 @@
+schema_version: 1
+pr: PR04
+scope: product
+status: preparation_only
+v3_base: 19384b9
+
+donor:
+  repository: /tmp/aicrm-v2-audit.yN3jmr
+  commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+  read_only: true
+  runtime_dependency: false
+
+rules:
+  backend: v3 module paths only; no v2 runtime, database, migration, or provider dependency
+  frontend: byte-exact source files staged outside web/src; no design or API rewrite
+  owner: Product
+
+behavior_contract:
+  product_definitions:
+    ordinary:
+      identity: Product.id
+      list: keyset cursor with an opaque cursor and a maximum page size of 100
+      mutable_fields: [name, description, price_minor, currency, stock_quantity, images, admin_projection]
+      create_fields: [product_code, name, description, price_minor, currency, stock_quantity, images, admin_projection]
+    service_period:
+      identity: ServicePeriodProduct.service_product_id
+      list: offset page with limit 1..100 and offset 0..1000000
+      mutable_fields: [name, description, price_minor, currency, stock_quantity, images, admin_projection]
+      create_fields: [product_code, name, description, price_minor, currency, stock_quantity, images, admin_projection]
+      projection_only: true
+  value_rules:
+    product_code: required, trimmed, 1..200 characters
+    name: required, trimmed, 1..200 characters
+    description: ordinary create/update requires the field; service-period create may omit it; all values are bounded at 10000 characters
+    price_minor: integer >= 0
+    currency: normalized uppercase three-letter code
+    stock_quantity: integer >= 0
+    images: ordered references, at most 20 entries and each reference at most 2048 characters
+    admin_projection: schema_version 1; tags are opaque admin projection data only
+  lifecycle:
+    ordinary_states: [draft, enabled, disabled]
+    service_period_states: [draft, enabled, disabled, archived]
+    concurrency: every update, enable, disable, copy, archive, or delete carries expected_version and uses compare-and-swap
+    copy: creates a new disabled/draft local record and does not copy provider, order, entitlement, membership, or customer effects
+    delete: ordinary product delete is only for an unreferenced draft; service-period delete is an archive fact preserving history
+    share: local descriptor only; unavailable unless a later integration supplies an authoritative public purchase route
+  tags_and_external_push:
+    product_tags: wecom_tagging remains a raw ProductAdminProjection field; this donor has no customer binding or tag mark/unmark behavior
+    configuration: external push stores only product_kind, enabled, and an opaque configuration_reference; no URL, secret, target, or payload is accepted
+    local_test: external-push test records a local accepted/queued EER fact with provider_accepted, delivery_proven, real_external_call_executed, and auto_retry_allowed all false
+  transaction_boundary: Product writes, idempotency receipts, audit facts, and local events must be committed atomically by the later Product Store/UoW adapter
+
+api_contract:
+  ordinary_products:
+    - id: list_products
+      method: GET
+      path: /api/v1/products
+      request: ListProductsParams
+      response: ProductPage
+      success: 200
+      errors: [400, 401, 403, 503]
+    - id: create_product
+      method: POST
+      path: /api/v1/products
+      request: CreateProductRequest
+      response: Product
+      success: 201
+      errors: [400, 401, 403, 409, 503]
+    - id: get_product
+      method: GET
+      path: /api/v1/products/{productId}
+      request: productId
+      response: Product
+      success: 200
+      errors: [400, 401, 403, 404, 503]
+    - id: update_product
+      method: PUT
+      path: /api/v1/products/{productId}
+      request: UpdateProductRequest
+      response: Product
+      success: 200
+      errors: [400, 401, 403, 404, 409, 503]
+    - id: enable_product
+      method: POST
+      path: /api/admin/wechat-pay/products/{productId}/enable
+      request: LocalProductLifecycleVersionRequest
+      response: LocalProductLifecycleProduct
+      success: 200
+      errors: [400, 401, 403, 404, 409, 422, 503]
+    - id: disable_product
+      method: POST
+      path: /api/admin/wechat-pay/products/{productId}/disable
+      request: LocalProductLifecycleVersionRequest
+      response: LocalProductLifecycleProduct
+      success: 200
+      errors: [400, 401, 403, 404, 409, 422, 503]
+    - id: copy_product
+      method: POST
+      path: /api/admin/wechat-pay/products/{productId}/copy
+      request: LocalProductLifecycleVersionRequest
+      response: LocalProductLifecycleProduct
+      success: 201
+      errors: [400, 401, 403, 404, 409, 422, 503]
+    - id: delete_product
+      method: DELETE
+      path: /api/admin/wechat-pay/products/{productId}
+      request: LocalProductLifecycleVersionRequest
+      response: LocalProductLifecycleDelete
+      success: 200
+      errors: [400, 401, 403, 404, 409, 422, 503]
+    - id: share_product
+      method: GET
+      path: /api/admin/wechat-pay/products/{productId}/share
+      request: productId
+      response: LocalProductLifecycleShare
+      success: 200
+      errors: [400, 401, 403, 404, 503]
+  service_period_products:
+    - id: list_service_period_products
+      method: GET
+      path: /api/admin/service-period-products
+      request: ListServicePeriodProductsParams
+      response: ServicePeriodProductPage
+      success: 200
+      errors: [400, 401, 403, 503]
+    - id: create_service_period_product
+      method: POST
+      path: /api/admin/service-period-products
+      request: ServicePeriodProductCreateRequest
+      response: ServicePeriodProductResponse
+      success: 201
+      errors: [400, 401, 403, 409, 503]
+    - id: get_service_period_product
+      method: GET
+      path: /api/admin/service-period-products/{serviceProductId}
+      request: serviceProductId
+      response: ServicePeriodProductResponse
+      success: 200
+      errors: [400, 401, 403, 404, 503]
+    - id: update_service_period_product
+      method: PUT
+      path: /api/admin/service-period-products/{serviceProductId}
+      request: ServicePeriodProductUpdateRequest
+      response: ServicePeriodProductResponse
+      success: 200
+      errors: [400, 401, 403, 404, 409, 503]
+    - id: archive_service_period_product
+      method: DELETE
+      path: /api/admin/service-period-products/{serviceProductId}
+      request: ServicePeriodVersionRequest
+      response: ServicePeriodProductResponse
+      success: 200
+      errors: [400, 401, 403, 404, 409, 503]
+    - id: enable_service_period_product
+      method: POST
+      path: /api/admin/service-period-products/{serviceProductId}/enable
+      request: ServicePeriodVersionRequest
+      response: ServicePeriodProductResponse
+      success: 200
+      errors: [400, 401, 403, 404, 409, 503]
+    - id: disable_service_period_product
+      method: POST
+      path: /api/admin/service-period-products/{serviceProductId}/disable
+      request: ServicePeriodVersionRequest
+      response: ServicePeriodProductResponse
+      success: 200
+      errors: [400, 401, 403, 404, 409, 503]
+    - id: copy_service_period_product
+      method: POST
+      path: /api/admin/service-period-products/{serviceProductId}/copy
+      request: ServicePeriodVersionRequest
+      response: ServicePeriodProductResponse
+      success: 201
+      errors: [400, 401, 403, 404, 409, 503]
+    - id: share_service_period_product
+      method: GET
+      path: /api/admin/service-period-products/{serviceProductId}/share
+      request: serviceProductId
+      response: ServicePeriodProductShareResponse
+      success: 200
+      errors: [400, 401, 403, 404, 503]
+  external_push_local_contract:
+    - id: get_product_external_push
+      method: GET
+      path: /api/admin/wechat-pay/products/{productId}/external-push
+      request: productId
+      response: CommerceExternalPushConfiguration
+      success: 200
+      errors: [400, 401, 403, 404, 503]
+    - id: save_product_external_push
+      method: PUT
+      path: /api/admin/wechat-pay/products/{productId}/external-push
+      request: CommerceExternalPushConfigurationRequest
+      response: CommerceExternalPushConfiguration
+      success: 200
+      errors: [400, 401, 403, 404, 409, 503]
+    - id: queue_product_external_push_test
+      method: POST
+      path: /api/admin/wechat-pay/products/{productId}/external-push/test
+      request: productId
+      response: CommerceExternalPushTest
+      success: 202
+      errors: [400, 401, 403, 404, 409, 503]
+    - id: get_service_period_external_push
+      method: GET
+      path: /api/admin/service-period-products/{serviceProductId}/external-push
+      request: serviceProductId
+      response: CommerceExternalPushConfiguration
+      success: 200
+      errors: [400, 401, 403, 404, 503]
+    - id: save_service_period_external_push
+      method: PUT
+      path: /api/admin/service-period-products/{serviceProductId}/external-push
+      request: CommerceExternalPushConfigurationRequest
+      response: CommerceExternalPushConfiguration
+      success: 200
+      errors: [400, 401, 403, 404, 409, 503]
+    - id: queue_service_period_external_push_test
+      method: POST
+      path: /api/admin/service-period-products/{serviceProductId}/external-push/test
+      request: serviceProductId
+      response: CommerceExternalPushTest
+      success: 202
+      errors: [400, 401, 403, 404, 409, 503]
+
+excluded_operations:
+  - path_prefix: /api/admin/service-period-history
+    reason: historical definitions, entitlement snapshots, and event history are membership/entitlement read models, not Product definition management
+  - path_prefix: /api/admin/products/{productId}/entitlements
+    reason: product-local entitlement reads are customer/member effects and are not part of this donor
+  - source_function: listProductLocalEntitlements
+    reason: product form donor call must be removed by the Web adapter
+  - source_namespace: p4-service-period-member-grid
+    reason: member grid, member views, share settings, and staff access are excluded customer/membership operations
+
+effect_boundary:
+  product_application_may: persist local product definitions, versions, lifecycle facts, opaque admin projections, local external-push configuration, and local EER acceptance records
+  product_application_must_not: call WeCom/WeChat/payment providers, create orders, grant/revoke entitlements, bind customers, query member grids, or mark/unmark customer tags
+  outbound_owner: provider execution, signatures, idempotency keys, callback replay, attempted/executed/outcome_unknown/reconciled transitions, and delivery reconciliation belong to outbound/EER
+  unknown_outcome: never retry with a replacement idempotency key; reconcile the original effect first
+
+backend:
+  copied_and_adapted:
+    - internal/product/port/port.go
+    - internal/product/port/local_lifecycle.go
+    - internal/product/port/service_period.go
+    - internal/product/port/external_push.go
+    - internal/product/app/catalog.go
+    - internal/product/app/catalog_test.go
+    - internal/product/app/local_lifecycle.go
+    - internal/product/app/local_lifecycle_test.go
+    - internal/product/app/service_period.go
+    - internal/product/app/service_period_test.go
+    - internal/product/app/external_push.go
+    - internal/product/app/external_push_test.go
+  added_v3_adaptation:
+    - path: internal/product/port/events.go
+      reason: local event seam keeps donor application behavior isolated; Terra adapts it to the v3 versioned event port
+  excluded:
+    - product member-grid and historical/settlement stores
+    - order, payment, refund, entitlement, membership, member-grid, customer, and identity code
+    - product HTTP handlers, provider adapters, and direct cross-domain stores
+
+frontend:
+  byte_exact_staged_under: web/donors/products-v2/src
+  allowed_pages:
+    - key: products
+      template: web/src/admin/templates/products.html
+      capability: ordinary product definitions, list, copy, local lifecycle, and delete controls
+    - key: productForm
+      template: web/src/admin/templates/productForm.html
+      capability: ordinary product create/update, image references, price/stock, admin projection, and local external-push configuration
+    - key: spProducts
+      template: web/src/admin/templates/spProducts.html
+      capability: service-period product definitions, list, copy, enable/disable, and archive controls
+    - key: spProductForm
+      template: web/src/admin/templates/spProductForm.html
+      capability: service-period product create/update, image references, price/stock, admin projection, and local external-push configuration
+  excluded_pages:
+    - key: spProductData
+      reason: member-grid/member data and customer entitlement presentation; the controller branch, registry entry, and navigation from spProducts must remain unwired
+      source_template: not staged; mixed controller branch is donor evidence only
+  mixed_dependencies:
+    - path: web/src/admin/controller.ts
+      allowlist: products, productForm, spProducts, and spProductForm rendering and actions only
+      exclude: spProductData, customer, order, payment, entitlement, membership, member-grid, and unrelated admin page branches
+    - path: web/src/admin/sections/util.ts
+      allowlist: copyText used by the product/service-period share modal
+      exclude: unrelated section helpers when the controller is split by the Web adapter
+    - path: web/src/admin/sections/qr.ts
+      allowlist: renderQr and downloadQr used by the product/service-period share modal
+      exclude: radar-specific exports; qrcode-generator must be supplied or replaced by a v3-owned adapter without adding a v2 dependency
+    - path: web/src/api/admin.ts
+      allowlist: product and service-period product functions plus external-push configuration/test functions listed in api_contract
+      exclude: listProductLocalEntitlements, all service-period member/member-grid functions, and all customer/order/payment/identity/tagging execution functions
+    - path: web/src/api/generated/p4-service-period-products/p4-service-period-products.ts
+      allowlist: service-period product definition/lifecycle/share functions
+      exclude: listServicePeriodHistoryDefinitions, listServicePeriodHistoryEntitlements, and listServicePeriodHistoryEvents
+    - path: web/src/admin/registry.json
+      allowlist: products and spProducts page entries
+      exclude: spProductData entry and all unrelated page entries
+    - path: web/src/admin/nav.json
+      allowlist: products and spProducts nav metadata only; preserve raw bytes until Web adapter selects these entries
+    - path: web/src/api/generated/health.schemas.ts
+      allowlist: Product, ProductAdminProjection, ServicePeriodProduct, lifecycle, and CommerceExternalPush DTOs
+      exclude: entitlement, membership, customer, order, payment, and identity DTOs
+    - path: web/src/shared/api/client.ts
+      allowlist: transport primitives required by the selected product pages
+      exclude: cross-domain orchestration
+    - path: web/src/shared/api/types.ts
+      allowlist: Product, SpProduct, ProductAdminProjection, and external-push view types required by the selected pages
+      exclude: customer, order, payment, membership, and identity view models
+    - path: web/src/shared/api/mockData.ts
+      allowlist: product and service-period product fixtures required by characterization coverage
+      exclude: fixtures for excluded domains
+    - path: web/src/api/transport.ts
+      allowlist: shared request/error transport used by selected product pages
+      exclude: provider execution or cross-domain side effects
+    - path: web/src/shared/ui/picker.ts
+      allowlist: image/admin projection picker behavior required by product forms
+    - path: web/src/shared/ui/feedback.ts
+      allowlist: product form/list feedback behavior
+    - path: web/src/shared/ui/download.ts
+      allowlist: only if required by the product page adapter; no order/customer export behavior
+    - path: web/src/shared/ui/runtime.ts
+      allowlist: shared UI runtime primitives required by selected pages
+    - path: web/src/shared/ui/tokens.css
+      allowlist: raw styling dependency; no second webshell or .side layout may be deployed
+  integration_rule: all listed frontend files stay byte-exact donor evidence under web/donors/products-v2; Terra/Web later selects the allowlisted product branches and mounts them through the v3-owned adapter and PR10 unique webshell without editing these files
+  copied:
+    - web/src/admin/templates/products.html
+    - web/src/admin/templates/productForm.html
+    - web/src/admin/templates/spProducts.html
+    - web/src/admin/templates/spProductForm.html
+    - web/src/admin/controller.ts
+    - web/src/admin/sections/util.ts
+    - web/src/admin/sections/qr.ts
+    - web/src/admin/main.ts
+    - web/src/admin/nav.json
+    - web/src/admin/registry.json
+    - web/src/shared/api/client.ts
+    - web/src/shared/api/types.ts
+    - web/src/shared/api/mockData.ts
+    - web/src/shared/ui/picker.ts
+    - web/src/shared/ui/feedback.ts
+    - web/src/shared/ui/download.ts
+    - web/src/shared/ui/runtime.ts
+    - web/src/shared/ui/tokens.css
+    - web/src/api/admin.ts
+    - web/src/api/transport.ts
+    - web/src/api/generated/p4-product/p4-product.ts
+    - web/src/api/generated/p4-service-period-products/p4-service-period-products.ts
+    - web/src/api/generated/p4-commerce-external-push/p4-commerce-external-push.ts
+    - web/src/api/generated/health.schemas.ts
+
+verification:
+  frontend:
+    donor_source_root: /tmp/aicrm-v2-audit.yN3jmr
+    staged_source_root: web/donors/products-v2/src
+    file_count: 24
+    byte_compare: cmp source files against staged files; all 24 pass
+    hashes: docs/migration/product/pr04-donor-sha256.txt
+  backend:
+    characterization_tests:
+      - internal/product/app/catalog_test.go
+      - internal/product/app/local_lifecycle_test.go
+      - internal/product/app/service_period_test.go
+      - internal/product/app/external_push_test.go
+    required_commands:
+      - go test -count=1 ./internal/product/...
+      - go vet ./internal/product/...
+      - go test -race -count=1 ./internal/product/...
+
+deferred_to_terra:
+  - Product-owned SQL store, transaction/UoW receipt persistence, audit, outbox, and migrations
+  - adapt internal/product/port/events.go to the v3 versioned event and outbox ports
+  - connect opaque image references through the Media-owned port; do not read Media tables directly
+  - define any Product-to-Order/Payment contract and any service-period-to-customer or entitlement contract
+  - move external provider execution, effect state transitions, signatures, idempotency, and reconciliation to the Outbound/EER integration
+  - select raw products and spProducts frontend assets and remove excluded central/controller branches in the Web integration lane
+
+forbidden_touched:
+  - cmd/aicrm
+  - api/openapi.yaml
+  - migrations
+  - go.mod
+  - go.sum
+  - package*.json
+  - deploy
+  - CI
+  - internal/platform
+  - internal/access
+  - internal/webshell

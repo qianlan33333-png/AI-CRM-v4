@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+import { JSDOM } from 'jsdom';
+
+const bundle = (await build({
+  stdin: { contents: "import * as feedback from './actionFeedback'; window.ActionFeedback = feedback;", resolveDir: decodeURIComponent(new URL('.', import.meta.url).pathname), sourcefile: 'action-feedback-test.ts' },
+  bundle: true, format: 'iife', platform: 'browser', target: 'es2020', write: false, logLevel: 'warning',
+})).outputFiles[0].text;
+const dom = new JSDOM('<!doctype html><body><button id="save" disabled aria-label="原标签" style="width:123px"><span class="icon">图标</span>保存</button><label id="upload-label">上传 <input id="upload" type="file"></label></body>', { runScripts: 'dangerously', pretendToBeVisual: true });
+dom.window.eval(bundle);
+const { runAction, rememberActionInputs } = dom.window.ActionFeedback;
+const button = dom.window.document.getElementById('save');
+let resolveFirst;
+const first = runAction(button, () => new Promise(resolve => { resolveFirst = resolve; }), '保存中…');
+const concurrent = runAction(button, () => Promise.resolve('duplicate'), '保存中…');
+assert.strictEqual(concurrent, first, 'concurrent action must share the active promise');
+assert.equal(button.getAttribute('aria-busy'), 'true');
+assert.match(button.textContent, /保存中/);
+await Promise.resolve();
+resolveFirst('ok');
+await first;
+assert.equal(button.disabled, true, 'original disabled state must be restored');
+assert.equal(button.innerHTML, '<span class="icon">图标</span>保存');
+assert.equal(button.getAttribute('aria-label'), '原标签');
+assert.equal(button.style.width, '123px');
+assert.equal(button.hasAttribute('aria-busy'), false);
+let reject;
+const failed = runAction(button, () => new Promise((_, r) => { reject = r; }), '保存中…');
+await Promise.resolve();
+reject(new Error('failed'));
+await assert.rejects(failed);
+const retry = runAction(button, () => Promise.resolve('retry'), '保存中…');
+assert.equal(await retry, 'retry', 'a rejected action must permit retry');
+const takeInput = rememberActionInputs((input) => input.id === 'upload');
+const input = dom.window.document.getElementById('upload');
+input.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+assert.equal(takeInput(), input, 'file input change must be associated with its action');
+let releaseUpload;
+const upload = runAction(input, () => new Promise(resolve => { releaseUpload = resolve; }), '上传中…');
+await Promise.resolve();
+assert.equal(input.disabled, true);
+assert.equal(dom.window.document.querySelector('#upload-label .v3-action-spinner') !== null, true, 'file spinner must be visible in its label');
+assert.equal(input.isConnected, true, 'busy feedback must preserve the original file input node');
+assert.strictEqual(runAction(input, () => Promise.resolve('duplicate'), '上传中…'), upload, 'second file change must reuse the active upload');
+releaseUpload('ok');
+await upload;
+assert.equal(input.disabled, false);
+assert.equal(dom.window.document.querySelector('#upload-label .v3-action-spinner'), null);
+const uploadAgain = runAction(input, () => Promise.resolve('again'), '上传中…');
+await uploadAgain;
+dom.window.close();
+console.log('action feedback lifecycle and DOM restore: PASS');

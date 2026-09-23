@@ -1,0 +1,272 @@
+schema_version: 1
+pr: PR06
+capability: content-package-and-group-ops
+status: preparation_only
+audit: docs/migration/groupops/pr06-contract-audit.md
+v3_base: 19384b93fe362c7786edc81dd5595b79570f6bb1
+target_branch: codex/import-content-groupops
+
+donor:
+  repository: /tmp/aicrm-v2-audit.yN3jmr
+  commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+  read_only: true
+  runtime_dependency: false
+
+rules:
+  backend: v2 source is adapted to v3 module paths only; no v2 module, runtime,
+    store, migration, HTTP, composition, or Provider dependency is introduced
+  frontend: listed donor files are byte-exact snapshots under web/donors and
+    are not wired into the v3 build; no wording, CSS, interaction, or request
+    contract was rewritten
+  ownership: Group Ops owns plan/run/effect-intent contracts; Media owns
+    content packages and material preparation; outbound owns real WeCom writes
+
+scope:
+  included:
+    - content-package creation, validation, version facts, and Media-owned
+      material snapshots as a dependency contract
+    - local Group Ops plan definition, ordered nodes, staff scope, group
+      directory references, lifecycle transitions, and webhook descriptor
+    - run-due, broadcast, webhook acceptance, schedule snapshots, execution
+      states, Provider acceptance, receipts, outcome_unknown, and reconciliation
+      evidence contracts without a Provider call
+    - exact Group Ops edit, directory, history, runtime, and material-picker
+      frontend donor files plus their preserved transport dependencies
+  excluded:
+    - customer, OneID, phone, external-customer, segment, audience,
+      Campaign, customer-automation, marking, unmarking, enrollment, or
+      recipient selection/execution
+    - direct WeCom or Provider calls, credentials, token exchange, retries, or
+      delivery claims without independently verified evidence
+    - Store, PostgreSQL schema, generated SQL, migration, historical import,
+      runtime worker, HTTP/auth, OpenAPI, composition, deployment, CI, and
+      dependency manifests
+
+backend:
+  copied_exact:
+    - source: internal/groupops/port/port.go
+      target: internal/groupops/port/port.go
+      notes: local plan, node, typed material reference, webhook, and content validation DTOs
+    - source: internal/groupops/port/dispatch.go
+      target: internal/groupops/port/dispatch.go
+      notes: Provider boundary, task receipt, outcome classification, and reconciliation evidence contract only
+    - source: internal/groupops/port/runtime.go
+      target: internal/groupops/port/runtime.go
+      notes: schedule/run/execution/directory/operation-member contracts; no scheduler or sender implementation
+    - source: internal/groupops/port/history.go
+      target: internal/groupops/port/history.go
+      notes: read-only historical plan/directory/group/node/receipt contracts only
+  copied_and_adapted:
+    - source: internal/groupops/app/service.go
+      target: internal/groupops/app/service.go
+      disposition: adapted
+      notes: v3 platform UoW plus local Group Ops staff/event seams; plan mutations remain local and fail closed
+    - source: internal/groupops/app/service_test.go
+      target: internal/groupops/app/service_test.go
+      disposition: adapted
+      notes: lifecycle, idempotent replay, strict draft boundary, typed material, webhook secrecy, and readback characterization
+  added_v3_adaptation:
+    - path: internal/groupops/domain/groupops.go
+      reason: pure plan/node/material/scope invariants and lifecycle transition rules without customer or Provider identity
+    - path: internal/groupops/domain/groupops_test.go
+      reason: characterization of terminal archive state, typed material limits, and concrete excluded identity fields
+    - path: internal/groupops/port/events.go
+      reason: local transactional event seam; Terra adapts it to the versioned v3 event/outbox implementation
+    - path: internal/groupops/port/staff.go
+      reason: local active-staff reference seam without Contact or external-recipient imports
+    - path: internal/groupops/README.md
+      reason: ownership, safety boundary, and Terra handoff record
+  content_package_dependency:
+    owner: Media
+    source_commit: 2801b5338e103e7d49eecd7b7696fe09d0348036
+    target_slice:
+      - internal/media/port/content_delivery.go
+      - internal/media/port/groupops_material.go
+      - internal/media/groupopsmaterial/freezer.go
+      - internal/media/app/content_delivery.go
+    notes: PR02 already owns these files. PR06 does not duplicate them; Terra must integrate only content-package/material-snapshot behavior and keep Campaign binding outside this scope.
+  deferred_to_terra:
+    - source: internal/groupops/app/runtime.go
+      reason: runtime implementation depends on v2 EER, Contact directory, Store, scheduler, and Media adapters; only local runtime/dispatch ports are frozen here
+    - source: internal/groupops/app/history.go
+      reason: historical import needs an independently owned v3 history schema and replay policy
+    - source: internal/groupops/provider/dispatch.go
+      reason: direct Provider adapter must be recreated behind outbound; v2 Provider code is not copied
+    - source: internal/groupops/store/*
+      reason: Group Ops-owned v3 tables, CAS/locking, receipts, audit, outbox, and generated SQL are not authorized in this preparation branch
+    - source: internal/groupops/worker/*
+      reason: scheduler/River/dispatch workers and material continuation require the v3 outbound/effect runtime
+    - source: internal/groupops/http/*
+      reason: authenticated HTTP/OpenAPI routes and central registration are forbidden here; generated request files are contract evidence only
+
+frontend:
+  byte_exact_staged_under: web/donors/groupops-v2/src
+  archive_readme: web/donors/groupops-v2/README.md
+  byte_exact_file_count: 35
+  dependency_closure:
+    source_of_truth: exact_files plus preserved_shared_dependencies below
+    archive_file_set: exactly 35 files; unlisted frontend files are forbidden
+    business_files: 21
+    shared_runtime_files: 14
+    shared_runtime_owner: PR01
+    shared_runtime_reuse: PR06 reuses the PR01 frozen bundle byte-for-byte
+    shared_runtime_mutation: forbidden; do not crop, rewrite, or create a second bundle
+    external_static_business_assets: []
+    standalone_groupops_stylesheets: []
+    inline_style_files:
+      - web/src/admin/templates/groupops.html
+      - web/src/admin/templates/groupopsDetail.html
+      - web/src/admin/sections/groupOpsDirectory.ts
+      - web/src/admin/sections/groupOpsHistory.ts
+      - web/src/admin/sections/broadcastJobHistory.ts
+    shared_stylesheet:
+      - web/src/shared/ui/tokens.css
+      - note: owned by the PR01 frozen runtime bundle; no PR06 variant is allowed
+    content_package_frontend:
+      owner: PR02 Media
+      donor_surface: Group Ops detail typed materialPlan and history read-only content_package JSON
+      standalone_editor_in_pr06_donor: false
+      required_for_complete_pr06: reuse the PR02 frozen content-package UI/adapter in the same Journey
+      fallback: if PR02 content-package UI is not openable, PR06 remains incomplete; do not invent a new page
+  exact_files:
+    - web/src/admin/templates/groupops.html
+    - web/src/admin/templates/groupopsDetail.html
+    - web/src/admin/legacy.ts
+    - web/src/admin/sections/groupOpsDirectory.ts
+    - web/src/admin/sections/groupOpsHistory.ts
+    - web/src/admin/sections/broadcastJobHistory.ts
+    - web/src/admin/sections/util.ts
+    - web/src/api/groupOpsDirectory.ts
+    - web/src/api/groupOpsDirectory.test.ts
+    - web/src/api/groupOpsHistory.ts
+    - web/src/api/groupOpsHistory.test.ts
+    - web/src/api/broadcastJobHistory.ts
+    - web/src/api/admin.test.ts
+    - web/src/api/capabilities.ts
+    - web/src/api/generated/p4-group-ops/p4-group-ops.ts
+    - web/src/api/generated/p4-group-ops-workspaces/p4-group-ops-workspaces.ts
+    - web/src/api/generated/p4-groupops-history/p4-groupops-history.ts
+    - web/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts
+    - web/src/api/generated/p4-broadcast-job-history/p4-broadcast-job-history.ts
+    - web/src/api/generated/p4-ai-audience/p4-ai-audience.ts
+    - web/src/api/generated/health.schemas.ts
+  preserved_shared_dependencies:
+    - web/src/admin/controller.ts
+    - web/src/admin/main.ts
+    - web/src/admin/nav.json
+    - web/src/admin/registry.json
+    - web/src/api/admin.ts
+    - web/src/api/transport.ts
+    - web/src/shared/api/client.ts
+    - web/src/shared/api/mockData.ts
+    - web/src/shared/api/types.ts
+    - web/src/shared/ui/download.ts
+    - web/src/shared/ui/feedback.ts
+    - web/src/shared/ui/picker.ts
+    - web/src/shared/ui/runtime.ts
+    - web/src/shared/ui/tokens.css
+  notes: These exact legacy dependencies contain broader customer/audience/Campaign branches. They are archive-only source evidence plus the PR01 frozen shared runtime bundle; Terra/Web must reuse the shared bytes unchanged and route-gate active Group Ops mounts. The p4-ai-audience generated file is retained solely because the unchanged directory adapter references its operation-member endpoint.
+  css: no standalone Group Ops stylesheet exists; page styles are inline in the exact templates
+  nested_runtime_assembly:
+    - path: web/src/admin/main.ts
+      owner: PR01
+      risk: dispatches non-customers pages to legacy.ts; it is not a PR06-only entrypoint
+    - path: web/src/admin/legacy.ts
+      owner: PR01
+      risk: static survey history import and broad dynamic section imports make whole-file
+        compilation expose unrelated customer/audience/Campaign branches
+    - path: web/src/admin/controller.ts
+      owner: PR01
+      risk: all-page controller contains legacy branches; reuse frozen bytes and route-gate
+        Group Ops rather than editing or pruning this file
+    - path: web/src/api/admin.ts
+      owner: PR01
+      risk: all-page DTO adapter contains legacy branches; Group Ops uses only its frozen
+        Group Ops DTO behavior and must not introduce Audience/Customer writes
+    - path: web/src/admin/templates/automation.html
+      owner: PR07
+      risk: outer donor page for broadcast_job_history=1; not a PR06 openable route and
+        must not be bundled as a second shell
+    - path: web/src/admin/sections/broadcastJobHistory.ts
+      owner: PR06 archive closure
+      risk: keep exact hash when statically bundled, but expose only through the owner PR07
+        route or a v3-owned read-only mount; never copy automation.html into PR06
+    - path: web/src/admin/nav.json
+      owner: PR01
+      risk: donor navigation contains broader pages; PR10 shell is the only production
+        sidebar and must gate un-migrated routes
+  integration: PR10's v3-owned internal/webshell/admin_base and primary sidebar
+    remain the only production shell. Terra/Web must mount these donor business
+    templates and the PR01 frozen runtime bundle through a v3-owned adapter; the
+    shared runtime must not be cropped or rewritten. This archive must never be
+    deployed as a second complete v2 shell or with a second `.side` navigation.
+    Donor files remain unmodified byte-exact snapshots.
+  request_contract:
+    generated_sources:
+      - web/src/api/generated/p4-group-ops/p4-group-ops.ts
+      - web/src/api/generated/p4-group-ops-workspaces/p4-group-ops-workspaces.ts
+      - web/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts
+      - web/src/api/generated/p4-groupops-history/p4-groupops-history.ts
+      - web/src/api/generated/p4-broadcast-job-history/p4-broadcast-job-history.ts
+    included_operations:
+      - local Group Ops plan list/detail/create/update/activate/pause/archive/delete
+      - plan staff and opaque group-asset list/add/remove
+      - ordered node list/add/update/remove and typed material preview
+      - webhook descriptor read/write and inbound run acceptance contract
+      - run-due/broadcast execution summary, provider-acceptance, receipt, and manual reconciliation read contracts
+      - current group directory list/sync and eligible operation-member list
+      - read-only Group Ops historical plan/directory/group/node and broadcast-job history
+    notes: Routes remain contract evidence only. No route is registered or exposed by this commit.
+
+terra_followups:
+  - owner: Terra/Media
+    item: integrate PR02 content package creation/validation/version and material freezer ports plus its frozen UI/adapter; keep Campaign delivery bindings outside PR06
+  - owner: Terra/GroupOps
+    item: define Group Ops-owned PostgreSQL tables, migrations, SQLC queries, CAS/locking, audit, idempotency receipts, and same-transaction event/outbox facts
+  - owner: Terra/GroupOps
+    item: implement authenticated plan/directory/run/history HTTP routes and composition registration without excluded customer/audience/Campaign branches
+  - owner: Terra/Outbound
+    item: translate immutable Group Ops dispatch intent through outbound only; persist accepted/attempted/outcome_unknown/reconciled states and independently verified WeCom receipt evidence
+  - owner: Terra/GroupOps
+    item: implement scheduler/River workers, group/member trusted read adapters, sender resolution, and material continuation without direct Provider access
+  - owner: Terra/Web
+    item: reuse the PR01 frozen shared runtime unchanged, route-gate the exact Group Ops pages, and wire only after v3 HTTP/OpenAPI contracts are approved; do not crop or rewrite shared bytes
+  - owner: Terra/GroupOps
+    item: decide whether legacy history is a separate read-only import after schema and retention review
+
+verification:
+  frontend_source_target_pairs: 35
+  frontend_cmp: PASS
+  frontend_cmp_scope: every exact_files and preserved_shared_dependencies entry,
+    including admin/sections/broadcastJobHistory.ts
+  frontend_sha256: docs/migration/groupops/pr06-donor-sha256.txt
+  backend_v3_commands:
+    - go test ./internal/groupops/...
+    - go vet ./internal/groupops/...
+    - go test -race ./internal/groupops/...
+  donor_backend_command: git -C /tmp/aicrm-v2-audit.yN3jmr worktree at frozen SHA;
+    go test ./internal/groupops/...
+  donor_frontend_tests:
+    - web/src/api/admin.test.ts::runAdminAdapterTests
+    - web/src/api/groupOpsDirectory.test.ts::runGroupOpsDirectoryAdapterTests
+    - web/src/api/groupOpsHistory.test.ts::runGroupOpsHistoryAdapterTests
+  donor_frontend_runner: frozen source tests bundled with esbuild 0.24.0 in a
+    temporary directory; all three runners passed, and the added broadcast
+    history section bundled successfully
+  note: Donor tests are characterization runners and are not copied into the v3
+    build; no npm/package/lock file is introduced by this preparation commit.
+
+forbidden_touched:
+  - cmd/aicrm
+  - api/openapi.yaml
+  - migrations
+  - go.mod
+  - go.sum
+  - package.json
+  - package-lock.json
+  - pnpm-lock.yaml
+  - deploy
+  - CI
+  - internal/platform
+  - internal/access
+  - internal/webshell central routing

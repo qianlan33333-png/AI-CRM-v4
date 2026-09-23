@@ -1,0 +1,12 @@
+[Unit]
+Description=Create daily AI-CRM v3 WeCom customer reconciliation at 02:30 Asia/Shanghai
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 Asia/Shanghai
+AccuracySec=1min
+Persistent=true
+Unit=aicrm-customer-sync-daily.service
+
+[Install]
+WantedBy=timers.target
+

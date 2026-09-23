@@ -1,0 +1,16 @@
+.shared-detail-drawer { width: min(620px, calc(100vw - 32px)); max-height: min(100vh - 32px, 760px); margin: 16px 16px 16px auto; border: 0; padding: 0; background: transparent; color: #1d2939; font: inherit; }
+.shared-detail-drawer--center { width: min(520px, calc(100vw - 32px)); margin: auto; }
+.shared-detail-drawer::backdrop { background: rgb(16 24 40 / 45%); }
+.shared-detail-drawer__panel { display: grid; gap: 18px; max-height: inherit; overflow: auto; padding: 22px; border-radius: 12px; background: #fff; color: inherit; box-shadow: 0 24px 48px rgb(16 24 40 / 20%); }
+.shared-detail-drawer__head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.shared-detail-drawer__head h2 { margin: 0; font-size: 18px; }
+.shared-detail-drawer__close { min-height: 32px; border: 1px solid #d0d5dd; border-radius: 6px; padding: 5px 10px; background: #fff; color: #344054; cursor: pointer; font: inherit; }
+.shared-qr-dialog { display: grid; gap: 16px; min-width: 0; }
+.shared-qr-dialog__url { width: 100%; min-height: var(--ui-control, 36px); box-sizing: border-box; border: 1px solid var(--line, #d0d5dd); border-radius: var(--radius-sm, 8px); padding: 7px 10px; color: var(--text, #1d2939); background: var(--panel, #fff); font: inherit; }
+.shared-qr-dialog__code { width: min(220px, 100%); aspect-ratio: 1; justify-self: center; padding: 8px; box-sizing: border-box; border: 1px solid var(--line, #d0d5dd); border-radius: var(--radius-md, 8px); background: #fff; }
+.shared-qr-dialog__code svg { display: block; width: 100%; height: 100%; }
+.shared-qr-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.shared-qr-dialog__actions button { min-height: var(--ui-control, 36px); border: 1px solid var(--line-strong, #c4c7cc); border-radius: var(--radius-sm, 8px); padding: 7px 12px; color: var(--text, #1d2939); background: var(--panel, #fff); cursor: pointer; font: inherit; }
+.shared-qr-dialog__actions button:focus-visible { outline: 2px solid var(--brand, #3370ff); outline-offset: 2px; }
+.shared-qr-dialog__actions button:disabled { cursor: not-allowed; opacity: .56; }
+.shared-qr-dialog__action--primary { border-color: var(--brand, #3370ff) !important; color: #fff !important; background: var(--brand, #3370ff) !important; }

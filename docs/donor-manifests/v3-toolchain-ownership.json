@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "owner": "V3 build and security maintainers",
+  "decision": "The active V3 npm toolchain is upgradeable for security fixes; frozen donor source and historical toolchain evidence remain immutable.",
+  "source_commit": "6bfbe5816bb89913c70adaca87d6a486260e016e",
+  "historical_manifest": "docs/donor-manifests/pr01-web.sha256",
+  "active_paths": ["package.json", "package-lock.json"],
+  "historical_snapshots": {
+    "package.json": "docs/donor-manifests/toolchain-v2/package.frozen.json",
+    "package-lock.json": "docs/donor-manifests/toolchain-v2/package-lock.frozen.json"
+  },
+  "required_checks": ["historical donor hashes", "npm audit including dev tools", "pinned Node/npm", "Orval regeneration", "typecheck", "unchanged donor source gates", "full existing CI lanes"]
+}

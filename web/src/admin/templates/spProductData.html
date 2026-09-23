@@ -1,0 +1,109 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <a onClick="{{ spDataPage.back }}" style="width:28px;height:28px;border:1px solid #DEE0E3;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#646A73" stroke-width="1.6"><path d="M9.6 3.6L5.2 8l4.4 4.4"/></svg></a>
+              <div style="min-width:0">
+                <div style="font-size:12px;color:#8F959E;line-height:14px">交易 / 周期商品</div>
+                <div style="font-size:16px;font-weight:600;line-height:22px">{{ spDataPage.productName }} · Member Grid</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex:none">
+              <sc-if value="{{ spDataPage.http }}"><a href="{{ spDataPage.historyHref }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;display:inline-flex;align-items:center;text-decoration:none;color:#1F2329">查看 V1 Member Grid 历史</a></sc-if>
+              <button onClick="{{ spDataPage.back }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;cursor:pointer">返回周期商品</button>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;gap:12px;align-content:start">
+            <sc-if value="{{ spDataPage.mock }}">
+              <div style="border:1px dashed #DEE0E3;border-radius:8px;background:#fff;padding:32px;text-align:center;font-size:13px;color:#8F959E">测试 Mock 环境不提供 Member Grid 服务端查询与写入；页面不展示模拟成员数据，真实网格由 HttpApi / OpenAPI 读取。</div>
+            </sc-if>
+            <sc-if value="{{ spDataPage.http }}">
+            <sc-if value="{{ spDataPage.detail.open }}">
+            <div style="padding:14px 16px;border:1px solid #C5D6FF;border-radius:8px;background:#F5F9FF">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2 style="margin:0;font-size:14px;font-weight:600">编辑成员本地字段</h2><button id="member-edit-cancel" onClick="{{ spDataPage.cancelEdit }}" style="height:28px;padding:0 10px;border:1px solid #D0D5DD;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">取消</button></div>
+              <div style="margin-top:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+                <label style="display:grid;gap:6px;font-size:12px;color:#646A73">备注<textarea id="member-remark" maxlength="500" rows="3" style="border:1px solid #DEE0E3;border-radius:6px;padding:8px 10px;font-size:13px;resize:vertical">{{ spDataPage.detail.remark }}</textarea></label>
+                <label style="display:grid;gap:6px;font-size:12px;color:#646A73">联盟<input id="member-alliance" maxlength="120" value="{{ spDataPage.detail.alliance }}" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px"></label>
+              </div>
+              <div style="margin-top:10px;font-size:12px;color:#667085;font-family:ui-monospace,Menlo,monospace">{{ spDataPage.detail.memberRef }} · 当前版本 {{ spDataPage.detail.version }} · 仅写入本地成员字段</div>
+              <button id="member-edit-save" onClick="{{ spDataPage.saveEdit }}" style="height:30px;margin-top:12px;padding:0 14px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">保存本地字段</button>
+            </div>
+            </sc-if>
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:12px 16px">
+              <h2 style="margin:0 0 10px;font-size:14px;font-weight:600">当前读取边界</h2>
+              <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:#344054"><span>访问：可查看 / 可查询</span><span>当前页：{{ spDataPage.boundary.rows }} 条</span><span>共享视图：{{ spDataPage.boundary.views }} 个内置只读视图</span><span>公开只读会员网格：{{ spDataPage.share.statusLabel }}</span></div>
+            </div>
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+              <div style="padding:12px 16px;border-bottom:1px solid #EFF0F1;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+                <h2 style="margin:0;font-size:14px;font-weight:600">会员数据（服务端 cursor）</h2>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <select id="member-grid-view" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;background:#fff;font-size:13px"><sc-if value="{{ spDataPage.f.viewDefault }}"><option value="default" selected="selected">默认视图</option></sc-if><sc-if value="{{ spDataPage.f.viewCustom }}"><option value="default">默认视图</option></sc-if><sc-if value="{{ spDataPage.f.viewCustom }}"><option value="" selected="selected">受限自定义查询</option></sc-if><sc-if value="{{ spDataPage.f.viewDefault }}"><option value="">受限自定义查询</option></sc-if></select>
+                  <select id="member-grid-state" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;background:#fff;font-size:13px"><sc-if value="{{ spDataPage.f.stateAll }}"><option value="all" selected="selected">全部状态</option></sc-if><sc-if value="{{ spDataPage.f.stateAllOff }}"><option value="all">全部状态</option></sc-if><sc-if value="{{ spDataPage.f.stateActive }}"><option value="active" selected="selected">有效</option></sc-if><sc-if value="{{ spDataPage.f.stateActiveOff }}"><option value="active">有效</option></sc-if><sc-if value="{{ spDataPage.f.stateExpired }}"><option value="expired" selected="selected">已过期</option></sc-if><sc-if value="{{ spDataPage.f.stateExpiredOff }}"><option value="expired">已过期</option></sc-if><sc-if value="{{ spDataPage.f.stateRemoved }}"><option value="removed" selected="selected">已移除</option></sc-if><sc-if value="{{ spDataPage.f.stateRemovedOff }}"><option value="removed">已移除</option></sc-if></select>
+                  <select id="member-grid-source" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;background:#fff;font-size:13px"><sc-if value="{{ spDataPage.f.sourceAll }}"><option value="" selected="selected">全部来源</option></sc-if><sc-if value="{{ spDataPage.f.sourceAllOff }}"><option value="">全部来源</option></sc-if><sc-if value="{{ spDataPage.f.sourceManual }}"><option value="manual" selected="selected">手动</option></sc-if><sc-if value="{{ spDataPage.f.sourceManualOff }}"><option value="manual">手动</option></sc-if><sc-if value="{{ spDataPage.f.sourcePaid }}"><option value="paid_order" selected="selected">已支付订单</option></sc-if><sc-if value="{{ spDataPage.f.sourcePaidOff }}"><option value="paid_order">已支付订单</option></sc-if></select>
+                  <select id="member-grid-sort" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;background:#fff;font-size:13px"><sc-if value="{{ spDataPage.f.sortUpdated }}"><option value="updated_at_desc" selected="selected">最近更新</option></sc-if><sc-if value="{{ spDataPage.f.sortUpdatedOff }}"><option value="updated_at_desc">最近更新</option></sc-if><sc-if value="{{ spDataPage.f.sortStarts }}"><option value="starts_at_desc" selected="selected">服务开始时间</option></sc-if><sc-if value="{{ spDataPage.f.sortStartsOff }}"><option value="starts_at_desc">服务开始时间</option></sc-if></select>
+                  <select id="member-grid-group" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;background:#fff;font-size:13px"><sc-if value="{{ spDataPage.f.groupNone }}"><option value="" selected="selected">不分组</option></sc-if><sc-if value="{{ spDataPage.f.groupNoneOff }}"><option value="">不分组</option></sc-if><sc-if value="{{ spDataPage.f.groupState }}"><option value="state" selected="selected">按状态分组</option></sc-if><sc-if value="{{ spDataPage.f.groupStateOff }}"><option value="state">按状态分组</option></sc-if></select>
+                  <button id="member-grid-apply" onClick="{{ spDataPage.apply }}" style="height:32px;padding:0 14px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">应用筛选</button>
+                </div>
+              </div>
+              <div style="overflow-x:auto">
+                <table style="width:100%;border-collapse:collapse">
+                  <thead><tr style="background:#FAFAFB;text-align:left;color:#667085"><th style="padding:9px 12px;font-size:12px;font-weight:500">成员</th><th style="padding:9px 12px;font-size:12px;font-weight:500">状态</th><th style="padding:9px 12px;font-size:12px;font-weight:500">来源</th><th style="padding:9px 12px;font-size:12px;font-weight:500">服务时间</th><th style="padding:9px 12px;font-size:12px;font-weight:500;text-align:right">版本</th></tr></thead>
+                  <tbody>
+                    <sc-for list="{{ spDataPage.rows }}" as="r" hint-placeholder-count="5">
+                      <sc-if value="{{ r.isGroup }}"><tr data-member-group="{{ r.groupState }}"><td colspan="5" style="padding:7px 12px;background:#F5F7FA;color:#667085;font-size:12px;font-weight:600">{{ r.groupLabel }}</td></tr></sc-if>
+                      <sc-if value="{{ r.isMember }}"><tr><td style="padding:9px 12px;border-bottom:1px solid #EEF0F3"><strong style="font-size:13px">{{ r.displayName }}</strong><div style="margin-top:3px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#667085">{{ r.memberRef }}</div></td><td style="padding:9px 12px;border-bottom:1px solid #EEF0F3;font-size:13px">{{ r.stateLabel }}</td><td style="padding:9px 12px;border-bottom:1px solid #EEF0F3;font-size:13px">{{ r.sourceLabel }}</td><td style="padding:9px 12px;border-bottom:1px solid #EEF0F3;font-size:12px;color:#646A73">{{ r.startsAt }}<br>{{ r.expiresAt }}</td><td style="padding:9px 12px;border-bottom:1px solid #EEF0F3;text-align:right;font-variant-numeric:tabular-nums;font-size:12px">{{ r.version }}<br><button data-member-edit="{{ r.memberRef }}" onClick="{{ spDataPage.editMember }}" style="height:26px;margin-top:5px;padding:0 10px;border:1px solid #D0D5DD;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">编辑备注/联盟</button></td></tr></sc-if>
+                    </sc-for>
+                  </tbody>
+                </table>
+              </div>
+              <sc-if value="{{ spDataPage.rowsEmpty }}">
+                <div style="padding:22px;text-align:center;font-size:13px;color:#8F959E">当前筛选没有服务端返回的成员</div>
+              </sc-if>
+              <div style="padding:12px 16px;display:flex;justify-content:flex-end;gap:8px">
+                <sc-if value="{{ spDataPage.showPrevious }}"><button id="member-grid-previous" onClick="{{ spDataPage.previous }}" style="height:28px;padding:0 10px;border:1px solid #D0D5DD;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">上一页</button></sc-if>
+                <sc-if value="{{ spDataPage.showNext }}"><button id="member-grid-next" onClick="{{ spDataPage.next }}" style="height:28px;padding:0 10px;border:1px solid #D0D5DD;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">下一页</button></sc-if>
+              </div>
+            </div>
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+              <div style="padding:12px 16px;border-bottom:1px solid #EFF0F1"><h2 style="margin:0;font-size:14px;font-weight:600">本地协作者（V2 产品内权限）</h2></div>
+              <div style="padding:14px 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <select id="member-grid-staff" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;background:#fff;font-size:13px;min-width:240px"><option value="">选择 active staff</option><sc-for list="{{ spDataPage.staff }}" as="st"><option value="{{ st.id }}">{{ st.label }}</option></sc-for></select>
+                <select id="member-grid-permission" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;background:#fff;font-size:13px"><option value="view">查看（V2 产品内）</option><option value="edit">编辑（V2 产品内）</option></select>
+                <button id="member-grid-add" onClick="{{ spDataPage.addCollaborator }}" style="height:32px;padding:0 14px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">添加协作者</button>
+              </div>
+              <sc-if value="{{ spDataPage.hasStaffError }}">
+                <p role="alert" style="margin:0;padding:0 16px 10px;color:#B42318;font-size:12px">{{ spDataPage.staffError }}；添加协作者已停用。</p>
+              </sc-if>
+              <p style="margin:0;padding:0 16px 12px;color:#8F5A16;font-size:12px">仅选择服务端真实 active staff 目录；写入 V2 产品内权限，不发送企微邀请，不证明 Provider 成功。</p>
+              <table style="width:100%;border-collapse:collapse">
+                <tbody>
+                  <sc-for list="{{ spDataPage.collaborators }}" as="c" hint-placeholder-count="2">
+                    <tr><td style="padding:9px 16px;border-bottom:1px solid #EEF0F3;font-size:12px;font-family:ui-monospace,Menlo,monospace">{{ c.label }}</td><td style="padding:9px 12px;border-bottom:1px solid #EEF0F3"><select data-collab-permission="{{ c.id }}" style="height:30px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;background:#fff;font-size:13px"><sc-if value="{{ c.isView }}"><option value="view" selected="selected">查看（V2 产品内）</option><option value="edit">编辑（V2 产品内）</option></sc-if><sc-if value="{{ c.isEdit }}"><option value="view">查看（V2 产品内）</option><option value="edit" selected="selected">编辑（V2 产品内）</option></sc-if></select></td><td style="padding:9px 12px;border-bottom:1px solid #EEF0F3;font-size:12px">{{ c.version }}</td><td style="padding:9px 16px;border-bottom:1px solid #EEF0F3;text-align:right"><button data-collab-update="{{ c.id }}" onClick="{{ spDataPage.updateCollaborator }}" style="height:28px;padding:0 10px;border:1px solid #D0D5DD;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">保存权限</button><button data-collab-remove="{{ c.id }}" onClick="{{ spDataPage.removeCollaborator }}" style="height:28px;margin-left:6px;padding:0 10px;border:1px solid #D0D5DD;border-radius:6px;background:#fff;font-size:12px;cursor:pointer;color:#D83931">移除</button></td></tr>
+                  </sc-for>
+                </tbody>
+              </table>
+              <sc-if value="{{ spDataPage.collaboratorsEmpty }}">
+                <div style="padding:18px;text-align:center;font-size:13px;color:#8F959E">暂无本地协作者</div>
+              </sc-if>
+            </div>
+            <div style="padding:12px 16px;border:1px solid #C5D6FF;border-radius:8px;background:#F5F9FF;color:#1849A9;font-size:13px;line-height:20px">
+              <strong>公开只读会员网格 {{ spDataPage.share.statusLabel }}</strong>：公开页只显示成员显示名、本地状态、来源和服务时间，不展示手机号、客户编号或外部身份。
+              <div style="margin-top:10px"><button id="member-grid-share-toggle" onClick="{{ spDataPage.toggleShare }}" style="height:30px;padding:0 14px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">{{ spDataPage.share.toggleText }}</button></div>
+              <sc-if value="{{ spDataPage.share.hasPath }}">
+                <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><code style="font-size:12px;color:#344054">{{ spDataPage.share.path }}</code><button id="member-grid-share-copy" onClick="{{ spDataPage.copyShare }}" style="height:28px;padding:0 10px;border:1px solid #D0D5DD;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">复制新链接</button></div>
+              </sc-if>
+              <sc-if value="{{ spDataPage.share.lostHint }}">
+                <p style="margin:10px 0 0;color:#8F5A16;font-size:12px">链接只在开启或同一幂等重试时返回；如已遗失，请先关闭再重新开启。</p>
+              </sc-if>
+            </div>
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+              <div style="padding:12px 16px;border-bottom:1px solid #EFF0F1"><h2 style="margin:0;font-size:14px;font-weight:600">网格列 Schema（只读）</h2></div>
+              <table style="width:100%;border-collapse:collapse">
+                <tbody>
+                  <sc-for list="{{ spDataPage.columns }}" as="col" hint-placeholder-count="12">
+                    <tr><td style="padding:8px 16px;border-bottom:1px solid #EEF0F3;font-size:12px;font-family:ui-monospace,Menlo,monospace">{{ col.key }}</td><td style="padding:8px 12px;border-bottom:1px solid #EEF0F3;font-size:13px">{{ col.label }}</td><td style="padding:8px 12px;border-bottom:1px solid #EEF0F3;font-size:12px;color:#667085">{{ col.type }}{{ col.nullableText }}</td></tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+            </sc-if>
+          </div>

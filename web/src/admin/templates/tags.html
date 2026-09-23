@@ -1,0 +1,80 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><span>客户管理后台</span><span>/</span><span>运营</span></div>
+              <div style="font-size:16px;font-weight:600;line-height:22px">企微标签管理</div>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px 10px">
+                <div><h2 style="margin:0;font-size:14px;font-weight:600">标签库与标签组</h2><p style="margin:2px 0 0;font-size:12px;color:#8F959E">集中管理企业客户标签：同步、搜索、新增、编辑、删除和复制 tag_id。</p></div>
+                <div style="display:flex;align-items:center;gap:8px;flex:none"><button onClick="{{ tagsPage.sync }}" style="height:34px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:13px;cursor:pointer;white-space:nowrap">同步企微标签</button><button onClick="{{ tagsPage.openCreateGroup }}" style="height:34px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:13px;cursor:pointer;white-space:nowrap">新增标签组</button><button onClick="{{ tagsPage.openCreateTag }}" style="height:34px;padding:0 12px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer;white-space:nowrap">新增标签</button></div>
+              </div>
+              <div style="display:grid;grid-template-columns:minmax(280px,1fr) minmax(240px,320px);gap:14px;align-items:stretch;padding:10px 16px 14px">
+                <input onInput="{{ tagsPage.search }}" placeholder="搜索标签组 / 标签 / tag_id" style="height:42px;width:100%;box-sizing:border-box;border:1px solid #DEE0E3;border-radius:6px;padding:0 12px;font-size:13px;background:#fff">
+                <div style="padding:9px 12px;border:1px solid #EFF0F1;border-radius:8px;background:#FAFAFB"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px"><span style="font-size:12px;color:#8F959E">标签容量</span><strong style="font-size:14px;color:#1F2329">{{ tagsPage.capacity }} / 1000</strong></div><div style="height:7px;border-radius:99px;background:#E5E6EB;overflow:hidden"><div style="width:{{ tagsPage.capacityPct }};height:100%;background:#2EA121;border-radius:99px"></div></div></div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:300px minmax(0,1fr);gap:12px;align-items:start">
+                <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:12px;max-height:calc(100vh - 230px);overflow:auto">
+                  <div style="font-size:14px;font-weight:600;color:#1F2329">标签组</div>
+                  <div style="font-size:12px;color:#8F959E;margin:3px 0 12px">共 {{ tagsPage.groupCount }} 个标签组</div>
+                  <sc-for list="{{ tagsPage.groups }}" as="g" hint-placeholder-count="5">
+                    <button type="button" data-tag-group-card="true" aria-pressed="{{ g.pressed }}" onClick="{{ g.pick }}" style="{{ g.row }}"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ g.name }}</span><span style="{{ g.cnt }}">{{ g.count }}</span></button>
+                  </sc-for>
+                </div>
+                <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid #EFF0F1"><div><h2 style="margin:0;font-size:14px;font-weight:600">{{ tagsPage.cur.name }}</h2><p style="margin:3px 0 0;font-size:12px;color:#8F959E">{{ tagsPage.rowCount }} 个标签；每页 20 个</p></div><div style="display:flex;gap:8px"><button onClick="{{ tagsPage.openEditGroup }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">编辑组名</button><button onClick="{{ tagsPage.deleteGroup }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">删除组</button></div></div>
+
+              <table style="width:100%;border-collapse:collapse">
+                <thead><tr><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:150px">标签名</th><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:110px">使用人数</th><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:160px">最近同步</th><th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:right;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:130px">操作</th></tr></thead>
+                <tbody>
+                  <sc-for list="{{ tagsPage.rows }}" as="tg" hint-placeholder-count="6">
+                  <tr><td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="font-size:13px">{{ tg.name }}</span></td><td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="font-size:12px;color:#646A73;font-variant-numeric:tabular-nums">{{ tg.users }}</span></td><td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="font-size:12px;color:#646A73">{{ tg.syncedAt }}</span></td><td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:right;vertical-align:middle"><div style="display:flex;flex-wrap:wrap;gap:2px;justify-content:flex-end"><button onClick="{{ tg.detail }}" style="height:24px;padding:0 6px;border:0;border-radius:4px;background:transparent;color:#245BDB;font-size:12px;cursor:pointer;white-space:nowrap">详情</button><button onClick="{{ tg.copyId }}" style="height:24px;padding:0 6px;border:0;border-radius:4px;background:transparent;color:#245BDB;font-size:12px;cursor:pointer;white-space:nowrap">复制 tag_id</button><button onClick="{{ tg.edit }}" style="height:24px;padding:0 6px;border:0;border-radius:4px;background:transparent;color:#245BDB;font-size:12px;cursor:pointer;white-space:nowrap">编辑</button><button onClick="{{ tg.del }}" style="height:24px;padding:0 6px;border:0;border-radius:4px;background:transparent;color:#D83931;font-size:12px;cursor:pointer;white-space:nowrap">删除</button></div></td></tr>
+                  </sc-for>
+                </tbody>
+              </table>
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;color:#8F959E;font-size:12px"><span>{{ tagsPage.pageSummary }}</span><div style="display:flex;gap:8px"><sc-if value="{{ tagsPage.hasPrev }}"><button onClick="{{ tagsPage.prev }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:12px;cursor:pointer">上一页</button></sc-if><sc-if value="{{ tagsPage.noPrev }}"><button disabled style="height:30px;padding:0 12px;border:1px solid #EFF0F1;border-radius:6px;background:#FAFAFB;color:#C9CDD4;font-size:12px">上一页</button></sc-if><sc-if value="{{ tagsPage.hasNext }}"><button onClick="{{ tagsPage.next }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:12px;cursor:pointer">下一页</button></sc-if><sc-if value="{{ tagsPage.noNext }}"><button disabled style="height:30px;padding:0 12px;border:1px solid #EFF0F1;border-radius:6px;background:#FAFAFB;color:#C9CDD4;font-size:12px">下一页</button></sc-if></div></div>
+                </div>
+              </div>
+          </div>
+
+          <!-- 标签 / 标签组编辑组件（生产 #wecom-tags-modal 对应：先调起编辑组件，再真实创建） -->
+          <sc-if value="{{ tagsPage.modalOpen }}">
+          <div style="position:fixed;inset:0;background:rgba(15,23,42,.34);z-index:80;display:flex;align-items:center;justify-content:center;padding:24px">
+            <div style="width:min(400px,100%);background:#fff;border-radius:12px;box-shadow:0 24px 64px rgba(15,23,42,.22);overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #EFF0F1"><span style="font-size:15px;font-weight:600;color:#1F2329">{{ tagsPage.modal.title }}</span><button onClick="{{ tagsPage.closeModal }}" style="width:28px;height:28px;border:0;border-radius:6px;background:#F2F3F5;color:#646A73;cursor:pointer;font-size:14px">×</button></div>
+              <div style="padding:18px;display:grid;gap:14px">
+                <sc-if value="{{ tagsPage.modal.isCreateTag }}">
+                  <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">所属标签组</label>
+                    <select id="fTagGroup" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;font-size:13px;background:#fff">
+                      <sc-for list="{{ tagsPage.modal.groupOpts }}" as="o"><sc-if value="{{ o.sel }}"><option value="{{ o.v }}" selected="selected">{{ o.t }}</option></sc-if><sc-if value="{{ o.not }}"><option value="{{ o.v }}">{{ o.t }}</option></sc-if></sc-for>
+                    </select></div>
+                </sc-if>
+                <sc-if value="{{ tagsPage.modal.isGroupForm }}">
+                  <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">标签组名称</label><input id="fTagGroupName" value="{{ tagsPage.modal.groupName }}" placeholder="请输入标签组名称" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;box-sizing:border-box"></div>
+                </sc-if>
+                <sc-if value="{{ tagsPage.modal.isCreateGroup }}">
+                  <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">第一个标签名称</label><input id="fTagFirst" placeholder="新建标签组时需要同时创建第一个标签" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;box-sizing:border-box"></div>
+                </sc-if>
+                <sc-if value="{{ tagsPage.modal.isTagForm }}">
+                  <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">标签名称</label><input id="fTagName" value="{{ tagsPage.modal.tagName }}" placeholder="请输入标签名称" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;box-sizing:border-box"></div>
+                </sc-if>
+                <sc-if value="{{ tagsPage.modal.isDetail }}">
+                  <div style="display:grid;grid-template-columns:92px minmax(0,1fr);gap:12px;font-size:13px"><span style="color:#8F959E">标签名称</span><strong style="font-weight:500">{{ tagsPage.modal.detailName }}</strong><span style="color:#8F959E">tag_id</span><span style="display:flex;align-items:center;gap:8px"><code>{{ tagsPage.modal.detailId }}</code><button onClick="{{ tagsPage.modal.copyId }}" style="height:24px;padding:0 6px;border:0;background:transparent;color:#245BDB;cursor:pointer">复制</button></span><span style="color:#8F959E">所属标签组</span><span>{{ tagsPage.modal.detailGroup }}</span><span style="color:#8F959E">使用人数</span><span>{{ tagsPage.modal.detailUsers }}</span></div>
+                </sc-if>
+              </div>
+              <sc-if value="{{ tagsPage.modal.isDetail }}"><div style="display:flex;justify-content:flex-end;padding:0 18px 18px"><button onClick="{{ tagsPage.closeModal }}" style="height:32px;padding:0 16px;border:1px solid var(--accent,#3370ff);border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">关闭</button></div></sc-if>
+              <sc-if value="{{ tagsPage.modal.isTagForm }}">
+              <div style="display:flex;justify-content:flex-end;gap:8px;padding:0 18px 18px">
+                <button onClick="{{ tagsPage.closeModal }}" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#1F2329;font-size:13px;cursor:pointer">取消</button>
+                <button onClick="{{ tagsPage.save }}" style="height:32px;padding:0 16px;border:1px solid var(--accent,#3370ff);border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">{{ tagsPage.modal.okLabel }}</button>
+              </div>
+              </sc-if>
+              <sc-if value="{{ tagsPage.modal.isGroupForm }}">
+              <div style="display:flex;justify-content:flex-end;gap:8px;padding:0 18px 18px"><button onClick="{{ tagsPage.closeModal }}" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#1F2329;font-size:13px;cursor:pointer">取消</button><button onClick="{{ tagsPage.save }}" style="height:32px;padding:0 16px;border:1px solid var(--accent,#3370ff);border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">{{ tagsPage.modal.okLabel }}</button></div>
+              </sc-if>
+            </div>
+          </div>
+          </sc-if>

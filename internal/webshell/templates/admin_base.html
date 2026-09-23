@@ -1,0 +1,304 @@
+{{define "admin_base"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  {{with presentationAssets}}{{if .Script}}<script type="module" async src="{{.Script}}"></script>{{end}}{{end}}
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.PageTitle}} · 用户管理后台</title>
+  <link rel="stylesheet" href="/static/admin_console/admin_console.css?v=production-shell-layout-20260909">
+  {{with presentationAssets}}{{if .AdminDateTimeScript}}<script type="module" src="{{.AdminDateTimeScript}}"></script>{{end}}{{end}}
+  <script defer src="/static/admin_console/admin_console.js?v=production-shell-41f80a11-mime2"></script>
+  <script defer src="/static/admin_console/admin_shell.js?v=operations-heading-20260917"></script>
+  {{if .AudienceList}}
+  <link rel="stylesheet" href="/static/admin_console/admin_audience.css?v=production-shell-41f80a11-mime2">
+  {{with presentationAssets}}{{if .ConfirmationDialogCSS}}<link rel="stylesheet" href="{{.ConfirmationDialogCSS}}">{{end}}{{if .ConfirmationDialogScript}}<script type="module" src="{{.ConfirmationDialogScript}}"></script>{{end}}{{end}}
+  <script defer src="/static/admin_console/admin_audience_detail.js?v=audience-direct-push-controls-v1"></script>
+  {{end}}
+  {{if .AudienceDetail}}
+  <link rel="stylesheet" href="/static/admin_console/automation_capability_selector.css?v=production-shell-41f80a11-mime2">
+  <link rel="stylesheet" href="/static/admin_console/send_content_readonly_detail.css?v=production-shell-41f80a11-mime2">
+  <link rel="stylesheet" href="/static/admin_console/ai_audience_send_records.css?v=production-shell-41f80a11-mime2">
+  <link rel="stylesheet" href="/static/admin_console/admin_audience_detail.css?v=production-shell-41f80a11-mime2">
+  {{with presentationAssets}}{{if .ConfirmationDialogCSS}}<link rel="stylesheet" href="{{.ConfirmationDialogCSS}}">{{end}}{{if .ConfirmationDialogScript}}<script type="module" src="{{.ConfirmationDialogScript}}"></script>{{end}}{{end}}
+  <script defer src="/static/admin_console/operation_member_picker_dd8d60d.js?v=audience-sender-picker-v2"></script>
+  <script defer src="/static/admin_console/admin_audience_detail.js?v=audience-sender-picker-v1"></script>
+  <script defer src="/static/admin_console/template_parameter_form.js?v=dd8-frozen-ab63c644"></script>
+  <script defer src="/static/admin_console/admin_audience_template_host.js?v=prd05-template-empty-v2"></script>
+  {{end}}
+  {{if or .AudienceList .AudienceDetail}}
+  <link rel="stylesheet" href="/static/admin_console/admin_core_operations.css?v=core-operations-empty-ai-v4">
+  <script defer src="/static/admin_console/admin_search_select.js?v=search-select-v1"></script>
+  <script defer src="/static/admin_console/admin_core_operations.js?v=core-operations-empty-ai-v4"></script>
+  <script defer src="/static/admin_console/admin_audience_activation_host.js?v=rule-activation-empty-v2"></script>
+  {{end}}
+  {{if eq .RequestPath "/admin/config/login-access"}}
+  <link rel="stylesheet" href="/static/admin_console/admin_access.css?v=static-mime2">
+  {{end}}
+  {{if .ExternalEffects}}
+  <link rel="stylesheet" href="{{.ExternalAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.ExternalAssets.LabsCSS}}">
+  <script type="module" src="{{.ExternalAssets.AdminJS}}"></script>
+  {{end}}
+  {{if .HXC}}
+  <link rel="stylesheet" href="{{.HXCAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.HXCAssets.LabsCSS}}">
+  <script type="module" src="{{.HXCAssets.AdminJS}}"></script>
+  {{end}}
+  {{if .Media}}
+  <link rel="stylesheet" href="{{.MediaAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.MediaAssets.LabsCSS}}">
+  {{if eq .MediaPage "images"}}
+  <script type="module" src="{{.MediaAssets.MaterialSaveHostJS}}"></script>
+  <script type="module" src="{{.MediaAssets.ImageLibraryFilterHostJS}}"></script>
+  {{else}}
+  <script type="module" src="{{.MediaAssets.AdminJS}}"></script>
+  <script type="module" src="{{.MediaAssets.MaterialSaveHostJS}}"></script>
+  {{end}}
+  <script type="module" src="{{.MediaAssets.MaterialLibraryHostJS}}"></script>
+  {{end}}
+  {{if .Customers}}
+  <link rel="stylesheet" href="/static/admin_console/admin_customers.css?v=customer-profile-v3">
+  <link rel="stylesheet" href="/assets/standard-components/wecom_tag_picker.css">
+  {{with presentationAssets}}{{if .SelectionDialogCSS}}<link rel="stylesheet" href="{{.SelectionDialogCSS}}">{{end}}{{end}}
+  <script type="module" src="/assets/standard-components/standard_components_host.js"></script>
+  <script defer src="/static/admin_console/admin_customers.js?v=operations-profile-20260917"></script>
+  {{end}}
+  {{if .MessageArchive}}
+  <link rel="stylesheet" href="/static/admin_console/message_archive.css?v=message-archive-v1">
+  <script defer src="/static/admin_console/message_archive.js?v=message-archive-v1"></script>
+  {{end}}
+  {{if .Tags}}
+  <link rel="stylesheet" href="{{.TagsAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.TagsAssets.LabsCSS}}">
+  <script type="module" src="{{.TagsAssets.AdminJS}}"></script>
+  <script type="module" src="{{.TagsAssets.PageHeaderActionHostJS}}"></script>
+  <script defer src="/static/admin_console/tag_sync_bridge.js?v=tag-sync-no-status-banner-v4"></script>
+  {{end}}
+  {{if .Product}}
+  <link rel="stylesheet" href="{{.ProductAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.ProductAssets.LabsCSS}}">
+  <link rel="stylesheet" href="{{.ProductAssets.ProductCSS}}">
+  {{range .ProductAssets.StandardCSS}}<link rel="stylesheet" href="{{.}}">{{end}}
+  <script type="module" src="{{.ProductAssets.StandardHostJS}}"></script>
+  <script type="module" src="{{.ProductAssets.HostJS}}"></script>
+  {{end}}
+	{{if .Order}}
+	<link rel="stylesheet" href="{{.OrderAssets.TokensCSS}}">
+	<link rel="stylesheet" href="{{.OrderAssets.LabsCSS}}">
+	<link rel="stylesheet" href="/static/admin_console/order_import.css?v=order-import-v1">
+	<script defer src="/static/admin_console/order_import.js?v=order-import-v1"></script>
+	<script type="module" src="{{.OrderAssets.HostJS}}"></script>
+	{{end}}
+  {{if .Coupons}}
+  <link rel="stylesheet" href="{{.CouponAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.CouponAssets.LabsCSS}}">
+  <script type="module" src="{{.CouponAssets.HostJS}}"></script>
+  {{end}}
+  {{if .Radar}}
+  <link rel="stylesheet" href="{{.RadarAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.RadarAssets.LabsCSS}}">
+  <link rel="stylesheet" href="/assets/standard-components/material_picker.css">
+  <link rel="stylesheet" href="{{.RadarAssets.SelectionDialogCSS}}">
+  <script type="module" src="{{.RadarAssets.StandardHostJS}}"></script>
+  <script defer src="/static/admin_console/radar_oneid_bridge.js?v=radar-oneid-v3"></script>
+  <script type="module" src="{{.RadarAssets.HostJS}}"></script>
+  {{end}}
+  {{if .GroupOps}}
+  <link rel="stylesheet" href="{{.GroupOpsAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.GroupOpsAssets.LabsCSS}}">
+  {{if .GroupOpsStandard}}
+  <link rel="stylesheet" href="{{.GroupOpsAssets.GroupPickerCSS}}">
+  <link rel="stylesheet" href="{{.GroupOpsAssets.MaterialPickerCSS}}">
+  <link rel="stylesheet" href="{{.GroupOpsAssets.ComposerCSS}}">
+  {{/* V3 presentation CSS follows frozen component CSS so the mounted V3
+       composer keeps its scoped layout without altering the donor files. */}}
+  <link rel="stylesheet" href="{{.GroupOpsAssets.StandardCSS}}">
+  <link rel="stylesheet" href="{{.GroupOpsAssets.SelectionDialogCSS}}">
+  <script defer src="{{.GroupOpsAssets.OperationPickerJS}}"></script>
+  <script defer src="{{.GroupOpsAssets.GroupPickerJS}}"></script>
+  <script defer src="{{.GroupOpsAssets.MaterialPickerJS}}"></script>
+  <script defer src="{{.GroupOpsAssets.ComposerJS}}"></script>
+  <script type="module" src="{{.GroupOpsAssets.HostJS}}"></script>
+  {{else}}
+  <link rel="stylesheet" href="{{.GroupOpsAssets.ReadonlyCSS}}">
+  <script defer src="{{.GroupOpsAssets.ReadonlyJS}}"></script>
+  <script defer src="/static/admin_console/groupops_history_readonly_bridge.js"></script>
+  <script type="module" src="{{.GroupOpsAssets.AdminJS}}"></script>
+  {{end}}
+  {{end}}
+  {{if .Automation}}
+  <link rel="stylesheet" href="{{.AutomationAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.AutomationAssets.LabsCSS}}">
+  {{if eq .AutomationPage "agentEdit"}}
+  <link rel="stylesheet" href="{{.AutomationAssets.PresentationCSS}}">
+  <link rel="stylesheet" href="{{.AutomationAssets.ContentCSS}}">
+  <link rel="stylesheet" href="{{.AutomationAssets.SelectionDialogCSS}}">
+  <link rel="stylesheet" href="{{.AutomationAssets.MaterialPickerCSS}}">
+  <script defer src="/static/admin_console/automation_create_code_adapter.js?v=automation-create-code-v2"></script>
+  <script defer src="{{.AutomationAssets.MaterialPickerJS}}"></script>
+  {{end}}
+  <script type="module" src="{{.AutomationAssets.AdminJS}}"></script>
+  {{if eq .AutomationPage "agentEdit"}}<script type="module" src="{{.AutomationAssets.ContentHostJS}}"></script>{{end}}
+  {{end}}
+  {{if .Survey}}
+  {{if eq .SurveyPage "questionnaireDetail"}}
+  <link rel="stylesheet" href="{{.SurveyAssets.EditorCSS}}">
+  {{range .SurveyAssets.StandardCSS}}<link rel="stylesheet" href="{{.}}">{{end}}
+  <script type="module" src="{{.SurveyAssets.StandardHostJS}}"></script>
+  <script type="module" src="{{.SurveyAssets.EditorJS}}"></script>
+  {{else if eq .SurveyPage "questionnaireOps"}}
+  <link rel="stylesheet" href="{{.SurveyAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.SurveyAssets.LabsCSS}}">
+  <link rel="stylesheet" href="{{.SurveyAssets.OperationsCSS}}">
+  <script type="module" src="{{.SurveyAssets.OperationsHostJS}}"></script>
+  {{else}}
+  <link rel="stylesheet" href="{{.SurveyAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.SurveyAssets.LabsCSS}}">
+  {{if .SurveyAssets.SurveyHostJS}}<script type="module" src="{{.SurveyAssets.SurveyHostJS}}"></script>{{else}}<script type="module" src="{{.SurveyAssets.AdminJS}}"></script>{{end}}
+  {{end}}
+  {{if ne .SurveyPage "questionnaireOps"}}<script defer src="/static/admin_console/survey_operations.js?v=survey-bridge-v2"></script>{{end}}
+  {{end}}
+  {{if .OperationCycles}}
+  <link rel="stylesheet" href="{{.OperationAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.OperationAssets.LabsCSS}}">
+  <script type="module" src="{{.OperationAssets.HostJS}}"></script>
+  {{end}}
+  {{if .Config}}
+  <link rel="stylesheet" href="{{.ConfigAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.ConfigAssets.LabsCSS}}">
+  <script defer src="/static/admin_console/config_adminops_bridge.js?v=config-adminops-v3-1"></script>
+  <script type="module" src="{{.ConfigAssets.AdminJS}}"></script>
+  {{end}}
+  {{if .RuntimeConfig}}
+  <link rel="stylesheet" href="/static/admin_console/config_center.css?v=dd8d60d-config-center">
+  <script defer src="/static/admin_console/runtime_config_releases_host.js?v=runtime-config-releases-v2"></script>
+  <script defer src="/static/admin_console/config_center_host.js?v=operations-config-20260917"></script>
+  {{end}}
+  {{if .Channel}}
+  <link rel="stylesheet" href="{{.ChannelAssets.TokensCSS}}">
+  <link rel="stylesheet" href="{{.ChannelAssets.LabsCSS}}">
+  {{range .ChannelAssets.StandardCSS}}<link rel="stylesheet" href="/{{.}}">{{end}}
+  <script type="module" src="{{.ChannelAssets.StandardHostJS}}"></script>
+  <script type="module" src="{{.ChannelAssets.AdminJS}}"></script>
+  {{end}}
+  {{if .OwnerHandoff}}
+  {{with presentationAssets}}{{if .SelectionDialogCSS}}<link rel="stylesheet" href="{{.SelectionDialogCSS}}">{{end}}{{end}}
+  <script type="module" src="/assets/standard-components/standard_components_host.js"></script>
+  <script defer src="/static/admin_console/owner_handoff_host.js?v=owner-handoff-host-v3"></script>
+  {{end}}
+  {{if .AIAssistant}}
+  <link rel="stylesheet" href="{{.AIAssistantAssets.TokensCSS}}"><link rel="stylesheet" href="{{.AIAssistantAssets.LabsCSS}}">
+  <link rel="stylesheet" href="{{.AIAssistantAssets.GroupCSS}}"><link rel="stylesheet" href="{{.AIAssistantAssets.MaterialCSS}}"><link rel="stylesheet" href="{{.AIAssistantAssets.ComposerCSS}}"><link rel="stylesheet" href="{{.AIAssistantAssets.ReadonlyCSS}}">
+  <script type="module" src="{{.AIAssistantAssets.HostJS}}"></script>
+  <script type="module" src="{{.AIAssistantAssets.PageHeaderActionHostJS}}"></script>
+  {{end}}
+  {{if .Distribution}}
+  <script defer src="/static/admin_console/admin_search_select.js?v=search-select-v2"></script>
+  <link rel="stylesheet" href="{{.DistributionAssets.CSS}}">
+	<link rel="stylesheet" href="{{.DistributionAssets.DetailDrawerCSS}}">
+  {{with presentationAssets}}{{if .ConfirmationDialogCSS}}<link rel="stylesheet" href="{{.ConfirmationDialogCSS}}">{{end}}{{if .ConfirmationDialogScript}}<script type="module" src="{{.ConfirmationDialogScript}}"></script>{{end}}{{end}}
+  <script type="module" src="{{.DistributionAssets.AdminJS}}"></script>
+  {{end}}
+  {{if .Governance}}
+  <link rel="stylesheet" href="{{.GovernanceAssets.CSS}}">
+  <link rel="stylesheet" href="{{.GovernanceAssets.DetailDrawerCSS}}">
+  <script type="module" src="{{.GovernanceAssets.AdminJS}}"></script>
+  {{end}}
+  {{if .Overview}}
+  <link rel="stylesheet" href="{{.OverviewAssets.CSS}}">
+  <link rel="stylesheet" href="{{.OverviewAssets.DetailDrawerCSS}}">
+  <script type="module" src="{{.OverviewAssets.AdminJS}}"></script>
+  {{end}}
+  {{with presentationAssets}}{{range .Styles}}<link rel="stylesheet" href="{{.}}">{{end}}{{end}}
+  {{if .ComponentStates}}
+  <link rel="stylesheet" href="{{.ComponentStatesAssets.VisualTokensCSS}}">
+  <link rel="stylesheet" href="{{.ComponentStatesAssets.GroupOpsCSS}}">
+  <link rel="stylesheet" href="{{.ComponentStatesAssets.GroupPickerCSS}}">
+  <link rel="stylesheet" href="{{.ComponentStatesAssets.MaterialPickerCSS}}">
+  <link rel="stylesheet" href="{{.ComponentStatesAssets.SelectionDialogCSS}}">
+  <link rel="stylesheet" href="{{.ComponentStatesAssets.StylesCSS}}">
+  <script type="module" src="{{.ComponentStatesAssets.HostJS}}"></script>
+  {{end}}
+</head>
+<body data-ui-surface="admin" class="admin-shell" data-admin-shell-source="v3_webshell"{{if .OwnerHandoff}} data-page="owner-handoff"{{end}}{{if .ExternalEffects}} data-page="campaigns"{{end}}{{if .HXC}} data-page="funnel"{{end}}{{if .Media}} data-page="{{.MediaPage}}"{{end}}{{if .Tags}} data-page="tags"{{end}}{{if .Product}} data-page="{{.ProductPage}}"{{end}}{{if .Order}} data-page="{{.OrderPage}}"{{end}}{{if .Coupons}} data-page="{{.CouponPage}}"{{end}}{{if .Radar}} data-page="{{.RadarPage}}"{{end}}{{if .GroupOps}} data-page="{{.GroupOpsPage}}"{{end}}{{if .Automation}} data-page="{{.AutomationPage}}"{{end}}{{if .AutomationCreateCode}} data-automation-create-code="{{.AutomationCreateCode}}"{{end}}{{if .Survey}} data-page="{{.SurveyPage}}"{{end}}{{if .OperationCycles}} data-page="{{.OperationPage}}"{{end}}{{if .Config}} data-page="{{.ConfigPage}}"{{end}}{{if .RuntimeConfig}} data-runtime-config-page="{{.RuntimeConfigPage}}"{{end}}{{if .Channel}} data-page="{{.ChannelPage}}"{{if .ChannelResourceID}} data-channel-resource-id="{{.ChannelResourceID}}"{{end}}{{end}}{{if .AIAssistant}} data-page="ai-assistant"{{end}}{{if .ComponentStates}} data-page="component-states"{{end}}>
+  <div class="admin-layout">
+    <aside class="admin-sidebar">
+      <div class="admin-brand">
+        <div class="admin-brand-mark">CRM</div>
+        <div class="admin-brand-copy">
+          <div class="admin-brand-title">用户管理后台</div>
+          <div class="admin-brand-subtitle">ADMIN CONSOLE</div>
+        </div>
+      </div>
+
+      <nav class="admin-nav" aria-label="用户管理后台导航">
+        {{range .NavItems}}
+        <section class="admin-nav-section{{if .Active}} is-active{{end}}">
+          <div class="admin-nav-section-title">{{.Title}}</div>
+          <div class="admin-nav-section-list">
+            {{range .Items}}
+            <a class="admin-nav-link{{if .Active}} is-active{{end}}" href="{{.Href}}" title="{{.Label}}">
+              <img class="admin-nav-icon" src="/static/admin_console/nav-icons/{{.Key}}.svg?v=static-mime2" alt="">
+              <span class="admin-nav-label">{{.Label}}</span>
+            </a>
+            {{end}}
+          </div>
+        </section>
+        {{end}}
+      </nav>
+
+      {{if .CurrentAdminUser}}
+      <div class="admin-sidebar-user">
+        <div class="admin-sidebar-user__avatar" aria-hidden="true">管</div>
+        <div class="admin-sidebar-user__meta">
+          <div class="admin-sidebar-user__name">{{.CurrentAdminUser.DisplayName}}</div>
+          <form class="admin-sidebar-user__logout-form" data-admin-logout action="/logout" method="post">
+            <button class="admin-sidebar-user__logout" type="submit">退出登录</button>
+          </form>
+        </div>
+      </div>
+      {{end}}
+    </aside>
+
+    <div class="admin-main-wrap">
+      {{if .ShowPageHeader}}
+      <header class="admin-topbar">
+        <div class="admin-topbar-head">
+          <div>
+            <h1 class="admin-page-title">{{.PageTitle}}</h1>
+            <p class="admin-page-summary">{{.PageSummary}}</p>
+          </div>
+        </div>
+
+        {{if or .PageActions .HeaderTabs}}
+        <div class="admin-topbar-meta">
+          {{if .HeaderTabs}}
+          <nav class="setup-topbar-tabs" aria-label="页面导航">
+            {{range .HeaderTabs}}
+            <a class="setup-topbar-tab{{if .Active}} is-active{{end}}" href="{{.Href}}">{{.Label}}</a>
+            {{end}}
+          </nav>
+          {{end}}
+          {{range .PageActions}}
+          <a class="admin-button{{if eq .Variant "primary"}} admin-button--primary{{else if eq .Variant "secondary"}} admin-button--secondary{{else}} admin-button--ghost{{end}}" href="{{.Href}}">{{.Label}}</a>
+          {{end}}
+        </div>
+        {{end}}
+      </header>
+      {{end}}
+
+      {{if or .ExternalEffects .HXC .Media .Tags .Product .Order .Coupons .Radar .GroupOps .Automation .Survey .OperationCycles .Config .RuntimeConfig .Channel .OwnerHandoff .AIAssistant}}
+      {{presentationContent .Content}}
+      {{else}}
+      <main class="admin-page">
+        {{if .PageNotice}}<section class="admin-alert admin-alert--success">{{.PageNotice}}</section>{{end}}
+        {{if .PageError}}<section class="admin-alert admin-alert--error">{{.PageError}}</section>{{end}}
+        {{presentationContent .Content}}
+      </main>
+      {{end}}
+    </div>
+  </div>
+</body>
+</html>
+{{end}}

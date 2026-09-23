@@ -1,0 +1,197 @@
+name: channel-history-import
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployed_release_sha:
+        description: Exact release SHA currently active in production
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: channel-history-production-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: aicrm_channel_rehearsal
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d aicrm_channel_rehearsal"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AICRM_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/aicrm_channel_rehearsal?sslmode=disable
+      AICRM_CHANNEL_SOURCE_SSH_HOST: ${{ vars.AICRM_CHANNEL_SOURCE_SSH_HOST }}
+      AICRM_CHANNEL_SOURCE_SSH_USER: ${{ vars.AICRM_CHANNEL_SOURCE_SSH_USER }}
+      DEPLOYED_RELEASE_SHA: ${{ inputs.deployed_release_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with: {node-version: '24.18.0'}
+      - name: Configure pinned source SSH host
+        env:
+          SOURCE_SSH_KEY: ${{ secrets.AICRM_CHANNEL_SOURCE_SSH_KEY }}
+          SOURCE_KNOWN_HOSTS: ${{ secrets.AICRM_CHANNEL_SOURCE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ -n "$AICRM_CHANNEL_SOURCE_SSH_HOST" && -n "$AICRM_CHANNEL_SOURCE_SSH_USER" ]]
+          install -d -m 0700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$SOURCE_SSH_KEY" > "$HOME/.ssh/channel_source_key"
+          printf '%s\n' "$SOURCE_KNOWN_HOSTS" > "$HOME/.ssh/channel_source_known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/channel_source_key" >/dev/null
+          ssh-keygen -F "$AICRM_CHANNEL_SOURCE_SSH_HOST" -f "$HOME/.ssh/channel_source_known_hosts" >/dev/null
+      - name: Capture and authenticate production snapshot
+        run: |
+          set -euo pipefail
+          umask 077
+          snapshot_key="$(openssl rand -base64 32 | tr -d '\n')"
+          printf '%s' "$snapshot_key" > "$RUNNER_TEMP/channel-history.key"
+          export AICRM_CHANNEL_SNAPSHOT_KEY="$snapshot_key"
+          export AICRM_CHANNEL_SOURCE_SSH_KEY_FILE="$HOME/.ssh/channel_source_key"
+          export AICRM_CHANNEL_SOURCE_KNOWN_HOSTS_FILE="$HOME/.ssh/channel_source_known_hosts"
+          scripts/capture-channel-history-source.sh "$RUNNER_TEMP/channel-history.stream"
+          scripts/run-go-with-donor-views.sh go build -trimpath -o "$RUNNER_TEMP/migrate-channel-history" ./cmd/migrate-channel-history
+          "$RUNNER_TEMP/migrate-channel-history" --mode inspect-stream \
+            --source-stream "$RUNNER_TEMP/channel-history.stream" \
+            --source-host "$AICRM_CHANNEL_SOURCE_SSH_HOST" \
+            --snapshot "$RUNNER_TEMP/channel-history.enc" \
+            --report "$RUNNER_TEMP/discovery.json" > "$RUNNER_TEMP/inspect.json"
+          python3 scripts/prepare-channel-semantic-rehearsal-fixtures.py \
+            "$RUNNER_TEMP/channel-history.stream" \
+            "$RUNNER_TEMP/channel-rehearsal-staff.tsv" \
+            "$RUNNER_TEMP/channel-rehearsal-tags.tsv"
+          unlink "$RUNNER_TEMP/channel-history.stream"
+          "$RUNNER_TEMP/migrate-channel-history" --mode validate --snapshot "$RUNNER_TEMP/channel-history.enc" > "$RUNNER_TEMP/validate.json"
+          "$RUNNER_TEMP/migrate-channel-history" --mode dry-run --snapshot "$RUNNER_TEMP/channel-history.enc" > "$RUNNER_TEMP/dry-run.json"
+          "$RUNNER_TEMP/migrate-channel-history" --mode semantic-validate --snapshot "$RUNNER_TEMP/channel-history.enc" > "$RUNNER_TEMP/semantic-validate.json"
+          manifest_digest="$(jq -er '.manifest_sha256' "$RUNNER_TEMP/validate.json")"
+          snapshot_id="$(jq -er '.snapshot_id' "$RUNNER_TEMP/validate.json")"
+          [[ "$manifest_digest" =~ ^[0-9a-f]{64}$ && "$snapshot_id" =~ ^channel-[0-9a-f]{24}$ ]]
+          printf 'MANIFEST_DIGEST=%s\nSNAPSHOT_ID=%s\n' "$manifest_digest" "$snapshot_id" >> "$GITHUB_ENV"
+          jq -e '.eligible == true and .provider_calls == 0 and .provider_effects == 0' "$RUNNER_TEMP/dry-run.json" >/dev/null
+          jq -e '.valid == true and .provider_calls == 0 and .provider_effects == 0 and .result.MissingMaterialRows == 0 and .result.MissingTagRows == 0' "$RUNNER_TEMP/semantic-validate.json" >/dev/null
+          jq '{snapshot_id,manifest_sha256,summary}' "$RUNNER_TEMP/validate.json"
+      - name: Rehearse import, replay and rollback on PostgreSQL 16
+        run: |
+          set -euo pipefail
+          export AICRM_CHANNEL_SNAPSHOT_KEY="$(<"$RUNNER_TEMP/channel-history.key")"
+          scripts/run-go-with-donor-views.sh go run ./cmd/migrate-platform -dir migrations
+          psql "$AICRM_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO admin_users(username,password_hash,display_name,is_active)
+          VALUES('migration-admin','$argon2id$rehearsal','Migration Admin',true);
+          INSERT INTO admin_user_roles(admin_user_id,role_code)
+          SELECT id,'super_admin' FROM admin_users WHERE username='migration-admin';
+          SQL
+          # psql meta-commands deliberately do not perform :variable
+          # interpolation. Let the shell place the runner-owned fixture paths
+          # into this otherwise static script; escape the only literal dollar
+          # signs used by the rehearsal password hash below.
+          psql "$AICRM_DATABASE_URL" -v ON_ERROR_STOP=1 <<SQL
+          CREATE TEMP TABLE rehearsal_channel_staff(provider_id text, display_name text);
+          \copy rehearsal_channel_staff FROM '$RUNNER_TEMP/channel-rehearsal-staff.tsv' WITH (FORMAT csv, DELIMITER E'\t')
+          INSERT INTO admin_users(username,password_hash,display_name,wecom_userid,is_active)
+          SELECT 'rehearsal-'||left(md5(provider_id),16),'\$argon2id\$rehearsal',left(display_name,160),provider_id,true
+          FROM rehearsal_channel_staff
+          ON CONFLICT DO NOTHING;
+
+          CREATE TEMP TABLE rehearsal_channel_tags(provider_tag_id text, provider_group_id text, tag_name text, group_name text);
+          \copy rehearsal_channel_tags FROM '$RUNNER_TEMP/channel-rehearsal-tags.tsv' WITH (FORMAT csv, DELIMITER E'\t')
+          WITH source_groups AS (
+            SELECT provider_group_id,min(group_name) AS group_name,dense_rank() OVER(ORDER BY provider_group_id) AS ordinal
+            FROM rehearsal_channel_tags GROUP BY provider_group_id
+          ), boundary AS (
+            SELECT COALESCE(max(sort_order),-1) AS base FROM tag_groups WHERE archived_at IS NULL
+          ), inserted AS (
+            INSERT INTO tag_groups(group_name,sort_order)
+            SELECT source_groups.group_name,(boundary.base+source_groups.ordinal)::integer FROM source_groups CROSS JOIN boundary
+            ON CONFLICT DO NOTHING RETURNING id,group_name,sort_order
+          )
+          INSERT INTO tag_provider_group_bindings(provider_group_id,group_id)
+          SELECT source_groups.provider_group_id,inserted.id
+          FROM source_groups CROSS JOIN boundary
+          JOIN inserted ON inserted.group_name=source_groups.group_name AND inserted.sort_order=(boundary.base+source_groups.ordinal)::integer
+          ON CONFLICT DO NOTHING;
+          WITH ranked AS (
+            SELECT source.*,binding.group_id,row_number() OVER(PARTITION BY binding.group_id ORDER BY source.provider_tag_id)-1 AS sort_order
+            FROM rehearsal_channel_tags source JOIN tag_provider_group_bindings binding USING(provider_group_id)
+          ), inserted AS (
+            INSERT INTO tag_catalog_tags(group_id,tag_name,sort_order)
+            SELECT group_id,tag_name,sort_order::integer FROM ranked
+            ON CONFLICT DO NOTHING RETURNING id,group_id,tag_name,sort_order
+          )
+          INSERT INTO tag_provider_tag_bindings(provider_tag_id,tag_id)
+          SELECT ranked.provider_tag_id,inserted.id
+          FROM ranked JOIN inserted ON inserted.group_id=ranked.group_id AND inserted.tag_name=ranked.tag_name AND inserted.sort_order=ranked.sort_order
+          ON CONFLICT DO NOTHING;
+          SQL
+          migrator="$RUNNER_TEMP/migrate-channel-history"
+          snapshot="$RUNNER_TEMP/channel-history.enc"
+          "$migrator" --mode import --snapshot "$snapshot" --manifest-sha256 "$MANIFEST_DIGEST" --confirm > "$RUNNER_TEMP/rehearsal-import.json"
+          "$migrator" --mode reconcile --snapshot "$snapshot" --manifest-sha256 "$MANIFEST_DIGEST" > "$RUNNER_TEMP/rehearsal-reconcile.json"
+          "$migrator" --mode replay-check --snapshot "$snapshot" --manifest-sha256 "$MANIFEST_DIGEST" > "$RUNNER_TEMP/rehearsal-replay.json"
+          "$migrator" --mode rollback --snapshot "$snapshot" --manifest-sha256 "$MANIFEST_DIGEST" --confirm > "$RUNNER_TEMP/rehearsal-rollback.json"
+          "$migrator" --mode import --snapshot "$snapshot" --manifest-sha256 "$MANIFEST_DIGEST" --confirm > "$RUNNER_TEMP/rehearsal-reimport.json"
+          "$migrator" --mode reconcile --snapshot "$snapshot" --manifest-sha256 "$MANIFEST_DIGEST" > "$RUNNER_TEMP/rehearsal-final.json"
+          "$migrator" --mode semantic-repair --snapshot "$snapshot" --manifest-sha256 "$MANIFEST_DIGEST" --confirm > "$RUNNER_TEMP/rehearsal-semantic-repair.json"
+          "$migrator" --mode semantic-repair --snapshot "$snapshot" --manifest-sha256 "$MANIFEST_DIGEST" --confirm > "$RUNNER_TEMP/rehearsal-semantic-replay.json"
+          "$migrator" --mode semantic-reconcile --snapshot "$snapshot" --manifest-sha256 "$MANIFEST_DIGEST" > "$RUNNER_TEMP/rehearsal-semantic-reconcile.json"
+          jq -e '.result.DuplicateSourceMaps == 0 and .result.ProviderEffectsCreatedByImport == 0 and .result.ProviderCallsDuringImport == 0 and .result.SilentLoss == 0 and .result.WrongOneIDBindings == 0' "$RUNNER_TEMP/rehearsal-final.json" >/dev/null
+          jq -e '.result.ProviderCalls == 0 and .result.ProviderEffects == 0' "$RUNNER_TEMP/rehearsal-semantic-repair.json" >/dev/null
+          jq -e '.result.channel_config_field_mismatches == 0 and .result.source_contacts_not_counted == 0 and .result.source_assignees_not_projected == 0 and .result.referenced_materials_unmapped == 0 and .result.referenced_tags_unmapped == 0 and .result.duplicate_source_maps == 0 and .result.wrong_oneid_bindings == 0 and .result.provider_effects_created_by_import == 0 and .result.provider_calls_during_import == 0 and .result.silent_loss == 0' "$RUNNER_TEMP/rehearsal-semantic-reconcile.json" >/dev/null
+          jq '{mode,result}' "$RUNNER_TEMP/rehearsal-final.json"
+      - name: Configure pinned deployment SSH host
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/deploy_known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/deploy_key" >/dev/null
+          test -s "$HOME/.ssh/deploy_known_hosts"
+      - name: Backup, import and reconcile production
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOYED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$HOME/.ssh/deploy_known_hosts")
+          remote_snapshot="/tmp/aicrm-channel-history-${SNAPSHOT_ID}.enc"
+          remote_key="/tmp/aicrm-channel-history-${SNAPSHOT_ID}.key"
+          remote_runner="/tmp/run-channel-history-import-${SNAPSHOT_ID}.sh"
+          cleanup() {
+            ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo unlink '$remote_snapshot' '$remote_key' '$remote_runner' 2>/dev/null || true" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          scp "${ssh_flags[@]}" "$RUNNER_TEMP/channel-history.enc" "${DEPLOY_USER}@${DEPLOY_HOST}:$remote_snapshot"
+          scp "${ssh_flags[@]}" "$RUNNER_TEMP/channel-history.key" "${DEPLOY_USER}@${DEPLOY_HOST}:$remote_key"
+          scp "${ssh_flags[@]}" deploy/run-channel-history-import.sh "${DEPLOY_USER}@${DEPLOY_HOST}:$remote_runner"
+          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo /usr/bin/bash '$remote_runner' '$remote_snapshot' '$remote_key' '$MANIFEST_DIGEST' '$SNAPSHOT_ID' '$DEPLOYED_RELEASE_SHA'" \
+            > "$RUNNER_TEMP/production-result.json"
+          jq '{backup_created,import:.import.result,reconcile:.reconcile.result,replay_check:."replay-check".result,staff_sync:."sync-wecom-staff",semantic_repair:."semantic-repair".result,legacy_verification:."verify-legacy-assets".result,semantic_reconcile:."semantic-reconcile".result,activation:."activate-repaired".result,provider_capabilities:."provider-capabilities"}' "$RUNNER_TEMP/production-result.json"
+          jq -e '.backup_created == true and ."provider-capabilities".enabled == true and ."provider-capabilities".effects_worker == true and ."sync-wecom-staff".state == "succeeded" and ."sync-wecom-staff".discovered > 0 and ."sync-wecom-staff".provider_reads == 1 and ."sync-wecom-staff".provider_writes == 0 and ."sync-wecom-staff".provider_effects == 0 and ."dry-run".provider_calls == 0 and ."dry-run".provider_effects == 0 and .reconcile.result.DuplicateSourceMaps == 0 and .reconcile.result.ProviderEffectsCreatedByImport == 0 and .reconcile.result.ProviderCallsDuringImport == 0 and .reconcile.result.SilentLoss == 0 and .reconcile.result.WrongOneIDBindings == 0 and ."semantic-repair".result.ProviderCalls == 0 and ."semantic-repair".result.ProviderEffects == 0 and (."semantic-reconcile".result | .channel_config_field_mismatches == 0 and .source_contacts_not_counted == 0 and .source_assignees_not_projected == 0 and .referenced_materials_unmapped == 0 and .referenced_tags_unmapped == 0 and .active_legacy_qr_without_binding == 0 and .active_legacy_qr_without_provider_readback == 0 and .duplicate_source_maps == 0 and .wrong_oneid_bindings == 0 and .provider_effects_created_by_import == 0 and .provider_calls_during_import == 0 and .silent_loss == 0)' "$RUNNER_TEMP/production-result.json" >/dev/null
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 https://id-dev.youcangogogo.com/readyz

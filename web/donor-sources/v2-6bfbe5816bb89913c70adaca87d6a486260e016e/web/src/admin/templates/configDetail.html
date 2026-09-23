@@ -1,0 +1,43 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <a onClick="{{ cfg.back }}" style="width:28px;height:28px;border:1px solid #DEE0E3;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#646A73" stroke-width="1.6"><path d="M9.6 3.6L5.2 8l4.4 4.4"/></svg></a>
+              <div style="min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><a onClick="{{ cfg.back }}" style="cursor:pointer;color:#8F959E">配置</a><span>/</span><span>{{ cfg.cat.label }}</span></div>
+                <div style="font-size:16px;font-weight:600;line-height:22px">{{ cfg.cat.label }}</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex:none">
+              <span style="{{ cfg.cat.cs }}">{{ cfg.cat.status }}</span>
+              <span onClick="{{ cfg.cat.toggle }}" style="{{ cfg.cat.sw.track }}"><span style="{{ cfg.cat.sw.knob }}"></span></span>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+            <sc-for list="{{ cfg.cat.blocks }}" as="b" hint-placeholder-count="2">
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden;max-width:900px">
+              <div style="padding:12px 16px;border-bottom:1px solid #EFF0F1"><h2 style="margin:0;font-size:14px;font-weight:600">{{ b.title }}</h2></div>
+              <table style="width:100%;border-collapse:collapse">
+                <tbody>
+                  <sc-for list="{{ b.fields }}" as="f" hint-placeholder-count="4">
+                    <tr>
+                      <th style="width:230px;padding:var(--rp,10px) 16px;text-align:left;font-size:13px;font-weight:400;color:#646A73;background:#FAFBFC;border-bottom:1px solid #F2F3F5;vertical-align:middle">{{ f.label }}<div style="font-size:11px;color:#A6AAB0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:2px">{{ f.key }}</div></th>
+                      <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5">
+                        <sc-if value="{{ f.isSwitch }}"><span onClick="{{ f.flip }}" style="{{ f.sw.track }}"><span style="{{ f.sw.knob }}"></span></span></sc-if>
+                        <sc-if value="{{ f.isSecret }}"><input type="password" data-cfg="{{ f.key }}" placeholder="{{ f.ph }}" style="{{ f.inputStyle }}"></sc-if>
+                        <sc-if value="{{ f.isText }}"><input data-cfg="{{ f.key }}" value="{{ f.value }}" style="{{ f.inputStyle }}"></sc-if>
+                        <sc-if value="{{ f.isNumber }}"><input type="number" data-cfg="{{ f.key }}" value="{{ f.value }}" style="{{ f.inputStyle }}"></sc-if>
+                        <sc-if value="{{ f.isReadonly }}"><input data-cfg="{{ f.key }}" value="{{ f.value }}" readonly="readonly" style="{{ f.inputStyle }}"></sc-if>
+                        <sc-if value="{{ f.isTextarea }}"><textarea data-cfg="{{ f.key }}" style="{{ f.areaStyle }}">{{ f.value }}</textarea></sc-if>
+                      </td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+            </sc-for>
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;max-width:900px">
+              <button onClick="{{ cfg.back }}" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;cursor:pointer">返回</button>
+              <sc-if value="{{ cfg.cat.checkSupported }}"><button onClick="{{ cfg.check }}" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;cursor:pointer">检查</button></sc-if>
+              <button onClick="{{ cfg.save }}" style="height:32px;padding:0 16px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">保存</button>
+            </div>
+          </div>

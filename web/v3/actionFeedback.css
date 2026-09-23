@@ -1,0 +1,7 @@
+.v3-action-busy { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.v3-action-spinner { width: 16px; height: 16px; box-sizing: border-box; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: v3-action-spin .7s linear infinite; }
+.v3-action-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.v3-upload-result { display: inline-block; margin-inline-start: 8px; font-size: 12px; line-height: 20px; color: #596579; overflow-wrap: anywhere; }
+.v3-upload-result[role="alert"] { color: #b42318; }
+@keyframes v3-action-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .v3-action-spinner { animation: none; } }

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "template_key": "questionnaire_submissions",
+  "parameters": {
+    "questionnaire_ids": [
+      "11"
+    ],
+    "owner_scope": "all",
+    "owner_staff_ids": [],
+    "require_wecom_identity": true
+  }
+}

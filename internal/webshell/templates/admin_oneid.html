@@ -1,0 +1,184 @@
+{{define "admin_oneid"}}
+<section class="admin-card admin-oneid-card" data-admin-oneid-root
+  data-resolve-url="/api/admin/oneid/resolve"
+  data-customer-url="/api/admin/oneid/customers/"
+  data-conflicts-url="/api/admin/oneid/conflicts"
+  data-candidates-url="/api/admin/oneid/merge-candidates"
+  data-source-conflicts-url="/api/admin/oneid/source-conflicts">
+  <div class="admin-card-head admin-card-head--tight">
+    <div>
+      <h2>OneID 基础查询</h2>
+      <p>使用受控的 kind、scope 和 identity key 查询当前用户归属。页面只展示服务端脱敏摘要，不创建用户、不修改身份。</p>
+    </div>
+    <span class="admin-chip admin-chip--neutral">只读查询</span>
+  </div>
+
+  <div id="admin-oneid-alert" class="admin-alert" role="status" aria-live="polite" hidden></div>
+
+  <div class="admin-oneid-query-grid">
+    <section class="admin-oneid-section" aria-labelledby="admin-oneid-resolve-title">
+      <div class="admin-oneid-section__head">
+        <div>
+          <h3 id="admin-oneid-resolve-title">按身份键查询</h3>
+          <p>查询完成后输入内容会立即清空，不会写入地址栏或浏览器存储。</p>
+        </div>
+      </div>
+      <form id="admin-oneid-resolve-form" class="admin-form-grid admin-form-grid--stacked" autocomplete="off">
+        <label>
+          <span>身份类型（kind）</span>
+          <select id="admin-oneid-kind" name="kind" required>
+            <option value="wecom_external_userid">企微外部联系人</option>
+            <option value="unionid">微信 UnionID</option>
+            <option value="mp_openid">小程序 OpenID</option>
+            <option value="oa_openid">公众号 OpenID</option>
+            <option value="alipay_user_id">支付宝用户 ID</option>
+            <option value="alipay_oauth_user_id">支付宝 OAuth 用户 ID</option>
+            <option value="alipay_oauth_open_id">支付宝 OAuth Open ID</option>
+            <option value="alipay_buyer_id">支付宝买家 ID</option>
+            <option value="alipay_buyer_open_id">支付宝买家 Open ID</option>
+            <option value="first_party_member_id">内部成员 ID</option>
+            <option value="phone">手机号</option>
+            <option value="ext">扩展身份</option>
+          </select>
+        </label>
+        <label>
+          <span>作用域（scope）</span>
+          <input id="admin-oneid-scope" name="scope" type="text" maxlength="256" placeholder="例如 wecom-corp:&lt;corp-id&gt;" required>
+          <small>作用域必须与身份类型匹配；不确定时不要猜测。</small>
+        </label>
+        <label>
+          <span>身份值（value）</span>
+          <input id="admin-oneid-value" name="value" type="password" maxlength="1024" autocomplete="off" spellcheck="false" required>
+          <small>仅用于本次同源请求，结果不会回显身份值。</small>
+        </label>
+        <div class="admin-form-actions">
+          <button class="admin-button admin-button--primary" type="submit">查询归属</button>
+          <button class="admin-button admin-button--ghost" id="admin-oneid-resolve-clear" type="button">清空</button>
+        </div>
+      </form>
+      <div id="admin-oneid-resolve-state" class="admin-state admin-state--inline" role="status" aria-live="polite">
+        <strong>等待查询</strong>
+        <span>输入身份键后查询其当前 OneID 状态。</span>
+      </div>
+    </section>
+
+    <section class="admin-oneid-section" aria-labelledby="admin-oneid-customer-title">
+      <div class="admin-oneid-section__head">
+        <div>
+          <h3 id="admin-oneid-customer-title">按 Customer ID 查看</h3>
+          <p>只读取用户状态、当前 OneID 和合并谱系摘要。</p>
+        </div>
+      </div>
+      <form id="admin-oneid-customer-form" class="admin-form-grid admin-form-grid--filters" autocomplete="off">
+        <label>
+          <span>Customer ID</span>
+          <input id="admin-oneid-customer-id" name="customer_id" type="number" min="1" step="1" inputmode="numeric" required>
+        </label>
+        <button class="admin-button admin-button--secondary" type="submit">查看用户</button>
+      </form>
+      <div id="admin-oneid-customer-state" class="admin-state admin-state--inline" role="status" aria-live="polite">
+        <strong>等待用户 ID</strong>
+        <span>用户详情不会显示身份原始值。</span>
+      </div>
+      <div id="admin-oneid-customer-detail" class="admin-oneid-detail" hidden>
+        <div class="admin-oneid-detail-grid">
+          <div class="admin-oneid-detail-field"><span>Customer ID</span><strong id="admin-oneid-detail-id">—</strong></div>
+          <div class="admin-oneid-detail-field"><span>当前状态</span><strong id="admin-oneid-detail-status">—</strong></div>
+          <div class="admin-oneid-detail-field"><span>Canonical Customer ID</span><strong id="admin-oneid-detail-canonical-id">—</strong></div>
+          <div class="admin-oneid-detail-field"><span>Canonical 状态</span><strong id="admin-oneid-detail-canonical-status">—</strong></div>
+        </div>
+        <div class="admin-oneid-detail-block">
+          <h4>已绑定身份摘要</h4>
+          <div id="admin-oneid-identities" class="admin-oneid-token-list"></div>
+        </div>
+        <div class="admin-oneid-detail-block">
+          <h4>合并谱系</h4>
+          <div id="admin-oneid-lineage" class="admin-table-wrap"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</section>
+
+<div class="admin-oneid-list-grid">
+  <section class="admin-card admin-oneid-list-card" aria-labelledby="admin-oneid-conflicts-title">
+    <div class="admin-card-head admin-card-head--tight">
+      <div>
+        <h2 id="admin-oneid-conflicts-title">身份冲突</h2>
+        <p id="admin-oneid-conflicts-status" class="admin-muted" role="status" aria-live="polite">正在加载开放冲突…</p>
+      </div>
+      <button class="admin-button admin-button--ghost" id="admin-oneid-conflicts-refresh" type="button">刷新</button>
+    </div>
+    <div id="admin-oneid-conflicts-loading" class="admin-state admin-state--loading" role="status">
+      <strong>正在加载</strong>
+      <span>读取服务端脱敏冲突记录。</span>
+    </div>
+    <div id="admin-oneid-conflicts-error" class="admin-state admin-state--error" role="alert" hidden>
+      <strong>冲突列表不可用</strong>
+      <span id="admin-oneid-conflicts-error-message">请稍后重试。</span>
+    </div>
+    <div id="admin-oneid-conflicts-empty" class="admin-state" hidden>
+      <strong>暂无开放冲突</strong>
+      <span>当前没有可供查看的身份冲突。</span>
+    </div>
+    <div id="admin-oneid-conflicts-table-wrap" class="admin-table-wrap" hidden>
+      <table class="admin-table admin-oneid-table">
+        <thead>
+          <tr><th scope="col">冲突 ID</th><th scope="col">用户根</th><th scope="col">原因</th><th scope="col">状态</th><th scope="col">创建时间</th></tr>
+        </thead>
+        <tbody id="admin-oneid-conflicts-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="admin-card admin-oneid-list-card" aria-labelledby="admin-oneid-candidates-title">
+    <div class="admin-card-head admin-card-head--tight">
+      <div>
+        <h2 id="admin-oneid-candidates-title">待确认归并</h2>
+        <p id="admin-oneid-candidates-status" class="admin-muted" role="status" aria-live="polite">正在加载开放候选…</p>
+      </div>
+      <button class="admin-button admin-button--ghost" id="admin-oneid-candidates-refresh" type="button">刷新</button>
+    </div>
+    <div id="admin-oneid-candidates-loading" class="admin-state admin-state--loading" role="status">
+      <strong>正在加载</strong>
+      <span>读取服务端脱敏归并候选。</span>
+    </div>
+    <div id="admin-oneid-candidates-error" class="admin-state admin-state--error" role="alert" hidden>
+      <strong>候选列表不可用</strong>
+      <span id="admin-oneid-candidates-error-message">请稍后重试。</span>
+    </div>
+    <div id="admin-oneid-candidates-empty" class="admin-state" hidden>
+      <strong>暂无待确认归并</strong>
+      <span>当前没有开放的归并候选。</span>
+    </div>
+    <div id="admin-oneid-candidates-table-wrap" class="admin-table-wrap" hidden>
+      <table class="admin-table admin-oneid-table">
+        <thead>
+          <tr><th scope="col">候选 ID</th><th scope="col">用户根</th><th scope="col">证据强度</th><th scope="col">原因</th><th scope="col">状态</th><th scope="col">创建时间</th><th scope="col">选择 survivor</th></tr>
+        </thead>
+        <tbody id="admin-oneid-candidates-body"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<section class="admin-card admin-oneid-list-card" aria-labelledby="admin-oneid-hxc-conflicts-title">
+  <div class="admin-card-head admin-card-head--tight">
+    <div>
+      <h2 id="admin-oneid-hxc-conflicts-title">HXC 来源身份冲突</h2>
+      <p id="admin-oneid-hxc-conflicts-status" class="admin-muted" role="status" aria-live="polite">正在加载开放冲突…</p>
+    </div>
+    <button class="admin-button admin-button--ghost" id="admin-oneid-hxc-conflicts-refresh" type="button">刷新</button>
+  </div>
+  <div id="admin-oneid-hxc-conflicts-loading" class="admin-state admin-state--loading" role="status"><strong>正在加载</strong><span>只展示安全用户引用、脱敏身份和证据摘要。</span></div>
+  <div id="admin-oneid-hxc-conflicts-error" class="admin-state admin-state--error" role="alert" hidden><strong>HXC 冲突列表不可用</strong><span id="admin-oneid-hxc-conflicts-error-message">请稍后重试。</span></div>
+  <div id="admin-oneid-hxc-conflicts-empty" class="admin-state" hidden><strong>暂无开放冲突</strong><span>当前 HXC 双键没有待处理冲突。</span></div>
+  <div id="admin-oneid-hxc-conflicts-table-wrap" class="admin-table-wrap" hidden>
+    <table class="admin-table admin-oneid-table admin-oneid-source-table">
+      <thead><tr><th scope="col">安全用户引用</th><th scope="col">原因</th><th scope="col">身份观察</th><th scope="col">用户根</th><th scope="col">候选 / Case</th><th scope="col">证据摘要</th><th scope="col">状态</th><th scope="col">处理</th></tr></thead>
+      <tbody id="admin-oneid-hxc-conflicts-body"></tbody>
+    </table>
+  </div>
+</section>
+<script defer src="/static/admin_console/admin_oneid.js?v=static-mime2"></script>
+{{end}}

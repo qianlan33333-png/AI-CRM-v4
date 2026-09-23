@@ -1,0 +1,12 @@
+BEGIN READ ONLY;
+SELECT 'webhook' AS queue, provider, status, count(*) FROM webhook_inbox GROUP BY provider,status ORDER BY provider,status;
+SELECT 'effect' AS queue, adapter_name, status, count(*) FROM external_effect_job GROUP BY adapter_name,status ORDER BY adapter_name,status;
+SELECT 'consumer' AS queue,status,count(*) FROM internal_event_consumer_run GROUP BY status ORDER BY status;
+SELECT 'outbox' AS queue,status,count(*) FROM internal_event_outbox GROUP BY status ORDER BY status;
+SELECT 'attempt' AS queue,adapter_name,status,count(*) FROM external_effect_attempt GROUP BY adapter_name,status ORDER BY adapter_name,status;
+SELECT 'webhook_open' AS gate,count(*) FROM webhook_inbox WHERE status IN ('received','processing','failed_retryable');
+SELECT 'effect_open' AS gate,count(*) FROM external_effect_job WHERE status IN ('planned','approved','queued','dispatching','failed_retryable','unknown_after_dispatch');
+SELECT 'effect_unknown' AS gate,count(*) FROM external_effect_job WHERE status='unknown_after_dispatch' OR reconciliation_required;
+SELECT 'consumer_open' AS gate,count(*) FROM internal_event_consumer_run WHERE status IN ('pending','running','failed_retryable');
+SELECT 'outbox_open' AS gate,count(*) FROM internal_event_outbox WHERE status IN ('pending','running','failed_retryable');
+COMMIT;

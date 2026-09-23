@@ -1,0 +1,20 @@
+#governance-admin-root{display:grid;gap:20px;color:var(--text-primary,#172033)}
+#governance-admin-root .governance-tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border-color,#e4e7ec);padding-bottom:12px}
+#governance-admin-root [aria-current=page]{background:var(--primary-color,#2563eb);color:white}
+#governance-admin-root .governance-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:18px 0}
+#governance-admin-root .admin-panel{background:var(--bg-primary,#fff);border:1px solid var(--border-color,#e4e7ec);border-radius:8px;padding:20px}
+#governance-admin-root .governance-metrics strong{display:block;font-size:28px;margin-top:8px}
+#governance-admin-root .governance-table-wrap{overflow:auto}
+#governance-admin-root table{border-collapse:collapse;width:100%;text-align:left;font-size:13px}
+#governance-admin-root td,#governance-admin-root th{padding:12px;border-bottom:1px solid var(--border-color,#e4e7ec);vertical-align:top}
+#governance-admin-root th{font-weight:500;color:var(--text-secondary,#667085)}
+#governance-admin-root h2{font-size:16px;margin:0 0 12px}
+#governance-admin-root .governance-note,#governance-admin-root .governance-freshness,#governance-admin-root small{color:var(--text-secondary,#667085);font-size:12px;line-height:1.8}
+#governance-admin-root .governance-empty{padding:30px;color:var(--text-secondary,#667085)}
+#governance-admin-root .governance-error{padding:20px;border:1px solid #fda29b;border-radius:8px;color:#b42318}
+#governance-admin-root .governance-status{display:inline-block;padding:3px 8px;border-radius:4px;background:#f2f4f7;white-space:nowrap}
+#governance-admin-root [data-status=ok],#governance-admin-root [data-status=executed]{color:#067647;background:#ecfdf3}
+#governance-admin-root [data-status=warning],#governance-admin-root [data-status=unknown]{color:#b54708;background:#fffaeb}
+#governance-admin-root [data-status=critical],#governance-admin-root [data-status=final_failed]{color:#b42318;background:#fef3f2}
+.governance-report{white-space:pre-wrap;overflow-wrap:anywhere;padding:20px;font:14px/1.8 system-ui}
+@media(max-width:900px){#governance-admin-root .governance-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}

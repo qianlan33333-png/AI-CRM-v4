@@ -1,0 +1,33 @@
+{{define "admin_invitations"}}
+<link rel="stylesheet" href="/static/admin_console/admin_audience.css">
+<link rel="stylesheet" href="/static/admin_console/admin_invitations.css">
+<section class="aud-card" id="invitationWorkspace">
+ <nav class="aud-actions" aria-label="群邀请"><button class="aud-btn" data-tab="plans">邀请计划</button><button class="aud-btn" data-tab="directory">群聊目录</button></nav>
+ <p id="invitationNotice" role="status" aria-live="polite"></p>
+ <div id="invitationActions" class="aud-actions"><button class="aud-btn primary" id="createInvitation">新建邀请计划</button><button class="aud-btn" id="refreshDirectory">一键刷新群聊</button></div>
+ <section id="directoryPanel" hidden>
+  <p id="directoryStatus"></p><form id="directorySearch"><label>群昵称 / 群 ID <input name="q" maxlength="128"></label><button class="aud-btn">搜索</button></form>
+  <div class="aud-table-wrap"><table class="aud-table"><thead><tr><th>群昵称</th><th>群 ID</th><th>群主</th><th>当前人数</th><th>最近同步</th><th>状态</th></tr></thead><tbody id="directoryRows"></tbody></table></div>
+  <footer class="aud-pagination"><span id="directoryPage"></span><button class="aud-btn" id="directoryPrev">上一页</button><button class="aud-btn" id="directoryNext">下一页</button></footer>
+ </section>
+ <section id="plansPanel"><div class="aud-table-wrap"><table class="aud-table"><thead><tr><th>计划名称</th><th>模式 / 阈值</th><th>当前承接群 / 群 ID</th><th>人数 / 同步时间</th><th>状态</th><th>操作</th></tr></thead><tbody id="invitationRows"></tbody></table></div></section>
+ <section id="invitationEditor" hidden>
+  <h2 id="editorTitle">新建邀请计划</h2><form id="invitationForm"><h3>基本信息</h3>
+   <p><label>计划名称 <input name="name" required maxlength="100"></label></p>
+   <p><label>对外标题 <input name="title" required maxlength="60"></label></p>
+   <p><label>说明 <textarea name="description" maxlength="250"></textarea></label></p>
+   <h3>承接规则</h3><p><label>模式 <select name="mode"><option value="single">固定单群</option><option value="sequence">多群顺序轮替</option></select></label></p>
+   <p id="thresholdField" hidden><label>换群人数 <input name="threshold" type="number" min="1" max="200" step="1" placeholder="请输入 1—200 的整数"></label></p>
+   <p><label><input name="enabled" type="checkbox" checked>启用计划</label></p>
+   <p id="invitationRuleNote">按下面的顺序承接。已切出的群不会自动回流，当前承接群不能调整顺序。</p>
+   <h3>承接群聊</h3><ol id="selectedInvitationGroups"></ol>
+   <label>搜索群昵称 / 群 ID <input id="invitationGroupQuery"></label><button class="aud-btn" id="findInvitationGroup" type="button">查找群聊</button>
+   <div class="aud-table-wrap"><table class="aud-table"><thead><tr><th>群昵称</th><th>群 ID</th><th>人数</th><th>操作</th></tr></thead><tbody id="invitationGroupOptions"></tbody></table></div>
+   <p><button class="aud-btn" id="groupOptionsMore" type="button">加载更多群聊</button></p>
+   <p id="invitationFormActions"><button class="aud-btn primary" type="submit">保存计划</button><button class="aud-btn" id="cancelInvitation" type="button">取消</button></p>
+  </form>
+ </section>
+ <section id="invitationHistory" hidden><h2>切换记录</h2><div id="invitationHistoryRows"></div><button class="aud-btn" id="closeInvitationHistory">关闭</button></section>
+</section>
+<script src="/static/admin_console/admin_invitations.js" type="module"></script>
+{{end}}

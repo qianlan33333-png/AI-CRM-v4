@@ -1,0 +1,57 @@
+/*
+ * V3 component aliases. The production admin shell remains the authority for
+ * colour, panel and radius tokens; presentation.css remains the authority for
+ * type and control sizes. Keep aliases scoped to V3-owned interactive UI so
+ * frozen donor documents and authored previews retain their rendered bytes.
+ */
+[data-ui-surface="admin"],
+body[data-ui-surface="h5"][data-v3-public-survey] {
+  --v3-ui-canvas: var(--bg, #f5f6f7);
+  --v3-ui-panel: var(--panel, #fff);
+  --v3-ui-panel-soft: var(--bg-soft, #fafbfc);
+  --v3-ui-text: var(--text, #1f2329);
+  --v3-ui-muted: var(--text-2, #646a73);
+  --v3-ui-muted-soft: var(--text-3, #8f959e);
+  --v3-ui-line: var(--line, #dee0e3);
+  --v3-ui-line-strong: var(--line-strong, #c4c7cc);
+  --v3-ui-primary: var(--brand, #3370ff);
+  --v3-ui-primary-strong: var(--brand-strong, #245bdb);
+  --v3-ui-primary-soft: var(--brand-soft, #eff4ff);
+  --v3-ui-success: var(--ok, #2ea121);
+  --v3-ui-success-soft: var(--ok-bg, #ebf9ec);
+  --v3-ui-warning: var(--warn, #d9730d);
+  --v3-ui-warning-soft: var(--warn-bg, #fff6e9);
+  --v3-ui-danger: var(--danger, #d83931);
+  --v3-ui-danger-soft: var(--danger-bg, #fff5f5);
+  --v3-ui-radius-sm: var(--radius-sm, 6px);
+  --v3-ui-radius-md: var(--radius-md, 8px);
+  --v3-ui-radius-lg: var(--radius-lg, 10px);
+  --v3-ui-shadow: 0 12px 28px rgb(31 35 41 / 8%);
+}
+
+/* The embedded WeCom sidebar has its own document shell, but it consumes the
+   same V3 semantic vocabulary. Keep the aliases at the sidebar surface so no
+   administration selectors or chrome are introduced into the WebView. */
+body[data-ui-surface="sidebar"] {
+  --v3-ui-canvas: #f5f6f7;
+  --v3-ui-panel: #fff;
+  --v3-ui-panel-soft: #f8f9fb;
+  --v3-ui-text: #1f2329;
+  --v3-ui-muted: #646a73;
+  --v3-ui-muted-soft: #8f959e;
+  --v3-ui-line: #dee0e3;
+  --v3-ui-line-strong: #c4c7cc;
+  --v3-ui-primary: #3370ff;
+  --v3-ui-primary-strong: #245bdb;
+  --v3-ui-primary-soft: #eff4ff;
+  --v3-ui-success: #2ea121;
+  --v3-ui-success-soft: #ebf9ec;
+  --v3-ui-warning: #d9730d;
+  --v3-ui-warning-soft: #fff6e9;
+  --v3-ui-danger: #d83931;
+  --v3-ui-danger-soft: #fff5f5;
+  --v3-ui-radius-sm: 6px;
+  --v3-ui-radius-md: 8px;
+  --v3-ui-radius-lg: 10px;
+  --v3-ui-shadow: 0 8px 20px rgb(31 35 41 / 7%);
+}

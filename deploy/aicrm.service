@@ -1,0 +1,26 @@
+[Unit]
+Description=AI-CRM v3
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=aicrm
+Group=aicrm
+WorkingDirectory=/opt/aicrm/current
+EnvironmentFile=/etc/aicrm/aicrm.env
+EnvironmentFile=-/opt/aicrm/current/release.env
+# ExecStart owns the role so a legacy/shared EnvironmentFile cannot override
+# it and accidentally start a second API listener.
+ExecStart=/usr/bin/env AICRM_ROLE=api /opt/aicrm/current/bin/aicrm
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

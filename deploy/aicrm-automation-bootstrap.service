@@ -1,0 +1,20 @@
+[Unit]
+Description=AI-CRM v3 Automation Operations semantic defaults
+After=network-online.target postgresql.service aicrm.service aicrm-effects-worker.service
+Requires=aicrm.service
+
+[Service]
+Type=oneshot
+User=aicrm
+Group=aicrm
+WorkingDirectory=/opt/aicrm/current
+EnvironmentFile=/etc/aicrm/aicrm.env
+EnvironmentFile=-/opt/aicrm/current/release.env
+ExecStart=/opt/aicrm/current/bin/bootstrap-automation-operations
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+UMask=0027

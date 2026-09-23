@@ -1,0 +1,23 @@
+{{define "admin_placeholder"}}
+<section class="admin-card" data-shell-state="placeholder">
+  <div class="admin-card-head admin-card-head--tight">
+    <div>
+      <h2>功能待接入</h2>
+      <p>该模块页面已预留，等待对应领域 API、权限与 Journey 完成后接入。</p>
+    </div>
+    <span class="admin-chip admin-chip--neutral">v3 壳</span>
+  </div>
+  <div class="admin-state admin-state--empty">
+    <strong>暂不读取业务数据</strong>
+    <span>当前页面只提供导航与布局，不展示模拟数据、假统计或模拟成功状态。</span>
+  </div>
+  {{if .RequestPath}}
+  <p class="admin-card-copy">预留路径：<code>{{.RequestPath}}</code></p>
+  {{end}}
+  {{if eq .RequestPath "/admin/config"}}
+  <div class="admin-form-actions">
+    <a class="admin-button admin-button--secondary" href="/admin/config/login-access">员工登录权限</a>
+  </div>
+  {{end}}
+</section>
+{{end}}

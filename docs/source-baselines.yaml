@@ -1,0 +1,29 @@
+version: 1
+decided_at: "2026-09-02"
+new_repository:
+  name: AI-CRM-v3
+  intended_remote: qianlan33333-png/AI-CRM-v3
+  role: future_primary_runtime
+sources:
+  - repository: qianlan33333-png/AI-CRM-v2
+    commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+    role: read_only_behavior_frontend_and_leaf_protocol_donor
+    runtime_dependency_allowed: false
+  - repository: qianlan33333-png/AI-CRM-production
+    commit: 4af15e64fb7ebb311b52b17eaf5fc5ea5e8154c8
+    role: production_behavior_and_oneid_reference
+    runtime_dependency_allowed: false
+  - repository: qianlan33333-png/AI-CRM
+    commit: 69c5282fb38058f2cc9872b6feb3f0f54bfad64b
+    role: admin_and_sidebar_shell_reference
+    runtime_dependency_allowed: false
+  - repository: qianlan33333-png/AI-CRM-v2
+    commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+    role: transaction_behavior_tests_and_leaf_protocol_reference
+    runtime_dependency_allowed: false
+rules:
+  preserve_source_repositories: true
+  whitelist_migration_only: true
+  copy_git_history: false
+  shared_business_tables: false
+  long_lived_dual_write: false

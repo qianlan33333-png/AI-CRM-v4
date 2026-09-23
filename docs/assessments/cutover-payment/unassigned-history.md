@@ -1,0 +1,11 @@
+# Unassigned historical payment facts
+
+OneID: migration consumes existing scoped Identity Port results, never creates or infers a beneficiary from payer. Persistence: Payment Owner import uses the existing caller UoW and payment history receipts/audit/outbox. External effects: none; history records cannot bind effects or originate refunds. No new queue or identity matcher.
+
+0131 adds a Payment-owned historical marker and source status/reason. Missing historical identity values are SQL NULL. Existing native rows retain mandatory positive identity/recipient constraints. Prior imports are marked through Payment-owned history receipts only. Full histories now retain paid/failed/cancelled money facts even when unassigned; independently evidenced refund histories are not dropped. Payer-only histories retain an absent beneficiary. Empty optional metadata keeps prior manifest JSON digests stable.
+
+Four source shop `returned` records may preserve `source_status=returned` and `history_reason=refund_evidence_missing` while normalized payment stays paid. This does not fabricate refunds or entitlement events. Native authenticated GET `/api/admin/payments/history?provider=wechat_shop&merchant_order_no=...` reads the Payment Owner and exposes null customer attribution and inert source evidence. Order detail renders a concise no-refund-evidence explanation. No public identity endpoint added.
+
+Verification: PostgreSQL integration imports unassigned and payer-only records, checks actual SQL NULL, reads the new native HTTP route against the real repository, verifies absent refund before explicit evidence, imports failed refund, confirms no effect and blocks native/null downgrade. Relevant packages pass `go test -race` with DATABASE_URL=postgresql:///postgres and `go vet`. Architecture check passes. Isolated browser contract exercises actual orderAdapter request/DOM flow. Full TypeScript check requires donor bindings absent from this new worktree; run-with-donor-views fails because internal/config/http/openapi.yaml is missing, not a claimed full frontend pass.
+
+Production unchanged. 0131 must be applied in rehearsal first. Imported source metadata participates in manifest digest; an existing source row requires audited delta rather than same-key overwrite.

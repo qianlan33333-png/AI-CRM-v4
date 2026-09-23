@@ -1,0 +1,46 @@
+  :root { --aud-blue:#2563eb; --aud-line:#e4e7ec; --aud-muted:#667085; --aud-text:#101828; --aud-danger:#d92d20; }
+  .admin-page-summary { display:none; }
+  .aud-layout { display:grid; grid-template-columns:270px minmax(0,1fr); gap:16px; align-items:start; }
+  .aud-card { border:1px solid var(--aud-line); border-radius:16px; background:#fff; box-shadow:0 12px 30px rgba(16,24,40,.06); }
+  .aud-groups { position:sticky; top:18px; padding:18px; }
+  .aud-group-head,.aud-detail-head,.aud-actions,.aud-pagination { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .aud-group-head h2,.aud-detail-head h2 { margin:0; color:var(--aud-text); font-size:18px; font-weight:850; }
+  .aud-group-note { margin:6px 0 14px; color:var(--aud-muted); font-size:12px; }
+  .aud-group-list { display:grid; gap:8px; }
+  .aud-group-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; width:100%; min-height:46px; align-items:center; border:1px solid var(--aud-line); border-radius:10px; background:#fff; color:#344054; cursor:pointer; font:inherit; padding:10px 12px; text-align:left; }
+  .aud-group-item strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .aud-group-item span { color:#98a2b3; font-size:12px; }
+  .aud-group-item.active { border-color:#528bff; background:#eef4ff; color:#1849a9; }
+  .aud-detail-head { min-height:72px; padding:16px 20px; border-bottom:1px solid #eef2f6; }
+  .aud-detail-copy { display:grid; gap:4px; }
+  .aud-detail-copy p { margin:0; color:var(--aud-muted); font-size:12px; }
+  .aud-btn { min-height:36px; border:1px solid #d0d5dd; border-radius:9px; background:#fff; color:#344054; cursor:pointer; font:inherit; font-weight:800; padding:7px 12px; }
+  .aud-btn.primary { border-color:var(--aud-blue); background:var(--aud-blue); color:#fff; }
+  .aud-btn.soft { border-color:#d6e4ff; background:#f5f8ff; color:#1849a9; }
+  .aud-btn.danger { border-color:#fecdca; background:#fff1f3; color:var(--aud-danger); }
+  .aud-btn:disabled { cursor:not-allowed; opacity:.55; }
+  .aud-table-wrap { overflow:auto; }
+  .aud-table { width:100%; min-width:980px; border-collapse:collapse; }
+  .aud-table th,.aud-table td { padding:14px 16px; border-bottom:1px solid #eef2f6; text-align:left; vertical-align:middle; }
+  .aud-table th { background:#fafbfc; color:#8993a4; font-size:12px; font-weight:800; }
+  .aud-name { display:inline-flex; align-items:center; gap:9px; border:0; background:transparent; color:#1849a9; cursor:pointer; font:inherit; font-weight:850; padding:0; }
+  .aud-name-cell { display:grid; gap:7px; justify-items:start; }
+  .aud-template-tag { display:inline-flex; border:1px solid #e4e7ec; border-radius:999px; background:#f8fafc; color:#667085; font-size:11px; font-weight:800; padding:3px 8px; }
+  .aud-dot { width:9px; height:9px; border-radius:50%; background:var(--aud-blue); box-shadow:0 0 0 4px #eff6ff; }
+  .aud-dot.muted { background:#98a2b3; box-shadow:0 0 0 4px #f2f4f7; }
+  .aud-pill { display:inline-flex; border:1px solid #dbeafe; border-radius:999px; background:#eff6ff; color:#1d4ed8; font-size:12px; font-weight:800; padding:4px 9px; }
+  .aud-pill.gray { border-color:#eaecf0; background:#f2f4f7; color:#475467; }
+  .aud-strong { color:var(--aud-text); font-weight:850; }
+  .aud-empty { padding:44px 16px !important; color:var(--aud-muted); text-align:center !important; }
+  .aud-pagination { min-height:64px; padding:12px 18px; color:var(--aud-muted); font-size:13px; }
+  .aud-notice { margin:14px 18px 0; border:1px solid #d6e4ff; border-radius:9px; background:#f5f8ff; color:#1849a9; padding:9px 11px; font-weight:700; }
+  .aud-notice.error { border-color:#fecdca; background:#fff1f3; color:#b42318; }
+  .aud-modal { position:fixed; inset:0; z-index:1000; display:grid; place-items:center; background:rgba(16,24,40,.38); padding:20px; }
+  .aud-modal[hidden] { display:none; }
+  .aud-dialog { width:min(420px,100%); border-radius:16px; background:#fff; box-shadow:0 24px 70px rgba(16,24,40,.24); padding:22px; }
+  .aud-dialog h3 { margin:0 0 16px; font-size:18px; }
+  .aud-dialog input { width:100%; border:1px solid #d0d5dd; border-radius:9px; font:inherit; padding:11px 12px; }
+  .aud-dialog select { width:100%; border:1px solid #d0d5dd; border-radius:9px; background:#fff; font:inherit; padding:11px 12px; }
+  .aud-dialog .aud-group-note:not(:first-of-type) { margin-top:14px; }
+  .aud-dialog .aud-actions { margin-top:18px; justify-content:flex-end; }
+  @media(max-width:900px){ .aud-layout{grid-template-columns:1fr}.aud-groups{position:static}.aud-group-list{grid-template-columns:repeat(2,minmax(0,1fr))} }

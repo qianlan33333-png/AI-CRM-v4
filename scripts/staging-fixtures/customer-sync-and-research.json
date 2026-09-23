@@ -1,0 +1,1 @@
+{"schema":1,"fixture_id":"customer-sync-and-research-v1","synthetic":true,"customer_sync":{"run_key":"staging-fixture:customer-sync:v1","customer_id":990001,"external_identity":"staging-external-customer-001","projection_count":1},"research":{"image_id":990010,"miniprogram_id":990011,"legacy_material_id":"00000000-0000-0000-0000-000000000001","title":"预发布合成教研课卡"}}

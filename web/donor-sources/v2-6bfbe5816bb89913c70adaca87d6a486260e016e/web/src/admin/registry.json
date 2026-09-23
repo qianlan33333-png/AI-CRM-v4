@@ -1,0 +1,387 @@
+{
+  "navOrder": [
+    "automation",
+    "cycles",
+    "groupops",
+    "channels",
+    "ai",
+    "customers",
+    "funnel",
+    "questionnaires",
+    "radar",
+    "tags",
+    "orders",
+    "products",
+    "spProducts",
+    "coupons",
+    "images",
+    "mpLib",
+    "attach",
+    "agents",
+    "ownerMig",
+    "config",
+    "apidocs"
+  ],
+  "screens": [
+    {
+      "key": "customers",
+      "num": 1,
+      "title": "客户列表（一级）",
+      "label": "客户列表",
+      "level": "一级",
+      "nav": "customers",
+      "isNav": true
+    },
+    {
+      "key": "customerDetail",
+      "num": 2,
+      "title": "客户档案（二级）",
+      "label": "客户档案",
+      "level": "二级",
+      "nav": "customers",
+      "isNav": false
+    },
+    {
+      "key": "questionnaires",
+      "num": 3,
+      "title": "问卷（一级）",
+      "label": "问卷",
+      "level": "一级",
+      "nav": "questionnaires",
+      "isNav": true
+    },
+    {
+      "key": "questionnaireDetail",
+      "num": 4,
+      "title": "问卷编辑器（二级 · 独立页）",
+      "label": "问卷编辑器",
+      "level": "二级",
+      "nav": "questionnaires",
+      "isNav": false
+    },
+    {
+      "key": "channels",
+      "num": 5,
+      "title": "渠道码中心（一级）",
+      "label": "渠道码中心",
+      "level": "一级",
+      "nav": "channels",
+      "isNav": true
+    },
+    {
+      "key": "channelForm",
+      "num": 6,
+      "title": "渠道码 编辑渠道（二级）",
+      "label": "渠道码 编辑渠道",
+      "level": "二级",
+      "nav": "channels",
+      "isNav": false
+    },
+    {
+      "key": "orders",
+      "num": 7,
+      "title": "交易管理（一级）",
+      "label": "交易管理",
+      "level": "一级",
+      "nav": "orders",
+      "isNav": true
+    },
+    {
+      "key": "orderDetail",
+      "num": 0,
+      "title": "订单 详情（二级）",
+      "label": "订单 详情",
+      "level": "二级",
+      "nav": "orders",
+      "isNav": false
+    },
+    {
+      "key": "spProducts",
+      "num": 8,
+      "title": "周期商品管理（一级）",
+      "label": "周期商品管理",
+      "level": "一级",
+      "nav": "spProducts",
+      "isNav": true
+    },
+    {
+      "key": "coupons",
+      "num": 9,
+      "title": "优惠券（一级）",
+      "label": "优惠券",
+      "level": "一级",
+      "nav": "coupons",
+      "isNav": true
+    },
+    {
+      "key": "couponForm",
+      "num": 10,
+      "title": "优惠券 新建 / 编辑（二级）",
+      "label": "优惠券 新建 / 编辑",
+      "level": "二级",
+      "nav": "coupons",
+      "isNav": false
+    },
+    {
+      "key": "images",
+      "num": 11,
+      "title": "图片素材库（一级）",
+      "label": "图片素材库",
+      "level": "一级",
+      "nav": "images",
+      "isNav": true
+    },
+    {
+      "key": "agents",
+      "num": 12,
+      "title": "自动化话术（一级）",
+      "label": "自动化话术",
+      "level": "一级",
+      "nav": "agents",
+      "isNav": true
+    },
+    {
+      "key": "agentEdit",
+      "num": 13,
+      "title": "Agent / 固定话术 编辑（二级）",
+      "label": "Agent / 固定话术 编辑",
+      "level": "二级",
+      "nav": "agents",
+      "isNav": false
+    },
+    {
+      "key": "config",
+      "num": 14,
+      "title": "配置（一级）",
+      "label": "配置",
+      "level": "一级",
+      "nav": "config",
+      "isNav": true
+    },
+    {
+      "key": "configDetail",
+      "num": 15,
+      "title": "配置中心子页（二级）",
+      "label": "配置中心子页",
+      "level": "二级",
+      "nav": "config",
+      "isNav": false
+    },
+    {
+      "key": "automation",
+      "num": 16,
+      "title": "AI 自动化运营 · 人群包（一级）",
+      "label": "AI 自动化运营 · 人群包",
+      "level": "一级",
+      "nav": "automation",
+      "isNav": true
+    },
+    {
+      "key": "cycles",
+      "num": 17,
+      "title": "运营闭环（一级）",
+      "label": "运营闭环",
+      "level": "一级",
+      "nav": "cycles",
+      "isNav": true
+    },
+    {
+      "key": "groupops",
+      "num": 18,
+      "title": "群运营计划（一级）",
+      "label": "群运营计划",
+      "level": "一级",
+      "nav": "groupops",
+      "isNav": true
+    },
+    {
+      "key": "campaigns",
+      "num": 0,
+      "title": "Cloud Campaign 工作区（V2 隐藏路由）",
+      "label": "Cloud Campaign 工作区",
+      "level": "扩展",
+      "nav": "automation",
+      "isNav": false
+    },
+    {
+      "key": "ai",
+      "num": 19,
+      "title": "AI 助手 · 运营计划审阅（一级）",
+      "label": "AI 助手 · 运营计划审阅",
+      "level": "一级",
+      "nav": "ai",
+      "isNav": true
+    },
+    {
+      "key": "funnel",
+      "num": 20,
+      "title": "漏斗 / 数据看板（一级）",
+      "label": "漏斗 / 数据看板",
+      "level": "一级",
+      "nav": "funnel",
+      "isNav": true
+    },
+    {
+      "key": "radar",
+      "num": 21,
+      "title": "内容雷达（一级）",
+      "label": "内容雷达",
+      "level": "一级",
+      "nav": "radar",
+      "isNav": true
+    },
+    {
+      "key": "tags",
+      "num": 22,
+      "title": "企微标签管理（一级）",
+      "label": "企微标签管理",
+      "level": "一级",
+      "nav": "tags",
+      "isNav": true
+    },
+    {
+      "key": "products",
+      "num": 23,
+      "title": "商品管理（一级）",
+      "label": "商品管理",
+      "level": "一级",
+      "nav": "products",
+      "isNav": true
+    },
+    {
+      "key": "mpLib",
+      "num": 24,
+      "title": "小程序素材库（一级）",
+      "label": "小程序素材库",
+      "level": "一级",
+      "nav": "mpLib",
+      "isNav": true
+    },
+    {
+      "key": "attach",
+      "num": 25,
+      "title": "附件素材库（一级）",
+      "label": "附件素材库",
+      "level": "一级",
+      "nav": "attach",
+      "isNav": true
+    },
+    {
+      "key": "ownerMig",
+      "num": 26,
+      "title": "负责人迁移（一级）",
+      "label": "负责人迁移",
+      "level": "一级",
+      "nav": "ownerMig",
+      "isNav": true
+    },
+    {
+      "key": "apidocs",
+      "num": 27,
+      "title": "API 文档（一级）",
+      "label": "API 文档",
+      "level": "一级",
+      "nav": "apidocs",
+      "isNav": true
+    },
+    {
+      "key": "productForm",
+      "num": 0,
+      "title": "商品 新建 / 编辑（二级）",
+      "label": "商品 新建 / 编辑",
+      "level": "二级",
+      "nav": "products",
+      "isNav": false
+    },
+    {
+      "key": "spProductForm",
+      "num": 0,
+      "title": "周期商品 新建 / 编辑（二级）",
+      "label": "周期商品 新建 / 编辑",
+      "level": "二级",
+      "nav": "spProducts",
+      "isNav": false
+    },
+    {
+      "key": "groupopsDetail",
+      "num": 0,
+      "title": "群运营计划 · 详情（二级）",
+      "label": "群运营计划 · 详情",
+      "level": "二级",
+      "nav": "groupops",
+      "isNav": false
+    },
+    {
+      "key": "radarDetail",
+      "num": 28,
+      "title": "内容雷达 · 详情（二级）",
+      "label": "内容雷达 · 详情",
+      "level": "二级",
+      "nav": "radar",
+      "isNav": false
+    },
+    {
+      "key": "radarForm",
+      "num": 29,
+      "title": "内容雷达 · 新建 / 编辑（二级）",
+      "label": "内容雷达 · 新建 / 编辑",
+      "level": "二级",
+      "nav": "radar",
+      "isNav": false
+    },
+    {
+      "key": "aiDetail",
+      "num": 30,
+      "title": "AI 助手 · 计划详情（二级）",
+      "label": "AI 助手 · 计划详情",
+      "level": "二级",
+      "nav": "ai",
+      "isNav": false
+    },
+    {
+      "key": "audienceEdit",
+      "num": 31,
+      "title": "AI 人群包 · 编辑器（二级）",
+      "label": "AI 人群包 · 编辑器",
+      "level": "二级",
+      "nav": "automation",
+      "isNav": false
+    },
+    {
+      "key": "cyclesDetail",
+      "num": 32,
+      "title": "运营闭环 · 运行档案（二级）",
+      "label": "运营闭环 · 运行档案",
+      "level": "二级",
+      "nav": "cycles",
+      "isNav": false
+    },
+    {
+      "key": "questionnaireOps",
+      "num": 33,
+      "title": "问卷 · 运营配置（二级）",
+      "label": "问卷 · 运营配置",
+      "level": "二级",
+      "nav": "questionnaires",
+      "isNav": false
+    },
+    {
+      "key": "spProductData",
+      "num": 34,
+      "title": "周期商品 · 会员数据（二级）",
+      "label": "周期商品 · 会员数据",
+      "level": "二级",
+      "nav": "spProducts",
+      "isNav": false
+    },
+    {
+      "key": "couponData",
+      "num": 35,
+      "title": "优惠券 · 数据（二级）",
+      "label": "优惠券 · 数据",
+      "level": "二级",
+      "nav": "coupons",
+      "isNav": false
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><span>客户管理后台</span><span>/</span><span>配置及后台</span></div>
+              <div style="font-size:16px;font-weight:600;line-height:22px">负责人迁移</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center"><button onClick="{{ mig.downloadTemplate }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:13px;cursor:pointer">下载安全 CSV 模板</button></div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+            <div style="max-width:1000px;padding:12px 16px;border:1px solid #B7D3FF;border-radius:8px;background:#F5F9FF;color:#245BDB;font-size:12px;line-height:19px">
+              当前后端仅支持可审计的本地负责人迁移事务：CSV 或 XLSX 第一张工作表中逐行提供客户 ID、预期原负责人 ID、客户更新时间与目标负责人 ID。XLSX 会在浏览器严格校验固定四列后转为 CSV；此流程不会发起企微转接，也不接受欢迎语。
+            </div>
+
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden;max-width:1000px">
+              <div style="padding:12px 16px;border-bottom:1px solid #EFF0F1"><h2 style="margin:0;font-size:14px;font-weight:600">① 上传并校验 CSV / XLSX</h2></div>
+              <div style="padding:16px;display:grid;gap:10px">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <input id="ownerMigCsv" type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="font-size:13px;max-width:420px">
+                  <button onClick="{{ mig.parseCsv }}" style="height:32px;padding:0 14px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">{{ mig.savingText }}</button>
+                </div>
+                <div style="font-size:12px;color:#8F959E">仅 CSV 或 XLSX，最大 1 MiB。XLSX 只读取第一张工作表，第一行必须且只能是固定四列；解析后以 CSV 生成有过期时间、哈希与单次执行约束的服务端持久预览。</div>
+              </div>
+            </div>
+
+            <sc-if value="{{ mig.noPreview }}">
+              <div style="max-width:1000px;padding:32px;border:1px dashed #DEE0E3;border-radius:8px;background:#fff;text-align:center;color:#8F959E;font-size:13px">尚未生成迁移预览，不会发送执行请求。</div>
+            </sc-if>
+
+            <sc-if value="{{ mig.hasPreview }}">
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden;max-width:1000px">
+              <div style="padding:12px 16px;border-bottom:1px solid #EFF0F1;display:flex;justify-content:space-between;gap:12px"><h2 style="margin:0;font-size:14px;font-weight:600">② 服务端持久预览</h2><span style="font-size:12px;color:#646A73">{{ mig.status }}</span></div>
+              <div style="padding:14px 16px;display:grid;gap:12px">
+                <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">
+                  <div style="padding:10px;background:#FAFBFC;border-radius:6px"><div style="font-size:12px;color:#8F959E">可执行</div><div style="font-size:20px;font-weight:600">{{ mig.validCount }}</div></div>
+                  <div style="padding:10px;background:#FAFBFC;border-radius:6px"><div style="font-size:12px;color:#8F959E">问题行</div><div style="font-size:20px;font-weight:600">{{ mig.issueCount }}</div></div>
+                  <div style="padding:10px;background:#FAFBFC;border-radius:6px"><div style="font-size:12px;color:#8F959E">已提交结果</div><div style="font-size:20px;font-weight:600">{{ mig.resultCount }}</div></div>
+                  <div style="padding:10px;background:#FAFBFC;border-radius:6px"><div style="font-size:12px;color:#8F959E">过期时间</div><div style="font-size:12px;font-weight:500;margin-top:5px">{{ mig.expiresAt }}</div></div>
+                </div>
+                <div style="font-size:12px;color:#8F959E;font-family:ui-monospace,Menlo,monospace">preview_id: {{ mig.id }}<br>hash: {{ mig.hash }}</div>
+                <div style="overflow-x:auto">
+                  <table style="width:100%;min-width:760px;border-collapse:collapse">
+                    <thead><tr><th style="padding:9px 12px;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;font-size:12px;color:#8F959E">客户 ID</th><th style="padding:9px 12px;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;font-size:12px;color:#8F959E">预期原负责人 ID</th><th style="padding:9px 12px;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;font-size:12px;color:#8F959E">目标负责人 ID</th><th style="padding:9px 12px;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;font-size:12px;color:#8F959E">预期客户更新时间</th></tr></thead>
+                    <tbody><sc-for list="{{ mig.rows }}" as="r" hint-placeholder-count="4"><tr><td style="padding:9px 12px;border-bottom:1px solid #EFF0F1;font-size:13px">{{ r.customerId }}</td><td style="padding:9px 12px;border-bottom:1px solid #EFF0F1;font-size:13px">{{ r.fromId }}</td><td style="padding:9px 12px;border-bottom:1px solid #EFF0F1;font-size:13px">{{ r.toId }}</td><td style="padding:9px 12px;border-bottom:1px solid #EFF0F1;font-size:12px;color:#646A73">{{ r.expectedUpdatedAt }}</td></tr></sc-for></tbody>
+                  </table>
+                </div>
+                <sc-if value="{{ mig.hasIssues }}"><div><div style="font-size:13px;font-weight:600;margin-bottom:6px">问题行</div><div style="display:flex;gap:8px;flex-wrap:wrap"><sc-for list="{{ mig.issues }}" as="issue" hint-placeholder-count="2"><span style="padding:5px 8px;border-radius:4px;background:#FFF7E8;color:#D97917;font-size:12px">第 {{ issue.line }} 行 · {{ issue.code }}</span></sc-for></div></div></sc-if>
+              </div>
+            </div>
+
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden;max-width:1000px">
+              <div style="padding:12px 16px;border-bottom:1px solid #EFF0F1"><h2 style="margin:0;font-size:14px;font-weight:600">③ 二次确认与本地执行</h2></div>
+              <div style="padding:14px 16px;display:grid;gap:12px">
+                <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;color:#646A73;line-height:20px"><input type="checkbox" onChange="{{ mig.setConfirmed }}" style="width:14px;height:14px;accent-color:#3370ff;margin-top:3px">我已核对服务端预览。确认后只提交本地 CRM 负责人变更，不代表企微侧已发生任何转接。</label>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <button onClick="{{ mig.downloadErrors }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:13px;cursor:pointer">下载脱敏错误 CSV</button>
+                  <sc-if value="{{ mig.hasResults }}"><button onClick="{{ mig.downloadResults }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:13px;cursor:pointer">下载脱敏结果 CSV</button></sc-if>
+                  <button onClick="{{ mig.execute }}" style="height:30px;padding:0 12px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">执行本地迁移</button>
+                </div>
+                <sc-if value="{{ mig.hasResults }}"><div style="font-size:12px;color:#2EA121">后端已返回 {{ mig.resultCount }} 条本地提交结果。未执行企微 Provider 调用。</div></sc-if>
+              </div>
+            </div>
+            </sc-if>
+          </div>

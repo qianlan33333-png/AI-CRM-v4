@@ -1,0 +1,101 @@
+<div class="shell">
+  <header class="topbar">
+    <div class="topbar-meta-wrap">
+      <div class="topbar-copy">
+        <a id="back-link" class="back-link" href="questionnaires.html">返回问卷管理</a>
+        <div class="topbar-title-row">
+          <h1 id="topbar-title">新建问卷</h1>
+          <span id="draft-indicator" class="draft-indicator hidden">未保存修改</span>
+        </div>
+        <p id="topbar-subtitle" class="topbar-subtitle"></p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <div id="editor-secondary-actions" class="header-actions"></div>
+      <button id="reset-btn" type="button" class="btn ghost">重置当前</button>
+      <button id="save-btn" type="button" class="btn primary">保存问卷</button>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <aside class="sidebar">
+      <section class="card section-card">
+        <div class="section-head">
+          <div>
+            <h3>添加题目</h3>
+            <p class="section-subtitle">点击添加到当前问卷。</p>
+          </div>
+        </div>
+        <div id="tag-catalog-message" class="inline-alert hidden" style="margin-bottom:12px;">当前未获取到企微标签，可稍后重试</div>
+        <div class="tool-grid">
+          <button id="add-single" type="button" class="tool-card">
+            <span class="tool-mark">单</span>
+            <span><strong>单选题</strong><span>只能选一个。</span></span>
+          </button>
+          <button id="add-multi" type="button" class="tool-card">
+            <span class="tool-mark">多</span>
+            <span><strong>多选题</strong><span>可以选多个。</span></span>
+          </button>
+          <button id="add-textarea" type="button" class="tool-card">
+            <span class="tool-mark">文</span>
+            <span><strong>文本题</strong><span>开放回答。</span></span>
+          </button>
+          <button id="add-mobile" type="button" class="tool-card">
+            <span class="tool-mark">号</span>
+            <span><strong>手机号题</strong><span>收集联系方式。</span></span>
+          </button>
+          <button id="open-assessment-settings" type="button" class="tool-card">
+            <span class="tool-mark">测</span>
+            <span><strong>添加多维测评模板</strong><span>从已创建模板中整组添加。</span></span>
+          </button>
+          <button id="add-rule" type="button" class="tool-card">
+            <span class="tool-mark">规</span>
+            <span><strong>分数规则</strong><span>按总分区间打标签。</span></span>
+          </button>
+        </div>
+      </section>
+    </aside>
+
+    <main class="preview-column">
+      <section class="card phone-stage">
+        <div class="phone-frame">
+          <div class="phone-topbar"><div class="phone-notch"></div></div>
+          <div class="phone-screen">
+            <div id="preview-head" class="preview-head"></div>
+            <div id="preview-questions" class="preview-stack"></div>
+            <div id="preview-rules-wrap" class="preview-stack"></div>
+            <div class="preview-footer-note">点击预览中的题目或分数规则即可在右侧编辑。</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="inspector-column">
+      <section class="card inspector-card">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">配置区</div>
+            <h2 id="inspector-title" style="margin:8px 0 0;font-size:18px;font-weight:700;">问卷设置</h2>
+            <p id="inspector-subtitle" class="section-subtitle">编辑当前选中项的属性。</p>
+          </div>
+        </div>
+        <div id="inspector-body"></div>
+      </section>
+    </aside>
+  </div>
+
+  <div id="drawer-overlay" class="drawer-overlay hidden">
+    <div class="drawer-panel">
+      <div class="section-head">
+        <div><h3 id="drawer-title">面板</h3></div>
+        <button id="drawer-close" type="button" class="btn ghost">关闭</button>
+      </div>
+      <div id="drawer-body"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+</div>
+<div id="questionnaire-editor-config" hidden>
+  {"mode":"new","heading":"问卷编辑","backHref":"questionnaires.html","defaultAssessment":false,"initialQuestionnaire":null,"initialQuestionnaireId":null}
+</div>

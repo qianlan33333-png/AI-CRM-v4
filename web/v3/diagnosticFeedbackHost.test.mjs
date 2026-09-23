@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {JSDOM} from 'jsdom';
+const built=await build({stdin:{contents:"import {installDiagnosticFeedback} from './web/v3/diagnosticFeedbackHost'; installDiagnosticFeedback(); installDiagnosticFeedback();",resolveDir:process.cwd()},bundle:true,write:false,format:'iife',platform:'browser'});
+const dom=new JSDOM('<main class="admin-page"></main>',{url:'https://crm.test/admin/products',runScripts:'outside-only'});
+const calls=[]; const id='a'.repeat(32);
+const response={status:503,ok:false,headers:new Headers({'X-AICRM-Diagnostic-ID':id})};
+dom.window.document.cookie='aicrm_csrf=fixture';
+dom.window.fetch=async (url,init)=>{calls.push({url,init});return response;};
+dom.window.eval(built.outputFiles[0].text);
+assert.equal(await dom.window.fetch('/api/products'),response,'preserve original Response and body');
+assert.match(dom.window.document.querySelector('[data-diagnostic-feedback]').textContent,new RegExp(id));
+assert.equal(dom.window.document.querySelector('[data-diagnostic-feedback] a').href,`https://crm.test/admin/ops?correlation=${id}`);
+dom.window.document.querySelector('[data-diagnostic-feedback]').remove();
+await dom.window.fetch('https://third-party.test/api');assert.equal(dom.window.document.querySelector('[data-diagnostic-feedback]'),null,'do not inspect external requests');
+for(let i=0;i<8;i++)dom.window.dispatchEvent(new dom.window.ErrorEvent('error',{message:'private token and phone',error:new Error('secret')}));
+await new Promise(r=>setTimeout(r,0));
+const reports=calls.filter(c=>c.url==='/api/admin/ops-diagnostics/client-events');assert.equal(reports.length,4,'bounded once-per-page listener');
+for(const call of reports){assert.equal(call.init.body,JSON.stringify({code:'frontend_error'}));assert.equal(call.init.headers['X-CSRF-Token'],'fixture');assert.ok(!call.init.body.includes('private'));}
+dom.window.close();
+console.log('shared diagnostic feedback preserves response, bounds reporting and excludes private error data');

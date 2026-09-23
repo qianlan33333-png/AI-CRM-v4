@@ -1,0 +1,53 @@
+{
+  "name": "ai-crm-v2-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "AI-CRM v2 TypeScript frontend — admin console, WeCom sidebar and H5",
+  "type": "module",
+  "engines": {
+    "node": "24.18.0",
+    "npm": "11.12.1"
+  },
+  "packageManager": "npm@11.12.1",
+  "scripts": {
+    "version:check": "node -e \"const ua=process.env.npm_config_user_agent||'';if(process.version!=='v24.18.0'||!ua.startsWith('npm/11.12.1 ')){console.error('expected node v24.18.0 and npm 11.12.1');process.exit(1)}\" && test \"$(orval --version)\" = \"7.21.0\" && test \"$(prettier --version)\" = \"3.9.6\"",
+    "orval:generate": "make generate-orval",
+    "orval:check": "make orval-check",
+    "orval:contract": "scripts/test_orval_generated_check.sh",
+    "lint": "tsc -p web/tsconfig.json --noEmit",
+    "typecheck": "tsc -p web/tsconfig.json --noEmit",
+    "transport:contract": "node web/scripts/transport-contract.mjs",
+    "admin:adapter:contract": "node web/scripts/admin-adapter-contract.mjs && node web/scripts/invalid-source-history-adapter-contract.mjs",
+    "capabilities:contract": "node web/scripts/capabilities-contract.mjs",
+    "smoke": "node web/scripts/smoke.mjs",
+    "performance:check": "npm run build --silent && node web/scripts/reproducible-build.mjs && node web/scripts/performance-budget.mjs",
+    "edge:contract": "scripts/test_g2_web_edge.sh",
+    "release:contract": "scripts/test_id_dev_web_release.sh",
+    "release:validate": "node web/scripts/validate-release.mjs",
+    "deploy:check": "scripts/check_id_dev_deployment.sh",
+    "e2e": "npm run build --silent && node web/scripts/e2e.mjs && node web/scripts/profile-catalog-history-e2e.mjs && node web/scripts/hxc-history-e2e.mjs && node web/scripts/static-history-e2e.mjs && node web/scripts/customer-state-history-e2e.mjs && node web/scripts/marketing-state-history-e2e.mjs && node web/scripts/wecom-contact-history-e2e.mjs && node web/scripts/radar-marketing-history-e2e.mjs && node web/scripts/campaign-definition-history-e2e.mjs && node web/scripts/e2e_deferred_identity_history.mjs && node web/scripts/invalid-source-history-e2e.mjs && node web/scripts/audience-history-e2e.mjs && node web/scripts/automation-agents-e2e.mjs",
+    "ui:shell:contract": "node web/scripts/ui-shell-contract.mjs",
+    "test": "npm run transport:contract && npm run admin:adapter:contract && npm run capabilities:contract && npm run ui:shell:contract && npm run smoke && npm run e2e",
+    "build": "node web/scripts/build.mjs",
+    "dev": "node web/scripts/dev.mjs",
+    "audit": "npm audit --audit-level=high",
+    "ci": "npm run version:check && npm run orval:check && npm run orval:contract && npm run lint && npm run typecheck && npm test && npm run performance:check && npm run edge:contract && npm run release:contract && npm run audit"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.0",
+    "jsdom": "30.0.1",
+    "orval": "7.21.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3"
+  },
+  "overrides": {
+    "js-yaml": "4.3.1",
+    "lodash": "4.18.1"
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "0.9.12",
+    "fflate": "0.8.3",
+    "qrcode-generator": "1.5.2",
+    "read-excel-file": "9.3.10"
+  }
+}

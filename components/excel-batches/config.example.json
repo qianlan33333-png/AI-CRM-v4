@@ -1,0 +1,16 @@
+{
+  "appid": "SET_HXC_MINIPROGRAM_APPID",
+  "source": {
+    "mysql": {
+      "host": "SET_READONLY_DB_HOST",
+      "user": "SET_READONLY_USER",
+      "password": "SET_SECRET",
+      "database": "SET_HXC_DATABASE",
+      "charset": "utf8mb4"
+    },
+    "user_sql": "SELECT id AS user_id FROM new_version_users WHERE unionid=%s",
+    "lesson_opens_sql": "SELECT opened_at FROM new_version_card_open_log WHERE user_id=%s AND lesson_id=%s AND opened_at>=%s AND opened_at<=%s ORDER BY opened_at,id",
+    "case_opens_sql": "SELECT opened_at FROM new_version_card_open_log WHERE user_id=%s AND content_type='case' AND content_id=%s AND opened_at>=%s AND opened_at<=%s ORDER BY opened_at,id",
+    "coverage_sql": null
+  }
+}

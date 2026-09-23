@@ -1,0 +1,17 @@
+{
+  "name": "public-local-tracking",
+  "source_commit": "6bfbe5816bb89913c70adaca87d6a486260e016e",
+  "disposition": "donor_real",
+  "capabilities": [
+    "enabled link redirect",
+    "landing and redirect receipts",
+    "public viewer event receipts",
+    "digest idempotency"
+  ],
+  "assertions": {
+    "identity_attributed": false,
+    "real_external_call_executed": false,
+    "raw_idempotency_key_stored": false,
+    "raw_pii_stored": false
+  }
+}

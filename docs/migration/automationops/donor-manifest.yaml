@@ -1,0 +1,48 @@
+schema_version: 1
+scope: automation_operations_audience_workspace
+status: frozen_contract
+v3_base: 923d940fd23fdeb74c07d2c033224247d8a71e08
+target_branch: codex/automation-operations-v3
+
+donor:
+  repository: https://github.com/qianlan33333-png/AI-CRM-v2.git
+  commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+  read_only: true
+  runtime_dependency: false
+
+classification:
+  oneid: resolves scoped verified identities and reads canonical customers; never provisions, binds, or merges
+  persistence: local transaction, internal durable job, Provider read, and Provider write through Outbound and External Effects
+
+ownership:
+  segment: groups, packages, immutable configurations, snapshots, refreshes, binding references, staff references, and webhook receipts
+  automation: existing Agents plus policies, enrollments, runs, action snapshots, and effect bindings
+  outbound: message intent, protected provider payload, WeCom write adapter, and completion projection
+  external_effects: effect acceptance, durable attempt, generation, fence, receipt, and reconciliation
+  identity: scoped identity resolution and canonical customer roots
+
+included:
+  - automation.html and audienceEdit.html active donor journeys
+  - group and audience-package lifecycle
+  - five fixed templates and closed SegmentDefinition configuration
+  - preview, materialization, configuration versions, sender list, Agent binding, and members
+  - durable refresh and signed inbound fact behavior
+  - immutable Automation rule versions, enrollments, action ledger, and historical read facts
+
+excluded:
+  - complete donor shell, legacy.ts bootstrap, runtime database, and migration history
+  - generic workflow builder, arbitrary SQL or JSON actions, Campaign, SMS, email, and Moments
+  - implicit customer creation, identity binding, identity merge, or guessed customer ownership
+  - GroupOps table ownership or a second group-send runtime
+
+donor_gaps_completed_by_v3:
+  - donor broadcast button is blocked and creates no run
+  - donor Provider adapter is disabled and supplies no delivery proof
+  - v3 adds digest-confirmed runs, Outbound/EER execution, result projection, and reconciliation
+
+frontend:
+  exact_file_count: 19
+  archive_root: web/donors/automation-operations-v2/src
+  active_pages: [automation, audienceEdit]
+  production_rule: donor files remain byte-exact; a v3-owned adapter supplies real APIs in the single webshell
+  forbidden_runtime_inputs: [mockData, sessionStorage, donor legacy shell]

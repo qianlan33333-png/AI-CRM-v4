@@ -1,0 +1,33 @@
+schema_version: 1
+scope: survey
+status: frozen_behavior_contract
+v3_base: 2c8a1e0bf07d472f012c2117242092a95711d9a5
+
+donor:
+  repository: https://github.com/qianlan33333-png/AI-CRM-v2
+  commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+  read_only: true
+  runtime_dependency: false
+
+classification:
+  oneid: resolves identity; provisions only from provider-verified facts; reads canonical customer
+  persistence: local transaction; internal durable job; provider read; provider write through outbound and external effects
+
+rules:
+  frontend: the donor hash manifest records the 16 unchanged donor files; questionnaireEditor.ts is superseded only by the characterization-backed questionnaireEditorV3 adapter import and assessment guard removal
+  backend: reimplement behavior in the v3 survey domain; do not copy the v2 identity, queue, provider, store, or migration history
+  migration: one read-only consistent snapshot; no cutover, dual write, continuous delta, or legacy effect replay
+  sensitive_history: import business outcomes only; discard URL, request body, response body, and raw legacy user identifiers
+
+behavior_sources:
+  - internal/survey/app
+  - internal/survey/http
+  - internal/survey/port
+  - internal/survey/store/queries
+  - api/openapi.yaml
+
+discarded_sources:
+  - v2 database migration history
+  - v2 opaque identity matching and customer keys
+  - v2 survey-specific provider execution and retry state
+  - raw external-push and SCRM request or response material

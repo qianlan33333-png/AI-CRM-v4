@@ -1,0 +1,13 @@
+# SHA-256 of selected files at AI-CRM-v2@6bfbe5816bb89913c70adaca87d6a486260e016e.
+# Only the two active templates are required to remain byte-exact in v3.
+aedbe5cef6c6127304c4ce6dfa0fe905710ab3faff6753d6e4c420849abe77f4  source:web/src/admin/templates/orders.html
+cac2f2b8a72772954f105798eef8837ddbe3d462e6d7fbaf53626e4b2c86c98e  source:web/src/admin/templates/orderDetail.html
+574293ff7ab6fb0c6d1227ff879649dbc05cf454caaaec6a0fbc1d23727df9ee  source:web/src/api/admin.ts
+4a30e68aa2bf1dc224aada891bd298fef6795957470b27517fae3608cdea3914  source:web/src/api/admin.test.ts
+0ef9998232f6beefbb588e5e3cdc1c7401a63f6daf7ef1cd2f9ebc808a855ece  source:internal/order/port/port.go
+78cbd9621f183e2ecbcf592617125481b9144b929d52dfe5a8f01cf6cd67fff7  source:internal/order/app/board.go
+3eb4d355fc454db079e0eb37deaa95a33607315f5dd3a4b65e50b770a6a612d6  source:internal/order/app/board_test.go
+fda5812edb831111e51f012de286e75f42f995fe91a5bcdd6f3f50258f618c26  source:internal/order/provider/callback_test.go
+37f660ff39b986c512b742f4d38ae8a707aa78ed4e9a47ab6040f5f66c90e3fe  source:internal/order/provider/wechat_pay_test.go
+c02eb330dc924d0862b4c155f74345722179d7e60b5546f0d37ad2178cba995e  source:internal/order/provider/wechat_shop_order_test.go
+ffc9d5b0cb4083225690e77ce8a6a0d8650bd2f00fe8e5d3e83b40cdded42763  source:internal/order/provider/wechat_shop_refund_test.go

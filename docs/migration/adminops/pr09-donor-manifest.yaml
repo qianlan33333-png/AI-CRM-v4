@@ -1,0 +1,303 @@
+schema_version: 1
+pr: PR09
+scope: configuration-adminops-release-diagnostics
+status: integrated_local_config_closure
+v3_base: 29ae6045dd334eee2c695b476b3da464b7fc3a0e
+target_branch: codex/feature-adminops
+contract_audit: docs/migration/adminops/pr09-contract-audit.md
+donor_sha256_file: docs/migration/adminops/pr09-donor-sha256.txt
+
+donor:
+  repository: /tmp/aicrm-v2-audit.yN3jmr
+  commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+  read_only: true
+  runtime_dependency: false
+
+rules:
+  backend: v2 leaf behavior is adapted only to v3 module paths and local
+    ports; no v2 module, generated SQL, migration, runtime, HTTP, OpenAPI,
+    composition, deployment, CI, or Provider dependency is introduced
+  frontend: listed donor files are byte-exact snapshots under web/donors;
+    release-private generated fragments and the existing frozen admin runtime
+    are mounted only through the v3 single-shell adapter. Wording, inline CSS,
+    interaction, and generated request contracts are not rewritten
+  effects: configuration and release services record local intents/evidence
+    only; any eventual WeCom or other external write must be translated by
+    outbound and independently reconciled
+  shell: PR10 v3-owned internal/webshell/admin_base and its primary sidebar
+    remain the only production shell; Terra must mount donor business hooks
+    through a v3 adapter and must not deploy a second v2 .side navigation
+
+scope:
+  included:
+    - non-secret configuration setting keys, closed value validation, and
+      local transaction/event seams
+    - app-settings projection with masked secret configured state and audit
+      metadata, plus setup-wizard two-key CAS/readback behavior
+    - Admin Ops credential-reference, category, release-record, local-job,
+      and notification configuration mutation behavior with idempotency and
+      fail-closed secret checks
+    - read-only Admin Ops runtime/timeline observation bounding and redaction
+    - local release candidate registration, prerequisite evidence, readiness,
+      cutover journal/generation/fence state, rollback checks, and
+      reconciliation-gated lifecycle transitions
+    - exact config, setup-wizard, API-docs, release, Admin Ops-safe, and
+      health/diagnostic frontend request/template donor files
+  excluded:
+    - customer, OneID, identity repair, phone, external-user, segment,
+      audience, Campaign, questionnaire, radar, marking, unmarking,
+      enrollment, recipient selection, or recipient execution
+    - direct WeCom, Feishu, Provider, payment, backup, deployment, traffic
+      switch, credential material, token exchange, retries, or delivery claims
+    - v2 config startup schema/load aliases that mix payment, customer,
+      audience, tag, outbound, and composition concerns
+    - Store/PostgreSQL/generated SQL, migrations, historical import, workers,
+      HTTP/auth, OpenAPI, composition, deployment, CI, and dependency files
+
+backend:
+  copied_and_adapted:
+    - source: internal/config/port/port.go
+      target: internal/config/port/port.go
+      disposition: adapted
+      notes: setting, audit, projection, and local transactional event DTOs;
+        no v2 store or central events import
+    - source: internal/config/registry.go
+      target: internal/config/registry.go
+      disposition: adapted
+      notes: closed non-secret setting registry and fail-closed validators
+    - source: internal/config/registry_test.go
+      target: internal/config/registry_test.go
+      disposition: adapted
+      notes: setting canonicalization, bounds, unknown-key, and secret tests
+    - source: internal/config/app/manager.go
+      target: internal/config/app/manager.go
+      disposition: adapted
+      notes: UoW-bound setting mutation, audit idempotency, and local event
+        append; persistence is a local port
+    - source: internal/config/app/manager_test.go
+      target: internal/config/app/manager_test.go
+      disposition: adapted
+    - source: internal/config/app/settings_compat.go
+      target: internal/config/app/settings_compat.go
+      disposition: adapted
+      notes: twelve-key safe app-settings projection and masked secret DTO
+    - source: internal/config/app/settings_compat_test.go
+      target: internal/config/app/settings_compat_test.go
+      disposition: adapted
+    - source: internal/config/app/setup_wizard.go
+      target: internal/config/app/setup_wizard.go
+      disposition: adapted
+      notes: only local WeCom corp/agent settings are editable; masked
+        credentials are rejected and never persisted or echoed
+    - source: internal/config/app/setup_wizard_test.go
+      target: internal/config/app/setup_wizard_test.go
+      disposition: adapted
+    - source: internal/adminops/port/port.go
+      target: internal/adminops/port/port.go
+      disposition: adapted
+      notes: local Admin Ops DTOs, repository seam, notification row, and
+        transaction receipt without generated DB types
+    - source: internal/adminops/port/execution_runtime.go
+      target: internal/adminops/port/execution_runtime.go
+      disposition: adapted
+      notes: read-only local runtime/timeline observation seam
+    - source: internal/adminops/app/service.go
+      target: internal/adminops/app/service.go
+      disposition: adapted
+      notes: credentials/categories/releases/jobs/notification configuration
+        mutations through the local repository port; legacy order_identity_repair
+        job kind is deliberately removed
+    - source: internal/adminops/app/credential_identifier_test.go
+      target: internal/adminops/app/credential_identifier_test.go
+      disposition: adapted
+    - source: internal/adminops/app/safe_projection.go
+      target: internal/adminops/app/safe_projection.go
+      disposition: adapted
+      notes: closed category/release projection and recursive secret redaction
+    - source: internal/adminops/app/safe_projection_test.go
+      target: internal/adminops/app/safe_projection_test.go
+      disposition: adapted
+    - source: internal/adminops/app/execution_runtime.go
+      target: internal/adminops/app/execution_runtime.go
+      disposition: adapted
+      notes: bounds and redaction only; it does not read/write a Provider
+    - source: internal/adminops/app/execution_runtime_test.go
+      target: internal/adminops/app/execution_runtime_test.go
+      disposition: adapted
+    - source: internal/release/port/port.go
+      target: internal/release/port/port.go
+      disposition: adapted
+      notes: local release evidence and lifecycle contracts; campaign/contact
+        closure values are release gate labels only, not execution code
+    - source: internal/release/app/service.go
+      target: internal/release/app/service.go
+      disposition: adapted
+      notes: candidate/prerequisite/cutover/rollback state machine through a
+        v3 UoW and repository seam; no deploy or traffic-switch call
+    - source: internal/release/app/service_test.go
+      target: internal/release/app/service_test.go
+      disposition: adapted
+  added_v3_adaptation:
+    - path: internal/config/README.md
+      reason: configuration ownership, secret boundary, and Terra handoff
+    - path: internal/adminops/README.md
+      reason: Admin Ops ownership and excluded execution boundary
+    - path: internal/release/README.md
+      reason: local release evidence and no-deployment boundary
+  donor_test_evidence:
+    - source: internal/config/registry_test.go
+      run: go test ./internal/config/...
+      disposition: copied and adapted to v3 local ports
+    - source: internal/config/app/manager_test.go
+      run: go test ./internal/config/app
+      disposition: copied and adapted
+    - source: internal/config/app/settings_compat_test.go
+      run: go test ./internal/config/app
+      disposition: copied and adapted
+    - source: internal/config/app/setup_wizard_test.go
+      run: go test ./internal/config/app
+      disposition: copied and adapted
+    - source: internal/adminops/app/safe_projection_test.go
+      run: go test ./internal/adminops/app
+      disposition: copied and adapted
+    - source: internal/adminops/app/execution_runtime_test.go
+      run: go test ./internal/adminops/app
+      disposition: copied and adapted
+    - source: internal/release/app/service_test.go
+      run: go test ./internal/release/app
+      disposition: copied and adapted
+  deferred_to_terra:
+    - source: internal/config/load.go
+      reason: v2 startup aliases and archive environments require a v3-owned
+        configuration decision; current v3 platform config already owns the
+        startup composition boundary
+    - source: internal/config/schema.go
+      reason: mixed startup schema contains customer acquisition, tag,
+        outbound, audience, payment, and runtime composition fields
+    - source: internal/config/store/*
+      reason: config-owned tables, SQLC, transaction persistence, audit rows,
+        and migrations are not authorized in this donor branch
+    - source: internal/config/http/*
+      reason: authenticated route/OpenAPI/composition wiring is forbidden
+    - source: internal/adminops/store/*
+      reason: Admin Ops-owned tables, locking/CAS, generated SQL, and receipt
+        persistence require an independently reviewed v3 schema
+    - source: internal/adminops/http/*
+      reason: route/auth/OpenAPI/composition work is forbidden
+    - source: internal/release/store/*
+      reason: release-owned tables, locking/CAS, generated SQL, and durable
+        idempotency receipts require Terra's v3 schema
+    - source: internal/release/http/*
+      reason: authenticated release routes and composition registration are
+        forbidden in a donor preparation commit
+    - source: internal/platform/*
+      reason: shared platform is v3-owned and must not be modified or copied
+
+frontend:
+  byte_exact_staged_under: web/donors/adminops-v2/src
+  archive_readme: web/donors/adminops-v2/README.md
+  exact_file_count: 16
+  exact_files:
+    - web/src/admin/templates/config.html
+    - web/src/admin/templates/configDetail.html
+    - web/src/admin/templates/apidocs.html
+    - web/src/admin/sections/setupWizard.ts
+    - web/src/api/generated/health.schemas.ts
+    - web/src/api/generated/health/health.ts
+    - web/src/api/generated/p4-config-settings-compat/p4-config-settings-compat.ts
+    - web/src/api/generated/p4-api-docs-compat/p4-api-docs-compat.ts
+    - web/src/api/generated/p4-setup-wizard/p4-setup-wizard.ts
+    - web/src/api/generated/p4-adminops-safe/p4-adminops-safe.ts
+    - web/src/api/generated/p4-data-health/p4-data-health.ts
+    - web/src/api/generated/p4-legacy-health/p4-legacy-health.ts
+    - web/src/api/generated/p4-system-health/p4-system-health.ts
+    - web/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts
+    - web/src/api/generated/p4-release-plane/p4-release-plane.ts
+    - web/src/api/transport.ts
+  generated_contract_notes:
+    - p4-adminops-safe is retained byte-exact as one generated artifact; only
+      category, push-capability, release-read, and local diagnostic contract
+      operations are in scope. Broadcast, Feishu notification, archive-sync,
+      callback, message-batch, and other effect branches remain unmounted.
+    - p4-setup-wizard includes the donor's AdminAccess operations because the
+      unchanged config page exposes that adjacent control. AdminAccess HTTP,
+      internal/access changes, and route registration remain excluded.
+    - setupWizard.ts imports the donor api/transport.ts; that transport is
+      archived byte-exact so the setup-wizard module has a closed archive
+      dependency without copying the mixed v2 admin bootstrap.
+    - health.schemas.ts is a generated shared dependency and therefore retains
+      unrelated donor schema declarations byte-exact; Terra must narrow imports
+      before runtime wiring and must not expose excluded routes.
+  integration: The archive is not active web/src code. Terra/Web must select
+    the exact config/API-docs assets and mount them through a v3-owned adapter
+    into PR10 internal/webshell/admin_base and its one primary sidebar. Do not
+    copy or deploy a full v2 shell, duplicate .side markup, or edit donor bytes.
+
+terra_followups:
+  - owner: Terra/Config
+    item: decide the v3 startup/config ownership split, implement Config-owned
+      PostgreSQL tables, CAS/locking, audit/idempotency, and migration without
+      importing v2 schema or runtime aliases
+  - owner: Terra/Config
+    item: adapt the local EventAppender seam to v3 versioned event/outbox
+      persistence in the same transaction; never append secrets or setting
+      values to events
+  - owner: Terra/AdminOps
+    item: implement the Admin Ops-owned repository, generated SQL, receipts,
+      audit, and authenticated HTTP/OpenAPI routes behind the local port;
+      preserve secret-reference-only behavior
+  - owner: Terra/AdminOps
+    item: decide which local job kinds are safe to expose; keep customer,
+      identity-repair, payment, recipient, and Provider execution absent
+  - owner: Terra/Release
+    item: implement release-owned schema, locking/CAS, audit/outbox and route
+      adapters; use the service only for local attestations and reconciliation
+      evidence, never as a deploy/traffic switch executor
+  - owner: Terra/Outbound
+    item: translate any future external-effect intent through outbound and
+      independently reconcile accepted/attempted/outcome_unknown/executed
+      states; no direct WeCom or Provider path from Config/AdminOps/Release
+  - owner: Terra/Web
+    item: narrow generated imports and mount only the config, API-docs,
+      setup-wizard, release, and diagnostic donor hooks through PR10's unique
+      v3 webshell; remove unscoped AdminOps and shared health-schema branches
+      before exposing routes
+
+forbidden_touched:
+  - cmd/aicrm
+  - api/openapi.yaml
+  - migrations
+  - go.mod
+  - go.sum
+  - package.json
+  - package-lock.json
+  - pnpm-lock.yaml
+  - deploy
+  - CI
+  - internal/platform
+  - internal/access
+  - internal/webshell central routing
+
+verification:
+  frontend_file_count: 16
+  frontend_cmp: PASS
+  frontend_cmp_command: cmp frozen donor web/src/<relative-path> with
+    web/donors/adminops-v2/src/<relative-path> for every exact file
+  donor_sha256_file: docs/migration/adminops/pr09-donor-sha256.txt
+  backend_tests:
+    - go test ./internal/config/... ./internal/adminops/... ./internal/release/...
+    - go vet ./internal/config/... ./internal/adminops/... ./internal/release/...
+    - go test -race ./internal/config/... ./internal/adminops/... ./internal/release/...
+  v3_regression:
+    - go test ./...
+    - go vet ./...
+    - go test -race ./...
+  donor_tests:
+    - go test ./internal/config/... ./internal/adminops/... ./internal/release/...
+    - go test ./acceptance/adminops ./acceptance/release (isolated database URL
+      required; without it the acceptance tests safely skip)
+  donor_acceptance_result: SKIPPED safely because ADMINOPS_TEST_DATABASE_URL and
+    -release-database-url were not provided; no PostgreSQL claim is made
+  frontend_smoke: setupWizard.ts and all 11 archived generated TypeScript entries
+    resolve with exact donor api/transport.ts and health schemas using esbuild; no
+    active web build or route wiring is changed

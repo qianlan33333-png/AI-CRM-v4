@@ -1,0 +1,58 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><span>客户管理后台</span><span>/</span><span>运营</span></div>
+              <div style="font-size:16px;font-weight:600;line-height:22px">客户激活 / 客户列表</div>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:14px 16px;display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+              <label style="flex:1 1 190px;min-width:0"><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">关键词</span><input id="fCustomerKeyword" value="{{ customersPage.filters.keyword }}" placeholder="姓名、客户 ID" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%"></label>
+              <label style="flex:1 1 160px;min-width:0"><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">负责人</span><input id="fCustomerOwner" value="{{ customersPage.filters.owner }}" inputmode="numeric" placeholder="输入负责人编号" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%"></label>
+              <label style="flex:1 1 160px;min-width:0"><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">手机号</span><input id="fCustomerMobile" value="{{ customersPage.filters.mobile }}" inputmode="numeric" maxlength="11" placeholder="11位中国大陆手机号" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%"></label>
+              <label style="flex:1 1 160px;min-width:0"><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">标签</span><input id="fCustomerTag" value="{{ customersPage.filters.tag }}" inputmode="numeric" placeholder="输入标签编号" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%"></label>
+              <div style="display:flex;gap:8px;flex:none"><button onClick="{{ customersPage.query }}" style="height:32px;padding:0 14px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">查询</button><button onClick="{{ customersPage.clear }}" style="height:32px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:13px;cursor:pointer">清空</button></div>
+            </div>
+
+            <sc-if value="{{ customersPage.error }}"><div data-customer-error style="padding:12px 16px;border:1px solid #F2B8B5;border-radius:8px;color:#D83931;background:#FFF1F0;font-size:13px">{{ customersPage.error }}</div></sc-if>
+
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid #EFF0F1">
+                <div>
+                  <h2 style="margin:0;font-size:14px;font-weight:600">客户列表</h2>
+                  <p style="margin:2px 0 0;font-size:12px;color:#8F959E">每页 50 条，按当前筛选逐页加载</p>
+                </div>
+                <span style="display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:4px;background:#F2F3F5;color:#646A73;font-size:12px">{{ customersPage.totalLabel }}</span>
+              </div>
+              <table style="width:100%;border-collapse:collapse">
+                <thead><tr>
+                  <th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">客户</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">负责人</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">手机号</th>
+                  <th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:right;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">查看档案</th>
+                </tr></thead>
+                <tbody>
+                  <sc-for list="{{ rows.customers }}" as="r" hint-placeholder-count="6">
+                    <tr>
+                      <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5">
+                        <div style="font-size:13px;font-weight:500;color:#1F2329">{{ r.name }}</div>
+                        <div style="font-size:12px;color:#A6AAB0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">{{ r.id }}</div>
+                      </td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;color:#1F2329">{{ r.owner }}</td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;color:#646A73;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">{{ r.mobileText }}</td>
+                      <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;text-align:right"><a href="customerDetail.html?id={{ r.id }}" onClick="{{ r.view }}" style="font-size:13px;color:var(--accent,#3370ff);cursor:pointer">查看档案</a></td>
+                    </tr>
+                  </sc-for>
+                  <sc-if value="{{ customersPage.empty }}"><tr><td colspan="4" style="padding:32px;text-align:center;color:#8F959E;font-size:13px">当前筛选暂无客户</td></tr></sc-if>
+                </tbody>
+              </table>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-top:1px solid #EFF0F1">
+                <span style="font-size:12px;color:#8F959E">{{ customersPage.rangeLabel }}</span>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <button onClick="{{ customersPage.previous }}" style="{{ customersPage.previousStyle }}">上一页</button>
+                  <span style="font-size:12px;color:#646A73;min-width:48px;text-align:center">第 {{ customersPage.page }} 页</span>
+                  <button onClick="{{ customersPage.next }}" style="{{ customersPage.nextStyle }}">下一页</button>
+                </div>
+              </div>
+            </div>
+          </div>

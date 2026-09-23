@@ -1,0 +1,14 @@
+[Unit]
+Description=AI CRM HXC dashboard durable refresh trigger
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=aicrm
+Group=aicrm
+EnvironmentFile=/etc/aicrm/aicrm.env
+ExecStart=/usr/bin/env AICRM_ROLE=worker AICRM_HXC_SYNC_TRIGGER=scheduled /opt/aicrm/current/bin/aicrm
+
+[Install]
+WantedBy=multi-user.target

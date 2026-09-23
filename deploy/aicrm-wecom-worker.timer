@@ -1,0 +1,12 @@
+[Unit]
+Description=Run AI-CRM v3 WeCom inbox worker
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Persistent=true
+Unit=aicrm-wecom-worker.service
+
+[Install]
+WantedBy=timers.target

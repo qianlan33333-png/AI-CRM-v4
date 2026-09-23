@@ -1,0 +1,109 @@
+# SHA-256 evidence for PR06 content-package and Group Ops preparation.
+# Source hashes are from donor commit 6bfbe5816bb89913c70adaca87d6a486260e016e.
+# Every web/donors file below was verified with cmp against its source before
+# this manifest was committed. Target hashes are worktree bytes.
+# Re-run the complete donor commit, SHA-256, cmp, and archive-set check with:
+#   scripts/check-pr06-donor-manifest.sh
+
+312a9437ffb17fb41a5cb234091e6def84d9d4a933640abe591e934a1ec38ff0  source:internal/groupops/port/port.go
+4a629f7d963dc7d61622be405fc61da8a902c74232deb640a7b94f48e372b0ab  source:internal/groupops/port/dispatch.go
+30a9450135a5b00f9e36a51633989982c282344d273ff62482cfd35661ca5717  source:internal/groupops/port/runtime.go
+b8ddabfb56133bdf0a553c518ede36e6f4a3f963617adcc5e09a8ddc6dc6dc0a  source:internal/groupops/port/history.go
+2fcce4a68f527eb1b6ba41745b3a0b467c8da0d5cab9c754ec0beb5dcf0ed9c2  source:internal/groupops/app/service.go
+536fc1549bc7b4068e9bf7afa0702e427e0998a71ff8319280cbed1245ea2858  source:internal/groupops/app/service_test.go
+778a913dfaaca81269f6c65f1d005e84da8a59ae7978ca0209f31e1d10c67b4e  source:internal/groupops/app/runtime.go
+fa9ea79cf293b0704c116fbe32b774b8f9adf99b43cf1ccda490aab1be35380d  source:internal/groupops/app/history.go
+7956ac66619def5e99c53843b85bb3f99e938649057ff198618224fd18f495bf  source:internal/groupops/http/handler.go
+9d88ecaab7a57acd0e559806c090b645b4b8be30b55ae87d63707cfe3981af77  source:internal/groupops/http/runtime_handler.go
+4d7b5a0edf1adb486feed376b6ae02f6ca663a9853a6558f70f855091fb807c8  source:internal/groupops/provider/dispatch.go
+
+312a9437ffb17fb41a5cb234091e6def84d9d4a933640abe591e934a1ec38ff0  target:internal/groupops/port/port.go
+4a629f7d963dc7d61622be405fc61da8a902c74232deb640a7b94f48e372b0ab  target:internal/groupops/port/dispatch.go
+30a9450135a5b00f9e36a51633989982c282344d273ff62482cfd35661ca5717  target:internal/groupops/port/runtime.go
+b8ddabfb56133bdf0a553c518ede36e6f4a3f963617adcc5e09a8ddc6dc6dc0a  target:internal/groupops/port/history.go
+6e2fc4a9dd8f4a1c30f004a4cc106891baa552d456bfdadabce0289adfb30766  target:internal/groupops/app/service.go
+a1337ccb4516226fd0979930b708dd3145668bb3930e44daa3b00cfe758572db  target:internal/groupops/app/service_test.go
+a0701303a30a4839dae00bcad8613051d5efb02eb0dd114bc6807146b18a6a59  target:internal/groupops/domain/groupops.go
+e04e0849ccbd3a1e7de3ee623116d728ad0b552806946c967d97a34e67583c06  target:internal/groupops/domain/groupops_test.go
+fbfc1726c903168e38f2a5cc73ac598f3cf07cd673f66741dc0478993313a064  target:internal/groupops/port/events.go
+6021b275fd61655a7265ec75195b410db950aa9808bc54edcae857b6a020f693  target:internal/groupops/port/staff.go
+8f8f07c1dc0e0542fc92f59e3ca56dfa8b1e34c9b3295d78ac3c6c7a1a2a4c7e  target:internal/groupops/README.md
+
+2c0d51283902b370c431dd04124bcc2215214eac314099fa5d6001ccdb038500  source:web/src/admin/controller.ts
+61bc0ef4ff883bb243af79f989813bbe29c3109168544f32d7358a7608514161  source:web/src/admin/main.ts
+ee7a9a6629dcdaae4d9792ffcd757cee850bad796edcfb7ff68b6028206f1ed1  source:web/src/admin/nav.json
+df5f131d9b322e435a09fccdc89c4f8269f3ef03f7856ece250d412af71bb145  source:web/src/admin/registry.json
+4ccc0d8a8e3d8503306397f46beb3675af31b9b1df20cbd188f88ce3fee6e69d  source:web/src/admin/sections/groupOpsDirectory.ts
+ab8660b56691b06e6a86b1cfedc23c6bc051bb32d7ec67cf53225894d67e40c9  source:web/src/admin/sections/groupOpsHistory.ts
+8fc0eaae99d1bc658f6b7e6d88ab8f4b633e399dcc9aef2fbb448e824c233281  source:web/src/admin/sections/broadcastJobHistory.ts
+75e3f2b24bc5e031382f7e5c58ddf64578eb7708b06d30467edaf80464362621  source:web/src/admin/sections/util.ts
+6dc8da3a44d259b8da57af3f9fe89fa50c0b22c35efe85121fe7818bcdbe16b8  source:web/src/admin/templates/groupops.html
+6704fda2582ff4d32ac976efae530937cc63b9dbacee6aeca331773be261ef9e  source:web/src/admin/templates/groupopsDetail.html
+37181a469d55c60e8cd1397894f0c3aae352622c0ebf43ab9f28e67da42a5b48  source:web/src/admin/legacy.ts
+574293ff7ab6fb0c6d1227ff879649dbc05cf454caaaec6a0fbc1d23727df9ee  source:web/src/api/admin.ts
+c74d1b26a94edaeabb32cb15ddde220b3e06a1092412cd262d27afc7a708a336  source:web/src/api/broadcastJobHistory.ts
+7f1bc1d05b3e012de46b1d53ef7b56319c0bc032a1c0389fa3fd138c7218b40d  source:web/src/api/generated/health.schemas.ts
+a1ed80ea7755d082502f62170549e702a5d581482af4677e4ed9ca73873d9d16  source:web/src/api/generated/p4-ai-audience/p4-ai-audience.ts
+9577c76dbc0a15415bc3d8d8363dcf8920ead4f7165504815839a0f7522f8bc2  source:web/src/api/generated/p4-broadcast-job-history/p4-broadcast-job-history.ts
+362be88fb99d33a236ce9b288453e7d1eed8e640179c49a1cb9ddfeec6a186ca  source:web/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts
+4faa11f6f38bf687540e8bdedea10fdff0b9b16c27d078672f233f79034af89a  source:web/src/api/generated/p4-group-ops-workspaces/p4-group-ops-workspaces.ts
+b6b79b6c6cac1a742037b281ad591c2997b762dd31de1e66eaaa86635a3ab6a2  source:web/src/api/generated/p4-group-ops/p4-group-ops.ts
+fefccedea8469bd73bee675cd743a8085f313f4bcefe5964c585cdce5b1b158a  source:web/src/api/generated/p4-groupops-history/p4-groupops-history.ts
+a427a6933d0bc1114a1bf31f76cdae0aeba9b09159c670f05b29cd13b1a60b4c  source:web/src/api/groupOpsDirectory.test.ts
+1044f4857ef3f56193784b46e453a46e079f33c040a86c0cfa03b99d7001df4a  source:web/src/api/groupOpsDirectory.ts
+4a30e68aa2bf1dc224aada891bd298fef6795957470b27517fae3608cdea3914  source:web/src/api/admin.test.ts
+f1605f1983667eb72b5eacd6e57e96749a680093c77664b5ef0f95fd0a972481  source:web/src/api/capabilities.ts
+346e4b7e335acf94e3ece3d912147f33ea00dfcda23d1ddbf4b192be4e3a289d  source:web/src/api/groupOpsHistory.test.ts
+2e0b2d231f55602e0eb8008a195b3552c628c2eeaf2470dba50644a7aa42bbcf  source:web/src/api/groupOpsHistory.ts
+fc5e4b447d10487f571fdafd953cb51756274bc40b019bb51b6cdd61cfbad885  source:web/src/api/transport.ts
+2e1bfde0d36f6ab6637da66fddf6b7ee94984364a7175ad787b1da80f98695d5  source:web/src/shared/api/client.ts
+d202111695e91432879fb16a3101eae6b7f10ba53237dd493989ffd284c8264c  source:web/src/shared/api/mockData.ts
+6fea805d568cf91b7c43292128c2a2b0694cf6515d85c264e048726a270c5a20  source:web/src/shared/api/types.ts
+dda7c727bbad4844749e59095dba4c450cf864efb2caaad3f96209f24348a7bb  source:web/src/shared/ui/download.ts
+5c16cd3b057663d2b0c5d2a01416e6330ec979513c6754f1f64f6e41f364a546  source:web/src/shared/ui/feedback.ts
+690639bde2fb605024a05fe3196f2ddf8fd5b4ae87c76ef3ff5868a7adf912c0  source:web/src/shared/ui/picker.ts
+1122c0be280b1f62c1784510459471bd3ffcc6989493f103daf811900411e66a  source:web/src/shared/ui/runtime.ts
+0f9b719686a8516727ad86fa9475b10cbb059fd10003b3eb6ef041900c7ee3b0  source:web/src/shared/ui/tokens.css
+
+2c0d51283902b370c431dd04124bcc2215214eac314099fa5d6001ccdb038500  target:web/donors/groupops-v2/src/admin/controller.ts
+61bc0ef4ff883bb243af79f989813bbe29c3109168544f32d7358a7608514161  target:web/donors/groupops-v2/src/admin/main.ts
+ee7a9a6629dcdaae4d9792ffcd757cee850bad796edcfb7ff68b6028206f1ed1  target:web/donors/groupops-v2/src/admin/nav.json
+df5f131d9b322e435a09fccdc89c4f8269f3ef03f7856ece250d412af71bb145  target:web/donors/groupops-v2/src/admin/registry.json
+4ccc0d8a8e3d8503306397f46beb3675af31b9b1df20cbd188f88ce3fee6e69d  target:web/donors/groupops-v2/src/admin/sections/groupOpsDirectory.ts
+ab8660b56691b06e6a86b1cfedc23c6bc051bb32d7ec67cf53225894d67e40c9  target:web/donors/groupops-v2/src/admin/sections/groupOpsHistory.ts
+8fc0eaae99d1bc658f6b7e6d88ab8f4b633e399dcc9aef2fbb448e824c233281  target:web/donors/groupops-v2/src/admin/sections/broadcastJobHistory.ts
+75e3f2b24bc5e031382f7e5c58ddf64578eb7708b06d30467edaf80464362621  target:web/donors/groupops-v2/src/admin/sections/util.ts
+6dc8da3a44d259b8da57af3f9fe89fa50c0b22c35efe85121fe7818bcdbe16b8  target:web/donors/groupops-v2/src/admin/templates/groupops.html
+6704fda2582ff4d32ac976efae530937cc63b9dbacee6aeca331773be261ef9e  target:web/donors/groupops-v2/src/admin/templates/groupopsDetail.html
+37181a469d55c60e8cd1397894f0c3aae352622c0ebf43ab9f28e67da42a5b48  target:web/donors/groupops-v2/src/admin/legacy.ts
+574293ff7ab6fb0c6d1227ff879649dbc05cf454caaaec6a0fbc1d23727df9ee  target:web/donors/groupops-v2/src/api/admin.ts
+c74d1b26a94edaeabb32cb15ddde220b3e06a1092412cd262d27afc7a708a336  target:web/donors/groupops-v2/src/api/broadcastJobHistory.ts
+7f1bc1d05b3e012de46b1d53ef7b56319c0bc032a1c0389fa3fd138c7218b40d  target:web/donors/groupops-v2/src/api/generated/health.schemas.ts
+a1ed80ea7755d082502f62170549e702a5d581482af4677e4ed9ca73873d9d16  target:web/donors/groupops-v2/src/api/generated/p4-ai-audience/p4-ai-audience.ts
+9577c76dbc0a15415bc3d8d8363dcf8920ead4f7165504815839a0f7522f8bc2  target:web/donors/groupops-v2/src/api/generated/p4-broadcast-job-history/p4-broadcast-job-history.ts
+362be88fb99d33a236ce9b288453e7d1eed8e640179c49a1cb9ddfeec6a186ca  target:web/donors/groupops-v2/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts
+4faa11f6f38bf687540e8bdedea10fdff0b9b16c27d078672f233f79034af89a  target:web/donors/groupops-v2/src/api/generated/p4-group-ops-workspaces/p4-group-ops-workspaces.ts
+b6b79b6c6cac1a742037b281ad591c2997b762dd31de1e66eaaa86635a3ab6a2  target:web/donors/groupops-v2/src/api/generated/p4-group-ops/p4-group-ops.ts
+fefccedea8469bd73bee675cd743a8085f313f4bcefe5964c585cdce5b1b158a  target:web/donors/groupops-v2/src/api/generated/p4-groupops-history/p4-groupops-history.ts
+a427a6933d0bc1114a1bf31f76cdae0aeba9b09159c670f05b29cd13b1a60b4c  target:web/donors/groupops-v2/src/api/groupOpsDirectory.test.ts
+1044f4857ef3f56193784b46e453a46e079f33c040a86c0cfa03b99d7001df4a  target:web/donors/groupops-v2/src/api/groupOpsDirectory.ts
+4a30e68aa2bf1dc224aada891bd298fef6795957470b27517fae3608cdea3914  target:web/donors/groupops-v2/src/api/admin.test.ts
+f1605f1983667eb72b5eacd6e57e96749a680093c77664b5ef0f95fd0a972481  target:web/donors/groupops-v2/src/api/capabilities.ts
+346e4b7e335acf94e3ece3d912147f33ea00dfcda23d1ddbf4b192be4e3a289d  target:web/donors/groupops-v2/src/api/groupOpsHistory.test.ts
+2e0b2d231f55602e0eb8008a195b3552c628c2eeaf2470dba50644a7aa42bbcf  target:web/donors/groupops-v2/src/api/groupOpsHistory.ts
+fc5e4b447d10487f571fdafd953cb51756274bc40b019bb51b6cdd61cfbad885  target:web/donors/groupops-v2/src/api/transport.ts
+2e1bfde0d36f6ab6637da66fddf6b7ee94984364a7175ad787b1da80f98695d5  target:web/donors/groupops-v2/src/shared/api/client.ts
+d202111695e91432879fb16a3101eae6b7f10ba53237dd493989ffd284c8264c  target:web/donors/groupops-v2/src/shared/api/mockData.ts
+6fea805d568cf91b7c43292128c2a2b0694cf6515d85c264e048726a270c5a20  target:web/donors/groupops-v2/src/shared/api/types.ts
+dda7c727bbad4844749e59095dba4c450cf864efb2caaad3f96209f24348a7bb  target:web/donors/groupops-v2/src/shared/ui/download.ts
+5c16cd3b057663d2b0c5d2a01416e6330ec979513c6754f1f64f6e41f364a546  target:web/donors/groupops-v2/src/shared/ui/feedback.ts
+690639bde2fb605024a05fe3196f2ddf8fd5b4ae87c76ef3ff5868a7adf912c0  target:web/donors/groupops-v2/src/shared/ui/picker.ts
+1122c0be280b1f62c1784510459471bd3ffcc6989493f103daf811900411e66a  target:web/donors/groupops-v2/src/shared/ui/runtime.ts
+0f9b719686a8516727ad86fa9475b10cbb059fd10003b3eb6ef041900c7ee3b0  target:web/donors/groupops-v2/src/shared/ui/tokens.css
+f2a73f46688895307ee045773b92be794681921a5425fffe51e2762872f28441  target:web/donors/groupops-v2/README.md
+
+# Reconciliation command (source is read directly from the frozen Git object):
+# for each manifest frontend source/target pair:
+#   git -C /tmp/aicrm-v2-audit.yN3jmr show 6bfbe5816bb89913c70adaca87d6a486260e016e:<source> | cmp - <target>
+# Result: PASS for all 35 byte-exact frontend pairs, including
+# admin/sections/broadcastJobHistory.ts. No donor frontend file was edited.

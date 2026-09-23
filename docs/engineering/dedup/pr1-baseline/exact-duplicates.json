@@ -1,0 +1,3723 @@
+{
+  "baseline_commit": "05045c645f95d269b624771ceb215713e3300f59",
+  "baseline_exact_groups": [
+    {
+      "bytes_per_copy": 692834,
+      "content_sha256": "7f1bc1d05b3e012de46b1d53ef7b56319c0bc032a1c0389fa3fd138c7218b40d",
+      "excess_path_bytes": 4849838,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 8,
+      "group_id": "blob:7098901ca96c37e1bad661ac62e9592cefc8f9a0",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 5542672,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/health.schemas.ts",
+        "web/donors/automation-operations-v2/src/api/generated/health.schemas.ts",
+        "web/donors/automation-v2/src/api/generated/health.schemas.ts",
+        "web/donors/coupons-v2/src/api/generated/health.schemas.ts",
+        "web/donors/groupops-v2/src/api/generated/health.schemas.ts",
+        "web/donors/media-v2/src/api/generated/health.schemas.ts",
+        "web/donors/products-v2/src/api/generated/health.schemas.ts",
+        "web/src/api/generated/health.schemas.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 243715,
+      "content_sha256": "2c0d51283902b370c431dd04124bcc2215214eac314099fa5d6001ccdb038500",
+      "excess_path_bytes": 1462290,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:dac1d5059f9712401c31744d249567d4ab116224",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 1706005,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/controller.ts",
+        "web/donors/automation-v2/src/admin/controller.ts",
+        "web/donors/coupons-v2/src/admin/controller.ts",
+        "web/donors/groupops-v2/src/admin/controller.ts",
+        "web/donors/media-v2/src/admin/controller.ts",
+        "web/donors/products-v2/src/admin/controller.ts",
+        "web/src/admin/controller.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 197573,
+      "content_sha256": "574293ff7ab6fb0c6d1227ff879649dbc05cf454caaaec6a0fbc1d23727df9ee",
+      "excess_path_bytes": 1185438,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:a5318a1b3c4d86eaa90567aca9f499ec15da4bbc",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 1383011,
+      "paths": [
+        "web/donors/automation-operations-v2/src/api/admin.ts",
+        "web/donors/automation-v2/src/api/admin.ts",
+        "web/donors/coupons-v2/src/api/admin.ts",
+        "web/donors/groupops-v2/src/api/admin.ts",
+        "web/donors/media-v2/src/api/admin.ts",
+        "web/donors/products-v2/src/api/admin.ts",
+        "web/src/api/admin.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 476110,
+      "content_sha256": "542ae46a708d512303f4308982141edafc115d3b0b7c0b780dbf2d221a1c616a",
+      "excess_path_bytes": 476110,
+      "extensions": [
+        ".yaml"
+      ],
+      "file_count": 2,
+      "group_id": "blob:b0178344226a3ba6c836e261f1154c6b7f5fd32b",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 952220,
+      "paths": [
+        "api/openapi.yaml",
+        "internal/config/http/openapi.yaml"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 66347,
+      "content_sha256": "2e1bfde0d36f6ab6637da66fddf6b7ee94984364a7175ad787b1da80f98695d5",
+      "excess_path_bytes": 398082,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:61725c1e23fb318841576f579233d632bf27806d",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 464429,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/api/client.ts",
+        "web/donors/automation-v2/src/shared/api/client.ts",
+        "web/donors/coupons-v2/src/shared/api/client.ts",
+        "web/donors/groupops-v2/src/shared/api/client.ts",
+        "web/donors/media-v2/src/shared/api/client.ts",
+        "web/donors/products-v2/src/shared/api/client.ts",
+        "web/src/shared/api/client.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 57513,
+      "content_sha256": "d202111695e91432879fb16a3101eae6b7f10ba53237dd493989ffd284c8264c",
+      "excess_path_bytes": 345078,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:b0283eb46c8e1df874d67e361a4b79d512fc159a",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 402591,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/api/mockData.ts",
+        "web/donors/automation-v2/src/shared/api/mockData.ts",
+        "web/donors/coupons-v2/src/shared/api/mockData.ts",
+        "web/donors/groupops-v2/src/shared/api/mockData.ts",
+        "web/donors/media-v2/src/shared/api/mockData.ts",
+        "web/donors/products-v2/src/shared/api/mockData.ts",
+        "web/src/shared/api/mockData.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 82451,
+      "content_sha256": "a1ed80ea7755d082502f62170549e702a5d581482af4677e4ed9ca73873d9d16",
+      "excess_path_bytes": 164902,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 3,
+      "group_id": "blob:6c8a1a4a37bc0086cea508a8f2c6cebdfd16c9bf",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 247353,
+      "paths": [
+        "web/donors/automation-operations-v2/src/api/generated/p4-ai-audience/p4-ai-audience.ts",
+        "web/donors/groupops-v2/src/api/generated/p4-ai-audience/p4-ai-audience.ts",
+        "web/src/api/generated/p4-ai-audience/p4-ai-audience.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 25799,
+      "content_sha256": "6fea805d568cf91b7c43292128c2a2b0694cf6515d85c264e048726a270c5a20",
+      "excess_path_bytes": 154794,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:2277ed01b219ce72339d40529e09be3a3fa7f7e7",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 180593,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/api/types.ts",
+        "web/donors/automation-v2/src/shared/api/types.ts",
+        "web/donors/coupons-v2/src/shared/api/types.ts",
+        "web/donors/groupops-v2/src/shared/api/types.ts",
+        "web/donors/media-v2/src/shared/api/types.ts",
+        "web/donors/products-v2/src/shared/api/types.ts",
+        "web/src/shared/api/types.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 20811,
+      "content_sha256": "690639bde2fb605024a05fe3196f2ddf8fd5b4ae87c76ef3ff5868a7adf912c0",
+      "excess_path_bytes": 124866,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:d639694cac7a6e334f3f0add391fead428752154",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 145677,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/picker.ts",
+        "web/donors/automation-v2/src/shared/ui/picker.ts",
+        "web/donors/coupons-v2/src/shared/ui/picker.ts",
+        "web/donors/groupops-v2/src/shared/ui/picker.ts",
+        "web/donors/media-v2/src/shared/ui/picker.ts",
+        "web/donors/products-v2/src/shared/ui/picker.ts",
+        "web/src/shared/ui/picker.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 83561,
+      "content_sha256": "b6b79b6c6cac1a742037b281ad591c2997b762dd31de1e66eaaa86635a3ab6a2",
+      "excess_path_bytes": 83561,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:074be4c244f4b9d8027273ddb057296c2c4e87c9",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 167122,
+      "paths": [
+        "web/donors/groupops-v2/src/api/generated/p4-group-ops/p4-group-ops.ts",
+        "web/src/api/generated/p4-group-ops/p4-group-ops.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 66960,
+      "content_sha256": "3efc2b02a6ae0b7953da74bb89d1636f3792aeb7707e4f0e4be5627cde0fe44e",
+      "excess_path_bytes": 66960,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:92ad0641acca3cdcac1c96761a1a3eb9593d8c71",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 133920,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-adminops-safe/p4-adminops-safe.ts",
+        "web/src/api/generated/p4-adminops-safe/p4-adminops-safe.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 57585,
+      "content_sha256": "bf25e064b42132c8a882c4cfc0381c47fee46124107fcd4fa4686c57794aa2b3",
+      "excess_path_bytes": 57585,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:277574178259a23f7a25276a1a7da92dc83c97bb",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 115170,
+      "paths": [
+        "web/donors/media-v2/src/api/generated/p4-media-compat/p4-media-compat.ts",
+        "web/src/api/generated/p4-media-compat/p4-media-compat.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 8911,
+      "content_sha256": "df5f131d9b322e435a09fccdc89c4f8269f3ef03f7856ece250d412af71bb145",
+      "excess_path_bytes": 53466,
+      "extensions": [
+        ".json"
+      ],
+      "file_count": 7,
+      "group_id": "blob:fcb1db48dce7b4955d070c66c03e09fcabfa10d2",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 62377,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/registry.json",
+        "web/donors/automation-v2/src/admin/registry.json",
+        "web/donors/coupons-v2/src/admin/registry.json",
+        "web/donors/groupops-v2/src/admin/registry.json",
+        "web/donors/media-v2/src/admin/registry.json",
+        "web/donors/products-v2/src/admin/registry.json",
+        "web/src/admin/registry.json"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 7268,
+      "content_sha256": "ee7a9a6629dcdaae4d9792ffcd757cee850bad796edcfb7ff68b6028206f1ed1",
+      "excess_path_bytes": 43608,
+      "extensions": [
+        ".json"
+      ],
+      "file_count": 7,
+      "group_id": "blob:f7d3f69132a37f8d47fbedb3c7e527b7ba4cfab2",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 50876,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/nav.json",
+        "web/donors/automation-v2/src/admin/nav.json",
+        "web/donors/coupons-v2/src/admin/nav.json",
+        "web/donors/groupops-v2/src/admin/nav.json",
+        "web/donors/media-v2/src/admin/nav.json",
+        "web/donors/products-v2/src/admin/nav.json",
+        "web/src/admin/nav.json"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 6984,
+      "content_sha256": "5c16cd3b057663d2b0c5d2a01416e6330ec979513c6754f1f64f6e41f364a546",
+      "excess_path_bytes": 41904,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:a120072629e9dac6a3113910755a14e37573fd59",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 48888,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/feedback.ts",
+        "web/donors/automation-v2/src/shared/ui/feedback.ts",
+        "web/donors/coupons-v2/src/shared/ui/feedback.ts",
+        "web/donors/groupops-v2/src/shared/ui/feedback.ts",
+        "web/donors/media-v2/src/shared/ui/feedback.ts",
+        "web/donors/products-v2/src/shared/ui/feedback.ts",
+        "web/src/shared/ui/feedback.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 6711,
+      "content_sha256": "0f9b719686a8516727ad86fa9475b10cbb059fd10003b3eb6ef041900c7ee3b0",
+      "excess_path_bytes": 40266,
+      "extensions": [
+        ".css"
+      ],
+      "file_count": 7,
+      "group_id": "blob:5f90f0cfe5c42df3d4810afc6639623e62d1b613",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 46977,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/tokens.css",
+        "web/donors/automation-v2/src/shared/ui/tokens.css",
+        "web/donors/coupons-v2/src/shared/ui/tokens.css",
+        "web/donors/groupops-v2/src/shared/ui/tokens.css",
+        "web/donors/media-v2/src/shared/ui/tokens.css",
+        "web/donors/products-v2/src/shared/ui/tokens.css",
+        "web/src/shared/ui/tokens.css"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 37949,
+      "content_sha256": "30812423915cdc7d499c0f5f4da3eb85fe25643c691479e89e0c20d9f2ff3fec",
+      "excess_path_bytes": 37949,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:baa08e20721ba39b1a0c00dae7c2d59d960d2597",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 75898,
+      "paths": [
+        "web/donors/coupons-v2/src/api/generated/p4-coupon-compat/p4-coupon-compat.ts",
+        "web/src/api/generated/p4-coupon-compat/p4-coupon-compat.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 6273,
+      "content_sha256": "1122c0be280b1f62c1784510459471bd3ffcc6989493f103daf811900411e66a",
+      "excess_path_bytes": 37638,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:8d9a9e6a679170a20e8d23be04564630489227de",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 43911,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/runtime.ts",
+        "web/donors/automation-v2/src/shared/ui/runtime.ts",
+        "web/donors/coupons-v2/src/shared/ui/runtime.ts",
+        "web/donors/groupops-v2/src/shared/ui/runtime.ts",
+        "web/donors/media-v2/src/shared/ui/runtime.ts",
+        "web/donors/products-v2/src/shared/ui/runtime.ts",
+        "web/src/shared/ui/runtime.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 28527,
+      "content_sha256": "be0ad716aa442b6a3068f2d34ffe0922f2d39bd8c576a3b7993ce35fab8e9fa4",
+      "excess_path_bytes": 28527,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:a8c3bfe2cf41cc2b8d8c33bfc5c88e56f1b72bc1",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 57054,
+      "paths": [
+        "web/donors/products-v2/src/api/generated/p4-service-period-products/p4-service-period-products.ts",
+        "web/src/api/generated/p4-service-period-products/p4-service-period-products.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 28311,
+      "content_sha256": "e6256f60834715f2639434a4c06738dd9a7fb4206209043327fbb107352e7e81",
+      "excess_path_bytes": 28311,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:5e175be74a4d6d9e3adae4e6040160bb32b77a7a",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 56622,
+      "paths": [
+        "web/donors/media-v2/src/api/generated/p4-media-content-delivery/p4-media-content-delivery.ts",
+        "web/src/api/generated/p4-media-content-delivery/p4-media-content-delivery.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 26187,
+      "content_sha256": "2685d45c3ab155bfba8f51250e601ab82bd52652758f9595c14e21824149e43c",
+      "excess_path_bytes": 26187,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:17dc5b2bee725e661d2ea48186d3b6873baf088c",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 52374,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-release-plane/p4-release-plane.ts",
+        "web/src/api/generated/p4-release-plane/p4-release-plane.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 25658,
+      "content_sha256": "f2992201652a0857614e23358d588a3a39d0237274172ab21715132318e4ac03",
+      "excess_path_bytes": 25658,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:a8b77eb5dec0ca4132f8e29ac7ebf1d5e8a7e638",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 51316,
+      "paths": [
+        "web/donors/automation-v2/src/api/generated/p4-automation-agents/p4-automation-agents.ts",
+        "web/src/api/generated/p4-automation-agents/p4-automation-agents.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 22905,
+      "content_sha256": "e7d4f666f17c39b90e69e4cd698bb97cc077dbd1ac13753aa2b8d07265933877",
+      "excess_path_bytes": 22905,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:32189d2e9990677aa8592fb3898030e9c1eb64c5",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 45810,
+      "paths": [
+        "web/donors/operation-cycles-v2/src/admin/templates/cyclesDetail.html",
+        "web/src/admin/templates/cyclesDetail.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 22678,
+      "content_sha256": "db656dfbfb43be0dfafc50a6c65800736961e62f49e84d6dbf40f4cff2df787d",
+      "excess_path_bytes": 22678,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:a5cce9342b6078ed09130fdac40445ad8ebf0044",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 45356,
+      "paths": [
+        "web/donors/products-v2/src/admin/templates/productForm.html",
+        "web/src/admin/templates/productForm.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 3131,
+      "content_sha256": "fc5e4b447d10487f571fdafd953cb51756274bc40b019bb51b6cdd61cfbad885",
+      "excess_path_bytes": 21917,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 8,
+      "group_id": "blob:a96456f8c7b6cea56a9ae0dccbec16da3b3c04ef",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 25048,
+      "paths": [
+        "web/donors/adminops-v2/src/api/transport.ts",
+        "web/donors/automation-operations-v2/src/api/transport.ts",
+        "web/donors/automation-v2/src/api/transport.ts",
+        "web/donors/coupons-v2/src/api/transport.ts",
+        "web/donors/groupops-v2/src/api/transport.ts",
+        "web/donors/media-v2/src/api/transport.ts",
+        "web/donors/products-v2/src/api/transport.ts",
+        "web/src/api/transport.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 21338,
+      "content_sha256": "60eace6cc96a4c6bcd5f3990afd18f9176d361d482d202d79625f772bbfae65c",
+      "excess_path_bytes": 21338,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:37c1b898ebb48e4de0467c4dbeb24b61a09755bf",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 42676,
+      "paths": [
+        "web/donors/products-v2/src/admin/templates/spProductForm.html",
+        "web/src/admin/templates/spProductForm.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 19874,
+      "content_sha256": "87ec917ad2a980e97b28c2e60ffc6d68254f1b96e37ccaf58c3068db2c7ada57",
+      "excess_path_bytes": 19874,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:3d61d61b4668905b41b1fdd34017d3fca0d302c9",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 39748,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/templates/audienceEdit.html",
+        "web/src/admin/templates/audienceEdit.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 19805,
+      "content_sha256": "d9a1f142f9836c4a9605324c613a2b94dfe01877128a1b0af8fcd41c9e18f8c6",
+      "excess_path_bytes": 19805,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:a41a60b80215eb07f2eebc83716d7102cf3896da",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 39610,
+      "paths": [
+        "web/donors/products-v2/src/api/generated/p4-product/p4-product.ts",
+        "web/src/api/generated/p4-product/p4-product.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 19094,
+      "content_sha256": "a427a6933d0bc1114a1bf31f76cdae0aeba9b09159c670f05b29cd13b1a60b4c",
+      "excess_path_bytes": 19094,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:80bad6936579961b68bdd47fb887eabc18a807b5",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 38188,
+      "paths": [
+        "web/donors/groupops-v2/src/api/groupOpsDirectory.test.ts",
+        "web/src/api/groupOpsDirectory.test.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 18346,
+      "content_sha256": "37181a469d55c60e8cd1397894f0c3aae352622c0ebf43ab9f28e67da42a5b48",
+      "excess_path_bytes": 18346,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:64a7429cbef9f19908903bc41cf0f0b2e8f617a4",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 36692,
+      "paths": [
+        "web/donors/groupops-v2/src/admin/legacy.ts",
+        "web/src/admin/legacy.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 17943,
+      "content_sha256": "b208e938eb8ae144d9831bcb145b2cce6eac4873bfe257e40f439e2ec1e3c5e4",
+      "excess_path_bytes": 17943,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:d8464d52626a7cbf909e93012f64c9430f0521d8",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 35886,
+      "paths": [
+        "web/donors/automation-v2/src/admin/sections/automationAgents.ts",
+        "web/src/admin/sections/automationAgents.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 17005,
+      "content_sha256": "f1605f1983667eb72b5eacd6e57e96749a680093c77664b5ef0f95fd0a972481",
+      "excess_path_bytes": 17005,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:c269fc6327d3618640b82f8fbb549a3b4cc2268d",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 34010,
+      "paths": [
+        "web/donors/groupops-v2/src/api/capabilities.ts",
+        "web/src/api/capabilities.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 16973,
+      "content_sha256": "2f5618dafd74279e52caae951afe78e659dc1ee921e552d80630fb37a13307bc",
+      "excess_path_bytes": 16973,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:8d4f03f2954bd6eb7f09dfd4a76dcc1453ae3b09",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 33946,
+      "paths": [
+        "web/donors/coupons-v2/src/admin/templates/couponForm.html",
+        "web/src/admin/templates/couponForm.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 16392,
+      "content_sha256": "63b1ddcd4a49d70a9c3cd8351138b64efa07a166f3e66f7dbd09277767633a4a",
+      "excess_path_bytes": 16392,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:8575d42f5a787a68d731b2c8cb1cb65767b21c9a",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 32784,
+      "paths": [
+        "web/donors/adminops-v2/src/admin/templates/apidocs.html",
+        "web/src/admin/templates/apidocs.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 15174,
+      "content_sha256": "5b631cfb532a7e63027d58efff79a0b6fac00123ba2d40f0b82c39e8bca233e1",
+      "excess_path_bytes": 15174,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:c5f66dfebf0e422f3eb9c332b86328d5e46de6c7",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 30348,
+      "paths": [
+        "web/donors/products-v2/src/api/generated/p4-commerce-external-push/p4-commerce-external-push.ts",
+        "web/src/api/generated/p4-commerce-external-push/p4-commerce-external-push.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 12738,
+      "content_sha256": "6704fda2582ff4d32ac976efae530937cc63b9dbacee6aeca331773be261ef9e",
+      "excess_path_bytes": 12738,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:189814d80121d36ac17c1df9fe8378fffb3f185f",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 25476,
+      "paths": [
+        "web/donors/groupops-v2/src/admin/templates/groupopsDetail.html",
+        "web/src/admin/templates/groupopsDetail.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 12395,
+      "content_sha256": "6dd591f4b208483bf76b4678bff728b7e4f4737f8aa4ca2b32b847fc66001a92",
+      "excess_path_bytes": 12395,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:9841b54d798206787ee14f0bbe31bccca3cf636d",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 24790,
+      "paths": [
+        "web/donors/media-v2/src/admin/templates/mpLib.html",
+        "web/src/admin/templates/mpLib.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 11984,
+      "content_sha256": "d5fdac4633a01d2f175af83f1e9de666db8472f4cb905de7ca46de18dd0f3f80",
+      "excess_path_bytes": 11984,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:d7358bf872959f93906c115d00ee4d4f8d41ee03",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 23968,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-config-settings-compat/p4-config-settings-compat.ts",
+        "web/src/api/generated/p4-config-settings-compat/p4-config-settings-compat.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 11135,
+      "content_sha256": "744432d6d80b903b2d5084568740f3cf7955f53e65d536eb7c625e140d57011b",
+      "excess_path_bytes": 11135,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:1da4620e2978dd12a985a03d90a84445c8803495",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 22270,
+      "paths": [
+        "web/donors/media-v2/src/admin/templates/attach.html",
+        "web/src/admin/templates/attach.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 11118,
+      "content_sha256": "d1a2375afc7e0a185aacfd41677a27b966d9db62d24a47ddd1a08ce4a1b5fe55",
+      "excess_path_bytes": 11118,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:0143e5cfc32d1a7d9c5a5e94cec9ef71ba201e1c",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 22236,
+      "paths": [
+        "web/donors/coupons-v2/src/admin/templates/couponData.html",
+        "web/src/admin/templates/couponData.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 5544,
+      "content_sha256": "362be88fb99d33a236ce9b288453e7d1eed8e640179c49a1cb9ddfeec6a186ca",
+      "excess_path_bytes": 11088,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 3,
+      "group_id": "blob:a1a6f2d32f4763a3b86fa2a4bdfca2a45652297d",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 16632,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts",
+        "web/donors/groupops-v2/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts",
+        "web/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 10029,
+      "content_sha256": "55517a5a937b61f1f02d103d72cf8bfee830a4a80f545462ab77aa6ca1d3a581",
+      "excess_path_bytes": 10029,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:b61553cb14a2930b0114a7ba8c6f60710c116346",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 20058,
+      "paths": [
+        "web/donors/media-v2/src/admin/templates/images.html",
+        "web/src/admin/templates/images.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 9889,
+      "content_sha256": "fefccedea8469bd73bee675cd743a8085f313f4bcefe5964c585cdce5b1b158a",
+      "excess_path_bytes": 9889,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:bce1f3eb273adabcd70424c29aa209cbe8733fa2",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 19778,
+      "paths": [
+        "web/donors/groupops-v2/src/api/generated/p4-groupops-history/p4-groupops-history.ts",
+        "web/src/api/generated/p4-groupops-history/p4-groupops-history.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 9877,
+      "content_sha256": "7722b9115cd279ae09b3aec046a93a7a0f35f4d5ce1f211fa383bd9d40cf970b",
+      "excess_path_bytes": 9877,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:212a5902b00968857b51d9029bd0ff2cc93d0003",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 19754,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/templates/automation.html",
+        "web/src/admin/templates/automation.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 9806,
+      "content_sha256": "6606c40c0e2dce2c2b5367684cc0005cd40d2a7bf190f4bef8626974ba119435",
+      "excess_path_bytes": 9806,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:633077a24216722b04bd85c94df22107a03248e8",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 19612,
+      "paths": [
+        "web/donors/automation-v2/src/admin/templates/agentEdit.html",
+        "web/src/admin/templates/agentEdit.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 8193,
+      "content_sha256": "250168ed3f306f390644ab6843eb331f6715345980851a405ed2ec68ec3b75a4",
+      "excess_path_bytes": 8193,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:103b7d25fc8ae5ccf0a6a937ef88e579777a32b9",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 16386,
+      "paths": [
+        "web/donors/products-v2/src/admin/templates/spProducts.html",
+        "web/src/admin/templates/spProducts.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 8152,
+      "content_sha256": "8189bdb210071ab831f1fae7fb4f05cb89e2e5314de649268cb0d13f17da15fa",
+      "excess_path_bytes": 8152,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:194862231804168ee214d092ba1708fc2daa765d",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 16304,
+      "paths": [
+        "web/donors/coupons-v2/src/admin/templates/coupons.html",
+        "web/src/admin/templates/coupons.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 7803,
+      "content_sha256": "3fd57864823673de3e84f0cceb32cd17492ef060da8b8552a660bb64c7b8dc29",
+      "excess_path_bytes": 7803,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:27ce48e930aad96814f5fb65c5bd94a9e7bf2c19",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 15606,
+      "paths": [
+        "web/donors/products-v2/src/admin/templates/products.html",
+        "web/src/admin/templates/products.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 1921,
+      "content_sha256": "75e3f2b24bc5e031382f7e5c58ddf64578eb7708b06d30467edaf80464362621",
+      "excess_path_bytes": 7684,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 5,
+      "group_id": "blob:c918005832c25b74566e59e2acc3f8b7bf64f6ab",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 9605,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/sections/util.ts",
+        "web/donors/automation-v2/src/admin/sections/util.ts",
+        "web/donors/groupops-v2/src/admin/sections/util.ts",
+        "web/donors/products-v2/src/admin/sections/util.ts",
+        "web/src/admin/sections/util.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 7410,
+      "content_sha256": "ab8660b56691b06e6a86b1cfedc23c6bc051bb32d7ec67cf53225894d67e40c9",
+      "excess_path_bytes": 7410,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:534ee4869ecee5b5940ab3265ee0f81b4a4209e9",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 14820,
+      "paths": [
+        "web/donors/groupops-v2/src/admin/sections/groupOpsHistory.ts",
+        "web/src/admin/sections/groupOpsHistory.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 7359,
+      "content_sha256": "47443ffbf72dfbc1744b434e8e4f913d1c2c6f9a3bc7ec11371edb255593ccd3",
+      "excess_path_bytes": 7359,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:544457bfd728d447fad24df8ae3ecf921ab067a9",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 14718,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-setup-wizard/p4-setup-wizard.ts",
+        "web/src/api/generated/p4-setup-wizard/p4-setup-wizard.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 7279,
+      "content_sha256": "4ccc0d8a8e3d8503306397f46beb3675af31b9b1df20cbd188f88ce3fee6e69d",
+      "excess_path_bytes": 7279,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:a177f551c13acffebc83c894978ab2989d4a3a3e",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 14558,
+      "paths": [
+        "web/donors/groupops-v2/src/admin/sections/groupOpsDirectory.ts",
+        "web/src/admin/sections/groupOpsDirectory.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 7266,
+      "content_sha256": "1b6a6d05e3300e3a59fc00068daa987b4e586c57a122f726c1c9abbbc1f34eb3",
+      "excess_path_bytes": 7266,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:725994788e851656b99f5b53f3816988d0de0bf7",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 14532,
+      "paths": [
+        "web/donors/adminops-v2/src/admin/templates/config.html",
+        "web/src/admin/templates/config.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 6554,
+      "content_sha256": "6dc8da3a44d259b8da57af3f9fe89fa50c0b22c35efe85121fe7818bcdbe16b8",
+      "excess_path_bytes": 6554,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:9f2d5f879e085cc987d5e9227336fabe04069b53",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 13108,
+      "paths": [
+        "web/donors/groupops-v2/src/admin/templates/groupops.html",
+        "web/src/admin/templates/groupops.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 6274,
+      "content_sha256": "346e4b7e335acf94e3ece3d912147f33ea00dfcda23d1ddbf4b192be4e3a289d",
+      "excess_path_bytes": 6274,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:11b6b051b235711937e68be88a8c13c14ad1050f",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 12548,
+      "paths": [
+        "web/donors/groupops-v2/src/api/groupOpsHistory.test.ts",
+        "web/src/api/groupOpsHistory.test.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 5612,
+      "content_sha256": "b302e46a388250485694557c65db0406abef0d68370f6f4069726fb6dc51763f",
+      "excess_path_bytes": 5612,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:1eb472a32f679eb330700fa87210638b1e2c54a0",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 11224,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-data-health/p4-data-health.ts",
+        "web/src/api/generated/p4-data-health/p4-data-health.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 5486,
+      "content_sha256": "e2d6324f84d81d4da7c254a35a40c560a5c157a63dc0a1beb9f79a5bd767f707",
+      "excess_path_bytes": 5486,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:d7b140d2038498ea490cebe715c19c78ad8dfef6",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 10972,
+      "paths": [
+        "web/donors/automation-v2/src/admin/templates/agents.html",
+        "web/src/admin/templates/agents.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 5229,
+      "content_sha256": "8fc0eaae99d1bc658f6b7e6d88ab8f4b633e399dcc9aef2fbb448e824c233281",
+      "excess_path_bytes": 5229,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:37060682f4619dc06d7d77d774a1ab4a483a5a10",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 10458,
+      "paths": [
+        "web/donors/groupops-v2/src/admin/sections/broadcastJobHistory.ts",
+        "web/src/admin/sections/broadcastJobHistory.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 4942,
+      "content_sha256": "4903070814159e3ddd703aa649dd2be9428b6829fcc4164918359fe4ad1b70e6",
+      "excess_path_bytes": 4942,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:5ab8251a8b7744a5f43559bf31d274683328adfb",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 9884,
+      "paths": [
+        "web/donors/adminops-v2/src/admin/sections/setupWizard.ts",
+        "web/src/admin/sections/setupWizard.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 4890,
+      "content_sha256": "c74d1b26a94edaeabb32cb15ddde220b3e06a1092412cd262d27afc7a708a336",
+      "excess_path_bytes": 4890,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:d33f63c9ab77e340ac364ce44571cc0698647dd1",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 9780,
+      "paths": [
+        "web/donors/groupops-v2/src/api/broadcastJobHistory.ts",
+        "web/src/api/broadcastJobHistory.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 4452,
+      "content_sha256": "9577c76dbc0a15415bc3d8d8363dcf8920ead4f7165504815839a0f7522f8bc2",
+      "excess_path_bytes": 4452,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:0697225ba62f5a935e48d93965142e46fac16dfd",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 8904,
+      "paths": [
+        "web/donors/groupops-v2/src/api/generated/p4-broadcast-job-history/p4-broadcast-job-history.ts",
+        "web/src/api/generated/p4-broadcast-job-history/p4-broadcast-job-history.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 4382,
+      "content_sha256": "235dcf711ce9965a6862fa5f0b9cc0d967f2fc25c13cd5a19d17ec40e446df14",
+      "excess_path_bytes": 4382,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:517748c20202bf34776d92ea5f12b13d11f94a51",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 8764,
+      "paths": [
+        "web/donors/adminops-v2/src/admin/templates/configDetail.html",
+        "web/src/admin/templates/configDetail.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 714,
+      "content_sha256": "61bc0ef4ff883bb243af79f989813bbe29c3109168544f32d7358a7608514161",
+      "excess_path_bytes": 4284,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:04d9a2411070aa7f52157740dd7abb794ddb1294",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 4998,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/main.ts",
+        "web/donors/automation-v2/src/admin/main.ts",
+        "web/donors/coupons-v2/src/admin/main.ts",
+        "web/donors/groupops-v2/src/admin/main.ts",
+        "web/donors/media-v2/src/admin/main.ts",
+        "web/donors/products-v2/src/admin/main.ts",
+        "web/src/admin/main.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 4081,
+      "content_sha256": "19a1fbbdaaca0a6c3b0fbdb2f75c496d0e2c3192ff5d29af34b650a1cdd6bc5c",
+      "excess_path_bytes": 4081,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:32cd5700f40d3826c514d21c457cd67fd07da644",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 8162,
+      "paths": [
+        "web/donors/operation-cycles-v2/src/admin/templates/cycles.html",
+        "web/src/admin/templates/cycles.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 632,
+      "content_sha256": "dda7c727bbad4844749e59095dba4c450cf864efb2caaad3f96209f24348a7bb",
+      "excess_path_bytes": 3792,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:2e5caf6b09509379a4075829b1c99d57d7a5f49c",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 4424,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/download.ts",
+        "web/donors/automation-v2/src/shared/ui/download.ts",
+        "web/donors/coupons-v2/src/shared/ui/download.ts",
+        "web/donors/groupops-v2/src/shared/ui/download.ts",
+        "web/donors/media-v2/src/shared/ui/download.ts",
+        "web/donors/products-v2/src/shared/ui/download.ts",
+        "web/src/shared/ui/download.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 3614,
+      "content_sha256": "4faa11f6f38bf687540e8bdedea10fdff0b9b16c27d078672f233f79034af89a",
+      "excess_path_bytes": 3614,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:f06746a81471e3efdaf42c3e8faf6b254dc753a0",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 7228,
+      "paths": [
+        "web/donors/groupops-v2/src/api/generated/p4-group-ops-workspaces/p4-group-ops-workspaces.ts",
+        "web/src/api/generated/p4-group-ops-workspaces/p4-group-ops-workspaces.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 3513,
+      "content_sha256": "8fca747b7a749c1122c15de15c6f53c8abf8dde4d69ad944c2d5734301c6d7cc",
+      "excess_path_bytes": 3513,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:9025d2103463efeea028203691559a18f85ea009",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 7026,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-api-docs-compat/p4-api-docs-compat.ts",
+        "web/src/api/generated/p4-api-docs-compat/p4-api-docs-compat.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 3470,
+      "content_sha256": "2e0b2d231f55602e0eb8008a195b3552c628c2eeaf2470dba50644a7aa42bbcf",
+      "excess_path_bytes": 3470,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:b12a69ee7376bdf81392dc35564159d921cd074e",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 6940,
+      "paths": [
+        "web/donors/groupops-v2/src/api/groupOpsHistory.ts",
+        "web/src/api/groupOpsHistory.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 2581,
+      "content_sha256": "1044f4857ef3f56193784b46e453a46e079f33c040a86c0cfa03b99d7001df4a",
+      "excess_path_bytes": 2581,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:cdb156ca4c5b78b1a4b40c9e1ce9ab7abbc4dbbd",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 5162,
+      "paths": [
+        "web/donors/groupops-v2/src/api/groupOpsDirectory.ts",
+        "web/src/api/groupOpsDirectory.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 2127,
+      "content_sha256": "ba469f1b3988ab18258303e48a1758609bc19376f10694c1185abefc73899483",
+      "excess_path_bytes": 2127,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:73d37a7b76e7a7aee57e17c511bc248d6d608d93",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 4254,
+      "paths": [
+        "web/donors/products-v2/src/admin/sections/qr.ts",
+        "web/src/admin/sections/qr.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 1761,
+      "content_sha256": "03aeeaf9b8e9e9d74dd8488835b01926e1cca7cb7ebb53f3988f3ceaed231c18",
+      "excess_path_bytes": 1761,
+      "extensions": [
+        ".css"
+      ],
+      "file_count": 2,
+      "group_id": "blob:11ea859fb340aad3f706ec53f63003d1ec3e5df9",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 3522,
+      "paths": [
+        "internal/webshell/static/admin_console/send_content_readonly_detail.css",
+        "web/donors/ai-assistant-production/static/send_content_readonly_detail.css"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 1535,
+      "content_sha256": "d1827f386c993e929ac37ad5bcdda68aa8bb5fa948e634435418341b1869f182",
+      "excess_path_bytes": 1535,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:ef15f26b801c48f965585fd4301543729de43cea",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 3070,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-legacy-health/p4-legacy-health.ts",
+        "web/src/api/generated/p4-legacy-health/p4-legacy-health.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 1486,
+      "content_sha256": "00ab5702d1f2d3aed9440010ac5642669634be822726036e95892a155f7b31cd",
+      "excess_path_bytes": 1486,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:53f75dbfc39f17a7e805c628f91330a21c297671",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 2972,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-system-health/p4-system-health.ts",
+        "web/src/api/generated/p4-system-health/p4-system-health.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 1139,
+      "content_sha256": "f86374997bbd6b16e660906222a1b0d5793ce28f30b3eed696eb484611692b04",
+      "excess_path_bytes": 1139,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:b80d77098b5724de7eca5d4bffc8e330a19c4278",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 2278,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/health/health.ts",
+        "web/src/api/generated/health/health.ts"
+      ],
+      "review_status": "unreviewed"
+    }
+  ],
+  "schema_version": 1,
+  "seed_metrics": {
+    "confirmed_groups": 39,
+    "confirmed_paths": 149,
+    "excess_path_bytes": 9021554,
+    "extra_paths": 110,
+    "path_bytes": 10639849,
+    "unique_payload_bytes": 1618295,
+    "unique_payloads": 39
+  },
+  "seed_validation": [
+    {
+      "baseline_observed_paths": [
+        "web/donors/adminops-v2/src/api/generated/health.schemas.ts",
+        "web/donors/automation-operations-v2/src/api/generated/health.schemas.ts",
+        "web/donors/automation-v2/src/api/generated/health.schemas.ts",
+        "web/donors/coupons-v2/src/api/generated/health.schemas.ts",
+        "web/donors/groupops-v2/src/api/generated/health.schemas.ts",
+        "web/donors/media-v2/src/api/generated/health.schemas.ts",
+        "web/donors/products-v2/src/api/generated/health.schemas.ts",
+        "web/src/api/generated/health.schemas.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "7098901ca96c37e1bad661ac62e9592cefc8f9a0",
+      "expected_bytes_per_copy": 692834,
+      "expected_paths": [
+        "web/donors/adminops-v2/src/api/generated/health.schemas.ts",
+        "web/donors/automation-operations-v2/src/api/generated/health.schemas.ts",
+        "web/donors/automation-v2/src/api/generated/health.schemas.ts",
+        "web/donors/coupons-v2/src/api/generated/health.schemas.ts",
+        "web/donors/groupops-v2/src/api/generated/health.schemas.ts",
+        "web/donors/media-v2/src/api/generated/health.schemas.ts",
+        "web/donors/products-v2/src/api/generated/health.schemas.ts",
+        "web/src/api/generated/health.schemas.ts"
+      ],
+      "seed_group_id": "DUP-001",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/admin/controller.ts",
+        "web/donors/automation-v2/src/admin/controller.ts",
+        "web/donors/coupons-v2/src/admin/controller.ts",
+        "web/donors/groupops-v2/src/admin/controller.ts",
+        "web/donors/media-v2/src/admin/controller.ts",
+        "web/donors/products-v2/src/admin/controller.ts",
+        "web/src/admin/controller.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "dac1d5059f9712401c31744d249567d4ab116224",
+      "expected_bytes_per_copy": 243715,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/admin/controller.ts",
+        "web/donors/automation-v2/src/admin/controller.ts",
+        "web/donors/coupons-v2/src/admin/controller.ts",
+        "web/donors/groupops-v2/src/admin/controller.ts",
+        "web/donors/media-v2/src/admin/controller.ts",
+        "web/donors/products-v2/src/admin/controller.ts",
+        "web/src/admin/controller.ts"
+      ],
+      "seed_group_id": "DUP-002",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/api/admin.ts",
+        "web/donors/automation-v2/src/api/admin.ts",
+        "web/donors/coupons-v2/src/api/admin.ts",
+        "web/donors/groupops-v2/src/api/admin.ts",
+        "web/donors/media-v2/src/api/admin.ts",
+        "web/donors/products-v2/src/api/admin.ts",
+        "web/src/api/admin.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "a5318a1b3c4d86eaa90567aca9f499ec15da4bbc",
+      "expected_bytes_per_copy": 197573,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/api/admin.ts",
+        "web/donors/automation-v2/src/api/admin.ts",
+        "web/donors/coupons-v2/src/api/admin.ts",
+        "web/donors/groupops-v2/src/api/admin.ts",
+        "web/donors/media-v2/src/api/admin.ts",
+        "web/donors/products-v2/src/api/admin.ts",
+        "web/src/api/admin.ts"
+      ],
+      "seed_group_id": "DUP-003",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/admin/main.ts",
+        "web/donors/automation-v2/src/admin/main.ts",
+        "web/donors/coupons-v2/src/admin/main.ts",
+        "web/donors/groupops-v2/src/admin/main.ts",
+        "web/donors/media-v2/src/admin/main.ts",
+        "web/donors/products-v2/src/admin/main.ts",
+        "web/src/admin/main.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "04d9a2411070aa7f52157740dd7abb794ddb1294",
+      "expected_bytes_per_copy": 714,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/admin/main.ts",
+        "web/donors/automation-v2/src/admin/main.ts",
+        "web/donors/coupons-v2/src/admin/main.ts",
+        "web/donors/groupops-v2/src/admin/main.ts",
+        "web/donors/media-v2/src/admin/main.ts",
+        "web/donors/products-v2/src/admin/main.ts",
+        "web/src/admin/main.ts"
+      ],
+      "seed_group_id": "DUP-004",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/admin/nav.json",
+        "web/donors/automation-v2/src/admin/nav.json",
+        "web/donors/coupons-v2/src/admin/nav.json",
+        "web/donors/groupops-v2/src/admin/nav.json",
+        "web/donors/media-v2/src/admin/nav.json",
+        "web/donors/products-v2/src/admin/nav.json",
+        "web/src/admin/nav.json"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "f7d3f69132a37f8d47fbedb3c7e527b7ba4cfab2",
+      "expected_bytes_per_copy": 7268,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/admin/nav.json",
+        "web/donors/automation-v2/src/admin/nav.json",
+        "web/donors/coupons-v2/src/admin/nav.json",
+        "web/donors/groupops-v2/src/admin/nav.json",
+        "web/donors/media-v2/src/admin/nav.json",
+        "web/donors/products-v2/src/admin/nav.json",
+        "web/src/admin/nav.json"
+      ],
+      "seed_group_id": "DUP-005",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/admin/registry.json",
+        "web/donors/automation-v2/src/admin/registry.json",
+        "web/donors/coupons-v2/src/admin/registry.json",
+        "web/donors/groupops-v2/src/admin/registry.json",
+        "web/donors/media-v2/src/admin/registry.json",
+        "web/donors/products-v2/src/admin/registry.json",
+        "web/src/admin/registry.json"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "fcb1db48dce7b4955d070c66c03e09fcabfa10d2",
+      "expected_bytes_per_copy": 8911,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/admin/registry.json",
+        "web/donors/automation-v2/src/admin/registry.json",
+        "web/donors/coupons-v2/src/admin/registry.json",
+        "web/donors/groupops-v2/src/admin/registry.json",
+        "web/donors/media-v2/src/admin/registry.json",
+        "web/donors/products-v2/src/admin/registry.json",
+        "web/src/admin/registry.json"
+      ],
+      "seed_group_id": "DUP-006",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/shared/api/client.ts",
+        "web/donors/automation-v2/src/shared/api/client.ts",
+        "web/donors/coupons-v2/src/shared/api/client.ts",
+        "web/donors/groupops-v2/src/shared/api/client.ts",
+        "web/donors/media-v2/src/shared/api/client.ts",
+        "web/donors/products-v2/src/shared/api/client.ts",
+        "web/src/shared/api/client.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "61725c1e23fb318841576f579233d632bf27806d",
+      "expected_bytes_per_copy": 66347,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/shared/api/client.ts",
+        "web/donors/automation-v2/src/shared/api/client.ts",
+        "web/donors/coupons-v2/src/shared/api/client.ts",
+        "web/donors/groupops-v2/src/shared/api/client.ts",
+        "web/donors/media-v2/src/shared/api/client.ts",
+        "web/donors/products-v2/src/shared/api/client.ts",
+        "web/src/shared/api/client.ts"
+      ],
+      "seed_group_id": "DUP-007",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/shared/api/mockData.ts",
+        "web/donors/automation-v2/src/shared/api/mockData.ts",
+        "web/donors/coupons-v2/src/shared/api/mockData.ts",
+        "web/donors/groupops-v2/src/shared/api/mockData.ts",
+        "web/donors/media-v2/src/shared/api/mockData.ts",
+        "web/donors/products-v2/src/shared/api/mockData.ts",
+        "web/src/shared/api/mockData.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "b0283eb46c8e1df874d67e361a4b79d512fc159a",
+      "expected_bytes_per_copy": 57513,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/shared/api/mockData.ts",
+        "web/donors/automation-v2/src/shared/api/mockData.ts",
+        "web/donors/coupons-v2/src/shared/api/mockData.ts",
+        "web/donors/groupops-v2/src/shared/api/mockData.ts",
+        "web/donors/media-v2/src/shared/api/mockData.ts",
+        "web/donors/products-v2/src/shared/api/mockData.ts",
+        "web/src/shared/api/mockData.ts"
+      ],
+      "seed_group_id": "DUP-008",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/shared/api/types.ts",
+        "web/donors/automation-v2/src/shared/api/types.ts",
+        "web/donors/coupons-v2/src/shared/api/types.ts",
+        "web/donors/groupops-v2/src/shared/api/types.ts",
+        "web/donors/media-v2/src/shared/api/types.ts",
+        "web/donors/products-v2/src/shared/api/types.ts",
+        "web/src/shared/api/types.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "2277ed01b219ce72339d40529e09be3a3fa7f7e7",
+      "expected_bytes_per_copy": 25799,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/shared/api/types.ts",
+        "web/donors/automation-v2/src/shared/api/types.ts",
+        "web/donors/coupons-v2/src/shared/api/types.ts",
+        "web/donors/groupops-v2/src/shared/api/types.ts",
+        "web/donors/media-v2/src/shared/api/types.ts",
+        "web/donors/products-v2/src/shared/api/types.ts",
+        "web/src/shared/api/types.ts"
+      ],
+      "seed_group_id": "DUP-009",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/download.ts",
+        "web/donors/automation-v2/src/shared/ui/download.ts",
+        "web/donors/coupons-v2/src/shared/ui/download.ts",
+        "web/donors/groupops-v2/src/shared/ui/download.ts",
+        "web/donors/media-v2/src/shared/ui/download.ts",
+        "web/donors/products-v2/src/shared/ui/download.ts",
+        "web/src/shared/ui/download.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "2e5caf6b09509379a4075829b1c99d57d7a5f49c",
+      "expected_bytes_per_copy": 632,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/download.ts",
+        "web/donors/automation-v2/src/shared/ui/download.ts",
+        "web/donors/coupons-v2/src/shared/ui/download.ts",
+        "web/donors/groupops-v2/src/shared/ui/download.ts",
+        "web/donors/media-v2/src/shared/ui/download.ts",
+        "web/donors/products-v2/src/shared/ui/download.ts",
+        "web/src/shared/ui/download.ts"
+      ],
+      "seed_group_id": "DUP-010",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/feedback.ts",
+        "web/donors/automation-v2/src/shared/ui/feedback.ts",
+        "web/donors/coupons-v2/src/shared/ui/feedback.ts",
+        "web/donors/groupops-v2/src/shared/ui/feedback.ts",
+        "web/donors/media-v2/src/shared/ui/feedback.ts",
+        "web/donors/products-v2/src/shared/ui/feedback.ts",
+        "web/src/shared/ui/feedback.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "a120072629e9dac6a3113910755a14e37573fd59",
+      "expected_bytes_per_copy": 6984,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/feedback.ts",
+        "web/donors/automation-v2/src/shared/ui/feedback.ts",
+        "web/donors/coupons-v2/src/shared/ui/feedback.ts",
+        "web/donors/groupops-v2/src/shared/ui/feedback.ts",
+        "web/donors/media-v2/src/shared/ui/feedback.ts",
+        "web/donors/products-v2/src/shared/ui/feedback.ts",
+        "web/src/shared/ui/feedback.ts"
+      ],
+      "seed_group_id": "DUP-011",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/picker.ts",
+        "web/donors/automation-v2/src/shared/ui/picker.ts",
+        "web/donors/coupons-v2/src/shared/ui/picker.ts",
+        "web/donors/groupops-v2/src/shared/ui/picker.ts",
+        "web/donors/media-v2/src/shared/ui/picker.ts",
+        "web/donors/products-v2/src/shared/ui/picker.ts",
+        "web/src/shared/ui/picker.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "d639694cac7a6e334f3f0add391fead428752154",
+      "expected_bytes_per_copy": 20811,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/picker.ts",
+        "web/donors/automation-v2/src/shared/ui/picker.ts",
+        "web/donors/coupons-v2/src/shared/ui/picker.ts",
+        "web/donors/groupops-v2/src/shared/ui/picker.ts",
+        "web/donors/media-v2/src/shared/ui/picker.ts",
+        "web/donors/products-v2/src/shared/ui/picker.ts",
+        "web/src/shared/ui/picker.ts"
+      ],
+      "seed_group_id": "DUP-012",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/runtime.ts",
+        "web/donors/automation-v2/src/shared/ui/runtime.ts",
+        "web/donors/coupons-v2/src/shared/ui/runtime.ts",
+        "web/donors/groupops-v2/src/shared/ui/runtime.ts",
+        "web/donors/media-v2/src/shared/ui/runtime.ts",
+        "web/donors/products-v2/src/shared/ui/runtime.ts",
+        "web/src/shared/ui/runtime.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "8d9a9e6a679170a20e8d23be04564630489227de",
+      "expected_bytes_per_copy": 6273,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/runtime.ts",
+        "web/donors/automation-v2/src/shared/ui/runtime.ts",
+        "web/donors/coupons-v2/src/shared/ui/runtime.ts",
+        "web/donors/groupops-v2/src/shared/ui/runtime.ts",
+        "web/donors/media-v2/src/shared/ui/runtime.ts",
+        "web/donors/products-v2/src/shared/ui/runtime.ts",
+        "web/src/shared/ui/runtime.ts"
+      ],
+      "seed_group_id": "DUP-013",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/tokens.css",
+        "web/donors/automation-v2/src/shared/ui/tokens.css",
+        "web/donors/coupons-v2/src/shared/ui/tokens.css",
+        "web/donors/groupops-v2/src/shared/ui/tokens.css",
+        "web/donors/media-v2/src/shared/ui/tokens.css",
+        "web/donors/products-v2/src/shared/ui/tokens.css",
+        "web/src/shared/ui/tokens.css"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "5f90f0cfe5c42df3d4810afc6639623e62d1b613",
+      "expected_bytes_per_copy": 6711,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/tokens.css",
+        "web/donors/automation-v2/src/shared/ui/tokens.css",
+        "web/donors/coupons-v2/src/shared/ui/tokens.css",
+        "web/donors/groupops-v2/src/shared/ui/tokens.css",
+        "web/donors/media-v2/src/shared/ui/tokens.css",
+        "web/donors/products-v2/src/shared/ui/tokens.css",
+        "web/src/shared/ui/tokens.css"
+      ],
+      "seed_group_id": "DUP-014",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/products-v2/src/admin/templates/productForm.html",
+        "web/src/admin/templates/productForm.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "a5cce9342b6078ed09130fdac40445ad8ebf0044",
+      "expected_bytes_per_copy": 22678,
+      "expected_paths": [
+        "web/donors/products-v2/src/admin/templates/productForm.html",
+        "web/src/admin/templates/productForm.html"
+      ],
+      "seed_group_id": "DUP-015",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/products-v2/src/admin/templates/products.html",
+        "web/src/admin/templates/products.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "27ce48e930aad96814f5fb65c5bd94a9e7bf2c19",
+      "expected_bytes_per_copy": 7803,
+      "expected_paths": [
+        "web/donors/products-v2/src/admin/templates/products.html",
+        "web/src/admin/templates/products.html"
+      ],
+      "seed_group_id": "DUP-016",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/products-v2/src/admin/templates/spProductForm.html",
+        "web/src/admin/templates/spProductForm.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "37c1b898ebb48e4de0467c4dbeb24b61a09755bf",
+      "expected_bytes_per_copy": 21338,
+      "expected_paths": [
+        "web/donors/products-v2/src/admin/templates/spProductForm.html",
+        "web/src/admin/templates/spProductForm.html"
+      ],
+      "seed_group_id": "DUP-017",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/products-v2/src/admin/templates/spProducts.html",
+        "web/src/admin/templates/spProducts.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "103b7d25fc8ae5ccf0a6a937ef88e579777a32b9",
+      "expected_bytes_per_copy": 8193,
+      "expected_paths": [
+        "web/donors/products-v2/src/admin/templates/spProducts.html",
+        "web/src/admin/templates/spProducts.html"
+      ],
+      "seed_group_id": "DUP-018",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/coupons-v2/src/admin/templates/couponData.html",
+        "web/src/admin/templates/couponData.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "0143e5cfc32d1a7d9c5a5e94cec9ef71ba201e1c",
+      "expected_bytes_per_copy": 11118,
+      "expected_paths": [
+        "web/donors/coupons-v2/src/admin/templates/couponData.html",
+        "web/src/admin/templates/couponData.html"
+      ],
+      "seed_group_id": "DUP-019",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/coupons-v2/src/admin/templates/couponForm.html",
+        "web/src/admin/templates/couponForm.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "8d4f03f2954bd6eb7f09dfd4a76dcc1453ae3b09",
+      "expected_bytes_per_copy": 16973,
+      "expected_paths": [
+        "web/donors/coupons-v2/src/admin/templates/couponForm.html",
+        "web/src/admin/templates/couponForm.html"
+      ],
+      "seed_group_id": "DUP-020",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/coupons-v2/src/admin/templates/coupons.html",
+        "web/src/admin/templates/coupons.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "194862231804168ee214d092ba1708fc2daa765d",
+      "expected_bytes_per_copy": 8152,
+      "expected_paths": [
+        "web/donors/coupons-v2/src/admin/templates/coupons.html",
+        "web/src/admin/templates/coupons.html"
+      ],
+      "seed_group_id": "DUP-021",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/media-v2/src/admin/templates/attach.html",
+        "web/src/admin/templates/attach.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "1da4620e2978dd12a985a03d90a84445c8803495",
+      "expected_bytes_per_copy": 11135,
+      "expected_paths": [
+        "web/donors/media-v2/src/admin/templates/attach.html",
+        "web/src/admin/templates/attach.html"
+      ],
+      "seed_group_id": "DUP-022",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/media-v2/src/admin/templates/images.html",
+        "web/src/admin/templates/images.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "b61553cb14a2930b0114a7ba8c6f60710c116346",
+      "expected_bytes_per_copy": 10029,
+      "expected_paths": [
+        "web/donors/media-v2/src/admin/templates/images.html",
+        "web/src/admin/templates/images.html"
+      ],
+      "seed_group_id": "DUP-023",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/media-v2/src/admin/templates/mpLib.html",
+        "web/src/admin/templates/mpLib.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "9841b54d798206787ee14f0bbe31bccca3cf636d",
+      "expected_bytes_per_copy": 12395,
+      "expected_paths": [
+        "web/donors/media-v2/src/admin/templates/mpLib.html",
+        "web/src/admin/templates/mpLib.html"
+      ],
+      "seed_group_id": "DUP-024",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-v2/src/admin/templates/agentEdit.html",
+        "web/src/admin/templates/agentEdit.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "633077a24216722b04bd85c94df22107a03248e8",
+      "expected_bytes_per_copy": 9806,
+      "expected_paths": [
+        "web/donors/automation-v2/src/admin/templates/agentEdit.html",
+        "web/src/admin/templates/agentEdit.html"
+      ],
+      "seed_group_id": "DUP-025",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-v2/src/admin/templates/agents.html",
+        "web/src/admin/templates/agents.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "d7b140d2038498ea490cebe715c19c78ad8dfef6",
+      "expected_bytes_per_copy": 5486,
+      "expected_paths": [
+        "web/donors/automation-v2/src/admin/templates/agents.html",
+        "web/src/admin/templates/agents.html"
+      ],
+      "seed_group_id": "DUP-026",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/admin/templates/audienceEdit.html",
+        "web/src/admin/templates/audienceEdit.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "3d61d61b4668905b41b1fdd34017d3fca0d302c9",
+      "expected_bytes_per_copy": 19874,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/admin/templates/audienceEdit.html",
+        "web/src/admin/templates/audienceEdit.html"
+      ],
+      "seed_group_id": "DUP-027",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/automation-operations-v2/src/admin/templates/automation.html",
+        "web/src/admin/templates/automation.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "212a5902b00968857b51d9029bd0ff2cc93d0003",
+      "expected_bytes_per_copy": 9877,
+      "expected_paths": [
+        "web/donors/automation-operations-v2/src/admin/templates/automation.html",
+        "web/src/admin/templates/automation.html"
+      ],
+      "seed_group_id": "DUP-028",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/groupops-v2/src/admin/templates/groupops.html",
+        "web/src/admin/templates/groupops.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "9f2d5f879e085cc987d5e9227336fabe04069b53",
+      "expected_bytes_per_copy": 6554,
+      "expected_paths": [
+        "web/donors/groupops-v2/src/admin/templates/groupops.html",
+        "web/src/admin/templates/groupops.html"
+      ],
+      "seed_group_id": "DUP-029",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/groupops-v2/src/admin/templates/groupopsDetail.html",
+        "web/src/admin/templates/groupopsDetail.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "189814d80121d36ac17c1df9fe8378fffb3f185f",
+      "expected_bytes_per_copy": 12738,
+      "expected_paths": [
+        "web/donors/groupops-v2/src/admin/templates/groupopsDetail.html",
+        "web/src/admin/templates/groupopsDetail.html"
+      ],
+      "seed_group_id": "DUP-030",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/operation-cycles-v2/src/admin/templates/cycles.html",
+        "web/src/admin/templates/cycles.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "32cd5700f40d3826c514d21c457cd67fd07da644",
+      "expected_bytes_per_copy": 4081,
+      "expected_paths": [
+        "web/donors/operation-cycles-v2/src/admin/templates/cycles.html",
+        "web/src/admin/templates/cycles.html"
+      ],
+      "seed_group_id": "DUP-031",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/operation-cycles-v2/src/admin/templates/cyclesDetail.html",
+        "web/src/admin/templates/cyclesDetail.html"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "32189d2e9990677aa8592fb3898030e9c1eb64c5",
+      "expected_bytes_per_copy": 22905,
+      "expected_paths": [
+        "web/donors/operation-cycles-v2/src/admin/templates/cyclesDetail.html",
+        "web/src/admin/templates/cyclesDetail.html"
+      ],
+      "seed_group_id": "DUP-032",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "internal/webshell/static/admin_console/send_content_readonly_detail.css",
+        "web/donors/ai-assistant-production/static/send_content_readonly_detail.css"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "11ea859fb340aad3f706ec53f63003d1ec3e5df9",
+      "expected_bytes_per_copy": 1761,
+      "expected_paths": [
+        "internal/webshell/static/admin_console/send_content_readonly_detail.css",
+        "web/donors/ai-assistant-production/static/send_content_readonly_detail.css"
+      ],
+      "seed_group_id": "DUP-033",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/groupops-v2/src/api/broadcastJobHistory.ts",
+        "web/src/api/broadcastJobHistory.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "d33f63c9ab77e340ac364ce44571cc0698647dd1",
+      "expected_bytes_per_copy": 4890,
+      "expected_paths": [
+        "web/donors/groupops-v2/src/api/broadcastJobHistory.ts",
+        "web/src/api/broadcastJobHistory.ts"
+      ],
+      "seed_group_id": "DUP-034",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/groupops-v2/src/api/capabilities.ts",
+        "web/src/api/capabilities.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "c269fc6327d3618640b82f8fbb549a3b4cc2268d",
+      "expected_bytes_per_copy": 17005,
+      "expected_paths": [
+        "web/donors/groupops-v2/src/api/capabilities.ts",
+        "web/src/api/capabilities.ts"
+      ],
+      "seed_group_id": "DUP-035",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/groupops-v2/src/api/groupOpsDirectory.test.ts",
+        "web/src/api/groupOpsDirectory.test.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "80bad6936579961b68bdd47fb887eabc18a807b5",
+      "expected_bytes_per_copy": 19094,
+      "expected_paths": [
+        "web/donors/groupops-v2/src/api/groupOpsDirectory.test.ts",
+        "web/src/api/groupOpsDirectory.test.ts"
+      ],
+      "seed_group_id": "DUP-036",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/groupops-v2/src/api/groupOpsDirectory.ts",
+        "web/src/api/groupOpsDirectory.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "cdb156ca4c5b78b1a4b40c9e1ce9ab7abbc4dbbd",
+      "expected_bytes_per_copy": 2581,
+      "expected_paths": [
+        "web/donors/groupops-v2/src/api/groupOpsDirectory.ts",
+        "web/src/api/groupOpsDirectory.ts"
+      ],
+      "seed_group_id": "DUP-037",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/groupops-v2/src/api/groupOpsHistory.test.ts",
+        "web/src/api/groupOpsHistory.test.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "11b6b051b235711937e68be88a8c13c14ad1050f",
+      "expected_bytes_per_copy": 6274,
+      "expected_paths": [
+        "web/donors/groupops-v2/src/api/groupOpsHistory.test.ts",
+        "web/src/api/groupOpsHistory.test.ts"
+      ],
+      "seed_group_id": "DUP-038",
+      "target_status": "still_exact_same_paths"
+    },
+    {
+      "baseline_observed_paths": [
+        "web/donors/groupops-v2/src/api/groupOpsHistory.ts",
+        "web/src/api/groupOpsHistory.ts"
+      ],
+      "baseline_status": "verified_exact",
+      "blob_id": "b12a69ee7376bdf81392dc35564159d921cd074e",
+      "expected_bytes_per_copy": 3470,
+      "expected_paths": [
+        "web/donors/groupops-v2/src/api/groupOpsHistory.ts",
+        "web/src/api/groupOpsHistory.ts"
+      ],
+      "seed_group_id": "DUP-039",
+      "target_status": "still_exact_same_paths"
+    }
+  ],
+  "target_commit": "5291366b9742030957f48ebf7464a040a3ab46db",
+  "target_exact_groups": [
+    {
+      "bytes_per_copy": 692834,
+      "content_sha256": "7f1bc1d05b3e012de46b1d53ef7b56319c0bc032a1c0389fa3fd138c7218b40d",
+      "excess_path_bytes": 4849838,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 8,
+      "group_id": "blob:7098901ca96c37e1bad661ac62e9592cefc8f9a0",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 5542672,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/health.schemas.ts",
+        "web/donors/automation-operations-v2/src/api/generated/health.schemas.ts",
+        "web/donors/automation-v2/src/api/generated/health.schemas.ts",
+        "web/donors/coupons-v2/src/api/generated/health.schemas.ts",
+        "web/donors/groupops-v2/src/api/generated/health.schemas.ts",
+        "web/donors/media-v2/src/api/generated/health.schemas.ts",
+        "web/donors/products-v2/src/api/generated/health.schemas.ts",
+        "web/src/api/generated/health.schemas.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 243715,
+      "content_sha256": "2c0d51283902b370c431dd04124bcc2215214eac314099fa5d6001ccdb038500",
+      "excess_path_bytes": 1462290,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:dac1d5059f9712401c31744d249567d4ab116224",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 1706005,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/controller.ts",
+        "web/donors/automation-v2/src/admin/controller.ts",
+        "web/donors/coupons-v2/src/admin/controller.ts",
+        "web/donors/groupops-v2/src/admin/controller.ts",
+        "web/donors/media-v2/src/admin/controller.ts",
+        "web/donors/products-v2/src/admin/controller.ts",
+        "web/src/admin/controller.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 197573,
+      "content_sha256": "574293ff7ab6fb0c6d1227ff879649dbc05cf454caaaec6a0fbc1d23727df9ee",
+      "excess_path_bytes": 1185438,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:a5318a1b3c4d86eaa90567aca9f499ec15da4bbc",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 1383011,
+      "paths": [
+        "web/donors/automation-operations-v2/src/api/admin.ts",
+        "web/donors/automation-v2/src/api/admin.ts",
+        "web/donors/coupons-v2/src/api/admin.ts",
+        "web/donors/groupops-v2/src/api/admin.ts",
+        "web/donors/media-v2/src/api/admin.ts",
+        "web/donors/products-v2/src/api/admin.ts",
+        "web/src/api/admin.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 476110,
+      "content_sha256": "542ae46a708d512303f4308982141edafc115d3b0b7c0b780dbf2d221a1c616a",
+      "excess_path_bytes": 476110,
+      "extensions": [
+        ".yaml"
+      ],
+      "file_count": 2,
+      "group_id": "blob:b0178344226a3ba6c836e261f1154c6b7f5fd32b",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 952220,
+      "paths": [
+        "api/openapi.yaml",
+        "internal/config/http/openapi.yaml"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 66347,
+      "content_sha256": "2e1bfde0d36f6ab6637da66fddf6b7ee94984364a7175ad787b1da80f98695d5",
+      "excess_path_bytes": 398082,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:61725c1e23fb318841576f579233d632bf27806d",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 464429,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/api/client.ts",
+        "web/donors/automation-v2/src/shared/api/client.ts",
+        "web/donors/coupons-v2/src/shared/api/client.ts",
+        "web/donors/groupops-v2/src/shared/api/client.ts",
+        "web/donors/media-v2/src/shared/api/client.ts",
+        "web/donors/products-v2/src/shared/api/client.ts",
+        "web/src/shared/api/client.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 57513,
+      "content_sha256": "d202111695e91432879fb16a3101eae6b7f10ba53237dd493989ffd284c8264c",
+      "excess_path_bytes": 345078,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:b0283eb46c8e1df874d67e361a4b79d512fc159a",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 402591,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/api/mockData.ts",
+        "web/donors/automation-v2/src/shared/api/mockData.ts",
+        "web/donors/coupons-v2/src/shared/api/mockData.ts",
+        "web/donors/groupops-v2/src/shared/api/mockData.ts",
+        "web/donors/media-v2/src/shared/api/mockData.ts",
+        "web/donors/products-v2/src/shared/api/mockData.ts",
+        "web/src/shared/api/mockData.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 82451,
+      "content_sha256": "a1ed80ea7755d082502f62170549e702a5d581482af4677e4ed9ca73873d9d16",
+      "excess_path_bytes": 164902,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 3,
+      "group_id": "blob:6c8a1a4a37bc0086cea508a8f2c6cebdfd16c9bf",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 247353,
+      "paths": [
+        "web/donors/automation-operations-v2/src/api/generated/p4-ai-audience/p4-ai-audience.ts",
+        "web/donors/groupops-v2/src/api/generated/p4-ai-audience/p4-ai-audience.ts",
+        "web/src/api/generated/p4-ai-audience/p4-ai-audience.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 25799,
+      "content_sha256": "6fea805d568cf91b7c43292128c2a2b0694cf6515d85c264e048726a270c5a20",
+      "excess_path_bytes": 154794,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:2277ed01b219ce72339d40529e09be3a3fa7f7e7",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 180593,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/api/types.ts",
+        "web/donors/automation-v2/src/shared/api/types.ts",
+        "web/donors/coupons-v2/src/shared/api/types.ts",
+        "web/donors/groupops-v2/src/shared/api/types.ts",
+        "web/donors/media-v2/src/shared/api/types.ts",
+        "web/donors/products-v2/src/shared/api/types.ts",
+        "web/src/shared/api/types.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 20811,
+      "content_sha256": "690639bde2fb605024a05fe3196f2ddf8fd5b4ae87c76ef3ff5868a7adf912c0",
+      "excess_path_bytes": 124866,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:d639694cac7a6e334f3f0add391fead428752154",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 145677,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/picker.ts",
+        "web/donors/automation-v2/src/shared/ui/picker.ts",
+        "web/donors/coupons-v2/src/shared/ui/picker.ts",
+        "web/donors/groupops-v2/src/shared/ui/picker.ts",
+        "web/donors/media-v2/src/shared/ui/picker.ts",
+        "web/donors/products-v2/src/shared/ui/picker.ts",
+        "web/src/shared/ui/picker.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 83561,
+      "content_sha256": "b6b79b6c6cac1a742037b281ad591c2997b762dd31de1e66eaaa86635a3ab6a2",
+      "excess_path_bytes": 83561,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:074be4c244f4b9d8027273ddb057296c2c4e87c9",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 167122,
+      "paths": [
+        "web/donors/groupops-v2/src/api/generated/p4-group-ops/p4-group-ops.ts",
+        "web/src/api/generated/p4-group-ops/p4-group-ops.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 66960,
+      "content_sha256": "3efc2b02a6ae0b7953da74bb89d1636f3792aeb7707e4f0e4be5627cde0fe44e",
+      "excess_path_bytes": 66960,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:92ad0641acca3cdcac1c96761a1a3eb9593d8c71",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 133920,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-adminops-safe/p4-adminops-safe.ts",
+        "web/src/api/generated/p4-adminops-safe/p4-adminops-safe.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 57585,
+      "content_sha256": "bf25e064b42132c8a882c4cfc0381c47fee46124107fcd4fa4686c57794aa2b3",
+      "excess_path_bytes": 57585,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:277574178259a23f7a25276a1a7da92dc83c97bb",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 115170,
+      "paths": [
+        "web/donors/media-v2/src/api/generated/p4-media-compat/p4-media-compat.ts",
+        "web/src/api/generated/p4-media-compat/p4-media-compat.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 8911,
+      "content_sha256": "df5f131d9b322e435a09fccdc89c4f8269f3ef03f7856ece250d412af71bb145",
+      "excess_path_bytes": 53466,
+      "extensions": [
+        ".json"
+      ],
+      "file_count": 7,
+      "group_id": "blob:fcb1db48dce7b4955d070c66c03e09fcabfa10d2",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 62377,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/registry.json",
+        "web/donors/automation-v2/src/admin/registry.json",
+        "web/donors/coupons-v2/src/admin/registry.json",
+        "web/donors/groupops-v2/src/admin/registry.json",
+        "web/donors/media-v2/src/admin/registry.json",
+        "web/donors/products-v2/src/admin/registry.json",
+        "web/src/admin/registry.json"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 7268,
+      "content_sha256": "ee7a9a6629dcdaae4d9792ffcd757cee850bad796edcfb7ff68b6028206f1ed1",
+      "excess_path_bytes": 43608,
+      "extensions": [
+        ".json"
+      ],
+      "file_count": 7,
+      "group_id": "blob:f7d3f69132a37f8d47fbedb3c7e527b7ba4cfab2",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 50876,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/nav.json",
+        "web/donors/automation-v2/src/admin/nav.json",
+        "web/donors/coupons-v2/src/admin/nav.json",
+        "web/donors/groupops-v2/src/admin/nav.json",
+        "web/donors/media-v2/src/admin/nav.json",
+        "web/donors/products-v2/src/admin/nav.json",
+        "web/src/admin/nav.json"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 6984,
+      "content_sha256": "5c16cd3b057663d2b0c5d2a01416e6330ec979513c6754f1f64f6e41f364a546",
+      "excess_path_bytes": 41904,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:a120072629e9dac6a3113910755a14e37573fd59",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 48888,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/feedback.ts",
+        "web/donors/automation-v2/src/shared/ui/feedback.ts",
+        "web/donors/coupons-v2/src/shared/ui/feedback.ts",
+        "web/donors/groupops-v2/src/shared/ui/feedback.ts",
+        "web/donors/media-v2/src/shared/ui/feedback.ts",
+        "web/donors/products-v2/src/shared/ui/feedback.ts",
+        "web/src/shared/ui/feedback.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 6711,
+      "content_sha256": "0f9b719686a8516727ad86fa9475b10cbb059fd10003b3eb6ef041900c7ee3b0",
+      "excess_path_bytes": 40266,
+      "extensions": [
+        ".css"
+      ],
+      "file_count": 7,
+      "group_id": "blob:5f90f0cfe5c42df3d4810afc6639623e62d1b613",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 46977,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/tokens.css",
+        "web/donors/automation-v2/src/shared/ui/tokens.css",
+        "web/donors/coupons-v2/src/shared/ui/tokens.css",
+        "web/donors/groupops-v2/src/shared/ui/tokens.css",
+        "web/donors/media-v2/src/shared/ui/tokens.css",
+        "web/donors/products-v2/src/shared/ui/tokens.css",
+        "web/src/shared/ui/tokens.css"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 37949,
+      "content_sha256": "30812423915cdc7d499c0f5f4da3eb85fe25643c691479e89e0c20d9f2ff3fec",
+      "excess_path_bytes": 37949,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:baa08e20721ba39b1a0c00dae7c2d59d960d2597",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 75898,
+      "paths": [
+        "web/donors/coupons-v2/src/api/generated/p4-coupon-compat/p4-coupon-compat.ts",
+        "web/src/api/generated/p4-coupon-compat/p4-coupon-compat.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 6273,
+      "content_sha256": "1122c0be280b1f62c1784510459471bd3ffcc6989493f103daf811900411e66a",
+      "excess_path_bytes": 37638,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:8d9a9e6a679170a20e8d23be04564630489227de",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 43911,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/runtime.ts",
+        "web/donors/automation-v2/src/shared/ui/runtime.ts",
+        "web/donors/coupons-v2/src/shared/ui/runtime.ts",
+        "web/donors/groupops-v2/src/shared/ui/runtime.ts",
+        "web/donors/media-v2/src/shared/ui/runtime.ts",
+        "web/donors/products-v2/src/shared/ui/runtime.ts",
+        "web/src/shared/ui/runtime.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 28527,
+      "content_sha256": "be0ad716aa442b6a3068f2d34ffe0922f2d39bd8c576a3b7993ce35fab8e9fa4",
+      "excess_path_bytes": 28527,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:a8c3bfe2cf41cc2b8d8c33bfc5c88e56f1b72bc1",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 57054,
+      "paths": [
+        "web/donors/products-v2/src/api/generated/p4-service-period-products/p4-service-period-products.ts",
+        "web/src/api/generated/p4-service-period-products/p4-service-period-products.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 28311,
+      "content_sha256": "e6256f60834715f2639434a4c06738dd9a7fb4206209043327fbb107352e7e81",
+      "excess_path_bytes": 28311,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:5e175be74a4d6d9e3adae4e6040160bb32b77a7a",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 56622,
+      "paths": [
+        "web/donors/media-v2/src/api/generated/p4-media-content-delivery/p4-media-content-delivery.ts",
+        "web/src/api/generated/p4-media-content-delivery/p4-media-content-delivery.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 26187,
+      "content_sha256": "2685d45c3ab155bfba8f51250e601ab82bd52652758f9595c14e21824149e43c",
+      "excess_path_bytes": 26187,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:17dc5b2bee725e661d2ea48186d3b6873baf088c",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 52374,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-release-plane/p4-release-plane.ts",
+        "web/src/api/generated/p4-release-plane/p4-release-plane.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 25658,
+      "content_sha256": "f2992201652a0857614e23358d588a3a39d0237274172ab21715132318e4ac03",
+      "excess_path_bytes": 25658,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:a8b77eb5dec0ca4132f8e29ac7ebf1d5e8a7e638",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 51316,
+      "paths": [
+        "web/donors/automation-v2/src/api/generated/p4-automation-agents/p4-automation-agents.ts",
+        "web/src/api/generated/p4-automation-agents/p4-automation-agents.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 22905,
+      "content_sha256": "e7d4f666f17c39b90e69e4cd698bb97cc077dbd1ac13753aa2b8d07265933877",
+      "excess_path_bytes": 22905,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:32189d2e9990677aa8592fb3898030e9c1eb64c5",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 45810,
+      "paths": [
+        "web/donors/operation-cycles-v2/src/admin/templates/cyclesDetail.html",
+        "web/src/admin/templates/cyclesDetail.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 22678,
+      "content_sha256": "db656dfbfb43be0dfafc50a6c65800736961e62f49e84d6dbf40f4cff2df787d",
+      "excess_path_bytes": 22678,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:a5cce9342b6078ed09130fdac40445ad8ebf0044",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 45356,
+      "paths": [
+        "web/donors/products-v2/src/admin/templates/productForm.html",
+        "web/src/admin/templates/productForm.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 3131,
+      "content_sha256": "fc5e4b447d10487f571fdafd953cb51756274bc40b019bb51b6cdd61cfbad885",
+      "excess_path_bytes": 21917,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 8,
+      "group_id": "blob:a96456f8c7b6cea56a9ae0dccbec16da3b3c04ef",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 25048,
+      "paths": [
+        "web/donors/adminops-v2/src/api/transport.ts",
+        "web/donors/automation-operations-v2/src/api/transport.ts",
+        "web/donors/automation-v2/src/api/transport.ts",
+        "web/donors/coupons-v2/src/api/transport.ts",
+        "web/donors/groupops-v2/src/api/transport.ts",
+        "web/donors/media-v2/src/api/transport.ts",
+        "web/donors/products-v2/src/api/transport.ts",
+        "web/src/api/transport.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 21338,
+      "content_sha256": "60eace6cc96a4c6bcd5f3990afd18f9176d361d482d202d79625f772bbfae65c",
+      "excess_path_bytes": 21338,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:37c1b898ebb48e4de0467c4dbeb24b61a09755bf",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 42676,
+      "paths": [
+        "web/donors/products-v2/src/admin/templates/spProductForm.html",
+        "web/src/admin/templates/spProductForm.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 19874,
+      "content_sha256": "87ec917ad2a980e97b28c2e60ffc6d68254f1b96e37ccaf58c3068db2c7ada57",
+      "excess_path_bytes": 19874,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:3d61d61b4668905b41b1fdd34017d3fca0d302c9",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 39748,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/templates/audienceEdit.html",
+        "web/src/admin/templates/audienceEdit.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 19805,
+      "content_sha256": "d9a1f142f9836c4a9605324c613a2b94dfe01877128a1b0af8fcd41c9e18f8c6",
+      "excess_path_bytes": 19805,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:a41a60b80215eb07f2eebc83716d7102cf3896da",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 39610,
+      "paths": [
+        "web/donors/products-v2/src/api/generated/p4-product/p4-product.ts",
+        "web/src/api/generated/p4-product/p4-product.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 19094,
+      "content_sha256": "a427a6933d0bc1114a1bf31f76cdae0aeba9b09159c670f05b29cd13b1a60b4c",
+      "excess_path_bytes": 19094,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:80bad6936579961b68bdd47fb887eabc18a807b5",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 38188,
+      "paths": [
+        "web/donors/groupops-v2/src/api/groupOpsDirectory.test.ts",
+        "web/src/api/groupOpsDirectory.test.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 18346,
+      "content_sha256": "37181a469d55c60e8cd1397894f0c3aae352622c0ebf43ab9f28e67da42a5b48",
+      "excess_path_bytes": 18346,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:64a7429cbef9f19908903bc41cf0f0b2e8f617a4",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 36692,
+      "paths": [
+        "web/donors/groupops-v2/src/admin/legacy.ts",
+        "web/src/admin/legacy.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 17943,
+      "content_sha256": "b208e938eb8ae144d9831bcb145b2cce6eac4873bfe257e40f439e2ec1e3c5e4",
+      "excess_path_bytes": 17943,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:d8464d52626a7cbf909e93012f64c9430f0521d8",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 35886,
+      "paths": [
+        "web/donors/automation-v2/src/admin/sections/automationAgents.ts",
+        "web/src/admin/sections/automationAgents.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 17005,
+      "content_sha256": "f1605f1983667eb72b5eacd6e57e96749a680093c77664b5ef0f95fd0a972481",
+      "excess_path_bytes": 17005,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:c269fc6327d3618640b82f8fbb549a3b4cc2268d",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 34010,
+      "paths": [
+        "web/donors/groupops-v2/src/api/capabilities.ts",
+        "web/src/api/capabilities.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 16973,
+      "content_sha256": "2f5618dafd74279e52caae951afe78e659dc1ee921e552d80630fb37a13307bc",
+      "excess_path_bytes": 16973,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:8d4f03f2954bd6eb7f09dfd4a76dcc1453ae3b09",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 33946,
+      "paths": [
+        "web/donors/coupons-v2/src/admin/templates/couponForm.html",
+        "web/src/admin/templates/couponForm.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 16392,
+      "content_sha256": "63b1ddcd4a49d70a9c3cd8351138b64efa07a166f3e66f7dbd09277767633a4a",
+      "excess_path_bytes": 16392,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:8575d42f5a787a68d731b2c8cb1cb65767b21c9a",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 32784,
+      "paths": [
+        "web/donors/adminops-v2/src/admin/templates/apidocs.html",
+        "web/src/admin/templates/apidocs.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 15174,
+      "content_sha256": "5b631cfb532a7e63027d58efff79a0b6fac00123ba2d40f0b82c39e8bca233e1",
+      "excess_path_bytes": 15174,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:c5f66dfebf0e422f3eb9c332b86328d5e46de6c7",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 30348,
+      "paths": [
+        "web/donors/products-v2/src/api/generated/p4-commerce-external-push/p4-commerce-external-push.ts",
+        "web/src/api/generated/p4-commerce-external-push/p4-commerce-external-push.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 12738,
+      "content_sha256": "6704fda2582ff4d32ac976efae530937cc63b9dbacee6aeca331773be261ef9e",
+      "excess_path_bytes": 12738,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:189814d80121d36ac17c1df9fe8378fffb3f185f",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 25476,
+      "paths": [
+        "web/donors/groupops-v2/src/admin/templates/groupopsDetail.html",
+        "web/src/admin/templates/groupopsDetail.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 12395,
+      "content_sha256": "6dd591f4b208483bf76b4678bff728b7e4f4737f8aa4ca2b32b847fc66001a92",
+      "excess_path_bytes": 12395,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:9841b54d798206787ee14f0bbe31bccca3cf636d",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 24790,
+      "paths": [
+        "web/donors/media-v2/src/admin/templates/mpLib.html",
+        "web/src/admin/templates/mpLib.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 11984,
+      "content_sha256": "d5fdac4633a01d2f175af83f1e9de666db8472f4cb905de7ca46de18dd0f3f80",
+      "excess_path_bytes": 11984,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:d7358bf872959f93906c115d00ee4d4f8d41ee03",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 23968,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-config-settings-compat/p4-config-settings-compat.ts",
+        "web/src/api/generated/p4-config-settings-compat/p4-config-settings-compat.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 11135,
+      "content_sha256": "744432d6d80b903b2d5084568740f3cf7955f53e65d536eb7c625e140d57011b",
+      "excess_path_bytes": 11135,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:1da4620e2978dd12a985a03d90a84445c8803495",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 22270,
+      "paths": [
+        "web/donors/media-v2/src/admin/templates/attach.html",
+        "web/src/admin/templates/attach.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 11118,
+      "content_sha256": "d1a2375afc7e0a185aacfd41677a27b966d9db62d24a47ddd1a08ce4a1b5fe55",
+      "excess_path_bytes": 11118,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:0143e5cfc32d1a7d9c5a5e94cec9ef71ba201e1c",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 22236,
+      "paths": [
+        "web/donors/coupons-v2/src/admin/templates/couponData.html",
+        "web/src/admin/templates/couponData.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 5544,
+      "content_sha256": "362be88fb99d33a236ce9b288453e7d1eed8e640179c49a1cb9ddfeec6a186ca",
+      "excess_path_bytes": 11088,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 3,
+      "group_id": "blob:a1a6f2d32f4763a3b86fa2a4bdfca2a45652297d",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 16632,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts",
+        "web/donors/groupops-v2/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts",
+        "web/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 10029,
+      "content_sha256": "55517a5a937b61f1f02d103d72cf8bfee830a4a80f545462ab77aa6ca1d3a581",
+      "excess_path_bytes": 10029,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:b61553cb14a2930b0114a7ba8c6f60710c116346",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 20058,
+      "paths": [
+        "web/donors/media-v2/src/admin/templates/images.html",
+        "web/src/admin/templates/images.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 9889,
+      "content_sha256": "fefccedea8469bd73bee675cd743a8085f313f4bcefe5964c585cdce5b1b158a",
+      "excess_path_bytes": 9889,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:bce1f3eb273adabcd70424c29aa209cbe8733fa2",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 19778,
+      "paths": [
+        "web/donors/groupops-v2/src/api/generated/p4-groupops-history/p4-groupops-history.ts",
+        "web/src/api/generated/p4-groupops-history/p4-groupops-history.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 9877,
+      "content_sha256": "7722b9115cd279ae09b3aec046a93a7a0f35f4d5ce1f211fa383bd9d40cf970b",
+      "excess_path_bytes": 9877,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:212a5902b00968857b51d9029bd0ff2cc93d0003",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 19754,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/templates/automation.html",
+        "web/src/admin/templates/automation.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 9806,
+      "content_sha256": "6606c40c0e2dce2c2b5367684cc0005cd40d2a7bf190f4bef8626974ba119435",
+      "excess_path_bytes": 9806,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:633077a24216722b04bd85c94df22107a03248e8",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 19612,
+      "paths": [
+        "web/donors/automation-v2/src/admin/templates/agentEdit.html",
+        "web/src/admin/templates/agentEdit.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 8193,
+      "content_sha256": "250168ed3f306f390644ab6843eb331f6715345980851a405ed2ec68ec3b75a4",
+      "excess_path_bytes": 8193,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:103b7d25fc8ae5ccf0a6a937ef88e579777a32b9",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 16386,
+      "paths": [
+        "web/donors/products-v2/src/admin/templates/spProducts.html",
+        "web/src/admin/templates/spProducts.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 8152,
+      "content_sha256": "8189bdb210071ab831f1fae7fb4f05cb89e2e5314de649268cb0d13f17da15fa",
+      "excess_path_bytes": 8152,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:194862231804168ee214d092ba1708fc2daa765d",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 16304,
+      "paths": [
+        "web/donors/coupons-v2/src/admin/templates/coupons.html",
+        "web/src/admin/templates/coupons.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 7803,
+      "content_sha256": "3fd57864823673de3e84f0cceb32cd17492ef060da8b8552a660bb64c7b8dc29",
+      "excess_path_bytes": 7803,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:27ce48e930aad96814f5fb65c5bd94a9e7bf2c19",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 15606,
+      "paths": [
+        "web/donors/products-v2/src/admin/templates/products.html",
+        "web/src/admin/templates/products.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 1921,
+      "content_sha256": "75e3f2b24bc5e031382f7e5c58ddf64578eb7708b06d30467edaf80464362621",
+      "excess_path_bytes": 7684,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 5,
+      "group_id": "blob:c918005832c25b74566e59e2acc3f8b7bf64f6ab",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 9605,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/sections/util.ts",
+        "web/donors/automation-v2/src/admin/sections/util.ts",
+        "web/donors/groupops-v2/src/admin/sections/util.ts",
+        "web/donors/products-v2/src/admin/sections/util.ts",
+        "web/src/admin/sections/util.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 7410,
+      "content_sha256": "ab8660b56691b06e6a86b1cfedc23c6bc051bb32d7ec67cf53225894d67e40c9",
+      "excess_path_bytes": 7410,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:534ee4869ecee5b5940ab3265ee0f81b4a4209e9",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 14820,
+      "paths": [
+        "web/donors/groupops-v2/src/admin/sections/groupOpsHistory.ts",
+        "web/src/admin/sections/groupOpsHistory.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 7359,
+      "content_sha256": "47443ffbf72dfbc1744b434e8e4f913d1c2c6f9a3bc7ec11371edb255593ccd3",
+      "excess_path_bytes": 7359,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:544457bfd728d447fad24df8ae3ecf921ab067a9",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 14718,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-setup-wizard/p4-setup-wizard.ts",
+        "web/src/api/generated/p4-setup-wizard/p4-setup-wizard.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 7279,
+      "content_sha256": "4ccc0d8a8e3d8503306397f46beb3675af31b9b1df20cbd188f88ce3fee6e69d",
+      "excess_path_bytes": 7279,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:a177f551c13acffebc83c894978ab2989d4a3a3e",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 14558,
+      "paths": [
+        "web/donors/groupops-v2/src/admin/sections/groupOpsDirectory.ts",
+        "web/src/admin/sections/groupOpsDirectory.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 7266,
+      "content_sha256": "1b6a6d05e3300e3a59fc00068daa987b4e586c57a122f726c1c9abbbc1f34eb3",
+      "excess_path_bytes": 7266,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:725994788e851656b99f5b53f3816988d0de0bf7",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 14532,
+      "paths": [
+        "web/donors/adminops-v2/src/admin/templates/config.html",
+        "web/src/admin/templates/config.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 6554,
+      "content_sha256": "6dc8da3a44d259b8da57af3f9fe89fa50c0b22c35efe85121fe7818bcdbe16b8",
+      "excess_path_bytes": 6554,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:9f2d5f879e085cc987d5e9227336fabe04069b53",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 13108,
+      "paths": [
+        "web/donors/groupops-v2/src/admin/templates/groupops.html",
+        "web/src/admin/templates/groupops.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 6274,
+      "content_sha256": "346e4b7e335acf94e3ece3d912147f33ea00dfcda23d1ddbf4b192be4e3a289d",
+      "excess_path_bytes": 6274,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:11b6b051b235711937e68be88a8c13c14ad1050f",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 12548,
+      "paths": [
+        "web/donors/groupops-v2/src/api/groupOpsHistory.test.ts",
+        "web/src/api/groupOpsHistory.test.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 5612,
+      "content_sha256": "b302e46a388250485694557c65db0406abef0d68370f6f4069726fb6dc51763f",
+      "excess_path_bytes": 5612,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:1eb472a32f679eb330700fa87210638b1e2c54a0",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 11224,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-data-health/p4-data-health.ts",
+        "web/src/api/generated/p4-data-health/p4-data-health.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 5486,
+      "content_sha256": "e2d6324f84d81d4da7c254a35a40c560a5c157a63dc0a1beb9f79a5bd767f707",
+      "excess_path_bytes": 5486,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:d7b140d2038498ea490cebe715c19c78ad8dfef6",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 10972,
+      "paths": [
+        "web/donors/automation-v2/src/admin/templates/agents.html",
+        "web/src/admin/templates/agents.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 5229,
+      "content_sha256": "8fc0eaae99d1bc658f6b7e6d88ab8f4b633e399dcc9aef2fbb448e824c233281",
+      "excess_path_bytes": 5229,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:37060682f4619dc06d7d77d774a1ab4a483a5a10",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 10458,
+      "paths": [
+        "web/donors/groupops-v2/src/admin/sections/broadcastJobHistory.ts",
+        "web/src/admin/sections/broadcastJobHistory.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 4942,
+      "content_sha256": "4903070814159e3ddd703aa649dd2be9428b6829fcc4164918359fe4ad1b70e6",
+      "excess_path_bytes": 4942,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:5ab8251a8b7744a5f43559bf31d274683328adfb",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 9884,
+      "paths": [
+        "web/donors/adminops-v2/src/admin/sections/setupWizard.ts",
+        "web/src/admin/sections/setupWizard.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 4890,
+      "content_sha256": "c74d1b26a94edaeabb32cb15ddde220b3e06a1092412cd262d27afc7a708a336",
+      "excess_path_bytes": 4890,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:d33f63c9ab77e340ac364ce44571cc0698647dd1",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 9780,
+      "paths": [
+        "web/donors/groupops-v2/src/api/broadcastJobHistory.ts",
+        "web/src/api/broadcastJobHistory.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 4452,
+      "content_sha256": "9577c76dbc0a15415bc3d8d8363dcf8920ead4f7165504815839a0f7522f8bc2",
+      "excess_path_bytes": 4452,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:0697225ba62f5a935e48d93965142e46fac16dfd",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 8904,
+      "paths": [
+        "web/donors/groupops-v2/src/api/generated/p4-broadcast-job-history/p4-broadcast-job-history.ts",
+        "web/src/api/generated/p4-broadcast-job-history/p4-broadcast-job-history.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 4382,
+      "content_sha256": "235dcf711ce9965a6862fa5f0b9cc0d967f2fc25c13cd5a19d17ec40e446df14",
+      "excess_path_bytes": 4382,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:517748c20202bf34776d92ea5f12b13d11f94a51",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 8764,
+      "paths": [
+        "web/donors/adminops-v2/src/admin/templates/configDetail.html",
+        "web/src/admin/templates/configDetail.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 714,
+      "content_sha256": "61bc0ef4ff883bb243af79f989813bbe29c3109168544f32d7358a7608514161",
+      "excess_path_bytes": 4284,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:04d9a2411070aa7f52157740dd7abb794ddb1294",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 4998,
+      "paths": [
+        "web/donors/automation-operations-v2/src/admin/main.ts",
+        "web/donors/automation-v2/src/admin/main.ts",
+        "web/donors/coupons-v2/src/admin/main.ts",
+        "web/donors/groupops-v2/src/admin/main.ts",
+        "web/donors/media-v2/src/admin/main.ts",
+        "web/donors/products-v2/src/admin/main.ts",
+        "web/src/admin/main.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 4081,
+      "content_sha256": "19a1fbbdaaca0a6c3b0fbdb2f75c496d0e2c3192ff5d29af34b650a1cdd6bc5c",
+      "excess_path_bytes": 4081,
+      "extensions": [
+        ".html"
+      ],
+      "file_count": 2,
+      "group_id": "blob:32cd5700f40d3826c514d21c457cd67fd07da644",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 8162,
+      "paths": [
+        "web/donors/operation-cycles-v2/src/admin/templates/cycles.html",
+        "web/src/admin/templates/cycles.html"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 632,
+      "content_sha256": "dda7c727bbad4844749e59095dba4c450cf864efb2caaad3f96209f24348a7bb",
+      "excess_path_bytes": 3792,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 7,
+      "group_id": "blob:2e5caf6b09509379a4075829b1c99d57d7a5f49c",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 4424,
+      "paths": [
+        "web/donors/automation-operations-v2/src/shared/ui/download.ts",
+        "web/donors/automation-v2/src/shared/ui/download.ts",
+        "web/donors/coupons-v2/src/shared/ui/download.ts",
+        "web/donors/groupops-v2/src/shared/ui/download.ts",
+        "web/donors/media-v2/src/shared/ui/download.ts",
+        "web/donors/products-v2/src/shared/ui/download.ts",
+        "web/src/shared/ui/download.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 3614,
+      "content_sha256": "4faa11f6f38bf687540e8bdedea10fdff0b9b16c27d078672f233f79034af89a",
+      "excess_path_bytes": 3614,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:f06746a81471e3efdaf42c3e8faf6b254dc753a0",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 7228,
+      "paths": [
+        "web/donors/groupops-v2/src/api/generated/p4-group-ops-workspaces/p4-group-ops-workspaces.ts",
+        "web/src/api/generated/p4-group-ops-workspaces/p4-group-ops-workspaces.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 3513,
+      "content_sha256": "8fca747b7a749c1122c15de15c6f53c8abf8dde4d69ad944c2d5734301c6d7cc",
+      "excess_path_bytes": 3513,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:9025d2103463efeea028203691559a18f85ea009",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 7026,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-api-docs-compat/p4-api-docs-compat.ts",
+        "web/src/api/generated/p4-api-docs-compat/p4-api-docs-compat.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 3470,
+      "content_sha256": "2e0b2d231f55602e0eb8008a195b3552c628c2eeaf2470dba50644a7aa42bbcf",
+      "excess_path_bytes": 3470,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:b12a69ee7376bdf81392dc35564159d921cd074e",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 6940,
+      "paths": [
+        "web/donors/groupops-v2/src/api/groupOpsHistory.ts",
+        "web/src/api/groupOpsHistory.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 2581,
+      "content_sha256": "1044f4857ef3f56193784b46e453a46e079f33c040a86c0cfa03b99d7001df4a",
+      "excess_path_bytes": 2581,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:cdb156ca4c5b78b1a4b40c9e1ce9ab7abbc4dbbd",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 5162,
+      "paths": [
+        "web/donors/groupops-v2/src/api/groupOpsDirectory.ts",
+        "web/src/api/groupOpsDirectory.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 2127,
+      "content_sha256": "ba469f1b3988ab18258303e48a1758609bc19376f10694c1185abefc73899483",
+      "excess_path_bytes": 2127,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:73d37a7b76e7a7aee57e17c511bc248d6d608d93",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 4254,
+      "paths": [
+        "web/donors/products-v2/src/admin/sections/qr.ts",
+        "web/src/admin/sections/qr.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 1761,
+      "content_sha256": "03aeeaf9b8e9e9d74dd8488835b01926e1cca7cb7ebb53f3988f3ceaed231c18",
+      "excess_path_bytes": 1761,
+      "extensions": [
+        ".css"
+      ],
+      "file_count": 2,
+      "group_id": "blob:11ea859fb340aad3f706ec53f63003d1ec3e5df9",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 3522,
+      "paths": [
+        "internal/webshell/static/admin_console/send_content_readonly_detail.css",
+        "web/donors/ai-assistant-production/static/send_content_readonly_detail.css"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 1535,
+      "content_sha256": "d1827f386c993e929ac37ad5bcdda68aa8bb5fa948e634435418341b1869f182",
+      "excess_path_bytes": 1535,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:ef15f26b801c48f965585fd4301543729de43cea",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 3070,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-legacy-health/p4-legacy-health.ts",
+        "web/src/api/generated/p4-legacy-health/p4-legacy-health.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 1486,
+      "content_sha256": "00ab5702d1f2d3aed9440010ac5642669634be822726036e95892a155f7b31cd",
+      "excess_path_bytes": 1486,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:53f75dbfc39f17a7e805c628f91330a21c297671",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 2972,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/p4-system-health/p4-system-health.ts",
+        "web/src/api/generated/p4-system-health/p4-system-health.ts"
+      ],
+      "review_status": "unreviewed"
+    },
+    {
+      "bytes_per_copy": 1139,
+      "content_sha256": "f86374997bbd6b16e660906222a1b0d5793ce28f30b3eed696eb484611692b04",
+      "excess_path_bytes": 1139,
+      "extensions": [
+        ".ts"
+      ],
+      "file_count": 2,
+      "group_id": "blob:b80d77098b5724de7eca5d4bffc8e330a19c4278",
+      "mode_variants": [
+        "100644"
+      ],
+      "path_bytes": 2278,
+      "paths": [
+        "web/donors/adminops-v2/src/api/generated/health/health.ts",
+        "web/src/api/generated/health/health.ts"
+      ],
+      "review_status": "unreviewed"
+    }
+  ]
+}

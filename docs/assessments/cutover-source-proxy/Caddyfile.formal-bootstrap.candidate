@@ -1,0 +1,46 @@
+id-dev.youcangogogo.com {
+ reverse_proxy 127.0.0.1:8080
+}
+www.youcangogogo.com {
+ tls /etc/caddy/formal-cutover-20260911/fullchain.pem /etc/caddy/formal-cutover-20260911/privkey.pem
+ @legacy_money {
+  method POST
+  path /api/h5/wechat-pay/notify /api/h5/wechat-pay/refund/notify
+ }
+ handle @legacy_money {
+  reverse_proxy https://150.158.82.186 {
+   header_up Host www.youcangogogo.com
+   transport http {
+    tls_server_name www.youcangogogo.com
+    dial_timeout 5s
+    response_header_timeout 30s
+   }
+  }
+ }
+ @legacy_shop {
+  method GET POST
+  path /api/wechat-shop/notify
+ }
+ handle @legacy_shop {
+  reverse_proxy https://150.158.82.186 {
+   header_up Host www.youcangogogo.com
+   transport http {
+    tls_server_name www.youcangogogo.com
+    dial_timeout 5s
+    response_header_timeout 30s
+   }
+  }
+ }
+ @legacy_other_method path /api/h5/wechat-pay/notify /api/h5/wechat-pay/refund/notify /api/wechat-shop/notify
+ handle @legacy_other_method {
+  respond "Method Not Allowed" 405
+ }
+ @legacy_internal path /api/internal/automation-conversion/laohuang-chat-results /api/internal/automation-conversion/lobster-results
+ handle @legacy_internal {
+  header Retry-After 300
+  respond "Legacy callback ownership pending" 503
+ }
+ handle {
+  reverse_proxy 127.0.0.1:8080
+ }
+}

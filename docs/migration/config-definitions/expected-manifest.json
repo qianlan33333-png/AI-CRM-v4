@@ -1,0 +1,128 @@
+{
+  "manifest_version": "config-definition-import.v1",
+  "migration_id": "config-definitions",
+  "source_system": "AI-CRM-production:150.158.82.186/openclaw_wecom",
+  "schema_digest_algorithm": "sha256(canonical-json-utf8)",
+  "source_snapshot": {
+    "mode": "read_only_operator_supplied",
+    "record_digest": "sha256(canonical-json-utf8)",
+    "same_snapshot_replay": "idempotent",
+    "different_snapshot_same_batch_key": "reject_as_drift"
+  },
+  "scope": {
+    "products": {
+      "total": 31,
+      "ordinary": 29,
+      "service_period": 2
+    },
+    "coupons": {
+      "definitions": 15,
+      "bindings": 15
+    },
+    "group_ops": {
+      "plans": 12,
+      "references": 14,
+      "text_nodes": 3
+    },
+    "automation": {
+      "runtime_configs": 10
+    }
+  },
+  "target_tables": [
+    "products",
+    "product_imported_service_period_definitions",
+    "coupon_rules",
+    "coupon_rule_targets",
+    "group_ops_plans",
+    "group_ops_plan_group_assets",
+    "group_ops_plan_nodes",
+    "automation_agents"
+  ],
+  "architecture": {
+    "oneid": "not_involved",
+    "external_effects": "not_involved",
+    "transaction": "local_postgresql_migration_transaction",
+    "provider_network_calls": false,
+    "customer_root_resolution": false
+  },
+  "frontend_boundary": {
+    "donor_web_files_must_be_unchanged": true,
+    "checked_roots": [
+      "web/donors"
+    ],
+    "allowed_changes": [
+      "docs/migration/config-definitions/expected-manifest.json",
+      "docs/migration/config-definitions/source-contract.md",
+      "docs/migration/config-definitions/production-import-runbook.md",
+      "scripts/check-config-definition-import-boundary.sh"
+    ]
+  },
+  "excluded_scopes": [
+    "tags",
+    "media",
+    "materials",
+    "customer_roots",
+    "oneid_identities",
+    "history",
+    "messages",
+    "execution",
+    "external_effects",
+    "provider_receipts",
+    "webhook_urls",
+    "webhook_secrets",
+    "orders",
+    "payments",
+    "entitlements",
+    "claims",
+    "redemptions"
+  ],
+  "forbidden_source_field_tokens": [
+    "tag",
+    "label",
+    "material",
+    "media",
+    "customer",
+    "oneid",
+    "openid",
+    "unionid",
+    "external_userid",
+    "phone",
+    "mobile",
+    "email",
+    "history",
+    "message",
+    "execution",
+    "external_effect",
+    "webhook",
+    "url",
+    "secret",
+    "token",
+    "password",
+    "credential",
+    "api_key"
+  ],
+  "excluded_source_tables": [
+    "commerce_coupon_claims",
+    "commerce_coupon_redemptions",
+    "coupon_claims",
+    "coupon_redemptions",
+    "tags",
+    "tag_groups",
+    "media_assets",
+    "message_history",
+    "message_records",
+    "execution_runs",
+    "external_effects",
+    "webhook_endpoints"
+  ],
+  "notes": [
+    "Group references are opaque local configuration references; they are not Media or material references.",
+    "Group text nodes are message_text configuration only and do not import message records or message history.",
+    "Coupon claim start and end timestamps are rule-definition fields and are allowed; claim rows and redemptions are excluded.",
+    "The migration coordinator owns one PostgreSQL transaction for the import ledger and all definition writes.",
+    "Service-period duration days are retained in the Product-owned import definition table; no customer entitlement or membership state is imported.",
+    "Safe legacy group plan and text-node scheduling fields are retained only as inert GroupOps-owned metadata while every imported plan remains paused.",
+    "Legacy coupon and group-plan creator/updater labels are provenance only; target ownership is the explicit v3 administrator.",
+    "This manifest is a contract, not evidence that a production snapshot has been imported."
+  ]
+}

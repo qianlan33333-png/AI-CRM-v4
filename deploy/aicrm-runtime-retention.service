@@ -1,0 +1,18 @@
+[Unit]
+Description=AI-CRM fixed host process retention
+After=systemd-journald@aicrm.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/aicrm-retention/runtime-maintenance.py
+TimeoutStartSec=90
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/aicrm/process-tmp /var/lib/aicrm/process-diagnostics /var/lib/aicrm-maintenance /run/lock
+ReadWritePaths=-/var/log/journal -/run/log/journal
+UMask=0022
+LogNamespace=aicrm

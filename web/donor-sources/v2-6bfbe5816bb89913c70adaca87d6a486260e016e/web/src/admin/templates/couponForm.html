@@ -1,0 +1,108 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <a onClick="{{ go.coupons }}" style="width:28px;height:28px;border:1px solid #DEE0E3;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#646A73" stroke-width="1.6"><path d="M9.6 3.6L5.2 8l4.4 4.4"/></svg></a>
+              <div style="min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><a onClick="{{ go.coupons }}" style="cursor:pointer;color:#8F959E">优惠券</a><span>/</span><span>{{ couponFormPage.title }}</span></div>
+                <div style="font-size:16px;font-weight:600;line-height:22px">{{ couponFormPage.title }}</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex:none">
+              <button onClick="{{ go.coupons }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;cursor:pointer">取消</button>
+              <button onClick="{{ couponFormPage.saveDraft }}" style="height:30px;padding:0 12px;border:1px solid #3370ff;border-radius:6px;background:#fff;color:#245BDB;font-size:13px;cursor:pointer">保存草稿</button>
+              <button onClick="{{ couponFormPage.savePublish }}" style="height:30px;padding:0 14px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">保存并发布</button>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:12px;align-items:start">
+            <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+              <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px">
+                <div style="padding:12px 16px;border-bottom:1px solid #EFF0F1"><h3 style="margin:0;font-size:14px;font-weight:600">基本信息</h3></div>
+                <div style="padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                  <label style="grid-column:1/-1"><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">优惠券名称 <span style="color:#D83931">*</span></span><input id="coupon-name" value="{{ couponFormPage.draft.name }}" placeholder="展示给用户的名称，如「新客立减 100」" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%;box-sizing:border-box"></label>
+                  <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">减免金额（元） <span style="color:#D83931">*</span></span><input id="coupon-discount" value="{{ couponFormPage.draft.discount }}" inputmode="decimal" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%;box-sizing:border-box;font-variant-numeric:tabular-nums"></label>
+                  <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">发行总量 <span style="color:#D83931">*</span></span><input id="coupon-total" type="number" min="1" value="{{ couponFormPage.draft.totalIssueLimit }}" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%;box-sizing:border-box;font-variant-numeric:tabular-nums"></label>
+                  <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">单用户限领 <span style="color:#D83931">*</span></span><input id="coupon-per-user" type="number" min="1" value="{{ couponFormPage.draft.perUserIssueLimit }}" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%;box-sizing:border-box;font-variant-numeric:tabular-nums"></label>
+                </div>
+              </div>
+              <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px">
+                <div style="padding:12px 16px;border-bottom:1px solid #EFF0F1"><h3 style="margin:0;font-size:14px;font-weight:600">适用商品</h3></div>
+                <div style="padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+                  <sc-for list="{{ couponFormPage.refs }}" as="r" hint-placeholder-count="2">
+                    <div style="display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 12px;border:1px solid #DEE0E3;border-radius:8px"><span style="font-size:12px;color:#1F2329;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">{{ r.ref }}</span><button data-remove-ref="{{ r.ref }}" onClick="{{ couponFormPage.removeRef }}" style="border:0;background:transparent;font-size:12px;color:#8F959E;cursor:pointer">移除</button></div>
+                  </sc-for>
+                  <sc-if value="{{ couponFormPage.noRefs }}">
+                    <div style="border:1px dashed #DEE0E3;border-radius:8px;padding:14px;text-align:center;font-size:12px;color:#8F959E">尚未选择适用商品；从下方服务端商品目录加入，或直接在输入框粘贴 target_ref</div>
+                  </sc-if>
+                  <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">适用商品引用（逗号、空格或换行分隔；使用服务端 target_refs 原值）</span><textarea id="coupon-target-refs" rows="3" style="border:1px solid #DEE0E3;border-radius:6px;padding:8px 10px;font-size:13px;font-family:ui-monospace,Menlo,monospace;width:100%;box-sizing:border-box;resize:vertical">{{ couponFormPage.draft.targetRefs }}</textarea></label>
+                </div>
+                <sc-if value="{{ couponFormPage.options.http }}">
+                <div style="padding:0 16px 14px;display:flex;flex-direction:column;gap:10px">
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <input id="option-query" value="{{ couponFormPage.options.query }}" placeholder="搜索商品名称" style="height:32px;flex:1;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px">
+                    <select id="option-type" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;background:#fff;font-size:13px"><sc-if value="{{ couponFormPage.options.typeAll }}"><option value="all" selected="selected">全部类型</option></sc-if><sc-if value="{{ couponFormPage.options.typeAllOff }}"><option value="all">全部类型</option></sc-if><sc-if value="{{ couponFormPage.options.typeStandard }}"><option value="standard_product" selected="selected">普通商品</option></sc-if><sc-if value="{{ couponFormPage.options.typeStandardOff }}"><option value="standard_product">普通商品</option></sc-if><sc-if value="{{ couponFormPage.options.typeService }}"><option value="service_period" selected="selected">周期商品</option></sc-if><sc-if value="{{ couponFormPage.options.typeServiceOff }}"><option value="service_period">周期商品</option></sc-if></select>
+                    <button id="option-search" onClick="{{ couponFormPage.searchOptions }}" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;cursor:pointer;flex:none">查询</button>
+                  </div>
+                  <sc-if value="{{ couponFormPage.options.hasError }}">
+                    <p role="alert" style="margin:0;color:#B42318;font-size:12px">{{ couponFormPage.options.error }} <a onClick="{{ couponFormPage.retryOptions }}" style="color:#245BDB;cursor:pointer">重试</a></p>
+                  </sc-if>
+                  <table style="width:100%;border-collapse:collapse">
+                    <tbody>
+                      <sc-for list="{{ couponFormPage.options.items }}" as="o" hint-placeholder-count="3">
+                        <tr><td style="padding:9px 12px;border-bottom:1px solid #EEF0F3"><strong style="font-size:13px">{{ o.name }}</strong><div style="margin-top:3px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#667085">{{ o.targetRef }}</div></td><td style="padding:9px 12px;border-bottom:1px solid #EEF0F3;font-size:13px;white-space:nowrap">{{ o.priceText }}</td><td style="padding:9px 12px;border-bottom:1px solid #EEF0F3;text-align:right"><button data-target-ref="{{ o.targetRef }}" onClick="{{ couponFormPage.addRef }}" style="height:28px;padding:0 10px;border:1px solid #D0D5DD;border-radius:6px;background:#fff;color:#344054;font-size:12px;cursor:pointer">加入适用范围</button></td></tr>
+                      </sc-for>
+                    </tbody>
+                  </table>
+                  <sc-if value="{{ couponFormPage.options.empty }}">
+                    <div style="padding:14px;text-align:center;font-size:12px;color:#8F959E">当前筛选没有服务端返回的商品选项</div>
+                  </sc-if>
+                  <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px">
+                    <span style="font-size:12px;color:#8F959E;margin-right:auto">{{ couponFormPage.options.totalLabel }}</span>
+                    <sc-if value="{{ couponFormPage.options.showPrevious }}"><button id="option-previous" onClick="{{ couponFormPage.previousOptions }}" style="height:28px;padding:0 10px;border:1px solid #D0D5DD;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">上一页</button></sc-if>
+                    <sc-if value="{{ couponFormPage.options.showNext }}"><button id="option-next" onClick="{{ couponFormPage.nextOptions }}" style="height:28px;padding:0 10px;border:1px solid #D0D5DD;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">下一页</button></sc-if>
+                  </div>
+                </div>
+                </sc-if>
+                <sc-if value="{{ couponFormPage.options.mock }}">
+                <div style="padding:0 16px 14px"><p style="margin:0;font-size:12px;color:#8F5A16">测试 Mock 不提供服务端商品选项目录；适用商品仅展示并保存服务端 target_refs 原值。</p></div>
+                </sc-if>
+              </div>
+              <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px">
+                <div style="padding:12px 16px;border-bottom:1px solid #EFF0F1"><h3 style="margin:0;font-size:14px;font-weight:600">领取与有效期</h3></div>
+                <div style="padding:16px;display:flex;flex-direction:column;gap:16px">
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                    <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">领取开始（北京时间） <span style="color:#D83931">*</span></span><input id="coupon-claim-start" type="datetime-local" value="{{ couponFormPage.draft.claimStartsAt }}" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%;box-sizing:border-box;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></label>
+                    <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">领取结束（北京时间） <span style="color:#D83931">*</span></span><input id="coupon-claim-end" type="datetime-local" value="{{ couponFormPage.draft.claimEndsAt }}" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%;box-sizing:border-box;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></label>
+                  </div>
+                  <fieldset style="border:1px solid #DEE0E3;border-radius:8px;padding:12px 14px;margin:0">
+                    <legend style="padding:0 6px;font-size:12px;color:#646A73">使用有效期 <span style="color:#D83931">*</span></legend>
+                    <div style="display:flex;flex-direction:column;gap:10px">
+                      <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><sc-if value="{{ couponFormPage.draft.relativeSelected }}"><input type="radio" name="coupon-validity" checked="checked" onClick="{{ couponFormPage.setRelative }}" style="accent-color:#3370ff"></sc-if><sc-if value="{{ couponFormPage.draft.fixedSelected }}"><input type="radio" name="coupon-validity" onClick="{{ couponFormPage.setRelative }}" style="accent-color:#3370ff"></sc-if>领取后 <input id="coupon-relative-days" type="number" min="1" value="{{ couponFormPage.draft.relativeValidityDays }}" style="width:56px;height:28px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;font-size:13px;text-align:center"> 天内可用</label>
+                      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#646A73;cursor:pointer"><sc-if value="{{ couponFormPage.draft.fixedSelected }}"><input type="radio" name="coupon-validity" checked="checked" onClick="{{ couponFormPage.setFixed }}" style="accent-color:#3370ff"></sc-if><sc-if value="{{ couponFormPage.draft.relativeSelected }}"><input type="radio" name="coupon-validity" onClick="{{ couponFormPage.setFixed }}" style="accent-color:#3370ff"></sc-if>固定日期区间</label>
+                      <sc-if value="{{ couponFormPage.draft.fixedSelected }}">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;padding-left:22px">
+                          <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">固定使用开始</span><input id="coupon-use-start" type="datetime-local" value="{{ couponFormPage.draft.useStartsAt }}" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%;box-sizing:border-box;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></label>
+                          <label><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">固定使用结束</span><input id="coupon-use-end" type="datetime-local" value="{{ couponFormPage.draft.useEndsAt }}" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%;box-sizing:border-box;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></label>
+                        </div>
+                      </sc-if>
+                    </div>
+                  </fieldset>
+                </div>
+              </div>
+              <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px">
+                <div style="padding:12px 16px;border-bottom:1px solid #EFF0F1"><h3 style="margin:0;font-size:14px;font-weight:600">使用说明</h3></div>
+                <div style="padding:16px"><textarea id="coupon-instructions" rows="3" placeholder="每个微信号限领 1 张，不可叠加使用，仅限指定周期商品，退款后优惠券不返还。" style="border:1px solid #DEE0E3;border-radius:6px;padding:10px 12px;font-size:13px;background:#fff;width:100%;box-sizing:border-box;resize:vertical;line-height:20px">{{ couponFormPage.draft.instructions }}</textarea></div>
+              </div>
+              <div style="padding:14px 16px;border:1px solid #D6E4FF;border-radius:8px;background:#F5F8FF;font-size:13px;color:#245BDB;line-height:20px">适用商品使用服务端 target_refs 原值，不在浏览器中猜测或转换商品编码。发布后停用、归档和草稿删除均由列表中的真实 lifecycle operation 执行。</div>
+            </div>
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;position:sticky;top:0">
+              <div style="padding:12px 16px;border-bottom:1px solid #EFF0F1"><h3 style="margin:0;font-size:14px;font-weight:600">用户端预览</h3></div>
+              <div style="padding:16px">
+                <div style="border-radius:10px;background:linear-gradient(135deg,#3370ff,#245BDB);padding:14px 16px;color:#fff;display:flex;align-items:center;gap:14px">
+                  <div style="flex:none;text-align:center"><div style="font-size:12px;opacity:.85">立减</div><div style="font-size:28px;font-weight:700;line-height:32px">{{ couponFormPage.preview.discount }}</div></div>
+                  <div style="width:1px;height:44px;background:rgba(255,255,255,.3)"></div>
+                  <div style="min-width:0"><div style="font-size:14px;font-weight:600">{{ couponFormPage.preview.name }}</div><div style="font-size:12px;opacity:.85;margin-top:4px">{{ couponFormPage.preview.window }}</div></div>
+                </div>
+                <div style="font-size:12px;color:#8F959E;line-height:19px;margin-top:12px">预览仅反映当前表单草稿；用户在报名页与支付落地页看到的样式以发布后的服务端规则为准。</div>
+              </div>
+            </div>
+          </div>

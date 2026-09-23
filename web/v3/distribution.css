@@ -1,0 +1,84 @@
+/* The public center owns this surface. Every public baseline is deliberately
+ * scoped so mounting the admin read model in admin_base cannot reset the
+ * administration shell's color, font, or page geometry. */
+body[data-ui-surface="distribution"] { margin: 0; min-width: 320px; color: #1d2939; background: #f7f8fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+body[data-ui-surface="distribution"] *, body[data-ui-surface="distribution"] *::before, body[data-ui-surface="distribution"] *::after { box-sizing: border-box; }
+body[data-ui-surface="distribution"] .distribution-shell { width: min(720px, 100%); margin: 0 auto; padding: 24px 20px 48px; }
+body[data-ui-surface="distribution"] .distribution-head { display: grid; gap: 12px; margin-bottom: 18px; }
+body[data-ui-surface="distribution"] .distribution-head h1 { margin: 0; font-size: 24px; line-height: 32px; }
+body[data-ui-surface="distribution"] .distribution-readiness { display: grid; gap: 6px; padding: 12px 14px; border-radius: 9px; background: #eef4ff; color: #1849a9; font-size: 13px; line-height: 20px; }
+body[data-ui-surface="distribution"] .distribution-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+body[data-ui-surface="distribution"] .distribution-filters { display: flex; align-items: center; gap: 8px; margin: 0 0 18px; color: #344054; font-size: 14px; line-height: 20px; }
+body[data-ui-surface="distribution"] .distribution-filters select { flex: 1 1 auto; min-width: 0; min-height: 36px; border: 1px solid #d0d5dd; border-radius: 7px; padding: 7px 32px 7px 10px; background: #fff; color: #344054; font: inherit; }
+body[data-ui-surface="distribution"] .distribution-tab, body[data-ui-surface="distribution"] .distribution-button { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 7px 12px; border: 1px solid #d0d5dd; border-radius: 7px; background: #fff; color: #344054; cursor: pointer; font: inherit; font-size: 14px; text-decoration: none; }
+body[data-ui-surface="distribution"] .distribution-tab.active, body[data-ui-surface="distribution"] .distribution-button.primary { border-color: #3370ff; background: #3370ff; color: #fff; }
+body[data-ui-surface="distribution"] .distribution-card { display: grid; gap: 10px; padding: 18px; border: 1px solid #eaecf0; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgb(16 24 40 / 4%); }
+body[data-ui-surface="distribution"] .distribution-card h2, body[data-ui-surface="distribution"] .distribution-card h3, body[data-ui-surface="distribution"] .distribution-card p { margin: 0; }
+body[data-ui-surface="distribution"] .distribution-card p, body[data-ui-surface="distribution"] .distribution-card small { color: #667085; line-height: 20px; }
+body[data-ui-surface="distribution"] .distribution-card strong { font-size: 22px; line-height: 30px; font-variant-numeric: tabular-nums; }
+body[data-ui-surface="distribution"] .distribution-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+body[data-ui-surface="distribution"] .distribution-product { grid-template-columns: minmax(0, 1fr); }
+body[data-ui-surface="distribution"] .distribution-product-body { display: grid; align-content: start; gap: 8px; min-width: 0; }
+body[data-ui-surface="distribution"] .distribution-product-body h2 { overflow-wrap: anywhere; font-size: 17px; line-height: 25px; }
+body[data-ui-surface="distribution"] .distribution-product .distribution-button { width: 100%; }
+body[data-ui-surface="distribution"] .distribution-login { width: min(520px, 100%); margin: 0 auto; }
+body[data-ui-surface="distribution"] .distribution-login h1 { font-size: 24px; line-height: 32px; }
+body[data-ui-surface="distribution"] .distribution-login label { color: #344054; font-size: 14px; line-height: 22px; }
+body[data-ui-surface="distribution"] .distribution-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
+body[data-ui-surface="distribution"] .distribution-list { display: grid; gap: 10px; }
+body[data-ui-surface="distribution"] .distribution-status { display: inline-flex; padding: 5px 9px; border-radius: 999px; background: #ecfdf3; color: #027a48; font-size: 12px; line-height: 18px; }
+body[data-ui-surface="distribution"] .distribution-status-已停用 { background: #fef3f2; color: #b42318; }
+body[data-ui-surface="distribution"] .distribution-message { min-height: 20px; margin: 14px 0 0; color: #027a48; font-size: 13px; line-height: 20px; }
+body[data-ui-surface="distribution"] .distribution-message[data-error="true"], body[data-ui-surface="distribution"] .distribution-error { color: #b42318; }
+body[data-ui-surface="distribution"] .distribution-dialog { width: min(440px, calc(100vw - 32px)); border: 0; background: transparent; padding: 0; }
+body[data-ui-surface="distribution"] .distribution-dialog::backdrop { background: rgb(16 24 40 / 45%); }
+body[data-ui-surface="distribution"] .distribution-qr { width: 220px; height: 220px; margin: 4px auto; }
+body[data-ui-surface="distribution"] .distribution-qr svg { display: block; width: 100%; height: 100%; }
+body[data-ui-surface="distribution"] .distribution-dialog input { width: 100%; min-height: 36px; border: 1px solid #d0d5dd; border-radius: 7px; padding: 7px 9px; color: #344054; }
+
+/* Admin keeps its established shell tokens and component primitives. */
+#distribution-admin-root { display: grid; gap: 18px; min-width: 0; max-width: 100%; }
+#distribution-admin-root > section { min-width: 0; }
+#distribution-admin-root .distribution-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+#distribution-admin-root .distribution-summary { display: grid; min-width: 0; max-width: 100%; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel); }
+#distribution-admin-root .distribution-summary__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+#distribution-admin-root .distribution-summary h2 { margin: 0; color: var(--text); font-size: var(--ui-section, 16px); line-height: var(--ui-line, 22px); }
+#distribution-admin-root .distribution-summary p { margin: 5px 0 0; color: var(--text-2); font-size: var(--ui-caption, 12px); line-height: 20px; }
+#distribution-admin-root .distribution-summary__periods { display: flex; gap: 6px; flex-wrap: wrap; }
+#distribution-admin-root .distribution-summary__periods .distribution-button { min-height: var(--ui-control, 36px); }
+#distribution-admin-root .distribution-summary__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+#distribution-admin-root .distribution-summary-card { display: grid; align-content: center; gap: 6px; min-height: 108px; padding: 16px; border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--panel-strong); }
+#distribution-admin-root .distribution-summary-card__label { color: var(--text-2); font-size: var(--ui-caption, 12px); line-height: 18px; }
+#distribution-admin-root .distribution-summary-card strong { overflow-wrap: anywhere; color: var(--text); font-size: clamp(26px, 2vw, 32px); font-weight: 650; line-height: 1.2; letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
+#distribution-admin-root .distribution-summary-card[data-distribution-summary-status="data_missing"] { border-color: var(--warn, #f79009); }
+#distribution-admin-root .distribution-summary-card[data-distribution-summary-status="failed"] { border-color: var(--danger, #d92d20); }
+#distribution-admin-root .distribution-summary-card[data-distribution-summary-status="failed"] strong { color: var(--danger, #d92d20); }
+#distribution-admin-root .distribution-summary__feedback { margin: 0; color: var(--danger); }
+#distribution-admin-root .distribution-admin-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
+#distribution-admin-root .distribution-admin-controls .distribution-tabs { flex: 0 0 auto; }
+#distribution-admin-root .distribution-admin-filter { display: flex; align-items: center; flex: 1 1 280px; justify-content: flex-end; min-width: 0; gap: 8px; color: var(--text-2); font-size: var(--ui-caption, 12px); }
+#distribution-admin-root .distribution-admin-filter > span, #distribution-admin-root .distribution-admin-filter .distribution-button { flex: 0 0 auto; }
+#distribution-admin-root .distribution-admin-filter input { flex: 0 1 min(320px, 100%); width: min(320px, 100%); min-width: 0; min-height: var(--ui-control, 36px); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 10px; background: var(--panel); color: var(--text); font: inherit; }
+#distribution-admin-root .distribution-admin-filter .distribution-button { width: auto; }
+#distribution-admin-root .distribution-admin-filter input:focus { border-color: var(--brand); outline: 3px solid color-mix(in srgb, var(--brand) 16%, transparent); }
+#distribution-admin-root .distribution-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+#distribution-admin-root .distribution-table-scroll .admin-table { min-width: 980px; font-size: 13px; line-height: 20px; }
+#distribution-admin-root .distribution-table-scroll .admin-table th, #distribution-admin-root .distribution-table-scroll .admin-table td { overflow-wrap: anywhere; }
+#distribution-admin-root .distribution-table-scroll td > span[data-actions], #distribution-admin-root .distribution-table-scroll td > span[data-exception] { display: flex; gap: 6px; flex-wrap: wrap; }
+#distribution-admin-root .distribution-pagination { display: flex; justify-content: flex-end; }
+#distribution-admin-root .distribution-message { min-height: 20px; margin: 0; color: var(--brand-strong); font-size: 13px; line-height: 20px; }
+#distribution-admin-root .distribution-message[data-error="true"], #distribution-admin-root .distribution-error { color: var(--danger); }
+body[data-ui-surface="admin"] .shared-detail-drawer .distribution-detail-body { display: grid; gap: 16px; min-height: 72px; color: var(--text); line-height: 20px; }
+body[data-ui-surface="admin"] .shared-detail-drawer .distribution-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+body[data-ui-surface="admin"] .shared-detail-drawer .distribution-detail-fact { display: grid; gap: 4px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-strong); }
+body[data-ui-surface="admin"] .shared-detail-drawer .distribution-detail-fact span { color: var(--muted); font-size: 12px; }
+body[data-ui-surface="admin"] .shared-detail-drawer .distribution-detail-fact strong { overflow-wrap: anywhere; font-size: 14px; line-height: 20px; }
+body[data-ui-surface="admin"] .shared-detail-drawer .distribution-detail-list { display: grid; gap: 8px; }
+body[data-ui-surface="admin"] .shared-detail-drawer .distribution-detail-list h3 { margin: 0; color: var(--text); }
+body[data-ui-surface="admin"] .shared-detail-drawer .distribution-detail-list p { margin: 0; color: var(--muted); }
+body[data-ui-surface="admin"] .shared-detail-drawer .distribution-detail-record { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: inherit; text-align: left; }
+body[data-ui-surface="admin"] .shared-detail-drawer button.distribution-detail-record { cursor: pointer; font: inherit; }
+body[data-ui-surface="admin"] .shared-detail-drawer .distribution-detail-record:hover { border-color: var(--brand); }
+body[data-ui-surface="admin"] .shared-detail-drawer .distribution-detail-record .distribution-detail-fact { padding: 0; border: 0; background: transparent; }
+@media (max-width: 980px) { #distribution-admin-root .distribution-summary__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { body[data-ui-surface="distribution"] .distribution-shell { padding: 20px 14px max(28px, env(safe-area-inset-bottom)); } body[data-ui-surface="distribution"] .distribution-tabs { gap: 6px; } body[data-ui-surface="distribution"] .distribution-filters { gap: 6px; flex-wrap: nowrap; } body[data-ui-surface="distribution"] .distribution-filters select { min-height: 44px; } body[data-ui-surface="distribution"] .distribution-tab, body[data-ui-surface="distribution"] .distribution-button { min-height: 44px; } body[data-ui-surface="distribution"] .distribution-dialog input { min-height: 44px; } body[data-ui-surface="distribution"] .distribution-metrics { gap: 10px; } body[data-ui-surface="distribution"] .distribution-metrics .distribution-card { min-width: 0; padding: 14px; } body[data-ui-surface="distribution"] .distribution-metrics strong { font-size: 18px; line-height: 26px; } body[data-ui-surface="admin"] .shared-detail-drawer .distribution-detail-record { grid-template-columns: 1fr; } #distribution-admin-root .distribution-summary { padding: 14px; } #distribution-admin-root .distribution-summary__grid { grid-template-columns: 1fr; } #distribution-admin-root .distribution-admin-controls { align-items: stretch; } #distribution-admin-root .distribution-admin-filter { flex-basis: 100%; justify-content: flex-start; } #distribution-admin-root .distribution-admin-filter input { flex-basis: min(320px, 100%); } }

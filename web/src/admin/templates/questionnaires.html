@@ -1,0 +1,70 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><span>客户管理后台</span><span>/</span><span>运营</span></div>
+              <div style="font-size:16px;font-weight:600;line-height:22px">问卷</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex:none">
+              <button onClick="{{ questionnairePage.createTemplate }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;cursor:pointer">创建测评问卷模板</button>
+              <button onClick="{{ questionnairePage.create }}" style="height:30px;padding:0 12px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">创建新问卷</button>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+              <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid #EFF0F1">
+                <label style="flex:1 1 260px;min-width:0"><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">搜索问卷</span><input value="{{ questionnairePage.query }}" onInput="{{ questionnairePage.setQuery }}" placeholder="按问卷名称或 ID 搜索" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;width:100%"></label>
+                <label style="flex:0 0 180px"><span style="display:block;font-size:12px;color:#646A73;margin:0 0 6px">状态筛选</span><select onChange="{{ questionnairePage.setStatus }}" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 8px;font-size:13px;background:#fff;width:100%;color:#1F2329"><sc-for list="{{ questionnairePage.statusOptions }}" as="o"><sc-if value="{{ o.selected }}"><option value="{{ o.value }}" selected="selected">{{ o.label }}</option></sc-if><sc-if value="{{ o.unselected }}"><option value="{{ o.value }}">{{ o.label }}</option></sc-if></sc-for></select></label>
+              </div>
+              <table style="width:100%;border-collapse:collapse">
+                <thead><tr>
+                  <th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">问卷名称</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">提交后动作</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">创建时间</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:right;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">提交数</th>
+                  <th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:right;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">操作</th>
+                </tr></thead>
+                <tbody>
+                  <sc-for list="{{ rows.questionnaires }}" as="r" hint-placeholder-count="6">
+                    <tr style="{{ r.rowStyle }}">
+                      <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                          <span style="{{ r.nameStyle }}">{{ r.name }}</span><span style="font-size:12px;color:#A6AAB0">{{ r.idText }}</span>
+                          <sc-if value="{{ r.assess }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:#EFF4FF;color:#245BDB;font-size:12px">多维测评</span></sc-if>
+                          <span style="{{ r.cs }}">{{ r.status }}</span>
+                        </div>
+                      </td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;color:#646A73">{{ r.actionText }}</td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;color:#646A73;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">{{ r.createdText }}</td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:right;font-variant-numeric:tabular-nums">{{ r.count }}</td>
+                      <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;text-align:right">
+                        <div style="display:inline-flex;flex-wrap:wrap;justify-content:flex-end;gap:8px">
+                          <a onClick="{{ r.view }}" style="height:28px;padding:0 10px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;color:#1F2329;cursor:pointer">编辑</a>
+                          <a onClick="{{ r.opsGo }}" style="height:28px;padding:0 10px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;color:#1F2329;cursor:pointer">运营配置</a>
+                          <a onClick="{{ r.copyIt }}" style="font-size:13px;color:#646A73;cursor:pointer;display:inline-flex;align-items:center;height:28px">复制</a>
+                          <a onClick="{{ r.toggleIt }}" style="font-size:13px;color:#646A73;cursor:pointer;display:inline-flex;align-items:center;height:28px">{{ r.toggle }}</a>
+                          <a onClick="{{ r.shareIt }}" style="font-size:13px;color:#646A73;cursor:pointer;display:inline-flex;align-items:center;height:28px">分享</a>
+                          <a onClick="{{ r.download }}" style="font-size:13px;color:#646A73;cursor:pointer;display:inline-flex;align-items:center;height:28px">下载数据</a>
+                          <a onClick="{{ r.del }}" style="{{ r.delStyle }}">删除</a>
+                        </div>
+                      </td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 分享弹窗（链接 + 二维码） -->
+          <sc-if value="{{ share.open }}">
+          <div style="position:fixed;inset:0;background:rgba(15,23,42,.34);z-index:80;display:flex;align-items:center;justify-content:center;padding:24px">
+            <div style="width:min(400px,100%);background:#fff;border-radius:12px;box-shadow:0 24px 64px rgba(15,23,42,.22);overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #EFF0F1"><span style="font-size:15px;font-weight:600;color:#1F2329">分享{{ share.kind }} · {{ share.title }}</span><button onClick="{{ share.close }}" style="width:28px;height:28px;border:0;border-radius:6px;background:#F2F3F5;color:#646A73;cursor:pointer;font-size:14px">×</button></div>
+              <div style="padding:18px;display:grid;gap:14px">
+                <div style="display:grid;gap:6px"><label style="font-size:12px;color:#646A73;font-weight:500">分享链接</label>
+                  <div style="display:flex;gap:8px"><input value="{{ share.url }}" readonly="readonly" style="height:34px;flex:1;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:12px;background:#F7F8FA;color:#646A73;font-family:ui-monospace,Menlo,monospace;min-width:0"><button onClick="{{ share.copyLink }}" style="height:34px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#1F2329;font-size:13px;cursor:pointer;flex:none">复制</button></div>
+                </div>
+                <div style="display:grid;justify-items:center;gap:10px"><div id="shareQrBox" style="width:180px;height:180px;border:1px solid #EFF0F1;border-radius:8px;padding:6px;box-sizing:content-box"></div><button onClick="{{ share.saveQr }}" style="height:30px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#1F2329;font-size:13px;cursor:pointer">保存二维码</button></div>
+              </div>
+            </div>
+          </div>
+          </sc-if>

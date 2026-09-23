@@ -1,0 +1,135 @@
+schema_version: 1
+pr: PR02
+scope: media
+status: active
+http_contract:
+  status: active
+  expected_methods: 29
+v3_base: 8ec60b7e3027e7813cd928ed43d7c8bcc7633b0e
+donor:
+  repository: /tmp/aicrm-v2-audit.yN3jmr
+  commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+  read_only: true
+  runtime_dependency: false
+rules:
+  backend: v2 source is adapted only for the v3 module path; no v2 module,
+    runtime, database, migration, central composition, or provider dependency
+  frontend: exact bytes staged outside the v3 frontend build; no design or API
+    rewrite
+  ownership: Media
+backend:
+  copied:
+    - internal/media/domain/image.go
+    - internal/media/domain/image_test.go
+    - internal/media/domain/attachment.go
+    - internal/media/domain/attachment_test.go
+    - internal/media/domain/miniprogram.go
+    - internal/media/domain/miniprogram_test.go
+    - internal/media/domain/group_invite.go
+    - internal/media/domain/group_invite_test.go
+    - internal/media/port/port.go
+    - internal/media/port/attachment.go
+    - internal/media/port/miniprogram.go
+    - internal/media/port/content_delivery.go
+    - internal/media/port/groupops_material.go
+    - internal/media/port/groupops_material_test.go
+    - internal/media/port/mutations.go
+    - internal/media/groupopsmaterial/freezer.go
+    - internal/media/groupopsmaterial/freezer_test.go
+    - internal/media/app/list.go
+    - internal/media/app/facets.go
+    - internal/media/app/detail.go
+    - internal/media/app/variant.go
+    - internal/media/app/content_delivery.go
+  adapted_from_donor:
+    - source: internal/media/app/upload.go
+      destination: internal/media/app/image_upload.go
+      reason: image multipart validation, receipt replay, local blob creation and event append are kept behind Media-owned v3 ports; the v2 write Service name conflicts with the v3 read Service
+    - source: internal/media/app/update.go
+      destination: internal/media/app/image_update.go
+      reason: image metadata/enabled update is exposed as a separate Media write service with a local event seam
+    - source: internal/media/app/delete.go
+      destination: internal/media/app/image_delete.go
+      reason: image hard-delete reference aggregation uses Media-owned Automation/Channel/Radar adapter ports and never imports their stores
+    - source: internal/media/app/attachment.go
+      destination: internal/media/app/attachment_library.go
+      reason: private PDF lifecycle, CAS metadata updates, multipart-safe blob read and fail-closed reference protection are kept in Media
+    - source: internal/media/app/group_invite.go
+      destination: internal/media/app/group_invite_library.go
+      reason: group-invite local card lifecycle and cover/reference checks are adapted to Media-owned ports with no WeCom effect
+    - source: internal/media/app/miniprogram.go
+      destination: internal/media/app/miniprogram_library.go
+      reason: Mini Program lifecycle and local thumbnail-cache outcomes are adapted to Media-owned ports; client thumb_media_id remains forbidden
+  characterization_tests:
+    - source: internal/media/app/upload_test.go
+      destination: internal/media/app/image_upload_test.go
+    - source: internal/media/app/update_test.go
+      destination: internal/media/app/image_update_test.go
+    - source: internal/media/app/delete_test.go
+      destination: internal/media/app/image_delete_test.go
+    - source: internal/media/app/attachment_test.go
+      destination: internal/media/app/attachment_library_test.go
+    - source: internal/media/app/group_invite_test.go
+      destination: internal/media/app/group_invite_library_test.go
+    - source: internal/media/app/miniprogram_test.go
+      destination: internal/media/app/miniprogram_library_test.go
+  contract_audit: docs/migration/media/pr02-contract-audit.md
+  added_v3_adaptation:
+    - destination: internal/media/app/service.go
+      reason: read-side Service replaces the donor write Service, which depended on v2-only event and receipt ports
+    - destination: internal/media/app/read_test.go
+      reason: focused read-side characterization coverage without donor write-test fixtures
+frontend:
+  byte_exact_staged_under: web/donors/media-v2/src
+  copied:
+    - web/src/admin/templates/images.html
+    - web/src/admin/templates/attach.html
+    - web/src/admin/templates/mpLib.html
+    - web/src/admin/controller.ts
+    - web/src/admin/main.ts
+    - web/src/admin/nav.json
+    - web/src/admin/registry.json
+    - web/src/shared/api/client.ts
+    - web/src/shared/api/types.ts
+    - web/src/shared/api/mockData.ts
+    - web/src/shared/ui/picker.ts
+    - web/src/shared/ui/feedback.ts
+    - web/src/shared/ui/download.ts
+    - web/src/shared/ui/runtime.ts
+    - web/src/shared/ui/tokens.css
+    - web/src/api/admin.ts
+    - web/src/api/transport.ts
+    - web/src/api/generated/p4-media-compat/p4-media-compat.ts
+    - web/src/api/generated/p4-media-content-delivery/p4-media-content-delivery.ts
+    - web/src/api/generated/health.schemas.ts
+integrated_v3:
+  central_files:
+    - cmd/aicrm/composition.go
+    - internal/media/module.go
+    - internal/media/http/handler.go
+    - internal/media/store/postgres.go
+    - migrations/0007_media.sql
+    - api/openapi.yaml
+    - scripts/stage-pr01-effects-ui.mjs
+  transaction_boundary: PostgreSQL Unit of Work commits Media state, receipts, audit and outbox together
+  release: PR02 exposes exactly the three frozen Media management HTML routes and their required byte-exact assets; attachment initiate/part/complete is active PR02 scope
+  external_effects: provider upload, lease and reconciliation remain disabled and out of scope
+  content_package: preview/create/update/bind remains PR06 and is not exposed by PR02
+excluded:
+  - go.mod
+  - go.sum
+  - package*.json
+  - deploy
+  - CI
+  - internal/platform
+  - internal/access
+  - internal/webshell central routing
+  - v2 store, worker, historical migration, and runtime files
+verification:
+  backend_tests:
+    - go test ./internal/media/...
+    - go vet ./internal/media/...
+    - go test -race ./internal/media/...
+  frontend_integrity:
+    - sha256 donor source list in docs/migration/media/pr02-donor-sha256.txt
+    - cmp donor files against web/donors/media-v2/src staged paths

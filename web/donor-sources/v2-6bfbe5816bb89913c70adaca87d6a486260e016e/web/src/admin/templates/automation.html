@@ -1,0 +1,65 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <div style="min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><span>客户管理后台</span><span>/</span><span>运营</span></div>
+                <div style="font-size:16px;font-weight:600;line-height:22px">AI 自动化运营</div>
+              </div>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+            <div style="display:grid;grid-template-columns:270px minmax(0,1fr);gap:16px;align-items:start">
+              <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:14px">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><h2 style="margin:0;font-size:15px;font-weight:600">人群包分组</h2><button onClick="{{ aud.openCreateGroup }}" style="height:28px;padding:0 10px;border:1px solid #D6E4FF;border-radius:6px;background:#F5F8FF;color:#1849A9;font-size:12px;font-weight:500;cursor:pointer">新增</button></div>
+                <p style="margin:6px 0 12px;font-size:12px;color:#8F959E">共 {{ aud.customCount }} 个自定义分组</p>
+                <div style="display:grid;gap:8px">
+                  <sc-for list="{{ aud.groups }}" as="g" hint-placeholder-count="2">
+                    <div onClick="{{ g.pick }}" style="{{ g.box }}"><strong style="font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ g.name }}</strong><span style="{{ g.cnt }}">{{ g.count }}</span></div>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid #EFF0F1">
+                  <div style="display:grid;gap:3px"><h2 style="margin:0;font-size:15px;font-weight:600">{{ aud.curGroupName }}</h2><p style="margin:0;font-size:12px;color:#8F959E">{{ aud.total }} 个人群包 · 每页 20 个</p></div>
+                  <sc-if value="{{ aud.isCustomGroup }}">
+                    <div style="display:flex;gap:8px;flex:none"><button onClick="{{ aud.openEditGroup }}" style="height:28px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">编辑组名</button><button onClick="{{ aud.deleteGroup }}" style="height:28px;padding:0 10px;border:1px solid #FBC4C2;border-radius:6px;background:#FFF5F5;color:#D83931;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">删除组</button></div>
+                  </sc-if>
+                </div>
+              <div style="overflow-x:auto"><table style="width:100%;min-width:872px;border-collapse:collapse;table-layout:fixed">
+                <thead><tr><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:240px">人群包名称</th><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:76px">人数</th><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:140px">最后一次刷新时间</th><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:96px">刷新方式</th><th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:right;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:320px">操作</th></tr></thead>
+                <tbody>
+                  <sc-for list="{{ aud.rows }}" as="p" hint-placeholder-count="2">
+                  <tr>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><div style="display:grid;gap:6px;justify-items:start"><a href="audienceEdit.html?id={{ p.id }}" onClick="{{ p.edit }}" style="display:inline-flex;align-items:center;gap:8px;color:#1849A9;font-size:13px;font-weight:600;cursor:pointer;line-height:19px;text-align:left;text-decoration:none"><span style="width:8px;height:8px;border-radius:50%;background:var(--accent,#3370ff);box-shadow:0 0 0 3px #EFF6FF;flex:none"></span>{{ p.name }}</a><span style="{{ p.verStyle }}">{{ p.version }}</span></div></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="font-size:13px;font-weight:600">{{ p.countText }}</span></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="font-size:13px;color:#646A73">{{ p.lastRefresh }}</span></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="{{ p.refreshStyle }}">{{ p.refreshMode }}</span></td>
+                    <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:right;vertical-align:middle"><div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap"><button onClick="{{ p.edit }}" style="height:28px;padding:0 10px;border:1px solid #D6E4FF;border-radius:6px;background:#F5F8FF;color:#1849A9;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">编辑</button><button onClick="{{ p.copyPkg }}" style="height:28px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">复制</button><button onClick="{{ p.toggle }}" style="height:28px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">{{ p.toggleText }}</button><button onClick="{{ p.del }}" style="height:28px;padding:0 10px;border:1px solid #FBC4C2;border-radius:6px;background:#FFF5F5;color:#D83931;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">删除</button><button onClick="{{ p.broadcast }}" style="height:28px;padding:0 10px;border:1px solid var(--accent,#3370ff);border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">群发</button></div></td>
+                  </tr>
+                  </sc-for>
+                </tbody>
+              </table></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-top:1px solid #EFF0F1;background:#FAFBFC">
+                  <span style="font-size:12px;color:#8F959E">第 1 / 1 页，共 {{ aud.total }} 个</span>
+                  <div style="display:flex;gap:8px"><button style="height:28px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">上一页</button><button style="height:28px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap">下一页</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 新增 / 编辑分组弹窗（生产 #groupModal 对应组件） -->
+          <sc-if value="{{ aud.groupModalOpen }}">
+          <div style="position:fixed;inset:0;background:rgba(15,23,42,.34);z-index:80;display:flex;align-items:center;justify-content:center;padding:24px">
+            <div style="width:min(400px,100%);background:#fff;border-radius:12px;box-shadow:0 24px 64px rgba(15,23,42,.22);overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #EFF0F1"><span style="font-size:15px;font-weight:600;color:#1F2329">{{ aud.groupModalTitle }}</span><button onClick="{{ aud.closeModal }}" style="width:28px;height:28px;border:0;border-radius:6px;background:#F2F3F5;color:#646A73;cursor:pointer;font-size:14px">×</button></div>
+              <div style="padding:18px">
+                <label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">分组名称</label>
+                <input id="fGroupName" maxlength="80" placeholder="请输入分组名称（80 字以内）" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;background:#fff;color:#1F2329;box-sizing:border-box">
+              </div>
+              <div style="display:flex;justify-content:flex-end;gap:8px;padding:0 18px 18px">
+                <button onClick="{{ aud.closeModal }}" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#1F2329;font-size:13px;cursor:pointer">取消</button>
+                <button onClick="{{ aud.saveGroup }}" style="height:32px;padding:0 16px;border:1px solid var(--accent,#3370ff);border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">确认</button>
+              </div>
+            </div>
+          </div>
+          </sc-if>

@@ -1,0 +1,28 @@
+version: 1
+donor:
+  repository: https://github.com/qianlan33333-png/AI-CRM.git
+  commit: dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f
+scope:
+  included: [plan-list, plan-detail, recipient-drawer, content-editor, material-picker, individual-review, whole-plan-review]
+  excluded: [campaigns, observability, automation-operations, historical-data]
+frontend:
+  classification: byte-frozen
+  files:
+    - {source: aicrm_next/app/admin_console/templates/admin_console/cloud_plan_review.html, frozen: web/donors/ai-assistant-production/templates/cloud_plan_review.html, sha256: f1868eb6b815a6320de6085ff8738cd0558a7b4daacc400238d2347e2978b58f}
+    - {source: aicrm_next/app/admin_console/static/admin_console/cloud_plan_review.js, frozen: web/donors/ai-assistant-production/static/cloud_plan_review.js, sha256: 6025321e25e25d46a724a909f5332217f1dc6a1d3b856cf9b35f0e2e73289cdd}
+    - {source: aicrm_next/app/admin_console/static/admin_console/send_content_composer.css, frozen: web/donors/ai-assistant-production/static/send_content_composer.css, sha256: d542f246a1fb311040bb39329bb50d1b7383105269aa6bb0e6556d014d9700c1}
+    - {source: aicrm_next/app/admin_console/static/admin_console/send_content_composer.js, frozen: web/donors/ai-assistant-production/static/send_content_composer.js, sha256: f58c588c681079d1d16ae610e8662ef177acc94caf8e612c35f373de769a6b85}
+    - {source: aicrm_next/app/admin_console/static/admin_console/send_content_readonly_detail.css, frozen: web/donors/ai-assistant-production/static/send_content_readonly_detail.css, sha256: 03aeeaf9b8e9e9d74dd8488835b01926e1cca7cb7ebb53f3988f3ceaed231c18}
+    - {source: aicrm_next/app/admin_console/static/admin_console/send_content_readonly_detail.js, frozen: web/donors/ai-assistant-production/static/send_content_readonly_detail.js, sha256: 1017b2368de30a6d58f344978efb3ca20ba6375888b6ba15184da9d19ccb1313}
+    - {source: aicrm_next/app/admin_console/static/admin_console/material_picker.css, frozen: web/donors/ai-assistant-production/static/material_picker.css, sha256: 46deddd60fbbbf6a94603e689fda6830d1a5b1aa221d0af8223bb6855846f1e1}
+    - {source: aicrm_next/app/admin_console/static/admin_console/material_picker.js, frozen: web/donors/ai-assistant-production/static/material_picker.js, sha256: 8f3e63686ffdd029d8f15b6112b771372467527fd533aa688711e0e33bb6bd73}
+    - {source: aicrm_next/app/admin_console/static/admin_console/group_chat_picker.css, frozen: web/donors/ai-assistant-production/static/group_chat_picker.css, sha256: 99627d8e05be5419c53a5cfbc3c8d6d006b6e4efafec157dd412aa656e858481}
+    - {source: aicrm_next/app/admin_console/static/admin_console/group_chat_picker.js, frozen: web/donors/ai-assistant-production/static/group_chat_picker.js, sha256: da3de5fc5861f1b22e61bbc2726b3de4ebdab8420e4af3342ba3e0c478f2c1ed}
+    - {source: ui-preview/labs/ai-assistant.html, frozen: web/donors/ai-assistant-production/ui-preview/ai-assistant.html, sha256: 7a5d2c9f51bdf34c403f35bab1f229a1d1b5703ae3876e8e5b4b586d0e7c2eee}
+backend_evidence:
+  classification: behavior-only
+  files:
+    - {path: aicrm_next/extensions/growth/cloud_orchestrator/api.py, sha256: cd76356a9ad1aa0634cdd10833acb66b79bd0e53a115f74974de80005b00d0d8}
+    - {path: aicrm_next/extensions/growth/cloud_orchestrator/application.py, sha256: 2ea54a7cbd346fae257104c58f8aea4f8ea2713086a8f6487a60faab5fe0ba65}
+    - {path: aicrm_next/extensions/growth/cloud_orchestrator/repository.py, sha256: e5025815831a863785bd0ebdcae5231d4361051b2b5ae489648af09b9bfd071f}
+    - {path: aicrm_next/extensions/growth/cloud_orchestrator/review_plans.py, sha256: fe357d95893555cdeaad8030a19bc19dd447ecffd2be957f61af7f361d2a8923}

@@ -1,0 +1,78 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><span>客户管理后台</span><span>/</span><span>素材</span></div>
+              <div style="font-size:16px;font-weight:600;line-height:22px">附件素材库</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex:none"><button onClick="{{ attachPage.openUpload }}" style="height:30px;padding:0 12px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">上传附件</button></div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid #EFF0F1">
+                <div style="min-width:0"><h2 style="margin:0;font-size:14px;font-weight:600">附件列表</h2></div><div style="display:flex;align-items:center;gap:8px;flex:none"><input placeholder="搜索附件名" style="height:30px;width:200px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px"></div>
+              </div>
+              <div style="overflow-x:auto">
+              <table style="width:100%;min-width:900px;border-collapse:collapse">
+                <thead><tr><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:280px">附件名</th><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:130px">标签</th><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:90px">类型</th><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:100px">大小</th><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:160px">上传时间</th><th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:right;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:130px">操作</th></tr></thead>
+                <tbody>
+                  <sc-for list="{{ rows.attachItems }}" as="a" hint-placeholder-count="5">
+                  <tr style="{{ a.rowStyle }}">
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><div style="display:flex;align-items:center;gap:8px"><span style="{{ a.badge }}">{{ a.type }}</span><span style="font-size:13px">{{ a.name }}</span></div></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="font-size:12px;color:#646A73">{{ a.tags }}</span></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:#F2F3F5;color:#646A73;font-size:12px;white-space:nowrap">{{ a.type }}</span></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="font-size:12px;color:#646A73">{{ a.size }}</span></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="font-size:12px;color:#646A73">{{ a.uploadedAt }}</span></td>
+                    <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:right;vertical-align:middle"><div style="display:flex;flex-wrap:wrap;gap:2px;justify-content:flex-end"><button onClick="{{ a.download }}" style="height:24px;padding:0 6px;border:0;border-radius:4px;background:transparent;color:#245BDB;font-size:12px;cursor:pointer;white-space:nowrap">下载</button><button onClick="{{ a.edit }}" style="height:24px;padding:0 6px;border:0;border-radius:4px;background:transparent;color:#245BDB;font-size:12px;cursor:pointer;white-space:nowrap">编辑</button><button onClick="{{ a.del }}" style="height:24px;padding:0 6px;border:0;border-radius:4px;background:transparent;color:#D83931;font-size:12px;cursor:pointer;white-space:nowrap">删除</button></div></td>
+                  </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- 上传附件弹窗（生产 upload 弹窗） -->
+          <sc-if value="{{ attachPage.uploadOpen }}">
+          <div style="position:fixed;inset:0;background:rgba(15,23,42,.34);z-index:80;display:flex;align-items:center;justify-content:center;padding:24px">
+            <div style="width:min(480px,100%);background:#fff;border-radius:12px;box-shadow:0 24px 64px rgba(15,23,42,.22);overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #EFF0F1"><span style="font-size:15px;font-weight:600;color:#1F2329">上传附件</span><button onClick="{{ attachPage.closeModal }}" style="width:28px;height:28px;border:0;border-radius:6px;background:#F2F3F5;color:#646A73;cursor:pointer;font-size:14px">×</button></div>
+              <div style="padding:18px;display:grid;gap:14px">
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">附件文件</label><input id="fAttUpFile" type="file" accept="application/pdf" style="width:100%;font-size:13px"></div>
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">附件名称</label><input id="fAttUpName" placeholder="留空则使用文件名" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;box-sizing:border-box"></div>
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">标签（逗号分隔）</label><input id="fAttUpTags" placeholder="如：课程表,共学营" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;box-sizing:border-box"></div>
+                <div style="font-size:12px;color:#A6AAB0;line-height:19px">当前后端契约仅接收不超过 10 MiB 的 PDF；上传后可在支持附件引用的配置中选择。</div>
+              </div>
+              <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #EFF0F1;background:#FAFBFC">
+                <button onClick="{{ attachPage.closeModal }}" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#1F2329;font-size:13px;cursor:pointer">取消</button>
+                <button onClick="{{ attachPage.submitUpload }}" style="height:32px;padding:0 16px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">上传</button>
+              </div>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- 编辑附件弹窗（生产 edit 弹窗：重命名 + 标签 + 停用） -->
+          <sc-if value="{{ attachPage.editOpen }}">
+          <div style="position:fixed;inset:0;background:rgba(15,23,42,.34);z-index:80;display:flex;align-items:center;justify-content:center;padding:24px">
+            <div style="width:min(460px,100%);background:#fff;border-radius:12px;box-shadow:0 24px 64px rgba(15,23,42,.22);overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #EFF0F1"><span style="font-size:15px;font-weight:600;color:#1F2329">编辑附件</span><button onClick="{{ attachPage.closeModal }}" style="width:28px;height:28px;border:0;border-radius:6px;background:#F2F3F5;color:#646A73;cursor:pointer;font-size:14px">×</button></div>
+              <div style="padding:18px;display:grid;gap:14px">
+                <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:#8F959E">
+                  <span style="{{ attachPage.editing.badge }}">{{ attachPage.editing.type }}</span>
+                  <span>大小：{{ attachPage.editing.size }} · 上传于 {{ attachPage.editing.uploadedAt }}</span>
+                </div>
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">附件名称</label><input id="fAttName" value="{{ attachPage.editing.name }}" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;box-sizing:border-box"></div>
+                <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">标签（逗号分隔）</label><input id="fAttTags" value="{{ attachPage.editing.tags }}" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;box-sizing:border-box"></div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 18px;border-top:1px solid #EFF0F1;background:#FAFBFC">
+                <div style="display:flex;gap:8px">
+                  <button onClick="{{ attachPage.del }}" style="height:32px;padding:0 12px;border:1px solid #FBC4C2;border-radius:6px;background:#FFF5F5;color:#D83931;font-size:13px;cursor:pointer">删除</button>
+                  <button onClick="{{ attachPage.toggle }}" style="height:32px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#646A73;font-size:13px;cursor:pointer">{{ attachPage.toggleText }}</button>
+                </div>
+                <div style="display:flex;gap:8px">
+                  <button onClick="{{ attachPage.closeModal }}" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#1F2329;font-size:13px;cursor:pointer">取消</button>
+                  <button onClick="{{ attachPage.save }}" style="height:32px;padding:0 16px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">保存</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          </sc-if>

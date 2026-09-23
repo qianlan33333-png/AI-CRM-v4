@@ -1,0 +1,62 @@
+[
+  {
+    "key": "auth",
+    "title": "Q1 · 微信授权拦截页",
+    "group": "Q"
+  },
+  {
+    "key": "all",
+    "title": "Q2 · 整卷平铺（all_in_one）",
+    "group": "Q"
+  },
+  {
+    "key": "one",
+    "title": "Q3 · 逐题作答（one_by_one）",
+    "group": "Q"
+  },
+  {
+    "key": "loading",
+    "title": "Q4 · 加载中",
+    "group": "Q"
+  },
+  {
+    "key": "error",
+    "title": "Q5 · 校验 / 提交报错",
+    "group": "Q"
+  },
+  {
+    "key": "result",
+    "title": "Q6 · 测评结果页",
+    "group": "Q"
+  },
+  {
+    "key": "done",
+    "title": "Q7 · 已提交 + 渠道二维码",
+    "group": "Q"
+  },
+  {
+    "key": "signup",
+    "title": "S1 · 未开通（立即报名）",
+    "group": "S"
+  },
+  {
+    "key": "active",
+    "title": "S2 · 生效中（剩余天数 + 添加企微）",
+    "group": "S"
+  },
+  {
+    "key": "expired",
+    "title": "S3 · 已过期（重新开通）",
+    "group": "S"
+  },
+  {
+    "key": "pay",
+    "title": "S4 · 支付落地页",
+    "group": "S"
+  },
+  {
+    "key": "qr",
+    "title": "S5 · 企微二维码弹层",
+    "group": "S"
+  }
+]

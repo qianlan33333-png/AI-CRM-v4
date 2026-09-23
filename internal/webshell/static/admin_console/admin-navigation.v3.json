@@ -1,0 +1,321 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "key": "overview",
+      "label": "总览",
+      "items": [
+        {
+          "key": "overview",
+          "label": "经营总览",
+          "endpoint": "api.admin_operating_overview",
+          "href": "/admin",
+          "active_prefixes": [
+            "/admin",
+            "/admin/index.html"
+          ],
+          "required_permission": ""
+        }
+      ]
+    },
+    {
+      "key": "customers",
+      "label": "用户",
+      "items": [
+        {
+          "key": "customers",
+          "label": "用户激活 / 用户列表",
+          "endpoint": "api.admin_console_customers",
+          "href": "/admin/customers",
+          "active_prefixes": [
+            "/admin/customers",
+            "/admin/customers.html",
+            "/admin/customerDetail.html"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "user_ops_funnel",
+          "label": "漏斗 / 数据看板",
+          "endpoint": "api.admin_hxc_dashboard_workspace",
+          "href": "/admin/hxc-dashboard",
+          "active_prefixes": [
+            "/admin/hxc-dashboard"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "wecom_tags",
+          "label": "企微标签管理",
+          "endpoint": "api.admin_wecom_tags_page",
+          "href": "/admin/wecom-tags",
+          "active_prefixes": [
+            "/admin/wecom-tags"
+          ],
+          "required_permission": ""
+        }
+      ]
+    },
+    {
+      "key": "operations",
+      "label": "运营",
+      "items": [
+        {
+          "key": "automation_conversion",
+          "label": "自动化运营",
+          "endpoint": "api.admin_automation_conversion",
+          "href": "/admin/automation-conversion",
+          "active_prefixes": [
+            "/admin/automation-conversion"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "automation_agents",
+          "label": "自动化话术",
+          "endpoint": "api.admin_automation_agents_page",
+          "href": "/admin/automation-agents",
+          "active_prefixes": [
+            "/admin/automation-agents",
+            "/admin/agents.html",
+            "/admin/agentEdit.html"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "operation_cycles",
+          "label": "运营闭环",
+          "endpoint": "api.admin_operation_cycles_page",
+          "href": "/admin/operation-cycles",
+          "active_prefixes": [
+            "/admin/operation-cycles"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "group_ops",
+          "label": "群运营计划",
+          "endpoint": "api.admin_group_ops_ui",
+          "href": "/admin/automation-conversion/group-ops/ui",
+          "active_prefixes": [
+            "/admin/automation-conversion/group-ops",
+            "/admin/groupops.html",
+            "/admin/groupopsDetail.html"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "group_invitations",
+          "label": "群邀请",
+          "endpoint": "api.admin_group_invitations",
+          "href": "/admin/group-invitations",
+          "active_prefixes": ["/admin/group-invitations"],
+          "required_permission": ""
+        },
+        {
+          "key": "channels",
+          "label": "渠道码中心",
+          "endpoint": "api.admin_channels_page",
+          "href": "/admin/channels",
+          "active_prefixes": [
+            "/admin/channels"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "cloud_orchestrator",
+          "label": "AI 助手",
+          "endpoint": "api.admin_cloud_orchestrator_workspace",
+          "href": "/admin/cloud-orchestrator/plans",
+          "active_prefixes": [
+            "/admin/cloud-orchestrator"
+          ],
+          "required_permission": ""
+        }
+      ]
+    },
+    {
+      "key": "commerce",
+      "label": "交易",
+      "items": [
+        {
+          "key": "wechat_pay_transactions",
+          "label": "交易管理",
+          "endpoint": "api.admin_orders_page",
+          "href": "/admin/orders",
+          "active_prefixes": [
+            "/admin/orders",
+            "/admin/orders.html",
+            "/admin/orderDetail.html",
+            "/admin/wechat-pay/transactions"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "wechat_pay_products",
+          "label": "商品管理",
+          "endpoint": "api.admin_wechat_pay_products_page",
+          "href": "/admin/wechat-pay/products",
+          "active_prefixes": [
+            "/admin/wechat-pay/products",
+            "/admin/products.html",
+            "/admin/wechat-pay/productForm.html",
+            "/admin/productForm.html"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "service_period_products",
+          "label": "周期商品管理",
+          "endpoint": "api.admin_service_period_products_page",
+          "href": "/admin/service-period-products",
+          "active_prefixes": [
+            "/admin/service-period-products",
+            "/admin/spProducts.html",
+            "/admin/spProductForm.html",
+            "/admin/spProductData.html",
+            "/admin/wechat-pay/spProducts.html",
+            "/admin/wechat-pay/spProductForm.html",
+            "/admin/wechat-pay/spProductData.html"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "coupons",
+          "label": "优惠券",
+          "endpoint": "api.admin_coupons_page",
+          "href": "/admin/coupons",
+          "active_prefixes": [
+            "/admin/coupons",
+            "/admin/coupons.html",
+            "/admin/couponForm.html",
+            "/admin/couponData.html"
+          ],
+          "required_permission": ""
+        }
+      ]
+    },
+    {
+      "key": "distribution",
+      "label": "分销",
+      "items": [
+        {
+          "key": "distribution",
+          "label": "分销管理",
+          "endpoint": "api.admin_distribution_page",
+          "href": "/admin/distribution",
+          "active_prefixes": [
+            "/admin/distribution"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "referral",
+          "label": "裂变活动",
+          "endpoint": "api.admin_referral_page",
+          "href": "/admin/referral",
+          "active_prefixes": ["/admin/referral"],
+          "required_permission": ""
+        }
+      ]
+    },
+    {
+      "key": "content",
+      "label": "内容素材",
+      "items": [
+        {
+          "key": "questionnaires",
+          "label": "问卷",
+          "endpoint": "api.admin_questionnaires",
+          "href": "/admin/questionnaires",
+          "active_prefixes": [
+            "/admin/questionnaires",
+            "/admin/questionnaires.html",
+            "/admin/questionnaireDetail.html",
+            "/admin/questionnaireOps.html"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "radar_links",
+          "label": "内容雷达",
+          "endpoint": "api.admin_radar_links",
+          "href": "/admin/radar-links",
+          "active_prefixes": [
+            "/admin/radar-links",
+            "/admin/radar.html",
+            "/admin/radarDetail.html",
+            "/admin/radarForm.html"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "image_library",
+          "label": "素材库",
+          "endpoint": "api.admin_materials_workspace",
+          "href": "/admin/materials",
+          "active_prefixes": [
+            "/admin/materials",
+            "/admin/image-library",
+            "/admin/miniprogram-library",
+            "/admin/attachment-library",
+            "/admin/images.html",
+            "/admin/mpLib.html",
+            "/admin/attach.html"
+          ],
+          "required_permission": ""
+        }
+      ]
+    },
+    {
+      "key": "system",
+      "label": "系统设置",
+      "items": [
+        {
+          "key": "owner_migration",
+          "label": "负责人迁移",
+          "endpoint": "api.admin_owner_migration_page",
+          "href": "/admin/owner-migration",
+          "active_prefixes": [
+            "/admin/owner-migration",
+            "/admin/ownerMig.html"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "ops_governance",
+          "label": "运行治理",
+          "endpoint": "api.admin_ops_governance",
+          "href": "/admin/ops",
+          "active_prefixes": [
+            "/admin/ops"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "config",
+          "label": "配置",
+          "endpoint": "api.admin_config",
+          "href": "/admin/config",
+          "active_prefixes": [
+            "/admin/config",
+            "/admin/config.html",
+            "/admin/configDetail.html"
+          ],
+          "required_permission": ""
+        },
+        {
+          "key": "api_docs",
+          "label": "API 文档",
+          "endpoint": "api.admin_api_docs",
+          "href": "/admin/api-docs",
+          "active_prefixes": [
+            "/admin/api-docs",
+            "/admin/apidocs.html"
+          ],
+          "required_permission": ""
+        }
+      ]
+    }
+  ]
+}

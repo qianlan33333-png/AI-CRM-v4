@@ -1,0 +1,29 @@
+#!/usr/bin/env node
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DonorViewError, verifySourceIndex } from './donor-source-views.mjs';
+
+const repository = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const usage = 'usage: node scripts/verify-donor-sources.mjs [--root DIRECTORY] [--index REPOSITORY_RELATIVE_PATH]';
+
+function parseArgs(args) {
+  const result = { root: repository, index: 'web/donor-sources/source-index.json' };
+  for (let position = 0; position < args.length; position += 1) {
+    const flag = args[position];
+    if (flag === '--help') return { help: true };
+    if (!['--root', '--index'].includes(flag) || position + 1 >= args.length) throw new Error(usage);
+    result[flag.slice(2)] = args[position + 1];
+    position += 1;
+  }
+  return result;
+}
+
+try {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) console.log(usage);
+  else console.log(JSON.stringify(verifySourceIndex(path.resolve(args.root), args.index), null, 2));
+} catch (error) {
+  const prefix = error instanceof DonorViewError ? `${error.code}: ` : '';
+  console.error(`${prefix}${error.message}`);
+  process.exitCode = 1;
+}

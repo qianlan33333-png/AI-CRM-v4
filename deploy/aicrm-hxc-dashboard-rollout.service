@@ -1,0 +1,12 @@
+[Unit]
+Description=AI CRM HXC identity rollout refresh trigger
+After=network-online.target postgresql.service aicrm-effects-worker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=aicrm
+Group=aicrm
+EnvironmentFile=/etc/aicrm/aicrm.env
+EnvironmentFile=-/opt/aicrm/current/release.env
+ExecStart=/usr/bin/env AICRM_ROLE=worker AICRM_HXC_SYNC_TRIGGER=initial /opt/aicrm/current/bin/aicrm

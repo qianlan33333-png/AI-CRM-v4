@@ -1,0 +1,25 @@
+{
+  "retrieved_at": "2026-09-08T03:17:50.609858+00:00",
+  "url": "https://developer.work.weixin.qq.com/document/path/94797",
+  "http_status": 200,
+  "html_bytes": 1745382,
+  "html_sha256": "fc56ba84fb819c6a1b1a11e1ba6efc40f8bd0468ce17d778bb3220009cc58ef1",
+  "page_updated_at": "2025-04-21",
+  "source": "official rendered HTML obtained directly; web text extractor failed",
+  "confirmed_contract": {
+    "legacy_jweixin_section_present": true,
+    "api": "sendChatMessage",
+    "application_identity_required": true,
+    "current_context_entry_restrictions_documented": true,
+    "news_fields": [
+      "link",
+      "title",
+      "desc",
+      "imgUrl"
+    ],
+    "legacy_image_field": "mediaid",
+    "explicit_success": "sendChatMessage:ok",
+    "official_media_required_not_public_account_media": true
+  },
+  "scope": "Protocol source verification only. No SDK replacement, no client/provider delivery acceptance. Full official HTML is temporary and is not committed."
+}

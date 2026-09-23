@@ -1,0 +1,19 @@
+# AI-CRM-v2 survey frontend behavior donor.
+# donor: https://github.com/qianlan33333-png/AI-CRM-v2
+# commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+d17595ec5c252063a1c4cb04658ff8f1ba8d9eeaf48aa3d2b18d07a21c708d4a  web/src/admin/sections/questionnaireEditor.css
+1d01f49f1542d30c1f29f81cd521b8aca50798fe3dd4d11592325eb0b726f732  web/src/admin/sections/questionnaireEditorStyles.css
+7dece7733e8171ce3d3ef9f8cd01f2fc605fb4528e171dcba478a87e7f24721b  web/src/admin/sections/surveyUnresolvedHistory.ts
+441aa59954f4d828d18cc0f260d28ead4be3d4f2ac75ed263bcbaefcbcbe35ce  web/src/admin/templates/questionnaireDetail.html
+aaef55a4c6aa8162ec089a0e780c634b5d9d4c8bdc91cfdd56a3cacd76eb22a8  web/src/admin/templates/questionnaireEditorStandalone.html
+1f78044ab225669767fb78bdb0ff0601571c9c53d69edfb547b8615ef651a860  web/src/admin/templates/questionnaireOps.html
+0143e9419df0c60fafbebe0db4d3cc327f1ef9a61c78e40eac8d4d82a544de8d  web/src/admin/templates/questionnaires.html
+96445735ced8725cdf9b37ba6606dd209083ee1c39dab102a72c2066dff36e81  web/src/api/generated/p4-sidebar-questionnaires/p4-sidebar-questionnaires.ts
+28695d65d830c62e9face771fa40747d99975dcff435858cea294597592ce969  web/src/api/generated/p4-survey-compat/p4-survey-compat.ts
+0faff7c9283cceaeadd151e5adb03280a12ca8b79ae4b94a674d96c5a395d291  web/src/api/generated/p4-survey-unresolved-history/p4-survey-unresolved-history.ts
+3ed4aaf0c373d26b8ebabce4fa7efd276c45b2bc340c04c8a476b5afce150807  web/src/api/generated/p4-survey/p4-survey.ts
+f32c7ecb07fc92a81dbd503a6c010880654dfc76ce20abb97c7874161139a841  web/src/api/public-survey.ts
+19d59dbcbfe9e0e30d648399c7756481be72bc430bb0fadc9120b36b53634fb5  web/src/api/questionnaireEditor.ts
+3261ac15d6cd45358b94a016d6444d069b0d9e8284a8dbccf997099705c82be4  web/src/api/surveyUnresolvedHistory.ts
+ad3de566c2d8aa1f881c081d0874e589cc5673f05406acdb8ded0c1461b79803  web/src/api/surveyUnresolvedHistoryHttp.ts
+5e0e21e313356fadd05f87376fff25c9c6504965a8511d063631514c9d009bb8  web/src/sidebar/tabs/questionnaires.ts

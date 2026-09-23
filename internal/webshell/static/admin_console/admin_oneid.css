@@ -1,0 +1,164 @@
+.admin-oneid-card,
+.admin-oneid-list-card {
+  display: grid;
+  gap: 18px;
+}
+
+.admin-oneid-query-grid,
+.admin-oneid-list-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.admin-oneid-section {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+}
+
+.admin-oneid-section__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-oneid-section__head h3,
+.admin-oneid-detail-block h4 {
+  margin: 0;
+}
+
+.admin-oneid-section__head h3 {
+  font-size: 17px;
+}
+
+.admin-oneid-section__head p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.admin-oneid-detail {
+  display: grid;
+  gap: 18px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.admin-oneid-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-oneid-detail-field {
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+}
+
+.admin-oneid-detail-field span,
+.admin-oneid-detail-block h4 {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-oneid-detail-field strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.admin-oneid-detail-block {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-oneid-token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-oneid-token {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--brand-border);
+  border-radius: 999px;
+  color: var(--brand-strong);
+  background: var(--brand-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-oneid-table {
+  min-width: 620px;
+}
+
+.admin-oneid-table td {
+  vertical-align: middle;
+}
+
+.admin-oneid-table__ids {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.admin-oneid-table__muted {
+  color: var(--muted);
+}
+
+.admin-oneid-source-table {
+  min-width: 1180px;
+}
+
+.admin-oneid-source-reason {
+  max-width: 150px;
+  margin-right: 6px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.admin-oneid-candidate-actions {
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.admin-oneid-list-card .admin-state {
+  min-height: 132px;
+}
+
+@media (max-width: 1180px) {
+  .admin-oneid-query-grid,
+  .admin-oneid-list-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .admin-oneid-section,
+  .admin-oneid-detail {
+    padding: 12px;
+  }
+
+  .admin-oneid-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}

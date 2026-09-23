@@ -1,0 +1,121 @@
+<sc-if value="{{ customerDetail.notFound }}">
+  <div data-customer-not-found style="margin:32px;padding:24px;background:#fff;border:1px solid #DEE0E3;border-radius:8px;text-align:center">
+    <div style="font-size:16px;font-weight:600;color:#1F2329;margin-bottom:8px">客户档案不存在</div>
+    <div style="font-size:13px;color:#646A73;margin-bottom:16px">该客户可能已删除，或当前账号无权查看此 OneID。</div>
+    <button onClick="{{ go.customers }}" style="height:32px;padding:0 14px;border:0;border-radius:6px;background:#3370ff;color:#fff;font-size:13px;cursor:pointer">返回客户列表</button>
+  </div>
+</sc-if>
+<sc-if value="{{ customerDetail.ready }}">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0">
+      <a onClick="{{ go.customers }}" style="width:28px;height:28px;border:1px solid #DEE0E3;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#646A73" stroke-width="1.6"><path d="M9.6 3.6L5.2 8l4.4 4.4"/></svg></a>
+      <div style="min-width:0">
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><a onClick="{{ go.customers }}" style="cursor:pointer;color:#8F959E">客户列表</a><span>/</span><span>客户档案</span></div>
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:16px;font-weight:600;line-height:22px">{{ customer.item.name }}</span><span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:4px;background:#EBF9EC;color:#2EA121;font-size:12px">客户档案</span></div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex:none">
+      <button onClick="{{ go.customers }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;cursor:pointer">返回客户列表</button>
+    </div>
+  </div>
+  <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+    <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:16px">
+      <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px">
+        <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">姓名</div><div style="font-size:14px;font-weight:500">{{ customer.item.name }}</div></div>
+        <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">添加时间</div><div style="font-size:13px;color:#646A73">{{ customerDetail.addedAt }}</div></div>
+        <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">负责人（staff ID）</div><div style="font-size:14px">{{ customer.item.owner }}</div></div>
+        <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">客户 OneID</div><div style="font-size:13px;color:#646A73;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis">{{ customer.item.id }}</div></div>
+        <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">当前阶段</div><div style="font-size:13px;color:#1F2329">{{ customerDetail.stageName }}</div></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid #F2F3F5;font-size:12px;color:#8F959E">
+        <span>来源渠道 ID：{{ customerDetail.channelId }}</span>
+        <span>最近互动：{{ customerDetail.lastInteractAt }}</span>
+      </div>
+    </div>
+
+    <details style="background:#fff;border:1px solid #DEE0E3;border-radius:8px">
+      <summary style="padding:12px 16px;font-size:14px;font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between"><span>更新客户资料</span><span style="font-size:12px;color:#8F959E;font-weight:400">展开编辑姓名 / 阶段 / 标签</span></summary>
+      <div style="padding:0 16px 16px;display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:12px;align-items:end">
+        <label><span style="display:block;font-size:12px;color:#646A73;margin-bottom:6px">姓名</span><input id="fCustomerName" value="{{ customer.item.name }}" style="height:32px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px"></label>
+        <label><span style="display:block;font-size:12px;color:#646A73;margin-bottom:6px">阶段（当前：{{ customerDetail.stageName }}；留空清除）</span><input id="fCustomerStage" value="{{ customer.item.stageId }}" list="customerStages" placeholder="输入或选择阶段" style="height:32px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px"></label>
+        <label><span style="display:block;font-size:12px;color:#646A73;margin-bottom:6px">标签 ID（企微标签目录编号）</span><input id="fCustomerTag" inputmode="numeric" placeholder="输入标签编号" style="height:32px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px"></label>
+        <div style="display:flex;gap:6px"><button onClick="{{ customer.save }}" style="height:32px;padding:0 12px;border:0;border-radius:6px;background:#3370ff;color:#fff">保存资料/阶段</button><button onClick="{{ customer.addTag }}" style="height:32px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#fff">加标签</button><button onClick="{{ customer.removeTag }}" style="height:32px;padding:0 10px;border:1px solid #FBC4C2;border-radius:6px;background:#FFF5F5;color:#D83931">移除标签</button></div>
+        <datalist id="customerStages"><sc-for list="{{ customer.stages }}" as="st"><option value="{{ st.v }}">{{ st.k }}</option></sc-for></datalist>
+      </div>
+    </details>
+
+    <div style="display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:12px;align-items:start">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+        <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #EFF0F1"><h2 style="margin:0;font-size:14px;font-weight:600">实时标签</h2><span style="font-size:12px;color:#8F959E">企微实时读取，不写入数据库</span></div>
+          <div style="padding:14px 16px;display:flex;flex-wrap:wrap;gap:8px">
+            <sc-for list="{{ customerDetail.tags }}" as="t" hint-placeholder-count="6">
+              <span style="display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:4px;background:#F2F3F5;color:#646A73;font-size:12px">{{ t.name }}</span>
+            </sc-for>
+          </div>
+        </div>
+        <div data-customer-survey style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #EFF0F1"><div><h2 style="margin:0;font-size:14px;font-weight:600">最近匹配的安全问卷提交</h2><p data-customer-answer-policy style="margin:2px 0 0;font-size:12px;color:#8F959E">仅展示提交、问卷、分数及选择题 ID；不展示自由文本、身份值或评测结果。</p></div><span style="font-size:12px;color:#8F959E">{{ customerDetail.surveyCompletenessLabel }}</span></div>
+          <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ customerDetail.surveyItems }}" as="s" hint-placeholder-count="3">
+              <div style="padding:10px 12px;border:1px solid #EFF0F1;border-radius:8px;background:#FAFAFB">
+                <div style="display:flex;justify-content:space-between;gap:12px;font-size:12px;color:#646A73"><span>提交 {{ s.submissionId }} · 问卷 {{ s.questionnaireId }} · 分数 {{ s.score }}</span><span>{{ s.submittedAt }}</span></div>
+                <div style="margin-top:5px;font-size:12px;color:#8F959E">{{ s.choices }}</div>
+              </div>
+            </sc-for>
+            <sc-if value="{{ customerDetail.surveyEmpty }}"><div style="padding:18px;text-align:center;color:#8F959E;font-size:13px">当前扫描范围内暂无匹配提交</div></sc-if>
+            <sc-if value="{{ customerDetail.surveyTruncated }}"><div style="padding:8px 10px;border-radius:6px;background:#FFF7E6;color:#B26A00;font-size:12px">结果不完整：已达到扫描或返回上限。</div></sc-if>
+            <div style="color:#8F959E;font-size:12px">评测结果：当前 V2 契约不可用。</div>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #EFF0F1"><div><h2 style="margin:0;font-size:14px;font-weight:600">客户时间线</h2><p style="margin:2px 0 0;font-size:12px;color:#8F959E">只展示事件类型和发生时间</p></div><span style="font-size:12px;color:#8F959E">{{ customerDetail.snapshotLabel }}</span></div>
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr><th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:42%">事件类型</th><th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">发生时间</th></tr></thead>
+            <tbody>
+              <sc-for list="{{ customerDetail.timeline }}" as="t" hint-placeholder-count="4">
+                <tr><td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;font-size:13px;color:#646A73">{{ t.eventType }}</td><td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;font-size:13px">{{ t.occurredAt }}</td></tr>
+              </sc-for>
+              <sc-if value="{{ customerDetail.timelineEmpty }}"><tr><td colspan="2" style="padding:24px;text-align:center;color:#8F959E;font-size:13px">暂无时间线事件</td></tr></sc-if>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #EFF0F1">
+          <div><h2 style="margin:0;font-size:14px;font-weight:600">聊天活动摘要</h2><p style="margin:2px 0 0;font-size:12px;color:#8F959E">{{ customerDetail.archiveLabel }} · 仅展示类型和时间，不展示正文</p></div>
+          <span style="font-size:12px;color:#8F959E">{{ customerDetail.chatTotalLabel }}</span>
+          <button onClick="{{ customer.reload }}" style="height:28px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">刷新记录</button>
+        </div>
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+          <sc-for list="{{ customerDetail.chatItems }}" as="m" hint-placeholder-count="4">
+            <div style="padding:8px 12px;border:1px solid #EFF0F1;border-radius:8px;background:#FAFAFB">
+              <div style="font-size:11px;color:#A6AAB0;margin-bottom:4px">{{ m.channel }} · {{ m.time }}</div>
+              <div style="font-size:13px;color:#646A73">消息类型：{{ m.type }}</div>
+            </div>
+          </sc-for>
+          <sc-if value="{{ customerDetail.chatEmpty }}"><div style="padding:24px;text-align:center;color:#8F959E;font-size:13px">暂无聊天活动摘要</div></sc-if>
+        </div>
+      </div>
+    </div>
+
+    <details data-customer-hxc style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+      <summary style="padding:12px 16px;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #EFF0F1"><span><span style="font-size:14px;font-weight:600">黄小璨使用与权益</span><span style="margin-left:8px;font-size:12px;color:#8F959E">只读当前状态，不含聊天正文</span></span><span style="font-size:12px;color:#8F959E">最后同步 {{ customerDetail.hxcLastSyncedAt }}</span></summary>
+      <sc-if value="{{ customerDetail.hxcUnavailable }}"><div style="padding:18px 16px;color:#D46B08;font-size:13px">黄小璨数据暂不可用。</div></sc-if>
+      <sc-if value="{{ customerDetail.hxcEmpty }}"><div style="padding:18px 16px;color:#8F959E;font-size:13px">当前客户暂无已匹配的黄小璨账号。</div></sc-if>
+      <sc-if value="{{ customerDetail.hxcStatusAvailable }}">
+        <div style="padding:14px 16px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 18px">
+          <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">会员等级</div><div style="font-size:14px;font-weight:500">{{ customerDetail.hxcTier }}</div></div>
+          <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">到期 / 剩余天数</div><div style="font-size:13px">{{ customerDetail.hxcExpiresAt }} / {{ customerDetail.hxcDaysRemaining }}</div></div>
+          <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">当前周期聊天 已用 / 额度</div><div style="font-size:13px">{{ customerDetail.hxcChatUsage }}</div></div>
+          <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">咨询 已用 / 额度</div><div style="font-size:13px">{{ customerDetail.hxcConsultationUsage }}</div></div>
+          <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">会话 7天 / 30天 / 累计</div><div style="font-size:13px">{{ customerDetail.hxcSessions }}</div></div>
+          <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">消息 7天 / 30天 / 累计</div><div style="font-size:13px">{{ customerDetail.hxcMessages }}</div></div>
+          <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">最近使用</div><div style="font-size:13px">{{ customerDetail.hxcLastUsedAt }} · {{ customerDetail.hxcLastCapability }}</div></div>
+          <div><div style="font-size:12px;color:#8F959E;margin-bottom:4px">结构化画像</div><div style="font-size:13px">{{ customerDetail.hxcProfile }}</div></div>
+        </div>
+      </sc-if>
+    </details>
+  </div>
+</sc-if>

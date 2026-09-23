@@ -1,0 +1,24 @@
+[Unit]
+Description=AI CRM Excel preparation and observation component
+After=network.target
+
+[Service]
+Type=simple
+User=aicrm-excel
+Group=aicrm-excel
+WorkingDirectory=/opt/aicrm/current/components/excel-batches
+EnvironmentFile=/etc/aicrm-excel/service.env
+ExecStart=/opt/aicrm-excel/venv/bin/python /opt/aicrm/current/components/excel-batches/batches.py --config /etc/aicrm-excel/config.json --database /var/lib/aicrm-excel/batches.sqlite --port 8791
+Restart=on-failure
+RestartSec=5
+StateDirectory=aicrm-excel
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/aicrm-excel
+ReadWritePaths=/var/lib/aicrm-excel
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+{
+  "schema_version": "aicrm-order-distribution-qualification-v1",
+  "run_key": "qualification-audit-20260914",
+  "source_system": "aicrm-production",
+  "snapshot_at": "2026-09-14T12:00:00Z",
+  "rows": [
+    {
+      "order_id": 71,
+      "order_item_line": 1,
+      "product_id": 9,
+      "product_type": "standard_product",
+      "source_product_code": "course-9",
+      "payer_customer_id": 41,
+      "beneficiary_customer_id": 42,
+      "item_paid_minor": 100,
+      "payment_confirmed_at": "2026-09-14T10:00:00Z",
+      "order_source_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{{define "admin_customers"}}
+<div data-customer-directory-root
+  data-customers-url="/api/admin/customers"
+  data-sync-url="/api/admin/customer-sync-runs"
+  data-tag-preview-url="/api/v1/customer-tag-commands/preview"
+  data-tag-command-url="/api/v1/customer-tag-commands"
+  data-tags-url="/api/admin/wecom/tags">
+{{if eq .RequestPath "/admin/customers"}}
+<section class="admin-card">
+  <div class="admin-card-head admin-card-head--tight">
+    <div><h2>用户查找</h2></div>
+  </div>
+  <form id="customer-list-filters" class="admin-filter-bar admin-form-grid admin-form-grid--wide-filters customer-search-form" autocomplete="off">
+    <label><span>关键词</span><input type="text" name="keyword" maxlength="200" placeholder="姓名、用户编号等"></label>
+    <label><span>手机号</span><input type="tel" name="phone" inputmode="numeric" maxlength="11" autocomplete="off" placeholder="用户手机号"></label>
+    <label><span>用户状态</span><select name="status"><option value="">全部</option><option value="active">正常</option><option value="merged">已归并</option><option value="closed">已关闭</option></select></label>
+    <div class="admin-toolbar">
+      <button type="submit" class="admin-button admin-button--primary">查询</button>
+      <button type="button" class="admin-button admin-button--ghost" id="customer-list-clear">清空</button>
+    </div>
+  </form>
+  <div id="customer-page-alert" class="admin-alert" role="status" aria-live="polite" hidden></div>
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head admin-card-head--tight">
+    <div><h2>用户列表</h2><p id="customer-sync-summary">正在读取企微用户同步状态…</p></div>
+    <div class="admin-toolbar customer-list-heading-actions">
+      <div class="admin-chip admin-chip--neutral" id="customer-list-summary">正在读取用户数量</div>
+      <button class="admin-button admin-button--ghost" id="customer-sync-start" type="button">重新拉取企微用户</button>
+      <button class="admin-button admin-button--ghost" id="customer-list-refresh" type="button">刷新</button>
+    </div>
+  </div>
+  <div class="customer-sync-strip" id="customer-sync-metrics" aria-live="polite"></div>
+  <div id="customer-list-state" class="admin-state admin-state--inline admin-state--loading"><strong>正在加载用户</strong><span>读取 v3 用户目录。</span></div>
+  <div id="customer-list-table-wrap" class="admin-table-wrap" hidden>
+    <table class="admin-table">
+      <thead><tr><th>选择</th><th>用户</th><th>用户编号</th><th>手机号</th><th>最后同步</th><th>操作</th></tr></thead>
+      <tbody id="customer-list-body"></tbody>
+    </table>
+  </div>
+  <form id="customer-tag-batch" class="admin-toolbar" autocomplete="off" style="margin-top:12px">
+    <label>批量加标签 <select name="add_tag_ids" multiple aria-label="批量加标签" disabled></select></label>
+    <label>批量移除标签 <select name="remove_tag_ids" multiple aria-label="批量移除标签" disabled></select></label>
+    <button class="admin-button admin-button--secondary" type="submit">预览并确认标签变更</button>
+    <button class="admin-button admin-button--ghost" id="customer-tag-batch-refresh" type="button" hidden>刷新执行结果</button>
+    <span id="customer-tag-batch-result" role="status" aria-live="polite"></span>
+  </form>
+  <div class="admin-toolbar admin-toolbar--pager customer-list-pager">
+    <button class="admin-button admin-button--ghost" id="customer-prev-page" type="button" hidden>上一页</button>
+    <button class="admin-button admin-button--ghost" id="customer-next-page" type="button" hidden>下一页</button>
+  </div>
+</section>
+
+{{else}}
+<section class="admin-card admin-module-banner" data-customer-profile-root>
+  <div class="admin-card-head">
+    <div><p class="customer-profile-eyebrow">用户档案</p><h2 id="customer-profile-name">正在读取用户资料…</h2></div>
+    <a class="admin-button admin-button--ghost" href="/admin/customers">返回用户列表</a>
+  </div>
+  <div id="customer-detail-state" class="admin-state admin-state--inline admin-state--loading"><strong>正在加载用户档案</strong><span>读取本地用户根和安全身份摘要。</span></div>
+  <div id="customer-detail-content" hidden>
+    <section class="customer-profile-summary" aria-labelledby="customer-profile-summary-title">
+      <div class="customer-profile-section-head"><div><h3 id="customer-profile-summary-title">基本资料</h3></div></div>
+      <div class="admin-profile-grid" id="customer-detail-fields"></div>
+    </section>
+    <div id="customer-phone-ephemeral" class="admin-alert admin-alert--success customer-phone-ephemeral" role="status" aria-live="polite" hidden></div>
+
+  </div>
+</section>
+
+<section class="admin-split-grid admin-customer-detail-layout" id="customer-360-sections" hidden>
+  <div class="admin-customer-detail-main" id="customer-360-main"></div>
+  <div class="admin-customer-detail-sidebar" id="customer-360-sidebar"></div>
+</section>
+{{end}}
+</div>
+{{end}}

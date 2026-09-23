@@ -1,0 +1,34 @@
+name: governance-weekly
+
+on:
+  schedule:
+    - cron: '23 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: governance-weekly
+  cancel-in-progress: false
+
+jobs:
+  security-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/governance-setup
+      - name: Scan current source and all Git history against current vulnerability data
+        run: python3 scripts/ci/governance_security.py scan --weekly --base HEAD --tools-dir "$RUNNER_TEMP/governance-tools" --out "$RUNNER_TEMP/security-inventory"
+      - name: Retain redacted inventory; findings never mutate dependencies or business state
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: security-inventory-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/security-inventory
+          if-no-files-found: error
+          retention-days: 30

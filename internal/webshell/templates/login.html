@@ -1,0 +1,68 @@
+{{define "login_page"}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.PageTitle}} · 用户管理后台</title>
+  <link rel="stylesheet" href="/static/admin_console/login.css?v=new-shell-login-v1">
+</head>
+<body class="login-body">
+  <main class="login-stage">
+    <section class="login-card">
+      <header class="login-brand">
+        <div class="login-mark">CRM</div>
+        <div class="login-brand-text">
+          <div class="login-brand-name">用户管理后台</div>
+          <div class="login-brand-en">ADMIN CONSOLE</div>
+        </div>
+      </header>
+
+      <div class="login-head">
+        <h1>{{.PageTitle}}</h1>
+        <p>{{.PageSummary}}</p>
+        <span class="login-chip">{{.AuthModeLabel}}</span>
+      </div>
+
+      {{if .PageNotice}}<section class="login-alert login-alert--success">{{.PageNotice}}</section>{{end}}
+      {{if .PageError}}<section class="login-alert login-alert--error">{{.PageError}}</section>{{end}}
+
+      <div class="login-grid">
+        <article class="login-panel">
+          <h2>企业微信登录</h2>
+          <p class="login-panel-desc">电脑浏览器可扫码，企业微信内打开时可走应用授权。</p>
+          <div class="login-actions">
+            <a class="login-button login-button--primary" href="{{.LoginLinks.QR}}">企业微信扫码登录</a>
+            <a class="login-button login-button--ghost" href="{{.LoginLinks.OAuth}}">企业微信内打开</a>
+          </div>
+        </article>
+
+        <article class="login-panel">
+          <h2>账号登录</h2>
+          <p class="login-panel-desc">使用已授权的后台账号登录，密码只提交给当前认证请求。</p>
+          <form class="login-form" method="post" action="{{.FormAction}}" autocomplete="on">
+            <input type="hidden" name="next" value="{{.NextPath}}">
+            <input type="hidden" name="login_csrf_token" value="{{.LoginCSRFToken}}">
+            <label class="login-field">
+              <span>账号</span>
+              <input type="text" name="username" autocomplete="username" placeholder="请输入账号" required>
+            </label>
+            <label class="login-field">
+              <span>密码</span>
+              <input type="password" name="password" autocomplete="current-password" placeholder="请输入密码" required>
+            </label>
+            <div class="login-actions">
+              <button class="login-button login-button--primary" type="submit">登录</button>
+            </div>
+          </form>
+        </article>
+      </div>
+
+      <footer class="login-foot">
+        员工权限入口预留在 <a href="/admin/config/login-access"><code>/admin/config/login-access</code></a>；认证成功后由 Access / WeCom 模块签发安全 Session，页面不保存或回显凭据。
+      </footer>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

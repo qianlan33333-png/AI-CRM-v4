@@ -1,0 +1,33 @@
+# Candidate only: do not install/reload until the cutover gates are met.
+# Existing test/admin origin remains on V3.
+id-dev.youcangogogo.com {
+ reverse_proxy 127.0.0.1:8080
+}
+
+www.youcangogogo.com {
+ # Old orders remain owned by the old signed-notification handler while they drain.
+ # Pin the origin IP, so changing public DNS cannot make this proxy loop to itself.
+ @legacy_notify {
+  method POST
+  path /api/h5/wechat-pay/notify /api/h5/wechat-pay/refund/notify
+ }
+ handle @legacy_notify {
+  reverse_proxy https://150.158.82.186 {
+   header_up Host www.youcangogogo.com
+   transport http {
+    tls_server_name www.youcangogogo.com
+    dial_timeout 5s
+    response_header_timeout 30s
+   }
+  }
+ }
+ # No legacy checkout, query, admin or arbitrary /api/h5/* fallback is proxied.
+ @legacy_notify_other_method path /api/h5/wechat-pay/notify /api/h5/wechat-pay/refund/notify
+ handle @legacy_notify_other_method {
+  respond "Method Not Allowed" 405
+ }
+ # New /api/public/wechat-pay/callbacks/payment and /refund stay on V3.
+ handle {
+  reverse_proxy 127.0.0.1:8080
+ }
+}

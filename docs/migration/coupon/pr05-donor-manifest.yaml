@@ -1,0 +1,106 @@
+schema_version: 1
+pr: PR05
+scope: coupon_rule_management
+status: preparation_only
+v3_base: 19384b93fe362c7786edc81dd5595b79570f6bb1
+
+donor:
+  repository: /tmp/aicrm-v2-audit.yN3jmr
+  commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+  read_only: true
+  runtime_dependency: false
+
+contract_audit: docs/migration/coupon/pr05-contract-audit.md
+
+boundary:
+  included:
+    - coupon rule definition create/edit
+    - rule copy, publish, stop, archive, and safe draft deletion
+    - standard-product applicability references and publication-time price/currency validation
+    - rule-owned issue counters, availability, and statistics projection
+    - fixed-range and relative-day validity configuration
+  excluded:
+    - claim execution and customer-held coupon records
+    - redemption or verification
+    - orders, payments, refunds, entitlements, memberships, and OneID
+    - historical coupon/claim/redemption import and reads
+
+backend:
+  copied_and_adapted:
+    - internal/coupon/port/port.go
+    - internal/coupon/app/service.go
+    - internal/coupon/app/board_test.go
+  added_v3_adaptation:
+    - path: internal/coupon/port/events.go
+      reason: local Coupon rule-event seam; Terra adapts it to the v3 versioned event/outbox port
+    - path: internal/coupon/port/target.go
+      reason: narrow Product applicability port carrying only product id, currency, and price
+  excluded_from_backend:
+    - internal/coupon/port/history.go
+    - internal/coupon/app/history.go
+    - internal/coupon/app/history_test.go
+    - internal/coupon/store
+    - claim, redemption, customer-held, order, payment, refund, entitlement, membership, and identity code
+
+frontend:
+  byte_exact_staged_under: web/donors/coupons-v2/src
+  copied:
+    - web/src/admin/templates/coupons.html
+    - web/src/admin/templates/couponForm.html
+    - web/src/admin/templates/couponData.html
+    - web/src/admin/controller.ts
+    - web/src/admin/main.ts
+    - web/src/admin/nav.json
+    - web/src/admin/registry.json
+    - web/src/shared/api/client.ts
+    - web/src/shared/api/types.ts
+    - web/src/shared/api/mockData.ts
+    - web/src/shared/ui/picker.ts
+    - web/src/shared/ui/feedback.ts
+    - web/src/shared/ui/download.ts
+    - web/src/shared/ui/runtime.ts
+    - web/src/shared/ui/tokens.css
+    - web/src/api/admin.ts
+    - web/src/api/transport.ts
+    - web/src/api/generated/p4-coupon-compat/p4-coupon-compat.ts
+    - web/src/api/generated/health.schemas.ts
+  immutable_excluded_domain_references:
+    - couponData.html and controller.ts retain raw claim/statistics view references from v2
+    - generated coupon compatibility types retain claim/public/sidebar shapes as donor evidence
+    - v2 has no independent rule-statistics operation; couponData statistics are claim-row derived and excluded
+  route_requirement: backend must not expose claim, redemption, customer-held, order, payment, entitlement, or OneID routes for this PR; do not modify the raw donor frontend to compensate
+  pr10_shell_requirement: a v3-owned backend/template adapter must mount the donor business hooks into the PR10 internal/webshell admin_base while preserving donor CSS/JS bytes; never deploy the v2 full page with a second .side shell and never edit donor files for integration
+
+deferred_to_terra:
+  - Coupon-owned SQL/store, UoW receipts, audit, outbox, and independent v3 migrations
+  - adapt internal/coupon/port/events.go to the v3 versioned event/outbox ports
+  - adapt internal/coupon/port/target.go to the canonical Product port without importing Product stores
+  - expose only a rule-owned statistics projection if the admin needs statistics; do not reuse coupon claim rows
+  - define any Product applicability read consistency and CAS/locking behavior at integration time
+  - keep excluded claim/redemption/customer-held/order/payment/entitlement routes absent or explicitly feature-gated
+  - mount the raw donor hooks through a v3-owned adapter into the PR10 internal/webshell admin_base; do not deploy a second .side shell
+  - do not edit files under web/donors/coupons-v2; any Web integration copy must be a separate controlled artifact
+
+forbidden_touched:
+  - cmd/aicrm
+  - api/openapi.yaml
+  - migrations
+  - go.mod
+  - go.sum
+  - package*.json
+  - deploy
+  - CI
+  - internal/platform
+  - internal/access
+  - internal/webshell
+
+verification:
+  frontend_file_count: 19
+  frontend_cmp: PASS
+  frontend_cmp_command: cmp donor web/src/<relative-path> with web/donors/coupons-v2/src/<relative-path> for every file
+  donor_sha256_file: docs/migration/coupon/pr05-donor-sha256.txt
+  target_sha256_file: docs/migration/coupon/pr05-donor-sha256.txt
+  backend_tests:
+    - go test ./internal/coupon/...
+    - go vet ./internal/coupon/...
+    - go test -race ./internal/coupon/...

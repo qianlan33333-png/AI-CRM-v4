@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "policy": "Only already reachable baseline findings with a separately approved exception, approval evidence, assigned owner and a deadline of at most 30 days may pass temporarily. Recording remediation_required never grants an exception. New reachable findings cannot be waived here; unapproved, missing or expired entries fail the change gate.",
+  "entries": [
+    {
+      "id": "GO-2026-5026",
+      "module": "golang.org/x/net",
+      "severity": "not_published_in_Go_advisory",
+      "owner": "Repository maintainer (individual assignment pending)",
+      "first_recorded": "2026-09-18",
+      "expires": "2026-10-02",
+      "status": "remediated_locally",
+      "tracking": "docs/governance/README.md#security-debt",
+      "reason": "Discovered in adoption baseline 0a0081c440be6231ecf82133e12900f9f82f7837. Integrated dependency update pins x/net v0.55.0; the subsequent complete govulncheck JSON stream has no reachable findings. This closes the local code remediation only, grants no exception, and does not assert final CI or production deployment.",
+      "evidence": "govulncheck v1.1.4 / Go 1.26.6 / source symbol scan: reachable={}; SBOM confirms golang.org/x/net v0.55.0; report SHA-256 0026bca6d4c5f2bdeb0bc924984be5e70a40fe3480732f911179cd56162655a4.",
+      "advisory": "https://pkg.go.dev/vuln/GO-2026-5026",
+      "remediated_on": "2026-09-18",
+      "fixed_version": "v0.55.0",
+      "fix_commit": "a8c089c8fb3dde3e6c7d32462092dc71f00be496",
+      "verification": {
+        "scope": "local_source_reachability",
+        "artifact": "/tmp/aicrm-governance-upgraded-vulns.json",
+        "artifact_sha256": "0026bca6d4c5f2bdeb0bc924984be5e70a40fe3480732f911179cd56162655a4",
+        "source_binding": "The raw scanner stream records dependency SBOM, not an exact Git HEAD/tree. Final integrated source must pass its own current-head CI scan.",
+        "full_ci": "pending",
+        "production_deployment": "not_verified"
+      },
+      "deadline_meaning": "Original remediation target only; never an approved exception."
+    },
+    {
+      "id": "NPM-AUDIT-2026-09-18-TOOLCHAIN",
+      "module": "active_npm_toolchain",
+      "severity": "1 critical, 14 high, 1 moderate package findings in baseline; not 16 distinct advisories",
+      "owner": "V3 build and security maintainers (individual assignment pending)",
+      "first_recorded": "2026-09-18",
+      "status": "remediated_locally",
+      "remediated_on": "2026-09-18",
+      "tracking": "docs/governance/README.md#security-debt",
+      "fix_commit": "63ebf9dabdfb6c64f3a2777260a4a084cb314c9b",
+      "tested_commit": "7acbed6453c7c10ebd236c97975137f70049768a",
+      "reason": "Upgrade current V3 execution dependencies through the reviewed toolchain ownership migration: Orval 8.33.0, esbuild 0.25.12, js-yaml 4.3.2 and resolved fast-uri 3.1.8. Preserve original donor manifests and hashes. All known npm severities remain blocking; no npm exception is allowed.",
+      "verification": {
+        "scope": "all tracked active package-lock projects including dev, optional and peer dependencies; known registry findings, not reachability",
+        "node": "24.18.0",
+        "npm": "11.12.1",
+        "incremental_artifact": "/private/tmp/aicrm-npm-7acbed6-incremental/npm-security.json",
+        "incremental_sha256": "0f9488680088e4da21dd001259d3ddce5a6af0c4bad5a9cb9b4c2edd45cd6a65",
+        "weekly_artifact": "/private/tmp/aicrm-npm-7acbed6-weekly/npm-security.json",
+        "weekly_sha256": "8bd61a91bbcfa976f10bf8fa7017b749a24105cbfda6056d6a05f017f7739a09",
+        "root_findings": 0,
+        "web_v3_findings": 0,
+        "baseline_resolved_package_findings": 16,
+        "integrated_package_and_lock_hashes_match_tested_commit": false,
+        "full_ci": "pending",
+        "production_deployment": "not_verified",
+        "integration_followup": "An explicit pinned @apidevtools/swagger-parser 13.0.0 dependency was added after Orval stopped supplying it transitively. OpenAPI validation and npm install audit (0 findings) passed locally; final integrated locks must be rescanned by exact-head CI."
+      }
+    }
+  ]
+}

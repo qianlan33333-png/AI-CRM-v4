@@ -1,0 +1,42 @@
+<style>
+.groupops-page button{height:28px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:12px;cursor:pointer;white-space:nowrap}
+</style>
+<div class="groupops-page" style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+  <div style="min-width:0">
+    <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><span>客户管理后台</span><span>/</span><span>运营</span></div>
+    <div style="font-size:16px;font-weight:600;line-height:22px">群运营计划</div>
+  </div>
+</div>
+<div class="groupops-page" style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+  <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button onClick="{{ groupOpsPage.directory }}" style="height:30px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">查看群目录</button><button onClick="{{ groupOpsPage.create }}" style="height:30px;padding:0 12px;border:0;border-radius:6px;background:#3370ff;color:#fff;font-size:13px;cursor:pointer;white-space:nowrap;flex:none">创建计划</button></div>
+  <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px">
+    <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:14px 16px"><div style="font-size:12px;color:#8F959E">运营计划</div><div style="margin-top:4px;font-size:22px;font-weight:600;line-height:28px">{{ groupOpsPage.total }}</div></div>
+    <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:14px 16px"><div style="font-size:12px;color:#8F959E">当前启用</div><div style="margin-top:4px;font-size:22px;font-weight:600;line-height:28px">{{ groupOpsPage.activeCount }}</div></div>
+    <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:14px 16px"><div style="font-size:12px;color:#8F959E">本地队列</div><div style="margin-top:4px;font-size:22px;font-weight:600;line-height:28px">{{ groupOpsPage.queueTotal }}</div></div>
+    <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:14px 16px"><div style="font-size:12px;color:#8F959E">运营成员</div><div style="margin-top:4px;font-size:22px;font-weight:600;line-height:28px">{{ groupOpsPage.memberCount }}</div></div>
+  </div>
+  <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid #EFF0F1">
+      <div style="min-width:0"><h2 style="margin:0;font-size:14px;font-weight:600">计划列表</h2></div>
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr><th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">计划名称</th><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:90px">状态</th><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:100px">本地待处理</th><th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:160px">更新时间</th><th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:right;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:240px">操作</th></tr></thead>
+      <tbody>
+        <sc-if value="{{ groupOpsPage.noPlans }}"><tr><td colspan="5" style="padding:32px 16px;text-align:center;font-size:13px;color:#8F959E">暂无群运营计划</td></tr></sc-if>
+        <sc-for list="{{ groupOpsPage.rows }}" as="p" hint-placeholder-count="3"><tr>
+          <td style="padding:10px 16px;border-bottom:1px solid #F2F3F5"><a onClick="{{ p.edit }}" style="font-size:13px;font-weight:600;color:#245BDB;cursor:pointer">{{ p.name }}</a><div style="margin-top:2px;font-size:11px;color:#A6AAB0">版本 {{ p.revision }}</div></td>
+          <td style="padding:10px 12px;border-bottom:1px solid #F2F3F5"><span style="{{ p.cs }}">{{ p.status }}</span></td>
+          <td style="padding:10px 12px;border-bottom:1px solid #F2F3F5;font-size:13px;font-variant-numeric:tabular-nums">{{ p.queueCount }}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid #F2F3F5;font-size:12px;color:#646A73">{{ p.updatedAt }}</td>
+          <td style="padding:10px 16px;border-bottom:1px solid #F2F3F5;text-align:right"><div style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button onClick="{{ p.edit }}" style="border-color:#3370ff;background:#3370ff;color:#fff">编辑</button><button onClick="{{ p.toggle }}">{{ p.toggleText }}</button><button onClick="{{ p.archive }}">归档</button><button onClick="{{ p.del }}" style="border-color:#FBC4C2;background:#FFF5F5;color:#D83931">删除草稿</button></div></td>
+        </tr></sc-for>
+      </tbody>
+    </table>
+  </div>
+  <details style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:12px 14px">
+    <summary style="cursor:pointer;font-size:13px;font-weight:600">运营成员选项（{{ groupOpsPage.memberCount }}）与本地执行边界</summary>
+    <sc-if value="{{ groupOpsPage.noMembers }}"><div style="margin-top:10px;font-size:12px;color:#8F959E">暂无运营成员</div></sc-if>
+    <sc-if value="{{ groupOpsPage.hasMembers }}"><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><sc-for list="{{ groupOpsPage.members }}" as="m"><span style="padding:4px 8px;border:1px solid #C7DAFF;border-radius:999px;background:#F5F8FF;font-size:12px">{{ m.name }} · staff_id={{ m.uid }}</span></sc-for></div></sc-if>
+    <p style="margin:10px 0 0;font-size:12px;color:#8F5A16">计划、目录和队列均为本地事实；队列不等于已发送。S06-031 仅维护本地群绑定；S06-032 刷新需要可信运营成员并显式确认，真实 Provider 配置与回执仍需单独验收。本页不接受 run-due、broadcast 或 webhook，不会执行真实群发。</p>
+  </details>
+</div>

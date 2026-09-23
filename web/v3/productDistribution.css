@@ -1,0 +1,185 @@
+/* Product-owned distribution controls share the existing admin form tokens.
+ * This is a presentation-only asset: Product/Distribution HTTP contracts own
+ * every policy, public URL and eligibility fact. */
+.product-distribution-policy {
+  display: grid;
+  gap: 16px;
+  margin: 0 0 16px;
+  padding: 20px;
+  border: 1px solid #DEE0E3;
+  border-radius: 8px;
+  background: #fff;
+  color: #1F2329;
+}
+.product-distribution-policy__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.product-distribution-policy__title { margin: 0; font-size: 16px; font-weight: 600; line-height: 24px; }
+.product-distribution-policy__hint { margin: 4px 0 0; color: #646A73; font-size: 13px; line-height: 20px; }
+.product-distribution-policy__toggle { display: inline-flex; flex: none; align-items: center; gap: 8px; min-height: 32px; color: #344054; font-size: 14px; cursor: pointer; }
+.product-distribution-policy__toggle input { width: 16px; height: 16px; margin: 0; accent-color: #3370FF; }
+.product-distribution-policy__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.product-distribution-policy__fields.is-disabled { opacity: .62; }
+.product-distribution-policy__field { display: grid; gap: 7px; color: #646A73; font-size: 13px; line-height: 20px; }
+.product-distribution-policy__field input {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid #DEE0E3;
+  border-radius: 6px;
+  background: #fff;
+  color: #1F2329;
+  font-size: 14px;
+  outline: none;
+}
+.product-distribution-policy__field input:focus { border-color: #3370FF; box-shadow: 0 0 0 3px rgba(51, 112, 255, .12); }
+
+/* The Product Host mounts this tag draft control into the frozen sale form.
+ * Keep it in this manifest-managed Product CSS so strict same-origin CSP
+ * never relies on runtime style tags or inline Host layout attributes. */
+.product-standard-tag-picker {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #DEE0E3;
+  border-radius: 8px;
+  background: #fff;
+}
+.product-standard-tag-picker__controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.product-standard-tag-picker__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.product-standard-tag-picker__button {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid #DEE0E3;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.product-standard-tag-picker input[type="checkbox"] {
+  appearance: none;
+  position: relative;
+  width: 42px;
+  height: 24px;
+  border: 0;
+  border-radius: 20px;
+  background: #cbd5e1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+[data-product-tag-enabled]::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform .15s;
+}
+.product-standard-tag-picker input:checked { background: #3370ff; }
+[data-product-tag-enabled]:checked::before { transform: translateX(18px); }
+[data-product-tag-summary] {
+  line-height: 1.8;
+  padding: 12px;
+  background: #f7f9fc;
+  border-radius: 8px;
+  color: #646A73;
+  font-size: 12px;
+}
+.product-standard-tag-picker__error {
+  margin: 0;
+  color: #D83931;
+  font-size: 12px;
+}
+
+/* Frozen legacy payment-action contract, mounted by the V3 Product Host into
+ * the existing Product editor.  These selectors stay Product-scoped so the
+ * admin shell and unrelated forms retain their own presentation. */
+.product-payment-action,
+.product-payment-push {
+  display: grid;
+  gap: 0;
+  color: #1F2329;
+  padding: 6px;
+  min-height: 420px;
+}
+.product-payment-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 18px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #EEF2F7;
+}
+.product-payment-panel__head h3 { margin: 0; font-size: 22px; font-weight: 900; }
+.product-payment-switch { display: inline-flex; align-items: center; gap: 10px; color: #1D2939; font-size: 14px; font-weight: 900; cursor: pointer; white-space: nowrap; }
+.product-payment-switch input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.product-payment-switch i { position: relative; width: 48px; height: 28px; border-radius: 999px; background: #D0D5DD; transition: background .18s; }
+.product-payment-switch i::after { content: ''; position: absolute; top: 4px; left: 4px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.24); transition: transform .18s; }
+.product-payment-switch input:checked + i { background: #2563EB; }
+.product-payment-switch input:checked + i::after { transform: translateX(20px); }
+.product-payment-panel__body { display: grid; gap: 16px; }
+.product-payment-action .product-payment-panel__body { gap: 0; }
+.product-payment-push .product-payment-panel__body { border: 1px solid #E7EBF2; border-radius: 16px; padding: 18px; }
+.product-payment-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.product-payment-mode { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; padding: 18px 20px; border: 1px solid #E7EBF2; border-radius: 16px; color: #1D2939; font-size: 18px; font-weight: 900; cursor: pointer; }
+.product-payment-mode:has(input:checked) { border-color: #93C5FD; background: #EFF6FF; color: #1D2939; }
+.product-payment-mode input { width: 18px; height: 18px; margin-top: 3px; accent-color: #1677FF; }
+.product-payment-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.product-payment-fields > label,
+.product-payment-param-label { display: grid; gap: 8px; color: #667085; font-size: 13px; font-weight: 850; }
+[data-product-purchase-lead] > label:first-child,
+.product-payment-fields[data-product-purchase-redirect] > label:first-child,
+.product-payment-fields[data-product-purchase-redirect] > label:has([data-product-purchase-h5-url]),
+.product-payment-fields[data-product-purchase-redirect] > label:has([data-product-purchase-url-link-source]),
+.product-payment-fields > label:has(textarea),
+.product-payment-fields > label:has([data-product-parity-push-remark]) { grid-column: 1 / -1; }
+.product-payment-fields input,
+.product-payment-fields select,
+.product-payment-fields textarea,
+.product-payment-param-row input { box-sizing: border-box; width: 100%; padding: 11px 13px; border: 1px solid #D0D5DD; border-radius: 10px; background: #fff; color: #1D2939; font-family: inherit; font-size: 14px; line-height: 1.45; outline: none; }
+.product-payment-fields textarea { min-height: 110px; resize: vertical; }
+.product-payment-fields input,
+.product-payment-fields select { min-height: 44px !important; height: 44px; }
+.product-payment-param-row input { min-height: 44px !important; height: 44px; }
+[data-product-purchase-redirect] { border: 1px solid #E7EBF2; border-radius: 16px; padding: 18px; }
+.product-payment-fields input:focus,
+.product-payment-fields select:focus,
+.product-payment-fields textarea:focus,
+.product-payment-param-row input:focus { border-color: #3370FF; box-shadow: 0 0 0 3px rgba(51,112,255,.12); }
+.product-payment-param-label > div { display: grid; gap: 8px; }
+.product-payment-param-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; }
+.product-payment-panel__inline-actions,
+.product-payment-panel__actions { display: flex; gap: 8px; align-items: center; }
+.product-payment-panel__inline-actions { justify-content: flex-end; }
+.product-payment-panel__actions { justify-content: flex-end; padding-top: 20px; margin-top: 20px; border-top: 1px solid #EEF2F7; }
+.product-payment-panel__inline-actions button,
+.product-payment-param-row button { min-height: 38px; padding: 8px 14px; border: 1px solid #D0D5DD; border-radius: 10px; background: #fff; color: #344054; font-size: 14px; font-weight: 850; cursor: pointer; white-space: nowrap; }
+.product-payment-primary { min-height: 38px; padding: 8px 14px; border: 1px solid #2563EB; border-radius: 10px; background: #2563EB; color: #fff; font-size: 14px; font-weight: 850; cursor: pointer; white-space: nowrap; }
+.product-payment-param-row button { border-color: #FECDCA; background: #FFF1F3; color: #D92D20; }
+.product-payment-push [data-product-parity-push-result] { min-height: 18px; color: #646A73; font-size: 12px; line-height: 18px; }
+
+@media (max-width: 720px) {
+  .product-distribution-policy { padding: 16px; }
+  .product-distribution-policy__head { flex-direction: column; gap: 8px; }
+  .product-distribution-policy__fields { grid-template-columns: 1fr; gap: 12px; }
+  .product-payment-modes,
+  .product-payment-fields { grid-template-columns: 1fr; gap: 12px; }
+  .product-payment-param-row { grid-template-columns: 1fr; }
+}

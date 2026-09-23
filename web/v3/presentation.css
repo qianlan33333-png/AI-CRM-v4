@@ -1,0 +1,195 @@
+@import "./shared/ui/contentComposer.css";
+
+/* V3 presentation tokens. Loaded after donor styles, never inside previews.
+   Inline-size selectors below are limited to frozen admin chrome: they adapt
+   its 13px body type without changing the immutable source or rendered data. */
+body[data-ui-surface] {
+  --ui-body: 14px;
+  --ui-caption: 12px;
+  --ui-section: 16px;
+  --ui-title: 20px;
+  --ui-line: 22px;
+  --ui-control: 36px;
+  font-size: var(--ui-body);
+  line-height: var(--ui-line);
+  font-weight: 400;
+}
+body[data-ui-surface="admin"] :is(.stage, .admin-main, .admin-main-wrap, .labs) {
+  min-width: 0;
+  font-size: var(--ui-body);
+  line-height: var(--ui-line);
+}
+body[data-ui-surface="admin"] :is(.nav-item, .admin-nav-link) { font-size: 14px; font-weight: 500; }
+body[data-ui-surface="admin"] :is(.side-grp, .admin-nav-group-title, .crumb, .page-desc) { font-size: 12px; line-height: 18px; }
+body[data-ui-surface="admin"] :is(.page-title, .admin-page-title, .channel-title) { font-size: 20px; line-height: 28px; font-weight: 600; }
+body[data-ui-surface="admin"] :is(.admin-card-head h2, .modal-title, .drawer-title, .dialog-title, .card-title) { font-size: 16px; line-height: 24px; font-weight: 600; }
+/* Restrict compatibility overrides to the workspace, excluding authored
+   previews, code samples and the independent questionnaire editor. */
+body[data-ui-surface="admin"] :is(#stage, .admin-main-wrap) [style*="font-size:13px"]:not(:is(.preview *, [class*="preview"] *, [contenteditable] *, .qe-editor *, pre *, code *)) {
+  font-size: 14px !important;
+  line-height: 22px;
+}
+body[data-ui-surface="admin"] :is(#stage, .admin-main-wrap) [style*="font-size: 13px"]:not(:is([class*="preview"] *, [contenteditable] *, .qe-editor *, pre *, code *)) { font-size: 14px !important; line-height: 22px; }
+/* Frozen 52px document header, not arbitrary nested section headings. */
+body[data-ui-surface="admin"] #stage [style*="height:52px"] [style*="font-size:16px"] { font-size: 20px !important; line-height: 28px !important; font-weight: 600 !important; }
+body[data-ui-surface="admin"] :is(.admin-card, .labs, #stage, .admin-main-wrap) :is(button, .btn, .admin-button, input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="hidden"]), select, textarea):not(:is([class*="preview"] *, [contenteditable] *, .qe-editor *)) {
+  font-size: 14px !important;
+  font-weight: 500;
+  line-height: 22px;
+}
+body[data-ui-surface="admin"] :is(.admin-card, .labs, #stage, .admin-main-wrap) :is(button, .btn, .admin-button, input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="hidden"]), select):not(:is([class*="preview"] *, .qe-editor *, [role="switch"])) {
+  min-height: 36px;
+}
+body[data-ui-surface="admin"] :is(#stage, .admin-main-wrap) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="hidden"]), select):not(:is([class*="preview"] *, .qe-editor *)) { box-sizing: border-box; height: 36px !important; padding-top: 6px !important; padding-bottom: 6px !important; }
+body[data-ui-surface="admin"] :is(#stage, .admin-main-wrap) :is(button, .btn, .admin-button):not(:is([class*="preview"] *, .qe-editor *, [role="switch"], .icon-btn)) { box-sizing: border-box; height: auto; padding-top: 6px; padding-bottom: 6px; }
+body[data-ui-surface="admin"] :is(table, .tbl) { font-size: 14px; line-height: 22px; }
+body[data-ui-surface="admin"] :is(table, .tbl) th { font-size: 12px; font-weight: 500; line-height: 18px; }
+body[data-ui-surface="admin"] :is(table, .tbl) :is(button, .btn, .admin-button) { min-height: 32px; }
+body[data-ui-surface="admin"] :is(.stat-value, .metric-value, .channel-metric strong, .channel-form-v3 .mini .value) { font-size: 24px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; }
+body[data-ui-surface="admin"] :is(.form-label, .field-label) { font-size: 12px; line-height: 18px; font-weight: 500; }
+body[data-ui-surface="admin"] :is(.help, .field-help, .form-help, .muted) { line-height: 20px; overflow-wrap: anywhere; }
+body[data-ui-surface="admin"] :is(.modal, .drawer, [role="dialog"]) { max-width: 100vw; }
+body[data-ui-surface="admin"] :is(.modal-panel, .drawer-panel, .modal-box, .dialog-panel, #fb-panel) { max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; }
+body[data-ui-surface="admin"] :is(.modal-body, .drawer-body) { min-height: 0; overflow-y: auto; }
+body[data-ui-surface="admin"] :is(.empty, .empty-state) { font-size: 14px; line-height: 22px; }
+body[data-ui-surface="admin"] :is(.page-head, .toolbar, .admin-card-head) { flex-wrap: wrap; }
+body[data-ui-surface="admin"] :is(.page-title, .admin-page-title, .modal-title, .drawer-title) { overflow-wrap: anywhere; }
+
+body[data-ui-surface] :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #3370ff;
+  outline-offset: 3px;
+}
+body[data-ui-surface] button:disabled { cursor: not-allowed; }
+body[data-ui-surface] :is(button, .btn, .admin-button) svg { flex-shrink: 0; vertical-align: middle; }
+body[data-ui-surface] :is([role="alert"], [data-share-read-error]) { overflow-wrap: anywhere; }
+
+/* H5 and public share pages use touch-first sizing. The WeCom sidebar keeps
+   the compact donor scale because it already runs inside a narrow desktop
+   panel and its own stylesheet defines the intended 11–16px hierarchy. */
+body:is([data-ui-surface="h5"], [data-ui-surface="share"]) {
+  --ui-body: 16px;
+  --ui-caption: 14px;
+  --ui-section: 18px;
+  --ui-title: 22px;
+  --ui-line: 24px;
+  --ui-control: 44px;
+}
+body[data-ui-surface="sidebar"] {
+  --ui-body: 13px;
+  --ui-caption: 11px;
+  --ui-section: 16px;
+  --ui-title: 18px;
+  --ui-line: 20px;
+  --ui-control: 34px;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root { max-width: 100%; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+body[data-ui-surface="sidebar"] :is(.name, .title, .row-title, .item-title, .head h2, .panel h3, .modal-head h2, .meta, .sub, .desc, .hint, .muted, .label, .row-sub, .item-sub, .field label, .modal-field > span, .phone-state, .toast) { overflow-wrap: anywhere; }
+body[data-ui-surface="sidebar"] .tabs { overflow-x: auto; }
+body[data-ui-surface="sidebar"] :is(.row-actions, .actions, .modal-actions, .head) { flex-wrap: wrap; }
+body[data-ui-surface="sidebar"] :is(.modal-panel, .modal-card, .modal-content) { max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow-y: auto; overscroll-behavior: contain; }
+body[data-ui-surface="sidebar"] :is(.row, .item, .card, .field) { min-width: 0; }
+
+/* H5 form controls and answer text only; hero artwork and QR codes are not
+   scaled. !important is confined to immutable inline presentation values. */
+body[data-ui-surface="h5"] #screen :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), textarea, select, button, label[data-option-id], [data-h5-local-exit]) {
+  font-size: 16px !important;
+  line-height: 24px !important;
+  min-height: 44px;
+}
+body[data-ui-surface="h5"] #screen label[data-option-id] span { font-size: 16px !important; line-height: 24px !important; }
+body[data-ui-surface="h5"] #screen [style*="font-size:13px"] { font-size: 14px !important; line-height: 20px !important; }
+body[data-ui-surface="h5"] #screen [data-question-id] > div:first-child { font-size: 18px !important; line-height: 26px !important; }
+body[data-ui-surface="h5"] :is(.phone-screen, #screen) { min-width: 0; }
+body[data-ui-surface="h5"] #screen [style*="flex:none"][style*="padding"]:last-child { padding-bottom: max(16px, env(safe-area-inset-bottom)) !important; }
+body[data-ui-surface="h5"] [data-h5-blocked] { font-size: 14px; line-height: 22px; }
+
+body[data-ui-surface="share"] .ix-wrap { width: 100%; max-width: 1080px; margin: 0 auto; padding: 24px; }
+body[data-ui-surface="share"] #stage h1 { margin: 0 0 20px; font-size: 22px; line-height: 30px; font-weight: 600; overflow-wrap: anywhere; }
+body[data-ui-surface="share"] #stage dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; }
+body[data-ui-surface="share"] #stage dd { margin: 0; font-variant-numeric: tabular-nums; }
+body[data-ui-surface="share"] .v3-share-table-scroll { overflow-x: auto; max-width: 100%; margin: 16px 0; border: 1px solid #dee0e3; border-radius: 8px; background: white; }
+body[data-ui-surface="share"] table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 16px; line-height: 24px; }
+body[data-ui-surface="share"] :is(th, td) { padding: 12px; text-align: left; border-bottom: 1px solid #eff0f1; overflow-wrap: anywhere; max-width: 240px; }
+body[data-ui-surface="share"] th { font-size: 14px; font-weight: 500; background: #f7f8fa; }
+body[data-ui-surface="share"] button { min-height: 44px; min-width: 44px; padding: 8px 16px; border: 1px solid #dee0e3; border-radius: 6px; background: white; color: #245bdb; font-size: 16px; line-height: 24px; font-weight: 500; }
+body[data-ui-surface="share"] [data-share-read-error] { margin: 12px 0; color: #b42318; }
+@media (max-width: 600px) {
+  /* Order detail is the only frozen workspace where the narrow screen is a
+     task page. Keep its source-owned panels readable instead of stacking the
+     desktop navigation above a squeezed two-column ledger. */
+  body.admin-shell[data-page="orderDetail"] .admin-layout { display: block; min-width: 0; }
+  body.admin-shell[data-page="orderDetail"] .admin-sidebar { display: none; }
+  body.admin-shell[data-page="orderDetail"] .admin-main-wrap { min-width: 0; padding: 0; }
+  body.admin-shell[data-page="orderDetail"] :is(.order-host-layout, #stage) { min-width: 0; width: 100%; }
+  body.admin-shell[data-page="orderDetail"] [data-order-detail-layout] {
+    grid-template-columns: minmax(0, 1fr) !important;
+    padding: 12px !important;
+    gap: 12px !important;
+  }
+  body.admin-shell[data-page="orderDetail"] [data-order-detail-section] { padding: 12px !important; }
+  body.admin-shell[data-page="orderDetail"] [data-order-detail-grid] {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 4px !important;
+  }
+  body.admin-shell[data-page="orderDetail"] :is([data-order-refund-panel], [data-order-effects-panel], .order-refund-confirmation) { min-width: 0; }
+  body.admin-shell[data-page="orderDetail"] .order-refund-confirmation :is(input, select, button) { max-width: 100%; }
+
+  body[data-ui-surface="share"] .ix-wrap { padding: 20px 16px max(20px, env(safe-area-inset-bottom)); }
+  body[data-ui-surface="share"] #stage > main > button { width: 100%; }
+  body[data-ui-surface="h5"] .h5-backdrop { padding: 0; }
+  body[data-ui-surface="h5"] .phone { width: 100%; max-width: 100vw; height: 100dvh; border-radius: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body[data-ui-surface] { scroll-behavior: auto; }
+  body[data-ui-surface] :is(.modal, .drawer, #fb-toast) { animation: none; transition: none; }
+}
+@media (max-width: 960px) {
+  body[data-ui-surface="admin"] .admin-layout { grid-template-rows: auto minmax(0, 1fr); }
+  body[data-ui-surface="admin"] .admin-sidebar { height: auto; max-height: none; }
+  body[data-ui-surface="admin"] .admin-brand { flex-shrink: 0; }
+  body[data-ui-surface="admin"] .admin-nav { flex: 0 1 auto; max-height: 40vh; }
+  body[data-ui-surface="admin"] .admin-topbar { position: relative; }
+  body[data-ui-surface="admin"] .admin-main-wrap { padding-top: 12px; }
+}
+
+@media (max-width: 600px) {
+  /* The frozen order header has a 52px desktop inline height. A production-
+     length order reference wraps on 390px, so only this route lets the header
+     grow and keeps its breadcrumb, number, and status fully visible. */
+  body.admin-shell[data-page="orderDetail"] #stage div[style*="height:52px"] {
+    height: auto !important;
+    min-height: 52px;
+    padding: 8px 12px !important;
+    align-items: flex-start !important;
+  }
+  body.admin-shell[data-page="orderDetail"] #stage div[style*="height:52px"] > div,
+  body.admin-shell[data-page="orderDetail"] #stage div[style*="height:52px"] > div > div:last-child {
+    align-items: flex-start !important;
+    min-width: 0;
+  }
+  body.admin-shell[data-page="orderDetail"] #stage div[style*="height:52px"] > div > div:last-child > div:last-child {
+    flex-wrap: wrap !important;
+    row-gap: 4px;
+  }
+  body.admin-shell[data-page="orderDetail"] #stage div[style*="height:52px"] [style*="font-family"] {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+}
+/* Page-owned dynamic commands share the single admin topbar with SSR links
+ * and tabs. This stylesheet is mounted by every admin shell. */
+body[data-ui-surface="admin"] .admin-topbar .page-header-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; }
+/* Cloud-plan commands are moved as their original nodes, so the donor's
+ * component-scoped custom properties would otherwise no longer inherit into
+ * the admin topbar. Keep the exact command semantics and disabled treatment
+ * available at their new, single page-header location without changing the
+ * frozen donor or recreating its callbacks. */
+body[data-ui-surface="admin"] .admin-topbar [data-page-header-actions="ai-plan-detail"] {
+  --plan-ink: #172033;
+  --plan-line: #d8dee8;
+  --plan-blue: #2563eb;
+  --plan-red: #d92d20;
+}
+/* The frozen Tags title uses an inline flex display. Keep the source row out
+ * of layout after the V3 shell becomes the one visible page title. */
+body[data-ui-surface="admin"] #stage [data-page-header-donor-title="tags"][hidden] { display: none !important; }

@@ -1,0 +1,61 @@
+{{define "admin_audience"}}
+<nav class="aud-workspace-tabs" aria-label="运营配置板块">
+  <a href="?tab=packages" data-audience-workspace-tab="packages" aria-current="page">人群包管理</a>
+  <a href="?tab=products" data-audience-workspace-tab="products">核心产品配置</a>
+</nav>
+<section id="coreProductPanel" hidden class="aud-card core-configuration aud-workspace-panel" aria-label="核心产品与智能分配"><header class="core-configuration-head"><h2>核心产品与智能分配</h2><p>先配置产品，再编写规则，最后用客户验证。</p></header><div id="coreOperationsRoot"></div></section>
+<section id="audiencePackagePanel" class="aud-layout aud-workspace-panel" aria-label="AI 自动化运营人群包分组">
+  <aside class="aud-card aud-groups">
+    <div class="aud-group-head"><h2>人群包分组</h2><button class="aud-btn soft" id="createGroupBtn" type="button" disabled aria-disabled="true">新增</button></div>
+    <p class="aud-group-note" id="groupSummary">共 0 个自定义分组</p>
+    <div class="aud-group-list" id="groupList">
+      <button class="aud-group-item active" type="button" disabled aria-disabled="true"><strong title="未分组">未分组</strong><span>0</span></button>
+    </div>
+  </aside>
+  <div class="aud-card">
+    <header class="aud-detail-head">
+      <div class="aud-detail-copy"><h2 id="selectedGroupName">未分组</h2><p id="selectedGroupMeta">0 个人群包 · 每页 20 个</p></div>
+      <div class="aud-actions">
+        <button class="aud-btn primary" id="createPackageBtn" type="button" disabled>新建人群包</button>
+        <span class="aud-actions" id="groupActions" hidden>
+          <button class="aud-btn" id="renameGroupBtn" type="button" disabled>编辑组名</button>
+          <button class="aud-btn danger" id="deleteGroupBtn" type="button" disabled>删除组</button>
+        </span>
+      </div>
+    </header>
+    <div class="aud-notice" id="audNotice" role="status" aria-live="polite" hidden></div>
+    <div class="aud-table-wrap">
+      <table class="aud-table" aria-label="人群包列表">
+        <thead><tr><th style="width:30%">人群包名称</th><th>人数</th><th>最后一次刷新时间</th><th>入包方式 / 状态</th><th style="text-align:right">操作</th></tr></thead>
+        <tbody id="audRows"><tr><td class="aud-empty" colspan="5">当前分组暂无人群包</td></tr></tbody>
+      </table>
+    </div>
+    <footer class="aud-pagination">
+      <span id="pageMeta">第 1 / 1 页，共 0 个</span>
+      <div class="aud-actions"><button class="aud-btn" id="prevBtn" type="button" disabled>上一页</button><button class="aud-btn" id="nextBtn" type="button" disabled>下一页</button></div>
+    </footer>
+  </div>
+</section>
+
+<div class="aud-modal" id="groupModal" hidden>
+  <form class="aud-dialog" id="groupForm">
+    <h3 id="groupModalTitle">新增分组</h3>
+    <label for="groupNameInput" class="aud-group-note">分组名称</label>
+    <input id="groupNameInput" maxlength="80" autocomplete="off" disabled>
+    <div class="aud-actions"><button class="aud-btn" id="cancelGroupBtn" type="button" disabled>取消</button><button class="aud-btn primary" type="submit" disabled>保存</button></div>
+  </form>
+</div>
+
+<div class="aud-modal" id="packageModal" hidden>
+  <form class="aud-dialog" id="packageForm">
+    <h3 id="packageModalTitle">新建人群包</h3>
+    <label for="packageCreateName" class="aud-group-note">人群包名称</label>
+    <input id="packageCreateName" maxlength="200" autocomplete="off" disabled>
+    <label for="packageCreateGroup" class="aud-group-note">所属分组</label>
+    <select id="packageCreateGroup" disabled></select>
+    <p id="packageFormHelp" class="aud-group-note">创建后为空人群包，绑定核心产品后由 AI 推荐成员。</p>
+    <p id="packageFormNotice" class="aud-notice" role="status" hidden></p>
+    <div class="aud-actions"><button class="aud-btn" id="cancelPackageBtn" type="button" disabled>取消</button><button class="aud-btn primary" id="packageSubmitBtn" type="submit" disabled>创建</button></div>
+  </form>
+</div>
+{{end}}

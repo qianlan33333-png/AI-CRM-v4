@@ -1,0 +1,164 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <a onClick="{{ go.cycles }}" style="width:28px;height:28px;border:1px solid #DEE0E3;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#646A73" stroke-width="1.6"><path d="M9.6 3.6L5.2 8l4.4 4.4"/></svg></a>
+              <div style="min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><a onClick="{{ go.cycles }}" style="cursor:pointer;color:#8F959E">运营闭环</a><span>/</span><span>单次运行档案</span></div>
+                <div style="font-size:16px;font-weight:600;line-height:22px">{{ run.label }}</div>
+              </div>
+            </div>
+            <span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:#F2F3F5;color:#646A73;font-size:12px;flex:none">只读档案</span>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:14px;align-content:start;max-width:960px">
+
+            <!-- Hero -->
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;padding:18px">
+              <div style="font-size:11px;letter-spacing:1px;color:#8F959E;font-weight:600">RUN DOSSIER · 单次运行档案</div>
+              <h2 style="margin:8px 0 6px;font-size:20px;font-weight:700">{{ run.label }}</h2>
+              <p style="margin:0 0 14px;font-size:13px;color:#646A73;line-height:1.7">{{ run.objective }}</p>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#8F959E;border-top:1px solid #F2F3F5;padding-top:12px">
+                <span>策略：<b style="color:#1F2329;font-weight:500">{{ run.strategy }}</b></span>
+                <span>运行键：<b style="color:#1F2329;font-weight:500;font-family:ui-monospace,Menlo,monospace">{{ run.runKey }}</b></span>
+                <span>快照修订：<b style="color:#1F2329;font-weight:500">{{ run.snapshotRev }}</b></span>
+              </div>
+            </div>
+
+            <!-- 章节索引 -->
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <a href="#cycle-step-1" style="height:26px;padding:0 10px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:999px;background:#fff;font-size:12px;color:#646A73;text-decoration:none;cursor:pointer"><b style="color:#3370ff;margin-right:4px">01</b>任务</a>
+              <a href="#cycle-step-2" style="height:26px;padding:0 10px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:999px;background:#fff;font-size:12px;color:#646A73;text-decoration:none;cursor:pointer"><b style="color:#3370ff;margin-right:4px">02</b>尝试</a>
+              <a href="#cycle-step-3" style="height:26px;padding:0 10px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:999px;background:#fff;font-size:12px;color:#646A73;text-decoration:none;cursor:pointer"><b style="color:#3370ff;margin-right:4px">03</b>人群</a>
+              <a href="#cycle-step-4" style="height:26px;padding:0 10px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:999px;background:#fff;font-size:12px;color:#646A73;text-decoration:none;cursor:pointer"><b style="color:#3370ff;margin-right:4px">04</b>人审</a>
+              <a href="#cycle-step-5" style="height:26px;padding:0 10px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:999px;background:#fff;font-size:12px;color:#646A73;text-decoration:none;cursor:pointer"><b style="color:#3370ff;margin-right:4px">05</b>发送</a>
+              <a href="#cycle-step-6" style="height:26px;padding:0 10px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:999px;background:#fff;font-size:12px;color:#646A73;text-decoration:none;cursor:pointer"><b style="color:#3370ff;margin-right:4px">06</b>结果</a>
+              <a href="#cycle-step-7" style="height:26px;padding:0 10px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:999px;background:#fff;font-size:12px;color:#646A73;text-decoration:none;cursor:pointer"><b style="color:#3370ff;margin-right:4px">07</b>复盘</a>
+              <a href="#cycle-step-8" style="height:26px;padding:0 10px;display:inline-flex;align-items:center;border:1px solid #DEE0E3;border-radius:999px;background:#fff;font-size:12px;color:#646A73;text-decoration:none;cursor:pointer"><b style="color:#3370ff;margin-right:4px">08</b>优化</a>
+            </div>
+
+            <!-- 01 任务目标与时间 -->
+            <div id="cycle-step-1" style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #EFF0F1"><span style="font-size:18px;font-weight:700;color:#3370ff">01</span><div><div style="font-size:10px;letter-spacing:1px;color:#8F959E">TASK DEFINITION</div><div style="font-size:15px;font-weight:600">任务目标与时间</div></div></div>
+              <div style="padding:16px;display:grid;gap:12px">
+                <div style="display:grid;grid-template-columns:110px 1fr;gap:8px;font-size:13px"><span style="color:#8F959E">目标</span><strong style="font-weight:600">{{ run.objective }}</strong></div>
+                <div style="display:grid;grid-template-columns:110px 1fr;gap:8px;font-size:13px"><span style="color:#8F959E">目标人群</span><strong style="font-weight:600">{{ run.audience }}</strong></div>
+                <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:4px">
+                  <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:10px 12px"><div style="font-size:11px;color:#8F959E">意图发送时间</div><div style="font-size:13px;font-weight:600;margin-top:4px;font-family:ui-monospace,Menlo,monospace">{{ run.intendedSendAt }}</div></div>
+                  <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:10px 12px"><div style="font-size:11px;color:#8F959E">计划排期时间</div><div style="font-size:13px;font-weight:600;margin-top:4px;font-family:ui-monospace,Menlo,monospace">{{ run.planScheduledFor }}</div></div>
+                  <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:10px 12px"><div style="font-size:11px;color:#8F959E">首次实际发送</div><div style="font-size:13px;font-weight:600;margin-top:4px;font-family:ui-monospace,Menlo,monospace">{{ run.firstSentAt }}</div></div>
+                  <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:10px 12px"><div style="font-size:11px;color:#8F959E">最后实际发送</div><div style="font-size:13px;font-weight:600;margin-top:4px;font-family:ui-monospace,Menlo,monospace">{{ run.lastSentAt }}</div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 02 前置检查与执行尝试 -->
+            <div id="cycle-step-2" style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #EFF0F1"><span style="font-size:18px;font-weight:700;color:#3370ff">02</span><div><div style="font-size:10px;letter-spacing:1px;color:#8F959E">ATTEMPTS &amp; PREFLIGHT</div><div style="font-size:15px;font-weight:600">前置检查与执行尝试</div></div></div>
+              <div style="padding:16px">
+                <sc-for list="{{ run.attempts }}" as="a" hint-placeholder-count="1">
+                  <div style="border:1px solid #EFF0F1;border-radius:8px;padding:14px;margin-bottom:10px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><strong style="font-size:13px">{{ a.label }}</strong><span style="{{ a.cs }}">{{ a.statusLabel }}</span></div>
+                    <p style="margin:8px 0;font-size:12px;color:#646A73;line-height:1.7">{{ a.summary }}</p>
+                    <div style="display:flex;gap:16px;font-size:12px;color:#8F959E;margin-bottom:10px"><span>开始 {{ a.startedAt }}</span><span>结束 {{ a.finishedAt }}</span></div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                      <sc-for list="{{ a.stages }}" as="sg"><span style="display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:999px;background:#F7F8FA;border:1px solid #EFF0F1;font-size:12px;color:#344054"><span style="width:6px;height:6px;border-radius:50%;background:{{ sg.dot }}"></span>{{ sg.label }}</span></sc-for>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <!-- 03 人群分层与去留判断 -->
+            <div id="cycle-step-3" style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #EFF0F1"><span style="font-size:18px;font-weight:700;color:#3370ff">03</span><div><div style="font-size:10px;letter-spacing:1px;color:#8F959E">AUDIENCE DECISION</div><div style="font-size:15px;font-weight:600">人群分层与去留判断</div></div></div>
+              <div style="padding:16px;display:grid;gap:10px">
+                <sc-for list="{{ run.funnel }}" as="f" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:12px"><span style="width:90px;font-size:12px;color:#646A73;text-align:right">{{ f.label }}</span><div style="flex:1;height:26px;background:#F7F8FA;border-radius:6px;overflow:hidden"><div style="width:{{ f.w }};height:100%;background:linear-gradient(90deg,#3370ff,#6FA8FF);display:flex;align-items:center;justify-content:flex-end;padding-right:8px;color:#fff;font-size:12px;font-weight:600;box-sizing:border-box">{{ f.value }}</div></div></div>
+                </sc-for>
+                <p style="margin:6px 0 0;padding:10px 12px;background:#FFF7E8;border:1px solid #FFE7BA;border-radius:8px;font-size:12px;color:#D97917">{{ run.audienceNote }}</p>
+              </div>
+            </div>
+
+            <!-- 04 人审与计划版本 -->
+            <div id="cycle-step-4" style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #EFF0F1"><span style="font-size:18px;font-weight:700;color:#3370ff">04</span><div><div style="font-size:10px;letter-spacing:1px;color:#8F959E">HUMAN REVIEW</div><div style="font-size:15px;font-weight:600">人审与计划版本</div></div></div>
+              <div style="padding:16px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">
+                <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:10px 12px"><div style="font-size:11px;color:#8F959E">人审状态</div><div style="margin-top:6px"><span style="{{ run.reviewCs }}">{{ run.reviewStatus }}</span></div></div>
+                <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:10px 12px"><div style="font-size:11px;color:#8F959E">计划版本</div><div style="font-size:14px;font-weight:600;margin-top:4px">{{ run.planVersion }}</div></div>
+                <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:10px 12px"><div style="font-size:11px;color:#8F959E">计划状态</div><div style="font-size:14px;font-weight:600;margin-top:4px">{{ run.planStatus }}<span style="font-size:11px;color:#A6AAB0;font-weight:400;margin-left:6px">{{ run.planSource }}</span></div></div>
+                <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:10px 12px"><div style="font-size:11px;color:#8F959E">目标人数</div><div style="font-size:14px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums">{{ run.targetCount }}</div></div>
+              </div>
+            </div>
+
+            <!-- 05 实际发送事实 -->
+            <div id="cycle-step-5" style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #EFF0F1"><span style="font-size:18px;font-weight:700;color:#3370ff">05</span><div><div style="font-size:10px;letter-spacing:1px;color:#8F959E">DELIVERY FACT</div><div style="font-size:15px;font-weight:600">实际发送事实</div></div></div>
+              <div style="padding:16px;display:grid;gap:12px">
+                <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px">
+                  <div style="border:1px solid #EFF0F1;border-radius:8px;padding:12px"><div style="font-size:11px;color:#8F959E">有效发送</div><div style="font-size:22px;font-weight:700;margin-top:4px;color:#2EA121;font-variant-numeric:tabular-nums">{{ run.delivery.sent }}</div><div style="font-size:11px;color:#A6AAB0;margin-top:2px">{{ run.delivery.source }}</div></div>
+                  <div style="border:1px solid #EFF0F1;border-radius:8px;padding:12px"><div style="font-size:11px;color:#8F959E">发送失败</div><div style="font-size:22px;font-weight:700;margin-top:4px;color:#D83931;font-variant-numeric:tabular-nums">{{ run.delivery.failed }}</div><div style="font-size:11px;color:#A6AAB0;margin-top:2px">含已删除好友</div></div>
+                  <div style="border:1px solid #EFF0F1;border-radius:8px;padding:12px"><div style="font-size:11px;color:#8F959E">可重试失败</div><div style="font-size:22px;font-weight:700;margin-top:4px;color:#D97917;font-variant-numeric:tabular-nums">{{ run.delivery.retryable }}</div><div style="font-size:11px;color:#A6AAB0;margin-top:2px">限频类失败</div></div>
+                  <div style="border:1px solid #EFF0F1;border-radius:8px;padding:12px"><div style="font-size:11px;color:#8F959E">发送完成率</div><div style="font-size:22px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums">{{ run.delivery.rate }}<span style="font-size:13px">%</span></div><div style="font-size:11px;color:#A6AAB0;margin-top:2px">{{ run.delivery.statusLabel }}</div></div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;font-size:12px">
+                  <div style="background:#FAFBFC;border-radius:8px;padding:8px 12px"><span style="color:#8F959E">发送状态</span><div style="font-weight:600;margin-top:2px">{{ run.delivery.statusLabel }}</div></div>
+                  <div style="background:#FAFBFC;border-radius:8px;padding:8px 12px"><span style="color:#8F959E">事实来源</span><div style="font-weight:600;margin-top:2px">{{ run.delivery.source }}</div></div>
+                  <div style="background:#FAFBFC;border-radius:8px;padding:8px 12px"><span style="color:#8F959E">首条发送</span><div style="font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace">{{ run.firstSentAt }}</div></div>
+                  <div style="background:#FAFBFC;border-radius:8px;padding:8px 12px"><span style="color:#8F959E">末条发送</span><div style="font-weight:600;margin-top:2px;font-family:ui-monospace,Menlo,monospace">{{ run.lastSentAt }}</div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 06 分窗口结果 -->
+            <div id="cycle-step-6" style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #EFF0F1"><span style="font-size:18px;font-weight:700;color:#3370ff">06</span><div><div style="font-size:10px;letter-spacing:1px;color:#8F959E">OBSERVATION WINDOWS</div><div style="font-size:15px;font-weight:600">分窗口结果</div></div></div>
+              <div style="padding:16px;display:grid;gap:10px">
+                <sc-for list="{{ run.windows }}" as="w" hint-placeholder-count="2">
+                  <div style="border:1px solid #EFF0F1;border-radius:8px;padding:14px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px"><strong style="font-size:13px">{{ w.label }}</strong><span style="{{ w.cs }}">{{ w.statusLabel }}</span></div>
+                    <sc-if value="{{ w.hasMetrics }}">
+                      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+                        <sc-for list="{{ w.metrics }}" as="mt"><div style="background:#F7F8FA;border-radius:8px;padding:8px 12px;min-width:140px"><div style="font-size:11px;color:#8F959E">{{ mt.label }}</div><div style="font-size:16px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums">{{ mt.value }}</div><div style="font-size:11px;color:#A6AAB0;margin-top:2px">{{ mt.desc }}</div></div></sc-for>
+                      </div>
+                    </sc-if>
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#8F959E"><span>观察范围 {{ w.start }} → {{ w.end }}</span><span>数据质量 {{ w.quality }}</span><span>口径限制 {{ w.limitation }}</span></div>
+                    <p style="margin:8px 0 0;font-size:11px;color:#A6AAB0">观察信号 · 不作为因果提升结论</p>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <!-- 07 结果复盘与限制 -->
+            <div id="cycle-step-7" style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #EFF0F1"><span style="font-size:18px;font-weight:700;color:#3370ff">07</span><div><div style="font-size:10px;letter-spacing:1px;color:#8F959E">POSTMORTEM</div><div style="font-size:15px;font-weight:600">结果复盘与限制</div></div></div>
+              <div style="padding:16px;display:grid;gap:12px">
+                <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:14px"><div style="font-size:11px;color:#8F959E">复盘结论</div><div style="font-size:14px;font-weight:600;margin-top:4px">{{ run.retro.summary }}</div><p style="margin:6px 0 0;font-size:12px;color:#646A73;line-height:1.7">{{ run.retro.detail }}</p></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                  <div style="border:1px solid #EFF0F1;border-radius:8px;padding:12px"><div style="font-size:12px;font-weight:600;margin-bottom:8px">已确认发现</div><ul style="margin:0;padding-left:18px;font-size:12px;color:#646A73;line-height:1.9"><sc-for list="{{ run.retro.findings }}" as="fd"><li>{{ fd }}</li></sc-for></ul></div>
+                  <div style="border:1px solid #EFF0F1;border-radius:8px;padding:12px"><div style="font-size:12px;font-weight:600;margin-bottom:8px">限制与缺口</div><ul style="margin:0;padding-left:18px;font-size:12px;color:#646A73;line-height:1.9"><sc-for list="{{ run.retro.limitations }}" as="lm"><li>{{ lm }}</li></sc-for></ul></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 08 下一轮优化 -->
+            <div id="cycle-step-8" style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #EFF0F1"><span style="font-size:18px;font-weight:700;color:#3370ff">08</span><div><div style="font-size:10px;letter-spacing:1px;color:#8F959E">NEXT ITERATION</div><div style="font-size:15px;font-weight:600">下一轮优化</div></div></div>
+              <div style="padding:16px;display:grid;gap:12px">
+                <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:14px"><span style="{{ run.next.cs }}">{{ run.next.statusLabel }}</span><div style="font-size:14px;font-weight:600;margin-top:8px">{{ run.next.summary }}</div><p style="margin:6px 0 0;font-size:12px;color:#646A73">{{ run.next.rationale }}</p></div>
+                <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;font-size:12px">
+                  <div style="background:#FAFBFC;border-radius:8px;padding:8px 12px"><span style="color:#8F959E">确认时间</span><div style="font-weight:600;margin-top:2px">{{ run.next.confirmedAt }}</div></div>
+                  <div style="background:#FAFBFC;border-radius:8px;padding:8px 12px"><span style="color:#8F959E">应用版本</span><div style="font-weight:600;margin-top:2px">{{ run.next.appliedVersion }}</div></div>
+                  <div style="background:#FAFBFC;border-radius:8px;padding:8px 12px"><span style="color:#8F959E">确认说明</span><div style="font-weight:600;margin-top:2px">{{ run.next.note }}</div></div>
+                </div>
+                <ol style="margin:0;padding:0;display:grid;gap:8px"><sc-for list="{{ run.next.changes }}" as="cg"><li style="list-style:none;display:flex;gap:10px;align-items:flex-start"><span style="width:20px;height:20px;border-radius:50%;background:#EFF4FF;color:#245BDB;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none">✓</span><p style="margin:0;font-size:13px;color:#1F2329">{{ cg }}</p></li></sc-for></ol>
+              </div>
+            </div>
+
+            <!-- 证据索引 -->
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:10px;overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #EFF0F1"><div><div style="font-size:10px;letter-spacing:1px;color:#8F959E">EVIDENCE INDEX · 证据索引</div><div style="font-size:15px;font-weight:600">关联只读事实</div></div><span style="font-size:12px;color:#8F959E">{{ run.references.length }} 条</span></div>
+              <div style="padding:16px;display:grid;gap:8px">
+                <sc-for list="{{ run.references }}" as="rf"><div style="display:flex;align-items:center;justify-content:space-between;border:1px solid #EFF0F1;border-radius:8px;padding:10px 14px"><div><div style="font-size:13px;font-weight:500">{{ rf.label }}</div><div style="font-size:12px;color:#8F959E;margin-top:2px">{{ rf.desc }}</div></div><span style="font-size:12px;color:#A6AAB0">只读</span></div></sc-for>
+              </div>
+            </div>
+
+          </div>

@@ -1,0 +1,641 @@
+name: ci
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_full:
+        description: Run all checks even when an identical merged tree has PR evidence
+        type: boolean
+        default: false
+      hxc_full_rollout:
+        description: Run HXC activation and full business acceptance (manual opt-in only)
+        type: boolean
+        default: false
+      tag_catalog_mutation_rollout:
+        description: Activate official WeCom tag catalog writes after the release is ready (manual opt-in only)
+        type: boolean
+        default: false
+      groupops_directory_rollout:
+        description: Activate WeCom staff and group directory reads without enabling message dispatch
+        type: boolean
+        default: false
+      h5_domain_rollout:
+        description: Configure www.qianlan333.cloud HTTPS and user-authorized H5 OAuth callbacks
+        type: boolean
+        default: false
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Preserve numbered main releases; only obsolete PR runs are cancelled.
+  group: ci-${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      full: ${{ steps.finalize.outputs.full }}
+      verified_run: ${{ steps.plan.outputs.verified_run }}
+      mode: ${{ steps.finalize.outputs.mode }}
+      lanes: ${{ steps.finalize.outputs.lanes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release target before building
+        run: |
+          python3 scripts/check-migration-sequence.py --base "${GITHUB_BASE_SHA:-origin/main}"
+      - id: plan
+        name: Verify whether main is exactly the tested PR tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_FULL: ${{ inputs.force_full }}
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/ci/verification.py plan
+      - id: impact
+        name: Select affected verification lanes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        if: ${{ github.event_name == 'pull_request' && steps.plan.outputs.full == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/governance_impact.py --out "$RUNNER_TEMP/impact.json"
+          selection="$(python3 scripts/ci/impact_selection.py "$RUNNER_TEMP/impact.json")"
+          echo "selection=$selection" >> "$GITHUB_STEP_SUMMARY"
+          python3 - "$selection" "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          selection = json.loads(sys.argv[1])
+          with open(sys.argv[2], "a") as output:
+              output.write("mode=" + selection["mode"] + "\n")
+              output.write("lanes=" + json.dumps(selection["lanes"], separators=(",", ":")) + "\n")
+          PY
+      - id: finalize
+        name: Publish verification plan
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.plan.outputs.mode }}" == "release" ]]; then
+            echo 'mode=release' >> "$GITHUB_OUTPUT"
+            echo 'lanes=[]' >> "$GITHUB_OUTPUT"
+            echo 'full=false' >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "push" || "${{ github.ref }}" == "refs/heads/main" || "${{ inputs.force_full }}" == "true" ]]; then
+            echo 'mode=full' >> "$GITHUB_OUTPUT"
+            echo 'lanes=["preflight","backend","frontend","browser","archive-sdk"]' >> "$GITHUB_OUTPUT"
+            echo 'full=true' >> "$GITHUB_OUTPUT"
+          elif [[ "${{ steps.plan.outputs.mode }}" == "light" ]]; then
+            echo 'mode=light' >> "$GITHUB_OUTPUT"
+            echo 'lanes=[]' >> "$GITHUB_OUTPUT"
+            echo 'full=false' >> "$GITHUB_OUTPUT"
+          elif [[ "${{ steps.impact.outputs.mode }}" == "targeted" ]]; then
+            echo 'mode=targeted' >> "$GITHUB_OUTPUT"
+            echo 'lanes=${{ steps.impact.outputs.lanes }}' >> "$GITHUB_OUTPUT"
+            echo 'full=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'mode=full' >> "$GITHUB_OUTPUT"
+            echo 'lanes=["preflight","backend","frontend","browser","archive-sdk"]' >> "$GITHUB_OUTPUT"
+            echo 'full=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  preflight:
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.lanes), 'preflight')
+    outputs:
+      classification: ${{ steps.receipt.outputs.classification }}
+      observations: ${{ steps.receipt.outputs.observations }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: setup-go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: false
+      - id: setup-node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with: {node-version: '24.18.0'}
+      - id: verify
+        if: ${{ steps.checkout.outcome == 'success' && steps.setup-go.outcome == 'success' && steps.setup-node.outcome == 'success' }}
+        name: Run canonical preflight verification lane
+        env:
+          # workflow_dispatch has no event.before; an empty value deliberately
+          # selects the checked-out HEAD parent in check-dedup-base-diff.sh.
+          AICRM_DEDUP_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before || '' }}
+          AICRM_DEDUP_HEAD_SHA: ${{ github.sha }}
+        run: python3 scripts/ci/quality_lanes.py preflight --report-dir "$RUNNER_TEMP/preflight"
+      - id: receipt
+        if: always()
+        name: Record structured preflight receipt
+        env:
+          SETUP_CHECKOUT: ${{ steps.checkout.outcome }}
+          SETUP_GO: ${{ steps.setup-go.outcome }}
+          SETUP_NODE: ${{ steps.setup-node.outcome }}
+          VERIFY: ${{ steps.verify.outcome }}
+          JOB: ${{ job.status }}
+        run: python3 scripts/ci/quality_report.py receipt --lane preflight --setup "checkout=$SETUP_CHECKOUT" --setup "go=$SETUP_GO" --setup "node=$SETUP_NODE" --verification "$VERIFY" --job "$JOB" --out "$RUNNER_TEMP/ci-receipts/preflight.json"
+      - name: Upload preflight evidence
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: preflight-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/preflight
+            ${{ runner.temp }}/ci-receipts/preflight.json
+          retention-days: 14
+
+  backend:
+    needs: [plan, preflight]
+    if: contains(fromJSON(needs.plan.outputs.lanes), 'backend')
+    outputs:
+      classification: ${{ steps.receipt.outputs.classification }}
+      observations: ${{ steps.receipt.outputs.observations }}
+    runs-on: ubuntu-latest
+    # Bound the full serial race suite plus setup/vet; each package keeps its 15m timeout.
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: aicrm_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d aicrm_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AICRM_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/aicrm_ci?sslmode=disable
+    steps:
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: setup
+        uses: ./.github/actions/ci-setup
+        with:
+          lane: race
+      - id: verify
+        if: ${{ steps.checkout.outcome == 'success' && steps.setup.outcome == 'success' }}
+        name: Run canonical backend verification lane
+        run: python3 scripts/ci/quality_lanes.py backend --report-dir "$RUNNER_TEMP/quality-lanes/backend"
+      - id: receipt
+        if: always()
+        name: Record structured backend receipt
+        env:
+          SETUP_CHECKOUT: ${{ steps.checkout.outcome }}
+          SETUP: ${{ steps.setup.outcome }}
+          VERIFY: ${{ steps.verify.outcome }}
+          JOB: ${{ job.status }}
+        run: python3 scripts/ci/quality_report.py receipt --lane backend --setup "checkout=$SETUP_CHECKOUT" --setup "ci-setup=$SETUP" --verification "$VERIFY" --job "$JOB" --out "$RUNNER_TEMP/ci-receipts/backend.json"
+      - if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-receipt-backend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-receipts/backend.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  frontend:
+    needs: [plan, preflight]
+    if: contains(fromJSON(needs.plan.outputs.lanes), 'frontend')
+    outputs:
+      classification: ${{ steps.receipt.outputs.classification }}
+      observations: ${{ steps.receipt.outputs.observations }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: setup
+        uses: ./.github/actions/ci-setup
+        with:
+          lane: frontend
+      - id: verify
+        if: ${{ steps.checkout.outcome == 'success' && steps.setup.outcome == 'success' }}
+        name: Run canonical frontend verification lane
+        run: python3 scripts/ci/quality_lanes.py frontend --report-dir "$RUNNER_TEMP/quality-lanes/frontend"
+      - id: receipt
+        if: always()
+        name: Record structured frontend receipt
+        env:
+          SETUP_CHECKOUT: ${{ steps.checkout.outcome }}
+          SETUP: ${{ steps.setup.outcome }}
+          VERIFY: ${{ steps.verify.outcome }}
+          JOB: ${{ job.status }}
+        run: python3 scripts/ci/quality_report.py receipt --lane frontend --setup "checkout=$SETUP_CHECKOUT" --setup "ci-setup=$SETUP" --verification "$VERIFY" --job "$JOB" --out "$RUNNER_TEMP/ci-receipts/frontend.json"
+      - if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-receipt-frontend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-receipts/frontend.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  browser:
+    needs: [plan, preflight]
+    if: contains(fromJSON(needs.plan.outputs.lanes), 'browser')
+    outputs:
+      classification: ${{ steps.receipt.outputs.classification }}
+      observations: ${{ steps.receipt.outputs.observations }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: aicrm_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d aicrm_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AICRM_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/aicrm_ci?sslmode=disable
+    steps:
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: setup
+        uses: ./.github/actions/ci-setup
+        with:
+          lane: browser
+      - id: setup-browser
+        name: Install required Chromium fonts
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install --no-install-recommends --yes fonts-noto-cjk || true
+          fc-match "Noto Sans CJK SC" || true
+          command -v google-chrome
+      - id: verify
+        if: ${{ steps.checkout.outcome == 'success' && steps.setup.outcome == 'success' && steps.setup-browser.outcome == 'success' }}
+        name: Run canonical browser verification lane
+        env:
+          AICRM_REQUIRE_CHROMIUM_JOURNEY: '1'
+          AICRM_ADMIN_LAYOUT_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/admin-shell-layout
+          AICRM_SIDEBAR_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/sidebar-standard
+        run: python3 scripts/ci/quality_lanes.py browser --report-dir "$RUNNER_TEMP/browser-evidence"
+      - id: receipt
+        if: always()
+        name: Record structured browser receipt
+        env:
+          SETUP_CHECKOUT: ${{ steps.checkout.outcome }}
+          SETUP: ${{ steps.setup.outcome }}
+          SETUP_BROWSER: ${{ steps.setup-browser.outcome }}
+          VERIFY: ${{ steps.verify.outcome }}
+          JOB: ${{ job.status }}
+        run: python3 scripts/ci/quality_report.py receipt --lane browser --setup "checkout=$SETUP_CHECKOUT" --setup "ci-setup=$SETUP" --setup "browser-runtime=$SETUP_BROWSER" --verification "$VERIFY" --job "$JOB" --out "$RUNNER_TEMP/ci-receipts/browser.json"
+      - name: Upload browser results and screenshots
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: required-browser-tests-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/browser-evidence
+            artifacts/admin-shell-layout
+            artifacts/sidebar-standard
+            ${{ runner.temp }}/ci-receipts/browser.json
+          retention-days: 14
+
+  archive-sdk:
+    needs: [plan, preflight]
+    if: contains(fromJSON(needs.plan.outputs.lanes), 'archive-sdk')
+    outputs:
+      classification: ${{ steps.receipt.outputs.classification }}
+      observations: ${{ steps.receipt.outputs.observations }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: setup
+        uses: ./.github/actions/ci-setup
+        with:
+          lane: sdk
+      - id: verify
+        if: ${{ steps.checkout.outcome == 'success' && steps.setup.outcome == 'success' }}
+        name: Run canonical archive SDK verification lane
+        run: python3 scripts/ci/quality_lanes.py archive-sdk --report-dir "$RUNNER_TEMP/quality-lanes/archive-sdk"
+      - id: receipt
+        if: always()
+        name: Record structured archive SDK receipt
+        env:
+          SETUP_CHECKOUT: ${{ steps.checkout.outcome }}
+          SETUP: ${{ steps.setup.outcome }}
+          VERIFY: ${{ steps.verify.outcome }}
+          JOB: ${{ job.status }}
+        run: python3 scripts/ci/quality_report.py receipt --lane archive-sdk --setup "checkout=$SETUP_CHECKOUT" --setup "ci-setup=$SETUP" --verification "$VERIFY" --job "$JOB" --out "$RUNNER_TEMP/ci-receipts/archive-sdk.json"
+      - if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-receipt-archive-sdk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-receipts/archive-sdk.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  governance:
+    # Always run, including main's verified-tree reuse: vulnerability data and
+    # PR review declarations are external facts, not immutable tree evidence.
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: setup
+        uses: ./.github/actions/governance-setup
+      - name: Validate governance rules with adversarial regression cases
+        run: python3 -m unittest discover -s scripts/ci -p test_governance.py -v
+      - id: impact
+        name: Map source changes to affected capabilities and existing journeys
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/governance_impact.py --out "$RUNNER_TEMP/governance/impact.json"
+      - name: Gate API compatibility, reachable vulnerabilities and redacted secret scan
+        if: ${{ always() && steps.checkout.outcome == 'success' && steps.setup.outcome == 'success' }}
+        env:
+          GOVERNANCE_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before || '' }}
+        run: |
+          set -euo pipefail
+          base="$GOVERNANCE_BASE"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then base="HEAD^"; fi
+          python3 scripts/ci/governance_security.py scan --base "$base" --tools-dir "$RUNNER_TEMP/governance-tools" --out "$RUNNER_TEMP/governance/security"
+      - name: Upload exact-head impact and security evidence
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: governance-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/governance
+          if-no-files-found: error
+          retention-days: 30
+
+  check:
+    if: always()
+    needs: [plan, preflight, backend, frontend, browser, archive-sdk, governance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require full success or a verified identical merged tree
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/governance_impact.py --gate
+          python3 scripts/ci/local_first_gate.py
+          python3 scripts/ci/verification.py gate
+      - name: Record the exact tested tree for main
+        if: needs.plan.outputs.full == 'true'
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: verification.json
+          if-no-files-found: error
+          retention-days: 90
+
+  quality-report:
+    # This is read-only reporting. It is intentionally outside the check gate:
+    # an unavailable history query must never make a failed verification green.
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    needs: [plan, preflight, backend, frontend, browser, archive-sdk, check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Summarize exact PR attempts and structured lane outcomes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/quality_report.py summary --repo "$GITHUB_REPOSITORY" --pr "${{ github.event.pull_request.number }}" --head "${{ github.event.pull_request.head.sha }}" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" --needs "$CI_NEEDS" --out "$RUNNER_TEMP/ci-quality-summary.json"
+      - name: Upload read-only CI quality summary
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-quality-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-quality-summary.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  # Production installation is opt-in. An unset repository variable is not
+  # equivalent to approval; deployment remains local-first.
+  deploy:
+    # Normal releases are local-first and pass through staging. Keep Actions
+    # deployment only as an explicit break-glass path.
+    if: ${{ vars.AICRM_ENABLE_ACTIONS_DEPLOY == 'true' && vars.AICRM_CLOUD_DEPLOY_BREAKGLASS == 'true' && !cancelled() && needs.check.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
+    needs: check
+    concurrency:
+      group: aicrm-production-release
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    # Cross-region upload to the mainland deployment host can make steady
+    # progress for longer than 60 minutes. Keep a bounded three-hour ceiling so
+    # that active chunk transfers can finish without weakening per-chunk limits.
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Configure pinned staging and production SSH hosts
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.STAGING_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS || secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 0700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/staging_key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/staging_known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/staging_key" >/dev/null
+          test -s "$HOME/.ssh/staging_known_hosts"
+      - name: Directly promote the accepted staging candidate
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER || 'ubuntu' }}
+          STAGING_KEY: ${{ secrets.STAGING_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
+          STAGING_KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS || secrets.DEPLOY_KNOWN_HOSTS }}
+          PRODUCTION_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          PRODUCTION_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          PRODUCTION_HOST: ${{ secrets.DEPLOY_HOST }}
+          PRODUCTION_USER: ${{ secrets.DEPLOY_USER || 'ubuntu' }}
+        run: |
+          set -euo pipefail
+          install -d -m 0700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$STAGING_KEY" > "$HOME/.ssh/staging_key"
+          printf '%s\n' "$STAGING_KNOWN_HOSTS" > "$HOME/.ssh/staging_known_hosts"
+          printf '%s\n' "$PRODUCTION_KEY" > "$HOME/.ssh/production_key"
+          printf '%s\n' "$PRODUCTION_KNOWN_HOSTS" > "$HOME/.ssh/production_known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/staging_key" >/dev/null
+          ssh-keygen -y -f "$HOME/.ssh/production_key" >/dev/null
+          flags=(-i "$HOME/.ssh/staging_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/staging_known_hosts")
+          tree="$(git rev-parse "${GITHUB_SHA}^{tree}")"
+          scp "${flags[@]}" deploy/promote-staging-direct.sh "$STAGING_USER@$STAGING_HOST:/tmp/promote-staging-direct-${GITHUB_SHA}.sh"
+          scp "${flags[@]}" "$HOME/.ssh/production_key" "$STAGING_USER@$STAGING_HOST:/tmp/production-key-${GITHUB_SHA}"
+          scp "${flags[@]}" "$HOME/.ssh/production_known_hosts" "$STAGING_USER@$STAGING_HOST:/tmp/production-known-hosts-${GITHUB_SHA}"
+          ssh "${flags[@]}" "$STAGING_USER@$STAGING_HOST" "chmod 700 /tmp/promote-staging-direct-${GITHUB_SHA}.sh /tmp/production-key-${GITHUB_SHA}; chmod 600 /tmp/production-known-hosts-${GITHUB_SHA}; PRODUCTION_HOST='$PRODUCTION_HOST' PRODUCTION_USER='$PRODUCTION_USER' PRODUCTION_KEY_FILE='/tmp/production-key-${GITHUB_SHA}' PRODUCTION_KNOWN_HOSTS_FILE='/tmp/production-known-hosts-${GITHUB_SHA}' bash /tmp/promote-staging-direct-${GITHUB_SHA}.sh '' '$GITHUB_SHA' '$tree'"
+          ssh "${flags[@]}" "$STAGING_USER@$STAGING_HOST" "rm -f /tmp/promote-staging-direct-${GITHUB_SHA}.sh /tmp/production-key-${GITHUB_SHA} /tmp/production-known-hosts-${GITHUB_SHA}"
+
+      - name: Configure HXC production source
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          AICRM_HXC_SOURCE_DSN: ${{ secrets.AICRM_HXC_SOURCE_DSN }}
+          AICRM_HXC_UNIONID_SCOPE: ${{ secrets.AICRM_HXC_UNIONID_SCOPE }}
+        run: |
+          set -euo pipefail
+          [[ -n "$AICRM_HXC_SOURCE_DSN" && "$AICRM_HXC_SOURCE_DSN" != *[$'\r\n']* ]]
+          [[ "$AICRM_HXC_UNIONID_SCOPE" == wechat-open-platform:* && "$AICRM_HXC_UNIONID_SCOPE" != *[$'\r\n']* ]]
+          local_config="$RUNNER_TEMP/aicrm-hxc-${GITHUB_SHA}.env"
+          remote_config="/tmp/aicrm-hxc-${GITHUB_SHA}.env"
+          remote_configurer="/tmp/configure-hxc-runtime-${GITHUB_SHA}.sh"
+          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          cleanup() {
+            rm -f -- "$local_config"
+            ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "rm -f -- ${remote_config} ${remote_configurer}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          umask 077
+          printf 'AICRM_HXC_SYNC_ENABLED=true\nAICRM_HXC_SOURCE_DSN=%s\nAICRM_HXC_UNIONID_SCOPE=%s\nAICRM_HXC_UNIONID_VERIFIED=true\n' \
+            "$AICRM_HXC_SOURCE_DSN" "$AICRM_HXC_UNIONID_SCOPE" > "$local_config"
+          scp "${ssh_flags[@]}" "$local_config" "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_config}"
+          scp "${ssh_flags[@]}" deploy/configure-hxc-runtime.sh "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_configurer}"
+          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "trap 'sudo rm -f -- ${remote_config} ${remote_configurer}' EXIT; sudo /usr/bin/bash ${remote_configurer} ${remote_config} ${GITHUB_SHA}"
+      - name: Run explicitly requested HXC activation and acceptance
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.hxc_full_rollout }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo /usr/bin/bash /opt/aicrm/current/deploy/rollout-hxc-identity-v2.sh ${GITHUB_SHA} full"
+      - name: Configure WeChat Pay H5 OAuth
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          AICRM_WECHAT_PAY_H5_APP_ID: ${{ secrets.AICRM_WECHAT_PAY_H5_APP_ID }}
+          AICRM_WECHAT_PAY_H5_APP_SECRET: ${{ secrets.AICRM_WECHAT_PAY_H5_APP_SECRET }}
+        run: |
+          set -euo pipefail
+          [[ "$AICRM_WECHAT_PAY_H5_APP_ID" =~ ^wx[0-9A-Za-z]{16}$ ]]
+          [[ "$AICRM_WECHAT_PAY_H5_APP_SECRET" =~ ^[0-9A-Za-z]{32}$ ]]
+          h5_scope="wechat-app:${AICRM_WECHAT_PAY_H5_APP_ID}"
+          local_config="$RUNNER_TEMP/aicrm-payment-h5-${GITHUB_SHA}.env"
+          remote_config="/tmp/aicrm-payment-h5-${GITHUB_SHA}.env"
+          remote_configurer="/tmp/configure-payment-h5-oauth-runtime-${GITHUB_SHA}.sh"
+          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          cleanup() {
+            rm -f -- "$local_config"
+            ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "rm -f -- ${remote_config} ${remote_configurer}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          umask 077
+          printf 'AICRM_WECHAT_PAY_H5_OAUTH_ENABLED=true\nAICRM_WECHAT_PAY_H5_APP_ID=%s\nAICRM_WECHAT_PAY_H5_APP_SECRET=%s\nAICRM_WECHAT_PAY_H5_APP_SCOPE=%s\n' \
+            "$AICRM_WECHAT_PAY_H5_APP_ID" "$AICRM_WECHAT_PAY_H5_APP_SECRET" "$h5_scope" > "$local_config"
+          scp "${ssh_flags[@]}" "$local_config" "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_config}"
+          scp "${ssh_flags[@]}" deploy/configure-payment-h5-oauth-runtime.sh "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_configurer}"
+          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "trap 'sudo rm -f -- ${remote_config} ${remote_configurer}' EXIT; sudo /usr/bin/bash ${remote_configurer} ${remote_config} ${GITHUB_SHA} skip-if-provider-disabled"
+      - name: Activate official WeCom tag catalog mutations
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_catalog_mutation_rollout }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          local_config="$RUNNER_TEMP/aicrm-tag-catalog-mutation-${GITHUB_SHA}.env"
+          remote_config="/tmp/aicrm-tag-catalog-mutation-${GITHUB_SHA}.env"
+          remote_configurer="/tmp/configure-wecom-tag-catalog-mutation-runtime-${GITHUB_SHA}.sh"
+          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          cleanup() {
+            rm -f -- "$local_config"
+            ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "rm -f -- ${remote_config} ${remote_configurer}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          umask 077
+          printf 'AICRM_WECOM_TAG_CATALOG_MUTATION_PROVIDER_ENABLED=true\nAICRM_WECOM_TAG_CATALOG_MUTATION_PROVIDER_PERMISSION=catalog-write-authorized\n' > "$local_config"
+          scp "${ssh_flags[@]}" "$local_config" "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_config}"
+          scp "${ssh_flags[@]}" deploy/configure-wecom-tag-catalog-mutation-runtime.sh "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_configurer}"
+          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "trap 'sudo rm -f -- ${remote_config} ${remote_configurer}' EXIT; sudo /usr/bin/bash ${remote_configurer} ${remote_config} ${GITHUB_SHA}"
+      - name: Activate requested Group Ops directory reads
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.groupops_directory_rollout }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          remote_script="/tmp/configure-groupops-directory-${GITHUB_SHA}.py"
+          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          scp "${ssh_flags[@]}" deploy/configure-groupops-directory-runtime.py "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_script}"
+          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "trap 'sudo rm -f -- ${remote_script}' EXIT; sudo python3 ${remote_script} ${GITHUB_SHA}"
+      - name: Configure requested H5 authorization domain
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.h5_domain_rollout }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          remote_script="/tmp/configure-h5-domain-${GITHUB_SHA}.sh"
+          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          scp "${ssh_flags[@]}" deploy/configure-h5-domain.sh "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_script}"
+          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "trap 'sudo rm -f -- ${remote_script}' EXIT; sudo bash ${remote_script} ${GITHUB_SHA}"
+      - name: Verify the public server is running this release
+        run: python3 scripts/ci/verify_deployment.py https://id-dev.youcangogogo.com "$GITHUB_SHA"

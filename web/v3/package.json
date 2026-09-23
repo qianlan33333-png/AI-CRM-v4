@@ -1,0 +1,12 @@
+{
+  "name": "aicrm-v3-workspace-ui",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "echarts": "6.1.0",
+    "tabulator-tables": "6.3.1"
+  },
+  "devDependencies": {
+    "@types/tabulator-tables": "6.3.4"
+  }
+}

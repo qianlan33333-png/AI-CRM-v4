@@ -1,0 +1,83 @@
+# SHA-256 evidence for PR09 config/AdminOps/release donor files.
+# Backend rows identify frozen donor bytes and adapted v3 targets separately.
+# Frontend rows must cmp byte-for-byte against the frozen donor.
+
+# frozen backend source (donor commit 6bfbe5816bb89913c70adaca87d6a486260e016e):
+d3ef44bedf2b467cc98ff355961eeb8b85e556b5a47404f59664f19df6f7f9cc  source:internal/config/port/port.go
+d90a3a2ffea74bbc51453132ad179bb40bd249137908b879412d0bc6f838d965  source:internal/config/registry.go
+fab5be640b3417346a4b3b0e5a13be288cc38c85bdb3399f2459a1c300235fdb  source:internal/config/registry_test.go
+5f8bc34ad31b6ee7435fdbc81d038fd5205e438ec4c98325de8459420d8e4231  source:internal/config/app/manager.go
+ddd410a63b140ff6b3b26d61089b6d6610ea61ec937b71ca35010b47f54d69e6  source:internal/config/app/manager_test.go
+9635bcd5f4b018e6efe9ac0bac8d9fd89065ed690a6e2879ec9f998ca0d202a2  source:internal/config/app/settings_compat.go
+69b9821567b3d2564c0b454c159356f095d9604bbeee8f5d032f8201583e2e63  source:internal/config/app/settings_compat_test.go
+ad2c68cd75fc7f6b1792cd3402db23e5c74ecdc3b58ec00e52eb46d326ad35f3  source:internal/config/app/setup_wizard.go
+b256a90f2739b592d193046c5ef970252dfc24d056e6a67afeac668a747fb4aa  source:internal/config/app/setup_wizard_test.go
+a5326775d0db4c7e4d68aa04ed0ce1f57e66c377f9f5adbc71e58a4e990c3284  source:internal/adminops/port/port.go
+69a99ec501b587370e8db770bf398be96fe5871670544faa043d826393e8d5fa  source:internal/adminops/port/execution_runtime.go
+3d794bcb0195610cf91ab421b01c8c3b96055dde6e6f959851c02437488a48fa  source:internal/adminops/app/service.go
+f22ed74c94caf733d4cb1a7b8c01a7ee3bd421966cea6cfce16307ab301b2ab6  source:internal/adminops/app/credential_identifier_test.go
+2afa25dfc21412dbfda143de7a2c44448fadd3ee10d8c13c1d023e5d826beb50  source:internal/adminops/app/safe_projection.go
+eab987c241476b115251dc4904963dd2fd0af15ea76558472a27ab6710bee5ff  source:internal/adminops/app/safe_projection_test.go
+b03dadd2ae2d85d250b81ea8a70dc3de2e3d4954bfb4d28bf2d882537e66844b  source:internal/adminops/app/execution_runtime.go
+962a32ca27a787bc88f216a043e4143520eb9a991df6fb6e8aa3a0c5b47dda81  source:internal/adminops/app/execution_runtime_test.go
+cc0788275f2da4f3bd2613cd3b6aa3ebbd5552b96d9428fd4acad570231e0817  source:internal/release/port/port.go
+9322f7cfe6d34faacf01284369ae04b6fedd32509a21f9aba891ddabdca8d0b3  source:internal/release/app/service.go
+3aa15564fb37ec9eeade8c611c6aa50bbe720dc06188a9dd545955b9b97cefbe  source:internal/release/app/service_test.go
+
+# frozen frontend source (same donor commit):
+4903070814159e3ddd703aa649dd2be9428b6829fcc4164918359fe4ad1b70e6  source:web/src/admin/sections/setupWizard.ts
+63b1ddcd4a49d70a9c3cd8351138b64efa07a166f3e66f7dbd09277767633a4a  source:web/src/admin/templates/apidocs.html
+1b6a6d05e3300e3a59fc00068daa987b4e586c57a122f726c1c9abbbc1f34eb3  source:web/src/admin/templates/config.html
+235dcf711ce9965a6862fa5f0b9cc0d967f2fc25c13cd5a19d17ec40e446df14  source:web/src/admin/templates/configDetail.html
+7f1bc1d05b3e012de46b1d53ef7b56319c0bc032a1c0389fa3fd138c7218b40d  source:web/src/api/generated/health.schemas.ts
+f86374997bbd6b16e660906222a1b0d5793ce28f30b3eed696eb484611692b04  source:web/src/api/generated/health/health.ts
+3efc2b02a6ae0b7953da74bb89d1636f3792aeb7707e4f0e4be5627cde0fe44e  source:web/src/api/generated/p4-adminops-safe/p4-adminops-safe.ts
+8fca747b7a749c1122c15de15c6f53c8abf8dde4d69ad944c2d5734301c6d7cc  source:web/src/api/generated/p4-api-docs-compat/p4-api-docs-compat.ts
+d5fdac4633a01d2f175af83f1e9de666db8472f4cb905de7ca46de18dd0f3f80  source:web/src/api/generated/p4-config-settings-compat/p4-config-settings-compat.ts
+b302e46a388250485694557c65db0406abef0d68370f6f4069726fb6dc51763f  source:web/src/api/generated/p4-data-health/p4-data-health.ts
+362be88fb99d33a236ce9b288453e7d1eed8e640179c49a1cb9ddfeec6a186ca  source:web/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts
+d1827f386c993e929ac37ad5bcdda68aa8bb5fa948e634435418341b1869f182  source:web/src/api/generated/p4-legacy-health/p4-legacy-health.ts
+2685d45c3ab155bfba8f51250e601ab82bd52652758f9595c14e21824149e43c  source:web/src/api/generated/p4-release-plane/p4-release-plane.ts
+47443ffbf72dfbc1744b434e8e4f913d1c2c6f9a3bc7ec11371edb255593ccd3  source:web/src/api/generated/p4-setup-wizard/p4-setup-wizard.ts
+00ab5702d1f2d3aed9440010ac5642669634be822726036e95892a155f7b31cd  source:web/src/api/generated/p4-system-health/p4-system-health.ts
+fc5e4b447d10487f571fdafd953cb51756274bc40b019bb51b6cdd61cfbad885  source:web/src/api/transport.ts
+
+# v3 target backend after bounded adaptation:
+632e5f95aad32c732dd97ee3a56fdc18f287ca3d47e025855c2749ca862eec90  target:internal/config/port/port.go
+0c052989a87dbb9474965b60926547deec23a848720026a46be9d414bc49e2e8  target:internal/config/registry.go
+5eeee7e7804bd97edb7bd32b7bd10c626a05eee76fcce6237282cd08b7691269  target:internal/config/registry_test.go
+3267acca4f33c40ade2df82ed70a4d94c1f7bba2aad989b1606db9cd17640ae7  target:internal/config/app/manager.go
+a16b117d4f0bc89ebd7a1fcfd6a4d24c479a8bf1d5149de5bb4db20ab2ebf56f  target:internal/config/app/manager_test.go
+cf8a1a4adfc46086281976337e8083aedcb86dfaed4f2ada22e77684bfdb659d  target:internal/config/app/settings_compat.go
+d5e82cf84fb18fbd4c441b29db6b5c1aff7402785092ef2497d8547ee4456a5a  target:internal/config/app/settings_compat_test.go
+46054b8aba2a81653f6f4b8cc309929ff7bed0b1e3d05c29b0194e3777125b47  target:internal/config/app/setup_wizard.go
+aefd662fc6d3c8a62ead6b0fc5e72b1ad8705eb3fad98d4c22a57e870ca189fa  target:internal/config/app/setup_wizard_test.go
+0005af28181dc30d3dbeb2e4aa7bef17216e08387a50ff14f75762cf91399117  target:internal/adminops/port/port.go
+69a99ec501b587370e8db770bf398be96fe5871670544faa043d826393e8d5fa  target:internal/adminops/port/execution_runtime.go
+949fa4f2941802eff018953c95fff0f9e503be458a4f6d9e6bba53605c1c3294  target:internal/adminops/app/service.go
+f22ed74c94caf733d4cb1a7b8c01a7ee3bd421966cea6cfce16307ab301b2ab6  target:internal/adminops/app/credential_identifier_test.go
+cfe756010c2c16a24c8b7092722f1bf8023248f96a2329c4e98335b67f174521  target:internal/adminops/app/safe_projection.go
+7b577553a81614da9a2e7b005897372fc982c7b9bc8daa0637e88c23153e6814  target:internal/adminops/app/safe_projection_test.go
+a5e6b1c0fa791283521f895d6e6dbe4ff152f72243e74b68603814f3f2cca3a9  target:internal/adminops/app/execution_runtime.go
+5b0cd9ab37f364f8281eea07324a258ddd1d84070573e5744eba66c32182f7f1  target:internal/adminops/app/execution_runtime_test.go
+cc0788275f2da4f3bd2613cd3b6aa3ebbd5552b96d9428fd4acad570231e0817  target:internal/release/port/port.go
+508e873c02ea62643ba48cf294b1832143e632b801a57f544542fed81b2be6a0  target:internal/release/app/service.go
+f08e201b3f0fcb7d8212c9a257a46206a8dc4cadaa0e6f69988b5bf44d8e2d50  target:internal/release/app/service_test.go
+
+# v3 donor target frontend (every row must cmp with its source row):
+4903070814159e3ddd703aa649dd2be9428b6829fcc4164918359fe4ad1b70e6  target:web/donors/adminops-v2/src/admin/sections/setupWizard.ts
+63b1ddcd4a49d70a9c3cd8351138b64efa07a166f3e66f7dbd09277767633a4a  target:web/donors/adminops-v2/src/admin/templates/apidocs.html
+1b6a6d05e3300e3a59fc00068daa987b4e586c57a122f726c1c9abbbc1f34eb3  target:web/donors/adminops-v2/src/admin/templates/config.html
+235dcf711ce9965a6862fa5f0b9cc0d967f2fc25c13cd5a19d17ec40e446df14  target:web/donors/adminops-v2/src/admin/templates/configDetail.html
+7f1bc1d05b3e012de46b1d53ef7b56319c0bc032a1c0389fa3fd138c7218b40d  target:web/donors/adminops-v2/src/api/generated/health.schemas.ts
+f86374997bbd6b16e660906222a1b0d5793ce28f30b3eed696eb484611692b04  target:web/donors/adminops-v2/src/api/generated/health/health.ts
+3efc2b02a6ae0b7953da74bb89d1636f3792aeb7707e4f0e4be5627cde0fe44e  target:web/donors/adminops-v2/src/api/generated/p4-adminops-safe/p4-adminops-safe.ts
+8fca747b7a749c1122c15de15c6f53c8abf8dde4d69ad944c2d5734301c6d7cc  target:web/donors/adminops-v2/src/api/generated/p4-api-docs-compat/p4-api-docs-compat.ts
+d5fdac4633a01d2f175af83f1e9de666db8472f4cb905de7ca46de18dd0f3f80  target:web/donors/adminops-v2/src/api/generated/p4-config-settings-compat/p4-config-settings-compat.ts
+b302e46a388250485694557c65db0406abef0d68370f6f4069726fb6dc51763f  target:web/donors/adminops-v2/src/api/generated/p4-data-health/p4-data-health.ts
+362be88fb99d33a236ce9b288453e7d1eed8e640179c49a1cb9ddfeec6a186ca  target:web/donors/adminops-v2/src/api/generated/p4-execution-runtime-compat/p4-execution-runtime-compat.ts
+d1827f386c993e929ac37ad5bcdda68aa8bb5fa948e634435418341b1869f182  target:web/donors/adminops-v2/src/api/generated/p4-legacy-health/p4-legacy-health.ts
+2685d45c3ab155bfba8f51250e601ab82bd52652758f9595c14e21824149e43c  target:web/donors/adminops-v2/src/api/generated/p4-release-plane/p4-release-plane.ts
+47443ffbf72dfbc1744b434e8e4f913d1c2c6f9a3bc7ec11371edb255593ccd3  target:web/donors/adminops-v2/src/api/generated/p4-setup-wizard/p4-setup-wizard.ts
+00ab5702d1f2d3aed9440010ac5642669634be822726036e95892a155f7b31cd  target:web/donors/adminops-v2/src/api/generated/p4-system-health/p4-system-health.ts
+fc5e4b447d10487f571fdafd953cb51756274bc40b019bb51b6cdd61cfbad885  target:web/donors/adminops-v2/src/api/transport.ts

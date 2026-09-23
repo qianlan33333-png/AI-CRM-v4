@@ -1,0 +1,9 @@
+// One fixed root-owned unit and only its start action. No sudo/worker escalation.
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.freedesktop.systemd1.manage-units" &&
+        subject.user === "aicrm" &&
+        action.lookup("unit") === "aicrm-runtime-retention.service" &&
+        action.lookup("verb") === "start") {
+        return polkit.Result.YES;
+    }
+});

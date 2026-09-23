@@ -1,0 +1,102 @@
+name: sidebar-history-import
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sidebar-history-production-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_DB: aicrm_sidebar_rehearsal, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres}
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d aicrm_sidebar_rehearsal"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AICRM_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/aicrm_sidebar_rehearsal?sslmode=disable
+      AICRM_SIDEBAR_SOURCE_SSH_HOST: ${{ vars.AICRM_CHANNEL_SOURCE_SSH_HOST }}
+      AICRM_SIDEBAR_SOURCE_SSH_USER: ${{ vars.AICRM_CHANNEL_SOURCE_SSH_USER }}
+      AICRM_SIDEBAR_UNIONID_SCOPE: ${{ secrets.AICRM_HXC_UNIONID_SCOPE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {persist-credentials: false}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with: {go-version-file: go.mod, cache: true}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with: {node-version: '24.18.0'}
+      - name: Configure pinned source SSH host
+        env:
+          SOURCE_SSH_KEY: ${{ secrets.AICRM_CHANNEL_SOURCE_SSH_KEY }}
+          SOURCE_KNOWN_HOSTS: ${{ secrets.AICRM_CHANNEL_SOURCE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ -n "$AICRM_SIDEBAR_SOURCE_SSH_HOST" && -n "$AICRM_SIDEBAR_SOURCE_SSH_USER" ]]
+          [[ "$AICRM_SIDEBAR_UNIONID_SCOPE" == wechat-open-platform:* && "$AICRM_SIDEBAR_UNIONID_SCOPE" != *[$'\r\n']* ]]
+          install -d -m 0700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$SOURCE_SSH_KEY" > "$HOME/.ssh/sidebar_source_key"
+          printf '%s\n' "$SOURCE_KNOWN_HOSTS" > "$HOME/.ssh/sidebar_source_known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/sidebar_source_key" >/dev/null
+          ssh-keygen -F "$AICRM_SIDEBAR_SOURCE_SSH_HOST" -f "$HOME/.ssh/sidebar_source_known_hosts" >/dev/null
+      - name: Capture protected source snapshot
+        run: |
+          set -euo pipefail
+          export AICRM_SIDEBAR_SOURCE_SSH_KEY_FILE="$HOME/.ssh/sidebar_source_key"
+          export AICRM_SIDEBAR_SOURCE_KNOWN_HOSTS_FILE="$HOME/.ssh/sidebar_source_known_hosts"
+          scripts/capture-sidebar-history-source.sh "$RUNNER_TEMP/sidebar.stream"
+          scripts/run-go-with-donor-views.sh go build -trimpath -o "$RUNNER_TEMP/migrate-sidebar-history" ./cmd/migrate-sidebar-history
+          "$RUNNER_TEMP/migrate-sidebar-history" --mode inspect-stream --source-stream "$RUNNER_TEMP/sidebar.stream" --snapshot "$RUNNER_TEMP/sidebar.json" --unionid-scope "$AICRM_SIDEBAR_UNIONID_SCOPE" > "$RUNNER_TEMP/inspect.json"
+          unlink "$RUNNER_TEMP/sidebar.stream"
+          "$RUNNER_TEMP/migrate-sidebar-history" --mode dry-run --snapshot "$RUNNER_TEMP/sidebar.json" > "$RUNNER_TEMP/dry-run.json"
+          snapshot_digest="$(jq -er '.manifest_sha256' "$RUNNER_TEMP/inspect.json")"
+          [[ "$snapshot_digest" =~ ^[0-9a-f]{64}$ ]]
+          printf 'SNAPSHOT_DIGEST=%s\n' "$snapshot_digest" >> "$GITHUB_ENV"
+          jq -e '.provider_calls == 0 and .oneid_links_created == 0 and .input == (.entitlements + .coupons)' "$RUNNER_TEMP/dry-run.json" >/dev/null
+          jq '{manifest_sha256,input,entitlements,coupons}' "$RUNNER_TEMP/dry-run.json"
+      - name: Rehearse migration and reconciliation on PostgreSQL 16
+        run: |
+          set -euo pipefail
+          scripts/run-go-with-donor-views.sh go run ./cmd/migrate-platform -dir migrations
+          migrator="$RUNNER_TEMP/migrate-sidebar-history"
+          snapshot="$RUNNER_TEMP/sidebar.json"
+          "$migrator" --mode apply --snapshot "$snapshot" --manifest-sha256 "$SNAPSHOT_DIGEST" --confirm-apply > "$RUNNER_TEMP/rehearsal-apply.json"
+          "$migrator" --mode reconcile --snapshot "$snapshot" --manifest-sha256 "$SNAPSHOT_DIGEST" > "$RUNNER_TEMP/rehearsal-reconcile.json"
+          jq -e '.matched == true and .input == (.mapped + .quarantined)' "$RUNNER_TEMP/rehearsal-reconcile.json" >/dev/null
+      - name: Configure pinned deployment SSH host
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/deploy_known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/deploy_key" >/dev/null
+          test -s "$HOME/.ssh/deploy_known_hosts"
+      - name: Backup, import, replay and reconcile production
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$HOME/.ssh/deploy_known_hosts")
+          remote_snapshot="/tmp/aicrm-sidebar-history-${SNAPSHOT_DIGEST:0:24}.json"
+          remote_runner="/tmp/run-sidebar-history-import-${SNAPSHOT_DIGEST:0:24}.sh"
+          cleanup() { ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo unlink '$remote_snapshot' '$remote_runner' 2>/dev/null || true" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          scp "${ssh_flags[@]}" "$RUNNER_TEMP/sidebar.json" "${DEPLOY_USER}@${DEPLOY_HOST}:$remote_snapshot"
+          scp "${ssh_flags[@]}" deploy/run-sidebar-history-import.sh "${DEPLOY_USER}@${DEPLOY_HOST}:$remote_runner"
+          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" "sudo /usr/bin/bash '$remote_runner' '$remote_snapshot' '$SNAPSHOT_DIGEST' '$GITHUB_SHA'" > "$RUNNER_TEMP/production-result.json"
+          jq -e '.backup_created == true and .preflight.blocked == 0 and ."final-reconcile".matched == true and ."final-reconcile".quarantined == 0 and (."final-reconcile".input == ."final-reconcile".mapped) and .apply.result.quarantined == 0 and (.apply.result.input == (.apply.result.imported + .apply.result.replayed)) and .replay.result.quarantined == 0 and (.replay.result.input == (.replay.result.imported + .replay.result.replayed))' "$RUNNER_TEMP/production-result.json" >/dev/null
+          jq '{backup_created,preflight,apply:.apply.result,reconcile:."final-reconcile",replay:.replay.result}' "$RUNNER_TEMP/production-result.json"
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 https://id-dev.youcangogogo.com/readyz

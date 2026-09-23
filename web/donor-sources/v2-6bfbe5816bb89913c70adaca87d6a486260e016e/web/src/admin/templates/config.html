@@ -1,0 +1,52 @@
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><span>客户管理后台</span><span>/</span><span>配置及后台</span></div>
+              <div style="font-size:16px;font-weight:600;line-height:22px">配置</div>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid #EFF0F1"><h2 style="margin:0;font-size:14px;font-weight:600">配置类目</h2><span style="font-size:12px;color:#8F959E">共 {{ configPage.total }} 个类目</span></div>
+              <table style="width:100%;border-collapse:collapse">
+                <thead><tr>
+                  <th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap">类目</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:150px">分组</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:110px">是否生效</th>
+                  <th style="padding:9px 12px;font-size:12px;font-weight:500;color:#8F959E;text-align:left;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:100px">生效开关</th>
+                  <th style="padding:9px 16px;font-size:12px;font-weight:500;color:#8F959E;text-align:right;background:#FAFAFB;border-bottom:1px solid #DEE0E3;white-space:nowrap;width:96px">配置</th>
+                </tr></thead>
+                <tbody>
+                  <sc-for list="{{ configPage.rows }}" as="c" hint-placeholder-count="7">
+                    <tr>
+                      <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="font-weight:500">{{ c.label }}</span></td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:#F2F3F5;color:#646A73;font-size:12px;white-space:nowrap">{{ c.group }}</span></td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span style="{{ c.cs }}">{{ c.status }}</span></td>
+                      <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:left;vertical-align:middle"><span onClick="{{ c.toggle }}" style="{{ c.sw.track }}"><span style="{{ c.sw.knob }}"></span></span></td>
+                      <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;font-size:13px;text-align:right;vertical-align:middle"><button onClick="{{ c.open }}" style="height:26px;padding:0 10px;border:1px solid #DEE0E3;border-radius:5px;background:#fff;color:#344054;font-size:12px;cursor:pointer">配置</button></td>
+                    </tr>
+                  </sc-for>
+                  <tr>
+                    <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;font-size:13px"><span style="font-weight:500">企微接入基础配置</span></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px"><span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:#F2F3F5;color:#646A73;font-size:12px">接入与鉴权</span></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px"><span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:#FFF7E8;color:#8A4B08;font-size:12px">按服务端检查</span></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:12px;color:#8F959E">本地配置</td>
+                    <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;text-align:right"><button id="open-setup-wizard" style="height:26px;padding:0 10px;border:1px solid #DEE0E3;border-radius:5px;background:#fff;color:#344054;font-size:12px;cursor:pointer">配置</button></td>
+                  </tr>
+                  <tr>
+                    <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;font-size:13px"><span style="font-weight:500">后台访问成员</span></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px"><span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:#F2F3F5;color:#646A73;font-size:12px">访问控制</span></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:13px"><span style="display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:#EFF4FF;color:#245BDB;font-size:12px">本地能力</span></td>
+                    <td style="padding:var(--rp,10px) 12px;border-bottom:1px solid #F2F3F5;font-size:12px;color:#8F959E">本地配置</td>
+                    <td style="padding:var(--rp,10px) 16px;border-bottom:1px solid #F2F3F5;text-align:right"><button id="open-admin-access" style="height:26px;padding:0 10px;border:1px solid #DEE0E3;border-radius:5px;background:#fff;color:#344054;font-size:12px;cursor:pointer">配置</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="config-extension-dialog" role="dialog" aria-modal="true" aria-label="配置详情" style="display:none;position:fixed;inset:0;z-index:90;align-items:center;justify-content:center;padding:24px;background:rgba(15,23,42,.34)">
+              <div style="width:min(920px,100%);max-height:min(760px,calc(100vh - 48px));display:flex;flex-direction:column;background:#fff;border-radius:10px;box-shadow:0 24px 64px rgba(15,23,42,.22);overflow:hidden">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #EFF0F1"><strong id="config-extension-title" style="font-size:15px">配置详情</strong><button id="close-config-extension" aria-label="关闭" style="width:28px;height:28px;border:0;border-radius:6px;background:#F2F3F5;color:#646A73;cursor:pointer">×</button></div>
+                <div id="config-extension-host" style="min-height:0;overflow:auto"></div>
+              </div>
+            </div>
+          </div>

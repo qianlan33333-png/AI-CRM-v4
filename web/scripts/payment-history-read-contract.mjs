@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+import { JSDOM } from 'jsdom';
+const result=await build({entryPoints:['web/v3/orderAdapter.ts'],bundle:true,write:false,format:'iife',plugins:[{name:'isolated-frozen-renderer',setup(b){b.onResolve({filter:/src\/admin\/(controller|main)$/},a=>({path:a.path,namespace:'test'}));b.onLoad({filter:/.*/,namespace:'test'},a=>({contents:a.path.endsWith('controller')?'export class AdminController { renderVals(){ return {}; } }':'export {};',loader:'js'}));}}]});
+const dom=new JSDOM('<body data-page="orderDetail"><div id="stage"><h1>订单详情</h1></div></body>',{url:'https://example.test/admin/orderDetail.html?id=test',runScripts:'outside-only'});
+const calls=[];
+Object.assign(dom.window,{Response,Request,Headers});
+dom.window.fetch=async input=>{const u=new URL(String(input),dom.window.location.href);calls.push(u.pathname);return new Response(JSON.stringify(u.pathname==='/api/admin/orders/test'?{record_origin:'v1_history',provider:'wechat_shop',merchant_order_no:'test'}:{record_origin:'history',status:'paid',source_status:'returned',history_reason:'refund_evidence_missing',payer_customer_id:null,beneficiary_customer_id:null}),{status:200,headers:{'Content-Type':'application/json'}});};
+dom.window.eval(result.outputFiles[0].text);
+await dom.window.fetch('/api/admin/orders/test');
+await new Promise(r=>setTimeout(r,40));
+assert.deepEqual(calls,['/api/admin/orders/test','/api/admin/payments/history']);
+const text=dom.window.document.getElementById('order-historical-money')?.textContent;
+assert.match(text,/没有退款凭证/);assert.match(text,/未记为退款成功/);assert.match(text,/付款人尚未归属/);assert.match(text,/未指定权益受益人/);
+assert.equal(dom.window.document.querySelectorAll('#order-historical-money').length,1);
+dom.window.dispatchEvent(new dom.window.Event("pagehide"));dom.window.close();console.log('historical money UI: real Owner read request, no fabricated refund or beneficiary');

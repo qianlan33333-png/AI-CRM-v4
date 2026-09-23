@@ -1,0 +1,20 @@
+{
+  "name": "v3-unionid-oneid-extension",
+  "source_commit": "6bfbe5816bb89913c70adaca87d6a486260e016e",
+  "disposition": "v3_required",
+  "capabilities": [
+    "wechat provider read",
+    "strict unionid verification",
+    "identity resolve",
+    "explicit verified provision",
+    "conflict fail closed"
+  ],
+  "assertions": {
+    "provider_identity_kind": "unionid",
+    "scope_prefix": "wechat-open-platform:",
+    "provider_verified_required": true,
+    "openid_fallback_allowed": false,
+    "other_id_link_owner": "identity",
+    "raw_unionid_exposed_to_radar": false
+  }
+}

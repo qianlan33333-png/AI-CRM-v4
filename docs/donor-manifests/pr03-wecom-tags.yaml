@@ -1,0 +1,329 @@
+schema: 1
+capability: PR03-wecom-tag-catalog-management
+source_repository: qianlan33333-png/AI-CRM-v2
+source_path: github.com/qianlan33333-png/AI-CRM-v2
+source_commit: 6bfbe5816bb89913c70adaca87d6a486260e016e
+target_base_commit: 0155871
+target_branch: codex/feature-wecom-tags
+transfer_mode: complete-v3-closure
+scope:
+  included:
+    - local tag groups and catalog reads
+    - group/tag create, update, archive semantics
+    - complete group/tag reorder semantics (permutation accepted; partial/stale list rejected)
+    - fail-closed local execution-gate projection
+    - manual and due catalog-sync acceptance
+    - transaction-bound idempotency receipts and catalog events
+    - exact frozen tags page template and tag picker assets
+  excluded:
+    - customer-facing tag mark operations
+    - customer-facing tag unmark operations
+    - customer tag assignment or removal, Customer/OneID ownership, and any customer table write
+  completed_v3_adapters:
+    - tag-owned PostgreSQL schema and additive migration 0008
+    - v3 admin-session/CSRF HTTP compatibility routes and OpenAPI
+    - frozen tags workspace mounted in the PR10 single-sidebar shell
+    - transaction-bound External Effects/River acceptance through outbound TransactionalAccepter
+    - opt-in read-only WeCom catalog adapter, opaque completion artifact, tag-owned catalog projection, and durable sync status
+    - v3 WebShell sync bridge that preserves frozen donor bytes while disabling duplicate clicks and polling terminal state
+source_files:
+  - path: internal/contact/app/legacy_tag_catalog.go
+    disposition: adapted
+    target: internal/tag/app/catalog.go
+    notes: renamed into v3 tag domain; customer mark/unmark methods were not transferred
+  - path: internal/contact/app/legacy_tag_sync.go
+    disposition: adapted
+    target: internal/tag/app/sync.go
+    notes: local acceptance only; no WeCom call
+  - path: internal/contact/app/legacy_tag_live.go
+    disposition: adapted-partial
+    target: internal/tag/app/gate.go
+    notes: only the opaque local fail-closed execution-gate projection was transferred; live mark/unmark command, payload, queue, and worker code were excluded
+  - path: internal/contact/app/tag_catalog_service.go
+    disposition: characterized
+    target: internal/tag/domain/catalog.go
+    notes: stable-order and fail-closed catalog invariants
+  - path: internal/contact/app/legacy_tag_catalog_test.go
+    disposition: characterized
+    target: internal/tag/app/catalog_test.go
+  - path: internal/contact/app/legacy_tag_sync_test.go
+    disposition: characterized
+    target: internal/tag/app/sync_test.go
+  - path: internal/contact/store/tag_catalog_repository.go
+    disposition: adapted
+    target: internal/tag/store/postgres.go
+    notes: implemented against v3-owned 0008 schema only
+  - path: internal/contact/store/tag_catalog_repository_test.go
+    disposition: characterized
+    target: internal/tag/store/postgres_integration_test.go
+    notes: v3 PostgreSQL transaction and ordering coverage
+  - path: internal/contact/http/local_tag_catalog_handler.go
+    disposition: adapted
+    target: internal/tag/http/handler.go
+    notes: v3 authenticated/CSRF compatibility adapter owns frozen DTO translation
+  - path: internal/contact/http/local_tag_catalog_handler_test.go
+    disposition: characterized
+    target: internal/tag/http/handler_test.go
+  - path: internal/wecom/client/tag_catalog.go
+    disposition: adapted
+    target: internal/wecom/adapter/client.go
+    notes: read-only catalog endpoint; explicit narrow configuration is default-off
+  - path: internal/wecom/tag/catalog_provider.go
+    disposition: adapted
+    target: internal/outbound/tag_catalog.go
+    notes: v3 outbound adapts opaque intent to shared EER/River transactional acceptance; no v2 client copied
+  - path: internal/wecom/tag/runtime.go
+    disposition: excluded
+    target: null
+    notes: customer mark/unmark and typed external effects remain outside this slice
+frontend_exact_files:
+  - source: web/src/admin/templates/tags.html
+    target: web/src/admin/templates/tags.html
+    notes: one of 25 frozen business files verified by scripts/check-pr03-frontend-donor-manifest.sh
+  - source: web/src/admin/sections/wecomTagPicker.ts
+    target: web/src/admin/sections/wecomTagPicker.ts
+    notes: one of 25 frozen business files verified by scripts/check-pr03-frontend-donor-manifest.sh
+  - source: web/src/admin/sections/wecomTagPicker.css
+    target: web/src/admin/sections/wecomTagPicker.css
+    notes: one of 25 frozen business files verified by scripts/check-pr03-frontend-donor-manifest.sh
+  - source: web/src/admin/controller.ts
+    target: web/src/admin/controller.ts
+    disposition: reused-frozen
+    notes: reused from PR01 frozen donor closure; PR03 does not alter its bytes
+  - source: web/src/api/admin.ts
+    target: web/src/api/admin.ts
+    disposition: reused-frozen
+    notes: reused from PR01 frozen donor closure; PR03 supplies server compatibility without altering its bytes
+request_contract:
+  source: web/src/api/generated/p4-tag-compat/p4-tag-compat.ts
+  source_sha256: ee681aa3460deccb41aad4daea555e3428301d30bafc804860ab6d83df1a930e
+  page_entry:
+    operation: legacyWecomTagsAdminShell
+    method: GET
+    path: /admin/wecom-tags
+    success: 200
+    notes: v3-owned webshell adapter mounts the exact tags fragment in the PR10 one-sidebar admin_base; the donor's second sidebar is never deployed
+  operations:
+    - operation: listLegacyWecomTags
+      method: GET
+      path: /api/admin/wecom/tags
+      request_dto: none
+      response_dto: LegacyTagCatalogResponse
+      success_status: 200
+      error_statuses: [401, 403]
+      local_effect: read_only_catalog
+    - operation: listLegacyWecomTagGroups
+      method: GET
+      path: /api/admin/wecom/tag-groups
+      request_dto: none
+      response_dto: LegacyTagGroupsResponse
+      success_status: 200
+      error_statuses: [401, 403, 503]
+      local_effect: read_only_groups
+    - operation: createLegacyWecomTag
+      method: POST
+      path: /api/admin/wecom/tags
+      request_dto: LegacyTagCreateRequest
+      response_dto: CreateLegacyWecomTag200
+      success_status: 200
+      error_statuses: [400, 401, 403, 404, 503]
+      local_effect: tag_create
+    - operation: createLegacyWecomTagGroup
+      method: POST
+      path: /api/admin/wecom/tag-groups
+      request_dto: LegacyTagGroupCreateRequest
+      response_dto: CreateLegacyWecomTagGroup200
+      success_status: 200
+      error_statuses: [400, 401, 403, 503]
+      local_effect: group_create_with_first_tag
+    - operation: getLegacyWecomTagGroup
+      method: GET
+      path: /api/admin/wecom/tag-groups/{group_id}
+      request_dto: none
+      response_dto: LegacyTagGroupResponse
+      success_status: 200
+      error_statuses: [401, 403, 404, 503]
+      local_effect: read_only_group
+    - operation: updateLegacyWecomTagGroupPut
+      method: PUT
+      path: /api/admin/wecom/tag-groups/{group_id}
+      request_dto: LegacyTagGroupUpdateRequest
+      response_dto: void
+      success_status: 200
+      error_statuses: [400, 401, 403, 404, 503]
+      local_effect: group_update
+    - operation: updateLegacyWecomTagGroupPatch
+      method: PATCH
+      path: /api/admin/wecom/tag-groups/{group_id}
+      request_dto: LegacyTagGroupUpdateRequest
+      response_dto: LegacyTagGroupUpdateResponse
+      success_status: 200
+      error_statuses: [400, 401, 403, 404, 503]
+      local_effect: group_update
+    - operation: archiveLegacyWecomTagGroup
+      method: DELETE
+      path: /api/admin/wecom/tag-groups/{group_id}
+      request_dto: LegacyTagArchiveRequest
+      response_dto: LegacyTagGroupArchiveResponse
+      success_status: 200
+      error_statuses: [400, 401, 403, 404, 503]
+      local_effect: group_archive
+    - operation: getLegacyWecomTag
+      method: GET
+      path: /api/admin/wecom/tags/{tag_id}
+      request_dto: none
+      response_dto: LegacyTagResponse
+      success_status: 200
+      error_statuses: [401, 403, 404, 503]
+      local_effect: read_only_tag
+    - operation: updateLegacyWecomTagPut
+      method: PUT
+      path: /api/admin/wecom/tags/{tag_id}
+      request_dto: LegacyTagUpdateRequest
+      response_dto: void
+      success_status: 200
+      error_statuses: [400, 401, 403, 404, 503]
+      local_effect: tag_update
+    - operation: updateLegacyWecomTagPatch
+      method: PATCH
+      path: /api/admin/wecom/tags/{tag_id}
+      request_dto: LegacyTagUpdateRequest
+      response_dto: LegacyTagUpdateResponse
+      success_status: 200
+      error_statuses: [400, 401, 403, 404, 503]
+      local_effect: tag_update
+    - operation: archiveLegacyWecomTag
+      method: DELETE
+      path: /api/admin/wecom/tags/{tag_id}
+      request_dto: LegacyTagArchiveRequest
+      response_dto: LegacyTagArchiveResponse
+      success_status: 200
+      error_statuses: [400, 401, 403, 404, 503]
+      local_effect: tag_archive
+    - operation: getLegacyWecomTagExecutionGate
+      method: GET
+      path: /api/admin/wecom/tags/live/gate
+      request_dto: none
+      response_dto: LegacyTagExecutionGate
+      success_status: 200
+      error_statuses: [401, 403, 503]
+      local_effect: fail_closed_gate_read
+    - operation: queueLegacyWecomTagSync
+      method: POST
+      path: /api/admin/wecom/tags/sync
+      request_dto: LegacyTagSyncRequest
+      response_dto: LegacyTagQueuedAcceptance
+      success_status: 202
+      error_statuses: [400, 401, 403, 409, 503]
+      local_effect: manual_sync_acceptance_only
+    - operation: queueLegacyWecomTagSyncDue
+      method: POST
+      path: /api/admin/wecom/tags/sync-due
+      request_dto: LegacyTagSyncRequest
+      response_dto: LegacyTagQueuedAcceptance
+      success_status: 202
+      error_statuses: [400, 401, 403, 409, 503]
+      local_effect: due_sync_acceptance_only
+    - operation: getLegacyWecomTagSyncStatus
+      method: GET
+      path: /api/admin/wecom/tags/sync-status
+      request_dto: none
+      response_dto: LegacyTagSyncStatusResponse
+      success_status: 200
+      error_statuses: [401, 403, 503]
+      local_effect: read_only_durable_sync_projection
+  included_operations:
+    - GET /api/admin/wecom/tags
+    - GET /api/admin/wecom/tag-groups
+    - POST /api/admin/wecom/tags
+    - POST /api/admin/wecom/tag-groups
+    - GET /api/admin/wecom/tags/{tag_id}
+    - GET /api/admin/wecom/tag-groups/{group_id}
+    - PUT /api/admin/wecom/tags/{tag_id}
+    - PATCH /api/admin/wecom/tags/{tag_id}
+    - DELETE /api/admin/wecom/tags/{tag_id}
+    - PUT /api/admin/wecom/tag-groups/{group_id}
+    - PATCH /api/admin/wecom/tag-groups/{group_id}
+    - DELETE /api/admin/wecom/tag-groups/{group_id}
+    - GET /api/admin/wecom/tags/live/gate
+    - POST /api/admin/wecom/tags/sync
+    - POST /api/admin/wecom/tags/sync-due
+    - GET /api/admin/wecom/tags/sync-status
+  excluded_operations:
+    - POST /api/admin/wecom/tags/live/mark
+    - POST /api/admin/wecom/tags/live/unmark
+    - POST /api/admin/wecom/tag-effects/{effect_id}/reconcile
+  notes: exact endpoint and payload evidence is implemented by the v3 HTTP/OpenAPI adapter; frozen donor business files are reused without byte changes
+  dto_fields:
+    LegacyTagGroupCreateRequest: [group_name, first_tag_name, actor, idempotency_key, trace_id, dry_run]
+    LegacyTagGroupUpdateRequest: [group_name, actor, idempotency_key, trace_id, dry_run]
+    LegacyTagCreateRequest: [group_id, group_name, tag_name, actor, idempotency_key, trace_id, dry_run]
+    LegacyTagUpdateRequest: [tag_name, actor, idempotency_key, trace_id, dry_run]
+    LegacyTagArchiveRequest: [actor, idempotency_key, trace_id, dry_run]
+    LegacyTagSyncRequest: [idempotency_key, trace_id]
+    LegacyTagSyncStatusResponse: [ok, sync]
+    LegacyTagCatalogResponse: [ok, items, tags, groups, count, total_tags, tag_limit, synced_at, source_status, read_model_status, route_owner, fallback_used, real_external_call_executed, sync_executed, fixture_used]
+    LegacyTagExecutionGate: [provider_execution_eligible, local_command_acceptance_available, local_queue_available, sync_executed, observed_at, real_external_call_executed]
+  ordering_contract:
+    app_operations: [ReorderGroups, ReorderTags]
+    request_paths: []
+    rule: complete permutation of the current IDs is accepted; partial, duplicate, unknown, or stale membership is rejected before mutation
+  error_interaction:
+    malformed_or_invalid: 400
+    unauthorized_or_wrong_scope: 403
+    missing_item: 404
+    idempotency_conflict: 409
+    local_or_provider_dependency_unavailable: 503
+    sync_success_copy: 标签同步已受理；尚未收到 Provider 同步结果
+    sync_failure_copy: 标签同步受理失败
+    sync_active_copy: 同步中…
+    sync_completed_copy: 标签同步完成并刷新本地目录
+    safety_fields: [real_external_call_executed, sync_executed]
+provider_effect_contract:
+  catalog_sync_only:
+    accepted: local command/event/receipt transaction
+    queued: durable queue acceptance; not Provider execution
+    attempted: Provider call started
+    executed: Provider read returned a validated complete catalog snapshot
+    outcome_unknown: Provider result cannot be proven; manual reconciliation required
+    reconciled: original effect resolved with evidence; never replace the idempotency key
+  receipt_fields: [effect_id, accept_receipt_id, queue_receipt_id, provider_call_attempted, provider_success_claimed, receipt_digest]
+  reconciliation: generic reconciliation may only close an unknown effect with evidence and never writes an observation; a validated fresh snapshot artifact is required for observed/executed state
+  notes: v3 outbound owns the opaque catalog intent; the read-only adapter is implemented behind AICRM_WECOM_TAG_CATALOG_PROVIDER_ENABLED plus catalog-read-authorized permission, default false and disabled on id-dev
+characterization:
+  tests:
+    - internal/tag/domain/catalog_test.go
+    - internal/tag/domain/gate_test.go
+    - internal/tag/app/catalog_test.go
+    - internal/tag/app/gate_test.go
+    - internal/tag/app/sync_test.go
+    - internal/tag/http/handler_test.go
+    - internal/tag/ui_test.go
+    - internal/tag/store/postgres_integration_test.go
+    - internal/outbound/tag_catalog_provider_test.go
+    - internal/wecom/adapter/client_test.go
+    - cmd/aicrm/tag_catalog_integration_test.go
+  behaviors:
+    - CRUD mutation receipt is transaction-bound and idempotent
+    - group-create creates the required first tag
+    - archive checks read-only references before mutation
+    - reorder accepts a complete permutation and rejects stale partial membership
+    - gate projects only the fail-closed allowlist
+    - manual and due sync return queued acceptance and never claim Provider execution
+    - completed catalog read atomically appends a tag-owned snapshot, reconciles provider-bound catalog rows, writes audit/outbox, and closes the sync receipt
+    - unknown, retryable, final-failed, cancelled, and reconciled states update the tag-owned receipt without appending a snapshot
+    - one active receipt is enforced in PostgreSQL and the v3 WebShell bridge disables the frozen donor button while active
+exclusion_audit:
+  forbidden_terms_not_in_transferred_commands: [external_userid, mark, unmark, customer_id]
+  excluded_frontend_behavior: [customer_detail_tagging, customer_tag_mark, customer_tag_unmark, channel_entry_tag_assignment, campaign_or_audience_targeting]
+  excluded_routes:
+    - POST /api/admin/wecom/tags/live/mark
+    - POST /api/admin/wecom/tags/live/unmark
+    - POST /api/admin/wecom/tag-effects/{effect_id}/reconcile
+completion_evidence:
+  - v3-owned 0008 migration and PostgreSQL repository own only tag tables
+  - authenticated/CSRF HTTP compatibility and OpenAPI adapters preserve the frozen DTO routes
+  - outbound TransactionalAccepter creates the real EER/River acceptance in the same PostgreSQL UoW
+  - completed catalog reads atomically transition EER and append the validated tag-owned observation; unknown/final_failed never write a snapshot
+remaining_limitation:
+  - id-dev configuration keeps the implemented catalog-read adapter disabled; enabling it requires the explicit catalog-read authorization and a separately approved live Provider Journey

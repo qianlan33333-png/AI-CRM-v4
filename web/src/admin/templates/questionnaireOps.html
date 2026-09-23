@@ -1,0 +1,111 @@
+
+          <sc-if value="{{ qops.missingId }}">
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px">
+            <div role="alert" style="max-width:720px;margin:40px auto;background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:32px;text-align:center">
+              <div style="font-size:16px;font-weight:600;color:#1F2329">缺少问卷 ID</div>
+              <p style="margin:10px 0 0;font-size:13px;color:#8F959E">运营配置必须针对一份真实问卷。请从问卷列表选择具体问卷进入，本页未发出任何读取或写入请求。</p>
+              <button onClick="{{ qops.back }}" style="margin-top:16px;height:32px;padding:0 16px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;cursor:pointer">返回问卷列表</button>
+            </div>
+          </div>
+          </sc-if>
+          <sc-if value="{{ qops.hasId }}">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;padding:0 20px;background:#fff;border-bottom:1px solid #DEE0E3;flex:none">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <a onClick="{{ qops.back }}" style="width:28px;height:28px;border:1px solid #DEE0E3;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#646A73" stroke-width="1.6"><path d="M9.6 3.6L5.2 8l4.4 4.4"/></svg></a>
+              <div style="min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8F959E;line-height:14px"><a onClick="{{ qops.back }}" style="cursor:pointer;color:#8F959E">问卷</a><span>/</span><span>运营配置</span></div>
+                <div style="font-size:16px;font-weight:600;line-height:22px">{{ qops.q.name }}</div>
+              </div>
+            </div>
+            <button onClick="{{ qops.save }}" style="height:30px;padding:0 14px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer;flex:none">保存当前维度</button>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-content:start">
+
+            <!-- 摘要卡 -->
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:14px 16px">
+              <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px">
+                <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:10px 12px"><div style="font-size:12px;color:#8F959E">问卷状态</div><div style="font-size:14px;font-weight:600;margin-top:6px">{{ qops.q.status }}</div></div>
+                <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:10px 12px"><div style="font-size:12px;color:#8F959E">提交量</div><div style="font-size:20px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums">{{ qops.q.count }}</div></div>
+                <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:10px 12px"><div style="font-size:12px;color:#8F959E">提交后动作</div><div style="font-size:14px;font-weight:600;margin-top:6px">{{ qops.q.action }}</div></div>
+                <div style="background:#FAFBFC;border:1px solid #EFF0F1;border-radius:8px;padding:10px 12px"><div style="font-size:12px;color:#8F959E">外部推送</div><div style="font-size:14px;font-weight:600;margin-top:6px"><sc-if value="{{ qops.ops.pushEnabled }}">已启用</sc-if><sc-if value="{{ qops.pushOff }}">未启用</sc-if></div></div>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:12px;border-top:1px solid #F2F3F5;padding-top:12px">
+                <button onClick="{{ qops.copyPublic }}" style="height:28px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:12px;cursor:pointer">复制公开地址</button>
+                <button onClick="{{ qops.openPublic }}" style="height:28px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:12px;cursor:pointer">打开公开页</button>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:220px minmax(0,1fr);gap:16px;align-items:start">
+              <!-- 维度导航 -->
+              <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:8px">
+                <button onClick="{{ qops.goTab.1 }}" style="{{ qops.nav.1 }}"><span style="{{ qops.nav.dot1 }}">1</span><span>提交后动作</span></button>
+                <button onClick="{{ qops.goTab.2 }}" style="{{ qops.nav.2 }}"><span style="{{ qops.nav.dot2 }}">2</span><span>外部推送</span></button>
+              </div>
+
+              <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:16px">
+
+                <!-- 1 提交后动作 -->
+                <div style="{{ qops.panel.1 }}">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+                    <div><h3 style="margin:0;font-size:15px;font-weight:600">提交后动作</h3><p style="margin:5px 0 0;font-size:12px;color:#8F959E">当前契约只接受服务端资源引用，不接收浏览器 URL 或本地二维码文案。</p></div>
+                    <span onClick="{{ qops.flipPost }}" style="{{ qops.postSw.track }}"><span style="{{ qops.postSw.knob }}"></span></span>
+                  </div>
+                  <sc-if value="{{ qops.postOn }}">
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+                    <div onClick="{{ qops.pickQr }}" style="{{ qops.cardQr }}">
+                      <div style="font-size:14px;font-weight:600">展示渠道二维码</div>
+                      <p style="margin:6px 0 0;font-size:12px;color:#8F959E;line-height:1.6">提交完成后向用户展示渠道活码，引导添加企微</p>
+                    </div>
+                    <div onClick="{{ qops.pickRedirect }}" style="{{ qops.cardRedirect }}">
+                      <div style="font-size:14px;font-weight:600">直接跳转</div>
+                      <p style="margin:6px 0 0;font-size:12px;color:#8F959E;line-height:1.6">提交完成后跳转到已配置的完成页</p>
+                    </div>
+                  </div>
+
+                  <sc-if value="{{ qops.isQr }}">
+                  <div style="display:grid;gap:14px">
+                    <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">绑定渠道码</label>
+                      <div onClick="{{ qops.pickChannel }}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;cursor:pointer"><span style="min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ qops.channelText }}</span><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#8F959E" stroke-width="1.6" style="flex:none"><path d="M3.6 6l4.4 4.4L12.4 6"/></svg></div></div>
+                    <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">渠道资源 ID（高级，选择器不可用时手填）</label><input id="opsChannelResourceId" value="{{ qops.ops.completionChannelId }}" inputmode="numeric" placeholder="123" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;font-family:ui-monospace,Menlo,monospace;box-sizing:border-box"></div>
+                    <div style="border:1px dashed #DEE0E3;border-radius:8px;padding:12px 16px;font-size:12px;color:#8F959E;background:#FAFBFC">二维码画面以渠道码中心当前已保存素材为准，本页不渲染预览图。</div>
+                  </div>
+                  </sc-if>
+
+                  <sc-if value="{{ qops.isRedirect }}">
+                  <div style="display:grid;gap:14px">
+                    <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">完成页导航目标（opaque 引用）</label><input id="opsNavigationTarget" value="{{ qops.ops.completionNavigationTargetId }}" placeholder="completion.thank-you" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;font-family:ui-monospace,Menlo,monospace;box-sizing:border-box"></div>
+                    <div style="font-size:12px;color:#8F959E">只接受 1-128 位服务端 opaque reference；填写 URL 会在保存前被拒绝。</div>
+                  </div>
+                  </sc-if>
+
+                  <div style="display:flex;justify-content:flex-end;margin-top:16px"><button onClick="{{ qops.save }}" style="height:32px;padding:0 16px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">保存提交后动作</button></div>
+                  </sc-if>
+                </div>
+
+                <!-- 2 外部推送 -->
+                <div style="{{ qops.panel.2 }}">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+                    <div><h3 style="margin:0;font-size:15px;font-weight:600">外部推送绑定</h3><p style="margin:5px 0 0;font-size:12px;color:#8F959E">这里只保存后端已有配置的 opaque reference；不会创建 webhook 或触发发送。</p></div>
+                    <span onClick="{{ qops.flipPush }}" style="{{ qops.pushSw.track }}"><span style="{{ qops.pushSw.knob }}"></span></span>
+                  </div>
+                  <sc-if value="{{ qops.pushOn }}">
+                  <div style="display:grid;gap:14px">
+                    <div><label style="display:block;font-size:12px;color:#646A73;margin-bottom:6px;font-weight:500">推送配置引用</label><input id="opsConfigurationReference" value="{{ qops.ops.externalPushConfigurationReference }}" placeholder="survey-push.crm-default" style="height:34px;width:100%;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px;font-family:ui-monospace,Menlo,monospace;box-sizing:border-box"></div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid #F2F3F5;padding-top:14px">
+                      <button onClick="{{ qops.viewLogs }}" style="height:28px;padding:0 10px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#344054;font-size:12px;cursor:pointer">查看推送日志</button>
+                      <div style="display:flex;gap:8px"><button onClick="{{ qops.testPush }}" style="height:32px;padding:0 14px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;color:#1F2329;font-size:13px;cursor:pointer">测试推送（仅本地记录）</button><button onClick="{{ qops.save }}" style="height:32px;padding:0 16px;border:0;border-radius:6px;background:var(--accent,#3370ff);color:#fff;font-size:13px;cursor:pointer">保存外部推送</button></div>
+                    </div>
+                  </div>
+                  </sc-if>
+                </div>
+
+              </div>
+            </div>
+            <div style="background:#fff;border:1px solid #DEE0E3;border-radius:8px;padding:16px">
+              <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><h3 style="margin:0;font-size:15px">{{ qops.logScope }}</h3><span style="font-size:12px;color:#8F959E">{{ qops.logCount }} 条</span></div>
+              <p style="margin:6px 0 0;font-size:12px;color:#8F959E">只显示本地 queued 测试记录；没有 Provider 调用、接收或送达回执。</p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button onClick="{{ qops.showQuestionnaireLogs }}" style="{{ qops.questionnaireLogScopeStyle }}">当前问卷</button><button onClick="{{ qops.showGlobalLogs }}" style="{{ qops.globalLogScopeStyle }}">全部问卷</button><input id="opsLogKeyword" value="{{ qops.logKeyword }}" placeholder="测试记录 ID / 问卷 ID" style="height:32px;min-width:220px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;font-size:13px"><select id="opsLogStatus" style="height:32px;border:1px solid #DEE0E3;border-radius:6px;padding:0 10px;background:#fff;font-size:13px"><sc-if value="{{ qops.logStatusAll }}"><option value="" selected="selected">全部状态</option><option value="queued">queued</option></sc-if><sc-if value="{{ qops.logStatusQueued }}"><option value="">全部状态</option><option value="queued" selected="selected">queued</option></sc-if></select><button onClick="{{ qops.filterLogs }}" style="height:32px;padding:0 12px;border:0;border-radius:6px;background:#3370ff;color:#fff;font-size:13px;cursor:pointer">应用筛选</button><button onClick="{{ qops.resetLogs }}" style="height:32px;padding:0 12px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;font-size:13px;cursor:pointer">重置</button></div>
+              <table style="width:100%;border-collapse:collapse;margin-top:10px"><thead><tr><th style="text-align:left;padding:8px;border-bottom:1px solid #DEE0E3">时间</th><th style="text-align:left;padding:8px;border-bottom:1px solid #DEE0E3">测试记录 ID</th><th style="text-align:left;padding:8px;border-bottom:1px solid #DEE0E3">问卷 ID</th><th style="text-align:left;padding:8px;border-bottom:1px solid #DEE0E3">状态</th><th style="text-align:left;padding:8px;border-bottom:1px solid #DEE0E3">本地边界</th></tr></thead><tbody><sc-for list="{{ rows.qApply }}" as="r"><tr><td style="padding:8px;border-bottom:1px solid #F2F3F5">{{ r.time }}</td><td style="padding:8px;border-bottom:1px solid #F2F3F5">{{ r.sid }}</td><td style="padding:8px;border-bottom:1px solid #F2F3F5">{{ r.uid }}</td><td style="padding:8px;border-bottom:1px solid #F2F3F5"><span style="{{ r.cs }}">{{ r.status }}</span></td><td style="padding:8px;border-bottom:1px solid #F2F3F5">{{ r.err }}</td></tr></sc-for></tbody></table>
+            </div>
+          </div>
+          </sc-if>

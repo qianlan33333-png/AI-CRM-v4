@@ -1,0 +1,330 @@
+/* V3-owned presentation layer for the signed WeCom customer sidebar. The
+   frozen sidebar renderer keeps all fields, navigation and business actions;
+   this stylesheet only consumes stable DOM roles after the donor CSS. */
+body[data-ui-surface="sidebar"] {
+  margin: 0;
+  min-width: 0;
+  background: var(--v3-ui-canvas);
+  color: var(--v3-ui-text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 10px max(16px, env(safe-area-inset-bottom));
+  background: var(--v3-ui-canvas);
+  overflow-x: clip;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: -6px -10px 8px;
+  padding: max(6px, env(safe-area-inset-top)) 10px 6px;
+  background: color-mix(in srgb, var(--v3-ui-canvas) 94%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--v3-ui-line) 70%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] :is(.profile-card, .panel, .card) {
+  background: var(--v3-ui-panel);
+  border-color: var(--v3-ui-line);
+  box-shadow: none;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .profile-card {
+  padding: 10px;
+  border-radius: var(--v3-ui-radius-lg);
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .profile-main {
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .identity,
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .name-row {
+  min-width: 0;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--v3-ui-text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] :is(.meta, .workflow, .mini, .sub, .hint) {
+  color: var(--v3-ui-muted);
+  overflow-wrap: anywhere;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .phone-state {
+  border-color: transparent;
+  background: var(--v3-ui-success-soft);
+  color: var(--v3-ui-success);
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .phone-state.unbound {
+  background: var(--v3-ui-warning-soft);
+  color: var(--v3-ui-warning);
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] :is(.btn, .tab, .material-keyword) {
+  min-height: 36px;
+  border-radius: var(--v3-ui-radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .btn.primary,
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .tab.active {
+  border-color: var(--v3-ui-primary);
+  background: var(--v3-ui-primary);
+  color: #fff;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .btn.primary:hover:not(:disabled),
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .tab:hover:not(:disabled) {
+  border-color: var(--v3-ui-primary-strong);
+  background: var(--v3-ui-primary-strong);
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] :is(.btn, .tab, input, textarea):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--v3-ui-primary) 28%, transparent);
+  outline-offset: 1px;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] :is(.btn, .tab):disabled,
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] :is(.btn, .tab)[aria-disabled="true"] {
+  border-color: var(--v3-ui-line);
+  background: var(--v3-ui-panel-soft);
+  color: var(--v3-ui-muted-soft);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .tabs {
+  gap: 6px;
+  margin: 8px 0 0;
+  overflow: visible;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .tab:not(.active) {
+  background: var(--v3-ui-panel);
+  color: var(--v3-ui-muted);
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .tab:not(.active):hover:not(:disabled) {
+  background: var(--v3-ui-primary-soft);
+  color: var(--v3-ui-primary-strong);
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .panel {
+  padding: 12px;
+  border-radius: var(--v3-ui-radius-lg);
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .card {
+  border-radius: var(--v3-ui-radius-md);
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] :is(.status, .empty) {
+  color: var(--v3-ui-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .status.error,
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .v3-sidebar-retained-error {
+  margin: 0 0 10px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--v3-ui-danger) 24%, var(--v3-ui-line));
+  border-radius: var(--v3-ui-radius-sm);
+  background: var(--v3-ui-danger-soft);
+  color: #a61d24;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .v3-sidebar-retained-error .row-actions {
+  margin-top: 8px;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material {
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 10px;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material-main {
+  min-width: 0;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material .tag {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  border-color: transparent;
+  background: var(--v3-ui-primary-soft);
+  color: var(--v3-ui-primary-strong);
+  font-size: 12px;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material-send {
+  width: auto;
+  min-width: 52px;
+  align-self: center;
+  white-space: nowrap;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material-search {
+  align-items: stretch;
+}
+
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material-search-field input {
+  min-height: 36px;
+  border-color: var(--v3-ui-line-strong);
+  background: var(--v3-ui-panel);
+  color: var(--v3-ui-text);
+}
+
+@media (max-width: 420px) {
+  body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] {
+    padding-inline: 8px;
+  }
+
+  body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .top {
+    margin-inline: -8px;
+    padding-inline: 8px;
+  }
+
+  body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .profile-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .change {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material-search {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material-search-clear {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+@media (max-width: 360px) {
+  body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .tab {
+    min-height: 38px;
+    padding-inline: 5px;
+    font-size: 13px;
+  }
+
+  body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .panel {
+    padding: 10px;
+  }
+
+  body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material {
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+  }
+
+  body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] :is(.material-thumb, .thumb) {
+    width: 48px;
+    min-width: 48px;
+    max-width: 48px;
+    height: 48px;
+  }
+
+  body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material-send {
+    grid-column: 3;
+    justify-self: end;
+  }
+}
+
+/* Keep identity context visible while leaving room for the active module. */
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .profile-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .identity {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: start;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .name-row {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-content: start;
+  gap: 3px 6px;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] :is(#customer-mobile, #customer-oneid) {
+  grid-column: 2;
+  margin: 0;
+  font-size: 12px;
+  line-height: 19px;
+  text-align: right;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] #workflow-title {
+  grid-column: 1 / -1;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] #workflow-title:empty {
+  display: none;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .change {
+  justify-self: end;
+  width: auto;
+  min-height: 28px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .tab {
+  min-height: 34px;
+  padding: 5px;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material > :is(.material-thumb, .thumb) {
+  grid-column: 1;
+  grid-row: 1;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material-main {
+  grid-column: 2;
+  grid-row: 1;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material .material-send {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  width: auto;
+  min-width: 48px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material-title {
+  font-size: 13px;
+  line-height: 19px;
+}
+body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material--image .tags {
+  margin-top: 4px;
+}

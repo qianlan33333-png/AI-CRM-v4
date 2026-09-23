@@ -1,0 +1,1814 @@
+{
+  "schema_version": 1,
+  "approvals": [
+    {
+      "base_commit": "7085192b0f6510ba71da119ffa2989849066e1cd",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "542ae46a708d512303f4308982141edafc115d3b0b7c0b780dbf2d221a1c616a",
+          "head_sha256": "b7c44469b69cd2212e9d2426b3de8a713ce9a87c8de328b679aa5c8dc4dca12a"
+        },
+        {
+          "path": "web/donor-sources/production-dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f/static/config_center.css",
+          "base_sha256": null,
+          "head_sha256": "b0963b207fe385f8f84bb8c709aa383ed0b1ea148dec096e5e51f9a3dc4b71c4"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "19e57d8e6166bf95afa99c7e955e8546318a3bd9ca7ceb82f61631c3c9bddfab",
+          "head_sha256": "b863615c2945ac6d35ab39ec620ba92994a1ac823f5b8725046d094fc3cfbb58"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "4c6039313cad63984d9addee315559593f22e5b39e4727d9e024f1253e9461e6",
+          "head_sha256": "02b1e6ed0805db43f09fcfada5a60635d16e08ad068b047fc7496f3a18107d18"
+        }
+      ],
+      "reason": "Expand the active V3 Config runtime release contract and add the audited legacy-binary recovery operation.",
+      "review_reference": "PR #190 Config Center legacy parity review"
+    },
+    {
+      "base_commit": "d59183c7235089c5bd147ed0a6caf0718ec9a8f3",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b7c44469b69cd2212e9d2426b3de8a713ce9a87c8de328b679aa5c8dc4dca12a",
+          "head_sha256": "eaf724ac7935510015ce7fb4cdd0dc59e4d6b8a06d50195e1c0ac44afc00998d"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b863615c2945ac6d35ab39ec620ba92994a1ac823f5b8725046d094fc3cfbb58",
+          "head_sha256": "a2a71c2c77e426a6519f6696b2e31e9e176a7967999070ce87e3df27d2790259"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "02b1e6ed0805db43f09fcfada5a60635d16e08ad068b047fc7496f3a18107d18",
+          "head_sha256": "b07c0ecf5a9ab3c1346040e0a94bd98ba5e92d93f98e15d69caa5ca73199d01f"
+        }
+      ],
+      "reason": "OperationCycle Runner adds the fenced action-lease renewal API contract while preserving the merged Config Center contract.",
+      "review_reference": "PR #193 OperationCycle Runner closeout review"
+    },
+    {
+      "base_commit": "1778225e308504a40679033f08853cdc2f723eef",
+      "changes": [
+        {
+          "path": "web/donor-sources/production-dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f/static/image_resource_loader.js",
+          "base_sha256": null,
+          "head_sha256": "38090abd86d19b7027841e7035bb8e8b12548487914a98a893fd71a5ec51187d"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "a2a71c2c77e426a6519f6696b2e31e9e176a7967999070ce87e3df27d2790259",
+          "head_sha256": "8ff73335aa4555800ac00bb0480db7043329790b804126ee33c825f28f6fbed0"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "b07c0ecf5a9ab3c1346040e0a94bd98ba5e92d93f98e15d69caa5ca73199d01f",
+          "head_sha256": "f1ebc9dc5775f46295de3f33846a69fe92748e326ddf89c68b3a15c8dc9c95c2"
+        }
+      ],
+      "reason": "Register the audited dd8 sidebar image loader as the single frozen source and package its byte-exact pager in the Sidebar release closure.",
+      "review_reference": "PR #192 Sidebar standard parity review"
+    },
+    {
+      "base_commit": "ae536c572dd93ccec5fe394ad715520ba88c1787",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "eaf724ac7935510015ce7fb4cdd0dc59e4d6b8a06d50195e1c0ac44afc00998d",
+          "head_sha256": "e604c5f39fc0b1d4f9a6797c641d992379504cffc72ef79d15907b72a215119a"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "8ff73335aa4555800ac00bb0480db7043329790b804126ee33c825f28f6fbed0",
+          "head_sha256": "b578369301c98da27d653693ac0b41d8df7ed6fe3aa152712efb3c78768f2218"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "f1ebc9dc5775f46295de3f33846a69fe92748e326ddf89c68b3a15c8dc9c95c2",
+          "head_sha256": "5ed6f33116aa3def302ab20867193ffb0f3705a1f134140a4f33d37eeb698fe4"
+        }
+      ],
+      "reason": "Register the approved Tag catalog external-effects contract change in the active V3 OpenAPI authority metadata.",
+      "review_reference": "2026-09-08 fast-launch approved Tag catalog external-effects delivery"
+    },
+    {
+      "base_commit": "f48fed245c1837b4f7efbac7c0285852dfe3f960",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e604c5f39fc0b1d4f9a6797c641d992379504cffc72ef79d15907b72a215119a",
+          "head_sha256": "249ce8aa28030e0796b73541a882367fad2fd331b234e97f333e93f763c6d702"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b578369301c98da27d653693ac0b41d8df7ed6fe3aa152712efb3c78768f2218",
+          "head_sha256": "3c7521a4ec7f28d99749ade68ae2b351a999cf49f0aa87553f2610a3823fde9e"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5ed6f33116aa3def302ab20867193ffb0f3705a1f134140a4f33d37eeb698fe4",
+          "head_sha256": "208d5130dddfc6cc00c651583a320d9c64ac445b1df22601d9379c274c26d762"
+        }
+      ],
+      "reason": "Register the user-approved optional Product paid-action contract and preserve byte-exact standard UI sources for the commerce release block.",
+      "review_reference": "2026-09-08 user-approved fast-launch execution plan, commerce block; stacked on PR #200"
+    },
+    {
+      "base_commit": "9baba27fca47704e51577885d657c06bb58ce59b",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e604c5f39fc0b1d4f9a6797c641d992379504cffc72ef79d15907b72a215119a",
+          "head_sha256": "249ce8aa28030e0796b73541a882367fad2fd331b234e97f333e93f763c6d702"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b578369301c98da27d653693ac0b41d8df7ed6fe3aa152712efb3c78768f2218",
+          "head_sha256": "3c7521a4ec7f28d99749ade68ae2b351a999cf49f0aa87553f2610a3823fde9e"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5ed6f33116aa3def302ab20867193ffb0f3705a1f134140a4f33d37eeb698fe4",
+          "head_sha256": "208d5130dddfc6cc00c651583a320d9c64ac445b1df22601d9379c274c26d762"
+        }
+      ],
+      "reason": "Register the user-approved optional Product paid-action contract and preserve byte-exact standard UI sources for the commerce release block.",
+      "review_reference": "2026-09-08 user-approved fast-launch execution plan, commerce block; stacked on PR #200"
+    },
+    {
+      "base_commit": "baffd7b89d7b90c80c71a01132485eb391d8e17d",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e604c5f39fc0b1d4f9a6797c641d992379504cffc72ef79d15907b72a215119a",
+          "head_sha256": "249ce8aa28030e0796b73541a882367fad2fd331b234e97f333e93f763c6d702"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b578369301c98da27d653693ac0b41d8df7ed6fe3aa152712efb3c78768f2218",
+          "head_sha256": "3c7521a4ec7f28d99749ade68ae2b351a999cf49f0aa87553f2610a3823fde9e"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5ed6f33116aa3def302ab20867193ffb0f3705a1f134140a4f33d37eeb698fe4",
+          "head_sha256": "208d5130dddfc6cc00c651583a320d9c64ac445b1df22601d9379c274c26d762"
+        }
+      ],
+      "reason": "Register the user-approved optional Product paid-action contract and preserve byte-exact standard UI sources for the commerce release block.",
+      "review_reference": "2026-09-08 user-approved fast-launch execution plan, commerce block; stacked on PR #200"
+    },
+    {
+      "base_commit": "eb0f66d988b5854b353825484e64c9c3a4bf8a4d",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e604c5f39fc0b1d4f9a6797c641d992379504cffc72ef79d15907b72a215119a",
+          "head_sha256": "249ce8aa28030e0796b73541a882367fad2fd331b234e97f333e93f763c6d702"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b578369301c98da27d653693ac0b41d8df7ed6fe3aa152712efb3c78768f2218",
+          "head_sha256": "3c7521a4ec7f28d99749ade68ae2b351a999cf49f0aa87553f2610a3823fde9e"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5ed6f33116aa3def302ab20867193ffb0f3705a1f134140a4f33d37eeb698fe4",
+          "head_sha256": "208d5130dddfc6cc00c651583a320d9c64ac445b1df22601d9379c274c26d762"
+        }
+      ],
+      "reason": "Register the user-approved optional Product paid-action contract and preserve byte-exact standard UI sources for the commerce release block.",
+      "review_reference": "2026-09-08 user-approved fast-launch execution plan, commerce block; stacked on PR #200"
+    },
+    {
+      "base_commit": "7b004733b2a7da651d4134715cd5969daae95deb",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e604c5f39fc0b1d4f9a6797c641d992379504cffc72ef79d15907b72a215119a",
+          "head_sha256": "249ce8aa28030e0796b73541a882367fad2fd331b234e97f333e93f763c6d702"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b578369301c98da27d653693ac0b41d8df7ed6fe3aa152712efb3c78768f2218",
+          "head_sha256": "3c7521a4ec7f28d99749ade68ae2b351a999cf49f0aa87553f2610a3823fde9e"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5ed6f33116aa3def302ab20867193ffb0f3705a1f134140a4f33d37eeb698fe4",
+          "head_sha256": "208d5130dddfc6cc00c651583a320d9c64ac445b1df22601d9379c274c26d762"
+        }
+      ],
+      "reason": "Register the user-approved optional Product paid-action contract and preserve byte-exact standard UI sources for the commerce release block.",
+      "review_reference": "2026-09-08 user-approved fast-launch execution plan, commerce block; stacked on PR #200"
+    },
+    {
+      "base_commit": "b80feb374998e0e3afa7ddba4a951ee68f3fba05",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e604c5f39fc0b1d4f9a6797c641d992379504cffc72ef79d15907b72a215119a",
+          "head_sha256": "249ce8aa28030e0796b73541a882367fad2fd331b234e97f333e93f763c6d702"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b578369301c98da27d653693ac0b41d8df7ed6fe3aa152712efb3c78768f2218",
+          "head_sha256": "3c7521a4ec7f28d99749ade68ae2b351a999cf49f0aa87553f2610a3823fde9e"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5ed6f33116aa3def302ab20867193ffb0f3705a1f134140a4f33d37eeb698fe4",
+          "head_sha256": "208d5130dddfc6cc00c651583a320d9c64ac445b1df22601d9379c274c26d762"
+        }
+      ],
+      "reason": "Register the user-approved optional Product paid-action contract and preserve byte-exact standard UI sources for the commerce release block.",
+      "review_reference": "2026-09-08 user-approved fast-launch execution plan, commerce block; stacked on PR #200"
+    },
+    {
+      "base_commit": "7907723899dfe2f496bf0c6a42f3bc3e85da0e0a",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "249ce8aa28030e0796b73541a882367fad2fd331b234e97f333e93f763c6d702",
+          "head_sha256": "ebeba9dacb58fd6c8383ceba28b8ec7eac27064f452d8e3e734a6b1552fd9293"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "3c7521a4ec7f28d99749ade68ae2b351a999cf49f0aa87553f2610a3823fde9e",
+          "head_sha256": "a2f38107097c39a6c54c28c492359df74cd7700e70665e857432b7f32acfb62f"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "208d5130dddfc6cc00c651583a320d9c64ac445b1df22601d9379c274c26d762",
+          "head_sha256": "16eaa92bcd2587b54efeba38b016dc063eb2bf95c9f36dcf199484c90f8f7142"
+        }
+      ],
+      "reason": "Implement authorized Excel batch import, uploaded cover and review/receipt API under the active V3 owner; frozen donor payloads remain unchanged.",
+      "review_reference": "https://github.com/qianlan33333-png/AI-CRM-v3/pull/218"
+    },
+    {
+      "base_commit": "142d58a183f64e4c82f177c1cabdb2cb657d647d",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "ebeba9dacb58fd6c8383ceba28b8ec7eac27064f452d8e3e734a6b1552fd9293",
+          "head_sha256": "19d6bb48c22478c3e1fdf586c0607507642b6cad44f285f401261396335c6fb2"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "a2f38107097c39a6c54c28c492359df74cd7700e70665e857432b7f32acfb62f",
+          "head_sha256": "50549838931183bd3ee8e53c46649faaee9ba87b1b6583cb2044903e6b9d6ea3"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "16eaa92bcd2587b54efeba38b016dc063eb2bf95c9f36dcf199484c90f8f7142",
+          "head_sha256": "e25bcf1d0f365730815eda0ecf1905966572879aab4eed81a7a72be8dd34e6fa"
+        }
+      ],
+      "reason": "Record the user-authorized integrated production cutover and payment checkout local-abandonment contract. Only the active V3 OpenAPI authority and its index/lock identities change; frozen donor payloads remain unchanged. This declaration is subject to PR review and is not independent proof of human approval.",
+      "review_reference": "https://github.com/qianlan33333-png/AI-CRM-v3/pull/227"
+    },
+    {
+      "base_commit": "02b79ed473e46beaac6880c6a4f8495c76c791d4",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "19d6bb48c22478c3e1fdf586c0607507642b6cad44f285f401261396335c6fb2",
+          "head_sha256": "7f8652ed24ba0570ca07c1ee24dee9d576a745c93d7508be126c01e903606930"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "50549838931183bd3ee8e53c46649faaee9ba87b1b6583cb2044903e6b9d6ea3",
+          "head_sha256": "8e4ae958b4fd21179b1bfe01ad617472f5b7c94ac7fa47c34fd36ad2d0a78d71"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "e25bcf1d0f365730815eda0ecf1905966572879aab4eed81a7a72be8dd34e6fa",
+          "head_sha256": "54b80195e1f7d58a562f13fe73c9354f499b1d80c70ed9c7599396a4775bcf7d"
+        }
+      ],
+      "reason": "Record the user-authorized checkout recovery PR active V3 contract for an audited explicit new purchase after an invalid legacy attempt. Frozen donors remain unchanged. This declaration is subject to PR review, not independent evidence of human approval.",
+      "review_reference": "https://github.com/qianlan33333-png/AI-CRM-v3/pull/228"
+    },
+    {
+      "base_commit": "077aee0d9d86d362c66f9f62cc6015df6a720fda",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "7f8652ed24ba0570ca07c1ee24dee9d576a745c93d7508be126c01e903606930",
+          "head_sha256": "cf060a5ea5e88d9c7f05ed2c44400ec55053876bada80d33f69099dc9b0d458b"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "8e4ae958b4fd21179b1bfe01ad617472f5b7c94ac7fa47c34fd36ad2d0a78d71",
+          "head_sha256": "78871ebebfb035f561e95f071b08cdb013b278c0ef522b4bba6a4c591ec3a5af"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "54b80195e1f7d58a562f13fe73c9354f499b1d80c70ed9c7599396a4775bcf7d",
+          "head_sha256": "246ce89231d88c97f25d2029c11fec596096265ab0ae1e4c4737768b53a6b660"
+        }
+      ],
+      "reason": "Record the user-authorized automatic userinfo authorization and purchase availability contract. Only active V3 OpenAPI authority changes; frozen donors remain unchanged. This declaration is subject to PR review and is not independent evidence of human approval.",
+      "review_reference": "Authorized automatic authorization and purchase flow"
+    },
+    {
+      "base_commit": "80d8c106c1e46563d4d30b73957570e7a03a3959",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "cf060a5ea5e88d9c7f05ed2c44400ec55053876bada80d33f69099dc9b0d458b",
+          "head_sha256": "3d5ad874f5e93c04be5fb04202ec53b12a41a8e998e8468af090d34895b32581"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "78871ebebfb035f561e95f071b08cdb013b278c0ef522b4bba6a4c591ec3a5af",
+          "head_sha256": "12da0cc94dbabd661e989ab5ec390ee6199c106ed737e91e5bc08281e9eb0a8f"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "246ce89231d88c97f25d2029c11fec596096265ab0ae1e4c4737768b53a6b660",
+          "head_sha256": "4541542f1da526465b3d553935efdce7b0c700243524cb42f8898d089f0100ad"
+        }
+      ],
+      "reason": "Restore complete product external push editor contract including Outbound-owned destination.",
+      "review_reference": "PR #230 user requested legacy product completion parity"
+    },
+    {
+      "base_commit": "f77b5ab7f5cb8b29c4890e93ccd2480d22694929",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "3d5ad874f5e93c04be5fb04202ec53b12a41a8e998e8468af090d34895b32581",
+          "head_sha256": "a989789843a439d664e6d04ad75fccbef134a8865355f1d67841b3315acda79c"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "12da0cc94dbabd661e989ab5ec390ee6199c106ed737e91e5bc08281e9eb0a8f",
+          "head_sha256": "c6e867f16e611ab8ec2b3272801ea4164cfd12d8b01e1a8a908b9e7787aeb025"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "4541542f1da526465b3d553935efdce7b0c700243524cb42f8898d089f0100ad",
+          "head_sha256": "b496adea724545ca16e96e2036b4c0046d0e04d27725366eb81a8aa167e0873a"
+        }
+      ],
+      "reason": "User-authorized versioned product external push field mapping and read-only synthetic preview; frozen donor authority unchanged.",
+      "review_reference": "https://github.com/qianlan33333-png/AI-CRM-v3/pull/232"
+    },
+    {
+      "base_commit": "4b4b503ea16d6e8c5154ccdeec9bc5251c33b455",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a989789843a439d664e6d04ad75fccbef134a8865355f1d67841b3315acda79c",
+          "head_sha256": "14632fd1e3570283a78a8382198410d7dc93d24d2f6010a0685b3d2016867d17"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "c6e867f16e611ab8ec2b3272801ea4164cfd12d8b01e1a8a908b9e7787aeb025",
+          "head_sha256": "656447e621bcc70912bc5da7f098508fb8d815ad8169aad55210395278e0f391"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "b496adea724545ca16e96e2036b4c0046d0e04d27725366eb81a8aa167e0873a",
+          "head_sha256": "f8a0b0161e028d6015b9530c9adf2576711f11e57af83eb099d8a4d11beb3851"
+        }
+      ],
+      "reason": "Record the user-authorized CRM audit closeout active V3 OpenAPI route parity, callable request/response contracts, and actual Open Platform OAuth/V1 error envelopes. Retired routes and frozen donor payloads remain unchanged. This declaration is subject to PR review and is not independent evidence of human approval.",
+      "review_reference": "docs/prd/2026-09-12-crm-audit-closeout.md AUD-08; https://github.com/qianlan33333-png/AI-CRM-v3/pull/244; https://github.com/qianlan33333-png/AI-CRM-v3/pull/246"
+    },
+    {
+      "base_commit": "46887f9d6b9f345e15de69cdc5c03907da805ae9",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a989789843a439d664e6d04ad75fccbef134a8865355f1d67841b3315acda79c",
+          "head_sha256": "aee412088dd2a7ed23a91c49397f3f8731a3d2ad739dc78f90a4a9259d207b40"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "c6e867f16e611ab8ec2b3272801ea4164cfd12d8b01e1a8a908b9e7787aeb025",
+          "head_sha256": "bdba25811ad4a8f25ff172f910f3e4b202f8c3f58c7f44e14fdc1e399f286e08"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "b496adea724545ca16e96e2036b4c0046d0e04d27725366eb81a8aa167e0873a",
+          "head_sha256": "8e663852d2664cab97cdd3b07f86261f106830ed32906896a829aa6c4f521259"
+        }
+      ],
+      "reason": "Record the user-authorized CRM audit closeout active V3 route parity together with the bounded Operation Cycle strategy-summary contract and observable retirement of the unscoped Excel import writer. Frozen donor payloads remain unchanged. This declaration is subject to PR review and is not independent evidence of human approval.",
+      "review_reference": "docs/prd/2026-09-12-crm-audit-closeout.md AUD-08; https://github.com/qianlan33333-png/AI-CRM-v3/pull/247; https://github.com/qianlan33333-png/AI-CRM-v3/pull/248"
+    },
+    {
+      "base_commit": "f3e453e288e26798808c02ad6adb17d396c05c61",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "aee412088dd2a7ed23a91c49397f3f8731a3d2ad739dc78f90a4a9259d207b40",
+          "head_sha256": "6b674f310b6e9c3191b63742360f4721d63670b67e798e26513f8587d90d8a5a"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "bdba25811ad4a8f25ff172f910f3e4b202f8c3f58c7f44e14fdc1e399f286e08",
+          "head_sha256": "9e3cf17048551fa4b561718d9e11af6e0b390cc189bfe5d55f04d91f12407525"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "8e663852d2664cab97cdd3b07f86261f106830ed32906896a829aa6c4f521259",
+          "head_sha256": "b64266561eab87bdd007fe7c357d785665eda37ce251375c811710ae57394369"
+        }
+      ],
+      "reason": "Record the user-authorized Chinese order and coupon presentation together with bounded WeChat Pay refund-confirmation safety. Only active V3 OpenAPI authority and its index/lock identities change; frozen donor payloads remain unchanged. This declaration is subject to PR review and is not independent evidence of human approval.",
+      "review_reference": "root review of PR #256 c15e209"
+    },
+    {
+      "base_commit": "d7e328afc805ebf4e54011f393a95a18a2c407d9",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "6b674f310b6e9c3191b63742360f4721d63670b67e798e26513f8587d90d8a5a",
+          "head_sha256": "709e24c1778e5af51b7e127ebba797f3ba7af9f76d269b147c32b87e07b4aee2"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "9e3cf17048551fa4b561718d9e11af6e0b390cc189bfe5d55f04d91f12407525",
+          "head_sha256": "63d3f61be023e111793a4439aac73e822addd71e5c28689ca1361da725b14b64"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "b64266561eab87bdd007fe7c357d785665eda37ce251375c811710ae57394369",
+          "head_sha256": "8c64f7e0899188f0f82a5f7d2e5441afaabc9870c3e5f69f056d5da183b80abe"
+        }
+      ],
+      "reason": "Record the user-authorized Coupon Chinese product presentation and Shanghai claim-window contract. Only active V3 OpenAPI authority and its index/lock identities change; frozen donor payloads remain unchanged. This declaration is subject to PR review and is not independent evidence of human approval.",
+      "review_reference": "root review of PR #259 coupon Product display contract"
+    },
+    {
+      "base_commit": "d0b74d416ca2a75ee2acf403731271a046c3f663",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "6b674f310b6e9c3191b63742360f4721d63670b67e798e26513f8587d90d8a5a",
+          "head_sha256": "709e24c1778e5af51b7e127ebba797f3ba7af9f76d269b147c32b87e07b4aee2"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "9e3cf17048551fa4b561718d9e11af6e0b390cc189bfe5d55f04d91f12407525",
+          "head_sha256": "8a8b5598aadf7529f9c5e02f319377b7edf2ec0e3741dd87d047cfbece09ccc3"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "b64266561eab87bdd007fe7c357d785665eda37ce251375c811710ae57394369",
+          "head_sha256": "5750f0d8a26a2c0746f0aacf8e85181f982d59683468caab56c2d19444b1d216"
+        }
+      ],
+      "reason": "Rebind the already reviewed Coupon Chinese product presentation and Shanghai claim-window authority metadata to the latest V3 main baseline. The active OpenAPI payload remains the reviewed e8d9 blob and SHA-256 709e24; frozen donor payloads remain unchanged. This declaration is subject to ordinary PR review and is not independent evidence of human approval.",
+      "review_reference": "root review of PR #259 coupon Product display contract"
+    },
+    {
+      "base_commit": "4275dbade2c4d26dc7fb3b5bb87234db0ee03c10",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "709e24c1778e5af51b7e127ebba797f3ba7af9f76d269b147c32b87e07b4aee2",
+          "head_sha256": "e70bf3092c095cfa91a545181f3da6fb5c10f6056930e96acd4d0fac6ff5c19e"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "8a8b5598aadf7529f9c5e02f319377b7edf2ec0e3741dd87d047cfbece09ccc3",
+          "head_sha256": "da9fae2bb291a147728208d67f379262de8c01d84f2510cf1f6d9eae9f514561"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5750f0d8a26a2c0746f0aacf8e85181f982d59683468caab56c2d19444b1d216",
+          "head_sha256": "a20aa5b0c293b6ffc5646d3d26bc74f570ad55444941947b278999a539b256a5"
+        }
+      ],
+      "reason": "Add the reviewed admin-only Radar visitor-session API contract and rebind its active V3 OpenAPI authority metadata without changing frozen donors.",
+      "review_reference": "root review of PR #263 Radar visitor contract"
+    },
+    {
+      "base_commit": "db884d26e749fe3dac820c590ceb19f7e7316ebe",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e70bf3092c095cfa91a545181f3da6fb5c10f6056930e96acd4d0fac6ff5c19e",
+          "head_sha256": "f83a5600545a7f5af3900d732b4d22a7238eeca9ff3ab5a3f334b8384797d4d2"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "da9fae2bb291a147728208d67f379262de8c01d84f2510cf1f6d9eae9f514561",
+          "head_sha256": "c0114992ec48dc1817d56f247d2ea3fa28c92f1067e3a5dfd5dc8af6ee5875a2"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "a20aa5b0c293b6ffc5646d3d26bc74f570ad55444941947b278999a539b256a5",
+          "head_sha256": "5d3978d07befce5e93d3da07075eddb9a411b110016d66062be2ac9d4c96db26"
+        }
+      ],
+      "reason": "Record the Root-reviewed 2026-09-13 external Open Platform read contract and its active V3 OpenAPI authority synchronization. Frozen donor payloads remain unchanged. This declaration is subject to ordinary PR review and is not independent evidence of human approval.",
+      "review_reference": "Root review of 2026-09-13 external read OpenAPI contract and manifest synchronization"
+    },
+    {
+      "base_commit": "7f448ccaa0c0a073b3702ab3af07cc99a5c145a9",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "f83a5600545a7f5af3900d732b4d22a7238eeca9ff3ab5a3f334b8384797d4d2",
+          "head_sha256": "1385101de807789fbcc1a9fcdb6bd50d7d685b848888fc59f21127edd2298893"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "c0114992ec48dc1817d56f247d2ea3fa28c92f1067e3a5dfd5dc8af6ee5875a2",
+          "head_sha256": "7e8bf519c66e4178ef78f0d2cdc6ef4e79fec8eadedf58518aac73bd0a0d11ab"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5d3978d07befce5e93d3da07075eddb9a411b110016d66062be2ac9d4c96db26",
+          "head_sha256": "0f18a7b97dc5b8857faad62493add91ab0c46d9a6ca40d2c157b7bfce2ae7ca3"
+        }
+      ],
+      "reason": "Synchronize the approved Access governance contract in the active V3 OpenAPI authority metadata; frozen donors remain unchanged.",
+      "review_reference": "Root review of approved Access governance contract and active V3 OpenAPI synchronization"
+    },
+    {
+      "base_commit": "406440c2823dfb7ec5618b6641fee266d9bb6f08",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "f83a5600545a7f5af3900d732b4d22a7238eeca9ff3ab5a3f334b8384797d4d2",
+          "head_sha256": "1385101de807789fbcc1a9fcdb6bd50d7d685b848888fc59f21127edd2298893"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "c0114992ec48dc1817d56f247d2ea3fa28c92f1067e3a5dfd5dc8af6ee5875a2",
+          "head_sha256": "7e8bf519c66e4178ef78f0d2cdc6ef4e79fec8eadedf58518aac73bd0a0d11ab"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5d3978d07befce5e93d3da07075eddb9a411b110016d66062be2ac9d4c96db26",
+          "head_sha256": "0f18a7b97dc5b8857faad62493add91ab0c46d9a6ca40d2c157b7bfce2ae7ca3"
+        }
+      ],
+      "reason": "Rebind the approved Access governance OpenAPI authority synchronization to the current main CI-evidence baseline; frozen donors remain unchanged.",
+      "review_reference": "Root review of approved Access governance contract and active V3 OpenAPI synchronization"
+    },
+    {
+      "base_commit": "6e9a12350a3386c33e47903a53036afa14fd090f",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "f83a5600545a7f5af3900d732b4d22a7238eeca9ff3ab5a3f334b8384797d4d2",
+          "head_sha256": "1385101de807789fbcc1a9fcdb6bd50d7d685b848888fc59f21127edd2298893"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "c0114992ec48dc1817d56f247d2ea3fa28c92f1067e3a5dfd5dc8af6ee5875a2",
+          "head_sha256": "7e8bf519c66e4178ef78f0d2cdc6ef4e79fec8eadedf58518aac73bd0a0d11ab"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5d3978d07befce5e93d3da07075eddb9a411b110016d66062be2ac9d4c96db26",
+          "head_sha256": "0f18a7b97dc5b8857faad62493add91ab0c46d9a6ca40d2c157b7bfce2ae7ca3"
+        }
+      ],
+      "reason": "Rebind the approved Access governance OpenAPI authority synchronization to the current main baseline after the independently reviewed external API documentation release; frozen donors remain unchanged.",
+      "review_reference": "Root review of approved Access governance contract and active V3 OpenAPI synchronization"
+    },
+    {
+      "base_commit": "1c53b73be2e46c6ef2ab3c64973ac662cab91e90",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "1385101de807789fbcc1a9fcdb6bd50d7d685b848888fc59f21127edd2298893",
+          "head_sha256": "b0e67bb43a4f7a58c53bd267c3df5f0e3b49c0e74e4de39b44f86b3d78a73448"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "7e8bf519c66e4178ef78f0d2cdc6ef4e79fec8eadedf58518aac73bd0a0d11ab",
+          "head_sha256": "8a8b565a5027b25b031d996f10494a25a28aa3944c7331821b8ecb275326b249"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "0f18a7b97dc5b8857faad62493add91ab0c46d9a6ca40d2c157b7bfce2ae7ca3",
+          "head_sha256": "f52ca008354fbbf02868b4d9d6cb8f46615665c014994a7d2c474cad0628762f"
+        }
+      ],
+      "reason": "Repair the reviewed Open Platform order refund amount-status contract: known Payment summaries now emit the required known value and the active V3 OpenAPI enum records both contract states; frozen donors remain unchanged.",
+      "review_reference": "Root review of the approved refund_amount_status contract and active V3 OpenAPI synchronization"
+    },
+    {
+      "base_commit": "8f19a3155ff162407e83fc2fb7994be24e27715a",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b0e67bb43a4f7a58c53bd267c3df5f0e3b49c0e74e4de39b44f86b3d78a73448",
+          "head_sha256": "c644ea46e6a2b688cccc85f12a6e2d198169eff77813cc2a9711c87834685c84"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "8a8b565a5027b25b031d996f10494a25a28aa3944c7331821b8ecb275326b249",
+          "head_sha256": "403981f0dea0d72aa91a08b8f0a5955ee75a100ce2ed26a60673f46acd460cf1"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "f52ca008354fbbf02868b4d9d6cb8f46615665c014994a7d2c474cad0628762f",
+          "head_sha256": "1f370b175c60be5bf72deccff011b3073af86d21d9f3d556d6dd4f17c0689901"
+        }
+      ],
+      "reason": "Record the Root-reviewed daily-lesson automatic cover and stored-miniprogram Webhook contract in the active V3 OpenAPI authority; frozen donors remain unchanged. This declaration is subject to ordinary PR review and is not independent evidence of human approval.",
+      "review_reference": "Root review of the daily-lesson automatic cover Webhook contract and active V3 OpenAPI synchronization"
+    },
+    {
+      "base_commit": "e416d0c3e11703b887c55b7caf96f89e8ca55595",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "c644ea46e6a2b688cccc85f12a6e2d198169eff77813cc2a9711c87834685c84",
+          "head_sha256": "b7553012d12adfcb9b424d3980167b69e9e3515d9f8f7128b63f99e13cb279eb"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "403981f0dea0d72aa91a08b8f0a5955ee75a100ce2ed26a60673f46acd460cf1",
+          "head_sha256": "021866a04c93fe46f5e7ebb2ba8bcdd0e93a41c109012b798f891b11d9095e02"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "1f370b175c60be5bf72deccff011b3073af86d21d9f3d556d6dd4f17c0689901",
+          "head_sha256": "5d310bfb95ec614c28df656f147425355451ba2ae8680e2667d7e167416802f9"
+        }
+      ],
+      "reason": "Align the active V3 audience membership-facts OpenAPI contract with its existing signed handler; frozen donors remain unchanged. This declaration is subject to ordinary PR review and is not independent evidence of human approval.",
+      "review_reference": "Root agent review of the e416 baseline and planned narrow contract diff on 2026-09-15; final PR review remains required"
+    },
+    {
+      "base_commit": "e481e6dd20fbf0db98801cba2abca2b1eea426f5",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b7553012d12adfcb9b424d3980167b69e9e3515d9f8f7128b63f99e13cb279eb",
+          "head_sha256": "b9214cb231f65a7b6cb67286631f1fd379827ad46750a7f98ede4bd3cd7e666e"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "021866a04c93fe46f5e7ebb2ba8bcdd0e93a41c109012b798f891b11d9095e02",
+          "head_sha256": "ae4a00225aeb39f5ec6cb06df38ac1f3b12c987132f7b78f6decf86c1ac93c7a"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5d310bfb95ec614c28df656f147425355451ba2ae8680e2667d7e167416802f9",
+          "head_sha256": "64caee6a45cd6ba5350c43aea7b98aa6061bfbb660673f5599c4df6210ff0a65"
+        }
+      ],
+      "reason": "Record the Root-reviewed GroupOps plan-list bound-group projection in the active V3 OpenAPI authority after the current-main integration. Frozen donors remain unchanged. This declaration is subject to ordinary PR review and is not independent evidence of human approval.",
+      "review_reference": "Root review of GroupOps bound-count projection rebased to main e481e6dd on 2026-09-15"
+    },
+    {
+      "base_commit": "4fbe652e519ff254fd8c1f4d82dfcce30d5fd994",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b9214cb231f65a7b6cb67286631f1fd379827ad46750a7f98ede4bd3cd7e666e",
+          "head_sha256": "c16b2a83d75c922ae8ce4befe7a507d9da17d3f8b365c8ba382e906b414943e5"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "ae4a00225aeb39f5ec6cb06df38ac1f3b12c987132f7b78f6decf86c1ac93c7a",
+          "head_sha256": "15736e427756d8eb434bf5248077e6b1cad31d47b1b869961565a618fe988db0"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "64caee6a45cd6ba5350c43aea7b98aa6061bfbb660673f5599c4df6210ff0a65",
+          "head_sha256": "f87bd7f91619c883671197ee46abe7e4c007e67a9dd2ea538c52013e44c506f1"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed GroupOps owner-scoped directory query and plan-list bound-group projection together after integrating the shared V3 selection and composer stack on current main. Frozen donor payloads remain unchanged.",
+      "review_reference": "Root review of PR #300 owner-scoped directory query and PR #313 bound-group projection during shared-component integration on 2026-09-15"
+    },
+    {
+      "base_commit": "179d3f5447f8fe46e00d741fdd91a9422d1b76d0",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b9214cb231f65a7b6cb67286631f1fd379827ad46750a7f98ede4bd3cd7e666e",
+          "head_sha256": "c16b2a83d75c922ae8ce4befe7a507d9da17d3f8b365c8ba382e906b414943e5"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "ae4a00225aeb39f5ec6cb06df38ac1f3b12c987132f7b78f6decf86c1ac93c7a",
+          "head_sha256": "15736e427756d8eb434bf5248077e6b1cad31d47b1b869961565a618fe988db0"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "64caee6a45cd6ba5350c43aea7b98aa6061bfbb660673f5599c4df6210ff0a65",
+          "head_sha256": "f87bd7f91619c883671197ee46abe7e4c007e67a9dd2ea538c52013e44c506f1"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed GroupOps owner-scoped directory query and plan-list bound-group projection after integrating the shared V3 selection and composer stack onto the current pagination baseline. Frozen donor payloads remain unchanged.",
+      "review_reference": "Root review of PR #300 owner-scoped directory query and PR #313 bound-group projection during shared-component integration, rebased to main 179d3f54 on 2026-09-15"
+    },
+    {
+      "base_commit": "a53d60d280ec6284f6d1f1b1b48bff4390bcaaa1",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b9214cb231f65a7b6cb67286631f1fd379827ad46750a7f98ede4bd3cd7e666e",
+          "head_sha256": "c16b2a83d75c922ae8ce4befe7a507d9da17d3f8b365c8ba382e906b414943e5"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "ae4a00225aeb39f5ec6cb06df38ac1f3b12c987132f7b78f6decf86c1ac93c7a",
+          "head_sha256": "15736e427756d8eb434bf5248077e6b1cad31d47b1b869961565a618fe988db0"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "64caee6a45cd6ba5350c43aea7b98aa6061bfbb660673f5599c4df6210ff0a65",
+          "head_sha256": "f87bd7f91619c883671197ee46abe7e4c007e67a9dd2ea538c52013e44c506f1"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed GroupOps owner-scoped directory query and plan-list bound-group projection to the shared-component integration base while preserving the active V3 OpenAPI authority and frozen donor identities.",
+      "review_reference": "Root review of PR #300 owner-scoped directory query and PR #313 bound-group projection during shared-component integration on 2026-09-15, rebased to main a53d60d2"
+    },
+    {
+      "base_commit": "8ad86bc844c10a488f4288fabc8f445036122cde",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b9214cb231f65a7b6cb67286631f1fd379827ad46750a7f98ede4bd3cd7e666e",
+          "head_sha256": "c16b2a83d75c922ae8ce4befe7a507d9da17d3f8b365c8ba382e906b414943e5"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "ae4a00225aeb39f5ec6cb06df38ac1f3b12c987132f7b78f6decf86c1ac93c7a",
+          "head_sha256": "15736e427756d8eb434bf5248077e6b1cad31d47b1b869961565a618fe988db0"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "64caee6a45cd6ba5350c43aea7b98aa6061bfbb660673f5599c4df6210ff0a65",
+          "head_sha256": "f87bd7f91619c883671197ee46abe7e4c007e67a9dd2ea538c52013e44c506f1"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed GroupOps owner-scoped directory query and plan-list bound-group projection to the shared-component integration after main 8ad86bc; the active V3 OpenAPI authority and frozen donor identities remain the reviewed values.",
+      "review_reference": "Root review of PR #300 owner-scoped directory query and PR #313 bound-group projection during shared-component integration, rebased to main 8ad86bc on 2026-09-15"
+    },
+    {
+      "base_commit": "6b82f09d623d94c2f669db2226ea07ab39d484d9",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b9214cb231f65a7b6cb67286631f1fd379827ad46750a7f98ede4bd3cd7e666e",
+          "head_sha256": "c16b2a83d75c922ae8ce4befe7a507d9da17d3f8b365c8ba382e906b414943e5"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "ae4a00225aeb39f5ec6cb06df38ac1f3b12c987132f7b78f6decf86c1ac93c7a",
+          "head_sha256": "15736e427756d8eb434bf5248077e6b1cad31d47b1b869961565a618fe988db0"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "64caee6a45cd6ba5350c43aea7b98aa6061bfbb660673f5599c4df6210ff0a65",
+          "head_sha256": "f87bd7f91619c883671197ee46abe7e4c007e67a9dd2ea538c52013e44c506f1"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed GroupOps owner-scoped directory query and plan-list bound-group projection to the shared-component integration after main 6b82f09d; the active V3 OpenAPI authority and frozen donor identities remain the reviewed values.",
+      "review_reference": "Root review of PR #300 owner-scoped directory query and PR #313 bound-group projection during shared-component integration, rebased to main 6b82f09d on 2026-09-15"
+    },
+    {
+      "base_commit": "22e24ddcf646252985257fe55370a8f5fe3890f9",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b9214cb231f65a7b6cb67286631f1fd379827ad46750a7f98ede4bd3cd7e666e",
+          "head_sha256": "c16b2a83d75c922ae8ce4befe7a507d9da17d3f8b365c8ba382e906b414943e5"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "ae4a00225aeb39f5ec6cb06df38ac1f3b12c987132f7b78f6decf86c1ac93c7a",
+          "head_sha256": "15736e427756d8eb434bf5248077e6b1cad31d47b1b869961565a618fe988db0"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "64caee6a45cd6ba5350c43aea7b98aa6061bfbb660673f5599c4df6210ff0a65",
+          "head_sha256": "f87bd7f91619c883671197ee46abe7e4c007e67a9dd2ea538c52013e44c506f1"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed GroupOps owner-scoped directory query and plan-list bound-group projection to shared-component integration after main 22e24ddc. The active V3 OpenAPI authority remains reviewed and frozen donor payloads remain unchanged.",
+      "review_reference": "Root review of PR #300 owner-scoped directory query and PR #313 bound-group projection during shared-component integration, rebased to main 22e24ddc on 2026-09-15"
+    },
+    {
+      "base_commit": "84c34e5ad784d3f4cf20082b6a83d39919bff7e5",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "c16b2a83d75c922ae8ce4befe7a507d9da17d3f8b365c8ba382e906b414943e5",
+          "head_sha256": "1554aac9c7debc7febd892d587d004861cde55ad169cd2ad91871664b1edc46c"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "15736e427756d8eb434bf5248077e6b1cad31d47b1b869961565a618fe988db0",
+          "head_sha256": "e099d5889c890e3f432f23066ce06fd82ccf0053001e01d118863d902e664530"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "f87bd7f91619c883671197ee46abe7e4c007e67a9dd2ea538c52013e44c506f1",
+          "head_sha256": "a96cff49116907c17d3697fd73d4ad0e9975c0e48b35143792b27f14f349aa1c"
+        }
+      ],
+      "reason": "Record the Root-reviewed Radar server filtering and visible pagination OpenAPI contract after integrating the shared selection and content components. Frozen donors remain unchanged. This declaration is subject to ordinary PR review and is not independent evidence of human approval.",
+      "review_reference": "Root review of Radar list pagination authority hashes rebased to main 84c34e5a on 2026-09-15"
+    },
+    {
+      "base_commit": "a53d60d280ec6284f6d1f1b1b48bff4390bcaaa1",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b9214cb231f65a7b6cb67286631f1fd379827ad46750a7f98ede4bd3cd7e666e",
+          "head_sha256": "a208401173e3da65f88bca4549bc17f3ce85bec7efdfc088d4cc374f30122523"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "ae4a00225aeb39f5ec6cb06df38ac1f3b12c987132f7b78f6decf86c1ac93c7a",
+          "head_sha256": "c8de024f06ff5a795b59bb03745895ad89f7b4cfa5a9fb112cc9a7ac0ea63292"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "64caee6a45cd6ba5350c43aea7b98aa6061bfbb660673f5599c4df6210ff0a65",
+          "head_sha256": "5328e3a5c0b16e5f5f60d0bd2c11fb17c8a7961c39e6c641e7d442cc93808590"
+        }
+      ],
+      "reason": "Integrate the Root-reviewed overview canonical-payer contract with the current main GroupOps OpenAPI authority. The count is omitted when canonical-root resolution is unavailable; frozen donors remain unchanged. This declaration is subject to ordinary PR review and is not independent evidence of human approval.",
+      "review_reference": "Root review of #320 canonical-payer integration against main a53d60d2 on 2026-09-15"
+    },
+    {
+      "base_commit": "84c34e5ad784d3f4cf20082b6a83d39919bff7e5",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "c16b2a83d75c922ae8ce4befe7a507d9da17d3f8b365c8ba382e906b414943e5",
+          "head_sha256": "608610bfc1893eaeda0f1d04d23ca71367a240394d5c7e5f7fb319255b745a0c"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "15736e427756d8eb434bf5248077e6b1cad31d47b1b869961565a618fe988db0",
+          "head_sha256": "18f30c68f5a9e69359d2ac562006aade4f46ca1cfc15058f6c0136c69053f50e"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "f87bd7f91619c883671197ee46abe7e4c007e67a9dd2ea538c52013e44c506f1",
+          "head_sha256": "adf53b0ee40013653c9b2b3a07df6a2737242bd2d8e65757e103d72257bb3ba7"
+        }
+      ],
+      "reason": "Integrate the Root-reviewed admin overview API canonical-payer contract with current main shared-component, GroupOps search, and Radar contract authority. Canonical source metadata is regenerated from the merged V3 OpenAPI payload; frozen donors remain unchanged.",
+      "review_reference": "Root instruction to integrate PR #293 with main 84c34e5a on 2026-09-15; normal PR review and complete CI remain required"
+    },
+    {
+      "base_commit": "0e73d42c433892a1f5088eea08d3a079c1c98455",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "1554aac9c7debc7febd892d587d004861cde55ad169cd2ad91871664b1edc46c",
+          "head_sha256": "4ac96d0938989e65f49485e1c46b9634c4b94918ae82b15c9e6c9b14fa615d53"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "e099d5889c890e3f432f23066ce06fd82ccf0053001e01d118863d902e664530",
+          "head_sha256": "7e14ad4394f7d2221b7bf70389bfb0bde3ff15d9f66a929efc6cfdf96e56f405"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "a96cff49116907c17d3697fd73d4ad0e9975c0e48b35143792b27f14f349aa1c",
+          "head_sha256": "ed4ae5d827614fc75fa0297a0ca20bbee9102a3fb31c5cadc072b78b2e7fb381"
+        }
+      ],
+      "reason": "Integrate the Root-reviewed admin overview API canonical-payer contract with current main shared-component, GroupOps search, and Radar contract authority. Canonical source metadata is regenerated from the merged V3 OpenAPI payload; frozen donors remain unchanged.",
+      "review_reference": "Root instruction to integrate PR #293 with main 0e73d42c on 2026-09-15; normal PR review and complete CI remain required"
+    },
+    {
+      "base_commit": "c45b9c7c3bc709919af883e2bc11acb1f46cf1eb",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b7553012d12adfcb9b424d3980167b69e9e3515d9f8f7128b63f99e13cb279eb",
+          "head_sha256": "98a99fc57ab24ccc03ac469372d597eda64f1a8ae4ab99eaed75e61e8ad03e5c"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "021866a04c93fe46f5e7ebb2ba8bcdd0e93a41c109012b798f891b11d9095e02",
+          "head_sha256": "e8fc80b382b9ee861e6ebd2b6472cc06207b2eb2217310ee69685f5f692c7cd2"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5d310bfb95ec614c28df656f147425355451ba2ae8680e2667d7e167416802f9",
+          "head_sha256": "e3771c115c04bd40a84acf882c2c3ff5ab3185a300349576ae0ee611024d1835"
+        }
+      ],
+      "reason": "Record the Root-reviewed provider-scoped Order Distribution read contract in the active V3 OpenAPI authority; frozen donors remain unchanged. This declaration is subject to ordinary PR review and is not independent evidence of human approval.",
+      "review_reference": "Root review of the approved order distribution read contract and active V3 OpenAPI synchronization"
+    },
+    {
+      "base_commit": "3eda04cbd56d7bfdf44ba2a15d573ee29703926a",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b7553012d12adfcb9b424d3980167b69e9e3515d9f8f7128b63f99e13cb279eb",
+          "head_sha256": "98a99fc57ab24ccc03ac469372d597eda64f1a8ae4ab99eaed75e61e8ad03e5c"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "021866a04c93fe46f5e7ebb2ba8bcdd0e93a41c109012b798f891b11d9095e02",
+          "head_sha256": "e8fc80b382b9ee861e6ebd2b6472cc06207b2eb2217310ee69685f5f692c7cd2"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5d310bfb95ec614c28df656f147425355451ba2ae8680e2667d7e167416802f9",
+          "head_sha256": "e3771c115c04bd40a84acf882c2c3ff5ab3185a300349576ae0ee611024d1835"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed provider-scoped Order Distribution read contract after rebasing its active V3 OpenAPI authority onto the current verified main; frozen donors remain unchanged. This declaration is subject to ordinary PR review and is not independent evidence of human approval.",
+      "review_reference": "Root review of the approved order distribution read contract and current-main source-authority synchronization"
+    },
+    {
+      "base_commit": "9de7c37312f08e531ecaf1956b874a9e5c745511",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b7553012d12adfcb9b424d3980167b69e9e3515d9f8f7128b63f99e13cb279eb",
+          "head_sha256": "98a99fc57ab24ccc03ac469372d597eda64f1a8ae4ab99eaed75e61e8ad03e5c"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "021866a04c93fe46f5e7ebb2ba8bcdd0e93a41c109012b798f891b11d9095e02",
+          "head_sha256": "e8fc80b382b9ee861e6ebd2b6472cc06207b2eb2217310ee69685f5f692c7cd2"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "5d310bfb95ec614c28df656f147425355451ba2ae8680e2667d7e167416802f9",
+          "head_sha256": "e3771c115c04bd40a84acf882c2c3ff5ab3185a300349576ae0ee611024d1835"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed provider-scoped Order Distribution read contract after merging the current verified main; frozen donors remain unchanged. This declaration is subject to ordinary PR review and is not independent evidence of human approval.",
+      "review_reference": "Root review of the approved order distribution read contract and current-main source-authority synchronization"
+    },
+    {
+      "base_commit": "179d3f5447f8fe46e00d741fdd91a9422d1b76d0",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "b9214cb231f65a7b6cb67286631f1fd379827ad46750a7f98ede4bd3cd7e666e",
+          "head_sha256": "9128622d96247f9fe8f217bcbbe3852bc27053baa12761504c0f8bc72de74116"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "ae4a00225aeb39f5ec6cb06df38ac1f3b12c987132f7b78f6decf86c1ac93c7a",
+          "head_sha256": "15c926457becf78d984077bbc14773aedac1f80972cd51871c8a9cff302a79d6"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "64caee6a45cd6ba5350c43aea7b98aa6061bfbb660673f5599c4df6210ff0a65",
+          "head_sha256": "bb00cef1e8c2f4050bd1ea366551c21f93f35171c4df2090f41d00bef95409ee"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed provider-scoped Order Distribution contract with the current main GroupOps OpenAPI authority; frozen donors remain unchanged. This declaration is subject to ordinary PR review and is not independent evidence of human approval.",
+      "review_reference": "Root review of the Order Distribution repair and current-main source-authority synchronization on 2026-09-15"
+    },
+    {
+      "base_commit": "0e73d42c433892a1f5088eea08d3a079c1c98455",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "1554aac9c7debc7febd892d587d004861cde55ad169cd2ad91871664b1edc46c",
+          "head_sha256": "bb60098a47488012a76275bafc458ca033a30d50ece5e7139f67622590a396a4"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "e099d5889c890e3f432f23066ce06fd82ccf0053001e01d118863d902e664530",
+          "head_sha256": "06fdec32c7d0be91106a5dfeea0cac69a17e2f4fa927c97c16dfeb09e55f9d07"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "a96cff49116907c17d3697fd73d4ad0e9975c0e48b35143792b27f14f349aa1c",
+          "head_sha256": "0f1c71988ccf577c82100b5edcb18482ea3fbc795cd12fd4bb46b8eba4082697"
+        }
+      ],
+      "reason": "Integrate the Root-reviewed provider-scoped Order Distribution read contract with current main shared-component, GroupOps search, and Radar contract authority. Canonical source metadata is regenerated from the merged V3 OpenAPI payload; frozen donors remain unchanged.",
+      "review_reference": "Root instruction to integrate PR #301 with main 0e73d42c on 2026-09-15; normal PR review and complete CI remain required"
+    },
+    {
+      "base_commit": "cbbca8c64e59b9ad5e1d58026d8cb01c9314bb0e",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "4ac96d0938989e65f49485e1c46b9634c4b94918ae82b15c9e6c9b14fa615d53",
+          "head_sha256": "7e1c5bceab7b2712a046bfaf800bbe60fa3435e0ad8c48c481c8a4de046939ef"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "7e14ad4394f7d2221b7bf70389bfb0bde3ff15d9f66a929efc6cfdf96e56f405",
+          "head_sha256": "08728066d69901700adba3cd840f47c9685519c0965cdada498ea0050f28a445"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "ed4ae5d827614fc75fa0297a0ca20bbee9102a3fb31c5cadc072b78b2e7fb381",
+          "head_sha256": "ecbf82f478da8a808425dd5ac70b983ebaccae8d7be561e46f236083bfa08663"
+        }
+      ],
+      "reason": "Integrate the Root-reviewed provider-scoped Order Distribution read contract with current main Overview canonical-payer, shared-component, GroupOps search, and Radar contract authority. Canonical source metadata is regenerated from the merged V3 OpenAPI payload; frozen donors remain unchanged.",
+      "review_reference": "Root instruction to integrate PR #301 with main cbbca8c6 on 2026-09-15; normal PR review and complete CI remain required"
+    },
+    {
+      "base_commit": "2c3a98bfaf66dc8acfe7f1e1f31a5fc4e3cf4760",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "7e1c5bceab7b2712a046bfaf800bbe60fa3435e0ad8c48c481c8a4de046939ef",
+          "head_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "08728066d69901700adba3cd840f47c9685519c0965cdada498ea0050f28a445",
+          "head_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "ecbf82f478da8a808425dd5ac70b983ebaccae8d7be561e46f236083bfa08663",
+          "head_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b"
+        }
+      ],
+      "reason": "Align Product, Survey and Coupon archive API contracts and their canonical-source metadata with retained-history deletion behavior.",
+      "review_reference": "2026-09-15 root review of six-module archive API authority diff, base 2c3a98bfaf66dc8acfe7f1e1f31a5fc4e3cf4760, candidate 1f39a8b64eb6cc89134caa58b51c76c33828ae26"
+    },
+    {
+      "base_commit": "933a448d9d25312b11429e3fcb57d655dbc4fa5d",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "7e1c5bceab7b2712a046bfaf800bbe60fa3435e0ad8c48c481c8a4de046939ef",
+          "head_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "08728066d69901700adba3cd840f47c9685519c0965cdada498ea0050f28a445",
+          "head_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "ecbf82f478da8a808425dd5ac70b983ebaccae8d7be561e46f236083bfa08663",
+          "head_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b"
+        }
+      ],
+      "reason": "Align Product, Survey and Coupon archive API contracts and their canonical-source metadata with retained-history deletion behavior.",
+      "review_reference": "2026-09-15 root review of six-module archive API authority diff, base 933a448d9d25312b11429e3fcb57d655dbc4fa5d, candidate ce218b1be5df02bea3558fa9393d86565f8cb2b1"
+    },
+    {
+      "base_commit": "79d8f15cb2629ecf6f5597da48ab2dca5c5293e8",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea",
+          "head_sha256": "fc3e53eef94e2fdf253aca9975dab9313f4f3f97b47896dd956f92bbea0ac169"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2",
+          "head_sha256": "10422b165e04f6d146b1eb7b65cd43a17971dc433bd01f15277bccdbc4b20a99"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b",
+          "head_sha256": "9fe52f44a009b49723d95e43a22b9b1b3dfba6040af790377a112c1e5dc93e20"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed read-only Overview paid-record drilldown OpenAPI contract to current main authority after the archive-deletion baseline advanced. The endpoint remains within the approved Overview read scope; frozen donors remain unchanged.",
+      "review_reference": "Root instruction and code review for #326 current-main authority binding on 2026-09-15; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "0f58ef30c5edf87f5120f75691907c1cb1affef6",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea",
+          "head_sha256": "fc3e53eef94e2fdf253aca9975dab9313f4f3f97b47896dd956f92bbea0ac169"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2",
+          "head_sha256": "10422b165e04f6d146b1eb7b65cd43a17971dc433bd01f15277bccdbc4b20a99"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b",
+          "head_sha256": "9fe52f44a009b49723d95e43a22b9b1b3dfba6040af790377a112c1e5dc93e20"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed read-only Overview paid-record drilldown OpenAPI contract to main 0f58ef30 after shared header actions landed. The endpoint remains within the approved Overview read scope; frozen donors remain unchanged.",
+      "review_reference": "Root instruction and code review for #326 current-main authority binding on 2026-09-15; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "f0d737376bf8afe68264fdd255e54f9573a51bf5",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea",
+          "head_sha256": "fc3e53eef94e2fdf253aca9975dab9313f4f3f97b47896dd956f92bbea0ac169"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2",
+          "head_sha256": "10422b165e04f6d146b1eb7b65cd43a17971dc433bd01f15277bccdbc4b20a99"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b",
+          "head_sha256": "9fe52f44a009b49723d95e43a22b9b1b3dfba6040af790377a112c1e5dc93e20"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed read-only Overview paid-record drilldown OpenAPI contract to main f0d73737 after the shared material-thumbnail presentation landed. The endpoint remains within the approved Overview read scope; frozen donors remain unchanged.",
+      "review_reference": "Root instruction and code review for #326 current-main authority binding on 2026-09-15; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "a4a89ce55e3dc745aca0baf6634d684700bbce8b",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea",
+          "head_sha256": "fc3e53eef94e2fdf253aca9975dab9313f4f3f97b47896dd956f92bbea0ac169"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2",
+          "head_sha256": "10422b165e04f6d146b1eb7b65cd43a17971dc433bd01f15277bccdbc4b20a99"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b",
+          "head_sha256": "9fe52f44a009b49723d95e43a22b9b1b3dfba6040af790377a112c1e5dc93e20"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed read-only Overview paid-record drilldown authority diff to main a4a89ce5 after the Product material Host landed. The endpoint remains within the approved Overview read scope; frozen donors remain unchanged.",
+      "review_reference": "Root review instruction for #347 current-main authority binding on 2026-09-15; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "97e3a759f77e7d782b0b204d11223dfa7b3e5095",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea",
+          "head_sha256": "fc3e53eef94e2fdf253aca9975dab9313f4f3f97b47896dd956f92bbea0ac169"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2",
+          "head_sha256": "10422b165e04f6d146b1eb7b65cd43a17971dc433bd01f15277bccdbc4b20a99"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b",
+          "head_sha256": "9fe52f44a009b49723d95e43a22b9b1b3dfba6040af790377a112c1e5dc93e20"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed read-only Overview paid-record drilldown authority diff to the final ordered stack base. The endpoint remains within the approved Overview read scope; frozen donors remain unchanged.",
+      "review_reference": "Root review of #347 final stack integration on 2026-09-16; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "4ed751f1fd82ebdf8f13f7b1c43e40e5817b4d65",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea",
+          "head_sha256": "fc3e53eef94e2fdf253aca9975dab9313f4f3f97b47896dd956f92bbea0ac169"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2",
+          "head_sha256": "10422b165e04f6d146b1eb7b65cd43a17971dc433bd01f15277bccdbc4b20a99"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b",
+          "head_sha256": "9fe52f44a009b49723d95e43a22b9b1b3dfba6040af790377a112c1e5dc93e20"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed read-only Overview paid-record drilldown authority diff to the current main merge base. The endpoint remains within the approved Overview read scope; frozen donors remain unchanged.",
+      "review_reference": "Root review of #347 CI P5 current-main approval on 2026-09-16; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "9d310804cf65f3668599ef173b893748c405e449",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea",
+          "head_sha256": "fc3e53eef94e2fdf253aca9975dab9313f4f3f97b47896dd956f92bbea0ac169"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2",
+          "head_sha256": "10422b165e04f6d146b1eb7b65cd43a17971dc433bd01f15277bccdbc4b20a99"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b",
+          "head_sha256": "9fe52f44a009b49723d95e43a22b9b1b3dfba6040af790377a112c1e5dc93e20"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed read-only Overview paid-record drilldown authority diff after the ordered #345, #352, #351 and #343 stack. The endpoint remains within the approved Overview read scope; frozen donors remain unchanged.",
+      "review_reference": "Root approval for #347 base 9d310804 authority binding on 2026-09-16; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "d8f4a7360567cf9719cc0e513236b354343474d8",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea",
+          "head_sha256": "fc3e53eef94e2fdf253aca9975dab9313f4f3f97b47896dd956f92bbea0ac169"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2",
+          "head_sha256": "10422b165e04f6d146b1eb7b65cd43a17971dc433bd01f15277bccdbc4b20a99"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b",
+          "head_sha256": "9fe52f44a009b49723d95e43a22b9b1b3dfba6040af790377a112c1e5dc93e20"
+        }
+      ],
+      "reason": "Rebind the Root-reviewed read-only Overview paid-record drilldown authority diff after #343 settlement-confirmed read-time landed. The endpoint remains within the approved Overview read scope; frozen donors remain unchanged.",
+      "review_reference": "Root preauthorization for #347 actual main d8f4a736 authority binding on 2026-09-16; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "8be30e38355df55e15c565b324dfc0f8119a9524",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea",
+          "head_sha256": "5fd591bed324a40668467a03a8d189d9af33e666b75233936bfa9cdf1eabe341"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2",
+          "head_sha256": "10272ec8a11aed8d94d0f073be5c1d98e268a618db599454bd626ef21ec0e39c"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b",
+          "head_sha256": "02a5cc773d0ee1471b9eb60489c3c1336efc74d7f92e32cb592196320b596fe3"
+        }
+      ],
+      "reason": "Add the Root-reviewed Distribution-owned read-only current distinct open/querying exception-order metric to the admin overview. The existing Distribution exception-record todo count remains unchanged; frozen donors remain unchanged.",
+      "review_reference": "Root code review on 2026-09-15 approved the exact current_exception_order_count OpenAPI, source-index and source-lock authority diff; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "afffafa2c3987003a5877cd273ef7dfee2135c46",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "fc3e53eef94e2fdf253aca9975dab9313f4f3f97b47896dd956f92bbea0ac169",
+          "head_sha256": "5c172834a6a7f081d07827225ee558686920b70d32d4c988d06cc2557c4d1093"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "10422b165e04f6d146b1eb7b65cd43a17971dc433bd01f15277bccdbc4b20a99",
+          "head_sha256": "cb37c3a505df9224b0e85f7686959d269701a58eafeceb465620cd9bf612d7be"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "9fe52f44a009b49723d95e43a22b9b1b3dfba6040af790377a112c1e5dc93e20",
+          "head_sha256": "1db61b398ad05da054735b0aa50dd2b698c9ed9f36aa0b519592b949f1709bc0"
+        }
+      ],
+      "reason": "Bind the Root-reviewed combined read-only Overview paid-record drilldown and Distribution current distinct open/querying exception-order metric after the final Overview authority approval. Existing Distribution exception-record todos remain unchanged; frozen donors remain unchanged.",
+      "review_reference": "Root review of exact combined Overview/Distribution authority diff on 2026-09-16; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "3ab25ffa01e8e60a93c5d3e4da421a486ae9dda4",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "fc3e53eef94e2fdf253aca9975dab9313f4f3f97b47896dd956f92bbea0ac169",
+          "head_sha256": "5c172834a6a7f081d07827225ee558686920b70d32d4c988d06cc2557c4d1093"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "10422b165e04f6d146b1eb7b65cd43a17971dc433bd01f15277bccdbc4b20a99",
+          "head_sha256": "cb37c3a505df9224b0e85f7686959d269701a58eafeceb465620cd9bf612d7be"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "9fe52f44a009b49723d95e43a22b9b1b3dfba6040af790377a112c1e5dc93e20",
+          "head_sha256": "1db61b398ad05da054735b0aa50dd2b698c9ed9f36aa0b519592b949f1709bc0"
+        }
+      ],
+      "reason": "Bind the Root-reviewed combined read-only Overview paid-record drilldown and Distribution current distinct open/querying exception-order metric after the final ordered Overview stack. Existing Distribution exception-record todos remain unchanged; frozen donors remain unchanged.",
+      "review_reference": "Root review of exact combined Overview/Distribution authority diff on 2026-09-16; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "1e91d8f8bff409d6d0e8c91c4191b12cc2efec4a",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea",
+          "head_sha256": "5c172834a6a7f081d07827225ee558686920b70d32d4c988d06cc2557c4d1093"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2",
+          "head_sha256": "cb37c3a505df9224b0e85f7686959d269701a58eafeceb465620cd9bf612d7be"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b",
+          "head_sha256": "1db61b398ad05da054735b0aa50dd2b698c9ed9f36aa0b519592b949f1709bc0"
+        }
+      ],
+      "reason": "Bind the Root-reviewed combined read-only Overview paid-record drilldown and Distribution current distinct open/querying exception-order metric to current main after the ordered stack. Existing Distribution exception-record todos remain unchanged; frozen donors remain unchanged.",
+      "review_reference": "Root approval of the exact combined authority diff for current main 1e91d8f8 on 2026-09-16; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "b4bb355d2b15324748fdc4f4d2a81e6e3523836b",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea",
+          "head_sha256": "5c172834a6a7f081d07827225ee558686920b70d32d4c988d06cc2557c4d1093"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2",
+          "head_sha256": "cb37c3a505df9224b0e85f7686959d269701a58eafeceb465620cd9bf612d7be"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b",
+          "head_sha256": "1db61b398ad05da054735b0aa50dd2b698c9ed9f36aa0b519592b949f1709bc0"
+        }
+      ],
+      "reason": "Bind the Root-approved combined read-only Overview paid-record drilldown and Distribution current distinct open/querying exception-order metric to current main after the ordered stack. Existing Distribution exception-record todos remain unchanged; frozen donors remain unchanged.",
+      "review_reference": "Root approval of the exact combined authority diff for current main b4bb355d on 2026-09-16; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "d2eda00380fa3fee94bbd303398228a20bcd2894",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a759668892f9d92ea21c50b4e1b4f3590cd0a53876aa14ecdf673f76c09a7aea",
+          "head_sha256": "5c172834a6a7f081d07827225ee558686920b70d32d4c988d06cc2557c4d1093"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "b946c5d6d2465933e976f57bb92aa6f0665cd95e475eec4dacf78fa1b98309e2",
+          "head_sha256": "cb37c3a505df9224b0e85f7686959d269701a58eafeceb465620cd9bf612d7be"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "250a407959db9d90fa377acb15fe735dcde152a82e8d81099d9669b380fc0c0b",
+          "head_sha256": "1db61b398ad05da054735b0aa50dd2b698c9ed9f36aa0b519592b949f1709bc0"
+        }
+      ],
+      "reason": "Bind the Root-approved combined read-only Overview paid-record drilldown and Distribution current distinct open/querying exception-order metric to current main after the ordered stack. Existing Distribution exception-record todos remain unchanged; frozen donors remain unchanged.",
+      "review_reference": "Root approval of the exact combined authority diff for current main d2eda003 on 2026-09-16; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "040eb6759c3ac3f1d81e78de40d3a4d61b4c1c74",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "fc3e53eef94e2fdf253aca9975dab9313f4f3f97b47896dd956f92bbea0ac169",
+          "head_sha256": "5c172834a6a7f081d07827225ee558686920b70d32d4c988d06cc2557c4d1093"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "10422b165e04f6d146b1eb7b65cd43a17971dc433bd01f15277bccdbc4b20a99",
+          "head_sha256": "cb37c3a505df9224b0e85f7686959d269701a58eafeceb465620cd9bf612d7be"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "9fe52f44a009b49723d95e43a22b9b1b3dfba6040af790377a112c1e5dc93e20",
+          "head_sha256": "1db61b398ad05da054735b0aa50dd2b698c9ed9f36aa0b519592b949f1709bc0"
+        }
+      ],
+      "reason": "Bind the Root-reviewed combined read-only Overview paid-record drilldown and Distribution current distinct open/querying exception-order metric to current main after #347. Existing Distribution exception-record todos remain unchanged; frozen donors remain unchanged.",
+      "review_reference": "Root review approved the exact #347 current-main combined authority diff on 2026-09-16; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "4fbcb97fbdbf215954c7e7f3ed0ad88466a75181",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "5c172834a6a7f081d07827225ee558686920b70d32d4c988d06cc2557c4d1093",
+          "head_sha256": "03e7ab4bc27019247776e5dff5614ec86ad27b12c41af06777f8338b909d16f8"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "cb37c3a505df9224b0e85f7686959d269701a58eafeceb465620cd9bf612d7be",
+          "head_sha256": "758b76e00161ab4c331a5384180656b0ef98e4eaeac19e986ecb7a274ae92810"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "1db61b398ad05da054735b0aa50dd2b698c9ed9f36aa0b519592b949f1709bc0",
+          "head_sha256": "ff2995dc11bd450ec9fd473cd6786cf0344b22c942757660dac08638f2c1a271"
+        }
+      ],
+      "reason": "Expose the canonical OneID label only in the ready WeCom Sidebar workbench response and declare the administrator-only WeCom contact-description backfill, status, and readback contract. OneID derives from the BootstrapViewer-resolved CustomerID; the backfill contract exposes no raw external identifier and has no Provider effect itself.",
+      "review_reference": "docs/prd/2026-09-16-wecom-contact-remark-oneid-backfill.md; Root-reviewed combined sidebar OneID and contact-description backfill scope on 2026-09-16."
+    },
+    {
+      "base_commit": "bd79ddbc0bf66632d3639797166789978228b1ea",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "5c172834a6a7f081d07827225ee558686920b70d32d4c988d06cc2557c4d1093",
+          "head_sha256": "19ce90a3e10d717afbc4a9321a77a4151381d047f348ec6af357f0f332b0ebdf"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "cb37c3a505df9224b0e85f7686959d269701a58eafeceb465620cd9bf612d7be",
+          "head_sha256": "eedcdb6f08279c6ad598fbf4a6dffc31af989d0b71eb9e00843d0ffb82cd2977"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "1db61b398ad05da054735b0aa50dd2b698c9ed9f36aa0b519592b949f1709bc0",
+          "head_sha256": "8955e54a923cd24d55f081cf4e0cb76ae27bd361ce89bb2a27363be1562db63e"
+        }
+      ],
+      "reason": "Expose the canonical OneID label and administrator-only WeCom contact-description backfill contract, including current-run non-PII source coverage. The coverage distinguishes observed, projected, omitted, submitted, and not_submitted relationships; omission and unsubmitted gaps are not completion.",
+      "review_reference": "Root reviewed the exact bd79ddb current-base authority diff and approved the non-PII source coverage shape on 2026-09-16; deployment and full backfill remain subject to ordinary PR review and required CI."
+    },
+    {
+      "base_commit": "a4259c6a7712b57f90ae4b8ca1450e225f42c30d",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "19ce90a3e10d717afbc4a9321a77a4151381d047f348ec6af357f0f332b0ebdf",
+          "head_sha256": "53fa0b1257e40a1a2fdf979351cabb36c4f067b92a379f37b931a6f212bb1e2e"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "eedcdb6f08279c6ad598fbf4a6dffc31af989d0b71eb9e00843d0ffb82cd2977",
+          "head_sha256": "e9a6de8de9c81d4605b18c259bfec1b23a74c6502b0d29828fd29439b0839308"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "8955e54a923cd24d55f081cf4e0cb76ae27bd361ce89bb2a27363be1562db63e",
+          "head_sha256": "670f173cd84c685fba478552bab573b7ca77407b604b2b9c1fb8e26633110f55"
+        }
+      ],
+      "reason": "Authorize the public Survey completion and operations contract: opaque safe navigation, legacy external-push configuration, release migration closure, a minimal nested completion receipt without a result token, and the retained top-level result-query compatibility token. Identity continues to read canonical Customer only; Provider writes remain in the existing External Effects and Outbound path.",
+      "review_reference": "User instructions in this Codex thread: implement the approved questionnaire single-submit and completion PRD, align the actual operations API, do not expose a normal completion token in the nested receipt or H5 flow, and preserve existing result-query compatibility with a nonempty top-level result_token. This is product authorization only; ordinary PR review and required CI remain pending."
+    },
+    {
+      "base_commit": "b522c3f56953b96ce57efd91313c8bfb199d34ff",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "53fa0b1257e40a1a2fdf979351cabb36c4f067b92a379f37b931a6f212bb1e2e",
+          "head_sha256": "abddc4a6cc1a89cc365ff4e93ee3b4d310dcdd24ac6291588cf6382748240322"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "e9a6de8de9c81d4605b18c259bfec1b23a74c6502b0d29828fd29439b0839308",
+          "head_sha256": "bde0be83d6b04d5ef6fa65b25932f9f7e8d95f8e3eedf79ea2d956490a47eb22"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "670f173cd84c685fba478552bab573b7ca77407b604b2b9c1fb8e26633110f55",
+          "head_sha256": "34c9524c7ee6ff1d47d74f92e415aa751966d045f977ea6cb477ecaa0ed51cf0"
+        }
+      ],
+      "reason": "Extend the active V3 contract for the user-requested employee nickname refresh, encrypted model settings, material groups and stable public customer numbers. Frozen donor payloads and gate rules are unchanged.",
+      "review_reference": "https://github.com/qianlan33333-png/AI-CRM-v3/pull/379"
+    },
+    {
+      "base_commit": "b522c3f56953b96ce57efd91313c8bfb199d34ff",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "53fa0b1257e40a1a2fdf979351cabb36c4f067b92a379f37b931a6f212bb1e2e",
+          "head_sha256": "82e2e8d219672d4368956928b56e24c347428224f4d4ae36d9bf0b34b11d7428"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "e9a6de8de9c81d4605b18c259bfec1b23a74c6502b0d29828fd29439b0839308",
+          "head_sha256": "3969410b8b39bb3dc70102d267111c79eccf20f7a34d8b34d752f2115d8d1c5c"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "670f173cd84c685fba478552bab573b7ca77407b604b2b9c1fb8e26633110f55",
+          "head_sha256": "60b636e2d9c62c9135836b163e3eca0292279231216a246f74b6fa1384ef8eb3"
+        }
+      ],
+      "reason": "Implement user-approved basic data workspace PRD: HXC saved views, owner-scoped readonly dashboard shares and aggregate query metadata. Only active V3 OpenAPI authority changes; frozen donors remain byte-identical.",
+      "review_reference": "User explicitly requested implementation of the supplied PRD in this task on 2026-09-17. This records product authorization only; PR review and complete CI remain required. docs/prd/2026-09-17-basic-data-workspaces.md"
+    },
+    {
+      "base_commit": "f19440fbc749f15fe43ee2f5da3fa518c9366d86",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "abddc4a6cc1a89cc365ff4e93ee3b4d310dcdd24ac6291588cf6382748240322",
+          "head_sha256": "14ec89b1ceac5a6252b47a313f4525aa7b0524f3751faa34937dca7f88cadee1"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "bde0be83d6b04d5ef6fa65b25932f9f7e8d95f8e3eedf79ea2d956490a47eb22",
+          "head_sha256": "119e267346e511ac03d86b698334f96333b1b4b1aaa7a707902a348d68062209"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "34c9524c7ee6ff1d47d74f92e415aa751966d045f977ea6cb477ecaa0ed51cf0",
+          "head_sha256": "e4313ea905df2cd795b2ccdf75d99f58734e403aa0cd6adb91a0427d62c4dde8"
+        }
+      ],
+      "reason": "Reconcile the approved basic data workspace API with the merged operations and customer-number update. Preserve both contracts and frozen donor bytes.",
+      "review_reference": "User approved implementation of the supplied dashboard PRD and Feishu-style UI in this task on 2026-09-17. This records product authorization only; current PR review and full CI remain required."
+    },
+    {
+      "base_commit": "0a0081c440be6231ecf82133e12900f9f82f7837",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "14ec89b1ceac5a6252b47a313f4525aa7b0524f3751faa34937dca7f88cadee1",
+          "head_sha256": "e333a3404d78b69aa00dd8378f55f457330c73aa70cc17d2c221f4f0524a74a4"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "119e267346e511ac03d86b698334f96333b1b4b1aaa7a707902a348d68062209",
+          "head_sha256": "9722589155f13ffdc2fab762644b75a7a62a5f964b62008e9d92058cf27f60b9"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "e4313ea905df2cd795b2ccdf75d99f58734e403aa0cd6adb91a0427d62c4dde8",
+          "head_sha256": "57b2f22bb4f4c5ed1271d450ce7560526d9b9f898e99d34b72d32ed98721365e"
+        }
+      ],
+      "reason": "Document the user-approved CRM core product, AI audience and customer push history interfaces. Refresh only the active V3 OpenAPI contract; frozen donors remain unchanged.",
+      "review_reference": "User explicitly requested implementing CRM existing capability release and HXC integration on 2026-09-18. Product authorization only; exact changes remain visible for PR review and complete CI in PR #383. docs/plans/2026-09-18-crm-core-first-release.md"
+    },
+    {
+      "base_commit": "10c3e0a963c88d18ca8fe09fdd6df0b11d5cbd89",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e333a3404d78b69aa00dd8378f55f457330c73aa70cc17d2c221f4f0524a74a4",
+          "head_sha256": "1e4514591e76dff478974a47b096e39325ea511b91b1bbd93aa60b7a7c96407a"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "9722589155f13ffdc2fab762644b75a7a62a5f964b62008e9d92058cf27f60b9",
+          "head_sha256": "1f49ae172a7bccb9c8a85261b0db41440a5e54e51be2684bdf1bd290d89fb734"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "57b2f22bb4f4c5ed1271d450ce7560526d9b9f898e99d34b72d32ed98721365e",
+          "head_sha256": "3e6eb04803e7efa7dfaf977901eb7f9a0e43ee2ed41abc9cc5e0e98318a9ad9e"
+        }
+      ],
+      "reason": "Document the user-approved runtime governance interfaces, align manual inspection acceptance with HTTP 202 and hourly limit HTTP 429, and register the config_usage/archive_sync_runs Owner policies in the read-only retention preview query. Only active V3 OpenAPI authority and its exact index/lock identities change; frozen donor bytes remain unchanged.",
+      "review_reference": "User authorized runtime governance implementation in this task on 2026-09-18; docs/plans/2026-09-18-runtime-governance-prd.md. This is product authorization and a reviewable source-change declaration only. Independent review is unverified and final current-head complete CI remains required."
+    },
+    {
+      "base_commit": "bb6b21891281477b2d781cac4a4054344ac5fefa",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "1e4514591e76dff478974a47b096e39325ea511b91b1bbd93aa60b7a7c96407a",
+          "head_sha256": "82f4107fe3b19f8de0c4cadbb2e2a8d6b7f1e26851bf6c95e7f9ebbe3a5e6c04"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "1f49ae172a7bccb9c8a85261b0db41440a5e54e51be2684bdf1bd290d89fb734",
+          "head_sha256": "c25df57ba7874ca6308011bb478160adc9b8aa8ca9b9da604fe1a40e6084caf4"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "3e6eb04803e7efa7dfaf977901eb7f9a0e43ee2ed41abc9cc5e0e98318a9ad9e",
+          "head_sha256": "d68011f973afa5fa477305cf6abcfd14c8070205760455c20cf3dd1023f16b12"
+        }
+      ],
+      "reason": "Complete the user-approved controlled API CPU diagnostic capability with fixed five-second capture, strict administrator/CSRF gates, bounded quotas and 720-hour reads. Only the active V3 OpenAPI authority and exact index/lock identities change.",
+      "review_reference": "User requested implementing the full runtime governance plan on 2026-09-18. docs/plans/2026-09-18-runtime-cpu-profiling.md records scope; this declaration is product authorization, not independent approval or complete CI evidence."
+    },
+    {
+      "base_commit": "e2e0f2505b59d41a8ec533ecd5537d90fea5682a",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e333a3404d78b69aa00dd8378f55f457330c73aa70cc17d2c221f4f0524a74a4",
+          "head_sha256": "82f4107fe3b19f8de0c4cadbb2e2a8d6b7f1e26851bf6c95e7f9ebbe3a5e6c04"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "9722589155f13ffdc2fab762644b75a7a62a5f964b62008e9d92058cf27f60b9",
+          "head_sha256": "c25df57ba7874ca6308011bb478160adc9b8aa8ca9b9da604fe1a40e6084caf4"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "57b2f22bb4f4c5ed1271d450ce7560526d9b9f898e99d34b72d32ed98721365e",
+          "head_sha256": "d68011f973afa5fa477305cf6abcfd14c8070205760455c20cf3dd1023f16b12"
+        }
+      ],
+      "reason": "Integrate approved runtime inspections, retention previews and controlled API CPU profiling after the concurrent Chinese UI main update. Preserve all main contracts and frozen donor bytes.",
+      "review_reference": "User authorized implementation of the complete CRM runtime governance plan and continued work on 2026-09-18; docs/plans/2026-09-18-runtime-governance-prd.md and docs/plans/2026-09-18-runtime-cpu-profiling.md. This exact source change declaration is not independent approval; current-head complete CI is required."
+    },
+    {
+      "base_commit": "eaa86a082633ed1d021bf5eb4d10c9d0cda91fb1",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e333a3404d78b69aa00dd8378f55f457330c73aa70cc17d2c221f4f0524a74a4",
+          "head_sha256": "82f4107fe3b19f8de0c4cadbb2e2a8d6b7f1e26851bf6c95e7f9ebbe3a5e6c04"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "9722589155f13ffdc2fab762644b75a7a62a5f964b62008e9d92058cf27f60b9",
+          "head_sha256": "c25df57ba7874ca6308011bb478160adc9b8aa8ca9b9da604fe1a40e6084caf4"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "57b2f22bb4f4c5ed1271d450ce7560526d9b9f898e99d34b72d32ed98721365e",
+          "head_sha256": "d68011f973afa5fa477305cf6abcfd14c8070205760455c20cf3dd1023f16b12"
+        }
+      ],
+      "reason": "Integrate the approved runtime governance and controlled CPU profile interfaces after the concurrent referral activity operations release; preserve the latest main behavior and frozen donor bytes.",
+      "review_reference": "User authorized the complete runtime governance implementation and continued work on 2026-09-18. docs/plans/2026-09-18-runtime-governance-prd.md records the business scope. This source-change declaration is not independent approval; exact-head complete CI remains required."
+    },
+    {
+      "base_commit": "7ef85d87e1a0c84ea3eaf0c3adaab85da9e437f4",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e333a3404d78b69aa00dd8378f55f457330c73aa70cc17d2c221f4f0524a74a4",
+          "head_sha256": "82f4107fe3b19f8de0c4cadbb2e2a8d6b7f1e26851bf6c95e7f9ebbe3a5e6c04"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "9722589155f13ffdc2fab762644b75a7a62a5f964b62008e9d92058cf27f60b9",
+          "head_sha256": "c25df57ba7874ca6308011bb478160adc9b8aa8ca9b9da604fe1a40e6084caf4"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "57b2f22bb4f4c5ed1271d450ce7560526d9b9f898e99d34b72d32ed98721365e",
+          "head_sha256": "d68011f973afa5fa477305cf6abcfd14c8070205760455c20cf3dd1023f16b12"
+        }
+      ],
+      "reason": "Integrate the approved runtime governance and controlled CPU profile interfaces after the concurrent audience empty-package release; preserve latest main behavior and frozen donor bytes.",
+      "review_reference": "User authorized the complete runtime governance implementation and continued work on 2026-09-18. docs/plans/2026-09-18-runtime-governance-prd.md records the business scope. This source-change declaration is not independent approval; exact-head complete CI remains required."
+    },
+    {
+      "base_commit": "eaa86a082633ed1d021bf5eb4d10c9d0cda91fb1",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e333a3404d78b69aa00dd8378f55f457330c73aa70cc17d2c221f4f0524a74a4",
+          "head_sha256": "b028271c3fbd391cd1f22e4c9acbcbff0609382903be5d1d6fc63ca51aa6b1f2"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "9722589155f13ffdc2fab762644b75a7a62a5f964b62008e9d92058cf27f60b9",
+          "head_sha256": "a0e31705959cd82e9e1ba404012a80a9a157daa2813f359483c93a7268b8a82d"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "57b2f22bb4f4c5ed1271d450ce7560526d9b9f898e99d34b72d32ed98721365e",
+          "head_sha256": "12ff8906fc4ab5037d6b15ca01f4e27edb2fb1f666fa0569b22afb0155b4dfb5"
+        }
+      ],
+      "reason": "Align the user-requested CRM audience APIs with the existing V1 OAuth operation catalog and standard response envelope. Only the active V3 OpenAPI and its source index/lock change; frozen donors remain unchanged.",
+      "review_reference": "User explicitly requested fixing CRM API issues from the integration handoff on 2026-09-18. Product authorization only; exact diff remains subject to PR #389 review and complete CI. docs/plans/2026-09-18-core-audience-open-api.md"
+    },
+    {
+      "base_commit": "7ef85d87e1a0c84ea3eaf0c3adaab85da9e437f4",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e333a3404d78b69aa00dd8378f55f457330c73aa70cc17d2c221f4f0524a74a4",
+          "head_sha256": "b028271c3fbd391cd1f22e4c9acbcbff0609382903be5d1d6fc63ca51aa6b1f2"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "9722589155f13ffdc2fab762644b75a7a62a5f964b62008e9d92058cf27f60b9",
+          "head_sha256": "a0e31705959cd82e9e1ba404012a80a9a157daa2813f359483c93a7268b8a82d"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "57b2f22bb4f4c5ed1271d450ce7560526d9b9f898e99d34b72d32ed98721365e",
+          "head_sha256": "12ff8906fc4ab5037d6b15ca01f4e27edb2fb1f666fa0569b22afb0155b4dfb5"
+        }
+      ],
+      "reason": "Align the user-requested CRM audience APIs with the existing V1 OAuth operation catalog and standard response envelope. Only the active V3 OpenAPI and its source index/lock change; frozen donors remain unchanged.",
+      "review_reference": "User explicitly requested fixing CRM API issues from the integration handoff on 2026-09-18. Product authorization only; exact diff remains subject to PR #389 review and complete CI. docs/plans/2026-09-18-core-audience-open-api.md"
+    },
+    {
+      "base_commit": "06f60bbc226b7cb5cc8141a7a3b7c597c1800ada",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "82f4107fe3b19f8de0c4cadbb2e2a8d6b7f1e26851bf6c95e7f9ebbe3a5e6c04",
+          "head_sha256": "3e9871284b98d58489656d463e89b13be02d7e816f78c593340635ab46696329"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "c25df57ba7874ca6308011bb478160adc9b8aa8ca9b9da604fe1a40e6084caf4",
+          "head_sha256": "7ae90fdfcfe47cad4f6fc0b54768f2afd2eb27d07c1f1e17b56230f91c244e60"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "d68011f973afa5fa477305cf6abcfd14c8070205760455c20cf3dd1023f16b12",
+          "head_sha256": "bff78af8959431e69cc1eb6e2d4aff76a27fe5cbfbec3cb525d8417648eecd69"
+        }
+      ],
+      "reason": "Align the user-requested CRM audience APIs with the existing V1 OAuth operation catalog and standard response envelope. Only the active V3 OpenAPI and its source index/lock change; frozen donors remain unchanged.",
+      "review_reference": "User explicitly requested fixing CRM API issues from the integration handoff on 2026-09-18. Product authorization only; exact diff remains subject to PR #389 review and complete CI. docs/plans/2026-09-18-core-audience-open-api.md"
+    },
+    {
+      "base_commit": "90a26fe786e5df275a9d7bee7ab5ad8f25a4e18f",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "82f4107fe3b19f8de0c4cadbb2e2a8d6b7f1e26851bf6c95e7f9ebbe3a5e6c04",
+          "head_sha256": "3e9871284b98d58489656d463e89b13be02d7e816f78c593340635ab46696329"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "c25df57ba7874ca6308011bb478160adc9b8aa8ca9b9da604fe1a40e6084caf4",
+          "head_sha256": "7ae90fdfcfe47cad4f6fc0b54768f2afd2eb27d07c1f1e17b56230f91c244e60"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "d68011f973afa5fa477305cf6abcfd14c8070205760455c20cf3dd1023f16b12",
+          "head_sha256": "bff78af8959431e69cc1eb6e2d4aff76a27fe5cbfbec3cb525d8417648eecd69"
+        }
+      ],
+      "reason": "Align the user-requested CRM audience APIs with the existing V1 OAuth operation catalog and standard response envelope. Only the active V3 OpenAPI and its source index/lock change; frozen donors remain unchanged.",
+      "review_reference": "User explicitly requested fixing CRM API issues from the integration handoff on 2026-09-18. Product authorization only; exact diff remains subject to PR #389 review and complete CI. docs/plans/2026-09-18-core-audience-open-api.md"
+    },
+    {
+      "base_commit": "68eca45fd441759c4fa18d35e4730e4392200c8c",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "3e9871284b98d58489656d463e89b13be02d7e816f78c593340635ab46696329",
+          "head_sha256": "831310222caf7f8c40b2c61851c67a837661a7ff860b6c11cd59d760255eeb76"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "7ae90fdfcfe47cad4f6fc0b54768f2afd2eb27d07c1f1e17b56230f91c244e60",
+          "head_sha256": "dd1ae93ccca50ea37f7ed4f270401a80625e0eece4cbb527c12f8ca6a287c77d"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "bff78af8959431e69cc1eb6e2d4aff76a27fe5cbfbec3cb525d8417648eecd69",
+          "head_sha256": "312f75865752896031dc1605b09bf0a00be02c3a2e889ba7d3ac45272bcdff2d"
+        }
+      ],
+      "reason": "Integrate actor-bound inspection receipts and explicit retention coverage after the concurrent audience operations API release. Preserve the current main API and frozen donor behavior.",
+      "review_reference": "User authorized full runtime governance implementation and continued work. docs/plans/2026-09-18-governance-acceptance-corrections.md and docs/plans/2026-09-18-retention-coverage-design.md define scope. This source declaration is not independent approval; exact-head full CI remains required."
+    },
+    {
+      "base_commit": "f488616309957113b9583143654e7797cc40dc66",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "3e9871284b98d58489656d463e89b13be02d7e816f78c593340635ab46696329",
+          "head_sha256": "3e6056f76216ddb8215316c939be4cbc4e96c66df62908572c55bbc4a0af5a4c"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "7ae90fdfcfe47cad4f6fc0b54768f2afd2eb27d07c1f1e17b56230f91c244e60",
+          "head_sha256": "de4992db74b756a0ea1e2ca4c1e8a230d0e99d6e50872da44c454cf593b7b892"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "bff78af8959431e69cc1eb6e2d4aff76a27fe5cbfbec3cb525d8417648eecd69",
+          "head_sha256": "114da85c58d14d835aaaf8b881a4e08a6d2ba237a2e989f4a606bff0320ad369"
+        }
+      ],
+      "reason": "Integrate the authorized governance outcomes capability with the current audience API and prior governance outcomes. Preserve frozen donor and existing business behavior.",
+      "review_reference": "User authorized full governance implementation and continued work. docs/plans/2026-09-18-governance-outcomes.md defines scope. This source declaration is not independent approval; exact-head complete CI remains required."
+    },
+    {
+      "base_commit": "a5c9151cd88d562f947d0979fb7140ba36dc8f26",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "831310222caf7f8c40b2c61851c67a837661a7ff860b6c11cd59d760255eeb76",
+          "head_sha256": "3e6056f76216ddb8215316c939be4cbc4e96c66df62908572c55bbc4a0af5a4c"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "dd1ae93ccca50ea37f7ed4f270401a80625e0eece4cbb527c12f8ca6a287c77d",
+          "head_sha256": "de4992db74b756a0ea1e2ca4c1e8a230d0e99d6e50872da44c454cf593b7b892"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "312f75865752896031dc1605b09bf0a00be02c3a2e889ba7d3ac45272bcdff2d",
+          "head_sha256": "114da85c58d14d835aaaf8b881a4e08a6d2ba237a2e989f4a606bff0320ad369"
+        }
+      ],
+      "reason": "Integrate the authorized governance outcomes capability with the current audience API and prior governance outcomes. Preserve frozen donor and existing business behavior.",
+      "review_reference": "User authorized full governance implementation and continued work. docs/plans/2026-09-18-governance-outcomes.md defines scope. This source declaration is not independent approval; exact-head complete CI remains required."
+    }
+  ]
+}
