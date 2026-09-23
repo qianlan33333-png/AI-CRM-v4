@@ -18,6 +18,8 @@
 
 一次性创建 `aicrm-build` 系统账户和独立的 `/opt/aicrm/domestic/build-worker/{cache,tmp}`，把 Go/npm 持久缓存复制给该账户；确认它无法读取 `/home/ubuntu/.ssh/ai-crm-v4-prod-deploy`、`/opt/aicrm/domestic/state.json` 且没有 sudo 权限。发布器本身的代码和 systemd 单元变更须先更新机器上的固定副本并完成预发演练，再合并相关 PR；业务源码由后续定时任务自动处理。
 
+固定 helper 更新到支持 `retry-staging` 后，发布代理仅在预备机建立 root-owned `/etc/aicrm/domestic-release-role`，内容精确为 `staging` 并禁止 group/other 写入；生产机不创建此文件。缺失、符号链接、owner/mode 不符或内容不精确时，迁移 orphan retry 必须拒绝执行。
+
 预备机安装同一完整目录到本机 `/opt/aicrm/current`，使用合成库验证受影响资源、服务和 `/readyz.release_sha`。首次预备机空环境会初始化合成库和服务单元；后续非迁移提交不运行迁移。生产接收区 `/opt/aicrm/domestic-incoming` 由传输账户持有；安装器在共享 `/opt/aicrm/install-release.lock` 下校验清单、当前 base SHA 与服务。迁移提交先做 `pg_dump -Fc` 备份，再运行迁移服务；非迁移提交跳过这两步。健康失败时切回上一版本并验证，数据库迁移保持前向兼容；若远程结果不明，状态置为 `outcome_unknown`，只读对账后人工明确结论，绝不盲目再次安装。
 
 ## 切换
@@ -37,6 +39,17 @@ python3 /usr/local/libexec/aicrm/domestic_release.py \
 ```
 
 恢复器会再次核对 main 第一父链与准确 `check`、预备机包和进程、生产当前版本/健康/进程、目标回执和远端 metadata，并只允许一次安全复用符合 manifest 的非迁移 orphan。调用固定 helper 时还会传准确 release SHA 和 controller 已验证的 metadata SHA256；helper 在同一次 metadata 读取中先校验 digest 与目标 SHA，再允许任何安装副作用。若生产已经运行目标版本且目标成功回执有效，只补技术游标；现场互相矛盾、目标 current 缺少回执、旧版不健康或此前已尝试过恢复时均拒绝操作，保持队列停止并升级人工处置。禁止手工改写/删除 state.json、直接改 current 或盲目重复安装。恢复完成后先读回状态和生产版本，再单独决定何时恢复 timer。
+
+### 仅限当前 5538/0206 事件的一次预备机重试
+
+此入口只恢复本次阻塞提交 `5538d615a9abe2e25be799936866a7330b1d3af8` 的 0206 备份前失败，不是可供未来迁移复用的通用自动重试。账本必须准确记录该 SHA 为 `staging_failed`，且失败发生在迁移前；安装 helper 后可以请求一次受控重试：
+
+```sh
+python3 /usr/local/libexec/aicrm/domestic_release.py \
+  --config /etc/aicrm/domestic-release.json retry-staging --sha <准确的40位SHA>
+```
+
+此操作要求该 SHA 是 `processed_sha` 后的第一父链下一提交、parent 精确等于 `processed_sha`、准确 `check` 成功，且它只有 0206 这一条迁移；随后验证本地构建产物、预备机旧版本健康状态、root-owned orphan、无目标回执/备份、0206 尚未应用且旧订单约束仍有效。特殊 retry 还强制配置目标为 `127.0.0.1` / `aicrm_test` / `aicrm_test_baseline_5d15`，并在同一个只读数据库连接中核对 `current_database()`、`current_user` 和 loopback `inet_server_addr()`；任一不符都会拒绝。任何不一致或无法完成独立读回都保持队列停止。成功后它只继续原有同 SHA 的生产复制、安装和精确 readback；只有生产读回成功才推进账本。重试尝试会先持久化一次性 guard，失败后不可盲目再跑此命令；`staging_verified`、`transport_failed` 或 `staging_retry_unknown` 均需只读核对。
 
 ## 回退与局限
 
