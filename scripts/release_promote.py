@@ -139,6 +139,9 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
                 other=[i for i in queue['items'] if i.get('status') in ACTIVE and i.get('candidate_id')!=cid and
                        not (bridge_path and i.get('candidate_id')==OLD_CANDIDATE)]
                 if len(owned)!=1 or owned[0]['status']!='waiting_merge' or other: raise ValueError('queue owner changed')
+                if bridge_path and (owned[0].get('candidate_tree_sha',owned[0].get('tree_sha'))!=prepared['candidate_tree_sha'] or
+                                    owned[0].get('package_sha256')!=prepared['package_sha256']):
+                    raise ValueError('first-v4 bridge queued package changed')
                 save(reservation,{'candidate_id':cid,'token':token,'generation':generation,'created_at':int(time.time())})
                 if bridge_path:
                     bridge_transition(queue,cid,'merged',bridge_digest)

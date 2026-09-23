@@ -227,6 +227,8 @@ def bridge_transition(queue, candidate_id, status, bridge_sha256):
     if old is None or old.get('status') != 'observing' or old.get('first_v4_batch_bridge_candidate_id') != candidate_id or len(owned) != 1:
         raise ValueError('first-v4 bridge consumption changed')
     item = owned[0]
+    if old.get('candidate_tree_sha') != OLD_TREE or old.get('package_sha256') != OLD_PACKAGE:
+        raise ValueError('first-v4 bridge old production evidence changed')
     same(old.get('first_v4_batch_bridge_sha256'), bridge_sha256, 'old bridge digest')
     same(item.get('first_v4_batch_bridge_sha256'), bridge_sha256, 'candidate bridge digest')
     expected = {'merged': 'waiting_merge', 'production': 'merged', 'observing': 'production'}

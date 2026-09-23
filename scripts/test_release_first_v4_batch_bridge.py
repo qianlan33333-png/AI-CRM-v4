@@ -123,6 +123,7 @@ class FirstV4BatchBridgeTests(unittest.TestCase):
         digest = 'a' * 64
         queue = {'items': [
             {'candidate_id': OLD_CANDIDATE, 'status': 'observing',
+             'candidate_tree_sha': OLD_TREE, 'package_sha256': OLD_PACKAGE,
              'first_v4_batch_bridge_candidate_id': 'new-batch', 'first_v4_batch_bridge_sha256': digest},
             {'candidate_id': 'new-batch', 'status': 'waiting_merge',
              'first_v4_batch_bridge_sha256': digest},
