@@ -1,5 +1,8 @@
 import os
+import io
+import json
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import local_first_gate
@@ -23,6 +26,14 @@ class StagingReceiptClassificationTests(unittest.TestCase):
                 self.assertFalse(local_first_gate.requires_staging_receipt("b" * 40), path)
             diff.return_value = "internal/payment/app/service.go\n"
             self.assertTrue(local_first_gate.requires_staging_receipt("b" * 40))
+
+    def test_targeted_runtime_pr_is_valid_code_ci_and_keeps_staging_separate(self):
+        env = {"GITHUB_EVENT_NAME": "pull_request", "PR_HEAD_SHA": "b" * 40,
+               "CI_NEEDS": json.dumps({"plan": {"outputs": {"mode": "targeted"}}})}
+        with patch.dict(os.environ, env), patch.object(local_first_gate, "requires_staging_receipt", return_value=True), \
+                patch("local_first_gate.subprocess.check_output", return_value="c" * 40), redirect_stdout(io.StringIO()) as output:
+            local_first_gate.main()
+        self.assertIn('"staging":"pending_release_handoff_validation"', output.getvalue())
 
 
 if __name__ == "__main__":

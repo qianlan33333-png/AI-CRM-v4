@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one canonical CI verification lane after its platform setup is ready.
+"""Run a canonical CI lane or its registered focused checks after setup.
 
 GitHub Actions and ``dev_preflight.py full`` both invoke this file so their
 verification command lists cannot drift.  It deliberately does not install an
@@ -9,12 +9,14 @@ prerequisites owned by the caller.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import platform
+import re
 from urllib.parse import parse_qs, unquote, urlparse
 
 
@@ -159,6 +161,68 @@ def commands(lane: str, report_dir: Path | None) -> list[list[str]]:
     raise ValueError("unknown lane: " + lane)
 
 
+def focused_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[list[str]]:
+    """Run registered checks for a lane, falling back to its full lane when a
+    check cannot be expressed safely as a focused command.
+    """
+    selected = [check for check in checks if check.get("lane") == lane]
+    if not selected:
+        raise ValueError("focused lane has no registered checks: " + lane)
+    if lane == "backend":
+        packages: dict[str, set[str]] = {}
+        for check in selected:
+            path = Path(check.get("path", ""))
+            if path.suffix != ".go" or not path.parts or ".." in path.parts:
+                return commands(lane, report_dir)
+            test = check.get("test")
+            if test is not None and not re.fullmatch(r"Test[A-Za-z0-9_]+", test):
+                return commands(lane, report_dir)
+            packages.setdefault(path.parent.as_posix(), set())
+            if test:
+                packages[path.parent.as_posix()].add(test)
+        result = []
+        for package, names in sorted(packages.items()):
+            command = ["bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-p", "1",
+                       "-race", "-count=1", "-timeout=15m"]
+            if names:
+                pattern = "^(" + "|".join(re.escape(name) for name in sorted(names)) + ")$"
+                command.extend(["-run", pattern])
+            command.append("./" + package)
+            result.append(command)
+        return result
+    if lane == "frontend":
+        paths = []
+        for check in selected:
+            path = Path(check.get("path", ""))
+            if path.suffix not in {".mjs", ".js"} or not path.parts or ".." in path.parts:
+                return commands(lane, report_dir)
+            paths.append(path.as_posix())
+        return [["node", path] for path in sorted(set(paths))]
+    if lane == "browser":
+        names = []
+        for check in selected:
+            name = check.get("test")
+            path = Path(check.get("path", ""))
+            if (not isinstance(name, str) or not re.fullmatch(r"Test[A-Za-z0-9_]*ChromiumJourney", name)
+                    or not path.as_posix().startswith("cmd/aicrm/") or path.suffix != ".go"):
+                return commands(lane, report_dir)
+            names.append(name)
+        command = [sys.executable, "scripts/dev_preflight.py", "browser"]
+        for name in sorted(set(names)):
+            command.extend(["--journey", name])
+        command.extend(["--report-dir", str(report_dir)])
+        return [command]
+    if lane == "archive-sdk":
+        paths = []
+        for check in selected:
+            path = Path(check.get("path", ""))
+            if path.suffix != ".sh" or not path.parts or ".." in path.parts:
+                return commands(lane, report_dir)
+            paths.append(path.as_posix())
+        return [["bash", path] for path in sorted(set(paths))]
+    return commands(lane, report_dir)
+
+
 def lane_environment(lane: str, report_dir: Path | None) -> dict[str, str]:
     env = dict(os.environ)
     if lane == "browser":
@@ -170,6 +234,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lane", choices=LANES)
     parser.add_argument("--report-dir", type=Path)
+    parser.add_argument("--focus-checks-json", default=os.environ.get("AICRM_CI_FOCUS_CHECKS", ""))
     parser.add_argument("--check-prerequisites", action="store_true")
     args = parser.parse_args()
     missing = missing_prerequisites(args.lane)
@@ -178,7 +243,15 @@ def main() -> int:
         return 2
     if args.check_prerequisites:
         return 0
-    for command in commands(args.lane, args.report_dir):
+    try:
+        checks = json.loads(args.focus_checks_json) if args.focus_checks_json else []
+    except json.JSONDecodeError as error:
+        raise ValueError("invalid focused check list") from error
+    if not isinstance(checks, list) or any(not isinstance(check, dict) for check in checks):
+        raise ValueError("focused check list must be a JSON array of objects")
+    lane_commands = (focused_commands(args.lane, args.report_dir, checks)
+                     if checks and args.lane != "preflight" else commands(args.lane, args.report_dir))
+    for command in lane_commands:
         run(command, lane_environment(args.lane, args.report_dir))
     return 0
 

@@ -7,22 +7,6 @@ on:
         description: Run all checks even when an identical merged tree has PR evidence
         type: boolean
         default: false
-      hxc_full_rollout:
-        description: Run HXC activation and full business acceptance (manual opt-in only)
-        type: boolean
-        default: false
-      tag_catalog_mutation_rollout:
-        description: Activate official WeCom tag catalog writes after the release is ready (manual opt-in only)
-        type: boolean
-        default: false
-      groupops_directory_rollout:
-        description: Activate WeCom staff and group directory reads without enabling message dispatch
-        type: boolean
-        default: false
-      h5_domain_rollout:
-        description: Configure www.qianlan333.cloud HTTPS and user-authorized H5 OAuth callbacks
-        type: boolean
-        default: false
   pull_request:
     branches: [main]
   push:
@@ -32,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  # Preserve numbered main releases; only obsolete PR runs are cancelled.
+  # Keep main checks non-cancellable; only obsolete PR runs are cancelled.
   group: ci-${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
@@ -52,19 +36,22 @@ jobs:
       verified_run: ${{ steps.plan.outputs.verified_run }}
       mode: ${{ steps.finalize.outputs.mode }}
       lanes: ${{ steps.finalize.outputs.lanes }}
+      checks: ${{ steps.finalize.outputs.checks }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Validate release target before building
+      - name: Validate migration sequence and destructive SQL
+        env:
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           python3 scripts/check-migration-sequence.py --base "${GITHUB_BASE_SHA:-origin/main}"
       - id: plan
         name: Verify whether main is exactly the tested PR tree
         env:
           GH_TOKEN: ${{ github.token }}
-          FORCE_FULL: ${{ inputs.force_full }}
+          FORCE_FULL: ${{ inputs.force_full || false }}
           GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 scripts/ci/verification.py plan
       - id: impact
@@ -74,8 +61,18 @@ jobs:
         if: ${{ github.event_name == 'pull_request' && steps.plan.outputs.full == 'true' }}
         run: |
           set -euo pipefail
-          python3 scripts/ci/governance_impact.py --out "$RUNNER_TEMP/impact.json"
-          selection="$(python3 scripts/ci/impact_selection.py "$RUNNER_TEMP/impact.json")"
+          full_selection='{"mode":"full","lanes":["preflight","backend","frontend","browser","archive-sdk"],"checks":[],"reason":"impact-analysis-failed"}'
+          if python3 scripts/ci/governance_impact.py --out "$RUNNER_TEMP/impact.json"; then
+            if selection="$(python3 scripts/ci/impact_selection.py "$RUNNER_TEMP/impact.json")"; then
+              :
+            else
+              echo 'Impact selection failed; scheduling every verification lane.' >> "$GITHUB_STEP_SUMMARY"
+              selection="$full_selection"
+            fi
+          else
+            echo 'Impact analysis failed; scheduling every verification lane. The governance gate will retain the failure.' >> "$GITHUB_STEP_SUMMARY"
+            selection="$full_selection"
+          fi
           echo "selection=$selection" >> "$GITHUB_STEP_SUMMARY"
           python3 - "$selection" "$GITHUB_OUTPUT" <<'PY'
           import json, sys
@@ -83,30 +80,40 @@ jobs:
           with open(sys.argv[2], "a") as output:
               output.write("mode=" + selection["mode"] + "\n")
               output.write("lanes=" + json.dumps(selection["lanes"], separators=(",", ":")) + "\n")
+              output.write("checks=" + json.dumps(selection.get("checks", []), separators=(",", ":")) + "\n")
           PY
       - id: finalize
         name: Publish verification plan
+        env:
+          IMPACT_MODE: ${{ steps.impact.outputs.mode }}
+          IMPACT_LANES: ${{ steps.impact.outputs.lanes }}
+          IMPACT_CHECKS: ${{ steps.impact.outputs.checks }}
         run: |
           set -euo pipefail
           if [[ "${{ steps.plan.outputs.mode }}" == "release" ]]; then
             echo 'mode=release' >> "$GITHUB_OUTPUT"
             echo 'lanes=[]' >> "$GITHUB_OUTPUT"
+            echo 'checks=[]' >> "$GITHUB_OUTPUT"
             echo 'full=false' >> "$GITHUB_OUTPUT"
           elif [[ "${{ github.event_name }}" == "push" || "${{ github.ref }}" == "refs/heads/main" || "${{ inputs.force_full }}" == "true" ]]; then
             echo 'mode=full' >> "$GITHUB_OUTPUT"
             echo 'lanes=["preflight","backend","frontend","browser","archive-sdk"]' >> "$GITHUB_OUTPUT"
+            echo 'checks=[]' >> "$GITHUB_OUTPUT"
             echo 'full=true' >> "$GITHUB_OUTPUT"
           elif [[ "${{ steps.plan.outputs.mode }}" == "light" ]]; then
             echo 'mode=light' >> "$GITHUB_OUTPUT"
             echo 'lanes=[]' >> "$GITHUB_OUTPUT"
+            echo 'checks=[]' >> "$GITHUB_OUTPUT"
             echo 'full=false' >> "$GITHUB_OUTPUT"
-          elif [[ "${{ steps.impact.outputs.mode }}" == "targeted" ]]; then
+          elif [[ "$IMPACT_MODE" == "targeted" ]]; then
             echo 'mode=targeted' >> "$GITHUB_OUTPUT"
-            echo 'lanes=${{ steps.impact.outputs.lanes }}' >> "$GITHUB_OUTPUT"
+            printf 'lanes=%s\n' "$IMPACT_LANES" >> "$GITHUB_OUTPUT"
+            printf 'checks=%s\n' "$IMPACT_CHECKS" >> "$GITHUB_OUTPUT"
             echo 'full=false' >> "$GITHUB_OUTPUT"
           else
             echo 'mode=full' >> "$GITHUB_OUTPUT"
             echo 'lanes=["preflight","backend","frontend","browser","archive-sdk"]' >> "$GITHUB_OUTPUT"
+            echo 'checks=[]' >> "$GITHUB_OUTPUT"
             echo 'full=true' >> "$GITHUB_OUTPUT"
           fi
 
@@ -197,6 +204,8 @@ jobs:
         if: ${{ steps.checkout.outcome == 'success' && steps.setup.outcome == 'success' }}
         name: Run canonical backend verification lane
         run: python3 scripts/ci/quality_lanes.py backend --report-dir "$RUNNER_TEMP/quality-lanes/backend"
+        env:
+          AICRM_CI_FOCUS_CHECKS: ${{ needs.plan.outputs.checks }}
       - id: receipt
         if: always()
         name: Record structured backend receipt
@@ -236,6 +245,8 @@ jobs:
         if: ${{ steps.checkout.outcome == 'success' && steps.setup.outcome == 'success' }}
         name: Run canonical frontend verification lane
         run: python3 scripts/ci/quality_lanes.py frontend --report-dir "$RUNNER_TEMP/quality-lanes/frontend"
+        env:
+          AICRM_CI_FOCUS_CHECKS: ${{ needs.plan.outputs.checks }}
       - id: receipt
         if: always()
         name: Record structured frontend receipt
@@ -298,6 +309,7 @@ jobs:
           AICRM_REQUIRE_CHROMIUM_JOURNEY: '1'
           AICRM_ADMIN_LAYOUT_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/admin-shell-layout
           AICRM_SIDEBAR_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/sidebar-standard
+          AICRM_CI_FOCUS_CHECKS: ${{ needs.plan.outputs.checks }}
         run: python3 scripts/ci/quality_lanes.py browser --report-dir "$RUNNER_TEMP/browser-evidence"
       - id: receipt
         if: always()
@@ -343,6 +355,8 @@ jobs:
         if: ${{ steps.checkout.outcome == 'success' && steps.setup.outcome == 'success' }}
         name: Run canonical archive SDK verification lane
         run: python3 scripts/ci/quality_lanes.py archive-sdk --report-dir "$RUNNER_TEMP/quality-lanes/archive-sdk"
+        env:
+          AICRM_CI_FOCUS_CHECKS: ${{ needs.plan.outputs.checks }}
       - id: receipt
         if: always()
         name: Record structured archive SDK receipt
@@ -462,180 +476,3 @@ jobs:
           path: ${{ runner.temp }}/ci-quality-summary.json
           if-no-files-found: warn
           retention-days: 90
-
-  # Production installation is opt-in. An unset repository variable is not
-  # equivalent to approval; deployment remains local-first.
-  deploy:
-    # Normal releases are local-first and pass through staging. Keep Actions
-    # deployment only as an explicit break-glass path.
-    if: ${{ vars.AICRM_ENABLE_ACTIONS_DEPLOY == 'true' && vars.AICRM_CLOUD_DEPLOY_BREAKGLASS == 'true' && !cancelled() && needs.check.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
-    needs: check
-    concurrency:
-      group: aicrm-production-release
-      cancel-in-progress: false
-    runs-on: ubuntu-latest
-    # Cross-region upload to the mainland deployment host can make steady
-    # progress for longer than 60 minutes. Keep a bounded three-hour ceiling so
-    # that active chunk transfers can finish without weakening per-chunk limits.
-    timeout-minutes: 180
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Configure pinned staging and production SSH hosts
-        env:
-          DEPLOY_SSH_KEY: ${{ secrets.STAGING_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS || secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          set -euo pipefail
-          install -d -m 0700 "$HOME/.ssh"
-          umask 077
-          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/staging_key"
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/staging_known_hosts"
-          ssh-keygen -y -f "$HOME/.ssh/staging_key" >/dev/null
-          test -s "$HOME/.ssh/staging_known_hosts"
-      - name: Directly promote the accepted staging candidate
-        env:
-          STAGING_HOST: ${{ secrets.STAGING_HOST }}
-          STAGING_USER: ${{ secrets.STAGING_USER || 'ubuntu' }}
-          STAGING_KEY: ${{ secrets.STAGING_SSH_KEY || secrets.DEPLOY_SSH_KEY }}
-          STAGING_KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS || secrets.DEPLOY_KNOWN_HOSTS }}
-          PRODUCTION_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          PRODUCTION_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          PRODUCTION_HOST: ${{ secrets.DEPLOY_HOST }}
-          PRODUCTION_USER: ${{ secrets.DEPLOY_USER || 'ubuntu' }}
-        run: |
-          set -euo pipefail
-          install -d -m 0700 "$HOME/.ssh"
-          umask 077
-          printf '%s\n' "$STAGING_KEY" > "$HOME/.ssh/staging_key"
-          printf '%s\n' "$STAGING_KNOWN_HOSTS" > "$HOME/.ssh/staging_known_hosts"
-          printf '%s\n' "$PRODUCTION_KEY" > "$HOME/.ssh/production_key"
-          printf '%s\n' "$PRODUCTION_KNOWN_HOSTS" > "$HOME/.ssh/production_known_hosts"
-          ssh-keygen -y -f "$HOME/.ssh/staging_key" >/dev/null
-          ssh-keygen -y -f "$HOME/.ssh/production_key" >/dev/null
-          flags=(-i "$HOME/.ssh/staging_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/staging_known_hosts")
-          tree="$(git rev-parse "${GITHUB_SHA}^{tree}")"
-          scp "${flags[@]}" deploy/promote-staging-direct.sh "$STAGING_USER@$STAGING_HOST:/tmp/promote-staging-direct-${GITHUB_SHA}.sh"
-          scp "${flags[@]}" "$HOME/.ssh/production_key" "$STAGING_USER@$STAGING_HOST:/tmp/production-key-${GITHUB_SHA}"
-          scp "${flags[@]}" "$HOME/.ssh/production_known_hosts" "$STAGING_USER@$STAGING_HOST:/tmp/production-known-hosts-${GITHUB_SHA}"
-          ssh "${flags[@]}" "$STAGING_USER@$STAGING_HOST" "chmod 700 /tmp/promote-staging-direct-${GITHUB_SHA}.sh /tmp/production-key-${GITHUB_SHA}; chmod 600 /tmp/production-known-hosts-${GITHUB_SHA}; PRODUCTION_HOST='$PRODUCTION_HOST' PRODUCTION_USER='$PRODUCTION_USER' PRODUCTION_KEY_FILE='/tmp/production-key-${GITHUB_SHA}' PRODUCTION_KNOWN_HOSTS_FILE='/tmp/production-known-hosts-${GITHUB_SHA}' bash /tmp/promote-staging-direct-${GITHUB_SHA}.sh '' '$GITHUB_SHA' '$tree'"
-          ssh "${flags[@]}" "$STAGING_USER@$STAGING_HOST" "rm -f /tmp/promote-staging-direct-${GITHUB_SHA}.sh /tmp/production-key-${GITHUB_SHA} /tmp/production-known-hosts-${GITHUB_SHA}"
-
-      - name: Configure HXC production source
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          AICRM_HXC_SOURCE_DSN: ${{ secrets.AICRM_HXC_SOURCE_DSN }}
-          AICRM_HXC_UNIONID_SCOPE: ${{ secrets.AICRM_HXC_UNIONID_SCOPE }}
-        run: |
-          set -euo pipefail
-          [[ -n "$AICRM_HXC_SOURCE_DSN" && "$AICRM_HXC_SOURCE_DSN" != *[$'\r\n']* ]]
-          [[ "$AICRM_HXC_UNIONID_SCOPE" == wechat-open-platform:* && "$AICRM_HXC_UNIONID_SCOPE" != *[$'\r\n']* ]]
-          local_config="$RUNNER_TEMP/aicrm-hxc-${GITHUB_SHA}.env"
-          remote_config="/tmp/aicrm-hxc-${GITHUB_SHA}.env"
-          remote_configurer="/tmp/configure-hxc-runtime-${GITHUB_SHA}.sh"
-          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
-          cleanup() {
-            rm -f -- "$local_config"
-            ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-              "rm -f -- ${remote_config} ${remote_configurer}" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          umask 077
-          printf 'AICRM_HXC_SYNC_ENABLED=true\nAICRM_HXC_SOURCE_DSN=%s\nAICRM_HXC_UNIONID_SCOPE=%s\nAICRM_HXC_UNIONID_VERIFIED=true\n' \
-            "$AICRM_HXC_SOURCE_DSN" "$AICRM_HXC_UNIONID_SCOPE" > "$local_config"
-          scp "${ssh_flags[@]}" "$local_config" "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_config}"
-          scp "${ssh_flags[@]}" deploy/configure-hxc-runtime.sh "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_configurer}"
-          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "trap 'sudo rm -f -- ${remote_config} ${remote_configurer}' EXIT; sudo /usr/bin/bash ${remote_configurer} ${remote_config} ${GITHUB_SHA}"
-      - name: Run explicitly requested HXC activation and acceptance
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.hxc_full_rollout }}
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          set -euo pipefail
-          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
-          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "sudo /usr/bin/bash /opt/aicrm/current/deploy/rollout-hxc-identity-v2.sh ${GITHUB_SHA} full"
-      - name: Configure WeChat Pay H5 OAuth
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          AICRM_WECHAT_PAY_H5_APP_ID: ${{ secrets.AICRM_WECHAT_PAY_H5_APP_ID }}
-          AICRM_WECHAT_PAY_H5_APP_SECRET: ${{ secrets.AICRM_WECHAT_PAY_H5_APP_SECRET }}
-        run: |
-          set -euo pipefail
-          [[ "$AICRM_WECHAT_PAY_H5_APP_ID" =~ ^wx[0-9A-Za-z]{16}$ ]]
-          [[ "$AICRM_WECHAT_PAY_H5_APP_SECRET" =~ ^[0-9A-Za-z]{32}$ ]]
-          h5_scope="wechat-app:${AICRM_WECHAT_PAY_H5_APP_ID}"
-          local_config="$RUNNER_TEMP/aicrm-payment-h5-${GITHUB_SHA}.env"
-          remote_config="/tmp/aicrm-payment-h5-${GITHUB_SHA}.env"
-          remote_configurer="/tmp/configure-payment-h5-oauth-runtime-${GITHUB_SHA}.sh"
-          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
-          cleanup() {
-            rm -f -- "$local_config"
-            ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-              "rm -f -- ${remote_config} ${remote_configurer}" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          umask 077
-          printf 'AICRM_WECHAT_PAY_H5_OAUTH_ENABLED=true\nAICRM_WECHAT_PAY_H5_APP_ID=%s\nAICRM_WECHAT_PAY_H5_APP_SECRET=%s\nAICRM_WECHAT_PAY_H5_APP_SCOPE=%s\n' \
-            "$AICRM_WECHAT_PAY_H5_APP_ID" "$AICRM_WECHAT_PAY_H5_APP_SECRET" "$h5_scope" > "$local_config"
-          scp "${ssh_flags[@]}" "$local_config" "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_config}"
-          scp "${ssh_flags[@]}" deploy/configure-payment-h5-oauth-runtime.sh "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_configurer}"
-          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "trap 'sudo rm -f -- ${remote_config} ${remote_configurer}' EXIT; sudo /usr/bin/bash ${remote_configurer} ${remote_config} ${GITHUB_SHA} skip-if-provider-disabled"
-      - name: Activate official WeCom tag catalog mutations
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_catalog_mutation_rollout }}
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          set -euo pipefail
-          local_config="$RUNNER_TEMP/aicrm-tag-catalog-mutation-${GITHUB_SHA}.env"
-          remote_config="/tmp/aicrm-tag-catalog-mutation-${GITHUB_SHA}.env"
-          remote_configurer="/tmp/configure-wecom-tag-catalog-mutation-runtime-${GITHUB_SHA}.sh"
-          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
-          cleanup() {
-            rm -f -- "$local_config"
-            ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-              "rm -f -- ${remote_config} ${remote_configurer}" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          umask 077
-          printf 'AICRM_WECOM_TAG_CATALOG_MUTATION_PROVIDER_ENABLED=true\nAICRM_WECOM_TAG_CATALOG_MUTATION_PROVIDER_PERMISSION=catalog-write-authorized\n' > "$local_config"
-          scp "${ssh_flags[@]}" "$local_config" "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_config}"
-          scp "${ssh_flags[@]}" deploy/configure-wecom-tag-catalog-mutation-runtime.sh "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_configurer}"
-          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "trap 'sudo rm -f -- ${remote_config} ${remote_configurer}' EXIT; sudo /usr/bin/bash ${remote_configurer} ${remote_config} ${GITHUB_SHA}"
-      - name: Activate requested Group Ops directory reads
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.groupops_directory_rollout }}
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          set -euo pipefail
-          remote_script="/tmp/configure-groupops-directory-${GITHUB_SHA}.py"
-          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
-          scp "${ssh_flags[@]}" deploy/configure-groupops-directory-runtime.py "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_script}"
-          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "trap 'sudo rm -f -- ${remote_script}' EXIT; sudo python3 ${remote_script} ${GITHUB_SHA}"
-      - name: Configure requested H5 authorization domain
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.h5_domain_rollout }}
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          set -euo pipefail
-          remote_script="/tmp/configure-h5-domain-${GITHUB_SHA}.sh"
-          ssh_flags=(-i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
-          scp "${ssh_flags[@]}" deploy/configure-h5-domain.sh "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_script}"
-          ssh "${ssh_flags[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "trap 'sudo rm -f -- ${remote_script}' EXIT; sudo bash ${remote_script} ${GITHUB_SHA}"
-      - name: Verify the public server is running this release
-        run: python3 scripts/ci/verify_deployment.py https://id-dev.youcangogogo.com "$GITHUB_SHA"

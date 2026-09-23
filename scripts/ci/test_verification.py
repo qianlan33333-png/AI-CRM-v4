@@ -126,7 +126,7 @@ class VerificationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             policy.require_results(needs, False, "push", "refs/heads/main")
 
-    def test_test_fixtures_and_high_risk_paths_require_full_pr_ci(self):
+    def test_code_and_unknown_paths_require_impact_selection(self):
         cases = (
             ("scripts/test-install-release-ordering.sh\n", True),
             ("cmd/aicrm/core_operations_chromium_journey.mjs\n", True),
@@ -137,12 +137,18 @@ class VerificationTests(unittest.TestCase):
             ("scripts/release_control.py\n", True),
             ("scripts/release_events.py\n", True),
             ("docs/guide.md\n", False),
+            ("new-root-file.txt\n", True),
             ("web/v3/productAdapter.ts\n", True),
         )
         for changed, expected in cases:
             with self.subTest(changed=changed), patch.dict("os.environ", {"GITHUB_BASE_SHA": "a" * 40}):
                 with patch.object(policy.subprocess, "check_output", return_value=changed):
-                    self.assertEqual(policy.requires_full_pr_verification(), expected)
+                    self.assertEqual(policy.requires_impact_selection(), expected)
+
+    def test_missing_impact_base_fails_closed_to_impact_selection(self):
+        with patch.dict("os.environ", {"GITHUB_BASE_SHA": ""}), patch.object(policy.subprocess, "check_output") as diff:
+            self.assertTrue(policy.requires_impact_selection())
+            diff.assert_not_called()
 
     def test_light_pr_gate_accepts_only_skipped_long_lanes(self):
         needs = {name: {"result": "skipped"} for name in policy.PHASES}
@@ -152,14 +158,14 @@ class VerificationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             policy.require_results(needs, False, "pull_request", "refs/pull/1/merge")
 
-    def test_delivery_infrastructure_changes_require_full_pr_verification(self):
+    def test_delivery_infrastructure_changes_enter_full_risk_selection(self):
         base = "d" * 40
         with patch.dict("os.environ", {"GITHUB_BASE_SHA": base}, clear=False):
             for path in (".github/workflows/ci.yml", "scripts/release_queue.py",
                          "scripts/release_coordinator.py", "scripts/release_control.py",
                          "scripts/release_events.py", "scripts/release_handoff.py"):
                 with patch.object(policy.subprocess, "check_output", return_value=path + "\n"):
-                    self.assertTrue(policy.requires_full_pr_verification(), path)
+                    self.assertTrue(policy.requires_impact_selection(), path)
 
     def test_release_metadata_pr_plan_runs_full_lanes(self):
         import sys
