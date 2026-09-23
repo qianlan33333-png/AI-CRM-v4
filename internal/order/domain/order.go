@@ -264,9 +264,6 @@ func validate(o Order) error {
 	if o.RecordOrigin == RecordOriginNative && (!validID(o.PayerCustomerID) || !validID(o.BeneficiaryCustomerID)) {
 		return ErrInvalidOrder
 	}
-	if o.RecordOrigin == RecordOriginNative && o.Provider == ProviderAlipay {
-		return ErrInvalidOrder
-	}
 	if o.PayerCustomerID != nil && *o.PayerCustomerID < 1 || o.BeneficiaryCustomerID != nil && *o.BeneficiaryCustomerID < 1 {
 		return ErrInvalidOrder
 	}

@@ -39,8 +39,8 @@ func TestMoneyProviderAndActors(t *testing.T) {
 	}
 	alipay := nativeInput()
 	alipay.Provider = ProviderAlipay
-	if _, err = NewOrder(alipay); !errors.Is(err, ErrInvalidOrder) {
-		t.Fatalf("native Alipay write err=%v", err)
+	if nativeAlipay, err := NewOrder(alipay); err != nil || !nativeAlipay.EffectEligible || nativeAlipay.Provider != ProviderAlipay {
+		t.Fatalf("native Alipay order=%#v err=%v", nativeAlipay, err)
 	}
 }
 

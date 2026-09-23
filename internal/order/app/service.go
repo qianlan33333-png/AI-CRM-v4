@@ -245,7 +245,7 @@ func (s *Service) CreatePaymentOrderWithin(ctx context.Context, command orderpor
 			command.ContactCollectionLevel = "none"
 		}
 	}
-	if !ready(s) || command.Provider != domain.ProviderWeChatPay || command.PayerCustomerID < 1 || command.BeneficiaryCustomerID < 1 || command.ProductID < 1 || command.ProductVersion < 1 || command.UnitAmountMinor < 1 || command.Currency != "CNY" || command.CouponClaimID < 0 || !validPaymentProductType(command.ProductType, command.ServicePeriodDurationDays) || !validPostPurchaseAction(command.PostPurchaseAction) || !validPromotionContext(command.PromotionContext) || !validReferralActivityContext(command.ReferralActivityContext) || !validKey(command.IdempotencyKey) || !validKey(command.ActorScope) || !validContactCollection(command.ContactCollectionLevel, command.MobileE164, command.ShippingAddress) {
+	if !ready(s) || (command.Provider != domain.ProviderWeChatPay && command.Provider != domain.ProviderAlipay) || command.PayerCustomerID < 1 || command.BeneficiaryCustomerID < 1 || command.ProductID < 1 || command.ProductVersion < 1 || command.UnitAmountMinor < 1 || command.Currency != "CNY" || command.CouponClaimID < 0 || !validPaymentProductType(command.ProductType, command.ServicePeriodDurationDays) || !validPostPurchaseAction(command.PostPurchaseAction) || !validPromotionContext(command.PromotionContext) || !validReferralActivityContext(command.ReferralActivityContext) || !validKey(command.IdempotencyKey) || !validKey(command.ActorScope) || !validContactCollection(command.ContactCollectionLevel, command.MobileE164, command.ShippingAddress) {
 		return domain.Snapshot{}, orderport.ErrConflict
 	}
 	productID := command.ProductID

@@ -742,6 +742,49 @@ func TestPostgreSQLOrderCheckoutSnapshotIsAtomicAndDatabaseFrozen(t *testing.T) 
 	}
 }
 
+func TestPostgreSQLNativeAlipayCheckoutKeepsOrderShape(t *testing.T) {
+	native, cleanup := orderIntegrationPool(t)
+	defer cleanup()
+	ctx := context.Background()
+	wrapper, err := platformpostgres.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uow, err := platformpostgres.NewUnitOfWork(wrapper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := orderapp.NewService(uow, repository)
+	command := orderport.PaymentOrderCommand{
+		Provider: domain.ProviderAlipay, MerchantOrderNo: "v4pay_alipay_postgres_0001",
+		PayerCustomerID: 11, BeneficiaryCustomerID: 22,
+		ProductID: 5, ProductCode: "course-5", ProductName: "Course 5", ProductVersion: 3,
+		ProductType: "standard_product", UnitAmountMinor: 8800, Currency: "CNY", ActorScope: "payment-session:alipay-postgres-0001", IdempotencyKey: "checkout-alipay-postgres-0001",
+	}
+	var created domain.Snapshot
+	if err = uow.Within(ctx, func(txctx context.Context) error {
+		var createErr error
+		created, createErr = service.CreatePaymentOrderWithin(txctx, command)
+		return createErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if created.Provider != domain.ProviderAlipay || !created.EffectEligible || created.RecordOrigin != domain.RecordOriginNative {
+		t.Fatalf("native Alipay order=%+v", created)
+	}
+	var count int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM order_checkout_snapshots WHERE order_id=$1`, created.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("checkout snapshot count=%d err=%v", count, err)
+	}
+	if _, err = native.Exec(ctx, `INSERT INTO orders(provider,source_system,source_key,merchant_order_no,amount_minor,currency,status,record_origin,effect_eligible,created_at,updated_at) VALUES('alipay','test','invalid-native-alipay','invalid-native-alipay',100,'CNY','pending_payment','native',true,now(),now())`); err == nil {
+		t.Fatal("database accepted native Alipay order without canonical customers")
+	}
+}
+
 func TestPostgreSQLServicePeriodFulfillmentKeepsLegacyCoverageAndRevokesOnce(t *testing.T) {
 	native, cleanup := orderIntegrationPool(t)
 	defer cleanup()
@@ -1467,7 +1510,7 @@ func orderIntegrationPool(t *testing.T) (*pgxpool.Pool, func()) {
 	if !ok {
 		t.Fatal("locate integration test")
 	}
-	for _, name := range []string{"0002_identity.sql", "0005_external_effects.sql", "0010_product.sql", "0020_order.sql", "0024_order_product_version.sql", "0049_order_history_attribution.sql", "0055_order_service_entitlements.sql", "0070_service_period_entitlement_fulfillment.sql", "0076_order_checkout_snapshots.sql", "0088_order_service_entitlement_alliance.sql", "0095_product_external_push.sql", "0158_order_distribution_qualification_evidence.sql", "0172_order_checkout_post_purchase_action.sql", "0197_order_referral_activity_context.sql"} {
+	for _, name := range []string{"0002_identity.sql", "0005_external_effects.sql", "0010_product.sql", "0020_order.sql", "0024_order_product_version.sql", "0049_order_history_attribution.sql", "0055_order_service_entitlements.sql", "0070_service_period_entitlement_fulfillment.sql", "0076_order_checkout_snapshots.sql", "0088_order_service_entitlement_alliance.sql", "0095_product_external_push.sql", "0158_order_distribution_qualification_evidence.sql", "0172_order_checkout_post_purchase_action.sql", "0197_order_referral_activity_context.sql", "0206_order_native_alipay_checkout.sql"} {
 		migration, readErr := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations", name))
 		if readErr != nil {
 			t.Fatal(readErr)
