@@ -103,6 +103,25 @@ class CoordinatorTests(unittest.TestCase):
             result = self.run_cmd(state, "transition", "x", "production")
             self.assertNotEqual(result.returncode, 0)
 
+    def test_governance_lane_is_independent_but_runtime_remains_serial(self):
+        base="a"*40
+        identity={"origin_thread_id":"origin","commit_sha":"c"*40,"tree_sha":"d"*40}
+        state={"schema":2,"returns":[],"events":[],"items":[
+            {**identity,"candidate_id":"old-runtime","change_class":"runtime","status":"observing","base_main_sha":"f"*40,"events":[]},
+            {**identity,"candidate_id":"governance","change_class":"governance_only","status":"handoff_ready","base_main_sha":base,"events":[]},
+        ]}
+        from release_coordinator import transition
+        transition(state,"governance","integration_check")
+        transition(state,"governance","preview_building",main_sha=base)
+        self.assertEqual(state["items"][1]["status"],"preview_building")
+        stale={"schema":2,"returns":[],"events":[],"items":[{**identity,"candidate_id":"governance","change_class":"governance_only","status":"integration_check","base_main_sha":base,"events":[]}]}
+        with self.assertRaisesRegex(ValueError,"stale"): transition(stale,"governance","preview_building",main_sha="b"*40)
+        runtime={"schema":2,"returns":[],"events":[],"items":[
+            {**identity,"candidate_id":"active","status":"observing","base_main_sha":"f"*40,"events":[]},
+            {**identity,"candidate_id":"next","change_class":"runtime","status":"integration_check","base_main_sha":base,"events":[]},
+        ]}
+        with self.assertRaisesRegex(ValueError,"owns"): transition(runtime,"next","preview_building",main_sha=base)
+
     def test_rejected_handoff_is_recorded_without_entering_lane(self):
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "state.json"

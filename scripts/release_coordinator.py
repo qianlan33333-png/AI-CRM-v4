@@ -94,7 +94,10 @@ def transition(state: dict, candidate_id: str, target: str, *, main_sha: str | N
     if target in {"preview_building", "staging_acceptance", "accepted", "waiting_merge"}:
         if not main_sha or main_sha != item.get("base_main_sha"):
             raise ValueError("candidate base main is stale")
-        active = [x for x in state["items"] if x["status"] in {"preview_building", "staging_acceptance", "production", "observing"}]
+        lane = item.get("change_class", "runtime")
+        active = [x for x in state["items"]
+                  if x["status"] in {"preview_building", "staging_acceptance", "production", "observing"}
+                  and x.get("change_class", "runtime") == lane]
         if active and item not in active:
             raise ValueError("another candidate owns the release lane")
     item["events"].append({"from": current, "to": target, "time": now()})
