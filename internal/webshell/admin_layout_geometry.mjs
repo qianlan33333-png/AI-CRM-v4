@@ -962,7 +962,7 @@ try {
     try {
       await cdp.call("Page.navigate", { url: baseURL + "/admin/config" });
       await waitFor(cdp, "location.pathname === '/admin/config' && document.readyState !== 'loading'", "config center did not navigate");
-      await waitFor(cdp, "Boolean(document.querySelector('[data-runtime-release-host].cc-page .cc-category-table')) && document.querySelectorAll('[data-runtime-release-host] .cc-category-table thead th').length === 4 && document.querySelectorAll('[data-runtime-release-host] [data-category-row]').length === 5", "config center Host did not become ready");
+      await waitFor(cdp, "Boolean(document.querySelector('[data-runtime-release-host].cc-page .cc-category-table')) && document.querySelectorAll('[data-runtime-release-host] .cc-category-table thead th').length === 4 && document.querySelectorAll('[data-runtime-release-host] [data-category-row]').length === 6", "config center Host did not become ready");
       await waitForFonts("config");
       await recordGeometry("config", () => assertConfigCenterLayout("config"), true);
       return true;

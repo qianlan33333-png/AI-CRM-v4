@@ -15,6 +15,7 @@ const script = source.slice(start + '</main><script>'.length, end)
   .replaceAll('{{.Product.ContactCollectionLevel}}', 'mobile')
   .replaceAll('{{.Product.PromotionContext}}', '')
   .replaceAll('{{.Product.RegionOptionsJSON}}', '[]')
+  .replaceAll('{{.AlipayEnabled}}', 'false')
   .replaceAll('{{.Product.CouponTargetRef}}', 'standard_product:7');
 
 assert.equal(source.includes('id="grossAmount"'), false);
@@ -37,13 +38,14 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   const calls = [], elements = new Map();
   const setGlobal = (name, value) => Object.defineProperty(globalThis, name, {value, configurable: true, writable: true});
   const element = () => ({hidden: false, disabled: false, dataset: {}, value: '0', checked: true, textContent: '', href: '', children: [], attributes: new Map(), addEventListener(type, listener) { this.listener ??= {}; this.listener[type] = listener; }, appendChild(child) { this.children.push(child); }, replaceChildren(...children) {this.children=children;this.textContent="";}, setAttribute(name, value) { this.attributes.set(name, String(value)); }, removeAttribute(name) { this.attributes.delete(name); }, set src(value) { this.source = value; queueMicrotask(() => this.listener?.load?.({target: this})); }, get src() { return this.source; }});
-  for (const id of ['price', 'buy', 'status', 'coupon', 'wechatNotice', 'mobile', 'payableAmount', 'footerAmount', 'discountAmount', 'identityGate', 'identityTitle', 'identityMessage', 'authContinue', 'checkoutContent','paymentDetails','mobilePanel','paymentMethod','product','footer','productName']) elements.set(id, element());
+  for (const id of ['price', 'buy', 'status', 'coupon', 'wechatNotice', 'mobile', 'payableAmount', 'footerAmount', 'discountAmount', 'identityGate', 'identityTitle', 'identityMessage', 'authContinue', 'checkoutContent','paymentDetails','mobilePanel','paymentMethod','product','footer','productName','alipayGuide','alipayGuideMessage','alipayPaymentURL','alipayCopy','alipayPaid']) elements.set(id, element());
   elements.get('checkoutContent').querySelector=selector=>elements.get(({'.product':'product','.checkout-footer':'footer','.product h1':'productName'})[selector]||selector.slice(1));
   if(renewal)elements.set('renew',element());
   if(details){const detail=element(),img=element();detail.hidden=true;img.dataset.src='https://example.com/detail.png';detail.querySelectorAll=()=>[img];elements.set('detailContent',detail);elements.set('detailImage',img);elements.set('detailPrice',element());}
   elements.get('authContinue').hidden = true;
   elements.get('checkoutContent').hidden = true;
-  setGlobal('document', {getElementById(id) { return elements.get(id); }, addEventListener() {}, createElement() { return element(); }});
+  const paymentOption=element(); paymentOption.value='wechat_pay';
+  setGlobal('document', {getElementById(id) { return elements.get(id); }, querySelector() { return paymentOption; }, querySelectorAll() { return [paymentOption]; }, addEventListener() {}, createElement() { return element(); }});
   setGlobal('navigator', {userAgent});
   setGlobal('sessionStorage', {getItem(key) { return store.get(key) ?? null; }, setItem(key,value) {store.set(key,String(value));}, removeItem(key) {store.delete(key);} });
   setGlobal('localStorage', {getItem(key) { return store.get(key) ?? null; }, setItem(key, value) { store.set(key, String(value)); }, removeItem(key) { store.delete(key); }});
