@@ -1,6 +1,6 @@
 {
   "registry_version": 1,
-  "registry_sha256": "d554b01632941b2bd83d5750c6eb7055cd65db13c5fa9b3af8dd5ac721e8d891",
+  "registry_sha256": "c4437d0f1f16dac315da7157fca5573457a44365a95c428f1f13bcdeaa9ff941",
   "inventory_scope": "committed_registry",
   "items": [
     {
@@ -6681,7 +6681,7 @@
       "source": "docs/governance/retention-registry.json#filesystem_prefixes//opt/aicrm/source-bundles",
       "cleanup_entrypoint": "deploy/cleanup-source-bundles.py#inventory",
       "policy_id": "release_artifact",
-      "coverage_status": "policy_available",
+      "coverage_status": "host_unobserved",
       "gap_code": "",
       "authorization_expiry": "not_assessed"
     },

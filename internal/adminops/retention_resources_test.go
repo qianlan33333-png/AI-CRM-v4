@@ -93,6 +93,9 @@ func TestRetentionResourceCatalogBindsCanonicalRegistry(t *testing.T) {
 	if total != len(items) || out.InventoryScope != "committed_registry" {
 		t.Fatal("inventory scope was broadened beyond the committed registry")
 	}
+	if bundle := items["filesystem_prefix:/opt/aicrm/source-bundles"]; bundle.CoverageStatus != "host_unobserved" || bundle.PolicyID != "release_artifact" || bundle.CleanupEntrypoint != "deploy/cleanup-source-bundles.py#inventory" {
+		t.Fatalf("source bundles must stay visible without joining the runtime cleanup allowlist: %+v", bundle)
+	}
 	// A returned DTO can never modify the embedded source for later requests.
 	out.Items[0].Owner = "mutated"
 	again, _ := coverageByName(t, &RetentionService{})

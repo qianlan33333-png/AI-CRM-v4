@@ -129,7 +129,7 @@
       "cleanup_entrypoint": ""
     },
     "filesystem_prefix:/opt/aicrm/source-bundles": {
-      "coverage_status": "policy_available",
+      "coverage_status": "host_unobserved",
       "gap_code": "",
       "policy_id": "release_artifact",
       "cleanup_entrypoint": "deploy/cleanup-source-bundles.py#inventory"
