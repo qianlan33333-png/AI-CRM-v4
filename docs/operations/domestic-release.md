@@ -28,7 +28,15 @@
 4. 在 `production_enabled=false` 下执行 `python3 /usr/local/libexec/aicrm/domestic_release.py --config /etc/aicrm/domestic-release.json bind-baseline --prod-preview-sha <生产当前SHA>`。它读取生产状态和旧收据，核对双 commit 同树与预备机基线，建立一次性游标；状态已存在则拒绝覆盖。
 5. 两个模拟 PR 连续合并的第一父链、页面无备份/无迁移、Go 受影响程序编译、摘要不符、预发失败、生产健康失败和结果不明的测试全部通过；实测 `.6 -> .13` 的 SSH 身份认证及增量传输。随后设置 `production_enabled=true` 并启用 `aicrm-domestic-release.timer`。记录首个真实合并到生产健康的耗时。
 
-`state.json` 只记录技术游标：`processed_sha`、`deployed_source_sha`、`prod_installed_sha`、`status`。它不等于旧 `/Users/qianlan/Downloads/新CRM/release-control/state.json`，也不记录真实业务验收。状态缺失或损坏、检查未完成、源码拉取失败、基础/生产失败时默认停止。`outcome_unknown` 用 `readback` 子命令核对现场，再按事故处置更新状态，不能删除状态从头跑。
+`state.json` 只记录技术游标：`processed_sha`、`deployed_source_sha`、`prod_installed_sha`、`status`。它不等于旧 `/Users/qianlan/Downloads/新CRM/release-control/state.json`，也不记录真实业务验收。状态缺失或损坏、检查未完成、源码拉取失败、基础/生产失败时默认停止。`outcome_unknown` 时保持 timer 停止，先做只读核对；符合本文恢复门槛后，运维必须显式给出 ledger 中同一个完整 SHA：
+
+```sh
+python3 /usr/local/libexec/aicrm/domestic_release.py \
+  --config /etc/aicrm/domestic-release.json recover \
+  --retry-blocked --sha <准确的40位blocked-SHA>
+```
+
+恢复器会再次核对 main 第一父链与准确 `check`、预备机包和进程、生产当前版本/健康/进程、目标回执和远端 metadata，并只允许一次安全复用符合 manifest 的非迁移 orphan。调用固定 helper 时还会传准确 release SHA 和 controller 已验证的 metadata SHA256；helper 在同一次 metadata 读取中先校验 digest 与目标 SHA，再允许任何安装副作用。若生产已经运行目标版本且目标成功回执有效，只补技术游标；现场互相矛盾、目标 current 缺少回执、旧版不健康或此前已尝试过恢复时均拒绝操作，保持队列停止并升级人工处置。禁止手工改写/删除 state.json、直接改 current 或盲目重复安装。恢复完成后先读回状态和生产版本，再单独决定何时恢复 timer。
 
 ## 回退与局限
 
