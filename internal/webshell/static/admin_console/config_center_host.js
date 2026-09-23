@@ -11,7 +11,7 @@
   switchStyle.textContent = ".cc-switch{width:40px;height:22px;flex:0 0 40px;margin-right:12px}.cc-slider:before{width:16px;height:16px;left:3px;top:3px;transform:translateX(0)}.cc-switch input:checked + .cc-slider:before{transform:translateX(18px)}.cc-switch input:focus-visible + .cc-slider{outline:2px solid var(--cc-blue);outline-offset:2px}.cc-switch input:disabled + .cc-slider{opacity:.55;cursor:not-allowed}@media(max-width:560px){.cc-switch{margin-right:10px;vertical-align:top}}";
   document.head.append(switchStyle);
 
-  const operationalCategories = new Set(["wecom_base", "admin_access", "wechat_pay", "wechat_shop", "wechat_oauth"]);
+  const operationalCategories = new Set(["wecom_base", "admin_access", "wechat_pay", "alipay", "wechat_shop", "wechat_oauth"]);
   const operationalField = (field) => !["deployment", "unsupported", "protected"].includes(field.input) && !/timeout|ttl|page_limit|page_budget|poll|worker|limit_per|retry|token_expir/i.test(field.key);
   const catalogAPI = "/api/admin/config/runtime-catalog";
   const releaseAPI = "/api/admin/config/runtime-releases";
@@ -64,6 +64,7 @@
   const primaryEnabledSetting = Object.freeze({
     wecom_base: "wecom.enabled",
     wechat_pay: "wechat_pay.provider_enabled",
+    alipay: "alipay.provider_enabled",
     wechat_shop: "wechat_shop.provider_enabled",
     wechat_oauth: "survey.oauth_enabled",
   });

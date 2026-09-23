@@ -247,7 +247,7 @@ try {
   // categories with one explicit V3 primary enable owner render a switch;
   // other categories must not gain a fabricated aggregate provider command.
   await cdp.call("Page.navigate", { url: `${baseURL}/admin/config` });
-  await waitFor(cdp, "document.querySelectorAll('[data-category-row]').length === 5 && Boolean(document.querySelector('[data-category-row=\"wecom_base\"] .cc-switch input'))", "Config Center did not render the operational category list");
+  await waitFor(cdp, "document.querySelectorAll('[data-category-row]').length === 6 && Boolean(document.querySelector('[data-category-row=\"wecom_base\"] .cc-switch input'))", "Config Center did not render the operational category list");
   const centerLayout = await evaluate(cdp, `(() => ({
     headers: [...document.querySelectorAll('.cc-category-table thead th')].map((cell) => cell.textContent.trim()),
     sidebarHasAggregateSwitch: Boolean(document.querySelector('[data-category-row="sidebar_identity"]')),
@@ -255,7 +255,7 @@ try {
     hasModel: document.body.textContent.includes('大模型'),
     hasTechnicalHomepageColumn: document.body.textContent.includes('发布/应用状态')
   }))()`);
-  if (JSON.stringify(centerLayout?.headers) !== JSON.stringify(["类目", "是否生效", "生效开关", "配置"]) || centerLayout?.sidebarHasAggregateSwitch || centerLayout?.hasTechnicalHomepageColumn || !centerLayout?.hasModel || JSON.stringify(centerLayout?.categories) !== JSON.stringify(["admin_access", "wechat_oauth", "wechat_pay", "wechat_shop", "wecom_base"])) {
+  if (JSON.stringify(centerLayout?.headers) !== JSON.stringify(["类目", "是否生效", "生效开关", "配置"]) || centerLayout?.sidebarHasAggregateSwitch || centerLayout?.hasTechnicalHomepageColumn || !centerLayout?.hasModel || JSON.stringify(centerLayout?.categories) !== JSON.stringify(["admin_access", "alipay", "wechat_oauth", "wechat_pay", "wechat_shop", "wecom_base"])) {
     throw new Error("Config Center operational category-table contract failed");
   }
 

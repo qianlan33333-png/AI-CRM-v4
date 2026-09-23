@@ -65,7 +65,7 @@ const centerDom = new JSDOM('<!doctype html><html><body data-runtime-config-page
 });
 try {
   centerDom.window.eval(host);
-  await waitFor(() => centerDom.window.document.querySelectorAll("[data-category-row]").length === 5, "Config Center did not render the five operational categories");
+  await waitFor(() => centerDom.window.document.querySelectorAll("[data-category-row]").length === 6, "Config Center did not render the six operational categories");
   assert.ok(centerDom.window.document.querySelector('a[href="/admin/configDetail.html?cat=ai_models"]'), "dedicated model settings entry is missing");
   for (const key of ["api_access", "stability", "sidebar_identity", "ai_automation"]) assert.equal(centerDom.window.document.querySelector(`[data-category-row="${key}"]`),null,"technical category must be absent");
   const headers = [...centerDom.window.document.querySelectorAll(".cc-category-table thead th")].map((cell) => cell.textContent.trim());
@@ -74,7 +74,7 @@ try {
   const wecomSwitch = centerDom.window.document.querySelector('[data-category-row="wecom_base"] .cc-switch input');
   assert.ok(wecomSwitch, "WeCom retains its owned primary switch");
   const categorySwitches = [...centerDom.window.document.querySelectorAll("[data-category-row] .cc-switch input")];
-  assert.deepEqual(categorySwitches.map((input) => input.closest("[data-category-row]")?.dataset.categoryRow), ["wecom_base", "wechat_pay", "wechat_shop", "wechat_oauth"], "Config Center must render the four primary switches declared by the real RuntimeCatalog");
+  assert.deepEqual(categorySwitches.map((input) => input.closest("[data-category-row]")?.dataset.categoryRow), ["wecom_base", "wechat_pay", "alipay", "wechat_shop", "wechat_oauth"], "Config Center must render the five primary switches declared by the real RuntimeCatalog");
   const oauthSwitch = centerDom.window.document.querySelector('[data-category-row="wechat_oauth"] .cc-switch input');
   assert.ok(oauthSwitch, "the official-account OAuth category must bind its RuntimeCatalog enable field");
   assert.equal(centerDom.window.document.querySelector('[data-category-row="sidebar_identity"] .cc-switch'), null, "a category without one primary enable field must show no aggregate switch");

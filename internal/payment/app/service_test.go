@@ -571,6 +571,22 @@ func TestH5CheckoutRequiresAndFreezesNormalizedMobile(t *testing.T) {
 	}
 }
 
+func TestAlipayWapCheckoutPreservesCollectedMobileInOriginalOrder(t *testing.T) {
+	store := &storeStub{}
+	orders := &checkoutOrderStub{}
+	products := &checkoutProductStub{product: productport.CheckoutProduct{ID: 5, ProductType: productport.ProductOptionStandard, Code: "course-5", Name: "Course 5", PriceMinor: 8800, Currency: "CNY", Version: 3, RequireMobile: true}}
+	sessions := &oneShotSessionStub{actor: paymentport.SessionActor{PayerIdentityID: 4, PayerCustomerID: 11, BeneficiarySelection: paymentport.BeneficiarySelectionUnresolved, Channel: domain.ChannelH5Official}}
+	service := NewService(uowStub{}, store, orders, sessions, &effectStub{})
+	if err := service.SetCheckoutProductReader(products); err != nil {
+		t.Fatal(err)
+	}
+	command := paymentport.CreateCommand{ProductID: 5, ProductType: "standard", Provider: "alipay", Channel: domain.ChannelAlipayWap, MobileE164: "+8613812345678", BeneficiarySelection: paymentport.BeneficiarySelectionPayerSelf, SessionToken: "pays_h5_session_token_00000005", CheckoutSessionBinding: paymentport.CheckoutSessionBinding("pays_h5_session_token_00000005"), ActorScope: "public-checkout", IdempotencyKey: "checkout-alipay-key-0000005"}
+	payment, err := service.Create(context.Background(), command)
+	if err != nil || orders.command.Provider != orderdomain.ProviderAlipay || payment.Channel != domain.ChannelAlipayWap || orders.command.MobileE164 != command.MobileE164 {
+		t.Fatalf("payment=%+v order=%+v err=%v", payment, orders.command, err)
+	}
+}
+
 func TestListOrderEffectsJoinsOnlyPaymentOwnedProjection(t *testing.T) {
 	store := &storeStub{}
 	effects := &effectStub{}

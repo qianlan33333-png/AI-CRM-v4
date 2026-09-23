@@ -955,14 +955,14 @@ try {
       return {root:box('[data-runtime-release-host].cc-page'),card:box('[data-runtime-release-host].cc-page .cc-card'),title:box('[data-runtime-release-host].cc-page .cc-card-h h2'),table:box('[data-runtime-release-host].cc-page .cc-category-table'),topbar:box('.admin-topbar'),headers:document.querySelectorAll('header.admin-topbar').length,headings,rows:table?.querySelectorAll('tbody [data-category-row]').length || 0,overflow:document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,titleText:String(title?.textContent || '').trim()};
     })()`);
     const expectedHeadings = ["类目", "是否生效", "生效开关", "配置"];
-    if (!layout.root || !layout.card || !layout.title || !layout.table || layout.titleText !== "配置类目" || !layout.topbar || layout.headers !== 1 || layout.overflow || layout.rows !== 5 || layout.headings.length !== expectedHeadings.length || layout.headings.some((heading, index) => heading !== expectedHeadings[index]) || layout.root.top + 1 < layout.topbar.bottom || layout.card.top + 1 < layout.root.top || layout.table.top + 1 < layout.card.top || layout.card.left + 1 < layout.root.left) throw new Error(label + " V3 topbar/config-center-card geometry invalid");
+    if (!layout.root || !layout.card || !layout.title || !layout.table || layout.titleText !== "配置类目" || !layout.topbar || layout.headers !== 1 || layout.overflow || layout.rows !== 6 || layout.headings.length !== expectedHeadings.length || layout.headings.some((heading, index) => heading !== expectedHeadings[index]) || layout.root.top + 1 < layout.topbar.bottom || layout.card.top + 1 < layout.root.top || layout.table.top + 1 < layout.card.top || layout.card.left + 1 < layout.root.left) throw new Error(label + " V3 topbar/config-center-card geometry invalid");
   };
   const navigateConfigCenter = async () => {
     currentStep = "config";
     try {
       await cdp.call("Page.navigate", { url: baseURL + "/admin/config" });
       await waitFor(cdp, "location.pathname === '/admin/config' && document.readyState !== 'loading'", "config center did not navigate");
-      await waitFor(cdp, "Boolean(document.querySelector('[data-runtime-release-host].cc-page .cc-category-table')) && document.querySelectorAll('[data-runtime-release-host] .cc-category-table thead th').length === 4 && document.querySelectorAll('[data-runtime-release-host] [data-category-row]').length === 5", "config center Host did not become ready");
+      await waitFor(cdp, "Boolean(document.querySelector('[data-runtime-release-host].cc-page .cc-category-table')) && document.querySelectorAll('[data-runtime-release-host] .cc-category-table thead th').length === 4 && document.querySelectorAll('[data-runtime-release-host] [data-category-row]').length === 6", "config center Host did not become ready");
       await waitForFonts("config");
       await recordGeometry("config", () => assertConfigCenterLayout("config"), true);
       return true;
