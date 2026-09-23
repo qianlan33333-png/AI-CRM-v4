@@ -116,6 +116,9 @@ class DomesticReleaseTest(unittest.TestCase):
 
             self.assertTrue(backup.is_file())
             args, kwargs = calls[0]
+            self.assertEqual(args[0], "/usr/sbin/runuser")
+            self.assertEqual(args[-2], "pg_dump")
+            self.assertEqual(kwargs["env"]["PATH"], "/usr/bin:/bin")
             self.assertNotIn("synthetic-secret", repr(args))
             self.assertNotIn("PGDATABASE=postgres://", repr(args))
             self.assertEqual(kwargs["env"]["PGPASSWORD"], "synthetic-secret")
@@ -151,10 +154,13 @@ class DomesticReleaseTest(unittest.TestCase):
             def fake_psql(args, **kwargs):
                 captured["args"] = args
                 captured["kwargs"] = kwargs
-                return SimpleNamespace(returncode=0, stdout=f"aicrm_test_baseline_5d15|aicrm_test|127.0.0.1|yes|1|{STAGE_OLD_ORDER_CHECK}\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout=f"aicrm_test_baseline_5d15|aicrm_test|127.0.0.1/32|yes|1|{STAGE_OLD_ORDER_CHECK}\n", stderr="")
 
             with mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", side_effect=fake_psql):
                 self.assertEqual(installer.staging_migration_baseline(), (True, True))
+            self.assertEqual(captured["args"][0], "/usr/sbin/runuser")
+            self.assertEqual(captured["args"][5], "psql")
+            self.assertEqual(captured["kwargs"]["env"]["PATH"], "/usr/bin:/bin")
             self.assertNotIn("synthetic-secret", repr(captured["args"]))
             self.assertEqual(captured["kwargs"]["env"]["PGHOST"], "127.0.0.1")
             self.assertEqual(captured["kwargs"]["env"]["PGUSER"], "aicrm_test")
@@ -185,9 +191,12 @@ class DomesticReleaseTest(unittest.TestCase):
 
     def test_staging_schema_probe_rejects_wrong_actual_database_identity(self):
         identities = (
-            "aicrm_prod|aicrm_test|127.0.0.1",
-            "aicrm_test_baseline_5d15|prod_user|127.0.0.1",
-            "aicrm_test_baseline_5d15|aicrm_test|10.0.4.13",
+            "aicrm_prod|aicrm_test|127.0.0.1/32",
+            "aicrm_test_baseline_5d15|prod_user|127.0.0.1/32",
+            "aicrm_test_baseline_5d15|aicrm_test|10.0.4.13/32",
+            "aicrm_test_baseline_5d15|aicrm_test|2001:db8::10/128",
+            "aicrm_test_baseline_5d15|aicrm_test|",
+            "aicrm_test_baseline_5d15|aicrm_test|not-an-ip/32",
         )
         for identity in identities:
             with self.subTest(identity=identity), tempfile.TemporaryDirectory() as temporary:
@@ -198,6 +207,20 @@ class DomesticReleaseTest(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "pre-0206 schema") as raised:
                         installer.staging_migration_baseline()
                 self.assertNotIn("synthetic-secret", str(raised.exception))
+
+    def test_staging_schema_probe_accepts_ipv6_cidr_loopback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            env_file = Path(temporary) / "runtime.env"
+            env_file.write_text(
+                "AICRM_DATABASE_URL=postgres://aicrm_test:synthetic-secret@127.0.0.1/aicrm_test_baseline_5d15?sslmode=disable\n"
+            )
+            result = SimpleNamespace(
+                returncode=0,
+                stdout=f"aicrm_test_baseline_5d15|aicrm_test|::1/128|yes|1|{STAGE_OLD_ORDER_CHECK}\n",
+                stderr="",
+            )
+            with mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", return_value=result):
+                self.assertEqual(installer.staging_migration_baseline(), (True, True))
 
     def test_pre_migration_constraint_matches_real_stage_definition_and_rejects_0206_shape(self):
         self.assertTrue(installer.is_pre_0206_order_constraint(STAGE_OLD_ORDER_CHECK))

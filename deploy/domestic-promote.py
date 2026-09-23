@@ -33,6 +33,7 @@ CURRENT = ROOT / "current"
 LOCK = ROOT / "install-release.lock"
 RECEIPTS = ROOT / "domestic-receipts"
 ENV = Path("/etc/aicrm/aicrm.env")
+RUNUSER = "/usr/sbin/runuser"
 STAGE_ROLE = Path("/etc/aicrm/domestic-release-role")
 READY = "http://127.0.0.1:8080/readyz"
 STAGING_MIGRATION_VERSION = "0206"
@@ -249,7 +250,7 @@ def backup_database(sha: str) -> Path:
         temp = Path(out.name)
         try:
             process = subprocess.run(
-                ["runuser", "--preserve-environment", "-u", "aicrm", "--", "pg_dump", "-Fc"],
+                [RUNUSER, "--preserve-environment", "-u", "aicrm", "--", "pg_dump", "-Fc"],
                 env={**database_env, "PATH": "/usr/bin:/bin"},
                 stdout=out,
                 stderr=subprocess.PIPE,
@@ -419,7 +420,7 @@ SELECT
 """
     try:
         result = subprocess.run(
-            ["runuser", "--preserve-environment", "-u", "aicrm", "--", "psql", "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-c", query],
+            [RUNUSER, "--preserve-environment", "-u", "aicrm", "--", "psql", "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-c", query],
             env={**environment, "PATH": "/usr/bin:/bin"},
             text=True,
             stdout=subprocess.PIPE,
@@ -432,7 +433,8 @@ SELECT
         raise RuntimeError("staging migration baseline could not be inspected")
     values = result.stdout.strip().split("|", 5)
     try:
-        server_is_loopback = ipaddress.ip_address(values[2]).is_loopback
+        # PostgreSQL renders inet addresses with their mask (e.g. 127.0.0.1/32).
+        server_is_loopback = ipaddress.ip_interface(values[2]).ip.is_loopback
     except (ValueError, IndexError):
         server_is_loopback = False
     old_constraint_present = len(values) == 6 and values[4] == "1" and is_pre_0206_order_constraint(values[5])
