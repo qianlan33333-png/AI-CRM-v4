@@ -1,0 +1,15 @@
+{
+  "status": "technical_accepted",
+  "environment": "staging",
+  "candidate_id": "<candidate-id>",
+  "merge_preview_sha": "<40-hex>",
+  "candidate_tree_sha": "<40-hex>",
+  "package_sha256": "<64-hex>",
+  "package_path": "/opt/aicrm/builds/<preview>/aicrm-<preview>.tar.gz",
+  "checks": [
+    {"name": "artifact_integrity", "passed": true, "evidence": {"path": "<absolute-path>", "sha256": "<64-hex>"}},
+    {"name": "build_provenance", "passed": true, "evidence": {"path": "<absolute-path>", "sha256": "<64-hex>"}},
+    {"name": "migration_sequence", "passed": true, "evidence": {"path": "<absolute-path>", "sha256": "<64-hex>"}},
+    {"name": "readyz", "passed": true, "evidence": {"path": "<absolute-path>", "sha256": "<64-hex>"}}
+  ]
+}

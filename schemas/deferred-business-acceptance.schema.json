@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/qianlan33333-png/AI-CRM-v4/schemas/deferred-business-acceptance.schema.json",
+  "type": "object",
+  "required": [
+    "batch_id",
+    "candidate_id",
+    "worktree",
+    "base_main_sha",
+    "aggregate_head_sha",
+    "merge_preview_sha",
+    "candidate_tree_sha",
+    "package_sha256",
+    "members",
+    "business_acceptance",
+    "technical_acceptance",
+    "production_readback"
+  ],
+  "properties": {
+    "batch_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "worktree": {
+      "type": "string",
+      "minLength": 1
+    },
+    "base_main_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "aggregate_head_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "merge_preview_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "candidate_tree_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "package_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "members": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_key",
+          "work_item",
+          "origin_thread_id",
+          "commit_sha",
+          "tree_sha"
+        ],
+        "properties": {
+          "project_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "work_item": {
+            "type": "string",
+            "minLength": 1
+          },
+          "origin_thread_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "commit_sha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "tree_sha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          }
+        }
+      }
+    },
+    "business_acceptance": {
+      "type": "object",
+      "required": [
+        "status",
+        "exception_id",
+        "decided_by",
+        "decided_at",
+        "due_at",
+        "decision_text",
+        "owner",
+        "scope",
+        "unverified_business_journeys",
+        "post_production_owner",
+        "post_production_actions"
+      ],
+      "properties": {
+        "status": {
+          "const": "business_acceptance_deferred_to_user"
+        },
+        "exception_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{7,127}$"
+        },
+        "decided_by": {
+          "const": "user"
+        },
+        "decided_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "due_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "decision_text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "const": "user"
+        },
+        "scope": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "unverified_business_journeys": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "project_key",
+              "work_item",
+              "journeys"
+            ],
+            "properties": {
+              "project_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "work_item": {
+                "type": "string",
+                "minLength": 1
+              },
+              "journeys": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 8
+                }
+              }
+            }
+          }
+        },
+        "post_production_owner": {
+          "const": "user"
+        },
+        "post_production_actions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "technical_acceptance": {
+      "type": "object",
+      "required": [
+        "receipt_ref",
+        "receipt_sha256"
+      ],
+      "properties": {
+        "receipt_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "receipt_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "production_readback": {
+      "type": "object",
+      "required": [
+        "status",
+        "business_status",
+        "required_technical_readback"
+      ],
+      "properties": {
+        "status": {
+          "const": "pending_technical_deployment"
+        },
+        "business_status": {
+          "const": "deferred_to_user"
+        },
+        "required_technical_readback": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

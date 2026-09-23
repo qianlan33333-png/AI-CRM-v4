@@ -11,6 +11,17 @@ ORDER = ['waiting_candidate', 'preview_building', 'staging_acceptance', 'frozen'
          'waiting_merge', 'merged', 'production', 'observing', 'released']
 ACTIVE = set(ORDER[1:-1])
 
+def reservation_file(queue_file):
+    return queue_file.with_name(queue_file.name + '.promotion-reservation.json')
+
+def guarded_reservation(queue_file, candidate_id=None, token=None, generation=None):
+    path = reservation_file(queue_file)
+    if not path.exists(): return None
+    value = json.loads(path.read_text())
+    if candidate_id != value.get('candidate_id') or token != value.get('token') or generation != value.get('generation'):
+        raise ValueError('promotion reservation owns release queue')
+    return value
+
 def change(queue, command, manifest=None, candidate_id=None, status=None, main=None):
     items = queue['items']
     if command == 'enqueue':
@@ -50,6 +61,8 @@ def main():
     a.file.parent.mkdir(parents=True, exist_ok=True)
     with a.file.with_suffix('.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        if a.command != 'show':
+            guarded_reservation(a.file, getattr(a, 'candidate_id', None), os.environ.get('AICRM_PROMOTION_TOKEN'), os.environ.get('AICRM_PROMOTION_GENERATION'))
         queue = json.loads(a.file.read_text()) if a.file.exists() else {'schema': 1, 'items': []}
         if a.command == 'show':
             print(json.dumps(queue, ensure_ascii=False)); return

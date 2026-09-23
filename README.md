@@ -1,14 +1,14 @@
-# AI-CRM v3
+# AI-CRM v4
 
-AI-CRM v3 是单企业私有化 CRM 的 Go 主运行仓库。当前已交付 PostgreSQL 平台底座、OneID 身份内核、员工认证与权限、企微 OAuth/回调/JSSDK/侧边栏身份，以及企微客户激活、客户目录和一次性 declared 手机号绑定能力。
+AI-CRM v4 是当前唯一的代码、测试、构建、发布和部署仓库。首个提交的 Git tree 与当时生产运行版本一致；后续能力只在本仓演进。
 
-固定供体基线：
+历史来源仅用于说明基线，不是开发供体或运行时依赖：
 
 - `AI-CRM-production@4af15e64fb7ebb311b52b17eaf5fc5ea5e8154c8`：生产行为与 OneID 参考；
 - `AI-CRM@69c5282fb38058f2cc9872b6feb3f0f54bfad64b`：管理后台和企微侧边栏视觉壳。
 - `AI-CRM-v2@6bfbe5816bb89913c70adaca87d6a486260e016e`：客户列表、游标分页和企微目录同步 Behavior Contract。
 
-供体仓不是运行时依赖，也未复制其 Git 历史。
+禁止从旧仓库 checkout、复制代码、构建或部署。
 
 ## 本期能力
 
@@ -60,3 +60,22 @@ make check
 go test -race ./cmd/aicrm ./internal/access/... ./internal/customer/... ./internal/identity/... ./internal/wecom/...
 govulncheck ./...
 ```
+
+## 开发与发布
+
+每个能力使用新的 `codex/<work-item>` worktree 和 PR。先阅读
+[`docs/development-before-start.md`](docs/development-before-start.md)，完成与影响范围
+匹配的本地验证和预发布验收，再提交不可变 handoff。发布指挥台验证 GitHub 当前
+head/main、required check、签名的新鲜度证明与预发布 receipt，然后串行晋级同一包；
+指挥台不修改候选源码。
+
+```sh
+python3 scripts/release_control.py handoff validate handoff.json
+python3 scripts/release_control.py --state /secure/release/state.json \
+  --coordinator-thread-id <thread-id> handoff submit handoff.json <candidate-id>
+python3 scripts/release_events.py --state /secure/release/state.json show
+```
+
+公开 `main` 的精确读回和离线验签见
+[`docs/release-command-center.md`](docs/release-command-center.md)。GitHub 分支保护负责
+合并门禁；指挥台队列负责串行合并、同包发布和观察，当前不使用 GitHub 原生 Merge Queue。

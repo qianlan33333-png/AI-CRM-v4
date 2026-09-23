@@ -1,9 +1,18 @@
 ---
 name: aicrm-v3-development
-description: Plan, implement, migrate, or review AI-CRM-v3 capabilities with an explicit first-pass decision on OneID identity coordination, PostgreSQL persistence, durable internal jobs, and External Effects reuse. Use for development work inside the 新CRM/AI-CRM-v3 repository; do not force these dependencies onto genuinely unrelated local-only work.
+description: Plan, implement, migrate, or review AI-CRM-v4 capabilities with an explicit first-pass decision on OneID, persistence, durable jobs, and External Effects. The v3 path name remains for tooling compatibility.
 ---
 
-# AI-CRM-v3 Development Decision Manual
+# AI-CRM-v4 Development Decision Manual
+
+## Completion and notification contract
+
+Before editing, classify the business judgment, acceptance journey, OneID,
+Persistence, and External Effects boundaries. Completion requires a clean,
+committed worktree and evidence bound to the exact tree and package. The origin
+task emits `handoff_ready`; a returned source issue requires a new commit and
+new handoff. A compile, mock, HTTP 200, synthetic fixture, or queued Provider
+effect is not a completed business acceptance.
 
 Use this skill after reading the repository `AGENTS.md`. Its purpose is to make OneID and durable execution deliberate shared foundations without turning them into universal dependencies.
 

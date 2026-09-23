@@ -12,6 +12,10 @@
 /coverage.out
 *.test
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # editors / OS
 .idea/
 .vscode/

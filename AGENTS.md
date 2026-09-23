@@ -1,17 +1,28 @@
 # AGENTS.md
 
-本文件适用于整个 `AI-CRM-v3` 仓库。
+## Development window and release command center
+
+每个开发任务使用新的 `codex/<work-item>` 分支/worktree 和新 PR。开始前阅读
+`docs/development-before-start.md`，记录 OneID、Persistence、External Effects
+分类，完成与影响范围匹配的验证，并提交绑定准确 commit/tree 的 handoff。
+
+开发任务对 `handoff_ready`、`new_commit`、`blocked`、`needs_review` 使用持久
+事件通知发布指挥台。指挥台只验证、排队、合并、部署和回传，不修改候选源码、
+PR、分支或 worktree。公开仓库 `main` 的 GitHub 保护是合并门禁；串行发布仍由
+指挥台队列负责，不假定 GitHub 原生 Merge Queue。
+
+本文件适用于整个 `AI-CRM-v4` 仓库。
 
 ## 1. 仓库地位
 
-- v3 是唯一新能力主线。
-- 当前 AI-CRM-v3 仓库是唯一代码、测试、构建、发布和部署来源。禁止使用 AI-CRM-production、AI-CRM-v2、AI-CRM 或任何旧仓库 checkout、commit、donor SHA、donor manifest、运行时、数据库、接口和前端；旧系统缺失不得阻塞 v3。
-- 新功能不得在 v3 和旧仓重复实现。
+- v4 是唯一新能力主线。
+- 当前 AI-CRM-v4 仓库是唯一代码、测试、构建、发布和部署来源。禁止使用 AI-CRM-production、AI-CRM-v3、AI-CRM-v2、AI-CRM 或任何旧仓库 checkout、commit、donor SHA、donor manifest、运行时、数据库、接口和前端；旧系统缺失不得阻塞 v4。
+- 新功能不得在 v4 和旧仓重复实现。
 - 优先级：用户最新明确指令 > 本文件第 2 节“开发前最高优先级判断”与第 8 节“红线” > `docs/01-PRD-迁移范围与新仓库基线.md` > `docs/02-模块化开发与交付方案.md` > 本文件其他内容。
 
 ## 2. 开发前最高优先级判断
 
-- 新功能、Bug 修复、调试、合并和上线前置流程统一先应用 `skills/aicrm-v3-development-frontdoor/SKILL.md`；新功能必须完成市场/GitHub 调研、复用评估和已确认 PRD，且合并前必须完成并行与发布快照。所有证据只允许来自当前 v3 commit/tree。
+- 新功能、Bug 修复、调试、合并和上线前置流程统一先应用 `skills/aicrm-v3-development-frontdoor/SKILL.md`；新功能必须完成市场/GitHub 调研、复用评估和已确认 PRD，且合并前必须完成并行与发布快照。Skill 路径为兼容现有工具保留，所有证据只允许来自当前 v4 commit/tree。
 - 除用户最新明确指令与安全红线外，任何设计、实现、迁移或代码审查在开始编码前，都必须优先判断两件事：是否涉及 OneID/外部身份，以及是否涉及持久化、内部持久任务或外部效果。
 - 开发者必须先阅读并应用项目核心 Skill：`skills/aicrm-v3-development/SKILL.md`，在计划或 PR 中留下简短分类结论。
 - 这是一项优先设计检查，不是要求所有功能都接入 OneID 或 External Effects。确实不涉及时，应明确记录“不涉及”及理由，随后按本领域正常边界开发，禁止为了过门禁而制造虚假依赖。
@@ -45,7 +56,7 @@
 - 业务状态、幂等收据、审计和 Outbox 必须在同一 PostgreSQL 事务提交或回滚。
 - Provider 网络调用不得持有数据库事务。
 - 并发更新使用显式锁、CAS 或版本号。
-- v3 迁移从独立序列开始，不复制旧仓 migration 历史。
+- v4 延续本仓已有迁移序列，不复制任何旧仓 migration 历史。
 - 迁移工具放在 `cmd/migrate-*`，运行时包不得 import 迁移器。
 
 ## 6. 外部效果
