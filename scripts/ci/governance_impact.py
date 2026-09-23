@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Validate the capability registry and report the consumers affected by a Git diff.
 
-This is an impact/review gate, not a replacement for the canonical full lanes.
-The report records author declarations separately from independent approval.
+This impact report feeds focused PR lanes for registered medium-risk changes.
+Protected and high-risk changes still run every canonical lane.
 """
 from __future__ import annotations
 
@@ -123,7 +123,7 @@ def analyze(root: Path, registry: dict, tracked: list[str], changed: list[str]) 
             "affected": sorted(affected), "checks": [json.loads(c) for c in sorted(checks)],
             "edges": [{"consumer": c, "dependency": d, "source": p} for c, d, p in sorted(set(edges))
                       if c in affected and d in affected],
-            "test_execution": "mapped to existing full CI lanes; this report does not execute or select a smaller test suite"}
+            "test_execution": "registered checks are selected by PR CI; protected and high-risk changes run every lane"}
 
 
 def author_review(body: str, head: str, risk: str) -> dict:

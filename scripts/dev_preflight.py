@@ -30,8 +30,16 @@ REQUIRED_JOURNEYS = SHELL_JOURNEYS | {
 }
 
 
-def select_journeys(listing: str, group: str) -> list[str]:
+def select_journeys(listing: str, group: str, requested: list[str] | None = None) -> list[str]:
     names = set(re.findall(r"^Test\w*ChromiumJourney$", listing, re.MULTILINE))
+    if requested:
+        selected = set(requested)
+        if len(selected) != len(requested) or not all(re.fullmatch(r"Test\w*ChromiumJourney", name) for name in requested):
+            raise ValueError("focused Chromium selection contains an invalid or duplicate journey")
+        missing = selected - names
+        if missing:
+            raise ValueError("selected Chromium tests missing: " + ", ".join(sorted(missing)))
+        return sorted(selected)
     missing = REQUIRED_JOURNEYS - names
     if missing:
         raise ValueError("required Chromium tests missing: " + ", ".join(sorted(missing)))
@@ -137,13 +145,13 @@ class Preflight:
     def compile(self):
         self.run("compile-all-tests", ["bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-p", "1", "-run", "^$", "./..."])
 
-    def browser(self, group: str):
+    def browser(self, group: str, requested: list[str] | None = None):
         if not os.environ.get("AICRM_DATABASE_URL"):
             raise ValueError("AICRM_DATABASE_URL is required; use an isolated PostgreSQL 16 test database")
         self.run("current-v3-source", ["node", "scripts/prepare-donor-source-views.mjs"])
         env = dict(os.environ, AICRM_REQUIRE_CHROMIUM_JOURNEY="1")
         listing = self.run("browser-discovery", ["bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-p", "1", "-list", "ChromiumJourney$", "./cmd/aicrm"], env)
-        names = select_journeys(listing.read_text(), group)
+        names = select_journeys(listing.read_text(), group, requested)
         self.report["required_browser_tests"] = names
         self.save()
         pattern = "^(" + "|".join(names) + ")$"
@@ -193,6 +201,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=["fast", "compile", "browser", "full"])
     parser.add_argument("--group", choices=["all", "shell", "business"], default="all")
+    parser.add_argument("--journey", action="append", default=[], help="run only the named Chromium journey; repeat for several")
     parser.add_argument("--report-dir", type=Path)
     args = parser.parse_args()
     report_dir = (args.report_dir or Path(tempfile.mkdtemp(prefix="aicrm-preflight-"))).resolve()
@@ -205,7 +214,7 @@ def main():
     print("Evidence: " + str(check.report_dir), flush=True)
     try:
         if args.phase == "browser":
-            check.browser(args.group)
+            check.browser(args.group, args.journey)
         else:
             getattr(check, args.phase)()
         check.report["result"] = "passed"

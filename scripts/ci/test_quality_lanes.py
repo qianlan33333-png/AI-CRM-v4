@@ -14,6 +14,46 @@ class QualityLaneTests(unittest.TestCase):
             self.assertTrue(commands, lane)
             self.assertTrue(all(isinstance(command, list) and command for command in commands), lane)
 
+    def test_focused_backend_runs_only_registered_package_tests(self):
+        checks = [
+            {"lane": "backend", "path": "internal/media/app/image_upload_test.go",
+             "test": "TestUploadActorScopedReplayConflictAndRollback"},
+            {"lane": "browser", "path": "cmd/aicrm/media_refresh_chromium_postgres_integration_test.go",
+             "test": "TestPostgreSQLMediaRefreshChromiumJourney"},
+        ]
+        commands = quality_lanes.focused_commands("backend", Path("/tmp/evidence"), checks)
+        self.assertEqual(len(commands), 1)
+        self.assertEqual(commands[0][-1], "./internal/media/app")
+        self.assertIn("-race", commands[0])
+        self.assertIn("-count=1", commands[0])
+        self.assertEqual(commands[0][commands[0].index("-run") + 1],
+                         "^(TestUploadActorScopedReplayConflictAndRollback)$")
+        self.assertNotIn("./...", commands[0])
+
+    def test_focused_browser_runs_only_the_registered_journey(self):
+        check = {"lane": "browser", "path": "cmd/aicrm/media_refresh_chromium_postgres_integration_test.go",
+                 "test": "TestPostgreSQLMediaRefreshChromiumJourney"}
+        command = quality_lanes.focused_commands("browser", Path("/tmp/evidence"), [check])[0]
+        self.assertIn("--journey", command)
+        self.assertIn(check["test"], command)
+        self.assertNotIn("--group", command)
+
+    def test_focused_frontend_runs_only_registered_scripts(self):
+        checks = [
+            {"lane": "frontend", "path": "web/scripts/ui-shell-contract.mjs"},
+            {"lane": "browser", "path": "cmd/aicrm/component_states_chromium_postgres_integration_test.go",
+             "test": "TestPostgreSQLComponentStatesChromiumJourney"},
+        ]
+        self.assertEqual(quality_lanes.focused_commands("frontend", Path("/tmp/evidence"), checks),
+                         [["node", "web/scripts/ui-shell-contract.mjs"]])
+
+    def test_unsupported_focused_mapping_falls_back_to_full_lane(self):
+        commands = quality_lanes.focused_commands(
+            "backend", Path("/tmp/evidence"),
+            [{"lane": "backend", "path": "internal/media/app/service.go", "test": "TestUnsafe.*"}],
+        )
+        self.assertIn("./...", commands[-1])
+
     def test_backend_keeps_full_race_coverage_with_bounded_package_timeout(self):
         commands = quality_lanes.commands("backend", Path("/tmp/evidence"))
         test_command = next(command for command in commands if "go" in command and "test" in command)

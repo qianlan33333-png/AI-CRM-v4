@@ -98,8 +98,8 @@ def main() -> int:
     if not requires_staging_receipt(current):
         print(json.dumps({"head": current, "staging": "not_applicable_to_non_runtime_change"}, separators=(",", ":")))
         return 0
-    if mode != "full":
-        raise SystemExit("runtime PR requires full code CI; staging is checked at release handoff")
+    if mode not in {"full", "targeted"}:
+        raise SystemExit("runtime PR requires selected code CI; staging is checked at release handoff")
     tree = subprocess.check_output(["git", "rev-parse", f"{current}^{{tree}}"], text=True).strip()
     # PR body links are author-controlled and never count as staging proof.
     # release_control handoff checks local preview/package/journey consistency;
