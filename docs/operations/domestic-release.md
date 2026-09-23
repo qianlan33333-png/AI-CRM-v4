@@ -14,7 +14,7 @@
 
 机器需 Ubuntu x86_64、与 `go.mod` 一致的 Go 1.26.6、Node 24.18.0、PostgreSQL 16、`rsync`、`pg_dump`，并为 Go/npm 配置持久缓存。数据库用合成数据，禁止从生产复制。2 核 2GB 先测完整基线及峰值；不足则扩到 4 核 8GB 后再启用自动生产。GitHub 源码拉取必须持续可用，且 `origin` 指向官方 GitHub 仓库。官方 API 读取 main SHA 与检查；不可用时停队列，不从未校验镜像自动发布。
 
-将独立源码库放在 `/opt/aicrm/source`，工作目录放在 `/opt/aicrm/domestic`，并由非 root 构建用户持有。配置示例为 [`deploy/domestic-release.example.json`](../../deploy/domestic-release.example.json)。固定的 `scripts/domestic_release.py`、`scripts/domestic_release_build.py` 放入 `/usr/local/libexec/aicrm/`，固定的 `deploy/domestic-promote.py` 以 root:root、0755 放在两台机器的同一路径。构建用户仅允许通过 sudo 调用该固定安装器；生产内网 SSH 使用专用密钥和经过核对的固定 Host Key，不关闭 Host Key 验证。`GITHUB_TOKEN` 如需提高 API 限额只给预备机检查查询使用，不能写入包。
+将独立源码库放在 `/opt/aicrm/source`，工作目录放在 `/opt/aicrm/domestic`，并由非 root 构建用户持有。配置示例为 [`deploy/domestic-release.example.json`](../../deploy/domestic-release.example.json)。固定的 `scripts/domestic_release.py`、`scripts/domestic_release_build.py` 放入 `/usr/local/libexec/aicrm/`，固定的 `deploy/domestic-promote.py` 以 root:root、0755 放在两台机器的同一路径。构建用户通过 sudo 调用固定安装器；当前预备/生产 SSH 账户 `ubuntu` 已有 sudo 权限，后续可收窄为专用部署账户。生产内网 SSH 使用专用密钥和经过核对的固定 Host Key，不关闭 Host Key 验证。`GITHUB_TOKEN` 如需提高 API 限额只给预备机检查查询使用，不能写入包。
 
 预备机安装同一完整目录到本机 `/opt/aicrm/current`，使用合成库验证受影响资源、服务和 `/readyz.release_sha`。首次预备机空环境会初始化合成库和服务单元；后续非迁移提交不运行迁移。生产接收区 `/opt/aicrm/domestic-incoming` 由传输账户持有；安装器在共享 `/opt/aicrm/install-release.lock` 下校验清单、当前 base SHA 与服务。迁移提交先做 `pg_dump -Fc` 备份，再运行迁移服务；非迁移提交跳过这两步。健康失败时切回上一版本并验证，数据库迁移保持前向兼容；若远程结果不明，状态置为 `outcome_unknown`，只读对账后人工明确结论，绝不盲目再次安装。
 

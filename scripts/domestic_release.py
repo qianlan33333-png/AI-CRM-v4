@@ -169,7 +169,7 @@ def copy_payload(config: dict, sha: str, payload: Path, metadata: Path, link_sha
     # Protected Linux hardlinks forbid the unprivileged receiver from linking
     # root-owned previous releases. Receive through the fixed sudo rsync path;
     # the installer still verifies every byte before making it current.
-    command("rsync", "-a", "--checksum", "--delete", "--rsync-path=sudo rsync", f"--link-dest=/opt/aicrm/releases/{link_sha}", "-e", transport, f"{payload}/", f"{config['prod_user']}@{config['prod_host']}:{incoming}/", timeout=600)
+    command("rsync", "-a", "--no-owner", "--no-group", "--no-perms", "--checksum", "--delete", "--rsync-path=sudo rsync", f"--link-dest=/opt/aicrm/releases/{link_sha}", "-e", transport, f"{payload}/", f"{config['prod_user']}@{config['prod_host']}:{incoming}/", timeout=600)
     command("rsync", "-a", "-e", transport, str(metadata), f"{config['prod_user']}@{config['prod_host']}:{remote_meta}", timeout=60)
     return incoming, remote_meta
 
