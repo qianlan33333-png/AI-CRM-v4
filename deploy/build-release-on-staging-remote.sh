@@ -2,6 +2,7 @@
 set -euo pipefail
 umask 022
 sha="${1:?sha}"; bundle="${2:?bundle}"; root="${3:?root}"; manifest="${4:?manifest}"
+attestation="${5:?attestation}"; signature="${6:?signature}"; verifier="${7:?verifier}"
 [[ "$sha" =~ ^[0-9a-f]{40}$ && "$root" == "/opt/aicrm/builds/$sha" ]] || exit 2
 exec 9>/opt/aicrm/staging-build.lock
 flock -x 9
@@ -9,8 +10,16 @@ flock -x 9
 [[ ! -e "$root" ]] || { echo 'build already exists; inspect or use a new candidate attempt' >&2; exit 3; }
 mirror=/opt/aicrm/source-mirror.git
 [[ -d "$mirror/objects" ]] || git init --bare "$mirror"
-git -C "$mirror" bundle verify "$bundle"
+# The verifier and its release_freshness.py companion are uploaded from the
+# reviewed local entry, not loaded from the untrusted candidate checkout.
+python3 "$verifier" --manifest "$manifest" --bundle "$bundle" \
+  --attestation "$attestation" --signature "$signature" \
+  --allowed-signers /opt/aicrm/release-allowed-signers --git-repository "$mirror"
 git -C "$mirror" fetch "$bundle" "$sha"
+python3 "$verifier" --manifest "$manifest" --bundle "$bundle" \
+  --attestation "$attestation" --signature "$signature" \
+  --allowed-signers /opt/aicrm/release-allowed-signers --git-repository "$mirror" --require-objects
+git -C "$mirror" update-ref "refs/candidates/$sha" "$sha"
 git clone --no-checkout "$mirror" "$root"
 git -C "$root" fetch "$mirror" "$sha"
 git -C "$root" checkout --detach "$sha"
@@ -28,6 +37,6 @@ python3 scripts/check-release-binaries.py release/bin
 python3 - "$root" "$sha" <<'PY'
 import hashlib,json,pathlib,subprocess,sys
 root=pathlib.Path(sys.argv[1]);sha=sys.argv[2];archive=root/('aicrm-'+sha+'.tar.gz');m=json.loads((root/'candidate-manifest.json').read_text())
-v={**m,'repository':'AI-CRM-v3','environment':'staging','status':'built','commit_sha':sha,'package_name':archive.name,'package_sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),'business_readback':'not run; build provenance only'}
+v={**m,'repository':'AI-CRM-v4','environment':'staging','status':'built','commit_sha':sha,'package_name':archive.name,'package_sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),'business_readback':'not run; build provenance only'}
 (root/'staging-receipt.json').write_text(json.dumps(v,indent=2)+'\n')
 PY

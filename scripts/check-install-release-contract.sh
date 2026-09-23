@@ -325,8 +325,9 @@ grep -qx 'if ! flock -w 15 9; then' "$installer" || { echo "installer must seria
 grep -qx 'release_run_number="${3:-}"' "$installer" || { echo "installer must accept the CI run number" >&2; exit 1; }
 grep -qF 'last_successful_run_file=/opt/aicrm/last-successful-run-number' "$installer" || { echo "installer must retain the successful CI run marker" >&2; exit 1; }
 grep -qF 'promote-staging-direct.sh' .github/workflows/ci.yml || grep -qF 'deploy/promote-staging-release.sh' .github/workflows/ci.yml || { echo "CI must promote through the reviewed staging gate" >&2; exit 1; }
-grep -qF 'AICRM_SOURCE_BUNDLE' deploy/build-release-on-staging.sh || { echo "staging builds must require a local v3 source bundle" >&2; exit 1; }
-grep -qF 'git bundle verify' deploy/build-release-on-staging.sh || { echo "staging builds must verify the source bundle" >&2; exit 1; }
+grep -qF 'AICRM_SOURCE_BUNDLE' deploy/build-release-on-staging.sh || { echo "staging builds must require a local v4 source bundle" >&2; exit 1; }
+grep -qF 'scripts/verify-staging-source.py --manifest' deploy/build-release-on-staging.sh || { echo "staging builds must verify signed source freshness" >&2; exit 1; }
+grep -qF '/opt/aicrm/release-allowed-signers' deploy/build-release-on-staging-remote.sh || { echo "staging must use pinned allowed signers" >&2; exit 1; }
 grep -qF 'staging-build.lock' deploy/build-release-on-staging-remote.sh && grep -qF 'flock -x' deploy/build-release-on-staging-remote.sh || { echo "staging builds must be single-flight" >&2; exit 1; }
 grep -qF 'deploy/build-release-on-staging-remote.sh' deploy/build-release-on-staging.sh || { echo "staging build must use the reviewed remote builder" >&2; exit 1; }
 if grep -qF 'git clone --filter=blob:none' deploy/build-release-on-staging.sh; then

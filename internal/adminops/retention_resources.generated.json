@@ -1,6 +1,6 @@
 {
   "registry_version": 1,
-  "registry_sha256": "e69b4658863d4fb0fcdf5549dc0238aa0189e7f13a4512d6ddd8dd3ef1a3dda2",
+  "registry_sha256": "d554b01632941b2bd83d5750c6eb7055cd65db13c5fa9b3af8dd5ac721e8d891",
   "inventory_scope": "committed_registry",
   "items": [
     {
@@ -6601,6 +6601,19 @@
       "policy": "never_delete_by_retention",
       "reason": "Explicit deployment control artifact; no generic deletion.",
       "source": "docs/governance/retention-registry.json#filesystem_prefixes//opt/aicrm/last-successful-run-number",
+      "cleanup_entrypoint": "",
+      "policy_id": "",
+      "coverage_status": "protected",
+      "gap_code": "",
+      "authorization_expiry": "not_assessed"
+    },
+    {
+      "kind": "filesystem_prefix",
+      "name": "/opt/aicrm/release-allowed-signers",
+      "owner": "release",
+      "policy": "never_delete_by_retention",
+      "reason": "Pinned public signing identities for offline staging source verification; release owner rotates it explicitly.",
+      "source": "docs/governance/retention-registry.json#filesystem_prefixes//opt/aicrm/release-allowed-signers",
       "cleanup_entrypoint": "",
       "policy_id": "",
       "coverage_status": "protected",

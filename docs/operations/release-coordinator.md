@@ -55,6 +55,13 @@ python3 scripts/release_freshness.py verify \
 
 签名、时效、字段、摘要或 bundle prerequisites 任一错误都拒绝。临时 SOCKS 只能用于一次性的只读 GitHub 核对，不能成为预发布长期依赖。
 
+`deploy/build-release-on-staging.sh` 要求 `AICRM_SOURCE_ATTESTATION`、
+`AICRM_SOURCE_SIGNATURE` 和本地 `AICRM_STAGING_ALLOWED_SIGNERS`。预发布机的
+`/opt/aicrm/release-allowed-signers` 由发布 Owner 事先固定并核对公钥指纹；构建脚本
+不能用环境变量覆盖远端信任锚。未配置公钥、签名过期或预发布 source mirror 缺少增量
+bundle 的 prerequisite 时，构建失败。指挥台须重新生成完整 bundle 并签发新证明，
+不能在传输中替换已签名的 bundle。
+
 ## 事件与通知
 
 `release_events.py` 使用 flock、原子替换、lease、退避和 dead letter。指挥代理显式执行 `show` → `claim` → Codex 消息工具 → `finish sent|failed`；接收任务处理后再 `ack`。`sent` 只说明消息已投递，不说明接收方处理或生产效果成功。接收方按 event ID 去重。

@@ -462,6 +462,12 @@
       "policy": "never_delete_by_retention",
       "reason": "Single-flight staging build lock; never treated as a retention candidate."
     },
+    "/opt/aicrm/release-allowed-signers": {
+      "owner": "release",
+      "scope": "exact",
+      "policy": "never_delete_by_retention",
+      "reason": "Pinned public signing identities for offline staging source verification; release owner rotates it explicitly."
+    },
     "/opt/aicrm/source-mirror.git": {
       "owner": "release",
       "scope": "subtree",
