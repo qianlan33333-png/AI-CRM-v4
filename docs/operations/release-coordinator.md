@@ -31,7 +31,7 @@ python3 scripts/release_control.py --state /secure/release/state.json \
   --coordinator-thread-id <thread-id> handoff checkpoint checkpoint.json
 ```
 
-`checkpoint.json` 包含 `candidate_id`、`work_item`、`origin_thread_id`、`owner_thread_id`、`branch`、`worktree`、`pr_url`、`commit_sha`、`tree_sha`、`base_main_sha`、`blocked_reason`、`required_action`、非空 `resubmit_conditions` 和 `evidence`。命令核对干净 worktree 与实时 PR base/head，并要求状态文件已存在；它在一次持久写入中记录 `blocked_development` 和待投递 `blocked` 事件。后续完整 handoff 使用新 candidate ID，经现有 validate/submit 成功后关闭同工作项的阻塞检查点。通知投递或 ack 均不能关闭检查点。
+`checkpoint.json` 包含 `candidate_id`、`work_item`、`origin_thread_id`、`owner_thread_id`、`branch`、`worktree`、`pr_url`、`commit_sha`、`tree_sha`、`base_main_sha`、`blocked_reason`、`required_action`、非空 `resubmit_conditions` 和 `evidence`。命令核对干净 worktree 与实时 PR base/head，并要求状态文件已存在；它在一次持久写入中记录 `blocked_development` 和待投递 `blocked` 事件。后续完整 handoff 使用新 candidate ID，并以 `supersedes_checkpoint_id` 显式引用活动检查点；系统核对同 PR/工作项和旧源码祖先，允许新任务接管。成功登记才关闭旧检查点。新提交仍受阻时，新 checkpoint 也显式引用旧检查点。通知投递或 ack 均不能关闭检查点。
 
 ## 公开 main 新鲜度证明
 

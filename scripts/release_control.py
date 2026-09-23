@@ -42,6 +42,9 @@ def verify_pr(value: dict) -> None:
 
 def validate_development_checkpoint(path: Path) -> dict:
     value = json.loads(path.read_text())
+    if 'supersedes_checkpoint_id' in value and (not isinstance(value['supersedes_checkpoint_id'], str)
+                                               or not value['supersedes_checkpoint_id'].strip()):
+        raise ValueError('supersedes_checkpoint_id must be a nonempty checkpoint ID')
     required = ('candidate_id', 'work_item', 'origin_thread_id', 'owner_thread_id',
                 'branch', 'worktree', 'pr_url', 'commit_sha', 'tree_sha', 'base_main_sha',
                 'blocked_reason', 'required_action')

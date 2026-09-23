@@ -10,6 +10,7 @@ import argparse
 import fcntl
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 
@@ -56,6 +57,24 @@ def register(state: dict, handoff: dict, candidate_id: str, coordinator_thread_i
         if prior["commit_sha"] == handoff["commit_sha"] and prior["tree_sha"] == handoff["tree_sha"] and prior["origin_thread_id"] == handoff["origin_thread_id"]:
             return
         raise ValueError(f"candidate id reused with different source: {candidate_id}")
+    active_checkpoints = [item for item in state["items"]
+                          if item.get("status") == "blocked_development"
+                          and item.get("work_item") == handoff["work_item"]
+                          and item.get("pr_url") == handoff["pr_url"]]
+    checkpoint_id = handoff.get("supersedes_checkpoint_id")
+    if active_checkpoints and not checkpoint_id:
+        raise ValueError("handoff must explicitly supersede the active development checkpoint")
+    checkpoint = None
+    if checkpoint_id:
+        checkpoint = next((item for item in active_checkpoints if item["candidate_id"] == checkpoint_id), None)
+        if checkpoint is None or len(active_checkpoints) != 1:
+            raise ValueError("superseded checkpoint is not the unique active checkpoint for this PR and work item")
+        if checkpoint["commit_sha"] != handoff["commit_sha"]:
+            result = subprocess.run(["git", "-C", handoff["worktree"], "merge-base", "--is-ancestor",
+                                     checkpoint["commit_sha"], handoff["commit_sha"]],
+                                    capture_output=True, text=True)
+            if result.returncode != 0:
+                raise ValueError("handoff source does not descend from checkpoint commit")
     state["items"].append({
         "schema": 1,
         "candidate_id": candidate_id,
@@ -73,13 +92,11 @@ def register(state: dict, handoff: dict, candidate_id: str, coordinator_thread_i
         "status": "handoff_ready",
         "events": [{"to": "handoff_ready", "time": now()}],
     })
-    for checkpoint in state["items"]:
-        if (checkpoint.get("status") == "blocked_development"
-                and checkpoint.get("work_item") == handoff["work_item"]
-                and checkpoint.get("origin_thread_id") == handoff["origin_thread_id"]):
-            checkpoint["events"].append({"from": "blocked_development", "to": "superseded_by_handoff",
-                                         "time": now(), "candidate_id": candidate_id})
-            checkpoint["status"] = "superseded_by_handoff"
+    if checkpoint:
+        checkpoint["events"].append({"from": "blocked_development", "to": "superseded_by_handoff",
+                                     "time": now(), "candidate_id": candidate_id,
+                                     "successor_thread_id": handoff["origin_thread_id"]})
+        checkpoint["status"] = "superseded_by_handoff"
     append(state, {"event_type": "handoff_ready", "origin_thread_id": handoff["origin_thread_id"],
                    "destination_thread_id": coordinator_thread_id, "candidate_id": candidate_id,
                    "commit_sha": handoff["commit_sha"], "tree_sha": handoff["tree_sha"],
@@ -111,15 +128,31 @@ def record_development_checkpoint(state: dict, value: dict, coordinator_thread_i
         "resubmit_conditions": list(value["resubmit_conditions"]),
         "evidence": list(value["evidence"]),
     }
+    if value.get("supersedes_checkpoint_id"):
+        item["supersedes_checkpoint_id"] = value["supersedes_checkpoint_id"]
     prior = next((entry for entry in state["items"] if entry.get("candidate_id") == value["candidate_id"]), None)
     if prior:
         if all(prior.get(key) == expected for key, expected in item.items()):
             return prior
         raise ValueError("checkpoint id reused with different payload or source")
-    if any(entry.get("work_item") == value["work_item"] and entry.get("origin_thread_id") == value["origin_thread_id"]
-           and entry.get("commit_sha") == value["commit_sha"] and entry.get("status") == "blocked_development"
-           for entry in state["items"]):
-        raise ValueError("current commit already has an active development checkpoint")
+    active = [entry for entry in state["items"] if entry.get("work_item") == value["work_item"]
+              and entry.get("pr_url") == value["pr_url"] and entry.get("status") == "blocked_development"]
+    if active:
+        if (len(active) != 1 or value.get("supersedes_checkpoint_id") != active[0]["candidate_id"]
+                or active[0]["commit_sha"] == value["commit_sha"]):
+            raise ValueError("new development checkpoint must explicitly supersede the unique prior checkpoint with a new commit")
+        result = subprocess.run(["git", "-C", value["worktree"], "merge-base", "--is-ancestor",
+                                 active[0]["commit_sha"], value["commit_sha"]],
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            raise ValueError("new checkpoint source does not descend from prior checkpoint commit")
+    elif value.get("supersedes_checkpoint_id"):
+        raise ValueError("superseded checkpoint is not active for this PR and work item")
+    if active:
+        active[0]["events"].append({"from": "blocked_development", "to": "superseded_by_checkpoint",
+                                    "time": now(), "candidate_id": value["candidate_id"],
+                                    "successor_thread_id": value["origin_thread_id"]})
+        active[0]["status"] = "superseded_by_checkpoint"
     item["events"] = [{"to": "blocked_development", "time": now()}]
     state["items"].append(item)
     append(state, {"event_type": "blocked", "origin_thread_id": value["origin_thread_id"],

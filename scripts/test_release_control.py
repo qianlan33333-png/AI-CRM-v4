@@ -37,14 +37,43 @@ class ControlTests(unittest.TestCase):
                 locked_state(state_path,lambda state: record_development_checkpoint(state,changed,'coordinator'),require_existing=True)
             self.assertEqual(json.loads(state_path.read_text())['items'][0]['blocked_reason'],'staging receipt missing')
             handoff={'change_class':'runtime','staging_acceptance':{'candidate_id':'accepted-pr13','receipt_sha256':'d'*64},
-                     'origin_thread_id':'origin','work_item':'group-invite-qr','branch':'codex/qr',
+                     'origin_thread_id':'successor-task','work_item':'group-invite-qr','branch':'codex/qr',
+                     'pr_url':'https://github.com/o/r/pull/13',
                      'commit_sha':'a'*40,'tree_sha':'b'*40,'candidate_tree_sha':'b'*40,
                      'base_main_sha':'c'*40,'merge_preview_sha':'e'*40,'package_sha256':'f'*64}
+            with self.assertRaisesRegex(ValueError,'explicitly supersede'):
+                locked_state(state_path,lambda state: register(state,handoff,'accepted-pr13','coordinator'),require_existing=True)
+            self.assertEqual(json.loads(state_path.read_text())['items'][0]['status'],'blocked_development')
+            wrong=dict(handoff,supersedes_checkpoint_id='unrelated')
+            with self.assertRaisesRegex(ValueError,'unique active checkpoint'):
+                locked_state(state_path,lambda state: register(state,wrong,'accepted-pr13','coordinator'),require_existing=True)
+            handoff['supersedes_checkpoint_id']='pr13-code-complete'
             locked_state(state_path,lambda state: register(state,handoff,'accepted-pr13','coordinator'),require_existing=True)
             state=json.loads(state_path.read_text())
             self.assertEqual(state['items'][0]['status'],'superseded_by_handoff')
+            self.assertEqual(state['items'][0]['events'][-1]['successor_thread_id'],'successor-task')
             self.assertEqual(state['items'][1]['status'],'handoff_ready')
             self.assertEqual(len(state['events']),2)
+    def test_checkpoint_cannot_be_closed_by_unrelated_pr_or_source(self):
+        state={'schema':2,'items':[],'events':[],'returns':[]}
+        value={'candidate_id':'old','work_item':'qr','origin_thread_id':'origin','owner_thread_id':'owner',
+               'branch':'codex/qr','pr_url':'https://github.com/o/r/pull/13',
+               'commit_sha':'a'*40,'tree_sha':'b'*40,'base_main_sha':'c'*40,
+               'blocked_reason':'receipt missing','required_action':'build preview',
+               'resubmit_conditions':['receipt'],'evidence':['PR']}
+        record_development_checkpoint(state,value,'coordinator')
+        handoff={'change_class':'runtime','staging_acceptance':{'candidate_id':'new'},
+                 'origin_thread_id':'successor','work_item':'qr','branch':'codex/qr',
+                 'pr_url':'https://github.com/o/r/pull/other','worktree':'/tmp/nonexistent',
+                 'commit_sha':'a'*40,'tree_sha':'b'*40,'candidate_tree_sha':'b'*40,
+                 'base_main_sha':'c'*40,'merge_preview_sha':'e'*40,'package_sha256':'f'*64,
+                 'supersedes_checkpoint_id':'old'}
+        with self.assertRaisesRegex(ValueError,'unique active checkpoint'):
+            register(state,handoff,'new','coordinator')
+        handoff['pr_url']=value['pr_url']; handoff['commit_sha']='d'*40
+        with self.assertRaisesRegex(ValueError,'does not descend'):
+            register(state,handoff,'new','coordinator')
+        self.assertEqual(state['items'][0]['status'],'blocked_development')
 
     def test_governance_only_handoff_uses_local_evidence_without_runtime_package(self):
         with tempfile.TemporaryDirectory() as tmp:

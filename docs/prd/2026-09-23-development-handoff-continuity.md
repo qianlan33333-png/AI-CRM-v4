@@ -16,8 +16,9 @@
 
 1. `handoff checkpoint <manifest.json>` 只接收当前 PR head 的干净 worktree，核对 tree、PR 仓库与实时 base/head；目标状态文件必须已存在。
 2. manifest 必填工作项、候选检查点 ID、原始任务、负责人、阻塞原因、后续动作、重试条件与证据。一次原子写同时新增 `blocked_development` 项和 `blocked` outbox 事件；重试相同输入幂等，不同来源复用 ID 报错。
-3. 后续 `handoff submit` 仍走现有完整验证；成功登记新候选时，将同工作项的开发检查点标为 `superseded_by_handoff`，保留旧事件。提交失败不得关闭检查点。新代码、新证据和新候选不能覆盖旧记录。
-4. 指挥台从持久状态发现未处理检查点，按 owner 和重试条件推进；通知仅提醒。任何 `sent` 或 `ack` 不改变业务状态。
+3. 后续 `handoff submit` 仍走现有完整验证；handoff 必须用 `supersedes_checkpoint_id` 显式引用唯一活动检查点，并核对同一 PR、工作项和旧提交的源码祖先关系。允许新的任务 ID 接续；成功登记新候选时标为 `superseded_by_handoff`，保留旧事件。提交失败不得关闭检查点。新代码、新证据和新候选不能覆盖旧记录。
+4. 新提交仍受阻时，新 checkpoint 也必须用 `supersedes_checkpoint_id` 显式接续同 PR/工作项的旧检查点，且源码是旧提交后代。旧检查点转为 `superseded_by_checkpoint`，新检查点继续阻塞。
+5. 指挥台从持久状态发现未处理检查点，按 owner 和重试条件推进；通知仅提醒。任何 `sent` 或 `ack` 不改变业务状态。
 
 ## 分类、权限与验收
 
