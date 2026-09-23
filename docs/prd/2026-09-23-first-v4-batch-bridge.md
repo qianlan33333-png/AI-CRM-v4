@@ -4,7 +4,7 @@
 
 旧生产候选 `6088e57ccf63b62dff46b4e1` 仍处于 `observing`，活跃 release 为 `4928f94e53a100ffab73132c0f096c4c4ff6e1d4`。旧仓 release 与 v4 orphan root `ef0d4a4d25fa79fad6b1043f7efca460daf56de6` 的 Git tree 都是 `9c788ee796a4bfecc229675bf4e539a16c749166`。这证明内容起点相同，不建立 Git 祖先关系，也不证明真实业务已验收。普通生产祖先校验必须保留；首个 v4 运行时批次只能经一次性、候选专属证据桥通过。
 
-拟议首包的 runtime 成员精确为共享 CI 基线 PR #15、支付宝入口 PR #3、群邀请换码 PR #13。PR #17 预发分槽治理若需要，可先并入 main 或作为独立治理祖先进入聚合 PR，不列作虚构 runtime 成员。最终成员、顺序及各 head/tree 均在冻结批次时实时读取 GitHub，本文不预填近期变化的 head。现有 PR #5 只服务 PR #3，不能作为本批次授权或复用其消费标记。PR #17 的预发并行规则不授权并行生产晋级。
+拟议首包的 runtime 成员精确为共享 CI 基线 PR #15、支付宝入口 PR #3、群邀请换码 PR #13。当前旧队列在生产 `observing` 时阻止新候选进入预发；PR #17 的预发分槽治理因此必须作为独立治理祖先进入聚合 PR，不列作虚构 runtime 成员。它允许单个预发候选 `preview_building/staging_acceptance`，仍阻断 `frozen/waiting_merge`；后者由本桥在 accepted receipt 后仅为精确首包一次性跨过。最终成员、顺序及各 head/tree 均在冻结批次时实时读取 GitHub，本文不预填近期变化的 head。现有 PR #5 只服务 PR #3，不能作为本批次授权或复用其消费标记。
 
 源 PR #3/#13 在当前 main 上的 required/full CI 会因 PR #15 尚未进入基线而失败；旧生产观察又使 #15 单独生产晋级受阻。因此由独立聚合候选任务通过普通、可审计的 Git merge 汇总最终源 heads，创建**一个聚合 PR**作为唯一受保护合并单元。桥只要求聚合 PR 当前 head 的 required `check` 与该 head 的完整云端 CI 为绿；源成员 PR 的失败保持原样，不冒充通过。聚合 PR 的 head/tree 必须等于批次 `aggregate_head_sha`/对应 tree，每个源成员仍独立保存原始 commit/tree、work item 和 receipt。聚合任务不修改本桥代码；本桥不修改其源码。
 
@@ -25,7 +25,7 @@ OneID：不涉及，桥不处理客户身份。Persistence：仅发布控制文�
 
 ## 输入、权限与状态
 
-桥接 manifest 由指挥台在批次冻结时生成，包含唯一 bridge ID、GitHub 仓库、旧/新基线、批次 manifest 摘要、聚合 PR URL/head/tree/完整 CI run、治理 PR #19 head/tree、成员 PR URL/head/tree、当前 main、联合 preview/tree、package SHA-256、accepted receipt 摘要、旧生产 receipt 与实时 readback 摘要、队列 owner、授权来源及失效时间。runtime 成员精确为 #15、#3、#13，不能默许额外成员。GitHub PR 必须 open、指向同一 v4 main，并按实时 REST head 校验。聚合 PR 的 GitHub protected required check 和完整 CI 所有 lane 必须对应当前 head 成功；源 PR 不要求单独绿灯。所有引用文件逐字节核 SHA-256；校验失败关闭。
+桥接 manifest 由指挥台在批次冻结时生成，包含唯一 bridge ID、GitHub 仓库、旧/新基线、批次 manifest 摘要、聚合 PR URL/head/tree/完整 CI run、治理 PR #19 与预发分槽 PR #17 的各自 head/tree、成员 PR URL/head/tree、当前 main、联合 preview/tree、package SHA-256、accepted receipt 摘要、旧生产 receipt 与实时 readback 摘要、队列 owner、授权来源及失效时间。#17/#19 都必须是聚合 head 祖先；runtime 成员精确为 #15、#3、#13，不能默许额外成员。GitHub PR 必须 open、指向同一 v4 main，并按实时 REST head 校验。聚合 PR 的 GitHub protected required check 和完整 CI 所有 lane 必须对应当前 head 成功；源 PR 不要求单独绿灯。所有引用文件逐字节核 SHA-256；校验失败关闭。
 
 用户在指挥台原始任务中已明确要求完成两项部署。桥记录该既有用户消息作为持续授权来源，不要求重复索取两条用户消息；指挥台在最终 candidate/package 可审查后分别记录精确入队与晋级 operator attestation，两者引用同一既有授权、各有唯一决定 ID。仅创建任务或批准 PRD 不等于证明任意包可晋级。首包入队不能改变旧观察状态；生产晋级须确认旧 active release 仍为原 SHA、旧观察仍在、没有另一生产占用者，并在网络写之前原子记录消费。任何 `outcome_unknown` 停止重试只读对账；消费记录不可删除或转移到另一 candidate。旧批次的延期业务项由原 Owner 后续补验，首包新增两项业务也分别验收。
 
