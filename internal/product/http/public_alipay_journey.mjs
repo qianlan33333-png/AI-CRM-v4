@@ -76,3 +76,23 @@ after.eval(after.document.querySelector('script:last-of-type').textContent);
 await settle();
 assert.equal(after.document.getElementById('buy').textContent, '已购买');
 assert.equal(reloadCalls.some(call => call.method === 'POST'), false, 'reload must not create another order');
+
+const desktop = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+Object.defineProperty(desktop.window.navigator, 'userAgent', {value: 'Mozilla/5.0'});
+const desktopCalls = [];
+desktop.window.fetch = async (url) => {
+  desktopCalls.push(String(url));
+  const body = url === '/api/v1/wechat-pay/checkout-session'
+    ? {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true}
+    : String(url).startsWith('/api/v1/wechat-pay/purchase-status')
+      ? {purchase_state: 'available', can_purchase: true}
+      : String(url).startsWith('/api/h5/coupons/available')
+        ? {items: [{claim_id: 31, name: '已领优惠券', discount_amount_minor: 100, currency: 'CNY'}]}
+        : assert.fail(`unexpected desktop request: ${url}`);
+  return {ok: true, status: 200, async json() {return body;}};
+};
+desktop.window.eval(desktop.window.document.querySelector('script:last-of-type').textContent);
+await settle();
+assert.equal(desktopCalls.some(url => url.startsWith('/api/h5/coupons/available')), true, 'Alipay desktop checkout reads claimed coupons');
+assert.match(desktop.window.document.getElementById('couponStatus').textContent, /已领取：已领优惠券/);
+assert.equal(desktop.window.document.getElementById('payableAmount').textContent, '¥8.90');
