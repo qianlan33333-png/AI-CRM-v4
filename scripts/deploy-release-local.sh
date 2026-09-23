@@ -14,15 +14,10 @@ environment="${DEPLOY_ENVIRONMENT:-staging}"
 [[ -f "$archive" && "$archive" == *"${sha}.tar.gz" ]] || { echo "archive/sha mismatch" >&2; exit 2; }
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid sha" >&2; exit 2; }
 python3 scripts/check-migration-sequence.py --base origin/main
-check_root="release"
-tmp_check=""
-if [[ ! -d "$check_root/bin" ]]; then
-  tmp_check="$(mktemp -d)"
-  trap 'rm -rf -- "$tmp_check"' EXIT
-  tar -xzf "$archive" -C "$tmp_check"
-  check_root="$tmp_check/release"
-fi
-python3 scripts/check-release-binaries.py "$check_root/bin"
+tmp_check="$(mktemp -d)"
+trap 'rm -rf -- "$tmp_check"' EXIT
+python3 scripts/release_archive_preflight.py "$archive" "$tmp_check"
+python3 scripts/check-release-binaries.py "$tmp_check/bin"
 chmod 600 "$key"
 ssh_flags=(-i "$key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known_hosts" -o ConnectTimeout=30)
 remote_archive="/tmp/aicrm-${sha}.tar.gz"
