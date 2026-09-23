@@ -183,6 +183,45 @@ class DomesticReleaseTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "current 5538 incident"):
                 installer.inspect_staging_retry(b"", "a" * 40, expected_sha="e" * 40, metadata_sha256="0" * 64)
 
+    def test_cached_artifact_verification_streams_release_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            release = Path(temporary) / "release"
+            (release / "bin").mkdir(parents=True)
+            (release / "web/dist").mkdir(parents=True)
+            (release / "bin/aicrm").write_bytes(b"x" * (4 * 1024 * 1024))
+            (release / "web/dist/index.html").write_text("<html></html>")
+            entries = []
+            for path in sorted(item for item in release.rglob("*") if item.is_file()):
+                entries.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(release).as_posix()}\n")
+            manifest = release / "release-files.sha256"
+            manifest.write_text("".join(entries))
+            metadata = {"release_files_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest()}
+            original_read_bytes = Path.read_bytes
+
+            def reject_artifact_read_bytes(path):
+                if path.is_relative_to(release):
+                    raise AssertionError("cached release files must be hashed in chunks")
+                return original_read_bytes(path)
+
+            with mock.patch.object(Path, "read_bytes", reject_artifact_read_bytes):
+                worker.verify_release_artifact(release, metadata)
+
+    def test_stage_retry_metadata_is_owned_private_and_revalidated(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            incoming = Path(temporary) / "incoming"
+            incoming.mkdir()
+            config = {"stage_incoming": str(incoming)}
+            sha = worker.STAGING_RETRY_SHA
+            content = b'{"source_sha":"' + sha.encode() + b'"}\n'
+            path = worker.stage_retry_metadata_path(config, sha, content)
+            info = path.stat()
+            self.assertEqual(info.st_uid, os.geteuid())
+            self.assertEqual(info.st_mode & 0o777, 0o600)
+            self.assertEqual(worker.stage_retry_metadata_path(config, sha, content), path)
+            path.chmod(0o644)
+            with self.assertRaisesRegex(RuntimeError, "metadata path is unsafe"):
+                worker.stage_retry_metadata_path(config, sha, content)
+
     def staging_retry_fixture(self, root):
         old_sha, target_sha, tree = "a" * 40, worker.STAGING_RETRY_SHA, "d" * 40
         repo = root / "repo"

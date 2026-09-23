@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -68,6 +69,14 @@ def command(*args: str, cwd: Path | None = None, timeout: int = 600) -> str:
 
 def git(repo: Path, *args: str) -> str:
     return command("git", "-C", str(repo), *args)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def require_official_origin(repo: Path) -> None:
@@ -324,7 +333,7 @@ def verify_release_artifact(release: Path, metadata: dict) -> None:
     if release.is_symlink() or not release.is_dir():
         raise RuntimeError("cached release artifact is missing or unsafe")
     manifest = release / "release-files.sha256"
-    if manifest.is_symlink() or not manifest.is_file() or hashlib.sha256(manifest.read_bytes()).hexdigest() != metadata.get("release_files_sha256"):
+    if manifest.is_symlink() or not manifest.is_file() or sha256_file(manifest) != metadata.get("release_files_sha256"):
         raise RuntimeError("cached release manifest does not match metadata")
     entries: dict[str, str] = {}
     for line in manifest.read_text().splitlines():
@@ -343,7 +352,7 @@ def verify_release_artifact(release: Path, metadata: dict) -> None:
         if path.is_file() and path != manifest:
             name = path.relative_to(release).as_posix()
             actual.add(name)
-            if entries.get(name) != hashlib.sha256(path.read_bytes()).hexdigest():
+            if entries.get(name) != sha256_file(path):
                 raise RuntimeError("cached release file digest mismatch")
     if actual != set(entries):
         raise RuntimeError("cached release file set mismatch")
@@ -354,27 +363,39 @@ def stage_retry_metadata_path(config: dict, sha: str, metadata_bytes: bytes) -> 
     if incoming_root.is_symlink() or not incoming_root.is_dir():
         raise RuntimeError("staging incoming root is missing or unsafe")
     target = incoming_root / f"{sha}.json"
+
+    def validate_existing() -> Path:
+        info = target.lstat()
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or target.read_bytes() != metadata_bytes
+        ):
+            raise RuntimeError("staging retry metadata path is unsafe")
+        return target
+
     if target.is_symlink():
         raise RuntimeError("staging retry metadata path is unsafe")
     if target.exists():
-        if not target.is_file() or target.read_bytes() != metadata_bytes:
-            raise RuntimeError("staging retry metadata already exists with different content")
-        return target
+        return validate_existing()
     try:
         descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
-        if target.is_symlink() or not target.is_file() or target.read_bytes() != metadata_bytes:
-            raise RuntimeError("staging retry metadata changed concurrently")
-        return target
+        return validate_existing()
     try:
         with os.fdopen(descriptor, "wb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+                raise RuntimeError("staging retry metadata file ownership is unsafe")
+            os.fchmod(stream.fileno(), 0o600)
             stream.write(metadata_bytes)
             stream.flush()
             os.fsync(stream.fileno())
+        return validate_existing()
     except Exception:
         target.unlink(missing_ok=True)
         raise
-    return target
 
 
 def call_stage_retry_inspector(config: dict, metadata_path: Path, sha: str, metadata_sha: str, base_sha: str) -> dict:
@@ -641,7 +662,7 @@ def recover(config: dict, *, retry_blocked: bool, expected_sha: str) -> dict:
         if metadata["migrations_changed"]:
             raise RuntimeError("automatic orphan recovery is disabled for migration releases")
         manifest_path = release_path / "release-files.sha256"
-        manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+        manifest_sha = sha256_file(manifest_path)
         if manifest_sha != metadata.get("release_files_sha256"):
             raise RuntimeError("stage package manifest differs from its metadata")
         stage = stage_readback(sha)
