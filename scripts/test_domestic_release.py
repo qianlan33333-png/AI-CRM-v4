@@ -109,7 +109,7 @@ class DomesticReleaseTest(unittest.TestCase):
             cfg = {"repo": str(root), "work_root": str(root), "state": str(state), "production_enabled": True, "prod_key": "key", "prod_known_hosts": "hosts", "prod_user": "ubuntu", "prod_host": "127.0.0.1", "prod_helper": "/fixed/helper"}
             metadatas = [{"source_sha": sha, "release_files_sha256": "f" * 64} for sha in (sha1, sha2)]
             command_results = [json.dumps({"runtime_changed": True}), json.dumps({**metadatas[0], "technical_status": "installed_healthy", "manifest_sha256": "f" * 64}), json.dumps({"runtime_changed": True}), json.dumps({**metadatas[1], "technical_status": "installed_healthy", "manifest_sha256": "f" * 64})]
-            readbacks = [{"release_env": f"AICRM_RELEASE_SHA={sha}\n", "readyz": {"release_sha": sha, "status": "ready"}} for sha in (sha1, sha2)]
+            readbacks = [{"current": f"/opt/aicrm/releases/{sha}", "release_env": f"AICRM_RELEASE_SHA={sha}\n", "manifest_sha256": "f" * 64, "readyz": {"release_sha": sha, "status": "ready"}, "services": {unit: {"active": True, "pid": 1} for unit in ("aicrm.service", "aicrm-effects-worker.service")}} for sha in (sha1, sha2)]
             def fake_git(_repo, *args):
                 if args[0] == "rev-parse":
                     return sha2
@@ -121,6 +121,15 @@ class DomesticReleaseTest(unittest.TestCase):
             self.assertEqual([call.args[3] for call in stage.call_args_list], [sha0, sha1])
             self.assertEqual([call.args[4] for call in transfer.call_args_list], [sha0, sha1])
             self.assertEqual(json.loads(state.read_text())["processed_sha"], sha2)
+
+    def test_readback_rejects_wrong_manifest_and_stopped_service(self):
+        sha = "a" * 40
+        readback = {"current": f"/opt/aicrm/releases/{sha}", "release_env": f"AICRM_RELEASE_SHA={sha}\n", "manifest_sha256": "b" * 64, "readyz": {"release_sha": sha, "status": "ready"}, "services": {unit: {"active": True, "pid": 12} for unit in ("aicrm.service", "aicrm-effects-worker.service")}}
+        with self.assertRaisesRegex(RuntimeError, "manifest digest mismatch"):
+            worker.verify_readback(readback, sha, "c" * 64)
+        readback["services"]["aicrm-effects-worker.service"]["active"] = False
+        with self.assertRaisesRegex(RuntimeError, "service not active"):
+            worker.verify_readback(readback, sha, "b" * 64)
 
     def test_health_failure_switches_back(self):
         with tempfile.TemporaryDirectory() as temp:

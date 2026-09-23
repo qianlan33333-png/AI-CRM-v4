@@ -23,6 +23,22 @@ import urllib.request
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 REPO = "qianlan33333-png/AI-CRM-v4"
+HOST_READBACK_CODE = """
+import hashlib, json, pathlib, subprocess, urllib.request
+p = pathlib.Path('/opt/aicrm/current').resolve(strict=True)
+units = {}
+for name in ('aicrm.service', 'aicrm-effects-worker.service'):
+    active = subprocess.run(('systemctl', 'is-active', '--quiet', name)).returncode == 0
+    pid = subprocess.check_output(('systemctl', 'show', name, '-p', 'MainPID', '--value'), text=True).strip()
+    units[name] = {'active': active, 'pid': int(pid) if pid.isdigit() else 0}
+print(json.dumps({
+    'current': str(p),
+    'release_env': (p / 'release.env').read_text(),
+    'manifest_sha256': hashlib.sha256((p / 'release-files.sha256').read_bytes()).hexdigest(),
+    'readyz': json.load(urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)),
+    'services': units,
+}))
+"""
 
 
 def command(*args: str, cwd: Path | None = None, timeout: int = 600) -> str:
@@ -118,8 +134,11 @@ def ssh_args(config: dict) -> list[str]:
 
 def prod_readback(config: dict) -> dict:
     # Entirely read-only. Also used after a result-unknown SSH interruption.
-    code = "import json,pathlib,urllib.request; p=pathlib.Path('/opt/aicrm/current'); print(json.dumps({'current':str(p.resolve()),'release_env':(p/'release.env').read_text(),'readyz':json.load(urllib.request.urlopen('http://127.0.0.1:8080/readyz',timeout=3))}))"
-    return json.loads(command(*ssh_args(config), "python3 -c " + shlex.quote(code), timeout=30))
+    return json.loads(command(*ssh_args(config), "python3 -c " + shlex.quote(HOST_READBACK_CODE), timeout=30))
+
+
+def stage_readback() -> dict:
+    return json.loads(command("python3", "-c", HOST_READBACK_CODE, timeout=30))
 
 
 def bind_baseline(config: dict, prod_preview_sha: str) -> dict:
@@ -153,9 +172,17 @@ def bind_baseline(config: dict, prod_preview_sha: str) -> dict:
     return state
 
 
-def verify_readback(data: dict, sha: str) -> None:
+def verify_readback(data: dict, sha: str, manifest_sha256: str | None = None) -> None:
     if data.get("release_env") != f"AICRM_RELEASE_SHA={sha}\n" or data.get("readyz", {}).get("release_sha") != sha or data.get("readyz", {}).get("status") != "ready":
         raise RuntimeError("production version or readyz mismatch")
+    if data.get("current") != f"/opt/aicrm/releases/{sha}":
+        raise RuntimeError("installed release directory mismatch")
+    if manifest_sha256 is not None and data.get("manifest_sha256") != manifest_sha256:
+        raise RuntimeError("installed manifest digest mismatch")
+    services = data.get("services", {})
+    for unit in ("aicrm.service", "aicrm-effects-worker.service"):
+        if services.get(unit, {}).get("active") is not True or services[unit].get("pid", 0) <= 0:
+            raise RuntimeError(f"installed service not active: {unit}")
 
 
 def copy_payload(config: dict, sha: str, payload: Path, metadata: Path, link_sha: str) -> tuple[str, str]:
@@ -209,6 +236,8 @@ def stage_install(config: dict, sha: str, out: Path, base_sha: str) -> dict:
     receipt = json.loads(result.splitlines()[-1])
     if receipt.get("source_sha") != sha or receipt.get("technical_status") != "installed_healthy":
         raise RuntimeError("staging install receipt mismatch")
+    expected_manifest = json.loads((out / "domestic-release.json").read_text())["release_files_sha256"]
+    verify_readback(stage_readback(), sha, expected_manifest)
     return receipt
 
 
@@ -269,7 +298,7 @@ def poll(config: dict) -> dict:
             try:
                 result = command(*ssh_args(config), "sudo", config["prod_helper"], "--incoming", incoming, "--metadata", remote_meta, "--expected-base", installed, timeout=300)
                 receipt = json.loads(result.splitlines()[-1])
-                verify_readback(prod_readback(config), sha)
+                verify_readback(prod_readback(config), sha, metadata["release_files_sha256"])
                 if receipt.get("source_sha") != sha or receipt.get("manifest_sha256") != metadata["release_files_sha256"]:
                     raise RuntimeError("production receipt mismatch")
             except Exception as exc:
