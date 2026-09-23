@@ -60,7 +60,8 @@ def queue_update(queue_file, candidate_id, token, generation, operation):
         return result
 
 def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_file,known_hosts_file,
-            attempt_file,deploy_script,staging_node_id=Path('/opt/aicrm/staging-node-id.json'),readback=ssh_readback,deploy=None):
+            attempt_file,deploy_script,staging_node_id=Path('/opt/aicrm/staging-node-id.json'),readback=ssh_readback,deploy=None,
+            bootstrap=None):
     reviewed = Path(__file__).resolve().with_name('deploy-release-local.sh')
     if deploy is None and Path(deploy_script).resolve() != reviewed:
         raise ValueError('only reviewed scripts/deploy-release-local.sh may install production package')
@@ -94,7 +95,7 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
                 save(attempt_file,previous)
                 return previous
             raise ValueError('existing attempt status cannot be retried')
-        prepared=prepare_promote(handoff_path,queue_file,merged_main,production_sha)
+        prepared=prepare_promote(handoff_path,queue_file,merged_main,production_sha,bootstrap)
         receipt_path=Path(handoff['staging_acceptance']['receipt'])
         if not receipt_path.is_absolute(): receipt_path=handoff_path.parent/receipt_path
         accepted=json.loads(receipt_path.read_text())
@@ -118,7 +119,10 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
             def reserve(queue,reservation):
                 if reservation.exists(): raise ValueError('promotion reservation already exists')
                 owned=[i for i in queue['items'] if i.get('candidate_id')==cid]
-                other=[i for i in queue['items'] if i.get('status') in ACTIVE and i.get('candidate_id')!=cid]
+                bridge=prepared.get('bootstrap_bridge')
+                other=[i for i in queue['items'] if i.get('status') in ACTIVE and i.get('candidate_id')!=cid
+                       and not (bridge and i.get('candidate_id')==bridge['legacy_candidate_id']
+                                and i.get('status')=='observing' and i.get('repair_candidate_id')==cid)]
                 if len(owned)!=1 or owned[0]['status']!='waiting_merge' or other: raise ValueError('queue owner changed')
                 save(reservation,{'candidate_id':cid,'token':token,'generation':generation,'created_at':int(time.time())})
                 change(queue,'transition',candidate_id=cid,status='merged')
@@ -127,6 +131,7 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
             attempt={'candidate_id':cid,'merged_main_sha':merged_main,'merge_preview_sha':handoff['merge_preview_sha'],
                      'candidate_tree_sha':prepared['candidate_tree_sha'],'package_sha256':prepared['package_sha256'],
                      'previous_active_sha':production_sha,'status':'attempting','attempt_id':str(uuid.uuid4()),
+                     'bootstrap_bridge':prepared.get('bootstrap_bridge'),
                      'business_acceptance_status':handoff.get('business_acceptance',{}).get('status','accepted'),
                      'unverified_business_journeys':handoff.get('business_acceptance',{}).get('unverified_business_journeys',[]),
                      'started_at':int(time.time())}
@@ -174,9 +179,10 @@ def main():
         p.add_argument('--'+name,required=True,type=Path)
     for name in ('merged-main','production-sha','host','user'):
         p.add_argument('--'+name,required=True)
+    p.add_argument('--bootstrap',type=Path)
     a=p.parse_args()
     result=promote(handoff_path=a.handoff,queue_file=a.queue,merged_main=a.merged_main,
-        production_sha=a.production_sha,host=a.host,user=a.user,key_file=a.key,
+        production_sha=a.production_sha,host=a.host,user=a.user,key_file=a.key,bootstrap=a.bootstrap,
         known_hosts_file=a.known_hosts,attempt_file=a.attempt_file,deploy_script=a.deploy_script)
     print(json.dumps(result,ensure_ascii=False,indent=2))
 if __name__=='__main__':main()

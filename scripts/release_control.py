@@ -55,7 +55,8 @@ def preview(root: Path, branch: str, base: str, output: Path) -> dict:
     with output.open('x') as handle: json.dump(manifest, handle, indent=2); handle.write('\n')
     return manifest
 
-def verify_lineage(root: Path, base: str, production_sha: str, preview_sha: str, head: str | None = None) -> dict:
+def verify_lineage(root: Path, base: str, production_sha: str, preview_sha: str, head: str | None = None,
+                   bootstrap: Path | None = None, queue_path: Path | None = None) -> dict:
     live_main = git(root, 'rev-parse', 'refs/remotes/origin/main')
     if live_main != base: raise ValueError('stale candidate: origin/main moved')
     if live_remote_main(root) != base: raise ValueError('stale candidate: remote main moved')
@@ -63,11 +64,24 @@ def verify_lineage(root: Path, base: str, production_sha: str, preview_sha: str,
     if len(parents) != 2 or parents[0] != base: raise ValueError('preview does not merge current main')
     if head and parents[1] != head: raise ValueError('preview PR head mismatch')
     proc = subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', production_sha, preview_sha])
-    if proc.returncode != 0: raise ValueError('candidate excludes active production SHA')
+    bridge = None
+    if proc.returncode != 0:
+        if not bootstrap or not queue_path or not head:
+            raise ValueError('candidate excludes active production SHA')
+        from release_bootstrap import validate_bootstrap
+        record = json.loads(bootstrap.read_text()); candidate = record.get('candidate') or {}
+        if production_sha != record.get('legacy', {}).get('release_sha'):
+            raise ValueError('bootstrap active production SHA mismatch')
+        bridge = validate_bootstrap(bootstrap, root=root, base=base, head=head, preview=preview_sha,
+                                    tree=git(root, 'rev-parse', preview_sha + '^{tree}'),
+                                    package=candidate.get('package_sha256'), candidate_id=candidate.get('candidate_id'),
+                                    queue=json.loads(queue_path.read_text()), phase='admission')
     if head and git(root, 'rev-parse', 'HEAD') != head: raise ValueError('PR head moved')
-    return {'valid': True, 'base_main_sha': base, 'production_sha': production_sha, 'merge_preview_sha': preview_sha, 'pr_head_sha': head}
+    return {'valid': True, 'base_main_sha': base, 'production_sha': production_sha,
+            'merge_preview_sha': preview_sha, 'pr_head_sha': head, 'bootstrap_bridge': bridge}
 
-def prepare_promote(handoff_path: Path, queue_path: Path, merged_main: str, production_sha: str) -> dict:
+def prepare_promote(handoff_path: Path, queue_path: Path, merged_main: str, production_sha: str,
+                    bootstrap: Path | None = None) -> dict:
     value = json.loads(handoff_path.read_text()); root = Path(value['worktree'])
     if 'members' in value:
         if value.get('business_acceptance',{}).get('status')=='business_acceptance_deferred_to_user':
@@ -87,20 +101,31 @@ def prepare_promote(handoff_path: Path, queue_path: Path, merged_main: str, prod
         raise ValueError('merged main tree differs from accepted package tree')
     parents = git(root, 'rev-list', '--parents', '-n', '1', value['merge_preview_sha']).split()[1:]
     if parents != [value['base_main_sha'], value['commit_sha']]: raise ValueError('invalid merge preview parents')
-    if subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', production_sha, value['merge_preview_sha']]).returncode:
-        raise ValueError('candidate excludes active production SHA')
     queue = json.loads(queue_path.read_text())
     cid = value['staging_acceptance']['candidate_id']
+    bridge = None
+    if subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', production_sha, value['merge_preview_sha']]).returncode:
+        if not bootstrap:
+            raise ValueError('candidate excludes active production SHA')
+        from release_bootstrap import validate_bootstrap
+        if production_sha != json.loads(bootstrap.read_text()).get('legacy', {}).get('release_sha'):
+            raise ValueError('bootstrap active production SHA mismatch')
+        bridge = validate_bootstrap(bootstrap, root=root, base=value['base_main_sha'], head=value['commit_sha'],
+                                    preview=value['merge_preview_sha'], tree=value['candidate_tree_sha'],
+                                    package=value['package_sha256'], candidate_id=cid, queue=queue, phase='promotion',
+                                    accepted_receipt_sha256=value['staging_acceptance']['receipt_sha256'],
+                                    merged_main_sha=merged_main)
     owned = [i for i in queue.get('items', []) if i.get('candidate_id') == cid]
     active = [i for i in queue.get('items', []) if i.get('status') in {'preview_building', 'staging_acceptance', 'frozen', 'waiting_merge', 'merged', 'production', 'observing'}]
-    if len(owned) != 1 or owned[0].get('status') != 'waiting_merge' or active != owned:
+    allowed_active = owned + ([i for i in active if i.get('candidate_id') == bridge['legacy_candidate_id']] if bridge else [])
+    if len(owned) != 1 or owned[0].get('status') != 'waiting_merge' or len(active) != len(allowed_active):
         raise ValueError('candidate does not exclusively own waiting_merge queue slot')
     if owned[0].get('tree_sha', owned[0].get('candidate_tree_sha')) != value['candidate_tree_sha'] or owned[0].get('package_sha256') != value['package_sha256']:
         raise ValueError('queue candidate tree/package differs from accepted receipt')
     return {'prepared': True, 'candidate_id': cid, 'merged_main_sha': merged_main,
             'candidate_tree_sha': value['candidate_tree_sha'], 'package_sha256': value['package_sha256'],
             'business_acceptance_status': value.get('business_acceptance',{}).get('status','accepted'),
-            'deployment_adapter': 'guarded_staging_same_package_v1'}
+            'deployment_adapter': 'guarded_staging_same_package_v1', 'bootstrap_bridge': bridge}
 
 def main():
     parser = argparse.ArgumentParser(); parser.add_argument('--state', type=Path, default=Path('release-coordinator/state.json')); parser.add_argument('--coordinator-thread-id', default=os.environ.get('AICRM_RELEASE_COORDINATOR_THREAD_ID','release-command-center'))
@@ -114,10 +139,10 @@ def main():
     p = sub.add_parser('release'); release = p.add_subparsers(dest='action', required=True)
     p = release.add_parser('candidate-preview'); p.add_argument('worktree', type=Path); p.add_argument('branch'); p.add_argument('base_main_sha'); p.add_argument('output', type=Path)
     p = release.add_parser('accept-staging'); p.add_argument('handoff', type=Path)
-    p = release.add_parser('verify-lineage'); p.add_argument('worktree', type=Path); p.add_argument('base_main_sha'); p.add_argument('production_sha'); p.add_argument('merge_preview_sha'); p.add_argument('--head-sha')
+    p = release.add_parser('verify-lineage'); p.add_argument('worktree', type=Path); p.add_argument('base_main_sha'); p.add_argument('production_sha'); p.add_argument('merge_preview_sha'); p.add_argument('--head-sha'); p.add_argument('--bootstrap',type=Path); p.add_argument('--queue',type=Path)
     p = release.add_parser('return'); p.add_argument('candidate_id'); p.add_argument('failure_class'); p.add_argument('--evidence', action='append', required=True); p.add_argument('--action', dest='required_action', required=True); p.add_argument('--condition', action='append', required=True)
     p = release.add_parser('replay-event'); p.add_argument('event_id')
-    p = release.add_parser('promote'); p.add_argument('--prepare', action='store_true'); p.add_argument('--execute', action='store_true'); p.add_argument('--handoff', type=Path); p.add_argument('--queue', type=Path); p.add_argument('--merged-main-sha'); p.add_argument('--production-sha'); p.add_argument('--host'); p.add_argument('--user',default='ubuntu'); p.add_argument('--key',type=Path); p.add_argument('--known-hosts',type=Path); p.add_argument('--attempt-file',type=Path); p.add_argument('--deploy-script',type=Path); p.add_argument('--staging-node-id',type=Path,default=Path('/opt/aicrm/staging-node-id.json'))
+    p = release.add_parser('promote'); p.add_argument('--prepare', action='store_true'); p.add_argument('--execute', action='store_true'); p.add_argument('--handoff', type=Path); p.add_argument('--queue', type=Path); p.add_argument('--merged-main-sha'); p.add_argument('--production-sha'); p.add_argument('--bootstrap',type=Path); p.add_argument('--host'); p.add_argument('--user',default='ubuntu'); p.add_argument('--key',type=Path); p.add_argument('--known-hosts',type=Path); p.add_argument('--attempt-file',type=Path); p.add_argument('--deploy-script',type=Path); p.add_argument('--staging-node-id',type=Path,default=Path('/opt/aicrm/staging-node-id.json'))
     args = parser.parse_args()
     if args.command == 'handoff':
         if args.action in {'submit-batch','submit-deferred-batch'}:
@@ -161,14 +186,14 @@ def main():
     elif args.action == 'accept-staging':
         value = validate(args.handoff)
         result = {'accepted': True, 'work_item': value['work_item'], 'candidate_tree_sha': value['candidate_tree_sha'], 'package_sha256': value['package_sha256'], 'receipt_sha256': value['staging_acceptance']['receipt_sha256']}
-    elif args.action == 'verify-lineage': result = verify_lineage(args.worktree, args.base_main_sha, args.production_sha, args.merge_preview_sha, args.head_sha)
+    elif args.action == 'verify-lineage': result = verify_lineage(args.worktree, args.base_main_sha, args.production_sha, args.merge_preview_sha, args.head_sha, args.bootstrap, args.queue)
     elif args.action == 'return': result = locked_state(args.state, lambda state: return_to_origin(state, args.candidate_id, args.failure_class, args.evidence, args.required_action, args.condition))
     elif args.action == 'replay-event': result = locked_state(args.state, lambda state: replay(state, args.event_id))
     elif args.action == 'promote':
         if args.prepare == args.execute: raise SystemExit('choose exactly one of --prepare or --execute')
         if not all((args.handoff, args.queue, args.merged_main_sha, args.production_sha)):
             raise SystemExit('prepare requires --handoff --queue --merged-main-sha --production-sha')
-        if args.prepare: result = prepare_promote(args.handoff, args.queue, args.merged_main_sha, args.production_sha)
+        if args.prepare: result = prepare_promote(args.handoff, args.queue, args.merged_main_sha, args.production_sha, args.bootstrap)
         else:
             if not all((args.host, args.key, args.known_hosts, args.attempt_file, args.deploy_script)):
                 raise SystemExit('execute requires --host --key --known-hosts --attempt-file --deploy-script')
@@ -176,7 +201,7 @@ def main():
             result = promote(handoff_path=args.handoff,queue_file=args.queue,merged_main=args.merged_main_sha,
                              production_sha=args.production_sha,host=args.host,user=args.user,key_file=args.key,
                              known_hosts_file=args.known_hosts,attempt_file=args.attempt_file,deploy_script=args.deploy_script,
-                             staging_node_id=args.staging_node_id)
+                             staging_node_id=args.staging_node_id,bootstrap=args.bootstrap)
     else: raise ValueError('unsupported command')
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

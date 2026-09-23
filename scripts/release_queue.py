@@ -33,13 +33,19 @@ def change(queue, command, manifest=None, candidate_id=None, status=None, main=N
     if item is None:
         raise ValueError('candidate not found')
     old = item['status']
+    if status == 'released' and item.get('bootstrap_exception_id'):
+        raise ValueError('bootstrap repair requires separate real-business acceptance reconciliation')
     if status == 'stale_candidate':
         if old in {'merged', 'production', 'observing', 'released'}:
             raise ValueError('merged candidate cannot be invalidated')
     elif old not in ORDER or ORDER.index(old) + 1 >= len(ORDER) or ORDER[ORDER.index(old)+1] != status:
         raise ValueError(f'invalid transition: {old} -> {status}')
     if status in ACTIVE:
-        if any(i['status'] in ACTIVE and i is not item for i in items):
+        allowed_legacy = item.get('bootstrap_exception_id') == 'first-v4-alipay-entry-repair-v1'
+        if any(i['status'] in ACTIVE and i is not item and not
+               (allowed_legacy and i.get('candidate_id') == '6088e57ccf63b62dff46b4e1'
+                and i.get('status') == 'observing' and i.get('repair_candidate_id') == candidate_id)
+               for i in items):
             raise ValueError('another candidate owns the release queue')
         if status == 'preview_building' and next(i for i in items if i['status'] == ORDER[0]) is not item:
             raise ValueError('candidate is not at queue head')
@@ -54,7 +60,7 @@ def main():
     p.add_argument('--file', type=Path, default=Path('/opt/aicrm/release-queue.json'))
     commands = p.add_subparsers(dest='command', required=True)
     c = commands.add_parser('enqueue'); c.add_argument('manifest', type=Path)
-    c = commands.add_parser('adopt-accepted'); c.add_argument('receipt', type=Path)
+    c = commands.add_parser('adopt-accepted'); c.add_argument('receipt', type=Path); c.add_argument('--bootstrap',type=Path); c.add_argument('--worktree',type=Path)
     c = commands.add_parser('transition'); c.add_argument('candidate_id'); c.add_argument('status'); c.add_argument('--main')
     commands.add_parser('show')
     a = p.parse_args()
@@ -69,7 +75,37 @@ def main():
         if a.command == 'adopt-accepted':
             value = json.loads(a.receipt.read_text())
             if value.get('status') != 'accepted': raise ValueError('accepted receipt required')
+            bridge = None
+            active = [i for i in queue['items'] if i.get('status') in ACTIVE]
+            if a.bootstrap:
+                if not a.worktree: raise ValueError('bootstrap requires worktree')
+                from release_bootstrap import validate_bootstrap
+                from release_control import verify_pr
+                from release_handoff import git, live_remote_main
+                import hashlib
+                record=json.loads(a.bootstrap.read_text()); c=record['candidate']
+                if live_remote_main(a.worktree)!=c['base_main_sha'] or git(a.worktree,'rev-parse','HEAD')!=c['head_sha']:
+                    raise ValueError('bootstrap main or head moved')
+                bridge=validate_bootstrap(a.bootstrap,root=a.worktree,base=c['base_main_sha'],head=c['head_sha'],
+                    preview=c['preview_sha'],tree=c['tree_sha'],package=c['package_sha256'],
+                    candidate_id=c['candidate_id'],queue=queue,phase='admission',
+                    accepted_receipt_sha256=hashlib.sha256(a.receipt.read_bytes()).hexdigest())
+                verify_pr({'pr_url':c['pr_url'],'worktree':str(a.worktree),'commit_sha':c['head_sha'],
+                           'base_main_sha':c['base_main_sha']})
+                for key, expected in (('candidate_id',c['candidate_id']),('merge_preview_sha',c['preview_sha']),
+                                      ('candidate_tree_sha',c['tree_sha']),('package_sha256',c['package_sha256'])):
+                    if value.get(key)!=expected: raise ValueError(f'accepted receipt {key} mismatch')
+                if any(i.get('candidate_id')!=bridge['legacy_candidate_id'] for i in active):
+                    raise ValueError('another candidate owns release queue')
+            elif active:
+                raise ValueError('another candidate owns the release queue')
             if not any(i.get('candidate_id') == value.get('candidate_id') for i in queue['items']):
+                if bridge:
+                    old=next(i for i in queue['items'] if i.get('candidate_id')==bridge['legacy_candidate_id'])
+                    old['repair_candidate_id']=bridge['candidate_id']
+                    old.setdefault('events',[]).append({'kind':'one_time_repair_bridge','candidate_id':bridge['candidate_id'],'time':int(time.time())})
+                    value['bootstrap_exception_id']=bridge['exception_id']
+                    value['repairs_observation_id']=bridge['legacy_candidate_id']
                 queue['items'].append({**value, 'status': 'waiting_merge', 'events': [{'from': 'accepted', 'to': 'waiting_merge', 'time': int(time.time())}]})
         else:
             change(queue, a.command, manifest=json.loads(a.manifest.read_text()) if a.command == 'enqueue' else None,

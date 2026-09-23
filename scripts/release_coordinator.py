@@ -80,7 +80,8 @@ def register(state: dict, handoff: dict, candidate_id: str, coordinator_thread_i
 
 
 def transition(state: dict, candidate_id: str, target: str, *, main_sha: str | None = None,
-               coordinator_thread_id: str = "release-command-center") -> None:
+               coordinator_thread_id: str = "release-command-center", bootstrap: Path | None = None,
+               worktree: Path | None = None) -> None:
     if target not in STATES:
         raise ValueError(f"invalid state: {target}")
     if target in {"production", "observing", "released"}:
@@ -99,7 +100,22 @@ def transition(state: dict, candidate_id: str, target: str, *, main_sha: str | N
                   if x["status"] in {"preview_building", "staging_acceptance", "production", "observing"}
                   and x.get("change_class", "runtime") == lane]
         if active and item not in active:
-            raise ValueError("another candidate owns the release lane")
+            if target != 'preview_building' or lane != 'runtime' or not bootstrap or not worktree:
+                raise ValueError("another candidate owns the release lane")
+            from release_bootstrap import validate_bootstrap
+            from release_control import verify_pr
+            record=json.loads(bootstrap.read_text()); c=record.get('candidate') or {}
+            bridge=validate_bootstrap(bootstrap,root=worktree,base=item['base_main_sha'],head=item['commit_sha'],
+                preview=item['merge_preview_sha'],tree=item['candidate_tree_sha'],package=item['package_sha256'],
+                candidate_id=candidate_id,queue=state,phase='admission',
+                accepted_receipt_sha256=item.get('staging_receipt_sha256'),queue_owner_thread_id=coordinator_thread_id)
+            verify_pr({'pr_url':c['pr_url'],'worktree':str(worktree),'commit_sha':item['commit_sha'],
+                       'base_main_sha':item['base_main_sha']})
+            old=next(x for x in state['items'] if x['candidate_id']==bridge['legacy_candidate_id'])
+            old['repair_candidate_id']=candidate_id
+            old.setdefault('events',[]).append({'kind':'one_time_repair_bridge','candidate_id':candidate_id,'time':now()})
+            item['bootstrap_exception_id']=bridge['exception_id']
+            item['repairs_observation_id']=bridge['legacy_candidate_id']
     item["events"].append({"from": current, "to": target, "time": now()})
     item["status"] = target
     event_type = "accepted_for_preview" if target == "preview_building" else (
@@ -203,7 +219,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("register"); p.add_argument("handoff", type=Path); p.add_argument("candidate_id")
     p = sub.add_parser("reject-handoff"); p.add_argument("handoff", type=Path); p.add_argument("candidate_id"); p.add_argument("failure_class"); p.add_argument("--evidence", action="append", default=[]); p.add_argument("--action", required=True); p.add_argument("--condition", action="append", default=[])
-    p = sub.add_parser("transition"); p.add_argument("candidate_id"); p.add_argument("status"); p.add_argument("--main-sha")
+    p = sub.add_parser("transition"); p.add_argument("candidate_id"); p.add_argument("status"); p.add_argument("--main-sha"); p.add_argument("--bootstrap",type=Path); p.add_argument("--worktree",type=Path)
     p = sub.add_parser("return"); p.add_argument("candidate_id"); p.add_argument("failure_class"); p.add_argument("--evidence", action="append", default=[]); p.add_argument("--action", required=True); p.add_argument("--condition", action="append", default=[])
     sub.add_parser("show")
     args = parser.parse_args()
@@ -221,7 +237,7 @@ def main() -> None:
             print(json.dumps(envelope, ensure_ascii=False, indent=2))
         elif args.command == "transition":
             transition(state, args.candidate_id, args.status, main_sha=args.main_sha,
-                       coordinator_thread_id=args.coordinator_thread_id)
+                       coordinator_thread_id=args.coordinator_thread_id,bootstrap=args.bootstrap,worktree=args.worktree)
         else:
             envelope = return_to_origin(state, args.candidate_id, args.failure_class, args.evidence, args.action, args.condition)
             print(json.dumps(envelope, ensure_ascii=False, indent=2))

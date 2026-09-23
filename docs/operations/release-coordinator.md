@@ -76,3 +76,24 @@ python3 scripts/release_freshness.py verify \
 ## 失败分类
 
 固定分类为 `assertion_or_verification_failure`、`environment_setup_failure`、`cancelled`、`pending_or_incomplete`、`unknown_failure`。failure envelope 记录候选、阶段、证据、要求动作和重新交接条件。环境失败不能冒称代码失败，替代环境通过不能冒称原环境通过。
+
+## 首次 v4 运行时引导与支付宝入口修复
+
+此段仅适用于 [一次性修复合同](../prd/2026-09-23-v4-bootstrap-alipay-repair-lane.md)。旧生产 SHA 不在 v4 Git 对象库；两棵树相同只是跨仓内容证据。普通候选继续要求生产 SHA 是 preview 祖先。**没有修复授权记录时，旧 `observing` 与祖先门禁均不变。**
+
+指挥台保管仓外不可变 `bootstrap.json`，其 `schema=1`、`exception_id=first-v4-alipay-entry-repair-v1`，并含：
+
+- `repository`；`legacy` 的旧 candidate/release/tree/package 和 `receipt: {path,sha256}`；`v4_root: {commit_sha,tree_sha}`。
+- `candidate` 的 `pr_url`、`candidate_id`、`base_main_sha`、`head_sha`、`preview_sha`、`tree_sha`、`package_sha256`、`accepted_receipt_sha256`、`queue_owner_thread_id`、`origin_thread_id`。PR #3 当前 head 仅是候选快照；合并前必须重新取得当前 head、main 和双亲 preview，不复用旧 SHA。
+- `production_readback: {path,sha256}`，文件记录十分钟内的旧 release/tree/package、`readyz.release_sha` 与 `ready`。生产晋级前仍由 `release_promote.py` 对真实生产再次执行 `/readyz` 读回。
+- `queue_authorization` 和稍后的 `production_authorization` 分别含 `decision=approved`、`decision_id`、`user_thread_id`、`user_message_id`、`recorded_by_thread_id`、`decision_text`、`candidate_id`、`preview_sha`、`package_sha256`、`evidence: {path,sha256}`；生产决定另含 `old_release_sha`。证据 JSON 中的来源须为 `user_message`，并与决定字段逐项相同。操作者须直接核对 Codex 原始用户消息，再把记录写入受控状态。文件摘要能防事后篡改，但不能凭空证明消息真实性。
+
+入队审批与生产安装审批互相独立。创建本合同、用户确认旧入口缺陷、PR/CI 通过均不是任一审批。PR #4 的构建来源签名修复是先行依赖，本合同不修改其脚本。PR #3 仍需当前 head 所需完整 CI、准确 merge-preview、Linux amd64 预发布构建/技术及业务旅程验收和 accepted package。修复通道必须由队列 Owner 使用 `--bootstrap` 明确选择；无参数的队列和祖先检查照旧拒绝。
+
+```sh
+python3 scripts/release_control.py release verify-lineage <worktree> <base-main> <active-production-sha> <preview-sha> --head-sha <pr3-head> --queue <queue.json> --bootstrap <bootstrap.json>
+python3 scripts/release_queue.py --file <queue.json> adopt-accepted <accepted-receipt.json> --worktree <worktree> --bootstrap <bootstrap.json>
+python3 scripts/release_control.py release promote --prepare --handoff <handoff.json> --queue <queue.json> --merged-main-sha <merged-sha> --production-sha <active-production-sha> --bootstrap <bootstrap.json>
+```
+
+如果使用 coordinator 状态机，`transition <candidate> preview_building --main-sha <main> --worktree <worktree> --bootstrap <bootstrap.json>` 是唯一修复入队入口；其余阶段延续原状态转换。两种队列文件不可同时作为同一生产队列使用。`repair_candidate_id` 锁定旧观察与准确新候选，`repairs_observation_id` 反向关联；旧观察继续 `observing`、支付宝 `not_accepted`，欢迎语/地址仍只是 `user_statement_only`。新的生产尝试另起 `observing`；未知结果时保留 reservation、attempt 和两条观察，先只读对账。回滚记录原活跃包、修复包及两条观察，不重置或改写旧观察。`release_queue.py` 禁止此候选直接转 `released`；真实商品页选择、实付、回调验签/幂等、查单、退款及状态读回由用户后测，并经独立收据审核后完成观察。
