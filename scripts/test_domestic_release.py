@@ -144,25 +144,60 @@ class DomesticReleaseTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             env_file = Path(temporary) / "runtime.env"
             env_file.write_text(
-                "AICRM_DATABASE_URL=postgres://stage_user:synthetic-secret@127.0.0.1/aicrm_stage?sslmode=disable\n"
+                "AICRM_DATABASE_URL=postgres://aicrm_test:synthetic-secret@127.0.0.1/aicrm_test_baseline_5d15?sslmode=disable\n"
             )
             captured = {}
 
             def fake_psql(args, **kwargs):
                 captured["args"] = args
                 captured["kwargs"] = kwargs
-                return SimpleNamespace(returncode=0, stdout=f"yes|1|{STAGE_OLD_ORDER_CHECK}\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout=f"aicrm_test_baseline_5d15|aicrm_test|127.0.0.1|yes|1|{STAGE_OLD_ORDER_CHECK}\n", stderr="")
 
             with mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", side_effect=fake_psql):
                 self.assertEqual(installer.staging_migration_baseline(), (True, True))
             self.assertNotIn("synthetic-secret", repr(captured["args"]))
-            self.assertEqual(captured["kwargs"]["env"]["PGDATABASE"], "aicrm_stage")
+            self.assertEqual(captured["kwargs"]["env"]["PGHOST"], "127.0.0.1")
+            self.assertEqual(captured["kwargs"]["env"]["PGUSER"], "aicrm_test")
+            self.assertEqual(captured["kwargs"]["env"]["PGDATABASE"], "aicrm_test_baseline_5d15")
             self.assertEqual(captured["kwargs"]["env"]["HOME"], "/var/lib/aicrm")
             self.assertIn("default_transaction_read_only=on", captured["kwargs"]["env"]["PGOPTIONS"])
             self.assertIn("statement_timeout=5000", captured["kwargs"]["env"]["PGOPTIONS"])
             self.assertIn("version >= '0206'", captured["args"][-1])
             self.assertIn("orders_origin_effect_shape", captured["args"][-1])
             self.assertIn("pg_get_constraintdef(oid)", captured["args"][-1])
+            self.assertIn("current_database()", captured["args"][-1])
+            self.assertIn("current_user", captured["args"][-1])
+            self.assertIn("inet_server_addr()", captured["args"][-1])
+
+    def test_staging_schema_probe_rejects_production_or_wrong_database_configuration(self):
+        for uri in (
+            "postgres://prod_user:synthetic-secret@10.0.4.13/aicrm_prod?sslmode=verify-full",
+            "postgres://aicrm_test:synthetic-secret@127.0.0.1/aicrm_prod?sslmode=disable",
+        ):
+            with self.subTest(uri=uri), tempfile.TemporaryDirectory() as temporary:
+                env_file = Path(temporary) / "runtime.env"
+                env_file.write_text(f"AICRM_DATABASE_URL={uri}\n")
+                with mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run") as psql:
+                    with self.assertRaisesRegex(RuntimeError, "approved synthetic database") as raised:
+                        installer.staging_migration_baseline()
+                self.assertNotIn("synthetic-secret", str(raised.exception))
+                psql.assert_not_called()
+
+    def test_staging_schema_probe_rejects_wrong_actual_database_identity(self):
+        identities = (
+            "aicrm_prod|aicrm_test|127.0.0.1",
+            "aicrm_test_baseline_5d15|prod_user|127.0.0.1",
+            "aicrm_test_baseline_5d15|aicrm_test|10.0.4.13",
+        )
+        for identity in identities:
+            with self.subTest(identity=identity), tempfile.TemporaryDirectory() as temporary:
+                env_file = Path(temporary) / "runtime.env"
+                env_file.write_text("AICRM_DATABASE_URL=postgres://aicrm_test:synthetic-secret@127.0.0.1/aicrm_test_baseline_5d15?sslmode=disable\n")
+                result = SimpleNamespace(returncode=0, stdout=f"{identity}|yes|1|{STAGE_OLD_ORDER_CHECK}\n", stderr="")
+                with mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", return_value=result):
+                    with self.assertRaisesRegex(RuntimeError, "pre-0206 schema") as raised:
+                        installer.staging_migration_baseline()
+                self.assertNotIn("synthetic-secret", str(raised.exception))
 
     def test_pre_migration_constraint_matches_real_stage_definition_and_rejects_0206_shape(self):
         self.assertTrue(installer.is_pre_0206_order_constraint(STAGE_OLD_ORDER_CHECK))

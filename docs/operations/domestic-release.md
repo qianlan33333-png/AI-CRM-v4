@@ -49,7 +49,7 @@ python3 /usr/local/libexec/aicrm/domestic_release.py \
   --config /etc/aicrm/domestic-release.json retry-staging --sha <准确的40位SHA>
 ```
 
-此操作要求该 SHA 是 `processed_sha` 后的第一父链下一提交、parent 精确等于 `processed_sha`、准确 `check` 成功，且它只有 0206 这一条迁移；随后验证本地构建产物、预备机旧版本健康状态、root-owned orphan、无目标回执/备份、0206 尚未应用且旧订单约束仍有效。任何不一致或无法完成独立读回都保持队列停止。成功后它只继续原有同 SHA 的生产复制、安装和精确 readback；只有生产读回成功才推进账本。重试尝试会先持久化一次性 guard，失败后不可盲目再跑此命令；`staging_verified`、`transport_failed` 或 `staging_retry_unknown` 均需只读核对。
+此操作要求该 SHA 是 `processed_sha` 后的第一父链下一提交、parent 精确等于 `processed_sha`、准确 `check` 成功，且它只有 0206 这一条迁移；随后验证本地构建产物、预备机旧版本健康状态、root-owned orphan、无目标回执/备份、0206 尚未应用且旧订单约束仍有效。特殊 retry 还强制配置目标为 `127.0.0.1` / `aicrm_test` / `aicrm_test_baseline_5d15`，并在同一个只读数据库连接中核对 `current_database()`、`current_user` 和 loopback `inet_server_addr()`；任一不符都会拒绝。任何不一致或无法完成独立读回都保持队列停止。成功后它只继续原有同 SHA 的生产复制、安装和精确 readback；只有生产读回成功才推进账本。重试尝试会先持久化一次性 guard，失败后不可盲目再跑此命令；`staging_verified`、`transport_failed` 或 `staging_retry_unknown` 均需只读核对。
 
 ## 回退与局限
 

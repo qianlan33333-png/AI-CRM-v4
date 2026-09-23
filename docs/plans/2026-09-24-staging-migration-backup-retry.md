@@ -36,6 +36,7 @@ flowchart TD
 - Keep ordinary installs and production orphan recovery unchanged. Migration orphan reuse is available only through the explicit staging retry path on a host with a trusted staging identity.
 - Restrict this one-time recovery to SHA `5538d615a9abe2e25be799936866a7330b1d3af8` and migration `0206_order_native_alipay_checkout.sql`; reject future migration releases.
 - Require a full SHA and current ledger status `staging_failed`; bind the attempt to the exact blocked SHA, `processed_sha`, first-parent queue head, parent SHA, and latest exact `check` success.
+- Before the special retry, require DSN host `127.0.0.1`, user `aicrm_test`, and database `aicrm_test_baseline_5d15`; on the same read-only connection verify `current_database()`, `current_user`, and loopback `inet_server_addr()`.
 - Verify local build metadata and the complete release manifest; verify stage current/readiness/processes/manifest remain on the previous deployed SHA and the target receipt is absent.
 - Under the host install lock, verify the root-owned canonical orphan, exact metadata/manifest, no target receipt or backup, migration 0206 absent from `platform_schema_migrations`, and the old validated `orders_origin_effect_shape` CHECK still present. Stop on any unknown state.
 - Persist a one-shot attempt guard before invoking the stage helper. Only exact stage health and receipt readback can continue into the existing production promotion path. Do not mark the ledger ready or advance cursors before exact production readback.

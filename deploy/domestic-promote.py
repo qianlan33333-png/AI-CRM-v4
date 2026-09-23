@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -385,9 +386,18 @@ def require_staging_role() -> None:
 def staging_migration_baseline() -> tuple[bool, bool]:
     """Return whether 0206 is unapplied and its old CHECK is still installed."""
     environment = _database_environment_from_host_config()
+    if any(environment.get(key) != value for key, value in {
+        "PGHOST": "127.0.0.1",
+        "PGUSER": "aicrm_test",
+        "PGDATABASE": "aicrm_test_baseline_5d15",
+    }.items()):
+        raise RuntimeError("staging retry database configuration is not the approved synthetic database")
     environment["PGOPTIONS"] = "-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=500"
     query = f"""
 SELECT
+  current_database(),
+  current_user,
+  COALESCE(inet_server_addr()::text, ''),
   CASE WHEN NOT EXISTS (
     SELECT 1 FROM public.platform_schema_migrations WHERE version >= '{STAGING_MIGRATION_VERSION}'
   ) THEN 'yes' ELSE 'no' END,
@@ -420,9 +430,20 @@ SELECT
         raise RuntimeError("staging migration baseline could not be inspected") from exc
     if result.returncode != 0:
         raise RuntimeError("staging migration baseline could not be inspected")
-    values = result.stdout.strip().split("|", 2)
-    old_constraint_present = len(values) == 3 and values[1] == "1" and is_pre_0206_order_constraint(values[2])
-    if len(values) != 3 or values[0] != "yes" or not old_constraint_present:
+    values = result.stdout.strip().split("|", 5)
+    try:
+        server_is_loopback = ipaddress.ip_address(values[2]).is_loopback
+    except (ValueError, IndexError):
+        server_is_loopback = False
+    old_constraint_present = len(values) == 6 and values[4] == "1" and is_pre_0206_order_constraint(values[5])
+    if (
+        len(values) != 6
+        or values[0] != "aicrm_test_baseline_5d15"
+        or values[1] != "aicrm_test"
+        or not server_is_loopback
+        or values[3] != "yes"
+        or not old_constraint_present
+    ):
         raise RuntimeError("staging migration baseline is not the expected pre-0206 schema")
     return True, old_constraint_present
 
