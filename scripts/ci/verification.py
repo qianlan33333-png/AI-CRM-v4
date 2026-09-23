@@ -29,7 +29,10 @@ def requires_full_pr_verification() -> bool:
         return False
     changed = subprocess.check_output(["git", "diff", "--name-only", f"{base}...HEAD"], text=True).splitlines()
     critical = (".github/", "deploy/", "scripts/ci/", "skills/aicrm-v3-development-frontdoor/",
-                "AGENTS.md", "scripts/check-install-release-contract.sh")
+                "AGENTS.md", "scripts/check-install-release-contract.sh",
+                "scripts/release_queue.py", "scripts/release_control.py",
+                "scripts/release_coordinator.py", "scripts/release_events.py",
+                "scripts/release_handoff.py")
     return any(path.startswith(critical) for path in changed)
 
 
@@ -154,7 +157,9 @@ def main():
         # Local and staging verification are authoritative for ordinary
         # changes. GitHub only checks the exact tree, receipt and governance.
         # Full lanes remain an explicit break-glass action.
-        if event in {"pull_request", "workflow_dispatch"} and ref != "refs/heads/main" and os.environ.get("FORCE_FULL") != "true":
+        if (event in {"pull_request", "workflow_dispatch"} and ref != "refs/heads/main"
+                and os.environ.get("FORCE_FULL") != "true"
+                and (event != "pull_request" or not requires_full_pr_verification())):
             mode = "light"
             full = False
             with open(os.environ["GITHUB_OUTPUT"], "a") as output:
