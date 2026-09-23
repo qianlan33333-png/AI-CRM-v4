@@ -1,8 +1,8 @@
 # CRM v4 Three-member Aggregate Candidate Implementation Plan
 
-**Goal:** Build one auditable draft PR containing the exact runtime source commits from PRs #15, #3, and #13 plus the final PR #19 bridge governance commit, then pass protected `check` and complete CI on the aggregate head.
+**Goal:** Build one auditable draft PR containing the exact runtime source commits from PRs #15, #3, and #13 plus the PR #17 staging-lane and final PR #19 bridge governance commits, then pass protected check and complete CI on the aggregate head.
 
-**Architecture:** Start from the live protected `main` SHA in a clean worktree and merge each immutable source head with ordinary `--no-ff` merge commits. Keep the three runtime members distinct from the PR #19 governance source; the PR19 bridge binds both sets of provenance without changing any source branch.
+**Architecture:** Start from the live protected main SHA in a clean worktree and merge each immutable source head with ordinary no-ff merge commits. Keep the three runtime members distinct from PR #17 staging-lane and PR #19 bridge governance sources; the final PR19 bridge binds both governance ancestors without changing any source branch.
 
 **Tech Stack:** Git, GitHub protected branch checks, Go, Node.js, PostgreSQL 16-backed CI, Chromium browser journeys, existing `release_batch.py` and PR19 bridge manifests.
 
@@ -10,15 +10,15 @@
 
 ## Step 1: Freeze source identities
 
-**Output:** Current main and four source PR head/tree pairs match GitHub live refs.
+**Output:** Current main and five source PR head/tree pairs match GitHub live refs.
 
-**Verify:** `git ls-remote origin refs/heads/main refs/heads/codex/v4-ci-baseline-consolidated refs/heads/codex/alipay-checkout-options-v4 refs/heads/codex/v4-group-invite-direct-qr refs/heads/codex/first-v4-batch-bridge`; verify PR #15/#3/#13/#19 `headRefOid` and base SHA through `gh pr view`.
+**Verify:** Query git ls-remote for main and all five source branches; verify PR #15/#3/#13/#17/#19 headRefOid and base SHA through gh pr view.
 
 ## Step 2: Assemble the aggregate history
 
-**Output:** Four normal merge commits on `codex/v4-three-member-aggregate-candidate`; all four exact source heads remain ancestors and source refs stay unchanged.
+**Output:** Five normal merge commits on codex/v4-three-member-aggregate-candidate; all five exact source heads remain ancestors and source refs stay unchanged.
 
-**Verify:** Run `git merge-base --is-ancestor <source-head> HEAD` for each source, compare `git show <source-head>^{tree}` with its frozen tree, then inspect `git status --short --branch` and all merge commit parents. Resolve any conflict only in the aggregate worktree and record it in the PRD.
+**Verify:** Run git merge-base --is-ancestor for each source, compare each source tree with its frozen tree, inspect all merge commit parents, and verify clean status. Resolve the known PR15/PR17 overlap only in the aggregate worktree and record each resolution in the PRD.
 
 ## Step 3: Run local preflight
 
@@ -30,7 +30,7 @@
 
 **Output:** One GitHub Draft PR from the aggregate branch to `main`; it lists exact source provenance, bridge fields, and remaining staging/production gates.
 
-**Verify:** Confirm the PR is draft, current head/tree match the worktree, live main is unchanged, the aggregate contains all required source ancestors, and PR #15/#3/#13/#19 remote heads are unchanged.
+**Verify:** Confirm the PR is draft, current head/tree match the worktree, live main is unchanged, the aggregate contains all five required source ancestors, and PR #15/#3/#13/#17/#19 remote heads are unchanged.
 
 ## Step 5: Verify the protected check and complete CI
 
