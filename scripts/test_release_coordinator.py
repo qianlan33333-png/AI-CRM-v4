@@ -44,7 +44,7 @@ class CoordinatorTests(unittest.TestCase):
             receipt = Path(tmp) / "accepted.json"
             receipt.write_text(json.dumps({"status": "accepted", "work_item": "demo", "candidate_id": "candidate-1", "merge_preview_sha": preview, "candidate_tree_sha": tree, "package_sha256": package_sha, "package_path": str(package), "built_receipt": str(built), "built_receipt_sha256": hashlib.sha256(built.read_bytes()).hexdigest(), "journeys": [{"work_item": "demo", "name": "demo journey", "expected": "readback", "actual": "readback", "command": "test command", "effect_mode": "virtual", "passed": True, "evidence_path": str(evidence), "evidence_sha256": hashlib.sha256(evidence.read_bytes()).hexdigest()}]}))
             handoff.write_text(json.dumps({
-                "work_item": "demo", "origin_thread_id": "thread-1", "branch": "codex/demo",
+                "change_class": "runtime", "work_item": "demo", "origin_thread_id": "thread-1", "branch": "codex/demo",
                 "worktree": str(worktree), "commit_sha": commit, "tree_sha": tree,
                 "scope": "test", "affected_modules": [], "dependencies": [], "local_tests": ["unit"],
                 "known_risks": [], "release_ready": True, "pr_url": "https://github.com/example/repo/pull/1", "oneid_decision": "none", "persistence_decision": "stateless", "external_effects_decision": "none", "rollback_point": "previous release", "base_main_sha": base, "merge_preview_sha": preview, "candidate_tree_sha": tree, "package_sha256": package_sha, "staging_acceptance": {"status": "accepted", "receipt": str(receipt), "receipt_sha256": hashlib.sha256(receipt.read_bytes()).hexdigest(), "candidate_id": "candidate-1", "merge_preview_sha": preview, "candidate_tree_sha": tree, "package_sha256": package_sha},

@@ -15,11 +15,11 @@ from pathlib import Path
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 REQUIRED = (
-    "work_item", "origin_thread_id", "branch", "worktree", "commit_sha",
+    "change_class", "work_item", "origin_thread_id", "branch", "worktree", "commit_sha",
     "tree_sha", "scope", "affected_modules", "dependencies", "local_tests",
     "known_risks", "release_ready", "pr_url", "oneid_decision",
     "persistence_decision", "external_effects_decision", "rollback_point",
-    "staging_acceptance", "base_main_sha", "merge_preview_sha", "candidate_tree_sha", "package_sha256",
+    "base_main_sha", "merge_preview_sha", "candidate_tree_sha",
 )
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -83,6 +83,23 @@ def validate_acceptance(value: dict, handoff_path: Path) -> None:
             raise ValueError("journey evidence is missing or changed")
 
 
+def validate_governance_acceptance(value: dict, handoff_path: Path) -> None:
+    acceptance = value.get("governance_acceptance")
+    if not isinstance(acceptance, dict) or acceptance.get("status") != "accepted":
+        raise ValueError("governance-only handoff requires accepted governance evidence")
+    checks = acceptance.get("checks")
+    if not isinstance(checks, list) or not checks:
+        raise ValueError("governance acceptance requires checks")
+    for check in checks:
+        if not isinstance(check, dict) or not check.get("name") or not check.get("command") or check.get("passed") is not True:
+            raise ValueError("governance check contract incomplete")
+        evidence_path = Path(check.get("evidence_path", ""))
+        if not evidence_path.is_absolute(): evidence_path = handoff_path.parent / evidence_path
+        digest = check.get("evidence_sha256", "")
+        if not evidence_path.is_file() or not SHA256.fullmatch(digest) or file_sha256(evidence_path) != digest:
+            raise ValueError("governance check evidence missing or changed")
+
+
 def git(root: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
 
@@ -109,8 +126,8 @@ def validate(path: Path) -> dict:
     for key in ("base_main_sha", "merge_preview_sha"):
         if not isinstance(value[key], str) or not SHA.fullmatch(value[key]):
             raise ValueError(f"handoff {key} must be full SHA")
-    if not isinstance(value["package_sha256"], str) or not SHA256.fullmatch(value["package_sha256"]):
-        raise ValueError("handoff package_sha256 must be full digest")
+    if value["change_class"] not in {"runtime", "governance_only"}:
+        raise ValueError("handoff change_class must be runtime or governance_only")
     if not isinstance(value["release_ready"], bool):
         raise ValueError("handoff release_ready must be boolean")
     for key in ("affected_modules", "dependencies", "local_tests", "known_risks"):
@@ -148,7 +165,15 @@ def validate(path: Path) -> dict:
         raise ValueError("handoff release_ready must be true")
     if not value["pr_url"].startswith("https://github.com/") or "/pull/" not in value["pr_url"]:
         raise ValueError("handoff needs a GitHub PR")
-    validate_acceptance(value, path)
+    if value["change_class"] == "runtime":
+        if not isinstance(value.get("package_sha256"), str) or not SHA256.fullmatch(value["package_sha256"]):
+            raise ValueError("runtime handoff package_sha256 must be full digest")
+        if "staging_acceptance" not in value: raise ValueError("runtime handoff missing staging_acceptance")
+        validate_acceptance(value, path)
+    else:
+        if value.get("package_sha256") not in {None, ""} or "staging_acceptance" in value:
+            raise ValueError("governance-only handoff cannot claim a runtime package")
+        validate_governance_acceptance(value, path)
     return value
 
 

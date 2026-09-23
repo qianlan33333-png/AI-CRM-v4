@@ -7,9 +7,22 @@ from unittest.mock import patch
 import sys
 sys.path.insert(0,str(Path(__file__).parent))
 from release_control import verify_pr
+from release_handoff import validate
 SCRIPT = Path(__file__).with_name('release_control.py')
 
 class ControlTests(unittest.TestCase):
+    def test_governance_only_handoff_uses_local_evidence_without_runtime_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); repo=root/'repo'; repo.mkdir()
+            def run(*args,**kwargs): return subprocess.check_output(['git','-C',str(repo),*args],text=True,**kwargs).strip()
+            run('init','-q'); run('config','user.name','test'); run('config','user.email','test@example.invalid'); (repo/'base').write_text('base'); run('add','base'); run('commit','-qm','base'); base=run('rev-parse','HEAD'); run('update-ref','refs/remotes/origin/main',base); run('branch','-m','codex/governance'); run('branch','main',base); run('remote','add','origin',str(repo)); (repo/'governance').write_text('rules'); run('add','governance'); run('commit','-qm','governance'); head=run('rev-parse','HEAD'); tree=run('rev-parse','HEAD^{tree}'); preview=run('commit-tree',tree,'-p',base,'-p',head,input='preview\n')
+            evidence=root/'tests.log'; evidence.write_text('41 tests passed\n'); import hashlib
+            handoff=root/'handoff.json'; handoff.write_text(json.dumps({'change_class':'governance_only','work_item':'release-governance','origin_thread_id':'origin','branch':'codex/governance','worktree':str(repo),'commit_sha':head,'tree_sha':tree,'scope':'release metadata','affected_modules':['scripts'],'dependencies':[],'local_tests':['unit'],'known_risks':[],'release_ready':True,'pr_url':'https://github.com/o/r/pull/1','oneid_decision':'not involved','persistence_decision':'local files','external_effects_decision':'GitHub read only','rollback_point':base,'base_main_sha':base,'merge_preview_sha':preview,'candidate_tree_sha':tree,'governance_acceptance':{'status':'accepted','checks':[{'name':'release unit tests','command':'python3 -m unittest','passed':True,'evidence_path':str(evidence),'evidence_sha256':hashlib.sha256(evidence.read_bytes()).hexdigest()}]}}))
+            with patch('release_handoff.live_remote_main',return_value=base): self.assertEqual(validate(handoff)['change_class'],'governance_only')
+            state=root/'state.json'; registered=subprocess.run(['python3',str(Path(__file__).with_name('release_coordinator.py')),'--state',str(state),'register',str(handoff),'governance-1'],capture_output=True,text=True)
+            self.assertEqual(registered.returncode,0,registered.stderr); self.assertIsNone(json.loads(state.read_text())['items'][0]['package_sha256'])
+            evidence.write_text('changed')
+            with patch('release_handoff.live_remote_main',return_value=base),self.assertRaisesRegex(ValueError,'evidence'): validate(handoff)
     def test_preview_lineage_and_no_source_change(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); repo = root/'repo'; repo.mkdir()

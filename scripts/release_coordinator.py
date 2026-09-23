@@ -49,7 +49,7 @@ def locked(path: Path):
 
 
 def register(state: dict, handoff: dict, candidate_id: str, coordinator_thread_id: str) -> None:
-    if handoff["staging_acceptance"]["candidate_id"] != candidate_id:
+    if handoff["change_class"] == "runtime" and handoff["staging_acceptance"]["candidate_id"] != candidate_id:
         raise ValueError("candidate id differs from accepted staging receipt")
     prior = next((item for item in state["items"] if item["candidate_id"] == candidate_id), None)
     if prior:
@@ -61,21 +61,22 @@ def register(state: dict, handoff: dict, candidate_id: str, coordinator_thread_i
         "candidate_id": candidate_id,
         "origin_thread_id": handoff["origin_thread_id"],
         "work_item": handoff["work_item"],
+        "change_class": handoff["change_class"],
         "branch": handoff["branch"],
         "commit_sha": handoff["commit_sha"],
         "tree_sha": handoff["tree_sha"],
         "candidate_tree_sha": handoff["candidate_tree_sha"],
         "base_main_sha": handoff["base_main_sha"],
         "merge_preview_sha": handoff["merge_preview_sha"],
-        "package_sha256": handoff["package_sha256"],
-        "staging_receipt_sha256": handoff["staging_acceptance"]["receipt_sha256"],
+        "package_sha256": handoff.get("package_sha256"),
+        "staging_receipt_sha256": handoff.get("staging_acceptance", {}).get("receipt_sha256"),
         "status": "handoff_ready",
         "events": [{"to": "handoff_ready", "time": now()}],
     })
     append(state, {"event_type": "handoff_ready", "origin_thread_id": handoff["origin_thread_id"],
                    "destination_thread_id": coordinator_thread_id, "candidate_id": candidate_id,
                    "commit_sha": handoff["commit_sha"], "tree_sha": handoff["tree_sha"],
-                   "evidence": [str(handoff.get("staging_acceptance", ""))]})
+                   "evidence": [str(handoff.get("staging_acceptance") or handoff.get("governance_acceptance"))]})
 
 
 def transition(state: dict, candidate_id: str, target: str, *, main_sha: str | None = None,
