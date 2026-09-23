@@ -1,28 +1,21 @@
 # AGENTS.md
 
-## Development window and release command center
+## Development and domestic serial release
 
 每个开发任务使用新的 `codex/<work-item>` 分支/worktree 和新 PR。开始前阅读
-`docs/development-before-start.md`，先完成业务判断、GitHub 参考检索、仓库复用评估
-和经确认的 PRD，再记录 OneID、Persistence、External Effects 分类。开发完成状态按
-`code_complete`、`staging_built`、`staging_self_accepted`、`handoff_ready` 四级记录；
-未达到后一级时不得用前一级冒称完成。该四级链用于运行时变更；纯治理/文档变更在
-`code_complete` 后以治理检查证据直接进入 `handoff_ready`，并将 `staging_built`、
-`staging_self_accepted` 标为 N/A。
+`docs/development-before-start.md`，先写业务判断、检索 GitHub 参考案例、评估仓库复用，
+再形成经确认的简短 PRD，并记录 OneID、Persistence、External Effects 分类。
 
-运行时 handoff 必须绑定准确 PR、base main、PR head、merge-preview、各自 tree、
-package SHA-256、staging receipt 和受影响业务 readback。纯治理/文档变更必须标记
-`change_class=governance_only`，明确 runtime package、staging app install 和业务运行时
-读回均为 N/A，并提交治理检查证据，不得伪造运行时收据。
+GitHub 是唯一主仓库和 PR 审核入口。受保护 `main` 只接受准确 head 的必需 `check`；
+GitHub Actions 不构建或运输生产包。不同板块可并行提 PR，合并后由预备机按 `main`
+第一父链顺序逐个构建、基础验收并通过内网将同一版本晋级生产。
+纯文档变更不安装；普通页面改动不备份数据库、不运行迁移；数据库变更必须经过
+兼容性检查、自动备份和迁移专项检查。生产技术安装成功与真实业务验收分开记录，
+真实业务验收未完成不占用后续技术发布通道。
 
-开发任务完成或收到返工后，必须先追加不可变持久事件，再通知发布指挥台。返工必须
-生成新 commit、新 candidate、新证据和新事件；旧候选、旧 receipt 和旧事件不可覆盖。
-指挥台只做只读判断、串行排队、合并、部署、观察和打回，不修改候选源码、PR、分支
-或 worktree。公开仓库 `main` 的 GitHub 保护是合并门禁；串行发布仍由指挥台队列负责，
-不假定 GitHub 原生 Merge Queue。
-
-生产晋级只使用预发布验收的同一包。`outcome_unknown` 时停止重试并只读对账；用户明确
-延期真实业务验收时，生产状态最多保持 `observing`，不得写成 `released`。
+旧 merge-preview、candidate handoff、release-control 观察占位只作为历史审计，
+不再是新 PR 的合并或部署门禁。发布操作和结果不明处置见
+`docs/operations/domestic-release.md`。PR #22 仍暂停，流程切换不得自动合并它。
 
 本文件适用于整个 `AI-CRM-v4` 仓库。
 
@@ -35,7 +28,7 @@ package SHA-256、staging receipt 和受影响业务 readback。纯治理/文档
 
 ## 2. 开发前最高优先级判断
 
-- 新功能、Bug 修复、调试、合并和上线前置流程统一先应用 `skills/aicrm-v3-development-frontdoor/SKILL.md`；新功能必须完成市场/GitHub 调研、复用评估和已确认 PRD，且合并前必须完成并行与发布快照。Skill 路径为兼容现有工具保留，所有证据只允许来自当前 v4 commit/tree。
+- 新功能、Bug 修复和调试先应用 `skills/aicrm-v3-development-frontdoor/SKILL.md` 的业务判断、GitHub 调研、复用评估和 PRD。旧 handoff、merge-preview 与合并前发布快照指引已由本文件的新流程取代。Skill 路径为兼容现有工具保留，所有证据只允许来自当前 v4 commit/tree。
 - 除用户最新明确指令与安全红线外，任何设计、实现、迁移或代码审查在开始编码前，都必须优先判断两件事：是否涉及 OneID/外部身份，以及是否涉及持久化、内部持久任务或外部效果。
 - 开发者必须先阅读并应用项目核心 Skill：`skills/aicrm-v3-development/SKILL.md`，在计划或 PR 中留下简短分类结论。
 - 这是一项优先设计检查，不是要求所有功能都接入 OneID 或 External Effects。确实不涉及时，应明确记录“不涉及”及理由，随后按本领域正常边界开发，禁止为了过门禁而制造虚假依赖。
@@ -95,7 +88,7 @@ package SHA-256、staging receipt 和受影响业务 readback。纯治理/文档
 ## 9. 提交前验证顺序
 
 - 首次推送和修复后再次推送前，先运行 `python3 scripts/dev_preflight.py fast`；Go 改动再运行 `python3 scripts/dev_preflight.py compile`，然后执行受影响领域的专项测试。编译成功不等于测试通过。
-- `fast`、`compile` 和局部 `browser` 的证据只能汇报对应局部 claim，不能称为完整回归或可交付验证。需要本地完整证据时运行 `python3 scripts/dev_preflight.py full`；它要求开始、每个 lane 前后及结束时都是同一干净已提交树，并拒绝缺 PostgreSQL 16、Linux amd64 Chromium、固定工具或仓内已登记视图源的环境。具备预发布机时，完整本地证据随后必须在 `49.232.57.128` 做真实部署、健康检查和业务读回。运行时、测试/fixture、CI、部署、迁移、共享平台和发布状态机改动的 PR 必须在当前 head 跑完整 GitHub 代码 CI；PR check 不认证预发收据。运行时预发包、业务读回和 accepted receipt 必须在合并/入队前核验：`release_control handoff` 只核本地文件摘要与候选一致性，指挥台还须独立核对签名来源、可信预发节点上的包与读回；不能把自备文件当来源证明。纯文档变更可使用轻门禁；`workflow_dispatch force_full=true` 只证明触发分支的代码树，不能冒充 PR required check 或预发验收。
+- `fast`、`compile` 和局部 `browser` 的证据只能汇报对应局部 claim，不能称为完整回归。GitHub 必需 `check` 按改动范围选测试；未知、共享基础设施、迁移和发布链变更运行完整检查。合并后的准确 SHA 还须有成功的 `check`，预备机才构建并安装。预备机基础验收与生产安装读回是独立证据，不能用 CI 代替。真实支付、扫码验收只能在生产技术部署后由业务方记录。
 - CI 失败先重现准确失败用例，修复后跑完整失败阶段，再提交全量 CI；不能通过删断言、接受 skip 或反复推送猜测修复。
 - 新增真实 Host 浏览器旅程放在 `cmd/aicrm`，使用 `Test…ChromiumJourney` 命名，自动进入必跑集合；其他包或命名必须明确接入。运行 `python3 scripts/dev_preflight.py browser` 前准备最终 Host 产物和独立 PostgreSQL 16 测试库。
 - 测试汇报附准确 HEAD、tree、工作区状态、命令及证据目录，区分编译、专项、本地完整、完整 CI、取消、跳过和未验证；修改代码后不能沿用旧 HEAD 绿灯。PR 首轮质量保留该 PR 最早 CI attempt 的原始 SHA；最终质量只对应当前 PR head 的最新 attempt。

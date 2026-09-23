@@ -1,0 +1,10 @@
+[Unit]
+Description=Check protected CRM v4 main every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=2min
+Unit=aicrm-domestic-release.service
+
+[Install]
+WantedBy=timers.target

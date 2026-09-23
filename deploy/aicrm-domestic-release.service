@@ -1,0 +1,14 @@
+[Unit]
+Description=CRM v4 serial domestic release poller
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/aicrm/source
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 /usr/local/libexec/aicrm/domestic_release.py --config /etc/aicrm/domestic-release.json poll
+TimeoutStartSec=3h
+PrivateTmp=true
