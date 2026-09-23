@@ -73,10 +73,62 @@ def register(state: dict, handoff: dict, candidate_id: str, coordinator_thread_i
         "status": "handoff_ready",
         "events": [{"to": "handoff_ready", "time": now()}],
     })
+    for checkpoint in state["items"]:
+        if (checkpoint.get("status") == "blocked_development"
+                and checkpoint.get("work_item") == handoff["work_item"]
+                and checkpoint.get("origin_thread_id") == handoff["origin_thread_id"]):
+            checkpoint["events"].append({"from": "blocked_development", "to": "superseded_by_handoff",
+                                         "time": now(), "candidate_id": candidate_id})
+            checkpoint["status"] = "superseded_by_handoff"
     append(state, {"event_type": "handoff_ready", "origin_thread_id": handoff["origin_thread_id"],
                    "destination_thread_id": coordinator_thread_id, "candidate_id": candidate_id,
                    "commit_sha": handoff["commit_sha"], "tree_sha": handoff["tree_sha"],
                    "evidence": [str(handoff.get("staging_acceptance") or handoff.get("governance_acceptance"))]})
+
+
+def record_development_checkpoint(state: dict, value: dict, coordinator_thread_id: str) -> dict:
+    """Persist a code-complete blocker and notification in the same state update."""
+    required = ("candidate_id", "work_item", "origin_thread_id", "owner_thread_id",
+                "branch", "pr_url", "commit_sha", "tree_sha", "base_main_sha",
+                "blocked_reason", "required_action")
+    for field in required:
+        if not isinstance(value.get(field), str) or not value[field].strip():
+            raise ValueError(f"checkpoint missing {field}")
+    for field in ("resubmit_conditions", "evidence"):
+        if not isinstance(value.get(field), list) or not value[field] or not all(
+                isinstance(item, str) and item.strip() for item in value[field]):
+            raise ValueError(f"checkpoint requires nonempty {field}")
+    if value["candidate_id"] == coordinator_thread_id:
+        raise ValueError("invalid checkpoint id")
+    item = {
+        "schema": 1, "candidate_id": value["candidate_id"], "work_item": value["work_item"],
+        "origin_thread_id": value["origin_thread_id"], "owner_thread_id": value["owner_thread_id"],
+        "branch": value["branch"], "pr_url": value["pr_url"],
+        "commit_sha": value["commit_sha"], "tree_sha": value["tree_sha"],
+        "base_main_sha": value["base_main_sha"], "stage": "code_complete",
+        "status": "blocked_development", "blocked_reason": value["blocked_reason"],
+        "required_action": value["required_action"],
+        "resubmit_conditions": list(value["resubmit_conditions"]),
+        "evidence": list(value["evidence"]),
+    }
+    prior = next((entry for entry in state["items"] if entry.get("candidate_id") == value["candidate_id"]), None)
+    if prior:
+        if all(prior.get(key) == expected for key, expected in item.items()):
+            return prior
+        raise ValueError("checkpoint id reused with different payload or source")
+    if any(entry.get("work_item") == value["work_item"] and entry.get("origin_thread_id") == value["origin_thread_id"]
+           and entry.get("commit_sha") == value["commit_sha"] and entry.get("status") == "blocked_development"
+           for entry in state["items"]):
+        raise ValueError("current commit already has an active development checkpoint")
+    item["events"] = [{"to": "blocked_development", "time": now()}]
+    state["items"].append(item)
+    append(state, {"event_type": "blocked", "origin_thread_id": value["origin_thread_id"],
+                   "destination_thread_id": coordinator_thread_id, "candidate_id": value["candidate_id"],
+                   "commit_sha": value["commit_sha"], "tree_sha": value["tree_sha"],
+                   "owner_thread_id": value["owner_thread_id"], "blocked_reason": value["blocked_reason"],
+                   "required_action": value["required_action"], "evidence": value["evidence"],
+                   "resubmit_conditions": value["resubmit_conditions"]})
+    return item
 
 
 def transition(state: dict, candidate_id: str, target: str, *, main_sha: str | None = None,

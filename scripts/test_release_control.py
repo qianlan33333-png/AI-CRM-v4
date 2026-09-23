@@ -6,11 +6,46 @@ from pathlib import Path
 from unittest.mock import patch
 import sys
 sys.path.insert(0,str(Path(__file__).parent))
-from release_control import verify_pr
+from release_control import verify_pr, validate_development_checkpoint, locked_state
+from release_coordinator import record_development_checkpoint, register
 from release_handoff import validate
 SCRIPT = Path(__file__).with_name('release_control.py')
 
 class ControlTests(unittest.TestCase):
+    def test_development_checkpoint_is_durable_idempotent_and_only_handoff_closes_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); state_path = root/'state.json'
+            value = {'candidate_id':'pr13-code-complete','work_item':'group-invite-qr',
+                     'origin_thread_id':'origin','owner_thread_id':'owner','branch':'codex/qr',
+                     'pr_url':'https://github.com/o/r/pull/13','commit_sha':'a'*40,
+                     'tree_sha':'b'*40,'base_main_sha':'c'*40,
+                     'blocked_reason':'staging receipt missing','required_action':'build exact preview',
+                     'resubmit_conditions':['accepted receipt'],'evidence':['https://github.com/o/r/pull/13']}
+            with self.assertRaisesRegex(ValueError,'does not exist'):
+                locked_state(state_path,lambda state: record_development_checkpoint(state,value,'coordinator'),require_existing=True)
+            state_path.write_text(json.dumps({'schema':2,'items':[],'returns':[],'events':[]}))
+            for _ in range(2):
+                locked_state(state_path,lambda state: record_development_checkpoint(state,value,'coordinator'),require_existing=True)
+            state=json.loads(state_path.read_text())
+            self.assertEqual(len(state['items']),1)
+            self.assertEqual(len(state['events']),1)
+            self.assertEqual(state['items'][0]['status'],'blocked_development')
+            self.assertEqual(state['events'][0]['payload']['owner_thread_id'],'owner')
+            self.assertEqual(state['events'][0]['delivery']['status'],'pending')
+            changed=dict(value,blocked_reason='different')
+            with self.assertRaisesRegex(ValueError,'reused'):
+                locked_state(state_path,lambda state: record_development_checkpoint(state,changed,'coordinator'),require_existing=True)
+            self.assertEqual(json.loads(state_path.read_text())['items'][0]['blocked_reason'],'staging receipt missing')
+            handoff={'change_class':'runtime','staging_acceptance':{'candidate_id':'accepted-pr13','receipt_sha256':'d'*64},
+                     'origin_thread_id':'origin','work_item':'group-invite-qr','branch':'codex/qr',
+                     'commit_sha':'a'*40,'tree_sha':'b'*40,'candidate_tree_sha':'b'*40,
+                     'base_main_sha':'c'*40,'merge_preview_sha':'e'*40,'package_sha256':'f'*64}
+            locked_state(state_path,lambda state: register(state,handoff,'accepted-pr13','coordinator'),require_existing=True)
+            state=json.loads(state_path.read_text())
+            self.assertEqual(state['items'][0]['status'],'superseded_by_handoff')
+            self.assertEqual(state['items'][1]['status'],'handoff_ready')
+            self.assertEqual(len(state['events']),2)
+
     def test_governance_only_handoff_uses_local_evidence_without_runtime_package(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); repo=root/'repo'; repo.mkdir()
@@ -63,4 +98,33 @@ class ControlTests(unittest.TestCase):
             pr['head']['sha']='c'*40
             with patch('release_control.subprocess.check_output',return_value=json.dumps(pr)):
                 with self.assertRaisesRegex(ValueError,'head or base moved'): verify_pr(value)
+    def test_checkpoint_requires_current_clean_pr_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); repo=root/'repo'; repo.mkdir()
+            def run(*args): return subprocess.check_output(['git','-C',str(repo),*args],text=True).strip()
+            run('init','-q'); run('config','user.name','test'); run('config','user.email','test@example.invalid')
+            (repo/'source').write_text('current'); run('add','source'); run('commit','-qm','current')
+            run('branch','-m','codex/qr'); run('remote','add','origin','https://github.com/o/r.git')
+            head=run('rev-parse','HEAD'); tree=run('rev-parse','HEAD^{tree}')
+            value={'candidate_id':'pr13-code-complete','work_item':'group-invite-qr',
+                   'origin_thread_id':'origin','owner_thread_id':'owner','branch':'codex/qr',
+                   'worktree':str(repo),'pr_url':'https://github.com/o/r/pull/13',
+                   'commit_sha':head,'tree_sha':tree,'base_main_sha':'c'*40,
+                   'blocked_reason':'receipt missing','required_action':'build preview',
+                   'resubmit_conditions':['accepted receipt'],'evidence':['PR check']}
+            manifest=root/'checkpoint.json'; manifest.write_text(json.dumps(value))
+            pr={'head':{'sha':head},'base':{'sha':'c'*40,'repo':{'full_name':'o/r'}}}
+            original_output=subprocess.check_output
+            with patch('release_control.subprocess.check_output') as command:
+                # Only the remote PR API is mocked; git evidence is read from the real worktree.
+                def output(argv,*args,**kwargs):
+                    if argv[:2]==['gh','api']: return json.dumps(pr)
+                    return original_output(argv,*args,**kwargs)
+                command.side_effect=output
+                self.assertEqual(validate_development_checkpoint(manifest)['tree_sha'],tree)
+                pr['head']['sha']='d'*40
+                with self.assertRaisesRegex(ValueError,'head or base moved'): validate_development_checkpoint(manifest)
+                pr['head']['sha']=head
+                (repo/'source').write_text('dirty')
+                with self.assertRaisesRegex(ValueError,'dirty'): validate_development_checkpoint(manifest)
 if __name__=='__main__': unittest.main()

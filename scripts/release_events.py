@@ -48,9 +48,11 @@ def append(state: dict, value: dict) -> dict:
     key = event_key(value)
     payload = {k: value.get(k, '') for k in ('event_type', 'origin_thread_id', 'destination_thread_id', 'candidate_id', 'commit_sha', 'tree_sha', 'required_action')}
     payload['evidence'] = list(value.get('evidence', [])); payload['resubmit_conditions'] = list(value.get('resubmit_conditions', []))
+    for optional in ('owner_thread_id', 'blocked_reason'):
+        if optional in value: payload[optional] = value[optional]
     for existing in state['events']:
         if existing['payload']['idempotency_key'] == key:
-            comparable = {k: existing['payload'][k] for k in payload}
+            comparable = {k: existing['payload'].get(k, '') for k in payload}
             if comparable != payload: raise ValueError('idempotency key reused with different payload')
             return existing
     payload.update(event_id=str(uuid.uuid4()), idempotency_key=key, created_at=now())

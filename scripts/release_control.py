@@ -9,13 +9,15 @@ import re
 import subprocess
 from pathlib import Path
 from release_handoff import validate, validate_acceptance, git, live_remote_main
-from release_coordinator import register, return_to_origin
+from release_coordinator import register, return_to_origin, record_development_checkpoint
 from release_events import load, save, replay, append
 
-def locked_state(path: Path, operation):
+def locked_state(path: Path, operation, *, require_existing: bool = False):
     lock_path = path.with_name(path.name + '.lock'); lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        if require_existing and not path.is_file():
+            raise ValueError('release state does not exist; refusing to create an empty state')
         state = load(path)
         result = operation(state)
         save(path, state)
@@ -37,6 +39,27 @@ def verify_pr(value: dict) -> None:
         raise ValueError('live PR head or base moved')
     if pr.get('base',{}).get('repo',{}).get('full_name')!=selected:
         raise ValueError('PR targets another repository')
+
+def validate_development_checkpoint(path: Path) -> dict:
+    value = json.loads(path.read_text())
+    required = ('candidate_id', 'work_item', 'origin_thread_id', 'owner_thread_id',
+                'branch', 'worktree', 'pr_url', 'commit_sha', 'tree_sha', 'base_main_sha',
+                'blocked_reason', 'required_action')
+    for field in required:
+        if not isinstance(value.get(field), str) or not value[field].strip():
+            raise ValueError(f'checkpoint missing {field}')
+    for field in ('commit_sha', 'tree_sha', 'base_main_sha'):
+        if not re.fullmatch(r'[0-9a-f]{40}', value[field]):
+            raise ValueError(f'invalid {field}')
+    root = Path(value['worktree'])
+    if git(root, 'status', '--porcelain'):
+        raise ValueError('checkpoint worktree is dirty')
+    if git(root, 'symbolic-ref', '--short', 'HEAD') != value['branch']:
+        raise ValueError('checkpoint branch mismatch')
+    if git(root, 'rev-parse', 'HEAD') != value['commit_sha'] or git(root, 'rev-parse', 'HEAD^{tree}') != value['tree_sha']:
+        raise ValueError('checkpoint head or tree mismatch')
+    verify_pr(value)
+    return value
 
 def preview(root: Path, branch: str, base: str, output: Path) -> dict:
     if output.exists(): raise ValueError('candidate manifest already exists')
@@ -109,6 +132,7 @@ def main():
     p = handoff.add_parser('validate'); p.add_argument('path', type=Path)
     for action in ('submit', 'resubmit'):
         p = handoff.add_parser(action); p.add_argument('path', type=Path); p.add_argument('candidate_id')
+    p = handoff.add_parser('checkpoint'); p.add_argument('path', type=Path)
     p = handoff.add_parser('submit-batch'); p.add_argument('path', type=Path)
     p = handoff.add_parser('submit-deferred-batch'); p.add_argument('path', type=Path)
     p = sub.add_parser('release'); release = p.add_subparsers(dest='action', required=True)
@@ -120,6 +144,12 @@ def main():
     p = release.add_parser('promote'); p.add_argument('--prepare', action='store_true'); p.add_argument('--execute', action='store_true'); p.add_argument('--handoff', type=Path); p.add_argument('--queue', type=Path); p.add_argument('--merged-main-sha'); p.add_argument('--production-sha'); p.add_argument('--host'); p.add_argument('--user',default='ubuntu'); p.add_argument('--key',type=Path); p.add_argument('--known-hosts',type=Path); p.add_argument('--attempt-file',type=Path); p.add_argument('--deploy-script',type=Path); p.add_argument('--staging-node-id',type=Path,default=Path('/opt/aicrm/staging-node-id.json'))
     args = parser.parse_args()
     if args.command == 'handoff':
+        if args.action == 'checkpoint':
+            value = validate_development_checkpoint(args.path)
+            item = locked_state(args.state, lambda state: record_development_checkpoint(state, value, args.coordinator_thread_id), require_existing=True)
+            print(json.dumps({'recorded': True, 'candidate_id': item['candidate_id'], 'status': item['status'],
+                              'stage': item['stage'], 'owner_thread_id': item['owner_thread_id']}, ensure_ascii=False, indent=2))
+            return
         if args.action in {'submit-batch','submit-deferred-batch'}:
             if args.action=='submit-deferred-batch':
                 from release_deferred_acceptance import validate_deferred_batch

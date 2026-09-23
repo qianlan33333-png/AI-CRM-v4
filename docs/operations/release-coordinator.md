@@ -24,6 +24,15 @@ python3 scripts/release_control.py --state /secure/release/state.json \
 
 submit/resubmit 通过 GitHub API 核对 PR 目标仓库、实时 head/base 和 required checks；查询失败时失败关闭。开发任务必须先持久化交接或返工事件，再发送指挥台通知。相同候选重复交接幂等，不同源码不能复用 candidate ID。源码修复必须由原始开发任务提交新 commit、新 candidate、新 handoff、receipt 和事件，旧候选不可覆盖；指挥台不改源码、PR、cherry-pick、rebase 或解决冲突。
 
+`code_complete` 后若缺真实预发包、收据或验收，开发任务在现有状态文件写入阻塞检查点，明确 owner、原因和重试条件；任务不可仅以 PR 正文或跨任务消息结束。检查点不占发布队列，也不证明 staging 成功：
+
+```sh
+python3 scripts/release_control.py --state /secure/release/state.json \
+  --coordinator-thread-id <thread-id> handoff checkpoint checkpoint.json
+```
+
+`checkpoint.json` 包含 `candidate_id`、`work_item`、`origin_thread_id`、`owner_thread_id`、`branch`、`worktree`、`pr_url`、`commit_sha`、`tree_sha`、`base_main_sha`、`blocked_reason`、`required_action`、非空 `resubmit_conditions` 和 `evidence`。命令核对干净 worktree 与实时 PR base/head，并要求状态文件已存在；它在一次持久写入中记录 `blocked_development` 和待投递 `blocked` 事件。后续完整 handoff 使用新 candidate ID，经现有 validate/submit 成功后关闭同工作项的阻塞检查点。通知投递或 ack 均不能关闭检查点。
+
 ## 公开 main 新鲜度证明
 
 预发布机访问 GitHub 可能超时。指挥台读取 `qianlan33333-png/AI-CRM-v4` 的公开分支 API，取得准确 main commit/tree，再签发短时证明：

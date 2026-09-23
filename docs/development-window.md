@@ -25,6 +25,9 @@ package、staging app install 和业务运行时 readback 明确为 N/A，只附
 
 开发任务完成或返工时先写持久事件，再发送指挥台通知。候选入队后冻结；任何源码修复
 都产生新 commit、候选、receipt 和事件，旧候选不可覆盖。
+若 `code_complete` 后缺少真实预发证据，先用 `release_control.py handoff checkpoint`
+在现有发布状态中写入 `blocked_development`，包括 owner、阻塞原因、重试条件与证据；
+通知投递和 ack 不代表业务验收。完整 handoff 成功登记新候选才关闭该检查点。
 
 用户明确要求把真实业务验收放到生产后时，必须附独立 deferred acceptance，列出具体
 未验证旅程、Owner、截止时间和后续动作。技术验收、同包、版本、健康、认证和指定读回
