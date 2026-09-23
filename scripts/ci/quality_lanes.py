@@ -133,7 +133,9 @@ def commands(lane: str, report_dir: Path | None) -> list[list[str]]:
             sys.executable, "scripts/audit/test_check_new_exact_duplicates.py"
         ], [sys.executable, "scripts/audit/test_check_source_authority_changes.py"], [
             "bash", "scripts/audit/check-dedup-base-diff.sh", "."
-        ], ["bash", "scripts/test-configure-wecom-tag-catalog-mutation-runtime.sh"], [sys.executable, "scripts/test_retention_registry.py"], [sys.executable, "-m", "unittest", "discover", "-s", "deploy", "-p", "test_*.py"]]
+        ], ["bash", "scripts/test-configure-wecom-tag-catalog-mutation-runtime.sh"], [sys.executable, "scripts/test_retention_registry.py"], [
+            sys.executable, "-m", "unittest", "scripts/test_domestic_release.py", "scripts/test_domestic_release_build.py"
+        ], [sys.executable, "-m", "unittest", "discover", "-s", "deploy", "-p", "test_*.py"]]
     if lane == "backend":
         venv = venv_path(lane, report_dir)
         return [["bash", "scripts/run-donor-view-consumers.sh", "stage"], [

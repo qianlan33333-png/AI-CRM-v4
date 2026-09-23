@@ -184,7 +184,6 @@ case "$mode" in
   check)
     run_frontend_and_stage_checks
     stage_frontend
-    scripts/check-install-release-contract.sh
     ;;
   release)
     build_release_binaries
