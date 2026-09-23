@@ -22,6 +22,12 @@ installer = load("domestic_promote", ROOT / "deploy/domestic-promote.py")
 
 
 class DomesticReleaseTest(unittest.TestCase):
+    def test_excel_component_update_requires_active_service_restart(self):
+        self.assertEqual(
+            installer.changed_units({"changed_paths": ["components/excel-batches/batches.py"]}),
+            ["aicrm-excel-batches.service"],
+        )
+
     def test_first_parent_two_successive_merges(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)

@@ -47,6 +47,15 @@ jobs:
           GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           python3 scripts/check-migration-sequence.py --base "${GITHUB_BASE_SHA:-origin/main}"
+      - name: Require an installer for Excel dependency updates
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if ! git diff --quiet "$GITHUB_BASE_SHA"...HEAD -- components/excel-batches/requirements.txt; then
+            echo 'Excel dependency changes need a portable staged venv installer before merge.' >&2
+            exit 1
+          fi
       - id: plan
         name: Verify whether main is exactly the tested PR tree
         env:

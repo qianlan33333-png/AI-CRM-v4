@@ -101,7 +101,7 @@ def switch_to(path: Path) -> None:
     os.replace(temp, CURRENT)
 
 
-def readiness(sha: str) -> None:
+def readiness(sha: str, extra_units: tuple[str, ...] = ()) -> None:
     last = "unavailable"
     for _ in range(30):
         try:
@@ -117,7 +117,16 @@ def readiness(sha: str) -> None:
                     if not pid_text.isdigit() or int(pid_text) <= 0 or Path(f"/proc/{pid_text}/exe").resolve() != expected_binary:
                         matching_images = False
                         break
-                if active and matching_images:
+                extra_active = True
+                for unit in extra_units:
+                    if run("systemctl", "is-active", "--quiet", unit, check=False).returncode != 0:
+                        extra_active = False
+                        break
+                    pid = run("systemctl", "show", unit, "-p", "MainPID", "--value").stdout.strip()
+                    if not pid.isdigit() or int(pid) <= 0:
+                        extra_active = False
+                        break
+                if active and matching_images and extra_active:
                     return
             last = f"status={body.get('status')} sha={body.get('release_sha')}"
         except Exception as exc:
@@ -126,21 +135,26 @@ def readiness(sha: str) -> None:
     raise RuntimeError(f"release health failed: {last}")
 
 
-def restart_services() -> None:
+def restart_services(extra_units: tuple[str, ...] = ()) -> None:
     run("systemctl", "restart", "aicrm.service")
     run("systemctl", "restart", "aicrm-effects-worker.service")
+    for unit in extra_units:
+        run("systemctl", "restart", unit)
 
 
 def changed_units(metadata: dict) -> list[str]:
     paths = metadata.get("changed_paths", [])
     if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
         raise ValueError("invalid changed paths")
-    return sorted({Path(path).name for path in paths if path.startswith("deploy/") and Path(path).suffix in {".service", ".timer"} and not Path(path).name.startswith("aicrm-domestic-release.")})
+    units = {Path(path).name for path in paths if path.startswith("deploy/") and Path(path).suffix in {".service", ".timer"} and not Path(path).name.startswith("aicrm-domestic-release.")}
+    if any(path.startswith("components/excel-batches/") for path in paths):
+        units.add("aicrm-excel-batches.service")
+    return sorted(units)
 
 
 def install_units(release: Path, names: list[str]) -> None:
     for name in names:
-        source = release / "deploy" / name
+        source = release / ("components/excel-batches" if name == "aicrm-excel-batches.service" else "deploy") / name
         if not source.is_file() or source.is_symlink():
             raise RuntimeError(f"systemd unit missing: {name}")
         target = Path("/etc/systemd/system") / name
@@ -244,6 +258,7 @@ def install(incoming: Path, metadata: dict, expected_base: str | None) -> dict:
         if bootstrap:
             units = sorted({path.name for path in (release / "deploy").glob("aicrm*.service") if path.name != "aicrm-domestic-release.service"} | {path.name for path in (release / "deploy").glob("aicrm*.timer") if path.name != "aicrm-domestic-release.timer"})
         unit_snapshot = {name: (Path("/etc/systemd/system") / name).read_bytes() if (Path("/etc/systemd/system") / name).is_file() else None for name in units}
+        extra_active = tuple(unit for unit in ("aicrm-excel-batches.service",) if unit in units and run("systemctl", "is-active", "--quiet", unit, check=False).returncode == 0)
         backup = None
         if metadata["migrations_changed"]:
             backup = backup_database(sha)
@@ -255,11 +270,11 @@ def install(incoming: Path, metadata: dict, expected_base: str | None) -> dict:
                 install_units(release, units)
             if metadata["migrations_changed"] or bootstrap:
                 run("systemctl", "start", "aicrm-migrate.service")
-            restart_services()
+            restart_services(extra_active)
             for unit in units:
-                if unit not in {"aicrm.service", "aicrm-effects-worker.service", "aicrm-migrate.service"}:
+                if unit not in {"aicrm.service", "aicrm-effects-worker.service", "aicrm-migrate.service", *extra_active}:
                     run("systemctl", "try-restart", unit)
-            readiness(sha)
+            readiness(sha, extra_active)
             verify_payload_without_release_env(release, metadata)
         except Exception:
             if switched:
@@ -268,8 +283,8 @@ def install(incoming: Path, metadata: dict, expected_base: str | None) -> dict:
                     try:
                         if units:
                             restore_units(unit_snapshot)
-                        restart_services()
-                        readiness(old_sha)
+                        restart_services(extra_active)
+                        readiness(old_sha, extra_active)
                     except Exception as rollback_error:
                         raise RuntimeError(f"rollback outcome unknown: {rollback_error}")
                 else:

@@ -236,8 +236,13 @@ def stage_install(config: dict, sha: str, out: Path, base_sha: str) -> dict:
     receipt = json.loads(result.splitlines()[-1])
     if receipt.get("source_sha") != sha or receipt.get("technical_status") != "installed_healthy":
         raise RuntimeError("staging install receipt mismatch")
-    expected_manifest = json.loads((out / "domestic-release.json").read_text())["release_files_sha256"]
+    metadata = json.loads((out / "domestic-release.json").read_text())
+    expected_manifest = metadata["release_files_sha256"]
     verify_readback(stage_readback(), sha, expected_manifest)
+    if metadata.get("frontend_changed"):
+        with urllib.request.urlopen("http://127.0.0.1:8080/login", timeout=5) as response:
+            if response.status != 200 or "text/html" not in response.headers.get("Content-Type", ""):
+                raise RuntimeError("staging UI route is not serving HTML")
     return receipt
 
 

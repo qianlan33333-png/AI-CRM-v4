@@ -666,6 +666,13 @@ def build(repo_path: str | Path, base_value: str, target_value: str,
 
             if not release_in_source.is_dir():
                 raise BuildError("release builder completed without creating release/")
+            missing_commands = [
+                item.binary for item in command_inventory
+                if not (release_in_source / "bin" / item.binary).is_file()
+                or (release_in_source / "bin" / item.binary).is_symlink()
+            ]
+            if missing_commands:
+                raise BuildError(f"release is missing expected programs: {missing_commands}")
             _remove_release_env(release_in_source)
             release_out = staged_output / RELEASE_DIR_NAME
             shutil.copytree(release_in_source, release_out, symlinks=True, copy_function=shutil.copy2)
