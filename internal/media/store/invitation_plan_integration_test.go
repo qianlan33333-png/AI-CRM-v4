@@ -11,6 +11,7 @@ import (
 	pg "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -127,6 +128,44 @@ func TestPostgreSQLInvitationAtomicSaveAndUpgrade(t *testing.T) {
 	}
 	if err = native.QueryRow(ctx, `SELECT count(*) FROM invitation_effect_probe`).Scan(&count); err != nil || count != 2 {
 		t.Fatal("upgrade recreated shared official code", count, err)
+	}
+	// A previously published /gi/ plan keeps serving its working group code
+	// while the new single-configuration Provider effect is still pending.
+	var existingID int64
+	if err = native.QueryRow(ctx, `INSERT INTO media_group_invites(name,title,description,join_url,enabled,created_by,updated_by) VALUES('已发布计划','已发布入群','','https://crm.example/gi/`+strings.Repeat("a", 48)+`',true,1,1) RETURNING id`).Scan(&existingID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = native.Exec(ctx, `INSERT INTO media_invitation_plans(invite_id,public_token,mode,threshold,state,current_chat_id,bindings) VALUES($1,$2,'sequence',180,'active','a','[{"chat_id":"a"},{"chat_id":"b"}]')`, existingID, strings.Repeat("a", 48)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = native.Exec(ctx, `INSERT INTO media_invitation_codes(chat_id,source_digest,state,config_id,qr_code) VALUES('a','old-code-a','executed','old-config','https://wework.qpic.cn/old-code')`); err != nil {
+		t.Fatal(err)
+	}
+	existing, err := repo.ReadInvitationPlan(ctx, existingID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	threshold := 180
+	oldInput := p.InvitationInput{ID: existingID, Version: existing.Version, Name: existing.Name, Title: existing.Title, Mode: "sequence", Threshold: &threshold, Enabled: true, ChatIDs: []string{"a", "b"}}
+	if _, err = repo.SaveInvitationPlan(ctx, oldInput, 1, "existing-plan-upgrade-0001", "https://crm.example", invitationTestEffects{}); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := repo.ReadPublicInvitation(ctx, existing.Token)
+	if err != nil || pending.ProviderState != "accepted" || pending.State != "active" || pending.CurrentChatID != "a" || pending.Bindings[0].QRCode != "https://wework.qpic.cn/old-code" {
+		t.Fatalf("published entry unavailable during upgrade: %+v %v", pending, err)
+	}
+	var effectID string
+	if err = native.QueryRow(ctx, `SELECT effect_id FROM media_invitation_join_ways WHERE invite_id=$1`, existingID).Scan(&effectID); err != nil {
+		t.Fatal(err)
+	}
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		return repo.CompleteInvitationPlanCode(tx, p.InvitationCodeCompletion{EffectID: effectID, State: "executed", QRCode: "https://wework.qpic.cn/stable-code", ConfigID: "stable-config"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ready, err := repo.ReadPublicInvitation(ctx, existing.Token)
+	if err != nil || ready.ProviderState != "executed" || ready.ProviderConfigID != "stable-config" || ready.Bindings[0].QRCode != "https://wework.qpic.cn/stable-code" || ready.JoinURL != existing.JoinURL {
+		t.Fatalf("stable code upgrade failed: %+v %v", ready, err)
 	}
 
 }

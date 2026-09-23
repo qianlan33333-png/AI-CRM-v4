@@ -323,10 +323,10 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 					level = "none"
 				}
 			}
-			if channel != domain.ChannelH5Official {
+			if channel != domain.ChannelH5Official && channel != domain.ChannelAlipayWap && channel != domain.ChannelAlipayPage {
 				level = "none"
 			}
-			if channel == domain.ChannelH5Official {
+			if channel == domain.ChannelH5Official || channel == domain.ChannelAlipayWap || channel == domain.ChannelAlipayPage {
 				if level == "shipping_address" && !validShippingAddress(c.ShippingAddress) {
 					return paymentport.ErrConflict
 				}

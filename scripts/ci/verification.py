@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Keep GitHub verification lightweight and exact-head based.
+"""Keep GitHub code checks exact-head and separate from staging acceptance.
 
-Local and staging evidence carry the long test suites. GitHub checks the
-current tree and governance; full lanes remain available only as an explicit
-workflow-dispatch break-glass action.
+Runtime, test, fixture and release-control changes run the full PR lanes.
+Staging evidence is checked later by handoff and trusted-node readback.
 """
 import argparse
 import io
@@ -13,6 +12,7 @@ from pathlib import Path
 import re
 import subprocess
 import zipfile
+import local_first_gate as staging_boundary
 
 PHASES = ("preflight", "backend", "frontend", "browser", "archive-sdk")
 WORKFLOW = ".github/workflows/ci.yml"
@@ -23,14 +23,23 @@ def git(ref):
 
 
 def requires_full_pr_verification() -> bool:
-    """Changes to delivery infrastructure must exercise the full CI lanes."""
+    """High-risk code and test/fixture changes must exercise the full CI lanes."""
     base = os.environ.get("GITHUB_BASE_SHA", "")
     if not re.fullmatch(r"[0-9a-f]{40}", base):
         return False
     changed = subprocess.check_output(["git", "diff", "--name-only", f"{base}...HEAD"], text=True).splitlines()
-    critical = (".github/", "deploy/", "scripts/ci/", "skills/aicrm-v3-development-frontdoor/",
-                "AGENTS.md", "scripts/check-install-release-contract.sh")
-    return any(path.startswith(critical) for path in changed)
+    critical = (".github/", "deploy/", "scripts/ci/", "migrations/", "internal/platform/",
+                "internal/identity/", "internal/outbound/", "internal/externaleffects/",
+                "scripts/release_queue.py", "scripts/release_control.py", "scripts/release_coordinator.py",
+                "scripts/release_events.py", "scripts/release_handoff.py",
+                "skills/aicrm-v3-development-frontdoor/", "AGENTS.md",
+                "scripts/check-install-release-contract.sh")
+    test_paths = ("scripts/test-", "scripts/test_", "cmd/aicrm/")
+    return any(staging_boundary.is_runtime_path(path)
+               or path in staging_boundary.OPERATOR_ONLY_PREFIXES
+               or path.startswith(critical) or path.startswith(test_paths)
+               or path.endswith(("_test.go", ".test.mjs", ".spec.mjs", "_chromium_journey.mjs"))
+               for path in changed)
 
 
 def api(path, raw=False):
@@ -151,10 +160,11 @@ def main():
     if args.mode == "plan":
         verified_run = None
         mode = "full"
-        # Local and staging verification are authoritative for ordinary
-        # changes. GitHub only checks the exact tree, receipt and governance.
-        # Full lanes remain an explicit break-glass action.
-        if event in {"pull_request", "workflow_dispatch"} and ref != "refs/heads/main" and os.environ.get("FORCE_FULL") != "true":
+        # PR code changes run full lanes. Staging receipt and package evidence
+        # remain a separate release-handoff gate before serial merge.
+        if (event in {"pull_request", "workflow_dispatch"} and ref != "refs/heads/main"
+                and os.environ.get("FORCE_FULL") != "true"
+                and (event != "pull_request" or not requires_full_pr_verification())):
             mode = "light"
             full = False
             with open(os.environ["GITHUB_OUTPUT"], "a") as output:

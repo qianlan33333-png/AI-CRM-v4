@@ -9,7 +9,10 @@ from pathlib import Path
 
 ORDER = ['waiting_candidate', 'preview_building', 'staging_acceptance', 'frozen',
          'waiting_merge', 'merged', 'production', 'observing', 'released']
-ACTIVE = set(ORDER[1:-1])
+# Staging runs on its own host.  A production observation must not prevent a
+# separately locked staging build/install, but it still owns promotion.
+STAGING_ACTIVE = {'preview_building', 'staging_acceptance'}
+PRODUCTION_ACTIVE = {'frozen', 'waiting_merge', 'merged', 'production', 'observing'}
 
 def reservation_file(queue_file):
     return queue_file.with_name(queue_file.name + '.promotion-reservation.json')
@@ -38,8 +41,9 @@ def change(queue, command, manifest=None, candidate_id=None, status=None, main=N
             raise ValueError('merged candidate cannot be invalidated')
     elif old not in ORDER or ORDER.index(old) + 1 >= len(ORDER) or ORDER[ORDER.index(old)+1] != status:
         raise ValueError(f'invalid transition: {old} -> {status}')
-    if status in ACTIVE:
-        if any(i['status'] in ACTIVE and i is not item for i in items):
+    lane = STAGING_ACTIVE if status in STAGING_ACTIVE else PRODUCTION_ACTIVE if status in PRODUCTION_ACTIVE else set()
+    if lane:
+        if any(i['status'] in lane and i is not item for i in items):
             raise ValueError('another candidate owns the release queue')
         if status == 'preview_building' and next(i for i in items if i['status'] == ORDER[0]) is not item:
             raise ValueError('candidate is not at queue head')
@@ -70,6 +74,8 @@ def main():
             value = json.loads(a.receipt.read_text())
             if value.get('status') != 'accepted': raise ValueError('accepted receipt required')
             if not any(i.get('candidate_id') == value.get('candidate_id') for i in queue['items']):
+                if any(i.get('status') in PRODUCTION_ACTIVE for i in queue['items']):
+                    raise ValueError('another candidate owns the production queue')
                 queue['items'].append({**value, 'status': 'waiting_merge', 'events': [{'from': 'accepted', 'to': 'waiting_merge', 'time': int(time.time())}]})
         else:
             change(queue, a.command, manifest=json.loads(a.manifest.read_text()) if a.command == 'enqueue' else None,

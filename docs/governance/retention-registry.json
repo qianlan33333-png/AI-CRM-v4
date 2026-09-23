@@ -129,7 +129,7 @@
       "cleanup_entrypoint": ""
     },
     "filesystem_prefix:/opt/aicrm/source-bundles": {
-      "coverage_status": "policy_available",
+      "coverage_status": "host_unobserved",
       "gap_code": "",
       "policy_id": "release_artifact",
       "cleanup_entrypoint": "deploy/cleanup-source-bundles.py#inventory"
@@ -461,6 +461,12 @@
       "scope": "exact",
       "policy": "never_delete_by_retention",
       "reason": "Single-flight staging build lock; never treated as a retention candidate."
+    },
+    "/opt/aicrm/release-allowed-signers": {
+      "owner": "release",
+      "scope": "exact",
+      "policy": "never_delete_by_retention",
+      "reason": "Pinned public signing identities for offline staging source verification; release owner rotates it explicitly."
     },
     "/opt/aicrm/source-mirror.git": {
       "owner": "release",

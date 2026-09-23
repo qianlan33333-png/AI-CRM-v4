@@ -70,7 +70,7 @@ def verify(*,attestation_path:Path,signature_path:Path,allowed_signers:Path,iden
  for field,expected_value in expected.items():
   if value.get(field)!=expected_value: raise ValueError(field+' mismatch')
  issued=parse_stamp(value['issued_at']); queried=parse_stamp(value['queried_at']); expires=parse_stamp(value['expires_at']); current=now or utcnow()
- if issued>current+timedelta(seconds=30) or queried>issued+timedelta(seconds=30) or current>=expires: raise ValueError('attestation is expired or from the future')
+ if issued>current+timedelta(seconds=30) or abs((issued-queried).total_seconds())>30 or current>=expires: raise ValueError('attestation is expired or from the future')
  if expires-issued>timedelta(seconds=max_age_seconds): raise ValueError('attestation validity window too long')
  if value.get('bundle_sha256')!=sha256(bundle): raise ValueError('bundle digest mismatch')
  stage=value.get('stage')

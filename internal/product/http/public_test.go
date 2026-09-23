@@ -303,6 +303,39 @@ func TestPublicPaymentCompletionRefreshJourney(t *testing.T) {
 	}
 }
 
+func TestPublicAlipayOriginalOrderBrowserJourney(t *testing.T) {
+	var html bytes.Buffer
+	view := publicProductPageView{Payment: true, WeChatPayEnabled: true, AlipayEnabled: true, Product: publicProduct{ID: 7, Name: "测试商品", PriceMinor: 990, ProductKind: "standard", CouponTargetRef: "standard_product:7", ContactCollectionLevel: "none", RegionOptionsJSON: template.JS("[]")}}
+	if err := publicProductPage.Execute(&html, view); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "alipay-checkout.html")
+	if err := os.WriteFile(path, html.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, source, _, _ := runtime.Caller(0)
+	journey := filepath.Join(filepath.Dir(source), "public_alipay_journey.mjs")
+	if output, err := exec.Command("node", journey, path).CombinedOutput(); err != nil {
+		t.Fatalf("Alipay original order journey: %v\n%s", err, output)
+	}
+}
+
+func TestPublicPaymentMethodsRespectAvailability(t *testing.T) {
+	for _, tc := range []struct {
+		wechat, alipay bool
+	}{{true, false}, {false, true}, {true, true}} {
+		var html bytes.Buffer
+		view := publicProductPageView{Payment: true, WeChatPayEnabled: tc.wechat, AlipayEnabled: tc.alipay, Product: publicProduct{ID: 7, Name: "测试商品", PriceMinor: 990, ProductKind: "standard", ContactCollectionLevel: "none", RegionOptionsJSON: template.JS("[]")}}
+		if err := publicProductPage.Execute(&html, view); err != nil {
+			t.Fatal(err)
+		}
+		body := html.String()
+		if strings.Contains(body, `name="paymentMethod" value="wechat_pay"`) != tc.wechat || strings.Contains(body, `name="paymentMethod" value="alipay"`) != tc.alipay {
+			t.Fatalf("visible payment methods differ from availability: wechat=%v alipay=%v", tc.wechat, tc.alipay)
+		}
+	}
+}
+
 func TestPublicPaymentEmbedsRegionOptionsAsArray(t *testing.T) {
 	var html bytes.Buffer
 	if err := publicProductPage.Execute(&html, map[string]any{

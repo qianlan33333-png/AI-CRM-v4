@@ -1129,6 +1129,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
+	publicProductHandler.SetPaymentMethods(cfg.WeChatPay.Enabled, cfg.Alipay.Enabled)
 	// Public commerce presentation is a release-only browser closure. Resolve
 	// its manifest lazily on the public route, consistent with the other UI
 	// bindings below: workers and non-UI composition fixtures need no cwd
@@ -1148,6 +1149,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
+	publicServicePeriodHandler.SetPaymentMethods(cfg.WeChatPay.Enabled, cfg.Alipay.Enabled)
 	if err = publicServicePeriodHandler.SetPublicPresentationAssets(publicCommerceAssets); err != nil {
 		return fail(err)
 	}

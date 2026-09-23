@@ -23,7 +23,7 @@ class StagingReceiptTests(unittest.TestCase):
             package.write_bytes(b"package")
             receipt = root / "receipt.json"
             receipt.write_text(json.dumps({
-                "schema": 1, "repository": "AI-CRM-v3", "environment": "staging",
+                "schema": 1, "repository": "AI-CRM-v4", "environment": "staging",
                 "status": "accepted", "commit_sha": "a" * 40, "tree_sha": "b" * 40,
                 "package_sha256": __import__("hashlib").sha256(b"package").hexdigest(),
             }))
@@ -37,6 +37,18 @@ class StagingReceiptTests(unittest.TestCase):
             path = Path(temp) / "receipt.json"
             path.write_text(json.dumps({"schema": 1, "environment": "staging", "status": "queued"}))
             with self.assertRaisesRegex(ValueError, "missing repository"):
+                checker.load(path)
+
+    def test_rejects_legacy_repository(self):
+        checker = load()
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "receipt.json"
+            path.write_text(json.dumps({
+                "schema": 1, "repository": "AI-CRM-v3", "environment": "staging",
+                "status": "accepted", "commit_sha": "a" * 40,
+                "tree_sha": "b" * 40, "package_sha256": "c" * 64,
+            }))
+            with self.assertRaisesRegex(ValueError, "AI-CRM-v4"):
                 checker.load(path)
 
 

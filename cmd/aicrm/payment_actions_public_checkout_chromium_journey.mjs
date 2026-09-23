@@ -13,7 +13,7 @@ const linkToken = process.env.AICRM_PAYMENT_ACTIONS_PUBLIC_LINK_TOKEN;
 const linkMerchant = process.env.AICRM_PAYMENT_ACTIONS_PUBLIC_LINK_MERCHANT;
 const linkBinding = process.env.AICRM_PAYMENT_ACTIONS_PUBLIC_LINK_BINDING;
 const screenshotDirectory = process.env.AICRM_PAYMENT_ACTIONS_PUBLIC_SCREENSHOT_DIR;
-const h5Destination = 'https://after.example.test/frozen-h5';
+const h5Destination = 'https://after.example.test/edited-after-checkout';
 const linkFallback = 'https://after.example.test/url-link-fallback';
 
 if (!/^https:\/\/127\.0\.0\.1:\d+$/.test(baseURL) || !standardCode || !serviceCode || !/^[1-9][0-9]*$/.test(serviceID || '') || !/^pays_[A-Za-z0-9_-]{20,}$/.test(h5Token || '') || !/^pays_[A-Za-z0-9_-]{20,}$/.test(linkToken || '') || !linkMerchant || !/^[A-Za-z0-9_-]{43}$/.test(linkBinding || '') || !path.isAbsolute(screenshotDirectory || '')) {
@@ -121,7 +121,7 @@ try {
   const setTrustedCookie = token => cdp.call('Network.setCookie', { url: baseURL, name: 'aicrm_payment_session', value: token, secure: true, httpOnly: true, sameSite: 'Lax' });
   assert.equal((await setTrustedCookie(h5Token)).success, true, 'H5 paid session cookie');
 
-  // A paid standard purchase uses its frozen H5 action directly. Re-entering
+  // A paid standard purchase uses its settlement-frozen H5 action. Re-entering
   // the real public payment page represents a browser refresh and must only
   // issue reads; a terminal checkout can never create another POST.
   await cdp.call('Page.navigate', { url: `${baseURL}/pay/${encodeURIComponent(standardCode)}` });

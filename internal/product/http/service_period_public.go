@@ -35,13 +35,19 @@ type ServicePeriodPublicHandler struct {
 	entitlements       orderport.EntitlementService
 	now                func() time.Time
 	presentationAssets PublicPresentationAssets
+	wechatPayEnabled   bool
+	alipayEnabled      bool
+}
+
+func (h *ServicePeriodPublicHandler) SetPaymentMethods(wechat, alipay bool) {
+	h.wechatPayEnabled, h.alipayEnabled = wechat, alipay
 }
 
 func NewServicePeriodPublicHandler(products productport.ServicePeriodPublicReader) (*ServicePeriodPublicHandler, error) {
 	if products == nil {
 		return nil, errors.New("service period public reader is required")
 	}
-	h := &ServicePeriodPublicHandler{products: products, now: time.Now}
+	h := &ServicePeriodPublicHandler{products: products, now: time.Now, wechatPayEnabled: true}
 	if presentation, ok := products.(productport.ServicePeriodPublicPresentationReader); ok {
 		h.presentation = presentation
 	}
@@ -133,7 +139,7 @@ func (h *ServicePeriodPublicHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", publicCommerceContentSecurityPolicy())
 	if available {
-		if err = publicProductPage.Execute(w, publicProductPageView{Product: public, Payment: true, Detail: !payment && len(public.Images) > 0, Presentation: publicPresentationTemplateFor(presentation)}); err != nil {
+		if err = publicProductPage.Execute(w, publicProductPageView{Product: public, Payment: true, Detail: !payment && len(public.Images) > 0, Presentation: publicPresentationTemplateFor(presentation), WeChatPayEnabled: h.wechatPayEnabled, AlipayEnabled: h.alipayEnabled}); err != nil {
 			return
 		}
 		return

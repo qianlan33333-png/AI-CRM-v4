@@ -55,6 +55,13 @@ python3 scripts/release_freshness.py verify \
 
 签名、时效、字段、摘要或 bundle prerequisites 任一错误都拒绝。临时 SOCKS 只能用于一次性的只读 GitHub 核对，不能成为预发布长期依赖。
 
+`deploy/build-release-on-staging.sh` 要求 `AICRM_SOURCE_ATTESTATION`、
+`AICRM_SOURCE_SIGNATURE` 和本地 `AICRM_STAGING_ALLOWED_SIGNERS`。预发布机的
+`/opt/aicrm/release-allowed-signers` 由发布 Owner 事先固定并核对公钥指纹；构建脚本
+不能用环境变量覆盖远端信任锚。未配置公钥、签名过期或预发布 source mirror 缺少增量
+bundle 的 prerequisite 时，构建失败。指挥台须重新生成完整 bundle 并签发新证明，
+不能在传输中替换已签名的 bundle。
+
 ## 事件与通知
 
 `release_events.py` 使用 flock、原子替换、lease、退避和 dead letter。指挥代理显式执行 `show` → `claim` → Codex 消息工具 → `finish sent|failed`；接收任务处理后再 `ack`。`sent` 只说明消息已投递，不说明接收方处理或生产效果成功。接收方按 event ID 去重。
@@ -62,6 +69,8 @@ python3 scripts/release_freshness.py verify \
 ## 串行发布队列
 
 每次入队在最新 `main` 上重建 preview，核对 GitHub PR current head、required checks、签名证明、生产祖先和已验收 package。main、head 或 tree 前进即使旧测试为绿也必须生成新候选证据。
+
+预发构建/安装自验与生产晋级/观察分别占用槽位。旧候选在生产 `observing` 时，专用预发机可在自己的单飞构建和安装锁下自验下一候选；预发同一时刻仍只允许一个安装/验收，切换前须记录旧预发 active SHA、保留包与 receipt、迁移和回滚兼容性、认证测试数据及虚拟外部效果。`accepted` 仅释放预发槽位，不自动进入 `waiting_merge`。生产 `frozen`、`waiting_merge`、`merged`、`production`、`observing` 仍排他；`adopt-accepted` 和 `release promote --prepare` 不得绕过旧生产观察或缺失的政策批准。预发服务切换不改变旧生产候选的状态。
 
 同一时间只允许一个候选占用合并/晋级/观察窗口。若已有 observing candidate，必须根据生产 receipt 完成观察后再处理下一项。队列冲突记录 `blocked_environment`；安装结果不明记录 `outcome_unknown` 并只读对账，不能换幂等键重试。
 

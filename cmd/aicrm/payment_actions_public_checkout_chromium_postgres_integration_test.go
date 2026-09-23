@@ -36,19 +36,21 @@ func TestPostgreSQLPaymentActionsPublicCheckoutChromiumJourney(t *testing.T) {
 	if !ok || service == nil {
 		t.Fatal("composition did not retain the native Payment application")
 	}
-	const h5URL = "https://after.example.test/frozen-h5"
-	setPublicCheckoutActionProjection(t, fixture, fixture.productID, legacyRedirectProjection(false, "h5", h5URL, "", "", ""))
+	const checkoutH5URL = "https://after.example.test/frozen-h5"
+	const paidH5URL = "https://after.example.test/edited-after-checkout"
+	setPublicCheckoutActionProjection(t, fixture, fixture.productID, legacyRedirectProjection(false, "h5", checkoutH5URL, "", "", ""))
 	h5Merchant := createPublicCheckoutForCompletionAction(t, fixture, h5Session.token, fixture.productID, "standard", "payment-actions-public-browser-h5-create")
-	setPublicCheckoutActionProjection(t, fixture, fixture.productID, legacyRedirectProjection(false, "h5", "https://after.example.test/edited-after-checkout", "", "", ""))
+	setPublicCheckoutActionProjection(t, fixture, fixture.productID, legacyRedirectProjection(false, "h5", paidH5URL, "", "", ""))
 	settlePublicCheckoutForCompletionAction(t, fixture, service, h5Merchant, 9900, "payment-actions-public-browser-h5")
-	assertPublicPurchaseStatusAction(t, fixture, h5Session.token, fixture.productID, "standard", h5URL)
+	setPublicCheckoutActionProjection(t, fixture, fixture.productID, legacyRedirectProjection(false, "h5", "https://after.example.test/edited-after-payment", "", "", ""))
+	assertPublicPurchaseStatusAction(t, fixture, h5Session.token, fixture.productID, "standard", paidH5URL)
 
 	linkSession := issuePublicCommerceTrustedH5SessionWithKey(t, fixture, "payment-actions-public-browser-link-session")
 	const fallbackURL = "https://after.example.test/url-link-fallback"
 	setPublicCheckoutActionProjection(t, fixture, fixture.serviceProductID, legacyRedirectProjection(true, "url_link", "", "https://source.invalid/legacy-url-link", "result.destination", fallbackURL))
 	linkMerchant := createPublicCheckoutForCompletionAction(t, fixture, linkSession.token, fixture.serviceProductID, "service_period", "payment-actions-public-browser-link-create")
-	setPublicCheckoutActionProjection(t, fixture, fixture.serviceProductID, legacyRedirectProjection(true, "h5", "https://after.example.test/edited-service", "", "", ""))
 	settlePublicCheckoutForCompletionAction(t, fixture, service, linkMerchant, 12800, "payment-actions-public-browser-link")
+	setPublicCheckoutActionProjection(t, fixture, fixture.serviceProductID, legacyRedirectProjection(true, "h5", "https://after.example.test/edited-service", "", "", ""))
 	linkBinding := publicCheckoutBindingForPaymentActions(t, fixture, linkSession.token)
 
 	screenshots := t.TempDir()
