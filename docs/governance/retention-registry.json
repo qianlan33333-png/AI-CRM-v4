@@ -372,6 +372,12 @@
       "policy": "verified_release_allowlist",
       "reason": "Root-owned staging build inputs and packages are retained until their matching receipt is promoted or explicitly expired by the release owner."
     },
+    "/opt/aicrm/build-gc-audit": {
+      "owner": "release",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Staging build GC audit receipts survive the build directories they describe."
+    },
     "/run/aicrm-release-retention": {
       "owner": "platform",
       "scope": "subtree",

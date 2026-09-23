@@ -1,6 +1,6 @@
 {
   "registry_version": 1,
-  "registry_sha256": "e69b4658863d4fb0fcdf5549dc0238aa0189e7f13a4512d6ddd8dd3ef1a3dda2",
+  "registry_sha256": "ba4cd125a7e1cd847f1898137936c5caa14ac2e6cb34f8085a55c2ce233cc3bb",
   "inventory_scope": "committed_registry",
   "items": [
     {
@@ -6523,6 +6523,19 @@
       "policy": "never_delete_by_retention",
       "reason": "Existing secret/configuration, formal import evidence, component state, or active release; excluded from process cleanup.",
       "source": "docs/governance/retention-registry.json#filesystem_prefixes//opt/aicrm-excel",
+      "cleanup_entrypoint": "",
+      "policy_id": "",
+      "coverage_status": "protected",
+      "gap_code": "",
+      "authorization_expiry": "not_assessed"
+    },
+    {
+      "kind": "filesystem_prefix",
+      "name": "/opt/aicrm/build-gc-audit",
+      "owner": "release",
+      "policy": "never_delete_by_retention",
+      "reason": "Staging build GC audit receipts survive the build directories they describe.",
+      "source": "docs/governance/retention-registry.json#filesystem_prefixes//opt/aicrm/build-gc-audit",
       "cleanup_entrypoint": "",
       "policy_id": "",
       "coverage_status": "protected",
