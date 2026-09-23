@@ -189,11 +189,10 @@ chmod 0755 "$test_root/install-release.sh"
 # The installer now rejects anything other than Linux amd64 ELF binaries.
 # Build one inert real binary for the ordering fixture so this test exercises
 # release sequencing without relying on shell scripts that fail that gate.
-cat > "$test_root/fixture-main.go" <<'EOF'
-package main
-func main() {}
+cat > "$test_root/fixture-main.c" <<'EOF'
+int main(void) { return 0; }
 EOF
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$test_root/fixture-binary" "$test_root/fixture-main.go"
+cc -Os -s -o "$test_root/fixture-binary" "$test_root/fixture-main.c"
 
 make_release() {
   local sha="$1"
