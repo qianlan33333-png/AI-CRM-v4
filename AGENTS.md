@@ -95,7 +95,7 @@ package SHA-256、staging receipt 和受影响业务 readback。纯治理/文档
 ## 9. 提交前验证顺序
 
 - 首次推送和修复后再次推送前，先运行 `python3 scripts/dev_preflight.py fast`；Go 改动再运行 `python3 scripts/dev_preflight.py compile`，然后执行受影响领域的专项测试。编译成功不等于测试通过。
-- `fast`、`compile` 和局部 `browser` 的证据只能汇报对应局部 claim，不能称为完整回归或可交付验证。需要本地完整证据时运行 `python3 scripts/dev_preflight.py full`；它要求开始、每个 lane 前后及结束时都是同一干净已提交树，并拒绝缺 PostgreSQL 16、Linux amd64 Chromium、固定工具或仓内已登记视图源的环境。具备预发布机时，完整本地证据随后必须在 `49.232.57.128` 做真实部署、健康检查和业务读回；PR 的 GitHub 默认只核对当前 head/tree、预发布 receipt、治理和并行一致性，不因 Composition、迁移、Provider、共享组件、CI 或部署变更自动升级完整 CI。完整云端 CI 仅在维护者明确执行 `workflow_dispatch` 并设置 `force_full=true` 时运行，不能把 GitHub 轻门禁冒称完整回归。
+- `fast`、`compile` 和局部 `browser` 的证据只能汇报对应局部 claim，不能称为完整回归或可交付验证。需要本地完整证据时运行 `python3 scripts/dev_preflight.py full`；它要求开始、每个 lane 前后及结束时都是同一干净已提交树，并拒绝缺 PostgreSQL 16、Linux amd64 Chromium、固定工具或仓内已登记视图源的环境。具备预发布机时，完整本地证据随后必须在 `49.232.57.128` 做真实部署、健康检查和业务读回。运行时、测试/fixture、CI、部署、迁移、共享平台和发布状态机改动的 PR 必须在当前 head 跑完整 GitHub 代码 CI；PR check 不认证预发收据。运行时预发包、业务读回和 accepted receipt 必须在 `release_control handoff` 入队前独立核验。纯文档变更可使用轻门禁；`workflow_dispatch force_full=true` 只证明触发分支的代码树，不能冒充 PR required check 或预发验收。
 - CI 失败先重现准确失败用例，修复后跑完整失败阶段，再提交全量 CI；不能通过删断言、接受 skip 或反复推送猜测修复。
 - 新增真实 Host 浏览器旅程放在 `cmd/aicrm`，使用 `Test…ChromiumJourney` 命名，自动进入必跑集合；其他包或命名必须明确接入。运行 `python3 scripts/dev_preflight.py browser` 前准备最终 Host 产物和独立 PostgreSQL 16 测试库。
 - 测试汇报附准确 HEAD、tree、工作区状态、命令及证据目录，区分编译、专项、本地完整、完整 CI、取消、跳过和未验证；修改代码后不能沿用旧 HEAD 绿灯。PR 首轮质量保留该 PR 最早 CI attempt 的原始 SHA；最终质量只对应当前 PR head 的最新 attempt。

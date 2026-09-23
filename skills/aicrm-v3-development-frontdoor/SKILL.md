@@ -120,7 +120,7 @@ staging app install、业务运行时读回均明确为 N/A，只提交与变更
 
 ## 测试与合并
 
-按影响范围先在本地执行适用的静态、编译/单元、PostgreSQL/迁移/事务、集成/权限、前端构建与真实浏览器、OneID、External Effects、发布包和回滚检查；涉及运行时代码的 PR 再在预发布机完成完整部署、合成数据业务旅程和读回。GitHub PR 默认只执行当前 head/tree、治理、冲突、证据和敏感信息一致性检查；运行时代码还必须核对预发布 receipt。纯 CI、治理、Skill 和文档变更不要求无意义的应用部署 receipt，也不重复本地长测试。完整云端 CI 仅在维护者显式使用 `workflow_dispatch` 的 `force_full=true` 时执行。
+按影响范围先在本地执行适用的静态、编译/单元、PostgreSQL/迁移/事务、集成/权限、前端构建与真实浏览器、OneID、External Effects、发布包和回滚检查；涉及运行时代码的 PR 再在预发布机完成完整部署、合成数据业务旅程和读回。运行时、测试/fixture、CI、部署、迁移、共享平台与发布状态机改动须在当前 PR head 通过完整 GitHub 代码 CI；GitHub PR check 不认证预发收据。运行时代码的准确预发包、accepted receipt 与业务读回由 `release_control handoff` 在串行合并前独立核验。纯治理、Skill 和文档变更不要求无意义的应用部署 receipt；`workflow_dispatch force_full=true` 仅证明触发分支代码树，不替代 PR required check。
 
 PR 保留准确 HEAD/tree、并行与发布快照、测试摘要、证据目录和未验证项。作者声明只作为上下文，不作为独立上线门禁；真正门禁是当前 head/tree、预发布 receipt、治理安全检查和部署后读回。编译通过、排队成功、Mock 或 HTTP 202 都不能单独称为完成。
 

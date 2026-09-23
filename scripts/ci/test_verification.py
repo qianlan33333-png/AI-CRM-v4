@@ -137,7 +137,7 @@ class VerificationTests(unittest.TestCase):
             ("scripts/release_control.py\n", True),
             ("scripts/release_events.py\n", True),
             ("docs/guide.md\n", False),
-            ("web/v3/productAdapter.ts\n", False),
+            ("web/v3/productAdapter.ts\n", True),
         )
         for changed, expected in cases:
             with self.subTest(changed=changed), patch.dict("os.environ", {"GITHUB_BASE_SHA": "a" * 40}):

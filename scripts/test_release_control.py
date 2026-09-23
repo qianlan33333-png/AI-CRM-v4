@@ -7,10 +7,50 @@ from unittest.mock import patch
 import sys
 sys.path.insert(0,str(Path(__file__).parent))
 from release_control import verify_pr
-from release_handoff import validate
+from release_handoff import validate, validate_acceptance
 SCRIPT = Path(__file__).with_name('release_control.py')
 
 class ControlTests(unittest.TestCase):
+    def test_runtime_handoff_accepts_real_receipt_and_rejects_forged_or_missing(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            preview, tree, candidate = "a" * 40, "b" * 40, "candidate-1"
+            package = root / "package.tar"; package.write_bytes(b"built package")
+            package_sha = hashlib.sha256(package.read_bytes()).hexdigest()
+            evidence = root / "journey.log"; evidence.write_text("authenticated business readback\n")
+            built = root / "built.json"
+            built.write_text(json.dumps({"status": "built", "merge_preview_sha": preview,
+                                         "candidate_tree_sha": tree, "package_sha256": package_sha}))
+            receipt = root / "accepted.json"
+            receipt.write_text(json.dumps({"status": "accepted", "work_item": "runtime", "candidate_id": candidate,
+                                           "merge_preview_sha": preview, "candidate_tree_sha": tree,
+                                           "package_sha256": package_sha, "package_path": str(package),
+                                           "built_receipt": str(built),
+                                           "built_receipt_sha256": hashlib.sha256(built.read_bytes()).hexdigest(),
+                                           "journeys": [{"work_item": "runtime", "name": "readback", "expected": "ok",
+                                                         "actual": "ok", "command": "GET /business", "effect_mode": "virtual",
+                                                         "passed": True, "evidence_path": str(evidence),
+                                                         "evidence_sha256": hashlib.sha256(evidence.read_bytes()).hexdigest()}]}))
+            value = {"work_item": "runtime", "merge_preview_sha": preview,
+                     "candidate_tree_sha": tree, "package_sha256": package_sha,
+                     "staging_acceptance": {"status": "accepted", "receipt": str(receipt),
+                                            "receipt_sha256": hashlib.sha256(receipt.read_bytes()).hexdigest(),
+                                            "candidate_id": candidate, "merge_preview_sha": preview,
+                                            "candidate_tree_sha": tree, "package_sha256": package_sha}}
+            validate_acceptance(value, root / "handoff.json")
+            forged = json.loads(receipt.read_text()); forged["package_sha256"] = "f" * 64
+            receipt.write_text(json.dumps(forged))
+            with self.assertRaisesRegex(ValueError, "digest mismatch"):
+                validate_acceptance(value, root / "handoff.json")
+            value["staging_acceptance"]["receipt_sha256"] = hashlib.sha256(receipt.read_bytes()).hexdigest()
+            value["staging_acceptance"]["package_sha256"] = "f" * 64
+            with self.assertRaisesRegex(ValueError, "differs from handoff"):
+                validate_acceptance(value, root / "handoff.json")
+            receipt.unlink()
+            with self.assertRaises(FileNotFoundError):
+                validate_acceptance(value, root / "handoff.json")
+
     def test_governance_only_handoff_uses_local_evidence_without_runtime_package(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); repo=root/'repo'; repo.mkdir()

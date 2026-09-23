@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import shutil
 import subprocess
@@ -162,21 +163,24 @@ class StagingSourceGateTests(unittest.TestCase):
                               return_value=changed + "internal/automation/app/policies.go\n"):
                 self.assertTrue(gate.requires_staging_receipt("b" * 40))
 
-    def test_pr_body_link_cannot_forge_staging_acceptance(self):
+    def test_pr_code_gate_does_not_claim_staging_acceptance(self):
         gate_spec = importlib.util.spec_from_file_location(
             "local_first_gate", ROOT / "scripts/ci/local_first_gate.py")
         gate = importlib.util.module_from_spec(gate_spec)
         gate_spec.loader.exec_module(gate)
         head, tree = "b" * 40, "c" * 40
-        body = {"body": (f"Staging-Head: {head}\nStaging-Tree: {tree}\n"
-                         "Staging-Receipt: https://example.test/fabricated.json\n")}
-        environment = {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REPOSITORY": "owner/repo",
-                       "PR_NUMBER": "15", "PR_HEAD_SHA": head,
+        environment = {"GITHUB_EVENT_NAME": "pull_request", "PR_HEAD_SHA": head,
                        "CI_NEEDS": json.dumps({"plan": {"outputs": {"mode": "full"}}})}
-        with patch.dict("os.environ", environment), patch.object(gate, "requires_staging_receipt", return_value=True):
-            with patch.object(gate.subprocess, "check_output",
-                              side_effect=[json.dumps(body), tree, tree]):
-                with self.assertRaisesRegex(SystemExit, "not independently verified"):
+        for label in ("real_receipt", "fabricated_link", "no_receipt"):
+            with self.subTest(label=label), patch.dict("os.environ", environment):
+                with patch.object(gate, "requires_staging_receipt", return_value=True), \
+                        patch.object(gate.subprocess, "check_output", return_value=tree), \
+                        patch("sys.stdout", new_callable=io.StringIO) as output:
+                    self.assertEqual(gate.main(), 0)
+                    self.assertEqual(json.loads(output.getvalue())["staging"], "pending_release_handoff_validation")
+        with patch.dict("os.environ", {**environment, "CI_NEEDS": json.dumps({"plan": {"outputs": {"mode": "light"}}})}):
+            with patch.object(gate, "requires_staging_receipt", return_value=True):
+                with self.assertRaisesRegex(SystemExit, "requires full code CI"):
                     gate.main()
 
 

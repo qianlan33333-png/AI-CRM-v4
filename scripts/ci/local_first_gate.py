@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Require an immutable staging receipt for pull requests."""
+"""Keep PR code verification separate from staging handoff acceptance."""
 from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
-import sys
+import re
 
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -64,6 +63,13 @@ OPERATOR_ONLY_PREFIXES += (
 )
 
 
+def is_runtime_path(path: str) -> bool:
+    return (path not in NON_RUNTIME_FILES
+            and not path.startswith(NON_RUNTIME_PREFIXES)
+            and not is_test_only(path)
+            and path not in OPERATOR_ONLY_PREFIXES)
+
+
 def requires_staging_receipt(current: str) -> bool:
     base = os.environ.get("PR_BASE_SHA", "")
     if not SHA.fullmatch(base):
@@ -72,13 +78,7 @@ def requires_staging_receipt(current: str) -> bool:
         ["git", "-c", "core.quotePath=false", "diff", "--name-only", f"{base}...{current}"],
         text=True,
     ).splitlines()
-    return any(
-        path not in NON_RUNTIME_FILES
-        and not path.startswith(NON_RUNTIME_PREFIXES)
-        and not is_test_only(path)
-        and path not in OPERATOR_ONLY_PREFIXES
-        for path in changed
-    )
+    return any(is_runtime_path(path) for path in changed)
 
 
 def main() -> int:
@@ -91,31 +91,19 @@ def main() -> int:
         raise SystemExit("invalid CI_NEEDS while checking staging receipt")
     if mode not in {"light", "targeted", "full"}:
         raise SystemExit("invalid PR verification mode while checking staging receipt")
-    repo = os.environ["GITHUB_REPOSITORY"]
-    number = os.environ["PR_NUMBER"]
-    body = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/pulls/{number}"], text=True))["body"] or ""
     current = os.environ.get("PR_HEAD_SHA") or subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     if not requires_staging_receipt(current):
-        print(json.dumps({"head": current, "staging": "not_required_for_non_runtime_change"}, separators=(",", ":")))
+        print(json.dumps({"head": current, "staging": "not_applicable_to_non_runtime_change"}, separators=(",", ":")))
         return 0
+    if mode != "full":
+        raise SystemExit("runtime PR requires full code CI; staging is checked at release handoff")
     tree = subprocess.check_output(["git", "rev-parse", f"{current}^{{tree}}"], text=True).strip()
-    values = {}
-    for name in ("Staging-Head", "Staging-Tree", "Staging-Receipt"):
-        match = re.search(rf"(?m)^{re.escape(name)}:\s*(\S+)\s*$", body)
-        values[name] = match.group(1) if match else ""
-    if not SHA.fullmatch(values["Staging-Head"]):
-        raise SystemExit("staging receipt head is missing or invalid")
-    staging_tree = subprocess.check_output(["git", "rev-parse", f"{values['Staging-Head']}^{{tree}}"], text=True).strip()
-    if staging_tree != tree:
-        raise SystemExit("staging receipt head tree does not match the current PR tree")
-    if not SHA.fullmatch(values["Staging-Tree"]) or values["Staging-Tree"] != tree:
-        raise SystemExit("staging receipt tree does not match the current PR tree")
-    # A PR body is author-controlled. A URL here cannot establish that the
-    # staging host built and accepted this merge preview or that its package
-    # matches the handoff. Until CI can independently verify an immutable,
-    # signed receipt, fail closed; release_handoff validates local receipts
-    # separately but is not part of this GitHub check.
-    raise SystemExit("staging receipt in PR body is not independently verified by CI")
+    # PR body links are author-controlled and never count as staging proof.
+    # release_control handoff validates the exact preview, package and journey
+    # evidence before the coordinator accepts this runtime candidate.
+    print(json.dumps({"head": current, "tree": tree,
+                      "staging": "pending_release_handoff_validation"}, separators=(",", ":")))
+    return 0
 
 
 if __name__ == "__main__":
