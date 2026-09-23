@@ -52,7 +52,7 @@ func (r *Repository) ReadPublicInvitation(ctx context.Context, token string) (v 
 func (r *Repository) hydrateInvitation(ctx context.Context, v *p.InvitationPlan) error {
 	tx, _ := pg.RequireTransaction(ctx)
 	for i := range v.Bindings {
-		if v.ProviderState != "" {
+		if v.ProviderState == "executed" || v.ProviderState == "reconciled" {
 			v.Bindings[i].QRCode = v.ProviderQRCode
 			v.Bindings[i].CodeState = v.ProviderState
 			continue
@@ -60,6 +60,10 @@ func (r *Repository) hydrateInvitation(ctx context.Context, v *p.InvitationPlan)
 		err := tx.QueryRow(ctx, `SELECT state,qr_code FROM media_invitation_codes WHERE chat_id=$1`, v.Bindings[i].ChatID).Scan(&v.Bindings[i].CodeState, &v.Bindings[i].QRCode)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
+		}
+		if v.ProviderState != "" && (v.Bindings[i].CodeState != "executed" && v.Bindings[i].CodeState != "reconciled") {
+			v.Bindings[i].CodeState = v.ProviderState
+			v.Bindings[i].QRCode = ""
 		}
 	}
 	return nil

@@ -169,6 +169,7 @@ try {
   await capture('invitation-editor');
   await click('#invitationForm button[type=submit]');
   await waitFor(cdp,"document.querySelector('#invitationRows').textContent.includes('浏览器邀请计划')",'save failed');
+  if(!await evaluate(cdp,"Boolean(document.querySelector('#invitationRows [data-qr]')?.disabled) && document.querySelector('#invitationRows [data-qr]')?.textContent.includes('下载企微入群码')"))throw new Error('unconfirmed Provider QR must not be downloadable');
   await capture('invitation-plans');
   if(exceptions.length)throw new Error('runtime exceptions: '+JSON.stringify(exceptions));
   console.log('invitation_chromium: PASS screenshots='+screenshotDirectory);
