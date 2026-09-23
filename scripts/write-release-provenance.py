@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write immutable provenance for an AI-CRM-v3 release archive."""
+"""Write immutable provenance for an AI-CRM-v4 release archive."""
 from __future__ import annotations
 
 import hashlib
@@ -22,7 +22,7 @@ def main() -> int:
     tree = git("rev-parse", f"{commit}^{{tree}}")
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     payload = {
-        "repository": "AI-CRM-v3",
+        "repository": "AI-CRM-v4",
         "commit_sha": commit,
         "tree_sha": tree,
         "package_sha256": digest,

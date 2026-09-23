@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Require an immutable staging receipt for pull requests."""
+"""Keep PR code verification separate from staging handoff acceptance."""
 from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
-import sys
+import re
 
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -14,6 +13,12 @@ NON_RUNTIME_PREFIXES = (".github/", "docs/", "scripts/ci/", "scripts/staging-fix
 NON_RUNTIME_FILES = {"AGENTS.md"}
 NON_RUNTIME_FILES.add("internal/adminops/retention_resources.generated.json")
 NON_RUNTIME_FILES.add("deploy/README.md")
+TEST_ONLY_PREFIXES = ("scripts/test-", "scripts/test_", "scripts/ci/test_", "deploy/test_")
+
+
+def is_test_only(path: str) -> bool:
+    return (path.startswith(TEST_ONLY_PREFIXES)
+            or path.endswith(("_test.go", ".test.mjs", ".spec.mjs", "_chromium_journey.mjs")))
 OPERATOR_ONLY_PREFIXES = (
     "scripts/deploy-release-local.sh",
     "deploy/install-release.sh",
@@ -32,6 +37,10 @@ OPERATOR_ONLY_PREFIXES += (
     "scripts/ci/local_first_gate.py",
     "scripts/validate-staging-receipt.py",
     "scripts/test_staging_receipt.py",
+    "scripts/verify-staging-source.py",
+    "scripts/test_staging_source_gate.py",
+    "scripts/release_freshness.py",
+    "scripts/write-release-provenance.py",
     "scripts/validate-staging-capability.py",
     "scripts/test_validate_staging_capability.py",
     "scripts/run-donor-view-consumers.sh",
@@ -41,6 +50,10 @@ OPERATOR_ONLY_PREFIXES += (
     "scripts/accept-staging-candidate.py",
     "scripts/release_candidate.py",
     "scripts/release_queue.py",
+    "scripts/release_control.py",
+    "scripts/release_coordinator.py",
+    "scripts/release_events.py",
+    "scripts/release_handoff.py",
     "scripts/test_release_candidate.py",
     "scripts/test_release_queue.py",
     "deploy/seed-staging-business-fixtures.sh",
@@ -48,6 +61,13 @@ OPERATOR_ONLY_PREFIXES += (
     "scripts/validate-staging-fixture-readback.py",
     "scripts/test_validate_staging_fixture_readback.py",
 )
+
+
+def is_runtime_path(path: str) -> bool:
+    return (path not in NON_RUNTIME_FILES
+            and not path.startswith(NON_RUNTIME_PREFIXES)
+            and not is_test_only(path)
+            and path not in OPERATOR_ONLY_PREFIXES)
 
 
 def requires_staging_receipt(current: str) -> bool:
@@ -58,12 +78,7 @@ def requires_staging_receipt(current: str) -> bool:
         ["git", "-c", "core.quotePath=false", "diff", "--name-only", f"{base}...{current}"],
         text=True,
     ).splitlines()
-    return any(
-        path not in NON_RUNTIME_FILES
-        and not path.startswith(NON_RUNTIME_PREFIXES)
-        and path not in OPERATOR_ONLY_PREFIXES
-        for path in changed
-    )
+    return any(is_runtime_path(path) for path in changed)
 
 
 def main() -> int:
@@ -74,31 +89,20 @@ def main() -> int:
         mode = needs.get("plan", {}).get("outputs", {}).get("mode", "light")
     except json.JSONDecodeError:
         raise SystemExit("invalid CI_NEEDS while checking staging receipt")
-    if mode != "light":
-        print(json.dumps({"mode": mode, "staging": "superseded by full CI"}, separators=(",", ":")))
-        return 0
-    repo = os.environ["GITHUB_REPOSITORY"]
-    number = os.environ["PR_NUMBER"]
-    body = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/pulls/{number}"], text=True))["body"] or ""
+    if mode not in {"light", "targeted", "full"}:
+        raise SystemExit("invalid PR verification mode while checking staging receipt")
     current = os.environ.get("PR_HEAD_SHA") or subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     if not requires_staging_receipt(current):
-        print(json.dumps({"head": current, "staging": "not_required_for_non_runtime_change"}, separators=(",", ":")))
+        print(json.dumps({"head": current, "staging": "not_applicable_to_non_runtime_change"}, separators=(",", ":")))
         return 0
+    if mode != "full":
+        raise SystemExit("runtime PR requires full code CI; staging is checked at release handoff")
     tree = subprocess.check_output(["git", "rev-parse", f"{current}^{{tree}}"], text=True).strip()
-    values = {}
-    for name in ("Staging-Head", "Staging-Tree", "Staging-Receipt"):
-        match = re.search(rf"(?m)^{re.escape(name)}:\s*(\S+)\s*$", body)
-        values[name] = match.group(1) if match else ""
-    if not SHA.fullmatch(values["Staging-Head"]):
-        raise SystemExit("staging receipt head is missing or invalid")
-    staging_tree = subprocess.check_output(["git", "rev-parse", f"{values['Staging-Head']}^{{tree}}"], text=True).strip()
-    if staging_tree != tree:
-        raise SystemExit("staging receipt head tree does not match the current PR tree")
-    if not SHA.fullmatch(values["Staging-Tree"]) or values["Staging-Tree"] != tree:
-        raise SystemExit("staging receipt tree does not match the current PR tree")
-    if values["Staging-Receipt"].startswith("<"):
-        raise SystemExit("staging receipt link is missing")
-    print(json.dumps({"head": current, "tree": tree, "receipt": values["Staging-Receipt"]}, separators=(",", ":")))
+    # PR body links are author-controlled and never count as staging proof.
+    # release_control handoff checks local preview/package/journey consistency;
+    # the coordinator must separately confirm trusted staging-node origin.
+    print(json.dumps({"head": current, "tree": tree,
+                      "staging": "pending_release_handoff_validation"}, separators=(",", ":")))
     return 0
 
 

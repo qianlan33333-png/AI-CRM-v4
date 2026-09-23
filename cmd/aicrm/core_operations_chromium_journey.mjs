@@ -187,7 +187,7 @@ try {
   await waitFor(cdp,"document.querySelector('#packageModal').hidden && document.querySelector('#audRows').textContent.includes('AI 空包已编辑')", "list edit failed");
   await cdp.call("Page.navigate",{url:baseURL+'/admin/automation-conversion/packages/'+emptyID});
   await waitFor(cdp,"document.querySelector('#membershipModeNotice')?.textContent==='等待绑定核心产品'", "empty detail missing");
-  if (!await evaluate(cdp,"document.querySelector('.template-config-card').hidden && document.querySelector('#manualRefreshBtn').hidden && !document.querySelector('#coreProductConfigLink').hidden")) throw new Error('empty package offers algorithm controls');
+  if (!await evaluate(cdp,"document.querySelector('[data-rule-config].template-config-card').hidden && document.querySelector('#manualRefreshBtn').hidden && !document.querySelector('#coreProductConfigLink').hidden && !document.querySelector('.template-config-card[aria-label=\"接口持续推送\"]').hidden")) throw new Error('empty package offers algorithm controls or hides direct push');
   await cdp.call("Page.navigate",{url:baseURL+'/admin/automation-conversion'});
   await waitFor(cdp,"document.querySelectorAll('#coreOperationsRoot .core-steps button').length===3", "core operations not loaded after detail");
   await click('[data-audience-workspace-tab=products]');

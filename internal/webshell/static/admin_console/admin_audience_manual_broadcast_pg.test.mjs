@@ -33,6 +33,7 @@ const dom = new JSDOM(`<!doctype html><html><body>${template}</body></html>`, {
     window.fetch = async (input, init = {}) => {
       const url = new URL(String(input), window.location.origin);
       if (url.pathname === `/api/admin/ai-audience/packages/${packageID}/broadcast-previews` || url.pathname === `/api/admin/ai-audience/packages/${packageID}/runs` || url.pathname === "/api/admin/automation-runs") return globalThis.fetch(url, init);
+      if (url.pathname === `/api/admin/ai-audience/packages/${packageID}/direct-pushes`) return json({ items: [] });
       if (url.pathname === `/api/admin/ai-audience/packages/${packageID}`) return json({ package: { id: packageID, name: "PG audience", version: 4, lifecycle: "paused" } });
       if (url.pathname === "/api/admin/ai-audience/package-groups") return json({ items: [] });
       if (url.pathname === "/api/admin/ai-audience/templates") return json({ items: [] });

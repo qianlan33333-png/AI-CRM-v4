@@ -19,8 +19,8 @@ def load(path: Path) -> dict:
     for key in ("repository", "commit_sha", "tree_sha", "package_sha256", "environment", "status"):
         if key not in value:
             raise ValueError(f"staging receipt missing {key}")
-    if value["repository"] != "AI-CRM-v3" or value["environment"] != "staging" or value["status"] != "accepted":
-        raise ValueError("staging receipt is not an accepted AI-CRM-v3 staging receipt")
+    if value["repository"] != "AI-CRM-v4" or value["environment"] != "staging" or value["status"] != "accepted":
+        raise ValueError("staging receipt is not an accepted AI-CRM-v4 staging receipt")
     if not SHA.fullmatch(value["commit_sha"]) or not SHA.fullmatch(value["tree_sha"]):
         raise ValueError("staging receipt has invalid commit/tree")
     if not DIGEST.fullmatch(value["package_sha256"]):
