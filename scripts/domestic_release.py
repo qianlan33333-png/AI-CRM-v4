@@ -24,7 +24,7 @@ import urllib.request
 SHA = re.compile(r"^[0-9a-f]{40}$")
 REPO = "qianlan33333-png/AI-CRM-v4"
 BUILD_USER = "aicrm-build"
-BUILD_ROOT = Path("/opt/aicrm/build-worker")
+BUILD_ROOT = Path("/opt/aicrm/domestic/build-worker")
 HOST_READBACK_CODE = """
 import hashlib, json, pathlib, subprocess, urllib.request
 p = pathlib.Path('/opt/aicrm/current').resolve(strict=True)
