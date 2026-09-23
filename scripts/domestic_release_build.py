@@ -393,14 +393,15 @@ def _embed_pattern_matches(relative: str, pattern: str) -> bool:
 
 
 class TemporaryWorktree:
-    def __init__(self, repo: Path, target_sha: str):
+    def __init__(self, repo: Path, target_sha: str, temp_parent: Path | None = None):
         self.repo = repo
         self.target_sha = target_sha
+        self.temp_parent = temp_parent
         self.parent: Path | None = None
         self.path: Path | None = None
 
     def __enter__(self) -> Path:
-        self.parent = Path(tempfile.mkdtemp(prefix="domestic-release-source-"))
+        self.parent = Path(tempfile.mkdtemp(prefix="domestic-release-source-", dir=self.temp_parent))
         self.path = self.parent / "source"
         try:
             _git(self.repo, "worktree", "add", "--detach", str(self.path), self.target_sha, capture=False)
@@ -634,7 +635,9 @@ def build(repo_path: str | Path, base_value: str, target_value: str,
     staged_output = Path(tempfile.mkdtemp(prefix=f".{output.name}.building-", dir=output.parent))
     completed = False
     try:
-        with TemporaryWorktree(repo, target_sha) as source:
+        # A complete release can exceed a small /tmp tmpfs. Keep the linker
+        # output on the persistent disk that holds --out.
+        with TemporaryWorktree(repo, target_sha, temp_parent=output.parent) as source:
             plan_value = _make_plan(repo, base_sha, target_sha, target_root=source)
             command_inventory = _release_commands(repo, target_sha)
             command_by_package = {item.package: item for item in command_inventory}
