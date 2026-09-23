@@ -10,7 +10,7 @@ Group=ubuntu
 UMask=0022
 WorkingDirectory=/opt/aicrm/source
 Environment=PYTHONDONTWRITEBYTECODE=1
-Environment=PATH=/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/opt/aicrm/toolchain/npm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/npm/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=GOCACHE=/opt/aicrm/cache/go-build
 Environment=GOMODCACHE=/opt/aicrm/cache/go-mod
 Environment=npm_config_cache=/opt/aicrm/cache/npm
