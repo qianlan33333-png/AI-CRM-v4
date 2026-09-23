@@ -154,10 +154,27 @@ class VerificationTests(unittest.TestCase):
 
     def test_delivery_infrastructure_changes_require_full_pr_verification(self):
         base = "d" * 40
-        with patch.dict("os.environ", {"GITHUB_BASE_SHA": base}, clear=False), patch.object(
-            policy.subprocess, "check_output", return_value=".github/workflows/ci.yml\n"
-        ):
-            self.assertTrue(policy.requires_full_pr_verification())
+        with patch.dict("os.environ", {"GITHUB_BASE_SHA": base}, clear=False):
+            for path in (".github/workflows/ci.yml", "scripts/release_queue.py",
+                         "scripts/release_coordinator.py", "scripts/release_control.py",
+                         "scripts/release_events.py", "scripts/release_handoff.py"):
+                with patch.object(policy.subprocess, "check_output", return_value=path + "\n"):
+                    self.assertTrue(policy.requires_full_pr_verification(), path)
+
+    def test_release_metadata_pr_plan_runs_full_lanes(self):
+        import sys
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            summary = Path(directory) / "summary"
+            env = {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REF": "refs/pull/17/merge",
+                   "GITHUB_REPOSITORY": "owner/repo", "GITHUB_SHA": "b" * 40,
+                   "GITHUB_BASE_SHA": "a" * 40, "GITHUB_OUTPUT": str(output),
+                   "GITHUB_STEP_SUMMARY": str(summary), "FORCE_FULL": "false"}
+            with patch.dict("os.environ", env), patch.object(sys, "argv", ["verification.py", "plan"]), \
+                 patch.object(policy.subprocess, "check_output", return_value="scripts/release_queue.py\n"):
+                policy.main()
+            self.assertIn("mode=full", output.read_text())
+            self.assertIn("full=true", output.read_text())
 
     def test_release_consistency_gate_accepts_main_without_long_lanes(self):
         needs = {name: {"result": "skipped"} for name in policy.PHASES}

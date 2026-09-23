@@ -36,6 +36,8 @@ NEXT = {
     "production": "observing",
     "observing": "released",
 }
+STAGING_ACTIVE = {"preview_building", "staging_acceptance"}
+PRODUCTION_ACTIVE = {"waiting_merge", "production", "observing"}
 
 
 def now() -> int:
@@ -95,8 +97,11 @@ def transition(state: dict, candidate_id: str, target: str, *, main_sha: str | N
         if not main_sha or main_sha != item.get("base_main_sha"):
             raise ValueError("candidate base main is stale")
         lane = item.get("change_class", "runtime")
+        # Acceptance may finish while a previous release is under production
+        # observation.  Only waiting_merge requests the production lane.
+        occupied = PRODUCTION_ACTIVE if target == "waiting_merge" else STAGING_ACTIVE
         active = [x for x in state["items"]
-                  if x["status"] in {"preview_building", "staging_acceptance", "production", "observing"}
+                  if x["status"] in occupied
                   and x.get("change_class", "runtime") == lane]
         if active and item not in active:
             raise ValueError("another candidate owns the release lane")
