@@ -67,8 +67,10 @@ def verify_lineage(root: Path, base: str, production_sha: str, preview_sha: str,
     if head and git(root, 'rev-parse', 'HEAD') != head: raise ValueError('PR head moved')
     return {'valid': True, 'base_main_sha': base, 'production_sha': production_sha, 'merge_preview_sha': preview_sha, 'pr_head_sha': head}
 
-def prepare_promote(handoff_path: Path, queue_path: Path, merged_main: str, production_sha: str) -> dict:
+def prepare_promote(handoff_path: Path, queue_path: Path, merged_main: str, production_sha: str,
+                    bridge_readback_path: Path | None = None, bridge_freshness: dict | None = None) -> dict:
     value = json.loads(handoff_path.read_text()); root = Path(value['worktree'])
+    bridge_ref = value.get('first_v4_batch_bridge')
     if 'members' in value:
         if value.get('business_acceptance',{}).get('status')=='business_acceptance_deferred_to_user':
             from release_deferred_acceptance import validate_deferred_batch
@@ -82,18 +84,36 @@ def prepare_promote(handoff_path: Path, queue_path: Path, merged_main: str, prod
         value['staging_acceptance']={'candidate_id':value['candidate_id'],'receipt':str(receipt_path)}
     else:
         validate_acceptance(value, handoff_path)
-    if live_remote_main(root) != merged_main: raise ValueError('merged main is not live origin/main')
+    if bridge_ref:
+        from release_first_v4_batch_bridge import verify_promotion_freshness
+        verify_promotion_freshness(handoff_path, merged_main, bridge_freshness)
+    elif live_remote_main(root) != merged_main:
+        raise ValueError('merged main is not live origin/main')
     if git(root, 'rev-parse', merged_main + '^{tree}') != value['candidate_tree_sha']:
         raise ValueError('merged main tree differs from accepted package tree')
     parents = git(root, 'rev-list', '--parents', '-n', '1', value['merge_preview_sha']).split()[1:]
     if parents != [value['base_main_sha'], value['commit_sha']]: raise ValueError('invalid merge preview parents')
-    if subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', production_sha, value['merge_preview_sha']]).returncode:
-        raise ValueError('candidate excludes active production SHA')
     queue = json.loads(queue_path.read_text())
+    if bridge_ref:
+        from release_first_v4_batch_bridge import OLD_RELEASE, validate as validate_first_v4_bridge
+        if production_sha != OLD_RELEASE or 'members' not in value:
+            raise ValueError('first-v4 bridge only applies to the exact old release and a batch')
+        if bridge_readback_path is None:
+            raise ValueError('first-v4 bridge requires fresh promotion readback')
+        bridge_path = Path(bridge_ref)
+        if not bridge_path.is_absolute(): bridge_path = handoff_path.parent / bridge_path
+        validate_first_v4_bridge(bridge_path, batch_path=handoff_path, queue=queue,
+                                 merged_main=merged_main, phase='promotion',
+                                 production_readback=json.loads(bridge_readback_path.read_text()))
+    elif subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', production_sha, value['merge_preview_sha']]).returncode:
+        raise ValueError('candidate excludes active production SHA')
     cid = value['staging_acceptance']['candidate_id']
     owned = [i for i in queue.get('items', []) if i.get('candidate_id') == cid]
     active = [i for i in queue.get('items', []) if i.get('status') in {'preview_building', 'staging_acceptance', 'frozen', 'waiting_merge', 'merged', 'production', 'observing'}]
-    if len(owned) != 1 or owned[0].get('status') != 'waiting_merge' or active != owned:
+    permitted = owned
+    if bridge_ref:
+        permitted = owned + [i for i in queue.get('items', []) if i.get('candidate_id') == OLD_CANDIDATE]
+    if len(owned) != 1 or owned[0].get('status') != 'waiting_merge' or len(active) != len(permitted) or any(i not in permitted for i in active):
         raise ValueError('candidate does not exclusively own waiting_merge queue slot')
     if owned[0].get('tree_sha', owned[0].get('candidate_tree_sha')) != value['candidate_tree_sha'] or owned[0].get('package_sha256') != value['package_sha256']:
         raise ValueError('queue candidate tree/package differs from accepted receipt')
@@ -117,7 +137,7 @@ def main():
     p = release.add_parser('verify-lineage'); p.add_argument('worktree', type=Path); p.add_argument('base_main_sha'); p.add_argument('production_sha'); p.add_argument('merge_preview_sha'); p.add_argument('--head-sha')
     p = release.add_parser('return'); p.add_argument('candidate_id'); p.add_argument('failure_class'); p.add_argument('--evidence', action='append', required=True); p.add_argument('--action', dest='required_action', required=True); p.add_argument('--condition', action='append', required=True)
     p = release.add_parser('replay-event'); p.add_argument('event_id')
-    p = release.add_parser('promote'); p.add_argument('--prepare', action='store_true'); p.add_argument('--execute', action='store_true'); p.add_argument('--handoff', type=Path); p.add_argument('--queue', type=Path); p.add_argument('--merged-main-sha'); p.add_argument('--production-sha'); p.add_argument('--host'); p.add_argument('--user',default='ubuntu'); p.add_argument('--key',type=Path); p.add_argument('--known-hosts',type=Path); p.add_argument('--attempt-file',type=Path); p.add_argument('--deploy-script',type=Path); p.add_argument('--staging-node-id',type=Path,default=Path('/opt/aicrm/staging-node-id.json'))
+    p = release.add_parser('promote'); p.add_argument('--prepare', action='store_true'); p.add_argument('--execute', action='store_true'); p.add_argument('--handoff', type=Path); p.add_argument('--queue', type=Path); p.add_argument('--merged-main-sha'); p.add_argument('--production-sha'); p.add_argument('--bridge-readback', type=Path); p.add_argument('--bridge-attestation', type=Path); p.add_argument('--bridge-signature', type=Path); p.add_argument('--bridge-allowed-signers', type=Path); p.add_argument('--bridge-bundle', type=Path); p.add_argument('--host'); p.add_argument('--user',default='ubuntu'); p.add_argument('--key',type=Path); p.add_argument('--known-hosts',type=Path); p.add_argument('--attempt-file',type=Path); p.add_argument('--deploy-script',type=Path); p.add_argument('--staging-node-id',type=Path,default=Path('/opt/aicrm/staging-node-id.json'))
     args = parser.parse_args()
     if args.command == 'handoff':
         if args.action in {'submit-batch','submit-deferred-batch'}:
@@ -168,7 +188,12 @@ def main():
         if args.prepare == args.execute: raise SystemExit('choose exactly one of --prepare or --execute')
         if not all((args.handoff, args.queue, args.merged_main_sha, args.production_sha)):
             raise SystemExit('prepare requires --handoff --queue --merged-main-sha --production-sha')
-        if args.prepare: result = prepare_promote(args.handoff, args.queue, args.merged_main_sha, args.production_sha)
+        bridge_freshness = ({'attestation': args.bridge_attestation, 'signature': args.bridge_signature,
+                             'allowed_signers': args.bridge_allowed_signers, 'bundle': args.bridge_bundle}
+                            if any((args.bridge_attestation, args.bridge_signature, args.bridge_allowed_signers, args.bridge_bundle)) else None)
+        if args.prepare: result = prepare_promote(args.handoff, args.queue, args.merged_main_sha, args.production_sha,
+                                                  bridge_readback_path=args.bridge_readback,
+                                                  bridge_freshness=bridge_freshness)
         else:
             if not all((args.host, args.key, args.known_hosts, args.attempt_file, args.deploy_script)):
                 raise SystemExit('execute requires --host --key --known-hosts --attempt-file --deploy-script')
@@ -176,7 +201,8 @@ def main():
             result = promote(handoff_path=args.handoff,queue_file=args.queue,merged_main=args.merged_main_sha,
                              production_sha=args.production_sha,host=args.host,user=args.user,key_file=args.key,
                              known_hosts_file=args.known_hosts,attempt_file=args.attempt_file,deploy_script=args.deploy_script,
-                             staging_node_id=args.staging_node_id)
+                             staging_node_id=args.staging_node_id,bridge_readback_path=args.bridge_readback,
+                             bridge_freshness=bridge_freshness)
     else: raise ValueError('unsupported command')
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
