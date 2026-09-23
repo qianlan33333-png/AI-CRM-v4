@@ -2,7 +2,7 @@
 """Keep GitHub code checks exact-head and separate from staging acceptance.
 
 Runtime, test, fixture and release-control changes run the full PR lanes.
-Accepted staging evidence is validated later by the release handoff.
+Staging evidence is checked later by handoff and trusted-node readback.
 """
 import argparse
 import io

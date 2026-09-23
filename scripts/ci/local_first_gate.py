@@ -99,8 +99,8 @@ def main() -> int:
         raise SystemExit("runtime PR requires full code CI; staging is checked at release handoff")
     tree = subprocess.check_output(["git", "rev-parse", f"{current}^{{tree}}"], text=True).strip()
     # PR body links are author-controlled and never count as staging proof.
-    # release_control handoff validates the exact preview, package and journey
-    # evidence before the coordinator accepts this runtime candidate.
+    # release_control handoff checks local preview/package/journey consistency;
+    # the coordinator must separately confirm trusted staging-node origin.
     print(json.dumps({"head": current, "tree": tree,
                       "staging": "pending_release_handoff_validation"}, separators=(",", ":")))
     return 0
