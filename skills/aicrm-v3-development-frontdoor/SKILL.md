@@ -1,15 +1,22 @@
 ---
 name: aicrm-v3-development-frontdoor
-description: "AI-CRM-v3 的开发前置门禁与并行交付流程。用于新功能、Bug 修复、调试、合并和上线前规划；要求先完成市场/GitHub 调研、复用评估和冻结 PRD，并持续推进到 GitHub 合并、SSH 部署和上线验收。"
+description: "AI-CRM-v4 的开发前置门禁与并行交付流程（路径名为兼容保留）。用于新功能、Bug 修复、调试和发布交接。"
 ---
 
-# AI-CRM-v3 开发前置门禁
+# AI-CRM-v4 开发前置门禁
+
+## 开发窗口交付硬门槛
+
+开发窗口的完成状态是 `handoff_ready`。开发任务必须完成适用的本地验证、预发布
+技术与业务验收，并提交绑定准确 commit/tree、package 和 receipt 的 handoff。
+用户明确延期真实业务验收时，必须生成独立 deferred acceptance；技术检查不可延期。
+返工产生新 commit、新候选、新 receipt 和新事件，不能覆盖已入队提交。
 
 ## 唯一代码来源
 
-所有开发、测试、构建、发布和部署只允许使用当前 AI-CRM-v3 仓库的准确
+所有开发、测试、构建、发布和部署只允许使用当前 AI-CRM-v4 仓库的准确
 commit 和 Git tree。禁止旧仓库 checkout、旧 commit、donor SHA、donor
-manifest、旧运行时、旧数据库、旧接口或旧前端；缺失旧系统不得阻塞 v3。
+manifest、旧运行时、旧数据库、旧接口或旧前端；缺失旧系统不得阻塞 v4。
 每个发布包必须生成 provenance sidecar，记录 repository、commit SHA、tree
 SHA、package SHA-256、构建环境和构建命令。
 
@@ -38,15 +45,20 @@ PRD 经用户确认后冻结；重大范围、合同或风险变化必须重新�
 
 ## 一次闭环交付
 
-当所有假设和风险边界确认、用户明确开始开发后，持续推进到完整上线验收，不把常规实现选择逐步退回用户。只有新的业务决策、红线风险、凭据/权限缺失或部署证据不一致才暂停并报告。
+当所有假设和风险边界确认、用户明确开始开发后，开发任务持续推进到
+`handoff_ready` 并发送持久事件；收到返工后由原开发任务修复并重新交接。发布指挥台
+负责串行合并、正式部署和观察。只有新的业务决策、红线风险、凭据/权限缺失或证据
+不一致才暂停并报告。
 
-完整终点：实现 → 预发布机按当前准确 commit 编译并验收 → GitHub 轻量一致性门禁与合并 → 预发布机将同一已验收包串行晋级生产 → 部署后认证读回 → 观察窗口验收 → 触发一次“彩纸礼炮”庆祝。本地只做快速反馈和发布脚本自检，不再重复上传本地构建包。
+开发终点：实现 → 准确候选验证 → 预发布机按当前候选编译并验收 → 干净提交、
+handoff 与 receipt → `handoff_ready`。指挥台终点：GitHub 保护检查 → 串行合并 →
+同一包晋级生产 → 认证和真实业务读回 → 观察窗口验收。本地不构建生产包。
 
 生产部署完成且仅在版本、健康状态、认证读回、真实业务读回和观察窗口全部通过后，调用 Codex 的
 `mcp__codex_app__fire_confetti` 一次庆祝本次上线。构建成功、PR 合并、部署开始、服务启动或仅有
 `/readyz` 通过都不能触发；部署失败、回滚、结果未知或观察窗口未结束时不得触发。一次上线事件只触发一次，重复重试同一部署不得重复庆祝。
 
-常规发布先在 `49.232.57.128` 预发布机从当前 v3 准确 commit 编译、安装并完成受影响板块验收，再合并 PR；receipt 必须绑定 repository、commit、tree、package SHA-256、capability 和 business readback。PR 只验证 receipt 与当前 tree 一致、治理和冲突状态。合并后由预发布机在发布锁下把同一已验收包串行晋级到 `124.220.53.183`，不重新编译和打包。生产只做版本、健康、认证和本次板块真实读回。生产部署私钥固定使用 `/Users/qianlan/Downloads/zhengshi.pem`，必须保持 `0600`，不得复制到仓库、PR、日志或命令输出。预发布使用同一账号和密钥时也必须单独核验 Host Key。staging 与 production 使用独立 concurrency/release lock；无关 Provider 不可用时标记 `external_config_unavailable`，只有声明为当前板块依赖时才阻塞。
+常规发布先在 `49.232.57.128` 预发布机从当前 v4 准确候选编译、安装并完成受影响板块验收，再合并 PR；receipt 必须绑定 repository、commit、tree、package SHA-256、capability 和 business readback。公开 `main` 的实时读回由指挥台完成并签发短时 freshness attestation；预发布只保存验签公钥，不保存 GitHub 凭据或长期代理。合并后由预发布机在发布锁下把同一已验收包串行晋级到 `124.220.53.183`，不重新编译和打包。
 
 发布包只允许在预发布机按 Linux amd64 目标编译，发布前执行 `scripts/check-release-binaries.py` 和 `scripts/check-migration-sequence.py`；安装器在切换 current 前再次拒绝非 Linux x86-64 ELF，避免 `status=126` 才发现架构错误。发布包统一由当前仓库 Python archiver 创建，拒绝 `._*` AppleDouble、symlink、未注册文件和非 Linux ELF；`release-files.sha256` 必须在预发布、生产安装器和 success observer 中通过。
 

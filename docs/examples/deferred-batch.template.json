@@ -1,0 +1,36 @@
+{
+  "batch_id": "<batch-id>",
+  "candidate_id": "<candidate-id>",
+  "worktree": "/absolute/path/to/aggregate-worktree",
+  "base_main_sha": "<40-hex>",
+  "aggregate_head_sha": "<40-hex>",
+  "merge_preview_sha": "<40-hex>",
+  "candidate_tree_sha": "<40-hex>",
+  "package_sha256": "<64-hex>",
+  "members": [
+    {
+      "project_key": "<domain-key>",
+      "work_item": "<work-item>",
+      "origin_thread_id": "<origin-task-id>",
+      "commit_sha": "<40-hex>",
+      "tree_sha": "<40-hex>"
+    }
+  ],
+  "business_acceptance": {
+    "status": "business_acceptance_deferred_to_user",
+    "exception_id": "<unique-kebab-case-id>",
+    "decided_by": "user",
+    "decided_at": "<RFC3339>",
+    "due_at": "<RFC3339>",
+    "decision_text": "<exact user decision>",
+    "owner": "user",
+    "scope": ["<domain-key>"],
+    "unverified_business_journeys": [
+      {"project_key": "<domain-key>", "work_item": "<work-item>", "journeys": ["<precise trigger and expected readback>"]}
+    ],
+    "post_production_owner": "user",
+    "post_production_actions": ["<record exact journey result>"]
+  },
+  "technical_acceptance": {"receipt_ref": "<path>", "receipt_sha256": "<64-hex>"},
+  "production_readback": {"status": "pending_technical_deployment", "business_status": "deferred_to_user", "required_technical_readback": ["active_sha", "readyz", "package_sha256"]}
+}

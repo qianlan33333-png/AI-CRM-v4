@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "payload",
+    "delivery",
+    "processing"
+  ],
+  "properties": {
+    "payload": {
+      "type": "object",
+      "required": [
+        "event_type",
+        "origin_thread_id",
+        "destination_thread_id",
+        "candidate_id",
+        "commit_sha",
+        "tree_sha",
+        "required_action",
+        "evidence",
+        "resubmit_conditions",
+        "event_id",
+        "idempotency_key",
+        "created_at"
+      ],
+      "properties": {
+        "event_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "origin_thread_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "destination_thread_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "candidate_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "tree_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "required_action": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array"
+        },
+        "resubmit_conditions": {
+          "type": "array"
+        },
+        "event_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_at": {
+          "type": "integer"
+        }
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "required": [
+        "status",
+        "attempt",
+        "lifetime_attempt",
+        "history",
+        "next_attempt_at",
+        "lease_token",
+        "lease_until",
+        "last_error"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "pending",
+            "sending",
+            "sent",
+            "failed",
+            "dead_letter"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lifetime_attempt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "history": {
+          "type": "array"
+        },
+        "next_attempt_at": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lease_token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lease_until": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "last_error": {
+          "type": "string"
+        }
+      }
+    },
+    "processing": {
+      "type": "object",
+      "required": [
+        "status",
+        "observations"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "unacknowledged",
+            "acknowledged"
+          ]
+        },
+        "observations": {
+          "type": "array"
+        }
+      }
+    }
+  }
+}
