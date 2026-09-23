@@ -464,6 +464,15 @@ def plan(repo_path: str | Path, base_value: str, target_value: str) -> dict[str,
     return _make_plan(repo, base_sha, target_sha)
 
 
+def classify(repo_path: str | Path, base_value: str, target_value: str) -> dict[str, Any]:
+    """Cheap impact check with no checkout or execution of target source."""
+    repo = Path(repo_path).resolve()
+    base_sha = _resolve_commit(repo, base_value)
+    target_sha = _resolve_commit(repo, target_value)
+    result = classify_paths(_changed_paths(repo, base_sha, target_sha))
+    return {"runtime_changed": result.runtime_changed, "changed_paths": result.changed_paths}
+
+
 def _iter_payload_files(release: Path) -> Iterator[Path]:
     for root, dirs, files in os.walk(release, followlinks=False):
         root_path = Path(root)
@@ -707,6 +716,10 @@ def build(repo_path: str | Path, base_value: str, target_value: str,
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="action", required=True)
+    classify_parser = subparsers.add_parser("classify", help="detect runtime changes without executing target source")
+    classify_parser.add_argument("--repo", required=True)
+    classify_parser.add_argument("--base", required=True)
+    classify_parser.add_argument("--target", required=True)
     plan_parser = subparsers.add_parser("plan", help="classify a source commit range")
     plan_parser.add_argument("--repo", required=True)
     plan_parser.add_argument("--base", required=True)
@@ -723,7 +736,9 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.action == "plan":
+        if args.action == "classify":
+            result = classify(args.repo, args.base, args.target)
+        elif args.action == "plan":
             result = plan(args.repo, args.base, args.target)
         else:
             result = build(args.repo, args.base, args.target, args.base_release, args.out)

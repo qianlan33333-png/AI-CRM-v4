@@ -23,6 +23,8 @@ import urllib.request
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 REPO = "qianlan33333-png/AI-CRM-v4"
+BUILD_USER = "aicrm-build"
+BUILD_ROOT = Path("/opt/aicrm/build-worker")
 HOST_READBACK_CODE = """
 import hashlib, json, pathlib, subprocess, urllib.request
 p = pathlib.Path('/opt/aicrm/current').resolve(strict=True)
@@ -204,24 +206,47 @@ def copy_payload(config: dict, sha: str, payload: Path, metadata: Path, link_sha
 def build_candidate(config: dict, sha: str, base: str, base_release: Path | None) -> tuple[Path, dict]:
     repo = Path(config["repo"])
     work_root = Path(config["work_root"])
-    checkout = work_root / "checkouts" / sha
+    if not SHA.fullmatch(sha) or not SHA.fullmatch(base):
+        raise ValueError("invalid build commit")
+    worker = BUILD_ROOT / sha
+    checkout = worker / "source"
+    worker_out = worker / "out"
     out = work_root / "builds" / sha
-    if checkout.exists() or out.exists():
+    if worker.exists() or out.exists():
         raise RuntimeError("existing build path needs inspection; refusing to reuse stale artifacts")
-    checkout.parent.mkdir(parents=True, exist_ok=True)
+    if not BUILD_ROOT.is_dir() or BUILD_ROOT.is_symlink():
+        raise RuntimeError("isolated build account is not provisioned")
     out.parent.mkdir(parents=True, exist_ok=True)
-    git(repo, "worktree", "add", "--detach", str(checkout), sha)
+    # Source hooks and npm/go build scripts execute as a separate account that
+    # cannot read the production SSH key, sudo, state ledger or runtime env.
+    build_prefix = ["sudo", "-u", BUILD_USER, "-H", "--"]
+    command(*build_prefix, "mkdir", "-m", "0755", str(worker), timeout=30)
+    command(*build_prefix, "git", "-c", f"safe.directory={repo / '.git'}", "clone", "-q", "--no-checkout", "--local", "--no-hardlinks", str(repo), str(checkout), timeout=120)
+    command(*build_prefix, "git", "-C", str(checkout), "-c", f"safe.directory={repo / '.git'}", "fetch", "-q", "--no-tags", str(repo), sha, timeout=120)
+    command(*build_prefix, "git", "-C", str(checkout), "cat-file", "-e", f"{sha}^{{commit}}", timeout=30)
+    environment = [
+        f"HOME={BUILD_ROOT}", f"PATH={os.environ['PATH']}",
+        f"GOCACHE={BUILD_ROOT / 'cache/go-build'}",
+        f"GOMODCACHE={BUILD_ROOT / 'cache/go-mod'}",
+        f"npm_config_cache={BUILD_ROOT / 'cache/npm'}",
+        f"TMPDIR={BUILD_ROOT / 'tmp'}", "PYTHONDONTWRITEBYTECODE=1",
+    ]
     try:
-        args = ["python3", "scripts/domestic_release_build.py", "build", "--repo", str(checkout), "--base", base, "--target", sha, "--base-release", str(base_release) if base_release is not None else "none", "--out", str(out)]
-        command(*args, cwd=checkout, timeout=7200)
-    finally:
-        git(repo, "worktree", "remove", "--force", str(checkout))
+        args = [*build_prefix, "/usr/bin/env", "-i", *environment, "python3", str(checkout / "scripts/domestic_release_build.py"), "build", "--repo", str(checkout), "--base", base, "--target", sha, "--base-release", str(base_release) if base_release is not None else "none", "--out", str(worker_out)]
+        command(*args, timeout=7200)
+        if worker_out.is_symlink() or any(path.is_symlink() for path in worker_out.rglob("*")):
+            raise RuntimeError("isolated build produced a symlink")
+        shutil.copytree(worker_out, out)
+    except Exception:
+        # Preserve failed isolated output for diagnosis; the queue stops.
+        raise
     metadata = json.loads((out / "domestic-release.json").read_text())
     if metadata.get("source_sha") != sha or metadata.get("base_sha") != base or metadata.get("source_tree") != git(repo, "rev-parse", f"{sha}^{{tree}}"):
         raise RuntimeError("built artifact source mismatch")
     manifest = out / "release" / "release-files.sha256"
     if hashlib.sha256(manifest.read_bytes()).hexdigest() != metadata.get("release_files_sha256"):
         raise RuntimeError("built artifact manifest mismatch")
+    command("sudo", "rm", "-rf", "--", str(worker), timeout=120)
     return out, metadata
 
 
@@ -274,7 +299,7 @@ def poll(config: dict) -> dict:
                 return {"status": "dry_run_only", "sha": sha}
             # The builder decides whether the merged change affects runtime;
             # docs-only commits still require exact check but advance cursor.
-            plan = json.loads(command("python3", str(Path(__file__).with_name("domestic_release_build.py")), "plan", "--repo", str(repo), "--base", deployed, "--target", sha))
+            plan = json.loads(command("python3", str(Path(__file__).with_name("domestic_release_build.py")), "classify", "--repo", str(repo), "--base", deployed, "--target", sha))
             if not plan.get("runtime_changed"):
                 state["processed_sha"] = sha
                 atomic_json(state_path, state)

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -16,6 +17,19 @@ import domestic_release_build as builder
 
 
 class DomesticReleaseBuildTests(unittest.TestCase):
+    def test_classify_does_not_execute_target_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            self._init_git_fixture(repo)
+            base = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+            (repo / "cmd/aicrm").mkdir(parents=True)
+            (repo / "cmd/aicrm/main.go").write_text("package main\nfunc main() {}\n")
+            subprocess.run(["git", "-C", str(repo), "add", "cmd/aicrm/main.go"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "add Go source"], check=True)
+            with mock.patch.object(builder, "_make_plan", side_effect=AssertionError("target source executed")):
+                result = builder.classify(repo, base, "HEAD")
+            self.assertTrue(result["runtime_changed"])
+
     def test_docs_and_tests_do_not_change_runtime(self) -> None:
         result = builder.classify_paths([
             "README.md",
