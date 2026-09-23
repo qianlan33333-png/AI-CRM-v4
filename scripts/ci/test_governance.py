@@ -182,6 +182,14 @@ class WorkflowTest(unittest.TestCase):
         self.assertNotIn("continue-on-error", governance)
         self.assertNotIn("needs.plan.outputs.full", governance)
 
+    def test_required_check_stays_stable_and_github_ci_has_no_production_deploy_job(self):
+        workflow = (impact.ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("\n  check:\n", workflow)
+        self.assertIn("AICRM_CI_FOCUS_CHECKS: ${{ needs.plan.outputs.checks }}", workflow)
+        self.assertIn("impact-analysis-failed", workflow)
+        self.assertNotIn("\n  deploy:\n", workflow)
+        self.assertNotIn("promote-staging-direct.sh", workflow)
+
     def test_weekly_scanner_is_reporting_without_write_permissions(self):
         workflow = (impact.ROOT / ".github/workflows/governance-weekly.yml").read_text()
         self.assertIn("schedule:", workflow)
