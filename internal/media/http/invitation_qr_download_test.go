@@ -102,10 +102,19 @@ func TestInvitationOfficialQRDownload(t *testing.T) {
 
 func TestInvitationOfficialQRRejectsUntrustedImages(t *testing.T) {
 	qr := testOfficialQR(t)
-	for _, url := range []string{"http://wework.qpic.cn/qr", "https://example.com/qr", "https://wework.qpic.cn:8443/qr", "https://user@wework.qpic.cn/qr"} {
+	for _, url := range []string{"http://example.com/qr", "https://example.com/qr", "https://wework.qpic.cn:8443/qr", "https://user@wework.qpic.cn/qr"} {
 		if _, err := fetchOfficialQRCode(context.Background(), url, nil); err == nil {
 			t.Fatalf("untrusted QR source accepted: %s", url)
 		}
+	}
+	tlsClient := &http.Client{Transport: invitationQRTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Scheme != "https" || r.URL.Hostname() != "p.qpic.cn" {
+			t.Fatalf("documented QR URL was not upgraded to TLS: %s", r.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(qr)), ContentLength: int64(len(qr))}, nil
+	})}
+	if _, err := fetchOfficialQRCode(context.Background(), "http://p.qpic.cn/wwhead/example/0", tlsClient); err != nil {
+		t.Fatalf("documented official QR URL rejected: %v", err)
 	}
 	client := &http.Client{Transport: invitationQRTransport(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusFound, Body: io.NopCloser(bytes.NewReader(qr)), Header: http.Header{"Location": {"https://example.com/qr"}}}, nil

@@ -28,17 +28,20 @@ func officialQRCodeReady(plan p.InvitationPlan) bool {
 // direct gm URL, so this endpoint must never derive one from config_id.
 func fetchOfficialQRCode(ctx context.Context, raw string, injected *http.Client) ([]byte, error) {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" || u.Fragment != "" ||
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.Port() != "" || u.Fragment != "" ||
 		(u.Hostname() != "wework.qpic.cn" && u.Hostname() != "p.qpic.cn") {
 		return nil, errors.New("invalid official QR host")
 	}
+	// WeCom documents p.qpic.cn QR URLs with an http scheme. Fetch the
+	// allowlisted image over TLS even when that is the scheme it returns.
+	u.Scheme = "https"
 	client := &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
 	if injected != nil {
 		client.Transport = injected.Transport
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
