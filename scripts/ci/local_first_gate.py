@@ -45,6 +45,8 @@ OPERATOR_ONLY_PREFIXES += (
     "scripts/test_release_queue.py",
     "deploy/seed-staging-business-fixtures.sh",
     "deploy/accept-staging-candidate.sh",
+    "deploy/staging-build-gc.py",
+    "deploy/test_staging_build_gc.py",
     "scripts/validate-staging-fixture-readback.py",
     "scripts/test_validate_staging_fixture_readback.py",
 )
