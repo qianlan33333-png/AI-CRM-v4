@@ -34,9 +34,9 @@
 
 ## Step 5: Verify the protected check and complete CI
 
-**Output:** The aggregate PR's required `check` succeeds and one `workflow_dispatch` full run is bound to the same exact head.
+**Output:** The aggregate PR event's required `check` succeeds and one `workflow_dispatch` full run is bound to the same exact head. Neither check consumes an accepted staging receipt.
 
-**Verify:** Run `gh workflow run ci.yml --ref codex/v4-three-member-aggregate-candidate -f force_full=true`; verify `plan`, `governance`, `preflight`, `backend`, `frontend`, `browser`, `archive-sdk`, and `check` all conclude `success` on the aggregate SHA. Skipped, cancelled, stale-head, or unknown lanes fail this step. The `deploy` job remains skipped because deployment is outside this task.
+**Verify:** Run `gh workflow run ci.yml --ref codex/v4-three-member-aggregate-candidate -f force_full=true`; verify `plan`, `governance`, `preflight`, `backend`, `frontend`, `browser`, `archive-sdk`, and `check` all conclude `success` on the aggregate SHA, and separately verify the PR event's protected `check`. `scripts/ci/local_first_gate.py` requires `mode=full` for runtime changes but reports staging as pending; `scripts/release_handoff.py` is where accepted receipt validation begins. Skipped, cancelled, stale-head, or unknown lanes fail this step. The `deploy` job remains skipped because deployment is outside this task.
 
 ## Step 6: Persist and deliver the development checkpoint
 

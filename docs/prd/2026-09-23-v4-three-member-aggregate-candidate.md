@@ -56,13 +56,15 @@ PR #17 的 staging-lane 治理提交是本批次取得合规预发验收的必�
 | 仓库 PR #17：[预发与生产观察分槽](https://github.com/qianlan33333-png/AI-CRM-v4/pull/17) | 生产观察与预发自验分离，预发自身仍单飞；旧 observing 不解除生产互斥。 | 在 aggregate 中作为必要 staging-lane 治理祖先，保留旧生产观察门禁。 |
 | 仓库 PR #19：[首包批次桥](https://github.com/qianlan33333-png/AI-CRM-v4/pull/19) | 通过精确成员、旧观察、签名 source、同包和单次 bridge admission 保护首包路径。 | 将最终桥治理提交作为聚合祖先；运行时成员与治理提交分开建模。 |
 
-复用仓库现有 .github/workflows/ci.yml 的 workflow_dispatch(force_full=true)、scripts/ci/verification.py、质量 lane、release_batch.py/deferred batch schema、PR19 bridge manifest、签名 freshness attestation、staging receipt 和 release-control 队列；不新建 CI 或发布机制。桥 JSON 精确包含 governance_pr:{pr_url,head_sha,tree_sha}（PR #19）、staging_lane_pr:{pr_url,head_sha,tree_sha}（PR #17）、aggregate_pr:{pr_url,head_sha,tree_sha}、full_ci_run_id；分别校验两个治理 head/tree 并要求二者都是 batch.aggregate_head_sha 的 Git 祖先。batch.members 和桥 JSON 的 members 按同顺序只绑定 #15/#3/#13；batch.first_v4_batch_bridge 指向桥 JSON，admit 从 batch.worktree 的准确 aggregate HEAD 执行。required check 与同 head 全量 workflow_dispatch 的 plan、governance、preflight、backend、frontend、browser、archive-sdk、check 必须全成功。
+复用仓库现有 .github/workflows/ci.yml 的 workflow_dispatch(force_full=true)、scripts/ci/verification.py、质量 lane、release_batch.py/deferred batch schema、PR19 bridge manifest、签名 freshness attestation、staging receipt 和 release-control 队列；不新建 CI 或发布机制。桥 JSON 精确包含 governance_pr:{pr_url,head_sha,tree_sha}（PR #19）、staging_lane_pr:{pr_url,head_sha,tree_sha}（PR #17）、aggregate_pr:{pr_url,head_sha,tree_sha}、full_ci_run_id；分别校验两个治理 head/tree 并要求二者都是 batch.aggregate_head_sha 的 Git 祖先。batch.members 和桥 JSON 的 members 按同顺序只绑定 #15/#3/#13；batch.first_v4_batch_bridge 指向桥 JSON，admit 从 batch.worktree 的准确 aggregate HEAD 执行。
+
+required `check` 与预发 accepted receipt 没有依赖环。`.github/workflows/ci.yml` 的 `check` job 汇总 `plan`、五个 CI lane 和 `governance`，再调用 `governance_impact.py --gate`、`local_first_gate.py`、`verification.py gate`。`scripts/ci/local_first_gate.py` 对含 runtime 改动的 PR 要求 `mode=full` 并输出 `staging=pending_release_handoff_validation`；它不读取 staging receipt。accepted receipt、包摘要和业务 journey 证据在独立的 `scripts/release_handoff.py` runtime handoff 校验中才是必需输入。故聚合 PR 的 required `check` 与 exact-head 全量 CI 可在预发前通过；check 绿不代表 staging accepted，也不代表可合并或部署。提交合并仍必须满足 `main` 当前 strict required check、最新 base 和其它保护规则；此方案不放宽生产门禁。预发后若 head/base 或 workflow 输入变化，则按新 exact head 重新满足 required check 与 CI。
 
 ## 5. 候选实现与 Git 历史
 
 1. 从实时 `main` 精确 SHA 创建隔离 worktree/`codex/` 分支。
 2. 依次以普通 Git merge 纳入 PR #15、#3、#13、PR #17 staging-lane 治理 head、PR #19 最终 bridge 治理 head。每个精确 head 必须为最终 aggregate HEAD 祖先，并与 GitHub 实时 tree 相符；不改写任何来源分支。
-3. 真实 merge 已知交叠于 #15/#17 的 docs/operations/release-coordinator.md、scripts/ci/local_first_gate.py、scripts/ci/test_verification.py、scripts/ci/verification.py。冲突只在聚合 worktree 解决，逐处保留 staging/production lane 区分、full-PR lane 检查和来源校验，并运行治理回归及最终全 CI。
+3. 真实 merge 确认 #15/#17 的交叠路径为 docs/operations/release-coordinator.md、scripts/ci/local_first_gate.py、scripts/ci/test_verification.py、scripts/ci/verification.py；仅 `verification.py` 有文本冲突。聚合分支以已经通过历史 #15+#17 force-full CI 的集成版本为解决参考，保留 runtime/test/fixture/release-control 的完整 PR lane 判定、纳入 `scripts/release_queue.py` critical path，并保留 PR #15 的“PR 代码改动跑 full lanes、staging receipt 属于单独 handoff gate”策略；PR #17 的 lane 分离逻辑保留在自动合并的 release queue/coordinator 文件中。该方案不将历史 CI 当作当前证明，仍需最终 aggregate exact-head 全 CI。
 4. 增加本 PRD、来源锁定表和 CI/验收结果，不把临时工具、密钥或 staging 环境文件提交进仓库。
 5. 推送新分支并创建 Draft PR；正文列出五个来源 SHA/tree，区分三个 runtime members 与 PR #17/#19 两个治理祖先，记录 exact CI run ID、required check 和未完成的 staging/业务验收项。
 
@@ -73,8 +75,8 @@ PR #17 的 staging-lane 治理提交是本批次取得合规预发验收的必�
 | Gate | 判定 |
 | --- | --- |
 | 源提交保留 | PR #15/#3/#13 的 runtime heads 与 PR #17/#19 的治理 heads 全为 aggregate HEAD 祖先；各原分支远端 ref 未改变。 |
-| GitHub required check | 当前聚合 PR head 的分支保护 `check` 为 SUCCESS；规则当前为 `strict=true`、context=`check`、管理员强制、禁止 force push/deletion。 |
-| 完整全量 CI | 对同一个聚合 head 显式运行 `gh workflow run ci.yml -f force_full=true`；`plan`、`preflight`、`backend`、`frontend`、`browser`、`archive-sdk`、`governance`、`check` 均为 success，且 run.head_sha 精确相同。任何 lane 的 skipped/cancelled/unknown 均不算绿。部署 job 因本任务不部署而 skipped，不能称作测试通过。 |
+| GitHub required check | 聚合 PR 当前 head 的 PR workflow `check` 为 SUCCESS；规则当前为 `strict=true`、context=`check`、管理员强制、禁止 force push/deletion。该代码门禁不要求 staging receipt；receipt 仍在 release handoff 验收。 |
+| 完整全量 CI | 对同一个聚合 head 显式运行 `gh workflow run ci.yml -f force_full=true`；`plan`、`preflight`、`backend`、`frontend`、`browser`、`archive-sdk`、`governance`、`check` 均为 success，且 run.head_sha 精确相同。另行核验 PR event 的 protected `check`，不能只用 workflow_dispatch 替代它。任何 lane 的 skipped/cancelled/unknown 均不算绿。部署 job 因本任务不部署而 skipped，不能称作测试通过。预发 accepted 后不需要仅为产生 accepted receipt 而重跑同 head required check；如代码 head 或 base 改变，重新全量验证。 |
 | PR 生命周期 | Draft PR 存在且指向 `main`，merge 未执行；聚合 PR 的最新 head/tree 与 CI、成员清单一致。 |
 | 本地验证 | `python3 scripts/dev_preflight.py fast`、`git diff --check`，并按组合影响运行失败用例/专项；Go 源码有改动时再运行适用 compile 专项。 |
 
@@ -110,9 +112,10 @@ PR #17 的 staging-lane 治理提交是本批次取得合规预发验收的必�
 ```text
 main HEAD/tree：f07d76f2b1e3585bf930f5e9a2a37fe5bf87baaa / 61b37458a378572cc6d0bc454b42d4d329fe5c13（开始时快照）
 活跃 PR：#3、#13、#15、#17、#19；#18 不纳入
-共享冲突审计：#15 与 #17 有四个交叠路径且需在本候选实际 merge 验证；其他来源集合与它们无路径交叠
+共享冲突审计：#15 与 #17 四个交叠路径已经实际 merge；仅 `scripts/ci/verification.py` 有文本冲突，按已验证 #15+#17 集成逻辑解决；#17 的 release queue/coordinator 文件和 PR19 bridge 文件均保留
 源 PR 状态：#15 full CI green；#3/#13 exact-old-main full CI red；#17 standalone full CI red、与 #15 历史联合树 full CI green；#19 自身旧基线 checks 不复用
 生产候选：6088e57ccf63b62dff46b4e1，observing，保持不变
 当前预发：PR #15 包只完成 built/installed/readiness 与部分虚拟测试；自动化等 journey 因合成业务对象/开关缺失未接受，没有 accepted receipt，不能用于本聚合候选。
 预发槽位：指挥台当前未释放聚合包预发槽；等待聚合 exact-head full CI 成功后再显式释放，PR17 只提供合法单飞状态机，不等于物理槽授权。
+本地组合验证：`python3 scripts/dev_preflight.py fast`、`compile`、CI verification/local-first gate、release queue/coordinator、first-v4 bridge 专项及 `git diff --check` 均通过；GitHub aggregate exact-head full CI 和 PR required check 仍待执行。
 ```
