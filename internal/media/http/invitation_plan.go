@@ -12,8 +12,9 @@ import (
 )
 
 type InvitationHandler struct {
-	Service  *app.InvitationService
-	Security RequestSecurity
+	Service      *app.InvitationService
+	Security     RequestSecurity
+	QRCodeClient *http.Client
 }
 
 func (h InvitationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -146,6 +147,36 @@ func (h InvitationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, map[string]any{"items": out})
+		return
+	}
+	if len(parts) == 2 && parts[1] == "qr-download" && r.Method == http.MethodGet {
+		plan, err := h.Service.Store.ReadInvitationPlan(ctx, id)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
+		if plan.Token == "" {
+			writeError(w, http.StatusConflict, "official_qr_not_ready")
+			return
+		}
+		plan, err = h.Service.Public(ctx, plan.Token)
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "official_qr_unavailable")
+			return
+		}
+		if !officialQRCodeReady(plan) {
+			writeError(w, http.StatusConflict, "official_qr_not_ready")
+			return
+		}
+		qr, err := fetchOfficialQRCode(ctx, plan.ProviderQRCode, h.QRCodeClient)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "official_qr_unavailable")
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Disposition", "attachment; filename=group-invitation-"+strconv.FormatInt(id, 10)+".png")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write(qr)
 		return
 	}
 	if len(parts) == 1 && r.Method == http.MethodGet {
