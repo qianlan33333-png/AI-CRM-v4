@@ -19,7 +19,9 @@ AI-CRM v4 是当前唯一的代码、测试、构建、发布和部署仓库。�
 - `/admin/customers` 列表/详情、固定 watermark 游标、精确手机号筛选、脱敏与审计揭示；
 - `cmd/migrate-phone-identities` 只接受已校验快照，支持 `inspect/dry-run/apply/reconcile/rollback`，不长期连接源生产环境；
 - 后台完整 CRM 菜单、登录/首页/员工权限/OneID 查询页和侧边栏壳；尚未开发的业务统一显示“功能待接入”，不会调用旧 API；
-- 支付宝仅实现通用身份 Provider 契约和 Fake Adapter，不包含支付宝网络调用、订单或支付；
+- 支付宝已实现 WAP/网页支付、签名回调、交易查询、退款与对账 Adapter；Provider 默认
+  关闭，启用真实网络调用必须提供部署侧商户凭据，并继续遵守幂等、回调重放和
+  `outcome_unknown` 对账边界；
 - `main` 必过 `make check`。GitHub Actions 的部署默认关闭，只有仓库变量 `AICRM_ENABLE_ACTIONS_DEPLOY` 精确为 `true` 才会通过固定 SSH 主机密钥发布版本化 release；常规合并后按本地完整发布流程执行。
 
 公开 HTTP 契约见 [OpenAPI](api/openapi.yaml)，数据迁移见 [migrations](migrations)，部署约束见 [部署说明](deploy/README.md)。

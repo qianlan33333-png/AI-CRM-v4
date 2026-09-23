@@ -93,6 +93,33 @@ Do not assume the current adapter participates in the caller's Unit of Work. Ver
 
 ## Completion Evidence
 
+开发进度必须使用四级完成状态，且逐级满足：
+
+- `code_complete`：干净 commit 和适用本地验证完成。
+- `staging_built`：准确 merge-preview 已由唯一 Linux amd64 节点构建，包和 built receipt
+  绑定 PR/base/head/preview/tree。
+- `staging_self_accepted`：原开发任务完成受影响业务 readback，并持有可校验的 accepted
+  staging receipt。
+- `handoff_ready`：不可变 handoff 与持久事件已完成，可以通知发布指挥台。
+
+四级链适用于运行时变更。纯治理或文档工作在 `code_complete` 后以治理检查证据进入
+`handoff_ready`，并把 `staging_built`、`staging_self_accepted`、runtime package 和
+staging app install 明确标记 N/A。
+
+运行时 handoff 必须包含准确 PR URL、base/head/merge-preview SHA 与 tree、package SHA-256、
+staging receipt 和受影响业务 readback。纯治理或文档工作必须标记
+`change_class=governance_only`，明确 runtime package、staging app install 和业务运行时
+readback 为 N/A，并提供治理检查证据。
+
+先持久化 `handoff_ready`、`new_commit`、`blocked` 或 `needs_review` 事件，再发送通知。
+返工必须由原开发任务产生新 commit、新 candidate、新证据和新事件；旧候选不可覆盖。
+发布指挥台只读判断并负责串行队列、合并、部署、观察和打回，不能修改候选源码或 PR。
+生产只晋级预发布验收的同一包；`outcome_unknown` 只允许原身份只读对账。用户延期真实
+业务验收时，生产最多保持 `observing`，不得标记 `released`。
+
+如果预发布外部效果采用虚拟 Adapter，`staging_self_accepted` 仅表示虚拟合同和确定性
+业务读回通过，必须保留 `effect_mode=virtual`；不得表述为 live Provider 或真实外部效果通过。
+
 The final handoff or PR should contain a compact section like:
 
 ```text
