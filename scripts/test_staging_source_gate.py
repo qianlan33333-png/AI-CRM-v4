@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -124,6 +125,23 @@ class StagingSourceGateTests(unittest.TestCase):
         self.assertIn("'repository':'AI-CRM-v4'", remote)
         self.assertIn('"repository": "AI-CRM-v4"',
                       (ROOT / "scripts/write-release-provenance.py").read_text())
+
+    def test_release_tool_changes_do_not_require_app_staging_receipt(self):
+        gate_spec = importlib.util.spec_from_file_location(
+            "local_first_gate", ROOT / "scripts/ci/local_first_gate.py")
+        gate = importlib.util.module_from_spec(gate_spec)
+        gate_spec.loader.exec_module(gate)
+        changed = ("deploy/build-release-on-staging.sh\n"
+                   "scripts/verify-staging-source.py\n"
+                   "scripts/test_staging_source_gate.py\n"
+                   "scripts/release_freshness.py\n"
+                   "scripts/write-release-provenance.py\n")
+        with patch.dict("os.environ", {"PR_BASE_SHA": "a" * 40}):
+            with patch.object(gate.subprocess, "check_output", return_value=changed):
+                self.assertFalse(gate.requires_staging_receipt("b" * 40))
+            with patch.object(gate.subprocess, "check_output",
+                              return_value=changed + "internal/payment/app/service.go\n"):
+                self.assertTrue(gate.requires_staging_receipt("b" * 40))
 
 
 if __name__ == "__main__":
