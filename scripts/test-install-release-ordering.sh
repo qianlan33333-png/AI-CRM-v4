@@ -186,6 +186,15 @@ sed \
 mv "$test_root/install-release.rewritten.sh" "$test_root/install-release.sh"
 chmod 0755 "$test_root/install-release.sh"
 
+# The installer now rejects anything other than Linux amd64 ELF binaries.
+# Build one inert real binary for the ordering fixture so this test exercises
+# release sequencing without relying on shell scripts that fail that gate.
+cat > "$test_root/fixture-main.go" <<'EOF'
+package main
+func main() {}
+EOF
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$test_root/fixture-binary" "$test_root/fixture-main.go"
+
 make_release() {
   local sha="$1"
   local missing_release_file="${2:-}"
@@ -194,7 +203,7 @@ make_release() {
   local archive="/tmp/aicrm-${sha}.tar.gz"
   mkdir -p "$release/bin" "$release/migrations" "$release/web/dist/admin" "$release/web/dist/sidebar" "$release/web/dist/aiassistant" "$release/deploy"
   for binary in aicrm aicrm-operation-cycle-runner aicrm-operation-cycle-result wecom-archive-sdk-runner migrate-platform migrate-access-role-convergence check-enterprise-directory migrate-river migrate-phone-identities migrate-identity-phone-vault migrate-survey-v2 migrate-commerce-history migrate-message-archive migrate-order-attribution migrate-order-distribution-qualification migrate-automation-operations migrate-v2-config-definitions migrate-v2-runtime-config-releases migrate-v2-commerce-external-push-history migrate-open-platform migrate-media-legacy-materials migrate-hxc-daily-lessons migrate-channel-history migrate-v2-customer-tag-history migrate-radar-v2 migrate-sidebar-history migrate-owner-handoff-history bootstrap-automation-operations; do
-    printf '#!/usr/bin/env bash\nexit 0\n' > "$release/bin/$binary"
+    cp "$test_root/fixture-binary" "$release/bin/$binary"
     chmod 0755 "$release/bin/$binary"
   done
   for migration in \
