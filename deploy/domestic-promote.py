@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+from urllib.parse import parse_qsl, unquote_to_bytes, urlsplit
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 FILE_SHA = re.compile(r"^[0-9a-f]{64}$")
@@ -30,7 +31,13 @@ CURRENT = ROOT / "current"
 LOCK = ROOT / "install-release.lock"
 RECEIPTS = ROOT / "domestic-receipts"
 ENV = Path("/etc/aicrm/aicrm.env")
+STAGE_ROLE = Path("/etc/aicrm/domestic-release-role")
 READY = "http://127.0.0.1:8080/readyz"
+STAGING_MIGRATION_VERSION = "0206"
+STAGING_MIGRATION_NAME = "0206_order_native_alipay_checkout.sql"
+STAGING_MIGRATION_PATH = f"migrations/{STAGING_MIGRATION_NAME}"
+STAGING_RETRY_SHA = "5538d615a9abe2e25be799936866a7330b1d3af8"
+PRE_0206_ORDER_CHECK = """CHECK ((((record_origin = 'native'::text) AND (provider <> 'alipay'::text) AND (effect_eligible = true) AND (source_row_digest IS NULL) AND (payer_customer_id IS NOT NULL) AND (beneficiary_customer_id IS NOT NULL)) OR ((record_origin = 'history'::text) AND (effect_eligible = false) AND (octet_length(source_row_digest) = 32))))"""
 
 
 def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -229,18 +236,26 @@ def backup_database(sha: str) -> Path:
     values = [line.partition("=")[2].strip().strip('"\'') for line in ENV.read_text().splitlines() if line.startswith("AICRM_DATABASE_URL=")]
     if len(values) != 1 or not values[0]:
         raise RuntimeError("exactly one database URL is required for migration backup")
-    root = ROOT / "database-backups"
-    root.mkdir(mode=0o700, exist_ok=True)
-    root.chmod(0o700)
+    database_env = database_environment(values[0])
+    root = database_backup_directory(create=True)
+    if root is None:
+        raise RuntimeError("database backup directory is missing")
     target = root / f"pre-{sha}.dump"
-    if target.exists():
-        raise RuntimeError("backup for SHA already exists; inspect before retry")
+    if database_backup_artifacts(root, sha):
+        raise RuntimeError("backup state for SHA already exists; inspect before retry")
     with tempfile.NamedTemporaryFile(dir=root, prefix=f".pre-{sha}.", delete=False) as out:
         temp = Path(out.name)
         try:
-            process = subprocess.run(["runuser", "-u", "aicrm", "--", "env", f"PGDATABASE={values[0]}", "pg_dump", "-Fc"], stdout=out, stderr=subprocess.PIPE)
+            process = subprocess.run(
+                ["runuser", "--preserve-environment", "-u", "aicrm", "--", "pg_dump", "-Fc"],
+                env={**database_env, "PATH": "/usr/bin:/bin"},
+                stdout=out,
+                stderr=subprocess.PIPE,
+            )
             if process.returncode != 0 or out.tell() < 100:
-                raise RuntimeError(f"pg_dump failed: {process.stderr.decode(errors='replace')[-300:]}")
+                # libpq client diagnostics can include connection details. Keep
+                # credentials and DSN material out of the release ledger/logs.
+                raise RuntimeError("pg_dump failed or returned an incomplete archive")
             out.flush()
             os.fsync(out.fileno())
             run("pg_restore", "--list", str(temp))
@@ -251,6 +266,221 @@ def backup_database(sha: str) -> Path:
     return target
 
 
+def database_backup_directory(*, create: bool) -> Path | None:
+    """Return the private backup directory, rejecting symlinks and unsafe modes."""
+    root = ROOT / "database-backups"
+    if create:
+        root.mkdir(mode=0o700, exist_ok=True)
+    try:
+        info = root.lstat()
+    except FileNotFoundError:
+        return None
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or info.st_gid != os.getegid()
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise RuntimeError("database backup directory is unsafe")
+    return root
+
+
+def database_backup_artifacts(root: Path | None, sha: str) -> list[Path]:
+    """Find a completed backup or a leftover in-progress dump for this SHA."""
+    if root is None:
+        return []
+    target = root / f"pre-{sha}.dump"
+    return [path for path in (target, *root.glob(f".pre-{sha}.*")) if path.exists() or path.is_symlink()]
+
+
+def _strict_unquote(value: str) -> str:
+    if re.search(r"%(?![0-9a-fA-F]{2})", value):
+        raise ValueError("database URL contains invalid percent encoding")
+    try:
+        decoded = unquote_to_bytes(value).decode("utf-8", errors="strict")
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("database URL contains invalid percent encoding") from exc
+    if any(ord(char) < 0x20 or ord(char) == 0x7f for char in decoded):
+        raise ValueError("database URL contains unsupported characters")
+    return decoded
+
+
+def database_environment(database_url: str) -> dict[str, str]:
+    """Translate the supported PostgreSQL URI subset to libpq PG* settings.
+
+    The URI itself must never be passed as PGDATABASE or placed in argv. Keep
+    the accepted option set narrow so TLS or connection behavior cannot be
+    silently discarded.
+    """
+    try:
+        parsed = urlsplit(database_url)
+        if re.search(r"%(?![0-9a-fA-F]{2})", database_url) or parsed.scheme not in {"postgres", "postgresql"} or parsed.fragment:
+            raise ValueError
+        host = parsed.hostname
+        if not host or not re.fullmatch(r"[A-Za-z0-9._:-]+", host) or parsed.username is None or not parsed.path.startswith("/"):
+            raise ValueError
+        parsed_port = parsed.port
+        port = 5432 if parsed_port is None else parsed_port
+        if not 1 <= port <= 65535:
+            raise ValueError
+        username = _strict_unquote(parsed.username)
+        password = _strict_unquote(parsed.password) if parsed.password is not None else None
+        database = _strict_unquote(parsed.path[1:])
+        if not username or not database or "/" in parsed.path[1:]:
+            raise ValueError
+        query = parse_qsl(parsed.query, keep_blank_values=True, strict_parsing=True, max_num_fields=2)
+        if len(query) > 1 or any(key != "sslmode" for key, _ in query):
+            raise ValueError
+        environment = {
+            "PGHOST": host,
+            "PGPORT": str(port),
+            "PGUSER": username,
+            "PGDATABASE": database,
+        }
+        if password is not None:
+            environment["PGPASSWORD"] = password
+        if query:
+            sslmode = query[0][1]
+            if sslmode not in {"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}:
+                raise ValueError
+            environment["PGSSLMODE"] = sslmode
+        return environment
+    except (ValueError, UnicodeError) as exc:
+        raise ValueError("database URL is outside the supported PostgreSQL URI subset") from exc
+
+
+def _database_environment_from_host_config() -> dict[str, str]:
+    values = [line.partition("=")[2].strip().strip('"\'') for line in ENV.read_text().splitlines() if line.startswith("AICRM_DATABASE_URL=")]
+    if len(values) != 1 or not values[0]:
+        raise RuntimeError("exactly one database URL is required")
+    return database_environment(values[0])
+
+
+def require_staging_role() -> None:
+    try:
+        info = STAGE_ROLE.lstat()
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or STAGE_ROLE.is_symlink()
+            or info.st_uid != 0
+            or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022
+            or STAGE_ROLE.read_text() != "staging\n"
+        ):
+            raise RuntimeError("staging-only retry is not enabled on this host")
+    except OSError as exc:
+        raise RuntimeError("staging-only retry is not enabled on this host") from exc
+
+
+def staging_migration_baseline() -> tuple[bool, bool]:
+    """Return whether 0206 is unapplied and its old CHECK is still installed."""
+    environment = _database_environment_from_host_config()
+    environment["PGOPTIONS"] = "-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=500"
+    query = f"""
+SELECT
+  CASE WHEN NOT EXISTS (
+    SELECT 1 FROM public.platform_schema_migrations WHERE version >= '{STAGING_MIGRATION_VERSION}'
+  ) THEN 'yes' ELSE 'no' END,
+  COALESCE((
+    SELECT 1 FROM pg_catalog.pg_constraint
+    WHERE conrelid = 'public.orders'::regclass
+      AND conname = 'orders_origin_effect_shape'
+      AND contype = 'c'
+      AND convalidated
+  ), 0),
+  COALESCE((
+    SELECT pg_get_constraintdef(oid)
+    FROM pg_catalog.pg_constraint
+    WHERE conrelid = 'public.orders'::regclass
+      AND conname = 'orders_origin_effect_shape'
+      AND contype = 'c'
+      AND convalidated
+  ), '')
+"""
+    try:
+        result = subprocess.run(
+            ["runuser", "--preserve-environment", "-u", "aicrm", "--", "psql", "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-c", query],
+            env={**environment, "PATH": "/usr/bin:/bin"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+        )
+    except Exception as exc:
+        raise RuntimeError("staging migration baseline could not be inspected") from exc
+    if result.returncode != 0:
+        raise RuntimeError("staging migration baseline could not be inspected")
+    values = result.stdout.strip().split("|", 2)
+    old_constraint_present = len(values) == 3 and values[1] == "1" and is_pre_0206_order_constraint(values[2])
+    if len(values) != 3 or values[0] != "yes" or not old_constraint_present:
+        raise RuntimeError("staging migration baseline is not the expected pre-0206 schema")
+    return True, old_constraint_present
+
+
+def is_pre_0206_order_constraint(definition: str) -> bool:
+    """Match the exact PostgreSQL 16 definition of the old validated CHECK."""
+    return re.sub(r"\s+", "", definition).lower() == re.sub(r"\s+", "", PRE_0206_ORDER_CHECK).lower()
+
+
+def is_only_staging_migration(metadata: dict) -> bool:
+    paths = metadata.get("changed_paths")
+    if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+        return False
+    return [path for path in paths if path.startswith("migrations/")] == [STAGING_MIGRATION_PATH]
+
+
+def inspect_staging_retry(
+    metadata_bytes: bytes,
+    expected_base: str,
+    *,
+    expected_sha: str,
+    metadata_sha256: str,
+) -> dict:
+    """Read-only eligibility check for the one approved staging migration retry."""
+    require_staging_role()
+    if expected_sha != STAGING_RETRY_SHA:
+        raise RuntimeError("staging migration retry is limited to the current 5538 incident")
+    metadata = verify_metadata_identity(metadata_bytes, expected_sha, metadata_sha256)
+    if expected_base is None or not SHA.fullmatch(expected_base):
+        raise ValueError("staging retry requires the exact prior SHA")
+    if metadata.get("migrations_changed") is not True or not is_only_staging_migration(metadata):
+        raise RuntimeError("staging retry is limited to migration 0206")
+    for control in (ROOT, RELEASES, RECEIPTS):
+        if control.is_symlink() or (control.exists() and not control.is_dir()):
+            raise RuntimeError("unsafe release control directory")
+    if LOCK.is_symlink() or not LOCK.exists() or not stat.S_ISREG(LOCK.lstat().st_mode):
+        raise RuntimeError("unsafe shared install lock")
+    backup_root = database_backup_directory(create=False)
+    with LOCK.open("r+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if current_sha() != expected_base:
+            raise RuntimeError("staging retry base has changed")
+        release = RELEASES / expected_sha
+        receipt = RECEIPTS / f"{expected_sha}.json"
+        temp_receipt = RECEIPTS / f".{expected_sha}.json.tmp"
+        backup_artifacts = database_backup_artifacts(backup_root, expected_sha)
+        if any(path.exists() or path.is_symlink() for path in (receipt, temp_receipt)) or backup_artifacts:
+            raise RuntimeError("staging retry target already has receipt or backup state")
+        if release.is_symlink() or not release.is_dir():
+            raise RuntimeError("staging retry orphan is missing or unsafe")
+        verify_payload_without_release_env(release, metadata)
+        verify_root_owned_release(release)
+        readiness(expected_base)
+        migration_pending, old_constraint_present = staging_migration_baseline()
+        if not migration_pending or not old_constraint_present:
+            raise RuntimeError("staging retry schema baseline is not the expected pre-0206 state")
+        return {
+            "status": "eligible",
+            "source_sha": expected_sha,
+            "base_sha": expected_base,
+            "orphan_verified": True,
+            "receipt_exists": False,
+            "backup_exists": False,
+            "migration_0206_applied": False,
+            "old_constraint_present": True,
+        }
+
+
 def install(
     incoming: Path | None,
     metadata_bytes: bytes,
@@ -259,6 +489,7 @@ def install(
     expected_sha: str,
     metadata_sha256: str,
     retry_existing: bool = False,
+    retry_staging_migration: bool = False,
 ) -> dict:
     metadata = verify_metadata_identity(metadata_bytes, expected_sha, metadata_sha256)
     sha = expected_sha
@@ -266,6 +497,8 @@ def install(
         raise ValueError("invalid base SHA")
     if type(metadata.get("migrations_changed")) is not bool:
         raise ValueError("migration classification is required")
+    if retry_staging_migration and not retry_existing:
+        raise ValueError("staging migration retry requires a verified orphan")
     if not ENV.is_file() or not shutil.which("systemctl"):
         raise RuntimeError("host runtime is not provisioned")
     for control in (ROOT, RELEASES, RECEIPTS):
@@ -285,16 +518,27 @@ def install(
         if any(path.exists() or path.is_symlink() for path in (receipt_path, temp_receipt)):
             raise RuntimeError("target release has receipt state; inspect before retry")
         if retry_existing:
-            if metadata["migrations_changed"]:
+            if metadata["migrations_changed"] and not retry_staging_migration:
                 raise RuntimeError("orphan retry is disabled for migration releases")
+            if retry_staging_migration:
+                require_staging_role()
+                if sha != STAGING_RETRY_SHA or metadata["migrations_changed"] is not True or not is_only_staging_migration(metadata):
+                    raise RuntimeError("staging migration retry is limited to migration 0206")
             if old_sha is None or old_sha == sha:
                 raise RuntimeError("orphan retry requires the prior release to be current")
             if release.is_symlink() or not release.is_dir():
                 raise RuntimeError("verified orphan release is missing or unsafe")
             verify_payload_without_release_env(release, metadata)
             verify_root_owned_release(release)
-            make_release_directories_traversable(release)
             readiness(old_sha)
+            if retry_staging_migration:
+                backup_root = database_backup_directory(create=False)
+                if database_backup_artifacts(backup_root, sha):
+                    raise RuntimeError("backup state for SHA already exists; inspect before retry")
+                migration_pending, old_constraint_present = staging_migration_baseline()
+                if not migration_pending or not old_constraint_present:
+                    raise RuntimeError("staging retry schema baseline is not the expected pre-0206 state")
+            make_release_directories_traversable(release)
         else:
             if incoming is None:
                 raise ValueError("incoming package is required for a new release")
@@ -432,6 +676,8 @@ def main() -> None:
     source = p.add_mutually_exclusive_group(required=True)
     source.add_argument("--incoming", type=Path)
     source.add_argument("--retry-existing", action="store_true", help="reuse a checksum-verified orphan under the install lock")
+    source.add_argument("--inspect-staging-retry", action="store_true", help="read-only preflight for the one staging migration retry")
+    p.add_argument("--retry-staging-migration", action="store_true", help="allow only the explicitly gated staging orphan retry for migration 0206")
     p.add_argument("--metadata", type=Path, required=True)
     p.add_argument("--expected-sha", required=True, help="exact source SHA bound to the metadata")
     p.add_argument("--metadata-sha256", required=True, help="SHA256 of the exact metadata file bytes")
@@ -439,21 +685,34 @@ def main() -> None:
     args = p.parse_args()
     if os.geteuid() != 0:
         raise SystemExit("root required")
+    if args.retry_staging_migration and not args.retry_existing:
+        p.error("--retry-staging-migration requires --retry-existing")
     metadata_root = ROOT / "domestic-incoming"
     if args.incoming is not None and not args.incoming.resolve().is_relative_to(metadata_root):
         raise SystemExit("incoming path outside domestic-incoming")
-    if args.retry_existing and not args.metadata.resolve().is_relative_to(metadata_root):
+    if (args.retry_existing or args.inspect_staging_retry) and not args.metadata.resolve().is_relative_to(metadata_root):
         raise SystemExit("retry metadata path outside domestic-incoming")
     if args.metadata.is_symlink() or not args.metadata.is_file():
         raise SystemExit("metadata path must be a regular file")
     metadata_bytes = args.metadata.read_bytes()
+    expected_base = None if args.expected_base == "none" else args.expected_base
+    if args.inspect_staging_retry:
+        result = inspect_staging_retry(
+            metadata_bytes,
+            expected_base,
+            expected_sha=args.expected_sha,
+            metadata_sha256=args.metadata_sha256,
+        )
+        print(json.dumps(result, sort_keys=True))
+        return
     result = install(
         args.incoming,
         metadata_bytes,
-        None if args.expected_base == "none" else args.expected_base,
+        expected_base,
         expected_sha=args.expected_sha,
         metadata_sha256=args.metadata_sha256,
         retry_existing=args.retry_existing,
+        retry_staging_migration=args.retry_staging_migration,
     )
     print(json.dumps(result, sort_keys=True))
 
