@@ -5,6 +5,7 @@ import {JSDOM, VirtualConsole} from 'jsdom';
 const html = await readFile(process.argv[2], 'utf8');
 const errors = [];
 const calls = [];
+let availableCoupons = [];
 const virtualConsole = new VirtualConsole();
 virtualConsole.on('jsdomError', error => errors.push(error));
 const page = new JSDOM(html, {
@@ -21,7 +22,7 @@ const page = new JSDOM(html, {
         : path.startsWith('/api/v1/wechat-pay/purchase-status')
           ? {purchase_state: 'available', can_purchase: true}
           : path.startsWith('/api/h5/coupons/available')
-            ? {items: []}
+            ? {items: availableCoupons}
             : path === '/api/v1/wechat-pay/checkouts' && options.method === 'POST'
               ? {merchant_order_no: 'M-shipping-1'}
               : path === '/api/v1/wechat-pay/checkouts/M-shipping-1'
@@ -65,8 +66,23 @@ assert.equal(district.disabled, true);
 document.getElementById('mobile').value = '13812345678';
 document.getElementById('buy').dispatchEvent(new Event('click', {bubbles: true}));
 await settle();
-assert.match(document.getElementById('status').textContent, /请完整填写收货信息/);
+assert.match(document.getElementById('status').textContent, /市、区\/县、收件人、详细地址/);
+assert.equal(document.getElementById('cityError').textContent, '请选择市');
+assert.equal(document.getElementById('detailAddressError').textContent, '请填写详细地址');
+assert.match(document.getElementById('paymentErrors').textContent, /请填写市、区\/县、收件人、详细地址/);
+assert.equal(document.getElementById('city').getAttribute('aria-invalid'), 'true');
+assert.equal(document.getElementById('buy').dataset.feedback, 'true');
 assert.equal(calls.filter(call => call.options.method === 'POST').length, 0, 'incomplete address must not create an order');
+
+availableCoupons = [{claim_id: 31, name: '已领满减券', discount_amount_minor: 100, currency: 'CNY'}];
+document.getElementById('refreshCoupons').click();
+await settle();
+assert.match(document.getElementById('couponStatus').textContent, /已领取：已领满减券/);
+assert.equal(document.getElementById('coupon').options.length, 2);
+assert.equal(document.getElementById('discountAmount').textContent, '优惠 −¥1.00');
+assert.equal(calls.filter(call => call.options.method === 'POST').length, 0, 'refreshing claimed coupons must not claim or create an order');
+document.getElementById('coupon').value = '31';
+document.getElementById('coupon').dispatchEvent(new Event('change', {bubbles: true}));
 
 city.value = city.options[1].value;
 city.dispatchEvent(new Event('change', {bubbles: true}));
@@ -79,6 +95,7 @@ const posts = calls.filter(call => call.path === '/api/v1/wechat-pay/checkouts' 
 assert.equal(posts.length, 1, 'complete address should create one order');
 const payload = JSON.parse(posts[0].options.body);
 assert.equal(payload.contact_collection_level, 'shipping_address');
+assert.equal(payload.coupon_claim_id, 31);
 assert.equal(payload.mobile, '+8613812345678');
 assert.equal(payload.recipient_name, '测试收件人');
 assert.equal(payload.province_code, province.value);
@@ -86,4 +103,5 @@ assert.equal(payload.city_code, city.value);
 assert.equal(payload.district_code, district.value);
 assert.ok(payload.province_name && payload.city_name && payload.district_name);
 assert.equal(payload.detail_address, '测试路 1 号');
+assert.equal(document.getElementById('couponPanel').hidden, true, 'paid result hides the coupon form');
 page.window.close();

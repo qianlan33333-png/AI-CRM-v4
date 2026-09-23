@@ -38,7 +38,7 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   const calls = [], elements = new Map();
   const setGlobal = (name, value) => Object.defineProperty(globalThis, name, {value, configurable: true, writable: true});
   const element = () => ({hidden: false, disabled: false, dataset: {}, value: '0', checked: true, textContent: '', href: '', children: [], attributes: new Map(), addEventListener(type, listener) { this.listener ??= {}; this.listener[type] = listener; }, appendChild(child) { this.children.push(child); }, replaceChildren(...children) {this.children=children;this.textContent="";}, setAttribute(name, value) { this.attributes.set(name, String(value)); }, removeAttribute(name) { this.attributes.delete(name); }, set src(value) { this.source = value; queueMicrotask(() => this.listener?.load?.({target: this})); }, get src() { return this.source; }});
-  for (const id of ['price', 'buy', 'status', 'coupon', 'wechatNotice', 'mobile', 'payableAmount', 'footerAmount', 'discountAmount', 'identityGate', 'identityTitle', 'identityMessage', 'authContinue', 'checkoutContent','paymentDetails','mobilePanel','paymentMethod','product','footer','productName','alipayGuide','alipayGuideMessage','alipayPaymentURL','alipayCopy','alipayPaid']) elements.set(id, element());
+  for (const id of ['price', 'buy', 'status', 'coupon', 'couponPanel', 'couponStatus', 'refreshCoupons', 'wechatNotice', 'mobile', 'payableAmount', 'footerAmount', 'discountAmount', 'identityGate', 'identityTitle', 'identityMessage', 'authContinue', 'checkoutContent','paymentDetails','mobilePanel','paymentMethod','product','footer','productName','alipayGuide','alipayGuideMessage','alipayPaymentURL','alipayCopy','alipayPaid']) elements.set(id, element());
   elements.get('checkoutContent').querySelector=selector=>elements.get(({'.product':'product','.checkout-footer':'footer','.product h1':'productName'})[selector]||selector.slice(1));
   if(renewal)elements.set('renew',element());
   if(details){const detail=element(),img=element();detail.hidden=true;img.dataset.src='https://example.com/detail.png';detail.querySelectorAll=()=>[img];elements.set('detailContent',detail);elements.set('detailImage',img);elements.set('detailPrice',element());}
@@ -91,10 +91,12 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   assert.equal(run.elements.get('identityGate').hidden, true);
   assert.equal(run.elements.get('checkoutContent').hidden, false);
   assert.equal(run.elements.get('buy').disabled, true);
+  assert.equal(run.elements.get('refreshCoupons').disabled, true, 'paid checkpoint locks coupon refresh');
   assert.equal(run.elements.has('renew'), false);
   assert.equal(run.elements.get('buy').textContent,'已购买');
   assert.equal(run.elements.get('status').children.some(child=>child.textContent==='支付完成'),true);
   assert.equal(run.elements.get('footer').hidden,true);
+  assert.equal(run.elements.get('couponPanel').hidden,true);
   assert.equal(run.elements.get('status').children.some(child=>child.className==='completion-qr'),true);
   assert.equal(JSON.parse(store.get(storageKey)).terminal_status, 'paid');
   assert.equal(run.calls.filter(call => call.url === '/api/v1/wechat-pay/checkouts/M-paid-7').length, 1);

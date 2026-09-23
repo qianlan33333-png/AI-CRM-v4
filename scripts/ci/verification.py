@@ -12,7 +12,6 @@ from pathlib import Path
 import re
 import subprocess
 import zipfile
-import local_first_gate as staging_boundary
 
 PHASES = ("preflight", "backend", "frontend", "browser", "archive-sdk")
 WORKFLOW = ".github/workflows/ci.yml"
@@ -22,24 +21,17 @@ def git(ref):
     return subprocess.check_output(["git", "rev-parse", ref], text=True).strip()
 
 
-def requires_full_pr_verification() -> bool:
-    """High-risk code and test/fixture changes must exercise the full CI lanes."""
+def requires_impact_selection() -> bool:
+    """Use the capability impact report for every non-documentation PR change."""
     base = os.environ.get("GITHUB_BASE_SHA", "")
     if not re.fullmatch(r"[0-9a-f]{40}", base):
-        return False
-    changed = subprocess.check_output(["git", "diff", "--name-only", f"{base}...HEAD"], text=True).splitlines()
-    critical = (".github/", "deploy/", "scripts/ci/", "migrations/", "internal/platform/",
-                "internal/identity/", "internal/outbound/", "internal/externaleffects/",
-                "scripts/release_queue.py", "scripts/release_control.py", "scripts/release_coordinator.py",
-                "scripts/release_events.py", "scripts/release_handoff.py",
-                "skills/aicrm-v3-development-frontdoor/", "AGENTS.md",
-                "scripts/check-install-release-contract.sh")
-    test_paths = ("scripts/test-", "scripts/test_", "cmd/aicrm/")
-    return any(staging_boundary.is_runtime_path(path)
-               or path in staging_boundary.OPERATOR_ONLY_PREFIXES
-               or path.startswith(critical) or path.startswith(test_paths)
-               or path.endswith(("_test.go", ".test.mjs", ".spec.mjs", "_chromium_journey.mjs"))
-               for path in changed)
+        return True
+    try:
+        changed = subprocess.check_output(["git", "diff", "--name-only", f"{base}...HEAD"], text=True).splitlines()
+    except subprocess.SubprocessError:
+        return True
+    return not changed or any(not (path.startswith("docs/") and path.endswith(".md")
+                                  and not path.startswith("docs/governance/")) for path in changed)
 
 
 def api(path, raw=False):
@@ -160,11 +152,11 @@ def main():
     if args.mode == "plan":
         verified_run = None
         mode = "full"
-        # PR code changes run full lanes. Staging receipt and package evidence
-        # remain a separate release-handoff gate before serial merge.
+        # Non-documentation PR changes enter capability impact selection;
+        # the selector keeps focused checks separate from full-risk CI.
         if (event in {"pull_request", "workflow_dispatch"} and ref != "refs/heads/main"
                 and os.environ.get("FORCE_FULL") != "true"
-                and (event != "pull_request" or not requires_full_pr_verification())):
+                and (event != "pull_request" or not requires_impact_selection())):
             mode = "light"
             full = False
             with open(os.environ["GITHUB_OUTPUT"], "a") as output:
@@ -181,7 +173,7 @@ def main():
         with open(os.environ["GITHUB_OUTPUT"], "a") as output:
             output.write(f"full={str(full).lower()}\nverified_run={verified_run or ''}\n")
             output.write(f"mode={'verified' if verified_run else 'full'}\n")
-        message = ("Full PR verification required" if full else
+        message = ("PR impact selection required" if full else
                    f"Reusing PR run {verified_run}: complete Git tree equals {sha}")
         print(message)
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
