@@ -61,7 +61,8 @@ def queue_update(queue_file, candidate_id, token, generation, operation):
         return result
 
 def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_file,known_hosts_file,
-            attempt_file,deploy_script,staging_node_id=Path('/opt/aicrm/staging-node-id.json'),readback=ssh_readback,deploy=None):
+            attempt_file,deploy_script,staging_node_id=Path('/opt/aicrm/staging-node-id.json'),
+            bridge_readback_path=None,readback=ssh_readback,deploy=None):
     reviewed = Path(__file__).resolve().with_name('deploy-release-local.sh')
     if deploy is None and Path(deploy_script).resolve() != reviewed:
         raise ValueError('only reviewed scripts/deploy-release-local.sh may install production package')
@@ -99,7 +100,8 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
                 save(attempt_file,previous)
                 return previous
             raise ValueError('existing attempt status cannot be retried')
-        prepared=prepare_promote(handoff_path,queue_file,merged_main,production_sha)
+        prepared=prepare_promote(handoff_path,queue_file,merged_main,production_sha,
+                                 bridge_readback_path=bridge_readback_path)
         receipt_path=Path(handoff['staging_acceptance']['receipt'])
         if not receipt_path.is_absolute(): receipt_path=handoff_path.parent/receipt_path
         accepted=json.loads(receipt_path.read_text())
@@ -120,11 +122,10 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
                 raise ValueError('active production release differs from expected ancestor')
             if bridge_path:
                 if digest_file(bridge_path)!=bridge_digest: raise ValueError('first-v4 bridge changed during promotion')
-                bridge_record=json.loads(bridge_path.read_text())
-                current_ref=bridge_record.get('production_readback') or {}
-                from release_first_v4_batch_bridge import evidence
-                current=evidence(current_ref,'current production readback')
-                current['readyz']=active
+                if bridge_readback_path is None: raise ValueError('first-v4 bridge fresh readback missing')
+                current=json.loads(Path(bridge_readback_path).read_text())
+                if current.get('readyz',{}).get('release_sha')!=active.get('release_sha') or current.get('readyz',{}).get('status')!=active.get('status'):
+                    raise ValueError('first-v4 bridge readback differs from live readyz')
                 queue_before=json.loads(queue_file.read_text())
                 validate_first_v4_bridge(bridge_path,batch_path=handoff_path,queue=queue_before,
                                          merged_main=merged_main,phase='promotion',production_readback=current)
@@ -149,6 +150,7 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
             attempt={'candidate_id':cid,'merged_main_sha':merged_main,'merge_preview_sha':handoff['merge_preview_sha'],
                      'candidate_tree_sha':prepared['candidate_tree_sha'],'package_sha256':prepared['package_sha256'],
                      'previous_active_sha':production_sha,'status':'attempting','attempt_id':str(uuid.uuid4()),
+                     'first_v4_bridge_sha256':bridge_digest,'first_v4_readback_sha256':digest_file(bridge_readback_path) if bridge_path else None,
                      'business_acceptance_status':handoff.get('business_acceptance',{}).get('status','accepted'),
                      'unverified_business_journeys':handoff.get('business_acceptance',{}).get('unverified_business_journeys',[]),
                      'started_at':int(time.time())}
@@ -195,11 +197,13 @@ def main():
     p=argparse.ArgumentParser()
     for name in ('handoff','queue','key','known-hosts','attempt-file','deploy-script'):
         p.add_argument('--'+name,required=True,type=Path)
+    p.add_argument('--bridge-readback',type=Path)
     for name in ('merged-main','production-sha','host','user'):
         p.add_argument('--'+name,required=True)
     a=p.parse_args()
     result=promote(handoff_path=a.handoff,queue_file=a.queue,merged_main=a.merged_main,
         production_sha=a.production_sha,host=a.host,user=a.user,key_file=a.key,
-        known_hosts_file=a.known_hosts,attempt_file=a.attempt_file,deploy_script=a.deploy_script)
+        known_hosts_file=a.known_hosts,attempt_file=a.attempt_file,deploy_script=a.deploy_script,
+        bridge_readback_path=a.bridge_readback)
     print(json.dumps(result,ensure_ascii=False,indent=2))
 if __name__=='__main__':main()

@@ -171,20 +171,23 @@ def validate(path: Path, *, batch_path: Path, queue: dict, merged_main: str | No
     if phase == 'promotion' and owned[0].get('status') != 'waiting_merge':
         raise ValueError('first-v4 bridge candidate not waiting_merge')
     decision(record, 'queue_authorization', batch, required=True)
-    decision(record, 'production_authorization', batch, required=phase == 'promotion')
-    if phase == 'promotion':
-        queue_decision = record['queue_authorization']
-        production_decision = record['production_authorization']
-        if queue_decision['decision_id'] == production_decision['decision_id'] or \
-           (queue_decision['user_thread_id'], queue_decision['user_message_id']) == \
-           (production_decision['user_thread_id'], production_decision['user_message_id']):
-            raise ValueError('first-v4 bridge production needs a separate user decision')
-    current = production_readback or evidence(record.get('production_readback'), 'current production readback')
-    same(current.get('release_sha'), OLD_RELEASE, 'active release')
-    same(current.get('tree_sha'), OLD_TREE, 'active tree')
-    same(current.get('package_sha256'), OLD_PACKAGE, 'active package')
-    same(current.get('readyz', {}).get('release_sha'), OLD_RELEASE, 'readyz release')
-    same(current.get('readyz', {}).get('status'), 'ready', 'readyz health')
+    decision(record, 'production_authorization', batch, required=True)
+    queue_decision = record['queue_authorization']
+    production_decision = record['production_authorization']
+    if queue_decision['decision_id'] == production_decision['decision_id'] or \
+       (queue_decision['user_thread_id'], queue_decision['user_message_id']) == \
+       (production_decision['user_thread_id'], production_decision['user_message_id']):
+        raise ValueError('first-v4 bridge production needs a separate user decision')
+    initial = evidence(record.get('production_readback'), 'admission production readback')
+    if phase == 'promotion' and production_readback is None:
+        raise ValueError('first-v4 bridge fresh promotion readback required')
+    current = production_readback if phase == 'promotion' else initial
+    for snapshot in (initial, current):
+        same(snapshot.get('release_sha'), OLD_RELEASE, 'active release')
+        same(snapshot.get('tree_sha'), OLD_TREE, 'active tree')
+        same(snapshot.get('package_sha256'), OLD_PACKAGE, 'active package')
+        same(snapshot.get('readyz', {}).get('release_sha'), OLD_RELEASE, 'readyz release')
+        same(snapshot.get('readyz', {}).get('status'), 'ready', 'readyz health')
     observed = datetime.fromisoformat(current['observed_at'].replace('Z', '+00:00'))
     if observed.tzinfo is None or not 0 <= (datetime.now(timezone.utc) - observed).total_seconds() <= 600:
         raise ValueError('first-v4 bridge production readback stale')
@@ -204,14 +207,15 @@ def admit(path: Path, *, batch_path: Path, queue_path: Path, pr_reader=live_pr):
         candidate = next(i for i in queue['items'] if i['candidate_id'] == result['candidate_id'])
         if old.get('first_v4_batch_bridge_candidate_id') is not None:
             raise ValueError('first-v4 bridge cannot be admitted twice')
-        if candidate['status'] != 'frozen':
-            raise ValueError('first-v4 bridge requires frozen accepted candidate')
+        if candidate['status'] not in {'staging_acceptance', 'frozen'}:
+            raise ValueError('first-v4 bridge requires a staging accepted candidate')
+        previous_status = candidate['status']
         old['first_v4_batch_bridge_candidate_id'] = result['candidate_id']
         old['first_v4_batch_bridge_sha256'] = result['bridge_sha256']
         candidate['first_v4_batch_bridge_id'] = result['bridge_id']
         candidate['first_v4_batch_bridge_sha256'] = result['bridge_sha256']
         candidate['status'] = 'waiting_merge'
-        candidate.setdefault('events', []).append({'from': 'frozen', 'to': 'waiting_merge',
+        candidate.setdefault('events', []).append({'from': previous_status, 'to': 'waiting_merge',
                                                    'kind': 'first_v4_batch_bridge', 'bridge_id': result['bridge_id']})
         save(queue_path, queue)
         return result

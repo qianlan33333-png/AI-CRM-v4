@@ -41,6 +41,8 @@ class FirstV4BatchBridgeTests(unittest.TestCase):
                       'members': [{'pr_url': f'https://github.com/qianlan33333-png/AI-CRM-v4/pull/{number}',
                                    'commit_sha': head, 'tree_sha': member_tree}
                                   for number, head, member_tree in zip((15, 3, 13), heads, trees)],
+                      'queue_authorization': {'decision_id': 'queue', 'user_thread_id': 'user', 'user_message_id': 'one'},
+                      'production_authorization': {'decision_id': 'production', 'user_thread_id': 'user', 'user_message_id': 'two'},
                       'production_readback': {'path': '/current', 'sha256': '7'*64}}
             bridge_path = root/'bridge.json'; bridge_path.write_text(json.dumps(record))
             queue = {'items': [{'candidate_id': OLD_CANDIDATE, 'status': 'observing',
@@ -101,7 +103,7 @@ class FirstV4BatchBridgeTests(unittest.TestCase):
             queue_path = root / 'queue.json'
             queue_path.write_text(json.dumps({'items': [
                 {'candidate_id': OLD_CANDIDATE, 'status': 'observing', 'events': [{'kind': 'original'}]},
-                {'candidate_id': 'new-batch', 'status': 'frozen', 'events': []}]}))
+                {'candidate_id': 'new-batch', 'status': 'staging_acceptance', 'events': []}]}))
             bridge = root / 'bridge.json'; bridge.write_text('{}')
             batch = root / 'batch.json'; batch.write_text('{}')
             result = {'candidate_id': 'new-batch', 'bridge_id': 'first-v4-joint-batch-v1',
@@ -115,6 +117,7 @@ class FirstV4BatchBridgeTests(unittest.TestCase):
             self.assertEqual(queue['items'][0]['events'], [{'kind': 'original'}])
             self.assertEqual(queue['items'][0]['first_v4_batch_bridge_candidate_id'], 'new-batch')
             self.assertEqual(queue['items'][1]['status'], 'waiting_merge')
+            self.assertEqual(queue['items'][1]['events'][0]['from'], 'staging_acceptance')
 
     def test_transition_is_narrow_and_cannot_be_rebound(self):
         digest = 'a' * 64
