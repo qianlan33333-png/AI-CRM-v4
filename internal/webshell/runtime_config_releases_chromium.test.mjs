@@ -122,12 +122,13 @@ const releaseHostDiagnostics = async (cdp, runtimeExceptions, responseStatuses) 
     path: location.pathname,
     host: Boolean(document.querySelector('[data-runtime-release-host]')),
     draft: Boolean(document.querySelector('[data-runtime-release-create]')),
-    error: document.querySelector('[data-runtime-release-status]')?.className || ''
+    error: document.querySelector('[data-runtime-release-status]')?.className || '',
+    message: document.querySelector('[data-runtime-release-status]')?.textContent?.slice(0, 160) || ''
   }))()`);
   const resources = ["/static/admin_console/runtime_config_releases_host.js", "/api/admin/config/runtime-releases"]
     .map((pathname) => `${pathname}:${responseStatuses.get(pathname) || "unseen"}`).join(",");
   const exceptions = runtimeExceptions.length ? runtimeExceptions.join(",") : "none";
-  return `path=${markers?.path || "unavailable"} host=${Boolean(markers?.host)} draft=${Boolean(markers?.draft)} page_error_class=${markers?.error || "none"} resources=${resources} runtime_exceptions=${exceptions}`;
+  return `path=${markers?.path || "unavailable"} host=${Boolean(markers?.host)} draft=${Boolean(markers?.draft)} page_error_class=${markers?.error || "none"} page_message=${markers?.message || "none"} resources=${resources} runtime_exceptions=${exceptions}`;
 };
 
 const waitForBrowserExit = async (child, timeoutMilliseconds) => {
@@ -217,7 +218,11 @@ try {
       form.requestSubmit();
       return true;
     })()`);
-    await waitFor(cdp, "Boolean(document.querySelector('[data-runtime-release-validate]'))", `draft ${ordinal} was not persisted through actual HTTP API`);
+    try {
+      await waitFor(cdp, "Boolean(document.querySelector('[data-runtime-release-validate]'))", `draft ${ordinal} was not persisted through actual HTTP API`);
+    } catch (_) {
+      throw new Error(`draft ${ordinal} was not persisted through actual HTTP API: ${await releaseHostDiagnostics(cdp, runtimeExceptions, responseStatuses)}`);
+    }
     await evaluate(cdp, "document.querySelector('[data-runtime-release-validate]').click(); true");
     await waitFor(cdp, "Boolean(document.querySelector('[data-runtime-release-publish]'))", `validation ${ordinal} was not persisted through actual HTTP API`);
     await evaluate(cdp, "document.querySelector('[data-runtime-release-publish]').click(); true");
