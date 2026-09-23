@@ -69,6 +69,7 @@ def verify_lineage(root: Path, base: str, production_sha: str, preview_sha: str,
 
 def prepare_promote(handoff_path: Path, queue_path: Path, merged_main: str, production_sha: str) -> dict:
     value = json.loads(handoff_path.read_text()); root = Path(value['worktree'])
+    bridge_ref = value.get('first_v4_batch_bridge')
     if 'members' in value:
         if value.get('business_acceptance',{}).get('status')=='business_acceptance_deferred_to_user':
             from release_deferred_acceptance import validate_deferred_batch
@@ -87,13 +88,24 @@ def prepare_promote(handoff_path: Path, queue_path: Path, merged_main: str, prod
         raise ValueError('merged main tree differs from accepted package tree')
     parents = git(root, 'rev-list', '--parents', '-n', '1', value['merge_preview_sha']).split()[1:]
     if parents != [value['base_main_sha'], value['commit_sha']]: raise ValueError('invalid merge preview parents')
-    if subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', production_sha, value['merge_preview_sha']]).returncode:
-        raise ValueError('candidate excludes active production SHA')
     queue = json.loads(queue_path.read_text())
+    if bridge_ref:
+        from release_first_v4_batch_bridge import OLD_RELEASE, validate as validate_first_v4_bridge
+        if production_sha != OLD_RELEASE or 'members' not in value:
+            raise ValueError('first-v4 bridge only applies to the exact old release and a batch')
+        bridge_path = Path(bridge_ref)
+        if not bridge_path.is_absolute(): bridge_path = handoff_path.parent / bridge_path
+        validate_first_v4_bridge(bridge_path, batch_path=handoff_path, queue=queue,
+                                 merged_main=merged_main, phase='promotion')
+    elif subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', production_sha, value['merge_preview_sha']]).returncode:
+        raise ValueError('candidate excludes active production SHA')
     cid = value['staging_acceptance']['candidate_id']
     owned = [i for i in queue.get('items', []) if i.get('candidate_id') == cid]
     active = [i for i in queue.get('items', []) if i.get('status') in {'preview_building', 'staging_acceptance', 'frozen', 'waiting_merge', 'merged', 'production', 'observing'}]
-    if len(owned) != 1 or owned[0].get('status') != 'waiting_merge' or active != owned:
+    permitted = owned
+    if bridge_ref:
+        permitted = owned + [i for i in queue.get('items', []) if i.get('candidate_id') == OLD_CANDIDATE]
+    if len(owned) != 1 or owned[0].get('status') != 'waiting_merge' or len(active) != len(permitted) or any(i not in permitted for i in active):
         raise ValueError('candidate does not exclusively own waiting_merge queue slot')
     if owned[0].get('tree_sha', owned[0].get('candidate_tree_sha')) != value['candidate_tree_sha'] or owned[0].get('package_sha256') != value['package_sha256']:
         raise ValueError('queue candidate tree/package differs from accepted receipt')

@@ -21,6 +21,7 @@ from release_batch import validate_batch
 from release_handoff import live_remote_main
 from release_queue import change, reservation_file
 from release_events import save
+from release_first_v4_batch_bridge import OLD_CANDIDATE, bridge_transition, validate as validate_first_v4_bridge
 
 ACTIVE = {'preview_building','staging_acceptance','frozen','waiting_merge','merged','production','observing'}
 
@@ -68,6 +69,10 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
         raise ValueError('production host/user differ from reviewed release target')
     if deploy is None: require_staging_node(Path(staging_node_id))
     handoff=json.loads(handoff_path.read_text())
+    bridge_ref=handoff.get('first_v4_batch_bridge')
+    bridge_path=Path(bridge_ref) if bridge_ref else None
+    if bridge_path and not bridge_path.is_absolute(): bridge_path=handoff_path.parent/bridge_path
+    bridge_digest=digest_file(bridge_path) if bridge_path else None
     if 'members' in handoff:
         if handoff.get('business_acceptance',{}).get('status')=='business_acceptance_deferred_to_user':
             from release_deferred_acceptance import validate_deferred_batch
@@ -113,16 +118,33 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
             active=readback(host,user,local_key,local_hosts)
             if active.get('release_sha')!=production_sha or active.get('status')!='ready':
                 raise ValueError('active production release differs from expected ancestor')
+            if bridge_path:
+                if digest_file(bridge_path)!=bridge_digest: raise ValueError('first-v4 bridge changed during promotion')
+                bridge_record=json.loads(bridge_path.read_text())
+                current_ref=bridge_record.get('production_readback') or {}
+                from release_first_v4_batch_bridge import evidence
+                current=evidence(current_ref,'current production readback')
+                current['readyz']=active
+                queue_before=json.loads(queue_file.read_text())
+                validate_first_v4_bridge(bridge_path,batch_path=handoff_path,queue=queue_before,
+                                         merged_main=merged_main,phase='promotion',production_readback=current)
             token=uuid.uuid4().hex
             generation=uuid.uuid4().hex
             def reserve(queue,reservation):
                 if reservation.exists(): raise ValueError('promotion reservation already exists')
                 owned=[i for i in queue['items'] if i.get('candidate_id')==cid]
-                other=[i for i in queue['items'] if i.get('status') in ACTIVE and i.get('candidate_id')!=cid]
+                if bridge_path and digest_file(bridge_path)!=bridge_digest:
+                    raise ValueError('first-v4 bridge changed before reservation')
+                other=[i for i in queue['items'] if i.get('status') in ACTIVE and i.get('candidate_id')!=cid and
+                       not (bridge_path and i.get('candidate_id')==OLD_CANDIDATE)]
                 if len(owned)!=1 or owned[0]['status']!='waiting_merge' or other: raise ValueError('queue owner changed')
                 save(reservation,{'candidate_id':cid,'token':token,'generation':generation,'created_at':int(time.time())})
-                change(queue,'transition',candidate_id=cid,status='merged')
-                change(queue,'transition',candidate_id=cid,status='production')
+                if bridge_path:
+                    bridge_transition(queue,cid,'merged',bridge_digest)
+                    bridge_transition(queue,cid,'production',bridge_digest)
+                else:
+                    change(queue,'transition',candidate_id=cid,status='merged')
+                    change(queue,'transition',candidate_id=cid,status='production')
             queue_update(queue_file,cid,token,generation,reserve)
             attempt={'candidate_id':cid,'merged_main_sha':merged_main,'merge_preview_sha':handoff['merge_preview_sha'],
                      'candidate_tree_sha':prepared['candidate_tree_sha'],'package_sha256':prepared['package_sha256'],
@@ -151,7 +173,8 @@ def promote(*,handoff_path,queue_file,merged_main,production_sha,host,user,key_f
                 attempt.update(status='observing',install_receipt=env['DEPLOY_RECEIPT'],latest_readback=observed)
                 save(attempt_file,attempt)
                 def finish_queue(q,reservation):
-                    change(q,'transition',candidate_id=cid,status='observing')
+                    if bridge_path: bridge_transition(q,cid,'observing',bridge_digest)
+                    else: change(q,'transition',candidate_id=cid,status='observing')
                     reservation.unlink()
                 queue_update(queue_file,cid,token,generation,finish_queue)
                 return attempt
