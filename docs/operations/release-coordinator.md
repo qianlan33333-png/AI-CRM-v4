@@ -4,7 +4,17 @@
 
 ## 开发交接
 
-`handoff.json` 必须包含仓库、PR、独立 worktree、PR head commit/tree、当前 GitHub `main`、merge preview SHA/tree、package SHA、架构分类、回滚点与 receipt。preview 以当前 main 和 PR head 为双亲。receipt 和每个证据文件都按 SHA-256 校验；HTTP 200、fixture、`/readyz` 或布尔 `business_verified` 不能替代真实业务旅程。
+开发任务按 `code_complete`、`staging_built`、`staging_self_accepted`、`handoff_ready`
+四级记录进度。运行时 `handoff.json` 必须包含仓库、PR、独立 worktree、当前 GitHub
+base main commit/tree、PR head commit/tree、merge preview SHA/tree、package SHA-256、
+staging built/accepted receipt、受影响业务 readback、架构分类与回滚点。preview 以当前
+main 和 PR head 为双亲。receipt 和每个证据文件都按 SHA-256 校验；HTTP 200、fixture、
+`/readyz` 或布尔 `business_verified` 不能替代真实业务旅程。
+
+纯治理/Skill/文档交接使用 `change_class=governance_only`，在 `code_complete` 后通过治理
+检查进入 `handoff_ready`；`staging_built`、`staging_self_accepted`、runtime package、
+staging app install 和业务运行时 readback 均明确为 N/A，并提供可校验的 governance
+acceptance，不得创建虚假的 package 或 staging receipt。
 
 ```sh
 python3 scripts/release_control.py handoff validate handoff.json
@@ -12,7 +22,7 @@ python3 scripts/release_control.py --state /secure/release/state.json \
   --coordinator-thread-id <thread-id> handoff submit handoff.json <candidate-id>
 ```
 
-submit/resubmit 通过 GitHub API 核对 PR 目标仓库、实时 head/base 和 required checks；查询失败时失败关闭。相同候选重复交接幂等，不同源码不能复用 candidate ID。源码修复必须由原始开发任务提交新 commit 和新 handoff，指挥台不改源码、cherry-pick、rebase 或解决冲突。
+submit/resubmit 通过 GitHub API 核对 PR 目标仓库、实时 head/base 和 required checks；查询失败时失败关闭。开发任务必须先持久化交接或返工事件，再发送指挥台通知。相同候选重复交接幂等，不同源码不能复用 candidate ID。源码修复必须由原始开发任务提交新 commit、新 candidate、新 handoff、receipt 和事件，旧候选不可覆盖；指挥台不改源码、PR、cherry-pick、rebase 或解决冲突。
 
 ## 公开 main 新鲜度证明
 

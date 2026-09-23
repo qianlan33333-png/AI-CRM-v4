@@ -3,13 +3,26 @@
 ## Development window and release command center
 
 每个开发任务使用新的 `codex/<work-item>` 分支/worktree 和新 PR。开始前阅读
-`docs/development-before-start.md`，记录 OneID、Persistence、External Effects
-分类，完成与影响范围匹配的验证，并提交绑定准确 commit/tree 的 handoff。
+`docs/development-before-start.md`，先完成业务判断、GitHub 参考检索、仓库复用评估
+和经确认的 PRD，再记录 OneID、Persistence、External Effects 分类。开发完成状态按
+`code_complete`、`staging_built`、`staging_self_accepted`、`handoff_ready` 四级记录；
+未达到后一级时不得用前一级冒称完成。该四级链用于运行时变更；纯治理/文档变更在
+`code_complete` 后以治理检查证据直接进入 `handoff_ready`，并将 `staging_built`、
+`staging_self_accepted` 标为 N/A。
 
-开发任务对 `handoff_ready`、`new_commit`、`blocked`、`needs_review` 使用持久
-事件通知发布指挥台。指挥台只验证、排队、合并、部署和回传，不修改候选源码、
-PR、分支或 worktree。公开仓库 `main` 的 GitHub 保护是合并门禁；串行发布仍由
-指挥台队列负责，不假定 GitHub 原生 Merge Queue。
+运行时 handoff 必须绑定准确 PR、base main、PR head、merge-preview、各自 tree、
+package SHA-256、staging receipt 和受影响业务 readback。纯治理/文档变更必须标记
+`change_class=governance_only`，明确 runtime package、staging app install 和业务运行时
+读回均为 N/A，并提交治理检查证据，不得伪造运行时收据。
+
+开发任务完成或收到返工后，必须先追加不可变持久事件，再通知发布指挥台。返工必须
+生成新 commit、新 candidate、新证据和新事件；旧候选、旧 receipt 和旧事件不可覆盖。
+指挥台只做只读判断、串行排队、合并、部署、观察和打回，不修改候选源码、PR、分支
+或 worktree。公开仓库 `main` 的 GitHub 保护是合并门禁；串行发布仍由指挥台队列负责，
+不假定 GitHub 原生 Merge Queue。
+
+生产晋级只使用预发布验收的同一包。`outcome_unknown` 时停止重试并只读对账；用户明确
+延期真实业务验收时，生产状态最多保持 `observing`，不得写成 `released`。
 
 本文件适用于整个 `AI-CRM-v4` 仓库。
 
@@ -82,7 +95,7 @@ PR、分支或 worktree。公开仓库 `main` 的 GitHub 保护是合并门禁�
 ## 9. 提交前验证顺序
 
 - 首次推送和修复后再次推送前，先运行 `python3 scripts/dev_preflight.py fast`；Go 改动再运行 `python3 scripts/dev_preflight.py compile`，然后执行受影响领域的专项测试。编译成功不等于测试通过。
-- `fast`、`compile` 和局部 `browser` 的证据只能汇报对应局部 claim，不能称为完整回归或可交付验证。需要本地完整证据时运行 `python3 scripts/dev_preflight.py full`；它要求开始、每个 lane 前后及结束时都是同一干净已提交树，并拒绝缺 PostgreSQL 16、Linux amd64 Chromium、固定工具或冻结供体的环境。具备预发布机时，完整本地证据随后必须在 `49.232.57.128` 做真实部署、健康检查和业务读回；PR 的 GitHub 默认只核对当前 head/tree、预发布 receipt、治理和并行一致性，不因 Composition、迁移、Provider、共享组件、CI 或部署变更自动升级完整 CI。完整云端 CI 仅在维护者明确执行 `workflow_dispatch` 并设置 `force_full=true` 时运行，不能把 GitHub 轻门禁冒称完整回归。
+- `fast`、`compile` 和局部 `browser` 的证据只能汇报对应局部 claim，不能称为完整回归或可交付验证。需要本地完整证据时运行 `python3 scripts/dev_preflight.py full`；它要求开始、每个 lane 前后及结束时都是同一干净已提交树，并拒绝缺 PostgreSQL 16、Linux amd64 Chromium、固定工具或仓内已登记视图源的环境。具备预发布机时，完整本地证据随后必须在 `49.232.57.128` 做真实部署、健康检查和业务读回；PR 的 GitHub 默认只核对当前 head/tree、预发布 receipt、治理和并行一致性，不因 Composition、迁移、Provider、共享组件、CI 或部署变更自动升级完整 CI。完整云端 CI 仅在维护者明确执行 `workflow_dispatch` 并设置 `force_full=true` 时运行，不能把 GitHub 轻门禁冒称完整回归。
 - CI 失败先重现准确失败用例，修复后跑完整失败阶段，再提交全量 CI；不能通过删断言、接受 skip 或反复推送猜测修复。
 - 新增真实 Host 浏览器旅程放在 `cmd/aicrm`，使用 `Test…ChromiumJourney` 命名，自动进入必跑集合；其他包或命名必须明确接入。运行 `python3 scripts/dev_preflight.py browser` 前准备最终 Host 产物和独立 PostgreSQL 16 测试库。
 - 测试汇报附准确 HEAD、tree、工作区状态、命令及证据目录，区分编译、专项、本地完整、完整 CI、取消、跳过和未验证；修改代码后不能沿用旧 HEAD 绿灯。PR 首轮质量保留该 PR 最早 CI attempt 的原始 SHA；最终质量只对应当前 PR head 的最新 attempt。

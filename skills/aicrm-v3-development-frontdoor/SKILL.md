@@ -7,10 +7,26 @@ description: "AI-CRM-v4 的开发前置门禁与并行交付流程（路径名�
 
 ## 开发窗口交付硬门槛
 
-开发窗口的完成状态是 `handoff_ready`。开发任务必须完成适用的本地验证、预发布
-技术与业务验收，并提交绑定准确 commit/tree、package 和 receipt 的 handoff。
-用户明确延期真实业务验收时，必须生成独立 deferred acceptance；技术检查不可延期。
-返工产生新 commit、新候选、新 receipt 和新事件，不能覆盖已入队提交。
+开发窗口用四级状态表达可核验进度：
+
+1. `code_complete`：实现与适用本地验证完成，代码形成干净 commit。
+2. `staging_built`：当前 `main + PR head` 的 merge-preview 已在唯一 Linux amd64
+   预发布节点构建，package 与 built receipt 均绑定准确 SHA/tree。
+3. `staging_self_accepted`：原开发任务已完成受影响业务旅程和技术读回，accepted
+   receipt 与旅程证据可校验。
+4. `handoff_ready`：PR、候选、包、receipt、风险、回滚点和持久事件均完整，可以
+   交给发布指挥台。
+
+这条四级链用于运行时变更。纯治理、Skill 和文档变更在 `code_complete` 后完成适用的
+governance checks 即可进入 `handoff_ready`；`staging_built`、`staging_self_accepted`、
+runtime package 和 staging app install 必须明确标记 N/A，不得伪造占位证据。
+
+未达到后一级时不得用前一级冒称完成。用户明确延期真实业务验收时，必须生成独立
+deferred acceptance；技术检查不可延期，生产状态最多保持 `observing`。返工产生新
+commit、新候选、新 receipt 和新事件，不能覆盖已入队提交。
+
+预发布使用虚拟 Provider 时，`staging_self_accepted` 只证明带 `effect_mode=virtual` 的
+本地合同、状态转换和业务读回通过；不得写成真实 Provider 调用或 live 业务验收通过。
 
 ## 唯一代码来源
 
@@ -43,6 +59,9 @@ Persistence：stateless | 本地事务 | 内部持久任务 | Provider 读取 | 
 
 PRD 经用户确认后冻结；重大范围、合同或风险变化必须重新确认。未完成三步不得正式编码。
 
+Bug 修复也必须先写清业务判断和根因假设，检索 GitHub/公开实现用于验证标准做法，并
+形成与影响面相称的修复 PRD 或缺陷合同；不得因范围较小而跳过复用评估和验收口径。
+
 ## 一次闭环交付
 
 当所有假设和风险边界确认、用户明确开始开发后，开发任务持续推进到
@@ -50,8 +69,8 @@ PRD 经用户确认后冻结；重大范围、合同或风险变化必须重新�
 负责串行合并、正式部署和观察。只有新的业务决策、红线风险、凭据/权限缺失或证据
 不一致才暂停并报告。
 
-开发终点：实现 → 准确候选验证 → 预发布机按当前候选编译并验收 → 干净提交、
-handoff 与 receipt → `handoff_ready`。指挥台终点：GitHub 保护检查 → 串行合并 →
+开发终点：实现 → `code_complete` → `staging_built` → `staging_self_accepted` →
+准确 handoff 与持久事件 → `handoff_ready`。指挥台终点：GitHub 保护检查 → 串行合并 →
 同一包晋级生产 → 认证和真实业务读回 → 观察窗口验收。本地不构建生产包。
 
 生产部署完成且仅在版本、健康状态、认证读回、真实业务读回和观察窗口全部通过后，调用 Codex 的
@@ -59,6 +78,13 @@ handoff 与 receipt → `handoff_ready`。指挥台终点：GitHub 保护检查 
 `/readyz` 通过都不能触发；部署失败、回滚、结果未知或观察窗口未结束时不得触发。一次上线事件只触发一次，重复重试同一部署不得重复庆祝。
 
 常规发布先在 `49.232.57.128` 预发布机从当前 v4 准确候选编译、安装并完成受影响板块验收，再合并 PR；receipt 必须绑定 repository、commit、tree、package SHA-256、capability 和 business readback。公开 `main` 的实时读回由指挥台完成并签发短时 freshness attestation；预发布只保存验签公钥，不保存 GitHub 凭据或长期代理。合并后由预发布机在发布锁下把同一已验收包串行晋级到 `124.220.53.183`，不重新编译和打包。
+
+运行时 handoff 必须准确记录 GitHub PR URL、实时 base main SHA/tree、PR head SHA/tree、
+双亲正确的 merge-preview SHA/tree、package SHA-256、staging built/accepted receipt 摘要，
+以及每个受影响板块的业务旅程、预期、实际结果和证据摘要。任何字段过期或不一致都回到
+新候选流程。纯治理、Skill 和文档变更使用 `change_class=governance_only`：runtime package、
+staging app install、业务运行时读回均明确为 N/A，只提交与变更相称的治理检查证据；禁止
+为通过 handoff 伪造 package 或 staging receipt。
 
 发布包只允许在预发布机按 Linux amd64 目标编译，发布前执行 `scripts/check-release-binaries.py` 和 `scripts/check-migration-sequence.py`；安装器在切换 current 前再次拒绝非 Linux x86-64 ELF，避免 `status=126` 才发现架构错误。发布包统一由当前仓库 Python archiver 创建，拒绝 `._*` AppleDouble、symlink、未注册文件和非 Linux ELF；`release-files.sha256` 必须在预发布、生产安装器和 success observer 中通过。
 
@@ -77,6 +103,12 @@ handoff 与 receipt → `handoff_ready`。指挥台终点：GitHub 保护检查 
 - 一次只执行一个生产部署；部署后独立读回版本、迁移、健康、管理员页面和真实业务结果。
 
 存在部署未完成、未知结果、回滚未完成、共享合同顺序依赖或过期 HEAD 时暂停合并并重新排队。
+
+开发任务完成和返工都必须先把事件写入持久事件存储，再通过 Codex 消息通知指挥台；
+消息送达只证明通知到达，不证明事件已处理。指挥台打回后，原开发任务负责修改源码并以
+新 commit、新 candidate、新 receipt 和新事件重新交接；旧候选及其证据保持不可变。
+指挥台只读核对 handoff、GitHub 和 receipt，负责串行队列、合并、部署、观察与打回，
+绝不在指挥台任务中修改候选源码、PR、分支或 worktree。
 
 ## Bug 修复
 
@@ -103,11 +135,20 @@ PR 保留准确 HEAD/tree、并行与发布快照、测试摘要、证据目录�
 
 ### 国内预发布机与合并晋级
 
-当前默认发布源是本地 v3 Git bundle。先在本地确认准确 commit/tree 并生成 `git bundle verify` 通过的 bundle，再由 `deploy/build-release-on-staging.sh` 上传到 `49.232.57.128`；预发布机不得依赖 GitHub 网络，也不得默认执行远端 clone。预发布机是唯一 Linux amd64 构建节点，必须完成二进制架构、包清单、安装、健康和受影响板块真实读回。
+当前发布源是公开 AI-CRM-v4 仓库中实时 `main + PR head` 生成的准确 merge-preview。
+指挥台只读 GitHub 当前 main/head，生成增量或完整 candidate bundle，并签发绑定
+repository、main/head/preview/tree、bundle 摘要和短时有效期的 freshness attestation。
+预发布机使用固定 allowed-signers 公钥离线验签并执行 `git bundle verify`；它不得依赖
+GitHub 网络、保存 GitHub 凭据或默认远端 clone。预发布机是唯一 Linux amd64 构建节点，
+必须完成二进制架构、包清单、安装、健康和受影响板块真实读回。
 
 预发布构建必须持有 `/opt/aicrm/staging-build.lock` 单飞锁，锁覆盖构建目录清理、checkout、编译和 receipt 生成。并行构建不得共享目录或互相删除产物。`built` receipt 只能证明包来源，不能授权生产；完成安装和业务读回后才可写入 `accepted`。
 
-合并后的 squash/rebase commit 允许与 staging 构建 commit 不同，但生产晋级前必须比较两者 tree 完全一致，并验证 accepted receipt 的 package SHA。生产使用 staging 已验收的同一包，不重新编译；任何 tree、receipt、包摘要或发布队列不一致都停止晋级。
+受保护 `main` 只接受 PR merge commit。合并 SHA 可以与 staging 候选的 merge-preview
+SHA 不同，但合并后的 tree 必须与已验收 candidate tree 完全一致，并验证 accepted
+receipt 的 package SHA。生产使用 staging 已验收的同一包，不重新编译；任何 tree、
+receipt、包摘要或发布队列不一致都停止晋级。若未来修改合并策略，必须先同步更新保护
+规则、指挥台合同和验证脚本，并继续失败关闭地核对合并后 tree 与已验收 candidate tree。
 
 ### 预发布板块验收不可被无关 Provider 阻塞
 
@@ -126,6 +167,11 @@ PR 保留准确 HEAD/tree、并行与发布快照、测试摘要、证据目录�
 预发布机维护非阻塞的 GitHub 源码镜像，仅用于增量 bundle 对象缓存。候选 bundle 优先以 `merge_preview_sha ^base_main_sha` 生成；缺少基线才传完整 bundle。Runner 不下载、不重新打包、不把发布包中转到生产。accepted 后由预发布机使用临时 0600 生产密钥、固定 known_hosts 和生产锁直推同一包，生产再次校验 tree、package SHA、active release、readyz 和板块读回。
 
 生产晋级必须直接使用预发布机已验收的原始归档；不得回传本地、重新编译、重新打包或让 Runner 充当大包中转。预发布机只发送一次归档到生产，生产端使用既有 root wrapper、发布锁、installer、observer、回滚和 readiness 检查。预发布队列登记缺失时只能通过 `adopt-accepted` 形成显式 `waiting_merge` 事件，不能静默绕过单一队列。
+
+生产网络或安装结果为 `outcome_unknown` 时，保留 attempt 与原幂等身份，只做版本、receipt
+和 active release 的只读对账；禁止换 key、重传旧包或强行插队。用户明确延期真实业务
+验收时，仍须完成同包、版本、健康、认证和指定技术读回，候选最多停留 `observing`；只有
+延期旅程全部取得证据后才能进入 `released`。
 
 客户同步/教研板块的预发布数据必须由 `deploy/seed-staging-business-fixtures.sh` 写入固定合成夹具；不得复制生产数据。夹具只提供可重复的同步记录、客户目录投影、教研课卡和映射事实，不能单独证明业务通过。必须再执行认证业务接口读回，并用 `scripts/validate-staging-fixture-readback.py` 核验 fixture 版本、数据摘要和 `business_verified=true`；无业务读回不得生成 accepted receipt。
 
