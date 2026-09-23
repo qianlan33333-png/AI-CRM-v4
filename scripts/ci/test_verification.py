@@ -134,6 +134,8 @@ class VerificationTests(unittest.TestCase):
             (".github/workflows/ci.yml\n", True),
             ("migrations/0205_config_alipay_runtime_setting_keys.sql\n", True),
             ("internal/platform/jobqueue/queue.go\n", True),
+            ("scripts/release_control.py\n", True),
+            ("scripts/release_events.py\n", True),
             ("docs/guide.md\n", False),
             ("web/v3/productAdapter.ts\n", False),
         )

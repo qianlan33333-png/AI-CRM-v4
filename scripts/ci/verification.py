@@ -30,6 +30,8 @@ def requires_full_pr_verification() -> bool:
     changed = subprocess.check_output(["git", "diff", "--name-only", f"{base}...HEAD"], text=True).splitlines()
     critical = (".github/", "deploy/", "scripts/ci/", "migrations/", "internal/platform/",
                 "internal/identity/", "internal/outbound/", "internal/externaleffects/",
+                "scripts/release_control.py", "scripts/release_coordinator.py",
+                "scripts/release_events.py", "scripts/release_handoff.py",
                 "skills/aicrm-v3-development-frontdoor/", "AGENTS.md",
                 "scripts/check-install-release-contract.sh")
     test_paths = ("scripts/test-", "scripts/test_", "cmd/aicrm/")

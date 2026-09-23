@@ -150,7 +150,11 @@ class StagingSourceGateTests(unittest.TestCase):
         gate_spec.loader.exec_module(gate)
         changed = ("scripts/test-install-release-ordering.sh\n"
                    "cmd/aicrm/core_operations_chromium_journey.mjs\n"
-                   "internal/payment/app/service_test.go\n")
+                   "internal/payment/app/service_test.go\n"
+                   "scripts/release_control.py\n"
+                   "scripts/release_coordinator.py\n"
+                   "scripts/release_events.py\n"
+                   "scripts/test_release_control.py\n")
         with patch.dict("os.environ", {"PR_BASE_SHA": "a" * 40}):
             with patch.object(gate.subprocess, "check_output", return_value=changed):
                 self.assertFalse(gate.requires_staging_receipt("b" * 40))
