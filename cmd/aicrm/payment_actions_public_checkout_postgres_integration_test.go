@@ -20,7 +20,7 @@ import (
 // TestPostgreSQLPaymentActionsPublicCheckoutCompletionParity uses the real
 // composed public Host, its trusted H5 session, the native checkout HTTP
 // boundary and a verified payment callback. It proves that the target saved at
-// checkout survives an intervening product edit, that terminal refreshes only
+// settlement survives a later product edit, that terminal refreshes only
 // read the same paid action, and that a URL Link stays a same-origin route
 // until Product resolves its legacy fallback server-side.
 //
@@ -37,30 +37,30 @@ func TestPostgreSQLPaymentActionsPublicCheckoutCompletionParity(t *testing.T) {
 		t.Fatal("composition did not retain the native Payment application")
 	}
 
-	const frozenH5URL = "https://after.example.test/frozen-h5"
-	setPublicCheckoutActionProjection(t, fixture, fixture.productID, legacyRedirectProjection(false, "h5", frozenH5URL, "", "", ""))
+	const checkoutH5URL = "https://after.example.test/frozen-h5"
+	const paidH5URL = "https://after.example.test/edited-after-checkout"
+	setPublicCheckoutActionProjection(t, fixture, fixture.productID, legacyRedirectProjection(false, "h5", checkoutH5URL, "", "", ""))
 	h5Merchant := createPublicCheckoutForCompletionAction(t, fixture, session.token, fixture.productID, "standard", "payment-actions-public-h5-create-0001")
-	// A product edit after checkout must not change the customer-facing target
-	// that was placed in Order's checkout snapshot.
-	setPublicCheckoutActionProjection(t, fixture, fixture.productID, legacyRedirectProjection(false, "h5", "https://after.example.test/edited-after-checkout", "", "", ""))
+	// The first paid event uses Product's current action, then freezes that
+	// action for later status reads even if the Product changes again.
+	setPublicCheckoutActionProjection(t, fixture, fixture.productID, legacyRedirectProjection(false, "h5", paidH5URL, "", "", ""))
 	settlePublicCheckoutForCompletionAction(t, fixture, paymentService, h5Merchant, 9900, "payment-actions-public-h5")
+	setPublicCheckoutActionProjection(t, fixture, fixture.productID, legacyRedirectProjection(false, "h5", "https://after.example.test/edited-after-payment", "", "", ""))
 
 	h5Status := readPublicCheckoutCompletionAction(t, fixture, session.token, h5Merchant)
-	if h5Status.Status != "paid" || h5Status.Action.State != "available" || h5Status.Action.Mode != "redirect" || h5Status.Action.RedirectURL != frozenH5URL {
+	if h5Status.Status != "paid" || h5Status.Action.State != "available" || h5Status.Action.Mode != "redirect" || h5Status.Action.RedirectURL != paidH5URL {
 		t.Fatalf("frozen H5 paid action status=%+v", h5Status)
 	}
-	assertPublicCompletionActionFrozen(t, fixture, h5Merchant, frozenH5URL, false)
+	assertPublicCompletionActionFrozen(t, fixture, h5Merchant, paidH5URL, false)
 	assertPublicCompletionRefreshIsReadOnly(t, fixture, session.token, h5Merchant, 1)
 
 	const fallbackURL = "https://after.example.test/url-link-fallback"
 	linkSession := issuePublicCommerceTrustedH5SessionWithKey(t, fixture, "payment-actions-public-url-link-session-001")
 	setPublicCheckoutActionProjection(t, fixture, fixture.serviceProductID, legacyRedirectProjection(true, "url_link", "", "https://source.invalid/legacy-url-link", "result.destination", fallbackURL))
 	linkMerchant := createPublicCheckoutForCompletionAction(t, fixture, linkSession.token, fixture.serviceProductID, "service_period", "payment-actions-public-url-link-create-1")
-	// This second edit is intentionally incompatible with the paid target. The
-	// action consumer may read today's tag settings but must retain checkout's
-	// URL Link source and fallback.
-	setPublicCheckoutActionProjection(t, fixture, fixture.serviceProductID, legacyRedirectProjection(true, "h5", "https://after.example.test/edited-service", "", "", ""))
 	settlePublicCheckoutForCompletionAction(t, fixture, paymentService, linkMerchant, 12800, "payment-actions-public-url-link")
+	// A later edit cannot replace the already persisted URL Link receipt.
+	setPublicCheckoutActionProjection(t, fixture, fixture.serviceProductID, legacyRedirectProjection(true, "h5", "https://after.example.test/edited-service", "", "", ""))
 
 	linkStatus := readPublicCheckoutCompletionAction(t, fixture, linkSession.token, linkMerchant)
 	wantResolverPath := "/api/v1/wechat-pay/checkouts/" + linkMerchant + "/completion-target"
