@@ -123,7 +123,12 @@ class CoordinatorTests(unittest.TestCase):
             {**identity,"candidate_id":"active","status":"observing","base_main_sha":"f"*40,"events":[]},
             {**identity,"candidate_id":"next","change_class":"runtime","status":"integration_check","base_main_sha":base,"events":[]},
         ]}
-        with self.assertRaisesRegex(ValueError,"owns"): transition(runtime,"next","preview_building",main_sha=base)
+        transition(runtime,"next","preview_building",main_sha=base)
+        transition(runtime,"next","staging_acceptance",main_sha=base)
+        transition(runtime,"next","accepted",main_sha=base)
+        with self.assertRaisesRegex(ValueError,"owns"): transition(runtime,"next","waiting_merge",main_sha=base)
+        self.assertEqual(runtime["items"][0]["status"],"observing")
+        self.assertEqual(runtime["items"][1]["status"],"accepted")
 
     def test_rejected_handoff_is_recorded_without_entering_lane(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -70,6 +70,8 @@ bundle 的 prerequisite 时，构建失败。指挥台须重新生成完整 bund
 
 每次入队在最新 `main` 上重建 preview，核对 GitHub PR current head、required checks、签名证明、生产祖先和已验收 package。main、head 或 tree 前进即使旧测试为绿也必须生成新候选证据。
 
+预发构建/安装自验与生产晋级/观察分别占用槽位。旧候选在生产 `observing` 时，专用预发机可在自己的单飞构建和安装锁下自验下一候选；预发同一时刻仍只允许一个安装/验收，切换前须记录旧预发 active SHA、保留包与 receipt、迁移和回滚兼容性、认证测试数据及虚拟外部效果。`accepted` 仅释放预发槽位，不自动进入 `waiting_merge`。生产 `frozen`、`waiting_merge`、`merged`、`production`、`observing` 仍排他；`adopt-accepted` 和 `release promote --prepare` 不得绕过旧生产观察或缺失的政策批准。预发服务切换不改变旧生产候选的状态。
+
 同一时间只允许一个候选占用合并/晋级/观察窗口。若已有 observing candidate，必须根据生产 receipt 完成观察后再处理下一项。队列冲突记录 `blocked_environment`；安装结果不明记录 `outcome_unknown` 并只读对账，不能换幂等键重试。
 
 `release promote --prepare` 核对合并后 main tree、生产祖先、accepted 包和唯一队列占用。`--execute` 只允许预发布 Linux amd64 节点，以固定 Host Key、生产锁和现有部署脚本把同一包推送生产；本地 Mac、重新编译、旧 receipt、旧 head 或自动 adopt 都被禁止。网络尝试前写 attempt ID；成功只到 `observing`，生产版本、健康、认证、业务读回和观察完成后才到 `released`。
