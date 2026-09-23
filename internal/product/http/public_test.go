@@ -380,6 +380,34 @@ func TestPublicPaymentRegionCascadeBrowserJourney(t *testing.T) {
 	}
 }
 
+func TestPublicCheckoutCollectionProviderMatrix(t *testing.T) {
+	dir := t.TempDir()
+	for _, kind := range []string{"standard", "service_period"} {
+		for _, level := range []string{"none", "mobile", "shipping_address"} {
+			var html bytes.Buffer
+			product := publicProduct{ID: 7, Name: "测试商品", Description: "文字描述", PriceMinor: 990, ProductKind: kind, CouponTargetRef: "standard_product:7", RequireMobile: level != "none", ContactCollectionLevel: level, RegionOptionsJSON: template.JS(`[{"c":11,"n":"北京市","ch":[{"c":1101,"n":"北京市","ch":[{"c":110101,"n":"东城区"}]}]}]`)}
+			if kind == "service_period" {
+				product.CouponTargetRef = "service_period:7"
+				product.ServicePeriodDurationDays = 30
+			}
+			if err := publicProductPage.Execute(&html, publicProductPageView{Payment: true, Product: product, WeChatPayEnabled: true, AlipayEnabled: true}); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, kind+"-"+level+".html"), html.Bytes(), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime caller unavailable")
+	}
+	journey := filepath.Join(filepath.Dir(source), "public_checkout_collection_matrix.mjs")
+	if output, err := exec.Command("node", journey, dir).CombinedOutput(); err != nil {
+		t.Fatalf("checkout collection/provider matrix: %v\n%s", err, output)
+	}
+}
+
 func TestPublicProductDraftDisabledAndMalformedAre404(t *testing.T) {
 	for _, projection := range []json.RawMessage{
 		json.RawMessage(`{"schema_version":1,"status":"draft","enabled":false,"buy_button_text":"","require_mobile":false,"lead_program_id":null,"lead_channel_id":null,"lead_qr_title":"","lead_qr_subtitle":"","completion_redirect_enabled":false,"completion_redirect_url":"","completion_target":null,"purchase_action_enabled":false,"purchase_action_mode":"","wecom_tagging":{},"slices":[]}`),

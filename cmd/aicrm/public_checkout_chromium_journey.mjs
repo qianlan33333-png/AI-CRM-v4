@@ -105,6 +105,11 @@ try {
   await cdp.call("Network.setCookie", { url: baseURL, name: sessionCookie.slice(0, splitCookie), value: sessionCookie.slice(splitCookie + 1), secure: false, httpOnly: true, sameSite: "Strict" });
 
   await visit(cdp, `/pay/course-7?promotion_context=${promotionA}`);
+  assert.equal(await evaluate(cdp, "document.querySelector('#checkoutContent > .product')?.querySelector('img') === null"), true, "checkout product is text only");
+  assert.equal(await evaluate(cdp, "document.getElementById('couponPanel')?.hidden === false"), true, "claimed coupon section is visible");
+  await evaluate(cdp, "document.getElementById('buy').click();true");
+  await wait(cdp, "document.getElementById('mobileError')?.textContent==='请填写手机号'", "missing phone feedback was not shown");
+  assert.equal(await evaluate(cdp, "sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard')"), null, "invalid form must not create a checkout checkpoint");
   await clickWithCoupon(cdp, 11);
   await wait(cdp, "document.getElementById('status')?.textContent==='请求失败'", "lost response was not rendered");
   const firstCheckpoint = await evaluate(cdp, "JSON.parse(sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard') || 'null')");
@@ -123,6 +128,7 @@ try {
   const ordinaryCheckpoint = await evaluate(cdp, "JSON.parse(sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard') || 'null')");
   assert.equal(ordinaryCheckpoint?.key, firstCheckpoint.key, "ordinary page keeps the original idempotency key");
   assert.equal(ordinaryCheckpoint?.payload?.promotion_context, promotionA, "ordinary page cannot replace paid attribution");
+  assert.equal(await evaluate(cdp, "document.getElementById('couponPanel')?.hidden"), true, "paid result hides coupon selection");
   if (cdp.exceptions.length) throw new Error(`page exceptions=${JSON.stringify(cdp.exceptions)}`);
   console.log("public_checkout_chromium: PASS");
 } finally {
