@@ -367,6 +367,58 @@ def refresh_capability_cost(record, deployment_seconds=20.0):
     }
 
 
+def ci_attempt(run_id, attempt_number, conclusion, head_sha, start, end, jobs=None):
+    jobs = jobs or []
+    return {
+        "run_id": run_id, "run_attempt": attempt_number, "status": "completed",
+        "conclusion": conclusion, "head_sha": head_sha,
+        "created_at": start, "started_at": start, "updated_at": end,
+        "jobs_total_count": len(jobs), "jobs_fetched_count": len(jobs), "jobs": jobs,
+        "jobs_sha256": shadow._json_digest(jobs),
+    }
+
+
+def ci_jobs_for_success(start, check_start, end):
+    return [
+        {"name": "plan", "status": "completed", "conclusion": "success",
+         "started_at": start, "completed_at": check_start},
+        {"name": "check", "status": "completed", "conclusion": "success",
+         "started_at": check_start, "completed_at": end},
+    ]
+
+
+def ci_history_receipt(record, attempts=None):
+    attempts = attempts or [ci_attempt(
+        record["run_id"], record["run_attempt"], "success", "a" * 40,
+        "2026-09-25T00:00:00Z", "2026-09-25T00:00:50Z",
+        ci_jobs_for_success("2026-09-25T00:00:00Z", "2026-09-25T00:00:40Z",
+                            "2026-09-25T00:00:50Z"))]
+    summaries = [shadow._history_attempt_cost(item, item["run_id"]) for item in attempts]
+    by_run = {}
+    for item in attempts:
+        row = by_run.setdefault(item["run_id"], {
+            "run_id": item["run_id"], "path": ".github/workflows/ci.yml",
+            "head_sha": item["head_sha"], "head_branch": "trial-branch",
+            "event": "pull_request", "pull_request_numbers": [record["pr_number"]],
+            "latest_attempt": 0,
+        })
+        row["latest_attempt"] = max(row["latest_attempt"], item["run_attempt"])
+    unsigned = {
+        "schema": 1, "kind": "github_pr_ci_attempt_history_wall_time",
+        "pr_number": record["pr_number"], "workflow_path": ".github/workflows/ci.yml",
+        "paired_run_id": record["run_id"], "paired_run_attempt": record["run_attempt"],
+        "paired_tested_sha": record["source_sha"], "paired_tree": record["tree"],
+        "paired_policy_fingerprint": record["policy_fingerprint"],
+        "paired_run_head_sha": "a" * 40,
+        "run_list_total_count": 3, "run_list_fetched_count": 3,
+        "run_list_sha256": "b" * 64, "complete": True,
+        "run_inventory": list(by_run.values()),
+        "attempt_count": len(summaries), "attempts": summaries,
+        "elapsed_seconds": sum(item["elapsed_seconds"] for item in summaries),
+    }
+    return {**unsigned, "history_sha256": shadow._json_digest(unsigned)}
+
+
 def benchmark_record(pair_id, mode, pr_number, scope_type="class", scope_id="payment", **overrides):
     test_command = ["go", "test", "-json", "-race", "-count=1", "-timeout=15m",
                     "./..." if mode == "full" else "./internal/payment/app"]
@@ -388,17 +440,8 @@ def benchmark_record(pair_id, mode, pr_number, scope_type="class", scope_id="pay
     value.update(overrides)
     value["execution_receipt"] = _receipt(value, value["commands"])
     if scope_type == "capability" and mode == "targeted":
-        value["ci_wall_seconds"] = 50.0
-        value["ci_wall_receipt"] = {
-            "schema": 1, "kind": "github_run_plan_to_required_check_wall_time",
-            "run_id": value["run_id"], "run_attempt": value["run_attempt"],
-            "plan_job": "plan", "plan_conclusion": "success",
-            "plan_started_at": "2026-09-25T00:00:00Z",
-            "required_check_job": "check", "required_check_conclusion": "success",
-            "required_check_started_at": "2026-09-25T00:00:40Z",
-            "required_check_completed_at": "2026-09-25T00:00:50Z",
-            "elapsed_seconds": 50.0, "jobs_json_sha256": "a" * 64,
-        }
+        value["ci_wall_receipt"] = ci_history_receipt(value)
+        value["ci_wall_seconds"] = value["ci_wall_receipt"]["elapsed_seconds"]
         refresh_capability_cost(value)
     return value
 
@@ -480,11 +523,17 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                 pr, record["source_sha"], record["tree"], record["policy_fingerprint"])
                 for pr, record in first_by_pr.items() if isinstance(pr, int) and pr > 0]
         return shadow.evaluate_benchmarks(
-            records, ["payment"], ["commerce"], baselines,
+            records, ["payment"], self.capability_inventory(), baselines,
             replays if replays is not None else [defect_replay()],
             defects if defects is not None else ["payment-regression-1"],
             "docs/prd/trial.md", "f" * 64,
             observations=observations, **kwargs)
+
+    @staticmethod
+    def capability_inventory(pr_numbers=range(100, 110)):
+        return {"schema": 1, "parent_prd_id": "docs/prd/trial.md",
+                "parent_prd_sha": "f" * 64,
+                "capabilities": [{"id": "commerce", "pr_numbers": list(pr_numbers)}]}
 
     def test_ten_distinct_pr_trial_needs_three_class_pairs_baseline_and_defect_replay(self):
         result = self.evaluate()
@@ -613,6 +662,43 @@ class BenchmarkEvidenceTests(unittest.TestCase):
         self.assertEqual(result["by_capability"]["commerce"]["total_targeted_ci_deploy_seconds"], 1000.0)
         self.assertEqual(result["by_capability"]["commerce"]["cost_change"], 0.25)
 
+    def test_capability_history_charges_failed_cancelled_and_terminal_zero_job_attempts(self):
+        target = benchmark_record("history", "targeted", 100, "capability", "commerce")
+        target["run_attempt"] = 2
+        target["execution_receipt"] = _receipt(target, target["commands"])
+        attempts = [
+            ci_attempt(target["run_id"], 1, "failure", "a" * 40,
+                       "2026-09-25T00:00:00Z", "2026-09-25T00:01:00Z"),
+            ci_attempt(target["run_id"], 2, "success", "a" * 40,
+                       "2026-09-25T00:00:00Z", "2026-09-25T00:00:50Z",
+                       ci_jobs_for_success("2026-09-25T00:00:00Z", "2026-09-25T00:00:40Z",
+                                           "2026-09-25T00:00:50Z")),
+            ci_attempt(target["run_id"] + 1, 1, "cancelled", "a" * 40,
+                       "2026-09-25T00:02:00Z", "2026-09-25T00:04:00Z"),
+            ci_attempt(target["run_id"] + 2, 1, "failure", "a" * 40,
+                       "2026-09-25T00:05:00Z", "2026-09-25T00:05:00Z"),
+        ]
+        target["ci_wall_receipt"] = ci_history_receipt(target, attempts)
+        target["ci_wall_seconds"] = target["ci_wall_receipt"]["elapsed_seconds"]
+        refresh_capability_cost(target)
+        self.assertEqual(target["ci_wall_seconds"], 230.0)
+        self.assertEqual(target["ci_wall_receipt"]["attempt_count"], 4)
+        self.assertNotEqual(target["ci_wall_receipt"]["paired_run_head_sha"], target["source_sha"])
+        self.assertEqual(shadow._valid_ci_wall_receipt(target), 230.0)
+
+    def test_capability_history_missing_earlier_attempt_is_not_complete(self):
+        target = benchmark_record("history-gap", "targeted", 100, "capability", "commerce")
+        target["run_attempt"] = 2
+        target["execution_receipt"] = _receipt(target, target["commands"])
+        only_latest = ci_attempt(
+            target["run_id"], 2, "success", "a" * 40,
+            "2026-09-25T00:00:00Z", "2026-09-25T00:00:50Z",
+            ci_jobs_for_success("2026-09-25T00:00:00Z", "2026-09-25T00:00:40Z",
+                                "2026-09-25T00:00:50Z"))
+        target["ci_wall_receipt"] = ci_history_receipt(target, [only_latest])
+        target["ci_wall_seconds"] = target["ci_wall_receipt"]["elapsed_seconds"]
+        self.assertIsNone(shadow._valid_ci_wall_receipt(target))
+
     def test_empty_known_defect_inventory_cannot_enable_any_class(self):
         result = self.evaluate(defects=[])
         self.assertFalse(result["activation_ready"])
@@ -690,7 +776,7 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                                           record["policy_fingerprint"])
                         for pr, record in first_by_pr.items()]
         result = shadow.evaluate_benchmarks(
-            records, ["payment", "tooling"], ["commerce"], baselines, [defect_replay()],
+            records, ["payment", "tooling"], self.capability_inventory(), baselines, [defect_replay()],
             ["payment-regression-1"], "docs/prd/trial.md", "f" * 64,
             observations=observations)
         self.assertTrue(result["activation_ready"])
@@ -752,20 +838,28 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                 "release_files_sha256": "a" * 64, "build_mode": "full",
                 "phase_timings_seconds": {"build": 112.3},
             }
-            jobs = {
-                "databaseId": 654321, "attempt": 1,
-                "jobs": [
-                    {"name": "plan", "conclusion": "success",
-                     "startedAt": "2026-09-25T10:00:00Z",
-                     "completedAt": "2026-09-25T10:01:00Z"},
-                    {"name": "backend", "conclusion": "success",
-                     "startedAt": "2026-09-25T10:02:00Z",
-                     "completedAt": "2026-09-25T10:45:00Z"},
-                    {"name": "check", "conclusion": "success",
-                     "startedAt": "2026-09-25T10:50:00Z",
-                     "completedAt": "2026-09-25T11:00:00Z"},
-                ],
+            history_attempt = ci_attempt(
+                654321, 1, "success", "f" * 40, "2026-09-25T10:00:00Z",
+                "2026-09-25T11:00:00Z",
+                ci_jobs_for_success("2026-09-25T10:00:00Z", "2026-09-25T10:50:00Z",
+                                    "2026-09-25T11:00:00Z"))
+            history_run = {
+                "run_id": 654321, "path": ".github/workflows/ci.yml",
+                "head_sha": "f" * 40, "head_branch": "pr-321", "event": "pull_request",
+                "pull_request_numbers": [321], "latest_attempt": 1,
+                "attempts": [history_attempt],
             }
+            jobs = {
+                "schema": 1, "kind": "github_pr_ci_history_export",
+                "github_repo": "example/crm", "pr_number": 321,
+                "workflow_path": ".github/workflows/ci.yml", "pr_head_branch": "pr-321",
+                "run_list_total_count": 4, "run_list_fetched_count": 4,
+                "run_list_page_count": 1, "run_list_sha256": "c" * 64,
+                "unattributed_same_branch_run_ids": [], "runs": [history_run],
+                "complete": True, "incomplete_reasons": [],
+                "exported_at": "2026-09-25T11:01:00Z",
+            }
+            jobs["history_sha256"] = shadow._json_digest(jobs)
             state_path, manifest_path, jobs_path = (
                 root / "state.json", root / "domestic-release.json", root / "ci-jobs.json")
             state_path.write_text(json.dumps(release_state))
@@ -822,6 +916,87 @@ class BenchmarkEvidenceTests(unittest.TestCase):
             (report / "backend-go-test.jsonl").write_text("modified\n")
             with self.assertRaisesRegex(shadow.ShadowEvidenceError, "Go JSON log"):
                 shadow._verified_quality_lane_receipt(run_path)
+
+
+class GitHubHistoryExportTests(unittest.TestCase):
+    def test_export_collects_all_runs_and_attempts_and_preserves_zero_job_cost(self):
+        run_rows = [
+            {"id": 701, "path": ".github/workflows/ci.yml", "head_sha": "1" * 40,
+             "head_branch": "topic", "event": "pull_request", "run_attempt": 2,
+             "pull_requests": [{"number": 77}]},
+            {"id": 702, "path": ".github/workflows/ci.yml", "head_sha": "2" * 40,
+             "head_branch": "topic", "event": "pull_request", "run_attempt": 1,
+             "pull_requests": [{"number": 77}]},
+            {"id": 703, "path": ".github/workflows/ci.yml", "head_sha": "3" * 40,
+             "head_branch": "topic", "event": "pull_request", "run_attempt": 1,
+             "pull_requests": [{"number": 77}]},
+        ]
+        attempt_rows = {
+            (701, 1): ("failure", "2026-09-25T00:00:00Z", "2026-09-25T00:01:00Z"),
+            (701, 2): ("success", "2026-09-25T00:00:00Z", "2026-09-25T00:00:50Z"),
+            (702, 1): ("cancelled", "2026-09-25T00:02:00Z", "2026-09-25T00:04:00Z"),
+            (703, 1): ("failure", "2026-09-25T00:05:00Z", "2026-09-25T00:05:00Z"),
+        }
+
+        def api(path):
+            if path == "repos/acme/crm/pulls/77":
+                return {"head": {"ref": "topic"}}
+            if "/actions/workflows/ci.yml/runs?" in path:
+                return {"total_count": len(run_rows), "workflow_runs": run_rows}
+            if "/jobs?" in path:
+                _, suffix = path.split("/actions/runs/", 1)
+                run_id, _, tail = suffix.partition("/attempts/")
+                attempt = int(tail.split("/", 1)[0])
+                if (int(run_id), attempt) == (701, 2):
+                    return {"total_count": 2, "jobs": [
+                        {"name": "plan", "status": "completed", "conclusion": "success",
+                         "started_at": "2026-09-25T00:00:00Z",
+                         "completed_at": "2026-09-25T00:00:20Z"},
+                        {"name": "check", "status": "completed", "conclusion": "success",
+                         "started_at": "2026-09-25T00:00:40Z",
+                         "completed_at": "2026-09-25T00:00:50Z"},
+                    ]}
+                return {"total_count": 0, "jobs": []}
+            if "/actions/runs/" in path:
+                _, suffix = path.split("/actions/runs/", 1)
+                run_text, _, attempt_text = suffix.partition("/attempts/")
+                run_id, attempt_number = int(run_text), int(attempt_text)
+                conclusion, started, ended = attempt_rows[(run_id, attempt_number)]
+                return {
+                    "id": run_id, "run_attempt": attempt_number,
+                    "head_sha": next(row["head_sha"] for row in run_rows if row["id"] == run_id),
+                    "status": "completed", "conclusion": conclusion,
+                    "created_at": started, "run_started_at": started, "updated_at": ended,
+                }
+            raise AssertionError("unexpected GitHub API path: " + path)
+
+        with patch.object(shadow, "_github_api_json", side_effect=api):
+            bundle = shadow.export_github_pr_ci_history("acme/crm", 77)
+        self.assertTrue(bundle["complete"], bundle["incomplete_reasons"])
+        self.assertEqual(bundle["run_list_fetched_count"], 3)
+        self.assertEqual(len(bundle["runs"]), 3)
+        self.assertEqual(sum(len(run["attempts"]) for run in bundle["runs"]), 4)
+        no_job = next(attempt for run in bundle["runs"] if run["run_id"] == 703
+                      for attempt in run["attempts"])
+        self.assertEqual(no_job["jobs_total_count"], 0)
+        self.assertEqual(no_job["created_at"], no_job["updated_at"])
+
+        receipt = {"pr_number": 77, "run_id": 701, "run_attempt": 2,
+                   "tested_sha": "9" * 40, "tree": "8" * 40,
+                   "policy_fingerprint": "7" * 64}
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "history.json"
+            path.write_text(json.dumps(bundle), encoding="utf-8")
+            cost = shadow._github_ci_wall_receipt(path, receipt)
+            self.assertEqual(cost["elapsed_seconds"], 230.0)
+            self.assertNotEqual(cost["paired_run_head_sha"], receipt["tested_sha"])
+            broken = copy.deepcopy(bundle)
+            broken["runs"][0]["attempts"].pop(0)
+            broken["history_sha256"] = shadow._json_digest(
+                {key: value for key, value in broken.items() if key != "history_sha256"})
+            path.write_text(json.dumps(broken), encoding="utf-8")
+            with self.assertRaisesRegex(shadow.ShadowEvidenceError, "missing or duplicate attempts"):
+                shadow._github_ci_wall_receipt(path, receipt)
 
 
 if __name__ == "__main__":

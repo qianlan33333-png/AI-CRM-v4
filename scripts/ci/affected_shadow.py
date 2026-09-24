@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+from datetime import timezone
 import hashlib
 import json
 from pathlib import Path
@@ -106,6 +107,12 @@ def _plan_bindings(plan: dict[str, Any]) -> dict[str, str]:
 def _safe_seconds(value: Any, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
         raise ShadowEvidenceError(f"{label} must be a positive measured duration")
+    return float(value)
+
+
+def _nonnegative_seconds(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        raise ShadowEvidenceError(f"{label} must be a measured nonnegative duration")
     return float(value)
 
 
@@ -576,62 +583,291 @@ def _parse_ci_timestamp(value: Any, field: str) -> datetime:
     return parsed
 
 
-def _github_ci_wall_receipt(ci_jobs_path: Path, run: dict[str, Any],
-                            execution_receipt: dict[str, Any]) -> dict[str, Any]:
-    """Bind the complete required-check wall time from a same-attempt Jobs API export.
-
-    Expected input is `gh run view RUN_ID --attempt ATTEMPT --json databaseId,attempt,jobs`.
-    The interval starts when the workflow's `plan` job starts and ends when its
-    stable required `check` job completes, so lane setup and inter-job waits are
-    included instead of treating backend duration as total CI time.
-    """
-    raw = ci_jobs_path.read_bytes()
+def _github_api_json(path: str) -> dict[str, Any]:
+    """Read one GitHub REST resource through the user's existing gh auth."""
+    result = subprocess.run(["gh", "api", path], stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, check=False, timeout=60)
+    if result.returncode:
+        raise ShadowEvidenceError("GitHub Actions history read failed")
     try:
-        document = json.loads(raw)
+        value = json.loads(result.stdout)
     except json.JSONDecodeError as error:
-        raise ShadowEvidenceError("GitHub CI jobs JSON is malformed") from error
-    if not isinstance(document, dict):
-        raise ShadowEvidenceError("GitHub CI jobs JSON is not an object")
-    run_id = document.get("databaseId", document.get("run_id"))
-    run_attempt = document.get("attempt", document.get("run_attempt"))
-    if (isinstance(run_id, bool) or not isinstance(run_id, (int, str)) or not str(run_id)
-            or isinstance(run_attempt, bool) or not isinstance(run_attempt, int) or run_attempt < 1
-            or str(run_id) != str(execution_receipt.get("run_id"))
-            or run_attempt != execution_receipt.get("run_attempt")
-            or str(run_id) != str(run.get("run_id"))
-            or run_attempt != run.get("run_attempt")):
-        raise ShadowEvidenceError("GitHub CI jobs JSON does not match the backend run/attempt")
-    jobs = document.get("jobs")
-    if not isinstance(jobs, list):
-        raise ShadowEvidenceError("GitHub CI jobs JSON has no jobs list")
+        raise ShadowEvidenceError("GitHub Actions history response is malformed") from error
+    if not isinstance(value, dict):
+        raise ShadowEvidenceError("GitHub Actions history response is not an object")
+    return value
 
-    def named_job(name: str) -> dict[str, Any]:
-        matches = [job for job in jobs if isinstance(job, dict) and job.get("name") == name]
-        if len(matches) != 1:
-            raise ShadowEvidenceError(f"GitHub CI jobs JSON must contain exactly one {name} job")
-        return matches[0]
 
-    plan_job, check_job = named_job("plan"), named_job("check")
-    if plan_job.get("conclusion") != "success" or check_job.get("conclusion") != "success":
-        raise ShadowEvidenceError("GitHub plan and required check jobs must both succeed")
-    plan_started = plan_job.get("startedAt", plan_job.get("started_at"))
-    check_started = check_job.get("startedAt", check_job.get("started_at"))
-    check_completed = check_job.get("completedAt", check_job.get("completed_at"))
-    start = _parse_ci_timestamp(plan_started, "plan.startedAt")
-    check_start = _parse_ci_timestamp(check_started, "check.startedAt")
-    end = _parse_ci_timestamp(check_completed, "check.completedAt")
-    if check_start < start or end < check_start:
-        raise ShadowEvidenceError("GitHub CI plan/check timestamps are out of order")
-    elapsed = (end - start).total_seconds()
-    _safe_seconds(elapsed, "complete CI wall seconds")
+def _github_api_pages(path: str, key: str) -> tuple[list[dict[str, Any]], int, int]:
+    """Read every page and reject a moving/truncated API result."""
+    page = 1
+    total = None
+    values: list[dict[str, Any]] = []
+    while page <= 1000:
+        separator = "&" if "?" in path else "?"
+        response = _github_api_json(f"{path}{separator}per_page=100&page={page}")
+        count, rows = response.get("total_count"), response.get(key)
+        if (isinstance(count, bool) or not isinstance(count, int) or count < 0
+                or not isinstance(rows, list)
+                or any(not isinstance(row, dict) for row in rows)):
+            raise ShadowEvidenceError("GitHub Actions history page has an invalid inventory")
+        if total is None:
+            total = count
+        elif count != total:
+            raise ShadowEvidenceError("GitHub Actions history changed during pagination")
+        values.extend(rows)
+        if len(values) >= total:
+            break
+        if not rows:
+            raise ShadowEvidenceError("GitHub Actions history pagination ended early")
+        page += 1
+    if total is None or page > 1000 or len(values) != total:
+        raise ShadowEvidenceError("GitHub Actions history is truncated")
+    return values, total, page
+
+
+def export_github_pr_ci_history(github_repo: str, pr_number: int) -> dict[str, Any]:
+    """Export read-only workflow run/attempt/job history for one PR."""
+    if (not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", github_repo)
+            or isinstance(pr_number, bool) or not isinstance(pr_number, int) or pr_number < 1):
+        raise ShadowEvidenceError("GitHub repository or PR number is invalid")
+    prefix = f"repos/{github_repo}"
+    pull = _github_api_json(f"{prefix}/pulls/{pr_number}")
+    head = pull.get("head") if isinstance(pull.get("head"), dict) else {}
+    head_ref = head.get("ref")
+    if not isinstance(head_ref, str) or not head_ref:
+        raise ShadowEvidenceError("GitHub PR head branch is unavailable")
+    listed, total, page_count = _github_api_pages(
+        f"{prefix}/actions/workflows/ci.yml/runs", "workflow_runs")
+    list_projection = []
+    matching = []
+    ambiguous = []
+    for item in listed:
+        refs = item.get("pull_requests")
+        if not isinstance(refs, list):
+            raise ShadowEvidenceError("GitHub workflow run has no PR attribution inventory")
+        if any(not isinstance(ref, dict) or isinstance(ref.get("number"), bool)
+               or not isinstance(ref.get("number"), int) or ref["number"] < 1 for ref in refs):
+            raise ShadowEvidenceError("GitHub workflow run has invalid PR attribution")
+        numbers = sorted({ref["number"] for ref in refs})
+        path = item.get("path")
+        if not isinstance(path, str) or path.split("@", 1)[0] != ".github/workflows/ci.yml":
+            continue
+        run_id, sha = item.get("id"), item.get("head_sha")
+        if (isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1
+                or not isinstance(sha, str) or not HEX40.fullmatch(sha)):
+            raise ShadowEvidenceError("GitHub workflow run identity is invalid")
+        projection = {"run_id": run_id, "path": path, "head_sha": sha,
+                      "head_branch": item.get("head_branch"), "event": item.get("event"),
+                      "pull_request_numbers": numbers, "latest_attempt": item.get("run_attempt")}
+        list_projection.append(projection)
+        if pr_number in numbers:
+            matching.append((item, projection))
+        elif item.get("head_branch") == head_ref:
+            ambiguous.append(run_id)
+    if len({item["run_id"] for item in list_projection}) != len(list_projection):
+        raise ShadowEvidenceError("GitHub workflow run list contains duplicate identities")
+
+    runs = []
+    incomplete_reasons = []
+    if ambiguous:
+        incomplete_reasons.append("workflow runs on the PR head branch lack PR attribution")
+    for item, projection in matching:
+        latest = item.get("run_attempt")
+        if isinstance(latest, bool) or not isinstance(latest, int) or latest < 1:
+            raise ShadowEvidenceError("GitHub workflow run has an invalid attempt count")
+        attempts = []
+        for attempt_number in range(1, latest + 1):
+            stem = f"{prefix}/actions/runs/{projection['run_id']}/attempts/{attempt_number}"
+            attempt = _github_api_json(stem)
+            if (attempt.get("id") != projection["run_id"]
+                    or attempt.get("run_attempt") != attempt_number
+                    or attempt.get("head_sha") != projection["head_sha"]):
+                raise ShadowEvidenceError("GitHub workflow attempt identity does not match its run")
+            jobs, jobs_count, jobs_pages = _github_api_pages(stem + "/jobs", "jobs")
+            normalized_jobs = [{key: job.get(key) for key in
+                                ("name", "status", "conclusion", "started_at", "completed_at")}
+                               for job in jobs]
+            start = attempt.get("run_started_at") or attempt.get("created_at")
+            record = {
+                "run_attempt": attempt_number, "status": attempt.get("status"),
+                "conclusion": attempt.get("conclusion"), "head_sha": attempt.get("head_sha"),
+                "created_at": attempt.get("created_at"), "started_at": start,
+                "updated_at": attempt.get("updated_at"),
+                "jobs_total_count": jobs_count, "jobs_fetched_count": len(jobs),
+                "jobs_page_count": jobs_pages, "jobs": normalized_jobs,
+                "jobs_sha256": _json_digest(normalized_jobs),
+            }
+            if record["status"] != "completed" or not isinstance(record["conclusion"], str):
+                incomplete_reasons.append(
+                    f"workflow run {projection['run_id']} attempt {attempt_number} is not terminal")
+            attempts.append(record)
+        runs.append({**projection, "attempts": attempts})
+    if not runs:
+        incomplete_reasons.append("no CI workflow runs are attributable to this PR")
+    bundle = {
+        "schema": 1, "kind": "github_pr_ci_history_export",
+        "github_repo": github_repo, "pr_number": pr_number,
+        "workflow_path": ".github/workflows/ci.yml", "pr_head_branch": head_ref,
+        "run_list_total_count": total, "run_list_fetched_count": len(listed),
+        "run_list_page_count": page_count,
+        "run_list_sha256": _json_digest(list_projection),
+        "unattributed_same_branch_run_ids": sorted(ambiguous),
+        "runs": runs, "complete": not incomplete_reasons,
+        "incomplete_reasons": sorted(set(incomplete_reasons)),
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+    }
+    bundle["history_sha256"] = _json_digest(bundle)
+    return bundle
+
+
+def _history_attempt_cost(attempt: dict[str, Any], run_id: int) -> dict[str, Any]:
+    jobs = attempt.get("jobs")
+    if (attempt.get("status") != "completed" or not isinstance(attempt.get("conclusion"), str)
+            or not isinstance(jobs, list)
+            or isinstance(attempt.get("run_attempt"), bool)
+            or not isinstance(attempt.get("run_attempt"), int) or attempt["run_attempt"] < 1
+            or not isinstance(attempt.get("head_sha"), str)
+            or not HEX40.fullmatch(attempt["head_sha"])
+            or isinstance(attempt.get("jobs_total_count"), bool)
+            or not isinstance(attempt.get("jobs_total_count"), int)
+            or attempt.get("jobs_total_count") != len(jobs)
+            or isinstance(attempt.get("jobs_fetched_count"), bool)
+            or not isinstance(attempt.get("jobs_fetched_count"), int)
+            or attempt.get("jobs_fetched_count") != len(jobs)
+            or not isinstance(attempt.get("jobs_sha256"), str)
+            or attempt.get("jobs_sha256") != _json_digest(jobs)):
+        raise ShadowEvidenceError("GitHub workflow attempt history is incomplete")
+    for job in jobs:
+        if not isinstance(job, dict) or not isinstance(job.get("name"), str):
+            raise ShadowEvidenceError("GitHub workflow attempt contains an invalid job")
+    conclusion = attempt["conclusion"]
+    if conclusion == "success":
+        plan = [job for job in jobs if job["name"] == "plan"]
+        check = [job for job in jobs if job["name"] == "check"]
+        if (len(plan) != 1 or len(check) != 1
+                or plan[0].get("conclusion") != "success"
+                or check[0].get("conclusion") != "success"):
+            raise ShadowEvidenceError("successful workflow attempt lacks its successful plan/check jobs")
+        started, ended = plan[0].get("started_at"), check[0].get("completed_at")
+        start = _parse_ci_timestamp(started, "plan.started_at")
+        check_start = _parse_ci_timestamp(check[0].get("started_at"), "check.started_at")
+        end = _parse_ci_timestamp(ended, "check.completed_at")
+        if check_start < start or end < check_start:
+            raise ShadowEvidenceError("GitHub plan/check timestamps are out of order")
+        seconds = _nonnegative_seconds((end - start).total_seconds(), "successful CI wall seconds")
+        measure = "plan_to_required_check"
+    else:
+        started, ended = attempt.get("started_at") or attempt.get("created_at"), attempt.get("updated_at")
+        start = _parse_ci_timestamp(started, "attempt.started_at")
+        end = _parse_ci_timestamp(ended, "attempt.updated_at")
+        if end < start:
+            raise ShadowEvidenceError("GitHub attempt timestamps are out of order")
+        seconds = _nonnegative_seconds((end - start).total_seconds(), "failed/cancelled CI wall seconds")
+        measure = "attempt_start_to_terminal"
     return {
-        "schema": 1, "kind": "github_run_plan_to_required_check_wall_time",
-        "run_id": execution_receipt["run_id"], "run_attempt": execution_receipt["run_attempt"],
-        "plan_job": "plan", "plan_conclusion": "success", "plan_started_at": plan_started,
-        "required_check_job": "check", "required_check_conclusion": "success",
-        "required_check_started_at": check_started,
-        "required_check_completed_at": check_completed,
-        "elapsed_seconds": elapsed, "jobs_json_sha256": hashlib.sha256(raw).hexdigest(),
+        "run_id": run_id, "run_attempt": attempt["run_attempt"],
+        "head_sha": attempt["head_sha"], "status": attempt["status"],
+        "conclusion": conclusion, "measure": measure,
+        "started_at": started, "ended_at": ended, "elapsed_seconds": seconds,
+        "jobs_total_count": attempt["jobs_total_count"],
+        "jobs_fetched_count": attempt["jobs_fetched_count"],
+        "jobs_sha256": attempt["jobs_sha256"], "jobs": jobs,
+        "plan_conclusion": plan[0]["conclusion"] if conclusion == "success" else None,
+        "check_conclusion": check[0]["conclusion"] if conclusion == "success" else None,
+        "check_started_at": check[0].get("started_at") if conclusion == "success" else None,
+        "check_completed_at": check[0].get("completed_at") if conclusion == "success" else None,
+    }
+
+
+def _github_ci_wall_receipt(ci_jobs_path: Path,
+                            execution_receipt: dict[str, Any]) -> dict[str, Any]:
+    """Bind all CI workflow runs and attempts attributed to this PR."""
+    try:
+        document = json.loads(ci_jobs_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ShadowEvidenceError("GitHub CI history JSON is malformed") from error
+    if not isinstance(document, dict):
+        raise ShadowEvidenceError("GitHub CI history JSON is not an object")
+    history_sha = document.get("history_sha256")
+    unsigned = {key: value for key, value in document.items() if key != "history_sha256"}
+    if (document.get("schema") != 1 or document.get("kind") != "github_pr_ci_history_export"
+            or document.get("complete") is not True or document.get("incomplete_reasons") != []
+            or history_sha != _json_digest(unsigned)
+            or document.get("workflow_path") != ".github/workflows/ci.yml"
+            or document.get("pr_number") != execution_receipt.get("pr_number")
+            or document.get("run_list_total_count") != document.get("run_list_fetched_count")
+            or isinstance(document.get("run_list_total_count"), bool)
+            or not isinstance(document.get("run_list_total_count"), int)
+            or not isinstance(document.get("run_list_sha256"), str)
+            or not HEX64.fullmatch(document["run_list_sha256"])
+            or document.get("unattributed_same_branch_run_ids") != []):
+        raise ShadowEvidenceError("GitHub CI PR history is incomplete or unbound")
+    runs = document.get("runs")
+    if not isinstance(runs, list) or not runs:
+        raise ShadowEvidenceError("GitHub CI PR history contains no runs")
+    summaries = []
+    seen = set()
+    for history_run in runs:
+        path = history_run.get("path") if isinstance(history_run, dict) else None
+        pr_numbers = history_run.get("pull_request_numbers") if isinstance(history_run, dict) else None
+        if (not isinstance(path, str)
+                or path.split("@", 1)[0] != ".github/workflows/ci.yml"
+                or not isinstance(pr_numbers, list)
+                or any(isinstance(number, bool) or not isinstance(number, int) for number in pr_numbers)
+                or execution_receipt["pr_number"] not in pr_numbers):
+            raise ShadowEvidenceError("GitHub CI history contains an unattributed workflow run")
+        run_id = history_run.get("run_id")
+        run_head_sha = history_run.get("head_sha")
+        latest = history_run.get("latest_attempt")
+        attempts = history_run.get("attempts")
+        if (isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1
+                or not isinstance(run_head_sha, str) or not HEX40.fullmatch(run_head_sha)
+                or isinstance(latest, bool) or not isinstance(latest, int) or latest < 1
+                or not isinstance(attempts, list) or len(attempts) != latest
+                or run_id in seen):
+            raise ShadowEvidenceError("GitHub CI history has missing or duplicate attempts")
+        seen.add(run_id)
+        numbers = set()
+        for attempt in attempts:
+            if (not isinstance(attempt, dict) or isinstance(attempt.get("run_attempt"), bool)
+                    or not isinstance(attempt.get("run_attempt"), int)):
+                raise ShadowEvidenceError("GitHub CI history has an invalid attempt")
+            number = attempt["run_attempt"]
+            if number in numbers or number < 1 or number > latest:
+                raise ShadowEvidenceError("GitHub CI history has duplicate/out-of-range attempt numbers")
+            numbers.add(number)
+            if attempt.get("head_sha") != run_head_sha:
+                raise ShadowEvidenceError("GitHub workflow attempt source disagrees with its run")
+            summaries.append(_history_attempt_cost(attempt, run_id))
+        if numbers != set(range(1, latest + 1)):
+            raise ShadowEvidenceError("GitHub CI history omitted a workflow run attempt")
+    paired = [item for item in summaries
+              if str(item["run_id"]) == str(execution_receipt["run_id"])
+              and item["run_attempt"] == execution_receipt["run_attempt"]]
+    if len(paired) != 1 or paired[0]["conclusion"] != "success":
+        raise ShadowEvidenceError("paired successful CI attempt is absent from the PR history")
+    return {
+        "schema": 1, "kind": "github_pr_ci_attempt_history_wall_time",
+        "pr_number": execution_receipt["pr_number"],
+        "workflow_path": ".github/workflows/ci.yml", "paired_run_id": execution_receipt["run_id"],
+        "paired_run_attempt": execution_receipt["run_attempt"],
+        # GitHub's PR run metadata identifies the PR head; the canonical lane
+        # receipt identifies the merge-preview tree actually tested by CI.
+        "paired_tested_sha": execution_receipt["tested_sha"],
+        "paired_tree": execution_receipt["tree"],
+        "paired_policy_fingerprint": execution_receipt["policy_fingerprint"],
+        "paired_run_head_sha": paired[0]["head_sha"],
+        "run_list_total_count": document["run_list_total_count"],
+        "run_list_fetched_count": document["run_list_fetched_count"],
+        "run_list_sha256": document["run_list_sha256"],
+        "history_sha256": history_sha, "complete": True,
+        "run_inventory": [{key: history_run[key] for key in
+                           ("run_id", "path", "head_sha", "head_branch", "event",
+                            "pull_request_numbers", "latest_attempt")}
+                          for history_run in runs],
+        "attempt_count": len(summaries), "attempts": summaries,
+        "elapsed_seconds": sum(item["elapsed_seconds"] for item in summaries),
     }
 
 
@@ -772,7 +1008,7 @@ def benchmark_records_from_lane_runs(full_run_path: Path, targeted_run_path: Pat
             raise ShadowEvidenceError("capability benchmark requires --release-state and --release-manifest")
         if ci_jobs_path is None:
             raise ShadowEvidenceError("capability benchmark requires --ci-jobs for complete CI wall time")
-        ci_wall_receipt = _github_ci_wall_receipt(ci_jobs_path, target_run, target_receipt)
+        ci_wall_receipt = _github_ci_wall_receipt(ci_jobs_path, target_receipt)
         target_record_identity = {**targeted_record}
         target_record_identity["scope_id"] = scope_id
         deployment = _release_state_timing(release_state_path, release_manifest_path,
@@ -803,26 +1039,93 @@ def benchmark_records_from_lane_runs(full_run_path: Path, targeted_run_path: Pat
 def _valid_ci_wall_receipt(record: dict[str, Any]) -> float | None:
     receipt = record.get("ci_wall_receipt")
     if (not isinstance(receipt, dict) or receipt.get("schema") != 1
-            or receipt.get("kind") != "github_run_plan_to_required_check_wall_time"
-            or str(receipt.get("run_id")) != str(record.get("run_id"))
-            or receipt.get("run_attempt") != record.get("run_attempt")
-            or receipt.get("plan_job") != "plan" or receipt.get("plan_conclusion") != "success"
-            or receipt.get("required_check_job") != "check"
-            or receipt.get("required_check_conclusion") != "success"
-            or not isinstance(receipt.get("jobs_json_sha256"), str)
-            or not HEX64.fullmatch(receipt["jobs_json_sha256"])):
+            or receipt.get("kind") != "github_pr_ci_attempt_history_wall_time"
+            or receipt.get("pr_number") != record.get("pr_number")
+            or str(receipt.get("paired_run_id")) != str(record.get("run_id"))
+            or receipt.get("paired_run_attempt") != record.get("run_attempt")
+            or receipt.get("paired_tested_sha") != record.get("source_sha")
+            or receipt.get("paired_tree") != record.get("tree")
+            or receipt.get("paired_policy_fingerprint") != record.get("policy_fingerprint")
+            or receipt.get("complete") is not True
+            or isinstance(receipt.get("run_list_total_count"), bool)
+            or not isinstance(receipt.get("run_list_total_count"), int)
+            or receipt.get("run_list_total_count") != receipt.get("run_list_fetched_count")
+            or not isinstance(receipt.get("run_list_sha256"), str)
+            or not HEX64.fullmatch(receipt["run_list_sha256"])
+            or not isinstance(receipt.get("history_sha256"), str)
+            or not HEX64.fullmatch(receipt["history_sha256"])):
         return None
     try:
-        start = _parse_ci_timestamp(receipt.get("plan_started_at"), "plan.startedAt")
-        check_start = _parse_ci_timestamp(receipt.get("required_check_started_at"), "check.startedAt")
-        end = _parse_ci_timestamp(receipt.get("required_check_completed_at"), "check.completedAt")
-        elapsed = _safe_seconds(receipt.get("elapsed_seconds"), "complete CI wall seconds")
+        attempts = receipt.get("attempts")
+        run_inventory = receipt.get("run_inventory")
+        if (not isinstance(attempts, list) or not attempts
+                or isinstance(receipt.get("attempt_count"), bool)
+                or receipt.get("attempt_count") != len(attempts)
+                or not isinstance(run_inventory, list) or not run_inventory):
+            return None
+        inventory_by_id = {}
+        for row in run_inventory:
+            row_path = row.get("path") if isinstance(row, dict) else None
+            pr_numbers = row.get("pull_request_numbers") if isinstance(row, dict) else None
+            if (not isinstance(row_path, str)
+                    or row_path.split("@", 1)[0] != ".github/workflows/ci.yml"
+                    or not isinstance(row.get("head_sha"), str)
+                    or not HEX40.fullmatch(row["head_sha"])
+                    or not isinstance(pr_numbers, list)
+                    or any(isinstance(number, bool) or not isinstance(number, int) for number in pr_numbers)
+                    or record["pr_number"] not in pr_numbers
+                    or isinstance(row.get("run_id"), bool)
+                    or not isinstance(row.get("run_id"), int) or row["run_id"] < 1
+                    or isinstance(row.get("latest_attempt"), bool)
+                    or not isinstance(row.get("latest_attempt"), int) or row["latest_attempt"] < 1
+                    or row["run_id"] in inventory_by_id):
+                return None
+            inventory_by_id[row["run_id"]] = row
+        computed, seen, paired = [], set(), []
+        attempts_by_run: dict[int, set[int]] = {run_id: set() for run_id in inventory_by_id}
+        for item in attempts:
+            if not isinstance(item, dict):
+                return None
+            attempt = {
+                "run_attempt": item.get("run_attempt"), "status": item.get("status"),
+                "conclusion": item.get("conclusion"), "head_sha": item.get("head_sha"),
+                "started_at": item.get("started_at"), "created_at": item.get("started_at"),
+                "updated_at": item.get("ended_at"), "jobs": item.get("jobs"),
+                "jobs_total_count": item.get("jobs_total_count"),
+                "jobs_fetched_count": item.get("jobs_fetched_count"),
+                "jobs_sha256": item.get("jobs_sha256"),
+            }
+            run_id = item.get("run_id")
+            if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1:
+                return None
+            key = (run_id, attempt["run_attempt"])
+            inventory = inventory_by_id.get(run_id)
+            if (key in seen or inventory is None
+                    or attempt["head_sha"] != inventory["head_sha"]):
+                return None
+            seen.add(key)
+            attempts_by_run[run_id].add(attempt["run_attempt"])
+            recalculated = _history_attempt_cost(attempt, run_id)
+            if recalculated != item:
+                return None
+            computed.append(recalculated["elapsed_seconds"])
+            if (str(key[0]) == str(receipt["paired_run_id"])
+                    and key[1] == receipt["paired_run_attempt"]):
+                paired.append(recalculated)
+        if any(numbers != set(range(1, inventory_by_id[run_id]["latest_attempt"] + 1))
+               for run_id, numbers in attempts_by_run.items()):
+            return None
+        elapsed = _nonnegative_seconds(sum(computed), "complete PR CI history seconds")
     except ShadowEvidenceError:
         return None
-    if check_start < start or end < check_start or abs((end - start).total_seconds() - elapsed) > 0.001:
+    paired_row = next((row for run_id, row in inventory_by_id.items()
+                       if str(run_id) == str(receipt.get("paired_run_id"))), None)
+    if (len(paired) != 1 or paired[0]["conclusion"] != "success"
+            or paired_row is None or paired[0]["head_sha"] != receipt.get("paired_run_head_sha")
+            or paired[0]["head_sha"] != paired_row["head_sha"]):
         return None
     try:
-        recorded_seconds = _safe_seconds(record.get("ci_wall_seconds"), "recorded CI wall seconds")
+        recorded_seconds = _nonnegative_seconds(record.get("ci_wall_seconds"), "recorded CI wall seconds")
     except ShadowEvidenceError:
         return None
     return elapsed if abs(recorded_seconds - elapsed) <= 0.001 else None
@@ -844,7 +1147,7 @@ def _valid_capability_cost_receipt(record: dict[str, Any], elapsed_seconds: floa
     if any(cost.get(key) != value for key, value in identity.items()):
         return None
     try:
-        ci_seconds = _safe_seconds(cost.get("ci_seconds"), "capability CI seconds")
+        ci_seconds = _nonnegative_seconds(cost.get("ci_seconds"), "capability CI seconds")
         backend_seconds = _safe_seconds(cost.get("backend_lane_seconds"), "capability backend lane seconds")
         deploy_seconds = _safe_seconds(cost.get("deployment_seconds"), "capability deployment seconds")
         total_seconds = _safe_seconds(cost.get("total_seconds"), "capability total seconds")
@@ -1083,10 +1386,44 @@ def _trial_observation_problem(record: Any, parent_prd_id: str | None,
     return None
 
 
+def _capability_pr_inventory(value: Any, parent_prd_id: str | None,
+                             parent_prd_sha: str | None) -> tuple[list[str], dict[str, set[int]], list[str]]:
+    """Validate business-capability PR membership separately from code owners."""
+    if value == []:
+        return [], {}, []
+    if (not isinstance(value, dict) or value.get("schema") != 1
+            or value.get("parent_prd_id") != parent_prd_id
+            or value.get("parent_prd_sha") != parent_prd_sha
+            or not isinstance(value.get("capabilities"), list)):
+        return [], {}, ["capability cost inventory is missing or not bound to the parent PRD"]
+    ids: list[str] = []
+    pr_map: dict[str, set[int]] = {}
+    errors = []
+    for entry in value["capabilities"]:
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not entry["id"]:
+            errors.append("capability cost inventory has an invalid business capability")
+            continue
+        capability = entry["id"]
+        if capability in pr_map:
+            errors.append("capability cost inventory has duplicate business capability ids")
+            continue
+        ids.append(capability)
+        numbers = entry.get("pr_numbers")
+        if (not isinstance(numbers, list) or not numbers
+                or any(isinstance(number, bool) or not isinstance(number, int) or number < 1
+                       for number in numbers)
+                or len(set(numbers)) != len(numbers)):
+            errors.append("business capability has a missing or invalid PR inventory: " + capability)
+            pr_map[capability] = set()
+        else:
+            pr_map[capability] = set(numbers)
+    return sorted(ids), pr_map, errors
+
+
 def evaluate_benchmarks(
     records: list[dict[str, Any]],
     trial_classes: list[str],
-    capabilities: list[str],
+    capabilities: Any,
     capability_baselines: dict[str, Any] | None = None,
     known_defect_replays: list[dict[str, Any]] | None = None,
     expected_defect_ids: list[str] | None = None,
@@ -1107,6 +1444,9 @@ def evaluate_benchmarks(
     grouped: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = {}
     rejected: list[str] = []
     invalid_capability_evidence: set[str] = set()
+    capability_ids, capability_pr_numbers, inventory_errors = _capability_pr_inventory(
+        capabilities, parent_prd_id, parent_prd_sha)
+    rejected.extend(inventory_errors)
 
     def invalidate_capability(record: Any) -> None:
         if (isinstance(record, dict) and record.get("scope_type") == "capability"
@@ -1172,8 +1512,13 @@ def evaluate_benchmarks(
         if scope_type == "class" and scope_id not in trial_classes:
             rejected.append("benchmark record belongs to an unregistered change class")
             continue
-        if scope_type == "capability" and scope_id not in capabilities:
+        if scope_type == "capability" and scope_id not in capability_ids:
             rejected.append("benchmark record belongs to an unregistered capability")
+            invalidate_capability(record)
+            continue
+        if (scope_type == "capability"
+                and pr_number not in capability_pr_numbers.get(scope_id, set())):
+            rejected.append("capability benchmark PR is outside its declared business-capability inventory")
             invalidate_capability(record)
             continue
         pr_key = (scope_type, scope_id, pr_number)
@@ -1243,11 +1588,15 @@ def evaluate_benchmarks(
 
     capability_baselines = capability_baselines or {}
     by_capability = {}
-    capability_ids = sorted(set(capabilities))
     capability_ready = bool(capability_ids)
     for capability in capability_ids:
         samples = measurements.get(("capability", capability), [])
         evidence_complete = capability not in invalid_capability_evidence
+        expected_prs = capability_pr_numbers.get(capability, set())
+        observed_prs = set(observation_by_pr)
+        measured_prs = {item["pr_number"] for item in samples}
+        coverage_complete = bool(expected_prs) and expected_prs <= observed_prs and measured_prs == expected_prs
+        evidence_complete = evidence_complete and coverage_complete
         baseline = capability_baselines.get(capability)
         baseline_valid = (
             isinstance(baseline, dict)
@@ -1277,6 +1626,10 @@ def evaluate_benchmarks(
             "sample_count": len(samples),
             "distinct_pr_count": len({item["pr_number"] for item in samples}),
             "evidence_complete": evidence_complete,
+            "expected_pr_numbers": sorted(expected_prs),
+            "observed_pr_numbers": sorted(expected_prs & observed_prs),
+            "cost_pr_numbers": sorted(measured_prs),
+            "coverage_complete": coverage_complete,
             "full_ci_seconds": round(sum(item["full_seconds"] for item in samples), 3),
             "targeted_ci_seconds": round(sum(item["capability_ci_seconds"] or 0 for item in samples), 3),
             "targeted_deployment_seconds": round(sum(item["capability_deployment_seconds"] or 0 for item in samples), 3),
@@ -1377,9 +1730,13 @@ def main() -> int:
     pair.add_argument("--release-state", type=Path)
     pair.add_argument("--release-manifest", type=Path)
     pair.add_argument("--ci-jobs", type=Path,
-                      help="same-run/attempt `gh run view --json databaseId,attempt,jobs` export; required for capability scope")
+                      help="complete read-only `export-ci-history` bundle for this PR; required for capability scope")
     pair.add_argument("--repo", type=Path)
     pair.add_argument("--out", type=Path, required=True)
+    export = sub.add_parser("export-ci-history", help="export all GitHub CI runs, attempts, and jobs for a PR")
+    export.add_argument("--github-repo", required=True, help="owner/repository")
+    export.add_argument("--pr-number", type=int, required=True)
+    export.add_argument("--out", type=Path, required=True)
     benchmark = sub.add_parser("benchmarks", help="evaluate actual paired full/targeted timings")
     benchmark.add_argument("--records", type=Path, required=True)
     benchmark.add_argument("--trial-classes", type=Path, required=True)
@@ -1391,7 +1748,9 @@ def main() -> int:
     benchmark.add_argument("--observations", type=Path)
     benchmark.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
-    if args.command == "collect":
+    if args.command == "export-ci-history":
+        result = export_github_pr_ci_history(args.github_repo, args.pr_number)
+    elif args.command == "collect":
         result = collect_execution(json.loads(args.plan.read_text()), json.loads(args.graph.read_text()),
                                    json.loads(args.runs.read_text()), pr_number=args.pr_number,
                                    original_gate_result=args.original_gate_result)
@@ -1415,6 +1774,8 @@ def main() -> int:
                                                    if args.observations else []))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if args.command == "export-ci-history" and not result["complete"]:
+        return 2
     return 0
 
 

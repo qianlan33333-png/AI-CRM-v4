@@ -153,8 +153,9 @@ try {
   await waitFor(cdp, 'Boolean(document.querySelector(\'form[action="/login"] input[name="login_csrf_token"]\'))', "login shell did not render");
   await evaluate(cdp, "(() => { document.querySelector('input[name=\"username\"]').value=" + JSON.stringify(username) + "; document.querySelector('input[name=\"password\"]').value=" + JSON.stringify(password) + "; document.querySelector('form[action=\"/login\"]').requestSubmit(); return true; })()");
 
-  await waitFor(cdp,"Boolean(document.querySelector('#createInvitation:not(:disabled)'))",'invitation workspace unavailable');
+  await waitFor(cdp,"location.pathname==='/admin/group-invitations' && document.readyState==='complete' && Boolean(document.querySelector('#createInvitation:not(:disabled)'))",'invitation workspace unavailable');
   await click('[data-tab="directory"]');
+  await waitFor(cdp,"document.querySelector('[data-tab=directory]')?.getAttribute('aria-selected')==='true'",'directory tab did not activate');
   await waitFor(cdp,"document.querySelector('#directoryPage')?.textContent.includes('共')",'initial directory load incomplete');
   await evaluate(cdp,`document.querySelector('#directorySearch input').value='测试群';document.querySelector('#directorySearch').requestSubmit()`);
   await waitFor(cdp,"document.querySelector('#directoryRows').textContent.includes('chromium-group-1')",'catalog names and IDs missing');
