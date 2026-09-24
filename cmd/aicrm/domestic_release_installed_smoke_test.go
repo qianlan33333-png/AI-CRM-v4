@@ -138,6 +138,21 @@ func TestDomesticReleaseInstalledAlipayCheckout(t *testing.T) {
 		databaseURL, values["AICRM_DOMESTIC_RELEASE_SOURCE_SHA"], h5Origin, dataKey,
 		wechatPrivateKeyPath, wechatPlatformCertPath, alipayPrivateKeyPath, alipayPublicKey, provider.URL+"/gateway.do",
 	)
+	gateway, err := validateDomesticSmokeAlipayGateway(fixtureRuntime.Alipay.Gateway)
+	if err != nil {
+		t.Fatal("synthetic Alipay gateway must be an HTTPS loopback fixture")
+	}
+	alipaySigningKey, err := os.ReadFile(alipayPrivateKeyPath)
+	if err != nil {
+		t.Fatal("read synthetic Alipay signing key")
+	}
+	alipayURLVerifier, err := alipaysdk.New(fixtureRuntime.Alipay.AppID, string(alipaySigningKey), false)
+	if err != nil {
+		t.Fatal("create synthetic Alipay URL verifier")
+	}
+	if err = alipayURLVerifier.LoadAliPayPublicKey(alipayPublicKey); err != nil {
+		t.Fatal("load synthetic Alipay URL verification key")
+	}
 	fixtureApplication, err := compose(ctx, fixtureRuntime)
 	if err != nil {
 		t.Fatalf("compose synthetic checkout fixture: %T", err)
@@ -229,28 +244,99 @@ func TestDomesticReleaseInstalledAlipayCheckout(t *testing.T) {
 	worker := startDomesticSmokeProcess(t, installedBinary, releaseRoot, workerEnvironment)
 	for _, testCase := range cases {
 		status := waitDomesticSmokeHandoff(t, worker, apiURL, tokens[testCase.name], created[testCase.name].MerchantOrder)
-		parsed, parseErr := url.Parse(status.Handoff.RedirectURL)
+		method := "alipay.trade.wap.pay"
+		if testCase.channel == paymentdomain.ChannelAlipayPage {
+			method = "alipay.trade.page.pay"
+		}
+		parsed, parseErr := validateDomesticSmokeAlipayRedirect(status.Handoff.RedirectURL, gateway, method, fixtureRuntime.Alipay.AppID, created[testCase.name].MerchantOrder, "99.00")
 		if parseErr != nil {
-			t.Fatalf("installed synthetic %s checkout handoff URL is invalid", testCase.name)
-		}
-		gateway, gatewayErr := url.Parse(provider.URL)
-		if gatewayErr != nil {
-			t.Fatal("synthetic provider URL is invalid")
-		}
-		var content struct {
-			OutTradeNo  string `json:"out_trade_no"`
-			TotalAmount string `json:"total_amount"`
-		}
-		decodeErr := json.Unmarshal([]byte(parsed.Query().Get("biz_content")), &content)
-		if decodeErr != nil || parsed.Scheme != "https" || parsed.Host != gateway.Host || content.OutTradeNo != created[testCase.name].MerchantOrder || content.TotalAmount != "99.00" {
 			t.Fatalf("installed synthetic %s checkout handoff is incomplete", testCase.name)
+		}
+		if err = alipayURLVerifier.VerifySign(ctx, parsed.Query()); err != nil {
+			t.Fatalf("installed synthetic %s checkout handoff signature is invalid", testCase.name)
 		}
 		assertAlipayCheckoutPersistence(t, fixture, created[testCase.name], testCase.channel)
 	}
-	if providerCalls.Load() == 0 {
-		t.Fatal("installed effects worker did not use the loopback-only synthetic Alipay fixture")
+	// WAP/Page creation signs a URL locally. It must not make an API request
+	// while producing the checkout handoff; the gateway above is a loopback
+	// TLS fixture so this journey cannot contact a live Alipay endpoint.
+	if calls := providerCalls.Load(); calls != 0 {
+		t.Fatalf("installed WAP/Page handoff unexpectedly made %d HTTP calls to the synthetic Alipay API fixture", calls)
 	}
 	t.Logf("domestic_release_installed_alipay_checkout: PASS source_sha=%s installed_sha=%s", values["AICRM_DOMESTIC_RELEASE_SOURCE_SHA"], installedSHA)
+}
+
+func validateDomesticSmokeAlipayGateway(raw string) (*url.URL, error) {
+	gateway, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse synthetic Alipay gateway: %w", err)
+	}
+	address := net.ParseIP(gateway.Hostname())
+	if gateway.Scheme != "https" || gateway.User != nil || address == nil || !address.IsLoopback() || gateway.Port() == "" || gateway.Path != "/gateway.do" || gateway.RawQuery != "" || gateway.Fragment != "" {
+		return nil, fmt.Errorf("synthetic Alipay gateway must be an HTTPS loopback /gateway.do endpoint")
+	}
+	return gateway, nil
+}
+
+func validateDomesticSmokeAlipayRedirect(raw string, gateway *url.URL, method, appID, merchantOrder, totalAmount string) (*url.URL, error) {
+	redirect, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse handoff URL: %w", err)
+	}
+	query := redirect.Query()
+	if redirect.Scheme != gateway.Scheme || redirect.User != nil || redirect.Host != gateway.Host || redirect.Path != gateway.Path || redirect.Fragment != "" ||
+		query.Get("method") != method || query.Get("app_id") != appID || query.Get("sign_type") != "RSA2" || query.Get("sign") == "" {
+		return nil, fmt.Errorf("handoff origin or signed Alipay method is invalid")
+	}
+	var content struct {
+		OutTradeNo  string `json:"out_trade_no"`
+		TotalAmount string `json:"total_amount"`
+	}
+	if err = json.Unmarshal([]byte(query.Get("biz_content")), &content); err != nil || content.OutTradeNo != merchantOrder || content.TotalAmount != totalAmount {
+		return nil, fmt.Errorf("handoff order or amount does not match")
+	}
+	return redirect, nil
+}
+
+func TestValidateDomesticSmokeAlipayGatewayRequiresLoopbackTLS(t *testing.T) {
+	if _, err := validateDomesticSmokeAlipayGateway("https://127.0.0.1:12345/gateway.do"); err != nil {
+		t.Fatalf("valid loopback gateway rejected: %v", err)
+	}
+	for _, raw := range []string{
+		"http://127.0.0.1:12345/gateway.do",
+		"https://203.0.113.10:12345/gateway.do",
+		"https://alipay.example:12345/gateway.do",
+		"https://127.0.0.1:12345/other",
+	} {
+		if _, err := validateDomesticSmokeAlipayGateway(raw); err == nil {
+			t.Errorf("unsafe synthetic gateway accepted: %s", raw)
+		}
+	}
+}
+
+func TestValidateDomesticSmokeAlipayRedirectContract(t *testing.T) {
+	gateway, err := validateDomesticSmokeAlipayGateway("https://127.0.0.1:12345/gateway.do")
+	if err != nil {
+		t.Fatal("valid loopback gateway rejected")
+	}
+	for _, method := range []string{"alipay.trade.wap.pay", "alipay.trade.page.pay"} {
+		content, marshalErr := json.Marshal(map[string]string{"out_trade_no": "merchant-test-1", "total_amount": "99.00"})
+		if marshalErr != nil {
+			t.Fatal("marshal synthetic Alipay order")
+		}
+		query := url.Values{
+			"method": {method}, "app_id": {"virtual-alipay-test-app"}, "sign_type": {"RSA2"}, "sign": {"synthetic-signature"}, "biz_content": {string(content)},
+		}
+		redirect := (&url.URL{Scheme: gateway.Scheme, Host: gateway.Host, Path: gateway.Path, RawQuery: query.Encode()}).String()
+		if _, err = validateDomesticSmokeAlipayRedirect(redirect, gateway, method, "virtual-alipay-test-app", "merchant-test-1", "99.00"); err != nil {
+			t.Errorf("valid %s handoff rejected: %v", method, err)
+		}
+		query.Set("sign", "")
+		unsigned := (&url.URL{Scheme: gateway.Scheme, Host: gateway.Host, Path: gateway.Path, RawQuery: query.Encode()}).String()
+		if _, err = validateDomesticSmokeAlipayRedirect(unsigned, gateway, method, "virtual-alipay-test-app", "merchant-test-1", "99.00"); err == nil {
+			t.Errorf("unsigned %s handoff accepted", method)
+		}
+	}
 }
 
 func readDomesticReleaseSmokeInputs(path string) (domesticReleaseSmokeInputs, error) {
