@@ -24,6 +24,41 @@ import (
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/wecom"
 )
 
+func TestCompositionMigrationFixtureRecordsCanonicalLedgerAndReadiesPostgreSQL(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	pool, cleanup := readinessIntegrationPool(t, ctx)
+	defer cleanup()
+
+	if err := adminAccessMigrateCompositionSchema(ctx, pool); err != nil {
+		t.Fatalf("apply composition migrations in isolated schema: %v", err)
+	}
+	if err := checkCurrentReleaseSchema(ctx, pool, platformconfig.Runtime{}); err != nil {
+		t.Fatalf("isolated schema is not release ready after its migrations: %v", err)
+	}
+
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate readiness integration test")
+	}
+	migrationName := "0001_platform.sql"
+	migrationPath := filepath.Join(filepath.Dir(file), "..", "..", "migrations", migrationName)
+	canonicalBytes, err := os.ReadFile(migrationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantChecksum := sha256.Sum256(canonicalBytes)
+	var gotName string
+	var gotChecksum []byte
+	if err = pool.QueryRow(ctx, `SELECT name, checksum FROM platform_schema_migrations WHERE version='0001'`).Scan(&gotName, &gotChecksum); err != nil {
+		t.Fatalf("read canonical migration ledger entry: %v", err)
+	}
+	checksumMatches := string(gotChecksum) == string(wantChecksum[:])
+	if gotName != migrationName || !checksumMatches {
+		t.Fatalf("migration ledger entry does not match canonical source: name=%q checksum_matches=%t", gotName, checksumMatches)
+	}
+}
+
 func TestCurrentReleaseReadinessRequiresAppliedMigrationsPostgreSQL(t *testing.T) {
 	ctx := context.Background()
 	pool, cleanup := readinessIntegrationPool(t, ctx)
