@@ -21,6 +21,13 @@ class StagingReceiptClassificationTests(unittest.TestCase):
                 "scripts/release_events.py",
                 "scripts/release_handoff.py",
                 "scripts/test_release_coordinator.py",
+                "scripts/domestic_release.py",
+                "scripts/domestic_release_build.py",
+                "scripts/test_domestic_release.py",
+                "scripts/test_domestic_release_build.py",
+                "deploy/domestic-promote.py",
+                "deploy/domestic-release-role.production.example",
+                "deploy/domestic-release-role.staging.example",
             ):
                 diff.return_value = path + "\n"
                 self.assertFalse(local_first_gate.requires_staging_receipt("b" * 40), path)

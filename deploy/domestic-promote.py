@@ -17,6 +17,7 @@ from pathlib import Path
 import pwd
 import re
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -34,13 +35,18 @@ LOCK = ROOT / "install-release.lock"
 RECEIPTS = ROOT / "domestic-receipts"
 ENV = Path("/etc/aicrm/aicrm.env")
 RUNUSER = "/usr/sbin/runuser"
-STAGE_ROLE = Path("/etc/aicrm/domestic-release-role")
+HOST_ROLE_FILE = Path("/etc/aicrm/domestic-release-role")
 READY = "http://127.0.0.1:8080/readyz"
-STAGING_MIGRATION_VERSION = "0206"
-STAGING_MIGRATION_NAME = "0206_order_native_alipay_checkout.sql"
-STAGING_MIGRATION_PATH = f"migrations/{STAGING_MIGRATION_NAME}"
-STAGING_RETRY_SHA = "5538d615a9abe2e25be799936866a7330b1d3af8"
-PRE_0206_ORDER_CHECK = """CHECK ((((record_origin = 'native'::text) AND (provider <> 'alipay'::text) AND (effect_eligible = true) AND (source_row_digest IS NULL) AND (payer_customer_id IS NOT NULL) AND (beneficiary_customer_id IS NOT NULL)) OR ((record_origin = 'history'::text) AND (effect_eligible = false) AND (octet_length(source_row_digest) = 32))))"""
+HOST_ROLE_DIRECTORY = Path("/etc/aicrm")
+HOST_ROLES = {"staging", "production"}
+HOST_CONTRACT_PATH = "/usr/bin:/bin"
+# These identities were read back from the current domestic VMs. If a host is
+# renamed or its private address changes, releases must stop until this mapping
+# is reviewed and updated in a trusted helper change.
+HOST_IDENTITIES = {
+    "vm-4-6-ubuntu": ("staging", "10.0.4.6"),
+    "vm-4-13-ubuntu": ("production", "10.0.4.13"),
+}
 
 
 def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -194,6 +200,30 @@ def changed_units(metadata: dict) -> list[str]:
     return sorted(units)
 
 
+def migration_inventory(release: Path) -> dict[str, str]:
+    """Hash the candidate SQL independently of the release controller's flag."""
+    root = release / "migrations"
+    if not root.exists():
+        return {}
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("migration path is unsafe")
+    inventory: dict[str, str] = {}
+    for path in root.rglob("*"):
+        if path.is_symlink() or not (path.is_dir() or path.is_file()):
+            raise ValueError("migration path contains a link or special file")
+        if path.is_file() and path.suffix == ".sql":
+            inventory[path.relative_to(release).as_posix()] = digest(path)
+    return inventory
+
+
+def reject_unclassified_migration_changes(metadata: dict, candidate: Path, previous: Path | None) -> None:
+    """Never let a false PR/build flag suppress a production migration backup."""
+    if metadata["migrations_changed"] or previous is None:
+        return
+    if migration_inventory(candidate) != migration_inventory(previous):
+        raise ValueError("migration SQL changed but release metadata marks migrations_changed=false")
+
+
 def install_units(release: Path, names: list[str]) -> None:
     for name in names:
         source = release / ("components/excel-batches" if name == "aicrm-excel-batches.service" else "deploy") / name
@@ -235,7 +265,8 @@ def restore_units(previous: dict[str, bytes | None]) -> None:
 
 
 def backup_database(sha: str) -> Path:
-    """Only migration releases call this; no production data goes to staging."""
+    """Create a verified production backup; synthetic staging databases are never dumped."""
+    require_host_role("production")
     values = [line.partition("=")[2].strip().strip('"\'') for line in ENV.read_text().splitlines() if line.startswith("AICRM_DATABASE_URL=")]
     if len(values) != 1 or not values[0]:
         raise RuntimeError("exactly one database URL is required for migration backup")
@@ -368,150 +399,219 @@ def _database_client_environment(database_url: str) -> dict[str, str]:
     return environment
 
 
-def require_staging_role() -> None:
+def actual_host_role() -> str:
+    """Bind marker interpretation to the known VM hostname and private IP."""
+    hostname = socket.gethostname().split(".", 1)[0].lower()
+    identity = HOST_IDENTITIES.get(hostname)
+    if identity is None:
+        raise RuntimeError("host identity is not approved for domestic release")
+    role, expected_address = identity
+    ip_command = next((path for path in (Path("/usr/sbin/ip"), Path("/usr/bin/ip")) if path.exists()), None)
+    if ip_command is None:
+        raise RuntimeError("host identity address probe is unavailable")
+    _require_host_tool(str(ip_command), "ip")
     try:
-        info = STAGE_ROLE.lstat()
+        result = subprocess.run(
+            [str(ip_command), "-o", "-4", "addr", "show", "scope", "global"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5,
+        )
+    except Exception as exc:
+        raise RuntimeError("host identity address probe failed") from exc
+    if result.returncode != 0:
+        raise RuntimeError("host identity address probe failed")
+    addresses: set[str] = set()
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if "inet" in fields:
+            try:
+                addresses.add(str(ipaddress.ip_interface(fields[fields.index("inet") + 1]).ip))
+            except (ValueError, IndexError):
+                continue
+    if expected_address not in addresses:
+        raise RuntimeError("host identity address does not match its approved role")
+    return role
+
+
+def require_host_role(expected: str | None = None) -> str:
+    """Read the protected host role; package metadata can never select it."""
+    try:
+        directory_info = HOST_ROLE_DIRECTORY.lstat()
+        info = HOST_ROLE_FILE.lstat()
         if (
-            not stat.S_ISREG(info.st_mode)
-            or STAGE_ROLE.is_symlink()
+            not stat.S_ISDIR(directory_info.st_mode)
+            or HOST_ROLE_DIRECTORY.is_symlink()
+            or directory_info.st_uid != 0
+            or directory_info.st_gid != 0
+            or stat.S_IMODE(directory_info.st_mode) & 0o022
+            or not stat.S_ISREG(info.st_mode)
+            or HOST_ROLE_FILE.is_symlink()
             or info.st_uid != 0
             or info.st_gid != 0
             or stat.S_IMODE(info.st_mode) & 0o022
-            or STAGE_ROLE.read_text() != "staging\n"
         ):
-            raise RuntimeError("staging-only retry is not enabled on this host")
+            raise RuntimeError("host role configuration is missing or unsafe")
+        value = HOST_ROLE_FILE.read_text(encoding="ascii")
+    except (OSError, UnicodeError) as exc:
+        raise RuntimeError("host role configuration is missing or unsafe") from exc
+    role = value.removesuffix("\n")
+    if value != f"{role}\n" or role not in HOST_ROLES:
+        raise RuntimeError("host role configuration must be exactly staging or production")
+    if role != actual_host_role():
+        raise RuntimeError("host role configuration does not match the machine identity")
+    if expected is not None and role != expected:
+        raise RuntimeError(f"host role mismatch: expected {expected}, found {role}")
+    return role
+
+
+def _host_tool(name: str) -> str:
+    path = shutil.which(name, path=HOST_CONTRACT_PATH)
+    if path is None:
+        raise RuntimeError(f"required host tool is unavailable in restricted PATH: {name}")
+    return path
+
+
+def _require_root_executable(path: str, label: str) -> None:
+    candidate = Path(path)
+    try:
+        info = candidate.lstat()
+        if (
+            candidate.is_symlink()
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != 0
+            or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022
+            or not os.access(candidate, os.X_OK)
+        ):
+            raise RuntimeError(f"unsafe host executable: {label}")
     except OSError as exc:
-        raise RuntimeError("staging-only retry is not enabled on this host") from exc
+        raise RuntimeError(f"required host executable is unavailable: {label}") from exc
 
 
-def staging_migration_baseline() -> tuple[bool, bool]:
-    """Return whether 0206 is unapplied and its old CHECK is still installed."""
+def _require_host_tool(path: str, label: str) -> None:
+    candidate = Path(path)
+    try:
+        resolved = candidate.resolve(strict=True)
+        info = resolved.stat()
+        if (
+            not resolved.is_file()
+            or info.st_uid != 0
+            or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022
+            or not os.access(resolved, os.X_OK)
+        ):
+            raise RuntimeError(f"unsafe host tool: {label}")
+    except OSError as exc:
+        raise RuntimeError(f"required host tool is unavailable: {label}") from exc
+
+
+def _service_user_can(flag: str, path: Path) -> None:
+    result = subprocess.run(
+        [RUNUSER, "--preserve-environment", "-u", "aicrm", "--", "/usr/bin/test", flag, str(path)],
+        env={"HOME": pwd.getpwnam("aicrm").pw_dir, "PATH": HOST_CONTRACT_PATH},
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("service account cannot access the configured runtime path")
+
+
+def check_host_contract() -> dict:
+    """Read-only host rehearsal for the fixed helper, service user, and PG16."""
+    role = require_host_role()
+    if not ENV.is_file() or ENV.is_symlink():
+        raise RuntimeError("host runtime environment is missing or unsafe")
+    _require_root_executable(RUNUSER, "runuser")
+    _require_host_tool(_host_tool("psql"), "psql")
+    systemctl = _host_tool("systemctl")
+    _require_host_tool(systemctl, "systemctl")
+    if role == "production":
+        _require_host_tool(_host_tool("pg_dump"), "pg_dump")
+        _require_host_tool(_host_tool("pg_restore"), "pg_restore")
+    try:
+        service = pwd.getpwnam("aicrm")
+    except KeyError as exc:
+        raise RuntimeError("database service account is unavailable") from exc
+    if not service.pw_dir:
+        raise RuntimeError("database service account has no home directory")
+    for flag, path in (("-r", ENV), ("-x", CURRENT), ("-x", CURRENT / "bin/aicrm")):
+        _service_user_can(flag, path)
+    for unit in ("aicrm.service", "aicrm-effects-worker.service", "aicrm-migrate.service"):
+        result = run(systemctl, "show", unit, "-p", "User", "-p", "Group", "-p", "WorkingDirectory")
+        fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        if fields != {"User": "aicrm", "Group": "aicrm", "WorkingDirectory": str(CURRENT)}:
+            raise RuntimeError(f"systemd service contract is invalid: {unit}")
     environment = _database_environment_from_host_config()
-    if any(environment.get(key) != value for key, value in {
-        "PGHOST": "127.0.0.1",
-        "PGUSER": "aicrm_test",
-        "PGDATABASE": "aicrm_test_baseline_5d15",
-    }.items()):
-        raise RuntimeError("staging retry database configuration is not the approved synthetic database")
-    environment["PGOPTIONS"] = "-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=500"
-    query = f"""
-SELECT
-  current_database(),
-  current_user,
-  COALESCE(inet_server_addr()::text, ''),
-  CASE WHEN NOT EXISTS (
-    SELECT 1 FROM public.platform_schema_migrations WHERE version >= '{STAGING_MIGRATION_VERSION}'
-  ) THEN 'yes' ELSE 'no' END,
-  COALESCE((
-    SELECT 1 FROM pg_catalog.pg_constraint
-    WHERE conrelid = 'public.orders'::regclass
-      AND conname = 'orders_origin_effect_shape'
-      AND contype = 'c'
-      AND convalidated
-  ), 0),
-  COALESCE((
-    SELECT pg_get_constraintdef(oid)
-    FROM pg_catalog.pg_constraint
-    WHERE conrelid = 'public.orders'::regclass
-      AND conname = 'orders_origin_effect_shape'
-      AND contype = 'c'
-      AND convalidated
-  ), '')
-"""
+    if role == "staging":
+        try:
+            configured_host_is_loopback = ipaddress.ip_address(environment["PGHOST"]).is_loopback
+        except (KeyError, ValueError):
+            configured_host_is_loopback = False
+        if not configured_host_is_loopback:
+            raise RuntimeError("staging PostgreSQL must use an explicit loopback IP")
+    environment["PGOPTIONS"] = "-c default_transaction_read_only=on -c statement_timeout=5000"
+    query = "SELECT json_build_array(current_setting('server_version_num')::int, current_database(), current_user, COALESCE(inet_server_addr()::text, ''))::text;"
     try:
         result = subprocess.run(
             [RUNUSER, "--preserve-environment", "-u", "aicrm", "--", "psql", "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-c", query],
-            env={**environment, "PATH": "/usr/bin:/bin"},
+            env={**environment, "PATH": HOST_CONTRACT_PATH},
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=10,
         )
     except Exception as exc:
-        raise RuntimeError("staging migration baseline could not be inspected") from exc
+        raise RuntimeError("PostgreSQL host contract probe failed") from exc
     if result.returncode != 0:
-        raise RuntimeError("staging migration baseline could not be inspected")
-    values = result.stdout.strip().split("|", 5)
+        raise RuntimeError("PostgreSQL host contract probe failed")
     try:
-        # PostgreSQL renders inet addresses with their mask (e.g. 127.0.0.1/32).
-        server_is_loopback = ipaddress.ip_interface(values[2]).ip.is_loopback
-    except (ValueError, IndexError):
-        server_is_loopback = False
-    old_constraint_present = len(values) == 6 and values[4] == "1" and is_pre_0206_order_constraint(values[5])
+        values = json.loads(result.stdout.strip())
+        if not isinstance(values, list) or len(values) != 4:
+            raise ValueError
+        version_major = int(values[0]) // 10000
+        server_address_is_loopback = ipaddress.ip_interface(values[3]).ip.is_loopback
+    except (ValueError, TypeError, IndexError):
+        raise RuntimeError("PostgreSQL host contract returned invalid identity") from None
     if (
-        len(values) != 6
-        or values[0] != "aicrm_test_baseline_5d15"
-        or values[1] != "aicrm_test"
-        or not server_is_loopback
-        or values[3] != "yes"
-        or not old_constraint_present
+        len(values) != 4
+        or version_major != 16
+        or values[1] != environment.get("PGDATABASE")
+        or values[2] != environment.get("PGUSER")
+        or not values[3]
+        or (role == "staging" and not server_address_is_loopback)
     ):
-        raise RuntimeError("staging migration baseline is not the expected pre-0206 schema")
-    return True, old_constraint_present
+        raise RuntimeError("PostgreSQL host contract identity or version mismatch")
+    return {"host_role": role, "postgres_major": version_major, "database_connection": "verified", "systemd_services": 3}
 
 
-def is_pre_0206_order_constraint(definition: str) -> bool:
-    """Match the exact PostgreSQL 16 definition of the old validated CHECK."""
-    return re.sub(r"\s+", "", definition).lower() == re.sub(r"\s+", "", PRE_0206_ORDER_CHECK).lower()
-
-
-def is_only_staging_migration(metadata: dict) -> bool:
-    paths = metadata.get("changed_paths")
-    if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
-        return False
-    return [path for path in paths if path.startswith("migrations/")] == [STAGING_MIGRATION_PATH]
-
-
-def inspect_staging_retry(
-    metadata_bytes: bytes,
-    expected_base: str,
-    *,
-    expected_sha: str,
-    metadata_sha256: str,
-) -> dict:
-    """Read-only eligibility check for the one approved staging migration retry."""
-    require_staging_role()
-    if expected_sha != STAGING_RETRY_SHA:
-        raise RuntimeError("staging migration retry is limited to the current 5538 incident")
-    metadata = verify_metadata_identity(metadata_bytes, expected_sha, metadata_sha256)
-    if expected_base is None or not SHA.fullmatch(expected_base):
-        raise ValueError("staging retry requires the exact prior SHA")
-    if metadata.get("migrations_changed") is not True or not is_only_staging_migration(metadata):
-        raise RuntimeError("staging retry is limited to migration 0206")
-    for control in (ROOT, RELEASES, RECEIPTS):
-        if control.is_symlink() or (control.exists() and not control.is_dir()):
-            raise RuntimeError("unsafe release control directory")
-    if LOCK.is_symlink() or not LOCK.exists() or not stat.S_ISREG(LOCK.lstat().st_mode):
-        raise RuntimeError("unsafe shared install lock")
-    backup_root = database_backup_directory(create=False)
-    with LOCK.open("r+") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if current_sha() != expected_base:
-            raise RuntimeError("staging retry base has changed")
-        release = RELEASES / expected_sha
-        receipt = RECEIPTS / f"{expected_sha}.json"
-        temp_receipt = RECEIPTS / f".{expected_sha}.json.tmp"
-        backup_artifacts = database_backup_artifacts(backup_root, expected_sha)
-        if any(path.exists() or path.is_symlink() for path in (receipt, temp_receipt)) or backup_artifacts:
-            raise RuntimeError("staging retry target already has receipt or backup state")
-        if release.is_symlink() or not release.is_dir():
-            raise RuntimeError("staging retry orphan is missing or unsafe")
-        verify_payload_without_release_env(release, metadata)
-        verify_root_owned_release(release)
-        readiness(expected_base)
-        migration_pending, old_constraint_present = staging_migration_baseline()
-        if not migration_pending or not old_constraint_present:
-            raise RuntimeError("staging retry schema baseline is not the expected pre-0206 state")
-        return {
-            "status": "eligible",
-            "source_sha": expected_sha,
-            "base_sha": expected_base,
-            "orphan_verified": True,
-            "receipt_exists": False,
-            "backup_exists": False,
-            "migration_0206_applied": False,
-            "old_constraint_present": True,
-        }
+def verify_helper_digest(expected_sha256: str) -> str:
+    if not isinstance(expected_sha256, str) or not FILE_SHA.fullmatch(expected_sha256):
+        raise ValueError("expected helper SHA256 is invalid")
+    helper = Path(__file__)
+    try:
+        helper_stat = helper.lstat()
+        parent_stat = helper.parent.lstat()
+    except OSError as exc:
+        raise RuntimeError("fixed helper location cannot be verified safely") from exc
+    if (
+        not stat.S_ISREG(helper_stat.st_mode)
+        or helper_stat.st_uid != 0
+        or helper_stat.st_gid != 0
+        or helper_stat.st_mode & 0o022
+        or not stat.S_ISDIR(parent_stat.st_mode)
+        or parent_stat.st_uid != 0
+        or parent_stat.st_gid != 0
+        or parent_stat.st_mode & 0o022
+    ):
+        raise RuntimeError("fixed helper must be a root-owned file in a protected root-owned directory")
+    actual = digest(helper)
+    if actual != expected_sha256:
+        raise RuntimeError("fixed helper SHA256 does not match the checked Git source file")
+    return actual
 
 
 def install(
@@ -522,16 +622,14 @@ def install(
     expected_sha: str,
     metadata_sha256: str,
     retry_existing: bool = False,
-    retry_staging_migration: bool = False,
 ) -> dict:
     metadata = verify_metadata_identity(metadata_bytes, expected_sha, metadata_sha256)
     sha = expected_sha
+    host_role = require_host_role()
     if expected_base is not None and not SHA.fullmatch(expected_base):
         raise ValueError("invalid base SHA")
     if type(metadata.get("migrations_changed")) is not bool:
         raise ValueError("migration classification is required")
-    if retry_staging_migration and not retry_existing:
-        raise ValueError("staging migration retry requires a verified orphan")
     if not ENV.is_file() or not shutil.which("systemctl"):
         raise RuntimeError("host runtime is not provisioned")
     for control in (ROOT, RELEASES, RECEIPTS):
@@ -542,40 +640,35 @@ def install(
     RELEASES.mkdir(mode=0o755, exist_ok=True)
     with LOCK.open("a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if require_host_role() != host_role:
+            raise RuntimeError("host role changed during installation preflight")
         old_sha = current_sha()
         if old_sha != expected_base:
             raise RuntimeError(f"base mismatch: current={old_sha} expected={expected_base}")
+        bootstrap = old_sha is None
+        old_path = CURRENT.resolve(strict=True) if old_sha else None
         release = RELEASES / sha
         receipt_path = RECEIPTS / f"{sha}.json"
         temp_receipt = RECEIPTS / f".{sha}.json.tmp"
         if any(path.exists() or path.is_symlink() for path in (receipt_path, temp_receipt)):
             raise RuntimeError("target release has receipt state; inspect before retry")
         if retry_existing:
-            if metadata["migrations_changed"] and not retry_staging_migration:
+            if metadata["migrations_changed"]:
                 raise RuntimeError("orphan retry is disabled for migration releases")
-            if retry_staging_migration:
-                require_staging_role()
-                if sha != STAGING_RETRY_SHA or metadata["migrations_changed"] is not True or not is_only_staging_migration(metadata):
-                    raise RuntimeError("staging migration retry is limited to migration 0206")
             if old_sha is None or old_sha == sha:
                 raise RuntimeError("orphan retry requires the prior release to be current")
             if release.is_symlink() or not release.is_dir():
                 raise RuntimeError("verified orphan release is missing or unsafe")
             verify_payload_without_release_env(release, metadata)
             verify_root_owned_release(release)
+            reject_unclassified_migration_changes(metadata, release, old_path)
             readiness(old_sha)
-            if retry_staging_migration:
-                backup_root = database_backup_directory(create=False)
-                if database_backup_artifacts(backup_root, sha):
-                    raise RuntimeError("backup state for SHA already exists; inspect before retry")
-                migration_pending, old_constraint_present = staging_migration_baseline()
-                if not migration_pending or not old_constraint_present:
-                    raise RuntimeError("staging retry schema baseline is not the expected pre-0206 state")
             make_release_directories_traversable(release)
         else:
             if incoming is None:
                 raise ValueError("incoming package is required for a new release")
             verify_payload(incoming, metadata)
+            reject_unclassified_migration_changes(metadata, incoming, old_path)
             if release.is_symlink() or release.exists():
                 raise RuntimeError("target release already exists; inspect before retry")
             # Validate before move and then seal; the receiving account loses
@@ -587,15 +680,14 @@ def install(
             verify_payload_without_release_env(release, metadata)
             verify_root_owned_release(release)
             make_release_directories_traversable(release)
-        old_path = CURRENT.resolve(strict=True) if old_sha else None
-        bootstrap = old_sha is None
         units = changed_units(metadata)
         if bootstrap:
             units = sorted({path.name for path in (release / "deploy").glob("aicrm*.service") if path.name != "aicrm-domestic-release.service"} | {path.name for path in (release / "deploy").glob("aicrm*.timer") if path.name != "aicrm-domestic-release.timer"})
         unit_snapshot = {name: (Path("/etc/systemd/system") / name).read_bytes() if (Path("/etc/systemd/system") / name).is_file() else None for name in units}
         extra_active = tuple(unit for unit in ("aicrm-excel-batches.service",) if unit in units and run("systemctl", "is-active", "--quiet", unit, check=False).returncode == 0)
         backup = None
-        if metadata["migrations_changed"]:
+        needs_migration = metadata["migrations_changed"] or bootstrap
+        if needs_migration and host_role == "production":
             backup = backup_database(sha)
         switched = False
         try:
@@ -603,8 +695,17 @@ def install(
             switched = True
             if units:
                 install_units(release, units)
-            if metadata["migrations_changed"] or bootstrap:
-                run("systemctl", "start", "aicrm-migrate.service")
+            if needs_migration:
+                try:
+                    run("systemctl", "start", "aicrm-migrate.service")
+                except Exception as exc:
+                    if needs_migration and host_role == "staging":
+                        raise RuntimeError(
+                            "staging migration failed; candidate stopped and live runtime returned to the previous release where one existed. "
+                            "Rebuild the disposable synthetic database from the current migration set "
+                            "and synthetic fixtures before creating a fresh candidate; do not restore a dump."
+                        ) from exc
+                    raise
             restart_services(extra_active)
             for unit in units:
                 if unit not in {"aicrm.service", "aicrm-effects-worker.service", "aicrm-migrate.service", *extra_active}:
@@ -709,35 +810,41 @@ def main() -> None:
     source = p.add_mutually_exclusive_group(required=True)
     source.add_argument("--incoming", type=Path)
     source.add_argument("--retry-existing", action="store_true", help="reuse a checksum-verified orphan under the install lock")
-    source.add_argument("--inspect-staging-retry", action="store_true", help="read-only preflight for the one staging migration retry")
-    p.add_argument("--retry-staging-migration", action="store_true", help="allow only the explicitly gated staging orphan retry for migration 0206")
-    p.add_argument("--metadata", type=Path, required=True)
-    p.add_argument("--expected-sha", required=True, help="exact source SHA bound to the metadata")
-    p.add_argument("--metadata-sha256", required=True, help="SHA256 of the exact metadata file bytes")
-    p.add_argument("--expected-base", required=True, help="40-char installed SHA or 'none' for empty staging")
+    source.add_argument("--check-host-contract", action="store_true", help="read-only check of role, PostgreSQL 16, service user, paths, and systemd")
+    p.add_argument("--metadata", type=Path)
+    p.add_argument("--expected-sha", help="exact source SHA bound to the metadata")
+    p.add_argument("--metadata-sha256", help="SHA256 of the exact metadata file bytes")
+    p.add_argument("--expected-base", help="40-char installed SHA or 'none' for empty staging")
+    p.add_argument("--expected-helper-sha256", help="SHA256 of the exact checked Git source file being rehearsed")
     args = p.parse_args()
     if os.geteuid() != 0:
         raise SystemExit("root required")
-    if args.retry_staging_migration and not args.retry_existing:
-        p.error("--retry-staging-migration requires --retry-existing")
+    if args.check_host_contract:
+        if any(value is not None for value in (args.metadata, args.expected_sha, args.metadata_sha256, args.expected_base)):
+            p.error("--check-host-contract does not accept release metadata")
+        if args.expected_helper_sha256 is None:
+            p.error("--check-host-contract requires --expected-helper-sha256 for the exact checked Git source file")
+        try:
+            helper_sha256 = verify_helper_digest(args.expected_helper_sha256)
+            result = check_host_contract()
+        except (ValueError, RuntimeError) as exc:
+            raise SystemExit(str(exc)) from exc
+        result["helper_sha256"] = helper_sha256
+        print(json.dumps(result, sort_keys=True))
+        return
+    if args.expected_helper_sha256 is not None:
+        p.error("--expected-helper-sha256 is only valid with --check-host-contract")
+    if args.metadata is None or args.expected_sha is None or args.metadata_sha256 is None or args.expected_base is None:
+        p.error("installation requires --metadata, --expected-sha, --metadata-sha256, and --expected-base")
     metadata_root = ROOT / "domestic-incoming"
     if args.incoming is not None and not args.incoming.resolve().is_relative_to(metadata_root):
         raise SystemExit("incoming path outside domestic-incoming")
-    if (args.retry_existing or args.inspect_staging_retry) and not args.metadata.resolve().is_relative_to(metadata_root):
+    if args.retry_existing and not args.metadata.resolve().is_relative_to(metadata_root):
         raise SystemExit("retry metadata path outside domestic-incoming")
     if args.metadata.is_symlink() or not args.metadata.is_file():
         raise SystemExit("metadata path must be a regular file")
     metadata_bytes = args.metadata.read_bytes()
     expected_base = None if args.expected_base == "none" else args.expected_base
-    if args.inspect_staging_retry:
-        result = inspect_staging_retry(
-            metadata_bytes,
-            expected_base,
-            expected_sha=args.expected_sha,
-            metadata_sha256=args.metadata_sha256,
-        )
-        print(json.dumps(result, sort_keys=True))
-        return
     result = install(
         args.incoming,
         metadata_bytes,
@@ -745,7 +852,6 @@ def main() -> None:
         expected_sha=args.expected_sha,
         metadata_sha256=args.metadata_sha256,
         retry_existing=args.retry_existing,
-        retry_staging_migration=args.retry_staging_migration,
     )
     print(json.dumps(result, sort_keys=True))
 

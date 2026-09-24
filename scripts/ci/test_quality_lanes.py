@@ -14,6 +14,16 @@ class QualityLaneTests(unittest.TestCase):
             self.assertTrue(commands, lane)
             self.assertTrue(all(isinstance(command, list) and command for command in commands), lane)
 
+    def test_tooling_profile_runs_release_contracts_without_application_builds(self):
+        commands = quality_lanes.tooling_contract_commands()
+        rendered = " ".join(" ".join(command) for command in commands)
+        self.assertIn("scripts/ci", rendered)
+        self.assertIn("test_domestic_release", rendered)
+        self.assertIn("test_domestic_promote", rendered)
+        self.assertNotIn("go test", rendered)
+        self.assertNotIn("npm", rendered)
+        self.assertNotIn("Chromium", rendered)
+
     def test_focused_backend_runs_only_registered_package_tests(self):
         checks = [
             {"lane": "backend", "path": "internal/media/app/image_upload_test.go",

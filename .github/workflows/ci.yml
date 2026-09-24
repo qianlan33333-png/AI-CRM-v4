@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       force_full:
-        description: Run all checks even when an identical merged tree has PR evidence
+        description: Run every lane for the exact selected ref, including CI-only changes
         type: boolean
         default: false
   pull_request:
@@ -37,6 +37,7 @@ jobs:
       mode: ${{ steps.finalize.outputs.mode }}
       lanes: ${{ steps.finalize.outputs.lanes }}
       checks: ${{ steps.finalize.outputs.checks }}
+      profile: ${{ steps.finalize.outputs.profile }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -70,7 +71,7 @@ jobs:
         if: ${{ github.event_name == 'pull_request' && steps.plan.outputs.full == 'true' }}
         run: |
           set -euo pipefail
-          full_selection='{"mode":"full","lanes":["preflight","backend","frontend","browser","archive-sdk"],"checks":[],"reason":"impact-analysis-failed"}'
+          full_selection='{"mode":"full","lanes":["preflight","backend","frontend","browser","archive-sdk"],"checks":[],"reason":"impact-analysis-failed","profile":"full"}'
           if python3 scripts/ci/governance_impact.py --out "$RUNNER_TEMP/impact.json"; then
             if selection="$(python3 scripts/ci/impact_selection.py "$RUNNER_TEMP/impact.json")"; then
               :
@@ -90,6 +91,7 @@ jobs:
               output.write("mode=" + selection["mode"] + "\n")
               output.write("lanes=" + json.dumps(selection["lanes"], separators=(",", ":")) + "\n")
               output.write("checks=" + json.dumps(selection.get("checks", []), separators=(",", ":")) + "\n")
+              output.write("profile=" + selection.get("profile", "full") + "\n")
           PY
       - id: finalize
         name: Publish verification plan
@@ -97,6 +99,7 @@ jobs:
           IMPACT_MODE: ${{ steps.impact.outputs.mode }}
           IMPACT_LANES: ${{ steps.impact.outputs.lanes }}
           IMPACT_CHECKS: ${{ steps.impact.outputs.checks }}
+          IMPACT_PROFILE: ${{ steps.impact.outputs.profile }}
         run: |
           set -euo pipefail
           if [[ "${{ steps.plan.outputs.mode }}" == "release" ]]; then
@@ -104,26 +107,31 @@ jobs:
             echo 'lanes=[]' >> "$GITHUB_OUTPUT"
             echo 'checks=[]' >> "$GITHUB_OUTPUT"
             echo 'full=false' >> "$GITHUB_OUTPUT"
+            echo 'profile=none' >> "$GITHUB_OUTPUT"
           elif [[ "${{ github.event_name }}" == "push" || "${{ github.ref }}" == "refs/heads/main" || "${{ inputs.force_full }}" == "true" ]]; then
             echo 'mode=full' >> "$GITHUB_OUTPUT"
             echo 'lanes=["preflight","backend","frontend","browser","archive-sdk"]' >> "$GITHUB_OUTPUT"
             echo 'checks=[]' >> "$GITHUB_OUTPUT"
             echo 'full=true' >> "$GITHUB_OUTPUT"
+            echo 'profile=full' >> "$GITHUB_OUTPUT"
           elif [[ "${{ steps.plan.outputs.mode }}" == "light" ]]; then
             echo 'mode=light' >> "$GITHUB_OUTPUT"
             echo 'lanes=[]' >> "$GITHUB_OUTPUT"
             echo 'checks=[]' >> "$GITHUB_OUTPUT"
             echo 'full=false' >> "$GITHUB_OUTPUT"
+            echo 'profile=none' >> "$GITHUB_OUTPUT"
           elif [[ "$IMPACT_MODE" == "targeted" ]]; then
             echo 'mode=targeted' >> "$GITHUB_OUTPUT"
             printf 'lanes=%s\n' "$IMPACT_LANES" >> "$GITHUB_OUTPUT"
             printf 'checks=%s\n' "$IMPACT_CHECKS" >> "$GITHUB_OUTPUT"
             echo 'full=false' >> "$GITHUB_OUTPUT"
+            printf 'profile=%s\n' "${IMPACT_PROFILE:-full}" >> "$GITHUB_OUTPUT"
           else
             echo 'mode=full' >> "$GITHUB_OUTPUT"
             echo 'lanes=["preflight","backend","frontend","browser","archive-sdk"]' >> "$GITHUB_OUTPUT"
             echo 'checks=[]' >> "$GITHUB_OUTPUT"
             echo 'full=true' >> "$GITHUB_OUTPUT"
+            echo 'profile=full' >> "$GITHUB_OUTPUT"
           fi
 
   preflight:
@@ -156,7 +164,8 @@ jobs:
           # selects the checked-out HEAD parent in check-dedup-base-diff.sh.
           AICRM_DEDUP_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before || '' }}
           AICRM_DEDUP_HEAD_SHA: ${{ github.sha }}
-        run: python3 scripts/ci/quality_lanes.py preflight --report-dir "$RUNNER_TEMP/preflight"
+          AICRM_CI_PROFILE: ${{ needs.plan.outputs.profile }}
+        run: python3 scripts/ci/quality_lanes.py preflight --profile "${AICRM_CI_PROFILE:-full}" --report-dir "$RUNNER_TEMP/preflight"
       - id: receipt
         if: always()
         name: Record structured preflight receipt

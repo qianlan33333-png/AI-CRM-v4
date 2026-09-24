@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Keep GitHub code checks exact-head and separate from staging acceptance.
 
-Runtime, test, fixture and release-control changes run the full PR lanes.
-Staging evidence is checked later by handoff and trusted-node readback.
+Unknown/shared application changes run full lanes; registered capabilities and
+the release-tool contract profile run only their selected checks. Staging
+evidence is a separate post-merge domestic installation fact.
 """
 import argparse
 import io

@@ -22,7 +22,7 @@ AI-CRM v4 是当前唯一的代码、测试、构建、发布和部署仓库。�
 - 支付宝已实现 WAP/网页支付、签名回调、交易查询、退款与对账 Adapter；Provider 默认
   关闭，启用真实网络调用必须提供部署侧商户凭据，并继续遵守幂等、回调重放和
   `outcome_unknown` 对账边界；
-- `main` 必过 `make check`。GitHub Actions 的部署默认关闭，只有仓库变量 `AICRM_ENABLE_ACTIONS_DEPLOY` 精确为 `true` 才会通过固定 SSH 主机密钥发布版本化 release；常规合并后按本地完整发布流程执行。
+- `main` 受保护且必过准确提交的 `check`。GitHub Actions 只做 PR 检查；国内预备机按合并后的第一父链构建并通过内网晋级同一版本。
 
 公开 HTTP 契约见 [OpenAPI](api/openapi.yaml)，数据迁移见 [migrations](migrations)，部署约束见 [部署说明](deploy/README.md)。
 
@@ -66,18 +66,12 @@ govulncheck ./...
 ## 开发与发布
 
 每个能力使用新的 `codex/<work-item>` worktree 和 PR。先阅读
-[`docs/development-before-start.md`](docs/development-before-start.md)，完成与影响范围
-匹配的本地验证和预发布验收，再提交不可变 handoff。发布指挥台验证 GitHub 当前
-head/main、required check、签名的新鲜度证明与预发布 receipt，然后串行晋级同一包；
-指挥台不修改候选源码。
+[`docs/development-before-start.md`](docs/development-before-start.md)，按改动影响运行本地检查。
+PR 的必需 `check` 始终有结果：已登记的普通能力运行受影响测试；发布工具/CI 变更运行发布合同测试；
+未知、共享构建基础和迁移运行完整检查。禁止给必需工作流添加路径过滤。
 
-```sh
-python3 scripts/release_control.py handoff validate handoff.json
-python3 scripts/release_control.py --state /secure/release/state.json \
-  --coordinator-thread-id <thread-id> handoff submit handoff.json <candidate-id>
-python3 scripts/release_events.py --state /secure/release/state.json show
-```
-
-公开 `main` 的精确读回和离线验签见
-[`docs/release-command-center.md`](docs/release-command-center.md)。GitHub 分支保护负责
-合并门禁；指挥台队列负责串行合并、同包发布和观察，当前不使用 GitHub 原生 Merge Queue。
+PR 合并后，国内预备机按 `main` 第一父链顺序拉取准确提交、构建并使用合成数据做基础验证，
+再通过内网晋级同一文件树。预备机数据可重建，无需备份；生产真实数据仅在数据库迁移前备份。
+生产安装、健康读回和真实业务验收分开记录。日常操作与失败恢复见
+[`docs/operations/domestic-release.md`](docs/operations/domestic-release.md)。旧 handoff、merge-preview
+和手工发布入口保留为历史审计材料，不是新流程门禁。

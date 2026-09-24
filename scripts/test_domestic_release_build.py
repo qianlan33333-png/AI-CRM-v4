@@ -24,11 +24,13 @@ class DomesticReleaseBuildTests(unittest.TestCase):
             base = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
             (repo / "cmd/aicrm").mkdir(parents=True)
             (repo / "cmd/aicrm/main.go").write_text("package main\nfunc main() {}\n")
-            subprocess.run(["git", "-C", str(repo), "add", "cmd/aicrm/main.go"], check=True)
+            (repo / "scripts/domestic_release.py").write_text("# updated fixed controller\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "cmd/aicrm/main.go", "scripts/domestic_release.py"], check=True)
             subprocess.run(["git", "-C", str(repo), "commit", "-qm", "add Go source"], check=True)
             with mock.patch.object(builder, "_make_plan", side_effect=AssertionError("target source executed")):
                 result = builder.classify(repo, base, "HEAD")
             self.assertTrue(result["runtime_changed"])
+            self.assertEqual(result["controller_files"], ["scripts/domestic_release.py"])
 
     def test_docs_and_tests_do_not_change_runtime(self) -> None:
         result = builder.classify_paths([
@@ -41,23 +43,69 @@ class DomesticReleaseBuildTests(unittest.TestCase):
         self.assertFalse(result.frontend_changed)
         self.assertFalse(result.full_build)
         self.assertFalse(result.migrations_changed)
+        for sample_path in (
+            "deploy/domestic-release.example.json",
+            "deploy/domestic-release-role.production.example",
+            "deploy/domestic-release-role.staging.example",
+        ):
+            with self.subTest(sample_path=sample_path):
+                sample = builder.classify_paths([sample_path])
+                self.assertFalse(sample.runtime_changed)
+                self.assertFalse(sample.full_build)
 
-    def test_frontend_change_is_incremental_and_migration_is_full(self) -> None:
+    def test_frontend_migration_and_infrastructure_impacts_choose_minimum_safe_build(self) -> None:
         frontend = builder.classify_paths(["web/v3/payment/page.ts"])
         self.assertTrue(frontend.runtime_changed)
         self.assertTrue(frontend.frontend_changed)
         self.assertFalse(frontend.full_build)
+        self.assertEqual(frontend.build_mode, "frontend_incremental")
         self.assertEqual(frontend.frontend_build_paths, ["web/v3/payment/page.ts"])
 
         migration = builder.classify_paths(["migrations/0201_payment_status.sql"])
         self.assertTrue(migration.runtime_changed)
         self.assertTrue(migration.migrations_changed)
-        self.assertTrue(migration.full_build)
+        self.assertFalse(migration.full_build)
+        self.assertEqual(migration.build_mode, "manifest_only")
+        self.assertEqual(migration.package_overlays, ["migrations"])
 
         for path in ("go.sum", "scripts/run-donor-view-consumers.sh", "deploy/install-release.sh", "components/excel-batches/batches.py"):
             with self.subTest(path=path):
+                classified = builder.classify_paths([path])
+                if path.startswith("components/excel-batches/"):
+                    self.assertFalse(classified.full_build)
+                    self.assertEqual(classified.build_mode, "manifest_only")
+                else:
+                    self.assertTrue(classified.full_build)
+        for path in ("components/excel-batches/requirements.txt", "components/excel-batches/aicrm-excel-batches.service", "components/unknown/worker.py"):
+            with self.subTest(path=path):
                 self.assertTrue(builder.classify_paths([path]).full_build)
         self.assertTrue(builder.classify_paths(["web/donor-sources/library/static/page.js"]).full_build)
+
+    def test_controller_and_ci_changes_are_not_app_builds_but_controller_files_are_explicit(self) -> None:
+        controller = builder.classify_paths([
+            "scripts/domestic_release.py",
+            "scripts/domestic_release_build.py",
+            "deploy/domestic-promote.py",
+            "scripts/test_domestic_release.py",
+        ])
+        self.assertFalse(controller.runtime_changed)
+        self.assertFalse(controller.full_build)
+        self.assertEqual(controller.build_mode, "controller_only")
+        self.assertEqual(controller.controller_files, [
+            "deploy/domestic-promote.py",
+            "scripts/domestic_release.py",
+            "scripts/domestic_release_build.py",
+        ])
+
+        ci = builder.classify_paths([".github/workflows/ci.yml", "scripts/ci/impact_selection.py"])
+        self.assertFalse(ci.runtime_changed)
+        self.assertFalse(ci.full_build)
+        self.assertEqual(ci.build_mode, "none")
+
+    def test_shared_or_unclassified_paths_still_force_full_build(self) -> None:
+        for path in ("go.mod", "scripts/run-donor-view-consumers.sh", "deploy/unknown.service", "internal/platform/release.go", "components/unknown/worker.py"):
+            with self.subTest(path=path):
+                self.assertTrue(builder.classify_paths([path]).full_build)
 
     def test_dependency_graph_limits_build_to_affected_command_and_embed_consumer(self) -> None:
         commands = [
@@ -130,10 +178,70 @@ class DomesticReleaseBuildTests(unittest.TestCase):
             self.assertEqual(manifest["base_sha"], base_sha)
             self.assertFalse(manifest["runtime_changed"])
             self.assertFalse(manifest["full_build"])
+            self.assertEqual(manifest["build_mode"], "none")
             self.assertEqual(manifest["go_commands"], [])
+            self.assertIn("build", manifest["phase_timings_seconds"])
             self.assertEqual(manifest["release_files_sha256"], hashlib.sha256((release / builder.CHECKSUM_NAME).read_bytes()).hexdigest())
             self.assertEqual(base_before, self._snapshot(base_release))
             self.assertEqual(json.loads((output / builder.MANIFEST_NAME).read_text(encoding="utf-8")), manifest)
+
+    def test_migration_build_reuses_verified_binaries_and_replaces_payload_tree(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="domestic-release-migration-") as temporary:
+            root = Path(temporary)
+            repo = root / "repo"
+            repo.mkdir()
+            self._init_git_fixture(repo)
+            (repo / "migrations").mkdir()
+            (repo / "migrations/0001_base.sql").write_text("SELECT 1;\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "migrations/0001_base.sql"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "base migration"], check=True, capture_output=True)
+            base_sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+            (repo / "migrations/0002_additive.sql").write_text("SELECT 2;\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "migrations/0002_additive.sql"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "add migration"], check=True, capture_output=True)
+            target_sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+            base_release = root / "base-release"
+            (base_release / "bin").mkdir(parents=True)
+            (base_release / "bin/aicrm").write_bytes(b"previous-binary")
+            (base_release / "migrations").mkdir()
+            (base_release / "migrations/0001_base.sql").write_text("old packaged base\n", encoding="utf-8")
+            (base_release / "migrations/stale.sql").write_text("must be removed\n", encoding="utf-8")
+            builder.write_release_inventory(base_release)
+
+            with mock.patch.object(builder, "_build_go_commands", side_effect=AssertionError("migration-only release must reuse binaries")), mock.patch.object(builder, "_build_frontend", side_effect=AssertionError("migration-only release must reuse frontend")):
+                manifest = builder.build(repo, base_sha, target_sha, str(base_release), root / "output")
+
+            release = root / "output/release"
+            self.assertEqual((release / "bin/aicrm").read_bytes(), b"previous-binary")
+            self.assertEqual((release / "migrations/0001_base.sql").read_text(), "SELECT 1;\n")
+            self.assertEqual((release / "migrations/0002_additive.sql").read_text(), "SELECT 2;\n")
+            self.assertFalse((release / "migrations/stale.sql").exists())
+            self.assertEqual(manifest["build_mode"], "manifest_only")
+            self.assertFalse(manifest["full_build"])
+            self.assertEqual(manifest["go_commands"], [])
+            builder.verify_release_inventory(release)
+
+    def test_removing_migration_or_packaged_worker_source_fails_closed(self) -> None:
+        for relative in ("migrations/0001_base.sql", "components/excel-batches/batches.py"):
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory(prefix="domestic-release-delete-") as temporary:
+                root = Path(temporary)
+                repo = root / "repo"
+                repo.mkdir()
+                self._init_git_fixture(repo)
+                source = repo / relative
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text("source\n", encoding="utf-8")
+                subprocess.run(["git", "-C", str(repo), "add", relative], check=True)
+                subprocess.run(["git", "-C", str(repo), "commit", "-m", "add packaged source"], check=True, capture_output=True)
+                prior_sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+                source.unlink()
+                subprocess.run(["git", "-C", str(repo), "add", "-u", relative], check=True)
+                subprocess.run(["git", "-C", str(repo), "commit", "-m", "remove packaged source"], check=True, capture_output=True)
+                target_sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+                with self.assertRaisesRegex(builder.BuildError, "deletion requires an explicit removal plan"):
+                    builder.build(repo, prior_sha, target_sha, "none", root / "output")
 
     @unittest.skipUnless(shutil.which("go"), "Go is required for dependency graph integration")
     def test_plan_uses_go_list_graph_for_embedded_frontend_asset(self) -> None:

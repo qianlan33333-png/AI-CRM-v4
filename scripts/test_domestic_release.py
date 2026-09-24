@@ -13,8 +13,6 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
-STAGE_OLD_ORDER_CHECK = """CHECK ((((record_origin = 'native'::text) AND (provider <> 'alipay'::text) AND (effect_eligible = true) AND (source_row_digest IS NULL) AND (payer_customer_id IS NOT NULL) AND (beneficiary_customer_id IS NOT NULL)) OR ((record_origin = 'history'::text) AND (effect_eligible = false) AND (octet_length(source_row_digest) = 32))))"""
-
 
 def load(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -111,7 +109,7 @@ class DomesticReleaseTest(unittest.TestCase):
                 kwargs["stdout"].write(b"x" * 256)
                 return SimpleNamespace(returncode=0)
 
-            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", side_effect=fake_dump), mock.patch.object(installer, "run") as restore:
+            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer, "require_host_role", return_value="production"), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", side_effect=fake_dump), mock.patch.object(installer, "run") as restore:
                 backup = installer.backup_database("b" * 40)
 
             self.assertTrue(backup.is_file())
@@ -138,110 +136,10 @@ class DomesticReleaseTest(unittest.TestCase):
                 self.assertEqual(kwargs["stderr"], subprocess.PIPE)
                 return SimpleNamespace(returncode=1, stderr=b"synthetic-secret")
 
-            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", side_effect=failed_dump):
+            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer, "require_host_role", return_value="production"), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", side_effect=failed_dump):
                 with self.assertRaisesRegex(RuntimeError, "pg_dump failed") as raised:
                     installer.backup_database("b" * 40)
             self.assertNotIn("synthetic-secret", str(raised.exception))
-
-    def test_staging_schema_probe_is_read_only_and_keeps_secret_out_of_argv(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            env_file = Path(temporary) / "runtime.env"
-            env_file.write_text(
-                "AICRM_DATABASE_URL=postgres://aicrm_test:synthetic-secret@127.0.0.1/aicrm_test_baseline_5d15?sslmode=disable\n"
-            )
-            captured = {}
-
-            def fake_psql(args, **kwargs):
-                captured["args"] = args
-                captured["kwargs"] = kwargs
-                return SimpleNamespace(returncode=0, stdout=f"aicrm_test_baseline_5d15|aicrm_test|127.0.0.1/32|yes|1|{STAGE_OLD_ORDER_CHECK}\n", stderr="")
-
-            with mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", side_effect=fake_psql):
-                self.assertEqual(installer.staging_migration_baseline(), (True, True))
-            self.assertEqual(captured["args"][0], "/usr/sbin/runuser")
-            self.assertEqual(captured["args"][5], "psql")
-            self.assertEqual(captured["kwargs"]["env"]["PATH"], "/usr/bin:/bin")
-            self.assertNotIn("synthetic-secret", repr(captured["args"]))
-            self.assertEqual(captured["kwargs"]["env"]["PGHOST"], "127.0.0.1")
-            self.assertEqual(captured["kwargs"]["env"]["PGUSER"], "aicrm_test")
-            self.assertEqual(captured["kwargs"]["env"]["PGDATABASE"], "aicrm_test_baseline_5d15")
-            self.assertEqual(captured["kwargs"]["env"]["HOME"], "/var/lib/aicrm")
-            self.assertIn("default_transaction_read_only=on", captured["kwargs"]["env"]["PGOPTIONS"])
-            self.assertIn("statement_timeout=5000", captured["kwargs"]["env"]["PGOPTIONS"])
-            self.assertIn("version >= '0206'", captured["args"][-1])
-            self.assertIn("orders_origin_effect_shape", captured["args"][-1])
-            self.assertIn("pg_get_constraintdef(oid)", captured["args"][-1])
-            self.assertIn("current_database()", captured["args"][-1])
-            self.assertIn("current_user", captured["args"][-1])
-            self.assertIn("inet_server_addr()", captured["args"][-1])
-
-    def test_staging_schema_probe_rejects_production_or_wrong_database_configuration(self):
-        for uri in (
-            "postgres://prod_user:synthetic-secret@10.0.4.13/aicrm_prod?sslmode=verify-full",
-            "postgres://aicrm_test:synthetic-secret@127.0.0.1/aicrm_prod?sslmode=disable",
-        ):
-            with self.subTest(uri=uri), tempfile.TemporaryDirectory() as temporary:
-                env_file = Path(temporary) / "runtime.env"
-                env_file.write_text(f"AICRM_DATABASE_URL={uri}\n")
-                with mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run") as psql:
-                    with self.assertRaisesRegex(RuntimeError, "approved synthetic database") as raised:
-                        installer.staging_migration_baseline()
-                self.assertNotIn("synthetic-secret", str(raised.exception))
-                psql.assert_not_called()
-
-    def test_staging_schema_probe_rejects_wrong_actual_database_identity(self):
-        identities = (
-            "aicrm_prod|aicrm_test|127.0.0.1/32",
-            "aicrm_test_baseline_5d15|prod_user|127.0.0.1/32",
-            "aicrm_test_baseline_5d15|aicrm_test|10.0.4.13/32",
-            "aicrm_test_baseline_5d15|aicrm_test|2001:db8::10/128",
-            "aicrm_test_baseline_5d15|aicrm_test|",
-            "aicrm_test_baseline_5d15|aicrm_test|not-an-ip/32",
-        )
-        for identity in identities:
-            with self.subTest(identity=identity), tempfile.TemporaryDirectory() as temporary:
-                env_file = Path(temporary) / "runtime.env"
-                env_file.write_text("AICRM_DATABASE_URL=postgres://aicrm_test:synthetic-secret@127.0.0.1/aicrm_test_baseline_5d15?sslmode=disable\n")
-                result = SimpleNamespace(returncode=0, stdout=f"{identity}|yes|1|{STAGE_OLD_ORDER_CHECK}\n", stderr="")
-                with mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", return_value=result):
-                    with self.assertRaisesRegex(RuntimeError, "pre-0206 schema") as raised:
-                        installer.staging_migration_baseline()
-                self.assertNotIn("synthetic-secret", str(raised.exception))
-
-    def test_staging_schema_probe_accepts_ipv6_cidr_loopback(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            env_file = Path(temporary) / "runtime.env"
-            env_file.write_text(
-                "AICRM_DATABASE_URL=postgres://aicrm_test:synthetic-secret@127.0.0.1/aicrm_test_baseline_5d15?sslmode=disable\n"
-            )
-            result = SimpleNamespace(
-                returncode=0,
-                stdout=f"aicrm_test_baseline_5d15|aicrm_test|::1/128|yes|1|{STAGE_OLD_ORDER_CHECK}\n",
-                stderr="",
-            )
-            with mock.patch.object(installer, "ENV", env_file), mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")), mock.patch.object(installer.subprocess, "run", return_value=result):
-                self.assertEqual(installer.staging_migration_baseline(), (True, True))
-
-    def test_pre_migration_constraint_matches_real_stage_definition_and_rejects_0206_shape(self):
-        self.assertTrue(installer.is_pre_0206_order_constraint(STAGE_OLD_ORDER_CHECK))
-        post_migration = STAGE_OLD_ORDER_CHECK.replace(" AND (provider <> 'alipay'::text)", "")
-        self.assertNotEqual(post_migration, STAGE_OLD_ORDER_CHECK)
-        self.assertFalse(installer.is_pre_0206_order_constraint(post_migration))
-
-    def test_staging_retry_is_limited_to_one_migration_file(self):
-        metadata = {
-            "changed_paths": ["internal/order/app/create.go", "migrations/0206_order_native_alipay_checkout.sql"],
-        }
-        self.assertTrue(installer.is_only_staging_migration(metadata))
-        metadata["changed_paths"].append("migrations/0207_followup.sql")
-        self.assertFalse(installer.is_only_staging_migration(metadata))
-        self.assertFalse(installer.is_only_staging_migration({"changed_paths": "migrations/0206_order_native_alipay_checkout.sql"}))
-        self.assertEqual(worker.STAGING_RETRY_SHA, installer.STAGING_RETRY_SHA)
-        with self.assertRaisesRegex(RuntimeError, "current 5538 migration incident"):
-            worker.retry_staging({}, "e" * 40)
-        with mock.patch.object(installer, "require_staging_role"):
-            with self.assertRaisesRegex(RuntimeError, "current 5538 incident"):
-                installer.inspect_staging_retry(b"", "a" * 40, expected_sha="e" * 40, metadata_sha256="0" * 64)
 
     def test_cached_artifact_verification_streams_release_files(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -265,271 +163,6 @@ class DomesticReleaseTest(unittest.TestCase):
 
             with mock.patch.object(Path, "read_bytes", reject_artifact_read_bytes):
                 worker.verify_release_artifact(release, metadata)
-
-    def test_stage_retry_metadata_is_owned_private_and_revalidated(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            incoming = Path(temporary) / "incoming"
-            incoming.mkdir()
-            config = {"stage_incoming": str(incoming)}
-            sha = worker.STAGING_RETRY_SHA
-            content = b'{"source_sha":"' + sha.encode() + b'"}\n'
-            path = worker.stage_retry_metadata_path(config, sha, content)
-            info = path.stat()
-            self.assertEqual(info.st_uid, os.geteuid())
-            self.assertEqual(info.st_mode & 0o777, 0o600)
-            self.assertEqual(worker.stage_retry_metadata_path(config, sha, content), path)
-            path.chmod(0o644)
-            with self.assertRaisesRegex(RuntimeError, "metadata path is unsafe"):
-                worker.stage_retry_metadata_path(config, sha, content)
-
-    def staging_retry_fixture(self, root):
-        old_sha, target_sha, tree = "a" * 40, worker.STAGING_RETRY_SHA, "d" * 40
-        repo = root / "repo"
-        repo.mkdir()
-        work_root = root / "work"
-        build_root = work_root / "builds"
-        stage_incoming = root / "stage-incoming"
-        stage_incoming.mkdir()
-
-        def make_artifact(sha, contents):
-            release = build_root / sha / "release"
-            (release / "bin").mkdir(parents=True)
-            (release / "web/dist").mkdir(parents=True)
-            (release / "bin/aicrm").write_text(contents + " app")
-            (release / "web/dist/index.html").write_text(contents + " page")
-            entries = []
-            for item in sorted(path for path in release.rglob("*") if path.is_file()):
-                entries.append(f"{hashlib.sha256(item.read_bytes()).hexdigest()}  {item.relative_to(release).as_posix()}\n")
-            manifest = release / "release-files.sha256"
-            manifest.write_text("".join(entries))
-            return release, hashlib.sha256(manifest.read_bytes()).hexdigest()
-
-        old_release, old_manifest = make_artifact(old_sha, "old")
-        previous_metadata = {
-            "source_sha": old_sha,
-            "base_sha": old_sha,
-            "source_tree": "c" * 40,
-            "release_files_sha256": old_manifest,
-            "migrations_changed": False,
-            "changed_paths": [],
-        }
-        previous_meta_path = work_root / "builds" / old_sha / "domestic-release.json"
-        previous_meta_path.write_text(json.dumps(previous_metadata, sort_keys=True))
-
-        target_release, target_manifest = make_artifact(target_sha, "target")
-        metadata = {
-            "source_sha": target_sha,
-            "base_sha": old_sha,
-            "source_tree": tree,
-            "release_files_sha256": target_manifest,
-            "migrations_changed": True,
-            "changed_paths": ["migrations/0206_order_native_alipay_checkout.sql"],
-        }
-        metadata_path = build_root / target_sha / "domestic-release.json"
-        metadata_path.write_text(json.dumps(metadata, sort_keys=True))
-        state_path = root / "state.json"
-        state_path.write_text(json.dumps({
-            "schema_version": 1,
-            "status": "staging_failed",
-            "processed_sha": old_sha,
-            "deployed_source_sha": old_sha,
-            "prod_installed_sha": old_sha,
-            "prod_installed_manifest_sha256": old_manifest,
-            "blocked_sha": target_sha,
-            "failure": "backup failed",
-        }))
-        config = {
-            "repo": str(repo),
-            "work_root": str(work_root),
-            "state": str(state_path),
-            "stage_incoming": str(stage_incoming),
-            "stage_helper": "/fixed/stage-helper",
-            "production_enabled": True,
-            "prod_key": "key",
-            "prod_known_hosts": "hosts",
-            "prod_user": "ubuntu",
-            "prod_host": "127.0.0.1",
-            "prod_incoming": "/incoming",
-            "prod_helper": "/fixed/prod-helper",
-        }
-        stage_receipt = success_receipt(metadata, old_sha)
-        stage_receipt["database_backup"] = f"/opt/aicrm/database-backups/pre-{target_sha}.dump"
-        stage_success = release_readback(target_sha, target_manifest, receipt_target=target_sha, receipt_exists=True, receipt=stage_receipt)
-        stage_success["database_backup_exists"] = True
-        production_receipt = success_receipt(metadata, old_sha)
-        production = release_readback(target_sha, target_manifest, receipt_target=target_sha, receipt_exists=True, receipt=production_receipt)
-        eligible = {
-            "status": "eligible",
-            "source_sha": target_sha,
-            "base_sha": old_sha,
-            "orphan_verified": True,
-            "receipt_exists": False,
-            "backup_exists": False,
-            "migration_0206_applied": False,
-            "old_constraint_present": True,
-        }
-        return {
-            "old_sha": old_sha,
-            "target_sha": target_sha,
-            "tree": tree,
-            "old_manifest": old_manifest,
-            "target_manifest": target_manifest,
-            "old_release": old_release,
-            "target_release": target_release,
-            "metadata": metadata,
-            "metadata_path": metadata_path,
-            "state_path": state_path,
-            "config": config,
-            "stage_receipt": stage_receipt,
-            "stage_success": stage_success,
-            "production_receipt": production_receipt,
-            "production": production,
-            "eligible": eligible,
-        }
-
-    def patch_staging_retry_common(self, stack, fixture, *, stage_readbacks, command_side_effect):
-        old_sha, target_sha, tree = fixture["old_sha"], fixture["target_sha"], fixture["tree"]
-
-        def fake_git(_repo, *args):
-            if args[:2] == ("rev-parse", "refs/remotes/origin/main"):
-                return target_sha
-            if args[0] == "rev-parse" and args[1] == f"{target_sha}^1":
-                return old_sha
-            if args[0] == "rev-parse" and args[1] == f"{target_sha}^{{tree}}":
-                return tree
-            if args[0] == "show":
-                return "1760000000"
-            return ""
-
-        stack.enter_context(mock.patch.object(worker, "git", side_effect=fake_git))
-        stack.enter_context(mock.patch.object(worker, "require_official_origin"))
-        stack.enter_context(mock.patch.object(worker, "first_parent_queue", return_value=[target_sha]))
-        stack.enter_context(mock.patch.object(worker, "exact_check_success", return_value=True))
-        stack.enter_context(mock.patch.object(worker, "stage_readback", side_effect=stage_readbacks))
-        stack.enter_context(mock.patch.object(worker, "copy_payload", return_value=("/incoming/target", "/incoming/target.json")))
-        stack.enter_context(mock.patch.object(worker, "prod_readback", return_value=fixture["production"]))
-        return stack.enter_context(mock.patch.object(worker, "command", side_effect=command_side_effect))
-
-    def test_retry_staging_installs_stage_then_continues_same_production_handoff_once(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.staging_retry_fixture(Path(temporary))
-            calls = []
-
-            def command_side_effect(*args, **_kwargs):
-                calls.append(args)
-                if "--retry-staging-migration" in args:
-                    return json.dumps(fixture["stage_receipt"])
-                if "--incoming" in args:
-                    return json.dumps(fixture["production_receipt"])
-                self.fail(f"unexpected command: {args[:4]}")
-
-            with ExitStack() as stack:
-                commands = self.patch_staging_retry_common(
-                    stack,
-                    fixture,
-                    stage_readbacks=[
-                        release_readback(fixture["old_sha"], fixture["old_manifest"], receipt_target=fixture["target_sha"]),
-                        fixture["stage_success"],
-                    ],
-                    command_side_effect=command_side_effect,
-                )
-                stack.enter_context(mock.patch.object(worker, "call_stage_retry_inspector", return_value=fixture["eligible"]))
-                result = worker.retry_staging(fixture["config"], fixture["target_sha"])
-
-            state = json.loads(fixture["state_path"].read_text())
-            self.assertEqual(result["status"], "ready")
-            self.assertEqual(state["processed_sha"], fixture["target_sha"])
-            self.assertEqual(state["staging_verified_sha"], fixture["target_sha"])
-            self.assertEqual(state["staging_verified_receipt"], fixture["stage_receipt"])
-            self.assertEqual(state["status"], "ready")
-            self.assertEqual(sum("--retry-staging-migration" in call for call in calls), 1)
-            self.assertEqual(sum("--incoming" in call for call in calls), 1)
-            self.assertEqual(commands.call_count, 2)
-
-    def test_retry_staging_confirmed_helper_failure_keeps_cursor_and_one_shot_guard(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.staging_retry_fixture(Path(temporary))
-            def command_side_effect(*args, **_kwargs):
-                if "--retry-staging-migration" in args:
-                    raise RuntimeError("stage helper failed")
-                self.fail("no production command is allowed")
-
-            base = release_readback(fixture["old_sha"], fixture["old_manifest"], receipt_target=fixture["target_sha"])
-            with ExitStack() as stack:
-                self.patch_staging_retry_common(
-                    stack,
-                    fixture,
-                    stage_readbacks=[base, base],
-                    command_side_effect=command_side_effect,
-                )
-                stack.enter_context(mock.patch.object(worker, "call_stage_retry_inspector", return_value=fixture["eligible"]))
-                copy_payload = stack.enter_context(mock.patch.object(worker, "copy_payload"))
-                with self.assertRaisesRegex(RuntimeError, "confirmed no stage or schema change"):
-                    worker.retry_staging(fixture["config"], fixture["target_sha"])
-                copy_payload.assert_not_called()
-
-            state = json.loads(fixture["state_path"].read_text())
-            self.assertEqual(state["status"], "staging_failed")
-            self.assertEqual(state["processed_sha"], fixture["old_sha"])
-            self.assertEqual(state["blocked_sha"], fixture["target_sha"])
-            self.assertEqual(state["staging_retry_attempted_sha"], fixture["target_sha"])
-            with self.assertRaisesRegex(RuntimeError, "already attempted"):
-                worker.retry_staging(fixture["config"], fixture["target_sha"])
-
-    def test_retry_staging_ambiguous_helper_failure_halts_as_unknown(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.staging_retry_fixture(Path(temporary))
-            def command_side_effect(*args, **_kwargs):
-                if "--retry-staging-migration" in args:
-                    raise RuntimeError("helper response lost")
-                self.fail("no production command is allowed")
-
-            with ExitStack() as stack:
-                self.patch_staging_retry_common(
-                    stack,
-                    fixture,
-                    stage_readbacks=[release_readback(fixture["old_sha"], fixture["old_manifest"], receipt_target=fixture["target_sha"])],
-                    command_side_effect=command_side_effect,
-                )
-                inspections = stack.enter_context(mock.patch.object(worker, "call_stage_retry_inspector", side_effect=[fixture["eligible"], RuntimeError("readback unavailable")]))
-                with self.assertRaisesRegex(RuntimeError, "read-only reconciliation"):
-                    worker.retry_staging(fixture["config"], fixture["target_sha"])
-
-            state = json.loads(fixture["state_path"].read_text())
-            self.assertEqual(inspections.call_count, 2)
-            self.assertEqual(state["status"], "staging_retry_unknown")
-            self.assertEqual(state["processed_sha"], fixture["old_sha"])
-            self.assertEqual(state["blocked_sha"], fixture["target_sha"])
-
-    def test_retry_staging_production_unknown_keeps_stage_receipt_without_cursor_advance(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.staging_retry_fixture(Path(temporary))
-            def command_side_effect(*args, **_kwargs):
-                if "--retry-staging-migration" in args:
-                    return json.dumps(fixture["stage_receipt"])
-                if "--incoming" in args:
-                    raise RuntimeError("production SSH reply lost")
-                self.fail(f"unexpected command: {args[:4]}")
-
-            with ExitStack() as stack:
-                self.patch_staging_retry_common(
-                    stack,
-                    fixture,
-                    stage_readbacks=[
-                        release_readback(fixture["old_sha"], fixture["old_manifest"], receipt_target=fixture["target_sha"]),
-                        fixture["stage_success"],
-                    ],
-                    command_side_effect=command_side_effect,
-                )
-                stack.enter_context(mock.patch.object(worker, "call_stage_retry_inspector", return_value=fixture["eligible"]))
-                with self.assertRaisesRegex(RuntimeError, "production SSH reply lost"):
-                    worker.retry_staging(fixture["config"], fixture["target_sha"])
-
-            state = json.loads(fixture["state_path"].read_text())
-            self.assertEqual(state["status"], "outcome_unknown")
-            self.assertEqual(state["staging_verified_sha"], fixture["target_sha"])
-            self.assertEqual(state["staging_verified_receipt"], fixture["stage_receipt"])
-            self.assertEqual(state["processed_sha"], fixture["old_sha"])
 
     def recovery_fixture(self, root, *, migrations_changed=False, already_attempted=False):
         sha0, sha1 = "a" * 40, "b" * 40
@@ -826,6 +459,12 @@ class DomesticReleaseTest(unittest.TestCase):
                 readback_call.assert_not_called()
                 baseline_call.assert_not_called()
 
+    def test_one_off_staging_retry_command_is_retired(self):
+        argv = ["domestic_release.py", "--config", "unused", "retry-staging", "--sha", "5" * 40]
+        with mock.patch.object(worker.sys, "argv", argv), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            worker.main()
+        self.assertEqual(raised.exception.code, 2)
+
     def test_installer_cli_requires_both_identity_flags_in_both_modes(self):
         source_modes = (
             ["--incoming", "/tmp/domestic-incoming/" + "b" * 40],
@@ -842,7 +481,7 @@ class DomesticReleaseTest(unittest.TestCase):
                     for flag, value in identity_flags:
                         if flag != omitted:
                             argv.extend((flag, value))
-                    with mock.patch.object(installer.sys, "argv", argv), redirect_stderr(io.StringIO()):
+                    with mock.patch.object(installer.os, "geteuid", return_value=0), mock.patch.object(installer.sys, "argv", argv), redirect_stderr(io.StringIO()):
                         with self.assertRaises(SystemExit) as raised:
                             installer.main()
                     self.assertEqual(raised.exception.code, 2)
@@ -912,6 +551,99 @@ class DomesticReleaseTest(unittest.TestCase):
                 shas.append(subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip())
             self.assertEqual(worker.first_parent_queue(repo, shas[0], shas[2]), shas[1:])
 
+    def controller_fixture(self, root):
+        repo = root / "repo"
+        (repo / "scripts").mkdir(parents=True)
+        (repo / "deploy").mkdir()
+        sources = {
+            "scripts/domestic_release.py": b"controller-v1\n",
+            "scripts/domestic_release_build.py": b"builder-v1\n",
+            "deploy/domestic-promote.py": b"installer-v1\n",
+        }
+        for relative, content in sources.items():
+            (repo / relative).write_bytes(content)
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Controller Test"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "controller-test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "controller source"], check=True)
+        sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+        fixed = root / "fixed"
+        fixed.mkdir()
+        (fixed / "domestic_release.py").write_bytes(sources["scripts/domestic_release.py"])
+        (fixed / "domestic_release_build.py").write_bytes(sources["scripts/domestic_release_build.py"])
+        stage_helper = root / "domestic-promote.py"
+        stage_helper.write_bytes(sources["deploy/domestic-promote.py"])
+        config = {
+            "repo": str(repo),
+            "stage_helper": str(stage_helper),
+            "prod_helper": "/usr/local/libexec/aicrm/domestic-promote.py",
+        }
+        hashes = {path: hashlib.sha256(content).hexdigest() for path, content in sources.items()}
+        return repo, sha, fixed, config, hashes
+
+    def test_controller_verification_requires_exact_checked_fixed_files(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-controller-verify-") as temporary:
+            root = Path(temporary)
+            repo, sha, fixed, config, hashes = self.controller_fixture(root)
+            paths = ["scripts/domestic_release.py", "scripts/domestic_release_build.py", "deploy/domestic-promote.py"]
+            with mock.patch.object(worker, "__file__", str(fixed / "domestic_release.py")), mock.patch.object(worker, "_remote_file_sha256", return_value=hashes["deploy/domestic-promote.py"]):
+                result = worker.verify_controller_installation(config, repo, sha, paths)
+                self.assertEqual(result["status"], "matched")
+                self.assertEqual(result["source_sha"], sha)
+                self.assertEqual(set(result["files"]), set(paths))
+                self.assertEqual(result["files"]["deploy/domestic-promote.py"]["production_sha256"], hashes["deploy/domestic-promote.py"])
+
+                (fixed / "domestic_release_build.py").write_bytes(b"stale builder\n")
+                with self.assertRaisesRegex(RuntimeError, "fixed controller digest mismatch"):
+                    worker.verify_controller_installation(config, repo, sha, paths)
+
+    def test_controller_update_mismatch_halts_queue_without_advancing_or_installing_app(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sha0, sha1 = "a" * 40, "b" * 40
+            state_path = root / "state.json"
+            state_path.write_text(json.dumps({"status": "ready", "processed_sha": sha0, "deployed_source_sha": sha0, "prod_installed_sha": sha0}))
+            config = {"repo": str(root), "state": str(state_path), "production_enabled": True}
+            plan = {"runtime_changed": False, "controller_files": ["scripts/domestic_release.py"]}
+            with mock.patch.object(worker, "git", return_value=sha1), mock.patch.object(worker, "require_official_origin"), mock.patch.object(worker, "first_parent_queue", return_value=[sha1]), mock.patch.object(worker, "exact_check_success", return_value=True), mock.patch.object(worker, "command", return_value=json.dumps(plan)), mock.patch.object(worker, "verify_controller_installation", side_effect=RuntimeError("stale fixed copy")), mock.patch.object(worker, "build_candidate") as build, mock.patch.object(worker, "stage_install") as stage, mock.patch.object(worker, "copy_payload") as transfer:
+                with self.assertRaisesRegex(RuntimeError, "install them under the maintenance lock"):
+                    worker.poll(config)
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state["status"], "controller_update_required")
+            self.assertEqual(state["blocked_sha"], sha1)
+            self.assertEqual(state["processed_sha"], sha0)
+            self.assertEqual(state["deployed_source_sha"], sha0)
+            build.assert_not_called()
+            stage.assert_not_called()
+            transfer.assert_not_called()
+
+    def test_controller_update_match_advances_only_source_cursor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sha0, sha1 = "a" * 40, "b" * 40
+            state_path = root / "state.json"
+            state_path.write_text(json.dumps({
+                "status": "controller_update_required", "processed_sha": sha0,
+                "deployed_source_sha": sha0, "prod_installed_sha": sha0,
+                "blocked_sha": sha1,
+            }))
+            config = {"repo": str(root), "state": str(state_path), "production_enabled": True}
+            plan = {"runtime_changed": False, "controller_files": ["scripts/domestic_release.py"]}
+            verification = {"source_sha": sha1, "source_tree": "c" * 40, "files": {}, "duration_seconds": 0.4, "status": "matched"}
+            with mock.patch.object(worker, "git", return_value=sha1), mock.patch.object(worker, "require_official_origin"), mock.patch.object(worker, "first_parent_queue", return_value=[sha1]), mock.patch.object(worker, "exact_check_success", return_value=True), mock.patch.object(worker, "command", return_value=json.dumps(plan)), mock.patch.object(worker, "verify_controller_installation", return_value=verification), mock.patch.object(worker, "build_candidate") as build, mock.patch.object(worker, "stage_install") as stage:
+                result = worker.poll(config)
+            state = json.loads(state_path.read_text())
+            self.assertEqual(result["status"], "ready")
+            self.assertEqual(state["processed_sha"], sha1)
+            self.assertEqual(state["deployed_source_sha"], sha0)
+            self.assertEqual(state["prod_installed_sha"], sha0)
+            self.assertEqual(state["last_controller_verification"], verification)
+            self.assertEqual(state["last_release_timings_seconds"]["controller_readback"], 0.4)
+            build.assert_not_called()
+            stage.assert_not_called()
+
     def test_manifest_rejects_changed_and_extra_files(self):
         with tempfile.TemporaryDirectory() as temp:
             payload = Path(temp)
@@ -944,6 +676,21 @@ class DomesticReleaseTest(unittest.TestCase):
         response.__enter__.return_value = response
         with mock.patch.object(worker.urllib.request, "urlopen", return_value=response), mock.patch.object(worker.json, "load", return_value=runs):
             self.assertFalse(worker.exact_check_success(sha))
+
+    def test_exact_check_reports_run_duration_for_release_timing(self):
+        sha = "a" * 40
+        runs = {"check_runs": [{
+            "name": "check", "head_sha": sha, "app": {"slug": "github-actions"}, "id": 9,
+            "started_at": "2026-09-24T01:00:00Z", "completed_at": "2026-09-24T01:00:23Z",
+            "status": "completed", "conclusion": "success",
+        }]}
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        observation = {}
+        with mock.patch.object(worker.urllib.request, "urlopen", return_value=response), mock.patch.object(worker.json, "load", return_value=runs):
+            self.assertTrue(worker.exact_check_success(sha, observation=observation))
+        self.assertEqual(observation["duration_seconds"], 23)
+        self.assertEqual(observation["completed_at"], "2026-09-24T01:00:23Z")
 
     def test_prod_install_failure_stops_as_outcome_unknown(self):
         # Fault injected after the production install was sent. The queue
@@ -979,6 +726,49 @@ class DomesticReleaseTest(unittest.TestCase):
                     worker.poll(cfg)
                 prod_copy.assert_not_called()
             self.assertEqual(json.loads(state.read_text())["status"], "staging_failed")
+
+    def test_github_fetch_timeout_keeps_ready_cursor_and_never_builds_or_installs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            sha0 = "a" * 40
+            state = root / "state.json"
+            initial = {
+                "status": "ready",
+                "processed_sha": sha0,
+                "deployed_source_sha": sha0,
+                "prod_installed_sha": sha0,
+                "blocked_sha": None,
+                "failure": None,
+            }
+            state.write_text(json.dumps(initial, sort_keys=True) + "\n")
+            original_state = state.read_bytes()
+            config = {"repo": str(root), "state": str(state), "production_enabled": True}
+
+            def timeout_fetch(*args, **kwargs):
+                self.assertEqual(args, ("git", "-C", str(root), "fetch", "--no-tags", "origin", "main"))
+                self.assertEqual(kwargs["timeout"], worker.GITHUB_FETCH_TIMEOUT_SECONDS)
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+            with (
+                mock.patch.object(worker, "require_official_origin"),
+                mock.patch.object(worker, "command", side_effect=timeout_fetch) as command,
+                mock.patch.object(worker, "exact_check_success") as check,
+                mock.patch.object(worker, "build_candidate") as build,
+                mock.patch.object(worker, "stage_install") as stage,
+                mock.patch.object(worker, "copy_payload") as transfer,
+                mock.patch.object(worker, "promote_checked_candidate") as promote,
+            ):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    worker.poll(config)
+
+            command.assert_called_once()
+            check.assert_not_called()
+            build.assert_not_called()
+            stage.assert_not_called()
+            transfer.assert_not_called()
+            promote.assert_not_called()
+            self.assertEqual(state.read_bytes(), original_state)
+            self.assertEqual(json.loads(state.read_text()), initial)
 
     def test_two_checked_commits_install_in_order(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -1021,7 +811,11 @@ class DomesticReleaseTest(unittest.TestCase):
             self.assertEqual(final_state["status"], "ready")
             self.assertEqual(final_state["staging_verified_sha"], sha2)
             self.assertEqual(final_state["staging_verified_receipt"], {})
-            self.assertFalse(any("--retry-staging-migration" in call.args for call in commands.call_args_list))
+            timings = final_state["last_release_timings_seconds"]
+            self.assertIn("transfer", timings)
+            self.assertIn("production_install", timings)
+            self.assertIn("production_readback", timings)
+            self.assertIn("total", timings)
 
     def test_readback_rejects_wrong_manifest_and_stopped_service(self):
         sha = "a" * 40
@@ -1071,7 +865,7 @@ class DomesticReleaseTest(unittest.TestCase):
             metadata_bytes, metadata_sha256 = encode_metadata(metadata)
             env = root / "runtime.env"
             env.write_text("AICRM_DATABASE_URL=synthetic\n")
-            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "RELEASES", releases), mock.patch.object(installer, "CURRENT", current), mock.patch.object(installer, "LOCK", root / "install.lock"), mock.patch.object(installer, "RECEIPTS", root / "domestic-receipts"), mock.patch.object(installer, "ENV", env), mock.patch.object(installer.shutil, "which", return_value="/bin/systemctl"), mock.patch.object(installer, "run"), mock.patch.object(installer, "verify_root_owned_release"), mock.patch.object(installer, "backup_database") as backup, mock.patch.object(installer, "restart_services"), mock.patch.object(installer, "readiness"):
+            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "RELEASES", releases), mock.patch.object(installer, "CURRENT", current), mock.patch.object(installer, "LOCK", root / "install.lock"), mock.patch.object(installer, "RECEIPTS", root / "domestic-receipts"), mock.patch.object(installer, "ENV", env), mock.patch.object(installer, "require_host_role", return_value="production"), mock.patch.object(installer.shutil, "which", return_value="/bin/systemctl"), mock.patch.object(installer, "run"), mock.patch.object(installer, "verify_root_owned_release"), mock.patch.object(installer, "backup_database") as backup, mock.patch.object(installer, "restart_services"), mock.patch.object(installer, "readiness"):
                 receipt = installer.install(incoming, metadata_bytes, old_sha, expected_sha=new_sha, metadata_sha256=metadata_sha256)
             installed = releases / new_sha
             installed_shared = installed / "bin/private.dat"
@@ -1112,7 +906,7 @@ class DomesticReleaseTest(unittest.TestCase):
             metadata_bytes, metadata_sha256 = encode_metadata(metadata)
             env = root / "runtime.env"
             env.write_text("AICRM_DATABASE_URL=synthetic\n")
-            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "RELEASES", releases), mock.patch.object(installer, "CURRENT", current), mock.patch.object(installer, "LOCK", root / "install.lock"), mock.patch.object(installer, "RECEIPTS", root / "domestic-receipts"), mock.patch.object(installer, "ENV", env), mock.patch.object(installer.shutil, "which", return_value="/bin/systemctl"), mock.patch.object(installer, "verify_root_owned_release"), mock.patch.object(installer, "run"), mock.patch.object(installer, "restart_services"), mock.patch.object(installer, "readiness") as readiness:
+            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "RELEASES", releases), mock.patch.object(installer, "CURRENT", current), mock.patch.object(installer, "LOCK", root / "install.lock"), mock.patch.object(installer, "RECEIPTS", root / "domestic-receipts"), mock.patch.object(installer, "ENV", env), mock.patch.object(installer, "require_host_role", return_value="production"), mock.patch.object(installer.shutil, "which", return_value="/bin/systemctl"), mock.patch.object(installer, "verify_root_owned_release"), mock.patch.object(installer, "run"), mock.patch.object(installer, "restart_services"), mock.patch.object(installer, "readiness") as readiness:
                 receipt = installer.install(None, metadata_bytes, old_sha, expected_sha=new_sha, metadata_sha256=metadata_sha256, retry_existing=True)
             self.assertEqual(current.resolve(), orphan.resolve())
             self.assertEqual(orphan.stat().st_mode & 0o777, 0o755)
@@ -1120,124 +914,6 @@ class DomesticReleaseTest(unittest.TestCase):
             self.assertEqual(readiness.call_args_list[-1].args[0], new_sha)
             self.assertEqual(receipt["technical_status"], "installed_healthy")
             self.assertTrue((root / "domestic-receipts" / f"{new_sha}.json").is_file())
-
-    def test_inspect_staging_retry_requires_exact_orphan_schema_and_no_backup_or_receipt(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            releases = root / "releases"
-            old_sha, new_sha = "a" * 40, installer.STAGING_RETRY_SHA
-            old = releases / old_sha
-            (old / "bin").mkdir(parents=True)
-            (old / "release.env").write_text(f"AICRM_RELEASE_SHA={old_sha}\n")
-            current = root / "current"
-            current.symlink_to(old)
-            orphan = releases / new_sha
-            (orphan / "bin").mkdir(parents=True)
-            (orphan / "web/dist").mkdir(parents=True)
-            (orphan / "bin/aicrm").write_text("orphan app")
-            (orphan / "web/dist/index.html").write_text("orphan page")
-            (orphan / "release.env").write_text(f"AICRM_RELEASE_SHA={new_sha}\n")
-            manifest = orphan / "release-files.sha256"
-            manifest.write_text("".join(
-                f"{installer.digest(path)}  {path.relative_to(orphan).as_posix()}\n"
-                for path in sorted(orphan.rglob("*"))
-                if path.is_file() and path.name != "release.env"
-            ))
-            metadata = {
-                "source_sha": new_sha,
-                "release_files_sha256": installer.digest(manifest),
-                "migrations_changed": True,
-                "changed_paths": ["migrations/0206_order_native_alipay_checkout.sql"],
-            }
-            content, content_sha = encode_metadata(metadata)
-            receipts = root / "domestic-receipts"
-            receipts.mkdir()
-            lock = root / "install.lock"
-            lock.write_text("")
-            env = root / "runtime.env"
-            env.write_text("AICRM_DATABASE_URL=postgres://synthetic\n")
-
-            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "RELEASES", releases), mock.patch.object(installer, "CURRENT", current), mock.patch.object(installer, "LOCK", lock), mock.patch.object(installer, "RECEIPTS", receipts), mock.patch.object(installer, "ENV", env), mock.patch.object(installer, "require_staging_role"), mock.patch.object(installer, "verify_root_owned_release"), mock.patch.object(installer, "readiness"), mock.patch.object(installer, "staging_migration_baseline", return_value=(True, True)) as schema:
-                result = installer.inspect_staging_retry(content, old_sha, expected_sha=new_sha, metadata_sha256=content_sha)
-                self.assertFalse((root / "database-backups" / f"pre-{new_sha}.dump").exists())
-                backup_root = root / "database-backups"
-                backup_root.mkdir(mode=0o700)
-                (backup_root / f".pre-{new_sha}.leftover").write_bytes(b"partial dump")
-                with self.assertRaisesRegex(RuntimeError, "receipt or backup state"):
-                    installer.inspect_staging_retry(content, old_sha, expected_sha=new_sha, metadata_sha256=content_sha)
-                (backup_root / f".pre-{new_sha}.leftover").unlink()
-                (backup_root / f"pre-{new_sha}.dump").write_bytes(b"existing backup")
-                with self.assertRaisesRegex(RuntimeError, "receipt or backup state"):
-                    installer.inspect_staging_retry(content, old_sha, expected_sha=new_sha, metadata_sha256=content_sha)
-
-            self.assertEqual(result["status"], "eligible")
-            self.assertFalse(result["receipt_exists"])
-            self.assertFalse(result["backup_exists"])
-            self.assertEqual(schema.call_count, 1)
-
-    def test_staging_role_marker_must_be_root_owned_safe_and_exact(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            role = Path(temporary) / "domestic-release-role"
-            role.write_text("staging\n")
-            real_lstat = Path.lstat
-
-            def pretend_root_owned(path):
-                info = real_lstat(path)
-                if path == role:
-                    return SimpleNamespace(st_mode=info.st_mode, st_uid=0, st_gid=0)
-                return info
-
-            with mock.patch.object(installer, "STAGE_ROLE", role), mock.patch.object(Path, "lstat", pretend_root_owned):
-                installer.require_staging_role()
-                role.write_text("production\n")
-                with self.assertRaisesRegex(RuntimeError, "not enabled"):
-                    installer.require_staging_role()
-                role.unlink()
-                role.symlink_to(Path(temporary) / "target")
-                with self.assertRaisesRegex(RuntimeError, "not enabled"):
-                    installer.require_staging_role()
-
-    def test_install_rejects_changed_0206_baseline_before_backup_or_switch(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            releases = root / "releases"
-            old_sha, new_sha = "a" * 40, installer.STAGING_RETRY_SHA
-            old = releases / old_sha
-            old.mkdir(parents=True)
-            (old / "release.env").write_text(f"AICRM_RELEASE_SHA={old_sha}\n")
-            current = root / "current"
-            current.symlink_to(old)
-            orphan = releases / new_sha
-            (orphan / "bin").mkdir(parents=True)
-            (orphan / "web/dist").mkdir(parents=True)
-            (orphan / "bin/aicrm").write_text("orphan app")
-            (orphan / "web/dist/index.html").write_text("orphan page")
-            (orphan / "release.env").write_text(f"AICRM_RELEASE_SHA={new_sha}\n")
-            manifest = orphan / "release-files.sha256"
-            manifest.write_text("".join(
-                f"{installer.digest(path)}  {path.relative_to(orphan).as_posix()}\n"
-                for path in sorted(orphan.rglob("*"))
-                if path.is_file() and path.name != "release.env"
-            ))
-            metadata = {
-                "source_sha": new_sha,
-                "release_files_sha256": installer.digest(manifest),
-                "migrations_changed": True,
-                "changed_paths": ["migrations/0206_order_native_alipay_checkout.sql"],
-            }
-            content, content_sha = encode_metadata(metadata)
-            env = root / "runtime.env"
-            env.write_text("AICRM_DATABASE_URL=synthetic\n")
-            lock = root / "install.lock"
-            receipts = root / "domestic-receipts"
-
-            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "RELEASES", releases), mock.patch.object(installer, "CURRENT", current), mock.patch.object(installer, "LOCK", lock), mock.patch.object(installer, "RECEIPTS", receipts), mock.patch.object(installer, "ENV", env), mock.patch.object(installer.shutil, "which", return_value="/bin/systemctl"), mock.patch.object(installer, "require_staging_role"), mock.patch.object(installer, "verify_root_owned_release"), mock.patch.object(installer, "readiness"), mock.patch.object(installer, "staging_migration_baseline", return_value=(True, False)), mock.patch.object(installer, "backup_database") as backup, mock.patch.object(installer, "switch_to") as switch:
-                with self.assertRaisesRegex(RuntimeError, "pre-0206 state"):
-                    installer.install(None, content, old_sha, expected_sha=new_sha, metadata_sha256=content_sha, retry_existing=True, retry_staging_migration=True)
-
-            self.assertEqual(current.resolve(), old.resolve())
-            backup.assert_not_called()
-            switch.assert_not_called()
 
     def test_install_rejects_metadata_identity_mismatch_before_live_writes(self):
         old_sha, new_sha, wrong_sha = "a" * 40, "b" * 40, "c" * 40
@@ -1361,7 +1037,7 @@ class DomesticReleaseTest(unittest.TestCase):
             metadata_bytes, metadata_sha256 = encode_metadata(metadata)
             env = root / "runtime.env"
             env.write_text("AICRM_DATABASE_URL=synthetic\n")
-            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "RELEASES", releases), mock.patch.object(installer, "CURRENT", current), mock.patch.object(installer, "LOCK", root / "install.lock"), mock.patch.object(installer, "RECEIPTS", root / "domestic-receipts"), mock.patch.object(installer, "ENV", env), mock.patch.object(installer.shutil, "which", return_value="/bin/systemctl"), mock.patch.object(installer, "run") as system_run, mock.patch.object(installer, "backup_database") as backup, mock.patch.object(installer, "verify_root_owned_release"), mock.patch.object(installer, "restart_services"), mock.patch.object(installer, "readiness", side_effect=[RuntimeError("health failed"), None]):
+            with mock.patch.object(installer, "ROOT", root), mock.patch.object(installer, "RELEASES", releases), mock.patch.object(installer, "CURRENT", current), mock.patch.object(installer, "LOCK", root / "install.lock"), mock.patch.object(installer, "RECEIPTS", root / "domestic-receipts"), mock.patch.object(installer, "ENV", env), mock.patch.object(installer, "require_host_role", return_value="production"), mock.patch.object(installer.shutil, "which", return_value="/bin/systemctl"), mock.patch.object(installer, "run") as system_run, mock.patch.object(installer, "backup_database") as backup, mock.patch.object(installer, "verify_root_owned_release"), mock.patch.object(installer, "restart_services"), mock.patch.object(installer, "readiness", side_effect=[RuntimeError("health failed"), None]):
                 with self.assertRaisesRegex(RuntimeError, "health failed"):
                     installer.install(incoming, metadata_bytes, "a" * 40, expected_sha="b" * 40, metadata_sha256=metadata_sha256)
                 backup.assert_not_called()
