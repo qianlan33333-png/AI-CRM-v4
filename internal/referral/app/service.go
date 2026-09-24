@@ -17,6 +17,7 @@ import (
 	"time"
 
 	distributiondomain "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/domain"
+	distributionport "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/port"
 	platformaudit "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/audit"
 	platformidempotency "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/idempotency"
 	platformoutbox "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/outbox"
@@ -40,6 +41,7 @@ type serviceStore interface {
 	AppendOperationReceiptWithin(context.Context, string, string, string, [sha256.Size]byte, string, int64, time.Time) error
 	ReadCampaignWithin(context.Context, int64, bool) (referraldomain.Campaign, error)
 	ListCampaignsWithin(context.Context, int32, int32, bool) ([]referraldomain.Campaign, error)
+	ProductCampaignsAtWithin(context.Context, int64, string, time.Time) ([]referraldomain.Campaign, error)
 	CampaignCountsWithin(context.Context, int64) (referralstore.CampaignCounts, error)
 	ListTeamsWithin(context.Context, int64) ([]referraldomain.Team, error)
 	CampaignDailyMetricsWithin(context.Context, int64) ([]referralport.CampaignDailyMetric, error)
@@ -114,6 +116,8 @@ type Service struct {
 	audit         *platformaudit.Service
 	outbox        platformoutbox.Appender
 	qualification referralport.PurchaseQualificationReader
+	attributions  distributionport.FrozenOrderAttributionReader
+	timeline      platformaudit.TimelineReader
 	now           func() time.Time
 }
 
@@ -136,6 +140,14 @@ func (s *Service) SetPurchaseQualificationReader(reader referralport.PurchaseQua
 		return referralport.ErrUnavailable
 	}
 	s.qualification = reader
+	return nil
+}
+
+func (s *Service) SetSaleEvidenceReaders(attributions distributionport.FrozenOrderAttributionReader, timeline platformaudit.TimelineReader) error {
+	if s == nil || attributions == nil || timeline == nil {
+		return referralport.ErrUnavailable
+	}
+	s.attributions, s.timeline = attributions, timeline
 	return nil
 }
 

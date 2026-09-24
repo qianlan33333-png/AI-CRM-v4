@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"math"
 	"time"
 
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
@@ -205,7 +204,10 @@ func (s *Service) consumeProductSaleRefundWithin(ctx context.Context, event refe
 		if remaining <= 0 {
 			return nil
 		}
-		amount := int64(math.Min(float64(remaining), float64(event.RefundedAmountMinor)))
+		amount := remaining
+		if event.RefundedAmountMinor < amount {
+			amount = event.RefundedAmountMinor
+		}
 		if amount <= 0 {
 			return nil
 		}

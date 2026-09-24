@@ -1010,6 +1010,18 @@ func DatabaseURL() (string, error) {
 	return "", errors.New("database URL is not configured")
 }
 
+// ReferralTokenDataKey is used by the bounded Referral sales backfill
+// composition. The command never issues tokens, but Service construction
+// requires the same configured key as the live application.
+func ReferralTokenDataKey() (string, error) {
+	value := os.Getenv("AICRM_REFERRAL_TOKEN_DATA_KEY")
+	decoded, err := base64.RawStdEncoding.DecodeString(value)
+	if err != nil || len(decoded) != 32 {
+		return "", errors.New("invalid AICRM_REFERRAL_TOKEN_DATA_KEY")
+	}
+	return value, nil
+}
+
 // ChromiumJourneyRequired is the configuration boundary for opt-in local
 // Chromium journeys. CI sets it explicitly for required browser acceptance.
 func ChromiumJourneyRequired() bool {

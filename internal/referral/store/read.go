@@ -49,6 +49,38 @@ func (r *Repository) ListCampaignsWithin(ctx context.Context, offset, limit int3
 	return values, nil
 }
 
+// ProductCampaignsAtWithin filters immutable started-campaign product and
+// window configuration. The domain forbids changing these once started;
+// lifecycle state still has to be reconstructed from audit facts.
+func (r *Repository) ProductCampaignsAtWithin(ctx context.Context, productID int64, productType string, at time.Time) ([]referraldomain.Campaign, error) {
+	tx, err := transaction(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if productID < 1 || (productType != referraldomain.ProductTypeStandard && productType != referraldomain.ProductTypeServicePeriod) || at.IsZero() {
+		return nil, ErrInvalid
+	}
+	rows, err := tx.Query(ctx, `SELECT `+campaignColumns+` FROM referral_campaigns
+WHERE qualification_mode='product_purchase' AND product_id=$1 AND product_type=$2
+AND starts_at<=$3 AND ends_at>$3 ORDER BY id`, productID, productType, at.UTC())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	defer rows.Close()
+	result := make([]referraldomain.Campaign, 0)
+	for rows.Next() {
+		campaign, scanErr := scanCampaign(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, campaign)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, mapError(err)
+	}
+	return result, nil
+}
+
 func (r *Repository) CampaignCountsWithin(ctx context.Context, campaignID int64) (CampaignCounts, error) {
 	tx, err := transaction(ctx)
 	if err != nil {
@@ -445,11 +477,19 @@ func (r *Repository) ListSalesLeaderboardRowsWithin(ctx context.Context, campaig
 	if metric == referraldomain.LeaderboardSalesOrders {
 		scoreExpr, orderExpr = "count(*)", "count(*) DESC,sum(net_minor) DESC"
 	}
-	base := `WITH active_sales AS (
-        SELECT promoter_customer_id,COALESCE(team_id,0) AS team_id,COALESCE(t.name,'') AS team_name,
-               (original_paid_minor-successful_refund_minor)::bigint AS net_minor,paid_at
-        FROM referral_sales_facts f LEFT JOIN referral_teams t ON t.id=f.team_id
-        WHERE f.campaign_id=$1 AND f.paid_at >= $2 AND f.paid_at < $3 AND f.original_paid_minor>f.successful_refund_minor`
+	base := `WITH sale_nets AS (
+	        SELECT c.promoter_customer_id,c.team_id,c.occurred_at AS paid_at,
+	               (c.amount_delta_minor+COALESCE(SUM(r.amount_delta_minor),0))::bigint AS net_minor,
+	               (c.order_count_delta+COALESCE(SUM(r.order_count_delta),0))::bigint AS net_orders
+	        FROM referral_product_sale_events c
+	        LEFT JOIN referral_product_sale_events r ON r.reverses_sale_event_id=c.id AND r.kind='reversal'
+	        WHERE c.campaign_id=$1 AND c.kind='credit' AND c.occurred_at >= $2 AND c.occurred_at < $3
+	        GROUP BY c.id,c.promoter_customer_id,c.team_id,c.occurred_at,c.amount_delta_minor,c.order_count_delta
+	    ), active_sales AS (
+	        SELECT f.promoter_customer_id,COALESCE(f.team_id,0) AS team_id,COALESCE(t.name,'') AS team_name,
+	               f.net_minor,f.paid_at
+	        FROM sale_nets f LEFT JOIN referral_teams t ON t.id=f.team_id
+	        WHERE f.net_minor>0 AND f.net_orders>0`
 	var query, ownQuery string
 	var args, ownArgs []any
 	switch kind {

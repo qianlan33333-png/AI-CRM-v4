@@ -1776,6 +1776,11 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		if distributionErr != nil {
 			return fail(distributionErr)
 		}
+		if referralService != nil {
+			if distributionErr = referralService.SetSaleEvidenceReaders(commissionService, platformaudit.NewPostgreSQLStore()); distributionErr != nil {
+				return fail(distributionErr)
+			}
+		}
 		refundService, distributionErr := distributionapp.NewRefundService(uow, distributionRepository, distributionDueEnqueuer, distributionRefundEnqueuer, qualificationService, orderService)
 		if distributionErr != nil {
 			return fail(distributionErr)

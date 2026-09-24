@@ -107,7 +107,9 @@ func (r *Repository) ReadProductSaleCreditWithin(ctx context.Context, orderID, p
 		return referraldomain.ProductSaleEvent{}, ErrInvalid
 	}
 	query := `SELECT ` + productSaleEventColumns + ` FROM referral_product_sale_events WHERE order_id=$1 AND product_id=$2 AND kind='credit'`
-	_ = lock // the credit row is locked by the caller before this aggregate read
+	if lock {
+		query += ` FOR UPDATE`
+	}
 	return scanProductSaleEvent(tx.QueryRow(ctx, query, orderID, productID))
 }
 
@@ -157,9 +159,13 @@ func (r *Repository) InsertProductSaleEventWithin(ctx context.Context, value ref
 	if !valid.Valid() {
 		return referraldomain.ProductSaleEvent{}, ErrInvalid
 	}
-	return scanProductSaleEvent(tx.QueryRow(ctx, `INSERT INTO referral_product_sale_events(campaign_id,order_id,order_version,product_id,product_type,product_code,product_name,product_version,participation_id,team_id,promoter_customer_id,promotion_credential_ref,policy_version,commission_rate_basis_points,wait_days,buyer_customer_id,beneficiary_customer_id,kind,amount_delta_minor,order_count_delta,source_paid_event_id,reverses_sale_event_id,refund_receipt_key,source_digest,occurred_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,0),NULLIF($11,0),NULLIF($12,''),NULLIF($13,0),$14,$15,$16,$17,$18,$19,$20,$21,NULLIF($22,0),$23,$24,$25)
-RETURNING `+productSaleEventColumns, value.CampaignID, value.OrderID, value.OrderVersion, value.ProductID, value.ProductType, value.ProductCode, value.ProductName, value.ProductVersion, value.ParticipationID, value.TeamID, value.PromoterCustomerID, value.PromotionCredentialRef, value.PolicyVersion, value.CommissionRateBasisPoints, value.WaitDays, value.BuyerCustomerID, value.BeneficiaryCustomerID, string(value.Kind), value.AmountDeltaMinor, value.OrderCountDelta, value.SourcePaidEventID, value.ReversesSaleEventID, value.RefundReceiptKey, value.SourceDigest[:], value.OccurredAt.UTC()))
+	inserted, err := scanProductSaleEvent(tx.QueryRow(ctx, `INSERT INTO referral_product_sale_events(campaign_id,order_id,order_version,product_id,product_type,product_code,product_name,product_version,participation_id,team_id,promoter_customer_id,promotion_credential_ref,policy_version,commission_rate_basis_points,wait_days,buyer_customer_id,beneficiary_customer_id,kind,amount_delta_minor,order_count_delta,source_paid_event_id,reverses_sale_event_id,refund_receipt_key,source_digest,occurred_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,0),NULLIF($10,0),NULLIF($11,0),NULLIF($12,''),NULLIF($13,0),$14,$15,$16,$17,$18,$19,$20,$21,NULLIF($22,0),$23,$24,$25)
+ON CONFLICT DO NOTHING RETURNING `+productSaleEventColumns, value.CampaignID, value.OrderID, value.OrderVersion, value.ProductID, value.ProductType, value.ProductCode, value.ProductName, value.ProductVersion, value.ParticipationID, value.TeamID, value.PromoterCustomerID, value.PromotionCredentialRef, value.PolicyVersion, value.CommissionRateBasisPoints, value.WaitDays, value.BuyerCustomerID, value.BeneficiaryCustomerID, string(value.Kind), value.AmountDeltaMinor, value.OrderCountDelta, value.SourcePaidEventID, value.ReversesSaleEventID, value.RefundReceiptKey, value.SourceDigest[:], value.OccurredAt.UTC()))
+	if errors.Is(err, referralport.ErrNotFound) {
+		return referraldomain.ProductSaleEvent{}, referralport.ErrConflict
+	}
+	return inserted, err
 }
 
 func scanProductSaleEvent(row rowScanner) (referraldomain.ProductSaleEvent, error) {
