@@ -163,6 +163,20 @@ def commands(lane: str, report_dir: Path | None) -> list[list[str]]:
     raise ValueError("unknown lane: " + lane)
 
 
+def tooling_contract_commands() -> list[list[str]]:
+    """Contracts for the release controller, CI selector, and installer.
+
+    This suite deliberately avoids building the application or running UI and
+    Chromium journeys. Host-only rehearsals remain a separate pre-deployment
+    check on the preparation machine with its real service account and paths.
+    """
+    return [
+        [sys.executable, "-m", "unittest", "discover", "-s", "scripts/ci", "-p", "test_*.py"],
+        [sys.executable, "-m", "unittest", "discover", "-s", "scripts", "-p", "test_domestic_release*.py"],
+        [sys.executable, "-m", "unittest", "discover", "-s", "deploy", "-p", "test_domestic_promote*.py"],
+    ]
+
+
 def focused_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[list[str]]:
     """Run registered checks for a lane, falling back to its full lane when a
     check cannot be expressed safely as a focused command.
@@ -236,6 +250,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lane", choices=LANES)
     parser.add_argument("--report-dir", type=Path)
+    parser.add_argument("--profile", choices=("full", "tooling"), default="full")
     parser.add_argument("--focus-checks-json", default=os.environ.get("AICRM_CI_FOCUS_CHECKS", ""))
     parser.add_argument("--check-prerequisites", action="store_true")
     args = parser.parse_args()
@@ -251,8 +266,13 @@ def main() -> int:
         raise ValueError("invalid focused check list") from error
     if not isinstance(checks, list) or any(not isinstance(check, dict) for check in checks):
         raise ValueError("focused check list must be a JSON array of objects")
-    lane_commands = (focused_commands(args.lane, args.report_dir, checks)
-                     if checks and args.lane != "preflight" else commands(args.lane, args.report_dir))
+    if args.profile == "tooling":
+        if args.lane != "preflight":
+            raise ValueError("tooling profile is only valid for the preflight receipt lane")
+        lane_commands = tooling_contract_commands()
+    else:
+        lane_commands = (focused_commands(args.lane, args.report_dir, checks)
+                         if checks and args.lane != "preflight" else commands(args.lane, args.report_dir))
     for command in lane_commands:
         run(command, lane_environment(args.lane, args.report_dir))
     return 0

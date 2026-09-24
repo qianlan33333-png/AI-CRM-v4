@@ -1,3 +1,5 @@
+> **已废弃的历史计划，禁止执行。** 用户已批准按机器角色确定备份：预备机仅使用可重建合成数据，迁移失败后重建；只有生产迁移前备份真实数据。本文仍保留了当时为 SHA `5538d615a9abe2e25be799936866a7330b1d3af8` 设计的一次性恢复方案，仅供还原决策背景；不可将它作为当前代码、命令或发布依据。当前规则见 [`domestic-release.md`](../domestic-release.md)。
+
 # Staging Migration Backup Retry PRD
 
 ## Business judgment

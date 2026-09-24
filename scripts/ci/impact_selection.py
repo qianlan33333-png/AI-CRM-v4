@@ -16,6 +16,44 @@ PROTECTED_PREFIXES = (
 )
 PROTECTED_FILES = {"Makefile", "AGENTS.md", "go.mod", "go.sum", "package.json", "package-lock.json", "orval.config.mjs"}
 
+# These files define the domestic publisher and its CI gate. They are high
+# consequence tools, but their contract suite is independent of application
+# behavior and should not force unrelated Go, frontend, and browser suites.
+# Keep this allow-list narrow: migrations, build inputs, service units, action
+# setup, and unknown deployment paths must retain the conservative full lanes.
+RELEASE_TOOL_FILES = {
+    ".github/workflows/ci.yml",
+    "AGENTS.md",
+    "README.md",
+    "deploy/README.md",
+    "docs/operations/domestic-release.md",
+    "docs/operations/archive/2026-09-23-5538-0206-staging-retry.md",
+    "docs/operations/archive/2026-09-24-staging-migration-backup-retry-plan.superseded.md",
+    "docs/plans/2026-09-24-staging-migration-backup-retry.md",
+    "docs/prd/2026-09-24-release-test-loop.md",
+    "deploy/domestic-release.example.json",
+    "deploy/domestic-release-role.production.example",
+    "deploy/domestic-release-role.staging.example",
+    "scripts/domestic_release.py",
+    "scripts/domestic_release_build.py",
+    "scripts/test_domestic_release.py",
+    "scripts/test_domestic_release_build.py",
+    "deploy/domestic-promote.py",
+}
+RELEASE_TOOL_PREFIXES = ("scripts/ci/",)
+
+
+def release_tooling_only(changed: list[str]) -> bool:
+    if not changed:
+        return False
+    for path in changed:
+        if path in RELEASE_TOOL_FILES or path.startswith(RELEASE_TOOL_PREFIXES):
+            continue
+        if path.startswith("deploy/test_domestic_promote") and path.endswith(".py"):
+            continue
+        return False
+    return True
+
 
 def full(reason: str) -> dict:
     return {"mode": "full", "lanes": list(LANES), "checks": [], "reason": reason}
@@ -47,6 +85,11 @@ def valid_check(check: object) -> bool:
 def select(report: dict) -> dict:
     changed = report.get("changed_paths", [])
     risk = report.get("risk", "high")
+    if not isinstance(changed, list) or not all(isinstance(path, str) for path in changed):
+        return full("invalid-changed-paths")
+    if release_tooling_only(changed):
+        return {"mode": "targeted", "lanes": ["preflight"], "checks": [],
+                "reason": "release-tooling-contracts", "profile": "tooling"}
     protected = any(path in PROTECTED_FILES or path.startswith(PROTECTED_PREFIXES) for path in changed)
     if not changed or protected or risk not in {"low", "medium"}:
         return full("protected-or-high-risk")

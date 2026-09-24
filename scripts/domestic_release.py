@@ -8,6 +8,7 @@ read-only privileged host readback.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
@@ -16,7 +17,6 @@ from pathlib import Path
 import re
 import shlex
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -26,9 +26,14 @@ import urllib.request
 SHA = re.compile(r"^[0-9a-f]{40}$")
 FILE_SHA = re.compile(r"^[0-9a-f]{64}$")
 REPO = "qianlan33333-png/AI-CRM-v4"
-STAGING_RETRY_SHA = "5538d615a9abe2e25be799936866a7330b1d3af8"
 BUILD_USER = "aicrm-build"
 BUILD_ROOT = Path("/opt/aicrm/domestic/build-worker")
+GITHUB_FETCH_TIMEOUT_SECONDS = 30
+CONTROLLER_SOURCE_PATHS = {
+    "scripts/domestic_release.py",
+    "scripts/domestic_release_build.py",
+    "deploy/domestic-promote.py",
+}
 HOST_READBACK_CODE = """
 import hashlib, json, pathlib, re, subprocess, sys, urllib.request
 p = pathlib.Path('/opt/aicrm/current').resolve(strict=True)
@@ -68,7 +73,10 @@ def command(*args: str, cwd: Path | None = None, timeout: int = 600) -> str:
 
 
 def git(repo: Path, *args: str) -> str:
-    return command("git", "-C", str(repo), *args)
+    git_args = ("git", "-C", str(repo), *args)
+    if args[:1] == ("fetch",):
+        return command(*git_args, timeout=GITHUB_FETCH_TIMEOUT_SECONDS)
+    return command(*git_args)
 
 
 def sha256_file(path: Path) -> str:
@@ -85,7 +93,26 @@ def require_official_origin(repo: Path) -> None:
         raise RuntimeError("source origin is not the official GitHub repository")
 
 
-def exact_check_success(sha: str, token: str | None = None) -> bool:
+def _parse_utc(value: str | None) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _seconds_since(value: str | None) -> int | None:
+    parsed = _parse_utc(value)
+    if parsed is None:
+        return None
+    return max(0, round((datetime.now(timezone.utc) - parsed).total_seconds()))
+
+
+def exact_check_success(sha: str, token: str | None = None, *, observation: dict | None = None) -> bool:
     if not SHA.fullmatch(sha):
         raise ValueError("invalid commit SHA")
     url = f"https://api.github.com/repos/{REPO}/commits/{sha}/check-runs?check_name=check&per_page=100"
@@ -98,9 +125,94 @@ def exact_check_success(sha: str, token: str | None = None) -> bool:
     # green run cannot override a later failed rerun on the same SHA.
     runs = [item for item in data.get("check_runs", []) if item.get("name") == "check" and item.get("head_sha") == sha and item.get("app", {}).get("slug") == "github-actions"]
     if not runs:
+        if observation is not None:
+            observation.clear()
         return False
     newest = max(runs, key=lambda item: (item.get("started_at") or "", item.get("id") or 0))
-    return newest.get("status") == "completed" and newest.get("conclusion") == "success"
+    success = newest.get("status") == "completed" and newest.get("conclusion") == "success"
+    if observation is not None:
+        started = _parse_utc(newest.get("started_at"))
+        completed = _parse_utc(newest.get("completed_at"))
+        observation.clear()
+        observation.update({
+            "run_id": newest.get("id"),
+            "started_at": newest.get("started_at"),
+            "completed_at": newest.get("completed_at"),
+            "duration_seconds": max(0, round((completed - started).total_seconds(), 1)) if started and completed else None,
+            "success": success,
+        })
+    return success
+
+
+def _git_file_sha256(repo: Path, sha: str, path: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), "show", f"{sha}:{path}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode:
+        raise RuntimeError(f"checked controller source is missing: {path}")
+    return hashlib.sha256(result.stdout).hexdigest()
+
+
+def _local_file_sha256(path: Path) -> str:
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError("fixed controller file is missing or unsafe")
+    return sha256_file(path)
+
+
+def _helper_fixed_path(value: str) -> str:
+    parts = shlex.split(value)
+    if len(parts) != 1 or not parts[0].startswith("/") or not re.fullmatch(r"/[A-Za-z0-9_./-]+", parts[0]):
+        raise RuntimeError("fixed installer helper path is missing or unsafe")
+    return parts[0]
+
+
+def _remote_file_sha256(config: dict, path: str) -> str:
+    quoted = shlex.quote(path)
+    script = f"test ! -L {quoted} && test -f {quoted} && sha256sum -- {quoted}"
+    output = command(*ssh_args(config), script, timeout=30)
+    match = re.fullmatch(r"([0-9a-f]{64})\s+.*", output)
+    if not match:
+        raise RuntimeError("remote fixed controller readback is invalid")
+    return match.group(1)
+
+
+def verify_controller_installation(config: dict, repo: Path, sha: str, paths: list[str]) -> dict:
+    """Require every changed fixed controller to match the checked source bytes."""
+    started = time.monotonic()
+    local_release = Path(__file__)
+    local_builder = local_release.with_name("domestic_release_build.py")
+    results: dict[str, dict[str, str]] = {}
+    for source_path in paths:
+        if source_path not in CONTROLLER_SOURCE_PATHS:
+            raise RuntimeError(f"unsupported fixed controller path: {source_path}")
+        expected = _git_file_sha256(repo, sha, source_path)
+        if source_path == "scripts/domestic_release.py":
+            actual = _local_file_sha256(local_release)
+            locations = {"staging": actual}
+        elif source_path == "scripts/domestic_release_build.py":
+            actual = _local_file_sha256(local_builder)
+            locations = {"staging": actual}
+        else:
+            stage_path = _helper_fixed_path(config["stage_helper"])
+            prod_path = _helper_fixed_path(config["prod_helper"])
+            locations = {
+                "staging": _local_file_sha256(Path(stage_path)),
+                "production": _remote_file_sha256(config, prod_path),
+            }
+        results[source_path] = {"expected_sha256": expected, **{f"{name}_sha256": value for name, value in locations.items()}}
+        if any(value != expected for value in locations.values()):
+            raise RuntimeError(f"fixed controller digest mismatch: {source_path}")
+    return {
+        "source_sha": sha,
+        "source_tree": git(repo, "rev-parse", f"{sha}^{{tree}}"),
+        "files": results,
+        "verified_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "duration_seconds": round(time.monotonic() - started, 1),
+        "status": "matched",
+    }
 
 
 def github_commit_tree(sha: str, token: str | None = None) -> str:
@@ -302,7 +414,7 @@ def build_candidate(config: dict, sha: str, base: str, base_release: Path | None
     return out, metadata
 
 
-def stage_install(config: dict, sha: str, out: Path, base_sha: str) -> dict:
+def stage_install(config: dict, sha: str, out: Path, base_sha: str, *, timing_sink: dict | None = None) -> dict:
     incoming_root = Path(config["stage_incoming"])
     incoming_root.mkdir(parents=True, exist_ok=True)
     incoming = incoming_root / sha
@@ -315,16 +427,26 @@ def stage_install(config: dict, sha: str, out: Path, base_sha: str) -> dict:
     if metadata.get("source_sha") != sha or metadata.get("base_sha") != base_sha:
         raise RuntimeError("staging metadata source or base SHA mismatch")
     metadata_sha = hashlib.sha256(metadata_bytes).hexdigest()
-    result = command("sudo", config["stage_helper"], "--incoming", str(incoming), "--metadata", str(metadata_path), "--expected-sha", sha, "--metadata-sha256", metadata_sha, "--expected-base", base_sha, timeout=300)
+    install_started = time.monotonic()
+    try:
+        result = command("sudo", config["stage_helper"], "--incoming", str(incoming), "--metadata", str(metadata_path), "--expected-sha", sha, "--metadata-sha256", metadata_sha, "--expected-base", base_sha, timeout=300)
+    finally:
+        if timing_sink is not None:
+            timing_sink["stage_install"] = round(time.monotonic() - install_started, 1)
     receipt = json.loads(result.splitlines()[-1])
     if receipt.get("source_sha") != sha or receipt.get("technical_status") != "installed_healthy":
         raise RuntimeError("staging install receipt mismatch")
     expected_manifest = metadata["release_files_sha256"]
-    verify_readback(stage_readback(), sha, expected_manifest)
-    if metadata.get("frontend_changed"):
-        with urllib.request.urlopen("http://127.0.0.1:8080/login", timeout=5) as response:
-            if response.status != 200 or "text/html" not in response.headers.get("Content-Type", ""):
-                raise RuntimeError("staging UI route is not serving HTML")
+    readback_started = time.monotonic()
+    try:
+        verify_readback(stage_readback(), sha, expected_manifest)
+        if metadata.get("frontend_changed"):
+            with urllib.request.urlopen("http://127.0.0.1:8080/login", timeout=5) as response:
+                if response.status != 200 or "text/html" not in response.headers.get("Content-Type", ""):
+                    raise RuntimeError("staging UI route is not serving HTML")
+    finally:
+        if timing_sink is not None:
+            timing_sink["stage_readback"] = round(time.monotonic() - readback_started, 1)
     return receipt
 
 
@@ -358,68 +480,6 @@ def verify_release_artifact(release: Path, metadata: dict) -> None:
         raise RuntimeError("cached release file set mismatch")
 
 
-def stage_retry_metadata_path(config: dict, sha: str, metadata_bytes: bytes) -> Path:
-    incoming_root = Path(config["stage_incoming"])
-    if incoming_root.is_symlink() or not incoming_root.is_dir():
-        raise RuntimeError("staging incoming root is missing or unsafe")
-    target = incoming_root / f"{sha}.json"
-
-    def validate_existing() -> Path:
-        info = target.lstat()
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.geteuid()
-            or stat.S_IMODE(info.st_mode) != 0o600
-            or target.read_bytes() != metadata_bytes
-        ):
-            raise RuntimeError("staging retry metadata path is unsafe")
-        return target
-
-    if target.is_symlink():
-        raise RuntimeError("staging retry metadata path is unsafe")
-    if target.exists():
-        return validate_existing()
-    try:
-        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        return validate_existing()
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
-                raise RuntimeError("staging retry metadata file ownership is unsafe")
-            os.fchmod(stream.fileno(), 0o600)
-            stream.write(metadata_bytes)
-            stream.flush()
-            os.fsync(stream.fileno())
-        return validate_existing()
-    except Exception:
-        target.unlink(missing_ok=True)
-        raise
-
-
-def call_stage_retry_inspector(config: dict, metadata_path: Path, sha: str, metadata_sha: str, base_sha: str) -> dict:
-    output = command(
-        "sudo", config["stage_helper"], "--inspect-staging-retry",
-        "--metadata", str(metadata_path), "--expected-sha", sha,
-        "--metadata-sha256", metadata_sha, "--expected-base", base_sha,
-        timeout=60,
-    )
-    result = json.loads(output.splitlines()[-1])
-    if (
-        result.get("status") != "eligible"
-        or result.get("source_sha") != sha
-        or result.get("base_sha") != base_sha
-        or result.get("orphan_verified") is not True
-        or result.get("receipt_exists") is not False
-        or result.get("backup_exists") is not False
-        or result.get("migration_0206_applied") is not False
-        or result.get("old_constraint_present") is not True
-    ):
-        raise RuntimeError("staging retry preflight did not prove the exact allowed state")
-    return result
-
-
 def promote_checked_candidate(
     config: dict,
     state_path: Path,
@@ -431,14 +491,22 @@ def promote_checked_candidate(
     started: float,
     *,
     stage_receipt: dict,
+    phase_timings: dict | None = None,
+    check_observation: dict | None = None,
 ) -> None:
     """Run the same production handoff only after stage receipt/readback is verified."""
+    phase_timings = dict(phase_timings or {})
+    check_observation = dict(check_observation or {})
+    build_timings = metadata.get("phase_timings_seconds", {})
+    if isinstance(build_timings, dict) and isinstance(build_timings.get("build"), (int, float)):
+        phase_timings.setdefault("build", build_timings["build"])
     state.update(
         status="staging_verified",
         blocked_sha=sha,
         staging_verified_sha=sha,
         staging_verified_receipt=stage_receipt,
         staging_verified_manifest_sha256=metadata["release_files_sha256"],
+        last_release_timings_seconds=phase_timings,
     )
     atomic_json(state_path, state)
     try:
@@ -448,25 +516,42 @@ def promote_checked_candidate(
         if copied_metadata != metadata or copied_metadata.get("source_sha") != sha:
             raise RuntimeError("staged metadata changed after package verification")
         metadata_sha = hashlib.sha256(metadata_bytes).hexdigest()
-        incoming, remote_meta = copy_payload(config, sha, out / "release", metadata_path, installed)
+        transfer_started = time.monotonic()
+        try:
+            incoming, remote_meta = copy_payload(config, sha, out / "release", metadata_path, installed)
+        finally:
+            phase_timings["transfer"] = round(time.monotonic() - transfer_started, 1)
+            state["last_release_timings_seconds"] = phase_timings
+            atomic_json(state_path, state)
     except Exception as exc:
-        state.update(status="transport_failed", blocked_sha=sha, failure=f"stage verified; production handoff did not complete: {type(exc).__name__}")
+        phase_timings["total"] = round(time.monotonic() - started, 1)
+        state.update(status="transport_failed", blocked_sha=sha, failure=f"stage verified; production handoff did not complete: {type(exc).__name__}", last_release_timings_seconds=phase_timings)
         atomic_json(state_path, state)
         raise
     # Once the remote install begins, a lost reply is outcome_unknown even if
     # its transport error looks retryable.
     state.update(status="prod_installing", blocked_sha=sha)
+    state["last_release_timings_seconds"] = phase_timings
     atomic_json(state_path, state)
     try:
+        install_started = time.monotonic()
         result = command(*ssh_args(config), "sudo", config["prod_helper"], "--incoming", incoming, "--metadata", remote_meta, "--expected-sha", sha, "--metadata-sha256", metadata_sha, "--expected-base", installed, timeout=300)
+        phase_timings["production_install"] = round(time.monotonic() - install_started, 1)
+        readback_started = time.monotonic()
         helper_receipt = json.loads(result.splitlines()[-1])
         production = prod_readback(config, sha)
         verify_readback(production, sha, metadata["release_files_sha256"])
         verify_install_receipt(production.get("receipt"), metadata, installed)
         if helper_receipt != production.get("receipt"):
             raise RuntimeError("production helper receipt differs from readback")
+        phase_timings["production_readback"] = round(time.monotonic() - readback_started, 1)
     except Exception as exc:
-        state.update(status="outcome_unknown", failure=f"production install/readback requires reconciliation: {type(exc).__name__}")
+        if "production_install" not in phase_timings:
+            phase_timings["production_install"] = round(time.monotonic() - install_started, 1)
+        elif "production_readback" not in phase_timings:
+            phase_timings["production_readback"] = round(time.monotonic() - readback_started, 1)
+        phase_timings["total"] = round(time.monotonic() - started, 1)
+        state.update(status="outcome_unknown", failure=f"production install/readback requires reconciliation: {type(exc).__name__}", last_release_timings_seconds=phase_timings)
         atomic_json(state_path, state)
         raise
     commit_time = git(Path(config["repo"]), "show", "-s", "--format=%ct", sha)
@@ -480,134 +565,10 @@ def promote_checked_candidate(
         failure=None,
         last_duration_seconds=round(time.monotonic() - started, 1),
         last_merge_to_healthy_seconds=max(0, int(time.time()) - int(commit_time)),
+        last_check_to_healthy_seconds=_seconds_since(check_observation.get("completed_at")),
+        last_release_timings_seconds={**phase_timings, "total": round(time.monotonic() - started, 1)},
     )
     atomic_json(state_path, state)
-
-
-def retry_staging(config: dict, expected_sha: str) -> dict:
-    """Retry only the exact stage backup failure, then continue one normal production handoff."""
-    if not isinstance(expected_sha, str) or not SHA.fullmatch(expected_sha):
-        raise ValueError("retry-staging requires an exact --sha")
-    if expected_sha != STAGING_RETRY_SHA:
-        raise RuntimeError("retry-staging is limited to the current 5538 migration incident")
-    if not config["production_enabled"]:
-        raise RuntimeError("production publishing is disabled")
-    started = time.monotonic()
-    repo = Path(config["repo"])
-    work_root = Path(config["work_root"])
-    state_path = Path(config["state"])
-    if not state_path.is_file():
-        raise RuntimeError("release ledger is missing")
-    lock_path = state_path.with_suffix(".lock")
-    with lock_path.open("a+") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        state = json.loads(state_path.read_text())
-        if state.get("status") != "staging_failed" or state.get("blocked_sha") != expected_sha:
-            raise RuntimeError("retry-staging requires the exact blocked staging_failed SHA")
-        if state.get("staging_retry_attempted_sha") == expected_sha:
-            raise RuntimeError("the one permitted staging retry was already attempted")
-        processed = state.get("processed_sha")
-        deployed = state.get("deployed_source_sha")
-        installed = state.get("prod_installed_sha")
-        if not all(isinstance(value, str) and SHA.fullmatch(value) for value in (processed, deployed, installed)):
-            raise RuntimeError("invalid release ledger cursor")
-        require_official_origin(repo)
-        git(repo, "fetch", "--no-tags", "origin", "main")
-        main_sha = git(repo, "rev-parse", "refs/remotes/origin/main")
-        queue = first_parent_queue(repo, processed, main_sha)
-        if (
-            not queue
-            or queue[0] != expected_sha
-            or git(repo, "rev-parse", f"{expected_sha}^1") != processed
-            or not exact_check_success(expected_sha, os.environ.get("GITHUB_TOKEN"))
-        ):
-            raise RuntimeError("blocked SHA is not the exact checked first-parent queue head")
-
-        build = work_root / "builds" / expected_sha
-        metadata_path = build / "domestic-release.json"
-        release_path = build / "release"
-        if metadata_path.is_symlink() or not metadata_path.is_file() or release_path.is_symlink() or not release_path.is_dir():
-            raise RuntimeError("verified stage package is missing or unsafe")
-        metadata_bytes = metadata_path.read_bytes()
-        metadata = json.loads(metadata_bytes)
-        migration_paths = [path for path in metadata.get("changed_paths", []) if isinstance(path, str) and path.startswith("migrations/")]
-        if (
-            metadata.get("source_sha") != expected_sha
-            or metadata.get("base_sha") != deployed
-            or metadata.get("source_tree") != git(repo, "rev-parse", f"{expected_sha}^{{tree}}")
-            or metadata.get("migrations_changed") is not True
-            or migration_paths != ["migrations/0206_order_native_alipay_checkout.sql"]
-        ):
-            raise RuntimeError("staging retry metadata does not match the exact 0206 release")
-        verify_release_artifact(release_path, metadata)
-        metadata_sha = hashlib.sha256(metadata_bytes).hexdigest()
-
-        previous_build = work_root / "builds" / deployed
-        previous_metadata_path = previous_build / "domestic-release.json"
-        previous_release_path = previous_build / "release"
-        if previous_metadata_path.is_symlink() or not previous_metadata_path.is_file() or previous_release_path.is_symlink() or not previous_release_path.is_dir():
-            raise RuntimeError("verified previous stage release is missing or unsafe")
-        previous_metadata = json.loads(previous_metadata_path.read_text())
-        previous_manifest = previous_metadata.get("release_files_sha256")
-        if previous_metadata.get("source_sha") != deployed or not isinstance(previous_manifest, str) or not FILE_SHA.fullmatch(previous_manifest):
-            raise RuntimeError("previous stage manifest is missing")
-        verify_release_artifact(previous_release_path, previous_metadata)
-        stage_before = stage_readback(expected_sha)
-        if stage_before.get("receipt_target_sha") != expected_sha or stage_before.get("receipt_exists") is not False:
-            raise RuntimeError("stage target receipt already exists; inspect before retry")
-        verify_readback(stage_before, deployed, previous_manifest)
-
-        retry_metadata_path = stage_retry_metadata_path(config, expected_sha, metadata_bytes)
-        call_stage_retry_inspector(config, retry_metadata_path, expected_sha, metadata_sha, deployed)
-        # Persist a one-shot guard before invoking a helper that can change the
-        # release or schema. A process interruption leaves the queue halted.
-        state.update(
-            status="staging_retrying",
-            blocked_sha=expected_sha,
-            staging_retry_attempted_sha=expected_sha,
-            staging_retry_attempted_at_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        )
-        atomic_json(state_path, state)
-        try:
-            output = command(
-                "sudo", config["stage_helper"], "--retry-existing", "--retry-staging-migration",
-                "--metadata", str(retry_metadata_path), "--expected-sha", expected_sha,
-                "--metadata-sha256", metadata_sha, "--expected-base", deployed,
-                timeout=300,
-            )
-            helper_receipt = json.loads(output.splitlines()[-1])
-            stage_after = stage_readback(expected_sha)
-            verify_readback(stage_after, expected_sha, metadata["release_files_sha256"])
-            verify_install_receipt(stage_after.get("receipt"), metadata, deployed)
-            expected_backup = f"/opt/aicrm/database-backups/pre-{expected_sha}.dump"
-            if (
-                helper_receipt != stage_after.get("receipt")
-                or helper_receipt.get("database_backup") != expected_backup
-                or stage_after.get("database_backup_exists") is not True
-            ):
-                raise RuntimeError("staging migration receipt or backup readback mismatch")
-        except Exception as exc:
-            confirmed_unchanged = False
-            try:
-                call_stage_retry_inspector(config, retry_metadata_path, expected_sha, metadata_sha, deployed)
-                stage_after = stage_readback(expected_sha)
-                verify_readback(stage_after, deployed, previous_manifest)
-                confirmed_unchanged = stage_after.get("receipt_target_sha") == expected_sha and stage_after.get("receipt_exists") is False
-            except Exception:
-                confirmed_unchanged = False
-            state.update(
-                status="staging_failed" if confirmed_unchanged else "staging_retry_unknown",
-                blocked_sha=expected_sha,
-                failure=("stage retry failed; independent readback confirmed no stage or schema change" if confirmed_unchanged else "stage retry result requires read-only reconciliation"),
-            )
-            atomic_json(state_path, state)
-            raise RuntimeError(state["failure"]) from exc
-
-        promote_checked_candidate(
-            config, state_path, state, expected_sha, build, metadata, installed, started,
-            stage_receipt=helper_receipt,
-        )
-        return {"status": "ready", "processed_sha": expected_sha, "stage_retry": "readback_confirmed"}
 
 
 def recover(config: dict, *, retry_blocked: bool, expected_sha: str) -> dict:
@@ -737,8 +698,12 @@ def poll(config: dict) -> dict:
     with lock_path.open("a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         state = json.loads(state_path.read_text())
-        if state.get("status") != "ready":
+        initial_status = state.get("status")
+        if initial_status not in {"ready", "controller_update_required"}:
             raise RuntimeError(f"queue halted: {state.get('status')}")
+        blocked_controller_sha = state.get("blocked_sha") if initial_status == "controller_update_required" else None
+        if blocked_controller_sha is not None and not SHA.fullmatch(blocked_controller_sha):
+            raise RuntimeError("controller update ledger cursor is invalid")
         processed = state["processed_sha"]
         deployed = state["deployed_source_sha"]
         installed = state["prod_installed_sha"]
@@ -748,62 +713,102 @@ def poll(config: dict) -> dict:
         git(repo, "fetch", "--no-tags", "origin", "main")
         head = git(repo, "rev-parse", "refs/remotes/origin/main")
         queue = first_parent_queue(repo, processed, head)
+        if blocked_controller_sha is not None and (not queue or queue[0] != blocked_controller_sha):
+            raise RuntimeError("controller update is no longer the next checked first-parent commit")
         for sha in queue:
             started = time.monotonic()
-            if not exact_check_success(sha, os.environ.get("GITHUB_TOKEN")):
+            check_observation: dict = {}
+            if not exact_check_success(sha, os.environ.get("GITHUB_TOKEN"), observation=check_observation):
                 return {"status": "awaiting_exact_check", "sha": sha}
             if not config["production_enabled"]:
                 return {"status": "dry_run_only", "sha": sha}
-            # The builder decides whether the merged change affects runtime;
-            # docs-only commits still require exact check but advance cursor.
             plan = json.loads(command("python3", str(Path(__file__).with_name("domestic_release_build.py")), "classify", "--repo", str(repo), "--base", deployed, "--target", sha))
+            phase_timings: dict[str, float | None] = {
+                "check": check_observation.get("duration_seconds"),
+            }
+            controller_files = plan.get("controller_files", [])
+            if controller_files:
+                controller_started = time.monotonic()
+                try:
+                    verification = verify_controller_installation(config, repo, sha, controller_files)
+                except Exception as exc:
+                    phase_timings["controller_readback"] = round(time.monotonic() - controller_started, 1)
+                    state.update(
+                        status="controller_update_required",
+                        blocked_sha=sha,
+                        failure=f"fixed controller files are not installed and verified: {type(exc).__name__}",
+                        last_release_timings_seconds={**phase_timings, "total": round(time.monotonic() - started, 1)},
+                    )
+                    atomic_json(state_path, state)
+                    raise RuntimeError("fixed controller files do not match the exact checked source; install them under the maintenance lock and rerun") from exc
+                phase_timings["controller_readback"] = verification["duration_seconds"]
+                state["last_controller_verification"] = verification
+                atomic_json(state_path, state)
+            if blocked_controller_sha == sha and not controller_files:
+                raise RuntimeError("blocked controller update is absent from the source impact plan")
             if not plan.get("runtime_changed"):
-                state["processed_sha"] = sha
+                state.update(
+                    status="ready",
+                    processed_sha=sha,
+                    blocked_sha=None,
+                    failure=None,
+                    last_release_timings_seconds={**phase_timings, "total": round(time.monotonic() - started, 1)},
+                )
+                if controller_files:
+                    state["last_check_to_controller_verified_seconds"] = _seconds_since(check_observation.get("completed_at"))
                 atomic_json(state_path, state)
                 processed = sha
+                blocked_controller_sha = None
                 continue
             base_release = Path(config["work_root"]) / "builds" / deployed / "release"
             if not base_release.is_dir():
                 raise RuntimeError("verified staging base release missing")
+            build_started = time.monotonic()
             try:
                 out, metadata = build_candidate(config, sha, deployed, base_release)
-                stage_receipt = stage_install(config, sha, out, deployed)
+                build_timings = metadata.get("phase_timings_seconds", {})
+                if isinstance(build_timings, dict) and isinstance(build_timings.get("build"), (int, float)):
+                    phase_timings["build"] = build_timings["build"]
+                stage_receipt = stage_install(config, sha, out, deployed, timing_sink=phase_timings)
             except Exception as exc:
-                state.update(status="staging_failed", blocked_sha=sha, failure=f"staging install failed: {type(exc).__name__}")
+                phase_timings.setdefault("build", round(time.monotonic() - build_started, 1))
+                state.update(status="staging_failed", blocked_sha=sha, failure=f"staging install failed: {type(exc).__name__}", last_release_timings_seconds={**phase_timings, "total": round(time.monotonic() - started, 1)})
                 atomic_json(state_path, state)
                 raise
-            promote_checked_candidate(config, state_path, state, sha, out, metadata, installed, started, stage_receipt=stage_receipt)
+            promote_checked_candidate(
+                config, state_path, state, sha, out, metadata, installed, started,
+                stage_receipt=stage_receipt,
+                phase_timings=phase_timings,
+                check_observation=check_observation,
+            )
             processed, deployed, installed = sha, sha, sha
+            blocked_controller_sha = None
         return {"status": "ready", "processed_sha": processed, "queued_count": len(queue)}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("action", choices=("poll", "readback", "bind-baseline", "recover", "retry-staging"))
+    parser.add_argument("action", choices=("poll", "readback", "bind-baseline", "recover"))
     parser.add_argument("--prod-preview-sha")
     parser.add_argument("--retry-blocked", action="store_true")
-    parser.add_argument("--sha", help=f"exact blocked commit SHA; staging retry only accepts {STAGING_RETRY_SHA}")
+    parser.add_argument("--sha", help="exact blocked commit SHA")
     args = parser.parse_args()
     config = load_config(args.config)
     if args.action == "poll":
         if args.retry_blocked or args.sha:
-            parser.error("--retry-blocked and --sha are only valid with recover or retry-staging")
+            parser.error("--retry-blocked and --sha are only valid with recover")
         result = poll(config)
     elif args.action == "readback":
         if args.retry_blocked or args.sha:
-            parser.error("--retry-blocked and --sha are only valid with recover or retry-staging")
+            parser.error("--retry-blocked and --sha are only valid with recover")
         result = prod_readback(config)
     elif args.action == "bind-baseline":
         if args.retry_blocked or args.sha:
-            parser.error("--retry-blocked and --sha are only valid with recover or retry-staging")
+            parser.error("--retry-blocked and --sha are only valid with recover")
         if not args.prod_preview_sha:
             parser.error("bind-baseline requires --prod-preview-sha")
         result = bind_baseline(config, args.prod_preview_sha)
-    elif args.action == "retry-staging":
-        if args.retry_blocked or not args.sha or args.prod_preview_sha:
-            parser.error("retry-staging requires only --sha <exact-blocked-SHA>")
-        result = retry_staging(config, args.sha)
     else:
         if not args.retry_blocked or not args.sha or args.prod_preview_sha:
             parser.error("recover requires --retry-blocked --sha <exact-blocked-SHA>")
