@@ -502,6 +502,62 @@ func TestPostgreSQLH5OAuthReturnPathAcceptsOnlyPublicCommerceSegments(t *testing
 	}
 }
 
+func TestPostgreSQLAlipayPaymentChannelsAndRefundProvider(t *testing.T) {
+	pool, cleanup := paymentIntegrationPool(t)
+	defer cleanup()
+	ctx := context.Background()
+	wrapper, err := platformpostgres.Wrap(pool, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uow, err := platformpostgres.NewUnitOfWork(wrapper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := paymentstore.NewPostgreSQL()
+	now := time.Now().UTC()
+	createOrder := func(provider, suffix string) int64 {
+		t.Helper()
+		var orderID int64
+		err := pool.QueryRow(ctx, `INSERT INTO orders(provider,source_system,source_key,merchant_order_no,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,record_origin,effect_eligible,created_at,updated_at) VALUES($1,'alipay-checkout-test',$2,$3,11,11,8800,'CNY','pending_payment','native',true,$4,$4) RETURNING id`, provider, suffix, "M-"+suffix, now).Scan(&orderID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return orderID
+	}
+	for _, test := range []struct {
+		provider domain.Provider
+		channel  domain.Channel
+		suffix   string
+	}{
+		{domain.ProviderAlipay, domain.ChannelAlipayWap, "alipay-wap"},
+		{domain.ProviderAlipay, domain.ChannelAlipayPage, "alipay-page"},
+		{domain.ProviderWeChatPay, domain.ChannelH5Official, "wechat-h5"},
+	} {
+		orderID := createOrder(string(test.provider), test.suffix)
+		payment := domain.Payment{OrderID: orderID, Provider: test.provider, Channel: test.channel, MerchantOrderNo: "M-" + test.suffix, PayerIdentityID: 4, PayerCustomerID: 11, BeneficiaryCustomerID: 11, AmountMinor: 8800, Currency: "CNY", Status: domain.StatusAwaitingPrepay, Version: 1, CreatedAt: now, UpdatedAt: now}
+		key := sha256.Sum256([]byte(test.suffix))
+		payload := sha256.Sum256([]byte("payment:" + test.suffix))
+		var created domain.Payment
+		var createdNow bool
+		if err = uow.Within(ctx, func(tx context.Context) error {
+			created, createdNow, err = repository.CreatePayment(tx, payment, key, payload, "public-checkout")
+			return err
+		}); err != nil || created.ID < 1 || !createdNow {
+			t.Fatalf("%s payment=%+v created=%t err=%v", test.suffix, created, createdNow, err)
+		}
+		if test.suffix == "alipay-wap" {
+			if _, err = pool.Exec(ctx, `INSERT INTO payment_refunds(payment_id,provider,refund_no,amount_minor,reason,status,version,created_at,updated_at) VALUES($1,'alipay','R-alipay-wap',100,'test','requested',1,$2,$2)`, created.ID, now); err != nil {
+				t.Fatalf("Alipay refund provider was rejected: %v", err)
+			}
+		}
+	}
+	wrongOrderID := createOrder("alipay", "alipay-wrong-channel")
+	if _, err = pool.Exec(ctx, `INSERT INTO payments(order_id,provider,payment_channel,merchant_order_no,payer_identity_id,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,version,created_at,updated_at) VALUES($1,'alipay','h5_official_account','M-alipay-wrong-channel',4,11,11,8800,'CNY','awaiting_prepay',1,$2,$2)`, wrongOrderID, now); err == nil {
+		t.Fatal("database accepted an Alipay payment with a WeChat channel")
+	}
+}
+
 func paymentIntegrationPool(t *testing.T) (*pgxpool.Pool, func()) {
 	t.Helper()
 	url, err := platformconfig.DatabaseURL()
@@ -534,7 +590,7 @@ func paymentIntegrationPool(t *testing.T) (*pgxpool.Pool, func()) {
 	}
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Join(filepath.Dir(file), "..", "..", "..")
-	for _, name := range []string{"0001_platform.sql", "0002_identity.sql", "0005_external_effects.sql", "0020_order.sql", "0021_payment.sql", "0024_order_product_version.sql", "0025_payment_reconciliation.sql", "0061_product_public_purchase.sql", "0068_payment_session_beneficiary_selection.sql", "0127_payment_historical_refund_states.sql", "0131_payment_historical_unassigned.sql", "0134_payment_history_source_delta.sql", "0140_payment_h5_unionid_verified.sql", "0143_payment_checkout_abandonments.sql", "0144_payment_checkout_restart_permissions.sql", "0156_distribution_profit_sharing_payment.sql", "0161_payment_paid_confirmation_time.sql", "0165_payment_profit_sharing_receiver_failure_class.sql", "0166_payment_profit_sharing_instruction_failure_class.sql"} {
+	for _, name := range []string{"0001_platform.sql", "0002_identity.sql", "0005_external_effects.sql", "0020_order.sql", "0021_payment.sql", "0024_order_product_version.sql", "0025_payment_reconciliation.sql", "0061_product_public_purchase.sql", "0068_payment_session_beneficiary_selection.sql", "0127_payment_historical_refund_states.sql", "0131_payment_historical_unassigned.sql", "0134_payment_history_source_delta.sql", "0140_payment_h5_unionid_verified.sql", "0143_payment_checkout_abandonments.sql", "0144_payment_checkout_restart_permissions.sql", "0156_distribution_profit_sharing_payment.sql", "0161_payment_paid_confirmation_time.sql", "0165_payment_profit_sharing_receiver_failure_class.sql", "0166_payment_profit_sharing_instruction_failure_class.sql", "0206_order_native_alipay_checkout.sql", "0207_payment_alipay_provider_channels.sql"} {
 		raw, readErr := os.ReadFile(filepath.Join(root, "migrations", name))
 		if readErr != nil {
 			t.Fatal(readErr)
