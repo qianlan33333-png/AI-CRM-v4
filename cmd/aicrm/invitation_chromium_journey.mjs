@@ -155,6 +155,7 @@ try {
 
   await waitFor(cdp,"Boolean(document.querySelector('#createInvitation:not(:disabled)'))",'invitation workspace unavailable');
   await click('[data-tab="directory"]');
+  await waitFor(cdp,"document.querySelector('#directoryPage')?.textContent.includes('共')",'initial directory load incomplete');
   await evaluate(cdp,`document.querySelector('#directorySearch input').value='测试群';document.querySelector('#directorySearch').requestSubmit()`);
   await waitFor(cdp,"document.querySelector('#directoryRows').textContent.includes('chromium-group-1')",'catalog names and IDs missing');
   await capture('invitation-directory');
