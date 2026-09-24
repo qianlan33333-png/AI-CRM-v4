@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Iterator, Sequence
@@ -23,6 +24,22 @@ MANIFEST_NAME = "domestic-release.json"
 RELEASE_DIR_NAME = "release"
 BUILDER_SCRIPT = "scripts/run-donor-view-consumers.sh"
 ARCHIVE_RUNNER_SCRIPT = "scripts/build-wecom-archive-sdk-runner-linux.sh"
+
+# These files are executed outside the application release tree. A changed
+# copy is a controller update: the release queue verifies the installed fixed
+# copies before advancing, but must not pretend that packaging the app installed
+# them.
+FIXED_CONTROLLER_FILES = {
+    "scripts/domestic_release.py",
+    "scripts/domestic_release_build.py",
+    "deploy/domestic-promote.py",
+}
+CI_ONLY_PREFIXES = (".github/", "scripts/ci/")
+DEPLOY_SAMPLE_CONFIGS = {
+    "deploy/domestic-release.example.json",
+    "deploy/domestic-release-role.production.example",
+    "deploy/domestic-release-role.staging.example",
+}
 
 DOC_SUFFIXES = {".md", ".mdx", ".rst", ".adoc"}
 TEST_DIR_NAMES = {"test", "tests", "testdata", "fixtures"}
@@ -63,6 +80,20 @@ class Classification:
     frontend_build_paths: list[str]
     changed_paths: list[str]
     full_build_reason: str | None = None
+    controller_files: list[str] = field(default_factory=list)
+    package_overlays: list[str] = field(default_factory=list)
+
+    @property
+    def build_mode(self) -> str:
+        if not self.runtime_changed:
+            return "controller_only" if self.controller_files else "none"
+        if self.full_build:
+            return "full"
+        if self.frontend_build_paths:
+            return "frontend_incremental"
+        if self.graph_paths:
+            return "go_incremental"
+        return "manifest_only"
 
     def as_json(self, base_sha: str, target_sha: str, target_tree: str, go_commands: list[str]) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -75,6 +106,9 @@ class Classification:
             "go_commands": go_commands,
             "migrations_changed": self.migrations_changed,
             "changed_paths": self.changed_paths,
+            "build_mode": self.build_mode,
+            "controller_files": self.controller_files,
+            "package_overlays": self.package_overlays,
         }
         if self.full_build_reason:
             result["full_build_reason"] = self.full_build_reason
@@ -114,6 +148,21 @@ def _changed_paths(repo: Path, base_sha: str, target_sha: str) -> list[str]:
     raw = _git(repo, "diff", "--no-renames", "--name-only", "-z", base_sha, target_sha)
     paths = [item.decode("utf-8", "surrogateescape") for item in raw.encode("utf-8", "surrogateescape").split(b"\0") if item]
     return sorted(set(paths))
+
+
+def _deleted_paths(repo: Path, base_sha: str, target_sha: str) -> list[str]:
+    raw = _git(repo, "diff", "--diff-filter=D", "--no-renames", "--name-only", "-z", base_sha, target_sha)
+    paths = [item.decode("utf-8", "surrogateescape") for item in raw.encode("utf-8", "surrogateescape").split(b"\0") if item]
+    return sorted(set(paths))
+
+
+def _validate_payload_deletions(repo: Path, base_sha: str, target_sha: str) -> None:
+    unsafe_deletions = [
+        path for path in _deleted_paths(repo, base_sha, target_sha)
+        if path.startswith("migrations/") or path == "components/excel-batches/batches.py"
+    ]
+    if unsafe_deletions:
+        raise BuildError(f"release payload deletion requires an explicit removal plan: {unsafe_deletions}")
 
 
 def _is_test_or_document(path: str) -> bool:
@@ -159,22 +208,60 @@ def classify_paths(paths: Iterable[str]) -> Classification:
     full_reason: str | None = None
     graph_paths: list[str] = []
     frontend_build_paths: list[str] = []
+    controller_files: list[str] = []
+    package_overlays: set[str] = set()
 
     for path in changed:
         if _is_test_or_document(path):
             continue
 
-        runtime_changed = True
         normalized = path.strip("/")
         name = PurePosixPath(normalized).name.lower()
 
+        if normalized.startswith(CI_ONLY_PREFIXES):
+            continue
+
+        if normalized in FIXED_CONTROLLER_FILES:
+            controller_files.append(normalized)
+            continue
+
+        if normalized in DEPLOY_SAMPLE_CONFIGS:
+            # This is operator documentation/config illustration, not the
+            # installed host config and not part of the application package.
+            continue
+
+        runtime_changed = True
+
         if normalized.startswith("migrations/"):
-            migrations_changed = True
-            full_reason = full_reason or "database_migration"
+            if PurePosixPath(normalized).suffix.lower() == ".sql":
+                migrations_changed = True
+                package_overlays.add("migrations")
+            else:
+                full_reason = full_reason or "unknown_migration_payload"
+            continue
+
+        if normalized.startswith("deploy/"):
+            # Except for the fixed installer helper and example config above,
+            # deploy files can change host units or install behavior. Require
+            # the full package path so the installer applies and verifies them.
+            full_reason = full_reason or "deploy_payload_change"
+            continue
+
+        if normalized.startswith("components/excel-batches/"):
+            if name == "batches.py":
+                package_overlays.add("components/excel-batches")
+            elif name in {"requirements.txt", "aicrm-excel-batches.service"}:
+                full_reason = full_reason or "component_dependency_or_service_change"
+            else:
+                full_reason = full_reason or "unknown_component_payload"
+            continue
+
+        if normalized.startswith(("internal/platform/", "internal/externaleffects/", "cmd/aicrm/")):
+            full_reason = full_reason or "shared_runtime_infrastructure"
             continue
 
         if (
-            normalized.startswith(("deploy/", ".github/", "scripts/"))
+            normalized.startswith("scripts/")
             or normalized in {"Makefile", "go.mod", "go.sum", "go.work", "go.work.sum", ".npmrc"}
             or name in {"package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"}
             or _is_lockfile(normalized)
@@ -223,6 +310,8 @@ def classify_paths(paths: Iterable[str]) -> Classification:
         frontend_build_paths=frontend_build_paths,
         changed_paths=changed,
         full_build_reason=full_reason,
+        controller_files=sorted(controller_files),
+        package_overlays=sorted(package_overlays),
     )
 
 
@@ -427,6 +516,8 @@ def _make_plan(repo: Path, base_sha: str, target_sha: str, target_root: Path | N
     changed = _changed_paths(repo, base_sha, target_sha)
     tree = _tree_sha(repo, target_sha)
     classification = classify_paths(changed)
+    if not classification.runtime_changed:
+        return classification.as_json(base_sha, target_sha, tree, [])
     try:
         commands = _release_commands(repo, target_sha)
     except BuildError:
@@ -461,6 +552,7 @@ def plan(repo_path: str | Path, base_value: str, target_value: str) -> dict[str,
     repo = Path(repo_path).resolve()
     base_sha = _resolve_commit(repo, base_value)
     target_sha = _resolve_commit(repo, target_value)
+    _validate_payload_deletions(repo, base_sha, target_sha)
     return _make_plan(repo, base_sha, target_sha)
 
 
@@ -470,7 +562,15 @@ def classify(repo_path: str | Path, base_value: str, target_value: str) -> dict[
     base_sha = _resolve_commit(repo, base_value)
     target_sha = _resolve_commit(repo, target_value)
     result = classify_paths(_changed_paths(repo, base_sha, target_sha))
-    return {"runtime_changed": result.runtime_changed, "changed_paths": result.changed_paths}
+    return {
+        "runtime_changed": result.runtime_changed,
+        "full_build": result.full_build,
+        "build_mode": result.build_mode,
+        "migrations_changed": result.migrations_changed,
+        "controller_files": result.controller_files,
+        "package_overlays": result.package_overlays,
+        "changed_paths": result.changed_paths,
+    }
 
 
 def _iter_payload_files(release: Path) -> Iterator[Path]:
@@ -569,6 +669,28 @@ def _copy_release(source: Path, destination: Path) -> None:
                     ignore=shutil.ignore_patterns("release.env"))
 
 
+def _overlay_source_directory(source_root: Path, release_root: Path, relative: str) -> None:
+    """Replace one packaged source directory without following links/special files."""
+    source = source_root / relative
+    destination = release_root / relative
+    if destination.is_symlink():
+        raise BuildError(f"release overlay destination is a symlink: {relative}")
+    if destination.exists():
+        if destination.is_dir():
+            shutil.rmtree(destination)
+        else:
+            destination.unlink()
+    if not source.exists():
+        return
+    if source.is_symlink() or not source.is_dir():
+        raise BuildError(f"release overlay source is not a regular directory: {relative}")
+    for path in source.rglob("*"):
+        if path.is_symlink() or not (path.is_file() or path.is_dir()):
+            raise BuildError(f"release overlay contains an unsafe path: {path.relative_to(source_root)}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, destination, symlinks=False, copy_function=shutil.copy2)
+
+
 def _build_frontend(root: Path) -> None:
     _run(["npm", "ci", "--no-audit", "--no-fund"], cwd=root)
     _run(["npm", "ci", "--prefix", "web/v3", "--no-audit", "--no-fund"], cwd=root)
@@ -614,9 +736,11 @@ def _write_manifest(path: Path, value: dict[str, Any]) -> None:
 
 def build(repo_path: str | Path, base_value: str, target_value: str,
           base_release_value: str, out_value: str | Path) -> dict[str, Any]:
+    build_started = time.monotonic()
     repo = Path(repo_path).resolve()
     base_sha = _resolve_commit(repo, base_value)
     target_sha = _resolve_commit(repo, target_value)
+    _validate_payload_deletions(repo, base_sha, target_sha)
     output = Path(out_value).resolve()
     try:
         output.relative_to(repo)
@@ -671,7 +795,11 @@ def build(repo_path: str | Path, base_value: str, target_value: str,
                     if not _is_test_or_document(path)
                 ):
                     _build_frontend(source)
-                _build_go_commands(source, go_commands, command_inventory)
+                if go_commands:
+                    _build_go_commands(source, go_commands, command_inventory)
+
+                for relative in plan_value.get("package_overlays", []):
+                    _overlay_source_directory(source, release_in_source, relative)
 
             if not release_in_source.is_dir():
                 raise BuildError("release builder completed without creating release/")
@@ -696,11 +824,15 @@ def build(repo_path: str | Path, base_value: str, target_value: str,
                 "runtime_changed": bool(plan_value["runtime_changed"]),
                 "frontend_changed": bool(plan_value["frontend_changed"]),
                 "full_build": actual_full_build,
+                "build_mode": "full" if actual_full_build else plan_value.get("build_mode", "manifest_only"),
                 "changed_paths": plan_value["changed_paths"],
                 "go_commands": go_commands,
                 "migrations_changed": bool(plan_value["migrations_changed"]),
+                "controller_files": plan_value.get("controller_files", []),
+                "package_overlays": plan_value.get("package_overlays", []),
                 "release_files_sha256": release_files_sha,
                 "release_path": RELEASE_DIR_NAME,
+                "phase_timings_seconds": {"build": round(time.monotonic() - build_started, 1)},
             }
             _write_manifest(staged_output / MANIFEST_NAME, manifest)
         if output.exists():

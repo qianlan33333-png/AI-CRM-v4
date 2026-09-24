@@ -22,9 +22,57 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(result["mode"], "full")
         self.assertEqual(result["lanes"], list(impact_selection.LANES))
 
-    def test_protected_path_cannot_be_downgraded(self):
-        result = impact_selection.select(self.report("low", [".github/workflows/ci.yml"]))
-        self.assertEqual(result["mode"], "full")
+    def test_release_tooling_uses_contract_profile_without_application_lanes(self):
+        paths = [".github/workflows/ci.yml", "AGENTS.md", "README.md", "deploy/README.md",
+                 "docs/operations/domestic-release.md",
+                 "docs/operations/archive/2026-09-23-5538-0206-staging-retry.md",
+                 "docs/operations/archive/2026-09-24-staging-migration-backup-retry-plan.superseded.md",
+                 "docs/plans/2026-09-24-staging-migration-backup-retry.md",
+                 "docs/prd/2026-09-24-release-test-loop.md",
+                 "deploy/domestic-release.example.json",
+                 "deploy/domestic-release-role.production.example",
+                 "deploy/domestic-release-role.staging.example", "scripts/ci/impact_selection.py",
+                 "scripts/domestic_release.py", "scripts/domestic_release_build.py",
+                 "deploy/domestic-promote.py", "deploy/test_domestic_promote_contract.py"]
+        result = impact_selection.select(self.report("high", paths))
+        self.assertEqual(result, {"mode": "targeted", "lanes": ["preflight"], "checks": [],
+                                  "reason": "release-tooling-contracts", "profile": "tooling"})
+
+    def test_current_release_simplification_changed_paths_select_tool_contracts(self):
+        paths = [
+            ".github/workflows/ci.yml", "AGENTS.md", "README.md", "deploy/README.md",
+            "deploy/domestic-promote.py", "deploy/domestic-release-role.production.example",
+            "deploy/domestic-release-role.staging.example", "deploy/test_domestic_promote_policy.py",
+            "docs/operations/domestic-release.md",
+            "docs/operations/archive/2026-09-23-5538-0206-staging-retry.md",
+            "docs/operations/archive/2026-09-24-staging-migration-backup-retry-plan.superseded.md",
+            "docs/plans/2026-09-24-staging-migration-backup-retry.md",
+            "docs/prd/2026-09-24-release-test-loop.md",
+            "scripts/ci/impact_selection.py", "scripts/ci/local_first_gate.py",
+            "scripts/ci/quality_lanes.py", "scripts/ci/test_impact_selection.py",
+            "scripts/ci/test_local_first_gate.py", "scripts/ci/test_quality_lanes.py",
+            "scripts/ci/test_workflow_contract.py", "scripts/ci/verification.py",
+            "scripts/domestic_release.py", "scripts/domestic_release_build.py",
+            "scripts/test_domestic_release.py", "scripts/test_domestic_release_build.py",
+        ]
+        result = impact_selection.select(self.report("high", paths))
+        self.assertEqual(result, {"mode": "targeted", "lanes": ["preflight"], "checks": [],
+                                  "reason": "release-tooling-contracts", "profile": "tooling"})
+
+    def test_unknown_or_shared_paths_cannot_enter_release_tooling_profile(self):
+        for changed in (
+            ["scripts/ci/quality_lanes.py", "scripts/run-go-with-donor-views.sh"],
+            [".github/actions/ci-setup/action.yml"],
+            ["deploy/aicrm-domestic-release.timer"],
+            ["deploy/unknown.service"],
+            ["deploy/domestic-release.example.json", "deploy/unknown.service"],
+            ["migrations/0200_example.sql", "scripts/domestic_release.py"],
+            ["scripts/domestic_release.py", "go.mod"],
+            ["scripts/test_release_promote.py"],
+        ):
+            with self.subTest(changed=changed):
+                result = impact_selection.select(self.report("low", changed))
+                self.assertEqual(result["mode"], "full")
 
     def test_medium_selects_mapped_lanes_and_preflight(self):
         result = impact_selection.select(self.report("medium", ["internal/referral/app/admin.go"], lanes=("browser", "backend")))
@@ -38,7 +86,8 @@ class SelectionTest(unittest.TestCase):
     def test_shared_and_migration_paths_force_all_lanes_even_if_report_says_medium(self):
         for path in ("migrations/0200_example.sql", "cmd/migrate-example/main.go",
                      "internal/configmigration/runner.go", "internal/platform/config.go",
-                     "internal/webshell/host.go", "scripts/ci/impact_selection.py", "package-lock.json"):
+                     "internal/webshell/host.go", ".github/actions/ci-setup/action.yml",
+                     "scripts/run-go-with-donor-views.sh", "package-lock.json"):
             with self.subTest(path=path):
                 result = impact_selection.select(self.report("medium", [path], lanes=("backend",)))
                 self.assertEqual(result["mode"], "full")
