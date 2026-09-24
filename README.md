@@ -68,7 +68,11 @@ govulncheck ./...
 每个 PR 交付一个独立可合并、可回退的用户可观察行为或明确缺陷，并在同一 PR 提交相关测试；按行为边界拆分，不设行数配额。整个实施留在同一个 Codex task，子 PR 复用已授权的父 brief。涉及侧栏、用户页或后台页时，编码前使用 Product Design 插件/skill。先阅读
 [`docs/development-before-start.md`](docs/development-before-start.md)，按改动影响运行本地检查。
 
-`python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` 显示候选影子计划与当前 enforced 选择；它不改变 GitHub 必需 `check`。普通本地运行仍执行 `fast`，Go 改动加 `compile`，只汇报本地范围。候选在 10 个有效 PR 中零已知漏选、配对中位耗时至少降低 30%、且每个能力的检查总耗时不增加后，按已授权标准启用；否则继续影子观察。未知、共享构建基础、可执行检查策略和迁移改动保持全量回退。禁止给必需工作流添加路径过滤。发布失败诊断和修复由单独的 `gpt-6-luna` max agent 执行；其他工作不受此模型限制。
+`python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` 只显示候选影子计划与当前 enforced 选择。普通本地运行会按候选计划执行 lane、受影响 Go 包的完整测试（包括新测试）及登记检查；环境、日志或收据缺失会报告不完整。此本地结果不替代 GitHub 必需 `check`，必需门禁保持现行规则。
+
+PR2 从既有 CI lane 收据记录每日全量回归和 PR 影子观察。10 个不同 PR 的观察复用原 CI 结果，不为收集观察重复运行测试；速度门槛必须另外由真实完整/候选命令配对证明，同一 SHA、环境和缓存下，每个拟启用类别至少 3 个不同 PR，p50 节省至少 30%。`quality_lanes` 生成的 backend `run.json` 与 Go JSON 日志可用 `python3 scripts/ci/affected_shadow.py pair --full-run <full/backend/run.json> --targeted-run <targeted/backend/run.json> --scope-type class --scope-id <registered-class> --out <pair.json>` 适配为类别性能样本。能力成本配对必须额外从同一 CI run/attempt 导出完整 GitHub jobs JSON：`gh run view "$RUN_ID" --attempt "$ATTEMPT" --json databaseId,attempt,jobs > ci-jobs.json`，并传 `--ci-jobs <ci-jobs.json>`；计入 plan job 开始至稳定 required `check` 完成的 wall time，不以 backend 单 lane 耗时代替整次 CI。还需传入发布器现有 `state.json` 和对应构建的 `domestic-release.json`（`--release-state <state.json> --release-manifest <domestic-release.json> --repo <git-repository>`）；适配器验证 `processed_sha == deployed_source_sha == prod_installed_sha`、安装 manifest、source tree 和父 PRD，并读取 `last_release_timings_seconds.total`。
+
+候选只有在零已知漏选、完整且已知缺陷重放、每类耗时门槛通过、且每个能力汇总的 CI 加部署总耗时不增加时才可进入既有启用评估；缺少证据、候选结果未知或确认漏选时继续使用原门禁。未知、共享构建基础、可执行检查策略和迁移改动保持全量回退。禁止给必需工作流添加路径过滤。发布失败诊断和修复由单独的 `gpt-6-luna` max agent 执行；其他工作不受此模型限制。
 
 PR 合并后，国内预备机按 `main` 第一父链顺序拉取准确提交、构建并使用合成数据做基础验证，
 再通过内网晋级同一文件树。预备机数据可重建，无需备份；生产真实数据仅在数据库迁移前备份。

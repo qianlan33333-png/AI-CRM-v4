@@ -99,7 +99,8 @@ PR 参数不能关闭生产备份。
 
 - 首次推送和修复后再次推送前，先运行 `python3 scripts/dev_preflight.py fast`；Go 改动再运行 `python3 scripts/dev_preflight.py compile`，然后执行受影响领域的专项测试。编译成功不等于测试通过。
 - `fast`、`compile` 和局部 `browser` 的证据只能汇报对应局部 claim，不能称为完整回归。GitHub 必需 `check` 按改动范围选测试；未知、共享基础设施、可执行检查策略和迁移变更运行完整检查，已登记的发布工具使用对应合同检查。合并后的准确 SHA 还须有成功的 `check`，预备机才构建并安装。预备机基础验收与生产安装读回是独立证据，不能用 CI 代替。真实支付、扫码验收只能在生产技术部署后由业务方记录。
-- `python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` 只显示候选影子计划。无 `--dry-run` 时仍执行本地 `fast`，Go 改动再执行 `compile`；输出只证明本地范围，GitHub 当前必需检查保持不变。候选须先积累 10 个有效 PR，零已知漏选、配对中位耗时至少降低 30%、且每个能力的检查总耗时不增加；达到已授权标准后才启用，否则继续影子观察。
+- `python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` 只显示候选计划。普通运行会按计划执行候选 lane、受影响 Go 包的完整测试（含新增测试）及登记检查；缺少环境、收据或执行结果时明确报告不完整，不能报通过。macOS 缺 Linux 浏览器环境时，浏览器结果由同一 CI 计划补齐。该本地执行不替代 GitHub 当前必需 `check`。
+- PR2 保留现行门禁并从其 lane 收据收集每日全量回归和 PR 影子观察。10 个不同 PR 的观察复用原 CI 结果，不为收集观察再跑一遍测试；实际耗时仍须另有同 SHA、同环境/缓存的完整与候选命令配对，每个拟启用类别至少 3 个不同 PR，p50 节省至少 30%。每项能力的候选 CI 与部署总耗时按该能力汇总比较，不能用包耗时估算。确认漏选、候选未知结果、缺少缺陷重放或能力成本证据时保持原门禁。
 - CI 失败先重现准确失败用例，修复后重跑完整失败阶段；提交前按更新后的影响计划重新计算适用检查范围。不能通过删断言、接受 skip 或反复推送猜测修复。
 - 新增真实 Host 浏览器旅程放在 `cmd/aicrm`，使用 `Test…ChromiumJourney` 命名，自动进入必跑集合；其他包或命名必须明确接入。运行 `python3 scripts/dev_preflight.py browser` 前准备最终 Host 产物和独立 PostgreSQL 16 测试库。
 - 测试汇报附准确 HEAD、tree、工作区状态、命令及证据目录，区分编译、专项、本地完整、完整 CI、取消、跳过和未验证；修改代码后不能沿用旧 HEAD 绿灯。PR 首轮质量保留该 PR 最早 CI attempt 的原始 SHA；最终质量只对应当前 PR head 的最新 attempt。

@@ -9,6 +9,7 @@ prerequisites owned by the caller.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,7 @@ import subprocess
 import sys
 import platform
 import re
+import time
 from urllib.parse import parse_qs, unquote, urlparse
 
 
@@ -24,6 +26,8 @@ ROOT = Path(__file__).resolve().parents[2]
 LANES = ("preflight", "backend", "frontend", "browser", "archive-sdk")
 NODE_VERSION = "24.18.0"
 NPM_VERSION = "11.12.1"
+WORKFLOW_PATH = ".github/workflows/ci.yml"
+PARENT_PRD_PATH = "docs/prd/2026-09-24-small-step-impact-checks.md"
 
 
 def command_available(name: str) -> bool:
@@ -117,6 +121,249 @@ def run(command: list[str], env: dict[str, str] | None = None) -> None:
     subprocess.run(command, cwd=ROOT, env=env, check=True)
 
 
+def affected_package_test_command(packages: list[str]) -> list[str]:
+    """Build a full-suite Go test command for exact affected packages.
+
+    The command intentionally has no test-name filter, so new tests in each
+    selected package are discovered automatically.
+    """
+    if not packages or any(not isinstance(item, str) or not item for item in packages):
+        raise ValueError("affected package inventory must be nonempty")
+    go_mod = (ROOT / "go.mod").read_text(encoding="utf-8")
+    match = re.search(r"(?m)^module[ \t]+([^\s]+)", go_mod)
+    if not match:
+        raise ValueError("go.mod has no module declaration")
+    module = match.group(1)
+    paths = []
+    for package in packages:
+        if not package.startswith(module + "/"):
+            raise ValueError("affected package is outside the repository module")
+        relative = package[len(module) + 1:]
+        if (not relative or relative.startswith("/") or ".." in Path(relative).parts
+                or any(part in {"", ".", "..."} for part in relative.split("/"))):
+            raise ValueError("affected package has an unsafe import path")
+        paths.append("./" + relative)
+    return ["bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-json",
+            "-p", "1", "-race", "-count=1", "-timeout=15m", *sorted(set(paths))]
+
+
+def replace_full_backend_test_with_packages(commands_: list[list[str]], packages: list[str]) -> list[list[str]]:
+    test_command = affected_package_test_command(packages)
+    replaced = False
+    result = []
+    for command in commands_:
+        if "test" in command and "go" in command and "./..." in command:
+            result.append(test_command)
+            replaced = True
+        else:
+            result.append(command)
+    if not replaced:
+        raise ValueError("canonical backend lane has no full Go test command to replace")
+    return result
+
+
+def _run_policy_fingerprint() -> str | None:
+    ci_dir = str(ROOT / "scripts/ci")
+    if ci_dir not in sys.path:
+        sys.path.insert(0, ci_dir)
+    try:
+        import affected_plan
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        return affected_plan.combined_policy_fingerprint(
+            affected_plan.planner_policy_fingerprint(),
+            affected_plan.repository_policy_fingerprint(ROOT, head))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def _sha256_json(value: dict) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _pr_number() -> int | None:
+    direct = os.environ.get("GITHUB_PR_NUMBER", "")
+    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+    try:
+        event = json.loads(Path(event_path).read_text()) if event_path else {}
+    except (OSError, json.JSONDecodeError):
+        event = {}
+    value = direct or (event.get("pull_request", {}).get("number") if isinstance(event, dict) else None)
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _parent_prd_sha(head: str | None) -> str | None:
+    if not head:
+        return None
+    try:
+        content = subprocess.check_output(["git", "show", f"{head}:{PARENT_PRD_PATH}"],
+                                          cwd=ROOT, stderr=subprocess.DEVNULL)
+    except subprocess.SubprocessError:
+        return None
+    return hashlib.sha256(content).hexdigest()
+
+
+def _measurement_fingerprints() -> tuple[str | None, str | None]:
+    """Bind timing evidence to the Actions runner image and cache policy."""
+    if os.environ.get("GITHUB_ACTIONS", "").lower() != "true":
+        return None, None
+    def version(command: list[str]) -> str:
+        try:
+            return subprocess.check_output(command, cwd=ROOT, stderr=subprocess.STDOUT,
+                                           text=True, timeout=10).strip().splitlines()[0]
+        except (OSError, subprocess.SubprocessError, IndexError):
+            return "unavailable"
+
+    runner = {
+        "os": os.environ.get("RUNNER_OS", platform.system()),
+        "arch": os.environ.get("RUNNER_ARCH", platform.machine()),
+        "image_os": os.environ.get("ImageOS", ""),
+        "image_version": os.environ.get("ImageVersion", ""),
+        "python": platform.python_version(),
+        "go": version(["go", "version"]),
+        "node": version(["node", "--version"]),
+        "npm": version(["npm", "--version"]),
+    }
+    # The generic runner OS/architecture fields do not pin the hosted image.
+    # Without both immutable image labels, timings cannot be compared as
+    # same-environment evidence, so keep the diagnostic environment hash but
+    # omit the cache fingerprint that makes a pair eligible.
+    if not runner["image_os"] or not runner["image_version"]:
+        return _sha256_json(runner), None
+    cache = {
+        "setup_go_actions_cache": False,
+        "setup_node_actions_cache": False,
+        "go_test_cache": "disabled-by-count-1",
+        "runner_image": runner["image_version"] or runner["image_os"],
+        "actions_hosted_job": True,
+        "pip_cache": "runner-local-no-actions-cache",
+    }
+    return _sha256_json(runner), _sha256_json(cache)
+
+
+def _execution_receipt(report_dir: Path, execution: dict, elapsed: float,
+                       result: str, exit_code: int, tested_sha: str | None,
+                       tree: str | None, policy_fingerprint: str | None,
+                       run_id: str | None, run_attempt: int | None) -> dict | None:
+    pr_number = _pr_number()
+    parent_sha = _parent_prd_sha(tested_sha)
+    environment_fingerprint, cache_fingerprint = _measurement_fingerprints()
+    commands = execution.get("commands", [])
+    commands_sha = (hashlib.sha256(json.dumps(
+        commands, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        if commands else None)
+    log_name = execution.get("go_json_log")
+    log_path = report_dir / log_name if isinstance(log_name, str) else None
+    try:
+        test_json_sha = hashlib.sha256(log_path.read_bytes()).hexdigest() if log_path and log_path.is_file() else None
+    except OSError:
+        test_json_sha = None
+    go_commands = [command for command in commands
+                   if isinstance(command, list) and "go" in command and "test" in command]
+    has_vet = any("go" in command and "vet" in command for command in commands
+                  if isinstance(command, list))
+    if (not pr_number or not run_id or not run_attempt or not tested_sha or not tree
+            or not policy_fingerprint or not parent_sha or not environment_fingerprint
+            or not cache_fingerprint or not commands_sha or not test_json_sha):
+        return None
+    return {
+        "schema": 1, "kind": "canonical_ci_lane_execution",
+        "workflow_path": WORKFLOW_PATH,
+        "conclusion": "success" if result == "success" and exit_code == 0 else "failure",
+        "pr_number": pr_number, "run_id": run_id, "run_attempt": run_attempt,
+        "tested_sha": tested_sha, "tree": tree, "policy_fingerprint": policy_fingerprint,
+        "parent_prd_id": PARENT_PRD_PATH, "parent_prd_sha": parent_sha,
+        "commands_sha256": commands_sha, "elapsed_seconds": elapsed,
+        "includes_setup": bool(commands), "includes_vet": has_vet,
+        "includes_test_suite": bool(go_commands), "test_json_sha256": test_json_sha,
+        "environment_fingerprint": environment_fingerprint,
+        "cache_fingerprint": cache_fingerprint,
+    }
+
+
+def _write_lane_receipt(report_dir: Path | None, lane: str, execution: dict,
+                        started: float, result: str, exit_code: int) -> None:
+    if report_dir is None:
+        return
+    report_dir.mkdir(parents=True, exist_ok=True)
+    def git(ref: str) -> str | None:
+        try:
+            return subprocess.check_output(["git", "rev-parse", ref], cwd=ROOT, text=True).strip()
+        except subprocess.SubprocessError:
+            return None
+    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    try:
+        run_attempt_value = int(run_attempt) if run_attempt else None
+    except ValueError:
+        run_attempt_value = None
+    elapsed = max(0.001, time.monotonic() - started)
+    tested_sha, tree = git("HEAD"), git("HEAD^{tree}")
+    policy_fingerprint = _run_policy_fingerprint()
+    run_id = os.environ.get("GITHUB_RUN_ID") or None
+    receipt = {
+        "schema": 1, "lane": lane,
+        "tested_sha": tested_sha, "tree": tree,
+        "policy_fingerprint": policy_fingerprint,
+        "result": result, "exit_code": exit_code,
+        "elapsed_seconds": elapsed,
+        "run_id": run_id,
+        "run_attempt": run_attempt_value,
+        "commands": execution["commands"],
+        "go_json_log": execution.get("go_json_log"),
+    }
+    measured = _execution_receipt(report_dir, execution, elapsed, result, exit_code,
+                                  tested_sha, tree, policy_fingerprint, run_id, run_attempt_value)
+    if measured is not None:
+        receipt["execution_receipt"] = measured
+    (report_dir / "run.json").write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n")
+
+
+def _clear_lane_outputs(report_dir: Path | None, lane: str) -> None:
+    """Remove only this lane's previous receipt and test log before a rerun."""
+    if report_dir is None:
+        return
+    names = ["run.json", lane + "-go-test.jsonl"]
+    if lane == "browser":
+        names.append("browser-execution.log")
+    for name in names:
+        path = report_dir / name
+        if path.is_dir() and not path.is_symlink():
+            raise ValueError("lane output path is a directory: " + name)
+        path.unlink(missing_ok=True)
+
+
+def run_recorded(command: list[str], env: dict[str, str] | None, lane: str,
+                 report_dir: Path | None, execution: dict) -> None:
+    print("+ " + " ".join(command), flush=True)
+    execution["commands"].append(command)
+    if "-json" in command and report_dir is not None:
+        report_dir.mkdir(parents=True, exist_ok=True)
+        log_path = report_dir / (lane + "-go-test.jsonl")
+        mode = "a" if log_path.exists() else "w"
+        process = subprocess.Popen(command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, text=True)
+        assert process.stdout is not None
+        with log_path.open(mode, encoding="utf-8") as log:
+            with process.stdout:
+                for line in process.stdout:
+                    log.write(line)
+                    print(line, end="", flush=True)
+        code = process.wait()
+        execution["go_json_log"] = log_path.name
+        if code:
+            raise subprocess.CalledProcessError(code, command)
+    else:
+        subprocess.run(command, cwd=ROOT, env=env, check=True)
+        if "dev_preflight.py" in command and "browser" in command and report_dir is not None:
+            browser_log = report_dir / "browser-execution.log"
+            if browser_log.is_file():
+                execution["go_json_log"] = browser_log.name
+
+
 def venv_path(lane: str, report_dir: Path | None) -> str:
     if report_dir is None:
         raise ValueError(lane + " requires --report-dir")
@@ -143,7 +390,7 @@ def commands(lane: str, report_dir: Path | None) -> list[list[str]]:
         ], [venv + "/bin/pip", "install", "-r", "components/excel-batches/requirements.txt"], [
             venv + "/bin/python", "-m", "unittest", "discover", "-s", "components/excel-batches", "-v"
         ], ["bash", "scripts/run-go-with-donor-views.sh", "go", "vet", "./..."], [
-            "bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-p", "1", "-race", "-count=1", "-timeout=15m", "./..."
+            "bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-json", "-p", "1", "-race", "-count=1", "-timeout=15m", "./..."
         ]]
     if lane == "frontend":
         return [["npm", "run", "orval:check"], ["node", "scripts/ci/generated_clients_contract.mjs"], ["node", "scripts/excel-batches-dom-test.mjs"], ["node", "scripts/excel-batches-pagination-dom-test.mjs"], ["node", "scripts/validate-openapi.mjs"], [
@@ -198,7 +445,7 @@ def focused_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[li
                 packages[path.parent.as_posix()].add(test)
         result = []
         for package, names in sorted(packages.items()):
-            command = ["bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-p", "1",
+            command = ["bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-json", "-p", "1",
                        "-race", "-count=1", "-timeout=15m"]
             if names:
                 pattern = "^(" + "|".join(re.escape(name) for name in sorted(names)) + ")$"
@@ -252,30 +499,53 @@ def main() -> int:
     parser.add_argument("--report-dir", type=Path)
     parser.add_argument("--profile", choices=("full", "tooling"), default="full")
     parser.add_argument("--focus-checks-json", default=os.environ.get("AICRM_CI_FOCUS_CHECKS", ""))
+    parser.add_argument("--focus-packages-json", default=os.environ.get("AICRM_CI_FOCUS_PACKAGES", ""))
     parser.add_argument("--check-prerequisites", action="store_true")
     args = parser.parse_args()
-    missing = missing_prerequisites(args.lane)
-    if missing:
-        print("missing required local environment: " + ", ".join(missing), file=sys.stderr)
-        return 2
-    if args.check_prerequisites:
-        return 0
+    started = time.monotonic()
+    execution = {"commands": [], "go_json_log": None}
+    result, exit_code = "failed", 2
     try:
-        checks = json.loads(args.focus_checks_json) if args.focus_checks_json else []
-    except json.JSONDecodeError as error:
-        raise ValueError("invalid focused check list") from error
-    if not isinstance(checks, list) or any(not isinstance(check, dict) for check in checks):
-        raise ValueError("focused check list must be a JSON array of objects")
-    if args.profile == "tooling":
-        if args.lane != "preflight":
-            raise ValueError("tooling profile is only valid for the preflight receipt lane")
-        lane_commands = tooling_contract_commands()
-    else:
-        lane_commands = (focused_commands(args.lane, args.report_dir, checks)
-                         if checks and args.lane != "preflight" else commands(args.lane, args.report_dir))
-    for command in lane_commands:
-        run(command, lane_environment(args.lane, args.report_dir))
-    return 0
+        _clear_lane_outputs(args.report_dir, args.lane)
+        missing = missing_prerequisites(args.lane)
+        if missing:
+            print("missing required local environment: " + ", ".join(missing), file=sys.stderr)
+            exit_code = 2
+        elif args.check_prerequisites:
+            result, exit_code = "success", 0
+        else:
+            checks = json.loads(args.focus_checks_json) if args.focus_checks_json else []
+            packages = json.loads(args.focus_packages_json) if args.focus_packages_json else []
+            if (not isinstance(checks, list) or any(not isinstance(check, dict) for check in checks)
+                    or not isinstance(packages, list)
+                    or any(not isinstance(package, str) for package in packages)):
+                raise ValueError("focused check and package lists must be JSON arrays")
+            if packages and checks:
+                raise ValueError("package focus and named-check focus cannot be combined")
+            if packages and (args.lane != "backend" or args.profile != "full"):
+                raise ValueError("affected package focus is only valid for the full backend lane")
+            if args.profile == "tooling":
+                if args.lane != "preflight":
+                    raise ValueError("tooling profile is only valid for the preflight receipt lane")
+                lane_commands = tooling_contract_commands()
+            else:
+                lane_commands = (focused_commands(args.lane, args.report_dir, checks)
+                                 if checks and args.lane != "preflight" else commands(args.lane, args.report_dir))
+            if packages:
+                lane_commands = replace_full_backend_test_with_packages(lane_commands, packages)
+            for command in lane_commands:
+                run_recorded(command, lane_environment(args.lane, args.report_dir),
+                             args.lane, args.report_dir, execution)
+            result, exit_code = "success", 0
+    except subprocess.CalledProcessError as error:
+        exit_code = error.returncode or 1
+        print(str(error), file=sys.stderr)
+    except (OSError, ValueError) as error:
+        print(str(error), file=sys.stderr)
+        exit_code = 2
+    finally:
+        _write_lane_receipt(args.report_dir, args.lane, execution, started, result, exit_code)
+    return exit_code
 
 
 if __name__ == "__main__":

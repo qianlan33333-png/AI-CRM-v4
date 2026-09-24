@@ -86,6 +86,53 @@ def build_affected_plan(base: str, head: str) -> dict:
     return affected_plan.build_plan(ROOT, base, head)
 
 
+def exact_affected_plan_source_binding(plan: dict, current: dict, root: Path = ROOT) -> bool:
+    """Validate the clean SHA/tree/policy binding without requiring sample eligibility.
+
+    `evidence_eligible` controls whether a shadow run can count toward the PR
+    trial. A clean plan that conservatively selected all lanes (for example,
+    because policy changed) is still valid for local execution.
+    """
+    if not isinstance(plan, dict) or not isinstance(current, dict):
+        return False
+    source = plan.get("source")
+    if (not isinstance(source, dict) or plan.get("schema") != 1
+            or plan.get("observed_mode") != "shadow" or plan.get("source_clean") is not True
+            or source.get("working_tree_clean") is not True or source.get("head_matches") is not True
+            or source.get("status") != [] or current.get("status") != []):
+        return False
+    baseline, head, head_tree = plan.get("baseline_sha"), plan.get("head_sha"), plan.get("head_tree")
+    policy = plan.get("policy_fingerprint")
+    if (not isinstance(baseline, str) or not re.fullmatch(r"[0-9a-f]{40}", baseline)
+            or not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head)
+            or not isinstance(plan.get("baseline_tree"), str)
+            or not re.fullmatch(r"[0-9a-f]{40}", plan["baseline_tree"])
+            or not isinstance(head_tree, str) or not re.fullmatch(r"[0-9a-f]{40}", head_tree)
+            or not isinstance(policy, str) or not re.fullmatch(r"[0-9a-f]{64}", policy)
+            or source.get("checked_out_head") != head
+            or current.get("head") != head or current.get("tree") != head_tree):
+        return False
+
+    ci_dir = str(root / "scripts/ci")
+    added_ci_path = ci_dir not in sys.path
+    if added_ci_path:
+        sys.path.insert(0, ci_dir)
+    try:
+        import verification
+        binding = verification.exact_source_binding(baseline, head, head_tree, root=root)
+    except (ImportError, OSError, ValueError, subprocess.SubprocessError):
+        return False
+    finally:
+        if added_ci_path:
+            try:
+                sys.path.remove(ci_dir)
+            except ValueError:
+                pass
+    return (isinstance(binding, dict)
+            and all(plan.get(key) == binding.get(key) for key in
+                    ("baseline_sha", "baseline_tree", "head_sha", "head_tree", "policy_fingerprint")))
+
+
 class Preflight:
     def __init__(self, report_dir: Path):
         self.report_dir = report_dir
@@ -169,17 +216,164 @@ class Preflight:
         log = self.run("browser-execution", ["bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-json", "-p", "1", "-count=1", "-timeout=15m", "-run", pattern, "./cmd/aicrm"], env)
         self.report["browser_results"] = verify_journey_results(log, names)
 
-    def affected(self, plan: dict):
-        if not plan.get("evidence_eligible"):
-            raise ValueError("affected plan requires a clean checkout at the requested head")
-        go_changed = any(path.endswith(".go") for path in plan.get("changed_paths", []))
+    def affected(self, plan: dict) -> str:
+        start = self.report["source"]["start"]
+        if not exact_affected_plan_source_binding(plan, start):
+            raise ValueError("affected plan does not bind the clean checkout, exact source tree, and policy")
+        candidate = plan.get("candidate")
+        if not isinstance(candidate, dict):
+            raise ValueError("affected plan has no candidate selection")
+        lanes = candidate.get("selected_lanes")
+        checks = candidate.get("selected_checks", [])
+        packages = plan.get("candidate_go_packages", [])
+        mode = candidate.get("selection_mode")
+        candidate_profile = candidate.get("profile", "full")
+        if (not isinstance(lanes, list) or not lanes
+                or any(lane not in FULL_LANES for lane in lanes)
+                or not isinstance(checks, list) or any(not isinstance(check, dict) for check in checks)
+                or not isinstance(packages, list) or any(not isinstance(item, str) or not item for item in packages)
+                or mode not in {"full", "targeted"}
+                or candidate_profile not in {"full", "tooling", "documentation", "affected", "affected-packages"}
+                or candidate_profile == "tooling" and (lanes != ["preflight"] or mode != "targeted")):
+            raise ValueError("affected candidate selection is malformed")
+
         self.report["affected_plan"] = plan
-        self.report["local_scope"] = ["fast"] + (["compile"] if go_changed else [])
-        self.report["claim"] = "local_preflight"
+        self.report["local_scope"] = list(lanes)
+        self.report["claim"] = "local_affected_plan"
         self.report["eligible_for_delivery"] = False
-        self.fast()
-        if go_changed:
-            self.compile()
+        self.report["existing_ci_gates_retained"] = True
+        self.report["affected_execution"] = {
+            "mode": mode, "planned_lanes": list(lanes), "completed_lanes": [],
+            "incomplete_lanes": [], "failed_lanes": [], "not_executed_lanes": [],
+            "packages": sorted(set(packages)), "checks": checks,
+        }
+
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1",
+                   AICRM_DEDUP_BASE_SHA=plan["baseline_sha"],
+                   AICRM_DEDUP_HEAD_SHA=plan["head_sha"])
+        affected_dir = self.report_dir / "affected-lanes"
+        for lane in lanes:
+            if self.source_snapshot() != start:
+                self.report["affected_execution"]["not_executed_lanes"].extend(lanes[lanes.index(lane):])
+                self.report["affected_execution"]["source_changed_before_lane"] = lane
+                return "incomplete"
+
+            lane_dir = affected_dir / lane
+            command = [sys.executable, "scripts/ci/quality_lanes.py", lane,
+                       "--report-dir", str(lane_dir)]
+            if lane == "preflight":
+                # quality_lanes has two concrete preflight profiles. Candidate
+                # documentation/affected profiles use the ordinary full
+                # preflight command set; only an explicit tooling candidate
+                # uses the dedicated tooling contract commands.
+                quality_profile = "tooling" if candidate_profile == "tooling" else "full"
+                command.extend(["--profile", quality_profile])
+            lane_checks = [check for check in checks if check.get("lane") == lane]
+            if mode == "targeted" and lane == "backend" and packages:
+                command.extend(["--focus-packages-json", json.dumps(sorted(set(packages)), separators=(",", ":"))])
+                execution_scope = {"kind": "full-package-suites", "packages": sorted(set(packages))}
+            elif mode == "targeted" and lane != "preflight" and lane != "backend" and lane_checks:
+                command.extend(["--focus-checks-json", json.dumps(lane_checks, separators=(",", ":"))])
+                execution_scope = {"kind": "mapped-checks", "checks": lane_checks}
+            elif mode == "targeted" and lane == "backend" and not packages:
+                # Backend test-name filtering would miss new tests in an affected
+                # package, so an absent package inventory widens to the full lane.
+                execution_scope = {"kind": "full-lane-fallback", "reason": "no affected package inventory"}
+            elif mode == "targeted" and lane not in {"preflight", "backend"} and not lane_checks:
+                execution_scope = {"kind": "full-lane-fallback", "reason": "no mapped checks for selected lane"}
+            else:
+                execution_scope = {"kind": "full-lane"}
+
+            step_count = len(self.report["steps"])
+            lane_result = "success"
+            error_text = None
+            try:
+                self.run("affected-lane-" + lane, command, env)
+            except (OSError, RuntimeError) as error:
+                lane_result = "failed"
+                error_text = str(error)
+
+            step = self.report["steps"][step_count] if len(self.report["steps"]) > step_count else {}
+            log_path = Path(step["log"]) if isinstance(step.get("log"), str) else None
+            missing_environment = []
+            if log_path and log_path.is_file():
+                for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                    prefix = "missing required local environment: "
+                    if line.startswith(prefix):
+                        missing_environment.extend(item.strip() for item in line[len(prefix):].split(",") if item.strip())
+            receipt_path = lane_dir / "run.json"
+            receipt = None
+            if receipt_path.is_file():
+                try:
+                    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    receipt = None
+            if lane_result == "success" and (
+                    not isinstance(receipt, dict) or receipt.get("lane") != lane
+                    or receipt.get("result") != "success" or receipt.get("exit_code") != 0
+                    or receipt.get("tested_sha") != plan["head_sha"]
+                    or receipt.get("tree") != plan["head_tree"]
+                    or receipt.get("policy_fingerprint") != plan["policy_fingerprint"]
+                    or not isinstance(receipt.get("commands"), list)
+                    or not receipt.get("commands")
+                    or not isinstance(receipt.get("elapsed_seconds"), (int, float))
+                    or receipt.get("elapsed_seconds", 0) <= 0):
+                lane_result = "incomplete"
+                error_text = "lane command returned success without a matching successful run receipt"
+            elif lane_result == "failed" and missing_environment:
+                lane_result = "incomplete"
+
+            lane_record = {
+                "name": lane, "result": lane_result, "command": command,
+                "execution_scope": execution_scope,
+                "exit_code": step.get("exit_code"), "log": str(log_path) if log_path else None,
+                "receipt": receipt, "missing_environment": sorted(set(missing_environment)),
+                "error": error_text,
+            }
+            self.report["lanes"].append(lane_record)
+            if lane_result == "success":
+                self.report["affected_execution"]["completed_lanes"].append(lane)
+            elif lane_result == "incomplete":
+                self.report["affected_execution"]["incomplete_lanes"].append(lane)
+            else:
+                self.report["affected_execution"]["failed_lanes"].append(lane)
+
+            if self.source_snapshot() != start:
+                self.report["affected_execution"]["not_executed_lanes"].extend(lanes[lanes.index(lane) + 1:])
+                self.report["affected_execution"]["source_changed_during_lane"] = lane
+                return "incomplete"
+
+        execution = self.report["affected_execution"]
+        if execution["incomplete_lanes"] or execution["not_executed_lanes"]:
+            return "incomplete"
+        if execution["failed_lanes"]:
+            return "failed"
+        graph = plan.get("graph_result")
+        if not isinstance(graph, dict):
+            self.report["affected_collection"] = {"result": "incomplete",
+                                                   "error": "plan has no bound package graph receipt"}
+            return "incomplete"
+        ci_dir = str(ROOT / "scripts/ci")
+        if ci_dir not in sys.path:
+            sys.path.insert(0, ci_dir)
+        try:
+            import affected_shadow
+            local_runs = []
+            for lane in lanes:
+                lane_receipt = dict(next(item["receipt"] for item in self.report["lanes"]
+                                         if item["name"] == lane))
+                go_log = lane_receipt.get("go_json_log")
+                if go_log:
+                    lane_receipt["go_json_log"] = str((affected_dir / lane / go_log).resolve())
+                local_runs.append(lane_receipt)
+            collection = affected_shadow.collect_execution(plan, graph, local_runs, allow_local=True)
+            self.report["affected_collection"] = collection
+            if not collection["required_results_passed"]:
+                return "failed"
+        except (OSError, ValueError, KeyError, StopIteration) as error:
+            self.report["affected_collection"] = {"result": "incomplete", "error": str(error)}
+            return "incomplete"
+        return "passed"
 
     def full(self):
         start = self.report["source"]["start"]
@@ -245,15 +439,15 @@ def main():
         print(json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         if args.dry_run:
             return 0 if plan.get("evidence_eligible") else 2
-        if not plan.get("evidence_eligible"):
-            print("affected checks require a clean checkout at the requested head", file=sys.stderr)
-            return 2
         report_dir = (args.report_dir or Path(tempfile.mkdtemp(prefix="aicrm-affected-"))).resolve()
         check = Preflight(report_dir)
         check.report["phase"] = "affected"
+        affected_result = "failed"
         try:
-            check.affected(plan)
-            check.report["result"] = "passed"
+            affected_result = check.affected(plan)
+            check.report["result"] = affected_result
+            if affected_result != "passed":
+                check.report["claim"] = "not_verified"
         except (OSError, RuntimeError, ValueError) as error:
             check.report.update(result="failed", error=str(error), claim="not_verified")
             print(str(error), file=sys.stderr)
@@ -266,7 +460,7 @@ def main():
                                     claim="not_verified")
             check.save()
         print("Evidence: " + str(check.report_dir), flush=True)
-        return 0 if check.report["result"] == "passed" else 1
+        return {"passed": 0, "failed": 1, "incomplete": 2}.get(check.report["result"], 1)
     report_dir = (args.report_dir or Path(tempfile.mkdtemp(prefix="aicrm-preflight-"))).resolve()
     if args.phase == "full" and (report_dir == ROOT or ROOT in report_dir.parents):
         parser.error("local full evidence directory must be outside the Git worktree")
