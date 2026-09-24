@@ -47,6 +47,21 @@ type ProductPolicyService interface {
 	ProductPolicyReader
 }
 
+// FrozenOrderAttribution is the trusted, checkout-time Distribution fact used
+// by other domains. It never reflects a later link, distributor, or policy
+// change and carries no browser-supplied campaign identity.
+type FrozenOrderAttribution struct {
+	OrderID, ProductID, PromoterCustomerID, CredentialID, PolicyVersion int64
+	OrderItemLine                                                       int32
+	ProductType                                                         domain.ProductType
+	CommissionRateBasisPoints, WaitDays                                 int32
+	AttributedAt                                                        time.Time
+}
+
+type FrozenOrderAttributionReader interface {
+	ReadFrozenOrderAttributionWithin(context.Context, int64, int32) (FrozenOrderAttribution, error)
+}
+
 // TrustedSessionActor is created only from an authenticated payment/WeChat
 // session adapter. HTTP callers cannot provide any field in it.
 type TrustedSessionActor struct {

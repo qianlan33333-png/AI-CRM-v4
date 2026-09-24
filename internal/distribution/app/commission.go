@@ -44,6 +44,54 @@ func NewCommissionService(store commissionStore, dueTasks DueCheckEnqueuer, qual
 	return &CommissionService{store: store, dueTasks: dueTasks, qualification: qualification}, nil
 }
 
+func (s *CommissionService) ReadFrozenOrderAttributionWithin(ctx context.Context, orderID int64, line int32) (distributionport.FrozenOrderAttribution, error) {
+	if s == nil || s.store == nil {
+		return distributionport.FrozenOrderAttribution{}, distributionport.ErrUnavailable
+	}
+	return readFrozenOrderAttributionWithin(ctx, s.store, orderID, line)
+}
+
+type frozenAttributionStore interface {
+	ReadAttributionQualificationContextByOrderItemWithin(context.Context, int64, int32, bool) (distributionstore.AttributionQualificationContext, error)
+}
+
+type FrozenAttributionReader struct{ store frozenAttributionStore }
+
+func NewFrozenAttributionReader(store frozenAttributionStore) *FrozenAttributionReader {
+	return &FrozenAttributionReader{store: store}
+}
+
+func (r *FrozenAttributionReader) ReadFrozenOrderAttributionWithin(ctx context.Context, orderID int64, line int32) (distributionport.FrozenOrderAttribution, error) {
+	if r == nil || r.store == nil {
+		return distributionport.FrozenOrderAttribution{}, distributionport.ErrUnavailable
+	}
+	return readFrozenOrderAttributionWithin(ctx, r.store, orderID, line)
+}
+
+func readFrozenOrderAttributionWithin(ctx context.Context, store frozenAttributionStore, orderID int64, line int32) (distributionport.FrozenOrderAttribution, error) {
+	if orderID < 1 || line < 1 {
+		return distributionport.FrozenOrderAttribution{}, distributionport.ErrUnavailable
+	}
+	value, err := store.ReadAttributionQualificationContextByOrderItemWithin(ctx, orderID, line, false)
+	if err != nil {
+		return distributionport.FrozenOrderAttribution{}, err
+	}
+	a := value.Attribution
+	if a.OrderID != orderID || a.OrderItemLine != line || a.QualificationState != distributiondomain.QualificationEligible {
+		return distributionport.FrozenOrderAttribution{}, distributionport.ErrConflict
+	}
+	return distributionport.FrozenOrderAttribution{
+		OrderID: a.OrderID, OrderItemLine: a.OrderItemLine, ProductID: value.ProductID,
+		ProductType: value.ProductType, PromoterCustomerID: value.DistributorCustomerID,
+		CredentialID: a.PromotionCredentialID, PolicyVersion: a.PolicyVersion,
+		CommissionRateBasisPoints: a.CommissionRateBasisPoints, WaitDays: a.WaitDays,
+		AttributedAt: a.AttributedAt,
+	}, nil
+}
+
+var _ distributionport.FrozenOrderAttributionReader = (*CommissionService)(nil)
+var _ distributionport.FrozenOrderAttributionReader = (*FrozenAttributionReader)(nil)
+
 func (s *CommissionService) ConsumePaidEventWithin(ctx context.Context, event orderport.PaidEvent) error {
 	if s == nil || s.store == nil || s.dueTasks == nil || s.qualification == nil || !event.Valid() {
 		return distributionport.ErrUnavailable

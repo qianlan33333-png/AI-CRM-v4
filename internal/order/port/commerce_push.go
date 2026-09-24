@@ -58,6 +58,18 @@ type PaidEventConsumer interface {
 	ConsumePaidEventWithin(context.Context, PaidEvent) error
 }
 
+// PaidSaleBackfillFact reconstructs the immutable paid snapshot and confirmed
+// refund deltas from Order-owned evidence. It never settles an order again.
+type PaidSaleBackfillFact struct {
+	Paid    PaidEvent
+	Refunds []RefundSettlementEvent
+}
+
+type PaidSaleBackfillReader interface {
+	ListPaidSaleOrderIDsWithin(context.Context, int64, int32) ([]int64, error)
+	ReadPaidSaleBackfillFactWithin(context.Context, int64) (PaidSaleBackfillFact, error)
+}
+
 // RefundSettlementEvent is derived from Order's already-persisted settlement
 // transition. It is not a second refund event stream: Payment remains owner of
 // refund receipts and provider finality, while consumers receive the exact

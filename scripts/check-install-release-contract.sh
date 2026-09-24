@@ -220,6 +220,8 @@ grep -qx 'test -x "$release_dir/bin/migrate-order-attribution"' "$installer" || 
 grep -qF 'go build -trimpath -ldflags "-s -w" -o release/bin/migrate-order-attribution ./cmd/migrate-order-attribution' "$release_builder" || { echo "CI must build the order history attribution tool" >&2; exit 1; }
 grep -qx 'test -x "$release_dir/bin/migrate-order-distribution-qualification"' "$installer" || { echo "release must include the reviewed historical qualification importer" >&2; exit 1; }
 grep -qF 'go build -trimpath -ldflags "-s -w" -o release/bin/migrate-order-distribution-qualification ./cmd/migrate-order-distribution-qualification' "$release_builder" || { echo "CI must build the reviewed historical qualification importer" >&2; exit 1; }
+grep -qx 'test -x "$release_dir/bin/migrate-referral-sales"' "$installer" || { echo "release must include the Referral sales backfill tool" >&2; exit 1; }
+grep -qF 'go build -trimpath -ldflags "-s -w" -o release/bin/migrate-referral-sales ./cmd/migrate-referral-sales' "$release_builder" || { echo "release workflow must build the Referral sales backfill tool" >&2; exit 1; }
 canonical_backend_full_go_test || { echo "CI must test the historical qualification importer through the canonical backend lane" >&2; exit 1; }
 grep -qx 'test -f "$release_dir/migrations/0047_automation_operations_migration.sql"' "$installer" || { echo "release must require Automation Operations migration schema" >&2; exit 1; }
 grep -qx 'test -f "$release_dir/migrations/0048_segment_audience_schedule_state.sql"' "$installer" || { echo "release must require Automation Operations schedule state" >&2; exit 1; }

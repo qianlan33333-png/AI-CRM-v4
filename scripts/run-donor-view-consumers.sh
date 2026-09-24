@@ -124,6 +124,7 @@ build_release_binaries() {
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-message-archive ./cmd/migrate-message-archive
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-order-attribution ./cmd/migrate-order-attribution
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-order-distribution-qualification ./cmd/migrate-order-distribution-qualification
+  go build -trimpath -ldflags "-s -w" -o release/bin/migrate-referral-sales ./cmd/migrate-referral-sales
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-automation-operations ./cmd/migrate-automation-operations
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-v2-config-definitions ./cmd/migrate-v2-config-definitions
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-v2-runtime-config-releases ./cmd/migrate-v2-runtime-config-releases
