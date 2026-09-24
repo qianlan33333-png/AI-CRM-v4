@@ -585,7 +585,7 @@ jobs:
           python3 scripts/ci/local_first_gate.py
           python3 scripts/ci/verification.py gate
       - name: Record exact main full regression result
-        if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'push' && needs.plan.outputs.mode == 'full') || (github.event_name == 'workflow_dispatch' && (needs.plan.outputs.mode == 'full' || inputs.force_full)) }}
+        if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'push' && needs.plan.outputs.mode == 'full') || (github.event_name == 'workflow_dispatch' && (needs.plan.outputs.mode == 'full' || inputs.force_full))) }}
         continue-on-error: true
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
@@ -594,7 +594,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/verification.py regression --out "$RUNNER_TEMP/main-regression.json"
       - name: Upload exact main full regression result
-        if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'push' && needs.plan.outputs.mode == 'full') || (github.event_name == 'workflow_dispatch' && (needs.plan.outputs.mode == 'full' || inputs.force_full)) }}
+        if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'push' && needs.plan.outputs.mode == 'full') || (github.event_name == 'workflow_dispatch' && (needs.plan.outputs.mode == 'full' || inputs.force_full))) }}
         continue-on-error: true
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
         with:
