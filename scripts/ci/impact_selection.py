@@ -42,6 +42,126 @@ RELEASE_TOOL_FILES = {
 }
 RELEASE_TOOL_PREFIXES = ("scripts/ci/",)
 
+# Candidate-only policy. Keep it separate from select(): PR1 records this plan
+# in shadow mode while the current CI selector remains the enforced contract.
+CANDIDATE_POLICY_FILES = {
+    ".github/workflows/ci.yml", "docs/governance/capability-impact.json",
+    "scripts/dev_preflight.py",
+    "scripts/ci/affected_plan.py", "scripts/ci/impact_selection.py",
+    "scripts/ci/governance_impact.py", "scripts/ci/quality_lanes.py",
+    "scripts/ci/quality_report.py", "scripts/ci/local_first_gate.py",
+    "scripts/ci/verification.py",
+}
+CANDIDATE_POLICY_PREFIXES = ("docs/governance/",)
+ORDINARY_DOC_PREFIXES = ("docs/", "skills/")
+ORDINARY_DOC_FILES = {
+    "AGENTS.md", "README.md", "docs/development-before-start.md",
+    "skills/aicrm-v3-development-frontdoor/SKILL.md",
+    "skills/aicrm-v3-development/SKILL.md",
+}
+
+
+def _candidate_full(reason: str, reasons: list[str] | None = None) -> dict:
+    why = sorted(set(reasons or [reason]))
+    return {"mode": "full", "lanes": list(LANES), "checks": [], "reason": reason,
+            "reasons": why, "profile": "full"}
+
+
+def _ordinary_document(path: str) -> bool:
+    if path in ORDINARY_DOC_FILES:
+        return True
+    return (path.startswith(ORDINARY_DOC_PREFIXES) and path.endswith(".md")
+            and not path.startswith(CANDIDATE_POLICY_PREFIXES))
+
+
+def _candidate_tooling(path: str) -> bool:
+    # Repository-wide instructions and the selector itself may not classify
+    # their own change as low impact. Other documented release-tool contracts
+    # retain the existing narrow tooling profile as a shadow candidate.
+    if path in CANDIDATE_POLICY_FILES or _ordinary_document(path):
+        return False
+    if path in RELEASE_TOOL_FILES:
+        return True
+    if path.startswith("scripts/ci/test_") and path.endswith(".py"):
+        return True
+    return path.startswith("deploy/test_domestic_promote") and path.endswith(".py")
+
+
+def select_candidate(report: dict) -> dict:
+    """Select a conservative shadow plan without changing the enforced selector.
+
+    Documentation and release-tooling contributions are combined. Any policy,
+    protected, unknown, high-risk, or malformed input keeps the full plan.
+    """
+    if not isinstance(report, dict):
+        return _candidate_full("invalid-impact-report")
+    changed = report.get("changed_paths", [])
+    risk = report.get("risk", "high")
+    if (not isinstance(changed, list) or not changed
+            or not all(isinstance(path, str) and path and not path.startswith("/")
+                       and ".." not in Path(path).parts for path in changed)):
+        return _candidate_full("invalid-or-empty-changed-paths")
+    if risk not in {"low", "medium", "high"}:
+        return _candidate_full("invalid-risk-classification")
+
+    if any(path in CANDIDATE_POLICY_FILES or path.startswith(CANDIDATE_POLICY_PREFIXES)
+           for path in changed):
+        return _candidate_full("policy-change-requires-full")
+
+    document_paths = [path for path in changed if _ordinary_document(path)]
+    tooling_paths = [path for path in changed if _candidate_tooling(path)]
+    classified = set(document_paths) | set(tooling_paths)
+    app_paths = [path for path in changed if path not in classified]
+
+    # Shared, migration, provider, build, and generic deployment changes remain
+    # conservative even if a caller supplies an attractive check mapping.
+    protected = [path for path in app_paths
+                 if path in PROTECTED_FILES or path.startswith(PROTECTED_PREFIXES)]
+    if protected:
+        return _candidate_full("protected-or-shared-path")
+
+    checks = report.get("checks", [])
+    if not isinstance(checks, list) or any(not valid_check(check) for check in checks):
+        return _candidate_full("unknown-or-unmapped-check")
+
+    reasons = []
+    if document_paths:
+        reasons.append("documentation-only")
+    if tooling_paths:
+        reasons.append("release-tooling-contracts")
+
+    if app_paths:
+        direct = report.get("direct", [])
+        mapped = isinstance(direct, list) and bool(direct)
+        if (any(not path.startswith("internal/") for path in app_paths)
+                or risk not in {"low", "medium"} or not mapped or not checks):
+            return _candidate_full("unknown-or-high-risk-impact")
+        reasons.append("affected-capabilities")
+
+    if not reasons:
+        return _candidate_full("unknown-or-unmapped-path")
+
+    # A tooling/doc-only combination should not inherit broad registry closure
+    # checks (for example downstream Go and browser consumers of delivery
+    # governance). Those two contributions both map to the preflight profile.
+    if not app_paths:
+        profile = "tooling" if tooling_paths else "documentation"
+        reason = reasons[0] if len(reasons) == 1 else "unioned-impacts"
+        return {"mode": "targeted", "lanes": ["preflight"], "checks": [],
+                "reason": reason, "reasons": sorted(reasons), "profile": profile}
+
+    lanes = {"preflight"}
+    lanes.update(check["lane"] for check in checks)
+    unioned_checks = {json.dumps(check, sort_keys=True): check for check in checks}
+    if len(reasons) == 1:
+        reason = reasons[0]
+    else:
+        reason = "unioned-impacts"
+    profile = "affected"
+    return {"mode": "targeted", "lanes": [lane for lane in LANES if lane in lanes],
+            "checks": [unioned_checks[key] for key in sorted(unioned_checks)],
+            "reason": reason, "reasons": sorted(reasons), "profile": profile}
+
 
 def release_tooling_only(changed: list[str]) -> bool:
     if not changed:

@@ -156,5 +156,54 @@ class BrowserCoverage(unittest.TestCase):
             self.assertEqual(check.report["lanes"][0]["result"], "success")
 
 
+class AffectedPreflight(unittest.TestCase):
+    def test_local_affected_runs_fast_and_compile_only_for_go_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            check = Preflight(Path(directory))
+            plan = {"evidence_eligible": True, "changed_paths": ["internal/customer/app/service.go"]}
+            with patch.object(check, "fast") as fast, patch.object(check, "compile") as compile:
+                check.affected(plan)
+            fast.assert_called_once_with()
+            compile.assert_called_once_with()
+            self.assertEqual(check.report["local_scope"], ["fast", "compile"])
+            self.assertEqual(check.report["claim"], "local_preflight")
+            self.assertFalse(check.report["eligible_for_delivery"])
+
+    def test_local_affected_stays_fast_for_docs_and_rejects_dirty_plan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            check = Preflight(Path(directory))
+            docs_plan = {"evidence_eligible": True, "changed_paths": ["docs/prd/example.md"]}
+            with patch.object(check, "fast") as fast, patch.object(check, "compile") as compile:
+                check.affected(docs_plan)
+            fast.assert_called_once_with()
+            compile.assert_not_called()
+            dirty_plan = {"evidence_eligible": False, "changed_paths": ["docs/prd/example.md"]}
+            with patch.object(check, "fast") as fast:
+                with self.assertRaisesRegex(ValueError, "clean checkout"):
+                    check.affected(dirty_plan)
+                fast.assert_not_called()
+
+    def test_affected_dry_run_prints_plan_without_running_checks(self):
+        plan = {"mode": "shadow", "evidence_eligible": True, "candidate": {"selected_lanes": ["preflight"]}}
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["dev_preflight.py", "affected", "--base", "a" * 40, "--dry-run"]), \
+                patch.object(dev_preflight, "build_affected_plan", return_value=plan) as build, \
+                contextlib.redirect_stdout(output):
+            result = dev_preflight.main()
+        build.assert_called_once_with("a" * 40, "HEAD")
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(output.getvalue()), plan)
+
+    def test_affected_dry_run_marks_dirty_source_ineligible(self):
+        plan = {"mode": "shadow", "evidence_eligible": False, "candidate": {"selected_lanes": ["preflight"]}}
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["dev_preflight.py", "affected", "--base", "a" * 40, "--dry-run"]), \
+                patch.object(dev_preflight, "build_affected_plan", return_value=plan), \
+                contextlib.redirect_stdout(output):
+            result = dev_preflight.main()
+        self.assertEqual(result, 2)
+        self.assertFalse(json.loads(output.getvalue())["evidence_eligible"])
+
+
 if __name__ == "__main__":
     unittest.main()

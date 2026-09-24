@@ -16,6 +16,10 @@ or queued Provider effect is not completed business acceptance.
 
 Use this skill after reading the repository `AGENTS.md`. Its purpose is to make OneID and durable execution deliberate shared foundations without turning them into universal dependencies.
 
+## Small-step delivery
+
+Follow `skills/aicrm-v3-development-frontdoor/SKILL.md`: keep the parent brief in one Codex task, deliver one independently mergeable behavior or defect with its tests in each PR, and use Product Design before UI implementation. Split by behavior, without line-count quotas. An authorized parent brief carries into child PRs; request a new decision only for material scope or contract changes. Release-failure diagnosis and fixes use a separate `gpt-6-luna` max agent; other tasks are not restricted to that model.
+
 ## Start With a Two-Axis Classification
 
 Before editing code, record a short decision in the implementation plan or PR:
