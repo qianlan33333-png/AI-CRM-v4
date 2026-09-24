@@ -182,10 +182,13 @@ func TestPublicProductEnabledOnlyAndSafeDTO(t *testing.T) {
 	if payment.Code != http.StatusOK || strings.Contains(payment.Body.String(), "beneficiarySelf") || !strings.Contains(payment.Body.String(), "beneficiary_selection:'payer_self'") || strings.Contains(payment.Body.String(), "beneficiary_customer_id") {
 		t.Fatalf("payment page status=%d body=%s", payment.Code, payment.Body.String())
 	}
-	for _, required := range []string{"微信身份验证", "正在核验微信身份", "bootstrapCheckout", "checkoutContent", "/api/v1/wechat-pay/checkout-session", "/api/h5/wechat-pay/oauth/start?return_url="} {
+	for _, required := range []string{"微信身份验证", "正在核验微信身份", "登录才能完成支付", "不会自动扣款", "授权并继续", "bootstrapCheckout", "checkoutContent", "/api/v1/wechat-pay/checkout-session", "/api/h5/wechat-pay/oauth/start?return_url="} {
 		if !strings.Contains(payment.Body.String(), required) {
 			t.Fatalf("payment page missing identity verification %q: %s", required, payment.Body.String())
 		}
+	}
+	if strings.Contains(payment.Body.String(), "authAttemptKey") {
+		t.Fatal("payment page must wait for a click before starting OAuth")
 	}
 	if strings.Contains(payment.Body.String(), `id="renew"`) {
 		t.Fatalf("ordinary product must not expose renewal: %s", payment.Body.String())

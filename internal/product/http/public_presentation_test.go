@@ -50,6 +50,7 @@ func TestPublicPresentationAssetsAreManifestBoundAndAnonymousSafe(t *testing.T) 
 
 	for _, path := range []string{
 		"/product-public-assets/publicCommerceStyles-ABCD1234.css",
+		"/product-public-assets/files/wechat-auth-ABCD1234.png",
 		"/product-public-assets/" + strings.TrimPrefix(hostRelative, "assets/"),
 		"/product-public-assets/chunks/publicCommerceRuntime-ABCD1234.js",
 	} {
@@ -220,11 +221,13 @@ func publicPresentationFixture(t *testing.T) (PublicPresentationAssets, string) 
 	t.Helper()
 	dist := t.TempDir()
 	cssRelative := "assets/publicCommerceStyles-ABCD1234.css"
+	imageRelative := "assets/files/wechat-auth-ABCD1234.png"
 	hostRelative := "assets/publicCommerceHost-ABCD1234.js"
 	chunkRelative := "assets/chunks/publicCommerceRuntime-ABCD1234.js"
 	adminRelative := "assets/admin-ABCD1234.js"
 	files := map[string][]byte{
-		cssRelative:   []byte("main[data-v3-public-commerce]{color:#123;}"),
+		cssRelative:   []byte("main[data-v3-public-commerce]{background:url('./files/wechat-auth-ABCD1234.png')}"),
+		imageRelative: []byte("\x89PNG\r\n\x1a\nfixture"),
 		hostRelative:  []byte("import './chunks/publicCommerceRuntime-ABCD1234.js';"),
 		chunkRelative: []byte("export const publicCommerceRuntime = true;"),
 		adminRelative: []byte("private admin asset"),
@@ -247,6 +250,9 @@ func publicPresentationFixture(t *testing.T) (PublicPresentationAssets, string) 
 		value := map[string]any{"sha256": hex.EncodeToString(sum[:])}
 		if relative == hostRelative {
 			value["imports"] = []map[string]string{{"path": chunkRelative}}
+		}
+		if relative == cssRelative {
+			value["imports"] = []map[string]string{{"path": imageRelative}}
 		}
 		manifestFiles[relative] = value
 		releaseFiles[relative] = map[string]string{"sha256": hex.EncodeToString(sum[:])}

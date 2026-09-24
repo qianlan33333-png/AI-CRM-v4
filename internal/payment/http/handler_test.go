@@ -192,6 +192,12 @@ func (stub *h5OAuthStub) Complete(_ context.Context, state, code string) (paymen
 	stub.completes++
 	return stub.issued, "/pay/course-7", stub.completeError
 }
+func (stub *h5OAuthStub) RecoverReturnPath(_ context.Context, state string) (string, error) {
+	if !paymenth5oauth.ValidReturnPath(stub.returnPath) {
+		return "", paymenth5oauth.ErrInvalid
+	}
+	return stub.returnPath, nil
+}
 
 type sessionVerifierStub struct{ fact identitydomain.VerifiedFact }
 
@@ -652,6 +658,52 @@ func TestH5OAuthStartRequiresWeChatAndDisabledMakesZeroCalls(t *testing.T) {
 	}
 }
 
+func TestH5OAuthFailureReturnsToOriginalLoginGateWithoutPayment(t *testing.T) {
+	handler, err := NewHandler(&appStub{}, nil, securityStub{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oauth := &h5OAuthStub{enabled: true, completeError: paymenth5oauth.ErrInvalid}
+	if err := handler.SetH5OAuth(oauth); err != nil {
+		t.Fatal(err)
+	}
+	start := httptest.NewRequest(http.MethodGet, "/api/h5/wechat-pay/oauth/start?return_url=%2Fpay%2Fcourse-7", nil)
+	start.Header.Set("User-Agent", "MicroMessenger")
+	started := httptest.NewRecorder()
+	handler.ServeHTTP(started, start)
+	if started.Code != http.StatusFound || len(started.Result().Cookies()) != 1 {
+		t.Fatalf("start status=%d cookies=%v", started.Code, started.Result().Cookies())
+	}
+	returnCookie := started.Result().Cookies()[0]
+	if !returnCookie.Secure || !returnCookie.HttpOnly || returnCookie.SameSite != http.SameSiteLaxMode || returnCookie.Path != "/api/h5/wechat-pay/oauth/callback" {
+		t.Fatalf("insecure recovery cookie: %+v", returnCookie)
+	}
+	callback := httptest.NewRequest(http.MethodGet, "/api/h5/wechat-pay/oauth/callback?state=used&code=denied", nil)
+	callback.AddCookie(returnCookie)
+	failed := httptest.NewRecorder()
+	handler.ServeHTTP(failed, callback)
+	if failed.Code != http.StatusSeeOther || failed.Header().Get("Location") != "/pay/course-7" || oauth.completes != 1 {
+		t.Fatalf("failed callback status=%d location=%q completes=%d", failed.Code, failed.Header().Get("Location"), oauth.completes)
+	}
+	// The consumed state still identifies the original gate if WeChat drops
+	// the short-lived cookie on the provider callback.
+	withoutCookie := httptest.NewRecorder()
+	handler.ServeHTTP(withoutCookie, httptest.NewRequest(http.MethodGet, "/api/h5/wechat-pay/oauth/callback?state=used&code=denied", nil))
+	if withoutCookie.Code != http.StatusSeeOther || withoutCookie.Header().Get("Location") != "/pay/course-7" {
+		t.Fatalf("cookie-less callback status=%d location=%q", withoutCookie.Code, withoutCookie.Header().Get("Location"))
+	}
+	oauth.returnPath = ""
+	for _, malicious := range []string{"https://evil.test/pay/course-7", "//evil.test", "/pay/course-7?next=evil"} {
+		callback := httptest.NewRequest(http.MethodGet, "/api/h5/wechat-pay/oauth/callback?state=used&code=denied", nil)
+		callback.AddCookie(&http.Cookie{Name: h5OAuthReturnCookieName, Value: base64.RawURLEncoding.EncodeToString([]byte(malicious))})
+		failed := httptest.NewRecorder()
+		handler.ServeHTTP(failed, callback)
+		if failed.Code != http.StatusUnauthorized || failed.Header().Get("Location") != "" {
+			t.Fatalf("unsafe return %q status=%d location=%q", malicious, failed.Code, failed.Header().Get("Location"))
+		}
+	}
+}
+
 func TestH5OAuthStartMapsUnavailableStateReservationToServiceUnavailable(t *testing.T) {
 	handler, err := NewHandler(&appStub{}, nil, securityStub{}, true)
 	if err != nil {
@@ -682,6 +734,9 @@ func (stub h5OAuthStartErrorStub) Start(ctx context.Context, returnPath string) 
 }
 func (stub h5OAuthStartErrorStub) Complete(ctx context.Context, state, code string) (paymentsession.Issued, string, error) {
 	return stub.oauth.Complete(ctx, state, code)
+}
+func (stub h5OAuthStartErrorStub) RecoverReturnPath(ctx context.Context, state string) (string, error) {
+	return stub.oauth.RecoverReturnPath(ctx, state)
 }
 
 func TestH5OAuthRejectsDuplicateAndUnknownQueryBeforeApplication(t *testing.T) {

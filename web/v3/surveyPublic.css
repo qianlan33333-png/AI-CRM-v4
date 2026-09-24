@@ -1,3 +1,4 @@
+@import './requiredAuth.css';
 /* Public Survey H5 only.  It deliberately does not target admin, sidebar, or
    the other H5 product/service pages that share the frozen donor build. */
 body[data-ui-surface="h5"][data-v3-public-survey] {
@@ -14,6 +15,34 @@ body[data-ui-surface="h5"][data-v3-public-survey] {
   --v3-survey-radius: var(--v3-ui-radius-lg, 12px);
   color: var(--v3-survey-text);
   background: var(--v3-survey-canvas);
+}
+
+body[data-v3-public-survey="auth"] #screen {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 24px 18px;
+  background: #f4f6fa;
+  max-width: 100vw;
+  min-width: 0;
+}
+
+body[data-v3-public-survey="auth"] #screen .required-auth-card {
+  max-width: min(570px, calc(100vw - 36px));
+  margin: 0 auto;
+}
+
+body[data-v3-public-survey] #screen [data-v3-survey-reauthorize] {
+  display: grid;
+  place-items: center;
+  min-height: 48px;
+  margin-top: 14px;
+  border-radius: 12px;
+  background: #3369ef;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  text-decoration: none;
 }
 
 body[data-ui-surface="h5"][data-v3-public-survey] #screen[data-v3-public-survey-screen] {
