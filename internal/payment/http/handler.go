@@ -309,11 +309,27 @@ func (handler *Handler) startH5OAuth(writer http.ResponseWriter, request *http.R
 
 func (handler *Handler) completeH5OAuth(writer http.ResponseWriter, request *http.Request) {
 	query, ok := exactH5OAuthQuery(request, "state", "code")
+	denied := false
+	if !ok {
+		if refusal, valid := exactH5OAuthQuery(request, "state", "error"); valid && (refusal["error"] == "access_denied" || refusal["error"] == "authdeny") {
+			query, ok, denied = refusal, true, true
+		} else if refusal, valid := exactH5OAuthQuery(request, "state"); valid {
+			query, ok, denied = refusal, true, true
+		}
+	}
 	if request.Method != http.MethodGet || handler.h5OAuth == nil || !handler.h5OAuth.Enabled() || !ok {
 		writeError(writer, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	issued, returnPath, err := handler.h5OAuth.Complete(request.Context(), query["state"], query["code"])
+	denied = denied || query["code"] == "authdeny"
+	var issued paymentsession.Issued
+	var returnPath string
+	var err error
+	if denied {
+		err = paymenth5oauth.ErrInvalid
+	} else {
+		issued, returnPath, err = handler.h5OAuth.Complete(request.Context(), query["state"], query["code"])
+	}
 	returnCookie, cookieErr := request.Cookie(h5OAuthReturnCookieName)
 	http.SetCookie(writer, &http.Cookie{Name: h5OAuthReturnCookieName, Path: "/api/h5/wechat-pay/oauth/callback", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	if err != nil {

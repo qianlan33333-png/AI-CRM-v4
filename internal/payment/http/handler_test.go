@@ -704,6 +704,34 @@ func TestH5OAuthFailureReturnsToOriginalLoginGateWithoutPayment(t *testing.T) {
 	}
 }
 
+func TestH5OAuthExplicitDenialReturnsToGateWithoutExchangingCode(t *testing.T) {
+	handler, err := NewHandler(&appStub{}, nil, securityStub{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oauth := &h5OAuthStub{enabled: true, returnPath: "/pay/course-7"}
+	if err := handler.SetH5OAuth(oauth); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{
+		"state=used&error=access_denied",
+		"state=used&error=authdeny",
+		"state=used&code=authdeny",
+		"state=used",
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/h5/wechat-pay/oauth/callback?"+suffix, nil))
+		if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/pay/course-7" || oauth.completes != 0 {
+			t.Fatalf("denial %q status=%d location=%q exchanges=%d", suffix, response.Code, response.Header().Get("Location"), oauth.completes)
+		}
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/h5/wechat-pay/oauth/callback?state=used&error=unrecognized", nil))
+	if response.Code != http.StatusBadRequest || oauth.completes != 0 {
+		t.Fatalf("unknown callback status=%d exchanges=%d", response.Code, oauth.completes)
+	}
+}
+
 func TestH5OAuthStartMapsUnavailableStateReservationToServiceUnavailable(t *testing.T) {
 	handler, err := NewHandler(&appStub{}, nil, securityStub{}, true)
 	if err != nil {
