@@ -43,7 +43,7 @@ flowchart TD
 
 ## 边界、验收与上线
 
-OneID：复用现有 Payment Session / Survey OAuth 对可信微信身份的校验；不新增身份映射、客户主键、隐式建客或合并。Persistence：仅原有单次 OAuth state 和会话；如增加恢复入口，只保存规范的同源 return path。External Effects：授权为 Provider 读取；点击登录不能创建订单、扣款、提交问卷或改变已有幂等标识。Payment 和 Survey 各自拥有自己的业务状态。回滚点是恢复旧页面和回调路由的前一生产包。
+OneID：复用现有 Payment Session / Survey OAuth 对可信微信身份的校验；不新增身份映射、客户主键、隐式建客或合并。Persistence：仅原有单次 OAuth state 和会话；恢复入口只使用规范的同源 return path；商品分享链接中的非业务查询参数不进入 OAuth return_url。External Effects：授权为 Provider 读取；点击登录不能创建订单、扣款、提交问卷或改变已有幂等标识。Payment 和 Survey 各自拥有自己的业务状态。回滚点是恢复旧页面和回调路由的前一生产包。
 
 验收包括：缺会话显示正确门槛；点击才进入 OAuth；拒绝/失败返回同门槛且再次点击产生新 state；成功返回原商品/问卷；有效会话直达；已支付/已提交不重复；无合法恢复路径、非微信、身份冲突分别给出真实状态；移动端 360/390/430 宽度视觉对照。当前发布流程以受保护 main 的当前 PR 检查为门禁；合并后由国内预备机按第一父链串行构建、合成数据验收并以内网把同包晋级生产，检查版本、完整文件摘要、健康和两条业务读回。真实微信设备授权另行验收，不把合成结果当作 Provider 成功。
 

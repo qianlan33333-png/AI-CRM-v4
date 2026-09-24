@@ -50,7 +50,7 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   setGlobal('navigator', {userAgent});
   setGlobal('sessionStorage', {getItem(key) { return store.get(key) ?? null; }, setItem(key,value) {store.set(key,String(value));}, removeItem(key) {store.delete(key);} });
   setGlobal('localStorage', {getItem(key) { return store.get(key) ?? null; }, setItem(key, value) { store.set(key, String(value)); }, removeItem(key) { store.delete(key); }});
-  setGlobal('location', {href: '', pathname: '/pay/course-7', assign(url) { calls.push({redirect: url}); if (redirectFailure) throw new Error('redirect blocked'); }});
+  setGlobal('location', {href: '', pathname: '/pay/course-7', search: '?utm_source=shared', assign(url) { calls.push({redirect: url}); if (redirectFailure) throw new Error('redirect blocked'); }});
   setGlobal('crypto', {randomUUID() { return 'fresh-checkout-key'; }});
   setGlobal('WeixinJSBridge', {invoke() { throw new Error('paid reload must not invoke payment'); }});
   setGlobal('fetch', async (url, options = {}) => {

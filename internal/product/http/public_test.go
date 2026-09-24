@@ -68,7 +68,7 @@ func TestPromotionContextPublicChainRetainsCheckoutContext(t *testing.T) {
 	}
 	payment := httptest.NewRecorder()
 	public.ServeHTTP(payment, publicRequest(http.MethodGet, "/pay/course-7?promotion_context="+context, nil))
-	if payment.Code != http.StatusOK || !strings.Contains(payment.Body.String(), "promotionContext='"+context+"'") || !strings.Contains(payment.Body.String(), "location.pathname+(location.search||'')") {
+	if payment.Code != http.StatusOK || !strings.Contains(payment.Body.String(), "promotionContext='"+context+"'") || !strings.Contains(payment.Body.String(), "location.pathname+(promotionContext?'?promotion_context='+promotionContext:'')") {
 		t.Fatalf("payment continuation status=%d body=%s", payment.Code, payment.Body.String())
 	}
 	if !strings.Contains(payment.Body.String(), "checkoutRecord(){let raw") || !strings.Contains(payment.Body.String(), "if(record.state==='invalid')throw requestFailure('checkout_checkpoint_invalid'") || !strings.Contains(payment.Body.String(), "if(record.state==='unavailable')return null") || !strings.Contains(payment.Body.String(), "if(promotionContext)payload.promotion_context=promotionContext") {
@@ -90,7 +90,7 @@ func TestServicePeriodPromotionContextReachesPaymentAndOAuth(t *testing.T) {
 	}
 	payment := httptest.NewRecorder()
 	handler.ServeHTTP(payment, publicRequest(http.MethodGet, "/s/term-31/pay?promotion_context="+context, nil))
-	if payment.Code != http.StatusOK || !strings.Contains(payment.Body.String(), "promotionContext='"+context+"'") || !strings.Contains(payment.Body.String(), "location.pathname+(location.search||'')") {
+	if payment.Code != http.StatusOK || !strings.Contains(payment.Body.String(), "promotionContext='"+context+"'") || !strings.Contains(payment.Body.String(), "location.pathname+(promotionContext?'?promotion_context='+promotionContext:'')") {
 		t.Fatalf("service promotion payment status=%d body=%s", payment.Code, payment.Body.String())
 	}
 	if !strings.Contains(payment.Body.String(), "checkoutRecord(){let raw") || !strings.Contains(payment.Body.String(), "if(record.state==='invalid')throw requestFailure('checkout_checkpoint_invalid'") || !strings.Contains(payment.Body.String(), "if(record.state==='unavailable')return null") || !strings.Contains(payment.Body.String(), "if(promotionContext)payload.promotion_context=promotionContext") {
