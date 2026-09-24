@@ -553,6 +553,17 @@ def _has_required_systemd_environment_file(value: str, path: Path) -> bool:
     return re.search(pattern, value) is not None
 
 
+def _parse_systemd_show_fields(output: str) -> dict[str, list[str]]:
+    """Preserve repeated systemctl properties such as EnvironmentFiles."""
+    fields: dict[str, list[str]] = {}
+    for line in output.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        fields.setdefault(key, []).append(value)
+    return fields
+
+
 def check_host_contract() -> dict:
     """Read-only host rehearsal for the fixed helper, service user, and PG16."""
     role = require_host_role()
@@ -574,12 +585,12 @@ def check_host_contract() -> dict:
         _service_user_can(flag, path)
     for unit in ("aicrm.service", "aicrm-effects-worker.service", "aicrm-migrate.service"):
         result = run(systemctl, "show", unit, "-p", "User", "-p", "Group", "-p", "WorkingDirectory", "-p", "EnvironmentFiles")
-        fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        fields = _parse_systemd_show_fields(result.stdout)
         if (
-            fields.get("User") != "aicrm"
-            or fields.get("Group") != "aicrm"
-            or fields.get("WorkingDirectory") != str(CURRENT)
-            or not _has_required_systemd_environment_file(fields.get("EnvironmentFiles", ""), ENV)
+            fields.get("User") != ["aicrm"]
+            or fields.get("Group") != ["aicrm"]
+            or fields.get("WorkingDirectory") != [str(CURRENT)]
+            or not _has_required_systemd_environment_file("\n".join(fields.get("EnvironmentFiles", [])), ENV)
         ):
             raise RuntimeError(f"systemd service contract is invalid: {unit}")
     environment = _database_environment_from_host_config()

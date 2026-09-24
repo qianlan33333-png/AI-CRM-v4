@@ -18,9 +18,9 @@ SPEC.loader.exec_module(installer)
 
 def systemd_unit_output(env_file: Path) -> str:
     return (
-        "User=aicrm\nGroup=aicrm\nWorkingDirectory=/opt/aicrm/current\n"
-        f"EnvironmentFiles={env_file} (ignore_errors=no) "
-        "/opt/aicrm/current/release.env (ignore_errors=yes)\n"
+        f"EnvironmentFiles={env_file} (ignore_errors=no)\n"
+        "EnvironmentFiles=/opt/aicrm/current/release.env (ignore_errors=yes)\n"
+        "WorkingDirectory=/opt/aicrm/current\nUser=aicrm\nGroup=aicrm\n"
     )
 
 
@@ -183,11 +183,32 @@ class HostEnvironmentContractTests(unittest.TestCase):
                         with self.assertRaisesRegex(RuntimeError, "missing or unsafe"):
                             installer._require_protected_runtime_environment(path)
 
-    def test_systemd_requires_non_optional_runtime_environment_file(self):
+    def test_systemd_show_preserves_repeated_environment_file_properties(self):
         required = installer.ENV
-        self.assertTrue(installer._has_required_systemd_environment_file(f"{required} (ignore_errors=no) /opt/aicrm/current/release.env (ignore_errors=yes)", required))
-        self.assertFalse(installer._has_required_systemd_environment_file(f"{required} (ignore_errors=yes)", required))
-        self.assertFalse(installer._has_required_systemd_environment_file("/etc/aicrm/other.env (ignore_errors=no)", required))
+        output = (
+            f"EnvironmentFiles={required} (ignore_errors=no)\n"
+            "EnvironmentFiles=/opt/aicrm/current/release.env (ignore_errors=yes)\n"
+            "WorkingDirectory=/opt/aicrm/current\nUser=aicrm\nGroup=aicrm\n"
+        )
+        fields = installer._parse_systemd_show_fields(output)
+        self.assertEqual(
+            fields["EnvironmentFiles"],
+            [
+                f"{required} (ignore_errors=no)",
+                "/opt/aicrm/current/release.env (ignore_errors=yes)",
+            ],
+        )
+        self.assertTrue(installer._has_required_systemd_environment_file("\n".join(fields["EnvironmentFiles"]), required))
+
+        optional_only = installer._parse_systemd_show_fields(
+            "EnvironmentFiles=/opt/aicrm/current/release.env (ignore_errors=yes)\n"
+        )
+        self.assertFalse(installer._has_required_systemd_environment_file("\n".join(optional_only["EnvironmentFiles"]), required))
+
+        wrong_path = installer._parse_systemd_show_fields(
+            "EnvironmentFiles=/etc/aicrm/other.env (ignore_errors=no)\n"
+        )
+        self.assertFalse(installer._has_required_systemd_environment_file("\n".join(wrong_path["EnvironmentFiles"]), required))
 
 
 class InstallBackupPolicyTests(unittest.TestCase):
