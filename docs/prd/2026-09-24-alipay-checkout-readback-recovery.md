@@ -40,6 +40,7 @@ flowchart TD
 - 复用 `internal/payment/http` 已存在的 `/api/v1/wechat-pay/checkouts` 与 `/api/v1/alipay/checkouts`；按路由 Provider 校验请求，读回只授权对应 Provider 的订单。
 - 外层跨站防护仅将精确 `POST /api/v1/alipay/checkouts` 绑定到配置的 H5 Origin。相邻路径、尾随斜线、其他方法及其他 Origin 不继承此例外。
 - 复用 `Payment Service`、`Payment Store`、`external_effects.Reader`、`payment_handoffs` 和现有产品页 checkpoint / 支付宝链接区域；不新增身份匹配器、订单表、任务队列、重试状态机或 Provider。
+- 支付宝旧 intent 缺少 `subject` 时，由 Provider material loader 在同一 Unit of Work 内通过 `Order CheckoutSnapshotReader` 读取冻结标题与金额；Payment Store 不读取 `order_items`。新 intent 若已保存 `subject`，必须校验其格式并与 Order 冻结标题一致，不接受不一致或无效标题。
 - WAP/Page 对应 `alipay_wap_pay_v1` / `alipay_page_pay_v1`；微信仍使用 `wechat_pay_prepay_v1`。客户端只认服务器状态，不将打开付款链接或点击“我已支付”当作成功。
 
 ## 数据、身份与外部效果分类
@@ -57,6 +58,7 @@ flowchart TD
 4. 完整迁移序列上的隔离 PostgreSQL 16 HTTP 旅程分别覆盖 Alipay WAP、Page、未知 Provider、错误 Channel 和微信路由误读控制；WAP/Page 必须由 worker 生成 `.test` 虚拟链接，并核对订单、支付、intent、effect 与 handoff。另以现有 `TestPostgreSQLPublicCheckoutResponseLossRejectsRenewedSessionReplay` 做微信创建响应丢失及终态回读对照；该对照不启动微信 Provider worker。所有旅程不得触发真实 Provider 支付。
 5. 首次 POST 的已知业务拒绝、无写入 401 和 Origin 403 清除无订单 checkpoint，恢复授权/表单流程；网络超时/断连/响应丢失保留 checkpoint。其后重试沿用同一 key、冻结请求与 Provider 路由；旧的不确定 checkpoint 不因后续拒绝或新授权而被误清除。无商户订单号时金额区不显示“待确认”，且同 key 重放不得多建订单。
 6. 浏览器状态恢复、支付宝“我已支付”读回与刷新均使用原 Provider 路由；只有服务器 `paid` 状态显示支付成功。
+7. 对生产旧 intent 的兼容仅适用于 `subject` 键不存在的记录；冻结 Order 快照缺失、金额不一致、标题无效、已有但错误的 `subject` 都失败关闭，不调用支付宝。
 
 ## 回滚与风险
 
