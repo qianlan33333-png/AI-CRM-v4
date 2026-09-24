@@ -204,3 +204,122 @@ assert.equal(JSON.parse(ambiguousWindow.sessionStorage.getItem('aicrm.checkout.t
 assert.equal(ambiguousWindow.document.getElementById('payableAmount').textContent, '—');
 assert.match(ambiguousWindow.document.getElementById('status').textContent, /订单创建结果尚未核实/);
 assert.match(ambiguousWindow.document.getElementById('buy').textContent, /重试原请求/);
+
+const firstUnauthorized = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const unauthorizedWindow = firstUnauthorized.window;
+Object.defineProperty(unauthorizedWindow.navigator, 'userAgent', {value: 'Mozilla/5.0'});
+unauthorizedWindow.crypto.randomUUID = () => 'checkout-alipay-first-401-7';
+let unauthorizedPosts = 0;
+unauthorizedWindow.fetch = async (url, options = {}) => {
+  const method = options.method || 'GET';
+  if (url === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
+  if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return {ok: true, status: 200, async json() {return {purchase_state: 'available', can_purchase: true};}};
+  if (String(url).startsWith('/api/h5/coupons/available')) return {ok: true, status: 200, async json() {return {items: []};}};
+  if (url === '/api/v1/alipay/checkouts' && method === 'POST') {
+    unauthorizedPosts++;
+    return {ok: false, status: 401, async json() {return {code: 'payment_session_required'};}};
+  }
+  throw new Error('unexpected first-401 request: ' + method + ' ' + url);
+};
+unauthorizedWindow.eval(unauthorizedWindow.document.querySelector('script:last-of-type').textContent);
+await settle();
+unauthorizedWindow.document.querySelector('input[name=paymentMethod][value=alipay]').click();
+unauthorizedWindow.document.getElementById('buy').click();
+await settle();
+assert.equal(unauthorizedPosts, 1, 'the initial POST returns a definite pre-write 401');
+assert.equal(unauthorizedWindow.sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard'), null, 'the definite first 401 removes the empty-order marker before authorization restarts');
+assert.equal(unauthorizedWindow.document.getElementById('identityGate').hidden, false);
+
+const afterReauthorization = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const reauthorizedWindow = afterReauthorization.window;
+Object.defineProperty(reauthorizedWindow.navigator, 'userAgent', {value: 'Mozilla/5.0'});
+reauthorizedWindow.crypto.randomUUID = () => 'checkout-alipay-new-binding-7';
+let reauthorizedPost;
+reauthorizedWindow.fetch = async (url, options = {}) => {
+  const method = options.method || 'GET';
+  if (url === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'b'.repeat(43), can_create_checkout: true};}};
+  if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return {ok: true, status: 200, async json() {return {purchase_state: 'available', can_purchase: true};}};
+  if (String(url).startsWith('/api/h5/coupons/available')) return {ok: true, status: 200, async json() {return {items: []};}};
+  if (url === '/api/v1/alipay/checkouts' && method === 'POST') {
+    reauthorizedPost = options;
+    return {ok: true, status: 202, async json() {return {merchant_order_no: 'M-after-reauthorization'};}};
+  }
+  if (url === '/api/v1/alipay/checkouts/M-after-reauthorization') return {ok: true, status: 200, async json() {return {status: 'awaiting_payment', provider: 'alipay', channel: 'alipay_page', ready: true, amount_minor: 990, currency: 'CNY', handoff: {redirectUrl: 'https://virtual-alipay.example.test/pay?channel=reauthorized'}};}};
+  throw new Error('unexpected reauthorization request: ' + method + ' ' + url);
+};
+reauthorizedWindow.eval(reauthorizedWindow.document.querySelector('script:last-of-type').textContent);
+await settle();
+reauthorizedWindow.document.querySelector('input[name=paymentMethod][value=alipay]').click();
+reauthorizedWindow.document.getElementById('buy').click();
+await settle();
+assert.equal(JSON.parse(reauthorizedPost.body).checkout_session_binding, 'b'.repeat(43), 'a fresh checkout uses the reauthorized binding');
+assert.equal(reauthorizedPost.headers['Idempotency-Key'], 'checkout-alipay-new-binding-7', 'a confirmed 401 permits a new attempt with a fresh key');
+
+const originRejected = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const originRejectedWindow = originRejected.window;
+Object.defineProperty(originRejectedWindow.navigator, 'userAgent', {value: 'Mozilla/5.0'});
+originRejectedWindow.crypto.randomUUID = () => 'checkout-alipay-origin-rejected-7';
+originRejectedWindow.fetch = async (url, options = {}) => {
+  const method = options.method || 'GET';
+  if (url === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
+  if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return {ok: true, status: 200, async json() {return {purchase_state: 'available', can_purchase: true};}};
+  if (String(url).startsWith('/api/h5/coupons/available')) return {ok: true, status: 200, async json() {return {items: []};}};
+  if (url === '/api/v1/alipay/checkouts' && method === 'POST') return {ok: false, status: 403, async json() {return {error: 'cross_site_request'};}};
+  throw new Error('unexpected Origin-rejection request: ' + method + ' ' + url);
+};
+originRejectedWindow.eval(originRejectedWindow.document.querySelector('script:last-of-type').textContent);
+await settle();
+originRejectedWindow.document.querySelector('input[name=paymentMethod][value=alipay]').click();
+originRejectedWindow.document.getElementById('buy').click();
+await settle();
+assert.equal(originRejectedWindow.sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard'), null, 'a definite outer Origin guard rejection cannot strand an initial attempt');
+assert.match(originRejectedWindow.document.getElementById('status').textContent, /页面来源校验未通过/);
+assert.doesNotMatch(originRejectedWindow.document.getElementById('status').textContent, /结果尚未核实/);
+
+const ambiguousNewBinding = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const ambiguousNewBindingWindow = ambiguousNewBinding.window;
+Object.defineProperty(ambiguousNewBindingWindow.navigator, 'userAgent', {value: 'MicroMessenger'});
+const previousUnknown = {key: 'checkout-alipay-old-session-unknown', merchant_order_no: '', create_attempted: true, payload: ambiguousPayload, session_binding: 'a'.repeat(43)};
+ambiguousNewBindingWindow.sessionStorage.setItem('aicrm.checkout.tab.v2:7:standard', JSON.stringify(previousUnknown));
+let blockedNewBindingPosts = 0;
+ambiguousNewBindingWindow.fetch = async (url, options = {}) => {
+  const method = options.method || 'GET';
+  if (url === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'b'.repeat(43), can_create_checkout: true};}};
+  if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return {ok: true, status: 200, async json() {return {purchase_state: 'available', can_purchase: true};}};
+  if (url === '/api/v1/alipay/checkouts' && method === 'POST') blockedNewBindingPosts++;
+  throw new Error('unexpected ambiguous-new-binding request: ' + method + ' ' + url);
+};
+ambiguousNewBindingWindow.eval(ambiguousNewBindingWindow.document.querySelector('script:last-of-type').textContent);
+await settle();
+ambiguousNewBindingWindow.document.getElementById('buy').click();
+await settle();
+const retainedAmbiguous = JSON.parse(ambiguousNewBindingWindow.sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard'));
+assert.equal(retainedAmbiguous.key, previousUnknown.key, 'reauthorization cannot replace the key for an earlier ambiguous create');
+assert.equal(retainedAmbiguous.session_binding, previousUnknown.session_binding, 'the original binding remains attached to the ambiguous request');
+assert.equal(blockedNewBindingPosts, 0, 'a changed binding cannot replay or create another order');
+assert.match(ambiguousNewBindingWindow.document.getElementById('status').textContent, /原订单标识已保留/);
+
+const ambiguousOriginRetry = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const ambiguousOriginRetryWindow = ambiguousOriginRetry.window;
+Object.defineProperty(ambiguousOriginRetryWindow.navigator, 'userAgent', {value: 'MicroMessenger'});
+const previousOriginUnknown = {key: 'checkout-alipay-origin-old-unknown', merchant_order_no: '', create_attempted: true, payload: ambiguousPayload, session_binding: 'a'.repeat(43)};
+ambiguousOriginRetryWindow.sessionStorage.setItem('aicrm.checkout.tab.v2:7:standard', JSON.stringify(previousOriginUnknown));
+let ambiguousOriginPosts = 0;
+ambiguousOriginRetryWindow.fetch = async (url, options = {}) => {
+  const method = options.method || 'GET';
+  if (url === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
+  if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return {ok: true, status: 200, async json() {return {purchase_state: 'available', can_purchase: true};}};
+  if (url === '/api/v1/alipay/checkouts' && method === 'POST') {
+    ambiguousOriginPosts++;
+    return {ok: false, status: 403, async json() {return {error: 'cross_site_request'};}};
+  }
+  throw new Error('unexpected ambiguous-Origin request: ' + method + ' ' + url);
+};
+ambiguousOriginRetryWindow.eval(ambiguousOriginRetryWindow.document.querySelector('script:last-of-type').textContent);
+await settle();
+ambiguousOriginRetryWindow.document.getElementById('buy').click();
+await settle();
+assert.equal(ambiguousOriginPosts, 1);
+const retainedAfterOrigin403 = JSON.parse(ambiguousOriginRetryWindow.sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard'));
+assert.equal(retainedAfterOrigin403.key, previousOriginUnknown.key, 'a later Origin rejection cannot erase an earlier ambiguous create');
+assert.match(ambiguousOriginRetryWindow.document.getElementById('status').textContent, /订单创建结果尚未核实/);

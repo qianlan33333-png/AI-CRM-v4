@@ -63,6 +63,9 @@ type productExternalPushChromiumFixtureOptions struct {
 	// original disabled Payment/OAuth configuration.
 	enablePublicH5 bool
 	enableAlipay   bool
+	// h5PublicOrigin separates the browser checkout origin from PublicOrigin
+	// for end-to-end Origin-guard tests.
+	h5PublicOrigin string
 	// alipayGateway is a loopback-only synthetic server used by the full
 	// Alipay journey, including post-handoff reconciliation reads.
 	alipayGateway string
@@ -196,7 +199,7 @@ func newProductExternalPushChromiumFixtureWithOptions(t *testing.T, timeout time
 	t.Cleanup(server.Close)
 	origin := "https://" + server.Listener.Addr().String()
 	runtime := platformconfig.Runtime{
-		Role: platformconfig.RoleAPI, DatabaseURL: databaseURL, PublicOrigin: origin,
+		Role: platformconfig.RoleAPI, DatabaseURL: databaseURL, PublicOrigin: origin, H5PublicOrigin: options.h5PublicOrigin,
 		ReleaseSHA: "product-external-push-chromium-journey", WorkerOwner: "product-external-push-chromium-journey", WorkerLimit: 1,
 		GroupOps:     platformconfig.GroupOps{WebhookSecret: "product-external-push-chromium-webhook-secret"},
 		WeCom:        platformconfig.WeCom{CorpID: "admin-layout-fixture-corp"},

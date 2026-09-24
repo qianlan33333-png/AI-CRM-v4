@@ -3150,6 +3150,12 @@ func isH5BrowserMutation(request *http.Request) bool {
 	if request.Method != http.MethodPost {
 		return false
 	}
+	// The independent H5 origin may create an Alipay checkout, but only at
+	// this exact mutation endpoint. Do not grant the H5 origin to neighboring
+	// Alipay APIs or to a slash-suffixed path.
+	if request.URL.Path == "/api/v1/alipay/checkouts" {
+		return true
+	}
 	path := strings.TrimSuffix(request.URL.Path, "/")
 	if path == "/api/public/survey-submission-results/query" || path == "/api/v1/wechat-pay/checkouts" {
 		return true

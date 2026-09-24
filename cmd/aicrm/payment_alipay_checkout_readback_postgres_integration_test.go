@@ -56,7 +56,9 @@ func TestPostgreSQLAlipayCheckoutReadbackJourney(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 	requireLocalPostgreSQL16(t, ctx)
-	fixture := newProductExternalPushChromiumFixtureWithOptions(t, 90*time.Second, productExternalPushChromiumFixtureOptions{enablePublicH5: true, enableAlipay: true})
+	const h5Origin = "https://alipay-h5.example.test"
+	fixture := newProductExternalPushChromiumFixtureWithOptions(t, 90*time.Second, productExternalPushChromiumFixtureOptions{enablePublicH5: true, enableAlipay: true, h5PublicOrigin: h5Origin})
+	assertComposedH5AlipayOriginBoundary(t, fixture, h5Origin)
 
 	pageProductID := seedAlipayPageCheckoutProduct(t, fixture)
 	for _, test := range []struct {
@@ -131,6 +133,43 @@ func TestPostgreSQLAlipayCheckoutReadbackJourney(t *testing.T) {
 				t.Fatalf("invalid %s created checkout facts before=%+v after=%+v", invalid.name, before, after)
 			}
 		})
+	}
+}
+
+func assertComposedH5AlipayOriginBoundary(t *testing.T, fixture *productExternalPushChromiumFixture, h5Origin string) {
+	t.Helper()
+	before := alipayCheckoutCounts(t, fixture)
+	request := func(origin, path string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, h5Origin+path, strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "alipay-origin-boundary-create-0001")
+		req.Header.Set("Origin", origin)
+		// The browser posts from the configured H5 origin; Origin is the
+		// authoritative signal when present.
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		fixture.application.handler.ServeHTTP(recorder, req)
+		return recorder
+	}
+
+	allowed := request(h5Origin, "/api/v1/alipay/checkouts")
+	if allowed.Code != http.StatusUnauthorized || !strings.Contains(allowed.Body.String(), "payment_session_required") {
+		t.Fatalf("configured H5 Origin did not pass the composed outer guard: status=%d body=%s", allowed.Code, allowed.Body.String())
+	}
+	for _, test := range []struct{ name, origin, path string }{
+		{name: "unrelated origin", origin: "https://evil.example", path: "/api/v1/alipay/checkouts"},
+		{name: "canonical origin", origin: fixture.server.URL, path: "/api/v1/alipay/checkouts"},
+		{name: "slash suffixed route", origin: h5Origin, path: "/api/v1/alipay/checkouts/"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			blocked := request(test.origin, test.path)
+			if blocked.Code != http.StatusForbidden || !strings.Contains(blocked.Body.String(), "cross_site_request") {
+				t.Fatalf("Origin/path should be blocked before the composed payment handler: status=%d body=%s", blocked.Code, blocked.Body.String())
+			}
+		})
+	}
+	if after := alipayCheckoutCounts(t, fixture); after != before {
+		t.Fatalf("origin checks or missing-session rejection wrote checkout facts before=%+v after=%+v", before, after)
 	}
 }
 
