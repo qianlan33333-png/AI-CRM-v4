@@ -807,7 +807,7 @@ func (r *Repository) ProviderIntent(ctx context.Context, kind effectport.Kind, s
 	var requestSnapshot []byte
 	err = t.QueryRow(ctx, `
 		SELECT i.effect_kind,i.source_ref_digest,i.payload_digest,i.request_snapshot,
-			COALESCE(p.id, rp.id),COALESCE(i.refund_id,0),
+			COALESCE(p.id, rp.id),COALESCE(i.refund_id,0),COALESCE(p.order_id,rp.order_id),
 			COALESCE(p.payer_identity_id,rp.payer_identity_id),COALESCE(p.payment_channel,rp.payment_channel),COALESCE(p.merchant_order_no,rp.merchant_order_no),
 			COALESCE(r.refund_no,''),COALESCE(r.reason,''),
 			COALESCE(r.amount_minor,p.amount_minor),COALESCE(p.amount_minor,rp.amount_minor),COALESCE(p.profit_sharing_marked,false),COALESCE(p.currency,rp.currency)
@@ -816,7 +816,7 @@ func (r *Repository) ProviderIntent(ctx context.Context, kind effectport.Kind, s
 		LEFT JOIN payment_refunds r ON r.id=i.refund_id
 		LEFT JOIN payments rp ON rp.id=r.payment_id
 		WHERE i.effect_kind=$1 AND i.source_ref_digest=$2`, kind, source,
-	).Scan(&storedKind, &storedSource, &payload, &requestSnapshot, &out.PaymentID, &out.RefundID,
+	).Scan(&storedKind, &storedSource, &payload, &requestSnapshot, &out.PaymentID, &out.RefundID, &out.OrderID,
 		&out.PayerIdentityID, &out.Channel, &out.MerchantOrderNo, &out.RefundNo, &out.RefundReason,
 		&out.AmountMinor, &out.TotalMinor, &out.ProfitSharingMarked, &out.Currency)
 	if errors.Is(err, pgx.ErrNoRows) {

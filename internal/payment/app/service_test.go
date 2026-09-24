@@ -182,6 +182,7 @@ func (e *effectStub) AcceptAndQueueWithin(ctx context.Context, c effectport.Acce
 
 type storeStub struct {
 	payment                  domain.Payment
+	checkoutPayments         map[domain.Provider]domain.Payment
 	refund                   domain.Refund
 	shopMaterial             paymentport.ShopRefundMaterial
 	bound                    bool
@@ -289,7 +290,17 @@ func (s *storeStub) UpdateRefundSettlement(_ context.Context, r domain.Refund, _
 func (s *storeStub) GetPaymentByMerchant(context.Context, string, bool) (domain.Payment, error) {
 	return s.payment, nil
 }
-func (s *storeStub) GetPaymentByMerchantProvider(context.Context, domain.Provider, string, bool) (domain.Payment, error) {
+func (s *storeStub) GetPaymentByMerchantProvider(_ context.Context, provider domain.Provider, merchantOrderNo string, _ bool) (domain.Payment, error) {
+	if s.checkoutPayments != nil {
+		payment, ok := s.checkoutPayments[provider]
+		if !ok || payment.MerchantOrderNo != merchantOrderNo {
+			return domain.Payment{}, paymentport.ErrNotFound
+		}
+		return payment, nil
+	}
+	if s.payment.ID < 1 || s.payment.Provider != provider || s.payment.MerchantOrderNo != merchantOrderNo {
+		return domain.Payment{}, paymentport.ErrNotFound
+	}
 	return s.payment, nil
 }
 

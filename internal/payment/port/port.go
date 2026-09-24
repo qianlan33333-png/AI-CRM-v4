@@ -271,6 +271,7 @@ type SessionLifecycle interface {
 type ProviderIntent struct {
 	Kind                    effectport.Kind
 	PaymentID, RefundID     int64
+	OrderID                 int64
 	PayerIdentityID         int64
 	Channel                 domain.Channel
 	MerchantOrderNo         string

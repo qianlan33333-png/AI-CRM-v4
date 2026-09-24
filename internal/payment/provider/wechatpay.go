@@ -22,6 +22,7 @@ import (
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
+	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	paymentdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/domain"
 	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
@@ -95,8 +96,9 @@ func (Config) String() string   { return "WeChatPayConfig{credentials:[REDACTED]
 func (Config) GoString() string { return "WeChatPayConfig{credentials:[REDACTED]}" }
 
 type Material struct {
-	Intent      paymentport.ProviderIntent
-	PayerOpenID string
+	Intent        paymentport.ProviderIntent
+	PayerOpenID   string
+	AlipaySubject string
 }
 
 type MaterialLoader interface {
@@ -107,6 +109,7 @@ type DBMaterialLoader struct {
 	UOW           platformport.UnitOfWork
 	Intents       paymentport.ProviderIntentReader
 	Identities    identityport.PaymentIdentityReader
+	Checkouts     orderport.CheckoutSnapshotReader
 	AppScope      string
 	H5AppScope    string
 	ProfitSharing paymentport.ProfitSharingMaterialReader
@@ -142,6 +145,16 @@ func (loader DBMaterialLoader) Load(ctx context.Context, kind effectport.Kind, s
 			return err
 		}
 		material.Intent = intent
+		if kind == effectport.KindAlipayWapPay || kind == effectport.KindAlipayPagePay {
+			if loader.Checkouts == nil || intent.OrderID < 1 || intent.PaymentID < 1 || intent.RefundID != 0 || intent.Currency != "CNY" {
+				return ErrInvalidMaterial
+			}
+			snapshot, readErr := loader.Checkouts.ReadCheckoutSnapshotWithin(tx, intent.OrderID)
+			if readErr != nil || snapshot.OrderID != intent.OrderID || snapshot.PayableAmountMinor != intent.AmountMinor || snapshot.Currency != intent.Currency || strings.TrimSpace(snapshot.ProductName) == "" {
+				return ErrInvalidMaterial
+			}
+			material.AlipaySubject = snapshot.ProductName
+		}
 		if kind == effectport.KindWeChatPayPrepay {
 			if loader.Identities == nil {
 				return ErrInvalidMaterial

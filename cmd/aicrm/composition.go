@@ -1589,7 +1589,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		if err != nil {
 			return fail(err)
 		}
-		if err = alipayAdapter.SetMaterialLoader(paymentprovider.DBMaterialLoader{UOW: uow, Intents: paymentRepository}); err != nil {
+		if err = alipayAdapter.SetMaterialLoader(paymentprovider.DBMaterialLoader{UOW: uow, Intents: paymentRepository, Checkouts: orderService}); err != nil {
 			return fail(err)
 		}
 	} else {

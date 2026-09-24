@@ -596,17 +596,18 @@ func (s *Service) GetCheckout(ctx context.Context, merchantOrderNo, sessionToken
 	now := s.now().UTC()
 	var out paymentport.Handoff
 	var prepayEffectID string
+	var prepayKind effectport.Kind
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		actor, err := s.sessions.LookupWithin(tx, sessionToken, now)
 		if err != nil {
 			return err
 		}
-		payment, err := s.store.GetPaymentByMerchantProvider(tx, domain.ProviderWeChatPay, merchantOrderNo, false)
+		payment, err := s.checkoutPaymentWithin(tx, merchantOrderNo)
 		if err != nil {
 			return err
 		}
 		authorized := checkoutReadAuthorized(payment, actor)
-		if !authorized && s.lineage != nil && payment.PayerIdentityID == actor.PayerIdentityID && payment.Channel == actor.Channel {
+		if !authorized && s.lineage != nil && payment.PayerIdentityID == actor.PayerIdentityID && checkoutSessionChannelMatches(payment, actor) {
 			roots, readErr := s.lineage.CanonicalLineage(tx, customerdomain.CustomerID(actor.PayerCustomerID))
 			if readErr != nil {
 				return readErr
@@ -647,6 +648,20 @@ func (s *Service) GetCheckout(ctx context.Context, merchantOrderNo, sessionToken
 				}
 			}
 			prepayEffectID = payment.EffectID
+			switch payment.Provider {
+			case domain.ProviderWeChatPay:
+				prepayKind = effectport.KindWeChatPayPrepay
+			case domain.ProviderAlipay:
+				if payment.Channel == domain.ChannelAlipayWap {
+					prepayKind = effectport.KindAlipayWapPay
+				} else if payment.Channel == domain.ChannelAlipayPage {
+					prepayKind = effectport.KindAlipayPagePay
+				} else {
+					return paymentport.ErrConflict
+				}
+			default:
+				return paymentport.ErrConflict
+			}
 			return nil
 		}
 		handoff, err := s.store.GetHandoff(tx, payment.ID)
@@ -669,12 +684,33 @@ func (s *Service) GetCheckout(ctx context.Context, merchantOrderNo, sessionToken
 	// only its state; never return effect identifiers or provider response data.
 	if prepayEffectID != "" && s.effectReader != nil {
 		projection, readErr := s.effectReader.Get(ctx, prepayEffectID)
-		if readErr != nil || projection.ID != prepayEffectID || projection.Owner != effectport.OwnerPayment || projection.Kind != effectport.KindWeChatPayPrepay {
+		if readErr != nil || projection.ID != prepayEffectID || projection.Owner != effectport.OwnerPayment || projection.Kind != prepayKind {
 			return paymentport.Handoff{}, paymentport.ErrUnavailable
 		}
 		out.PrepayState = projection.State
 	}
 	return out, nil
+}
+
+func (s *Service) checkoutPaymentWithin(ctx context.Context, merchantOrderNo string) (domain.Payment, error) {
+	wechat, wechatErr := s.store.GetPaymentByMerchantProvider(ctx, domain.ProviderWeChatPay, merchantOrderNo, false)
+	if wechatErr != nil && !errors.Is(wechatErr, paymentport.ErrNotFound) {
+		return domain.Payment{}, wechatErr
+	}
+	alipay, alipayErr := s.store.GetPaymentByMerchantProvider(ctx, domain.ProviderAlipay, merchantOrderNo, false)
+	if alipayErr != nil && !errors.Is(alipayErr, paymentport.ErrNotFound) {
+		return domain.Payment{}, alipayErr
+	}
+	if wechatErr == nil && alipayErr == nil {
+		return domain.Payment{}, paymentport.ErrConflict
+	}
+	if wechatErr == nil {
+		return wechat, nil
+	}
+	if alipayErr == nil {
+		return alipay, nil
+	}
+	return domain.Payment{}, paymentport.ErrNotFound
 }
 
 // CheckoutSessionBinding proves only that the caller still holds a valid
@@ -1441,7 +1477,7 @@ func validScope(v string) bool { return v == strings.TrimSpace(v) && len(v) > 0 
 // selects a recipient, but that browser state must not hide an already persisted
 // payment whose beneficiary was selected in the original transaction.
 func checkoutReadAuthorized(payment domain.Payment, actor paymentport.SessionActor) bool {
-	if payment.PayerIdentityID != actor.PayerIdentityID || payment.PayerCustomerID != actor.PayerCustomerID || payment.Channel != actor.Channel {
+	if payment.PayerIdentityID != actor.PayerIdentityID || payment.PayerCustomerID != actor.PayerCustomerID || !checkoutSessionChannelMatches(payment, actor) {
 		return false
 	}
 	switch actor.BeneficiarySelection {
@@ -1451,6 +1487,17 @@ func checkoutReadAuthorized(payment domain.Payment, actor paymentport.SessionAct
 		return actor.BeneficiaryCustomerID == actor.PayerCustomerID && payment.BeneficiaryCustomerID == actor.BeneficiaryCustomerID
 	case paymentport.BeneficiarySelectionAdminAssisted:
 		return actor.BeneficiaryCustomerID > 0 && payment.BeneficiaryCustomerID == actor.BeneficiaryCustomerID
+	default:
+		return false
+	}
+}
+
+func checkoutSessionChannelMatches(payment domain.Payment, actor paymentport.SessionActor) bool {
+	switch payment.Provider {
+	case domain.ProviderWeChatPay:
+		return payment.Channel == actor.Channel
+	case domain.ProviderAlipay:
+		return actor.Channel == domain.ChannelH5Official && (payment.Channel == domain.ChannelAlipayWap || payment.Channel == domain.ChannelAlipayPage)
 	default:
 		return false
 	}

@@ -155,7 +155,7 @@ func (a *Alipay) Execute(ctx context.Context, envelope effectport.Envelope, atte
 		}
 		return effectport.AdapterResult{Completion: effectport.StateExecuted, ReceiptDigest: receipt("alipay.refund.executed", envelope, attempt), CallAttempted: true, RealExternalCallExecuted: true}, nil
 	}
-	request := WebPayRequest{MerchantOrderNo: material.Intent.MerchantOrderNo, Subject: material.Intent.ProductID, TotalAmount: minorToAmount(material.Intent.AmountMinor)}
+	request := WebPayRequest{MerchantOrderNo: material.Intent.MerchantOrderNo, Subject: material.AlipaySubject, TotalAmount: minorToAmount(material.Intent.AmountMinor)}
 	var payURL string
 	if envelope.Kind == effectport.KindAlipayWapPay {
 		payURL, err = a.BuildWapPay(ctx, request)
