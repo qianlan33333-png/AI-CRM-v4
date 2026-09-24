@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import unittest
 
 
@@ -6,6 +7,41 @@ WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml"
 
 
 class RequiredCheckWorkflowContractTests(unittest.TestCase):
+    def test_if_expressions_have_balanced_parentheses(self):
+        source = WORKFLOW.read_text()
+        conditions = []
+        for line_number, line in enumerate(source.splitlines(), 1):
+            match = re.search(r"(?:^|\s)if:\s*(.*?)\s*$", line)
+            if not match:
+                continue
+            expression = match.group(1).strip()
+            if expression.startswith("${{") and expression.endswith("}}"):
+                expression = expression[3:-2]
+            depth = 0
+            quoted = False
+            index = 0
+            while index < len(expression):
+                char = expression[index]
+                if quoted:
+                    if char == "'":
+                        if index + 1 < len(expression) and expression[index + 1] == "'":
+                            index += 2
+                            continue
+                        quoted = False
+                elif char == "'":
+                    quoted = True
+                elif char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+                    if depth < 0:
+                        break
+                index += 1
+            self.assertGreater(len(expression), 0, f"workflow line {line_number} has an empty if expression")
+            self.assertEqual((depth, quoted), (0, False), f"unbalanced if expression at workflow line {line_number}")
+            conditions.append(line_number)
+        self.assertGreater(len(conditions), 0, "workflow has no if expressions to validate")
+
     def test_required_workflow_is_not_skipped_by_path_filters(self):
         source = WORKFLOW.read_text()
         self.assertIn("  pull_request:\n    branches: [main]", source)
