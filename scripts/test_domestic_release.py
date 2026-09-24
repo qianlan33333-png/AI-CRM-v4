@@ -343,19 +343,30 @@ class DomesticReleaseTest(unittest.TestCase):
             smoke_input = root / "installed-smoke-input.json"
             source_root = root / "source"
             source_root.mkdir()
+            git_dir = root / "repository-git"
+            git_dir.mkdir()
+            (git_dir / "index").write_bytes(b"live repository index\n")
+            source_index = root / "source.index"
+            source_index.write_bytes(b"checked source index\n")
+            source_index.chmod(0o444)
+            installer._attach_smoke_source_git_metadata(source_root, source_index, str(git_dir))
             with mock.patch.object(installer, "_run_unprivileged_smoke_command", side_effect=run_command), mock.patch.object(installer, "_verify_smoke_source_snapshot") as verify:
                 installer._run_installed_smoke_test(
                     source_root,
                     {"HOME": "/home/ubuntu", "PATH": "/fixed/go:/fixed/node:/usr/bin:/bin", "TMPDIR": str(root)},
-                    "/protected/gitdir", root / "index", "/fixed/node/node", smoke_input,
+                    str(git_dir), source_index, "/fixed/node/node", smoke_input,
                 )
 
         self.assertEqual(len(calls), 2)
+        source_command, source_environment, _source_options = calls[0]
         test_command, test_environment, options = calls[1]
         self.assertIn("-args", test_command)
         self.assertIn(f"-domestic-release-smoke-input={smoke_input}", test_command)
         self.assertNotIn("AICRM_DATABASE_URL", test_environment)
         self.assertNotIn("synthetic-secret", repr(test_command))
+        self.assertEqual(test_environment["HOME"], "/home/ubuntu")
+        self.assertEqual(test_environment["PATH"], "/fixed/go:/fixed/node:/usr/bin:/bin")
+        self.assertEqual(source_environment["GIT_INDEX_FILE"], str(source_index.resolve()))
         self.assertEqual(options["required_marker"], installer.SMOKE_TEST_MARKER)
         self.assertEqual(verify.call_count, 2)
 
@@ -451,6 +462,153 @@ class DomesticReleaseTest(unittest.TestCase):
                     (source_root / "contract.txt").write_text("mutated source\n")
                     with self.assertRaisesRegex(RuntimeError, "no longer matches"):
                         installer._verify_smoke_source_snapshot(source_root, git_dir, index)
+
+    def test_archive_smoke_source_prepares_views_with_exact_read_only_index_in_real_node(self):
+        node = installer.shutil.which("node")
+        self.assertIsNotNone(node, "the real Node integration test requires Node.js")
+        with tempfile.TemporaryDirectory(prefix="domestic-smoke-source-views-") as temporary:
+            root = Path(temporary)
+            repository = root / "repository"
+            repository.mkdir()
+            source = b"frozen canonical donor payload\n"
+            source_blob = hashlib.sha1(b"blob " + str(len(source)).encode() + b"\0" + source).hexdigest()
+            source_sha256 = hashlib.sha256(source).hexdigest()
+            library = {
+                "id": "fixture-library",
+                "source_repository": "https://example.invalid/frozen.git",
+                "source_commit": "89abcdef0123456789abcdef0123456789abcdef",
+                "root": "sources",
+                "immutable": True,
+                "authority_kind": "frozen_donor",
+            }
+            content = {
+                "id": "health",
+                "library_id": library["id"],
+                "canonical_path": "sources/health.schemas.ts",
+                "source_path": "web/src/api/generated/health.schemas.ts",
+                "source_git_blob_sha": source_blob,
+                "content_sha256": source_sha256,
+                "bytes": len(source),
+                "mode": "100644",
+            }
+            index_document = {
+                "schema_version": 1,
+                "lock_path": "source-lock.json",
+                "libraries": [library],
+                "contents": [content],
+                "bindings": [{
+                    "module": "fixture",
+                    "logical_path": "tracked/health.schemas.ts",
+                    "content_id": "health",
+                    "source_repository": library["source_repository"],
+                    "source_commit": library["source_commit"],
+                    "source_path": content["source_path"],
+                    "source_git_blob_sha": source_blob,
+                    "mode": "100644",
+                    "usage": "frozen_donor_compatibility_view",
+                    "freeze_gate": "scripts/check-fixture.sh",
+                    "freeze_ledger": "docs/fixture-ledger.txt",
+                    "current_path_state": "tracked_pre_p4_removal",
+                }],
+                "views": [{
+                    "target_path": "views/health.schemas.ts",
+                    "content_id": "health",
+                    "enabled": True,
+                }],
+            }
+            lock_entry = {
+                "id": content["id"],
+                "library_id": library["id"],
+                "source_repository": library["source_repository"],
+                "source_commit": library["source_commit"],
+                "canonical_path": content["canonical_path"],
+                "source_path": content["source_path"],
+                "source_git_blob_sha": source_blob,
+                "content_sha256": source_sha256,
+                "bytes": len(source),
+                "mode": "100644",
+            }
+            for relative in ("sources/health.schemas.ts", "tracked/health.schemas.ts"):
+                target = repository / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(source)
+            (repository / "source-index.json").write_text(json.dumps(index_document, indent=2) + "\n")
+            (repository / "source-lock.json").write_text(json.dumps({"schema_version": 1, "entries": [lock_entry]}, indent=2) + "\n")
+            subprocess.run(["git", "-C", str(repository), "init", "-q"], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.name", "Smoke Fixture"], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.email", "smoke@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repository), "remote", "add", "origin", next(iter(installer.SMOKE_SOURCE_REMOTES))], check=True)
+            subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repository), "commit", "-qm", "smoke source"], check=True)
+            source_sha = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
+            subprocess.run(["git", "-C", str(repository), "update-ref", "refs/remotes/origin/main", source_sha], check=True)
+            git_dir = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "--absolute-git-dir"], text=True).strip()
+
+            live_view = repository / "views/health.schemas.ts"
+            live_view.parent.mkdir()
+            live_view.write_bytes(b"staged live-only view\n")
+            subprocess.run(["git", "-C", str(repository), "add", "views/health.schemas.ts"], check=True)
+            live_index_before = (Path(git_dir) / "index").read_bytes()
+
+            with tempfile.TemporaryDirectory(dir=root) as scratch_name, mock.patch.object(installer, "SMOKE_SOURCE_REPOSITORY", repository):
+                scratch = Path(scratch_name)
+                tree = installer._archive_smoke_source(source_sha, scratch)
+                source_root = scratch / "source"
+                self.assertEqual(tree, subprocess.check_output(["git", "-C", str(repository), "rev-parse", f"{source_sha}^{{tree}}"], text=True).strip())
+                self.assertFalse((source_root / ".git").exists(), "git archive must not supply Git metadata")
+                self.assertFalse((source_root / "views/health.schemas.ts").exists(), "staged live-only path must not enter the commit archive")
+                source_index = installer._smoke_source_index(source_sha, source_root, scratch, git_dir)
+                installer._chown_smoke_source_snapshot(source_root, os.getuid(), os.getgid())
+                metadata_index = installer._attach_smoke_source_git_metadata(source_root, source_index, git_dir)
+                metadata_index_before = metadata_index.read_bytes()
+                self.assertFalse(os.path.samefile(metadata_index, source_index))
+                self.assertEqual(metadata_index_before, source_index.read_bytes())
+                self.assertEqual(metadata_index.lstat().st_uid, os.geteuid())
+                self.assertEqual(metadata_index.stat().st_mode & 0o777, 0o444)
+                self.assertEqual((source_root / ".git").stat().st_mode & 0o777, 0o555)
+
+                environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+                environment.update({
+                    "PATH": f"{Path(node).parent}:/usr/bin:/bin",
+                    "GIT_DIR": str(Path(git_dir).resolve()),
+                    "GIT_WORK_TREE": str(source_root.resolve()),
+                    "GIT_INDEX_FILE": str(source_index.resolve()),
+                    "GIT_OPTIONAL_LOCKS": "0",
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": "safe.directory",
+                    "GIT_CONFIG_VALUE_0": str(repository.resolve()),
+                })
+                installer._verify_smoke_source_snapshot(source_root, git_dir, source_index)
+                scratch.chmod(0o555)
+                try:
+                    prepared = subprocess.run(
+                        [
+                            str(node), str(ROOT / "scripts/prepare-donor-source-views.mjs"),
+                            "--root", str(source_root), "--index", "source-index.json",
+                        ],
+                        cwd=source_root,
+                        env=environment,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                finally:
+                    scratch.chmod(0o755)
+                self.assertEqual(prepared.returncode, 0, prepared.stderr)
+                summary = json.loads(prepared.stdout)
+                self.assertEqual(summary["created"], 1)
+                self.assertEqual((source_root / "views/health.schemas.ts").read_bytes(), source)
+                installer._verify_smoke_source_snapshot(source_root, git_dir, source_index)
+                installer._verify_smoke_source_git_metadata(source_root, source_index, git_dir)
+                self.assertEqual(metadata_index.read_bytes(), metadata_index_before)
+                self.assertEqual((Path(git_dir) / "index").read_bytes(), live_index_before)
+                self.assertIn("A  views/health.schemas.ts", subprocess.check_output(["git", "-C", str(repository), "status", "--short"], text=True))
+
+                tracked_source = source_root / "tracked/health.schemas.ts"
+                tracked_source.chmod(0o644)
+                tracked_source.write_text("snapshot mutation\n")
+                with self.assertRaisesRegex(RuntimeError, "no longer matches"):
+                    installer._verify_smoke_source_snapshot(source_root, git_dir, source_index)
 
     def test_backup_passes_uri_credentials_in_environment_not_argv_or_errors(self):
         with tempfile.TemporaryDirectory() as temporary:
