@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -336,20 +338,51 @@ func adminAccessMigrateCompositionSchema(ctx context.Context, pool *pgxpool.Pool
 		}
 	}
 	sort.Strings(names)
+	if _, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS platform_schema_migrations (
+			version text PRIMARY KEY,
+			name text NOT NULL UNIQUE,
+			checksum bytea NOT NULL,
+			applied_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+			CONSTRAINT platform_schema_migrations_checksum_sha256 CHECK (octet_length(checksum) = 32)
+		)`); err != nil {
+		return fmt.Errorf("create composition migration ledger: %w", err)
+	}
 	for _, name := range names {
 		sql, readErr := os.ReadFile(filepath.Join(base, name))
 		if readErr != nil {
 			return readErr
 		}
+		version, _, ok := strings.Cut(name, "_")
+		if !ok || len(version) != 4 {
+			return fmt.Errorf("invalid composition migration name %q", name)
+		}
+		checksum := sha256.Sum256(sql)
 		// Historical migrations 0005 and 0006 explicitly qualify two trigger
 		// functions in public. Composition Journeys run against isolated schemas,
 		// so keeping that qualifier would make parallel package tests race while
-		// creating the same public pg_proc entries. The deployed migration bytes
-		// remain immutable; only this ephemeral test schema removes the qualifier.
+		// creating the same public pg_proc entries. Only the SQL executed in this
+		// ephemeral test schema removes the qualifier; the ledger records the
+		// canonical migration filename and checksum of the original source bytes.
 		statement := strings.ReplaceAll(string(sql), "public.external_effects_reject_delete", "external_effects_reject_delete")
 		statement = strings.ReplaceAll(statement, "public.wecom_callback_facts_reject_mutation", "wecom_callback_facts_reject_mutation")
-		if _, execErr := pool.Exec(ctx, statement); execErr != nil {
-			return execErr
+		tx, beginErr := pool.Begin(ctx)
+		if beginErr != nil {
+			return fmt.Errorf("begin composition migration %s: %w", name, beginErr)
+		}
+		if _, execErr := tx.Exec(ctx, statement); execErr != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("apply composition migration %s: %w", name, execErr)
+		}
+		if _, execErr := tx.Exec(ctx,
+			`INSERT INTO platform_schema_migrations(version, name, checksum) VALUES($1, $2, $3)`,
+			version, name, checksum[:],
+		); execErr != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("record composition migration %s: %w", name, execErr)
+		}
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return fmt.Errorf("commit composition migration %s: %w", name, commitErr)
 		}
 	}
 	return nil

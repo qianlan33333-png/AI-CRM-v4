@@ -452,6 +452,9 @@ func waitDomesticReleaseReady(t *testing.T, process *domesticSmokeProcess, baseU
 	t.Helper()
 	client := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(30 * time.Second)
+	lastHTTPStatus := "no response"
+	lastStatus := "unavailable"
+	lastReleaseSHA := "unavailable"
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-process.done:
@@ -460,20 +463,42 @@ func waitDomesticReleaseReady(t *testing.T, process *domesticSmokeProcess, baseU
 		default:
 		}
 		response, err := client.Get(baseURL + "/readyz")
-		if err == nil {
-			var body struct {
-				Status     string `json:"status"`
-				ReleaseSHA string `json:"release_sha"`
+		if err != nil {
+			lastHTTPStatus = "no response"
+			lastStatus = "unavailable"
+			lastReleaseSHA = "unavailable"
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		lastHTTPStatus = fmt.Sprintf("%d", response.StatusCode)
+		var body struct {
+			Status     string `json:"status"`
+			ReleaseSHA string `json:"release_sha"`
+		}
+		decodeErr := json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&body)
+		_ = response.Body.Close()
+		if decodeErr == nil {
+			switch body.Status {
+			case "ready", "not_ready":
+				lastStatus = body.Status
+			default:
+				lastStatus = "unavailable"
 			}
-			decodeErr := json.NewDecoder(response.Body).Decode(&body)
-			_ = response.Body.Close()
-			if decodeErr == nil && response.StatusCode == http.StatusOK && body.Status == "ready" && body.ReleaseSHA == installedSHA {
-				return
+			if validDomesticReleaseSHA(body.ReleaseSHA) {
+				lastReleaseSHA = body.ReleaseSHA
+			} else {
+				lastReleaseSHA = "unavailable"
 			}
+		} else {
+			lastStatus = "unavailable"
+			lastReleaseSHA = "unavailable"
+		}
+		if decodeErr == nil && response.StatusCode == http.StatusOK && body.Status == "ready" && body.ReleaseSHA == installedSHA {
+			return
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	t.Fatal("installed API did not report ready for the expected release SHA")
+	t.Fatalf("installed API did not report ready: last_http_status=%q last_status=%q last_release_sha=%q", lastHTTPStatus, lastStatus, lastReleaseSHA)
 }
 
 func domesticSmokeCheckoutBinding(t *testing.T, baseURL, token string) string {
