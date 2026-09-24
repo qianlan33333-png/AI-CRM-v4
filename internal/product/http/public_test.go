@@ -174,13 +174,16 @@ func TestPublicProductEnabledOnlyAndSafeDTO(t *testing.T) {
 
 	page := httptest.NewRecorder()
 	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/p/secret-code", nil))
-	if page.Code != http.StatusOK || catalog.getCode != "secret-code" || !strings.Contains(page.Body.String(), "公开商品") || !strings.Contains(page.Body.String(), "checkoutStorageKey") {
+	if page.Code != http.StatusOK || catalog.getCode != "secret-code" || !strings.Contains(page.Body.String(), "公开商品") || strings.Contains(page.Body.String(), "checkoutStorageKey") {
 		t.Fatalf("status=%d body=%s", page.Code, page.Body.String())
 	}
 	payment := httptest.NewRecorder()
 	handler.ServeHTTP(payment, httptest.NewRequest(http.MethodGet, "/pay/secret-code", nil))
 	if payment.Code != http.StatusOK || strings.Contains(payment.Body.String(), "beneficiarySelf") || !strings.Contains(payment.Body.String(), "beneficiary_selection:'payer_self'") || strings.Contains(payment.Body.String(), "beneficiary_customer_id") {
 		t.Fatalf("payment page status=%d body=%s", payment.Code, payment.Body.String())
+	}
+	if !strings.Contains(payment.Body.String(), "const regionOptions=[];") || payment.Body.Len() > 60000 {
+		t.Fatalf("non-shipping payment page should not embed the region catalog: %d bytes", payment.Body.Len())
 	}
 	for _, required := range []string{"微信身份验证", "正在核验微信身份", "登录才能完成支付", "不会自动扣款", "授权并继续", "bootstrapCheckout", "checkoutContent", "/api/v1/wechat-pay/checkout-session", "/api/h5/wechat-pay/oauth/start?return_url="} {
 		if !strings.Contains(payment.Body.String(), required) {
@@ -268,17 +271,22 @@ func TestPublicProductDetailIsImmersiveAndPrioritizesOnlyTheFirstImage(t *testin
 		}
 	}
 	for _, required := range []string{
-		`id="detailContent" hidden><img class="detail-image"`,
-		`data-src="https://cdn.example.test/first.png" data-detail-index="0" alt="商品详情" decoding="async" loading="eager" fetchpriority="high"`,
-		`data-src="https://cdn.example.test/second.png" data-detail-index="1" alt="商品详情" decoding="async" loading="lazy"`,
-		`new IntersectionObserver`,
-		`rootMargin:'900px 0px'`,
-		`controller.abort(),12000`,
-		`网络连接超时，请刷新重试`,
+		`id="detailContent"><img class="detail-image" src="https://cdn.example.test/first.png" alt="商品详情" decoding="async" loading="eager" fetchpriority="high"`,
+		`src="https://cdn.example.test/second.png" alt="商品详情" decoding="async" loading="lazy"`,
+		`href="/pay/course-7"`,
+		`¥9.90`,
 	} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("immersive detail missing %q: %s", required, body)
 		}
+	}
+	for _, forbidden := range []string{"checkout-session", "purchase-status", "oauth/start", `id="identityGate"`, `id="checkoutContent"`, "regionOptions"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("public detail must not start payment identity work: %q", forbidden)
+		}
+	}
+	if len(body) > 16000 {
+		t.Fatalf("public detail HTML unexpectedly large: %d bytes", len(body))
 	}
 }
 
@@ -368,6 +376,9 @@ func TestPublicPaymentRegionCascadeBrowserJourney(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/pay/book", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("payment page status=%d", response.Code)
+	}
+	if !strings.Contains(response.Body.String(), `const regionOptions=[`) || response.Body.Len() < 100000 {
+		t.Fatalf("shipping checkout lost its region catalog: %d bytes", response.Body.Len())
 	}
 	_, source, _, ok := runtime.Caller(0)
 	if !ok {
@@ -463,7 +474,7 @@ func TestPublicProductMediaUsesOnlyEnabledProductImageBindings(t *testing.T) {
 	}
 	api := httptest.NewRecorder()
 	handler.ServeHTTP(api, httptest.NewRequest(http.MethodGet, "/api/public/products/course-9", nil))
-	if api.Code != http.StatusOK || !strings.Contains(api.Body.String(), "/api/h5/product-images/course-9/88/variants/original") || strings.Contains(api.Body.String(), "/api/admin/image-library/") {
+	if api.Code != http.StatusOK || !strings.Contains(api.Body.String(), "/api/h5/product-images/course-9/88/variants/large_1440") || strings.Contains(api.Body.String(), "/api/admin/image-library/") {
 		t.Fatalf("public product status=%d body=%s", api.Code, api.Body.String())
 	}
 	page := httptest.NewRecorder()
@@ -472,6 +483,11 @@ func TestPublicProductMediaUsesOnlyEnabledProductImageBindings(t *testing.T) {
 		t.Fatalf("public page status=%d body=%s", page.Code, page.Body.String())
 	}
 	allowed := httptest.NewRecorder()
+	handler.ServeHTTP(allowed, httptest.NewRequest(http.MethodGet, "/api/h5/product-images/course-9/88/variants/large_1440", nil))
+	if allowed.Code != http.StatusOK || allowed.Body.String() != "image-88" || allowed.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("bounded media status=%d body=%q headers=%v", allowed.Code, allowed.Body.String(), allowed.Header())
+	}
+	allowed = httptest.NewRecorder()
 	handler.ServeHTTP(allowed, httptest.NewRequest(http.MethodGet, "/api/h5/product-images/course-9/88/variants/original", nil))
 	if allowed.Code != http.StatusOK || allowed.Body.String() != "image-88" || allowed.Header().Get("Content-Type") != "image/png" {
 		t.Fatalf("allowed status=%d body=%q headers=%v", allowed.Code, allowed.Body.String(), allowed.Header())
@@ -676,12 +692,12 @@ func TestPublicServicePeriodRendersTrustedEntitlementWithoutIdentityFallback(t *
 	request.AddCookie(&http.Cookie{Name: paymentport.TrustedSessionCookieName, Value: "service-period-trusted"})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `id="detailContent" hidden`) || !strings.Contains(response.Body.String(), "/images/88/variants/original") || !strings.Contains(response.Body.String(), `href="/s/term-31/pay"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `id="detailContent"`) || !strings.Contains(response.Body.String(), "/images/88/variants/large_1440") || !strings.Contains(response.Body.String(), `href="/s/term-31/pay"`) {
 		t.Fatalf("active page status=%d body=%s", response.Code, response.Body.String())
 	}
 	untrusted := httptest.NewRecorder()
 	handler.ServeHTTP(untrusted, httptest.NewRequest(http.MethodGet, "/s/term-31", nil))
-	if untrusted.Code != http.StatusOK || !strings.Contains(untrusted.Body.String(), `id="identityGate"`) {
+	if untrusted.Code != http.StatusOK || !strings.Contains(untrusted.Body.String(), `id="detailContent"`) || strings.Contains(untrusted.Body.String(), `id="identityGate"`) {
 		t.Fatalf("untrusted page status=%d body=%s", untrusted.Code, untrusted.Body.String())
 	}
 }
@@ -713,7 +729,7 @@ func TestPublicServicePeriodUsesExactCodeAndSeparateCheckoutRoute(t *testing.T) 
 	}
 	page := httptest.NewRecorder()
 	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/s/term-31", nil))
-	if page.Code != http.StatusOK || reader.code != "term-31" || !strings.Contains(page.Body.String(), `id="detailContent" hidden`) || !strings.Contains(page.Body.String(), "服务周期 31 天") || !strings.Contains(page.Body.String(), `href="/s/term-31/pay"`) {
+	if page.Code != http.StatusOK || reader.code != "term-31" || !strings.Contains(page.Body.String(), `id="detailContent"`) || !strings.Contains(page.Body.String(), "服务周期 31 天") || !strings.Contains(page.Body.String(), `href="/s/term-31/pay"`) {
 		t.Fatalf("page status=%d code=%q body=%s", page.Code, reader.code, page.Body.String())
 	}
 	payment := httptest.NewRecorder()
@@ -755,7 +771,7 @@ func (servicePeriodMediaStub) LocalImageExists(_ context.Context, id int64) (boo
 	return id == 88, nil
 }
 func (servicePeriodMediaStub) GetImageVariant(_ context.Context, id int64, key string) (mediaport.ImageVariant, error) {
-	if id != 88 || key != "original" {
+	if id != 88 || (key != "original" && key != "large_1440") {
 		return mediaport.ImageVariant{}, errors.New("not found")
 	}
 	return mediaport.ImageVariant{Content: []byte("image-88"), MediaType: "image/png", ETag: `"image-88"`}, nil

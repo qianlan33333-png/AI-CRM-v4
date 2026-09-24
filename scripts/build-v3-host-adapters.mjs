@@ -109,7 +109,7 @@ const result = await build({
   entryNames: '[name]-[hash]',
   chunkNames: 'chunks/[name]-[hash]',
   assetNames: 'files/[name]-[hash]',
-  loader: { '.png': 'file' },
+  loader: { '.png': 'file', '.jpg': 'file' },
   minify: true,
   metafile: true,
   logLevel: 'warning',

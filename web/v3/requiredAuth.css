@@ -29,7 +29,7 @@
   width: min(100%, 315px);
   height: clamp(170px, 28vh, 245px);
   margin: 20px auto 10px;
-  background: url('./wechat-auth-illustration.png') center / contain no-repeat;
+  background: url('./wechat-auth-illustration.jpg') center / contain no-repeat;
 }
 .required-auth-card h1 {
   margin: 12px 0 0;

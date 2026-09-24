@@ -23,10 +23,10 @@ func TestPublicProductImageURLsUseSavedImageLibraryBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(urls), 3; got != want || urls[0] != "/api/h5/product-images/course-9/88/variants/original" || urls[1] != "https://assets.example.test/cover.png" || urls[2] != "/api/h5/product-images/course-9/88/variants/original" {
+	if got, want := len(urls), 3; got != want || urls[0] != "/api/h5/product-images/course-9/88/variants/large_1440" || urls[1] != "https://assets.example.test/cover.png" || urls[2] != "/api/h5/product-images/course-9/88/variants/large_1440" {
 		t.Fatalf("urls=%q", urls)
 	}
-	if cover := publicProductCardCover(product); cover != "/api/h5/product-images/course-9/88/variants/original" {
+	if cover := publicProductCardCover(product); cover != "/api/h5/product-images/course-9/88/variants/large_1440" {
 		t.Fatalf("cover=%q", cover)
 	}
 	ids, err := PublicProductImageIDs(product)

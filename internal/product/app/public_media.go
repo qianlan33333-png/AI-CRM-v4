@@ -71,7 +71,7 @@ func publicProductCardCover(product productport.Product) string {
 }
 
 func publicProductImageURL(code string, imageID int64) string {
-	return "/api/h5/product-images/" + url.PathEscape(code) + "/" + strconv.FormatInt(imageID, 10) + "/variants/original"
+	return "/api/h5/product-images/" + url.PathEscape(code) + "/" + strconv.FormatInt(imageID, 10) + "/variants/large_1440"
 }
 
 func productImageLibraryID(raw string) (int64, bool) {
