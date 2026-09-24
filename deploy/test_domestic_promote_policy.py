@@ -16,6 +16,14 @@ installer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(installer)
 
 
+def systemd_unit_output(env_file: Path) -> str:
+    return (
+        "User=aicrm\nGroup=aicrm\nWorkingDirectory=/opt/aicrm/current\n"
+        f"EnvironmentFiles={env_file} (ignore_errors=no) "
+        "/opt/aicrm/current/release.env (ignore_errors=yes)\n"
+    )
+
+
 def metadata_package(incoming: Path, sha: str, *, migration: bool) -> tuple[bytes, str]:
     (incoming / "bin").mkdir(parents=True)
     (incoming / "web/dist").mkdir(parents=True)
@@ -48,13 +56,16 @@ class HostRoleTests(unittest.TestCase):
         role_file.chmod(0o644)
         return parent, role_file
 
-    def protected_lstat(self, parent: Path, role_file: Path):
+    def protected_lstat(self, parent: Path, role_file: Path, *, directory_uid=0, directory_gid=0, role_uid=0, role_gid=0, role_mode=None):
         original = Path.lstat
 
         def fake(path):
             info = original(path)
-            if path in {parent, role_file}:
-                return SimpleNamespace(st_mode=info.st_mode, st_uid=0, st_gid=0)
+            if path == parent:
+                return SimpleNamespace(st_mode=info.st_mode, st_uid=directory_uid, st_gid=directory_gid)
+            if path == role_file:
+                mode = info.st_mode if role_mode is None else stat.S_IFREG | role_mode
+                return SimpleNamespace(st_mode=mode, st_uid=role_uid, st_gid=role_gid)
             return info
 
         return mock.patch.object(Path, "lstat", autospec=True, side_effect=fake)
@@ -99,30 +110,84 @@ class HostRoleTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "missing or unsafe"):
                     installer.require_host_role()
 
-    def test_role_directory_must_be_root_owned_and_not_group_or_other_writable(self):
+    def test_role_directory_accepts_root_owned_protected_non_root_group(self):
         with tempfile.TemporaryDirectory() as temporary:
             parent, role_file = self.role_fixture(Path(temporary), "production")
-            parent.chmod(0o777)
-            with mock.patch.object(installer, "HOST_ROLE_DIRECTORY", parent), mock.patch.object(installer, "HOST_ROLE_FILE", role_file), mock.patch.object(installer, "actual_host_role", return_value="production"), self.protected_lstat(parent, role_file):
+            parent.chmod(0o750)
+            with mock.patch.object(installer, "HOST_ROLE_DIRECTORY", parent), mock.patch.object(installer, "HOST_ROLE_FILE", role_file), mock.patch.object(installer, "actual_host_role", return_value="production"), self.protected_lstat(parent, role_file, directory_gid=1001):
+                self.assertEqual(installer.require_host_role("production"), "production")
+
+    def test_role_directory_rejects_non_root_owner_or_group_and_other_write(self):
+        for owner, mode in ((1001, 0o750), (0, 0o770), (0, 0o752)):
+            with self.subTest(owner=owner, mode=oct(mode)), tempfile.TemporaryDirectory() as temporary:
+                parent, role_file = self.role_fixture(Path(temporary), "production")
+                parent.chmod(mode)
+                with mock.patch.object(installer, "HOST_ROLE_DIRECTORY", parent), mock.patch.object(installer, "HOST_ROLE_FILE", role_file), mock.patch.object(installer, "actual_host_role", return_value="production"), self.protected_lstat(parent, role_file, directory_uid=owner, directory_gid=1001):
+                    with self.assertRaisesRegex(RuntimeError, "missing or unsafe"):
+                        installer.require_host_role()
+
+    def test_role_marker_must_remain_root_group_owned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent, role_file = self.role_fixture(Path(temporary), "production")
+            with mock.patch.object(installer, "HOST_ROLE_DIRECTORY", parent), mock.patch.object(installer, "HOST_ROLE_FILE", role_file), mock.patch.object(installer, "actual_host_role", return_value="production"), self.protected_lstat(parent, role_file, role_gid=1001):
                 with self.assertRaisesRegex(RuntimeError, "missing or unsafe"):
                     installer.require_host_role()
 
-    def test_role_directory_requires_root_group(self):
+    def test_staging_marker_keeps_0644_compatibility_but_rejects_group_or_other_write(self):
         with tempfile.TemporaryDirectory() as temporary:
             parent, role_file = self.role_fixture(Path(temporary), "staging")
-            original = Path.lstat
+            with mock.patch.object(installer, "HOST_ROLE_DIRECTORY", parent), mock.patch.object(installer, "HOST_ROLE_FILE", role_file), mock.patch.object(installer, "actual_host_role", return_value="staging"), self.protected_lstat(parent, role_file, role_mode=0o644):
+                self.assertEqual(installer.require_host_role(), "staging")
+            for mode in (0o664, 0o646):
+                with self.subTest(mode=oct(mode)), mock.patch.object(installer, "HOST_ROLE_DIRECTORY", parent), mock.patch.object(installer, "HOST_ROLE_FILE", role_file), mock.patch.object(installer, "actual_host_role", return_value="staging"), self.protected_lstat(parent, role_file, role_mode=mode):
+                    with self.assertRaisesRegex(RuntimeError, "missing or unsafe"):
+                        installer.require_host_role()
 
-            def non_root_group(path):
-                info = original(path)
-                if path == parent:
-                    return SimpleNamespace(st_mode=info.st_mode, st_uid=0, st_gid=20)
-                if path == role_file:
-                    return SimpleNamespace(st_mode=info.st_mode, st_uid=0, st_gid=0)
-                return info
 
-            with mock.patch.object(installer, "HOST_ROLE_DIRECTORY", parent), mock.patch.object(installer, "HOST_ROLE_FILE", role_file), mock.patch.object(installer, "actual_host_role", return_value="staging"), mock.patch.object(Path, "lstat", autospec=True, side_effect=non_root_group):
-                with self.assertRaisesRegex(RuntimeError, "missing or unsafe"):
-                    installer.require_host_role()
+class HostEnvironmentContractTests(unittest.TestCase):
+    def test_protected_environment_accepts_staging_and_production_permissions(self):
+        original = Path.lstat
+        for role, group, mode in (("staging", 1001, 0o640), ("production", 0, 0o600)):
+            with self.subTest(role=role), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "aicrm.env"
+                path.write_text("synthetic only\n")
+
+                def fake(candidate):
+                    info = original(candidate)
+                    if candidate == path:
+                        return SimpleNamespace(st_mode=stat.S_IFREG | mode, st_uid=0, st_gid=group)
+                    return info
+
+                with mock.patch.object(Path, "lstat", autospec=True, side_effect=fake), mock.patch.object(installer.grp, "getgrnam", return_value=SimpleNamespace(gr_gid=1001)):
+                    installer._require_protected_runtime_environment(path)
+
+    def test_protected_environment_rejects_unreadable_writable_linked_or_non_root_file(self):
+        original = Path.lstat
+        cases = ((1001, 1001, 0o600, stat.S_IFREG), (0, 1001, 0o660, stat.S_IFREG),
+                 (0, 0, 0o602, stat.S_IFREG), (0, 0, 0o200, stat.S_IFREG),
+                 (0, 0, 0o600, stat.S_IFLNK), (0, 0, 0o600, stat.S_IFDIR),
+                 (0, 1002, 0o640, stat.S_IFREG), (0, 1001, 0o604, stat.S_IFREG),
+                 (0, 1001, 0o744, stat.S_IFREG))
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "aicrm.env"
+            path.write_text("synthetic only\n")
+            for owner, group, mode, file_type in cases:
+                with self.subTest(owner=owner, group=group, mode=oct(mode), file_type=file_type):
+                    def fake(candidate):
+                        info = original(candidate)
+                        if candidate == path:
+                            return SimpleNamespace(st_mode=file_type | mode, st_uid=owner, st_gid=group)
+                        return info
+
+                    with mock.patch.object(Path, "lstat", autospec=True, side_effect=fake), mock.patch.object(installer.grp, "getgrnam", return_value=SimpleNamespace(gr_gid=1001)):
+                        with self.assertRaisesRegex(RuntimeError, "missing or unsafe"):
+                            installer._require_protected_runtime_environment(path)
+
+    def test_systemd_requires_non_optional_runtime_environment_file(self):
+        required = installer.ENV
+        self.assertTrue(installer._has_required_systemd_environment_file(f"{required} (ignore_errors=no) /opt/aicrm/current/release.env (ignore_errors=yes)", required))
+        self.assertFalse(installer._has_required_systemd_environment_file(f"{required} (ignore_errors=yes)", required))
+        self.assertFalse(installer._has_required_systemd_environment_file("/etc/aicrm/other.env (ignore_errors=no)", required))
 
 
 class InstallBackupPolicyTests(unittest.TestCase):
@@ -346,18 +411,25 @@ class HostContractTests(unittest.TestCase):
                 stack.enter_context(mock.patch.object(installer, "ENV", env_file))
                 stack.enter_context(mock.patch.object(installer, "CURRENT", Path("/opt/aicrm/current")))
                 stack.enter_context(mock.patch.object(installer, "RUNUSER", "/usr/sbin/runuser"))
+                check_env = stack.enter_context(mock.patch.object(installer, "_require_protected_runtime_environment"))
                 check_runuser = stack.enter_context(mock.patch.object(installer, "_require_root_executable"))
                 check_tool = stack.enter_context(mock.patch.object(installer, "_require_host_tool"))
                 stack.enter_context(mock.patch.object(installer, "_host_tool", side_effect=lambda name: f"/usr/bin/{name}"))
                 service_user = stack.enter_context(mock.patch.object(installer, "_service_user_can"))
                 stack.enter_context(mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")))
-                systemctl = stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(stdout="User=aicrm\nGroup=aicrm\nWorkingDirectory=/opt/aicrm/current\n")))
+                systemctl = stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(stdout=systemd_unit_output(env_file))))
                 psql = stack.enter_context(mock.patch.object(installer.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout='[160013,"aicrm_test","aicrm_test","127.0.0.1/32"]\n', stderr="")))
                 result = installer.check_host_contract()
             check_runuser.assert_called_once_with("/usr/sbin/runuser", "runuser")
+            check_env.assert_called_once_with(env_file)
             self.assertEqual([call.args for call in check_tool.call_args_list], [("/usr/bin/psql", "psql"), ("/usr/bin/systemctl", "systemctl")])
-            self.assertEqual(service_user.call_count, 3)
+            self.assertEqual(service_user.call_count, 2)
+            self.assertEqual([call.args for call in service_user.call_args_list], [
+                ("-x", Path("/opt/aicrm/current")),
+                ("-x", Path("/opt/aicrm/current/bin/aicrm")),
+            ])
             self.assertEqual(systemctl.call_count, 3)
+            self.assertTrue(all("EnvironmentFiles" in call.args for call in systemctl.call_args_list))
             args, kwargs = psql.call_args
             self.assertEqual(args[0][0], "/usr/sbin/runuser")
             self.assertIn("-u", args[0])
@@ -377,12 +449,13 @@ class HostContractTests(unittest.TestCase):
                 stack.enter_context(mock.patch.object(installer, "ENV", env_file))
                 stack.enter_context(mock.patch.object(installer, "CURRENT", Path("/opt/aicrm/current")))
                 stack.enter_context(mock.patch.object(installer, "RUNUSER", "/usr/sbin/runuser"))
+                stack.enter_context(mock.patch.object(installer, "_require_protected_runtime_environment"))
                 stack.enter_context(mock.patch.object(installer, "_require_root_executable"))
                 stack.enter_context(mock.patch.object(installer, "_require_host_tool"))
                 stack.enter_context(mock.patch.object(installer, "_host_tool", side_effect=lambda name: f"/usr/bin/{name}"))
                 stack.enter_context(mock.patch.object(installer, "_service_user_can"))
                 stack.enter_context(mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")))
-                stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(stdout="User=aicrm\nGroup=aicrm\nWorkingDirectory=/opt/aicrm/current\n")))
+                stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(stdout=systemd_unit_output(env_file))))
                 stack.enter_context(mock.patch.object(installer.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout='[160013,"aicrm_test","aicrm_test","10.0.4.6/32"]\n', stderr="")))
                 with self.assertRaisesRegex(RuntimeError, "identity or version mismatch"):
                     installer.check_host_contract()
@@ -396,12 +469,13 @@ class HostContractTests(unittest.TestCase):
                 stack.enter_context(mock.patch.object(installer, "ENV", env_file))
                 stack.enter_context(mock.patch.object(installer, "CURRENT", Path("/opt/aicrm/current")))
                 stack.enter_context(mock.patch.object(installer, "RUNUSER", "/usr/sbin/runuser"))
+                stack.enter_context(mock.patch.object(installer, "_require_protected_runtime_environment"))
                 stack.enter_context(mock.patch.object(installer, "_require_root_executable"))
                 stack.enter_context(mock.patch.object(installer, "_require_host_tool"))
                 stack.enter_context(mock.patch.object(installer, "_host_tool", side_effect=lambda name: f"/usr/bin/{name}"))
                 stack.enter_context(mock.patch.object(installer, "_service_user_can"))
                 stack.enter_context(mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")))
-                stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(stdout="User=aicrm\nGroup=aicrm\nWorkingDirectory=/opt/aicrm/current\n")))
+                stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(stdout=systemd_unit_output(env_file))))
                 stack.enter_context(mock.patch.object(installer.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout='[160013,"aicrm_test","aicrm_test","::1/128"]\n', stderr="")))
                 result = installer.check_host_contract()
             self.assertEqual(result["postgres_major"], 16)
@@ -415,12 +489,13 @@ class HostContractTests(unittest.TestCase):
                 stack.enter_context(mock.patch.object(installer, "ENV", env_file))
                 stack.enter_context(mock.patch.object(installer, "CURRENT", Path("/opt/aicrm/current")))
                 stack.enter_context(mock.patch.object(installer, "RUNUSER", "/usr/sbin/runuser"))
+                stack.enter_context(mock.patch.object(installer, "_require_protected_runtime_environment"))
                 stack.enter_context(mock.patch.object(installer, "_require_root_executable"))
                 stack.enter_context(mock.patch.object(installer, "_require_host_tool"))
                 stack.enter_context(mock.patch.object(installer, "_host_tool", side_effect=lambda name: f"/usr/bin/{name}"))
                 stack.enter_context(mock.patch.object(installer, "_service_user_can"))
                 stack.enter_context(mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")))
-                stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(stdout="User=aicrm\nGroup=aicrm\nWorkingDirectory=/opt/aicrm/current\n")))
+                stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(stdout=systemd_unit_output(env_file))))
                 stack.enter_context(mock.patch.object(installer.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout='[150008,"aicrm_test","aicrm_test","127.0.0.1/32"]\n', stderr="")))
                 with self.assertRaisesRegex(RuntimeError, "identity or version mismatch"):
                     installer.check_host_contract()
@@ -435,12 +510,13 @@ class HostContractTests(unittest.TestCase):
                 stack.enter_context(mock.patch.object(installer, "ENV", env_file))
                 stack.enter_context(mock.patch.object(installer, "CURRENT", Path("/opt/aicrm/current")))
                 stack.enter_context(mock.patch.object(installer, "RUNUSER", "/usr/sbin/runuser"))
+                stack.enter_context(mock.patch.object(installer, "_require_protected_runtime_environment"))
                 stack.enter_context(mock.patch.object(installer, "_require_root_executable"))
                 check_tool = stack.enter_context(mock.patch.object(installer, "_require_host_tool"))
                 stack.enter_context(mock.patch.object(installer, "_host_tool", side_effect=lambda name: names.append(name) or f"/usr/bin/{name}"))
                 stack.enter_context(mock.patch.object(installer, "_service_user_can"))
                 stack.enter_context(mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/var/lib/aicrm")))
-                stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(stdout="User=aicrm\nGroup=aicrm\nWorkingDirectory=/opt/aicrm/current\n")))
+                stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(stdout=systemd_unit_output(env_file))))
                 stack.enter_context(mock.patch.object(installer.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout='[160013,"aicrm","aicrm","10.0.4.13/32"]\n', stderr="")))
                 installer.check_host_contract()
             self.assertEqual(names, ["psql", "systemctl", "pg_dump", "pg_restore"])
