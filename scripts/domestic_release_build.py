@@ -38,6 +38,7 @@ CI_ONLY_PREFIXES = (".github/", "scripts/ci/")
 # Explicit validation-only entrypoints are not part of the installed release.
 # Keep this list small and reviewed; unknown scripts remain full-build changes.
 CI_ONLY_FILES = {
+    ".gitleaksignore",
     "scripts/dev_preflight.py",
     "scripts/check-architecture.py",
     "scripts/check-config-definition-import-boundary.sh",

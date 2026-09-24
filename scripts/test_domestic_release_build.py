@@ -60,6 +60,7 @@ class DomesticReleaseBuildTests(unittest.TestCase):
             "skills/aicrm-v3-development/SKILL.md",
             "scripts/dev_preflight.py",
             "scripts/check-architecture.py",
+            ".gitleaksignore",
         ])
         self.assertFalse(result.runtime_changed)
         self.assertFalse(result.full_build)

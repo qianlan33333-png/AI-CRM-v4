@@ -307,6 +307,22 @@ func domesticSmokeDataKey(t *testing.T) string {
 	return base64.RawStdEncoding.EncodeToString(key)
 }
 
+func domesticSmokeAPIV3Key(dataKey string) string {
+	// The provider credential is only used by the isolated smoke runtime. Derive
+	// a fresh, correctly sized synthetic value from this run's random fixture
+	// key rather than keeping a key-shaped literal in source history.
+	digest := sha256.Sum256([]byte("domestic-release-smoke/wechat-api-v3\x00" + dataKey))
+	return hex.EncodeToString(digest[:16])
+}
+
+func TestDomesticSmokeAPIV3KeyIsFreshAndSized(t *testing.T) {
+	first := domesticSmokeAPIV3Key("first-per-run-data-key")
+	second := domesticSmokeAPIV3Key("second-per-run-data-key")
+	if len(first) != 32 || len(second) != 32 || first == second {
+		t.Fatal("synthetic API v3 key must be a distinct 32-character value for each fixture key")
+	}
+}
+
 func domesticSmokeRuntime(
 	databaseURL, releaseSHA, h5Origin, dataKey string,
 	wechatPrivateKeyPath, wechatPlatformCertPath, alipayPrivateKeyPath, alipayPublicKey, alipayGateway string,
@@ -341,7 +357,7 @@ func domesticSmokeRuntime(
 			H5AppScope: "wechat-app:" + wechatH5AppID, OrderContactDataKey: dataKey,
 			MerchantID: "domestic-release-synthetic-merchant", MerchantSerial: "domestic-release-synthetic-serial",
 			PrivateKeyPath: wechatPrivateKeyPath, PlatformCertPath: wechatPlatformCertPath,
-			APIV3Key: "0123456789abcdef0123456789abcdef",
+			APIV3Key: domesticSmokeAPIV3Key(dataKey),
 		},
 		Alipay: platformconfig.Alipay{
 			Enabled: true, Production: false, AppID: alipayAppID,
