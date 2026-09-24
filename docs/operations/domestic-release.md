@@ -24,9 +24,9 @@
 ## 失败处置
 
 - `check` 失败：按准确 head 修复并重跑，不人工绕过 required check。
-- 预备机安装/迁移失败：停止在该候选并回退运行版本；不要重试安装。预备机目前没有仓库维护的数据库重置工具，迁移可能已部分执行，队列必须保持停止，不能把“可丢弃”理解成可盲目删除。
-- 预备机数据库恢复只能由一个授权操作员按此顺序引导处理：暂停 `aicrm-domestic-release.timer`；在 `10.0.4.6` 用准确已检查提交中 helper 文件的 SHA256 执行固定 helper 的只读主机合同检查，确认返回 `host_role=staging`、`postgres_major=16`、`database_connection=verified`；再在不输出或复制连接密钥的前提下，核对 `/etc/aicrm/aicrm.env` 的非机密连接身份必须为 `127.0.0.1`、用户 `aicrm_test`、数据库 `aicrm_test_baseline_5d15`、PostgreSQL `16.15`。这些是当前已核实的预备机身份；任何一项不符就停止，不得重建。
-- 仓库尚无经验证的 drop/create 命令或自动重置入口。目标身份确认后，授权操作员仍须使用已批准的本机 PostgreSQL 管理规程，仅重建上述合成库；随后用新构建候选所带的 `deploy/aicrm-migrate.service`（先 `migrate-river`、再 `migrate-platform -dir migrations`）应用迁移，并按 `deploy/seed-staging-business-fixtures.sh` 重建合成夹具、完成预发读回。该恢复步骤目前是引导式、未完成主机演练的人工操作，不是发布器自动能力；不得临时拼接 SQL、复用生产凭据或恢复生产 dump。取得完整读回后再生成新候选，不能复用失败候选的收据。
+- 预备机安装/迁移失败：停止该候选并保持 timer 暂停；不要对失败候选重试，也不要把“可丢弃”理解成可盲目删除。恢复仍由授权操作员引导，发布器没有自动重置数据库的能力。
+- **预备机数据库恢复门禁（人工，不自动）：**任何 scratch 建删前暂停 `aicrm-domestic-release.timer`，确认 timer/service 均为 `inactive`；对准确检查提交中的固定 helper 运行 `--check-host-contract --expected-helper-sha256 <源文件 SHA256>`。只允许身份全部匹配时继续：主机 `VM-4-6-ubuntu`、受保护角色 `staging`、地址 `10.0.4.6`、PostgreSQL 16、解析后的连接身份 `127.0.0.1:5432 / aicrm_test / aicrm_test_baseline_5d15`。不要显示或复制连接密钥；任何一项不符、目标库/owner 不符或存在活动会话就停止，不执行 CREATE/DROP。隔离验证只可使用独立命名、owner 为 `aicrm_test`、template0 且 locale 与基线一致的 scratch；仅用本机 PostgreSQL 管理连接执行普通 DROP，禁止 `DROP ... FORCE`。这组门禁不授权删除持久的 `aicrm_test_baseline_5d15`；其现场恢复仍需单独的操作员判断，发布器没有自动重置能力。
+- **隔离演练记录：**2026-09-24 在 `10.0.4.6` 使用 `aicrm_pr29_rehearsal_dee494a257e0` 和已核对的 `832a8d38…` 迁移二进制。单文件 9999 除零故障按预期回滚，未留下 ledger 行或 probe 表；普通 DROP 后重建，201 个迁移（最高 `0207`）与五类合成夹具全部通过读回，约 16.8 秒后 scratch 已清理。基线库前后 owner、大小、ledger 和夹具计数完全一致。**本演练没有重置基线库，不能作为现场基线恢复已经验证的证据。**实际恢复后重新跑迁移和合成夹具读回，并为新候选生成新证据，不复用失败候选收据。详细读回结果见 PR #29 描述。
 - 生产迁移前备份或迁移失败：停止队列；根据备份和迁移读回判断，未经专项修复不重试。
 - 生产健康失败：自动切回上一技术版本并读回。数据库迁移保持向前兼容，不反向恢复真实业务库。
 - 部署状态为 `outcome_unknown` 或读回互相矛盾：停止 timer，只读比对账本、当前链接、版本、摘要、服务与健康；得出确定结论前不重新安装。
