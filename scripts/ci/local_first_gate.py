@@ -27,6 +27,12 @@ OPERATOR_ONLY_PREFIXES = (
 # Release guard and deployment mechanics are validated by their own contracts;
 # they do not require an application receipt when no runtime code changes.
 OPERATOR_ONLY_PREFIXES += (
+    "scripts/dev_preflight.py",
+    "scripts/check-architecture.py",
+    "scripts/check-config-definition-import-boundary.sh",
+    "scripts/check-hxc-identity-boundaries.sh",
+    "scripts/check-radar-boundaries.sh",
+    "scripts/check-retention-registry.py",
     "scripts/domestic_release.py",
     "scripts/domestic_release_build.py",
     "scripts/test_domestic_release.py",

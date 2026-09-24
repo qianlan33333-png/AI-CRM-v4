@@ -1,0 +1,3 @@
+# Confirmed synthetic fixture key in this historical commit; the smoke now derives a fresh key at runtime.
+# Keep this exception bound to the single reported commit, file, rule, and line.
+96bb5e8ee062447a4c25d85a5259907d5434ad92:cmd/aicrm/domestic_release_installed_smoke_test.go:generic-api-key:344

@@ -13,7 +13,7 @@ import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shlex
 import shutil
@@ -26,6 +26,13 @@ import urllib.request
 SHA = re.compile(r"^[0-9a-f]{40}$")
 FILE_SHA = re.compile(r"^[0-9a-f]{64}$")
 REPO = "qianlan33333-png/AI-CRM-v4"
+CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
+CI_FULL_RESULT_STEP = "Record exact main full regression result"
+CI_REQUIRED_JOBS = ("plan", "preflight", "backend", "frontend", "browser", "archive-sdk", "governance", "check")
+CI_FULL_LANES = ("preflight", "backend", "frontend", "browser", "archive-sdk")
+CI_RUNS_PAGE_SIZE = 100
+CI_RUNS_MAX_PAGES = 20
+CI_HISTORY_RETRY_SECONDS = 300
 BUILD_USER = "aicrm-build"
 BUILD_ROOT = Path("/opt/aicrm/domestic/build-worker")
 GITHUB_FETCH_TIMEOUT_SECONDS = 30
@@ -34,6 +41,21 @@ CONTROLLER_SOURCE_PATHS = {
     "scripts/domestic_release_build.py",
     "deploy/domestic-promote.py",
 }
+ALIPAY_SMOKE_PATHS = (
+    "cmd/aicrm/",
+    "internal/externaleffects/",
+    "internal/identity/",
+    "internal/order/",
+    "internal/payment/",
+    "internal/platform/",
+    "internal/product/",
+    "internal/webshell/",
+    "migrations/",
+    "web/v3/payment/",
+)
+ALIPAY_SMOKE_FIXTURE = "cmd/aicrm/domestic_release_installed_smoke_test.go"
+SMOKE_DOC_SUFFIXES = {".md", ".mdx", ".rst", ".adoc"}
+SMOKE_TEST_DIR_NAMES = {"test", "tests", "testdata", "fixtures"}
 HOST_READBACK_CODE = """
 import hashlib, json, pathlib, re, subprocess, sys, urllib.request
 p = pathlib.Path('/opt/aicrm/current').resolve(strict=True)
@@ -127,6 +149,7 @@ def exact_check_success(sha: str, token: str | None = None, *, observation: dict
     if not runs:
         if observation is not None:
             observation.clear()
+            observation.update({"head_sha": sha, "success": False, "status": "missing", "conclusion": None})
         return False
     newest = max(runs, key=lambda item: (item.get("started_at") or "", item.get("id") or 0))
     success = newest.get("status") == "completed" and newest.get("conclusion") == "success"
@@ -135,13 +158,393 @@ def exact_check_success(sha: str, token: str | None = None, *, observation: dict
         completed = _parse_utc(newest.get("completed_at"))
         observation.clear()
         observation.update({
+            "head_sha": sha,
             "run_id": newest.get("id"),
             "started_at": newest.get("started_at"),
             "completed_at": newest.get("completed_at"),
             "duration_seconds": max(0, round((completed - started).total_seconds(), 1)) if started and completed else None,
             "success": success,
+            "status": newest.get("status"),
+            "conclusion": newest.get("conclusion"),
         })
     return success
+
+
+class CIHistoryReadError(RuntimeError):
+    """A temporary public GitHub API/transport failure while reading CI history."""
+
+
+def _check_signature(observation: dict) -> dict:
+    return {
+        key: observation.get(key)
+        for key in ("head_sha", "run_id", "started_at", "completed_at", "status", "conclusion")
+    }
+
+
+def _github_public_json(url: str) -> dict:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "aicrm-domestic-release/1",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.load(response)
+    except Exception as exc:
+        # The controller has no private GitHub token. Network errors and public
+        # API throttling must pause promotion briefly, then be retried without
+        # requiring a new application commit or another full CI run.
+        raise CIHistoryReadError("GitHub public CI metadata is temporarily unavailable") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("GitHub public CI response is not an object")
+    return payload
+
+
+def _main_ci_run_pages(start_page: int = 1):
+    """Yield public main-branch CI pages without a token or artifact ZIP."""
+    if type(start_page) is not int or start_page < 1 or start_page > CI_RUNS_MAX_PAGES:
+        return
+    for page in range(start_page, CI_RUNS_MAX_PAGES + 1):
+        url = (
+            f"https://api.github.com/repos/{REPO}/actions/workflows/ci.yml/runs"
+            f"?branch=main&per_page={CI_RUNS_PAGE_SIZE}&page={page}"
+        )
+        payload = _github_public_json(url)
+        batch = payload.get("workflow_runs")
+        if not isinstance(batch, list):
+            raise RuntimeError("GitHub main CI run list is missing")
+        yield [item for item in batch if isinstance(item, dict)]
+        if len(batch) < CI_RUNS_PAGE_SIZE:
+            return
+    raise RuntimeError("GitHub main CI history exceeds the bounded public scan")
+
+
+def _main_ci_run_jobs(run: dict) -> dict[str, dict]:
+    run_id = run.get("id")
+    attempt = run.get("run_attempt")
+    sha = run.get("head_sha")
+    if type(run_id) is not int or run_id <= 0 or type(attempt) is not int or attempt <= 0 or not isinstance(sha, str) or not SHA.fullmatch(sha):
+        raise RuntimeError("GitHub main CI run identity is invalid")
+    url = f"https://api.github.com/repos/{REPO}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100"
+    payload = _github_public_json(url)
+    raw_jobs = payload.get("jobs")
+    if not isinstance(raw_jobs, list):
+        raise RuntimeError("GitHub exact CI attempt jobs are missing")
+    jobs: dict[str, dict] = {}
+    for item in raw_jobs:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        if not isinstance(name, str):
+            continue
+        # A job from another SHA or rerun attempt is never proof for this run.
+        if item.get("head_sha") != sha or item.get("run_attempt") != attempt:
+            continue
+        if name in jobs:
+            raise RuntimeError(f"GitHub exact CI attempt repeats job {name}")
+        jobs[name] = item
+    return jobs
+
+
+def _main_ci_run_classification(run: dict, jobs: dict[str, dict]) -> tuple[str, str]:
+    """Classify a run from its own exact attempt jobs; no PR-controlled flags are read."""
+    event = run.get("event")
+    force_full = event == "workflow_dispatch" and "[force_full]" in str(run.get("display_title", ""))
+    if run.get("path") != CI_WORKFLOW_PATH or run.get("head_branch") != "main":
+        return "not_full", "run is outside protected main CI"
+    if event not in {"schedule", "push", "workflow_dispatch"} or (event == "workflow_dispatch" and not force_full):
+        return "not_full", "run is not an eligible main full-check trigger"
+
+    sha = run.get("head_sha")
+    attempt = run.get("run_attempt")
+    expected = {name for name in CI_REQUIRED_JOBS}
+    if not isinstance(sha, str) or not SHA.fullmatch(sha) or type(attempt) is not int or attempt <= 0:
+        return "unknown", "eligible run identity is invalid"
+    if any(name not in jobs for name in expected):
+        return "unknown", "eligible full run is missing a required job"
+    for name in expected:
+        if jobs[name].get("head_sha") != sha or jobs[name].get("run_attempt") != attempt:
+            return "unknown", "required job does not match the exact run attempt"
+
+    auxiliaries = ("plan", "governance", "check")
+    check_steps = jobs["check"].get("steps")
+    marker = next(
+        (step for step in check_steps if isinstance(step, dict) and step.get("name") == CI_FULL_RESULT_STEP),
+        None,
+    ) if isinstance(check_steps, list) else None
+    if marker is None:
+        if event == "push":
+            # Pre-PR2 main pushes can have old CI failures or skipped lanes.
+            # They are not regression records and must not bootstrap a pause.
+            return "not_full", "legacy main push has no full-regression record step"
+        return "unknown", "eligible full run is missing its full-regression record step"
+    all_aux_success = all(
+        jobs[name].get("status") == "completed" and jobs[name].get("conclusion") == "success"
+        for name in auxiliaries
+    )
+    lane_conclusions = [jobs[name].get("conclusion") for name in CI_FULL_LANES]
+    if all(value == "skipped" for value in lane_conclusions) and all_aux_success:
+        if attempt > 1:
+            return "unknown", "rerun attempt skipped every lane, so an earlier attempt may remain unresolved"
+        return "verified", "all lanes were skipped; this cannot clear a full-run failure"
+    if any(value == "skipped" for value in lane_conclusions):
+        return "unknown", "eligible full run skipped a required lane"
+    if not all_aux_success:
+        return "unknown", "eligible full run plan, governance, or required check did not succeed"
+    if any(
+        jobs[name].get("status") != "completed" or jobs[name].get("conclusion") != "success"
+        for name in CI_FULL_LANES
+    ):
+        return "unknown", "eligible full run did not complete every verification lane successfully"
+    return "success", "all full verification lanes, governance, and check succeeded"
+
+
+def _main_first_parent_positions(repo: Path, head_sha: str) -> dict[str, int]:
+    if not SHA.fullmatch(head_sha):
+        raise ValueError("invalid protected main head")
+    chain = git(repo, "rev-list", "--first-parent", head_sha).splitlines()
+    if not chain or chain[0] != head_sha or any(not SHA.fullmatch(item) for item in chain):
+        raise RuntimeError("protected main first-parent chain is invalid")
+    return {sha: len(chain) - index - 1 for index, sha in enumerate(chain)}
+
+
+def _main_full_regression_blocker(
+    repo: Path,
+    candidate_sha: str,
+    main_head_sha: str,
+    *,
+    cache: dict | None = None,
+) -> dict | None:
+    """Stop a candidate behind an unresolved full-main regression or unknown run."""
+    if not SHA.fullmatch(candidate_sha) or not SHA.fullmatch(main_head_sha):
+        raise ValueError("invalid main regression candidate identity")
+    positions = _main_first_parent_positions(repo, main_head_sha)
+    if candidate_sha not in positions:
+        raise RuntimeError("release candidate is not on protected main first-parent history")
+    candidate_position = positions[candidate_sha]
+    cache = cache if cache is not None else {}
+    if cache.get("head_sha") != main_head_sha:
+        cache.clear()
+        cache["head_sha"] = main_head_sha
+        cache["pages"] = []
+        cache["complete"] = False
+    pages: list[list[dict]] = cache.setdefault("pages", [])
+    later_success_positions: list[int] = []
+    def scan_page(page: list[dict]) -> dict | None:
+        runs = [
+            run for run in page
+            if run.get("path") == CI_WORKFLOW_PATH
+            and run.get("head_branch") == "main"
+            and run.get("event") in {"schedule", "push", "workflow_dispatch"}
+            and (run.get("event") != "workflow_dispatch" or "[force_full]" in str(run.get("display_title", "")))
+        ]
+        runs.sort(
+            key=lambda run: (
+                str(run.get("run_started_at") or run.get("updated_at") or run.get("created_at") or ""),
+                int(run.get("id") or 0),
+                int(run.get("run_attempt") or 0),
+            ),
+            reverse=True,
+        )
+        for run in runs:
+            sha = run.get("head_sha")
+            if not isinstance(sha, str) or not SHA.fullmatch(sha):
+                return {"run_id": run.get("id"), "run_attempt": run.get("run_attempt"), "sha": None, "classification": "unknown", "reason": "eligible main run SHA is invalid"}
+            run_position = positions.get(sha)
+            if run_position is None:
+                return {"run_id": run.get("id"), "run_attempt": run.get("run_attempt"), "sha": sha, "classification": "unknown", "reason": "eligible main run is outside the current first-parent chain"}
+            try:
+                job_key = (run.get("id"), run.get("run_attempt"))
+                if job_key not in cache:
+                    cache[job_key] = _main_ci_run_jobs(run)
+                jobs = cache[job_key]
+                outcome, reason = _main_ci_run_classification(run, jobs)
+            except CIHistoryReadError as exc:
+                return {
+                    "run_id": run.get("id"),
+                    "run_attempt": run.get("run_attempt"),
+                    "sha": sha,
+                    "classification": "unknown",
+                    "transient_read_error": True,
+                    "reason": str(exc),
+                }
+            except Exception as exc:
+                outcome, reason = "unknown", f"exact run jobs could not be verified: {type(exc).__name__}"
+            if outcome == "not_full" or outcome == "verified":
+                continue
+            if outcome == "success":
+                later_success_positions.append(run_position)
+                # A full run on the current tip covers every older first-parent SHA.
+                if run_position == positions[main_head_sha]:
+                    return {"_stop": True}
+                continue
+            if run_position > candidate_position:
+                # A future regression does not prevent earlier commits from being released.
+                continue
+            cleared = any(success_position >= run_position for success_position in later_success_positions)
+            if not cleared:
+                return {
+                    "run_id": run.get("id"),
+                    "run_attempt": run.get("run_attempt"),
+                    "sha": sha,
+                    "classification": "unknown",
+                    "reason": reason,
+                }
+        return {"_continue": True}
+
+    for page in pages:
+        result = scan_page(page)
+        if result is not None and result.get("_stop"):
+            return None
+        if result is not None and not result.get("_continue"):
+            return result
+    if cache.get("complete"):
+        return None
+    start_page = len(pages) + 1
+    try:
+        for page in _main_ci_run_pages(start_page):
+            pages.append(page)
+            result = scan_page(page)
+            if result is not None and result.get("_stop"):
+                return None
+            if result is not None and not result.get("_continue"):
+                return result
+        cache["complete"] = True
+    except CIHistoryReadError as exc:
+        return {
+            "run_id": None,
+            "run_attempt": None,
+            "sha": main_head_sha,
+            "classification": "unknown",
+            "transient_read_error": True,
+            "reason": str(exc),
+        }
+    return None
+
+
+def _ci_retry_after_utc() -> str:
+    retry_at = datetime.fromtimestamp(time.time() + CI_HISTORY_RETRY_SECONDS, timezone.utc)
+    return retry_at.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _ci_retry_is_due(pause: dict) -> bool:
+    retry_at = _parse_utc(pause.get("retry_after_utc"))
+    return retry_at is not None and retry_at <= datetime.now(timezone.utc)
+
+
+def _record_ci_pause_retry(pause: dict, *, transient: bool = True) -> None:
+    if transient:
+        pause["retry_after_utc"] = _ci_retry_after_utc()
+    else:
+        pause.pop("retry_after_utc", None)
+
+
+def _watch_main_check(sha: str) -> dict:
+    observation: dict = {}
+    try:
+        exact_check_success(sha, observation=observation)
+    except Exception:
+        return {"head_sha": sha, "run_id": None, "status": "unavailable", "conclusion": None}
+    return _check_signature(observation)
+
+
+def _enter_ci_regression_pause(
+    state_path: Path,
+    state: dict,
+    repo: Path,
+    candidate_sha: str,
+    main_head_sha: str,
+    blocker: dict,
+    candidate_check_observation: dict | None = None,
+) -> dict:
+    if candidate_sha == main_head_sha and candidate_check_observation is not None:
+        watched_check = _check_signature(candidate_check_observation)
+    else:
+        watched_check = _watch_main_check(main_head_sha)
+    pause = {
+        "candidate_sha": candidate_sha,
+        "main_head_sha": main_head_sha,
+        "classification": "unknown",
+        "blocker": blocker,
+        "watched_check": watched_check,
+        "blocked_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    if blocker.get("transient_read_error") is True:
+        _record_ci_pause_retry(pause)
+    state.update(
+        status="ci_regression_blocked",
+        failure="main full CI evidence is failing or incomplete; release queue is paused",
+        ci_regression_pause=pause,
+    )
+    atomic_json(state_path, state)
+    return {"status": "ci_regression_blocked", "sha": candidate_sha, "blocker": blocker}
+
+
+def _retry_ci_regression_pause(state_path: Path, state: dict, repo: Path, main_head_sha: str) -> bool:
+    """Retry transient history reads after backoff; retry CI evidence on a new green check."""
+    pause = state.get("ci_regression_pause")
+    if not isinstance(pause, dict) or not isinstance(pause.get("blocker"), dict):
+        raise RuntimeError("CI regression pause ledger is invalid")
+    retry_is_due = _ci_retry_is_due(pause)
+    head_changed = main_head_sha != pause.get("main_head_sha")
+    if pause.get("retry_after_utc") and not retry_is_due and not head_changed:
+        return False
+    observation: dict = {}
+    try:
+        success = exact_check_success(main_head_sha, observation=observation)
+    except Exception:
+        pause["main_head_sha"] = main_head_sha
+        _record_ci_pause_retry(pause)
+        state["ci_regression_pause"] = pause
+        atomic_json(state_path, state)
+        return False
+    signature = _check_signature(observation)
+    prior_signature = pause.get("watched_check")
+    changed = main_head_sha != pause.get("main_head_sha") or signature != prior_signature
+    retry_transient_history = (
+        pause.get("blocker", {}).get("transient_read_error") is True
+        and _ci_retry_is_due(pause)
+    )
+    if not changed and not retry_transient_history:
+        if retry_is_due:
+            pause.pop("retry_after_utc", None)
+            state["ci_regression_pause"] = pause
+            atomic_json(state_path, state)
+        return False
+    pause["main_head_sha"] = main_head_sha
+    pause["watched_check"] = signature
+    if not success:
+        if retry_transient_history:
+            _record_ci_pause_retry(pause)
+        elif retry_is_due:
+            pause.pop("retry_after_utc", None)
+        state["ci_regression_pause"] = pause
+        atomic_json(state_path, state)
+        return False
+    try:
+        blocker = _main_full_regression_blocker(repo, main_head_sha, main_head_sha)
+    except Exception as exc:
+        blocker = {
+            "run_id": None,
+            "run_attempt": None,
+            "sha": main_head_sha,
+            "classification": "unknown",
+            "transient_read_error": isinstance(exc, CIHistoryReadError),
+            "reason": f"full CI history could not be reverified: {type(exc).__name__}",
+        }
+    if blocker is not None:
+        pause["blocker"] = blocker
+        _record_ci_pause_retry(pause, transient=blocker.get("transient_read_error") is True)
+        state["ci_regression_pause"] = pause
+        atomic_json(state_path, state)
+        return False
+    state.pop("ci_regression_pause", None)
+    state.update(status="ready", failure=None)
+    atomic_json(state_path, state)
+    return True
 
 
 def _git_file_sha256(repo: Path, sha: str, path: str) -> str:
@@ -367,11 +770,20 @@ def copy_payload(config: dict, sha: str, payload: Path, metadata: Path, link_sha
     return incoming, remote_meta
 
 
-def build_candidate(config: dict, sha: str, base: str, base_release: Path | None) -> tuple[Path, dict]:
+def build_candidate(
+    config: dict,
+    sha: str,
+    base: str,
+    base_release: Path | None,
+    validation_scope_base: str | None = None,
+) -> tuple[Path, dict]:
     repo = Path(config["repo"])
     work_root = Path(config["work_root"])
     if not SHA.fullmatch(sha) or not SHA.fullmatch(base):
         raise ValueError("invalid build commit")
+    validation_scope_base = validation_scope_base or base
+    if not SHA.fullmatch(validation_scope_base):
+        raise ValueError("invalid validation scope base commit")
     worker = BUILD_ROOT / sha
     checkout = worker / "source"
     worker_out = worker / "out"
@@ -395,7 +807,7 @@ def build_candidate(config: dict, sha: str, base: str, base_release: Path | None
         f"npm_config_cache={BUILD_ROOT / 'cache/npm'}",
         f"TMPDIR={BUILD_ROOT / 'tmp'}", "PYTHONDONTWRITEBYTECODE=1",
     ]
-    args = [*build_prefix, "/usr/bin/env", "-i", *environment, "python3", str(Path(__file__).with_name("domestic_release_build.py")), "build", "--repo", str(checkout), "--base", base, "--target", sha, "--base-release", str(base_release) if base_release is not None else "none", "--out", str(worker_out)]
+    args = [*build_prefix, "/usr/bin/env", "-i", *environment, "python3", str(Path(__file__).with_name("domestic_release_build.py")), "build", "--repo", str(checkout), "--base", base, "--validation-scope-base", validation_scope_base, "--target", sha, "--base-release", str(base_release) if base_release is not None else "none", "--out", str(worker_out)]
     command(*args, timeout=7200)
     if worker_out.is_symlink():
         raise RuntimeError("isolated build produced a symlink")
@@ -405,7 +817,15 @@ def build_candidate(config: dict, sha: str, base: str, base_release: Path | None
     shutil.copytree(worker_out, out)
     out.chmod(0o755)
     metadata = json.loads((out / "domestic-release.json").read_text())
-    if metadata.get("source_sha") != sha or metadata.get("base_sha") != base or metadata.get("source_tree") != git(repo, "rev-parse", f"{sha}^{{tree}}"):
+    if (
+        metadata.get("source_sha") != sha
+        or metadata.get("base_sha") != base
+        or metadata.get("source_tree") != git(repo, "rev-parse", f"{sha}^{{tree}}")
+        or metadata.get("validation_scope_base_sha") != validation_scope_base
+        or metadata.get("validation_scope_base_tree") != git(repo, "rev-parse", f"{validation_scope_base}^{{tree}}")
+        or metadata.get("validation_scope_changed_paths") != git(repo, "diff", "--name-only", "--no-renames", validation_scope_base, sha).splitlines()
+        or metadata.get("actual_ci_baseline_verified") is not False
+    ):
         raise RuntimeError("built artifact source mismatch")
     manifest = out / "release" / "release-files.sha256"
     if hashlib.sha256(manifest.read_bytes()).hexdigest() != metadata.get("release_files_sha256"):
@@ -450,6 +870,121 @@ def stage_install(config: dict, sha: str, out: Path, base_sha: str, *, timing_si
     return receipt
 
 
+def _alipay_smoke_required(plan: dict) -> bool:
+    """Return whether trusted controller policy requires the installed checkout contract."""
+    paths = plan.get("changed_paths", [])
+    if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+        raise RuntimeError("invalid release impact paths for staging smoke policy")
+    return any(
+        path == ALIPAY_SMOKE_FIXTURE
+        or (path.startswith(ALIPAY_SMOKE_PATHS) and not _alipay_smoke_path_is_test_or_document(path))
+        for path in paths
+    )
+
+
+def _alipay_smoke_path_is_test_or_document(path: str) -> bool:
+    parsed = PurePosixPath(path)
+    name = parsed.name.lower()
+    if path.startswith("docs/") or parsed.suffix.lower() in SMOKE_DOC_SUFFIXES:
+        return True
+    if any(part.lower() in SMOKE_TEST_DIR_NAMES for part in parsed.parts):
+        return True
+    if name.endswith("_test.go") or name.startswith(("test_", "test-")):
+        return True
+    if ".test." in name or ".spec." in name:
+        return True
+    return parsed.parent.as_posix() == "cmd/aicrm" and name.endswith("_chromium_journey.mjs")
+
+
+def _trusted_changed_paths(repo: Path, base_sha: str, target_sha: str) -> list[str]:
+    if not SHA.fullmatch(base_sha) or not SHA.fullmatch(target_sha):
+        raise ValueError("invalid release path range")
+    return git(repo, "diff", "--name-only", "--no-renames", base_sha, target_sha).splitlines()
+
+
+def verify_stage_smoke_receipt(
+    receipt: dict,
+    source_sha: str,
+    installed_sha: str,
+    manifest_sha256: str,
+    helper_sha256: str,
+    source_tree: str,
+) -> dict:
+    expected = {
+        "status": "passed",
+        "contract": "alipay_checkout",
+        "test_name": "TestDomesticReleaseInstalledAlipayCheckout",
+        "test_marker": "domestic_release_installed_alipay_checkout: PASS",
+        "stage_role": "staging",
+        "source_sha": source_sha,
+        "source_tree": source_tree,
+        "installed_sha": installed_sha,
+        "manifest_sha256": manifest_sha256,
+        "helper_sha256": helper_sha256,
+    }
+    if not isinstance(receipt, dict) or any(receipt.get(key) != value for key, value in expected.items()):
+        raise RuntimeError("staging smoke receipt identity mismatch")
+    if not FILE_SHA.fullmatch(str(receipt.get("installed_binary_sha256", ""))):
+        raise RuntimeError("staging smoke receipt has no installed binary digest")
+    timestamp = receipt.get("verified_at_utc")
+    if _parse_utc(timestamp) is None:
+        raise RuntimeError("staging smoke receipt has no verification timestamp")
+    return receipt
+
+
+def _installed_stage_manifest_sha(config: dict, installed_sha: str) -> str:
+    readback = stage_readback(installed_sha)
+    if readback.get("current") != f"/opt/aicrm/releases/{installed_sha}":
+        raise RuntimeError("staging smoke current release mismatch")
+    manifest_sha = readback.get("manifest_sha256")
+    if not isinstance(manifest_sha, str) or not FILE_SHA.fullmatch(manifest_sha):
+        raise RuntimeError("staging smoke manifest digest is missing")
+    artifact = Path(config["work_root"]) / "builds" / installed_sha
+    metadata_path = artifact / "domestic-release.json"
+    release_path = artifact / "release"
+    if metadata_path.is_symlink() or not metadata_path.is_file() or release_path.is_symlink() or not release_path.is_dir():
+        raise RuntimeError("staging smoke verified package is missing")
+    metadata = json.loads(metadata_path.read_text())
+    if metadata.get("source_sha") != installed_sha or metadata.get("release_files_sha256") != manifest_sha:
+        raise RuntimeError("staging smoke package metadata does not match the installed release")
+    verify_release_artifact(release_path, metadata)
+    return manifest_sha
+
+
+def run_stage_smoke(
+    config: dict,
+    repo: Path,
+    source_sha: str,
+    installed_sha: str,
+    manifest_sha: str,
+    *,
+    timing_sink: dict | None = None,
+) -> dict:
+    """Run a fixed source fixture against the exact installed staging executable."""
+    if not all(SHA.fullmatch(value) for value in (source_sha, installed_sha)) or not FILE_SHA.fullmatch(manifest_sha):
+        raise ValueError("invalid staging smoke identity")
+    started = time.monotonic()
+    helper = config["stage_helper"]
+    helper_sha = _git_file_sha256(repo, source_sha, "deploy/domestic-promote.py")
+    if _local_file_sha256(Path(helper)) != helper_sha:
+        raise RuntimeError("fixed staging smoke helper does not match the checked source")
+    try:
+        output = command(
+            "sudo", helper, "--run-staging-smoke",
+            "--source-sha", source_sha,
+            "--expected-sha", installed_sha,
+            "--expected-manifest-sha256", manifest_sha,
+            "--expected-helper-sha256", helper_sha,
+            timeout=900,
+        )
+        receipt = json.loads(output.splitlines()[-1])
+        source_tree = git(repo, "rev-parse", f"{source_sha}^{{tree}}")
+        return verify_stage_smoke_receipt(receipt, source_sha, installed_sha, manifest_sha, helper_sha, source_tree)
+    finally:
+        if timing_sink is not None:
+            timing_sink["stage_smoke"] = round(time.monotonic() - started, 1)
+
+
 def verify_release_artifact(release: Path, metadata: dict) -> None:
     """Revalidate the complete cached artifact before reusing a stage orphan."""
     if release.is_symlink() or not release.is_dir():
@@ -491,6 +1026,10 @@ def promote_checked_candidate(
     started: float,
     *,
     stage_receipt: dict,
+    changed_paths: list[str],
+    build_base_sha: str,
+    validation_scope_base_sha: str,
+    stage_smoke_receipt: dict | None = None,
     phase_timings: dict | None = None,
     check_observation: dict | None = None,
 ) -> None:
@@ -500,14 +1039,51 @@ def promote_checked_candidate(
     build_timings = metadata.get("phase_timings_seconds", {})
     if isinstance(build_timings, dict) and isinstance(build_timings.get("build"), (int, float)):
         phase_timings.setdefault("build", build_timings["build"])
+    if not SHA.fullmatch(validation_scope_base_sha) or git(Path(config["repo"]), "rev-parse", f"{sha}^1") != validation_scope_base_sha:
+        raise RuntimeError("promotion validation scope is not the exact first parent")
+    if metadata.get("validation_scope_base_sha") != validation_scope_base_sha:
+        raise RuntimeError("promotion validation scope does not match the built candidate")
+    repo = Path(config["repo"])
+    if not SHA.fullmatch(build_base_sha) or metadata.get("base_sha") != build_base_sha:
+        raise RuntimeError("promotion build base does not match the deployed source cursor")
+    trusted_build_paths = _trusted_changed_paths(repo, build_base_sha, sha)
+    if changed_paths != trusted_build_paths:
+        raise RuntimeError("promotion package paths do not match the deployed build base")
+    smoke_paths = _trusted_changed_paths(repo, validation_scope_base_sha, sha)
+    if (
+        metadata.get("validation_scope_base_tree") != git(repo, "rev-parse", f"{validation_scope_base_sha}^{{tree}}")
+        or metadata.get("validation_scope_changed_paths") != smoke_paths
+        or metadata.get("actual_ci_baseline_verified") is not False
+    ):
+        raise RuntimeError("promotion validation range does not match the checked source")
+    smoke_required = _alipay_smoke_required({"changed_paths": smoke_paths})
+    if smoke_required:
+        source_tree = metadata.get("source_tree")
+        # The checked controller derives its own exact helper source digest;
+        # candidate metadata cannot make the behavior contract optional.
+        if not isinstance(source_tree, str) or not SHA.fullmatch(source_tree):
+            raise RuntimeError("staging smoke candidate source tree is invalid")
+        if stage_smoke_receipt is None:
+            raise RuntimeError("required installed staging smoke receipt is missing")
+        actual_helper_sha = _git_file_sha256(Path(config["repo"]), sha, "deploy/domestic-promote.py")
+        verify_stage_smoke_receipt(
+            stage_smoke_receipt, sha, sha, metadata["release_files_sha256"], actual_helper_sha, source_tree,
+        )
     state.update(
         status="staging_verified",
         blocked_sha=sha,
         staging_verified_sha=sha,
         staging_verified_receipt=stage_receipt,
         staging_verified_manifest_sha256=metadata["release_files_sha256"],
+        validation_scope_base_sha=validation_scope_base_sha,
+        validation_scope_base_tree=metadata["validation_scope_base_tree"],
+        validation_scope_changed_paths=metadata["validation_scope_changed_paths"],
         last_release_timings_seconds=phase_timings,
     )
+    if smoke_required and stage_smoke_receipt is not None:
+        state["staging_verified_smoke"] = stage_smoke_receipt
+    else:
+        state.pop("staging_verified_smoke", None)
     atomic_json(state_path, state)
     try:
         metadata_path = out / "domestic-release.json"
@@ -598,8 +1174,30 @@ def recover(config: dict, *, retry_blocked: bool, expected_sha: str) -> dict:
         git(repo, "fetch", "--no-tags", "origin", "main")
         head = git(repo, "rev-parse", "refs/remotes/origin/main")
         queue = first_parent_queue(repo, state["processed_sha"], head)
-        if not queue or queue[0] != sha or not exact_check_success(sha, os.environ.get("GITHUB_TOKEN")):
+        check_observation: dict = {}
+        if not queue or queue[0] != sha or not exact_check_success(sha, os.environ.get("GITHUB_TOKEN"), observation=check_observation):
             raise RuntimeError("blocked SHA is not the next checked commit on protected main")
+        try:
+            regression_blocker = _main_full_regression_blocker(repo, sha, head)
+        except Exception as exc:
+            regression_blocker = {
+                "run_id": None,
+                "run_attempt": None,
+                "sha": head,
+                "classification": "unknown",
+                "reason": f"main full CI history could not be verified: {type(exc).__name__}",
+            }
+        if regression_blocker is not None:
+            state["ci_regression_pause"] = {
+                "candidate_sha": sha,
+                "main_head_sha": head,
+                "classification": "unknown",
+                "blocker": regression_blocker,
+                "watched_check": _check_signature(check_observation),
+                "blocked_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+            atomic_json(state_path, state)
+            raise RuntimeError("main full CI evidence is failing or incomplete; orphan recovery is blocked")
 
         installed = state.get("prod_installed_sha")
         deployed = state.get("deployed_source_sha")
@@ -629,6 +1227,41 @@ def recover(config: dict, *, retry_blocked: bool, expected_sha: str) -> dict:
         stage = stage_readback(sha)
         verify_readback(stage, sha, manifest_sha)
         verify_install_receipt(stage.get("receipt"), metadata, deployed)
+
+        validation_scope_base_sha = state.get("processed_sha")
+        if (
+            not isinstance(validation_scope_base_sha, str)
+            or not SHA.fullmatch(validation_scope_base_sha)
+            or git(repo, "rev-parse", f"{sha}^1") != validation_scope_base_sha
+            or metadata.get("validation_scope_base_sha") != validation_scope_base_sha
+        ):
+            raise RuntimeError("stage validation scope does not match the blocked first-parent commit")
+        changed_paths = _trusted_changed_paths(repo, deployed, sha)
+        validation_paths = _trusted_changed_paths(repo, validation_scope_base_sha, sha)
+        smoke_required = _alipay_smoke_required({"changed_paths": validation_paths})
+        stage_smoke_receipt = None
+        if smoke_required:
+            try:
+                stage_smoke_receipt = run_stage_smoke(config, repo, sha, sha, manifest_sha)
+            except Exception as exc:
+                state.pop("staging_verified_smoke", None)
+                state.update(
+                    status="outcome_unknown",
+                    failure=f"required staging installed behavior smoke failed during recovery: {type(exc).__name__}",
+                    last_stage_smoke={"source_sha": sha, "installed_sha": sha, "manifest_sha256": manifest_sha, "status": "failed"},
+                )
+                atomic_json(state_path, state)
+                raise
+            verify_stage_smoke_receipt(
+                stage_smoke_receipt,
+                sha,
+                sha,
+                manifest_sha,
+                _git_file_sha256(repo, sha, "deploy/domestic-promote.py"),
+                git(repo, "rev-parse", f"{sha}^{{tree}}"),
+            )
+            state["staging_verified_smoke"] = stage_smoke_receipt
+            atomic_json(state_path, state)
 
         production = prod_readback(config, sha)
         target_receipt_present = production.get("receipt_exists") is True
@@ -685,6 +1318,10 @@ def recover(config: dict, *, retry_blocked: bool, expected_sha: str) -> dict:
             last_duration_seconds=round(time.monotonic() - started, 1),
             last_merge_to_healthy_seconds=max(0, int(time.time()) - int(commit_time)),
         )
+        if stage_smoke_receipt is not None:
+            state["staging_verified_smoke"] = stage_smoke_receipt
+        else:
+            state.pop("staging_verified_smoke", None)
         atomic_json(state_path, state)
         return {"status": "ready", "processed_sha": sha, "recovery": state["last_recovery_status"]}
 
@@ -699,7 +1336,7 @@ def poll(config: dict) -> dict:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         state = json.loads(state_path.read_text())
         initial_status = state.get("status")
-        if initial_status not in {"ready", "controller_update_required"}:
+        if initial_status not in {"ready", "controller_update_required", "ci_regression_blocked"}:
             raise RuntimeError(f"queue halted: {state.get('status')}")
         blocked_controller_sha = state.get("blocked_sha") if initial_status == "controller_update_required" else None
         if blocked_controller_sha is not None and not SHA.fullmatch(blocked_controller_sha):
@@ -712,9 +1349,19 @@ def poll(config: dict) -> dict:
         require_official_origin(repo)
         git(repo, "fetch", "--no-tags", "origin", "main")
         head = git(repo, "rev-parse", "refs/remotes/origin/main")
+        if initial_status == "ci_regression_blocked":
+            if not _retry_ci_regression_pause(state_path, state, repo, head):
+                return {
+                    "status": "ci_regression_blocked",
+                    "sha": state.get("ci_regression_pause", {}).get("candidate_sha"),
+                    "blocker": state.get("ci_regression_pause", {}).get("blocker"),
+                }
+            initial_status = "ready"
+            blocked_controller_sha = None
         queue = first_parent_queue(repo, processed, head)
         if blocked_controller_sha is not None and (not queue or queue[0] != blocked_controller_sha):
             raise RuntimeError("controller update is no longer the next checked first-parent commit")
+        regression_history_cache: dict = {}
         for sha in queue:
             started = time.monotonic()
             check_observation: dict = {}
@@ -722,7 +1369,29 @@ def poll(config: dict) -> dict:
                 return {"status": "awaiting_exact_check", "sha": sha}
             if not config["production_enabled"]:
                 return {"status": "dry_run_only", "sha": sha}
+            try:
+                regression_blocker = _main_full_regression_blocker(
+                    repo, sha, head, cache=regression_history_cache,
+                )
+            except Exception as exc:
+                regression_blocker = {
+                    "run_id": None,
+                    "run_attempt": None,
+                    "sha": head,
+                    "classification": "unknown",
+                    "reason": f"main full CI history could not be verified: {type(exc).__name__}",
+                }
+            if regression_blocker is not None:
+                return _enter_ci_regression_pause(
+                    state_path, state, repo, sha, head, regression_blocker,
+                    candidate_check_observation=check_observation,
+                )
             plan = json.loads(command("python3", str(Path(__file__).with_name("domestic_release_build.py")), "classify", "--repo", str(repo), "--base", deployed, "--target", sha))
+            changed_paths = _trusted_changed_paths(repo, deployed, sha)
+            validation_paths = _trusted_changed_paths(repo, processed, sha)
+            if plan.get("changed_paths") != changed_paths:
+                raise RuntimeError("release classifier output does not match the trusted commit path range")
+            smoke_required = _alipay_smoke_required({"changed_paths": validation_paths})
             phase_timings: dict[str, float | None] = {
                 "check": check_observation.get("duration_seconds"),
             }
@@ -747,6 +1416,32 @@ def poll(config: dict) -> dict:
             if blocked_controller_sha == sha and not controller_files:
                 raise RuntimeError("blocked controller update is absent from the source impact plan")
             if not plan.get("runtime_changed"):
+                stage_smoke_receipt = None
+                if smoke_required:
+                    try:
+                        smoke_manifest = _installed_stage_manifest_sha(config, deployed)
+                        stage_smoke_receipt = run_stage_smoke(
+                            config,
+                            repo,
+                            sha,
+                            deployed,
+                            smoke_manifest,
+                            timing_sink=phase_timings,
+                        )
+                    except Exception as exc:
+                        phase_timings["total"] = round(time.monotonic() - started, 1)
+                        state.update(
+                            status="staging_failed",
+                            blocked_sha=sha,
+                            validation_scope_base_sha=processed,
+                            validation_scope_base_tree=git(repo, "rev-parse", f"{processed}^{{tree}}"),
+                            validation_scope_changed_paths=validation_paths,
+                            failure=f"staging installed behavior smoke failed: {type(exc).__name__}",
+                            last_stage_smoke={"source_sha": sha, "installed_sha": deployed, "status": "failed"},
+                            last_release_timings_seconds=phase_timings,
+                        )
+                        atomic_json(state_path, state)
+                        raise
                 state.update(
                     status="ready",
                     processed_sha=sha,
@@ -754,6 +1449,10 @@ def poll(config: dict) -> dict:
                     failure=None,
                     last_release_timings_seconds={**phase_timings, "total": round(time.monotonic() - started, 1)},
                 )
+                if stage_smoke_receipt is not None:
+                    state["last_stage_smoke"] = stage_smoke_receipt
+                else:
+                    state.pop("last_stage_smoke", None)
                 if controller_files:
                     state["last_check_to_controller_verified_seconds"] = _seconds_since(check_observation.get("completed_at"))
                 atomic_json(state_path, state)
@@ -764,20 +1463,48 @@ def poll(config: dict) -> dict:
             if not base_release.is_dir():
                 raise RuntimeError("verified staging base release missing")
             build_started = time.monotonic()
+            stage_smoke_receipt = None
             try:
-                out, metadata = build_candidate(config, sha, deployed, base_release)
+                out, metadata = build_candidate(config, sha, deployed, base_release, processed)
                 build_timings = metadata.get("phase_timings_seconds", {})
                 if isinstance(build_timings, dict) and isinstance(build_timings.get("build"), (int, float)):
                     phase_timings["build"] = build_timings["build"]
                 stage_receipt = stage_install(config, sha, out, deployed, timing_sink=phase_timings)
+                if smoke_required:
+                    stage_smoke_receipt = run_stage_smoke(
+                        config,
+                        repo,
+                        sha,
+                        sha,
+                        metadata["release_files_sha256"],
+                        timing_sink=phase_timings,
+                    )
             except Exception as exc:
                 phase_timings.setdefault("build", round(time.monotonic() - build_started, 1))
-                state.update(status="staging_failed", blocked_sha=sha, failure=f"staging install failed: {type(exc).__name__}", last_release_timings_seconds={**phase_timings, "total": round(time.monotonic() - started, 1)})
+                state.update(
+                    status="staging_failed",
+                    blocked_sha=sha,
+                    validation_scope_base_sha=processed,
+                    validation_scope_base_tree=git(repo, "rev-parse", f"{processed}^{{tree}}"),
+                    validation_scope_changed_paths=validation_paths,
+                    failure=f"staging install or behavior smoke failed: {type(exc).__name__}",
+                    last_release_timings_seconds={**phase_timings, "total": round(time.monotonic() - started, 1)},
+                )
+                if smoke_required:
+                    state["last_stage_smoke"] = {
+                        "source_sha": sha,
+                        "installed_sha": sha,
+                        "status": "failed",
+                    }
                 atomic_json(state_path, state)
                 raise
             promote_checked_candidate(
                 config, state_path, state, sha, out, metadata, installed, started,
                 stage_receipt=stage_receipt,
+                changed_paths=changed_paths,
+                build_base_sha=deployed,
+                validation_scope_base_sha=processed,
+                stage_smoke_receipt=stage_smoke_receipt,
                 phase_timings=phase_timings,
                 check_observation=check_observation,
             )

@@ -18,10 +18,12 @@ from pathlib import Path
 import pwd
 import re
 import shutil
+import signal
 import socket
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import urllib.request
@@ -41,6 +43,22 @@ READY = "http://127.0.0.1:8080/readyz"
 HOST_ROLE_DIRECTORY = Path("/etc/aicrm")
 HOST_ROLES = {"staging", "production"}
 HOST_CONTRACT_PATH = "/usr/bin:/bin"
+SMOKE_SOURCE_REPOSITORY = Path("/opt/aicrm/source")
+SMOKE_SNAPSHOT_ROOT = ROOT / "domestic-smoke-sources"
+SMOKE_DIAGNOSTIC_ROOT = ROOT / "domestic-smoke-diagnostics"
+SMOKE_GO = Path("/opt/aicrm/toolchain/go-1.26.6/bin/go")
+SMOKE_NODE = Path("/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin/node")
+SMOKE_GOCACHE = Path("/opt/aicrm/cache/go-build")
+SMOKE_GOMODCACHE = Path("/opt/aicrm/cache/go-mod")
+SMOKE_CONTRACT = "alipay_checkout"
+SMOKE_TEST_NAME = "TestDomesticReleaseInstalledAlipayCheckout"
+SMOKE_TEST_MARKER = "domestic_release_installed_alipay_checkout: PASS"
+SMOKE_TEST_TIMEOUT_SECONDS = 840
+SMOKE_GOMAXPROCS = "2"
+SMOKE_SOURCE_REMOTES = {
+    "git@github.com:qianlan33333-png/AI-CRM-v4.git",
+    "https://github.com/qianlan33333-png/AI-CRM-v4.git",
+}
 # These identities were read back from the current domestic VMs. If a host is
 # renamed or its private address changes, releases must stop until this mapping
 # is reviewed and updated in a trusted helper change.
@@ -520,6 +538,23 @@ def _service_user_can(flag: str, path: Path) -> None:
         raise RuntimeError("service account cannot access the configured runtime path")
 
 
+def _staging_smoke_user_can(flag: str, path: Path) -> None:
+    try:
+        account = pwd.getpwnam("ubuntu")
+    except KeyError as exc:
+        raise RuntimeError("staging smoke account is unavailable") from exc
+    result = subprocess.run(
+        [RUNUSER, "--preserve-environment", "-u", "ubuntu", "--", "/usr/bin/test", flag, str(path)],
+        env={"HOME": account.pw_dir, "PATH": HOST_CONTRACT_PATH},
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("staging smoke account cannot access the configured offline build path")
+
+
 def _require_protected_runtime_environment(path: Path) -> None:
     """Require a root-readable, root-owned secret file without following links."""
     try:
@@ -660,6 +695,552 @@ def verify_helper_digest(expected_sha256: str) -> str:
     if actual != expected_sha256:
         raise RuntimeError("fixed helper SHA256 does not match the checked Git source file")
     return actual
+
+
+def _staging_database_url() -> str:
+    _require_protected_runtime_environment(ENV)
+    values = [line.partition("=")[2].strip().strip("\"'") for line in ENV.read_text().splitlines() if line.startswith("AICRM_DATABASE_URL=")]
+    if len(values) != 1 or not values[0]:
+        raise RuntimeError("exactly one staging database URL is required")
+    parsed = database_environment(values[0])
+    try:
+        if not ipaddress.ip_address(parsed["PGHOST"]).is_loopback:
+            raise RuntimeError("staging PostgreSQL must use an explicit loopback IP")
+    except (KeyError, ValueError) as exc:
+        raise RuntimeError("staging PostgreSQL must use an explicit loopback IP") from exc
+    return values[0]
+
+
+def staging_smoke_test_environment(
+    runtime_tmp: Path,
+) -> dict[str, str]:
+    """Return only the fixed build-tool environment for the unprivileged runner."""
+    return {
+        "HOME": pwd.getpwnam("ubuntu").pw_dir,
+        "PATH": f"{SMOKE_GO.parent}:{SMOKE_NODE.parent}:/usr/bin:/bin",
+        "GOCACHE": str(SMOKE_GOCACHE),
+        "GOMODCACHE": str(SMOKE_GOMODCACHE),
+        "GOTOOLCHAIN": "local",
+        "GOMAXPROCS": SMOKE_GOMAXPROCS,
+        "GOPROXY": "off",
+        "GOSUMDB": "off",
+        "GOWORK": "off",
+        "TMPDIR": str(runtime_tmp),
+    }
+
+
+def _write_staging_smoke_inputs(
+    path: Path,
+    *,
+    database_url: str,
+    source_sha: str,
+    installed_sha: str,
+    installed_binary: Path,
+    installed_binary_sha256: str,
+    uid: int,
+    gid: int,
+) -> None:
+    """Write private fixture inputs outside argv/environment and transfer them to ubuntu."""
+    database_environment(database_url)
+    payload = {
+        "stage_role": "staging",
+        "source_sha": source_sha,
+        "installed_sha": installed_sha,
+        "installed_binary": str(installed_binary),
+        "installed_binary_sha256": installed_binary_sha256,
+        "database_url": database_url,
+    }
+    encoded = (json.dumps(payload, sort_keys=True) + "\n").encode("utf-8")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        with os.fdopen(descriptor, "wb", closefd=False) as output:
+            output.write(encoded)
+            output.flush()
+            os.fsync(descriptor)
+        os.fchown(descriptor, uid, gid)
+        os.fchmod(descriptor, 0o400)
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    finally:
+        os.close(descriptor)
+
+
+def _source_commit_tree(source_sha: str) -> str:
+    if not SHA.fullmatch(source_sha):
+        raise ValueError("invalid smoke source SHA")
+    repository = SMOKE_SOURCE_REPOSITORY
+    if repository.is_symlink() or not repository.is_dir() or (repository / ".git").is_symlink() or not (repository / ".git").exists():
+        raise RuntimeError("fixed source repository is missing or unsafe")
+    git_prefix = ("git", "-C", str(repository), "-c", f"safe.directory={repository}")
+    origin = run(*git_prefix, "remote", "get-url", "origin").stdout.strip()
+    if origin not in SMOKE_SOURCE_REMOTES:
+        raise RuntimeError("fixed source repository origin is not the approved CRM v4 repository")
+    run(*git_prefix, "cat-file", "-e", f"{source_sha}^{{commit}}")
+    ancestry = subprocess.run((*git_prefix, "merge-base", "--is-ancestor", source_sha, "refs/remotes/origin/main"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if ancestry.returncode != 0:
+        raise RuntimeError("smoke source commit is not on the checked main history")
+    tree = run(*git_prefix, "rev-parse", f"{source_sha}^{{tree}}").stdout.strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", tree):
+        raise RuntimeError("smoke source tree identity is invalid")
+    return tree
+
+
+def _source_git_dir() -> str:
+    repository = SMOKE_SOURCE_REPOSITORY
+    git_prefix = ("git", "-C", str(repository), "-c", f"safe.directory={repository}")
+    value = run(*git_prefix, "rev-parse", "--absolute-git-dir").stdout.strip()
+    path = Path(value)
+    if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+        raise RuntimeError("fixed source repository Git directory is unavailable")
+    return str(path.resolve(strict=True))
+
+
+def _extract_source_archive(archive_path: Path, destination: Path) -> None:
+    """Extract only regular files and directories from a trusted Git archive."""
+    destination.mkdir(mode=0o700)
+    root = destination.resolve(strict=True)
+    seen: set[str] = set()
+    try:
+        with tarfile.open(archive_path, mode="r:") as archive:
+            members = archive.getmembers()
+            if not members:
+                raise RuntimeError("smoke source archive is empty")
+            total_bytes = 0
+            for member in members:
+                name = member.name[:-1] if member.isdir() and member.name.endswith("/") else member.name
+                relative = Path(name)
+                if (
+                    not name
+                    or "\\" in name
+                    or relative.is_absolute()
+                    or relative.as_posix() != name
+                    or any(part in {"", ".", ".."} for part in relative.parts)
+                    or name in seen
+                    or not (member.isdir() or member.isfile())
+                ):
+                    raise RuntimeError("smoke source archive contains an unsafe path or entry")
+                seen.add(name)
+                target = root.joinpath(*relative.parts)
+                if not target.resolve(strict=False).is_relative_to(root):
+                    raise RuntimeError("smoke source archive escapes its fixed snapshot")
+                if member.isdir():
+                    target.mkdir(mode=0o755, parents=True, exist_ok=False)
+                    continue
+                total_bytes += member.size
+                if member.size < 0 or total_bytes > 2_000_000_000:
+                    raise RuntimeError("smoke source archive exceeds the size limit")
+                target.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+                source = archive.extractfile(member)
+                if source is None:
+                    raise RuntimeError("smoke source archive file data is missing")
+                with source, target.open("xb") as output:
+                    shutil.copyfileobj(source, output)
+                target.chmod(0o444 | (member.mode & 0o111))
+        for directory in sorted((path for path in root.rglob("*") if path.is_dir()), reverse=True):
+            directory.chmod(0o555)
+        root.chmod(0o555)
+    except Exception:
+        shutil.rmtree(destination, ignore_errors=True)
+        raise
+
+
+def _archive_smoke_source(source_sha: str, destination: Path) -> str:
+    tree = _source_commit_tree(source_sha)
+    repository = SMOKE_SOURCE_REPOSITORY
+    result = subprocess.run(
+        ("git", "-C", str(repository), "-c", f"safe.directory={repository}", "archive", "--format=tar", source_sha),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=120,
+    )
+    if result.returncode != 0 or not result.stdout:
+        raise RuntimeError("fixed source commit could not be archived")
+    archive_path = destination / "source.tar"
+    archive_path.write_bytes(result.stdout)
+    _extract_source_archive(archive_path, destination / "source")
+    archive_path.unlink()
+    return tree
+
+
+def _installed_staging_smoke_identity(expected_sha: str, expected_manifest_sha256: str) -> tuple[Path, str]:
+    if not SHA.fullmatch(expected_sha) or not FILE_SHA.fullmatch(expected_manifest_sha256):
+        raise ValueError("invalid installed staging smoke identity")
+    if current_sha() != expected_sha:
+        raise RuntimeError("staging smoke current release SHA mismatch")
+    release = RELEASES / expected_sha
+    if release.is_symlink() or not release.is_dir() or release.resolve(strict=True) != release:
+        raise RuntimeError("staging smoke release path is unsafe")
+    metadata = {"source_sha": expected_sha, "release_files_sha256": expected_manifest_sha256}
+    verify_payload_without_release_env(release, metadata)
+    verify_root_owned_release(release)
+    manifest = release / "release-files.sha256"
+    if digest(manifest) != expected_manifest_sha256:
+        raise RuntimeError("staging smoke installed manifest mismatch")
+    binary = release / "bin/aicrm"
+    info = binary.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0 or info.st_mode & 0o022 or not os.access(binary, os.R_OK | os.X_OK):
+        raise RuntimeError("staging smoke installed binary is unsafe or unavailable")
+    readiness(expected_sha)
+    return binary, digest(binary)
+
+
+def _chown_smoke_source_snapshot(source_root: Path, uid: int, gid: int) -> None:
+    """Make only the throwaway extracted source tree writable by the test user."""
+    for path in source_root.rglob("*"):
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode) or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+            raise RuntimeError("staging smoke source snapshot contains a linked or special path")
+        os.chown(path, uid, gid)
+        if stat.S_ISDIR(info.st_mode):
+            path.chmod(0o755)
+        else:
+            path.chmod(0o755 if info.st_mode & 0o111 else 0o644)
+    os.chown(source_root, uid, gid)
+    source_root.chmod(0o755)
+
+
+def _smoke_source_index(source_sha: str, source_root: Path, scratch: Path, git_dir: str) -> Path:
+    index_path = scratch / "source.index"
+    result = subprocess.run(
+        (
+            "git", "-c", f"safe.directory={SMOKE_SOURCE_REPOSITORY}",
+            f"--git-dir={git_dir}", f"--work-tree={source_root}", "read-tree",
+            f"--index-output={index_path}", f"{source_sha}^{{tree}}",
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0 or index_path.is_symlink() or not index_path.is_file():
+        raise RuntimeError("staging smoke source index could not be prepared")
+    index_path.chmod(0o444)
+    return index_path
+
+
+def _verify_smoke_source_snapshot(source_root: Path, git_dir: str, index_path: Path) -> None:
+    environment = {
+        **os.environ,
+        "GIT_DIR": git_dir,
+        "GIT_WORK_TREE": str(source_root),
+        "GIT_INDEX_FILE": str(index_path),
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.directory",
+        "GIT_CONFIG_VALUE_0": str(SMOKE_SOURCE_REPOSITORY),
+    }
+    result = subprocess.run(
+        (
+            "git", "-c", f"safe.directory={SMOKE_SOURCE_REPOSITORY}",
+            "--git-dir", git_dir, "--work-tree", str(source_root), "diff", "--quiet", "--",
+        ),
+        env=environment,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("staging smoke source snapshot no longer matches its checked commit")
+
+
+def _run_unprivileged_smoke_command(
+    command: Sequence[str],
+    source_root: Path,
+    environment: dict[str, str],
+    *,
+    timeout_seconds: int,
+    required_marker: str | None = None,
+    label: str,
+) -> str:
+    args = [
+        RUNUSER, "-u", "ubuntu", "--", "/usr/bin/env", "-i",
+        *(f"{key}={value}" for key, value in sorted(environment.items())),
+        *command,
+    ]
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        try:
+            process = subprocess.Popen(
+                args,
+                cwd=source_root,
+                stdin=subprocess.DEVNULL,
+                stdout=stdout,
+                stderr=stderr,
+                env={"PATH": HOST_CONTRACT_PATH},
+                start_new_session=True,
+            )
+            returncode = process.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            if "process" in locals() and process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                except ProcessLookupError:
+                    pass
+            if "process" in locals():
+                try:
+                    _stop_smoke_process_group(process.pid)
+                except ProcessLookupError:
+                    pass
+            diagnostic = _write_smoke_diagnostic(
+                label, source_root, command, environment, "timeout", stdout, stderr,
+            )
+            detail = f"; diagnostic={diagnostic}" if diagnostic else "; diagnostic unavailable"
+            raise RuntimeError(f"{label} timed out; child process group was stopped{detail}") from exc
+        except OSError as exc:
+            diagnostic = _write_smoke_diagnostic(
+                label, source_root, command, environment, "not-started", stdout, stderr,
+            )
+            detail = f"; diagnostic={diagnostic}" if diagnostic else "; diagnostic unavailable"
+            raise RuntimeError(f"{label} could not start{detail}") from exc
+        orphaned = _stop_smoke_process_group(process.pid)
+        output = _read_smoke_stream(stdout, 2_000_000)
+        if returncode != 0:
+            diagnostic = _write_smoke_diagnostic(
+                label, source_root, command, environment, returncode, stdout, stderr,
+            )
+            detail = f"; diagnostic={diagnostic}" if diagnostic else "; diagnostic unavailable"
+            raise RuntimeError(f"{label} failed with exit status {returncode}{detail}")
+        if orphaned:
+            diagnostic = _write_smoke_diagnostic(
+                label, source_root, command, environment, "orphan-processes-stopped", stdout, stderr,
+            )
+            detail = f"; diagnostic={diagnostic}" if diagnostic else "; diagnostic unavailable"
+            raise RuntimeError(f"{label} left child processes; the process group was stopped{detail}")
+        if required_marker is not None and required_marker not in output:
+            diagnostic = _write_smoke_diagnostic(
+                label, source_root, command, environment, "missing-pass-marker", stdout, stderr,
+            )
+            detail = f"; diagnostic={diagnostic}" if diagnostic else "; diagnostic unavailable"
+            raise RuntimeError(f"{label} did not report its required pass marker{detail}")
+        return output
+
+
+def _read_smoke_stream(stream, limit: int) -> str:
+    stream.seek(0)
+    return stream.read(limit).decode("utf-8", errors="replace")
+
+
+def _redact_smoke_output(value: str, environment: dict[str, str]) -> str:
+    result = value
+    for name, secret in environment.items():
+        upper = name.upper()
+        if secret and any(marker in upper for marker in ("DATABASE_URL", "PASSWORD", "SECRET", "PRIVATE", "TOKEN", "API_KEY")):
+            result = result.replace(secret, "[REDACTED]")
+    result = re.sub(r"(?<=://)[^/@\s:]+:[^/@\s]+@", "[REDACTED]@", result)
+    return result
+
+
+def _write_smoke_diagnostic(
+    label: str,
+    source_root: Path,
+    command: Sequence[str],
+    environment: dict[str, str],
+    result: int | str,
+    stdout,
+    stderr,
+) -> Path | None:
+    """Keep bounded, redacted failure output in a private root-only local file."""
+    if os.geteuid() != 0:
+        return None
+    try:
+        SMOKE_DIAGNOSTIC_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = SMOKE_DIAGNOSTIC_ROOT.lstat()
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != 0
+            or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) != 0o700
+        ):
+            return None
+        key = re.sub(r"[^a-z0-9-]+", "-", label.lower()).strip("-")[:48] or "smoke"
+        source_sha = environment.get("AICRM_DOMESTIC_RELEASE_SOURCE_SHA", "unknown")
+        if not SHA.fullmatch(source_sha):
+            source_sha = "unknown"
+        path = SMOKE_DIAGNOSTIC_ROOT / f"{source_sha}-{key}-{time.time_ns()}.log"
+        safe_stdout = _redact_smoke_output(_read_smoke_stream(stdout, 2_000_000), environment)
+        safe_stderr = _redact_smoke_output(_read_smoke_stream(stderr, 512_000), environment)
+        content = (
+            f"label={label}\nresult={result}\ncommand={command[0] if command else '<empty>'}\n"
+            f"working_directory={source_root}\n\nstdout:\n{safe_stdout}\n\nstderr:\n{safe_stderr}\n"
+        ).encode("utf-8", errors="replace")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        try:
+            with os.fdopen(fd, "wb") as output:
+                output.write(content)
+                output.flush()
+                os.fsync(output.fileno())
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        return path
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _run_installed_smoke_test(
+    source_root: Path,
+    environment: dict[str, str],
+    git_dir: str,
+    index_path: Path,
+    node_path: str,
+    smoke_input_path: Path,
+) -> None:
+    source_index_environment = {
+        "HOME": environment["HOME"],
+        "PATH": environment["PATH"],
+        "TMPDIR": environment["TMPDIR"],
+        "GIT_DIR": git_dir,
+        "GIT_WORK_TREE": str(source_root),
+        "GIT_INDEX_FILE": str(index_path),
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.directory",
+        "GIT_CONFIG_VALUE_0": str(SMOKE_SOURCE_REPOSITORY),
+    }
+    _run_unprivileged_smoke_command(
+        (node_path, str(source_root / "scripts/prepare-donor-source-views.mjs"), "--root", str(source_root)),
+        source_root,
+        source_index_environment,
+        timeout_seconds=120,
+        label="staging smoke source preparation",
+    )
+    _verify_smoke_source_snapshot(source_root, git_dir, index_path)
+    test_environment = {**environment, "GOFLAGS": "-buildvcs=false"}
+    _run_unprivileged_smoke_command(
+        (
+            str(SMOKE_GO), "test", "-p=1", "-count=1", "-v", "-run",
+            f"^{SMOKE_TEST_NAME}$", "./cmd/aicrm", "-args",
+            f"-domestic-release-smoke-input={smoke_input_path}",
+        ),
+        source_root,
+        test_environment,
+        timeout_seconds=SMOKE_TEST_TIMEOUT_SECONDS,
+        required_marker=SMOKE_TEST_MARKER,
+        label="installed staging smoke",
+    )
+    _verify_smoke_source_snapshot(source_root, git_dir, index_path)
+
+
+def _stop_smoke_process_group(process_group: int) -> bool:
+    """Return whether any process remained after the test runner exited."""
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    os.killpg(process_group, signal.SIGTERM)
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(process_group, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.1)
+    try:
+        os.killpg(process_group, signal.SIGKILL)
+    except ProcessLookupError:
+        return True
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(process_group, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.1)
+    raise RuntimeError("installed staging smoke child process group could not be stopped")
+
+
+def run_staging_smoke(
+    source_sha: str,
+    expected_sha: str,
+    expected_manifest_sha256: str,
+    expected_helper_sha256: str,
+) -> dict:
+    """Run the reviewed smoke fixture as ubuntu against the immutable installed API binary."""
+    helper_sha256 = verify_helper_digest(expected_helper_sha256)
+    if require_host_role("staging") != "staging":
+        raise RuntimeError("installed behavior smoke is staging-only")
+    host_contract = check_host_contract()
+    if host_contract.get("host_role") != "staging" or host_contract.get("postgres_major") != 16 or host_contract.get("database_connection") != "verified":
+        raise RuntimeError("staging host contract is incomplete for installed behavior smoke")
+    tree_sha = _source_commit_tree(source_sha)
+    database_url = _staging_database_url()
+    binary, binary_sha256 = _installed_staging_smoke_identity(expected_sha, expected_manifest_sha256)
+    if LOCK.is_symlink() or (LOCK.exists() and not stat.S_ISREG(LOCK.lstat().st_mode)):
+        raise RuntimeError("shared install lock is unsafe")
+    SMOKE_SNAPSHOT_ROOT.mkdir(mode=0o755, parents=True, exist_ok=True)
+    snapshot_info = SMOKE_SNAPSHOT_ROOT.lstat()
+    if not stat.S_ISDIR(snapshot_info.st_mode) or snapshot_info.st_uid != 0 or snapshot_info.st_gid != 0 or snapshot_info.st_mode & 0o022:
+        raise RuntimeError("fixed staging smoke snapshot root is unsafe")
+    test_started = time.monotonic()
+    with LOCK.open("a+") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("another release install is holding the shared lock") from exc
+        # Recheck release identity and services after the lock closes the race
+        # between preflight and installing another immutable release.
+        binary, binary_sha256 = _installed_staging_smoke_identity(expected_sha, expected_manifest_sha256)
+        with tempfile.TemporaryDirectory(prefix=f"{source_sha}-", dir=SMOKE_SNAPSHOT_ROOT) as scratch_name:
+            scratch = Path(scratch_name)
+            scratch.chmod(0o755)
+            source_root = scratch / "source"
+            tree_sha = _archive_smoke_source(source_sha, scratch)
+            if source_root.is_symlink() or not source_root.is_dir():
+                raise RuntimeError("fixed staging smoke source snapshot is unavailable")
+            ubuntu = pwd.getpwnam("ubuntu")
+            git_dir = _source_git_dir()
+            source_index = _smoke_source_index(source_sha, source_root, scratch, git_dir)
+            _chown_smoke_source_snapshot(source_root, ubuntu.pw_uid, ubuntu.pw_gid)
+            runtime_tmp = scratch / "runtime-tmp"
+            runtime_tmp.mkdir(mode=0o700)
+            os.chown(runtime_tmp, ubuntu.pw_uid, ubuntu.pw_gid)
+            for cache in (SMOKE_GOCACHE, SMOKE_GOMODCACHE):
+                if cache.is_symlink() or not cache.is_dir():
+                    raise RuntimeError("offline Go smoke cache is unavailable")
+                _staging_smoke_user_can("-w", cache)
+            _require_host_tool(str(SMOKE_GO), "fixed Go toolchain")
+            _require_host_tool(str(SMOKE_NODE), "fixed Node.js runtime")
+            smoke_input_path = scratch / "installed-smoke-input.json"
+            _write_staging_smoke_inputs(
+                smoke_input_path,
+                database_url=database_url,
+                source_sha=source_sha,
+                installed_sha=expected_sha,
+                installed_binary=binary,
+                installed_binary_sha256=binary_sha256,
+                uid=ubuntu.pw_uid,
+                gid=ubuntu.pw_gid,
+            )
+            environment = staging_smoke_test_environment(runtime_tmp)
+            _run_installed_smoke_test(
+                source_root, environment, git_dir, source_index, str(SMOKE_NODE), smoke_input_path,
+            )
+        final_binary, final_binary_sha256 = _installed_staging_smoke_identity(expected_sha, expected_manifest_sha256)
+        if final_binary != binary or final_binary_sha256 != binary_sha256:
+            raise RuntimeError("staging smoke installed binary changed during the contract")
+    return {
+        "status": "passed",
+        "contract": SMOKE_CONTRACT,
+        "test_name": SMOKE_TEST_NAME,
+        "test_marker": SMOKE_TEST_MARKER,
+        "stage_role": "staging",
+        "source_sha": source_sha,
+        "source_tree": tree_sha,
+        "installed_sha": expected_sha,
+        "manifest_sha256": expected_manifest_sha256,
+        "installed_binary_sha256": binary_sha256,
+        "helper_sha256": helper_sha256,
+        "test_duration_seconds": round(time.monotonic() - test_started, 1),
+        "go_toolchain": str(SMOKE_GO),
+        "go_package_parallelism": 1,
+        "go_max_procs": int(SMOKE_GOMAXPROCS),
+        "verified_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
 
 
 def install(
@@ -859,16 +1440,19 @@ def main() -> None:
     source.add_argument("--incoming", type=Path)
     source.add_argument("--retry-existing", action="store_true", help="reuse a checksum-verified orphan under the install lock")
     source.add_argument("--check-host-contract", action="store_true", help="read-only check of role, PostgreSQL 16, service user, paths, and systemd")
+    source.add_argument("--run-staging-smoke", action="store_true", help="run the fixed installed Alipay checkout contract on staging")
     p.add_argument("--metadata", type=Path)
     p.add_argument("--expected-sha", help="exact source SHA bound to the metadata")
     p.add_argument("--metadata-sha256", help="SHA256 of the exact metadata file bytes")
     p.add_argument("--expected-base", help="40-char installed SHA or 'none' for empty staging")
+    p.add_argument("--source-sha", help="exact checked source commit that owns the fixed staging fixture")
+    p.add_argument("--expected-manifest-sha256", help="SHA256 of the installed release manifest")
     p.add_argument("--expected-helper-sha256", help="SHA256 of the exact checked Git source file being rehearsed")
     args = p.parse_args()
     if os.geteuid() != 0:
         raise SystemExit("root required")
     if args.check_host_contract:
-        if any(value is not None for value in (args.metadata, args.expected_sha, args.metadata_sha256, args.expected_base)):
+        if any(value is not None for value in (args.metadata, args.expected_sha, args.metadata_sha256, args.expected_base, args.source_sha, args.expected_manifest_sha256)):
             p.error("--check-host-contract does not accept release metadata")
         if args.expected_helper_sha256 is None:
             p.error("--check-host-contract requires --expected-helper-sha256 for the exact checked Git source file")
@@ -880,8 +1464,21 @@ def main() -> None:
         result["helper_sha256"] = helper_sha256
         print(json.dumps(result, sort_keys=True))
         return
-    if args.expected_helper_sha256 is not None:
-        p.error("--expected-helper-sha256 is only valid with --check-host-contract")
+    if args.run_staging_smoke:
+        if any(value is not None for value in (args.metadata, args.metadata_sha256, args.expected_base)):
+            p.error("--run-staging-smoke does not accept install metadata")
+        if args.expected_sha is None or args.source_sha is None or args.expected_manifest_sha256 is None or args.expected_helper_sha256 is None:
+            p.error("--run-staging-smoke requires --source-sha, --expected-sha, --expected-manifest-sha256, and --expected-helper-sha256")
+        try:
+            result = run_staging_smoke(
+                args.source_sha, args.expected_sha, args.expected_manifest_sha256, args.expected_helper_sha256,
+            )
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            raise SystemExit(str(exc)) from exc
+        print(json.dumps(result, sort_keys=True))
+        return
+    if args.expected_helper_sha256 is not None or args.source_sha is not None or args.expected_manifest_sha256 is not None:
+        p.error("staging smoke arguments are only valid with --run-staging-smoke")
     if args.metadata is None or args.expected_sha is None or args.metadata_sha256 is None or args.expected_base is None:
         p.error("installation requires --metadata, --expected-sha, --metadata-sha256, and --expected-base")
     metadata_root = ROOT / "domestic-incoming"
