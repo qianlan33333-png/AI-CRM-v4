@@ -63,6 +63,9 @@ type productExternalPushChromiumFixtureOptions struct {
 	// original disabled Payment/OAuth configuration.
 	enablePublicH5 bool
 	enableAlipay   bool
+	// deferEffectsWorker lets a journey freeze a pre-existing intent shape
+	// before the real effect worker observes the committed payment.
+	deferEffectsWorker bool
 	// h5PublicOrigin separates the browser checkout origin from PublicOrigin
 	// for end-to-end Origin-guard tests.
 	h5PublicOrigin string
@@ -249,20 +252,22 @@ func newProductExternalPushChromiumFixtureWithOptions(t *testing.T, timeout time
 	if err != nil {
 		t.Fatal(err)
 	}
-	workerCtx, stopWorker := context.WithCancel(ctx)
-	workerDone := make(chan error, 1)
-	go func() { workerDone <- application.effectsRuntime.Run(workerCtx) }()
-	t.Cleanup(func() {
-		stopWorker()
-		select {
-		case runErr := <-workerDone:
-			if runErr != nil && !errors.Is(runErr, context.Canceled) {
-				t.Errorf("effects runtime: %v", runErr)
+	if !options.deferEffectsWorker {
+		workerCtx, stopWorker := context.WithCancel(ctx)
+		workerDone := make(chan error, 1)
+		go func() { workerDone <- application.effectsRuntime.Run(workerCtx) }()
+		t.Cleanup(func() {
+			stopWorker()
+			select {
+			case runErr := <-workerDone:
+				if runErr != nil && !errors.Is(runErr, context.Canceled) {
+					t.Errorf("effects runtime: %v", runErr)
+				}
+			case <-time.After(20 * time.Second):
+				t.Error("effects runtime did not stop")
 			}
-		case <-time.After(20 * time.Second):
-			t.Error("effects runtime did not stop")
-		}
-	})
+		})
+	}
 	server.Config.Handler = application.handler
 	server.StartTLS()
 

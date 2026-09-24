@@ -58,7 +58,7 @@ flowchart TD
 4. 完整迁移序列上的隔离 PostgreSQL 16 HTTP 旅程分别覆盖 Alipay WAP、Page、未知 Provider、错误 Channel 和微信路由误读控制；WAP/Page 必须由 worker 生成 `.test` 虚拟链接，并核对订单、支付、intent、effect 与 handoff。另以现有 `TestPostgreSQLPublicCheckoutResponseLossRejectsRenewedSessionReplay` 做微信创建响应丢失及终态回读对照；该对照不启动微信 Provider worker。所有旅程不得触发真实 Provider 支付。
 5. 首次 POST 的已知业务拒绝、无写入 401 和 Origin 403 清除无订单 checkpoint，恢复授权/表单流程；网络超时/断连/响应丢失保留 checkpoint。其后重试沿用同一 key、冻结请求与 Provider 路由；旧的不确定 checkpoint 不因后续拒绝或新授权而被误清除。无商户订单号时金额区不显示“待确认”，且同 key 重放不得多建订单。
 6. 浏览器状态恢复、支付宝“我已支付”读回与刷新均使用原 Provider 路由；只有服务器 `paid` 状态显示支付成功。
-7. 对生产旧 intent 的兼容仅适用于 `subject` 键不存在的记录；冻结 Order 快照缺失、金额不一致、标题无效、已有但错误的 `subject` 都失败关闭，不调用支付宝。
+7. 对生产旧 intent 的兼容仅适用于 `subject` 键不存在的记录；隔离 PostgreSQL 旅程在 worker 启动前构造这种旧快照，再让真实 effect worker 生成同一 OrderID、金额和冻结标题的 WAP/Page 虚拟链接。冻结 Order 快照缺失、金额不一致、标题无效、已有但错误的 `subject` 都失败关闭，不调用真实支付宝。
 
 ## 回滚与风险
 

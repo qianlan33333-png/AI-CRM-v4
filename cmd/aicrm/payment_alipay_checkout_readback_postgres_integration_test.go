@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -60,45 +61,58 @@ func TestPostgreSQLAlipayCheckoutReadbackJourney(t *testing.T) {
 	defer cancel()
 	requireLocalPostgreSQL16(t, ctx)
 	const h5Origin = "https://alipay-h5.example.test"
-	fixture := newProductExternalPushChromiumFixtureWithOptions(t, 90*time.Second, productExternalPushChromiumFixtureOptions{enablePublicH5: true, enableAlipay: true, h5PublicOrigin: h5Origin})
+	fixture := newProductExternalPushChromiumFixtureWithOptions(t, 90*time.Second, productExternalPushChromiumFixtureOptions{enablePublicH5: true, enableAlipay: true, h5PublicOrigin: h5Origin, deferEffectsWorker: true})
 	assertComposedH5AlipayOriginBoundary(t, fixture, h5Origin)
 
 	pageProductID := seedAlipayPageCheckoutProduct(t, fixture)
-	for _, test := range []struct {
+	tests := []struct {
 		name      string
 		productID int64
 		channel   paymentdomain.Channel
 		key       string
 		provider  paymentdomain.Provider
+		token     string
+		created   alipayCheckoutCreateResult
+		subject   string
+		amount    int64
 	}{
 		{name: "WAP", productID: fixture.productID, channel: paymentdomain.ChannelAlipayWap, key: "alipay-readback-wap-create-0001", provider: paymentdomain.ProviderAlipay},
 		{name: "Page", productID: pageProductID, channel: paymentdomain.ChannelAlipayPage, key: "alipay-readback-page-create-0001", provider: paymentdomain.ProviderAlipay},
-	} {
+	}
+	// Persist both original orders and emulate the old production intent shape
+	// before the effect worker can claim either one.
+	for index := range tests {
+		test := &tests[index]
+		session := issuePublicCommerceTrustedH5SessionWithKey(t, fixture, "alipay-readback-"+strings.ToLower(test.name)+"-session-0001")
+		test.token = session.token
+		test.created = createPublicAlipayCheckout(t, fixture, test.token, test.productID, test.channel, test.key)
+		if test.created.OrderID < 1 || test.created.PaymentID < 1 || test.created.MerchantOrder == "" || test.created.EffectID == "" {
+			t.Fatalf("incomplete synthetic checkout receipt: %+v", test.created)
+		}
+		test.subject, test.amount = assertLegacyAlipayIntentOrderSnapshotRecovery(t, fixture, test.created, test.channel)
+	}
+	startAlipayCheckoutEffectsWorker(t, fixture)
+	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			session := issuePublicCommerceTrustedH5SessionWithKey(t, fixture, "alipay-readback-"+strings.ToLower(test.name)+"-session-0001")
-			created := createPublicAlipayCheckout(t, fixture, session.token, test.productID, test.channel, test.key)
-			if created.OrderID < 1 || created.PaymentID < 1 || created.MerchantOrder == "" || created.EffectID == "" {
-				t.Fatalf("incomplete synthetic checkout receipt: %+v", created)
-			}
-			status := awaitPublicAlipayHandoff(t, fixture, session.token, created.MerchantOrder, test.channel)
+			status := awaitPublicAlipayHandoff(t, fixture, test.token, test.created.MerchantOrder, test.channel)
 			parsed, err := url.Parse(status.Handoff.RedirectURL)
 			var bizContent struct {
-				OutTradeNo string `json:"out_trade_no"`
-				Subject    string `json:"subject"`
+				OutTradeNo  string `json:"out_trade_no"`
+				Subject     string `json:"subject"`
+				TotalAmount string `json:"total_amount"`
 			}
 			decodeErr := json.Unmarshal([]byte(parsed.Query().Get("biz_content")), &bizContent)
 			gateway, gatewayErr := url.Parse(fixture.alipayGateway)
-			if err != nil || decodeErr != nil || gatewayErr != nil || parsed.Scheme != gateway.Scheme || parsed.Host != gateway.Host || bizContent.OutTradeNo != created.MerchantOrder || strings.TrimSpace(bizContent.Subject) == "" {
+			if err != nil || decodeErr != nil || gatewayErr != nil || parsed.Scheme != gateway.Scheme || parsed.Host != gateway.Host || bizContent.OutTradeNo != test.created.MerchantOrder || bizContent.Subject != test.subject || bizContent.TotalAmount != fmt.Sprintf("%d.%02d", test.amount/100, test.amount%100) {
 				t.Fatalf("synthetic %s handoff URL=%q parsed=%+v err=%v", test.name, status.Handoff.RedirectURL, parsed, err)
 			}
-			assertAlipayCheckoutPersistence(t, fixture, created, test.channel)
-			assertLegacyAlipayIntentOrderSnapshotRecovery(t, fixture, created, test.channel)
+			assertAlipayCheckoutPersistence(t, fixture, test.created, test.channel)
 
 			// Provider-scoped lookup must not expose the same Alipay order through
 			// the WeChat URL, even though both providers share this HTTP surface.
 			wrongRoute := httptest.NewRecorder()
-			wrongRequest := httptest.NewRequest(http.MethodGet, "/api/v1/wechat-pay/checkouts/"+created.MerchantOrder, nil)
-			wrongRequest.AddCookie(&http.Cookie{Name: paymentport.TrustedSessionCookieName, Value: session.token})
+			wrongRequest := httptest.NewRequest(http.MethodGet, "/api/v1/wechat-pay/checkouts/"+test.created.MerchantOrder, nil)
+			wrongRequest.AddCookie(&http.Cookie{Name: paymentport.TrustedSessionCookieName, Value: test.token})
 			fixture.application.handler.ServeHTTP(wrongRoute, wrongRequest)
 			if wrongRoute.Code != http.StatusNotFound {
 				t.Fatalf("WeChat route read Alipay order: status=%d body=%s", wrongRoute.Code, wrongRoute.Body.String())
@@ -139,6 +153,24 @@ func TestPostgreSQLAlipayCheckoutReadbackJourney(t *testing.T) {
 	}
 }
 
+func startAlipayCheckoutEffectsWorker(t *testing.T, fixture *productExternalPushChromiumFixture) {
+	t.Helper()
+	workerCtx, stopWorker := context.WithCancel(fixture.ctx)
+	workerDone := make(chan error, 1)
+	go func() { workerDone <- fixture.application.effectsRuntime.Run(workerCtx) }()
+	t.Cleanup(func() {
+		stopWorker()
+		select {
+		case runErr := <-workerDone:
+			if runErr != nil && !errors.Is(runErr, context.Canceled) {
+				t.Errorf("effects runtime: %v", runErr)
+			}
+		case <-time.After(20 * time.Second):
+			t.Error("effects runtime did not stop")
+		}
+	})
+}
+
 func assertComposedH5AlipayOriginBoundary(t *testing.T, fixture *productExternalPushChromiumFixture, h5Origin string) {
 	t.Helper()
 	before := alipayCheckoutCounts(t, fixture)
@@ -176,7 +208,7 @@ func assertComposedH5AlipayOriginBoundary(t *testing.T, fixture *productExternal
 	}
 }
 
-func assertLegacyAlipayIntentOrderSnapshotRecovery(t *testing.T, fixture *productExternalPushChromiumFixture, created alipayCheckoutCreateResult, channel paymentdomain.Channel) {
+func assertLegacyAlipayIntentOrderSnapshotRecovery(t *testing.T, fixture *productExternalPushChromiumFixture, created alipayCheckoutCreateResult, channel paymentdomain.Channel) (string, int64) {
 	t.Helper()
 	kind := effectport.KindAlipayWapPay
 	if channel == paymentdomain.ChannelAlipayPage {
@@ -188,6 +220,10 @@ func assertLegacyAlipayIntentOrderSnapshotRecovery(t *testing.T, fixture *produc
 	}
 	if _, err := fixture.application.pool.Native().Exec(fixture.ctx, `UPDATE payment_provider_intents SET request_snapshot=request_snapshot-'subject' WHERE payment_id=$1`, created.PaymentID); err != nil {
 		t.Fatal("remove synthetic snapshot subject to emulate pre-fix intent")
+	}
+	var handoffCount int
+	if err := fixture.application.pool.Native().QueryRow(fixture.ctx, `SELECT count(*) FROM payment_handoffs WHERE payment_id=$1`, created.PaymentID).Scan(&handoffCount); err != nil || handoffCount != 0 {
+		t.Fatalf("old intent must precede the effect worker: handoffs=%d err=%v", handoffCount, err)
 	}
 	uow, err := platformpostgres.NewUnitOfWork(fixture.application.pool)
 	if err != nil {
@@ -213,10 +249,12 @@ func assertLegacyAlipayIntentOrderSnapshotRecovery(t *testing.T, fixture *produc
 		t.Fatalf("pre-fix intent should leave subject resolution to Order: intent=%+v err=%v", intent, err)
 	}
 	var expected string
+	var expectedAmount int64
 	if err := uow.Within(fixture.ctx, func(tx context.Context) error {
 		snapshot, readErr := orders.ReadCheckoutSnapshotWithin(tx, created.OrderID)
 		if readErr == nil {
 			expected = snapshot.ProductName
+			expectedAmount = snapshot.PayableAmountMinor
 		}
 		return readErr
 	}); err != nil {
@@ -226,6 +264,7 @@ func assertLegacyAlipayIntentOrderSnapshotRecovery(t *testing.T, fixture *produc
 	if err != nil || material.AlipaySubject != expected || expected == "" {
 		t.Fatalf("pre-fix intent did not recover frozen Order subject: subject=%q expected=%q err=%v", material.AlipaySubject, expected, err)
 	}
+	return expected, expectedAmount
 }
 
 type alipayCheckoutFactCounts struct {
