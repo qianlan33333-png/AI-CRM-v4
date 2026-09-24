@@ -27,6 +27,13 @@ OPERATOR_ONLY_PREFIXES = (
 # Release guard and deployment mechanics are validated by their own contracts;
 # they do not require an application receipt when no runtime code changes.
 OPERATOR_ONLY_PREFIXES += (
+    "scripts/domestic_release.py",
+    "scripts/domestic_release_build.py",
+    "scripts/test_domestic_release.py",
+    "scripts/test_domestic_release_build.py",
+    "deploy/domestic-promote.py",
+    "deploy/domestic-release-role.production.example",
+    "deploy/domestic-release-role.staging.example",
     "deploy/build-release-on-staging.sh",
     "deploy/build-release-on-staging-remote.sh",
     "deploy/promote-staging-release.sh",

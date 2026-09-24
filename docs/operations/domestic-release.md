@@ -1,58 +1,38 @@
-# CRM v4 国内构建与内网串行发布
+# CRM v4 国内发布操作
 
-新流程的唯一源码是 GitHub `qianlan33333-png/AI-CRM-v4`。PR 在 GitHub 审核；受保护 `main` 的准确提交 `check` 成功后，上海预备机 `10.0.4.6` 每两分钟按第一父链顺序处理。GitHub Actions 不生成或传输生产包。预备机本地构建并安装，基础健康通过后，`rsync --link-dest` 经内网将完整文件树的变化部分传至 `10.0.4.13`。生产重新校验完整摘要、原子切换和 `/readyz.release_sha`，成功后推进技术游标。后一个版本包含前一个版本。
+## 日常发布
 
-**当前启用条件：** PR #22 维持暂停。先完成本文“切换”中所有核对，再把配置的 `production_enabled` 置为 `true` 并启用 timer。仅安装工具或启动预备机演练不会发布生产。
+开发者提交 PR。GitHub 受保护 `main` 只认当前 PR head 的必需 `check`；`check` 工作流始终运行，不配置路径过滤。
 
-## 开发和 PR
+| 改动 | 检查 |
+| --- | --- |
+| 已登记的业务能力 | 影响到的后端、前端或浏览器旅程 |
+| 发布器、安装器、CI 白名单工具 | 发布器、分类器、安装器和恢复合同；不跑全量 Go/UI/浏览器 |
+| SQL、共享基础、构建规则、未知路径 | 完整检查 |
+| 纯文档 | 轻量一致性检查 |
 
-新能力各用一个 PR；共享代码改动应协调。CI 保留稳定的必需 `check`：页面改动跑前端与相关测试，Go 改动跑受影响测试，未知、共享基础设施、迁移、构建/部署改动跑完整检查。PR 仅靠准确 head 的当前检查结果合并；部署器重新核对合并提交的 `check`。GitHub 不运行生产包构建，不使用原生 Merge Queue。
+合并后，预备机 `10.0.4.6` 按 `main` 第一父链顺序拉取通过检查的提交，在国内构建并用合成数据验证，再把同一版本经内网晋级生产 `10.0.4.13`。发布器串行执行；预发失败停止队列。生产安装失败使用上一技术版本回退；结果不明时停止队列并只读对账，不重复安装。
 
-迁移必须前向兼容；破坏性变更在 PR 检查中拒绝。普通页面改动绝不触发数据库备份或 `aicrm-migrate.service`。生产安装完成只表示准确版本健康；真实支付、扫码结果另行登记，不占据后续技术发布队列。
+**备份按机器角色决定。** 预备机只使用可丢弃的合成数据，不做整库备份或恢复。生产库含真实业务数据，只有数据库迁移才在迁移前自动备份并核对备份文件；普通页面、程序和资源发布不备份、不运行迁移。角色由 root 管理的 `/etc/aicrm/domestic-release-role` 固定为 `staging` 或 `production`；缺失、权限不符或内容不精确时停止。PR 参数不能关闭生产备份。
 
-## 预备机配置
+技术发布成功须读回准确 SHA、完整文件摘要、服务和 `/readyz`。真实支付、扫码等业务结果独立记录；它们不阻塞下一次技术发布，也不能由 CI、预发或健康检查代替。
 
-机器需 Ubuntu x86_64、与 `go.mod` 一致的 Go 1.26.6、Node 24.18.0、PostgreSQL 16、`rsync`、`pg_dump`，并为 Go/npm 配置持久缓存。数据库用合成数据，禁止从生产复制。2 核 2GB 先测完整基线及峰值；不足则扩到 4 核 8GB 后再启用自动生产。构建临时工作树必须与输出目录位于持久磁盘；预备机的 1GB `/tmp` 内存盘不足以容纳主程序链接输出。GitHub 源码拉取必须持续可用，且 `origin` 指向官方 GitHub 仓库。官方 API 读取 main SHA 与检查；不可用时停队列，不从未校验镜像自动发布。
+## 首次切换或发布工具升级
 
-将独立源码库放在 `/opt/aicrm/source`，工作目录放在 `/opt/aicrm/domestic`。固定的发布控制器以 `ubuntu` 运行；它把每个待构建提交只读克隆到 `/opt/aicrm/domestic/build-worker/<SHA>`，由无 sudo 的 `aicrm-build` 账户执行源码、npm 和 Go 构建。该账户不能读生产 SSH 密钥、发布账本或运行时密钥；构建成功后控制器复制并核对产物。配置示例为 [`deploy/domestic-release.example.json`](../../deploy/domestic-release.example.json)。固定的 `scripts/domestic_release.py`、`scripts/domestic_release_build.py` 放入 `/usr/local/libexec/aicrm/`，固定的 `deploy/domestic-promote.py` 以 root:root、0755 放在两台机器的同一路径。当前预备/生产 SSH 账户 `ubuntu` 已有 sudo 权限，后续可收窄为专用部署账户。生产内网 SSH 使用专用密钥和经过核对的固定 Host Key，不关闭 Host Key 验证。`GITHUB_TOKEN` 如需提高 API 限额只给预备机检查查询使用，不能写入包。
+只由一个发布执行者操作。修改固定发布器或安装器前，先暂停 timer，并停用旧的生产写入口；只读确认当前生产版本、健康、主机角色及无结果不明部署。把准确已合并提交中的工具安装到预备机和生产机，核对文件摘要及权限。预备机以真实服务用户、真实目录、受限 `PATH` 和 systemd 环境运行主机合同检查；固定 helper 使用 `--check-host-contract --expected-helper-sha256 <准确已检查提交中该文件的 SHA256>`，并应读回 `host_role=staging`、PostgreSQL 16 和 `database_connection=verified`。同时通过两个 PR 连续排队、阶段失败、摘要不符、生产健康失败和结果不明的合同测试。确认生产角色标记精确为 `production` 且主机身份为 `10.0.4.13` 后恢复 timer。切换过程不改应用 `main`、数据库或当前版本；结果不符就保持 timer 停止并只读排查。
 
-一次性创建 `aicrm-build` 系统账户和独立的 `/opt/aicrm/domestic/build-worker/{cache,tmp}`，把 Go/npm 持久缓存复制给该账户；确认它无法读取 `/home/ubuntu/.ssh/ai-crm-v4-prod-deploy`、`/opt/aicrm/domestic/state.json` 且没有 sudo 权限。发布器本身的代码和 systemd 单元变更须先更新机器上的固定副本并完成预发演练，再合并相关 PR；业务源码由后续定时任务自动处理。
+## 失败处置
 
-固定 helper 更新到支持 `retry-staging` 后，发布代理仅在预备机建立 root-owned `/etc/aicrm/domestic-release-role`，内容精确为 `staging` 并禁止 group/other 写入；生产机不创建此文件。缺失、符号链接、owner/mode 不符或内容不精确时，迁移 orphan retry 必须拒绝执行。
+- `check` 失败：按准确 head 修复并重跑，不人工绕过 required check。
+- 预备机安装/迁移失败：停止在该候选并回退运行版本；不要重试安装。预备机目前没有仓库维护的数据库重置工具，迁移可能已部分执行，队列必须保持停止，不能把“可丢弃”理解成可盲目删除。
+- 预备机数据库恢复只能由一个授权操作员按此顺序引导处理：暂停 `aicrm-domestic-release.timer`；在 `10.0.4.6` 用准确已检查提交中 helper 文件的 SHA256 执行固定 helper 的只读主机合同检查，确认返回 `host_role=staging`、`postgres_major=16`、`database_connection=verified`；再在不输出或复制连接密钥的前提下，核对 `/etc/aicrm/aicrm.env` 的非机密连接身份必须为 `127.0.0.1`、用户 `aicrm_test`、数据库 `aicrm_test_baseline_5d15`、PostgreSQL `16.15`。这些是当前已核实的预备机身份；任何一项不符就停止，不得重建。
+- 仓库尚无经验证的 drop/create 命令或自动重置入口。目标身份确认后，授权操作员仍须使用已批准的本机 PostgreSQL 管理规程，仅重建上述合成库；随后用新构建候选所带的 `deploy/aicrm-migrate.service`（先 `migrate-river`、再 `migrate-platform -dir migrations`）应用迁移，并按 `deploy/seed-staging-business-fixtures.sh` 重建合成夹具、完成预发读回。该恢复步骤目前是引导式、未完成主机演练的人工操作，不是发布器自动能力；不得临时拼接 SQL、复用生产凭据或恢复生产 dump。取得完整读回后再生成新候选，不能复用失败候选的收据。
+- 生产迁移前备份或迁移失败：停止队列；根据备份和迁移读回判断，未经专项修复不重试。
+- 生产健康失败：自动切回上一技术版本并读回。数据库迁移保持向前兼容，不反向恢复真实业务库。
+- 部署状态为 `outcome_unknown` 或读回互相矛盾：停止 timer，只读比对账本、当前链接、版本、摘要、服务与健康；得出确定结论前不重新安装。
 
-预备机安装同一完整目录到本机 `/opt/aicrm/current`，使用合成库验证受影响资源、服务和 `/readyz.release_sha`。首次预备机空环境会初始化合成库和服务单元；后续非迁移提交不运行迁移。生产接收区 `/opt/aicrm/domestic-incoming` 由传输账户持有；安装器在共享 `/opt/aicrm/install-release.lock` 下校验清单、当前 base SHA 与服务。迁移提交先做 `pg_dump -Fc` 备份，再运行迁移服务；非迁移提交跳过这两步。健康失败时切回上一版本并验证，数据库迁移保持前向兼容；若远程结果不明，状态置为 `outcome_unknown`，只读对账后人工明确结论，绝不盲目再次安装。
+## 时间记录
 
-## 切换
+现有发布收据记录检查、构建、预发、传输、生产安装和健康读回耗时。接下来十次发布统计目标：工具 `check` ≤5 分钟，普通业务 PR 约14分钟，从 check 变绿到生产健康 ≤10分钟。目标未实测前不报告为已达成。
 
-1. 暂停旧 GitHub Actions `deploy` 入口及旧指挥台生产写入口。保留旧账本只读供审计。两条发布路径共享主机锁，但切换期间仍需确保只有新定时器可以发起安装。
-2. 核对生产 `/opt/aicrm/current/release.env`、`/readyz`、原安装收据和完整清单。核对安装的 preview commit 与当前 GitHub `main` 的 Git tree 相同。旧观察待办不改写成真实业务验收完成。
-3. 在预备机从该 `main` 做一次完整基线构建、文件清单和合成数据安装；记录实际构建时间、峰值内存及磁盘。运行固定安装器的摘要失败、基础健康失败及回滚演练。
-4. 在 `production_enabled=false` 下执行 `python3 /usr/local/libexec/aicrm/domestic_release.py --config /etc/aicrm/domestic-release.json bind-baseline --prod-preview-sha <生产当前SHA>`。它读取生产状态和旧收据，核对双 commit 同树与预备机基线，建立一次性游标；状态已存在则拒绝覆盖。
-5. 两个模拟 PR 连续合并的第一父链、页面无备份/无迁移、Go 受影响程序编译、摘要不符、预发失败、生产健康失败和结果不明的测试全部通过；实测 `.6 -> .13` 的 SSH 身份认证及增量传输。随后设置 `production_enabled=true` 并启用 `aicrm-domestic-release.timer`。记录首个真实合并到生产健康的耗时。
-
-`state.json` 只记录技术游标：`processed_sha`、`deployed_source_sha`、`prod_installed_sha`、`status`。它不等于旧 `/Users/qianlan/Downloads/新CRM/release-control/state.json`，也不记录真实业务验收。状态缺失或损坏、检查未完成、源码拉取失败、基础/生产失败时默认停止。`outcome_unknown` 时保持 timer 停止，先做只读核对；符合本文恢复门槛后，运维必须显式给出 ledger 中同一个完整 SHA：
-
-```sh
-python3 /usr/local/libexec/aicrm/domestic_release.py \
-  --config /etc/aicrm/domestic-release.json recover \
-  --retry-blocked --sha <准确的40位blocked-SHA>
-```
-
-恢复器会再次核对 main 第一父链与准确 `check`、预备机包和进程、生产当前版本/健康/进程、目标回执和远端 metadata，并只允许一次安全复用符合 manifest 的非迁移 orphan。调用固定 helper 时还会传准确 release SHA 和 controller 已验证的 metadata SHA256；helper 在同一次 metadata 读取中先校验 digest 与目标 SHA，再允许任何安装副作用。若生产已经运行目标版本且目标成功回执有效，只补技术游标；现场互相矛盾、目标 current 缺少回执、旧版不健康或此前已尝试过恢复时均拒绝操作，保持队列停止并升级人工处置。禁止手工改写/删除 state.json、直接改 current 或盲目重复安装。恢复完成后先读回状态和生产版本，再单独决定何时恢复 timer。
-
-### 仅限当前 5538/0206 事件的一次预备机重试
-
-此入口只恢复本次阻塞提交 `5538d615a9abe2e25be799936866a7330b1d3af8` 的 0206 备份前失败，不是可供未来迁移复用的通用自动重试。账本必须准确记录该 SHA 为 `staging_failed`，且失败发生在迁移前；安装 helper 后可以请求一次受控重试：
-
-```sh
-python3 /usr/local/libexec/aicrm/domestic_release.py \
-  --config /etc/aicrm/domestic-release.json retry-staging --sha <准确的40位SHA>
-```
-
-此操作要求该 SHA 是 `processed_sha` 后的第一父链下一提交、parent 精确等于 `processed_sha`、准确 `check` 成功，且它只有 0206 这一条迁移；随后验证本地构建产物、预备机旧版本健康状态、root-owned orphan、无目标回执/备份、0206 尚未应用且旧订单约束仍有效。特殊 retry 还强制配置目标为 `127.0.0.1` / `aicrm_test` / `aicrm_test_baseline_5d15`，并在同一个只读数据库连接中核对 `current_database()`、`current_user` 和 loopback `inet_server_addr()`；任一不符都会拒绝。任何不一致或无法完成独立读回都保持队列停止。成功后它只继续原有同 SHA 的生产复制、安装和精确 readback；只有生产读回成功才推进账本。重试尝试会先持久化一次性 guard，失败后不可盲目再跑此命令；`staging_verified`、`transport_failed` 或 `staging_retry_unknown` 均需只读核对。
-
-## 回退与局限
-
-静态文件也经当前单体服务提供，因此版本切换后会重启 API 和 effects worker 以让 `/readyz` 报新 SHA；它不重新编译无关程序。若改动涉及系统服务定义、密钥或商户平台设置，需要单独的运维变更；代码发布器不改商户平台配置。迁移只能前向兼容，代码技术回退不会还原数据库。PR #22 不由本流程自动合并。
-
-Excel 批次组件的源码更新会重启其正在运行的 `aicrm-excel-batches.service` 并核对进程存活；预备机的合成环境目前未运行该可选组件。`requirements.txt` 依赖升级尚无可移植的离线 venv 安装路径，不能只凭主程序健康宣告该组件已发布；此类 PR 应先补齐独立的组件部署与预发验证，再进入自动合并。
+旧 merge-preview、handoff、观察占位及手工发布/恢复入口均为历史审计材料，不是新发布门禁。5538/0206 专项故障记录见[归档](archive/2026-09-23-5538-0206-staging-retry.md)。
