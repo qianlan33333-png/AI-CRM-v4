@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {JSDOM} from 'jsdom';
 
 const html = await readFile(process.argv[2], 'utf8');
-const signedURL = 'https://virtual-alipay.example.test/pay?channel=wap&merchant=M-alipay-7&signature=synthetic';
+const signedURL = 'https://openapi.alipay.com/gateway.do?method=alipay.trade.wap.pay&app_id=virtual-test-app&sign=synthetic&biz_content=wap-order';
 const calls = [];
 const records = new Map();
 let copied = '';
@@ -80,6 +80,7 @@ assert.equal(records.values().next().value.creates, 2);
 assert.equal(checkpoint().merchant_order_no, 'M-alipay-7');
 assert.equal(window.document.getElementById('alipayGuide').hidden, false);
 assert.equal(window.document.getElementById('alipayPaymentURL').value, signedURL);
+assert.equal(window.document.getElementById('alipayOpen').getAttribute('href'), '/pay/alipay/continue#'+encodeURIComponent(signedURL), 'WeChat uses the browser handoff for the same signed URL');
 assert.ok(calls.some(call => call.url === '/api/v1/alipay/checkouts/M-alipay-7'));
 window.document.getElementById('alipayCopy').click();
 await settle();
@@ -133,7 +134,7 @@ desktop.window.fetch = async (url, options = {}) => {
         : url === '/api/v1/alipay/checkouts' && options.method === 'POST'
           ? {merchant_order_no: 'M-alipay-page-7'}
           : url === '/api/v1/alipay/checkouts/M-alipay-page-7'
-            ? {status: 'awaiting_payment', provider: 'alipay', channel: 'alipay_page', ready: true, amount_minor: 990, currency: 'CNY', handoff: {redirectUrl: 'https://virtual-alipay.example.test/pay?channel=page'}}
+            ? {status: 'awaiting_payment', provider: 'alipay', channel: 'alipay_page', ready: true, amount_minor: 990, currency: 'CNY', handoff: {redirectUrl: 'https://openapi.alipay.com/gateway.do?method=alipay.trade.page.pay&app_id=virtual-test-app&sign=synthetic&biz_content=page-order'}}
             : assert.fail(`unexpected desktop request: ${url}`);
   return {ok: true, status: options.method === 'POST' ? 202 : 200, async json() {return body;}};
 };
@@ -144,7 +145,7 @@ desktop.window.document.getElementById('buy').click();
 await settle();
 assert.equal(JSON.parse(desktopCalls.find(call => call.options.method === 'POST').options.body).channel, 'alipay_page');
 assert.ok(desktopCalls.some(call => call.url === '/api/v1/alipay/checkouts/M-alipay-page-7'));
-assert.equal(desktop.window.document.getElementById('alipayPaymentURL').value, 'https://virtual-alipay.example.test/pay?channel=page');
+assert.equal(desktop.window.document.getElementById('alipayPaymentURL').value, 'https://openapi.alipay.com/gateway.do?method=alipay.trade.page.pay&app_id=virtual-test-app&sign=synthetic&biz_content=page-order');
 
 const rejected = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
 const rejectedWindow = rejected.window;
@@ -244,7 +245,7 @@ reauthorizedWindow.fetch = async (url, options = {}) => {
     reauthorizedPost = options;
     return {ok: true, status: 202, async json() {return {merchant_order_no: 'M-after-reauthorization'};}};
   }
-  if (url === '/api/v1/alipay/checkouts/M-after-reauthorization') return {ok: true, status: 200, async json() {return {status: 'awaiting_payment', provider: 'alipay', channel: 'alipay_page', ready: true, amount_minor: 990, currency: 'CNY', handoff: {redirectUrl: 'https://virtual-alipay.example.test/pay?channel=reauthorized'}};}};
+  if (url === '/api/v1/alipay/checkouts/M-after-reauthorization') return {ok: true, status: 200, async json() {return {status: 'awaiting_payment', provider: 'alipay', channel: 'alipay_page', ready: true, amount_minor: 990, currency: 'CNY', handoff: {redirectUrl: 'https://openapi.alipay.com/gateway.do?method=alipay.trade.page.pay&app_id=virtual-test-app&sign=synthetic&biz_content=reauthorized-order'}};}};
   throw new Error('unexpected reauthorization request: ' + method + ' ' + url);
 };
 reauthorizedWindow.eval(reauthorizedWindow.document.querySelector('script:last-of-type').textContent);
