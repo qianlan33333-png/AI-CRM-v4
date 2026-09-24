@@ -900,6 +900,92 @@ def _chown_smoke_source_snapshot(source_root: Path, uid: int, gid: int) -> None:
     source_root.chmod(0o755)
 
 
+def _attach_smoke_source_git_metadata(source_root: Path, index_path: Path, git_dir: str) -> Path:
+    """Expose the checked, private index to source-view tooling in the archive."""
+    root = Path(source_root)
+    index = Path(index_path)
+    repository_git_dir = Path(git_dir)
+    try:
+        root_real = root.resolve(strict=True)
+        index_real = index.resolve(strict=True)
+        index_info = index.lstat()
+        git_dir_info = repository_git_dir.lstat()
+    except OSError as exc:
+        raise RuntimeError("staging smoke source Git metadata is unavailable") from exc
+    if (
+        root.is_symlink()
+        or not root.is_dir()
+        or not stat.S_ISREG(index_info.st_mode)
+        or index_info.st_uid != os.geteuid()
+        or stat.S_IMODE(index_info.st_mode) != 0o444
+        or not stat.S_ISDIR(git_dir_info.st_mode)
+        or repository_git_dir.is_symlink()
+        or index_real.is_relative_to(root_real)
+    ):
+        raise RuntimeError("staging smoke source index or Git directory is unsafe")
+    git_dir_real = repository_git_dir.resolve(strict=True)
+    live_index = git_dir_real / "index"
+    if live_index.exists() and os.path.samefile(index_real, live_index):
+        raise RuntimeError("staging smoke source index must not use the live repository index")
+    metadata = root / ".git"
+    if metadata.exists() or metadata.is_symlink():
+        raise RuntimeError("staging smoke source snapshot already contains Git metadata")
+    metadata.mkdir(mode=0o700)
+    metadata_index = metadata / "index"
+    fd = os.open(metadata_index, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with index_real.open("rb") as source, os.fdopen(fd, "wb") as output:
+            shutil.copyfileobj(source, output)
+            output.flush()
+            os.fsync(output.fileno())
+            os.fchmod(output.fileno(), 0o444)
+    except Exception:
+        metadata_index.unlink(missing_ok=True)
+        raise
+    if digest(metadata_index) != digest(index_real):
+        raise RuntimeError("staging smoke source Git metadata differs from its checked index")
+    metadata.chmod(0o555)
+    _verify_smoke_source_git_metadata(root, index_real, str(git_dir_real))
+    return metadata_index
+
+
+def _verify_smoke_source_git_metadata(source_root: Path, index_path: Path, git_dir: str) -> None:
+    root = Path(source_root)
+    index = Path(index_path)
+    metadata = root / ".git"
+    metadata_index = metadata / "index"
+    try:
+        metadata_info = metadata.lstat()
+        metadata_index_info = metadata_index.lstat()
+        index_info = index.lstat()
+        git_dir_info = Path(git_dir).lstat()
+    except OSError as exc:
+        raise RuntimeError("staging smoke source Git metadata is unavailable") from exc
+    root_real = root.resolve(strict=True)
+    index_real = index.resolve(strict=True)
+    if (
+        not stat.S_ISDIR(metadata_info.st_mode)
+        or metadata.is_symlink()
+        or metadata_info.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata_info.st_mode) & 0o022
+        or not stat.S_ISREG(metadata_index_info.st_mode)
+        or metadata_index.is_symlink()
+        or metadata_index_info.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata_index_info.st_mode) != 0o444
+        or not stat.S_ISREG(index_info.st_mode)
+        or index.is_symlink()
+        or index_info.st_uid != os.geteuid()
+        or stat.S_IMODE(index_info.st_mode) != 0o444
+        or index_real.is_relative_to(root_real)
+        or not stat.S_ISDIR(git_dir_info.st_mode)
+        or Path(git_dir).is_symlink()
+    ):
+        raise RuntimeError("staging smoke source Git metadata is unsafe")
+    live_index = Path(git_dir).resolve(strict=True) / "index"
+    if live_index.exists() and os.path.samefile(index, live_index):
+        raise RuntimeError("staging smoke source index must not use the live repository index")
+
+
 def _smoke_source_index(source_sha: str, source_root: Path, scratch: Path, git_dir: str) -> Path:
     index_path = scratch / "source.index"
     result = subprocess.run(
@@ -943,6 +1029,11 @@ def _verify_smoke_source_snapshot(source_root: Path, git_dir: str, index_path: P
     )
     if result.returncode != 0:
         raise RuntimeError("staging smoke source snapshot no longer matches its checked commit")
+    index = Path(index_path)
+    index_info = index.lstat()
+    if not stat.S_ISREG(index_info.st_mode) or index.is_symlink() or index_info.st_uid != os.geteuid():
+        raise RuntimeError("staging smoke source index became unsafe during snapshot verification")
+    index.chmod(0o444)
 
 
 def _run_unprivileged_smoke_command(
@@ -1090,13 +1181,19 @@ def _run_installed_smoke_test(
     node_path: str,
     smoke_input_path: Path,
 ) -> None:
+    _verify_smoke_source_git_metadata(source_root, index_path, git_dir)
+    metadata_index = Path(source_root) / ".git/index"
+    metadata_index_digest = digest(metadata_index)
+    source_root_real = Path(source_root).resolve(strict=True)
+    git_dir_real = Path(git_dir).resolve(strict=True)
+    index_real = Path(index_path).resolve(strict=True)
     source_index_environment = {
         "HOME": environment["HOME"],
         "PATH": environment["PATH"],
         "TMPDIR": environment["TMPDIR"],
-        "GIT_DIR": git_dir,
-        "GIT_WORK_TREE": str(source_root),
-        "GIT_INDEX_FILE": str(index_path),
+        "GIT_DIR": str(git_dir_real),
+        "GIT_WORK_TREE": str(source_root_real),
+        "GIT_INDEX_FILE": str(index_real),
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_CONFIG_COUNT": "1",
         "GIT_CONFIG_KEY_0": "safe.directory",
@@ -1110,6 +1207,9 @@ def _run_installed_smoke_test(
         label="staging smoke source preparation",
     )
     _verify_smoke_source_snapshot(source_root, git_dir, index_path)
+    _verify_smoke_source_git_metadata(source_root, index_path, git_dir)
+    if digest(metadata_index) != metadata_index_digest:
+        raise RuntimeError("staging smoke source Git metadata changed during preparation")
     test_environment = {**environment, "GOFLAGS": "-buildvcs=false"}
     _run_unprivileged_smoke_command(
         (
@@ -1196,6 +1296,7 @@ def run_staging_smoke(
             git_dir = _source_git_dir()
             source_index = _smoke_source_index(source_sha, source_root, scratch, git_dir)
             _chown_smoke_source_snapshot(source_root, ubuntu.pw_uid, ubuntu.pw_gid)
+            _attach_smoke_source_git_metadata(source_root, source_index, git_dir)
             runtime_tmp = scratch / "runtime-tmp"
             runtime_tmp.mkdir(mode=0o700)
             os.chown(runtime_tmp, ubuntu.pw_uid, ubuntu.pw_gid)
