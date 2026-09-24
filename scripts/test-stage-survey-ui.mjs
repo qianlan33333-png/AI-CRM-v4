@@ -77,7 +77,8 @@ for (const page of ['auth.html', 'all.html', 'one.html', 'result.html', 'error.h
   for (const entry of ['sharedVisualTokens', 'surveyPublicStyles']) {
     assert.ok(html.includes(`<link rel="stylesheet" href="../${sourceManifest.entries[entry]}">`), `staged h5/${page} does not load ${entry}`);
   }
-  assert.ok(html.includes(`<script type="module" src="../${sourceManifest.entries.surveyPublicHost}"></script>`), `staged h5/${page} does not load the public Survey Host`);
+  const host = page === 'auth.html' ? sourceManifest.entries.h5AuthHost : sourceManifest.entries.surveyPublicHost;
+  assert.ok(html.includes(`<script type="module" src="../${host}"></script>`), `staged h5/${page} does not load its public Survey Host`);
 }
 const doneCompletionHTML = fs.readFileSync(path.join(stage, 'h5', 'done.html'), 'utf8');
 assert.ok(doneCompletionHTML.includes('data-sc-if="{{ done }}"') && doneCompletionHTML.includes('data-h5-done'), 'staged H5 completion page does not gate confirmation on a submitted session');

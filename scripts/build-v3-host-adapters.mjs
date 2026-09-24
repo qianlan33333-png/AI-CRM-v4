@@ -109,6 +109,7 @@ const result = await build({
   entryNames: '[name]-[hash]',
   chunkNames: 'chunks/[name]-[hash]',
   assetNames: 'files/[name]-[hash]',
+  loader: { '.png': 'file' },
   minify: true,
   metafile: true,
   logLevel: 'warning',
@@ -384,7 +385,11 @@ for (const page of ['auth', 'all', 'one', 'result', 'error', 'done']) {
   if (!demoShell.test(html)) throw new Error(`${page}.html H5 shell changed; inspect the mobile adaptation`);
   html = html.replace(demoShell, '<main id="screen" class="v3-survey-screen"></main>');
   html = html.replace('</head>', `<style>html,body{margin:0;min-height:100%;background:#F5F6F7}*{box-sizing:border-box}.v3-survey-screen{display:flex;flex-direction:column;width:100%;max-width:720px;min-height:100vh;min-height:100dvh;margin:0 auto;overflow-wrap:anywhere;padding-bottom:env(safe-area-inset-bottom)}.v3-survey-screen input,.v3-survey-screen textarea{max-width:100%;font-size:16px}</style>\n${sharedVisualTokensStylesheet}\n${surveyPublicStylesheet}</head>`);
-  html = html.replace(frozenH5Reference, `${h5AuthReference}\n${surveyPublicReference}\n${frozenH5Reference}`);
+  // The auth carrier is presented by the V4-owned required-login Host. The
+  // frozen runtime remains authoritative for answer, result and done pages.
+  html = html.replace(frozenH5Reference, page === 'auth'
+    ? `${h5AuthReference}`
+    : `${h5AuthReference}\n${surveyPublicReference}\n${frozenH5Reference}`);
   fs.writeFileSync(documentPath, html);
   manifest.release_files[`h5/${page}.html`] = metadataFor(Buffer.from(html));
 }

@@ -128,7 +128,7 @@ assert.ok(
 );
 
 for (const [raw, expected, detail] of [
-  ["登录状态已失效，请重新登录", "登录或授权已失效，请重新授权后继续。", "问题详情：HTTP 401"],
+  ["登录状态已失效，请重新登录", "登录或授权已失效，当前答案尚未提交。请重新授权后填写问卷。", "问题详情：HTTP 401"],
   ["当前账号无权执行此操作", "当前无权限访问此问卷，请联系管理员确认访问权限。", "问题详情：HTTP 403"],
 ]) {
   screen.innerHTML = `<button data-h5-submit>提交</button><div data-h5-error>${raw}</div>`;
@@ -136,6 +136,10 @@ for (const [raw, expected, detail] of [
   assert.equal(screen.querySelector("[data-v3-survey-recovery]")?.textContent, expected, `${detail} keeps its authorization meaning`);
   assert.equal(screen.querySelector("[data-v3-survey-error-detail]")?.textContent, detail, `${detail} remains a secondary diagnostic`);
   assert.ok(screen.querySelector("[data-h5-submit]"), `${detail} does not clear the Owner retry control or draft`);
+  if (detail.includes('401')) {
+    assert.equal(screen.querySelector('[data-v3-survey-reauthorize]')?.getAttribute('href'), '/h5/auth.html?slug=survey', 'expired session has one explicit login action');
+    assert.equal(screen.querySelector('[data-h5-submit]')?.disabled, true, 'expired session cannot resubmit until login');
+  }
 }
 
 screen.innerHTML = "<button data-h5-submit>提交</button><div data-h5-error>问卷已停止填写</div>";
@@ -273,36 +277,7 @@ assert.equal(unknownDOM.window.document.documentElement.outerHTML.includes(unsaf
 assert.equal(unknownScreen?.querySelector("a"), null, "unknown error code cannot create a navigation target");
 unknownDOM.window.close();
 
-const authPage = fs.readFileSync(path.join(root, "web/dist/h5/auth.html"), "utf8");
-const oauthFailureDOM = new JSDOM(authPage, {
-  url: "https://test.invalid/h5/auth.html?oauth_error=%3Csvg%3E&slug=growth",
-  runScripts: "outside-only",
-  pretendToBeVisual: true,
-});
-oauthFailureDOM.window.eval(authHost);
-oauthFailureDOM.window.eval(publicHost);
-oauthFailureDOM.window.eval(runtime);
-await new Promise((resolve) => setTimeout(resolve, 0));
-const oauthFailureScreen = oauthFailureDOM.window.document.getElementById("screen");
-assert.match(oauthFailureScreen?.textContent || "", /授权失败/, "OAuth callback failure must not claim that identity verification is still running");
-assert.equal(oauthFailureScreen?.textContent?.includes("正在验证微信身份"), false, "failed OAuth must not retain a validating title");
-assert.equal(oauthFailureScreen?.textContent?.includes("重试微信授权"), false, "failed OAuth must not offer a direct Provider retry");
-const safeReturn = oauthFailureScreen?.querySelector("[data-v3-survey-safe-return]");
-assert.ok(safeReturn instanceof oauthFailureDOM.window.HTMLAnchorElement, "only a validated callback slug provides a return path");
-assert.equal(safeReturn.href, "https://test.invalid/q/growth", "return path is rebuilt from the validated slug, not copied from a query URL");
-assert.equal(oauthFailureDOM.window.document.documentElement.outerHTML.includes("<svg>"), false, "untrusted OAuth query value must not be rendered");
-oauthFailureDOM.window.close();
-
-const invalidSlugDOM = new JSDOM(authPage, {
-  url: "https://test.invalid/h5/auth.html?oauth_error=1&slug=javascript%3Aalert(1)",
-  runScripts: "outside-only",
-  pretendToBeVisual: true,
-});
-invalidSlugDOM.window.eval(authHost);
-invalidSlugDOM.window.eval(publicHost);
-invalidSlugDOM.window.eval(runtime);
-await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(invalidSlugDOM.window.document.querySelector("[data-v3-survey-safe-return]"), null, "untrusted slug cannot become a return target");
-invalidSlugDOM.window.close();
+// The required login gate is covered by h5AuthAdapter.test.mjs. The frozen
+// answer, result and terminal Owner states remain covered above.
 
 console.log("public Survey H5 presentation Host: PASS");

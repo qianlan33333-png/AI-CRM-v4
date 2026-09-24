@@ -1,3 +1,4 @@
+@import './requiredAuth.css';
 /* Public commerce presentation is isolated from the admin shell and frozen
    service-period body. Existing Owner text and controls remain authoritative. */
 :is(main, body)[data-v3-public-commerce] {
@@ -17,6 +18,20 @@
   color: var(--public-text);
   max-width: 680px;
   padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
+}
+
+main[data-v3-public-commerce][data-auth-state="required"] {
+  background: #f4f6fa;
+  padding: 24px 18px;
+}
+main[data-v3-public-commerce][data-auth-state="required"] #identityGate {
+  margin: 0;
+  min-height: calc(100dvh - 48px);
+  padding: 34px 26px;
+  border-radius: 28px;
+}
+main[data-v3-public-commerce]:not([data-auth-state="required"]) #identityGate .auth-illustration {
+  display: none;
 }
 
 :is(main, body)[data-v3-public-commerce] :is(.panel, .completion-result) {

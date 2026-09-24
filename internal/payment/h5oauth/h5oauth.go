@@ -59,6 +59,7 @@ type State struct {
 type Store interface {
 	Create(context.Context, [32]byte, State, time.Time) error
 	Consume(context.Context, [32]byte, time.Time) (State, error)
+	ReturnPath(context.Context, [32]byte) (string, error)
 }
 
 type PostgreSQL struct{}
@@ -83,6 +84,18 @@ func (PostgreSQL) Consume(ctx context.Context, digest [32]byte, now time.Time) (
 		return State{}, ErrInvalid
 	}
 	return state, nil
+}
+
+func (PostgreSQL) ReturnPath(ctx context.Context, digest [32]byte) (string, error) {
+	tx, err := platformpostgres.RequireTransaction(ctx)
+	if err != nil {
+		return "", err
+	}
+	var returnPath string
+	if err = tx.QueryRow(ctx, `SELECT return_path FROM payment_h5_oauth_states WHERE state_digest=$1`, digest[:]).Scan(&returnPath); err != nil || !validReturnPath(returnPath) {
+		return "", ErrInvalid
+	}
+	return returnPath, nil
 }
 
 type Service struct {
@@ -153,6 +166,24 @@ func (s *Service) Complete(ctx context.Context, stateToken, code string) (paymen
 	return issued, state.ReturnPath, nil
 }
 
+// RecoverReturnPath reads only the canonical return path, including after a
+// state was consumed. It never replays OAuth or issues a payment session.
+func (s *Service) RecoverReturnPath(ctx context.Context, stateToken string) (string, error) {
+	if !s.Enabled() || !safe(stateToken, 128) {
+		return "", ErrInvalid
+	}
+	digest := sha256.Sum256([]byte(stateToken))
+	var returnPath string
+	if err := s.uow.Within(ctx, func(tx context.Context) error {
+		var err error
+		returnPath, err = s.store.ReturnPath(tx, digest)
+		return err
+	}); err != nil || !validReturnPath(returnPath) {
+		return "", ErrInvalid
+	}
+	return returnPath, nil
+}
+
 func safe(value string, maximum int) bool {
 	return value != "" && len(value) <= maximum && strings.TrimSpace(value) == value && !strings.ContainsAny(value, "\r\n\x00")
 }
@@ -206,3 +237,7 @@ func validReturnPath(value string) bool {
 	// regex and later redirect to a different multi-segment route.
 	return err == nil && safe(code, 200) && !strings.ContainsAny(code, "/\\?#")
 }
+
+// ValidReturnPath exposes the same narrow return-path policy to the HTTP
+// callback's short-lived recovery cookie. It never accepts arbitrary URLs.
+func ValidReturnPath(value string) bool { return validReturnPath(value) }

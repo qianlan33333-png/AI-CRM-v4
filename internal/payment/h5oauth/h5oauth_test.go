@@ -20,6 +20,7 @@ func (uowStub) Within(ctx context.Context, fn func(context.Context) error) error
 
 type stateStoreStub struct {
 	states map[[32]byte]State
+	all    map[[32]byte]State
 }
 
 func (s *stateStoreStub) Create(_ context.Context, digest [32]byte, state State, _ time.Time) error {
@@ -27,7 +28,18 @@ func (s *stateStoreStub) Create(_ context.Context, digest [32]byte, state State,
 		s.states = map[[32]byte]State{}
 	}
 	s.states[digest] = state
+	if s.all == nil {
+		s.all = map[[32]byte]State{}
+	}
+	s.all[digest] = state
 	return nil
+}
+func (s *stateStoreStub) ReturnPath(_ context.Context, digest [32]byte) (string, error) {
+	state, ok := s.all[digest]
+	if !ok {
+		return "", ErrInvalid
+	}
+	return state.ReturnPath, nil
 }
 func (s *stateStoreStub) Consume(_ context.Context, digest [32]byte, _ time.Time) (State, error) {
 	state, ok := s.states[digest]
@@ -79,6 +91,12 @@ func TestH5OAuthStateIsBoundExpiresAndCannotReplay(t *testing.T) {
 	issued, redirect, err := service.Complete(context.Background(), state, "trusted-code")
 	if err != nil || redirect != "/pay/course-7" || issued.Channel != paymentdomain.ChannelH5Official || issuer.command.Fact.Reference().Kind != identitydomain.KindOAOpenID || issuer.command.Fact.Reference().Scope != "wechat-app:wx-oa" || issuer.command.DisplayName != "微信昵称" || issuer.command.AvatarURL != "https://thirdwx.qlogo.cn/avatar" {
 		t.Fatalf("issued=%+v redirect=%q command=%+v err=%v", issued, redirect, issuer.command, err)
+	}
+	if recovered, recoverErr := service.RecoverReturnPath(context.Background(), state); recoverErr != nil || recovered != "/pay/course-7" {
+		t.Fatalf("consumed state recovery path=%q err=%v", recovered, recoverErr)
+	}
+	if _, recoverErr := service.RecoverReturnPath(context.Background(), "unknown-state"); recoverErr == nil {
+		t.Fatal("unknown state returned a path")
 	}
 	if _, _, err = service.Complete(context.Background(), state, "trusted-code"); err == nil {
 		t.Fatal("OAuth state replay succeeded")

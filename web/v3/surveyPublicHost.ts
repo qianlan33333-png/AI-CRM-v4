@@ -60,7 +60,7 @@ const failurePresentation = (): FailurePresentation | null => {
   }
 };
 
-if (supportedPages.has(page)) {
+if (supportedPages.has(page) && page !== 'auth') {
   document.body.dataset.v3PublicSurvey = page;
 
   const template = document.getElementById("tpl") as HTMLTemplateElement | null;
@@ -236,7 +236,7 @@ if (supportedPages.has(page)) {
     const recovery = document.createElement("p");
     recovery.dataset.v3SurveyRecovery = "";
     recovery.textContent = unauthorized
-      ? "登录或授权已失效，请重新授权后继续。"
+      ? "登录或授权已失效，当前答案尚未提交。请重新授权后填写问卷。"
       : forbidden
         ? "当前无权限访问此问卷，请联系管理员确认访问权限。"
         : page === "result"
@@ -247,6 +247,17 @@ if (supportedPages.has(page)) {
     detail.textContent = `问题详情：HTTP ${unauthorized ? "401" : forbidden ? "403" : status}`;
     error.prepend(recovery);
     error.append(detail);
+    if (unauthorized && (page === 'all' || page === 'one')) {
+      const slug = new URLSearchParams(location.search).get('slug') || '';
+      if (validPublicSlug(slug)) {
+        const action = document.createElement('a');
+        action.dataset.v3SurveyReauthorize = '';
+        action.className = 'auth-button';
+        action.href = `/h5/auth.html?slug=${encodeURIComponent(slug)}`;
+        action.textContent = '授权并继续';
+        error.append(action);
+      }
+    }
   };
 
   const decorate = (): void => {
@@ -283,6 +294,12 @@ if (supportedPages.has(page)) {
       error.setAttribute("aria-live", "assertive");
       error.dataset.v3SurveyError = "";
       improveTransportError(error);
+    }
+    if (screen.querySelector('[data-v3-survey-reauthorize]')) {
+      for (const button of Array.from(screen.querySelectorAll<HTMLButtonElement>('[data-h5-submit]'))) {
+        button.disabled = true;
+        button.setAttribute('aria-disabled', 'true');
+      }
     }
     for (const receipt of Array.from(
       screen.querySelectorAll<HTMLElement>(

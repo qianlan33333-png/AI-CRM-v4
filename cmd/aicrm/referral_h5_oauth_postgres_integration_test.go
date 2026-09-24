@@ -75,6 +75,7 @@ func TestPostgreSQLReferralH5OAuthReturnRoundTrip(t *testing.T) {
 
 	invite := "rfi_" + strings.Repeat("A", 43)
 	var consumedState string
+	var firstReturnPath string
 	var paymentSession string
 	for _, returnPath := range []string{
 		"/referral?campaign=1",
@@ -94,23 +95,42 @@ func TestPostgreSQLReferralH5OAuthReturnRoundTrip(t *testing.T) {
 		}
 		if consumedState == "" {
 			consumedState = state
+			firstReturnPath = returnPath
 		}
-		callback := referralH5OAuthRequest(t, application.handler, "/api/h5/wechat-pay/oauth/callback?state="+url.QueryEscape(state)+"&code=referral-roundtrip-code", "")
+		startCookies := start.Result().Cookies()
+		if len(startCookies) != 1 || startCookies[0].Name != "__Secure-aicrm_payment_oauth_return" || !startCookies[0].Secure || !startCookies[0].HttpOnly {
+			t.Fatal("OAuth start did not issue the short-lived return-path cookie")
+		}
+		callback := referralH5OAuthRequest(t, application.handler, "/api/h5/wechat-pay/oauth/callback?state="+url.QueryEscape(state)+"&code=referral-roundtrip-code", "", startCookies[0])
 		if callback.Code != http.StatusFound || callback.Header().Get("Location") != returnPath {
 			t.Fatalf("callback return=%q status=%d actual=%q", returnPath, callback.Code, callback.Header().Get("Location"))
 		}
 		cookies := callback.Result().Cookies()
-		if len(cookies) != 1 || cookies[0].Name != "aicrm_payment_session" || !cookies[0].Secure || !cookies[0].HttpOnly || !strings.HasPrefix(cookies[0].Value, "pays_") || len(cookies[0].Value) != 48 {
+		var trusted, cleared *http.Cookie
+		for _, cookie := range cookies {
+			switch cookie.Name {
+			case "aicrm_payment_session":
+				trusted = cookie
+			case "__Secure-aicrm_payment_oauth_return":
+				cleared = cookie
+			}
+		}
+		if len(cookies) != 2 || trusted == nil || !trusted.Secure || !trusted.HttpOnly || !strings.HasPrefix(trusted.Value, "pays_") || len(trusted.Value) != 48 || cleared == nil || cleared.MaxAge != -1 || !cleared.Secure || !cleared.HttpOnly {
 			t.Fatalf("callback did not issue one valid trusted session cookie")
 		}
-		paymentSession = cookies[0].Value
+		paymentSession = trusted.Value
 	}
 	if transport.calls != 4 {
 		t.Fatalf("provider calls=%d want 4", transport.calls)
 	}
 	replayed := referralH5OAuthRequest(t, application.handler, "/api/h5/wechat-pay/oauth/callback?state="+url.QueryEscape(consumedState)+"&code=referral-roundtrip-code", "")
-	if replayed.Code != http.StatusUnauthorized || transport.calls != 4 {
+	if replayed.Code != http.StatusSeeOther || replayed.Header().Get("Location") != firstReturnPath || transport.calls != 4 {
 		t.Fatalf("OAuth state replay status=%d provider_calls=%d", replayed.Code, transport.calls)
+	}
+	for _, cookie := range replayed.Result().Cookies() {
+		if cookie.Name == "aicrm_payment_session" {
+			t.Fatal("OAuth state replay issued a second trusted session")
+		}
 	}
 	var consumed int
 	if err = application.pool.Native().QueryRow(ctx, `SELECT count(*) FROM payment_h5_oauth_states WHERE return_path LIKE '/referral?campaign=1%' AND consumed_at IS NOT NULL`).Scan(&consumed); err != nil || consumed != 2 {
@@ -260,11 +280,14 @@ func (transport *referralH5OAuthTransport) RoundTrip(request *http.Request) (*ht
 	return transport.base.RoundTrip(forwarded)
 }
 
-func referralH5OAuthRequest(t *testing.T, handler http.Handler, path, userAgent string) *httptest.ResponseRecorder {
+func referralH5OAuthRequest(t *testing.T, handler http.Handler, path, userAgent string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, path, nil)
 	if userAgent != "" {
 		request.Header.Set("User-Agent", userAgent)
+	}
+	for _, cookie := range cookies {
+		request.AddCookie(cookie)
 	}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

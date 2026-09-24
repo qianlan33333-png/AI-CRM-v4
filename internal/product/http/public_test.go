@@ -68,7 +68,7 @@ func TestPromotionContextPublicChainRetainsCheckoutContext(t *testing.T) {
 	}
 	payment := httptest.NewRecorder()
 	public.ServeHTTP(payment, publicRequest(http.MethodGet, "/pay/course-7?promotion_context="+context, nil))
-	if payment.Code != http.StatusOK || !strings.Contains(payment.Body.String(), "promotionContext='"+context+"'") || !strings.Contains(payment.Body.String(), "location.pathname+(location.search||'')") {
+	if payment.Code != http.StatusOK || !strings.Contains(payment.Body.String(), "promotionContext='"+context+"'") || !strings.Contains(payment.Body.String(), "location.pathname+(promotionContext?'?promotion_context='+promotionContext:'')") {
 		t.Fatalf("payment continuation status=%d body=%s", payment.Code, payment.Body.String())
 	}
 	if !strings.Contains(payment.Body.String(), "checkoutRecord(){let raw") || !strings.Contains(payment.Body.String(), "if(record.state==='invalid')throw requestFailure('checkout_checkpoint_invalid'") || !strings.Contains(payment.Body.String(), "if(record.state==='unavailable')return null") || !strings.Contains(payment.Body.String(), "if(promotionContext)payload.promotion_context=promotionContext") {
@@ -90,7 +90,7 @@ func TestServicePeriodPromotionContextReachesPaymentAndOAuth(t *testing.T) {
 	}
 	payment := httptest.NewRecorder()
 	handler.ServeHTTP(payment, publicRequest(http.MethodGet, "/s/term-31/pay?promotion_context="+context, nil))
-	if payment.Code != http.StatusOK || !strings.Contains(payment.Body.String(), "promotionContext='"+context+"'") || !strings.Contains(payment.Body.String(), "location.pathname+(location.search||'')") {
+	if payment.Code != http.StatusOK || !strings.Contains(payment.Body.String(), "promotionContext='"+context+"'") || !strings.Contains(payment.Body.String(), "location.pathname+(promotionContext?'?promotion_context='+promotionContext:'')") {
 		t.Fatalf("service promotion payment status=%d body=%s", payment.Code, payment.Body.String())
 	}
 	if !strings.Contains(payment.Body.String(), "checkoutRecord(){let raw") || !strings.Contains(payment.Body.String(), "if(record.state==='invalid')throw requestFailure('checkout_checkpoint_invalid'") || !strings.Contains(payment.Body.String(), "if(record.state==='unavailable')return null") || !strings.Contains(payment.Body.String(), "if(promotionContext)payload.promotion_context=promotionContext") {
@@ -182,10 +182,13 @@ func TestPublicProductEnabledOnlyAndSafeDTO(t *testing.T) {
 	if payment.Code != http.StatusOK || strings.Contains(payment.Body.String(), "beneficiarySelf") || !strings.Contains(payment.Body.String(), "beneficiary_selection:'payer_self'") || strings.Contains(payment.Body.String(), "beneficiary_customer_id") {
 		t.Fatalf("payment page status=%d body=%s", payment.Code, payment.Body.String())
 	}
-	for _, required := range []string{"微信身份验证", "正在核验微信身份", "bootstrapCheckout", "checkoutContent", "/api/v1/wechat-pay/checkout-session", "/api/h5/wechat-pay/oauth/start?return_url="} {
+	for _, required := range []string{"微信身份验证", "正在核验微信身份", "登录才能完成支付", "不会自动扣款", "授权并继续", "bootstrapCheckout", "checkoutContent", "/api/v1/wechat-pay/checkout-session", "/api/h5/wechat-pay/oauth/start?return_url="} {
 		if !strings.Contains(payment.Body.String(), required) {
 			t.Fatalf("payment page missing identity verification %q: %s", required, payment.Body.String())
 		}
+	}
+	if strings.Contains(payment.Body.String(), "authAttemptKey") {
+		t.Fatal("payment page must wait for a click before starting OAuth")
 	}
 	if strings.Contains(payment.Body.String(), `id="renew"`) {
 		t.Fatalf("ordinary product must not expose renewal: %s", payment.Body.String())

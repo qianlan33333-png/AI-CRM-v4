@@ -32,6 +32,7 @@ import (
 )
 
 const SessionCookieName = paymentport.TrustedSessionCookieName
+const h5OAuthReturnCookieName = "__Secure-aicrm_payment_oauth_return"
 const maxBody = 64 << 10
 
 type RequestSecurity interface {
@@ -82,6 +83,7 @@ type H5OAuthApplication interface {
 	Enabled() bool
 	Start(context.Context, string) (string, error)
 	Complete(context.Context, string, string) (paymentsession.Issued, string, error)
+	RecoverReturnPath(context.Context, string) (string, error)
 }
 
 type AlipayCallbackVerifier interface {
@@ -298,17 +300,52 @@ func (handler *Handler) startH5OAuth(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusServiceUnavailable, "payment_h5_oauth_unavailable")
 		return
 	}
+	// The OAuth state remains one-time. This short-lived, path-scoped cookie
+	// carries only the already validated same-origin return path so a rejected
+	// or stale callback can return to the login gate without replaying state.
+	http.SetCookie(writer, &http.Cookie{Name: h5OAuthReturnCookieName, Value: base64.RawURLEncoding.EncodeToString([]byte(query["return_url"])), Path: "/api/h5/wechat-pay/oauth/callback", MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	http.Redirect(writer, request, location, http.StatusFound)
 }
 
 func (handler *Handler) completeH5OAuth(writer http.ResponseWriter, request *http.Request) {
 	query, ok := exactH5OAuthQuery(request, "state", "code")
+	denied := false
+	if !ok {
+		if refusal, valid := exactH5OAuthQuery(request, "state", "error"); valid && (refusal["error"] == "access_denied" || refusal["error"] == "authdeny") {
+			query, ok, denied = refusal, true, true
+		} else if refusal, valid := exactH5OAuthQuery(request, "state"); valid {
+			query, ok, denied = refusal, true, true
+		}
+	}
 	if request.Method != http.MethodGet || handler.h5OAuth == nil || !handler.h5OAuth.Enabled() || !ok {
 		writeError(writer, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	issued, returnPath, err := handler.h5OAuth.Complete(request.Context(), query["state"], query["code"])
+	denied = denied || query["code"] == "authdeny"
+	var issued paymentsession.Issued
+	var returnPath string
+	var err error
+	if denied {
+		err = paymenth5oauth.ErrInvalid
+	} else {
+		issued, returnPath, err = handler.h5OAuth.Complete(request.Context(), query["state"], query["code"])
+	}
+	returnCookie, cookieErr := request.Cookie(h5OAuthReturnCookieName)
+	http.SetCookie(writer, &http.Cookie{Name: h5OAuthReturnCookieName, Path: "/api/h5/wechat-pay/oauth/callback", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	if err != nil {
+		if !errors.Is(err, paymenth5oauth.ErrIdentityConflict) {
+			recoveryPath, recoveryErr := handler.h5OAuth.RecoverReturnPath(request.Context(), query["state"])
+			if recoveryErr != nil && cookieErr == nil {
+				if decoded, decodeErr := base64.RawURLEncoding.DecodeString(returnCookie.Value); decodeErr == nil && paymenth5oauth.ValidReturnPath(string(decoded)) {
+					recoveryPath = string(decoded)
+				}
+			}
+			if paymenth5oauth.ValidReturnPath(recoveryPath) {
+				writer.Header().Set("Cache-Control", "no-store")
+				http.Redirect(writer, request, recoveryPath, http.StatusSeeOther)
+				return
+			}
+		}
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 		writer.Header().Set("Cache-Control", "no-store")
 		message := "微信授权未完成，请关闭页面后从原链接重新进入。"

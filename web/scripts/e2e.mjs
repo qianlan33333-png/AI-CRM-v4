@@ -25,6 +25,7 @@ const TEST_BUNDLES = {
   questionnaireEditor: await buildTestBrowserBundle(path.join(ROOT, 'src/admin/sections/questionnaireEditor.ts')),
   surveyOperationsHost: await buildTestBrowserBundle(path.join(ROOT, 'v3/surveyOperationsHost.ts')),
   h5: await buildTestBrowserBundle(path.join(ROOT, 'src/h5/main.ts')),
+  h5AuthHost: await buildTestBrowserBundle(path.join(ROOT, 'v3/h5AuthAdapter.ts')),
   sidebar: await buildTestBrowserBundle(path.join(ROOT, 'v3/sidebar/main.ts')),
   memberGridShare: (await build({ entryPoints: [path.join(ROOT, 'v3/memberGridFeedbackHost.ts')], bundle: true, write: false, format: 'iife', plugins: [memberGridPresentationPlugin] })).outputFiles[0].text,
 };
@@ -184,6 +185,7 @@ async function loadPage(rel, { id, q, automationHistoryHttp = false, campaignHis
     return `<script>${productHttp ? TEST_BUNDLES.productHost : bundle}</script>`;
   });
   html = html.replace(/<script type="module" src="[^"]*assets\/surveyOperationsHost-[^"]+\.js"><\/script>/, `<script>${TEST_BUNDLES.surveyOperationsHost}</script>`);
+  if (rel === 'h5/auth.html') html = html.replace(/<script type="module" src="[^"]*assets\/h5AuthHost-[^"]+\.js"><\/script>/, `<script>${TEST_BUNDLES.h5AuthHost}</script>`);
   if (rel === 'sidebar/index.html') html = html.replace(/<script src="[^"]*assets\/sidebarImageResourceLoader-[^"]+\.js"><\/script>/, `<script>${SIDEBAR_IMAGE_RESOURCE_LOADER}</script>`);
   // ownerMig's Host is a separately served V3 adapter. Inline the exact built
   // adapter here so this regression executes the frozen donor mount rather
@@ -3188,12 +3190,12 @@ for (const scenario of [
 {
   const outside = await loadPage('h5/auth.html', { q: 'slug=uat-survey', h5Http: {} });
   const d = outside.window.document;
-  ok('H5 auth 微信外禁止继续且提示在微信中打开', d.body.textContent.includes('请在微信中打开') && [...d.querySelectorAll('#screen button')].every((button) => button.disabled) && outside.window.__h5HttpTest.calls.length === 0);
+  ok('H5 auth 微信外提示在微信中打开且不发起授权', d.body.textContent.includes('请在微信中打开') && d.querySelector('.auth-button')?.hidden === true && outside.window.__h5HttpTest.calls.length === 0);
   outside.window.close();
 
   const inside = await loadPage('h5/auth.html', { q: 'slug=uat-survey', h5Http: {}, h5WeChat: true });
   const insideDocument = inside.window.document;
-  ok('H5 auth 微信内先读取安全会话并自动发起一次授权', ![...insideDocument.querySelectorAll('#screen button')].some((button) => !button.disabled) && inside.window.sessionStorage.getItem('survey.oauth:uat-survey') === 'started' && inside.window.__h5HttpTest.calls.length === 1 && inside.window.__h5HttpTest.calls[0].path === '/api/h5/surveys/session');
+  ok('H5 auth 微信内先读取安全会话，再由用户点击发起授权', insideDocument.querySelector('#surveyAuthTitle')?.textContent === '登录才能填写问卷' && insideDocument.querySelector('.auth-button')?.getAttribute('href') === '/api/h5/surveys/oauth/start?slug=uat-survey' && inside.window.__h5HttpTest.calls.length === 1 && inside.window.__h5HttpTest.calls[0].path === '/api/h5/surveys/session');
   inside.window.close();
 }
 for (const page of ['error', 'signup', 'active', 'expired', 'pay', 'qr']) {

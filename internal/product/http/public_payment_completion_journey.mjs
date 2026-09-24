@@ -38,18 +38,19 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   const calls = [], elements = new Map();
   const setGlobal = (name, value) => Object.defineProperty(globalThis, name, {value, configurable: true, writable: true});
   const element = () => ({hidden: false, disabled: false, dataset: {}, value: '0', checked: true, textContent: '', href: '', children: [], attributes: new Map(), addEventListener(type, listener) { this.listener ??= {}; this.listener[type] = listener; }, appendChild(child) { this.children.push(child); }, replaceChildren(...children) {this.children=children;this.textContent="";}, setAttribute(name, value) { this.attributes.set(name, String(value)); }, removeAttribute(name) { this.attributes.delete(name); }, set src(value) { this.source = value; queueMicrotask(() => this.listener?.load?.({target: this})); }, get src() { return this.source; }});
-  for (const id of ['price', 'buy', 'status', 'coupon', 'couponPanel', 'couponStatus', 'refreshCoupons', 'wechatNotice', 'mobile', 'payableAmount', 'footerAmount', 'discountAmount', 'identityGate', 'identityTitle', 'identityMessage', 'authContinue', 'checkoutContent','paymentDetails','mobilePanel','paymentMethod','product','footer','productName','alipayGuide','alipayGuideMessage','alipayPaymentURL','alipayCopy','alipayPaid']) elements.set(id, element());
+  for (const id of ['price', 'buy', 'status', 'coupon', 'couponPanel', 'couponStatus', 'refreshCoupons', 'wechatNotice', 'mobile', 'payableAmount', 'footerAmount', 'discountAmount', 'identityGate', 'identityTitle', 'identityMessage', 'authFeedback', 'authContinue', 'checkoutContent','paymentDetails','mobilePanel','paymentMethod','product','footer','productName','alipayGuide','alipayGuideMessage','alipayPaymentURL','alipayCopy','alipayPaid']) elements.set(id, element());
   elements.get('checkoutContent').querySelector=selector=>elements.get(({'.product':'product','.checkout-footer':'footer','.product h1':'productName'})[selector]||selector.slice(1));
   if(renewal)elements.set('renew',element());
   if(details){const detail=element(),img=element();detail.hidden=true;img.dataset.src='https://example.com/detail.png';detail.querySelectorAll=()=>[img];elements.set('detailContent',detail);elements.set('detailImage',img);elements.set('detailPrice',element());}
   elements.get('authContinue').hidden = true;
+  elements.get('identityGate').parentElement = {dataset: {}};
   elements.get('checkoutContent').hidden = true;
   const paymentOption=element(); paymentOption.value='wechat_pay';
   setGlobal('document', {getElementById(id) { return elements.get(id); }, querySelector() { return paymentOption; }, querySelectorAll() { return [paymentOption]; }, addEventListener() {}, createElement() { return element(); }});
   setGlobal('navigator', {userAgent});
   setGlobal('sessionStorage', {getItem(key) { return store.get(key) ?? null; }, setItem(key,value) {store.set(key,String(value));}, removeItem(key) {store.delete(key);} });
   setGlobal('localStorage', {getItem(key) { return store.get(key) ?? null; }, setItem(key, value) { store.set(key, String(value)); }, removeItem(key) { store.delete(key); }});
-  setGlobal('location', {href: '', pathname: '/pay/course-7', assign(url) { calls.push({redirect: url}); if (redirectFailure) throw new Error('redirect blocked'); }});
+  setGlobal('location', {href: '', pathname: '/pay/course-7', search: '?utm_source=shared', assign(url) { calls.push({redirect: url}); if (redirectFailure) throw new Error('redirect blocked'); }});
   setGlobal('crypto', {randomUUID() { return 'fresh-checkout-key'; }});
   setGlobal('WeixinJSBridge', {invoke() { throw new Error('paid reload must not invoke payment'); }});
   setGlobal('fetch', async (url, options = {}) => {
@@ -64,7 +65,7 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   return {calls, elements};
 }
 
-// An unauthenticated WeChat visitor automatically enters snsapi_userinfo,
+// An unauthenticated WeChat visitor sees the required login gate,
 // without exposing checkout or creating an order.
 {
   const store = new Map();
@@ -72,13 +73,14 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   await settle();
   assert.equal(run.elements.get('identityGate').hidden, false);
   assert.equal(run.elements.get('checkoutContent').hidden, true);
-  assert.equal(run.elements.get('authContinue').hidden, true);
+  assert.equal(run.elements.get('authContinue').hidden, false);
   assert.equal(run.elements.get('authContinue').href, '/api/h5/wechat-pay/oauth/start?return_url=%2Fpay%2Fcourse-7');
-  assert.match(run.elements.get('identityMessage').textContent, /正在前往微信授权/);
-  assert.equal(run.calls.length, 2);
+  assert.equal(run.elements.get('identityTitle').textContent, '登录才能完成支付');
+  assert.match(run.elements.get('identityMessage').textContent, /不会自动扣款/);
+  assert.equal(run.calls.length, 1);
   assert.equal(run.calls[0].url, '/api/v1/wechat-pay/checkout-session');
   assert.equal(run.calls.some(call => call.method === 'POST'), false);
-  assert.equal(run.calls.filter(call => call.redirect).length, 1);
+  assert.equal(run.calls.filter(call => call.redirect).length, 0);
 }
 
 // A QR action is re-read after a reload from the persisted paid checkpoint.
@@ -260,11 +262,11 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   await run.elements.get('buy').listener.click();
   assert.equal(run.elements.get('identityGate').hidden, false);
   assert.equal(run.elements.get('checkoutContent').hidden, true);
-  assert.equal(run.elements.get('authContinue').hidden, true);
-  assert.match(run.elements.get('identityMessage').textContent, /正在前往微信授权/);
+  assert.equal(run.elements.get('authContinue').hidden, false);
+  assert.equal(run.elements.get('identityTitle').textContent, '登录才能完成支付');
   assert.equal(store.has(storageKey), false);
   assert.equal(run.calls.some(call => call.method === 'POST'), false);
-  assert.equal(run.calls.filter(call => call.redirect).length, 1);
+  assert.equal(run.calls.filter(call => call.redirect).length, 0);
 }
 
 // A cancelled payment resumes its immutable original amount, never a newly
@@ -322,7 +324,7 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
 {
  const store=new Map();
  const first=boot(store,{},false,false);await settle();
- assert.equal(first.calls.filter(call=>call.redirect).length,1);
+ assert.equal(first.calls.filter(call=>call.redirect).length,0);
  const again=boot(store,{},false,false);await settle();
  assert.equal(again.calls.some(call=>call.redirect),false);
  assert.equal(again.elements.get('authContinue').hidden,false);
@@ -367,7 +369,7 @@ for(const [auth,purchase,visible] of [[false,{purchase_state:'available',can_pur
 {
  const store=new Map();const run=boot(store,{},false,'consumed');await settle();
  assert.equal(run.elements.get('checkoutContent').hidden,true);
- assert.equal(run.calls.filter(call=>call.redirect).length,1);
+ assert.equal(run.calls.filter(call=>call.redirect).length,0);
  assert.equal(store.has(storageKey),false);
  assert.equal(run.calls.some(call=>call.method==='POST'),false);
 }
@@ -407,7 +409,7 @@ for(const action of [
 for(const details of [false,true]){
  const store=new Map();
  const first=boot(store,{},false,'consumed','',undefined,'MicroMessenger',false,details);await settle();
- assert.equal(first.calls.filter(call=>call.redirect).length,1);
+ assert.equal(first.calls.filter(call=>call.redirect).length,0);
  if(details)assert.equal(first.elements.get('detailImage').src,undefined);
  const second=boot(store,{},false,'consumed','',undefined,'MicroMessenger',false,details);await settle();
  assert.equal(second.calls.some(call=>call.redirect),false);
@@ -425,7 +427,7 @@ for(const details of [false,true]){
  const store=new Map([[storageKey,paidCheckpoint()]]);
  const run=boot(store,{status:'paid'},false,'consumed','',undefined,'MicroMessenger',true);await settle();
  await run.elements.get('renew').listener.click();await settle();
- assert.equal(run.calls.filter(call=>call.redirect).length,1);
+ assert.equal(run.calls.filter(call=>call.redirect).length,0);
  assert.equal(run.elements.get('checkoutContent').hidden,true);
  assert.equal(store.has(storageKey),false);
  assert.equal(run.calls.some(call=>call.method==='POST'),false);
