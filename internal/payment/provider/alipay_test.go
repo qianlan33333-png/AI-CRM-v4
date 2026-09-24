@@ -3,7 +3,10 @@ package provider
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 )
 
 func TestAlipayDisabledIsFailClosedWithoutCredentials(t *testing.T) {
@@ -44,6 +47,15 @@ func TestAlipayWebPayRequestValidation(t *testing.T) {
 		if validWebPayRequest(request) {
 			t.Fatalf("invalid request accepted: %+v", request)
 		}
+	}
+	if !validWebPayRequest(WebPayRequest{MerchantOrderNo: "order", Subject: strings.Repeat("课", paymentport.AlipayMaxSubjectRunes), TotalAmount: "9.90"}) {
+		t.Fatal("256-rune Unicode subject should fit the provider budget")
+	}
+	if validWebPayRequest(WebPayRequest{MerchantOrderNo: "order", Subject: strings.Repeat("课", paymentport.AlipayMaxSubjectRunes+1), TotalAmount: "9.90"}) {
+		t.Fatal("subject over provider rune budget accepted")
+	}
+	if validWebPayRequest(WebPayRequest{MerchantOrderNo: "order", Subject: "line\nbreak", TotalAmount: "9.90"}) {
+		t.Fatal("control character accepted in provider subject")
 	}
 }
 

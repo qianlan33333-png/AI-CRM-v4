@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	addresscatalog "github.com/qianlan33333-png/AI-CRM-v3/internal/address/port"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
@@ -411,7 +412,15 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 			if err != nil {
 				return err
 			}
-			payment, err = s.store.BindPaymentEffect(tx, payment, intent, map[string]any{"payment_id": payment.ID, "order_id": payment.OrderID, "amount_minor": payment.AmountMinor, "currency": payment.Currency})
+			snapshot := map[string]any{"payment_id": payment.ID, "order_id": payment.OrderID, "amount_minor": payment.AmountMinor, "currency": payment.Currency}
+			if payment.Provider == domain.ProviderAlipay {
+				subject, ok := alipaySubjectFromOrder(order)
+				if !ok {
+					return paymentport.ErrConflict
+				}
+				snapshot["subject"] = subject
+			}
+			payment, err = s.store.BindPaymentEffect(tx, payment, intent, snapshot)
 			if err != nil {
 				return err
 			}
@@ -425,6 +434,25 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 		return domain.Payment{}, classify(err)
 	}
 	return result, nil
+}
+
+func alipaySubjectFromOrder(order orderdomain.Snapshot) (string, bool) {
+	if len(order.Items) != 1 {
+		return "", false
+	}
+	item := order.Items[0]
+	subject := strings.TrimSpace(item.ProductName)
+	if subject == "" {
+		subject = strings.TrimSpace(item.ProductCode)
+	}
+	if subject == "" || strings.IndexFunc(subject, unicode.IsControl) >= 0 {
+		return "", false
+	}
+	runes := []rune(subject)
+	if len(runes) > paymentport.AlipayMaxSubjectRunes {
+		subject = strings.TrimSpace(string(runes[:paymentport.AlipayMaxSubjectRunes]))
+	}
+	return subject, subject != ""
 }
 
 func validOpaqueActivityContext(value string) bool {
@@ -589,8 +617,8 @@ func (s *Service) GetPayment(ctx context.Context, id int64) (domain.Payment, err
 	return out, classify(err)
 }
 
-func (s *Service) GetCheckout(ctx context.Context, merchantOrderNo, sessionToken string) (paymentport.Handoff, error) {
-	if s == nil || s.uow == nil || s.store == nil || s.sessions == nil || !validScope(merchantOrderNo) || len(sessionToken) < 20 || len(sessionToken) > 100 {
+func (s *Service) GetCheckout(ctx context.Context, provider domain.Provider, merchantOrderNo, sessionToken string) (paymentport.Handoff, error) {
+	if s == nil || s.uow == nil || s.store == nil || s.sessions == nil || (provider != domain.ProviderWeChatPay && provider != domain.ProviderAlipay) || !validScope(merchantOrderNo) || len(sessionToken) < 20 || len(sessionToken) > 100 {
 		return paymentport.Handoff{}, paymentport.ErrInvalid
 	}
 	now := s.now().UTC()
@@ -602,7 +630,7 @@ func (s *Service) GetCheckout(ctx context.Context, merchantOrderNo, sessionToken
 		if err != nil {
 			return err
 		}
-		payment, err := s.checkoutPaymentWithin(tx, merchantOrderNo)
+		payment, err := s.store.GetPaymentByMerchantProvider(tx, provider, merchantOrderNo, false)
 		if err != nil {
 			return err
 		}
@@ -627,7 +655,7 @@ func (s *Service) GetCheckout(ctx context.Context, merchantOrderNo, sessionToken
 		if !authorized {
 			return paymentport.ErrConflict
 		}
-		out = paymentport.Handoff{PaymentID: payment.ID, OrderID: payment.OrderID, MerchantOrder: payment.MerchantOrderNo, Status: payment.Status, AmountMinor: payment.AmountMinor, Currency: payment.Currency}
+		out = paymentport.Handoff{PaymentID: payment.ID, OrderID: payment.OrderID, MerchantOrder: payment.MerchantOrderNo, Provider: payment.Provider, Channel: payment.Channel, Status: payment.Status, AmountMinor: payment.AmountMinor, Currency: payment.Currency}
 		// A terminal outcome is an immutable Payment fact. It remains readable to
 		// the original trusted payer after the short-lived JSAPI handoff expires;
 		// handoff material is neither needed nor safe to revive at this point.
@@ -690,27 +718,6 @@ func (s *Service) GetCheckout(ctx context.Context, merchantOrderNo, sessionToken
 		out.PrepayState = projection.State
 	}
 	return out, nil
-}
-
-func (s *Service) checkoutPaymentWithin(ctx context.Context, merchantOrderNo string) (domain.Payment, error) {
-	wechat, wechatErr := s.store.GetPaymentByMerchantProvider(ctx, domain.ProviderWeChatPay, merchantOrderNo, false)
-	if wechatErr != nil && !errors.Is(wechatErr, paymentport.ErrNotFound) {
-		return domain.Payment{}, wechatErr
-	}
-	alipay, alipayErr := s.store.GetPaymentByMerchantProvider(ctx, domain.ProviderAlipay, merchantOrderNo, false)
-	if alipayErr != nil && !errors.Is(alipayErr, paymentport.ErrNotFound) {
-		return domain.Payment{}, alipayErr
-	}
-	if wechatErr == nil && alipayErr == nil {
-		return domain.Payment{}, paymentport.ErrConflict
-	}
-	if wechatErr == nil {
-		return wechat, nil
-	}
-	if alipayErr == nil {
-		return alipay, nil
-	}
-	return domain.Payment{}, paymentport.ErrNotFound
 }
 
 // CheckoutSessionBinding proves only that the caller still holds a valid

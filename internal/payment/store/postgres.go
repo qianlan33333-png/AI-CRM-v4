@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -842,10 +843,39 @@ func (r *Repository) ProviderIntent(ctx context.Context, kind effectport.Kind, s
 		out.ProviderOrderID, out.ProductID, out.SKUID = material.ProviderOrderID, material.ProductID, material.SKUID
 		out.RefundCount, out.ReasonCode = material.RefundCount, material.ReasonCode
 	}
+	if out.Kind == effectport.KindAlipayWapPay || out.Kind == effectport.KindAlipayPagePay {
+		subject, subjectErr := alipayIntentSubject(requestSnapshot)
+		if subjectErr != nil {
+			return paymentport.ProviderIntent{}, subjectErr
+		}
+		out.Subject = subject
+	}
 	if out.Kind != kind || out.SourceRefDigest != source || !effectport.ValidDigest(out.PayloadDigest) {
 		return paymentport.ProviderIntent{}, paymentport.ErrConflict
 	}
 	return out, nil
+}
+
+func alipayIntentSubject(snapshot []byte) (string, error) {
+	var material map[string]json.RawMessage
+	if json.Unmarshal(snapshot, &material) != nil || material == nil {
+		return "", paymentport.ErrConflict
+	}
+	raw, exists := material["subject"]
+	if !exists {
+		// Pre-fix intents have no subject. The Provider loader reads the frozen
+		// Order checkout snapshot through its stable port in the same UoW.
+		return "", nil
+	}
+	var subject string
+	if json.Unmarshal(raw, &subject) != nil || !validStoredAlipaySubject(subject) {
+		return "", paymentport.ErrConflict
+	}
+	return subject, nil
+}
+
+func validStoredAlipaySubject(subject string) bool {
+	return strings.TrimSpace(subject) == subject && subject != "" && len([]rune(subject)) <= paymentport.AlipayMaxSubjectRunes && strings.IndexFunc(subject, unicode.IsControl) < 0
 }
 
 func (r *Repository) CompleteEffectWithin(ctx context.Context, effectRef string, envelope effectport.Envelope, attempt effectport.Attempt, result effectport.AdapterResult) error {

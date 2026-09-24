@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
@@ -150,10 +151,24 @@ func (loader DBMaterialLoader) Load(ctx context.Context, kind effectport.Kind, s
 				return ErrInvalidMaterial
 			}
 			snapshot, readErr := loader.Checkouts.ReadCheckoutSnapshotWithin(tx, intent.OrderID)
-			if readErr != nil || snapshot.OrderID != intent.OrderID || snapshot.PayableAmountMinor != intent.AmountMinor || snapshot.Currency != intent.Currency || strings.TrimSpace(snapshot.ProductName) == "" {
+			if readErr != nil || snapshot.OrderID != intent.OrderID || snapshot.PayableAmountMinor != intent.AmountMinor || snapshot.Currency != intent.Currency {
 				return ErrInvalidMaterial
 			}
-			material.AlipaySubject = snapshot.ProductName
+			subject := strings.TrimSpace(snapshot.ProductName)
+			if subject == "" {
+				subject = strings.TrimSpace(snapshot.ProductCode)
+			}
+			if strings.IndexFunc(subject, unicode.IsControl) >= 0 {
+				return ErrInvalidMaterial
+			}
+			runes := []rune(subject)
+			if len(runes) > paymentport.AlipayMaxSubjectRunes {
+				subject = strings.TrimSpace(string(runes[:paymentport.AlipayMaxSubjectRunes]))
+			}
+			if !validAlipaySubject(subject) || (intent.Subject != "" && intent.Subject != subject) {
+				return ErrInvalidMaterial
+			}
+			material.AlipaySubject = subject
 		}
 		if kind == effectport.KindWeChatPayPrepay {
 			if loader.Identities == nil {

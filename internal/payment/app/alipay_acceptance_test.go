@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	orderdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/payment/domain"
 	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	paymentprovider "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/provider"
@@ -52,6 +54,113 @@ func TestAlipayAcceptanceVirtualPaymentSettlementAndReplay(t *testing.T) {
 	wrongApp.AppID = "other-app"
 	if err := service.ApplyVerifiedCallback(context.Background(), wrongApp); !errors.Is(err, paymentport.ErrConflict) {
 		t.Fatalf("mismatched app accepted: %v", err)
+	}
+}
+
+func TestAlipayCheckoutReadbackUsesPaymentProviderChannelAndTrustedWechatSession(t *testing.T) {
+	for _, channel := range []domain.Channel{domain.ChannelAlipayWap, domain.ChannelAlipayPage} {
+		t.Run(string(channel), func(t *testing.T) {
+			store := &storeStub{payment: domain.Payment{
+				ID: 7, OrderID: 3, Provider: domain.ProviderAlipay, Channel: channel,
+				MerchantOrderNo: "merchant-test-1", PayerIdentityID: 4, PayerCustomerID: 11, BeneficiaryCustomerID: 11,
+				AmountMinor: 990, Currency: "CNY", Status: domain.StatusAwaitingPayment,
+			}}
+			sessions := checkoutReadSessionStub{actors: map[string]paymentport.SessionActor{
+				"authorized-payment-session": {PayerIdentityID: 4, PayerCustomerID: 11, Channel: domain.ChannelH5Official, BeneficiaryCustomerID: 11, BeneficiarySelection: paymentport.BeneficiarySelectionPayerSelf},
+			}}
+			service := NewService(uowStub{}, store, orderStub{}, sessions, &effectStub{})
+			got, err := service.GetCheckout(context.Background(), domain.ProviderAlipay, "merchant-test-1", "authorized-payment-session")
+			if err != nil || got.Provider != domain.ProviderAlipay || got.Channel != channel || got.Status != domain.StatusAwaitingPayment || string(got.Payload) == "" {
+				t.Fatalf("Alipay checkout readback=%+v err=%v", got, err)
+			}
+			if _, err = service.GetCheckout(context.Background(), domain.ProviderWeChatPay, "merchant-test-1", "authorized-payment-session"); !errors.Is(err, paymentport.ErrNotFound) {
+				t.Fatalf("WeChat route read an Alipay order: %v", err)
+			}
+		})
+	}
+}
+
+func TestAlipayCheckoutReadbackValidatesChannelSpecificPrepayEffect(t *testing.T) {
+	for _, test := range []struct {
+		channel domain.Channel
+		kind    effectport.Kind
+	}{{domain.ChannelAlipayWap, effectport.KindAlipayWapPay}, {domain.ChannelAlipayPage, effectport.KindAlipayPagePay}} {
+		t.Run(string(test.channel), func(t *testing.T) {
+			store := &storeStub{payment: domain.Payment{
+				ID: 7, OrderID: 3, Provider: domain.ProviderAlipay, Channel: test.channel,
+				MerchantOrderNo: "merchant-test-1", PayerIdentityID: 4, PayerCustomerID: 11, BeneficiaryCustomerID: 11,
+				AmountMinor: 990, Currency: "CNY", Status: domain.StatusAwaitingPrepay, EffectID: "eer_alipay_7",
+			}}
+			sessions := checkoutReadSessionStub{actors: map[string]paymentport.SessionActor{
+				"authorized-payment-session": {PayerIdentityID: 4, PayerCustomerID: 11, Channel: domain.ChannelH5Official, BeneficiaryCustomerID: 11, BeneficiarySelection: paymentport.BeneficiarySelectionPayerSelf},
+			}}
+			reader := &prepayReadStub{projection: effectport.Projection{ID: "eer_alipay_7", Owner: effectport.OwnerPayment, Kind: test.kind, State: effectport.StateQueued}}
+			service := NewService(uowStub{}, store, orderStub{}, sessions, &effectStub{}, reader)
+			got, err := service.GetCheckout(context.Background(), domain.ProviderAlipay, "merchant-test-1", "authorized-payment-session")
+			if err != nil || got.Provider != domain.ProviderAlipay || got.Channel != test.channel || got.PrepayState != effectport.StateQueued {
+				t.Fatalf("Alipay prepay readback=%+v err=%v", got, err)
+			}
+			reader.projection.Kind = effectport.KindWeChatPayPrepay
+			if _, err = service.GetCheckout(context.Background(), domain.ProviderAlipay, "merchant-test-1", "authorized-payment-session"); !errors.Is(err, paymentport.ErrUnavailable) {
+				t.Fatalf("mismatched WeChat effect was exposed for Alipay: %v", err)
+			}
+		})
+	}
+}
+
+func TestAlipayCheckoutReadbackDoesNotBroadenPayerBeneficiaryOrSessionScope(t *testing.T) {
+	store := &storeStub{payment: domain.Payment{
+		ID: 7, OrderID: 3, Provider: domain.ProviderAlipay, Channel: domain.ChannelAlipayWap,
+		MerchantOrderNo: "merchant-test-1", PayerIdentityID: 4, PayerCustomerID: 11, BeneficiaryCustomerID: 22,
+		AmountMinor: 990, Currency: "CNY", Status: domain.StatusPaid,
+	}}
+	actors := map[string]paymentport.SessionActor{
+		"same-admin-beneficiary":    {PayerIdentityID: 4, PayerCustomerID: 11, Channel: domain.ChannelH5Official, BeneficiaryCustomerID: 22, BeneficiarySelection: paymentport.BeneficiarySelectionAdminAssisted},
+		"mini-program-session":      {PayerIdentityID: 4, PayerCustomerID: 11, Channel: domain.ChannelMiniProgram, BeneficiaryCustomerID: 22, BeneficiarySelection: paymentport.BeneficiarySelectionAdminAssisted},
+		"same-payer-self-mismatch":  {PayerIdentityID: 4, PayerCustomerID: 11, Channel: domain.ChannelH5Official, BeneficiaryCustomerID: 11, BeneficiarySelection: paymentport.BeneficiarySelectionPayerSelf},
+		"other-payer-identity":      {PayerIdentityID: 5, PayerCustomerID: 11, Channel: domain.ChannelH5Official, BeneficiaryCustomerID: 22, BeneficiarySelection: paymentport.BeneficiarySelectionAdminAssisted},
+		"other-payer-customer":      {PayerIdentityID: 4, PayerCustomerID: 12, Channel: domain.ChannelH5Official, BeneficiaryCustomerID: 22, BeneficiarySelection: paymentport.BeneficiarySelectionAdminAssisted},
+		"unrelated-session-channel": {PayerIdentityID: 4, PayerCustomerID: 11, Channel: domain.ChannelAlipayWap, BeneficiaryCustomerID: 22, BeneficiarySelection: paymentport.BeneficiarySelectionAdminAssisted},
+	}
+	sessions := checkoutReadSessionStub{actors: actors}
+	service := NewService(uowStub{}, store, orderStub{}, sessions, &effectStub{})
+	for _, name := range []string{"same-admin-beneficiary"} {
+		if _, err := service.GetCheckout(context.Background(), domain.ProviderAlipay, "merchant-test-1", name); err != nil {
+			t.Fatalf("same payer and selected beneficiary should read checkout: actor=%s err=%v", name, err)
+		}
+	}
+	for _, name := range []string{"same-payer-self-mismatch", "other-payer-identity", "other-payer-customer", "unrelated-session-channel", "mini-program-session"} {
+		if _, err := service.GetCheckout(context.Background(), domain.ProviderAlipay, "merchant-test-1", name); !errors.Is(err, paymentport.ErrConflict) {
+			t.Fatalf("Alipay readback crossed payer, beneficiary, or session scope: actor=%s err=%v", name, err)
+		}
+	}
+}
+
+func TestAlipaySubjectComesFromSingleImmutableOrderItemAndFitsProviderBudget(t *testing.T) {
+	tests := []struct {
+		name  string
+		items []orderdomain.ItemSnapshot
+		want  string
+		ok    bool
+	}{
+		{name: "order item name", items: []orderdomain.ItemSnapshot{{ProductName: "产品标题", ProductCode: "immutable-code"}}, want: "产品标题", ok: true},
+		{name: "item code fallback", items: []orderdomain.ItemSnapshot{{ProductCode: "immutable-code"}}, want: "immutable-code", ok: true},
+		{name: "unicode title limit", items: []orderdomain.ItemSnapshot{{ProductName: strings.Repeat("课", paymentport.AlipayMaxSubjectRunes+3)}}, want: strings.Repeat("课", paymentport.AlipayMaxSubjectRunes), ok: true},
+		{name: "missing item", ok: false},
+		{name: "ambiguous items", items: []orderdomain.ItemSnapshot{{ProductName: "one"}, {ProductName: "two"}}, ok: false},
+		{name: "missing name and code", items: []orderdomain.ItemSnapshot{{ProductName: "  ", ProductCode: " "}}, ok: false},
+		{name: "control character", items: []orderdomain.ItemSnapshot{{ProductName: "bad\ntitle"}}, ok: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := alipaySubjectFromOrder(orderdomain.Snapshot{Items: test.items})
+			if ok != test.ok || got != test.want {
+				t.Fatalf("subject=%q ok=%t want=%q ok=%t", got, ok, test.want, test.ok)
+			}
+			if ok && len([]rune(got)) > paymentport.AlipayMaxSubjectRunes {
+				t.Fatalf("subject exceeds Alipay rune budget: %d", len([]rune(got)))
+			}
+		})
 	}
 }
 

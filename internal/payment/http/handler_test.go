@@ -59,11 +59,15 @@ func (*appStub) CheckoutSessionBinding(_ context.Context, token string) (string,
 	}
 	return binding, nil
 }
-func (stub *appStub) GetCheckout(context.Context, string, string) (paymentport.Handoff, error) {
+func (stub *appStub) GetCheckout(_ context.Context, provider domain.Provider, _ string, _ string) (paymentport.Handoff, error) {
 	if stub.handoff.Status != "" {
 		return stub.handoff, nil
 	}
-	return paymentport.Handoff{PaymentID: 7, MerchantOrder: "M-7", Status: domain.StatusAwaitingPayment, Payload: []byte(`{"appId":"wx-test","package":"prepay_id=safe"}`), ExpiresAt: time.Now().Add(time.Minute)}, nil
+	channel := domain.ChannelH5Official
+	if provider == domain.ProviderAlipay {
+		channel = domain.ChannelAlipayWap
+	}
+	return paymentport.Handoff{PaymentID: 7, MerchantOrder: "M-7", Provider: provider, Channel: channel, Status: domain.StatusAwaitingPayment, Payload: []byte(`{"appId":"wx-test","package":"prepay_id=safe"}`), ExpiresAt: time.Now().Add(time.Minute)}, nil
 }
 
 type paidPurchaseActionReaderStub struct {
@@ -472,6 +476,46 @@ func TestCheckoutAcceptsOnlyOpaqueCookieIdentity(t *testing.T) {
 		if response.Code != http.StatusBadRequest {
 			t.Fatalf("field=%s code=%d", rawField, response.Code)
 		}
+	}
+}
+
+func TestAlipayCheckoutRouteBindsProviderAndReadback(t *testing.T) {
+	application := &appStub{handoff: paymentport.Handoff{
+		PaymentID: 7, OrderID: 3, MerchantOrder: "M-alipay-7", Provider: domain.ProviderAlipay,
+		Channel: domain.ChannelAlipayWap, Status: domain.StatusAwaitingPayment,
+		Payload: []byte(`{"redirectUrl":"https://virtual-alipay.example.test/pay/7"}`), ExpiresAt: time.Now().Add(time.Minute),
+	}}
+	handler, err := NewHandler(application, nil, securityStub{}, true, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := "pays_session_token_0000000001"
+	binding := paymentport.CheckoutSessionBinding(token)
+	create := httptest.NewRequest(http.MethodPost, "/api/v1/alipay/checkouts", strings.NewReader(`{"product_id":7,"product_kind":"standard","provider":"alipay","channel":"alipay_wap","beneficiary_selection":"payer_self","checkout_session_binding":"`+binding+`"}`))
+	create.Header.Set("Content-Type", "application/json")
+	create.Header.Set("Idempotency-Key", "checkout-alipay-key-0001")
+	create.AddCookie(&http.Cookie{Name: SessionCookieName, Value: token})
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, create)
+	if created.Code != http.StatusAccepted || application.create.Provider != string(domain.ProviderAlipay) || application.create.Channel != domain.ChannelAlipayWap {
+		t.Fatalf("create code=%d command=%+v body=%s", created.Code, application.create, created.Body.String())
+	}
+
+	status := httptest.NewRequest(http.MethodGet, "/api/v1/alipay/checkouts/M-alipay-7", nil)
+	status.AddCookie(&http.Cookie{Name: SessionCookieName, Value: token})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, status)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"provider":"alipay"`) || !strings.Contains(response.Body.String(), `"channel":"alipay_wap"`) || !strings.Contains(response.Body.String(), `"redirectUrl":"https://virtual-alipay.example.test/pay/7"`) || application.handoff.Provider != domain.ProviderAlipay {
+		t.Fatalf("status code=%d handoff=%+v body=%s", response.Code, application.handoff, response.Body.String())
+	}
+
+	mismatch := httptest.NewRequest(http.MethodPost, "/api/v1/alipay/checkouts", strings.NewReader(`{"product_id":7,"product_kind":"standard","provider":"wechat_pay","beneficiary_selection":"payer_self","checkout_session_binding":"`+binding+`"}`))
+	mismatch.Header.Set("Content-Type", "application/json")
+	mismatch.AddCookie(&http.Cookie{Name: SessionCookieName, Value: token})
+	rejected := httptest.NewRecorder()
+	handler.ServeHTTP(rejected, mismatch)
+	if rejected.Code != http.StatusConflict || !strings.Contains(rejected.Body.String(), "payment_provider_mismatch") || application.createCalls != 1 {
+		t.Fatalf("mismatch code=%d calls=%d body=%s", rejected.Code, application.createCalls, rejected.Body.String())
 	}
 }
 

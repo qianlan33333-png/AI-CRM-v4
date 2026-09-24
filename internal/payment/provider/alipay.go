@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	paymentdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/domain"
@@ -380,7 +382,11 @@ func amountToMinor(value string) (int64, error) {
 }
 
 func validWebPayRequest(request WebPayRequest) bool {
-	return strings.TrimSpace(request.MerchantOrderNo) == request.MerchantOrderNo && request.MerchantOrderNo != "" && len(request.MerchantOrderNo) <= 64 && strings.TrimSpace(request.Subject) != "" && strings.TrimSpace(request.TotalAmount) != ""
+	return strings.TrimSpace(request.MerchantOrderNo) == request.MerchantOrderNo && request.MerchantOrderNo != "" && len(request.MerchantOrderNo) <= 64 && validAlipaySubject(request.Subject) && strings.TrimSpace(request.TotalAmount) != ""
+}
+
+func validAlipaySubject(subject string) bool {
+	return strings.TrimSpace(subject) == subject && subject != "" && utf8.RuneCountInString(subject) <= paymentport.AlipayMaxSubjectRunes && strings.IndexFunc(subject, unicode.IsControl) < 0
 }
 
 func minorToAmount(value int64) string {

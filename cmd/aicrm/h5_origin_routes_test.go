@@ -27,6 +27,10 @@ func TestApplicationRouterSeparatesH5AndAdminOrigins(t *testing.T) {
 		{"/api/public/survey-submission-results/query", h5, http.StatusNoContent},
 		{"/api/v1/wechat-pay/checkouts", h5, http.StatusNoContent},
 		{"/api/v1/wechat-pay/checkouts/", h5, http.StatusNoContent},
+		{"/api/v1/alipay/checkouts", h5, http.StatusNoContent},
+		{"/api/v1/alipay/checkouts", admin, http.StatusForbidden},
+		{"/api/v1/alipay/checkouts", "https://evil.example", http.StatusForbidden},
+		{"/api/v1/alipay/checkouts/", h5, http.StatusForbidden},
 		{"/api/public/questionnaires/example/submissions", admin, http.StatusForbidden},
 		{"/api/v1/wechat-pay/checkouts", "https://evil.example", http.StatusForbidden},
 		{"/api/public/questionnaires/example/submissions", "null", http.StatusForbidden},
@@ -50,6 +54,14 @@ func TestApplicationRouterSeparatesH5AndAdminOrigins(t *testing.T) {
 				t.Fatalf("status=%d want=%d body=%s", w.Code, test.want, w.Body.String())
 			}
 		})
+	}
+	unsupportedMethod := httptest.NewRecorder()
+	unsupportedRequest := httptest.NewRequest(http.MethodPut, h5+"/api/v1/alipay/checkouts", nil)
+	unsupportedRequest.Header.Set("Origin", h5)
+	unsupportedRequest.Header.Set("Sec-Fetch-Site", "same-origin")
+	handler.ServeHTTP(unsupportedMethod, unsupportedRequest)
+	if unsupportedMethod.Code != http.StatusForbidden {
+		t.Fatalf("configured H5 origin must not inherit the Alipay exception for PUT: status=%d body=%s", unsupportedMethod.Code, unsupportedMethod.Body.String())
 	}
 }
 

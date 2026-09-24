@@ -2238,6 +2238,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	adminAPIs.Handle("/api/admin/exports/", orderHandler)
 	adminAPIs.Handle("/api/admin/alipay/transactions", orderHandler)
 	adminAPIs.Handle("/api/v1/wechat-pay/", paymentHandler)
+	adminAPIs.Handle("/api/v1/alipay/", paymentHandler)
 	adminAPIs.Handle("/api/h5/wechat-pay/oauth/", paymentHandler)
 	adminAPIs.Handle("/api/public/wechat-pay/", paymentHandler)
 	adminAPIs.Handle("/api/public/alipay/", paymentHandler)
@@ -2909,6 +2910,7 @@ func routeApplicationWithProductsCouponsGroupOpsAutomationAndCycles(health, acce
 	mux.Handle("/api/admin/wechat-pay/orders", identity)
 	mux.Handle("/api/admin/payments/", identity)
 	mux.Handle("/api/v1/wechat-pay/", identity)
+	mux.Handle("/api/v1/alipay/", identity)
 	mux.Handle("/api/h5/wechat-pay/oauth/", identity)
 	mux.Handle("/api/public/wechat-pay/", identity)
 	mux.Handle("/api/public/alipay/", identity)
@@ -3147,6 +3149,12 @@ func isH5EntryPage(path string) bool {
 func isH5BrowserMutation(request *http.Request) bool {
 	if request.Method != http.MethodPost {
 		return false
+	}
+	// The independent H5 origin may create an Alipay checkout, but only at
+	// this exact mutation endpoint. Do not grant the H5 origin to neighboring
+	// Alipay APIs or to a slash-suffixed path.
+	if request.URL.Path == "/api/v1/alipay/checkouts" {
+		return true
 	}
 	path := strings.TrimSuffix(request.URL.Path, "/")
 	if path == "/api/public/survey-submission-results/query" || path == "/api/v1/wechat-pay/checkouts" {

@@ -193,6 +193,8 @@ type Handoff struct {
 	// AmountMinor and Currency are frozen Payment facts, not current catalog/coupon prices.
 	AmountMinor            int64
 	Currency               string
+	Provider               domain.Provider
+	Channel                domain.Channel
 	CheckoutRestartAllowed bool
 	CheckoutAbandoned      bool
 	PrepayState            effectport.State
@@ -278,6 +280,7 @@ type ProviderIntent struct {
 	RefundNo, RefundReason  string
 	ProviderOrderID         string
 	ProductID, SKUID        string
+	Subject                 string
 	RefundCount             int64
 	ReasonCode              string
 	AmountMinor, TotalMinor int64
@@ -286,6 +289,10 @@ type ProviderIntent struct {
 	SourceRefDigest         effectport.Digest
 	PayloadDigest           effectport.Digest
 }
+
+// AlipayMaxSubjectRunes follows the provider checkout title budget while
+// counting Unicode code points rather than UTF-8 bytes.
+const AlipayMaxSubjectRunes = 256
 
 type ShopRefundQuery struct {
 	AfterSaleID, ProviderOrderID, ProductID, SKUID string

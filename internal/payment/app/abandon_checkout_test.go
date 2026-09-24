@@ -85,17 +85,17 @@ func TestMergedPayerCanReadAbandonedOriginalWithoutReassignment(t *testing.T) {
 	reader := &prepayReadStub{projection: effectport.Projection{ID: p.EffectID, Owner: effectport.OwnerPayment, Kind: effectport.KindWeChatPayPrepay, State: effectport.StateUnknown}}
 	svc := NewService(uowStub{}, st, orderStub{}, sessions, &effectStub{}, reader)
 	svc.SetCanonicalLineageReader(lineageStub{22, 11})
-	got, err := svc.GetCheckout(context.Background(), "legacy", "authorized-payment-session")
+	got, err := svc.GetCheckout(context.Background(), domain.ProviderWeChatPay, "legacy", "authorized-payment-session")
 	if err != nil || !got.CheckoutAbandoned || got.Status != p.Status || st.payment != p {
 		t.Fatalf("merged read: %+v %v", got, err)
 	}
 	sessions.actors["authorized-payment-session"] = paymentport.SessionActor{PayerIdentityID: 5, PayerCustomerID: 22, Channel: domain.ChannelH5Official, BeneficiarySelection: paymentport.BeneficiarySelectionUnresolved}
-	if _, err = svc.GetCheckout(context.Background(), "legacy", "authorized-payment-session"); !errors.Is(err, paymentport.ErrConflict) {
+	if _, err = svc.GetCheckout(context.Background(), domain.ProviderWeChatPay, "legacy", "authorized-payment-session"); !errors.Is(err, paymentport.ErrConflict) {
 		t.Fatal("another identity on same customer was allowed")
 	}
 	sessions.actors["authorized-payment-session"] = paymentport.SessionActor{PayerIdentityID: 4, PayerCustomerID: 22, Channel: domain.ChannelH5Official, BeneficiarySelection: paymentport.BeneficiarySelectionUnresolved}
 	svc.SetCanonicalLineageReader(lineageStub{22, 33})
-	if _, err = svc.GetCheckout(context.Background(), "legacy", "authorized-payment-session"); !errors.Is(err, paymentport.ErrConflict) {
+	if _, err = svc.GetCheckout(context.Background(), domain.ProviderWeChatPay, "legacy", "authorized-payment-session"); !errors.Is(err, paymentport.ErrConflict) {
 		t.Fatal("unrelated root was allowed")
 	}
 }

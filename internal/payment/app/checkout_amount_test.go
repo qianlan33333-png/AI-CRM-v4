@@ -21,7 +21,7 @@ func TestCheckoutRecoveryUsesFrozenPaymentAmount(t *testing.T) {
 			}
 			for _, currentPrice := range []int64{99999, 1} {
 				products.product.PriceMinor = currentPrice
-				got, err := svc.GetCheckout(context.Background(), "M-7", "authorized-payment-session")
+				got, err := svc.GetCheckout(context.Background(), domain.ProviderWeChatPay, "M-7", "authorized-payment-session")
 				if err != nil || got.AmountMinor != 789 || got.Currency != "CNY" || products.calls != 0 {
 					t.Fatalf("recovery repriced original payment: %+v %v", got, err)
 				}
