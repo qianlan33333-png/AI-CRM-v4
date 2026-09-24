@@ -1,29 +1,24 @@
 ---
 name: aicrm-v3-development-frontdoor
-description: "AI-CRM-v4 开发前的业务判断、GitHub 参考、PRD 与并行交付；路径名仅为兼容保留。"
+description: "AI-CRM-v4 development intake: decide business flow, check references and reuse, write one reusable parent PRD, classify shared boundaries, and split work into independently releasable PRs. The v3 path name remains for compatibility."
 ---
 
-# AI-CRM-v4 开发前置流程
+# AI-CRM-v4 Development Frontdoor
 
-先读仓库 `AGENTS.md` 和 `skills/aicrm-v3-development/SKILL.md`。以当前 v4 仓库与准确 GitHub `main` 为唯一源码，不把旧仓库、旧预发布机或旧版本当运行时依赖。
+Read repository `AGENTS.md` and `skills/aicrm-v3-development/SKILL.md`. Use the current v4 repository and exact Git source only; old repositories and runtimes are not dependencies.
 
-## 编码前三步
+## Before editing
 
-1. 写业务判断：用户动作、状态变化、权限/错误分支、成功标准和真实验收地点。修 Bug 时写根因假设与可重现证据。
-2. 查 GitHub 或公开产品/实现参考，评估仓库内可复用的领域、共享组件与接口。没有合适案例时写明搜索范围与结论。
-3. 形成与改动规模相称、经用户确认的 PRD，包含接口/数据边界、OneID/Persistence/External Effects 分类、测试、上线、回退和并行依赖。
+1. Map user action, state changes, permission/error branches, success criteria, and real acceptance location. For a bug, record the root-cause hypothesis and reproduction evidence.
+2. Search GitHub or established products for references, then identify repository-owned domains, components, and interfaces to reuse.
+3. Write one concise parent PRD with the flow, interface/data boundaries, tests, acceptance, rollback, dependencies, and OneID/Persistence/External Effects classifications. If the user authorized the parent brief, child PRs inherit it and record only their scope delta; do not ask for the same approval again.
 
-分类不涉及时写明理由，不因流程而引入身份、队列、Provider 或数据库依赖。重大合同变化更新 PRD；常规实现细节按确认的业务方向自主完成。
+## Small-step delivery
 
-## 开发与 PR
+- Keep the implementation and its child PRs in the same Codex task. Each PR delivers one independently mergeable, reversible user-visible behavior or clear defect, with its related tests in that PR. Split by behavior; do not use line or file quotas.
+- Use the Product Design plugin/skill before implementing any sidebar, customer-facing, or admin UI.
+- Diagnose or fix release failures with a separate `gpt-6-luna` max agent; this does not restrict model choice for other work.
+- Preserve exact head/tree and test scope in PR evidence. Unknown, shared, migration, executable check-policy, or release-path changes remain conservative.
+- `python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` prints a shadow candidate beside the existing enforced plan. It does not alter GitHub's required `check`; ordinary local execution remains `fast` plus `compile` for Go changes. Activate only after 10 valid PRs show zero known omissions, at least 30% paired median time reduction, and no per-capability check-time increase; these user-authorized criteria need no repeated confirmation.
 
-- 一个 PR 交付一个用户可观察能力或一个明确缺陷。不同板块各提 PR，并行开发；共享文件、迁移、Provider、CI 和发布工具改动需协调合并顺序。
-- PR 保留准确 HEAD/tree、影响范围、适用测试与未验证事项。`fast`、编译、局部浏览器测试只证明对应范围。未知、共享、迁移、构建与部署改动运行完整检查。
-- GitHub 受保护 `main` 和准确 head 的必需 `check` 是合并门禁。GitHub Actions 只做检查，不构建或传输生产包；不要求合并前生成 merge-preview、staging receipt、handoff 事件或业务验收截止时间。
-- 已合并的提交由预备机 `10.0.4.6` 按 `main` 第一父链逐个在国内构建、安装与基础验证，再通过内网将同一完整文件树晋级生产 `10.0.4.13`。后一个版本含前一个版本，无法从已合并代码中单独抽掉板块。
-- 静态页面变更不备份数据库、不运行迁移；Go 改动只重编受影响命令；迁移必须经安全检查、自动备份和专项验证。生产技术健康与真实支付/扫码业务结果独立记录，真实业务结果不占用后续技术发布通道。
-- 旧 preview、candidate handoff、观察占位队列只供历史审计。当前操作见 `docs/operations/domestic-release.md`。PR #22 保持暂停；新流程不得自动合并它。
-
-## 停止条件
-
-身份错绑、支付/退款或企微效果可能重复、鉴权绕过、Secret/PII 泄漏、不可逆数据损坏、破坏性迁移、准确提交或包摘要不符时停止并报告。部署结果不明时只读对账，不盲目重装。
+Routine implementation choices within an authorized PRD do not need another confirmation. Revisit the brief only when business scope, data ownership, or an external contract materially changes.

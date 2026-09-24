@@ -65,10 +65,10 @@ govulncheck ./...
 
 ## 开发与发布
 
-每个能力使用新的 `codex/<work-item>` worktree 和 PR。先阅读
+每个 PR 交付一个独立可合并、可回退的用户可观察行为或明确缺陷，并在同一 PR 提交相关测试；按行为边界拆分，不设行数配额。整个实施留在同一个 Codex task，子 PR 复用已授权的父 brief。涉及侧栏、用户页或后台页时，编码前使用 Product Design 插件/skill。先阅读
 [`docs/development-before-start.md`](docs/development-before-start.md)，按改动影响运行本地检查。
-PR 的必需 `check` 始终有结果：已登记的普通能力运行受影响测试；发布工具/CI 变更运行发布合同测试；
-未知、共享构建基础和迁移运行完整检查。禁止给必需工作流添加路径过滤。
+
+`python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` 显示候选影子计划与当前 enforced 选择；它不改变 GitHub 必需 `check`。普通本地运行仍执行 `fast`，Go 改动加 `compile`，只汇报本地范围。候选在 10 个有效 PR 中零已知漏选、配对中位耗时至少降低 30%、且每个能力的检查总耗时不增加后，按已授权标准启用；否则继续影子观察。未知、共享构建基础、可执行检查策略和迁移改动保持全量回退。禁止给必需工作流添加路径过滤。发布失败诊断和修复由单独的 `gpt-6-luna` max agent 执行；其他工作不受此模型限制。
 
 PR 合并后，国内预备机按 `main` 第一父链顺序拉取准确提交、构建并使用合成数据做基础验证，
 再通过内网晋级同一文件树。预备机数据可重建，无需备份；生产真实数据仅在数据库迁移前备份。

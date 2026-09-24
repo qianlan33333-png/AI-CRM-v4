@@ -77,6 +77,15 @@ def verify_journey_results(path: Path, expected: list[str]) -> dict:
     return terminal
 
 
+def build_affected_plan(base: str, head: str) -> dict:
+    """Load the shadow planner without changing the existing local phases."""
+    ci_dir = str(ROOT / "scripts/ci")
+    if ci_dir not in sys.path:
+        sys.path.insert(0, ci_dir)
+    import affected_plan
+    return affected_plan.build_plan(ROOT, base, head)
+
+
 class Preflight:
     def __init__(self, report_dir: Path):
         self.report_dir = report_dir
@@ -160,6 +169,18 @@ class Preflight:
         log = self.run("browser-execution", ["bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-json", "-p", "1", "-count=1", "-timeout=15m", "-run", pattern, "./cmd/aicrm"], env)
         self.report["browser_results"] = verify_journey_results(log, names)
 
+    def affected(self, plan: dict):
+        if not plan.get("evidence_eligible"):
+            raise ValueError("affected plan requires a clean checkout at the requested head")
+        go_changed = any(path.endswith(".go") for path in plan.get("changed_paths", []))
+        self.report["affected_plan"] = plan
+        self.report["local_scope"] = ["fast"] + (["compile"] if go_changed else [])
+        self.report["claim"] = "local_preflight"
+        self.report["eligible_for_delivery"] = False
+        self.fast()
+        if go_changed:
+            self.compile()
+
     def full(self):
         start = self.report["source"]["start"]
         if start["status"]:
@@ -199,11 +220,53 @@ class Preflight:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=["fast", "compile", "browser", "full"])
+    parser.add_argument("phase", choices=["fast", "compile", "browser", "full", "affected"])
     parser.add_argument("--group", choices=["all", "shell", "business"], default="all")
     parser.add_argument("--journey", action="append", default=[], help="run only the named Chromium journey; repeat for several")
     parser.add_argument("--report-dir", type=Path)
+    parser.add_argument("--base", help="baseline commit for the affected shadow plan")
+    parser.add_argument("--head", default="HEAD", help="candidate commit for the affected shadow plan")
+    parser.add_argument("--dry-run", action="store_true", help="print the affected plan without local checks")
     args = parser.parse_args()
+    if args.phase == "affected" and not args.base:
+        parser.error("affected requires --base SHA")
+    if args.phase != "affected" and (args.base or args.head != "HEAD" or args.dry_run):
+        parser.error("--base, --head and --dry-run are only valid with affected")
+    if args.phase == "affected":
+        if args.report_dir:
+            requested_report = args.report_dir.resolve()
+            if requested_report == ROOT or ROOT in requested_report.parents:
+                parser.error("affected evidence directory must be outside the Git worktree")
+        try:
+            plan = build_affected_plan(args.base, args.head)
+        except Exception as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        print(json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        if args.dry_run:
+            return 0 if plan.get("evidence_eligible") else 2
+        if not plan.get("evidence_eligible"):
+            print("affected checks require a clean checkout at the requested head", file=sys.stderr)
+            return 2
+        report_dir = (args.report_dir or Path(tempfile.mkdtemp(prefix="aicrm-affected-"))).resolve()
+        check = Preflight(report_dir)
+        check.report["phase"] = "affected"
+        try:
+            check.affected(plan)
+            check.report["result"] = "passed"
+        except (OSError, RuntimeError, ValueError) as error:
+            check.report.update(result="failed", error=str(error), claim="not_verified")
+            print(str(error), file=sys.stderr)
+        finally:
+            end = check.source_snapshot()
+            check.report["source"]["end"] = end
+            check.report["source"]["unchanged_during_execution"] = end == check.report["source"]["start"]
+            if not check.report["source"]["unchanged_during_execution"]:
+                check.report.update(result="failed", error="source changed during local affected checks",
+                                    claim="not_verified")
+            check.save()
+        print("Evidence: " + str(check.report_dir), flush=True)
+        return 0 if check.report["result"] == "passed" else 1
     report_dir = (args.report_dir or Path(tempfile.mkdtemp(prefix="aicrm-preflight-"))).resolve()
     if args.phase == "full" and (report_dir == ROOT or ROOT in report_dir.parents):
         parser.error("local full evidence directory must be outside the Git worktree")

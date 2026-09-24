@@ -2,14 +2,18 @@
 
 ## Development and domestic serial release
 
-每个开发任务使用新的 `codex/<work-item>` 分支/worktree 和新 PR。开始前阅读
-`docs/development-before-start.md`，先写业务判断、检索 GitHub 参考案例、评估仓库复用，
-再形成经确认的简短 PRD，并记录 OneID、Persistence、External Effects 分类。
+每个开发任务使用新的 `codex/<work-item>` 分支/worktree 和 PR。开始前阅读
+`docs/development-before-start.md`，完成业务判断、GitHub 参考与仓库复用评估，再形成一份简短父 PRD
+并记录 OneID、Persistence、External Effects 分类。父 brief 一经授权，拆分出的 PR 复用该 brief，
+只补充各自范围和验收，不重复请求确认；只有业务范围或外部合同发生实质变化时才重新确认。
+每个 PR 交付一个独立可合并、可回退的用户可观察行为或明确缺陷，相关测试同 PR；按行为边界拆分，不设行数门槛。
+涉及侧栏、用户展示页或后台页面时，编码前使用 Product Design 插件/skill。整个实施留在同一 Codex task。
+发布失败诊断和修复由单独的 `gpt-6-luna` max agent 执行；其他工作不受此模型限制。
 
 GitHub 是唯一主仓库和 PR 审核入口。受保护 `main` 只接受准确 head 的必需 `check`；
 CI 工作流始终启动，最终 `check` 汇总实际需要的检查，不能用 `paths` 过滤掉必需工作流。
-发布工具/CI 变更运行控制器、分类器、安装器与恢复合同测试；未知、共享构建基础或
-迁移改动保守运行完整检查。GitHub Actions 不构建或运输生产包。不同板块可并行提 PR，
+已登记的发布工具变更运行对应合同测试；可执行检查策略、未知、共享构建基础或迁移改动
+保守运行完整检查。GitHub Actions 不构建或运输生产包。不同板块可并行提 PR，
 合并后由预备机按 `main` 第一父链顺序逐个构建、基础验收并通过内网将同一版本晋级生产。
 纯文档变更不安装；普通页面改动不备份数据库、不运行迁移；数据库变更必须经过
 兼容性检查、自动备份和迁移专项检查。生产技术安装成功与真实业务验收分开记录，
@@ -17,7 +21,7 @@ CI 工作流始终启动，最终 `check` 汇总实际需要的检查，不能�
 
 旧 merge-preview、candidate handoff、release-control 观察占位只作为历史审计，
 不再是新 PR 的合并或部署门禁。发布操作和结果不明处置见
-`docs/operations/domestic-release.md`。PR #22 的暂停是历史决定；新流程不会自动处理旧 PR。
+`docs/operations/domestic-release.md`。
 普通页面/程序发布不备份数据库。备份规则由受保护主机角色固定：预备机只用可重建的合成数据，
 不做数据库备份；生产数据是真实数据，只有数据库迁移在运行迁移前备份。缺失或不符的角色配置必须停止，
 PR 参数不能关闭生产备份。
@@ -81,7 +85,8 @@ PR 参数不能关闭生产备份。
 
 ## 7. 开发单位
 
-- 一个 PR 交付一个用户可观察能力或一个明确缺陷。
+- 一个 PR 交付一个独立可合并、可回退的用户可观察行为或明确缺陷，相关测试与行为放在同一 PR；不设行数或文件数配额。
+- 涉及 UI 时，编码前使用 Product Design 插件/skill；父 brief 已授权的拆分 PR 不重复请求确认。
 - 不以目录存在、接口骨架、HTTP 200、Mock 或排队成功作为完成。
 - 旧能力迁入前先冻结 Behavior Contract 和 Characterization/Journey 测试；禁止整目录复制后再清理。
 - 临时兼容 Adapter 必须登记 Owner、替代路径和删除条件。
@@ -93,8 +98,9 @@ PR 参数不能关闭生产备份。
 ## 9. 提交前验证顺序
 
 - 首次推送和修复后再次推送前，先运行 `python3 scripts/dev_preflight.py fast`；Go 改动再运行 `python3 scripts/dev_preflight.py compile`，然后执行受影响领域的专项测试。编译成功不等于测试通过。
-- `fast`、`compile` 和局部 `browser` 的证据只能汇报对应局部 claim，不能称为完整回归。GitHub 必需 `check` 按改动范围选测试；未知、共享基础设施、迁移和发布链变更运行完整检查。合并后的准确 SHA 还须有成功的 `check`，预备机才构建并安装。预备机基础验收与生产安装读回是独立证据，不能用 CI 代替。真实支付、扫码验收只能在生产技术部署后由业务方记录。
-- CI 失败先重现准确失败用例，修复后跑完整失败阶段，再提交全量 CI；不能通过删断言、接受 skip 或反复推送猜测修复。
+- `fast`、`compile` 和局部 `browser` 的证据只能汇报对应局部 claim，不能称为完整回归。GitHub 必需 `check` 按改动范围选测试；未知、共享基础设施、可执行检查策略和迁移变更运行完整检查，已登记的发布工具使用对应合同检查。合并后的准确 SHA 还须有成功的 `check`，预备机才构建并安装。预备机基础验收与生产安装读回是独立证据，不能用 CI 代替。真实支付、扫码验收只能在生产技术部署后由业务方记录。
+- `python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` 只显示候选影子计划。无 `--dry-run` 时仍执行本地 `fast`，Go 改动再执行 `compile`；输出只证明本地范围，GitHub 当前必需检查保持不变。候选须先积累 10 个有效 PR，零已知漏选、配对中位耗时至少降低 30%、且每个能力的检查总耗时不增加；达到已授权标准后才启用，否则继续影子观察。
+- CI 失败先重现准确失败用例，修复后重跑完整失败阶段；提交前按更新后的影响计划重新计算适用检查范围。不能通过删断言、接受 skip 或反复推送猜测修复。
 - 新增真实 Host 浏览器旅程放在 `cmd/aicrm`，使用 `Test…ChromiumJourney` 命名，自动进入必跑集合；其他包或命名必须明确接入。运行 `python3 scripts/dev_preflight.py browser` 前准备最终 Host 产物和独立 PostgreSQL 16 测试库。
 - 测试汇报附准确 HEAD、tree、工作区状态、命令及证据目录，区分编译、专项、本地完整、完整 CI、取消、跳过和未验证；修改代码后不能沿用旧 HEAD 绿灯。PR 首轮质量保留该 PR 最早 CI attempt 的原始 SHA；最终质量只对应当前 PR head 的最新 attempt。
 - 共享 Composition、构建和工作流改动先核对并行任务，避免重复修复；不能恢复手工维护的 Chromium 用例正则。操作细则见 `docs/plans/2026-09-08-development-preflight.md`。

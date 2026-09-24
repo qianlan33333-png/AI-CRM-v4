@@ -1,9 +1,11 @@
 # 开发开始前
 
-1. 只使用当前 AI-CRM-v4 仓库和准确 `main`；创建新的 `codex/<work-item>` worktree/分支和 PR。
-2. 先写业务判断逻辑，查成熟产品和 GitHub 参考，评估仓库复用点，形成并冻结 PRD。
-3. 明确 OneID、Persistence、External Effects 分类、数据 Owner、事务边界、真实验收旅程和回滚点。
-4. 查看活跃 PR、共享文件与生产技术发布游标。Composition、迁移、公共组件、Provider、External Effects、CI 和部署脚本需协调同一文件；不同板块可并行开发、各提一个 PR。
-5. 保存开始时 `main`、HEAD、tree 和干净状态。缺少准确基线、凭据或安全边界时失败关闭。
+1. 只使用当前 AI-CRM-v4 仓库和准确 `main`；在同一 Codex task 中使用新的 `codex/<work-item>` worktree/分支。
+2. 写出用户动作、状态/错误分支和验收；检索 GitHub/成熟产品参考，并确认仓库复用点。
+3. 为父任务形成一份简短 PRD，包含业务流程、验收、回退及 OneID、Persistence、External Effects 分类。父 brief 获授权后，子 PR 复用它，只记录自身范围差异，不重复确认。
+4. 每个 PR 包含一个独立可合并、可回退的用户行为或缺陷及其测试；按行为边界拆分，不按行数配额拆分。涉及 UI 时，编码前使用 Product Design 插件/skill。
+5. 查看共享文件与并行改动，保存准确 base/head/tree 和工作树状态；基线、映射或边界不明时使用全量检查。
 
-仓库公开不等于候选可信。受保护 `main` 与准确提交的 `check` 决定能否进入国内构建队列。合并后预备机按第一父链处理提交、生成完整文件清单和摘要，基础验收后通过内网晋级同一文件树。业务真实验收在生产技术安装后独立记录。见 `docs/operations/domestic-release.md`。
+候选 `affected` 计划目前仅在影子模式观察：`--dry-run` 只打印绑定准确 Git SHA/tree 和策略指纹的计划；普通本地运行仍是 `fast`，Go 改动加 `compile`。GitHub 现行必需 `check` 不变。至少观察 10 个有效 PR，并达到零已知漏选、配对中位耗时下降至少 30%、每个能力的检查总耗时不增加，才按已授权标准启用；否则继续影子观察，无需重复确认既定标准。
+
+受保护 `main` 与准确提交的必需 `check` 决定能否进入国内构建队列。合并后预备机按第一父链处理提交，基础验收后通过内网晋级同一文件树。业务真实验收在生产技术安装后独立记录。见 `docs/operations/domestic-release.md`。发布失败诊断和修复由单独的 `gpt-6-luna` max agent 执行；其他工作不受此模型限制。

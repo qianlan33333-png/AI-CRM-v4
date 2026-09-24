@@ -1,5 +1,9 @@
 import unittest
+from pathlib import Path
+import subprocess
+import json
 
+import governance_impact
 import impact_selection
 
 
@@ -111,3 +115,87 @@ class SelectionTest(unittest.TestCase):
     def test_unknown_path_and_unknown_risk_use_full(self):
         for report in (self.report("low", ["new-runtime.toml"]), self.report("unexpected"), self.report("low")):
             self.assertEqual(impact_selection.select(report)["mode"], "full")
+
+    def test_candidate_unions_tooling_prd_and_ordinary_skill_docs(self):
+        report = self.report("high", [
+            "scripts/ci/test_workflow_contract.py",
+            "docs/prd/2026-09-24-small-step-impact-checks.md",
+            "skills/ordinary-writing/SKILL.md",
+        ], lanes=("preflight",))
+        # The currently enforced selector remains conservative for this mixed
+        # set; only the separate candidate plan combines the equivalent impacts.
+        self.assertEqual(impact_selection.select(report)["mode"], "full")
+        candidate = impact_selection.select_candidate(report)
+        self.assertEqual(candidate["mode"], "targeted")
+        self.assertEqual(candidate["lanes"], ["preflight"])
+        self.assertEqual(candidate["profile"], "tooling")
+        self.assertEqual(candidate["reasons"], ["documentation-only", "release-tooling-contracts"])
+        self.assertEqual(candidate["checks"], [])
+
+    def test_candidate_instruction_docs_use_light_consistency_profile(self):
+        report = self.report("low", [
+            "AGENTS.md", "README.md", "docs/development-before-start.md",
+            "skills/aicrm-v3-development/SKILL.md", "docs/prd/ordinary.md",
+        ])
+        candidate = impact_selection.select_candidate(report)
+        self.assertEqual(candidate["mode"], "targeted")
+        self.assertEqual(candidate["profile"], "documentation")
+        self.assertEqual(candidate["lanes"], ["preflight"])
+        self.assertEqual(candidate["reasons"], ["documentation-only"])
+
+    def test_candidate_instruction_docs_cannot_lower_executable_check_policy(self):
+        report = self.report("low", [
+            "scripts/ci/impact_selection.py", "AGENTS.md", "docs/prd/ordinary.md",
+        ])
+        candidate = impact_selection.select_candidate(report)
+        self.assertEqual(candidate["mode"], "full")
+        self.assertEqual(candidate["reason"], "policy-change-requires-full")
+        self.assertEqual(candidate["lanes"], list(impact_selection.LANES))
+
+    def test_candidate_unions_multiple_capability_checks_and_lanes(self):
+        report = {
+            "risk": "medium",
+            "direct": ["referral", "customer"],
+            "changed_paths": ["internal/referral/app/service.go", "internal/customer/app/service.go"],
+            "checks": [
+                {"lane": "backend", "path": "internal/referral/app/service_test.go", "test": "TestReferral"},
+                {"lane": "backend", "path": "internal/referral/app/service_test.go", "test": "TestReferral"},
+                {"lane": "browser", "path": "cmd/aicrm/fixture_test.go", "test": "TestFixtureChromiumJourney"},
+            ],
+        }
+        candidate = impact_selection.select_candidate(report)
+        self.assertEqual(candidate["mode"], "targeted")
+        self.assertEqual(candidate["lanes"], ["preflight", "backend", "browser"])
+        self.assertEqual(len(candidate["checks"]), 2)
+        self.assertEqual(candidate["reasons"], ["affected-capabilities"])
+
+    def test_candidate_unknown_mixed_path_and_malformed_mapping_fall_back_to_full(self):
+        reports = (
+            self.report("low", ["scripts/ci/test_fixture.py", "docs/prd/ordinary.md", "new-runtime.toml"],
+                        lanes=("preflight",)),
+            self.report("medium", ["internal/referral/app/service.go"], lanes=("unknown",)),
+            {"risk": "medium", "direct": ["referral"],
+             "changed_paths": ["internal/referral/app/service.go"],
+             "checks": [{"lane": "backend", "path": "../outside.go", "test": "TestUnsafe"}]},
+        )
+        for report in reports:
+            with self.subTest(report=report):
+                candidate = impact_selection.select_candidate(report)
+                self.assertEqual(candidate["mode"], "full")
+                self.assertEqual(candidate["lanes"], list(impact_selection.LANES))
+
+    def test_candidate_uses_current_registry_without_transitive_tooling_checks(self):
+        root = Path(__file__).resolve().parents[2]
+        tracked = subprocess.check_output(["git", "ls-files"], cwd=root, text=True).splitlines()
+        registry = json.loads((root / "docs/governance/capability-impact.json").read_text())
+        report = governance_impact.analyze(root, registry, tracked, [
+            "deploy/domestic-promote.py", "docs/prd/ordinary.md", "skills/ordinary-writing/SKILL.md",
+        ])
+        # The registry can carry downstream application checks for delivery
+        # governance. The candidate keeps tooling + prose in their unioned
+        # preflight profile instead of copying those unrelated consumer checks.
+        candidate = impact_selection.select_candidate(report)
+        self.assertEqual(candidate["mode"], "targeted")
+        self.assertEqual(candidate["profile"], "tooling")
+        self.assertEqual(candidate["lanes"], ["preflight"])
+        self.assertEqual(candidate["checks"], [])
