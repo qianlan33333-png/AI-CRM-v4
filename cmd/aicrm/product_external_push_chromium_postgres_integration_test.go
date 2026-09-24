@@ -54,6 +54,7 @@ type productExternalPushChromiumFixture struct {
 	materialLaterID          int64
 	historicalOrderReference string
 	dataKey                  []byte
+	alipayGateway            string
 }
 
 type productExternalPushChromiumFixtureOptions struct {
@@ -61,6 +62,10 @@ type productExternalPushChromiumFixtureOptions struct {
 	// H5 identity/session boundary. Existing product-admin fixtures keep their
 	// original disabled Payment/OAuth configuration.
 	enablePublicH5 bool
+	enableAlipay   bool
+	// alipayGateway is a loopback-only synthetic server used by the full
+	// Alipay journey, including post-handoff reconciliation reads.
+	alipayGateway string
 }
 
 // TestPostgreSQLProductExternalPushCompositionPreflight runs in every real
@@ -210,6 +215,18 @@ func newProductExternalPushChromiumFixtureWithOptions(t *testing.T, timeout time
 		runtime.Survey = platformconfig.Survey{DataKey: base64.RawStdEncoding.EncodeToString(dataKey), IdentityPhoneDataKey: base64.RawStdEncoding.EncodeToString(dataKey), OAuthEnabled: true, OAuthAppID: "wx-public-commerce-h5", OAuthSecret: "public-commerce-h5-fixture-secret", OAuthOpenPlatformID: "public-commerce-fixture-platform", OAuthScope: "snsapi_userinfo"}
 		runtime.WeChatPay = platformconfig.WeChatPay{Enabled: true, AppID: "wx-public-commerce-mini", AppSecret: "public-commerce-mini-fixture-secret", AppScope: "wechat-app:wx-public-commerce-mini", H5OAuthEnabled: true, H5AppID: "wx-public-commerce-h5", H5AppSecret: "public-commerce-h5-fixture-secret", H5AppScope: "wechat-app:wx-public-commerce-h5", OrderContactDataKey: base64.RawStdEncoding.EncodeToString(dataKey), MerchantID: "public-commerce-fixture-mch", MerchantSerial: "public-commerce-fixture-serial", PrivateKeyPath: paymentKey, PlatformCertPath: paymentCertificate, APIV3Key: "0123456789abcdef0123456789abcdef"}
 	}
+	alipayGateway := options.alipayGateway
+	if options.enableAlipay {
+		privateKeyPath, publicKey := virtualAlipayFixtureCredentials(t)
+		if alipayGateway == "" {
+			alipayGateway = newVirtualAlipayGateway(t, privateKeyPath).URL
+		}
+		runtime.Alipay = platformconfig.Alipay{
+			Enabled: true, AppID: "virtual-alipay-test-app", PrivateKeyPath: privateKeyPath,
+			AlipayPublicKey: publicKey, Gateway: alipayGateway,
+			NotifyURL: "https://crm.example.test/api/public/alipay/callback", ReturnURL: "https://crm.example.test/pay/result",
+		}
+	}
 	application, err := compose(ctx, runtime)
 	if err != nil {
 		t.Fatal(err)
@@ -316,6 +333,7 @@ func newProductExternalPushChromiumFixtureWithOptions(t *testing.T, timeout time
 		productID: productID, serviceProductID: serviceProductID,
 		materialFirstID: materialFirstID, materialLaterID: materialLaterID,
 		historicalOrderReference: historicalOrderReference, dataKey: dataKey,
+		alipayGateway: alipayGateway,
 	}
 }
 

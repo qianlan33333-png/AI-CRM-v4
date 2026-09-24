@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"net/http"
@@ -128,14 +129,18 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 	}))
 	defer server.Close()
 	provider, signer = alipayContractFixture(t, server.URL)
-	request := WebPayRequest{MerchantOrderNo: "merchant-test-1", Subject: "test item", TotalAmount: "9.90"}
+	request := WebPayRequest{MerchantOrderNo: "merchant-test-1", Subject: "课程 A&B=+%中文/订单", TotalAmount: "9.90"}
 	for name, build := range map[string]func(context.Context, WebPayRequest) (string, error){"alipay.trade.wap.pay": provider.BuildWapPay, "alipay.trade.page.pay": provider.BuildPagePay} {
 		checkoutURL, err := build(context.Background(), request)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		parsed, err := url.Parse(checkoutURL)
-		if err != nil || parsed.Query().Get("method") != name || parsed.Query().Get("sign") == "" || parsed.Query().Get("notify_url") != "https://example.test/api/public/alipay/callback" {
+		var content struct {
+			Subject string `json:"subject"`
+		}
+		decodeErr := json.Unmarshal([]byte(parsed.Query().Get("biz_content")), &content)
+		if err != nil || decodeErr != nil || content.Subject != request.Subject || parsed.Query().Get("method") != name || parsed.Query().Get("sign") == "" || parsed.Query().Get("notify_url") != "https://example.test/api/public/alipay/callback" {
 			t.Fatalf("%s checkout artifact invalid: err=%v", name, err)
 		}
 	}

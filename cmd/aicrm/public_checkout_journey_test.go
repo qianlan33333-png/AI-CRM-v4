@@ -108,7 +108,7 @@ func checkoutJourneyTrustedPayer(token string) int {
 	}
 }
 
-func (app *checkoutJourneyApplication) GetCheckout(_ context.Context, merchantOrderNo, sessionToken string) (paymentport.Handoff, error) {
+func (app *checkoutJourneyApplication) GetCheckout(_ context.Context, provider paymentdomain.Provider, merchantOrderNo, sessionToken string) (paymentport.Handoff, error) {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 	for _, record := range app.records {
@@ -118,24 +118,27 @@ func (app *checkoutJourneyApplication) GetCheckout(_ context.Context, merchantOr
 		if checkoutJourneyTrustedPayer(record.command.SessionToken) == 0 || checkoutJourneyTrustedPayer(record.command.SessionToken) != checkoutJourneyTrustedPayer(sessionToken) {
 			return paymentport.Handoff{}, paymentport.ErrConflict
 		}
+		if record.command.Provider != string(provider) {
+			return paymentport.Handoff{}, paymentport.ErrNotFound
+		}
 		record.statusCalls++
 		switch record.command.CouponClaimID {
 		case 11:
-			return paymentport.Handoff{MerchantOrder: merchantOrderNo, Status: paymentdomain.StatusPaid}, nil
+			return paymentport.Handoff{Provider: provider, Channel: record.command.Channel, MerchantOrder: merchantOrderNo, Status: paymentdomain.StatusPaid}, nil
 		case 12:
 			if record.statusCalls >= 3 {
-				return paymentport.Handoff{MerchantOrder: merchantOrderNo, Status: paymentdomain.StatusPaid}, nil
+				return paymentport.Handoff{Provider: provider, Channel: record.command.Channel, MerchantOrder: merchantOrderNo, Status: paymentdomain.StatusPaid}, nil
 			}
-			return paymentport.Handoff{MerchantOrder: merchantOrderNo, Status: paymentdomain.StatusAwaitingPayment, Payload: []byte(`{"appId":"wx-test","package":"prepay_id=checkout"}`), ExpiresAt: time.Now().Add(time.Minute)}, nil
+			return paymentport.Handoff{Provider: provider, Channel: record.command.Channel, MerchantOrder: merchantOrderNo, Status: paymentdomain.StatusAwaitingPayment, Payload: []byte(`{"appId":"wx-test","package":"prepay_id=checkout"}`), ExpiresAt: time.Now().Add(time.Minute)}, nil
 		case 13:
 			// A known merchant order can be recovered by a renewed trusted session
 			// for the same payer. It must never call Create or mint another key.
 			if sessionToken == "trusted-payment-session-two" {
-				return paymentport.Handoff{MerchantOrder: merchantOrderNo, Status: paymentdomain.StatusPaid}, nil
+				return paymentport.Handoff{Provider: provider, Channel: record.command.Channel, MerchantOrder: merchantOrderNo, Status: paymentdomain.StatusPaid}, nil
 			}
-			return paymentport.Handoff{MerchantOrder: merchantOrderNo, Status: paymentdomain.StatusAwaitingPrepay}, nil
+			return paymentport.Handoff{Provider: provider, Channel: record.command.Channel, MerchantOrder: merchantOrderNo, Status: paymentdomain.StatusAwaitingPrepay}, nil
 		default:
-			return paymentport.Handoff{MerchantOrder: merchantOrderNo, Status: paymentdomain.StatusAwaitingPrepay}, nil
+			return paymentport.Handoff{Provider: provider, Channel: record.command.Channel, MerchantOrder: merchantOrderNo, Status: paymentdomain.StatusAwaitingPrepay}, nil
 		}
 	}
 	return paymentport.Handoff{}, paymentport.ErrNotFound
@@ -192,7 +195,7 @@ type checkoutJourneyResponseLoss struct {
 }
 
 func (handler *checkoutJourneyResponseLoss) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	if request.Method != http.MethodPost || request.URL.Path != "/api/v1/wechat-pay/checkouts" {
+	if request.Method != http.MethodPost || (request.URL.Path != "/api/v1/wechat-pay/checkouts" && request.URL.Path != "/api/v1/alipay/checkouts") {
 		handler.next.ServeHTTP(writer, request)
 		return
 	}
@@ -288,6 +291,7 @@ func newPublicCheckoutJourneyServer(t *testing.T, public http.Handler, applicati
 	mux := http.NewServeMux()
 	mux.Handle("/pay/", public)
 	mux.Handle("/api/v1/wechat-pay/", &checkoutJourneyResponseLoss{next: payment})
+	mux.Handle("/api/v1/alipay/", &checkoutJourneyResponseLoss{next: payment})
 	mux.HandleFunc("/api/h5/coupons/available", func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet || request.URL.Query().Get("target_ref") != "standard_product:7" {
 			http.NotFound(writer, request)

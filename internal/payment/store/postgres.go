@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -805,9 +807,10 @@ func (r *Repository) ProviderIntent(ctx context.Context, kind effectport.Kind, s
 	var out paymentport.ProviderIntent
 	var storedKind, storedSource, payload string
 	var requestSnapshot []byte
+	var paymentOrderID int64
 	err = t.QueryRow(ctx, `
 		SELECT i.effect_kind,i.source_ref_digest,i.payload_digest,i.request_snapshot,
-			COALESCE(p.id, rp.id),COALESCE(i.refund_id,0),
+			COALESCE(p.id, rp.id),COALESCE(p.order_id,rp.order_id),COALESCE(i.refund_id,0),
 			COALESCE(p.payer_identity_id,rp.payer_identity_id),COALESCE(p.payment_channel,rp.payment_channel),COALESCE(p.merchant_order_no,rp.merchant_order_no),
 			COALESCE(r.refund_no,''),COALESCE(r.reason,''),
 			COALESCE(r.amount_minor,p.amount_minor),COALESCE(p.amount_minor,rp.amount_minor),COALESCE(p.profit_sharing_marked,false),COALESCE(p.currency,rp.currency)
@@ -816,7 +819,7 @@ func (r *Repository) ProviderIntent(ctx context.Context, kind effectport.Kind, s
 		LEFT JOIN payment_refunds r ON r.id=i.refund_id
 		LEFT JOIN payments rp ON rp.id=r.payment_id
 		WHERE i.effect_kind=$1 AND i.source_ref_digest=$2`, kind, source,
-	).Scan(&storedKind, &storedSource, &payload, &requestSnapshot, &out.PaymentID, &out.RefundID,
+	).Scan(&storedKind, &storedSource, &payload, &requestSnapshot, &out.PaymentID, &paymentOrderID, &out.RefundID,
 		&out.PayerIdentityID, &out.Channel, &out.MerchantOrderNo, &out.RefundNo, &out.RefundReason,
 		&out.AmountMinor, &out.TotalMinor, &out.ProfitSharingMarked, &out.Currency)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -842,10 +845,82 @@ func (r *Repository) ProviderIntent(ctx context.Context, kind effectport.Kind, s
 		out.ProviderOrderID, out.ProductID, out.SKUID = material.ProviderOrderID, material.ProductID, material.SKUID
 		out.RefundCount, out.ReasonCode = material.RefundCount, material.ReasonCode
 	}
+	if out.Kind == effectport.KindAlipayWapPay || out.Kind == effectport.KindAlipayPagePay {
+		subject, subjectErr := alipayIntentSubject(requestSnapshot, func() (string, error) {
+			return alipaySubjectFromOrderItems(ctx, t, paymentOrderID)
+		})
+		if subjectErr != nil {
+			return paymentport.ProviderIntent{}, subjectErr
+		}
+		out.Subject = subject
+	}
 	if out.Kind != kind || out.SourceRefDigest != source || !effectport.ValidDigest(out.PayloadDigest) {
 		return paymentport.ProviderIntent{}, paymentport.ErrConflict
 	}
 	return out, nil
+}
+
+func alipayIntentSubject(snapshot []byte, legacyFallback func() (string, error)) (string, error) {
+	var material map[string]json.RawMessage
+	if json.Unmarshal(snapshot, &material) != nil || material == nil {
+		return "", paymentport.ErrConflict
+	}
+	raw, exists := material["subject"]
+	if !exists {
+		if legacyFallback == nil {
+			return "", paymentport.ErrConflict
+		}
+		return legacyFallback()
+	}
+	var subject string
+	if json.Unmarshal(raw, &subject) != nil || !validStoredAlipaySubject(subject) {
+		return "", paymentport.ErrConflict
+	}
+	return subject, nil
+}
+
+func alipaySubjectFromOrderItems(ctx context.Context, t pgx.Tx, orderID int64) (string, error) {
+	if orderID < 1 {
+		return "", paymentport.ErrConflict
+	}
+	var count int64
+	var name, code string
+	err := t.QueryRow(ctx, `SELECT COUNT(*),COALESCE(MAX(NULLIF(BTRIM(product_name),'')),''),COALESCE(MAX(NULLIF(BTRIM(product_code),'')),'') FROM order_items WHERE order_id=$1`, orderID).Scan(&count, &name, &code)
+	if err != nil {
+		return "", mapError(err)
+	}
+	return alipaySubjectFromOrderItemFacts(count, name, code)
+}
+
+func alipaySubjectFromOrderItemFacts(count int64, name, code string) (string, error) {
+	if count != 1 {
+		return "", paymentport.ErrConflict
+	}
+	subject := strings.TrimSpace(name)
+	if subject == "" {
+		subject = strings.TrimSpace(code)
+	}
+	subject, ok := normalizeStoredAlipaySubject(subject)
+	if !ok {
+		return "", paymentport.ErrConflict
+	}
+	return subject, nil
+}
+
+func normalizeStoredAlipaySubject(subject string) (string, bool) {
+	subject = strings.TrimSpace(subject)
+	if subject == "" || strings.IndexFunc(subject, unicode.IsControl) >= 0 {
+		return "", false
+	}
+	runes := []rune(subject)
+	if len(runes) > paymentport.AlipayMaxSubjectRunes {
+		subject = strings.TrimSpace(string(runes[:paymentport.AlipayMaxSubjectRunes]))
+	}
+	return subject, subject != "" && utf8.RuneCountInString(subject) <= paymentport.AlipayMaxSubjectRunes
+}
+
+func validStoredAlipaySubject(subject string) bool {
+	return strings.TrimSpace(subject) == subject && subject != "" && utf8.RuneCountInString(subject) <= paymentport.AlipayMaxSubjectRunes && strings.IndexFunc(subject, unicode.IsControl) < 0
 }
 
 func (r *Repository) CompleteEffectWithin(ctx context.Context, effectRef string, envelope effectport.Envelope, attempt effectport.Attempt, result effectport.AdapterResult) error {
