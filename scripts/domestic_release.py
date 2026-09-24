@@ -13,7 +13,7 @@ import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shlex
 import shutil
@@ -54,6 +54,8 @@ ALIPAY_SMOKE_PATHS = (
     "web/v3/payment/",
 )
 ALIPAY_SMOKE_FIXTURE = "cmd/aicrm/domestic_release_installed_smoke_test.go"
+SMOKE_DOC_SUFFIXES = {".md", ".mdx", ".rst", ".adoc"}
+SMOKE_TEST_DIR_NAMES = {"test", "tests", "testdata", "fixtures"}
 HOST_READBACK_CODE = """
 import hashlib, json, pathlib, re, subprocess, sys, urllib.request
 p = pathlib.Path('/opt/aicrm/current').resolve(strict=True)
@@ -873,7 +875,25 @@ def _alipay_smoke_required(plan: dict) -> bool:
     paths = plan.get("changed_paths", [])
     if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
         raise RuntimeError("invalid release impact paths for staging smoke policy")
-    return any(path == ALIPAY_SMOKE_FIXTURE or path.startswith(ALIPAY_SMOKE_PATHS) for path in paths)
+    return any(
+        path == ALIPAY_SMOKE_FIXTURE
+        or (path.startswith(ALIPAY_SMOKE_PATHS) and not _alipay_smoke_path_is_test_or_document(path))
+        for path in paths
+    )
+
+
+def _alipay_smoke_path_is_test_or_document(path: str) -> bool:
+    parsed = PurePosixPath(path)
+    name = parsed.name.lower()
+    if path.startswith("docs/") or parsed.suffix.lower() in SMOKE_DOC_SUFFIXES:
+        return True
+    if any(part.lower() in SMOKE_TEST_DIR_NAMES for part in parsed.parts):
+        return True
+    if name.endswith("_test.go") or name.startswith(("test_", "test-")):
+        return True
+    if ".test." in name or ".spec." in name:
+        return True
+    return parsed.parent.as_posix() == "cmd/aicrm" and name.endswith("_chromium_journey.mjs")
 
 
 def _trusted_changed_paths(repo: Path, base_sha: str, target_sha: str) -> list[str]:

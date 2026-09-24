@@ -1045,9 +1045,118 @@ class DomesticReleaseTest(unittest.TestCase):
         self.assertTrue(worker._alipay_smoke_required({"changed_paths": ["internal/payment/app/service.go"]}))
         self.assertTrue(worker._alipay_smoke_required({"changed_paths": [worker.ALIPAY_SMOKE_FIXTURE]}))
         self.assertTrue(worker._alipay_smoke_required({"changed_paths": ["migrations/0208_payment.sql"]}))
-        self.assertFalse(worker._alipay_smoke_required({"changed_paths": ["docs/release.md", "scripts/ci/impact_selection.py"]}))
+        self.assertTrue(worker._alipay_smoke_required({"changed_paths": ["cmd/aicrm/payment_callback.go"]}))
+        self.assertTrue(worker._alipay_smoke_required({"changed_paths": ["internal/webshell/static/payment.html"]}))
+        self.assertFalse(worker._alipay_smoke_required({"changed_paths": ["cmd/aicrm/invitation_chromium_journey.mjs"]}))
+        self.assertFalse(worker._alipay_smoke_required({"changed_paths": ["internal/payment/app/service_test.go"]}))
+        self.assertFalse(worker._alipay_smoke_required({"changed_paths": ["docs/release.md", "internal/payment/README.md", "scripts/ci/impact_selection.py"]}))
+        self.assertTrue(worker._alipay_smoke_required({"changed_paths": ["cmd/aicrm/other_browser_journey.mjs"]}))
         with self.assertRaisesRegex(RuntimeError, "invalid release impact paths"):
             worker._alipay_smoke_required({"changed_paths": "internal/payment/app/service.go"})
+
+    def test_queue_smokes_new_fixture_but_not_browser_test_or_followup_docs(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-release-smoke-queue-sequence-") as temporary:
+            root = Path(temporary)
+            deployed, browser_test, fixture_change, docs_change = (value * 40 for value in "1234")
+            source_tree = "5" * 40
+            old_helper_sha, new_helper_sha = "6" * 64, "7" * 64
+            manifest_sha, binary_sha = "8" * 64, "9" * 64
+            invitation_journey = "cmd/aicrm/invitation_chromium_journey.mjs"
+            fixture = worker.ALIPAY_SMOKE_FIXTURE
+            helper = "deploy/domestic-promote.py"
+            documentation = "docs/release-follow-up.md"
+            state_path = root / "state.json"
+            state_path.write_text(json.dumps({
+                "status": "ready", "processed_sha": deployed,
+                "deployed_source_sha": deployed, "prod_installed_sha": deployed,
+            }))
+            config = {
+                "repo": str(root), "state": str(state_path), "production_enabled": True,
+                "stage_helper": "/fixed/domestic-promote.py",
+            }
+            first_paths = [invitation_journey]
+            second_paths = [invitation_journey, fixture, helper]
+            third_paths = [invitation_journey, fixture, helper, documentation]
+            plans = iter((
+                {"base_sha": deployed, "target_sha": browser_test, "changed_paths": first_paths, "runtime_changed": False, "controller_files": []},
+                {"base_sha": deployed, "target_sha": fixture_change, "changed_paths": second_paths, "runtime_changed": False, "controller_files": [helper]},
+                {"base_sha": deployed, "target_sha": docs_change, "changed_paths": third_paths, "runtime_changed": False, "controller_files": [helper]},
+            ))
+            path_ranges = {
+                (deployed, browser_test): first_paths,
+                (deployed, fixture_change): second_paths,
+                (browser_test, fixture_change): [fixture, helper],
+                (deployed, docs_change): third_paths,
+                (fixture_change, docs_change): [documentation],
+            }
+            receipt = {
+                "status": "passed", "contract": "alipay_checkout",
+                "test_name": "TestDomesticReleaseInstalledAlipayCheckout",
+                "test_marker": "domestic_release_installed_alipay_checkout: PASS",
+                "stage_role": "staging", "source_sha": fixture_change,
+                "source_tree": source_tree, "installed_sha": deployed,
+                "manifest_sha256": manifest_sha, "helper_sha256": new_helper_sha,
+                "installed_binary_sha256": binary_sha,
+                "verified_at_utc": "2026-09-24T00:00:00Z",
+            }
+            smoke_commands = []
+
+            def fake_git(_repo, *args):
+                if args == ("rev-parse", "refs/remotes/origin/main"):
+                    return docs_change
+                if args == ("rev-parse", f"{fixture_change}^{{tree}}"):
+                    return source_tree
+                return ""
+
+            def fake_command(*args, **_kwargs):
+                if args[0] == "python3":
+                    return json.dumps(next(plans))
+                if args[0] == "sudo":
+                    smoke_commands.append(args)
+                    return json.dumps(receipt)
+                self.fail(f"unexpected controller command: {args[0]}")
+
+            def candidate_helper_digest(_repo, source_sha, path):
+                self.assertEqual(path, helper)
+                return {browser_test: old_helper_sha, fixture_change: new_helper_sha, docs_change: new_helper_sha}[source_sha]
+
+            with (
+                mock.patch.object(worker, "git", side_effect=fake_git),
+                mock.patch.object(worker, "require_official_origin"),
+                mock.patch.object(worker, "first_parent_queue", return_value=[browser_test, fixture_change, docs_change]),
+                mock.patch.object(worker, "exact_check_success", return_value=True),
+                mock.patch.object(worker, "command", side_effect=fake_command),
+                mock.patch.object(worker, "_trusted_changed_paths", side_effect=lambda _repo, base, target: path_ranges[(base, target)]),
+                mock.patch.object(worker, "verify_controller_installation", return_value={"duration_seconds": 0.1}) as verify_controller,
+                mock.patch.object(worker, "_installed_stage_manifest_sha", return_value=manifest_sha) as read_manifest,
+                mock.patch.object(worker, "_git_file_sha256", side_effect=candidate_helper_digest) as source_helper_digest,
+                mock.patch.object(worker, "_local_file_sha256", return_value=new_helper_sha) as installed_helper_digest,
+                mock.patch.object(worker, "build_candidate") as build,
+                mock.patch.object(worker, "stage_install") as stage,
+                mock.patch.object(worker, "copy_payload") as promote,
+            ):
+                result = worker.poll(config)
+
+            self.assertEqual(result["status"], "ready")
+            self.assertEqual(result["processed_sha"], docs_change)
+            self.assertEqual(json.loads(state_path.read_text())["processed_sha"], docs_change)
+            self.assertEqual(len(smoke_commands), 1)
+            self.assertEqual(
+                smoke_commands[0],
+                (
+                    "sudo", config["stage_helper"], "--run-staging-smoke",
+                    "--source-sha", fixture_change, "--expected-sha", deployed,
+                    "--expected-manifest-sha256", manifest_sha,
+                    "--expected-helper-sha256", new_helper_sha,
+                ),
+            )
+            source_helper_digest.assert_called_once_with(root, fixture_change, helper)
+            installed_helper_digest.assert_called_once_with(Path(config["stage_helper"]))
+            read_manifest.assert_called_once_with(config, deployed)
+            self.assertEqual([call.args[2] for call in verify_controller.call_args_list], [fixture_change, docs_change])
+            build.assert_not_called()
+            stage.assert_not_called()
+            promote.assert_not_called()
 
     def test_promotion_requires_a_bound_smoke_receipt_for_payment_changes(self):
         with tempfile.TemporaryDirectory(prefix="domestic-release-smoke-gate-") as temporary:
