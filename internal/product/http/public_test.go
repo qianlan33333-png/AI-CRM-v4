@@ -274,7 +274,7 @@ func TestPublicProductDetailIsImmersiveAndPrioritizesOnlyTheFirstImage(t *testin
 		`id="detailContent"><img class="detail-image" src="https://cdn.example.test/first.png" alt="商品详情" decoding="async" loading="eager" fetchpriority="high"`,
 		`src="https://cdn.example.test/second.png" alt="商品详情" decoding="async" loading="lazy"`,
 		`href="/pay/course-7"`,
-		`¥9.90`,
+		`<strong>¥<span id="detailPrice">9.90</span></strong>`,
 	} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("immersive detail missing %q: %s", required, body)
