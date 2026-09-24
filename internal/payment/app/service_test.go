@@ -36,6 +36,7 @@ func (o orderStub) ReservePaymentWithin(ctx context.Context, _ int64) (orderdoma
 type checkoutOrderStub struct {
 	command  orderport.PaymentOrderCommand
 	purchase orderport.StandardPurchaseState
+	items    []orderdomain.ItemSnapshot
 }
 
 func (*checkoutOrderStub) ReservePaymentWithin(context.Context, int64) (orderdomain.Snapshot, error) {
@@ -47,8 +48,10 @@ func (stub *checkoutOrderStub) CreatePaymentOrderWithin(ctx context.Context, com
 	}
 	stub.command = command
 	order := nativeOrder()
+	order.Provider = command.Provider
 	order.MerchantOrderNo = command.MerchantOrderNo
 	order.Amount = orderdomain.Money{AmountMinor: command.UnitAmountMinor, Currency: command.Currency}
+	order.Items = append([]orderdomain.ItemSnapshot(nil), stub.items...)
 	payerCustomerID := command.PayerCustomerID
 	beneficiaryCustomerID := command.BeneficiaryCustomerID
 	order.PayerCustomerID = &payerCustomerID
@@ -182,6 +185,8 @@ func (e *effectStub) AcceptAndQueueWithin(ctx context.Context, c effectport.Acce
 
 type storeStub struct {
 	payment                  domain.Payment
+	checkoutPayments         map[domain.Provider]domain.Payment
+	paymentIntentSnapshot    map[string]any
 	refund                   domain.Refund
 	shopMaterial             paymentport.ShopRefundMaterial
 	bound                    bool
@@ -213,8 +218,9 @@ func (s *storeStub) CreatePayment(_ context.Context, p domain.Payment, _, _ [32]
 func (s *storeStub) ReplayPayment(context.Context, [32]byte, [32]byte, string) (domain.Payment, bool, error) {
 	return s.payment, s.payment.ID > 0, nil
 }
-func (s *storeStub) BindPaymentEffect(_ context.Context, p domain.Payment, _ effectport.PaymentV1Intent, _ map[string]any) (domain.Payment, error) {
+func (s *storeStub) BindPaymentEffect(_ context.Context, p domain.Payment, _ effectport.PaymentV1Intent, snapshot map[string]any) (domain.Payment, error) {
 	s.payment = p
+	s.paymentIntentSnapshot = snapshot
 	s.bound = true
 	return p, nil
 }
@@ -289,7 +295,17 @@ func (s *storeStub) UpdateRefundSettlement(_ context.Context, r domain.Refund, _
 func (s *storeStub) GetPaymentByMerchant(context.Context, string, bool) (domain.Payment, error) {
 	return s.payment, nil
 }
-func (s *storeStub) GetPaymentByMerchantProvider(context.Context, domain.Provider, string, bool) (domain.Payment, error) {
+func (s *storeStub) GetPaymentByMerchantProvider(_ context.Context, provider domain.Provider, merchantOrderNo string, _ bool) (domain.Payment, error) {
+	if s.checkoutPayments != nil {
+		payment, ok := s.checkoutPayments[provider]
+		if !ok || payment.MerchantOrderNo != merchantOrderNo {
+			return domain.Payment{}, paymentport.ErrNotFound
+		}
+		return payment, nil
+	}
+	if s.payment.ID < 1 || s.payment.Provider != provider || s.payment.MerchantOrderNo != merchantOrderNo {
+		return domain.Payment{}, paymentport.ErrNotFound
+	}
 	return s.payment, nil
 }
 
@@ -511,11 +527,11 @@ func TestGetCheckoutAllowsRenewedSamePayerToReadTerminalWithoutHandoff(t *testin
 		"other-payment-session-token":   {PayerIdentityID: 5, PayerCustomerID: 12, BeneficiarySelection: paymentport.BeneficiarySelectionUnresolved, Channel: domain.ChannelH5Official},
 	}}
 	service := NewService(uowStub{}, store, orderStub{}, sessions, &effectStub{})
-	result, err := service.GetCheckout(context.Background(), "M-terminal-7", "renewed-payment-session-token")
+	result, err := service.GetCheckout(context.Background(), domain.ProviderWeChatPay, "M-terminal-7", "renewed-payment-session-token")
 	if err != nil || result.Status != domain.StatusPaid || len(result.Payload) != 0 || store.handoffCalls != 0 {
 		t.Fatalf("renewed terminal checkout=%+v handoff_calls=%d err=%v", result, store.handoffCalls, err)
 	}
-	if _, err = service.GetCheckout(context.Background(), "M-terminal-7", "other-payment-session-token"); !errors.Is(err, paymentport.ErrConflict) || store.handoffCalls != 0 {
+	if _, err = service.GetCheckout(context.Background(), domain.ProviderWeChatPay, "M-terminal-7", "other-payment-session-token"); !errors.Is(err, paymentport.ErrConflict) || store.handoffCalls != 0 {
 		t.Fatalf("other trusted payer err=%v handoff_calls=%d", err, store.handoffCalls)
 	}
 }
@@ -573,7 +589,7 @@ func TestH5CheckoutRequiresAndFreezesNormalizedMobile(t *testing.T) {
 
 func TestAlipayWapCheckoutPreservesCollectedMobileInOriginalOrder(t *testing.T) {
 	store := &storeStub{}
-	orders := &checkoutOrderStub{}
+	orders := &checkoutOrderStub{items: []orderdomain.ItemSnapshot{{LineNo: 1, ProductCode: "course-5", ProductName: "Course 5", UnitAmountMinor: 8800, Quantity: 1, LineAmountMinor: 8800}}}
 	products := &checkoutProductStub{product: productport.CheckoutProduct{ID: 5, ProductType: productport.ProductOptionStandard, Code: "course-5", Name: "Course 5", PriceMinor: 8800, Currency: "CNY", Version: 3, RequireMobile: true}}
 	sessions := &oneShotSessionStub{actor: paymentport.SessionActor{PayerIdentityID: 4, PayerCustomerID: 11, BeneficiarySelection: paymentport.BeneficiarySelectionUnresolved, Channel: domain.ChannelH5Official}}
 	service := NewService(uowStub{}, store, orders, sessions, &effectStub{})
@@ -582,7 +598,7 @@ func TestAlipayWapCheckoutPreservesCollectedMobileInOriginalOrder(t *testing.T) 
 	}
 	command := paymentport.CreateCommand{ProductID: 5, ProductType: "standard", Provider: "alipay", Channel: domain.ChannelAlipayWap, MobileE164: "+8613812345678", BeneficiarySelection: paymentport.BeneficiarySelectionPayerSelf, SessionToken: "pays_h5_session_token_00000005", CheckoutSessionBinding: paymentport.CheckoutSessionBinding("pays_h5_session_token_00000005"), ActorScope: "public-checkout", IdempotencyKey: "checkout-alipay-key-0000005"}
 	payment, err := service.Create(context.Background(), command)
-	if err != nil || orders.command.Provider != orderdomain.ProviderAlipay || payment.Channel != domain.ChannelAlipayWap || orders.command.MobileE164 != command.MobileE164 {
+	if err != nil || orders.command.Provider != orderdomain.ProviderAlipay || payment.Channel != domain.ChannelAlipayWap || orders.command.MobileE164 != command.MobileE164 || store.paymentIntentSnapshot["subject"] != "Course 5" {
 		t.Fatalf("payment=%+v order=%+v err=%v", payment, orders.command, err)
 	}
 }
@@ -758,15 +774,15 @@ func TestGetCheckoutExposesUnknownPrepayOnlyToAuthorizedPayer(t *testing.T) {
 	}}
 	reader := &prepayReadStub{projection: effectport.Projection{ID: "eer_21", Owner: effectport.OwnerPayment, Kind: effectport.KindWeChatPayPrepay, State: effectport.StateUnknown}}
 	service := NewService(uowStub{}, store, orderStub{}, sessions, &effectStub{}, reader)
-	result, err := service.GetCheckout(context.Background(), "M-pending-7", "authorized-payment-session")
+	result, err := service.GetCheckout(context.Background(), domain.ProviderWeChatPay, "M-pending-7", "authorized-payment-session")
 	if err != nil || result.PrepayState != effectport.StateUnknown || len(result.Payload) != 0 || store.handoffCalls != 0 {
 		t.Fatalf("unexpected checkout result=%+v err=%v", result, err)
 	}
-	if _, err = service.GetCheckout(context.Background(), "M-pending-7", "other-payment-session-token"); !errors.Is(err, paymentport.ErrConflict) || reader.calls != 1 {
+	if _, err = service.GetCheckout(context.Background(), domain.ProviderWeChatPay, "M-pending-7", "other-payment-session-token"); !errors.Is(err, paymentport.ErrConflict) || reader.calls != 1 {
 		t.Fatalf("unauthorized effect read: calls=%d err=%v", reader.calls, err)
 	}
 	reader.projection.Owner = effectport.OwnerOutbound
-	if _, err = service.GetCheckout(context.Background(), "M-pending-7", "authorized-payment-session"); !errors.Is(err, paymentport.ErrUnavailable) {
+	if _, err = service.GetCheckout(context.Background(), domain.ProviderWeChatPay, "M-pending-7", "authorized-payment-session"); !errors.Is(err, paymentport.ErrUnavailable) {
 		t.Fatalf("wrong owner: %v", err)
 	}
 }

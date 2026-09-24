@@ -11,6 +11,7 @@ for (const kind of ['standard', 'service_period']) {
     for (const provider of ['wechat', 'alipay']) {
       const html = await readFile(path.join(dir, `${kind}-${level}.html`), 'utf8');
       const calls = [], errors = [];
+      const checkoutRoute = provider === 'alipay' ? '/api/v1/alipay/checkouts' : '/api/v1/wechat-pay/checkouts';
       const console = new VirtualConsole();
       console.on('jsdomError', error => errors.push(error.message));
       const page = new JSDOM(html, {
@@ -27,10 +28,10 @@ for (const kind of ['standard', 'service_period']) {
                 ? {purchase_state: 'available', can_purchase: true}
                 : route.startsWith('/api/h5/coupons/available')
                   ? {items: []}
-                  : route === '/api/v1/wechat-pay/checkouts' && method === 'POST'
+                  : route === checkoutRoute && method === 'POST'
                     ? {code: 'unavailable'}
                     : assert.fail(`unexpected matrix request ${method} ${route}`);
-            const rejected = route === '/api/v1/wechat-pay/checkouts' && method === 'POST';
+            const rejected = route === checkoutRoute && method === 'POST';
             return {ok: !rejected, status: rejected ? 503 : 200, async json() {return body;}};
           };
         },
@@ -46,7 +47,7 @@ for (const kind of ['standard', 'service_period']) {
 
       document.getElementById('buy').click();
       await settle();
-      const posts = () => calls.filter(call => call.route === '/api/v1/wechat-pay/checkouts' && call.method === 'POST');
+      const posts = () => calls.filter(call => call.route === checkoutRoute && call.method === 'POST');
       if (level !== 'none') {
         assert.equal(posts().length, 0, `${kind}/${level}/${provider}: invalid details must block order creation`);
         assert.equal(document.getElementById('mobileError').textContent, '请填写手机号');

@@ -42,7 +42,7 @@ type RequestSecurity interface {
 type Application interface {
 	Create(context.Context, paymentport.CreateCommand) (domain.Payment, error)
 	CheckoutSessionBinding(context.Context, string) (string, error)
-	GetCheckout(context.Context, string, string) (paymentport.Handoff, error)
+	GetCheckout(context.Context, domain.Provider, string, string) (paymentport.Handoff, error)
 	RequestRefund(context.Context, paymentport.RefundCommand) (domain.Refund, error)
 	GetPayment(context.Context, int64) (domain.Payment, error)
 	ApplyVerifiedCallback(context.Context, paymentprovider.CallbackResult) error
@@ -190,23 +190,23 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	case path == "/api/v1/wechat-pay/checkout-session":
 		handler.checkoutSession(writer, request)
 	case path == "/api/v1/wechat-pay/checkouts":
-		handler.checkout(writer, request)
+		handler.checkout(writer, request, domain.ProviderWeChatPay)
 	case path == "/api/v1/alipay/checkouts":
-		handler.checkout(writer, request)
+		handler.checkout(writer, request, domain.ProviderAlipay)
 	case strings.HasPrefix(path, "/api/v1/wechat-pay/checkouts/"):
 		checkoutPath := strings.TrimPrefix(path, "/api/v1/wechat-pay/checkouts/")
 		if strings.HasSuffix(checkoutPath, "/completion-target") {
-			handler.resolveCompletionTarget(writer, request, strings.TrimSuffix(checkoutPath, "/completion-target"))
+			handler.resolveCompletionTarget(writer, request, domain.ProviderWeChatPay, strings.TrimSuffix(checkoutPath, "/completion-target"))
 			return
 		}
-		handler.checkoutStatus(writer, request, checkoutPath)
+		handler.checkoutStatus(writer, request, domain.ProviderWeChatPay, checkoutPath)
 	case strings.HasPrefix(path, "/api/v1/alipay/checkouts/"):
 		checkoutPath := strings.TrimPrefix(path, "/api/v1/alipay/checkouts/")
 		if strings.HasSuffix(checkoutPath, "/completion-target") {
-			handler.resolveCompletionTarget(writer, request, strings.TrimSuffix(checkoutPath, "/completion-target"))
+			handler.resolveCompletionTarget(writer, request, domain.ProviderAlipay, strings.TrimSuffix(checkoutPath, "/completion-target"))
 			return
 		}
-		handler.checkoutStatus(writer, request, checkoutPath)
+		handler.checkoutStatus(writer, request, domain.ProviderAlipay, checkoutPath)
 	case strings.HasPrefix(path, "/api/admin/wechat-pay/payments/") && strings.HasSuffix(path, "/abandon-checkout"):
 		handler.abandonCheckout(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/api/admin/wechat-pay/payments/"), "/abandon-checkout"))
 	case strings.HasPrefix(path, "/api/admin/wechat-pay/payments/") && strings.HasSuffix(path, "/allow-checkout-restart"):
@@ -758,8 +758,26 @@ func compatRefundStatus(status domain.RefundStatus) string {
 	}
 }
 
-func (handler *Handler) checkout(writer http.ResponseWriter, request *http.Request) {
-	if !handler.writesEnabled && !handler.alipayWritesEnabled {
+func (handler *Handler) providerEnabled(provider domain.Provider) bool {
+	switch provider {
+	case domain.ProviderWeChatPay:
+		return handler != nil && handler.writesEnabled
+	case domain.ProviderAlipay:
+		return handler != nil && handler.alipayWritesEnabled
+	default:
+		return false
+	}
+}
+
+func checkoutStatusPath(provider domain.Provider) string {
+	if provider == domain.ProviderAlipay {
+		return "/api/v1/alipay/checkouts/"
+	}
+	return "/api/v1/wechat-pay/checkouts/"
+}
+
+func (handler *Handler) checkout(writer http.ResponseWriter, request *http.Request, routeProvider domain.Provider) {
+	if !handler.providerEnabled(routeProvider) {
 		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")
 		return
 	}
@@ -800,10 +818,10 @@ func (handler *Handler) checkout(writer http.ResponseWriter, request *http.Reque
 	}
 	provider := body.Provider
 	if provider == "" {
-		provider = "wechat_pay"
+		provider = string(routeProvider)
 	}
-	if (provider == "alipay" && !handler.alipayWritesEnabled) || (provider != "alipay" && !handler.writesEnabled) {
-		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")
+	if provider != string(routeProvider) {
+		writeError(writer, http.StatusConflict, "payment_provider_mismatch")
 		return
 	}
 	if !paymentport.MatchesCheckoutSessionBinding(cookie.Value, body.CheckoutSessionBinding) {
@@ -819,7 +837,7 @@ func (handler *Handler) checkout(writer http.ResponseWriter, request *http.Reque
 	if activityCookie, cookieErr := request.Cookie(paymentport.ReferralActivityCookieName); cookieErr == nil && validReferralActivityContext(activityCookie.Value) {
 		activityContext = activityCookie.Value
 	}
-	payment, err := handler.app.Create(request.Context(), paymentport.CreateCommand{ProductID: body.ProductID, CouponClaimID: body.CouponClaimID, ProductType: body.ProductType, Provider: body.Provider, Channel: body.Channel, MobileE164: body.MobileE164, ContactCollectionLevel: body.ContactCollectionLevel, ShippingAddress: paymentport.ShippingAddress{RecipientName: body.RecipientName, ProvinceCode: body.ProvinceCode, ProvinceName: body.ProvinceName, CityCode: body.CityCode, CityName: body.CityName, DistrictCode: body.DistrictCode, DistrictName: body.DistrictName, DetailAddress: body.DetailAddress}, BeneficiarySelection: body.BeneficiarySelection, SessionToken: cookie.Value, CheckoutSessionBinding: body.CheckoutSessionBinding, PromotionContext: body.PromotionContext, ReferralActivityContext: activityContext, ActorScope: "public-checkout", IdempotencyKey: idempotency})
+	payment, err := handler.app.Create(request.Context(), paymentport.CreateCommand{ProductID: body.ProductID, CouponClaimID: body.CouponClaimID, ProductType: body.ProductType, Provider: provider, Channel: body.Channel, MobileE164: body.MobileE164, ContactCollectionLevel: body.ContactCollectionLevel, ShippingAddress: paymentport.ShippingAddress{RecipientName: body.RecipientName, ProvinceCode: body.ProvinceCode, ProvinceName: body.ProvinceName, CityCode: body.CityCode, CityName: body.CityName, DistrictCode: body.DistrictCode, DistrictName: body.DistrictName, DetailAddress: body.DetailAddress}, BeneficiarySelection: body.BeneficiarySelection, SessionToken: cookie.Value, CheckoutSessionBinding: body.CheckoutSessionBinding, PromotionContext: body.PromotionContext, ReferralActivityContext: activityContext, ActorScope: "public-checkout", IdempotencyKey: idempotency})
 	if err != nil {
 		resultError(writer, err)
 		return
@@ -846,8 +864,8 @@ func validReferralActivityContext(value string) bool {
 	return err == nil && len(raw) == 32
 }
 
-func (handler *Handler) checkoutStatus(writer http.ResponseWriter, request *http.Request, merchantOrderNo string) {
-	if !handler.writesEnabled && !handler.alipayWritesEnabled {
+func (handler *Handler) checkoutStatus(writer http.ResponseWriter, request *http.Request, provider domain.Provider, merchantOrderNo string) {
+	if !handler.providerEnabled(provider) {
 		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")
 		return
 	}
@@ -860,12 +878,12 @@ func (handler *Handler) checkoutStatus(writer http.ResponseWriter, request *http
 		writeError(writer, http.StatusUnauthorized, "payment_session_required")
 		return
 	}
-	handoff, err := handler.app.GetCheckout(request.Context(), merchantOrderNo, cookie.Value)
+	handoff, err := handler.app.GetCheckout(request.Context(), provider, merchantOrderNo, cookie.Value)
 	if err != nil {
 		resultError(writer, err)
 		return
 	}
-	result := map[string]any{"payment_id": handoff.PaymentID, "merchant_order_no": handoff.MerchantOrder, "status": handoff.Status, "ready": len(handoff.Payload) > 0, "amount_minor": handoff.AmountMinor, "currency": handoff.Currency}
+	result := map[string]any{"payment_id": handoff.PaymentID, "merchant_order_no": handoff.MerchantOrder, "provider": handoff.Provider, "channel": handoff.Channel, "status": handoff.Status, "ready": len(handoff.Payload) > 0, "amount_minor": handoff.AmountMinor, "currency": handoff.Currency}
 	if handoff.CheckoutRestartAllowed {
 		result["checkout_restart_allowed"] = true
 	}
@@ -891,14 +909,14 @@ func (handler *Handler) checkoutStatus(writer http.ResponseWriter, request *http
 		// terminal paid state. A refresh can therefore re-read the same frozen
 		// completion action, while GetCheckout still binds it to this exact
 		// merchant order and cannot create a new payment or action.
-		result["completion_action"] = handler.paidPurchaseAction(request.Context(), handoff.OrderID, handoff.MerchantOrder)
+		result["completion_action"] = handler.paidPurchaseAction(request.Context(), provider, handoff.OrderID, handoff.MerchantOrder)
 	} else if handoff.Status == domain.StatusFailed || handoff.Status == domain.StatusCancelled {
 		clearSessionCookie(writer)
 	}
 	writeJSON(writer, status, result)
 }
 
-func (handler *Handler) paidPurchaseAction(ctx context.Context, orderID int64, merchantOrderNo string) map[string]any {
+func (handler *Handler) paidPurchaseAction(ctx context.Context, provider domain.Provider, orderID int64, merchantOrderNo string) map[string]any {
 	if handler == nil || handler.purchaseActions == nil || handler.leadQR == nil || orderID < 1 {
 		return map[string]any{"state": "unavailable"}
 	}
@@ -917,7 +935,7 @@ func (handler *Handler) paidPurchaseAction(ctx context.Context, orderID int64, m
 			if merchantOrderNo == "" {
 				return map[string]any{"state": "unavailable"}
 			}
-			return map[string]any{"state": "available", "mode": "redirect", "redirect_url": "/api/v1/wechat-pay/checkouts/" + url.PathEscape(merchantOrderNo) + "/completion-target"}
+			return map[string]any{"state": "available", "mode": "redirect", "redirect_url": checkoutStatusPath(provider) + url.PathEscape(merchantOrderNo) + "/completion-target"}
 		}
 		if action.RedirectURL == "" {
 			return map[string]any{"state": "unavailable"}
@@ -937,8 +955,8 @@ func (handler *Handler) paidPurchaseAction(ctx context.Context, orderID int64, m
 	}
 }
 
-func (handler *Handler) resolveCompletionTarget(writer http.ResponseWriter, request *http.Request, merchantOrderNo string) {
-	if !handler.writesEnabled {
+func (handler *Handler) resolveCompletionTarget(writer http.ResponseWriter, request *http.Request, provider domain.Provider, merchantOrderNo string) {
+	if !handler.providerEnabled(provider) {
 		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")
 		return
 	}
@@ -951,7 +969,7 @@ func (handler *Handler) resolveCompletionTarget(writer http.ResponseWriter, requ
 		writeError(writer, http.StatusUnauthorized, "payment_session_required")
 		return
 	}
-	handoff, err := handler.app.GetCheckout(request.Context(), merchantOrderNo, cookie.Value)
+	handoff, err := handler.app.GetCheckout(request.Context(), provider, merchantOrderNo, cookie.Value)
 	if err != nil {
 		resultError(writer, err)
 		return

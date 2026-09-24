@@ -1,9 +1,11 @@
 package paymenthttp
 
 import (
-	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	"net/http"
 	"strconv"
+
+	"github.com/qianlan33333-png/AI-CRM-v3/internal/payment/domain"
+	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 )
 
 func (h *Handler) purchaseStatus(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +36,7 @@ func (h *Handler) purchaseStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	result := map[string]any{"purchase_state": state.State, "can_purchase": state.CanPurchase}
 	if state.State == "owned" {
-		result["completion_action"] = h.paidPurchaseAction(r.Context(), state.PaidOrderID, state.MerchantOrderNo)
+		result["completion_action"] = h.paidPurchaseAction(r.Context(), domain.ProviderWeChatPay, state.PaidOrderID, state.MerchantOrderNo)
 	}
 	writeJSON(w, 200, result)
 }

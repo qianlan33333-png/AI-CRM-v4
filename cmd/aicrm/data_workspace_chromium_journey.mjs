@@ -23,8 +23,12 @@ const child = spawn(
   [
     "--headless=new",
     "--no-sandbox",
-    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-background-networking",
     "--ignore-certificate-errors",
+    "--allow-insecure-localhost",
     "--remote-debugging-port=0",
     "--user-data-dir=" + profile,
     "about:blank",

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	addresscatalog "github.com/qianlan33333-png/AI-CRM-v3/internal/address/port"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
@@ -411,7 +412,15 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 			if err != nil {
 				return err
 			}
-			payment, err = s.store.BindPaymentEffect(tx, payment, intent, map[string]any{"payment_id": payment.ID, "order_id": payment.OrderID, "amount_minor": payment.AmountMinor, "currency": payment.Currency})
+			snapshot := map[string]any{"payment_id": payment.ID, "order_id": payment.OrderID, "amount_minor": payment.AmountMinor, "currency": payment.Currency}
+			if payment.Provider == domain.ProviderAlipay {
+				subject, ok := alipaySubjectFromOrder(order)
+				if !ok {
+					return paymentport.ErrConflict
+				}
+				snapshot["subject"] = subject
+			}
+			payment, err = s.store.BindPaymentEffect(tx, payment, intent, snapshot)
 			if err != nil {
 				return err
 			}
@@ -425,6 +434,25 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 		return domain.Payment{}, classify(err)
 	}
 	return result, nil
+}
+
+func alipaySubjectFromOrder(order orderdomain.Snapshot) (string, bool) {
+	if len(order.Items) != 1 {
+		return "", false
+	}
+	item := order.Items[0]
+	subject := strings.TrimSpace(item.ProductName)
+	if subject == "" {
+		subject = strings.TrimSpace(item.ProductCode)
+	}
+	if subject == "" || strings.IndexFunc(subject, unicode.IsControl) >= 0 {
+		return "", false
+	}
+	runes := []rune(subject)
+	if len(runes) > paymentport.AlipayMaxSubjectRunes {
+		subject = strings.TrimSpace(string(runes[:paymentport.AlipayMaxSubjectRunes]))
+	}
+	return subject, subject != ""
 }
 
 func validOpaqueActivityContext(value string) bool {
@@ -589,24 +617,25 @@ func (s *Service) GetPayment(ctx context.Context, id int64) (domain.Payment, err
 	return out, classify(err)
 }
 
-func (s *Service) GetCheckout(ctx context.Context, merchantOrderNo, sessionToken string) (paymentport.Handoff, error) {
-	if s == nil || s.uow == nil || s.store == nil || s.sessions == nil || !validScope(merchantOrderNo) || len(sessionToken) < 20 || len(sessionToken) > 100 {
+func (s *Service) GetCheckout(ctx context.Context, provider domain.Provider, merchantOrderNo, sessionToken string) (paymentport.Handoff, error) {
+	if s == nil || s.uow == nil || s.store == nil || s.sessions == nil || (provider != domain.ProviderWeChatPay && provider != domain.ProviderAlipay) || !validScope(merchantOrderNo) || len(sessionToken) < 20 || len(sessionToken) > 100 {
 		return paymentport.Handoff{}, paymentport.ErrInvalid
 	}
 	now := s.now().UTC()
 	var out paymentport.Handoff
 	var prepayEffectID string
+	var prepayKind effectport.Kind
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		actor, err := s.sessions.LookupWithin(tx, sessionToken, now)
 		if err != nil {
 			return err
 		}
-		payment, err := s.store.GetPaymentByMerchantProvider(tx, domain.ProviderWeChatPay, merchantOrderNo, false)
+		payment, err := s.store.GetPaymentByMerchantProvider(tx, provider, merchantOrderNo, false)
 		if err != nil {
 			return err
 		}
 		authorized := checkoutReadAuthorized(payment, actor)
-		if !authorized && s.lineage != nil && payment.PayerIdentityID == actor.PayerIdentityID && payment.Channel == actor.Channel {
+		if !authorized && s.lineage != nil && payment.PayerIdentityID == actor.PayerIdentityID && checkoutSessionChannelMatches(payment, actor) {
 			roots, readErr := s.lineage.CanonicalLineage(tx, customerdomain.CustomerID(actor.PayerCustomerID))
 			if readErr != nil {
 				return readErr
@@ -626,7 +655,7 @@ func (s *Service) GetCheckout(ctx context.Context, merchantOrderNo, sessionToken
 		if !authorized {
 			return paymentport.ErrConflict
 		}
-		out = paymentport.Handoff{PaymentID: payment.ID, OrderID: payment.OrderID, MerchantOrder: payment.MerchantOrderNo, Status: payment.Status, AmountMinor: payment.AmountMinor, Currency: payment.Currency}
+		out = paymentport.Handoff{PaymentID: payment.ID, OrderID: payment.OrderID, MerchantOrder: payment.MerchantOrderNo, Provider: payment.Provider, Channel: payment.Channel, Status: payment.Status, AmountMinor: payment.AmountMinor, Currency: payment.Currency}
 		// A terminal outcome is an immutable Payment fact. It remains readable to
 		// the original trusted payer after the short-lived JSAPI handoff expires;
 		// handoff material is neither needed nor safe to revive at this point.
@@ -647,6 +676,20 @@ func (s *Service) GetCheckout(ctx context.Context, merchantOrderNo, sessionToken
 				}
 			}
 			prepayEffectID = payment.EffectID
+			switch payment.Provider {
+			case domain.ProviderWeChatPay:
+				prepayKind = effectport.KindWeChatPayPrepay
+			case domain.ProviderAlipay:
+				if payment.Channel == domain.ChannelAlipayWap {
+					prepayKind = effectport.KindAlipayWapPay
+				} else if payment.Channel == domain.ChannelAlipayPage {
+					prepayKind = effectport.KindAlipayPagePay
+				} else {
+					return paymentport.ErrConflict
+				}
+			default:
+				return paymentport.ErrConflict
+			}
 			return nil
 		}
 		handoff, err := s.store.GetHandoff(tx, payment.ID)
@@ -669,7 +712,7 @@ func (s *Service) GetCheckout(ctx context.Context, merchantOrderNo, sessionToken
 	// only its state; never return effect identifiers or provider response data.
 	if prepayEffectID != "" && s.effectReader != nil {
 		projection, readErr := s.effectReader.Get(ctx, prepayEffectID)
-		if readErr != nil || projection.ID != prepayEffectID || projection.Owner != effectport.OwnerPayment || projection.Kind != effectport.KindWeChatPayPrepay {
+		if readErr != nil || projection.ID != prepayEffectID || projection.Owner != effectport.OwnerPayment || projection.Kind != prepayKind {
 			return paymentport.Handoff{}, paymentport.ErrUnavailable
 		}
 		out.PrepayState = projection.State
@@ -1441,7 +1484,7 @@ func validScope(v string) bool { return v == strings.TrimSpace(v) && len(v) > 0 
 // selects a recipient, but that browser state must not hide an already persisted
 // payment whose beneficiary was selected in the original transaction.
 func checkoutReadAuthorized(payment domain.Payment, actor paymentport.SessionActor) bool {
-	if payment.PayerIdentityID != actor.PayerIdentityID || payment.PayerCustomerID != actor.PayerCustomerID || payment.Channel != actor.Channel {
+	if payment.PayerIdentityID != actor.PayerIdentityID || payment.PayerCustomerID != actor.PayerCustomerID || !checkoutSessionChannelMatches(payment, actor) {
 		return false
 	}
 	switch actor.BeneficiarySelection {
@@ -1451,6 +1494,17 @@ func checkoutReadAuthorized(payment domain.Payment, actor paymentport.SessionAct
 		return actor.BeneficiaryCustomerID == actor.PayerCustomerID && payment.BeneficiaryCustomerID == actor.BeneficiaryCustomerID
 	case paymentport.BeneficiarySelectionAdminAssisted:
 		return actor.BeneficiaryCustomerID > 0 && payment.BeneficiaryCustomerID == actor.BeneficiaryCustomerID
+	default:
+		return false
+	}
+}
+
+func checkoutSessionChannelMatches(payment domain.Payment, actor paymentport.SessionActor) bool {
+	switch payment.Provider {
+	case domain.ProviderWeChatPay:
+		return payment.Channel == actor.Channel
+	case domain.ProviderAlipay:
+		return actor.Channel == domain.ChannelH5Official && (payment.Channel == domain.ChannelAlipayWap || payment.Channel == domain.ChannelAlipayPage)
 	default:
 		return false
 	}

@@ -130,7 +130,8 @@ const replayStorage = new SharedStorage();
 const lostResponse = await runPage(replayStorage, firstSession, normalBridge, `/pay/course-7?promotion_context=${promotionA}`);
 setPurchase(lostResponse, 11, "13800138000");
 lostResponse.window.document.getElementById("buy").click();
-await waitFor(lostResponse.window.document, "请求失败", "lost response");
+await waitFor(lostResponse.window.document, "订单创建结果尚未核实，原请求已保留。点击重试会复用同一请求，不会重复下单。", "lost response");
+assert.equal(lostResponse.window.document.getElementById("buy").textContent, "重试原请求", "lost response offers the original request retry");
 assert.equal(replayStorage.values.size, 1, "response loss must retain a recovery checkpoint");
 closePage(lostResponse);
 

@@ -54,6 +54,7 @@ type productExternalPushChromiumFixture struct {
 	materialLaterID          int64
 	historicalOrderReference string
 	dataKey                  []byte
+	alipayGateway            string
 }
 
 type productExternalPushChromiumFixtureOptions struct {
@@ -61,6 +62,16 @@ type productExternalPushChromiumFixtureOptions struct {
 	// H5 identity/session boundary. Existing product-admin fixtures keep their
 	// original disabled Payment/OAuth configuration.
 	enablePublicH5 bool
+	enableAlipay   bool
+	// deferEffectsWorker lets a journey freeze a pre-existing intent shape
+	// before the real effect worker observes the committed payment.
+	deferEffectsWorker bool
+	// h5PublicOrigin separates the browser checkout origin from PublicOrigin
+	// for end-to-end Origin-guard tests.
+	h5PublicOrigin string
+	// alipayGateway is a loopback-only synthetic server used by the full
+	// Alipay journey, including post-handoff reconciliation reads.
+	alipayGateway string
 }
 
 // TestPostgreSQLProductExternalPushCompositionPreflight runs in every real
@@ -191,7 +202,7 @@ func newProductExternalPushChromiumFixtureWithOptions(t *testing.T, timeout time
 	t.Cleanup(server.Close)
 	origin := "https://" + server.Listener.Addr().String()
 	runtime := platformconfig.Runtime{
-		Role: platformconfig.RoleAPI, DatabaseURL: databaseURL, PublicOrigin: origin,
+		Role: platformconfig.RoleAPI, DatabaseURL: databaseURL, PublicOrigin: origin, H5PublicOrigin: options.h5PublicOrigin,
 		ReleaseSHA: "product-external-push-chromium-journey", WorkerOwner: "product-external-push-chromium-journey", WorkerLimit: 1,
 		GroupOps:     platformconfig.GroupOps{WebhookSecret: "product-external-push-chromium-webhook-secret"},
 		WeCom:        platformconfig.WeCom{CorpID: "admin-layout-fixture-corp"},
@@ -209,6 +220,18 @@ func newProductExternalPushChromiumFixtureWithOptions(t *testing.T, timeout time
 		paymentKey, paymentCertificate := distributionFixturePaymentCredentials(t)
 		runtime.Survey = platformconfig.Survey{DataKey: base64.RawStdEncoding.EncodeToString(dataKey), IdentityPhoneDataKey: base64.RawStdEncoding.EncodeToString(dataKey), OAuthEnabled: true, OAuthAppID: "wx-public-commerce-h5", OAuthSecret: "public-commerce-h5-fixture-secret", OAuthOpenPlatformID: "public-commerce-fixture-platform", OAuthScope: "snsapi_userinfo"}
 		runtime.WeChatPay = platformconfig.WeChatPay{Enabled: true, AppID: "wx-public-commerce-mini", AppSecret: "public-commerce-mini-fixture-secret", AppScope: "wechat-app:wx-public-commerce-mini", H5OAuthEnabled: true, H5AppID: "wx-public-commerce-h5", H5AppSecret: "public-commerce-h5-fixture-secret", H5AppScope: "wechat-app:wx-public-commerce-h5", OrderContactDataKey: base64.RawStdEncoding.EncodeToString(dataKey), MerchantID: "public-commerce-fixture-mch", MerchantSerial: "public-commerce-fixture-serial", PrivateKeyPath: paymentKey, PlatformCertPath: paymentCertificate, APIV3Key: "0123456789abcdef0123456789abcdef"}
+	}
+	alipayGateway := options.alipayGateway
+	if options.enableAlipay {
+		privateKeyPath, publicKey := virtualAlipayFixtureCredentials(t)
+		if alipayGateway == "" {
+			alipayGateway = newVirtualAlipayGateway(t, privateKeyPath).URL
+		}
+		runtime.Alipay = platformconfig.Alipay{
+			Enabled: true, AppID: "virtual-alipay-test-app", PrivateKeyPath: privateKeyPath,
+			AlipayPublicKey: publicKey, Gateway: alipayGateway,
+			NotifyURL: "https://crm.example.test/api/public/alipay/callback", ReturnURL: "https://crm.example.test/pay/result",
+		}
 	}
 	application, err := compose(ctx, runtime)
 	if err != nil {
@@ -229,20 +252,22 @@ func newProductExternalPushChromiumFixtureWithOptions(t *testing.T, timeout time
 	if err != nil {
 		t.Fatal(err)
 	}
-	workerCtx, stopWorker := context.WithCancel(ctx)
-	workerDone := make(chan error, 1)
-	go func() { workerDone <- application.effectsRuntime.Run(workerCtx) }()
-	t.Cleanup(func() {
-		stopWorker()
-		select {
-		case runErr := <-workerDone:
-			if runErr != nil && !errors.Is(runErr, context.Canceled) {
-				t.Errorf("effects runtime: %v", runErr)
+	if !options.deferEffectsWorker {
+		workerCtx, stopWorker := context.WithCancel(ctx)
+		workerDone := make(chan error, 1)
+		go func() { workerDone <- application.effectsRuntime.Run(workerCtx) }()
+		t.Cleanup(func() {
+			stopWorker()
+			select {
+			case runErr := <-workerDone:
+				if runErr != nil && !errors.Is(runErr, context.Canceled) {
+					t.Errorf("effects runtime: %v", runErr)
+				}
+			case <-time.After(20 * time.Second):
+				t.Error("effects runtime did not stop")
 			}
-		case <-time.After(20 * time.Second):
-			t.Error("effects runtime did not stop")
-		}
-	})
+		})
+	}
 	server.Config.Handler = application.handler
 	server.StartTLS()
 
@@ -316,6 +341,7 @@ func newProductExternalPushChromiumFixtureWithOptions(t *testing.T, timeout time
 		productID: productID, serviceProductID: serviceProductID,
 		materialFirstID: materialFirstID, materialLaterID: materialLaterID,
 		historicalOrderReference: historicalOrderReference, dataKey: dataKey,
+		alipayGateway: alipayGateway,
 	}
 }
 
