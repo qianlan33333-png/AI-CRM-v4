@@ -28,6 +28,7 @@ FILE_SHA = re.compile(r"^[0-9a-f]{64}$")
 REPO = "qianlan33333-png/AI-CRM-v4"
 BUILD_USER = "aicrm-build"
 BUILD_ROOT = Path("/opt/aicrm/domestic/build-worker")
+GITHUB_FETCH_TIMEOUT_SECONDS = 30
 CONTROLLER_SOURCE_PATHS = {
     "scripts/domestic_release.py",
     "scripts/domestic_release_build.py",
@@ -72,7 +73,10 @@ def command(*args: str, cwd: Path | None = None, timeout: int = 600) -> str:
 
 
 def git(repo: Path, *args: str) -> str:
-    return command("git", "-C", str(repo), *args)
+    git_args = ("git", "-C", str(repo), *args)
+    if args[:1] == ("fetch",):
+        return command(*git_args, timeout=GITHUB_FETCH_TIMEOUT_SECONDS)
+    return command(*git_args)
 
 
 def sha256_file(path: Path) -> str:

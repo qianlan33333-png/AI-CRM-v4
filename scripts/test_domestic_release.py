@@ -727,6 +727,49 @@ class DomesticReleaseTest(unittest.TestCase):
                 prod_copy.assert_not_called()
             self.assertEqual(json.loads(state.read_text())["status"], "staging_failed")
 
+    def test_github_fetch_timeout_keeps_ready_cursor_and_never_builds_or_installs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            sha0 = "a" * 40
+            state = root / "state.json"
+            initial = {
+                "status": "ready",
+                "processed_sha": sha0,
+                "deployed_source_sha": sha0,
+                "prod_installed_sha": sha0,
+                "blocked_sha": None,
+                "failure": None,
+            }
+            state.write_text(json.dumps(initial, sort_keys=True) + "\n")
+            original_state = state.read_bytes()
+            config = {"repo": str(root), "state": str(state), "production_enabled": True}
+
+            def timeout_fetch(*args, **kwargs):
+                self.assertEqual(args, ("git", "-C", str(root), "fetch", "--no-tags", "origin", "main"))
+                self.assertEqual(kwargs["timeout"], worker.GITHUB_FETCH_TIMEOUT_SECONDS)
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+            with (
+                mock.patch.object(worker, "require_official_origin"),
+                mock.patch.object(worker, "command", side_effect=timeout_fetch) as command,
+                mock.patch.object(worker, "exact_check_success") as check,
+                mock.patch.object(worker, "build_candidate") as build,
+                mock.patch.object(worker, "stage_install") as stage,
+                mock.patch.object(worker, "copy_payload") as transfer,
+                mock.patch.object(worker, "promote_checked_candidate") as promote,
+            ):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    worker.poll(config)
+
+            command.assert_called_once()
+            check.assert_not_called()
+            build.assert_not_called()
+            stage.assert_not_called()
+            transfer.assert_not_called()
+            promote.assert_not_called()
+            self.assertEqual(state.read_bytes(), original_state)
+            self.assertEqual(json.loads(state.read_text()), initial)
+
     def test_two_checked_commits_install_in_order(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
