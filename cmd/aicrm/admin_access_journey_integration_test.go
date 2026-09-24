@@ -256,6 +256,14 @@ func adminAccessCompositionDatabase(t *testing.T, ctx context.Context) (string, 
 	if err != nil {
 		t.Skip("AICRM_DATABASE_URL is not configured; skipping admin-access composition PostgreSQL Journey")
 	}
+	return adminAccessCompositionDatabaseForURL(t, ctx, raw)
+}
+
+func adminAccessCompositionDatabaseForURL(t *testing.T, ctx context.Context, raw string) (string, func()) {
+	t.Helper()
+	if raw == "" {
+		t.Fatal("an explicit PostgreSQL URL is required for the isolated composition schema")
+	}
 	adminConfig, err := pgxpool.ParseConfig(raw)
 	if err != nil {
 		t.Fatal(err)

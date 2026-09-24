@@ -53,6 +53,24 @@ class DomesticReleaseBuildTests(unittest.TestCase):
                 self.assertFalse(sample.runtime_changed)
                 self.assertFalse(sample.full_build)
 
+    def test_preflight_and_reviewed_validation_tools_do_not_install_application(self) -> None:
+        result = builder.classify_paths([
+            "AGENTS.md",
+            "docs/prd/2026-09-24-small-step-impact-checks.md",
+            "skills/aicrm-v3-development/SKILL.md",
+            "scripts/dev_preflight.py",
+            "scripts/check-architecture.py",
+        ])
+        self.assertFalse(result.runtime_changed)
+        self.assertFalse(result.full_build)
+        self.assertEqual(result.build_mode, "none")
+
+        # The allowlist stays explicit: a new executable script is not silently
+        # assumed to be validation-only.
+        unknown = builder.classify_paths(["scripts/new-release-helper.py"])
+        self.assertTrue(unknown.runtime_changed)
+        self.assertTrue(unknown.full_build)
+
     def test_frontend_migration_and_infrastructure_impacts_choose_minimum_safe_build(self) -> None:
         frontend = builder.classify_paths(["web/v3/payment/page.ts"])
         self.assertTrue(frontend.runtime_changed)
@@ -222,6 +240,53 @@ class DomesticReleaseBuildTests(unittest.TestCase):
             self.assertEqual(manifest["go_commands"], [])
             builder.verify_release_inventory(release)
 
+    def test_build_keeps_validation_scope_separate_from_deployed_package_base(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="domestic-release-dual-base-") as temporary:
+            root = Path(temporary)
+            repo = root / "repo"
+            repo.mkdir()
+            self._init_git_fixture(repo)
+            (repo / "migrations").mkdir()
+            (repo / "migrations/0001_base.sql").write_text("SELECT 1;\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "migrations/0001_base.sql"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "deployed base"], check=True)
+            deployed_sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+            (repo / "docs").mkdir()
+            (repo / "docs/validation-notes.md").write_text("CI validation advanced here.\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "docs/validation-notes.md"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "advance validation baseline"], check=True)
+            validation_sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+            (repo / "migrations/0002_additive.sql").write_text("SELECT 2;\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "migrations/0002_additive.sql"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "add migration"], check=True)
+            target_sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+            base_release = root / "deployed-release"
+            (base_release / "bin").mkdir(parents=True)
+            (base_release / "bin/aicrm").write_bytes(b"deployed-binary")
+            (base_release / "bin/migrate-customer").write_bytes(b"deployed-migration-binary")
+            (base_release / "migrations").mkdir()
+            (base_release / "migrations/0001_base.sql").write_text("SELECT 1;\n", encoding="utf-8")
+            builder.write_release_inventory(base_release)
+
+            output = root / "output"
+            manifest = builder.build(
+                repo, deployed_sha, target_sha, str(base_release), output,
+                validation_scope_base_value=validation_sha,
+            )
+            release = output / "release"
+            self.assertEqual(manifest["base_sha"], deployed_sha)
+            self.assertEqual(manifest["validation_scope_base_sha"], validation_sha)
+            self.assertEqual(manifest["validation_scope_base_tree"], builder._tree_sha(repo, validation_sha))
+            self.assertEqual(manifest["validation_scope_changed_paths"], ["migrations/0002_additive.sql"])
+            self.assertIs(manifest["actual_ci_baseline_verified"], False)
+            self.assertEqual(manifest["go_commands"], [])
+            self.assertEqual((release / "bin/aicrm").read_bytes(), b"deployed-binary")
+            self.assertEqual((release / "bin/migrate-customer").read_bytes(), b"deployed-migration-binary")
+            self.assertEqual((release / "migrations/0002_additive.sql").read_text(encoding="utf-8"), "SELECT 2;\n")
+
     def test_removing_migration_or_packaged_worker_source_fails_closed(self) -> None:
         for relative in ("migrations/0001_base.sql", "components/excel-batches/batches.py"):
             with self.subTest(relative=relative), tempfile.TemporaryDirectory(prefix="domestic-release-delete-") as temporary:
@@ -262,6 +327,54 @@ class DomesticReleaseBuildTests(unittest.TestCase):
             self.assertFalse(result["full_build"])
             self.assertEqual(result["go_commands"], ["./cmd/aicrm"])
             self.assertEqual(result["changed_paths"], ["internal/webshell/static/payment.html"])
+
+    @unittest.skipUnless(shutil.which("go"), "Go is required for dependency graph integration")
+    def test_plan_uses_aicrm_graph_and_base_graph_for_deleted_files(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="domestic-release-delete-graph-") as temporary:
+            repo = Path(temporary) / "repo"
+            repo.mkdir()
+            self._init_go_fixture(repo)
+            webshell = repo / "internal/webshell/webshell.go"
+            webshell.write_text(
+                'package webshell\nimport "embed"\n'
+                '//go:embed static/*.html\nvar paymentPages embed.FS\n',
+                encoding="utf-8",
+            )
+            (repo / "internal/webshell/static/keep.html").write_text("<h1>Keep</h1>\n", encoding="utf-8")
+            (repo / "internal/webshell/legacy.go").write_text(
+                "package webshell\nfunc legacyPage() string { return \"old\" }\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "establish removable graph inputs"], check=True)
+            base_sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+            # The aicrm composition package change is graph-resolvable, so it
+            # rebuilds aicrm without forcing every migration binary.
+            (repo / "cmd/aicrm/main.go").write_text(
+                'package main\nimport _ "example.test/crm/internal/webshell"\nfunc main() { _ = "updated" }\n',
+                encoding="utf-8",
+            )
+            # Delete one embed match and one Go file while retaining the
+            # package. Only the base graph knows their prior package ownership.
+            (repo / "internal/webshell/static/payment.html").unlink()
+            (repo / "internal/webshell/legacy.go").unlink()
+            subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "remove old package inputs"], check=True)
+            target_sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+            result = builder.plan(repo, base_sha, target_sha)
+            self.assertTrue(result["runtime_changed"])
+            self.assertFalse(result["full_build"])
+            self.assertEqual(result["go_commands"], ["./cmd/aicrm"])
+            self.assertEqual(
+                result["changed_paths"],
+                [
+                    "cmd/aicrm/main.go",
+                    "internal/webshell/legacy.go",
+                    "internal/webshell/static/payment.html",
+                ],
+            )
 
     @staticmethod
     def _snapshot(root: Path) -> dict[str, bytes]:

@@ -23,6 +23,7 @@ def load(name, path):
 
 worker = load("domestic_release", ROOT / "scripts/domestic_release.py")
 installer = load("domestic_promote", ROOT / "deploy/domestic-promote.py")
+main_full_regression_blocker = worker._main_full_regression_blocker
 
 
 def service_process(sha, pid=1, active=True):
@@ -66,6 +67,195 @@ def encode_metadata(metadata):
 
 
 class DomesticReleaseTest(unittest.TestCase):
+    def setUp(self):
+        self.release_gate = mock.patch.object(worker, "_main_full_regression_blocker", return_value=None)
+        self.release_gate.start()
+
+    def tearDown(self):
+        self.release_gate.stop()
+
+    @staticmethod
+    def _ci_run(sha, *, run_id=1, event="push", attempt=1, started="2026-09-24T10:00:00Z", marker=True):
+        return {
+            "id": run_id,
+            "run_attempt": attempt,
+            "head_sha": sha,
+            "head_branch": "main",
+            "path": worker.CI_WORKFLOW_PATH,
+            "event": event,
+            "display_title": "[force_full] manual recovery" if event == "workflow_dispatch" else "main CI",
+            "run_started_at": started,
+            "created_at": started,
+            "updated_at": started,
+            "marker": marker,
+        }
+
+    @staticmethod
+    def _ci_jobs(sha, *, attempt=1, lane_conclusion="success", marker=True):
+        jobs = {}
+        for name in worker.CI_REQUIRED_JOBS:
+            conclusion = lane_conclusion if name in worker.CI_FULL_LANES else "success"
+            job = {
+                "name": name,
+                "head_sha": sha,
+                "run_attempt": attempt,
+                "status": "completed",
+                "conclusion": conclusion,
+                "steps": [],
+            }
+            if name == "check" and marker:
+                # This step is best-effort reporting; its own conclusion must
+                # not override success of the exact required jobs.
+                job["steps"] = [{"name": worker.CI_FULL_RESULT_STEP, "conclusion": "failure"}]
+            jobs[name] = job
+        return jobs
+
+    def test_main_full_ci_requires_exact_attempt_jobs_and_ignores_marker_step_result(self):
+        sha = "a" * 40
+        run = self._ci_run(sha)
+        jobs = self._ci_jobs(sha)
+        self.assertEqual(worker._main_ci_run_classification(run, jobs)[0], "success")
+        jobs["browser"]["head_sha"] = "b" * 40
+        self.assertEqual(worker._main_ci_run_classification(run, jobs)[0], "unknown")
+
+    def test_main_verified_schedule_cannot_clear_and_rerun_with_skipped_lanes_is_unknown(self):
+        sha = "a" * 40
+        run = self._ci_run(sha, event="schedule")
+        jobs = self._ci_jobs(sha, lane_conclusion="skipped")
+        self.assertEqual(worker._main_ci_run_classification(run, jobs)[0], "verified")
+        run["run_attempt"] = 2
+        for job in jobs.values():
+            job["run_attempt"] = 2
+        self.assertEqual(worker._main_ci_run_classification(run, jobs)[0], "unknown")
+
+    def test_legacy_main_push_without_regression_marker_does_not_bootstrap_pause(self):
+        sha = "a" * 40
+        run = self._ci_run(sha, marker=False)
+        jobs = self._ci_jobs(sha, lane_conclusion="failure", marker=False)
+        jobs["governance"]["conclusion"] = "failure"
+        self.assertEqual(worker._main_ci_run_classification(run, jobs)[0], "not_full")
+
+    def test_schedule_or_force_full_missing_regression_marker_is_unknown(self):
+        sha = "a" * 40
+        for event in ("schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                run = self._ci_run(sha, event=event, marker=False)
+                jobs = self._ci_jobs(sha, marker=False)
+                self.assertEqual(worker._main_ci_run_classification(run, jobs)[0], "unknown")
+
+    def _scan_main_ci_runs(self, runs, jobs_by_id, candidate_sha, head_sha):
+        with (
+            mock.patch.object(worker, "_main_first_parent_positions", return_value={head_sha: 2, "b" * 40: 1, "a" * 40: 0}),
+            mock.patch.object(worker, "_main_ci_run_pages", return_value=iter([runs])),
+            mock.patch.object(worker, "_main_ci_run_jobs", side_effect=lambda run: jobs_by_id[run["id"]]),
+        ):
+            return main_full_regression_blocker(Path("/unused"), candidate_sha, head_sha)
+
+    def test_later_full_success_on_descendant_clears_earlier_failure(self):
+        old, descendant, head = "a" * 40, "b" * 40, "c" * 40
+        failed = self._ci_run(old, run_id=1, started="2026-09-24T09:00:00Z")
+        succeeded = self._ci_run(descendant, run_id=2, started="2026-09-24T10:00:00Z")
+        jobs = {
+            1: self._ci_jobs(old, lane_conclusion="failure"),
+            2: self._ci_jobs(descendant),
+        }
+        self.assertIsNone(self._scan_main_ci_runs([failed, succeeded], jobs, old, head))
+
+    def test_newer_full_failure_is_not_cleared_by_older_success(self):
+        old, descendant, head = "a" * 40, "b" * 40, "c" * 40
+        succeeded = self._ci_run(old, run_id=1, started="2026-09-24T09:00:00Z")
+        failed = self._ci_run(descendant, run_id=2, started="2026-09-24T10:00:00Z")
+        jobs = {
+            1: self._ci_jobs(old),
+            2: self._ci_jobs(descendant, lane_conclusion="failure"),
+        }
+        blocker = self._scan_main_ci_runs([succeeded, failed], jobs, descendant, head)
+        self.assertEqual(blocker["sha"], descendant)
+
+    def test_future_failure_does_not_block_earlier_queue_candidate(self):
+        candidate, head = "b" * 40, "c" * 40
+        failed = self._ci_run(head, run_id=3, started="2026-09-24T10:00:00Z")
+        blocker = self._scan_main_ci_runs([failed], {3: self._ci_jobs(head, lane_conclusion="failure")}, candidate, head)
+        self.assertIsNone(blocker)
+
+    def test_verified_full_skip_does_not_clear_failure(self):
+        old, descendant, head = "a" * 40, "b" * 40, "c" * 40
+        failed = self._ci_run(old, run_id=1, started="2026-09-24T09:00:00Z")
+        verified = self._ci_run(descendant, run_id=2, event="schedule", started="2026-09-24T10:00:00Z")
+        jobs = {
+            1: self._ci_jobs(old, lane_conclusion="failure"),
+            2: self._ci_jobs(descendant, lane_conclusion="skipped"),
+        }
+        blocker = self._scan_main_ci_runs([failed, verified], jobs, old, head)
+        self.assertEqual(blocker["sha"], old)
+
+    def test_public_history_read_failure_is_marked_transient_for_bounded_retry(self):
+        sha = "a" * 40
+        with (
+            mock.patch.object(worker, "_main_first_parent_positions", return_value={sha: 0}),
+            mock.patch.object(worker, "_main_ci_run_pages", side_effect=worker.CIHistoryReadError("temporary")),
+        ):
+            blocker = main_full_regression_blocker(Path("/unused"), sha, sha)
+        self.assertTrue(blocker["transient_read_error"])
+
+    def test_transient_history_pause_retries_after_deadline_without_new_check_run(self):
+        sha = "a" * 40
+        signature = {"head_sha": sha, "run_id": 7, "started_at": "2026-09-24T10:00:00Z", "completed_at": "2026-09-24T10:01:00Z", "status": "completed", "conclusion": "success"}
+        state = {
+            "status": "ci_regression_blocked",
+            "ci_regression_pause": {
+                "candidate_sha": sha,
+                "main_head_sha": sha,
+                "blocker": {"classification": "unknown", "transient_read_error": True},
+                "watched_check": signature,
+                "retry_after_utc": "2026-09-24T09:00:00Z",
+            },
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = Path(temporary) / "state.json"
+            with (
+                mock.patch.object(worker, "_ci_retry_is_due", return_value=True),
+                mock.patch.object(worker, "exact_check_success", side_effect=lambda _sha, observation=None, **_kw: (observation.update(signature) or True)),
+                mock.patch.object(worker, "_main_full_regression_blocker", return_value=None) as history,
+            ):
+                self.assertTrue(worker._retry_ci_regression_pause(state_path, state, Path(temporary), sha))
+            history.assert_called_once()
+            self.assertEqual(state["status"], "ready")
+            self.assertNotIn("ci_regression_pause", state)
+
+    def test_unresolved_regression_does_not_rescan_until_check_changes(self):
+        sha = "a" * 40
+        signature = {"head_sha": sha, "run_id": 7, "started_at": "2026-09-24T10:00:00Z", "completed_at": "2026-09-24T10:01:00Z", "status": "completed", "conclusion": "success"}
+        state = {"status": "ci_regression_blocked", "ci_regression_pause": {"candidate_sha": sha, "main_head_sha": sha, "blocker": {"classification": "unknown", "reason": "full lane failed"}, "watched_check": signature}}
+        with tempfile.TemporaryDirectory() as temporary:
+            with (
+                mock.patch.object(worker, "exact_check_success", side_effect=lambda _sha, observation=None, **_kw: (observation.update(signature) or True)),
+                mock.patch.object(worker, "_main_full_regression_blocker") as history,
+            ):
+                self.assertFalse(worker._retry_ci_regression_pause(Path(temporary) / "state.json", state, Path(temporary), sha))
+            history.assert_not_called()
+
+    def test_exact_check_api_error_sets_one_bounded_retry_without_erasing_blocker(self):
+        sha = "a" * 40
+        state = {
+            "status": "ci_regression_blocked",
+            "ci_regression_pause": {
+                "candidate_sha": sha,
+                "main_head_sha": sha,
+                "blocker": {"classification": "unknown", "reason": "observed full lane failure"},
+                "watched_check": {"head_sha": sha, "run_id": 7, "status": "completed", "conclusion": "success"},
+            },
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = Path(temporary) / "state.json"
+            with mock.patch.object(worker, "exact_check_success", side_effect=OSError("rate limited")) as check:
+                self.assertFalse(worker._retry_ci_regression_pause(state_path, state, Path(temporary), sha))
+                retry_at = state["ci_regression_pause"]["retry_after_utc"]
+                self.assertFalse(worker._retry_ci_regression_pause(state_path, state, Path(temporary), sha))
+            self.assertEqual(check.call_count, 1)
+            self.assertEqual(state["ci_regression_pause"]["blocker"]["reason"], "observed full lane failure")
+            self.assertTrue(worker._parse_utc(retry_at))
+
     def test_database_uri_maps_stage_and_production_values_only_to_pg_environment(self):
         stage = installer.database_environment(
             "postgres://stage_user:stage%40secret@127.0.0.1/aicrm_stage?sslmode=disable"
@@ -94,6 +284,173 @@ class DomesticReleaseTest(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(ValueError) as raised:
                 installer.database_environment(url)
             self.assertNotIn("synthetic-secret", str(raised.exception))
+
+    def test_installed_smoke_environment_is_a_complete_synthetic_allowlist(self):
+        runtime_tmp = Path("/tmp/smoke-runtime")
+        with mock.patch.object(installer.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/home/ubuntu")):
+            environment = installer.staging_smoke_test_environment(runtime_tmp)
+        self.assertEqual(environment["GOMAXPROCS"], "2")
+        self.assertEqual(environment["GOPROXY"], "off")
+        self.assertEqual(environment["GOSUMDB"], "off")
+        self.assertEqual(environment["HOME"], "/home/ubuntu")
+        self.assertEqual(environment["TMPDIR"], str(runtime_tmp))
+        self.assertEqual(
+            environment["PATH"],
+            f"{installer.SMOKE_GO.parent}:{installer.SMOKE_NODE.parent}:/usr/bin:/bin",
+        )
+        self.assertEqual(
+            set(environment),
+            {
+                "HOME", "PATH", "GOCACHE", "GOMODCACHE", "GOTOOLCHAIN", "GOMAXPROCS", "GOPROXY",
+                "GOSUMDB", "GOWORK", "TMPDIR",
+            },
+        )
+        self.assertFalse(any(name.startswith("AICRM_") for name in environment))
+        self.assertNotIn("GITHUB_TOKEN", environment)
+        self.assertNotIn("AICRM_ALIPAY_PRIVATE_KEY", environment)
+
+    def test_installed_smoke_inputs_are_private_file_not_environment_or_argv_values(self):
+        connection = "postgres://smoke:synthetic-secret@127.0.0.1/aicrm_test?sslmode=disable"
+        with tempfile.TemporaryDirectory(prefix="domestic-smoke-inputs-") as temporary:
+            path = Path(temporary) / "inputs.json"
+            installer._write_staging_smoke_inputs(
+                path,
+                database_url=connection,
+                source_sha="a" * 40,
+                installed_sha="b" * 40,
+                installed_binary=Path("/opt/aicrm/releases") / ("b" * 40) / "bin/aicrm",
+                installed_binary_sha256="c" * 64,
+                uid=os.getuid(),
+                gid=os.getgid(),
+            )
+            self.assertEqual(path.stat().st_mode & 0o777, 0o400)
+            self.assertEqual(path.stat().st_uid, os.getuid())
+            inputs = installer.json.loads(path.read_text())
+            self.assertEqual(inputs["database_url"], connection)
+            self.assertEqual(inputs["stage_role"], "staging")
+
+    def test_installed_smoke_runner_passes_only_private_input_path_to_go_test(self):
+        calls = []
+
+        def run_command(command, source_root, environment, **kwargs):
+            calls.append((command, environment, kwargs))
+            if kwargs["label"] == "installed staging smoke":
+                return installer.SMOKE_TEST_MARKER
+            return "prepared"
+
+        with tempfile.TemporaryDirectory(prefix="domestic-smoke-runner-contract-") as temporary:
+            root = Path(temporary)
+            smoke_input = root / "installed-smoke-input.json"
+            source_root = root / "source"
+            source_root.mkdir()
+            with mock.patch.object(installer, "_run_unprivileged_smoke_command", side_effect=run_command), mock.patch.object(installer, "_verify_smoke_source_snapshot") as verify:
+                installer._run_installed_smoke_test(
+                    source_root,
+                    {"HOME": "/home/ubuntu", "PATH": "/fixed/go:/fixed/node:/usr/bin:/bin", "TMPDIR": str(root)},
+                    "/protected/gitdir", root / "index", "/fixed/node/node", smoke_input,
+                )
+
+        self.assertEqual(len(calls), 2)
+        test_command, test_environment, options = calls[1]
+        self.assertIn("-args", test_command)
+        self.assertIn(f"-domestic-release-smoke-input={smoke_input}", test_command)
+        self.assertNotIn("AICRM_DATABASE_URL", test_environment)
+        self.assertNotIn("synthetic-secret", repr(test_command))
+        self.assertEqual(options["required_marker"], installer.SMOKE_TEST_MARKER)
+        self.assertEqual(verify.call_count, 2)
+
+    def test_installed_smoke_requires_the_contract_pass_marker(self):
+        process = mock.Mock(pid=123456789, wait=mock.Mock(return_value=0), poll=mock.Mock(return_value=0))
+
+        def start_process(_args, **kwargs):
+            kwargs["stdout"].write(b"ok   cmd/aicrm\n")
+            return process
+
+        with mock.patch.object(installer.subprocess, "Popen", side_effect=start_process), mock.patch.object(installer, "_stop_smoke_process_group", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "required pass marker"):
+                installer._run_unprivileged_smoke_command(
+                    ("/bin/true",), Path("/tmp/verified-source"), {},
+                    timeout_seconds=10,
+                    required_marker=installer.SMOKE_TEST_MARKER,
+                    label="installed staging smoke",
+                )
+
+    def test_installed_smoke_failures_write_private_redacted_diagnostics(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-smoke-diagnostics-test-") as temporary:
+            root = Path(temporary)
+            diagnostic_root = root / "private-logs"
+            connection = "postgres://smoke:synthetic-secret@127.0.0.1/aicrm_test?sslmode=disable"
+            labels = ("staging smoke source preparation", "installed staging smoke")
+
+            for index, label in enumerate(labels):
+                process = mock.Mock(pid=120000 + index, wait=mock.Mock(return_value=2), poll=mock.Mock(return_value=2))
+
+                def start_process(_args, **kwargs):
+                    kwargs["stdout"].write(f"fixture failed for {connection}".encode())
+                    kwargs["stderr"].write(b"synthetic provider fixture rejected request")
+                    return process
+
+                real_lstat = Path.lstat
+
+                def trusted_root_lstat(path):
+                    if path == diagnostic_root:
+                        return SimpleNamespace(
+                            st_mode=installer.stat.S_IFDIR | 0o700,
+                            st_uid=0,
+                            st_gid=0,
+                        )
+                    return real_lstat(path)
+
+                with (
+                    mock.patch.object(installer, "SMOKE_DIAGNOSTIC_ROOT", diagnostic_root),
+                    mock.patch.object(installer.os, "geteuid", return_value=0),
+                    mock.patch.object(installer.Path, "lstat", trusted_root_lstat),
+                    mock.patch.object(installer.subprocess, "Popen", side_effect=start_process),
+                    mock.patch.object(installer, "_stop_smoke_process_group", return_value=False),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "exit status 2; diagnostic=") as raised:
+                        installer._run_unprivileged_smoke_command(
+                            ("/fixed/tool",), root / "source",
+                            {"AICRM_DATABASE_URL": connection},
+                            timeout_seconds=10,
+                            label=label,
+                        )
+                self.assertNotIn("synthetic-secret", str(raised.exception))
+                diagnostic_path = Path(str(raised.exception).split("diagnostic=", 1)[1])
+                self.assertEqual(diagnostic_path.parent, diagnostic_root)
+                self.assertEqual(diagnostic_path.stat().st_mode & 0o777, 0o600)
+                diagnostic = diagnostic_path.read_text()
+                self.assertIn(label, diagnostic)
+                self.assertIn("[REDACTED]", diagnostic)
+                self.assertNotIn("synthetic-secret", diagnostic)
+                self.assertNotIn(connection, diagnostic)
+
+    def test_smoke_source_snapshot_is_bound_to_git_tree_and_detects_mutation(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-smoke-source-identity-") as temporary:
+            root = Path(temporary)
+            repository = root / "repository"
+            repository.mkdir()
+            subprocess.run(["git", "-C", str(repository), "init", "-q"], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.name", "Smoke Fixture"], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.email", "smoke@example.invalid"], check=True)
+            (repository / "contract.txt").write_text("committed source\n")
+            subprocess.run(["git", "-C", str(repository), "add", "contract.txt"], check=True)
+            subprocess.run(["git", "-C", str(repository), "commit", "-qm", "smoke source"], check=True)
+            sha = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
+            git_dir = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "--absolute-git-dir"], text=True).strip()
+            with tempfile.TemporaryDirectory(dir=root) as scratch_name:
+                scratch = Path(scratch_name)
+                archive = root / "source.tar"
+                archive.write_bytes(subprocess.check_output(["git", "-C", str(repository), "archive", "--format=tar", sha]))
+                source_root = scratch / "source"
+                installer._extract_source_archive(archive, source_root)
+                with mock.patch.object(installer, "SMOKE_SOURCE_REPOSITORY", repository):
+                    index = installer._smoke_source_index(sha, source_root, scratch, git_dir)
+                    installer._verify_smoke_source_snapshot(source_root, git_dir, index)
+                    (source_root / "contract.txt").chmod(0o644)
+                    (source_root / "contract.txt").write_text("mutated source\n")
+                    with self.assertRaisesRegex(RuntimeError, "no longer matches"):
+                        installer._verify_smoke_source_snapshot(source_root, git_dir, index)
 
     def test_backup_passes_uri_credentials_in_environment_not_argv_or_errors(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -181,6 +538,10 @@ class DomesticReleaseTest(unittest.TestCase):
             "source_sha": sha1,
             "base_sha": sha0,
             "source_tree": tree,
+            "validation_scope_base_sha": sha0,
+            "validation_scope_base_tree": "f" * 40,
+            "validation_scope_changed_paths": [],
+            "actual_ci_baseline_verified": False,
             "release_files_sha256": installer.digest(manifest),
             "migrations_changed": migrations_changed,
         }
@@ -193,6 +554,9 @@ class DomesticReleaseTest(unittest.TestCase):
             "prod_installed_sha": sha0,
             "prod_installed_manifest_sha256": previous_manifest,
             "baseline_prod_manifest_sha256": previous_manifest,
+            "validation_scope_base_sha": sha0,
+            "validation_scope_base_tree": "f" * 40,
+            "validation_scope_changed_paths": [],
             "blocked_sha": sha1,
             "failure": "health failed",
         }
@@ -222,6 +586,10 @@ class DomesticReleaseTest(unittest.TestCase):
                 return sha1
             if args[0] == "rev-parse" and args[1] == f"{sha1}^{{tree}}":
                 return tree
+            if args[0] == "rev-parse" and args[1] == f"{sha0}^{{tree}}":
+                return "f" * 40
+            if args[0] == "rev-parse" and args[1] == f"{sha1}^1":
+                return sha0
             if args[0] == "show":
                 return "1760000000"
             return ""
@@ -315,6 +683,35 @@ class DomesticReleaseTest(unittest.TestCase):
             self.assertEqual(retry_args[retry_args.index("--expected-sha") + 1], fixture["sha1"])
             self.assertEqual(retry_args[retry_args.index("--metadata-sha256") + 1], expected_digest)
             self.assertEqual(retry_args[-1], fixture["sha0"])
+
+    def test_recover_installed_smoke_failure_keeps_orphan_blocked_before_production_read(self):
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = self.recovery_fixture(Path(temp))
+            payment_paths = ["internal/payment/app/service.go"]
+            fixture["metadata"].update(validation_scope_changed_paths=payment_paths)
+            fixture["metadata_path"].write_text(json.dumps(fixture["metadata"]))
+            state = json.loads(fixture["state_path"].read_text())
+            state["validation_scope_changed_paths"] = payment_paths
+            fixture["state_path"].write_text(json.dumps(state))
+            with (
+                self.recovery_patches(fixture, [fixture["old"]]) as calls,
+                mock.patch.object(worker, "_trusted_changed_paths", return_value=payment_paths),
+                mock.patch.object(worker, "run_stage_smoke", side_effect=RuntimeError("required fixture unavailable")) as smoke,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "required fixture unavailable"):
+                    worker.recover(fixture["config"], retry_blocked=True, expected_sha=fixture["sha1"])
+
+            smoke.assert_called_once_with(
+                fixture["config"], fixture["repo"], fixture["sha1"], fixture["sha1"],
+                installer.digest(fixture["build"] / "release" / "release-files.sha256"),
+            )
+            calls["production"].assert_not_called()
+            calls["command"].assert_not_called()
+            state = json.loads(fixture["state_path"].read_text())
+            self.assertEqual(state["status"], "outcome_unknown")
+            self.assertEqual(state["blocked_sha"], fixture["sha1"])
+            self.assertEqual(state["last_stage_smoke"]["status"], "failed")
+            self.assertNotIn("staging_verified_smoke", state)
 
     def test_recover_with_matching_receipt_only_repairs_cursor(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -606,8 +1003,8 @@ class DomesticReleaseTest(unittest.TestCase):
             state_path = root / "state.json"
             state_path.write_text(json.dumps({"status": "ready", "processed_sha": sha0, "deployed_source_sha": sha0, "prod_installed_sha": sha0}))
             config = {"repo": str(root), "state": str(state_path), "production_enabled": True}
-            plan = {"runtime_changed": False, "controller_files": ["scripts/domestic_release.py"]}
-            with mock.patch.object(worker, "git", return_value=sha1), mock.patch.object(worker, "require_official_origin"), mock.patch.object(worker, "first_parent_queue", return_value=[sha1]), mock.patch.object(worker, "exact_check_success", return_value=True), mock.patch.object(worker, "command", return_value=json.dumps(plan)), mock.patch.object(worker, "verify_controller_installation", side_effect=RuntimeError("stale fixed copy")), mock.patch.object(worker, "build_candidate") as build, mock.patch.object(worker, "stage_install") as stage, mock.patch.object(worker, "copy_payload") as transfer:
+            plan = {"base_sha": sha0, "target_sha": sha1, "changed_paths": ["scripts/domestic_release.py"], "runtime_changed": False, "controller_files": ["scripts/domestic_release.py"]}
+            with mock.patch.object(worker, "git", return_value=sha1), mock.patch.object(worker, "require_official_origin"), mock.patch.object(worker, "first_parent_queue", return_value=[sha1]), mock.patch.object(worker, "exact_check_success", return_value=True), mock.patch.object(worker, "command", return_value=json.dumps(plan)), mock.patch.object(worker, "_trusted_changed_paths", return_value=plan["changed_paths"]), mock.patch.object(worker, "verify_controller_installation", side_effect=RuntimeError("stale fixed copy")), mock.patch.object(worker, "build_candidate") as build, mock.patch.object(worker, "stage_install") as stage, mock.patch.object(worker, "copy_payload") as transfer:
                 with self.assertRaisesRegex(RuntimeError, "install them under the maintenance lock"):
                     worker.poll(config)
             state = json.loads(state_path.read_text())
@@ -630,9 +1027,9 @@ class DomesticReleaseTest(unittest.TestCase):
                 "blocked_sha": sha1,
             }))
             config = {"repo": str(root), "state": str(state_path), "production_enabled": True}
-            plan = {"runtime_changed": False, "controller_files": ["scripts/domestic_release.py"]}
+            plan = {"base_sha": sha0, "target_sha": sha1, "changed_paths": ["scripts/domestic_release.py"], "runtime_changed": False, "controller_files": ["scripts/domestic_release.py"]}
             verification = {"source_sha": sha1, "source_tree": "c" * 40, "files": {}, "duration_seconds": 0.4, "status": "matched"}
-            with mock.patch.object(worker, "git", return_value=sha1), mock.patch.object(worker, "require_official_origin"), mock.patch.object(worker, "first_parent_queue", return_value=[sha1]), mock.patch.object(worker, "exact_check_success", return_value=True), mock.patch.object(worker, "command", return_value=json.dumps(plan)), mock.patch.object(worker, "verify_controller_installation", return_value=verification), mock.patch.object(worker, "build_candidate") as build, mock.patch.object(worker, "stage_install") as stage:
+            with mock.patch.object(worker, "git", return_value=sha1), mock.patch.object(worker, "require_official_origin"), mock.patch.object(worker, "first_parent_queue", return_value=[sha1]), mock.patch.object(worker, "exact_check_success", return_value=True), mock.patch.object(worker, "command", return_value=json.dumps(plan)), mock.patch.object(worker, "_trusted_changed_paths", return_value=plan["changed_paths"]), mock.patch.object(worker, "verify_controller_installation", return_value=verification), mock.patch.object(worker, "build_candidate") as build, mock.patch.object(worker, "stage_install") as stage:
                 result = worker.poll(config)
             state = json.loads(state_path.read_text())
             self.assertEqual(result["status"], "ready")
@@ -643,6 +1040,70 @@ class DomesticReleaseTest(unittest.TestCase):
             self.assertEqual(state["last_release_timings_seconds"]["controller_readback"], 0.4)
             build.assert_not_called()
             stage.assert_not_called()
+
+    def test_installed_alipay_smoke_policy_uses_fixed_paths(self):
+        self.assertTrue(worker._alipay_smoke_required({"changed_paths": ["internal/payment/app/service.go"]}))
+        self.assertTrue(worker._alipay_smoke_required({"changed_paths": [worker.ALIPAY_SMOKE_FIXTURE]}))
+        self.assertTrue(worker._alipay_smoke_required({"changed_paths": ["migrations/0208_payment.sql"]}))
+        self.assertFalse(worker._alipay_smoke_required({"changed_paths": ["docs/release.md", "scripts/ci/impact_selection.py"]}))
+        with self.assertRaisesRegex(RuntimeError, "invalid release impact paths"):
+            worker._alipay_smoke_required({"changed_paths": "internal/payment/app/service.go"})
+
+    def test_promotion_requires_a_bound_smoke_receipt_for_payment_changes(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-release-smoke-gate-") as temporary:
+            root = Path(temporary)
+            sha0, sha = "a" * 40, "b" * 40
+            state_path = root / "state.json"
+            original_state = {"status": "ready", "processed_sha": sha0}
+            state_path.write_text(json.dumps(original_state))
+            state = dict(original_state)
+            metadata = {
+                "base_sha": sha0,
+                "validation_scope_base_sha": sha0,
+                "source_tree": "c" * 40,
+                "validation_scope_base_tree": "e" * 40,
+                "validation_scope_changed_paths": ["internal/payment/app/service.go"],
+                "actual_ci_baseline_verified": False,
+                "release_files_sha256": "d" * 64,
+            }
+            with mock.patch.object(worker, "git", side_effect=lambda _repo, *args: sha0 if args == ("rev-parse", f"{sha}^1") else "e" * 40), mock.patch.object(worker, "_trusted_changed_paths", return_value=["internal/payment/app/service.go"]), mock.patch.object(worker, "copy_payload") as copy_payload:
+                with self.assertRaisesRegex(RuntimeError, "required installed staging smoke receipt is missing"):
+                    worker.promote_checked_candidate(
+                        {"repo": str(root)}, state_path, state, sha, root, metadata, "a" * 40, 1.0,
+                        stage_receipt={}, changed_paths=["internal/payment/app/service.go"],
+                        build_base_sha=sha0, validation_scope_base_sha=sha0,
+                    )
+            copy_payload.assert_not_called()
+            self.assertEqual(state_path.read_text(), json.dumps(original_state))
+
+    def test_processed_validation_scope_prevents_repeating_old_checkout_smoke(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-release-validation-scope-") as temporary:
+            root = Path(temporary)
+            deployed, processed, target = "a" * 40, "b" * 40, "c" * 40
+            state_path = root / "state.json"
+            state_path.write_text(json.dumps({
+                "status": "ready", "processed_sha": processed,
+                "deployed_source_sha": deployed, "prod_installed_sha": deployed,
+            }))
+            config = {"repo": str(root), "state": str(state_path), "production_enabled": True}
+            fixture_path = worker.ALIPAY_SMOKE_FIXTURE
+            build_paths = [fixture_path, "docs/release-follow-up.md"]
+            validation_paths = ["docs/release-follow-up.md"]
+            plan = {"changed_paths": build_paths, "runtime_changed": False, "controller_files": []}
+            with (
+                mock.patch.object(worker, "git", return_value=target),
+                mock.patch.object(worker, "require_official_origin"),
+                mock.patch.object(worker, "first_parent_queue", return_value=[target]),
+                mock.patch.object(worker, "exact_check_success", return_value=True),
+                mock.patch.object(worker, "command", return_value=json.dumps(plan)),
+                mock.patch.object(worker, "_trusted_changed_paths", side_effect=[build_paths, validation_paths]),
+                mock.patch.object(worker, "run_stage_smoke") as smoke,
+            ):
+                result = worker.poll(config)
+
+            self.assertEqual(result["status"], "ready")
+            self.assertEqual(json.loads(state_path.read_text())["processed_sha"], target)
+            smoke.assert_not_called()
 
     def test_manifest_rejects_changed_and_extra_files(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -702,11 +1163,26 @@ class DomesticReleaseTest(unittest.TestCase):
             state.write_text(json.dumps({"status": "ready", "processed_sha": sha0, "deployed_source_sha": sha0, "prod_installed_sha": sha0}))
             (root / "builds" / sha0 / "release").mkdir(parents=True)
             cfg = {"repo": str(root), "work_root": str(root), "state": str(state), "production_enabled": True, "prod_key": "key", "prod_known_hosts": "hosts", "prod_user": "ubuntu", "prod_host": "127.0.0.1", "prod_helper": "/fixed/helper"}
-            metadata = {"source_sha": sha1, "release_files_sha256": "f" * 64}
+            changed = ["internal/customer/app/service.go"]
+            metadata = {
+                "source_sha": sha1, "base_sha": sha0, "source_tree": "d" * 40,
+                "validation_scope_base_sha": sha0, "validation_scope_base_tree": "e" * 40,
+                "validation_scope_changed_paths": changed,
+                "actual_ci_baseline_verified": False,
+                "release_files_sha256": "f" * 64,
+            }
             def fake_build_candidate(*_args):
                 (root / "domestic-release.json").write_text(json.dumps(metadata))
                 return root, metadata
-            with mock.patch.object(worker, "git", return_value=sha1), mock.patch.object(worker, "require_official_origin"), mock.patch.object(worker, "first_parent_queue", return_value=[sha1]), mock.patch.object(worker, "exact_check_success", return_value=True), mock.patch.object(worker, "command", side_effect=[json.dumps({"runtime_changed": True}), RuntimeError("ssh interrupted")]), mock.patch.object(worker, "build_candidate", side_effect=fake_build_candidate), mock.patch.object(worker, "stage_install", return_value={}), mock.patch.object(worker, "copy_payload", return_value=("/incoming", "/meta")):
+            plan = {"base_sha": sha0, "target_sha": sha1, "changed_paths": changed, "runtime_changed": True}
+            def fake_git(_repo, *args):
+                if args[0] == "rev-parse" and args[1] == f"{sha1}^1":
+                    return sha0
+                if args[0] == "rev-parse" and args[1] == f"{sha0}^{{tree}}":
+                    return "e" * 40
+                return sha1
+
+            with mock.patch.object(worker, "git", side_effect=fake_git), mock.patch.object(worker, "require_official_origin"), mock.patch.object(worker, "first_parent_queue", return_value=[sha1]), mock.patch.object(worker, "exact_check_success", return_value=True), mock.patch.object(worker, "command", side_effect=[json.dumps(plan), RuntimeError("ssh interrupted")]), mock.patch.object(worker, "_trusted_changed_paths", return_value=changed), mock.patch.object(worker, "build_candidate", side_effect=fake_build_candidate), mock.patch.object(worker, "stage_install", return_value={}), mock.patch.object(worker, "copy_payload", return_value=("/incoming", "/meta")):
                 with self.assertRaises(RuntimeError):
                     worker.poll(cfg)
             self.assertEqual(json.loads(state.read_text())["status"], "outcome_unknown")
@@ -721,11 +1197,52 @@ class DomesticReleaseTest(unittest.TestCase):
             state.write_text(json.dumps({"status": "ready", "processed_sha": sha0, "deployed_source_sha": sha0, "prod_installed_sha": sha0}))
             (root / "builds" / sha0 / "release").mkdir(parents=True)
             cfg = {"repo": str(root), "work_root": str(root), "state": str(state), "production_enabled": True}
-            with mock.patch.object(worker, "git", return_value=sha1), mock.patch.object(worker, "require_official_origin"), mock.patch.object(worker, "first_parent_queue", return_value=[sha1]), mock.patch.object(worker, "exact_check_success", return_value=True), mock.patch.object(worker, "command", return_value=json.dumps({"runtime_changed": True})), mock.patch.object(worker, "build_candidate", side_effect=RuntimeError("stage build failed")), mock.patch.object(worker, "copy_payload") as prod_copy:
+            changed = ["internal/customer/app/service.go"]
+            plan = {"base_sha": sha0, "target_sha": sha1, "changed_paths": changed, "runtime_changed": True}
+            with mock.patch.object(worker, "git", return_value=sha1), mock.patch.object(worker, "require_official_origin"), mock.patch.object(worker, "first_parent_queue", return_value=[sha1]), mock.patch.object(worker, "exact_check_success", return_value=True), mock.patch.object(worker, "command", return_value=json.dumps(plan)), mock.patch.object(worker, "_trusted_changed_paths", return_value=changed), mock.patch.object(worker, "build_candidate", side_effect=RuntimeError("stage build failed")), mock.patch.object(worker, "copy_payload") as prod_copy:
                 with self.assertRaisesRegex(RuntimeError, "stage build failed"):
                     worker.poll(cfg)
                 prod_copy.assert_not_called()
             self.assertEqual(json.loads(state.read_text())["status"], "staging_failed")
+
+    def test_installed_smoke_failure_stops_before_production_copy(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-release-poll-smoke-") as temporary:
+            root = Path(temporary)
+            sha0, sha1 = "a" * 40, "b" * 40
+            state_path = root / "state.json"
+            state_path.write_text(json.dumps({
+                "status": "ready", "processed_sha": sha0,
+                "deployed_source_sha": sha0, "prod_installed_sha": sha0,
+            }))
+            (root / "builds" / sha0 / "release").mkdir(parents=True)
+            config = {
+                "repo": str(root), "work_root": str(root), "state": str(state_path),
+                "production_enabled": True,
+            }
+            metadata = {"source_sha": sha1, "source_tree": "c" * 40, "release_files_sha256": "d" * 64}
+            plan = {"base_sha": sha0, "target_sha": sha1, "changed_paths": ["internal/payment/app/service.go"], "runtime_changed": True}
+            with (
+                mock.patch.object(worker, "git", return_value=sha1),
+                mock.patch.object(worker, "require_official_origin"),
+                mock.patch.object(worker, "first_parent_queue", return_value=[sha1]),
+                mock.patch.object(worker, "exact_check_success", return_value=True),
+                mock.patch.object(worker, "command", return_value=json.dumps(plan)),
+                mock.patch.object(worker, "_trusted_changed_paths", return_value=plan["changed_paths"]),
+                mock.patch.object(worker, "build_candidate", return_value=(root, metadata)),
+                mock.patch.object(worker, "stage_install", return_value={}) as stage,
+                mock.patch.object(worker, "run_stage_smoke", side_effect=RuntimeError("installed fixture failed")) as smoke,
+                mock.patch.object(worker, "copy_payload") as production_copy,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "installed fixture failed"):
+                    worker.poll(config)
+
+            stage.assert_called_once()
+            smoke.assert_called_once()
+            production_copy.assert_not_called()
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state["status"], "staging_failed")
+            self.assertEqual(state["blocked_sha"], sha1)
+            self.assertEqual(state["last_stage_smoke"]["status"], "failed")
 
     def test_github_fetch_timeout_keeps_ready_cursor_and_never_builds_or_installs(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -779,13 +1296,40 @@ class DomesticReleaseTest(unittest.TestCase):
             for sha in (sha0, sha1):
                 (root / "builds" / sha / "release").mkdir(parents=True)
             cfg = {"repo": str(root), "work_root": str(root), "state": str(state), "production_enabled": True, "prod_key": "key", "prod_known_hosts": "hosts", "prod_user": "ubuntu", "prod_host": "127.0.0.1", "prod_helper": "/fixed/helper"}
-            metadatas = [{"source_sha": sha, "source_tree": "d" * 40, "release_files_sha256": "f" * 64, "migrations_changed": False} for sha in (sha1, sha2)]
+            metadatas = [
+                {
+                    "source_sha": sha1, "base_sha": sha0, "source_tree": "d" * 40,
+                    "validation_scope_base_sha": sha0, "validation_scope_base_tree": "e" * 40,
+                    "validation_scope_changed_paths": ["internal/customer/app/service.go"],
+                    "actual_ci_baseline_verified": False,
+                    "release_files_sha256": "f" * 64, "migrations_changed": False,
+                },
+                {
+                    "source_sha": sha2, "base_sha": sha1, "source_tree": "d" * 40,
+                    "validation_scope_base_sha": sha1, "validation_scope_base_tree": "e" * 40,
+                    "validation_scope_changed_paths": ["internal/customer/app/service.go"],
+                    "actual_ci_baseline_verified": False,
+                    "release_files_sha256": "f" * 64, "migrations_changed": False,
+                },
+            ]
             receipts = [success_receipt(metadatas[0], sha0), success_receipt(metadatas[1], sha1)]
-            command_results = [json.dumps({"runtime_changed": True}), json.dumps(receipts[0]), json.dumps({"runtime_changed": True}), json.dumps(receipts[1])]
+            changes = [["internal/customer/app/service.go"], ["internal/customer/app/service.go"]]
+            command_results = [
+                json.dumps({"base_sha": sha0, "target_sha": sha1, "changed_paths": changes[0], "runtime_changed": True}),
+                json.dumps(receipts[0]),
+                json.dumps({"base_sha": sha1, "target_sha": sha2, "changed_paths": changes[1], "runtime_changed": True}),
+                json.dumps(receipts[1]),
+            ]
             readbacks = [{"current": f"/opt/aicrm/releases/{sha}", "release_env": f"AICRM_RELEASE_SHA={sha}\n", "manifest_sha256": "f" * 64, "readyz": {"release_sha": sha, "status": "ready"}, "services": {unit: service_process(sha) for unit in ("aicrm.service", "aicrm-effects-worker.service")}, "receipt": receipts[index]} for index, sha in enumerate((sha1, sha2))]
             metadata_hashes = []
             def fake_git(_repo, *args):
                 if args[0] == "rev-parse":
+                    if args[1] == f"{sha1}^1":
+                        return sha0
+                    if args[1] == f"{sha2}^1":
+                        return sha1
+                    if args[1] in (f"{sha0}^{{tree}}", f"{sha1}^{{tree}}"):
+                        return "e" * 40
                     return sha2
                 if args[0] == "show":
                     return "1760000000"
@@ -797,7 +1341,8 @@ class DomesticReleaseTest(unittest.TestCase):
                 (root / "domestic-release.json").write_bytes(metadata_bytes)
                 metadata_hashes.append(hashlib.sha256(metadata_bytes).hexdigest())
                 return root, metadata
-            with mock.patch.object(worker, "git", side_effect=fake_git), mock.patch.object(worker, "require_official_origin"), mock.patch.object(worker, "first_parent_queue", return_value=[sha1, sha2]), mock.patch.object(worker, "exact_check_success", return_value=True), mock.patch.object(worker, "command", side_effect=command_results) as commands, mock.patch.object(worker, "build_candidate", side_effect=fake_build_candidate), mock.patch.object(worker, "stage_install", return_value={}) as stage, mock.patch.object(worker, "copy_payload", side_effect=[("/incoming/one", "/meta/one"), ("/incoming/two", "/meta/two")]) as transfer, mock.patch.object(worker, "prod_readback", side_effect=readbacks):
+            path_reads = [changes[0], changes[0], changes[0], changes[0], changes[1], changes[1], changes[1], changes[1]]
+            with mock.patch.object(worker, "git", side_effect=fake_git), mock.patch.object(worker, "require_official_origin"), mock.patch.object(worker, "first_parent_queue", return_value=[sha1, sha2]), mock.patch.object(worker, "exact_check_success", return_value=True), mock.patch.object(worker, "_trusted_changed_paths", side_effect=path_reads), mock.patch.object(worker, "command", side_effect=command_results) as commands, mock.patch.object(worker, "build_candidate", side_effect=fake_build_candidate), mock.patch.object(worker, "stage_install", return_value={}) as stage, mock.patch.object(worker, "copy_payload", side_effect=[("/incoming/one", "/meta/one"), ("/incoming/two", "/meta/two")]) as transfer, mock.patch.object(worker, "prod_readback", side_effect=readbacks):
                 worker.poll(cfg)
             self.assertEqual([call.args[3] for call in stage.call_args_list], [sha0, sha1])
             self.assertEqual([call.args[4] for call in transfer.call_args_list], [sha0, sha1])

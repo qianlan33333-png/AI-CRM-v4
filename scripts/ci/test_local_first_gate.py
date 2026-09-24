@@ -9,6 +9,22 @@ import local_first_gate
 
 
 class StagingReceiptClassificationTests(unittest.TestCase):
+    def test_preflight_prd_skill_and_release_tool_checks_are_operator_only(self):
+        base = "a" * 40
+        with patch.dict(os.environ, {"PR_BASE_SHA": base}), patch(
+            "local_first_gate.subprocess.check_output"
+        ) as diff:
+            diff.return_value = (
+                "AGENTS.md\n"
+                "docs/prd/2026-09-24-small-step-impact-checks.md\n"
+                "skills/aicrm-v3-development/SKILL.md\n"
+                "scripts/dev_preflight.py\n"
+                "scripts/check-architecture.py\n"
+            )
+            self.assertFalse(local_first_gate.requires_staging_receipt("b" * 40))
+            diff.return_value += "scripts/new-release-helper.py\n"
+            self.assertTrue(local_first_gate.requires_staging_receipt("b" * 40))
+
     def test_release_metadata_is_operator_only_but_runtime_still_needs_receipt(self):
         base = "a" * 40
         with patch.dict(os.environ, {"PR_BASE_SHA": base}), patch(

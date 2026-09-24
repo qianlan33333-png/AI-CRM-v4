@@ -35,6 +35,19 @@ FIXED_CONTROLLER_FILES = {
     "deploy/domestic-promote.py",
 }
 CI_ONLY_PREFIXES = (".github/", "scripts/ci/")
+# Explicit validation-only entrypoints are not part of the installed release.
+# Keep this list small and reviewed; unknown scripts remain full-build changes.
+CI_ONLY_FILES = {
+    "scripts/dev_preflight.py",
+    "scripts/check-architecture.py",
+    "scripts/check-config-definition-import-boundary.sh",
+    "scripts/check-hxc-identity-boundaries.sh",
+    "scripts/check-radar-boundaries.sh",
+    "scripts/check-retention-registry.py",
+    "scripts/check-migration-sequence.py",
+    "scripts/check-install-release-contract.sh",
+    "scripts/check-release-binaries.py",
+}
 DEPLOY_SAMPLE_CONFIGS = {
     "deploy/domestic-release.example.json",
     "deploy/domestic-release-role.production.example",
@@ -140,6 +153,18 @@ def _resolve_commit(repo: Path, value: str) -> str:
     return _git(repo, "rev-parse", "--verify", f"{value}^{{commit}}").strip()
 
 
+def _require_ancestor(repo: Path, ancestor_sha: str, target_sha: str, label: str) -> None:
+    result = subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--is-ancestor", ancestor_sha, target_sha],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise BuildError(f"{label} must be an ancestor of the target commit")
+
+
 def _tree_sha(repo: Path, target_sha: str) -> str:
     return _git(repo, "rev-parse", f"{target_sha}^{{tree}}").strip()
 
@@ -218,7 +243,7 @@ def classify_paths(paths: Iterable[str]) -> Classification:
         normalized = path.strip("/")
         name = PurePosixPath(normalized).name.lower()
 
-        if normalized.startswith(CI_ONLY_PREFIXES):
+        if normalized.startswith(CI_ONLY_PREFIXES) or normalized in CI_ONLY_FILES:
             continue
 
         if normalized in FIXED_CONTROLLER_FILES:
@@ -256,7 +281,7 @@ def classify_paths(paths: Iterable[str]) -> Classification:
                 full_reason = full_reason or "unknown_component_payload"
             continue
 
-        if normalized.startswith(("internal/platform/", "internal/externaleffects/", "cmd/aicrm/")):
+        if normalized.startswith(("internal/platform/", "internal/externaleffects/")):
             full_reason = full_reason or "shared_runtime_infrastructure"
             continue
 
@@ -438,11 +463,28 @@ def affected_go_commands(
     commands: list[ReleaseCommand],
     package_map: dict[str, GoPackage],
     command_graphs: dict[str, set[str]],
+    *,
+    previous_package_map: dict[str, GoPackage] | None = None,
+    previous_command_graphs: dict[str, set[str]] | None = None,
 ) -> list[str]:
-    """Return release commands whose go list dependency graphs contain a change."""
+    """Return commands affected in either side of a source range.
+
+    The head graph identifies new/changed files and current dependencies. The
+    base graph is equally important for deleted files: once a source or embed
+    input has been removed, the head graph cannot tell which old binaries used
+    to depend on it.
+    """
+    package_maps = [package_map]
+    if previous_package_map is not None:
+        package_maps.append(previous_package_map)
+    graph_versions = [command_graphs]
+    if previous_command_graphs is not None:
+        graph_versions.append(previous_command_graphs)
+
     package_by_dir: dict[str, set[str]] = {}
-    for import_path, package in package_map.items():
-        package_by_dir.setdefault(package.rel_dir, set()).add(import_path)
+    for packages in package_maps:
+        for import_path, package in packages.items():
+            package_by_dir.setdefault(package.rel_dir, set()).add(import_path)
 
     changed_packages: set[str] = set()
     for path in changed_paths:
@@ -453,22 +495,27 @@ def affected_go_commands(
         parent = PurePosixPath(normalized).parent.as_posix()
         if PurePosixPath(normalized).suffix in GO_SOURCE_SUFFIXES:
             matches.update(package_by_dir.get(parent, set()))
-        for import_path, package in package_map.items():
-            if normalized in package.embed_files or normalized in package.files:
-                matches.add(import_path)
-                continue
-            package_prefix = package.rel_dir.rstrip("/") + "/"
-            if normalized.startswith(package_prefix):
-                relative = normalized[len(package_prefix):]
-                for pattern in package.embed_patterns:
-                    if _embed_pattern_matches(relative, pattern):
-                        matches.add(import_path)
-                        break
+        for packages in package_maps:
+            for import_path, package in packages.items():
+                if normalized in package.embed_files or normalized in package.files:
+                    matches.add(import_path)
+                    continue
+                package_prefix = package.rel_dir.rstrip("/") + "/"
+                if normalized.startswith(package_prefix):
+                    relative = normalized[len(package_prefix):]
+                    for pattern in package.embed_patterns:
+                        if _embed_pattern_matches(relative, pattern):
+                            matches.add(import_path)
+                            break
         if not matches:
             raise BuildError(f"changed Go or package asset is outside the release dependency graph: {path}")
         changed_packages.update(matches)
 
-    result = [command.package for command in commands if command_graphs.get(command.package, set()) & changed_packages]
+    result = [
+        command.package
+        for command in commands
+        if any(graphs.get(command.package, set()) & changed_packages for graphs in graph_versions)
+    ]
     return result
 
 
@@ -534,11 +581,21 @@ def _make_plan(repo: Path, base_sha: str, target_sha: str, target_root: Path | N
         try:
             if target_root is not None:
                 package_map, command_graphs = _go_packages(target_root, commands)
-                affected = affected_go_commands(classification.graph_paths, commands, package_map, command_graphs)
+                with TemporaryWorktree(repo, base_sha) as baseline_source:
+                    baseline_package_map, baseline_graphs = _go_packages(baseline_source, commands)
             else:
                 with TemporaryWorktree(repo, target_sha) as source:
                     package_map, command_graphs = _go_packages(source, commands)
-                    affected = affected_go_commands(classification.graph_paths, commands, package_map, command_graphs)
+                with TemporaryWorktree(repo, base_sha) as baseline_source:
+                    baseline_package_map, baseline_graphs = _go_packages(baseline_source, commands)
+            affected = affected_go_commands(
+                classification.graph_paths,
+                commands,
+                package_map,
+                command_graphs,
+                previous_package_map=baseline_package_map,
+                previous_command_graphs=baseline_graphs,
+            )
             return classification.as_json(base_sha, target_sha, tree, affected)
         except (BuildError, json.JSONDecodeError):
             classification.full_build = True
@@ -548,12 +605,27 @@ def _make_plan(repo: Path, base_sha: str, target_sha: str, target_root: Path | N
     return classification.as_json(base_sha, target_sha, tree, [])
 
 
-def plan(repo_path: str | Path, base_value: str, target_value: str) -> dict[str, Any]:
+def plan(
+    repo_path: str | Path,
+    base_value: str,
+    target_value: str,
+    validation_scope_base_value: str | None = None,
+) -> dict[str, Any]:
     repo = Path(repo_path).resolve()
     base_sha = _resolve_commit(repo, base_value)
     target_sha = _resolve_commit(repo, target_value)
+    validation_scope_base_sha = _resolve_commit(repo, validation_scope_base_value or base_value)
+    _require_ancestor(repo, validation_scope_base_sha, target_sha, "validation scope base")
     _validate_payload_deletions(repo, base_sha, target_sha)
-    return _make_plan(repo, base_sha, target_sha)
+    result = _make_plan(repo, base_sha, target_sha)
+    # This range explains package and test scope. The release controller has
+    # only verified the exact GitHub check; it has not fetched an independently
+    # bound CI receipt, so this must not be reported as the actual CI baseline.
+    result["validation_scope_base_sha"] = validation_scope_base_sha
+    result["validation_scope_base_tree"] = _tree_sha(repo, validation_scope_base_sha)
+    result["validation_scope_changed_paths"] = _changed_paths(repo, validation_scope_base_sha, target_sha)
+    result["actual_ci_baseline_verified"] = False
+    return result
 
 
 def classify(repo_path: str | Path, base_value: str, target_value: str) -> dict[str, Any]:
@@ -735,11 +807,14 @@ def _write_manifest(path: Path, value: dict[str, Any]) -> None:
 
 
 def build(repo_path: str | Path, base_value: str, target_value: str,
-          base_release_value: str, out_value: str | Path) -> dict[str, Any]:
+          base_release_value: str, out_value: str | Path,
+          validation_scope_base_value: str | None = None) -> dict[str, Any]:
     build_started = time.monotonic()
     repo = Path(repo_path).resolve()
     base_sha = _resolve_commit(repo, base_value)
     target_sha = _resolve_commit(repo, target_value)
+    validation_scope_base_sha = _resolve_commit(repo, validation_scope_base_value or base_value)
+    _require_ancestor(repo, validation_scope_base_sha, target_sha, "validation scope base")
     _validate_payload_deletions(repo, base_sha, target_sha)
     output = Path(out_value).resolve()
     try:
@@ -821,6 +896,13 @@ def build(repo_path: str | Path, base_value: str, target_value: str,
                 "source_sha": target_sha,
                 "base_sha": base_sha,
                 "source_tree": _tree_sha(repo, target_sha),
+                # Package reuse binds to the last actually deployed source.
+                # This controller-derived source range is only a scope hint;
+                # it is not an exact CI baseline receipt.
+                "validation_scope_base_sha": validation_scope_base_sha,
+                "validation_scope_base_tree": _tree_sha(repo, validation_scope_base_sha),
+                "validation_scope_changed_paths": _changed_paths(repo, validation_scope_base_sha, target_sha),
+                "actual_ci_baseline_verified": False,
                 "runtime_changed": bool(plan_value["runtime_changed"]),
                 "frontend_changed": bool(plan_value["frontend_changed"]),
                 "full_build": actual_full_build,
@@ -855,10 +937,12 @@ def _parser() -> argparse.ArgumentParser:
     plan_parser = subparsers.add_parser("plan", help="classify a source commit range")
     plan_parser.add_argument("--repo", required=True)
     plan_parser.add_argument("--base", required=True)
+    plan_parser.add_argument("--validation-scope-base")
     plan_parser.add_argument("--target", required=True)
     build_parser = subparsers.add_parser("build", help="create a complete release tree")
     build_parser.add_argument("--repo", required=True)
     build_parser.add_argument("--base", required=True)
+    build_parser.add_argument("--validation-scope-base")
     build_parser.add_argument("--target", required=True)
     build_parser.add_argument("--base-release", required=True, help="existing release directory, or 'none' for the first build")
     build_parser.add_argument("--out", required=True)
@@ -871,9 +955,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.action == "classify":
             result = classify(args.repo, args.base, args.target)
         elif args.action == "plan":
-            result = plan(args.repo, args.base, args.target)
+            result = plan(args.repo, args.base, args.target, args.validation_scope_base)
         else:
-            result = build(args.repo, args.base, args.target, args.base_release, args.out)
+            result = build(args.repo, args.base, args.target, args.base_release, args.out, args.validation_scope_base)
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0
     except (BuildError, OSError, ValueError) as exc:
