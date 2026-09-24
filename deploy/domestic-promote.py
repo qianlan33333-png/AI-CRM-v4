@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import grp
 import hashlib
 import ipaddress
 import json
@@ -444,7 +445,6 @@ def require_host_role(expected: str | None = None) -> str:
             not stat.S_ISDIR(directory_info.st_mode)
             or HOST_ROLE_DIRECTORY.is_symlink()
             or directory_info.st_uid != 0
-            or directory_info.st_gid != 0
             or stat.S_IMODE(directory_info.st_mode) & 0o022
             or not stat.S_ISREG(info.st_mode)
             or HOST_ROLE_FILE.is_symlink()
@@ -520,11 +520,43 @@ def _service_user_can(flag: str, path: Path) -> None:
         raise RuntimeError("service account cannot access the configured runtime path")
 
 
+def _require_protected_runtime_environment(path: Path) -> None:
+    """Require a root-readable, root-owned secret file without following links."""
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise RuntimeError("host runtime environment is missing or unsafe") from exc
+    mode = stat.S_IMODE(info.st_mode)
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != 0
+        or not mode & 0o400
+        or mode & 0o022
+        or mode & 0o111
+        or mode & 0o007
+    ):
+        raise RuntimeError("host runtime environment is missing or unsafe")
+    if mode & 0o040:
+        try:
+            service_group = grp.getgrnam("aicrm").gr_gid
+        except KeyError as exc:
+            raise RuntimeError("host runtime environment is missing or unsafe") from exc
+        if info.st_gid != service_group:
+            raise RuntimeError("host runtime environment is missing or unsafe")
+
+
+def _has_required_systemd_environment_file(value: str, path: Path) -> bool:
+    # systemd --show renders each environment file as
+    # "/path (ignore_errors=no)". Require the secret file as mandatory; the
+    # per-release environment may remain optional.
+    pattern = rf"(?:^|\s){re.escape(str(path))} \(ignore_errors=no\)(?:\s|$)"
+    return re.search(pattern, value) is not None
+
+
 def check_host_contract() -> dict:
     """Read-only host rehearsal for the fixed helper, service user, and PG16."""
     role = require_host_role()
-    if not ENV.is_file() or ENV.is_symlink():
-        raise RuntimeError("host runtime environment is missing or unsafe")
+    _require_protected_runtime_environment(ENV)
     _require_root_executable(RUNUSER, "runuser")
     _require_host_tool(_host_tool("psql"), "psql")
     systemctl = _host_tool("systemctl")
@@ -538,12 +570,17 @@ def check_host_contract() -> dict:
         raise RuntimeError("database service account is unavailable") from exc
     if not service.pw_dir:
         raise RuntimeError("database service account has no home directory")
-    for flag, path in (("-r", ENV), ("-x", CURRENT), ("-x", CURRENT / "bin/aicrm")):
+    for flag, path in (("-x", CURRENT), ("-x", CURRENT / "bin/aicrm")):
         _service_user_can(flag, path)
     for unit in ("aicrm.service", "aicrm-effects-worker.service", "aicrm-migrate.service"):
-        result = run(systemctl, "show", unit, "-p", "User", "-p", "Group", "-p", "WorkingDirectory")
+        result = run(systemctl, "show", unit, "-p", "User", "-p", "Group", "-p", "WorkingDirectory", "-p", "EnvironmentFiles")
         fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
-        if fields != {"User": "aicrm", "Group": "aicrm", "WorkingDirectory": str(CURRENT)}:
+        if (
+            fields.get("User") != "aicrm"
+            or fields.get("Group") != "aicrm"
+            or fields.get("WorkingDirectory") != str(CURRENT)
+            or not _has_required_systemd_environment_file(fields.get("EnvironmentFiles", ""), ENV)
+        ):
             raise RuntimeError(f"systemd service contract is invalid: {unit}")
     environment = _database_environment_from_host_config()
     if role == "staging":
