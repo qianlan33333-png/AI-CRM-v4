@@ -21,6 +21,8 @@
 
 只由一个发布执行者操作。修改固定发布器或安装器前，先暂停 timer，并停用旧的生产写入口；只读确认当前生产版本、健康、主机角色及无结果不明部署。把准确已合并提交中的工具安装到预备机和生产机，核对文件摘要及权限。预备机以真实服务用户、真实目录、受限 `PATH` 和 systemd 环境运行主机合同检查；固定 helper 使用 `--check-host-contract --expected-helper-sha256 <准确已检查提交中该文件的 SHA256>`，并应读回 `host_role=staging`、PostgreSQL 16 和 `database_connection=verified`。同时通过两个 PR 连续排队、阶段失败、摘要不符、生产健康失败和结果不明的合同测试。确认生产角色标记精确为 `production` 且主机身份为 `10.0.4.13` 后恢复 timer。切换过程不改应用 `main`、数据库或当前版本；结果不符就保持 timer 停止并只读排查。
 
+若 helper 改动涉及生产主机权限合同，合并前须对生产做只读预检并记录结果：角色标记须为 root:root 且内容精确；`/etc/aicrm` 须 root-owned 且无组/其他写；`aicrm.env` 须为 root-owned 普通文件、root 可读且无组/其他写或任何其他用户权限，组可读时只能属于 `aicrm`；`aicrm` 须可遍历 `CURRENT` 并执行程序文件；三个 systemd unit 须配置必需的 `EnvironmentFile=/etc/aicrm/aicrm.env`。只记录路径、权限和检查结论，不读取或记录秘密值；此预检不改数据库、不备份、不安装。
+
 ## 失败处置
 
 - `check` 失败：按准确 head 修复并重跑，不人工绕过 required check。
