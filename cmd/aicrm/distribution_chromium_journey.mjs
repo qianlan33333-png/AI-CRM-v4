@@ -112,14 +112,16 @@ try {
   await wait(cdp, "window.__distributionCopiedReplay===window.__distributionCopied", 'credential replay did not copy its original link');
   await value(cdp,"[...document.querySelectorAll('button')].find(x=>x.textContent==='我的收益')?.click(); true"); await wait(cdp,"document.querySelector('#distribution-root')?.textContent.includes('累计推广成交额')","new distributor earnings did not render its summary"); await wait(cdp,`document.querySelector('.distribution-list .distribution-card')?.textContent.includes(${JSON.stringify(earningsProduct)})`,'registered distributor did not render a real commission detail'); const earningsText=await value(cdp,"document.querySelector('#distribution-root')?.textContent||''"); if(!earningsText.includes(money(earningsGrossMinor))||!earningsText.includes(money(earningsCommissionMinor))||!earningsText.includes(earningsOrder))throw new Error(`registered distributor earnings must retain the non-zero fixture facts: ${earningsText}`); const commissionFilter=await value(cdp,"(()=>{const select=document.querySelector('select[name=commission-status]');return Boolean(select&&select.getAttribute('aria-label')==='筛选佣金状态'&&select.options.length===7)})()"); assert.equal(commissionFilter,true,'commission status filter must remain a compact accessible native select'); await captureDistributionScreen(cdp,'distribution-earnings',390); await value(cdp,"(()=>{const select=document.querySelector('select[name=commission-status]');if(!(select instanceof HTMLSelectElement))throw new Error('commission status select missing');select.value='pending';select.dispatchEvent(new Event('change',{bubbles:true}));return true})()"); await wait(cdp,"document.querySelector('select[name=commission-status]')?.value==='pending'&&document.querySelector('.distribution-list .distribution-card')?.textContent.includes('订单')",'pending commission filter did not preserve the non-empty detail'); await captureDistributionScreen(cdp,'distribution-earnings-detail',390);
   // A first-time buyer reaches the generated /d URL without a Payment session.
-  // This product has no page material, so the public product route must go
-  // straight to payment while preserving the credential context into the real
-  // H5 OAuth start endpoint, which in turn must redirect to WeChat.
+  // This product has no page material, so the public product route goes to
+  // payment and shows the required login gate. An explicit click preserves
+  // the credential context into OAuth start, which redirects to WeChat.
   // A provider callback is deliberately outside this local browser journey.
   const promotionReturnPath=`/pay/${product}?promotion_context=${generatedPromotion}`;
   const promotionOAuth=`${base}/api/h5/wechat-pay/oauth/start`;
   const redirectsBeforePromotion=cdp.redirects.length;
   await cdp.call("Page.navigate",{url:`${base}/d/${generatedPromotion}`});
+  await wait(cdp, `location.pathname===${JSON.stringify(`/pay/${product}`)}&&document.querySelector('#identityTitle')?.textContent==='登录才能完成支付'&&document.querySelector('#authContinue')?.getAttribute('href')===${JSON.stringify(`/api/h5/wechat-pay/oauth/start?return_url=${encodeURIComponent(promotionReturnPath)}`)}`, 'promotion product did not show the required login gate with the original credential context');
+  await value(cdp,"document.querySelector('#authContinue')?.click(); true");
   let promotionOAuthRedirect;
   for(let i=0;i<180&&!promotionOAuthRedirect;i++){
     promotionOAuthRedirect=cdp.redirects.slice(redirectsBeforePromotion).find(item=>{

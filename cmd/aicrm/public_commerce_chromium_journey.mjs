@@ -147,8 +147,8 @@ try {
     await cdp.call("Page.navigate", { url: baseURL + `/pay/${encodeURIComponent(standardCode)}` });
     await waitFor(cdp, "document.querySelector('[data-v3-public-commerce]')?.dataset.publicCommerceMounted === 'true'", "presentation Host did not mount unauthenticated public payment");
     await waitFor(cdp, "document.querySelector('#identityGate:not([hidden])') && document.querySelector('#identityTitle')?.textContent === '请在微信中打开'", "non-WeChat Owner identity state did not settle");
-    const gate = await evaluate(cdp, "(() => ({title:document.querySelector('#identityTitle')?.textContent,message:document.querySelector('#identityMessage')?.textContent,action:document.querySelector('#authContinue')?.textContent,disabled:document.querySelector('#authContinue')?.getAttribute('aria-disabled'),checkoutHidden:document.querySelector('#checkoutContent')?.hidden}))()");
-    assert.deepEqual(gate, { title: "请在微信中打开", message: "请复制当前链接到微信中打开并完成授权。", action: "请在微信中打开", disabled: "true", checkoutHidden: true }, "non-WeChat identity gate must not claim an in-progress authorization");
+    const gate = await evaluate(cdp, "(() => ({title:document.querySelector('#identityTitle')?.textContent,message:document.querySelector('#identityMessage')?.textContent,actionHidden:document.querySelector('#authContinue')?.hidden,checkoutHidden:document.querySelector('#checkoutContent')?.hidden}))()");
+    assert.deepEqual(gate, { title: "请在微信中打开", message: "请复制当前链接到微信中打开，登录后才能完成支付。", actionHidden: true, checkoutHidden: true }, "non-WeChat identity gate must explain where to log in without offering an unusable authorization action");
   };
 
   const visit = async ({ pagePath, kind, route, width, file, name, price, detail = false, media = false, unavailable = false }) => {

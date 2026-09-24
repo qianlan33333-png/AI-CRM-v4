@@ -106,7 +106,7 @@ try {
   }
   await cdp.call('Network.setBlockedURLs', { urls: [] });
   await cdp.call('Page.navigate', { url: `${base}/api/h5/surveys/oauth/callback?state=${'x'.repeat(43)}&code=controlled-failure` });
-  await waitFor(cdp, `(() => { const stop=document.querySelector('#screen [data-v3-survey-stop]'); const text=stop?.textContent || ''; return location.pathname === '/h5/auth.html' && document.body?.dataset.v3PublicSurvey === 'auth' && stop?.querySelector('h1')?.textContent === '授权失败' && !stop?.querySelector('button') && !text.includes('正在验证微信身份') && !text.includes('重试微信授权'); })()`, 'Owner OAuth failure did not render the public stopped authorization state');
+  await waitFor(cdp, `(() => { const card=document.querySelector('#screen .required-auth-card'); const action=card?.querySelector('.auth-button'); return location.pathname === '/h5/auth.html' && document.body?.dataset.v3PublicSurvey === 'auth' && card?.querySelector('h1')?.textContent === '登录才能填写问卷' && card?.textContent.includes('微信授权未完成') && action?.getAttribute('href') === '/api/h5/surveys/oauth/start?slug=${successSlug}' && !action.hidden; })()`, 'Owner OAuth failure did not offer explicit authorization retry on the public login gate');
   for (const width of [375, 390, 430]) await screenshot(cdp, width, `public-survey-auth-${width}.png`);
 
   await cdp.call('Network.deleteCookies', { name: 'survey_oauth_return', url: `${base}/api/h5/surveys/oauth/callback` });
