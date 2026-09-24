@@ -8,6 +8,7 @@ import unittest
 import contextlib
 import io
 import sys
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import dev_preflight
@@ -157,31 +158,241 @@ class BrowserCoverage(unittest.TestCase):
 
 
 class AffectedPreflight(unittest.TestCase):
-    def test_local_affected_runs_fast_and_compile_only_for_go_changes(self):
-        with tempfile.TemporaryDirectory() as directory:
-            check = Preflight(Path(directory))
-            plan = {"evidence_eligible": True, "changed_paths": ["internal/customer/app/service.go"]}
-            with patch.object(check, "fast") as fast, patch.object(check, "compile") as compile:
-                check.affected(plan)
-            fast.assert_called_once_with()
-            compile.assert_called_once_with()
-            self.assertEqual(check.report["local_scope"], ["fast", "compile"])
-            self.assertEqual(check.report["claim"], "local_preflight")
-            self.assertFalse(check.report["eligible_for_delivery"])
+    def plan(self, lanes=("preflight", "backend", "browser"), mode="targeted",
+             profile="affected-packages", evidence_eligible=True):
+        changed_paths = ([("internal/payment/app/service.go")]
+                         if profile == "affected-packages" else ["scripts/ci/impact_selection.py"])
+        candidate_checks = ([
+            {"lane": "backend", "path": "internal/payment/app/service_test.go", "test": "TestPayment"},
+            {"lane": "browser", "path": "cmd/aicrm/payment_test.go", "test": "TestPaymentChromiumJourney"},
+        ] if mode == "targeted" and profile != "tooling" else [])
+        package_inventory = ([
+            {"dir": "cmd/aicrm", "import_path": "example.test/crm/cmd/aicrm",
+             "test_files": ["cmd/aicrm/unit_test.go", "cmd/aicrm/payment_test.go"]},
+            {"dir": "internal/payment/app", "import_path": "example.test/crm/internal/payment/app",
+             "test_files": ["internal/payment/app/service_test.go"]},
+        ] if profile == "affected-packages" else [])
+        packages = [item["import_path"] for item in package_inventory]
+        plan = {
+            "schema": 1, "observed_mode": "shadow", "evidence_eligible": evidence_eligible,
+            "baseline_sha": "1" * 40, "baseline_tree": "2" * 40,
+            "head_sha": "a" * 40, "head_tree": "b" * 40,
+            "policy_fingerprint": "c" * 64,
+            "changed_paths": changed_paths,
+            "source_clean": True,
+            "source": {"checked_out_head": "a" * 40, "status": [],
+                       "working_tree_clean": True, "head_matches": True},
+            "parent_prd": {"id": "docs/prd/trial.md", "sha256": "e" * 64},
+            "candidate": {
+                "selection_mode": mode,
+                "selected_lanes": list(lanes),
+                "selected_checks": candidate_checks,
+                "profile": profile,
+            },
+            "candidate_go_packages": packages,
+        }
+        plan["selected_lanes"] = list(lanes)
+        plan["selected_checks"] = plan["candidate"]["selected_checks"]
+        plan["graph_result"] = {
+            "schema": 1, "baseline_sha": plan["baseline_sha"], "baseline_tree": plan["baseline_tree"],
+            "head_sha": plan["head_sha"], "head_tree": plan["head_tree"],
+            "changed_paths": plan["changed_paths"], "graph_valid": True, "unowned_go_paths": [],
+            "module": "example.test/crm", "graph_fingerprint": "d" * 64,
+            "selected_packages": package_inventory,
+        }
+        return plan
 
-    def test_local_affected_stays_fast_for_docs_and_rejects_dirty_plan(self):
+    def prepare_check(self, directory, plan, run_side_effect=None):
+        source = {"head": plan["head_sha"], "tree": plan["head_tree"], "status": []}
+        with patch.object(Preflight, "source_snapshot", return_value=source):
+            check = Preflight(Path(directory))
+
+        def success(name, command, env=None):
+            lane = command[2]
+            lane_dir = Path(command[command.index("--report-dir") + 1])
+            lane_dir.mkdir(parents=True, exist_ok=True)
+            log_path = check.report_dir / (name + ".log")
+            log_path.write_text("lane output\n")
+            check.report["steps"].append({"name": name, "command": command, "exit_code": 0,
+                                          "seconds": 1.0, "log": str(log_path)})
+            commands = [["python", "scripts/dev_preflight.py", "fast"]]
+            go_log = None
+            if lane == "backend":
+                package_args = ["./" + item["dir"] for item in plan["graph_result"]["selected_packages"]]
+                package_args = package_args or ["./..."]
+                commands = [["bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-json",
+                             "-p", "1", "-race", "-count=1", "-timeout=15m",
+                             *package_args]]
+                go_log = "backend-go-test.jsonl"
+                events = [
+                    {"Action": "run", "Package": "example.test/crm/cmd/aicrm", "Test": "TestUnit"},
+                    {"Action": "pass", "Package": "example.test/crm/cmd/aicrm", "Test": "TestUnit", "Elapsed": 0.1},
+                    {"Action": "run", "Package": "example.test/crm/cmd/aicrm", "Test": "TestPaymentChromiumJourney"},
+                    {"Action": "skip", "Package": "example.test/crm/cmd/aicrm", "Test": "TestPaymentChromiumJourney", "Elapsed": 0},
+                    {"Action": "pass", "Package": "example.test/crm/cmd/aicrm", "Elapsed": 0.2},
+                    {"Action": "run", "Package": "example.test/crm/internal/payment/app", "Test": "TestPayment"},
+                    {"Action": "pass", "Package": "example.test/crm/internal/payment/app", "Test": "TestPayment", "Elapsed": 0.1},
+                    {"Action": "pass", "Package": "example.test/crm/internal/payment/app", "Elapsed": 0.2},
+                ]
+                (lane_dir / go_log).write_text("\n".join(json.dumps(event) for event in events) + "\n")
+            elif lane == "browser":
+                commands = [[sys.executable, "scripts/dev_preflight.py", "browser",
+                             "--journey", "TestPaymentChromiumJourney"]]
+                go_log = "browser-execution.log"
+                events = [
+                    {"Action": "run", "Package": "example.test/crm/cmd/aicrm", "Test": "TestPaymentChromiumJourney"},
+                    {"Action": "pass", "Package": "example.test/crm/cmd/aicrm", "Test": "TestPaymentChromiumJourney", "Elapsed": 0.1},
+                    {"Action": "pass", "Package": "example.test/crm/cmd/aicrm", "Elapsed": 0.2},
+                ]
+                (lane_dir / go_log).write_text("\n".join(json.dumps(event) for event in events) + "\n")
+            receipt = {"lane": lane, "result": "success", "exit_code": 0,
+                       "tested_sha": plan["head_sha"], "tree": plan["head_tree"],
+                       "policy_fingerprint": plan["policy_fingerprint"],
+                       "commands": commands, "elapsed_seconds": 1.0, "run_id": None,
+                       "run_attempt": None, "go_json_log": go_log}
+            (lane_dir / "run.json").write_text(json.dumps(receipt))
+            return log_path
+
+        if run_side_effect is not None:
+            run = run_side_effect
+        else:
+            run = success
+        return check, success, run, source
+
+    def test_exact_source_binding_accepts_clean_plan_even_if_shadow_sample_is_ineligible(self):
+        plan = self.plan(lanes=dev_preflight.FULL_LANES, mode="full", profile="full",
+                         evidence_eligible=False)
+        source = {"head": plan["head_sha"], "tree": plan["head_tree"], "status": []}
+        binding = {key: plan[key] for key in
+                   ("baseline_sha", "baseline_tree", "head_sha", "head_tree", "policy_fingerprint")}
+        verification = SimpleNamespace(exact_source_binding=lambda *args, **kwargs: binding)
+        with patch.dict(sys.modules, {"verification": verification}):
+            self.assertTrue(dev_preflight.exact_affected_plan_source_binding(plan, source))
+            plan["source"]["working_tree_clean"] = False
+            self.assertFalse(dev_preflight.exact_affected_plan_source_binding(plan, source))
+
+    def test_local_affected_runs_candidate_lanes_and_full_package_suites(self):
+        plan = self.plan()
+        with tempfile.TemporaryDirectory() as directory:
+            check, _, run, source = self.prepare_check(directory, plan)
+            commands = []
+
+            def capture(name, command, env=None):
+                commands.append(command)
+                return run(name, command, env)
+
+            with patch.object(check, "run", side_effect=capture), \
+                    patch.object(check, "source_snapshot", return_value=source), \
+                    patch.object(dev_preflight, "exact_affected_plan_source_binding", return_value=True):
+                result = check.affected(plan)
+
+            self.assertEqual(result, "passed")
+            self.assertEqual(check.report["local_scope"], ["preflight", "backend", "browser"])
+            self.assertEqual(check.report["affected_execution"]["completed_lanes"], ["preflight", "backend", "browser"])
+            self.assertTrue(check.report["affected_collection"]["required_results_passed"])
+            self.assertFalse(check.report["affected_collection"]["measurement_eligible"])
+            self.assertEqual(check.report["claim"], "local_affected_plan")
+            self.assertFalse(check.report["eligible_for_delivery"])
+            backend_command = next(command for command in commands if command[2] == "backend")
+            self.assertIn("--focus-packages-json", backend_command)
+            self.assertNotIn("--focus-checks-json", backend_command)
+            browser_command = next(command for command in commands if command[2] == "browser")
+            self.assertIn("--focus-checks-json", browser_command)
+
+    def test_local_affected_reports_missing_browser_environment_as_incomplete(self):
+        plan = self.plan(lanes=("browser",))
+        with tempfile.TemporaryDirectory() as directory:
+            check, success, _, source = self.prepare_check(directory, plan)
+
+            def unavailable(name, command, env=None):
+                lane_dir = Path(command[command.index("--report-dir") + 1])
+                lane_dir.mkdir(parents=True, exist_ok=True)
+                log_path = check.report_dir / (name + ".log")
+                log_path.write_text("missing required local environment: Linux amd64 browser environment, google-chrome\n")
+                check.report["steps"].append({"name": name, "command": command, "exit_code": 2,
+                                              "seconds": 0.1, "log": str(log_path)})
+                (lane_dir / "run.json").write_text(json.dumps({"lane": "browser", "result": "failed",
+                    "exit_code": 2, "tested_sha": plan["head_sha"], "tree": plan["head_tree"],
+                    "policy_fingerprint": plan["policy_fingerprint"], "commands": [], "elapsed_seconds": 0.1}))
+                raise RuntimeError("browser lane missing prerequisites")
+
+            with patch.object(check, "run", side_effect=unavailable), patch.object(
+                    check, "source_snapshot", return_value=source), patch.object(
+                    dev_preflight, "exact_affected_plan_source_binding", return_value=True):
+                result = check.affected(plan)
+
+            self.assertEqual(result, "incomplete")
+            self.assertEqual(check.report["affected_execution"]["incomplete_lanes"], ["browser"])
+            self.assertEqual(check.report["lanes"][0]["missing_environment"],
+                             ["Linux amd64 browser environment", "google-chrome"])
+            self.assertTrue(check.report["existing_ci_gates_retained"])
+
+    def test_local_affected_rejects_success_without_matching_run_receipt(self):
+        plan = self.plan(lanes=("backend",))
+        with tempfile.TemporaryDirectory() as directory:
+            check, _, run, source = self.prepare_check(directory, plan)
+            def no_receipt(name, command, env=None):
+                log_path = check.report_dir / (name + ".log")
+                log_path.write_text("success\n")
+                check.report["steps"].append({"name": name, "command": command, "exit_code": 0,
+                                              "seconds": 1.0, "log": str(log_path)})
+                return log_path
+            with patch.object(check, "run", side_effect=no_receipt), patch.object(
+                    check, "source_snapshot", return_value=source), patch.object(
+                    dev_preflight, "exact_affected_plan_source_binding", return_value=True):
+                result = check.affected(plan)
+            self.assertEqual(result, "incomplete")
+            self.assertTrue(any("without a matching successful run receipt" in item["error"]
+                                for item in check.report["lanes"]))
+
+    def test_local_affected_rejects_dirty_plan(self):
         with tempfile.TemporaryDirectory() as directory:
             check = Preflight(Path(directory))
-            docs_plan = {"evidence_eligible": True, "changed_paths": ["docs/prd/example.md"]}
-            with patch.object(check, "fast") as fast, patch.object(check, "compile") as compile:
-                check.affected(docs_plan)
-            fast.assert_called_once_with()
-            compile.assert_not_called()
-            dirty_plan = {"evidence_eligible": False, "changed_paths": ["docs/prd/example.md"]}
-            with patch.object(check, "fast") as fast:
-                with self.assertRaisesRegex(ValueError, "clean checkout"):
-                    check.affected(dirty_plan)
-                fast.assert_not_called()
+            dirty_plan = {"evidence_eligible": False}
+            with self.assertRaisesRegex(ValueError, "does not bind the clean checkout"):
+                check.affected(dirty_plan)
+
+    def test_local_full_plan_runs_when_shadow_sampling_is_ineligible(self):
+        plan = self.plan(lanes=dev_preflight.FULL_LANES, mode="full", profile="full",
+                         evidence_eligible=False)
+        with tempfile.TemporaryDirectory() as directory:
+            check, _, run, source = self.prepare_check(directory, plan)
+            commands = []
+
+            def capture(name, command, env=None):
+                commands.append(command)
+                return run(name, command, env)
+
+            with patch.object(check, "run", side_effect=capture), \
+                    patch.object(check, "source_snapshot", return_value=source), \
+                    patch.object(dev_preflight, "exact_affected_plan_source_binding", return_value=True):
+                result = check.affected(plan)
+
+            self.assertEqual(result, "passed")
+            self.assertEqual(check.report["affected_execution"]["completed_lanes"],
+                             list(dev_preflight.FULL_LANES))
+            self.assertFalse(check.report["affected_collection"]["measurement_eligible"])
+            self.assertEqual(check.report["affected_collection"]["evidence_kind"], "local_only")
+            self.assertEqual(commands[0][commands[0].index("--profile") + 1], "full")
+
+    def test_tooling_candidate_passes_tooling_profile_to_preflight_lane(self):
+        plan = self.plan(lanes=("preflight",), mode="targeted", profile="tooling")
+        with tempfile.TemporaryDirectory() as directory:
+            check, _, run, source = self.prepare_check(directory, plan)
+            commands = []
+
+            def capture(name, command, env=None):
+                commands.append(command)
+                return run(name, command, env)
+
+            with patch.object(check, "run", side_effect=capture), \
+                    patch.object(check, "source_snapshot", return_value=source), \
+                    patch.object(dev_preflight, "exact_affected_plan_source_binding", return_value=True):
+                result = check.affected(plan)
+
+            self.assertEqual(result, "passed")
+            preflight_command = next(command for command in commands if command[2] == "preflight")
+            self.assertEqual(preflight_command[preflight_command.index("--profile") + 1], "tooling")
 
     def test_affected_dry_run_prints_plan_without_running_checks(self):
         plan = {"mode": "shadow", "evidence_eligible": True, "candidate": {"selected_lanes": ["preflight"]}}

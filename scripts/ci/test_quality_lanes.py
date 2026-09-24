@@ -1,13 +1,33 @@
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
+import contextlib
+import io
+import json
+import sys
 
 import quality_lanes
 
 
 class QualityLaneTests(unittest.TestCase):
+    def test_timing_fingerprint_requires_exact_hosted_runner_image(self):
+        base = {"GITHUB_ACTIONS": "true", "RUNNER_OS": "Linux", "RUNNER_ARCH": "X64"}
+        with patch.dict(os.environ, base, clear=True), patch.object(
+                quality_lanes.subprocess, "check_output", return_value="tool version\n"):
+            environment, cache = quality_lanes._measurement_fingerprints()
+        self.assertTrue(environment)
+        self.assertIsNone(cache)
+
+        pinned = {**base, "ImageOS": "ubuntu22", "ImageVersion": "202609.1"}
+        with patch.dict(os.environ, pinned, clear=True), patch.object(
+                quality_lanes.subprocess, "check_output", return_value="tool version\n"):
+            environment, cache = quality_lanes._measurement_fingerprints()
+        self.assertTrue(environment)
+        self.assertTrue(cache)
+
     def test_all_ci_lanes_have_one_canonical_command_definition(self):
         for lane in quality_lanes.LANES:
             commands = quality_lanes.commands(lane, Path("/tmp/evidence"))
@@ -117,6 +137,47 @@ class QualityLaneTests(unittest.TestCase):
         head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=quality_lanes.ROOT, text=True).strip()
         with patch.dict(os.environ, {"AICRM_DEDUP_HEAD_SHA": head, "AICRM_DEDUP_BASE_SHA": ""}, clear=False):
             self.assertTrue(quality_lanes.dedup_base_ready())
+
+    def test_invalid_focus_configuration_writes_failed_lane_receipt(self):
+        with tempfile.TemporaryDirectory() as temp:
+            report_dir = Path(temp)
+            argv = ["quality_lanes.py", "backend", "--report-dir", str(report_dir),
+                    "--focus-packages-json", "{}"]
+            with patch.object(sys, "argv", argv), patch.object(quality_lanes, "missing_prerequisites", return_value=[]), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(quality_lanes.main(), 2)
+            receipt = json.loads((report_dir / "run.json").read_text())
+            self.assertEqual(receipt["result"], "failed")
+            self.assertEqual(receipt["exit_code"], 2)
+            self.assertGreater(receipt["elapsed_seconds"], 0)
+            self.assertEqual(receipt["commands"], [])
+
+    def test_reused_report_directory_does_not_mix_old_json_events_or_receipt(self):
+        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
+            report_dir = Path(temp)
+            (report_dir / "backend-go-test.jsonl").write_text('{"Test":"OLD_COMMIT"}\n')
+            (report_dir / "run.json").write_text('{"result":"success","tested_sha":"old"}\n')
+            commands = [["go", "test", "-json", "first-run"], ["go", "test", "-json", "second-run"]]
+
+            def record_command(command, env, lane, directory, execution):
+                execution["commands"].append(command)
+                log = directory / (lane + "-go-test.jsonl")
+                with log.open("a", encoding="utf-8") as output:
+                    output.write(command[-1] + "\n")
+                execution["go_json_log"] = log.name
+
+            with patch.object(quality_lanes, "missing_prerequisites", return_value=[]), \
+                    patch.object(quality_lanes, "commands", side_effect=[[[*commands[0]]], [[*commands[1]]]]), \
+                    patch.object(quality_lanes, "run_recorded", side_effect=record_command), \
+                    patch.object(quality_lanes, "_run_policy_fingerprint", return_value="f" * 64):
+                for _ in range(2):
+                    with patch.object(sys, "argv", ["quality_lanes.py", "backend", "--report-dir", str(report_dir)]):
+                        self.assertEqual(quality_lanes.main(), 0)
+
+            self.assertEqual((report_dir / "backend-go-test.jsonl").read_text(), "second-run\n")
+            receipt = json.loads((report_dir / "run.json").read_text())
+            self.assertEqual(receipt["result"], "success")
+            self.assertEqual(receipt["commands"], [commands[1]])
 
 
 if __name__ == "__main__":

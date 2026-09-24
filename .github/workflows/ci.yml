@@ -1,4 +1,5 @@
 name: ci
+run-name: ci${{ github.event_name == 'workflow_dispatch' && inputs.force_full && ' [force_full]' || '' }}
 
 on:
   workflow_dispatch:
@@ -11,6 +12,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+  schedule:
+    # 03:17 Asia/Shanghai (19:17 UTC), outside the main workday.
+    - cron: '17 19 * * *'
 
 permissions:
   contents: read
@@ -34,10 +38,14 @@ jobs:
     outputs:
       full: ${{ steps.finalize.outputs.full }}
       verified_run: ${{ steps.plan.outputs.verified_run }}
+      verified_source: ${{ steps.plan.outputs.verified_source }}
+      verified_run_attempt: ${{ steps.plan.outputs.verified_run_attempt }}
       mode: ${{ steps.finalize.outputs.mode }}
       lanes: ${{ steps.finalize.outputs.lanes }}
       checks: ${{ steps.finalize.outputs.checks }}
       profile: ${{ steps.finalize.outputs.profile }}
+      baseline_sha: ${{ steps.plan.outputs.baseline_sha }}
+      policy_fingerprint: ${{ steps.plan.outputs.policy_fingerprint }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -63,24 +71,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           FORCE_FULL: ${{ inputs.force_full || false }}
           GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python3 scripts/ci/verification.py plan
+        run: python3 scripts/ci/verification.py plan --run-attempt "${{ github.run_attempt }}"
       - id: impact
         name: Select affected verification lanes
+        if: ${{ github.event_name == 'pull_request' && steps.plan.outputs.full == 'true' && steps.plan.outputs.conservative_full != 'true' }}
         env:
-          GH_TOKEN: ${{ github.token }}
-        if: ${{ github.event_name == 'pull_request' && steps.plan.outputs.full == 'true' }}
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           full_selection='{"mode":"full","lanes":["preflight","backend","frontend","browser","archive-sdk"],"checks":[],"reason":"impact-analysis-failed","profile":"full"}'
-          if python3 scripts/ci/governance_impact.py --out "$RUNNER_TEMP/impact.json"; then
-            if selection="$(python3 scripts/ci/impact_selection.py "$RUNNER_TEMP/impact.json")"; then
-              :
-            else
-              echo 'Impact selection failed; scheduling every verification lane.' >> "$GITHUB_STEP_SUMMARY"
-              selection="$full_selection"
-            fi
+          if selection="$(python3 scripts/ci/verification.py select --base "$GITHUB_BASE_SHA" --head "$GITHUB_SHA")"; then
+            :
           else
-            echo 'Impact analysis failed; scheduling every verification lane. The governance gate will retain the failure.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Trusted-base impact selection failed; scheduling every verification lane.' >> "$GITHUB_STEP_SUMMARY"
             selection="$full_selection"
           fi
           echo "selection=$selection" >> "$GITHUB_STEP_SUMMARY"
@@ -102,25 +105,28 @@ jobs:
           IMPACT_PROFILE: ${{ steps.impact.outputs.profile }}
         run: |
           set -euo pipefail
-          if [[ "${{ steps.plan.outputs.mode }}" == "release" ]]; then
-            echo 'mode=release' >> "$GITHUB_OUTPUT"
+          if [[ "${{ steps.plan.outputs.mode }}" == "verified" ]]; then
+            echo 'mode=verified' >> "$GITHUB_OUTPUT"
             echo 'lanes=[]' >> "$GITHUB_OUTPUT"
             echo 'checks=[]' >> "$GITHUB_OUTPUT"
             echo 'full=false' >> "$GITHUB_OUTPUT"
             echo 'profile=none' >> "$GITHUB_OUTPUT"
-          elif [[ "${{ github.event_name }}" == "push" || "${{ github.ref }}" == "refs/heads/main" || "${{ inputs.force_full }}" == "true" ]]; then
+            printf 'verified_run=%s\n' "${{ steps.plan.outputs.verified_run }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "schedule" || "${{ github.event_name }}" == "push" || "${{ github.ref }}" == "refs/heads/main" || "${{ inputs.force_full }}" == "true" || "${{ steps.plan.outputs.conservative_full }}" == "true" ]]; then
             echo 'mode=full' >> "$GITHUB_OUTPUT"
+            echo 'verified_run=' >> "$GITHUB_OUTPUT"
             echo 'lanes=["preflight","backend","frontend","browser","archive-sdk"]' >> "$GITHUB_OUTPUT"
             echo 'checks=[]' >> "$GITHUB_OUTPUT"
             echo 'full=true' >> "$GITHUB_OUTPUT"
             echo 'profile=full' >> "$GITHUB_OUTPUT"
           elif [[ "${{ steps.plan.outputs.mode }}" == "light" ]]; then
             echo 'mode=light' >> "$GITHUB_OUTPUT"
+            echo 'verified_run=' >> "$GITHUB_OUTPUT"
             echo 'lanes=[]' >> "$GITHUB_OUTPUT"
             echo 'checks=[]' >> "$GITHUB_OUTPUT"
             echo 'full=false' >> "$GITHUB_OUTPUT"
             echo 'profile=none' >> "$GITHUB_OUTPUT"
-          elif [[ "$IMPACT_MODE" == "targeted" ]]; then
+          elif [[ "${{ steps.plan.outputs.mode }}" == "full" && "$IMPACT_MODE" == "targeted" ]]; then
             echo 'mode=targeted' >> "$GITHUB_OUTPUT"
             printf 'lanes=%s\n' "$IMPACT_LANES" >> "$GITHUB_OUTPUT"
             printf 'checks=%s\n' "$IMPACT_CHECKS" >> "$GITHUB_OUTPUT"
@@ -128,11 +134,86 @@ jobs:
             printf 'profile=%s\n' "${IMPACT_PROFILE:-full}" >> "$GITHUB_OUTPUT"
           else
             echo 'mode=full' >> "$GITHUB_OUTPUT"
+            echo 'verified_run=' >> "$GITHUB_OUTPUT"
             echo 'lanes=["preflight","backend","frontend","browser","archive-sdk"]' >> "$GITHUB_OUTPUT"
             echo 'checks=[]' >> "$GITHUB_OUTPUT"
             echo 'full=true' >> "$GITHUB_OUTPUT"
             echo 'profile=full' >> "$GITHUB_OUTPUT"
           fi
+
+  affected-plan:
+    # Candidate graph discovery can download Go toolchains or time out. Keep
+    # that non-enforcing work outside the required plan/check path.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: setup-go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: false
+      - id: go-paths
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ${{ steps.go-paths.outputs.build }}
+            ${{ steps.go-paths.outputs.modules }}
+          key: go-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-paths.outputs.version }}-race-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go-paths.outputs.version }}-race-${{ hashFiles('go.sum') }}-
+      - name: Build non-enforcing affected plan for this exact tree
+        env:
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+        run: |
+          set -u
+          base="$GITHUB_BASE_SHA"
+          if [[ ! "$base" =~ ^[0-9a-f]{40}$ || "$base" =~ ^0+$ ]]; then
+            base="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          fi
+          plan="$RUNNER_TEMP/affected-plan.json"
+          status=0
+          if [[ -n "$base" ]]; then
+            timeout --signal=TERM 60s python3 scripts/dev_preflight.py affected --base "$base" --head "$GITHUB_SHA" --dry-run > "$plan" || status=$?
+          else
+            status=2
+          fi
+          python3 - "$plan" "$base" "$GITHUB_SHA" <<'PY'
+          import json, sys
+          path, fallback_base, fallback_head = sys.argv[1:]
+          try:
+              plan = json.load(open(path, encoding="utf-8"))
+          except (OSError, json.JSONDecodeError):
+              plan = {}
+          if not isinstance(plan, dict) or plan.get("schema") != 1:
+              with open(path, "w", encoding="utf-8") as stream:
+                  json.dump({"schema": 0, "baseline_sha": fallback_base, "head_sha": fallback_head,
+                             "source_clean": False, "evidence_eligible": False,
+                             "analysis": {"status": "failed", "error": "affected plan unavailable"}}, stream)
+          PY
+          if [[ "$status" == 0 ]]; then
+            echo 'Affected plan is evidence-eligible for shadow comparison.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Affected plan is fail-closed for shadow comparison (exit $status); current enforced CI selection is unchanged." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload non-enforcing affected plan
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-shadow-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/affected-plan.json
+          if-no-files-found: warn
+          retention-days: 30
 
   preflight:
     needs: plan
@@ -165,6 +246,7 @@ jobs:
           AICRM_DEDUP_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before || '' }}
           AICRM_DEDUP_HEAD_SHA: ${{ github.sha }}
           AICRM_CI_PROFILE: ${{ needs.plan.outputs.profile }}
+          AICRM_CI_POLICY_FINGERPRINT: ${{ needs.plan.outputs.policy_fingerprint }}
         run: python3 scripts/ci/quality_lanes.py preflight --profile "${AICRM_CI_PROFILE:-full}" --report-dir "$RUNNER_TEMP/preflight"
       - id: receipt
         if: always()
@@ -185,6 +267,14 @@ jobs:
             ${{ runner.temp }}/preflight
             ${{ runner.temp }}/ci-receipts/preflight.json
           retention-days: 14
+      - name: Upload preflight shadow execution receipt
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-shadow-lane-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/preflight
+          if-no-files-found: warn
+          retention-days: 30
 
   backend:
     needs: [plan, preflight]
@@ -224,6 +314,7 @@ jobs:
         run: python3 scripts/ci/quality_lanes.py backend --report-dir "$RUNNER_TEMP/quality-lanes/backend"
         env:
           AICRM_CI_FOCUS_CHECKS: ${{ needs.plan.outputs.checks }}
+          AICRM_CI_POLICY_FINGERPRINT: ${{ needs.plan.outputs.policy_fingerprint }}
       - id: receipt
         if: always()
         name: Record structured backend receipt
@@ -240,6 +331,13 @@ jobs:
           path: ${{ runner.temp }}/ci-receipts/backend.json
           if-no-files-found: warn
           retention-days: 14
+      - if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-shadow-lane-backend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/quality-lanes/backend
+          if-no-files-found: warn
+          retention-days: 30
 
   frontend:
     needs: [plan, preflight]
@@ -265,6 +363,7 @@ jobs:
         run: python3 scripts/ci/quality_lanes.py frontend --report-dir "$RUNNER_TEMP/quality-lanes/frontend"
         env:
           AICRM_CI_FOCUS_CHECKS: ${{ needs.plan.outputs.checks }}
+          AICRM_CI_POLICY_FINGERPRINT: ${{ needs.plan.outputs.policy_fingerprint }}
       - id: receipt
         if: always()
         name: Record structured frontend receipt
@@ -281,6 +380,13 @@ jobs:
           path: ${{ runner.temp }}/ci-receipts/frontend.json
           if-no-files-found: warn
           retention-days: 14
+      - if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-shadow-lane-frontend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/quality-lanes/frontend
+          if-no-files-found: warn
+          retention-days: 30
 
   browser:
     needs: [plan, preflight]
@@ -328,6 +434,7 @@ jobs:
           AICRM_ADMIN_LAYOUT_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/admin-shell-layout
           AICRM_SIDEBAR_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/sidebar-standard
           AICRM_CI_FOCUS_CHECKS: ${{ needs.plan.outputs.checks }}
+          AICRM_CI_POLICY_FINGERPRINT: ${{ needs.plan.outputs.policy_fingerprint }}
         run: python3 scripts/ci/quality_lanes.py browser --report-dir "$RUNNER_TEMP/browser-evidence"
       - id: receipt
         if: always()
@@ -350,6 +457,14 @@ jobs:
             artifacts/sidebar-standard
             ${{ runner.temp }}/ci-receipts/browser.json
           retention-days: 14
+      - name: Upload browser shadow execution receipt
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-shadow-lane-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/browser-evidence
+          if-no-files-found: warn
+          retention-days: 30
 
   archive-sdk:
     needs: [plan, preflight]
@@ -375,6 +490,7 @@ jobs:
         run: python3 scripts/ci/quality_lanes.py archive-sdk --report-dir "$RUNNER_TEMP/quality-lanes/archive-sdk"
         env:
           AICRM_CI_FOCUS_CHECKS: ${{ needs.plan.outputs.checks }}
+          AICRM_CI_POLICY_FINGERPRINT: ${{ needs.plan.outputs.policy_fingerprint }}
       - id: receipt
         if: always()
         name: Record structured archive SDK receipt
@@ -391,6 +507,14 @@ jobs:
           path: ${{ runner.temp }}/ci-receipts/archive-sdk.json
           if-no-files-found: warn
           retention-days: 14
+
+      - if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-shadow-lane-archive-sdk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/quality-lanes/archive-sdk
+          if-no-files-found: warn
+          retention-days: 30
 
   governance:
     # Always run, including main's verified-tree reuse: vulnerability data and
@@ -439,12 +563,16 @@ jobs:
     needs: [plan, preflight, backend, frontend, browser, archive-sdk, governance]
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Require full success or a verified identical merged tree
+      - id: gate
+        name: Require full success or a verified identical merged tree
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -456,13 +584,123 @@ jobs:
           python3 scripts/ci/governance_impact.py --gate
           python3 scripts/ci/local_first_gate.py
           python3 scripts/ci/verification.py gate
-      - name: Record the exact tested tree for main
-        if: needs.plan.outputs.full == 'true'
+      - name: Record exact main full regression result
+        if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'push' && needs.plan.outputs.mode == 'full') || (github.event_name == 'workflow_dispatch' && (needs.plan.outputs.mode == 'full' || inputs.force_full))) }}
+        continue-on-error: true
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          FORCE_FULL: ${{ inputs.force_full || false }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/verification.py regression --out "$RUNNER_TEMP/main-regression.json"
+      - name: Upload exact main full regression result
+        if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'push' && needs.plan.outputs.mode == 'full') || (github.event_name == 'workflow_dispatch' && (needs.plan.outputs.mode == 'full' || inputs.force_full))) }}
+        continue-on-error: true
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-main-regression-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/main-regression.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Record the exact tested PR tree and selection
+        if: ${{ success() && github.event_name == 'pull_request' }}
+        continue-on-error: true
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
         with:
           name: ci-verification-${{ github.run_id }}-${{ github.run_attempt }}
           path: verification.json
           if-no-files-found: error
+          retention-days: 90
+
+  affected-shadow:
+    # Reporting only: the stable required check above retains authority over
+    # all enforced lanes and does not depend on this candidate comparison.
+    if: always()
+    needs: [plan, affected-plan, preflight, backend, frontend, browser, archive-sdk, governance, check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: ci-shadow-*
+          path: ${{ runner.temp }}/affected-shadow
+          merge-multiple: false
+      - name: Join candidate plan to existing lane executions
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/affected-shadow" "$RUNNER_TEMP/affected-shadow-plan.json" "$RUNNER_TEMP/affected-shadow-graph.json" "$RUNNER_TEMP/affected-shadow-runs.json" <<'PY'
+          import json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          plan_path, graph_path, runs_path = map(pathlib.Path, sys.argv[2:])
+          plan_files = sorted(root.glob("ci-shadow-plan-*/affected-plan.json"))
+          if len(plan_files) == 1:
+              plan = json.loads(plan_files[0].read_text(encoding="utf-8"))
+              (plan_path.parent).mkdir(parents=True, exist_ok=True)
+              plan_path.write_text(json.dumps(plan, ensure_ascii=False) + "\n", encoding="utf-8")
+              graph = plan.get("graph_result")
+          else:
+              plan, graph = {}, None
+          graph_path.write_text(json.dumps(graph if isinstance(graph, dict) else {}) + "\n", encoding="utf-8")
+          runs = []
+          for receipt_path in sorted(root.glob("ci-shadow-lane-*/run.json")):
+              try:
+                  receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+              except (OSError, json.JSONDecodeError):
+                  continue
+              log = receipt.get("go_json_log")
+              if isinstance(log, str) and log:
+                  candidate = pathlib.Path(log)
+                  if not candidate.is_absolute() or not candidate.is_file():
+                      candidate = receipt_path.parent / candidate.name
+                  receipt["go_json_log"] = str(candidate.resolve()) if candidate.is_file() else None
+              runs.append(receipt)
+          runs_path.write_text(json.dumps(runs, ensure_ascii=False) + "\n", encoding="utf-8")
+          PY
+      - name: Validate shadow evidence from existing runs
+        if: always()
+        run: |
+          set +e
+          python3 scripts/ci/affected_shadow.py collect \
+            --plan "$RUNNER_TEMP/affected-shadow-plan.json" \
+            --graph "$RUNNER_TEMP/affected-shadow-graph.json" \
+            --runs "$RUNNER_TEMP/affected-shadow-runs.json" \
+            --original-gate-result "${{ needs.check.result }}" \
+            --pr-number "${{ github.event.pull_request.number || '0' }}" \
+            --out "$RUNNER_TEMP/affected-shadow-receipt.json"
+          result=$?
+          if [[ ! -s "$RUNNER_TEMP/affected-shadow-receipt.json" ]]; then
+            python3 - "$RUNNER_TEMP/affected-shadow-receipt.json" "$result" <<'PY'
+          import json, sys
+          with open(sys.argv[1], "w", encoding="utf-8") as output:
+              json.dump({"schema": 1, "observed_mode": "shadow", "required_results_passed": False,
+                         "measurement_eligible": False,
+                         "problems": ["shadow collection unavailable; exit=" + sys.argv[2]]}, output, indent=2)
+              output.write("\n")
+          PY
+          fi
+          python3 - "$RUNNER_TEMP/affected-shadow-receipt.json" "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          with open(sys.argv[2], "a", encoding="utf-8") as output:
+              output.write("Affected shadow evidence: **" + str(data.get("measurement_eligible", False))
+                           + "**; required results passed: **" + str(data.get("required_results_passed", False))
+                           + "**; issues: " + str(len(data.get("problems", []))) + ".\n")
+          PY
+          exit 0
+      - name: Upload non-enforcing shadow execution evidence
+        if: always()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: ci-shadow-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/affected-shadow-receipt.json
+          if-no-files-found: warn
           retention-days: 90
 
   quality-report:
