@@ -196,6 +196,8 @@ def _is_test_or_document(path: str) -> bool:
     name = parsed.name.lower()
     if path.startswith("docs/") or parsed.suffix.lower() in DOC_SUFFIXES:
         return True
+    if parsed.parent.as_posix() == "cmd/aicrm" and name.endswith("_chromium_journey.mjs"):
+        return True
     if any(part.lower() in TEST_DIR_NAMES for part in parsed.parts):
         return True
     if name.endswith("_test.go") or name.startswith(("test_", "test-")):

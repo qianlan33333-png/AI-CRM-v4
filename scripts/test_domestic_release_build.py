@@ -72,6 +72,37 @@ class DomesticReleaseBuildTests(unittest.TestCase):
         self.assertTrue(unknown.runtime_changed)
         self.assertTrue(unknown.full_build)
 
+    def test_aicrm_chromium_journeys_are_tests_but_application_mjs_stays_graph_checked(self) -> None:
+        invitation_journey = "cmd/aicrm/invitation_chromium_journey.mjs"
+        repository = Path(__file__).resolve().parents[1]
+        self.assertTrue((repository / invitation_journey).is_file())
+        invitation = builder.classify_paths([invitation_journey])
+        self.assertFalse(invitation.runtime_changed)
+        self.assertFalse(invitation.full_build)
+        self.assertEqual(invitation.build_mode, "none")
+
+        application_asset = "cmd/aicrm/application_runtime.mjs"
+        application = builder.classify_paths([application_asset])
+        self.assertTrue(application.runtime_changed)
+        self.assertEqual(application.graph_paths, [application_asset])
+
+        command = builder.ReleaseCommand("./cmd/aicrm", "aicrm")
+        packages = {
+            "example/cmd/aicrm": builder.GoPackage(
+                "example/cmd/aicrm", "cmd/aicrm", [], {"cmd/aicrm/main.go"}, set(), set(),
+            ),
+        }
+        graphs = {"./cmd/aicrm": {"example/cmd/aicrm"}}
+        with self.assertRaises(builder.BuildError):
+            builder.affected_go_commands([application_asset], [command], packages, graphs)
+
+        embedded_asset = "cmd/aicrm/embedded_runtime.mjs"
+        packages["example/cmd/aicrm"].embed_files.add(embedded_asset)
+        self.assertEqual(
+            builder.affected_go_commands([embedded_asset], [command], packages, graphs),
+            ["./cmd/aicrm"],
+        )
+
     def test_frontend_migration_and_infrastructure_impacts_choose_minimum_safe_build(self) -> None:
         frontend = builder.classify_paths(["web/v3/payment/page.ts"])
         self.assertTrue(frontend.runtime_changed)
