@@ -32,7 +32,7 @@ run_frontend_and_stage_checks() {
   node internal/webshell/static/admin_console/survey_operations_frozen_runtime.test.mjs
   node web/v3/committedTextSearch.test.mjs
   node --test internal/webshell/chromium_launch.test.mjs
-  node --test internal/webshell/data_workspace_chromium_binary.test.mjs
+  node --test internal/webshell/chromium_binary.test.mjs
   node internal/webshell/owner_handoff_host.test.mjs
   node scripts/build-v3-host-adapters.mjs
   node --test web/v3/publicCommerceHost.test.mjs
