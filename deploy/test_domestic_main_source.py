@@ -44,6 +44,15 @@ class DomesticMainSourceTests(unittest.TestCase):
         (self.repo / "app.txt").write_text("installed app\n")
         self.git("add", "app.txt")
         self.git("commit", "--quiet", "-m", "installed app")
+        self.initial_app_sha = self.git("rev-parse", "HEAD")
+        self.git("branch", "-M", "main")
+        self.git("checkout", "--quiet", "-b", "install-predecessor")
+        (self.repo / "previous.txt").write_text("previous installed release\n")
+        self.git("add", "previous.txt")
+        self.git("commit", "--quiet", "-m", "previous installed app")
+        self.previous_app_sha = self.git("rev-parse", "HEAD")
+        self.git("checkout", "--quiet", "main")
+        self.git("merge", "--quiet", "--no-ff", "install-predecessor", "-m", "installed app merge")
         self.app_sha = self.git("rev-parse", "HEAD")
         self.app_tree = self.git("rev-parse", "HEAD^{tree}")
         (self.repo / "docs.md").write_text("source-only baseline\n")
@@ -61,7 +70,6 @@ class DomesticMainSourceTests(unittest.TestCase):
         self.git("commit", "--quiet", "-m", "stale base candidate")
         self.stale_sha = self.git("rev-parse", "HEAD")
         self.stale_tree = self.git("rev-parse", "HEAD^{tree}")
-        self.git("branch", "-M", "main")
         self._make_bundle(self.baseline_sha, self.app_sha, baseline=True)
         self.baseline_bundle = self.incoming / f"{self.baseline_sha}.bundle"
         self.baseline_digest = installer.digest(self.baseline_bundle)
@@ -191,7 +199,12 @@ class DomesticMainSourceTests(unittest.TestCase):
         return info
 
     def _make_production_app(self):
-        release = self.releases / self.app_sha
+        return self._install_fixture_app(self.app_sha, self.app_tree, self.previous_app_sha)
+
+    def _install_fixture_app(self, sha: str, tree: str, previous_sha: str | None) -> str:
+        release = self.releases / sha
+        if release.exists():
+            shutil.rmtree(release)
         (release / "bin").mkdir(parents=True)
         (release / "web/dist").mkdir(parents=True)
         (release / "bin/aicrm").write_bytes(b"synthetic app binary")
@@ -202,22 +215,24 @@ class DomesticMainSourceTests(unittest.TestCase):
         manifest = release / "release-files.sha256"
         manifest.write_text("".join(entries))
         manifest_sha = installer.digest(manifest)
-        (release / "release.env").write_text(f"AICRM_RELEASE_SHA={self.app_sha}\n")
+        (release / "release.env").write_text(f"AICRM_RELEASE_SHA={sha}\n")
         self.current = self.root / "current"
+        self.current.unlink(missing_ok=True)
         self.current.symlink_to(release)
-        self.install_receipt = {
+        install_receipt = {
             "schema_version": 1,
-            "source_sha": self.app_sha,
-            "source_tree": self.app_tree,
+            "source_sha": sha,
+            "source_tree": tree,
             "manifest_sha256": manifest_sha,
-            "previous_sha": None,
+            "previous_sha": previous_sha,
             "database_backup": None,
             "technical_status": "installed_healthy",
             "installed_at_utc": "2026-09-25T00:00:00Z",
         }
-        receipt_path = self.receipts / f"{self.app_sha}.json"
-        receipt_path.write_text(json.dumps(self.install_receipt, sort_keys=True) + "\n")
+        receipt_path = self.receipts / f"{sha}.json"
+        receipt_path.write_text(json.dumps(install_receipt, sort_keys=True) + "\n")
         receipt_path.chmod(0o600)
+        self.install_receipt = install_receipt
         return manifest_sha
 
     def _save_baseline(self):
@@ -244,6 +259,9 @@ class DomesticMainSourceTests(unittest.TestCase):
             allow_baseline_transition=True,
         )
         self.assertEqual(verified["_first_parent"][:2], [self.baseline_sha, self.app_sha])
+        self.assertEqual(verified["source_receipt_sha256"], installer.digest(
+            self.backups / f"{self.baseline_sha}.bundle.json",
+        ))
         repeated = self._save_baseline()
         self.assertEqual(repeated["bundle_sha256"], self.baseline_digest)
         self.assertTrue((self.backups / f"{self.baseline_sha}.bundle").exists())
@@ -322,7 +340,12 @@ class DomesticMainSourceTests(unittest.TestCase):
             "--allow-baseline-transition",
         ]
         output = io.StringIO()
-        expected = {"status": "verified", "_first_parent": [self.baseline_sha, self.app_sha]}
+        expected = {
+            "status": "verified",
+            "source_receipt_sha256": "b" * 64,
+            "_first_parent": [self.baseline_sha, self.app_sha],
+            "_app_ancestors": [self.app_sha],
+        }
         with mock.patch.object(installer.sys, "argv", argv), mock.patch.object(installer.os, "geteuid", return_value=0), mock.patch.object(installer, "verify_domestic_source_backup", return_value=expected) as verify, redirect_stdout(output):
             installer.main()
         verify.assert_called_once_with(
@@ -330,7 +353,9 @@ class DomesticMainSourceTests(unittest.TestCase):
             previous_main_sha=self.app_sha, expected_bundle_sha256=self.baseline_digest,
             allow_baseline_transition=True,
         )
-        self.assertEqual(json.loads(output.getvalue()), {"status": "verified"})
+        self.assertEqual(json.loads(output.getvalue()), {
+            "status": "verified", "source_receipt_sha256": "b" * 64,
+        })
     def test_baseline_transition_is_explicit_and_normal_candidate_uses_old_main_ref(self):
         self.baseline_bundle.chmod(0o400)
         with self.assertRaisesRegex(ValueError, "bundle refs do not match"):
@@ -394,6 +419,23 @@ class DomesticMainSourceTests(unittest.TestCase):
         self.assertEqual(output["status"], "ready")
         self.assertEqual(output["cursor"]["main_sha"], self.baseline_sha)
         self.assertEqual(output["cursor"]["installed_app_sha"], self.app_sha)
+        self.assertEqual(output["cursor"]["legacy_previous_sha"], self.previous_app_sha)
+        verified = installer.verify_domestic_source_backup(
+            source_sha=self.baseline_sha, source_tree=self.baseline_tree,
+            previous_main_sha=self.app_sha, expected_bundle_sha256=self.baseline_digest,
+            allow_baseline_transition=True, installed_app_sha=self.app_sha,
+            installed_app_tree=self.app_tree,
+        )
+        self.assertIn(self.previous_app_sha, verified["_app_ancestors"])
+        self.assertNotIn(self.previous_app_sha, verified["_first_parent"])
+        self.assertIn(self.app_sha, verified["_first_parent"])
+        self.assertIn(self.previous_app_sha, installer._build_main_cursor(
+            main_sha=self.baseline_sha, main_tree=self.baseline_tree,
+            installed_app_sha=self.app_sha, installed_app_tree=self.app_tree,
+            installed_manifest_sha256=self.manifest_sha,
+            source_bundle_sha256=self.baseline_digest,
+            previous_main_sha=self.app_sha, allow_baseline_transition=True,
+        )[0]["legacy_previous_sha"])
         raw_receipt = (self.receipts / f"{self.app_sha}.json").read_bytes()
         self.assertEqual(output["install_receipt_sha256"], hashlib.sha256(raw_receipt).hexdigest())
 
@@ -410,6 +452,26 @@ class DomesticMainSourceTests(unittest.TestCase):
                 source_bundle_sha256=self.baseline_digest,
             )
         self.assertFalse(installer.DOMESTIC_MAIN_STATE.exists())
+
+    def test_initialize_refuses_existing_cursor_with_damaged_legacy_marker(self):
+        self._save_baseline()
+        installer.initialize_domestic_main(
+            main_sha=self.baseline_sha, main_tree=self.baseline_tree,
+            installed_app_sha=self.app_sha, installed_app_tree=self.app_tree,
+            installed_manifest_sha256=self.manifest_sha,
+            source_bundle_sha256=self.baseline_digest,
+        )
+        state = json.loads(installer.DOMESTIC_MAIN_STATE.read_text())
+        state["legacy_previous_sha"] = self.app_sha
+        installer.DOMESTIC_MAIN_STATE.write_text(json.dumps(state, sort_keys=True) + "\n")
+        installer.DOMESTIC_MAIN_STATE.chmod(0o600)
+        with self.assertRaisesRegex(ValueError, "marker does not match"):
+            installer.initialize_domestic_main(
+                main_sha=self.baseline_sha, main_tree=self.baseline_tree,
+                installed_app_sha=self.app_sha, installed_app_tree=self.app_tree,
+                installed_manifest_sha256=self.manifest_sha,
+                source_bundle_sha256=self.baseline_digest,
+            )
 
     def test_install_receipt_mismatch_stale_cursor_cas_and_lost_ack_retry(self):
         self._save_baseline()
@@ -431,6 +493,17 @@ class DomesticMainSourceTests(unittest.TestCase):
             self.next_bundle, source_sha=self.next_sha, source_tree=self.next_tree,
             previous_main_sha=self.baseline_sha, expected_bundle_sha256=self.next_digest,
         )
+        receipt_path.write_bytes(original_receipt + b" ")
+        with self.assertRaisesRegex(ValueError, "production install receipt digest mismatch"):
+            installer.record_domestic_main(
+                main_sha=self.next_sha, main_tree=self.next_tree,
+                installed_app_sha=self.app_sha, installed_app_tree=self.app_tree,
+                installed_manifest_sha256=self.manifest_sha,
+                source_bundle_sha256=self.next_digest,
+                expected_previous_main_sha=self.baseline_sha,
+            )
+        self.assertEqual(installer._read_main_state()["main_sha"], self.baseline_sha)
+        receipt_path.write_bytes(original_receipt)
         recorded = installer.record_domestic_main(
             main_sha=self.next_sha, main_tree=self.next_tree,
             installed_app_sha=self.app_sha, installed_app_tree=self.app_tree,
@@ -447,6 +520,10 @@ class DomesticMainSourceTests(unittest.TestCase):
         )
         self.assertEqual(repeated, recorded)
         self.assertEqual(installer.read_domestic_main()["cursor"]["main_sha"], self.next_sha)
+        self.assertEqual(
+            installer.read_domestic_main()["cursor"]["legacy_previous_sha"],
+            self.previous_app_sha,
+        )
         stale_bundle = self.incoming / f"{self.stale_sha}.bundle"
         installer.save_domestic_source_bundle(
             stale_bundle, source_sha=self.stale_sha, source_tree=self.stale_tree,
@@ -472,6 +549,115 @@ class DomesticMainSourceTests(unittest.TestCase):
         manifest.write_text(manifest.read_text() + "\n")
         with self.assertRaises((ValueError, RuntimeError)):
             installer.read_domestic_main()
+
+    def test_baseline_previous_main_must_equal_installed_application(self):
+        saved = installer.save_domestic_source_bundle(
+            self.baseline_bundle, source_sha=self.baseline_sha,
+            source_tree=self.baseline_tree, previous_main_sha=self.initial_app_sha,
+            expected_bundle_sha256=self.baseline_digest,
+            allow_baseline_transition=True,
+        )
+        self.assertEqual(saved["previous_main_sha"], self.initial_app_sha)
+        with self.assertRaisesRegex(ValueError, "previous main must equal"):
+            installer._build_main_cursor(
+                main_sha=self.baseline_sha, main_tree=self.baseline_tree,
+                installed_app_sha=self.app_sha, installed_app_tree=self.app_tree,
+                installed_manifest_sha256=self.manifest_sha,
+                source_bundle_sha256=self.baseline_digest,
+                previous_main_sha=self.initial_app_sha,
+                allow_baseline_transition=True,
+            )
+        self.assertFalse(installer.DOMESTIC_MAIN_STATE.exists())
+
+    def test_rejects_predecessor_reachable_only_from_main_side_parent(self):
+        # This unrelated branch is reachable from the candidate main merge but
+        # is not part of the installed application's ancestry.
+        self.git("checkout", "--quiet", "--detach", self.app_sha)
+        (self.repo / "unrelated.txt").write_text("unrelated main side branch\n")
+        self.git("add", "unrelated.txt")
+        self.git("commit", "--quiet", "-m", "unrelated main side branch")
+        unrelated_sha = self.git("rev-parse", "HEAD")
+        self.git("checkout", "--quiet", "main")
+        self.git("merge", "--quiet", "--no-ff", unrelated_sha, "-m", "merge unrelated history")
+        candidate_sha = self.git("rev-parse", "HEAD")
+        candidate_tree = self.git("rev-parse", "HEAD^{tree}")
+        self._make_bundle(candidate_sha, self.app_sha, baseline=True)
+        candidate_bundle = self.incoming / f"{candidate_sha}.bundle"
+        candidate_digest = installer.digest(candidate_bundle)
+        # Replace the installed receipt's historical predecessor with a valid
+        # commit in main's DAG that is not an ancestor of the installed app.
+        self.install_receipt["previous_sha"] = unrelated_sha
+        (self.receipts / f"{self.app_sha}.json").write_text(
+            json.dumps(self.install_receipt, sort_keys=True) + "\n",
+        )
+        (self.receipts / f"{self.app_sha}.json").chmod(0o600)
+        saved = installer.save_domestic_source_bundle(
+            candidate_bundle, source_sha=candidate_sha, source_tree=candidate_tree,
+            previous_main_sha=self.app_sha, expected_bundle_sha256=candidate_digest,
+            allow_baseline_transition=True,
+        )
+        self.assertEqual(saved["source_sha"], candidate_sha)
+        with self.assertRaisesRegex(ValueError, "not an ancestor of the installed app"):
+            installer._build_main_cursor(
+                main_sha=candidate_sha, main_tree=candidate_tree,
+                installed_app_sha=self.app_sha, installed_app_tree=self.app_tree,
+                installed_manifest_sha256=self.manifest_sha,
+                source_bundle_sha256=candidate_digest,
+                previous_main_sha=self.app_sha,
+                allow_baseline_transition=True,
+            )
+
+    def test_runtime_install_receipt_must_name_prior_cursor_app_exactly(self):
+        self._save_baseline()
+        installer.initialize_domestic_main(
+            main_sha=self.baseline_sha, main_tree=self.baseline_tree,
+            installed_app_sha=self.app_sha, installed_app_tree=self.app_tree,
+            installed_manifest_sha256=self.manifest_sha,
+            source_bundle_sha256=self.baseline_digest,
+        )
+        self.git("checkout", "--quiet", "main")
+        self.git("reset", "--quiet", "--hard", self.baseline_sha)
+        (self.repo / "app.txt").write_text("next installed app\n")
+        self.git("add", "app.txt")
+        self.git("commit", "--quiet", "-m", "runtime app update")
+        candidate_sha = self.git("rev-parse", "HEAD")
+        candidate_tree = self.git("rev-parse", "HEAD^{tree}")
+        self._make_bundle(candidate_sha, self.baseline_sha)
+        candidate_bundle = self.incoming / f"{candidate_sha}.bundle"
+        candidate_digest = installer.digest(candidate_bundle)
+        installer.save_domestic_source_bundle(
+            candidate_bundle, source_sha=candidate_sha, source_tree=candidate_tree,
+            previous_main_sha=self.baseline_sha,
+            expected_bundle_sha256=candidate_digest,
+        )
+
+        # This older commit is still on main's first-parent chain, but it was
+        # not the app currently installed before this runtime change.
+        wrong_manifest = self._install_fixture_app(
+            candidate_sha, candidate_tree, self.initial_app_sha,
+        )
+        with self.assertRaisesRegex(ValueError, "does not match the prior installed app"):
+            installer.record_domestic_main(
+                main_sha=candidate_sha, main_tree=candidate_tree,
+                installed_app_sha=candidate_sha, installed_app_tree=candidate_tree,
+                installed_manifest_sha256=wrong_manifest,
+                source_bundle_sha256=candidate_digest,
+                expected_previous_main_sha=self.baseline_sha,
+            )
+        self.assertEqual(installer._read_main_state()["main_sha"], self.baseline_sha)
+
+        correct_manifest = self._install_fixture_app(
+            candidate_sha, candidate_tree, self.app_sha,
+        )
+        recorded = installer.record_domestic_main(
+            main_sha=candidate_sha, main_tree=candidate_tree,
+            installed_app_sha=candidate_sha, installed_app_tree=candidate_tree,
+            installed_manifest_sha256=correct_manifest,
+            source_bundle_sha256=candidate_digest,
+            expected_previous_main_sha=self.baseline_sha,
+        )
+        self.assertEqual(recorded["main_sha"], candidate_sha)
+        self.assertNotIn("legacy_previous_sha", recorded)
 
 
 if __name__ == "__main__":

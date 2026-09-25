@@ -234,7 +234,7 @@
    fi
    ```
 
-**先从 Mac 准备并验证准确 PR #46 head 的 seed bundle。** 旧 stage `/opt/aicrm/source` 不含 PR #46 head 且含旧 GitHub remote 配置，不能用作工具或候选来源。本次国内 `source.git` 已存在并保留 main=291；PR #46 bundle 只用于核验候选历史、导出精确工具字节和运行候选 controller，不用于重建或覆盖该仓库。GitHub `main` 保持在 `6d3ee9c`。bundle 只经现有运维 SSH（`/Users/qianlan/Downloads/zhengshi.pem`，通过 production `124.220.53.183` 跳板到 stage `10.0.4.6`）传到 `/var/tmp`；先核对 HostKey pin 与该 key `0600`。此身份只用于受控文件传输，不提供 GitHub 凭据，也不使用受限 archive-ack key。
+**先从 Mac 准备并验证准确 PR #46 head 的 seed bundle。** 旧 stage `/opt/aicrm/source` 不含 PR #46 head 且含旧 GitHub remote 配置，不能用作工具或候选来源。本次国内 `source.git` 已存在并保留 main=291；PR #46 bundle 只用于核验候选历史、导出精确工具字节和运行候选 controller，不用于重建或覆盖该仓库。GitHub `main` 保持在 `6d3ee9c`，仅作人工归档；本次切换不查询也不依赖 GitHub Actions。GitHub `pull_request` 检查使用 GitHub 合成 merge tree，不能证明候选相对国内 291 的检查结果。后文 `resume-baseline` 会在 verified seed 中按 291→candidate 运行 trusted tool lanes、国内 release-controller 全套单测及预备机 helper host contract；这些是本次国内基线的实际检查。bundle 只经现有运维 SSH（`/Users/qianlan/Downloads/zhengshi.pem`，通过 production `124.220.53.183` 跳板到 stage `10.0.4.6`）传到 `/var/tmp`；先核对 HostKey pin 与该 key `0600`。此身份只用于受控文件传输，不提供 GitHub 凭据，也不使用受限 archive-ack key。
 
    在 Mac 开发机的 clean 工作树上执行，`DOMESTIC_MAIN_SHA` 是 PR #46 最终准确 head，`APP_SHA` 是已安装应用 SHA，`DOMESTIC_MAIN_TREE` 是已审查的 head tree。临时 ref 不覆盖现有 branch，bundle 只包含该 commit 的完整可达历史：
 
@@ -243,8 +243,11 @@
    DOMESTIC_MAIN_SHA=<EXACT_PR46_HEAD_SHA>
    DOMESTIC_MAIN_TREE=<EXACT_PR46_HEAD_TREE>
    APP_SHA=<EXACT_INSTALLED_APP_SHA>
-   SEED_REF="refs/domestic-main-seed/$DOMESTIC_MAIN_SHA"
+   SEED_REPO="${TMPDIR:-/tmp}/domestic-main-seed-source-$DOMESTIC_MAIN_SHA.git"
+   SEED_REF="refs/heads/main"
    BUNDLE="${TMPDIR:-/tmp}/domestic-main-seed-$DOMESTIC_MAIN_SHA.bundle"
+   test ! -e "$SEED_REPO"
+   test ! -L "$SEED_REPO"
    test ! -e "$BUNDLE"
    test ! -L "$BUNDLE"
    test "$(git rev-parse HEAD)" = "$DOMESTIC_MAIN_SHA"
@@ -253,17 +256,13 @@
    git cat-file -e "$DOMESTIC_MAIN_SHA^{commit}"
    git merge-base --is-ancestor "$APP_SHA" "$DOMESTIC_MAIN_SHA"
    git rev-list --first-parent "$DOMESTIC_MAIN_SHA" | grep -Fx "$APP_SHA"
-   if git show-ref --verify --quiet "$SEED_REF"; then
-     echo 'seed ref already exists' >&2
-     exit 1
-   fi
-   git update-ref "$SEED_REF" "$DOMESTIC_MAIN_SHA"
-   git bundle create "$BUNDLE" "$SEED_REF"
+   git init --bare --quiet "$SEED_REPO"
+   git -C "$(git rev-parse --show-toplevel)" push "$SEED_REPO" "$DOMESTIC_MAIN_SHA:$SEED_REF"
+   git --git-dir="$SEED_REPO" bundle create "$BUNDLE" "$SEED_REF"
    VERIFY=$(git bundle verify "$BUNDLE")
    printf '%s\n' "$VERIFY"
    grep -F 'The bundle records a complete history.' <<<"$VERIFY"
    git bundle list-heads "$BUNDLE" | grep -Fx "$DOMESTIC_MAIN_SHA $SEED_REF"
-   git update-ref -d "$SEED_REF"
    sha256sum "$BUNDLE"
    ```
 
@@ -285,7 +284,7 @@
    BUNDLE_SHA256=<BUNDLE_SHA256>
    BUNDLE="/var/tmp/domestic-main-seed-$DOMESTIC_MAIN_SHA.bundle"
    SEED_REPO="/var/tmp/domestic-main-seed-$DOMESTIC_MAIN_SHA.git"
-   SEED_REF="refs/domestic-main-seed/$DOMESTIC_MAIN_SHA"
+   SEED_REF="refs/heads/main"
    sudo test -f "$BUNDLE"
    sudo test ! -L "$BUNDLE"
    test "$(sudo sha256sum "$BUNDLE" | awk '{print $1}')" = "$BUNDLE_SHA256"
@@ -331,7 +330,7 @@
    done
    ```
 
-3. **核验并安装固定工具字节。** 本次工具基线 SHA 为 `291baa2d13864c3a60f3ed93e08382c3e598db33`。在准确 PR #46 candidate `<EXACT_PR46_HEAD_SHA>` 的 clean V4 工作树核对 fixed files；除 `domestic_main_release.py` 外，待安装 fixed files 必须与 291 blob 完全相同。PR46 candidate controller 从 seed 导出后仅作临时命令脚本，不在 baseline 前替换已安装 291 controller。stage 与 production 的 helper、builder、unit 均保持 291 字节；安装前备份同路径 regular files，用 `.new` 比对 291 blob 摘要后原子改名。新 controller 仅在 baseline 后通过双重 maintenance-check、marker 核验后安装。
+3. **核验并安装固定工具字节。** 本次基线 SHA 为 `291baa2d13864c3a60f3ed93e08382c3e598db33`。在准确 PR #46 candidate `<EXACT_PR46_HEAD_SHA>` 的 clean V4 工作树核对 fixed files；只有 `deploy/domestic-promote.py` 与 `scripts/domestic_main_release.py` 可与 291 不同，其他固定工具、builder、unit 必须与 291 blob 相同。`domestic-promote.py` 是恢复 cursor 所需的唯一 overlay：先在 stage 与 production 手工备份并原子安装候选 helper，逐台核对候选 SHA；不安装应用，也不改 production controller。PR46 candidate controller 从 seed 导出后仅作临时命令脚本，baseline 前不替换 stage controller。新 controller 在 baseline 后通过候选自身的 `maintenance-check` 写 marker，再手工安装。
 
    ```bash
    set -euo pipefail
@@ -340,13 +339,20 @@
    test "$(git rev-parse HEAD)" = "$DOMESTIC_MAIN_SHA"
    test -z "$(git status --porcelain)"
    for path in scripts/domestic_release.py \
-     scripts/domestic_release_build.py deploy/domestic-promote.py \
+     scripts/domestic_release_build.py \
      deploy/aicrm-domestic-main-release.service deploy/aicrm-domestic-main-release.timer; do
      baseline=$(git show "$BASELINE_SHA:$path" | sha256sum | cut -d ' ' -f 1)
      candidate=$(git show "$DOMESTIC_MAIN_SHA:$path" | sha256sum | cut -d ' ' -f 1)
      test "$candidate" = "$baseline" || { printf 'fixed tool differs from baseline: %s\n' "$path" >&2; exit 1; }
      printf '%s  %s\n' "$baseline" "$path"
    done
+   BASELINE_HELPER=$(git show "$BASELINE_SHA:deploy/domestic-promote.py" | sha256sum | cut -d ' ' -f 1)
+   CANDIDATE_HELPER=$(git show "$DOMESTIC_MAIN_SHA:deploy/domestic-promote.py" | sha256sum | cut -d ' ' -f 1)
+   test "$CANDIDATE_HELPER" != "$BASELINE_HELPER" || {
+     echo 'PR #46 candidate helper unexpectedly equals baseline 291' >&2
+     exit 1
+   }
+   printf '%s  candidate deploy/domestic-promote.py\n' "$CANDIDATE_HELPER"
    ```
 
    stage 工具先备份再安装为同目录 `.new`，比较文件摘要完全相同后才 `mv` 到正式路径：
@@ -372,6 +378,7 @@
        sudo install -d -o root -g root -m 0755 "$directory"
      fi
    done
+   EXPECTED_BASELINE_HELPER=$(sudo /usr/bin/git --git-dir="$SEED_REPO" show "$BASELINE_SHA:deploy/domestic-promote.py" | sha256sum | awk '{print $1}')
    for path in /usr/local/libexec/aicrm/domestic_release.py \
      /usr/local/libexec/aicrm/domestic_release_build.py \
      /usr/local/libexec/aicrm/domestic-promote.py \
@@ -385,9 +392,26 @@
        test "$(sudo stat -c '%u:%g' -- "$path")" = '0:0'
        mode=$(sudo stat -c '%a' -- "$path")
        (( (8#$mode & 18) == 0 )) || { printf 'writable release file: %s\n' "$path" >&2; exit 1; }
-       sudo test ! -e "$path.pre-domestic-main"
-       sudo test ! -L "$path.pre-domestic-main"
-       sudo install -o root -g root -m 0600 "$path" "$path.pre-domestic-main"
+       if [[ "$path" == /usr/local/libexec/aicrm/domestic-promote.py ]]; then
+         test "$(sudo sha256sum "$path" | awk '{print $1}')" = "$EXPECTED_BASELINE_HELPER"
+         backup="$path.pre-baseline-overlay-291"
+         if sudo test -L "$backup"; then
+           echo "refusing linked baseline helper backup: $backup" >&2; exit 1
+         elif sudo test -e "$backup"; then
+           sudo test -f "$backup"
+           test "$(sudo stat -c '%F %U:%G %a' -- "$backup")" = 'regular file root:root 600'
+           test "$(sudo sha256sum "$backup" | awk '{print $1}')" = "$EXPECTED_BASELINE_HELPER"
+         else
+           sudo test ! -e "$backup" && sudo test ! -L "$backup"
+           sudo install -o root -g root -m 0600 "$path" "$backup"
+         fi
+         test "$(sudo stat -c '%F %U:%G %a' -- "$backup")" = 'regular file root:root 600'
+         test "$(sudo sha256sum "$backup" | awk '{print $1}')" = "$EXPECTED_BASELINE_HELPER"
+       else
+         sudo test ! -e "$path.pre-domestic-main"
+         sudo test ! -L "$path.pre-domestic-main"
+         sudo install -o root -g root -m 0600 "$path" "$path.pre-domestic-main"
+       fi
      fi
    done
    for path in /usr/local/libexec/aicrm/domestic_release.py.new \
@@ -405,7 +429,7 @@
    sudo install -o root -g root -m 0644 "$SOURCE_WORK/deploy/aicrm-domestic-main-release.timer" /etc/systemd/system/aicrm-domestic-main-release.timer.new
    ```
 
-   在替换正式文件前，对全部 `.new` 文件逐个比较固定 baseline SHA `291baa2d...` 的 Git blob 摘要；任一不符即停止，不能执行后续 `mv`。另只读确认已安装 controller 仍匹配该 baseline blob，不能安装 candidate controller：
+   在替换正式文件前，固定工具与 unit 的 `.new` 文件逐个比较 baseline 291 blob；唯一例外 `domestic-promote.py.new` 必须匹配准确 PR #46 candidate blob。任一不符即停止，不能执行后续 `mv`。另只读确认已安装 controller 仍匹配 baseline 291 blob，不能安装 candidate controller：
 
    ```bash
    set -euo pipefail
@@ -421,10 +445,11 @@
    done <<'EOF'
    scripts/domestic_release.py /usr/local/libexec/aicrm/domestic_release.py.new
    scripts/domestic_release_build.py /usr/local/libexec/aicrm/domestic_release_build.py.new
-   deploy/domestic-promote.py /usr/local/libexec/aicrm/domestic-promote.py.new
    deploy/aicrm-domestic-main-release.service /etc/systemd/system/aicrm-domestic-main-release.service.new
    deploy/aicrm-domestic-main-release.timer /etc/systemd/system/aicrm-domestic-main-release.timer.new
    EOF
+   EXPECTED_HELPER=$(sudo /usr/bin/git --git-dir="$SEED_REPO" show "$DOMESTIC_MAIN_SHA:deploy/domestic-promote.py" | sha256sum | awk '{print $1}')
+   test "$(sudo sha256sum /usr/local/libexec/aicrm/domestic-promote.py.new | awk '{print $1}')" = "$EXPECTED_HELPER"
    ```
 
    比对 `.new` 文件与准确 main 源摘要后，才原子替换并读回：
@@ -541,7 +566,7 @@
    sudo test "$(sudo /usr/bin/git --git-dir="$SEED_REPO" rev-parse refs/heads/main)" = "$DOMESTIC_MAIN_SHA"
    test ! -e "$UPLOAD" && test ! -L "$UPLOAD"
    sudo install -o ubuntu -g ubuntu -m 0644 "$SOURCE_WORK/deploy/domestic-promote.py" "$UPLOAD"
-   EXPECTED=$(sudo /usr/bin/git --git-dir="$SEED_REPO" show "$BASELINE_SHA:deploy/domestic-promote.py" | sha256sum | awk '{print $1}')
+   EXPECTED=$(sudo /usr/bin/git --git-dir="$SEED_REPO" show "$DOMESTIC_MAIN_SHA:deploy/domestic-promote.py" | sha256sum | awk '{print $1}')
    test "$(sudo sha256sum "$UPLOAD" | awk '{print $1}')" = "$EXPECTED"
    ssh -i /home/ubuntu/.ssh/ai-crm-v4-prod-deploy \
      -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/ubuntu/.ssh/known_hosts_aicrm_prod \
@@ -558,22 +583,63 @@
    test "$REMOTE_SHA" = "$EXPECTED"
    ```
 
-   只有 production `.new` 摘要与 stage verified seed 中 baseline 291 的 `deploy/domestic-promote.py` blob SHA-256 完全相同，才复制现有 helper 到 root-only 回滚文件并切换；存在旧回滚文件时停止，不能覆盖：
+   现有 `.pre-domestic-main` 是更早 helper 的历史备份，保留不动，不作为回滚到 291 的副本。只有 production 当前 helper 与 291 blob、`.new` 与准确 candidate blob 均匹配时，才创建或验证专用 `.pre-baseline-overlay-291`。该专用回滚文件必须为 root:root 0600 regular file 且摘要等于 291；已存在且摘要相同则复用，不覆盖；不存在才从当前 291 helper create-only 保存。随后原子切换 candidate：
 
    ```bash
    set -euo pipefail
    DOMESTIC_MAIN_SHA=<EXACT_PR46_HEAD_SHA>
    BASELINE_SHA=291baa2d13864c3a60f3ed93e08382c3e598db33
    SEED_REPO="/var/tmp/domestic-main-seed-$DOMESTIC_MAIN_SHA.git"
-   EXPECTED=$(sudo /usr/bin/git --git-dir="$SEED_REPO" show "$BASELINE_SHA:deploy/domestic-promote.py" | sha256sum | awk '{print $1}')
+   EXPECTED=$(sudo /usr/bin/git --git-dir="$SEED_REPO" show "$DOMESTIC_MAIN_SHA:deploy/domestic-promote.py" | sha256sum | awk '{print $1}')
+   EXPECTED_BASELINE=$(sudo /usr/bin/git --git-dir="$SEED_REPO" show "$BASELINE_SHA:deploy/domestic-promote.py" | sha256sum | awk '{print $1}')
    test "$(sudo /usr/bin/git --git-dir="$SEED_REPO" rev-parse refs/heads/main)" = "$DOMESTIC_MAIN_SHA"
    REMOTE_NEW_SHA=$(ssh -i /home/ubuntu/.ssh/ai-crm-v4-prod-deploy \
      -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/ubuntu/.ssh/known_hosts_aicrm_prod \
      ubuntu@10.0.4.13 'sudo sha256sum /usr/local/libexec/aicrm/domestic-promote.py.new' | awk '{print $1}')
    test "$REMOTE_NEW_SHA" = "$EXPECTED"
+   REMOTE_CURRENT_SHA=$(ssh -i /home/ubuntu/.ssh/ai-crm-v4-prod-deploy \
+     -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/ubuntu/.ssh/known_hosts_aicrm_prod \
+     ubuntu@10.0.4.13 'sudo sha256sum /usr/local/libexec/aicrm/domestic-promote.py' | awk '{print $1}')
+   test "$REMOTE_CURRENT_SHA" = "$EXPECTED_BASELINE"
+   BACKUP=/usr/local/libexec/aicrm/domestic-promote.py.pre-baseline-overlay-291
    ssh -i /home/ubuntu/.ssh/ai-crm-v4-prod-deploy \
      -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/ubuntu/.ssh/known_hosts_aicrm_prod \
-     ubuntu@10.0.4.13 'set -e; sudo test ! -L /usr/local/libexec/aicrm/domestic-promote.py; sudo test -f /usr/local/libexec/aicrm/domestic-promote.py; test "$(sudo stat -c "%u:%g" /usr/local/libexec/aicrm/domestic-promote.py)" = "0:0"; sudo test ! -e /usr/local/libexec/aicrm/domestic-promote.py.pre-domestic-main; sudo test ! -L /usr/local/libexec/aicrm/domestic-promote.py.pre-domestic-main; sudo test -e /usr/local/libexec/aicrm/domestic-promote.py.new; sudo test ! -L /usr/local/libexec/aicrm/domestic-promote.py.new; sudo install -o root -g root -m 0600 /usr/local/libexec/aicrm/domestic-promote.py /usr/local/libexec/aicrm/domestic-promote.py.pre-domestic-main; sudo mv /usr/local/libexec/aicrm/domestic-promote.py.new /usr/local/libexec/aicrm/domestic-promote.py; sudo sha256sum /usr/local/libexec/aicrm/domestic-promote.py'
+     ubuntu@10.0.4.13 "sudo bash -s -- '$EXPECTED_BASELINE'" <<'REMOTE_BACKUP_SCRIPT'
+   set -euo pipefail
+   expected="$1"
+   current=/usr/local/libexec/aicrm/domestic-promote.py
+   backup=/usr/local/libexec/aicrm/domestic-promote.py.pre-baseline-overlay-291
+   temporary="$backup.new"
+   test "$(sha256sum "$current" | cut -d ' ' -f1)" = "$expected"
+   if test -L "$backup"; then
+     echo "refusing linked baseline helper backup: $backup" >&2
+     exit 1
+   elif test -e "$backup"; then
+     test -f "$backup"
+     test "$(stat -c '%F %U:%G %a' "$backup")" = 'regular file root:root 600'
+     test "$(sha256sum "$backup" | cut -d ' ' -f1)" = "$expected"
+   else
+     if test -L "$temporary"; then
+       echo "refusing linked temporary helper backup: $temporary" >&2
+       exit 1
+     elif test -e "$temporary"; then
+       test -f "$temporary"
+       test "$(stat -c '%F %U:%G %a' "$temporary")" = 'regular file root:root 600'
+       test "$(sha256sum "$temporary" | cut -d ' ' -f1)" = "$expected"
+     else
+       install -o root -g root -m 0600 "$current" "$temporary"
+     fi
+     test "$(stat -c '%F %U:%G %a' "$temporary")" = 'regular file root:root 600'
+     test "$(sha256sum "$temporary" | cut -d ' ' -f1)" = "$expected"
+     ln -- "$temporary" "$backup"
+     rm -- "$temporary"
+   fi
+   test "$(stat -c '%F %U:%G %a' "$backup")" = 'regular file root:root 600'
+   test "$(sha256sum "$backup" | cut -d ' ' -f1)" = "$expected"
+REMOTE_BACKUP_SCRIPT
+   ssh -i /home/ubuntu/.ssh/ai-crm-v4-prod-deploy \
+     -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/ubuntu/.ssh/known_hosts_aicrm_prod \
+     ubuntu@10.0.4.13 'set -e; sudo test ! -L /usr/local/libexec/aicrm/domestic-promote.py; sudo test -f /usr/local/libexec/aicrm/domestic-promote.py; test "$(sudo stat -c "%u:%g" /usr/local/libexec/aicrm/domestic-promote.py)" = "0:0"; sudo test -e /usr/local/libexec/aicrm/domestic-promote.py.new; sudo test ! -L /usr/local/libexec/aicrm/domestic-promote.py.new; sudo mv /usr/local/libexec/aicrm/domestic-promote.py.new /usr/local/libexec/aicrm/domestic-promote.py; sudo sha256sum /usr/local/libexec/aicrm/domestic-promote.py'
    REMOTE_SHA=$(ssh -i /home/ubuntu/.ssh/ai-crm-v4-prod-deploy \
      -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/ubuntu/.ssh/known_hosts_aicrm_prod \
      ubuntu@10.0.4.13 'sudo sha256sum /usr/local/libexec/aicrm/domestic-promote.py' | awk '{print $1}')
@@ -585,7 +651,7 @@
 
    摘要不符时停止并从回滚文件恢复；任何 host write 都须等到旧队列已按序处理完已知运行时变化、stage 旧 timer/service 已停止、production 旧/新 unit 不存在、准确 PR #46 head 的 app→head 分类为 `runtime_changed=false`、两机 app identity 相等、源码 first-parent 关系验证通过且无不明发布结果。
 
-   安装后在 stage 对固定工具与两个 `/etc/systemd/system/aicrm-domestic-main-release.*` 文件运行 `sha256sum`；已安装 controller 必须仍为 291 字节，其他 fixed files 与 291 源 blob 相等。在 production 对 `/usr/local/libexec/aicrm/domestic-promote.py` 运行 `sha256sum`，与 291 源 blob 比较；只有全等才继续。用 `systemd-analyze verify` 核对落盘 unit，并确认新 timer 仍 disabled/inactive。任何摘要不符都停下，使用回滚文件恢复旧字节并复核。
+   安装后在 stage 对固定工具与两个 `/etc/systemd/system/aicrm-domestic-main-release.*` 文件运行 `sha256sum`；已安装 controller 必须仍匹配 291 blob，`domestic-promote.py` 必须匹配 PR #46 candidate blob，其他 fixed files 与 291 源 blob 相等。在 production 对 `/usr/local/libexec/aicrm/domestic-promote.py` 运行 `sha256sum`，与 candidate SHA 的源 blob 比较；只有全等才继续。用 `systemd-analyze verify` 核对落盘 unit，并确认新 timer 仍 disabled/inactive。任何摘要不符都停下，使用回滚文件恢复旧字节并复核。
 
 4. **准备受保护配置与合成数据库。** 将脱敏样例复制到固定位置，再由 root 按真实环境填写 production SSH key 路径、持久 Host Key pin、合成数据库连接及固定工具 PATH；配置文件必须 `root:root 0600`。不得将密码、私钥或生产数据库连接放进样例、命令历史或报告。state 路径必须精确为 `/opt/aicrm/domestic/control/state.json`，控制器会拒绝其他值。核验 PostgreSQL 为本机 16，检查库为 `aicrm_ci` 或 `aicrm_test_*`，并且只含合成数据。
 
@@ -714,35 +780,41 @@
    APP_SHA=960b30e9406fae2045aeb7ef5dce863976407727
    test "$(sudo /usr/bin/git --git-dir=/opt/aicrm/domestic/source.git rev-parse refs/heads/main)" = "$BASELINE_SHA"
    test "$(sudo /usr/bin/git --git-dir=/opt/aicrm/domestic/source.git rev-parse 'refs/heads/main^{tree}')" = "$BASELINE_TREE"
-   # 本次 source backup 已存在；此处执行只验证并恢复 cursor 的入口。
-   sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" --config /etc/aicrm/domestic-main-release.json resume-baseline
-   sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" --config /etc/aicrm/domestic-main-release.json activate
-   sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" --config /etc/aicrm/domestic-main-release.json verify
+   SEED_BUNDLE="/var/tmp/domestic-main-seed-$DOMESTIC_MAIN_SHA.bundle"
+   test -f "$SEED_BUNDLE" && test ! -L "$SEED_BUNDLE"
+   # This verifies the exact 291-to-candidate seed and local gates; GitHub CI is not queried.
+   # It writes an immutable, root-only proof at work/baseline-helper-overlay-$DOMESTIC_MAIN_SHA.json.
+   sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" \
+     --config /etc/aicrm/domestic-main-release.json resume-baseline \
+     --candidate-sha "$DOMESTIC_MAIN_SHA" --seed-bundle "$SEED_BUNDLE"
+   sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" \
+     --config /etc/aicrm/domestic-main-release.json activate --candidate-sha "$DOMESTIC_MAIN_SHA"
+   sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" \
+     --config /etc/aicrm/domestic-main-release.json verify --candidate-sha "$DOMESTIC_MAIN_SHA"
    ```
 
-   本次中断前生产 source bundle 与 receipt 已持久化，所以必须先 `resume-baseline`；全新初始化且确认 production 尚无对应 backup 时才执行一次 `prepare-baseline`。两种路径返回的 source main SHA/tree 与生产 cursor 必须完全一致，初始队列为空。之后将准确 PR #46 head 通过现有受限入口登记为 `base=291` 的队首候选；不得 poll。先后用固定 291 controller、verified seed 导出的 exact candidate script 对同一 SHA 运行 `maintenance-check`：
+   本次中断前生产 source bundle 与 receipt 已持久化，所以必须先 `resume-baseline`；全新初始化且确认 production 尚无对应 backup 时才执行一次 `prepare-baseline`。两种路径返回的 source main SHA/tree 与生产 cursor 必须完全一致，初始队列为空。overlay 会把候选 SHA、候选 helper/controller blob、seed 摘要及 production source receipt 原始摘要写入每 SHA 独立的 root-only 文件，并在 `work_root/baseline-helper-overlay-active.json` 记录当前唯一候选。GitHub CI 不参与此门禁；硬门禁是在 verified seed 上相对 291 执行的 trusted tool lanes、controller 全套单测及 stage helper host contract。resume 只有在准确 seed/helper 已核对后才只读查询 production cursor 是否存在；首次候选先建立 active pointer，再写 marker、再幂等初始化 cursor。若 cursor 与 ledger 都尚不存在，新 head 可以原子 supersede active SHA，旧 SHA marker 保留且 pointer 记录历史；任一已存在时 active SHA 不可更换。`activate`/`verify` 在调用任一 production helper 前要求 marker 与 active pointer SHA 一致，并先核对当前 helper/controller 摘要。随后将同一 SHA 通过现有受限入口登记为 `base=291` 的队首候选；不得先 poll。运行 verified seed 导出的 exact candidate script 执行 `maintenance-check`，确认 marker 后再安装 candidate controller：
 
-   如果后续 `prepare-baseline` 在生产 source bundle 已保存后中断，**不要再次运行 `prepare-baseline`**。先只读核对 stage 本地 `.bundle` 与 `.json` 的 SHA、树、旧 app SHA 和 bundle 摘要，再使用同一 verified PR46 head 临时脚本执行 `resume-baseline`：
+   如果后续 `prepare-baseline` 在生产 source bundle 已保存后中断，**不要再次运行 `prepare-baseline`**。先只读核对 stage 本地 `.bundle` 与 `.json` 的 SHA、树、旧 app SHA 和 bundle 摘要，再用相同 PR46 head 和 seed bundle 执行 `resume-baseline`：
 
    ```bash
    sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" \
-     --config /etc/aicrm/domestic-main-release.json resume-baseline
+     --config /etc/aicrm/domestic-main-release.json resume-baseline \
+     --candidate-sha "$DOMESTIC_MAIN_SHA" --seed-bundle "/var/tmp/domestic-main-seed-$DOMESTIC_MAIN_SHA.bundle"
    ```
 
-   该恢复入口只验证已有本地 bundle/meta，并让已安装的 291 production helper 只读核验其 root-owned bundle 与 receipt（包含持久 `baseline_transition=true`），随后幂等初始化/读回 production cursor。它不重新传包、不调用保存命令、不构建或安装应用。摘要、身份、receipt、现存 cursor 任一不符就停止；不得删除、覆盖、重建或重传。只有返回 `baseline_resumed` 且 source SHA/tree、app SHA、bundle SHA 全部与现场预检一致，才继续 `activate` 和 `verify`。
+   该恢复入口只验证已有本地 bundle/meta，并让已摘要核对的 candidate production helper 只读核验其 root-owned bundle 与 receipt，随后幂等初始化/读回 production cursor。它不重新传包、不调用保存命令、不构建或安装应用。摘要、身份、receipt、现存 cursor 任一不符就停止；不得删除、覆盖、重建或重传。同 SHA 重入重新检查 seed、helper、base=291 tool lanes、controller 单测及 staging host contract；create-only marker 保留首次 check receipt 摘要，后续运行目录/耗时导致的 receipt hash 差异不改变候选身份，也不会覆盖 marker。若 PR head 变更且 cursor 与 ledger 都尚不存在，可用新 head 更新 active pointer、保留旧 SHA marker 供审计；若 cursor 或 ledger 任一已创建，则 active pointer 固定，只能继续原 SHA 并对账，禁止换候选。
 
    ```bash
    set -euo pipefail
    DOMESTIC_MAIN_SHA=<EXACT_PR46_HEAD_SHA>
    SOURCE_WORK="/var/tmp/domestic-main-source-$DOMESTIC_MAIN_SHA"
    CONFIG=/etc/aicrm/domestic-main-release.json
-   sudo /usr/bin/python3 /usr/local/libexec/aicrm/domestic_main_release.py \
-     --config "$CONFIG" maintenance-check --sha "$DOMESTIC_MAIN_SHA"
    sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" \
      --config "$CONFIG" maintenance-check --sha "$DOMESTIC_MAIN_SHA"
    ```
 
-   两次结果必须显示相同的 candidate SHA/tree/base、controller 文件清单、toolchain 与 lane 集合，且每条 lane 均通过；raw receipt SHA 可以不同。只有新版本的精确脚本会写入 marker。确认 marker 绑定唯一队首候选的 SHA/base/tree 和 fixed-file hashes 后，才以不可覆盖的回滚副本和原子替换方式安装候选 controller：
+   结果必须显示 candidate SHA/tree/base、controller 文件清单、toolchain 与 lane 集合，且每条 lane 均通过。此处 `maintenance-check` 是在正式激活前的独立复核；`resume-baseline` 还会先对 verified seed 的准确 291→candidate 树运行 trusted tool lanes 与 `scripts.test_domestic_release_controller` 全套单测，并现场执行 staging helper host contract。只有当前准确候选脚本会写入 marker。确认 marker 绑定 active pointer 唯一 SHA、队首候选的 SHA/base/tree 和 fixed-file hashes 后，才以不可覆盖的回滚副本和原子替换方式安装候选 controller：
 
    ```bash
    set -euo pipefail
@@ -765,7 +837,7 @@
    test "$(sudo sha256sum "$CONTROLLER" | awk '{print $1}')" = "$EXPECTED"
    ```
 
-   若候选已被旧 controller 记为 failed，只能通过原受限入口对同一 SHA/ref/base 显式重提，不能改候选。该 source-only candidate 通过正常锁、测试与 CAS 晋级后，后续候选按新 main 顺序处理。若 prepare/activate 响应或读回不明，不重跑，转只读对账：
+   若候选已被旧 controller 记为 failed，只能通过原受限入口对同一 SHA/ref/base 显式重提，不能改候选。未有 marker 时 poll 保持原 fixed-tool 摘要门禁；marker 建立后 poll 仅为当前唯一队首候选临时接受该工具集合。该 source-only candidate 通过正常锁、测试与 CAS 晋级后，main 到达新 SHA，固定工具摘要校验自动恢复常规严格模式。若 prepare/activate 响应或读回不明，不重跑，转只读对账：
 
    固定 controller 精确替换后，先手动显式处理唯一队首候选，再独立读回 ledger、国内 main、生产 cursor、安装 app identity 与健康；不得让启用 timer 触发首个候选：
 

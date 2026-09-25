@@ -52,6 +52,11 @@ SOURCE_BUNDLE_INCOMING_ROOT = "/opt/aicrm/domestic-incoming"
 DEFAULT_REPO = "/opt/aicrm/domestic/source.git"
 DEFAULT_CONTROLLER = "/usr/local/libexec/aicrm/domestic_main_release.py"
 DEFAULT_CONFIG = "/etc/aicrm/domestic-main-release.json"
+BASELINE_OVERLAY_BASE_SHA = "291baa2d13864c3a60f3ed93e08382c3e598db33"
+BASELINE_OVERLAY_BASE_TREE = "3c17b8a86e2e69ed4f6942304300c609300fb077"
+BASELINE_OVERLAY_APP_SHA = "960b30e9406fae2045aeb7ef5dce863976407727"
+BASELINE_OVERLAY_PR = 46
+BASELINE_OVERLAY_SEED_ROOT = Path("/var/tmp")
 OLD_RELEASE_TIMER = "aicrm-domestic-release.timer"
 NEW_RELEASE_TIMER = "aicrm-domestic-main-release.timer"
 HOST_UNIT_FILES = {
@@ -2305,25 +2310,38 @@ def _installed_app_identity(config: dict[str, Any], *, production: bool) -> tupl
     return identity, data
 
 
-def activate(config: dict[str, Any]) -> dict[str, Any]:
+def activate(config: dict[str, Any], *, candidate_sha: str | None = None) -> dict[str, Any]:
     """Create the stage ledger only after the production source cursor is ready."""
     config = _check_config(config)
     with _locked(Path(config["lock"]), nonblocking=True):
         _assert_release_timers_stopped()
-        return _activate_locked_no_lock(config)
+        return _activate_locked_no_lock(config, candidate_sha=candidate_sha)
 
 
-def _activate_locked_no_lock(config: dict[str, Any]) -> dict[str, Any]:
+def _activate_locked_no_lock(config: dict[str, Any], *, candidate_sha: str | None = None) -> dict[str, Any]:
     """Activate without reacquiring the lock (used by prepare-baseline)."""
     repo, state_path = Path(config["repo"]), Path(config["state"])
     if state_path.exists() or state_path.is_symlink():
         raise ReleaseError("domestic ledger already exists; never overwrite or reset it")
     repository = verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
-    _verify_controller_files(config, repo, repository["main_sha"], sorted(builder.FIXED_CONTROLLER_FILES))
+    stage_app, _ = _installed_app_identity(config, production=False)
+    if candidate_sha is not None and (repository["main_sha"] != BASELINE_OVERLAY_BASE_SHA
+                                      or repository["main_tree"] != BASELINE_OVERLAY_BASE_TREE):
+        raise ReleaseError("baseline overlay candidate is valid only while domestic main remains at 291")
+    overlay = None
+    if candidate_sha is None:
+        _verify_controller_files(config, repo, repository["main_sha"], sorted(builder.FIXED_CONTROLLER_FILES))
+    else:
+        overlay = _verify_existing_baseline_helper_overlay(
+            config, repo, candidate_sha=candidate_sha,
+            base_sha=repository["main_sha"], base_tree=repository["main_tree"],
+            installed_app=stage_app,
+        )
     cursor = _verify_production_cursor(config)["cursor"]
     if repository["main_sha"] != cursor.get("main_sha") or repository["main_tree"] != cursor.get("main_tree"):
         raise ReleaseError("domestic main does not match the independently read production source cursor")
-    stage_app, _ = _installed_app_identity(config, production=False)
+    if overlay is not None and cursor.get("source_bundle_sha256") != overlay["source_bundle_sha256"]:
+        raise ReleaseError("production cursor source bundle differs from the helper overlay")
     if stage_app != {"sha": cursor["installed_app_sha"], "tree": cursor["installed_app_tree"],
                      "manifest_sha256": cursor["installed_manifest_sha256"]}:
         raise ReleaseError("preproduction installed application does not match production source cursor")
@@ -2402,7 +2420,426 @@ def _load_existing_baseline_bundle(repo: Path, work_root: Path, *, source_sha: s
     return bundle, verified_metadata
 
 
-def resume_baseline(config: dict[str, Any]) -> dict[str, Any]:
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON key")
+        value[key] = item
+    return value
+
+
+@contextmanager
+def _verified_overlay_seed_bundle(repo: Path, work_root: Path, seed_bundle: Path,
+                                  candidate_sha: str, base_sha: str) -> Iterator[tuple[Path, str, str]]:
+    """Yield a verified empty-repository import of the exact one-time seed bundle."""
+    expected_path = BASELINE_OVERLAY_SEED_ROOT / f"domestic-main-seed-{candidate_sha}.bundle"
+    if seed_bundle != expected_path:
+        raise ReleaseError("baseline overlay seed bundle must use its fixed SHA-bound path")
+    _safe_directory(work_root)
+    if seed_bundle.is_symlink():
+        raise ReleaseError("baseline overlay seed bundle is a symlink")
+    try:
+        source_fd = os.open(seed_bundle, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as exc:
+        raise ReleaseError("baseline overlay seed bundle is missing or unsafe") from exc
+    with os.fdopen(source_fd, "rb") as source, tempfile.TemporaryDirectory(
+            prefix="baseline-overlay-seed-", dir=work_root) as temporary:
+        source_info = os.fstat(source.fileno())
+        if not stat.S_ISREG(source_info.st_mode) or source_info.st_size <= 0:
+            raise ReleaseError("baseline overlay seed bundle is not a non-empty regular file")
+        bundle = Path(temporary) / "seed.bundle"
+        digest = hashlib.sha256()
+        with bundle.open("xb") as target:
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(block)
+                target.write(block)
+            target.flush()
+            os.fsync(target.fileno())
+        seed_repo = Path(temporary) / "seed.git"
+        _run(["git", "init", "--bare", "--quiet", str(seed_repo)])
+        verification = _run(["git", f"--git-dir={seed_repo}", "bundle", "verify", str(bundle)]).stdout
+        if "The bundle records a complete history." not in verification:
+            raise ReleaseError("baseline overlay seed bundle is not self-contained")
+        ref = "refs/heads/main"
+        heads = _run(["git", "bundle", "list-heads", str(bundle)]).stdout.splitlines()
+        if heads != [f"{candidate_sha} {ref}"]:
+            raise ReleaseError("baseline overlay seed bundle has unexpected refs")
+        _run(["git", f"--git-dir={seed_repo}", "fetch", "--no-tags", str(bundle), f"{ref}:refs/heads/main"])
+        _run(["git", f"--git-dir={seed_repo}", "fsck", "--full", "--strict", "--no-reflogs"])
+        candidate_tree = _tree(seed_repo, candidate_sha)
+        if (not _is_ancestor(seed_repo, base_sha, candidate_sha)
+                or base_sha not in _git(seed_repo, "rev-list", "--first-parent", candidate_sha).splitlines()):
+            raise ReleaseError("baseline overlay seed bundle does not prove candidate ancestry and tree")
+        if _tree(seed_repo, base_sha) != _tree(repo, base_sha):
+            raise ReleaseError("baseline overlay seed base tree differs from domestic main")
+        yield seed_repo, digest.hexdigest(), candidate_tree
+
+
+def _run_baseline_overlay_preflight(config: dict[str, Any], repo: Path, *,
+                                    base_sha: str, candidate_sha: str) -> dict[str, Any]:
+    """Run the trusted tool lanes and staging helper contract on the exact 291-based seed."""
+    work_root = Path(config["work_root"])
+    _safe_directory(work_root)
+    with tempfile.TemporaryDirectory(prefix="baseline-overlay-check-", dir=work_root) as temporary:
+        check_root = Path(temporary)
+        worktree = check_root / "candidate"
+        _run(["git", f"--git-dir={repo}", "worktree", "add", "--detach", str(worktree), candidate_sha], timeout=120)
+        _make_worktree_metadata_readable(repo, worktree)
+        check_config = {**config, "work_root": temporary}
+        report_dir = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate_sha}-baseline-{time.time_ns()}"
+        checks = _check_report(check_config, repo, worktree, report_dir, base_sha, candidate_sha)
+        if (checks.get("status") != "passed" or checks.get("baseline_sha") != base_sha
+                or checks.get("head_sha") != candidate_sha or "preflight" not in checks.get("selected_lanes", [])):
+            raise ReleaseError("exact seed candidate did not pass trusted base-291 tool preflight")
+        python_files = ["scripts/domestic_main_release.py", "deploy/domestic-promote.py"]
+        compile_code = (
+            "from pathlib import Path; import sys; root=Path(sys.argv[1]); "
+            "[compile((root / name).read_bytes(), name, 'exec') for name in sys.argv[2:]]; "
+            "print('overlay-tool-syntax-ok')"
+        )
+        _build_command(check_config, ["/usr/bin/python3", "-c", compile_code, str(worktree), *python_files],
+                       cwd=worktree, timeout=120, safe_repository=worktree)
+        _build_command(check_config, ["/usr/bin/python3", str(worktree / "scripts/domestic_main_release.py"), "--help"],
+                       cwd=worktree, timeout=60, safe_repository=worktree)
+        _build_command(check_config, ["/usr/bin/python3", "-m", "unittest",
+                                      "scripts.test_domestic_release_controller"],
+                       cwd=worktree, timeout=900, safe_repository=worktree)
+        host = _run_stage_helper_host_contract(config, repo, candidate_sha)
+        if not isinstance(host, dict):
+            raise ControllerMaintenanceRequired("exact candidate staging helper host contract did not run")
+        _run(["git", f"--git-dir={repo}", "worktree", "remove", "--force", str(worktree)], timeout=120)
+        return {"baseline_sha": base_sha, "head_sha": candidate_sha,
+                "candidate_tree": _tree(repo, candidate_sha),
+                "check_receipt_sha256": checks.get("execution_receipt_sha256"),
+                "selected_lanes": checks.get("selected_lanes"),
+                "stage_host_contract": host}
+
+
+def _overlay_evidence_digest(evidence: dict[str, Any]) -> str:
+    canonical = json.dumps(evidence, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _overlay_evidence_path(config: dict[str, Any], candidate_sha: str) -> Path:
+    candidate_sha = _sha(candidate_sha, "baseline overlay candidate SHA")
+    return Path(config["work_root"]) / f"baseline-helper-overlay-{candidate_sha}.json"
+
+
+def _active_overlay_candidate_path(config: dict[str, Any]) -> Path:
+    return Path(config["work_root"]) / "baseline-helper-overlay-active.json"
+
+
+def _read_active_overlay_candidate(config: dict[str, Any]) -> dict[str, Any] | None:
+    path = _active_overlay_candidate_path(config)
+    if not path.exists() and not path.is_symlink():
+        return None
+    _safe_directory(path.parent)
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as exc:
+        raise ReleaseError("active baseline overlay pointer is missing or unsafe") from exc
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 16 * 1024):
+            raise ReleaseError("active baseline overlay pointer is not root-only")
+        raw = stream.read(16 * 1024 + 1)
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_json_object)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ReleaseError("active baseline overlay pointer is invalid") from exc
+    if (not isinstance(value, dict) or set(value) != {"schema_version", "candidate_sha", "superseded_candidate_shas"}
+            or value.get("schema_version") != 1 or not isinstance(value.get("superseded_candidate_shas"), list)):
+        raise ReleaseError("active baseline overlay pointer has an invalid schema")
+    active = _sha(value.get("candidate_sha"), "active overlay candidate SHA")
+    history = [_sha(sha, "superseded overlay candidate SHA") for sha in value["superseded_candidate_shas"]]
+    if len(history) != len(set(history)) or active in history:
+        raise ReleaseError("active baseline overlay pointer history is invalid")
+    return value
+
+
+def _select_active_overlay_candidate(config: dict[str, Any], candidate_sha: str, *,
+                                     cursor_exists: bool, ledger_exists: bool,
+                                     allow_supersede: bool = False) -> dict[str, Any]:
+    """Bind the one overlay SHA; replacement is allowed only before cursor/ledger creation."""
+    if os.geteuid() != 0:
+        raise ReleaseError("active baseline overlay pointer must be managed by root")
+    candidate_sha = _sha(candidate_sha, "active overlay candidate SHA")
+    path = _active_overlay_candidate_path(config)
+    _safe_directory(path.parent)
+    active = _read_active_overlay_candidate(config)
+    if active is None:
+        if cursor_exists or ledger_exists:
+            raise ReleaseError("active overlay candidate pointer is missing after cursor or ledger creation")
+        active = {"schema_version": 1, "candidate_sha": candidate_sha,
+                  "superseded_candidate_shas": []}
+        atomic_json(path, active, mode=0o600)
+        return active
+    if active["candidate_sha"] == candidate_sha:
+        return active
+    if not allow_supersede or cursor_exists or ledger_exists:
+        raise ReleaseError("baseline overlay candidate is already fixed by an existing cursor or ledger")
+    history = list(active["superseded_candidate_shas"])
+    if active["candidate_sha"] not in history:
+        history.append(active["candidate_sha"])
+    if candidate_sha in history:
+        raise ReleaseError("a superseded baseline overlay candidate cannot be reactivated")
+    replacement = {"schema_version": 1, "candidate_sha": candidate_sha,
+                   "superseded_candidate_shas": history}
+    atomic_json(path, replacement, mode=0o600)
+    return replacement
+
+
+def _production_cursor_exists(config: dict[str, Any]) -> bool:
+    """Read only whether the fixed production cursor path exists; SSH errors fail closed."""
+    code = "import os,sys; print('present' if os.path.lexists(sys.argv[1]) else 'absent')"
+    path = str(config.get("prod_cursor_path", CURSOR_PATH))
+    if path != CURSOR_PATH:
+        raise ReleaseError("production cursor path must use the fixed protected path")
+    command = "sudo -n /usr/bin/python3 -c " + shlex.quote(code) + " " + shlex.quote(path)
+    result = _production_ssh(config, command, timeout=30)
+    if result not in {"present", "absent"}:
+        raise ReleaseError("production cursor presence readback is invalid")
+    return result == "present"
+
+
+def _stable_overlay_evidence(value: dict[str, Any]) -> dict[str, Any]:
+    normalized = json.loads(json.dumps(value))
+    normalized.pop("created_at_utc", None)
+    preflight = normalized.get("local_preflight")
+    if isinstance(preflight, dict):
+        # Keep the original run receipt in the immutable marker for audit,
+        # but do not make same-candidate recovery depend on run-local details.
+        preflight.pop("check_receipt_sha256", None)
+    return normalized
+
+
+def _read_baseline_overlay_evidence(config: dict[str, Any], candidate_sha: str) -> dict[str, Any]:
+    path = _overlay_evidence_path(config, candidate_sha)
+    _safe_directory(path.parent)
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as exc:
+        raise ReleaseError("baseline helper overlay evidence is missing or unsafe") from exc
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 128 * 1024):
+            raise ReleaseError("existing baseline overlay evidence file is unsafe")
+        raw = stream.read(128 * 1024 + 1)
+    try:
+        stored = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_json_object)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ReleaseError("existing baseline overlay evidence is invalid") from exc
+    if (not isinstance(stored, dict) or set(stored) != {"schema_version", "evidence", "evidence_sha256"}
+            or stored.get("schema_version") != 1 or not isinstance(stored.get("evidence"), dict)
+            or stored.get("evidence_sha256") != _overlay_evidence_digest(stored["evidence"])):
+        raise ReleaseError("existing baseline overlay evidence digest or schema is invalid")
+    return stored
+
+
+def _store_baseline_overlay_evidence(config: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    """Create the root-only overlay receipt once; re-entry accepts only same identity."""
+    if os.geteuid() != 0:
+        raise ReleaseError("baseline helper overlay evidence must be stored by root")
+    candidate = evidence.get("candidate")
+    if not isinstance(candidate, dict) or not isinstance(candidate.get("sha"), str):
+        raise ReleaseError("baseline overlay evidence lacks a candidate SHA")
+    path = _overlay_evidence_path(config, candidate["sha"])
+    _safe_directory(path.parent)
+    expected = {"schema_version": 1, "evidence": evidence,
+                "evidence_sha256": _overlay_evidence_digest(evidence)}
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError:
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                                 getattr(os, "O_NOFOLLOW", 0), 0o600)
+        except FileExistsError:
+            return _store_baseline_overlay_evidence(config, evidence)
+        try:
+            info = os.fstat(descriptor)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+                    or stat.S_IMODE(info.st_mode) != 0o600):
+                raise ReleaseError("created baseline overlay evidence file is not root-only")
+            raw = (json.dumps(expected, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode()
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except Exception:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            raise
+        return expected
+    os.close(descriptor)
+    stored = _read_baseline_overlay_evidence(config, candidate["sha"])
+    if _stable_overlay_evidence(stored["evidence"]) != _stable_overlay_evidence(evidence):
+        raise ReleaseError("baseline overlay evidence already exists for a different identity; do not replace it")
+    return stored
+
+
+def _verify_baseline_helper_overlay_candidate(config: dict[str, Any], repo: Path, *,
+                                              base_sha: str, base_tree: str,
+                                              installed_app: dict[str, str],
+                                              baseline_bundle: dict[str, Any],
+                                              candidate_sha: str, seed_bundle: Path) -> dict[str, Any]:
+    """Verify the exact PR46 helper before invoking its production read-only commands."""
+    if (base_sha != BASELINE_OVERLAY_BASE_SHA or base_tree != BASELINE_OVERLAY_BASE_TREE
+            or installed_app.get("sha") != BASELINE_OVERLAY_APP_SHA
+            or baseline_bundle.get("source_sha") != base_sha
+            or baseline_bundle.get("source_tree") != base_tree
+            or baseline_bundle.get("previous_main_sha") != installed_app.get("sha")
+            or baseline_bundle.get("baseline_transition") is not True):
+        raise ReleaseError("baseline helper overlay is restricted to the saved 291/app960 transition")
+    candidate_sha = _sha(candidate_sha, "baseline overlay candidate SHA")
+    if candidate_sha == base_sha:
+        raise ReleaseError("baseline overlay candidate must advance baseline main")
+    with _verified_overlay_seed_bundle(repo, Path(config["work_root"]), seed_bundle,
+                                       candidate_sha, base_sha) as (seed_repo, seed_digest, candidate_tree):
+        _first_parent_chain(seed_repo, base_sha, candidate_sha)
+        classification = builder.classify(seed_repo, base_sha, candidate_sha)
+        changed_fixed = sorted(classification.get("controller_files", []))
+        allowed_fixed = sorted({"deploy/domestic-promote.py", "scripts/domestic_main_release.py"})
+        if classification.get("runtime_changed") is not False or changed_fixed != allowed_fixed:
+            raise ReleaseError("baseline helper overlay accepts only the reviewed PR46 controller-only change")
+        helper_sha = hashlib.sha256(_source_blob(seed_repo, candidate_sha, "deploy/domestic-promote.py")).hexdigest()
+        controller_sha = hashlib.sha256(_source_blob(seed_repo, candidate_sha, "scripts/domestic_main_release.py")).hexdigest()
+        if _file_sha256(Path(__file__).resolve(strict=True)) != controller_sha:
+            raise ControllerMaintenanceRequired("resume-baseline must run from the exact PR46 candidate controller bytes")
+        # The normal fixed-file verifier remains strict for every other file.
+        unchanged_fixed = sorted(set(builder.FIXED_CONTROLLER_FILES) - {"deploy/domestic-promote.py"})
+        _verify_controller_files(config, repo, base_sha, unchanged_fixed)
+        stage_helper = Path(legacy._helper_fixed_path(config["stage_helper"]))
+        if not _protected_exact_helper(stage_helper, helper_sha):
+            raise ControllerMaintenanceRequired("staging helper is not the exact PR46 overlay blob")
+        prod_helper_path = legacy._helper_fixed_path(config["prod_helper"])
+        prod_helper_sha = legacy._remote_file_sha256(config, prod_helper_path)
+        if prod_helper_sha != helper_sha:
+            raise ControllerMaintenanceRequired("production helper is not the exact PR46 overlay blob")
+        preflight = _run_baseline_overlay_preflight(
+            config, seed_repo, base_sha=base_sha, candidate_sha=candidate_sha,
+        )
+        return {"candidate_sha": candidate_sha, "candidate_tree": candidate_tree,
+                "helper_sha256": helper_sha, "controller_sha256": controller_sha,
+                "seed_bundle_sha256": seed_digest, "local_preflight": preflight}
+
+
+def _record_baseline_helper_overlay(config: dict[str, Any], *,
+                                    base_sha: str, base_tree: str,
+                                    installed_app: dict[str, str],
+                                    baseline_bundle: dict[str, Any],
+                                    saved_backup: dict[str, Any],
+                                    verified_candidate: dict[str, Any]) -> dict[str, Any]:
+    source_receipt_sha = _digest(saved_backup.get("source_receipt_sha256"),
+                                 "production baseline source receipt digest")
+    candidate_sha = verified_candidate["candidate_sha"]
+    evidence = {
+            "schema_version": 1,
+            "operation": "resume_baseline_helper_overlay",
+            "baseline": {"sha": base_sha, "tree": base_tree},
+            "installed_app": {key: installed_app[key] for key in ("sha", "tree", "manifest_sha256")},
+            "production_source_backup": {
+                "source_sha": base_sha,
+                "source_tree": base_tree,
+                "previous_main_sha": installed_app["sha"],
+                "bundle_sha256": baseline_bundle["bundle_sha256"],
+                "source_receipt_sha256": source_receipt_sha,
+            },
+            "candidate": {"pr_number": BASELINE_OVERLAY_PR, "sha": candidate_sha,
+                          "tree": verified_candidate["candidate_tree"],
+                          "helper_blob_sha256": verified_candidate["helper_sha256"],
+                          "controller_blob_sha256": verified_candidate["controller_sha256"]},
+            "local_preflight": verified_candidate["local_preflight"],
+            "seed_bundle_sha256": verified_candidate["seed_bundle_sha256"],
+            "created_at_utc": _utc_now(),
+    }
+    stored = _store_baseline_overlay_evidence(config, evidence)
+    return {"path": str(_overlay_evidence_path(config, candidate_sha)),
+            "evidence_sha256": stored["evidence_sha256"],
+            "seed_bundle_sha256": verified_candidate["seed_bundle_sha256"],
+            "helper_blob_sha256": verified_candidate["helper_sha256"],
+            "source_receipt_sha256": source_receipt_sha}
+
+
+def _verify_existing_baseline_helper_overlay(config: dict[str, Any], repo: Path, *,
+                                            candidate_sha: str, base_sha: str, base_tree: str,
+                                            installed_app: dict[str, str],
+                                            production_cursor: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Read the immutable proof and verify only the live baseline transition identities."""
+    candidate_sha = _sha(candidate_sha, "baseline overlay candidate SHA")
+    stored = _read_baseline_overlay_evidence(config, candidate_sha)
+    evidence = stored["evidence"]
+    candidate, backup, preflight = (evidence.get("candidate"), evidence.get("production_source_backup"),
+                                    evidence.get("local_preflight"))
+    if (evidence.get("operation") != "resume_baseline_helper_overlay"
+            or evidence.get("baseline") != {"sha": BASELINE_OVERLAY_BASE_SHA, "tree": BASELINE_OVERLAY_BASE_TREE}
+            or (base_sha, base_tree) != (BASELINE_OVERLAY_BASE_SHA, BASELINE_OVERLAY_BASE_TREE)
+            or evidence.get("installed_app") != {key: installed_app.get(key)
+                                                  for key in ("sha", "tree", "manifest_sha256")}
+            or installed_app.get("sha") != BASELINE_OVERLAY_APP_SHA
+            or not isinstance(candidate, dict) or candidate.get("pr_number") != BASELINE_OVERLAY_PR
+            or candidate.get("sha") != candidate_sha
+            or not isinstance(backup, dict) or not isinstance(preflight, dict)):
+        raise ReleaseError("baseline overlay does not match the selected 291/app960 transition")
+    helper_sha = _digest(candidate.get("helper_blob_sha256"), "overlay helper blob digest")
+    controller_sha = _digest(candidate.get("controller_blob_sha256"), "overlay controller blob digest")
+    _sha(candidate.get("tree"), "overlay candidate tree")
+    active = _read_active_overlay_candidate(config)
+    if not isinstance(active, dict) or active.get("candidate_sha") != candidate_sha:
+        raise ReleaseError("baseline overlay candidate does not match the root-only active candidate pointer")
+    seed_sha = _digest(evidence.get("seed_bundle_sha256"), "overlay seed bundle digest")
+    if (preflight.get("baseline_sha") != base_sha or preflight.get("head_sha") != candidate_sha
+            or preflight.get("candidate_tree") != candidate.get("tree")
+            or not isinstance(preflight.get("selected_lanes"), list)
+            or "preflight" not in preflight["selected_lanes"]):
+        raise ReleaseError("stored local candidate preflight is not bound to base 291 and the exact seed head")
+    _digest(preflight.get("check_receipt_sha256"), "local candidate check receipt digest")
+    host = preflight.get("stage_host_contract")
+    if (not isinstance(host, dict) or host.get("host_role") != "staging"
+            or host.get("postgres_major") != 16 or host.get("database_connection") != "verified"
+            or host.get("helper_sha256") != helper_sha):
+        raise ReleaseError("stored staging helper host-contract evidence is not exact")
+    _digest(backup.get("source_receipt_sha256"), "production source receipt digest")
+    if (backup.get("source_sha") != base_sha or backup.get("source_tree") != base_tree
+            or backup.get("previous_main_sha") != installed_app["sha"]):
+        raise ReleaseError("baseline overlay source receipt identity is invalid")
+    metadata = _load_existing_baseline_bundle(
+        repo, Path(config["work_root"]), source_sha=base_sha, source_tree=base_tree,
+        previous_main_sha=installed_app["sha"],
+    )[1]
+    if backup.get("bundle_sha256") != metadata.get("bundle_sha256"):
+        raise ReleaseError("baseline overlay source bundle digest changed")
+    if (not _protected_exact_helper(Path(legacy._helper_fixed_path(config["stage_helper"])), helper_sha)
+            or legacy._remote_file_sha256(config, legacy._helper_fixed_path(config["prod_helper"])) != helper_sha
+            or _file_sha256(Path(__file__).resolve(strict=True)) != controller_sha):
+        raise ControllerMaintenanceRequired("stage, production and running controller must match the overlay candidate")
+    saved = _verify_saved_production_bundle(config, metadata, baseline_transition=True)
+    if _digest(saved.get("source_receipt_sha256"), "production source receipt digest") != backup["source_receipt_sha256"]:
+        raise ReleaseError("production baseline source receipt changed")
+    if production_cursor is not None:
+        expected = {"main_sha": base_sha, "main_tree": base_tree,
+                    "installed_app_sha": installed_app["sha"], "installed_app_tree": installed_app["tree"],
+                    "installed_manifest_sha256": installed_app["manifest_sha256"],
+                    "source_bundle_sha256": backup["bundle_sha256"]}
+        if any(production_cursor.get(key) != value for key, value in expected.items()):
+            raise ReleaseError("production cursor is not the exact baseline bound by the helper overlay")
+    return {"path": str(_overlay_evidence_path(config, candidate_sha)),
+            "evidence_sha256": stored["evidence_sha256"], "candidate_sha": candidate_sha,
+            "helper_blob_sha256": helper_sha, "seed_bundle_sha256": seed_sha,
+            "source_bundle_sha256": backup["bundle_sha256"]}
+
+
+def resume_baseline(config: dict[str, Any], *, candidate_sha: str | None = None,
+                    seed_bundle: Path | None = None) -> dict[str, Any]:
     """Finish a baseline whose exact source bundle is already durable on production.
 
     This path is deliberately read-only with respect to the bundle: it never
@@ -2414,6 +2851,8 @@ def resume_baseline(config: dict[str, Any]) -> dict[str, Any]:
     config = _check_config(config)
     if config.get("production_enabled") is not True:
         raise ReleaseError("baseline resumption requires production_enabled=true in the protected config")
+    if (candidate_sha is None) != (seed_bundle is None):
+        raise ReleaseError("baseline helper overlay requires both --candidate-sha and --seed-bundle")
     repo, state_path = Path(config["repo"]), Path(config["state"])
     with _locked(Path(config["lock"]), nonblocking=True):
         _assert_release_timers_stopped()
@@ -2427,13 +2866,38 @@ def resume_baseline(config: dict[str, Any]) -> dict[str, Any]:
         if prod_app != stage_app:
             raise ReleaseError("staging and production installed application identities differ")
         _validate_baseline_identity(repo, main_sha, main_tree, prod_app)
-        _verify_controller_files(config, repo, main_sha, sorted(builder.FIXED_CONTROLLER_FILES))
         _pin_candidate(repo, main_sha)
         _bundle, bundle_meta = _load_existing_baseline_bundle(
             repo, Path(config["work_root"]), source_sha=main_sha,
             source_tree=main_tree, previous_main_sha=prod_app["sha"],
         )
-        saved = _verify_saved_production_bundle(config, bundle_meta, baseline_transition=True)
+        overlay = None
+        if candidate_sha is None:
+            _verify_controller_files(config, repo, main_sha, sorted(builder.FIXED_CONTROLLER_FILES))
+            saved = _verify_saved_production_bundle(config, bundle_meta, baseline_transition=True)
+        else:
+            verified_candidate = _verify_baseline_helper_overlay_candidate(
+                config, repo, base_sha=main_sha, base_tree=main_tree,
+                installed_app=prod_app, baseline_bundle=bundle_meta,
+                candidate_sha=candidate_sha,
+                seed_bundle=seed_bundle,
+            )
+            # This read-only path-existence probe runs only after both installed
+            # helper bytes have been checked against the exact seed candidate.
+            cursor_exists = _production_cursor_exists(config)
+            _select_active_overlay_candidate(
+                config, candidate_sha, cursor_exists=cursor_exists,
+                ledger_exists=state_path.exists() or state_path.is_symlink(),
+                allow_supersede=True,
+            )
+            # Only after verifying the installed production helper's exact candidate
+            # digest above may its read-only backup verifier be executed.
+            saved = _verify_saved_production_bundle(config, bundle_meta, baseline_transition=True)
+            overlay = _record_baseline_helper_overlay(
+                config, base_sha=main_sha, base_tree=main_tree,
+                installed_app=prod_app, baseline_bundle=bundle_meta,
+                saved_backup=saved, verified_candidate=verified_candidate,
+            )
         _record_production_cursor(config, candidate_sha=main_sha, candidate_tree=main_tree,
                                   previous_main_sha=main_sha, installed_app=prod_app,
                                   bundle_sha256=bundle_meta["bundle_sha256"], initialize=True)
@@ -2448,22 +2912,36 @@ def resume_baseline(config: dict[str, Any]) -> dict[str, Any]:
         return {"status": "baseline_resumed", "main_sha": main_sha, "main_tree": main_tree,
                 "installed_app_sha": prod_app["sha"], "source_bundle_sha256": bundle_meta["bundle_sha256"],
                 "production_backup": saved, "activation_required": True,
-                "bundle_uploaded": False, "application_deployed": False}
+                "bundle_uploaded": False, "application_deployed": False,
+                **({"baseline_helper_overlay": overlay} if overlay is not None else {})}
 
 
-def verify(config: dict[str, Any]) -> dict[str, Any]:
+def verify(config: dict[str, Any], *, candidate_sha: str | None = None) -> dict[str, Any]:
     """Read-only check of stage bare main, durable ledger, and production cursor."""
     config = _check_config(config)
     repo, state_path = Path(config["repo"]), Path(config["state"])
     with _locked(Path(config["lock"]), nonblocking=True):
         repository = verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
-        _verify_controller_files(config, repo, repository["main_sha"], sorted(builder.FIXED_CONTROLLER_FILES))
         state = _load_state(state_path)
         if state.get("staging_out_of_sync") is True:
             raise ReleaseError("staging reset has not been acknowledged after an interrupted candidate")
         if repository["main_sha"] != state["main"]["sha"] or repository["main_tree"] != state["main"]["tree"]:
             raise ReleaseError("domestic bare main does not match its durable ledger")
+        if candidate_sha is not None:
+            if (repository["main_sha"] != BASELINE_OVERLAY_BASE_SHA
+                    or repository["main_tree"] != BASELINE_OVERLAY_BASE_TREE):
+                raise ReleaseError("baseline overlay candidate is valid only while domestic main remains at 291")
+            installed_app, _ = _installed_app_identity(config, production=False)
+            overlay = _verify_existing_baseline_helper_overlay(
+                config, repo, candidate_sha=candidate_sha,
+                base_sha=repository["main_sha"], base_tree=repository["main_tree"],
+                installed_app=installed_app,
+            )
+        else:
+            _verify_controller_files(config, repo, repository["main_sha"], sorted(builder.FIXED_CONTROLLER_FILES))
         cursor = _verify_production_cursor(config)["cursor"]
+        if candidate_sha is not None and cursor.get("source_bundle_sha256") != overlay["source_bundle_sha256"]:
+            raise ReleaseError("production cursor source bundle differs from the helper overlay")
         if cursor.get("main_sha") != state["main"]["sha"] or cursor.get("main_tree") != state["main"]["tree"]:
             raise ReleaseError("production source cursor does not match domestic main")
         if cursor.get("installed_app_sha") != state["installed_app"]["sha"] or cursor.get("installed_manifest_sha256") != state["installed_app"]["manifest_sha256"]:
@@ -2571,12 +3049,21 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--sha")
     parser.add_argument("--tree")
     parser.add_argument("--installed-app-sha")
+    parser.add_argument("--candidate-sha", help="exact PR #46 head for the one-time baseline helper overlay")
+    parser.add_argument("--seed-bundle", type=Path, help="verified full seed bundle for the one-time baseline helper overlay")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    allowed_candidate_actions = {"resume-baseline", "activate", "verify"}
+    if args.action not in allowed_candidate_actions and (args.candidate_sha is not None or args.seed_bundle is not None):
+        parser.error("--candidate-sha is valid only with resume-baseline, activate or verify")
+    if args.action != "resume-baseline" and args.seed_bundle is not None:
+        parser.error("--seed-bundle is valid only with resume-baseline")
+    if args.action == "resume-baseline" and ((args.candidate_sha is None) != (args.seed_bundle is None)):
+        parser.error("resume-baseline overlay requires both --candidate-sha and --seed-bundle")
     try:
         if args.action == "restricted-ssh":
             restricted_ssh()
@@ -2609,7 +3096,13 @@ def main(argv: list[str] | None = None) -> int:
         elif args.action == "prepare-baseline":
             result = prepare_baseline(config)
         elif args.action == "resume-baseline":
-            result = resume_baseline(config)
+            result = resume_baseline(config, candidate_sha=args.candidate_sha, seed_bundle=args.seed_bundle)
+        elif args.action == "activate":
+            if os.geteuid() != 0:
+                raise ReleaseError("activate must run as root")
+            result = activate(config, candidate_sha=args.candidate_sha)
+        elif args.action == "verify":
+            result = verify(config, candidate_sha=args.candidate_sha)
         elif args.action == "submit-stdin":
             result = _submit_stdin(config)
         elif args.action == "ack-stage-reset":
@@ -2633,12 +3126,6 @@ def main(argv: list[str] | None = None) -> int:
             result = archive_ack(config, args.sha)
         elif args.action == "archive-ack-stdin":
             result = _archive_ack_stdin(config)
-        elif args.action == "activate":
-            if os.geteuid() != 0:
-                raise ReleaseError("activate must run as root")
-            result = activate(config)
-        elif args.action == "verify":
-            result = verify(config)
         elif args.action == "poll":
             result = poll(config)
         elif args.action == "reconcile":

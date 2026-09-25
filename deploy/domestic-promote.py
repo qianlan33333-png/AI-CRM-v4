@@ -1736,6 +1736,11 @@ def _verify_source_bundle_file(
             restored_app_tree = _git_checked(repository, "rev-parse", f"{installed_app_sha}^{{tree}}")
             if installed_app_tree is None or restored_app_tree != _valid_sha(installed_app_tree, "installed app tree"):
                 raise ValueError("installed app tree does not match its source commit")
+            app_ancestors = _git_checked(repository, "rev-list", installed_app_sha).splitlines()
+        else:
+            app_ancestors = []
+        if allow_baseline_transition and installed_app_sha is not None and previous_main_sha != installed_app_sha:
+            raise ValueError("baseline source bundle previous main must equal the installed app SHA")
         if allow_baseline_transition and previous_main_sha == source_sha and first_parent != [source_sha]:
             raise ValueError("baseline source bundle self identity is invalid")
         return {
@@ -1746,6 +1751,7 @@ def _verify_source_bundle_file(
             "self_contained": True,
             "bundle_bytes": info.st_size,
             "first_parent": first_parent,
+            "app_ancestors": app_ancestors,
         }
 
 
@@ -1956,6 +1962,7 @@ def verify_domestic_source_backup(
         }.items()
     ):
         raise ValueError("source backup receipt identity mismatch")
+    receipt_sha256 = digest(receipt_path)
     verified = _verify_source_bundle_file(
         bundle, source_sha=source_sha, source_tree=source_tree,
         previous_main_sha=previous_main_sha,
@@ -1975,7 +1982,9 @@ def verify_domestic_source_backup(
         "self_contained": True,
         "bundle_bytes": verified["bundle_bytes"],
         "available_bytes": shutil.disk_usage(SOURCE_BACKUPS).free,
+        "source_receipt_sha256": receipt_sha256,
         "_first_parent": verified["first_parent"],
+        "_app_ancestors": verified["app_ancestors"],
     }
 
 
@@ -2018,6 +2027,8 @@ def _verify_installed_app(
     installed_app_tree: str,
     installed_manifest_sha256: str,
     expected_receipt_sha256: str | None = None,
+    *,
+    require_current: bool = True,
 ) -> tuple[dict, str]:
     installed_app_sha = _valid_sha(installed_app_sha, "installed app SHA")
     installed_app_tree = _valid_sha(installed_app_tree, "installed app tree")
@@ -2033,7 +2044,7 @@ def _verify_installed_app(
         or receipt.get("technical_status") != "installed_healthy"
     ):
         raise ValueError("production install receipt identity mismatch")
-    if current_sha() != installed_app_sha:
+    if require_current and current_sha() != installed_app_sha:
         raise ValueError("production current release SHA mismatch")
     release = RELEASES / installed_app_sha
     if release.is_symlink() or not release.is_dir() or release.resolve(strict=True) != RELEASES.resolve(strict=True) / installed_app_sha:
@@ -2046,7 +2057,8 @@ def _verify_installed_app(
     verify_root_owned_release(release)
     if digest(release / "release-files.sha256") != installed_manifest_sha256:
         raise ValueError("production release manifest mismatch")
-    readiness(installed_app_sha)
+    if require_current:
+        readiness(installed_app_sha)
     return receipt, receipt_sha256
 
 
@@ -2063,12 +2075,16 @@ def _read_main_state() -> dict:
         "installed_app_tree", "installed_manifest_sha256", "install_receipt_sha256",
         "source_bundle_sha256", "updated_at_utc",
     }
-    if not isinstance(state, dict) or set(state) != required or state.get("schema_version") != 1 or state.get("status") != "ready":
+    optional = {"legacy_previous_sha"}
+    if (not isinstance(state, dict) or set(state) not in (required, required | optional)
+            or state.get("schema_version") != 1 or state.get("status") != "ready"):
         raise RuntimeError("domestic main state is invalid")
     for field in ("main_sha", "main_tree", "installed_app_sha", "installed_app_tree"):
         _valid_sha(state[field], field)
     for field in ("installed_manifest_sha256", "install_receipt_sha256", "source_bundle_sha256"):
         _valid_digest(state[field], field)
+    if "legacy_previous_sha" in state:
+        _valid_sha(state["legacy_previous_sha"], "legacy install receipt previous SHA")
     if not isinstance(state["updated_at_utc"], str) or not state["updated_at_utc"].endswith("Z"):
         raise RuntimeError("domestic main state timestamp is invalid")
     return state
@@ -2084,6 +2100,9 @@ def _build_main_cursor(
     source_bundle_sha256: str,
     previous_main_sha: str,
     allow_baseline_transition: bool = False,
+    legacy_previous_sha: str | None = None,
+    previous_cursor: dict | None = None,
+    require_current: bool = True,
 ) -> tuple[dict, dict]:
     main_sha = _valid_sha(main_sha, "main SHA")
     main_tree = _valid_sha(main_tree, "main tree")
@@ -2103,12 +2122,51 @@ def _build_main_cursor(
     )
     receipt, receipt_sha256 = _verify_installed_app(
         installed_app_sha, installed_app_tree, installed_manifest_sha256,
+        require_current=require_current,
     )
     receipt_previous = receipt.get("previous_sha")
+    legacy_marker: str | None = None
     if receipt_previous is not None:
         receipt_previous = _valid_sha(receipt_previous, "install receipt previous SHA")
-        if receipt_previous not in verified_bundle["_first_parent"]:
-            raise ValueError("installed app receipt base is not an ancestor of domestic main")
+    if allow_baseline_transition:
+        if previous_main_sha != installed_app_sha:
+            raise ValueError("baseline source bundle previous main must equal the installed app SHA")
+        if receipt_previous is not None:
+            if receipt_previous not in verified_bundle["_app_ancestors"]:
+                raise ValueError("baseline install receipt predecessor is not an ancestor of the installed app")
+            if receipt_previous not in verified_bundle["_first_parent"]:
+                legacy_marker = receipt_previous
+        if legacy_previous_sha is not None and legacy_previous_sha != legacy_marker:
+            raise ValueError("baseline cursor legacy predecessor marker does not match its install receipt")
+    elif previous_cursor is not None:
+        if previous_cursor.get("main_sha") != previous_main_sha:
+            raise ValueError("previous domestic cursor does not match the source bundle base")
+        same_install = all(previous_cursor.get(field) == value for field, value in (
+            ("installed_app_sha", installed_app_sha),
+            ("installed_app_tree", installed_app_tree),
+            ("installed_manifest_sha256", installed_manifest_sha256),
+            ("install_receipt_sha256", receipt_sha256),
+        ))
+        inherited_legacy = previous_cursor.get("legacy_previous_sha")
+        if same_install:
+            if inherited_legacy is not None:
+                if receipt_previous != inherited_legacy or inherited_legacy not in verified_bundle["_app_ancestors"]:
+                    raise ValueError("source-only candidate does not preserve the verified legacy install receipt")
+                legacy_marker = inherited_legacy
+            elif receipt_previous is not None and receipt_previous not in verified_bundle["_first_parent"]:
+                raise ValueError("installed app receipt base is not on the domestic main first-parent chain")
+        else:
+            if receipt_previous != previous_cursor.get("installed_app_sha"):
+                raise ValueError("new install receipt previous SHA does not match the prior installed app")
+            if receipt_previous not in verified_bundle["_first_parent"]:
+                raise ValueError("new install receipt previous SHA is not on the domestic main first-parent chain")
+    elif legacy_previous_sha is not None:
+        if (receipt_previous != legacy_previous_sha
+                or legacy_previous_sha not in verified_bundle["_app_ancestors"]):
+            raise ValueError("legacy install receipt predecessor is not bound to the installed app")
+        legacy_marker = legacy_previous_sha
+    elif receipt_previous is not None and receipt_previous not in verified_bundle["_first_parent"]:
+        raise ValueError("installed app receipt base is not on the domestic main first-parent chain")
     cursor = {
         "schema_version": 1,
         "status": "ready",
@@ -2121,7 +2179,40 @@ def _build_main_cursor(
         "source_bundle_sha256": source_bundle_sha256,
         "updated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
+    if legacy_marker is not None:
+        cursor["legacy_previous_sha"] = legacy_marker
     return cursor, receipt
+
+
+def _reverify_main_cursor(cursor: dict, *, require_current: bool = True) -> tuple[dict, dict]:
+    """Rebuild a persisted cursor from its protected bundle and install receipt."""
+    source_receipt_path = _source_bundle_receipt_path(cursor["main_sha"])
+    _assert_root_file(source_receipt_path, exact_mode=0o600)
+    try:
+        source_receipt = json.loads(source_receipt_path.read_bytes())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("source backup receipt is invalid") from exc
+    if not isinstance(source_receipt, dict):
+        raise RuntimeError("source backup receipt is invalid")
+    baseline_transition = source_receipt.get("baseline_transition") is True
+    verified, install_receipt = _build_main_cursor(
+        main_sha=cursor["main_sha"], main_tree=cursor["main_tree"],
+        installed_app_sha=cursor["installed_app_sha"],
+        installed_app_tree=cursor["installed_app_tree"],
+        installed_manifest_sha256=cursor["installed_manifest_sha256"],
+        source_bundle_sha256=cursor["source_bundle_sha256"],
+        previous_main_sha=source_receipt.get("previous_main_sha", ""),
+        allow_baseline_transition=baseline_transition,
+        legacy_previous_sha=cursor.get("legacy_previous_sha"),
+        require_current=require_current,
+    )
+    if verified["install_receipt_sha256"] != cursor["install_receipt_sha256"]:
+        raise ValueError("production install receipt digest mismatch")
+    verified_identity = {key: value for key, value in verified.items() if key != "updated_at_utc"}
+    cursor_identity = {key: value for key, value in cursor.items() if key != "updated_at_utc"}
+    if verified_identity != cursor_identity:
+        raise ValueError("domestic main cursor does not match verified production state")
+    return verified, install_receipt
 
 
 def initialize_domestic_main(
@@ -2160,8 +2251,10 @@ def initialize_domestic_main(
         )
         if DOMESTIC_MAIN_STATE.exists() or DOMESTIC_MAIN_STATE.is_symlink():
             existing = _read_main_state()
-            identity_fields = set(cursor) - {"updated_at_utc"}
-            if all(existing[field] == cursor[field] for field in identity_fields):
+            verified_existing, _existing_receipt = _reverify_main_cursor(existing)
+            existing_identity = {key: value for key, value in verified_existing.items() if key != "updated_at_utc"}
+            cursor_identity = {key: value for key, value in cursor.items() if key != "updated_at_utc"}
+            if existing_identity == cursor_identity:
                 return existing
             raise RuntimeError("domestic main baseline already exists with a different identity")
         _atomic_root_receipt(DOMESTIC_MAIN_STATE, cursor, create_only=True)
@@ -2185,20 +2278,25 @@ def record_domestic_main(
     _assert_root_directory(DOMESTIC_MAIN, private=True)
     with _production_release_lock():
         existing = _read_main_state()
+        verified_existing, _existing_receipt = _reverify_main_cursor(
+            existing, require_current=(installed_app_sha == existing["installed_app_sha"]),
+        )
+        if existing["main_sha"] != main_sha and existing["main_sha"] != expected_previous_main_sha:
+            raise RuntimeError("domestic main compare-and-swap base mismatch")
         cursor, _receipt = _build_main_cursor(
             main_sha=main_sha, main_tree=main_tree,
             installed_app_sha=installed_app_sha, installed_app_tree=installed_app_tree,
             installed_manifest_sha256=installed_manifest_sha256,
             source_bundle_sha256=source_bundle_sha256,
             previous_main_sha=expected_previous_main_sha,
+            legacy_previous_sha=(existing.get("legacy_previous_sha") if existing["main_sha"] == main_sha else None),
+            previous_cursor=(verified_existing if existing["main_sha"] != main_sha else None),
         )
         identity_fields = set(cursor) - {"updated_at_utc"}
         if existing["main_sha"] == cursor["main_sha"]:
             if all(existing[field] == cursor[field] for field in identity_fields):
                 return existing
             raise RuntimeError("domestic main already records a different identity for this SHA")
-        if existing["main_sha"] != expected_previous_main_sha:
-            raise RuntimeError("domestic main compare-and-swap base mismatch")
         if cursor["main_sha"] == expected_previous_main_sha:
             raise ValueError("record-domestic-main requires a new main SHA")
         _atomic_root_receipt(DOMESTIC_MAIN_STATE, cursor, create_only=False)
@@ -2210,30 +2308,11 @@ def read_domestic_main() -> dict:
     _assert_root_directory(ROOT)
     with _production_release_lock():
         cursor = _read_main_state()
-        source_receipt_path = _source_bundle_receipt_path(cursor["main_sha"])
-        _assert_root_file(source_receipt_path, exact_mode=0o600)
-        try:
-            source_receipt = json.loads(source_receipt_path.read_bytes())
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError("source backup receipt is invalid") from exc
-        if not isinstance(source_receipt, dict):
-            raise RuntimeError("source backup receipt is invalid")
-        verified = _build_main_cursor(
-            main_sha=cursor["main_sha"], main_tree=cursor["main_tree"],
-            installed_app_sha=cursor["installed_app_sha"], installed_app_tree=cursor["installed_app_tree"],
-            installed_manifest_sha256=cursor["installed_manifest_sha256"],
-            source_bundle_sha256=cursor["source_bundle_sha256"],
-            previous_main_sha=source_receipt.get("previous_main_sha", ""),
-            allow_baseline_transition=source_receipt.get("baseline_transition") is True,
-        )
-        verified_identity = {key: value for key, value in verified[0].items() if key != "updated_at_utc"}
-        cursor_identity = {key: value for key, value in cursor.items() if key != "updated_at_utc"}
-        if verified_identity != cursor_identity:
-            raise ValueError("domestic main cursor does not match verified production state")
+        _verified_cursor, receipt = _reverify_main_cursor(cursor)
         return {
             "status": "ready",
             "cursor": cursor,
-            "install_receipt": verified[1],
+            "install_receipt": receipt,
             "install_receipt_sha256": cursor["install_receipt_sha256"],
         }
 
@@ -2365,6 +2444,7 @@ def main() -> None:
                     allow_baseline_transition=args.allow_baseline_transition,
                 )
                 result.pop("_first_parent", None)
+                result.pop("_app_ancestors", None)
             elif args.initialize_domestic_main or args.record_domestic_main:
                 if (
                     args.source_bundle is not None

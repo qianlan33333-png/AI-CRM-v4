@@ -863,6 +863,284 @@ class DomesticMainReleaseTests(unittest.TestCase):
                   "prod_helper": "/fixed/helper", "production_enabled": True}
         return config, app_sha, baseline_sha, {"app": app, "tree": baseline_tree, "bundle_meta": bundle_meta}
 
+    def test_baseline_overlay_does_not_require_github_ci(self) -> None:
+        self.assertFalse(hasattr(release, "_github_json"))
+        self.assertFalse(hasattr(release, "_github_pr46_ci_evidence"))
+
+    def test_baseline_overlay_seed_bundle_requires_one_complete_main_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            subprocess.run(["git", f"--git-dir={repo}", "update-ref", "refs/heads/main", candidate], check=True)
+            bundle = root / f"domestic-main-seed-{candidate}.bundle"
+            subprocess.run(["git", f"--git-dir={repo}", "bundle", "create", str(bundle), "refs/heads/main"], check=True,
+                           stdout=subprocess.DEVNULL)
+            work_root = root / "work"
+            work_root.mkdir(mode=0o700)
+            with mock.patch.object(release, "BASELINE_OVERLAY_SEED_ROOT", root):
+                with release._verified_overlay_seed_bundle(repo, work_root, bundle, candidate, base) as (seed_repo, digest, tree):
+                    self.assertEqual(tree, release._tree(seed_repo, candidate))
+                    self.assertEqual(digest, release._file_sha256(bundle))
+                extra_ref = f"refs/domestic-main-seed/{candidate}"
+                subprocess.run(["git", f"--git-dir={repo}", "update-ref", extra_ref, candidate], check=True)
+                malformed = root / f"domestic-main-seed-{candidate}.bundle"
+                malformed.unlink()
+                subprocess.run(["git", f"--git-dir={repo}", "bundle", "create", str(malformed),
+                                "refs/heads/main", extra_ref], check=True, stdout=subprocess.DEVNULL)
+                with self.assertRaisesRegex(release.ReleaseError, "unexpected refs"):
+                    with release._verified_overlay_seed_bundle(repo, work_root, malformed, candidate, base):
+                        self.fail("multi-ref seed bundle must not be accepted")
+
+    def test_baseline_overlay_runs_local_base291_tool_and_host_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            work_root = root / "work"
+            work_root.mkdir(mode=0o700)
+            receipt = {"status": "passed", "baseline_sha": base, "head_sha": candidate,
+                       "execution_receipt_sha256": "a" * 64, "selected_lanes": ["preflight"]}
+            host = {"host_role": "staging", "postgres_major": 16,
+                    "database_connection": "verified", "helper_sha256": "b" * 64}
+            config = {"work_root": str(work_root), "stage_helper": "/stage/helper"}
+            with mock.patch.object(release, "_safe_directory"), \
+                 mock.patch.object(release, "_run"), \
+                 mock.patch.object(release, "_make_worktree_metadata_readable"), \
+                 mock.patch.object(release, "_check_report", return_value=receipt) as check, \
+                 mock.patch.object(release, "_build_command") as build, \
+                 mock.patch.object(release, "_tree", return_value="2" * 40), \
+                 mock.patch.object(release, "_run_stage_helper_host_contract", return_value=host) as contract:
+                result = release._run_baseline_overlay_preflight(
+                    config, repo, base_sha=base, candidate_sha=candidate)
+            self.assertEqual(result["baseline_sha"], base)
+            self.assertEqual(result["head_sha"], candidate)
+            self.assertEqual(result["stage_host_contract"], host)
+            self.assertEqual(check.call_args.args[4:], (base, candidate))
+            self.assertEqual(build.call_count, 3)
+            self.assertEqual(build.call_args_list[-1].args[1][1:3],
+                             ["-m", "unittest"])
+            self.assertEqual(build.call_args_list[-1].args[1][-1],
+                             "scripts.test_domestic_release_controller")
+            contract.assert_called_once_with(config, repo, candidate)
+            with mock.patch.object(release, "_safe_directory"), \
+                 mock.patch.object(release, "_run"), \
+                 mock.patch.object(release, "_make_worktree_metadata_readable"), \
+                 mock.patch.object(release, "_check_report", return_value=receipt), \
+                 mock.patch.object(release, "_build_command"), \
+                 mock.patch.object(release, "_run_stage_helper_host_contract", return_value=None):
+                with self.assertRaisesRegex(release.ControllerMaintenanceRequired, "host contract"):
+                    release._run_baseline_overlay_preflight(
+                        config, repo, base_sha=base, candidate_sha=candidate)
+
+    def test_baseline_overlay_evidence_is_create_only_and_same_identity_resumable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            work_root = Path(temporary) / "work"
+            work_root.mkdir(mode=0o700)
+            config = {"work_root": str(work_root)}
+            evidence = {"schema_version": 1, "candidate": {"sha": "a" * 40},
+                        "created_at_utc": "2026-09-26T00:00:00Z",
+                        "local_preflight": {"check_receipt_sha256": "d" * 64,
+                            "stage_host_contract": {"host_role": "staging", "postgres_major": 16,
+                                "database_connection": "verified", "systemd_services": 3,
+                                "helper_sha256": "b" * 64}}}
+            fake_stat = mock.Mock(st_mode=stat.S_IFREG | 0o600, st_uid=0, st_gid=0, st_size=0)
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_safe_directory"), \
+                 mock.patch.object(release.os, "fstat", return_value=fake_stat):
+                first = release._store_baseline_overlay_evidence(config, evidence)
+                retry = release._store_baseline_overlay_evidence(config, {
+                    **evidence, "created_at_utc": "2026-09-26T00:01:00Z",
+                    "local_preflight": {**evidence["local_preflight"],
+                        "check_receipt_sha256": "e" * 64},
+                })
+                self.assertEqual(first, retry)
+                different_head = {**evidence, "candidate": {"sha": "b" * 40}}
+                second_candidate = release._store_baseline_overlay_evidence(config, different_head)
+                self.assertNotEqual(first, second_candidate)
+                with self.assertRaisesRegex(release.ReleaseError, "different identity"):
+                    release._store_baseline_overlay_evidence(config, {
+                        **evidence, "helper_blob_sha256": "c" * 64,
+                    })
+                changed_host_contract = {**evidence, "local_preflight": {
+                    **evidence["local_preflight"], "stage_host_contract": {
+                        **evidence["local_preflight"]["stage_host_contract"], "postgres_major": 15}}}
+                with self.assertRaisesRegex(release.ReleaseError, "different identity"):
+                    release._store_baseline_overlay_evidence(config, changed_host_contract)
+            for candidate_sha in ("a" * 40, "b" * 40):
+                overlay = release._overlay_evidence_path(config, candidate_sha)
+                self.assertEqual(stat.S_IMODE(overlay.stat().st_mode), 0o600)
+                self.assertTrue(overlay.is_file())
+
+    def test_active_overlay_candidate_allows_pre_cursor_supersede_and_locks_after_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            work_root = Path(temporary) / "work"
+            work_root.mkdir(mode=0o700)
+            config = {"work_root": str(work_root)}
+            fake_stat = mock.Mock(st_mode=stat.S_IFREG | 0o600, st_uid=0, st_gid=0, st_size=0)
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_safe_directory"), \
+                 mock.patch.object(release.os, "fstat", return_value=fake_stat):
+                first = release._select_active_overlay_candidate(
+                    config, "a" * 40, cursor_exists=False, ledger_exists=False, allow_supersede=True)
+                self.assertEqual(first["candidate_sha"], "a" * 40)
+                # Simulates a crash after marker A but before initialize cursor.
+                resumed = release._select_active_overlay_candidate(
+                    config, "a" * 40, cursor_exists=False, ledger_exists=False, allow_supersede=True)
+                self.assertEqual(resumed["candidate_sha"], "a" * 40)
+                with self.assertRaisesRegex(release.ReleaseError, "fixed by an existing cursor"):
+                    release._select_active_overlay_candidate(
+                        config, "b" * 40, cursor_exists=True, ledger_exists=False, allow_supersede=True)
+                second = release._select_active_overlay_candidate(
+                    config, "b" * 40, cursor_exists=False, ledger_exists=False, allow_supersede=True)
+                self.assertEqual(second["candidate_sha"], "b" * 40)
+                self.assertEqual(second["superseded_candidate_shas"], ["a" * 40])
+                self.assertEqual(release._read_active_overlay_candidate(config), second)
+                with self.assertRaisesRegex(release.ReleaseError, "fixed by an existing cursor"):
+                    release._select_active_overlay_candidate(
+                        config, "c" * 40, cursor_exists=True, ledger_exists=False, allow_supersede=True)
+                with self.assertRaisesRegex(release.ReleaseError, "fixed by an existing cursor"):
+                    release._select_active_overlay_candidate(
+                        config, "c" * 40, cursor_exists=False, ledger_exists=True, allow_supersede=True)
+
+    def test_baseline_overlay_readback_binds_live_helper_app_cursor_and_receipt(self) -> None:
+        candidate_sha, helper_sha, controller_sha = "a" * 40, "b" * 64, "c" * 64
+        app = {"sha": release.BASELINE_OVERLAY_APP_SHA, "tree": "d" * 40,
+               "manifest_sha256": "e" * 64}
+        bundle = {"source_sha": release.BASELINE_OVERLAY_BASE_SHA,
+                  "source_tree": release.BASELINE_OVERLAY_BASE_TREE,
+                  "previous_main_sha": app["sha"], "bundle_sha256": "f" * 64,
+                  "baseline_transition": True}
+        evidence = {
+            "schema_version": 1, "operation": "resume_baseline_helper_overlay",
+            "baseline": {"sha": release.BASELINE_OVERLAY_BASE_SHA,
+                         "tree": release.BASELINE_OVERLAY_BASE_TREE},
+            "installed_app": app,
+            "production_source_backup": {"source_sha": bundle["source_sha"],
+                "source_tree": bundle["source_tree"], "previous_main_sha": app["sha"],
+                "bundle_sha256": bundle["bundle_sha256"], "source_receipt_sha256": "1" * 64},
+            "candidate": {"pr_number": 46, "sha": candidate_sha, "tree": "2" * 40,
+                "helper_blob_sha256": helper_sha, "controller_blob_sha256": controller_sha},
+            "local_preflight": {"baseline_sha": release.BASELINE_OVERLAY_BASE_SHA,
+                "head_sha": candidate_sha, "candidate_tree": "2" * 40,
+                "check_receipt_sha256": "5" * 64, "selected_lanes": ["preflight"],
+                "stage_host_contract": {"host_role": "staging", "postgres_major": 16,
+                    "database_connection": "verified", "helper_sha256": helper_sha}},
+            "seed_bundle_sha256": "3" * 64,
+        }
+        cursor = {"main_sha": release.BASELINE_OVERLAY_BASE_SHA,
+                  "main_tree": release.BASELINE_OVERLAY_BASE_TREE,
+                  "installed_app_sha": app["sha"], "installed_app_tree": app["tree"],
+                  "installed_manifest_sha256": app["manifest_sha256"],
+                  "source_bundle_sha256": bundle["bundle_sha256"]}
+        stored = {"evidence": evidence, "evidence_sha256": "4" * 64}
+        config = {"work_root": "/work", "stage_helper": "/stage/helper", "prod_helper": "/prod/helper"}
+        with mock.patch.object(release, "_read_baseline_overlay_evidence", return_value=stored), \
+             mock.patch.object(release, "_read_active_overlay_candidate", return_value={"candidate_sha": candidate_sha}), \
+             mock.patch.object(release, "_load_existing_baseline_bundle", return_value=(Path("/bundle"), bundle)), \
+             mock.patch.object(release, "_verify_saved_production_bundle", return_value={
+                 "source_receipt_sha256": "1" * 64}), \
+             mock.patch.object(release, "_protected_exact_helper", return_value=True), \
+             mock.patch.object(release.legacy, "_remote_file_sha256", return_value=helper_sha), \
+             mock.patch.object(release, "_file_sha256", return_value=controller_sha):
+            result = release._verify_existing_baseline_helper_overlay(
+                config, Path("/repo"), candidate_sha=candidate_sha,
+                base_sha=release.BASELINE_OVERLAY_BASE_SHA,
+                base_tree=release.BASELINE_OVERLAY_BASE_TREE,
+                installed_app=app, production_cursor=cursor)
+            self.assertEqual(result["helper_blob_sha256"], helper_sha)
+            with self.assertRaisesRegex(release.ReleaseError, "cursor"):
+                release._verify_existing_baseline_helper_overlay(
+                    config, Path("/repo"), candidate_sha=candidate_sha,
+                    base_sha=release.BASELINE_OVERLAY_BASE_SHA,
+                    base_tree=release.BASELINE_OVERLAY_BASE_TREE,
+                    installed_app=app, production_cursor={**cursor, "main_sha": "9" * 40})
+
+        with mock.patch.object(release, "_read_baseline_overlay_evidence", return_value=stored), \
+             mock.patch.object(release, "_read_active_overlay_candidate", return_value={"candidate_sha": candidate_sha}), \
+             mock.patch.object(release, "_load_existing_baseline_bundle", return_value=(Path("/bundle"), bundle)), \
+             mock.patch.object(release, "_verify_saved_production_bundle") as saved, \
+             mock.patch.object(release, "_protected_exact_helper", return_value=True), \
+             mock.patch.object(release.legacy, "_remote_file_sha256", return_value="9" * 64), \
+             mock.patch.object(release, "_file_sha256", return_value=controller_sha):
+            with self.assertRaisesRegex(release.ControllerMaintenanceRequired, "production and running"):
+                release._verify_existing_baseline_helper_overlay(
+                    config, Path("/repo"), candidate_sha=candidate_sha,
+                    base_sha=release.BASELINE_OVERLAY_BASE_SHA,
+                    base_tree=release.BASELINE_OVERLAY_BASE_TREE, installed_app=app)
+            saved.assert_not_called()
+
+    def test_activate_and_verify_select_overlay_only_for_explicit_candidate_sha(self) -> None:
+        candidate_sha = "a" * 40
+        app = {"sha": release.BASELINE_OVERLAY_APP_SHA, "tree": "d" * 40,
+               "manifest_sha256": "e" * 64}
+        cursor = {"main_sha": release.BASELINE_OVERLAY_BASE_SHA,
+                  "main_tree": release.BASELINE_OVERLAY_BASE_TREE,
+                  "installed_app_sha": app["sha"], "installed_app_tree": app["tree"],
+                  "installed_manifest_sha256": app["manifest_sha256"],
+                  "source_bundle_sha256": "f" * 64}
+        repository = {"main_sha": release.BASELINE_OVERLAY_BASE_SHA,
+                      "main_tree": release.BASELINE_OVERLAY_BASE_TREE}
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = Path(temporary) / "state.json"
+            config = {"repo": "/repo", "state": str(state_path), "lock": "/lock",
+                      "controller_path": "/controller", "push_group": "push"}
+            activation_order = []
+            with mock.patch.object(release, "verify_bare_repository", return_value=repository), \
+                 mock.patch.object(release, "_installed_app_identity", return_value=(app, {})), \
+                 mock.patch.object(release, "_verify_production_cursor",
+                                   side_effect=lambda *_a, **_kw: activation_order.append("production_cursor") or {"cursor": cursor}), \
+                 mock.patch.object(release, "_verify_existing_baseline_helper_overlay",
+                                   side_effect=lambda *a, **kw: activation_order.append("overlay") or {"source_bundle_sha256": "f" * 64}) as overlay, \
+                 mock.patch.object(release, "_verify_controller_files") as strict, \
+                 mock.patch.object(release, "atomic_json"):
+                activated = release._activate_locked_no_lock(config, candidate_sha=candidate_sha)
+            self.assertEqual(activated["status"], "activated")
+            self.assertEqual(overlay.call_args.kwargs["candidate_sha"], candidate_sha)
+            self.assertEqual(activation_order, ["overlay", "production_cursor"])
+            strict.assert_not_called()
+
+            state = release._new_state(release.BASELINE_OVERLAY_BASE_SHA,
+                release.BASELINE_OVERLAY_BASE_TREE, app)
+            verify_order = []
+            with mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "verify_bare_repository", return_value=repository), \
+                 mock.patch.object(release, "_load_state", return_value=state), \
+                 mock.patch.object(release, "_installed_app_identity", return_value=(app, {})), \
+                 mock.patch.object(release, "_verify_production_cursor",
+                                   side_effect=lambda *_a, **_kw: verify_order.append("production_cursor") or {"cursor": cursor}), \
+                 mock.patch.object(release, "_verify_existing_baseline_helper_overlay",
+                                   side_effect=lambda *a, **kw: verify_order.append("overlay") or {"source_bundle_sha256": "f" * 64}) as overlay, \
+                 mock.patch.object(release, "_verify_controller_files") as strict, \
+                 mock.patch.object(release.legacy, "stage_readback", return_value={}), \
+                 mock.patch.object(release.legacy, "verify_readback"):
+                verified = release.verify(config, candidate_sha=candidate_sha)
+            self.assertEqual(verified["status"], "verified")
+            self.assertEqual(overlay.call_args.kwargs["candidate_sha"], candidate_sha)
+            self.assertEqual(verify_order, ["overlay", "production_cursor"])
+            strict.assert_not_called()
+
+    def test_poll_without_transition_marker_still_requires_fixed_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, _candidate, _other = make_repository(root)
+            tree = release._tree(repo, base)
+            state = release._new_state(base, tree,
+                {"sha": base, "tree": tree, "manifest_sha256": "a" * 64})
+            config = {"repo": str(repo), "state": str(root / "state.json"),
+                      "lock": str(root / "lock"), "production_enabled": True,
+                      "controller_path": release.DEFAULT_CONTROLLER, "push_group": "release-push-test"}
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                 mock.patch.object(release, "verify_bare_repository", return_value={"bare": True}), \
+                 mock.patch.object(release, "_load_state", return_value=state), \
+                 mock.patch.object(release, "_verify_controller_files",
+                                   side_effect=release.ControllerMaintenanceRequired("strict helper check")) as strict:
+                with self.assertRaisesRegex(release.ControllerMaintenanceRequired, "strict helper"):
+                    release.poll(config)
+            strict.assert_called_once()
+
     def test_resume_baseline_reuses_verified_local_and_production_pair_on_reentry(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
