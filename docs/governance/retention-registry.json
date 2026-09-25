@@ -536,30 +536,6 @@
     }
   },
   "tables": {
-    "adminops_incident_episodes": {
-      "owner": "adminops",
-      "source": "migrations/0193_adminops_governance_outcomes.sql",
-      "policy": "permanent",
-      "reason": "Permanent minimal episode and fixed-enum attribution facts, without raw diagnostic details; recurrence retains independent duration."
-    },
-    "adminops_incident_attributions": {
-      "owner": "adminops",
-      "source": "migrations/0193_adminops_governance_outcomes.sql",
-      "policy": "permanent",
-      "reason": "Permanent immutable CAS, idempotency and attribution audit receipts containing only fixed structured governance facts."
-    },
-    "adminops_governance_releases": {
-      "owner": "adminops",
-      "source": "migrations/0193_adminops_governance_outcomes.sql",
-      "policy": "permanent",
-      "reason": "Permanent root-authenticated successful-release summary and one-way revocation facts; observed runtime projections are excluded."
-    },
-    "adminops_cpu_profile_receipts": {
-      "owner": "adminops",
-      "source": "migrations/0190_adminops_cpu_profiles.sql",
-      "policy": "permanent",
-      "reason": "Minimal immutable administrator CPU-profile acceptance and completion receipt prevents replay after 720-hour artifact expiry; no raw profile bytes, labels or stacks are stored."
-    },
     "access_machine_audit": {
       "owner": "access",
       "policy": "permanent",
@@ -692,6 +668,12 @@
       "source": "migrations/0003_access.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/admin_users"
     },
+    "adminops_cpu_profile_receipts": {
+      "owner": "adminops",
+      "source": "migrations/0190_adminops_cpu_profiles.sql",
+      "policy": "permanent",
+      "reason": "Minimal immutable administrator CPU-profile acceptance and completion receipt prevents replay after 720-hour artifact expiry; no raw profile bytes, labels or stacks are stored."
+    },
     "adminops_diagnostic_events": {
       "owner": "adminops",
       "source": "migrations/0186_adminops_inspections.sql",
@@ -707,6 +689,24 @@
       "reason": "Diagnostic process snapshots; read TTL 30 days and bounded same-UoW Owner cleanup. Shared scheduling activation is separate.",
       "cleanup": "owner_port_available",
       "executor": "internal/adminops/port.SnapshotRetention"
+    },
+    "adminops_governance_releases": {
+      "owner": "adminops",
+      "source": "migrations/0193_adminops_governance_outcomes.sql",
+      "policy": "permanent",
+      "reason": "Permanent root-authenticated successful-release summary and one-way revocation facts; observed runtime projections are excluded."
+    },
+    "adminops_incident_attributions": {
+      "owner": "adminops",
+      "source": "migrations/0193_adminops_governance_outcomes.sql",
+      "policy": "permanent",
+      "reason": "Permanent immutable CAS, idempotency and attribution audit receipts containing only fixed structured governance facts."
+    },
+    "adminops_incident_episodes": {
+      "owner": "adminops",
+      "source": "migrations/0193_adminops_governance_outcomes.sql",
+      "policy": "permanent",
+      "reason": "Permanent minimal episode and fixed-enum attribution facts, without raw diagnostic details; recurrence retains independent duration."
     },
     "adminops_inspection_commands": {
       "owner": "adminops",
@@ -863,6 +863,14 @@
       "source": "migrations/0036_ai_assistant_review.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/ai_assistant_review_decisions"
     },
+    "ai_assistant_workbench_packages": {
+      "owner": "aiassistant",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "Frozen approved-package versions and creator-scoped idempotency references remain attached to durable AI review plans; no UnionID is stored.",
+      "source": "migrations/0209_ai_assistant_workbench_packages.sql",
+      "classification_evidence": "docs/prd/2026-09-25-scrm-controlled-singlechat-v4.md#first-phase-contract"
+    },
     "audit_events": {
       "owner": "platform",
       "policy": "permanent",
@@ -878,14 +886,6 @@
       "reason": "保存领域业务对象、成员/归属关系、内容或来源凭据，Owner 读取/写入及引用关系持续使用；年龄本身不能使该业务事实失效。 核验字段：status, draft_version, published_version, legacy_configuration, agent_name, agent_code, automation_type, execution_enabled。",
       "source": "migrations/0013_automation_agents.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/automation_agents"
-    },
-    "automation_audit_events": {
-      "owner": "automation",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "记录具体业务对象的变更、操作者或领域事件与摘要，供历史追溯/重放；属于业务审计或事件事实，不是调试输出。 核验字段：agent_id, actor_id, payload_digest, operation, occurred_at。",
-      "source": "migrations/0013_automation_agents.sql",
-      "classification_evidence": "docs/governance/retention-classification-review.json#tables/automation_audit_events"
     },
     "automation_audience_push_audit_events": {
       "owner": "automation",
@@ -935,6 +935,14 @@
       "cleanup": "disabled",
       "reason": "记录持续推送批次已受理的版本化领域事件与幂等摘要，供后续可靠消费和重放。",
       "source": "migrations/0201_automation_audience_direct_push.sql"
+    },
+    "automation_audit_events": {
+      "owner": "automation",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "记录具体业务对象的变更、操作者或领域事件与摘要，供历史追溯/重放；属于业务审计或事件事实，不是调试输出。 核验字段：agent_id, actor_id, payload_digest, operation, occurred_at。",
+      "source": "migrations/0013_automation_agents.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/automation_audit_events"
     },
     "automation_enrollments": {
       "owner": "automation",
@@ -1884,6 +1892,30 @@
       "source": "migrations/0012_group_ops.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/group_ops_audit_events"
     },
+    "group_ops_catalog_control": {
+      "owner": "groupops",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "保存群目录自动同步控制状态和合并重跑标记。",
+      "source": "migrations/0194_group_invitation_catalog.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/group_ops_catalog_control"
+    },
+    "group_ops_catalog_observations": {
+      "owner": "groupops",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "保存全量群目录同步逐群结果，支持部分失败审计。",
+      "source": "migrations/0194_group_invitation_catalog.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/group_ops_catalog_observations"
+    },
+    "group_ops_catalog_runs": {
+      "owner": "groupops",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "保存全量群目录同步运行记录，作为可审计业务状态。",
+      "source": "migrations/0194_group_invitation_catalog.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/group_ops_catalog_runs"
+    },
     "group_ops_directory_groups": {
       "owner": "groupops",
       "policy": "owner_projection",
@@ -2335,6 +2367,38 @@
       "source": "migrations/0007_media.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/media_images"
     },
+    "media_invitation_changes": {
+      "owner": "media",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "保存邀请计划切换历史和审计记录。",
+      "source": "migrations/0195_media_invitation_plans.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/media_invitation_changes"
+    },
+    "media_invitation_codes": {
+      "owner": "media",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "保存官方群码外部效果回执及当前二维码投影。",
+      "source": "migrations/0195_media_invitation_plans.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/media_invitation_codes"
+    },
+    "media_invitation_join_ways": {
+      "owner": "media",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "保存公开邀请计划固定 join_way 的 config_id、二维码和切群更新回执。",
+      "source": "migrations/0204_media_invitation_join_ways.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/media_invitation_join_ways"
+    },
+    "media_invitation_plans": {
+      "owner": "media",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "保存邀请计划、绑定顺序、阈值和当前承接状态。",
+      "source": "migrations/0195_media_invitation_plans.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/media_invitation_plans"
+    },
     "media_legacy_material_mappings": {
       "owner": "media",
       "policy": "permanent",
@@ -2473,6 +2537,24 @@
       "source": "migrations/0071_message_archive_core.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/message_archive_sync_state"
     },
+    "openplatform_customer_window_items": {
+      "owner": "openplatform",
+      "policy": "security_ttl",
+      "cleanup": "enabled",
+      "reason": "Machine contact page snapshots contain only allowlisted safe fields and expire after 24 hours; a new window deletes expired windows and cascades items.",
+      "source": "migrations/0208_openplatform_customer_windows.sql",
+      "classification_evidence": "docs/prd/2026-09-25-scrm-controlled-singlechat-v4.md#first-phase-contract",
+      "executor": "internal/openplatform/store/customer_window.go#FreezeCustomerWindow"
+    },
+    "openplatform_customer_windows": {
+      "owner": "openplatform",
+      "policy": "security_ttl",
+      "cleanup": "enabled",
+      "reason": "Machine contact page snapshots contain only allowlisted safe fields and expire after 24 hours; a new window deletes expired windows and cascades items.",
+      "source": "migrations/0208_openplatform_customer_windows.sql",
+      "classification_evidence": "docs/prd/2026-09-25-scrm-controlled-singlechat-v4.md#first-phase-contract",
+      "executor": "internal/openplatform/store/customer_window.go#FreezeCustomerWindow"
+    },
     "operation_cycle_action_execution_snapshots": {
       "owner": "operationcycle",
       "policy": "permanent",
@@ -2589,13 +2671,6 @@
       "policy": "permanent",
       "source": "migrations/0061_product_public_purchase.sql",
       "reason": "Frozen order contact evidence; not process cache.",
-      "cleanup": "disabled"
-    },
-    "order_shipping_address_snapshots": {
-      "owner": "order",
-      "policy": "permanent",
-      "source": "migrations/0203_order_shipping_address_snapshots.sql",
-      "reason": "Frozen shipping address evidence captured at checkout; not process cache.",
       "cleanup": "disabled"
     },
     "order_distribution_qualification_evidence": {
@@ -2741,6 +2816,13 @@
       "source": "migrations/0055_order_service_entitlements.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/order_service_entitlements"
     },
+    "order_shipping_address_snapshots": {
+      "owner": "order",
+      "policy": "permanent",
+      "source": "migrations/0203_order_shipping_address_snapshots.sql",
+      "reason": "Frozen shipping address evidence captured at checkout; not process cache.",
+      "cleanup": "disabled"
+    },
     "order_status_history": {
       "owner": "order",
       "policy": "permanent",
@@ -2868,13 +2950,6 @@
       "source": "migrations/0044_outbound_automation_messages.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/outbound_message_intents"
     },
-    "outbound_message_receipts": {
-      "owner": "outbound",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "保存企微消息任务、发送人、目标和实际发送回执，用于证明送达或明确失败并禁止盲目重发。",
-      "source": "migrations/0201_automation_audience_direct_push.sql"
-    },
     "outbound_message_outbox": {
       "owner": "outbound",
       "policy": "permanent",
@@ -2882,6 +2957,13 @@
       "reason": "记录具体业务对象的变更、操作者或领域事件与摘要，供历史追溯/重放；属于业务审计或事件事实，不是调试输出。 核验字段：message_intent_id, idempotency_digest, event_type, payload, occurred_at。",
       "source": "migrations/0044_outbound_automation_messages.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/outbound_message_outbox"
+    },
+    "outbound_message_receipts": {
+      "owner": "outbound",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "保存企微消息任务、发送人、目标和实际发送回执，用于证明送达或明确失败并禁止盲目重发。",
+      "source": "migrations/0201_automation_audience_direct_push.sql"
     },
     "outbound_private_message_intents": {
       "owner": "outbound",
@@ -3394,6 +3476,27 @@
       "source": "migrations/0185_referral_core.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/referral_participations"
     },
+    "referral_product_activity_contexts": {
+      "owner": "referral",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "服务端签发的活动上下文是订单归因和销售事实的不可变来源；过期状态由活动规则控制，不能物理删除。",
+      "source": "migrations/0198_referral_activity_config.sql"
+    },
+    "referral_product_sale_checkouts": {
+      "owner": "referral",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "保存订单创建时冻结的活动、商品和推广归因事实，供支付事件重放和审计使用。",
+      "source": "migrations/0198_referral_activity_config.sql"
+    },
+    "referral_product_sale_events": {
+      "owner": "referral",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "销售计分与退款冲正是追加式业务事实，必须保留原始付款和冲正证据。",
+      "source": "migrations/0198_referral_activity_config.sql"
+    },
     "referral_relationship_history": {
       "owner": "referral",
       "policy": "permanent",
@@ -3425,6 +3528,13 @@
       "reason": "保存领域业务对象、成员/归属关系、内容或来源凭据，Owner 读取/写入及引用关系持续使用；年龄本身不能使该业务事实失效。 核验字段：reward_id, score_event_id, reason, occurred_at。",
       "source": "migrations/0185_referral_core.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/referral_reward_reviews"
+    },
+    "referral_sales_facts": {
+      "owner": "referral",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "销售榜的可重建事实及退款投影，历史活动和对账需要长期保留。",
+      "source": "migrations/0198_referral_activity_config.sql"
     },
     "referral_score_events": {
       "owner": "referral",
@@ -4156,90 +4266,6 @@
       "reason": "过期欢迎码是短期能力，但 callback 去重与消费 effect_ref 是发送事实；保留收据，凭据按既有更短 TTL 失效而非延长到30天。",
       "source": "migrations/0033_wecom_welcome_grants.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/wecom_welcome_grants"
-    },
-    "group_ops_catalog_runs": {
-      "owner": "groupops",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "保存全量群目录同步运行记录，作为可审计业务状态。",
-      "source": "migrations/0194_group_invitation_catalog.sql",
-      "classification_evidence": "docs/governance/retention-classification-review.json#tables/group_ops_catalog_runs"
-    },
-    "group_ops_catalog_control": {
-      "owner": "groupops",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "保存群目录自动同步控制状态和合并重跑标记。",
-      "source": "migrations/0194_group_invitation_catalog.sql",
-      "classification_evidence": "docs/governance/retention-classification-review.json#tables/group_ops_catalog_control"
-    },
-    "group_ops_catalog_observations": {
-      "owner": "groupops",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "保存全量群目录同步逐群结果，支持部分失败审计。",
-      "source": "migrations/0194_group_invitation_catalog.sql",
-      "classification_evidence": "docs/governance/retention-classification-review.json#tables/group_ops_catalog_observations"
-    },
-    "media_invitation_plans": {
-      "owner": "media",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "保存邀请计划、绑定顺序、阈值和当前承接状态。",
-      "source": "migrations/0195_media_invitation_plans.sql",
-      "classification_evidence": "docs/governance/retention-classification-review.json#tables/media_invitation_plans"
-    },
-    "media_invitation_codes": {
-      "owner": "media",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "保存官方群码外部效果回执及当前二维码投影。",
-      "source": "migrations/0195_media_invitation_plans.sql",
-      "classification_evidence": "docs/governance/retention-classification-review.json#tables/media_invitation_codes"
-    },
-    "media_invitation_changes": {
-      "owner": "media",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "保存邀请计划切换历史和审计记录。",
-      "source": "migrations/0195_media_invitation_plans.sql",
-      "classification_evidence": "docs/governance/retention-classification-review.json#tables/media_invitation_changes"
-    },
-    "referral_product_activity_contexts": {
-      "owner": "referral",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "服务端签发的活动上下文是订单归因和销售事实的不可变来源；过期状态由活动规则控制，不能物理删除。",
-      "source": "migrations/0198_referral_activity_config.sql"
-    },
-    "referral_product_sale_checkouts": {
-      "owner": "referral",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "保存订单创建时冻结的活动、商品和推广归因事实，供支付事件重放和审计使用。",
-      "source": "migrations/0198_referral_activity_config.sql"
-    },
-    "referral_product_sale_events": {
-      "owner": "referral",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "销售计分与退款冲正是追加式业务事实，必须保留原始付款和冲正证据。",
-      "source": "migrations/0198_referral_activity_config.sql"
-    },
-    "referral_sales_facts": {
-      "owner": "referral",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "销售榜的可重建事实及退款投影，历史活动和对账需要长期保留。",
-      "source": "migrations/0198_referral_activity_config.sql"
-    },
-    "media_invitation_join_ways": {
-      "owner": "media",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "保存公开邀请计划固定 join_way 的 config_id、二维码和切群更新回执。",
-      "source": "migrations/0204_media_invitation_join_ways.sql",
-      "classification_evidence": "docs/governance/retention-classification-review.json#tables/media_invitation_join_ways"
     }
   }
 }

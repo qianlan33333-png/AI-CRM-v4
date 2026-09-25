@@ -111,3 +111,43 @@ func (r *Repository) MachineExecutionSummary(ctx context.Context, planID aiassis
 		FROM ai_assistant_plan_recipients WHERE plan_id=$1`, planID).Scan(&summary.OutcomeUnknownCount, &summary.RetryableFailureCount)
 	return summary, err
 }
+
+func (r *Repository) SaveMachinePackage(ctx context.Context, planID aiassistantport.PlanID, actor aiassistantport.MachineActor, metadata aiassistantport.MachinePackageMetadata) error {
+	if planID < 1 || !actor.Valid() || !metadata.Valid() {
+		return ErrInvalid
+	}
+	tx, err := platformpostgres.RequireTransaction(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO ai_assistant_workbench_packages(plan_id,actor_ref,client_reference,audience_package_id,audience_version,copy_package_id,copy_version,strategy_version,product_fact_version,source_fingerprint,approval_revision,member_count)
+	 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, planID, actor.Reference, metadata.ClientReference, metadata.AudiencePackageID, metadata.AudienceVersion, metadata.CopyPackageID, metadata.CopyVersion, metadata.StrategyVersion, metadata.ProductFactVersion, metadata.SourceFingerprint, metadata.ApprovalRevision, metadata.MemberCount)
+	if unique(err) {
+		return ErrConflict
+	}
+	return err
+}
+
+func (r *Repository) MachineRecipientResults(ctx context.Context, planID aiassistantport.PlanID) ([]aiassistantport.MachineRecipientResult, error) {
+	tx, err := platformpostgres.RequireTransaction(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `SELECT r.id,r.customer_id,r.review_state,r.execution_state,
+	 COALESCE(b.provider_accepted,false),COALESCE(b.delivery_proven,false),COALESCE(b.external_effect_id,''),r.updated_at
+	 FROM ai_assistant_plan_recipients r LEFT JOIN ai_assistant_effect_bindings b ON b.recipient_id=r.id
+	 WHERE r.plan_id=$1 ORDER BY r.id`, planID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]aiassistantport.MachineRecipientResult, 0)
+	for rows.Next() {
+		var item aiassistantport.MachineRecipientResult
+		if err = rows.Scan(&item.RecipientID, &item.CustomerID, &item.ReviewState, &item.ExecutionState, &item.ProviderAccepted, &item.DeliveryProven, &item.EffectID, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}

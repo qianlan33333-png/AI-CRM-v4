@@ -395,7 +395,7 @@ func TestV1MachinePatchInputRejectsDuplicateAndEmptyGrantAmbiguity(t *testing.T)
 
 func TestV1MachineRateLimitRejectsBeforeOperationAcrossRESTAndMCP(t *testing.T) {
 	operations := &handlerOperationStub{}
-	limiter := &handlerRateLimiterStub{machineErr: accessdomain.ErrRateLimited}
+	limiter := &handlerRateLimiterStub{machineErr: accessdomain.MachineRateLimitError{RetryAfter: 1500 * time.Millisecond}}
 	handler, err := NewHandler(Config{MachineAuthentication: handlerMachineStub{principal: accessdomain.MachinePrincipal{ClientID: "client-a", ClientRecord: 7}}, RateLimiter: limiter, AdminAuthentication: handlerAdminStub{}, Management: handlerManagementStub{}, Operations: operations, SessionCookieName: "session", CSRFCookieName: "csrf"})
 	if err != nil {
 		t.Fatal(err)
@@ -403,7 +403,7 @@ func TestV1MachineRateLimitRejectsBeforeOperationAcrossRESTAndMCP(t *testing.T) 
 	rest := machineRequest(http.MethodGet, "https://crm.example.com/open/v1/capabilities", "")
 	restResponse := httptest.NewRecorder()
 	handler.Routes().ServeHTTP(restResponse, rest)
-	if restResponse.Code != http.StatusTooManyRequests || !strings.Contains(restResponse.Body.String(), `"code":"rate_limited"`) || len(operations.invocations) != 0 {
+	if restResponse.Code != http.StatusTooManyRequests || restResponse.Header().Get("Retry-After") != "2" || !strings.Contains(restResponse.Body.String(), `"code":"rate_limited"`) || len(operations.invocations) != 0 {
 		t.Fatalf("REST status=%d invocations=%d body=%s", restResponse.Code, len(operations.invocations), restResponse.Body.String())
 	}
 	mcp := machineRequest(http.MethodPost, "https://crm.example.com/mcp", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
@@ -415,7 +415,7 @@ func TestV1MachineRateLimitRejectsBeforeOperationAcrossRESTAndMCP(t *testing.T) 
 }
 
 func TestOAuthCredentialRateLimitAndBodyBound(t *testing.T) {
-	limiter := &handlerRateLimiterStub{credentialErr: accessdomain.ErrRateLimited}
+	limiter := &handlerRateLimiterStub{credentialErr: accessdomain.MachineRateLimitError{RetryAfter: 1500 * time.Millisecond}}
 	handler, err := NewHandler(Config{MachineAuthentication: handlerMachineStub{}, RateLimiter: limiter, AdminAuthentication: handlerAdminStub{}, Management: handlerManagementStub{}, Operations: &handlerOperationStub{}, SessionCookieName: "session", CSRFCookieName: "csrf"})
 	if err != nil {
 		t.Fatal(err)
@@ -425,7 +425,7 @@ func TestOAuthCredentialRateLimitAndBodyBound(t *testing.T) {
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	response := httptest.NewRecorder()
 	handler.Routes().ServeHTTP(response, request)
-	if response.Code != http.StatusTooManyRequests || !strings.Contains(response.Body.String(), `"error":"rate_limited"`) || limiter.credentialHit != 1 {
+	if response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") != "2" || !strings.Contains(response.Body.String(), `"error":"rate_limited"`) || limiter.credentialHit != 1 {
 		t.Fatalf("rate status=%d hits=%d body=%s", response.Code, limiter.credentialHit, response.Body.String())
 	}
 

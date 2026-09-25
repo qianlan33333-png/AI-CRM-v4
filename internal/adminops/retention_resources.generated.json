@@ -1,6 +1,6 @@
 {
   "registry_version": 1,
-  "registry_sha256": "40e676006cd00d55cddf9a2c85b09952862ef5cd19f70cb6f1f8319601811327",
+  "registry_sha256": "5a0b8d14c180a0ab19e3309675c27d90bb123f1b1a8a376ca44d6a407e69c89d",
   "inventory_scope": "committed_registry",
   "items": [
     {
@@ -556,6 +556,19 @@
       "policy": "permanent",
       "reason": "保存领域业务对象、成员/归属关系、内容或来源凭据，Owner 读取/写入及引用关系持续使用；年龄本身不能使该业务事实失效。 核验字段：plan_id, recipient_id, actor_id, aggregate_version, idempotency_digest, decision, reason, occurred_at。",
       "source": "migrations/0036_ai_assistant_review.sql",
+      "cleanup_entrypoint": "",
+      "policy_id": "",
+      "coverage_status": "protected",
+      "gap_code": "",
+      "authorization_expiry": "not_assessed"
+    },
+    {
+      "kind": "table",
+      "name": "ai_assistant_workbench_packages",
+      "owner": "aiassistant",
+      "policy": "permanent",
+      "reason": "Frozen approved-package versions and creator-scoped idempotency references remain attached to durable AI review plans; no UnionID is stored.",
+      "source": "migrations/0209_ai_assistant_workbench_packages.sql",
       "cleanup_entrypoint": "",
       "policy_id": "",
       "coverage_status": "protected",
@@ -3291,6 +3304,32 @@
       "coverage_status": "owner_managed",
       "gap_code": "",
       "authorization_expiry": "not_assessed"
+    },
+    {
+      "kind": "table",
+      "name": "openplatform_customer_window_items",
+      "owner": "openplatform",
+      "policy": "security_ttl",
+      "reason": "Machine contact page snapshots contain only allowlisted safe fields and expire after 24 hours; a new window deletes expired windows and cascades items.",
+      "source": "migrations/0208_openplatform_customer_windows.sql",
+      "cleanup_entrypoint": "",
+      "policy_id": "",
+      "coverage_status": "gap",
+      "gap_code": "security_ttl_physical_cleanup_missing",
+      "authorization_expiry": "owner_security_ttl"
+    },
+    {
+      "kind": "table",
+      "name": "openplatform_customer_windows",
+      "owner": "openplatform",
+      "policy": "security_ttl",
+      "reason": "Machine contact page snapshots contain only allowlisted safe fields and expire after 24 hours; a new window deletes expired windows and cascades items.",
+      "source": "migrations/0208_openplatform_customer_windows.sql",
+      "cleanup_entrypoint": "",
+      "policy_id": "",
+      "coverage_status": "gap",
+      "gap_code": "security_ttl_physical_cleanup_missing",
+      "authorization_expiry": "owner_security_ttl"
     },
     {
       "kind": "table",

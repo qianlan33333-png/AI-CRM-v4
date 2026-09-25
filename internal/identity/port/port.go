@@ -205,6 +205,12 @@ type MachineIdentityExportReader interface {
 	MachineIdentityExport(context.Context, customerdomain.CustomerID) (MachineIdentityExport, error)
 }
 
+// VerifiedScopedUnionReader confirms the exact provider-verified identity
+// selected by an already authorized caller, without exporting other facts.
+type VerifiedScopedUnionReader interface {
+	HasVerifiedScopedUnion(context.Context, customerdomain.CustomerID, string, string) (bool, error)
+}
+
 // GroupCandidateIdentityReader reads a unique active verified identity only.
 // Missing or ambiguous evidence must remain unknown; this never provisions.
 type GroupCandidateIdentityReader interface {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	accessdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/access/domain"
+	accessport "github.com/qianlan33333-png/AI-CRM-v3/internal/access/port"
 	aiassistantport "github.com/qianlan33333-png/AI-CRM-v3/internal/aiassistant/port"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
@@ -82,6 +83,13 @@ type openPlatformExecutor struct {
 	surveyAliases       openPlatformSurveyIdentityReader
 	timeline            customerport.CustomerTimelineReader
 	owners              wecomport.AudiencePrimaryOwnerReader
+	contacts            wecomport.MachineContactPageReader
+	contactTouches      archiveport.MachineContactTouchReader
+	contactStatuses     customerport.MachineContactStatusReader
+	contactStaff        accessport.Repository
+	contactWindows      openplatformport.CustomerWindowRepository
+	contactReadUOW      platformport.UnitOfWork
+	contactWriteUOW     platformport.UnitOfWork
 	customerDetails     wecomport.CustomerBusinessDetailReader
 	scopes              openPlatformIdentityScopes
 	activities          *openPlatformActivityReaders
@@ -90,12 +98,30 @@ type openPlatformExecutor struct {
 	aiMachineIntake     aiassistantport.MachineTransactionalIntake
 	aiMachineReader     aiassistantport.MachineReader
 	aiUOW               platformport.UnitOfWork
+	workbenchUnions     identityport.VerifiedScopedUnionReader
 	v1Orders            orderport.ExternalReadQueryService
 	v1OrderTimeline     orderport.ExternalOrderTimelineReader
 	v1Refunds           paymentport.ExternalOrderRefundReader
 	v1OrderCursorKey    []byte
 	v1OrderUOW          platformport.UnitOfWork
 	v1ExternalCursorKey []byte
+}
+
+func (executor *openPlatformExecutor) BindV1CustomerList(contacts wecomport.MachineContactPageReader, statuses customerport.MachineContactStatusReader, staff accessport.Repository, windows openplatformport.CustomerWindowRepository, readUOW, writeUOW platformport.UnitOfWork) error {
+	if executor == nil || contacts == nil || statuses == nil || staff == nil || windows == nil || readUOW == nil || writeUOW == nil {
+		return errOpenPlatformRouteUnavailable
+	}
+	executor.contacts, executor.contactStatuses, executor.contactStaff, executor.contactWindows = contacts, statuses, staff, windows
+	executor.contactReadUOW, executor.contactWriteUOW = readUOW, writeUOW
+	return nil
+}
+
+func (executor *openPlatformExecutor) BindV1ContactTouches(reader archiveport.MachineContactTouchReader) error {
+	if executor == nil || reader == nil {
+		return errOpenPlatformRouteUnavailable
+	}
+	executor.contactTouches = reader
+	return nil
 }
 
 func (executor *openPlatformExecutor) BindV1Orders(orders orderport.ExternalReadQueryService, refunds paymentport.ExternalOrderRefundReader, uow platformport.UnitOfWork, signingKey []byte) error {
@@ -159,6 +185,14 @@ func (executor *openPlatformExecutor) BindV1AI(intake aiassistantport.MachineTra
 		return errOpenPlatformRouteUnavailable
 	}
 	executor.aiMachineIntake, executor.aiMachineReader, executor.aiUOW = intake, reader, uow
+	return nil
+}
+
+func (executor *openPlatformExecutor) BindV1WorkbenchUnions(reader identityport.VerifiedScopedUnionReader) error {
+	if executor == nil || reader == nil {
+		return errOpenPlatformRouteUnavailable
+	}
+	executor.workbenchUnions = reader
 	return nil
 }
 

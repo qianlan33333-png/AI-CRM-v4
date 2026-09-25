@@ -385,6 +385,9 @@ func (stub *v1AIMachineStub) GetMachineOperationStatus(_ context.Context, actor 
 	}
 	return stub.status, stub.err
 }
+func (stub *v1AIMachineStub) GetMachineRecipientResults(context.Context, aiassistantport.MachineActor, aiassistantport.PlanID) ([]aiassistantport.MachineRecipientResult, error) {
+	return nil, stub.err
+}
 
 func TestV1AICreateAndStatusUseMachineActorAndAtomicAudit(t *testing.T) {
 	executor := v1ExecutorForTest(t, &openPlatformIdentityStub{}, &openPlatformProfileStub{})

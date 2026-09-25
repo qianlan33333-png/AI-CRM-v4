@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	aiassistantapp "github.com/qianlan33333-png/AI-CRM-v3/internal/aiassistant/app"
@@ -254,5 +255,6 @@ func digestFromBytes(value []byte) (effectport.Digest, error) {
 }
 
 func unique(err error) bool {
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique")
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

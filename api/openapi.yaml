@@ -4527,6 +4527,14 @@ paths:
       security: [{machineBearer: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/OpenPlatformCustomerResolveRequest"}}}}
       responses: {"200": {description: Safe resolution result, content: {application/json: {schema: {$ref: "#/components/schemas/OpenPlatformCustomerResolveResponse"}}}}, "400": {$ref: "#/components/responses/OpenPlatformV1Failure"}, "401": {$ref: "#/components/responses/OpenPlatformV1Failure"}, "403": {$ref: "#/components/responses/OpenPlatformV1Failure"}, "404": {$ref: "#/components/responses/OpenPlatformV1Failure"}, "409": {$ref: "#/components/responses/OpenPlatformV1Failure"}, "429": {$ref: "#/components/responses/OpenPlatformV1Failure"}, "503": {$ref: "#/components/responses/OpenPlatformV1Failure"}}
+  /open/v1/customers:
+    get:
+      operationId: listOpenPlatformCustomers
+      tags: [OpenPlatform]
+      description: Frozen privacy-safe contact window for one authorized corporation. Advance the watermark only after the final page.
+      security: [{machineBearer: []}]
+      parameters: [{name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}, {name: cursor, in: query, schema: {type: string, minLength: 1, maxLength: 1024}}, {name: updated_from, in: query, schema: {type: string, format: date-time}}, {name: updated_to, in: query, schema: {type: string, format: date-time}}]
+      responses: {"200": {description: Frozen safe contact page, content: {application/json: {schema: {$ref: "#/components/schemas/OpenPlatformContactWindowResponse"}}}}, "400": {$ref: "#/components/responses/OpenPlatformV1Failure"}, "401": {$ref: "#/components/responses/OpenPlatformV1Failure"}, "403": {$ref: "#/components/responses/OpenPlatformV1Failure"}, "404": {$ref: "#/components/responses/OpenPlatformV1Failure"}, "429": {$ref: "#/components/responses/OpenPlatformV1Failure"}, "503": {$ref: "#/components/responses/OpenPlatformV1Failure"}}
   /open/v1/customers/{customer_id}:
     parameters: [{name: customer_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveID"}}]
     get:
@@ -4546,7 +4554,7 @@ paths:
     post:
       operationId: createOpenPlatformAIReviewPlan
       tags: [OpenPlatform]
-      description: Creates a review plan only; it does not dispatch an external effect.
+      description: Creates a review plan only; a workbench package additionally requires ai.workbench.package.create and remains blocked from approval and dispatch until authoritative send gates are composed.
       security: [{machineBearer: []}]
       parameters: [{$ref: "#/components/parameters/RequiredIdempotencyKey"}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/OpenPlatformAIReviewPlanRequest"}}}}
@@ -8581,6 +8589,42 @@ components:
       additionalProperties: false
       required: [data, error, request_id]
       properties: {data: {$ref: "#/components/schemas/OpenPlatformCustomerContext"}, error: {type: "null"}, request_id: {type: string, minLength: 1}}
+    OpenPlatformSafeContact:
+      type: object
+      additionalProperties: false
+      required: [record_id, safe_user_ref, identity_status, owner_userid, owner_display_name, owner_status, tags, binding_status, contact_permission, do_not_disturb, human_handoff, last_real_touch_at, last_interaction_at, updated_at, deleted_at]
+      properties:
+        record_id: {type: string}
+        safe_user_ref: {type: [string, "null"]}
+        identity_status: {type: string, enum: [resolved, unresolved]}
+        owner_userid: {type: string}
+        owner_display_name: {type: string}
+        owner_status: {type: string, enum: [known, ambiguous, unknown]}
+        tags: {type: array, items: {type: string}}
+        binding_status: {type: string, enum: [bound, unbound, unknown]}
+        contact_permission: {const: unknown}
+        do_not_disturb: {const: unknown}
+        human_handoff: {const: unknown}
+        last_real_touch_at: {type: [string, "null"], format: date-time}
+        last_interaction_at: {type: [string, "null"], format: date-time}
+        updated_at: {type: string, format: date-time}
+        deleted_at: {type: [string, "null"], format: date-time}
+    OpenPlatformContactWindow:
+      type: object
+      additionalProperties: false
+      required: [items, item_count, updated_from, updated_to, window_complete]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/OpenPlatformSafeContact"}}
+        item_count: {type: integer, minimum: 0}
+        updated_from: {type: string, format: date-time}
+        updated_to: {type: string, format: date-time}
+        window_complete: {type: boolean}
+        next_cursor: {type: string, minLength: 1, maxLength: 1024}
+    OpenPlatformContactWindowResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties: {data: {$ref: "#/components/schemas/OpenPlatformContactWindow"}, error: {type: "null"}, request_id: {type: string, minLength: 1}}
     OpenPlatformActivityItem:
       type: object
       additionalProperties: false
@@ -8897,12 +8941,40 @@ components:
     OpenPlatformAIReviewPlanRequest:
       type: object
       additionalProperties: false
-      required: [name, source_kind, source_digest, recipients]
+      required: [name]
+      oneOf:
+        - required: [source_kind, source_digest, recipients]
+        - required: [package, members, content]
       properties:
         name: {type: string, minLength: 1}
         source_kind: {type: string, minLength: 1}
         source_digest: {type: string, minLength: 1}
         recipients: {type: array, minItems: 1, maxItems: 5000, items: {$ref: "#/components/schemas/OpenPlatformAIReviewRecipient"}}
+        package: {$ref: "#/components/schemas/OpenPlatformAIWorkbenchPackage"}
+        members: {type: array, minItems: 1, maxItems: 10, items: {$ref: "#/components/schemas/OpenPlatformAIWorkbenchMember"}}
+        content: {type: array, minItems: 1, maxItems: 20, items: {$ref: "#/components/schemas/OpenPlatformAIReviewContent"}}
+    OpenPlatformAIWorkbenchPackage:
+      type: object
+      additionalProperties: false
+      required: [audience_package_id, audience_version, copy_package_id, copy_version, strategy_version, product_fact_version, source_fingerprint, approval_revision, client_reference, member_count]
+      properties:
+        audience_package_id: {type: string, minLength: 1, maxLength: 200}
+        audience_version: {type: string, minLength: 1, maxLength: 200}
+        copy_package_id: {type: string, minLength: 1, maxLength: 200}
+        copy_version: {type: string, minLength: 1, maxLength: 200}
+        strategy_version: {type: string, minLength: 1, maxLength: 200}
+        product_fact_version: {type: string, minLength: 1, maxLength: 200}
+        source_fingerprint: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+        approval_revision: {type: string, minLength: 1, maxLength: 200}
+        client_reference: {type: string, minLength: 1, maxLength: 200}
+        member_count: {type: integer, minimum: 1, maximum: 10}
+    OpenPlatformAIWorkbenchMember:
+      type: object
+      additionalProperties: false
+      required: [union_id, owner_userid]
+      properties:
+        union_id: {type: string, minLength: 1, maxLength: 256, writeOnly: true}
+        owner_userid: {type: string, minLength: 1}
     OpenPlatformAIReviewPlanData:
       type: object
       additionalProperties: false
@@ -8911,6 +8983,8 @@ components:
         operation_id: {type: string, pattern: "^ai_review_plan:[1-9][0-9]*$"}
         review_state: {type: string}
         replayed: {type: boolean}
+        automatic_send_allowed: {type: boolean}
+        members: {type: array, items: {type: object, additionalProperties: false, required: [index, status], properties: {index: {type: integer, minimum: 0}, status: {type: string, enum: [accepted, rejected]}, reason: {type: string}}}}
     OpenPlatformAIReviewPlanResponse:
       type: object
       additionalProperties: false
@@ -8927,6 +9001,7 @@ components:
         outcome_unknown_count: {type: integer, minimum: 0}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+        recipients: {type: array, items: {type: object, additionalProperties: false, required: [recipient_id, safe_user_ref, review_state, execution_state, provider_accepted, delivery_proven, effect_id, updated_at], properties: {recipient_id: {type: integer, minimum: 1}, safe_user_ref: {type: string}, review_state: {type: string}, execution_state: {type: string}, provider_accepted: {type: boolean}, delivery_proven: {type: boolean}, effect_id: {type: string}, updated_at: {type: string, format: date-time}}}}
     OpenPlatformOperationStatusResponse:
       type: object
       additionalProperties: false
@@ -8946,7 +9021,7 @@ components:
         credential_hint: {type: string}
         audiences: {type: array, minItems: 1, items: {type: string}}
         scopes: {type: array, minItems: 1, items: {type: string, enum: [read, write]}}
-        capabilities: {type: array, minItems: 1, items: {type: string, enum: [platform.capabilities.read, customer.resolve, customer.read, customer.activity.read, customer.detail.read, identity.read, order.read, questionnaire.read, radar.click.read, radar.link.read, chat.read, ai.review_plan.create, operation.read]}}
+        capabilities: {type: array, minItems: 1, items: {type: string, enum: [platform.capabilities.read, customer.resolve, customer.read, customer.activity.read, customer.detail.read, identity.read, order.read, questionnaire.read, radar.click.read, radar.link.read, chat.read, ai.review_plan.create, operation.read]}, x-aicrm-additional-capabilities: [customer.list.read, ai.workbench.package.create]}
         allowed_cidrs: {type: array, items: {type: string}}
         corp_id: {type: string}
         owner_scope: {$ref: "#/components/schemas/OpenPlatformOwnerScope"}
@@ -8967,7 +9042,7 @@ components:
         purpose: {const: external_agent}
         audiences: {type: array, minItems: 1, items: {type: string}}
         scopes: {type: array, minItems: 1, items: {type: string, enum: [read, write]}}
-        capabilities: {type: array, minItems: 1, items: {type: string, enum: [platform.capabilities.read, customer.resolve, customer.read, customer.activity.read, customer.detail.read, identity.read, order.read, questionnaire.read, radar.click.read, radar.link.read, chat.read, ai.review_plan.create, operation.read]}}
+        capabilities: {type: array, minItems: 1, items: {type: string, enum: [platform.capabilities.read, customer.resolve, customer.read, customer.activity.read, customer.detail.read, identity.read, order.read, questionnaire.read, radar.click.read, radar.link.read, chat.read, ai.review_plan.create, operation.read]}, x-aicrm-additional-capabilities: [customer.list.read, ai.workbench.package.create]}
         allowed_cidrs: {type: array, items: {type: string}}
         owner_scope: {$ref: "#/components/schemas/OpenPlatformOwnerScope"}
         token_ttl_seconds: {type: integer, minimum: 1}
@@ -8980,7 +9055,7 @@ components:
         display_name: {type: string, minLength: 1}
         audiences: {type: array, minItems: 1, items: {type: string}}
         scopes: {type: array, minItems: 1, items: {type: string, enum: [read, write]}}
-        capabilities: {type: array, minItems: 1, items: {type: string, enum: [platform.capabilities.read, customer.resolve, customer.read, customer.activity.read, customer.detail.read, identity.read, order.read, questionnaire.read, radar.click.read, radar.link.read, chat.read, ai.review_plan.create, operation.read]}}
+        capabilities: {type: array, minItems: 1, items: {type: string, enum: [platform.capabilities.read, customer.resolve, customer.read, customer.activity.read, customer.detail.read, identity.read, order.read, questionnaire.read, radar.click.read, radar.link.read, chat.read, ai.review_plan.create, operation.read]}, x-aicrm-additional-capabilities: [customer.list.read, ai.workbench.package.create]}
         allowed_cidrs: {type: array, items: {type: string}}
         token_ttl_seconds: {type: integer, minimum: 1}
         owner_scope: {oneOf: [{$ref: "#/components/schemas/OpenPlatformOwnerScope"}, {type: "null"}]}

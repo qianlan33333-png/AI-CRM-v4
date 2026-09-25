@@ -91,6 +91,7 @@ func (handler *Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /mcp", handler.mcp)
 	mux.HandleFunc("GET /open/v1/capabilities", handler.v1Capabilities)
 	mux.HandleFunc("POST /open/v1/customers:resolve", handler.v1ResolveCustomer)
+	mux.HandleFunc("GET /open/v1/customers", handler.v1Customers)
 	mux.HandleFunc("GET /open/v1/customers/{customer_id}", handler.v1CustomerContext)
 	mux.HandleFunc("GET /open/v1/customers/{customer_id}/activities", handler.v1CustomerActivities)
 	mux.HandleFunc("POST /open/v1/ai/review-plans", handler.v1AIReviewPlan)
@@ -141,6 +142,7 @@ func Mount(next, machine http.Handler) http.Handler {
 	for _, route := range []string{
 		"POST /oauth/token", "GET /mcp", "POST /mcp",
 		"GET /open/v1/capabilities", "POST /open/v1/customers:resolve",
+		"GET /open/v1/customers",
 		"GET /open/v1/customers/{customer_id}", "GET /open/v1/customers/{customer_id}/activities",
 		"POST /open/v1/ai/review-plans", "GET /open/v1/operations/{operation_id}",
 		"GET /open/v1/orders", "GET /open/v1/orders/{order_id}",
@@ -203,6 +205,7 @@ func (handler *Handler) token(response http.ResponseWriter, request *http.Reques
 		clientID, clientSecret = formID, formSecret
 	}
 	if err := handler.rateLimiter.AllowClientCredentials(request.Context(), clientID, source); err != nil {
+		setMachineRetryAfter(response, err)
 		writeOAuthError(response, statusForMachineError(err), oauthErrorFor(err))
 		return
 	}
@@ -226,6 +229,7 @@ func (handler *Handler) mcpMetadata(response http.ResponseWriter, request *http.
 		return
 	}
 	if err = handler.allowMachineRequest(request, principal); err != nil {
+		setMachineRetryAfter(response, err)
 		writeV1Error(response, statusForMachineError(err), operationErrorForMachineError(err), requestID)
 		return
 	}
@@ -260,6 +264,7 @@ func (handler *Handler) mcp(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	if err = handler.allowMachineRequest(request, principal); err != nil {
+		setMachineRetryAfter(response, err)
 		writeJSONRPCOperationError(response, rpc.ID, operationErrorForMachineError(err))
 		return
 	}
@@ -299,7 +304,7 @@ func (handler *Handler) mcp(response http.ResponseWriter, request *http.Request)
 			IdempotencyKey: strings.TrimSpace(request.Header.Get("Idempotency-Key")), Input: params.Arguments,
 		})
 		if invokeErr != nil {
-			writeJSONRPCOperationError(response, rpc.ID, openplatformport.ErrorCodeOf(invokeErr))
+			writeJSONRPCOperationDetailedError(response, rpc.ID, openplatformport.ErrorCodeOf(invokeErr), openplatformport.ErrorDetailsOf(invokeErr))
 			return
 		}
 		writeJSONRPCResult(response, rpc.ID, map[string]any{"content": []any{}, "structuredContent": result.Data})
@@ -318,6 +323,12 @@ func (handler *Handler) v1ResolveCustomer(response http.ResponseWriter, request 
 
 func (handler *Handler) v1CustomerContext(response http.ResponseWriter, request *http.Request) {
 	handler.invokeV1(response, request, openplatformport.OperationCustomerContext, pathJSONInput("customer_id"))
+}
+
+func (handler *Handler) v1Customers(response http.ResponseWriter, request *http.Request) {
+	handler.invokeV1(response, request, openplatformport.OperationCustomerList, func(request *http.Request) (json.RawMessage, error) {
+		return externalRecordsJSONInput(request, "customers", map[string]bool{"limit": true}, map[string]bool{"updated_from": true, "updated_to": true, "cursor": true})
+	})
 }
 
 func (handler *Handler) v1CustomerActivities(response http.ResponseWriter, request *http.Request) {
@@ -364,6 +375,7 @@ func (handler *Handler) invokeV1(response http.ResponseWriter, request *http.Req
 		return
 	}
 	if err = handler.allowMachineRequest(request, principal); err != nil {
+		setMachineRetryAfter(response, err)
 		writeV1Error(response, statusForMachineError(err), operationErrorForMachineError(err), id)
 		return
 	}
@@ -381,6 +393,11 @@ func (handler *Handler) invokeV1(response http.ResponseWriter, request *http.Req
 		IdempotencyKey: strings.TrimSpace(request.Header.Get("Idempotency-Key")), Input: input,
 	})
 	if err != nil {
+		if details := openplatformport.ErrorDetailsOf(err); details != nil {
+			response.Header().Set("X-Request-ID", id)
+			writeJSON(response, statusForOperationError(openplatformport.ErrorCodeOf(err)), map[string]any{"data": nil, "error": map[string]any{"code": string(openplatformport.ErrorCodeOf(err)), "details": details}, "request_id": id})
+			return
+		}
 		writeV1Error(response, statusForOperationError(openplatformport.ErrorCodeOf(err)), openplatformport.ErrorCodeOf(err), id)
 		return
 	}
@@ -711,10 +728,18 @@ func writeV1Error(response http.ResponseWriter, status int, code openplatformpor
 }
 
 func writeJSONRPCOperationError(response http.ResponseWriter, id json.RawMessage, category openplatformport.ErrorCode) {
+	writeJSONRPCOperationDetailedError(response, id, category, nil)
+}
+
+func writeJSONRPCOperationDetailedError(response http.ResponseWriter, id json.RawMessage, category openplatformport.ErrorCode, details any) {
 	if len(id) == 0 {
 		id = json.RawMessage("null")
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": -32000, "message": string(category), "data": map[string]string{"category": string(category)}}})
+	data := map[string]any{"category": string(category)}
+	if details != nil {
+		data["details"] = details
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": -32000, "message": string(category), "data": data}})
 }
 func (handler *Handler) listClients(response http.ResponseWriter, request *http.Request) {
 	actor, ok := handler.adminPrincipal(response, request, false)
@@ -1689,6 +1714,18 @@ func statusForMachineError(err error) int {
 	default:
 		return http.StatusBadRequest
 	}
+}
+
+func setMachineRetryAfter(response http.ResponseWriter, err error) {
+	var limited accessdomain.MachineRateLimitError
+	if !errors.As(err, &limited) {
+		return
+	}
+	seconds := int64((limited.RetryAfter + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	response.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
 }
 
 func oauthErrorFor(err error) string {
