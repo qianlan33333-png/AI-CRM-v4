@@ -677,7 +677,7 @@ def _policy_worktree(repo: Path, work_root: Path, base_sha: str, push_group: str
         registered = _run(["git", f"--git-dir={repo}", "worktree", "list", "--porcelain"], check=False).stdout
         if path.is_symlink() or not path.is_dir() or str(path.resolve()) not in registered:
             raise ReleaseError("unregistered trusted policy worktree path exists")
-        if _worktree_git(path, "rev-parse", "HEAD") != base_sha or _worktree_git(path, "status", "--porcelain"): 
+        if _worktree_git(path, "rev-parse", "HEAD") != base_sha or _worktree_git(path, "status", "--porcelain"):
             raise ReleaseError("trusted policy worktree differs from its exact base")
         _make_worktree_metadata_readable(repo, path, push_group)
         return path
