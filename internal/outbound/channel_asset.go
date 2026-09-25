@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
-	"strings"
 	"time"
 
 	channelport "github.com/qianlan33333-png/AI-CRM-v3/internal/channel/port"
@@ -29,10 +28,7 @@ func (provider *ChannelAssetProvider) Execute(ctx context.Context, envelope effe
 	if err != nil {
 		return effectport.AdapterResult{Completion: effectport.StateRetryable, ReceiptDigest: effectport.Hash("channel.asset.config-unavailable", string(envelope.Fingerprint()))}, nil
 	}
-	state := config.StateValue
-	if state == "" {
-		state = "ca-" + strings.TrimPrefix(string(envelope.SourceRefDigest), "sha256:")[:48]
-	}
+	state := channelport.EffectiveAcquisitionState(config.StateValue, string(envelope.SourceRefDigest))
 	request := wecomport.AcquisitionAssetRequest{Name: config.ChannelName, State: state, SkipVerify: config.SkipVerify, StaffUserIDs: config.StaffProviderRefs}
 	var result wecomport.AcquisitionAssetResult
 	if config.Kind == "contact_way_qrcode" {

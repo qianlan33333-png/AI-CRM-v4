@@ -19,10 +19,12 @@ func (channelAssetReaderStub) ReadPublishedConfig(context.Context, string) (chan
 type channelAssetWriterStub struct {
 	err   error
 	calls int
+	state string
 }
 
-func (writer *channelAssetWriterStub) CreateContactWay(context.Context, wecomport.AcquisitionAssetRequest) (wecomport.AcquisitionAssetResult, error) {
+func (writer *channelAssetWriterStub) CreateContactWay(_ context.Context, request wecomport.AcquisitionAssetRequest) (wecomport.AcquisitionAssetResult, error) {
 	writer.calls++
+	writer.state = request.State
 	return wecomport.AcquisitionAssetResult{}, writer.err
 }
 func (*channelAssetWriterStub) GetContactWay(context.Context, string) (wecomport.AcquisitionAssetResult, error) {
@@ -58,8 +60,9 @@ func TestChannelAssetProviderDistinguishesDefiniteRejectionFromUnknown(t *testin
 		t.Run(test.name, func(t *testing.T) {
 			writer := &channelAssetWriterStub{err: test.err}
 			result, err := NewChannelAssetProvider(channelAssetReaderStub{}, writer).Execute(context.Background(), channelAssetTestEnvelope(), effectport.Attempt{Number: 1})
-			if (err != nil) != test.hasErr || result.Completion != test.state || result.FailureCode != test.code || !result.CallAttempted || writer.calls != 1 {
-				t.Fatalf("result=%+v err=%v calls=%d", result, err, writer.calls)
+			wantState := channelport.EffectiveAcquisitionState("", string(channelAssetTestEnvelope().SourceRefDigest))
+			if (err != nil) != test.hasErr || result.Completion != test.state || result.FailureCode != test.code || !result.CallAttempted || writer.calls != 1 || writer.state != wantState || len(writer.state) != 30 {
+				t.Fatalf("result=%+v err=%v calls=%d state=%q", result, err, writer.calls, writer.state)
 			}
 		})
 	}
