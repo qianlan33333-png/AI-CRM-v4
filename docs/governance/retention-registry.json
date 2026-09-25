@@ -384,6 +384,18 @@
       "policy": "never_delete_by_retention",
       "reason": "Domestic build cache, technical cursor, and exact build receipts require explicit release-owner maintenance."
     },
+    "/opt/aicrm/domestic-main": {
+      "owner": "release",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Production domestic source cursor is required to reconcile the exact installed application and must be retained."
+    },
+    "/opt/aicrm/source-backups": {
+      "owner": "release",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Verified production source bundles are the recovery copy until the release owner explicitly replaces them."
+    },
     "/opt/aicrm/cache": {
       "owner": "release",
       "scope": "subtree",
@@ -461,6 +473,12 @@
       "scope": "subtree",
       "policy": "never_delete_by_retention",
       "reason": "Root-owned latest aggregate maintenance observations; atomic replacement, no business payload."
+    },
+    "/var/lib/aicrm/domestic-main": {
+      "owner": "release",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Staging serial release ledger and lock preserve recovery identity and must not be removed by generic retention."
     },
     "/var/lib/aicrm/channel-history-imports": {
       "owner": "platform",
