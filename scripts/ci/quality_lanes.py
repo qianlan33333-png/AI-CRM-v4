@@ -421,6 +421,7 @@ def tooling_contract_commands() -> list[list[str]]:
         [sys.executable, "-m", "unittest", "discover", "-s", "scripts/ci", "-p", "test_*.py"],
         [sys.executable, "-m", "unittest", "discover", "-s", "scripts", "-p", "test_domestic_release*.py"],
         [sys.executable, "-m", "unittest", "discover", "-s", "deploy", "-p", "test_domestic_promote*.py"],
+        [sys.executable, "-m", "unittest", "deploy.test_domestic_main_source"],
     ]
 
 

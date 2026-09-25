@@ -133,6 +133,7 @@ class DomesticReleaseBuildTests(unittest.TestCase):
 
     def test_controller_and_ci_changes_are_not_app_builds_but_controller_files_are_explicit(self) -> None:
         controller = builder.classify_paths([
+            "scripts/domestic_main_release.py",
             "scripts/domestic_release.py",
             "scripts/domestic_release_build.py",
             "deploy/domestic-promote.py",
@@ -143,6 +144,7 @@ class DomesticReleaseBuildTests(unittest.TestCase):
         self.assertEqual(controller.build_mode, "controller_only")
         self.assertEqual(controller.controller_files, [
             "deploy/domestic-promote.py",
+            "scripts/domestic_main_release.py",
             "scripts/domestic_release.py",
             "scripts/domestic_release_build.py",
         ])

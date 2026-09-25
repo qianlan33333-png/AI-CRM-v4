@@ -221,7 +221,8 @@ def changed_units(metadata: dict) -> list[str]:
     paths = metadata.get("changed_paths", [])
     if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
         raise ValueError("invalid changed paths")
-    units = {Path(path).name for path in paths if path.startswith("deploy/") and Path(path).suffix in {".service", ".timer"} and not Path(path).name.startswith("aicrm-domestic-release.")}
+    units = {Path(path).name for path in paths if path.startswith("deploy/") and Path(path).suffix in {".service", ".timer"}
+             and not Path(path).name.startswith(("aicrm-domestic-release.", "aicrm-domestic-main-release."))}
     if any(path.startswith("components/excel-batches/") for path in paths):
         units.add("aicrm-excel-batches.service")
     return sorted(units)
@@ -774,12 +775,31 @@ def _write_staging_smoke_inputs(
         os.close(descriptor)
 
 
-def _source_commit_tree(source_sha: str) -> str:
+def _source_commit_tree(source_sha: str, *, source_ref: str | None = None,
+                        source_repository: Path | None = None) -> str:
     if not SHA.fullmatch(source_sha):
         raise ValueError("invalid smoke source SHA")
-    repository = SMOKE_SOURCE_REPOSITORY
+    source_repository = source_repository or SMOKE_SOURCE_REPOSITORY
+    repository = source_repository
     if repository.is_symlink() or not repository.is_dir() or (repository / ".git").is_symlink() or not (repository / ".git").exists():
-        raise RuntimeError("fixed source repository is missing or unsafe")
+        # Bare repositories have no .git directory; accept them only when a
+        # domestic immutable candidate ref is supplied explicitly.
+        if source_ref is None or repository.is_symlink() or not repository.is_dir():
+            raise RuntimeError("fixed source repository is missing or unsafe")
+    is_bare = run("git", f"--git-dir={repository}", "rev-parse", "--is-bare-repository", check=False).stdout.strip() == "true"
+    if source_ref is not None:
+        expected_ref = f"refs/domestic/candidates/{source_sha}"
+        if source_ref != expected_ref or not is_bare:
+            raise RuntimeError("domestic smoke requires the exact immutable candidate ref in a bare repository")
+        resolved = run("git", f"--git-dir={repository}", "rev-parse", "--verify", f"{source_ref}^{{commit}}").stdout.strip()
+        if resolved != source_sha:
+            raise RuntimeError("domestic smoke candidate ref does not resolve to the exact source SHA")
+        tree = run("git", f"--git-dir={repository}", "rev-parse", "--verify", f"{source_sha}^{{tree}}").stdout.strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", tree):
+            raise RuntimeError("smoke source tree identity is invalid")
+        return tree
+    if is_bare:
+        raise RuntimeError("bare source repository requires an explicit domestic candidate ref")
     git_prefix = ("git", "-C", str(repository), "-c", f"safe.directory={repository}")
     origin = run(*git_prefix, "remote", "get-url", "origin").stdout.strip()
     if origin not in SMOKE_SOURCE_REMOTES:
@@ -794,8 +814,8 @@ def _source_commit_tree(source_sha: str) -> str:
     return tree
 
 
-def _source_git_dir() -> str:
-    repository = SMOKE_SOURCE_REPOSITORY
+def _source_git_dir(repository: Path | None = None) -> str:
+    repository = repository or SMOKE_SOURCE_REPOSITORY
     git_prefix = ("git", "-C", str(repository), "-c", f"safe.directory={repository}")
     value = run(*git_prefix, "rev-parse", "--absolute-git-dir").stdout.strip()
     path = Path(value)
@@ -853,11 +873,16 @@ def _extract_source_archive(archive_path: Path, destination: Path) -> None:
         raise
 
 
-def _archive_smoke_source(source_sha: str, destination: Path) -> str:
-    tree = _source_commit_tree(source_sha)
-    repository = SMOKE_SOURCE_REPOSITORY
+def _archive_smoke_source(source_sha: str, destination: Path, *, source_ref: str | None = None,
+                          source_repository: Path | None = None) -> str:
+    source_repository = source_repository or SMOKE_SOURCE_REPOSITORY
+    tree = _source_commit_tree(source_sha, source_ref=source_ref, source_repository=source_repository)
+    if source_ref is None:
+        command = ("git", "-C", str(source_repository), "-c", f"safe.directory={source_repository}", "archive", "--format=tar", source_sha)
+    else:
+        command = ("git", f"--git-dir={source_repository}", "archive", "--format=tar", source_sha)
     result = subprocess.run(
-        ("git", "-C", str(repository), "-c", f"safe.directory={repository}", "archive", "--format=tar", source_sha),
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         timeout=120,
@@ -994,11 +1019,13 @@ def _verify_smoke_source_git_metadata(source_root: Path, index_path: Path, git_d
         raise RuntimeError("staging smoke source index must not use the live repository index")
 
 
-def _smoke_source_index(source_sha: str, source_root: Path, scratch: Path, git_dir: str) -> Path:
+def _smoke_source_index(source_sha: str, source_root: Path, scratch: Path, git_dir: str,
+                        source_repository: Path | None = None) -> Path:
+    source_repository = source_repository or SMOKE_SOURCE_REPOSITORY
     index_path = scratch / "source.index"
     result = subprocess.run(
         (
-            "git", "-c", f"safe.directory={SMOKE_SOURCE_REPOSITORY}",
+            "git", "-c", f"safe.directory={source_repository}",
             f"--git-dir={git_dir}", f"--work-tree={source_root}", "read-tree",
             f"--index-output={index_path}", f"{source_sha}^{{tree}}",
         ),
@@ -1013,7 +1040,9 @@ def _smoke_source_index(source_sha: str, source_root: Path, scratch: Path, git_d
     return index_path
 
 
-def _verify_smoke_source_snapshot(source_root: Path, git_dir: str, index_path: Path) -> None:
+def _verify_smoke_source_snapshot(source_root: Path, git_dir: str, index_path: Path,
+                                  source_repository: Path | None = None) -> None:
+    source_repository = source_repository or SMOKE_SOURCE_REPOSITORY
     environment = {
         **os.environ,
         "GIT_DIR": git_dir,
@@ -1022,11 +1051,11 @@ def _verify_smoke_source_snapshot(source_root: Path, git_dir: str, index_path: P
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_CONFIG_COUNT": "1",
         "GIT_CONFIG_KEY_0": "safe.directory",
-        "GIT_CONFIG_VALUE_0": str(SMOKE_SOURCE_REPOSITORY),
+        "GIT_CONFIG_VALUE_0": str(source_repository),
     }
     result = subprocess.run(
         (
-            "git", "-c", f"safe.directory={SMOKE_SOURCE_REPOSITORY}",
+            "git", "-c", f"safe.directory={source_repository}",
             "--git-dir", git_dir, "--work-tree", str(source_root), "diff", "--quiet", "--",
         ),
         env=environment,
@@ -1188,7 +1217,9 @@ def _run_installed_smoke_test(
     index_path: Path,
     node_path: str,
     smoke_input_path: Path,
+    source_repository: Path | None = None,
 ) -> None:
+    source_repository = source_repository or SMOKE_SOURCE_REPOSITORY
     _verify_smoke_source_git_metadata(source_root, index_path, git_dir)
     metadata_index = Path(source_root) / ".git/index"
     metadata_index_digest = digest(metadata_index)
@@ -1205,7 +1236,7 @@ def _run_installed_smoke_test(
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_CONFIG_COUNT": "1",
         "GIT_CONFIG_KEY_0": "safe.directory",
-        "GIT_CONFIG_VALUE_0": str(SMOKE_SOURCE_REPOSITORY),
+        "GIT_CONFIG_VALUE_0": str(source_repository),
     }
     _run_unprivileged_smoke_command(
         (node_path, str(source_root / "scripts/prepare-donor-source-views.mjs"), "--root", str(source_root)),
@@ -1214,7 +1245,7 @@ def _run_installed_smoke_test(
         timeout_seconds=120,
         label="staging smoke source preparation",
     )
-    _verify_smoke_source_snapshot(source_root, git_dir, index_path)
+    _verify_smoke_source_snapshot(source_root, git_dir, index_path, source_repository)
     _verify_smoke_source_git_metadata(source_root, index_path, git_dir)
     if digest(metadata_index) != metadata_index_digest:
         raise RuntimeError("staging smoke source Git metadata changed during preparation")
@@ -1231,7 +1262,7 @@ def _run_installed_smoke_test(
         required_marker=SMOKE_TEST_MARKER,
         label="installed staging smoke",
     )
-    _verify_smoke_source_snapshot(source_root, git_dir, index_path)
+    _verify_smoke_source_snapshot(source_root, git_dir, index_path, source_repository)
 
 
 def _stop_smoke_process_group(process_group: int) -> bool:
@@ -1267,6 +1298,9 @@ def run_staging_smoke(
     expected_sha: str,
     expected_manifest_sha256: str,
     expected_helper_sha256: str,
+    *,
+    source_ref: str | None = None,
+    source_repository: Path | None = None,
 ) -> dict:
     """Run the reviewed smoke fixture as ubuntu against the immutable installed API binary."""
     helper_sha256 = verify_helper_digest(expected_helper_sha256)
@@ -1275,7 +1309,8 @@ def run_staging_smoke(
     host_contract = check_host_contract()
     if host_contract.get("host_role") != "staging" or host_contract.get("postgres_major") != 16 or host_contract.get("database_connection") != "verified":
         raise RuntimeError("staging host contract is incomplete for installed behavior smoke")
-    tree_sha = _source_commit_tree(source_sha)
+    source_repository = source_repository or SMOKE_SOURCE_REPOSITORY
+    tree_sha = _source_commit_tree(source_sha, source_ref=source_ref, source_repository=source_repository)
     database_url = _staging_database_url()
     binary, binary_sha256 = _installed_staging_smoke_identity(expected_sha, expected_manifest_sha256)
     if LOCK.is_symlink() or (LOCK.exists() and not stat.S_ISREG(LOCK.lstat().st_mode)):
@@ -1297,12 +1332,13 @@ def run_staging_smoke(
             scratch = Path(scratch_name)
             scratch.chmod(0o755)
             source_root = scratch / "source"
-            tree_sha = _archive_smoke_source(source_sha, scratch)
+            tree_sha = _archive_smoke_source(source_sha, scratch, source_ref=source_ref,
+                                             source_repository=source_repository)
             if source_root.is_symlink() or not source_root.is_dir():
                 raise RuntimeError("fixed staging smoke source snapshot is unavailable")
             ubuntu = pwd.getpwnam("ubuntu")
-            git_dir = _source_git_dir()
-            source_index = _smoke_source_index(source_sha, source_root, scratch, git_dir)
+            git_dir = _source_git_dir(source_repository)
+            source_index = _smoke_source_index(source_sha, source_root, scratch, git_dir, source_repository)
             _chown_smoke_source_snapshot(source_root, ubuntu.pw_uid, ubuntu.pw_gid)
             _attach_smoke_source_git_metadata(source_root, source_index, git_dir)
             runtime_tmp = scratch / "runtime-tmp"
@@ -1328,6 +1364,7 @@ def run_staging_smoke(
             environment = staging_smoke_test_environment(runtime_tmp)
             _run_installed_smoke_test(
                 source_root, environment, git_dir, source_index, str(SMOKE_NODE), smoke_input_path,
+                source_repository,
             )
         final_binary, final_binary_sha256 = _installed_staging_smoke_identity(expected_sha, expected_manifest_sha256)
         if final_binary != binary or final_binary_sha256 != binary_sha256:
@@ -1420,7 +1457,7 @@ def install(
             make_release_directories_traversable(release)
         units = changed_units(metadata)
         if bootstrap:
-            units = sorted({path.name for path in (release / "deploy").glob("aicrm*.service") if path.name != "aicrm-domestic-release.service"} | {path.name for path in (release / "deploy").glob("aicrm*.timer") if path.name != "aicrm-domestic-release.timer"})
+            units = sorted({path.name for path in (release / "deploy").glob("aicrm*.service") if path.name not in {"aicrm-domestic-release.service", "aicrm-domestic-main-release.service"}} | {path.name for path in (release / "deploy").glob("aicrm*.timer") if path.name not in {"aicrm-domestic-release.timer", "aicrm-domestic-main-release.timer"}})
         unit_snapshot = {name: (Path("/etc/systemd/system") / name).read_bytes() if (Path("/etc/systemd/system") / name).is_file() else None for name in units}
         extra_active = tuple(unit for unit in ("aicrm-excel-batches.service",) if unit in units and run("systemctl", "is-active", "--quiet", unit, check=False).returncode == 0)
         backup = None
@@ -2220,6 +2257,8 @@ def main() -> None:
     p.add_argument("--installed-app-tree")
     p.add_argument("--installed-manifest-sha256")
     p.add_argument("--source-bundle-sha256")
+    p.add_argument("--source-ref", help="exact immutable domestic candidate ref, for domestic bare repositories")
+    p.add_argument("--source-repository", type=Path, help="fixed checked source repository used by the smoke fixture")
     args = p.parse_args()
     if os.geteuid() != 0:
         raise SystemExit("root required")
@@ -2252,6 +2291,8 @@ def main() -> None:
         try:
             result = run_staging_smoke(
                 args.source_sha, args.expected_sha, args.expected_manifest_sha256, args.expected_helper_sha256,
+                source_ref=args.source_ref,
+                source_repository=args.source_repository or SMOKE_SOURCE_REPOSITORY,
             )
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             raise SystemExit(str(exc)) from exc

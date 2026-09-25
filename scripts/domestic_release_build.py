@@ -30,6 +30,7 @@ ARCHIVE_RUNNER_SCRIPT = "scripts/build-wecom-archive-sdk-runner-linux.sh"
 # copies before advancing, but must not pretend that packaging the app installed
 # them.
 FIXED_CONTROLLER_FILES = {
+    "scripts/domestic_main_release.py",
     "scripts/domestic_release.py",
     "scripts/domestic_release_build.py",
     "deploy/domestic-promote.py",

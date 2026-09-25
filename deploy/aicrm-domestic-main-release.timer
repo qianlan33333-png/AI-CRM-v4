@@ -1,0 +1,14 @@
+[Unit]
+Description=Check the domestic CRM v4 candidate queue every two minutes
+ConditionPathExists=/etc/aicrm/domestic-main-release.json
+ConditionPathExists=/opt/aicrm/domestic-main/state.json
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=true
+Unit=aicrm-domestic-main-release.service
+
+[Install]
+WantedBy=timers.target
