@@ -946,7 +946,7 @@ func (client *Client) CreateContactWay(ctx context.Context, input wecomport.Acqu
 	if err != nil {
 		return wecomport.AcquisitionAssetResult{}, wecomport.WrapProviderWriteError(err, false)
 	}
-	body, err := json.Marshal(map[string]any{"type": 2, "scene": 2, "style": 1, "remark": input.Name, "skip_verify": input.SkipVerify, "state": input.State, "user": input.StaffUserIDs})
+	body, err := json.Marshal(map[string]any{"type": contactWayType(input.StaffUserIDs), "scene": 2, "style": 1, "remark": contactWayRemark(input.Name), "skip_verify": input.SkipVerify, "state": input.State, "user": input.StaffUserIDs})
 	if err != nil {
 		return wecomport.AcquisitionAssetResult{}, ErrResponse
 	}
@@ -955,11 +955,11 @@ func (client *Client) CreateContactWay(ctx context.Context, input wecomport.Acqu
 		return wecomport.AcquisitionAssetResult{}, wrapAcquisitionWriteError(err)
 	}
 	payload.ConfigID = strings.TrimSpace(payload.ConfigID)
-	payload.QRCode = strings.TrimSpace(payload.QRCode)
-	if invalid(payload.ConfigID) || !validProviderHTTPS(payload.QRCode) {
+	qrCode, validQR := normalizeContactWayQR(payload.QRCode)
+	if invalid(payload.ConfigID) || !validQR {
 		return wecomport.AcquisitionAssetResult{}, wecomport.WrapProviderWriteError(ErrResponse, true)
 	}
-	return wecomport.AcquisitionAssetResult{ProviderAssetRef: payload.ConfigID, URL: payload.QRCode}, nil
+	return wecomport.AcquisitionAssetResult{ProviderAssetRef: payload.ConfigID, URL: qrCode}, nil
 }
 
 // wrapAcquisitionWriteError keeps a completed WeCom rejection distinct from a
@@ -998,7 +998,8 @@ func (client *Client) GetContactWay(ctx context.Context, configID string) (wecom
 	if qrCode == "" {
 		qrCode = strings.TrimSpace(payload.QRCode)
 	}
-	if returnedID != configID || !validProviderHTTPS(qrCode) {
+	qrCode, validQR := normalizeContactWayQR(qrCode)
+	if returnedID != configID || !validQR {
 		return wecomport.AcquisitionAssetResult{}, ErrResponse
 	}
 	return wecomport.AcquisitionAssetResult{ProviderAssetRef: returnedID, URL: qrCode}, nil
@@ -1012,7 +1013,7 @@ func (client *Client) UpdateContactWay(ctx context.Context, configID string, inp
 	if err != nil {
 		return wecomport.AcquisitionAssetResult{}, wecomport.WrapProviderWriteError(err, false)
 	}
-	body, _ := json.Marshal(map[string]any{"config_id": configID, "type": 2, "scene": 2, "style": 1, "remark": input.Name, "skip_verify": input.SkipVerify, "state": input.State, "user": input.StaffUserIDs})
+	body, _ := json.Marshal(map[string]any{"config_id": configID, "type": contactWayType(input.StaffUserIDs), "scene": 2, "style": 1, "remark": contactWayRemark(input.Name), "skip_verify": input.SkipVerify, "state": input.State, "user": input.StaffUserIDs})
 	if _, err = client.requestJSON(ctx, http.MethodPost, "/cgi-bin/externalcontact/update_contact_way", url.Values{"access_token": {token}}, body); err != nil {
 		return wecomport.AcquisitionAssetResult{}, wecomport.WrapProviderWriteError(err, true)
 	}
@@ -1500,6 +1501,35 @@ func validAcquisitionRequest(input wecomport.AcquisitionAssetRequest) bool {
 		seen[id] = struct{}{}
 	}
 	return true
+}
+
+func contactWayType(staff []string) int {
+	if len(staff) == 1 {
+		return 1
+	}
+	return 2
+}
+
+func contactWayRemark(name string) string {
+	characters := []rune(name)
+	if len(characters) > 30 {
+		characters = characters[:30]
+	}
+	return string(characters)
+}
+
+func normalizeContactWayQR(raw string) (string, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.Fragment != "" || parsed.Port() != "" {
+		return "", false
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "wework.qpic.cn", "p.qpic.cn", "wework.qlogo.cn":
+		parsed.Scheme = "https"
+		return parsed.String(), true
+	default:
+		return "", false
+	}
 }
 func validProviderHTTPS(raw string) bool {
 	parsed, err := url.Parse(raw)
