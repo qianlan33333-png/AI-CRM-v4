@@ -1,6 +1,6 @@
 # CRM v4 国内主仓发布
 
-**生效条件：**预备机 `/opt/aicrm/domestic/main-state.json` 有通过 `verify` 的激活基线，生产机 `/opt/aicrm/domestic-main/state.json` 的 `main_sha/main_tree` 与其一致，且旧 `aicrm-domestic-release.timer` 和 service 均停止。缺少任一项继续按[旧流程](domestic-release.md)，不得启动新发布器。发布失败由一个执行者处理。
+**生效条件：**预备机 `/var/lib/aicrm/domestic-main/state.json` 有通过 `verify` 的激活基线，生产机 `/opt/aicrm/domestic-main/state.json` 的 `main_sha/main_tree` 与其一致，且旧 `aicrm-domestic-release.timer` 和 service 均停止。缺少任一项继续按[旧流程](domestic-release.md)，不得启动新发布器。发布失败由一个执行者处理。
 
 ## 日常四步
 
