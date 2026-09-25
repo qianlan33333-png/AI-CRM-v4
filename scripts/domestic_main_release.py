@@ -1417,6 +1417,7 @@ def _run_installed_smoke(config: dict[str, Any], worktree: Path, sha: str,
     output = legacy.command(
         "sudo", config["stage_helper"], "--run-staging-smoke",
         "--source-sha", sha, "--source-ref", source_ref,
+        "--source-repository", config["repo"],
         "--expected-sha", sha, "--expected-manifest-sha256", manifest_sha,
         "--expected-helper-sha256", helper_sha,
         timeout=900,

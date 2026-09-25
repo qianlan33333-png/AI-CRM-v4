@@ -179,12 +179,15 @@ class DomesticMainReleaseTests(unittest.TestCase):
         with mock.patch.object(release, "_worktree_git", return_value="internal/payment/checkout.go"), \
              mock.patch.object(release, "_needs_installed_alipay_smoke", return_value=True), \
              mock.patch.object(release.legacy, "command", return_value=json.dumps(receipt)) as command:
-            result = release._run_installed_smoke({"stage_helper": "/usr/local/libexec/aicrm/domestic-promote.py"},
+            result = release._run_installed_smoke({"stage_helper": "/usr/local/libexec/aicrm/domestic-promote.py",
+                                                  "repo": release.DEFAULT_REPO},
                                                   Path("/candidate"), sha, manifest, helper, tree)
         self.assertEqual(result, receipt)
         argv = command.call_args.args
         self.assertIn("--source-ref", argv)
         self.assertIn(release._candidate_ref(sha), argv)
+        self.assertIn("--source-repository", argv)
+        self.assertIn(release.DEFAULT_REPO, argv)
 
     def test_candidate_stage_helper_host_check_binds_exact_git_blob(self) -> None:
         sha = "1" * 40

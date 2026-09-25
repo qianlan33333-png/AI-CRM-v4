@@ -111,6 +111,22 @@ class DomesticMainSourceTests(unittest.TestCase):
         self.git("bundle", "create", str(destination), "refs/heads/main", ref)
         destination.chmod(0o600)
 
+    def test_domestic_smoke_source_uses_only_fixed_bare_repo_and_exact_candidate_ref(self):
+        bare = self.root / "domestic-source.git"
+        subprocess.run(["git", "init", "--bare", str(bare)], check=True, stdout=subprocess.DEVNULL)
+        candidate_ref = f"refs/domestic/candidates/{self.next_sha}"
+        subprocess.run([
+            "git", f"--git-dir={bare}", "fetch", "--no-tags", str(self.repo),
+            f"{self.next_sha}:{candidate_ref}",
+        ], check=True, stdout=subprocess.DEVNULL)
+        with mock.patch.object(installer, "DOMESTIC_SOURCE_REPOSITORY", bare):
+            self.assertEqual(
+                installer._source_commit_tree(self.next_sha, source_ref=candidate_ref, source_repository=bare),
+                self.next_tree,
+            )
+            with self.assertRaisesRegex(RuntimeError, "exact immutable candidate ref"):
+                installer._source_commit_tree(self.next_sha, source_ref=candidate_ref, source_repository=self.repo)
+
     def _assert_directory(self, path: Path, *, create=False, mode=0o700, private=False):
         if path.is_symlink():
             raise RuntimeError("unsafe fixture directory")

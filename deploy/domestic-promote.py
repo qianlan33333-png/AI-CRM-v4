@@ -45,6 +45,7 @@ HOST_ROLE_DIRECTORY = Path("/etc/aicrm")
 HOST_ROLES = {"staging", "production"}
 HOST_CONTRACT_PATH = "/usr/bin:/bin"
 SMOKE_SOURCE_REPOSITORY = Path("/opt/aicrm/source")
+DOMESTIC_SOURCE_REPOSITORY = ROOT / "domestic/source.git"
 SMOKE_SNAPSHOT_ROOT = ROOT / "domestic-smoke-sources"
 SMOKE_DIAGNOSTIC_ROOT = ROOT / "domestic-smoke-diagnostics"
 SMOKE_GO = Path("/opt/aicrm/toolchain/go-1.26.6/bin/go")
@@ -779,7 +780,7 @@ def _source_commit_tree(source_sha: str, *, source_ref: str | None = None,
                         source_repository: Path | None = None) -> str:
     if not SHA.fullmatch(source_sha):
         raise ValueError("invalid smoke source SHA")
-    source_repository = source_repository or SMOKE_SOURCE_REPOSITORY
+    source_repository = source_repository or (DOMESTIC_SOURCE_REPOSITORY if source_ref else SMOKE_SOURCE_REPOSITORY)
     repository = source_repository
     if repository.is_symlink() or not repository.is_dir() or (repository / ".git").is_symlink() or not (repository / ".git").exists():
         # Bare repositories have no .git directory; accept them only when a
@@ -789,7 +790,7 @@ def _source_commit_tree(source_sha: str, *, source_ref: str | None = None,
     is_bare = run("git", f"--git-dir={repository}", "rev-parse", "--is-bare-repository", check=False).stdout.strip() == "true"
     if source_ref is not None:
         expected_ref = f"refs/domestic/candidates/{source_sha}"
-        if source_ref != expected_ref or not is_bare:
+        if source_ref != expected_ref or not is_bare or repository != DOMESTIC_SOURCE_REPOSITORY:
             raise RuntimeError("domestic smoke requires the exact immutable candidate ref in a bare repository")
         resolved = run("git", f"--git-dir={repository}", "rev-parse", "--verify", f"{source_ref}^{{commit}}").stdout.strip()
         if resolved != source_sha:
@@ -1309,7 +1310,7 @@ def run_staging_smoke(
     host_contract = check_host_contract()
     if host_contract.get("host_role") != "staging" or host_contract.get("postgres_major") != 16 or host_contract.get("database_connection") != "verified":
         raise RuntimeError("staging host contract is incomplete for installed behavior smoke")
-    source_repository = source_repository or SMOKE_SOURCE_REPOSITORY
+    source_repository = source_repository or (DOMESTIC_SOURCE_REPOSITORY if source_ref else SMOKE_SOURCE_REPOSITORY)
     tree_sha = _source_commit_tree(source_sha, source_ref=source_ref, source_repository=source_repository)
     database_url = _staging_database_url()
     binary, binary_sha256 = _installed_staging_smoke_identity(expected_sha, expected_manifest_sha256)
@@ -2258,7 +2259,7 @@ def main() -> None:
     p.add_argument("--installed-manifest-sha256")
     p.add_argument("--source-bundle-sha256")
     p.add_argument("--source-ref", help="exact immutable domestic candidate ref, for domestic bare repositories")
-    p.add_argument("--source-repository", type=Path, help="fixed checked source repository used by the smoke fixture")
+    p.add_argument("--source-repository", type=Path, help="fixed domestic bare repository used by the smoke fixture")
     p.add_argument("--source-bundle", type=Path)
     p.add_argument("--expected-source-sha")
     p.add_argument("--expected-source-tree")
@@ -2279,6 +2280,7 @@ def main() -> None:
     if args.check_host_contract:
         if (
             any(value is not None for value in (args.metadata, args.expected_sha, args.metadata_sha256, args.expected_base, args.source_sha, args.expected_manifest_sha256))
+            or any(value is not None for value in (args.source_ref, args.source_repository))
             or any(value is not None for value in (args.source_bundle, args.expected_source_sha, args.expected_source_tree, args.expected_previous_main_sha, args.expected_bundle_sha256, args.source_tree, args.previous_main_sha, args.source_bundle_sha256, args.main_sha, args.main_tree, args.installed_app_sha, args.installed_app_tree, args.installed_manifest_sha256))
             or args.allow_baseline_transition
         ):
@@ -2302,6 +2304,10 @@ def main() -> None:
             p.error("--run-staging-smoke does not accept install metadata")
         if args.expected_sha is None or args.source_sha is None or args.expected_manifest_sha256 is None or args.expected_helper_sha256 is None:
             p.error("--run-staging-smoke requires --source-sha, --expected-sha, --expected-manifest-sha256, and --expected-helper-sha256")
+        if args.source_repository is not None and args.source_repository != DOMESTIC_SOURCE_REPOSITORY:
+            p.error("--source-repository must be the fixed domestic bare repository")
+        if args.source_ref is not None and args.source_repository is None:
+            p.error("domestic --source-ref requires --source-repository")
         try:
             result = run_staging_smoke(
                 args.source_sha, args.expected_sha, args.expected_manifest_sha256, args.expected_helper_sha256,
@@ -2325,7 +2331,8 @@ def main() -> None:
         args.initialize_domestic_main, args.record_domestic_main, args.read_domestic_main,
     ))
     if domestic_mode:
-        if any(value is not None for value in (args.metadata, args.expected_sha, args.metadata_sha256, args.expected_base, args.expected_manifest_sha256, args.expected_helper_sha256)) or (args.source_sha is not None and not args.verify_domestic_source_backup):
+        if (any(value is not None for value in (args.metadata, args.expected_sha, args.metadata_sha256, args.expected_base, args.expected_manifest_sha256, args.expected_helper_sha256, args.source_ref, args.source_repository))
+                or (args.source_sha is not None and not args.verify_domestic_source_backup)):
             p.error("domestic source commands do not accept installer or smoke arguments")
         try:
             if args.save_domestic_source_bundle:
@@ -2398,6 +2405,8 @@ def main() -> None:
         return
     if any(value is not None for value in domestic_fields) or args.allow_baseline_transition:
         p.error("domestic source arguments require a domestic source command")
+    if args.source_ref is not None or args.source_repository is not None:
+        p.error("staging smoke source arguments are only valid with --run-staging-smoke")
     if args.expected_helper_sha256 is not None or args.source_sha is not None or args.expected_manifest_sha256 is not None:
         p.error("staging smoke arguments are only valid with --run-staging-smoke")
     if args.metadata is None or args.expected_sha is None or args.metadata_sha256 is None or args.expected_base is None:
