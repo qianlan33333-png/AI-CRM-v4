@@ -3,7 +3,7 @@ Description=Build, validate and serially promote one domestic CRM v4 candidate
 After=network-online.target postgresql.service
 Wants=network-online.target
 ConditionPathExists=/etc/aicrm/domestic-main-release.json
-ConditionPathExists=/opt/aicrm/domestic-main/state.json
+ConditionPathExists=/var/lib/aicrm/domestic-main/state.json
 
 [Service]
 Type=oneshot
@@ -12,4 +12,3 @@ Group=root
 UMask=0077
 TimeoutStartSec=7h
 ExecStart=/usr/bin/python3 /usr/local/libexec/aicrm/domestic_main_release.py --config /etc/aicrm/domestic-main-release.json poll
-
