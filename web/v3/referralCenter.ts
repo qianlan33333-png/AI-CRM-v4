@@ -602,7 +602,7 @@ function homeCard(): HTMLElement {
         section.append(purchase);
       }
     } else if (campaign?.teamMode === "individual") {
-      section.append(element("p", campaign.qualificationMode === "product_purchase" ? "支付成功后会自动参加活动。" : "确认参加活动后即可获得自己的邀请入口。"));
+      section.append(element("p", "确认参加活动后即可获得自己的邀请入口。"));
       const join = button("确认参加活动", () => void beginParticipation(), "referral-primary");
       join.dataset.testid = "referral-join-individual";
       section.append(join);
