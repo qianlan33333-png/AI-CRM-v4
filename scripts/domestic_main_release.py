@@ -669,10 +669,18 @@ def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base
 
 def _policy_worktree(repo: Path, work_root: Path, base_sha: str, push_group: str) -> Path:
     """Materialize the trusted current-main check policy outside candidate code."""
-    root = Path(legacy.BUILD_ROOT) / "domestic-main-policy"
+    if work_root.is_symlink() or not work_root.is_dir():
+        raise ReleaseError("trusted policy parent is missing or unsafe")
+    parent_info = work_root.lstat()
+    if parent_info.st_uid != 0 or parent_info.st_mode & 0o022:
+        raise ReleaseError("trusted policy parent must be protected by root ownership")
+    root = work_root / "trusted-policy"
     if root.is_symlink():
         raise ReleaseError("trusted policy worktree root is unsafe")
     root.mkdir(mode=0o755, parents=True, exist_ok=True)
+    root_info = root.lstat()
+    if root_info.st_uid != 0 or root_info.st_mode & 0o022:
+        raise ReleaseError("trusted policy worktree root must be protected by root ownership")
     path = root / base_sha
     if path.exists() or path.is_symlink():
         registered = _run(["git", f"--git-dir={repo}", "worktree", "list", "--porcelain"], check=False).stdout
@@ -1580,7 +1588,7 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
             base_release = Path(config.get("stage_releases", "/opt/aicrm/releases")) / build_base
             build_config = dict(config, repo=str(source_worktree))
             out, metadata = legacy.build_candidate(build_config, item["head_sha"], build_base,
-                                                   base_release, validation_scope_base_sha=old_main_sha)
+                                                   base_release, validation_scope_base=old_main_sha)
             if metadata.get("source_tree") != head_tree:
                 raise ReleaseError("builder returned a package for a different source tree")
             if item.get("head_sha") != item["candidate_id"]:
