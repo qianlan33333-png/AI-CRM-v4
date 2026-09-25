@@ -686,8 +686,9 @@ api.loadDb = async (context?: AdminReadContext): Promise<AdminDb> => {
   if (context?.page === 'spProducts') {
     loadedServiceProductCodes.clear();
     for (const product of db.rows.spProducts) {
-      if (Number.isSafeInteger(product.resourceId) && product.resourceId > 0 && product.code) {
-        loadedServiceProductCodes.set(product.resourceId, product.code);
+      const productID = product.resourceId;
+      if (typeof productID === 'number' && Number.isSafeInteger(productID) && productID > 0 && product.code) {
+        loadedServiceProductCodes.set(productID, product.code);
       }
     }
   }
