@@ -93,6 +93,7 @@ print(json.dumps({
 PR38_SMOKE_SOURCE_SHA = "32043f2ecdb814270245dbf2b3840eb868e0a33f"
 PR38_SMOKE_SOURCE_TREE = "de394d4902d56337d110d2acd0a2f889f9dc0be6"
 PR38_SOURCE_HELPER_SHA256 = "ca3ae4c8c8022620ba87e1d6c0c006fac222b0e63419c56adfb65b852ff3f5f9"
+PR38_FORWARD_BUILDER_SHA256 = "775be12976cab4d66728b28bd877ea11e7314649c65ebc852759eb99b6e95f79"
 PR38_PREVIOUS_CURSOR_SHA = "20b6e33f4a6667d76e675501ec7ab9466388dee7"
 PR38_INSTALLED_BASE_SHA = "3ab9946d45b99101d483e23d8a68c2492047b748"
 PR38_RESUME_MARKER = {
@@ -727,6 +728,11 @@ def verify_controller_installation(
         if not SHA.fullmatch(checked_main_sha):
             raise RuntimeError("checked main controller source SHA is invalid")
         checked_main_tree = git(repo, "rev-parse", f"{checked_main_sha}^{{tree}}")
+    if helper_selection["compatibility"] == "pr38_source_to_reviewed_main_executor":
+        candidate_builder_sha = _git_file_sha256(repo, sha, "scripts/domestic_release_build.py")
+        checked_main_builder_sha = _git_file_sha256(repo, checked_main_sha, "scripts/domestic_release_build.py")
+        if candidate_builder_sha != PR38_FORWARD_BUILDER_SHA256 or checked_main_builder_sha != PR38_FORWARD_BUILDER_SHA256:
+            raise RuntimeError("PR38 forward controller builder is not the exact reviewed source")
     for source_path in paths:
         if source_path not in CONTROLLER_SOURCE_PATHS:
             raise RuntimeError(f"unsupported fixed controller path: {source_path}")

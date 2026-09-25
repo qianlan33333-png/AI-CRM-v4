@@ -61,7 +61,7 @@ flowchart TD
 - 正常候选：来源 helper digest 必须与 staging/prod 当前 fixed helper digest相等。
 - 唯一兼容候选：source SHA `32043f2ecdb814270245dbf2b3840eb868e0a33f`、tree `de394d4902d56337d110d2acd0a2f889f9dc0be6`、source helper SHA `ca3…`；可信执行工具锚定 source SHA `4018d27e719a4f54b279df1c33e1fe8d69882855`、tree `49299006dd4db445f368351ef26f7e2173586a27`、helper SHA `2a…`。
 - 当前 checked main 必须是该可信锚点的后代，且当前 main 中 helper 文件仍精确为 `2a…`；不接受任意较新 helper。
-- 固定 controller 允许前向字节匹配的唯一候选是精确 PR38；仅接受本次已检查、full regression 通过的当前 main controller/builder 字节，并将 main SHA/tree 与候选/安装文件 SHA-256 写入核验记录。
+- 固定 controller 允许前向字节匹配的唯一候选是精确 PR38；controller 安装字节必须等于本次已检查、full regression 通过的 current main 完整文件 SHA-256；builder 同时锁定 PR38 审核过的 SHA-256 `775be1…`。核验记录包含 main SHA/tree 与候选/安装文件 SHA-256；后续 main controller 改动若未同步安装会被拒绝。
 - `staging_failed` 只允许精确 PR38 的恢复：state 游标必须是 PR37/#36、failure 与 smoke 记录必须匹配已知失败形态；PR38 必须仍是下一提交。恢复前在 poll 锁内只读核验 stage/prod healthy、current/manifest 仍为 #36，并确认两机都不存在 #38 install receipt 或 backup；任何偏差都停，不改 state 游标、不重试安装。SMOKE 恢复只允许一次，启动前先写入 attempt guard；结果未知或再次失败后只读对账，不重试。
 - receipt 字段：`source_helper_sha256`、`executor_helper_sha256`、原始 `helper_sha256`、`source_sha`、`source_tree`、`installed_sha`、`manifest_sha256`、`installed_binary_sha256`、`test_marker`、`verified_at_utc`。
 - 未知状态、helper mismatch、tree mismatch、receipt 缺字段或 smoke 失败：沿用失败关闭，保留 cursor 与证据，不重试安装。

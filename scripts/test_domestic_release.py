@@ -1164,12 +1164,12 @@ class DomesticReleaseTest(unittest.TestCase):
             checked_main = "f" * 40
             candidate_hashes = {
                 "scripts/domestic_release.py": "1" * 64,
-                "scripts/domestic_release_build.py": "2" * 64,
+                "scripts/domestic_release_build.py": worker.PR38_FORWARD_BUILDER_SHA256,
                 "deploy/domestic-promote.py": worker.PR38_SOURCE_HELPER_SHA256,
             }
             checked_hashes = {
                 "scripts/domestic_release.py": "3" * 64,
-                "scripts/domestic_release_build.py": "4" * 64,
+                "scripts/domestic_release_build.py": worker.PR38_FORWARD_BUILDER_SHA256,
                 "deploy/domestic-promote.py": worker.PR38_EXECUTOR_HELPER_SHA256,
             }
             installed_hashes = {
@@ -1217,6 +1217,28 @@ class DomesticReleaseTest(unittest.TestCase):
                 self.assertEqual(result["files"]["scripts/domestic_release_build.py"]["checked_main_sha256"], checked_hashes["scripts/domestic_release_build.py"])
                 self.assertEqual(result["files"]["deploy/domestic-promote.py"]["compatibility"], "pr38_source_to_reviewed_main_executor")
 
+                checked_hashes["scripts/domestic_release.py"] = "5" * 64
+                with self.assertRaisesRegex(RuntimeError, "fixed controller digest mismatch"):
+                    worker.verify_controller_installation(
+                        config,
+                        repo,
+                        candidate,
+                        ["scripts/domestic_release.py"],
+                        checked_main_sha=checked_main,
+                    )
+
+                checked_hashes["scripts/domestic_release.py"] = "3" * 64
+                checked_hashes["scripts/domestic_release_build.py"] = "5" * 64
+                with self.assertRaisesRegex(RuntimeError, "builder is not the exact reviewed source"):
+                    worker.verify_controller_installation(
+                        config,
+                        repo,
+                        candidate,
+                        ["scripts/domestic_release_build.py"],
+                        checked_main_sha=checked_main,
+                    )
+
+                checked_hashes["scripts/domestic_release_build.py"] = worker.PR38_FORWARD_BUILDER_SHA256
                 with self.assertRaisesRegex(RuntimeError, "restricted to the reviewed PR38 source"):
                     worker.verify_controller_installation(
                         config,
