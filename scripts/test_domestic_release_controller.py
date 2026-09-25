@@ -879,6 +879,7 @@ class DomesticMainReleaseTests(unittest.TestCase):
             work_root.mkdir(mode=0o700)
             with mock.patch.object(release, "BASELINE_OVERLAY_SEED_ROOT", root):
                 with release._verified_overlay_seed_bundle(repo, work_root, bundle, candidate, base) as (seed_repo, digest, tree):
+                    self.assertEqual(stat.S_IMODE(seed_repo.parent.stat().st_mode), 0o711)
                     self.assertEqual(tree, release._tree(seed_repo, candidate))
                     self.assertEqual(digest, release._file_sha256(bundle))
                 extra_ref = f"refs/domestic-main-seed/{candidate}"

@@ -2445,6 +2445,9 @@ def _verified_overlay_seed_bundle(repo: Path, work_root: Path, seed_bundle: Path
         raise ReleaseError("baseline overlay seed bundle is missing or unsafe") from exc
     with os.fdopen(source_fd, "rb") as source, tempfile.TemporaryDirectory(
             prefix="baseline-overlay-seed-", dir=work_root) as temporary:
+        # Git worktree metadata resolves through this parent when the isolated
+        # build account checks the candidate. Permit traversal, not listing.
+        os.chmod(temporary, 0o711)
         source_info = os.fstat(source.fileno())
         if not stat.S_ISREG(source_info.st_mode) or source_info.st_size <= 0:
             raise ReleaseError("baseline overlay seed bundle is not a non-empty regular file")
