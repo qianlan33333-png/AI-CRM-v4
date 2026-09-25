@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
@@ -104,6 +105,330 @@ class DomesticMainReleaseTests(unittest.TestCase):
             if os.geteuid() != 0:
                 with self.assertRaisesRegex(release.ReleaseError, "must be root-owned"):
                     release._verify_bare_repository_parent(repo, require_root_owner=True)
+
+    def test_bootstrap_tightens_shared_git_hooks_before_safe_directory_check(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            seed_repo, base, _candidate, _other = make_repository(root)
+            destination = root / "bootstrapped.git"
+            original_run = release._run
+            original_safe_directory = release._safe_directory
+            init_modes: list[int] = []
+            checked_modes: list[int] = []
+
+            def run_and_capture_shared_hooks(args, **kwargs):
+                result = original_run(args, **kwargs)
+                if args[:3] == ["git", "init", "--bare"]:
+                    init_modes.append(stat.S_IMODE((destination / "hooks").lstat().st_mode))
+                return result
+
+            def safe_after_tightening(path, **kwargs):
+                if path == destination / "hooks":
+                    checked_modes.append(stat.S_IMODE(path.lstat().st_mode))
+                return original_safe_directory(path, **kwargs)
+
+            with mock.patch.object(release, "_run", side_effect=run_and_capture_shared_hooks), \
+                 mock.patch.object(release, "_safe_directory", side_effect=safe_after_tightening), \
+                 mock.patch.object(release, "_secure_bare_repository_permissions"):
+                result = release.bootstrap_bare_repository(
+                    destination, seed_repo, base,
+                    controller_path="/usr/local/libexec/aicrm/domestic_main_release.py",
+                    push_group=release.grp.getgrgid(os.getegid()).gr_name,
+                )
+
+            self.assertEqual(len(init_modes), 1)
+            self.assertTrue(init_modes[0] & 0o020, oct(init_modes[0]))
+            self.assertEqual(len(checked_modes), 1)
+            self.assertFalse(checked_modes[0] & 0o022, oct(checked_modes[0]))
+            self.assertEqual(result["main_sha"], base)
+            self.assertTrue((destination / "hooks/pre-receive").is_file())
+
+    def test_new_hooks_directory_refuses_symlink_or_wrong_owner_before_chmod(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target"
+            target.mkdir(mode=0o2775)
+            linked = root / "hooks-link"
+            linked.symlink_to(target, target_is_directory=True)
+            target_mode = stat.S_IMODE(target.lstat().st_mode)
+            with self.assertRaisesRegex(release.ReleaseError, "unsafe type or owner"):
+                release._prepare_new_bare_hooks_directory(linked)
+            self.assertEqual(stat.S_IMODE(target.lstat().st_mode), target_mode)
+
+            hooks = root / "hooks"
+            hooks.mkdir(mode=0o2775)
+            hooks_mode = stat.S_IMODE(hooks.lstat().st_mode)
+            owner = hooks.lstat().st_uid
+            with mock.patch.object(release.os, "geteuid", return_value=owner + 1):
+                with self.assertRaisesRegex(release.ReleaseError, "unsafe type or owner"):
+                    release._prepare_new_bare_hooks_directory(hooks)
+            self.assertEqual(stat.S_IMODE(hooks.lstat().st_mode), hooks_mode)
+
+    def test_recover_partial_bootstrap_repairs_exact_shared_init_without_advancing_main(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            seed_repo, base, _candidate, _other = make_repository(root)
+            repo = root / "partial.git"
+            subprocess.run(["git", "init", "--bare", "--shared=group", str(repo)], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["git", f"--git-dir={repo}", "config", "receive.denyDeletes", "true"], check=True)
+            subprocess.run(["git", f"--git-dir={repo}", "config", "receive.denyNonFastForwards", "true"], check=True)
+            subprocess.run(["git", f"--git-dir={repo}", "config", "core.logAllRefUpdates", "true"], check=True)
+            subprocess.run(["git", f"--git-dir={repo}", "fetch", "--no-tags", str(seed_repo),
+                            f"{base}:refs/heads/main"], check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(["git", f"--git-dir={repo}", "symbolic-ref", "HEAD", "refs/heads/main"], check=True)
+            control = root / "control"
+            control.mkdir(mode=0o700)
+            state_path = control / "state.json"
+            lock_path = control / "controller.lock"
+            config = {"repo": str(repo), "state": str(state_path), "lock": str(lock_path),
+                      "controller_path": "/usr/local/libexec/aicrm/domestic_main_release.py",
+                      "push_group": release.grp.getgrgid(os.getegid()).gr_name}
+            tree = release._tree(repo, base)
+            verified_calls: list[dict[str, str]] = []
+
+            def verify_exact(candidate_repo, *, controller_path, push_group):
+                hook = candidate_repo / "hooks/pre-receive"
+                self.assertTrue(hook.is_file())
+                self.assertTrue(os.access(hook, os.X_OK))
+                self.assertIn(controller_path, hook.read_text(encoding="utf-8"))
+                main_sha = release._resolve_ref(candidate_repo, release.MAIN_REF)
+                result = {"main_sha": main_sha, "main_tree": release._tree(candidate_repo, main_sha)}
+                verified_calls.append(result)
+                return result
+
+            with mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "DEFAULT_LOCK", str(lock_path)), \
+                 mock.patch.object(release, "_secure_bare_repository_permissions") as secure, \
+                 mock.patch.object(release, "verify_bare_repository", side_effect=verify_exact):
+                result = release.recover_partial_bootstrap(config, base, tree, base)
+
+            self.assertEqual(result["status"], "partial_bootstrap_recovered")
+            self.assertEqual(result["main_sha"], base)
+            self.assertEqual(result["main_tree"], tree)
+            self.assertFalse(result["ledger_created"])
+            self.assertEqual(git(repo, "for-each-ref", "--format=%(refname)"), release.MAIN_REF)
+            self.assertFalse(state_path.exists())
+            self.assertEqual(len(verified_calls), 1)
+            secure.assert_called_once_with(repo, release.grp.getgrnam(config["push_group"]).gr_gid)
+            with self.assertRaisesRegex(release.ReleaseError, "lock to be absent"):
+                with mock.patch.object(release, "_check_config", return_value=config), \
+                     mock.patch.object(release, "DEFAULT_LOCK", str(lock_path)):
+                    release.recover_partial_bootstrap(config, base, tree, base)
+
+    def test_recover_partial_bootstrap_rejects_unreviewed_state_before_writing_hook(self) -> None:
+        for mutation in ("wrong_sha", "wrong_tree", "wrong_app", "extra_ref", "existing_state"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                seed_repo, base, candidate, _other = make_repository(root)
+                repo = root / "partial.git"
+                subprocess.run(["git", "init", "--bare", "--shared=group", str(repo)], check=True,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                for key, value in (("receive.denyDeletes", "true"),
+                                   ("receive.denyNonFastForwards", "true"),
+                                   ("core.logAllRefUpdates", "true")):
+                    subprocess.run(["git", f"--git-dir={repo}", "config", key, value], check=True)
+                subprocess.run(["git", f"--git-dir={repo}", "fetch", "--no-tags", str(seed_repo),
+                                f"{base}:refs/heads/main"], check=True, stdout=subprocess.DEVNULL)
+                subprocess.run(["git", f"--git-dir={repo}", "symbolic-ref", "HEAD", "refs/heads/main"], check=True)
+                control = root / "control"
+                control.mkdir(mode=0o700)
+                state_path, lock_path = control / "state.json", control / "controller.lock"
+                config = {"repo": str(repo), "state": str(state_path), "lock": str(lock_path),
+                          "controller_path": "/usr/local/libexec/aicrm/domestic_main_release.py",
+                          "push_group": release.grp.getgrgid(os.getegid()).gr_name}
+                expected_tree = release._tree(repo, base)
+                if mutation == "extra_ref":
+                    subprocess.run(["git", f"--git-dir={repo}", "fetch", "--no-tags", str(seed_repo),
+                                    f"{candidate}:refs/heads/codex/unexpected"], check=True,
+                                   stdout=subprocess.DEVNULL)
+                if mutation == "existing_state":
+                    state_path.write_text("{}\n", encoding="utf-8")
+                with mock.patch.object(release, "_check_config", return_value=config), \
+                     mock.patch.object(release, "DEFAULT_LOCK", str(lock_path)), \
+                     mock.patch.object(release, "_secure_bare_repository_permissions") as secure:
+                    with self.assertRaises(release.ReleaseError):
+                        sha = "f" * 40 if mutation == "wrong_sha" else base
+                        tree = "e" * 40 if mutation == "wrong_tree" else expected_tree
+                        app_sha = "d" * 40 if mutation == "wrong_app" else base
+                        release.recover_partial_bootstrap(config, sha, tree, app_sha)
+                    secure.assert_not_called()
+                self.assertFalse((repo / "hooks/pre-receive").exists())
+                self.assertFalse(lock_path.exists())
+
+    def test_new_baseline_allows_merges_only_when_installed_app_is_on_first_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            subprocess.run(["git", "init", str(source)], check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(["git", "-C", str(source), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(source), "config", "user.email", "test@example.invalid"], check=True)
+            (source / "README.md").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(source), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "root"], check=True,
+                           stdout=subprocess.DEVNULL)
+            common = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+            subprocess.run(["git", "-C", str(source), "checkout", "-b", "installed-app"], check=True,
+                           stdout=subprocess.DEVNULL)
+            (source / "app.go").write_text("package app\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(source), "add", "app.go"], check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "installed app"], check=True,
+                           stdout=subprocess.DEVNULL)
+            app_sha = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+            subprocess.run(["git", "-C", str(source), "checkout", "-b", "domestic-main", common], check=True,
+                           stdout=subprocess.DEVNULL)
+            (source / "CUTOVER.md").write_text("source-only merge\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(source), "add", "CUTOVER.md"], check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "source-only"], check=True,
+                           stdout=subprocess.DEVNULL)
+            subprocess.run(["git", "-C", str(source), "merge", "--no-ff", "installed-app", "-m", "merge app"],
+                           check=True, stdout=subprocess.DEVNULL)
+            main_sha = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+            repo = root / "bare.git"
+            subprocess.run(["git", "init", "--bare", str(repo)], check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(["git", f"--git-dir={repo}", "fetch", "--no-tags", str(source),
+                            f"{main_sha}:refs/heads/main"], check=True, stdout=subprocess.DEVNULL)
+            app = {"sha": app_sha, "tree": release._tree(repo, app_sha), "manifest_sha256": "a" * 64}
+            self.assertNotIn(app_sha, git(repo, "rev-list", "--first-parent", main_sha).splitlines())
+            with mock.patch.object(release.builder, "classify", return_value={"runtime_changed": False}):
+                with self.assertRaisesRegex(release.ReleaseError, "first-parent chain"):
+                    release._validate_baseline_identity(repo, main_sha, release._tree(repo, main_sha), app)
+
+            subprocess.run(["git", "-C", str(source), "checkout", "-b", "domestic-main-first-parent", app_sha],
+                           check=True, stdout=subprocess.DEVNULL)
+            (source / "CUTOVER.md").write_text("source-only on first parent\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(source), "add", "CUTOVER.md"], check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "first-parent source-only"], check=True,
+                           stdout=subprocess.DEVNULL)
+            first_parent_main = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+            first_parent_repo = root / "first-parent.git"
+            subprocess.run(["git", "init", "--bare", str(first_parent_repo)], check=True,
+                           stdout=subprocess.DEVNULL)
+            subprocess.run(["git", f"--git-dir={first_parent_repo}", "fetch", "--no-tags", str(source),
+                            f"{first_parent_main}:refs/heads/main"], check=True, stdout=subprocess.DEVNULL)
+            with mock.patch.object(release.builder, "classify", return_value={"runtime_changed": False}):
+                release._validate_baseline_identity(first_parent_repo, first_parent_main,
+                                                    release._tree(first_parent_repo, first_parent_main), app)
+
+    def test_controller_maintenance_marker_binds_base_candidate_and_all_fixed_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            source_blobs = {path: f"fixed:{path}".encode() for path in release.builder.FIXED_CONTROLLER_FILES}
+            fixed_hashes = {path: release.hashlib.sha256(blob).hexdigest()
+                            for path, blob in source_blobs.items()}
+            marker = {"candidate_sha": candidate, "candidate_tree": release._tree(repo, candidate),
+                      "base_sha": base, "controller_files": ["scripts/domestic_main_release.py"],
+                      "fixed_file_sha256": fixed_hashes, "check_receipt_sha256": "a" * 64,
+                      "checked_at_utc": release._utc_now()}
+            state = release._new_state(base, release._tree(repo, base),
+                                       {"sha": base, "tree": release._tree(repo, base),
+                                        "manifest_sha256": "b" * 64})
+            state["queue"] = [{"candidate_id": candidate, "ref": "refs/heads/codex/one",
+                               "head_sha": candidate, "base_sha": base, "status": "pending"}]
+            state["controller_maintenance"] = marker
+            config = {"controller_path": release.DEFAULT_CONTROLLER}
+            classification = {"runtime_changed": False,
+                              "controller_files": ["scripts/domestic_main_release.py"]}
+            with mock.patch.object(release.builder, "classify", return_value=classification), \
+                 mock.patch.object(release, "_source_blob", side_effect=lambda _repo, _sha, path: source_blobs[path]), \
+                 mock.patch.object(release, "_verify_controller_files") as verify_files:
+                release._validate_state(state)
+                self.assertEqual(release._verify_controller_maintenance_candidate(config, repo, state), marker)
+                verify_files.assert_called_once_with(config, repo, candidate,
+                                                     sorted(release.builder.FIXED_CONTROLLER_FILES))
+
+                missing = dict(state, controller_maintenance=None)
+                with self.assertRaises(release.ControllerMaintenanceRequired):
+                    release._verify_controller_maintenance_candidate(config, repo, missing)
+
+                old_base = json.loads(json.dumps(state))
+                old_base["controller_maintenance"]["base_sha"] = "f" * 40
+                with self.assertRaisesRegex(release.ReleaseError, "marker base"):
+                    release._validate_state(old_base)
+
+                other_candidate = json.loads(json.dumps(state))
+                other_candidate["controller_maintenance"]["candidate_sha"] = "e" * 40
+                with self.assertRaisesRegex(release.ReleaseError, "queue front"):
+                    release._validate_state(other_candidate)
+
+                changed_hashes = json.loads(json.dumps(state))
+                changed_hashes["controller_maintenance"]["fixed_file_sha256"]["scripts/domestic_main_release.py"] = "c" * 64
+                with self.assertRaisesRegex(release.ControllerMaintenanceRequired, "hashes differ"):
+                    release._verify_controller_maintenance_candidate(config, repo, changed_hashes)
+
+    def test_poll_consumes_maintenance_marker_before_normal_candidate_cas(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            state_path = root / "state.json"
+            lock_path = root / "controller.lock"
+            tree = release._tree(repo, base)
+            state = release._new_state(base, tree,
+                                       {"sha": base, "tree": tree, "manifest_sha256": "b" * 64})
+            state["queue"] = [{"candidate_id": candidate, "ref": "refs/heads/codex/one",
+                               "head_sha": candidate, "base_sha": base, "status": "pending"}]
+            state["controller_maintenance"] = {
+                "candidate_sha": candidate, "candidate_tree": release._tree(repo, candidate),
+                "base_sha": base, "controller_files": ["scripts/domestic_main_release.py"],
+                "fixed_file_sha256": {path: "a" * 64 for path in release.builder.FIXED_CONTROLLER_FILES},
+                "check_receipt_sha256": "c" * 64, "checked_at_utc": release._utc_now(),
+            }
+            config = {"repo": str(repo), "state": str(state_path), "lock": str(lock_path),
+                      "production_enabled": True, "controller_path": release.DEFAULT_CONTROLLER,
+                      "push_group": "push-group"}
+            processed: list[str] = []
+
+            def process(_config, _state_path, current_state, item):
+                self.assertIsNone(current_state["controller_maintenance"])
+                release._advance_main_cas(repo, base, candidate)
+                current_state["main"] = {"sha": candidate, "tree": release._tree(repo, candidate)}
+                item["status"] = "completed"
+                processed.append(item["head_sha"])
+                return {"status": "completed", "candidate_sha": candidate}
+
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_locked", return_value=__import__("contextlib").nullcontext()), \
+                 mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                 mock.patch.object(release, "verify_bare_repository", return_value={"bare": True}), \
+                 mock.patch.object(release, "_load_state", return_value=state), \
+                 mock.patch.object(release, "_update_state", side_effect=lambda _path, current, **changes: current.update(changes)), \
+                 mock.patch.object(release, "_verify_controller_maintenance_candidate", return_value=state["controller_maintenance"]), \
+                 mock.patch.object(release, "process_candidate", side_effect=process):
+                result = release.poll(config)
+
+            self.assertEqual(processed, [candidate])
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(release._resolve_ref(repo, release.MAIN_REF), candidate)
+            self.assertIsNone(state["controller_maintenance"])
+            self.assertFalse(state_path.exists())
+
+    def test_failed_candidate_cannot_reuse_maintenance_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            tree = release._tree(repo, base)
+            state = release._new_state(base, tree,
+                                       {"sha": base, "tree": tree, "manifest_sha256": "b" * 64})
+            item = {"candidate_id": candidate, "ref": "refs/heads/codex/one",
+                    "head_sha": candidate, "base_sha": base, "status": "pending"}
+            state["queue"] = [item]
+            state["controller_maintenance"] = {
+                "candidate_sha": candidate, "candidate_tree": release._tree(repo, candidate),
+                "base_sha": base, "controller_files": ["scripts/domestic_main_release.py"],
+                "fixed_file_sha256": {path: "a" * 64 for path in release.builder.FIXED_CONTROLLER_FILES},
+                "check_receipt_sha256": "c" * 64, "checked_at_utc": release._utc_now(),
+            }
+            state_path = root / "state.json"
+            state["in_flight"] = {}
+            with mock.patch.object(release, "atomic_json") as save:
+                release._mark_failed(state_path, state, item, RuntimeError("failed"), "checks")
+            self.assertIsNone(state["controller_maintenance"])
+            self.assertEqual(item["status"], "failed")
+            self.assertEqual(state["status"], "blocked")
+            save.assert_called_once()
 
     def test_policy_changes_cannot_request_targeted_lanes(self) -> None:
         targeted = {"enforced": {"selection_mode": "targeted", "selected_lanes": ["preflight"],

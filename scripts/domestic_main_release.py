@@ -46,6 +46,7 @@ PUSH_REF = re.compile(r"^refs/heads/codex/[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$")
 SCHEMA_VERSION = 1
 CURSOR_PATH = "/opt/aicrm/domestic/source-cursor/state.json"
 DEFAULT_STATE = "/opt/aicrm/domestic/control/state.json"
+DEFAULT_LOCK = "/opt/aicrm/domestic/control/controller.lock"
 SOURCE_BACKUP_ROOT = "/opt/aicrm/domestic/source-backups"
 SOURCE_BUNDLE_INCOMING_ROOT = "/opt/aicrm/domestic-incoming"
 DEFAULT_REPO = "/opt/aicrm/domestic/source.git"
@@ -195,6 +196,139 @@ def _safe_directory(path: Path, *, create: bool = False, mode: int = 0o700) -> N
         raise ReleaseError(f"protected directory has unsafe type or permissions: {path}")
 
 
+def _prepare_new_bare_hooks_directory(path: Path) -> None:
+    """Remove only shared-repository write bits from a just-created hooks dir."""
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise ReleaseError("new bare repository hooks directory is missing or unreadable") from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+        raise ReleaseError("new bare repository hooks directory has unsafe type or owner")
+    mode = stat.S_IMODE(info.st_mode)
+    safe_mode = mode & ~0o022
+    if safe_mode != mode:
+        try:
+            os.chmod(path, safe_mode)
+        except OSError as exc:
+            raise ReleaseError("cannot secure new bare repository hooks directory") from exc
+    _safe_directory(path)
+
+
+def _install_new_pre_receive_hook(repo: Path, controller_path: str) -> Path:
+    hook = repo / "hooks/pre-receive"
+    if hook.exists() or hook.is_symlink():
+        raise ReleaseError("unexpected pre-receive hook already exists")
+    content = (
+        "#!/bin/sh\n"
+        f"exec /usr/bin/python3 {shlex.quote(controller_path)} hook-pre-receive "
+        f"--repo {shlex.quote(str(repo))}\n"
+    )
+    try:
+        descriptor = os.open(hook, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                             getattr(os, "O_NOFOLLOW", 0), 0o755)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+            os.fchmod(stream.fileno(), 0o755)
+    except OSError as exc:
+        raise ReleaseError("cannot install the new protected receive hook") from exc
+    return hook
+
+
+def _assert_partial_bootstrap_repository(repo: Path, state_path: Path, lock_path: Path,
+                                        expected_sha: str, expected_tree: str,
+                                        installed_app_sha: str, *, require_lock_absent: bool) -> None:
+    if state_path.exists() or state_path.is_symlink():
+        raise ReleaseError("partial bootstrap recovery requires the domestic ledger to be absent")
+    if require_lock_absent and (lock_path.exists() or lock_path.is_symlink()):
+        raise ReleaseError("partial bootstrap recovery requires the controller lock to be absent")
+    if repo.is_symlink() or not repo.is_dir():
+        raise ReleaseError("partial bootstrap repository is missing or unsafe")
+    owner = os.geteuid()
+    repo_info = repo.lstat()
+    group = repo_info.st_gid
+    if repo_info.st_uid != owner:
+        raise ReleaseError("partial bootstrap repository has an unexpected owner")
+    for current, dirs, files in os.walk(repo, topdown=True, followlinks=False):
+        directory = Path(current)
+        info = directory.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != owner or info.st_gid != group:
+            raise ReleaseError("partial bootstrap repository contains an unsafe directory")
+        for name in dirs:
+            child = directory / name
+            child_info = child.lstat()
+            if (stat.S_ISLNK(child_info.st_mode) or not stat.S_ISDIR(child_info.st_mode)
+                    or child_info.st_uid != owner or child_info.st_gid != group):
+                raise ReleaseError("partial bootstrap repository contains a linked or unowned directory")
+        for name in files:
+            child = directory / name
+            child_info = child.lstat()
+            if (stat.S_ISLNK(child_info.st_mode) or not stat.S_ISREG(child_info.st_mode)
+                    or child_info.st_uid != owner or child_info.st_gid != group):
+                raise ReleaseError("partial bootstrap repository contains a linked or unowned file")
+    _verify_bare_repository_parent(repo, require_root_owner=(repo == Path(DEFAULT_REPO)))
+    if not _is_bare_repo(repo) or _git(repo, "symbolic-ref", "HEAD") != MAIN_REF:
+        raise ReleaseError("partial bootstrap repository is not bound to bare main")
+    if _git(repo, "config", "--bool", "receive.denyDeletes") != "true":
+        raise ReleaseError("partial bootstrap repository does not deny ref deletion")
+    if _git(repo, "config", "--bool", "receive.denyNonFastForwards") != "true":
+        raise ReleaseError("partial bootstrap repository does not deny non-fast-forward updates")
+    if _git(repo, "config", "--get", "core.sharedRepository") != "1":
+        raise ReleaseError("partial bootstrap repository is not the expected shared-init repository")
+    refs = _git(repo, "for-each-ref", "--format=%(refname)").splitlines()
+    if refs != [MAIN_REF] or _resolve_ref(repo, MAIN_REF) != expected_sha:
+        raise ReleaseError("partial bootstrap repository refs differ from the reviewed main-only state")
+    if _tree(repo, expected_sha) != expected_tree:
+        raise ReleaseError("partial bootstrap main tree differs from the reviewed tree")
+    if not _is_ancestor(repo, installed_app_sha, expected_sha):
+        raise ReleaseError("partial bootstrap main does not descend from the installed application")
+    first_parent = _git(repo, "rev-list", "--first-parent", expected_sha).splitlines()
+    if installed_app_sha not in first_parent:
+        raise ReleaseError("installed application is not on the partial bootstrap first-parent chain")
+    if builder.classify(repo, installed_app_sha, expected_sha).get("runtime_changed") is not False:
+        raise ReleaseError("partial bootstrap main contains application changes beyond the installed app")
+    hook = repo / "hooks/pre-receive"
+    if hook.exists() or hook.is_symlink():
+        raise ReleaseError("partial bootstrap recovery requires the receive hook to be absent")
+    checked = _run(["git", f"--git-dir={repo}", "fsck", "--full", "--strict", "--no-reflogs"], check=False)
+    if checked.returncode != 0:
+        raise ReleaseError("partial bootstrap repository object integrity check failed")
+
+
+def recover_partial_bootstrap(config: dict[str, Any], expected_sha: str,
+                              expected_tree: str, installed_app_sha: str) -> dict[str, Any]:
+    """Complete only the reviewed shared-init partial repository; never reseed it."""
+    config = _check_config(config)
+    expected_sha = _sha(expected_sha, "partial bootstrap main SHA")
+    expected_tree = _sha(expected_tree, "partial bootstrap main tree")
+    installed_app_sha = _sha(installed_app_sha, "installed application SHA")
+    repo, state_path, lock_path = (Path(config[key]) for key in ("repo", "state", "lock"))
+    if str(lock_path) != DEFAULT_LOCK:
+        raise ReleaseError("partial bootstrap recovery requires the fixed controller lock")
+    _assert_partial_bootstrap_repository(repo, state_path, lock_path, expected_sha,
+                                        expected_tree, installed_app_sha,
+                                        require_lock_absent=True)
+    with _locked(lock_path, nonblocking=True):
+        _assert_partial_bootstrap_repository(repo, state_path, lock_path, expected_sha,
+                                            expected_tree, installed_app_sha,
+                                            require_lock_absent=False)
+        _prepare_new_bare_hooks_directory(repo / "hooks")
+        hook = _install_new_pre_receive_hook(repo, config["controller_path"])
+        _secure_bare_repository_permissions(repo, grp.getgrnam(config["push_group"]).gr_gid)
+        verified = verify_bare_repository(repo, controller_path=config["controller_path"],
+                                          push_group=config["push_group"])
+        if (verified.get("main_sha") != expected_sha or verified.get("main_tree") != expected_tree
+                or hook.is_symlink() or not hook.is_file()):
+            raise ReleaseError("partial bootstrap recovery readback differs from the reviewed main")
+        checked = _run(["git", f"--git-dir={repo}", "fsck", "--full", "--strict", "--no-reflogs"], check=False)
+        if checked.returncode != 0 or state_path.exists() or state_path.is_symlink():
+            raise ReleaseError("partial bootstrap recovery did not preserve verified objects and absent ledger")
+        return {"status": "partial_bootstrap_recovered", "main_sha": verified["main_sha"],
+                "main_tree": verified["main_tree"], "hook": str(hook),
+                "ledger_created": False}
+
+
 def atomic_json(path: Path, value: dict[str, Any], *, mode: int = 0o600) -> None:
     _safe_directory(path.parent, create=True)
     if path.is_symlink() or (path.exists() and not path.is_file()):
@@ -301,17 +435,8 @@ def bootstrap_bare_repository(repo: Path, seed_repo: Path, baseline_sha: str,
         raise ReleaseError("seed baseline does not resolve to the requested domestic main SHA")
     _git(repo, "symbolic-ref", "HEAD", MAIN_REF)
     hooks = repo / "hooks"
-    _safe_directory(hooks)
-    hook = hooks / "pre-receive"
-    if hook.exists() or hook.is_symlink():
-        raise ReleaseError("unexpected pre-receive hook already exists")
-    hook.write_text(
-        "#!/bin/sh\n"
-        f"exec /usr/bin/python3 {shlex.quote(controller_path)} hook-pre-receive "
-        f"--repo {shlex.quote(str(repo))}\n",
-        encoding="utf-8",
-    )
-    os.chmod(hook, 0o755)
+    _prepare_new_bare_hooks_directory(hooks)
+    _install_new_pre_receive_hook(repo, controller_path)
     # The fixed hook and repository config remain root-owned. The push group
     # can write Git objects and candidate refs only; receive-pack's hook is
     # the boundary that protects main and hooks from the forced SSH account.
@@ -477,6 +602,43 @@ def _load_state(path: Path, *, owner_uid: int = 0) -> dict[str, Any]:
     return state
 
 
+def _validate_controller_maintenance_marker(state: dict[str, Any]) -> None:
+    marker = state.get("controller_maintenance")
+    if marker is None:
+        return
+    required = {"candidate_sha", "candidate_tree", "base_sha", "controller_files",
+                "fixed_file_sha256", "check_receipt_sha256", "checked_at_utc"}
+    if not isinstance(marker, dict) or set(marker) != required:
+        raise ReleaseError("controller maintenance marker is incomplete")
+    _sha(marker.get("candidate_sha"), "maintenance candidate SHA")
+    _sha(marker.get("candidate_tree"), "maintenance candidate tree")
+    _sha(marker.get("base_sha"), "maintenance base SHA")
+    _digest(marker.get("check_receipt_sha256"), "maintenance check receipt digest")
+    _utc_string(marker.get("checked_at_utc"), "maintenance check timestamp")
+    changed = marker.get("controller_files")
+    fixed_hashes = marker.get("fixed_file_sha256")
+    fixed_files = set(builder.FIXED_CONTROLLER_FILES)
+    if (not isinstance(changed, list) or not changed
+            or any(not isinstance(path, str) or path not in fixed_files for path in changed)
+            or changed != sorted(set(changed))
+            or not isinstance(fixed_hashes, dict) or set(fixed_hashes) != fixed_files):
+        raise ReleaseError("controller maintenance marker file inventory is invalid")
+    for path, digest in fixed_hashes.items():
+        if not isinstance(path, str):
+            raise ReleaseError("controller maintenance marker file inventory is invalid")
+        _digest(digest, "maintenance fixed file digest")
+    main = state.get("main")
+    if not isinstance(main, dict) or marker["base_sha"] != main.get("sha"):
+        raise ReleaseError("controller maintenance marker base differs from domestic main")
+    active = _active_queue_item(state)
+    if (active is None or active.get("status") not in {"pending", "failed"}
+            or active.get("head_sha") != marker["candidate_sha"]
+            or active.get("base_sha") != marker["base_sha"]
+            or state.get("in_flight") is not None
+            or state.get("status") not in {"ready", "blocked"}):
+        raise ReleaseError("controller maintenance marker no longer identifies the queue front")
+
+
 def _validate_state(state: Any) -> None:
     if not isinstance(state, dict) or state.get("schema_version") != SCHEMA_VERSION:
         raise ReleaseError("domestic main ledger has an unsupported schema")
@@ -518,6 +680,7 @@ def _validate_state(state: Any) -> None:
     inflight = state.get("in_flight")
     if state["status"] == "outcome_unknown" and inflight is None:
         raise ReleaseError("unknown outcome has no durable in-flight identity")
+    _validate_controller_maintenance_marker(state)
 
 
 def _active_queue_item(state: dict[str, Any]) -> dict[str, Any] | None:
@@ -539,6 +702,7 @@ def _new_state(main_sha: str, main_tree: str, installed_app: dict[str, str]) -> 
         },
         "queue": [],
         "in_flight": None,
+        "controller_maintenance": None,
         "staging_out_of_sync": False,
         "last_release": None,
         "archive_ack": None,
@@ -624,6 +788,8 @@ def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base
         _first_parent_chain(repo, base_sha, head_sha)
         _pin_candidate(repo, head_sha)
         entries = state["queue"]
+        queue_identity_before = [tuple(item.get(key) for key in ("candidate_id", "ref", "head_sha", "base_sha"))
+                                 for item in entries]
         duplicate = next((record for record in entries if record.get("head_sha") == head_sha), None)
         same_ref = next((item for item in entries if item.get("ref") == ref
                          and item.get("status") in {"pending", "stale_base", "failed"}), None)
@@ -675,6 +841,13 @@ def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base
                 item = {"candidate_id": head_sha, "ref": ref, "head_sha": head_sha, "base_sha": base_sha,
                         "status": "pending", "submitted_at_utc": _utc_now(), "attempt": 0}
                 entries.append(item)
+        queue_identity_after = [tuple(record.get(key) for key in ("candidate_id", "ref", "head_sha", "base_sha"))
+                                for record in entries]
+        if queue_identity_after != queue_identity_before:
+            state["controller_maintenance"] = None
+        marker = state.get("controller_maintenance")
+        if marker is not None and (marker.get("candidate_sha") != head_sha or marker.get("base_sha") != base_sha):
+            state["controller_maintenance"] = None
         state["status"] = "ready"
         state["in_flight"] = None
         state["updated_at_utc"] = _utc_now()
@@ -1305,7 +1478,9 @@ def _validate_baseline_identity(repo: Path, main_sha: str, main_tree: str,
         raise ReleaseError("installed production app is not an ancestor of the domestic main baseline")
     if _tree(repo, app_sha) != app_tree or _tree(repo, main_sha) != main_tree:
         raise ReleaseError("installed app or domestic main tree differs from its recorded source")
-    _first_parent_chain(repo, app_sha, main_sha)
+    first_parent = _git(repo, "rev-list", "--first-parent", main_sha).splitlines()
+    if app_sha not in first_parent:
+        raise ReleaseError("installed production app is not on the first-parent chain of domestic main")
     if builder.classify(repo, app_sha, main_sha)["runtime_changed"]:
         raise ReleaseError("domestic baseline contains application changes newer than the installed production app")
 
@@ -1532,6 +1707,7 @@ def _finalize_success(config: dict[str, Any], state_path: Path, state: dict[str,
     state["installed_app"] = installed_app
     state["staging_out_of_sync"] = False
     state["in_flight"] = None
+    state["controller_maintenance"] = None
     ack = state.get("archive_ack")
     try:
         pending = _pending_archive_count(repo, ack.get("sha") if ack else None, candidate_sha)
@@ -1570,6 +1746,7 @@ def _mark_failed(state_path: Path, state: dict[str, Any], item: dict[str, Any], 
         state["staging_out_of_sync"] = True
         item["failure"]["required_recovery"] = "restore the prior verified application and rebuild the synthetic staging database, then run ack-stage-reset"
     state["in_flight"] = None
+    state["controller_maintenance"] = None
     state["status"] = "blocked"
     state["updated_at_utc"] = _utc_now()
     atomic_json(state_path, state)
@@ -1771,17 +1948,27 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
         state = _load_state(state_path)
         if state.get("status") == "outcome_unknown" or state.get("staging_out_of_sync") is True:
             raise ReleaseError("controller maintenance check is blocked by an unresolved release state")
+        if state.get("controller_maintenance") is not None:
+            state["controller_maintenance"] = None
+            _update_state(state_path, state)
         item = _active_queue_item(state)
-        if item is None or item.get("head_sha") != candidate_sha:
+        if (item is None or item.get("status") not in {"pending", "failed"}
+                or item.get("head_sha") != candidate_sha):
             raise ReleaseError("maintenance check requires the exact head candidate at the serial queue front")
         main_sha = _resolve_ref(repo, MAIN_REF)
         if (main_sha != state["main"]["sha"] or item.get("base_sha") != main_sha
                 or _resolve_ref(repo, item["ref"]) != candidate_sha):
             raise ReleaseError("maintenance candidate is stale; update and check it from current domestic main")
         _first_parent_chain(repo, main_sha, candidate_sha)
+        expected_controller = hashlib.sha256(_source_blob(repo, candidate_sha, "scripts/domestic_main_release.py")).hexdigest()
+        running_controller = Path(__file__).resolve(strict=True)
+        if _file_sha256(running_controller) != expected_controller:
+            raise ControllerMaintenanceRequired("maintenance-check must run from the exact candidate controller bytes")
         _pin_candidate(repo, candidate_sha)
         worktree = _active_worktree(config, repo, candidate_sha)
         classification = builder.classify(worktree, main_sha, candidate_sha)
+        if classification.get("runtime_changed") is not False:
+            raise ReleaseError("controller maintenance path accepts source-only candidates only")
         controller_files = classification.get("controller_files", [])
         if not controller_files:
             raise ReleaseError("candidate does not contain a registered fixed-controller change")
@@ -1833,6 +2020,19 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
             stage_helper_install_required = stage_host_contract is None
         canonical = json.dumps(check_receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
         status = "tests_passed_stage_helper_install_required" if stage_helper_install_required else "maintenance_checks_passed"
+        if status == "maintenance_checks_passed":
+            fixed_hashes = {path: hashlib.sha256(_source_blob(repo, candidate_sha, path)).hexdigest()
+                            for path in sorted(builder.FIXED_CONTROLLER_FILES)}
+            state["controller_maintenance"] = {
+                "candidate_sha": candidate_sha,
+                "candidate_tree": _tree(repo, candidate_sha),
+                "base_sha": main_sha,
+                "controller_files": sorted(controller_files),
+                "fixed_file_sha256": fixed_hashes,
+                "check_receipt_sha256": hashlib.sha256(canonical).hexdigest(),
+                "checked_at_utc": _utc_now(),
+            }
+            _update_state(state_path, state)
         return {"status": status, "candidate_sha": candidate_sha,
                 "candidate_tree": _tree(repo, candidate_sha), "base_sha": main_sha,
                 "controller_files": sorted(controller_files),
@@ -1842,6 +2042,34 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
                 "next_action": ("install the exact staging helper bytes with rollback, rerun maintenance-check, then install all remaining exact fixed-controller bytes before resubmitting this SHA"
                                 if stage_helper_install_required else
                                 "review this result, install any remaining exact fixed-controller bytes with rollback, then resubmit this SHA")}
+
+
+def _verify_controller_maintenance_candidate(config: dict[str, Any], repo: Path,
+                                              state: dict[str, Any]) -> dict[str, Any]:
+    marker = state.get("controller_maintenance")
+    item = _active_queue_item(state)
+    if (not isinstance(marker, dict) or item is None or item.get("status") != "pending"
+            or state.get("status") != "ready" or state.get("in_flight") is not None):
+        raise ControllerMaintenanceRequired("controller maintenance marker is missing or candidate is not ready")
+    candidate_sha, base_sha = marker["candidate_sha"], marker["base_sha"]
+    main_sha = _resolve_ref(repo, MAIN_REF)
+    if (main_sha != state["main"]["sha"] or base_sha != main_sha
+            or item.get("head_sha") != candidate_sha or item.get("base_sha") != base_sha
+            or _resolve_ref(repo, item["ref"]) != candidate_sha
+            or _tree(repo, candidate_sha) != marker["candidate_tree"]):
+        raise ControllerMaintenanceRequired("controller maintenance marker no longer matches main or queue candidate")
+    _first_parent_chain(repo, base_sha, candidate_sha)
+    classification = builder.classify(repo, base_sha, candidate_sha)
+    changed = sorted(classification.get("controller_files", []))
+    if (classification.get("runtime_changed") is not False
+            or not changed or changed != marker["controller_files"]):
+        raise ControllerMaintenanceRequired("controller maintenance marker file set differs from candidate")
+    actual_hashes = {path: hashlib.sha256(_source_blob(repo, candidate_sha, path)).hexdigest()
+                     for path in sorted(builder.FIXED_CONTROLLER_FILES)}
+    if actual_hashes != marker["fixed_file_sha256"]:
+        raise ControllerMaintenanceRequired("controller maintenance marker fixed-file hashes differ from candidate")
+    _verify_controller_files(config, repo, candidate_sha, sorted(builder.FIXED_CONTROLLER_FILES))
+    return marker
 
 
 def poll(config: dict[str, Any]) -> dict[str, Any]:
@@ -1857,7 +2085,11 @@ def poll(config: dict[str, Any]) -> dict[str, Any]:
         _assert_legacy_release_path_stopped()
         verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
         state = _load_state(state_path)
-        _verify_controller_files(config, repo, state["main"]["sha"], sorted(builder.FIXED_CONTROLLER_FILES))
+        maintenance = state.get("controller_maintenance")
+        if maintenance is None:
+            _verify_controller_files(config, repo, state["main"]["sha"], sorted(builder.FIXED_CONTROLLER_FILES))
+        else:
+            _verify_controller_maintenance_candidate(config, repo, state)
         _recover_orphaned_inflight(state_path, state)
         if state["status"] == "outcome_unknown":
             raise ReleaseError("production outcome is unknown; use reconcile, never reinstall blindly")
@@ -1866,6 +2098,9 @@ def poll(config: dict[str, Any]) -> dict[str, Any]:
         item = _active_queue_item(state)
         if item is None:
             return {"status": "ready", "main_sha": state["main"]["sha"], "queue_depth": 0}
+        if maintenance is not None:
+            state["controller_maintenance"] = None
+            _update_state(state_path, state)
         result = process_candidate(config, state_path, state, item)
         if result.get("status") != "completed":
             return result
@@ -2192,7 +2427,7 @@ def restricted_ssh() -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "prepare-baseline", "activate", "verify", "submit", "submit-stdin", "ack-stage-reset", "maintenance-check",
+    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "activate", "verify", "submit", "submit-stdin", "ack-stage-reset", "maintenance-check",
                                             "poll", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
     parser.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG))
     parser.add_argument("--repo", type=Path)
@@ -2203,6 +2438,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base")
     parser.add_argument("--supersedes-candidate")
     parser.add_argument("--sha")
+    parser.add_argument("--tree")
+    parser.add_argument("--installed-app-sha")
     return parser
 
 
@@ -2232,6 +2469,12 @@ def main(argv: list[str] | None = None) -> int:
             if seed is None or sha is None:
                 parser.error("bootstrap requires --seed-repo and --baseline-sha")
             result = bootstrap_bare_repository(repo, seed, sha, controller_path=config["controller_path"], push_group=config["push_group"])
+        elif args.action == "recover-partial-bootstrap":
+            if os.geteuid() != 0:
+                raise ReleaseError("partial bootstrap recovery must run as root")
+            if not (args.sha and args.tree and args.installed_app_sha):
+                parser.error("recover-partial-bootstrap requires --sha, --tree and --installed-app-sha")
+            result = recover_partial_bootstrap(config, args.sha, args.tree, args.installed_app_sha)
         elif args.action == "prepare-baseline":
             result = prepare_baseline(config)
         elif args.action == "submit-stdin":
