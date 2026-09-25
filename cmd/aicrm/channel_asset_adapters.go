@@ -168,9 +168,7 @@ func applyChannelAssetBinding(ctx context.Context, asset channelstore.Acquisitio
 	if asset.Operation == "delete" {
 		return nil
 	}
-	if state == "" {
-		state = "ca-" + strings.TrimPrefix(asset.SourceRefDigest, "sha256:")[:48]
-	}
+	state = channelport.EffectiveAcquisitionState(state, asset.SourceRefDigest)
 	digest, err := digester.DigestState(corpID, state)
 	if err != nil {
 		return err

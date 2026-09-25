@@ -75,6 +75,7 @@ import (
 	archivehttp "github.com/qianlan33333-png/AI-CRM-v3/internal/messagearchive/http"
 	archivestore "github.com/qianlan33333-png/AI-CRM-v3/internal/messagearchive/store"
 	openplatformhttp "github.com/qianlan33333-png/AI-CRM-v3/internal/openplatform/http"
+	openplatformstore "github.com/qianlan33333-png/AI-CRM-v3/internal/openplatform/store"
 	operationcycle "github.com/qianlan33333-png/AI-CRM-v3/internal/operationcycle"
 	operationapp "github.com/qianlan33333-png/AI-CRM-v3/internal/operationcycle/app"
 	operationstore "github.com/qianlan33333-png/AI-CRM-v3/internal/operationcycle/store"
@@ -1363,10 +1364,19 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = openPlatformExecutor.BindV1ExternalCursorKey(cursorSigningKey); err != nil {
 		return fail(err)
 	}
+	if err = openPlatformExecutor.BindV1CustomerList(customerProfileStore, customerStore, accessRepository, openplatformstore.CustomerWindows{}, overviewReadUoW, uow); err != nil {
+		return fail(err)
+	}
+	if err = openPlatformExecutor.BindV1ContactTouches(archivestore.NewPostgreSQL()); err != nil {
+		return fail(err)
+	}
 	if err = openPlatformExecutor.BindV1OperationAudit(accessRepository, uow); err != nil {
 		return fail(err)
 	}
 	if err = openPlatformExecutor.BindV1AI(aiService, aiService, uow); err != nil {
+		return fail(err)
+	}
+	if err = openPlatformExecutor.BindV1WorkbenchUnions(queries); err != nil {
 		return fail(err)
 	}
 	openPlatformExecutor.coreAudience = coreOperations

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
-	"strings"
 	"time"
 
 	channelport "github.com/qianlan33333-png/AI-CRM-v3/internal/channel/port"
@@ -29,10 +28,7 @@ func (provider *ChannelAssetProvider) Execute(ctx context.Context, envelope effe
 	if err != nil {
 		return effectport.AdapterResult{Completion: effectport.StateRetryable, ReceiptDigest: effectport.Hash("channel.asset.config-unavailable", string(envelope.Fingerprint()))}, nil
 	}
-	state := config.StateValue
-	if state == "" {
-		state = "ca-" + strings.TrimPrefix(string(envelope.SourceRefDigest), "sha256:")[:48]
-	}
+	state := channelport.EffectiveAcquisitionState(config.StateValue, string(envelope.SourceRefDigest))
 	request := wecomport.AcquisitionAssetRequest{Name: config.ChannelName, State: state, SkipVerify: config.SkipVerify, StaffUserIDs: config.StaffProviderRefs}
 	var result wecomport.AcquisitionAssetResult
 	if config.Kind == "contact_way_qrcode" {
@@ -53,6 +49,18 @@ func (provider *ChannelAssetProvider) Execute(ctx context.Context, envelope effe
 	}
 	if err != nil {
 		attempted := wecomport.ProviderCallAttempted(err)
+		// A completed WeCom response with a numeric rejection code proves that
+		// no contact way was created. Keep transport ambiguity as unknown.
+		if attempted && wecomport.ProviderWriteClassified(err) && !wecomport.ProviderOutcomeUnknown(err) {
+			if code, known := wecomport.ProviderErrorCode(err); known {
+				return effectport.AdapterResult{
+					Completion:    effectport.StateFinalFailed,
+					ReceiptDigest: effectport.Hash("channel.asset.provider-rejected", string(envelope.Fingerprint()), strconv.FormatInt(code, 10)),
+					FailureCode:   "wecom_errcode_" + strconv.FormatInt(code, 10),
+					CallAttempted: true, RealExternalCallExecuted: true,
+				}, nil
+			}
+		}
 		state := effectport.StateRetryable
 		if attempted {
 			state = effectport.StateUnknown

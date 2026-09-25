@@ -11,12 +11,17 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"time"
 
+	"github.com/makiuchi-d/gozxing"
+	"github.com/makiuchi-d/gozxing/qrcode"
 	p "github.com/qianlan33333-png/AI-CRM-v3/internal/media/port"
 )
 
 const maxInvitationQRBytes = 2 << 20
+
+var officialJoinPath = regexp.MustCompile(`^/gm/[A-Za-z0-9_-]{8,128}$`)
 
 func officialQRCodeReady(plan p.InvitationPlan) bool {
 	return plan.Token != "" && plan.Enabled && plan.State == "active" && plan.CurrentChatID != "" &&
@@ -70,4 +75,28 @@ func fetchOfficialQRCode(ctx context.Context, raw string, injected *http.Client)
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+// WeCom only documents a QR image URL. Decode the actual image rather than
+// constructing a join link from config_id or a current group's chat ID.
+func officialJoinURL(qrImage []byte) (string, error) {
+	img, _, err := image.Decode(bytes.NewReader(qrImage))
+	if err != nil {
+		return "", err
+	}
+	bitmap, err := gozxing.NewBinaryBitmapFromImage(img)
+	if err != nil {
+		return "", err
+	}
+	result, err := qrcode.NewQRCodeReader().Decode(bitmap, nil)
+	if err != nil {
+		return "", err
+	}
+	target := result.GetText()
+	u, err := url.Parse(target)
+	if err != nil || u.Scheme != "https" || u.Host != "work.weixin.qq.com" || u.User != nil ||
+		u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || !officialJoinPath.MatchString(u.EscapedPath()) {
+		return "", errors.New("invalid official join URL")
+	}
+	return target, nil
 }

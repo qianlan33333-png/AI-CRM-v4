@@ -529,6 +529,27 @@ func (store PostgreSQL) MachineIdentityFacts(ctx context.Context, customerID cus
 	return export.Facts, nil
 }
 
+func (store PostgreSQL) HasVerifiedScopedUnion(ctx context.Context, customerID customerdomain.CustomerID, scope, value string) (bool, error) {
+	if customerID < 1 || identitydomain.ValidateNamespace(identitydomain.KindUnionID, scope) != nil || value == "" {
+		return false, ErrInvalidQuery
+	}
+	tx, err := platformpostgres.RequireTransaction(ctx)
+	if err != nil {
+		return false, err
+	}
+	lineage, err := store.CanonicalLineage(ctx, customerID)
+	if err != nil || len(lineage) == 0 {
+		return false, err
+	}
+	var verified, conflict bool
+	err = tx.QueryRow(ctx, `SELECT
+		EXISTS(SELECT 1 FROM customer_identities WHERE customer_id=ANY($1::bigint[]) AND kind='unionid' AND scope_key=$2 AND normalized_value=$3 AND assurance='verified' AND status='active'),
+		EXISTS(SELECT 1 FROM customer_identity_conflicts WHERE status='open' AND (left_customer_id=ANY($1::bigint[]) OR right_customer_id=ANY($1::bigint[])))`, lineage, scope, value).Scan(&verified, &conflict)
+	return verified && !conflict, err
+}
+
+var _ identityport.VerifiedScopedUnionReader = PostgreSQL{}
+
 // MachineIdentityExport follows the Identity-owned canonical lineage before
 // exposing facts. It deliberately includes declared phones: assurance remains
 // an output fact and callers must not turn it into verified evidence.

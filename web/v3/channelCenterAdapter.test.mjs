@@ -31,7 +31,7 @@ async function waitFor(check, message) {
 function channel(id, status, name) {
   return {
     id, channel_name: name, channel_code: `code-${id}`, channel_type: 'qrcode', carrier_type: 'qrcode', status,
-    channel_contact_count: 0, scene_value: 'scene', qr_url: 'https://example.invalid/qr', qr_download_url: `/api/admin/channels/${id}/qrcode/download`, owner_staff_id: '7', customer_channel: 'source', link_url: '', final_url: '',
+    channel_contact_count: 0, scene_value: 'scene', qr_url: 'https://example.invalid/qr', qr_download_url: id === 12 ? '' : `/api/admin/channels/${id}/qrcode/download`, owner_staff_id: '7', customer_channel: 'source', link_url: '', final_url: '',
     welcome_message: '欢迎{{客户名}}', welcome_image_library_ids: [11], welcome_miniprogram_library_ids: [12], welcome_attachment_library_ids: [13], welcome_group_invite_library_ids: [14],
     auto_accept_friend: false, entry_tag_id: '3', entry_tag_name: '新客', entry_tag_group_name: '来源', assignment_mode: 'multi_staff', assignment_strategy: 'ratio', overflow_policy: '',
     assignment_config_json: { assignees: [{ staff_id: 7, priority: 1, ratio_percent: 100, max_scans_24h: 0 }] },
@@ -71,6 +71,9 @@ const list = new JSDOM(`<!doctype html><body data-page="channels"><header class=
         const ids = state.ids.filter((rowID) => url.searchParams.get('include_archived') === 'true' || state.status.get(rowID) !== 'archived');
         state.listSnapshots.push(ids);
         return new Response(JSON.stringify({ channels: ids.map((rowID) => channel(Number(rowID), state.status.get(rowID), state.names.get(rowID))) }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.pathname === '/api/admin/channels/12/acquisition-assets' && method === 'GET') {
+        return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       if (id && method === 'GET') {
         if (state.outcomes.get(id) === 'preflight_network') throw new TypeError('detail preflight unavailable');
@@ -137,6 +140,14 @@ try {
   assert.equal(initialListRead?.path, '/api/admin/channels?limit=50', 'the normal channel list removes the frozen include_archived=true parameter before its real GET');
   assert.deepEqual(state.listSnapshots.at(0), ['10', '11', '12'], 'the normal list total projects only its three non-archived resources');
   assert.equal([...list.window.document.querySelectorAll('tbody tr')].length, 3, 'the normal channel list renders only its three non-archived rows');
+  const missingQRRow = [...list.window.document.querySelectorAll('tbody tr')].find((row) => row.textContent.includes('预读渠道'));
+  const missingQRAction = [...missingQRRow.querySelectorAll('button')].find((button) => button.textContent.trim() === '查看／生成二维码');
+  assert.ok(missingQRAction, 'a saved channel without an asset has a labeled path to generation');
+  assert.equal(missingQRAction.getAttribute('aria-disabled'), 'false');
+  missingQRAction.click();
+  await waitFor(() => [...list.window.document.querySelectorAll('button')].some((button) => button.textContent.trim() === '申请二维码'), 'the drawer exposes a readable asset request action');
+  assert.equal(state.calls.some((call) => call.method === 'POST' && call.path.includes('acquisition-assets')), false, 'opening the drawer does not itself create a Provider effect');
+  [...list.window.document.querySelectorAll('button')].find((button) => button.textContent.trim() === '×')?.click();
   assert.equal([...list.window.document.querySelectorAll('tbody tr')].some((row) => row.querySelectorAll(':scope > td')[2]?.textContent?.trim() === '归档'), false, 'an archived row is not retained as a disabled normal-list row');
   assert.equal([...list.window.document.querySelectorAll('tr')].some((row) => row.textContent?.includes('同名渠道') && [...row.querySelectorAll('a')].some((node) => node.textContent === '下载二维码')), true, 'an active row keeps its QR download action');
   for (const name of ['同名渠道', '权限渠道', '预读渠道']) {

@@ -128,7 +128,7 @@ func TestDomesticReleaseInstalledAlipayCheckout(t *testing.T) {
 	dataKey := domesticSmokeDataKey(t)
 	wechatPrivateKeyPath, wechatPlatformCertPath := distributionFixturePaymentCredentials(t)
 	alipayPrivateKeyPath, alipayPublicKey := virtualAlipayFixtureCredentials(t)
-	provider, providerCalls := domesticSmokeAlipayGateway(t, alipayPrivateKeyPath)
+	provider, providerCalls, unexpectedProviderCalls := domesticSmokeAlipayGateway(t, alipayPrivateKeyPath)
 	t.Cleanup(provider.Close)
 	providerCertificate := filepath.Join(t.TempDir(), "synthetic-alipay-provider.pem")
 	certificatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: provider.Certificate().Raw})
@@ -226,6 +226,11 @@ func TestDomesticReleaseInstalledAlipayCheckout(t *testing.T) {
 		binding := domesticSmokeCheckoutBinding(t, apiURL, session.token)
 		created[testCase.name] = domesticSmokeCreateAlipayCheckout(t, apiURL, session.token, binding, productID, testCase.channel, "domestic-release-"+testCase.name+"-"+values["AICRM_DOMESTIC_RELEASE_SOURCE_SHA"][:12])
 	}
+	// Creating WAP/Page handoffs signs URLs locally. The effects worker starts
+	// below and may subsequently query the provider to reconcile payment state.
+	if calls := providerCalls.Load(); calls != 0 {
+		t.Fatalf("installed WAP/Page checkout creation unexpectedly made %d HTTP calls to the synthetic Alipay API fixture", calls)
+	}
 
 	workerEnvironment := make([]string, 0, len(apiEnvironment))
 	for _, value := range apiEnvironment {
@@ -254,11 +259,10 @@ func TestDomesticReleaseInstalledAlipayCheckout(t *testing.T) {
 		}
 		assertAlipayCheckoutPersistence(t, fixture, created[testCase.name], testCase.channel)
 	}
-	// WAP/Page creation signs a URL locally. It must not make an API request
-	// while producing the checkout handoff; the gateway above is a loopback
-	// TLS fixture so this journey cannot contact a live Alipay endpoint.
-	if calls := providerCalls.Load(); calls != 0 {
-		t.Fatalf("installed WAP/Page handoff unexpectedly made %d HTTP calls to the synthetic Alipay API fixture", calls)
+	// Only read-only trade queries are allowed after the worker starts. A WAP
+	// or Page provider API call is never part of URL generation.
+	if calls := unexpectedProviderCalls.Load(); calls != 0 {
+		t.Fatalf("installed WAP/Page handoff made %d unexpected HTTP calls to the synthetic Alipay API fixture", calls)
 	}
 	t.Logf("domestic_release_installed_alipay_checkout: PASS source_sha=%s installed_sha=%s", values["AICRM_DOMESTIC_RELEASE_SOURCE_SHA"], installedSHA)
 }
@@ -552,7 +556,7 @@ func domesticSmokeRuntime(
 	}
 }
 
-func domesticSmokeAlipayGateway(t *testing.T, privateKeyPath string) (*httptest.Server, *atomic.Int32) {
+func domesticSmokeAlipayGateway(t *testing.T, privateKeyPath string) (*httptest.Server, *atomic.Int32, *atomic.Int32) {
 	t.Helper()
 	privateKey, err := os.ReadFile(privateKeyPath)
 	if err != nil {
@@ -563,9 +567,11 @@ func domesticSmokeAlipayGateway(t *testing.T, privateKeyPath string) (*httptest.
 		t.Fatal("create synthetic Alipay query signer")
 	}
 	var calls atomic.Int32
+	var unexpectedCalls atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		calls.Add(1)
 		if err := request.ParseForm(); err != nil || request.Form.Get("method") != "alipay.trade.query" {
+			unexpectedCalls.Add(1)
 			http.Error(writer, "synthetic checkout fixture accepts query only", http.StatusBadRequest)
 			return
 		}
@@ -592,7 +598,7 @@ func domesticSmokeAlipayGateway(t *testing.T, privateKeyPath string) (*httptest.
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(writer, `{"alipay_trade_query_response":%s,"sign":%q}`, body, base64.StdEncoding.EncodeToString(signature))
 	}))
-	return server, &calls
+	return server, &calls, &unexpectedCalls
 }
 
 type domesticSmokeProcess struct {

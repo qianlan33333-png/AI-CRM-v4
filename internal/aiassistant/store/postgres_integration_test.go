@@ -753,6 +753,62 @@ func machineKeyDigest(value string) []byte {
 	return digest[:]
 }
 
+func TestPostgreSQLWorkbenchPackageAtomicReceiptAndClientReference(t *testing.T) {
+	native, cleanup := integrationPool(t)
+	defer cleanup()
+	wrapped, err := platformpostgres.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrapped.Close()
+	uow, err := platformpostgres.NewUnitOfWork(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := aiassistantapp.NewService(uow, repository, integrationCustomers{}, integrationStaff{}, integrationMaterials{}, integrationIdentities{}, integrationIdentities{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor, err := aiassistantport.MachineActorFromClientID("synthetic-workbench")
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := effectport.Hash("synthetic-frozen-source")
+	packageFact := &aiassistantport.MachinePackageMetadata{AudiencePackageID: "aud-1", AudienceVersion: "1", CopyPackageID: "copy-1", CopyVersion: "1", StrategyVersion: "1", ProductFactVersion: "1", SourceFingerprint: string(digest), ApprovalRevision: "approved-1", ClientReference: "synthetic-reference-1", MemberCount: 1}
+	command := aiassistantport.MachineCreatePlanCommand{Actor: actor, IdempotencyKey: strings.Repeat("a", 16), Name: "synthetic package", SourceKind: "scrm_workbench", SourceDigest: digest, Package: packageFact, Recipients: []aiassistantport.RecipientCandidate{{CustomerID: 11, StaffID: 21, Content: []aiassistantport.ContentBlock{{Kind: aiassistantport.ContentText, Text: "synthetic copy"}}}}, OccurredAt: time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)}
+	created, err := service.CreateMachinePlan(context.Background(), command)
+	if err != nil || created.Plan.ID < 1 || created.Replayed {
+		t.Fatalf("create=%+v err=%v", created, err)
+	}
+	replay, err := service.CreateMachinePlan(context.Background(), command)
+	if err != nil || !replay.Replayed || replay.Plan.ID != created.Plan.ID {
+		t.Fatalf("replay=%+v err=%v", replay, err)
+	}
+	changed := command
+	changed.IdempotencyKey = strings.Repeat("b", 16)
+	if _, err = service.CreateMachinePlan(context.Background(), changed); !errors.Is(err, aiassistantapp.ErrConflict) {
+		t.Fatalf("duplicate client reference err=%v", err)
+	}
+	var plans, packages int
+	if err = native.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM ai_assistant_plans),(SELECT count(*) FROM ai_assistant_workbench_packages)`).Scan(&plans, &packages); err != nil {
+		t.Fatal(err)
+	}
+	if plans != 1 || packages != 1 {
+		t.Fatalf("partial duplicate created plans=%d packages=%d", plans, packages)
+	}
+	var frozen string
+	if err = native.QueryRow(context.Background(), `SELECT row_to_json(p)::text FROM ai_assistant_workbench_packages p WHERE plan_id=$1`, created.Plan.ID).Scan(&frozen); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(frozen, "unionid") || strings.Contains(frozen, "union_id") {
+		t.Fatalf("identity leaked into package table")
+	}
+}
+
 func integrationPool(t *testing.T) (*pgxpool.Pool, func()) {
 	t.Helper()
 	url, err := platformconfig.DatabaseURL()
@@ -787,7 +843,7 @@ func integrationPool(t *testing.T) (*pgxpool.Pool, func()) {
 	if !ok {
 		t.Fatal("locate test")
 	}
-	for _, name := range []string{"0007_media.sql", "0036_ai_assistant_review.sql", "0100_ai_assistant_machine_actor.sql", "0120_excel_batches.sql", "0124_operation_excel_batch_lifecycle.sql", "0126_media_material_source_snapshots.sql"} {
+	for _, name := range []string{"0007_media.sql", "0036_ai_assistant_review.sql", "0100_ai_assistant_machine_actor.sql", "0120_excel_batches.sql", "0124_operation_excel_batch_lifecycle.sql", "0126_media_material_source_snapshots.sql", "0209_ai_assistant_workbench_packages.sql"} {
 		migration, readErr := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations", name))
 		if readErr != nil {
 			t.Fatal(readErr)

@@ -20,6 +20,11 @@ type machineStore interface {
 
 type machineStatusStore interface {
 	MachineExecutionSummary(context.Context, aiassistantport.PlanID) (aiassistantport.MachineExecutionSummary, error)
+	MachineRecipientResults(context.Context, aiassistantport.PlanID) ([]aiassistantport.MachineRecipientResult, error)
+}
+
+type machinePackageStore interface {
+	SaveMachinePackage(context.Context, aiassistantport.PlanID, aiassistantport.MachineActor, aiassistantport.MachinePackageMetadata) error
 }
 
 func (s *Service) machineStore() (machineStore, bool) {
@@ -110,6 +115,15 @@ func (s *Service) createMachineWithin(ctx context.Context, command aiassistantpo
 	if err != nil {
 		return err
 	}
+	if command.Package != nil {
+		writer, ok := s.store.(machinePackageStore)
+		if !ok {
+			return ErrUnavailable
+		}
+		if err = writer.SaveMachinePackage(ctx, plan.ID, command.Actor, *command.Package); err != nil {
+			return err
+		}
+	}
 	for index := range created {
 		if err = s.registerContentReferences(ctx, created[index].ContentVersionID, recipients[index].Content); err != nil {
 			return err
@@ -190,6 +204,29 @@ func (s *Service) GetMachineOperationStatus(ctx context.Context, actor aiassista
 		}
 		result = machineOperationStatus(plan, summary)
 		return nil
+	})
+	return result, classify(err)
+}
+
+func (s *Service) GetMachineRecipientResults(ctx context.Context, actor aiassistantport.MachineActor, id aiassistantport.PlanID) ([]aiassistantport.MachineRecipientResult, error) {
+	if s == nil || !actor.Valid() || id < 1 {
+		return nil, ErrInvalid
+	}
+	store, ok := s.store.(machineStatusStore)
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	var result []aiassistantport.MachineRecipientResult
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		plan, readErr := s.store.GetPlan(tx, id, false)
+		if readErr != nil {
+			return readErr
+		}
+		if plan.CreatedActorKind != aiassistantport.MachineActorKind || plan.CreatedActorRef != actor.Reference {
+			return ErrNotFound
+		}
+		result, readErr = store.MachineRecipientResults(tx, id)
+		return readErr
 	})
 	return result, classify(err)
 }

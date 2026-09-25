@@ -26,6 +26,7 @@ const (
 	OperationCapabilitiesList         OperationID = "platform.capabilities.list"
 	OperationCustomerResolve          OperationID = "customer.resolve"
 	OperationCustomerContext          OperationID = "customer.context.get"
+	OperationCustomerList             OperationID = "customer.list"
 	OperationCustomerActivities       OperationID = "customer.activities.list"
 	OperationAIReviewPlanCreate       OperationID = "ai.review_plan.create"
 	OperationGet                      OperationID = "operation.get"
@@ -50,8 +51,10 @@ const (
 	CapabilityPlatformCapabilitiesRead Capability = "platform.capabilities.read"
 	CapabilityCustomerResolve          Capability = "customer.resolve"
 	CapabilityCustomerRead             Capability = "customer.read"
+	CapabilityCustomerListRead         Capability = "customer.list.read"
 	CapabilityCustomerActivityRead     Capability = "customer.activity.read"
 	CapabilityAIReviewPlanCreate       Capability = "ai.review_plan.create"
+	CapabilityWorkbenchPackageCreate   Capability = "ai.workbench.package.create"
 	CapabilityOperationRead            Capability = "operation.read"
 	CapabilityOrderRead                Capability = "order.read"
 	CapabilityIdentityRead             Capability = "identity.read"
@@ -84,6 +87,7 @@ func OperationCatalog() []Descriptor {
 		{OperationID: OperationCapabilitiesList, RESTMethod: "GET", RESTPath: "/open/v1/capabilities", MCPTool: "list_capabilities", Capability: CapabilityPlatformCapabilitiesRead, RequiredScope: "read", SchemaVersion: SchemaVersion},
 		{OperationID: OperationCustomerResolve, RESTMethod: "POST", RESTPath: "/open/v1/customers:resolve", MCPTool: "resolve_customer", Capability: CapabilityCustomerResolve, RequiredScope: "read", SchemaVersion: SchemaVersion},
 		{OperationID: OperationCustomerContext, RESTMethod: "GET", RESTPath: "/open/v1/customers/{customer_id}", MCPTool: "get_customer_context", Capability: CapabilityCustomerRead, RequiredScope: "read", SchemaVersion: SchemaVersion},
+		{OperationID: OperationCustomerList, RESTMethod: "GET", RESTPath: "/open/v1/customers", MCPTool: "list_customers", Capability: CapabilityCustomerListRead, RequiredScope: "read", SchemaVersion: SchemaVersion},
 		{OperationID: OperationCustomerActivities, RESTMethod: "GET", RESTPath: "/open/v1/customers/{customer_id}/activities", MCPTool: "list_customer_activities", Capability: CapabilityCustomerActivityRead, RequiredScope: "read", SchemaVersion: SchemaVersion, ActivityTypes: []string{"message", "survey", "radar", "order"}, ActivityItemFields: []string{"activity_id", "type", "occurred_at", "source", "payload"}},
 		{OperationID: OperationAIReviewPlanCreate, RESTMethod: "POST", RESTPath: "/open/v1/ai/review-plans", MCPTool: "create_ai_review_plan", Capability: CapabilityAIReviewPlanCreate, RequiredScope: "write", SchemaVersion: SchemaVersion},
 		{OperationID: OperationGet, RESTMethod: "GET", RESTPath: "/open/v1/operations/{operation_id}", MCPTool: "get_operation_status", Capability: CapabilityOperationRead, RequiredScope: "read", SchemaVersion: SchemaVersion},
@@ -192,6 +196,7 @@ const (
 type OperationError struct {
 	Code    ErrorCode
 	Message string
+	Details any
 }
 
 func (e *OperationError) Error() string {
@@ -206,6 +211,18 @@ func (e *OperationError) Error() string {
 
 func NewError(code ErrorCode, message string) error {
 	return &OperationError{Code: code, Message: message}
+}
+
+func NewDetailedError(code ErrorCode, message string, details any) error {
+	return &OperationError{Code: code, Message: message, Details: details}
+}
+
+func ErrorDetailsOf(err error) any {
+	var operationError *OperationError
+	if errors.As(err, &operationError) && operationError != nil {
+		return operationError.Details
+	}
+	return nil
 }
 
 func ErrorCodeOf(err error) ErrorCode {

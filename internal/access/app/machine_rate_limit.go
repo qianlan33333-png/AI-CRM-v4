@@ -98,7 +98,7 @@ func (limiter *MachineRequestRateLimiter) allow(ctx context.Context, namespace, 
 			limit.BlockedUntil = nil
 		}
 		if limit.BlockedUntil != nil && now.Before(*limit.BlockedUntil) {
-			decision = domain.ErrRateLimited
+			decision = domain.MachineRateLimitError{RetryAfter: limit.BlockedUntil.Sub(now)}
 			return nil
 		}
 		if limit.FailureCount >= maximum {
@@ -108,7 +108,7 @@ func (limiter *MachineRequestRateLimiter) allow(ctx context.Context, namespace, 
 			if err = limiter.repository.SaveLoginRateLimit(tx, limit); err != nil {
 				return err
 			}
-			decision = domain.ErrRateLimited
+			decision = domain.MachineRateLimitError{RetryAfter: blockedUntil.Sub(now)}
 			return nil
 		}
 		limit.FailureCount++

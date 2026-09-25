@@ -1016,6 +1016,26 @@ class DomesticReleaseTest(unittest.TestCase):
                 readback_call.assert_not_called()
                 baseline_call.assert_not_called()
 
+    def test_pr38_corrected_fixture_cli_requires_exact_candidate_and_main_sha(self):
+        candidate = worker.PR38_SMOKE_SOURCE_SHA
+        main_sha = "f" * 40
+        invalid_args = (
+            ["domestic_release.py", "--config", "unused", "recover-pr38-smoke", "--main-sha", main_sha],
+            ["domestic_release.py", "--config", "unused", "recover-pr38-smoke", "--sha", candidate],
+            ["domestic_release.py", "--config", "unused", "recover-pr38-smoke", "--retry-blocked", "--sha", candidate, "--main-sha", main_sha],
+        )
+        for argv in invalid_args:
+            with self.subTest(argv=argv):
+                with mock.patch.object(worker, "load_config", return_value={}), mock.patch.object(worker, "recover_pr38_staging_smoke") as recovery, mock.patch.object(worker.sys, "argv", argv):
+                    with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+                        worker.main()
+                self.assertEqual(raised.exception.code, 2)
+                recovery.assert_not_called()
+
+        with mock.patch.object(worker, "load_config", return_value={"repo": "/unused", "state": "/unused/state.json"}), mock.patch.object(worker, "recover_pr38_staging_smoke", return_value={"status": "ready"}) as recovery, mock.patch.object(worker.sys, "argv", ["domestic_release.py", "--config", "unused", "recover-pr38-smoke", "--sha", candidate, "--main-sha", main_sha]), redirect_stdout(io.StringIO()):
+            worker.main()
+        recovery.assert_called_once_with({"repo": "/unused", "state": "/unused/state.json"}, expected_sha=candidate, expected_main_sha=main_sha)
+
     def test_one_off_staging_retry_command_is_retired(self):
         argv = ["domestic_release.py", "--config", "unused", "retry-staging", "--sha", "5" * 40]
         with mock.patch.object(worker.sys, "argv", argv), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
@@ -1294,6 +1314,456 @@ class DomesticReleaseTest(unittest.TestCase):
         with mock.patch.object(worker, "git", side_effect=checked_git), mock.patch.object(worker, "_git_file_sha256", side_effect=wrong_helper_digest):
             with self.assertRaisesRegex(RuntimeError, "executor is not the exact reviewed main helper"):
                 worker._smoke_helper_selection(repo, worker.PR38_SMOKE_SOURCE_SHA, checked_main)
+
+    def test_pr38_corrected_fixture_selection_is_bound_to_exact_candidate_fixture_and_helper_hashes(self):
+        repo = Path("/unused")
+        checked_main = "f" * 40
+        self.assertEqual(worker.PR38_CORRECTED_FIXTURE_SHA, "948ffd35063efcb8609cd6c33eff48acf9697b0b")
+        self.assertEqual(worker.PR38_CORRECTED_FIXTURE_TREE, "8a356497374af9a913d7d28ccec78ca55df20586")
+        self.assertEqual(worker.PR38_CORRECTED_SMOKE_FILE_SHA256, "4176c260dd4fa89b0036aa37a9f6fac33c58d3a7262f4c65e40d334af7f71eeb")
+        self.assertEqual(worker.PR38_CORRECTED_SCHEMA_FILE_SHA256, "b75eebf20e210aecb4f1d960a2adb9522b45468a2f014435d377f435ebbe197b")
+        self.assertEqual(worker.PR38_CORRECTED_FIXTURE_HELPER_SHA256, "2a6c8a222dee5d19e505083d8311f548d8effafcb3fd68f856d8a24c82fa46f7")
+        trees = {
+            worker.PR38_SMOKE_SOURCE_SHA: worker.PR38_SMOKE_SOURCE_TREE,
+            worker.PR38_CORRECTED_FIXTURE_SHA: worker.PR38_CORRECTED_FIXTURE_TREE,
+            checked_main: "a" * 40,
+        }
+        digests = {
+            (worker.PR38_CORRECTED_FIXTURE_SHA, worker.ALIPAY_SMOKE_FIXTURE): worker.PR38_CORRECTED_SMOKE_FILE_SHA256,
+            (worker.PR38_CORRECTED_FIXTURE_SHA, "cmd/aicrm/admin_access_journey_integration_test.go"): worker.PR38_CORRECTED_SCHEMA_FILE_SHA256,
+            (worker.PR38_CORRECTED_FIXTURE_SHA, "deploy/domestic-promote.py"): worker.PR38_CORRECTED_FIXTURE_HELPER_SHA256,
+            (worker.PR38_SMOKE_SOURCE_SHA, "deploy/domestic-promote.py"): worker.PR38_SOURCE_HELPER_SHA256,
+            (checked_main, "deploy/domestic-promote.py"): worker.PR38_EXECUTOR_HELPER_SHA256,
+        }
+
+        def checked_git(_repo, *args):
+            if args[0] == "rev-parse":
+                return trees[args[1].split("^{", 1)[0]]
+            if args[:2] == ("merge-base", "--is-ancestor"):
+                return ""
+            raise AssertionError(args)
+
+        def checked_digest(_repo, sha, path):
+            return digests[(sha, path)]
+
+        with mock.patch.object(worker, "git", side_effect=checked_git), mock.patch.object(worker, "_git_file_sha256", side_effect=checked_digest):
+            selected = worker._pr38_corrected_fixture_selection(
+                repo, worker.PR38_SMOKE_SOURCE_SHA, worker.PR38_CORRECTED_FIXTURE_SHA, checked_main,
+            )
+        self.assertEqual(selected["candidate_sha"], worker.PR38_SMOKE_SOURCE_SHA)
+        self.assertEqual(selected["fixture_sha"], worker.PR38_CORRECTED_FIXTURE_SHA)
+        self.assertEqual(selected["fixture_tree"], worker.PR38_CORRECTED_FIXTURE_TREE)
+        self.assertEqual(selected["compatibility"], "pr38_candidate_with_pr43_corrected_smoke_fixture")
+
+        for candidate, fixture in (("b" * 40, worker.PR38_CORRECTED_FIXTURE_SHA),
+                                   (worker.PR38_SMOKE_SOURCE_SHA, "c" * 40),
+                                   (worker.PR38_SMOKE_SOURCE_SHA, "e8456a9ef91efe00a3f9c87514363eb6436fff35")):
+            with self.subTest(candidate=candidate, fixture=fixture), self.assertRaisesRegex(RuntimeError, "restricted to the exact PR38 candidate|differs from reviewed PR43"):
+                worker._pr38_corrected_fixture_selection(repo, candidate, fixture, checked_main)
+
+        def wrong_smoke_digest(_repo, sha, path):
+            if sha == worker.PR38_CORRECTED_FIXTURE_SHA and path == worker.ALIPAY_SMOKE_FIXTURE:
+                return "0" * 64
+            return checked_digest(_repo, sha, path)
+
+        with mock.patch.object(worker, "git", side_effect=checked_git), mock.patch.object(worker, "_git_file_sha256", side_effect=wrong_smoke_digest):
+            with self.assertRaisesRegex(RuntimeError, "PR43 installed-smoke fixture bytes"):
+                worker._pr38_corrected_fixture_selection(
+                    repo, worker.PR38_SMOKE_SOURCE_SHA, worker.PR38_CORRECTED_FIXTURE_SHA, checked_main,
+                )
+
+    def test_run_stage_smoke_executes_whole_pr43_fixture_and_preserves_pr38_candidate_identity(self):
+        repo = Path("/unused")
+        helper = "/fixed/staging-helper.py"
+        selected = {
+            "candidate_sha": worker.PR38_SMOKE_SOURCE_SHA,
+            "candidate_tree": worker.PR38_SMOKE_SOURCE_TREE,
+            "candidate_helper_sha256": worker.PR38_SOURCE_HELPER_SHA256,
+            "fixture_sha": worker.PR38_CORRECTED_FIXTURE_SHA,
+            "fixture_tree": worker.PR38_CORRECTED_FIXTURE_TREE,
+            "fixture_smoke_file_sha256": worker.PR38_CORRECTED_SMOKE_FILE_SHA256,
+            "fixture_schema_file_sha256": worker.PR38_CORRECTED_SCHEMA_FILE_SHA256,
+            "fixture_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+            "checked_main_sha": "f" * 40,
+            "checked_main_tree": "a" * 40,
+            "executor_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+            "compatibility": "pr38_candidate_with_pr43_corrected_smoke_fixture",
+        }
+        helper_selection = {
+            "source_tree": worker.PR38_CORRECTED_FIXTURE_TREE,
+            "source_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+            "executor_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+            "executor_source_sha": worker.PR38_CORRECTED_FIXTURE_SHA,
+            "executor_source_tree": worker.PR38_CORRECTED_FIXTURE_TREE,
+            "compatibility": "exact_source",
+        }
+        remote_receipt = {"source_sha": worker.PR38_CORRECTED_FIXTURE_SHA}
+        verified = {
+            "source_sha": worker.PR38_CORRECTED_FIXTURE_SHA,
+            "source_tree": worker.PR38_CORRECTED_FIXTURE_TREE,
+            "source_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+            "executor_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+            "executor_source_sha": worker.PR38_CORRECTED_FIXTURE_SHA,
+            "executor_source_tree": worker.PR38_CORRECTED_FIXTURE_TREE,
+            "helper_compatibility": "exact_source",
+            "installed_sha": worker.PR38_INSTALLED_BASE_SHA,
+            "manifest_sha256": "a" * 64,
+        }
+        calls = {}
+
+        def fake_command(*args, **_kwargs):
+            calls["command"] = args
+            return json.dumps(remote_receipt)
+
+        with (
+            mock.patch.object(worker, "_pr38_corrected_fixture_selection", return_value=selected),
+            mock.patch.object(worker, "_smoke_helper_selection", return_value=helper_selection),
+            mock.patch.object(worker, "_local_file_sha256", return_value=worker.PR38_EXECUTOR_HELPER_SHA256),
+            mock.patch.object(worker, "command", side_effect=fake_command),
+            mock.patch.object(worker, "verify_stage_smoke_receipt", return_value=dict(verified)) as verify,
+        ):
+            receipt = worker.run_stage_smoke(
+                {"stage_helper": helper}, repo, worker.PR38_SMOKE_SOURCE_SHA,
+                worker.PR38_INSTALLED_BASE_SHA, "a" * 64,
+                checked_main_sha="f" * 40, fixture_source_sha=worker.PR38_CORRECTED_FIXTURE_SHA,
+            )
+
+        command = calls["command"]
+        self.assertIn("--source-sha", command)
+        self.assertEqual(command[command.index("--source-sha") + 1], worker.PR38_CORRECTED_FIXTURE_SHA)
+        verify.assert_called_once()
+        self.assertEqual(receipt["source_sha"], worker.PR38_SMOKE_SOURCE_SHA)
+        self.assertEqual(receipt["candidate_source_tree"], worker.PR38_SMOKE_SOURCE_TREE)
+        self.assertEqual(receipt["fixture_source_sha"], worker.PR38_CORRECTED_FIXTURE_SHA)
+        self.assertEqual(receipt["test_source_sha"], worker.PR38_CORRECTED_FIXTURE_SHA)
+        self.assertEqual(receipt["fixture_execution_receipt"]["source_sha"], worker.PR38_CORRECTED_FIXTURE_SHA)
+        self.assertEqual(receipt["fixture_execution_receipt"]["source_tree"], worker.PR38_CORRECTED_FIXTURE_TREE)
+
+    def _pr38_corrected_recovery_fixture(self, root):
+        candidate = worker.PR38_SMOKE_SOURCE_SHA
+        previous = worker.PR38_PREVIOUS_CURSOR_SHA
+        installed = worker.PR38_INSTALLED_BASE_SHA
+        main_sha = "f" * 40
+        manifest = "a" * 64
+        state_path = root / "state.json"
+        state_path.write_text(json.dumps({
+            "status": "staging_failed",
+            "processed_sha": previous,
+            "deployed_source_sha": installed,
+            "prod_installed_sha": installed,
+            "prod_installed_manifest_sha256": manifest,
+            "blocked_sha": candidate,
+            "failure": "staging installed behavior smoke failed: RuntimeError",
+            "last_stage_smoke": {"source_sha": candidate, "installed_sha": installed, "status": "failed"},
+            "pr38_staging_failed_resume": dict(worker.PR38_RESUME_MARKER),
+            "pr38_staging_failed_smoke_attempted": {
+                "source_sha": candidate,
+                "checked_main_sha": worker.PR38_FIXTURE_RECOVERY_FIRST_MAIN_SHA,
+                "started_at_utc": "2026-09-25T00:00:00Z",
+            },
+        }))
+        selection = {
+            "candidate_sha": candidate,
+            "candidate_tree": worker.PR38_SMOKE_SOURCE_TREE,
+            "candidate_helper_sha256": worker.PR38_SOURCE_HELPER_SHA256,
+            "fixture_sha": worker.PR38_CORRECTED_FIXTURE_SHA,
+            "fixture_tree": worker.PR38_CORRECTED_FIXTURE_TREE,
+            "fixture_smoke_file_sha256": worker.PR38_CORRECTED_SMOKE_FILE_SHA256,
+            "fixture_schema_file_sha256": worker.PR38_CORRECTED_SCHEMA_FILE_SHA256,
+            "fixture_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+            "checked_main_sha": main_sha,
+            "checked_main_tree": "b" * 40,
+            "executor_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+            "compatibility": "pr38_candidate_with_pr43_corrected_smoke_fixture",
+        }
+        paths = ["scripts/domestic_release.py", "scripts/domestic_release_build.py", "deploy/domestic-promote.py", worker.ALIPAY_SMOKE_FIXTURE]
+        plan = {
+            "changed_paths": paths,
+            "runtime_changed": False,
+            "controller_files": paths[:3],
+        }
+        host_readbacks = {
+            "staging_readyz": {"release_sha": installed, "status": "ready"},
+            "staging_current": f"/opt/aicrm/releases/{installed}",
+            "staging_manifest_sha256": manifest,
+            "staging_receipt_exists": False,
+            "staging_database_backup_exists": False,
+            "production_readyz": {"release_sha": installed, "status": "ready"},
+            "production_current": f"/opt/aicrm/releases/{installed}",
+            "production_manifest_sha256": manifest,
+            "production_receipt_exists": False,
+            "production_database_backup_exists": False,
+            "manifest_sha256": manifest,
+        }
+        smoke = {
+            "source_sha": candidate,
+            "candidate_source_tree": worker.PR38_SMOKE_SOURCE_TREE,
+            "fixture_source_sha": worker.PR38_CORRECTED_FIXTURE_SHA,
+            "fixture_source_tree": worker.PR38_CORRECTED_FIXTURE_TREE,
+            "installed_sha": installed,
+            "manifest_sha256": manifest,
+            "helper_compatibility": selection["compatibility"],
+            "status": "passed",
+            "test_source_sha": worker.PR38_CORRECTED_FIXTURE_SHA,
+            "checked_main_sha": main_sha,
+            "fixture_execution_receipt": {
+                "source_sha": worker.PR38_CORRECTED_FIXTURE_SHA,
+                "source_tree": worker.PR38_CORRECTED_FIXTURE_TREE,
+                "status": "passed",
+            },
+        }
+        config = {"repo": str(root), "state": str(state_path), "stage_helper": "/fixed/stage-helper.py"}
+        return {
+            "candidate": candidate, "installed": installed, "main": main_sha,
+            "manifest": manifest, "state_path": state_path, "config": config,
+            "selection": selection, "paths": paths, "plan": plan,
+            "host_readbacks": host_readbacks, "smoke": smoke,
+        }
+
+    def _run_pr38_corrected_recovery(self, fixture, *, smoke_side_effect=None, main_after=None):
+        repo = Path(fixture["config"]["repo"])
+        candidate, main_sha = fixture["candidate"], fixture["main"]
+        state_path = fixture["state_path"]
+        rev_main = [main_sha, main_after or main_sha]
+        main_reads = {"count": 0}
+
+        def fake_git(_repo, *args):
+            if args == ("rev-parse", "refs/remotes/origin/main"):
+                index = min(main_reads["count"], len(rev_main) - 1)
+                main_reads["count"] += 1
+                return rev_main[index]
+            if args and args[0] == "rev-parse" and args[1].endswith("^{tree}"):
+                return "c" * 40
+            return ""
+
+        command_mock = mock.Mock(return_value=json.dumps(fixture["plan"]))
+        smoke_mock = mock.Mock(side_effect=smoke_side_effect or (lambda *_args, **_kwargs: dict(fixture["smoke"])))
+        build_patch = mock.patch.object(worker, "build_candidate")
+        stage_install_patch = mock.patch.object(worker, "stage_install")
+        production_copy_patch = mock.patch.object(worker, "copy_payload")
+        promote_patch = mock.patch.object(worker, "promote_checked_candidate")
+        build = stage_install = production_copy = promote = None
+        controller_readback = None
+        error = None
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(worker, "git", side_effect=fake_git))
+            stack.enter_context(mock.patch.object(worker, "require_official_origin"))
+            stack.enter_context(mock.patch.object(worker, "first_parent_queue", return_value=[candidate]))
+            stack.enter_context(mock.patch.object(worker, "_pr38_corrected_fixture_selection", return_value=fixture["selection"]))
+            stack.enter_context(mock.patch.object(worker, "exact_check_success", return_value=True))
+            stack.enter_context(mock.patch.object(worker, "_main_full_regression_blocker", return_value=None))
+            stack.enter_context(mock.patch.object(worker, "command", command_mock))
+            stack.enter_context(mock.patch.object(worker, "_trusted_changed_paths", side_effect=[fixture["paths"], fixture["paths"]]))
+            stack.enter_context(mock.patch.object(worker, "_alipay_smoke_required", return_value=True))
+            controller_readback = stack.enter_context(mock.patch.object(
+                worker, "verify_controller_installation",
+                return_value={"status": "matched", "duration_seconds": 0.1},
+            ))
+            stack.enter_context(mock.patch.object(worker, "_verify_pr38_staging_failed_readbacks", return_value=fixture["host_readbacks"]))
+            stack.enter_context(mock.patch.object(worker, "run_stage_smoke", smoke_mock))
+            build = stack.enter_context(build_patch)
+            stage_install = stack.enter_context(stage_install_patch)
+            production_copy = stack.enter_context(production_copy_patch)
+            promote = stack.enter_context(promote_patch)
+            try:
+                result = worker.recover_pr38_staging_smoke(
+                    fixture["config"], expected_sha=candidate, expected_main_sha=main_sha,
+                )
+            except Exception as exc:
+                result = None
+                error = exc
+        state = json.loads(state_path.read_text())
+        return result, state, {
+            "command": command_mock, "smoke": smoke_mock,
+            "controller_readback": controller_readback,
+            "build": build, "stage_install": stage_install,
+            "production_copy": production_copy, "promote": promote,
+            "error": error,
+        }
+
+    def test_pr38_corrected_recovery_records_ready_receipt_without_build_or_install(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-pr38-corrected-recovery-") as temporary:
+            fixture = self._pr38_corrected_recovery_fixture(Path(temporary))
+            result, state, calls = self._run_pr38_corrected_recovery(fixture)
+
+        self.assertIsNone(calls["error"])
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["processed_sha"], worker.PR38_SMOKE_SOURCE_SHA)
+        self.assertEqual(result["deployed_source_sha"], worker.PR38_INSTALLED_BASE_SHA)
+        self.assertEqual(result["prod_installed_sha"], worker.PR38_INSTALLED_BASE_SHA)
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["processed_sha"], worker.PR38_SMOKE_SOURCE_SHA)
+        self.assertEqual(state["pr38_staging_verified"]["status"], "staging_verified")
+        self.assertEqual(state["pr38_staging_verified"]["source_sha"], worker.PR38_SMOKE_SOURCE_SHA)
+        self.assertEqual(state["pr38_staging_verified"]["fixture_source_sha"], worker.PR38_CORRECTED_FIXTURE_SHA)
+        self.assertEqual(state["pr38_corrected_fixture_recovery"]["candidate_tree"], worker.PR38_SMOKE_SOURCE_TREE)
+        self.assertEqual(state["pr38_corrected_fixture_recovery"]["fixture_source_tree"], worker.PR38_CORRECTED_FIXTURE_TREE)
+        self.assertEqual(state["pr38_corrected_fixture_recovery"]["checked_main_sha"], fixture["main"])
+        self.assertEqual(state["pr38_corrected_fixture_recovery"]["status"], "staging_verified")
+        self.assertTrue(state["pr38_corrected_fixture_recovery"]["attempted"])
+        self.assertEqual(state["pr38_corrected_fixture_recovery"]["two_host_readbacks"], fixture["host_readbacks"])
+        self.assertFalse(state["pr38_corrected_fixture_recovery"]["two_host_readbacks"]["staging_receipt_exists"])
+        self.assertFalse(state["pr38_corrected_fixture_recovery"]["two_host_readbacks"]["production_receipt_exists"])
+        self.assertFalse(state["pr38_corrected_fixture_recovery"]["two_host_readbacks"]["staging_database_backup_exists"])
+        self.assertFalse(state["pr38_corrected_fixture_recovery"]["two_host_readbacks"]["production_database_backup_exists"])
+        self.assertIn("pr38_staging_failed_smoke_attempted", state)
+        self.assertNotIn("pr38_staging_failed_resume", state)
+        calls["smoke"].assert_called_once()
+        self.assertEqual(calls["smoke"].call_args.kwargs["fixture_source_sha"], worker.PR38_CORRECTED_FIXTURE_SHA)
+        self.assertEqual(calls["smoke"].call_args.args[2:5], (
+            worker.PR38_SMOKE_SOURCE_SHA, worker.PR38_INSTALLED_BASE_SHA, fixture["manifest"],
+        ))
+        self.assertIn("classify", calls["command"].call_args.args)
+        calls["controller_readback"].assert_called_once()
+        self.assertIn("scripts/domestic_release.py", calls["controller_readback"].call_args.args[3])
+        self.assertIn("deploy/domestic-promote.py", calls["controller_readback"].call_args.args[3])
+        self.assertEqual(calls["controller_readback"].call_args.kwargs["checked_main_sha"], fixture["main"])
+        calls["build"].assert_not_called()
+        calls["stage_install"].assert_not_called()
+        calls["production_copy"].assert_not_called()
+        calls["promote"].assert_not_called()
+
+    def test_normal_poll_after_recovery_processes_next_first_parent_and_keeps_nested_history(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-pr38-next-poll-") as temporary:
+            fixture = self._pr38_corrected_recovery_fixture(Path(temporary))
+            _, state, recovery_calls = self._run_pr38_corrected_recovery(fixture)
+            self.assertIsNone(recovery_calls["error"])
+            next_queue = worker.first_parent_queue(
+                ROOT, worker.PR38_SMOKE_SOURCE_SHA, worker.PR38_FIXTURE_RECOVERY_FIRST_MAIN_SHA,
+            )
+            self.assertTrue(next_queue)
+            expected_next = next_queue[0]
+            self.assertEqual(expected_next, "cba3247932e4e79efbfe07a7b8533510be0d4757")
+            fixture["state_path"].write_text(json.dumps(state))
+            config = dict(fixture["config"], production_enabled=True)
+            next_paths = ["deploy/domestic-promote.py"]
+            next_plan = {"changed_paths": next_paths, "runtime_changed": False, "controller_files": next_paths}
+            with (
+                mock.patch.object(worker, "git", return_value=worker.PR38_FIXTURE_RECOVERY_FIRST_MAIN_SHA),
+                mock.patch.object(worker, "require_official_origin"),
+                mock.patch.object(worker, "first_parent_queue", return_value=[expected_next]) as queue,
+                mock.patch.object(worker, "exact_check_success", return_value=True) as check,
+                mock.patch.object(worker, "_validate_pr38_staging_failed_ledger", side_effect=AssertionError("stale recovery path re-entered")),
+                mock.patch.object(worker, "_main_full_regression_blocker", return_value=None),
+                mock.patch.object(worker, "command", return_value=json.dumps(next_plan)),
+                mock.patch.object(worker, "_trusted_changed_paths", return_value=next_paths),
+                mock.patch.object(worker, "_alipay_smoke_required", return_value=False),
+                mock.patch.object(worker, "verify_controller_installation", return_value={"status": "matched", "duration_seconds": 0.1}),
+                mock.patch.object(worker, "build_candidate") as build,
+                mock.patch.object(worker, "stage_install") as stage,
+                mock.patch.object(worker, "promote_checked_candidate") as promote,
+            ):
+                result = worker.poll(config)
+
+            self.assertEqual(result, {"status": "ready", "processed_sha": expected_next, "queued_count": 1})
+            self.assertEqual(queue.call_args.args[1], worker.PR38_SMOKE_SOURCE_SHA)
+            check.assert_called_once_with(expected_next, mock.ANY, observation=mock.ANY)
+            self.assertEqual(check.call_args.args[0], expected_next)
+            build.assert_not_called()
+            stage.assert_not_called()
+            promote.assert_not_called()
+            persisted = json.loads(fixture["state_path"].read_text())
+            self.assertEqual(persisted["processed_sha"], expected_next)
+            self.assertNotIn("pr38_staging_failed_smoke_attempted", persisted)
+            self.assertEqual(
+                persisted["pr38_corrected_fixture_recovery"]["original_failed_attempt"]["source_sha"],
+                worker.PR38_SMOKE_SOURCE_SHA,
+            )
+            self.assertEqual(
+                persisted["pr38_staging_verified"]["receipt"]["fixture_execution_receipt"]["source_sha"],
+                worker.PR38_CORRECTED_FIXTURE_SHA,
+            )
+
+    def test_pr38_corrected_recovery_failure_is_one_shot_and_leaves_queue_blocked(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-pr38-corrected-failure-") as temporary:
+            fixture = self._pr38_corrected_recovery_fixture(Path(temporary))
+            _, failed_state, first_calls = self._run_pr38_corrected_recovery(
+                fixture, smoke_side_effect=RuntimeError("synthetic fixture failed"),
+            )
+            self.assertIsInstance(first_calls["error"], RuntimeError)
+            self.assertEqual(failed_state["status"], "staging_failed")
+            self.assertEqual(failed_state["processed_sha"], worker.PR38_PREVIOUS_CURSOR_SHA)
+            self.assertEqual(failed_state["deployed_source_sha"], worker.PR38_INSTALLED_BASE_SHA)
+            self.assertEqual(failed_state["prod_installed_sha"], worker.PR38_INSTALLED_BASE_SHA)
+            self.assertEqual(failed_state["pr38_corrected_fixture_recovery"]["status"], "failed")
+            self.assertTrue(failed_state["pr38_corrected_fixture_recovery"]["attempted"])
+            self.assertIn("pr38_staging_failed_smoke_attempted", failed_state)
+            first_calls["build"].assert_not_called()
+            first_calls["stage_install"].assert_not_called()
+            first_calls["production_copy"].assert_not_called()
+            first_calls["promote"].assert_not_called()
+
+            _, retry_state, retry_calls = self._run_pr38_corrected_recovery(fixture)
+            self.assertIsInstance(retry_calls["error"], RuntimeError)
+            self.assertIn("exact PR38 failure after its one prior attempt", str(retry_calls["error"]))
+            retry_calls["smoke"].assert_not_called()
+            self.assertEqual(retry_state["status"], "staging_failed")
+
+    def test_pr38_corrected_recovery_stops_if_main_advances_during_smoke(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-pr38-main-advance-") as temporary:
+            fixture = self._pr38_corrected_recovery_fixture(Path(temporary))
+            _, state, calls = self._run_pr38_corrected_recovery(fixture, main_after="e" * 40)
+        self.assertIsInstance(calls["error"], RuntimeError)
+        self.assertIn("main advanced during corrected-fixture recovery", str(calls["error"]))
+        self.assertEqual(state["status"], "staging_failed")
+        self.assertEqual(state["processed_sha"], worker.PR38_PREVIOUS_CURSOR_SHA)
+        self.assertEqual(state["deployed_source_sha"], worker.PR38_INSTALLED_BASE_SHA)
+        self.assertEqual(state["pr38_corrected_fixture_recovery"]["status"], "failed")
+        calls["smoke"].assert_called_once()
+        calls["build"].assert_not_called()
+        calls["stage_install"].assert_not_called()
+        calls["production_copy"].assert_not_called()
+        calls["promote"].assert_not_called()
+
+    def test_pr38_corrected_recovery_rejects_unknown_state_and_prior_recovery_marker(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-pr38-recovery-reject-") as temporary:
+            fixture = self._pr38_corrected_recovery_fixture(Path(temporary))
+            for bad_state in (
+                dict(json.loads(fixture["state_path"].read_text()), status="outcome_unknown"),
+                dict(json.loads(fixture["state_path"].read_text()), pr38_corrected_fixture_recovery={"status": "started", "attempted": True}),
+            ):
+                fixture["state_path"].write_text(json.dumps(bad_state))
+                _, state, calls = self._run_pr38_corrected_recovery(fixture)
+                self.assertIsInstance(calls["error"], RuntimeError)
+                calls["smoke"].assert_not_called()
+                calls["build"].assert_not_called()
+                calls["stage_install"].assert_not_called()
+                calls["production_copy"].assert_not_called()
+                calls["promote"].assert_not_called()
+                self.assertEqual(state["status"], bad_state["status"])
+
+    def test_pr38_corrected_recovery_requires_installed_release_tool_and_smoke_helper(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-pr38-fixed-tools-") as temporary:
+            fixture = self._pr38_corrected_recovery_fixture(Path(temporary))
+            fixture["plan"]["controller_files"] = ["scripts/domestic_release_build.py"]
+            _, state, calls = self._run_pr38_corrected_recovery(fixture)
+        self.assertIsInstance(calls["error"], RuntimeError)
+        self.assertIn("fixed tool set", str(calls["error"]))
+        calls["controller_readback"].assert_not_called()
+        calls["smoke"].assert_not_called()
+        calls["build"].assert_not_called()
+        calls["stage_install"].assert_not_called()
+        calls["production_copy"].assert_not_called()
+        calls["promote"].assert_not_called()
+        self.assertNotIn("pr38_corrected_fixture_recovery", state)
+
+    def test_pr38_two_host_readback_rejects_backup_even_when_version_and_health_match(self):
+        config = {"repo": "/unused"}
+        healthy_with_backup = release_readback(
+            worker.PR38_INSTALLED_BASE_SHA, "a" * 64,
+            receipt_target=worker.PR38_SMOKE_SOURCE_SHA, receipt_exists=False,
+        )
+        healthy_with_backup["database_backup_exists"] = True
+        state = {
+            "prod_installed_sha": worker.PR38_INSTALLED_BASE_SHA,
+            "prod_installed_manifest_sha256": "a" * 64,
+        }
+        with (
+            mock.patch.object(worker, "stage_readback", return_value=healthy_with_backup),
+            mock.patch.object(worker, "prod_readback", return_value=healthy_with_backup),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "backup state is unexpected"):
+                worker._verify_pr38_staging_failed_readbacks(config, state)
 
     def test_smoke_receipt_requires_both_helper_hashes_and_executor_source(self):
         selection = {
