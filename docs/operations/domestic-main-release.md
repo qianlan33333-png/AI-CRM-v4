@@ -2,11 +2,11 @@
 
 **生效条件：**预备机 ledger 与生产源码游标的 `main_sha/main_tree` 一致；预备机和生产机已安装应用的 SHA、tree、manifest 相互一致且健康。已验证的源码 `main` 必须以该应用 SHA 为 first-parent 祖先；应用提交到所选 `main` 之间只能有工具/文档等不改变运行时的提交，baseline 绑定所选 `main` 的准确 SHA/tree。预备机旧 `aicrm-domestic-release.timer` 和 service 均停止；生产机没有旧/新 domestic release units，必须读回 `not-found`。预备机固定工具与 systemd 单元的摘要对应准确 `main`。缺少任一项继续按[旧流程](domestic-release.md)，不得启动新发布器。发布失败由一个执行者处理。
 
-> **当前未启用。** 必须先将旧发布队列按候选顺序处理完已知运行时变化，逐项核对安装与健康证据，再停止旧入口。以准确审核过的 PR #46 head 作为国内主仓初始 `main`，确认两机已安装应用到该 head 的分类结果为 `runtime_changed=false`。分别读回候选 head 与预备机、生产机已安装应用的准确身份和健康状态；两机应用的 SHA/tree/manifest 必须相互一致，候选 head 必须以应用 SHA 为 first-parent 祖先。未核实该关系、对账所有结果不明部署并确认旧发布 timer/service 已停止前，下面的命令都只是操作说明，不得执行。GitHub `main` 当前停在 `6d3ee9c`，供激活后的人工快进归档；无需先合入 PR #46。PR 状态、配置文件存在或预发构建成功都不构成切换完成。
+> **当前未启用。** 这次 partial-bootstrap 恢复必须先只读确认裸仓仍为 `main=291baa2d13864c3a60f3ed93e08382c3e598db33`、tree=`3c17b8a86e2e69ed4f6942304300c609300fb077`，且 app=`960b30e9406fae2045aeb7ef5dce863976407727` 在其 first-parent 链上、`runtime_changed=false`。恢复只补 hook/权限，不移动 main、不建 ledger；`prepare-baseline`/`activate` 也以 291 为 baseline。准确 PR #46 head 之后作为第一个普通 controller-only 候选串行处理。旧固定 291 controller 先对该 SHA 执行 `maintenance-check`，再由从同一已验证 bundle 导出的精确候选脚本重复检查并写 marker；对照两次的 candidate SHA/tree/base、controller 文件清单、toolchain、lane 集合与全通过结果，raw receipt SHA 会因时间、用时和日志路径而不同。两机 app SHA/tree/manifest 与健康、旧队列结果和 timer 状态仍须按 bootstrap 清单读回。GitHub `main` 暂停在 `6d3ee9c`，供之后人工快进归档；无需先合入 PR #46。
 
 ## 一次性主机准备与切换
 
-国内主仓尚未启用。一次性主机配置、受限账号、固定工具安装、2 核/2GB build-only 演练和激活命令集中在[一次性主机准备与切换清单](domestic-main-bootstrap.md)。只有旧发布队列已按序处理完已知运行时变化、预备机与生产机已安装应用身份相互一致、准确 PR #46 head 与应用提交的 first-parent/无运行时改动关系已核实、旧发布入口停止且未知结果已对账后，才由单一执行者按清单操作；否则所有新 timer 保持 disabled。国内初始 `main` 从该 PR #46 head 的本地 bundle seed；GitHub `main` 仍停在 `6d3ee9c`，之后按人工归档流程快进同步。演练不得使用 `poll`，也不得与旧 build-worker 队列并行运行。
+国内主仓尚未启用。一次性恢复、baseline、首个候选维护检查和激活命令集中在[一次性主机准备与切换清单](domestic-main-bootstrap.md)。本次国内初始 `main` 固定为 partial repo 已验证的 291；精确 PR #46 head bundle 用于导出候选脚本/工具，不用于重建或覆盖 source.git。固定 291 controller 保留到 baseline 后首个 candidate 通过旧规则与新脚本双重 maintenance-check，marker 写入且新 controller 精确安装后，才由普通候选处理推进 main。旧/new timer、双机 app identity 与无结果不明发布项等其余门禁不变。
 
 ## 日常四步
 
