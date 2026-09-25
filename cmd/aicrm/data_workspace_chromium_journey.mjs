@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import { chromiumStartupDiagnostic, chromiumStartupTimeoutMS } from "../../internal/webshell/chromium_launch.mjs";
+import { resolveDataWorkspaceChromiumBinary } from "../../internal/webshell/data_workspace_chromium_binary.mjs";
 const origin = process.env.AICRM_DATA_WORKSPACE_URL;
 const session = process.env.AICRM_DATA_WORKSPACE_SESSION;
 const csrf = process.env.AICRM_DATA_WORKSPACE_CSRF;
@@ -13,11 +14,7 @@ const output = process.env.AICRM_DATA_WORKSPACE_SCREENSHOTS;
 const profile = await fs.mkdtemp(
   path.join(os.tmpdir(), "data-workspace-browser-"),
 );
-const executable =
-  process.env.AICRM_CHROMIUM_BINARY ||
-  (process.platform === "darwin"
-    ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-    : "chromium");
+const executable = resolveDataWorkspaceChromiumBinary();
 const child = spawn(
   executable,
   [
