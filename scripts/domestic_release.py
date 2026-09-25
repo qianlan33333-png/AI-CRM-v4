@@ -106,6 +106,17 @@ PR38_RESUME_MARKER = {
 PR38_HELPER_TRUST_ANCHOR_SHA = "4018d27e719a4f54b279df1c33e1fe8d69882855"
 PR38_HELPER_TRUST_ANCHOR_TREE = "49299006dd4db445f368351ef26f7e2173586a27"
 PR38_EXECUTOR_HELPER_SHA256 = "2a6c8a222dee5d19e505083d8311f548d8effafcb3fd68f856d8a24c82fa46f7"
+# PR41 fixes the schema-ledger omission in PR38's installed-smoke fixture. This
+# exact merged source is permitted only for the one corrected-fixture recovery
+# described by PR38_FIXTURE_RECOVERY; normal candidates always test their own
+# exact source tree.
+PR38_FIXTURE_RECOVERY_SOURCE_SHA = PR38_SMOKE_SOURCE_SHA
+PR38_FIXTURE_RECOVERY_FIRST_MAIN_SHA = "079813d4c449d32e6c85e2373d5341cc99984b7f"
+PR38_CORRECTED_FIXTURE_SHA = "e8456a9ef91efe00a3f9c87514363eb6436fff35"
+PR38_CORRECTED_FIXTURE_TREE = "907a65b66b8d24d45b6feaf0565efde29cd2f753"
+PR38_CORRECTED_SMOKE_FILE_SHA256 = "fcf9ef8f8d2d047ad341ed6d29f6ac224a294ebd9a690970c0186023495faa4b"
+PR38_CORRECTED_SCHEMA_FILE_SHA256 = "b75eebf20e210aecb4f1d960a2adb9522b45468a2f014435d377f435ebbe197b"
+PR38_CORRECTED_FIXTURE_HELPER_SHA256 = PR38_EXECUTOR_HELPER_SHA256
 
 
 def command(*args: str, cwd: Path | None = None, timeout: int = 600) -> str:
@@ -619,6 +630,59 @@ def _smoke_helper_selection(repo: Path, source_sha: str, checked_main_sha: str |
     }
 
 
+def _pr38_corrected_fixture_selection(
+    repo: Path,
+    candidate_sha: str,
+    fixture_sha: str,
+    checked_main_sha: str,
+) -> dict[str, str]:
+    """Verify the one reviewed PR38 candidate/PR41 fixture source pair."""
+    if candidate_sha != PR38_FIXTURE_RECOVERY_SOURCE_SHA:
+        raise RuntimeError("corrected smoke fixture is restricted to the exact PR38 candidate")
+    if not SHA.fullmatch(checked_main_sha):
+        raise RuntimeError("corrected smoke fixture requires the exact checked main SHA")
+    if fixture_sha != PR38_CORRECTED_FIXTURE_SHA:
+        raise RuntimeError("corrected smoke fixture source SHA differs from reviewed PR41")
+
+    candidate_tree = git(repo, "rev-parse", f"{candidate_sha}^{{tree}}")
+    fixture_tree = git(repo, "rev-parse", f"{fixture_sha}^{{tree}}")
+    if candidate_tree != PR38_SMOKE_SOURCE_TREE or fixture_tree != PR38_CORRECTED_FIXTURE_TREE:
+        raise RuntimeError("PR38 or PR41 smoke fixture tree differs from the reviewed source")
+    git(repo, "merge-base", "--is-ancestor", candidate_sha, fixture_sha)
+    git(repo, "merge-base", "--is-ancestor", fixture_sha, checked_main_sha)
+
+    smoke_file_sha = _git_file_sha256(repo, fixture_sha, ALIPAY_SMOKE_FIXTURE)
+    schema_file_sha = _git_file_sha256(repo, fixture_sha, "cmd/aicrm/admin_access_journey_integration_test.go")
+    fixture_helper_sha = _git_file_sha256(repo, fixture_sha, "deploy/domestic-promote.py")
+    candidate_helper_sha = _git_file_sha256(repo, candidate_sha, "deploy/domestic-promote.py")
+    checked_main_helper_sha = _git_file_sha256(repo, checked_main_sha, "deploy/domestic-promote.py")
+    if smoke_file_sha != PR38_CORRECTED_SMOKE_FILE_SHA256:
+        raise RuntimeError("PR41 installed-smoke fixture bytes differ from the reviewed file")
+    if schema_file_sha != PR38_CORRECTED_SCHEMA_FILE_SHA256:
+        raise RuntimeError("PR41 composition migration fixture bytes differ from the reviewed file")
+    if fixture_helper_sha != PR38_CORRECTED_FIXTURE_HELPER_SHA256:
+        raise RuntimeError("PR41 smoke helper differs from the verified staging helper")
+    if candidate_helper_sha != PR38_SOURCE_HELPER_SHA256:
+        raise RuntimeError("PR38 candidate helper differs from the reviewed source")
+    if checked_main_helper_sha != PR38_EXECUTOR_HELPER_SHA256:
+        raise RuntimeError("checked main smoke helper differs from the reviewed executor")
+
+    return {
+        "candidate_sha": candidate_sha,
+        "candidate_tree": candidate_tree,
+        "candidate_helper_sha256": candidate_helper_sha,
+        "fixture_sha": fixture_sha,
+        "fixture_tree": fixture_tree,
+        "fixture_smoke_file_sha256": smoke_file_sha,
+        "fixture_schema_file_sha256": schema_file_sha,
+        "fixture_helper_sha256": fixture_helper_sha,
+        "checked_main_sha": checked_main_sha,
+        "checked_main_tree": git(repo, "rev-parse", f"{checked_main_sha}^{{tree}}"),
+        "executor_helper_sha256": checked_main_helper_sha,
+        "compatibility": "pr38_candidate_with_pr41_corrected_smoke_fixture",
+    }
+
+
 def _validate_pr38_staging_failed_ledger(state: dict, queue: list[str]) -> None:
     """Allow only the observed PR38 smoke-only failure to resume under poll's lock."""
     smoke = state.get("last_stage_smoke")
@@ -680,10 +744,216 @@ def _verify_pr38_staging_failed_readbacks(config: dict, state: dict) -> dict:
     return {
         "staging_readyz": stage["readyz"],
         "staging_current": stage["current"],
+        "staging_manifest_sha256": stage["manifest_sha256"],
+        "staging_receipt_exists": False,
+        "staging_database_backup_exists": False,
         "production_readyz": production["readyz"],
         "production_current": production["current"],
+        "production_manifest_sha256": production["manifest_sha256"],
+        "production_receipt_exists": False,
+        "production_database_backup_exists": False,
         "manifest_sha256": manifest,
     }
+
+
+def _validate_pr38_corrected_fixture_retry_ledger(state: dict, queue: list[str]) -> None:
+    """Allow one corrected-fixture retry only after the recorded old retry failed."""
+    original_attempt = state.get("pr38_staging_failed_smoke_attempted")
+    smoke = state.get("last_stage_smoke")
+    if (
+        state.get("status") != "staging_failed"
+        or state.get("blocked_sha") != PR38_SMOKE_SOURCE_SHA
+        or state.get("processed_sha") != PR38_PREVIOUS_CURSOR_SHA
+        or state.get("deployed_source_sha") != PR38_INSTALLED_BASE_SHA
+        or state.get("prod_installed_sha") != PR38_INSTALLED_BASE_SHA
+        or state.get("failure") != "staging installed behavior smoke failed: RuntimeError"
+        or state.get("pr38_staging_failed_resume") != PR38_RESUME_MARKER
+        or not isinstance(original_attempt, dict)
+        or set(original_attempt) != {"source_sha", "checked_main_sha", "started_at_utc"}
+        or original_attempt.get("source_sha") != PR38_SMOKE_SOURCE_SHA
+        or original_attempt.get("checked_main_sha") != PR38_FIXTURE_RECOVERY_FIRST_MAIN_SHA
+        or _parse_utc(original_attempt.get("started_at_utc")) is None
+        or not isinstance(smoke, dict)
+        or smoke.get("source_sha") != PR38_SMOKE_SOURCE_SHA
+        or smoke.get("installed_sha") != PR38_INSTALLED_BASE_SHA
+        or smoke.get("status") != "failed"
+        or state.get("staging_verified_sha") == PR38_SMOKE_SOURCE_SHA
+        or state.get("pr38_corrected_fixture_recovery") is not None
+        or not queue
+        or queue[0] != PR38_SMOKE_SOURCE_SHA
+    ):
+        raise RuntimeError("corrected-fixture recovery is restricted to the exact PR38 failure after its one prior attempt")
+
+
+def recover_pr38_staging_smoke(config: dict, *, expected_sha: str, expected_main_sha: str) -> dict:
+    """Run one PR41-fixture smoke for the exact unpromoted PR38/#36 state."""
+    if expected_sha != PR38_SMOKE_SOURCE_SHA:
+        raise ValueError("PR38 corrected-fixture recovery requires the exact blocked SHA")
+    if not SHA.fullmatch(expected_main_sha):
+        raise ValueError("PR38 corrected-fixture recovery requires the exact current main SHA")
+    repo = Path(config["repo"])
+    state_path = Path(config["state"])
+    if not state_path.is_file():
+        raise RuntimeError("release state missing; corrected-fixture recovery cannot initialize a ledger")
+    lock_path = state_path.with_suffix(".lock")
+    with lock_path.open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        state = json.loads(state_path.read_text())
+        require_official_origin(repo)
+        git(repo, "fetch", "--no-tags", "origin", "main")
+        checked_main_sha = git(repo, "rev-parse", "refs/remotes/origin/main")
+        if checked_main_sha != expected_main_sha:
+            raise RuntimeError("current main changed from the explicitly supplied recovery SHA")
+        queue = first_parent_queue(repo, state.get("processed_sha", ""), checked_main_sha)
+        _validate_pr38_corrected_fixture_retry_ledger(state, queue)
+        fixture_selection = _pr38_corrected_fixture_selection(
+            repo, expected_sha, PR38_CORRECTED_FIXTURE_SHA, checked_main_sha,
+        )
+
+        check_observation: dict = {}
+        if not exact_check_success(expected_sha, os.environ.get("GITHUB_TOKEN"), observation=check_observation):
+            raise RuntimeError("exact PR38 check is not successful")
+        regression_blocker = _main_full_regression_blocker(
+            repo, expected_sha, checked_main_sha,
+        )
+        if regression_blocker is not None:
+            raise RuntimeError("main full CI evidence blocks corrected-fixture recovery")
+
+        installed = PR38_INSTALLED_BASE_SHA
+        plan = json.loads(command(
+            "python3", str(Path(__file__).with_name("domestic_release_build.py")),
+            "classify", "--repo", str(repo), "--base", installed, "--target", expected_sha,
+        ))
+        changed_paths = _trusted_changed_paths(repo, installed, expected_sha)
+        validation_paths = _trusted_changed_paths(repo, PR38_PREVIOUS_CURSOR_SHA, expected_sha)
+        if (
+            plan.get("changed_paths") != changed_paths
+            or plan.get("runtime_changed") is not False
+            or not plan.get("controller_files")
+            or not _alipay_smoke_required({"changed_paths": validation_paths})
+        ):
+            raise RuntimeError("PR38 no longer matches its reviewed controller-only smoke plan")
+
+        controller_readback = verify_controller_installation(
+            config, repo, expected_sha, plan["controller_files"], checked_main_sha=checked_main_sha,
+        )
+        host_readbacks = _verify_pr38_staging_failed_readbacks(config, state)
+        attempt = {
+            "schema_version": 1,
+            "status": "started",
+            "attempted": True,
+            "candidate_sha": expected_sha,
+            "candidate_tree": fixture_selection["candidate_tree"],
+            "candidate_helper_sha256": fixture_selection["candidate_helper_sha256"],
+            "fixture_source_sha": fixture_selection["fixture_sha"],
+            "fixture_source_tree": fixture_selection["fixture_tree"],
+            "fixture_smoke_file_sha256": fixture_selection["fixture_smoke_file_sha256"],
+            "fixture_schema_file_sha256": fixture_selection["fixture_schema_file_sha256"],
+            "fixture_helper_sha256": fixture_selection["fixture_helper_sha256"],
+            "checked_main_sha": checked_main_sha,
+            "checked_main_tree": fixture_selection["checked_main_tree"],
+            "executor_helper_sha256": fixture_selection["executor_helper_sha256"],
+            "installed_sha": installed,
+            "installed_manifest_sha256": host_readbacks["manifest_sha256"],
+            "exact_candidate_check": check_observation,
+            "original_failed_attempt": dict(state["pr38_staging_failed_smoke_attempted"]),
+            "prior_resume_marker": dict(state["pr38_staging_failed_resume"]),
+            "two_host_readbacks": host_readbacks,
+            "controller_readback": controller_readback,
+            "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        state["pr38_corrected_fixture_recovery"] = attempt
+        atomic_json(state_path, state)
+
+        started = time.monotonic()
+        smoke_timings: dict[str, float] = {}
+        try:
+            smoke = run_stage_smoke(
+                config, repo, expected_sha, installed, host_readbacks["manifest_sha256"],
+                checked_main_sha=checked_main_sha,
+                fixture_source_sha=PR38_CORRECTED_FIXTURE_SHA,
+                timing_sink=smoke_timings,
+            )
+            if (
+                smoke.get("source_sha") != expected_sha
+                or smoke.get("candidate_source_tree") != fixture_selection["candidate_tree"]
+                or smoke.get("fixture_source_sha") != fixture_selection["fixture_sha"]
+                or smoke.get("fixture_source_tree") != fixture_selection["fixture_tree"]
+                or smoke.get("installed_sha") != installed
+                or smoke.get("manifest_sha256") != host_readbacks["manifest_sha256"]
+                or smoke.get("helper_compatibility") != fixture_selection["compatibility"]
+            ):
+                raise RuntimeError("corrected-fixture smoke receipt identity mismatch")
+
+            # Re-read main and both hosts before advancing only the processed
+            # cursor. This operation never builds, installs, transfers or writes
+            # production; it only records a successful staging smoke receipt.
+            git(repo, "fetch", "--no-tags", "origin", "main")
+            if git(repo, "rev-parse", "refs/remotes/origin/main") != checked_main_sha:
+                raise RuntimeError("main advanced during corrected-fixture recovery")
+            final_readbacks = _verify_pr38_staging_failed_readbacks(config, state)
+            if final_readbacks != host_readbacks:
+                raise RuntimeError("staging or production readback changed during corrected-fixture recovery")
+        except Exception as exc:
+            attempt.update(
+                status="failed",
+                failure_type=type(exc).__name__,
+                finished_at_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                duration_seconds=round(time.monotonic() - started, 1),
+            )
+            state.update(
+                status="staging_failed",
+                blocked_sha=expected_sha,
+                failure=f"PR38 corrected-fixture smoke recovery failed: {type(exc).__name__}",
+                last_release_timings_seconds={
+                    "stage_smoke": smoke_timings.get("stage_smoke", round(time.monotonic() - started, 1)),
+                    "recovery_total": round(time.monotonic() - started, 1),
+                },
+            )
+            atomic_json(state_path, state)
+            raise
+
+        attempt.update(
+            status="staging_verified",
+            result="passed",
+            smoke_receipt=smoke,
+            two_host_readbacks=final_readbacks,
+            finished_at_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            duration_seconds=round(time.monotonic() - started, 1),
+        )
+        state.update(
+            status="ready",
+            processed_sha=expected_sha,
+            blocked_sha=None,
+            failure=None,
+            last_stage_smoke=smoke,
+            pr38_staging_verified={
+                "source_sha": expected_sha,
+                "status": "staging_verified",
+                "fixture_source_sha": fixture_selection["fixture_sha"],
+                "installed_sha": installed,
+                "manifest_sha256": host_readbacks["manifest_sha256"],
+                "receipt": smoke,
+                "verified_at_utc": attempt["finished_at_utc"],
+            },
+            last_release_timings_seconds={
+                "stage_smoke": smoke_timings.get("stage_smoke", round(time.monotonic() - started, 1)),
+                "recovery_total": round(time.monotonic() - started, 1),
+            },
+        )
+        # Consume the original resume state. Retain both one-shot attempt records
+        # so that neither the failed old helper attempt nor this recovery can loop.
+        state.pop("pr38_staging_failed_resume", None)
+        atomic_json(state_path, state)
+        return {
+            "status": "ready",
+            "processed_sha": expected_sha,
+            "deployed_source_sha": state["deployed_source_sha"],
+            "prod_installed_sha": state["prod_installed_sha"],
+            "fixture_source_sha": fixture_selection["fixture_sha"],
+            "checked_main_sha": checked_main_sha,
+            "recovery": "one_shot_corrected_fixture_staging_verified",
+        }
 
 
 def _local_file_sha256(path: Path) -> str:
@@ -1134,6 +1404,7 @@ def run_stage_smoke(
     manifest_sha: str,
     *,
     checked_main_sha: str | None = None,
+    fixture_source_sha: str | None = None,
     timing_sink: dict | None = None,
 ) -> dict:
     """Run a fixed source fixture against the exact installed staging executable."""
@@ -1141,13 +1412,25 @@ def run_stage_smoke(
         raise ValueError("invalid staging smoke identity")
     started = time.monotonic()
     helper = config["stage_helper"]
-    helper_selection = _smoke_helper_selection(repo, source_sha, checked_main_sha)
+    if fixture_source_sha is None or fixture_source_sha == source_sha:
+        fixture_source_sha = source_sha
+        helper_selection = _smoke_helper_selection(repo, source_sha, checked_main_sha)
+        corrected_fixture = None
+    else:
+        corrected_fixture = _pr38_corrected_fixture_selection(
+            repo, source_sha, fixture_source_sha, checked_main_sha or "",
+        )
+        helper_selection = _smoke_helper_selection(repo, fixture_source_sha, checked_main_sha)
+        if helper_selection["source_tree"] != corrected_fixture["fixture_tree"]:
+            raise RuntimeError("corrected smoke source tree selection changed")
+        if helper_selection["executor_helper_sha256"] != corrected_fixture["executor_helper_sha256"]:
+            raise RuntimeError("corrected smoke executor differs from the checked main helper")
     if _local_file_sha256(Path(helper)) != helper_selection["executor_helper_sha256"]:
         raise RuntimeError("fixed staging smoke helper does not match the checked source")
     try:
         output = command(
             "sudo", helper, "--run-staging-smoke",
-            "--source-sha", source_sha,
+            "--source-sha", fixture_source_sha,
             "--expected-sha", installed_sha,
             "--expected-manifest-sha256", manifest_sha,
             "--expected-helper-sha256", helper_selection["executor_helper_sha256"],
@@ -1166,7 +1449,41 @@ def run_stage_smoke(
         if any(key in receipt and receipt[key] != value for key, value in provenance.items()):
             raise RuntimeError("staging smoke helper returned conflicting executor provenance")
         receipt.update(provenance)
-        return verify_stage_smoke_receipt(receipt, source_sha, installed_sha, manifest_sha, helper_selection)
+        verified = verify_stage_smoke_receipt(
+            receipt, fixture_source_sha, installed_sha, manifest_sha, helper_selection,
+        )
+        if corrected_fixture is None:
+            return verified
+        # Keep the source tested by the remote helper explicit while presenting
+        # the release candidate as the owning source_sha consumed by the queue.
+        # The receipt therefore binds both immutable trees without a synthetic
+        # or modified source snapshot.
+        fixture_execution_receipt = dict(verified)
+        verified.update({
+            "candidate_source_sha": corrected_fixture["candidate_sha"],
+            "candidate_source_tree": corrected_fixture["candidate_tree"],
+            "candidate_helper_sha256": corrected_fixture["candidate_helper_sha256"],
+            "fixture_source_sha": corrected_fixture["fixture_sha"],
+            "fixture_source_tree": corrected_fixture["fixture_tree"],
+            "fixture_smoke_file_sha256": corrected_fixture["fixture_smoke_file_sha256"],
+            "fixture_schema_file_sha256": corrected_fixture["fixture_schema_file_sha256"],
+            "fixture_helper_sha256": corrected_fixture["fixture_helper_sha256"],
+            "test_source_sha": verified["source_sha"],
+            "test_source_tree": verified["source_tree"],
+            "test_source_helper_sha256": verified["source_helper_sha256"],
+            "test_executor_source_sha": verified["executor_source_sha"],
+            "test_executor_source_tree": verified["executor_source_tree"],
+            "fixture_execution_receipt": fixture_execution_receipt,
+            "checked_main_sha": corrected_fixture["checked_main_sha"],
+            "checked_main_tree": corrected_fixture["checked_main_tree"],
+            "helper_compatibility": corrected_fixture["compatibility"],
+            "source_sha": corrected_fixture["candidate_sha"],
+            "source_tree": corrected_fixture["candidate_tree"],
+            "source_helper_sha256": corrected_fixture["candidate_helper_sha256"],
+            "executor_source_sha": corrected_fixture["checked_main_sha"],
+            "executor_source_tree": corrected_fixture["checked_main_tree"],
+        })
+        return verified
     finally:
         if timing_sink is not None:
             timing_sink["stage_smoke"] = round(time.monotonic() - started, 1)
@@ -1744,30 +2061,35 @@ def poll(config: dict) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("action", choices=("poll", "readback", "bind-baseline", "recover"))
+    parser.add_argument("action", choices=("poll", "readback", "bind-baseline", "recover", "recover-pr38-smoke"))
     parser.add_argument("--prod-preview-sha")
     parser.add_argument("--retry-blocked", action="store_true")
     parser.add_argument("--sha", help="exact blocked commit SHA")
+    parser.add_argument("--main-sha", help="exact checked main SHA for the one-time PR38 fixture recovery")
     args = parser.parse_args()
     config = load_config(args.config)
     if args.action == "poll":
-        if args.retry_blocked or args.sha:
-            parser.error("--retry-blocked and --sha are only valid with recover")
+        if args.retry_blocked or args.sha or args.main_sha:
+            parser.error("--retry-blocked and --sha are only valid with recover; --main-sha is only for recover-pr38-smoke")
         result = poll(config)
     elif args.action == "readback":
-        if args.retry_blocked or args.sha:
-            parser.error("--retry-blocked and --sha are only valid with recover")
+        if args.retry_blocked or args.sha or args.main_sha:
+            parser.error("--retry-blocked and --sha are only valid with recover; --main-sha is only for recover-pr38-smoke")
         result = prod_readback(config)
     elif args.action == "bind-baseline":
-        if args.retry_blocked or args.sha:
-            parser.error("--retry-blocked and --sha are only valid with recover")
+        if args.retry_blocked or args.sha or args.main_sha:
+            parser.error("--retry-blocked and --sha are only valid with recover; --main-sha is only for recover-pr38-smoke")
         if not args.prod_preview_sha:
             parser.error("bind-baseline requires --prod-preview-sha")
         result = bind_baseline(config, args.prod_preview_sha)
-    else:
-        if not args.retry_blocked or not args.sha or args.prod_preview_sha:
+    elif args.action == "recover":
+        if not args.retry_blocked or not args.sha or args.prod_preview_sha or args.main_sha:
             parser.error("recover requires --retry-blocked --sha <exact-blocked-SHA>")
         result = recover(config, retry_blocked=True, expected_sha=args.sha)
+    else:
+        if args.retry_blocked or not args.sha or not args.main_sha or args.prod_preview_sha:
+            parser.error("recover-pr38-smoke requires --sha <exact-PR38-SHA> --main-sha <exact-main-SHA>")
+        result = recover_pr38_staging_smoke(config, expected_sha=args.sha, expected_main_sha=args.main_sha)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 

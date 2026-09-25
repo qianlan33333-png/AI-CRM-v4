@@ -17,6 +17,21 @@
 
 技术发布成功须读回准确 SHA、完整文件摘要、服务和 `/readyz`。真实支付、扫码等业务结果独立记录；它们不阻塞下一次技术发布，也不能由 CI、预发或健康检查代替。
 
+## PR38 一次性预发烟测恢复
+
+PR38 的原烟测夹具在隔离 schema 中运行 migration SQL，却没有写 `platform_schema_migrations`。已安装 #36 API 的 `/readyz` 因而保持 `503 not_ready`；这是测试夹具缺陷，不能据此判断 #36 应用包异常。PR41 `e8456a9` 为夹具补上事务内迁移台账。本次专用入口只允许准确 PR38 候选使用完整、已合并的 PR41 源码快照，不修改 PR38 源码或快照。
+
+只有当本变更已经合并、该准确 main 版本的固定发布器已安装并校验、发布 timer/service 已停止时，才可由单一发布执行者运行下面的一次性命令。命令会重新检查队列头、PR38 的准确 `check`、PR41 祖先关系、预发/生产的 #36 SHA 与完整摘要、健康状态，以及两机都不存在 #38 收据或数据库备份；任一证据未知就停止。
+
+```sh
+sudo -u ubuntu /usr/bin/python3 /usr/local/libexec/aicrm/domestic_release.py \
+  --config /etc/aicrm/domestic-release.json recover-pr38-smoke \
+  --sha 32043f2ecdb814270245dbf2b3840eb868e0a33f \
+  --main-sha <当次核对的准确 origin/main SHA>
+```
+
+此命令只在预发机对当前 #36 安装二进制运行完整的支付宝虚拟结算烟测，并原子记录 candidate #38、fixture PR41、检查过的 main、两个主机的负向读回及结果。成功后状态为 `ready`，仅将 `processed_sha` 推进至 #38；`deployed_source_sha` 与 `prod_installed_sha` 仍是 #36，不构建、不安装、不传输、不调用生产晋级。原失败尝试和本次 one-shot marker 均保留；普通 `poll` 从 #38 后面的第一父提交继续按序处理，不跳过其间提交。若烟测、main 读回或任一主机读回失败，状态保持阻塞；marker 一旦写入即不可重试，转为只读对账。
+
 ## 受影响验证与已安装行为合同
 
 构建范围以 `deployed_source_sha..candidate` 为准，保证候选包从真实已部署版本构建；验证范围单独以已处理的第一父提交 `processed_sha..candidate` 记录。构建元数据保存两组 SHA、树和路径，并把 `actual_ci_baseline_verified` 设为 `false`，直到有能绑定准确 CI 收据的接口。发布器不会把本地分类结果或部署基线冒充 CI 实际测试基线。支付合同是否重跑由可信固定策略判断处理范围内的路径，PR 内容不能关闭合同。
