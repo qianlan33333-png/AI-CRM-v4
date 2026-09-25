@@ -1390,6 +1390,19 @@ func (s *Service) ApplyVerifiedCallback(ctx context.Context, callback paymentpro
 		if err != nil || payment.Provider != callback.Provider || !s.callbackAppIDMatches(payment, callback.AppID) {
 			return paymentport.ErrConflict
 		}
+		if !effectport.ValidDigest(effectport.Digest(callback.ProviderRefundDigest)) {
+			return paymentport.ErrConflict
+		}
+		// A trusted query may have completed this same refund before its
+		// notification arrives. Preserve the new callback receipt without
+		// applying the refund to the Order a second time.
+		if refund.Status == domain.RefundCompleted {
+			if refund.ProviderRefundDigest != callback.ProviderRefundDigest {
+				return paymentport.ErrConflict
+			}
+			_, err = s.store.ClaimCallback(tx, callbackProvider, callback.EventDigest, callback.BodyDigest, "refund", "replayed", refund.ID)
+			return err
+		}
 		replay, err := s.store.ClaimCallback(tx, callbackProvider, callback.EventDigest, callback.BodyDigest, "refund", "settled", refund.ID)
 		if err != nil || replay {
 			return err

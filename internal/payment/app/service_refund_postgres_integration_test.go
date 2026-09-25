@@ -17,8 +17,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	orderdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
+	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/payment/domain"
 	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
+	paymentprovider "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/provider"
 	paymentstore "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/store"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
@@ -55,6 +58,19 @@ type profitSharingReconcilerSequence struct {
 // only verifies that it emits the bounded stable-port snapshot.
 type paymentReceiverStatusObserver struct {
 	values []paymentport.ReceiverReadiness
+}
+
+type postgresOrderSettlementRecorder struct {
+	orderStub
+	settlementCount int
+}
+
+func (r *postgresOrderSettlementRecorder) SettlePaymentWithin(ctx context.Context, command orderport.PaymentSettlementCommand) (orderdomain.Snapshot, error) {
+	if _, err := platformpostgres.RequireTransaction(ctx); err != nil {
+		return orderdomain.Snapshot{}, err
+	}
+	r.settlementCount++
+	return orderdomain.Snapshot{ID: command.OrderID}, nil
 }
 
 func (o *paymentReceiverStatusObserver) SyncProfitSharingReceiverStatusWithin(_ context.Context, value paymentport.ReceiverReadiness) error {
@@ -170,6 +186,64 @@ func TestPostgreSQLWeChatPayRefundSerializesNewKeysPerPayment(t *testing.T) {
 	later, err := service.RequestRefund(ctx, paymentport.RefundCommand{PaymentID: paymentID, AmountMinor: 300, RefundNo: "RF-concurrency-terminal-next", Reason: "fixture later partial", ActorScope: "admin:19", IdempotencyKey: "refund-concurrency-key-0003"})
 	if err != nil || later.ID < 1 || later.ID == accepted.refund.ID {
 		t.Fatalf("later=%+v original=%+v err=%v", later, accepted.refund, err)
+	}
+}
+
+func TestPostgreSQLRefundQueryBeforeCallbackKeepsOneSettlement(t *testing.T) {
+	pool, cleanup := paymentAppIntegrationPool(t)
+	defer cleanup()
+	ctx := context.Background()
+	wrapped, err := platformpostgres.Wrap(pool, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uow, err := platformpostgres.NewUnitOfWork(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)
+	var orderID, paymentID, refundID int64
+	if err = pool.QueryRow(ctx, `INSERT INTO orders(provider,source_system,source_key,merchant_order_no,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,record_origin,effect_eligible,created_at,updated_at) VALUES('wechat_pay','refund-callback-order','refund-callback-order-1','M-refund-query-first',11,11,1000,'CNY','paid','native',true,$1,$1) RETURNING id`, now).Scan(&orderID); err != nil {
+		t.Fatal(err)
+	}
+	if err = pool.QueryRow(ctx, `INSERT INTO payments(order_id,provider,payment_channel,merchant_order_no,payer_identity_id,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,version,created_at,updated_at) VALUES($1,'wechat_pay','mini_program','M-refund-query-first',4,11,11,1000,'CNY','paid',1,$2,$2) RETURNING id`, orderID, now).Scan(&paymentID); err != nil {
+		t.Fatal(err)
+	}
+	if err = pool.QueryRow(ctx, `INSERT INTO payment_refunds(payment_id,provider,refund_no,amount_minor,reason,status,version,created_at,updated_at) VALUES($1,'wechat_pay','R-refund-query-first',300,'fixture refund','effect_accepted',2,$2,$2) RETURNING id`, paymentID, now).Scan(&refundID); err != nil {
+		t.Fatal(err)
+	}
+	providerDigest := effectport.Hash("wechatpay.refund", "provider-refund-query-first")
+	orders := &postgresOrderSettlementRecorder{}
+	service := NewService(uow, paymentstore.NewPostgreSQL(), orders, sessionStub{}, postgresRefundEffects{})
+	if err = service.SetWeChatPayReconciler(payReconcilerStub{refund: paymentport.WeChatPayRefundQuery{
+		RefundNo: "R-refund-query-first", Currency: "CNY", Status: "SUCCESS", AmountMinor: 300, TotalMinor: 1000,
+		OccurredAt: now.Add(time.Minute), EvidenceDigest: effectport.Hash("wechatpay.refund.query", "R-refund-query-first"), RefundDigest: providerDigest,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.ReconcileWeChatPayRefund(ctx, refundID); err != nil {
+		t.Fatalf("provider query settlement: %v", err)
+	}
+	callback := paymentprovider.CallbackResult{
+		Kind: "refund", RefundNo: "R-refund-query-first", AmountMinor: 300, Currency: "CNY", OccurredAt: now.Add(time.Minute),
+		ProviderRefundDigest: string(providerDigest), EventDigest: [32]byte{7}, BodyDigest: [32]byte{8},
+	}
+	if err = service.ApplyVerifiedCallback(ctx, callback); err != nil {
+		t.Fatalf("late verified callback: %v", err)
+	}
+	if err = service.ApplyVerifiedCallback(ctx, callback); err != nil {
+		t.Fatalf("repeated verified callback: %v", err)
+	}
+	var status, digest, callbackOutcome string
+	var version, callbackCount int
+	if err = pool.QueryRow(ctx, `SELECT status,provider_refund_digest,version FROM payment_refunds WHERE id=$1`, refundID).Scan(&status, &digest, &version); err != nil {
+		t.Fatal(err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT count(*),max(outcome) FROM payment_callback_receipts WHERE refund_id=$1`, refundID).Scan(&callbackCount, &callbackOutcome); err != nil {
+		t.Fatal(err)
+	}
+	if status != "completed" || digest != string(providerDigest) || version != 3 || callbackCount != 1 || callbackOutcome != "replayed" || orders.settlementCount != 1 {
+		t.Fatalf("query/callback replay status=%s digest=%s version=%d receipts=%d outcome=%s order_settlements=%d", status, digest, version, callbackCount, callbackOutcome, orders.settlementCount)
 	}
 }
 
