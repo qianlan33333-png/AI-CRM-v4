@@ -53,6 +53,18 @@ func (provider *ChannelAssetProvider) Execute(ctx context.Context, envelope effe
 	}
 	if err != nil {
 		attempted := wecomport.ProviderCallAttempted(err)
+		// A completed WeCom response with a numeric rejection code proves that
+		// no contact way was created. Keep transport ambiguity as unknown.
+		if attempted && wecomport.ProviderWriteClassified(err) && !wecomport.ProviderOutcomeUnknown(err) {
+			if code, known := wecomport.ProviderErrorCode(err); known {
+				return effectport.AdapterResult{
+					Completion:    effectport.StateFinalFailed,
+					ReceiptDigest: effectport.Hash("channel.asset.provider-rejected", string(envelope.Fingerprint()), strconv.FormatInt(code, 10)),
+					FailureCode:   "wecom_errcode_" + strconv.FormatInt(code, 10),
+					CallAttempted: true, RealExternalCallExecuted: true,
+				}, nil
+			}
+		}
 		state := effectport.StateRetryable
 		if attempted {
 			state = effectport.StateUnknown

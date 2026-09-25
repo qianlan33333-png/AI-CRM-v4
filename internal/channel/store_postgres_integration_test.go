@@ -247,6 +247,55 @@ func TestPostgreSQLAssetVersionLockAcceptsTypedChannelIDIntegration(t *testing.T
 	}
 }
 
+func TestPostgreSQLAssetVersionBlocksUnresolvedProviderWriteIntegration(t *testing.T) {
+	pool, cleanup := channelIntegrationPool(t)
+	defer cleanup()
+	unit, err := platformpostgres.NewUnitOfWork(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	actor := insertChannelAdmin(t, ctx, pool)
+	store := NewPostgreSQLAssetStore(pool.Native())
+	var channelID, assetID int64
+	err = unit.Within(ctx, func(txContext context.Context) error {
+		tx, txErr := platformpostgres.RequireTransaction(txContext)
+		if txErr != nil {
+			return txErr
+		}
+		if txErr = tx.QueryRow(txContext, `INSERT INTO channels(code,status,created_at,updated_at) VALUES('pending-asset-fixture','active',clock_timestamp(),clock_timestamp()) RETURNING id`).Scan(&channelID); txErr != nil {
+			return txErr
+		}
+		if _, txErr = tx.Exec(txContext, `INSERT INTO channel_config_versions(channel_id,config_version,channel_type,carrier_type,name,assignment_mode,assignment_strategy,config_digest,created_by,created_at) VALUES($1,1,'qrcode','qrcode','fixture','single_owner','ratio',$2,$3,clock_timestamp())`, channelID, make([]byte, 32), actor); txErr != nil {
+			return txErr
+		}
+		return tx.QueryRow(txContext, `INSERT INTO channel_acquisition_assets(channel_id,config_version,asset_version,kind,source_ref_digest,operation_key_digest,request_digest,effect_ref,accept_receipt_ref,queue_receipt_ref,state,created_by) VALUES($1,1,1,'contact_way_qrcode',$2,$3,$3,'eer_1','eerop_1','eerop_2','outcome_unknown',$4) RETURNING id`, channelID, string(effectport.Hash("pending-asset-fixture")), make([]byte, 32), actor).Scan(&assetID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = unit.Within(ctx, func(txContext context.Context) error {
+		_, nextErr := store.NextAssetVersion(txContext, channelID, AcquisitionAssetQRCode)
+		return nextErr
+	})
+	if !errors.Is(err, ErrCatalogConflict) {
+		t.Fatalf("unresolved Provider write allowed new version: %v", err)
+	}
+	if _, err = pool.Native().Exec(ctx, `UPDATE channel_acquisition_assets SET state='final_failed' WHERE id=$1`, assetID); err != nil {
+		t.Fatal(err)
+	}
+	var next int64
+	err = unit.Within(ctx, func(txContext context.Context) error {
+		var nextErr error
+		next, nextErr = store.NextAssetVersion(txContext, channelID, AcquisitionAssetQRCode)
+		return nextErr
+	})
+	if err != nil || next != 2 {
+		t.Fatalf("reconciled failure did not release the version lock: version=%d err=%v", next, err)
+	}
+}
+
 func TestPostgreSQLVerifiedLegacyAssetCanBeRetiredIntegration(t *testing.T) {
 	pool, cleanup := channelIntegrationPool(t)
 	defer cleanup()

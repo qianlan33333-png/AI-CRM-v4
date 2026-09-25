@@ -95,6 +95,20 @@ func (store *PostgreSQLAssetStore) NextAssetVersion(ctx context.Context, channel
 	if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('channel.asset:'||$1::bigint::text||':'||$2::text,0))`, channelID, kind); e != nil {
 		return 0, e
 	}
+	// The lock serializes every new version for this channel and carrier.
+	// Never create a second Provider effect while an earlier write is still
+	// pending or its external outcome has not been reconciled.
+	var unresolved bool
+	e = tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM channel_acquisition_assets
+		WHERE channel_id=$1 AND kind=$2 AND state IN ('accepted','queued','attempted','outcome_unknown')
+	)`, channelID, kind).Scan(&unresolved)
+	if e != nil {
+		return 0, e
+	}
+	if unresolved {
+		return 0, ErrCatalogConflict
+	}
 	var v int64
 	e = tx.QueryRow(ctx, `SELECT COALESCE(max(asset_version),0)+1 FROM channel_acquisition_assets WHERE channel_id=$1 AND kind=$2`, channelID, kind).Scan(&v)
 	return v, e
