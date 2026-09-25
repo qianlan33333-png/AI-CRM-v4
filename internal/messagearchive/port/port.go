@@ -87,3 +87,14 @@ type CustomerMessageReader interface {
 	CustomerMessages(context.Context, CustomerQuery) (CustomerPage, error)
 	CustomerStaff(context.Context, customerdomain.CustomerID) ([]StaffOption, error)
 }
+
+// MachineContactTouchReader exposes only observed event times. No message body,
+// provider identifier, or attribution claim leaves MessageArchive.
+type MachineContactTouchReader interface {
+	MachineContactTouchTimes(context.Context, string, []int64) (map[int64]MachineContactTouch, error)
+}
+
+type MachineContactTouch struct {
+	LastStaffMessageAt    *time.Time
+	LastCustomerMessageAt *time.Time
+}

@@ -818,6 +818,49 @@ func TestChannelContactWayLifecycleAndWelcomeAttachments(t *testing.T) {
 	}
 }
 
+func TestCreateContactWayUsesQRCodeContractAndSecureProviderURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/cgi-bin/gettoken":
+			_, _ = w.Write([]byte(`{"errcode":0,"access_token":"contact-token","expires_in":120}`))
+		case "/cgi-bin/externalcontact/add_contact_way":
+			var body struct {
+				Type   int      `json:"type"`
+				Scene  int      `json:"scene"`
+				Remark string   `json:"remark"`
+				State  string   `json:"state"`
+				User   []string `json:"user"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Type != 1 || body.Scene != 2 || len([]rune(body.Remark)) != 30 || len(body.State) != 30 || len(body.User) != 1 {
+				t.Fatalf("contact-way request=%+v", body)
+			}
+			_, _ = w.Write([]byte(`{"errcode":0,"config_id":"cw-1","qr_code":"http://p.qpic.cn/wwhead/example/0"}`))
+		default:
+			t.Fatalf("unexpected path=%s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client := newTestClient(t, server, func() time.Time { return testNow })
+	client.config.ContactSecret = "contact secret"
+	result, err := client.CreateContactWay(context.Background(), wecomport.AcquisitionAssetRequest{
+		Name: strings.Repeat("中", 31), State: strings.Repeat("a", 30), StaffUserIDs: []string{"staff-1"},
+	})
+	if err != nil || result.ProviderAssetRef != "cw-1" || result.URL != "https://p.qpic.cn/wwhead/example/0" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if contactWayType([]string{"one", "two"}) != 2 {
+		t.Fatal("multiple staff must use multi-user contact-way type")
+	}
+	for _, raw := range []string{"http://example.com/qr", "http://p.qpic.cn:8080/qr", "https://p.qpic.cn.evil.test/qr"} {
+		if _, valid := normalizeContactWayQR(raw); valid {
+			t.Fatalf("unsafe QR URL accepted: %q", raw)
+		}
+	}
+}
+
 func TestSendWelcomeMessagePreflightFailureIsNotAttempted(t *testing.T) {
 	client, err := NewDirectory(Config{Enabled: true, CorpID: "corp", ContactSecret: "contact-secret"})
 	if err != nil {

@@ -2,8 +2,23 @@ package port
 
 import (
 	"context"
+	"strings"
 	"time"
 )
+
+// EffectiveAcquisitionState is shared by the Provider request and the
+// completion-side attribution binding. WeCom limits contact-way state to 30
+// characters; the 27 hex characters retain 108 bits of asset identity.
+func EffectiveAcquisitionState(configured, sourceDigest string) string {
+	if configured != "" {
+		return configured
+	}
+	hex := strings.TrimPrefix(sourceDigest, "sha256:")
+	if len(hex) < 27 {
+		return ""
+	}
+	return "ca-" + hex[:27]
+}
 
 // PublishedConfig is the immutable, versioned material Outbound may read
 // after EER has committed an attempt. It contains staff provider references

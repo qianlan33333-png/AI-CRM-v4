@@ -58,13 +58,14 @@ func validMachineClientID(clientID string) bool {
 // MachineCreatePlanCommand is distinct from the legacy human command so that
 // adding a machine subject cannot alter existing human receipt serialization.
 type MachineCreatePlanCommand struct {
-	Actor          MachineActor         `json:"-"`
-	IdempotencyKey string               `json:"-"`
-	Name           string               `json:"name"`
-	SourceKind     string               `json:"source_kind"`
-	SourceDigest   effectport.Digest    `json:"source_digest"`
-	Recipients     []RecipientCandidate `json:"recipients"`
-	OccurredAt     time.Time            `json:"-"`
+	Actor          MachineActor            `json:"-"`
+	IdempotencyKey string                  `json:"-"`
+	Name           string                  `json:"name"`
+	SourceKind     string                  `json:"source_kind"`
+	SourceDigest   effectport.Digest       `json:"source_digest"`
+	Recipients     []RecipientCandidate    `json:"recipients"`
+	Package        *MachinePackageMetadata `json:"package,omitempty"`
+	OccurredAt     time.Time               `json:"-"`
 }
 
 func (c MachineCreatePlanCommand) Valid() bool {
@@ -76,7 +77,38 @@ func (c MachineCreatePlanCommand) Valid() bool {
 			return false
 		}
 	}
+	if c.SourceKind == "scrm_workbench" {
+		if c.Package == nil || !c.Package.Valid() || c.Package.MemberCount != len(c.Recipients) || len(c.Recipients) > 10 {
+			return false
+		}
+	} else if c.Package != nil {
+		return false
+	}
 	return true
+}
+
+// Metadata is frozen with the plan and contributes to the existing machine
+// idempotency digest. It contains no provider identity or message body.
+type MachinePackageMetadata struct {
+	AudiencePackageID  string `json:"audience_package_id"`
+	AudienceVersion    string `json:"audience_version"`
+	CopyPackageID      string `json:"copy_package_id"`
+	CopyVersion        string `json:"copy_version"`
+	StrategyVersion    string `json:"strategy_version"`
+	ProductFactVersion string `json:"product_fact_version"`
+	SourceFingerprint  string `json:"source_fingerprint"`
+	ApprovalRevision   string `json:"approval_revision"`
+	ClientReference    string `json:"client_reference"`
+	MemberCount        int    `json:"member_count"`
+}
+
+func (m MachinePackageMetadata) Valid() bool {
+	for _, value := range []string{m.AudiencePackageID, m.AudienceVersion, m.CopyPackageID, m.CopyVersion, m.StrategyVersion, m.ProductFactVersion, m.ApprovalRevision, m.ClientReference} {
+		if value == "" || len(value) > 200 || strings.TrimSpace(value) != value {
+			return false
+		}
+	}
+	return effectport.ValidDigest(effectport.Digest(m.SourceFingerprint)) && m.MemberCount >= 1 && m.MemberCount <= 10
 }
 
 // MachinePlan exposes review progress only. It intentionally does not expose
@@ -119,6 +151,17 @@ type MachineExecutionSummary struct {
 	RetryableFailureCount int
 }
 
+type MachineRecipientResult struct {
+	RecipientID      int64
+	CustomerID       int64
+	ReviewState      string
+	ExecutionState   string
+	ProviderAccepted bool
+	DeliveryProven   bool
+	EffectID         string
+	UpdatedAt        time.Time
+}
+
 // MachineOperationStatus keeps review approval distinct from execution. For
 // example, an approved plan with no queued recipient remains "approved", not
 // "completed"; an outcome_unknown recipient is surfaced explicitly.
@@ -152,6 +195,7 @@ type MachineTransactionalIntake interface {
 type MachineReader interface {
 	GetMachinePlan(context.Context, MachineActor, PlanID) (MachinePlan, error)
 	GetMachineOperationStatus(context.Context, MachineActor, PlanID) (MachineOperationStatus, error)
+	GetMachineRecipientResults(context.Context, MachineActor, PlanID) ([]MachineRecipientResult, error)
 }
 
 // MachineEvent is persisted through the same atomic audit/outbox boundary as

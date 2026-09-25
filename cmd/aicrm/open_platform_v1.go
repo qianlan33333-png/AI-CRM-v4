@@ -54,6 +54,7 @@ func (executor *openPlatformExecutor) Available(_ context.Context, principal acc
 		openplatformport.OperationCorePushRecord:       executor.coreAudience != nil,
 		openplatformport.OperationCustomerResolve:      executor.identity != nil,
 		openplatformport.OperationCustomerContext:      executor.profiles != nil,
+		openplatformport.OperationCustomerList:         executor.contacts != nil && executor.contactStatuses != nil && executor.contactStaff != nil && executor.contactWindows != nil && executor.contactReadUOW != nil && executor.contactWriteUOW != nil && len(executor.v1ExternalCursorKey) >= 16,
 		// Activities and AI are enabled only by their explicit V1 binders. The
 		// legacy compatibility readers are deliberately not a substitute.
 		openplatformport.OperationCustomerActivities:       executor.activities != nil,
@@ -109,6 +110,8 @@ func (executor *openPlatformExecutor) Invoke(ctx context.Context, invocation ope
 		result, err = executor.v1ResolveCustomer(ctx, invocation.Principal, invocation.Input)
 	case openplatformport.OperationCustomerContext:
 		result, err = executor.v1CustomerContext(ctx, invocation.Principal, invocation.Input)
+	case openplatformport.OperationCustomerList:
+		result, err = executor.v1ListCustomers(ctx, invocation.Principal, invocation.Input)
 	case openplatformport.OperationCustomerActivities:
 		result, err = executor.v1CustomerActivities(ctx, invocation.Principal, invocation.Input)
 	case openplatformport.OperationAIReviewPlanCreate:

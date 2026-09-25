@@ -237,7 +237,7 @@ try {
     const capabilities=root ? [...root.querySelectorAll('input[name="create-capability"]')].map(input=>input.value).sort() : [];
     const csrf=String(document.cookie||'').split(';').some(part=>part.trim().startsWith('aicrm_admin_csrf=')) || String(document.cookie||'').split(';').some(part=>part.trim().startsWith('aicrm_csrf='));
     const audienceCapabilities = ['audience.product.read', 'audience.member.read', 'audience.member.operations.read', 'audience.member.history.read', 'audience.push.write'];
-    return Boolean(root && client && form && csrf && capabilities.length===18 && audienceCapabilities.every(capability => capabilities.includes(capability)) && capabilities.includes('platform.capabilities.read') && capabilities.includes('chat.read') && capabilities.includes('order.read'));
+    return Boolean(root && client && form && csrf && audienceCapabilities.every(capability => capabilities.includes(capability)) && capabilities.includes('platform.capabilities.read') && capabilities.includes('customer.list.read') && capabilities.includes('chat.read') && capabilities.includes('order.read'));
   })()`;
   try { await waitFor(cdp, authenticatedHostReady, "authenticated V1 caller Host did not finish loading"); }
   catch (_) {
@@ -291,7 +291,7 @@ try {
   if (firstActivation.status !== 200) throw new Error(`manual confirmation activation status=${firstActivation.status} category=${await activationFailureCategory(cdp, firstActivation)}`);
   await waitFor(cdp, "document.querySelector('[data-open-platform-client=\"browser-open-agent\"]')?.textContent.includes('已启用')", "activation succeeded but the caller Host did not refresh as enabled");
   progress("activated");
-  const expectedCatalogCapabilities = ["ai.review_plan.create", "audience.product.read", "audience.member.read", "audience.member.operations.read", "audience.member.history.read", "audience.push.write", "chat.read", "customer.activity.read", "customer.detail.read", "customer.read", "customer.resolve", "identity.read", "operation.read", "order.read", "platform.capabilities.read", "questionnaire.read", "radar.click.read", "radar.link.read"].sort();
+  const expectedCatalogCapabilities = ["ai.review_plan.create", "audience.product.read", "audience.member.read", "audience.member.operations.read", "audience.member.history.read", "audience.push.write", "chat.read", "customer.activity.read", "customer.detail.read", "customer.list.read", "customer.read", "customer.resolve", "identity.read", "operation.read", "order.read", "platform.capabilities.read", "questionnaire.read", "radar.click.read", "radar.link.read"].sort();
   // Activation refreshes the selected detail and catalog separately. The caller
   // badge may be enabled while the create form is still withheld during loading.
   // Wait for the exact catalog, then retain the independent contents assertion.

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/makiuchi-d/gozxing"
+	"github.com/makiuchi-d/gozxing/qrcode"
 	g "github.com/qianlan33333-png/AI-CRM-v3/internal/groupops/port"
 	app "github.com/qianlan33333-png/AI-CRM-v3/internal/media/app"
 	p "github.com/qianlan33333-png/AI-CRM-v3/internal/media/port"
@@ -56,6 +58,74 @@ func testOfficialQR(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return out.Bytes()
+}
+
+func testJoinQR(t *testing.T, target string) []byte {
+	t.Helper()
+	matrix, err := qrcode.NewQRCodeWriter().Encode(target, gozxing.BarcodeFormat_QR_CODE, 512, 512, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := png.Encode(&out, matrix); err != nil {
+		t.Fatal(err)
+	}
+	return out.Bytes()
+}
+
+func TestInvitationPublicDirectOfficialJoin(t *testing.T) {
+	target := "https://work.weixin.qq.com/gm/96f26e59e98ebd6e3007edbf7fbb3f44"
+	qr := testJoinQR(t, target)
+	requests := 0
+	client := &http.Client{Transport: invitationQRTransport(func(*http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(qr)), ContentLength: int64(len(qr))}, nil
+	})}
+	plan := p.InvitationPlan{ID: 11, Token: strings.Repeat("a", 48), Enabled: true, State: "active", CurrentChatID: "chat-a", ProviderState: "executed", ProviderConfigID: "stable-config", ProviderQRCode: "https://wework.qpic.cn/qr/0", Bindings: []p.InvitationBinding{{ChatID: "chat-a", CodeState: "executed", QRCode: "https://wework.qpic.cn/qr/0"}}}
+	store := &invitationQRStore{plan: plan}
+	now := time.Now().UTC()
+	catalog := invitationQRCatalog{group: g.CatalogGroup{ChatID: "chat-a", ObservedAt: &now}}
+	h := InvitationHandler{Service: &app.InvitationService{Store: store, Catalog: catalog}, QRCodeClient: client}
+	request := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		return w
+	}
+	path := "/gi/" + plan.Token
+	if got := request(path); got.Code != http.StatusFound || got.Header().Get("Location") != target || got.Header().Get("Referrer-Policy") != "no-referrer" || requests != 1 {
+		t.Fatalf("active plan did not open official page: status=%d location=%q reads=%d", got.Code, got.Header().Get("Location"), requests)
+	}
+	if got := request(path + "?format=json"); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"qr_code":"https://wework.qpic.cn/qr/0"`) || requests != 1 {
+		t.Fatalf("public JSON contract changed: status=%d reads=%d body=%s", got.Code, requests, got.Body.String())
+	}
+	store.plan.Enabled = false
+	if got := request(path); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), "邀请已暂停") && !strings.Contains(got.Body.String(), "groupCode") || requests != 1 {
+		t.Fatalf("paused plan did not retain status page: status=%d reads=%d", got.Code, requests)
+	}
+	store.plan = plan
+	client.Transport = invitationQRTransport(func(*http.Request) (*http.Response, error) {
+		requests++
+		bad := testJoinQR(t, "https://example.com/gm/96f26e59e98ebd6e3007edbf7fbb3f44")
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(bad)), ContentLength: int64(len(bad))}, nil
+	})
+	if got := request(path); got.Code != http.StatusOK || got.Header().Get("Location") != "" || !strings.Contains(got.Body.String(), "groupCode") {
+		t.Fatalf("untrusted code did not retain fallback: status=%d location=%q", got.Code, got.Header().Get("Location"))
+	}
+}
+
+func TestOfficialJoinURLRejectsUntrustedPayload(t *testing.T) {
+	for _, target := range []string{
+		"http://work.weixin.qq.com/gm/96f26e59e98ebd6e3007edbf7fbb3f44",
+		"https://example.com/gm/96f26e59e98ebd6e3007edbf7fbb3f44",
+		"https://work.weixin.qq.com.evil.test/gm/96f26e59e98ebd6e3007edbf7fbb3f44",
+		"https://work.weixin.qq.com:8443/gm/96f26e59e98ebd6e3007edbf7fbb3f44",
+		"https://work.weixin.qq.com/gm/96f26e59e98ebd6e3007edbf7fbb3f44?next=evil",
+		"https://work.weixin.qq.com/gm/%2e%2e/96f26e59e98ebd6e3007edbf7fbb3f44",
+	} {
+		if got, err := officialJoinURL(testJoinQR(t, target)); err == nil {
+			t.Fatalf("untrusted QR target accepted: %q", got)
+		}
+	}
 }
 
 func TestInvitationOfficialQRDownload(t *testing.T) {

@@ -22,6 +22,7 @@ COORDINATION = (RIVER_TABLES - {"river_job", "river_migration"}) | {"admin_login
 PROJECTIONS = {"hxc_dashboard_rows", "customer_directory_projection", "customer_timeline_projection", "adminops_release_projections"}
 OPERATIONAL_DETAILS |= {'config_runtime_usage', 'message_archive_sync_runs'}
 SECURITY_TTL |= {'survey_result_tokens', 'ai_assistant_integration_nonces'}
+SECURITY_TTL |= {'openplatform_customer_windows', 'openplatform_customer_window_items'}
 COORDINATION |= {'wecom_customer_tag_refresh_watermarks', 'operation_cycle_runners', 'wecom_external_contact_event_cursors', 'referral_relationship_locks', 'message_archive_sync_state', 'referral_participation_locks', 'segment_audience_schedule_states'}
 PROJECTIONS |= {'wecom_customer_owner_observations', 'wecom_group_membership_facts', 'wecom_group_provider_facts', 'group_ops_directory_groups', 'wecom_customer_tag_observations', 'group_ops_operation_member_directory', 'hxc_registration_coverage', 'wecom_external_contact_profiles'}
 RESOURCE_PATH = re.compile(r'/(?:opt|etc|usr/local/libexec|var/lib|var/log|run)(?:/[A-Za-z0-9_.@+-]+)+')

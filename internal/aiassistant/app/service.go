@@ -550,6 +550,13 @@ func (s *Service) UpdateContent(ctx context.Context, command aiassistantport.Upd
 	}
 	var content aiassistantport.ContentVersion
 	err := s.uow.Within(ctx, func(tx context.Context) error {
+		plan, planErr := s.store.GetPlan(tx, command.PlanID, false)
+		if planErr != nil {
+			return planErr
+		}
+		if plan.SourceKind == "scrm_workbench" {
+			return ErrConflict
+		}
 		linked, linkedErr := s.linkedOperationExcelBatch(tx, command.PlanID)
 		if linkedErr != nil {
 			return linkedErr
@@ -788,6 +795,11 @@ func (s *Service) approvePlan(ctx context.Context, command aiassistantport.Appro
 	planBefore, readErr := s.GetPlan(ctx, command.PlanID)
 	if readErr != nil {
 		return aiassistantport.Plan{}, readErr
+	}
+	// Existing approval queues the whole plan. Workbench packages must remain
+	// pending until a separate per-person gate and synthetic allowlist exist.
+	if planBefore.SourceKind == "scrm_workbench" {
+		return aiassistantport.Plan{}, ErrUnavailable
 	}
 	var linked bool
 	readErr = s.uow.Within(ctx, func(tx context.Context) error {

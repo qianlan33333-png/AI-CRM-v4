@@ -18,6 +18,13 @@ var (
 	ErrNotFound           = errors.New("access record not found")
 )
 
+// MachineRateLimitError carries the durable bucket's remaining block time.
+// It preserves errors.Is(err, ErrRateLimited) for existing callers.
+type MachineRateLimitError struct{ RetryAfter time.Duration }
+
+func (e MachineRateLimitError) Error() string { return ErrRateLimited.Error() }
+func (e MachineRateLimitError) Unwrap() error { return ErrRateLimited }
+
 type Role string
 
 const (

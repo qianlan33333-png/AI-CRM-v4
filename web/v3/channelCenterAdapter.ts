@@ -301,25 +301,61 @@ function installStableChannelArchiveBinding(): void {
     if (this.page !== 'channels') return values;
     const rows = values.rows as Record<string, unknown> | undefined;
     if (!rows || !Array.isArray(rows.channels)) return values;
+    const originalDrawer = values.channelDrawer as Record<string, unknown> | undefined;
+    const drawerAsset = originalDrawer?.asset as Record<string, unknown> | undefined;
+    const drawerChannel = originalDrawer?.channel as Record<string, unknown> | undefined;
+    const drawerBusy = originalDrawer?.assetBusy === true;
+    const drawerHasAsset = drawerAsset?.has === true;
+    const drawerFailed = drawerHasAsset && drawerAsset?.status === '执行失败';
+    const drawerInactive = blockedEntrantActionStatus(drawerChannel?.status) !== '';
+    const drawerReadFailed = typeof originalDrawer?.assetError === 'string' && originalDrawer.assetError.trim() !== '';
+    const drawerRequestBlocked = drawerBusy || drawerHasAsset && !drawerFailed || drawerReadFailed || drawerInactive;
+    const drawerRequest = originalDrawer?.assetRequest;
+    const channelDrawer = originalDrawer && {
+      ...originalDrawer,
+      assetRequestLabel: drawerBusy ? '申请中…' : drawerReadFailed ? '资产状态读取失败' : drawerInactive ? '当前渠道不可申请' : drawerFailed ? '修正配置后重新申请' : drawerHasAsset ? String(drawerAsset?.status || '已有申请记录') : drawerChannel?.carrierType === 'link' ? '申请获客链接' : '申请二维码',
+      assetRequestDisabled: drawerRequestBlocked ? 'true' : 'false',
+      assetRequest: () => {
+        if (drawerRequestBlocked) return;
+        if (typeof drawerRequest === 'function') drawerRequest();
+      },
+    };
     const visibleRows = rows.channels;
     const query = typeof rows.channelQuery === 'string' ? rows.channelQuery : '';
     renderChannelReadState(this, visibleRows, query);
     if (channelAuthorizationRevoked) {
-      return { ...values, rows: { ...rows, channels: [] } };
+      return { ...values, channelDrawer, rows: { ...rows, channels: [] } };
     }
     return {
       ...values,
+      channelDrawer,
       rows: {
         ...rows,
         channels: visibleRows.map((value) => {
           if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
           const row = value as ChannelListRow;
           const channelID = String(row.resourceId ?? '');
+          const qrMissing = row.qrMissing === true;
+          const qrBlocked = blockedEntrantActionStatus(row.status) !== '';
+          const qrActionLabel = qrBlocked ? String(row.qr || '当前渠道不可申请') : row.carrierType === 'link' ? '查看获客链接状态' : '查看／生成二维码';
+          const qrAction = () => {
+            if (qrBlocked) return;
+            if (typeof row.view === 'function') row.view();
+          };
+          const qrFields = qrMissing ? {
+            qrActionLabel,
+            qrActionTitle: qrBlocked ? qrActionLabel : '查看资产状态；尚未申请时可提交一次二维码申请',
+            qrActionDisabled: qrBlocked ? 'true' : 'false',
+            qrAction,
+            qrActionStyle: qrBlocked
+              ? 'font-size:13px;color:#A6AAB0;background:none;border:0;padding:0;white-space:nowrap;cursor:not-allowed'
+              : 'font-size:13px;color:#3370FF;background:none;border:0;padding:0;white-space:nowrap;cursor:pointer',
+          } : {};
           if (!validChannelID(channelID)) return { ...row, archive: () => toast('渠道缺少服务端资源 ID，无法删除。', true), archiveLabel: '删除不可用', archiveDisabled: 'true', archiveTitle: '渠道缺少服务端资源 ID，无法删除。', archiveStyle: { fontSize: '13px', color: '#A6AAB0', cursor: 'not-allowed', whiteSpace: 'nowrap' } };
           if (row.status === 'archived' || confirmedArchivedChannelIDs.has(channelID)) {
-            return { ...row, archive: () => toast('渠道已删除；请刷新后核对最新列表状态。'), archiveLabel: '已删除', archiveDisabled: 'true', archiveTitle: '渠道已删除：扫码不会发送欢迎语或入渠标签；可编辑后再启用。', archiveStyle: { fontSize: '13px', color: '#A6AAB0', cursor: 'not-allowed', whiteSpace: 'nowrap' } };
+            return { ...row, ...qrFields, archive: () => toast('渠道已删除；请刷新后核对最新列表状态。'), archiveLabel: '已删除', archiveDisabled: 'true', archiveTitle: '渠道已删除：扫码不会发送欢迎语或入渠标签；可编辑后再启用。', archiveStyle: { fontSize: '13px', color: '#A6AAB0', cursor: 'not-allowed', whiteSpace: 'nowrap' } };
           }
-          return { ...row, archive: archiveAction(channelID, this, String(row.name || row.code || '该渠道')), archiveLabel: '删除', archiveDisabled: 'false', archiveTitle: '删除会停止扫码欢迎语和入渠标签，并保留历史；可编辑后再启用。', archiveStyle: { fontSize: '13px', color: '#3370FF', cursor: 'pointer', whiteSpace: 'nowrap' } };
+          return { ...row, ...qrFields, archive: archiveAction(channelID, this, String(row.name || row.code || '该渠道')), archiveLabel: '删除', archiveDisabled: 'false', archiveTitle: '删除会停止扫码欢迎语和入渠标签，并保留历史；可编辑后再启用。', archiveStyle: { fontSize: '13px', color: '#3370FF', cursor: 'pointer', whiteSpace: 'nowrap' } };
         }),
       },
     };
@@ -353,10 +389,28 @@ function prepareFrozenChannelListTemplate(): void {
   // explicitly because querySelectorAll does not cross template fragments.
   const fragments: DocumentFragment[] = [template.content];
   const anchors: HTMLElement[] = [];
+  const missingQR: HTMLElement[] = [];
+  const assetButtons: HTMLButtonElement[] = [];
   while (fragments.length) {
     const fragment = fragments.pop()!;
     anchors.push(...Array.from(fragment.querySelectorAll<HTMLElement>('a')));
+    missingQR.push(...Array.from(fragment.querySelectorAll<HTMLElement>('span')).filter((node) => node.textContent?.trim() === '后端未返回二维码地址'));
+    assetButtons.push(...Array.from(fragment.querySelectorAll<HTMLButtonElement>('button')).filter((node) => node.textContent?.includes('申请当前载体资产')));
     for (const nested of Array.from(fragment.querySelectorAll<HTMLTemplateElement>('template'))) fragments.push(nested.content);
+  }
+  for (const placeholder of missingQR) {
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.setAttribute('onClick', '{{ r.qrAction }}');
+    action.setAttribute('aria-disabled', '{{ r.qrActionDisabled }}');
+    action.setAttribute('title', '{{ r.qrActionTitle }}');
+    action.setAttribute('style', '{{ r.qrActionStyle }}');
+    action.textContent = '{{ r.qrActionLabel }}';
+    placeholder.replaceWith(action);
+  }
+  for (const button of assetButtons) {
+    button.textContent = '{{ channelDrawer.assetRequestLabel }}';
+    button.setAttribute('aria-disabled', '{{ channelDrawer.assetRequestDisabled }}');
   }
   const archive = anchors.find((node) => node.textContent?.trim() === '下架' && node.title === '后端暂无渠道归档 operation');
   if (archive) {
