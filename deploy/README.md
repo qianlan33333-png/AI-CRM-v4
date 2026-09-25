@@ -6,7 +6,7 @@
 
 ## 发布
 
-GitHub `main` 是唯一主线。PR 合并后，国内预备机从准确提交构建、以合成数据做基础验证，再经内网把同一文件树晋级生产。GitHub Actions 负责 required `check`，不生成或运输生产包。发布按第一父链串行处理，普通发布步骤、检查分级和失败恢复见[国内发布操作](../docs/operations/domestic-release.md)。
+国内主仓激活前，GitHub `main` 和准确 PR `check` 仍是旧发布门禁，见[旧发布操作](../docs/operations/domestic-release.md)。激活后，权威 `main` 位于预备机裸仓库，独立开发分支登记准确候选，经预备机检查、合成数据验收、生产源码 bundle 备份和同包内网晋级；生产读回后才推进国内 `main`，见[国内主仓发布](../docs/operations/domestic-main-release.md)。GitHub 只由用户人工择机归档，不自动推送。
 
 - 预备机角色：root 管理 `/etc/aicrm/domestic-release-role`，内容精确为 `staging`；数据库仅含可重建合成数据，不备份。迁移失败会停止候选；当前没有仓库内的数据库重置工具，必须按[国内发布操作](../docs/operations/domestic-release.md)核验主机和合成库身份后人工引导恢复。
 - 生产机角色：同一路径内容精确为 `production`；数据是真实业务数据，只有数据库迁移前备份并核对归档。普通页面/程序发布跳过数据库备份与迁移。
@@ -16,7 +16,7 @@ GitHub `main` 是唯一主线。PR 合并后，国内预备机从准确提交构
 
 ## 工具升级与首次切换
 
-发布器、构建器、安装器或 systemd 单元变更需要在启用前完成准确已合并工具的安装核验。切换工具时先停 timer 和旧生产写入口，核对当前生产版本及读回，完成预备机真实服务用户/目录/PATH/systemd 主机合同演练和发布失败恢复合同测试，然后按主机角色配置恢复 timer。详细门槛见国内发布操作文档。
+发布器、构建器、安装器或 systemd 单元变更需要在启用前完成准确代码的安装核验。国内主仓切换时须按候选顺序处理旧发布队列，并完成 GitHub、预备机和生产端的准确版本核对；停旧 timer 和生产写入口，验证预备机真实服务用户/目录/PATH/systemd 主机合同与失败恢复演练，再建立受限裸仓和激活收据。新旧发布器不得同时操作生产。详细门槛见[国内主仓发布](../docs/operations/domestic-main-release.md)。
 
 ## 历史材料
 

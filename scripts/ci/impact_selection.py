@@ -36,9 +36,14 @@ RELEASE_TOOL_FILES = {
     "deploy/domestic-release-role.staging.example",
     "scripts/domestic_release.py",
     "scripts/domestic_release_build.py",
+    "scripts/domestic_main_release.py",
+    "scripts/manual_github_sync.py",
     "scripts/test_domestic_release.py",
     "scripts/test_domestic_release_build.py",
+    "scripts/test_domestic_release_controller.py",
+    "scripts/test_manual_github_sync.py",
     "deploy/domestic-promote.py",
+    "deploy/test_domestic_main_source.py",
 }
 RELEASE_TOOL_PREFIXES = ("scripts/ci/",)
 

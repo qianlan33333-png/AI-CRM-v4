@@ -1241,11 +1241,11 @@ def build_candidate(
     # cannot read the production SSH key, sudo, state ledger or runtime env.
     build_prefix = ["sudo", "-u", BUILD_USER, "-H", "--"]
     command(*build_prefix, "mkdir", "-m", "0755", str(worker), timeout=30)
-    command(*build_prefix, "git", "-c", f"safe.directory={repo / '.git'}", "clone", "-q", "--no-checkout", "--local", "--no-hardlinks", str(repo), str(checkout), timeout=120)
-    command(*build_prefix, "git", "-C", str(checkout), "-c", f"safe.directory={repo / '.git'}", "fetch", "-q", "--no-tags", str(repo), sha, timeout=120)
+    command(*build_prefix, "git", "-c", f"safe.directory={repo.resolve()}", "clone", "-q", "--no-checkout", "--local", "--no-hardlinks", str(repo), str(checkout), timeout=120)
+    command(*build_prefix, "git", "-C", str(checkout), "-c", f"safe.directory={repo.resolve()}", "fetch", "-q", "--no-tags", str(repo), sha, timeout=120)
     command(*build_prefix, "git", "-C", str(checkout), "cat-file", "-e", f"{sha}^{{commit}}", timeout=30)
     environment = [
-        f"HOME={BUILD_ROOT}", f"PATH={os.environ['PATH']}",
+        f"HOME={BUILD_ROOT}", f"PATH={config.get('build_path', os.environ['PATH'])}",
         f"GOCACHE={BUILD_ROOT / 'cache/go-build'}",
         f"GOMODCACHE={BUILD_ROOT / 'cache/go-mod'}",
         f"npm_config_cache={BUILD_ROOT / 'cache/npm'}",

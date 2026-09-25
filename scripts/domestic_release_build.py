@@ -30,9 +30,12 @@ ARCHIVE_RUNNER_SCRIPT = "scripts/build-wecom-archive-sdk-runner-linux.sh"
 # copies before advancing, but must not pretend that packaging the app installed
 # them.
 FIXED_CONTROLLER_FILES = {
+    "scripts/domestic_main_release.py",
     "scripts/domestic_release.py",
     "scripts/domestic_release_build.py",
     "deploy/domestic-promote.py",
+    "deploy/aicrm-domestic-main-release.service",
+    "deploy/aicrm-domestic-main-release.timer",
 }
 CI_ONLY_PREFIXES = (".github/", "scripts/ci/")
 # Explicit validation-only entrypoints are not part of the installed release.
@@ -49,7 +52,13 @@ CI_ONLY_FILES = {
     "scripts/check-install-release-contract.sh",
     "scripts/check-release-binaries.py",
 }
+# Developer-machine archive operations are neither installed controller
+# binaries nor application runtime. Keep this separate from FIXED_CONTROLLER_FILES.
+OPERATOR_ONLY_FILES = {
+    "scripts/manual_github_sync.py",
+}
 DEPLOY_SAMPLE_CONFIGS = {
+    "deploy/domestic-main-release-example.json",
     "deploy/domestic-release.example.json",
     "deploy/domestic-release-role.production.example",
     "deploy/domestic-release-role.staging.example",
@@ -251,6 +260,9 @@ def classify_paths(paths: Iterable[str]) -> Classification:
 
         if normalized in FIXED_CONTROLLER_FILES:
             controller_files.append(normalized)
+            continue
+
+        if normalized in OPERATOR_ONLY_FILES:
             continue
 
         if normalized in DEPLOY_SAMPLE_CONFIGS:
