@@ -4,8 +4,8 @@
 
 ## 日常四步
 
-1. 开发者在独立 worktree/`codex/<work-item>` 分支提交代码、相关测试和简短变更说明。只推到预备机 `/opt/aicrm/domestic/source.git` 的 `refs/heads/codex/*`。受限推送账号没有 shell、`main` 写权或生产密钥。
-2. 将准确 branch、head、base 登记给单一发布器。base 必须等于登记时的国内 `main`；若别的线先上线，原开发线更新分支并重新检查，发布器不 rebase 或解决冲突。
+1. 开发者先从预备机抓取国内 `main`，以它的准确 SHA 新建独立 worktree/`codex/<work-item>` 分支，再提交代码、相关测试和简短变更说明。只推到预备机 `/opt/aicrm/domestic/source.git` 的 `refs/heads/codex/*`。受限推送账号没有 shell、`main` 写权或生产密钥；本机可能落后的 GitHub `main` 不能作为新分支基线。
+2. 将准确 branch、head、base 登记给单一发布器。base 必须等于登记时的国内 `main`，并位于候选的第一父链；若别的线先上线，原开发线将改动更新到新的国内 `main` 上并重新检查，发布器不 rebase 或解决冲突。
 3. 发布器在锁内检查准确 SHA/tree，按影响范围运行必要测试，预备机构建并安装，再运行受影响的合成业务合同。未知路径、迁移、共享基础和检查策略变更保守全量。预发失败停在该候选。
 4. 生产端先保存、验证可从空仓恢复的完整源码 bundle；之后才接受预发同一安装包。生产版本、完整文件摘要、服务和 `/readyz` 读回通过，发布器才以旧 SHA 为条件推进国内 `main`。每条线按队列顺序累计上线。纯文档提交只备份源码、推进源码游标，不重装应用。
 

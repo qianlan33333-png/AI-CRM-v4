@@ -972,7 +972,7 @@ def build_candidate(
     command(*build_prefix, "git", "-C", str(checkout), "-c", f"safe.directory={repo.resolve()}", "fetch", "-q", "--no-tags", str(repo), sha, timeout=120)
     command(*build_prefix, "git", "-C", str(checkout), "cat-file", "-e", f"{sha}^{{commit}}", timeout=30)
     environment = [
-        f"HOME={BUILD_ROOT}", f"PATH={os.environ['PATH']}",
+        f"HOME={BUILD_ROOT}", f"PATH={config.get('build_path', os.environ['PATH'])}",
         f"GOCACHE={BUILD_ROOT / 'cache/go-build'}",
         f"GOMODCACHE={BUILD_ROOT / 'cache/go-mod'}",
         f"npm_config_cache={BUILD_ROOT / 'cache/npm'}",
