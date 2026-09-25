@@ -1318,6 +1318,11 @@ class DomesticReleaseTest(unittest.TestCase):
     def test_pr38_corrected_fixture_selection_is_bound_to_exact_candidate_fixture_and_helper_hashes(self):
         repo = Path("/unused")
         checked_main = "f" * 40
+        self.assertEqual(worker.PR38_CORRECTED_FIXTURE_SHA, "948ffd35063efcb8609cd6c33eff48acf9697b0b")
+        self.assertEqual(worker.PR38_CORRECTED_FIXTURE_TREE, "8a356497374af9a913d7d28ccec78ca55df20586")
+        self.assertEqual(worker.PR38_CORRECTED_SMOKE_FILE_SHA256, "4176c260dd4fa89b0036aa37a9f6fac33c58d3a7262f4c65e40d334af7f71eeb")
+        self.assertEqual(worker.PR38_CORRECTED_SCHEMA_FILE_SHA256, "b75eebf20e210aecb4f1d960a2adb9522b45468a2f014435d377f435ebbe197b")
+        self.assertEqual(worker.PR38_CORRECTED_FIXTURE_HELPER_SHA256, "2a6c8a222dee5d19e505083d8311f548d8effafcb3fd68f856d8a24c82fa46f7")
         trees = {
             worker.PR38_SMOKE_SOURCE_SHA: worker.PR38_SMOKE_SOURCE_TREE,
             worker.PR38_CORRECTED_FIXTURE_SHA: worker.PR38_CORRECTED_FIXTURE_TREE,
@@ -1348,11 +1353,12 @@ class DomesticReleaseTest(unittest.TestCase):
         self.assertEqual(selected["candidate_sha"], worker.PR38_SMOKE_SOURCE_SHA)
         self.assertEqual(selected["fixture_sha"], worker.PR38_CORRECTED_FIXTURE_SHA)
         self.assertEqual(selected["fixture_tree"], worker.PR38_CORRECTED_FIXTURE_TREE)
-        self.assertEqual(selected["compatibility"], "pr38_candidate_with_pr41_corrected_smoke_fixture")
+        self.assertEqual(selected["compatibility"], "pr38_candidate_with_pr43_corrected_smoke_fixture")
 
         for candidate, fixture in (("b" * 40, worker.PR38_CORRECTED_FIXTURE_SHA),
-                                   (worker.PR38_SMOKE_SOURCE_SHA, "c" * 40)):
-            with self.subTest(candidate=candidate, fixture=fixture), self.assertRaisesRegex(RuntimeError, "restricted to the exact PR38 candidate|differs from reviewed PR41"):
+                                   (worker.PR38_SMOKE_SOURCE_SHA, "c" * 40),
+                                   (worker.PR38_SMOKE_SOURCE_SHA, "e8456a9ef91efe00a3f9c87514363eb6436fff35")):
+            with self.subTest(candidate=candidate, fixture=fixture), self.assertRaisesRegex(RuntimeError, "restricted to the exact PR38 candidate|differs from reviewed PR43"):
                 worker._pr38_corrected_fixture_selection(repo, candidate, fixture, checked_main)
 
         def wrong_smoke_digest(_repo, sha, path):
@@ -1361,12 +1367,12 @@ class DomesticReleaseTest(unittest.TestCase):
             return checked_digest(_repo, sha, path)
 
         with mock.patch.object(worker, "git", side_effect=checked_git), mock.patch.object(worker, "_git_file_sha256", side_effect=wrong_smoke_digest):
-            with self.assertRaisesRegex(RuntimeError, "installed-smoke fixture bytes"):
+            with self.assertRaisesRegex(RuntimeError, "PR43 installed-smoke fixture bytes"):
                 worker._pr38_corrected_fixture_selection(
                     repo, worker.PR38_SMOKE_SOURCE_SHA, worker.PR38_CORRECTED_FIXTURE_SHA, checked_main,
                 )
 
-    def test_run_stage_smoke_executes_whole_pr41_fixture_and_preserves_pr38_candidate_identity(self):
+    def test_run_stage_smoke_executes_whole_pr43_fixture_and_preserves_pr38_candidate_identity(self):
         repo = Path("/unused")
         helper = "/fixed/staging-helper.py"
         selected = {
@@ -1381,7 +1387,7 @@ class DomesticReleaseTest(unittest.TestCase):
             "checked_main_sha": "f" * 40,
             "checked_main_tree": "a" * 40,
             "executor_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
-            "compatibility": "pr38_candidate_with_pr41_corrected_smoke_fixture",
+            "compatibility": "pr38_candidate_with_pr43_corrected_smoke_fixture",
         }
         helper_selection = {
             "source_tree": worker.PR38_CORRECTED_FIXTURE_TREE,
@@ -1468,7 +1474,7 @@ class DomesticReleaseTest(unittest.TestCase):
             "checked_main_sha": main_sha,
             "checked_main_tree": "b" * 40,
             "executor_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
-            "compatibility": "pr38_candidate_with_pr41_corrected_smoke_fixture",
+            "compatibility": "pr38_candidate_with_pr43_corrected_smoke_fixture",
         }
         paths = ["scripts/domestic_release.py", "scripts/domestic_release_build.py", "deploy/domestic-promote.py", worker.ALIPAY_SMOKE_FIXTURE]
         plan = {

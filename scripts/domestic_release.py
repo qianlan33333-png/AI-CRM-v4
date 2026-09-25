@@ -106,15 +106,16 @@ PR38_RESUME_MARKER = {
 PR38_HELPER_TRUST_ANCHOR_SHA = "4018d27e719a4f54b279df1c33e1fe8d69882855"
 PR38_HELPER_TRUST_ANCHOR_TREE = "49299006dd4db445f368351ef26f7e2173586a27"
 PR38_EXECUTOR_HELPER_SHA256 = "2a6c8a222dee5d19e505083d8311f548d8effafcb3fd68f856d8a24c82fa46f7"
-# PR41 fixes the schema-ledger omission in PR38's installed-smoke fixture. This
+# PR43 carries the migration-ledger correction from PR41 and fixes the invalid
+# provider-call assertion while adding generated-URL signature checks. This
 # exact merged source is permitted only for the one corrected-fixture recovery
 # described by PR38_FIXTURE_RECOVERY; normal candidates always test their own
 # exact source tree.
 PR38_FIXTURE_RECOVERY_SOURCE_SHA = PR38_SMOKE_SOURCE_SHA
 PR38_FIXTURE_RECOVERY_FIRST_MAIN_SHA = "079813d4c449d32e6c85e2373d5341cc99984b7f"
-PR38_CORRECTED_FIXTURE_SHA = "e8456a9ef91efe00a3f9c87514363eb6436fff35"
-PR38_CORRECTED_FIXTURE_TREE = "907a65b66b8d24d45b6feaf0565efde29cd2f753"
-PR38_CORRECTED_SMOKE_FILE_SHA256 = "fcf9ef8f8d2d047ad341ed6d29f6ac224a294ebd9a690970c0186023495faa4b"
+PR38_CORRECTED_FIXTURE_SHA = "948ffd35063efcb8609cd6c33eff48acf9697b0b"
+PR38_CORRECTED_FIXTURE_TREE = "8a356497374af9a913d7d28ccec78ca55df20586"
+PR38_CORRECTED_SMOKE_FILE_SHA256 = "4176c260dd4fa89b0036aa37a9f6fac33c58d3a7262f4c65e40d334af7f71eeb"
 PR38_CORRECTED_SCHEMA_FILE_SHA256 = "b75eebf20e210aecb4f1d960a2adb9522b45468a2f014435d377f435ebbe197b"
 PR38_CORRECTED_FIXTURE_HELPER_SHA256 = PR38_EXECUTOR_HELPER_SHA256
 
@@ -636,18 +637,18 @@ def _pr38_corrected_fixture_selection(
     fixture_sha: str,
     checked_main_sha: str,
 ) -> dict[str, str]:
-    """Verify the one reviewed PR38 candidate/PR41 fixture source pair."""
+    """Verify the one reviewed PR38 candidate/PR43 fixture source pair."""
     if candidate_sha != PR38_FIXTURE_RECOVERY_SOURCE_SHA:
         raise RuntimeError("corrected smoke fixture is restricted to the exact PR38 candidate")
     if not SHA.fullmatch(checked_main_sha):
         raise RuntimeError("corrected smoke fixture requires the exact checked main SHA")
     if fixture_sha != PR38_CORRECTED_FIXTURE_SHA:
-        raise RuntimeError("corrected smoke fixture source SHA differs from reviewed PR41")
+        raise RuntimeError("corrected smoke fixture source SHA differs from reviewed PR43")
 
     candidate_tree = git(repo, "rev-parse", f"{candidate_sha}^{{tree}}")
     fixture_tree = git(repo, "rev-parse", f"{fixture_sha}^{{tree}}")
     if candidate_tree != PR38_SMOKE_SOURCE_TREE or fixture_tree != PR38_CORRECTED_FIXTURE_TREE:
-        raise RuntimeError("PR38 or PR41 smoke fixture tree differs from the reviewed source")
+        raise RuntimeError("PR38 or PR43 smoke fixture tree differs from the reviewed source")
     git(repo, "merge-base", "--is-ancestor", candidate_sha, fixture_sha)
     git(repo, "merge-base", "--is-ancestor", fixture_sha, checked_main_sha)
 
@@ -657,11 +658,11 @@ def _pr38_corrected_fixture_selection(
     candidate_helper_sha = _git_file_sha256(repo, candidate_sha, "deploy/domestic-promote.py")
     checked_main_helper_sha = _git_file_sha256(repo, checked_main_sha, "deploy/domestic-promote.py")
     if smoke_file_sha != PR38_CORRECTED_SMOKE_FILE_SHA256:
-        raise RuntimeError("PR41 installed-smoke fixture bytes differ from the reviewed file")
+        raise RuntimeError("PR43 installed-smoke fixture bytes differ from the reviewed file")
     if schema_file_sha != PR38_CORRECTED_SCHEMA_FILE_SHA256:
-        raise RuntimeError("PR41 composition migration fixture bytes differ from the reviewed file")
+        raise RuntimeError("PR43 composition migration fixture bytes differ from the reviewed file")
     if fixture_helper_sha != PR38_CORRECTED_FIXTURE_HELPER_SHA256:
-        raise RuntimeError("PR41 smoke helper differs from the verified staging helper")
+        raise RuntimeError("PR43 smoke helper differs from the verified staging helper")
     if candidate_helper_sha != PR38_SOURCE_HELPER_SHA256:
         raise RuntimeError("PR38 candidate helper differs from the reviewed source")
     if checked_main_helper_sha != PR38_EXECUTOR_HELPER_SHA256:
@@ -679,7 +680,7 @@ def _pr38_corrected_fixture_selection(
         "checked_main_sha": checked_main_sha,
         "checked_main_tree": git(repo, "rev-parse", f"{checked_main_sha}^{{tree}}"),
         "executor_helper_sha256": checked_main_helper_sha,
-        "compatibility": "pr38_candidate_with_pr41_corrected_smoke_fixture",
+        "compatibility": "pr38_candidate_with_pr43_corrected_smoke_fixture",
     }
 
 
@@ -786,7 +787,7 @@ def _validate_pr38_corrected_fixture_retry_ledger(state: dict, queue: list[str])
 
 
 def recover_pr38_staging_smoke(config: dict, *, expected_sha: str, expected_main_sha: str) -> dict:
-    """Run one PR41-fixture smoke for the exact unpromoted PR38/#36 state."""
+    """Run one PR43-fixture smoke for the exact unpromoted PR38/#36 state."""
     if expected_sha != PR38_SMOKE_SOURCE_SHA:
         raise ValueError("PR38 corrected-fixture recovery requires the exact blocked SHA")
     if not SHA.fullmatch(expected_main_sha):
