@@ -50,7 +50,7 @@ func TestPublicPresentationAssetsAreManifestBoundAndAnonymousSafe(t *testing.T) 
 
 	for _, path := range []string{
 		"/product-public-assets/publicCommerceStyles-ABCD1234.css",
-		"/product-public-assets/files/wechat-auth-ABCD1234.png",
+		"/product-public-assets/files/wechat-auth-ABCD1234.jpg",
 		"/product-public-assets/" + strings.TrimPrefix(hostRelative, "assets/"),
 		"/product-public-assets/chunks/publicCommerceRuntime-ABCD1234.js",
 	} {
@@ -58,6 +58,9 @@ func TestPublicPresentationAssetsAreManifestBoundAndAnonymousSafe(t *testing.T) 
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
 		if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Cache-Control"), "immutable") || response.Header().Get("ETag") == "" {
 			t.Fatalf("public asset path=%s status=%d headers=%v", path, response.Code, response.Header())
+		}
+		if strings.HasSuffix(path, ".jpg") && !strings.HasPrefix(response.Header().Get("Content-Type"), "image/jpeg") {
+			t.Fatalf("public JPEG type=%q", response.Header().Get("Content-Type"))
 		}
 	}
 	for _, path := range []string{
@@ -221,13 +224,13 @@ func publicPresentationFixture(t *testing.T) (PublicPresentationAssets, string) 
 	t.Helper()
 	dist := t.TempDir()
 	cssRelative := "assets/publicCommerceStyles-ABCD1234.css"
-	imageRelative := "assets/files/wechat-auth-ABCD1234.png"
+	imageRelative := "assets/files/wechat-auth-ABCD1234.jpg"
 	hostRelative := "assets/publicCommerceHost-ABCD1234.js"
 	chunkRelative := "assets/chunks/publicCommerceRuntime-ABCD1234.js"
 	adminRelative := "assets/admin-ABCD1234.js"
 	files := map[string][]byte{
-		cssRelative:   []byte("main[data-v3-public-commerce]{background:url('./files/wechat-auth-ABCD1234.png')}"),
-		imageRelative: []byte("\x89PNG\r\n\x1a\nfixture"),
+		cssRelative:   []byte("main[data-v3-public-commerce]{background:url('./files/wechat-auth-ABCD1234.jpg')}"),
+		imageRelative: []byte("\xff\xd8\xff\xe0fixture"),
 		hostRelative:  []byte("import './chunks/publicCommerceRuntime-ABCD1234.js';"),
 		chunkRelative: []byte("export const publicCommerceRuntime = true;"),
 		adminRelative: []byte("private admin asset"),

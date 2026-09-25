@@ -206,7 +206,7 @@ func validPublicPresentationPath(value, suffix string) bool {
 		return false
 	}
 	switch strings.ToLower(filepath.Ext(value)) {
-	case ".css", ".js", ".mjs", ".png":
+	case ".css", ".js", ".mjs", ".png", ".jpg":
 		return true
 	default:
 		return false

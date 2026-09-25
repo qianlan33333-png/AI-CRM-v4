@@ -139,7 +139,12 @@ func (h *ServicePeriodPublicHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", publicCommerceContentSecurityPolicy())
 	if available {
-		if err = publicProductPage.Execute(w, publicProductPageView{Product: public, Payment: true, Detail: !payment && len(public.Images) > 0, Presentation: publicPresentationTemplateFor(presentation), WeChatPayEnabled: h.wechatPayEnabled, AlipayEnabled: h.alipayEnabled}); err != nil {
+		view := publicProductPageView{Product: public, Payment: true, Detail: !payment && len(public.Images) > 0, Presentation: publicPresentationTemplateFor(presentation), WeChatPayEnabled: h.wechatPayEnabled, AlipayEnabled: h.alipayEnabled}
+		if view.Detail {
+			_ = publicProductDetailPage.Execute(w, view)
+			return
+		}
+		if err = publicProductPage.Execute(w, view); err != nil {
 			return
 		}
 		return
@@ -211,7 +216,7 @@ func (h *ServicePeriodPublicHandler) publicStateOrDetailMedia(w http.ResponseWri
 
 func (h *ServicePeriodPublicHandler) detailMedia(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/h5/service-period-products/"), "/")
-	if len(parts) != 5 || parts[1] != "images" || parts[3] != "variants" || parts[4] != "original" {
+	if len(parts) != 5 || parts[1] != "images" || parts[3] != "variants" || (parts[4] != "original" && parts[4] != "large_1440") {
 		http.NotFound(w, r)
 		return
 	}
@@ -246,7 +251,7 @@ func (h *ServicePeriodPublicHandler) detailMedia(w http.ResponseWriter, r *http.
 		http.NotFound(w, r)
 		return
 	}
-	variant, variantErr := h.media.GetImageVariant(r.Context(), id, "original")
+	variant, variantErr := h.media.GetImageVariant(r.Context(), id, parts[4])
 	if variantErr != nil {
 		http.NotFound(w, r)
 		return
@@ -261,7 +266,7 @@ func publicDetailMedia(code string, media []productport.PublicDetailMedia) []str
 	out := make([]string, 0, len(media))
 	for _, item := range media {
 		if item.ImageID > 0 {
-			out = append(out, "/api/h5/service-period-products/"+url.PathEscape(code)+"/images/"+strconv.FormatInt(item.ImageID, 10)+"/variants/original")
+			out = append(out, "/api/h5/service-period-products/"+url.PathEscape(code)+"/images/"+strconv.FormatInt(item.ImageID, 10)+"/variants/large_1440")
 		}
 	}
 	return out

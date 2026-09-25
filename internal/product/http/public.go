@@ -187,6 +187,10 @@ func (h *PublicHandler) publicPage(w http.ResponseWriter, r *http.Request, payme
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", publicCommerceContentSecurityPolicy())
 	data := publicProductPageView{Product: product, Payment: true, Detail: !payment && len(product.Images) > 0, Presentation: publicPresentationTemplateFor(presentation), WeChatPayEnabled: h.wechatPayEnabled, AlipayEnabled: h.alipayEnabled}
+	if data.Detail {
+		_ = publicProductDetailPage.Execute(w, data)
+		return
+	}
 	if err := publicProductPage.Execute(w, data); err != nil {
 		return
 	}
@@ -224,7 +228,11 @@ func (h *PublicHandler) enabledProduct(r *http.Request, code string) (publicProd
 	if len(images) > 0 {
 		heroURL = images[0]
 	}
-	return publicProduct{ID: value.ID, ProductCode: value.ProductCode, Name: value.Name, Description: value.Description, PriceMinor: value.PriceMinor, Currency: value.Currency, Images: images, HeroURL: heroURL, PaymentPath: "/pay/" + url.PathEscape(value.ProductCode), BuyButtonText: projection.BuyButtonText, ProductKind: "standard", CouponTargetRef: "standard_product:" + strconv.FormatInt(int64(value.ID), 10), RequireMobile: level != "none", ContactCollectionLevel: level, RegionOptionsJSON: template.JS(addresscatalog.OptionsJSON())}, true
+	regionOptions := template.JS("[]")
+	if level == "shipping_address" {
+		regionOptions = template.JS(addresscatalog.OptionsJSON())
+	}
+	return publicProduct{ID: value.ID, ProductCode: value.ProductCode, Name: value.Name, Description: value.Description, PriceMinor: value.PriceMinor, Currency: value.Currency, Images: images, HeroURL: heroURL, PaymentPath: "/pay/" + url.PathEscape(value.ProductCode), BuyButtonText: projection.BuyButtonText, ProductKind: "standard", CouponTargetRef: "standard_product:" + strconv.FormatInt(int64(value.ID), 10), RequireMobile: level != "none", ContactCollectionLevel: level, RegionOptionsJSON: regionOptions}, true
 }
 
 func (h *PublicHandler) enabledProductValue(r *http.Request, code string) (productport.Product, bool) {
@@ -253,7 +261,7 @@ func (h *PublicHandler) detailMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	const prefix = "/api/h5/product-images/"
 	parts := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), prefix), "/")
-	if len(parts) != 4 || parts[2] != "variants" || parts[3] != "original" {
+	if len(parts) != 4 || parts[2] != "variants" || (parts[3] != "original" && parts[3] != "large_1440") {
 		http.NotFound(w, r)
 		return
 	}
@@ -282,7 +290,7 @@ func (h *PublicHandler) detailMedia(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	variant, variantErr := h.media.GetImageVariant(r.Context(), id, "original")
+	variant, variantErr := h.media.GetImageVariant(r.Context(), id, parts[3])
 	if variantErr != nil {
 		http.NotFound(w, r)
 		return
