@@ -32,6 +32,7 @@ run_frontend_and_stage_checks() {
   node internal/webshell/static/admin_console/survey_operations_frozen_runtime.test.mjs
   node web/v3/committedTextSearch.test.mjs
   node --test internal/webshell/chromium_launch.test.mjs
+  node --test internal/webshell/chromium_binary.test.mjs
   node internal/webshell/owner_handoff_host.test.mjs
   node scripts/build-v3-host-adapters.mjs
   node --test web/v3/publicCommerceHost.test.mjs
@@ -79,6 +80,7 @@ run_frontend_and_stage_checks() {
   node web/v3/productAdapter.save_recovery.test.mjs
   node web/v3/productAdapter.material_order.test.mjs
   node web/v3/productAdapter.sp_material.test.mjs
+  node web/v3/productAdapter.period_share.test.mjs
   node web/v3/productAdapter.archive.test.mjs
   node web/v3/orderAdapter.test.mjs
   node web/v3/couponAdapter.test.mjs
