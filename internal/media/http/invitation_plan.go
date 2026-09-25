@@ -223,6 +223,15 @@ func (h InvitationHandler) public(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"title": plan.Title, "description": plan.Description, "state": plan.State, "qr_code": qr, "version": plan.Version})
 		return
 	}
+	if officialQRCodeReady(plan) {
+		if qr, err := fetchOfficialQRCode(r.Context(), plan.ProviderQRCode, h.QRCodeClient); err == nil {
+			if target, err := officialJoinURL(qr); err == nil {
+				w.Header().Set("Referrer-Policy", "no-referrer")
+				http.Redirect(w, r, target, http.StatusFound)
+				return
+			}
+		}
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = invitationPublicTemplate.Execute(w, plan)
 }
