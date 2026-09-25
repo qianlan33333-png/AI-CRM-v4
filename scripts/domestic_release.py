@@ -826,16 +826,18 @@ def recover_pr38_staging_smoke(config: dict, *, expected_sha: str, expected_main
         ))
         changed_paths = _trusted_changed_paths(repo, installed, expected_sha)
         validation_paths = _trusted_changed_paths(repo, PR38_PREVIOUS_CURSOR_SHA, expected_sha)
+        controller_files = plan.get("controller_files")
         if (
             plan.get("changed_paths") != changed_paths
             or plan.get("runtime_changed") is not False
-            or not plan.get("controller_files")
+            or not isinstance(controller_files, list)
+            or not {"scripts/domestic_release.py", "deploy/domestic-promote.py"}.issubset(controller_files)
             or not _alipay_smoke_required({"changed_paths": validation_paths})
         ):
-            raise RuntimeError("PR38 no longer matches its reviewed controller-only smoke plan")
+            raise RuntimeError("PR38 no longer matches its reviewed controller-only smoke plan and fixed tool set")
 
         controller_readback = verify_controller_installation(
-            config, repo, expected_sha, plan["controller_files"], checked_main_sha=checked_main_sha,
+            config, repo, expected_sha, controller_files, checked_main_sha=checked_main_sha,
         )
         host_readbacks = _verify_pr38_staging_failed_readbacks(config, state)
         attempt = {

@@ -1036,26 +1036,6 @@ class DomesticReleaseTest(unittest.TestCase):
             worker.main()
         recovery.assert_called_once_with({"repo": "/unused", "state": "/unused/state.json"}, expected_sha=candidate, expected_main_sha=main_sha)
 
-    def test_pr38_corrected_fixture_cli_requires_exact_candidate_and_main_sha(self):
-        candidate = worker.PR38_SMOKE_SOURCE_SHA
-        main_sha = "f" * 40
-        invalid_args = (
-            ["domestic_release.py", "--config", "unused", "recover-pr38-smoke", "--main-sha", main_sha],
-            ["domestic_release.py", "--config", "unused", "recover-pr38-smoke", "--sha", candidate],
-            ["domestic_release.py", "--config", "unused", "recover-pr38-smoke", "--retry-blocked", "--sha", candidate, "--main-sha", main_sha],
-        )
-        for argv in invalid_args:
-            with self.subTest(argv=argv):
-                with mock.patch.object(worker, "load_config", return_value={}), mock.patch.object(worker, "recover_pr38_staging_smoke") as recovery, mock.patch.object(worker.sys, "argv", argv):
-                    with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
-                        worker.main()
-                self.assertEqual(raised.exception.code, 2)
-                recovery.assert_not_called()
-
-        with mock.patch.object(worker, "load_config", return_value={"repo": "/unused", "state": "/unused/state.json"}), mock.patch.object(worker, "recover_pr38_staging_smoke", return_value={"status": "ready"}) as recovery, mock.patch.object(worker.sys, "argv", ["domestic_release.py", "--config", "unused", "recover-pr38-smoke", "--sha", candidate, "--main-sha", main_sha]), redirect_stdout(io.StringIO()):
-            worker.main()
-        recovery.assert_called_once_with({"repo": "/unused", "state": "/unused/state.json"}, expected_sha=candidate, expected_main_sha=main_sha)
-
     def test_one_off_staging_retry_command_is_retired(self):
         argv = ["domestic_release.py", "--config", "unused", "retry-staging", "--sha", "5" * 40]
         with mock.patch.object(worker.sys, "argv", argv), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
@@ -1557,6 +1537,7 @@ class DomesticReleaseTest(unittest.TestCase):
         production_copy_patch = mock.patch.object(worker, "copy_payload")
         promote_patch = mock.patch.object(worker, "promote_checked_candidate")
         build = stage_install = production_copy = promote = None
+        controller_readback = None
         error = None
         with ExitStack() as stack:
             stack.enter_context(mock.patch.object(worker, "git", side_effect=fake_git))
@@ -1568,7 +1549,10 @@ class DomesticReleaseTest(unittest.TestCase):
             stack.enter_context(mock.patch.object(worker, "command", command_mock))
             stack.enter_context(mock.patch.object(worker, "_trusted_changed_paths", side_effect=[fixture["paths"], fixture["paths"]]))
             stack.enter_context(mock.patch.object(worker, "_alipay_smoke_required", return_value=True))
-            stack.enter_context(mock.patch.object(worker, "verify_controller_installation", return_value={"status": "matched", "duration_seconds": 0.1}))
+            controller_readback = stack.enter_context(mock.patch.object(
+                worker, "verify_controller_installation",
+                return_value={"status": "matched", "duration_seconds": 0.1},
+            ))
             stack.enter_context(mock.patch.object(worker, "_verify_pr38_staging_failed_readbacks", return_value=fixture["host_readbacks"]))
             stack.enter_context(mock.patch.object(worker, "run_stage_smoke", smoke_mock))
             build = stack.enter_context(build_patch)
@@ -1585,6 +1569,7 @@ class DomesticReleaseTest(unittest.TestCase):
         state = json.loads(state_path.read_text())
         return result, state, {
             "command": command_mock, "smoke": smoke_mock,
+            "controller_readback": controller_readback,
             "build": build, "stage_install": stage_install,
             "production_copy": production_copy, "promote": promote,
             "error": error,
@@ -1623,6 +1608,10 @@ class DomesticReleaseTest(unittest.TestCase):
             worker.PR38_SMOKE_SOURCE_SHA, worker.PR38_INSTALLED_BASE_SHA, fixture["manifest"],
         ))
         self.assertIn("classify", calls["command"].call_args.args)
+        calls["controller_readback"].assert_called_once()
+        self.assertIn("scripts/domestic_release.py", calls["controller_readback"].call_args.args[3])
+        self.assertIn("deploy/domestic-promote.py", calls["controller_readback"].call_args.args[3])
+        self.assertEqual(calls["controller_readback"].call_args.kwargs["checked_main_sha"], fixture["main"])
         calls["build"].assert_not_called()
         calls["stage_install"].assert_not_called()
         calls["production_copy"].assert_not_called()
@@ -1736,6 +1725,21 @@ class DomesticReleaseTest(unittest.TestCase):
                 calls["production_copy"].assert_not_called()
                 calls["promote"].assert_not_called()
                 self.assertEqual(state["status"], bad_state["status"])
+
+    def test_pr38_corrected_recovery_requires_installed_release_tool_and_smoke_helper(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-pr38-fixed-tools-") as temporary:
+            fixture = self._pr38_corrected_recovery_fixture(Path(temporary))
+            fixture["plan"]["controller_files"] = ["scripts/domestic_release_build.py"]
+            _, state, calls = self._run_pr38_corrected_recovery(fixture)
+        self.assertIsInstance(calls["error"], RuntimeError)
+        self.assertIn("fixed tool set", str(calls["error"]))
+        calls["controller_readback"].assert_not_called()
+        calls["smoke"].assert_not_called()
+        calls["build"].assert_not_called()
+        calls["stage_install"].assert_not_called()
+        calls["production_copy"].assert_not_called()
+        calls["promote"].assert_not_called()
+        self.assertNotIn("pr38_corrected_fixture_recovery", state)
 
     def test_pr38_two_host_readback_rejects_backup_even_when_version_and_health_match(self):
         config = {"repo": "/unused"}
