@@ -253,12 +253,24 @@ class DomesticMainReleaseTests(unittest.TestCase):
     def test_source_only_baseline_bundle_binds_new_main_to_prior_installed_app(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            repo, base, candidate, _other = make_repository(root)
-            git(repo, "update-ref", release.MAIN_REF, candidate, base)
+            repo, base, runtime_candidate, _other = make_repository(root)
+            app = {"sha": base, "tree": release._tree(repo, base), "manifest_sha256": "a" * 64}
+            with self.assertRaisesRegex(release.ReleaseError, "application changes newer"):
+                release._validate_baseline_identity(repo, runtime_candidate,
+                                                    release._tree(repo, runtime_candidate), app)
+            source = root / "source-only"
+            subprocess.run(["git", "clone", str(repo), str(source)], check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(["git", "-C", str(source), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(source), "config", "user.email", "test@example.invalid"], check=True)
+            (source / "README.md").write_text("source-only documentation\n")
+            subprocess.run(["git", "-C", str(source), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "docs"], check=True, stdout=subprocess.DEVNULL)
+            candidate = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+            subprocess.run(["git", f"--git-dir={repo}", "fetch", "--no-tags", str(source),
+                            f"{candidate}:{release.MAIN_REF}"], check=True, stdout=subprocess.DEVNULL)
             release._pin_candidate(repo, candidate)
             base_tree = release._tree(repo, base)
             candidate_tree = release._tree(repo, candidate)
-            app = {"sha": base, "tree": base_tree, "manifest_sha256": "a" * 64}
             release._validate_baseline_identity(repo, candidate, candidate_tree, app)
             bundle, metadata = release._create_full_bundle(
                 repo, root / "work", candidate, candidate_tree,

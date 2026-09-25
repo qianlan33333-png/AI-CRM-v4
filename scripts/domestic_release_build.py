@@ -34,6 +34,8 @@ FIXED_CONTROLLER_FILES = {
     "scripts/domestic_release.py",
     "scripts/domestic_release_build.py",
     "deploy/domestic-promote.py",
+    "deploy/aicrm-domestic-main-release.service",
+    "deploy/aicrm-domestic-main-release.timer",
 }
 CI_ONLY_PREFIXES = (".github/", "scripts/ci/")
 # Explicit validation-only entrypoints are not part of the installed release.

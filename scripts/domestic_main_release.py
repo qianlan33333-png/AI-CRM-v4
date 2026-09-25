@@ -52,6 +52,10 @@ DEFAULT_CONTROLLER = "/usr/local/libexec/aicrm/domestic_main_release.py"
 DEFAULT_CONFIG = "/etc/aicrm/domestic-main-release.json"
 OLD_RELEASE_TIMER = "aicrm-domestic-release.timer"
 NEW_RELEASE_TIMER = "aicrm-domestic-main-release.timer"
+HOST_UNIT_FILES = {
+    "deploy/aicrm-domestic-main-release.service": Path("/etc/systemd/system/aicrm-domestic-main-release.service"),
+    "deploy/aicrm-domestic-main-release.timer": Path("/etc/systemd/system/aicrm-domestic-main-release.timer"),
+}
 BUILD_TOOLCHAIN = ("go", "node", "npm", "git", "bash")
 
 
@@ -319,9 +323,12 @@ def _secure_bare_repository_permissions(repo: Path, push_gid: int) -> None:
     # account gets group write on those two data trees, while config, HEAD,
     # packed refs and hooks remain root-owned and unavailable for modification.
     os.chown(repo, 0, push_gid)
-    os.chmod(repo, 0o2750)
+    # Candidate checks run as a separate, untrusted build identity. Git
+    # objects are world-readable because this source is public, but only the
+    # forced push account's group may write them.
+    os.chmod(repo, 0o2755)
     codex_refs = repo / "refs/heads/codex"
-    codex_refs.mkdir(mode=0o2770, parents=True, exist_ok=True)
+    codex_refs.mkdir(mode=0o2775, parents=True, exist_ok=True)
     for current, dirs, files in os.walk(repo, topdown=True, followlinks=False):
         current_path = Path(current)
         for name in dirs:
@@ -330,7 +337,7 @@ def _secure_bare_repository_permissions(repo: Path, push_gid: int) -> None:
                 raise ReleaseError("bare repository contains a linked or special directory")
             relative = path.relative_to(repo)
             if _push_writable_bare_path(relative):
-                os.chown(path, 0, push_gid); os.chmod(path, 0o2770)
+                os.chown(path, 0, push_gid); os.chmod(path, 0o2775)
             elif relative.parts[:1] in {("hooks",)}:
                 os.chown(path, 0, 0); os.chmod(path, 0o755)
             else:
@@ -343,7 +350,7 @@ def _secure_bare_repository_permissions(repo: Path, push_gid: int) -> None:
                 raise ReleaseError("bare repository contains a linked or special file")
             relative = path.relative_to(repo)
             if _push_writable_bare_path(relative):
-                os.chown(path, 0, push_gid); os.chmod(path, 0o660)
+                os.chown(path, 0, push_gid); os.chmod(path, 0o664)
             elif relative.parts[:1] == ("hooks",):
                 os.chown(path, 0, 0); os.chmod(path, 0o755 if path == repo / "hooks/pre-receive" else 0o644)
             else:
@@ -353,7 +360,7 @@ def _secure_bare_repository_permissions(repo: Path, push_gid: int) -> None:
     os.chown(repo / "refs", 0, 0)
     os.chmod(repo / "refs", 0o755)
     os.chown(codex_refs, 0, push_gid)
-    os.chmod(codex_refs, 0o2770)
+    os.chmod(codex_refs, 0o2775)
     os.chown(repo / "config", 0, 0); os.chmod(repo / "config", 0o644)
     os.chown(repo / "hooks", 0, 0); os.chmod(repo / "hooks", 0o755)
 
@@ -391,7 +398,13 @@ def verify_bare_repository(repo: Path, *, controller_path: str | None = None,
         try:
             builder_user = pwd.getpwnam(legacy.BUILD_USER)
             build_groups = {builder_user.pw_gid, *(item.gr_gid for item in grp.getgrall() if legacy.BUILD_USER in item.gr_mem)}
-            if group.gr_gid not in build_groups:
+            if group.gr_gid in build_groups:
+                raise ReleaseError("isolated build account must not belong to the writable push group")
+            readable = _run(["/usr/bin/sudo", "-n", "-u", legacy.BUILD_USER, "--",
+                             "/usr/bin/git", "-c", f"safe.directory={repo}", f"--git-dir={repo}",
+                             "cat-file", "-e", f"{_resolve_ref(repo, MAIN_REF)}^{{commit}}"],
+                            timeout=30, check=False)
+            if readable.returncode != 0:
                 raise ReleaseError("isolated build account cannot read the protected bare repository")
         except KeyError as exc:
             raise ReleaseError("isolated build account or push group is not provisioned") from exc
@@ -688,34 +701,34 @@ def _policy_worktree(repo: Path, work_root: Path, base_sha: str, push_group: str
             raise ReleaseError("unregistered trusted policy worktree path exists")
         if _worktree_git(path, "rev-parse", "HEAD") != base_sha or _worktree_git(path, "status", "--porcelain"):
             raise ReleaseError("trusted policy worktree differs from its exact base")
-        _make_worktree_metadata_readable(repo, path, push_group)
+        _make_worktree_metadata_readable(repo, path)
         return path
     _run(["git", f"--git-dir={repo}", "worktree", "add", "--detach", str(path), base_sha], timeout=120)
     os.chmod(path, 0o755)
-    _make_worktree_metadata_readable(repo, path, push_group)
+    _make_worktree_metadata_readable(repo, path)
     if _worktree_git(path, "rev-parse", "HEAD") != base_sha or _worktree_git(path, "status", "--porcelain"):
         raise ReleaseError("trusted policy worktree failed its base binding")
     return path
 
 
-def _make_worktree_metadata_readable(repo: Path, worktree: Path, push_group: str) -> None:
+def _make_worktree_metadata_readable(repo: Path, worktree: Path) -> None:
     """Give the isolated builder read access to Git metadata without write access."""
     if os.geteuid() != 0:
         raise ReleaseError("worktree Git metadata permissions must be set by root")
-    group = grp.getgrnam(push_group)
+    build_gid = pwd.getpwnam(legacy.BUILD_USER).pw_gid
     metadata = Path(_worktree_git(worktree, "rev-parse", "--absolute-git-dir")).resolve(strict=True)
     expected_root = (repo / "worktrees").resolve(strict=True)
     try:
         metadata.relative_to(expected_root)
     except ValueError as exc:
         raise ReleaseError("candidate worktree Git metadata is outside the protected bare repository") from exc
-    os.chown(expected_root, 0, group.gr_gid)
+    os.chown(expected_root, 0, build_gid)
     os.chmod(expected_root, 0o750)
     for current, dirs, files in os.walk(metadata, topdown=True, followlinks=False):
         directory = Path(current)
         if directory.is_symlink() or not stat.S_ISDIR(directory.lstat().st_mode):
             raise ReleaseError("candidate Git metadata contains an unsafe directory")
-        os.chown(directory, 0, group.gr_gid)
+        os.chown(directory, 0, build_gid)
         os.chmod(directory, 0o750)
         for name in dirs:
             target = directory / name
@@ -725,7 +738,7 @@ def _make_worktree_metadata_readable(repo: Path, worktree: Path, push_group: str
             target = directory / name
             if target.is_symlink() or not stat.S_ISREG(target.lstat().st_mode):
                 raise ReleaseError("candidate Git metadata contains an unsafe file")
-            os.chown(target, 0, group.gr_gid)
+            os.chown(target, 0, build_gid)
             os.chmod(target, 0o640)
 
 
@@ -1184,7 +1197,7 @@ def _verify_controller_files(config: dict[str, Any], repo: Path, head_sha: str,
     supported = set(builder.FIXED_CONTROLLER_FILES) | {"scripts/domestic_main_release.py"}
     if any(path not in supported for path in paths):
         raise ReleaseError("candidate changes an unregistered fixed controller")
-    legacy_paths = [path for path in paths if path != "scripts/domestic_main_release.py"]
+    legacy_paths = [path for path in paths if path != "scripts/domestic_main_release.py" and path not in HOST_UNIT_FILES]
     try:
         legacy_result = legacy.verify_controller_installation(config, repo, head_sha, legacy_paths) if legacy_paths else None
     except (RuntimeError, OSError) as exc:
@@ -1201,8 +1214,31 @@ def _verify_controller_files(config: dict[str, Any], repo: Path, head_sha: str,
         if info.st_uid != 0 or info.st_mode & 0o022 or actual != expected:
             raise ControllerMaintenanceRequired("fixed domestic controller differs from the candidate; run the reviewed maintenance-check and installation path")
         own_result = {"expected_sha256": expected, "staging_sha256": actual}
+    units = _verify_host_units(repo, head_sha, [path for path in paths if path in HOST_UNIT_FILES])
     return {"status": "matched", "files": legacy_result.get("files", {}) if legacy_result else {},
-            **({own_path: own_result} if own_result else {}), "verified_at_utc": _utc_now()}
+            **({own_path: own_result} if own_result else {}), "host_units": units,
+            "verified_at_utc": _utc_now()}
+
+
+def _verify_host_units(repo: Path, head_sha: str, paths: list[str]) -> dict[str, str]:
+    """Bind the installed, root-protected new poller to the exact source tree."""
+    result: dict[str, str] = {}
+    for source in paths:
+        if source not in HOST_UNIT_FILES:
+            raise ReleaseError("unregistered domestic release unit")
+        target = HOST_UNIT_FILES[source]
+        if target.is_symlink() or not target.is_file():
+            raise ControllerMaintenanceRequired("reviewed domestic release unit is not installed")
+        info, parent = target.lstat(), target.parent.lstat()
+        if (info.st_uid != 0 or info.st_mode & 0o022 or parent.st_uid != 0
+                or parent.st_mode & 0o022 or not stat.S_ISDIR(parent.st_mode)):
+            raise ReleaseError("domestic release unit is not protected by root ownership")
+        expected = hashlib.sha256(_source_blob(repo, head_sha, source)).hexdigest()
+        actual = _file_sha256(target)
+        if actual != expected:
+            raise ControllerMaintenanceRequired("installed domestic release unit differs from exact source")
+        result[source] = actual
+    return result
 
 
 def _protected_exact_helper(path: Path, expected_sha256: str) -> bool:
@@ -1264,6 +1300,9 @@ def _validate_baseline_identity(repo: Path, main_sha: str, main_tree: str,
         raise ReleaseError("installed production app is not an ancestor of the domestic main baseline")
     if _tree(repo, app_sha) != app_tree or _tree(repo, main_sha) != main_tree:
         raise ReleaseError("installed app or domestic main tree differs from its recorded source")
+    _first_parent_chain(repo, app_sha, main_sha)
+    if builder.classify(repo, app_sha, main_sha)["runtime_changed"]:
+        raise ReleaseError("domestic baseline contains application changes newer than the installed production app")
 
 
 def archive_ack(config: dict[str, Any], github_sha: str) -> dict[str, Any]:
@@ -1405,7 +1444,7 @@ def _active_worktree(config: dict[str, Any], repo: Path, head_sha: str) -> Path:
             raise ReleaseError("unregistered source worktree occupies the fixed candidate path")
         _run(["git", f"--git-dir={repo}", "worktree", "remove", "--force", str(worktree)])
     _run(["git", f"--git-dir={repo}", "worktree", "add", "--detach", str(worktree), head_sha], timeout=120)
-    _make_worktree_metadata_readable(repo, worktree, config["push_group"])
+    _make_worktree_metadata_readable(repo, worktree)
     if _worktree_git(worktree, "rev-parse", "HEAD") != head_sha:
         raise ReleaseError("candidate checkout is not at the exact submitted head")
     if _worktree_git(worktree, "status", "--porcelain=v1", "--untracked-files=all"):
@@ -1743,13 +1782,19 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
             raise ReleaseError("candidate does not contain a registered fixed-controller change")
         report_dir = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate_sha}-maintenance-{time.time_ns()}"
         check_receipt = _check_report(config, repo, worktree, report_dir, main_sha, candidate_sha)
+        python_controller_files = [path for path in controller_files if path.endswith(".py")]
         compile_code = (
             "from pathlib import Path; import sys; root=Path(sys.argv[1]); "
             "[compile((root / name).read_bytes(), name, 'exec') for name in sys.argv[2:]]; "
             "print('controller-syntax-ok')"
         )
-        _build_command(config, ["/usr/bin/python3", "-c", compile_code, str(worktree), *controller_files],
-                       cwd=worktree, timeout=120, safe_repository=worktree)
+        if python_controller_files:
+            _build_command(config, ["/usr/bin/python3", "-c", compile_code, str(worktree), *python_controller_files],
+                           cwd=worktree, timeout=120, safe_repository=worktree)
+        changed_units = [str(worktree / path) for path in controller_files if path in HOST_UNIT_FILES]
+        if changed_units:
+            _build_command(config, ["/usr/bin/systemd-analyze", "verify", *changed_units],
+                           cwd=worktree, timeout=120, safe_repository=worktree)
         if "scripts/domestic_main_release.py" in controller_files:
             _build_command(config, ["/usr/bin/python3", str(worktree / "scripts/domestic_main_release.py"), "--help"],
                            cwd=worktree, timeout=60, safe_repository=worktree)
@@ -1807,6 +1852,7 @@ def poll(config: dict[str, Any]) -> dict[str, Any]:
         _assert_legacy_release_path_stopped()
         verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
         state = _load_state(state_path)
+        _verify_controller_files(config, repo, state["main"]["sha"], sorted(builder.FIXED_CONTROLLER_FILES))
         _recover_orphaned_inflight(state_path, state)
         if state["status"] == "outcome_unknown":
             raise ReleaseError("production outcome is unknown; use reconcile, never reinstall blindly")
@@ -1984,6 +2030,7 @@ def _activate_locked_no_lock(config: dict[str, Any]) -> dict[str, Any]:
     if state_path.exists() or state_path.is_symlink():
         raise ReleaseError("domestic ledger already exists; never overwrite or reset it")
     repository = verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
+    _verify_controller_files(config, repo, repository["main_sha"], sorted(builder.FIXED_CONTROLLER_FILES))
     cursor = _verify_production_cursor(config)["cursor"]
     if repository["main_sha"] != cursor.get("main_sha") or repository["main_tree"] != cursor.get("main_tree"):
         raise ReleaseError("domestic main does not match the independently read production source cursor")
@@ -2017,7 +2064,7 @@ def prepare_baseline(config: dict[str, Any]) -> dict[str, Any]:
         if prod_app != stage_app:
             raise ReleaseError("staging and production installed application identities differ")
         _validate_baseline_identity(repo, main_sha, main_tree, prod_app)
-        _verify_controller_files(config, repo, main_sha, ["scripts/domestic_main_release.py"])
+        _verify_controller_files(config, repo, main_sha, sorted(builder.FIXED_CONTROLLER_FILES))
         _pin_candidate(repo, main_sha)
         bundle, bundle_meta = _create_full_bundle(repo, Path(config["work_root"]), main_sha, main_tree,
                                                   previous_main_sha=prod_app["sha"], baseline_transition=True)
@@ -2039,6 +2086,7 @@ def verify(config: dict[str, Any]) -> dict[str, Any]:
     repo, state_path = Path(config["repo"]), Path(config["state"])
     with _locked(Path(config["lock"]), nonblocking=True):
         repository = verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
+        _verify_controller_files(config, repo, repository["main_sha"], sorted(builder.FIXED_CONTROLLER_FILES))
         state = _load_state(state_path)
         if state.get("staging_out_of_sync") is True:
             raise ReleaseError("staging reset has not been acknowledged after an interrupted candidate")
@@ -2082,6 +2130,7 @@ def restricted_ssh() -> None:
     repo = DEFAULT_REPO
     if original in {f"git-receive-pack '{repo}'", f"git-receive-pack {repo}",
                     f"git receive-pack '{repo}'", f"git receive-pack {repo}"}:
+        os.umask(0o002)
         os.execv("/usr/bin/git", ["git", "-c", f"safe.directory={repo}", "receive-pack", repo])
     if original in {f"git-upload-pack '{repo}'", f"git-upload-pack {repo}",
                     f"git upload-pack '{repo}'", f"git upload-pack {repo}"}:

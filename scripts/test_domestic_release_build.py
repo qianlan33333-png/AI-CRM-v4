@@ -137,12 +137,16 @@ class DomesticReleaseBuildTests(unittest.TestCase):
             "scripts/domestic_release.py",
             "scripts/domestic_release_build.py",
             "deploy/domestic-promote.py",
+            "deploy/aicrm-domestic-main-release.service",
+            "deploy/aicrm-domestic-main-release.timer",
             "scripts/test_domestic_release.py",
         ])
         self.assertFalse(controller.runtime_changed)
         self.assertFalse(controller.full_build)
         self.assertEqual(controller.build_mode, "controller_only")
         self.assertEqual(controller.controller_files, [
+            "deploy/aicrm-domestic-main-release.service",
+            "deploy/aicrm-domestic-main-release.timer",
             "deploy/domestic-promote.py",
             "scripts/domestic_main_release.py",
             "scripts/domestic_release.py",
