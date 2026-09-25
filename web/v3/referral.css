@@ -1033,73 +1033,59 @@ body:has(#referral-root) {
 }
 
 /* Leaderboard-first activity surface. The admin workbench keeps its own CRM styles. */
-#referral-root:has(.referral-mobile-top) {
+#referral-root.referral-mobile-detail {
   width: min(100%, 680px);
   padding: 0 0 calc(156px + env(safe-area-inset-bottom));
-  background: linear-gradient(180deg, #f5f7fa 0 64px, #fa4c25 64px 540px, #fff3ed 760px);
-}
-.referral-mobile-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 64px;
-  padding: 10px 18px;
-  background: #f5f7fa;
-}
-.referral-mobile-top a,
-.referral-info-trigger {
-  color: #25272c;
-  font-size: 14px;
-  text-decoration: none;
+  background: linear-gradient(180deg, #fa4c25 0 480px, #fff3ed 680px);
 }
 .referral-info-trigger {
-  border: 1px solid #dedfe2;
+  width: 31px;
+  height: 31px;
+  border: 0;
   border-radius: 999px;
-  padding: 7px 11px;
-  background: #fff;
+  padding: 0;
+  color: #8b4938;
+  background: #fff4ef;
+  font-size: 17px;
+  line-height: 1;
   cursor: pointer;
 }
-#referral-root:has(.referral-mobile-top) .referral-hero {
-  min-height: 184px;
+#referral-root.referral-mobile-detail .referral-hero {
+  min-height: 148px;
   margin: 0;
   border-radius: 0;
-  padding: 28px 24px 50px;
+  padding: 28px 24px 56px;
   background: #fa4c25;
   box-shadow: none;
 }
-#referral-root:has(.referral-mobile-top) .referral-hero::after {
+#referral-root.referral-mobile-detail .referral-hero::after {
   right: -35px;
   bottom: -112px;
   width: 240px;
   height: 240px;
   border-color: rgb(255 223 191 / 17%);
 }
-#referral-root:has(.referral-mobile-top) .referral-hero h1 {
+#referral-root.referral-mobile-detail .referral-hero h1 {
   max-width: 18ch;
-  margin: 12px 0 8px;
+  margin: 0;
   font-family: "PingFang SC", sans-serif;
   font-size: clamp(26px, 7vw, 34px);
   font-weight: 750;
   letter-spacing: .01em;
 }
-#referral-root:has(.referral-mobile-top) .referral-hero p {
-  font-size: 14px;
-  opacity: .92;
-}
-#referral-root:has(.referral-mobile-top) .referral-metrics {
+#referral-root.referral-mobile-detail .referral-metrics {
   position: relative;
   z-index: 1;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin: -30px 18px 14px;
 }
-#referral-root:has(.referral-mobile-top) .referral-metric {
+#referral-root.referral-mobile-detail .referral-metric {
   border: 0;
   border-radius: 14px;
   padding: 11px;
   box-shadow: 0 8px 24px rgb(125 42 18 / 12%);
 }
-#referral-root:has(.referral-mobile-top) > .referral-card {
+#referral-root.referral-mobile-detail > .referral-card {
   position: relative;
   z-index: 1;
   margin: 14px 12px;
@@ -1108,21 +1094,26 @@ body:has(#referral-root) {
   padding: 20px 14px 28px;
   box-shadow: 0 10px 30px rgb(122 45 25 / 10%);
 }
-#referral-root:has(.referral-mobile-top) .referral-card-title h2 {
+#referral-root.referral-mobile-detail .referral-card-title h2 {
   font-family: "PingFang SC", sans-serif;
   font-size: 23px;
   font-weight: 750;
 }
-#referral-root:has(.referral-mobile-top) .referral-card-title span {
+#referral-root.referral-mobile-detail .referral-card-title span {
   color: #b65b43;
   font-size: 12px;
 }
-#referral-root:has(.referral-mobile-top) .referral-filters {
+.referral-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+#referral-root.referral-mobile-detail .referral-filters {
   display: flex;
   gap: 10px;
   margin: 10px 0 18px;
 }
-#referral-root:has(.referral-mobile-top) .referral-filters select {
+#referral-root.referral-mobile-detail .referral-filters select {
   flex: 1 1 0;
   min-height: 42px;
   border-color: #ffd3c5;
@@ -1132,7 +1123,7 @@ body:has(#referral-root) {
   text-align: center;
   font-weight: 650;
 }
-#referral-root:has(.referral-mobile-top) .referral-board-label {
+#referral-root.referral-mobile-detail .referral-board-label {
   display: flex;
   flex: 1 1 0;
   align-items: center;
@@ -1144,8 +1135,8 @@ body:has(#referral-root) {
   background: #fff8f6;
   font-weight: 600;
 }
-#referral-root:has(.referral-mobile-top) .referral-leaderboard { gap: 0; }
-#referral-root:has(.referral-mobile-top) .referral-leaderboard__row {
+#referral-root.referral-mobile-detail .referral-leaderboard { gap: 0; }
+#referral-root.referral-mobile-detail .referral-leaderboard__row {
   grid-template-columns: 28px 46px minmax(0,1fr) auto;
   gap: 10px;
   min-height: 75px;
@@ -1154,30 +1145,30 @@ body:has(#referral-root) {
   padding: 10px 4px;
   background: #fff;
 }
-#referral-root:has(.referral-mobile-top) .referral-leaderboard__row.is-me { outline: 0; background: #fff6ef; }
-#referral-root:has(.referral-mobile-top) .referral-leaderboard__row b {
+#referral-root.referral-mobile-detail .referral-leaderboard__row.is-me { outline: 0; background: #fff6ef; }
+#referral-root.referral-mobile-detail .referral-leaderboard__row b {
   display: grid;
   place-items: center;
   font-size: 20px;
   color: #8b9298;
 }
-#referral-root:has(.referral-mobile-top) .referral-leaderboard__row:nth-child(1) b,
-#referral-root:has(.referral-mobile-top) .referral-leaderboard__row:nth-child(2) b,
-#referral-root:has(.referral-mobile-top) .referral-leaderboard__row:nth-child(3) b {
+#referral-root.referral-mobile-detail .referral-leaderboard__row:nth-child(1) b,
+#referral-root.referral-mobile-detail .referral-leaderboard__row:nth-child(2) b,
+#referral-root.referral-mobile-detail .referral-leaderboard__row:nth-child(3) b {
   width: 28px;
   height: 28px;
   border-radius: 50%;
   color: #fff;
   font-size: 17px;
 }
-#referral-root:has(.referral-mobile-top) .referral-leaderboard__row:nth-child(1) b { background: #e9aa2f; }
-#referral-root:has(.referral-mobile-top) .referral-leaderboard__row:nth-child(2) b { background: #9ca9ae; }
-#referral-root:has(.referral-mobile-top) .referral-leaderboard__row:nth-child(3) b { background: #c77850; }
-#referral-root:has(.referral-mobile-top) .referral-avatar { width: 46px; height: 46px; }
-#referral-root:has(.referral-mobile-top) .referral-leaderboard__row strong { font-size: 15px; color: #1f2429; }
-#referral-root:has(.referral-mobile-top) .referral-leaderboard__row small { font-size: 11px; }
-#referral-root:has(.referral-mobile-top) .referral-leaderboard__row > span:last-child { font-size: 15px; font-weight: 750; color: #bd4d30; }
-#referral-root:has(.referral-mobile-top) .referral-my-rank {
+#referral-root.referral-mobile-detail .referral-leaderboard__row:nth-child(1) b { background: #e9aa2f; }
+#referral-root.referral-mobile-detail .referral-leaderboard__row:nth-child(2) b { background: #9ca9ae; }
+#referral-root.referral-mobile-detail .referral-leaderboard__row:nth-child(3) b { background: #c77850; }
+#referral-root.referral-mobile-detail .referral-avatar { width: 46px; height: 46px; }
+#referral-root.referral-mobile-detail .referral-leaderboard__row strong { font-size: 15px; color: #1f2429; }
+#referral-root.referral-mobile-detail .referral-leaderboard__row small { font-size: 11px; }
+#referral-root.referral-mobile-detail .referral-leaderboard__row > span:last-child { font-size: 15px; font-weight: 750; color: #bd4d30; }
+#referral-root.referral-mobile-detail .referral-my-rank {
   position: fixed;
   z-index: 6;
   left: max(12px,calc((100vw - 680px) / 2 + 12px));
@@ -1216,9 +1207,9 @@ body:has(#referral-root) {
   box-shadow: 0 3px 0 #d4661f;
 }
 .referral-bottom-bar .referral-invite-fab:disabled { background: #a4a8ae; box-shadow: none; }
-.referral-info-title { padding: 20px 18px 4px; color: #fff; }
-.referral-info-title span { font-size: 12px; opacity: .8; }
-.referral-info-title h1 { margin: 6px 0; font-size: 25px; }
+.referral-info-title { padding: 23px 18px 8px; color: #fff; }
+.referral-info-back { border: 0; padding: 4px 0; background: transparent; color: #fff; font-size: 14px; cursor: pointer; }
+.referral-info-title h1 { margin: 8px 0; font-size: 25px; }
 .referral-poster-dialog { width: min(480px,calc(100vw - 24px)); }
 .referral-poster-selectors { display: flex; gap: 8px; }
 .referral-poster-choice { flex: 1; min-height: 38px; border: 1px solid #f2c7b6; border-radius: 9px; background: #fff7f2; color: #9e4a32; cursor: pointer; }
@@ -1239,5 +1230,5 @@ body:has(#referral-root) {
 @media (max-width: 390px) {
   .referral-bottom-bar { padding-inline: 12px; }
   .referral-bottom-bar .referral-invite-fab { min-width: 148px; padding-inline: 12px; }
-  #referral-root:has(.referral-mobile-top) .referral-leaderboard__row { gap: 7px; }
+  #referral-root.referral-mobile-detail .referral-leaderboard__row { gap: 7px; }
 }

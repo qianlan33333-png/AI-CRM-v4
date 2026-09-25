@@ -468,23 +468,19 @@ function metric(label: string, value: string): HTMLElement {
 }
 function render(): void {
   if (!campaign) {
+    host.classList.remove("referral-mobile-detail");
     renderCampaignList();
     return;
   }
   if (campaign.teamMode === "individual") board = "personal";
+  host.classList.add("referral-mobile-detail");
   host.replaceChildren();
-  const top = element("div");
-  top.className = "referral-mobile-top";
-  const back = element("a", "‹ 返回活动");
-  back.href = "/referral";
-  const info = button(infoOpen ? "返回榜单" : "活动信息 ···", () => { infoOpen = !infoOpen; render(); }, "referral-info-trigger");
-  info.dataset.testid = "referral-activity-info";
-  top.append(back, info);
-  host.append(top);
   if (infoOpen) {
     const title = element("header");
     title.className = "referral-info-title";
-    title.append(element("span", "活动详情"), element("h1", campaign.name));
+    const back = button("‹ 返回榜单", () => { infoOpen = false; render(); }, "referral-info-back");
+    back.dataset.testid = "referral-activity-info";
+    title.append(back, element("h1", campaign.name));
     host.append(title, homeCard(), detailCard(), rulesCard());
     const message = element("p");
     message.className = "referral-message";
@@ -502,11 +498,7 @@ function render(): void {
     header.append(image);
   }
   const copy = element("div");
-  copy.append(
-    element("span", campaign.status === "active" ? "活动进行中" : statusText(campaign.status)),
-    element("h1", campaign.name),
-    element("p", campaign.qualificationMode === "product_purchase" ? "按退款调整后的有效销售金额冲榜" : "邀请好友，一起冲榜"),
-  );
+  copy.append(element("h1", campaign.name));
   header.append(copy);
   host.append(header);
   const stats = element("section");
@@ -635,7 +627,14 @@ function leaderCard(): HTMLElement {
   section.className = "referral-card";
   const heading = element("div");
   heading.className = "referral-card-title";
-  heading.append(element("h2", "排行榜"), element("span", campaign?.leaderboardMetric === "sales_amount" ? "有效销售金额" : "实时成绩"));
+  const actions = element("div");
+  actions.className = "referral-heading-actions";
+  const info = button("···", () => { infoOpen = true; render(); }, "referral-info-trigger");
+  info.setAttribute("aria-label", "活动信息");
+  info.title = "活动信息";
+  info.dataset.testid = "referral-activity-info";
+  actions.append(element("span", campaign?.leaderboardMetric === "sales_amount" ? "有效销售金额" : "实时成绩"), info);
+  heading.append(element("h2", "排行榜"), actions);
   section.append(heading);
   const filters = element("div");
   filters.className = "referral-filters";

@@ -89,6 +89,10 @@ const paidDom = new JSDOM('<!doctype html><main id="referral-root"></main>', { u
 } });
 paidDom.window.eval(bundle);
 await waitFor(() => paidDom.window.document.querySelector('[data-testid="referral-invite"]')?.disabled === false, 'paid activity invite action must be enabled for a participant');
+assert.equal(paidDom.window.document.querySelector('.referral-mobile-top'), null, 'activity page omits the redundant top navigation strip');
+assert.equal(paidDom.window.document.querySelector('.referral-hero span'), null, 'activity page omits the status chip');
+assert.equal(paidDom.window.document.querySelector('.referral-hero p'), null, 'activity page omits the redundant slogan');
+assert.ok(paidDom.window.document.querySelector('.referral-card-title [data-testid="referral-activity-info"]'), 'activity details remain accessible beside the leaderboard title');
 assert.equal(paidDom.window.document.querySelector('[data-testid="referral-leaderboard-board"]'), null, 'individual campaign has no redundant team filter');
 assert.match(paidDom.window.document.querySelector('.referral-board-label').textContent, /个人榜/);
 paidDom.window.document.querySelector('[data-testid="referral-invite"]').click();
