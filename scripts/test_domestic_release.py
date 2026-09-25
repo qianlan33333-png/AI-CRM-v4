@@ -58,6 +58,7 @@ def release_readback(sha, manifest_sha, *, receipt_target=None, receipt_exists=F
         "receipt_target_sha": target,
         "receipt_exists": receipt_exists,
         "receipt": receipt,
+        "database_backup_exists": False,
     }
 
 
@@ -862,6 +863,7 @@ class DomesticReleaseTest(unittest.TestCase):
             smoke.assert_called_once_with(
                 fixture["config"], fixture["repo"], fixture["sha1"], fixture["sha1"],
                 installer.digest(fixture["build"] / "release" / "release-files.sha256"),
+                checked_main_sha=fixture["sha1"],
             )
             calls["production"].assert_not_called()
             calls["command"].assert_not_called()
@@ -1153,6 +1155,349 @@ class DomesticReleaseTest(unittest.TestCase):
                 (fixed / "domestic_release_build.py").write_bytes(b"stale builder\n")
                 with self.assertRaisesRegex(RuntimeError, "fixed controller digest mismatch"):
                     worker.verify_controller_installation(config, repo, sha, paths)
+
+    def test_pr38_controller_forward_compatibility_is_exact_and_records_checked_main(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-controller-pr38-forward-") as temporary:
+            root = Path(temporary)
+            repo, _sha, fixed, config, _hashes = self.controller_fixture(root)
+            candidate = worker.PR38_SMOKE_SOURCE_SHA
+            checked_main = "f" * 40
+            candidate_hashes = {
+                "scripts/domestic_release.py": "1" * 64,
+                "scripts/domestic_release_build.py": worker.PR38_FORWARD_BUILDER_SHA256,
+                "deploy/domestic-promote.py": worker.PR38_SOURCE_HELPER_SHA256,
+            }
+            checked_hashes = {
+                "scripts/domestic_release.py": "3" * 64,
+                "scripts/domestic_release_build.py": worker.PR38_FORWARD_BUILDER_SHA256,
+                "deploy/domestic-promote.py": worker.PR38_EXECUTOR_HELPER_SHA256,
+            }
+            installed_hashes = {
+                "scripts/domestic_release.py": checked_hashes["scripts/domestic_release.py"],
+                "scripts/domestic_release_build.py": checked_hashes["scripts/domestic_release_build.py"],
+                "deploy/domestic-promote.py": worker.PR38_EXECUTOR_HELPER_SHA256,
+            }
+
+            def source_digest(_repo, sha, path):
+                return checked_hashes[path] if sha == checked_main else candidate_hashes[path]
+
+            def local_digest(path):
+                if path.name == "domestic_release.py":
+                    return installed_hashes["scripts/domestic_release.py"]
+                if path.name == "domestic_release_build.py":
+                    return installed_hashes["scripts/domestic_release_build.py"]
+                return installed_hashes["deploy/domestic-promote.py"]
+
+            selected = {
+                "source_tree": worker.PR38_SMOKE_SOURCE_TREE,
+                "source_helper_sha256": worker.PR38_SOURCE_HELPER_SHA256,
+                "executor_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+                "executor_source_sha": worker.PR38_HELPER_TRUST_ANCHOR_SHA,
+                "executor_source_tree": worker.PR38_HELPER_TRUST_ANCHOR_TREE,
+                "compatibility": "pr38_source_to_reviewed_main_executor",
+            }
+            with (
+                mock.patch.object(worker, "_smoke_helper_selection", return_value=selected),
+                mock.patch.object(worker, "_git_file_sha256", side_effect=source_digest),
+                mock.patch.object(worker, "_local_file_sha256", side_effect=local_digest),
+                mock.patch.object(worker, "_remote_file_sha256", return_value=installed_hashes["deploy/domestic-promote.py"]),
+                mock.patch.object(worker, "git", return_value="e" * 40),
+                mock.patch.object(worker, "__file__", str(fixed / "domestic_release.py")),
+            ):
+                result = worker.verify_controller_installation(
+                    config,
+                    repo,
+                    candidate,
+                    ["scripts/domestic_release.py", "scripts/domestic_release_build.py", "deploy/domestic-promote.py"],
+                    checked_main_sha=checked_main,
+                )
+                self.assertEqual(result["checked_main_sha"], checked_main)
+                self.assertEqual(result["checked_main_tree"], "e" * 40)
+                self.assertEqual(result["files"]["scripts/domestic_release.py"]["compatibility"], "exact_checked_main_controller")
+                self.assertEqual(result["files"]["scripts/domestic_release_build.py"]["checked_main_sha256"], checked_hashes["scripts/domestic_release_build.py"])
+                self.assertEqual(result["files"]["deploy/domestic-promote.py"]["compatibility"], "pr38_source_to_reviewed_main_executor")
+
+                checked_hashes["scripts/domestic_release.py"] = "5" * 64
+                with self.assertRaisesRegex(RuntimeError, "fixed controller digest mismatch"):
+                    worker.verify_controller_installation(
+                        config,
+                        repo,
+                        candidate,
+                        ["scripts/domestic_release.py"],
+                        checked_main_sha=checked_main,
+                    )
+
+                checked_hashes["scripts/domestic_release.py"] = "3" * 64
+                checked_hashes["scripts/domestic_release_build.py"] = "5" * 64
+                with self.assertRaisesRegex(RuntimeError, "builder is not the exact reviewed source"):
+                    worker.verify_controller_installation(
+                        config,
+                        repo,
+                        candidate,
+                        ["scripts/domestic_release_build.py"],
+                        checked_main_sha=checked_main,
+                    )
+
+                checked_hashes["scripts/domestic_release_build.py"] = worker.PR38_FORWARD_BUILDER_SHA256
+                with self.assertRaisesRegex(RuntimeError, "restricted to the reviewed PR38 source"):
+                    worker.verify_controller_installation(
+                        config,
+                        repo,
+                        "a" * 40,
+                        ["scripts/domestic_release.py"],
+                        checked_main_sha=checked_main,
+                    )
+
+    def test_pr38_helper_selection_binds_exact_source_anchor_and_current_main(self):
+        repo = Path("/unused")
+        checked_main = "f" * 40
+
+        def checked_git(_repo, *args):
+            if args[0] == "rev-parse":
+                sha = args[1].split("^{", 1)[0]
+                return {
+                    worker.PR38_SMOKE_SOURCE_SHA: worker.PR38_SMOKE_SOURCE_TREE,
+                    worker.PR38_HELPER_TRUST_ANCHOR_SHA: worker.PR38_HELPER_TRUST_ANCHOR_TREE,
+                    checked_main: "a" * 40,
+                }[sha]
+            if args[:2] == ("merge-base", "--is-ancestor"):
+                return ""
+            raise AssertionError(args)
+
+        def checked_digest(_repo, sha, path):
+            self.assertEqual(path, "deploy/domestic-promote.py")
+            return {
+                worker.PR38_SMOKE_SOURCE_SHA: worker.PR38_SOURCE_HELPER_SHA256,
+                worker.PR38_HELPER_TRUST_ANCHOR_SHA: worker.PR38_EXECUTOR_HELPER_SHA256,
+                checked_main: worker.PR38_EXECUTOR_HELPER_SHA256,
+            }[sha]
+
+        with mock.patch.object(worker, "git", side_effect=checked_git), mock.patch.object(worker, "_git_file_sha256", side_effect=checked_digest):
+            selection = worker._smoke_helper_selection(repo, worker.PR38_SMOKE_SOURCE_SHA, checked_main)
+            self.assertEqual(selection["source_helper_sha256"], worker.PR38_SOURCE_HELPER_SHA256)
+            self.assertEqual(selection["executor_helper_sha256"], worker.PR38_EXECUTOR_HELPER_SHA256)
+            self.assertEqual(selection["compatibility"], "pr38_source_to_reviewed_main_executor")
+            with self.assertRaisesRegex(RuntimeError, "requires the exact checked main SHA"):
+                worker._smoke_helper_selection(repo, worker.PR38_SMOKE_SOURCE_SHA)
+
+        with (
+            mock.patch.object(worker, "git", side_effect=lambda _repo, *args: "0" * 40 if args[0] == "rev-parse" else ""),
+            mock.patch.object(worker, "_git_file_sha256", side_effect=checked_digest),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "source identity differs"):
+                worker._smoke_helper_selection(repo, worker.PR38_SMOKE_SOURCE_SHA, checked_main)
+
+        def wrong_helper_digest(_repo, sha, path):
+            value = checked_digest(_repo, sha, path)
+            return "b" * 64 if sha == checked_main else value
+
+        with mock.patch.object(worker, "git", side_effect=checked_git), mock.patch.object(worker, "_git_file_sha256", side_effect=wrong_helper_digest):
+            with self.assertRaisesRegex(RuntimeError, "executor is not the exact reviewed main helper"):
+                worker._smoke_helper_selection(repo, worker.PR38_SMOKE_SOURCE_SHA, checked_main)
+
+    def test_smoke_receipt_requires_both_helper_hashes_and_executor_source(self):
+        selection = {
+            "source_tree": worker.PR38_SMOKE_SOURCE_TREE,
+            "source_helper_sha256": worker.PR38_SOURCE_HELPER_SHA256,
+            "executor_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+            "executor_source_sha": worker.PR38_HELPER_TRUST_ANCHOR_SHA,
+            "executor_source_tree": worker.PR38_HELPER_TRUST_ANCHOR_TREE,
+            "compatibility": "pr38_source_to_reviewed_main_executor",
+        }
+        receipt = {
+            "status": "passed",
+            "contract": "alipay_checkout",
+            "test_name": "TestDomesticReleaseInstalledAlipayCheckout",
+            "test_marker": "domestic_release_installed_alipay_checkout: PASS",
+            "stage_role": "staging",
+            "source_sha": worker.PR38_SMOKE_SOURCE_SHA,
+            "source_tree": selection["source_tree"],
+            "installed_sha": worker.PR38_INSTALLED_BASE_SHA,
+            "manifest_sha256": "a" * 64,
+            "helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+            "source_helper_sha256": worker.PR38_SOURCE_HELPER_SHA256,
+            "executor_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+            "executor_source_sha": worker.PR38_HELPER_TRUST_ANCHOR_SHA,
+            "executor_source_tree": worker.PR38_HELPER_TRUST_ANCHOR_TREE,
+            "helper_compatibility": selection["compatibility"],
+            "installed_binary_sha256": "c" * 64,
+            "verified_at_utc": "2026-09-25T00:00:00Z",
+        }
+        verified = worker.verify_stage_smoke_receipt(
+            receipt,
+            worker.PR38_SMOKE_SOURCE_SHA,
+            worker.PR38_INSTALLED_BASE_SHA,
+            "a" * 64,
+            selection,
+        )
+        self.assertIs(verified, receipt)
+        for field in ("source_helper_sha256", "executor_helper_sha256", "executor_source_sha", "executor_source_tree", "helper_compatibility"):
+            changed = dict(receipt)
+            changed[field] = "0" * 64
+            with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, "receipt identity mismatch"):
+                worker.verify_stage_smoke_receipt(
+                    changed,
+                    worker.PR38_SMOKE_SOURCE_SHA,
+                    worker.PR38_INSTALLED_BASE_SHA,
+                    "a" * 64,
+                    selection,
+                )
+
+    def test_pr38_staging_failed_resume_rejects_wrong_cursor_or_receipt(self):
+        state = {
+            "status": "staging_failed",
+            "blocked_sha": worker.PR38_SMOKE_SOURCE_SHA,
+            "processed_sha": worker.PR38_PREVIOUS_CURSOR_SHA,
+            "deployed_source_sha": worker.PR38_INSTALLED_BASE_SHA,
+            "prod_installed_sha": worker.PR38_INSTALLED_BASE_SHA,
+            "failure": "staging installed behavior smoke failed: RuntimeError",
+            "last_stage_smoke": {
+                "source_sha": worker.PR38_SMOKE_SOURCE_SHA,
+                "installed_sha": worker.PR38_INSTALLED_BASE_SHA,
+                "status": "failed",
+            },
+        }
+        worker._validate_pr38_staging_failed_ledger(state, [worker.PR38_SMOKE_SOURCE_SHA])
+        wrong = dict(state, processed_sha="0" * 40)
+        with self.assertRaisesRegex(RuntimeError, "restricted to the exact unpromoted PR38"):
+            worker._validate_pr38_staging_failed_ledger(wrong, [worker.PR38_SMOKE_SOURCE_SHA])
+        with self.assertRaisesRegex(RuntimeError, "restricted to the exact unpromoted PR38"):
+            worker._validate_pr38_staging_failed_ledger(state, ["f" * 40, worker.PR38_SMOKE_SOURCE_SHA])
+        attempted = dict(state, pr38_staging_failed_smoke_attempted={"source_sha": worker.PR38_SMOKE_SOURCE_SHA})
+        with self.assertRaisesRegex(RuntimeError, "restricted to the exact unpromoted PR38"):
+            worker._validate_pr38_staging_failed_ledger(attempted, [worker.PR38_SMOKE_SOURCE_SHA])
+        pending_ci = dict(state)
+        pending_ci.update(
+            status="ci_regression_blocked",
+            failure="main full CI evidence is failing or incomplete; release queue is paused",
+            pr38_staging_failed_resume=dict(worker.PR38_RESUME_MARKER),
+            ci_regression_pause={"candidate_sha": worker.PR38_SMOKE_SOURCE_SHA},
+        )
+        worker._validate_pr38_staging_failed_ledger(pending_ci, [worker.PR38_SMOKE_SOURCE_SHA])
+        pending_ci.update(status="ready", failure=None)
+        pending_ci.pop("ci_regression_pause")
+        worker._validate_pr38_staging_failed_ledger(pending_ci, [worker.PR38_SMOKE_SOURCE_SHA])
+
+        config = {"repo": "/unused"}
+        receipt_present = release_readback(
+            worker.PR38_INSTALLED_BASE_SHA,
+            "a" * 64,
+            receipt_target=worker.PR38_SMOKE_SOURCE_SHA,
+            receipt_exists=True,
+        )
+        with mock.patch.object(worker, "stage_readback", return_value=receipt_present), mock.patch.object(worker, "prod_readback", return_value=receipt_present):
+            with self.assertRaisesRegex(RuntimeError, "success receipt already exists"):
+                worker._verify_pr38_staging_failed_readbacks(config, {
+                    "prod_installed_sha": worker.PR38_INSTALLED_BASE_SHA,
+                    "prod_installed_manifest_sha256": "a" * 64,
+                })
+
+    def test_pr38_staging_failed_poll_resumes_only_after_exact_readback_and_smoke(self):
+        with tempfile.TemporaryDirectory(prefix="domestic-pr38-staging-failed-resume-") as temporary:
+            root = Path(temporary)
+            previous = worker.PR38_PREVIOUS_CURSOR_SHA
+            installed = worker.PR38_INSTALLED_BASE_SHA
+            candidate = worker.PR38_SMOKE_SOURCE_SHA
+            head = "f" * 40
+            manifest = "8" * 64
+            state_path = root / "state.json"
+            state_path.write_text(json.dumps({
+                "status": "staging_failed",
+                "processed_sha": previous,
+                "deployed_source_sha": installed,
+                "prod_installed_sha": installed,
+                "prod_installed_manifest_sha256": manifest,
+                "blocked_sha": candidate,
+                "failure": "staging installed behavior smoke failed: RuntimeError",
+                "last_stage_smoke": {"source_sha": candidate, "installed_sha": installed, "status": "failed"},
+            }))
+            config = {"repo": str(root), "state": str(state_path), "production_enabled": True, "stage_helper": "/fixed/promote.py"}
+            paths = [
+                "scripts/domestic_release.py",
+                "scripts/domestic_release_build.py",
+                "deploy/domestic-promote.py",
+                worker.ALIPAY_SMOKE_FIXTURE,
+            ]
+            plan = {
+                "base_sha": installed,
+                "target_sha": candidate,
+                "changed_paths": paths,
+                "runtime_changed": False,
+                "controller_files": paths[:3],
+            }
+            checked_readback = release_readback(
+                installed,
+                manifest,
+                receipt_target=candidate,
+                receipt_exists=False,
+            )
+            selection = {
+                "source_tree": worker.PR38_SMOKE_SOURCE_TREE,
+                "source_helper_sha256": worker.PR38_SOURCE_HELPER_SHA256,
+                "executor_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+                "executor_source_sha": worker.PR38_HELPER_TRUST_ANCHOR_SHA,
+                "executor_source_tree": worker.PR38_HELPER_TRUST_ANCHOR_TREE,
+                "compatibility": "pr38_source_to_reviewed_main_executor",
+            }
+            smoke_receipt = {
+                "status": "passed",
+                "source_sha": candidate,
+                "installed_sha": installed,
+                "manifest_sha256": manifest,
+                "source_helper_sha256": worker.PR38_SOURCE_HELPER_SHA256,
+                "executor_helper_sha256": worker.PR38_EXECUTOR_HELPER_SHA256,
+                "helper_compatibility": "pr38_source_to_reviewed_main_executor",
+            }
+
+            def fake_git(_repo, *args):
+                if args == ("rev-parse", "refs/remotes/origin/main"):
+                    return head
+                if args[0] == "rev-parse" and args[1] == f"{previous}^{{tree}}":
+                    return "7" * 40
+                if args[0] == "rev-parse" and args[1] == f"{candidate}^{{tree}}":
+                    return worker.PR38_SMOKE_SOURCE_TREE
+                if args[0] == "rev-parse" and args[1] == f"{head}^{{tree}}":
+                    return "6" * 40
+                return ""
+
+            with (
+                mock.patch.object(worker, "git", side_effect=fake_git),
+                mock.patch.object(worker, "require_official_origin"),
+                mock.patch.object(worker, "first_parent_queue", return_value=[candidate]),
+                mock.patch.object(worker, "exact_check_success", return_value=True),
+                mock.patch.object(worker, "_main_full_regression_blocker", return_value=None) as full_run,
+                mock.patch.object(worker, "command", return_value=json.dumps(plan)),
+                mock.patch.object(worker, "_trusted_changed_paths", side_effect=[paths, paths]),
+                mock.patch.object(worker, "verify_controller_installation", return_value={"duration_seconds": 0.2, "status": "matched"}) as controllers,
+                mock.patch.object(worker, "stage_readback", return_value=checked_readback) as stage_readback,
+                mock.patch.object(worker, "prod_readback", return_value=checked_readback) as prod_readback,
+                mock.patch.object(worker, "_installed_stage_manifest_sha", return_value=manifest),
+                mock.patch.object(worker, "_smoke_helper_selection", return_value=selection),
+                mock.patch.object(worker, "run_stage_smoke", return_value=smoke_receipt) as smoke,
+                mock.patch.object(worker, "build_candidate") as build,
+                mock.patch.object(worker, "stage_install") as stage_install,
+                mock.patch.object(worker, "copy_payload") as production_copy,
+            ):
+                result = worker.poll(config)
+
+            self.assertEqual(result["status"], "ready")
+            self.assertEqual(result["processed_sha"], candidate)
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state["processed_sha"], candidate)
+            self.assertEqual(state["deployed_source_sha"], installed)
+            self.assertEqual(state["prod_installed_sha"], installed)
+            self.assertEqual(state["last_stage_smoke"]["executor_helper_sha256"], worker.PR38_EXECUTOR_HELPER_SHA256)
+            self.assertEqual(state["last_pr38_resume_readback"]["checked_main_sha"], head)
+            self.assertNotIn("pr38_staging_failed_resume", state)
+            self.assertNotIn("pr38_staging_failed_smoke_attempted", state)
+            self.assertEqual(stage_readback.call_args_list[0].args, (candidate,))
+            self.assertEqual(prod_readback.call_args_list[0].args, (config, candidate))
+            self.assertEqual(smoke.call_args.kwargs["checked_main_sha"], head)
+            self.assertEqual(full_run.call_args.args[1:], (candidate, head))
+            controllers.assert_called_once()
+            build.assert_not_called()
+            stage_install.assert_not_called()
+            production_copy.assert_not_called()
 
     def test_controller_update_mismatch_halts_queue_without_advancing_or_installing_app(self):
         with tempfile.TemporaryDirectory() as temporary:
