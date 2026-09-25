@@ -1831,6 +1831,28 @@
       ],
       "reason": "Record the V4 SCRM machine customer window and guarded workbench review-plan OpenAPI contract with its coordinated source index and lock. Frozen donor payloads remain unchanged; this declaration does not enable sending.",
       "review_reference": "User explicitly approved recording the exact three-file P5 authority diff for PR #48, base 079813d and head 6756399, on 2026-09-25. Ordinary PR review and accurate-head CI remain required; this does not authorize merge, deployment or SCRM sending."
+    },
+    {
+      "base_commit": "0ee8eadfdc61ef1d3b8d6506e85618069710e0e1",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "3e6056f76216ddb8215316c939be4cbc4e96c66df62908572c55bbc4a0af5a4c",
+          "head_sha256": "da7820a66b28c4a2c02ccee7ac3e98f3f6766175b1cff009a2de485c998437fe"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "de4992db74b756a0ea1e2ca4c1e8a230d0e99d6e50872da44c454cf593b7b892",
+          "head_sha256": "9c2b06b0fed98af828a73f93873bbe5e57c438fc68957e988efe4c08f8ca0a56"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "114da85c58d14d835aaaf8b881a4e08a6d2ba237a2e989f4a606bff0320ad369",
+          "head_sha256": "ac7697fdfdc5d3e2f72c8aae3817906189a8cad379e451f0347fe74133427188"
+        }
+      ],
+      "reason": "Carry the identical three-file V4 SCRM authority change from PR #48 onto current main while preserving the already deployed production hotfix lineage. The before and after file hashes match the earlier approved record exactly.",
+      "review_reference": "The user approved the exact three-file PR #48 P5 change on 2026-09-25 and subsequently explicitly requested direct hotfix deployment of #48. The current-main source bytes equal approved base 079813d, and the resulting three source file hashes remain unchanged. Exact-head CI and production safety gates remain required."
     }
   ]
 }
