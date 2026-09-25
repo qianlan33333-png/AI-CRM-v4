@@ -1325,10 +1325,43 @@ def _upload_and_store_bundle(config: dict[str, Any], bundle: Path, metadata: dic
     expected = {"status": "verified", "source_sha": sha, "source_tree": tree,
                 "previous_main_sha": metadata["previous_main_sha"],
                 "bundle_sha256": metadata["bundle_sha256"], "self_contained": True}
-    if baseline_transition:
-        expected["baseline_transition"] = True
     if not isinstance(receipt, dict) or any(receipt.get(key) != value for key, value in expected.items()):
         raise ReleaseError("production source backup receipt does not match the candidate bundle")
+    if baseline_transition:
+        # The installed 291 helper persists and verifies this flag in its
+        # root-owned receipt, but its save/verify JSON responses intentionally
+        # omit it. Verify the durable object through that compatible contract.
+        return _verify_saved_production_bundle(config, metadata, baseline_transition=True)
+    return receipt
+
+
+def _verify_saved_production_bundle(config: dict[str, Any], metadata: dict[str, Any],
+                                    *, baseline_transition: bool = False) -> dict[str, Any]:
+    """Read and verify an already-persisted production bundle without upload."""
+    args = ["sudo", "-n", config["prod_helper"], "--verify-domestic-source-backup",
+            "--source-sha", metadata["source_sha"],
+            "--source-tree", metadata["source_tree"],
+            "--previous-main-sha", metadata["previous_main_sha"],
+            "--source-bundle-sha256", metadata["bundle_sha256"]]
+    if baseline_transition:
+        args.append("--allow-baseline-transition")
+    raw = _production_ssh(config, *args, timeout=600)
+    try:
+        receipt = json.loads(raw.splitlines()[-1])
+    except (IndexError, json.JSONDecodeError) as exc:
+        raise ReleaseError("production source backup verification returned invalid JSON") from exc
+    expected = {"status": "verified", "source_sha": metadata["source_sha"],
+                "source_tree": metadata["source_tree"],
+                "previous_main_sha": metadata["previous_main_sha"],
+                "bundle_sha256": metadata["bundle_sha256"], "self_contained": True}
+    if not isinstance(receipt, dict) or any(receipt.get(key) != value for key, value in expected.items()):
+        raise ReleaseError("production source backup readback does not match the saved bundle")
+    if "bundle_bytes" in metadata and receipt.get("bundle_bytes") != metadata["bundle_bytes"]:
+        raise ReleaseError("production source backup readback has a different bundle size")
+    # The old helper validates baseline_transition against the durable receipt
+    # before returning this response; only the response omits the field.
+    if baseline_transition:
+        receipt["baseline_transition"] = True
     return receipt
 
 
@@ -2336,6 +2369,88 @@ def prepare_baseline(config: dict[str, Any]) -> dict[str, Any]:
                 "production_backup": saved, "build_toolchain": toolchain, "activation_required": True}
 
 
+def _load_existing_baseline_bundle(repo: Path, work_root: Path, *, source_sha: str,
+                                   source_tree: str, previous_main_sha: str) -> tuple[Path, dict[str, Any]]:
+    """Load, never create, the exact local bundle for baseline recovery."""
+    bundle_root = work_root / "source-bundles"
+    bundle = bundle_root / f"{source_sha}.bundle"
+    metadata_path = bundle_root / f"{source_sha}.json"
+    if (bundle_root.is_symlink() or not bundle_root.is_dir()
+            or bundle.is_symlink() or not bundle.is_file()
+            or metadata_path.is_symlink() or not metadata_path.is_file()):
+        raise ReleaseError("baseline recovery requires the existing local source bundle and metadata")
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ReleaseError("existing baseline source bundle metadata is invalid") from exc
+    actual_digest = _file_sha256(bundle)
+    actual_size = bundle.stat().st_size
+    expected = {"schema_version": 1, "source_sha": source_sha, "source_tree": source_tree,
+                "previous_main_sha": previous_main_sha, "bundle_sha256": actual_digest,
+                "bundle_bytes": actual_size, "self_contained": True,
+                "verified_from_empty_repository": True, "baseline_transition": True}
+    if not isinstance(metadata, dict) or any(metadata.get(key) != value for key, value in expected.items()):
+        raise ReleaseError("existing baseline bundle identity or digest does not match recovery inputs")
+    # This re-verifies bundle refs, ancestry, object completeness, and the tree;
+    # the existence check above prevents this helper from creating a fresh bundle.
+    verified_bundle, verified_metadata = _create_full_bundle(
+        repo, work_root, source_sha, source_tree,
+        previous_main_sha=previous_main_sha, baseline_transition=True,
+    )
+    if verified_bundle != bundle or verified_metadata.get("bundle_sha256") != actual_digest:
+        raise ReleaseError("existing baseline source bundle changed during verification")
+    return bundle, verified_metadata
+
+
+def resume_baseline(config: dict[str, Any]) -> dict[str, Any]:
+    """Finish a baseline whose exact source bundle is already durable on production.
+
+    This path is deliberately read-only with respect to the bundle: it never
+    uploads, saves, deletes, or rebuilds it. The production helper validates the
+    saved receipt and bytes before the idempotent initial cursor write.
+    """
+    if os.geteuid() != 0:
+        raise ReleaseError("resume-baseline must run as root")
+    config = _check_config(config)
+    if config.get("production_enabled") is not True:
+        raise ReleaseError("baseline resumption requires production_enabled=true in the protected config")
+    repo, state_path = Path(config["repo"]), Path(config["state"])
+    with _locked(Path(config["lock"]), nonblocking=True):
+        _assert_release_timers_stopped()
+        if state_path.exists() or state_path.is_symlink():
+            raise ReleaseError("domestic ledger already exists; baseline resumption never overwrites it")
+        repository = verify_bare_repository(repo, controller_path=config["controller_path"],
+                                            push_group=config["push_group"])
+        main_sha, main_tree = repository["main_sha"], repository["main_tree"]
+        prod_app, _ = _installed_app_identity(config, production=True)
+        stage_app, _ = _installed_app_identity(config, production=False)
+        if prod_app != stage_app:
+            raise ReleaseError("staging and production installed application identities differ")
+        _validate_baseline_identity(repo, main_sha, main_tree, prod_app)
+        _verify_controller_files(config, repo, main_sha, sorted(builder.FIXED_CONTROLLER_FILES))
+        _pin_candidate(repo, main_sha)
+        _bundle, bundle_meta = _load_existing_baseline_bundle(
+            repo, Path(config["work_root"]), source_sha=main_sha,
+            source_tree=main_tree, previous_main_sha=prod_app["sha"],
+        )
+        saved = _verify_saved_production_bundle(config, bundle_meta, baseline_transition=True)
+        _record_production_cursor(config, candidate_sha=main_sha, candidate_tree=main_tree,
+                                  previous_main_sha=main_sha, installed_app=prod_app,
+                                  bundle_sha256=bundle_meta["bundle_sha256"], initialize=True)
+        cursor = _verify_production_cursor(config)["cursor"]
+        expected_cursor = {"main_sha": main_sha, "main_tree": main_tree,
+                           "installed_app_sha": prod_app["sha"],
+                           "installed_app_tree": prod_app["tree"],
+                           "installed_manifest_sha256": prod_app["manifest_sha256"],
+                           "source_bundle_sha256": bundle_meta["bundle_sha256"]}
+        if any(cursor.get(key) != value for key, value in expected_cursor.items()):
+            raise ReleaseError("resumed production baseline cursor does not match the saved bundle")
+        return {"status": "baseline_resumed", "main_sha": main_sha, "main_tree": main_tree,
+                "installed_app_sha": prod_app["sha"], "source_bundle_sha256": bundle_meta["bundle_sha256"],
+                "production_backup": saved, "activation_required": True,
+                "bundle_uploaded": False, "application_deployed": False}
+
+
 def verify(config: dict[str, Any]) -> dict[str, Any]:
     """Read-only check of stage bare main, durable ledger, and production cursor."""
     config = _check_config(config)
@@ -2443,7 +2558,7 @@ def restricted_ssh() -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "activate", "verify", "submit", "submit-stdin", "ack-stage-reset", "maintenance-check",
+    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "submit-stdin", "ack-stage-reset", "maintenance-check",
                                             "poll", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
     parser.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG))
     parser.add_argument("--repo", type=Path)
@@ -2493,6 +2608,8 @@ def main(argv: list[str] | None = None) -> int:
             result = recover_partial_bootstrap(config, args.sha, args.tree, args.installed_app_sha)
         elif args.action == "prepare-baseline":
             result = prepare_baseline(config)
+        elif args.action == "resume-baseline":
+            result = resume_baseline(config)
         elif args.action == "submit-stdin":
             result = _submit_stdin(config)
         elif args.action == "ack-stage-reset":

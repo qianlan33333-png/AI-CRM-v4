@@ -714,12 +714,22 @@
    APP_SHA=960b30e9406fae2045aeb7ef5dce863976407727
    test "$(sudo /usr/bin/git --git-dir=/opt/aicrm/domestic/source.git rev-parse refs/heads/main)" = "$BASELINE_SHA"
    test "$(sudo /usr/bin/git --git-dir=/opt/aicrm/domestic/source.git rev-parse 'refs/heads/main^{tree}')" = "$BASELINE_TREE"
-   sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" --config /etc/aicrm/domestic-main-release.json prepare-baseline
+   # 本次 source backup 已存在；此处执行只验证并恢复 cursor 的入口。
+   sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" --config /etc/aicrm/domestic-main-release.json resume-baseline
    sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" --config /etc/aicrm/domestic-main-release.json activate
    sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" --config /etc/aicrm/domestic-main-release.json verify
    ```
 
-   `prepare-baseline`、`activate`、`verify` 读回的 source main SHA/tree 与生产 cursor 必须完全一致，初始队列为空。之后将准确 PR #46 head 通过现有受限入口登记为 `base=291` 的队首候选；不得 poll。先后用固定 291 controller、verified seed 导出的 exact candidate script 对同一 SHA 运行 `maintenance-check`：
+   本次中断前生产 source bundle 与 receipt 已持久化，所以必须先 `resume-baseline`；全新初始化且确认 production 尚无对应 backup 时才执行一次 `prepare-baseline`。两种路径返回的 source main SHA/tree 与生产 cursor 必须完全一致，初始队列为空。之后将准确 PR #46 head 通过现有受限入口登记为 `base=291` 的队首候选；不得 poll。先后用固定 291 controller、verified seed 导出的 exact candidate script 对同一 SHA 运行 `maintenance-check`：
+
+   如果后续 `prepare-baseline` 在生产 source bundle 已保存后中断，**不要再次运行 `prepare-baseline`**。先只读核对 stage 本地 `.bundle` 与 `.json` 的 SHA、树、旧 app SHA 和 bundle 摘要，再使用同一 verified PR46 head 临时脚本执行 `resume-baseline`：
+
+   ```bash
+   sudo /usr/bin/python3 "$SOURCE_WORK/scripts/domestic_main_release.py" \
+     --config /etc/aicrm/domestic-main-release.json resume-baseline
+   ```
+
+   该恢复入口只验证已有本地 bundle/meta，并让已安装的 291 production helper 只读核验其 root-owned bundle 与 receipt（包含持久 `baseline_transition=true`），随后幂等初始化/读回 production cursor。它不重新传包、不调用保存命令、不构建或安装应用。摘要、身份、receipt、现存 cursor 任一不符就停止；不得删除、覆盖、重建或重传。只有返回 `baseline_resumed` 且 source SHA/tree、app SHA、bundle SHA 全部与现场预检一致，才继续 `activate` 和 `verify`。
 
    ```bash
    set -euo pipefail

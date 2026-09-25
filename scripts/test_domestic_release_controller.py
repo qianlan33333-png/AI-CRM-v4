@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager, nullcontext, redirect_stdout
 import io
 import json
 import os
@@ -790,6 +790,165 @@ class DomesticMainReleaseTests(unittest.TestCase):
                 release._validate_baseline_identity(repo, base, base_tree, {
                     "sha": candidate, "tree": candidate_tree, "manifest_sha256": "b" * 64,
                 })
+
+    def test_baseline_upload_accepts_installed_291_response_then_verifies_durable_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bundle = root / "baseline.bundle"
+            bundle.write_bytes(b"verified baseline bundle")
+            sha, tree, previous = "1" * 40, "2" * 40, "3" * 40
+            digest = release._file_sha256(bundle)
+            metadata = {"source_sha": sha, "source_tree": tree, "previous_main_sha": previous,
+                        "bundle_sha256": digest, "bundle_bytes": bundle.stat().st_size,
+                        "baseline_transition": True}
+            saved = {"status": "verified", "source_sha": sha, "source_tree": tree,
+                     "previous_main_sha": previous, "bundle_sha256": digest,
+                     "self_contained": True, "bundle_bytes": bundle.stat().st_size}
+            calls: list[tuple[str, ...]] = []
+
+            def production_ssh(_config, *args, **_kwargs):
+                calls.append(tuple(args))
+                if "--save-domestic-source-bundle" in args:
+                    # Installed 291 helper persists baseline_transition in its
+                    # receipt but omits it from this success response.
+                    return json.dumps(saved) + "\n"
+                if "--verify-domestic-source-backup" in args:
+                    self.assertIn("--allow-baseline-transition", args)
+                    return json.dumps(saved) + "\n"
+                return ""
+
+            config = {"prod_source_bundle_incoming": release.SOURCE_BUNDLE_INCOMING_ROOT,
+                      "prod_user": "ubuntu", "prod_host": "production.test", "prod_helper": "/fixed/helper",
+                      "prod_key": "/fixed/key", "prod_known_hosts": "/fixed/known-hosts"}
+            with mock.patch.object(release, "_production_ssh", side_effect=production_ssh), \
+                 mock.patch.object(release.legacy, "command", return_value="") as transfer:
+                receipt = release._upload_and_store_bundle(config, bundle, metadata, baseline_transition=True)
+
+            self.assertTrue(receipt["baseline_transition"])
+            transfer.assert_called_once()
+            self.assertEqual(sum("--save-domestic-source-bundle" in call for call in calls), 1)
+            self.assertEqual(sum("--verify-domestic-source-backup" in call for call in calls), 1)
+
+    def test_saved_baseline_verification_rejects_digest_mismatch(self) -> None:
+        metadata = {"source_sha": "1" * 40, "source_tree": "2" * 40,
+                    "previous_main_sha": "3" * 40, "bundle_sha256": "a" * 64,
+                    "bundle_bytes": 24, "baseline_transition": True}
+        response = {"status": "verified", "source_sha": metadata["source_sha"],
+                    "source_tree": metadata["source_tree"],
+                    "previous_main_sha": metadata["previous_main_sha"],
+                    "bundle_sha256": "b" * 64, "self_contained": True, "bundle_bytes": 24}
+        with mock.patch.object(release, "_production_ssh", return_value=json.dumps(response)) as ssh, \
+             self.assertRaisesRegex(release.ReleaseError, "readback does not match"):
+            release._verify_saved_production_bundle({"prod_helper": "/fixed/helper"}, metadata,
+                                                    baseline_transition=True)
+        self.assertIn("--allow-baseline-transition", ssh.call_args.args)
+
+    def _baseline_resume_fixture(self, root: Path) -> tuple[dict, str, str, dict]:
+        repo, app_sha, baseline_sha, _other = make_repository(root)
+        subprocess.run(["git", f"--git-dir={repo}", "update-ref", "refs/heads/main", baseline_sha, app_sha],
+                       check=True)
+        release._pin_candidate(repo, baseline_sha)
+        baseline_tree = release._tree(repo, baseline_sha)
+        app = {"sha": app_sha, "tree": release._tree(repo, app_sha), "manifest_sha256": "a" * 64}
+        work_root = root / "work"
+        _bundle, bundle_meta = release._create_full_bundle(
+            repo, work_root, baseline_sha, baseline_tree,
+            previous_main_sha=app_sha, baseline_transition=True,
+        )
+        private_dir = root / "private"
+        private_dir.mkdir(mode=0o700)
+        config = {"repo": str(repo), "state": str(root / "state.json"),
+                  "lock": str(private_dir / "controller.lock"), "work_root": str(work_root),
+                  "controller_path": "/fixed/controller", "push_group": "release-push-test",
+                  "prod_helper": "/fixed/helper", "production_enabled": True}
+        return config, app_sha, baseline_sha, {"app": app, "tree": baseline_tree, "bundle_meta": bundle_meta}
+
+    def test_resume_baseline_reuses_verified_local_and_production_pair_on_reentry(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, _app_sha, baseline_sha, evidence = self._baseline_resume_fixture(root)
+            app = evidence["app"]
+            cursor = {"main_sha": baseline_sha, "main_tree": evidence["tree"],
+                      "installed_app_sha": app["sha"], "installed_app_tree": app["tree"],
+                      "installed_manifest_sha256": app["manifest_sha256"],
+                      "source_bundle_sha256": evidence["bundle_meta"]["bundle_sha256"]}
+            production_payload = {"cursor": cursor}
+            record_calls = []
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", side_effect=lambda value: value), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_safe_directory"), \
+                 mock.patch.object(release, "_assert_release_timers_stopped"), \
+                 mock.patch.object(release, "verify_bare_repository", return_value={"main_sha": baseline_sha, "main_tree": evidence["tree"]}), \
+                 mock.patch.object(release, "_installed_app_identity", side_effect=lambda *_a, **_kw: (app, {})), \
+                 mock.patch.object(release, "_validate_baseline_identity"), \
+                 mock.patch.object(release, "_verify_controller_files"), \
+                 mock.patch.object(release, "_verify_saved_production_bundle", return_value={"status": "verified", "bundle_sha256": evidence["bundle_meta"]["bundle_sha256"]}) as verify_saved, \
+                 mock.patch.object(release, "_record_production_cursor", side_effect=lambda *a, **kw: record_calls.append(kw) or {"status": "ready"}), \
+                 mock.patch.object(release, "_verify_production_cursor", return_value=production_payload), \
+                 mock.patch.object(release, "_upload_and_store_bundle") as upload, \
+                 mock.patch.object(release.legacy, "command") as transfer:
+                first = release.resume_baseline(config)
+                # The production helper's initialize operation is create-only
+                # for a new cursor and idempotent for this exact existing one.
+                second = release.resume_baseline(config)
+
+            self.assertEqual(first["status"], "baseline_resumed")
+            self.assertFalse(first["bundle_uploaded"])
+            self.assertFalse(first["application_deployed"])
+            self.assertEqual(second["source_bundle_sha256"], first["source_bundle_sha256"])
+            self.assertEqual(len(record_calls), 2)
+            self.assertTrue(all(call["initialize"] is True for call in record_calls))
+            self.assertEqual(verify_saved.call_count, 2)
+            upload.assert_not_called()
+            transfer.assert_not_called()
+
+    def test_resume_baseline_stops_before_cursor_on_local_bundle_digest_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, _app_sha, baseline_sha, evidence = self._baseline_resume_fixture(root)
+            bundle = Path(config["work_root"]) / "source-bundles" / f"{baseline_sha}.bundle"
+            bundle.write_bytes(bundle.read_bytes() + b"tamper")
+            app = evidence["app"]
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", side_effect=lambda value: value), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_safe_directory"), \
+                 mock.patch.object(release, "_assert_release_timers_stopped"), \
+                 mock.patch.object(release, "verify_bare_repository", return_value={"main_sha": baseline_sha, "main_tree": evidence["tree"]}), \
+                 mock.patch.object(release, "_installed_app_identity", side_effect=lambda *_a, **_kw: (app, {})), \
+                 mock.patch.object(release, "_validate_baseline_identity"), \
+                 mock.patch.object(release, "_verify_controller_files"), \
+                 mock.patch.object(release, "_verify_saved_production_bundle") as verify_saved, \
+                 mock.patch.object(release, "_record_production_cursor") as record:
+                with self.assertRaisesRegex(release.ReleaseError, "identity or digest"):
+                    release.resume_baseline(config)
+            verify_saved.assert_not_called()
+            record.assert_not_called()
+
+    def test_resume_baseline_stops_when_existing_cursor_readback_has_another_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, _app_sha, baseline_sha, evidence = self._baseline_resume_fixture(root)
+            app = evidence["app"]
+            wrong_cursor = {"main_sha": "f" * 40, "main_tree": evidence["tree"],
+                            "installed_app_sha": app["sha"], "installed_app_tree": app["tree"],
+                            "installed_manifest_sha256": app["manifest_sha256"],
+                            "source_bundle_sha256": evidence["bundle_meta"]["bundle_sha256"]}
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", side_effect=lambda value: value), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_safe_directory"), \
+                 mock.patch.object(release, "_assert_release_timers_stopped"), \
+                 mock.patch.object(release, "verify_bare_repository", return_value={"main_sha": baseline_sha, "main_tree": evidence["tree"]}), \
+                 mock.patch.object(release, "_installed_app_identity", side_effect=lambda *_a, **_kw: (app, {})), \
+                 mock.patch.object(release, "_validate_baseline_identity"), \
+                 mock.patch.object(release, "_verify_controller_files"), \
+                 mock.patch.object(release, "_verify_saved_production_bundle", return_value={"status": "verified"}), \
+                 mock.patch.object(release, "_record_production_cursor", return_value={"status": "ready"}), \
+                 mock.patch.object(release, "_verify_production_cursor", return_value={"cursor": wrong_cursor}):
+                with self.assertRaisesRegex(release.ReleaseError, "cursor does not match"):
+                    release.resume_baseline(config)
 
     def test_receive_hook_rejects_main_deletion_non_fast_forward_and_shell_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
