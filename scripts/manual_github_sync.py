@@ -21,6 +21,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -576,17 +577,21 @@ def synchronize(
     if changes:
         # Deliberately no --force, --force-with-lease, or branch deletion.
         # Git's ordinary fast-forward check rejects concurrent divergent updates.
+        # Isolate local hooks and tag-following config: the operator's local Git
+        # config must not expand this one-ref push into other remote writes.
         report["github_target_sha"] = domestic_sha
         try:
-            result = subprocess.run(
-                ["git", "-C", str(repo), "push", "--porcelain", github_remote,
-                 f"{domestic_sha}:refs/heads/main"],
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=120,
-                check=False,
-            )
+            with tempfile.TemporaryDirectory(prefix="aicrm-github-sync-hooks-") as hooks_path:
+                result = subprocess.run(
+                    ["git", "-C", str(repo), "-c", f"core.hooksPath={hooks_path}",
+                     "-c", f"remote.{github_remote}.mirror=false", "push", "--no-follow-tags",
+                     "--porcelain", github_remote, f"{domestic_sha}:refs/heads/main"],
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=120,
+                    check=False,
+                )
             push_response = "success" if result.returncode == 0 else "rejected"
         except (OSError, subprocess.TimeoutExpired):
             # A timeout or transport interruption cannot establish whether the

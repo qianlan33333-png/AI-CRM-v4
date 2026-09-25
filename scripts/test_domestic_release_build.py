@@ -73,6 +73,13 @@ class DomesticReleaseBuildTests(unittest.TestCase):
         self.assertTrue(unknown.runtime_changed)
         self.assertTrue(unknown.full_build)
 
+    def test_manual_github_sync_is_operator_only_not_an_application_build(self) -> None:
+        result = builder.classify_paths(["scripts/manual_github_sync.py"])
+        self.assertFalse(result.runtime_changed)
+        self.assertFalse(result.full_build)
+        self.assertEqual(result.build_mode, "none")
+        self.assertEqual(result.controller_files, [])
+
     def test_aicrm_chromium_journeys_are_tests_but_application_mjs_stays_graph_checked(self) -> None:
         invitation_journey = "cmd/aicrm/invitation_chromium_journey.mjs"
         repository = Path(__file__).resolve().parents[1]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -144,6 +145,31 @@ class ManualGitHubSyncTests(unittest.TestCase):
         self.assertEqual(result["github_pending_commit_count"], 0)
         self.assertEqual(run_git(self.repo, "ls-remote", str(self.github), "refs/heads/main").split()[0], self.domestic_sha)
 
+    def test_push_ignores_local_hook_follow_tags_and_mirror_settings(self) -> None:
+        marker = self.root / "pre-push-ran"
+        hooks = self.repo / ".git" / "hooks"
+        hook = hooks / "pre-push"
+        hook.write_text(
+            "#!/bin/sh\n"
+            f"printf ran > {shlex.quote(str(marker))}\n"
+            f"git -C {shlex.quote(str(self.repo))} -c core.hooksPath=/dev/null push -q origin HEAD:refs/heads/hook-leak\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+        run_git(self.repo, "config", "push.followTags", "true")
+        run_git(self.repo, "config", "remote.origin.mirror", "true")
+        run_git(self.repo, "tag", "-a", "unrelated-annotated-tag", "-m", "must not be pushed", self.domestic_sha)
+
+        result = self.sync_local_remotes(execute=True)
+
+        self.assertEqual(result["status"], "synchronized")
+        self.assertFalse(marker.exists(), "manual sync must not execute the local pre-push hook")
+        self.assertEqual(run_git(self.repo, "ls-remote", str(self.github), "refs/heads/main").split()[0], self.domestic_sha)
+        refs = subprocess.check_output(
+            ["git", "--git-dir", str(self.github), "for-each-ref", "--format=%(refname)"], text=True
+        ).strip()
+        self.assertEqual(refs.splitlines(), ["refs/heads/main"])
+
     def test_successful_push_with_failed_github_readback_reports_unknown_and_target(self) -> None:
         original_fetch = sync.fetch_main
         github_fetches = 0
@@ -177,7 +203,8 @@ class ManualGitHubSyncTests(unittest.TestCase):
 
         def push_then_timeout(args, *positional, **kwargs):
             nonlocal push_calls
-            if isinstance(args, list) and len(args) >= 4 and args[:2] == ["git", "-C"] and Path(args[2]).resolve() == self.repo.resolve() and args[3] == "push":
+            if (isinstance(args, list) and len(args) >= 4 and args[:2] == ["git", "-C"]
+                    and Path(args[2]).resolve() == self.repo.resolve() and "push" in args):
                 push_calls += 1
                 original_run(args, *positional, **kwargs)
                 raise subprocess.TimeoutExpired(args, timeout=120)
