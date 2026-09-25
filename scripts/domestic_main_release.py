@@ -2483,6 +2483,9 @@ def _run_baseline_overlay_preflight(config: dict[str, Any], repo: Path, *,
     _safe_directory(work_root)
     with tempfile.TemporaryDirectory(prefix="baseline-overlay-check-", dir=work_root) as temporary:
         check_root = Path(temporary)
+        # The isolated build account must traverse this root-owned scratch
+        # parent to read the candidate and trusted-policy worktrees.
+        os.chmod(check_root, 0o755)
         worktree = check_root / "candidate"
         _run(["git", f"--git-dir={repo}", "worktree", "add", "--detach", str(worktree), candidate_sha], timeout=120)
         _make_worktree_metadata_readable(repo, worktree)

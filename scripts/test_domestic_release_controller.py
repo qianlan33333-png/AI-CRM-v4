@@ -902,10 +902,15 @@ class DomesticMainReleaseTests(unittest.TestCase):
             host = {"host_role": "staging", "postgres_major": 16,
                     "database_connection": "verified", "helper_sha256": "b" * 64}
             config = {"work_root": str(work_root), "stage_helper": "/stage/helper"}
+
+            def check_traversable_parent(_config, _repo, worktree, _report_dir, _base, _head):
+                self.assertEqual(stat.S_IMODE(worktree.parent.stat().st_mode), 0o755)
+                return receipt
+
             with mock.patch.object(release, "_safe_directory"), \
                  mock.patch.object(release, "_run"), \
                  mock.patch.object(release, "_make_worktree_metadata_readable"), \
-                 mock.patch.object(release, "_check_report", return_value=receipt) as check, \
+                 mock.patch.object(release, "_check_report", side_effect=check_traversable_parent) as check, \
                  mock.patch.object(release, "_build_command") as build, \
                  mock.patch.object(release, "_tree", return_value="2" * 40), \
                  mock.patch.object(release, "_run_stage_helper_host_contract", return_value=host) as contract:
