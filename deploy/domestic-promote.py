@@ -8,6 +8,7 @@ legacy install lock so an old/manual installer cannot switch current at once.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import fcntl
 import grp
 import hashlib
@@ -59,6 +60,13 @@ SMOKE_SOURCE_REMOTES = {
     "git@github.com:qianlan33333-png/AI-CRM-v4.git",
     "https://github.com/qianlan33333-png/AI-CRM-v4.git",
 }
+DOMESTIC_INCOMING = ROOT / "domestic-incoming"
+SOURCE_BACKUPS = ROOT / "source-backups"
+DOMESTIC_MAIN = ROOT / "domestic-main"
+DOMESTIC_MAIN_STATE = DOMESTIC_MAIN / "state.json"
+DOMESTIC_SOURCE_RECEIPT_SUFFIX = ".bundle.json"
+DOMESTIC_SOURCE_BUNDLE_MIN_FREE_BYTES = 1024 * 1024 * 1024
+DOMESTIC_SOURCE_REFS = ("refs/heads/main", "refs/domestic/candidates/{sha}")
 # These identities were read back from the current domestic VMs. If a host is
 # renamed or its private address changes, releases must stop until this mapping
 # is reviewed and updated in a trusted helper change.
@@ -1535,6 +1543,650 @@ def make_release_directories_traversable(release: Path) -> None:
             directory.chmod(safe_mode)
 
 
+def _valid_sha(value: str, label: str) -> str:
+    if not isinstance(value, str) or not SHA.fullmatch(value):
+        raise ValueError(f"invalid {label}")
+    return value
+
+
+def _valid_digest(value: str, label: str) -> str:
+    if not isinstance(value, str) or not FILE_SHA.fullmatch(value):
+        raise ValueError(f"invalid {label}")
+    return value
+
+
+def _assert_root_directory(path: Path, *, create: bool = False, mode: int = 0o700, private: bool = False) -> None:
+    if path.is_symlink():
+        raise RuntimeError("fixed domestic release directory is unsafe")
+    if not path.exists():
+        if not create:
+            raise RuntimeError("fixed domestic release directory is missing")
+        path.mkdir(mode=mode, parents=True, exist_ok=False)
+        os.chown(path, 0, 0)
+        os.chmod(path, mode)
+    info = path.lstat()
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) & 0o022
+        or (private and stat.S_IMODE(info.st_mode) != 0o700)
+    ):
+        raise RuntimeError("fixed domestic release directory is unsafe")
+
+
+def _assert_root_file(path: Path, *, exact_mode: int | None = None) -> os.stat_result:
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise RuntimeError("fixed domestic release file is missing or unsafe") from exc
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or (exact_mode is not None and stat.S_IMODE(info.st_mode) != exact_mode)
+        or (exact_mode is None and stat.S_IMODE(info.st_mode) & 0o022)
+        or path.is_symlink()
+    ):
+        raise RuntimeError("fixed domestic release file is unsafe")
+    return info
+
+
+def _git_checked(repository: Path, *args: str, timeout: int = 60) -> str:
+    environment = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": "/root",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_OPTIONAL_LOCKS": "0",
+    }
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repository), *args],
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("source bundle validation failed") from exc
+    if result.returncode != 0:
+        raise RuntimeError("source bundle validation failed")
+    return result.stdout.strip()
+
+
+def _source_bundle_receipt_path(source_sha: str) -> Path:
+    return SOURCE_BACKUPS / f"{source_sha}{DOMESTIC_SOURCE_RECEIPT_SUFFIX}"
+
+
+def _bundle_heads(repository: Path, bundle: Path) -> dict[str, str]:
+    raw = _git_checked(repository, "bundle", "list-heads", str(bundle))
+    heads: dict[str, str] = {}
+    for line in raw.splitlines():
+        pieces = line.split()
+        if len(pieces) != 2 or not SHA.fullmatch(pieces[0]) or pieces[1] in heads:
+            raise RuntimeError("source bundle refs are invalid")
+        heads[pieces[1]] = pieces[0]
+    return heads
+
+
+def _verify_source_bundle_file(
+    bundle: Path,
+    *,
+    source_sha: str,
+    source_tree: str,
+    previous_main_sha: str,
+    bundle_sha256: str,
+    allow_baseline_transition: bool = False,
+    installed_app_sha: str | None = None,
+    installed_app_tree: str | None = None,
+) -> dict:
+    source_sha = _valid_sha(source_sha, "source SHA")
+    source_tree = _valid_sha(source_tree, "source tree")
+    previous_main_sha = _valid_sha(previous_main_sha, "previous main SHA")
+    bundle_sha256 = _valid_digest(bundle_sha256, "source bundle SHA256")
+    info = _assert_root_file(bundle, exact_mode=0o400)
+    if info.st_size <= 0 or digest(bundle) != bundle_sha256:
+        raise ValueError("source bundle digest mismatch")
+    if source_sha == previous_main_sha and not allow_baseline_transition:
+        raise ValueError("source candidate must advance domestic main")
+    _assert_root_directory(ROOT)
+    _assert_root_directory(SOURCE_BACKUPS, private=True)
+    with tempfile.TemporaryDirectory(prefix=f".verify-{source_sha}-", dir=SOURCE_BACKUPS) as temporary:
+        repository = Path(temporary) / "repo.git"
+        bundle_path = Path(temporary) / "source.bundle"
+        shutil.copyfile(bundle, bundle_path)
+        bundle_path.chmod(0o400)
+        _git_checked(Path(temporary), "init", "--bare", "--quiet", str(repository))
+        _git_checked(repository, "bundle", "verify", str(bundle_path))
+        heads = _bundle_heads(repository, bundle_path)
+        candidate_ref = DOMESTIC_SOURCE_REFS[1].format(sha=source_sha)
+        expected_refs = {DOMESTIC_SOURCE_REFS[0], candidate_ref}
+        if set(heads) != expected_refs:
+            raise ValueError("source bundle must contain exactly the approved main and candidate refs")
+        if allow_baseline_transition:
+            if heads[DOMESTIC_SOURCE_REFS[0]] != source_sha or heads[candidate_ref] != source_sha:
+                raise ValueError("baseline source bundle refs must both point to the source commit")
+        elif heads[DOMESTIC_SOURCE_REFS[0]] != previous_main_sha or heads[candidate_ref] != source_sha:
+            raise ValueError("source bundle refs do not match the requested identities")
+        _git_checked(
+            repository,
+            "fetch", "--no-tags", str(bundle_path),
+            f"{DOMESTIC_SOURCE_REFS[0]}:{DOMESTIC_SOURCE_REFS[0]}",
+            f"{candidate_ref}:{candidate_ref}",
+        )
+        _git_checked(repository, "fsck", "--full", "--strict", "--no-reflogs")
+        restored_tree = _git_checked(repository, "rev-parse", f"{source_sha}^{{tree}}")
+        if restored_tree != source_tree:
+            raise ValueError("source bundle tree mismatch")
+        first_parent = _git_checked(repository, "rev-list", "--first-parent", source_sha).splitlines()
+        if not first_parent or first_parent[0] != source_sha or previous_main_sha not in first_parent:
+            raise ValueError("source candidate is not on the expected first-parent main history")
+        if installed_app_sha is not None:
+            installed_app_sha = _valid_sha(installed_app_sha, "installed app SHA")
+            if installed_app_sha not in first_parent:
+                raise ValueError("installed app source is not an ancestor of domestic main")
+            restored_app_tree = _git_checked(repository, "rev-parse", f"{installed_app_sha}^{{tree}}")
+            if installed_app_tree is None or restored_app_tree != _valid_sha(installed_app_tree, "installed app tree"):
+                raise ValueError("installed app tree does not match its source commit")
+        if allow_baseline_transition and previous_main_sha == source_sha and first_parent != [source_sha]:
+            raise ValueError("baseline source bundle self identity is invalid")
+        return {
+            "source_sha": source_sha,
+            "source_tree": restored_tree,
+            "previous_main_sha": previous_main_sha,
+            "bundle_sha256": bundle_sha256,
+            "self_contained": True,
+            "bundle_bytes": info.st_size,
+            "first_parent": first_parent,
+        }
+
+
+def _copy_incoming_bundle(source_bundle: Path, source_sha: str, expected_digest: str) -> tuple[Path, int, int]:
+    expected_path = DOMESTIC_INCOMING / f"{source_sha}.bundle"
+    if source_bundle != expected_path:
+        raise ValueError("source bundle path is outside the fixed incoming directory")
+    _assert_root_directory(ROOT)
+    _assert_root_directory(DOMESTIC_INCOMING, private=True)
+    _assert_root_directory(SOURCE_BACKUPS, create=True, private=True)
+    try:
+        descriptor = os.open(source_bundle, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as exc:
+        raise RuntimeError("incoming source bundle is missing or unsafe") from exc
+    try:
+        source_info = os.fstat(descriptor)
+        if not stat.S_ISREG(source_info.st_mode) or source_info.st_size <= 0:
+            raise RuntimeError("incoming source bundle is missing or unsafe")
+        available_bytes = shutil.disk_usage(SOURCE_BACKUPS).free
+        required = max(DOMESTIC_SOURCE_BUNDLE_MIN_FREE_BYTES, 2 * source_info.st_size)
+        if available_bytes < required:
+            raise RuntimeError("insufficient free disk for verified source backup")
+        temporary_fd, temporary_name = tempfile.mkstemp(prefix=f".{source_sha}.", suffix=".bundle.tmp", dir=SOURCE_BACKUPS)
+        temporary = Path(temporary_name)
+        hasher = hashlib.sha256()
+        copied_bytes = 0
+        try:
+            with os.fdopen(descriptor, "rb", closefd=False) as source, os.fdopen(temporary_fd, "wb") as target:
+                for block in iter(lambda: source.read(1024 * 1024), b""):
+                    target.write(block)
+                    hasher.update(block)
+                    copied_bytes += len(block)
+                target.flush()
+                os.fsync(target.fileno())
+            os.chown(temporary, 0, 0)
+            os.chmod(temporary, 0o400)
+            if copied_bytes != source_info.st_size or hasher.hexdigest() != expected_digest:
+                raise ValueError("source bundle digest mismatch")
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+        return temporary, source_info.st_size, available_bytes
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_root_receipt(path: Path, payload: dict, *, create_only: bool) -> None:
+    parent = path.parent
+    _assert_root_directory(parent, create=True, private=True)
+    encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(encoded)
+            output.flush()
+            os.fchown(output.fileno(), 0, 0)
+            os.fchmod(output.fileno(), 0o600)
+            os.fsync(output.fileno())
+        if create_only:
+            os.link(temporary, path, follow_symlinks=False)
+            temporary.unlink()
+        else:
+            if path.is_symlink() or (path.exists() and not stat.S_ISREG(path.lstat().st_mode)):
+                raise RuntimeError("fixed domestic main state file is unsafe")
+            if path.exists():
+                _assert_root_file(path, exact_mode=0o600)
+            os.replace(temporary, path)
+        directory_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def save_domestic_source_bundle(
+    source_bundle: Path,
+    *,
+    source_sha: str,
+    source_tree: str,
+    previous_main_sha: str,
+    expected_bundle_sha256: str,
+    allow_baseline_transition: bool = False,
+) -> dict:
+    require_host_role("production")
+    source_sha = _valid_sha(source_sha, "source SHA")
+    source_tree = _valid_sha(source_tree, "source tree")
+    previous_main_sha = _valid_sha(previous_main_sha, "previous main SHA")
+    expected_bundle_sha256 = _valid_digest(expected_bundle_sha256, "source bundle SHA256")
+    _assert_root_directory(ROOT)
+    _assert_root_directory(SOURCE_BACKUPS, create=True, private=True)
+    target = SOURCE_BACKUPS / f"{source_sha}.bundle"
+    receipt_path = _source_bundle_receipt_path(source_sha)
+    if target.exists() and not target.is_symlink() and not receipt_path.exists() and not receipt_path.is_symlink():
+        verified = _verify_source_bundle_file(
+            target, source_sha=source_sha, source_tree=source_tree,
+            previous_main_sha=previous_main_sha,
+            bundle_sha256=expected_bundle_sha256,
+            allow_baseline_transition=allow_baseline_transition,
+        )
+        _atomic_root_receipt(receipt_path, {
+            "schema_version": 1,
+            "source_sha": source_sha,
+            "source_tree": source_tree,
+            "previous_main_sha": previous_main_sha,
+            "bundle_sha256": expected_bundle_sha256,
+            "self_contained": True,
+            "baseline_transition": allow_baseline_transition,
+            "bundle_bytes": verified["bundle_bytes"],
+            "verified_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }, create_only=True)
+        return {
+            "status": "verified",
+            "source_sha": source_sha,
+            "source_tree": source_tree,
+            "previous_main_sha": previous_main_sha,
+            "bundle_sha256": expected_bundle_sha256,
+            "self_contained": True,
+            "bundle_bytes": verified["bundle_bytes"],
+            "available_bytes": shutil.disk_usage(SOURCE_BACKUPS).free,
+        }
+    if target.exists() or target.is_symlink() or receipt_path.exists() or receipt_path.is_symlink():
+        return verify_domestic_source_backup(
+            source_sha=source_sha, source_tree=source_tree,
+            previous_main_sha=previous_main_sha,
+            expected_bundle_sha256=expected_bundle_sha256,
+            allow_baseline_transition=allow_baseline_transition,
+        )
+    temporary, bundle_bytes, available_bytes = _copy_incoming_bundle(
+        source_bundle, source_sha, expected_bundle_sha256,
+    )
+    try:
+        validated = _verify_source_bundle_file(
+            temporary, source_sha=source_sha, source_tree=source_tree,
+            previous_main_sha=previous_main_sha,
+            bundle_sha256=expected_bundle_sha256,
+            allow_baseline_transition=allow_baseline_transition,
+        )
+        try:
+            os.link(temporary, target, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise RuntimeError("source backup already exists; inspect before retry") from exc
+        os.unlink(temporary)
+        receipt = {
+            "schema_version": 1,
+            "source_sha": source_sha,
+            "source_tree": source_tree,
+            "previous_main_sha": previous_main_sha,
+            "bundle_sha256": expected_bundle_sha256,
+            "self_contained": True,
+            "baseline_transition": allow_baseline_transition,
+            "bundle_bytes": bundle_bytes,
+            "verified_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        _atomic_root_receipt(receipt_path, receipt, create_only=True)
+        return {
+            "status": "verified",
+            "source_sha": source_sha,
+            "source_tree": source_tree,
+            "previous_main_sha": previous_main_sha,
+            "bundle_sha256": expected_bundle_sha256,
+            "self_contained": True,
+            "bundle_bytes": bundle_bytes,
+            "available_bytes": available_bytes,
+        }
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def verify_domestic_source_backup(
+    *,
+    source_sha: str,
+    source_tree: str,
+    previous_main_sha: str,
+    expected_bundle_sha256: str,
+    allow_baseline_transition: bool = False,
+    installed_app_sha: str | None = None,
+    installed_app_tree: str | None = None,
+) -> dict:
+    require_host_role("production")
+    source_sha = _valid_sha(source_sha, "source SHA")
+    source_tree = _valid_sha(source_tree, "source tree")
+    previous_main_sha = _valid_sha(previous_main_sha, "previous main SHA")
+    expected_bundle_sha256 = _valid_digest(expected_bundle_sha256, "source bundle SHA256")
+    _assert_root_directory(ROOT)
+    _assert_root_directory(SOURCE_BACKUPS, private=True)
+    bundle = SOURCE_BACKUPS / f"{source_sha}.bundle"
+    receipt_path = _source_bundle_receipt_path(source_sha)
+    _assert_root_file(receipt_path, exact_mode=0o600)
+    try:
+        receipt = json.loads(receipt_path.read_bytes())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("source backup receipt is invalid") from exc
+    if not isinstance(receipt, dict) or any(
+        receipt.get(key) != value for key, value in {
+            "schema_version": 1,
+            "source_sha": source_sha,
+            "source_tree": source_tree,
+            "previous_main_sha": previous_main_sha,
+            "bundle_sha256": expected_bundle_sha256,
+            "self_contained": True,
+            "baseline_transition": allow_baseline_transition,
+        }.items()
+    ):
+        raise ValueError("source backup receipt identity mismatch")
+    verified = _verify_source_bundle_file(
+        bundle, source_sha=source_sha, source_tree=source_tree,
+        previous_main_sha=previous_main_sha,
+        bundle_sha256=expected_bundle_sha256,
+        allow_baseline_transition=allow_baseline_transition,
+        installed_app_sha=installed_app_sha,
+        installed_app_tree=installed_app_tree,
+    )
+    if receipt.get("bundle_bytes") != verified["bundle_bytes"] or not isinstance(receipt.get("verified_at_utc"), str):
+        raise ValueError("source backup receipt size or timestamp mismatch")
+    return {
+        "status": "verified",
+        "source_sha": source_sha,
+        "source_tree": source_tree,
+        "previous_main_sha": previous_main_sha,
+        "bundle_sha256": expected_bundle_sha256,
+        "self_contained": True,
+        "bundle_bytes": verified["bundle_bytes"],
+        "available_bytes": shutil.disk_usage(SOURCE_BACKUPS).free,
+        "_first_parent": verified["first_parent"],
+    }
+
+
+@contextmanager
+def _production_release_lock():
+    _assert_root_directory(ROOT)
+    if LOCK.is_symlink() or (LOCK.exists() and not stat.S_ISREG(LOCK.lstat().st_mode)):
+        raise RuntimeError("shared production install lock is unsafe")
+    descriptor = os.open(LOCK, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) & 0o022:
+            raise RuntimeError("shared production install lock is unsafe")
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("production release is currently locked") from exc
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def _read_install_receipt(installed_app_sha: str) -> tuple[dict, bytes, str]:
+    installed_app_sha = _valid_sha(installed_app_sha, "installed app SHA")
+    path = RECEIPTS / f"{installed_app_sha}.json"
+    _assert_root_directory(RECEIPTS, private=True)
+    _assert_root_file(path, exact_mode=0o600)
+    content = path.read_bytes()
+    try:
+        receipt = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("production install receipt is invalid") from exc
+    if not isinstance(receipt, dict):
+        raise RuntimeError("production install receipt is invalid")
+    return receipt, content, hashlib.sha256(content).hexdigest()
+
+
+def _verify_installed_app(
+    installed_app_sha: str,
+    installed_app_tree: str,
+    installed_manifest_sha256: str,
+    expected_receipt_sha256: str | None = None,
+) -> tuple[dict, str]:
+    installed_app_sha = _valid_sha(installed_app_sha, "installed app SHA")
+    installed_app_tree = _valid_sha(installed_app_tree, "installed app tree")
+    installed_manifest_sha256 = _valid_digest(installed_manifest_sha256, "installed manifest SHA256")
+    receipt, _content, receipt_sha256 = _read_install_receipt(installed_app_sha)
+    if expected_receipt_sha256 is not None and receipt_sha256 != _valid_digest(expected_receipt_sha256, "install receipt SHA256"):
+        raise ValueError("production install receipt digest mismatch")
+    if (
+        receipt.get("schema_version") != 1
+        or receipt.get("source_sha") != installed_app_sha
+        or receipt.get("source_tree") != installed_app_tree
+        or receipt.get("manifest_sha256") != installed_manifest_sha256
+        or receipt.get("technical_status") != "installed_healthy"
+    ):
+        raise ValueError("production install receipt identity mismatch")
+    if current_sha() != installed_app_sha:
+        raise ValueError("production current release SHA mismatch")
+    release = RELEASES / installed_app_sha
+    if release.is_symlink() or not release.is_dir() or release.resolve(strict=True) != RELEASES.resolve(strict=True) / installed_app_sha:
+        raise RuntimeError("production current release path is unsafe")
+    release_env = release / "release.env"
+    if release_env.is_symlink() or not release_env.is_file() or release_env.read_text() != f"AICRM_RELEASE_SHA={installed_app_sha}\n":
+        raise ValueError("production release marker mismatch")
+    metadata = {"source_sha": installed_app_sha, "release_files_sha256": installed_manifest_sha256}
+    verify_payload_without_release_env(release, metadata)
+    verify_root_owned_release(release)
+    if digest(release / "release-files.sha256") != installed_manifest_sha256:
+        raise ValueError("production release manifest mismatch")
+    readiness(installed_app_sha)
+    return receipt, receipt_sha256
+
+
+def _read_main_state() -> dict:
+    _assert_root_directory(DOMESTIC_MAIN, private=True)
+    _assert_root_file(DOMESTIC_MAIN_STATE, exact_mode=0o600)
+    try:
+        state = json.loads(DOMESTIC_MAIN_STATE.read_bytes())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("domestic main state is invalid") from exc
+    required = {
+        "schema_version", "status", "main_sha", "main_tree", "installed_app_sha",
+        "installed_app_tree", "installed_manifest_sha256", "install_receipt_sha256",
+        "source_bundle_sha256", "updated_at_utc",
+    }
+    if not isinstance(state, dict) or set(state) != required or state.get("schema_version") != 1 or state.get("status") != "ready":
+        raise RuntimeError("domestic main state is invalid")
+    for field in ("main_sha", "main_tree", "installed_app_sha", "installed_app_tree"):
+        _valid_sha(state[field], field)
+    for field in ("installed_manifest_sha256", "install_receipt_sha256", "source_bundle_sha256"):
+        _valid_digest(state[field], field)
+    if not isinstance(state["updated_at_utc"], str) or not state["updated_at_utc"].endswith("Z"):
+        raise RuntimeError("domestic main state timestamp is invalid")
+    return state
+
+
+def _build_main_cursor(
+    *,
+    main_sha: str,
+    main_tree: str,
+    installed_app_sha: str,
+    installed_app_tree: str,
+    installed_manifest_sha256: str,
+    source_bundle_sha256: str,
+    previous_main_sha: str,
+    allow_baseline_transition: bool = False,
+) -> tuple[dict, dict]:
+    main_sha = _valid_sha(main_sha, "main SHA")
+    main_tree = _valid_sha(main_tree, "main tree")
+    installed_app_sha = _valid_sha(installed_app_sha, "installed app SHA")
+    installed_app_tree = _valid_sha(installed_app_tree, "installed app tree")
+    installed_manifest_sha256 = _valid_digest(installed_manifest_sha256, "installed manifest SHA256")
+    source_bundle_sha256 = _valid_digest(source_bundle_sha256, "source bundle SHA256")
+    previous_main_sha = _valid_sha(previous_main_sha, "previous main SHA")
+    verified_bundle = verify_domestic_source_backup(
+        source_sha=main_sha,
+        source_tree=main_tree,
+        previous_main_sha=previous_main_sha,
+        expected_bundle_sha256=source_bundle_sha256,
+        allow_baseline_transition=allow_baseline_transition,
+        installed_app_sha=installed_app_sha,
+        installed_app_tree=installed_app_tree,
+    )
+    receipt, receipt_sha256 = _verify_installed_app(
+        installed_app_sha, installed_app_tree, installed_manifest_sha256,
+    )
+    receipt_previous = receipt.get("previous_sha")
+    if receipt_previous is not None:
+        receipt_previous = _valid_sha(receipt_previous, "install receipt previous SHA")
+        if receipt_previous not in verified_bundle["_first_parent"]:
+            raise ValueError("installed app receipt base is not an ancestor of domestic main")
+    cursor = {
+        "schema_version": 1,
+        "status": "ready",
+        "main_sha": main_sha,
+        "main_tree": main_tree,
+        "installed_app_sha": installed_app_sha,
+        "installed_app_tree": installed_app_tree,
+        "installed_manifest_sha256": installed_manifest_sha256,
+        "install_receipt_sha256": receipt_sha256,
+        "source_bundle_sha256": source_bundle_sha256,
+        "updated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    return cursor, receipt
+
+
+def initialize_domestic_main(
+    *,
+    main_sha: str,
+    main_tree: str,
+    installed_app_sha: str,
+    installed_app_tree: str,
+    installed_manifest_sha256: str,
+    source_bundle_sha256: str,
+) -> dict:
+    require_host_role("production")
+    _assert_root_directory(ROOT)
+    _assert_root_directory(DOMESTIC_MAIN, create=True, private=True)
+    with _production_release_lock():
+        main_sha = _valid_sha(main_sha, "main SHA")
+        source_receipt_path = _source_bundle_receipt_path(main_sha)
+        _assert_root_file(source_receipt_path, exact_mode=0o600)
+        try:
+            source_receipt = json.loads(source_receipt_path.read_bytes())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("source backup receipt is invalid") from exc
+        if not isinstance(source_receipt, dict) or source_receipt.get("baseline_transition") is not True:
+            raise RuntimeError("initial domestic main requires a baseline-transition source backup")
+        previous_main_sha = source_receipt.get("previous_main_sha")
+        if not isinstance(previous_main_sha, str) or not SHA.fullmatch(previous_main_sha):
+            raise RuntimeError("baseline source backup receipt is invalid")
+        cursor, _receipt = _build_main_cursor(
+            main_sha=main_sha, main_tree=main_tree,
+            installed_app_sha=installed_app_sha, installed_app_tree=installed_app_tree,
+            installed_manifest_sha256=installed_manifest_sha256,
+            source_bundle_sha256=source_bundle_sha256,
+            previous_main_sha=previous_main_sha,
+            allow_baseline_transition=True,
+        )
+        if DOMESTIC_MAIN_STATE.exists() or DOMESTIC_MAIN_STATE.is_symlink():
+            existing = _read_main_state()
+            identity_fields = set(cursor) - {"updated_at_utc"}
+            if all(existing[field] == cursor[field] for field in identity_fields):
+                return existing
+            raise RuntimeError("domestic main baseline already exists with a different identity")
+        _atomic_root_receipt(DOMESTIC_MAIN_STATE, cursor, create_only=True)
+        return cursor
+
+
+def record_domestic_main(
+    *,
+    main_sha: str,
+    main_tree: str,
+    installed_app_sha: str,
+    installed_app_tree: str,
+    installed_manifest_sha256: str,
+    source_bundle_sha256: str,
+    expected_previous_main_sha: str,
+) -> dict:
+    require_host_role("production")
+    expected_previous_main_sha = _valid_sha(expected_previous_main_sha, "expected previous main SHA")
+    _assert_root_directory(ROOT)
+    _assert_root_directory(DOMESTIC_MAIN, private=True)
+    with _production_release_lock():
+        existing = _read_main_state()
+        cursor, _receipt = _build_main_cursor(
+            main_sha=main_sha, main_tree=main_tree,
+            installed_app_sha=installed_app_sha, installed_app_tree=installed_app_tree,
+            installed_manifest_sha256=installed_manifest_sha256,
+            source_bundle_sha256=source_bundle_sha256,
+            previous_main_sha=expected_previous_main_sha,
+        )
+        identity_fields = set(cursor) - {"updated_at_utc"}
+        if existing["main_sha"] == cursor["main_sha"]:
+            if all(existing[field] == cursor[field] for field in identity_fields):
+                return existing
+            raise RuntimeError("domestic main already records a different identity for this SHA")
+        if existing["main_sha"] != expected_previous_main_sha:
+            raise RuntimeError("domestic main compare-and-swap base mismatch")
+        if cursor["main_sha"] == expected_previous_main_sha:
+            raise ValueError("record-domestic-main requires a new main SHA")
+        _atomic_root_receipt(DOMESTIC_MAIN_STATE, cursor, create_only=False)
+        return cursor
+
+
+def read_domestic_main() -> dict:
+    require_host_role("production")
+    _assert_root_directory(ROOT)
+    with _production_release_lock():
+        cursor = _read_main_state()
+        source_receipt_path = _source_bundle_receipt_path(cursor["main_sha"])
+        _assert_root_file(source_receipt_path, exact_mode=0o600)
+        try:
+            source_receipt = json.loads(source_receipt_path.read_bytes())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("source backup receipt is invalid") from exc
+        if not isinstance(source_receipt, dict):
+            raise RuntimeError("source backup receipt is invalid")
+        verified = _build_main_cursor(
+            main_sha=cursor["main_sha"], main_tree=cursor["main_tree"],
+            installed_app_sha=cursor["installed_app_sha"], installed_app_tree=cursor["installed_app_tree"],
+            installed_manifest_sha256=cursor["installed_manifest_sha256"],
+            source_bundle_sha256=cursor["source_bundle_sha256"],
+            previous_main_sha=source_receipt.get("previous_main_sha", ""),
+            allow_baseline_transition=source_receipt.get("baseline_transition") is True,
+        )
+        verified_identity = {key: value for key, value in verified[0].items() if key != "updated_at_utc"}
+        cursor_identity = {key: value for key, value in cursor.items() if key != "updated_at_utc"}
+        if verified_identity != cursor_identity:
+            raise ValueError("domestic main cursor does not match verified production state")
+        return {
+            "status": "ready",
+            "cursor": cursor,
+            "install_receipt": verified[1],
+            "install_receipt_sha256": cursor["install_receipt_sha256"],
+        }
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     source = p.add_mutually_exclusive_group(required=True)
@@ -1542,6 +2194,11 @@ def main() -> None:
     source.add_argument("--retry-existing", action="store_true", help="reuse a checksum-verified orphan under the install lock")
     source.add_argument("--check-host-contract", action="store_true", help="read-only check of role, PostgreSQL 16, service user, paths, and systemd")
     source.add_argument("--run-staging-smoke", action="store_true", help="run the fixed installed Alipay checkout contract on staging")
+    source.add_argument("--save-domestic-source-bundle", action="store_true")
+    source.add_argument("--verify-domestic-source-backup", action="store_true")
+    source.add_argument("--initialize-domestic-main", action="store_true")
+    source.add_argument("--record-domestic-main", action="store_true")
+    source.add_argument("--read-domestic-main", action="store_true")
     p.add_argument("--metadata", type=Path)
     p.add_argument("--expected-sha", help="exact source SHA bound to the metadata")
     p.add_argument("--metadata-sha256", help="SHA256 of the exact metadata file bytes")
@@ -1549,11 +2206,29 @@ def main() -> None:
     p.add_argument("--source-sha", help="exact checked source commit that owns the fixed staging fixture")
     p.add_argument("--expected-manifest-sha256", help="SHA256 of the installed release manifest")
     p.add_argument("--expected-helper-sha256", help="SHA256 of the exact checked Git source file being rehearsed")
+    p.add_argument("--source-bundle", type=Path)
+    p.add_argument("--expected-source-sha")
+    p.add_argument("--expected-source-tree")
+    p.add_argument("--expected-previous-main-sha")
+    p.add_argument("--expected-bundle-sha256")
+    p.add_argument("--allow-baseline-transition", action="store_true")
+    p.add_argument("--source-tree")
+    p.add_argument("--previous-main-sha")
+    p.add_argument("--main-sha")
+    p.add_argument("--main-tree")
+    p.add_argument("--installed-app-sha")
+    p.add_argument("--installed-app-tree")
+    p.add_argument("--installed-manifest-sha256")
+    p.add_argument("--source-bundle-sha256")
     args = p.parse_args()
     if os.geteuid() != 0:
         raise SystemExit("root required")
     if args.check_host_contract:
-        if any(value is not None for value in (args.metadata, args.expected_sha, args.metadata_sha256, args.expected_base, args.source_sha, args.expected_manifest_sha256)):
+        if (
+            any(value is not None for value in (args.metadata, args.expected_sha, args.metadata_sha256, args.expected_base, args.source_sha, args.expected_manifest_sha256))
+            or any(value is not None for value in (args.source_bundle, args.expected_source_sha, args.expected_source_tree, args.expected_previous_main_sha, args.expected_bundle_sha256, args.source_tree, args.previous_main_sha, args.source_bundle_sha256, args.main_sha, args.main_tree, args.installed_app_sha, args.installed_app_tree, args.installed_manifest_sha256))
+            or args.allow_baseline_transition
+        ):
             p.error("--check-host-contract does not accept release metadata")
         if args.expected_helper_sha256 is None:
             p.error("--check-host-contract requires --expected-helper-sha256 for the exact checked Git source file")
@@ -1566,7 +2241,11 @@ def main() -> None:
         print(json.dumps(result, sort_keys=True))
         return
     if args.run_staging_smoke:
-        if any(value is not None for value in (args.metadata, args.metadata_sha256, args.expected_base)):
+        if (
+            any(value is not None for value in (args.metadata, args.metadata_sha256, args.expected_base))
+            or any(value is not None for value in (args.source_bundle, args.expected_source_sha, args.expected_source_tree, args.expected_previous_main_sha, args.expected_bundle_sha256, args.source_tree, args.previous_main_sha, args.source_bundle_sha256, args.main_sha, args.main_tree, args.installed_app_sha, args.installed_app_tree, args.installed_manifest_sha256))
+            or args.allow_baseline_transition
+        ):
             p.error("--run-staging-smoke does not accept install metadata")
         if args.expected_sha is None or args.source_sha is None or args.expected_manifest_sha256 is None or args.expected_helper_sha256 is None:
             p.error("--run-staging-smoke requires --source-sha, --expected-sha, --expected-manifest-sha256, and --expected-helper-sha256")
@@ -1578,6 +2257,92 @@ def main() -> None:
             raise SystemExit(str(exc)) from exc
         print(json.dumps(result, sort_keys=True))
         return
+    domestic_fields = (
+        args.source_bundle, args.expected_source_sha, args.expected_source_tree,
+        args.expected_previous_main_sha, args.expected_bundle_sha256,
+        args.source_tree, args.previous_main_sha, args.source_bundle_sha256,
+        args.main_sha, args.main_tree, args.installed_app_sha,
+        args.installed_app_tree, args.installed_manifest_sha256,
+        args.source_bundle_sha256,
+    )
+    domestic_mode = any((
+        args.save_domestic_source_bundle, args.verify_domestic_source_backup,
+        args.initialize_domestic_main, args.record_domestic_main, args.read_domestic_main,
+    ))
+    if domestic_mode:
+        if any(value is not None for value in (args.metadata, args.expected_sha, args.metadata_sha256, args.expected_base, args.expected_manifest_sha256, args.expected_helper_sha256)) or (args.source_sha is not None and not args.verify_domestic_source_backup):
+            p.error("domestic source commands do not accept installer or smoke arguments")
+        try:
+            if args.save_domestic_source_bundle:
+                if (
+                    args.source_bundle is None
+                    or any(value is None for value in (args.expected_source_sha, args.expected_source_tree, args.expected_previous_main_sha, args.expected_bundle_sha256))
+                    or any(value is not None for value in (args.source_sha, args.source_tree, args.previous_main_sha, args.source_bundle_sha256, args.main_sha, args.main_tree, args.installed_app_sha, args.installed_app_tree, args.installed_manifest_sha256))
+                ):
+                    p.error("--save-domestic-source-bundle requires --source-bundle and all expected source identity fields")
+                result = save_domestic_source_bundle(
+                    args.source_bundle,
+                    source_sha=args.expected_source_sha,
+                    source_tree=args.expected_source_tree,
+                    previous_main_sha=args.expected_previous_main_sha,
+                    expected_bundle_sha256=args.expected_bundle_sha256,
+                    allow_baseline_transition=args.allow_baseline_transition,
+                )
+            elif args.verify_domestic_source_backup:
+                if (
+                    args.source_bundle is not None
+                    or any(value is not None for value in (args.expected_source_sha, args.expected_source_tree, args.expected_previous_main_sha, args.expected_bundle_sha256))
+                    or any(value is None for value in (args.source_sha, args.source_tree, args.previous_main_sha, args.source_bundle_sha256))
+                    or any(value is not None for value in (args.main_sha, args.main_tree, args.installed_app_sha, args.installed_app_tree, args.installed_manifest_sha256))
+                ):
+                    p.error("--verify-domestic-source-backup requires source identity fields and no incoming path")
+                result = verify_domestic_source_backup(
+                    source_sha=args.source_sha,
+                    source_tree=args.source_tree,
+                    previous_main_sha=args.previous_main_sha,
+                    expected_bundle_sha256=args.source_bundle_sha256,
+                    allow_baseline_transition=args.allow_baseline_transition,
+                )
+                result.pop("_first_parent", None)
+            elif args.initialize_domestic_main or args.record_domestic_main:
+                if (
+                    args.source_bundle is not None
+                    or any(value is not None for value in (args.expected_source_sha, args.expected_source_tree, args.expected_bundle_sha256, args.source_sha, args.source_tree, args.previous_main_sha))
+                    or args.allow_baseline_transition
+                ):
+                    p.error("domestic main record commands do not accept source-bundle validation arguments")
+                required = (args.main_sha, args.main_tree, args.installed_app_sha, args.installed_app_tree, args.installed_manifest_sha256, args.source_bundle_sha256)
+                if any(value is None for value in required):
+                    p.error("domestic main record command requires all main, app, manifest, and bundle identity fields")
+                if args.initialize_domestic_main:
+                    if args.expected_previous_main_sha is not None:
+                        p.error("--initialize-domestic-main does not accept --expected-previous-main-sha")
+                    result = initialize_domestic_main(
+                        main_sha=args.main_sha, main_tree=args.main_tree,
+                        installed_app_sha=args.installed_app_sha, installed_app_tree=args.installed_app_tree,
+                        installed_manifest_sha256=args.installed_manifest_sha256,
+                        source_bundle_sha256=args.source_bundle_sha256,
+                    )
+                else:
+                    if args.expected_previous_main_sha is None:
+                        p.error("--record-domestic-main requires --expected-previous-main-sha")
+                    result = record_domestic_main(
+                        main_sha=args.main_sha, main_tree=args.main_tree,
+                        installed_app_sha=args.installed_app_sha, installed_app_tree=args.installed_app_tree,
+                        installed_manifest_sha256=args.installed_manifest_sha256,
+                        source_bundle_sha256=args.source_bundle_sha256,
+                        expected_previous_main_sha=args.expected_previous_main_sha,
+                    )
+            else:
+                if any(value is not None for value in domestic_fields) or args.allow_baseline_transition:
+                    p.error("--read-domestic-main takes no additional identity arguments")
+                result = read_domestic_main()
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            raise SystemExit(str(exc)) from None
+        print(json.dumps(result, sort_keys=True))
+        return
+    if any(value is not None for value in domestic_fields) or args.allow_baseline_transition:
+        p.error("domestic source arguments require a domestic source command")
     if args.expected_helper_sha256 is not None or args.source_sha is not None or args.expected_manifest_sha256 is not None:
         p.error("staging smoke arguments are only valid with --run-staging-smoke")
     if args.metadata is None or args.expected_sha is None or args.metadata_sha256 is None or args.expected_base is None:
