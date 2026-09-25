@@ -45,6 +45,18 @@ def make_repository(root: Path) -> tuple[Path, str, str, str]:
 
 
 class DomesticMainReleaseTests(unittest.TestCase):
+    def test_fixed_bare_repository_requires_root_owned_non_writable_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            repo = parent / "source.git"
+            parent.chmod(0o775)
+            with self.assertRaisesRegex(release.ReleaseError, "not be group/world writable"):
+                release._verify_bare_repository_parent(repo, require_root_owner=False)
+            parent.chmod(0o755)
+            if os.geteuid() != 0:
+                with self.assertRaisesRegex(release.ReleaseError, "must be root-owned"):
+                    release._verify_bare_repository_parent(repo, require_root_owner=True)
+
     def test_policy_changes_cannot_request_targeted_lanes(self) -> None:
         targeted = {"enforced": {"selection_mode": "targeted", "selected_lanes": ["preflight"],
                                  "selected_checks": [], "profile": "tooling"},

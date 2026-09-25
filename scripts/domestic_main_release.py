@@ -260,6 +260,20 @@ def load_config(path: Path) -> dict[str, Any]:
     return _check_config(json.loads(path.read_text(encoding="utf-8")))
 
 
+def _verify_bare_repository_parent(repo: Path, *, require_root_owner: bool) -> None:
+    """Ensure the fixed repository cannot be replaced through its parent."""
+    parent = repo.parent
+    if parent.is_symlink() or not parent.is_dir():
+        raise ReleaseError("domestic bare repository parent is missing or unsafe")
+    info = parent.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise ReleaseError("domestic bare repository parent is missing or unsafe")
+    if info.st_mode & 0o022:
+        raise ReleaseError("domestic bare repository parent must not be group/world writable")
+    if require_root_owner and info.st_uid != 0:
+        raise ReleaseError("domestic bare repository parent must be root-owned before bootstrap/activation")
+
+
 def bootstrap_bare_repository(repo: Path, seed_repo: Path, baseline_sha: str,
                               *, controller_path: str, push_group: str) -> dict[str, str]:
     """Create a new protected bare repo from one verified baseline commit."""
@@ -268,6 +282,7 @@ def bootstrap_bare_repository(repo: Path, seed_repo: Path, baseline_sha: str,
         raise ReleaseError("bare repository path already exists; inspect rather than overwrite")
     if not seed_repo.exists() or seed_repo.is_symlink() or not seed_repo.is_dir():
         raise ReleaseError("seed repository is missing or unsafe")
+    _verify_bare_repository_parent(repo, require_root_owner=(repo == Path(DEFAULT_REPO)))
     repo.parent.mkdir(parents=True, exist_ok=True)
     result = _run(["git", "init", "--bare", "--shared=group", str(repo)])
     del result
@@ -351,6 +366,7 @@ def _push_writable_bare_path(relative: Path) -> bool:
 
 def verify_bare_repository(repo: Path, *, controller_path: str | None = None,
                           push_group: str | None = None) -> dict[str, Any]:
+    _verify_bare_repository_parent(repo, require_root_owner=(repo == Path(DEFAULT_REPO)))
     if not _is_bare_repo(repo):
         raise ReleaseError("domestic source repository is missing, unsafe or not bare")
     if _git(repo, "symbolic-ref", "HEAD") != MAIN_REF:
