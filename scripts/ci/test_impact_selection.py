@@ -63,6 +63,14 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(result, {"mode": "targeted", "lanes": ["preflight"], "checks": [],
                                   "reason": "release-tooling-contracts", "profile": "tooling"})
 
+    def test_domestic_controller_and_manual_archive_changes_select_tool_contracts(self):
+        paths = ["scripts/domestic_main_release.py", "scripts/manual_github_sync.py",
+                 "scripts/test_domestic_release_controller.py", "scripts/test_manual_github_sync.py",
+                 "deploy/test_domestic_main_source.py"]
+        result = impact_selection.select(self.report("high", paths))
+        self.assertEqual(result, {"mode": "targeted", "lanes": ["preflight"], "checks": [],
+                                  "reason": "release-tooling-contracts", "profile": "tooling"})
+
     def test_unknown_or_shared_paths_cannot_enter_release_tooling_profile(self):
         for changed in (
             ["scripts/ci/quality_lanes.py", "scripts/run-go-with-donor-views.sh"],
