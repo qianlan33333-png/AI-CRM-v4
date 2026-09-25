@@ -15,6 +15,12 @@
 
 GitHub 凭据只在用户电脑。`scripts/manual_github_sync.py` 默认只读展示 GitHub 已同步 SHA、待同步提交和生产源码收据；仅显式 `--execute` 才尝试普通快进推送。它核对国内 `main` 等于生产 `main_sha/main_tree`，另核对最近一次应用安装收据、完整摘要和源码祖先。GitHub 若前进、分叉或推送后读回不符即停止，绝不强推。**无自动推送，也无固定同步周期；未同步不阻塞下一次技术发布。**
 
+激活后，在含新同步脚本的本机 V4 工作树配置 `domestic` 远端为 `aicrm-release-push@aicrm-v4-stage-source:/opt/aicrm/domestic/source.git`，从该工作树运行命令。先用默认预览；只有你决定归档时，给同一命令追加 `--execute`。`--stage-host` 使用受限账号别名，`--production-host` 使用已验证的生产入口；两者均须有持久 Host Key pin。退出码 3 表示 GitHub 已读回但预备机 ACK 待核对，退出码 4 表示推送后 GitHub 读回失败、结果不明；两者均不能盲目重推。
+
+```sh
+python3 scripts/manual_github_sync.py --repo "$PWD" --production-host 124.220.53.183 --stage-host aicrm-v4-stage-source --ssh-key /Users/qianlan/Downloads/zhengshi.pem --known-hosts /Users/qianlan/.ssh/known_hosts
+```
+
 最新已验证的完整源码 bundle 留在生产机 `/opt/aicrm/source-backups/`，可用于预备机故障后恢复国内 `main`。在没有已验证的新 bundle 前不得删旧 bundle。两台国内机器在人工归档前同时丢失，GitHub 不保证找回期间代码。
 
 ## 停止与恢复
