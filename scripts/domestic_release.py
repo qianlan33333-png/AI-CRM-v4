@@ -86,6 +86,27 @@ print(json.dumps({
 }))
 """
 
+# PR38's immutable source archive predates the source-view smoke fix in PR40.
+# Permit exactly this checked source/helper pair to use the already merged PR40
+# executor, while preserving both digests in the smoke receipt. All other
+# candidates must use the helper committed in that candidate.
+PR38_SMOKE_SOURCE_SHA = "32043f2ecdb814270245dbf2b3840eb868e0a33f"
+PR38_SMOKE_SOURCE_TREE = "de394d4902d56337d110d2acd0a2f889f9dc0be6"
+PR38_SOURCE_HELPER_SHA256 = "ca3ae4c8c8022620ba87e1d6c0c006fac222b0e63419c56adfb65b852ff3f5f9"
+PR38_FORWARD_BUILDER_SHA256 = "775be12976cab4d66728b28bd877ea11e7314649c65ebc852759eb99b6e95f79"
+PR38_PREVIOUS_CURSOR_SHA = "20b6e33f4a6667d76e675501ec7ab9466388dee7"
+PR38_INSTALLED_BASE_SHA = "3ab9946d45b99101d483e23d8a68c2492047b748"
+PR38_RESUME_MARKER = {
+    "source_sha": PR38_SMOKE_SOURCE_SHA,
+    "processed_sha": PR38_PREVIOUS_CURSOR_SHA,
+    "deployed_source_sha": PR38_INSTALLED_BASE_SHA,
+    "prod_installed_sha": PR38_INSTALLED_BASE_SHA,
+    "reason": "staging_smoke_failed",
+}
+PR38_HELPER_TRUST_ANCHOR_SHA = "4018d27e719a4f54b279df1c33e1fe8d69882855"
+PR38_HELPER_TRUST_ANCHOR_TREE = "49299006dd4db445f368351ef26f7e2173586a27"
+PR38_EXECUTOR_HELPER_SHA256 = "2a6c8a222dee5d19e505083d8311f548d8effafcb3fd68f856d8a24c82fa46f7"
+
 
 def command(*args: str, cwd: Path | None = None, timeout: int = 600) -> str:
     result = subprocess.run(args, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
@@ -559,6 +580,112 @@ def _git_file_sha256(repo: Path, sha: str, path: str) -> str:
     return hashlib.sha256(result.stdout).hexdigest()
 
 
+def _smoke_helper_selection(repo: Path, source_sha: str, checked_main_sha: str | None = None) -> dict[str, str]:
+    """Bind a smoke source helper to the exact executor helper used for the test."""
+    source_tree = git(repo, "rev-parse", f"{source_sha}^{{tree}}")
+    source_helper_sha = _git_file_sha256(repo, source_sha, "deploy/domestic-promote.py")
+    if source_sha != PR38_SMOKE_SOURCE_SHA:
+        return {
+            "source_tree": source_tree,
+            "source_helper_sha256": source_helper_sha,
+            "executor_helper_sha256": source_helper_sha,
+            "executor_source_sha": source_sha,
+            "executor_source_tree": source_tree,
+            "compatibility": "exact_source",
+        }
+
+    if source_tree != PR38_SMOKE_SOURCE_TREE or source_helper_sha != PR38_SOURCE_HELPER_SHA256:
+        raise RuntimeError("PR38 smoke source identity differs from the reviewed compatibility pair")
+    if not isinstance(checked_main_sha, str) or not SHA.fullmatch(checked_main_sha):
+        raise RuntimeError("PR38 smoke compatibility requires the exact checked main SHA")
+
+    anchor_tree = git(repo, "rev-parse", f"{PR38_HELPER_TRUST_ANCHOR_SHA}^{{tree}}")
+    if anchor_tree != PR38_HELPER_TRUST_ANCHOR_TREE:
+        raise RuntimeError("PR38 smoke helper trust anchor tree changed")
+    git(repo, "merge-base", "--is-ancestor", source_sha, PR38_HELPER_TRUST_ANCHOR_SHA)
+    git(repo, "merge-base", "--is-ancestor", PR38_HELPER_TRUST_ANCHOR_SHA, checked_main_sha)
+    anchor_helper_sha = _git_file_sha256(repo, PR38_HELPER_TRUST_ANCHOR_SHA, "deploy/domestic-promote.py")
+    checked_main_helper_sha = _git_file_sha256(repo, checked_main_sha, "deploy/domestic-promote.py")
+    if anchor_helper_sha != PR38_EXECUTOR_HELPER_SHA256 or checked_main_helper_sha != PR38_EXECUTOR_HELPER_SHA256:
+        raise RuntimeError("PR38 smoke executor is not the exact reviewed main helper")
+
+    return {
+        "source_tree": source_tree,
+        "source_helper_sha256": source_helper_sha,
+        "executor_helper_sha256": PR38_EXECUTOR_HELPER_SHA256,
+        "executor_source_sha": PR38_HELPER_TRUST_ANCHOR_SHA,
+        "executor_source_tree": PR38_HELPER_TRUST_ANCHOR_TREE,
+        "compatibility": "pr38_source_to_reviewed_main_executor",
+    }
+
+
+def _validate_pr38_staging_failed_ledger(state: dict, queue: list[str]) -> None:
+    """Allow only the observed PR38 smoke-only failure to resume under poll's lock."""
+    smoke = state.get("last_stage_smoke")
+    marker = state.get("pr38_staging_failed_resume")
+    marker_present = marker == PR38_RESUME_MARKER and state.get("status") in {
+        "staging_failed", "ci_regression_blocked", "controller_update_required", "ready",
+    }
+    status = state.get("status")
+    failure = state.get("failure")
+    controller_failure = isinstance(failure, str) and failure.startswith("fixed controller files are not installed and verified:")
+    if status == "staging_failed":
+        failure_matches = failure == "staging installed behavior smoke failed: RuntimeError" or (marker_present and controller_failure)
+    elif status == "ci_regression_blocked":
+        pause = state.get("ci_regression_pause")
+        failure_matches = (
+            marker_present
+            and failure == "main full CI evidence is failing or incomplete; release queue is paused"
+            and isinstance(pause, dict)
+            and pause.get("candidate_sha") == PR38_SMOKE_SOURCE_SHA
+        )
+    elif status == "controller_update_required":
+        failure_matches = marker_present and controller_failure
+    else:
+        failure_matches = marker_present and failure is None
+    if (
+        not (state.get("status") == "staging_failed" or marker_present)
+        or state.get("blocked_sha") != PR38_SMOKE_SOURCE_SHA
+        or state.get("processed_sha") != PR38_PREVIOUS_CURSOR_SHA
+        or state.get("deployed_source_sha") != PR38_INSTALLED_BASE_SHA
+        or state.get("prod_installed_sha") != PR38_INSTALLED_BASE_SHA
+        or not failure_matches
+        or not isinstance(smoke, dict)
+        or smoke.get("source_sha") != PR38_SMOKE_SOURCE_SHA
+        or smoke.get("installed_sha") != PR38_INSTALLED_BASE_SHA
+        or smoke.get("status") != "failed"
+        or state.get("staging_verified_sha") == PR38_SMOKE_SOURCE_SHA
+        or ("staging_verified_receipt" in state and state.get("staging_verified_sha") is None)
+        or state.get("pr38_staging_failed_smoke_attempted") is not None
+        or not queue
+        or queue[0] != PR38_SMOKE_SOURCE_SHA
+    ):
+        raise RuntimeError("staging_failed resume is restricted to the exact unpromoted PR38 smoke failure")
+
+
+def _verify_pr38_staging_failed_readbacks(config: dict, state: dict) -> dict:
+    """Prove PR38 has no installed receipt and both hosts remain healthy on PR36."""
+    installed = state.get("prod_installed_sha")
+    manifest = state.get("prod_installed_manifest_sha256")
+    if installed != PR38_INSTALLED_BASE_SHA or not isinstance(manifest, str) or not FILE_SHA.fullmatch(manifest):
+        raise RuntimeError("PR38 staging_failed resume has no exact installed baseline")
+    stage = stage_readback(PR38_SMOKE_SOURCE_SHA)
+    production = prod_readback(config, PR38_SMOKE_SOURCE_SHA)
+    for role, result in (("staging", stage), ("production", production)):
+        verify_readback(result, installed, manifest)
+        if result.get("receipt_target_sha") != PR38_SMOKE_SOURCE_SHA or result.get("receipt_exists") is not False:
+            raise RuntimeError(f"PR38 {role} success receipt already exists; reconcile before resuming")
+        if result.get("database_backup_exists") is not False:
+            raise RuntimeError(f"PR38 {role} backup state is unexpected; reconcile before resuming")
+    return {
+        "staging_readyz": stage["readyz"],
+        "staging_current": stage["current"],
+        "production_readyz": production["readyz"],
+        "production_current": production["current"],
+        "manifest_sha256": manifest,
+    }
+
+
 def _local_file_sha256(path: Path) -> str:
     if path.is_symlink() or not path.is_file():
         raise RuntimeError("fixed controller file is missing or unsafe")
@@ -582,16 +709,34 @@ def _remote_file_sha256(config: dict, path: str) -> str:
     return match.group(1)
 
 
-def verify_controller_installation(config: dict, repo: Path, sha: str, paths: list[str]) -> dict:
-    """Require every changed fixed controller to match the checked source bytes."""
+def verify_controller_installation(
+    config: dict,
+    repo: Path,
+    sha: str,
+    paths: list[str],
+    *,
+    checked_main_sha: str | None = None,
+) -> dict:
+    """Verify fixed tools against the candidate or the exact checked main source."""
     started = time.monotonic()
     local_release = Path(__file__)
     local_builder = local_release.with_name("domestic_release_build.py")
     results: dict[str, dict[str, str]] = {}
+    helper_selection = _smoke_helper_selection(repo, sha, checked_main_sha)
+    checked_main_tree = None
+    if checked_main_sha is not None:
+        if not SHA.fullmatch(checked_main_sha):
+            raise RuntimeError("checked main controller source SHA is invalid")
+        checked_main_tree = git(repo, "rev-parse", f"{checked_main_sha}^{{tree}}")
+    if helper_selection["compatibility"] == "pr38_source_to_reviewed_main_executor":
+        candidate_builder_sha = _git_file_sha256(repo, sha, "scripts/domestic_release_build.py")
+        checked_main_builder_sha = _git_file_sha256(repo, checked_main_sha, "scripts/domestic_release_build.py")
+        if candidate_builder_sha != PR38_FORWARD_BUILDER_SHA256 or checked_main_builder_sha != PR38_FORWARD_BUILDER_SHA256:
+            raise RuntimeError("PR38 forward controller builder is not the exact reviewed source")
     for source_path in paths:
         if source_path not in CONTROLLER_SOURCE_PATHS:
             raise RuntimeError(f"unsupported fixed controller path: {source_path}")
-        expected = _git_file_sha256(repo, sha, source_path)
+        candidate_expected = _git_file_sha256(repo, sha, source_path)
         if source_path == "scripts/domestic_release.py":
             actual = _local_file_sha256(local_release)
             locations = {"staging": actual}
@@ -605,12 +750,38 @@ def verify_controller_installation(config: dict, repo: Path, sha: str, paths: li
                 "staging": _local_file_sha256(Path(stage_path)),
                 "production": _remote_file_sha256(config, prod_path),
             }
-        results[source_path] = {"expected_sha256": expected, **{f"{name}_sha256": value for name, value in locations.items()}}
-        if any(value != expected for value in locations.values()):
+
+        allowed_expected = candidate_expected
+        compatibility = "exact_candidate"
+        checked_main_expected = None
+        if source_path in {"scripts/domestic_release.py", "scripts/domestic_release_build.py"} and checked_main_sha:
+            checked_main_expected = _git_file_sha256(repo, checked_main_sha, source_path)
+            if checked_main_expected != candidate_expected:
+                if (
+                    sha != PR38_SMOKE_SOURCE_SHA
+                    or helper_selection["compatibility"] != "pr38_source_to_reviewed_main_executor"
+                ):
+                    raise RuntimeError("forward controller compatibility is restricted to the reviewed PR38 source")
+                allowed_expected = checked_main_expected
+                compatibility = "exact_checked_main_controller"
+        elif source_path == "deploy/domestic-promote.py" and helper_selection["compatibility"] == "pr38_source_to_reviewed_main_executor":
+            allowed_expected = helper_selection["executor_helper_sha256"]
+            compatibility = helper_selection["compatibility"]
+
+        results[source_path] = {
+            "candidate_sha256": candidate_expected,
+            "allowed_installed_sha256": allowed_expected,
+            "checked_main_sha256": checked_main_expected or "",
+            "compatibility": compatibility,
+            **{f"{name}_sha256": value for name, value in locations.items()},
+        }
+        if any(value != allowed_expected for value in locations.values()):
             raise RuntimeError(f"fixed controller digest mismatch: {source_path}")
     return {
         "source_sha": sha,
         "source_tree": git(repo, "rev-parse", f"{sha}^{{tree}}"),
+        "checked_main_sha": checked_main_sha,
+        "checked_main_tree": checked_main_tree,
         "files": results,
         "verified_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "duration_seconds": round(time.monotonic() - started, 1),
@@ -907,8 +1078,7 @@ def verify_stage_smoke_receipt(
     source_sha: str,
     installed_sha: str,
     manifest_sha256: str,
-    helper_sha256: str,
-    source_tree: str,
+    helper_selection: dict[str, str],
 ) -> dict:
     expected = {
         "status": "passed",
@@ -917,10 +1087,15 @@ def verify_stage_smoke_receipt(
         "test_marker": "domestic_release_installed_alipay_checkout: PASS",
         "stage_role": "staging",
         "source_sha": source_sha,
-        "source_tree": source_tree,
+        "source_tree": helper_selection["source_tree"],
         "installed_sha": installed_sha,
         "manifest_sha256": manifest_sha256,
-        "helper_sha256": helper_sha256,
+        "helper_sha256": helper_selection["executor_helper_sha256"],
+        "source_helper_sha256": helper_selection["source_helper_sha256"],
+        "executor_helper_sha256": helper_selection["executor_helper_sha256"],
+        "executor_source_sha": helper_selection["executor_source_sha"],
+        "executor_source_tree": helper_selection["executor_source_tree"],
+        "helper_compatibility": helper_selection["compatibility"],
     }
     if not isinstance(receipt, dict) or any(receipt.get(key) != value for key, value in expected.items()):
         raise RuntimeError("staging smoke receipt identity mismatch")
@@ -958,6 +1133,7 @@ def run_stage_smoke(
     installed_sha: str,
     manifest_sha: str,
     *,
+    checked_main_sha: str | None = None,
     timing_sink: dict | None = None,
 ) -> dict:
     """Run a fixed source fixture against the exact installed staging executable."""
@@ -965,8 +1141,8 @@ def run_stage_smoke(
         raise ValueError("invalid staging smoke identity")
     started = time.monotonic()
     helper = config["stage_helper"]
-    helper_sha = _git_file_sha256(repo, source_sha, "deploy/domestic-promote.py")
-    if _local_file_sha256(Path(helper)) != helper_sha:
+    helper_selection = _smoke_helper_selection(repo, source_sha, checked_main_sha)
+    if _local_file_sha256(Path(helper)) != helper_selection["executor_helper_sha256"]:
         raise RuntimeError("fixed staging smoke helper does not match the checked source")
     try:
         output = command(
@@ -974,12 +1150,23 @@ def run_stage_smoke(
             "--source-sha", source_sha,
             "--expected-sha", installed_sha,
             "--expected-manifest-sha256", manifest_sha,
-            "--expected-helper-sha256", helper_sha,
+            "--expected-helper-sha256", helper_selection["executor_helper_sha256"],
             timeout=900,
         )
         receipt = json.loads(output.splitlines()[-1])
-        source_tree = git(repo, "rev-parse", f"{source_sha}^{{tree}}")
-        return verify_stage_smoke_receipt(receipt, source_sha, installed_sha, manifest_sha, helper_sha, source_tree)
+        if not isinstance(receipt, dict):
+            raise RuntimeError("staging smoke helper returned an invalid receipt")
+        provenance = {
+            "source_helper_sha256": helper_selection["source_helper_sha256"],
+            "executor_helper_sha256": helper_selection["executor_helper_sha256"],
+            "executor_source_sha": helper_selection["executor_source_sha"],
+            "executor_source_tree": helper_selection["executor_source_tree"],
+            "helper_compatibility": helper_selection["compatibility"],
+        }
+        if any(key in receipt and receipt[key] != value for key, value in provenance.items()):
+            raise RuntimeError("staging smoke helper returned conflicting executor provenance")
+        receipt.update(provenance)
+        return verify_stage_smoke_receipt(receipt, source_sha, installed_sha, manifest_sha, helper_selection)
     finally:
         if timing_sink is not None:
             timing_sink["stage_smoke"] = round(time.monotonic() - started, 1)
@@ -1032,6 +1219,7 @@ def promote_checked_candidate(
     stage_smoke_receipt: dict | None = None,
     phase_timings: dict | None = None,
     check_observation: dict | None = None,
+    checked_main_sha: str | None = None,
 ) -> None:
     """Run the same production handoff only after stage receipt/readback is verified."""
     phase_timings = dict(phase_timings or {})
@@ -1065,9 +1253,9 @@ def promote_checked_candidate(
             raise RuntimeError("staging smoke candidate source tree is invalid")
         if stage_smoke_receipt is None:
             raise RuntimeError("required installed staging smoke receipt is missing")
-        actual_helper_sha = _git_file_sha256(Path(config["repo"]), sha, "deploy/domestic-promote.py")
+        helper_selection = _smoke_helper_selection(repo, sha, checked_main_sha)
         verify_stage_smoke_receipt(
-            stage_smoke_receipt, sha, sha, metadata["release_files_sha256"], actual_helper_sha, source_tree,
+            stage_smoke_receipt, sha, sha, metadata["release_files_sha256"], helper_selection,
         )
     state.update(
         status="staging_verified",
@@ -1242,7 +1430,7 @@ def recover(config: dict, *, retry_blocked: bool, expected_sha: str) -> dict:
         stage_smoke_receipt = None
         if smoke_required:
             try:
-                stage_smoke_receipt = run_stage_smoke(config, repo, sha, sha, manifest_sha)
+                stage_smoke_receipt = run_stage_smoke(config, repo, sha, sha, manifest_sha, checked_main_sha=head)
             except Exception as exc:
                 state.pop("staging_verified_smoke", None)
                 state.update(
@@ -1257,8 +1445,7 @@ def recover(config: dict, *, retry_blocked: bool, expected_sha: str) -> dict:
                 sha,
                 sha,
                 manifest_sha,
-                _git_file_sha256(repo, sha, "deploy/domestic-promote.py"),
-                git(repo, "rev-parse", f"{sha}^{{tree}}"),
+                _smoke_helper_selection(repo, sha, head),
             )
             state["staging_verified_smoke"] = stage_smoke_receipt
             atomic_json(state_path, state)
@@ -1336,8 +1523,12 @@ def poll(config: dict) -> dict:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         state = json.loads(state_path.read_text())
         initial_status = state.get("status")
-        if initial_status not in {"ready", "controller_update_required", "ci_regression_blocked"}:
+        if initial_status not in {"ready", "controller_update_required", "ci_regression_blocked", "staging_failed"}:
             raise RuntimeError(f"queue halted: {state.get('status')}")
+        resuming_pr38_staging_failure = (
+            initial_status == "staging_failed"
+            or state.get("pr38_staging_failed_resume") == PR38_RESUME_MARKER
+        )
         blocked_controller_sha = state.get("blocked_sha") if initial_status == "controller_update_required" else None
         if blocked_controller_sha is not None and not SHA.fullmatch(blocked_controller_sha):
             raise RuntimeError("controller update ledger cursor is invalid")
@@ -1361,9 +1552,15 @@ def poll(config: dict) -> dict:
         queue = first_parent_queue(repo, processed, head)
         if blocked_controller_sha is not None and (not queue or queue[0] != blocked_controller_sha):
             raise RuntimeError("controller update is no longer the next checked first-parent commit")
+        if resuming_pr38_staging_failure:
+            _validate_pr38_staging_failed_ledger(state, queue)
+            if state.get("pr38_staging_failed_resume") != PR38_RESUME_MARKER:
+                state["pr38_staging_failed_resume"] = dict(PR38_RESUME_MARKER)
+                atomic_json(state_path, state)
         regression_history_cache: dict = {}
         for sha in queue:
             started = time.monotonic()
+            pr38_resume_readback = None
             check_observation: dict = {}
             if not exact_check_success(sha, os.environ.get("GITHUB_TOKEN"), observation=check_observation):
                 return {"status": "awaiting_exact_check", "sha": sha}
@@ -1396,22 +1593,40 @@ def poll(config: dict) -> dict:
                 "check": check_observation.get("duration_seconds"),
             }
             controller_files = plan.get("controller_files", [])
+            if resuming_pr38_staging_failure and sha == PR38_SMOKE_SOURCE_SHA:
+                if not controller_files or plan.get("runtime_changed") is not False or not smoke_required:
+                    raise RuntimeError("PR38 staging_failed resume no longer matches the reviewed controller-only smoke plan")
+                pr38_resume_readback = _verify_pr38_staging_failed_readbacks(config, state)
             if controller_files:
                 controller_started = time.monotonic()
                 try:
-                    verification = verify_controller_installation(config, repo, sha, controller_files)
+                    verification = verify_controller_installation(config, repo, sha, controller_files, checked_main_sha=head)
                 except Exception as exc:
                     phase_timings["controller_readback"] = round(time.monotonic() - controller_started, 1)
-                    state.update(
-                        status="controller_update_required",
-                        blocked_sha=sha,
-                        failure=f"fixed controller files are not installed and verified: {type(exc).__name__}",
-                        last_release_timings_seconds={**phase_timings, "total": round(time.monotonic() - started, 1)},
-                    )
-                    atomic_json(state_path, state)
+                    if resuming_pr38_staging_failure:
+                        state.update(
+                            failure=f"fixed controller files are not installed and verified: {type(exc).__name__}",
+                            last_release_timings_seconds={**phase_timings, "total": round(time.monotonic() - started, 1)},
+                        )
+                        atomic_json(state_path, state)
+                    else:
+                        state.update(
+                            status="controller_update_required",
+                            blocked_sha=sha,
+                            failure=f"fixed controller files are not installed and verified: {type(exc).__name__}",
+                            last_release_timings_seconds={**phase_timings, "total": round(time.monotonic() - started, 1)},
+                        )
+                        atomic_json(state_path, state)
                     raise RuntimeError("fixed controller files do not match the exact checked source; install them under the maintenance lock and rerun") from exc
                 phase_timings["controller_readback"] = verification["duration_seconds"]
                 state["last_controller_verification"] = verification
+                if pr38_resume_readback is not None:
+                    state["last_pr38_resume_readback"] = {
+                        **pr38_resume_readback,
+                        "checked_main_sha": head,
+                        "checked_main_tree": git(repo, "rev-parse", f"{head}^{{tree}}"),
+                        "source_sha": sha,
+                    }
                 atomic_json(state_path, state)
             if blocked_controller_sha == sha and not controller_files:
                 raise RuntimeError("blocked controller update is absent from the source impact plan")
@@ -1420,12 +1635,20 @@ def poll(config: dict) -> dict:
                 if smoke_required:
                     try:
                         smoke_manifest = _installed_stage_manifest_sha(config, deployed)
+                        if resuming_pr38_staging_failure:
+                            state["pr38_staging_failed_smoke_attempted"] = {
+                                "source_sha": PR38_SMOKE_SOURCE_SHA,
+                                "checked_main_sha": head,
+                                "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                            }
+                            atomic_json(state_path, state)
                         stage_smoke_receipt = run_stage_smoke(
                             config,
                             repo,
                             sha,
                             deployed,
                             smoke_manifest,
+                            checked_main_sha=head,
                             timing_sink=phase_timings,
                         )
                     except Exception as exc:
@@ -1455,9 +1678,12 @@ def poll(config: dict) -> dict:
                     state.pop("last_stage_smoke", None)
                 if controller_files:
                     state["last_check_to_controller_verified_seconds"] = _seconds_since(check_observation.get("completed_at"))
+                state.pop("pr38_staging_failed_resume", None)
+                state.pop("pr38_staging_failed_smoke_attempted", None)
                 atomic_json(state_path, state)
                 processed = sha
                 blocked_controller_sha = None
+                resuming_pr38_staging_failure = False
                 continue
             base_release = Path(config["work_root"]) / "builds" / deployed / "release"
             if not base_release.is_dir():
@@ -1477,6 +1703,7 @@ def poll(config: dict) -> dict:
                         sha,
                         sha,
                         metadata["release_files_sha256"],
+                        checked_main_sha=head,
                         timing_sink=phase_timings,
                     )
             except Exception as exc:
@@ -1507,6 +1734,7 @@ def poll(config: dict) -> dict:
                 stage_smoke_receipt=stage_smoke_receipt,
                 phase_timings=phase_timings,
                 check_observation=check_observation,
+                checked_main_sha=head,
             )
             processed, deployed, installed = sha, sha, sha
             blocked_controller_sha = None
