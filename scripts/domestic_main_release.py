@@ -45,6 +45,7 @@ CANDIDATE_REF_PREFIX = "refs/domestic/candidates/"
 PUSH_REF = re.compile(r"^refs/heads/codex/[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$")
 SCHEMA_VERSION = 1
 CURSOR_PATH = "/opt/aicrm/domestic-main/state.json"
+DEFAULT_STATE = "/var/lib/aicrm/domestic-main/state.json"
 SOURCE_BACKUP_ROOT = "/opt/aicrm/source-backups"
 SOURCE_BUNDLE_INCOMING_ROOT = "/opt/aicrm/domestic-incoming"
 DEFAULT_REPO = "/opt/aicrm/domestic/source.git"
@@ -244,6 +245,8 @@ def _check_config(config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("domestic main release config is incomplete")
     if not Path(config["repo"]).is_absolute() or not Path(config["state"]).is_absolute():
         raise ValueError("repository and state paths must be absolute")
+    if config["state"] != DEFAULT_STATE:
+        raise ValueError("domestic release state path must match the systemd unit contract")
     if Path(config["prod_known_hosts"]).is_relative_to(Path("/tmp")):
         raise ValueError("production Host Key pin must use a persistent protected known_hosts file")
     if not Path(config["prod_key"]).is_absolute() or not Path(config["prod_known_hosts"]).is_absolute():

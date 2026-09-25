@@ -45,6 +45,33 @@ def make_repository(root: Path) -> tuple[Path, str, str, str]:
 
 
 class DomesticMainReleaseTests(unittest.TestCase):
+    def test_config_state_path_matches_systemd_condition(self) -> None:
+        config = {
+            "repo": release.DEFAULT_REPO,
+            "state": release.DEFAULT_STATE,
+            "lock": "/var/lib/aicrm/domestic-main/controller.lock",
+            "work_root": "/var/lib/aicrm/domestic-main/work",
+            "source_worktree": "/var/lib/aicrm/domestic-main/work/candidate",
+            "stage_incoming": "/opt/aicrm/domestic-incoming",
+            "stage_helper": "/usr/local/libexec/aicrm/domestic-promote.py",
+            "prod_host": "10.0.4.13",
+            "prod_user": "ubuntu",
+            "prod_key": "/home/ubuntu/.ssh/ai-crm-v4-prod-deploy",
+            "prod_known_hosts": "/home/ubuntu/.ssh/known_hosts_aicrm_prod",
+            "prod_incoming": "/opt/aicrm/domestic-incoming",
+            "prod_helper": "/usr/local/libexec/aicrm/domestic-promote.py",
+            "push_user": "aicrm-release-push",
+            "push_group": "aicrm-release-push",
+            "controller_path": release.DEFAULT_CONTROLLER,
+            "config_path": release.DEFAULT_CONFIG,
+            "production_enabled": False,
+        }
+        self.assertIs(release._check_config(config), config)
+
+        config["state"] = "/var/lib/aicrm/domestic-main/alternate-state.json"
+        with self.assertRaisesRegex(ValueError, "state path must match the systemd unit contract"):
+            release._check_config(config)
+
     def test_bare_objects_are_readable_but_not_writable_without_push_group(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repo, _base, _candidate, _other = make_repository(Path(temporary))

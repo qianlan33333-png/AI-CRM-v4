@@ -53,6 +53,7 @@ CI_ONLY_FILES = {
     "scripts/check-release-binaries.py",
 }
 DEPLOY_SAMPLE_CONFIGS = {
+    "deploy/domestic-main-release-example.json",
     "deploy/domestic-release.example.json",
     "deploy/domestic-release-role.production.example",
     "deploy/domestic-release-role.staging.example",

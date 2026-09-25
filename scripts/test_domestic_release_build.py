@@ -44,6 +44,7 @@ class DomesticReleaseBuildTests(unittest.TestCase):
         self.assertFalse(result.full_build)
         self.assertFalse(result.migrations_changed)
         for sample_path in (
+            "deploy/domestic-main-release-example.json",
             "deploy/domestic-release.example.json",
             "deploy/domestic-release-role.production.example",
             "deploy/domestic-release-role.staging.example",

@@ -1,0 +1,22 @@
+{
+  "repo": "/opt/aicrm/domestic/source.git",
+  "state": "/var/lib/aicrm/domestic-main/state.json",
+  "lock": "/var/lib/aicrm/domestic-main/controller.lock",
+  "work_root": "/var/lib/aicrm/domestic-main/work",
+  "source_worktree": "/var/lib/aicrm/domestic-main/work/candidate",
+  "stage_incoming": "/opt/aicrm/domestic-incoming",
+  "stage_helper": "/usr/local/libexec/aicrm/domestic-promote.py",
+  "prod_host": "10.0.4.13",
+  "prod_user": "ubuntu",
+  "prod_key": "/home/ubuntu/.ssh/ai-crm-v4-prod-deploy",
+  "prod_known_hosts": "/home/ubuntu/.ssh/known_hosts_aicrm_prod",
+  "prod_incoming": "/opt/aicrm/domestic-incoming",
+  "prod_helper": "/usr/local/libexec/aicrm/domestic-promote.py",
+  "push_user": "aicrm-release-push",
+  "push_group": "aicrm-release-push",
+  "controller_path": "/usr/local/libexec/aicrm/domestic_main_release.py",
+  "config_path": "/etc/aicrm/domestic-main-release.json",
+  "production_enabled": false,
+  "check_database_url": "postgresql://127.0.0.1/aicrm_ci",
+  "build_path": "/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/usr/bin:/bin"
+}
