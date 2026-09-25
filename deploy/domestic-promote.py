@@ -62,8 +62,8 @@ SMOKE_SOURCE_REMOTES = {
     "https://github.com/qianlan33333-png/AI-CRM-v4.git",
 }
 DOMESTIC_INCOMING = ROOT / "domestic-incoming"
-SOURCE_BACKUPS = ROOT / "source-backups"
-DOMESTIC_MAIN = ROOT / "domestic-main"
+SOURCE_BACKUPS = ROOT / "domestic/source-backups"
+DOMESTIC_MAIN = ROOT / "domestic/source-cursor"
 DOMESTIC_MAIN_STATE = DOMESTIC_MAIN / "state.json"
 DOMESTIC_SOURCE_RECEIPT_SUFFIX = ".bundle.json"
 DOMESTIC_SOURCE_BUNDLE_MIN_FREE_BYTES = 1024 * 1024 * 1024
@@ -1613,6 +1613,12 @@ def _assert_root_directory(path: Path, *, create: bool = False, mode: int = 0o70
         raise RuntimeError("fixed domestic release directory is unsafe")
 
 
+def _assert_domestic_parent() -> None:
+    """Validate the nested source parent before reading or creating children."""
+    _assert_root_directory(ROOT)
+    _assert_root_directory(ROOT / "domestic")
+
+
 def _assert_root_file(path: Path, *, exact_mode: int | None = None) -> os.stat_result:
     try:
         info = path.lstat()
@@ -1691,6 +1697,7 @@ def _verify_source_bundle_file(
     if source_sha == previous_main_sha and not allow_baseline_transition:
         raise ValueError("source candidate must advance domestic main")
     _assert_root_directory(ROOT)
+    _assert_domestic_parent()
     _assert_root_directory(SOURCE_BACKUPS, private=True)
     with tempfile.TemporaryDirectory(prefix=f".verify-{source_sha}-", dir=SOURCE_BACKUPS) as temporary:
         repository = Path(temporary) / "repo.git"
@@ -1748,6 +1755,7 @@ def _copy_incoming_bundle(source_bundle: Path, source_sha: str, expected_digest:
         raise ValueError("source bundle path is outside the fixed incoming directory")
     _assert_root_directory(ROOT)
     _assert_root_directory(DOMESTIC_INCOMING, private=True)
+    _assert_domestic_parent()
     _assert_root_directory(SOURCE_BACKUPS, create=True, private=True)
     try:
         descriptor = os.open(source_bundle, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
@@ -1831,6 +1839,7 @@ def save_domestic_source_bundle(
     previous_main_sha = _valid_sha(previous_main_sha, "previous main SHA")
     expected_bundle_sha256 = _valid_digest(expected_bundle_sha256, "source bundle SHA256")
     _assert_root_directory(ROOT)
+    _assert_domestic_parent()
     _assert_root_directory(SOURCE_BACKUPS, create=True, private=True)
     target = SOURCE_BACKUPS / f"{source_sha}.bundle"
     receipt_path = _source_bundle_receipt_path(source_sha)
@@ -1926,6 +1935,7 @@ def verify_domestic_source_backup(
     previous_main_sha = _valid_sha(previous_main_sha, "previous main SHA")
     expected_bundle_sha256 = _valid_digest(expected_bundle_sha256, "source bundle SHA256")
     _assert_root_directory(ROOT)
+    _assert_domestic_parent()
     _assert_root_directory(SOURCE_BACKUPS, private=True)
     bundle = SOURCE_BACKUPS / f"{source_sha}.bundle"
     receipt_path = _source_bundle_receipt_path(source_sha)
@@ -2041,6 +2051,7 @@ def _verify_installed_app(
 
 
 def _read_main_state() -> dict:
+    _assert_domestic_parent()
     _assert_root_directory(DOMESTIC_MAIN, private=True)
     _assert_root_file(DOMESTIC_MAIN_STATE, exact_mode=0o600)
     try:
@@ -2124,6 +2135,7 @@ def initialize_domestic_main(
 ) -> dict:
     require_host_role("production")
     _assert_root_directory(ROOT)
+    _assert_domestic_parent()
     _assert_root_directory(DOMESTIC_MAIN, create=True, private=True)
     with _production_release_lock():
         main_sha = _valid_sha(main_sha, "main SHA")
@@ -2169,6 +2181,7 @@ def record_domestic_main(
     require_host_role("production")
     expected_previous_main_sha = _valid_sha(expected_previous_main_sha, "expected previous main SHA")
     _assert_root_directory(ROOT)
+    _assert_domestic_parent()
     _assert_root_directory(DOMESTIC_MAIN, private=True)
     with _production_release_lock():
         existing = _read_main_state()

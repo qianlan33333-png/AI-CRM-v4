@@ -376,6 +376,22 @@ class ManualGitHubSyncTests(unittest.TestCase):
         self.assertEqual(run.call_args_list[0].args[0][-1], "ubuntu@prod-alias")
         self.assertEqual(run.call_args_list[1].args[0][2], "prod-pinned")
 
+    def test_stage_proxy_alias_uses_allowlisted_host_and_pinned_hostkeyalias(self) -> None:
+        resolved = subprocess.CompletedProcess(
+            [], 0,
+            stdout=("hostname 10.0.4.6\nport 22\nuser aicrm-release-push\n"
+                    "hostkeyalias stage-pinned\nproxyjump ubuntu@124.220.53.183\n"),
+            stderr="",
+        )
+        pinned = subprocess.CompletedProcess([], 0, stdout="stage-pinned ssh-ed25519 AAAATEST\n", stderr="")
+        with patch.object(sync.subprocess, "run", side_effect=[resolved, pinned]) as run:
+            canonical = sync._resolve_ssh_target(
+                "aicrm-v4-stage-source", "staging", "aicrm-release-push", self.known_hosts,
+            )
+        self.assertEqual(canonical, "10.0.4.6")
+        self.assertEqual(run.call_args_list[0].args[0][-1], "aicrm-release-push@aicrm-v4-stage-source")
+        self.assertEqual(run.call_args_list[1].args[0][2], "stage-pinned")
+
     def test_ssh_alias_to_unexpected_server_is_rejected_before_hostkey_lookup(self) -> None:
         resolved = subprocess.CompletedProcess(
             [], 0,

@@ -19,6 +19,7 @@ SPEC = importlib.util.spec_from_file_location("domestic_promote_main_source", RO
 installer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(installer)
 assert_root_file = installer._assert_root_file
+assert_root_directory = installer._assert_root_directory
 
 
 class DomesticMainSourceTests(unittest.TestCase):
@@ -27,8 +28,10 @@ class DomesticMainSourceTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.incoming = self.root / "domestic-incoming"
-        self.backups = self.root / "source-backups"
-        self.domestic_main = self.root / "domestic-main"
+        self.domestic_root = self.root / "domestic"
+        self.domestic_root.mkdir(mode=0o755)
+        self.backups = self.domestic_root / "source-backups"
+        self.domestic_main = self.domestic_root / "source-cursor"
         self.releases = self.root / "releases"
         self.receipts = self.root / "domestic-receipts"
         self.repo = self.root / "source-repo"
@@ -126,6 +129,46 @@ class DomesticMainSourceTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(RuntimeError, "exact immutable candidate ref"):
                 installer._source_commit_tree(self.next_sha, source_ref=candidate_ref, source_repository=self.repo)
+
+    def test_domestic_parent_directories_reject_group_or_world_write(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            domestic = root / "domestic"
+            domestic.mkdir(mode=0o755)
+            root.chmod(0o755)
+            domestic.chmod(0o755)
+
+            original_lstat = Path.lstat
+            root_owned_paths = {root, domestic}
+
+            def root_owned_lstat(path):
+                result = original_lstat(path)
+                if path not in root_owned_paths:
+                    return result
+                fields = list(result)
+                fields[4] = 0
+                fields[5] = 0
+                return installer.os.stat_result(fields)
+
+            with mock.patch.object(installer, "ROOT", root), \
+                 mock.patch.object(installer, "_assert_root_directory", assert_root_directory), \
+                 mock.patch.object(Path, "lstat", root_owned_lstat):
+                installer._assert_domestic_parent()
+
+                for unsafe_parent in (root, domestic):
+                    for unsafe_mode in (0o775, 0o757):
+                        with self.subTest(parent=unsafe_parent.name, mode=oct(unsafe_mode)):
+                            unsafe_parent.chmod(unsafe_mode)
+                            with self.assertRaisesRegex(RuntimeError, "unsafe"):
+                                installer._assert_domestic_parent()
+                            unsafe_parent.chmod(0o755)
+
+                domestic.rename(root / "domestic-directory")
+                with self.assertRaisesRegex(RuntimeError, "missing"):
+                    installer._assert_domestic_parent()
+                (root / "domestic").symlink_to(root / "domestic-directory", target_is_directory=True)
+                with self.assertRaisesRegex(RuntimeError, "unsafe"):
+                    installer._assert_domestic_parent()
 
     def _assert_directory(self, path: Path, *, create=False, mode=0o700, private=False):
         if path.is_symlink():

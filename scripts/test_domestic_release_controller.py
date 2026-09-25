@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -44,14 +46,20 @@ def make_repository(root: Path) -> tuple[Path, str, str, str]:
     return bare, base, candidate, other
 
 
+def stdin_with_bytes(payload: bytes) -> mock.Mock:
+    stream = mock.Mock()
+    stream.buffer = io.BytesIO(payload)
+    return stream
+
+
 class DomesticMainReleaseTests(unittest.TestCase):
     def test_config_state_path_matches_systemd_condition(self) -> None:
         config = {
             "repo": release.DEFAULT_REPO,
             "state": release.DEFAULT_STATE,
-            "lock": "/var/lib/aicrm/domestic-main/controller.lock",
-            "work_root": "/var/lib/aicrm/domestic-main/work",
-            "source_worktree": "/var/lib/aicrm/domestic-main/work/candidate",
+            "lock": "/opt/aicrm/domestic/control/controller.lock",
+            "work_root": "/opt/aicrm/domestic/control/work",
+            "source_worktree": "/opt/aicrm/domestic/control/work/candidate",
             "stage_incoming": "/opt/aicrm/domestic-incoming",
             "stage_helper": "/usr/local/libexec/aicrm/domestic-promote.py",
             "prod_host": "10.0.4.13",
@@ -68,7 +76,7 @@ class DomesticMainReleaseTests(unittest.TestCase):
         }
         self.assertIs(release._check_config(config), config)
 
-        config["state"] = "/var/lib/aicrm/domestic-main/alternate-state.json"
+        config["state"] = "/opt/aicrm/domestic/control/alternate-state.json"
         with self.assertRaisesRegex(ValueError, "state path must match the systemd unit contract"):
             release._check_config(config)
 
@@ -257,12 +265,15 @@ class DomesticMainReleaseTests(unittest.TestCase):
             release._check_env(base)
         with self.assertRaises(release.ReleaseError):
             release._check_env({**base, "build_path": "/opt/go/bin:relative"})
-        env = release._check_env({**base, "build_path": "/opt/aicrm/toolchain/go/bin:/opt/aicrm/toolchain/node/bin:/usr/bin:/bin"})
-        self.assertEqual(env["PATH"], "/opt/aicrm/toolchain/go/bin:/opt/aicrm/toolchain/node/bin:/usr/bin:/bin")
+        with self.assertRaisesRegex(release.ReleaseError, "fixed npm toolchain directory"):
+            release._check_env({**base, "build_path": "/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/usr/bin:/bin"})
+        expected_path = "/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/npm/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/usr/bin:/bin"
+        env = release._check_env({**base, "build_path": expected_path})
+        self.assertEqual(env["PATH"], expected_path)
 
     def test_build_toolchain_probe_runs_as_isolated_user_and_requires_all_tools(self) -> None:
         config = {"check_database_url": "postgresql://localhost/aicrm_ci",
-                  "build_path": "/opt/go/bin:/opt/node/bin:/usr/bin:/bin"}
+                  "build_path": "/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/npm/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/usr/bin:/bin"}
         expected = {name: {"path": f"/opt/{name}/bin/{name}", "version": name + " version"}
                     for name in release.BUILD_TOOLCHAIN}
         completed = subprocess.CompletedProcess([], 0, json.dumps(expected) + "\n", "")
@@ -486,6 +497,94 @@ class DomesticMainReleaseTests(unittest.TestCase):
                  self.assertRaises(release.ReleaseError):
                 release.restricted_ssh()
                 execve.assert_not_called()
+
+    def test_restricted_ssh_archive_ack_passes_sha_only_over_stdin(self) -> None:
+        sha = "a" * 40
+        result = subprocess.CompletedProcess([], 0, '{"status":"recorded"}', "")
+        with mock.patch.dict(os.environ, {"SSH_ORIGINAL_COMMAND": f"domestic-archive-ack --sha {sha}"}), \
+             mock.patch.object(release, "_run", return_value=result) as run, \
+             redirect_stdout(io.StringIO()):
+            release.restricted_ssh()
+
+        args, kwargs = run.call_args
+        self.assertEqual(args[0], ["/usr/bin/sudo", "-n", "/usr/bin/python3", release.DEFAULT_CONTROLLER,
+                                   "archive-ack-stdin", "--config", release.DEFAULT_CONFIG])
+        self.assertEqual(kwargs, {"input_text": json.dumps({"sha": sha}) + "\n", "timeout": 60})
+        self.assertNotIn(sha, args[0])
+
+    def test_restricted_ssh_archive_ack_rejects_extra_or_malformed_arguments(self) -> None:
+        sha = "a" * 40
+        commands = (
+            f"domestic-archive-ack --sha {sha} --config /etc/other.json",
+            f"domestic-archive-ack --sha {sha} extra",
+            f"domestic-archive-ack --sha {sha}; touch /tmp/no",
+            f"domestic-archive-ack --sha {sha.upper()}",
+            "domestic-archive-ack --sha " + "a" * 39,
+            f"domestic-archive-ack --sha {sha} --sha {sha}",
+        )
+        for command in commands:
+            with self.subTest(command=command), \
+                 mock.patch.dict(os.environ, {"SSH_ORIGINAL_COMMAND": command}), \
+                 mock.patch.object(release, "_run") as run, \
+                 self.assertRaises(release.ReleaseError):
+                release.restricted_ssh()
+                run.assert_not_called()
+
+    def test_archive_ack_stdin_accepts_only_one_exact_sha_field(self) -> None:
+        config = {"repo": release.DEFAULT_REPO}
+        sha = "b" * 40
+        with mock.patch.object(release.os, "geteuid", return_value=0), \
+             mock.patch.object(release, "_check_config", return_value=config) as check_config, \
+             mock.patch.object(release, "archive_ack", return_value={"status": "recorded"}) as ack, \
+             mock.patch.object(release.sys, "stdin", stdin_with_bytes((json.dumps({"sha": sha}) + "\n").encode())):
+            result = release._archive_ack_stdin(config)
+
+        self.assertEqual(result, {"status": "recorded"})
+        check_config.assert_called_once_with(config)
+        ack.assert_called_once_with(config, sha)
+
+    def test_archive_ack_stdin_rejects_malicious_or_ambiguous_json(self) -> None:
+        valid_sha = "c" * 40
+        invalid_payloads = (
+            b"",
+            b"[]",
+            b"null",
+            json.dumps({"sha": valid_sha, "extra": "ignored"}).encode(),
+            ('{"sha":"' + valid_sha + '","sha":"' + "d" * 40 + '"}').encode(),
+            (json.dumps({"sha": valid_sha}) + "\n{}").encode(),
+            json.dumps({"sha": "C" * 40}).encode(),
+            json.dumps({"sha": "x" * 40}).encode(),
+            json.dumps({"sha": 123}).encode(),
+            b" " * 513,
+            ("é" * 257).encode("utf-8"),
+            b"\xff",
+        )
+        for payload in invalid_payloads:
+            with self.subTest(payload=repr(payload[:80])), \
+                 mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config") as check_config, \
+                 mock.patch.object(release, "archive_ack") as ack, \
+                 mock.patch.object(release.sys, "stdin", stdin_with_bytes(payload)):
+                with self.assertRaises(release.ReleaseError):
+                    release._archive_ack_stdin({})
+                check_config.assert_not_called()
+                ack.assert_not_called()
+
+    def test_archive_ack_stdin_rejects_non_root_invocation(self) -> None:
+        with mock.patch.object(release.os, "geteuid", return_value=1000), \
+             mock.patch.object(release, "archive_ack") as ack, \
+             mock.patch.object(release.sys, "stdin", stdin_with_bytes((('{"sha":"' + "e" * 40 + '"}').encode()))):
+            with self.assertRaisesRegex(release.ReleaseError, "fixed root-mediated endpoint"):
+                release._archive_ack_stdin({})
+        ack.assert_not_called()
+
+    def test_archive_ack_stdin_rejects_non_binary_input_stream(self) -> None:
+        with mock.patch.object(release.os, "geteuid", return_value=0), \
+             mock.patch.object(release, "archive_ack") as ack, \
+             mock.patch.object(release.sys, "stdin", io.StringIO('{"sha":"' + "f" * 40 + '"}')):
+            with self.assertRaises(release.ReleaseError):
+                release._archive_ack_stdin({})
+        ack.assert_not_called()
 
     def test_generated_trusted_runner_is_valid_python(self) -> None:
         compile(release._trusted_runner_code(), "<trusted-runner>", "exec")

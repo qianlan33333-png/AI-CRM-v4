@@ -44,9 +44,9 @@ MAIN_REF = "refs/heads/main"
 CANDIDATE_REF_PREFIX = "refs/domestic/candidates/"
 PUSH_REF = re.compile(r"^refs/heads/codex/[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$")
 SCHEMA_VERSION = 1
-CURSOR_PATH = "/opt/aicrm/domestic-main/state.json"
-DEFAULT_STATE = "/var/lib/aicrm/domestic-main/state.json"
-SOURCE_BACKUP_ROOT = "/opt/aicrm/source-backups"
+CURSOR_PATH = "/opt/aicrm/domestic/source-cursor/state.json"
+DEFAULT_STATE = "/opt/aicrm/domestic/control/state.json"
+SOURCE_BACKUP_ROOT = "/opt/aicrm/domestic/source-backups"
 SOURCE_BUNDLE_INCOMING_ROOT = "/opt/aicrm/domestic-incoming"
 DEFAULT_REPO = "/opt/aicrm/domestic/source.git"
 DEFAULT_CONTROLLER = "/usr/local/libexec/aicrm/domestic_main_release.py"
@@ -760,6 +760,8 @@ def _check_env(config: dict[str, Any], safe_repository: Path | None = None) -> d
     if (not isinstance(path_value, str) or not path_value or "\n" in path_value or "\x00" in path_value
             or any(not part or not Path(part).is_absolute() for part in path_value.split(":"))):
         raise ReleaseError("isolated check PATH is invalid")
+    if "/opt/aicrm/toolchain/npm/bin" not in path_value.split(":"):
+        raise ReleaseError("isolated check PATH omits the fixed npm toolchain directory")
     build_root = Path(legacy.BUILD_ROOT)
     return {
         "PATH": path_value,
@@ -1805,16 +1807,16 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
                 "import os,sys,tempfile; from pathlib import Path; "
                 "root=Path(sys.argv[1]); sys.path.insert(0,str(root/'scripts')); "
                 "import domestic_main_release as m; "
-                "c={'repo':'/opt/aicrm/domestic/source.git','state':'/var/lib/aicrm/domestic-main/state.json',"
-                "'lock':'/var/lib/aicrm/domestic-main/controller.lock','work_root':'/var/lib/aicrm/domestic-main/work',"
-                "'source_worktree':'/var/lib/aicrm/domestic-main/work/candidate','stage_incoming':'/opt/aicrm/domestic-incoming',"
+                "c={'repo':'/opt/aicrm/domestic/source.git','state':'/opt/aicrm/domestic/control/state.json',"
+                "'lock':'/opt/aicrm/domestic/control/controller.lock','work_root':'/opt/aicrm/domestic/control/work',"
+                "'source_worktree':'/opt/aicrm/domestic/control/work/candidate','stage_incoming':'/opt/aicrm/domestic-incoming',"
                 "'stage_helper':'/usr/local/libexec/aicrm/domestic-promote.py','prod_host':'unused','prod_user':'unused',"
                 "'prod_key':'/var/lib/aicrm/probe-key','prod_known_hosts':'/etc/ssh/ssh_known_hosts',"
                 "'prod_incoming':'/opt/aicrm/domestic-incoming','prod_helper':'/usr/local/libexec/aicrm/domestic-promote.py',"
                 "'push_user':'aicrm-release-push','push_group':'aicrm-release-push',"
                 "'controller_path':'/usr/local/libexec/aicrm/domestic_main_release.py',"
                 "'config_path':'/etc/aicrm/domestic-main-release.json','production_enabled':False,"
-                "'check_database_url':'postgresql://127.0.0.1/aicrm_ci','build_path':'/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/usr/bin:/bin'}; "
+                "'check_database_url':'postgresql://127.0.0.1/aicrm_ci','build_path':'/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/npm/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/usr/bin:/bin'}; "
                 "m._check_config(c); d=Path(tempfile.mkdtemp()); lock=d/'lock'; "
                 "ctx=m._locked(lock,nonblocking=True); ctx.__enter__(); "
                 "try:\n try:\n  with m._locked(lock,nonblocking=True): raise SystemExit(31)\n except m.ReleaseError: print('locked-config-dry-run-ok')\n"
@@ -2125,6 +2127,34 @@ def _submit_stdin(config: dict[str, Any], payload: dict[str, Any] | None = None)
                             Path(config["lock"]), payload.get("supersedes_candidate_id"))
 
 
+def _archive_ack_stdin(config: dict[str, Any]) -> dict[str, Any]:
+    """Accept one exact SHA over stdin for the fixed sudo-rs endpoint."""
+    if os.geteuid() != 0:
+        raise ReleaseError("archive-ack-stdin is a fixed root-mediated endpoint")
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate JSON key")
+            value[key] = item
+        return value
+
+    try:
+        raw = sys.stdin.buffer.read(513)
+        if len(raw) > 512:
+            raise ValueError("archive acknowledgement is too large")
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object)
+    except (OSError, ValueError, AttributeError, TypeError) as exc:
+        raise ReleaseError("invalid archive acknowledgement request") from exc
+    if not isinstance(payload, dict) or set(payload) != {"sha"}:
+        raise ReleaseError("archive acknowledgement fields are invalid")
+    sha = payload["sha"]
+    if not isinstance(sha, str) or not SHA.fullmatch(sha):
+        raise ReleaseError("archive acknowledgement SHA is invalid")
+    return archive_ack(_check_config(config), sha)
+
+
 def restricted_ssh() -> None:
     """Forced SSH command for the push-only developer account."""
     original = os.environ.get("SSH_ORIGINAL_COMMAND", "")
@@ -2152,8 +2182,9 @@ def restricted_ssh() -> None:
         return
     ack = re.fullmatch(r"domestic-archive-ack --sha ([0-9a-f]{40})", original)
     if ack:
+        payload = json.dumps({"sha": ack.group(1)}) + "\n"
         result = _run(["/usr/bin/sudo", "-n", "/usr/bin/python3", DEFAULT_CONTROLLER,
-                       "archive-ack", "--sha", ack.group(1), "--config", DEFAULT_CONFIG], timeout=60)
+                       "archive-ack-stdin", "--config", DEFAULT_CONFIG], input_text=payload, timeout=60)
         print(json.dumps(json.loads(result.stdout), ensure_ascii=False, sort_keys=True))
         return
     raise ReleaseError("SSH account permits only fixed bare-repository fetch/push, domestic-submit and domestic-archive-ack")
@@ -2162,7 +2193,7 @@ def restricted_ssh() -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("bootstrap", "prepare-baseline", "activate", "verify", "submit", "submit-stdin", "ack-stage-reset", "maintenance-check",
-                                            "poll", "reconcile", "archive-ack", "restricted-ssh", "hook-pre-receive"))
+                                            "poll", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
     parser.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG))
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--seed-repo", type=Path)
@@ -2224,6 +2255,8 @@ def main(argv: list[str] | None = None) -> int:
             if not args.sha:
                 parser.error("archive-ack requires --sha <SHA>")
             result = archive_ack(config, args.sha)
+        elif args.action == "archive-ack-stdin":
+            result = _archive_ack_stdin(config)
         elif args.action == "activate":
             if os.geteuid() != 0:
                 raise ReleaseError("activate must run as root")

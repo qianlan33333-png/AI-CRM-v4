@@ -3,7 +3,7 @@ Description=Build, validate and serially promote one domestic CRM v4 candidate
 After=network-online.target postgresql.service
 Wants=network-online.target
 ConditionPathExists=/etc/aicrm/domestic-main-release.json
-ConditionPathExists=/var/lib/aicrm/domestic-main/state.json
+ConditionPathExists=/opt/aicrm/domestic/control/state.json
 
 [Service]
 Type=oneshot

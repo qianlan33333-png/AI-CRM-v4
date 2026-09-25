@@ -1,6 +1,6 @@
 {
   "registry_version": 1,
-  "registry_sha256": "9f3422dcd85032afa523f271fffd8710e663c1f40be731e7e42e0dffdf140800",
+  "registry_sha256": "40e676006cd00d55cddf9a2c85b09952862ef5cd19f70cb6f1f8319601811327",
   "inventory_scope": "committed_registry",
   "items": [
     {
@@ -6609,19 +6609,6 @@
     },
     {
       "kind": "filesystem_prefix",
-      "name": "/opt/aicrm/domestic-main",
-      "owner": "release",
-      "policy": "never_delete_by_retention",
-      "reason": "Production domestic source cursor is required to reconcile the exact installed application and must be retained.",
-      "source": "docs/governance/retention-registry.json#filesystem_prefixes//opt/aicrm/domestic-main",
-      "cleanup_entrypoint": "",
-      "policy_id": "",
-      "coverage_status": "protected",
-      "gap_code": "",
-      "authorization_expiry": "not_assessed"
-    },
-    {
-      "kind": "filesystem_prefix",
       "name": "/opt/aicrm/domestic-receipts",
       "owner": "release",
       "policy": "never_delete_by_retention",
@@ -6757,19 +6744,6 @@
       "policy": "never_delete_by_retention",
       "reason": "Official GitHub source checkout on the domestic staging host; release cleanup never deletes source objects.",
       "source": "docs/governance/retention-registry.json#filesystem_prefixes//opt/aicrm/source",
-      "cleanup_entrypoint": "",
-      "policy_id": "",
-      "coverage_status": "protected",
-      "gap_code": "",
-      "authorization_expiry": "not_assessed"
-    },
-    {
-      "kind": "filesystem_prefix",
-      "name": "/opt/aicrm/source-backups",
-      "owner": "release",
-      "policy": "never_delete_by_retention",
-      "reason": "Verified production source bundles are the recovery copy until the release owner explicitly replaces them.",
-      "source": "docs/governance/retention-registry.json#filesystem_prefixes//opt/aicrm/source-backups",
       "cleanup_entrypoint": "",
       "policy_id": "",
       "coverage_status": "protected",
@@ -6952,19 +6926,6 @@
       "policy": "never_delete_by_retention",
       "reason": "Existing secret/configuration, formal import evidence, component state, or active release; excluded from process cleanup.",
       "source": "docs/governance/retention-registry.json#filesystem_prefixes//var/lib/aicrm/channel-history-imports",
-      "cleanup_entrypoint": "",
-      "policy_id": "",
-      "coverage_status": "protected",
-      "gap_code": "",
-      "authorization_expiry": "not_assessed"
-    },
-    {
-      "kind": "filesystem_prefix",
-      "name": "/var/lib/aicrm/domestic-main",
-      "owner": "release",
-      "policy": "never_delete_by_retention",
-      "reason": "Staging serial release ledger and lock preserve recovery identity and must not be removed by generic retention.",
-      "source": "docs/governance/retention-registry.json#filesystem_prefixes//var/lib/aicrm/domestic-main",
       "cleanup_entrypoint": "",
       "policy_id": "",
       "coverage_status": "protected",

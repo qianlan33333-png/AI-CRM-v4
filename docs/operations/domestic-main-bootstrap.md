@@ -1,10 +1,10 @@
 # CRM v4 国内主仓：一次性主机准备与切换
 
-> **切换操作当前禁用。** 必须先将旧发布队列处理到选定的 GitHub `main` SHA：所有已合并但尚未技术发布的运行时提交均已装上（包括 #47 的 Chromium 运行时改动），仅完成 #39 不足以切换。stage 与 production 已安装应用的 SHA/tree/manifest 须相互一致且健康；源码 `main` 以该 app SHA 为 first-parent 祖先，app→main 之间没有运行时改动；旧发布 service/timer 已停止，所有结果不明项已只读对账。源码 `main` 与已安装应用 SHA 不要求相等；新 baseline 会绑定准确的 source main SHA/tree 和独立记录的 app identity。未满足这些条件时不得执行任何写命令、基线初始化、构建演练或 timer 激活。新流程的日常入口见[国内主仓发布](domestic-main-release.md)。
+> **切换操作当前禁用。** 旧发布队列必须按候选顺序处理到选定的 GitHub `main` SHA，并逐项确认运行时变化已安装、健康。随后停止旧入口，把最新 `main` 普通合入 PR #46，确认从两机已安装应用到该 `main` 的分类结果为 `runtime_changed=false`。stage 与 production 已安装应用的 SHA/tree/manifest 须相互一致且健康；源码 `main` 以该 app SHA 为 first-parent 祖先；旧发布 service/timer 已停止，所有结果不明项已只读对账。源码 `main` 与已安装应用 SHA 不要求相等；新 baseline 会绑定准确的 source main SHA/tree 和独立记录的 app identity。未满足这些条件时不得执行任何写命令、基线初始化、构建演练或 timer 激活。新流程的日常入口见[国内主仓发布](domestic-main-release.md)。
 
 ## 一次性主机准备与切换
 
-以下步骤仅供一次性切换，且必须等旧发布队列处理到选定的 GitHub `main` SHA；所有已合并但尚未技术发布的运行时改动（包括 #47 的 Chromium 变更）都已装上，不能仅以 #39 完成为准。分别读回准确的 GitHub `main` 源码 SHA/tree 和 stage、production 已安装 app SHA/tree/manifest 及健康状态，并确认两台机器的 app identity 相等。源码 `main` 可晚于 app，但必须以 app SHA 为 first-parent 祖先且 app→main 仅含无运行时影响的工具/文档改动。所有旧发布任务已停止且结果不明项已对账后，才由单一执行者依次操作。任何一项未满足都保持新 timer disabled。执行前将命令中的所有尖括号占位符替换为已核实的值，不要原样粘贴。GitHub 凭据只留在开发者电脑；预备机不保存 GitHub 凭据。完整步骤见本文件顶部的禁用说明。`deploy/domestic-main-release-example.json` 是脱敏模板，必须按真实合成数据库访问方式复核；初始 `production_enabled` 保持 `false`。
+以下步骤仅供一次性切换，且必须按此顺序：旧发布器处理至选定的 GitHub `main` SHA，并按候选顺序逐项确认所有运行时变化已安装；再停止旧 timer/service；把最新 `main` 普通合入 PR #46，确认 app→main 分类为 `runtime_changed=false`。之后分别读回准确的 GitHub `main` 源码 SHA/tree 和 stage、production 已安装 app SHA/tree/manifest 及健康状态，并确认两台机器的 app identity 相等。源码 `main` 可晚于 app，但必须以 app SHA 为 first-parent 祖先且 app→main 仅含无运行时影响的工具/文档改动。所有旧发布任务已停止且结果不明项已对账后，才由单一执行者依次操作。任何一项未满足都保持新 timer disabled。执行前将命令中的所有尖括号占位符替换为已核实的值，不要原样粘贴。GitHub 凭据只留在开发者电脑；预备机不保存 GitHub 凭据。完整步骤见本文件顶部的禁用说明。`deploy/domestic-main-release-example.json` 是脱敏模板，必须按真实合成数据库访问方式复核；初始 `production_enabled` 保持 `false`。
 
 1. **确认旧发布器空闲，再停用旧入口。** 先只读检查，不得有运行中的旧 service 或未知发布结果：
 
@@ -27,10 +27,14 @@
 
    结果须为 disabled/inactive。新 `aicrm-domestic-main-release.timer` 也必须 disabled/inactive。
 
-2. **准备最小权限账号与目录。** 先核对现有目录内容、账户和组，不对旧 `/opt/aicrm/domestic` 内容递归改权：
+2. **准备最小权限账号与目录。** 先只读核对 `/opt/aicrm` 和 `/opt/aicrm/domestic` 均为真实目录、root 拥有且不允许组或其他用户写入；核对现有子目录、账户和组，不对 `/opt/aicrm/domestic` 内容递归改权。
+
+   在 stage 和 production 分别执行这项父目录只读预检。stage 会在 source bundle/cursor 操作前校验该条件，production helper 也会在首次写入前校验。若检查不通过先停下盘点，不递归修复，也不继续安装工具：
 
    ```sh
-   sudo stat -c '%U:%G %a %n' /opt/aicrm/domestic
+   sudo test -d /opt/aicrm && sudo test ! -L /opt/aicrm
+   sudo test -d /opt/aicrm/domestic && sudo test ! -L /opt/aicrm/domestic
+   sudo stat -c '%U:%G %a %n' /opt/aicrm /opt/aicrm/domestic
    sudo find /opt/aicrm/domestic -maxdepth 2 -mindepth 1 -printf '%y %u:%g %m %p\n'
    getent group aicrm-release-push
    id aicrm-release-push
@@ -50,13 +54,14 @@
    id aicrm-build
    ```
 
-   检查旧内容已归档并确认目录可用于新裸仓后，才把**父目录本身**设为 root 管理；不递归覆盖已有对象：
+   若 `/opt/aicrm/domestic` 缺失，经确认目标不存在后仅创建该父目录；若它或 `/opt/aicrm` 是链接、属主不为 `root:root` 或组/其他用户可写，停止并盘点，不能递归改权。已满足上述条件时保留父目录，不重复 chown/chmod。后续只创建本流程明确列出的子目录：
 
    ```sh
-   sudo chown root:root /opt/aicrm/domestic
-   sudo chmod 0755 /opt/aicrm/domestic
-   sudo install -d -o root -g root -m 0755 /var/lib/aicrm/domestic-main
-   sudo install -d -o root -g root -m 0755 /var/lib/aicrm/domestic-main/work
+   if ! sudo test -e /opt/aicrm/domestic && ! sudo test -L /opt/aicrm/domestic; then
+     sudo install -d -o root -g root -m 0755 /opt/aicrm/domestic
+   fi
+   sudo install -d -o root -g root -m 0755 /opt/aicrm/domestic/control
+   sudo install -d -o root -g root -m 0755 /opt/aicrm/domestic/control/work
    sudo install -d -o aicrm-build -g aicrm-build -m 0750 /opt/aicrm/domestic/build-worker
    sudo install -d -o aicrm-build -g aicrm-build -m 0750 /opt/aicrm/domestic/build-worker/tmp
    sudo install -d -o aicrm-build -g aicrm-build -m 0750 /opt/aicrm/domestic/build-worker/cache/go-build
@@ -70,38 +75,22 @@
    no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding,command="/usr/bin/python3 /usr/local/libexec/aicrm/domestic_main_release.py restricted-ssh" ssh-ed25519 <MAC_PUBLIC_KEY_BASE64> <KEY_LABEL>
    ```
 
-   该强制命令只接受固定裸仓的 Git fetch/push、`domestic-submit` 和 `domestic-archive-ack`；仓库钩子再限制开发者只能快进更新 `refs/heads/codex/*`。按下列命令安装已审查的公钥文件；不要在该文件中加入其他 key：
+   该强制命令只接受固定裸仓的 Git fetch/push、`domestic-submit` 和格式固定的 `domestic-archive-ack --sha <40位小写 SHA>`；归档 SHA 经 stdin 交给 root controller，不会进入 sudo 命令参数。仓库钩子再限制开发者只能快进更新 `refs/heads/codex/*`。按下列命令安装已审查的公钥文件；不要在该文件中加入其他 key：
 
    ```sh
    sudo install -d -o aicrm-release-push -g aicrm-release-push -m 0700 /var/lib/aicrm-release-push/.ssh
    sudo install -o aicrm-release-push -g aicrm-release-push -m 0600 <REVIEWED_AUTHORIZED_KEYS_FILE> /var/lib/aicrm-release-push/.ssh/authorized_keys
    ```
 
-   sudoers 的 SHA 正则只可在实际 stage sudo 版本支持时使用。下面先检查 `sudo --version`；低于 1.9.10、版本无法识别或检查失败都停止切换，不得用通配符或省略参数来代替：
-
-   ```sh
-   set -euo pipefail
-   SUDO_VERSION=$(sudo --version | awk 'NR == 1 { print $3 }')
-   printf 'stage sudo version: %s\n' "$SUDO_VERSION"
-   python3 - "$SUDO_VERSION" <<'PY'
-   import re
-   import sys
-   match = re.match(r"^(\d+)\.(\d+)\.(\d+)", sys.argv[1])
-   if not match or tuple(map(int, match.groups())) < (1, 9, 10):
-       raise SystemExit("sudo 1.9.10 or newer is required for argument regex")
-   PY
-   ```
-
-   只有该版本检查通过，才把下列规则写入临时文件。归档参数使用匹配**整段参数**的锚定正则。先确认正式规则不存在；将已审查的临时文件安装为 `root:root 0440`，运行 `visudo -cf` 验证临时文件和完整 sudoers 配置；两次检查都通过后才原子改名，并用 `sudo -l -U aicrm-release-push` 读回。失败就删除临时文件并停止，不安装规则：
+   stage 的 `/usr/bin/sudo` 是 sudo-rs。使用 sudo-rs 支持的可执行文件和参数精确匹配：归档 SHA 不进入 argv，root endpoint 只接受最多 512 字节、只含一个 `sha` 字段且没有重复 JSON 键的 stdin 请求。sudoers 中只授权下面两条固定命令；不要加参数正则、通配符或命令别名续行。先确认正式规则不存在；将下列文件安装为 `root:root 0440`，运行 `visudo -cf` 检查临时文件和完整 sudoers 配置；两次检查都通过后才原子改名，再用 `sudo -l -U aicrm-release-push` 读回，确认只列出这两条固定命令。失败就删除临时文件并停止，不安装规则：
 
    ```sh
    set -euo pipefail
    sudo test ! -e /etc/sudoers.d/aicrm-domestic-release
    sudo test ! -e /etc/sudoers.d/aicrm-domestic-release.new
    sudo sh -c 'umask 077; cat > /etc/sudoers.d/aicrm-domestic-release.new' <<'EOF'
-   Cmnd_Alias AICRM_DOMESTIC_SUBMIT = /usr/bin/python3 /usr/local/libexec/aicrm/domestic_main_release.py submit-stdin --config /etc/aicrm/domestic-main-release.json
-   Cmnd_Alias AICRM_DOMESTIC_ARCHIVE_ACK = /usr/bin/python3 /usr/local/libexec/aicrm/domestic_main_release.py ^archive-ack --sha [0-9a-f]{40} --config /etc/aicrm/domestic-main-release.json$
-   aicrm-release-push ALL=(root) NOPASSWD: AICRM_DOMESTIC_SUBMIT, AICRM_DOMESTIC_ARCHIVE_ACK
+   aicrm-release-push ALL=(root) NOPASSWD: /usr/bin/python3 /usr/local/libexec/aicrm/domestic_main_release.py submit-stdin --config /etc/aicrm/domestic-main-release.json
+   aicrm-release-push ALL=(root) NOPASSWD: /usr/bin/python3 /usr/local/libexec/aicrm/domestic_main_release.py archive-ack-stdin --config /etc/aicrm/domestic-main-release.json
    EOF
    sudo chown root:root /etc/sudoers.d/aicrm-domestic-release.new
    sudo chmod 0440 /etc/sudoers.d/aicrm-domestic-release.new
@@ -110,6 +99,11 @@
    sudo mv /etc/sudoers.d/aicrm-domestic-release.new /etc/sudoers.d/aicrm-domestic-release
    sudo visudo -cf /etc/sudoers
    sudo -l -U aicrm-release-push
+   sudo -l -U aicrm-release-push /usr/bin/python3 /usr/local/libexec/aicrm/domestic_main_release.py archive-ack-stdin --config /etc/aicrm/domestic-main-release.json
+   if sudo -l -U aicrm-release-push /usr/bin/python3 /usr/local/libexec/aicrm/domestic_main_release.py archive-ack-stdin --config /etc/aicrm/domestic-main-release.json --sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; then
+     echo 'unexpected sudo grant for extra arguments' >&2
+     exit 1
+   fi
    ```
 
 3. **安装并核验固定工具字节。** 在包含 `<EXACT_MAIN_SHA>` 的 V4 工作树先记录每个文件的源 SHA-256。stage 安装 `scripts/domestic_main_release.py`、`scripts/domestic_release.py`、`scripts/domestic_release_build.py`、`deploy/domestic-promote.py` 和两个 unit；production 只安装 `deploy/domestic-promote.py`。安装前把现有同路径文件复制到 root-only 回滚副本；用同目录 `.new` 文件安装、比对摘要后再原子改名。禁止在服务运行中替换 helper。
@@ -192,6 +186,80 @@
    sudo systemctl is-enabled aicrm-domestic-main-release.timer || true
    ```
 
+   **预备机 npm 工具树的固定权限。** isolated `build_path` 必须包含 `/opt/aicrm/toolchain/npm/bin`，并由 `_verify_build_toolchain` 检查实际解析到的工具和父链；不得删除或放宽这项所有权检查。已知预备机的 npm 入口当前为 `ubuntu:ubuntu 775`，该状态会被检查拒绝。变更权限前，从官方 `npm@11.12.1` tarball 独立复核已安装内容：tarball 地址为 `https://registry.npmjs.org/npm/-/npm-11.12.1.tgz`，固定 SRI 为 `sha512-zcoUuF1kezGSAo0CqtvoLXX3mkRqzuqYdL6Y5tdo8g69NVV3CkjQ6ZBhBgB4d7vGkPcV6TcvLi3GRKPDFX+xTA==`。在 stage 以 root 运行以下只读脚本；它先校验官方 tarball 的 SHA-512 SRI，再按每个 `package/` 常规文件的相对路径和 SHA-256 对比已安装树，并检查树内全部 symlink 均指向该树内常规文件。任一摘要、文件数、路径集合或链接不符就停止，不能 chown：
+
+   ```sh
+   sudo /usr/bin/python3 - <<'PY'
+   import base64, hashlib, hmac, io, json, pathlib, tarfile, urllib.request
+
+   root = pathlib.Path('/opt/aicrm/toolchain/npm')
+   package = root / 'lib/node_modules/npm'
+   if root.is_symlink() or package.is_symlink() or not package.is_dir():
+       raise SystemExit('fixed npm package directory is missing or linked')
+   url = 'https://registry.npmjs.org/npm/-/npm-11.12.1.tgz'
+   expected_sri = 'sha512-zcoUuF1kezGSAo0CqtvoLXX3mkRqzuqYdL6Y5tdo8g69NVV3CkjQ6ZBhBgB4d7vGkPcV6TcvLi3GRKPDFX+xTA=='
+   with urllib.request.urlopen(url, timeout=60) as response:
+       tarball = response.read()
+   actual_sri = 'sha512-' + base64.b64encode(hashlib.sha512(tarball).digest()).decode('ascii')
+   if not hmac.compare_digest(actual_sri, expected_sri):
+       raise SystemExit('npm tarball SRI mismatch')
+
+   expected = {}
+   with tarfile.open(fileobj=io.BytesIO(tarball), mode='r:gz') as archive:
+       for member in archive.getmembers():
+           if member.isdir():
+               continue
+           path = pathlib.PurePosixPath(member.name)
+           if (not member.isfile() or not path.parts or path.parts[0] != 'package'
+                   or len(path.parts) < 2 or any(part in {'', '.', '..'} for part in path.parts)):
+               raise SystemExit('unexpected npm tarball entry')
+           relative = pathlib.PurePosixPath(*path.parts[1:]).as_posix()
+           stream = archive.extractfile(member)
+           if stream is None or relative in expected:
+               raise SystemExit('invalid or duplicate npm tarball file')
+           expected[relative] = hashlib.sha256(stream.read()).hexdigest()
+
+   actual = {}
+   for path in package.rglob('*'):
+       if path.is_symlink():
+           continue
+       if path.is_file():
+           actual[path.relative_to(package).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+   if actual != expected:
+       raise SystemExit('installed npm package files differ from verified tarball')
+   manifest_sha = hashlib.sha256(json.dumps(actual, sort_keys=True).encode()).hexdigest()
+   if len(actual) != 1774 or manifest_sha != 'b029ca86a35722ec0ae0eb1b21698f4dfe8b5508fb94de460c115694604f7cc1':
+       raise SystemExit('npm package manifest differs from reviewed stage evidence')
+
+   links = [path for path in root.rglob('*') if path.is_symlink()]
+   root_real = root.resolve(strict=True)
+   if len(links) != 9:
+       raise SystemExit('unexpected npm symlink count')
+   for link in links:
+       target = link.resolve(strict=True)
+       try:
+           target.relative_to(root_real)
+       except ValueError:
+           raise SystemExit('npm symlink escapes its fixed tool tree')
+       if not target.is_file():
+           raise SystemExit('npm symlink target is not a regular file')
+   print(json.dumps({'npm_version': '11.12.1', 'regular_files': len(actual),
+                     'manifest_sha256': manifest_sha, 'tree_symlinks': len(links)}, sort_keys=True))
+   PY
+   ```
+
+   只读核验通过后，才把**固定 npm 工具树**设为 root 所有并去掉组/其他用户写权限；这个变更仅限该 npm 树，不涉及 `/opt/aicrm/domestic` 或共享 cache。随后用隔离账号读回版本，控制器完整 toolchain probe 仍须通过：
+
+   ```sh
+   sudo chown -hR root:root /opt/aicrm/toolchain/npm
+   sudo find -P /opt/aicrm/toolchain/npm -type d -exec chmod go-w {} +
+   sudo find -P /opt/aicrm/toolchain/npm -type f -exec chmod go-w {} +
+   sudo stat -c '%U:%G %a %n' /opt/aicrm/toolchain/npm /opt/aicrm/toolchain/npm/bin /opt/aicrm/toolchain/npm/bin/npm /opt/aicrm/toolchain/npm/lib/node_modules/npm/bin/npm-cli.js
+   sudo -u aicrm-build -H env -i PATH=/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/npm/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/usr/bin:/bin npm --version
+   ```
+
+   若官方内容核验或权限读回不符，停止；不得仅凭 `npm --version` 修复所有权。配置样例和下面的完整构建命令都固定包含该 npm 路径。
+
    production 安装 `deploy/domestic-promote.py` 时使用已 pinned 的 SSH key/known_hosts，从预备机复制到 ubuntu 的临时文件，先按同一源摘要比对后再由 root 原子安装；示例中的 key 与 known_hosts 路径必须对应真实固定文件：
 
    ```sh
@@ -214,11 +282,11 @@
      ubuntu@10.0.4.13 'sudo test ! -e /usr/local/libexec/aicrm/domestic-promote.py.pre-domestic-main && sudo install -o root -g root -m 0600 /usr/local/libexec/aicrm/domestic-promote.py /usr/local/libexec/aicrm/domestic-promote.py.pre-domestic-main && sudo mv /usr/local/libexec/aicrm/domestic-promote.py.new /usr/local/libexec/aicrm/domestic-promote.py && sudo sha256sum /usr/local/libexec/aicrm/domestic-promote.py'
    ```
 
-   摘要不符时停止并从回滚文件恢复；任何 host write 都须等到旧队列处理到选定的 GitHub `main` SHA（含全部已合并运行时改动）、两机 app identity 相等、源码 app→main 关系验证通过且无不明发布结果。
+   摘要不符时停止并从回滚文件恢复；任何 host write 都须等到旧队列按序处理到选定的 GitHub `main` SHA、旧 timer/service 已停止、最新 `main` 已普通合入 PR #46 且 app→main `runtime_changed=false`、两机 app identity 相等、源码关系验证通过且无不明发布结果。
 
    安装后在 stage 对 `/usr/local/libexec/aicrm/domestic_main_release.py`、`domestic_release.py`、`domestic_release_build.py`、`domestic-promote.py` 和两个 `/etc/systemd/system/aicrm-domestic-main-release.*` 文件运行 `sha256sum`；在 production 对 `/usr/local/libexec/aicrm/domestic-promote.py` 运行 `sha256sum`。逐一与上面的同一 `MAIN_SHA` 源摘要比较；只有全等才继续。用 `systemd-analyze verify` 核对落盘 unit，并确认新 timer 仍 disabled/inactive。任何摘要不符都停下，使用回滚文件恢复旧字节并复核。
 
-4. **准备受保护配置与合成数据库。** 将脱敏样例复制到固定位置，再由 root 按真实环境填写 production SSH key 路径、持久 Host Key pin、合成数据库连接及固定工具 PATH；配置文件必须 `root:root 0600`。不得将密码、私钥或生产数据库连接放进样例、命令历史或报告。state 路径必须精确为 `/var/lib/aicrm/domestic-main/state.json`，控制器会拒绝其他值。核验 PostgreSQL 为本机 16，检查库为 `aicrm_ci` 或 `aicrm_test_*`，并且只含合成数据。
+4. **准备受保护配置与合成数据库。** 将脱敏样例复制到固定位置，再由 root 按真实环境填写 production SSH key 路径、持久 Host Key pin、合成数据库连接及固定工具 PATH；配置文件必须 `root:root 0600`。不得将密码、私钥或生产数据库连接放进样例、命令历史或报告。state 路径必须精确为 `/opt/aicrm/domestic/control/state.json`，控制器会拒绝其他值。核验 PostgreSQL 为本机 16，检查库为 `aicrm_ci` 或 `aicrm_test_*`，并且只含合成数据。
 
    ```sh
    sudo install -o root -g root -m 0600 deploy/domestic-main-release-example.json /etc/aicrm/domestic-main-release.json
@@ -231,7 +299,7 @@
    sudo /usr/bin/python3 -c 'import sys; sys.path.insert(0, "/usr/local/libexec/aicrm"); import domestic_main_release as m; c=m.load_config(m.Path(m.DEFAULT_CONFIG)); print("config_valid", c["production_enabled"])'
    ```
 
-   固定工具和配置安装完成后，从已核对 V4 seed 仓库建立裸仓。以下 `<EXACT_MAIN_SHA>` 必须是旧发布队列完全处理后的准确 GitHub `main` SHA（含 #47 等已合并运行时改动的部署）；初始化期间若该 `main` 前进，停止并重新核对 app→main 关系。仓库路径必须尚不存在。若路径已存在，停止并盘点，禁止覆盖：
+   固定工具和配置安装完成后，从已核对 V4 seed 仓库建立裸仓。以下 `<EXACT_MAIN_SHA>` 必须是旧发布队列按序处理完成、最新 `main` 已普通合入 PR #46 后的准确 GitHub `main` SHA；初始化期间若该 `main` 前进，停止并重新核对 app→main 关系。仓库路径必须尚不存在。若路径已存在，停止并盘点，禁止覆盖：
 
    ```sh
    sudo test ! -e /opt/aicrm/domestic/source.git
@@ -242,7 +310,7 @@
 
    裸仓由 root 创建，推送组只写 Git objects 和 `refs/heads/codex/*`；`main`、candidate pins、钩子、配置均不可由推送账号改写。运行 `verify_bare_repository` 前核对 `aicrm-build` 能读仓库且不属于推送组。
 
-5. **在 2 核、2GB 预备机运行 build-only 容量演练。** 仅在旧发布队列已处理到选定的 GitHub main SHA、#47 等已合并运行时改动均已安装、源码 main 与两机已安装 app 的身份关系读回并验证完成、旧 timer/service disabled/inactive 且所有结果不明项已对账后进行。该演练会使用现有 build-worker 的 Go/npm 共享缓存，因此旧队列活动期间严禁运行；不得清空或重置共享缓存。先确认 stage 当前 `/readyz` 健康、磁盘有足够空间、无运行发布任务。演练只运行 `domestic_release_build.py build`；**不要以 `poll` 作为演练命令**，因为开启生产配置后它会真实晋级生产。以下用隔离的本地 clone，`--base-release none` 明确强制完整构建，不安装、不迁移、不连接生产。为输出填写生产已安装 SHA 与当前准确 `main`：
+   5. **在 2 核、2GB 预备机运行 build-only 容量演练。** 仅在旧发布队列已按序处理到选定的 GitHub main SHA、源码 main 与两机已安装 app 的身份关系读回并验证完成、旧 timer/service disabled/inactive 且所有结果不明项已对账后进行。此前记录的完整构建用时不包含峰值内存，不能据此认定 2GB 容量稳定。该演练会使用现有 build-worker 的 Go/npm 共享缓存，因此旧队列活动期间严禁运行；不得清空或重置共享缓存。先确认 stage 当前 `/readyz` 健康、磁盘有足够空间、无运行发布任务。演练只运行 `domestic_release_build.py build`；**不要以 `poll` 作为演练命令**，因为开启生产配置后它会真实晋级生产。以下用隔离的本地 clone，`--base-release none` 明确强制完整构建，不安装、不迁移、不连接生产。为输出填写生产已安装 SHA 与当前准确 `main`：
 
    ```sh
    REPO=/opt/aicrm/domestic/source.git
@@ -254,7 +322,7 @@
    sudo -u aicrm-build -H git -C "$WORK/source" fetch -q --no-tags "$REPO" "$MAIN_SHA"
    sudo -u aicrm-build -H git -C "$WORK/source" checkout --detach "$MAIN_SHA"
    sudo -u aicrm-build -H env -i \
-     PATH=/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/usr/bin:/bin \
+     PATH=/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/npm/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/usr/bin:/bin \
      HOME=/opt/aicrm/domestic/build-worker \
      TMPDIR=/opt/aicrm/domestic/build-worker/tmp \
      GOCACHE=/opt/aicrm/domestic/build-worker/cache/go-build \
@@ -282,7 +350,7 @@
 
    不要清空共享 Go/npm cache 来制造冷启动。记录 cache 起始状态；成功后再跑一次并标为热缓存。若发生 OOM、持续 swap in/out、stage 健康下降、构建/摘要不完整、磁盘空间不足或资源表现不稳定，停止切换并扩容或保留旧流程。构建输出只作证据，不能替代完整受影响检查和已安装预发合同。
 
-6. **只在全部门禁过后写一次 baseline 并激活。** 先确认旧发布队列已处理到选定的 GitHub `main` SHA，所有后续已合并运行时提交（包括 #47 Chromium 变更）都已安装；仅完成 #39 不足以切换。再以旧流程收据分别读回 GitHub `main` 的准确 source SHA/tree 和 stage、production 的 app SHA/tree/manifest；两台机器的 app identity 必须相等并健康。源码 main 可晚于 app，不要求 SHA 相等。`prepare-baseline` 仅在源码 app SHA 位于 `main` 的 first-parent 链、记录的 app/main tree 匹配，且 app→main 分类结果 `runtime_changed=false` 时才继续；之后将 baseline 绑定确切 main SHA/tree，并单独记录 app identity。复制配置时确认两台计时器仍 disabled/inactive；新 timer 处于 disabled，ledger 尚不存在。再由 root 显式编辑配置，将 `production_enabled` 从 `false` 改为 `true`，保持文件 `root:root 0600`，并重新运行只输出 `config_valid`/布尔值的配置校验命令：
+   6. **只在全部门禁过后写一次 baseline 并激活。** 先确认旧发布队列已按序安装并读回所有运行时变更；随后旧 timer/service 已停止，最新 `main` 已普通合入 PR #46 且 app→main 分类为 `runtime_changed=false`。再以旧流程收据分别读回 GitHub `main` 的准确 source SHA/tree 和 stage、production 的 app SHA/tree/manifest；两台机器的 app identity 必须相等并健康。源码 main 可晚于 app，不要求 SHA 相等。`prepare-baseline` 仅在源码 app SHA 位于 `main` 的 first-parent 链、记录的 app/main tree 匹配，且 app→main 分类结果 `runtime_changed=false` 时才继续；之后将 baseline 绑定确切 main SHA/tree，并单独记录 app identity。复制配置时确认两台计时器仍 disabled/inactive；新 timer 处于 disabled，ledger 尚不存在。再由 root 显式编辑配置，将 `production_enabled` 从 `false` 改为 `true`，保持文件 `root:root 0600`，并重新运行只输出 `config_valid`/布尔值的配置校验命令：
 
    ```sh
    sudoedit /etc/aicrm/domestic-main-release.json
