@@ -7,7 +7,9 @@ read-only SSH, and refuses to push unless production's main cursor exactly
 matches domestic ``main``. The marker separately identifies the most recent
 installed application SHA so docs-only commits do not require a new app install.
 
-Dry-run is the default. ``--execute`` performs one ordinary, non-forced push.
+Dry-run is the default. ``--execute --stage-host HOST`` performs one ordinary,
+non-forced push and records its exact readback with the staging archive-ack
+handler. The production and staging SSH checks run only from this local Mac CLI.
 """
 from __future__ import annotations
 
@@ -19,12 +21,16 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA64 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_HOST = re.compile(r"^[A-Za-z0-9._-]+$")
 SAFE_USER = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
+GITHUB_OWNER = "qianlan33333-png"
+GITHUB_REPOSITORY = "AI-CRM-v4"
+DOMESTIC_REPOSITORY_PATH = "/opt/aicrm/domestic/source.git"
 
 # This fixed, read-only helper validates the root-owned production marker and
 # installation receipt. Never read environment files or secrets here.
@@ -86,8 +92,70 @@ def validate_remote_pair(repo: Path, domestic_remote: str, github_remote: str) -
     github_push_url = _remote_url(repo, github_remote, push=True)
     if domestic_url == github_url:
         raise SyncError("domestic_and_github_urls_must_differ")
-    if github_push_url != github_url:
-        raise SyncError("github_fetch_and_push_urls_must_match")
+    if not is_expected_domestic_url(domestic_url):
+        raise SyncError("domestic_remote_not_authoritative_repository")
+    if not is_expected_github_url(github_url) or not is_expected_github_url(github_push_url):
+        raise SyncError("github_remote_not_expected_repository")
+
+
+def is_expected_github_url(value: str) -> bool:
+    """Accept only canonical HTTPS/SSH forms for the configured GitHub repo."""
+    owner_repo = f"{GITHUB_OWNER}/{GITHUB_REPOSITORY}"
+
+    # Git's common scp-like SSH syntax is not a URL to urlsplit().
+    scp = re.fullmatch(r"(?P<user>[^@/:]+)@(?P<host>[^/:]+):(?P<path>[^?#]+)", value)
+    if scp:
+        if scp.group("user") != "git" or scp.group("host").lower() != "github.com":
+            return False
+        path = scp.group("path").removesuffix(".git").strip("/")
+        return path.casefold() == owner_repo.casefold()
+
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return False
+    if parsed.scheme == "https":
+        if parsed.hostname is None or parsed.hostname.lower() != "github.com":
+            return False
+        if parsed.username is not None or parsed.password is not None or port not in (None, 443):
+            return False
+    elif parsed.scheme == "ssh":
+        if parsed.hostname is None or parsed.hostname.lower() != "github.com":
+            return False
+        if parsed.username != "git" or parsed.password is not None or port not in (None, 22):
+            return False
+    else:
+        return False
+    if parsed.query or parsed.fragment:
+        return False
+    path = parsed.path.removesuffix(".git").strip("/")
+    return path.casefold() == owner_repo.casefold()
+
+
+def is_expected_domestic_url(value: str) -> bool:
+    """Accept SSH aliases only when they address the fixed domestic bare repo."""
+    scp = None if "://" in value else re.fullmatch(
+        r"(?:(?P<user>[^@/:]+)@)?(?P<host>[^/:]+):(?P<path>[^?#]+)", value
+    )
+    if scp:
+        user = scp.group("user")
+        return user in (None, "ubuntu") and scp.group("path") == DOMESTIC_REPOSITORY_PATH
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "ssh"
+        and parsed.hostname is not None
+        and parsed.username in (None, "ubuntu")
+        and parsed.password is None
+        and port in (None, 22)
+        and not parsed.query
+        and not parsed.fragment
+        and parsed.path == DOMESTIC_REPOSITORY_PATH
+    )
 
 
 def fetch_main(repo: Path, remote: str, target_ref: str) -> str:
@@ -135,6 +203,8 @@ def validate_production_readback(repo: Path, envelope: dict[str, Any], domestic_
         raise SyncError("production_source_version_sha_invalid")
     if not isinstance(receipt_digest, str) or not SHA64.fullmatch(receipt_digest):
         raise SyncError("production_install_receipt_digest_invalid")
+    if envelope.get("install_receipt_sha256") != receipt_digest:
+        raise SyncError("production_install_receipt_digest_mismatch")
     if not isinstance(bundle_digest, str) or not SHA64.fullmatch(bundle_digest):
         raise SyncError("production_source_bundle_digest_invalid")
     if status != "ready":
@@ -211,6 +281,88 @@ def _read_production_via_ssh(
     return value
 
 
+def _ssh_prefix(
+    host: str,
+    user: str,
+    ssh_key: Path | None = None,
+    known_hosts: Path | None = None,
+    ssh_binary: str = "ssh",
+) -> list[str]:
+    if not SAFE_HOST.fullmatch(host) or not SAFE_USER.fullmatch(user):
+        raise SyncError("ssh_target_invalid")
+    command = [
+        ssh_binary,
+        "-T",
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", "ConnectTimeout=10",
+    ]
+    if ssh_key is not None:
+        command.extend(["-i", str(ssh_key.expanduser()), "-o", "IdentitiesOnly=yes"])
+    if known_hosts is not None:
+        command.extend(["-o", f"UserKnownHostsFile={known_hosts.expanduser()}"])
+    command.append(f"{user}@{host}")
+    return command
+
+
+def _record_archive_ack_via_ssh(
+    host: str,
+    sha: str,
+    user: str = "ubuntu",
+    ssh_key: Path | None = None,
+    known_hosts: Path | None = None,
+    ssh_binary: str = "ssh",
+) -> dict[str, Any]:
+    if not SHA40.fullmatch(sha):
+        raise SyncError("archive_ack_sha_invalid")
+    command = _ssh_prefix(host, user, ssh_key, known_hosts, ssh_binary)
+    command.append(f"domestic-archive-ack --sha {sha}")
+    try:
+        result = subprocess.run(
+            command,
+            input=json.dumps({"sha": sha}, separators=(",", ":")) + "\n",
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SyncError("stage_archive_ack_ssh_unavailable") from exc
+    if result.returncode != 0:
+        raise SyncError("stage_archive_ack_rejected")
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise SyncError("stage_archive_ack_not_valid_json") from exc
+    if not isinstance(value, dict):
+        raise SyncError("stage_archive_ack_not_an_object")
+    return value
+
+
+def validate_archive_ack(value: dict[str, Any], expected_sha: str) -> dict[str, Any]:
+    if value.get("status") != "recorded" or value.get("github_synced_sha") != expected_sha:
+        raise SyncError("stage_archive_ack_sha_mismatch")
+    domestic_sha = value.get("domestic_main_sha")
+    pending = value.get("pending_first_parent_count")
+    confirmed = value.get("confirmed_at_utc")
+    if not isinstance(domestic_sha, str) or not SHA40.fullmatch(domestic_sha):
+        raise SyncError("stage_archive_ack_domestic_sha_invalid")
+    if domestic_sha != expected_sha:
+        raise SyncError("stage_archive_ack_domestic_sha_mismatch")
+    if type(pending) is not int or pending < 0:
+        raise SyncError("stage_archive_ack_pending_count_invalid")
+    if not _valid_timestamp(confirmed):
+        raise SyncError("stage_archive_ack_timestamp_invalid")
+    return {
+        "archive_ack_status": "last_confirmed",
+        "last_manual_confirmed_github_sha": expected_sha,
+        "github_sync_observed_by": "manual_cli",
+        "github_pending_first_parent_count": pending,
+        "archive_ack_domestic_main_sha": domestic_sha,
+        "archive_ack_confirmed_at_utc": confirmed,
+    }
+
+
 def pending_commits(repo: Path, github_sha: str, domestic_sha: str) -> list[dict[str, str]]:
     if not git_success(repo, "merge-base", "--is-ancestor", github_sha, domestic_sha):
         raise SyncError("github_main_is_not_an_ancestor_of_domestic_main")
@@ -231,8 +383,11 @@ def synchronize(
     production_reader: Callable[[], dict[str, Any]],
     *,
     execute: bool = False,
+    archive_ack_writer: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     repo = repo.resolve()
+    if execute and archive_ack_writer is None:
+        raise SyncError("execute_requires_stage_archive_ack_writer")
     root = Path(git(repo, "rev-parse", "--show-toplevel")).resolve()
     if root != repo:
         raise SyncError("repo_must_be_git_toplevel")
@@ -261,7 +416,7 @@ def synchronize(
         "github_pending_commits": changes,
         "checked_at_utc": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
     }
-    if not changes or not execute:
+    if not execute:
         return report
 
     # Re-fetch both refs and reread production immediately before pushing. Any
@@ -276,32 +431,48 @@ def synchronize(
     if fresh_info != receipt_info:
         raise SyncError("production_readback_changed_after_preview")
 
-    # Deliberately no --force, --force-with-lease, or branch deletion. Git's
-    # ordinary fast-forward check rejects any concurrent divergent update.
-    result = subprocess.run(
-        ["git", "-C", str(repo), "push", "--porcelain", github_remote,
-         f"{domestic_sha}:refs/heads/main"],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if result.returncode != 0:
-        # Read back the remote after a rejected/raced push, but never retry.
-        observed = fetch_main(repo, github_remote, github_ref)
-        report["github_synced_sha"] = observed
-        report["status"] = "push_failed_remote_unchanged" if observed == github_sha else "remote_changed_during_push"
-        raise SyncError(report["status"])
+    if changes:
+        # Deliberately no --force, --force-with-lease, or branch deletion.
+        # Git's ordinary fast-forward check rejects concurrent divergent updates.
+        result = subprocess.run(
+            ["git", "-C", str(repo), "push", "--porcelain", github_remote,
+             f"{domestic_sha}:refs/heads/main"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if result.returncode != 0:
+            # Read back the remote after a rejected/raced push, but never retry.
+            observed = fetch_main(repo, github_remote, github_ref)
+            report["github_synced_sha"] = observed
+            report["status"] = "push_failed_remote_unchanged" if observed == github_sha else "remote_changed_during_push"
+            raise SyncError(report["status"])
 
     after_sha = fetch_main(repo, github_remote, github_ref)
     report["github_synced_sha"] = after_sha
     if after_sha != domestic_sha:
         report["status"] = "remote_changed_during_push"
         raise SyncError(report["status"])
-    report["status"] = "synchronized"
+    report["github_readback_sha"] = after_sha
+    report["status"] = "synchronized" if changes else "in_sync"
     report["github_pending_commit_count"] = 0
     report["github_pending_commits"] = []
     report["completed_at_utc"] = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        assert archive_ack_writer is not None
+        ack = validate_archive_ack(archive_ack_writer(domestic_sha), domestic_sha)
+    except SyncError as exc:
+        report.update({
+            "archive_ack_status": "unknown",
+            "last_manual_confirmed_github_sha": None,
+            "github_sync_observed_by": "manual_cli",
+            "github_pending_first_parent_count": None,
+            "archive_ack_reason": str(exc),
+        })
+        report["status"] = "github_push_succeeded_archive_ack_pending"
+        return report
+    report.update(ack)
     return report
 
 
@@ -314,6 +485,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--production-user", default="ubuntu", help="production SSH user (default: ubuntu)")
     parser.add_argument("--ssh-key", type=Path, help="optional laptop-local SSH identity file")
     parser.add_argument("--known-hosts", type=Path, help="optional laptop-local known_hosts file; strict verification is always enabled")
+    parser.add_argument("--stage-host", help="staging SSH host/alias; required with --execute to record the successful manual GitHub readback")
+    parser.add_argument("--stage-user", default="ubuntu", help="staging SSH user (default: ubuntu)")
     parser.add_argument("--execute", action="store_true", help="after a fresh recheck, push domestic main by ordinary fast-forward")
     return parser
 
@@ -322,6 +495,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if sys.platform != "darwin":
         print(json.dumps({"operation": "manual_github_sync", "status": "blocked", "reason": "local_macos_only"}), file=sys.stderr)
+        return 2
+    if args.execute and not args.stage_host:
+        print(json.dumps({"operation": "manual_github_sync", "status": "blocked", "reason": "execute_requires_stage_host"}), file=sys.stderr)
         return 2
     try:
         report = synchronize(
@@ -335,12 +511,21 @@ def main(argv: list[str] | None = None) -> int:
                 args.known_hosts,
             ),
             execute=args.execute,
+            archive_ack_writer=(
+                lambda sha: _record_archive_ack_via_ssh(
+                    args.stage_host,
+                    sha,
+                    args.stage_user,
+                    args.ssh_key,
+                    args.known_hosts,
+                )
+            ) if args.execute and args.stage_host else None,
         )
     except SyncError as exc:
         print(json.dumps({"operation": "manual_github_sync", "status": "blocked", "reason": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 0
+    return 3 if report["status"] == "github_push_succeeded_archive_ack_pending" else 0
 
 
 if __name__ == "__main__":
