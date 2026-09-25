@@ -2128,13 +2128,15 @@ def restricted_ssh() -> None:
     if len(original) > 2048:
         raise ReleaseError("restricted SSH command is too long")
     repo = DEFAULT_REPO
+    git_environment = {"PATH": "/usr/bin:/bin", "HOME": pwd.getpwuid(os.geteuid()).pw_dir,
+                       "LANG": "C", "GIT_CONFIG_NOSYSTEM": "1"}
     if original in {f"git-receive-pack '{repo}'", f"git-receive-pack {repo}",
                     f"git receive-pack '{repo}'", f"git receive-pack {repo}"}:
         os.umask(0o002)
-        os.execv("/usr/bin/git", ["git", "-c", f"safe.directory={repo}", "receive-pack", repo])
+        os.execve("/usr/bin/git", ["git", "-c", f"safe.directory={repo}", "receive-pack", repo], git_environment)
     if original in {f"git-upload-pack '{repo}'", f"git-upload-pack {repo}",
                     f"git upload-pack '{repo}'", f"git upload-pack {repo}"}:
-        os.execv("/usr/bin/git", ["git", "-c", f"safe.directory={repo}", "upload-pack", repo])
+        os.execve("/usr/bin/git", ["git", "-c", f"safe.directory={repo}", "upload-pack", repo], git_environment)
     submit = re.fullmatch(r"domestic-submit --ref (refs/heads/codex/[A-Za-z0-9][A-Za-z0-9._/-]{0,119}) --head ([0-9a-f]{40}) --base ([0-9a-f]{40})(?: --supersedes ([0-9a-f]{40}))?", original)
     if submit:
         payload_value = {"ref": submit.group(1), "head_sha": submit.group(2), "base_sha": submit.group(3)}

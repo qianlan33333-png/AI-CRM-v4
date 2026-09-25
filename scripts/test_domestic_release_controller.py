@@ -45,6 +45,19 @@ def make_repository(root: Path) -> tuple[Path, str, str, str]:
 
 
 class DomesticMainReleaseTests(unittest.TestCase):
+    def test_bare_objects_are_readable_but_not_writable_without_push_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo, _base, _candidate, _other = make_repository(Path(temporary))
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release.os, "chown"):
+                release._secure_bare_repository_permissions(repo, 12345)
+            for path in (repo, repo / "objects", repo / "refs/heads/codex"):
+                mode = path.stat().st_mode
+                self.assertTrue(mode & 0o005, path)
+                self.assertFalse(mode & 0o002, path)
+            self.assertTrue((repo / "objects").stat().st_mode & 0o020)
+            self.assertTrue((repo / "refs/heads/codex").stat().st_mode & 0o020)
+
     def test_fixed_bare_repository_requires_root_owned_non_writable_parent(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary)
@@ -424,14 +437,17 @@ class DomesticMainReleaseTests(unittest.TestCase):
 
     def test_restricted_ssh_only_executes_exact_upload_pack_command(self) -> None:
         exact = f"git-upload-pack '{release.DEFAULT_REPO}'"
-        with mock.patch.dict(os.environ, {"SSH_ORIGINAL_COMMAND": exact}), \
-             mock.patch.object(release.os, "execv", side_effect=SystemExit(0)) as execv:
+        with mock.patch.dict(os.environ, {"SSH_ORIGINAL_COMMAND": exact,
+                                          "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.hooksPath",
+                                          "GIT_CONFIG_VALUE_0": "/tmp/unsafe"}), \
+             mock.patch.object(release.os, "execve", side_effect=SystemExit(0)) as execve:
             with self.assertRaises(SystemExit):
                 release.restricted_ssh()
-            execv.assert_called_once_with(
+            args = execve.call_args.args
+            self.assertEqual(args[:2], (
                 "/usr/bin/git", ["git", "-c", f"safe.directory={release.DEFAULT_REPO}",
-                                 "upload-pack", release.DEFAULT_REPO],
-            )
+                                 "upload-pack", release.DEFAULT_REPO]))
+            self.assertNotIn("GIT_CONFIG_COUNT", args[2])
 
         for command in (
             f"git-upload-pack '{release.DEFAULT_REPO}'; touch /tmp/no",
@@ -439,10 +455,10 @@ class DomesticMainReleaseTests(unittest.TestCase):
             f"git-receive-pack '{release.DEFAULT_REPO}' --config core.hooksPath=/tmp",
         ):
             with mock.patch.dict(os.environ, {"SSH_ORIGINAL_COMMAND": command}), \
-                 mock.patch.object(release.os, "execv") as execv, \
+                 mock.patch.object(release.os, "execve") as execve, \
                  self.assertRaises(release.ReleaseError):
                 release.restricted_ssh()
-                execv.assert_not_called()
+                execve.assert_not_called()
 
     def test_generated_trusted_runner_is_valid_python(self) -> None:
         compile(release._trusted_runner_code(), "<trusted-runner>", "exec")
