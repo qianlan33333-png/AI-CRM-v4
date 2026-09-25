@@ -416,7 +416,10 @@ class DomesticMainReleaseTests(unittest.TestCase):
              mock.patch.object(release.os, "execv", side_effect=SystemExit(0)) as execv:
             with self.assertRaises(SystemExit):
                 release.restricted_ssh()
-            execv.assert_called_once_with("/usr/bin/git", ["git", "upload-pack", release.DEFAULT_REPO])
+            execv.assert_called_once_with(
+                "/usr/bin/git", ["git", "-c", f"safe.directory={release.DEFAULT_REPO}",
+                                 "upload-pack", release.DEFAULT_REPO],
+            )
 
         for command in (
             f"git-upload-pack '{release.DEFAULT_REPO}'; touch /tmp/no",

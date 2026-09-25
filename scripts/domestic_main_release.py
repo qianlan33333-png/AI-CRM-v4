@@ -87,7 +87,7 @@ def _run(args: list[str], *, cwd: Path | None = None, input_text: str | None = N
 
 
 def _git(repo: Path, *args: str, timeout: int = 600, check: bool = True) -> str:
-    return _run(["git", f"--git-dir={repo}", *args], timeout=timeout, check=check).stdout.strip()
+    return _run(["git", "-c", f"safe.directory={repo}", f"--git-dir={repo}", *args], timeout=timeout, check=check).stdout.strip()
 
 
 def _source_blob(repo: Path, sha: str, path: str) -> bytes:
@@ -441,7 +441,8 @@ def validate_receive_updates(repo: Path, input_text: str) -> None:
         _sha(_git(repo, "rev-parse", "--verify", f"{new}^{{commit}}"), "pushed commit")
         if old != ZERO_SHA:
             _sha(_git(repo, "rev-parse", "--verify", f"{old}^{{commit}}"), "old pushed commit")
-            fast_forward = _run(["git", f"--git-dir={repo}", "merge-base", "--is-ancestor", old, new], check=False)
+            fast_forward = _run(["git", "-c", f"safe.directory={repo}", f"--git-dir={repo}",
+                                 "merge-base", "--is-ancestor", old, new], check=False)
             if fast_forward.returncode != 0:
                 raise ReleaseError("non-fast-forward developer updates are rejected")
 
@@ -2073,10 +2074,10 @@ def restricted_ssh() -> None:
     repo = DEFAULT_REPO
     if original in {f"git-receive-pack '{repo}'", f"git-receive-pack {repo}",
                     f"git receive-pack '{repo}'", f"git receive-pack {repo}"}:
-        os.execv("/usr/bin/git", ["git", "receive-pack", repo])
+        os.execv("/usr/bin/git", ["git", "-c", f"safe.directory={repo}", "receive-pack", repo])
     if original in {f"git-upload-pack '{repo}'", f"git-upload-pack {repo}",
                     f"git upload-pack '{repo}'", f"git upload-pack {repo}"}:
-        os.execv("/usr/bin/git", ["git", "upload-pack", repo])
+        os.execv("/usr/bin/git", ["git", "-c", f"safe.directory={repo}", "upload-pack", repo])
     submit = re.fullmatch(r"domestic-submit --ref (refs/heads/codex/[A-Za-z0-9][A-Za-z0-9._/-]{0,119}) --head ([0-9a-f]{40}) --base ([0-9a-f]{40})(?: --supersedes ([0-9a-f]{40}))?", original)
     if submit:
         payload_value = {"ref": submit.group(1), "head_sha": submit.group(2), "base_sha": submit.group(3)}
