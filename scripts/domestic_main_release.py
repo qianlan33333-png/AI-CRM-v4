@@ -238,34 +238,43 @@ def _install_new_pre_receive_hook(repo: Path, controller_path: str) -> Path:
 
 def _assert_partial_bootstrap_repository(repo: Path, state_path: Path, lock_path: Path,
                                         expected_sha: str, expected_tree: str,
-                                        installed_app_sha: str, *, require_lock_absent: bool) -> None:
+                                        installed_app_sha: str) -> None:
     if state_path.exists() or state_path.is_symlink():
         raise ReleaseError("partial bootstrap recovery requires the domestic ledger to be absent")
-    if require_lock_absent and (lock_path.exists() or lock_path.is_symlink()):
-        raise ReleaseError("partial bootstrap recovery requires the controller lock to be absent")
+    if lock_path.is_symlink():
+        raise ReleaseError("partial bootstrap recovery controller lock is a symlink")
+    if lock_path.exists():
+        lock_info = lock_path.lstat()
+        lock_owner = 0 if repo == Path(DEFAULT_REPO) else os.geteuid()
+        if (not stat.S_ISREG(lock_info.st_mode) or lock_info.st_uid != lock_owner
+                or stat.S_IMODE(lock_info.st_mode) != 0o600):
+            raise ReleaseError("partial bootstrap recovery controller lock is unsafe")
     if repo.is_symlink() or not repo.is_dir():
         raise ReleaseError("partial bootstrap repository is missing or unsafe")
-    owner = os.geteuid()
+    owner = 0 if repo == Path(DEFAULT_REPO) else os.geteuid()
     repo_info = repo.lstat()
-    group = repo_info.st_gid
+    group = 0 if repo == Path(DEFAULT_REPO) else repo_info.st_gid
     if repo_info.st_uid != owner:
         raise ReleaseError("partial bootstrap repository has an unexpected owner")
     for current, dirs, files in os.walk(repo, topdown=True, followlinks=False):
         directory = Path(current)
         info = directory.lstat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != owner or info.st_gid != group:
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != owner or info.st_gid != group
+                or info.st_mode & 0o002):
             raise ReleaseError("partial bootstrap repository contains an unsafe directory")
         for name in dirs:
             child = directory / name
             child_info = child.lstat()
             if (stat.S_ISLNK(child_info.st_mode) or not stat.S_ISDIR(child_info.st_mode)
-                    or child_info.st_uid != owner or child_info.st_gid != group):
+                    or child_info.st_uid != owner or child_info.st_gid != group
+                    or child_info.st_mode & 0o002):
                 raise ReleaseError("partial bootstrap repository contains a linked or unowned directory")
         for name in files:
             child = directory / name
             child_info = child.lstat()
             if (stat.S_ISLNK(child_info.st_mode) or not stat.S_ISREG(child_info.st_mode)
-                    or child_info.st_uid != owner or child_info.st_gid != group):
+                    or child_info.st_uid != owner or child_info.st_gid != group
+                    or child_info.st_mode & 0o002):
                 raise ReleaseError("partial bootstrap repository contains a linked or unowned file")
     _verify_bare_repository_parent(repo, require_root_owner=(repo == Path(DEFAULT_REPO)))
     if not _is_bare_repo(repo) or _git(repo, "symbolic-ref", "HEAD") != MAIN_REF:
@@ -306,13 +315,17 @@ def recover_partial_bootstrap(config: dict[str, Any], expected_sha: str,
     repo, state_path, lock_path = (Path(config[key]) for key in ("repo", "state", "lock"))
     if str(lock_path) != DEFAULT_LOCK:
         raise ReleaseError("partial bootstrap recovery requires the fixed controller lock")
+    push_group = grp.getgrnam(config["push_group"])
+    push_user = pwd.getpwnam(config["push_user"])
+    root_group = grp.getgrgid(0)
+    if (push_group.gr_gid == 0 or push_user.pw_uid == 0 or push_user.pw_gid == 0
+            or config["push_user"] in root_group.gr_mem):
+        raise ReleaseError("partial bootstrap recovery requires a non-root push identity outside root group")
     _assert_partial_bootstrap_repository(repo, state_path, lock_path, expected_sha,
-                                        expected_tree, installed_app_sha,
-                                        require_lock_absent=True)
+                                        expected_tree, installed_app_sha)
     with _locked(lock_path, nonblocking=True):
         _assert_partial_bootstrap_repository(repo, state_path, lock_path, expected_sha,
-                                            expected_tree, installed_app_sha,
-                                            require_lock_absent=False)
+                                            expected_tree, installed_app_sha)
         _prepare_new_bare_hooks_directory(repo / "hooks")
         hook = _install_new_pre_receive_hook(repo, config["controller_path"])
         _secure_bare_repository_permissions(repo, grp.getgrnam(config["push_group"]).gr_gid)
@@ -1761,6 +1774,7 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
         item["status"] = "stale_base"
         item["failure"] = {"phase": "base-check", "expected_base": old_main_sha,
                            "candidate_base": item["base_sha"], "recorded_at_utc": _utc_now()}
+        state["controller_maintenance"] = None
         state["status"] = "blocked"
         _update_state(state_path, state)
         return {"status": "stale_base", "candidate_sha": item["head_sha"], "main_sha": old_main_sha}
@@ -1768,6 +1782,7 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
         item["status"] = "stale_base"
         item["failure"] = {"phase": "branch-head-check", "reason": "submitted branch has changed; resubmit exact updated head",
                            "recorded_at_utc": _utc_now()}
+        state["controller_maintenance"] = None
         state["status"] = "blocked"
         _update_state(state_path, state)
         return {"status": "stale_base", "candidate_sha": item["head_sha"], "main_sha": old_main_sha}
@@ -1788,6 +1803,10 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
                            "base_sha": old_main_sha, "base_tree": _tree(repo, old_main_sha),
                            "phase": phase, "production_install_started": False,
                            "updated_at_utc": _utc_now()}
+    # Consume the one-shot maintenance authorization in the same durable
+    # write that claims this exact candidate. Any earlier validation error
+    # leaves the marker available for a safe retry.
+    state["controller_maintenance"] = None
     _update_state(state_path, state, status="blocked")
     try:
         classification = builder.classify(source_worktree, old_main_sha, item["head_sha"])
@@ -2085,22 +2104,19 @@ def poll(config: dict[str, Any]) -> dict[str, Any]:
         _assert_legacy_release_path_stopped()
         verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
         state = _load_state(state_path)
-        maintenance = state.get("controller_maintenance")
-        if maintenance is None:
-            _verify_controller_files(config, repo, state["main"]["sha"], sorted(builder.FIXED_CONTROLLER_FILES))
-        else:
-            _verify_controller_maintenance_candidate(config, repo, state)
         _recover_orphaned_inflight(state_path, state)
         if state["status"] == "outcome_unknown":
             raise ReleaseError("production outcome is unknown; use reconcile, never reinstall blindly")
         if state["status"] == "blocked":
             raise ReleaseError("domestic release queue is blocked; inspect or resubmit its head candidate")
+        maintenance = state.get("controller_maintenance")
+        if maintenance is None:
+            _verify_controller_files(config, repo, state["main"]["sha"], sorted(builder.FIXED_CONTROLLER_FILES))
+        else:
+            _verify_controller_maintenance_candidate(config, repo, state)
         item = _active_queue_item(state)
         if item is None:
             return {"status": "ready", "main_sha": state["main"]["sha"], "queue_depth": 0}
-        if maintenance is not None:
-            state["controller_maintenance"] = None
-            _update_state(state_path, state)
         result = process_candidate(config, state_path, state, item)
         if result.get("status") != "completed":
             return result

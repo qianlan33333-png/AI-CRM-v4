@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 import io
 import json
 import os
@@ -51,6 +51,19 @@ def stdin_with_bytes(payload: bytes) -> mock.Mock:
     stream = mock.Mock()
     stream.buffer = io.BytesIO(payload)
     return stream
+
+
+@contextmanager
+def recovery_push_identity(*, group_gid: int = 12345, user_uid: int = 12346,
+                           user_primary_gid: int = 12345,
+                           root_group_members: tuple[str, ...] = ()):
+    group = mock.Mock(gr_gid=group_gid)
+    user = mock.Mock(pw_uid=user_uid, pw_gid=user_primary_gid)
+    root_group = mock.Mock(gr_mem=list(root_group_members))
+    with mock.patch.object(release.grp, "getgrnam", return_value=group), \
+         mock.patch.object(release.pwd, "getpwnam", return_value=user), \
+         mock.patch.object(release.grp, "getgrgid", return_value=root_group):
+        yield group
 
 
 class DomesticMainReleaseTests(unittest.TestCase):
@@ -183,7 +196,7 @@ class DomesticMainReleaseTests(unittest.TestCase):
             lock_path = control / "controller.lock"
             config = {"repo": str(repo), "state": str(state_path), "lock": str(lock_path),
                       "controller_path": "/usr/local/libexec/aicrm/domestic_main_release.py",
-                      "push_group": release.grp.getgrgid(os.getegid()).gr_name}
+                      "push_user": "release-push-test", "push_group": "release-push-group-test"}
             tree = release._tree(repo, base)
             verified_calls: list[dict[str, str]] = []
 
@@ -197,10 +210,19 @@ class DomesticMainReleaseTests(unittest.TestCase):
                 verified_calls.append(result)
                 return result
 
-            with mock.patch.object(release, "_check_config", return_value=config), \
+            lock_path.write_text("", encoding="utf-8")
+            lock_path.chmod(0o600)
+            with recovery_push_identity() as push_group, \
+                 mock.patch.object(release, "_check_config", return_value=config), \
                  mock.patch.object(release, "DEFAULT_LOCK", str(lock_path)), \
                  mock.patch.object(release, "_secure_bare_repository_permissions") as secure, \
                  mock.patch.object(release, "verify_bare_repository", side_effect=verify_exact):
+                with mock.patch.object(release, "_install_new_pre_receive_hook",
+                                       side_effect=release.ReleaseError("simulated interruption")):
+                    with self.assertRaisesRegex(release.ReleaseError, "simulated interruption"):
+                        release.recover_partial_bootstrap(config, base, tree, base)
+                self.assertTrue(lock_path.is_file())
+                self.assertEqual(stat.S_IMODE(lock_path.stat().st_mode), 0o600)
                 result = release.recover_partial_bootstrap(config, base, tree, base)
 
             self.assertEqual(result["status"], "partial_bootstrap_recovered")
@@ -210,14 +232,17 @@ class DomesticMainReleaseTests(unittest.TestCase):
             self.assertEqual(git(repo, "for-each-ref", "--format=%(refname)"), release.MAIN_REF)
             self.assertFalse(state_path.exists())
             self.assertEqual(len(verified_calls), 1)
-            secure.assert_called_once_with(repo, release.grp.getgrnam(config["push_group"]).gr_gid)
-            with self.assertRaisesRegex(release.ReleaseError, "lock to be absent"):
-                with mock.patch.object(release, "_check_config", return_value=config), \
+            secure.assert_called_once_with(repo, push_group.gr_gid)
+            with self.assertRaisesRegex(release.ReleaseError, "receive hook to be absent"):
+                with recovery_push_identity(), \
+                     mock.patch.object(release, "_check_config", return_value=config), \
                      mock.patch.object(release, "DEFAULT_LOCK", str(lock_path)):
                     release.recover_partial_bootstrap(config, base, tree, base)
 
     def test_recover_partial_bootstrap_rejects_unreviewed_state_before_writing_hook(self) -> None:
-        for mutation in ("wrong_sha", "wrong_tree", "wrong_app", "extra_ref", "existing_state"):
+        for mutation in ("wrong_sha", "wrong_tree", "wrong_app", "extra_ref", "existing_state",
+                         "world_writable", "unsafe_lock", "busy_lock", "root_push_group", "root_push_user",
+                         "primary_root_group", "supplemental_root_group"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 seed_repo, base, candidate, _other = make_repository(root)
@@ -236,7 +261,7 @@ class DomesticMainReleaseTests(unittest.TestCase):
                 state_path, lock_path = control / "state.json", control / "controller.lock"
                 config = {"repo": str(repo), "state": str(state_path), "lock": str(lock_path),
                           "controller_path": "/usr/local/libexec/aicrm/domestic_main_release.py",
-                          "push_group": release.grp.getgrgid(os.getegid()).gr_name}
+                          "push_user": "release-push-test", "push_group": "release-push-group-test"}
                 expected_tree = release._tree(repo, base)
                 if mutation == "extra_ref":
                     subprocess.run(["git", f"--git-dir={repo}", "fetch", "--no-tags", str(seed_repo),
@@ -244,17 +269,35 @@ class DomesticMainReleaseTests(unittest.TestCase):
                                    stdout=subprocess.DEVNULL)
                 if mutation == "existing_state":
                     state_path.write_text("{}\n", encoding="utf-8")
-                with mock.patch.object(release, "_check_config", return_value=config), \
+                if mutation == "world_writable":
+                    (repo / "config").chmod(0o666)
+                if mutation == "unsafe_lock":
+                    lock_path.write_text("", encoding="utf-8")
+                    lock_path.chmod(0o644)
+                identity = {
+                    "root_push_group": {"group_gid": 0},
+                    "root_push_user": {"user_uid": 0},
+                    "primary_root_group": {"user_primary_gid": 0},
+                    "supplemental_root_group": {"root_group_members": ("release-push-test",)},
+                }.get(mutation, {})
+                with recovery_push_identity(**identity), \
+                     mock.patch.object(release, "_check_config", return_value=config), \
                      mock.patch.object(release, "DEFAULT_LOCK", str(lock_path)), \
                      mock.patch.object(release, "_secure_bare_repository_permissions") as secure:
-                    with self.assertRaises(release.ReleaseError):
-                        sha = "f" * 40 if mutation == "wrong_sha" else base
-                        tree = "e" * 40 if mutation == "wrong_tree" else expected_tree
-                        app_sha = "d" * 40 if mutation == "wrong_app" else base
-                        release.recover_partial_bootstrap(config, sha, tree, app_sha)
+                    sha = "f" * 40 if mutation == "wrong_sha" else base
+                    tree = "e" * 40 if mutation == "wrong_tree" else expected_tree
+                    app_sha = "d" * 40 if mutation == "wrong_app" else base
+                    if mutation == "busy_lock":
+                        with release._locked(lock_path):
+                            with self.assertRaisesRegex(release.ReleaseError, "serial lock"):
+                                release.recover_partial_bootstrap(config, sha, tree, app_sha)
+                    else:
+                        with self.assertRaises(release.ReleaseError):
+                            release.recover_partial_bootstrap(config, sha, tree, app_sha)
                     secure.assert_not_called()
                 self.assertFalse((repo / "hooks/pre-receive").exists())
-                self.assertFalse(lock_path.exists())
+                if mutation not in {"unsafe_lock", "busy_lock"}:
+                    self.assertFalse(lock_path.exists())
 
     def test_new_baseline_allows_merges_only_when_installed_app_is_on_first_parent(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -379,14 +422,28 @@ class DomesticMainReleaseTests(unittest.TestCase):
                       "production_enabled": True, "controller_path": release.DEFAULT_CONTROLLER,
                       "push_group": "push-group"}
             processed: list[str] = []
+            durable_claims: list[dict[str, object]] = []
 
             def process(_config, _state_path, current_state, item):
-                self.assertIsNone(current_state["controller_maintenance"])
+                self.assertIsNotNone(current_state["controller_maintenance"])
+                current_state["controller_maintenance"] = None
+                current_state["in_flight"] = {"candidate_id": item["candidate_id"],
+                                               "head_sha": item["head_sha"],
+                                               "production_install_started": False}
+                item["status"] = "checking"
+                release._update_state(state_path, current_state, status="blocked")
+                durable_claims.append({"maintenance": current_state["controller_maintenance"],
+                                       "in_flight": dict(current_state["in_flight"])})
                 release._advance_main_cas(repo, base, candidate)
                 current_state["main"] = {"sha": candidate, "tree": release._tree(repo, candidate)}
+                current_state["in_flight"] = None
+                current_state["status"] = "ready"
                 item["status"] = "completed"
                 processed.append(item["head_sha"])
                 return {"status": "completed", "candidate_sha": candidate}
+
+            def update_state(_path, current, **changes):
+                current.update(changes)
 
             with mock.patch.object(release.os, "geteuid", return_value=0), \
                  mock.patch.object(release, "_check_config", return_value=config), \
@@ -394,16 +451,88 @@ class DomesticMainReleaseTests(unittest.TestCase):
                  mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
                  mock.patch.object(release, "verify_bare_repository", return_value={"bare": True}), \
                  mock.patch.object(release, "_load_state", return_value=state), \
-                 mock.patch.object(release, "_update_state", side_effect=lambda _path, current, **changes: current.update(changes)), \
+                 mock.patch.object(release, "_update_state", side_effect=update_state), \
                  mock.patch.object(release, "_verify_controller_maintenance_candidate", return_value=state["controller_maintenance"]), \
                  mock.patch.object(release, "process_candidate", side_effect=process):
                 result = release.poll(config)
 
             self.assertEqual(processed, [candidate])
+            self.assertEqual(durable_claims, [{"maintenance": None,
+                                               "in_flight": {"candidate_id": candidate,
+                                                              "head_sha": candidate,
+                                                              "production_install_started": False}}])
             self.assertEqual(result["status"], "completed")
             self.assertEqual(release._resolve_ref(repo, release.MAIN_REF), candidate)
             self.assertIsNone(state["controller_maintenance"])
             self.assertFalse(state_path.exists())
+
+    def test_maintenance_marker_survives_preclaim_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            tree = release._tree(repo, base)
+            state = release._new_state(base, tree,
+                                       {"sha": base, "tree": tree, "manifest_sha256": "b" * 64})
+            item = {"candidate_id": candidate, "ref": "refs/heads/codex/one",
+                    "head_sha": candidate, "base_sha": base, "status": "pending"}
+            state["queue"] = [item]
+            marker = {"candidate_sha": candidate, "candidate_tree": release._tree(repo, candidate),
+                      "base_sha": base, "controller_files": ["scripts/domestic_main_release.py"],
+                      "fixed_file_sha256": {path: "a" * 64 for path in release.builder.FIXED_CONTROLLER_FILES},
+                      "check_receipt_sha256": "c" * 64, "checked_at_utc": release._utc_now()}
+            state["controller_maintenance"] = marker
+            config = {"repo": str(repo), "work_root": str(root),
+                      "source_worktree": str(root / "worktree")}
+            with mock.patch.object(release, "_resolve_ref", side_effect=release.ReleaseError("preclaim failure")), \
+                 mock.patch.object(release, "_update_state") as persist:
+                with self.assertRaisesRegex(release.ReleaseError, "preclaim failure"):
+                    release.process_candidate(config, root / "state.json", state, item)
+            self.assertEqual(state["controller_maintenance"], marker)
+            self.assertIsNone(state["in_flight"])
+            persist.assert_not_called()
+
+    def test_poll_recovers_claimed_candidate_before_helper_check_and_never_retries_unknown(self) -> None:
+        for production_started in (False, True):
+            with self.subTest(production_started=production_started), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                repo, base, candidate, _other = make_repository(root)
+                state_path = root / "state.json"
+                tree = release._tree(repo, base)
+                state = release._new_state(base, tree,
+                                           {"sha": base, "tree": tree, "manifest_sha256": "b" * 64})
+                item = {"candidate_id": candidate, "ref": "refs/heads/codex/one",
+                        "head_sha": candidate, "base_sha": base, "status": "checking"}
+                state["queue"] = [item]
+                state["status"] = "blocked"
+                state["in_flight"] = {"candidate_id": candidate, "ref": item["ref"],
+                                       "head_sha": candidate, "production_install_started": production_started,
+                                       "commit_started": False, "phase": "checks"}
+                config = {"repo": str(repo), "state": str(state_path),
+                          "lock": str(root / "controller.lock"), "production_enabled": True,
+                          "controller_path": release.DEFAULT_CONTROLLER,
+                          "push_group": "release-push-group-test"}
+                with mock.patch.object(release.os, "geteuid", return_value=0), \
+                     mock.patch.object(release, "_check_config", return_value=config), \
+                     mock.patch.object(release, "_locked", return_value=__import__("contextlib").nullcontext()), \
+                     mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                     mock.patch.object(release, "verify_bare_repository", return_value={"bare": True}), \
+                     mock.patch.object(release, "_load_state", return_value=state), \
+                     mock.patch.object(release, "atomic_json") as persist, \
+                     mock.patch.object(release, "_verify_controller_files") as verify_files, \
+                     mock.patch.object(release, "process_candidate") as process:
+                    expected = "outcome is unknown" if production_started else "queue is blocked"
+                    with self.assertRaisesRegex(release.ReleaseError, expected):
+                        release.poll(config)
+                persist.assert_called_once()
+                verify_files.assert_not_called()
+                process.assert_not_called()
+                if production_started:
+                    self.assertEqual(state["status"], "outcome_unknown")
+                    self.assertEqual(item["status"], "outcome_unknown")
+                else:
+                    self.assertEqual(state["status"], "blocked")
+                    self.assertEqual(item["status"], "failed")
+                    self.assertIsNone(state["in_flight"])
 
     def test_failed_candidate_cannot_reuse_maintenance_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
