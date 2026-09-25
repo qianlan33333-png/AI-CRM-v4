@@ -1,10 +1,10 @@
 # CRM v4 国内主仓：一次性主机准备与切换
 
-> **切换操作当前禁用。** 仅当旧 #39 队列完成、GitHub/stage/production 的准确 SHA、tree、安装清单与健康状态全部读回一致，旧发布 service/timer 已停止，且所有结果不明项已只读对账后，才可由单一执行者按本清单操作。否则不得执行任何写命令、基线初始化、构建演练或 timer 激活。新流程的日常入口见[国内主仓发布](domestic-main-release.md)。
+> **切换操作当前禁用。** 仅当旧 #39 队列完成、stage 与 production 已安装应用的 SHA/tree/manifest 相互一致且健康、源码 `main` 以该应用 SHA 为 first-parent 祖先且 app→main 之间没有运行时改动、旧发布 service/timer 已停止，且所有结果不明项已只读对账后，才可由单一执行者按本清单操作。源码 `main` 与已安装应用 SHA 不要求相等；新 baseline 会绑定准确的 source main SHA/tree 和独立记录的 app identity。否则不得执行任何写命令、基线初始化、构建演练或 timer 激活。新流程的日常入口见[国内主仓发布](domestic-main-release.md)。
 
 ## 一次性主机准备与切换
 
-以下步骤仅供一次性切换，且必须等旧 #39 链完成、GitHub/stage/production 三端 SHA、tree、安装清单和健康读回一致、所有旧发布任务已停止且结果不明项已对账后，由单一执行者依次操作。任何一项未满足都保持新 timer disabled。执行前将命令中的所有尖括号占位符替换为已核实的值，不要原样粘贴。GitHub 凭据只留在开发者电脑；预备机不保存 GitHub 凭据。完整步骤见本文件顶部的禁用说明。`deploy/domestic-main-release-example.json` 是脱敏模板，必须按真实合成数据库访问方式复核；初始 `production_enabled` 保持 `false`。
+以下步骤仅供一次性切换，且必须等旧 #39 链完成，分别读回准确的 GitHub `main` 源码 SHA/tree 和 stage、production 已安装 app SHA/tree/manifest 及健康状态，并确认两台机器的 app identity 相等。源码 `main` 可晚于 app，但必须以 app SHA 为 first-parent 祖先且 app→main 仅含无运行时影响的工具/文档改动。所有旧发布任务已停止且结果不明项已对账后，才由单一执行者依次操作。任何一项未满足都保持新 timer disabled。执行前将命令中的所有尖括号占位符替换为已核实的值，不要原样粘贴。GitHub 凭据只留在开发者电脑；预备机不保存 GitHub 凭据。完整步骤见本文件顶部的禁用说明。`deploy/domestic-main-release-example.json` 是脱敏模板，必须按真实合成数据库访问方式复核；初始 `production_enabled` 保持 `false`。
 
 1. **确认旧发布器空闲，再停用旧入口。** 先只读检查，不得有运行中的旧 service 或未知发布结果：
 
@@ -195,6 +195,9 @@
    production 安装 `deploy/domestic-promote.py` 时使用已 pinned 的 SSH key/known_hosts，从预备机复制到 ubuntu 的临时文件，先按同一源摘要比对后再由 root 原子安装；示例中的 key 与 known_hosts 路径必须对应真实固定文件：
 
    ```sh
+   ssh -i /home/ubuntu/.ssh/ai-crm-v4-prod-deploy \
+     -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/ubuntu/.ssh/known_hosts_aicrm_prod \
+     ubuntu@10.0.4.13 'test ! -e /home/ubuntu/domestic-promote.py.new && sudo test ! -e /usr/local/libexec/aicrm/domestic-promote.py.new && sudo install -d -o root -g root -m 0755 /usr/local/libexec/aicrm'
    scp -i /home/ubuntu/.ssh/ai-crm-v4-prod-deploy \
      -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/ubuntu/.ssh/known_hosts_aicrm_prod \
      deploy/domestic-promote.py ubuntu@10.0.4.13:/home/ubuntu/domestic-promote.py.new
@@ -211,7 +214,7 @@
      ubuntu@10.0.4.13 'sudo test ! -e /usr/local/libexec/aicrm/domestic-promote.py.pre-domestic-main && sudo install -o root -g root -m 0600 /usr/local/libexec/aicrm/domestic-promote.py /usr/local/libexec/aicrm/domestic-promote.py.pre-domestic-main && sudo mv /usr/local/libexec/aicrm/domestic-promote.py.new /usr/local/libexec/aicrm/domestic-promote.py && sudo sha256sum /usr/local/libexec/aicrm/domestic-promote.py'
    ```
 
-   摘要不符时停止并从回滚文件恢复；任何 host write 都须等到开头的 #39/三端读回门禁通过。
+   摘要不符时停止并从回滚文件恢复；任何 host write 都须等到开头的 #39 完成、两机 app identity 相等、源码 app→main 关系验证通过且无不明发布结果。
 
    安装后在 stage 对 `/usr/local/libexec/aicrm/domestic_main_release.py`、`domestic_release.py`、`domestic_release_build.py`、`domestic-promote.py` 和两个 `/etc/systemd/system/aicrm-domestic-main-release.*` 文件运行 `sha256sum`；在 production 对 `/usr/local/libexec/aicrm/domestic-promote.py` 运行 `sha256sum`。逐一与上面的同一 `MAIN_SHA` 源摘要比较；只有全等才继续。用 `systemd-analyze verify` 核对落盘 unit，并确认新 timer 仍 disabled/inactive。任何摘要不符都停下，使用回滚文件恢复旧字节并复核。
 
@@ -239,7 +242,7 @@
 
    裸仓由 root 创建，推送组只写 Git objects 和 `refs/heads/codex/*`；`main`、candidate pins、钩子、配置均不可由推送账号改写。运行 `verify_bare_repository` 前核对 `aicrm-build` 能读仓库且不属于推送组。
 
-5. **在 2 核、2GB 预备机运行 build-only 容量演练。** 仅在旧 #39 队列已完全停止、GitHub/stage/production 的准确读回完成、旧 timer/service disabled/inactive 且所有结果不明项已对账后进行。该演练会使用现有 build-worker 的 Go/npm 共享缓存，因此旧队列活动期间严禁运行；不得清空或重置共享缓存。先确认 stage 当前 `/readyz` 健康、磁盘有足够空间、无运行发布任务。演练只运行 `domestic_release_build.py build`；**不要以 `poll` 作为演练命令**，因为开启生产配置后它会真实晋级生产。以下用隔离的本地 clone，`--base-release none` 明确强制完整构建，不安装、不迁移、不连接生产。为输出填写生产已安装 SHA 与当前准确 `main`：
+5. **在 2 核、2GB 预备机运行 build-only 容量演练。** 仅在旧 #39 队列已完全停止、GitHub 源码 main 与两机已安装 app 的身份关系读回并验证完成、旧 timer/service disabled/inactive 且所有结果不明项已对账后进行。该演练会使用现有 build-worker 的 Go/npm 共享缓存，因此旧队列活动期间严禁运行；不得清空或重置共享缓存。先确认 stage 当前 `/readyz` 健康、磁盘有足够空间、无运行发布任务。演练只运行 `domestic_release_build.py build`；**不要以 `poll` 作为演练命令**，因为开启生产配置后它会真实晋级生产。以下用隔离的本地 clone，`--base-release none` 明确强制完整构建，不安装、不迁移、不连接生产。为输出填写生产已安装 SHA 与当前准确 `main`：
 
    ```sh
    REPO=/opt/aicrm/domestic/source.git
@@ -260,10 +263,12 @@
      GOOS=linux GOARCH=amd64 GITHUB_SHA="$MAIN_SHA" \
      /usr/bin/time -v -o "$WORK/time.txt" /usr/bin/python3 "$WORK/source/scripts/domestic_release_build.py" build \
        --repo "$WORK/source" --base "$APP_SHA" --target "$MAIN_SHA" \
-       --validation-scope-base "$MAIN_SHA" --base-release none --out "$WORK/out"
+       --validation-scope-base "$APP_SHA" --base-release none --out "$WORK/out"
    (cd "$WORK/out/release" && sha256sum -c release-files.sha256)
    python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["source_sha"]==sys.argv[2] and m["full_build"] is True and m["build_mode"]=="full"; print(json.dumps({"source_sha":m["source_sha"],"tree":m["source_tree"],"manifest":m["release_files_sha256"],"full_build":m["full_build"],"seconds":m["phase_timings_seconds"]},sort_keys=True))' "$WORK/out/domestic-release.json" "$MAIN_SHA"
    ```
+
+   `--base-release none` 在 builder 中强制 `full_build=true` 并运行完整 `release-fast` 构建，不依赖路径分类；`--validation-scope-base "$APP_SHA"` 只记录 app→main 的变更范围，不能缩小该完整构建。此演练只测构建/清单，不代替独立的测试合同。
 
    演练前后记录 UTC 起止时间、`free -h`、`vmstat 1`、`df -h /opt /var`、`/usr/bin/time -v` 最大 RSS、内核 OOM 记录和 stage 健康；`vmstat 1` 可在另一终端观察并以 Ctrl-C 结束：
 
@@ -277,7 +282,7 @@
 
    不要清空共享 Go/npm cache 来制造冷启动。记录 cache 起始状态；成功后再跑一次并标为热缓存。若发生 OOM、持续 swap in/out、stage 健康下降、构建/摘要不完整、磁盘空间不足或资源表现不稳定，停止切换并扩容或保留旧流程。构建输出只作证据，不能替代完整受影响检查和已安装预发合同。
 
-6. **只在全部门禁过后写一次 baseline 并激活。** 先以旧流程收据证明 GitHub `main`、stage app 和 production app 的 SHA/tree/manifest 对齐；baseline 还会拒绝安装 app 之后存在运行时改动的 main。复制配置时确认两台计时器仍 disabled/inactive；新 timer 处于 disabled，ledger 尚不存在。再由 root 显式编辑配置，将 `production_enabled` 从 `false` 改为 `true`，保持文件 `root:root 0600`，并重新运行只输出 `config_valid`/布尔值的配置校验命令：
+6. **只在全部门禁过后写一次 baseline 并激活。** 先以旧流程收据分别读回 GitHub `main` 的准确 source SHA/tree 和 stage、production 的 app SHA/tree/manifest；两台机器的 app identity 必须相等并健康。源码 main 可晚于 app，不要求 SHA 相等。`prepare-baseline` 仅在源码 app SHA 位于 `main` 的 first-parent 链、记录的 app/main tree 匹配，且 app→main 分类结果 `runtime_changed=false` 时才继续；之后将 baseline 绑定确切 main SHA/tree，并单独记录 app identity。复制配置时确认两台计时器仍 disabled/inactive；新 timer 处于 disabled，ledger 尚不存在。再由 root 显式编辑配置，将 `production_enabled` 从 `false` 改为 `true`，保持文件 `root:root 0600`，并重新运行只输出 `config_valid`/布尔值的配置校验命令：
 
    ```sh
    sudoedit /etc/aicrm/domestic-main-release.json
@@ -298,7 +303,7 @@
    sudo /usr/bin/python3 /usr/local/libexec/aicrm/domestic_main_release.py --config /etc/aicrm/domestic-main-release.json verify
    ```
 
-   三条命令的 SHA/tree、production cursor、stage app 和 manifest 均须读回一致，且初始队列为空。`prepare-baseline` 会在生产保存 Git bundle 并初始化源码游标，是一次性状态变更；若响应/读回不明，不重跑，转只读对账。读回完成后最后才启用新 timer：
+   `prepare-baseline`、`activate`、`verify` 读回的 source main SHA/tree 与生产 cursor 必须完全一致；stage 与 production app SHA/tree/manifest 必须彼此一致，并与独立的 installed-app 字段一致。若 app 之后只有工具/文档提交，`main_sha` 与 `installed_app_sha` 预期不同。初始队列须为空。`prepare-baseline` 会在生产保存 Git bundle 并初始化源码游标，是一次性状态变更；若响应/读回不明，不重跑，转只读对账。读回完成后最后才启用新 timer：
 
    ```sh
    sudo systemctl enable --now aicrm-domestic-main-release.timer

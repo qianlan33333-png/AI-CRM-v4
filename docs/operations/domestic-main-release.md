@@ -1,12 +1,12 @@
 # CRM v4 国内主仓发布
 
-**生效条件：**预备机 `/var/lib/aicrm/domestic-main/state.json` 有通过 `verify` 的激活基线，生产机 `/opt/aicrm/domestic-main/state.json` 的 `main_sha/main_tree` 与其一致，且旧 `aicrm-domestic-release.timer` 和 service 均停止。基线须证明已装应用之后的源码提交没有运行时改动，且预备机、生产机固定工具和预备机 systemd 单元与准确 `main` 摘要一致。缺少任一项继续按[旧流程](domestic-release.md)，不得启动新发布器。发布失败由一个执行者处理。
+**生效条件：**预备机 ledger 与生产源码游标的 `main_sha/main_tree` 一致；预备机和生产机已安装应用的 SHA、tree、manifest 相互一致且健康。已验证的源码 `main` 必须以该应用 SHA 为 first-parent 祖先；应用提交到所选 `main` 之间只能有工具/文档等不改变运行时的提交，baseline 绑定所选 `main` 的准确 SHA/tree。旧 `aicrm-domestic-release.timer` 和 service 均停止，预备机固定工具与 systemd 单元的摘要对应准确 `main`。缺少任一项继续按[旧流程](domestic-release.md)，不得启动新发布器。发布失败由一个执行者处理。
 
-> **当前未启用。** 必须先完成旧流程 #39 队列，并读回 GitHub `main`、预备机和生产机的准确版本/树/安装清单与健康状态。未得到三端一致证据、无结果不明部署且确认旧发布 timer/service 已停止前，下面的命令都只是操作说明，不得执行。PR 合并、配置文件存在或预发构建成功都不构成切换完成。
+> **当前未启用。** 必须先完成旧流程 #39 队列，并分别读回 GitHub 源码 `main` 与预备机、生产机已安装应用的准确身份和健康状态。预备机与生产机应用的 SHA/tree/manifest 必须相互一致；源码 `main` 的 SHA/tree 可以更新，但必须以应用 SHA 为 first-parent 祖先，且两者之间没有运行时改动。未核实该关系、对账所有结果不明部署并确认旧发布 timer/service 已停止前，下面的命令都只是操作说明，不得执行。PR 合并、配置文件存在或预发构建成功都不构成切换完成。
 
 ## 一次性主机准备与切换
 
-国内主仓尚未启用。一次性主机配置、受限账号、固定工具安装、2 核/2GB build-only 演练和激活命令集中在[一次性主机准备与切换清单](domestic-main-bootstrap.md)。只有旧 #39 队列结束且 GitHub、预备机、生产机的准确版本、安装清单、健康读回一致，旧发布入口停止且未知结果已对账后，才由单一执行者按清单操作；否则所有新 timer 保持 disabled。演练不得使用 `poll`，也不得与旧 build-worker 队列并行运行。
+国内主仓尚未启用。一次性主机配置、受限账号、固定工具安装、2 核/2GB build-only 演练和激活命令集中在[一次性主机准备与切换清单](domestic-main-bootstrap.md)。只有旧 #39 队列结束、预备机与生产机已安装应用身份相互一致、源码 `main` 与应用提交的 first-parent/无运行时改动关系已核实、旧发布入口停止且未知结果已对账后，才由单一执行者按清单操作；否则所有新 timer 保持 disabled。演练不得使用 `poll`，也不得与旧 build-worker 队列并行运行。
 
 ## 日常四步
 
