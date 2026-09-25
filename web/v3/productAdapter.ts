@@ -1,7 +1,7 @@
 import { createFieldMappingEditor, type FieldMapping, type MappingField, type MappingPreview } from './fieldMappingEditor';
 // This is the only v3-owned browser seam for the byte-frozen Product UI.
 // It validates the authoritative lifecycle/sales projection, supplies Chinese
-// display labels, and replaces only the ordinary-product share interaction.
+// display labels, and repairs the Product share interactions at the Host.
 import { api } from '../src/shared/api/client';
 // @ts-ignore Byte-frozen controller; navigation is adapted only at the Host.
 import { AdminController } from '../src/admin/controller';
@@ -94,6 +94,7 @@ function archivedProductEditorTerminal(editor: ArchivedProductEditor): AdminDb {
 }
 
 let loadedProducts: ProductProjection[] = [];
+const loadedServiceProductCodes = new Map<number, string>();
 const openedProductPayloads = new Map<number, RecordValue>();
 const purchaseActionByProduct = new Map<number, { enabled: boolean; mode: '' | 'qr' | 'redirect' }>();
 const loadedLeadChannels: RecordValue[] = [];
@@ -682,6 +683,14 @@ api.loadDb = async (context?: AdminReadContext): Promise<AdminDb> => {
   }
 
   const db = await donorLoadDb(context);
+  if (context?.page === 'spProducts') {
+    loadedServiceProductCodes.clear();
+    for (const product of db.rows.spProducts) {
+      if (Number.isSafeInteger(product.resourceId) && product.resourceId > 0 && product.code) {
+        loadedServiceProductCodes.set(product.resourceId, product.code);
+      }
+    }
+  }
   if (context?.page === 'productForm' || context?.page === 'spProductForm') {
     loadedLeadChannels.splice(0, loadedLeadChannels.length, ...list(db.rows.channels).map(object));
   }
@@ -709,6 +718,35 @@ api.loadDb = async (context?: AdminReadContext): Promise<AdminDb> => {
   loadedProducts = rawItems.map((item) => strictProjection(item, byID.get(Number(object(item).id))));
   db.rows.products = loadedProducts;
   return db;
+};
+
+// The frozen client expects /p/service_period/{id}, while Product owns the
+// live /s/{product_code} route. Keep this correction in the V4 Host seam.
+const donorServiceProductSharePath = api.getServiceProductSharePath.bind(api);
+api.getServiceProductSharePath = async (serviceProductId): Promise<string> => {
+  if (api.mode !== 'http') return donorServiceProductSharePath(serviceProductId);
+  const expectedCode = loadedServiceProductCodes.get(serviceProductId);
+  if (!Number.isSafeInteger(serviceProductId) || serviceProductId < 1 || !expectedCode) {
+    throw new Error('周期商品缺少已加载的商品 ID 或编码，请刷新列表');
+  }
+  const response = await request(`/api/admin/service-period-products/${serviceProductId}/share`, {
+    method: 'GET', headers: { Accept: 'application/json' },
+  });
+  const projection = object(await response.json().catch(() => null));
+  const path = typeof projection.public_path === 'string' ? projection.public_path : '';
+  const code = typeof projection.product_code === 'string' ? projection.product_code : '';
+  const invalid = (): never => { throw new Error('周期商品分享响应不完整或越过本地边界'); };
+  if (projection.ok !== true || projection.service_product_id !== serviceProductId || code !== expectedCode ||
+    projection.local_only !== true || projection.real_external_call_executed !== false || !path.startsWith('/s/')) invalid();
+  const encodedCode = path.slice('/s/'.length);
+  if (!encodedCode || encodedCode.includes('/')) invalid();
+  let decodedCode: string;
+  try { decodedCode = decodeURIComponent(encodedCode); } catch { return invalid(); }
+  if (decodedCode !== expectedCode) invalid();
+  let url: URL;
+  try { url = new URL(path, location.origin); } catch { return invalid(); }
+  if (url.origin !== location.origin || url.username || url.password || url.pathname !== path || url.search || url.hash) invalid();
+  return path;
 };
 
 async function readShare(product: ProductProjection): Promise<string> {
