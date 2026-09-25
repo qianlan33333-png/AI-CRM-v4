@@ -166,6 +166,9 @@ func (s *RuntimeService) ConfirmRun(ctx context.Context, c RunConfirmCommand) (a
 	}
 	var run automationdomain.RuntimeRun
 	err = s.runtimeMutation(ctx, "confirm_run", c.Actor, c.IdempotencyKey, payload, func(tx context.Context) (any, RuntimeFact, error) {
+		if e := s.validatePreviewRuntimeConfigWithin(tx, preview); e != nil {
+			return run, RuntimeFact{}, e
+		}
 		plan, e := s.reviewPlans.CreatePlanWithin(tx, aiassistantport.CreatePlanCommand{Actor: aiassistantport.Actor{Kind: aiassistantport.ActorAdmin, ID: c.Actor}, IdempotencyKey: "automation-manual-review-" + c.IdempotencyKey, Name: "Audience broadcast " + strconv.FormatInt(c.PackageID, 10), SourceKind: "automation.manual_audience_run.v1", SourceDigest: effectport.Hash("automation.manual-audience-run", hex.EncodeToString(digest[:])), Recipients: recipients, OccurredAt: now})
 		if e != nil {
 			return run, RuntimeFact{}, e
@@ -194,6 +197,24 @@ func (s *RuntimeService) ConfirmRun(ctx context.Context, c RunConfirmCommand) (a
 	}, &run)
 	return run, runtimeClassify(err)
 }
+
+// validatePreviewRuntimeConfigWithin rejects confirmation when a safety
+// setting changed after its preview was created. Call it inside the same UoW
+// that creates either fixed-content plans or dynamic-generation effects.
+func (s *RuntimeService) validatePreviewRuntimeConfigWithin(ctx context.Context, preview automationdomain.RunPreview) error {
+	if !preview.RuntimeConfigObserved {
+		return nil
+	}
+	current, err := s.runtimeConfigWithin(ctx)
+	if err != nil {
+		return err
+	}
+	if current.Revision != preview.RuntimeConfigRevision || current.AutomationMaxRecipients != preview.MaxRecipientsPerRun {
+		return ErrRuntimeConflict
+	}
+	return nil
+}
+
 func reviewContentBlocks(content automationport.FixedContentPackage) ([]aiassistantport.ContentBlock, error) {
 	if len(content.DynamicMiniprogramCard) != 0 {
 		return nil, ErrRuntimeNotReady

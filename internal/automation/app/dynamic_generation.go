@@ -57,6 +57,9 @@ func (s *RuntimeService) confirmDynamicRun(ctx context.Context, c RunConfirmComm
 	}
 	var run automationdomain.RuntimeRun
 	err = s.runtimeMutation(ctx, "confirm_run", c.Actor, c.IdempotencyKey, payload, func(tx context.Context) (any, RuntimeFact, error) {
+		if e := s.validatePreviewRuntimeConfigWithin(tx, preview); e != nil {
+			return run, RuntimeFact{}, e
+		}
 		run = automationdomain.RuntimeRun{PackageID: c.PackageID, PackageVersion: c.PackageVersion, SnapshotID: c.SnapshotID, AgentID: c.AgentID, AgentPublishedVersion: c.AgentPublishedVersion, BindingVersion: preview.BindingVersion, SenderSetVersion: preview.SenderSetVersion, RuntimeConfigObserved: preview.RuntimeConfigObserved, RuntimeConfigRevision: preview.RuntimeConfigRevision, MaxRecipientsPerRun: preview.MaxRecipientsPerRun, PreviewDigest: digest, State: automationport.RunPreparing, TargetCount: int64(len(recipients)), CreatedBy: c.Actor, CreatedAt: now, UpdatedAt: now}
 		created, existing, createErr := s.store.CreateRun(tx, run, nil)
 		if createErr != nil || len(existing) != 0 {
