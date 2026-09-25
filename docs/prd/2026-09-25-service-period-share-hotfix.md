@@ -30,10 +30,10 @@ flowchart TD
 - OneID：不涉及。商品 ID／编码不是客户身份，不读取或写入客户归属。
 - Persistence：无新持久化。管理端分享是受权 Product GET，前端只渲染返回的路径。
 - External Effects：不涉及。保留 `local_only=true`、`real_external_call_executed=false` 的校验，不新增 Provider 写入或任务。
-- Owner 与回滚：Product Owner 生成 `/s/{code}`；V4 Host 验证并展示。回滚本 PR 的前端适配与 OpenAPI 修订即可，生产业务数据无需回滚。
+- Owner 与回滚：Product Owner 生成 `/s/{code}`；V4 Host 验证并展示。回滚本 PR 的前端适配即可，生产业务数据无需回滚。
 
 ## 验收
 
 1. 已启用的 `ces`、`lianmeng` 分享结果分别为同源 `/s/ces`、`/s/lianmeng`，公开 GET 可访问；二维码、复制、预览同址。
 2. 错误 ID、错误编码、旧 `/p/service_period/{id}`、额外路径、查询串、跨源和外部执行标志均拒绝展示。
-3. 受影响 Web Host 回归、类型检查、来源校验及预发布业务读回通过；生产发布和观察由 V4 发布指挥台串行处理，不能以本地测试冒称生产修复。
+3. 受影响 Web Host 回归、类型检查、来源校验及准确 PR 必需 check 通过；合并后按 `docs/operations/domestic-release.md` 由国内发布器串行构建和技术发布，核对预备机与生产准确 SHA、文件摘要、服务及 `/readyz`。真实登录后的分享业务读回单独记录，不能以技术健康冒称业务修复。
