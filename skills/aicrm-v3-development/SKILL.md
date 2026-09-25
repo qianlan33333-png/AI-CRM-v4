@@ -9,8 +9,8 @@ description: Plan, implement, migrate, or review AI-CRM-v4 capabilities with an 
 
 Before editing, classify the business judgment, acceptance journey, OneID,
 Persistence, and External Effects boundaries. Completion requires a clean,
-committed worktree and test evidence bound to its exact head/tree. GitHub PR
-`check`, staging build/install, production technical health, and real business
+committed worktree and test evidence bound to its exact head/tree. Candidate
+checks, staging build/install, production technical health, and real business
 acceptance are separate facts. A compile, mock, HTTP 200, synthetic fixture,
 or queued Provider effect is not completed business acceptance.
 
@@ -18,7 +18,7 @@ Use this skill after reading the repository `AGENTS.md`. Its purpose is to make 
 
 ## Small-step delivery
 
-Follow `skills/aicrm-v3-development-frontdoor/SKILL.md`: keep the parent brief in one Codex task, deliver one independently mergeable behavior or defect with its tests in each PR, and use Product Design before UI implementation. Split by behavior, without line-count quotas. An authorized parent brief carries into child PRs; request a new decision only for material scope or contract changes. Release-failure diagnosis and fixes use a separate `gpt-6-luna` max agent; other tasks are not restricted to that model.
+Follow `skills/aicrm-v3-development-frontdoor/SKILL.md`: keep the parent brief in one Codex task, deliver one independently releasable behavior or defect with its tests in each candidate, and use Product Design before UI implementation. Split by behavior, without line-count quotas. An authorized parent brief carries into child candidates; request a new decision only for material scope or contract changes. Release-failure diagnosis and fixes use a separate `gpt-6-luna` max agent; other tasks are not restricted to that model.
 
 ## Start With a Two-Axis Classification
 
@@ -97,16 +97,17 @@ Do not assume the current adapter participates in the caller's Unit of Work. Ver
 
 ## Completion Evidence
 
-PR 记录准确 HEAD/tree、适用测试及未验证事项。受保护 `main` 的准确提交 `check` 成功后，
-预备机按第一父链构建并验证，再以同一文件树晋级生产。每一步单独记录 SHA、摘要、
-版本和健康读回；纯文档提交不做无意义的应用安装。生产技术安装完成后再记录真实
+候选记录准确 HEAD/tree、适用测试及未验证事项。国内激活前仍按 GitHub 的准确 `check`；
+激活后，预备机在候选准确 SHA/tree 上执行可信检查、构建和验证，并先在生产保存自包含源码 bundle，
+再以同一安装包晋级生产。每一步单独记录 SHA、摘要、版本和健康读回；纯文档提交只更新源码游标，
+不做无意义的应用安装。生产技术安装完成后再记录真实
 支付、扫码等业务结果，未有结果时不能声称业务验收完成，也不占用下一次技术发布。
 
 部署结果不明时只读对账，不重复安装。预备机使用虚拟 Provider 时，其结论只证明
 虚拟合同和确定性状态转换，不得写成真实外部效果通过。操作流程见
-`docs/operations/domestic-release.md`。
+`docs/operations/domestic-main-release.md`；切换前仍见旧的 `docs/operations/domestic-release.md`。
 
-The PR should contain a compact section like:
+The candidate description should contain a compact section like:
 
 ```text
 OneID decision: involved/not involved, with reason and Port used

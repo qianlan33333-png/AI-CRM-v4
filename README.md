@@ -22,7 +22,7 @@ AI-CRM v4 是当前唯一的代码、测试、构建、发布和部署仓库。�
 - 支付宝已实现 WAP/网页支付、签名回调、交易查询、退款与对账 Adapter；Provider 默认
   关闭，启用真实网络调用必须提供部署侧商户凭据，并继续遵守幂等、回调重放和
   `outcome_unknown` 对账边界；
-- `main` 受保护且必过准确提交的 `check`。GitHub Actions 只做 PR 检查；国内预备机按合并后的第一父链构建并通过内网晋级同一版本。
+- 切换激活前，GitHub `main` 和准确 `check` 决定旧发布队列；激活后预备机国内裸仓为权威，候选经国内检查、同包内网晋级，GitHub 只由用户人工择机归档。
 
 公开 HTTP 契约见 [OpenAPI](api/openapi.yaml)，数据迁移见 [migrations](migrations)，部署约束见 [部署说明](deploy/README.md)。
 
@@ -65,34 +65,8 @@ govulncheck ./...
 
 ## 开发与发布
 
-每个 PR 交付一个独立可合并、可回退的用户可观察行为或明确缺陷，并在同一 PR 提交相关测试；按行为边界拆分，不设行数配额。整个实施留在同一个 Codex task，子 PR 复用已授权的父 brief。涉及侧栏、用户页或后台页时，编码前使用 Product Design 插件/skill。先阅读
-[`docs/development-before-start.md`](docs/development-before-start.md)，按改动影响运行本地检查。
+每个能力先做一次业务判断、参考检索和简短父 PRD；同一 Codex 任务中，每条开发线使用独立 `codex/<work-item>` worktree/分支。一个候选交付可单独上线的最小完整行为或明确缺陷，相关测试同行。涉及用户页或后台 UI 时先使用 Product Design。详见[开发入口](docs/development-before-start.md)。
 
-`python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` 只显示候选影子计划与当前 enforced 选择。普通本地运行会按候选计划执行 lane、受影响 Go 包的完整测试（包括新测试）及登记检查；环境、日志或收据缺失会报告不完整。此本地结果不替代 GitHub 必需 `check`，必需门禁保持现行规则。
+国内主仓**仅在受锁激活收据存在且旧轮询器停用后**生效。此前继续使用 GitHub PR、必需 `check` 和[旧发布流程](docs/operations/domestic-release.md)。激活后开发者只推国内分支并提交准确 base/head；单一发布器在预备机检查、构建和合成数据验收，在生产机先保存可独立恢复的源码 bundle，再通过内网晋级同一安装包。生产准确版本、摘要、服务与健康读回通过才推进国内 `main`。日常操作见[国内主仓发布](docs/operations/domestic-main-release.md)。
 
-PR2 从既有 CI lane 收据记录每日全量回归和 PR 影子观察。10 个不同 PR 的观察复用原 CI 结果，不为收集观察重复运行测试；速度门槛必须另外由真实完整/候选命令配对证明，同一 SHA、环境和缓存下，每个拟启用类别至少 3 个不同 PR，p50 节省至少 30%。`quality_lanes` 生成的 backend `run.json` 与 Go JSON 日志可用 `python3 scripts/ci/affected_shadow.py pair --full-run <full/backend/run.json> --targeted-run <targeted/backend/run.json> --scope-type class --scope-id <registered-class> --out <pair.json>` 适配为类别性能样本。
-
-能力成本必须从完整 CI 历史计算，不能用 backend lane 时长或最终成功 run 代替。只读导出该 PR 在仓库 `ci.yml` 的全部 runs、每个 run 的全部 attempts 和 jobs：`python3 scripts/ci/affected_shadow.py export-ci-history --github-repo <owner/repo> --pr-number <number> --out ci-history.json`；再把 `--ci-jobs ci-history.json` 传给 capability `pair` 命令。失败、取消和无 jobs 的终态 attempt 也计时；若 GitHub API 分页不完整、仍在运行或某个同分支 run 无法归属，导出会标记不完整，不能用于启用判断。能力清单须绑定父 PRD 并显式列出各业务能力的 PR 编号，按清单覆盖所有 PR 的 CI attempts 与部署总耗时；目录组件名不构成业务能力归属。还需传入发布器现有 `state.json` 和对应构建的 `domestic-release.json`（`--release-state <state.json> --release-manifest <domestic-release.json> --repo <git-repository>`）；适配器验证 `processed_sha == deployed_source_sha == prod_installed_sha`、安装 manifest、source tree 和父 PRD，并读取 `last_release_timings_seconds.total`。
-
-传给 `benchmarks --capabilities` 的清单结构如下。只有明确列出的 PR 能作为该业务能力的观察和全成本样本；缺少任一 PR 的完整历史或成本会保持 shadow。
-
-此清单是父 PRD 负责人核对并留档的权威试验范围。评估器只能证明已登记 PR 的成本证据齐全，不能自动证明业务能力的所有 PR 都已穷尽；范围未经核对，不得宣称该能力总成本完整，也不得启用受影响的快速门禁。
-
-```json
-{
-  "schema": 1,
-  "parent_prd_id": "docs/prd/affected-ci-trial.md",
-  "parent_prd_sha": "<64-character SHA-256>",
-  "capabilities": [
-    {"id": "commerce-checkout", "pr_numbers": [101, 102, 103]}
-  ]
-}
-```
-
-候选只有在零已知漏选、完整且已知缺陷重放、每类耗时门槛通过、且每个能力汇总的 CI 加部署总耗时不增加时才可进入既有启用评估；缺少证据、候选结果未知或确认漏选时继续使用原门禁。未知、共享构建基础、可执行检查策略和迁移改动保持全量回退。禁止给必需工作流添加路径过滤。发布失败诊断和修复由单独的 `gpt-6-luna` max agent 执行；其他工作不受此模型限制。
-
-PR 合并后，国内预备机按 `main` 第一父链顺序拉取准确提交、构建并使用合成数据做基础验证，
-再通过内网晋级同一文件树。预备机数据可重建，无需备份；生产真实数据仅在数据库迁移前备份。
-生产安装、健康读回和真实业务验收分开记录。日常操作与失败恢复见
-[`docs/operations/domestic-release.md`](docs/operations/domestic-release.md)。旧 handoff、merge-preview
-和手工发布入口保留为历史审计材料，不是新流程门禁。
+普通发布不备份数据库；生产迁移前才备份。真实支付、扫码等业务验收在技术安装后独立记录。GitHub 不自动同步、没有同步周期；人工同步须先确认国内 `main` 与生产源码收据相同、GitHub 是其祖先，才普通快进推送并读回 SHA。若两台国内机器在归档前同时丢失，GitHub 可能缺少尚未同步的提交。
