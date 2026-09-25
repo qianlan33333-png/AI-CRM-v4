@@ -5,7 +5,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import { chromiumStartupDiagnostic, chromiumStartupTimeoutMS } from "../../internal/webshell/chromium_launch.mjs";
-import { resolveDataWorkspaceChromiumBinary } from "../../internal/webshell/data_workspace_chromium_binary.mjs";
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 const origin = process.env.AICRM_DATA_WORKSPACE_URL;
 const session = process.env.AICRM_DATA_WORKSPACE_SESSION;
 const csrf = process.env.AICRM_DATA_WORKSPACE_CSRF;
@@ -14,7 +14,7 @@ const output = process.env.AICRM_DATA_WORKSPACE_SCREENSHOTS;
 const profile = await fs.mkdtemp(
   path.join(os.tmpdir(), "data-workspace-browser-"),
 );
-const executable = resolveDataWorkspaceChromiumBinary();
+const executable = resolveChromiumBinary();
 const child = spawn(
   executable,
   [

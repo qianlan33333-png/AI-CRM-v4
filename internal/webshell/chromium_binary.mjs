@@ -9,19 +9,19 @@ const isExecutable = (candidate, spawn = spawnSync) => {
   }
 };
 
-export const dataWorkspaceChromiumCandidates = (env = process.env, platform = process.platform) => {
+export const chromiumBinaryCandidates = (env = process.env, platform = process.platform) => {
   const candidates = [env.AICRM_CHROMIUM_BINARY, env.CHROME_BIN].filter(Boolean);
   if (platform === "darwin") candidates.push("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
   candidates.push("google-chrome", "google-chrome-stable", "chromium", "chromium-browser");
   return [...new Set(candidates)];
 };
 
-export const resolveDataWorkspaceChromiumBinary = ({
+export const resolveChromiumBinary = ({
   env = process.env,
   platform = process.platform,
   spawn = spawnSync,
 } = {}) => {
-  const candidate = dataWorkspaceChromiumCandidates(env, platform)
+  const candidate = chromiumBinaryCandidates(env, platform)
     .find(value => isExecutable(value, spawn));
   if (candidate) return candidate;
   throw new Error("Chromium binary is unavailable");
