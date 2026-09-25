@@ -21,6 +21,8 @@ class ManualGitHubSyncTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        self.known_hosts = self.root / "known_hosts"
+        self.known_hosts.write_text("test pinned host key\n", encoding="utf-8")
         self.repo = self.root / "developer"
         self.repo.mkdir()
         subprocess.run(["git", "-C", str(self.repo), "init", "-q", "--initial-branch=main"], check=True)
@@ -82,12 +84,19 @@ class ManualGitHubSyncTests(unittest.TestCase):
     def sync_local_remotes(self, *, execute: bool, production_reader=None, archive_ack_writer=None) -> dict:
         def logical_remote_url(_repo: Path, remote: str, *, push: bool = False) -> str:
             if remote == "domestic":
-                return "ssh://ubuntu@domestic.internal/opt/aicrm/domestic/source.git"
+                return "ssh://aicrm-release-push@stage-alias/opt/aicrm/domestic/source.git"
             if remote == "origin":
                 return "git@github.com:qianlan33333-png/AI-CRM-v4.git"
             raise AssertionError(f"unexpected remote {remote}")
 
-        with patch.object(sync, "_remote_url", side_effect=logical_remote_url):
+        def logical_target(_host: str, role: str, user: str, _known_hosts=None, _ssh_binary="ssh") -> str:
+            if role == "staging" and user == "aicrm-release-push":
+                return "10.0.4.6"
+            if role == "production" and user == "ubuntu":
+                return "124.220.53.183"
+            raise AssertionError(f"unexpected SSH target: {role}/{user}")
+
+        with patch.object(sync, "_remote_url", side_effect=logical_remote_url), patch.object(sync, "_resolve_ssh_target", side_effect=logical_target):
             return sync.synchronize(
                 self.repo,
                 "domestic",
@@ -95,6 +104,7 @@ class ManualGitHubSyncTests(unittest.TestCase):
                 production_reader or (lambda: self.readback),
                 execute=execute,
                 archive_ack_writer=(archive_ack_writer or self.fake_archive_ack) if execute else None,
+                known_hosts=self.known_hosts,
             )
 
     def fake_archive_ack(self, sha: str) -> dict:
@@ -134,6 +144,65 @@ class ManualGitHubSyncTests(unittest.TestCase):
         self.assertEqual(result["github_pending_commit_count"], 0)
         self.assertEqual(run_git(self.repo, "ls-remote", str(self.github), "refs/heads/main").split()[0], self.domestic_sha)
 
+    def test_successful_push_with_failed_github_readback_reports_unknown_and_target(self) -> None:
+        original_fetch = sync.fetch_main
+        github_fetches = 0
+
+        def fail_after_push(repo, remote, target_ref, *, ssh_command=None):
+            nonlocal github_fetches
+            if remote == "origin":
+                github_fetches += 1
+                if github_fetches == 3:
+                    raise sync.SyncError("git_fetch_failed")
+            return original_fetch(repo, remote, target_ref, ssh_command=ssh_command)
+
+        ack_calls: list[str] = []
+        with patch.object(sync, "fetch_main", side_effect=fail_after_push):
+            result = self.sync_local_remotes(
+                execute=True,
+                archive_ack_writer=lambda sha: ack_calls.append(sha) or self.fake_archive_ack(sha),
+            )
+        self.assertEqual(result["status"], "github_push_outcome_unknown")
+        self.assertEqual(result["github_target_sha"], self.domestic_sha)
+        self.assertIsNone(result["github_synced_sha"])
+        self.assertIsNone(result["github_readback_sha"])
+        self.assertTrue(result["read_only_reconciliation_required"])
+        self.assertIn("do not retry", result["reconciliation_action"])
+        self.assertEqual(ack_calls, [])
+        self.assertEqual(run_git(self.repo, "ls-remote", str(self.github), "refs/heads/main").split()[0], self.domestic_sha)
+
+    def test_timed_out_push_with_failed_readback_is_unknown_and_not_retried(self) -> None:
+        original_run = sync.subprocess.run
+        push_calls = 0
+
+        def push_then_timeout(args, *positional, **kwargs):
+            nonlocal push_calls
+            if isinstance(args, list) and len(args) >= 4 and args[:2] == ["git", "-C"] and Path(args[2]).resolve() == self.repo.resolve() and args[3] == "push":
+                push_calls += 1
+                original_run(args, *positional, **kwargs)
+                raise subprocess.TimeoutExpired(args, timeout=120)
+            return original_run(args, *positional, **kwargs)
+
+        original_fetch = sync.fetch_main
+        github_fetches = 0
+
+        def fail_readback(repo, remote, target_ref, *, ssh_command=None):
+            nonlocal github_fetches
+            if remote == "origin":
+                github_fetches += 1
+                if github_fetches == 3:
+                    raise sync.SyncError("git_fetch_failed")
+            return original_fetch(repo, remote, target_ref, ssh_command=ssh_command)
+
+        with patch.object(sync, "fetch_main", side_effect=fail_readback), patch.object(sync.subprocess, "run", side_effect=push_then_timeout):
+            result = self.sync_local_remotes(execute=True)
+        self.assertEqual(push_calls, 1)
+        self.assertEqual(result["status"], "github_push_outcome_unknown")
+        self.assertEqual(result["github_push_response"], "unknown")
+        self.assertEqual(result["github_target_sha"], self.domestic_sha)
+        self.assertIsNone(result["github_synced_sha"])
+        self.assertEqual(run_git(self.repo, "ls-remote", str(self.github), "refs/heads/main").split()[0], self.domestic_sha)
+
     def test_push_success_with_stage_ack_failure_reports_readback_without_repush(self) -> None:
         def unavailable(_sha: str) -> dict:
             raise sync.SyncError("stage_archive_ack_rejected")
@@ -152,27 +221,41 @@ class ManualGitHubSyncTests(unittest.TestCase):
             "pending_first_parent_count": 0,
             "confirmed_at_utc": "2026-09-25T00:02:00Z",
         }
+        ssh_config = subprocess.CompletedProcess(
+            [], 0,
+            stdout="hostname 10.0.4.6\nport 22\nuser aicrm-release-push\nhostkeyalias staging-pinned\n",
+            stderr="",
+        )
+        pin = subprocess.CompletedProcess([], 0, stdout="staging-pinned ssh-ed25519 AAAATEST\n", stderr="")
         completed = subprocess.CompletedProcess([], 0, stdout=json.dumps(response), stderr="")
-        with patch.object(sync.subprocess, "run", return_value=completed) as run:
+        with patch.object(sync.subprocess, "run", side_effect=[ssh_config, pin, completed]) as run:
             value = sync._record_archive_ack_via_ssh(
                 "stage",
                 self.domestic_sha,
-                user="ubuntu",
+                user="aicrm-release-push",
                 ssh_key=Path("/tmp/local-key"),
-                known_hosts=Path("/tmp/known-hosts"),
+                known_hosts=self.known_hosts,
             )
         self.assertEqual(value, response)
-        command = run.call_args.args[0]
+        command = run.call_args_list[2].args[0]
         self.assertEqual(command[0:2], ["ssh", "-T"])
         self.assertIn("StrictHostKeyChecking=yes", command)
-        self.assertIn("ubuntu@stage", command)
+        self.assertIn("GlobalKnownHostsFile=/dev/null", command)
+        self.assertIn(f"UserKnownHostsFile={self.known_hosts.resolve()}", command)
+        self.assertIn("aicrm-release-push@stage", command)
         self.assertEqual(command[-1], f"domestic-archive-ack --sha {self.domestic_sha}")
-        self.assertEqual(run.call_args.kwargs["input"], json.dumps({"sha": self.domestic_sha}, separators=(",", ":")) + "\n")
+        self.assertEqual(run.call_args_list[2].kwargs["input"], json.dumps({"sha": self.domestic_sha}, separators=(",", ":")) + "\n")
 
     def test_archive_ack_must_confirm_current_domestic_main(self) -> None:
         ack = self.fake_archive_ack(self.domestic_sha)
         ack["domestic_main_sha"] = self.app_sha
         with self.assertRaisesRegex(sync.SyncError, "stage_archive_ack_domestic_sha_mismatch"):
+            sync.validate_archive_ack(ack, self.domestic_sha)
+
+    def test_archive_ack_with_nonzero_pending_count_is_not_confirmed(self) -> None:
+        ack = self.fake_archive_ack(self.domestic_sha)
+        ack["pending_first_parent_count"] = 1
+        with self.assertRaisesRegex(sync.SyncError, "stage_archive_ack_pending_first_parent_nonzero"):
             sync.validate_archive_ack(ack, self.domestic_sha)
 
     def test_diverged_github_main_blocks_without_modifying_remote(self) -> None:
@@ -234,15 +317,15 @@ class ManualGitHubSyncTests(unittest.TestCase):
 
     def test_domestic_remote_allowlist_requires_fixed_bare_repository_path(self) -> None:
         accepted = (
-            "ubuntu@staging:/opt/aicrm/domestic/source.git",
-            "staging:/opt/aicrm/domestic/source.git",
-            "ssh://ubuntu@10.0.4.6/opt/aicrm/domestic/source.git",
-            "ssh://staging/opt/aicrm/domestic/source.git",
+            "aicrm-release-push@staging:/opt/aicrm/domestic/source.git",
+            "ssh://aicrm-release-push@10.0.4.6/opt/aicrm/domestic/source.git",
         )
         rejected = (
             "/tmp/source.git",
             "file:///opt/aicrm/domestic/source.git",
-            "ubuntu@staging:/opt/aicrm/other/source.git",
+            "ubuntu@staging:/opt/aicrm/domestic/source.git",
+            "staging:/opt/aicrm/domestic/source.git",
+            "aicrm-release-push@staging:/opt/aicrm/other/source.git",
             "https://example.invalid/opt/aicrm/domestic/source.git",
             "ssh://root@staging/opt/aicrm/domestic/source.git",
         )
@@ -253,26 +336,52 @@ class ManualGitHubSyncTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertFalse(sync.is_expected_domestic_url(value))
 
+    def test_ssh_alias_must_resolve_to_allowlisted_endpoint_and_pinned_hostkey(self) -> None:
+        resolved = subprocess.CompletedProcess(
+            [], 0,
+            stdout="hostname 124.220.53.183\nport 22\nuser ubuntu\nhostkeyalias prod-pinned\n",
+            stderr="",
+        )
+        pinned = subprocess.CompletedProcess([], 0, stdout="prod-pinned ssh-ed25519 AAAATEST\n", stderr="")
+        with patch.object(sync.subprocess, "run", side_effect=[resolved, pinned]) as run:
+            canonical = sync._resolve_ssh_target("prod-alias", "production", "ubuntu", self.known_hosts)
+        self.assertEqual(canonical, "124.220.53.183")
+        self.assertEqual(run.call_args_list[0].args[0][-1], "ubuntu@prod-alias")
+        self.assertEqual(run.call_args_list[1].args[0][2], "prod-pinned")
+
+    def test_ssh_alias_to_unexpected_server_is_rejected_before_hostkey_lookup(self) -> None:
+        resolved = subprocess.CompletedProcess(
+            [], 0,
+            stdout="hostname 198.51.100.77\nport 22\nuser aicrm-release-push\nhostkeyalias none\n",
+            stderr="",
+        )
+        with patch.object(sync.subprocess, "run", return_value=resolved) as run:
+            with self.assertRaisesRegex(sync.SyncError, "staging_ssh_host_not_allowlisted"):
+                sync._resolve_ssh_target("wrong-stage", "staging", "aicrm-release-push", self.known_hosts)
+        self.assertEqual(run.call_count, 1)
+
     def test_wrong_domestic_remote_path_blocks_before_fetch(self) -> None:
-        run_git(self.repo, "remote", "set-url", "domestic", "ubuntu@staging:/opt/aicrm/other/source.git")
+        run_git(self.repo, "remote", "set-url", "domestic", "aicrm-release-push@staging:/opt/aicrm/other/source.git")
         with self.assertRaisesRegex(sync.SyncError, "domestic_remote_not_authoritative_repository"):
             sync.synchronize(self.repo, "domestic", "origin", lambda: self.readback, execute=False)
 
     def test_unexpected_github_push_url_blocks_before_fetch(self) -> None:
         expected_fetch = "https://github.com/qianlan33333-png/AI-CRM-v4.git"
         wrong_push = "git@github.com:attacker/AI-CRM-v4.git"
-        run_git(self.repo, "remote", "set-url", "domestic", "ubuntu@staging:/opt/aicrm/domestic/source.git")
+        run_git(self.repo, "remote", "set-url", "domestic", "aicrm-release-push@staging:/opt/aicrm/domestic/source.git")
         run_git(self.repo, "remote", "set-url", "origin", expected_fetch)
         run_git(self.repo, "remote", "set-url", "--push", "origin", wrong_push)
-        with self.assertRaisesRegex(sync.SyncError, "github_remote_not_expected_repository"):
-            sync.synchronize(
-                self.repo,
-                "domestic",
-                "origin",
-                lambda: self.readback,
-                execute=True,
-                archive_ack_writer=self.fake_archive_ack,
-            )
+        with patch.object(sync, "_resolve_ssh_target", return_value="10.0.4.6"):
+            with self.assertRaisesRegex(sync.SyncError, "github_remote_not_expected_repository"):
+                sync.synchronize(
+                    self.repo,
+                    "domestic",
+                    "origin",
+                    lambda: self.readback,
+                    execute=True,
+                    archive_ack_writer=self.fake_archive_ack,
+                    known_hosts=self.known_hosts,
+                )
 
 
 if __name__ == "__main__":
