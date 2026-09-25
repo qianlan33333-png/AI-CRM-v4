@@ -61,7 +61,7 @@ The new regression failed on the base implementation for both `fixed_content` an
 | `python3 scripts/dev_preflight.py fast` | PASS; claim limited to fast checks |
 | `python3 scripts/dev_preflight.py compile` | PASS; all Go test packages compiled with tests filtered out |
 
-The final fast and compile preflight summaries are in `/private/var/folders/dq/56xlfzsx05zc7vqhbl7lgv6c0000gn/T/aicrm-preflight-x3qqgo80/summary.json` and `/private/var/folders/dq/56xlfzsx05zc7vqhbl7lgv6c0000gn/T/aicrm-preflight-fno8ygxg/summary.json`. They ran on Go 1.26.6, Darwin arm64, at the base HEAD and report their own limited claims; neither is full delivery evidence. The additional PostgreSQL test is storage-level transaction/concurrency evidence only: it is not the locked E1 PostgreSQL 16.14 environment and does not exercise the new App-layer stale-config check against a real database. Full backend integration, staging, provider, browser, and production acceptance remain unperformed. The random test schema was verified absent after cleanup. No real provider or production database was used.
+The fast and compile commands emit temporary evidence directories recorded in the originating task report. They ran on Go 1.26.6, Darwin arm64, and each supports only its named lane; neither is full delivery evidence. The additional PostgreSQL test is storage-level transaction/concurrency evidence only: it is not the locked E1 PostgreSQL 16.14 environment and does not exercise the new App-layer stale-config check against a real database. Full backend integration, staging, provider, browser, and production acceptance remain unperformed. The random test schema was verified absent after cleanup. No real provider or production database was used.
 
 ## Rollback
 
