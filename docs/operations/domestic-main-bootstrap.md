@@ -408,9 +408,22 @@
          test "$(sudo stat -c '%F %U:%G %a' -- "$backup")" = 'regular file root:root 600'
          test "$(sudo sha256sum "$backup" | awk '{print $1}')" = "$EXPECTED_BASELINE_HELPER"
        else
-         sudo test ! -e "$path.pre-domestic-main"
-         sudo test ! -L "$path.pre-domestic-main"
-         sudo install -o root -g root -m 0600 "$path" "$path.pre-domestic-main"
+         backup="$path.pre-domestic-main"
+         case "$path" in
+           /usr/local/libexec/aicrm/domestic_release.py)
+             expected_backup_sha=96ce1f12aeb787d25759143573ad7c6bcb992e8f7de3f4af2d7de95eb3869d35 ;;
+           /usr/local/libexec/aicrm/domestic_release_build.py)
+             expected_backup_sha=775be12976cab4d66728b28bd877ea11e7314649c65ebc852759eb99b6e95f79 ;;
+           *)
+             sudo test ! -e "$backup"
+             sudo test ! -L "$backup"
+             sudo install -o root -g root -m 0600 "$path" "$backup"
+             continue ;;
+         esac
+         sudo test ! -L "$backup"
+         sudo test -f "$backup"
+         test "$(sudo stat -c '%F %U:%G %a' -- "$backup")" = 'regular file root:root 600'
+         test "$(sudo sha256sum "$backup" | awk '{print $1}')" = "$expected_backup_sha"
        fi
      fi
    done
