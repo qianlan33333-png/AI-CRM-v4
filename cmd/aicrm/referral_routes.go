@@ -30,7 +30,7 @@ func mountReferral(next, public, admin http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/referral/invite" || strings.HasPrefix(r.URL.Path, "/referral/invite/") || r.URL.Path == "/api/v1/referral" || strings.HasPrefix(r.URL.Path, "/api/v1/referral/"):
+		case r.URL.Path == "/referral/invite" || strings.HasPrefix(r.URL.Path, "/referral/invite/") || strings.HasPrefix(r.URL.Path, "/referral/activity/") || r.URL.Path == "/api/v1/referral" || strings.HasPrefix(r.URL.Path, "/api/v1/referral/"):
 			public.ServeHTTP(w, r)
 		case r.URL.Path == "/api/admin/referral" || strings.HasPrefix(r.URL.Path, "/api/admin/referral/"):
 			admin.ServeHTTP(w, r)

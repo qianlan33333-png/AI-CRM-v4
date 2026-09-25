@@ -3354,6 +3354,13 @@
       "source": "migrations/0185_referral_core.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/referral_campaigns"
     },
+    "referral_campaign_posters": {
+      "owner": "referral",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "活动当前发布的海报原图快照，供公开下载时叠加邀请人专属二维码；发布替换由管理员显式操作和审计记录约束。",
+      "source": "migrations/0208_referral_campaign_posters.sql"
+    },
     "referral_current_relationships": {
       "owner": "referral",
       "policy": "permanent",

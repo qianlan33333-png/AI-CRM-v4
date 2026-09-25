@@ -24,6 +24,7 @@ type Campaign = {
   productID: number;
   productType: string;
   leaderboardMetric: "invites" | "sales_amount" | "sales_orders";
+  posters: Array<{ slot: number; imageID: number; description: string; imageURL: string }>;
 };
 type Tab =
   | "campaigns"
@@ -237,6 +238,10 @@ function parseCampaign(raw: unknown): Campaign {
             row.leaderboard_metric === "sales_amount"
           ? "sales_amount"
           : "invites",
+    posters: Array.isArray(row.posters) ? row.posters.map((item) => {
+      const poster = obj(item);
+      return { slot: int(poster.slot), imageID: int(poster.image_id), description: str(poster.description), imageURL: str(poster.image_url) };
+    }).filter((item) => item.slot >= 1 && item.slot <= 3 && item.imageID > 0) : [],
   };
 }
 function node<K extends keyof HTMLElementTagNameMap>(
@@ -959,6 +964,67 @@ function dialog(title: string): {
   document.body.append(modal);
   return { modal, form, feedback };
 }
+async function choosePosterImage(): Promise<{ id: number; name: string } | undefined> {
+  return new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "referral-admin-poster-picker";
+    const card = node("section");
+    card.append(node("h3", "选择已启用的图片素材"));
+    const search = document.createElement("input");
+    search.type = "search";
+    search.placeholder = "搜索素材名称";
+    search.setAttribute("aria-label", "搜索图片素材");
+    const list = node("div");
+    list.className = "referral-admin-poster-materials";
+    let cursor = 0;
+    let query = "";
+    let request = 0;
+    const next = action("加载更多", () => void load(false));
+    const finish = (result?: { id: number; name: string }) => {
+      resolve(result);
+      dialog.close();
+    };
+    const load = async (reset: boolean) => {
+      if (reset) { cursor = 0; list.replaceChildren(); }
+      const current = ++request;
+      next.disabled = true;
+      try {
+        const url = new URL("/api/admin/image-library", location.origin);
+        url.searchParams.set("limit", "50");
+        url.searchParams.set("offset", String(cursor));
+        url.searchParams.set("q", query);
+        url.searchParams.set("enabled_only", "true");
+        const response = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } });
+        if (!response.ok) throw new Error("素材库读取失败，请检查权限后重试。");
+        const payload = obj(await response.json());
+        if (current !== request || !dialog.open) return;
+        const rows = Array.isArray(payload.items) ? payload.items : [];
+        for (const raw of rows) {
+          const item = obj(raw);
+          const id = int(item.id);
+          if (id < 1 || item.enabled !== true) continue;
+          const label = action(str(item.name, `图片 ${id}`), () => finish({ id, name: str(item.name) }));
+          const thumbnail = document.createElement("img");
+          thumbnail.src = str(item.thumb_320_url, `/api/admin/image-library/${id}/variants/thumb_320`);
+          thumbnail.alt = "";
+          label.prepend(thumbnail);
+          list.append(label);
+        }
+        cursor = int(payload.next_offset, cursor + rows.length);
+        next.hidden = payload.has_more !== true || rows.length === 0;
+        next.disabled = false;
+        if (!list.children.length) list.append(node("p", "没有可选的已启用图片。"));
+      } catch (error) { if (current === request) list.replaceChildren(node("p", error instanceof Error ? error.message : "素材读取失败。")); }
+    };
+    search.addEventListener("input", () => { query = search.value.trim(); void load(true); });
+    card.append(search, list, next, action("取消", () => finish()));
+    dialog.append(card);
+    dialog.addEventListener("close", () => { dialog.remove(); resolve(undefined); }, { once: true });
+    document.body.append(dialog);
+    dialog.showModal();
+    void load(true);
+  });
+}
 function openCampaignForm(existing?: Campaign): void {
   const page = node("section");
   page.className = "referral-admin-settings-page";
@@ -1164,6 +1230,56 @@ function openCampaignForm(existing?: Campaign): void {
     area("活动介绍", "活动介绍", existing?.introduction || ""),
     area("奖励说明", "奖励说明", existing?.reward || ""),
   );
+  const posterSection = section("邀请海报", "最多 3 张。请在每张图片右下角预留二维码位置；前台下载时会叠加当前邀请人的专属二维码。");
+  if (existing) {
+    const posterList = node("div");
+    posterList.className = "referral-admin-poster-list";
+    const posterRows = existing.posters.map((item) => ({ ...item }));
+    const drawPosters = () => {
+      posterList.replaceChildren();
+      for (const [index, poster] of posterRows.entries()) {
+        const row = node("div");
+        const preview = document.createElement("img");
+        preview.src = poster.imageURL;
+        preview.alt = `海报${index + 1}预览`;
+        const meta = node("div");
+        meta.append(node("strong", `海报${["一", "二", "三"][index]}`));
+        const description = document.createElement("input");
+        description.value = poster.description;
+        description.maxLength = 80;
+        description.placeholder = "简短说明";
+        description.setAttribute("aria-label", `海报${index + 1}说明`);
+        description.addEventListener("input", () => { poster.description = description.value; });
+        meta.append(description);
+        row.append(preview,meta,action("移除", () => { posterRows.splice(index,1); drawPosters(); }));
+        posterList.append(row);
+      }
+    };
+    drawPosters();
+    const addPoster = action("选择图片素材", async () => {
+      if (posterRows.length >= 3) { feedback.textContent = "最多配置 3 张海报。"; return; }
+      const image = await choosePosterImage();
+      if (!image) return;
+      posterRows.push({ slot: posterRows.length+1, imageID: image.id, description: image.name.slice(0,80), imageURL: `/api/admin/image-library/${image.id}/variants/thumb_320` });
+      drawPosters();
+    });
+    const savePosters = action("发布海报配置", async () => {
+      savePosters.disabled = true;
+      try {
+        await api(`/campaigns/${existing.id}/posters`, { method: "PUT", body: JSON.stringify({ expected_version: existing.version, posters: posterRows.map((row) => ({ image_id: row.imageID, description: row.description.trim() })) }) }, `posters:${existing.id}`);
+        keys.delete(`posters:${existing.id}`);
+        existing.version++;
+        feedback.textContent = "海报已发布，前台可选择并下载专属海报。";
+        feedback.dataset.error = "false";
+      } catch (error) {
+        feedback.textContent = error instanceof Error ? error.message : "海报发布失败。";
+        feedback.dataset.error = "true";
+      } finally { savePosters.disabled = false; }
+    }, "referral-admin-primary");
+    posterSection.append(posterList,addPoster,savePosters);
+  } else {
+    posterSection.append(node("p", "创建活动后可选择图片素材并发布海报。"));
+  }
   page.append(form);
   form.addEventListener("submit", (event) => event.preventDefault());
   host.replaceChildren(page);

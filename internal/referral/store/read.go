@@ -117,6 +117,70 @@ func (r *Repository) CountDirectInvitationsWithin(ctx context.Context, campaignI
 	return count, nil
 }
 
+// CountPaidInviteesWithin counts distinct buyers with a positive net paid
+// amount in this campaign. Repeated orders count once; fully refunded buyers
+// cease to count. The underlying immutable events preserve the original paid
+// attribution even when a refund is settled on another day.
+func (r *Repository) CountPaidInviteesWithin(ctx context.Context, campaignID, promoterCustomerID int64) (int64, error) {
+	tx, err := transaction(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if campaignID < 1 || promoterCustomerID < 1 {
+		return 0, ErrInvalid
+	}
+	var count int64
+	err = tx.QueryRow(ctx, `WITH paid_buyers AS (
+		SELECT buyer_customer_id, SUM(amount_delta_minor) AS net_minor
+		FROM referral_product_sale_events
+		WHERE campaign_id=$1 AND promoter_customer_id=$2 AND buyer_customer_id<>$2
+		GROUP BY buyer_customer_id
+	) SELECT count(*) FROM paid_buyers WHERE net_minor>0`, campaignID, promoterCustomerID).Scan(&count)
+	if err != nil {
+		return 0, mapError(err)
+	}
+	return count, nil
+}
+
+// ListPaidInviteItemsWithin uses the same campaign, promoter, buyer and refund
+// facts as CountPaidInviteesWithin. A fully refunded buyer remains visible in
+// the detail list as reversed while no longer counting as an effective invite.
+func (r *Repository) ListPaidInviteItemsWithin(ctx context.Context, campaignID, promoterCustomerID int64, offset, limit int32) ([]referralport.InviteItem, error) {
+	tx, err := transaction(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if campaignID < 1 || promoterCustomerID < 1 || offset < 0 || limit < 1 || limit > 101 {
+		return nil, ErrInvalid
+	}
+	rows, err := tx.Query(ctx, `SELECT buyer_customer_id,MIN(occurred_at) AS first_paid_at,SUM(amount_delta_minor)::bigint AS net_minor
+		FROM referral_product_sale_events
+		WHERE campaign_id=$1 AND promoter_customer_id=$2 AND buyer_customer_id<>$2
+		GROUP BY buyer_customer_id
+		ORDER BY first_paid_at DESC,buyer_customer_id DESC OFFSET $3 LIMIT $4`, campaignID, promoterCustomerID, offset, limit)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	defer rows.Close()
+	items := make([]referralport.InviteItem, 0, limit)
+	for rows.Next() {
+		var customerID, netMinor int64
+		var paidAt time.Time
+		if err = rows.Scan(&customerID, &paidAt, &netMinor); err != nil {
+			return nil, mapError(err)
+		}
+		state := "valid"
+		if netMinor <= 0 {
+			state = "reversed"
+		}
+		items = append(items, referralport.InviteItem{Participation: referraldomain.Participation{CampaignID: campaignID, CustomerID: customerID, JoinedAt: paidAt}, ScoreState: state, ScoreDelta: netMinor})
+	}
+	if err = rows.Err(); err != nil {
+		return nil, mapError(err)
+	}
+	return items, nil
+}
+
 func (r *Repository) ListTeamsWithin(ctx context.Context, campaignID int64) ([]referraldomain.Team, error) {
 	tx, err := transaction(ctx)
 	if err != nil {

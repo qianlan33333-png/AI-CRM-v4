@@ -193,7 +193,7 @@ func (PostgreSQL) PublicProfiles(ctx context.Context, customerIDs []customerdoma
 		if err = rows.Scan(&id, &value.DisplayName, &value.AvatarURL); err != nil {
 			return nil, err
 		}
-		if value.DisplayName != "" {
+		if value.DisplayName != "" || value.AvatarURL != "" {
 			result[id] = value
 		}
 	}

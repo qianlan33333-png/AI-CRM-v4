@@ -1,6 +1,7 @@
 // Public referral campaign host.  It only consumes safe display projections
 // emitted by Referral HTTP; browser query parameters are never customer proof.
 export {};
+import qrcode from "qrcode-generator";
 
 type Row = Record<string, unknown>;
 type Campaign = {
@@ -21,6 +22,7 @@ type Campaign = {
   teams: Team[];
   activityURL: string;
   productURL: string;
+  posters: Array<{ slot: number; description: string; imageURL: string }>;
 };
 type Team = { id: number; name: string; logoURL: string; captainName: string };
 type Me = {
@@ -90,10 +92,11 @@ let me: Me | undefined;
 let campaigns: Campaign[] = [];
 let leaderboard: Leader[] = [];
 let myLeaderboard: Leader | undefined;
-let board: "team" | "personal" | "in_team" = "personal";
+let board: "team" | "personal" = "personal";
 let period: "total" | "day" = "total";
-let historyDate = "";
-let invite: { url: string; qrPayload: string; shareText: string } | undefined;
+let infoOpen = false;
+let leaderboardError = "";
+let invite: { qrPayload: string } | undefined;
 let invitationRows:
   | Array<{ name: string; avatarURL: string; joinedAt: string; status: string }>
   | undefined;
@@ -101,6 +104,7 @@ let invitationCursor = "";
 let invitationPreview: { inviterName: string; teamName: string } | undefined;
 let loadVersion = 0;
 let bridgeTried = false;
+const defaultAvatar = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="32" fill="#fff0e8"/><circle cx="32" cy="25" r="11" fill="#e9a083"/><path d="M12 60c2-13 10-21 20-21s18 8 20 21" fill="#e9a083"/></svg>')}`;
 
 function campaignFromURL(): number | undefined {
   const raw = new URL(location.href).searchParams.get("campaign") || "";
@@ -116,12 +120,6 @@ function beijingDate(): string {
   const part = (kind: string) =>
     fields.find((field) => field.type === kind)?.value || "";
   return `${part("year")}-${part("month")}-${part("day")}`;
-}
-function leaderboardDate(): string {
-  const value = /^\d{4}-\d{2}-\d{2}$/.test(historyDate)
-    ? historyDate
-    : beijingDate();
-  return value;
 }
 function referralCSRF(): string {
   for (const part of document.cookie.split(";")) {
@@ -241,6 +239,10 @@ function parseCampaign(raw: unknown): Campaign {
     teams,
     activityURL: str(row.activity_url, `/referral?campaign=${num(row.id)}`),
     productURL: str(row.product_url),
+    posters: Array.isArray(row.posters) ? row.posters.map((item) => {
+      const poster = obj(item);
+      return { slot: num(poster.slot), description: str(poster.description), imageURL: str(poster.image_url) };
+    }).filter((item) => item.slot >= 1 && item.slot <= 3 && item.imageURL.startsWith("/api/v1/referral/campaigns/")) : [],
   };
 }
 function parseMe(raw: unknown): Me {
@@ -336,21 +338,29 @@ function remaining(c: Campaign): string {
   if (c.status !== "active" || !Number.isFinite(ms))
     return statusText(c.status);
   if (ms <= 0) return "活动已结束";
-  const hours = Math.floor(ms / 3600000);
-  return hours >= 24
-    ? `还剩 ${Math.ceil(hours / 24)} 天`
-    : `还剩 ${Math.max(1, hours)} 小时`;
+  const seconds = Math.floor(ms / 1000);
+  const days = Math.floor(seconds / 86400);
+  const clock = [Math.floor(seconds / 3600) % 24, Math.floor(seconds / 60) % 60, seconds % 60].map((part) => String(part).padStart(2, "0")).join(":");
+  return days ? `${days}天 ${clock}` : clock;
+}
+function checkoutPending(campaignID: number): boolean {
+  const key = `referral-checkout:${campaignID}`;
+  const startedAt = Number(sessionStorage.getItem(key));
+  if (Number.isFinite(startedAt) && startedAt > 0 && Date.now() - startedAt < 15 * 60 * 1000) return true;
+  sessionStorage.removeItem(key);
+  return false;
 }
 function avatar(url: string, name: string): HTMLElement {
-  if (url) {
-    const image = document.createElement("img");
-    image.className = "referral-avatar";
-    image.src = url;
-    image.alt = "";
-    image.referrerPolicy = "no-referrer";
-    return image;
-  }
-  return element("span", name.slice(0, 1) || "用");
+  const image = document.createElement("img");
+  image.className = "referral-avatar";
+  image.alt = `${name || "用户"}头像`;
+  image.referrerPolicy = "no-referrer";
+  image.src = url || defaultAvatar;
+  image.onerror = () => {
+    image.onerror = null;
+    image.src = defaultAvatar;
+  };
+  return image;
 }
 
 function renderLogin(): void {
@@ -462,7 +472,26 @@ function render(): void {
     return;
   }
   if (campaign.teamMode === "individual") board = "personal";
-  host.replaceChildren(nav());
+  host.replaceChildren();
+  const top = element("div");
+  top.className = "referral-mobile-top";
+  const back = element("a", "‹ 返回活动");
+  back.href = "/referral";
+  const info = button(infoOpen ? "返回榜单" : "活动信息 ···", () => { infoOpen = !infoOpen; render(); }, "referral-info-trigger");
+  info.dataset.testid = "referral-activity-info";
+  top.append(back, info);
+  host.append(top);
+  if (infoOpen) {
+    const title = element("header");
+    title.className = "referral-info-title";
+    title.append(element("span", "活动详情"), element("h1", campaign.name));
+    host.append(title, homeCard(), detailCard(), rulesCard());
+    const message = element("p");
+    message.className = "referral-message";
+    message.dataset.referralMessage = "";
+    host.append(message);
+    return;
+  }
   const header = element("header");
   header.className = "referral-hero";
   if (campaign.coverURL) {
@@ -474,19 +503,15 @@ function render(): void {
   }
   const copy = element("div");
   copy.append(
-    element("span", remaining(campaign)),
+    element("span", campaign.status === "active" ? "活动进行中" : statusText(campaign.status)),
     element("h1", campaign.name),
-    element("p", campaign.introduction || (campaign.qualificationMode === "product_purchase" ? "购买指定商品后即可参与推广和冲榜。" : "邀请好友参加活动，和好友一起冲榜。")),
+    element("p", campaign.qualificationMode === "product_purchase" ? "按退款调整后的有效销售金额冲榜" : "邀请好友，一起冲榜"),
   );
   header.append(copy);
   host.append(header);
   const stats = element("section");
   stats.className = "referral-metrics";
-  stats.append(
-    metric("我的有效邀请", String(me?.invitations || 0)),
-    metric("我的排名", me?.rank ? `第 ${me.rank} 名` : "待上榜"),
-    metric("活动参与", campaign.participants.toLocaleString("zh-CN")),
-  );
+  stats.append(metric("我的有效邀请", String(me?.invitations || 0)), metric("我的排名", me?.rank ? `第 ${me.rank} 名` : "待上榜"));
   host.append(stats);
   if (campaign.status !== "active") {
     const unavailable = element(
@@ -496,28 +521,25 @@ function render(): void {
     unavailable.className = "referral-message";
     host.append(unavailable);
   }
-  const tabs = element("div");
-  tabs.className = "referral-sections";
-  tabs.append(homeCard(), leaderCard(), detailCard(), rulesCard());
-  host.append(tabs);
+  host.append(leaderCard());
   const message = element("p");
   message.className = "referral-message";
   message.dataset.referralMessage = "";
   host.append(message);
-  const inviteButton = button(
-    me?.participant
-      ? "邀请好友"
-      : me?.isCaptain && me.captainTeam
-        ? "加入战队并邀请"
-        : "参加活动并邀请",
-    () => void (me?.participant ? openInvite() : beginParticipation()),
-    "referral-invite-fab",
-  );
+  const footer = element("div");
+  footer.className = "referral-bottom-bar";
+  const timer = element("div");
+  timer.append(element("small", "活动剩余时间"),element("strong",remaining(campaign)));
+  const paid = campaign.qualificationMode === "product_purchase";
+  const pending = paid && !me?.participant && checkoutPending(campaign.id);
+  const inviteButton = button(me?.participant ? "邀请好友" : paid ? pending ? "资格确认中" : "购买并参与" : me?.isCaptain && me.captainTeam ? "加入战队并邀请" : "参加活动", () => void (me?.participant ? openInvite() : beginParticipation()), "referral-invite-fab");
   inviteButton.dataset.testid = "referral-invite";
   inviteButton.disabled =
     campaign.status !== "active" ||
+    pending ||
     (me?.participant !== undefined && me.participant !== null && !me.invitationAvailable);
-  host.append(inviteButton);
+  footer.append(timer,inviteButton);
+  host.append(footer);
 }
 function homeCard(): HTMLElement {
   const section = element("section");
@@ -534,7 +556,9 @@ function homeCard(): HTMLElement {
       element("strong", campaign?.teamMode === "team" && me.participant.teamID ? me.participant.teamName : "已参加活动"),
       element(
         "p",
-        `已于 ${dateText(me.participant.joinedAt)} 加入。本活动的战队和邀请成绩已锁定。`,
+        campaign?.qualificationMode === "product_purchase"
+          ? `支付确认后已于 ${dateText(me.participant.joinedAt)} 参加。成绩随有效付款及退款调整。`
+          : `已于 ${dateText(me.participant.joinedAt)} 加入。本活动的战队和邀请成绩已锁定。`,
       ),
     );
   } else {
@@ -571,6 +595,12 @@ function homeCard(): HTMLElement {
       );
       accept.dataset.testid = "referral-join-team";
       section.append(accept);
+    } else if (campaign?.qualificationMode === "product_purchase") {
+      section.append(element("p", "支付确认后自动参加；支付待确认时暂不计入榜单。"));
+      if (campaign.productURL) {
+        const purchase = button("继续购买指定商品", () => void beginParticipation(), "referral-quiet");
+        section.append(purchase);
+      }
     } else if (campaign?.teamMode === "individual") {
       section.append(element("p", campaign.qualificationMode === "product_purchase" ? "支付成功后会自动参加活动。" : "确认参加活动后即可获得自己的邀请入口。"));
       const join = button("确认参加活动", () => void beginParticipation(), "referral-primary");
@@ -605,10 +635,7 @@ function leaderCard(): HTMLElement {
   section.className = "referral-card";
   const heading = element("div");
   heading.className = "referral-card-title";
-  heading.append(
-    element("h2", "排行榜"),
-    button("刷新榜单", () => void loadLeaderboard(), "referral-quiet"),
-  );
+  heading.append(element("h2", "排行榜"), element("span", campaign?.leaderboardMetric === "sales_amount" ? "有效销售金额" : "实时成绩"));
   section.append(heading);
   const filters = element("div");
   filters.className = "referral-filters";
@@ -616,10 +643,10 @@ function leaderCard(): HTMLElement {
   boardSelect.dataset.testid = "referral-leaderboard-board";
   boardSelect.setAttribute("aria-label", "榜单类型");
   const boardOptions = campaign?.teamMode === "team"
-    ? (["team", "personal", "in_team"] as const)
+    ? (["personal", "team"] as const)
     : (["personal"] as const);
   for (const value of boardOptions) {
-    const label = value === "team" ? "战队榜" : value === "in_team" ? "队内榜" : "个人榜";
+    const label = value === "team" ? "战队榜" : "个人榜";
     const option = element("option", label);
     option.value = value;
     option.selected = board === value;
@@ -634,7 +661,7 @@ function leaderCard(): HTMLElement {
   periodSelect.setAttribute("aria-label", "榜单周期");
   for (const [value, label] of [
     ["total", "总榜"],
-    ["day", "日榜"],
+    ["day", "今日日榜"],
   ] as const) {
     const option = element("option", label);
     option.value = value;
@@ -645,18 +672,13 @@ function leaderCard(): HTMLElement {
     period = periodSelect.value as typeof period;
     void loadLeaderboard();
   });
-  filters.append(boardSelect, periodSelect);
-  if (period !== "total") {
-    const history = document.createElement("input");
-    history.type = "date";
-    history.value = historyDate;
-    history.setAttribute("aria-label", "历史日期");
-    history.addEventListener("change", () => {
-      historyDate = history.value;
-      void loadLeaderboard();
-    });
-    filters.append(history);
+  if (campaign?.teamMode === "team") filters.append(boardSelect);
+  else {
+    const label = element("span", "个人榜");
+    label.className = "referral-board-label";
+    filters.append(label);
   }
+  filters.append(periodSelect);
   section.append(filters);
   const list = element("ol");
   list.className = "referral-leaderboard";
@@ -669,13 +691,8 @@ function leaderCard(): HTMLElement {
       avatar(item.avatarURL, item.name),
     );
     const name = element("div");
-    name.append(
-      element("strong", item.name),
-      element(
-        "small",
-        item.teamName || (board === "team" ? "战队" : "未加入战队"),
-      ),
-    );
+    name.append(element("strong", item.name));
+    if (campaign?.teamMode === "team") name.append(element("small", item.teamName || (board === "team" ? "战队" : "未加入战队")));
     const value = campaign?.leaderboardMetric !== "invites"
       ? campaign?.leaderboardMetric === "sales_orders"
         ? `${item.salesOrderCount} 单`
@@ -684,7 +701,7 @@ function leaderCard(): HTMLElement {
     row.append(name, element("span", value));
     list.append(row);
   }
-  if (!leaderboard.length) list.append(empty("当前周期还没有可展示的排名。"));
+  if (!leaderboard.length) list.append(empty(leaderboardError || "当前周期还没有可展示的排名。"));
   section.append(list);
   if (myLeaderboard) {
     const mine = element("div");
@@ -708,11 +725,10 @@ function detailCard(): HTMLElement {
   title.append(element("h2", "邀请明细"), details);
   section.append(title);
   if (!me?.participant) {
-    section.append(
-      element("p", "确认参加活动后，可在这里查看你直接邀请的好友。"),
-    );
+    section.append(element("p", campaign?.qualificationMode === "product_purchase" ? "支付确认后可查看本活动中的有效好友。" : "确认参加活动后，可在这里查看你直接邀请的好友。"));
     return section;
   }
+  if (!invitationRows) section.append(element("p", campaign?.qualificationMode === "product_purchase" ? `当前有 ${me.invitations} 位有效好友，点击“查看明细”查看付款与退款状态。` : `当前有 ${me.invitations} 位有效好友，点击“查看明细”查看邀请状态。`));
   if (invitationRows) {
     const list = element("div");
     list.className = "referral-invitation-list";
@@ -749,11 +765,14 @@ function rulesCard(): HTMLElement {
   section.append(element("h2", "活动规则与奖励"));
   const reward = element("p", campaign?.reward || "奖励规则以活动公告为准。");
   const rules = element("ul");
-  for (const value of [
-    "仅可信微信登录后点击“确认参加”才算有效邀请。",
+  for (const value of (campaign?.qualificationMode === "product_purchase" ? [
+    "购买指定商品并完成支付确认后自动参加活动；支付待确认时不计成绩。",
+    "销售金额按已确认退款调整，日榜归入原订单的北京时间付款日期。",
+    "每位实际付款且仍有有效金额的被邀请人计一次有效邀请。",
+  ] : [
+    "可信微信登录后确认参加活动。",
     "每位好友在同一活动只计一次，重复参加不会换队或重复计分。",
-    "仅计算直接邀请；后续活动中的归属变更不会改变本活动成绩。",
-  ])
+  ]))
     rules.append(element("li", value));
   section.append(reward, rules);
   return section;
@@ -851,6 +870,17 @@ async function beginParticipation(): Promise<void> {
     setMessage(`当前${statusText(campaign.status)}，暂不能参加。`, true);
     return;
   }
+  if (campaign.qualificationMode === "product_purchase") {
+    if (!campaign.productURL) { setMessage("活动商品入口暂不可用。", true); return; }
+    try {
+      const target = new URL(campaign.productURL, location.origin);
+      if (target.origin !== location.origin || !/^\/(?:p|s)\/[^/]+$/.test(target.pathname) || target.search || target.hash) throw new Error("活动商品入口无效。");
+      await api(`/campaigns/${campaign.id}/product-context`, { method: "POST" }, `product-context:${campaign.id}`);
+      sessionStorage.setItem(`referral-checkout:${campaign.id}`, String(Date.now()));
+      location.assign(target.toString());
+    } catch (error) { setMessage(error instanceof Error ? error.message : "活动购买入口暂不可用。",true); }
+    return;
+  }
   if (campaign.teamMode === "individual") {
     await confirmJoin();
     return;
@@ -903,7 +933,6 @@ async function openInvite(): Promise<void> {
   if (!campaign || !me?.participant) return;
   try {
     let url = "";
-    let shareText = `邀请你参加 ${campaign.name}，一起组队冲榜！`;
     if (campaign.qualificationMode === "product_purchase") {
       const raw = obj(
         await api(
@@ -913,9 +942,8 @@ async function openInvite(): Promise<void> {
         ),
       );
       url = str(raw.url);
-      shareText = `邀请你购买活动指定商品，参加 ${campaign.name}！`;
       const parsed = new URL(url, location.origin);
-      if (parsed.origin !== location.origin || !/^\/d\/dpc_[A-Za-z0-9_-]{16,}$/.test(parsed.pathname) || parsed.search || parsed.hash)
+      if (parsed.origin !== location.origin || !new RegExp(`^/referral/activity/${campaign.id}/dpc_[A-Za-z0-9_-]{16,}$`).test(parsed.pathname) || !/^[a-f0-9]{64}$/.test(parsed.searchParams.get("sig") || "") || parsed.searchParams.size !== 1 || parsed.hash)
         throw new Error("活动绑定商品入口暂不可用。");
     } else {
       const raw = obj(
@@ -934,11 +962,7 @@ async function openInvite(): Promise<void> {
       !/^\/referral\/invite\/rfi_[A-Za-z0-9_-]{43}$/.test(parsed.pathname)
     ))
       throw new Error("服务端返回的邀请入口无效。");
-    invite = {
-      url: parsed.toString(),
-      qrPayload: parsed.toString(),
-      shareText,
-    };
+    invite = { qrPayload: parsed.toString() };
     renderInviteDialog();
   } catch (error) {
     setMessage(
@@ -955,69 +979,100 @@ async function copy(value: string): Promise<boolean> {
     return false;
   }
 }
-function posterURL(title: string, qrSVG: string): string {
-  const safe = esc(title).slice(0, 80);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="750" height="1120" viewBox="0 0 750 1120"><rect width="750" height="1120" fill="#e85d39"/><circle cx="680" cy="160" r="170" fill="#f6be55" opacity=".72"/><text x="64" y="120" fill="white" font-size="34" font-family="PingFang SC, sans-serif">一起组队冲榜</text><text x="64" y="240" fill="white" font-size="62" font-weight="700" font-family="Songti SC, serif">${safe}</text><rect x="190" y="402" width="370" height="370" rx="22" fill="white"/>${qrSVG ? `<g transform="translate(230 442) scale(.72)">${qrSVG}</g>` : ""}<text x="64" y="950" fill="white" font-size="30" font-family="PingFang SC, sans-serif">扫码参与活动</text></svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+async function composePoster(imageURL: string, payload: string): Promise<HTMLCanvasElement> {
+  const source = new Image();
+  source.decoding = "async";
+  source.src = imageURL;
+  await source.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = source.naturalWidth;
+  canvas.height = source.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx || canvas.width < 600 || canvas.height < 800) throw new Error("海报图片不可用。");
+  ctx.drawImage(source, 0, 0);
+  // All poster artwork reserves the lower-right square for this QR. It is
+  // composed at preview/download time from the current trusted invite URL.
+  const qr = qrcode(0, "M");
+  qr.addData(payload, "Byte");
+  qr.make();
+  const size = Math.round(Math.min(canvas.width * 0.25, canvas.height * 0.19));
+  const x = canvas.width - size - Math.round(canvas.width * 0.06);
+  const y = canvas.height - size - Math.round(canvas.height * 0.06);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(x, y, size, size);
+  const quiet = Math.max(4, Math.floor(size * 0.06));
+  const cell = (size - quiet * 2) / qr.getModuleCount();
+  ctx.fillStyle = "#1b1b1b";
+  for (let row = 0; row < qr.getModuleCount(); row++) {
+    for (let col = 0; col < qr.getModuleCount(); col++) {
+      if (qr.isDark(row, col)) ctx.fillRect(x + quiet + col * cell, y + quiet + row * cell, Math.ceil(cell), Math.ceil(cell));
+    }
+  }
+  return canvas;
 }
 async function renderInviteDialog(): Promise<void> {
   if (!invite || !campaign) return;
-  const paidActivity = campaign.qualificationMode === "product_purchase";
   const dialog = document.createElement("dialog");
-  dialog.className = "referral-dialog";
+  dialog.className = "referral-dialog referral-poster-dialog";
   dialog.dataset.testid = "referral-invite-dialog";
   const card = element("section");
   card.append(element("h2", "邀请好友"));
-  const qr = element("div");
-  qr.className = "referral-qr";
-  const { renderQr } = await import("../src/admin/sections/qr");
-  renderQr(qr, invite.qrPayload, paidActivity ? "活动商品入口" : "活动邀请入口");
-  const input = document.createElement("input");
-  input.readOnly = true;
-  input.value = invite.url;
-  input.dataset.testid = "referral-invite-url";
-  card.append(qr, input, element("p", invite.shareText));
-  const poster = element("div");
-  poster.className = "referral-poster";
-  poster.append(
-    element("span", "一起组队冲榜"),
-    element("strong", campaign.name),
-    element("small", "扫码参与活动"),
-  );
-  const copyLink = button(
-    paidActivity ? "复制商品链接" : "复制邀请链接",
-    async () => {
-      if (await copy(invite!.url)) {
-        setMessage(paidActivity ? "商品链接已复制。" : "邀请链接已复制。");
-        dialog.close();
-      } else {
-        input.focus();
-        input.select();
-        setMessage(paidActivity ? "请手动复制商品链接。" : "请手动复制邀请链接。", true);
-      }
-    },
-    "referral-primary",
-  );
-  copyLink.dataset.testid = "referral-copy-invite";
-  const posterLink = element("a", "下载固定海报");
-  posterLink.className = "referral-quiet";
-  posterLink.href = posterURL(campaign.name, qr.innerHTML);
-  posterLink.download = `${campaign.name.slice(0, 48)}-邀请海报.svg`;
-  posterLink.dataset.testid = "referral-download-poster";
-  card.append(
-    poster,
-    copyLink,
-    button("复制分享文案", async () => {
-      if (await copy(invite!.shareText)) setMessage("分享文案已复制。");
-      else setMessage("请手动复制分享文案。", true);
-    }),
-    posterLink,
-    button("关闭", () => dialog.close(), "referral-quiet"),
-  );
+  const selectors = element("div");
+  selectors.className = "referral-poster-selectors";
+  const preview = element("div");
+  preview.className = "referral-poster-preview";
+  const description = element("p");
+  const download = button("下载海报", () => {}, "referral-primary");
+  download.dataset.testid = "referral-download-poster";
+  download.disabled = true;
+  const posters = campaign.posters.slice(0, 3);
+  let selectedCanvas: HTMLCanvasElement | undefined;
+  let selection = 0;
+  const show = async (index: number) => {
+    const poster = posters[index];
+    selection++;
+    const current = selection;
+    selectedCanvas = undefined;
+    download.disabled = true;
+    preview.replaceChildren(element("p", "正在生成专属海报…"));
+    description.textContent = poster?.description || "扫码购买活动商品";
+    selectors.querySelectorAll("button").forEach((node, buttonIndex) => node.setAttribute("aria-pressed", String(buttonIndex === index)));
+    if (!poster) { preview.replaceChildren(element("p", "管理员尚未发布邀请海报。")); return; }
+    try {
+      const canvas = await composePoster(poster.imageURL, invite!.qrPayload);
+      if (current !== selection || !dialog.open) return;
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label", `海报${index + 1}，包含我的专属邀请二维码`);
+      preview.replaceChildren(canvas);
+      selectedCanvas = canvas;
+      download.disabled = false;
+    } catch {
+      if (current === selection) preview.replaceChildren(element("p", "海报加载失败，请稍后重试。"));
+    }
+  };
+  posters.forEach((poster,index) => {
+    const choice = button(`海报${["一", "二", "三"][index]}`, () => void show(index), "referral-poster-choice");
+    choice.setAttribute("aria-pressed", String(index === 0));
+    selectors.append(choice);
+  });
+  download.onclick = () => {
+    if (!selectedCanvas || !campaign) return;
+    selectedCanvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${campaign!.name.slice(0, 48)}-海报${["一", "二", "三"][Math.max(0, Array.from(selectors.children).findIndex((item) => item.getAttribute("aria-pressed") === "true"))]}.png`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, "image/png");
+  };
+  card.append(selectors, preview, description, download, button("关闭", () => dialog.close(), "referral-quiet"));
   dialog.append(card);
   dialog.addEventListener("close", () => dialog.remove());
   document.body.append(dialog);
   dialog.showModal();
+  void show(0);
 }
 async function openInvitations(append = false): Promise<void> {
   if (!campaign) return;
@@ -1026,7 +1081,7 @@ async function openInvitations(append = false): Promise<void> {
     invitationRows = [];
     invitationCursor = "";
     render();
-    setMessage("确认参加活动后，可查看你直接邀请的好友。");
+    setMessage(campaign.qualificationMode === "product_purchase" ? "支付确认后，可查看本活动中的有效好友。" : "确认参加活动后，可查看你直接邀请的好友。");
     return;
   }
   try {
@@ -1059,20 +1114,8 @@ async function openInvitations(append = false): Promise<void> {
 async function loadLeaderboard(): Promise<void> {
   if (!campaign) return;
   const params = new URLSearchParams({ kind: board, period, limit: "30" });
-  if (board === "in_team") {
-    if (!me?.participant?.teamID) {
-      leaderboard = [];
-      myLeaderboard = undefined;
-      render();
-      setMessage("加入战队后才能查看队内榜。", true);
-      return;
-    }
-    params.set("team_id", String(me.participant.teamID));
-  }
   if (period !== "total") {
-    const anchor = leaderboardDate();
-    historyDate = anchor;
-    params.set("date", anchor);
+    params.set("date", beijingDate());
   }
   try {
     const raw = obj(
@@ -1080,8 +1123,13 @@ async function loadLeaderboard(): Promise<void> {
     );
     leaderboard = parseLeaders(raw);
     myLeaderboard = raw.my_entry ? parseLeader(raw.my_entry) : undefined;
+    leaderboardError = "";
     render();
   } catch (error) {
+    leaderboard = [];
+    myLeaderboard = undefined;
+    leaderboardError = error instanceof Error ? error.message : "排行榜读取失败。";
+    render();
     setMessage(
       error instanceof Error ? error.message : "排行榜读取失败。",
       true,
@@ -1120,9 +1168,7 @@ async function reload(): Promise<void> {
     if (version !== loadVersion) return;
     campaign = parseCampaign(response[0]);
     me = parseMe(response[1]);
-    if (campaign.qualificationMode === "product_purchase" && me.participant) {
-      try { await api(`/campaigns/${campaign.id}/product-context`, { method: "POST" }, `product-context:${campaign.id}`); } catch { /* checkout remains ordinary until context is ready */ }
-    }
+    if (me.participant) sessionStorage.removeItem(`referral-checkout:${campaign.id}`);
     if (response[2]) {
       const preview = obj(response[2]);
       invitationPreview = {
@@ -1152,3 +1198,16 @@ async function reload(): Promise<void> {
   }
 }
 void reload();
+setInterval(() => {
+  if (!campaign) return;
+  const timer = document.querySelector<HTMLElement>(".referral-bottom-bar strong");
+  if (timer) timer.textContent = remaining(campaign);
+  if (campaign.qualificationMode === "product_purchase" && !me?.participant && !checkoutPending(campaign.id)) {
+    const cta = document.querySelector<HTMLButtonElement>(".referral-bottom-bar .referral-invite-fab");
+    if (cta && cta.textContent === "资格确认中") { cta.textContent = "购买并参与"; cta.disabled = false; }
+  }
+  if (new Date(campaign.endAt).getTime() <= Date.now()) {
+    const cta = document.querySelector<HTMLButtonElement>(".referral-bottom-bar .referral-invite-fab");
+    if (cta) cta.disabled = true;
+  }
+}, 1000);

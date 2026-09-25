@@ -15,14 +15,17 @@ func TestMountReferralSeparatesPublicAndAdminPrefixes(t *testing.T) {
 
 	for path, expected := range map[string]int{
 		"/referral/invite/rfi_" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": http.StatusNoContent,
-		"/api/v1/referral/campaigns":             http.StatusNoContent,
-		"/api/admin/referral/campaigns":          http.StatusAccepted,
-		"/referral":                              http.StatusTeapot,
-		"/api/v1/referrals":                      http.StatusTeapot,
-		"/r/rd_remaining_pages123":               http.StatusTeapot,
-		"/r/not-a-referral-token":                http.StatusTeapot,
-		"/referral/invite/rfi_not-a-valid-token": http.StatusNoContent,
-		"/r/rfi_not-a-valid-token":               http.StatusTeapot,
+		"/referral/activity/7/dpc_ABCDEFGHIJKLMNOPQRSTUV":                       http.StatusNoContent,
+		"/api/v1/referral/campaigns/7/posters/1":                                http.StatusNoContent,
+		"/api/admin/referral/campaigns/7/posters":                               http.StatusAccepted,
+		"/api/v1/referral/campaigns":                                            http.StatusNoContent,
+		"/api/admin/referral/campaigns":                                         http.StatusAccepted,
+		"/referral":                                                             http.StatusTeapot,
+		"/api/v1/referrals":                                                     http.StatusTeapot,
+		"/r/rd_remaining_pages123":                                              http.StatusTeapot,
+		"/r/not-a-referral-token":                                               http.StatusTeapot,
+		"/referral/invite/rfi_not-a-valid-token":                                http.StatusNoContent,
+		"/r/rfi_not-a-valid-token":                                              http.StatusTeapot,
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
@@ -47,6 +50,7 @@ func TestMountSecuredReferralAddsHostSecurityHeaders(t *testing.T) {
 
 	for _, path := range []string{
 		"/referral/invite/rfi_" + strings.Repeat("A", 43),
+		"/referral/activity/7/dpc_ABCDEFGHIJKLMNOPQRSTUV",
 		"/api/v1/referral/campaigns",
 		"/api/admin/referral/campaigns",
 	} {

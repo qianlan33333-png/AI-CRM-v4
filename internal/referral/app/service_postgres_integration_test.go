@@ -1033,7 +1033,7 @@ func referralPostgreSQLPool(t *testing.T) (*pgxpool.Pool, func()) {
 		t.Fatal("locate referral migrations")
 	}
 	root := filepath.Join(filepath.Dir(file), "..", "..", "..")
-	for _, name := range []string{"0001_platform.sql", "0185_referral_core.sql", "0198_referral_activity_config.sql", "0199_referral_individual_invitation.sql"} {
+	for _, name := range []string{"0001_platform.sql", "0185_referral_core.sql", "0198_referral_activity_config.sql", "0199_referral_individual_invitation.sql", "0208_referral_campaign_posters.sql"} {
 		body, readErr := os.ReadFile(filepath.Join(root, "migrations", name))
 		if readErr != nil {
 			pool.Close()

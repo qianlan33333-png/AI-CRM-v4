@@ -54,6 +54,8 @@ const dom = new JSDOM('<!doctype html><main id="referral-root"></main>', {
   },
 });
 dom.window.eval(bundle);
+await waitFor(() => dom.window.document.querySelector('[data-testid="referral-activity-info"]'), 'activity info entry missing');
+dom.window.document.querySelector('[data-testid="referral-activity-info"]').click();
 await waitFor(
   () => dom.window.document.querySelector('[data-testid="referral-join-captain-team"]'),
   'unjoined trusted captain must be directed to their assigned team',
@@ -76,6 +78,7 @@ assert.match(
   /确认参加活动后，可在这里查看你直接邀请的好友/,
   'unjoined member sees an invitation-detail empty state',
 );
+dom.window.document.querySelector('[data-testid="referral-activity-info"]').click();
 const cta = dom.window.document.querySelector('[data-testid="referral-invite"]');
 assert.equal(cta?.textContent, '加入战队并邀请');
 assert.equal(cta?.disabled, false, 'active assigned captain must have an explicit join CTA');

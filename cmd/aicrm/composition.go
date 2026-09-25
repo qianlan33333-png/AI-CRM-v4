@@ -1668,6 +1668,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	var referralAdmin http.Handler = referralUnavailableHandler{}
 	var referralService *referralapp.Service
 	var referralAdminService *referralapp.AdminService
+	var referralPosters *referralapp.PosterService
 	var referralHandler *referralhttp.Handler
 	var referralErr error
 	var referralPaidConsumer orderport.PaidEventConsumer
@@ -1688,6 +1689,10 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 			return fail(err)
 		}
 		referralAdminService, err = referralapp.NewAdminService(uow, referralRepository, referralCanonicalCustomerVerifier{resolver: canonicalCustomerAdapter{reader: queries}, identities: queries}, referralCampaignCloseEnqueuer, auditService, platformoutbox.NewPostgreSQL())
+		if err != nil {
+			return fail(err)
+		}
+		referralPosters, err = referralapp.NewPosterService(uow, referralRepository, referralPosterMediaReader{media: mediaService}, auditService, platformoutbox.NewPostgreSQL())
 		if err != nil {
 			return fail(err)
 		}
@@ -1714,20 +1719,22 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		}
 		if referralService != nil && referralAdminService != nil {
 			referralHandler, referralErr = referralhttp.NewHandler(referralhttp.Config{
-				ProductOptions:    productCatalog,
-				ProductTargets:    productTargets,
-				Public:            referralService,
-				Admin:             referralAdminService,
-				Sessions:          trustedBrowserSessions,
-				Bridge:            trustedPaymentSessionBridge,
-				Names:             orderCustomerDisplayNameAdapter{uow: uow, reader: customerStore},
-				Profiles:          referralCustomerProfileAdapter{uow: uow, reader: customerStore},
-				Security:          requestSecurity,
-				CookieSecure:      true,
-				AllowedOrigins:    []string{cfg.PublicOrigin, h5PublicOrigin(cfg)},
-				SessionCookieName: distributionhttp.DistributionSessionCookieName,
-				CSRFCookieName:    distributionhttp.DistributionCSRFCookieName,
-				CSRFHeader:        distributionhttp.DistributionCSRFHeader,
+				ProductOptions:     productCatalog,
+				ProductTargets:     productTargets,
+				Public:             referralService,
+				Admin:              referralAdminService,
+				Posters:            referralPosters,
+				ActivityHandoffKey: cfg.Referral.TokenDataKey,
+				Sessions:           trustedBrowserSessions,
+				Bridge:             trustedPaymentSessionBridge,
+				Names:              orderCustomerDisplayNameAdapter{uow: uow, reader: customerStore},
+				Profiles:           referralCustomerProfileAdapter{uow: uow, reader: customerStore},
+				Security:           requestSecurity,
+				CookieSecure:       true,
+				AllowedOrigins:     []string{cfg.PublicOrigin, h5PublicOrigin(cfg)},
+				SessionCookieName:  distributionhttp.DistributionSessionCookieName,
+				CSRFCookieName:     distributionhttp.DistributionCSRFCookieName,
+				CSRFHeader:         distributionhttp.DistributionCSRFHeader,
 			})
 			if referralErr != nil {
 				return fail(referralErr)
