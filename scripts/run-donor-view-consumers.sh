@@ -150,6 +150,9 @@ build_frontend() {
 
 stage_frontend() {
     mkdir -p release
+    # Earlier build steps can materialize this directory. The staging script
+    # requires a fresh destination and creates it from the verified manifest.
+    rm -rf -- release/web/dist
     node scripts/stage-pr01-effects-ui.mjs web/dist release/web/dist
     node scripts/test-stage-pr01-effects-ui.mjs
     node scripts/test-groupops-history-release.mjs web/dist release/web/dist
