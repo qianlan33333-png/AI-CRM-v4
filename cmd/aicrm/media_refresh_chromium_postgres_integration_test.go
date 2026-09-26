@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +13,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,8 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	accesshttp "github.com/qianlan33333-png/AI-CRM-v3/internal/access/http"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 )
@@ -148,11 +144,11 @@ func delayedMediaRefreshThumbnailReads(next http.Handler, delay time.Duration) h
 	})
 }
 
-// The release artifact is prepared by the browser build stage.  This fixture
-// deliberately reads it in place: rebuilding or replacing web/dist would race
-// the other Chromium journeys and would test a different release closure.
+// Restore a private writable copy of the attempt-bound staged release artifact.
+// Browser journeys execute serially inside their own checkout.
 func prepareMediaRefreshChromiumArtifacts(t *testing.T, repository string) {
 	t.Helper()
+	prepareProductExternalPushChromiumArtifacts(t, repository)
 	manifest, err := os.ReadFile(filepath.Join(repository, "web", "dist", "asset-manifest.json"))
 	if err != nil || !bytes.Contains(manifest, []byte(`"materialSaveHost"`)) || !bytes.Contains(manifest, []byte(`"operationCyclesHost"`)) {
 		t.Fatalf("Media refresh Chromium requires the staged release Host artifact: %v", err)
@@ -161,60 +157,7 @@ func prepareMediaRefreshChromiumArtifacts(t *testing.T, repository string) {
 
 func mediaRefreshBrowserDatabase(t *testing.T, ctx context.Context) (string, func()) {
 	t.Helper()
-	raw, err := platformconfig.DatabaseURL()
-	if err != nil {
-		t.Fatal("AICRM_DATABASE_URL is required for the browser PostgreSQL journey")
-	}
-	adminConfig, err := pgxpool.ParseConfig(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	admin, err := pgxpool.NewWithConfig(ctx, adminConfig)
-	if err != nil {
-		t.Fatalf("browser PostgreSQL database unavailable: %v", err)
-	}
-	var random [8]byte
-	if _, err = rand.Read(random[:]); err != nil {
-		admin.Close()
-		t.Fatal(err)
-	}
-	schema := "media_refresh_chromium_" + hex.EncodeToString(random[:])
-	identifier := pgx.Identifier{schema}.Sanitize()
-	if _, err = admin.Exec(ctx, "CREATE SCHEMA "+identifier); err != nil {
-		admin.Close()
-		t.Fatal(err)
-	}
-	config := adminConfig.Copy()
-	config.ConnConfig.RuntimeParams["search_path"] = schema
-	pool, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		_, _ = admin.Exec(ctx, "DROP SCHEMA "+identifier+" CASCADE")
-		admin.Close()
-		t.Fatalf("dedicated browser database unavailable: %v", err)
-	}
-	if err = adminAccessMigrateCompositionSchema(ctx, pool); err != nil {
-		pool.Close()
-		_, _ = admin.Exec(ctx, "DROP SCHEMA "+identifier+" CASCADE")
-		admin.Close()
-		t.Fatal(err)
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		pool.Close()
-		_, _ = admin.Exec(ctx, "DROP SCHEMA "+identifier+" CASCADE")
-		admin.Close()
-		t.Fatal(err)
-	}
-	query := parsed.Query()
-	query.Set("search_path", schema)
-	parsed.RawQuery = query.Encode()
-	return parsed.String(), func() {
-		pool.Close()
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = admin.Exec(cleanup, "DROP SCHEMA "+identifier+" CASCADE")
-		admin.Close()
-	}
+	return adminAccessCompositionDatabase(t, ctx)
 }
 
 func mediaRefreshSeedStrategy(t *testing.T, application *composedApplication) error {
@@ -284,19 +227,25 @@ func mediaRefreshSeedHistoricalMissingSource(t *testing.T, application *composed
 	if err = json.NewDecoder(response.Body).Decode(&payload); err != nil || payload.Item.ID < 1 {
 		t.Fatalf("decode seed historical Media source id=%d err=%v", payload.Item.ID, err)
 	}
-	conn, err := application.pool.Native().Acquire(context.Background())
+	// The synthetic database is owned by this fixture. Restore the original
+	// foreign key in the same transaction without validating the deliberately
+	// broken historical row. New writes still enforce it; no global replication
+	// setting or privileged role is necessary to exercise historical corruption.
+	tx, err := application.pool.Native().Begin(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Release()
-	if _, err = conn.Exec(context.Background(), `SET session_replication_role = replica`); err != nil {
+	defer tx.Rollback(context.Background())
+	if _, err = tx.Exec(context.Background(), `ALTER TABLE media_images DROP CONSTRAINT media_images_blob_digest_fkey`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = conn.Exec(context.Background(), `UPDATE media_images SET blob_digest=$1 WHERE id=$2`, "sha256:"+strings.Repeat("0", 64), payload.Item.ID); err != nil {
-		_, _ = conn.Exec(context.Background(), `SET session_replication_role = origin`)
+	if _, err = tx.Exec(context.Background(), `UPDATE media_images SET blob_digest=$1 WHERE id=$2`, "sha256:"+strings.Repeat("0", 64), payload.Item.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = conn.Exec(context.Background(), `SET session_replication_role = origin`); err != nil {
+	if _, err = tx.Exec(context.Background(), `ALTER TABLE media_images ADD CONSTRAINT media_images_blob_digest_fkey FOREIGN KEY(blob_digest) REFERENCES media_blobs(digest) NOT VALID`); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	return "image:" + strconv.FormatInt(payload.Item.ID, 10)
@@ -412,4 +361,36 @@ func (f *mediaRefreshExcelComponent) Close(t *testing.T) {
 		_ = f.command.Process.Kill()
 	}
 	_ = f.command.Wait()
+}
+
+func TestMediaHistoricalMissingSourceKeepsNewWriteConstraint(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	database, cleanup := adminAccessCompositionDatabase(t, ctx)
+	defer cleanup()
+	application, err := compose(ctx, platformconfig.Runtime{Role: platformconfig.RoleAPI,
+		DatabaseURL: database, PublicOrigin: "https://media-fixture.test", ReleaseSHA: "media-fixture-contract",
+		WorkerOwner: "media-fixture", WorkerLimit: 1,
+		GroupOps: platformconfig.GroupOps{WebhookSecret: "media-fixture-webhook"},
+		Survey:   platformconfig.Survey{DataKey: base64.RawStdEncoding.EncodeToString(make([]byte, 32)), IdentityPhoneDataKey: base64.RawStdEncoding.EncodeToString(make([]byte, 32))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer application.Close()
+	if err = application.bootstrap(ctx, platformconfig.Bootstrap{Enabled: true, Username: "media-browser", Password: "media-browser-password", DisplayName: "Media Browser"}); err != nil {
+		t.Fatal(err)
+	}
+	reference := mediaRefreshSeedHistoricalMissingSource(t, application)
+	id := strings.TrimPrefix(reference, "image:")
+	var valid bool
+	if err = application.pool.Native().QueryRow(ctx, "SELECT convalidated FROM pg_constraint WHERE conrelid='media_images'::regclass AND conname='media_images_blob_digest_fkey'").Scan(&valid); err != nil || valid {
+		t.Fatalf("historical fixture constraint=%v err=%v", valid, err)
+	}
+	if _, err = application.pool.Native().Exec(ctx, "UPDATE media_images SET blob_digest=$1 WHERE id=$2", "sha256:"+strings.Repeat("1", 64), id); err == nil {
+		t.Fatal("historical corrupt fixture must continue enforcing foreign key on new writes")
+	}
+	var exists bool
+	if err = application.pool.Native().QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM media_images i LEFT JOIN media_blobs b ON b.digest=i.blob_digest WHERE i.id=$1 AND b.digest IS NULL)", id).Scan(&exists); err != nil || !exists {
+		t.Fatalf("historical missing source changed: %v", err)
+	}
 }

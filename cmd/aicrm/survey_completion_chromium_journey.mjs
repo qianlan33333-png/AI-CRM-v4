@@ -1,7 +1,8 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 const base = process.env.AICRM_SURVEY_BROWSER_URL;
 const username = process.env.AICRM_SURVEY_BROWSER_USERNAME;
@@ -11,11 +12,7 @@ const webhook = process.env.AICRM_SURVEY_BROWSER_WEBHOOK;
 if (!/^https:\/\//.test(base || '') || !username || !password || !/^[1-9][0-9]*$/.test(questionnaireID || '') || !/^https:\/\//.test(webhook || '')) throw new Error('survey Chromium journey configuration is invalid');
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const chrome = () => {
-  const candidates = process.platform === 'darwin' ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'google-chrome', 'chromium'] : ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
-  for (const candidate of candidates) if ((candidate.includes('/') ? spawnSync(candidate, ['--version'], { stdio: 'ignore' }).status : spawnSync('which', [candidate], { stdio: 'ignore' }).status) === 0) return candidate;
-  throw new Error('Chromium binary is unavailable');
-};
+const chrome = resolveChromiumBinary;
 class CDP {
   constructor(socket) { this.socket = socket; this.id = 0; this.saveRequests = 0; this.pending = new Map(); socket.addEventListener('message', (event) => { const message = JSON.parse(String(event.data)); if(message.method==='Network.requestWillBeSent' && message.params?.request?.method==='PUT' && message.params.request.url.endsWith('/external-push')) this.saveRequests++; const pending = this.pending.get(message.id); if (!pending) return; this.pending.delete(message.id); message.error ? pending.reject(new Error('CDP request failed')) : pending.resolve(message.result || {}); }); }
   call(method, params = {}) { return new Promise((resolve, reject) => { const id = ++this.id; this.pending.set(id, { resolve, reject }); this.socket.send(JSON.stringify({ id, method, params })); }); }

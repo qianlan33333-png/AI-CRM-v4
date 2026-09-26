@@ -1,8 +1,9 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 const base = process.env.AICRM_DISTRIBUTION_POLICY_BROWSER_URL;
@@ -13,7 +14,7 @@ const serviceProductID = process.env.AICRM_DISTRIBUTION_POLICY_BROWSER_SERVICE_P
 const screenshotDir = process.env.AICRM_DISTRIBUTION_POLICY_BROWSER_SCREENSHOT_DIR;
 if (!/^https:\/\//.test(base || "") || !username || !password || !/^[1-9][0-9]*$/.test(productID || "") || !/^[1-9][0-9]*$/.test(serviceProductID || "")) throw new Error("Distribution policy Chromium journey environment is incomplete");
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-function browser() { for (const item of [process.env.AICRM_CHROMIUM_BINARY, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "google-chrome", "chromium"].filter(Boolean)) if ((item.includes("/") ? spawnSync(item,["--version"],{stdio:"ignore"}) : spawnSync("which",[item],{stdio:"ignore"})).status === 0) return item; throw new Error("Chromium is unavailable"); }
+const browser = resolveChromiumBinary;
 class CDP { constructor(socket) { this.socket=socket; this.id=0; this.pending=new Map(); this.requests=[]; socket.addEventListener("message", event => { const m=JSON.parse(String(event.data)); if(m.method === "Network.requestWillBeSent") this.requests.push(m.params.request); const p=this.pending.get(m.id); if (!p) return; this.pending.delete(m.id); m.error?p.reject(new Error(`CDP ${m.error.code}`)):p.resolve(m.result||{}); }); } call(method,params={}) { return new Promise((resolve,reject)=>{const id=++this.id,timer=setTimeout(()=>{this.pending.delete(id);reject(new Error(`CDP ${method} timed out`));},8000);this.pending.set(id,{resolve:v=>{clearTimeout(timer);resolve(v)},reject});this.socket.send(JSON.stringify({id,method,params}));}); } }
 async function endpoint(profile) { for(let i=0;i<160;i++){try { const port=(await fs.readFile(path.join(profile,"DevToolsActivePort"),"utf8")).split("\n")[0]; if(/^\d+$/.test(port))return `http://127.0.0.1:${port}`; }catch{} await sleep(50);} throw new Error("Chromium DevTools did not start"); }
 async function value(cdp,expression) { const result=await cdp.call("Runtime.evaluate",{expression,returnByValue:true,awaitPromise:true}); if(result.exceptionDetails)throw new Error(`page evaluation failed: ${result.exceptionDetails.exception?.description || result.exceptionDetails.text || 'unknown error'}`); return result.result?.value; }

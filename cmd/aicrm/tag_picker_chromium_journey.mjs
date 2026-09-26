@@ -1,7 +1,8 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { chromiumStartupDiagnostic, chromiumStartupTimeoutMS } from '../../internal/webshell/chromium_launch.mjs';
 
 const baseURL = process.env.AICRM_TAG_PICKER_TEST_URL;
@@ -15,15 +16,7 @@ const screenshotDir = process.env.AICRM_TAG_PICKER_SCREENSHOT_DIR;
 if (!/^https:\/\//.test(baseURL || '') || !username || !password || !/^[1-9]\d*$/.test(productID || '') || !/^[1-9]\d*$/.test(channelID || '') || !/^[1-9]\d*$/.test(tagID || '') || !/^[1-9]\d*$/.test(channelStaffID || '')) throw new Error('tag picker Chromium journey requires URL, credentials and fixture IDs');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-function browserBinary() {
-  const candidates = [process.env.AICRM_CHROMIUM_BINARY, process.env.CHROME_BIN, process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : '', 'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'].filter(Boolean);
-  for (const candidate of candidates) {
-    try {
-      if (candidate.includes('/') ? spawnSync(candidate, ['--version'], { stdio: 'ignore' }).status === 0 : spawnSync('which', [candidate], { stdio: 'ignore' }).status === 0) return candidate;
-    } catch {}
-  }
-  throw new Error('Chromium binary is unavailable');
-}
+const browserBinary = resolveChromiumBinary;
 class CDP {
   constructor(socket) {
     this.socket = socket; this.nextID = 0; this.pending = new Map();

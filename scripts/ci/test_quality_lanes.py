@@ -63,10 +63,38 @@ class QualityLaneTests(unittest.TestCase):
     def test_focused_browser_runs_only_the_registered_journey(self):
         check = {"lane": "browser", "path": "cmd/aicrm/media_refresh_chromium_postgres_integration_test.go",
                  "test": "TestPostgreSQLMediaRefreshChromiumJourney"}
-        command = quality_lanes.focused_commands("browser", Path("/tmp/evidence"), [check])[0]
+        commands = quality_lanes.focused_commands("browser", Path("/tmp/evidence"), [check])
+        self.assertEqual(commands[:-1], quality_lanes.commands("browser", Path("/tmp/evidence"))[:-1])
+        command = commands[-1]
         self.assertIn("--journey", command)
         self.assertIn(check["test"], command)
         self.assertNotIn("--group", command)
+
+    def test_continuation_reuses_checks_but_recreates_setup(self):
+        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
+            report = Path(temp)
+            validation = ["node", "scripts/validate-openapi.mjs"]
+            setup = [sys.executable, "-m", "venv", str(report / ".venv")]
+            execution = {"commands": [], "resume_commands": [quality_lanes.normalized_command(c, report)
+                          for c in [validation, setup]]}
+            with patch.object(quality_lanes.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+                quality_lanes.run_recorded(validation, None, "frontend", report, execution)
+                quality_lanes.run_recorded(setup, None, "frontend", report, execution)
+                self.assertEqual(run.call_count, 1)
+                self.assertEqual(run.call_args.args[0], setup)
+            self.assertTrue(execution["command_results"][0]["reused"])
+            self.assertNotIn("reused", execution["command_results"][1])
+
+    def test_failed_browser_keeps_test_log_for_environment_diagnosis(self):
+        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
+            report = Path(temp)
+            (report / "browser-execution.log").write_text('{"Action":"fail","Test":"TestFailedChromiumJourney"}\n')
+            execution = {"commands": []}
+            with patch.object(quality_lanes.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    quality_lanes.run_recorded([sys.executable, "scripts/dev_preflight.py", "browser"], None,
+                                               "browser", report, execution)
+            self.assertEqual(execution["go_json_log"], "browser-execution.log")
 
     def test_focused_frontend_runs_only_registered_scripts(self):
         checks = [
@@ -109,9 +137,10 @@ class QualityLaneTests(unittest.TestCase):
         with patch.object(quality_lanes, "command_available", side_effect=available), patch.object(
                 quality_lanes, "exact_version", return_value=True), patch.object(
                 quality_lanes, "postgres_16_ready", return_value=True), patch.object(
-                quality_lanes, "chromium_font_ready", return_value=True):
-            self.assertIn("google-chrome", quality_lanes.missing_prerequisites("browser"))
-            self.assertNotIn("google-chrome", quality_lanes.missing_prerequisites("frontend"))
+                quality_lanes, "chromium_font_ready", return_value=True), patch.object(
+                quality_lanes, "chromium_ready", return_value=False):
+            self.assertIn("Chromium executable (existing resolver)", quality_lanes.missing_prerequisites("browser"))
+            self.assertNotIn("Chromium executable (existing resolver)", quality_lanes.missing_prerequisites("frontend"))
 
     def test_postgres_check_does_not_print_database_url(self):
         with patch.dict(os.environ, {"AICRM_DATABASE_URL": "postgres://secret@127.0.0.1/aicrm_test_secret"}), patch.object(

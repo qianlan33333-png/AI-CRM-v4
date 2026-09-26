@@ -11,6 +11,7 @@ This controller deliberately has no GitHub API or GitHub push path.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
@@ -28,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
 from typing import Any, Iterator
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -68,6 +70,12 @@ BUILD_TOOLCHAIN = ("go", "node", "npm", "git", "bash")
 
 class ReleaseError(RuntimeError):
     pass
+
+
+class CheckEnvironmentError(ReleaseError):
+    """Checks cannot evaluate the candidate because the test environment is unavailable."""
+
+    checkpoint: str | None = None
 
 
 class ControllerMaintenanceRequired(ReleaseError):
@@ -839,12 +847,14 @@ def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base
         if same is not None:
             previous = same["head_sha"]
             if previous == head_sha and same["base_sha"] == base_sha:
-                if same["status"] in {"pending", "stale_base"}:
+                environment_retry = same.get("failure", {}).get("kind") == "environment"
+                if same["status"] in {"pending", "stale_base"} and not environment_retry:
                     return {"status": same["status"], "candidate_id": same["candidate_id"], "head_sha": head_sha,
                             "base_sha": base_sha, "queue_position": entries.index(same) + 1}
                 # Keep attempts monotonic so every retry gets a fresh evidence directory.
                 same.update({"status": "pending", "submitted_at_utc": _utc_now()})
-                same.pop("failure", None)
+                if not environment_retry:
+                    same.pop("failure", None)
                 state["in_flight"] = None
                 state["status"] = "ready"
                 state["updated_at_utc"] = _utc_now()
@@ -992,6 +1002,13 @@ def _check_env(config: dict[str, Any], safe_repository: Path | None = None, *,
         "GIT_CONFIG_KEY_0": "safe.directory",
         "GIT_CONFIG_VALUE_0": str(safe_repository.resolve(strict=True)) if safe_repository else "",
     }
+    verified_profile = config.get("verified_commerce_policy_fingerprint")
+    if verified_profile is not None:
+        if not isinstance(verified_profile, str) or not FILE_SHA.fullmatch(verified_profile):
+            raise ReleaseError("verified commerce policy fingerprint is invalid")
+        environment["AICRM_VERIFIED_COMMERCE_POLICY"] = verified_profile
+    if config.get("_check_preparation_dir"):
+        environment["AICRM_TEST_PREP_DIR"] = str(config["_check_preparation_dir"])
     if (base_sha is None) != (head_sha is None):
         raise ReleaseError("check environment requires both exact base and head SHAs")
     if base_sha is not None:
@@ -1035,7 +1052,7 @@ print(json.dumps(result, sort_keys=True, separators=(",", ":")))
 '''
     result = _build_command(config, ["/usr/bin/python3", "-c", code], cwd=Path("/"), timeout=120, check=False)
     if result.returncode != 0:
-        raise ReleaseError("required build tools are unavailable or not protected for the isolated build account")
+        raise CheckEnvironmentError("required build tools are unavailable or not protected for the isolated build account")
     try:
         payload = json.loads(result.stdout.splitlines()[-1])
     except (IndexError, json.JSONDecodeError) as exc:
@@ -1153,7 +1170,11 @@ def _trusted_preflight_plan(config: dict[str, Any], policy: Path, candidate: Pat
             or plan.get("head_tree") != _worktree_git(candidate, "rev-parse", "HEAD^{tree}")
             or plan.get("source_clean") is not True or plan.get("source", {}).get("head_matches") is not True
             or plan.get("source", {}).get("status") != []
-            or plan.get("evidence_eligible") is not True
+            or not (plan.get("evidence_eligible") is True or
+                    (plan.get("policy_changed") is True
+                     and enforced.get("selection_mode") == "full"
+                     and lanes == list(builder_ci_lanes())
+                     and plan.get("graph_result", {}).get("graph_valid") is True))
             or not isinstance(lanes, list) or not lanes
             or any(lane not in builder_ci_lanes() for lane in lanes)):
         raise ReleaseError("trusted impact plan failed exact source or lane validation")
@@ -1319,25 +1340,248 @@ def _verify_check_checkout_tree(repo: Path, head_sha: str, checkout: Path) -> in
     return count
 
 
+def _verify_lane_evidence(lane_dir: Path, lane: str, head_sha: str, tree: str,
+                          checks: list[dict[str, Any]], packages: list[str]) -> dict[str, Any]:
+    try:
+        receipt = json.loads((lane_dir / "run.json").read_text())
+    except (OSError, ValueError) as exc:
+        raise ReleaseError("trusted lane evidence is missing: " + lane) from exc
+    if (receipt.get("lane") != lane or receipt.get("result") != "success"
+            or receipt.get("exit_code") != 0 or receipt.get("tested_sha") != head_sha
+            or receipt.get("tree") != tree or not receipt.get("commands")):
+        raise ReleaseError("trusted lane evidence failed exact identity or result validation: " + lane)
+    if "required_commands" in receipt:
+        results = receipt.get("command_results", [])
+        if (receipt["required_commands"] != len(receipt["commands"])
+                or len(results) != receipt["required_commands"]
+                or any(result.get("exit_code") != 0 or result.get("command") != command
+                       for result, command in zip(results, receipt["commands"]))):
+            raise ReleaseError("required check command evidence is missing or failed: " + lane)
+    required_names = {check["test"] for check in checks if check.get("lane") == "browser" and check.get("test")}
+    if lane in {"backend", "browser"}:
+        name = receipt.get("go_json_log")
+        if not isinstance(name, str) or Path(name).name != name:
+            raise ReleaseError("trusted lane test evidence is missing: " + lane)
+        try:
+            events = []
+            for line in (lane_dir / name).read_text().splitlines():
+                try:
+                    value = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(value, dict):
+                    events.append(value)
+        except OSError as exc:
+            raise ReleaseError("trusted lane test log is absent: " + lane) from exc
+        if not events or any(event.get("Action") == "fail" for event in events):
+            raise ReleaseError("trusted lane test evidence is empty or failed: " + lane)
+        if lane == "backend" and packages:
+            terminal = {event.get("Package"): event.get("Action") for event in events
+                        if not event.get("Test") and event.get("Action") in {"pass", "skip", "fail"}}
+            no_tests = {event.get("Package") for event in events
+                        if event.get("Action") == "output" and "[no test files]" in event.get("Output", "")}
+            if any(terminal.get(package) != "pass" and not
+                   (terminal.get(package) == "skip" and package in no_tests) for package in packages):
+                raise ReleaseError("required affected package was missing or skipped")
+        if lane == "browser":
+            try:
+                summary = json.loads((lane_dir / "summary.json").read_text())
+                discovered = summary.get("required_browser_tests")
+            except (OSError, ValueError) as exc:
+                raise ReleaseError("browser discovery evidence is absent") from exc
+            if not isinstance(discovered, list) or not discovered or any(not isinstance(name, str) for name in discovered):
+                raise ReleaseError("browser discovery evidence is empty")
+            required_names.update(discovered)
+            terminal = {event.get("Test"): event.get("Action") for event in events
+                        if event.get("Action") in {"pass", "skip", "fail"} and event.get("Test")}
+            if required_names and any(terminal.get(name) != "pass" for name in required_names):
+                raise ReleaseError("required Chromium journey was missing or skipped")
+            if any(value == "skip" for value in terminal.values()):
+                raise ReleaseError("required browser lane contains a skipped journey")
+    return receipt
+
+
+def _lane_test_events(lane_dir: Path, receipt: dict[str, Any]) -> list[dict[str, Any]]:
+    name = receipt.get("go_json_log")
+    if name is None and receipt.get("lane") == "browser":
+        name = "browser-execution.log"
+    if not isinstance(name, str) or Path(name).name != name:
+        return []
+    try:
+        values = []
+        for line in (lane_dir / name).read_text().splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict):
+                values.append(event)
+        return values
+    except OSError:
+        return []
+
+
+def _environment_lane_failure(receipt: dict[str, Any], events: list[dict[str, Any]]) -> bool:
+    """Only explicit prerequisite failures or known infrastructure errors qualify.
+
+    An assertion failure, HTTP permission failure, timeout, or unknown error
+    must never turn into a resumable environment failure by keyword alone.
+    """
+    if receipt.get("failure_kind") == "environment" and not events:
+        return True
+    failed = {event["Test"] for event in events if event.get("Test")
+              and "/" not in event["Test"] and event.get("Action") == "fail"}
+    if not failed:
+        return False
+    classified = set()
+    for event in events:
+        name, output = event.get("Test", ""), event.get("Output", "")
+        if name not in failed or not isinstance(output, str):
+            continue
+        if (name == "TestPostgreSQLMediaRefreshChromiumJourney"
+                and 'permission denied to set parameter "session_replication_role"' in output
+                and "42501" in output):
+            classified.add(name)
+        if (name.endswith("ChromiumJourney") and
+                (re.search(r"spawn (?:chromium|chromium-browser|google-chrome(?:-stable)?) ENOENT", output)
+                 or "Chromium binary is unavailable" in output)):
+            classified.add(name)
+    return classified == failed
+
+
+def _sanitized_test_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # Preserve test evidence without copying fixture logs or credentials into
+    # the durable controller ledger. No-test package markers are significant.
+    result = []
+    for event in events:
+        if event.get("Action") in {"pass", "skip", "fail"}:
+            result.append({key: event[key] for key in ("Action", "Package", "Test", "Elapsed") if key in event})
+        elif event.get("Action") == "output" and "[no test files]" in event.get("Output", ""):
+            result.append({"Action": "output", "Package": event.get("Package"), "Output": "[no test files]"})
+    return result
+
+
+def _check_resume_identity(config: dict[str, Any], plan: dict[str, Any], toolchain: dict,
+                           enforced: dict, lanes: list[str], checks: list, packages: list,
+                           profile: str) -> dict[str, Any]:
+    from urllib.parse import urlsplit, unquote
+    database = urlsplit(config["check_database_url"])
+    return {"baseline_sha": plan["baseline_sha"], "head_sha": plan["head_sha"],
+            "head_tree": plan["head_tree"], "policy_fingerprint": plan["policy_fingerprint"],
+            "controller_sha256": _file_sha256(Path(__file__)),
+            "lanes": lanes, "checks": checks, "packages": packages, "profile": profile,
+            "selection_mode": enforced["selection_mode"],
+            "host": list(os.uname()), "build_user": legacy.BUILD_USER,
+            "database": {"host": database.hostname, "port": database.port or 5432,
+                         "role": unquote(database.username or ""), "name": unquote(database.path),
+                         "options_sha256": hashlib.sha256(database.query.encode()).hexdigest()},
+            "tools": {name: value if name != "chromium" else {"version": value["version"]}
+                      for name, value in toolchain.items()}}
+
+
+def _load_check_checkpoint(path: Path, diagnostic_root: Path, identity: dict) -> dict:
+    # Only the controller's protected capsule can certify an earlier attempt.
+    # Build-owned run.json files alone cannot authorize reuse on a later run.
+    if path.parent != diagnostic_root or not path.name.endswith("-checkpoint.json"):
+        raise ReleaseError("check continuation checkpoint is outside protected diagnostics")
+    _safe_directory(diagnostic_root)
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+            raise ReleaseError("check continuation checkpoint is not protected")
+        with os.fdopen(descriptor, "r", closefd=False) as stream:
+            value = json.load(stream)
+    finally:
+        os.close(descriptor)
+    if value.get("schema") != 1 or value.get("failure_kind") != "environment" or value.get("identity") != identity:
+        return {}  # Different code, policy, scope, or runtime gets a fresh run.
+    for snapshot in value.get("lanes", {}).values():
+        result = snapshot["result"]
+        log = Path(result["log_path"])
+        if log.parent != diagnostic_root or log.is_symlink():
+            raise ReleaseError("continued check diagnostic is outside protected diagnostics")
+        info = log.lstat()
+        if (info.st_uid != os.geteuid() or not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600
+                or _file_sha256(log) != result["log_sha256"]):
+            raise ReleaseError("continued check diagnostic hash or ownership changed")
+    return value
+
+
+def _restore_check_snapshot(lane_dir: Path, snapshot: dict) -> None:
+    receipt = dict(snapshot["receipt"])
+    receipt.update(reused_from=snapshot["result"]["log_path"], go_json_log="continued-tests.jsonl")
+    (lane_dir / "continued-tests.jsonl").write_text("".join(json.dumps(event) + "\n" for event in snapshot["events"]))
+    if snapshot.get("required_browser_tests"):
+        (lane_dir / "summary.json").write_text(json.dumps({"required_browser_tests": snapshot["required_browser_tests"]}))
+    (lane_dir / "run.json").write_text(json.dumps(receipt))
+    (lane_dir / "progress.json").write_text(json.dumps({"lane": receipt["lane"], "status": "reused",
+                                                       "reused_from": receipt["reused_from"]}))
+
+
+def _merge_browser_continuation(lane_dir: Path, snapshot: dict, receipt: dict) -> None:
+    prior = [event for event in snapshot["events"] if event.get("Test")
+             and event.get("Action") == "pass"]
+    events = _sanitized_test_events(_lane_test_events(lane_dir, receipt))
+    receipt.update(go_json_log="continued-tests.jsonl", reused_from=snapshot["result"]["log_path"],
+                   reused_browser_tests=sorted({event["Test"] for event in prior if "/" not in event["Test"]}))
+    (lane_dir / "continued-tests.jsonl").write_text("".join(json.dumps(event) + "\n" for event in [*prior, *events]))
+    (lane_dir / "summary.json").write_text(json.dumps({"required_browser_tests": snapshot["required_browser_tests"]}))
+    (lane_dir / "run.json").write_text(json.dumps(receipt))
+
+
 def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                      execution_worktree: Path, report_dir: Path,
                      base_sha: str, head_sha: str, enforced: dict[str, Any],
                      lanes: list[str], checks: list[dict[str, Any]], packages: list[str],
                      profile: str, diagnostic_root: Path) -> list[dict[str, Any]]:
-    lane_results = []
-    for lane in lanes:
+    tree = _worktree_git(execution_worktree, "rev-parse", "HEAD^{tree}")
+    prior = config.get("_check_checkpoint", {}).get("lanes", {})
+    snapshots = config.setdefault("_check_snapshots", {})
+    guard = threading.Lock()
+
+    def run_lane(lane: str) -> dict[str, Any]:
+        # t.Chdir and generated artifacts may mutate a checkout. Never share it
+        # between concurrently executing lanes, even when source SHA is equal.
+        snapshot = prior.get(lane, {})
         lane_dir = report_dir / lane
         _build_command(config, ["/usr/bin/mkdir", "-m", "0700", str(lane_dir)], cwd=execution_worktree,
                        timeout=30, safe_repository=execution_worktree)
+        lane_checks = [check for check in checks if check.get("lane") == lane]
+        lane_packages = packages if lane == "backend" and enforced.get("selection_mode") == "targeted" else []
+        if snapshot.get("status") == "passed":
+            _restore_check_snapshot(lane_dir, snapshot)
+            _verify_lane_evidence(lane_dir, lane, head_sha, tree, lane_checks, lane_packages)
+            with guard:
+                snapshots[lane] = snapshot
+            return dict(snapshot["result"], reused=True, duration_seconds=0,
+                        reused_duration_seconds=snapshot["result"].get("duration_seconds"))
+        checkout = (execution_worktree if lane == "preflight" else
+                    _private_check_checkout(config, repo, execution_worktree.parent / ("candidate-" + lane), head_sha))
+        if lane in {"backend", "frontend", "browser"}:
+            _prepare_check_dependencies(config, checkout, [lane],
+                diagnostic_root / f"{head_sha}-{report_dir.name}-{lane}-npm-ci.log", policy=policy)
         args = [lane, "--report-dir", str(lane_dir)]
         if lane == "preflight":
             args.extend(["--profile", "tooling" if profile == "tooling" else "full"])
-        lane_checks = [check for check in checks if check.get("lane") == lane]
-        if enforced.get("selection_mode") == "targeted" and lane != "preflight" and lane_checks:
-            args.extend(["--focus-checks-json", json.dumps(lane_checks, separators=(",", ":"))])
+        continued_names = []
+        if lane == "browser" and snapshot.get("required_browser_tests"):
+            passed = {event["Test"] for event in snapshot["events"] if event.get("Action") == "pass" and event.get("Test")}
+            continued_names = [name for name in snapshot["required_browser_tests"] if name not in passed]
+            if continued_names:
+                # dev_preflight still discovers and validates every requested
+                # name against this exact candidate before it executes them.
+                lane_checks = [{"lane": "browser", "path": "cmd/aicrm/continuation_test.go", "test": name}
+                               for name in continued_names]
         if enforced.get("selection_mode") == "targeted" and lane == "backend" and packages:
             args.extend(["--focus-packages-json", json.dumps(sorted(set(packages)), separators=(",", ":"))])
-        command = ["/usr/bin/python3", "-c", _trusted_runner_code(), str(policy), str(execution_worktree), *args]
+        elif (enforced.get("selection_mode") == "targeted" or continued_names) and lane != "preflight" and lane_checks:
+            args.extend(["--focus-checks-json", json.dumps(lane_checks, separators=(",", ":"))])
+        if snapshot and (policy / "scripts/ci/check_preparation.py").is_file():
+            args.extend(["--resume-commands-json", json.dumps(snapshot.get("passed_commands", []), separators=(",", ":"))])
+        command = ["/usr/bin/python3", "-c", _trusted_runner_code(), str(policy), str(checkout), *args]
         log = diagnostic_root / f"{head_sha}-{report_dir.name}-{lane}.log"
         if log.exists() or log.is_symlink():
             raise ReleaseError("trusted check diagnostic path already exists; inspect before retry")
@@ -1346,21 +1590,130 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
             os.chmod(log, 0o600)
             run_args = ["/usr/bin/sudo", "-n", "-u", legacy.BUILD_USER, "-H", "--", "/usr/bin/env", "-i"]
             run_args.extend([f"{key}={value}" for key, value in
-                             _check_env(config, execution_worktree, base_sha=base_sha, head_sha=head_sha).items()])
+                             _check_env(config, checkout, base_sha=base_sha, head_sha=head_sha).items()])
             run_args.extend(command)
-            completed = subprocess.run(run_args, cwd=execution_worktree, stdout=output, stderr=subprocess.STDOUT,
+            completed = subprocess.run(run_args, cwd=checkout, stdout=output, stderr=subprocess.STDOUT,
                                         timeout=6 * 60 * 60, check=False)
-        lane_results.append({"lane": lane, "exit_code": completed.returncode,
-                             "duration_seconds": round(time.monotonic() - started, 1),
-                             "log_sha256": _file_sha256(log), "log_path": str(log)})
-        if completed.returncode != 0:
+        result = {"lane": lane, "exit_code": completed.returncode,
+                  "duration_seconds": round(time.monotonic() - started, 1),
+                  "log_sha256": _file_sha256(log), "log_path": str(log)}
+        # Failed attempts need the same immutable-source validation as passed
+        # ones before any partial result is eligible for future continuation.
+        _verify_check_checkout_tree(repo, head_sha, checkout)
+        try:
+            receipt = json.loads((lane_dir / "run.json").read_text())
+        except (OSError, ValueError):
+            receipt = {}
+        events = _lane_test_events(lane_dir, receipt)
+        identity_valid = (receipt.get("lane") == lane and receipt.get("tested_sha") == head_sha
+                          and receipt.get("tree") == tree)
+        environment = identity_valid and _environment_lane_failure(receipt, events)
+        if completed.returncode != 0 and not environment:
             raise ReleaseError(f"trusted impact lane failed: {lane} (exit={completed.returncode})")
-    return lane_results
+        if continued_names and completed.returncode == 0:
+            _verify_lane_evidence(lane_dir, lane, head_sha, tree, lane_checks, [])
+            _merge_browser_continuation(lane_dir, snapshot, receipt)
+            events = _lane_test_events(lane_dir, receipt)
+        required_names = []
+        if lane == "browser":
+            try:
+                required_names = json.loads((lane_dir / "summary.json").read_text()).get("required_browser_tests", [])
+            except (OSError, ValueError):
+                pass
+            # Keep earlier passed journeys even when another environment
+            # issue stops the continuation before all remaining names pass.
+            if snapshot.get("required_browser_tests") and completed.returncode:
+                events = [*[event for event in snapshot["events"] if event.get("Test") and event.get("Action") == "pass"], *events]
+                required_names = snapshot["required_browser_tests"]
+        with guard:
+            snapshots[lane] = {"status": "environment" if environment else "passed", "result": result,
+                "receipt": receipt, "events": _sanitized_test_events(events),
+                "required_browser_tests": required_names,
+                "passed_commands": receipt.get("passed_commands", [])}
+        if environment:
+            raise CheckEnvironmentError("required check environment is unavailable: " + lane)
+        receipt = _verify_lane_evidence(lane_dir, lane, head_sha, tree, lane_checks,
+                                       lane_packages)
+        result.update(command_results=receipt.get("command_results", []),
+                      preparation=receipt.get("preparation", {}), slow_tests=receipt.get("slow_tests", []))
+        if snapshot:
+            result.update(reused_browser_tests=receipt.get("reused_browser_tests", []),
+                          resumed_from=snapshot["result"]["log_path"])
+        return result
+
+    # Preflight remains a prerequisite. Only independent lanes overlap, with
+    # their expensive commands serialized by the attempt's heavy.lock.
+    lane_results = []
+    callback = config.get("_check_progress_callback")
+    pending_lanes = list(lanes)
+    if "preflight" in pending_lanes:
+        if callback:
+            callback({"stages": [{"lane": "preflight", "status": "running"}],
+                      "completed_lanes": 0, "required_lanes": len(lanes)})
+        lane_results.append(run_lane("preflight"))
+        pending_lanes.remove("preflight")
+    if not (policy / "scripts/ci/check_preparation.py").is_file():
+        # The installed old policy has no shared heavy-resource lock. Its own
+        # maintenance validation must retain serial execution on this host.
+        lane_results.extend(run_lane(lane) for lane in pending_lanes)
+        return lane_results
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        pending = {executor.submit(run_lane, lane): lane for lane in pending_lanes}
+        failures = []
+        previous = None
+        browser_offset = 0
+        browser_terminal = {}
+        while pending:
+            completed, _ = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+            for future in completed:
+                pending.pop(future)
+                try:
+                    lane_results.append(future.result())
+                except ReleaseError as error:
+                    failures.append(error)
+            if callback:
+                stages = []
+                for lane in lanes:
+                    path = report_dir / lane / "progress.json"
+                    try:
+                        value = json.loads(path.read_text())
+                    except (OSError, ValueError):
+                        value = {"lane": lane, "status": "preparing" if lane in pending.values() else "pending"}
+                    if lane == "browser":
+                        lane_path = report_dir / lane
+                        try:
+                            required = json.loads((lane_path / "summary.json").read_text()).get("required_browser_tests", [])
+                            log_path = lane_path / "browser-execution.log"
+                            if log_path.is_file():
+                                with log_path.open() as events:
+                                    events.seek(browser_offset)
+                                    for line in events:
+                                        try:
+                                            event = json.loads(line)
+                                        except ValueError:
+                                            continue
+                                        if event.get("Test") in required and event.get("Action") in {"pass", "skip", "fail"}:
+                                            browser_terminal[event["Test"]] = event["Action"]
+                                    browser_offset = events.tell()
+                            value.update(required_tests=len(required), completed_tests=len(browser_terminal),
+                                         failed_tests=[name for name, status in browser_terminal.items() if status != "pass"])
+                        except (OSError, ValueError):
+                            pass
+                    stages.append(value)
+                progress = {"stages": stages, "completed_lanes": len(lane_results), "required_lanes": len(lanes)}
+                encoded = json.dumps(progress, sort_keys=True)
+                if encoded != previous:
+                    callback(progress)
+                    previous = encoded
+        if failures:
+            # An environment error cannot mask an independent code failure.
+            raise next((error for error in failures if not isinstance(error, CheckEnvironmentError)), failures[0])
+    return sorted(lane_results, key=lambda result: lanes.index(result["lane"]))
 
 
 def _prepare_check_dependencies(config: dict[str, Any], checkout: Path, lanes: list[str],
-                                diagnostic_log: Path) -> None:
-    if not {"frontend", "browser"}.intersection(lanes):
+                                diagnostic_log: Path, *, policy: Path | None = None) -> None:
+    if not ({"backend", "frontend", "browser"} if policy else {"frontend", "browser"}).intersection(lanes):
         return
     if diagnostic_log.exists() or diagnostic_log.is_symlink():
         raise ReleaseError("trusted check diagnostic path already exists; inspect before retry")
@@ -1369,6 +1722,9 @@ def _prepare_check_dependencies(config: dict[str, Any], checkout: Path, lanes: l
         ["env", "-u", "AICRM_DATABASE_URL", "npm", "ci", "--prefix", "web/v3",
          "--no-audit", "--no-fund"],
     ]
+    if policy and (policy / "scripts/ci/check_preparation.py").is_file():
+        commands = [["/usr/bin/python3", str(policy / "scripts/ci/check_preparation.py"), "npm"],
+                    ["/usr/bin/python3", str(policy / "scripts/ci/check_preparation.py"), "npm", "--prefix", "web/v3"]]
     with diagnostic_log.open("xb") as output:
         os.chmod(diagnostic_log, 0o600)
         for command in commands:
@@ -1396,9 +1752,28 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
     toolchain = _verify_build_toolchain(config)
     plan = _trusted_preflight_plan(config, policy, worktree, base_sha, head_sha)
     enforced, lanes, checks, packages, profile = _enforced_lanes(plan, changed_policy)
+    if "browser" in lanes:
+        browser_code = """import {resolveChromiumBinary} from %s;
+import {execFileSync} from 'node:child_process';
+const path=resolveChromiumBinary();
+console.log(JSON.stringify({path, version:execFileSync(path,['--version'],{encoding:'utf8',timeout:20000}).trim()}));""" % json.dumps((policy / "internal/webshell/chromium_binary.mjs").as_uri())
+        browser = _build_command(config, ["node", "--input-type=module", "-e", browser_code],
+                                 cwd=policy, timeout=30, check=False)
+        if browser.returncode:
+            raise CheckEnvironmentError("Chromium executable probe failed under the actual build account")
+        try:
+            toolchain["chromium"] = json.loads(browser.stdout.splitlines()[-1])
+        except (ValueError, IndexError) as exc:
+            raise ReleaseError("Chromium executable probe returned incomplete evidence") from exc
+
     diagnostic_root = diagnostic_root or (Path(config["work_root"]) / "diagnostics")
     _safe_directory(diagnostic_root, create=True)
     _safe_directory(Path(config["work_root"]))
+    continuation_identity = _check_resume_identity(config, plan, toolchain, enforced, lanes, checks, packages, profile)
+    prior = {}
+    previous_path = config.get("_check_resume_checkpoint")
+    if previous_path:
+        prior = _load_check_checkpoint(Path(previous_path), diagnostic_root, continuation_identity)
     with tempfile.TemporaryDirectory(prefix="domestic-main-check-", dir=Path(config["work_root"])) as temporary:
         check_root = Path(temporary)
         os.chmod(check_root, 0o711)
@@ -1409,12 +1784,34 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
         os.chmod(execution_parent, 0o700)
         execution_worktree = _private_check_checkout(
             config, repo, execution_parent / "candidate", head_sha)
-        _prepare_check_dependencies(
-            config, execution_worktree, lanes,
-            diagnostic_root / f"{head_sha}-{report_dir.name}-npm-ci.log")
-        lane_results = _run_check_lanes(
-            config, repo, policy, execution_worktree, report_dir, base_sha, head_sha,
-            enforced, lanes, checks, packages, profile, diagnostic_root)
+        prep = report_dir / ".preparation"
+        _build_command(config, ["/usr/bin/mkdir", "-m", "0700", str(prep)], cwd=execution_worktree, timeout=30)
+        check_config = dict(config, _check_checkpoint=prior, _check_snapshots={})
+        if (policy / "scripts/ci/check_preparation.py").is_file():
+            check_config["_check_preparation_dir"] = str(prep)
+        try:
+            lane_results = _run_check_lanes(
+                check_config, repo, policy, execution_worktree, report_dir, base_sha, head_sha,
+                enforced, lanes, checks, packages, profile, diagnostic_root)
+        except CheckEnvironmentError as error:
+            if (_worktree_git(worktree, "rev-parse", "HEAD") != head_sha
+                    or _worktree_git(worktree, "status", "--porcelain=v1", "--untracked-files=all")):
+                raise ReleaseError("candidate source changed during failed isolated checks") from error
+            checkpoint = diagnostic_root / f"{head_sha}-{report_dir.name}-checkpoint.json"
+            atomic_json(checkpoint, {"schema": 1, "failure_kind": "environment",
+                "identity": continuation_identity, "recorded_at_utc": _utc_now(),
+                "lanes": check_config["_check_snapshots"], "continued_from": previous_path if prior else None})
+            error.checkpoint = str(checkpoint)
+            raise
+        finally:
+            cleanup_script = policy / "scripts/ci/check_preparation.py"
+            if cleanup_script.is_file():
+                result = _build_command(check_config, ["/usr/bin/python3", str(cleanup_script), "cleanup"],
+                                        cwd=execution_worktree, timeout=120, check=False)
+                if result.returncode:
+                    raise ReleaseError("attempt database cleanup failed; retained preparation evidence")
+            elif list(prep.glob("database-*.json")):
+                raise ReleaseError("trusted baseline cannot clean prepared database inventory")
         if _verify_check_checkout_tree(repo, head_sha, execution_worktree) == 0:
             raise ReleaseError("isolated check candidate checkout has no tracked source files")
     if _worktree_git(worktree, "rev-parse", "HEAD") != head_sha or _worktree_git(worktree, "status", "--porcelain=v1", "--untracked-files=all"):
@@ -1430,6 +1827,7 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
                               if changed_policy else enforced.get("selection_reasons")),
         "changed_paths": plan.get("changed_paths"), "toolchain": toolchain, "lane_results": lane_results,
         "execution_receipt_sha256": None, "verified_at_utc": _utc_now(),
+        "continued_from": previous_path if prior else None,
     }
     canonical = json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     receipt["execution_receipt_sha256"] = hashlib.sha256(canonical).hexdigest()
@@ -2020,13 +2418,21 @@ def _mark_unknown(state_path: Path, state: dict[str, Any], phase: str, error: Ba
 
 
 def _mark_failed(state_path: Path, state: dict[str, Any], item: dict[str, Any], error: BaseException, phase: str) -> None:
-    item["status"] = "failed"
-    item["failure"] = {"phase": phase, "error_type": type(error).__name__, "recorded_at_utc": _utc_now()}
+    environment = isinstance(error, CheckEnvironmentError)
+    item["status"] = "pending" if environment else "failed"
+    item["failure"] = {"phase": phase, "error_type": type(error).__name__, "recorded_at_utc": _utc_now(),
+                       "kind": "environment" if environment else "candidate_check",
+                       "candidate_verdict": "not_evaluated" if environment else "failed"}
+    if environment:
+        item["failure"]["required_action"] = "repair the check environment, then resubmit the same exact candidate; keep queue order"
+        if error.checkpoint:
+            item["failure"]["check_checkpoint"] = error.checkpoint
     if isinstance(error, ControllerMaintenanceRequired):
         item["failure"]["required_action"] = "run maintenance-check for this exact SHA; review and install the checked fixed controller bytes with rollback; resubmit the same candidate"
-    if state.get("in_flight", {}).get("stage_install_started") is True:
+    if (state.get("in_flight") or {}).get("stage_install_started") is True:
         state["staging_out_of_sync"] = True
         item["failure"]["required_recovery"] = "restore the prior verified application and rebuild the synthetic staging database, then run ack-stage-reset"
+    item.setdefault("attempt_history", []).append({"attempt": item.get("attempt"), **item["failure"]})
     state["in_flight"] = None
     state["controller_maintenance"] = None
     state["status"] = "blocked"
@@ -2091,7 +2497,11 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
         classification = _classify_candidate(source_worktree, old_main_sha, item["head_sha"])
         controller_files = classification.get("controller_files", [])
         controller_receipt = _verify_controller_files(config, source_worktree, item["head_sha"], controller_files)
-        check_receipt = _check_report(config, repo, source_worktree, report_dir, old_main_sha, item["head_sha"])
+        check_config = dict(config, _check_progress_callback=lambda progress: _update_state(
+            state_path, state, in_flight={**state["in_flight"], "check_progress": progress}))
+        if item.get("failure", {}).get("kind") == "environment":
+            check_config["_check_resume_checkpoint"] = item["failure"].get("check_checkpoint")
+        check_receipt = _check_report(check_config, repo, source_worktree, report_dir, old_main_sha, item["head_sha"])
         paths = check_receipt["changed_paths"]
         runtime_changed = bool(classification.get("runtime_changed"))
         installed_app = dict(state["installed_app"])

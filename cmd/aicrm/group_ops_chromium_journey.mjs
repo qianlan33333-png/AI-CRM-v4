@@ -1,7 +1,8 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 const baseURL = process.env.AICRM_GROUPOPS_TEST_URL;
 const username = process.env.AICRM_GROUPOPS_TEST_USERNAME;
@@ -15,16 +16,7 @@ const radarImageID = Number(process.env.AICRM_GROUPOPS_TEST_RADAR_IMAGE_ID);
 const radarAttachmentID = Number(process.env.AICRM_GROUPOPS_TEST_RADAR_ATTACHMENT_ID);
 if (!/^https:\/\//.test(baseURL || "") || !username || !password || !/^[1-9][0-9]*$/.test(planID || "") || !radarUploadPath || composerImageIDs.length !== 2 || [...composerImageIDs, radarImageID, radarAttachmentID].some((id) => !Number.isSafeInteger(id) || id < 1) || radarImageID !== radarAttachmentID) throw new Error("Group Ops Chromium journey requires HTTPS URL, credentials, plan ID, same-ID Radar image/PDF fixture, two composer Media IDs, and a Radar upload file");
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const browserBinary = () => {
-  const candidates = [process.env.AICRM_CHROMIUM_BINARY, process.env.CHROME_BIN].filter(Boolean);
-  if (process.platform === "darwin") candidates.push("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-  candidates.push("google-chrome", "google-chrome-stable", "chromium", "chromium-browser");
-  for (const candidate of candidates) {
-    if (candidate.includes("/")) { try { if (spawnSync(candidate, ["--version"], { stdio: "ignore" }).status === 0) return candidate; } catch (_) {} }
-    else if (spawnSync("which", [candidate], { stdio: "ignore" }).status === 0) return candidate;
-  }
-  throw new Error("Chromium binary is unavailable");
-};
+const browserBinary = resolveChromiumBinary;
 class CDP {
   constructor(socket) { this.socket = socket; this.nextID = 0; this.pending = new Map(); socket.addEventListener("message", (event) => { const message = JSON.parse(String(event.data)); const pending = this.pending.get(message.id); if (!pending) return; this.pending.delete(message.id); message.error ? pending.reject(new Error("CDP request failed")) : pending.resolve(message.result || {}); }); }
   call(method, params = {}) { return new Promise((resolve, reject) => { const id = ++this.nextID; this.pending.set(id, { resolve, reject }); this.socket.send(JSON.stringify({ id, method, params })); }); }

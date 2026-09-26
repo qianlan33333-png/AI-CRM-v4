@@ -1,7 +1,8 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 const base = process.env.AICRM_PUBLIC_SURVEY_BROWSER_URL;
 const session = process.env.AICRM_PUBLIC_SURVEY_BROWSER_SESSION;
@@ -16,11 +17,7 @@ const screenshots = process.env.AICRM_PUBLIC_SURVEY_SCREENSHOT_DIR;
 if (!/^https:\/\//.test(base || '') || !/^[A-Za-z0-9_-]{43}$/.test(session || '') || !/^[A-Za-z0-9_-]{43}$/.test(secondSession || '') || session === secondSession || !/^[a-z0-9-]{1,128}$/.test(successSlug || '') || !/^[a-z0-9-]{1,128}$/.test(failureSlug || '') || !/^[a-z0-9-]{1,128}$/.test(redirectSlug || '') || !/^[a-z0-9-]{1,128}$/.test(leadQRSlug || '') || !redirectTarget?.startsWith(base + '/') || !leadQRURL?.startsWith(base + '/') || !path.isAbsolute(screenshots || '')) throw new Error('public Survey Chromium journey configuration is invalid');
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-const chrome = () => {
-  const candidates = process.platform === 'darwin' ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'google-chrome', 'chromium'] : ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
-  for (const candidate of candidates) if ((candidate.includes('/') ? spawnSync(candidate, ['--version'], { stdio: 'ignore' }).status : spawnSync('which', [candidate], { stdio: 'ignore' }).status) === 0) return candidate;
-  throw new Error('Chromium binary is unavailable');
-};
+const chrome = resolveChromiumBinary;
 class CDP {
   constructor(socket) {
     this.socket = socket; this.id = 0; this.successSubmissions = 0; this.failureSubmissions = 0; this.redirectSubmissions = 0; this.leadQRSubmissions = 0; this.topLevelNavigations = []; this.pending = new Map();

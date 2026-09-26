@@ -1,7 +1,8 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { chromiumStartupDiagnostic, chromiumStartupTimeoutMS } from '../../internal/webshell/chromium_launch.mjs';
 
 const baseURL=process.env.AICRM_QUESTIONNAIRE_LIST_TEST_URL;
@@ -10,7 +11,7 @@ const password=process.env.AICRM_QUESTIONNAIRE_LIST_TEST_PASSWORD;
 const screenshotDirectory=process.env.AICRM_QUESTIONNAIRE_LIST_SCREENSHOT_DIR;
 if(!/^https:\/\//.test(baseURL||'')||!username||!password||!path.isAbsolute(screenshotDirectory||'')) throw new Error('questionnaire list read-state Chromium configuration is invalid');
 const sleep=(ms)=>new Promise(resolve=>setTimeout(resolve,ms));
-function chrome(){for(const candidate of [process.env.AICRM_CHROMIUM_BINARY,process.env.CHROME_BIN,process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':'','google-chrome','google-chrome-stable','chromium','chromium-browser'].filter(Boolean)){if(candidate.includes('/')){try{if(spawnSync(candidate,['--version'],{stdio:'ignore'}).status===0)return candidate;}catch{}}else if(spawnSync('which',[candidate],{stdio:'ignore'}).status===0)return candidate;}throw new Error('Chromium binary is unavailable');}
+const chrome = resolveChromiumBinary;
 class CDP { constructor(socket){this.socket=socket;this.id=0;this.pending=new Map();socket.addEventListener('message',event=>{const message=JSON.parse(String(event.data));const pending=this.pending.get(message.id);if(!pending)return;this.pending.delete(message.id);message.error?pending.reject(new Error(`CDP ${message.error.code}: ${message.error.message}`)):pending.resolve(message.result||{});});} call(method,params={}){return new Promise((resolve,reject)=>{const id=++this.id;this.pending.set(id,{resolve,reject});this.socket.send(JSON.stringify({id,method,params}));});} close(){for(const pending of this.pending.values())pending.reject(new Error('CDP closed'));this.pending.clear();this.socket.close();}}
 function binaryDiagnostic(browser,stderr){return chromiumStartupDiagnostic({profile,exitCode:browser?.exitCode,signalCode:browser?.signalCode,stderr});}
 async function devtools(profile,browser,stderr){const deadline=Date.now()+chromiumStartupTimeoutMS;while(Date.now()<deadline){try{const port=String(await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8')).split('\n')[0];if(/^\d+$/.test(port))return `http://127.0.0.1:${port}`;}catch{}if(browser?.exitCode!==null)break;await sleep(50);}throw new Error(binaryDiagnostic(browser,stderr));}

@@ -29,6 +29,8 @@ __pycache__/
 
 # frozen V2 workspace dependencies and generated browser output
 /node_modules/
+/web/v3/node_modules/
+/release/
 /web/dist/
 
 # generated P4 donor-source views; exact paths only (see source-index.json)

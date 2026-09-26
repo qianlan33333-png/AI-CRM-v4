@@ -1,8 +1,9 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 const baseURL = String(process.env.AICRM_PUBLIC_COMMERCE_TEST_URL || "").replace(/\/$/, "");
 const screenshots = process.env.AICRM_PUBLIC_COMMERCE_SCREENSHOT_DIR;
@@ -18,12 +19,7 @@ const browserUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)
 const nonWeChatUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1";
 
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
-const browserBinary = () => {
-  for (const candidate of [process.env.AICRM_CHROMIUM_BINARY, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "google-chrome", "chromium"].filter(Boolean)) {
-    if ((candidate.includes("/") ? spawnSync(candidate, ["--version"], { stdio: "ignore" }) : spawnSync("which", [candidate], { stdio: "ignore" })).status === 0) return candidate;
-  }
-  throw new Error("Chromium is unavailable");
-};
+const browserBinary = resolveChromiumBinary;
 
 class CDP {
   constructor(socket) {

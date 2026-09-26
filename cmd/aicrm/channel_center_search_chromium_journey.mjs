@@ -1,7 +1,8 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { chromiumStartupDiagnostic, chromiumStartupTimeoutMS } from "../../internal/webshell/chromium_launch.mjs";
 
 const baseURL = process.env.AICRM_CHANNEL_CENTER_TEST_URL;
@@ -13,13 +14,7 @@ if (!/^https:\/\//.test(baseURL || "") || !username || !password) throw new Erro
 if (!path.isAbsolute(screenshotDirectory || "")) throw new Error("Channel Center Chromium journey requires an absolute screenshot directory");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const asError = (error) => error instanceof Error ? error : new Error(String(error));
-function browserBinary() {
-  for (const item of [process.env.AICRM_CHROMIUM_BINARY, process.env.CHROME_BIN, process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"].filter(Boolean)) {
-    if (item.includes("/")) { try { if (spawnSync(item, ["--version"], { stdio: "ignore" }).status === 0) return item; } catch {} }
-    else if (spawnSync("which", [item], { stdio: "ignore" }).status === 0) return item;
-  }
-  throw new Error("Chromium binary is unavailable");
-}
+const browserBinary = resolveChromiumBinary;
 class CDP {
   constructor(socket) { this.socket = socket; this.id = 0; this.pending = new Map(); socket.addEventListener("message", (event) => { const message = JSON.parse(String(event.data)); const pending = this.pending.get(message.id); if (!pending) return; this.pending.delete(message.id); message.error ? pending.reject(new Error(`CDP ${message.error.code}: ${message.error.message}`)) : pending.resolve(message.result || {}); }); }
   call(method, params = {}) { return new Promise((resolve, reject) => { const id = ++this.id; this.pending.set(id, { resolve, reject }); this.socket.send(JSON.stringify({ id, method, params })); }); }

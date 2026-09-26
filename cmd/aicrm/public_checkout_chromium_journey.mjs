@@ -1,8 +1,9 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 const baseURL = String(process.env.AICRM_PUBLIC_CHECKOUT_CHROMIUM_BASE_URL || "").replace(/\/$/, "");
 const sessionCookie = String(process.env.AICRM_PUBLIC_CHECKOUT_CHROMIUM_SESSION || "");
@@ -12,12 +13,7 @@ const promotionA = `dpc_${"A".repeat(43)}`;
 const promotionB = `dpc_${"B".repeat(43)}`;
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
-function browser() {
-  for (const item of [process.env.AICRM_CHROMIUM_BINARY, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "google-chrome", "chromium"].filter(Boolean)) {
-    if ((item.includes("/") ? spawnSync(item, ["--version"], { stdio: "ignore" }) : spawnSync("which", [item], { stdio: "ignore" })).status === 0) return item;
-  }
-  throw new Error("Chromium is unavailable");
-}
+const browser = resolveChromiumBinary;
 
 class CDP {
   constructor(socket) {

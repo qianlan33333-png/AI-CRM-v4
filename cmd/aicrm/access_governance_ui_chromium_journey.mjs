@@ -1,7 +1,8 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { chromiumStartupDiagnostic, chromiumStartupTimeoutMS as accessChromiumStartupTimeoutMS } from "../../internal/webshell/chromium_launch.mjs";
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -15,11 +16,7 @@ const credentials = {
 };
 if (!/^https:\/\//.test(baseURL || "") || !screenshots || Object.values(credentials).flat().some((value) => !value)) throw new Error("Access UI Chromium journey environment is incomplete");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const browserBinary = () => {
-  const choices = [process.env.AICRM_CHROMIUM_BINARY, process.env.CHROME_BIN, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "google-chrome", "chromium"].filter(Boolean);
-  for (const candidate of choices) { try { if (candidate.includes("/") ? spawnSync(candidate, ["--version"], { stdio: "ignore" }).status === 0 : spawnSync("which", [candidate], { stdio: "ignore" }).status === 0) return candidate; } catch (_) {} }
-  throw new Error("Chromium binary is unavailable");
-};
+const browserBinary = resolveChromiumBinary;
 class CDP {
   constructor(socket) { this.socket = socket; this.id = 0; this.pending = new Map(); socket.addEventListener("message", (event) => { const message = JSON.parse(String(event.data)); const pending = this.pending.get(message.id); if (!pending) return; this.pending.delete(message.id); message.error ? pending.reject(new Error(`CDP ${message.error.code}`)) : pending.resolve(message.result || {}); }); }
   call(method, params = {}) { return new Promise((resolve, reject) => { const id = ++this.id; const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }, 8000); this.pending.set(id, { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } }); this.socket.send(JSON.stringify({ id, method, params })); }); }

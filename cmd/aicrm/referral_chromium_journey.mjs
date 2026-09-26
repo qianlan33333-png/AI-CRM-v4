@@ -1,8 +1,9 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const base = process.env.AICRM_REFERRAL_BROWSER_URL;
@@ -16,7 +17,7 @@ await fs.mkdir(screenshots, { recursive: true });
 let chrome, socket;
 const pending = new Map(); let sequence = 0;
 try {
-  const binary = [process.env.AICRM_CHROMIUM_BINARY, process.env.CHROME_BIN, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'chromium', 'google-chrome'].filter(Boolean).find(p => spawnSync(p, ['--version'], { stdio: 'ignore' }).status === 0);
+  const binary = resolveChromiumBinary();
   assert.ok(binary, 'Chromium is required');
   chrome = spawn(binary, ['--headless=new','--no-sandbox','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--no-first-run','--ignore-certificate-errors','--disable-background-networking','about:blank'], { stdio: 'ignore' });
   let port;

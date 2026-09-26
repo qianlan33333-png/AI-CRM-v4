@@ -10,6 +10,8 @@ import subprocess
 import governance_impact
 import impact_selection
 import go_affected_graph
+import commerce_checks
+import os
 
 SCHEMA = 1
 POLICY_FILES = (
@@ -26,6 +28,8 @@ POLICY_FILES = (
     "scripts/ci/quality_lanes.py",
     "scripts/ci/affected_shadow.py",
     "scripts/ci/go_affected_graph.py",
+    "scripts/ci/commerce_checks.py",
+    "scripts/ci/check_preparation.py",
     "scripts/ci/verification.py",
     "skills/aicrm-v3-development-frontdoor/SKILL.md",
     "skills/aicrm-v3-development/SKILL.md",
@@ -34,7 +38,8 @@ EXECUTABLE_POLICY_FILES = {
     ".github/workflows/ci.yml", "docs/governance/capability-impact.json",
     "scripts/dev_preflight.py", "scripts/ci/affected_plan.py", "scripts/ci/impact_selection.py",
     "scripts/ci/governance_impact.py", "scripts/ci/quality_lanes.py", "scripts/ci/affected_shadow.py",
-    "scripts/ci/go_affected_graph.py", "scripts/ci/verification.py",
+    "scripts/ci/go_affected_graph.py", "scripts/ci/commerce_checks.py",
+    "scripts/ci/check_preparation.py", "scripts/ci/verification.py",
 }
 POLICY_PREFIXES = (".github/workflows/", "docs/governance/", "scripts/ci/")
 PAYMENT_LEAF_PREFIX = "internal/payment/"
@@ -110,7 +115,8 @@ def parent_prd_identity(root: Path, head: str) -> dict:
 def planner_policy_fingerprint() -> str:
     """Hash the planner and selector code that actually produced this plan."""
     files = (Path(__file__).resolve(), Path(impact_selection.__file__).resolve(),
-             Path(go_affected_graph.__file__).resolve())
+             Path(go_affected_graph.__file__).resolve(), Path(commerce_checks.__file__).resolve(),
+             Path(__file__).with_name("quality_lanes.py"), Path(__file__).with_name("check_preparation.py"))
     entries = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
     payload = json.dumps({"schema": SCHEMA, "files": entries}, sort_keys=True,
                          separators=(",", ":")).encode()
@@ -324,10 +330,15 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
     else:
         try:
             candidate, candidate_packages = package_candidate(report, graph_result, paths, policy_changed)
-            # A policy author cannot use the policy under review to describe
-            # the gate as narrower. This is a shadow record; the stable CI
-            # workflow remains the authority for the currently enforced gate.
+            commerce = (commerce_checks.selection(root, base_sha, head_sha, paths, graph_result)
+                        if not policy_changed else None)
+            if commerce is not None:
+                candidate = commerce
+            # Policy changes always use the trusted full gate. The first commerce
+            # profile remains shadow-only until the release desk pins its
+            # verified planner fingerprint after full/result comparison.
             enforced = (full_selection("trusted-policy-change-fallback") if policy_changed
+                        else commerce if commerce is not None and os.environ.get("AICRM_VERIFIED_COMMERCE_POLICY") == planner_policy_fingerprint()
                         else impact_selection.select(report))
         except Exception as error:
             report = None
@@ -365,6 +376,7 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
         "parent_prd": parent_prd_identity(root, head_sha),
         "analysis": {"status": "complete" if report is not None else "failed",
                      "error": analysis_error},
+        "execution_eligible": bool(report is not None and clean and exact_checkout and graph_valid),
         "evidence_eligible": bool(report is not None and clean and exact_checkout and graph_valid
                                   and not policy_changed),
         "graph_result": graph_result,

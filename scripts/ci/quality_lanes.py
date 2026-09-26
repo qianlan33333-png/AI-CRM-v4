@@ -19,6 +19,12 @@ import sys
 import platform
 import re
 import time
+import tempfile
+
+CI_DIR = str(Path(__file__).resolve().parent)
+if CI_DIR not in sys.path:
+    sys.path.insert(0, CI_DIR)
+import check_preparation
 from urllib.parse import parse_qs, unquote, urlparse
 
 
@@ -73,6 +79,16 @@ def chromium_font_ready() -> bool:
     return result.returncode == 0 and "Noto" in result.stdout
 
 
+def chromium_ready() -> bool:
+    if not command_available("node"):
+        return False
+    module = (ROOT / "internal/webshell/chromium_binary.mjs").as_uri()
+    result = subprocess.run(["node", "--input-type=module", "-e",
+                            "import {resolveChromiumBinary} from " + json.dumps(module) + "; resolveChromiumBinary();"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False)
+    return result.returncode == 0
+
+
 def dedup_base_ready() -> bool:
     base, head = os.environ.get("AICRM_DEDUP_BASE_SHA", ""), os.environ.get("AICRM_DEDUP_HEAD_SHA", "")
     if not len(head) == 40 or not all(char in "0123456789abcdef" for char in head):
@@ -104,7 +120,8 @@ def missing_prerequisites(lane: str) -> list[str]:
     if lane == "browser":
         if platform.system() != "Linux" or platform.machine() not in {"x86_64", "amd64"}:
             missing.append("Linux amd64 browser environment")
-        required.add("google-chrome")
+        if not chromium_ready():
+            missing.append("Chromium executable (existing resolver)")
     if lane == "archive-sdk" and (platform.system() != "Linux" or platform.machine() not in {"x86_64", "amd64"}):
         missing.append("Linux amd64 archive SDK environment")
     for item in sorted(required):
@@ -155,6 +172,8 @@ def replace_full_backend_test_with_packages(commands_: list[list[str]], packages
         if "test" in command and "go" in command and "./..." in command:
             result.append(test_command)
             replaced = True
+        elif "vet" in command and "go" in command and "./..." in command:
+            result.append([*command[:-1], "-p", "1", *test_command[test_command.index("-timeout=15m") + 1:]])
         else:
             result.append(command)
     if not replaced:
@@ -313,7 +332,14 @@ def _write_lane_receipt(report_dir: Path | None, lane: str, execution: dict,
         "run_id": run_id,
         "run_attempt": run_attempt_value,
         "commands": execution["commands"],
+        "required_commands": execution.get("required_commands", 0),
         "go_json_log": execution.get("go_json_log"),
+        "command_results": execution.get("command_results", []),
+        "slow_tests": sorted(execution.get("slow_tests", []), key=lambda item: item["seconds"], reverse=True)[:30],
+        "preparation": execution.get("preparation", {}),
+        "failure_kind": execution.get("failure_kind"),
+        "passed_commands": execution.get("passed_commands", []),
+        "reused_commands": execution.get("reused_commands", []),
     }
     measured = _execution_receipt(report_dir, execution, elapsed, result, exit_code,
                                   tested_sha, tree, policy_fingerprint, run_id, run_attempt_value)
@@ -336,32 +362,119 @@ def _clear_lane_outputs(report_dir: Path | None, lane: str) -> None:
         path.unlink(missing_ok=True)
 
 
+def _progress(report_dir: Path | None, lane: str, execution: dict, command: list[str] | None,
+              status: str, failure: str | None = None) -> None:
+    if report_dir is None:
+        return
+    report_dir.mkdir(parents=True, exist_ok=True)
+    check_preparation.atomic_json(report_dir / "progress.json", {
+        "schema": 1, "lane": lane, "status": status, "current_command": command,
+        "started_at_utc": execution.get("started_at_utc"),
+        "completed_commands": len(execution.get("command_results", [])),
+        "required_commands": execution.get("required_commands", 0),
+        "completed_tests": execution.get("completed_tests", 0),
+        "required_packages": execution.get("required_packages", 0),
+        "completed_packages": execution.get("completed_packages", 0), "failure_summary": failure})
+
+
+def normalized_command(command: list[str], report_dir: Path | None) -> list[str]:
+    return [value.replace(str(report_dir), "$REPORT") if report_dir else value for value in
+            [value.replace(str(ROOT), "$ROOT") for value in command]]
+
+
+def reusable_validation(command: list[str]) -> bool:
+    """Reuse validation results only; fresh checkouts still need their setup.
+
+    Build/stage/generator, venv/pip, and Go test commands create artifacts or
+    test logs used by later commands, so they must execute in the new attempt.
+    """
+    if "go" in command:
+        return "vet" in command and "test" not in command
+    if "-m" in command and "unittest" in command:
+        return True
+    if command[0] == "node":
+        return len(command) == 2 and not re.search(r"(?:generate|prepare|stage|build)[-_]", Path(command[1]).name)
+    if command[0] == "npm":
+        return command[1:] == ["run", "orval:check"]
+    if command[0] == "bash":
+        return len(command) > 1 and Path(command[1]).name.startswith(("check-", "test-"))
+    return len(command) == 2 and Path(command[1]).name.startswith("test_")
+
+
 def run_recorded(command: list[str], env: dict[str, str] | None, lane: str,
                  report_dir: Path | None, execution: dict) -> None:
     print("+ " + " ".join(command), flush=True)
     execution["commands"].append(command)
-    if "-json" in command and report_dir is not None:
-        report_dir.mkdir(parents=True, exist_ok=True)
-        log_path = report_dir / (lane + "-go-test.jsonl")
-        mode = "a" if log_path.exists() else "w"
-        process = subprocess.Popen(command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, text=True)
-        assert process.stdout is not None
-        with log_path.open(mode, encoding="utf-8") as log:
-            with process.stdout:
-                for line in process.stdout:
-                    log.write(line)
-                    print(line, end="", flush=True)
-        code = process.wait()
-        execution["go_json_log"] = log_path.name
-        if code:
-            raise subprocess.CalledProcessError(code, command)
-    else:
-        subprocess.run(command, cwd=ROOT, env=env, check=True)
-        if "dev_preflight.py" in command and "browser" in command and report_dir is not None:
-            browser_log = report_dir / "browser-execution.log"
-            if browser_log.is_file():
-                execution["go_json_log"] = browser_log.name
+    normalized = normalized_command(command, report_dir)
+    if reusable_validation(command) and normalized in execution.get("resume_commands", []):
+        execution.setdefault("command_results", []).append({"command": command, "exit_code": 0,
+                                                             "elapsed_seconds": 0, "reused": True})
+        execution.setdefault("passed_commands", []).append(normalized)
+        execution.setdefault("reused_commands", []).append(normalized)
+        _progress(report_dir, lane, execution, command, "reused")
+        return
+    _progress(report_dir, lane, execution, command, "queued")
+    started = time.monotonic()
+    code = 2
+    last_progress = started
+    try:
+        with check_preparation.heavy_slot(command, env) as child_env:
+            _progress(report_dir, lane, execution, command, "running")
+            if "-json" in command and report_dir is not None:
+                report_dir.mkdir(parents=True, exist_ok=True)
+                log_path = report_dir / (lane + "-go-test.jsonl")
+                mode = "a" if log_path.exists() else "w"
+                process = subprocess.Popen(command, cwd=ROOT, env=child_env, stdout=subprocess.PIPE,
+                                           stderr=subprocess.STDOUT, text=True)
+                assert process.stdout is not None
+                with log_path.open(mode, encoding="utf-8") as log, process.stdout:
+                    for line in process.stdout:
+                        log.write(line)
+                        print(line, end="", flush=True)
+                        try:
+                            item = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if not item.get("Test") and item.get("Action") in {"pass", "fail", "skip"}:
+                            execution["completed_packages"] = execution.get("completed_packages", 0) + 1
+                        if time.monotonic() - last_progress >= 1:
+                            _progress(report_dir, lane, execution, command, "running")
+                            last_progress = time.monotonic()
+                        if item.get("Test") and item.get("Action") in {"pass", "fail", "skip"}:
+                            execution["completed_tests"] = execution.get("completed_tests", 0) + 1
+                            if "/" not in item["Test"] and item.get("Elapsed", 0) >= 1:
+                                execution.setdefault("slow_tests", []).append({"package": item.get("Package"),
+                                    "test": item["Test"], "seconds": item["Elapsed"], "result": item["Action"]})
+                code = process.wait()
+                execution["go_json_log"] = log_path.name
+                if code:
+                    raise subprocess.CalledProcessError(code, command)
+            else:
+                completed = subprocess.run(command, cwd=ROOT, env=child_env, check=False)
+                code = completed.returncode
+                if code:
+                    raise subprocess.CalledProcessError(code, command)
+                if "browser" in command and report_dir is not None:
+                    browser_log = report_dir / "browser-execution.log"
+                    if browser_log.is_file():
+                        execution["go_json_log"] = browser_log.name
+                        for line in browser_log.read_text().splitlines():
+                            try:
+                                item = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            if item.get("Test") and "/" not in item["Test"] and item.get("Action") in {"pass", "fail", "skip"}:
+                                execution.setdefault("slow_tests", []).append({"package": item.get("Package"),
+                                    "test": item["Test"], "seconds": item.get("Elapsed", 0), "result": item["Action"]})
+    finally:
+        if lane == "browser" and report_dir and (report_dir / "browser-execution.log").is_file():
+            execution["go_json_log"] = "browser-execution.log"
+        if code == 0 and reusable_validation(command):
+            execution.setdefault("passed_commands", []).append(normalized)
+        execution.setdefault("command_results", []).append({"command": command, "exit_code": code,
+            "elapsed_seconds": round(time.monotonic() - started, 3)})
+        _progress(report_dir, lane, execution, None, "running" if code == 0 else "failed",
+                  None if code == 0 else "command exited " + str(code))
 
 
 def venv_path(lane: str, report_dir: Path | None) -> str:
@@ -385,7 +498,7 @@ def commands(lane: str, report_dir: Path | None) -> list[list[str]]:
         ], [sys.executable, "-m", "unittest", "discover", "-s", "deploy", "-p", "test_*.py"]]
     if lane == "backend":
         venv = venv_path(lane, report_dir)
-        return [["bash", "scripts/run-donor-view-consumers.sh", "stage"], [
+        return [[sys.executable, "scripts/ci/check_preparation.py", "stage"], [
             sys.executable, "-m", "venv", venv
         ], [venv + "/bin/pip", "install", "-r", "components/excel-batches/requirements.txt"], [
             venv + "/bin/python", "-m", "unittest", "discover", "-s", "components/excel-batches", "-v"
@@ -394,7 +507,7 @@ def commands(lane: str, report_dir: Path | None) -> list[list[str]]:
         ]]
     if lane == "frontend":
         return [["npm", "run", "orval:check"], ["node", "scripts/ci/generated_clients_contract.mjs"], ["node", "scripts/excel-batches-dom-test.mjs"], ["node", "scripts/excel-batches-pagination-dom-test.mjs"], ["node", "scripts/validate-openapi.mjs"], [
-            "bash", "scripts/run-donor-view-consumers.sh", "check"
+            sys.executable, "scripts/ci/check_preparation.py", "check"
         ], ["node", "scripts/media-shell-interactions-e2e.mjs"], [
             "node", "scripts/tags-shell-interactions-e2e.mjs"
         ], ["node", "scripts/customer-directory-shell-e2e.mjs"]]
@@ -476,7 +589,7 @@ def focused_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[li
         for name in sorted(set(names)):
             command.extend(["--journey", name])
         command.extend(["--report-dir", str(report_dir)])
-        return [command]
+        return [*commands(lane, report_dir)[:-1], command]
     if lane == "archive-sdk":
         paths = []
         for check in selected:
@@ -502,15 +615,27 @@ def main() -> int:
     parser.add_argument("--profile", choices=("full", "tooling"), default="full")
     parser.add_argument("--focus-checks-json", default=os.environ.get("AICRM_CI_FOCUS_CHECKS", ""))
     parser.add_argument("--focus-packages-json", default=os.environ.get("AICRM_CI_FOCUS_PACKAGES", ""))
+    parser.add_argument("--resume-commands-json", default="[]")
     parser.add_argument("--check-prerequisites", action="store_true")
     args = parser.parse_args()
     started = time.monotonic()
-    execution = {"commands": [], "go_json_log": None}
+    execution = {"commands": [], "go_json_log": None, "command_results": [],
+                 "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    owned_preparation = None
+    if not os.environ.get("AICRM_TEST_PREP_DIR"):
+        owned_preparation = tempfile.TemporaryDirectory(prefix="aicrm-check-preparation-")
+        os.environ["AICRM_TEST_PREP_DIR"] = owned_preparation.name
     result, exit_code = "failed", 2
     try:
+        execution["resume_commands"] = json.loads(args.resume_commands_json)
+        if (not isinstance(execution["resume_commands"], list) or any(
+                not isinstance(command, list) or not command or any(not isinstance(value, str) for value in command)
+                for command in execution["resume_commands"])):
+            raise ValueError("continued command inventory must contain command arrays")
         _clear_lane_outputs(args.report_dir, args.lane)
         missing = missing_prerequisites(args.lane)
         if missing:
+            execution["failure_kind"] = "environment"
             print("missing required local environment: " + ", ".join(missing), file=sys.stderr)
             exit_code = 2
         elif args.check_prerequisites:
@@ -535,6 +660,8 @@ def main() -> int:
                                  if checks and args.lane != "preflight" else commands(args.lane, args.report_dir))
             if packages:
                 lane_commands = replace_full_backend_test_with_packages(lane_commands, packages)
+            execution["required_commands"] = len(lane_commands)
+            execution["required_packages"] = len(packages)
             for command in lane_commands:
                 run_recorded(command, lane_environment(args.lane, args.report_dir),
                              args.lane, args.report_dir, execution)
@@ -546,6 +673,26 @@ def main() -> int:
         print(str(error), file=sys.stderr)
         exit_code = 2
     finally:
+        prep = check_preparation.preparation_root()
+        if prep:
+            events = prep / "preparation.jsonl"
+            records = [json.loads(line) for line in events.read_text().splitlines()] if events.exists() else []
+            database_records = list(prep.glob("database-aicrm_test_tpl_*.json"))
+            execution["preparation"] = {"migration_templates": len(database_records),
+                "npm_installs": sum(record["kind"] == "npm" and not record["reused"] for record in records),
+                "artifact_builds": sum(record["kind"] == "artifact" and not record["reused"] for record in records),
+                "artifact_copies": sum(record["kind"] == "artifact" for record in records)}
+        if owned_preparation:
+            try:
+                if prep and list(prep.glob("database-*.json")):
+                    check_preparation.cleanup_databases(prep, os.environ["AICRM_DATABASE_URL"])
+                owned_preparation.cleanup()
+            except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+                print("attempt cleanup failed: " + str(error), file=sys.stderr)
+                result, exit_code = "failed", 2
+            finally:
+                os.environ.pop("AICRM_TEST_PREP_DIR", None)
+        _progress(args.report_dir, args.lane, execution, None, result)
         _write_lane_receipt(args.report_dir, args.lane, execution, started, result, exit_code)
     return exit_code
 

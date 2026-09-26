@@ -1,7 +1,8 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { chromiumStartupDiagnostic, chromiumStartupTimeoutMS } from "../../internal/webshell/chromium_launch.mjs";
 
 const baseURL = process.env.AICRM_MEDIA_REFRESH_TEST_URL;
@@ -14,7 +15,7 @@ if (!/^https:\/\//.test(baseURL || "") || !username || !password || !screenshot 
 const xlsxBase64 = (await fs.readFile(xlsxPath)).toString("base64");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const asError = (error) => error instanceof Error ? error : new Error(String(error));
-function binary() { for (const item of [process.env.AICRM_CHROMIUM_BINARY, process.env.CHROME_BIN, process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"].filter(Boolean)) { if (item.includes("/")) { try { if (spawnSync(item, ["--version"], { stdio: "ignore" }).status === 0) return item; } catch {} } else if (spawnSync("which", [item], { stdio: "ignore" }).status === 0) return item; } throw new Error("Chromium binary is unavailable"); }
+const binary = resolveChromiumBinary;
 class CDP { constructor(socket) { this.socket=socket; this.id=0; this.waiting=new Map(); socket.addEventListener("message", event => { const m=JSON.parse(String(event.data)); if (m.id && this.waiting.has(m.id)) { const p=this.waiting.get(m.id); this.waiting.delete(m.id); m.error ? p.reject(Object.assign(new Error(`CDP ${m.error.code}: ${m.error.message}`), {code:m.error.code})) : p.resolve(m.result||{}); } }); } call(method, params={}) { return new Promise((resolve,reject)=>{ const id=++this.id; this.waiting.set(id,{resolve,reject}); this.socket.send(JSON.stringify({id,method,params})); }); } close() { this.socket.close(); } }
 let browser; let stderr="";
 async function devtools(profile) { const until=Date.now()+chromiumStartupTimeoutMS; while(Date.now()<until) { try { const port=String(await fs.readFile(path.join(profile,"DevToolsActivePort"),"utf8")).split("\n")[0]; if(/^\d+$/.test(port)) return `http://127.0.0.1:${port}`; } catch {} if(browser?.exitCode!==null) break; await sleep(50); } throw new Error(chromiumStartupDiagnostic({profile,exitCode:browser?.exitCode,signalCode:browser?.signalCode,stderr})); }

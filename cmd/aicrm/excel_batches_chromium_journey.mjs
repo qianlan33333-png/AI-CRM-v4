@@ -1,7 +1,8 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
   chromiumStartupDiagnostic,
   chromiumStartupTimeoutMS,
@@ -33,22 +34,7 @@ const candidates = () => {
     "chromium-browser",
   ];
 };
-function browserBinary() {
-  for (const candidate of candidates()) {
-    if (candidate.includes("/")) {
-      try {
-        if (
-          spawnSync(candidate, ["--version"], { stdio: "ignore" }).status === 0
-        )
-          return candidate;
-      } catch (_) {}
-    } else if (
-      spawnSync("which", [candidate], { stdio: "ignore" }).status === 0
-    )
-      return candidate;
-  }
-  throw new Error("Chromium binary is unavailable");
-}
+const browserBinary = resolveChromiumBinary;
 class CDP {
   constructor(socket) {
     this.socket = socket;

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -20,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
@@ -263,55 +261,7 @@ func adminAccessCompositionDatabase(t *testing.T, ctx context.Context) (string, 
 
 func adminAccessCompositionDatabaseForURL(t *testing.T, ctx context.Context, raw string) (string, func()) {
 	t.Helper()
-	if raw == "" {
-		t.Fatal("an explicit PostgreSQL URL is required for the isolated composition schema")
-	}
-	adminConfig, err := pgxpool.ParseConfig(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	admin, err := pgxpool.NewWithConfig(ctx, adminConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var random [8]byte
-	if _, err = rand.Read(random[:]); err != nil {
-		admin.Close()
-		t.Fatal(err)
-	}
-	schema := "admin_access_composition_" + hex.EncodeToString(random[:])
-	if _, err = admin.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
-		admin.Close()
-		t.Fatal(err)
-	}
-	config := adminConfig.Copy()
-	config.ConnConfig.RuntimeParams["search_path"] = schema
-	native, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		admin.Close()
-		t.Fatal(err)
-	}
-	if err = adminAccessMigrateCompositionSchema(ctx, native); err != nil {
-		native.Close()
-		admin.Close()
-		t.Fatal(err)
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		native.Close()
-		admin.Close()
-		t.Fatal(err)
-	}
-	query := parsed.Query()
-	query.Set("search_path", schema)
-	parsed.RawQuery = query.Encode()
-	return parsed.String(), func() {
-		native.Close()
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = admin.Exec(cleanup, "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
-		admin.Close()
-	}
+	return preparedCompositionDatabase(t, ctx, raw)
 }
 
 func adminAccessMigrateCompositionSchema(ctx context.Context, pool *pgxpool.Pool) error {

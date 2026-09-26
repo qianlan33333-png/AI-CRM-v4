@@ -1,18 +1,14 @@
+import { resolveChromiumBinary } from "../../../../internal/webshell/chromium_binary.mjs";
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { build } from 'esbuild';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const chrome = () => {
-  for (const candidate of [process.env.AICRM_CHROMIUM_BINARY, process.env.CHROME_BIN, process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : '', 'google-chrome', 'chromium'].filter(Boolean)) {
-    if ((candidate.includes('/') ? spawnSync(candidate, ['--version'], { stdio: 'ignore' }).status : spawnSync('which', [candidate], { stdio: 'ignore' }).status) === 0) return candidate;
-  }
-  throw new Error('Chromium binary is unavailable');
-};
+const chrome = resolveChromiumBinary;
 class CDP {
   constructor(socket) {
     this.socket = socket; this.id = 0; this.pending = new Map();

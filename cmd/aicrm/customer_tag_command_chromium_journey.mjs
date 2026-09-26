@@ -1,25 +1,16 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 const baseURL = process.env.AICRM_CUSTOMER_TAG_TEST_URL;
 const username = process.env.AICRM_CUSTOMER_TAG_TEST_USERNAME;
 const password = process.env.AICRM_CUSTOMER_TAG_TEST_PASSWORD;
 if (!/^https:\/\//.test(baseURL || "") || !username || !password) throw new Error("customer tag Chromium journey requires HTTPS URL and test credentials");
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const candidates = () => {
-  const explicit = [process.env.AICRM_CHROMIUM_BINARY, process.env.CHROME_BIN].filter(Boolean);
-  if (process.platform === "darwin") explicit.push("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-  return [...explicit, "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"];
-};
-function browserBinary() {
-  for (const candidate of candidates()) {
-    if (candidate.includes("/")) { try { if (spawnSync(candidate, ["--version"], { stdio: "ignore" }).status === 0) return candidate; } catch (_) {} }
-    else if (spawnSync("which", [candidate], { stdio: "ignore" }).status === 0) return candidate;
-  }
-  throw new Error("Chromium binary is unavailable");
-}
+
+const browserBinary = resolveChromiumBinary;
 class CDP {
   constructor(socket) { this.socket = socket; this.nextID = 0; this.pending = new Map(); this.events = new Map(); socket.addEventListener("message", (event) => { const message = JSON.parse(String(event.data)); if (message.id && this.pending.has(message.id)) { const pending = this.pending.get(message.id); this.pending.delete(message.id); message.error ? pending.reject(new Error(`CDP ${message.error.code || "error"}`)) : pending.resolve(message.result || {}); return; } for (const listener of this.events.get(message.method) || []) listener(message.params || {}); }); }
   call(method, params = {}) { return new Promise((resolve, reject) => { const id = ++this.nextID; this.pending.set(id, { resolve, reject }); this.socket.send(JSON.stringify({ id, method, params })); }); }

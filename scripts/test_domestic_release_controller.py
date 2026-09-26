@@ -972,6 +972,22 @@ class DomesticMainReleaseTests(unittest.TestCase):
             self.assertEqual(result["status"], "pending")
             self.assertEqual(state["queue"][0]["attempt"], 4)
 
+    def test_environment_retry_reactivates_queue_and_keeps_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            state = release._new_state(base, release._tree(repo, base),
+                                       {"sha":base, "tree":release._tree(repo, base), "manifest_sha256":"a"*64})
+            failure = {"kind":"environment", "check_checkpoint":"/protected/attempt1-checkpoint.json"}
+            state.update(status="blocked", queue=[{"candidate_id":candidate, "ref":"refs/heads/codex/one",
+                "head_sha":candidate, "base_sha":base, "status":"pending", "attempt":1, "failure":failure}])
+            with mock.patch.object(release, "_load_state", return_value=state):
+                result = release.submit_candidate(repo, root/"state.json", "refs/heads/codex/one", candidate, base, root/"lock")
+            self.assertEqual(result["status"], "pending")
+            self.assertEqual(state["status"], "ready")
+            self.assertEqual(state["queue"][0]["failure"], failure)
+            self.assertEqual(state["queue"][0]["attempt"], 1)
+
     def test_release_candidate_does_not_poll_behind_an_earlier_candidate(self) -> None:
         head, base = "a" * 40, "b" * 40
         config = {"repo": "/repo", "state": "/state", "lock": "/lock",
@@ -2272,6 +2288,7 @@ def main():
             subprocess.run(["git", "-C", str(candidate), "commit", "-m", "fixture"], check=True,
                            stdout=subprocess.DEVNULL)
             quality_source = Path(__file__).resolve().parent / "ci/quality_lanes.py"
+            shutil.copy2(quality_source.with_name("check_preparation.py"), policy / "scripts/ci/check_preparation.py")
             (policy / "scripts/ci/quality_lanes.py").write_text('''import os
 from pathlib import Path
 exec(compile(Path(os.environ["AICRM_QUALITY_LANES_SOURCE"]).read_bytes(),

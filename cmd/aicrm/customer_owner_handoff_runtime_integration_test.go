@@ -472,13 +472,30 @@ func TestCustomerOwnerHandoffRiverSegmentsLocalOnly20000(t *testing.T) {
 		if txErr = tx.QueryRow(txctx, `INSERT INTO admin_users(username,password_hash,display_name,wecom_userid,is_active,login_enabled) VALUES('handoff-segment-target','$argon2id$fixture','Next','segment-next',true,false) RETURNING id`).Scan(&targetID); txErr != nil {
 			return txErr
 		}
-		for index := 0; index < handoffRows; index++ {
+		// These are fixture customers, not the handoff being verified. Seed the
+		// same 20,000 rows in one statement instead of 20,000 round trips; the
+		// complete preview, confirm, River interruption and restart still run.
+		rows, txErr := tx.Query(txctx, `WITH seeded AS (
+			INSERT INTO customers(status) SELECT 'active' FROM generate_series(1,$1::integer) RETURNING id
+		) SELECT id FROM seeded ORDER BY id`, handoffRows)
+		if txErr != nil {
+			return txErr
+		}
+		defer rows.Close()
+		for rows.Next() {
 			var customerID customerdomain.CustomerID
-			if txErr = tx.QueryRow(txctx, `INSERT INTO customers(status) VALUES('active') RETURNING id`).Scan(&customerID); txErr != nil {
+			if txErr = rows.Scan(&customerID); txErr != nil {
 				return txErr
 			}
+			index := len(ids)
 			ids = append(ids, customerID)
 			candidates = append(candidates, customerport.OwnerHandoffCandidate{CustomerID: customerID, State: "ready", RelationshipDigest: sha256.Sum256([]byte(fmt.Sprintf("segment-%d", index)))})
+		}
+		if txErr = rows.Err(); txErr != nil {
+			return txErr
+		}
+		if len(ids) != handoffRows {
+			return fmt.Errorf("owner-handoff fixture seeded %d customers, expected %d", len(ids), handoffRows)
 		}
 		return nil
 	}); err != nil {

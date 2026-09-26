@@ -1,8 +1,9 @@
+import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 const baseURL = String(process.env.AICRM_REMAINING_PAGES_URL || "").replace(/\/$/, "");
 const session = process.env.AICRM_REMAINING_PAGES_ADMIN_SESSION || "";
@@ -18,12 +19,7 @@ if (!/^https:\/\/127\.0\.0\.1:\d+$/.test(baseURL) || !session || !csrf || !/^[1-
 }
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const browserBinary = () => {
-  for (const candidate of [process.env.AICRM_CHROMIUM_BINARY, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "google-chrome", "chromium"].filter(Boolean)) {
-    if ((candidate.includes("/") ? spawnSync(candidate, ["--version"], { stdio: "ignore" }) : spawnSync("which", [candidate], { stdio: "ignore" })).status === 0) return candidate;
-  }
-  throw new Error("Chromium is unavailable");
-};
+const browserBinary = resolveChromiumBinary;
 class CDP {
   constructor(socket) { this.socket = socket; this.next = 0; this.pending = new Map(); this.events = new Map(); socket.addEventListener("message", event => { const message = JSON.parse(String(event.data)); if (message.id && this.pending.has(message.id)) { const pending = this.pending.get(message.id); this.pending.delete(message.id); message.error ? pending.reject(new Error(`CDP ${message.error.code}`)) : pending.resolve(message.result || {}); return; } for (const listener of this.events.get(message.method) || []) listener(message.params || {}); }); }
   call(method, params = {}) { return new Promise((resolve, reject) => { const id = ++this.next; const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }, 8000); this.pending.set(id, { resolve: value => { clearTimeout(timer); resolve(value); }, reject }); this.socket.send(JSON.stringify({ id, method, params })); }); }
