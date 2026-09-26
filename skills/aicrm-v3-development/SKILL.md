@@ -20,6 +20,9 @@ Use this skill after reading the repository `AGENTS.md`. Its purpose is to make 
 
 Follow `skills/aicrm-v3-development-frontdoor/SKILL.md`: keep the parent brief in one Codex task, deliver one independently releasable behavior or defect with its tests in each candidate, and use Product Design before UI implementation. Split by behavior, without line-count quotas. An authorized parent brief carries into child candidates; request a new decision only for material scope or contract changes. Release-failure diagnosis and fixes use a separate `gpt-6-luna` max agent; other tasks are not restricted to that model.
 
+
+每个候选固定说明对外合同、业务机制、关联模块、页面影响和验证证据，按 [开发入口五项判断](../aicrm-v3-development-frontdoor/SKILL.md#五项影响判断) 用准确 diff、依赖图和可信映射复核。高风险加强相关断言；未知影响不能仅靠作者声明缩减检查。
+
 ## Start With a Two-Axis Classification
 
 Before editing code, record a short decision in the implementation plan or PR:

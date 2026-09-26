@@ -11,6 +11,9 @@ import json
 import os
 from pathlib import Path
 import platform
+import shutil
+import signal
+import threading
 import subprocess
 import sys
 import tempfile
@@ -88,28 +91,59 @@ def main() -> int:
             if name != "full":
                 command += ["--base", plan["baseline_sha"], "--head", head]
             started = time.monotonic()
-            with tempfile.TemporaryDirectory(prefix="preparation-", dir=report) as directory:
-                env = dict(os.environ, AICRM_TEST_PREP_DIR=directory,
+            directory = Path(tempfile.mkdtemp(prefix="preparation-", dir=report))
+            free_before = shutil.disk_usage(report).free
+            minimum = {"free":free_before}
+            stopped = threading.Event()
+            def sample():
+                while not stopped.wait(0.5):
+                    minimum["free"] = min(minimum["free"],shutil.disk_usage(report).free)
+            sampler = threading.Thread(target=sample,daemon=True)
+            sampler.start()
+            try:
+                env = dict(os.environ, AICRM_TEST_PREP_DIR=str(directory),
                            AICRM_DEDUP_BASE_SHA=plan["baseline_sha"], AICRM_DEDUP_HEAD_SHA=head)
                 if name == "cold":
                     # Only this disposable checkout's generated dependencies;
                     # canonical sources and shared host caches remain intact.
-                    import shutil
                     for path in (root / "node_modules", root / "web/v3/node_modules"):
                         shutil.rmtree(path, ignore_errors=True)
                     env.update(GOCACHE=str(Path(directory) / "go-build"),
                                npm_config_cache=str(Path(directory) / "npm-cache"))
                 with (report / (name + ".log")).open("xb") as log:
-                    result = subprocess.run(command, cwd=root, env=env, stdout=log, stderr=subprocess.STDOUT)
+                    process = subprocess.Popen(command,cwd=root,env=env,stdout=log,stderr=subprocess.STDOUT,
+                                               start_new_session=True)
+                    try:
+                        result = subprocess.CompletedProcess(command,process.wait())
+                    except BaseException:
+                        try:
+                            os.killpg(process.pid,signal.SIGTERM)
+                            try: process.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                os.killpg(process.pid,signal.SIGKILL); process.wait(timeout=5)
+                        except ProcessLookupError: pass
+                        raise
+            finally:
+                stopped.set(); sampler.join()
+                minimum["free"] = min(minimum["free"],shutil.disk_usage(report).free)
+                metadata = report/(name+"-preparation")
+                metadata.mkdir(mode=0o700)
+                for value in [*directory.glob("*.json"),*directory.glob("*.jsonl")]:
+                    if value.is_file() and not value.is_symlink(): shutil.copyfile(value,metadata/value.name)
                 try:
-                    check_preparation.cleanup_databases(Path(directory), env["AICRM_DATABASE_URL"])
+                    check_preparation.cleanup_databases(directory, os.environ["AICRM_DATABASE_URL"])
                 except BaseException:
                     # Preserve cleanup failure in the benchmark result.
                     receipt["acceptance"] = "failed_cleanup"
+                    receipt["retained_preparation"] = str(directory)
                     raise
+                shutil.rmtree(directory)
                 elapsed = round(time.monotonic() - started, 3)
             receipt["runs"].append({"name": name, "command": command, "exit_code": result.returncode,
-                                     "elapsed_seconds": elapsed, "cache": "cold" if name == "cold" else "existing-host-cache",
+                                     "elapsed_seconds": elapsed,
+                                     "disk": {"free_before_bytes":free_before,"minimum_free_bytes":minimum["free"],
+                                              "peak_increment_bytes":max(0,free_before-minimum["free"]),
+                                              "free_after_cleanup_bytes":shutil.disk_usage(report).free}, "cache": "cold" if name == "cold" else "existing-host-cache",
                                      "log_sha256": hashlib.sha256((report / (name + ".log")).read_bytes()).hexdigest()})
             check_preparation.atomic_json(summary, receipt)
             if result.returncode or git(root, "rev-parse", "HEAD") != head or git(root, "rev-parse", "HEAD^{tree}") != tree or git(root, "status", "--porcelain=v1", "--untracked-files=all"):

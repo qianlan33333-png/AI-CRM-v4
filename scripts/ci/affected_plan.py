@@ -287,6 +287,7 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
     exact_checkout = checked_out_head == head_sha
 
     report = None
+    commerce = None
     analysis_error = None
     # POLICY_FILES contribute to the trace fingerprint, while only executable
     # gate/selector policy changes force the trusted full fallback. Human-facing
@@ -372,6 +373,15 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
                                           if isinstance(item, dict) and isinstance(item.get("import_path"), str)})
                                   if graph_valid and isinstance(graph_result, dict) else candidate_packages),
         "enforced": normalize_selection(enforced),
+        "policy_changed": policy_changed,
+        "business_assessment": (commerce_checks.business_evidence(commerce, graph_result, paths)
+                                if commerce is not None else {
+                                    "status": "requires_review",
+                                    "changed_paths": paths,
+                                    "scope_reasons": normalize_selection(enforced)["selection_reasons"],
+                                    "five_items": ["external_contract", "business_mechanism", "related_modules",
+                                                   "page_impact", "verification"],
+                                    "basis": "unverified scope remains conservative; declarations cannot narrow checks"}),
         "impact_maps": IMPACT_MAPS,
         "parent_prd": parent_prd_identity(root, head_sha),
         "analysis": {"status": "complete" if report is not None else "failed",

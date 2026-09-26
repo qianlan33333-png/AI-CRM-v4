@@ -12,6 +12,49 @@ from scripts import domestic_main_release as release
 
 
 class AccelerationGateTest(unittest.TestCase):
+    def test_package_continuation_retains_only_whole_passed_packages(self):
+        required = ["example/a", "example/b", "example/c", "example/no_tests"]
+        events = [
+            {"Action":"pass", "Package":"example/a", "Test":"TestA"},
+            {"Action":"pass", "Package":"example/a"},
+            {"Action":"pass", "Package":"example/b", "Test":"TestAlreadyPassed"},
+            {"Action":"fail", "Package":"example/b", "Test":"TestFailed"},
+            {"Action":"fail", "Package":"example/b"},
+            {"Action":"pass", "Package":"example/c", "Test":"TestIncompletePackage"},
+            {"Action":"skip", "Package":"example/no_tests"},
+            {"Action":"output", "Package":"example/no_tests", "Output":"? example/no_tests [no test files]"}]
+        passed = release._passed_go_packages(events, required)
+        self.assertEqual(passed, ["example/a", "example/no_tests"])
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            fresh = [{"Action":"pass", "Package":package} for package in ["example/b", "example/c"]]
+            receipt = self.receipt(directory, "backend", fresh)
+            receipt.update(required_go_packages=required, reused_go_packages=passed)
+            snapshot = {"events":release._sanitized_test_events(events), "required_go_packages":required,
+                        "result":{"log_path":"original-protected.log"}}
+            release._merge_backend_continuation(directory, snapshot, receipt, required)
+            release._verify_lane_evidence(directory, "backend", "b"*40, "c"*40, [], required)
+            merged = release._lane_test_events(directory, receipt)
+            self.assertNotIn("TestAlreadyPassed", [event.get("Test") for event in merged])
+            self.assertNotIn("TestIncompletePackage", [event.get("Test") for event in merged])
+            with self.assertRaises(release.CheckIncompleteError):
+                release._merge_backend_continuation(directory, snapshot, receipt, required + ["example/changed"])
+
+    def test_unknown_interruption_has_no_candidate_verdict_or_reuse_authority(self):
+        timeout = [{"Action":"fail", "Test":"TestBusiness"},
+                   {"Action":"output", "Output":"panic: test timed out after 30m"}]
+        self.assertFalse(release._candidate_lane_failure({}, timeout))
+        self.assertTrue(release._candidate_lane_failure({}, [{"Action":"fail", "Test":"TestAssertion"}]))
+        self.assertFalse(release._candidate_lane_failure({}, []))
+        with tempfile.TemporaryDirectory() as temp:
+            item = {"attempt":1}; state = {"in_flight":{"phase":"checks"}}
+            release._mark_failed(Path(temp)/"state.json", state, item,
+                                 release.CheckIncompleteError("interrupted"), "checks")
+            self.assertEqual(item["failure"]["kind"], "unknown")
+            self.assertEqual(item["failure"]["candidate_verdict"], "not_evaluated")
+            self.assertNotIn("check_checkpoint", item["failure"])
+            self.assertEqual(state["status"], "blocked")
+
     def test_only_known_environment_errors_are_resumable(self):
         media = "TestPostgreSQLMediaRefreshChromiumJourney"
         ops = "TestPostgreSQLOpsGovernanceChromiumJourney"
@@ -72,7 +115,7 @@ class AccelerationGateTest(unittest.TestCase):
                  patch.object(release, "_check_env", return_value={}), \
                  patch.object(release, "_verify_check_checkout_tree", return_value=1), \
                  patch.object(release, "_worktree_git", return_value="c"*40), \
-                 patch.object(release.subprocess, "run", side_effect=run):
+                 patch.object(release, "_run_check_process", side_effect=run):
                 execution = root / "attempt1/candidate"; execution.mkdir(parents=True)
                 reports = root / "reports1"; reports.mkdir()
                 config = {"_check_snapshots":{}}
@@ -85,6 +128,11 @@ class AccelerationGateTest(unittest.TestCase):
                 release.atomic_json(checkpoint, {"schema":1, "failure_kind":"environment", "identity":identity,
                                                 "lanes":config["_check_snapshots"]})
                 prior = release._load_check_checkpoint(checkpoint, diagnostics, identity)
+                completed = diagnostics / "maintenance-checkpoint.json"
+                release.atomic_json(completed, {"schema":1, "result":"passed", "failure_kind":None,
+                    "identity":identity, "lanes":config["_check_snapshots"]})
+                self.assertEqual(release._load_check_checkpoint(completed,diagnostics,identity)["result"],"passed")
+                self.assertEqual(release._load_check_checkpoint(completed,diagnostics,{**identity,"policy":"changed"}),{})
                 attempt["value"] = 2
                 execution = root / "attempt2/candidate"; execution.mkdir(parents=True)
                 reports = root / "reports2"; reports.mkdir()
@@ -189,7 +237,7 @@ class AccelerationGateTest(unittest.TestCase):
                  patch.object(release, "_check_env", return_value={}), \
                  patch.object(release, "_verify_check_checkout_tree", return_value=1), \
                  patch.object(release, "_worktree_git", return_value="c"*40), \
-                 patch.object(release.subprocess, "run", side_effect=run):
+                 patch.object(release, "_run_check_process", side_effect=run):
                 results = release._run_check_lanes({}, root, root, execution, reports, "a"*40, "b"*40,
                     {"selection_mode":"full"}, ["preflight","backend","frontend","browser"], [], [], "full", diagnostics)
             self.assertEqual(counter["maximum"], 2)

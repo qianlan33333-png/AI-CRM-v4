@@ -20,6 +20,8 @@ import platform
 import re
 import time
 import tempfile
+import uuid
+import threading
 
 CI_DIR = str(Path(__file__).resolve().parent)
 if CI_DIR not in sys.path:
@@ -71,6 +73,33 @@ def exact_version(command: list[str], expected: str) -> bool:
     return result.returncode == 0 and expected in result.stdout.split()
 
 
+def postgres_operations_ready() -> bool:
+    """Exercise only owned synthetic CREATE/TEMPLATE/DROP operations."""
+    if not os.environ.get("AICRM_DATABASE_URL") or not postgres_16_ready():
+        return False
+    parsed = urlparse(os.environ["AICRM_DATABASE_URL"])
+    env = dict(os.environ, PGHOST=parsed.hostname, PGPORT=str(parsed.port or 5432),
+               PGUSER=unquote(parsed.username or ""), PGPASSWORD=unquote(parsed.password or ""),
+               PGDATABASE=unquote(parsed.path.strip("/")),
+               PGSSLMODE=parse_qs(parsed.query).get("sslmode", ["prefer"])[0])
+    template = "aicrm_test_probe_" + uuid.uuid4().hex[:16] + "_acceptance_test"
+    clone = template.replace("_probe_", "_probe_clone_")
+    def sql(statement: str) -> bool:
+        return subprocess.run(["psql", "-X", "-v", "ON_ERROR_STOP=1", "-Atqc", statement],
+                              env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              timeout=15, check=False).returncode == 0
+    ready = False
+    try:
+        if sql('CREATE DATABASE "' + template + '" TEMPLATE template0'):
+            ready = (sql('ALTER DATABASE "' + template + '" ALLOW_CONNECTIONS false') and
+                     sql('CREATE DATABASE "' + clone + '" TEMPLATE "' + template + '"'))
+    finally:
+        # Both names were generated here, on a verified local synthetic DB.
+        ready = sql('DROP DATABASE IF EXISTS "' + clone + '"') and ready
+        ready = sql('DROP DATABASE IF EXISTS "' + template + '"') and ready
+    return ready
+
+
 def chromium_font_ready() -> bool:
     if not command_available("fc-match"):
         return False
@@ -115,8 +144,11 @@ def missing_prerequisites(lane: str) -> list[str]:
         missing.append("npm " + NPM_VERSION)
     if lane == "preflight" and not dedup_base_ready():
         missing.append("AICRM_DEDUP_BASE_SHA/current AICRM_DEDUP_HEAD_SHA baseline")
-    if lane in {"backend", "browser"} and not postgres_16_ready():
-        required.add("PostgreSQL 16 reachable through AICRM_DATABASE_URL")
+    if lane in {"backend", "browser"}:
+        if not postgres_16_ready():
+            missing.append("PostgreSQL 16 reachable through AICRM_DATABASE_URL")
+        elif not postgres_operations_ready():
+            missing.append("PostgreSQL 16 synthetic database CREATE/TEMPLATE/DROP under the actual account")
     if lane == "browser":
         if platform.system() != "Linux" or platform.machine() not in {"x86_64", "amd64"}:
             missing.append("Linux amd64 browser environment")
@@ -173,7 +205,8 @@ def replace_full_backend_test_with_packages(commands_: list[list[str]], packages
             result.append(test_command)
             replaced = True
         elif "vet" in command and "go" in command and "./..." in command:
-            result.append([*command[:-1], "-p", "1", *test_command[test_command.index("-timeout=15m") + 1:]])
+            result.append([*command[:-1], *([] if "-p" in command else ["-p", "1"]),
+                           *test_command[test_command.index("-timeout=15m") + 1:]])
         else:
             result.append(command)
     if not replaced:
@@ -340,6 +373,8 @@ def _write_lane_receipt(report_dir: Path | None, lane: str, execution: dict,
         "failure_kind": execution.get("failure_kind"),
         "passed_commands": execution.get("passed_commands", []),
         "reused_commands": execution.get("reused_commands", []),
+        "required_go_packages": execution.get("required_go_packages", []),
+        "reused_go_packages": execution.get("reused_go_packages", []),
     }
     measured = _execution_receipt(report_dir, execution, elapsed, result, exit_code,
                                   tested_sha, tree, policy_fingerprint, run_id, run_attempt_value)
@@ -415,6 +450,14 @@ def run_recorded(command: list[str], env: dict[str, str] | None, lane: str,
         return
     _progress(report_dir, lane, execution, command, "queued")
     started = time.monotonic()
+    free_before = shutil.disk_usage(ROOT).free
+    minimum_free = {"value":free_before}
+    stopped = threading.Event()
+    def sample_disk():
+        while not stopped.wait(0.5):
+            minimum_free["value"] = min(minimum_free["value"], shutil.disk_usage(ROOT).free)
+    sampler = threading.Thread(target=sample_disk, daemon=True)
+    sampler.start()
     code = 2
     last_progress = started
     try:
@@ -424,7 +467,32 @@ def run_recorded(command: list[str], env: dict[str, str] | None, lane: str,
                 report_dir.mkdir(parents=True, exist_ok=True)
                 log_path = report_dir / (lane + "-go-test.jsonl")
                 mode = "a" if log_path.exists() else "w"
-                process = subprocess.Popen(command, cwd=ROOT, env=child_env, stdout=subprocess.PIPE,
+                actual = command
+                if lane == "backend" and "-run" not in command:
+                    expressions = [value for value in command if value.startswith("./")]
+                    inventory = subprocess.check_output(
+                        ["go", "list", "-f", "{{.ImportPath}}", *expressions],
+                        cwd=ROOT, env=child_env, text=True).splitlines()
+                    inventory = sorted(set(inventory))
+                    if not inventory:
+                        raise ValueError("backend package discovery returned no required packages")
+                    execution["required_go_packages"] = inventory
+                    execution["required_packages"] = len(inventory)
+                    reused = execution.get("resume_go_packages", [])
+                    if not set(reused).issubset(inventory):
+                        raise ValueError("continued Go packages differ from required inventory")
+                    execution["reused_go_packages"] = reused
+                    execution["completed_packages"] = len(reused)
+                    if reused:
+                        remaining = sorted(set(inventory) - set(reused))
+                        if not remaining:
+                            log_path.touch()
+                            execution["go_json_log"] = log_path.name
+                            code = 0
+                            return
+                        paths = affected_package_test_command(remaining)[10:]
+                        actual = [value for value in command if value not in expressions] + paths
+                process = subprocess.Popen(actual, cwd=ROOT, env=child_env, stdout=subprocess.PIPE,
                                            stderr=subprocess.STDOUT, text=True)
                 assert process.stdout is not None
                 with log_path.open(mode, encoding="utf-8") as log, process.stdout:
@@ -467,12 +535,20 @@ def run_recorded(command: list[str], env: dict[str, str] | None, lane: str,
                                 execution.setdefault("slow_tests", []).append({"package": item.get("Package"),
                                     "test": item["Test"], "seconds": item.get("Elapsed", 0), "result": item["Action"]})
     finally:
+        stopped.set()
+        sampler.join()
+        free_after = shutil.disk_usage(ROOT).free
+        minimum_free["value"] = min(minimum_free["value"],free_after)
         if lane == "browser" and report_dir and (report_dir / "browser-execution.log").is_file():
             execution["go_json_log"] = "browser-execution.log"
         if code == 0 and reusable_validation(command):
             execution.setdefault("passed_commands", []).append(normalized)
         execution.setdefault("command_results", []).append({"command": command, "exit_code": code,
-            "elapsed_seconds": round(time.monotonic() - started, 3)})
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+            "free_before_bytes":free_before, "free_after_bytes":free_after,
+            "peak_disk_increment_bytes":max(0,free_before-minimum_free["value"]),
+            "disk_increment_bytes":free_before-free_after,
+            "executed_command": locals().get("actual", command)})
         _progress(report_dir, lane, execution, None, "running" if code == 0 else "failed",
                   None if code == 0 else "command exited " + str(code))
 
@@ -502,7 +578,7 @@ def commands(lane: str, report_dir: Path | None) -> list[list[str]]:
             sys.executable, "-m", "venv", venv
         ], [venv + "/bin/pip", "install", "-r", "components/excel-batches/requirements.txt"], [
             venv + "/bin/python", "-m", "unittest", "discover", "-s", "components/excel-batches", "-v"
-        ], ["bash", "scripts/run-go-with-donor-views.sh", "go", "vet", "./..."], [
+        ], ["bash", "scripts/run-go-with-donor-views.sh", "go", "vet", "-p", "1", "./..."], [
             "bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-json", "-p", "1", "-race", "-count=1", "-timeout=15m", "./..."
         ]]
     if lane == "frontend":
@@ -616,6 +692,7 @@ def main() -> int:
     parser.add_argument("--focus-checks-json", default=os.environ.get("AICRM_CI_FOCUS_CHECKS", ""))
     parser.add_argument("--focus-packages-json", default=os.environ.get("AICRM_CI_FOCUS_PACKAGES", ""))
     parser.add_argument("--resume-commands-json", default="[]")
+    parser.add_argument("--resume-go-packages-json", default="[]")
     parser.add_argument("--check-prerequisites", action="store_true")
     args = parser.parse_args()
     started = time.monotonic()
@@ -628,6 +705,12 @@ def main() -> int:
     result, exit_code = "failed", 2
     try:
         execution["resume_commands"] = json.loads(args.resume_commands_json)
+        execution["resume_go_packages"] = json.loads(args.resume_go_packages_json)
+        if (not isinstance(execution["resume_go_packages"], list) or any(
+                not isinstance(package, str) for package in execution["resume_go_packages"])):
+            raise ValueError("continued Go package inventory must be a string array")
+        if execution["resume_go_packages"] and args.lane != "backend":
+            raise ValueError("Go package continuation is only valid for the backend lane")
         if (not isinstance(execution["resume_commands"], list) or any(
                 not isinstance(command, list) or not command or any(not isinstance(value, str) for value in command)
                 for command in execution["resume_commands"])):

@@ -118,3 +118,27 @@ def selection(root: Path, base: str, head: str, paths: list[str], graph: dict) -
     return {"mode": "targeted", "lanes": ["preflight", "backend", "browser"],
             "checks": checks, "reason": PROFILE,
             "reasons": [PROFILE, "go-test-import-closure"], "profile": "affected-packages"}
+
+
+def business_evidence(selection_: dict, graph: dict, paths: list[str]) -> dict:
+    """Explain a verified mapping; author declarations cannot change selection."""
+    return {
+        "profile": PROFILE,
+        "external_contract": {"review_paths": [path for path in paths if path in RUNTIME_PATHS],
+                              "connections": ["public product -> H5 authorization -> period entitlement",
+                                              "checkout -> payment actions", "invitation -> distribution"]},
+        "business_mechanism": {"review": ["identity and permissions", "payment and entitlement state"],
+                               "assertions": "related contracts retained; risk strengthens assertions within this scope"},
+        "related_modules": {"go_packages": sorted(item["import_path"] for item in graph["selected_packages"]),
+                            "ownership": graph.get("direct_path_owners", {}),
+                            "basis": "production, test imports and embeds in exact base/head graph",
+                            "journey_connections": ["product", "payment", "identity", "referral", "distribution"]},
+        "page_impact": {"pages": ["public product entry", "period detail", "authorization callback and denial retry",
+                                  "post-payment actions", "invitation and distribution"],
+                        "basis": "trusted commerce journey mapping, including backend-only changes"},
+        "verification": {"go": "complete package suites with vet/race/count=1/p=1",
+                         "browser": selection_["checks"],
+                         "final_outputs": ["authorized period detail and fresh retry after denial",
+                                           "paid-order actions", "invitation ownership", "distribution result"],
+                         "uncovered": ["real Provider and production business readback"]},
+    }

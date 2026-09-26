@@ -13,6 +13,43 @@ import quality_lanes
 
 
 class QualityLaneTests(unittest.TestCase):
+    def test_go_continuation_runs_complete_unfinished_packages_and_retains_suite_flags(self):
+        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
+            root = Path(temp)
+            module = "example.invalid/crm"
+            (root / "go.mod").write_text("module " + module + "\n")
+            report = root / "report"
+            required = [module + "/a", module + "/b", module + "/c"]
+            process = unittest.mock.Mock()
+            process.stdout = io.StringIO(json.dumps({"Action":"pass", "Package":required[1]}) + "\n")
+            process.wait.return_value = 0
+            execution = {"commands":[], "resume_go_packages":[required[0], required[2]]}
+            command = ["go", "test", "-json", "-p", "1", "-race", "-count=1", "-timeout=30m", "./..."]
+            with patch.object(quality_lanes, "ROOT", root), \
+                 patch.object(quality_lanes.subprocess, "check_output", return_value="\n".join(required)), \
+                 patch.object(quality_lanes.subprocess, "Popen", return_value=process) as run:
+                quality_lanes.run_recorded(command, None, "backend", report, execution)
+            actual = run.call_args.args[0]
+            self.assertEqual(actual, command[:-1] + ["./b"])
+            self.assertNotIn("-run", actual)
+            self.assertEqual(execution["required_go_packages"], required)
+            self.assertEqual(execution["commands"], [command])
+            self.assertEqual(execution["command_results"][0]["executed_command"], actual)
+
+    def test_database_precheck_uses_owned_local_objects_and_never_special_parameter_privileges(self):
+        url = "postgres://synthetic@localhost/aicrm_test_probe_acceptance_test?sslmode=disable"
+        with patch.dict(os.environ, {"AICRM_DATABASE_URL":url}), \
+             patch.object(quality_lanes, "postgres_16_ready", return_value=True), \
+             patch.object(quality_lanes.subprocess, "run", return_value=subprocess.CompletedProcess([],0)) as run:
+            self.assertTrue(quality_lanes.postgres_operations_ready())
+        commands = [call.args[0] for call in run.call_args_list]
+        rendered = " ".join(" ".join(command) for command in commands)
+        self.assertIn("TEMPLATE template0", rendered)
+        self.assertIn("ALLOW_CONNECTIONS false", rendered)
+        self.assertEqual(sum("DROP DATABASE" in command[-1] for command in commands), 2)
+        self.assertNotIn("session_replication_role", rendered)
+        self.assertNotIn("postgres://", rendered)
+
     def test_timing_fingerprint_requires_exact_hosted_runner_image(self):
         base = {"GITHUB_ACTIONS": "true", "RUNNER_OS": "Linux", "RUNNER_ARCH": "X64"}
         with patch.dict(os.environ, base, clear=True), patch.object(

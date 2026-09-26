@@ -15,6 +15,21 @@ Read repository `AGENTS.md` and `skills/aicrm-v3-development/SKILL.md`. Use the 
 
 新增限制前使用 [核心 skill 的必要性判断](../aicrm-v3-development/SKILL.md#限制必要性判断奥卡姆剃刀原则)；没有新增限制时一句“不涉及新增限制”即可。
 
+
+## 五项影响判断
+
+每个候选在 PRD 和交付摘要中说明：
+
+| 判断 | 必须说明 |
+| --- | --- |
+| 对外合同 | 接口、事件、错误行为及最终业务输出是否变化 |
+| 业务机制 | 数据、事务、身份权限和外部效果是否变化 |
+| 关联模块 | 直接、间接调用方及消费者，附影响依据 |
+| 页面影响 | 页面、入口、展示和交互；后端变化也须评估 |
+| 验证证据 | 模块完整测试、连接合同、业务旅程、最终输出及未覆盖项 |
+
+作者声明由准确 diff、生产／测试／embed 依赖图和可信检查映射复核；填写“无影响”不能缩减检查。影响可靠时执行本模块全集、关联合同及最终输出；影响无法界定时扩大相关阶段，必要时全仓并说明原因。高风险加强相关断言，不直接扩大到无关业务。共享、迁移、策略和未验证类别保守执行；规则经完整结果对照后逐类启用。页面能力开发继续使用 Product Design。
+
 ## Small-step delivery
 
 - Keep the implementation and its child candidates in the same Codex task. Each candidate delivers one independently releasable, reversible user-visible behavior or clear defect with related tests. Split by behavior, not line or file quota. 日常候选是国内 `codex/*` 分支的准确 SHA/base；GitHub PR 仅作人工归档，不决定部署。
