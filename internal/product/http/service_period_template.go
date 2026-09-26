@@ -1,6 +1,7 @@
 package http
 
 import (
+	_ "embed"
 	"fmt"
 	"html"
 	"io"
@@ -16,6 +17,7 @@ import (
 // No donor business code is executed.
 type servicePeriodPublicState struct {
 	Available                              bool
+	Authenticated, ReadFailed              bool
 	LeadQRURL, LeadQRTitle, LeadQRSubtitle string
 	Product                                publicProduct
 	Status                                 string
@@ -43,9 +45,6 @@ func renderServicePeriodPublicPageWithPresentation(w io.Writer, state servicePer
 	// zone after the script refreshes its state so an evening UTC expiry cannot
 	// display two different calendar dates on one page.
 	page = strings.Replace(page, frozenServicePeriodEndDateFunction, servicePeriodShanghaiEndDateFunction, 1)
-	// Preserve the validated promotion context when refreshing the state card,
-	// otherwise the refresh would replace the attributed checkout link.
-	page = strings.Replace(page, `fetch(window.location.pathname.replace(/^\\/s\\//, "/api/h5/service-period-products/"))`, `fetch(window.location.pathname.replace(/^\\/s\\//, "/api/h5/service-period-products/") + window.location.search)`, 1)
 
 	status := state.Status
 	if status == "" {
@@ -93,6 +92,12 @@ func renderServicePeriodPublicPageWithPresentation(w io.Writer, state servicePer
 		card = servicePeriodNoneCard(price, state.Product.ServicePeriodDurationDays)
 	}
 
+	if state.Available && (!state.Authenticated || state.ReadFailed) {
+		tagHidden, heroHidden, wecomHidden = " hidden", " hidden", " hidden"
+		card = servicePeriodNoneCard(price, state.Product.ServicePeriodDurationDays) + `<p class="service-period-tip" role="status">正在查询服务权益…</p>`
+		barMeta, cta = "正在查询服务权益…", "正在查询"
+	}
+
 	// Decode only static Python f-string segments before inserting trusted Host
 	// facts. The frozen source contains both doubled f-string braces and Python
 	// escapes (notably `\\\\` in JavaScript regexes). A whole-page replacement
@@ -124,6 +129,10 @@ func renderServicePeriodPublicPageWithPresentation(w io.Writer, state servicePer
 	if err != nil {
 		return err
 	}
+	if strings.Count(page, servicePeriodFrozenRefresh) != 1 {
+		return fmt.Errorf("service-period state refresh insertion point unavailable")
+	}
+	page = strings.Replace(page, servicePeriodFrozenRefresh, servicePeriodIdentityScript, 1)
 	if presentation.configured() {
 		page, err = decorateFrozenServicePeriodPresentation(page, presentation)
 		if err != nil {
@@ -352,3 +361,17 @@ func servicePeriodDetailMedia(images []string) string {
 	b.WriteString("    </section>")
 	return b.String()
 }
+
+// The frozen DOM and state render functions remain unchanged. This Owner script
+// replaces only its anonymous refresh with the trusted identity/read lifecycle.
+//
+//go:embed service_period_identity.js
+var servicePeriodIdentityScript string
+
+const servicePeriodFrozenRefresh = `      applyState(initialState);
+      fetch(window.location.pathname.replace(/^\/s\//, "/api/h5/service-period-products/"))
+        .then(function (response) { return response.json(); })
+        .then(function (payload) {
+          if (payload && payload.ok !== false) applyState(payload);
+        })
+        .catch(function () {});`

@@ -147,8 +147,8 @@ func (h *ServicePeriodPublicHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 	}
 	state, entitlementErr := h.publicState(r.Context(), r, product, public)
 	if entitlementErr != nil {
-		http.Error(w, "service state unavailable", http.StatusServiceUnavailable)
-		return
+		// Keep the introduction and a retryable card; a failed read is not no entitlement.
+		state.ReadFailed = true
 	}
 	if !available {
 		state.Available, state.Status, state.CTA, state.LeadQRURL = false, "unavailable", "暂未开放", ""
@@ -158,7 +158,8 @@ func (h *ServicePeriodPublicHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 
 func (h *ServicePeriodPublicHandler) publicState(ctx context.Context, r *http.Request, product productport.CheckoutProduct, public publicProduct) (servicePeriodPublicState, error) {
 	state := servicePeriodPublicState{Available: true, Product: public, Status: "none", CTA: "立即报名"}
-	entitlement, found, err := h.trustedEntitlement(ctx, r, product.ID)
+	entitlement, found, authenticated, err := h.trustedEntitlement(ctx, r, product.ID)
+	state.Authenticated = authenticated
 	if err != nil || !found {
 		return state, err
 	}
@@ -210,7 +211,7 @@ func (h *ServicePeriodPublicHandler) publicStateOrDetailMedia(w http.ResponseWri
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "available": state.Available, "entitlement": map[string]any{"status": state.Status, "end_at": state.EndAt.UTC().Format(time.RFC3339), "remaining_days": state.RemainingDays}, "lead_qr": map[string]any{"qr_url": state.LeadQRURL, "title": state.LeadQRTitle, "subtitle": state.LeadQRSubtitle}, "cta_text": state.CTA, "checkout_url": state.Product.PaymentPath})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "available": state.Available, "authenticated": state.Authenticated, "entitlement": map[string]any{"status": state.Status, "end_at": state.EndAt.UTC().Format(time.RFC3339), "remaining_days": state.RemainingDays}, "lead_qr": map[string]any{"qr_url": state.LeadQRURL, "title": state.LeadQRTitle, "subtitle": state.LeadQRSubtitle}, "cta_text": state.CTA, "checkout_url": state.Product.PaymentPath})
 		return
 	}
 	h.detailMedia(w, r)
@@ -293,13 +294,13 @@ func servicePeriodPublicCode(path string) (string, bool, bool) {
 	return code, payment, true
 }
 
-func (h *ServicePeriodPublicHandler) trustedEntitlement(ctx context.Context, r *http.Request, productID productport.ID) (orderport.Entitlement, bool, error) {
+func (h *ServicePeriodPublicHandler) trustedEntitlement(ctx context.Context, r *http.Request, productID productport.ID) (orderport.Entitlement, bool, bool, error) {
 	if h == nil || h.uow == nil || h.sessions == nil || h.entitlements == nil {
-		return orderport.Entitlement{}, false, nil
+		return orderport.Entitlement{}, false, false, nil
 	}
 	cookie, err := r.Cookie(paymentport.TrustedSessionCookieName)
 	if err != nil || cookie.Value == "" {
-		return orderport.Entitlement{}, false, nil
+		return orderport.Entitlement{}, false, false, nil
 	}
 	var (
 		actor        paymentport.SessionActor
@@ -320,17 +321,18 @@ func (h *ServicePeriodPublicHandler) trustedEntitlement(ctx context.Context, r *
 		return nil
 	})
 	if err != nil {
-		return orderport.Entitlement{}, false, err
+		return orderport.Entitlement{}, false, false, err
 	}
 	if !sessionValid || actor.PayerCustomerID < 1 {
-		return orderport.Entitlement{}, false, nil
+		return orderport.Entitlement{}, false, false, nil
 	}
 	// The Payment session reader requires the short local transaction above,
 	// while the stable Order entitlement application owns its own read UoW.
 	// Keep the calls sequential: forwarding txctx would attempt a nested
 	// PostgreSQL transaction and turn a legitimate public unavailable state
 	// into a 503. This route is a read-only presentation projection.
-	return h.entitlements.GetCustomerServicePeriodEntitlement(ctx, actor.PayerCustomerID, int64(productID))
+	entitlement, found, err := h.entitlements.GetCustomerServicePeriodEntitlement(ctx, actor.PayerCustomerID, int64(productID))
+	return entitlement, found, true, err
 }
 
 func remainingServicePeriodDays(now, end time.Time) int32 {

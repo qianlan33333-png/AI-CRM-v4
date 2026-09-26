@@ -227,6 +227,77 @@ try {
   await visit({ pagePath: `/s/${encodeURIComponent(unavailableServiceCode)}`, kind: "service_period", route: "service-period-state", width: 375, file: "public-service-unavailable-detail-375.png", unavailable: true });
   await visit({ pagePath: `/s/${encodeURIComponent(unavailableServiceCode)}/pay`, kind: "service_period", route: "service-period-state", width: 430, file: "public-service-unavailable-payment-430.png", unavailable: true });
 
+  // Missing identity on the period detail now starts OAuth before a purchase.
+  // Intercept only the external authorization UI; start, callback, session
+  // issuance, identity matching and rights reads all use the composed Host.
+  await cdp.call("Network.deleteCookies", { name: trustedCookieName, url: baseURL });
+  await evaluate(cdp, "sessionStorage.clear()");
+  await setUserAgent(nonWeChatUserAgent);
+  await cdp.call("Page.navigate", { url: baseURL + `/p/${encodeURIComponent(standardCode)}` });
+  await waitFor(cdp, "document.querySelector('#detailContent:not([hidden])')", "ordinary details must remain anonymous");
+  await cdp.call("Page.navigate", { url: baseURL + `/s/${encodeURIComponent(serviceCode)}` });
+  await waitFor(cdp, "document.querySelector('#servicePeriodPayButton')?.textContent === '请在微信中打开'", "anonymous Safari period prompt");
+  assert.equal(await evaluate(cdp, "document.querySelector('#servicePeriodStateCard').textContent.includes('剩余有效期')"), false);
+  await capture("public-service-anonymous-430.png");
+
+  let authorizationMode = "refused", oauthStarts = 0, lastCallback, failState = false;
+  const interceptionErrors = [];
+  cdp.on("Fetch.requestPaused", event => {
+    void (async () => {
+      const requestURL = new URL(event.request.url);
+      if (requestURL.host === "open.weixin.qq.com") {
+        oauthStarts += 1;
+        assert.equal(requestURL.searchParams.get("scope"), "snsapi_userinfo");
+        const callback = new URL(requestURL.searchParams.get("redirect_uri"));
+        assert.equal(callback.origin, baseURL);
+        callback.searchParams.set("state", requestURL.searchParams.get("state"));
+        callback.searchParams.set("code", authorizationMode === "refused" ? "authdeny" : "service-detail-roundtrip-code");
+        lastCallback = callback.toString();
+        await cdp.call("Fetch.fulfillRequest", { requestId:event.requestId, responseCode:302, responseHeaders:[{name:"Location",value:lastCallback}], body:"" });
+      } else if (failState) {
+        await cdp.call("Fetch.fulfillRequest", { requestId:event.requestId, responseCode:503, responseHeaders:[{name:"Content-Type",value:"text/plain"}], body:Buffer.from("state unavailable").toString("base64") });
+      } else {
+        await cdp.call("Fetch.continueRequest", {requestId:event.requestId});
+      }
+    })().catch(error => interceptionErrors.push(error.message));
+  });
+  await cdp.call("Fetch.enable", {patterns:[{urlPattern:"https://open.weixin.qq.com/connect/oauth2/authorize*"},{urlPattern:baseURL+"/api/h5/service-period-products/"+serviceCode+"*"}]});
+  await setUserAgent(browserUserAgent);
+  const promotion = "dpc_" + "a".repeat(43);
+  const periodDetail = `/s/${encodeURIComponent(serviceCode)}?promotion_context=${promotion}`;
+  await cdp.call("Page.navigate", {url:baseURL+periodDetail});
+  await waitFor(cdp, "document.querySelector('#servicePeriodPayButton')?.textContent === '重新授权'", "refused OAuth must return to retryable detail");
+  assert.equal(oauthStarts,1,"refused automatic OAuth does not loop");
+  await capture("public-service-auth-refused-430.png");
+  authorizationMode="success";
+  await evaluate(cdp, "document.querySelector('#servicePeriodPayButton').click()");
+  await waitFor(cdp, "document.querySelector('#servicePeriodPayButton')?.textContent === '立即续费' && document.querySelector('#servicePeriodStateCard')?.getAttribute('aria-busy') === 'false'", "OAuth callback must show active rights on original detail");
+  assert.equal(await evaluate(cdp,"location.pathname+location.search"), periodDetail);
+  assert.equal(oauthStarts,2);
+  assert.equal(await evaluate(cdp,"sessionStorage.getItem('aicrm.oauth.auto:'+location.pathname)"),null);
+  await capture("public-service-authenticated-430.png");
+  const beforeReplay=await cdp.call("Network.getCookies",{urls:[baseURL]});
+  await evaluate(cdp,`fetch(${JSON.stringify(lastCallback)},{credentials:'same-origin'}).then(response=>response.text()).then(()=>true)`);
+  const afterReplay=await cdp.call("Network.getCookies",{urls:[baseURL]});
+  assert.equal(afterReplay.cookies.find(cookie=>cookie.name===trustedCookieName)?.value,beforeReplay.cookies.find(cookie=>cookie.name===trustedCookieName)?.value,"callback replay cannot mint a new session");
+
+  failState=true;
+  await evaluate(cdp,"window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}))");
+  await waitFor(cdp,"document.querySelector('#servicePeriodPayButton')?.textContent==='重新查询'","failed rights read must be retryable");
+  assert.equal(await evaluate(cdp,"document.querySelector('#servicePeriodStateCard').textContent.includes('剩余有效期')"),false);
+  await capture("public-service-read-failed-430.png");
+  failState=false;
+  await evaluate(cdp,"document.querySelector('#servicePeriodPayButton').click()");
+  await waitFor(cdp,"document.querySelector('#servicePeriodPayButton')?.textContent==='立即续费'","retry rights read");
+  await cdp.call("Page.navigate",{url:baseURL+`/s/${encodeURIComponent(serviceCode)}/pay?promotion_context=${promotion}`});
+  await waitFor(cdp,"document.querySelector('#checkoutContent:not([hidden])')","renewal checkout remains separate");
+  await evaluate(cdp,"fetch('/__fixture__/renew-entitlement',{method:'POST'}).then(response=>{if(response.status!==204)throw new Error('fixture renewal failed')})");
+  await evaluate(cdp,"history.back()");
+  await waitFor(cdp,"document.querySelector('#servicePeriodStateCard')?.textContent.includes('120 天')","back from checkout must refresh extended rights");
+  await capture("public-service-return-refreshed-430.png");
+  if(interceptionErrors.length) throw new Error(interceptionErrors.join('; '));
+  await cdp.call("Fetch.disable");
+
   const successfulAssets = [...publicAssets.entries()].filter(([, status]) => status === 200).map(([resource]) => resource);
   if (successfulAssets.length < 3 || !successfulAssets.some(resource => resource.endsWith(".css")) || !successfulAssets.some(resource => resource.endsWith(".js")) || !successfulAssets.some(resource => resource.includes("/chunks/"))) {
     throw new Error(`anonymous public asset closure did not load CSS, Host, and module chunk: ${JSON.stringify(Object.fromEntries(publicAssets))}`);

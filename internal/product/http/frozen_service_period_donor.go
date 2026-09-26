@@ -29,12 +29,14 @@ func servicePeriodStateJSON(state servicePeriodPublicState, status string) strin
 		entitlement["remaining_days"] = state.RemainingDays
 	}
 	payload, _ := json.Marshal(map[string]any{
-		"ok":           true,
-		"available":    state.Available,
-		"entitlement":  entitlement,
-		"lead_qr":      map[string]any{"qr_url": state.LeadQRURL, "title": state.LeadQRTitle, "subtitle": state.LeadQRSubtitle},
-		"cta_text":     state.CTA,
-		"checkout_url": state.Product.PaymentPath,
+		"ok":            true,
+		"available":     state.Available,
+		"authenticated": state.Authenticated,
+		"read_failed":   state.ReadFailed,
+		"entitlement":   entitlement,
+		"lead_qr":       map[string]any{"qr_url": state.LeadQRURL, "title": state.LeadQRTitle, "subtitle": state.LeadQRSubtitle},
+		"cta_text":      state.CTA,
+		"checkout_url":  state.Product.PaymentPath,
 	})
 	return strings.ReplaceAll(string(payload), "</", "<\\/")
 }

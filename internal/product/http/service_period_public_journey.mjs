@@ -27,6 +27,7 @@ async function runPage(path, cookie) {
     runScripts: "dangerously",
     virtualConsole: console,
     beforeParse(window) {
+      window.AbortController = globalThis.AbortController;
       Object.defineProperty(window.navigator,'userAgent',{value:cookie?'MicroMessenger':'Safari'});
       window.fetch = async (input, init = {}) => {
         refreshes += 1;
@@ -54,12 +55,13 @@ assert.equal(activeDocument.getElementById('servicePeriodWecomAction').hidden, f
 active.window.close();
 
 // A legacy fragment cannot mint an entitlement. Without the existing opaque
-// Payment OAuth cookie the exact same page stays unregistered after refresh.
+// Payment OAuth cookie the page offers a WeChat-open prompt, never personal facts.
 const untrusted = await runPage("/s/term-31#aicrm_ctx=untrusted-external-id", "");
 const untrustedDocument = untrusted.window.document;
 assert.equal(untrustedDocument.getElementById('identityGate'), null);
 assert.equal(untrustedDocument.getElementById('checkoutContent'), null);
-assert.equal(untrustedDocument.getElementById('servicePeriodPayButton').textContent, '立即报名');
+assert.equal(untrustedDocument.getElementById('servicePeriodPayButton').textContent, '请在微信中打开');
+assert.equal(untrustedDocument.getElementById('servicePeriodPayButton').disabled, true);
 assert.equal(untrustedDocument.getElementById('servicePeriodWecomAction').hidden, true);
 assert.doesNotMatch(untrustedDocument.getElementById('servicePeriodStateCard').textContent, /剩余有效期/);
 assert.doesNotMatch(untrustedDocument.documentElement.outerHTML, /aicrm_ctx/);

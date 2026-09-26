@@ -1,22 +1,25 @@
-# Referral settings design QA
+# 周期详情授权与权益状态 QA
 
-final result: blocked
+目标：用户提供的周期商品详情截图；保留现有蓝色标题、权益卡片、绿色进度与底部按钮。本次使用 Product Design get-context / image-to-code 的现有目标复用原则及 design-qa 截图对照，不创建新页面框架。
 
-Source: user /Users/qianlan/Downloads/1.png and retained CRM template reference.
-Implementation: http://127.0.0.1:4189/admin/referral/settings, actual webshell renderer and built Referral assets with read-only local API fixtures. Chrome native UI inspected on 2026-09-19. Screenshot /tmp/referral-settings-preview.png.
+## Findings
 
-Fixed during visual verification: settings failed to mount because shared product selector script was not loaded; large participation dropdown stretched to adjacent picker height; form controls moved out of page header. Re-capture confirms complete-page route, persistent CRM navigation, four white setting sections, blue numbered headings, page-header actions and non-stretched product controls.
+- 首轮检查发现新增失败原因在底栏过长。已将底栏改为“授权未完成”“权益查询失败”等短状态，完整原因保留在卡片。第二轮真实 Host 截图确认文本和按钮没有重叠或横向溢出。
+- 没有本次改动造成的 P0/P1/P2 遗留问题。
 
-Source and implementation were emitted together for comparison twice. Current desktop viewport is 1051x768 including browser chrome, source is 1487x1058. Exact viewport/state comparison and mobile verification remain open, so full design QA is not marked passed. Existing cover URL field is retained; image upload, radio/switch styling and chosen-product thumbnail do not yet reproduce the reference. Do not report pixel fidelity or full Product Design completion.
+## Fidelity surfaces
 
-Functional evidence: PostgreSQL and JSDOM tests are recorded in the PRD. Local visual fixtures are not production readback or purchase acceptance.
+- 字体/层级：沿用当前服务期 renderer；标题、剩余天数与说明层级保留。合成商品名称和天数与用户截图不同，是验收数据差异。
+- 间距/布局：未修改现有 CSS；430×860 移动视口检查卡片、页脚、状态提示与返回后的卡片。源图 1140×2616，去除微信浏览器顶部 chrome 后按 430px 宽度归一化对照；源图可视高度与测试视口不同，不据此判定页面比例漂移。
+- 颜色：沿用蓝色主按钮/标题、灰色说明、绿色权益进度。
+- 图片/素材：保留商品已有详情图片接口与展示方式。Host 的蓝绿图片是合成上传素材，与用户截图中的 OPC 海报不同；本次不修改或重新生成商品海报。企微入口按真实产品配置展示，测试商品未配置入口，因此截图中不出现。
+- 文案：核验中不会宣布“未报名”；已验证身份后分别展示续费、重新开通或报名。失败卡片说明可行修正方式，底栏保持简短。
 
-2026-09-20 follow-up: Chrome native capture remained unavailable after the user reopened the preview. The in-app browser could load and interact with the settings page, including selecting product-purchase mode. Its viewport screenshot had scaling/blur/duplicated paint artifacts, including after resetting through the supported viewport/CDP controls. DOM interaction evidence does not substitute for reliable visual comparison. Visual QA therefore remains blocked. Active product controls are now disabled as a fieldset so asynchronous directory completion cannot re-enable clearing the locked product.
+## Implementation checklist
 
-## 2026-09-26 支付宝原付款页修复
+- 实际 Chromium + PostgreSQL + Composition Root 旅程通过。外部微信授权 UI 使用局部拦截，OAuth start、callback、OneID、会话和权益读取均运行真实 Host；Provider 使用本地合成响应。
+- 覆盖匿名普通详情、非微信周期详情、取消/重试/成功回跳、回调重放、读取失败/重试与返回后权益更新。
+- 真实微信 UI 与真实付款仍须独立业务验收；合成截图不代表这些外部结果。
+- 截图与比较图位于相邻独立证据目录 `v4-service-period-entry-auth-evidence/screenshots/`。已打开原始参考、组合比较图及失败状态截图检查；后续失败截图复验了修正后的底栏。
 
-本次付款蒙版及成功反馈范围：passed。Product Design 已按 360/390/430px 实际浏览器截图及原页自动成功行为验收。详见 [验收记录](docs/qa/2026-09-26-alipay-checkout-design.md)。上方历史 referral QA 状态不代表本次付款页面。生产实付证据待发布后取得。
-
-## 2026-09-26 支付宝订单详情修复
-
-本次主信息展示及交付面板隔离范围：passed。Product Design 已使用实际 V4 Host 和合成附属 404 做浏览器验收。详见 [验收记录](docs/qa/2026-09-26-alipay-order-detail-design.md)。上方历史 referral QA 状态不代表本次订单页面。生产认证读回待发布后取得。
+final result: passed

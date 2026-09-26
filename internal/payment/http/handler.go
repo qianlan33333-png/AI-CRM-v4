@@ -286,6 +286,9 @@ func (handler *Handler) checkoutSession(writer http.ResponseWriter, request *htt
 
 func (handler *Handler) startH5OAuth(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet || handler.h5OAuth == nil || !handler.h5OAuth.Enabled() {
+		if query, ok := exactH5OAuthQuery(request, "return_url"); ok && retryPeriodDetailOAuth(writer, request, query["return_url"]) {
+			return
+		}
 		writeError(writer, http.StatusServiceUnavailable, "payment_h5_oauth_disabled")
 		return
 	}
@@ -303,6 +306,9 @@ func (handler *Handler) startH5OAuth(writer http.ResponseWriter, request *http.R
 		// A valid canonical return can still fail while durably reserving its
 		// one-time OAuth state. Do not misreport that server-side condition as a
 		// caller error or expose its database/provider detail.
+		if retryPeriodDetailOAuth(writer, request, query["return_url"]) {
+			return
+		}
 		writeError(writer, http.StatusServiceUnavailable, "payment_h5_oauth_unavailable")
 		return
 	}
@@ -311,6 +317,27 @@ func (handler *Handler) startH5OAuth(writer http.ResponseWriter, request *http.R
 	// or stale callback can return to the login gate without replaying state.
 	http.SetCookie(writer, &http.Cookie{Name: h5OAuthReturnCookieName, Value: base64.RawURLEncoding.EncodeToString([]byte(query["return_url"])), Path: "/api/h5/wechat-pay/oauth/callback", MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	http.Redirect(writer, request, location, http.StatusFound)
+}
+
+// Period details retain their per-tab automatic-attempt marker before leaving
+// for OAuth. Returning here on a start failure exposes the manual retry action
+// without an automatic loop or an unusable JSON error page. Other consumers
+// retain their existing error contract; only canonical detail returns qualify.
+func retryPeriodDetailOAuth(writer http.ResponseWriter, request *http.Request, returnPath string) bool {
+	if request.Method != http.MethodGet || !strings.Contains(strings.ToLower(request.UserAgent()), "micromessenger") || !paymenth5oauth.ValidReturnPath(returnPath) {
+		return false
+	}
+	parsed, err := url.Parse(returnPath)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(parsed.Path, "/")
+	if len(parts) != 3 || parts[1] != "s" || parts[2] == "" {
+		return false
+	}
+	writer.Header().Set("Cache-Control", "no-store")
+	http.Redirect(writer, request, returnPath, http.StatusSeeOther)
+	return true
 }
 
 func (handler *Handler) completeH5OAuth(writer http.ResponseWriter, request *http.Request) {

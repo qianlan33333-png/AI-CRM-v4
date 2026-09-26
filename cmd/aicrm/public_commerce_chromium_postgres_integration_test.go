@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,7 @@ func TestPostgreSQLPublicCommerceChromiumJourney(t *testing.T) {
 	}
 	trustedSession := issuePublicCommerceTrustedH5Session(t, fixture)
 	seedPublicCommerceEntitlement(t, fixture, publicCommerceUnavailableServicePeriod{code: "browser-push-service-period", id: fixture.serviceProductID}, trustedSession)
+	installPublicCommerceIdentityFixture(t, fixture, trustedSession)
 	assertPublicCommerceUnavailableState(t, fixture, unavailable.code, trustedSession.token, "no_entitlement")
 	seedPublicCommerceEntitlement(t, fixture, unavailable, trustedSession)
 	assertPublicCommerceUnavailableState(t, fixture, unavailable.code, trustedSession.token, "active_entitlement")
@@ -65,6 +67,10 @@ func TestPostgreSQLPublicCommerceChromiumJourney(t *testing.T) {
 	if err != nil || !strings.Contains(string(output), "public_commerce_chromium: PASS") {
 		t.Fatalf("public commerce Chromium journey err=%v output=%s", err, strings.TrimSpace(string(output)))
 	}
+	var checkouts int
+	if err := fixture.application.pool.Native().QueryRow(fixture.ctx, `SELECT count(*) FROM payments`).Scan(&checkouts); err != nil || checkouts != 0 {
+		t.Fatalf("detail identity journey created checkouts=%d err=%v", checkouts, err)
+	}
 	expirePublicCommerceTrustedSession(t, fixture, trustedSession.token)
 	assertPublicCommerceUnavailableState(t, fixture, unavailable.code, trustedSession.token, "expired_session")
 
@@ -87,6 +93,52 @@ func TestPostgreSQLPublicCommerceChromiumJourney(t *testing.T) {
 			}())
 		}
 	}
+}
+
+// Exercise the existing OAuth state, OneID issuer and callback with a local
+// provider. Browser interception only redirects the external authorization UI
+// to the real callback; no trusted session is injected into that round trip.
+func installPublicCommerceIdentityFixture(t *testing.T, fixture *productExternalPushChromiumFixture, session publicCommerceTrustedH5Session) {
+	t.Helper()
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/sns/oauth2/access_token":
+			if r.URL.Query().Get("code") != "service-detail-roundtrip-code" {
+				http.Error(w, "unexpected fixture code", http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`{"access_token":"detail-fixture-access","openid":"public-commerce-browser-openid","scope":"snsapi_userinfo"}`))
+		case "/sns/userinfo":
+			_, _ = w.Write([]byte(`{"openid":"public-commerce-browser-openid","unionid":"public-commerce-browser-unionid","nickname":"周期详情验收"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(provider.Close)
+	target, err := url.Parse(provider.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := http.DefaultTransport
+	transport := &referralH5OAuthTransport{base: original, target: target}
+	http.DefaultTransport = transport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	// This test-only endpoint models an already committed renewal projection.
+	// Actual payment/renewal commits are covered by the existing virtual journey.
+	owner := fixture.server.Config.Handler
+	fixture.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/__fixture__/renew-entitlement" && r.Method == http.MethodPost {
+			_, err := fixture.application.pool.Native().Exec(r.Context(), `UPDATE order_service_entitlements SET end_at=now()+interval '120 days' WHERE customer_id=$1 AND service_product_id=$2`, session.payerCustomerID, fixture.serviceProductID)
+			if err != nil {
+				http.Error(w, "fixture renewal failed", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		owner.ServeHTTP(w, r)
+	})
 }
 
 type publicCommerceUnavailableServicePeriod struct {
