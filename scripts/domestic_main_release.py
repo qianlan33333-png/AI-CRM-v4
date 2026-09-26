@@ -1627,7 +1627,7 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                      base_sha: str, head_sha: str, enforced: dict[str, Any],
                      lanes: list[str], checks: list[dict[str, Any]], packages: list[str],
                      profile: str, diagnostic_root: Path) -> list[dict[str, Any]]:
-    tree = _worktree_git(execution_worktree, "rev-parse", "HEAD^{tree}")
+    tree = _tree(repo, head_sha)  # Protected authority; never trust private clone Git metadata.
     prior = config.get("_check_checkpoint", {}).get("lanes", {})
     snapshots = config.setdefault("_check_snapshots", {})
     guard = threading.Lock()
@@ -2178,7 +2178,9 @@ def _reclaim_unreferenced_packages(config: dict) -> dict:
         if installed.get("source_sha") != path.name:
             continue
         manifest = builder.verify_release_inventory(path, allow_release_env=True)
-        if duplicate.is_dir() and not duplicate.is_symlink() and builder.verify_release_inventory(duplicate) == manifest:
+        ancestors = [duplicate, duplicate.parent, duplicate.parent.parent, duplicate.parent.parent.parent]
+        if (duplicate.is_dir() and not any(value.is_symlink() for value in ancestors)
+                and builder.verify_release_inventory(duplicate) == manifest):
             record = {"path":str(duplicate), "manifest_sha256":manifest,
                       "allocated_bytes":_allocated_bytes(duplicate), "reason":"verified duplicate of retained package"}
             removed.append(record)
@@ -2214,6 +2216,8 @@ def _archive_closed_check_evidence(config: dict) -> list[dict]:
             raise ReleaseError("archived report is outside registered roots")
         for member in members:
             value = Path(member["original_path"])
+            if not value.is_absolute() or Path(os.path.abspath(value)) != value:
+                raise ReleaseError("archived evidence path is not normalized")
             if not (value.is_relative_to(report) or
                     (value.parent == diagnostics and value.name.startswith(record["head_sha"]+"-"+report.name+"-"))):
                 raise ReleaseError("archived member is outside registered evidence roots")

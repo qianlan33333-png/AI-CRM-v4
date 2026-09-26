@@ -101,8 +101,9 @@ def digest_files(root: Path, paths: list[str]) -> str:
     return digest.hexdigest()
 
 
-def directory_digest(root: Path) -> str:
-    return digest_files(root, [p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()])
+def directory_digest(root: Path, *, excluded: tuple[str, ...] = ()) -> str:
+    return digest_files(root, [p.relative_to(root).as_posix() for p in root.rglob("*")
+                              if p.is_file() and p.relative_to(root).as_posix() not in excluded])
 
 
 def tool_input() -> list[str]:
@@ -132,17 +133,33 @@ def npm_dependencies(root: Path, prefix: str) -> None:
     stamp = package / "node_modules/.aicrm-preparation.json"
     with lock(prep, "npm.lock"):
         if stamp.is_file():
-            data = json.loads(stamp.read_text())
+            try:
+                data = json.loads(stamp.read_text())
+            except (OSError, ValueError):
+                data = {}
             marker = package / "node_modules/.package-lock.json"
-            if data.get("input") == fingerprint and marker.is_file() and data.get("lock") == digest_files(marker.parent, [marker.name]):
+            if (data.get("input") == fingerprint and marker.is_file()
+                    and data.get("lock") == digest_files(marker.parent, [marker.name])
+                    and data.get("output") == directory_digest(stamp.parent, excluded=(stamp.name,))):
                 event("npm", True, fingerprint)
                 return
         reused = cache.is_dir()
+        if reused:
+            try:
+                receipt = json.loads((cache / "receipt.json").read_text())
+                valid = receipt.get("input") == fingerprint and receipt.get("output") == directory_digest(cache / "modules")
+            except (OSError, ValueError):
+                valid = False
+            if not valid:
+                event("npm_corruption",False,fingerprint)
+                shutil.rmtree(cache)
+                reused = False
         if not reused:
             run(command, root)
             temporary = Path(tempfile.mkdtemp(prefix="npm-build-", dir=prep))
             try:
                 shutil.copytree(package / "node_modules", temporary / "modules", symlinks=True)
+                atomic_json(temporary / "receipt.json",{"input":fingerprint,"output":directory_digest(temporary / "modules")})
                 temporary.rename(cache)
             finally:
                 if temporary.exists():
@@ -151,7 +168,8 @@ def npm_dependencies(root: Path, prefix: str) -> None:
             shutil.rmtree(package / "node_modules", ignore_errors=True)
             shutil.copytree(cache / "modules", package / "node_modules", symlinks=True)
         marker = package / "node_modules/.package-lock.json"
-        atomic_json(stamp, {"input": fingerprint, "lock": digest_files(marker.parent, [marker.name])})
+        atomic_json(stamp, {"input": fingerprint, "lock": digest_files(marker.parent, [marker.name]),
+                            "output":directory_digest(stamp.parent,excluded=(stamp.name,))})
         event("npm", reused, fingerprint)
 
 

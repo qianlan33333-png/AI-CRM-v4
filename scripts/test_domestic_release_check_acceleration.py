@@ -133,7 +133,8 @@ class AccelerationGateTest(unittest.TestCase):
                  patch.object(release, "_prepare_check_dependencies"), \
                  patch.object(release, "_check_env", return_value={}), \
                  patch.object(release, "_verify_check_checkout_tree", return_value=1), \
-                 patch.object(release, "_worktree_git", return_value="c"*40), \
+                 patch.object(release, "_tree", return_value="c"*40), \
+                 patch.object(release, "_worktree_git", side_effect=AssertionError("root must not read private clone Git metadata")), \
                  patch.object(release, "_run_check_process", side_effect=run):
                 execution = root / "attempt1/candidate"; execution.mkdir(parents=True)
                 reports = root / "reports1"; reports.mkdir()
@@ -255,7 +256,8 @@ class AccelerationGateTest(unittest.TestCase):
                  patch.object(release, "_prepare_check_dependencies"), \
                  patch.object(release, "_check_env", return_value={}), \
                  patch.object(release, "_verify_check_checkout_tree", return_value=1), \
-                 patch.object(release, "_worktree_git", return_value="c"*40), \
+                 patch.object(release, "_tree", return_value="c"*40), \
+                 patch.object(release, "_worktree_git", side_effect=AssertionError("root must not read private clone Git metadata")), \
                  patch.object(release, "_run_check_process", side_effect=run):
                 results = release._run_check_lanes({}, root, root, execution, reports, "a"*40, "b"*40,
                     {"selection_mode":"full"}, ["preflight","backend","frontend","browser"], [], [], "full", diagnostics)

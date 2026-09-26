@@ -185,6 +185,16 @@ class CheckLifecycleTest(unittest.TestCase):
             for name in names[:3]: self.assertTrue((releases/name).exists())
             self.assertFalse((releases/names[3]).exists())
             self.assertEqual(len(result['removed']),2)
+            # A build ancestor link cannot redirect duplicate GC outside its root.
+            protected=root/'protected-task'; (protected/'release').mkdir(parents=True)
+            shutil.copytree(releases/names[0],protected/'release',dirs_exist_ok=True)
+            (duplicate.parent/'domestic-release.json').unlink()
+            duplicate.parent.rmdir()
+            duplicate.parent.symlink_to(protected,target_is_directory=True)
+            with patch.object(release,'_load_state',return_value=state), \
+                 patch.object(release,'_git',return_value=names[0]), release._locked(Path(config['lock'])):
+                release._reclaim_unreferenced_packages(config)
+            self.assertTrue((protected/'release/binary').exists())
 
     def test_timeout_terminates_only_the_attempt_process_group_before_cleanup(self):
         process=unittest.mock.Mock(pid=424242)

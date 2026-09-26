@@ -65,6 +65,28 @@ class CheckPreparationTest(unittest.TestCase):
             prep.npm_dependencies(root, ".")
             self.assertEqual(run.call_count, 2)
 
+    def test_corrupt_dependency_copy_restores_and_corrupt_snapshot_reinstalls(self):
+        cache,root=self.fixture()
+        (root/"package.json").write_text("{}")
+        (root/"package-lock.json").write_text("lock")
+        def install(command,cwd):
+            modules=cwd/"node_modules"; modules.mkdir(exist_ok=True)
+            (modules/".package-lock.json").write_text("installed")
+            (modules/"library.js").write_text("verified")
+        with patch.object(prep,"tool_input",return_value=["node","npm"]),patch.object(prep,"run",side_effect=install) as run:
+            prep.npm_dependencies(root,".")
+            (root/"node_modules/library.js").write_text("corrupt writable copy")
+            prep.npm_dependencies(root,".")
+            self.assertEqual((root/"node_modules/library.js").read_text(),"verified")
+            self.assertEqual(run.call_count,1)
+            snapshot=next(cache.glob("npm-*/modules"))
+            (snapshot/"library.js").write_text("corrupt snapshot")
+            (root/"node_modules/library.js").write_text("corrupt copy again")
+            prep.npm_dependencies(root,".")
+            self.assertEqual(run.call_count,2)
+            self.assertEqual((root/"node_modules/library.js").read_text(),"verified")
+            self.assertIn("npm_corruption",(cache/"preparation.jsonl").read_text())
+
     def test_cleanup_rejects_non_synthetic_server_and_unowned_database(self):
         cache, _ = self.fixture()
         (cache / "database-bad.json").write_text(json.dumps({"database": "production"}))
