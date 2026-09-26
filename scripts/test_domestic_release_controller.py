@@ -5,6 +5,8 @@ import io
 import json
 import os
 from pathlib import Path
+import pwd
+import shutil
 import stat
 import subprocess
 import sys
@@ -942,6 +944,123 @@ class DomesticMainReleaseTests(unittest.TestCase):
                 with self.assertRaisesRegex(release.ControllerMaintenanceRequired, "host contract"):
                     release._run_baseline_overlay_preflight(
                         config, repo, base_sha=base, candidate_sha=candidate)
+
+    @unittest.skipUnless(os.geteuid() != 0 and shutil.which("node"),
+                         "requires a real non-root account and Node.js")
+    def test_private_check_checkout_allows_generated_outputs_and_keeps_bare_source_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, _base, candidate, _other = make_repository(root)
+            refs_before = subprocess.check_output(["git", f"--git-dir={repo}", "show-ref"], text=True)
+            main_before = git(repo, "rev-parse", "refs/heads/main")
+            report_dir = root / "checks"
+            report_dir.mkdir(mode=0o700)
+            user_name = pwd.getpwuid(os.geteuid()).pw_name
+
+            def run_as_current_user(_config, command, *, cwd, timeout, check, safe_repository=None):
+                return subprocess.run(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      text=True, timeout=timeout, check=False)
+
+            with mock.patch.object(release.legacy, "BUILD_USER", user_name), \
+                 mock.patch.object(release, "_build_command", side_effect=run_as_current_user):
+                checkout = release._private_check_checkout({}, repo, report_dir / "candidate-source", candidate)
+                self.assertEqual(checkout.stat().st_uid, os.geteuid())
+                self.assertEqual(stat.S_IMODE(checkout.stat().st_mode), 0o700)
+                self.assertEqual(release._verify_check_checkout_tree(repo, candidate, checkout), 2)
+                generated = [
+                    ".aicrm-dedup/donor-views-receipt.json",
+                    "node_modules/.cache/npm-check.json",
+                    "out/backend/contract-check.json",
+                    "web/dist/browser-check.json",
+                    "tmp/archive-sdk/check.json",
+                ]
+                script = (
+                    "const fs=require('node:fs'),path=require('node:path');"
+                    f"for(const file of {json.dumps(generated)} ){{"
+                    "fs.mkdirSync(path.dirname(file),{recursive:true});"
+                    "fs.writeFileSync(file,'generated\\n');}"
+                )
+                subprocess.run([shutil.which("node"), "-e", script], cwd=checkout, check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                self.assertTrue((checkout / ".aicrm-dedup/donor-views-receipt.json").is_file())
+                self.assertTrue((checkout / "node_modules/.cache/npm-check.json").is_file())
+                self.assertTrue((checkout / "out/backend/contract-check.json").is_file())
+                self.assertTrue((checkout / "web/dist/browser-check.json").is_file())
+                self.assertTrue((checkout / "tmp/archive-sdk/check.json").is_file())
+                self.assertEqual(release._verify_check_checkout_tree(repo, candidate, checkout), 2)
+                self.assertEqual(git(repo, "rev-parse", "refs/heads/main"), main_before)
+                self.assertEqual(subprocess.check_output(["git", f"--git-dir={repo}", "show-ref"], text=True), refs_before)
+
+    @unittest.skipUnless(os.geteuid() != 0, "requires a real non-root account")
+    def test_check_checkout_verifier_ignores_builder_index_and_rejects_parent_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, _base, candidate, _other = make_repository(root)
+            report_dir = root / "checks"
+            report_dir.mkdir(mode=0o700)
+            user_name = pwd.getpwuid(os.geteuid()).pw_name
+
+            def run_as_current_user(_config, command, *, cwd, timeout, check, safe_repository=None):
+                return subprocess.run(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      text=True, timeout=timeout, check=False)
+
+            with mock.patch.object(release.legacy, "BUILD_USER", user_name), \
+                 mock.patch.object(release, "_build_command", side_effect=run_as_current_user):
+                checkout = release._private_check_checkout({}, repo, report_dir / "candidate-source", candidate)
+                (checkout / "main.txt").write_text("forged tracked source\n")
+                subprocess.run(["git", "-C", str(checkout), "update-index", "--assume-unchanged", "main.txt"],
+                               check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                status = subprocess.check_output(["git", "-C", str(checkout), "status", "--porcelain",
+                                                  "--untracked-files=no"], text=True)
+                self.assertEqual(status, "")
+                with self.assertRaisesRegex(release.ReleaseError, "tracked source bytes differ"):
+                    release._verify_check_checkout_tree(repo, candidate, checkout)
+
+                fifo_checkout = release._private_check_checkout(
+                    {}, repo, report_dir / "fifo-source", candidate)
+                (fifo_checkout / "main.txt").unlink()
+                os.mkfifo(fifo_checkout / "main.txt")
+                with self.assertRaisesRegex(release.ReleaseError, "changed type or link count"):
+                    release._verify_check_checkout_tree(repo, candidate, fifo_checkout)
+
+                mode_checkout = release._private_check_checkout(
+                    {}, repo, report_dir / "mode-source", candidate)
+                subprocess.run(["git", "-C", str(mode_checkout), "config", "core.filemode", "false"],
+                               check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                (mode_checkout / "main.txt").chmod(0o755)
+                status = subprocess.check_output(["git", "-C", str(mode_checkout), "status", "--porcelain",
+                                                  "--untracked-files=no"], text=True)
+                self.assertEqual(status, "")
+                with self.assertRaisesRegex(release.ReleaseError, "tracked source file mode changed"):
+                    release._verify_check_checkout_tree(repo, candidate, mode_checkout)
+
+                source = root / "source"
+                subprocess.run(["git", "-C", str(source), "checkout", "-b", "codex/nested", candidate],
+                               check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                nested_file = source / "nested" / "tracked.txt"
+                nested_file.parent.mkdir()
+                nested_file.write_text("nested source\n")
+                (source / "nested-link").symlink_to("nested/tracked.txt")
+                subprocess.run(["git", "-C", str(source), "add", "nested/tracked.txt"], check=True)
+                subprocess.run(["git", "-C", str(source), "add", "nested-link"], check=True)
+                subprocess.run(["git", "-C", str(source), "commit", "-m", "nested source"], check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                nested_head = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+                subprocess.run(["git", f"--git-dir={repo}", "fetch", "--no-tags", str(source),
+                                f"{nested_head}:refs/heads/codex/nested"], check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                nested_checkout = release._private_check_checkout(
+                    {}, repo, report_dir / "nested-source", nested_head)
+                self.assertEqual(release._verify_check_checkout_tree(repo, nested_head, nested_checkout), 4)
+                self.assertTrue((nested_checkout / "nested-link").is_symlink())
+                self.assertEqual(os.readlink(nested_checkout / "nested-link"), "nested/tracked.txt")
+                outside = root / "outside"
+                outside.mkdir()
+                (outside / "tracked.txt").write_text("nested source\n")
+                (nested_checkout / "nested").rename(nested_checkout / "nested-original")
+                (nested_checkout / "nested").symlink_to(outside, target_is_directory=True)
+                with self.assertRaisesRegex(release.ReleaseError, "unsafe parent"):
+                    release._verify_check_checkout_tree(repo, nested_head, nested_checkout)
 
     def test_baseline_overlay_evidence_is_create_only_and_same_identity_resumable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

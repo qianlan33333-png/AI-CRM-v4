@@ -1154,6 +1154,165 @@ def _enforced_lanes(plan: dict[str, Any], changed_policy: list[str]) -> tuple[di
     return enforced, lanes, checks, packages, profile
 
 
+def _private_check_checkout(config: dict[str, Any], repo: Path, checkout: Path,
+                            head_sha: str) -> Path:
+    """Clone the exact candidate into the unprivileged, disposable check workspace."""
+    build_user = legacy.BUILD_USER
+    build_info = pwd.getpwnam(build_user)
+    parent = checkout.parent
+    parent_info = parent.lstat()
+    if (parent.is_symlink() or not stat.S_ISDIR(parent_info.st_mode)
+            or parent_info.st_uid != build_info.pw_uid
+            or stat.S_IMODE(parent_info.st_mode) != 0o700):
+        raise ReleaseError("private check workspace parent is not a build-user-only directory")
+    if checkout.exists() or checkout.is_symlink():
+        raise ReleaseError("private check checkout path already exists")
+    source = repo.resolve(strict=True)
+    commands = [
+        (["git", "-c", f"safe.directory={source}", "clone", "-q", "--no-checkout",
+          "--local", "--no-hardlinks", str(source), str(checkout)], source),
+        (["git", "-C", str(checkout), "-c", f"safe.directory={source}", "fetch",
+          "-q", "--no-tags", str(source), head_sha], checkout),
+        (["git", "-C", str(checkout), "checkout", "--detach", "--force", head_sha], checkout),
+    ]
+    for command, safe_repository in commands:
+        result = _build_command(config, command, cwd=Path("/"), timeout=600,
+                                check=False, safe_repository=safe_repository)
+        if result.returncode:
+            raise ReleaseError("isolated check candidate checkout failed")
+    try:
+        info = checkout.lstat()
+    except OSError as exc:
+        raise ReleaseError("isolated check candidate checkout is missing") from exc
+    if (checkout.is_symlink() or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != build_info.pw_uid):
+        raise ReleaseError("isolated check candidate checkout has an unexpected owner")
+    os.chmod(checkout, 0o700)
+    _verify_check_checkout_tree(repo, head_sha, checkout)
+    return checkout
+
+
+def _verify_check_checkout_tree(repo: Path, head_sha: str, checkout: Path) -> int:
+    """Compare tracked files to protected bare-tree blobs without trusting checkout Git metadata."""
+    head_sha = _sha(head_sha, "check checkout SHA")
+    try:
+        root_info = checkout.lstat()
+        build_uid = pwd.getpwnam(legacy.BUILD_USER).pw_uid
+    except (OSError, KeyError) as exc:
+        raise ReleaseError("isolated check candidate checkout is unavailable") from exc
+    if (checkout.is_symlink() or not stat.S_ISDIR(root_info.st_mode)
+            or root_info.st_uid != build_uid):
+        raise ReleaseError("isolated check candidate checkout has an unsafe root")
+    tree_result = subprocess.run(
+        ["git", f"--git-dir={repo}", "ls-tree", "-rz", "--full-tree", "-r", head_sha],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if tree_result.returncode:
+        raise ReleaseError("protected candidate tree could not be enumerated")
+    try:
+        root_fd = os.open(os.fsencode(checkout), os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as exc:
+        raise ReleaseError("isolated check candidate checkout root is not safely accessible") from exc
+    count = 0
+    try:
+        for record in tree_result.stdout.split(b"\0"):
+            if not record:
+                continue
+            try:
+                header, raw_path = record.split(b"\t", 1)
+                raw_mode, object_type, expected_oid = header.split(b" ")
+            except ValueError as exc:
+                raise ReleaseError("protected candidate tree entry is malformed") from exc
+            parts = raw_path.split(b"/")
+            if (not raw_path or raw_path.startswith(b"/") or b".git" in parts
+                    or any(part in {b"", b".", b".."} for part in parts)):
+                raise ReleaseError("protected candidate tree contains an unsafe path")
+            if object_type != b"blob" or raw_mode not in {b"100644", b"100755", b"120000"}:
+                raise ReleaseError("protected candidate tree contains an unsupported file type")
+            parent_fd = os.dup(root_fd)
+            try:
+                for part in parts[:-1]:
+                    next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY |
+                                      getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+                    os.close(parent_fd)
+                    parent_fd = next_fd
+                leaf = parts[-1]
+                if raw_mode == b"120000":
+                    info = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+                    if not stat.S_ISLNK(info.st_mode) or info.st_uid != build_uid:
+                        raise ReleaseError("tracked source symlink changed type")
+                    target = os.readlink(leaf, dir_fd=parent_fd)
+                    target_bytes = target if isinstance(target, bytes) else os.fsencode(target)
+                    actual_oid = hashlib.sha1(f"blob {len(target_bytes)}\0".encode() + target_bytes).hexdigest().encode()
+                else:
+                    descriptor = os.open(leaf, os.O_RDONLY | os.O_NONBLOCK |
+                                         getattr(os, "O_NOFOLLOW", 0),
+                                         dir_fd=parent_fd)
+                    try:
+                        info = os.fstat(descriptor)
+                        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                                or info.st_uid != build_uid):
+                            raise ReleaseError("tracked source file changed type or link count")
+                        executable = bool(info.st_mode & 0o111)
+                        if executable != (raw_mode == b"100755"):
+                            raise ReleaseError("tracked source file mode changed")
+                        digest = hashlib.sha1(f"blob {info.st_size}\0".encode())
+                        while chunk := os.read(descriptor, 1024 * 1024):
+                            digest.update(chunk)
+                        actual_oid = digest.hexdigest().encode()
+                    finally:
+                        os.close(descriptor)
+                if actual_oid != expected_oid:
+                    raise ReleaseError("tracked source bytes differ from the protected candidate tree")
+                count += 1
+            except OSError as exc:
+                raise ReleaseError("tracked source path is missing or traverses an unsafe parent") from exc
+            finally:
+                os.close(parent_fd)
+    finally:
+        os.close(root_fd)
+    return count
+
+
+def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
+                     execution_worktree: Path, report_dir: Path,
+                     base_sha: str, head_sha: str, enforced: dict[str, Any],
+                     lanes: list[str], checks: list[dict[str, Any]], packages: list[str],
+                     profile: str, diagnostic_root: Path) -> list[dict[str, Any]]:
+    lane_results = []
+    for lane in lanes:
+        lane_dir = report_dir / lane
+        _build_command(config, ["/usr/bin/mkdir", "-m", "0700", str(lane_dir)], cwd=execution_worktree,
+                       timeout=30, safe_repository=execution_worktree)
+        args = [lane, "--report-dir", str(lane_dir)]
+        if lane == "preflight":
+            args.extend(["--profile", "tooling" if profile == "tooling" else "full"])
+        lane_checks = [check for check in checks if check.get("lane") == lane]
+        if enforced.get("selection_mode") == "targeted" and lane != "preflight" and lane_checks:
+            args.extend(["--focus-checks-json", json.dumps(lane_checks, separators=(",", ":"))])
+        if enforced.get("selection_mode") == "targeted" and lane == "backend" and packages:
+            args.extend(["--focus-packages-json", json.dumps(sorted(set(packages)), separators=(",", ":"))])
+        command = ["/usr/bin/python3", "-c", _trusted_runner_code(), str(policy), str(execution_worktree), *args]
+        log = diagnostic_root / f"{head_sha}-{report_dir.name}-{lane}.log"
+        if log.exists() or log.is_symlink():
+            raise ReleaseError("trusted check diagnostic path already exists; inspect before retry")
+        started = time.monotonic()
+        with log.open("xb") as output:
+            os.chmod(log, 0o600)
+            run_args = ["/usr/bin/sudo", "-n", "-u", legacy.BUILD_USER, "-H", "--", "/usr/bin/env", "-i"]
+            run_args.extend([f"{key}={value}" for key, value in
+                             _check_env(config, execution_worktree, base_sha=base_sha, head_sha=head_sha).items()])
+            run_args.extend(command)
+            completed = subprocess.run(run_args, cwd=execution_worktree, stdout=output, stderr=subprocess.STDOUT,
+                                        timeout=6 * 60 * 60, check=False)
+        lane_results.append({"lane": lane, "exit_code": completed.returncode,
+                             "duration_seconds": round(time.monotonic() - started, 1),
+                             "log_sha256": _file_sha256(log), "log_path": str(log)})
+        if completed.returncode != 0:
+            raise ReleaseError(f"trusted impact lane failed: {lane} (exit={completed.returncode})")
+    return lane_results
+
+
 def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir: Path,
                   base_sha: str, head_sha: str, *, diagnostic_root: Path | None = None) -> dict[str, Any]:
     if report_dir.exists() or report_dir.is_symlink():
@@ -1167,39 +1326,24 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
     toolchain = _verify_build_toolchain(config)
     plan = _trusted_preflight_plan(config, policy, worktree, base_sha, head_sha)
     enforced, lanes, checks, packages, profile = _enforced_lanes(plan, changed_policy)
-    lane_results = []
     diagnostic_root = diagnostic_root or (Path(config["work_root"]) / "diagnostics")
     _safe_directory(diagnostic_root, create=True)
-    for lane in lanes:
-        lane_dir = report_dir / lane
-        _build_command(config, ["/usr/bin/mkdir", "-m", "0700", str(lane_dir)], cwd=worktree,
-                       timeout=30, safe_repository=worktree)
-        args = [lane, "--report-dir", str(lane_dir)]
-        if lane == "preflight":
-            args.extend(["--profile", "tooling" if profile == "tooling" else "full"])
-        lane_checks = [check for check in checks if check.get("lane") == lane]
-        if enforced.get("selection_mode") == "targeted" and lane != "preflight" and lane_checks:
-            args.extend(["--focus-checks-json", json.dumps(lane_checks, separators=(",", ":"))])
-        if enforced.get("selection_mode") == "targeted" and lane == "backend" and packages:
-            args.extend(["--focus-packages-json", json.dumps(sorted(set(packages)), separators=(",", ":"))])
-        command = ["/usr/bin/python3", "-c", _trusted_runner_code(), str(policy), str(worktree), *args]
-        log = diagnostic_root / f"{head_sha}-{report_dir.name}-{lane}.log"
-        if log.exists() or log.is_symlink():
-            raise ReleaseError("trusted check diagnostic path already exists; inspect before retry")
-        started = time.monotonic()
-        with log.open("xb") as output:
-            os.chmod(log, 0o600)
-            run_args = ["/usr/bin/sudo", "-n", "-u", legacy.BUILD_USER, "-H", "--", "/usr/bin/env", "-i"]
-            run_args.extend([f"{key}={value}" for key, value in
-                             _check_env(config, worktree, base_sha=base_sha, head_sha=head_sha).items()])
-            run_args.extend(command)
-            completed = subprocess.run(run_args, cwd=worktree, stdout=output, stderr=subprocess.STDOUT,
-                                        timeout=6 * 60 * 60, check=False)
-        lane_results.append({"lane": lane, "exit_code": completed.returncode,
-                             "duration_seconds": round(time.monotonic() - started, 1),
-                             "log_sha256": _file_sha256(log), "log_path": str(log)})
-        if completed.returncode != 0:
-            raise ReleaseError(f"trusted impact lane failed: {lane} (exit={completed.returncode})")
+    _safe_directory(Path(config["work_root"]))
+    with tempfile.TemporaryDirectory(prefix="domestic-main-check-", dir=Path(config["work_root"])) as temporary:
+        check_root = Path(temporary)
+        os.chmod(check_root, 0o711)
+        build_info = pwd.getpwnam(legacy.BUILD_USER)
+        execution_parent = check_root / "execution"
+        execution_parent.mkdir(mode=0o700)
+        os.chown(execution_parent, build_info.pw_uid, build_info.pw_gid)
+        os.chmod(execution_parent, 0o700)
+        execution_worktree = _private_check_checkout(
+            config, repo, execution_parent / "candidate", head_sha)
+        lane_results = _run_check_lanes(
+            config, repo, policy, execution_worktree, report_dir, base_sha, head_sha,
+            enforced, lanes, checks, packages, profile, diagnostic_root)
+        if _verify_check_checkout_tree(repo, head_sha, execution_worktree) == 0:
+            raise ReleaseError("isolated check candidate checkout has no tracked source files")
     if _worktree_git(worktree, "rev-parse", "HEAD") != head_sha or _worktree_git(worktree, "status", "--porcelain=v1", "--untracked-files=all"):
         raise ReleaseError("candidate source changed or became dirty during isolated checks")
     receipt = {
