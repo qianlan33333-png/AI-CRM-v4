@@ -191,3 +191,56 @@ func TestAlipayAcceptanceVirtualRefundSettlementAndReplay(t *testing.T) {
 		t.Fatalf("refund replay changed settlement: status=%s updates=%d order_settlements=%d claims=%d", store.refund.Status, store.refundSettlementUpdates, orders.settlementCount, store.callbackClaims)
 	}
 }
+
+// Legacy successful queries used their observation time, so matching late
+// Alipay notifications must not resettle or fail because of that timestamp.
+func TestAlipayCallbackAfterLegacyQueryRecordsReplay(t *testing.T) {
+	paidAt := time.Date(2026, 9, 26, 8, 13, 50, 0, time.UTC)
+	observedAt := paidAt.Add(80 * time.Second)
+	store := &storeStub{payment: domain.Payment{ID: 7, OrderID: 3,
+		Provider: domain.ProviderAlipay, Channel: domain.ChannelAlipayWap,
+		MerchantOrderNo: "merchant-late-query", AmountMinor: 99900, Currency: "CNY",
+		Status: domain.StatusPaid, Version: 4, PaidConfirmedAt: &observedAt,
+		ProviderTransactionReference: "trade-late-query", ProviderTransactionDigest: string(effectport.Hash("alipay.transaction", "trade-late-query")),
+	}}
+	orders := &recordingOrderStub{}
+	service := NewService(uowStub{}, store, orders, sessionStub{}, &effectStub{})
+	if err := service.SetAlipayAppID("test-alipay-app"); err != nil {
+		t.Fatal(err)
+	}
+	callback := paymentprovider.CallbackResult{Provider: domain.ProviderAlipay, Kind: "payment", AppID: "test-alipay-app",
+		MerchantOrderNo: store.payment.MerchantOrderNo, ProviderTransactionReference: "trade-late-query",
+		ProviderTransactionDigest: store.payment.ProviderTransactionDigest, AmountMinor: 99900, Currency: "CNY",
+		OccurredAt: paidAt, EventDigest: [32]byte{31}, BodyDigest: [32]byte{32},
+	}
+	for i := 0; i < 2; i++ {
+		if err := service.ApplyVerifiedCallback(context.Background(), callback); err != nil {
+			t.Fatalf("late replay: %v", err)
+		}
+	}
+	if store.callbackClaims != 2 || store.callbackOutcome != "replayed" || store.paymentSettlementUpdates != 0 || orders.settlementCount != 0 || store.payment.Version != 4 {
+		t.Fatal("late notification repeated settlement")
+	}
+	other := callback
+	other.ProviderTransactionReference = "other-trade"
+	other.ProviderTransactionDigest = string(effectport.Hash("alipay.transaction", other.ProviderTransactionReference))
+	if err := service.ApplyVerifiedCallback(context.Background(), other); !errors.Is(err, paymentport.ErrConflict) {
+		t.Fatalf("different trade accepted: %v", err)
+	}
+}
+
+func TestAlipayCallbackCannotReadSameMerchantFromOtherProvider(t *testing.T) {
+	now := time.Now().UTC()
+	store := &storeStub{checkoutPayments: map[domain.Provider]domain.Payment{
+		domain.ProviderWeChatPay: {ID: 8, Provider: domain.ProviderWeChatPay, MerchantOrderNo: "shared-merchant", AmountMinor: 990, Currency: "CNY"},
+	}}
+	service := NewService(uowStub{}, store, &recordingOrderStub{}, sessionStub{}, &effectStub{})
+	callback := paymentprovider.CallbackResult{Provider: domain.ProviderAlipay, Kind: "payment", MerchantOrderNo: "shared-merchant",
+		ProviderTransactionReference: "shared-trade", ProviderTransactionDigest: string(effectport.Hash("alipay.transaction", "shared-trade")), AmountMinor: 990, Currency: "CNY", OccurredAt: now}
+	if err := service.ApplyVerifiedCallback(context.Background(), callback); !errors.Is(err, paymentport.ErrNotFound) {
+		t.Fatalf("cross-provider lookup: %v", err)
+	}
+	if store.callbackClaims != 0 {
+		t.Fatal("cross-provider receipt written")
+	}
+}

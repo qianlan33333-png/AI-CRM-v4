@@ -229,6 +229,7 @@ type PaymentQueryResult struct {
 	TradeStatus     string
 	TotalAmount     string
 	BuyerID         string
+	PaidAt          string
 }
 
 func (a *Alipay) Query(ctx context.Context, request PaymentQuery) (PaymentQueryResult, error) {
@@ -239,7 +240,7 @@ func (a *Alipay) Query(ctx context.Context, request PaymentQuery) (PaymentQueryR
 	if err != nil || result == nil {
 		return PaymentQueryResult{}, ErrInvalidResponse
 	}
-	return PaymentQueryResult{MerchantOrderNo: result.OutTradeNo, TradeNo: result.TradeNo, TradeStatus: string(result.TradeStatus), TotalAmount: result.TotalAmount, BuyerID: result.BuyerUserId}, nil
+	return PaymentQueryResult{MerchantOrderNo: result.OutTradeNo, TradeNo: result.TradeNo, TradeStatus: string(result.TradeStatus), TotalAmount: result.TotalAmount, BuyerID: result.BuyerUserId, PaidAt: result.SendPayDate}, nil
 }
 
 func (a *Alipay) QueryPayment(ctx context.Context, merchantOrderNo string) (paymentport.AlipayPaymentQuery, error) {
@@ -251,7 +252,15 @@ func (a *Alipay) QueryPayment(ctx context.Context, merchantOrderNo string) (paym
 	if err != nil {
 		return paymentport.AlipayPaymentQuery{}, err
 	}
-	return paymentport.AlipayPaymentQuery{MerchantOrderNo: result.MerchantOrderNo, TradeNo: result.TradeNo, TradeStatus: result.TradeStatus, Currency: "CNY", AmountMinor: minor, OccurredAt: time.Now().UTC(), EvidenceDigest: effectport.Hash("alipay.query", result.MerchantOrderNo, result.TradeNo, result.TradeStatus, result.TotalAmount), TransactionDigest: effectport.Hash("alipay.transaction", result.TradeNo)}, nil
+	occurred := time.Now().UTC()
+	if result.TradeStatus == "TRADE_SUCCESS" || result.TradeStatus == "TRADE_FINISHED" {
+		occurred, err = time.ParseInLocation("2006-01-02 15:04:05", result.PaidAt, time.FixedZone("CST", 8*60*60))
+		if err != nil {
+			return paymentport.AlipayPaymentQuery{}, ErrInvalidResponse
+		}
+		occurred = occurred.UTC()
+	}
+	return paymentport.AlipayPaymentQuery{MerchantOrderNo: result.MerchantOrderNo, TradeNo: result.TradeNo, TradeStatus: result.TradeStatus, Currency: "CNY", AmountMinor: minor, OccurredAt: occurred, EvidenceDigest: effectport.Hash("alipay.query", result.MerchantOrderNo, result.TradeNo, result.TradeStatus, result.TotalAmount, result.PaidAt), TransactionDigest: effectport.Hash("alipay.transaction", result.TradeNo)}, nil
 }
 
 type RefundRequest struct {

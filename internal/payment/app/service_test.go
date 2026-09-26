@@ -292,8 +292,8 @@ func (s *storeStub) UpdateRefundSettlement(_ context.Context, r domain.Refund, _
 	s.refund = r
 	return r, nil
 }
-func (s *storeStub) GetPaymentByMerchant(context.Context, string, bool) (domain.Payment, error) {
-	return s.payment, nil
+func (s *storeStub) GetPaymentByMerchant(ctx context.Context, merchant string, lock bool) (domain.Payment, error) {
+	return s.GetPaymentByMerchantProvider(ctx, domain.ProviderWeChatPay, merchant, lock)
 }
 func (s *storeStub) GetPaymentByMerchantProvider(_ context.Context, provider domain.Provider, merchantOrderNo string, _ bool) (domain.Payment, error) {
 	if s.checkoutPayments != nil {
