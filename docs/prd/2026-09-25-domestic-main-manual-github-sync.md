@@ -45,6 +45,6 @@ flowchart LR
 
 ## 切换顺序与验收
 
-按候选顺序处理旧发布队列至选定的 GitHub `main` SHA，核对 GitHub、预备机、生产当前 SHA/tree/manifest；确认旧定时器及其已触发的 service 都已退出。随后在预备机实测 2 核、2GB 的检查和构建，演练双分支串行、过期基线、预发失败、生产健康失败、安装结果不明、生产 bundle 恢复、人工快进与远端分叉。通过后才启用国内发布入口。首次人工归档前，将 GitHub `main` 的有效保护规则改为允许指定归档维护者直接快进推送，同时继续禁止强推和删除；移除会拒绝该直接推送的 PR/check 门槛，并读回 branch protection 与 ruleset 的合并效果。GitHub Actions 不再决定生产发布。切换完成后撤销旧预备机只读 GitHub deploy key 并清除其私钥，保留生产内网部署凭据与预备机 archive-ack 限定 key。
+按候选顺序处理旧发布队列至选定的 GitHub `main` SHA，核对 GitHub、预备机、生产当前 SHA/tree/manifest；确认旧定时器及其已触发的 service 都已退出。预备机资源规格固定为 2 vCPU、2 GiB，切换期间不扩容；只在该规格内验证现有检查和构建。首次人工归档前，将 GitHub `main` 的有效保护规则改为允许指定归档维护者直接快进推送，同时继续禁止强推和删除；移除会拒绝该直接推送的 PR/check 门槛，并读回 branch protection 与 ruleset 的合并效果。GitHub Actions 不再决定生产发布。切换完成后撤销旧预备机只读 GitHub deploy key 并清除其私钥，保留生产内网部署凭据与预备机 archive-ack 限定 key。
 
-未完成切换时，GitHub 仍是发布权威。未通过资源实测时先扩容或维持旧流程，不能减少必要检查来宣称提速。
+切换未完成时不得启用新发布入口。若固定规格下现有检查/构建不能完成，停止切换并维持已验证的发布方式；不得扩容，也不得减少必要检查来宣称通过。

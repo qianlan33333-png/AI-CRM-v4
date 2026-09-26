@@ -1,12 +1,8 @@
 # CRM v4 国内主仓发布
 
-**生效条件：**预备机 ledger 与生产源码游标的 `main_sha/main_tree` 一致；预备机和生产机已安装应用的 SHA、tree、manifest 相互一致且健康。已验证的源码 `main` 必须以该应用 SHA 为 first-parent 祖先；应用提交到所选 `main` 之间只能有工具/文档等不改变运行时的提交，baseline 绑定所选 `main` 的准确 SHA/tree。预备机旧 `aicrm-domestic-release.timer` 和 service 均停止；生产机没有旧/新 domestic release units，必须读回 `not-found`。预备机固定工具与 systemd 单元的摘要对应准确 `main`。缺少任一项继续按[旧流程](domestic-release.md)，不得启动新发布器。发布失败由一个执行者处理。
+本次周期详情、退款回调、推荐海报和自动化配置应用已发布为 `00e248605b7cc0cd5b481b091bf12a6d23688f12`。应用发布不等于国内源码基线或发布器已启用：只有主机读回的 `prepare-baseline`、`activate`、`verify` 收据及精确 SHA/tree、双机应用身份、固定工具摘要和健康结果全部吻合，才可报告基线已激活。本文不预设 timer 已启用；GitHub 归档始终由用户明确发起，无自动推送或固定同步周期。
 
-> **当前未启用。** 这次 partial-bootstrap 恢复必须先只读确认裸仓仍为 `main=291baa2d13864c3a60f3ed93e08382c3e598db33`、tree=`3c17b8a86e2e69ed4f6942304300c609300fb077`，且 app=`960b30e9406fae2045aeb7ef5dce863976407727` 在其 first-parent 链上、`runtime_changed=false`。恢复只补 hook/权限，不移动 main、不建 ledger；`prepare-baseline`/`activate` 也以 291 为 baseline。准确 PR #46 head 之后作为第一个普通 controller-only 候选串行处理。旧固定 291 controller 先对该 SHA 执行 `maintenance-check`，再由从同一已验证 bundle 导出的精确候选脚本重复检查并写 marker；对照两次的 candidate SHA/tree/base、controller 文件清单、toolchain、lane 集合与全通过结果，raw receipt SHA 会因时间、用时和日志路径而不同。两机 app SHA/tree/manifest 与健康、旧队列结果和 timer 状态仍须按 bootstrap 清单读回。GitHub `main` 暂停在 `6d3ee9c`，供之后人工快进归档；无需先合入 PR #46。
-
-## 一次性主机准备与切换
-
-国内主仓尚未启用。一次性恢复、baseline、首个候选维护检查和激活命令集中在[一次性主机准备与切换清单](domestic-main-bootstrap.md)。本次国内初始 `main` 固定为 partial repo 已验证的 291；精确 PR #46 head bundle 用于导出候选脚本/工具，不用于重建或覆盖 source.git。固定 291 controller 保留到 baseline 后首个 candidate 通过旧规则与新脚本双重 maintenance-check，marker 写入且新 controller 精确安装后，才由普通候选处理推进 main。旧/new timer、双机 app identity 与无结果不明发布项等其余门禁不变。
+国内主仓的一次性基线对齐见[主机基线对齐清单](domestic-main-bootstrap.md)。日常发布只使用该清单完成后的准确国内 `main`；不要从旧的 291/960 partial-bootstrap 说明推断当前状态。
 
 ## 日常四步
 
@@ -38,4 +34,6 @@ python3 scripts/manual_github_sync.py --repo "$PWD" --production-host 124.220.53
 - 安装结果不明：停队列，只读对账生产 current、安装收据、源码 bundle、完整摘要、服务和健康。若已准确安装且健康，但国内 `main` 尚未推进，`reconcile` 只在原 SHA/tree 与收据全匹配时完成原本的 CAS；绝不重装。
 - 预备机故障：在生产机只读核对最新 bundle、marker 和安装收据，将 bundle 恢复到新的空裸仓并比对 SHA/tree，然后重新建立受限推送与单一发布器。不能从可能落后的 GitHub `main` 静默覆盖生产源码。
 
-切换演练须覆盖双分支顺序、过期基线、预发失败、生产健康失败、结果不明、bundle 空仓恢复、人工同步快进和远端分叉；2 核、2GB 预备机还须实测构建稳定性。未通过不得激活。
+任何 SHA/tree、收据、bundle、固定工具、预发合同或生产健康结果不符，停止队列并只读对账。发布器的检查、构建和健康边界不得凭本文缩减；完整一次性初始化步骤见[主机基线对齐清单](domestic-main-bootstrap.md)。
+
+首次启用验收仍覆盖双分支顺序、过期基线、预发/生产失败、结果不明、bundle 空仓恢复、人工快进和远端分叉；SHA/tree、工具链与范围一致的既有 controller 合同和 00 主机收据可复用。D 提交自身仅改文档，00→D 累计链还包含 C 的两项已审查工具修复；不因该文档提交重跑全套业务应用。

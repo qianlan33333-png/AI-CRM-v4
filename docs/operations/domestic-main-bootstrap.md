@@ -1,8 +1,26 @@
 # CRM v4 国内主仓：一次性主机准备与切换
 
-> **切换操作当前禁用。** 本次只允许恢复已核实的 partial bare repo：main=`291baa2d13864c3a60f3ed93e08382c3e598db33`、tree=`3c17b8a86e2e69ed4f6942304300c609300fb077`，installed app=`960b30e9406fae2045aeb7ef5dce863976407727`。若现场 SHA/tree 不符就停下，不 bootstrap、不重建、不删除仓库或 ledger。恢复只补 hook 和仓库安全权限，保持 main=291；initial baseline 也是 291。准确 PR #46 head 的本地 bundle 只作为经 hash 验证的工具/候选来源，baseline 后作为普通 controller-only 首个候选。`prepare-baseline`/`activate` 必须由该 bundle 导出的精确 PR46 head 临时脚本执行，配置中的 `controller_path` 仍固定指向已安装 291 controller。旧 291 controller 先对队首候选完整运行 `maintenance-check`，再由精确候选脚本重复检查并写 durable marker；逐项比对 SHA/tree/base、controller 文件、toolchain、lane 与全通过状态（receipt raw SHA 可能因时间、用时和日志路径不同）。stage 与 production app identity/健康、旧队列结果和 timer 门禁仍须全部满足。GitHub `main` 保持 `6d3ee9c`，不需要先合 PR #46。未满足这些条件时不得执行 host write、构建演练或 timer 激活。新流程日常入口见[国内主仓发布](domestic-main-release.md)。
+> **当前业务应用：** `00e248605b7cc0cd5b481b091bf12a6d23688f12` 已完成预发/生产安装及健康读回。应用版本不能代替国内 source main、ledger、生产 cursor、固定 controller 或 timer 的主机读回。本次新基线以应用 00 为已安装版本；发布器只在本清单要求的精确读回成功后才能报告已激活。
+>
+> **当前入口：** 现场初始值须由唯一主机执行者重新读取。已知国内 bare main 为 `291baa2d13864c3a60f3ed93e08382c3e598db33`；它不是已安装应用 `00e248605b7cc0cd5b481b091bf12a6d23688f12`。stage ledger 与 production source cursor 尚不存在。若任一值变化、已有 ledger/cursor、timer/job/process 活动或结果不明，停止并盘点，不覆盖状态。候选 D 是以 00 为祖先、仅含已审查工具修复与本文档更新的准确单父后继；必须实际验证 D 相对已安装应用 `runtime_changed=false`。
 
-## 一次性主机准备与切换
+## 当前：00 应用后的国内基线对齐
+
+以下动作由唯一主机执行者按生产收据操作；文档本身不证明任何步骤已执行，也不声称 timer 已启用。
+
+1. **核实现场和候选。** 只读核对 stage 与 production 已安装 SHA/tree/manifest 均为应用 00 且健康，国内裸仓 main、tree、当前 fixed-controller 文件摘要、ledger/cursor、stage timer/service、production units、发布队列和进程均符合本清单预期；记录当前工具与 D 的摘要差异，不要求待替换的旧工具预先匹配 D。确认 D 的唯一父提交、完整 bundle 及空仓恢复；用现有 classifier 验证 00→D 的 `runtime_changed=false`，并核对每个待安装文件都与 D 中对应 blob 字节完全一致。任一身份、祖先关系、bundle 或源 blob 校验不符即停止。
+2. **root CAS 将国内源码 main 从 291 推进到 D。** 将经过验证的 D 对象导入现有 bare repo 的受控临时候选 ref，并只在现场 main 仍等于读回的旧 SHA（当前已知值 `291baa2d13864c3a60f3ed93e08382c3e598db33`）时，以该旧值为比较条件执行一次 `refs/heads/main` CAS 到 D。00 是已安装 app SHA，不是 CAS 的旧值或国内 main。使用现有 root-only 操作和 `core.sharedRepository=0`、子进程 umask `022` 的受控写入设置；不得 force-push、重建 bare repo 或覆盖未知 refs。立即读回 main SHA/tree、first-parent 与 ref 权限。
+3. **精确替换固定工具。** 仅替换已记录为不同的 `scripts/domestic_main_release.py` 与 C 工具修复涉及的 `scripts/domestic_release.py`，从已验证 D bundle 安装并逐文件与 D blob 核对字节；保留回滚副本，原子替换后读回 SHA/属主/模式。其余已匹配的 fixed-controller 文件及 systemd units 保持原样，只复核摘要；不安装未列入固定工具清单的业务文件。安装后确认 stage 新 timer 仍 disabled/inactive、production 的发布 units 仍为 not-found。
+4. **按顺序建立并激活基线。** 在准确 D controller 与 root-owned 配置上先运行一次 `prepare-baseline`，它应以 source main=D、已安装 app=00 写入生产源码备份及 cursor；随后运行 `activate` 创建 stage ledger，再运行 `verify`。三份真实收据必须显示同一 D SHA/tree、app 00 SHA/tree/manifest、已验证的 source bundle 摘要和固定工具摘要。任何命令结果不明都停止，先只读对账，不盲目重复写操作。
+5. **结束验收。** 独立读回 stage ledger、生产 cursor、国内 main、双机 app identity、固定工具 SHA、服务和 `/readyz`。只有所有字段彼此吻合且所有必要安装/合同检查通过，才可由主机执行者另行确认 stage timer 是否应启用；production 不安装发布 timer。GitHub `main` 仍只由用户在开发机人工普通快进归档，无自动推送。
+
+首次启用的切换演练覆盖双分支顺序、过期基线、预发/生产失败、结果不明、bundle 空仓恢复、人工快进和远端分叉。复用 SHA/tree、工具链和影响范围完全匹配的既有 controller 合同及 00 主机证据。D 提交自身仅改文档；00→D 累计链还包含 C 的两项已审查工具修复，按累计候选范围核实 classifier 和固定文件，不因文档提交重跑全套业务应用验收。
+
+## 历史：291/960 partial-bootstrap 操作记录（仅供审计，禁止照此执行）
+
+以下原始清单保留历史现场、命令及证据。它描述的 app=960、291 baseline、PR #46 helper overlay、双 maintenance-check 和 PR46 candidate 流程已经过期；不得用于当前 00 应用后的基线对齐。遇到中断/偏差时按上方当前入口重新核对，不以历史命令覆盖现场。
+
+## 历史一次性主机准备与切换
 
 以下步骤仅供一次性切换，且必须按此顺序：旧发布器处理完已知运行时变化并逐项读回安装/健康证据；stage 旧 timer/service 停用并确认 inactive，production 的旧/新 units 读回 `not-found` 且无相关 job/process；只读复核已有 source.git=291/tree `3c17b8a86e2e69ed4f6942304300c609300fb077` 和 app SHA `960b30e9406fae2045aeb7ef5dce863976407727`。修复后 `prepare-baseline` 仍以 main=291；PR #46 精确 head 后由正常 candidate 队列处理，不能把它直接当 initial main。未满足条件就保持新 timer disabled，不安装新 timer 到 production。尖括号占位符均须换成核实值。GitHub 凭据只留在开发机；本次 `main=6d3ee9c` 仅供人工归档。完整顺序见本文件后续步骤；配置样例保持 `production_enabled=false` 直到独立门禁通过。
 
