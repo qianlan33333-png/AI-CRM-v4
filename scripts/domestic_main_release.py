@@ -1057,7 +1057,7 @@ root = Path(sys.argv.pop(1))
 sys.path.insert(0, str(policy / 'scripts'))
 import dev_preflight as module
 module.ROOT = root
-sys.argv = ['dev_preflight', *sys.argv]
+sys.argv = ['dev_preflight', *sys.argv[1:]]
 raise SystemExit(module.main())
 '''
             result.append([sys.executable, '-c', wrapper, str(policy), str(candidate), *command[2:]])
@@ -1073,7 +1073,7 @@ def trusted_focused(lane, report_dir, checks):
 
 quality_lanes.commands = trusted_commands
 quality_lanes.focused_commands = trusted_focused
-sys.argv = ['quality_lanes', *sys.argv]
+sys.argv = ['quality_lanes', *sys.argv[1:]]
 raise SystemExit(quality_lanes.main())
 """
 
@@ -1148,7 +1148,7 @@ def _enforced_lanes(plan: dict[str, Any], changed_policy: list[str]) -> tuple[di
 
 
 def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir: Path,
-                  base_sha: str, head_sha: str) -> dict[str, Any]:
+                  base_sha: str, head_sha: str, *, diagnostic_root: Path | None = None) -> dict[str, Any]:
     if report_dir.exists() or report_dir.is_symlink():
         raise ReleaseError("candidate check evidence path already exists; inspect before retry")
     _build_command(config, ["/usr/bin/mkdir", "-m", "0700", "-p", str(report_dir)], cwd=Path("/"), timeout=30)
@@ -1161,7 +1161,7 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
     plan = _trusted_preflight_plan(config, policy, worktree, base_sha, head_sha)
     enforced, lanes, checks, packages, profile = _enforced_lanes(plan, changed_policy)
     lane_results = []
-    diagnostic_root = Path(config["work_root"]) / "diagnostics"
+    diagnostic_root = diagnostic_root or (Path(config["work_root"]) / "diagnostics")
     _safe_directory(diagnostic_root, create=True)
     for lane in lanes:
         lane_dir = report_dir / lane
@@ -2494,7 +2494,8 @@ def _run_baseline_overlay_preflight(config: dict[str, Any], repo: Path, *,
         _make_worktree_metadata_readable(repo, worktree)
         check_config = {**config, "work_root": temporary}
         report_dir = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate_sha}-baseline-{time.time_ns()}"
-        checks = _check_report(check_config, repo, worktree, report_dir, base_sha, candidate_sha)
+        checks = _check_report(check_config, repo, worktree, report_dir, base_sha, candidate_sha,
+                               diagnostic_root=work_root / "diagnostics")
         if (checks.get("status") != "passed" or checks.get("baseline_sha") != base_sha
                 or checks.get("head_sha") != candidate_sha or "preflight" not in checks.get("selected_lanes", [])):
             raise ReleaseError("exact seed candidate did not pass trusted base-291 tool preflight")

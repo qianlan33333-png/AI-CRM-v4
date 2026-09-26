@@ -904,8 +904,9 @@ class DomesticMainReleaseTests(unittest.TestCase):
                     "database_connection": "verified", "helper_sha256": "b" * 64}
             config = {"work_root": str(work_root), "stage_helper": "/stage/helper"}
 
-            def check_traversable_parent(_config, _repo, worktree, _report_dir, _base, _head):
+            def check_traversable_parent(_config, _repo, worktree, _report_dir, _base, _head, *, diagnostic_root):
                 self.assertEqual(stat.S_IMODE(worktree.parent.stat().st_mode), 0o755)
+                self.assertEqual(diagnostic_root, work_root / "diagnostics")
                 return receipt
 
             with mock.patch.object(release, "_safe_directory"), \
@@ -1485,6 +1486,38 @@ class DomesticMainReleaseTests(unittest.TestCase):
 
     def test_generated_trusted_runner_is_valid_python(self) -> None:
         compile(release._trusted_runner_code(), "<trusted-runner>", "exec")
+
+    def test_trusted_runner_passes_only_lane_and_preflight_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            policy, candidate = root / "policy", root / "candidate"
+            (policy / "scripts/ci").mkdir(parents=True)
+            candidate.mkdir()
+            (policy / "scripts/ci/quality_lanes.py").write_text('''import subprocess, sys
+from pathlib import Path
+ROOT = Path('.')
+def commands(lane, report_dir):
+    return [[sys.executable, 'scripts/dev_preflight.py', 'fast', '--report-dir', str(report_dir)]]
+def focused_commands(lane, report_dir, checks):
+    return commands(lane, report_dir)
+def main():
+    assert sys.argv == ['quality_lanes', 'preflight', '--report-dir', str(ROOT / 'report')], sys.argv
+    return subprocess.run(commands('preflight', ROOT / 'report')[0], cwd=ROOT).returncode
+''')
+            (policy / "scripts/dev_preflight.py").write_text('''import json, sys
+from pathlib import Path
+ROOT = Path('.')
+def main():
+    assert sys.argv == ['dev_preflight', 'fast', '--report-dir', str(ROOT / 'report')], sys.argv
+    print(json.dumps({'status': 'passed', 'candidate_root': str(ROOT)}))
+    return 0
+''')
+            result = subprocess.run(
+                [sys.executable, "-c", release._trusted_runner_code(), str(policy), str(candidate),
+                 "preflight", "--report-dir", str(candidate / "report")],
+                cwd=candidate, capture_output=True, text=True, check=True,
+            )
+            self.assertEqual(json.loads(result.stdout), {"status": "passed", "candidate_root": str(candidate)})
 
     def test_controller_and_selection_policy_changes_are_not_self_certified(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
