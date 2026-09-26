@@ -69,6 +69,81 @@ def recovery_push_identity(*, group_gid: int = 12345, user_uid: int = 12346,
 
 
 class DomesticMainReleaseTests(unittest.TestCase):
+    def test_run_forwards_umask_for_text_and_file_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            input_path = Path(temporary) / "input.txt"
+            input_path.write_bytes(b"file input\n")
+            text_result = subprocess.CompletedProcess(["child"], 0, "ok", "")
+            file_result = subprocess.CompletedProcess(["child"], 0, b"ok", b"")
+            with mock.patch.object(release.subprocess, "run", side_effect=[text_result, file_result]) as run:
+                release._run(["child"], input_text="text input", umask=0o022)
+                self.assertEqual(run.call_args.kwargs["input"], "text input")
+                self.assertEqual(run.call_args.kwargs["umask"], 0o022)
+
+                release._run(["child"], input_path=input_path, umask=0o022)
+                self.assertEqual(run.call_args.kwargs["input"], b"file input\n")
+                self.assertEqual(run.call_args.kwargs["umask"], 0o022)
+
+    def test_worktree_creation_keeps_checkout_readable_under_umask_077(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, _candidate, _other = make_repository(root)
+            source = root / "source"
+            executable = source / "tool.sh"
+            executable.write_text("#!/bin/sh\nexit 0\n")
+            executable.chmod(0o755)
+            subprocess.run(["git", "-C", str(source), "add", "tool.sh"], check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "add executable"],
+                           check=True, stdout=subprocess.DEVNULL)
+            candidate = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"],
+                                                 text=True).strip()
+            subprocess.run(["git", f"--git-dir={repo}", "fetch", "--no-tags", str(source),
+                            f"{candidate}:refs/heads/codex/umask-test"], check=True,
+                           stdout=subprocess.DEVNULL)
+
+            root.chmod(0o711)
+            work_root = root / "work"
+            work_root.mkdir(mode=0o711)
+            work_root.chmod(0o711)
+            policy_root = work_root / "trusted-policy"
+            config = {"work_root": str(work_root), "source_worktree": str(work_root / "candidate")}
+            original_lstat = Path.lstat
+
+            def root_owned_lstat(path: Path):
+                result = original_lstat(path)
+                if path in {work_root, policy_root}:
+                    return mock.Mock(st_uid=0, st_mode=result.st_mode)
+                return result
+
+            old_umask = os.umask(0o077)
+            try:
+                with mock.patch.object(Path, "lstat", new=root_owned_lstat), \
+                     mock.patch.object(release, "_make_worktree_metadata_readable") as metadata:
+                    active = release._active_worktree(config, repo, candidate)
+                    policy = release._policy_worktree(repo, work_root, base, "release-push-test")
+                    self.assertEqual(metadata.call_count, 2)
+
+                self.assertEqual(stat.S_IMODE(active.stat().st_mode), 0o755)
+                self.assertEqual(stat.S_IMODE(policy.stat().st_mode), 0o755)
+                self.assertEqual(stat.S_IMODE(policy_root.stat().st_mode), 0o711)
+                for worktree in (active, policy):
+                    source_file = worktree / "main.txt"
+                    self.assertEqual(source_file.read_text(), "main\n")
+                    mode = stat.S_IMODE(source_file.stat().st_mode)
+                    self.assertEqual(mode, 0o644)
+                    self.assertFalse(mode & 0o022)
+                executable_mode = stat.S_IMODE((active / "tool.sh").stat().st_mode)
+                self.assertEqual(executable_mode, 0o755)
+                self.assertFalse(executable_mode & 0o022)
+
+                state_path = root / "private" / "state.json"
+                release.atomic_json(state_path, {"status": "test"})
+                self.assertEqual(stat.S_IMODE(state_path.parent.stat().st_mode), 0o700)
+                self.assertEqual(stat.S_IMODE(state_path.stat().st_mode), 0o600)
+                self.assertEqual(os.umask(0o077), 0o077)
+            finally:
+                os.umask(old_umask)
+
     def test_config_state_path_matches_systemd_condition(self) -> None:
         config = {
             "repo": release.DEFAULT_REPO,

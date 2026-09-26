@@ -75,19 +75,21 @@ class ControllerMaintenanceRequired(ReleaseError):
 
 
 def _run(args: list[str], *, cwd: Path | None = None, input_text: str | None = None,
-         input_path: Path | None = None, timeout: int = 600, check: bool = True) -> subprocess.CompletedProcess[str]:
+         input_path: Path | None = None, timeout: int = 600, check: bool = True,
+         umask: int = -1) -> subprocess.CompletedProcess[str]:
     if input_text is not None and input_path is not None:
         raise ValueError("command input must have one source")
     if input_path is not None:
         with input_path.open("rb") as source:
             raw = subprocess.run(args, cwd=cwd, input=source.read(), stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, timeout=timeout)
+                                 stderr=subprocess.PIPE, timeout=timeout, umask=umask)
         result = subprocess.CompletedProcess(args, raw.returncode,
                                              raw.stdout.decode("utf-8", errors="replace"),
                                              raw.stderr.decode("utf-8", errors="replace"))
     else:
         result = subprocess.run(args, cwd=cwd, input=input_text, text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
+                                umask=umask)
     if check and result.returncode:
         # Child output can contain test credentials and database diagnostics.
         # Preserve only the command basename and exit code in the durable log.
@@ -888,6 +890,7 @@ def _policy_worktree(repo: Path, work_root: Path, base_sha: str, push_group: str
     root_info = root.lstat()
     if root_info.st_uid != 0 or root_info.st_mode & 0o022:
         raise ReleaseError("trusted policy worktree root must be protected by root ownership")
+    os.chmod(root, 0o711)
     path = root / base_sha
     if path.exists() or path.is_symlink():
         registered = _run(["git", f"--git-dir={repo}", "worktree", "list", "--porcelain"], check=False).stdout
@@ -897,7 +900,8 @@ def _policy_worktree(repo: Path, work_root: Path, base_sha: str, push_group: str
             raise ReleaseError("trusted policy worktree differs from its exact base")
         _make_worktree_metadata_readable(repo, path)
         return path
-    _run(["git", f"--git-dir={repo}", "worktree", "add", "--detach", str(path), base_sha], timeout=120)
+    _run(["git", f"--git-dir={repo}", "worktree", "add", "--detach", str(path), base_sha],
+         timeout=120, umask=0o022)
     os.chmod(path, 0o755)
     _make_worktree_metadata_readable(repo, path)
     if _worktree_git(path, "rev-parse", "HEAD") != base_sha or _worktree_git(path, "status", "--porcelain"):
@@ -1826,7 +1830,8 @@ def _active_worktree(config: dict[str, Any], repo: Path, head_sha: str) -> Path:
         if str(worktree.resolve()) not in registered:
             raise ReleaseError("unregistered source worktree occupies the fixed candidate path")
         _run(["git", f"--git-dir={repo}", "worktree", "remove", "--force", str(worktree)])
-    _run(["git", f"--git-dir={repo}", "worktree", "add", "--detach", str(worktree), head_sha], timeout=120)
+    _run(["git", f"--git-dir={repo}", "worktree", "add", "--detach", str(worktree), head_sha],
+         timeout=120, umask=0o022)
     _make_worktree_metadata_readable(repo, worktree)
     if _worktree_git(worktree, "rev-parse", "HEAD") != head_sha:
         raise ReleaseError("candidate checkout is not at the exact submitted head")
@@ -2642,7 +2647,8 @@ def _run_baseline_overlay_preflight(config: dict[str, Any], repo: Path, *,
         # parent to read the candidate and trusted-policy worktrees.
         os.chmod(check_root, 0o755)
         worktree = check_root / "candidate"
-        _run(["git", f"--git-dir={repo}", "worktree", "add", "--detach", str(worktree), candidate_sha], timeout=120)
+        _run(["git", f"--git-dir={repo}", "worktree", "add", "--detach", str(worktree), candidate_sha],
+             timeout=120, umask=0o022)
         _make_worktree_metadata_readable(repo, worktree)
         check_config = {**config, "work_root": temporary}
         report_dir = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate_sha}-baseline-{time.time_ns()}"
