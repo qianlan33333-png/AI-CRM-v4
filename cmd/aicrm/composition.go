@@ -1594,7 +1594,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 			Enabled: true, Production: cfg.Alipay.Production, AppID: cfg.Alipay.AppID,
 			PrivateKey: string(privateKey), Gateway: cfg.Alipay.Gateway, ContentEncryptionKey: contentEncryptionKey, AlipayPublicKey: cfg.Alipay.AlipayPublicKey,
 			AppCertPath: cfg.Alipay.AppCertPath, AlipayCertPath: cfg.Alipay.AlipayCertPath, AlipayRootPath: cfg.Alipay.AlipayRootPath,
-			NotifyURL: cfg.Alipay.NotifyURL, ReturnURL: cfg.Alipay.ReturnURL,
+			NotifyURL: cfg.Alipay.NotifyURL, ReturnURL: h5PublicOrigin(cfg) + "/pay/alipay/return",
 		})
 		if err != nil {
 			return fail(err)
@@ -2264,6 +2264,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	adminAPIs.Handle("/api/h5/wechat-pay/oauth/", paymentHandler)
 	adminAPIs.Handle("/api/public/wechat-pay/", paymentHandler)
 	adminAPIs.Handle("/api/public/alipay/", paymentHandler)
+	adminAPIs.Handle("/pay/alipay/return", paymentHandler)
 	adminAPIs.Handle("/api/public/wechat-shop/", paymentHandler)
 	adminAPIs.Handle("/api/public/service-period-member-grid/bootstrap", productBindings.Products)
 	adminAPIs.Handle("/api/public/service-period-member-grid/query", productBindings.Products)
@@ -2698,6 +2699,10 @@ func mountOrderUI(next, adminUI http.Handler, authentication accessAuthenticatio
 
 func mountPublicProduct(next, products http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/pay/alipay/return" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/product-public-assets/") || strings.HasPrefix(r.URL.Path, "/api/public/products/") || strings.HasPrefix(r.URL.Path, "/api/h5/product-images/") || strings.HasPrefix(r.URL.Path, "/p/") || strings.HasPrefix(r.URL.Path, "/pay/") {
 			products.ServeHTTP(w, r)
 			return
@@ -2936,6 +2941,7 @@ func routeApplicationWithProductsCouponsGroupOpsAutomationAndCycles(health, acce
 	mux.Handle("/api/h5/wechat-pay/oauth/", identity)
 	mux.Handle("/api/public/wechat-pay/", identity)
 	mux.Handle("/api/public/alipay/", identity)
+	mux.Handle("/pay/alipay/return", identity)
 	mux.Handle("/api/public/wechat-shop/", identity)
 	mux.Handle("/api/admin/wechat-pay/orders/", identity)
 	mux.Handle("/api/admin/wechat-pay/payments/", identity)

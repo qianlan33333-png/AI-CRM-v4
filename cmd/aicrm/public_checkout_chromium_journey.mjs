@@ -111,7 +111,8 @@ try {
   await wait(cdp, "document.getElementById('mobileError')?.textContent==='请填写手机号'", "missing phone feedback was not shown");
   assert.equal(await evaluate(cdp, "sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard')"), null, "invalid form must not create a checkout checkpoint");
   await clickWithCoupon(cdp, 11);
-  await wait(cdp, "document.getElementById('status')?.textContent==='请求失败'", "lost response was not rendered");
+  await wait(cdp, "document.getElementById('status')?.textContent==='订单创建结果尚未核实，原请求已保留。点击重试会复用同一请求，不会重复下单。'", "lost response did not preserve the original request");
+  assert.equal(await evaluate(cdp, "document.getElementById('buy')?.textContent"), "重试原请求", "lost response offers the original request retry");
   const firstCheckpoint = await evaluate(cdp, "JSON.parse(sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard') || 'null')");
   assert.equal(firstCheckpoint?.payload?.promotion_context, promotionA, "initial promotion checkpoint preserves the rendered context");
   assert.equal(typeof firstCheckpoint?.key, "string", "initial promotion checkpoint has an idempotency key");

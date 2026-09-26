@@ -189,7 +189,7 @@ func (a *Alipay) BuildWapPay(_ context.Context, request WebPayRequest) (string, 
 		return "", ErrInvalidMaterial
 	}
 	value := alipay.TradeWapPay{Trade: alipay.Trade{
-		NotifyURL: a.config.NotifyURL, ReturnURL: a.config.ReturnURL,
+		NotifyURL: a.config.NotifyURL, ReturnURL: alipayPaymentReturnURL(a.config.ReturnURL),
 		OutTradeNo: request.MerchantOrderNo, Subject: request.Subject,
 		Body: request.Body, TotalAmount: request.TotalAmount,
 		ProductCode: "QUICK_WAP_WAY", TimeoutExpress: request.TimeoutExpress,
@@ -206,7 +206,7 @@ func (a *Alipay) BuildPagePay(_ context.Context, request WebPayRequest) (string,
 		return "", ErrInvalidMaterial
 	}
 	value := alipay.TradePagePay{Trade: alipay.Trade{
-		NotifyURL: a.config.NotifyURL, ReturnURL: a.config.ReturnURL,
+		NotifyURL: a.config.NotifyURL, ReturnURL: alipayPaymentReturnURL(a.config.ReturnURL),
 		OutTradeNo: request.MerchantOrderNo, Subject: request.Subject,
 		Body: request.Body, TotalAmount: request.TotalAmount,
 		ProductCode: "FAST_INSTANT_TRADE_PAY", TimeoutExpress: request.TimeoutExpress,
@@ -403,3 +403,17 @@ func minorToAmount(value int64) string {
 }
 
 var _ effectport.ProviderAdapter = (*Alipay)(nil)
+
+// Preserve the deployment-owned HTTPS origin, route the return to Payment.
+// Old survey paths and unrelated query data must not become a payment return.
+func alipayPaymentReturnURL(raw string) string {
+	value, err := url.Parse(raw)
+	if err != nil || value.Scheme != "https" || value.Host == "" || value.User != nil {
+		return ""
+	}
+	value.Path = "/pay/alipay/return"
+	value.RawPath = ""
+	value.RawQuery = ""
+	value.Fragment = ""
+	return value.String()
+}

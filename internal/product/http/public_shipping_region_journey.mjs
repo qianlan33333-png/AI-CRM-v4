@@ -10,7 +10,7 @@ const virtualConsole = new VirtualConsole();
 virtualConsole.on('jsdomError', error => errors.push(error));
 const page = new JSDOM(html, {
   url: 'https://example.test/pay/book',
-  runScripts: 'dangerously',
+  pretendToBeVisual: true, runScripts: 'dangerously',
   virtualConsole,
   beforeParse(window) {
     Object.defineProperty(window.navigator, 'userAgent', {value: 'MicroMessenger'});

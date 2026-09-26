@@ -2,6 +2,7 @@ package http
 
 import (
 	"crypto/sha256"
+	_ "embed"
 	"encoding/base64"
 	"io"
 	"net/http"
@@ -39,7 +40,7 @@ try{
   target=new URL(decodeURIComponent(location.hash.slice(1)));
   if(target.protocol!=='https:'||target.host!=='openapi.alipay.com'||target.pathname!=='/gateway.do'||target.username||target.password||target.hash)throw new Error();
   for(const key of ['method','app_id','sign','biz_content'])if(target.searchParams.getAll(key).length!==1||!target.searchParams.get(key))throw new Error();
-  if(target.searchParams.get('method')!=='alipay.trade.wap.pay')throw new Error();
+  if(!['alipay.trade.wap.pay','alipay.trade.page.pay'].includes(target.searchParams.get('method')))throw new Error();
 }catch(_){fail('请返回微信中的原订单页，重新打开付款引导或复制原付款链接。');return}
 open.href=target.href;copy.hidden=false;note.hidden=false;
 copy.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(target.href);message.textContent='已复制原付款链接，可在系统浏览器地址栏粘贴打开。'}catch(_){fallback.value=target.href;fallback.hidden=false;fallback.focus();fallback.select();message.textContent='请长按或手动复制下方原付款链接。'}});
@@ -49,3 +50,19 @@ if(/MicroMessenger/i.test(navigator.userAgent)){
   title.textContent='正在打开支付宝付款…';message.textContent='如未自动打开，请点击下方按钮继续。';open.hidden=false;location.replace(target.href);
 }
 })();`
+
+// Tabler Icons (MIT), outline/arrow-up-right; attribution lives beside asset.
+//
+//go:embed assets/alipay-menu-arrow.svg
+var alipayMenuArrow []byte
+
+func serveAlipayMenuArrow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(alipayMenuArrow)
+}

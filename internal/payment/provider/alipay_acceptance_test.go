@@ -54,6 +54,32 @@ func alipayContractFixture(t *testing.T, gateway string) (*Alipay, *alipaysdk.Cl
 	return provider, signer
 }
 
+func TestAlipayEncryptedWebLinksKeepCiphertextAndPaymentReturn(t *testing.T) {
+	provider, _ := alipayContractFixture(t, "")
+	key := base64.StdEncoding.EncodeToString([]byte("0123456789ABCDEF"))
+	if err := provider.client.SetEncryptKey(key); err != nil {
+		t.Fatal(err)
+	}
+	for _, build := range []func(context.Context, WebPayRequest) (string, error){provider.BuildWapPay, provider.BuildPagePay} {
+		raw, err := build(context.Background(), WebPayRequest{MerchantOrderNo: "merchant-encrypted", Subject: "Synthetic", TotalAmount: "9.90"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		target, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		query := target.Query()
+		ciphertext, err := base64.StdEncoding.DecodeString(query.Get("biz_content"))
+		if err != nil || len(ciphertext) == 0 || len(ciphertext)%16 != 0 || query.Get("encrypt_type") != "AES" || query.Get("return_url") != "https://example.test/pay/alipay/return" {
+			t.Fatalf("SDK encryption/return contract failed: %v", err)
+		}
+		if json.Valid([]byte(query.Get("biz_content"))) {
+			t.Fatal("encrypted content treated as plaintext JSON")
+		}
+	}
+}
+
 func TestAlipayAcceptanceSignedCallbackRejectsTamperAndWrongApp(t *testing.T) {
 	provider, signer := alipayContractFixture(t, "")
 	values := url.Values{
@@ -145,7 +171,7 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 			Subject string `json:"subject"`
 		}
 		decodeErr := json.Unmarshal([]byte(parsed.Query().Get("biz_content")), &content)
-		if err != nil || decodeErr != nil || content.Subject != request.Subject || parsed.Query().Get("method") != name || parsed.Query().Get("sign") == "" || parsed.Query().Get("notify_url") != "https://example.test/api/public/alipay/callback" {
+		if err != nil || decodeErr != nil || content.Subject != request.Subject || parsed.Query().Get("method") != name || parsed.Query().Get("sign") == "" || parsed.Query().Get("notify_url") != "https://example.test/api/public/alipay/callback" || parsed.Query().Get("return_url") != "https://example.test/pay/alipay/return" {
 			t.Fatalf("%s checkout artifact invalid: err=%v", name, err)
 		}
 	}

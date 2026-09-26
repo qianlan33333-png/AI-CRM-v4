@@ -63,6 +63,11 @@ func TestPostgreSQLAlipayCheckoutReadbackJourney(t *testing.T) {
 	const h5Origin = "https://alipay-h5.example.test"
 	fixture := newProductExternalPushChromiumFixtureWithOptions(t, 90*time.Second, productExternalPushChromiumFixtureOptions{enablePublicH5: true, enableAlipay: true, h5PublicOrigin: h5Origin, deferEffectsWorker: true})
 	assertComposedH5AlipayOriginBoundary(t, fixture, h5Origin)
+	returned := httptest.NewRecorder()
+	fixture.application.handler.ServeHTTP(returned, httptest.NewRequest(http.MethodGet, "/pay/alipay/return?out_trade_no=untrusted-return&trade_status=TRADE_SUCCESS", nil))
+	if returned.Code != http.StatusOK || !strings.Contains(returned.Body.String(), "正在确认付款结果") {
+		t.Fatalf("Alipay return is not mounted on Payment: status=%d", returned.Code)
+	}
 
 	pageProductID := seedAlipayPageCheckoutProduct(t, fixture)
 	tests := []struct {
@@ -105,6 +110,9 @@ func TestPostgreSQLAlipayCheckoutReadbackJourney(t *testing.T) {
 			gateway, gatewayErr := url.Parse(fixture.alipayGateway)
 			if err != nil || decodeErr != nil || gatewayErr != nil || parsed.Scheme != gateway.Scheme || parsed.Host != gateway.Host || bizContent.OutTradeNo != test.created.MerchantOrder || bizContent.Subject != test.subject || bizContent.TotalAmount != fmt.Sprintf("%d.%02d", test.amount/100, test.amount%100) {
 				t.Fatalf("synthetic %s handoff URL=%q parsed=%+v err=%v", test.name, status.Handoff.RedirectURL, parsed, err)
+			}
+			if parsed.Query().Get("return_url") != h5Origin+"/pay/alipay/return" {
+				t.Fatal("return URL does not use session-owned H5 origin")
 			}
 			assertAlipayCheckoutPersistence(t, fixture, test.created, test.channel)
 

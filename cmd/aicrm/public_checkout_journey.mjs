@@ -181,7 +181,7 @@ const unknownStorage = new SharedStorage();
 const unknown = await runPage(unknownStorage, firstSession, normalBridge);
 setPurchase(unknown, 14, "13800138000");
 unknown.window.document.getElementById("buy").click();
-await waitFor(unknown.window.document, "支付结果确认超时，请稍后刷新查看", "unknown checkout");
+await waitFor(unknown.window.document, "支付结果确认超时，原订单已保留，请稍后刷新查看", "unknown checkout");
 assert.equal(unknownStorage.values.size, 1, "unknown result keeps checkpoint for later status recovery");
 closePage(unknown);
 
@@ -193,7 +193,7 @@ const ordinaryThenPromotion = await runPage(unknownStorage, firstSession, normal
 await waitFor(ordinaryThenPromotion.window.document, "已恢复原订单，请继续确认支付。", "ordinary checkpoint restoration before a new click");
 assert.equal(ordinaryThenPromotion.window.document.getElementById("buy").disabled, false, "restored checkpoint enables only the original-order continuation");
 ordinaryThenPromotion.window.document.getElementById("buy").click();
-await waitFor(ordinaryThenPromotion.window.document, "支付结果确认超时，请稍后刷新查看", "ordinary checkpoint from promotion page");
+await waitFor(ordinaryThenPromotion.window.document, "支付结果确认超时，原订单已保留，请稍后刷新查看", "ordinary checkpoint from promotion page");
 const recoveredOrdinaryCheckpoint = JSON.parse([...unknownStorage.values.values()][0]);
 assert.equal(recoveredOrdinaryCheckpoint.key, ordinaryCheckpoint.key, "promotion page keeps original ordinary idempotency key");
 assert.equal(recoveredOrdinaryCheckpoint.merchant_order_no, ordinaryCheckpoint.merchant_order_no, "promotion page keeps original ordinary merchant order");
@@ -226,7 +226,7 @@ const switchStorage = new SharedStorage();
 const originalSession = await runPage(switchStorage, firstSession, normalBridge);
 setPurchase(originalSession, 13, "13800138000");
 originalSession.window.document.getElementById("buy").click();
-await waitFor(originalSession.window.document, "支付结果确认超时，请稍后刷新查看", "original session pending checkout");
+await waitFor(originalSession.window.document, "支付结果确认超时，原订单已保留，请稍后刷新查看", "original session pending checkout");
 closePage(originalSession);
 const switchedSession = await runPage(switchStorage, secondSession, normalBridge);
 setPurchase(switchedSession, 13, "13800138000");

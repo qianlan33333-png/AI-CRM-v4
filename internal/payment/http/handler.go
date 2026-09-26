@@ -221,6 +221,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.refundRecoveryReceipt(writer, request)
 	case path == "/api/public/wechat-pay/callbacks/payment" || path == "/api/public/wechat-pay/callbacks/refund":
 		handler.callback(writer, request)
+	case path == "/pay/alipay/return":
+		handler.alipayReturn(writer, request)
 	case path == "/api/public/alipay/callback":
 		handler.alipayCallback(writer, request)
 	case path == "/api/public/wechat-shop/callbacks/refund":

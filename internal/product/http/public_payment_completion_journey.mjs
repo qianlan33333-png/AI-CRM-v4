@@ -34,11 +34,11 @@ async function settle() {
   for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve));
 }
 
-function boot(store, completion, redirectFailure = false, sessionAuthorized = true, setup = '', purchase = {purchase_state:'available',can_purchase:true}, userAgent='MicroMessenger', renewal=false, details=false) {
+function boot(store, completion, redirectFailure = false, sessionAuthorized = true, setup = '', purchase = {purchase_state:'available',can_purchase:true}, userAgent='MicroMessenger', renewal=false, details=false, fragment='') {
   const calls = [], elements = new Map();
   const setGlobal = (name, value) => Object.defineProperty(globalThis, name, {value, configurable: true, writable: true});
   const element = () => ({hidden: false, disabled: false, dataset: {}, value: '0', checked: true, textContent: '', href: '', children: [], attributes: new Map(), addEventListener(type, listener) { this.listener ??= {}; this.listener[type] = listener; }, appendChild(child) { this.children.push(child); }, replaceChildren(...children) {this.children=children;this.textContent="";}, setAttribute(name, value) { this.attributes.set(name, String(value)); }, removeAttribute(name) { this.attributes.delete(name); }, set src(value) { this.source = value; queueMicrotask(() => this.listener?.load?.({target: this})); }, get src() { return this.source; }});
-  for (const id of ['price', 'buy', 'status', 'coupon', 'couponPanel', 'couponStatus', 'refreshCoupons', 'wechatNotice', 'mobile', 'payableAmount', 'footerAmount', 'discountAmount', 'identityGate', 'identityTitle', 'identityMessage', 'authFeedback', 'authContinue', 'checkoutContent','paymentDetails','mobilePanel','paymentMethod','product','footer','productName','alipayGuide','alipayGuideMessage','alipayPaymentURL','alipayCopy','alipayPaid']) elements.set(id, element());
+  for (const id of ['price', 'buy', 'status', 'coupon', 'couponPanel', 'couponStatus', 'refreshCoupons', 'wechatNotice', 'mobile', 'payableAmount', 'footerAmount', 'discountAmount', 'identityGate', 'identityTitle', 'identityMessage', 'authFeedback', 'authContinue', 'checkoutContent','paymentDetails','mobilePanel','paymentMethod','product','footer','productName','alipayGuide','alipayGuideMessage','alipayPaymentURL','alipayCopy','alipayPaid','alipayClose']) elements.set(id, element());
   elements.get('checkoutContent').querySelector=selector=>elements.get(({'.product':'product','.checkout-footer':'footer','.product h1':'productName'})[selector]||selector.slice(1));
   if(renewal)elements.set('renew',element());
   if(details){const detail=element(),img=element();detail.hidden=true;img.dataset.src='https://example.com/detail.png';detail.querySelectorAll=()=>[img];elements.set('detailContent',detail);elements.set('detailImage',img);elements.set('detailPrice',element());}
@@ -47,10 +47,11 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   elements.get('checkoutContent').hidden = true;
   const paymentOption=element(); paymentOption.value='wechat_pay';
   setGlobal('document', {getElementById(id) { return elements.get(id); }, querySelector() { return paymentOption; }, querySelectorAll() { return [paymentOption]; }, addEventListener() {}, createElement() { return element(); }});
+  setGlobal('window', {addEventListener(){}});
   setGlobal('navigator', {userAgent});
   setGlobal('sessionStorage', {getItem(key) { return store.get(key) ?? null; }, setItem(key,value) {store.set(key,String(value));}, removeItem(key) {store.delete(key);} });
   setGlobal('localStorage', {getItem(key) { return store.get(key) ?? null; }, setItem(key, value) { store.set(key, String(value)); }, removeItem(key) { store.delete(key); }});
-  setGlobal('location', {href: '', pathname: '/pay/course-7', search: '?utm_source=shared', assign(url) { calls.push({redirect: url}); if (redirectFailure) throw new Error('redirect blocked'); }});
+  setGlobal('location', {href: '', hash:fragment, replace(url){calls.push({replace:url});}, pathname: '/pay/course-7', search: '?utm_source=shared', assign(url) { calls.push({redirect: url}); if (redirectFailure) throw new Error('redirect blocked'); }});
   setGlobal('crypto', {randomUUID() { return 'fresh-checkout-key'; }});
   setGlobal('WeixinJSBridge', {invoke() { throw new Error('paid reload must not invoke payment'); }});
   setGlobal('fetch', async (url, options = {}) => {
@@ -456,4 +457,22 @@ if(process.argv[2]){
   if(periodic){w.document.getElementById('renew').click();await settle();for(const selector of ['.product','#paymentDetails','#mobilePanel','#paymentMethod','.checkout-footer'])assert.equal(w.document.querySelector('#checkoutContent '+selector).hidden,false,'renew '+selector);assert.equal(status.querySelector('.completion-qr'),null);assert.equal(requests.some(r=>r.method==='POST'),false)}
   dom.window.close();
  }
+}
+
+// Opening the original WeChat URL in a fresh system browser consumes the
+// fragment before auth/bootstrap; no checkout POST, session or OAuth is used.
+{
+ const signed='https://openapi.alipay.com/gateway.do?method=alipay.trade.wap.pay&app_id=fixture&sign=synthetic&biz_content='+encodeURIComponent(JSON.stringify({out_trade_no:'M-original'}));
+ const run=boot(new Map(),{},false,false,'',{purchase_state:'available',can_purchase:true},'Chrome',false,false,'#alipay='+encodeURIComponent(signed));
+ await settle();assert.equal(run.calls.filter(call=>call.url).length,0);assert.equal(run.calls[0].replace,signed);
+ const encrypted=new URL(signed);encrypted.searchParams.set('encrypt_type','AES');encrypted.searchParams.set('biz_content',Buffer.alloc(32,7).toString('base64'));
+ const cipherURL=encrypted.href;
+ const cipherRun=boot(new Map(),{},false,false,'',{purchase_state:'available',can_purchase:true},'Chrome',false,false,'#alipay='+encodeURIComponent(cipherURL));
+ await settle();assert.equal(cipherRun.calls.filter(call=>call.url).length,0);assert.equal(cipherRun.calls[0].replace,cipherURL,'encrypted original URL reaches Alipay unchanged without OAuth or another order');
+ for(const bad of [cipherURL.replace('encrypt_type=AES','encrypt_type=other'),cipherURL+'&encrypt_type=AES',cipherURL.replace(/biz_content=[^&]+/,'biz_content=invalid')]){
+  const blocked=boot(new Map(),{},false,false,'',{purchase_state:'available',can_purchase:true},'Chrome',false,false,'#alipay='+encodeURIComponent(bad));
+  await settle();assert.equal(blocked.calls.length,0);assert.match(blocked.elements.get('identityTitle').textContent,/付款链接暂不可用/);
+ }
+ const invalid=boot(new Map(),{},false,false,'',{purchase_state:'available',can_purchase:true},'Chrome',false,false,'#alipay='+encodeURIComponent(signed.replace('openapi.alipay.com','evil.test')));
+ await settle();assert.equal(invalid.calls.length,0);assert.match(invalid.elements.get('identityTitle').textContent,/付款链接暂不可用/);
 }

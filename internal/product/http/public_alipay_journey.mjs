@@ -3,12 +3,12 @@ import {readFile} from 'node:fs/promises';
 import {JSDOM} from 'jsdom';
 
 const html = await readFile(process.argv[2], 'utf8');
-const signedURL = 'https://openapi.alipay.com/gateway.do?method=alipay.trade.wap.pay&app_id=virtual-test-app&sign=synthetic&biz_content=wap-order';
+const signedURL = 'https://openapi.alipay.com/gateway.do?method=alipay.trade.wap.pay&app_id=virtual-test-app&sign=synthetic&biz_content=%7B%22out_trade_no%22%3A%22M-alipay-7%22%7D';
 const calls = [];
 const records = new Map();
 let copied = '';
 let statusReads = 0;
-const dom = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const dom = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', pretendToBeVisual: true, runScripts: 'outside-only'});
 const {window} = dom;
 Object.defineProperty(window.navigator, 'userAgent', {value: 'MicroMessenger'});
 Object.defineProperty(window.navigator, 'clipboard', {value: {async writeText(value) {copied = value;}}});
@@ -80,24 +80,25 @@ assert.equal(records.values().next().value.creates, 2);
 assert.equal(checkpoint().merchant_order_no, 'M-alipay-7');
 assert.equal(window.document.getElementById('alipayGuide').hidden, false);
 assert.equal(window.document.getElementById('alipayPaymentURL').value, signedURL);
-assert.equal(window.document.getElementById('alipayOpen').getAttribute('href'), '/pay/alipay/continue#'+encodeURIComponent(signedURL), 'WeChat uses the browser handoff for the same signed URL');
+assert.equal(window.location.hash, '#alipay='+encodeURIComponent(signedURL), 'WeChat stays on original page and carries the same signed URL');
+assert.equal(window.document.getElementById('alipayGuide').dataset.overlay, 'true');
 assert.ok(calls.some(call => call.url === '/api/v1/alipay/checkouts/M-alipay-7'));
 window.document.getElementById('alipayCopy').click();
 await settle();
 assert.equal(copied, signedURL, 'the synthetic signed payment URL is returned to the user unchanged');
 
-window.document.getElementById('alipayPaid').click();
+window.document.dispatchEvent(new window.Event('visibilitychange'));
 await settle();
 assert.equal(records.size, 1, 'readback does not create a new order');
 assert.equal(window.document.getElementById('alipayGuide').hidden, false, 'pending provider status keeps the link available');
-window.document.getElementById('alipayPaid').click();
+window.document.dispatchEvent(new window.Event('visibilitychange'));
 await settle();
 assert.equal(window.document.getElementById('alipayGuide').hidden, true);
 assert.equal(buy.textContent, '已购买');
 assert.equal(calls.some(call => call.url.startsWith('/api/v1/wechat-pay/checkouts/')), false, 'status and handoff never poll the WeChat route');
 
 const saved = window.sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard');
-const reload = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const reload = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', pretendToBeVisual: true, runScripts: 'outside-only'});
 const after = reload.window;
 Object.defineProperty(after.navigator, 'userAgent', {value: 'MicroMessenger'});
 after.sessionStorage.setItem('aicrm.checkout.tab.v2:7:standard', saved);
@@ -119,7 +120,7 @@ assert.equal(after.document.getElementById('buy').textContent, '已购买');
 assert.equal(reloadCalls.some(call => call.method === 'POST'), false, 'reload reads the same Alipay payment without creating another order');
 assert.ok(reloadCalls.some(call => call.url === '/api/v1/alipay/checkouts/M-alipay-7'));
 
-const desktop = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const desktop = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', pretendToBeVisual: true, runScripts: 'outside-only'});
 Object.defineProperty(desktop.window.navigator, 'userAgent', {value: 'Mozilla/5.0'});
 const desktopCalls = [];
 desktop.window.crypto.randomUUID = () => 'checkout-alipay-page-7';
@@ -134,7 +135,7 @@ desktop.window.fetch = async (url, options = {}) => {
         : url === '/api/v1/alipay/checkouts' && options.method === 'POST'
           ? {merchant_order_no: 'M-alipay-page-7'}
           : url === '/api/v1/alipay/checkouts/M-alipay-page-7'
-            ? {status: 'awaiting_payment', provider: 'alipay', channel: 'alipay_page', ready: true, amount_minor: 990, currency: 'CNY', handoff: {redirectUrl: 'https://openapi.alipay.com/gateway.do?method=alipay.trade.page.pay&app_id=virtual-test-app&sign=synthetic&biz_content=page-order'}}
+            ? {status: 'awaiting_payment', provider: 'alipay', channel: 'alipay_page', ready: true, amount_minor: 990, currency: 'CNY', handoff: {redirectUrl: 'https://openapi.alipay.com/gateway.do?method=alipay.trade.page.pay&app_id=virtual-test-app&sign=synthetic&biz_content=%7B%22out_trade_no%22%3A%22M-alipay-page-7%22%7D'}}
             : assert.fail(`unexpected desktop request: ${url}`);
   return {ok: true, status: options.method === 'POST' ? 202 : 200, async json() {return body;}};
 };
@@ -145,9 +146,9 @@ desktop.window.document.getElementById('buy').click();
 await settle();
 assert.equal(JSON.parse(desktopCalls.find(call => call.options.method === 'POST').options.body).channel, 'alipay_page');
 assert.ok(desktopCalls.some(call => call.url === '/api/v1/alipay/checkouts/M-alipay-page-7'));
-assert.equal(desktop.window.document.getElementById('alipayPaymentURL').value, 'https://openapi.alipay.com/gateway.do?method=alipay.trade.page.pay&app_id=virtual-test-app&sign=synthetic&biz_content=page-order');
+assert.equal(desktop.window.document.getElementById('alipayPaymentURL').value, 'https://openapi.alipay.com/gateway.do?method=alipay.trade.page.pay&app_id=virtual-test-app&sign=synthetic&biz_content=%7B%22out_trade_no%22%3A%22M-alipay-page-7%22%7D');
 
-const rejected = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const rejected = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', pretendToBeVisual: true, runScripts: 'outside-only'});
 const rejectedWindow = rejected.window;
 Object.defineProperty(rejectedWindow.navigator, 'userAgent', {value: 'MicroMessenger'});
 rejectedWindow.crypto.randomUUID = () => 'checkout-alipay-rejected-7';
@@ -178,7 +179,7 @@ assert.equal(rejectedWindow.document.getElementById('alipayGuide').hidden, true)
 assert.match(rejectedWindow.document.getElementById('buy').textContent, /立即支付/);
 assert.equal(rejectedWindow.document.getElementById('coupon').disabled, false, 'clearing the marker lets the user edit and start a new request');
 
-const ambiguousRetry = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const ambiguousRetry = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', pretendToBeVisual: true, runScripts: 'outside-only'});
 const ambiguousWindow = ambiguousRetry.window;
 Object.defineProperty(ambiguousWindow.navigator, 'userAgent', {value: 'MicroMessenger'});
 const ambiguousKey = 'checkout-alipay-earlier-unknown-7';
@@ -206,7 +207,7 @@ assert.equal(ambiguousWindow.document.getElementById('payableAmount').textConten
 assert.match(ambiguousWindow.document.getElementById('status').textContent, /订单创建结果尚未核实/);
 assert.match(ambiguousWindow.document.getElementById('buy').textContent, /重试原请求/);
 
-const firstUnauthorized = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const firstUnauthorized = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', pretendToBeVisual: true, runScripts: 'outside-only'});
 const unauthorizedWindow = firstUnauthorized.window;
 Object.defineProperty(unauthorizedWindow.navigator, 'userAgent', {value: 'Mozilla/5.0'});
 unauthorizedWindow.crypto.randomUUID = () => 'checkout-alipay-first-401-7';
@@ -231,7 +232,7 @@ assert.equal(unauthorizedPosts, 1, 'the initial POST returns a definite pre-writ
 assert.equal(unauthorizedWindow.sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard'), null, 'the definite first 401 removes the empty-order marker before authorization restarts');
 assert.equal(unauthorizedWindow.document.getElementById('identityGate').hidden, false);
 
-const afterReauthorization = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const afterReauthorization = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', pretendToBeVisual: true, runScripts: 'outside-only'});
 const reauthorizedWindow = afterReauthorization.window;
 Object.defineProperty(reauthorizedWindow.navigator, 'userAgent', {value: 'Mozilla/5.0'});
 reauthorizedWindow.crypto.randomUUID = () => 'checkout-alipay-new-binding-7';
@@ -256,7 +257,7 @@ await settle();
 assert.equal(JSON.parse(reauthorizedPost.body).checkout_session_binding, 'b'.repeat(43), 'a fresh checkout uses the reauthorized binding');
 assert.equal(reauthorizedPost.headers['Idempotency-Key'], 'checkout-alipay-new-binding-7', 'a confirmed 401 permits a new attempt with a fresh key');
 
-const originRejected = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const originRejected = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', pretendToBeVisual: true, runScripts: 'outside-only'});
 const originRejectedWindow = originRejected.window;
 Object.defineProperty(originRejectedWindow.navigator, 'userAgent', {value: 'Mozilla/5.0'});
 originRejectedWindow.crypto.randomUUID = () => 'checkout-alipay-origin-rejected-7';
@@ -277,7 +278,7 @@ assert.equal(originRejectedWindow.sessionStorage.getItem('aicrm.checkout.tab.v2:
 assert.match(originRejectedWindow.document.getElementById('status').textContent, /页面来源校验未通过/);
 assert.doesNotMatch(originRejectedWindow.document.getElementById('status').textContent, /结果尚未核实/);
 
-const ambiguousNewBinding = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const ambiguousNewBinding = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', pretendToBeVisual: true, runScripts: 'outside-only'});
 const ambiguousNewBindingWindow = ambiguousNewBinding.window;
 Object.defineProperty(ambiguousNewBindingWindow.navigator, 'userAgent', {value: 'MicroMessenger'});
 const previousUnknown = {key: 'checkout-alipay-old-session-unknown', merchant_order_no: '', create_attempted: true, payload: ambiguousPayload, session_binding: 'a'.repeat(43)};
@@ -300,7 +301,7 @@ assert.equal(retainedAmbiguous.session_binding, previousUnknown.session_binding,
 assert.equal(blockedNewBindingPosts, 0, 'a changed binding cannot replay or create another order');
 assert.match(ambiguousNewBindingWindow.document.getElementById('status').textContent, /原订单标识已保留/);
 
-const ambiguousOriginRetry = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', runScripts: 'outside-only'});
+const ambiguousOriginRetry = new JSDOM(html, {url: 'https://crm.example.test/pay/course-7', pretendToBeVisual: true, runScripts: 'outside-only'});
 const ambiguousOriginRetryWindow = ambiguousOriginRetry.window;
 Object.defineProperty(ambiguousOriginRetryWindow.navigator, 'userAgent', {value: 'MicroMessenger'});
 const previousOriginUnknown = {key: 'checkout-alipay-origin-old-unknown', merchant_order_no: '', create_attempted: true, payload: ambiguousPayload, session_binding: 'a'.repeat(43)};
@@ -324,3 +325,20 @@ assert.equal(ambiguousOriginPosts, 1);
 const retainedAfterOrigin403 = JSON.parse(ambiguousOriginRetryWindow.sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard'));
 assert.equal(retainedAfterOrigin403.key, previousOriginUnknown.key, 'a later Origin rejection cannot erase an earlier ambiguous create');
 assert.match(ambiguousOriginRetryWindow.document.getElementById('status').textContent, /订单创建结果尚未核实/);
+
+const encryptedLink=new URL(signedURL);encryptedLink.searchParams.set('encrypt_type','AES');encryptedLink.searchParams.set('biz_content',Buffer.alloc(32,7).toString('base64'));
+const encryptedPage=new JSDOM(html,{url:'https://crm.example.test/pay/course-7',pretendToBeVisual:true,runScripts:'outside-only'});
+Object.defineProperty(encryptedPage.window.navigator,'userAgent',{value:'MicroMessenger'});
+encryptedPage.window.sessionStorage.setItem('aicrm.checkout.tab.v2:7:standard',JSON.stringify({key:'encrypted-original',merchant_order_no:'M-alipay-7',create_attempted:true,session_binding:'a'.repeat(43),payload:ambiguousPayload}));
+let encryptedReads=0;
+encryptedPage.window.fetch=async(url,options={})=>{assert.notEqual(options.method,'POST','encrypted handoff never creates a second order');let body;
+ if(url==='/api/v1/wechat-pay/checkout-session')body={checkout_session_binding:'a'.repeat(43),can_create_checkout:true};
+ else if(String(url).startsWith('/api/v1/wechat-pay/purchase-status'))body={purchase_state:'available',can_purchase:true};
+ else if(url==='/api/v1/alipay/checkouts/M-alipay-7'){encryptedReads++;body={status:'awaiting_payment',ready:true,provider:'alipay',handoff:{redirectUrl:encryptedLink.href}}}
+ else assert.fail('unexpected encrypted read '+url);
+ return {ok:true,status:200,json:async()=>body};
+};
+encryptedPage.window.eval(encryptedPage.window.document.querySelector('script:last-of-type').textContent);await settle();
+assert.ok(encryptedReads>0);assert.equal(encryptedPage.window.document.getElementById('alipayGuide').hidden,false);assert.equal(encryptedPage.window.location.hash,'#alipay='+encodeURIComponent(encryptedLink.href));assert.equal(encryptedPage.window.document.getElementById('alipayPaymentURL').value,encryptedLink.href);
+
+for (const page of [encryptedPage,dom,reload,desktop,rejected,ambiguousRetry,firstUnauthorized,afterReauthorization,originRejected,ambiguousNewBinding,ambiguousOriginRetry]) {page.window.dispatchEvent(new page.window.Event("pagehide"));page.window.close();}

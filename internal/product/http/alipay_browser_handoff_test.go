@@ -72,9 +72,18 @@ func TestPublicCheckoutOffersAlipayBrowserHandoff(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("payment page status=%d", response.Code)
 	}
-	for _, expected := range []string{"继续支付宝支付", "'/pay/alipay/continue#'+encodeURIComponent(target.href)", "复制原付款链接（备用）", "checkoutStatusURL(checkpoint,checkpoint.merchant_order_no)"} {
+	for _, expected := range []string{"继续支付宝支付", "'#alipay='+encodeURIComponent(target.href)", "复制原付款链接（备用）", "checkoutStatusURL(checkpoint,checkpoint.merchant_order_no)"} {
 		if !strings.Contains(response.Body.String(), expected) {
 			t.Fatalf("payment page misses %q", expected)
 		}
+	}
+}
+
+func TestAlipayMenuArrowIsServedBeforeProductAPIPrefix(t *testing.T) {
+	handler, _ := NewPublicHandler(&testCatalog{product: enabledPublicProduct(7, "course-7")})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/public/products/assets/alipay-menu-arrow.svg", nil))
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/svg+xml" || !strings.Contains(response.Body.String(), "<svg") {
+		t.Fatalf("arrow status=%d", response.Code)
 	}
 }
