@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext, redirect_stdout
+import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -1878,6 +1880,8 @@ def commands(lane, report_dir):
     return [[sys.executable, 'scripts/dev_preflight.py', 'fast', '--report-dir', str(report_dir)]]
 def focused_commands(lane, report_dir, checks):
     return commands(lane, report_dir)
+def run_recorded(command, env, lane, report_dir, execution):
+    return subprocess.run(command, cwd=ROOT).returncode
 def main():
     assert sys.argv == ['quality_lanes', 'preflight', '--report-dir', str(ROOT / 'report')], sys.argv
     assert os.environ['AICRM_DEDUP_BASE_SHA'] == 'a' * 40
@@ -1903,6 +1907,128 @@ def main():
                 ),
             )
             self.assertEqual(json.loads(result.stdout), {"status": "passed", "candidate_root": str(candidate)})
+
+    def test_trusted_runner_raises_only_complete_backend_suite_timeout_and_receipts_actual_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            policy, candidate = root / "policy", root / "candidate"
+            (policy / "scripts/ci").mkdir(parents=True)
+            (policy / "scripts/dev_preflight.py").write_text("raise SystemExit(99)\n")
+            (candidate / "scripts/ci").mkdir(parents=True)
+            (candidate / "go.mod").write_text("module github.com/qianlan33333-png/AI-CRM-v3\n\ngo 1.26.6\n")
+            prd = candidate / "docs/prd/2026-09-24-small-step-impact-checks.md"
+            prd.parent.mkdir(parents=True)
+            prd.write_text("controller timeout contract\n")
+            subprocess.run(["git", "-C", str(candidate), "init"], check=True,
+                           stdout=subprocess.DEVNULL)
+            subprocess.run(["git", "-C", str(candidate), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(candidate), "config", "user.email",
+                            "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(candidate), "add", "go.mod", "docs"], check=True)
+            subprocess.run(["git", "-C", str(candidate), "commit", "-m", "fixture"], check=True,
+                           stdout=subprocess.DEVNULL)
+            quality_source = Path(__file__).resolve().parent / "ci/quality_lanes.py"
+            (policy / "scripts/ci/quality_lanes.py").write_text('''import os
+from pathlib import Path
+exec(compile(Path(os.environ["AICRM_QUALITY_LANES_SOURCE"]).read_bytes(),
+              "scripts/ci/quality_lanes.py", "exec"), globals())
+_canonical_commands = commands
+def missing_prerequisites(lane):
+    return []
+def _run_policy_fingerprint():
+    return "f" * 64
+def run_recorded(command, env, lane, report_dir, execution):
+    execution["commands"].append(list(command))
+    if "-json" in command and report_dir is not None:
+        report_dir.mkdir(parents=True, exist_ok=True)
+        log_name = lane + "-go-test.jsonl"
+        (report_dir / log_name).write_text('{"Action":"pass"}\\n')
+        execution["go_json_log"] = log_name
+if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
+    def commands(lane, report_dir):
+        result = _canonical_commands(lane, report_dir)
+        if lane == "backend":
+            result[-1][1] = "scripts/not-the-canonical-wrapper.sh"
+        return result
+''')
+            environment = dict(os.environ)
+            environment.update({
+                "AICRM_QUALITY_LANES_SOURCE": str(quality_source),
+                "GITHUB_ACTIONS": "true", "GITHUB_PR_NUMBER": "1",
+                "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1",
+                "RUNNER_OS": "Linux", "RUNNER_ARCH": "X64",
+                "ImageOS": "ubuntu-test", "ImageVersion": "2026-test",
+            })
+
+            def run_lane(name: str, report_name: str, *focus_args: str,
+                         malformed_prefix: bool = False) -> dict:
+                report_dir = root / report_name
+                args = [sys.executable, "-c", release._trusted_runner_code(),
+                        str(policy), str(candidate), name, "--report-dir", str(report_dir),
+                        *focus_args]
+                env = dict(environment)
+                if malformed_prefix:
+                    env["AICRM_TEST_MALFORMED_PREFIX"] = "1"
+                result = subprocess.run(args, cwd=candidate, env=env, capture_output=True,
+                                        text=True, check=True)
+                receipt = json.loads((report_dir / "run.json").read_text())
+                self.assertEqual(receipt["result"], "success", result.stdout + result.stderr)
+                return receipt
+
+            full = run_lane("backend", "full")
+            full_go = next(command for command in full["commands"]
+                           if command[:4] == ["bash", "scripts/run-go-with-donor-views.sh", "go", "test"])
+            self.assertEqual(full_go[-2:], ["-timeout=30m", "./..."])
+            self.assertEqual(full["execution_receipt"]["tested_sha"],
+                             subprocess.check_output(["git", "-C", str(candidate), "rev-parse", "HEAD"],
+                                                     text=True).strip())
+            commands_sha = hashlib.sha256(json.dumps(
+                full["commands"], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            self.assertEqual(full["execution_receipt"]["commands_sha256"], commands_sha)
+            test_log = root / "full" / full["go_json_log"]
+            self.assertEqual(full["execution_receipt"]["test_json_sha256"],
+                             hashlib.sha256(test_log.read_bytes()).hexdigest())
+
+            focused_packages = run_lane(
+                "backend", "focused-packages", "--focus-packages-json",
+                json.dumps(["github.com/qianlan33333-png/AI-CRM-v3/internal/example"]),
+            )
+            package_go = next(command for command in focused_packages["commands"]
+                              if command[:4] == ["bash", "scripts/run-go-with-donor-views.sh", "go", "test"])
+            self.assertEqual(package_go[-2:], ["-timeout=30m", "./internal/example"])
+
+            named = run_lane(
+                "backend", "named", "--focus-checks-json",
+                json.dumps([{"lane": "backend", "path": "internal/example/feature_test.go",
+                             "test": "TestSelected"}]),
+            )
+            named_go = next(command for command in named["commands"]
+                            if command[:4] == ["bash", "scripts/run-go-with-donor-views.sh", "go", "test"])
+            self.assertIn("-run", named_go)
+            self.assertIn("-timeout=15m", named_go)
+
+            malformed = run_lane("backend", "malformed", malformed_prefix=True)
+            malformed_go = next(command for command in malformed["commands"]
+                                 if command[:4] == ["bash", "scripts/not-the-canonical-wrapper.sh", "go", "test"])
+            self.assertIn("-timeout=15m", malformed_go)
+
+            frontend = run_lane("frontend", "frontend")
+            self.assertFalse(any("-timeout=30m" in command for command in frontend["commands"]))
+
+            spec = importlib.util.spec_from_file_location("quality_lanes_unmodified", quality_source)
+            self.assertIsNotNone(spec)
+            source_module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(source_module)
+            source_backend = source_module.commands("backend", root / "full")
+            source_go = next(command for command in source_backend if "./..." in command and "test" in command)
+            self.assertIn("-timeout=15m", source_go)
+            expected_backend = [list(command) for command in source_backend]
+            source_test = next(command for command in expected_backend if "./..." in command and "test" in command)
+            source_test[source_test.index("-timeout=15m")] = "-timeout=30m"
+            self.assertEqual(full["commands"], expected_backend)
+            self.assertEqual(frontend["commands"],
+                             source_module.commands("frontend", root / "frontend"))
 
     def test_controller_and_selection_policy_changes_are_not_self_certified(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

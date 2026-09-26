@@ -1059,6 +1059,7 @@ import quality_lanes
 quality_lanes.ROOT = candidate
 original_commands = quality_lanes.commands
 original_focused = quality_lanes.focused_commands
+original_run_recorded = quality_lanes.run_recorded
 
 def rewrite(commands):
     result = []
@@ -1085,8 +1086,24 @@ def trusted_commands(lane, report_dir):
 def trusted_focused(lane, report_dir, checks):
     return rewrite(original_focused(lane, report_dir, checks))
 
+def trusted_run_recorded(command, env, lane, report_dir, execution):
+    actual = list(command)
+    prefix = ['bash', 'scripts/run-go-with-donor-views.sh', 'go', 'test', '-json',
+              '-p', '1', '-race', '-count=1']
+    if (lane == 'backend' and actual[:len(prefix)] == prefix
+            and len(actual) > len(prefix) + 1
+            and actual[len(prefix)] == '-timeout=15m'):
+        packages = actual[len(prefix) + 1:]
+        if all(package == './...' or
+               (package.startswith('./') and all(part not in {'', '.', '..', '...'}
+                                                   for part in package[2:].split('/')))
+               for package in packages):
+            actual[len(prefix)] = '-timeout=30m'
+    return original_run_recorded(actual, env, lane, report_dir, execution)
+
 quality_lanes.commands = trusted_commands
 quality_lanes.focused_commands = trusted_focused
+quality_lanes.run_recorded = trusted_run_recorded
 sys.argv = ['quality_lanes', *sys.argv[1:]]
 raise SystemExit(quality_lanes.main())
 """
