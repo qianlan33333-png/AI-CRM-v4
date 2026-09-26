@@ -22,7 +22,7 @@ AI-CRM v4 是当前唯一的代码、测试、构建、发布和部署仓库。�
 - 支付宝已实现 WAP/网页支付、签名回调、交易查询、退款与对账 Adapter；Provider 默认
   关闭，启用真实网络调用必须提供部署侧商户凭据，并继续遵守幂等、回调重放和
   `outcome_unknown` 对账边界；
-- 切换激活前，GitHub `main` 和准确 `check` 决定旧发布队列；激活后预备机国内裸仓为权威，候选经国内检查、同包内网晋级，GitHub 只由用户人工择机归档。
+- 当前选择国内源码候选、相关检查与同包内网晋级；GitHub 仅人工归档。源码与生产身份不一致时先对账，不回退旧 GitHub 发布入口。
 
 公开 HTTP 契约见 [OpenAPI](api/openapi.yaml)，数据迁移见 [migrations](migrations)，部署约束见 [部署说明](deploy/README.md)。
 
@@ -67,6 +67,5 @@ govulncheck ./...
 
 每个能力先做一次业务判断、参考检索和简短父 PRD；同一 Codex 任务中，每条开发线使用独立 `codex/<work-item>` worktree/分支。一个候选交付可单独上线的最小完整行为或明确缺陷，相关测试同行。涉及用户页或后台 UI 时先使用 Product Design。详见[开发入口](docs/development-before-start.md)。
 
-国内主仓**仅在受锁激活收据存在且旧轮询器停用后**生效。此前继续使用 GitHub PR、必需 `check` 和[旧发布流程](docs/operations/domestic-release.md)。激活后开发者只推国内分支并提交准确 base/head；单一发布器在预备机检查、构建和合成数据验收，在生产机先保存可独立恢复的源码 bundle，再通过内网晋级同一安装包。生产准确版本、摘要、服务与健康读回通过才推进国内 `main`。日常操作见[国内主仓发布](docs/operations/domestic-main-release.md)。
-
+日常发布采用已实测的热修同包路径：准确候选与相关测试 → 国内构建一次 → 预发安装和受影响合成旅程 → 内网晋级同一包 → 生产完整读回 → 同一任务完成源码 main/收据对齐。GitHub 仅由用户人工择机归档，不要求 PR/check、merge-preview 或 handoff ACK。发布失败由同一负责人处理，需要代理时使用一个 `gpt-6-luna` max agent。文档/skill 本地生效，不构建或安装应用。日常操作见[国内发布](docs/operations/domestic-main-release.md)。基线对账与发布工具维护仅在实际需要时处理，未验证的定时器保持关闭。
 普通发布不备份数据库；生产迁移前才备份。真实支付、扫码等业务验收在技术安装后独立记录。GitHub 不自动同步、没有同步周期；人工同步须先确认国内 `main` 与生产源码收据相同、GitHub 是其祖先，才普通快进推送并读回 SHA。若两台国内机器在归档前同时丢失，GitHub 可能缺少尚未同步的提交。

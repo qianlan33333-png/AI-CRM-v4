@@ -187,6 +187,36 @@ class DomesticMainReleaseTests(unittest.TestCase):
         finally:
             os.umask(old_umask)
 
+    def test_classify_candidate_restores_umask_after_success_and_exception(self) -> None:
+        old_umask = os.umask(0o077)
+        try:
+            classification = {"runtime_changed": True}
+
+            def successful_classify(*args):
+                observed = os.umask(0o077)
+                os.umask(observed)
+                self.assertEqual(observed, 0o022)
+                return classification
+
+            with mock.patch.object(release.builder, "classify", side_effect=successful_classify) as classify:
+                self.assertEqual(release._classify_candidate(Path("/repo"), "a" * 40, "b" * 40),
+                                 classification)
+            classify.assert_called_once_with(Path("/repo"), "a" * 40, "b" * 40)
+            self.assertEqual(os.umask(0o077), 0o077)
+
+            def failed_classify(*_args):
+                observed = os.umask(0o077)
+                os.umask(observed)
+                self.assertEqual(observed, 0o022)
+                raise RuntimeError("expected classifier failure")
+
+            with mock.patch.object(release.builder, "classify", side_effect=failed_classify):
+                with self.assertRaisesRegex(RuntimeError, "expected classifier failure"):
+                    release._classify_candidate(Path("/repo"), "a" * 40, "b" * 40)
+            self.assertEqual(os.umask(0o077), 0o077)
+        finally:
+            os.umask(old_umask)
+
     def test_worktree_creation_keeps_checkout_readable_under_umask_077(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -942,6 +972,123 @@ class DomesticMainReleaseTests(unittest.TestCase):
             self.assertEqual(result["status"], "pending")
             self.assertEqual(state["queue"][0]["attempt"], 4)
 
+    def test_release_candidate_does_not_poll_behind_an_earlier_candidate(self) -> None:
+        head, base = "a" * 40, "b" * 40
+        config = {"repo": "/repo", "state": "/state", "lock": "/lock",
+                  "production_enabled": True}
+        submission = {"status": "pending", "head_sha": head, "base_sha": base,
+                      "queue_position": 2}
+        with mock.patch.object(release.os, "geteuid", return_value=0), \
+             mock.patch.object(release, "_check_config", return_value=config), \
+             mock.patch.object(release, "submit_candidate", return_value=submission) as submit, \
+             mock.patch.object(release, "poll") as poll:
+            result = release.release_candidate(
+                config, "refs/heads/codex/bundle", head, base)
+
+        self.assertEqual(result["status"], "queued_behind_prior_candidate")
+        self.assertEqual(result["candidate_sha"], head)
+        self.assertEqual(result["queue_position"], 2)
+        submit.assert_called_once()
+        poll.assert_not_called()
+
+    def test_release_candidate_requires_root_before_submission(self) -> None:
+        with mock.patch.object(release.os, "geteuid", return_value=1000), \
+             mock.patch.object(release, "submit_candidate") as submit:
+            with self.assertRaisesRegex(release.ReleaseError, "root release controller"):
+                release.release_candidate({}, "refs/heads/codex/bundle", "a" * 40, "b" * 40)
+        submit.assert_not_called()
+
+    def test_release_candidate_polls_only_its_exact_queue_front_and_checks_main(self) -> None:
+        head, base = "a" * 40, "b" * 40
+        config = {"repo": "/repo", "state": "/state", "lock": "/lock",
+                  "production_enabled": True}
+        submission = {"status": "pending", "head_sha": head, "base_sha": base,
+                      "queue_position": 1}
+        completed = {"status": "completed", "main_sha": head}
+        with mock.patch.object(release.os, "geteuid", return_value=0), \
+             mock.patch.object(release, "_check_config", return_value=config), \
+             mock.patch.object(release, "submit_candidate", return_value=submission), \
+             mock.patch.object(release, "poll", return_value=completed) as poll:
+            result = release.release_candidate(
+                config, "refs/heads/codex/bundle", head, base)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["main_sha"], head)
+        poll.assert_called_once_with(config, expected_candidate_sha=head)
+
+        different = {"status": "candidate_not_at_queue_front", "main_sha": base,
+                     "queue_head_sha": "c" * 40}
+        with mock.patch.object(release.os, "geteuid", return_value=0), \
+             mock.patch.object(release, "_check_config", return_value=config), \
+             mock.patch.object(release, "submit_candidate", return_value=submission), \
+             mock.patch.object(release, "poll", return_value=different):
+            not_released = release.release_candidate(
+                config, "refs/heads/codex/bundle", head, base)
+        self.assertEqual(not_released["status"], "not_released")
+        self.assertNotEqual(not_released.get("main_sha"), head)
+
+    def test_completed_release_candidate_cannot_be_submitted_or_installed_again(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            release._advance_main_cas(repo, base, candidate)
+            candidate_tree = release._tree(repo, candidate)
+            app = {"sha": candidate, "tree": candidate_tree, "manifest_sha256": "a" * 64}
+            state = release._new_state(candidate, candidate_tree, app)
+            state["queue"] = [{"candidate_id": candidate,
+                               "ref": "refs/heads/codex/one", "head_sha": candidate,
+                               "base_sha": base, "status": "completed"}]
+            config = {"repo": str(repo), "state": str(root / "state.json"),
+                      "lock": str(root / "release.lock"), "production_enabled": True}
+
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_load_state", return_value=state), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_pin_candidate"), \
+                 mock.patch.object(release, "poll") as poll:
+                with self.assertRaisesRegex(release.ReleaseError, "already present in the queue"):
+                    release.release_candidate(
+                        config, "refs/heads/codex/one", candidate, candidate)
+            poll.assert_not_called()
+
+    def test_release_cli_action_calls_root_release_wrapper(self) -> None:
+        head, base = "a" * 40, "b" * 40
+        config = {"repo": "/repo", "state": "/state", "lock": "/lock",
+                  "production_enabled": True}
+        expected = {"status": "completed", "candidate_sha": head, "main_sha": head}
+        output = io.StringIO()
+        with mock.patch.object(release, "load_config", return_value=config) as load_config, \
+             mock.patch.object(release, "release_candidate", return_value=expected) as run_release, \
+             redirect_stdout(output):
+            result = release.main(["release", "--config", "/test/domestic-main-release.json",
+                                   "--ref", "refs/heads/codex/bundle",
+                                   "--head", head, "--base", base])
+        self.assertEqual(result, 0)
+        load_config.assert_called_once_with(Path("/test/domestic-main-release.json"))
+        run_release.assert_called_once_with(config, "refs/heads/codex/bundle", head, base, None)
+        self.assertEqual(json.loads(output.getvalue()), expected)
+
+    def test_release_cli_returns_nonzero_and_preserves_json_when_candidate_is_not_released(self) -> None:
+        head, base = "a" * 40, "b" * 40
+        config = {"repo": "/repo", "state": "/state", "lock": "/lock",
+                  "production_enabled": True}
+        for result in (
+            {"status": "queued_behind_prior_candidate", "candidate_sha": head,
+             "queue_position": 2},
+            {"status": "not_released", "candidate_sha": head, "main_sha": base},
+        ):
+            with self.subTest(status=result["status"]):
+                output = io.StringIO()
+                with mock.patch.object(release, "load_config", return_value=config), \
+                     mock.patch.object(release, "release_candidate", return_value=result), \
+                     redirect_stdout(output):
+                    exit_code = release.main(["release", "--config", "/test/domestic-main-release.json",
+                                              "--ref", "refs/heads/codex/bundle",
+                                              "--head", head, "--base", base])
+                self.assertEqual(exit_code, 2)
+                self.assertEqual(json.loads(output.getvalue()), result)
+
     def test_smoke_helper_contract_pins_domestic_candidate_ref(self) -> None:
         sha, tree = "1" * 40, "2" * 40
         manifest, helper = "a" * 64, "b" * 64
@@ -953,13 +1100,61 @@ class DomesticMainReleaseTests(unittest.TestCase):
              mock.patch.object(release.legacy, "command", return_value=json.dumps(receipt)) as command:
             result = release._run_installed_smoke({"stage_helper": "/usr/local/libexec/aicrm/domestic-promote.py",
                                                   "repo": release.DEFAULT_REPO},
-                                                  Path("/candidate"), sha, manifest, helper, tree)
+                                                  Path("/candidate"), sha, manifest, helper, tree,
+                                                  validation_scope_base_sha="0" * 40)
         self.assertEqual(result, receipt)
         argv = command.call_args.args
         self.assertIn("--source-ref", argv)
         self.assertIn(release._candidate_ref(sha), argv)
         self.assertIn("--source-repository", argv)
         self.assertIn(release.DEFAULT_REPO, argv)
+
+    def test_installed_smoke_selects_paths_from_full_multi_commit_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            worktree = Path(temporary) / "candidate"
+            worktree.mkdir()
+            subprocess.run(["git", "init", "--quiet", "--initial-branch=main", str(worktree)],
+                           check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(["git", "-C", str(worktree), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(worktree), "config", "user.email",
+                            "test@example.invalid"], check=True)
+            (worktree / "README.md").write_text("base\n")
+            subprocess.run(["git", "-C", str(worktree), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(worktree), "commit", "-m", "base"],
+                           check=True, stdout=subprocess.DEVNULL)
+            base_sha = subprocess.check_output(["git", "-C", str(worktree), "rev-parse", "HEAD"],
+                                               text=True).strip()
+
+            payment_file = worktree / "internal" / "payment" / "checkout.go"
+            payment_file.parent.mkdir(parents=True)
+            payment_file.write_text("package payment\n")
+            subprocess.run(["git", "-C", str(worktree), "add", "internal/payment/checkout.go"],
+                           check=True)
+            subprocess.run(["git", "-C", str(worktree), "commit", "-m", "update payment runtime"],
+                           check=True, stdout=subprocess.DEVNULL)
+
+            docs_file = worktree / "docs" / "release-note.md"
+            docs_file.parent.mkdir()
+            docs_file.write_text("unrelated release note\n")
+            subprocess.run(["git", "-C", str(worktree), "add", "docs/release-note.md"], check=True)
+            subprocess.run(["git", "-C", str(worktree), "commit", "-m", "add release note"],
+                           check=True, stdout=subprocess.DEVNULL)
+            candidate_sha = subprocess.check_output(["git", "-C", str(worktree), "rev-parse", "HEAD"],
+                                                    text=True).strip()
+            tree = subprocess.check_output(["git", "-C", str(worktree), "rev-parse", "HEAD^{tree}"],
+                                           text=True).strip()
+            manifest, helper = "a" * 64, "b" * 64
+            receipt = {"status": "passed", "source_sha": candidate_sha, "source_tree": tree,
+                       "source_ref": release._candidate_ref(candidate_sha), "installed_sha": candidate_sha,
+                       "manifest_sha256": manifest, "helper_sha256": helper, "stage_role": "staging"}
+            with mock.patch.object(release.legacy, "command", return_value=json.dumps(receipt)) as command:
+                result = release._run_installed_smoke(
+                    {"stage_helper": "/usr/local/libexec/aicrm/domestic-promote.py",
+                     "repo": release.DEFAULT_REPO}, worktree, candidate_sha,
+                    manifest, helper, tree, validation_scope_base_sha=base_sha)
+
+            self.assertEqual(result, receipt)
+            self.assertIn("--run-staging-smoke", command.call_args.args)
 
     def test_candidate_stage_helper_host_check_binds_exact_git_blob(self) -> None:
         sha = "1" * 40
@@ -1775,6 +1970,37 @@ class DomesticMainReleaseTests(unittest.TestCase):
             self.assertEqual(state["queue"][1]["base_sha"], first)
             self.assertEqual(state["queue"][1]["supersedes_ref"], "refs/heads/codex/two")
             self.assertEqual(state["queue"][1]["status"], "pending")
+
+    def test_poll_expected_candidate_stops_when_an_earlier_candidate_is_queue_front(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, first, second = make_repository(root)
+            app = {"sha": base, "tree": release._tree(repo, base), "manifest_sha256": "a" * 64}
+            state = release._new_state(base, app["tree"], app)
+            state["queue"] = [
+                {"candidate_id": first, "ref": "refs/heads/codex/one", "head_sha": first,
+                 "base_sha": base, "status": "pending"},
+                {"candidate_id": second, "ref": "refs/heads/codex/two", "head_sha": second,
+                 "base_sha": base, "status": "pending"},
+            ]
+            config = {"repo": str(repo), "state": str(root / "state.json"),
+                      "lock": str(root / "controller.lock"), "production_enabled": True,
+                      "controller_path": "/controller", "push_group": "push"}
+
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_is_bare_repo", return_value=True), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                 mock.patch.object(release, "verify_bare_repository"), \
+                 mock.patch.object(release, "_load_state", return_value=state), \
+                 mock.patch.object(release, "process_candidate") as process:
+                result = release.poll(config, expected_candidate_sha=second)
+
+        self.assertEqual(result["status"], "candidate_not_at_queue_front")
+        self.assertEqual(result["requested_candidate_sha"], second)
+        self.assertEqual(result["queue_head_sha"], first)
+        process.assert_not_called()
 
     def test_stage_reset_ack_requires_both_hosts_on_last_verified_app(self) -> None:
         installed = {"sha": "a" * 40, "tree": "b" * 40, "manifest_sha256": "c" * 64}

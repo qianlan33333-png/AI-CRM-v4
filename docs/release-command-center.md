@@ -1,5 +1,5 @@
 # CRM v4 发布入口
 
-当前发布路径见 [国内构建与内网自动发布](operations/domestic-release.md)。GitHub 保留为唯一 PR 和受保护 `main`；合并后预备机按第一父链逐个构建和技术发布。真实业务验收单独记录，不占用技术通道。
+当前日常路径见 [国内发布](operations/domestic-main-release.md)：相关检查、国内构建一次、预发验证、内网同包晋级、生产读回和源码对齐。GitHub 仅人工择机归档，不是部署门禁。真实业务验收单独记录，不占技术通道。
 
-旧 `release_control.py`、`release_events.py`、merge-preview、候选 handoff 及观察占位流程仅用于查询历史账本。新 PR 不再创建候选事件，也不由指挥台合并或部署。历史状态文件不可删除或重建；原入口在切换后不得写生产。
+旧 `release_control.py`、`release_events.py`、GitHub 轮询、merge-preview、handoff 和观察占位流程仅用于历史查询。当前发布者负责国内候选串行发布，不修改候选源码或解决冲突。历史账本不可删除或重建；旧入口不得与当前发布者同时写生产。

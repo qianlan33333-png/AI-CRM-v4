@@ -182,6 +182,20 @@ def _first_parent_chain(repo: Path, base: str, head: str) -> list[str]:
     return values
 
 
+def _classify_candidate(repo: Path, base_sha: str, head_sha: str) -> dict[str, Any]:
+    """Run source/graph classification with the repository's intended file mask.
+
+    The classifier materializes source and Go graph snapshots. Keep only that
+    work under 022 so its generated tracked-source modes remain readable, and
+    restore the controller's (normally 0077) mask even if analysis fails.
+    """
+    previous_umask = os.umask(0o022)
+    try:
+        return builder.classify(repo, base_sha, head_sha)
+    finally:
+        os.umask(previous_umask)
+
+
 def _is_bare_repo(repo: Path) -> bool:
     return not repo.is_symlink() and repo.is_dir() and _git(repo, "rev-parse", "--is-bare-repository") == "true"
 
@@ -303,7 +317,7 @@ def _assert_partial_bootstrap_repository(repo: Path, state_path: Path, lock_path
     first_parent = _git(repo, "rev-list", "--first-parent", expected_sha).splitlines()
     if installed_app_sha not in first_parent:
         raise ReleaseError("installed application is not on the partial bootstrap first-parent chain")
-    if builder.classify(repo, installed_app_sha, expected_sha).get("runtime_changed") is not False:
+    if _classify_candidate(repo, installed_app_sha, expected_sha).get("runtime_changed") is not False:
         raise ReleaseError("partial bootstrap main contains application changes beyond the installed app")
     hook = repo / "hooks/pre-receive"
     if hook.exists() or hook.is_symlink():
@@ -1739,7 +1753,7 @@ def _validate_baseline_identity(repo: Path, main_sha: str, main_tree: str,
     first_parent = _git(repo, "rev-list", "--first-parent", main_sha).splitlines()
     if app_sha not in first_parent:
         raise ReleaseError("installed production app is not on the first-parent chain of domestic main")
-    if builder.classify(repo, app_sha, main_sha)["runtime_changed"]:
+    if _classify_candidate(repo, app_sha, main_sha)["runtime_changed"]:
         raise ReleaseError("domestic baseline contains application changes newer than the installed production app")
 
 
@@ -1896,8 +1910,12 @@ def _needs_installed_alipay_smoke(changed_paths: list[str]) -> bool:
 
 
 def _run_installed_smoke(config: dict[str, Any], worktree: Path, sha: str,
-                         manifest_sha: str, helper_sha: str, tree_sha: str) -> dict[str, Any] | None:
-    plan_paths = _worktree_git(worktree, "diff", "--name-only", "--no-renames", f"{sha}^1", sha).splitlines()
+                         manifest_sha: str, helper_sha: str, tree_sha: str, *,
+                         validation_scope_base_sha: str) -> dict[str, Any] | None:
+    validation_scope_base_sha = _sha(validation_scope_base_sha, "installed smoke validation base SHA")
+    plan_paths = _worktree_git(
+        worktree, "diff", "--name-only", "--no-renames", validation_scope_base_sha, sha,
+    ).splitlines()
     if not _needs_installed_alipay_smoke(plan_paths):
         return None
     source_ref = _candidate_ref(sha)
@@ -2066,7 +2084,7 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
     state["controller_maintenance"] = None
     _update_state(state_path, state, status="blocked")
     try:
-        classification = builder.classify(source_worktree, old_main_sha, item["head_sha"])
+        classification = _classify_candidate(source_worktree, old_main_sha, item["head_sha"])
         controller_files = classification.get("controller_files", [])
         controller_receipt = _verify_controller_files(config, source_worktree, item["head_sha"], controller_files)
         check_receipt = _check_report(config, repo, source_worktree, report_dir, old_main_sha, item["head_sha"])
@@ -2111,8 +2129,11 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
                 _update_state(state_path, state, in_flight={**state["in_flight"], "phase": phase})
                 helper_source = _worktree_git(source_worktree, "show", f"{item['head_sha']}:deploy/domestic-promote.py")
                 helper_sha = hashlib.sha256(helper_source.encode()).hexdigest()
-                smoke_receipt = _run_installed_smoke(config, source_worktree, item["head_sha"],
-                                                     metadata["release_files_sha256"], helper_sha, head_tree)
+                smoke_receipt = _run_installed_smoke(
+                    config, source_worktree, item["head_sha"],
+                    metadata["release_files_sha256"], helper_sha, head_tree,
+                    validation_scope_base_sha=old_main_sha,
+                )
                 if smoke_receipt is None:
                     raise ReleaseError("required installed behavior check was not run")
             phase = "source-backup"
@@ -2242,7 +2263,7 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
             raise ControllerMaintenanceRequired("maintenance-check must run from the exact candidate controller bytes")
         _pin_candidate(repo, candidate_sha)
         worktree = _active_worktree(config, repo, candidate_sha)
-        classification = builder.classify(worktree, main_sha, candidate_sha)
+        classification = _classify_candidate(worktree, main_sha, candidate_sha)
         if classification.get("runtime_changed") is not False:
             raise ReleaseError("controller maintenance path accepts source-only candidates only")
         controller_files = classification.get("controller_files", [])
@@ -2335,7 +2356,7 @@ def _verify_controller_maintenance_candidate(config: dict[str, Any], repo: Path,
             or _tree(repo, candidate_sha) != marker["candidate_tree"]):
         raise ControllerMaintenanceRequired("controller maintenance marker no longer matches main or queue candidate")
     _first_parent_chain(repo, base_sha, candidate_sha)
-    classification = builder.classify(repo, base_sha, candidate_sha)
+    classification = _classify_candidate(repo, base_sha, candidate_sha)
     changed = sorted(classification.get("controller_files", []))
     if (classification.get("runtime_changed") is not False
             or not changed or changed != marker["controller_files"]):
@@ -2348,7 +2369,7 @@ def _verify_controller_maintenance_candidate(config: dict[str, Any], repo: Path,
     return marker
 
 
-def poll(config: dict[str, Any]) -> dict[str, Any]:
+def poll(config: dict[str, Any], *, expected_candidate_sha: str | None = None) -> dict[str, Any]:
     if os.geteuid() != 0:
         raise ReleaseError("domestic serial release poll must run as root")
     config = _check_config(config)
@@ -2366,6 +2387,16 @@ def poll(config: dict[str, Any]) -> dict[str, Any]:
             raise ReleaseError("production outcome is unknown; use reconcile, never reinstall blindly")
         if state["status"] == "blocked":
             raise ReleaseError("domestic release queue is blocked; inspect or resubmit its head candidate")
+        if expected_candidate_sha is not None:
+            expected_candidate_sha = _sha(expected_candidate_sha, "expected queue-front candidate SHA")
+            front = _active_queue_item(state)
+            if front is None:
+                return {"status": "ready", "main_sha": state["main"]["sha"], "queue_depth": 0}
+            if front.get("head_sha") != expected_candidate_sha:
+                return {"status": "candidate_not_at_queue_front",
+                        "requested_candidate_sha": expected_candidate_sha,
+                        "queue_head_sha": front.get("head_sha"),
+                        "main_sha": state["main"]["sha"]}
         maintenance = state.get("controller_maintenance")
         if maintenance is None:
             _verify_controller_files(config, repo, state["main"]["sha"], sorted(builder.FIXED_CONTROLLER_FILES))
@@ -2397,6 +2428,36 @@ def poll(config: dict[str, Any]) -> dict[str, Any]:
         result["queue_status"] = "pending"
         result["next_candidate_sha"] = next_item["head_sha"]
         return result
+
+
+def release_candidate(config: dict[str, Any], ref: str, head_sha: str, base_sha: str,
+                      supersedes_candidate_id: str | None = None) -> dict[str, Any]:
+    """Submit an exact candidate, then process it only if it is queue front."""
+    if os.geteuid() != 0:
+        raise ReleaseError("release must run through the root release controller")
+    config = _check_config(config)
+    if config.get("production_enabled") is not True:
+        raise ReleaseError("production release is disabled until the verified cutover is activated")
+    head_sha = _sha(head_sha, "release candidate head")
+    submitted = submit_candidate(
+        Path(config["repo"]), Path(config["state"]), ref, head_sha, base_sha,
+        Path(config["lock"]), supersedes_candidate_id,
+    )
+    queue_position = submitted.get("queue_position")
+    if type(queue_position) is not int or queue_position < 1:
+        raise ReleaseError("submitted candidate has no valid serial queue position")
+    if queue_position > 1:
+        return {"status": "queued_behind_prior_candidate", "candidate_sha": head_sha,
+                "queue_position": queue_position, "submission": submitted}
+
+    result = poll(config, expected_candidate_sha=head_sha)
+    if (result.get("main_sha") == head_sha
+            and result.get("status") in {"completed", "ready", "candidate_not_at_queue_front"}):
+        return {"status": "completed", "candidate_sha": head_sha, "main_sha": head_sha,
+                "submission": submitted, "release": result}
+    return {"status": "not_released", "candidate_sha": head_sha,
+            "queue_position": queue_position, "submission": submitted,
+            "release": result}
 
 
 def reconcile(config: dict[str, Any]) -> dict[str, Any]:
@@ -2934,7 +2995,7 @@ def _verify_baseline_helper_overlay_candidate(config: dict[str, Any], repo: Path
     with _verified_overlay_seed_bundle(repo, Path(config["work_root"]), seed_bundle,
                                        candidate_sha, base_sha) as (seed_repo, seed_digest, candidate_tree):
         _first_parent_chain(seed_repo, base_sha, candidate_sha)
-        classification = builder.classify(seed_repo, base_sha, candidate_sha)
+        classification = _classify_candidate(seed_repo, base_sha, candidate_sha)
         changed_fixed = sorted(classification.get("controller_files", []))
         allowed_fixed = sorted({"deploy/domestic-promote.py", "scripts/domestic_main_release.py"})
         if classification.get("runtime_changed") is not False or changed_fixed != allowed_fixed:
@@ -3264,7 +3325,7 @@ def restricted_ssh() -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "submit-stdin", "ack-stage-reset", "maintenance-check",
+    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check",
                                             "poll", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
     parser.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG))
     parser.add_argument("--repo", type=Path)
@@ -3346,6 +3407,11 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("submit requires --ref, --head and --base")
             result = submit_candidate(Path(config["repo"]), Path(config["state"]), args.ref, args.head, args.base,
                                       Path(config["lock"]), args.supersedes_candidate)
+        elif args.action == "release":
+            if not (args.ref and args.head and args.base):
+                parser.error("release requires --ref, --head and --base")
+            result = release_candidate(config, args.ref, args.head, args.base,
+                                       args.supersedes_candidate)
         elif args.action == "archive-ack":
             if os.geteuid() != 0:
                 raise ReleaseError("archive acknowledgement must run as root")
@@ -3365,6 +3431,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"domestic main release stopped: {type(exc).__name__}", file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    if args.action == "release" and result.get("status") != "completed":
+        return 2
     return 0
 
 

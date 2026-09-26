@@ -1,28 +1,14 @@
 # AGENTS.md
 
-## Development and domestic serial release
+## 日常开发与发布
 
-**权威切换以受锁的国内主仓激活收据为界。** 激活前，继续使用
-`docs/operations/domestic-release.md` 的 GitHub PR、准确 `check` 和旧发布器；
-激活后，以 `docs/operations/domestic-main-release.md` 为日常入口，GitHub 只是人工择机同步的历史归档。
-不要仅凭本文件合并或安装就假定切换完成。新旧发布器不得同时拥有生产写入口。
+使用 [开发入口](docs/development-before-start.md) 和 [日常国内发布](docs/operations/domestic-main-release.md)。用户已选择国内源码、GitHub 人工择机归档；GitHub PR/check、merge-preview、freshness、handoff ACK 与观察占位不是日常部署门禁。旧发布说明只作历史查询。
 
-每个开发任务使用新的 `codex/<work-item>` 分支/worktree。开始前阅读
-`docs/development-before-start.md`，完成业务判断、GitHub/成熟产品参考与仓库复用评估，再形成一份简短父 PRD，
-记录 OneID、Persistence、External Effects 分类。父 brief 一经授权，拆出的候选复用它，
-只补充本次范围和验收；业务范围或外部合同实质变化时才重做判断。每个候选交付可单独上线的最小完整行为或明确缺陷，相关测试同提交；不设行数门槛。
-涉及侧栏、用户展示页或后台页面时，编码前使用 Product Design 插件/skill。发布失败由同一个
-发布执行者处理；需要代理接手时只用一个 `gpt-6-luna` max agent，其他工作不受此模型限制。
+每个开发任务使用独立 `codex/<work-item>` worktree/分支，一个能力只准备一次业务流程、参考和简短父 PRD。复用已授权 brief，相关测试随完整行为交付。UI 编码前使用 Product Design；新增限制先应用核心 skill 的必要性判断。
 
-激活后开发者只推国内裸仓的 `codex/*` 分支，不得直接改国内 `main`、共享预发目录或生产。
-单一发布器核对候选基线和准确 SHA/tree，按影响范围测试、预发安装与业务合同验收，
-在生产机先保存可验证的完整源码 bundle，再将预发同一安装包通过内网晋级。生产版本、
-文件摘要、服务和健康读回通过后才 CAS 推进国内 `main`。过期分支由原开发任务更新重验，
-发布器不 rebase 或解决冲突。纯文档候选只更新源码备份和游标，不伪造应用安装。
-未知、共享基础、迁移或检查策略变化保守运行全量检查。普通发布不备份数据库；仅生产迁移
-在迁移前备份，预备机使用可重建的合成数据。真实业务验收独立于技术安装，不占后续技术通道。
-结果不明时停队列，只读对账，不盲目重装。GitHub 凭据只留在开发者电脑；发布器不自动推送，
-也不规定同步周期。
+同一发布者持串行锁核对准确源码和影响，运行相关测试、国内构建一次、预发安装与相关合成旅程、生产保存源码 bundle、内网晋级同一包、生产完整读回，最后完成源码 main/收据对齐。需要代理时用一个 `gpt-6-luna` max agent；不按预发、交接和观察拆任务。
+
+普通发布不备份或迁移数据库；仅生产迁移前备份。文档/skill 不安装应用。真实支付、扫码及 Provider 结果另行记录，不阻塞下次技术发布、不冒称业务成功。部署结果不明只读对账，不盲目重装。基线落后或旧发布器仍可写时先停止对账，不能凭修改文档假定自动流程已启用。预备机保持 2 核 2GB。
 
 本文件适用于整个 `AI-CRM-v4` 仓库。
 
@@ -35,7 +21,7 @@
 
 ## 2. 开发前最高优先级判断
 
-- 新功能、Bug 修复和调试先应用 `skills/aicrm-v3-development-frontdoor/SKILL.md` 的业务判断、参考调研、复用评估和 PRD。旧 handoff、merge-preview 与合并前发布快照只作历史审计。Skill 路径为兼容现有工具保留，所有证据只允许来自当前 v4 commit/tree。
+- 新功能、Bug 修复和调试先应用 `skills/aicrm-v3-development-frontdoor/SKILL.md` 的业务判断、参考调研、复用评估和 PRD。旧 handoff、merge-preview 与合并前发布快照只作历史审计。新增限制先应用核心 skill 的必要性判断。Skill 路径为兼容现有工具保留，所有证据只允许来自当前 v4 commit/tree。
 - 除用户最新明确指令与安全红线外，任何设计、实现、迁移或代码审查在开始编码前，都必须优先判断两件事：是否涉及 OneID/外部身份，以及是否涉及持久化、内部持久任务或外部效果。
 - 开发者必须先阅读并应用项目核心 Skill：`skills/aicrm-v3-development/SKILL.md`，在计划或候选说明中留下简短分类结论。
 - 这是一项优先设计检查，不是要求所有功能都接入 OneID 或 External Effects。确实不涉及时，应明确记录“不涉及”及理由，随后按本领域正常边界开发，禁止为了过门禁而制造虚假依赖。
@@ -96,10 +82,10 @@
 ## 9. 提交前验证顺序
 
 - 首次推送和修复后再次推送前，先运行 `python3 scripts/dev_preflight.py fast`；Go 改动再运行 `python3 scripts/dev_preflight.py compile`，然后执行受影响领域的专项测试。编译成功不等于测试通过。
-- `fast`、`compile` 和局部 `browser` 的证据只能汇报对应局部结论，不能称为完整回归。激活前继续执行 GitHub 准确提交的必需 `check`；激活后由预备机在准确候选 SHA/tree 上执行受信任的影响检查和已安装业务合同。未知、共享基础设施、可执行检查策略和迁移变更全量检查；发布工具运行对应合同。预备机基础验收与生产安装读回是独立证据，真实支付、扫码只由生产技术部署后的业务方验收。
+- `fast`、`compile` 和局部 `browser` 的证据只能汇报对应局部结论，不能称为完整回归。由预备机在准确候选 SHA/tree 上核对受信任的影响检查和已安装业务合同；GitHub 不决定生产发布。未知、共享基础设施、可执行检查策略和迁移变更全量检查；发布工具运行对应合同。预备机基础验收与生产安装读回是独立证据，真实支付、扫码只由生产技术部署后的业务方验收。
 - `python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` 可显示候选计划。普通运行执行计划中的 lane、受影响 Go 包全集及登记检查；缺少环境、收据或执行结果时报不完整。macOS 缺 Linux 浏览器环境时，在预备机补齐，不能凭本地局部测试宣称候选通过。
 - 旧 PR2 的十 PR 影子试验是 GitHub 门禁优化的历史记录；切换本身不证明快速检查安全。新国内发布器只能按已验证的影响规则收窄，否则回退全量；确认漏选或未知结果立即关闭相关快速路径。
 - CI 失败先重现准确失败用例，修复后重跑完整失败阶段；提交前按更新后的影响计划重新计算适用检查范围。不能通过删断言、接受 skip 或反复推送猜测修复。
 - 新增真实 Host 浏览器旅程放在 `cmd/aicrm`，使用 `Test…ChromiumJourney` 命名，自动进入必跑集合；其他包或命名必须明确接入。运行 `python3 scripts/dev_preflight.py browser` 前准备最终 Host 产物和独立 PostgreSQL 16 测试库。
-- 测试汇报附准确 HEAD、tree、工作区状态、命令及证据目录，区分编译、专项、本地完整、预备机检查、取消、跳过和未验证；修改代码后不能沿用旧 HEAD 绿灯。激活前的 PR 质量保留最早与当前 head 的准确 CI attempt；激活后的候选以国内 SHA/tree 和检查收据为准。
+- 测试汇报附准确 HEAD、tree、工作区状态、命令及证据目录，区分编译、专项、本地完整、预备机检查、取消、跳过和未验证；修改代码后不能沿用旧 HEAD 绿灯。历史 PR 的首轮/最终 CI 证据保留作审计；日常候选以国内 SHA/tree、实际测试和安装收据为准。
 - 共享 Composition、构建和工作流改动先核对并行任务，避免重复修复；不能恢复手工维护的 Chromium 用例正则。操作细则见 `docs/plans/2026-09-08-development-preflight.md`。
