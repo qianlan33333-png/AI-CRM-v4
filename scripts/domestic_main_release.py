@@ -2281,7 +2281,7 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
                 "'config_path':'/etc/aicrm/domestic-main-release.json','production_enabled':False,"
                 "'check_database_url':'postgresql://127.0.0.1/aicrm_ci','build_path':'/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/npm/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/usr/bin:/bin'}; "
                 "m._check_config(c); d=Path(tempfile.mkdtemp()); lock=d/'lock'; "
-                "ctx=m._locked(lock,nonblocking=True); ctx.__enter__(); "
+                "ctx=m._locked(lock,nonblocking=True); ctx.__enter__();\n"
                 "try:\n try:\n  with m._locked(lock,nonblocking=True): raise SystemExit(31)\n except m.ReleaseError: print('locked-config-dry-run-ok')\n"
                 "finally: ctx.__exit__(None,None,None)"
             )

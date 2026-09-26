@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from contextlib import contextmanager, nullcontext, redirect_stdout
 import hashlib
 import importlib.util
@@ -98,6 +99,40 @@ class DomesticMainReleaseTests(unittest.TestCase):
              mock.patch.object(release, "_run", return_value=completed) as run:
             release._build_command({}, ["child"], cwd=Path("/"), check=False)
         self.assertEqual(run.call_args.kwargs["umask"], -1)
+
+    def test_maintenance_embedded_probes_compile_and_enforce_lock_exclusion(self) -> None:
+        module_source = Path(release.__file__).read_text(encoding="utf-8")
+        function = next(node for node in ast.parse(module_source).body
+                        if isinstance(node, ast.FunctionDef) and node.name == "maintenance_check")
+        snippets: dict[str, str] = {}
+        for node in ast.walk(function):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id in {"compile_code", "dry_run"}:
+                        snippets[target.id] = ast.literal_eval(node.value)
+        self.assertEqual(set(snippets), {"compile_code", "dry_run"})
+        for name, code in snippets.items():
+            with self.subTest(snippet=name):
+                compile(code, f"<maintenance-check-{name}>", "exec")
+
+        root = Path(release.__file__).resolve().parent.parent
+        syntax = subprocess.run(
+            [sys.executable, "-c", snippets["compile_code"], str(root),
+             "scripts/domestic_main_release.py"], cwd=root,
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(syntax.returncode, 0, syntax.stderr)
+        self.assertIn("controller-syntax-ok", syntax.stdout)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            env = os.environ.copy()
+            env["TMPDIR"] = temporary
+            probe = subprocess.run(
+                [sys.executable, "-c", snippets["dry_run"], str(root)], cwd=root,
+                env=env, capture_output=True, text=True, timeout=30,
+            )
+        self.assertEqual(probe.returncode, 0, probe.stderr)
+        self.assertIn("locked-config-dry-run-ok", probe.stdout)
 
     def test_trusted_preflight_plan_uses_022_umask_for_snapshot_materialization(self) -> None:
         base_sha, head_sha, head_tree = "a" * 40, "b" * 40, "c" * 40
