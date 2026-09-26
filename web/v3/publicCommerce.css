@@ -149,3 +149,47 @@ main[data-v3-public-commerce]:not([data-auth-state="required"]) #identityGate .a
 :is(main, body)[data-v3-public-commerce][data-public-commerce-route="service-period-state"][data-public-commerce-primary-action="disabled"] .service-period-tag::before {
   background: #a8adb5;
 }
+
+/* Long service-period posters retain their original pixels and run edge to
+   edge. Scope overrides to this Owner's main so checkout and ordinary Product
+   layouts keep their existing spacing. The fixed bar is a sibling of main. */
+:is(main, body)[data-v3-public-commerce].service-period-page {
+  width: min(100%, 680px);
+  padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
+  padding-bottom: calc(92px + env(safe-area-inset-bottom));
+}
+
+:is(main, body)[data-v3-public-commerce].service-period-page .service-period-hero {
+  min-height: 0;
+  padding: 16px;
+}
+
+:is(main, body)[data-v3-public-commerce].service-period-page .service-period-hero h1 {
+  font-size: 22px;
+}
+
+:is(main, body)[data-v3-public-commerce].service-period-page .service-period-card {
+  margin: 12px;
+  padding: 16px;
+}
+
+:is(main, body)[data-v3-public-commerce].service-period-page .detail-media {
+  gap: 0;
+  padding: 0;
+}
+
+:is(main, body)[data-v3-public-commerce].service-period-page .slice-img {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  border-radius: 0;
+  object-fit: contain;
+}
+
+:is(main, body)[data-v3-public-commerce].service-period-page + .service-period-bar {
+  width: min(100%, 680px);
+  padding-inline: max(14px, env(safe-area-inset-left)) max(14px, env(safe-area-inset-right));
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  border-top-color: var(--public-line, #e2e5ea);
+  box-shadow: 0 -8px 24px rgb(31 35 41 / 6%);
+}

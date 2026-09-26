@@ -268,7 +268,7 @@ func publicDetailMedia(code string, media []productport.PublicDetailMedia) []str
 	out := make([]string, 0, len(media))
 	for _, item := range media {
 		if item.ImageID > 0 {
-			out = append(out, "/api/h5/service-period-products/"+url.PathEscape(code)+"/images/"+strconv.FormatInt(item.ImageID, 10)+"/variants/large_1440")
+			out = append(out, "/api/h5/service-period-products/"+url.PathEscape(code)+"/images/"+strconv.FormatInt(item.ImageID, 10)+"/variants/original")
 		}
 	}
 	return out

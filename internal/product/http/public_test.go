@@ -710,7 +710,7 @@ func TestPublicServicePeriodRendersTrustedEntitlementWithoutIdentityFallback(t *
 	request.AddCookie(&http.Cookie{Name: paymentport.TrustedSessionCookieName, Value: "service-period-trusted"})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `id="servicePeriodStateCard"`) || !strings.Contains(response.Body.String(), "剩余 15 天") || !strings.Contains(response.Body.String(), "/images/88/variants/large_1440") || !strings.Contains(response.Body.String(), `"checkout_url":"/s/term-31/pay"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `id="servicePeriodStateCard"`) || !strings.Contains(response.Body.String(), "剩余 15 天") || !strings.Contains(response.Body.String(), "/images/88/variants/original") || !strings.Contains(response.Body.String(), `"checkout_url":"/s/term-31/pay"`) {
 		t.Fatalf("active page status=%d body=%s", response.Code, response.Body.String())
 	}
 	untrusted := httptest.NewRecorder()
@@ -829,5 +829,32 @@ func TestPublicServicePeriodMediaIsRestrictedToProductSlices(t *testing.T) {
 	h.ServeHTTP(denied, httptest.NewRequest(http.MethodGet, "/api/h5/service-period-products/term-31/images/89/variants/original", nil))
 	if denied.Code != http.StatusNotFound {
 		t.Fatalf("denied=%d", denied.Code)
+	}
+}
+
+// Tall posters must bypass longest-edge variants: a 1080x2838 source would
+// otherwise lose almost half its width before reaching a high-density phone.
+func TestPublicServicePeriodDetailPreservesOriginalPostersAndLoadingOrder(t *testing.T) {
+	reader := &servicePeriodPublicStub{product: productport.CheckoutProduct{ID: 71, ProductType: productport.ProductOptionServicePeriod, Code: "term-31", Name: "期", PriceMinor: 99900, Currency: "CNY", Version: 1, ServicePeriodDurationDays: 90, DetailMedia: []productport.PublicDetailMedia{{ImageID: 88}, {ImageID: 89}, {ImageID: 90}}}}
+	h, err := NewServicePeriodPublicHandler(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/s/term-31", nil))
+	body := response.Body.String()
+	if response.Code != http.StatusOK || strings.Contains(body, "/variants/large_1440") {
+		t.Fatalf("detail status=%d uses downsampled poster", response.Code)
+	}
+	previous := -1
+	for _, id := range []string{"88", "89", "90"} {
+		index := strings.Index(body, "/images/"+id+"/variants/original")
+		if index <= previous {
+			t.Fatalf("original poster %s missing or reordered", id)
+		}
+		previous = index
+	}
+	if strings.Count(body, `loading="eager"`) != 1 || strings.Count(body, `fetchpriority="high"`) != 1 || strings.Count(body, `loading="lazy"`) != 2 {
+		t.Fatal("poster loading priority changed")
 	}
 }
