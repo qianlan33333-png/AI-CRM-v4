@@ -287,8 +287,9 @@ func (s *storeStub) UpdatePaymentSettlement(_ context.Context, p domain.Payment,
 	s.payment = p
 	return p, nil
 }
-func (s *storeStub) UpdateRefundSettlement(_ context.Context, r domain.Refund, _, _ string) (domain.Refund, error) {
+func (s *storeStub) UpdateRefundSettlement(_ context.Context, r domain.Refund, providerDigest, _ string) (domain.Refund, error) {
 	s.refundSettlementUpdates++
+	r.ProviderRefundDigest = providerDigest
 	s.refund = r
 	return r, nil
 }
@@ -472,6 +473,45 @@ func TestVerifiedRefundCallbackCompletesUnknownOnceAndReplays(t *testing.T) {
 	}
 	if store.refund.Status != domain.RefundCompleted || store.refundSettlementUpdates != 1 || store.callbackClaims != 2 {
 		t.Fatalf("duplicate callback reapplied settlement: refund=%+v updates=%d claims=%d", store.refund, store.refundSettlementUpdates, store.callbackClaims)
+	}
+}
+
+func TestVerifiedRefundCallbackAfterReconciliationRecordsReplayWithoutSettlingAgain(t *testing.T) {
+	now := time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name     string
+		provider domain.Provider
+		digest   string
+	}{
+		{name: "wechat", provider: domain.ProviderWeChatPay, digest: string(effectport.Hash("wechatpay.refund", "provider-refund-9"))},
+		{name: "alipay", provider: domain.ProviderAlipay, digest: string(effectport.Hash("alipay.refund", "R-refund-reconciled", "trade-9"))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &storeStub{
+				payment: domain.Payment{ID: 7, OrderID: 3, Provider: tc.provider, Channel: domain.ChannelMiniProgram, MerchantOrderNo: "M-refund-reconciled", AmountMinor: 1000, Currency: "CNY", Status: domain.StatusPaid, Version: 2, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+				refund:  domain.Refund{ID: 9, PaymentID: 7, Provider: tc.provider, RefundNo: "R-refund-reconciled", AmountMinor: 300, Status: domain.RefundCompleted, ProviderRefundDigest: tc.digest, Version: 5, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+			}
+			orders := &recordingOrderStub{}
+			service := NewService(uowStub{}, store, orders, sessionStub{}, &effectStub{})
+			callback := paymentprovider.CallbackResult{
+				Provider: tc.provider, Kind: "refund", RefundNo: store.refund.RefundNo, AmountMinor: store.refund.AmountMinor, Currency: "CNY", OccurredAt: now,
+				ProviderRefundDigest: tc.digest, EventDigest: [32]byte{7}, BodyDigest: [32]byte{8},
+			}
+			if err := service.ApplyVerifiedCallback(context.Background(), callback); err != nil {
+				t.Fatalf("late matching callback err=%v", err)
+			}
+			if store.callbackOutcome != "replayed" || store.callbackClaims != 1 || store.refund.Version != 5 || store.refundSettlementUpdates != 0 || orders.settlementCount != 0 {
+				t.Fatalf("late callback changed settled business fact: outcome=%q claims=%d refund=%+v refund_updates=%d order_updates=%d", store.callbackOutcome, store.callbackClaims, store.refund, store.refundSettlementUpdates, orders.settlementCount)
+			}
+			callback.EventDigest = [32]byte{9}
+			callback.ProviderRefundDigest = string(effectport.Hash("different-provider-refund", tc.name))
+			if err := service.ApplyVerifiedCallback(context.Background(), callback); !errors.Is(err, paymentport.ErrConflict) {
+				t.Fatalf("different provider refund fact err=%v", err)
+			}
+			if store.callbackClaims != 1 || store.refundSettlementUpdates != 0 || orders.settlementCount != 0 {
+				t.Fatalf("conflicting callback changed business fact: claims=%d refund_updates=%d order_updates=%d", store.callbackClaims, store.refundSettlementUpdates, orders.settlementCount)
+			}
+		})
 	}
 }
 
