@@ -1920,13 +1920,67 @@ class DomesticMainReleaseTests(unittest.TestCase):
 
     def test_nested_git_object_storage_is_push_writable_but_main_and_hooks_are_not(self) -> None:
         for relative in (Path("objects"), Path("objects/pack"), Path("objects/ab"),
-                         Path("refs/heads/codex"), Path("refs/heads/codex/task")):
+                         Path("refs/heads/codex"), Path("refs/heads/codex/task"),
+                         Path("logs/refs/heads/codex"),
+                         Path("logs/refs/heads/codex/task")):
             with self.subTest(path=str(relative)):
                 self.assertTrue(release._push_writable_bare_path(relative))
         for relative in (Path("refs/heads/main"), Path("refs/domestic/candidates/abc"),
+                         Path("logs/refs/heads/main"), Path("logs/refs/heads/other"),
+                         Path("logs/refs/domestic/candidates/abc"),
                          Path("hooks/pre-receive"), Path("config"), Path("HEAD")):
             with self.subTest(path=str(relative)):
                 self.assertFalse(release._push_writable_bare_path(relative))
+
+    def test_task_reflog_is_push_writable_while_main_and_other_logs_stay_root_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo, _base, _candidate, _other = make_repository(Path(temporary))
+            log_heads = repo / "logs/refs/heads"
+            task_dir = log_heads / "codex"
+            task_dir.mkdir(parents=True)
+            task_log = task_dir / "task"
+            task_log.write_text("task reflog\n")
+            main_log = log_heads / "main"
+            main_log.write_text("main reflog\n")
+            other_log = log_heads / "other"
+            other_log.write_text("non-task reflog\n")
+
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release.os, "chown") as chown:
+                release._secure_bare_repository_permissions(repo, 12345)
+
+            self.assertEqual(stat.S_IMODE(task_dir.stat().st_mode), 0o2775)
+            self.assertEqual(stat.S_IMODE(task_log.stat().st_mode), 0o664)
+            for path in (log_heads, main_log, other_log):
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode),
+                                 0o755 if path == log_heads else 0o644, path)
+
+            requested_ownership = {(call.args[0], call.args[1], call.args[2])
+                                   for call in chown.call_args_list}
+            self.assertIn((task_dir, 0, 12345), requested_ownership)
+            self.assertIn((task_log, 0, 12345), requested_ownership)
+            self.assertIn((log_heads, 0, 0), requested_ownership)
+            self.assertIn((main_log, 0, 0), requested_ownership)
+            self.assertIn((other_log, 0, 0), requested_ownership)
+
+            fresh_root = Path(temporary) / "fresh"
+            fresh_root.mkdir()
+            fresh_repo, _base, _candidate, _other = make_repository(fresh_root)
+            shutil.rmtree(fresh_repo / "logs", ignore_errors=True)
+            self.assertFalse((fresh_repo / "logs").exists())
+            fresh_log_heads = fresh_repo / "logs/refs/heads"
+            fresh_task_dir = fresh_log_heads / "codex"
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release.os, "chown") as fresh_chown:
+                release._secure_bare_repository_permissions(fresh_repo, 12345)
+
+            self.assertTrue(fresh_task_dir.is_dir())
+            self.assertEqual(stat.S_IMODE(fresh_task_dir.stat().st_mode), 0o2775)
+            self.assertEqual(stat.S_IMODE(fresh_log_heads.stat().st_mode), 0o755)
+            fresh_requested_ownership = {(call.args[0], call.args[1], call.args[2])
+                                         for call in fresh_chown.call_args_list}
+            self.assertIn((fresh_task_dir, 0, 12345), fresh_requested_ownership)
+            self.assertIn((fresh_log_heads, 0, 0), fresh_requested_ownership)
 
     def test_stale_second_branch_can_be_replaced_on_current_main_without_controller_rebase(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

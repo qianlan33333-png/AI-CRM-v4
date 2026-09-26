@@ -473,8 +473,8 @@ def bootstrap_bare_repository(repo: Path, seed_repo: Path, baseline_sha: str,
     _prepare_new_bare_hooks_directory(hooks)
     _install_new_pre_receive_hook(repo, controller_path)
     # The fixed hook and repository config remain root-owned. The push group
-    # can write Git objects and candidate refs only; receive-pack's hook is
-    # the boundary that protects main and hooks from the forced SSH account.
+    # can write Git objects and codex refs/reflogs only; receive-pack's hook
+    # protects main and hooks from the forced SSH account.
     _secure_bare_repository_permissions(repo, grp.getgrnam(push_group).gr_gid)
     return {"repo": str(repo), "main_sha": baseline_sha, "main_tree": _tree(repo, baseline_sha)}
 
@@ -482,9 +482,9 @@ def bootstrap_bare_repository(repo: Path, seed_repo: Path, baseline_sha: str,
 def _secure_bare_repository_permissions(repo: Path, push_gid: int) -> None:
     if os.geteuid() != 0:
         raise ReleaseError("bare repository ownership setup must run as root")
-    # Git stores immutable objects separately from mutable refs. The push
-    # account gets group write on those two data trees, while config, HEAD,
-    # packed refs and hooks remain root-owned and unavailable for modification.
+    # Git stores objects, refs, and reflogs separately. The push account gets
+    # group write on objects and codex refs/reflogs; config, main refs/reflogs,
+    # packed refs, and hooks remain root-owned and unavailable for modification.
     os.chown(repo, 0, push_gid)
     # Candidate checks run as a separate, untrusted build identity. Git
     # objects are world-readable because this source is public, but only the
@@ -492,6 +492,8 @@ def _secure_bare_repository_permissions(repo: Path, push_gid: int) -> None:
     os.chmod(repo, 0o2755)
     codex_refs = repo / "refs/heads/codex"
     codex_refs.mkdir(mode=0o2775, parents=True, exist_ok=True)
+    codex_reflogs = repo / "logs/refs/heads/codex"
+    codex_reflogs.mkdir(mode=0o2775, parents=True, exist_ok=True)
     for current, dirs, files in os.walk(repo, topdown=True, followlinks=False):
         current_path = Path(current)
         for name in dirs:
@@ -529,9 +531,11 @@ def _secure_bare_repository_permissions(repo: Path, push_gid: int) -> None:
 
 
 def _push_writable_bare_path(relative: Path) -> bool:
-    """Only loose/packed object storage and task refs accept push-account writes."""
+    """Only object storage and task refs/reflogs accept push-account writes."""
     parts = relative.parts
-    return parts[:1] == ("objects",) or parts[:3] == ("refs", "heads", "codex")
+    return (parts[:1] == ("objects",)
+            or parts[:3] == ("refs", "heads", "codex")
+            or parts[:4] == ("logs", "refs", "heads", "codex"))
 
 
 def verify_bare_repository(repo: Path, *, controller_path: str | None = None,
