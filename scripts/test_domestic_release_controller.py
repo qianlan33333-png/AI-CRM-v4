@@ -724,6 +724,11 @@ class DomesticMainReleaseTests(unittest.TestCase):
         expected_path = "/opt/aicrm/toolchain/go-1.26.6/bin:/opt/aicrm/toolchain/npm/bin:/opt/aicrm/toolchain/node-v24.18.0-linux-x64/bin:/usr/bin:/bin"
         env = release._check_env({**base, "build_path": expected_path})
         self.assertEqual(env["PATH"], expected_path)
+        self.assertNotIn("AICRM_DEDUP_HEAD_SHA", env)
+        with self.assertRaisesRegex(release.ReleaseError, "both exact base and head"):
+            release._check_env({**base, "build_path": expected_path}, base_sha="a" * 40)
+        with self.assertRaises(ValueError):
+            release._check_env({**base, "build_path": expected_path}, base_sha="a" * 40, head_sha="invalid")
 
     def test_build_toolchain_probe_runs_as_isolated_user_and_requires_all_tools(self) -> None:
         config = {"check_database_url": "postgresql://localhost/aicrm_ci",
@@ -1493,7 +1498,7 @@ class DomesticMainReleaseTests(unittest.TestCase):
             policy, candidate = root / "policy", root / "candidate"
             (policy / "scripts/ci").mkdir(parents=True)
             candidate.mkdir()
-            (policy / "scripts/ci/quality_lanes.py").write_text('''import subprocess, sys
+            (policy / "scripts/ci/quality_lanes.py").write_text('''import os, subprocess, sys
 from pathlib import Path
 ROOT = Path('.')
 def commands(lane, report_dir):
@@ -1502,6 +1507,8 @@ def focused_commands(lane, report_dir, checks):
     return commands(lane, report_dir)
 def main():
     assert sys.argv == ['quality_lanes', 'preflight', '--report-dir', str(ROOT / 'report')], sys.argv
+    assert os.environ['AICRM_DEDUP_BASE_SHA'] == 'a' * 40
+    assert os.environ['AICRM_DEDUP_HEAD_SHA'] == 'b' * 40
     return subprocess.run(commands('preflight', ROOT / 'report')[0], cwd=ROOT).returncode
 ''')
             (policy / "scripts/dev_preflight.py").write_text('''import json, sys
@@ -1516,6 +1523,11 @@ def main():
                 [sys.executable, "-c", release._trusted_runner_code(), str(policy), str(candidate),
                  "preflight", "--report-dir", str(candidate / "report")],
                 cwd=candidate, capture_output=True, text=True, check=True,
+                env=release._check_env(
+                    {"check_database_url": "postgresql://localhost/aicrm_ci",
+                     "build_path": "/opt/aicrm/toolchain/npm/bin:/usr/bin:/bin"},
+                    candidate, base_sha="a" * 40, head_sha="b" * 40,
+                ),
             )
             self.assertEqual(json.loads(result.stdout), {"status": "passed", "candidate_root": str(candidate)})
 

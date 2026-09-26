@@ -936,7 +936,8 @@ def _make_worktree_metadata_readable(repo: Path, worktree: Path) -> None:
             os.chmod(target, 0o640)
 
 
-def _check_env(config: dict[str, Any], safe_repository: Path | None = None) -> dict[str, str]:
+def _check_env(config: dict[str, Any], safe_repository: Path | None = None, *,
+               base_sha: str | None = None, head_sha: str | None = None) -> dict[str, str]:
     database_url = config.get("check_database_url")
     if not isinstance(database_url, str) or not database_url:
         raise ReleaseError("isolated synthetic check database URL is not configured")
@@ -954,7 +955,7 @@ def _check_env(config: dict[str, Any], safe_repository: Path | None = None) -> d
     if "/opt/aicrm/toolchain/npm/bin" not in path_value.split(":"):
         raise ReleaseError("isolated check PATH omits the fixed npm toolchain directory")
     build_root = Path(legacy.BUILD_ROOT)
-    return {
+    environment = {
         "PATH": path_value,
         "HOME": str(build_root),
         "TMPDIR": str(build_root / "tmp"),
@@ -967,6 +968,12 @@ def _check_env(config: dict[str, Any], safe_repository: Path | None = None) -> d
         "GIT_CONFIG_KEY_0": "safe.directory",
         "GIT_CONFIG_VALUE_0": str(safe_repository.resolve(strict=True)) if safe_repository else "",
     }
+    if (base_sha is None) != (head_sha is None):
+        raise ReleaseError("check environment requires both exact base and head SHAs")
+    if base_sha is not None:
+        environment.update(AICRM_DEDUP_BASE_SHA=_sha(base_sha, "check base SHA"),
+                           AICRM_DEDUP_HEAD_SHA=_sha(head_sha, "check head SHA"))
+    return environment
 
 
 def _verify_build_toolchain(config: dict[str, Any]) -> dict[str, dict[str, str]]:
@@ -1183,7 +1190,8 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
         with log.open("xb") as output:
             os.chmod(log, 0o600)
             run_args = ["/usr/bin/sudo", "-n", "-u", legacy.BUILD_USER, "-H", "--", "/usr/bin/env", "-i"]
-            run_args.extend([f"{key}={value}" for key, value in _check_env(config, worktree).items()])
+            run_args.extend([f"{key}={value}" for key, value in
+                             _check_env(config, worktree, base_sha=base_sha, head_sha=head_sha).items()])
             run_args.extend(command)
             completed = subprocess.run(run_args, cwd=worktree, stdout=output, stderr=subprocess.STDOUT,
                                         timeout=6 * 60 * 60, check=False)
