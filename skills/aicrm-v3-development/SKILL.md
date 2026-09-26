@@ -31,6 +31,39 @@ Persistence: stateless | local transaction | internal durable job | Provider rea
 
 If an axis is not involved, state why and continue without adding a dependency. Revisit the classification when scope changes.
 
+## 限制必要性判断（奥卡姆剃刀原则）
+
+本规则仅约束今后新开发中新增的限制，不要求审计或批量修改既有限制。权限、字符长度、格式、数量、超时、重试和额外审批步骤都适用。
+
+> 每增加一个限制，先假设没有它，判断业务正确性、安全边界和资源承载是否仍然成立。成立则不增加；不成立则采用有明确依据、足以解决问题的最小约束。
+
+```mermaid
+flowchart TD
+    A[准备新增限制] --> B[假设不增加该限制]
+    B --> C{是否仍满足业务、安全和资源要求}
+    C -->|是| D[不增加限制]
+    C -->|否，有具体依据| E[优先复用已有边界]
+    E --> F[选择足够且最少的约束]
+    F --> G[验证正常业务可完成，目标风险被阻止]
+    C -->|依据不明确| H[核实合同或风险，不凭猜测设置阈值]
+```
+
+- **业务和输入限制**：阈值来自已确认业务规则、数据库或 Provider 合同、具体资源预算；不凭习惯设置 100、255、1000 等数值。已有边界足够时，不新增更严的重复限制。
+- **权限**：按实际操作授予最少权限，并保证完整操作链能够执行。受保护资源仍须进行授权判断并默认拒绝未授权访问；参照 [OWASP 最小权限和默认拒绝原则](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html)。不得以“最少限制”为由绕过身份、事务、外部效果或凭据保护红线。
+- **作用范围**：限制施加于需要保护的对象和环节，避免把服务、凭据的私有权限要求机械套到源码快照、CSS 等不同用途的文件上。
+- **限制反馈**：必要限制被触发时，明确说明原因和可行修正方式；字符超限不得静默截断。
+
+在 PRD 或 PR 中简短记录新增限制：
+
+`限制对象｜不限制的具体后果｜依据｜最小约束及作用范围`
+
+没有新增限制时，写一句“不涉及新增限制”即可；无需逐个参数创建台账。核实依据后，结论应明确为“不加”“复用已有边界”或“增加最小必要约束”。
+
+### 示例
+
+- **临时源码快照**：根据读取者和文件用途确定权限，验证创建、读取和检查的完整链路；不修改发布服务或凭据权限，也不预设所有快照必须全局可读。检查器应判断所需权限是否满足，不能仅因文件权限与某个无依据的固定值不同而拒绝正确的 CSS。
+- **自由文本长度**：没有业务或技术依据时不添加额外字段长度限制；确有下游上限时，说明按字节、字符或其他单位计量、阈值来源和错误反馈，并验证边界内正常输入与超限反馈。已有请求大小或资源保护仍按其自身依据生效。
+
 ## OneID Decision
 
 OneID is involved when a capability reads or assigns a customer, accepts an external identity, correlates channels, or changes identity ownership.

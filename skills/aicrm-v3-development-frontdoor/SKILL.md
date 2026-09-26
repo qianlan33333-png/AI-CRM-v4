@@ -13,6 +13,8 @@ Read repository `AGENTS.md` and `skills/aicrm-v3-development/SKILL.md`. Use the 
 2. Search GitHub or established products for references, then identify repository-owned domains, components, and interfaces to reuse.
 3. Write one concise parent PRD with the flow, interface/data boundaries, tests, acceptance, rollback, dependencies, and OneID/Persistence/External Effects classifications. If the user authorized the parent brief, child PRs inherit it and record only their scope delta; do not ask for the same approval again.
 
+新增权限、长度、格式、数量、超时、重试或审批限制前，应用 [核心 Skill 的限制必要性判断](../aicrm-v3-development/SKILL.md#限制必要性判断奥卡姆剃刀原则)，在父 PRD 或 PR 简短记录依据；没有新增限制时写“不涉及新增限制”。该要求仅针对今后新开发，不启动既有限制审计。
+
 ## Small-step delivery
 
 - Keep the implementation and its child PRs in the same Codex task. Each PR delivers one independently mergeable, reversible user-visible behavior or clear defect, with its related tests in that PR. Split by behavior; do not use line or file quotas.
