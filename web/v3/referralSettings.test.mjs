@@ -63,4 +63,40 @@ for(const active of [false,true]) {
  assert.equal(writes[0].product_type,'standard_product','create must submit Referral canonical product type');
  dom.window.close();
 }
+{
+ const writes=[];
+ const campaign={id:2,name:'海报活动',state:'active',effective_state:'active',starts_at:'2026-01-01T00:00:12Z',ends_at:'2099-12-01T00:00:12Z',version:2,team_mode:'individual',qualification_mode:'product_purchase',product_id:51,product_type:'standard_product',leaderboard_metric:'sales_amount',posters:[]};
+ const dom=new JSDOM('<section id="referral-admin-root"></section>',{url:'https://crm.example/admin/referral/settings?campaign=2',runScripts:'dangerously',beforeParse(w){
+  w.Headers=Headers;w.Response=Response;
+  w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
+  w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new w.Event('close'));};
+  w.fetch=async(input,init={})=>{const u=new URL(String(input),'https://crm.example');
+   if(u.pathname==='/api/admin/image-library')return json({items:[{id:11,name:'第一张',enabled:true,thumb_320_url:'/api/admin/image-library/11/variants/thumb_320'}],has_more:false});
+   if(u.pathname.endsWith('/campaigns/2/posters')&&init.method==='PUT'){writes.push(JSON.parse(init.body));return json({posters:[]});}
+   if(u.pathname.endsWith('/product-options'))return json({items:[{id:51,code:'122331',name:'测试',product_type:'standard'}],total:1});
+   if(u.pathname.endsWith('/campaigns'))return json({items:[campaign]});
+   if(u.pathname.endsWith('/campaigns/2'))return json(campaign);
+   return json({items:[]});
+  };
+ }});
+ dom.window.eval(picker);dom.window.eval(bundle);
+ const doc=dom.window.document;
+ await wait(()=>doc.querySelector('[data-testid="referral-admin-settings-page"]'));
+ const add=[...doc.querySelectorAll('button')].find(x=>x.textContent==='选择图片素材');
+ for(let i=0;i<3;i++){
+  add.click();
+  await wait(()=>doc.querySelector('.referral-admin-poster-materials button'));
+  doc.querySelector('.referral-admin-poster-materials button').click();
+  await wait(()=>!doc.querySelector('.referral-admin-poster-picker'));
+  await wait(()=>doc.querySelectorAll('.referral-admin-poster-list > div').length===i+1);
+ }
+ assert.equal(doc.querySelectorAll('.referral-admin-poster-list > div').length,3,'admin may select three posters');
+ add.click();
+ assert.match(doc.querySelector('[data-testid="referral-admin-form-message"]').textContent,/最多配置 3 张/,'fourth poster is rejected');
+ [...doc.querySelectorAll('button')].find(x=>x.textContent==='发布海报配置').click();
+ await wait(()=>writes.length===1);
+ assert.equal(writes[0].expected_version,2);
+ assert.deepEqual(writes[0].posters,[{image_id:11,description:'第一张'},{image_id:11,description:'第一张'},{image_id:11,description:'第一张'}]);
+ dom.window.close();
+}
 console.log('referral settings route, product selection, active copy save and readback passed');

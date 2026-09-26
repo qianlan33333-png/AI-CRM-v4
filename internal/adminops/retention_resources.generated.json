@@ -1,6 +1,6 @@
 {
   "registry_version": 1,
-  "registry_sha256": "5a0b8d14c180a0ab19e3309675c27d90bb123f1b1a8a376ca44d6a407e69c89d",
+  "registry_sha256": "6112848673b45f3d2daee1e16681b109679191ea5ecc08f203fec10bb926b7ce",
   "inventory_scope": "committed_registry",
   "items": [
     {
@@ -4760,6 +4760,19 @@
       "coverage_status": "gap",
       "gap_code": "security_ttl_physical_cleanup_missing",
       "authorization_expiry": "owner_security_ttl"
+    },
+    {
+      "kind": "table",
+      "name": "referral_campaign_posters",
+      "owner": "referral",
+      "policy": "permanent",
+      "reason": "活动当前发布的海报原图快照，供公开下载时叠加邀请人专属二维码；发布替换由管理员显式操作和审计记录约束。",
+      "source": "migrations/0210_referral_campaign_posters.sql",
+      "cleanup_entrypoint": "",
+      "policy_id": "",
+      "coverage_status": "protected",
+      "gap_code": "",
+      "authorization_expiry": "not_assessed"
     },
     {
       "kind": "table",

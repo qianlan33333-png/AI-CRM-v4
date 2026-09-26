@@ -70,6 +70,20 @@ func TestPostgreSQLDistributionSaleScoresWithoutSignupAndRefundsOriginalDay(t *t
 		}
 	}
 	assertCount(t, h.pool, `SELECT count(*) FROM referral_product_sale_events WHERE order_id=943 AND kind='credit'`, 1)
+	paidInviteCount := func() int64 {
+		var count int64
+		if err := h.uow.Within(ctx, func(tx context.Context) error {
+			var readErr error
+			count, readErr = h.repository.CountPaidInviteesWithin(tx, c.ID, 3541)
+			return readErr
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+	if got := paidInviteCount(); got != 1 {
+		t.Fatalf("paid invite count=%d want=1", got)
+	}
 	assertCount(t, h.pool, `SELECT count(*) FROM referral_participations WHERE campaign_id=$1`, 0, c.ID)
 	board, err := h.service.Leaderboard(ctx, referralport.LeaderboardQuery{CampaignID: c.ID, Kind: referralport.LeaderboardPersonal, Period: referralport.LeaderboardTotal, ViewerCustomerID: 3541, Limit: 20})
 	if err != nil || len(board.Items) != 1 || board.Items[0].CustomerID != 3541 || board.Items[0].Score != 990 || board.Items[0].SalesAmountMinor != 990 || board.Items[0].SalesOrderCount != 1 {
@@ -84,6 +98,9 @@ func TestPostgreSQLDistributionSaleScoresWithoutSignupAndRefundsOriginalDay(t *t
 	if err != nil || len(day.Items) != 1 || day.Items[0].Score != 690 || day.Items[0].SalesOrderCount != 1 {
 		t.Fatalf("partial refund original-day board=%+v err=%v", day, err)
 	}
+	if got := paidInviteCount(); got != 1 {
+		t.Fatalf("partial refund invite count=%d want=1", got)
+	}
 	full := partial
 	full.RefundedDelta, full.ReceiptKey, full.OccurredAt = 690, "refund-943-2", paidAt.Add(26*time.Hour)
 	full.Order.Status, full.Order.RefundedMinor, full.Order.Version = orderdomain.StatusRefunded, 990, 4
@@ -96,7 +113,33 @@ func TestPostgreSQLDistributionSaleScoresWithoutSignupAndRefundsOriginalDay(t *t
 	if err != nil || len(board.Items) != 0 {
 		t.Fatalf("fully refunded board=%+v err=%v", board, err)
 	}
+	if got := paidInviteCount(); got != 0 {
+		t.Fatalf("full refund invite count=%d want=0", got)
+	}
+	if err := h.uow.Within(ctx, func(tx context.Context) error {
+		items, readErr := h.repository.ListPaidInviteItemsWithin(tx, c.ID, 3541, 0, 10)
+		if readErr != nil {
+			return readErr
+		}
+		if len(items) != 1 || items[0].Participation.CustomerID != 12484 || items[0].ScoreState != "reversed" || items[0].ScoreDelta != 0 {
+			t.Fatalf("refunded invitation details=%+v", items)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	assertCount(t, h.pool, `SELECT count(*) FROM referral_product_sale_events WHERE order_id=943 AND kind='reversal'`, 2)
+	for _, item := range []struct{ orderID, buyerID, expected int64 }{{949, 12484, 1}, {950, 12485, 2}} {
+		stub.values[item.orderID] = distributionport.FrozenOrderAttribution{OrderID: item.orderID, OrderItemLine: 1, ProductID: 51, ProductType: distributiondomain.ProductTypeStandard, PromoterCustomerID: 3541, CredentialID: 17, PolicyVersion: 1, CommissionRateBasisPoints: 1000, AttributedAt: h.clock.Add(-time.Minute)}
+		if err := h.uow.Within(ctx, func(tx context.Context) error {
+			return h.service.ConsumePaidEventWithin(tx, salePaidEvent(item.orderID, 51, item.buyerID, paidAt.Add(2*time.Minute)))
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if got := paidInviteCount(); got != item.expected {
+			t.Fatalf("order=%d unique paid buyers=%d want=%d", item.orderID, got, item.expected)
+		}
+	}
 	// A disabled campaign still admits a replay of a payment made in its
 	// audited active interval, while a later payment earns no sale.
 	h.clock = paidAt.Add(time.Hour)

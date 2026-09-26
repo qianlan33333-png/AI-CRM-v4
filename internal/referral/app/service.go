@@ -61,7 +61,9 @@ type serviceStore interface {
 	InsertScoreEventWithin(context.Context, referraldomain.ScoreEvent) (referraldomain.ScoreEvent, error)
 	CurrentRelationshipAtWithin(context.Context, int64, time.Time) (referraldomain.Relationship, bool, error)
 	CountDirectInvitationsWithin(context.Context, int64, int64) (int64, error)
+	CountPaidInviteesWithin(context.Context, int64, int64) (int64, error)
 	ListInviteItemsWithin(context.Context, int64, int64, int32, int32) ([]referralport.InviteItem, error)
+	ListPaidInviteItemsWithin(context.Context, int64, int64, int32, int32) ([]referralport.InviteItem, error)
 	LeaderboardRowsWithin(context.Context, int64, referralport.LeaderboardKind, int64, time.Time, time.Time, int32, int32, int64, int64) ([]referralport.LeaderboardEntry, *referralport.LeaderboardEntry, error)
 	ListSalesLeaderboardRowsWithin(context.Context, int64, referralport.LeaderboardKind, referraldomain.LeaderboardMetric, int64, time.Time, time.Time, int32, int32, int64, int64) ([]referralport.LeaderboardEntry, *referralport.LeaderboardEntry, error)
 	InsertProductActivityContextWithin(context.Context, referralport.ProductActivityContext) error
@@ -74,6 +76,20 @@ func (s *Service) IssueProductActivityContext(ctx context.Context, actor referra
 	if s == nil || !actor.Valid() || campaignID < 1 || !validKey(idempotencyKey) {
 		return "", referralport.ErrConflict
 	}
+	return s.issueProductActivityContext(ctx, campaignID)
+}
+
+// IssuePublicProductActivityContext is used only by the signed, campaign-bound
+// promotion handoff. It conveys no customer or promoter identity; Order still
+// freezes both from its own trusted checkout and Distribution credential.
+func (s *Service) IssuePublicProductActivityContext(ctx context.Context, campaignID int64) (string, error) {
+	if s == nil || campaignID < 1 {
+		return "", referralport.ErrConflict
+	}
+	return s.issueProductActivityContext(ctx, campaignID)
+}
+
+func (s *Service) issueProductActivityContext(ctx context.Context, campaignID int64) (string, error) {
 	var token string
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		campaign, err := s.store.ReadCampaignWithin(tx, campaignID, true)
@@ -83,26 +99,13 @@ func (s *Service) IssueProductActivityContext(ctx context.Context, actor referra
 		if campaign.Config().QualificationMode != referraldomain.QualificationProductPurchase || !campaign.AcceptingAt(s.now().UTC()) {
 			return referralport.ErrCampaignUnavailable
 		}
-		// The activity context is the server-issued bridge from the activity
-		// page to the bound product checkout.  It must be issuable before the
-		// first purchase; requiring an existing purchase here would make a
-		// product-qualified activity circular (the buyer could never reach the
-		// checkout that grants qualification).  Qualification is enforced when
-		// the paid event is consumed and the participant is created.
 		buf := make([]byte, 32)
 		if _, err := cryptoRandRead(buf); err != nil {
 			return referralport.ErrUnavailable
 		}
 		token = "rpa_" + base64.RawURLEncoding.EncodeToString(buf)
 		digest := sha256.Sum256([]byte(token))
-		metric := referralport.SalesMetricAmount
-		if campaign.Config().LeaderboardMetric != referraldomain.LeaderboardInvites {
-			// The activity config currently distinguishes invite versus sales
-			// leaderboards; sales defaults to amount for the product context until
-			// the persisted amount/order metric is exposed as its own field.
-			metric = referralport.SalesMetricAmount
-		}
-		return s.store.InsertProductActivityContextWithin(tx, referralport.ProductActivityContext{ContextDigest: digest, CampaignID: campaign.ID, ProductID: campaign.ProductID, ProductType: campaign.ProductType, SalesMetric: metric, State: "active", ExpiresAt: campaign.EndsAt, CreatedAt: s.now().UTC()})
+		return s.store.InsertProductActivityContextWithin(tx, referralport.ProductActivityContext{ContextDigest: digest, CampaignID: campaign.ID, ProductID: campaign.ProductID, ProductType: campaign.ProductType, SalesMetric: referralport.SalesMetricAmount, State: "active", ExpiresAt: campaign.EndsAt, CreatedAt: s.now().UTC()})
 	})
 	return token, err
 }
@@ -542,7 +545,11 @@ func (s *Service) MyCampaign(ctx context.Context, actor referralport.TrustedSess
 		result.InvitationAvailable = participation.State == referraldomain.ParticipationActive && campaign.AcceptingAt(s.now().UTC())
 		var countErr error
 		err = s.uow.Within(ctx, func(tx context.Context) error {
-			result.DirectInvitationCount, countErr = s.store.CountDirectInvitationsWithin(tx, campaignID, actor.CustomerID)
+			if campaign.Config().QualificationMode == referraldomain.QualificationProductPurchase {
+				result.DirectInvitationCount, countErr = s.store.CountPaidInviteesWithin(tx, campaignID, actor.CustomerID)
+			} else {
+				result.DirectInvitationCount, countErr = s.store.CountDirectInvitationsWithin(tx, campaignID, actor.CustomerID)
+			}
 			return countErr
 		})
 		if err != nil {
@@ -587,8 +594,9 @@ func (s *Service) ListMyInvites(ctx context.Context, actor referralport.TrustedS
 		// invitation details yet; it is not a failed login. Read the campaign
 		// first so an unknown campaign remains a real not-found result, and do
 		// not hide store failures behind an authorization error.
-		if _, err = s.store.ReadCampaignWithin(tx, campaignID, false); err != nil {
-			return err
+		campaign, readErr := s.store.ReadCampaignWithin(tx, campaignID, false)
+		if readErr != nil {
+			return readErr
 		}
 		if _, err = s.store.ReadParticipationWithin(tx, campaignID, actor.CustomerID, false); err != nil {
 			if errors.Is(err, referralport.ErrNotFound) {
@@ -596,7 +604,11 @@ func (s *Service) ListMyInvites(ctx context.Context, actor referralport.TrustedS
 			}
 			return err
 		}
-		values, err = s.store.ListInviteItemsWithin(tx, campaignID, actor.CustomerID, offset, limit+1)
+		if campaign.Config().QualificationMode == referraldomain.QualificationProductPurchase {
+			values, err = s.store.ListPaidInviteItemsWithin(tx, campaignID, actor.CustomerID, offset, limit+1)
+		} else {
+			values, err = s.store.ListInviteItemsWithin(tx, campaignID, actor.CustomerID, offset, limit+1)
+		}
 		return err
 	})
 	if err != nil {

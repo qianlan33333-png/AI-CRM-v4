@@ -39,11 +39,23 @@ assert.ok(surveyController && surveyMain && surveyLegacy, 'Survey Host must reta
 includeStatic(surveyController);
 includeStatic(surveyMain);
 includeStatic(surveyLegacy);
-const qrChunks = Object.entries(sourceManifest.files || {})
-  .filter(([, metadata]) => (metadata.inputs || []).includes('web/src/admin/sections/qr.ts'))
-  .map(([relative]) => relative);
-assert.equal(qrChunks.length, 1, 'build must contain exactly one Survey QR dynamic chunk');
-includeStatic(qrChunks[0]);
+const legacyClosure = new Set();
+const visitLegacy = (relative) => {
+  if (legacyClosure.has(relative)) return;
+  assert.ok(sourceManifest.files?.[relative], `Survey legacy dependency is missing: ${relative}`);
+  legacyClosure.add(relative);
+  for (const imported of sourceManifest.files[relative].imports || []) visitLegacy(imported.path);
+};
+visitLegacy(surveyLegacy);
+const qrChunks = [...legacyClosure]
+  .filter((relative) => (sourceManifest.files[relative].inputs || []).includes('web/src/admin/sections/qr.ts'));
+assert.equal(qrChunks.length, 1, 'Survey legacy closure must contain exactly one QR dynamic chunk');
+const qrEntries = [...legacyClosure].flatMap((relative) => sourceManifest.files[relative].imports || [])
+  .filter((item) => item.kind === 'dynamic-import' && path.basename(item.path).startsWith('qr-'))
+  .map((item) => item.path);
+assert.equal(new Set(qrEntries).size, 1, 'Survey legacy closure must contain exactly one QR dynamic entry');
+includeStatic(qrEntries[0]);
+assert.ok(required.has(qrChunks[0]), 'Survey QR entry must load its source chunk');
 for (const relative of required) {
   assert.deepEqual(stagedManifest.files?.[relative], sourceManifest.files?.[relative], `staged manifest metadata drifted for ${relative}`);
   assert.deepEqual(stagedManifest.release_files?.[relative], sourceManifest.release_files?.[relative], `staged release metadata drifted for ${relative}`);

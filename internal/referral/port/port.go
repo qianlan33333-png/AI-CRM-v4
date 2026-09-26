@@ -89,6 +89,38 @@ type CampaignView struct {
 	Teams         []domain.Team
 	TeamSummaries []AdminTeamSummary
 	DailyMetrics  []CampaignDailyMetric
+	Posters       []CampaignPoster
+}
+
+// CampaignPoster contains only public metadata; image bytes are served from
+// Referral's campaign-scoped read route, never from the admin media library.
+type CampaignPoster struct {
+	Slot          int
+	Description   string
+	ImageURL      string
+	SourceImageID int64
+}
+
+type CampaignPosterImage struct {
+	Content   []byte
+	MediaType string
+}
+
+type CampaignPosterSource struct {
+	ImageID     int64  `json:"image_id"`
+	Description string `json:"description"`
+}
+
+type SetCampaignPostersCommand struct {
+	CampaignID, ExpectedVersion, ActorAdminID int64
+	IdempotencyKey                            string
+	Posters                                   []CampaignPosterSource
+}
+
+// PosterImageReader is an enabled, local Media projection injected by
+// composition. Referral stores a publication snapshot in its own transaction.
+type PosterImageReader interface {
+	ReadEnabledPosterImage(context.Context, int64) (CampaignPosterImage, error)
 }
 
 type AdminTeamSummary struct {

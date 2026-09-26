@@ -60,13 +60,25 @@ includeStatic(surveyLegacy);
 
 // Survey sharing is loaded with import('./sections/qr') from the shared admin
 // controller.  esbuild therefore emits it outside the static entry closure.
-// Locate that one source-owned dynamic chunk explicitly instead of copying all
-// donor dynamic imports into this release slice.
-const qrChunks = Object.entries(sourceManifest.files || {})
-  .filter(([, metadata]) => (metadata.inputs || []).includes('web/src/admin/sections/qr.ts'))
-  .map(([relative]) => relative);
+// The frozen build and V3 Host may both compile qr.ts. Select the chunk in
+// this Survey Host's legacy closure instead of any unrelated build copy.
+const legacyClosure = new Set();
+const visitLegacy = (relative) => {
+  if (legacyClosure.has(relative)) return;
+  if (!sourceManifest.files?.[relative]) fail(`Survey legacy dependency is missing: ${relative}`);
+  legacyClosure.add(relative);
+  for (const imported of sourceManifest.files[relative].imports || []) visitLegacy(imported.path);
+};
+visitLegacy(surveyLegacy);
+const qrChunks = [...legacyClosure]
+  .filter((relative) => (sourceManifest.files[relative].inputs || []).includes('web/src/admin/sections/qr.ts'));
 if (qrChunks.length !== 1) fail(`expected exactly one Survey QR chunk, found ${qrChunks.length}`);
-includeStatic(qrChunks[0]);
+const qrEntries = [...legacyClosure].flatMap((relative) => sourceManifest.files[relative].imports || [])
+  .filter((item) => item.kind === 'dynamic-import' && path.basename(item.path).startsWith('qr-'))
+  .map((item) => item.path);
+if (new Set(qrEntries).size !== 1) fail(`expected exactly one Survey QR entry, found ${new Set(qrEntries).size}`);
+includeStatic(qrEntries[0]);
+if (!selected.has(qrChunks[0])) fail('Survey QR entry does not load its source chunk');
 const adminPages = ['questionnaires.html', 'questionnaireDetail.html', 'questionnaireOps.html'];
 const h5Pages = ['active.html', 'all.html', 'auth.html', 'done.html', 'error.html', 'expired.html', 'index.html', 'loading.html', 'one.html', 'pay.html', 'qr.html', 'result.html', 'signup.html'];
 const documents = [...adminPages.map((page) => path.join('admin', page)), ...h5Pages.map((page) => path.join('h5', page))];

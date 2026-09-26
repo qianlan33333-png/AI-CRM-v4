@@ -73,7 +73,9 @@ try {
     await cookie('aicrm_distribution_session',captain.session);await cookie('aicrm_distribution_csrf','referral-fixture-csrf');
     await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});
     await call('Page.navigate',{url:`${base}/referral?campaign=${first.c.id}`});
-    await wait("document.querySelector('[data-testid=referral-join-captain-team]') && document.querySelector('[data-testid=referral-invite]')?.textContent.includes('加入战队并邀请')");
+    await wait("document.querySelector('[data-testid=referral-invite]')?.textContent.includes('加入战队并邀请')");
+    await evaluate("document.querySelector('[data-testid=referral-activity-info]').click()");
+    await wait("document.querySelector('[data-testid=referral-join-captain-team]')");
     await wait("[...document.querySelectorAll('button')].some(b=>b.textContent==='参加后查看')");
     const beforeDetail=networkRequests.length;
     await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='参加后查看').click()");
@@ -82,11 +84,11 @@ try {
     await evaluate("[...document.querySelectorAll('dialog button')].find(b=>b.textContent==='暂不参加').click()");
     await wait("!document.querySelector('[data-testid=referral-accept-dialog]')");
     const unjoinedImage=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,'captain-unjoined-375.png'),Buffer.from(unjoinedImage.data,'base64'));
-    await evaluate("document.querySelector('[data-testid=referral-invite]').click()");
+    await evaluate("document.querySelector('[data-testid=referral-activity-info]').click(); document.querySelector('[data-testid=referral-invite]').click()");
     await wait("document.querySelector('[data-testid=referral-confirm-join]')");
     await evaluate("document.querySelector('#referral-rule-check').click(); document.querySelector('[data-testid=referral-confirm-join]').click()");
     await wait("document.querySelector('[data-testid=referral-invite-dialog]') && document.querySelector('[data-testid=referral-invite]')?.textContent==='邀请好友'");
-    const captainURL=await evaluate("document.querySelector('[data-testid=referral-invite-url]')?.value");
+    const captainURL=(await api(`/api/v1/referral/campaigns/${first.c.id}/invite`,{},captain)).url;
     assert.match(captainURL,/^https:\/\/127\.0\.0\.1:\d+\/referral\/invite\/rfi_[A-Za-z0-9_-]{43}$/);
     first.link={url:captainURL};
     const joinedImage=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,'captain-joined-375.png'),Buffer.from(joinedImage.data,'base64'));
@@ -96,11 +98,15 @@ try {
     await cookie('aicrm_distribution_session',actors[2].session);await cookie('aicrm_distribution_csrf','referral-fixture-csrf');
     await call('Emulation.setDeviceMetricsOverride',{width:index?430:375,height:850,deviceScaleFactor:1,mobile:true});
     await call('Page.navigate',{url:campaigns[index].link.url});
+    await wait("document.querySelector('[data-testid=referral-activity-info]')");
+    await evaluate("document.querySelector('[data-testid=referral-activity-info]').click()");
     await wait("[...document.querySelectorAll('button')].some(b=>b.textContent.includes('接受邀请'))");
     await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('接受邀请')).click()");
     await wait("document.querySelector('[data-testid=referral-confirm-join]')");
     await evaluate("document.querySelector('#referral-rule-check').click(); document.querySelector('[data-testid=referral-confirm-join]').click()");
-    await wait("document.querySelector('[data-testid=referral-invite]')?.disabled === false && !document.querySelector('[data-testid=referral-accept-dialog]')");
+    await wait("!document.querySelector('[data-testid=referral-accept-dialog]')");
+    await evaluate("document.querySelector('[data-testid=referral-activity-info]').click()");
+    await wait("document.querySelector('[data-testid=referral-invite]')?.textContent==='邀请好友'");
     const pageImage=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,`campaign-${index?430:375}.png`),Buffer.from(pageImage.data,'base64'));
   for(const period of ['day','total']) {
       await evaluate(`(()=>{const el=document.querySelector('[data-testid=referral-leaderboard-period]');el.value='${period}';el.dispatchEvent(new Event('change'));})()`);
@@ -108,12 +114,10 @@ try {
       await wait("document.querySelector('[data-testid=referral-leaderboard]')?.textContent.includes('1')");
       assert.equal(await evaluate("document.querySelector('[data-referral-message]')?.dataset.error === 'true'"),false,'period switch should not fail');
     }
-    await evaluate("Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{window.__referralCopied=value;}}}); document.querySelector('[data-testid=referral-invite]').click()");
-    await wait("document.querySelector('[data-testid=referral-copy-invite]')");
-    await evaluate("document.querySelector('[data-testid=referral-copy-invite]').click()");
-    await wait("typeof window.__referralCopied === 'string'");
-    const copied = new URL(await evaluate('window.__referralCopied'));
-    assert.equal(copied.origin,base);assert.match(copied.pathname,/^\/referral\/invite\/rfi_[A-Za-z0-9_-]{43}$/);
+    await evaluate("document.querySelector('[data-testid=referral-invite]').click()");
+    await wait("document.querySelector('[data-testid=referral-invite-dialog]')");
+    assert.equal(await evaluate("document.querySelector('[data-testid=referral-invite-url]')===null"),true,'poster panel has no editable link action');
+    await evaluate("document.querySelector('[data-testid=referral-invite-dialog]').close()");
     assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'),true,'mobile does not horizontally overflow');
     const image=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,`mobile-${index?430:375}.png`),Buffer.from(image.data,'base64'));
   }

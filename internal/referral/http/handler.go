@@ -55,29 +55,33 @@ type RequestSecurity interface {
 }
 
 type Config struct {
-	ProductOptions    productport.ProductOptionReader
-	ProductTargets    productport.ProductTargetReader
-	Public            referralport.PublicApplication
-	Promotion         PromotionIssuer
-	Admin             referralport.AdminApplication
-	Sessions          SessionResolver
-	Bridge            PaymentSessionBridge
-	Names             customerport.DirectoryDisplayNameReader
-	Profiles          customerport.DirectoryPublicProfileReader
-	Security          RequestSecurity
-	CookieSecure      bool
-	AllowedOrigins    []string
-	SessionCookieName string
-	CSRFCookieName    string
-	CSRFHeader        string
+	ActivityHandoffKey string
+	ProductOptions     productport.ProductOptionReader
+	ProductTargets     productport.ProductTargetReader
+	Public             referralport.PublicApplication
+	Promotion          PromotionIssuer
+	Admin              referralport.AdminApplication
+	Posters            CampaignPosters
+	Sessions           SessionResolver
+	Bridge             PaymentSessionBridge
+	Names              customerport.DirectoryDisplayNameReader
+	Profiles           customerport.DirectoryPublicProfileReader
+	Security           RequestSecurity
+	CookieSecure       bool
+	AllowedOrigins     []string
+	SessionCookieName  string
+	CSRFCookieName     string
+	CSRFHeader         string
 }
 
 type Handler struct {
+	activityHandoffKey                            []byte
 	productOptions                                productport.ProductOptionReader
 	productTargets                                productport.ProductTargetReader
 	public                                        referralport.PublicApplication
 	promotion                                     PromotionIssuer
 	admin                                         referralport.AdminApplication
+	posters                                       CampaignPosters
 	sessions                                      SessionResolver
 	bridge                                        PaymentSessionBridge
 	names                                         customerport.DirectoryDisplayNameReader
@@ -103,7 +107,7 @@ func NewHandler(config Config) (*Handler, error) {
 	if len(allowed) == 0 {
 		return nil, referralport.ErrUnavailable
 	}
-	return &Handler{productOptions: config.ProductOptions, productTargets: config.ProductTargets, public: config.Public, promotion: config.Promotion, admin: config.Admin, sessions: config.Sessions, bridge: config.Bridge, names: config.Names, profiles: config.Profiles, security: config.Security, cookieSecure: config.CookieSecure, allowedOrigins: allowed, sessionCookieName: config.SessionCookieName, csrfCookieName: config.CSRFCookieName, csrfHeader: config.CSRFHeader}, nil
+	return &Handler{activityHandoffKey: []byte(config.ActivityHandoffKey), productOptions: config.ProductOptions, productTargets: config.ProductTargets, public: config.Public, promotion: config.Promotion, admin: config.Admin, posters: config.Posters, sessions: config.Sessions, bridge: config.Bridge, names: config.Names, profiles: config.Profiles, security: config.Security, cookieSecure: config.CookieSecure, allowedOrigins: allowed, sessionCookieName: config.SessionCookieName, csrfCookieName: config.CSRFCookieName, csrfHeader: config.CSRFHeader}, nil
 }
 
 // SetPromotionApplication wires Distribution after both domains have been
@@ -126,6 +130,8 @@ func (h *Handler) ServePublicHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasPrefix(path, "/referral/invite/"):
 		h.invitationHandoff(w, r, strings.TrimPrefix(path, "/referral/invite/"))
+	case strings.HasPrefix(path, "/referral/activity/"):
+		h.activityHandoff(w, r, strings.TrimPrefix(path, "/referral/activity/"))
 	case path == publicPrefix+"/session/bridge":
 		h.bridgeSession(w, r)
 	case path == publicPrefix+"/campaigns":
@@ -173,6 +179,8 @@ func (h *Handler) ServeAdminHTTP(w http.ResponseWriter, r *http.Request) {
 		h.readAdminCampaign(w, r, parts[1])
 	case len(parts) == 2 && parts[0] == "campaigns" && r.Method == http.MethodPut:
 		h.updateCampaign(w, r, parts[1], actor)
+	case len(parts) == 3 && parts[0] == "campaigns" && parts[2] == "posters" && r.Method == http.MethodPut:
+		h.setCampaignPosters(w, r, parts[1], actor)
 	case len(parts) == 3 && parts[0] == "campaigns" && parts[2] == "state" && r.Method == http.MethodPost:
 		h.setCampaignState(w, r, parts[1], actor)
 	case len(parts) == 3 && parts[0] == "campaigns" && parts[2] == "teams" && r.Method == http.MethodPost:
@@ -237,8 +245,20 @@ func (h *Handler) campaignTail(w http.ResponseWriter, r *http.Request, tail stri
 			return
 		}
 		response := campaignView(view)
+		if h.posters != nil {
+			posters, err := h.posters.ListCampaignPosters(r.Context(), campaignID, false)
+			if err != nil {
+				resultError(w, err)
+				return
+			}
+			response["posters"] = publicPosters(posters, false)
+		}
 		h.addPublicCampaignLinks(r.Context(), response, view.Campaign)
 		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	if len(parts) == 3 && parts[1] == "posters" {
+		h.publicPoster(w, r, campaignID, parts[2])
 		return
 	}
 	if len(parts) != 2 {
@@ -314,7 +334,12 @@ func (h *Handler) issuePromotionLink(w http.ResponseWriter, r *http.Request, cam
 		resultError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"url": link.URL, "expires_at": link.ExpiresAt.UTC()})
+	wrapped, err := h.signedActivityURL(campaignID, link.URL)
+	if err != nil {
+		resultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"url": wrapped, "expires_at": link.ExpiresAt.UTC()})
 }
 
 func (h *Handler) productContext(w http.ResponseWriter, r *http.Request, campaignID int64) {
@@ -622,6 +647,14 @@ func (h *Handler) readAdminCampaign(w http.ResponseWriter, r *http.Request, raw 
 		return
 	}
 	response := campaignView(view)
+	if h.posters != nil {
+		posters, err := h.posters.ListCampaignPosters(r.Context(), campaignID, true)
+		if err != nil {
+			resultError(w, err)
+			return
+		}
+		response["posters"] = publicPosters(posters, true)
+	}
 	captainIDs := make([]customerdomain.CustomerID, 0, len(view.TeamSummaries))
 	for _, summary := range view.TeamSummaries {
 		captainIDs = append(captainIDs, customerdomain.CustomerID(summary.Team.CaptainCustomerID))
@@ -1225,6 +1258,8 @@ func leaderboardEntry(value referralport.LeaderboardEntry, profile customerport.
 	}
 	if profile.DisplayName != "" {
 		response["display_name"] = profile.DisplayName
+	}
+	if profile.AvatarURL != "" {
 		response["avatar_url"] = profile.AvatarURL
 	}
 	return response
