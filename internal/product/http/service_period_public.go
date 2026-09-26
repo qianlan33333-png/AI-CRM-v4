@@ -138,12 +138,8 @@ func (h *ServicePeriodPublicHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", publicCommerceContentSecurityPolicy())
-	if available {
-		view := publicProductPageView{Product: public, Payment: true, Detail: !payment && len(public.Images) > 0, Presentation: publicPresentationTemplateFor(presentation), WeChatPayEnabled: h.wechatPayEnabled, AlipayEnabled: h.alipayEnabled}
-		if view.Detail {
-			_ = publicProductDetailPage.Execute(w, view)
-			return
-		}
+	if available && payment {
+		view := publicProductPageView{Product: public, Payment: true, Presentation: publicPresentationTemplateFor(presentation), WeChatPayEnabled: h.wechatPayEnabled, AlipayEnabled: h.alipayEnabled}
 		if err = publicProductPage.Execute(w, view); err != nil {
 			return
 		}
@@ -201,7 +197,13 @@ func (h *ServicePeriodPublicHandler) publicStateOrDetailMedia(w http.ResponseWri
 			http.NotFound(w, r)
 			return
 		}
+		promotionContext, accepted := publicPromotionContext(r)
+		if !accepted {
+			http.NotFound(w, r)
+			return
+		}
 		public := publicProduct{ID: product.ID, Name: product.Name, PriceMinor: product.PriceMinor, Currency: product.Currency, PaymentPath: "/s/" + url.PathEscape(product.Code) + "/pay", BuyButtonText: "立即报名", ProductKind: "service_period", CouponTargetRef: "service_period:" + strconv.FormatInt(int64(product.ID), 10), ServicePeriodDurationDays: product.ServicePeriodDurationDays, Images: publicDetailMedia(product.Code, product.DetailMedia)}
+		public.PaymentPath = publicPaymentPath(public.PaymentPath, promotionContext)
 		state, stateErr := h.publicState(r.Context(), r, product, public)
 		if stateErr != nil {
 			http.Error(w, "service state unavailable", http.StatusServiceUnavailable)

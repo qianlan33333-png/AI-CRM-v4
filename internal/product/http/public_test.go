@@ -85,7 +85,7 @@ func TestServicePeriodPromotionContextReachesPaymentAndOAuth(t *testing.T) {
 	context := promotionContextToken()
 	landing := httptest.NewRecorder()
 	handler.ServeHTTP(landing, publicRequest(http.MethodGet, "/s/term-31?promotion_context="+context, nil))
-	if landing.Code != http.StatusOK || !strings.Contains(landing.Body.String(), "promotionContext='"+context+"'") {
+	if landing.Code != http.StatusOK || !strings.Contains(landing.Body.String(), "/s/term-31/pay?promotion_context="+context) {
 		t.Fatalf("service promotion landing status=%d body=%s", landing.Code, landing.Body.String())
 	}
 	payment := httptest.NewRecorder()
@@ -95,6 +95,24 @@ func TestServicePeriodPromotionContextReachesPaymentAndOAuth(t *testing.T) {
 	}
 	if !strings.Contains(payment.Body.String(), "checkoutRecord(){let raw") || !strings.Contains(payment.Body.String(), "if(record.state==='invalid')throw requestFailure('checkout_checkpoint_invalid'") || !strings.Contains(payment.Body.String(), "if(record.state==='unavailable')return null") || !strings.Contains(payment.Body.String(), "if(promotionContext)payload.promotion_context=promotionContext") {
 		t.Fatalf("service payment body does not share the controlled checkpoint runtime: %s", payment.Body.String())
+	}
+}
+
+func TestServicePeriodStateRefreshRetainsPromotionContext(t *testing.T) {
+	reader := &servicePeriodPublicStub{product: productport.CheckoutProduct{ID: 71, ProductType: productport.ProductOptionServicePeriod, Code: "term-31", Name: "周期商品", PriceMinor: 100, Currency: "CNY", Version: 1, ServicePeriodDurationDays: 31}}
+	h, _ := NewServicePeriodPublicHandler(reader)
+	token := promotionContextToken()
+	for _, path := range []string{"/s/term-31", "/api/h5/service-period-products/term-31"} {
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path+"?promotion_context="+token, nil))
+		if response.Code != 200 || !strings.Contains(response.Body.String(), "/s/term-31/pay?promotion_context="+token) {
+			t.Fatalf("attribution lost on %s status=%d", path, response.Code)
+		}
+	}
+	denied := httptest.NewRecorder()
+	h.ServeHTTP(denied, httptest.NewRequest(http.MethodGet, "/api/h5/service-period-products/term-31?promotion_context=bad", nil))
+	if denied.Code != 404 {
+		t.Fatalf("invalid context status=%d", denied.Code)
 	}
 }
 
@@ -692,12 +710,12 @@ func TestPublicServicePeriodRendersTrustedEntitlementWithoutIdentityFallback(t *
 	request.AddCookie(&http.Cookie{Name: paymentport.TrustedSessionCookieName, Value: "service-period-trusted"})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `id="detailContent"`) || !strings.Contains(response.Body.String(), "/images/88/variants/large_1440") || !strings.Contains(response.Body.String(), `href="/s/term-31/pay"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `id="servicePeriodStateCard"`) || !strings.Contains(response.Body.String(), "剩余 15 天") || !strings.Contains(response.Body.String(), "/images/88/variants/large_1440") || !strings.Contains(response.Body.String(), `"checkout_url":"/s/term-31/pay"`) {
 		t.Fatalf("active page status=%d body=%s", response.Code, response.Body.String())
 	}
 	untrusted := httptest.NewRecorder()
 	handler.ServeHTTP(untrusted, httptest.NewRequest(http.MethodGet, "/s/term-31", nil))
-	if untrusted.Code != http.StatusOK || !strings.Contains(untrusted.Body.String(), `id="detailContent"`) || strings.Contains(untrusted.Body.String(), `id="identityGate"`) {
+	if untrusted.Code != http.StatusOK || !strings.Contains(untrusted.Body.String(), `id="servicePeriodStateCard"`) || strings.Contains(untrusted.Body.String(), `"status":"active"`) || strings.Contains(untrusted.Body.String(), `id="identityGate"`) {
 		t.Fatalf("untrusted page status=%d body=%s", untrusted.Code, untrusted.Body.String())
 	}
 }
@@ -729,7 +747,7 @@ func TestPublicServicePeriodUsesExactCodeAndSeparateCheckoutRoute(t *testing.T) 
 	}
 	page := httptest.NewRecorder()
 	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/s/term-31", nil))
-	if page.Code != http.StatusOK || reader.code != "term-31" || !strings.Contains(page.Body.String(), `id="detailContent"`) || !strings.Contains(page.Body.String(), "服务周期 31 天") || !strings.Contains(page.Body.String(), `href="/s/term-31/pay"`) {
+	if page.Code != http.StatusOK || reader.code != "term-31" || !strings.Contains(page.Body.String(), `id="servicePeriodStateCard"`) || !strings.Contains(page.Body.String(), "<strong>31 天</strong>") || !strings.Contains(page.Body.String(), `"checkout_url":"/s/term-31/pay"`) || strings.Contains(page.Body.String(), `id="checkoutContent"`) {
 		t.Fatalf("page status=%d code=%q body=%s", page.Code, reader.code, page.Body.String())
 	}
 	payment := httptest.NewRecorder()
@@ -743,6 +761,23 @@ func TestPublicServicePeriodUsesExactCodeAndSeparateCheckoutRoute(t *testing.T) 
 		if response.Code != http.StatusNotFound {
 			t.Fatalf("path=%s status=%d", path, response.Code)
 		}
+	}
+}
+
+func TestPublicServicePeriodExpiredDetailOffersReopen(t *testing.T) {
+	reader := &servicePeriodPublicStub{product: productport.CheckoutProduct{ID: 71, ProductType: productport.ProductOptionServicePeriod, Code: "term-31", Name: "周期商品", PriceMinor: 100, Currency: "CNY", Version: 1, ServicePeriodDurationDays: 31}}
+	h, _ := NewServicePeriodPublicHandler(reader)
+	now := time.Date(2026, 9, 26, 0, 0, 0, 0, time.UTC)
+	h.now = func() time.Time { return now }
+	if err := h.SetTrustedPublicState(servicePeriodTestUOW{}, servicePeriodSessionStub{}, servicePeriodEntitlementStub{page: orderport.EntitlementPage{Items: []orderport.Entitlement{{CustomerID: 11, ServiceProductID: 71, Status: "active", EndAt: now.Add(-time.Hour)}}}}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/s/term-31", nil)
+	req.AddCookie(&http.Cookie{Name: paymentport.TrustedSessionCookieName, Value: "service-period-trusted"})
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, req)
+	if response.Code != 200 || !strings.Contains(response.Body.String(), `"status":"expired"`) || !strings.Contains(response.Body.String(), `"cta_text":"重新开通"`) || strings.Contains(response.Body.String(), `id="checkoutContent"`) {
+		t.Fatalf("expired detail status=%d", response.Code)
 	}
 }
 

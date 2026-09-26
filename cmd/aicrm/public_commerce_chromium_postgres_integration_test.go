@@ -32,7 +32,12 @@ func TestPostgreSQLPublicCommerceChromiumJourney(t *testing.T) {
 	}
 	fixture := newPublicCommerceChromiumFixture(t, 110*time.Second)
 	unavailable := seedPublicCommerceUnavailableServicePeriod(t, fixture.ctx, fixture.application)
+	// Reproduce the uploader's images-only binding with an empty slices list.
+	if _, err := fixture.application.pool.Native().Exec(fixture.ctx, `UPDATE products SET images=(SELECT images FROM products WHERE id=$1) WHERE id=$2`, fixture.productID, fixture.serviceProductID); err != nil {
+		t.Fatal(err)
+	}
 	trustedSession := issuePublicCommerceTrustedH5Session(t, fixture)
+	seedPublicCommerceEntitlement(t, fixture, publicCommerceUnavailableServicePeriod{code: "browser-push-service-period", id: fixture.serviceProductID}, trustedSession)
 	assertPublicCommerceUnavailableState(t, fixture, unavailable.code, trustedSession.token, "no_entitlement")
 	seedPublicCommerceEntitlement(t, fixture, unavailable, trustedSession)
 	assertPublicCommerceUnavailableState(t, fixture, unavailable.code, trustedSession.token, "active_entitlement")
@@ -154,8 +159,8 @@ func seedPublicCommerceEntitlement(t *testing.T, fixture *productExternalPushChr
 		t.Fatal("public commerce entitlement fixture requires a trusted customer and service product")
 	}
 	now := time.Now().UTC()
-	digest := sha256.Sum256([]byte("public-commerce-unavailable-entitlement"))
-	if _, err := fixture.application.pool.Native().Exec(fixture.ctx, `INSERT INTO order_service_entitlements(source_system,source_key,customer_id,service_product_id,product_name,status,start_at,end_at,remark,source_digest,created_at,updated_at) VALUES('public-commerce-chromium','unavailable-entitlement',$1,$2,'周期商品暂未开放','active',$3,$4,'',$5,$3,$3)`, session.payerCustomerID, unavailable.id, now.Add(-time.Hour), now.AddDate(0, 0, 30), digest[:]); err != nil {
+	digest := sha256.Sum256([]byte("public-commerce-entitlement-" + unavailable.code))
+	if _, err := fixture.application.pool.Native().Exec(fixture.ctx, `INSERT INTO order_service_entitlements(source_system,source_key,customer_id,service_product_id,product_name,status,start_at,end_at,remark,source_digest,created_at,updated_at) VALUES('public-commerce-chromium',$6,$1,$2,'周期商品验收','active',$3,$4,'',$5,$3,$3)`, session.payerCustomerID, unavailable.id, now.Add(-time.Hour), now.AddDate(0, 0, 30), digest[:], "entitlement-"+unavailable.code); err != nil {
 		t.Fatal(err)
 	}
 }

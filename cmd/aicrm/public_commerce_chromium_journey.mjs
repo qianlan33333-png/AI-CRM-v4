@@ -151,7 +151,7 @@ try {
     assert.deepEqual(gate, { title: "请在微信中打开", message: "请复制当前链接到微信中打开，登录后才能完成支付。", actionHidden: true, checkoutHidden: true }, "non-WeChat identity gate must explain where to log in without offering an unusable authorization action");
   };
 
-  const visit = async ({ pagePath, kind, route, width, file, name, price, detail = false, media = false, unavailable = false }) => {
+  const visit = async ({ pagePath, kind, route, width, file, name, price, detail = false, media = false, unavailable = false, serviceDetail = false }) => {
     await resize(width);
     await cdp.call("Page.navigate", { url: baseURL + pagePath });
     const rootMounted = "document.querySelector('[data-v3-public-commerce]')?.dataset.publicCommerceMounted === 'true'";
@@ -163,9 +163,9 @@ try {
     }
     await waitFor(cdp, "Array.from(document.styleSheets).some(sheet => String(sheet.href || '').includes('/product-public-assets/'))", `public stylesheet did not load ${pagePath}`);
     if (!unavailable) {
-      const contentSelector = detail ? "#detailContent:not([hidden])" : "#checkoutContent:not([hidden])";
+      const contentSelector = serviceDetail ? "#servicePeriodStateCard" : detail ? "#detailContent:not([hidden])" : "#checkoutContent:not([hidden])";
       await waitFor(cdp, `document.querySelector(${JSON.stringify(contentSelector)})`, `authorized business content did not appear ${pagePath}`);
-      if (media) {
+      if (media && !serviceDetail) {
         await waitFor(cdp, "(() => { const image=document.querySelector('#detailContent .detail-image'); return image && image.complete && image.naturalWidth > 0; })()", `Product-owned detail media did not load ${pagePath}`);
       }
     }
@@ -181,6 +181,15 @@ try {
       assert.equal(state.unavailableButton, true, `${pagePath} unavailable Owner state`);
       assert.equal(state.primaryAction, 'disabled', `${pagePath} unavailable primary action marker`);
       assert.equal(state.unavailableTagDot, 'rgb(168, 173, 181)', `${pagePath} unavailable status dot remains neutral`);
+    } else if (serviceDetail) {
+      assert.equal(state.identityVisible, false, `${pagePath} details do not require payment authorization`);
+      assert.equal(state.checkoutVisible, false, `${pagePath} details cannot skip into payment`);
+      const period = await evaluate(cdp, "(() => ({card:document.querySelector('#servicePeriodStateCard')?.textContent,title:document.querySelector('h1')?.textContent,cta:document.querySelector('#servicePeriodPayButton')?.textContent}))()");
+      assert.equal(period.title, name);
+      assert.match(period.card, /剩余有效期/);
+      assert.match(period.card, /30 天/);
+      assert.equal(period.cta, '立即续费');
+      await waitFor(cdp, "(() => { const image=document.querySelector('.detail-media .slice-img'); return image && image.complete && image.naturalWidth > 0; })()", `${pagePath} uploaded image must load through Product public route`);
     } else if (detail) {
       assert.equal(state.identityVisible, false, `${pagePath} trusted session must reveal product detail`);
       assert.equal(state.detailVisible, true, `${pagePath} visible product detail`);
@@ -217,11 +226,7 @@ try {
   assert.equal(cookie.success, true, "trusted Payment session cookie");
   await visit({ pagePath: `/p/${encodeURIComponent(standardCode)}`, kind: "standard", route: "detail", width: 375, file: "public-standard-detail-375.png", name: "浏览器外推商品", price: "99.00", detail: true, media: true });
   await visit({ pagePath: `/pay/${encodeURIComponent(standardCode)}`, kind: "standard", route: "payment", width: 390, file: "public-standard-payment-390.png", name: "浏览器外推商品", price: "99.00" });
-  // Service-period's existing Owner selects the checkout presentation when a
-  // product has no detail-media records. This fixture intentionally has no
-  // synthetic media, so verify its real route output instead of treating the
-  // URL alone as proof of a detail section.
-  await visit({ pagePath: `/s/${encodeURIComponent(serviceCode)}`, kind: "service_period", route: "payment", width: 430, file: "public-service-available-430.png", name: "浏览器周期外推商品", price: "128.00" });
+  await visit({ pagePath: `/s/${encodeURIComponent(serviceCode)}`, kind: "service_period", route: "service-period-state", width: 430, file: "public-service-available-430.png", name: "浏览器周期外推商品", serviceDetail: true });
   await visit({ pagePath: `/s/${encodeURIComponent(serviceCode)}/pay`, kind: "service_period", route: "payment", width: 390, file: "public-service-available-payment-390.png", name: "浏览器周期外推商品", price: "128.00" });
   await visit({ pagePath: `/s/${encodeURIComponent(unavailableServiceCode)}`, kind: "service_period", route: "service-period-state", width: 375, file: "public-service-unavailable-detail-375.png", unavailable: true });
   await visit({ pagePath: `/s/${encodeURIComponent(unavailableServiceCode)}/pay`, kind: "service_period", route: "service-period-state", width: 430, file: "public-service-unavailable-payment-430.png", unavailable: true });

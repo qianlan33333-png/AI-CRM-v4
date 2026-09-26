@@ -43,6 +43,9 @@ func renderServicePeriodPublicPageWithPresentation(w io.Writer, state servicePer
 	// zone after the script refreshes its state so an evening UTC expiry cannot
 	// display two different calendar dates on one page.
 	page = strings.Replace(page, frozenServicePeriodEndDateFunction, servicePeriodShanghaiEndDateFunction, 1)
+	// Preserve the validated promotion context when refreshing the state card,
+	// otherwise the refresh would replace the attributed checkout link.
+	page = strings.Replace(page, `fetch(window.location.pathname.replace(/^\\/s\\//, "/api/h5/service-period-products/"))`, `fetch(window.location.pathname.replace(/^\\/s\\//, "/api/h5/service-period-products/") + window.location.search)`, 1)
 
 	status := state.Status
 	if status == "" {

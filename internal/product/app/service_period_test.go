@@ -542,3 +542,24 @@ func newServicePeriodFixture() (*ServicePeriodService, *servicePeriodTestStore, 
 	}
 	return service, store, events
 }
+
+// Reproduces ces: the current uploader writes images while legacy slices is empty.
+func TestServicePeriodPublicReaderIncludesUploadedImages(t *testing.T) {
+	service, store, _ := newServicePeriodFixture()
+	created := mustCreateServicePeriod(t, service, "period-uploaded-images", 75, "period-upload-create-0001")
+	enabled, err := service.SetServicePeriodProductEnabled(context.Background(), productport.SetServicePeriodProductEnabledCommand{ID: created.ServiceProductID, ExpectedVersion: created.Version, Enabled: true, Actor: 75, IdempotencyKey: "period-upload-enable-0001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := store.products[enabled.ServiceProductID]
+	row.Images = []string{"/api/admin/image-library/1076/variants/original", "/api/admin/image-library/1077/variants/original", "/api/admin/image-library/1078/variants/original", "/api/admin/image-library/1076/variants/original", "/api/admin/image-library/999/variants/original?unbound=1", "https://other.test/api/admin/image-library/999/variants/original"}
+	store.products[row.ID] = row
+	public, err := service.ReadPublicServicePeriodByCode(context.Background(), row.ProductCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []productport.PublicDetailMedia{{ImageID: 1076}, {ImageID: 1077}, {ImageID: 1078}}
+	if !reflect.DeepEqual(public.DetailMedia, want) {
+		t.Fatalf("uploaded media=%+v want=%+v", public.DetailMedia, want)
+	}
+}

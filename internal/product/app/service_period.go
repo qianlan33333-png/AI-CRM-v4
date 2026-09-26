@@ -227,6 +227,18 @@ func (service *ServicePeriodService) ReadServicePeriodPublicPresentationByCode(c
 	if presentationErr != nil {
 		return productport.CheckoutProduct{}, false, ErrUnavailable
 	}
+	// The current admin uploader persists image-library bindings in images;
+	// imported products may still use slices. Both are Product-owned bindings.
+	seen := make(map[int64]bool, len(presentation.Media))
+	for _, media := range presentation.Media {
+		seen[media.ImageID] = true
+	}
+	for _, image := range projected.Images {
+		if id, ok := productImageLibraryID(image); ok && !seen[id] {
+			presentation.Media = append(presentation.Media, productport.PublicDetailMedia{ImageID: id})
+			seen[id] = true
+		}
+	}
 	checkout := productport.CheckoutProduct{ID: projected.ServiceProductID, ProductType: productport.ProductOptionServicePeriod, Code: projected.ProductCode, Name: projected.Name, PriceMinor: projected.PriceMinor, Currency: projected.Currency, Version: projected.Version, Images: append([]string(nil), projected.Images...), DetailMedia: presentation.Media, LeadChannelID: presentation.LeadChannelID, LeadQRTitle: presentation.LeadQRTitle, LeadQRSubtitle: presentation.LeadQRSubtitle, CompletionBlocksLeadQR: presentation.CompletionBlocksLeadQR, ServicePeriodDurationDays: duration}
 	return checkout, projected.Enabled && projected.Lifecycle == productport.ServicePeriodEnabled, nil
 }
