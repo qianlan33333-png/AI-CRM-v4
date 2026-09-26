@@ -12,6 +12,25 @@ from scripts import domestic_main_release as release
 
 
 class AccelerationGateTest(unittest.TestCase):
+    def test_package_discovery_materializes_embed_inputs_in_private_checkout_first(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw); checkout=root/"private"; policy=root/"trusted"
+            (checkout/"web/donor-sources").mkdir(parents=True)
+            (checkout/"web/donor-sources/source-index.json").write_text("{}")
+            calls=[]
+            def build(config,args,**kwargs):
+                calls.append((args,kwargs))
+                return subprocess.CompletedProcess(args,0,"module/a\nmodule/b\n" if args[0]=="go" else "prepared","")
+            with patch.object(release,"_build_command",side_effect=build):
+                inventory=release._discover_check_packages({},policy,checkout,{}, {"selection_mode":"full"})
+            self.assertEqual(inventory,["module/a","module/b"])
+            self.assertEqual(calls[0][0],["node",str(policy/"scripts/prepare-donor-source-views.mjs"),"--root",str(checkout)])
+            self.assertEqual(calls[1][0],["go","list","-f","{{.ImportPath}}","./..."])
+            self.assertTrue(all(call[1]["cwd"]==checkout and call[1]["safe_repository"]==checkout for call in calls))
+            with patch.object(release,"_build_command",return_value=subprocess.CompletedProcess([],1,"","embed missing")):
+                with self.assertRaises(release.CheckIncompleteError):
+                    release._discover_check_packages({},policy,checkout,{}, {"selection_mode":"full"})
+
     def test_package_continuation_retains_only_whole_passed_packages(self):
         required = ["example/a", "example/b", "example/c", "example/no_tests"]
         events = [

@@ -2328,6 +2328,25 @@ def _check_attempt_directory(config: dict, report: Path, policy: Path, head_sha:
             raise
 
 
+def _discover_check_packages(config: dict, policy: Path, checkout: Path,
+                             plan: dict, enforced: dict) -> list[str]:
+    # The graph and actual tests materialize these same exact-source embed
+    # inputs. Never generate them in the protected authority worktree.
+    if (checkout / "web/donor-sources/source-index.json").is_file():
+        prepared = _build_command(config,["node",str(policy / "scripts/prepare-donor-source-views.mjs"),
+                                  "--root",str(checkout)],cwd=checkout,timeout=180,
+                                  check=False,safe_repository=checkout)
+        if prepared.returncode:
+            raise CheckIncompleteError("exact-source embed preparation did not complete")
+    expressions = (["./"+item["dir"] for item in plan["graph_result"]["selected_packages"]]
+                   if enforced["selection_mode"] == "targeted" else ["./..."])
+    inventory = _build_command(config,["go","list","-f","{{.ImportPath}}",*expressions],
+                               cwd=checkout,timeout=300,check=False,safe_repository=checkout)
+    if inventory.returncode or not inventory.stdout.strip():
+        raise CheckIncompleteError("trusted backend package discovery did not complete")
+    return sorted(set(inventory.stdout.splitlines()))
+
+
 def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir: Path,
                   base_sha: str, head_sha: str, *, diagnostic_root: Path | None = None) -> dict[str, Any]:
     if report_dir.exists() or report_dir.is_symlink():
@@ -2368,14 +2387,6 @@ print(json.dumps({lane: items for lane, items in missing.items() if items}))
             raise CheckIncompleteError("actual build account prerequisite evidence is missing") from exc
         if missing:
             raise CheckEnvironmentError("required check prerequisites missing: " + json.dumps(missing, sort_keys=True))
-    if "backend" in lanes and (enforced["selection_mode"] == "full" or profile == "affected-packages"):
-        expressions = (["./" + item["dir"] for item in plan["graph_result"]["selected_packages"]]
-                       if enforced["selection_mode"] == "targeted" else ["./..."])
-        inventory = _build_command(config, ["go", "list", "-f", "{{.ImportPath}}", *expressions],
-                                   cwd=worktree, timeout=300, check=False, safe_repository=worktree)
-        if inventory.returncode or not inventory.stdout.strip():
-            raise CheckIncompleteError("trusted backend package discovery did not complete")
-        config["_required_go_packages"] = sorted(set(inventory.stdout.splitlines()))
     if "browser" in lanes:
         browser_code = """import {resolveChromiumBinary} from %s;
 import {execFileSync} from 'node:child_process';
@@ -2393,11 +2404,8 @@ console.log(JSON.stringify({path, version:execFileSync(path,['--version'],{encod
     diagnostic_root = diagnostic_root or (Path(config["work_root"]) / "diagnostics")
     _safe_directory(diagnostic_root, create=True)
     _safe_directory(Path(config["work_root"]))
-    continuation_identity = _check_resume_identity(config, plan, toolchain, enforced, lanes, checks, packages, profile)
-    prior = {}
     previous_path = config.get("_check_resume_checkpoint")
-    if previous_path:
-        prior = _load_check_checkpoint(Path(previous_path), diagnostic_root, continuation_identity)
+    prior = {}
     with _check_attempt_directory(config, report_dir, policy, head_sha) as temporary:
         check_root = Path(temporary)
         os.chmod(check_root, 0o711)
@@ -2413,8 +2421,16 @@ console.log(JSON.stringify({path, version:execFileSync(path,['--version'],{encod
             config, repo, execution_parent / "candidate", head_sha)
         prep = report_dir / ".preparation"
         _build_command(config, ["/usr/bin/mkdir", "-m", "0700", str(prep)], cwd=execution_worktree, timeout=30)
-        check_config = dict(config, _check_checkpoint=prior, _check_snapshots={}, _check_tmpdir=str(attempt_tmp))
+        check_config = dict(config, _check_snapshots={}, _check_tmpdir=str(attempt_tmp))
         check_config["_check_preparation_dir"] = str(prep)
+        if "backend" in lanes and (enforced["selection_mode"] == "full" or profile == "affected-packages"):
+            check_config["_required_go_packages"] = _discover_check_packages(
+                check_config,policy,execution_worktree,plan,enforced)
+        continuation_identity = _check_resume_identity(
+            check_config,plan,toolchain,enforced,lanes,checks,packages,profile)
+        if previous_path:
+            prior = _load_check_checkpoint(Path(previous_path),diagnostic_root,continuation_identity)
+        check_config["_check_checkpoint"] = prior
         try:
             lane_results = _run_check_lanes(
                 check_config, repo, policy, execution_worktree, report_dir, base_sha, head_sha,
