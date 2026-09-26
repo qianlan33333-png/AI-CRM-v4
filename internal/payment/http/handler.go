@@ -237,6 +237,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.reconcileWeChatPay(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/api/admin/wechat-pay/refunds/"), "/reconcile"), true)
 	case strings.HasPrefix(path, "/api/admin/wechat-pay/orders/") && strings.HasSuffix(path, "/refunds"):
 		handler.compatRefund(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/api/admin/wechat-pay/orders/"), "/refunds"))
+	case strings.HasPrefix(path, "/api/admin/order-deliveries/"):
+		handler.orderEffects(writer, request)
 	case strings.HasPrefix(path, "/api/admin/wechat-pay/orders/") && strings.HasSuffix(path, "/external-push-deliveries"):
 		handler.orderEffects(writer, request)
 	case strings.HasPrefix(path, "/api/admin/payments/") && strings.HasSuffix(path, "/refunds"):
@@ -712,7 +714,27 @@ func (handler *Handler) orderEffects(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	reference, err := handler.commerceOrders.CommercePushDeliveryReference(request.Context(), orderdomain.ProviderWeChatPay, orderRef)
+	provider := orderdomain.ProviderWeChatPay
+	if strings.HasPrefix(request.URL.Path, "/api/admin/order-deliveries/") {
+		orderRef = strings.TrimPrefix(request.URL.Path, "/api/admin/order-deliveries/")
+		values := request.URL.Query()["provider"]
+		if len(values) != 1 || strings.Contains(orderRef, "/") || orderRef == "" {
+			writeError(writer, http.StatusBadRequest, "invalid_request")
+			return
+		}
+		switch values[0] {
+		case "wechat", "wechat_pay":
+			provider = orderdomain.ProviderWeChatPay
+		case "wechat_shop":
+			provider = orderdomain.ProviderWeChatShop
+		case "alipay":
+			provider = orderdomain.ProviderAlipay
+		default:
+			writeError(writer, http.StatusBadRequest, "invalid_request")
+			return
+		}
+	}
+	reference, err := handler.commerceOrders.CommercePushDeliveryReference(request.Context(), provider, orderRef)
 	if err != nil {
 		commerceDeliveryError(writer, err)
 		return

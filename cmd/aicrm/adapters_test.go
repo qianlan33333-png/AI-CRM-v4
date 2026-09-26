@@ -642,6 +642,7 @@ func TestApplicationRouterAndAdminAPIsMountRecoveryAndWeChatPayRefundPrefixesExa
 		t.Fatal(err)
 	}
 	for _, path := range []string{
+		"/api/admin/order-deliveries/merchant-alipay?provider=alipay",
 		"/api/admin/refunds/recovery",
 		"/api/admin/wechat-pay/profit-sharing/receivers/psrecv_9/recover",
 		"/api/admin/wechat-pay/refunds/9/reconcile",

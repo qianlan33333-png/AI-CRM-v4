@@ -16,3 +16,7 @@ Functional evidence: PostgreSQL and JSDOM tests are recorded in the PRD. Local v
 ## 2026-09-26 支付宝原付款页修复
 
 本次付款蒙版及成功反馈范围：passed。Product Design 已按 360/390/430px 实际浏览器截图及原页自动成功行为验收。详见 [验收记录](docs/qa/2026-09-26-alipay-checkout-design.md)。上方历史 referral QA 状态不代表本次付款页面。生产实付证据待发布后取得。
+
+## 2026-09-26 支付宝订单详情修复
+
+本次主信息展示及交付面板隔离范围：passed。Product Design 已使用实际 V4 Host 和合成附属 404 做浏览器验收。详见 [验收记录](docs/qa/2026-09-26-alipay-order-detail-design.md)。上方历史 referral QA 状态不代表本次订单页面。生产认证读回待发布后取得。

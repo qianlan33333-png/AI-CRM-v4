@@ -898,12 +898,17 @@ func TestCheckoutURLLinkResolvesOnlyThroughTheAuthorizedPaidOrder(t *testing.T) 
 }
 
 type commerceOrderReaderStub struct {
-	value orderport.CommercePushDeliveryReference
-	err   error
+	provider orderdomain.Provider
+	value    orderport.CommercePushDeliveryReference
+	err      error
 }
 
 func (s commerceOrderReaderStub) CommercePushDeliveryReference(_ context.Context, provider orderdomain.Provider, reference string) (orderport.CommercePushDeliveryReference, error) {
-	if provider != orderdomain.ProviderWeChatPay || reference != "legacy-order-1" {
+	expected := s.provider
+	if expected == "" {
+		expected = orderdomain.ProviderWeChatPay
+	}
+	if provider != expected || reference != "legacy-order-1" {
 		return orderport.CommercePushDeliveryReference{}, orderport.ErrNotFound
 	}
 	return s.value, s.err
@@ -1013,4 +1018,40 @@ func TestOAuthIdentityConflictExplainsReviewWithoutRedirect(t *testing.T) {
 	if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), "历史账号资料需要核对") || response.Header().Get("Location") != "" || !strings.Contains(response.Header().Get("Content-Type"), "text/html") {
 		t.Fatalf("unexpected OAuth response: %d", response.Code)
 	}
+}
+
+func TestOrderDeliveriesRequiresAuthenticatedExactProvider(t *testing.T) {
+	for _, provider := range []orderdomain.Provider{orderdomain.ProviderWeChatPay, orderdomain.ProviderWeChatShop, orderdomain.ProviderAlipay} {
+		handler, _ := NewHandler(&appStub{}, nil, securityStub{}, true)
+		reader := &commerceDeliveryReaderStub{}
+		if err := handler.SetCommercePushDeliveryReaders(commerceOrderReaderStub{provider: provider, value: orderport.CommercePushDeliveryReference{OrderID: 7, PaidEventID: 11, HistoricalMappingState: "current"}}, reader); err != nil {
+			t.Fatal(err)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/admin/order-deliveries/legacy-order-1?provider="+string(provider), nil))
+		if response.Code != 200 || reader.query.PaidEventID != 11 {
+			t.Fatalf("provider=%s status=%d query=%+v", provider, response.Code, reader.query)
+		}
+	}
+	handler, _ := NewHandler(&appStub{}, nil, securityStub{}, true)
+	_ = handler.SetCommercePushDeliveryReaders(commerceOrderReaderStub{}, &commerceDeliveryReaderStub{})
+	for _, query := range []string{"", "?provider=unknown", "?provider=alipay&provider=wechat", "?provider="} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/admin/order-deliveries/legacy-order-1"+query, nil))
+		if response.Code != 400 {
+			t.Fatalf("ambiguous provider %s status=%d", query, response.Code)
+		}
+	}
+	denied, _ := NewHandler(&appStub{}, nil, denyingSecurityStub{}, true)
+	response := httptest.NewRecorder()
+	denied.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/admin/order-deliveries/legacy-order-1?provider=alipay", nil))
+	if response.Code != 401 {
+		t.Fatalf("unauthenticated status=%d", response.Code)
+	}
+}
+
+type denyingSecurityStub struct{ securityStub }
+
+func (denyingSecurityStub) Authenticate(context.Context, *http.Request) (accessdomain.Principal, error) {
+	return accessdomain.Principal{}, errors.New("denied")
 }

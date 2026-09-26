@@ -237,6 +237,7 @@ const scopedDetailDom = new JSDOM(`<!doctype html><body data-page="orderDetail">
     window.fetch = async (input) => {
       const url = new URL(typeof input === 'string' ? input : input instanceof window.URL ? input.toString() : input.url, window.location.href);
       scopedDetailCalls.push(url);
+      if (url.pathname.startsWith('/api/admin/order-deliveries/')) return new Response('{}', { status: 404 });
       if (url.pathname === `/api/admin/orders/${collisionReference}`) return new Response(JSON.stringify({ record_origin: 'native', merchant_order_no: collisionReference, provider: 'alipay', product_name: '待核验商品', amount_yuan: '1.00', refundable_amount_total: 0, created_at: '2026-09-15T00:01:00Z', status: 'paid', distribution_read_state: 'available', distribution: [{ item_line: 1, product_name: '待核验商品', distributor_display_name: '分销员待核验', rate_basis_points: 1000, wait_days: 7, policy_version: 1, has_commission: true, initial_minor: 100, current_payable_minor: 100, paid_minor: 0, currency: 'CNY', status: 'exception', hold_reason: '', cancel_reason: '', exception_reason: 'unmapped_engine_reason', due_at: '2026-09-22T00:01:00Z', settlement_confirmed_at: null, adjustments: [], settlements: [{ reference: 'dstl_unknown', amount_minor: 100, currency: 'CNY', state: 'outcome_unknown', settlement_confirmed_at: null }], exceptions: [] }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       if (url.pathname === '/api/admin/refunds') return new Response(JSON.stringify(scopedRefundPage()), { status: 200, headers: { 'Content-Type': 'application/json' } });
       return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -248,6 +249,12 @@ try {
 	await new Promise((resolve) => setTimeout(resolve, 60));
   const orderRead = scopedDetailCalls.find((url) => url.pathname === `/api/admin/orders/${collisionReference}`);
   assert.equal(orderRead?.searchParams.get('provider'), 'alipay', 'detail read forwards the server-owned provider rather than inferring it from a duplicate merchant number');
+  const delivery = await scopedDetailDom.window.fetch(`/api/admin/wechat-pay/orders/${collisionReference}/external-push-deliveries`);
+  const deliveryURL = scopedDetailCalls.at(-1);
+  assert.equal(deliveryURL.pathname, `/api/admin/order-deliveries/${collisionReference}`);
+  assert.equal(deliveryURL.searchParams.get('provider'), 'alipay');
+  assert.equal(delivery.status, 200, 'auxiliary failure cannot reject the main order Promise.all');
+  assert.equal((await delivery.json()).unavailable, true, 'failure stays explicit');
   const body = scopedDetailDom.window.document.body.textContent;
   assert.match(body, /分销员待核验/, 'provider-scoped detail shows the selected provider order');
   assert.match(body, /原因待确认/, 'unknown distribution reason code has a safe Chinese pending label');
@@ -280,6 +287,7 @@ try {
 }
 
 const detailCalls = [];
+let deliveryNetworkFailure = false;
 const detailDom = new JSDOM(`<!doctype html><body data-page="orderDetail">
   <div><span>M-ORDER-TEST-0001</span><span>paid</span></div>
   <div><div><h2>订单详情</h2></div><div></div></div>
@@ -302,7 +310,8 @@ const detailDom = new JSDOM(`<!doctype html><body data-page="orderDetail">
       if (url.pathname === '/api/admin/refunds') return new Response(JSON.stringify(scopedRefundPage([
         { refund_no: 'RF-TEST-1', refund_amount_total: 2000, status: 'completed', reason: '测试退款', created_at: '2026-10-01T00:01:02+08:00' },
       ])), { status: 200, headers: { 'Content-Type': 'application/json' } });
-      if (url.pathname.endsWith('/external-push-deliveries')) return new Response(JSON.stringify({
+      if (url.pathname.startsWith('/api/admin/order-deliveries/') && deliveryNetworkFailure) throw new Error('synthetic unavailable');
+      if (url.pathname.startsWith('/api/admin/order-deliveries/')) return new Response(JSON.stringify({
         effects: [
           { external_effect_state: 'outcome_unknown', updated_at: '2026-09-30T16:01:02Z' },
           { external_effect_state: 'succeeded', updated_at: '2026-09-30T16:01:02Z' },
@@ -357,6 +366,13 @@ try {
     assert.match(detailDom.window.document.body.textContent, new RegExp(label), `legacy effect ${raw} must have its own factual Chinese presentation`);
     assert.ok(!detailDom.window.document.body.textContent.includes(raw), `legacy effect ${raw} must not expose a raw enum`);
   }
+  deliveryNetworkFailure = true;
+  const failedDelivery = await detailDom.window.fetch('/api/admin/wechat-pay/orders/M-ORDER-TEST-0001/external-push-deliveries');
+  assert.equal(failedDelivery.status, 200);
+  assert.equal((await failedDelivery.json()).unavailable, true);
+  await pause();
+  assert.match(detailDom.window.document.body.textContent, /外部处理记录暂不可读取/);
+  assert.match(detailDom.window.document.body.textContent, /订单详情/, 'main panel survives delivery network failure');
   assert.ok(!detailDom.window.document.body.textContent.includes('事件时间线'), 'the donor mixed timeline must be replaced by scoped external feedback');
   assert.match(detailDom.window.document.body.textContent, /再次输入微信支付交易单号/, 'refund confirmation must ask for transaction_id, not merchant order number');
 } finally {

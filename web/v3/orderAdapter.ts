@@ -533,6 +533,19 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     if (provider) url.searchParams.set('provider', provider);
   }
 
+  const deliveryMatch = isOrderDetailPage() && url.pathname.match(/^\/api\/admin\/wechat-pay\/orders\/([^/]+)\/external-push-deliveries$/);
+  const unavailableDeliveries = (): Response => {
+    markDetailReadUnavailable('effects');
+    return new Response(JSON.stringify({ items: [], effects: [], total: 0, unavailable: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  if (deliveryMatch) {
+    const provider = detailProvider();
+    if (provider === null) return unavailableDeliveries();
+    url.pathname = '/api/admin/order-deliveries/' + deliveryMatch[1];
+    url.search = '';
+    url.searchParams.set('provider', provider || 'wechat_pay');
+  }
+
   if (isOrderDetailPage() && url.pathname === '/api/admin/refunds') {
     const scope = refundScope(detailContext.order);
     if (!scope) {
@@ -550,7 +563,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     response = await originalFetch(url.toString(), init);
   } catch (error) {
     if (isOrderDetailPage() && url.pathname === '/api/admin/refunds') markDetailReadUnavailable('refunds');
-    else if (isOrderDetailPage() && /^\/api\/admin\/wechat-pay\/orders\/[^/]+\/external-push-deliveries$/.test(url.pathname)) markDetailReadUnavailable('effects');
+    else if (deliveryMatch) return unavailableDeliveries();
     throw error;
   }
   if (isOrderDetailPage()) {
@@ -559,9 +572,9 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     else if (url.pathname === '/api/admin/refunds') {
       if (response.ok) captureDetailResponse('refunds', response);
       else markDetailReadUnavailable('refunds');
-    } else if (/^\/api\/admin\/wechat-pay\/orders\/[^/]+\/external-push-deliveries$/.test(url.pathname)) {
+    } else if (deliveryMatch) {
       if (response.ok) captureDetailResponse('effects', response);
-      else markDetailReadUnavailable('effects');
+      else return unavailableDeliveries();
     }
   }
   if (url.pathname !== '/api/admin/orders' || !response.ok) return response;
@@ -1363,7 +1376,7 @@ function applyOrderDetailPresentation(): void {
   ]);
   appendDetailSection(card, '支付信息', [
     ['支付来源', commerceProviderLabel(order.provider)],
-    ['微信支付交易单号', text(order.transaction_id)],
+    [order.provider === 'alipay' ? '支付宝交易单号' : '微信支付交易单号', text(order.transaction_id)],
   ]);
   appendDetailSection(card, '买家信息', [
     ['买家', text(order.payer_name, '未提供')],
