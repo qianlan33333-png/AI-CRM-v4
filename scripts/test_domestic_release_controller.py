@@ -92,6 +92,35 @@ class DomesticMainReleaseTests(unittest.TestCase):
                 release._build_command({}, ["child"], cwd=Path("/"), umask=0o022)
             self.assertEqual(run.call_args.kwargs["umask"], 0o022)
 
+    def test_ordinary_build_command_keeps_inherited_umask(self) -> None:
+        completed = subprocess.CompletedProcess(["child"], 0, "ok", "")
+        with mock.patch.object(release, "_check_env", return_value={}), \
+             mock.patch.object(release, "_run", return_value=completed) as run:
+            release._build_command({}, ["child"], cwd=Path("/"), check=False)
+        self.assertEqual(run.call_args.kwargs["umask"], -1)
+
+    def test_trusted_preflight_plan_uses_022_umask_for_snapshot_materialization(self) -> None:
+        base_sha, head_sha, head_tree = "a" * 40, "b" * 40, "c" * 40
+        plan = {
+            "selection_source": "trusted-baseline-registry-and-go-test-graph",
+            "baseline_sha": base_sha,
+            "head_sha": head_sha,
+            "head_tree": head_tree,
+            "source_clean": True,
+            "source": {"head_matches": True, "status": []},
+            "evidence_eligible": True,
+            "enforced": {"selected_lanes": ["backend"]},
+        }
+        completed = subprocess.CompletedProcess(["python3"], 0, json.dumps(plan) + "\n", "")
+        with mock.patch.object(release, "_build_command", return_value=completed) as build, \
+             mock.patch.object(release, "_worktree_git", return_value=head_tree):
+            result = release._trusted_preflight_plan(
+                {}, Path("/trusted-policy"), Path("/candidate"), base_sha, head_sha)
+
+        self.assertEqual(result, plan)
+        self.assertEqual(build.call_args.kwargs["safe_repository"], Path("/candidate"))
+        self.assertEqual(build.call_args.kwargs["umask"], 0o022)
+
     def test_build_candidate_restores_umask_after_success_and_exception(self) -> None:
         old_umask = os.umask(0o077)
         try:

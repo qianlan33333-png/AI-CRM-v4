@@ -1117,8 +1117,11 @@ def _trusted_preflight_plan(config: dict[str, Any], policy: Path, candidate: Pat
         "sys.path.insert(0,str(policy/'scripts/ci')); import affected_plan; "
         "print(json.dumps(affected_plan.build_plan(root,base,head),sort_keys=True,separators=(',',':')))"
     )
+    # Graph snapshots and generated donor views must retain tracked 100644
+    # source modes. Limit the permissive umask to this isolated read-only plan.
     result = _build_command(config, ["/usr/bin/python3", "-c", code, str(policy), str(candidate), base_sha, head_sha],
-                            cwd=policy, timeout=900, check=False, safe_repository=candidate)
+                            cwd=policy, timeout=900, check=False, safe_repository=candidate,
+                            umask=0o022)
     if result.returncode != 0:
         raise ReleaseError("trusted impact analysis failed; candidate is held for full review")
     try:
