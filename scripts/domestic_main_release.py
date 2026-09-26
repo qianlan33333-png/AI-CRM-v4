@@ -112,7 +112,8 @@ def _source_blob(repo: Path, sha: str, path: str) -> bytes:
 
 
 def _worktree_git(path: Path, *args: str, timeout: int = 600, check: bool = True) -> str:
-    return _run(["git", "-C", str(path), *args], timeout=timeout, check=check).stdout.strip()
+    return _run(["git", "--no-optional-locks", "-C", str(path), *args],
+                timeout=timeout, check=check).stdout.strip()
 
 
 def _sha(value: Any, label: str) -> str:
@@ -781,7 +782,8 @@ def _pin_candidate(repo: Path, head_sha: str) -> None:
         if existing != head_sha:
             raise ReleaseError("immutable domestic candidate ref points elsewhere")
         return
-    _run(["git", f"--git-dir={repo}", "update-ref", ref, head_sha, ZERO_SHA])
+    _run(["git", "-c", "core.sharedRepository=0", f"--git-dir={repo}",
+          "update-ref", ref, head_sha, ZERO_SHA], umask=0o022)
 
 
 def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base_sha: str,
@@ -1317,6 +1319,31 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
     return lane_results
 
 
+def _prepare_check_dependencies(config: dict[str, Any], checkout: Path, lanes: list[str],
+                                diagnostic_log: Path) -> None:
+    if not {"frontend", "browser"}.intersection(lanes):
+        return
+    if diagnostic_log.exists() or diagnostic_log.is_symlink():
+        raise ReleaseError("trusted check diagnostic path already exists; inspect before retry")
+    commands = [
+        ["env", "-u", "AICRM_DATABASE_URL", "npm", "ci", "--no-audit", "--no-fund"],
+        ["env", "-u", "AICRM_DATABASE_URL", "npm", "ci", "--prefix", "web/v3",
+         "--no-audit", "--no-fund"],
+    ]
+    with diagnostic_log.open("xb") as output:
+        os.chmod(diagnostic_log, 0o600)
+        for command in commands:
+            output.write(("$ " + shlex.join(command) + "\n").encode())
+            output.flush()
+            result = _build_command(config, command, cwd=checkout, timeout=60 * 60,
+                                    check=False, safe_repository=checkout)
+            output.write(result.stdout.encode())
+            output.write(result.stderr.encode())
+            output.flush()
+            if result.returncode:
+                raise ReleaseError("isolated check npm dependency setup failed")
+
+
 def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir: Path,
                   base_sha: str, head_sha: str, *, diagnostic_root: Path | None = None) -> dict[str, Any]:
     if report_dir.exists() or report_dir.is_symlink():
@@ -1343,6 +1370,9 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
         os.chmod(execution_parent, 0o700)
         execution_worktree = _private_check_checkout(
             config, repo, execution_parent / "candidate", head_sha)
+        _prepare_check_dependencies(
+            config, execution_worktree, lanes,
+            diagnostic_root / f"{head_sha}-{report_dir.name}-npm-ci.log")
         lane_results = _run_check_lanes(
             config, repo, policy, execution_worktree, report_dir, base_sha, head_sha,
             enforced, lanes, checks, packages, profile, diagnostic_root)
@@ -1883,7 +1913,8 @@ def _advance_main_cas(repo: Path, old_sha: str, new_sha: str) -> None:
     if current != old_sha:
         raise ReleaseError("domestic main changed during the release; CAS stopped")
     _first_parent_chain(repo, old_sha, new_sha)
-    _run(["git", f"--git-dir={repo}", "update-ref", MAIN_REF, new_sha, old_sha])
+    _run(["git", "-c", "core.sharedRepository=0", f"--git-dir={repo}",
+          "update-ref", MAIN_REF, new_sha, old_sha], umask=0o022)
 
 
 def _finalize_success(config: dict[str, Any], state_path: Path, state: dict[str, Any], item: dict[str, Any],

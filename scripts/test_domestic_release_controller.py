@@ -108,6 +108,7 @@ class DomesticMainReleaseTests(unittest.TestCase):
             policy_root = work_root / "trusted-policy"
             config = {"work_root": str(work_root), "source_worktree": str(work_root / "candidate")}
             original_lstat = Path.lstat
+            metadata_indexes: dict[Path, Path] = {}
 
             def root_owned_lstat(path: Path):
                 result = original_lstat(path)
@@ -115,10 +116,16 @@ class DomesticMainReleaseTests(unittest.TestCase):
                     return mock.Mock(st_uid=0, st_mode=result.st_mode)
                 return result
 
+            def make_index_readable(_repo: Path, worktree: Path) -> None:
+                git_dir = Path(release._worktree_git(worktree, "rev-parse", "--absolute-git-dir"))
+                index = git_dir / "index"
+                os.chmod(index, 0o640)
+                metadata_indexes[worktree] = index
+
             old_umask = os.umask(0o077)
             try:
                 with mock.patch.object(Path, "lstat", new=root_owned_lstat), \
-                     mock.patch.object(release, "_make_worktree_metadata_readable") as metadata:
+                     mock.patch.object(release, "_make_worktree_metadata_readable", side_effect=make_index_readable) as metadata:
                     active = release._active_worktree(config, repo, candidate)
                     policy = release._policy_worktree(repo, work_root, base, "release-push-test")
                     self.assertEqual(metadata.call_count, 2)
@@ -136,6 +143,20 @@ class DomesticMainReleaseTests(unittest.TestCase):
                 self.assertEqual(executable_mode, 0o755)
                 self.assertFalse(executable_mode & 0o022)
 
+                index = metadata_indexes[active]
+                index_before = index.read_bytes()
+                self.assertEqual(stat.S_IMODE(index.stat().st_mode), 0o640)
+                tracked = active / "main.txt"
+                tracked_info = tracked.stat()
+                os.utime(tracked, ns=(tracked_info.st_atime_ns, tracked_info.st_mtime_ns + 30_000_000_000))
+                status = release._worktree_git(active, "status", "--porcelain=v1", "--untracked-files=all")
+                self.assertEqual(status, "")
+                self.assertEqual(index.read_bytes(), index_before)
+                self.assertEqual(stat.S_IMODE(index.stat().st_mode), 0o640)
+                self.assertEqual(release._git(repo, "rev-parse", "refs/heads/main"), base)
+                self.assertEqual(release._worktree_git(active, "rev-parse", "HEAD"), candidate)
+                self.assertEqual(release._worktree_git(policy, "rev-parse", "HEAD"), base)
+
                 state_path = root / "private" / "state.json"
                 release.atomic_json(state_path, {"status": "test"})
                 self.assertEqual(stat.S_IMODE(state_path.parent.stat().st_mode), 0o700)
@@ -143,6 +164,75 @@ class DomesticMainReleaseTests(unittest.TestCase):
                 self.assertEqual(os.umask(0o077), 0o077)
             finally:
                 os.umask(old_umask)
+
+    def test_shared_repository_refs_stay_readable_and_cas_strict_under_umask_077(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo, base, candidate, other = make_repository(Path(temporary))
+            subprocess.run(["git", f"--git-dir={repo}", "config", "core.sharedRepository", "1"],
+                           check=True)
+            self.assertEqual(git(repo, "config", "--get", "core.sharedRepository"), "1")
+
+            old_umask = os.umask(0o077)
+            try:
+                release._pin_candidate(repo, candidate)
+                pin = repo / "refs/domestic/candidates" / candidate
+                self.assertTrue(pin.is_file())
+                self.assertEqual(pin.read_text().strip(), candidate)
+                self.assertEqual(stat.S_IMODE(pin.stat().st_mode), 0o644)
+
+                release._advance_main_cas(repo, base, candidate)
+                main = repo / "refs/heads/main"
+                self.assertEqual(git(repo, "rev-parse", "refs/heads/main"), candidate)
+                self.assertEqual(stat.S_IMODE(main.stat().st_mode), 0o644)
+                self.assertEqual(git(repo, "config", "--get", "core.sharedRepository"), "1")
+
+                stale_cas = release._run(
+                    ["git", "-c", "core.sharedRepository=0", f"--git-dir={repo}",
+                     "update-ref", "refs/heads/main", other, base],
+                    check=False, umask=0o022)
+                self.assertNotEqual(stale_cas.returncode, 0)
+                self.assertEqual(git(repo, "rev-parse", "refs/heads/main"), candidate)
+                self.assertEqual(stat.S_IMODE(main.stat().st_mode), 0o644)
+                self.assertEqual(os.umask(0o077), 0o077)
+            finally:
+                os.umask(old_umask)
+
+    def test_private_check_dependency_setup_is_lane_gated_and_logged_privately(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            checkout = root / "candidate"
+            checkout.mkdir()
+            log = root / "diagnostics" / "npm-ci.log"
+            log.parent.mkdir(mode=0o700)
+            success = subprocess.CompletedProcess(["npm"], 0, "installed\n", "")
+            with mock.patch.object(release, "_build_command", return_value=success) as build:
+                release._prepare_check_dependencies({}, checkout, ["backend"], log)
+                build.assert_not_called()
+                self.assertFalse(log.exists())
+
+                release._prepare_check_dependencies({}, checkout, ["browser"], log)
+            self.assertEqual(build.call_count, 2)
+            self.assertEqual(
+                [call.args[1] for call in build.call_args_list],
+                [
+                    ["env", "-u", "AICRM_DATABASE_URL", "npm", "ci", "--no-audit", "--no-fund"],
+                    ["env", "-u", "AICRM_DATABASE_URL", "npm", "ci", "--prefix", "web/v3",
+                     "--no-audit", "--no-fund"],
+                ],
+            )
+            self.assertTrue(all(call.kwargs["cwd"] == checkout for call in build.call_args_list))
+            self.assertTrue(all(call.kwargs["check"] is False for call in build.call_args_list))
+            self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
+            self.assertIn("AICRM_DATABASE_URL", log.read_text())
+
+            failed_log = root / "diagnostics" / "npm-ci-failed.log"
+            failure = subprocess.CompletedProcess(["npm"], 17, "partial output\n", "install failed\n")
+            with mock.patch.object(release, "_build_command", return_value=failure):
+                with self.assertRaisesRegex(release.ReleaseError, "npm dependency setup failed"):
+                    release._prepare_check_dependencies({}, checkout, ["frontend"], failed_log)
+            self.assertEqual(stat.S_IMODE(failed_log.stat().st_mode), 0o600)
+            self.assertIn("partial output", failed_log.read_text())
+            self.assertIn("install failed", failed_log.read_text())
 
     def test_config_state_path_matches_systemd_condition(self) -> None:
         config = {
