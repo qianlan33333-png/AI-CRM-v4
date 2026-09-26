@@ -2070,6 +2070,11 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
             (worktree / "scripts/ci").mkdir()
             (worktree / "scripts/ci/quality_lanes.py").write_text("# changed\n")
             subprocess.run(["git", "-C", str(worktree), "add", "scripts/ci/quality_lanes.py"], check=True)
+            # This bare-repository worktree has no inherited author identity;
+            # configure fixture-only identity instead of relying on host globals.
+            subprocess.run(["git", "-C", str(worktree), "config", "user.name", "Controller Test"], check=True)
+            subprocess.run(["git", "-C", str(worktree), "config", "user.email",
+                            "controller-test@example.invalid"], check=True)
             subprocess.run(["git", "-C", str(worktree), "commit", "-m", "change checker"], check=True, stdout=subprocess.DEVNULL)
             head = subprocess.check_output(["git", "-C", str(worktree), "rev-parse", "HEAD"], text=True).strip()
             self.assertEqual(release._check_policy_changes(repo, base, head), ["scripts/ci/quality_lanes.py"])
