@@ -1147,27 +1147,47 @@ func (handler *Handler) callback(writer http.ResponseWriter, request *http.Reque
 }
 
 func (handler *Handler) alipayCallback(writer http.ResponseWriter, request *http.Request) {
+	alipayCallbackDiagnostic("arrived")
 	if request.Method != http.MethodPost || handler.alipayVerifier == nil {
+		alipayCallbackDiagnostic("route_unavailable")
 		writeError(writer, http.StatusNotFound, "not_found")
 		return
 	}
 	request.Body = http.MaxBytesReader(writer, request.Body, maxBody)
 	if err := request.ParseForm(); err != nil {
+		alipayCallbackDiagnostic("parse_failed")
 		writeError(writer, http.StatusBadRequest, "invalid_callback")
 		return
 	}
 	callback, err := handler.alipayVerifier.VerifyValues(request.Context(), request.PostForm)
 	if err != nil {
+		alipayCallbackDiagnostic("verification_failed")
 		writeError(writer, http.StatusUnauthorized, "invalid_signature")
 		return
 	}
+	alipayCallbackDiagnostic("verified")
 	if err = handler.app.ApplyVerifiedCallback(request.Context(), callback); err != nil {
+		stage := "transaction_failed"
+		if errors.Is(err, paymentport.ErrNotFound) {
+			stage = "order_not_found"
+		}
+		if errors.Is(err, paymentport.ErrConflict) || errors.Is(err, paymentport.ErrInvalid) {
+			stage = "facts_rejected"
+		}
+		alipayCallbackDiagnostic(stage)
 		resultError(writer, err)
 		return
 	}
+	alipayCallbackDiagnostic("success")
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	writer.WriteHeader(http.StatusOK)
 	_, _ = writer.Write([]byte("success"))
+}
+
+// Only fixed operational categories leave this boundary. No request fields,
+// provider errors, signatures, merchant references or customer data are logged.
+func alipayCallbackDiagnostic(stage string) {
+	slog.Info("alipay_callback", "stage", stage, "route", "alipay_payment_callback")
 }
 
 // callbackDiagnostic allows production operators to distinguish ingress,

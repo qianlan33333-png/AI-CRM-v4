@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	alipaysdk "github.com/smartwalle/alipay/v3"
 	"github.com/smartwalle/nsign"
@@ -97,6 +98,7 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 	var provider *Alipay
 	var signer *alipaysdk.Client
 	tamperResponse := false
+	missingPaidDate := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Errorf("parse form: %v", err)
@@ -106,7 +108,7 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 		var field, body string
 		switch r.Form.Get("method") {
 		case "alipay.trade.query":
-			field, body = "alipay_trade_query_response", `{"code":"10000","out_trade_no":"merchant-test-1","trade_no":"trade-test-1","trade_status":"TRADE_SUCCESS","total_amount":"9.90"}`
+			field, body = "alipay_trade_query_response", `{"code":"10000","out_trade_no":"merchant-test-1","trade_no":"trade-test-1","trade_status":"TRADE_SUCCESS","total_amount":"9.90","send_pay_date":"2026-09-26 16:13:50"}`
 		case "alipay.trade.refund":
 			field, body = "alipay_trade_refund_response", `{"code":"10000","out_trade_no":"merchant-test-1","trade_no":"trade-test-1","refund_fee":"1.20","fund_change":"Y"}`
 		case "alipay.trade.fastpay.refund.query":
@@ -115,6 +117,9 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 			t.Errorf("unexpected method %q", r.Form.Get("method"))
 			w.WriteHeader(http.StatusBadRequest)
 			return
+		}
+		if missingPaidDate {
+			body = strings.Replace(body, `,"send_pay_date":"2026-09-26 16:13:50"`, "", 1)
 		}
 		signature, err := signer.SignBytes([]byte(body))
 		if err != nil {
@@ -145,7 +150,7 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 		}
 	}
 	query, err := provider.QueryPayment(context.Background(), "merchant-test-1")
-	if err != nil || query.TradeStatus != "TRADE_SUCCESS" || query.AmountMinor != 990 || query.TradeNo != "trade-test-1" {
+	if err != nil || query.TradeStatus != "TRADE_SUCCESS" || query.AmountMinor != 990 || query.TradeNo != "trade-test-1" || !query.OccurredAt.Equal(time.Date(2026, 9, 26, 8, 13, 50, 0, time.UTC)) {
 		t.Fatalf("signed payment query: status=%q amount=%d err=%v", query.TradeStatus, query.AmountMinor, err)
 	}
 	refund, err := provider.Refund(context.Background(), RefundRequest{MerchantOrderNo: "merchant-test-1", RefundRequestNo: "refund-test-1", RefundAmount: "1.20"})
@@ -156,6 +161,11 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 	if err != nil || refundQuery.Status != "REFUND_SUCCESS" || refundQuery.AmountMinor != 120 || refundQuery.TotalMinor != 990 {
 		t.Fatalf("signed refund query: status=%q amount=%d total=%d err=%v", refundQuery.Status, refundQuery.AmountMinor, refundQuery.TotalMinor, err)
 	}
+	missingPaidDate = true
+	if _, err := provider.QueryPayment(context.Background(), "merchant-test-1"); err == nil {
+		t.Fatal("successful query without payment time accepted")
+	}
+	missingPaidDate = false
 	tamperResponse = true
 	if _, err := provider.QueryPayment(context.Background(), "merchant-test-1"); err == nil {
 		t.Fatal("tampered provider response accepted")

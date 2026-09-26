@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -1224,13 +1225,16 @@ func (s *Service) ReconcileAlipayPayment(ctx context.Context, paymentID int64) (
 	} else if query.TradeStatus == "TRADE_CLOSED" {
 		outcome = "final_failed"
 	}
-	if outcome == "paid" && (!effectport.ValidDigest(query.TransactionDigest) || !validProviderTransactionReference(query.TradeNo)) {
+	if outcome == "paid" && (!effectport.ValidDigest(query.TransactionDigest) || !validProviderTransactionReference(query.TradeNo) || query.TransactionDigest != effectport.Hash("alipay.transaction", query.TradeNo)) {
 		return domain.Payment{}, paymentport.ErrConflict
 	}
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		locked, inner := s.store.GetPayment(tx, paymentID, true)
 		if inner != nil {
 			return inner
+		}
+		if locked.Status == domain.StatusPaid && outcome == "paid" && (locked.ProviderTransactionReference != query.TradeNo || locked.ProviderTransactionDigest != string(query.TransactionDigest)) {
+			return paymentport.ErrConflict
 		}
 		if _, inner = s.store.RecordPaymentReconciliation(tx, locked.ID, query.EvidenceDigest, outcome, s.now().UTC()); inner != nil || outcome == "pending" || locked.Status == domain.StatusPaid && outcome == "paid" {
 			current = locked
@@ -1342,9 +1346,12 @@ func (s *Service) ApplyVerifiedCallback(ctx context.Context, callback paymentpro
 	}
 	return classify(s.uow.Within(ctx, func(tx context.Context) error {
 		if callback.Kind == "payment" {
-			payment, err := s.store.GetPaymentByMerchant(tx, callback.MerchantOrderNo, true)
+			payment, err := s.store.GetPaymentByMerchantProvider(tx, callback.Provider, callback.MerchantOrderNo, true)
 			if err != nil {
 				return err
+			}
+			if callback.Provider == domain.ProviderAlipay {
+				slog.Info("alipay_callback", "stage", "order_located", "route", "alipay_payment_callback")
 			}
 			if payment.Provider != callback.Provider || payment.AmountMinor != callback.AmountMinor || payment.Currency != callback.Currency || !s.callbackAppIDMatches(payment, callback.AppID) {
 				return paymentport.ErrConflict
@@ -1352,9 +1359,11 @@ func (s *Service) ApplyVerifiedCallback(ctx context.Context, callback paymentpro
 			// Reconciliation may have already settled this exact Provider fact
 			// before the original notification arrives.  The callback still gets
 			// an immutable receipt, but it must not settle the Order a second time
-			// or rerun its paid-event consumers.
+			// or rerun its paid-event consumers. Alipay queries in older releases
+			// stored observation time; trade identity, amount, currency and app
+			// determine the same verified fact even for those legacy records.
 			if payment.Status == domain.StatusPaid {
-				if payment.ProviderTransactionReference != callback.ProviderTransactionReference || payment.ProviderTransactionDigest != callback.ProviderTransactionDigest || !samePaymentConfirmationTime(payment.PaidConfirmedAt, callback.OccurredAt) {
+				if payment.ProviderTransactionReference != callback.ProviderTransactionReference || payment.ProviderTransactionDigest != callback.ProviderTransactionDigest || (callback.Provider != domain.ProviderAlipay && !samePaymentConfirmationTime(payment.PaidConfirmedAt, callback.OccurredAt)) {
 					return paymentport.ErrConflict
 				}
 				_, err = s.store.ClaimCallback(tx, callbackProvider, callback.EventDigest, callback.BodyDigest, "payment", "replayed", payment.ID)
