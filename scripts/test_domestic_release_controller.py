@@ -84,6 +84,43 @@ class DomesticMainReleaseTests(unittest.TestCase):
                 self.assertEqual(run.call_args.kwargs["input"], b"file input\n")
                 self.assertEqual(run.call_args.kwargs["umask"], 0o022)
 
+            completed = subprocess.CompletedProcess(["child"], 0, "", "")
+            with mock.patch.object(release, "_check_env", return_value={}), \
+                 mock.patch.object(release, "_run", return_value=completed) as run:
+                release._build_command({}, ["child"], cwd=Path("/"), umask=0o022)
+            self.assertEqual(run.call_args.kwargs["umask"], 0o022)
+
+    def test_build_candidate_restores_umask_after_success_and_exception(self) -> None:
+        old_umask = os.umask(0o077)
+        try:
+            result = (Path("/build/output"), {"status": "built"})
+
+            def successful_build(*args, **kwargs):
+                self.assertEqual(os.umask(0o022), 0o022)
+                return result
+
+            with mock.patch.object(release.legacy, "build_candidate", side_effect=successful_build) as build:
+                self.assertEqual(
+                    release._build_candidate({}, "a" * 40, "b" * 40, None,
+                                             validation_scope_base="c" * 40),
+                    result,
+                )
+            build.assert_called_once_with({}, "a" * 40, "b" * 40, None,
+                                          validation_scope_base="c" * 40)
+            self.assertEqual(os.umask(0o077), 0o077)
+
+            def failed_build(*_args, **_kwargs):
+                self.assertEqual(os.umask(0o022), 0o022)
+                raise RuntimeError("expected builder failure")
+
+            with mock.patch.object(release.legacy, "build_candidate", side_effect=failed_build):
+                with self.assertRaisesRegex(RuntimeError, "expected builder failure"):
+                    release._build_candidate({}, "a" * 40, "b" * 40, None,
+                                             validation_scope_base="c" * 40)
+            self.assertEqual(os.umask(0o077), 0o077)
+        finally:
+            os.umask(old_umask)
+
     def test_worktree_creation_keeps_checkout_readable_under_umask_077(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1150,43 +1187,62 @@ class DomesticMainReleaseTests(unittest.TestCase):
             repo, _base, candidate, _other = make_repository(root)
             refs_before = subprocess.check_output(["git", f"--git-dir={repo}", "show-ref"], text=True)
             main_before = git(repo, "rev-parse", "refs/heads/main")
+            protected_files = {
+                name: git(repo, "show", f"{candidate}:{name}")
+                for name in ("main.txt", "one.txt")
+            }
             report_dir = root / "checks"
             report_dir.mkdir(mode=0o700)
             user_name = pwd.getpwuid(os.geteuid()).pw_name
+            child_umasks: list[int] = []
 
-            def run_as_current_user(_config, command, *, cwd, timeout, check, safe_repository=None):
+            def run_as_current_user(_config, command, *, cwd, timeout, check,
+                                    safe_repository=None, umask: int = -1):
+                child_umasks.append(umask)
                 return subprocess.run(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                      text=True, timeout=timeout, check=False)
+                                      text=True, timeout=timeout, check=False, umask=umask)
 
-            with mock.patch.object(release.legacy, "BUILD_USER", user_name), \
-                 mock.patch.object(release, "_build_command", side_effect=run_as_current_user):
-                checkout = release._private_check_checkout({}, repo, report_dir / "candidate-source", candidate)
-                self.assertEqual(checkout.stat().st_uid, os.geteuid())
-                self.assertEqual(stat.S_IMODE(checkout.stat().st_mode), 0o700)
-                self.assertEqual(release._verify_check_checkout_tree(repo, candidate, checkout), 2)
-                generated = [
-                    ".aicrm-dedup/donor-views-receipt.json",
-                    "node_modules/.cache/npm-check.json",
-                    "out/backend/contract-check.json",
-                    "web/dist/browser-check.json",
-                    "tmp/archive-sdk/check.json",
-                ]
-                script = (
-                    "const fs=require('node:fs'),path=require('node:path');"
-                    f"for(const file of {json.dumps(generated)} ){{"
-                    "fs.mkdirSync(path.dirname(file),{recursive:true});"
-                    "fs.writeFileSync(file,'generated\\n');}"
-                )
-                subprocess.run([shutil.which("node"), "-e", script], cwd=checkout, check=True,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                self.assertTrue((checkout / ".aicrm-dedup/donor-views-receipt.json").is_file())
-                self.assertTrue((checkout / "node_modules/.cache/npm-check.json").is_file())
-                self.assertTrue((checkout / "out/backend/contract-check.json").is_file())
-                self.assertTrue((checkout / "web/dist/browser-check.json").is_file())
-                self.assertTrue((checkout / "tmp/archive-sdk/check.json").is_file())
-                self.assertEqual(release._verify_check_checkout_tree(repo, candidate, checkout), 2)
-                self.assertEqual(git(repo, "rev-parse", "refs/heads/main"), main_before)
-                self.assertEqual(subprocess.check_output(["git", f"--git-dir={repo}", "show-ref"], text=True), refs_before)
+            old_umask = os.umask(0o077)
+            try:
+                with mock.patch.object(release.legacy, "BUILD_USER", user_name), \
+                     mock.patch.object(release, "_build_command", side_effect=run_as_current_user):
+                    checkout = release._private_check_checkout({}, repo, report_dir / "candidate-source", candidate)
+                    self.assertEqual(checkout.stat().st_uid, os.geteuid())
+                    self.assertEqual(stat.S_IMODE(checkout.stat().st_mode), 0o700)
+                    for name, expected in protected_files.items():
+                        tracked = checkout / name
+                        self.assertEqual(stat.S_IMODE(tracked.stat().st_mode), 0o644)
+                        self.assertEqual(tracked.read_text().strip(), expected)
+                    self.assertEqual(release._verify_check_checkout_tree(repo, candidate, checkout), 2)
+                    generated = [
+                        ".aicrm-dedup/donor-views-receipt.json",
+                        "node_modules/.cache/npm-check.json",
+                        "out/backend/contract-check.json",
+                        "web/dist/browser-check.json",
+                        "tmp/archive-sdk/check.json",
+                    ]
+                    script = (
+                        "const fs=require('node:fs'),path=require('node:path');"
+                        f"for(const file of {json.dumps(generated)} ){{"
+                        "fs.mkdirSync(path.dirname(file),{recursive:true});"
+                        "fs.writeFileSync(file,'generated\\n');}"
+                    )
+                    subprocess.run([shutil.which("node"), "-e", script], cwd=checkout, check=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    for name in generated:
+                        self.assertTrue((checkout / name).is_file())
+                    with (checkout / generated[0]).open("a", encoding="utf-8") as output:
+                        output.write("appendable\n")
+                    self.assertEqual(release._verify_check_checkout_tree(repo, candidate, checkout), 2)
+                    self.assertEqual(git(repo, "rev-parse", "refs/heads/main"), main_before)
+                    self.assertEqual(subprocess.check_output(
+                        ["git", f"--git-dir={repo}", "show-ref"], text=True), refs_before)
+                    for name, expected in protected_files.items():
+                        self.assertEqual(git(repo, "show", f"{candidate}:{name}"), expected)
+                    self.assertEqual(child_umasks, [0o022, 0o022, 0o022])
+                    self.assertEqual(os.umask(0o077), 0o077)
+            finally:
+                os.umask(old_umask)
 
     @unittest.skipUnless(os.geteuid() != 0, "requires a real non-root account")
     def test_check_checkout_verifier_ignores_builder_index_and_rejects_parent_symlink(self) -> None:
@@ -1197,9 +1253,10 @@ class DomesticMainReleaseTests(unittest.TestCase):
             report_dir.mkdir(mode=0o700)
             user_name = pwd.getpwuid(os.geteuid()).pw_name
 
-            def run_as_current_user(_config, command, *, cwd, timeout, check, safe_repository=None):
+            def run_as_current_user(_config, command, *, cwd, timeout, check,
+                                    safe_repository=None, umask: int = -1):
                 return subprocess.run(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                      text=True, timeout=timeout, check=False)
+                                      text=True, timeout=timeout, check=False, umask=umask)
 
             with mock.patch.object(release.legacy, "BUILD_USER", user_name), \
                  mock.patch.object(release, "_build_command", side_effect=run_as_current_user):

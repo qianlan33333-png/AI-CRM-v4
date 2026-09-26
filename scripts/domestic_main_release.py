@@ -1035,12 +1035,13 @@ print(json.dumps(result, sort_keys=True, separators=(",", ":")))
 
 def _build_command(config: dict[str, Any], command: list[str], *, cwd: Path,
                    input_text: str | None = None, timeout: int = 60 * 60,
-                   check: bool = True, safe_repository: Path | None = None) -> subprocess.CompletedProcess[str]:
+                   check: bool = True, safe_repository: Path | None = None,
+                   umask: int = -1) -> subprocess.CompletedProcess[str]:
     env = _check_env(config, safe_repository)
     args = ["/usr/bin/sudo", "-n", "-u", legacy.BUILD_USER, "-H", "--", "/usr/bin/env", "-i"]
     args.extend([f"{key}={value}" for key, value in env.items()])
     args.extend(command)
-    return _run(args, cwd=cwd, input_text=input_text, timeout=timeout, check=check)
+    return _run(args, cwd=cwd, input_text=input_text, timeout=timeout, check=check, umask=umask)
 
 
 def _trusted_runner_code() -> str:
@@ -1183,7 +1184,7 @@ def _private_check_checkout(config: dict[str, Any], repo: Path, checkout: Path,
     ]
     for command, safe_repository in commands:
         result = _build_command(config, command, cwd=Path("/"), timeout=600,
-                                check=False, safe_repository=safe_repository)
+                                check=False, safe_repository=safe_repository, umask=0o022)
         if result.returncode:
             raise ReleaseError("isolated check candidate checkout failed")
     try:
@@ -1991,6 +1992,16 @@ def _mark_failed(state_path: Path, state: dict[str, Any], item: dict[str, Any], 
     atomic_json(state_path, state)
 
 
+def _build_candidate(config: dict[str, Any], sha: str, base: str,
+                     base_release: Path | None, *, validation_scope_base: str) -> tuple[Path, dict[str, Any]]:
+    old_umask = os.umask(0o022)
+    try:
+        return legacy.build_candidate(config, sha, base, base_release,
+                                      validation_scope_base=validation_scope_base)
+    finally:
+        os.umask(old_umask)
+
+
 def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
     repo = Path(config["repo"])
     old_main_sha = _resolve_ref(repo, MAIN_REF)
@@ -2053,8 +2064,8 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
             build_base = installed_app["sha"]
             base_release = Path(config.get("stage_releases", "/opt/aicrm/releases")) / build_base
             build_config = dict(config, repo=str(source_worktree))
-            out, metadata = legacy.build_candidate(build_config, item["head_sha"], build_base,
-                                                   base_release, validation_scope_base=old_main_sha)
+            out, metadata = _build_candidate(build_config, item["head_sha"], build_base,
+                                             base_release, validation_scope_base=old_main_sha)
             if metadata.get("source_tree") != head_tree:
                 raise ReleaseError("builder returned a package for a different source tree")
             if item.get("head_sha") != item["candidate_id"]:
