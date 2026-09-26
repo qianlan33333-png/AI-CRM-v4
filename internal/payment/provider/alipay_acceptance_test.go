@@ -125,6 +125,8 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 	var signer *alipaysdk.Client
 	tamperResponse := false
 	missingPaidDate := false
+	refundQueryBody := ""
+	refundBody := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Errorf("parse form: %v", err)
@@ -138,11 +140,21 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 		case "alipay.trade.refund":
 			field, body = "alipay_trade_refund_response", `{"code":"10000","out_trade_no":"merchant-test-1","trade_no":"trade-test-1","refund_fee":"1.20","fund_change":"Y"}`
 		case "alipay.trade.fastpay.refund.query":
-			field, body = "alipay_trade_fastpay_refund_query_response", `{"code":"10000","out_request_no":"refund-test-1","trade_no":"trade-test-1","total_amount":"9.90","refund_amount":"1.20","refund_status":"REFUND_SUCCESS"}`
+			var query map[string]string
+			if json.Unmarshal([]byte(r.Form.Get("biz_content")), &query) != nil || query["out_trade_no"] != "merchant-test-1" || query["out_request_no"] != "refund-test-1" {
+				t.Error("refund query omitted original order/refund keys")
+			}
+			field, body = "alipay_trade_fastpay_refund_query_response", `{"code":"10000","out_request_no":"refund-test-1","out_trade_no":"merchant-test-1","trade_no":"trade-test-1","total_amount":"9.90","refund_amount":"1.20","refund_status":"REFUND_SUCCESS"}`
 		default:
 			t.Errorf("unexpected method %q", r.Form.Get("method"))
 			w.WriteHeader(http.StatusBadRequest)
 			return
+		}
+		if r.Form.Get("method") == "alipay.trade.fastpay.refund.query" && refundQueryBody != "" {
+			body = refundQueryBody
+		}
+		if r.Form.Get("method") == "alipay.trade.refund" && refundBody != "" {
+			body = refundBody
 		}
 		if missingPaidDate {
 			body = strings.Replace(body, `,"send_pay_date":"2026-09-26 16:13:50"`, "", 1)
@@ -155,6 +167,7 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 		}
 		if tamperResponse {
 			body = strings.Replace(body, "9.90", "99.90", 1)
+			body = strings.Replace(body, "1.20", "1.21", 1)
 		}
 		_, _ = fmt.Fprintf(w, "{\"%s\":%s,\"sign\":%q}", field, body, base64.StdEncoding.EncodeToString(signature))
 	}))
@@ -183,10 +196,36 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 	if err != nil || !refund.FundChanged || refund.RefundAmount != "1.20" {
 		t.Fatalf("signed refund: changed=%t amount=%q err=%v", refund.FundChanged, refund.RefundAmount, err)
 	}
-	refundQuery, err := provider.QueryRefund(context.Background(), "refund-test-1")
+	refundQuery, err := provider.QueryRefund(context.Background(), "merchant-test-1", "refund-test-1")
 	if err != nil || refundQuery.Status != "REFUND_SUCCESS" || refundQuery.AmountMinor != 120 || refundQuery.TotalMinor != 990 {
 		t.Fatalf("signed refund query: status=%q amount=%d total=%d err=%v", refundQuery.Status, refundQuery.AmountMinor, refundQuery.TotalMinor, err)
 	}
+	for _, body := range []string{
+		`{"code":"40004","out_trade_no":"merchant-test-1","out_request_no":"refund-test-1","trade_no":"trade-test-1","total_amount":"9.90","refund_amount":"1.20","refund_status":"REFUND_SUCCESS"}`,
+		`{"code":"10000","out_trade_no":"other","out_request_no":"refund-test-1","trade_no":"trade-test-1","total_amount":"9.90","refund_amount":"1.20","refund_status":"REFUND_SUCCESS"}`,
+		`{"code":"10000","out_trade_no":"merchant-test-1","out_request_no":"other","trade_no":"trade-test-1","total_amount":"9.90","refund_amount":"1.20","refund_status":"REFUND_SUCCESS"}`,
+		`{"code":"10000","out_trade_no":"merchant-test-1","out_request_no":"refund-test-1","total_amount":"9.90","refund_amount":"1.20","refund_status":"REFUND_SUCCESS"}`,
+	} {
+		refundQueryBody = body
+		if _, err := provider.QueryRefund(context.Background(), "merchant-test-1", "refund-test-1"); err == nil {
+			t.Fatal("mismatched or incomplete refund result accepted")
+		}
+	}
+	refundQueryBody = `{"code":"10000"}`
+	pending, err := provider.QueryRefund(context.Background(), "merchant-test-1", "refund-test-1")
+	if err != nil || pending.Status != "" || pending.RefundDigest != "" {
+		t.Fatalf("empty successful query must remain pending: %v", err)
+	}
+	refundQueryBody = ""
+	refundBody = `{"code":"10000","out_trade_no":"other","trade_no":"trade-test-1","refund_fee":"1.20","fund_change":"Y"}`
+	if _, err := provider.Refund(context.Background(), RefundRequest{MerchantOrderNo: "merchant-test-1", RefundRequestNo: "refund-test-1", RefundAmount: "1.20"}); err == nil {
+		t.Fatal("wrong refund order accepted")
+	}
+	refundBody = `{"code":"10000","out_trade_no":"merchant-test-1","trade_no":"trade-test-1","refund_fee":"9.90","fund_change":"Y"}`
+	if _, err := provider.Refund(context.Background(), RefundRequest{MerchantOrderNo: "merchant-test-1", RefundRequestNo: "refund-test-1", RefundAmount: "1.20"}); err == nil {
+		t.Fatal("wrong refund amount accepted")
+	}
+	refundBody = ""
 	missingPaidDate = true
 	if _, err := provider.QueryPayment(context.Background(), "merchant-test-1"); err == nil {
 		t.Fatal("successful query without payment time accepted")
@@ -195,5 +234,11 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 	tamperResponse = true
 	if _, err := provider.QueryPayment(context.Background(), "merchant-test-1"); err == nil {
 		t.Fatal("tampered provider response accepted")
+	}
+	if _, err := provider.QueryRefund(context.Background(), "merchant-test-1", "refund-test-1"); err == nil {
+		t.Fatal("tampered refund query accepted")
+	}
+	if _, err := provider.Refund(context.Background(), RefundRequest{MerchantOrderNo: "merchant-test-1", RefundRequestNo: "refund-test-1", RefundAmount: "1.20"}); err == nil {
+		t.Fatal("tampered refund response accepted")
 	}
 }

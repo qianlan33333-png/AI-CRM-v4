@@ -3807,7 +3807,7 @@ paths:
       tags: [Transactions]
       security: [{adminSession: []}]
       parameters:
-        - {name: provider, in: query, required: false, description: "When filtering an order detail, must be paired with order_no. all or omitted lists all local payment refunds; wechat_pay is a legacy query alias for wechat.", schema: {type: string, enum: [all, wechat, wechat_pay, wechat_shop]}}
+        - {name: provider, in: query, required: false, description: "When filtering an order detail, must be paired with order_no. all or omitted lists all local payment refunds; wechat_pay is a legacy query alias for wechat.", schema: {type: string, enum: [all, wechat, wechat_pay, wechat_shop, alipay]}}
         - {name: order_no, in: query, required: false, description: "Merchant order number; valid only with provider because the provider/order pair identifies one Payment.", schema: {type: string, minLength: 1, maxLength: 200}}
         - {$ref: "#/components/parameters/Limit"}
         - {$ref: "#/components/parameters/Offset"}
@@ -3844,7 +3844,7 @@ paths:
       description: Read-only refund-recovery receipt lookup. The original Idempotency-Key is supplied only in a request header and is matched with the authenticated admin actor plus the exact provider/order Payment; it never replays a refund command or exposes its payload or key digest. actor_binding is a non-secret local-browser partition marker, never an authorization credential.
       security: [{adminSession: []}]
       parameters:
-        - {name: provider, in: query, required: true, schema: {type: string, enum: [wechat, wechat_pay, wechat_shop]}}
+        - {name: provider, in: query, required: true, schema: {type: string, enum: [wechat, wechat_pay, wechat_shop, alipay]}}
         - {name: order_no, in: query, required: true, description: Merchant order number paired with provider to select one Payment., schema: {type: string, minLength: 1, maxLength: 200}}
         - {name: Idempotency-Key, in: header, required: true, description: Original refund confirmation key. Kept out of URLs and browser history., schema: {type: string, minLength: 16, maxLength: 200}}
       responses: {"200": {description: Exact actor/key Payment receipt when found; otherwise found is false. The response contains no external-effect state because refund status is not an effect-state projection., content: {application/json: {schema: {$ref: "#/components/schemas/RefundRecoveryReceiptResponse"}}}}, "400": {$ref: "#/components/responses/Error"}, "401": {$ref: "#/components/responses/Error"}, "404": {$ref: "#/components/responses/Error"}, "503": {$ref: "#/components/responses/Unavailable"}}
@@ -3900,6 +3900,14 @@ paths:
       parameters: [{$ref: "#/components/parameters/OrderReference"}, {$ref: "#/components/parameters/RequiredIdempotencyKey"}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [refund_amount_total, reason, transaction_id_confirmation, checked], properties: {provider: {type: string, enum: [wechat]}, order_no: {type: string, minLength: 1, maxLength: 200}, refund_amount_total: {type: integer, minimum: 1}, reason: {type: string, minLength: 1, maxLength: 500}, transaction_id_confirmation: {type: string, minLength: 1, maxLength: 200, description: "Exact provider-verified WeChat transaction_id; merchant and v3pay order numbers are not confirmation values."}, checked: {type: boolean}, operator: {type: string, maxLength: 200}}}}}}
       responses: {"202": {description: WeChat Pay refund effect accepted atomically, content: {application/json: {schema: {$ref: "#/components/schemas/LegacyWechatRefundEffectAccepted"}}}}, "400": {$ref: "#/components/responses/Error"}, "401": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "404": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}, "503": {$ref: "#/components/responses/Unavailable"}}
+  /api/admin/alipay/orders/{order_ref}/refunds:
+    post:
+      operationId: createAlipayRefundIntent
+      tags: [Transactions]
+      security: [{adminSession: [], csrfHeader: []}]
+      parameters: [{$ref: "#/components/parameters/OrderReference"}, {$ref: "#/components/parameters/RequiredIdempotencyKey"}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [refund_amount_total, reason, transaction_id_confirmation, checked], properties: {provider: {type: string, enum: [alipay]}, order_no: {type: string, minLength: 1, maxLength: 200}, refund_amount_total: {type: integer, minimum: 1}, reason: {type: string, minLength: 1, maxLength: 500}, transaction_id_confirmation: {type: string, minLength: 1, maxLength: 200, description: "Exact provider-verified Alipay trade_no; merchant and v3pay order numbers are not confirmation values."}, checked: {type: boolean}, operator: {type: string, maxLength: 200}}}}}}
+      responses: {"202": {description: Alipay refund effect accepted atomically, content: {application/json: {schema: {$ref: "#/components/schemas/LegacyWechatRefundEffectAccepted"}}}}, "400": {$ref: "#/components/responses/Error"}, "401": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "404": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}, "503": {$ref: "#/components/responses/Unavailable"}}
   /api/admin/wechat-shop/refunds/{refund_id}/reconcile:
     post:
       operationId: reconcileWechatShopRefund
@@ -6046,7 +6054,7 @@ components:
       properties:
         id: {$ref: "#/components/schemas/PositiveID"}
         order_id: {$ref: "#/components/schemas/PositiveID"}
-        provider: {type: string, enum: [wechat, wechat_shop]}
+        provider: {type: string, enum: [wechat, wechat_shop, alipay]}
         order_no: {type: string, minLength: 1, maxLength: 200}
         transaction_id: {type: string, maxLength: 200, deprecated: true, description: "Legacy placeholder, always empty. It is not a verified Order transaction_id and must never be used for refund confirmation."}
         refund_id: {type: string, minLength: 1, maxLength: 200}

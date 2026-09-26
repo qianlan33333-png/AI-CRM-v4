@@ -13,8 +13,8 @@ import { distributionAdjustmentLabel, distributionCommissionStatusLabel, distrib
 
 type OrderController = { page: string; api: { mode: string }; state: { orderFilters: Record<string, string> } };
 type DetailRecord = Record<string, unknown>;
-type RefundScope = { provider: 'wechat' | 'wechat_shop'; orderNo: string };
-type RefundIntentRequest = { provider: 'wechat'; order_no: string; refund_amount_total: number; reason: string; transaction_id_confirmation: string; checked: true };
+type RefundScope = { provider: 'wechat' | 'wechat_shop' | 'alipay'; orderNo: string };
+type RefundIntentRequest = { provider: 'wechat' | 'alipay'; order_no: string; refund_amount_total: number; reason: string; transaction_id_confirmation: string; checked: true };
 type RefundIntentCandidate = Omit<RefundIntentRequest, 'checked'> & { checked: boolean };
 type RefundIntentState = 'submitting' | 'accepted' | 'unknown';
 type RefundReceipt = { id: number; refundNo: string };
@@ -239,7 +239,7 @@ function refundScope(order: DetailRecord | undefined): RefundScope | undefined {
   // Order detail normalizes WeChat Pay to `wechat`; preserve the API's
   // documented legacy alias only while reading older rows.
   const provider = rawProvider === 'wechat_pay' ? 'wechat' : rawProvider;
-  return orderNo && (provider === 'wechat' || provider === 'wechat_shop') ? { provider, orderNo } : undefined;
+  return orderNo && (provider === 'wechat' || provider === 'wechat_shop' || provider === 'alipay') ? { provider, orderNo } : undefined;
 }
 
 function refundIntentScope(scope: RefundScope, actorBinding: string): string {
@@ -269,7 +269,7 @@ function loadDurableRefundIntents(): DurableRefundIntent[] | undefined {
     for (const value of values) {
       const record = asRecord(value);
       if (!(record
-        && (record.provider === 'wechat' || record.provider === 'wechat_shop')
+        && (record.provider === 'wechat' || record.provider === 'wechat_shop' || record.provider === 'alipay')
         && typeof record.order_no === 'string' && record.order_no.length > 0 && record.order_no.length <= 200
         && typeof record.idempotency_key === 'string' && record.idempotency_key.length > 0 && record.idempotency_key.length <= 200
         && typeof record.payload_digest === 'string' && /^[a-f0-9]{64}$/.test(record.payload_digest)
@@ -771,7 +771,7 @@ function replaceRefundPanel(order: DetailRecord): void {
   const title = element('h2', native ? '退款' : '历史订单，仅供查询');
   title.style.cssText = 'margin:0;font-size:14px;font-weight:600';
   const description = element('p', native
-    ? '提交前请核对商品、可退金额和已核验的微信支付交易单号。退款结果以后续退款记录为准。'
+    ? `提交前请核对商品、可退金额和已核验的${order.provider === "alipay" ? "支付宝交易单号" : "微信支付交易单号"}。退款结果以后续退款记录为准。`
     : '该订单保留历史事实，仅供查询，不支持退款确认。');
   description.style.cssText = 'margin:2px 0 0;font-size:12px;color:#8F959E';
   header.append(title, description);
@@ -803,7 +803,7 @@ function replaceRefundPanel(order: DetailRecord): void {
 
 function appendRefundForm(parent: HTMLElement, order: DetailRecord): void {
   const scope = refundScope(order);
-  if (!scope || scope.provider !== 'wechat') {
+  if (!scope || (scope.provider !== 'wechat' && scope.provider !== 'alipay')) {
     parent.appendChild(element('p', '当前支付来源暂不支持在本页确认退款。'));
     return;
   }
@@ -868,9 +868,10 @@ function appendRefundForm(parent: HTMLElement, order: DetailRecord): void {
     appendRefundReadbackControl(parent, scope, existing);
     return;
   }
+  const transactionLabel = order.provider === 'alipay' ? '支付宝交易单号' : '微信支付交易单号';
   const transactionID = text(order.transaction_id, '');
   if (!transactionID) {
-    parent.appendChild(element('p', '无法确认退款：未获得已核验的微信支付交易单号。'));
+    parent.appendChild(element('p', `无法确认退款：未获得已核验的${transactionLabel}。`));
     return;
   }
   const refundableMinor = minorAmountValue(order.refundable_amount_total);
@@ -902,10 +903,10 @@ function appendRefundForm(parent: HTMLElement, order: DetailRecord): void {
   amountLabel.appendChild(amount);
   const confirmationLabel = element('label');
   confirmationLabel.className = 'field';
-  confirmationLabel.append(element('span', '再次输入微信支付交易单号'));
+  confirmationLabel.append(element('span', `再次输入${transactionLabel}`));
   const confirmation = document.createElement('input');
   confirmation.className = 'input';
-  confirmation.type = 'text'; confirmation.placeholder = '请输入已核验的微信支付交易单号'; confirmation.dataset.orderRefundTransaction = '';
+  confirmation.type = 'text'; confirmation.placeholder = `请输入已核验的${transactionLabel}`; confirmation.dataset.orderRefundTransaction = '';
   confirmationLabel.appendChild(confirmation);
   const reasonLabel = element('label');
   reasonLabel.className = 'field';
@@ -918,7 +919,7 @@ function appendRefundForm(parent: HTMLElement, order: DetailRecord): void {
   const checkedLabel = element('label');
   checkedLabel.className = 'field';
   const checked = document.createElement('input'); checked.type = 'checkbox'; checked.dataset.orderRefundChecked = '';
-  checkedLabel.append(checked, document.createTextNode('已核对付款人、商品、可退金额、支付来源和微信支付交易单号'));
+  checkedLabel.append(checked, document.createTextNode(`已核对付款人、商品、可退金额、支付来源和${transactionLabel}`));
   const submit = element('button', '确认提交退款申请') as HTMLButtonElement;
   submit.type = 'button'; submit.className = 'btn primary';
   submit.addEventListener('click', () => { void submitRefundConfirmation(order, scope, amount, confirmation, reason, checked, submit); });
@@ -1029,7 +1030,9 @@ async function refreshRefundReadback(scope: RefundScope): Promise<boolean> {
       showOrderMessage('当前订单详情暂不可重新读取，当前可退金额无法确认，不能提交新的退款申请。');
       return false;
     }
-    const orderResponse = await originalFetch(`/api/admin/orders/${encodeURIComponent(reference)}`, { credentials: 'same-origin', cache: 'no-store' });
+    const orderURL = currentDetailAPIURL(reference);
+    if (!orderURL) { detailContext.orderRefreshUnavailable = true; schedulePresentation(); return false; }
+    const orderResponse = await originalFetch(orderURL, { credentials: 'same-origin', cache: 'no-store' });
     if (!orderResponse.ok) {
       detailContext.orderRefreshUnavailable = true;
       schedulePresentation();
@@ -1058,7 +1061,7 @@ async function refreshRefundReadback(scope: RefundScope): Promise<boolean> {
 
 function candidateRefundRequest(scope: RefundScope, amount: HTMLInputElement, confirmation: HTMLInputElement, reason: HTMLSelectElement, checked: HTMLInputElement): RefundIntentCandidate {
   return {
-    provider: 'wechat', order_no: scope.orderNo, refund_amount_total: minorAmount(amount.value) ?? -1,
+    provider: scope.provider === 'alipay' ? 'alipay' : 'wechat', order_no: scope.orderNo, refund_amount_total: minorAmount(amount.value) ?? -1,
     reason: reason.value, transaction_id_confirmation: confirmation.value.trim(), checked: checked.checked,
   };
 }
@@ -1153,7 +1156,7 @@ async function submitRefundConfirmation(order: DetailRecord, scope: RefundScope,
   const intentScope = refundIntentScope(scope, actorBinding);
   refundIntents.set(intentScope, intent);
   try {
-    const response = await originalFetch(`/api/admin/wechat-pay/orders/${encodeURIComponent(scope.orderNo)}/refunds`, apiRequestOptions({
+    const response = await originalFetch(`/api/admin/${scope.provider === 'alipay' ? 'alipay' : 'wechat-pay'}/orders/${encodeURIComponent(scope.orderNo)}/refunds`, apiRequestOptions({
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': intent.idempotencyKey }, body: JSON.stringify(request),
     }));
     const acceptance = response.status === 202 ? legacyRefundAcceptance(await response.clone().json().catch(() => undefined)) : undefined;

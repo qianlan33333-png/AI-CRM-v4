@@ -373,14 +373,14 @@ type AlipayPaymentQuery struct {
 	EvidenceDigest, TransactionDigest               effectport.Digest
 }
 type AlipayRefundQuery struct {
-	RefundNo, Currency, Status   string
-	AmountMinor, TotalMinor      int64
-	OccurredAt                   time.Time
-	EvidenceDigest, RefundDigest effectport.Digest
+	MerchantOrderNo, TradeNo, RefundNo, Currency, Status string
+	AmountMinor, TotalMinor                              int64
+	OccurredAt                                           time.Time
+	EvidenceDigest, RefundDigest                         effectport.Digest
 }
 type AlipayReconciler interface {
 	QueryPayment(context.Context, string) (AlipayPaymentQuery, error)
-	QueryRefund(context.Context, string) (AlipayRefundQuery, error)
+	QueryRefund(context.Context, string, string) (AlipayRefundQuery, error)
 }
 
 type ProviderIntentReader interface {

@@ -446,10 +446,10 @@ func TestRefundConfirmationHonorsProviderBoundary(t *testing.T) {
 		}
 	})
 
-	t.Run("non-WeChat generic payment preserves its existing contract", func(t *testing.T) {
-		application := &appStub{payment: domain.Payment{ID: 9, Provider: domain.Provider("alipay")}}
-		handler, _ := NewHandler(application, nil, securityStub{}, true)
-		request := httptest.NewRequest(http.MethodPost, "/api/admin/payments/9/refunds", strings.NewReader(`{"amount_minor":200,"refund_no":"RF-generic","reason":"客户申请"}`))
+	t.Run("Alipay generic refund requires enabled provider and verified transaction", func(t *testing.T) {
+		application := &appStub{payment: domain.Payment{ID: 9, Provider: domain.ProviderAlipay, ProviderTransactionDigest: string(effectport.Hash("alipay.transaction", "ALI-TRADE-9"))}}
+		handler, _ := NewHandler(application, nil, securityStub{}, false, false, true)
+		request := httptest.NewRequest(http.MethodPost, "/api/admin/payments/9/refunds", strings.NewReader(`{"amount_minor":200,"refund_no":"RF-generic","reason":"客户申请","transaction_id_confirmation":"ALI-TRADE-9"}`))
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Idempotency-Key", "refund-generic-test-key")
 		response := httptest.NewRecorder()

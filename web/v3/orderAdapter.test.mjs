@@ -1082,3 +1082,49 @@ try {
 }
 
 console.log('order refund idempotency, exact readback, and unavailable-state journeys: PASS');
+
+const aliOrderNo = 'M-ALIPAY-REFUND-1';
+const aliCalls = [];
+const aliDom = new JSDOM(refundDetailHTML(aliOrderNo), {
+  url: `https://test.invalid/admin/orderDetail.html?id=${aliOrderNo}&provider=alipay`, runScripts: 'outside-only', pretendToBeVisual: true,
+  virtualConsole: new VirtualConsole(),
+  beforeParse(window) {
+    browserRuntime(window);
+    window.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof window.URL ? input.toString() : input.url, window.location.href);
+      const method = init.method || 'GET';
+      aliCalls.push({ url, method, body: init.body, key: new Headers(init.headers).get('Idempotency-Key') });
+      if (url.pathname === `/api/admin/orders/${aliOrderNo}`) return Response.json({ ...nativeOrderFixture(aliOrderNo), provider: 'alipay', transaction_id: 'ALI-TRADE-1' });
+      if (url.pathname === '/api/admin/refunds/recovery') return recoveryNotFound();
+      if (url.pathname === '/api/admin/refunds') return Response.json(scopedRefundPage());
+      if (url.pathname === `/api/admin/alipay/orders/${aliOrderNo}/refunds` && method === 'POST') return Response.json({ id: 901, refund_id: 'RF-ALI-901', out_refund_no: 'RF-ALI-901', status: 'processing', external_effect_id: '902', auto_retry_allowed: false }, { status: 202 });
+      return Response.json({ items: [] });
+    };
+  },
+});
+try {
+  aliDom.window.eval(host); await pause();
+  await aliDom.window.fetch('/api/admin/refunds'); await pause();
+  const document = aliDom.window.document;
+  assert.match(document.body.textContent, /再次输入支付宝交易单号/, 'Alipay reuses the existing refund form with its own verified trade label');
+  assert.doesNotMatch(document.body.textContent, /再次输入微信支付交易单号/);
+  const transaction = document.querySelector('[data-order-refund-transaction]');
+  const amount = document.querySelector('[data-order-refund-amount]');
+  const checked = document.querySelector('[data-order-refund-checked]');
+  const submit = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '确认提交退款申请');
+  transaction.value = 'ALI-TRADE-1'; amount.value = '1.20'; checked.checked = true;
+  submit.click(); await new Promise((resolve) => setTimeout(resolve, 100));
+  const posts = aliCalls.filter((call) => call.method === 'POST');
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url.pathname, `/api/admin/alipay/orders/${aliOrderNo}/refunds`);
+  assert.deepEqual(JSON.parse(posts[0].body), { provider: 'alipay', order_no: aliOrderNo, refund_amount_total: 120, reason: '用户主动申请退款', transaction_id_confirmation: 'ALI-TRADE-1', checked: true });
+  assert.ok(posts[0].key);
+  const stored = JSON.parse(aliDom.window.localStorage.getItem('aicrm.order-refund-intents.v1'));
+  assert.equal(stored[0].provider, 'alipay'); assert.equal(stored[0].idempotency_key, posts[0].key);
+  submit.click(); await pause();
+  assert.equal(aliCalls.filter((call) => call.method === 'POST').length, 1, 'accepted Alipay intent prevents another POST');
+  for (const call of aliCalls.filter((call) => call.url.pathname === '/api/admin/refunds' || call.url.pathname === '/api/admin/refunds/recovery')) {
+    assert.equal(call.url.searchParams.get('provider'), 'alipay'); assert.equal(call.url.searchParams.get('order_no'), aliOrderNo);
+  }
+} finally { aliDom.window.close(); }
+console.log('Alipay refund uses existing form, exact scope, partial amount, and durable intent: PASS');

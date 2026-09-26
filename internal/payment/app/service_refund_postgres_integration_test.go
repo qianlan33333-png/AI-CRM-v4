@@ -92,6 +92,12 @@ func (sequence *profitSharingReconcilerSequence) QueryProfitSharingUnfreeze(cont
 }
 
 func TestPostgreSQLWeChatPayRefundSerializesNewKeysPerPayment(t *testing.T) {
+	testPostgreSQLRefundSerializesNewKeysPerPayment(t, "wechat_pay", "mini_program")
+}
+func TestPostgreSQLAlipayRefundSerializesNewKeysPerPayment(t *testing.T) {
+	testPostgreSQLRefundSerializesNewKeysPerPayment(t, "alipay", "alipay_wap")
+}
+func testPostgreSQLRefundSerializesNewKeysPerPayment(t *testing.T, provider, channel string) {
 	pool, cleanup := paymentAppIntegrationPool(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -106,10 +112,10 @@ func TestPostgreSQLWeChatPayRefundSerializesNewKeysPerPayment(t *testing.T) {
 	repository := paymentstore.NewPostgreSQL()
 	now := time.Date(2026, 9, 12, 7, 0, 0, 0, time.UTC)
 	var orderID, paymentID int64
-	if err = pool.QueryRow(ctx, `INSERT INTO orders(provider,source_system,source_key,merchant_order_no,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,record_origin,effect_eligible,created_at,updated_at) VALUES('wechat_pay','refund-concurrency','native-refund-concurrency','M-refund-concurrency',11,11,1000,'CNY','paid','native',true,$1,$1) RETURNING id`, now).Scan(&orderID); err != nil {
+	if err = pool.QueryRow(ctx, `INSERT INTO orders(provider,source_system,source_key,merchant_order_no,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,record_origin,effect_eligible,created_at,updated_at) VALUES($2,'refund-concurrency','native-refund-concurrency','M-refund-concurrency',11,11,1000,'CNY','paid','native',true,$1,$1) RETURNING id`, now, provider).Scan(&orderID); err != nil {
 		t.Fatal(err)
 	}
-	if err = pool.QueryRow(ctx, `INSERT INTO payments(order_id,provider,payment_channel,merchant_order_no,payer_identity_id,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,version,created_at,updated_at) VALUES($1,'wechat_pay','mini_program','M-refund-concurrency',4,11,11,1000,'CNY','paid',1,$2,$2) RETURNING id`, orderID, now).Scan(&paymentID); err != nil {
+	if err = pool.QueryRow(ctx, `INSERT INTO payments(order_id,provider,payment_channel,merchant_order_no,payer_identity_id,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,version,created_at,updated_at) VALUES($1,$3,$4,'M-refund-concurrency',4,11,11,1000,'CNY','paid',1,$2,$2) RETURNING id`, orderID, now, provider, channel).Scan(&paymentID); err != nil {
 		t.Fatal(err)
 	}
 	service := NewService(uow, repository, orderStub{}, sessionStub{}, postgresRefundEffects{})
@@ -245,6 +251,78 @@ func TestPostgreSQLRefundQueryBeforeCallbackKeepsOneSettlement(t *testing.T) {
 	if status != "completed" || digest != string(providerDigest) || version != 3 || callbackCount != 1 || callbackOutcome != "replayed" || orders.settlementCount != 1 {
 		t.Fatalf("query/callback replay status=%s digest=%s version=%d receipts=%d outcome=%s order_settlements=%d", status, digest, version, callbackCount, callbackOutcome, orders.settlementCount)
 	}
+}
+
+func TestPostgreSQLAlipayRefundQueryBeforeCallbackKeepsOneSettlement(t *testing.T) {
+	pool, cleanup := paymentAppIntegrationPool(t)
+	defer cleanup()
+	ctx := context.Background()
+	wrapped, err := platformpostgres.Wrap(pool, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uow, err := platformpostgres.NewUnitOfWork(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)
+	var orderID, paymentID, refundID int64
+	if err = pool.QueryRow(ctx, `INSERT INTO orders(provider,source_system,source_key,merchant_order_no,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,record_origin,effect_eligible,created_at,updated_at) VALUES('alipay','refund-callback-order','refund-callback-order-1','M-refund-query-first',11,11,1000,'CNY','paid','native',true,$1,$1) RETURNING id`, now).Scan(&orderID); err != nil {
+		t.Fatal(err)
+	}
+	if err = pool.QueryRow(ctx, `INSERT INTO payments(order_id,provider,payment_channel,merchant_order_no,payer_identity_id,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,version,created_at,updated_at) VALUES($1,'alipay','alipay_wap','M-refund-query-first',4,11,11,1000,'CNY','paid',1,$2,$2) RETURNING id`, orderID, now).Scan(&paymentID); err != nil {
+		t.Fatal(err)
+	}
+	if err = pool.QueryRow(ctx, `INSERT INTO payment_refunds(payment_id,provider,refund_no,amount_minor,reason,status,version,created_at,updated_at) VALUES($1,'alipay','R-refund-query-first',300,'fixture refund','effect_accepted',2,$2,$2) RETURNING id`, paymentID, now).Scan(&refundID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE payments SET provider_transaction_digest=$1 WHERE id=$2`, string(effectport.Hash("alipay.transaction", "ALI-QUERY-FIRST")), paymentID); err != nil {
+		t.Fatal(err)
+	}
+	providerDigest := effectport.Hash("alipay.refund", "R-refund-query-first", "ALI-QUERY-FIRST")
+	orders := &postgresOrderSettlementRecorder{}
+	service := NewService(uow, paymentstore.NewPostgreSQL(), orders, sessionStub{}, postgresRefundEffects{})
+	if err = service.SetAlipayReconciler(&alipayRefundReconcilerStub{query: paymentport.AlipayRefundQuery{
+		MerchantOrderNo: "M-refund-query-first", TradeNo: "ALI-QUERY-FIRST", RefundNo: "R-refund-query-first", Currency: "CNY", Status: "REFUND_SUCCESS", AmountMinor: 300, TotalMinor: 1000,
+		OccurredAt: now.Add(time.Minute), EvidenceDigest: effectport.Hash("alipay.refund.query", "R-refund-query-first"), RefundDigest: providerDigest,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err = service.ReconcileAlipayRefund(ctx, refundID); err != nil {
+			t.Fatalf("provider query settlement: %v", err)
+		}
+	}
+	callback := paymentprovider.CallbackResult{
+		Provider: domain.ProviderAlipay, Kind: "refund", RefundNo: "R-refund-query-first", AmountMinor: 300, Currency: "CNY", OccurredAt: now.Add(time.Minute),
+		ProviderRefundDigest: string(providerDigest), EventDigest: [32]byte{7}, BodyDigest: [32]byte{8},
+	}
+	if err = service.ApplyVerifiedCallback(ctx, callback); err != nil {
+		t.Fatalf("late verified callback: %v", err)
+	}
+	if err = service.ApplyVerifiedCallback(ctx, callback); err != nil {
+		t.Fatalf("repeated verified callback: %v", err)
+	}
+	var status, digest, callbackOutcome string
+	var version, callbackCount int
+	if err = pool.QueryRow(ctx, `SELECT status,provider_refund_digest,version FROM payment_refunds WHERE id=$1`, refundID).Scan(&status, &digest, &version); err != nil {
+		t.Fatal(err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT count(*),max(outcome) FROM payment_callback_receipts WHERE refund_id=$1`, refundID).Scan(&callbackCount, &callbackOutcome); err != nil {
+		t.Fatal(err)
+	}
+	if status != "completed" || digest != string(providerDigest) || version != 3 || callbackCount != 1 || callbackOutcome != "replayed" || orders.settlementCount != 1 {
+		t.Fatalf("query/callback replay status=%s digest=%s version=%d receipts=%d outcome=%s order_settlements=%d", status, digest, version, callbackCount, callbackOutcome, orders.settlementCount)
+	}
+	_, err = service.RequestRefund(ctx, paymentport.RefundCommand{PaymentID: paymentID, AmountMinor: 701, RefundNo: "RF-exceeds-remaining", Reason: "fixture", ActorScope: "admin:17", IdempotencyKey: "alipay-exceeds-remaining-0001"})
+	if !errors.Is(err, paymentport.ErrConflict) {
+		t.Fatalf("completed partial refund failed to reserve amount: %v", err)
+	}
+	later, err := service.RequestRefund(ctx, paymentport.RefundCommand{PaymentID: paymentID, AmountMinor: 700, RefundNo: "RF-refund-remaining", Reason: "fixture", ActorScope: "admin:17", IdempotencyKey: "alipay-refund-remaining-0001"})
+	if err != nil || later.ID == refundID {
+		t.Fatalf("remaining full refund rejected: %v", err)
+	}
+
 }
 
 func TestPostgreSQLProfitSharingCompletionUpdatesOnlyMatchingEffect(t *testing.T) {
@@ -480,7 +558,7 @@ func paymentAppIntegrationPool(t *testing.T) (*pgxpool.Pool, func()) {
 	}
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Join(filepath.Dir(file), "..", "..", "..")
-	for _, name := range []string{"0001_platform.sql", "0002_identity.sql", "0005_external_effects.sql", "0020_order.sql", "0021_payment.sql", "0024_order_product_version.sql", "0025_payment_reconciliation.sql", "0061_product_public_purchase.sql", "0068_payment_session_beneficiary_selection.sql", "0127_payment_historical_refund_states.sql", "0131_payment_historical_unassigned.sql", "0134_payment_history_source_delta.sql", "0140_payment_h5_unionid_verified.sql", "0143_payment_checkout_abandonments.sql", "0144_payment_checkout_restart_permissions.sql", "0156_distribution_profit_sharing_payment.sql", "0157_distribution_core.sql", "0161_payment_paid_confirmation_time.sql", "0163_payment_profit_sharing_receiver_recovery.sql", "0165_payment_profit_sharing_receiver_failure_class.sql", "0166_payment_profit_sharing_instruction_failure_class.sql", "0167_distribution_settlement_not_paid_exception.sql"} {
+	for _, name := range []string{"0001_platform.sql", "0002_identity.sql", "0005_external_effects.sql", "0020_order.sql", "0021_payment.sql", "0024_order_product_version.sql", "0025_payment_reconciliation.sql", "0061_product_public_purchase.sql", "0068_payment_session_beneficiary_selection.sql", "0127_payment_historical_refund_states.sql", "0131_payment_historical_unassigned.sql", "0134_payment_history_source_delta.sql", "0140_payment_h5_unionid_verified.sql", "0143_payment_checkout_abandonments.sql", "0144_payment_checkout_restart_permissions.sql", "0156_distribution_profit_sharing_payment.sql", "0157_distribution_core.sql", "0161_payment_paid_confirmation_time.sql", "0163_payment_profit_sharing_receiver_recovery.sql", "0165_payment_profit_sharing_receiver_failure_class.sql", "0166_payment_profit_sharing_instruction_failure_class.sql", "0167_distribution_settlement_not_paid_exception.sql", "0202_alipay_web_payment.sql", "0206_order_native_alipay_checkout.sql", "0207_payment_alipay_provider_channels.sql"} {
 		raw, readErr := os.ReadFile(filepath.Join(root, "migrations", name))
 		if readErr != nil {
 			pool.Close()

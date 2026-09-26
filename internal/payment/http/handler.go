@@ -236,7 +236,9 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	case strings.HasPrefix(path, "/api/admin/wechat-pay/refunds/") && strings.HasSuffix(path, "/reconcile"):
 		handler.reconcileWeChatPay(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/api/admin/wechat-pay/refunds/"), "/reconcile"), true)
 	case strings.HasPrefix(path, "/api/admin/wechat-pay/orders/") && strings.HasSuffix(path, "/refunds"):
-		handler.compatRefund(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/api/admin/wechat-pay/orders/"), "/refunds"))
+		handler.compatRefund(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/api/admin/wechat-pay/orders/"), "/refunds"), domain.ProviderWeChatPay)
+	case strings.HasPrefix(path, "/api/admin/alipay/orders/") && strings.HasSuffix(path, "/refunds"):
+		handler.compatRefund(writer, request, strings.TrimSuffix(strings.TrimPrefix(path, "/api/admin/alipay/orders/"), "/refunds"), domain.ProviderAlipay)
 	case strings.HasPrefix(path, "/api/admin/order-deliveries/"):
 		handler.orderEffects(writer, request)
 	case strings.HasPrefix(path, "/api/admin/wechat-pay/orders/") && strings.HasSuffix(path, "/external-push-deliveries"):
@@ -517,6 +519,8 @@ func parseRefundListQuery(request *http.Request) (domain.Provider, string, int64
 		provider = domain.ProviderWeChatPay
 	case "wechat_shop":
 		provider = domain.ProviderWeChatShop
+	case "alipay":
+		provider = domain.ProviderAlipay
 	default:
 		return "", "", 0, 0, false, false
 	}
@@ -539,6 +543,8 @@ func parseRefundRecoveryQuery(request *http.Request) (domain.Provider, string, b
 		return domain.ProviderWeChatPay, merchantOrderNo, true
 	case "wechat_shop":
 		return domain.ProviderWeChatShop, merchantOrderNo, true
+	case "alipay":
+		return domain.ProviderAlipay, merchantOrderNo, true
 	default:
 		return "", "", false
 	}
@@ -643,8 +649,8 @@ func (handler *Handler) shopRefund(writer http.ResponseWriter, request *http.Req
 	writeJSON(writer, http.StatusAccepted, map[string]any{"id": refund.ID, "refund_id": refund.RefundNo, "out_refund_no": refund.RefundNo, "provider": "wechat_shop", "state": compatRefundStatus(refund.Status), "status": compatRefundStatus(refund.Status), "external_effect_id": strings.TrimPrefix(refund.EffectID, "eer_"), "real_external_call_executed": false, "delivery_proven": false})
 }
 
-func (handler *Handler) compatRefund(writer http.ResponseWriter, request *http.Request, orderRef string) {
-	if !handler.writesEnabled {
+func (handler *Handler) compatRefund(writer http.ResponseWriter, request *http.Request, orderRef string, provider domain.Provider) {
+	if !handler.providerEnabled(provider) {
 		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")
 		return
 	}
@@ -669,16 +675,16 @@ func (handler *Handler) compatRefund(writer http.ResponseWriter, request *http.R
 	if !decodeJSON(writer, request, &body) {
 		return
 	}
-	if orderRef == "" || (body.OrderNo != "" && body.OrderNo != orderRef) || !body.Checked || !validTransactionConfirmation(body.TransactionIDConfirmation) {
+	if (body.Provider != "" && body.Provider != string(provider) && !(provider == domain.ProviderWeChatPay && body.Provider == "wechat")) || orderRef == "" || (body.OrderNo != "" && body.OrderNo != orderRef) || !body.Checked || !validTransactionConfirmation(body.TransactionIDConfirmation) {
 		writeError(writer, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	payment, err := handler.app.FindPayment(request.Context(), domain.ProviderWeChatPay, orderRef)
+	payment, err := handler.app.FindPayment(request.Context(), provider, orderRef)
 	if err != nil {
 		resultError(writer, err)
 		return
 	}
-	if !matchesVerifiedWeChatTransaction(payment, body.TransactionIDConfirmation) {
+	if payment.Provider != provider || payment.MerchantOrderNo != orderRef || !matchesVerifiedPaymentTransaction(payment, body.TransactionIDConfirmation) {
 		writeError(writer, http.StatusBadRequest, "invalid_request")
 		return
 	}
@@ -823,6 +829,8 @@ func (handler *Handler) providerEnabled(provider domain.Provider) bool {
 	switch provider {
 	case domain.ProviderWeChatPay:
 		return handler != nil && handler.writesEnabled
+	case domain.ProviderWeChatShop:
+		return handler != nil && handler.shopWritesEnabled
 	case domain.ProviderAlipay:
 		return handler != nil && handler.alipayWritesEnabled
 	default:
@@ -1068,10 +1076,6 @@ func (handler *Handler) readPaidPurchaseAction(ctx context.Context, orderID int6
 }
 
 func (handler *Handler) refund(writer http.ResponseWriter, request *http.Request, rawPaymentID string) {
-	if !handler.writesEnabled {
-		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")
-		return
-	}
 	if request.Method != http.MethodPost {
 		methodNotAllowed(writer, http.MethodPost)
 		return
@@ -1100,10 +1104,12 @@ func (handler *Handler) refund(writer http.ResponseWriter, request *http.Request
 		resultError(writer, err)
 		return
 	}
-	// This route spans providers. Only WeChat Pay has the verified callback
-	// transaction fact this confirmation checks; preserve every other provider's
-	// established contract instead of inventing a cross-provider substitute.
-	if payment.Provider == domain.ProviderWeChatPay && !matchesVerifiedWeChatTransaction(payment, body.TransactionIDConfirmation) {
+	if !handler.providerEnabled(payment.Provider) {
+		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")
+		return
+	}
+	// Both direct payment providers require the verified original transaction.
+	if (payment.Provider == domain.ProviderWeChatPay || payment.Provider == domain.ProviderAlipay) && !matchesVerifiedPaymentTransaction(payment, body.TransactionIDConfirmation) {
 		writeError(writer, http.StatusBadRequest, "invalid_request")
 		return
 	}
@@ -1123,13 +1129,20 @@ func validTransactionConfirmation(value string) bool {
 // transaction_id to the digest stored from a verified payment callback or
 // reconciliation. It never treats the merchant order number as a substitute.
 func matchesVerifiedWeChatTransaction(payment domain.Payment, confirmation string) bool {
+	return payment.Provider == domain.ProviderWeChatPay && matchesVerifiedPaymentTransaction(payment, confirmation)
+}
+
+func matchesVerifiedPaymentTransaction(payment domain.Payment, confirmation string) bool {
 	if !validTransactionConfirmation(confirmation) || payment.ProviderTransactionDigest == "" {
 		return false
 	}
-	if payment.Provider != domain.ProviderWeChatPay {
+	namespace := "wechatpay.transaction"
+	if payment.Provider == domain.ProviderAlipay {
+		namespace = "alipay.transaction"
+	} else if payment.Provider != domain.ProviderWeChatPay {
 		return false
 	}
-	expected := effectport.Hash("wechatpay.transaction", confirmation)
+	expected := effectport.Hash(namespace, confirmation)
 	return len(payment.ProviderTransactionDigest) == len(expected) && subtle.ConstantTimeCompare([]byte(payment.ProviderTransactionDigest), []byte(expected)) == 1
 }
 

@@ -151,6 +151,9 @@ func (a *Alipay) Execute(ctx context.Context, envelope effectport.Envelope, atte
 		return final("alipay.material", envelope, attempt), nil
 	}
 	if envelope.Kind == effectport.KindAlipayRefund {
+		if !validAlipayReference(material.Intent.MerchantOrderNo) || !validAlipayReference(material.Intent.RefundNo) || material.Intent.AmountMinor < 1 || material.Intent.AmountMinor > material.Intent.TotalMinor || material.Intent.Currency != "CNY" {
+			return final("alipay.refund.invalid", envelope, attempt), nil
+		}
 		_, callErr := a.Refund(ctx, RefundRequest{MerchantOrderNo: material.Intent.MerchantOrderNo, RefundAmount: minorToAmount(material.Intent.AmountMinor), RefundReason: material.Intent.RefundReason, RefundRequestNo: material.Intent.RefundNo})
 		if callErr != nil {
 			return effectport.AdapterResult{Completion: effectport.StateUnknown, ReceiptDigest: receipt("alipay.refund.unknown", envelope, attempt), CallAttempted: true, RealExternalCallExecuted: true}, callErr
@@ -279,33 +282,62 @@ type RefundResult struct {
 }
 
 func (a *Alipay) Refund(ctx context.Context, request RefundRequest) (RefundResult, error) {
-	if !a.Enabled() || strings.TrimSpace(request.RefundAmount) == "" || strings.TrimSpace(request.RefundRequestNo) == "" || (strings.TrimSpace(request.MerchantOrderNo) == "" && strings.TrimSpace(request.TradeNo) == "") {
+	if !a.Enabled() || !validAlipayReference(request.RefundRequestNo) || (strings.TrimSpace(request.MerchantOrderNo) == "" && strings.TrimSpace(request.TradeNo) == "") {
+		return RefundResult{}, ErrInvalidMaterial
+	}
+	if _, err := amountToMinor(request.RefundAmount); err != nil {
 		return RefundResult{}, ErrInvalidMaterial
 	}
 	result, err := a.client.TradeRefund(ctx, alipay.TradeRefund{OutTradeNo: request.MerchantOrderNo, TradeNo: request.TradeNo, RefundAmount: request.RefundAmount, RefundReason: request.RefundReason, OutRequestNo: request.RefundRequestNo})
-	if err != nil || result == nil {
+	if err != nil || result == nil || !result.IsSuccess() || result.TradeNo == "" || (request.MerchantOrderNo != "" && result.OutTradeNo != request.MerchantOrderNo) || (request.TradeNo != "" && result.TradeNo != request.TradeNo) {
+		return RefundResult{}, ErrInvalidResponse
+	}
+	requestedMinor, amountErr := amountToMinor(request.RefundAmount)
+	refundedMinor, resultErr := amountToMinor(result.RefundFee)
+	if amountErr != nil || resultErr != nil || requestedMinor != refundedMinor || (result.FundChange != "Y" && result.FundChange != "N") {
 		return RefundResult{}, ErrInvalidResponse
 	}
 	return RefundResult{MerchantOrderNo: result.OutTradeNo, TradeNo: result.TradeNo, RefundAmount: result.RefundFee, FundChanged: result.FundChange == "Y"}, nil
 }
 
-func (a *Alipay) QueryRefund(ctx context.Context, refundNo string) (paymentport.AlipayRefundQuery, error) {
-	if !a.Enabled() || strings.TrimSpace(refundNo) == "" {
+// QueryRefund always uses the original order and refund keys. A successful
+// gateway query alone does not prove that the refund succeeded.
+func (a *Alipay) QueryRefund(ctx context.Context, merchantOrderNo, refundNo string) (paymentport.AlipayRefundQuery, error) {
+	if !a.Enabled() || !validAlipayReference(merchantOrderNo) || !validAlipayReference(refundNo) {
 		return paymentport.AlipayRefundQuery{}, ErrInvalidMaterial
 	}
-	result, err := a.client.TradeFastPayRefundQuery(ctx, alipay.TradeFastPayRefundQuery{OutRequestNo: refundNo})
-	if err != nil || result == nil {
+	result, err := a.client.TradeFastPayRefundQuery(ctx, alipay.TradeFastPayRefundQuery{OutTradeNo: merchantOrderNo, OutRequestNo: refundNo})
+	if err != nil || result == nil || !result.IsSuccess() || (result.OutTradeNo != "" && result.OutTradeNo != merchantOrderNo) || (result.OutRequestNo != "" && result.OutRequestNo != refundNo) {
 		return paymentport.AlipayRefundQuery{}, ErrInvalidResponse
 	}
-	amount, err := amountToMinor(result.RefundAmount)
-	if err != nil {
-		return paymentport.AlipayRefundQuery{}, err
+	query := paymentport.AlipayRefundQuery{MerchantOrderNo: merchantOrderNo, TradeNo: result.TradeNo, RefundNo: refundNo, Currency: "CNY", Status: result.RefundStatus, OccurredAt: time.Now().UTC(), EvidenceDigest: effectport.Hash("alipay.refund.query.v2", merchantOrderNo, refundNo, result.TradeNo, result.RefundStatus, result.RefundAmount, result.TotalAmount)}
+	if result.RefundStatus != "REFUND_SUCCESS" {
+		return query, nil
 	}
-	total, err := amountToMinor(result.TotalAmount)
-	if err != nil {
-		return paymentport.AlipayRefundQuery{}, err
+	if result.OutTradeNo != merchantOrderNo || result.OutRequestNo != refundNo || result.TradeNo == "" {
+		return paymentport.AlipayRefundQuery{}, ErrInvalidResponse
 	}
-	return paymentport.AlipayRefundQuery{RefundNo: result.OutRequestNo, Currency: "CNY", Status: result.RefundStatus, AmountMinor: amount, TotalMinor: total, OccurredAt: time.Now().UTC(), EvidenceDigest: effectport.Hash("alipay.refund.query", result.OutRequestNo, result.RefundStatus, result.RefundAmount), RefundDigest: effectport.Hash("alipay.refund", result.OutRequestNo, result.TradeNo)}, nil
+	query.AmountMinor, err = amountToMinor(result.RefundAmount)
+	if err != nil {
+		return paymentport.AlipayRefundQuery{}, ErrInvalidResponse
+	}
+	query.TotalMinor, err = amountToMinor(result.TotalAmount)
+	if err != nil || query.AmountMinor > query.TotalMinor {
+		return paymentport.AlipayRefundQuery{}, ErrInvalidResponse
+	}
+	if result.GMTRefundPay != "" {
+		occurred, parseErr := time.ParseInLocation("2006-01-02 15:04:05", result.GMTRefundPay, time.FixedZone("CST", 8*60*60))
+		if parseErr != nil {
+			return paymentport.AlipayRefundQuery{}, ErrInvalidResponse
+		}
+		query.OccurredAt = occurred.UTC()
+	}
+	query.RefundDigest = effectport.Hash("alipay.refund", refundNo, result.TradeNo)
+	return query, nil
+}
+
+func validAlipayReference(value string) bool {
+	return value != "" && strings.TrimSpace(value) == value && len(value) <= 64
 }
 
 type Notification struct {
