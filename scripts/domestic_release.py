@@ -1201,16 +1201,20 @@ def verify_install_receipt(receipt: dict | None, metadata: dict, previous_sha: s
 def copy_payload(config: dict, sha: str, payload: Path, metadata: Path, link_sha: str) -> tuple[str, str]:
     incoming = f"{config['prod_incoming'].rstrip('/')}/{sha}"
     remote_meta = f"{config['prod_incoming'].rstrip('/')}/{sha}.json"
-    # Dedicated account can only write incoming; root-owned helper revalidates
-    # and moves into immutable releases under the shared host lock.
-    command(*ssh_args(config), "mkdir", "-m", "0700", "--", incoming, timeout=30)
+    # The incoming root is root-owned 0700. Create only this candidate with
+    # the fixed non-interactive sudo command; do not relax the directory.
+    # The root-owned helper revalidates both files and moves the release under
+    # the shared host lock.
+    command(*ssh_args(config), "sudo", "-n", "/usr/bin/mkdir", "-m", "0700", "--", incoming, timeout=30)
     transport = " ".join(shlex.quote(part) for part in ssh_args(config)[:-1])
     # -e is a fixed local command string; config is provisioned by root.
     # Protected Linux hardlinks forbid the unprivileged receiver from linking
-    # root-owned previous releases. Receive through the fixed sudo rsync path;
-    # the installer still verifies every byte before making it current.
-    command("rsync", "-a", "--no-owner", "--no-group", "--no-perms", "--checksum", "--delete", "--rsync-path=sudo rsync", f"--link-dest=/opt/aicrm/releases/{link_sha}", "-e", transport, f"{payload}/", f"{config['prod_user']}@{config['prod_host']}:{incoming}/", timeout=600)
-    command("rsync", "-a", "-e", transport, str(metadata), f"{config['prod_user']}@{config['prod_host']}:{remote_meta}", timeout=60)
+    # root-owned previous releases. Receive both payload and metadata through
+    # the fixed non-interactive sudo rsync path; the installer verifies them
+    # before making the payload current.
+    rsync_path = "--rsync-path=sudo -n /usr/bin/rsync"
+    command("rsync", "-a", "--no-owner", "--no-group", "--no-perms", "--checksum", "--delete", rsync_path, f"--link-dest=/opt/aicrm/releases/{link_sha}", "-e", transport, f"{payload}/", f"{config['prod_user']}@{config['prod_host']}:{incoming}/", timeout=600)
+    command("rsync", "-a", rsync_path, "-e", transport, str(metadata), f"{config['prod_user']}@{config['prod_host']}:{remote_meta}", timeout=60)
     return incoming, remote_meta
 
 

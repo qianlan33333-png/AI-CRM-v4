@@ -75,6 +75,62 @@ class DomesticReleaseTest(unittest.TestCase):
     def tearDown(self):
         self.release_gate.stop()
 
+    def test_copy_payload_uses_root_access_for_protected_incoming_and_metadata(self):
+        sha, previous = "b" * 40, "a" * 40
+        config = {
+            "prod_incoming": "/opt/aicrm/domestic-incoming",
+            "prod_user": "ubuntu",
+            "prod_host": "10.0.4.13",
+        }
+        ssh = ["ssh", "-i", "/fixed/deploy-key", "-o", "BatchMode=yes", "ubuntu@10.0.4.13"]
+        payload = Path("/build/release")
+        metadata = Path("/build/domestic-release.json")
+        incoming = f"{config['prod_incoming']}/{sha}"
+        remote_metadata = f"{config['prod_incoming']}/{sha}.json"
+        transport = "ssh -i /fixed/deploy-key -o BatchMode=yes"
+
+        with mock.patch.object(worker, "ssh_args", return_value=ssh), mock.patch.object(worker, "command") as command:
+            self.assertEqual(worker.copy_payload(config, sha, payload, metadata, previous), (incoming, remote_metadata))
+
+        self.assertEqual(command.call_args_list, [
+            mock.call(
+                *ssh,
+                "sudo", "-n", "/usr/bin/mkdir", "-m", "0700", "--", incoming,
+                timeout=30,
+            ),
+            mock.call(
+                "rsync", "-a", "--no-owner", "--no-group", "--no-perms", "--checksum", "--delete",
+                "--rsync-path=sudo -n /usr/bin/rsync", f"--link-dest=/opt/aicrm/releases/{previous}",
+                "-e", transport, f"{payload}/", f"ubuntu@10.0.4.13:{incoming}/", timeout=600,
+            ),
+            mock.call(
+                "rsync", "-a", "--rsync-path=sudo -n /usr/bin/rsync", "-e", transport,
+                str(metadata), f"ubuntu@10.0.4.13:{remote_metadata}", timeout=60,
+            ),
+        ])
+
+    def test_copy_payload_stops_when_protected_candidate_directory_already_exists(self):
+        sha = "b" * 40
+        config = {
+            "prod_incoming": "/opt/aicrm/domestic-incoming",
+            "prod_user": "ubuntu",
+            "prod_host": "10.0.4.13",
+        }
+        ssh = ["ssh", "-i", "/fixed/deploy-key", "ubuntu@10.0.4.13"]
+        incoming = f"{config['prod_incoming']}/{sha}"
+
+        with mock.patch.object(worker, "ssh_args", return_value=ssh), mock.patch.object(
+            worker, "command", side_effect=RuntimeError("candidate directory already exists")
+        ) as command:
+            with self.assertRaisesRegex(RuntimeError, "candidate directory already exists"):
+                worker.copy_payload(config, sha, Path("/build/release"), Path("/build/domestic-release.json"), "a" * 40)
+
+        command.assert_called_once_with(
+            *ssh,
+            "sudo", "-n", "/usr/bin/mkdir", "-m", "0700", "--", incoming,
+            timeout=30,
+        )
+
     @staticmethod
     def _ci_run(sha, *, run_id=1, event="push", attempt=1, started="2026-09-24T10:00:00Z", marker=True):
         return {
