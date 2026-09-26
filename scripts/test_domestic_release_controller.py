@@ -974,6 +974,38 @@ class DomesticMainReleaseTests(unittest.TestCase):
                     with release._verified_overlay_seed_bundle(repo, work_root, malformed, candidate, base):
                         self.fail("multi-ref seed bundle must not be accepted")
 
+    def test_baseline_overlay_seed_git_metadata_is_readable_under_umask_077(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            subprocess.run(["git", f"--git-dir={repo}", "update-ref", "refs/heads/main", candidate], check=True)
+            bundle = root / f"domestic-main-seed-{candidate}.bundle"
+            subprocess.run(["git", f"--git-dir={repo}", "bundle", "create", str(bundle), "refs/heads/main"],
+                           check=True, stdout=subprocess.DEVNULL)
+            work_root = root / "work"
+            work_root.mkdir(mode=0o700)
+            with mock.patch.object(release, "BASELINE_OVERLAY_SEED_ROOT", root):
+                old_umask = os.umask(0o077)
+                try:
+                    with release._verified_overlay_seed_bundle(
+                            repo, work_root, bundle, candidate, base) as (seed_repo, _digest, _tree):
+                        self.assertEqual(stat.S_IMODE(seed_repo.parent.stat().st_mode), 0o711)
+                        self.assertEqual(stat.S_IMODE((seed_repo.parent / "seed.bundle").stat().st_mode), 0o600)
+                        self.assertEqual(stat.S_IMODE(seed_repo.stat().st_mode), 0o755)
+                        for current, dirs, files in os.walk(seed_repo):
+                            directory_mode = stat.S_IMODE(Path(current).stat().st_mode)
+                            self.assertTrue(directory_mode & 0o001, f"Git directory is not traversable: {current}")
+                            self.assertFalse(directory_mode & 0o022, f"Git directory is group/world-writable: {current}")
+                            for name in files:
+                                file_path = Path(current) / name
+                                file_mode = stat.S_IMODE(file_path.stat().st_mode)
+                                self.assertTrue(file_mode & 0o004, f"Git file is not readable: {file_path.name}")
+                                self.assertFalse(file_mode & 0o022, f"Git file is group/world-writable: {file_path.name}")
+                        current_umask = os.umask(0o077)
+                        self.assertEqual(current_umask, 0o077)
+                finally:
+                    os.umask(old_umask)
+
     def test_baseline_overlay_runs_local_base291_tool_and_host_preflight(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

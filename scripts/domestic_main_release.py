@@ -2617,7 +2617,7 @@ def _verified_overlay_seed_bundle(repo: Path, work_root: Path, seed_bundle: Path
             target.flush()
             os.fsync(target.fileno())
         seed_repo = Path(temporary) / "seed.git"
-        _run(["git", "init", "--bare", "--quiet", str(seed_repo)])
+        _run(["git", "init", "--bare", "--quiet", str(seed_repo)], umask=0o022)
         verification = _run(["git", f"--git-dir={seed_repo}", "bundle", "verify", str(bundle)]).stdout
         if "The bundle records a complete history." not in verification:
             raise ReleaseError("baseline overlay seed bundle is not self-contained")
@@ -2625,7 +2625,8 @@ def _verified_overlay_seed_bundle(repo: Path, work_root: Path, seed_bundle: Path
         heads = _run(["git", "bundle", "list-heads", str(bundle)]).stdout.splitlines()
         if heads != [f"{candidate_sha} {ref}"]:
             raise ReleaseError("baseline overlay seed bundle has unexpected refs")
-        _run(["git", f"--git-dir={seed_repo}", "fetch", "--no-tags", str(bundle), f"{ref}:refs/heads/main"])
+        _run(["git", f"--git-dir={seed_repo}", "fetch", "--no-tags", str(bundle), f"{ref}:refs/heads/main"],
+             umask=0o022)
         _run(["git", f"--git-dir={seed_repo}", "fsck", "--full", "--strict", "--no-reflogs"])
         candidate_tree = _tree(seed_repo, candidate_sha)
         if (not _is_ancestor(seed_repo, base_sha, candidate_sha)
