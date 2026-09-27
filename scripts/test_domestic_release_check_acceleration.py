@@ -12,6 +12,15 @@ from scripts import domestic_main_release as release
 
 
 class AccelerationGateTest(unittest.TestCase):
+    def test_commerce_preparation_only_follows_the_enforced_verified_mapping(self):
+        exact = {"selection_mode": "targeted", "selection_reasons": ["public-commerce-v1", "go-test-import-closure"]}
+        self.assertEqual(release._lane_check_profile(exact, "affected-packages"), "public-commerce-v1")
+        for selection, profile in (({**exact, "selection_mode": "full"}, "affected-packages"),
+                                   (exact, "full"), ({"selection_mode": "targeted"}, "affected-packages"),
+                                   ({**exact, "selection_reasons": ["payment-leaf"]}, "affected-packages")):
+            self.assertEqual(release._lane_check_profile(selection, profile), "full")
+        self.assertEqual(release._lane_check_profile({}, "tooling"), "tooling")
+
     def test_browser_overlaps_real_backend_execution_but_never_waits_forever_after_backend_exit(self):
         for outcome in ("running", "no-tests", "environment", "timeout"):
             with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as temp:

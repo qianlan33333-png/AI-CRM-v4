@@ -73,6 +73,8 @@ class CheckPreparationTest(unittest.TestCase):
             prep.npm_dependencies(root, ".")
             prep.npm_dependencies(root, ".")
             self.assertEqual(run.call_count, 1)
+            self.assertIn("--prefer-offline", run.call_args.args[0])
+            self.assertNotIn("--offline", run.call_args.args[0])
             (root / "package-lock.json").write_text("second")
             prep.npm_dependencies(root, ".")
             self.assertEqual(run.call_count, 2)

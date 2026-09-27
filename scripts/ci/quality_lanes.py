@@ -633,6 +633,28 @@ def tooling_contract_commands() -> list[list[str]]:
     ]
 
 
+def commerce_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[list[str]]:
+    """Preparation for the trusted bounded commerce mapping, not a generic fast lane.
+
+    Checker/installer/Excel changes cannot enter this mapping. Package suites
+    and newly discovered browser journeys still execute; an unfamiliar journey
+    keeps the complete browser dependency setup.
+    """
+    if lane == "preflight":
+        canonical = commands(lane, report_dir)
+        return [canonical[0], canonical[5]]  # Actual source guards and exact diff dedup.
+    if lane == "backend":
+        canonical = commands(lane, report_dir)
+        return [canonical[0], *canonical[4:]]  # Stage, complete vet and complete Go suites.
+    if lane == "browser":
+        import commerce_checks
+        known = {(path, name) for path, name in commerce_checks.JOURNEY_FILES.items()}
+        selected = {(check.get("path"), check.get("test")) for check in checks if check.get("lane") == lane}
+        canonical = focused_commands(lane, report_dir, checks)
+        return canonical[3:] if selected == known else canonical
+    raise ValueError("commerce profile does not cover lane: " + lane)
+
+
 def focused_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[list[str]]:
     """Run registered checks for a lane, falling back to its full lane when a
     check cannot be expressed safely as a focused command.
@@ -706,7 +728,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lane", choices=LANES)
     parser.add_argument("--report-dir", type=Path)
-    parser.add_argument("--profile", choices=("full", "tooling"), default="full")
+    parser.add_argument("--profile", choices=("full", "tooling", "public-commerce-v1"), default="full")
     parser.add_argument("--focus-checks-json", default=os.environ.get("AICRM_CI_FOCUS_CHECKS", ""))
     parser.add_argument("--focus-packages-json", default=os.environ.get("AICRM_CI_FOCUS_PACKAGES", ""))
     parser.add_argument("--resume-commands-json", default="[]")
@@ -750,12 +772,16 @@ def main() -> int:
                 raise ValueError("focused check and package lists must be JSON arrays")
             if packages and checks:
                 raise ValueError("package focus and named-check focus cannot be combined")
-            if packages and (args.lane != "backend" or args.profile != "full"):
+            if packages and (args.lane != "backend" or args.profile not in {"full", "public-commerce-v1"}):
                 raise ValueError("affected package focus is only valid for the full backend lane")
             if args.profile == "tooling":
                 if args.lane != "preflight":
                     raise ValueError("tooling profile is only valid for the preflight receipt lane")
                 lane_commands = tooling_contract_commands()
+            elif args.profile == "public-commerce-v1":
+                if args.lane == "backend" and not packages:
+                    raise ValueError("commerce backend requires the complete affected package inventory")
+                lane_commands = commerce_commands(args.lane, args.report_dir, checks)
             else:
                 lane_commands = (focused_commands(args.lane, args.report_dir, checks)
                                  if checks and args.lane != "preflight" else commands(args.lane, args.report_dir))

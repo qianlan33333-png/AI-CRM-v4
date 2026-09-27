@@ -160,7 +160,7 @@ def run(command: list[str], root: Path) -> None:
 def npm_dependencies(root: Path, prefix: str) -> None:
     prep = preparation_root()
     package = root / prefix
-    command = ["npm", "ci", "--no-audit", "--no-fund"]
+    command = ["npm", "ci", "--prefer-offline", "--no-audit", "--no-fund"]
     if prefix != ".":
         command += ["--prefix", prefix]
     if prep is None:

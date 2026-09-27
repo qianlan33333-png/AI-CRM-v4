@@ -1652,6 +1652,13 @@ def _run_check_process(args: list[str], *, cwd: Path, output, timeout: int) -> s
         raise
 
 
+def _lane_check_profile(enforced: dict[str, Any], profile: str) -> str:
+    if (enforced.get("selection_mode") == "targeted" and profile == "affected-packages"
+            and "public-commerce-v1" in enforced.get("selection_reasons", [])):
+        return "public-commerce-v1"
+    return "tooling" if profile == "tooling" else "full"
+
+
 def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                      execution_worktree: Path, report_dir: Path,
                      base_sha: str, head_sha: str, enforced: dict[str, Any],
@@ -1684,7 +1691,12 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                         reused_duration_seconds=snapshot["result"].get("duration_seconds"))
         checkout = (execution_worktree if lane == "preflight" else
                     _private_check_checkout(config, repo, execution_worktree.parent / ("candidate-" + lane), head_sha))
-        if lane in {"backend", "frontend", "browser"}:
+        preparation_helper = (policy / "scripts/ci/check_preparation.py").is_file()
+        # The canonical backend stage prepares both dependency trees itself.
+        # Pre-installing them here makes stage rehash the same writable copies.
+        backend_stages_dependencies = preparation_helper and (
+            enforced.get("selection_mode") == "full" or bool(packages))
+        if lane in {"frontend", "browser"} or (lane == "backend" and not backend_stages_dependencies):
             _prepare_check_dependencies(config, checkout, [lane],
                 diagnostic_root / f"{head_sha}-{report_dir.name}-{lane}-npm-ci.log", policy=policy)
         # Let backend compile/link its first test binary before Chromium takes
@@ -1696,7 +1708,9 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
             backend_running.wait()
         scheduler_wait = time.monotonic() - waiting
         args = [lane, "--report-dir", str(lane_dir)]
-        if lane == "preflight":
+        if _lane_check_profile(enforced, profile) == "public-commerce-v1":
+            args.extend(["--profile", "public-commerce-v1"])
+        elif lane == "preflight":
             args.extend(["--profile", "tooling" if profile == "tooling" else "full"])
         continued_names = []
         if lane == "browser" and snapshot.get("required_browser_tests"):

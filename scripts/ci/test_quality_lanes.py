@@ -13,6 +13,40 @@ import quality_lanes
 
 
 class QualityLaneTests(unittest.TestCase):
+    def test_commerce_preparation_retains_source_guards_whole_packages_and_new_journeys(self):
+        import commerce_checks
+        report = Path("/tmp/evidence")
+        preflight = quality_lanes.commerce_commands("preflight", report, [])
+        self.assertEqual(preflight[0], quality_lanes.commands("preflight", report)[0])
+        self.assertEqual(preflight[-1], ["bash", "scripts/audit/check-dedup-base-diff.sh", "."])
+        backend = quality_lanes.commerce_commands("backend", report, [])
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); (root / "go.mod").write_text("module example/crm\n")
+            packages = ["example/crm/cmd/aicrm", "example/crm/internal/product/http"]
+            with patch.object(quality_lanes, "ROOT", root):
+                focused = quality_lanes.replace_full_backend_test_with_packages(backend, packages)
+        self.assertEqual(focused[0][-1], "stage")
+        self.assertEqual(focused[1][-2:], ["./cmd/aicrm", "./internal/product/http"])
+        self.assertEqual(focused[2][-2:], ["./cmd/aicrm", "./internal/product/http"])
+        for flag in ("-race", "-count=1", "-p"):
+            self.assertIn(flag, focused[2])
+        self.assertNotIn("-run", focused[2])
+        checks = [{"lane": "browser", "path": path, "test": name}
+                  for path, name in commerce_checks.JOURNEY_FILES.items()]
+        browser = quality_lanes.commerce_commands("browser", report, checks)
+        self.assertEqual(len(browser), 2)
+        for name in commerce_checks.JOURNEY_FILES.values():
+            self.assertIn(name, browser[-1])
+        added = {"lane": "browser", "path": checks[0]["path"], "test": "TestNewAuthorizationChromiumJourney"}
+        browser = quality_lanes.commerce_commands("browser", report, [*checks, added])
+        self.assertEqual(len(browser), 5)
+        self.assertIn("TestNewAuthorizationChromiumJourney", browser[-1])
+        self.assertIn("openpyxl", browser[2][-1])
+        self.assertEqual(len(quality_lanes.commands("preflight", report)), 10)
+        self.assertEqual(len(quality_lanes.commands("backend", report)), 6)
+        with self.assertRaises(ValueError):
+            quality_lanes.commerce_commands("frontend", report, [])
+
     def test_first_actual_go_test_run_publishes_runtime_before_test_completion(self):
         with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
             root = Path(temp); report = root / "report"
