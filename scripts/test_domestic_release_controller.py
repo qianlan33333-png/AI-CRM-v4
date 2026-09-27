@@ -105,25 +105,123 @@ class DomesticMainReleaseTests(unittest.TestCase):
             root = Path(temporary)
             bare, base, candidate, other = make_repository(root)
             ordinary = root / "source"
+            helper_blob = b"#!/usr/bin/env python3\r\nprint('candidate helper')\n"
+            binary_blob = b"\x00\xffline\r\nwithout-final-newline"
+            helper_path = ordinary / "deploy" / "domestic-promote.py"
+            helper_path.parent.mkdir(parents=True)
+            helper_path.write_bytes(helper_blob)
+            (ordinary / "binary.blob").write_bytes(binary_blob)
+            subprocess.run(["git", "-C", str(ordinary), "add", "deploy/domestic-promote.py",
+                            "binary.blob"], check=True)
+            subprocess.run(["git", "-C", str(ordinary), "commit", "-m", "add exact-byte fixtures"],
+                           check=True, stdout=subprocess.DEVNULL)
+            blob_commit = subprocess.check_output(["git", "-C", str(ordinary), "rev-parse", "HEAD"],
+                                                  text=True).strip()
+            subprocess.run(["git", f"--git-dir={bare}", "fetch", "--no-tags", str(ordinary),
+                            f"refs/heads/codex/two:refs/domestic/test/exact-byte-fixtures"],
+                           check=True, stdout=subprocess.DEVNULL)
             linked = root / "linked"
             subprocess.run(["git", f"--git-dir={bare}", "worktree", "add", "--detach",
-                            str(linked), candidate], check=True, stdout=subprocess.DEVNULL)
+                            str(linked), blob_commit], check=True, stdout=subprocess.DEVNULL)
 
             # The controller must read the requested commit's blob even when a
             # worktree has unsaved edits and its current HEAD differs from it.
             dirty = b"unsaved worktree content\n"
             (ordinary / "main.txt").write_bytes(dirty)
             (linked / "main.txt").write_bytes(dirty)
+            helper_path.write_bytes(b"unsaved helper edits\n")
+            (linked / "deploy/domestic-promote.py").write_bytes(b"linked helper edits\n")
             repositories = {"bare": bare, "ordinary": ordinary, "linked": linked}
             for kind, repo in repositories.items():
                 with self.subTest(repository=kind):
                     self.assertEqual(release._source_blob(repo, base, "main.txt"), b"main\n")
                     self.assertEqual(release._source_blob(repo, candidate, "one.txt"), b"one\n")
                     self.assertEqual(release._source_blob(repo, other, "two.txt"), b"two\n")
+                    self.assertEqual(release._source_blob(repo, blob_commit,
+                                                          "deploy/domestic-promote.py"), helper_blob)
+                    self.assertEqual(release._source_blob(repo, blob_commit, "binary.blob"), binary_blob)
+                    with self.assertRaisesRegex(ValueError, "invalid source commit"):
+                        release._source_blob(repo, "invalid-sha", "main.txt")
                     with self.assertRaises(release.ReleaseError):
                         release._source_blob(repo, "f" * 40, "main.txt")
                     with self.assertRaises(release.ReleaseError):
                         release._source_blob(repo, candidate, "missing-registered-file.txt")
+
+    def test_source_blob_failure_redacts_git_stderr(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            sha = "a" * 40
+            command = ["git", "-c", f"safe.directory={repo.resolve()}", "-C", str(repo.resolve()),
+                       "show", f"{sha}:deploy/domestic-promote.py"]
+            failure = subprocess.CompletedProcess(command, 128, b"", b"private git diagnostic")
+            with mock.patch.object(release.subprocess, "run", return_value=failure) as run:
+                with self.assertRaises(release.ReleaseError) as raised:
+                    release._source_blob(repo, sha, "deploy/domestic-promote.py")
+            self.assertEqual(str(raised.exception), "command failed: git operation (exit=128)")
+            self.assertNotIn("private git diagnostic", str(raised.exception))
+            self.assertEqual(run.call_args.args[0], command)
+            self.assertEqual(run.call_args.kwargs["timeout"], 600)
+
+    def test_stage_smoke_helper_digest_uses_exact_git_blob_and_rejects_trimmed_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _repo, base, _candidate, _other = make_repository(root)
+            worktree = root / "source"
+            helper_blob = (Path(release.__file__).resolve().parent.parent /
+                           "deploy/domestic-promote.py").read_bytes()
+            helper_path = worktree / "deploy" / "domestic-promote.py"
+            helper_path.parent.mkdir(parents=True)
+            helper_path.write_bytes(helper_blob)
+            subprocess.run(["git", "-C", str(worktree), "add", "deploy/domestic-promote.py"], check=True)
+            subprocess.run(["git", "-C", str(worktree), "commit", "-m", "add smoke helper"],
+                           check=True, stdout=subprocess.DEVNULL)
+            candidate_sha = subprocess.check_output(["git", "-C", str(worktree), "rev-parse", "HEAD"],
+                                                    text=True).strip()
+            tree_sha = release._worktree_git(worktree, "rev-parse", "--verify",
+                                             f"{candidate_sha}^{{tree}}")
+            helper_path.write_bytes(b"dirty helper bytes that must not enter the smoke digest\n")
+
+            # Execute the helper digest assignments from process_candidate
+            # against a real commit. This binds the test to the release caller.
+            module = ast.parse(Path(release.__file__).read_text(encoding="utf-8"))
+            process = next(node for node in module.body
+                           if isinstance(node, ast.FunctionDef) and node.name == "process_candidate")
+            assignments = {node.targets[0].id: node for node in ast.walk(process)
+                           if isinstance(node, ast.Assign) and len(node.targets) == 1
+                           and isinstance(node.targets[0], ast.Name)
+                           and node.targets[0].id in {"helper_source", "helper_sha"}}
+            self.assertEqual(set(assignments), {"helper_source", "helper_sha"})
+            helper_code = ast.fix_missing_locations(ast.Module(
+                body=[assignments["helper_source"], assignments["helper_sha"]], type_ignores=[]))
+            scope = {"_source_blob": release._source_blob, "_worktree_git": release._worktree_git,
+                     "source_worktree": worktree, "item": {"head_sha": candidate_sha},
+                     "hashlib": hashlib}
+            exec(compile(helper_code, "process_candidate smoke helper digest", "exec"), scope)
+
+            exact_sha = hashlib.sha256(helper_blob).hexdigest()
+            stripped_sha = hashlib.sha256(release._worktree_git(
+                worktree, "show", f"{candidate_sha}:deploy/domestic-promote.py").encode()).hexdigest()
+            self.assertNotEqual(stripped_sha, exact_sha)
+            self.assertEqual(scope["helper_source"], helper_blob)
+            self.assertEqual(scope["helper_sha"], exact_sha)
+
+            manifest_sha = "a" * 64
+            receipt = {"status": "passed", "source_sha": candidate_sha, "source_tree": tree_sha,
+                       "source_ref": release._candidate_ref(candidate_sha), "installed_sha": candidate_sha,
+                       "manifest_sha256": manifest_sha, "helper_sha256": exact_sha,
+                       "stage_role": "staging"}
+            config = {"stage_helper": "/usr/local/libexec/aicrm/domestic-promote.py",
+                      "repo": release.DEFAULT_REPO}
+            with mock.patch.object(release, "_needs_installed_alipay_smoke", return_value=True), \
+                 mock.patch.object(release.legacy, "command", return_value=json.dumps(receipt)):
+                result = release._run_installed_smoke(config, worktree, candidate_sha, manifest_sha,
+                                                      scope["helper_sha"], tree_sha,
+                                                      validation_scope_base_sha=base)
+                self.assertEqual(result, receipt)
+                with self.assertRaisesRegex(release.ReleaseError, "exact domestic candidate"):
+                    release._run_installed_smoke(config, worktree, candidate_sha, manifest_sha,
+                                                 stripped_sha, tree_sha,
+                                                 validation_scope_base_sha=base)
 
     def test_check_report_prerequisite_probe_binds_real_git_base_and_head(self) -> None:
         # Execute the report's actual embedded probe and call expression. Only

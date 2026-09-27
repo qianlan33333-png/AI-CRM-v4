@@ -144,9 +144,14 @@ def _git(repo: Path, *args: str, timeout: int = 600, check: bool = True) -> str:
 
 def _source_blob(repo: Path, sha: str, path: str) -> bytes:
     source = repo.resolve()
-    result = _run(["git", "-c", f"safe.directory={source}", "-C", str(source),
-                   "show", f"{_sha(sha, 'source commit')}:{path}"])
-    return result.stdout.encode()
+    commit = _sha(sha, "source commit")
+    result = subprocess.run(
+        ["git", "-c", f"safe.directory={source}", "-C", str(source), "show", f"{commit}:{path}"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, timeout=600,
+    )
+    if result.returncode:
+        raise ReleaseError(f"command failed: git operation (exit={result.returncode})")
+    return result.stdout
 
 
 def _worktree_git(path: Path, *args: str, timeout: int = 600, check: bool = True) -> str:
@@ -3808,8 +3813,8 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
             if smoke_required:
                 phase = "stage-smoke"
                 _update_state(state_path, state, in_flight={**state["in_flight"], "phase": phase})
-                helper_source = _worktree_git(source_worktree, "show", f"{item['head_sha']}:deploy/domestic-promote.py")
-                helper_sha = hashlib.sha256(helper_source.encode()).hexdigest()
+                helper_source = _source_blob(source_worktree, item["head_sha"], "deploy/domestic-promote.py")
+                helper_sha = hashlib.sha256(helper_source).hexdigest()
                 smoke_receipt = _run_installed_smoke(
                     config, source_worktree, item["head_sha"],
                     metadata["release_files_sha256"], helper_sha, head_tree,
