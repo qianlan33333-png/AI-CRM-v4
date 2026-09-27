@@ -14,6 +14,35 @@ from scripts.test_domestic_release_controller import make_repository
 
 
 class CheckLifecycleTest(unittest.TestCase):
+    def test_attempt_database_changes_only_execution_name_and_not_resume_identity(self):
+        config = {'check_database_url':'postgresql://test:private@localhost:5432/aicrm_test_anchor?sslmode=disable',
+                  'build_path':'/opt/aicrm/toolchain/npm/bin:/usr/bin:/bin'}
+        original = release._check_database_identity(config)
+        name = 'aicrm_test_clone_'+'a'*16+'_acceptance_test'
+        isolated = {**config, '_check_attempt_database':name}
+        self.assertEqual(release._check_database_identity(isolated), original)
+        self.assertEqual(release._check_env(isolated)['AICRM_DATABASE_URL'],
+                         config['check_database_url'].replace('aicrm_test_anchor', name))
+        for invalid in ('aicrm_ci', 'production', '../anchor', name+';DROP DATABASE aicrm_ci',
+                        'aicrm_test_tpl_'+'a'*16+'_acceptance_test', 7):
+            with self.subTest(invalid=invalid), self.assertRaises(release.ReleaseError):
+                release._check_env({**config, '_check_attempt_database':invalid})
+
+    def test_attempt_database_creation_requires_complete_evidence_and_retains_failure(self):
+        name = 'aicrm_test_clone_'+'a'*16+'_acceptance_test'
+        for output in ('{}', '{"database":"aicrm_ci"}', '{"database":null}', 'incomplete'):
+            with self.subTest(output=output), patch.object(release, '_build_command',
+                    return_value=subprocess.CompletedProcess([], 0, output, '')):
+                with self.assertRaises(release.CheckIncompleteError):
+                    release._create_check_attempt_database({}, Path('/checkout'), Path('/preparation'))
+        with patch.object(release, '_build_command',
+                return_value=subprocess.CompletedProcess([], 1, '', '')):
+            with self.assertRaises(release.CheckEnvironmentError):
+                release._create_check_attempt_database({}, Path('/checkout'), Path('/preparation'))
+        with patch.object(release, '_build_command',
+                return_value=subprocess.CompletedProcess([], 0, json.dumps({'database':name}), '')):
+            self.assertEqual(release._create_check_attempt_database({}, Path('/checkout'), Path('/preparation')), name)
+
     def fixture(self, root):
         work = root / 'control/work'; work.mkdir(parents=True)
         build = root / 'build-worker'; (build/'domestic-main-checks').mkdir(parents=True)

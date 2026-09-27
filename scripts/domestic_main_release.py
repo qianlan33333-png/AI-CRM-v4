@@ -1018,6 +1018,15 @@ def _check_env(config: dict[str, Any], safe_repository: Path | None = None, *,
             or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
             or not (database == "aicrm_ci" or database.startswith("aicrm_test_"))):
         raise ReleaseError("check database must be a local synthetic aicrm_ci/aicrm_test database")
+    attempt_database = config.get("_check_attempt_database")
+    if attempt_database is not None:
+        if not isinstance(attempt_database, str) or not re.fullmatch(
+                r"aicrm_test_clone_[0-9a-f]{16}_acceptance_test", attempt_database):
+            raise ReleaseError("check attempt database is not a registered synthetic name")
+        # Keep the canonical host, role, credentials and options. Only the
+        # disposable execution database changes; resume identity stays bound
+        # to the configured anchor, never a random attempt name.
+        database_url = parsed._replace(path="/" + attempt_database).geturl()
     path_value = config.get("build_path")
     if (not isinstance(path_value, str) or not path_value or "\n" in path_value or "\x00" in path_value
             or any(not part or not Path(part).is_absolute() for part in path_value.split(":"))):
@@ -2879,6 +2888,40 @@ raise SystemExit(0 if ready else 23)
         raise CheckEnvironmentError("PostgreSQL 16 synthetic CREATE/TEMPLATE/DROP failed under the actual build account")
 
 
+def _create_check_attempt_database(config: dict, checkout: Path, prep: Path) -> str:
+    # Legacy fixtures create schemas and rely on defer to remove them. Putting
+    # their anchor inside the existing DB registry also covers SIGKILL, without
+    # guessing which schemas in the shared configured database are disposable.
+    code = """import json,os,subprocess,sys,uuid
+from pathlib import Path
+from urllib.parse import urlsplit,unquote,parse_qs
+p=urlsplit(os.environ['AICRM_DATABASE_URL'])
+env=dict(os.environ,PGHOST=p.hostname,PGPORT=str(p.port or 5432),PGUSER=unquote(p.username or ''),
+ PGPASSWORD=unquote(p.password or ''),PGDATABASE=unquote(p.path.strip('/')),
+ PGSSLMODE=parse_qs(p.query).get('sslmode',['prefer'])[0])
+name='aicrm_test_clone_'+uuid.uuid4().hex[:16]+'_acceptance_test'
+target=Path(sys.argv[1])/('database-'+name+'.json');temporary=target.with_suffix('.tmp')
+with temporary.open('x') as out:
+ os.chmod(temporary,0o600);json.dump({'database':name,'purpose':'attempt_anchor'},out);out.flush();os.fsync(out.fileno())
+os.replace(temporary,target)
+result=subprocess.run(['psql','-X','-v','ON_ERROR_STOP=1','-Atqc',
+ 'CREATE DATABASE "'+name+'" TEMPLATE template0'],env=env,capture_output=True,text=True,timeout=30)
+if result.returncode:raise SystemExit(21)
+print(json.dumps({'database':name}))
+"""
+    result = _build_command(config, ["/usr/bin/python3", "-c", code, str(prep)],
+                            cwd=checkout, timeout=60, check=False)
+    if result.returncode:
+        raise CheckEnvironmentError("registered synthetic attempt database creation failed; retained inventory")
+    try:
+        name = json.loads(result.stdout.splitlines()[-1])["database"]
+    except (ValueError, KeyError, TypeError, IndexError) as exc:
+        raise CheckIncompleteError("synthetic attempt database evidence is missing") from exc
+    if not isinstance(name, str) or not re.fullmatch(r"aicrm_test_clone_[0-9a-f]{16}_acceptance_test", name):
+        raise CheckIncompleteError("synthetic attempt database evidence is invalid")
+    return name
+
+
 def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir: Path,
                   base_sha: str, head_sha: str, *, diagnostic_root: Path | None = None) -> dict[str, Any]:
     storage = _check_storage_mount(config)  # Before recovery or any filesystem mutation.
@@ -2960,6 +3003,9 @@ print(json.dumps({lane: items for lane, items in missing.items() if items}))
         if previous_path:
             prior = _load_check_checkpoint(Path(previous_path),diagnostic_root,continuation_identity)
         check_config["_check_checkpoint"] = prior
+        if set(lanes) & {"backend", "browser"}:
+            check_config["_check_attempt_database"] = _create_check_attempt_database(
+                check_config, execution_worktree, prep)
         try:
             lane_results = _run_check_lanes(
                 check_config, repo, policy, execution_worktree, report_dir, base_sha, head_sha,
