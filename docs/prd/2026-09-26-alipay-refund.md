@@ -31,7 +31,7 @@ OneID：读取订单已有 canonical customer，不解析/创建/合并身份。
 
 无数据库迁移。回退代码时保留已受理退款数据与原键，继续按原退款号对账；不能用回退触发再次退款。真实资金退款不作为开发测试自动执行。
 
-## 五项影响判断（791 基线重提）
+## 五项影响判断（862 基线重提）
 
 | 判断 | 本次影响及依据 |
 | --- | --- |
@@ -41,4 +41,4 @@ OneID：读取订单已有 canonical customer，不解析/创建/合并身份。
 | 页面影响 | 复用 web/v3/orderAdapter 现有退款申请页，支付宝订单可申请并恢复，显示对应渠道/交易号，详情刷新保留 provider 作用域；无新页面或设计变更。 |
 | 验证证据 | 新 SHA 重跑 fast、compile、Payment/Order/External Effects 全包、签名 Provider 及 PostgreSQL 连接合同、现有退款 Host、OpenAPI/typecheck/build；影响计划另存证据。Linux 必需检查、预发安装旅程、生产读回和真实资金退款仍分别验证。 |
 
-本次只将原退款行为重放到 `7916dc2d63eda463e2af535fd4f06eb53d60ecb0`，保留已授权父 PRD 与官方参考，未带入旧维护/bench 测试提交，未新增业务限制。
+本次只将原退款行为重放到 `862634d0caf8f87c09f93667a0849f1ebd5d5289`，保留已授权父 PRD 与官方参考，未带入旧维护/bench 测试提交，未新增业务限制。
