@@ -171,6 +171,15 @@ class DomesticReleaseBuildTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(builder.classify_paths([path]).full_build)
 
+    def test_browser_diagnostic_helper_does_not_turn_maintenance_into_app_install(self) -> None:
+        helper = builder.classify_paths(["internal/webshell/chromium_launch.mjs",
+                                         "scripts/domestic_main_release.py"])
+        self.assertFalse(helper.runtime_changed)
+        self.assertEqual(helper.build_mode, "controller_only")
+        for path in ("internal/webshell/unknown_browser.mjs", "internal/webshell/assets/main.js"):
+            with self.subTest(path=path):
+                self.assertTrue(builder.classify_paths([path]).runtime_changed)
+
     def test_dependency_graph_limits_build_to_affected_command_and_embed_consumer(self) -> None:
         commands = [
             builder.ReleaseCommand("./cmd/aicrm", "aicrm"),

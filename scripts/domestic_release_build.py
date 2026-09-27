@@ -43,6 +43,10 @@ CI_ONLY_PREFIXES = (".github/", "scripts/ci/")
 CI_ONLY_FILES = {
     ".gitignore",
     ".gitleaksignore",
+    # Referenced only by Chromium journeys/tests and absent from every
+    # application command's production embed graph. Other webshell assets
+    # continue to change the installed application.
+    "internal/webshell/chromium_launch.mjs",
     "scripts/dev_preflight.py",
     "scripts/check-architecture.py",
     "scripts/check-config-definition-import-boundary.sh",
