@@ -1661,8 +1661,11 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
     prior = config.get("_check_checkpoint", {}).get("lanes", {})
     snapshots = config.setdefault("_check_snapshots", {})
     guard = threading.Lock()
+    backend_running = threading.Event()
+    if "backend" not in lanes:
+        backend_running.set()
 
-    def run_lane(lane: str) -> dict[str, Any]:
+    def execute_lane(lane: str) -> dict[str, Any]:
         # t.Chdir and generated artifacts may mutate a checkout. Never share it
         # between concurrently executing lanes, even when source SHA is equal.
         snapshot = prior.get(lane, {})
@@ -1684,6 +1687,14 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
         if lane in {"backend", "frontend", "browser"}:
             _prepare_check_dependencies(config, checkout, [lane],
                 diagnostic_root / f"{head_sha}-{report_dir.name}-{lane}-npm-ci.log", policy=policy)
+        # Let backend compile/link its first test binary before Chromium takes
+        # the shared heavy slot. Dependency copies above remain independent.
+        # This schedules work only: all mandatory browser assertions still run
+        # if backend finishes without starting a test (including failure).
+        waiting = time.monotonic()
+        if lane == "browser":
+            backend_running.wait()
+        scheduler_wait = time.monotonic() - waiting
         args = [lane, "--report-dir", str(lane_dir)]
         if lane == "preflight":
             args.extend(["--profile", "tooling" if profile == "tooling" else "full"])
@@ -1725,6 +1736,7 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                 raise CheckIncompleteError("trusted check process timed out: " + lane) from exc
         result = {"lane": lane, "exit_code": completed.returncode,
                   "duration_seconds": round(time.monotonic() - started, 1),
+                  "scheduler_wait_seconds": round(scheduler_wait, 3),
                   "free_before_bytes":free_before, "free_after_bytes":shutil.disk_usage(report_dir).free,
                   "disk_increment_bytes":free_before-shutil.disk_usage(report_dir).free,
                   "log_sha256": _file_sha256(log), "log_path": str(log)}
@@ -1781,6 +1793,13 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                           resumed_from=snapshot["result"]["log_path"])
         return result
 
+    def run_lane(lane: str) -> dict[str, Any]:
+        try:
+            return execute_lane(lane)
+        finally:
+            if lane == "backend":
+                backend_running.set()
+
     # Preflight remains a prerequisite. Only independent lanes overlap, with
     # their expensive commands serialized by the attempt's heavy.lock.
     lane_results = []
@@ -1798,6 +1817,11 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
         lane_results.extend(run_lane(lane) for lane in pending_lanes)
         return lane_results
     with ThreadPoolExecutor(max_workers=2) as executor:
+        # Backend must own a worker even if the caller lists browser first;
+        # otherwise both workers could wait for a backend still in the queue.
+        if "backend" in pending_lanes:
+            pending_lanes.remove("backend")
+            pending_lanes.insert(0, "backend")
         pending = {executor.submit(run_lane, lane): lane for lane in pending_lanes}
         failures = []
         previous = None
@@ -1805,6 +1829,13 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
         browser_terminal = {}
         while pending:
             completed, _ = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+            if not backend_running.is_set():
+                try:
+                    backend_progress = json.loads((report_dir / "backend" / "progress.json").read_text())
+                    if backend_progress.get("started_tests", 0) > 0:
+                        backend_running.set()
+                except (OSError, ValueError):
+                    pass
             for future in completed:
                 pending.pop(future)
                 try:

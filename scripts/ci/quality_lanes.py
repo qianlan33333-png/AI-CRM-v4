@@ -421,6 +421,7 @@ def _progress(report_dir: Path | None, lane: str, execution: dict, command: list
         "completed_commands": len(execution.get("command_results", [])),
         "required_commands": execution.get("required_commands", 0),
         "completed_tests": execution.get("completed_tests", 0),
+        "started_tests": execution.get("started_tests", 0),
         "required_packages": execution.get("required_packages", 0),
         "completed_packages": execution.get("completed_packages", 0), "failure_summary": failure})
 
@@ -516,6 +517,10 @@ def run_recorded(command: list[str], env: dict[str, str] | None, lane: str,
                             item = json.loads(line)
                         except json.JSONDecodeError:
                             continue
+                        if item.get("Test") and item.get("Action") == "run":
+                            execution["started_tests"] = execution.get("started_tests", 0) + 1
+                            if execution["started_tests"] == 1:
+                                _progress(report_dir, lane, execution, command, "running")
                         if not item.get("Test") and item.get("Action") in {"pass", "fail", "skip"}:
                             execution["completed_packages"] = execution.get("completed_packages", 0) + 1
                         if time.monotonic() - last_progress >= 1:

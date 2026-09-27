@@ -13,6 +13,31 @@ import quality_lanes
 
 
 class QualityLaneTests(unittest.TestCase):
+    def test_first_actual_go_test_run_publishes_runtime_before_test_completion(self):
+        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
+            root = Path(temp); report = root / "report"
+            execution = {"commands": []}
+            def lines():
+                yield json.dumps({"Action": "start", "Package": "example/a"}) + "\n"
+                self.assertEqual(json.loads((report / "progress.json").read_text())["started_tests"], 0)
+                yield json.dumps({"Action": "run", "Package": "example/a", "Test": "TestBusiness"}) + "\n"
+                progress = json.loads((report / "progress.json").read_text())
+                self.assertEqual(progress["started_tests"], 1)
+                self.assertEqual(progress["completed_tests"], 0)
+                yield json.dumps({"Action": "pass", "Package": "example/a", "Test": "TestBusiness"}) + "\n"
+                yield json.dumps({"Action": "pass", "Package": "example/a"}) + "\n"
+            stream = unittest.mock.MagicMock()
+            stream.__iter__.side_effect = lines
+            process = unittest.mock.Mock(stdout=stream)
+            process.wait.return_value = 0
+            with patch.object(quality_lanes, "ROOT", root), \
+                 patch.object(quality_lanes.subprocess, "check_output", return_value="example/a\n"), \
+                 patch.object(quality_lanes.subprocess, "Popen", return_value=process):
+                quality_lanes.run_recorded(["go", "test", "-json", "-race", "-count=1", "./a"], None,
+                                           "backend", report, execution)
+            self.assertEqual(execution["started_tests"], 1)
+            self.assertEqual(execution["completed_tests"], 1)
+
     def test_go_continuation_runs_complete_unfinished_packages_and_retains_suite_flags(self):
         with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
             root = Path(temp)

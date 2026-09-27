@@ -12,6 +12,59 @@ from scripts import domestic_main_release as release
 
 
 class AccelerationGateTest(unittest.TestCase):
+    def test_browser_overlaps_real_backend_execution_but_never_waits_forever_after_backend_exit(self):
+        for outcome in ("running", "no-tests", "environment", "timeout"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                (root / "scripts/ci").mkdir(parents=True)
+                (root / "scripts/ci/check_preparation.py").write_text("trusted policy")
+                execution = root / "candidate"; execution.mkdir()
+                reports = root / "reports"; reports.mkdir()
+                diagnostics = root / "diagnostics"; diagnostics.mkdir()
+                browser_started = threading.Event()
+                backend_started = threading.Event()
+                def checkout(config, repo, path, sha):
+                    path.mkdir(); return path
+                def build(config, args, **kwargs):
+                    if args[0] == "/usr/bin/mkdir": Path(args[-1]).mkdir()
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                def run(args, **kwargs):
+                    directory = Path(args[args.index("--report-dir") + 1])
+                    if directory.name == "backend":
+                        backend_started.set()
+                        # Package start / queued compiler is not test runtime.
+                        release.atomic_json(directory / "progress.json", {"started_tests": 0, "status": "running"})
+                        self.assertFalse(browser_started.wait(0.1))
+                        if outcome == "running":
+                            release.atomic_json(directory / "progress.json", {"started_tests": 1, "status": "running"})
+                            self.assertTrue(browser_started.wait(3), "browser must overlap backend runtime without a UI callback")
+                        elif outcome == "environment":
+                            raise release.CheckEnvironmentError("synthetic database unavailable")
+                        elif outcome == "timeout":
+                            raise subprocess.TimeoutExpired(args, 1)
+                        self.receipt(directory, "backend", [{"Action": "pass", "Package": "example/required"}])
+                    else:
+                        self.assertTrue(backend_started.is_set(), "backend must own a worker even when browser is listed first")
+                        browser_started.set()
+                        self.receipt(directory, "browser", [{"Action": "pass", "Test": "TestRequiredChromiumJourney"}])
+                    return subprocess.CompletedProcess(args, 0)
+                with patch.object(release, "_private_check_checkout", side_effect=checkout), \
+                     patch.object(release, "_build_command", side_effect=build), \
+                     patch.object(release, "_prepare_check_dependencies"), \
+                     patch.object(release, "_check_env", return_value={}), \
+                     patch.object(release, "_verify_check_checkout_tree"), \
+                     patch.object(release, "_tree", return_value="c" * 40), \
+                     patch.object(release, "_run_check_process", side_effect=run):
+                    args = ({}, root, root, execution, reports, "a" * 40, "b" * 40,
+                            {"selection_mode": "full"}, ["browser", "backend"], [], [], "full", diagnostics)
+                    if outcome in {"environment", "timeout"}:
+                        with self.assertRaises(release.CheckEnvironmentError if outcome == "environment" else release.CheckIncompleteError):
+                            release._run_check_lanes(*args)
+                    else:
+                        results = release._run_check_lanes(*args)
+                        self.assertEqual([result["lane"] for result in results], ["browser", "backend"])
+                self.assertTrue(browser_started.is_set(), "backend errors must not drop mandatory browser checks")
+
     def test_maintenance_continuation_only_uses_protected_digest_and_exact_identity(self):
         with tempfile.TemporaryDirectory() as raw:
             root=Path(raw); config={"work_root":str(root)}
