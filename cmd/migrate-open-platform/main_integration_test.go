@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 )
 
 // TestOpenPlatformHistoryCLIPostgreSQLJourney is a complete offline rehearsal:
@@ -176,13 +176,16 @@ func openPlatformHistoryDatabases(t *testing.T, ctx context.Context) (string, st
 	if err != nil {
 		t.Fatal(err)
 	}
-	var random [8]byte
-	if _, err = rand.Read(random[:]); err != nil {
+	sourceName, err := testconfig.NewDatabaseName()
+	if err != nil {
 		admin.Close(ctx)
 		t.Fatal(err)
 	}
-	prefix := hex.EncodeToString(random[:])
-	sourceName, targetName := "aicrm_open_source_"+prefix, "aicrm_open_target_"+prefix
+	targetName, err := testconfig.NewDatabaseName()
+	if err != nil {
+		admin.Close(ctx)
+		t.Fatal(err)
+	}
 	for _, name := range []string{sourceName, targetName} {
 		if _, err = admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize()); err != nil {
 			admin.Close(ctx)

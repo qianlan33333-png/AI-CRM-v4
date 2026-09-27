@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"net/url"
 	"os"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 )
 
 func TestPostgreSQLCaptureCompleteTablesAndMissingCoverage(t *testing.T) {
@@ -28,11 +28,10 @@ func TestPostgreSQLCaptureCompleteTablesAndMissingCoverage(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer admin.Close(ctx)
-	var suffix [8]byte
-	if _, e = rand.Read(suffix[:]); e != nil {
+	name, e := testconfig.NewDatabaseName()
+	if e != nil {
 		t.Fatal(e)
 	}
-	name := "commerce_capture_" + hex.EncodeToString(suffix[:])
 	identifier := pgx.Identifier{name}.Sanitize()
 	if _, e = admin.Exec(ctx, "CREATE DATABASE "+identifier); e != nil {
 		t.Fatal(e)

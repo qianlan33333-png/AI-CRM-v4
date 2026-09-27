@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/tls"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -30,6 +28,7 @@ import (
 	openplatformhttp "github.com/qianlan33333-png/AI-CRM-v3/internal/openplatform/http"
 	openplatformport "github.com/qianlan33333-png/AI-CRM-v3/internal/openplatform/port"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 )
 
@@ -594,11 +593,10 @@ func openPlatformMachineTestDatabase(t *testing.T, ctx context.Context) (string,
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		t.Fatal("parse AICRM_DATABASE_URL")
 	}
-	var random [8]byte
-	if _, err = rand.Read(random[:]); err != nil {
+	database, err := testconfig.NewDatabaseName()
+	if err != nil {
 		t.Fatal(err)
 	}
-	database := "aicrm_open_platform_" + hex.EncodeToString(random[:])
 	adminURL := *parsed
 	adminURL.Path = "/postgres"
 	adminURL.RawPath = ""

@@ -5,15 +5,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -29,7 +28,10 @@ func TestPostgreSQLCaptureFrozenFactsAndReadOnlyEnforcement(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer admin.Close(ctx)
-	name := fmt.Sprintf("audience_capture_test_%d", time.Now().UnixNano())
+	name, e := testconfig.NewDatabaseName()
+	if e != nil {
+		t.Fatal(e)
+	}
 	ident := pgx.Identifier{name}.Sanitize()
 	if _, e = admin.Exec(ctx, "CREATE DATABASE "+ident); e != nil {
 		t.Fatal(e)
