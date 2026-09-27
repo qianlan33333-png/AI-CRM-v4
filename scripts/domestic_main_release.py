@@ -2383,8 +2383,13 @@ def _check_attempt_directory(config: dict, report: Path, policy: Path, head_sha:
     if config.get("check_execution_root"):
         _safe_directory(execution_root)
     token = os.urandom(8).hex()
-    temporary = Path(config["work_root"]) / ("domestic-main-check-" + token)
+    # Go's compile action includes the absolute package directory. The serial
+    # controller owns this fixed workspace; every attempt still creates a new
+    # checkout and removes it afterwards. Lane checkouts remain independent.
+    temporary = Path(config["work_root"]) / "domestic-main-check-current"
     scratch = execution_root / ("ac-" + token)
+    if any(value.exists() or value.is_symlink() for value in (temporary, scratch)):
+        raise CheckEnvironmentError("unreclaimed check workspace exists; retained for registered recovery or diagnosis")
     record_path = directory / (report.name + "-attempt.json")
     helper = policy / "scripts/ci/check_preparation.py"
     record = {"schema":1, "pid":os.getpid(), "status":"active", "head_sha":head_sha,
@@ -2421,6 +2426,7 @@ def _check_attempt_directory(config: dict, report: Path, policy: Path, head_sha:
     try:
         yield str(temporary)
     finally:
+        original_error = sys.exc_info()[1]
         stopped.set()
         sampler.join()
         minimum["free"] = min(minimum["free"], shutil.disk_usage(temporary.parent).free)
@@ -2441,6 +2447,10 @@ def _check_attempt_directory(config: dict, report: Path, policy: Path, head_sha:
         except BaseException as exc:
             record["cleanup_error_type"] = type(exc).__name__
             atomic_json(record_path, record)
+            if original_error is not None:
+                # Cleanup blockage cannot relabel a product assertion or an
+                # unknown interrupted execution as a resumable environment fault.
+                raise original_error from exc
             raise
         finally:
             config.pop("_check_tmpdir", None)

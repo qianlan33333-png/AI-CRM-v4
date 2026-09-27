@@ -153,6 +153,39 @@ class CheckLifecycleTest(unittest.TestCase):
                     release._cleanup_attempt_record(config,work/'attempt.json',record)
             self.assertTrue(temporary.is_dir())
 
+    def test_recreated_checkout_uses_same_compile_path_and_retains_unknown_workspaces(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw);work,build,policy,config=self.fixture(root)
+            paths=[]
+            with patch.object(release.legacy,'BUILD_ROOT',build),release._locked(Path(config['lock'])):
+                for number in range(2):
+                    report=build/'domestic-main-checks'/('b'*40+'-stable-'+str(number));report.mkdir()
+                    with release._check_attempt_directory(config,report,policy,'b'*40) as temporary:
+                        checkout=Path(temporary)/'execution/candidate';checkout.mkdir(parents=True)
+                        self.assertFalse((checkout/'generated').exists())
+                        (checkout/'generated').write_text('attempt-'+str(number));paths.append(str(checkout))
+                    self.assertFalse(Path(temporary).exists())
+                self.assertEqual(paths[0],paths[1])
+                unknown=work/'domestic-main-check-current';unknown.mkdir();(unknown/'retain').write_text('diagnose')
+                report=build/'domestic-main-checks'/('b'*40+'-stable-unknown');report.mkdir()
+                with self.assertRaisesRegex(release.CheckEnvironmentError,'unreclaimed'):
+                    with release._check_attempt_directory(config,report,policy,'b'*40):self.fail('unexpected execution')
+                self.assertEqual((unknown/'retain').read_text(),'diagnose')
+
+    def test_cleanup_blockage_preserves_original_failure_classification(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw);work,build,policy,config=self.fixture(root)
+            report=build/'domestic-main-checks'/('b'*40+'-mixed');report.mkdir()
+            with patch.object(release.legacy,'BUILD_ROOT',build),release._locked(Path(config['lock'])), \
+                 patch.object(release,'_cleanup_attempt_record',side_effect=release.CheckEnvironmentError('live child')):
+                with self.assertRaisesRegex(release.CheckCandidateError,'business assertion'):
+                    with release._check_attempt_directory(config,report,policy,'b'*40):
+                        raise release.CheckCandidateError('business assertion')
+                record=json.loads(next((work/'check-lifecycle').glob('*-attempt.json')).read_text())
+                self.assertEqual(record['status'],'evidence_saved_cleanup_pending')
+                self.assertTrue(Path(record['temporary']).exists())
+                shutil.rmtree(Path(record['scratch']))  # fixture owns the retained mock resource
+
     def test_capacity_blocks_before_work_and_lru_cache_keeps_recent_content(self):
         with tempfile.TemporaryDirectory() as raw:
             root=Path(raw); work,build,policy,config=self.fixture(root)
