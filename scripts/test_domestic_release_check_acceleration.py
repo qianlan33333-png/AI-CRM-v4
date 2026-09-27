@@ -13,9 +13,9 @@ from scripts import domestic_main_release as release
 
 class AccelerationGateTest(unittest.TestCase):
     def test_omitting_unused_npm_still_executes_and_verifies_every_required_browser_journey(self):
-        for verified, needs_npm, continued in ((True, False, False), (True, True, False),
-                                               (False, False, False), (True, False, True)):
-            with self.subTest(verified=verified, needs_npm=needs_npm, continued=continued), tempfile.TemporaryDirectory() as raw:
+        for verified, needs_npm, continued, artifact_ready in ((True, False, False, True), (True, True, False, True),
+                (False, False, False, True), (True, False, True, True), (True, False, False, False)):
+            with self.subTest(verified=verified, needs_npm=needs_npm, continued=continued, artifact_ready=artifact_ready), tempfile.TemporaryDirectory() as raw:
                 root = Path(raw)
                 (root / "scripts/ci").mkdir(parents=True)
                 (root / "scripts/ci/check_preparation.py").write_text("policy")
@@ -34,6 +34,10 @@ class AccelerationGateTest(unittest.TestCase):
                 def run(args, **kwargs):
                     directory = Path(args[args.index("--report-dir") + 1])
                     if directory.name == "backend":
+                        if artifact_ready:
+                            artifact = reports / ".preparation/artifact-reviewed"
+                            artifact.mkdir(parents=True)
+                            (artifact / "receipt.json").write_text("{}")
                         self.receipt(directory, "backend", [{"Action": "pass", "Package": "example/required"}])
                         return subprocess.CompletedProcess(args, 0)
                     self.receipt(directory, "browser", [{"Action": "pass", "Test": name} for name in names])
@@ -55,8 +59,8 @@ class AccelerationGateTest(unittest.TestCase):
                     results = release._run_check_lanes(config, root, root, execution, reports, "a" * 40, "b" * 40,
                         enforced, ["backend", "browser"], checks, ["./example/required"], "affected-packages", diagnostics)
                 self.assertEqual(execute.call_count, 2)
-                self.assertEqual(prepare.call_count, int(not verified or needs_npm or continued))
-                self.assertEqual(dependency_guard.call_count, int(verified and not continued))
+                self.assertEqual(prepare.call_count, int(not verified or needs_npm or continued or not artifact_ready))
+                self.assertEqual(dependency_guard.call_count, int(verified and not continued and artifact_ready))
                 self.assertEqual(set(config["_check_snapshots"]["browser"]["required_browser_tests"]), set(names))
 
     def test_browser_dependency_decision_executes_only_trusted_policy_and_defaults_to_prepare(self):
