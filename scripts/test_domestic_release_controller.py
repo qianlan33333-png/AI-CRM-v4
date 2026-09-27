@@ -701,6 +701,83 @@ class DomesticMainReleaseTests(unittest.TestCase):
                 with self.assertRaisesRegex(release.ControllerMaintenanceRequired, "hashes differ"):
                     release._verify_controller_maintenance_candidate(config, repo, changed_hashes)
 
+    def test_maintenance_writer_load_install_and_resubmit_preserve_legacy_marker_protocol(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            state_path = root / "state.json"
+            state = release._new_state(base, release._tree(repo, base),
+                {"sha":base, "tree":release._tree(repo, base), "manifest_sha256":"b"*64})
+            state["queue"] = [{"candidate_id":candidate, "ref":"refs/heads/codex/one",
+                "head_sha":candidate, "base_sha":base, "status":"pending"}]
+            release.atomic_json(state_path, state)
+            diagnostics = root / "diagnostics"; diagnostics.mkdir(mode=0o700)
+            checkpoint = diagnostics / (candidate + "-completed-checkpoint.json")
+            receipt = {"status":"passed", "baseline_sha":base, "head_sha":candidate,
+                "head_tree":release._tree(repo, candidate), "toolchain":{"go":"fixture"},
+                "check_checkpoint":str(checkpoint)}
+            release.atomic_json(diagnostics / (candidate + "-completed-receipt.json"), receipt)
+            source_blobs = {path: (Path(release.__file__).read_bytes()
+                if path == "scripts/domestic_main_release.py" else path.encode())
+                for path in release.builder.FIXED_CONTROLLER_FILES}
+            config = {"repo":str(repo), "state":str(state_path), "lock":str(root/"lock"),
+                "work_root":str(root), "source_worktree":str(root/"source"),
+                "controller_path":release.DEFAULT_CONTROLLER, "push_group":"fixture"}
+            real_load = release._load_state
+            local_uid = os.getuid()
+            def load(path):
+                return real_load(path, owner_uid=local_uid)
+            entry = {"first":True}
+            def maintenance_uid():
+                if entry["first"]:
+                    entry["first"] = False
+                    return 0  # Satisfy only the root-only entry gate.
+                return local_uid
+            # Platform/root-only and expensive QA operations are isolated;
+            # state generation, serialization, strict validation and reload are real.
+            with mock.patch.object(release.os, "geteuid", side_effect=maintenance_uid), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "verify_bare_repository"), \
+                 mock.patch.object(release, "_load_state", side_effect=load), \
+                 mock.patch.object(release, "_active_worktree", return_value=root/"source"), \
+                 mock.patch.object(release, "_classify_candidate", return_value={"runtime_changed":False,
+                    "controller_files":["scripts/domestic_main_release.py"]}), \
+                 mock.patch.object(release, "_source_blob", side_effect=lambda _r,_s,path:source_blobs[path]), \
+                 mock.patch.object(release, "_check_report", return_value=receipt), \
+                 mock.patch.object(release, "_build_command", return_value=subprocess.CompletedProcess(
+                    [],0,"locked-config-dry-run-ok","")):
+                result = release.maintenance_check(config, candidate)
+            self.assertEqual(result["status"], "maintenance_checks_passed")
+            loaded = real_load(state_path, owner_uid=local_uid)
+            marker = loaded["controller_maintenance"]
+            self.assertEqual(set(marker), {"candidate_sha","candidate_tree","base_sha","controller_files",
+                "fixed_file_sha256","check_receipt_sha256","checked_at_utc"})
+            self.assertEqual(release._maintenance_check_checkpoint(config,marker),str(checkpoint))
+            # Install the fixture bytes, verify them through the real marker
+            # binding, then use the real submission reader on the same head.
+            installed = root / "installed"; installed.mkdir()
+            for path, blob in source_blobs.items():
+                target=installed/path; target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(blob)
+            def verify_bytes(_config,_repo,_sha,paths):
+                for path in paths:
+                    if release._file_sha256(installed/path) != marker["fixed_file_sha256"][path]:
+                        raise release.ControllerMaintenanceRequired("fixture installed bytes differ")
+            with mock.patch.object(release, "_classify_candidate", return_value={"runtime_changed":False,
+                    "controller_files":["scripts/domestic_main_release.py"]}), \
+                 mock.patch.object(release, "_source_blob", side_effect=lambda _r,_s,path:source_blobs[path]), \
+                 mock.patch.object(release, "_verify_controller_files", side_effect=verify_bytes), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_load_state", side_effect=load):
+                release._verify_controller_maintenance_candidate(config,repo,loaded)
+                resubmitted=release.submit_candidate(repo,state_path,"refs/heads/codex/one",candidate,base,
+                    root/"lock")
+                self.assertEqual(resubmitted["head_sha"],candidate)
+                self.assertEqual(real_load(state_path,owner_uid=local_uid)["controller_maintenance"],marker)
+                (installed/"scripts/domestic_main_release.py").write_text("changed bytes")
+                with self.assertRaises(release.ControllerMaintenanceRequired):
+                    release._verify_controller_maintenance_candidate(config,repo,loaded)
+
     def test_poll_consumes_maintenance_marker_before_normal_candidate_cas(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -3233,6 +3233,46 @@ def _update_state(path: Path, state: dict[str, Any], **changes: Any) -> None:
     atomic_json(path, state)
 
 
+def _maintenance_check_checkpoint(config: dict[str, Any], marker: dict[str, Any]) -> str | None:
+    """Resolve the completed capsule through the existing receipt digest.
+
+    Keep the maintenance marker compatible with installed older controllers;
+    only protected exact-receipt evidence can supply a continuation pointer.
+    """
+    directory = Path(config["work_root"]) / "diagnostics"
+    if not directory.exists() and not directory.is_symlink():
+        return None  # Older markers without a protected receipt need fresh checks.
+    _safe_directory(directory)
+    for path in sorted(directory.glob(f"{marker['candidate_sha']}-*-receipt.json")):
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            info = os.fstat(descriptor)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                    or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+                raise ReleaseError("maintenance check receipt is not protected")
+            with os.fdopen(descriptor, "r", closefd=False) as stream:
+                receipt = json.load(stream)
+        finally:
+            os.close(descriptor)
+        if not isinstance(receipt, dict):
+            raise ReleaseError("maintenance check receipt is malformed")
+        canonical = json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        if hashlib.sha256(canonical).hexdigest() != marker["check_receipt_sha256"]:
+            continue
+        if (receipt.get("status") != "passed" or receipt.get("baseline_sha") != marker["base_sha"]
+                or receipt.get("head_sha") != marker["candidate_sha"]
+                or receipt.get("head_tree") != marker["candidate_tree"]):
+            raise ReleaseError("maintenance check receipt identity differs from marker")
+        checkpoint = receipt.get("check_checkpoint")
+        if checkpoint is None:
+            return None
+        if (not isinstance(checkpoint, str) or Path(checkpoint).parent != directory
+                or not Path(checkpoint).name.endswith("-checkpoint.json")):
+            raise ReleaseError("maintenance check checkpoint is outside protected diagnostics")
+        return checkpoint
+    return None
+
+
 def _advance_main_cas(repo: Path, old_sha: str, new_sha: str) -> None:
     old_sha, new_sha = _sha(old_sha, "expected old main SHA"), _sha(new_sha, "candidate main SHA")
     current = _resolve_ref(repo, MAIN_REF)
@@ -3392,7 +3432,7 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
         check_config = dict(config, _check_progress_callback=lambda progress: _update_state(
             state_path, state, in_flight={**state["in_flight"], "check_progress": progress}))
         if maintenance_marker and maintenance_marker.get("candidate_sha") == item["head_sha"]:
-            check_config["_check_resume_checkpoint"] = maintenance_marker.get("check_checkpoint")
+            check_config["_check_resume_checkpoint"] = _maintenance_check_checkpoint(config, maintenance_marker)
         if item.get("failure", {}).get("kind") == "environment" and item["failure"].get("check_checkpoint"):
             check_config["_check_resume_checkpoint"] = item["failure"].get("check_checkpoint")
         check_receipt = _check_report(check_config, repo, source_worktree, report_dir, old_main_sha, item["head_sha"])
@@ -3636,7 +3676,6 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
                 "fixed_file_sha256": fixed_hashes,
                 "check_receipt_sha256": hashlib.sha256(canonical).hexdigest(),
                 "checked_at_utc": _utc_now(),
-                "check_checkpoint":check_receipt.get("check_checkpoint"),
             }
             _update_state(state_path, state)
         return {"status": status, "candidate_sha": candidate_sha,

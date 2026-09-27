@@ -12,6 +12,36 @@ from scripts import domestic_main_release as release
 
 
 class AccelerationGateTest(unittest.TestCase):
+    def test_maintenance_continuation_only_uses_protected_digest_and_exact_identity(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw); config={"work_root":str(root)}
+            marker={"candidate_sha":"b"*40,"candidate_tree":"c"*40,"base_sha":"a"*40,
+                    "check_receipt_sha256":"d"*64}
+            self.assertIsNone(release._maintenance_check_checkpoint(config,marker))
+            directory=root/"diagnostics"; directory.mkdir(mode=0o700)
+            path=directory/("b"*40+"-completed-receipt.json")
+            checkpoint=directory/("b"*40+"-completed-checkpoint.json")
+            receipt={"status":"passed","head_sha":"b"*40,"head_tree":"c"*40,
+                     "baseline_sha":"a"*40,"check_checkpoint":str(checkpoint)}
+            def write(value):
+                release.atomic_json(path,value)
+                marker["check_receipt_sha256"]=release.hashlib.sha256(json.dumps(
+                    value,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+            write(receipt)
+            self.assertEqual(release._maintenance_check_checkpoint(config,marker),str(checkpoint))
+            release.atomic_json(path,{**receipt,"head_tree":"changed"})
+            self.assertIsNone(release._maintenance_check_checkpoint(config,marker))
+            for change in ({"head_sha":"e"*40},{"head_tree":"e"*40},{"baseline_sha":"e"*40},
+                           {"status":"failed"},{"check_checkpoint":str(root/"outside-checkpoint.json")}):
+                write({**receipt,**change})
+                with self.assertRaises(release.ReleaseError):
+                    release._maintenance_check_checkpoint(config,marker)
+            write({**receipt,"check_checkpoint":None})
+            self.assertIsNone(release._maintenance_check_checkpoint(config,marker))
+            write(receipt); path.chmod(0o644)
+            with self.assertRaises(release.ReleaseError):
+                release._maintenance_check_checkpoint(config,marker)
+
     def test_package_discovery_materializes_embed_inputs_in_private_checkout_first(self):
         with tempfile.TemporaryDirectory() as raw:
             root=Path(raw); checkout=root/"private"; policy=root/"trusted"
