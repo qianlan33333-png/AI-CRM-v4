@@ -100,6 +100,49 @@ class DomesticMainReleaseTests(unittest.TestCase):
             release._build_command({}, ["child"], cwd=Path("/"), check=False)
         self.assertEqual(run.call_args.kwargs["umask"], -1)
 
+    def test_check_report_prerequisite_probe_binds_real_git_base_and_head(self) -> None:
+        # Execute the report's actual embedded probe and call expression. Only
+        # sudo transport is replaced; env construction, the trusted prerequisite
+        # implementation and Git identity checks all run normally.
+        module = ast.parse(Path(release.__file__).read_text(encoding="utf-8"))
+        report = next(node for node in module.body
+                      if isinstance(node, ast.FunctionDef) and node.name == "_check_report")
+        assignments = {node.targets[0].id: node.value for node in ast.walk(report)
+                       if isinstance(node, ast.Assign) and len(node.targets) == 1
+                       and isinstance(node.targets[0], ast.Name)
+                       and node.targets[0].id in {"probe_code", "probe"}}
+        probe_code = ast.literal_eval(assignments["probe_code"])
+        probe_call = compile(ast.Expression(assignments["probe"]), "<report-prerequisite>", "eval")
+        policy = Path(release.__file__).resolve().parent.parent
+
+        def run_without_sudo(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            index = args.index("/usr/bin/env")
+            return subprocess.run(args[index:], cwd=kwargs["cwd"], capture_output=True,
+                                  text=True, timeout=kwargs["timeout"], check=kwargs["check"])
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _, base, _, head = make_repository(root)
+            worktree = root / "source"
+            config = {"check_database_url": "postgresql://localhost/aicrm_ci",
+                      "build_path": "/opt/aicrm/toolchain/npm/bin:/usr/bin:/bin"}
+            scope = {"check_config": config, "policy": policy, "worktree": worktree,
+                     "lanes": ["preflight"], "probe_code": probe_code,
+                     "base_sha": base, "head_sha": head, "json": json,
+                     "_build_command": release._build_command}
+            identity_error = "AICRM_DEDUP_BASE_SHA/current AICRM_DEDUP_HEAD_SHA baseline"
+            with mock.patch.object(release, "_run", side_effect=run_without_sudo):
+                valid = eval(probe_call, scope)
+                self.assertEqual(valid.returncode, 0, valid.stderr)
+                self.assertNotIn(identity_error, json.loads(valid.stdout).get("preflight", []))
+                for identity in ({"head_sha": base}, {"base_sha": "a" * 40}):
+                    with self.subTest(identity=identity):
+                        invalid = eval(probe_call, {**scope, **identity})
+                        self.assertEqual(invalid.returncode, 0, invalid.stderr)
+                        self.assertIn(identity_error, json.loads(invalid.stdout)["preflight"])
+                with self.assertRaisesRegex(release.ReleaseError, "both exact base and head"):
+                    eval(probe_call, {**scope, "base_sha": None})
+
     def test_maintenance_embedded_probes_compile_and_enforce_lock_exclusion(self) -> None:
         module_source = Path(release.__file__).read_text(encoding="utf-8")
         function = next(node for node in ast.parse(module_source).body

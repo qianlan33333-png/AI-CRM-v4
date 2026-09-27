@@ -1109,9 +1109,10 @@ print(json.dumps(result, sort_keys=True, separators=(",", ":")))
 def _build_command(config: dict[str, Any], command: list[str], *, cwd: Path,
                    input_text: str | None = None, timeout: int = 60 * 60,
                    check: bool = True, safe_repository: Path | None = None,
-                   umask: int = -1) -> subprocess.CompletedProcess[str]:
+                   umask: int = -1, base_sha: str | None = None,
+                   head_sha: str | None = None) -> subprocess.CompletedProcess[str]:
     _check_storage_mount(config)
-    env = _check_env(config, safe_repository)
+    env = _check_env(config, safe_repository, base_sha=base_sha, head_sha=head_sha)
     args = ["/usr/bin/sudo", "-n", "-u", legacy.BUILD_USER, "-H", "--", "/usr/bin/env", "-i"]
     args.extend([f"{key}={value}" for key, value in env.items()])
     args.extend(command)
@@ -2654,7 +2655,8 @@ print(json.dumps({lane: items for lane, items in missing.items() if items}))
 """
             probe = _build_command(check_config, ["/usr/bin/python3", "-c", probe_code, str(policy),
                                    str(worktree), json.dumps(lanes)], cwd=worktree, timeout=180,
-                                   check=False, safe_repository=worktree)
+                                   check=False, safe_repository=worktree,
+                                   base_sha=base_sha, head_sha=head_sha)
             if probe.returncode:
                 raise CheckIncompleteError("actual build account prerequisite probe did not complete")
             try:
