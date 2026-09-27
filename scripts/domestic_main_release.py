@@ -1659,6 +1659,18 @@ def _lane_check_profile(enforced: dict[str, Any], profile: str) -> str:
     return "tooling" if profile == "tooling" else "full"
 
 
+def _browser_needs_npm(policy: Path, checkout: Path, checks: list[dict[str, Any]]) -> bool:
+    # Import only protected policy, never candidate Python. Missing/old policy
+    # and uncertain dependency inputs retain the existing complete preparation.
+    code = ("import sys,json; from pathlib import Path; "
+            "sys.path.insert(0,str(Path(sys.argv[1])/'scripts/ci')); "
+            "import commerce_checks; print(json.dumps(commerce_checks.browser_needs_npm("
+            "Path(sys.argv[1]),Path(sys.argv[2]),json.loads(sys.argv[3]))))")
+    result = _run(["/usr/bin/python3", "-c", code, str(policy), str(checkout),
+                   json.dumps(checks)], cwd=policy, check=False)
+    return result.returncode != 0 or result.stdout.strip() != "false"
+
+
 def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                      execution_worktree: Path, report_dir: Path,
                      base_sha: str, head_sha: str, enforced: dict[str, Any],
@@ -1705,7 +1717,15 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
         if lane == "browser":
             backend_running.wait()
         scheduler_wait = time.monotonic() - waiting
+        dependency_preparation = "not-applicable"
         if lane in {"frontend", "browser"} or (lane == "backend" and not backend_stages_dependencies):
+            needs_dependencies = not (lane == "browser" and preparation_helper
+                and _lane_check_profile(enforced, profile) == "public-commerce-v1"
+                and not _browser_needs_npm(policy, checkout, lane_checks))
+            dependency_preparation = "prepared" if needs_dependencies else "not-required-by-trusted-drivers"
+        else:
+            needs_dependencies = False
+        if needs_dependencies:
             _prepare_check_dependencies(config, checkout, [lane],
                 diagnostic_root / f"{head_sha}-{report_dir.name}-{lane}-npm-ci.log", policy=policy)
         args = [lane, "--report-dir", str(lane_dir)]
@@ -1750,6 +1770,7 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
             except subprocess.TimeoutExpired as exc:
                 raise CheckIncompleteError("trusted check process timed out: " + lane) from exc
         result = {"lane": lane, "exit_code": completed.returncode,
+                  "dependency_preparation": dependency_preparation,
                   "duration_seconds": round(time.monotonic() - started, 1),
                   "scheduler_wait_seconds": round(scheduler_wait, 3),
                   "free_before_bytes":free_before, "free_after_bytes":shutil.disk_usage(report_dir).free,

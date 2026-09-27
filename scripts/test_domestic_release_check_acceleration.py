@@ -12,6 +12,61 @@ from scripts import domestic_main_release as release
 
 
 class AccelerationGateTest(unittest.TestCase):
+    def test_omitting_unused_npm_still_executes_and_verifies_every_required_browser_journey(self):
+        for verified, needs_npm in ((True, False), (True, True), (False, False)):
+            with self.subTest(verified=verified, needs_npm=needs_npm), tempfile.TemporaryDirectory() as raw:
+                root = Path(raw)
+                (root / "scripts/ci").mkdir(parents=True)
+                (root / "scripts/ci/check_preparation.py").write_text("policy")
+                execution = root / "candidate"; execution.mkdir()
+                reports = root / "reports"; reports.mkdir()
+                diagnostics = root / "diagnostics"; diagnostics.mkdir()
+                from scripts.ci import commerce_checks
+                checks = [{"lane": "browser", "path": path, "test": name}
+                          for path, name in commerce_checks.JOURNEY_FILES.items()]
+                names = [check["test"] for check in checks]
+                def checkout(config, repo, path, sha):
+                    path.mkdir(); return path
+                def build(config, args, **kwargs):
+                    if args[0] == "/usr/bin/mkdir": Path(args[-1]).mkdir()
+                    return subprocess.CompletedProcess(args, 0, "", "")
+                def run(args, **kwargs):
+                    directory = Path(args[args.index("--report-dir") + 1])
+                    self.receipt(directory, "browser", [{"Action": "pass", "Test": name} for name in names])
+                    (directory / "summary.json").write_text(json.dumps({"required_browser_tests": names}))
+                    return subprocess.CompletedProcess(args, 0)
+                enforced = {"selection_mode": "targeted", "selection_reasons": ["public-commerce-v1"] if verified else []}
+                config = {}
+                with patch.object(release, "_private_check_checkout", side_effect=checkout), \
+                     patch.object(release, "_build_command", side_effect=build), \
+                     patch.object(release, "_prepare_check_dependencies") as prepare, \
+                     patch.object(release, "_browser_needs_npm", return_value=needs_npm) as dependency_guard, \
+                     patch.object(release, "_check_env", return_value={}), \
+                     patch.object(release, "_verify_check_checkout_tree"), \
+                     patch.object(release, "_tree", return_value="c" * 40), \
+                     patch.object(release, "_run_check_process", side_effect=run) as execute:
+                    results = release._run_check_lanes(config, root, root, execution, reports, "a" * 40, "b" * 40,
+                        enforced, ["browser"], checks, [], "affected-packages", diagnostics)
+                self.assertEqual(execute.call_count, 1)
+                self.assertEqual(prepare.call_count, int(not verified or needs_npm))
+                self.assertEqual(dependency_guard.call_count, int(verified))
+                self.assertEqual(set(config["_check_snapshots"]["browser"]["required_browser_tests"]), set(names))
+
+    def test_browser_dependency_decision_executes_only_trusted_policy_and_defaults_to_prepare(self):
+        policy = Path(__file__).resolve().parent.parent
+        from scripts.ci import commerce_checks
+        checks = [{"lane": "browser", "path": path, "test": name}
+                  for path, name in commerce_checks.JOURNEY_FILES.items()]
+        self.assertFalse(release._browser_needs_npm(policy, policy, checks))
+        with tempfile.TemporaryDirectory() as raw:
+            unknown = Path(raw)
+            self.assertTrue(release._browser_needs_npm(unknown, policy, checks))
+            (unknown / "scripts/ci").mkdir(parents=True)
+            (unknown / "scripts/ci/commerce_checks.py").write_text('raise Exception("candidate code must not execute")')
+            self.assertTrue(release._browser_needs_npm(policy, unknown, checks))
+        with patch.object(release, "_run", return_value=subprocess.CompletedProcess([], 0, "not-a-bool", "")):
+            self.assertTrue(release._browser_needs_npm(policy, policy, checks))
+
     def test_commerce_preparation_only_follows_the_enforced_verified_mapping(self):
         exact = {"selection_mode": "targeted", "selection_reasons": ["public-commerce-v1", "go-test-import-closure"]}
         self.assertEqual(release._lane_check_profile(exact, "affected-packages"), "public-commerce-v1")

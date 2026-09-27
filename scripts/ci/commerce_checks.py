@@ -66,6 +66,34 @@ JOURNEY_SCRIPTS = {
 }
 
 
+def browser_needs_npm(policy: Path, candidate: Path, checks: list[dict]) -> bool:
+    """The existing four drivers use Node builtins and the local Chrome resolver.
+
+    Compare actual inputs with the trusted, reviewed drivers. Changed/new
+    drivers retain dependency preparation; this never substitutes for running
+    the required browser assertions or preparing their real Host artifact.
+    """
+    known = set(JOURNEY_FILES.items())
+    selected = {(check.get("path"), check.get("test")) for check in checks
+                if check.get("lane") == "browser"}
+    if selected != known:
+        return True
+    inputs = JOURNEY_SCRIPTS | {
+        "internal/webshell/chromium_binary.mjs",
+        "scripts/generate-ai-assistant-client.mjs",
+    }
+    for name in inputs:
+        trusted, actual = policy / name, candidate / name
+        try:
+            if (trusted.is_symlink() or actual.is_symlink()
+                    or not trusted.is_file() or not actual.is_file()
+                    or trusted.read_bytes() != actual.read_bytes()):
+                return True
+        except OSError:
+            return True
+    return False
+
+
 def ordinary_document(path: str) -> bool:
     return path == "design-qa.md" or (path.startswith(("docs/", "skills/"))
         and path.endswith(".md") and not path.startswith("docs/governance/"))
