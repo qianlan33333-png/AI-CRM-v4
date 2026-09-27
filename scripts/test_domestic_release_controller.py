@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ast
-from contextlib import contextmanager, nullcontext, redirect_stdout
+from contextlib import ExitStack, contextmanager, nullcontext, redirect_stdout
 import hashlib
 import importlib.util
 import io
@@ -1367,6 +1367,95 @@ class DomesticMainReleaseTests(unittest.TestCase):
         self.assertIn(release._candidate_ref(sha), argv)
         self.assertIn("--source-repository", argv)
         self.assertIn(release.DEFAULT_REPO, argv)
+
+    def test_actual_smoke_producer_receipt_is_accepted_by_controller(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "domestic_promote_contract", Path(__file__).resolve().parents[1] / "deploy/domestic-promote.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        sha, tree = "1" * 40, "2" * 40
+        manifest, helper, binary_hash = "a" * 64, "b" * 64, "c" * 64
+        source_ref = release._candidate_ref(sha)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            snapshot_root = root / "snapshots"
+            go_cache, mod_cache = root / "gocache", root / "modcache"
+            go_cache.mkdir()
+            mod_cache.mkdir()
+            source_repo = root / "source.git"
+            source_repo.mkdir()
+            binary = root / "aicrm"
+            lock = root / "release.lock"
+            original_lstat = Path.lstat
+
+            def root_owned_snapshot(path: Path):
+                if path == snapshot_root:
+                    return mock.Mock(st_mode=stat.S_IFDIR | 0o755, st_uid=0, st_gid=0)
+                return original_lstat(path)
+
+            def archive_source(_sha: str, scratch: Path, **_kwargs) -> str:
+                (scratch / "source").mkdir()
+                return tree
+
+            patches = [
+                mock.patch.object(Path, "lstat", root_owned_snapshot),
+                mock.patch.object(installer, "LOCK", lock),
+                mock.patch.object(installer, "SMOKE_SNAPSHOT_ROOT", snapshot_root),
+                mock.patch.object(installer, "SMOKE_GOCACHE", go_cache),
+                mock.patch.object(installer, "SMOKE_GOMODCACHE", mod_cache),
+                mock.patch.object(installer, "verify_helper_digest", return_value=helper),
+                mock.patch.object(installer, "require_host_role", return_value="staging"),
+                mock.patch.object(installer, "check_host_contract", return_value={
+                    "host_role": "staging", "postgres_major": 16,
+                    "database_connection": "verified"}),
+                mock.patch.object(installer, "_source_commit_tree", return_value=tree),
+                mock.patch.object(installer, "_staging_database_url", return_value="postgres:///synthetic"),
+                mock.patch.object(installer, "_installed_staging_smoke_identity",
+                                  return_value=(binary, binary_hash)),
+                mock.patch.object(installer, "_archive_smoke_source", side_effect=archive_source),
+                mock.patch.object(installer, "_source_git_dir", return_value=source_repo),
+                mock.patch.object(installer, "_smoke_source_index", return_value=root / "index"),
+                mock.patch.object(installer, "_chown_smoke_source_snapshot"),
+                mock.patch.object(installer, "_attach_smoke_source_git_metadata"),
+                mock.patch.object(installer, "_staging_smoke_user_can"),
+                mock.patch.object(installer, "_require_host_tool"),
+                mock.patch.object(installer, "_write_staging_smoke_inputs"),
+                mock.patch.object(installer, "staging_smoke_test_environment", return_value={}),
+                mock.patch.object(installer, "_run_installed_smoke_test"),
+                mock.patch.object(installer.pwd, "getpwnam", return_value=mock.Mock(
+                    pw_uid=os.getuid(), pw_gid=os.getgid())),
+                mock.patch.object(installer.os, "chown"),
+            ]
+            with ExitStack() as stack:
+                for patcher in patches:
+                    stack.enter_context(patcher)
+                receipt = installer.run_staging_smoke(
+                    sha, sha, manifest, helper, source_ref=source_ref,
+                    source_repository=source_repo)
+                legacy_receipt = installer.run_staging_smoke(
+                    sha, sha, manifest, helper, source_repository=source_repo)
+
+        self.assertEqual(receipt["source_ref"], source_ref)
+        self.assertIsNone(legacy_receipt["source_ref"])
+        with mock.patch.object(release, "_worktree_git", return_value="internal/payment/checkout.go"), \
+             mock.patch.object(release, "_needs_installed_alipay_smoke", return_value=True), \
+             mock.patch.object(release.legacy, "command", return_value=json.dumps(receipt)):
+            self.assertEqual(release._run_installed_smoke(
+                {"stage_helper": "/usr/local/libexec/aicrm/domestic-promote.py",
+                 "repo": release.DEFAULT_REPO}, Path("/candidate"), sha, manifest, helper,
+                tree, validation_scope_base_sha="0" * 40), receipt)
+
+        for bad_receipt in ({**receipt, "source_ref": "refs/heads/main"},
+                            {key: value for key, value in receipt.items() if key != "source_ref"}):
+            with self.subTest(bad_receipt=bad_receipt), \
+                 mock.patch.object(release, "_worktree_git", return_value="internal/payment/checkout.go"), \
+                 mock.patch.object(release, "_needs_installed_alipay_smoke", return_value=True), \
+                 mock.patch.object(release.legacy, "command", return_value=json.dumps(bad_receipt)):
+                with self.assertRaises(release.ReleaseError):
+                    release._run_installed_smoke(
+                        {"stage_helper": "/usr/local/libexec/aicrm/domestic-promote.py",
+                         "repo": release.DEFAULT_REPO}, Path("/candidate"), sha, manifest,
+                        helper, tree, validation_scope_base_sha="0" * 40)
 
     def test_installed_smoke_selects_paths_from_full_multi_commit_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -1378,6 +1378,7 @@ def run_staging_smoke(
         "stage_role": "staging",
         "source_sha": source_sha,
         "source_tree": tree_sha,
+        "source_ref": source_ref,
         "installed_sha": expected_sha,
         "manifest_sha256": expected_manifest_sha256,
         "installed_binary_sha256": binary_sha256,
