@@ -1875,6 +1875,28 @@
       ],
       "reason": "Record the exact Alipay refund API provider enums and scoped admin refund intent contract with synchronized canonical source index, lock and embed binding. Frozen donor payloads and authority libraries are unchanged.",
       "review_reference": "Author review on 2026-09-28 of the exact three-file base 9845909 to candidate f46977c Git diff and canonical snapshot hashes, under the user-authorized Alipay refund parent PRD docs/prd/2026-09-26-alipay-refund.md. This is an auditable source-change declaration, not independent human approval. Linux candidate checks and production release readback remain required."
+    },
+    {
+      "base_commit": "7916dc2d63eda463e2af535fd4f06eb53d60ecb0",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "da7820a66b28c4a2c02ccee7ac3e98f3f6766175b1cff009a2de485c998437fe",
+          "head_sha256": "c59f76be378762e696fba1298dc1e98647771f236941566b5cc0033e2cb3002d"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "9c2b06b0fed98af828a73f93873bbe5e57c438fc68957e988efe4c08f8ca0a56",
+          "head_sha256": "76da324f7c6643b01f971690c67dbf6ff72400471b3f968fdd80361e53089b43"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "ac7697fdfdc5d3e2f72c8aae3817906189a8cad379e451f0347fe74133427188",
+          "head_sha256": "bb90cc43cc1a067c680d5c623181f2a68703c2d0f588d025d17ef8116ebfda95"
+        }
+      ],
+      "reason": "Rebind the exact Alipay refund API and synchronized canonical index/lock authority change to domestic main 7916dc2. Independently recomputed complete before/after hashes equal the earlier 984 baseline review; frozen donor payloads, authority libraries and refund behavior are unchanged.",
+      "review_reference": "Author review on 2026-09-28 of the exact 7916dc2 baseline authority diff, validated Git canonical snapshots and full three-path input hashes under docs/prd/2026-09-26-alipay-refund.md. This is an auditable author source review, not independent human approval or new-head Linux approval. Earlier 5ce37bb Linux receipt remains historical; current candidate checks and production readback remain required."
     }
   ]
 }
