@@ -47,6 +47,9 @@ CI_ONLY_FILES = {
     # application command's production embed graph. Other webshell assets
     # continue to change the installed application.
     "internal/webshell/chromium_launch.mjs",
+    # Loaded only by the HTTP package test's Node process; the production
+    # host embeds member_grid_host.js, not this journey.
+    "internal/product/http/member_grid_host/member_grid_journey.mjs",
     "scripts/dev_preflight.py",
     "scripts/check-architecture.py",
     "scripts/check-config-definition-import-boundary.sh",

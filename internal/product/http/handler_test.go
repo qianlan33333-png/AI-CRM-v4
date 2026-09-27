@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1006,7 +1007,18 @@ func TestFrozenMemberGridBrowserJourneyUsesActualHTTPAPI(t *testing.T) {
 	mux.HandleFunc("/assets/standard-components/operation_member_picker.js", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, filepath.Join("..", "..", "webshell", "static", "admin_console", "operation_member_picker_dd8d60d.js"))
 	})
-	mux.Handle("/", handler)
+	var refreshAfterDelete atomic.Bool
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/admin/service-period-products/7/member-grid/collaborators/") {
+			refreshAfterDelete.Store(true)
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/admin/service-period-products/7/member-grid/share-settings" && refreshAfterDelete.CompareAndSwap(true, false) {
+			// Keep the real refresh in flight so a loading placeholder cannot
+			// accidentally count as completed deletion before the next input.
+			time.Sleep(200 * time.Millisecond)
+		}
+		handler.ServeHTTP(w, r)
+	}))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 

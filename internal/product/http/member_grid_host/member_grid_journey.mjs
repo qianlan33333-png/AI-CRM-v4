@@ -156,7 +156,9 @@ async function runInternalJourney() {
   change(window, permission, 'collaborator permission');
   await eventually(() => document.getElementById('spGridToast')?.textContent.includes('已改为可编辑'), 'updated collaborator');
   click(window, await eventually(() => document.querySelector('[data-remove-collaborator]'), 'remove collaborator control'), 'remove collaborator');
-  await eventually(() => !document.querySelector('[data-collaborator-id]'), 'removed collaborator');
+  // Loading replaces collaborator rows before the refreshed share settings
+  // arrive. Continue only when the actual share control accepts user input.
+  await eventually(() => !document.querySelector('[data-collaborator-id]') && !document.getElementById('spExternalShareToggle').disabled, 'removed collaborator and sharing ready');
 
   const toggle = document.getElementById('spExternalShareToggle');
   toggle.checked = true;

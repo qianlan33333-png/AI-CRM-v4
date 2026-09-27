@@ -180,6 +180,18 @@ class DomesticReleaseBuildTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(builder.classify_paths([path]).runtime_changed)
 
+    def test_frozen_member_grid_journey_is_explicitly_validation_only(self) -> None:
+        journey = "internal/product/http/member_grid_host/member_grid_journey.mjs"
+        repository = Path(__file__).resolve().parents[1]
+        self.assertTrue((repository / journey).is_file())
+        result = builder.classify_paths([journey, "scripts/domestic_main_release.py"])
+        self.assertFalse(result.runtime_changed)
+        self.assertEqual(result.build_mode, "controller_only")
+        for path in ("internal/product/http/member_grid_host/member_grid_host.js",
+                     "internal/product/http/member_grid_host/unknown_journey.mjs"):
+            with self.subTest(path=path):
+                self.assertTrue(builder.classify_paths([path]).runtime_changed)
+
     def test_dependency_graph_limits_build_to_affected_command_and_embed_consumer(self) -> None:
         commands = [
             builder.ReleaseCommand("./cmd/aicrm", "aicrm"),
