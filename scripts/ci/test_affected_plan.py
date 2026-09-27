@@ -10,6 +10,26 @@ import impact_selection
 
 
 class AffectedPlanTest(unittest.TestCase):
+    def test_browser_dependency_parser_changes_invalidate_rules_and_require_full_verification(self):
+        _, root, base, _ = self.repo()
+        target = root / "scripts/ci/browser_npm_dependencies.mjs"
+        target.parent.mkdir(parents=True)
+        target.write_text('export const inspect = () => false;\n')
+        subprocess.run(["git", "add", "."], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-qm", "change dependency rule"], cwd=root, check=True)
+        head = affected_plan.resolve_commit(root, "HEAD")
+        with patch.object(affected_plan, "analyze_trusted_base", return_value=self.report([target.relative_to(root).as_posix()])):
+            plan = affected_plan.build_plan(root, base, head, graph_result=self.graph_for(root, base, head))
+        self.assertTrue(plan["policy_changed"])
+        self.assertEqual(plan["enforced"]["selection_mode"], "full")
+        self.assertNotEqual(affected_plan.repository_policy_fingerprint(root, base),
+                            affected_plan.repository_policy_fingerprint(root, head))
+        previous = affected_plan.planner_policy_fingerprint()
+        read = Path.read_bytes
+        with patch.object(Path, "read_bytes", autospec=True, side_effect=lambda path:
+                read(path) + (b"changed-parser" if path.name == target.name else b"")):
+            self.assertNotEqual(previous, affected_plan.planner_policy_fingerprint())
+
     def repo(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

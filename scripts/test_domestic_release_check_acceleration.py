@@ -68,15 +68,24 @@ class AccelerationGateTest(unittest.TestCase):
         from scripts.ci import commerce_checks
         checks = [{"lane": "browser", "path": path, "test": name}
                   for path, name in commerce_checks.JOURNEY_FILES.items()]
-        self.assertFalse(release._browser_needs_npm(policy, policy, checks))
+        config = {"marker": "actual-build-account"}
+        for stdout, code, expected in (("{\"needs_npm\":false}", 0, False),
+                ("{\"needs_npm\":true}", 0, True), ("{\"needs_npm\":false}", 1, True),
+                ("{\"needs_npm\":0}", 0, True), ("{}", 0, True), ("not-a-proof", 0, True)):
+            with self.subTest(stdout=stdout, code=code), patch.object(release, "_build_command",
+                    return_value=subprocess.CompletedProcess([], code, stdout, "")) as execute:
+                self.assertEqual(release._browser_needs_npm(config, policy, policy, policy, checks), expected)
+                args, kwargs = execute.call_args
+                self.assertEqual(args[0], config)
+                self.assertEqual(args[1][1], str(policy / "scripts/ci/browser_npm_dependencies.mjs"))
+                self.assertEqual(kwargs["safe_repository"], policy)
         with tempfile.TemporaryDirectory() as raw:
             unknown = Path(raw)
-            self.assertTrue(release._browser_needs_npm(unknown, policy, checks))
-            (unknown / "scripts/ci").mkdir(parents=True)
-            (unknown / "scripts/ci/commerce_checks.py").write_text('raise Exception("candidate code must not execute")')
-            self.assertTrue(release._browser_needs_npm(policy, unknown, checks))
-        with patch.object(release, "_run", return_value=subprocess.CompletedProcess([], 0, "not-a-bool", "")):
-            self.assertTrue(release._browser_needs_npm(policy, policy, checks))
+            with patch.object(release, "_build_command") as execute:
+                self.assertTrue(release._browser_needs_npm(config, unknown, policy, policy, checks))
+                execute.assert_not_called()
+        with patch.object(release, "_run", return_value=subprocess.CompletedProcess([], 0, "not-json", "")):
+            self.assertTrue(release._browser_needs_npm(config, policy, policy, policy, checks))
 
     def test_commerce_preparation_only_follows_the_enforced_verified_mapping(self):
         exact = {"selection_mode": "targeted", "selection_reasons": ["public-commerce-v1", "go-test-import-closure"]}

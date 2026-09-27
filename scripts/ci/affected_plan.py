@@ -29,6 +29,7 @@ POLICY_FILES = (
     "scripts/ci/affected_shadow.py",
     "scripts/ci/go_affected_graph.py",
     "scripts/ci/commerce_checks.py",
+    "scripts/ci/browser_npm_dependencies.mjs",
     "scripts/ci/check_preparation.py",
     "scripts/ci/verification.py",
     "skills/aicrm-v3-development-frontdoor/SKILL.md",
@@ -116,7 +117,8 @@ def planner_policy_fingerprint() -> str:
     """Hash the planner and selector code that actually produced this plan."""
     files = (Path(__file__).resolve(), Path(impact_selection.__file__).resolve(),
              Path(go_affected_graph.__file__).resolve(), Path(commerce_checks.__file__).resolve(),
-             Path(__file__).with_name("quality_lanes.py"), Path(__file__).with_name("check_preparation.py"))
+             Path(__file__).with_name("quality_lanes.py"), Path(__file__).with_name("check_preparation.py"),
+             Path(__file__).with_name("browser_npm_dependencies.mjs"))
     entries = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
     payload = json.dumps({"schema": SCHEMA, "files": entries}, sort_keys=True,
                          separators=(",", ":")).encode()

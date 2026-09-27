@@ -7,34 +7,15 @@ import commerce_checks
 
 
 class CommerceChecksTest(unittest.TestCase):
-    def test_browser_preparation_compares_actual_reviewed_driver_inputs(self):
-        policy = Path(__file__).resolve().parents[2]
+    def test_browser_dependency_inspection_keeps_complete_preparation_for_unknown_journeys(self):
         checks = [{"lane": "browser", "path": path, "test": name}
                   for path, name in commerce_checks.JOURNEY_FILES.items()]
-        self.assertFalse(commerce_checks.browser_needs_npm(policy, policy, checks))
-        with tempfile.TemporaryDirectory() as raw:
-            candidate = Path(raw)
-            inputs = commerce_checks.JOURNEY_SCRIPTS | {
-                "internal/webshell/chromium_binary.mjs", "scripts/generate-ai-assistant-client.mjs"}
-            for name in inputs:
-                target = candidate / name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes((policy / name).read_bytes())
-            self.assertFalse(commerce_checks.browser_needs_npm(policy, candidate, checks))
-            for name in inputs:
-                with self.subTest(input=name):
-                    target = candidate / name
-                    original = target.read_bytes()
-                    target.write_bytes(original + b'\nimport "new-npm-dependency";\n')
-                    self.assertTrue(commerce_checks.browser_needs_npm(policy, candidate, checks))
-                    target.unlink()
-                    self.assertTrue(commerce_checks.browser_needs_npm(policy, candidate, checks))
-                    target.symlink_to(policy / name)
-                    self.assertTrue(commerce_checks.browser_needs_npm(policy, candidate, checks))
-                    target.unlink(); target.write_bytes(original)
-            self.assertTrue(commerce_checks.browser_needs_npm(policy, candidate, checks[:-1]))
-            self.assertTrue(commerce_checks.browser_needs_npm(policy, candidate, checks + [
-                {"lane": "browser", "path": checks[0]["path"], "test": "TestNewChromiumJourney"}]))
+        inputs = commerce_checks.browser_npm_inputs(checks)
+        self.assertTrue(commerce_checks.JOURNEY_SCRIPTS.issubset(inputs))
+        self.assertIn("scripts/prepare-donor-source-views.mjs", inputs)
+        self.assertIsNone(commerce_checks.browser_npm_inputs(checks[:-1]))
+        self.assertIsNone(commerce_checks.browser_npm_inputs(checks + [
+            {"lane": "browser", "path": checks[0]["path"], "test": "TestNewChromiumJourney"}]))
 
     def graph(self):
         return {"graph_valid": True, "unowned_go_paths": [], "selected_packages": [

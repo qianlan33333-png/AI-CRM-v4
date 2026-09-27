@@ -66,32 +66,23 @@ JOURNEY_SCRIPTS = {
 }
 
 
-def browser_needs_npm(policy: Path, candidate: Path, checks: list[dict]) -> bool:
-    """The existing four drivers use Node builtins and the local Chrome resolver.
+def browser_npm_inputs(checks: list[dict]) -> list[str] | None:
+    """Entries for source-only dependency inspection of the bounded journeys.
 
-    Compare actual inputs with the trusted, reviewed drivers. Changed/new
-    drivers retain dependency preparation; this never substitutes for running
-    the required browser assertions or preparing their real Host artifact.
+    New/unknown journeys keep full preparation. Actual import dependencies,
+    rather than changed assertions, determine whether npm is needed.
     """
     known = set(JOURNEY_FILES.items())
     selected = {(check.get("path"), check.get("test")) for check in checks
                 if check.get("lane") == "browser"}
     if selected != known:
-        return True
+        return None
     inputs = JOURNEY_SCRIPTS | {
         "internal/webshell/chromium_binary.mjs",
         "scripts/generate-ai-assistant-client.mjs",
+        "scripts/prepare-donor-source-views.mjs",
     }
-    for name in inputs:
-        trusted, actual = policy / name, candidate / name
-        try:
-            if (trusted.is_symlink() or actual.is_symlink()
-                    or not trusted.is_file() or not actual.is_file()
-                    or trusted.read_bytes() != actual.read_bytes()):
-                return True
-        except OSError:
-            return True
-    return False
+    return sorted(inputs)
 
 
 def ordinary_document(path: str) -> bool:

@@ -1659,16 +1659,40 @@ def _lane_check_profile(enforced: dict[str, Any], profile: str) -> str:
     return "tooling" if profile == "tooling" else "full"
 
 
-def _browser_needs_npm(policy: Path, checkout: Path, checks: list[dict[str, Any]]) -> bool:
+def _browser_needs_npm(config: dict[str, Any], policy: Path, checkout: Path,
+                       backend_checkout: Path, checks: list[dict[str, Any]]) -> bool:
     # Import only protected policy, never candidate Python. Missing/old policy
     # and uncertain dependency inputs retain the existing complete preparation.
+    config["_browser_dependency_evidence"] = {"needs_npm": True, "reason": "dependency inspection unavailable"}
     code = ("import sys,json; from pathlib import Path; "
             "sys.path.insert(0,str(Path(sys.argv[1])/'scripts/ci')); "
-            "import commerce_checks; print(json.dumps(commerce_checks.browser_needs_npm("
-            "Path(sys.argv[1]),Path(sys.argv[2]),json.loads(sys.argv[3]))))")
+            "import commerce_checks; print(json.dumps(commerce_checks.browser_npm_inputs(json.loads(sys.argv[3]))))")
     result = _run(["/usr/bin/python3", "-c", code, str(policy), str(checkout),
                    json.dumps(checks)], cwd=policy, check=False)
-    return result.returncode != 0 or result.stdout.strip() != "false"
+    try:
+        inputs = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        return True
+    if result.returncode or not isinstance(inputs, list) or not inputs:
+        return True
+    parser = policy / "scripts/ci/browser_npm_dependencies.mjs"
+    if not parser.is_file() or parser.is_symlink():
+        return True
+    try:
+        result = _build_command(config, ["node", str(parser), "--root", str(checkout),
+            "--compiler-root", str(backend_checkout), "--entries-json", json.dumps(inputs)],
+            cwd=checkout, safe_repository=checkout, timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return True
+    try:
+        proof = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        return True
+    needs_npm = result.returncode != 0 or not isinstance(proof, dict) or proof.get("needs_npm") is not False
+    if isinstance(proof, dict):
+        config["_browser_dependency_evidence"] = {**proof, "needs_npm": needs_npm,
+            "parser_sha256": _file_sha256(parser), "exit_code": result.returncode}
+    return needs_npm
 
 
 def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
@@ -1726,8 +1750,9 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                 and any(path.is_file() and not path.is_symlink() for path in
                         (report_dir / ".preparation").glob("artifact-*/receipt.json"))
                 and _lane_check_profile(enforced, profile) == "public-commerce-v1"
-                and not _browser_needs_npm(policy, checkout, lane_checks))
-            dependency_preparation = "prepared" if needs_dependencies else "not-required-by-trusted-drivers"
+                and not _browser_needs_npm(config, policy, checkout,
+                    execution_worktree.parent / "candidate-backend", lane_checks))
+            dependency_preparation = "prepared" if needs_dependencies else "not-required-by-inspected-dependencies"
         else:
             needs_dependencies = False
         if needs_dependencies:
@@ -1781,6 +1806,8 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                   "free_before_bytes":free_before, "free_after_bytes":shutil.disk_usage(report_dir).free,
                   "disk_increment_bytes":free_before-shutil.disk_usage(report_dir).free,
                   "log_sha256": _file_sha256(log), "log_path": str(log)}
+        if lane == "browser" and config.get("_browser_dependency_evidence"):
+            result["dependency_inspection"] = config["_browser_dependency_evidence"]
         # Failed attempts need the same immutable-source validation as passed
         # ones before any partial result is eligible for future continuation.
         _verify_check_checkout_tree(repo, head_sha, checkout)
