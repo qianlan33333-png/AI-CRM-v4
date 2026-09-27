@@ -1045,6 +1045,8 @@ def _check_env(config: dict[str, Any], safe_repository: Path | None = None, *,
         environment["AICRM_VERIFIED_COMMERCE_POLICY"] = verified_profile
     if config.get("_check_preparation_dir"):
         environment["AICRM_TEST_PREP_DIR"] = str(config["_check_preparation_dir"])
+    if config.get("_check_preparation_cache"):
+        environment["AICRM_TEST_PREP_CACHE"] = str(config["_check_preparation_cache"])
     if config.get("_check_tmpdir"):
         environment["TMPDIR"] = str(config["_check_tmpdir"])
     if (base_sha is None) != (head_sha is None):
@@ -2052,6 +2054,15 @@ def _cleanup_attempt_record(config: dict, path: Path, record: dict) -> dict:
             if not value.is_symlink() and value.is_file():
                 shutil.copyfile(value, evidence / value.name)
                 os.chmod(evidence / value.name, 0o600)
+        for snapshot in prep.iterdir():
+            if (snapshot.is_symlink() or not snapshot.is_dir()
+                    or not re.fullmatch(r"(?:artifact|npm)-[0-9a-f]{64}", snapshot.name)):
+                continue
+            receipt = snapshot / "receipt.json"
+            if receipt.is_file() and not receipt.is_symlink():
+                preserved = evidence / (snapshot.name + "-receipt.json")
+                shutil.copyfile(receipt, preserved)
+                os.chmod(preserved, 0o600)
         if list(prep.glob("database-*.json")):
             if _check_database_identity(config) != record["database_identity"]:
                 raise CheckEnvironmentError("stale synthetic database cleanup identity is unavailable; retained attempt")
@@ -2061,6 +2072,10 @@ def _cleanup_attempt_record(config: dict, path: Path, record: dict) -> dict:
             raise ReleaseError("generated lifecycle object is a symlink")
         if value.exists():
             shutil.rmtree(value)
+    preparation_cache = _trim_preparation_cache(config,
+        config.get("check_capacity", {}).get("cache_limits_bytes", {}).get("preparation"))
+    if preparation_cache is not None:
+        record["preparation_cache"] = preparation_cache
     record.update(status="reclaimed", finished_at_utc=_utc_now(), reclaimed_allocated_bytes=reclaim,
                   free_after_bytes=shutil.disk_usage(Path(config["work_root"])).free,
                   released_free_bytes=shutil.disk_usage(Path(config["work_root"])).free - before)
@@ -2338,6 +2353,67 @@ def _merge_legacy_check_caches(config: dict) -> dict:
     return record
 
 
+def _check_preparation_cache(config: dict) -> Path | None:
+    limit = config.get("check_capacity", {}).get("cache_limits_bytes", {}).get("preparation")
+    if limit is None:
+        return None
+    if type(limit) is not int or limit <= 0:
+        raise CheckEnvironmentError("preparation cache capacity must be positive and measured")
+    _require_cleanup_lock(config)
+    root = Path(legacy.BUILD_ROOT) / "cache/preparation"
+    if root.is_symlink():
+        raise CheckEnvironmentError("preparation cache root is a symlink")
+    _build_command(config, ["/usr/bin/mkdir", "-m", "0700", "-p", str(root)],
+                   cwd=Path("/"), timeout=30)
+    info = root.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != pwd.getpwnam(legacy.BUILD_USER).pw_uid:
+        raise CheckEnvironmentError("preparation cache must belong to the actual build account")
+    if stat.S_IMODE(info.st_mode) != 0o700:
+        _build_command(config, ["/usr/bin/chmod", "0700", str(root)], cwd=Path("/"), timeout=30)
+    _verify_preparation_cache_root(root)
+    return root
+
+
+def _verify_preparation_cache_root(root: Path) -> None:
+    info = root.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != pwd.getpwnam(legacy.BUILD_USER).pw_uid
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise CheckEnvironmentError("preparation cache must be private to the actual build account")
+
+
+def _trim_preparation_cache(config: dict, limit: int | None) -> dict | None:
+    _require_cleanup_lock(config)
+    root = Path(legacy.BUILD_ROOT) / "cache/preparation"
+    if not root.exists() and not root.is_symlink():
+        return None
+    _assert_build_account_idle()  # Preserve snapshots while any task uses them.
+    _verify_preparation_cache_root(root)
+    units = []
+    for value in root.iterdir():
+        if value.name in {"artifact.lock", "npm.lock"} and value.is_file() and not value.is_symlink():
+            continue
+        if not value.is_symlink() and value.is_dir() and re.fullmatch(r"(?:artifact|npm)-[0-9a-f]{64}", value.name):
+            units.append(value)
+        else:
+            raise CheckEnvironmentError("unrecognized preparation cache entry; retained for diagnosis")
+    if limit is not None and (type(limit) is not int or limit <= 0):
+        raise CheckEnvironmentError("preparation cache capacity must be positive and measured")
+    before = _allocated_bytes(root)
+    reclaimed = 0
+    removed = []
+    for unit in sorted(units, key=lambda item: item.stat().st_mtime_ns):
+        if limit is None or before - reclaimed <= limit:
+            break
+        reclaimed += unit.lstat().st_blocks * 512 + _allocated_bytes(unit)
+        removed.append(unit.name)
+        shutil.rmtree(unit)  # Whole snapshots only; writable task copies are elsewhere.
+    after = _allocated_bytes(root)
+    if limit is not None and after > limit:
+        raise CheckEnvironmentError("preparation cache metadata exceeds measured budget")
+    return {"before_bytes": before, "reclaimed_bytes": reclaimed, "after_bytes": after,
+            "limit_bytes": limit, "removed": removed, "reused": limit is not None}
+
+
 def _trim_check_caches(config: dict) -> dict:
     _require_cleanup_lock(config)
     limits = config.get("check_capacity", {}).get("cache_limits_bytes", {})
@@ -2402,6 +2478,9 @@ def _trim_check_caches(config: dict) -> dict:
                             "limit_bytes":limit, "reused":True, "protected_by":"all authoritative source refs go.sum"}
         if limit is not None and after > limit:
             raise CheckEnvironmentError("referenced module cache exceeds measured budget; keep source dependencies and review capacity")
+    preparation = _trim_preparation_cache(config, limits.get("preparation"))
+    if preparation is not None:
+        result["preparation"] = preparation
     return result
 
 
@@ -2828,6 +2907,9 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
         _build_command(config, ["/usr/bin/mkdir", "-m", "0700", str(prep)], cwd=execution_worktree, timeout=30)
         check_config = dict(config, _check_snapshots={}, _check_tmpdir=str(attempt_tmp))
         check_config["_check_preparation_dir"] = str(prep)
+        preparation_cache = _check_preparation_cache(check_config)
+        if preparation_cache is not None:
+            check_config["_check_preparation_cache"] = str(preparation_cache)
         toolchain["execution"] = _check_execution_preflight(check_config, policy, execution_worktree, report_dir, "browser" in lanes)
         if (policy / "scripts/ci/check_preparation.py").is_file():
             probe_code = """import sys,json

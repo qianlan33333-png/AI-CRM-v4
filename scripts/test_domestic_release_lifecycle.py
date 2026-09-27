@@ -164,6 +164,8 @@ class CheckLifecycleTest(unittest.TestCase):
                             (temporary/'checkout').mkdir(); (temporary/'checkout/generated').write_bytes(b'x'*65536)
                             (report/'.preparation').mkdir(mode=0o700)
                             (report/'.preparation/preparation.jsonl').write_text('{"kind":"npm"}\n')
+                            snapshot = report / '.preparation' / ('artifact-' + 'a' * 64)
+                            snapshot.mkdir(); (snapshot / 'receipt.json').write_text(json.dumps({'round': number}))
                             (report/'.preparation/snapshot').write_bytes(b'y'*65536)
                             (report/'backend/.venv').mkdir(parents=True); (report/'backend/.venv/runtime').write_bytes(b'z'*65536)
                             if error: raise error
@@ -173,6 +175,9 @@ class CheckLifecycleTest(unittest.TestCase):
                     self.assertFalse((report/'.preparation').exists())
                     self.assertFalse((report/'backend/.venv').exists())
                     self.assertTrue((report/'run.json').exists())
+                    receipt = work / 'check-lifecycle' / (report.name + '-attempt-preparation') / ('artifact-' + 'a' * 64 + '-receipt.json')
+                    self.assertEqual(json.loads(receipt.read_text()), {'round': number})
+                    self.assertEqual(receipt.stat().st_mode & 0o777, 0o600)
                     self.assertEqual(list(work.glob('domestic-main-check-*')), [])
                 records = list((work/'check-lifecycle').glob('*-attempt.json'))
                 self.assertEqual(len(records),10)
@@ -337,6 +342,83 @@ class CheckLifecycleTest(unittest.TestCase):
             self.assertFalse(old.exists()); self.assertTrue(new.exists())
             self.assertTrue(usage['go-build']['reused'])
             self.assertGreater(usage['go-build']['reclaimed_bytes'],0)
+
+    def test_preparation_cache_requires_opt_in_and_uses_actual_private_build_account(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw); _, build, _, config = self.fixture(root)
+            account = pwd.getpwuid(os.getuid())
+            def mkdir(cfg, command, **kwargs):
+                if command[0] == '/usr/bin/chmod':
+                    os.chmod(command[-1], 0o700)
+                else:
+                    Path(command[-1]).mkdir(mode=0o700, parents=True, exist_ok=True)
+                return subprocess.CompletedProcess(command, 0, '', '')
+            with patch.object(release.legacy, 'BUILD_ROOT', build), \
+                 patch.object(release.pwd, 'getpwnam', return_value=account), \
+                 patch.object(release, '_build_command', side_effect=mkdir) as execute:
+                self.assertIsNone(release._check_preparation_cache(config))
+                execute.assert_not_called()
+                config['check_capacity'] = {'cache_limits_bytes': {'preparation': 1024 * 1024}}
+                with self.assertRaisesRegex(release.ReleaseError, 'serial'):
+                    release._check_preparation_cache(config)
+                with release._locked(Path(config['lock'])):
+                    cache = release._check_preparation_cache(config)
+                    self.assertEqual(cache, build / 'cache/preparation')
+                    cfg = dict(config, _check_preparation_cache=str(cache),
+                               build_path='/opt/aicrm/toolchain/npm/bin:/usr/bin')
+                    self.assertEqual(release._check_env(cfg)['AICRM_TEST_PREP_CACHE'], str(cache))
+                    os.chmod(cache, 0o755)
+                    self.assertEqual(release._check_preparation_cache(config), cache)
+                    self.assertEqual(cache.stat().st_mode & 0o777, 0o700)
+                    for bad in (0, True, -1):
+                        config['check_capacity']['cache_limits_bytes']['preparation'] = bad
+                        with self.assertRaisesRegex(release.CheckEnvironmentError, 'positive'):
+                            release._check_preparation_cache(config)
+
+    def test_preparation_cache_reclaims_whole_old_snapshots_and_preserves_writable_copy(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw); _, build, _, config = self.fixture(root)
+            cache = build / 'cache/preparation'; cache.mkdir(parents=True, mode=0o700)
+            old = cache / ('npm-' + 'a' * 64); (old / 'modules').mkdir(parents=True)
+            (old / 'modules/library.js').write_bytes(b'a' * 65536)
+            copy = root / 'active-copy.js'; copy.write_text('private copy')
+            (old / 'modules/link').symlink_to(copy)
+            new = cache / ('artifact-' + 'b' * 64); new.mkdir(); (new / 'page.js').write_bytes(b'b' * 8192)
+            (new / 'receipt.json').write_text('{"input":"verified"}')
+            os.utime(old, (1, 1))
+            config['check_capacity'] = {'cache_limits_bytes': {'preparation': 24576}}
+            with patch.object(release.legacy, 'BUILD_ROOT', build), \
+                 patch.object(release.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())), \
+                 patch.object(release, '_assert_build_account_idle'), release._locked(Path(config['lock'])):
+                result = release._trim_check_caches(config)['preparation']
+            self.assertEqual(result['removed'], [old.name])
+            self.assertLessEqual(result['after_bytes'], 24576)
+            self.assertFalse(old.exists()); self.assertTrue((new / 'receipt.json').is_file())
+            self.assertEqual(copy.read_text(), 'private copy')
+
+    def test_preparation_cache_retains_all_entries_if_running_unknown_or_linked(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw); _, build, _, config = self.fixture(root)
+            cache = build / 'cache/preparation'; cache.mkdir(parents=True, mode=0o700)
+            known = cache / ('artifact-' + 'a' * 64); known.mkdir(); (known / 'page.js').write_bytes(b'a' * 8192)
+            protected = root / 'source.txt'; protected.write_text('protected')
+            with patch.object(release.legacy, 'BUILD_ROOT', build), \
+                 patch.object(release.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())):
+                with self.assertRaisesRegex(release.ReleaseError, 'serial'):
+                    release._trim_preparation_cache(config, 1)
+                with release._locked(Path(config['lock'])), \
+                     patch.object(release, '_assert_build_account_idle', side_effect=release.CheckEnvironmentError('running task')):
+                    with self.assertRaisesRegex(release.CheckEnvironmentError, 'running'):
+                        release._trim_preparation_cache(config, 1)
+                with release._locked(Path(config['lock'])), patch.object(release, '_assert_build_account_idle'):
+                    unknown = cache / 'unaccounted'; unknown.mkdir()
+                    with self.assertRaisesRegex(release.CheckEnvironmentError, 'unrecognized'):
+                        release._trim_preparation_cache(config, 1)
+                    self.assertTrue(known.exists()); unknown.rmdir()
+                    linked = cache / 'artifact.lock'; linked.symlink_to(protected)
+                    with self.assertRaisesRegex(release.CheckEnvironmentError, 'unrecognized'):
+                        release._trim_preparation_cache(config, 1)
+                    self.assertTrue(known.exists()); self.assertEqual(protected.read_text(), 'protected')
 
     def test_missing_or_wrong_disk_blocks_before_root_disk_fallback(self):
         with tempfile.TemporaryDirectory() as raw:

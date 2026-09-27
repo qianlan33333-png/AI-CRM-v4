@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 def atomic_json(path: Path, value: dict) -> None:
     temporary = path.with_name(path.name + ".tmp-" + str(os.getpid()))
     temporary.write_text(json.dumps(value, sort_keys=True) + "\n")
+    os.chmod(temporary, 0o600)
     temporary.replace(path)
 
 
@@ -43,9 +45,115 @@ def preparation_root() -> Path | None:
 
 @contextmanager
 def lock(root: Path, name: str):
-    with (root / name).open("a") as file:
-        fcntl.flock(file, fcntl.LOCK_EX)
-        yield
+    path = root / name
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+            raise ValueError("preparation lock must be a regular file owned by the check account")
+        if info.st_mode & 0o077:
+            os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "r+") as file:
+            descriptor = -1
+            fcntl.flock(file, fcntl.LOCK_EX)
+            yield
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def snapshot_root(prep: Path) -> Path:
+    """Return the persistent snapshot root, or the attempt root when disabled."""
+    raw = os.environ.get("AICRM_TEST_PREP_CACHE")
+    if not raw:
+        return prep
+    root = Path(raw)
+    if not root.is_absolute() or root.is_symlink() or not root.is_dir():
+        raise ValueError("preparation snapshot cache must be an existing absolute private directory")
+    info = root.stat()
+    if info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError("preparation snapshot cache must belong exclusively to the check account")
+    if prep.stat().st_dev != info.st_dev:
+        raise ValueError("attempt preparation and snapshot cache must be on the same filesystem")
+    for entry in root.iterdir():
+        item = entry.lstat()
+        if entry.is_symlink() or item.st_uid != os.getuid() or item.st_mode & 0o077:
+            raise ValueError("preparation snapshot cache contains a linked or non-private entry")
+        if entry.name in {"artifact.lock", "npm.lock"}:
+            if not stat.S_ISREG(item.st_mode):
+                raise ValueError("preparation snapshot lock is not a regular file")
+        elif re.fullmatch(r"(?:artifact|npm)-[0-9a-f]{64}", entry.name):
+            if not stat.S_ISDIR(item.st_mode):
+                raise ValueError("preparation snapshot unit is not a directory")
+        else:
+            raise ValueError("preparation snapshot cache contains an unknown entry")
+    return root
+
+
+def checked_unit(cache: Path) -> bool:
+    """Validate a snapshot unit's boundary; return False only when it is absent."""
+    try:
+        info = cache.lstat()
+    except FileNotFoundError:
+        return False
+    if cache.is_symlink() or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError("preparation snapshot unit has an unsafe type, owner, or mode")
+    return True
+
+
+def snapshot_receipt(cache: Path) -> dict | None:
+    path = cache / "receipt.json"
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    if path.is_symlink() or not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise UnsafeSnapshot("preparation snapshot receipt has an unsafe type, owner, or mode")
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def snapshot_layout(cache: Path, directory_names: set[str]) -> bool:
+    """Reject unknown top-level content and report incomplete units as corrupt."""
+    seen: set[str] = set()
+    for entry in cache.iterdir():
+        info = entry.lstat()
+        if entry.is_symlink() or info.st_uid != os.getuid():
+            raise UnsafeSnapshot("preparation snapshot unit contains a linked or foreign entry")
+        if entry.name == "receipt.json":
+            if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+                raise UnsafeSnapshot("preparation snapshot receipt has an unsafe type or mode")
+        elif entry.name in directory_names:
+            if not stat.S_ISDIR(info.st_mode):
+                raise UnsafeSnapshot("preparation snapshot payload has an unsafe type")
+        else:
+            raise UnsafeSnapshot("preparation snapshot unit contains an unknown entry")
+        seen.add(entry.name)
+    return seen == directory_names | {"receipt.json"}
+
+
+class UnsafeSnapshot(ValueError):
+    pass
+
+
+def _safe_link(root: Path, path: Path) -> str:
+    target = os.readlink(path)
+    try:
+        resolved_root = root.resolve(strict=True)
+        resolved_target = path.resolve(strict=False)
+        if os.path.commonpath((str(resolved_root), str(resolved_target))) != str(resolved_root):
+            raise UnsafeSnapshot("preparation snapshot contains a link outside its unit")
+    except (OSError, RuntimeError, ValueError) as error:
+        if isinstance(error, UnsafeSnapshot):
+            raise
+        raise UnsafeSnapshot("preparation snapshot contains an invalid link") from error
+    return target
 
 
 @contextmanager
@@ -141,8 +249,40 @@ def digest_files(root: Path, paths: list[str]) -> str:
 
 
 def directory_digest(root: Path, *, excluded: tuple[str, ...] = ()) -> str:
-    return digest_files(root, [p.relative_to(root).as_posix() for p in root.rglob("*")
-                              if p.is_file() and p.relative_to(root).as_posix() not in excluded])
+    if root.is_symlink():
+        raise UnsafeSnapshot("preparation snapshot tree is not a real directory")
+    if not root.is_dir():
+        raise FileNotFoundError(root)
+    entries: list[tuple[str, Path, str]] = []
+    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        kept_directories = []
+        for name in directories:
+            path = current_path / name
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                entries.append((relative, path, "link"))
+            else:
+                kept_directories.append(name)
+        directories[:] = kept_directories
+        for name in files:
+            path = current_path / name
+            relative = path.relative_to(root).as_posix()
+            entries.append((relative, path, "link" if path.is_symlink() else "file"))
+    digest = hashlib.sha256()
+    for name, path, kind in sorted(entries, key=lambda entry: entry[0]):
+        if name in excluded:
+            continue
+        digest.update(name.encode() + b"\0")
+        if kind == "link":
+            digest.update(b"L\0" + _safe_link(root, path).encode())
+        else:
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode):
+                raise UnsafeSnapshot("preparation snapshot contains a non-regular file")
+            digest.update(f"F{stat.S_IMODE(info.st_mode):04o}\0".encode() + path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def tool_input() -> list[str]:
@@ -160,6 +300,9 @@ def run(command: list[str], root: Path) -> None:
 def npm_dependencies(root: Path, prefix: str) -> None:
     prep = preparation_root()
     package = root / prefix
+    modules = package / "node_modules"
+    if modules.is_symlink():
+        raise ValueError("candidate node_modules must not be a symlink")
     command = ["npm", "ci", "--prefer-offline", "--no-audit", "--no-fund"]
     if prefix != ".":
         command += ["--prefix", prefix]
@@ -168,10 +311,17 @@ def npm_dependencies(root: Path, prefix: str) -> None:
         return
     fingerprint = hashlib.sha256(json.dumps([digest_files(package, ["package.json", "package-lock.json"]),
                                             tool_input()], sort_keys=True).encode()).hexdigest()
-    cache = prep / ("npm-" + fingerprint)
+    snapshots = snapshot_root(prep)
+    cache = snapshots / ("npm-" + fingerprint)
     stamp = package / "node_modules/.aicrm-preparation.json"
-    with lock(prep, "npm.lock"):
+    with lock(snapshots, "npm.lock"):
+        # Recheck the namespace under the snapshot lock before inspecting or
+        # publishing a complete unit.
+        if os.environ.get("AICRM_TEST_PREP_CACHE"):
+            snapshot_root(prep)
         if stamp.is_file():
+            if stamp.is_symlink():
+                raise ValueError("npm preparation stamp must not be a symlink")
             try:
                 data = json.loads(stamp.read_text())
             except (OSError, ValueError):
@@ -182,11 +332,16 @@ def npm_dependencies(root: Path, prefix: str) -> None:
                     and data.get("output") == directory_digest(stamp.parent, excluded=(stamp.name,))):
                 event("npm", True, fingerprint)
                 return
-        reused = cache.is_dir()
+        reused = checked_unit(cache)
         if reused:
             try:
-                receipt = json.loads((cache / "receipt.json").read_text())
+                complete = snapshot_layout(cache, {"modules"})
+                receipt = snapshot_receipt(cache)
+                if not complete or receipt is None:
+                    raise OSError("npm snapshot receipt is missing or malformed")
                 valid = receipt.get("input") == fingerprint and receipt.get("output") == directory_digest(cache / "modules")
+            except UnsafeSnapshot:
+                raise
             except (OSError, ValueError):
                 valid = False
             if not valid:
@@ -196,15 +351,13 @@ def npm_dependencies(root: Path, prefix: str) -> None:
         if not reused:
             run(command, root)
             temporary = Path(tempfile.mkdtemp(prefix="npm-build-", dir=prep))
-            try:
-                shutil.copytree(package / "node_modules", temporary / "modules", symlinks=True)
-                atomic_json(temporary / "receipt.json",{"input":fingerprint,"output":directory_digest(temporary / "modules")})
-                temporary.rename(cache)
-            finally:
-                if temporary.exists():
-                    shutil.rmtree(temporary)
+            shutil.copytree(package / "node_modules", temporary / "modules", symlinks=True)
+            atomic_json(temporary / "receipt.json",{"input":fingerprint,"output":directory_digest(temporary / "modules")})
+            if temporary.stat().st_dev != snapshots.stat().st_dev:
+                raise ValueError("npm preparation snapshot must be atomically published on the same filesystem")
+            temporary.rename(cache)
         else:
-            shutil.rmtree(package / "node_modules", ignore_errors=True)
+            shutil.rmtree(modules, ignore_errors=True)
             shutil.copytree(cache / "modules", package / "node_modules", symlinks=True)
         marker = package / "node_modules/.package-lock.json"
         atomic_json(stamp, {"input": fingerprint, "lock": digest_files(marker.parent, [marker.name]),
@@ -213,11 +366,104 @@ def npm_dependencies(root: Path, prefix: str) -> None:
 
 
 def artifact_input(root: Path) -> str:
-    # Hash the actual tracked bytes, including build scripts and source carriers.
-    # HEAD alone would accept changed local inputs under an old commit identity.
+    # Bind generated assets to both the exact checked-out identity and current
+    # tracked bytes. The manifest honors AICRM_SOURCE_SHA when supplied.
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True).strip()
     names = subprocess.check_output(["git", "ls-files", "-z"], cwd=root).decode().split("\0")
-    return hashlib.sha256(json.dumps([digest_files(root, [name for name in names if name]),
-                                     tool_input()], sort_keys=True).encode()).hexdigest()
+    inputs = {
+        "head": head,
+        "tree": tree,
+        "source_sha": os.environ.get("AICRM_SOURCE_SHA"),
+        "tracked": digest_files(root, [name for name in names if name]),
+        "tools": tool_input(),
+    }
+    return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
+
+
+def artifact_valid(cache: Path, fingerprint: str, *, require_web_dist: bool = False) -> bool:
+    try:
+        if not snapshot_layout(cache, {"dist", "web-dist"} if require_web_dist else {"dist"}):
+            return False
+        receipt = snapshot_receipt(cache)
+        if receipt is None:
+            return False
+        if receipt.get("input") != fingerprint or receipt.get("output") != directory_digest(cache / "dist"):
+            return False
+        if require_web_dist and receipt.get("web_dist_output") != directory_digest(cache / "web-dist"):
+            return False
+        return True
+    except UnsafeSnapshot:
+        raise
+    except (OSError, ValueError):
+        return False
+
+
+def touch_snapshot(cache: Path) -> None:
+    os.utime(cache, None)
+
+
+def write_attempt_artifact_receipt(prep: Path, snapshots: Path, cache: Path, fingerprint: str) -> None:
+    if snapshots == prep:
+        return
+    local = prep / ("artifact-" + fingerprint)
+    if local.is_symlink():
+        raise ValueError("attempt artifact receipt directory must not be a symlink")
+    local.mkdir(mode=0o700, exist_ok=True)
+    info = local.stat()
+    if info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError("attempt artifact receipt directory must be private")
+    receipt = json.loads((cache / "receipt.json").read_text())
+    atomic_json(local / "receipt.json", receipt)
+
+
+def restore_frontend_artifact(root: Path, cache: Path, fingerprint: str) -> None:
+    if not artifact_valid(cache, fingerprint, require_web_dist=True):
+        raise ValueError("prepared frontend artifact bytes or input identity changed")
+    for source, destination in ((cache / "web-dist", root / "web/dist"),
+                                (cache / "dist", root / "release/web/dist")):
+        if destination.is_symlink():
+            raise ValueError("frontend artifact destination must not be a symlink")
+        shutil.rmtree(destination, ignore_errors=True)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, destination, symlinks=True)
+
+
+def reusable_stage_tests(stage_function: str) -> list[list[str]] | None:
+    """Recognize the canonical stage pipeline, returning only its test commands."""
+    tests: list[list[str]] = []
+    for raw in stage_function.splitlines()[1:-1]:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line in {"mkdir -p release", "rm -rf -- release/web/dist"}:
+            continue
+        if re.fullmatch(r"node[ \t]+scripts/test-[A-Za-z0-9_.-]+\.mjs(?:[ \t]+[A-Za-z0-9_./-]+)*", line):
+            tests.append(re.split(r"[ \t]+", line))
+        elif line == "node scripts/stage-pr01-effects-ui.mjs web/dist release/web/dist":
+            continue
+        elif line == "node scripts/stage-survey-ui.mjs web/dist release/web/dist":
+            continue
+        elif line == "node scripts/stage-new-shell-ui.mjs web/dist release/web/dist":
+            continue
+        else:
+            return None
+    return tests or None
+
+
+def reusable_build_frontend(build_function: str) -> bool:
+    """Only reuse a build when its entire canonical command body is known."""
+    commands = []
+    for raw in build_function.splitlines()[1:-1]:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        commands.append(line)
+    return commands == [
+        "node scripts/generate-ai-assistant-client.mjs",
+        "npm run build",
+        "node scripts/build-v3-host-adapters.mjs",
+    ]
 
 
 def materialize_artifact(root: Path) -> None:
@@ -225,19 +471,26 @@ def materialize_artifact(root: Path) -> None:
     if prep is None:
         raise ValueError("artifact preparation requires an attempt directory")
     fingerprint = artifact_input(root)
-    cache = prep / ("artifact-" + fingerprint)
-    with lock(prep, "artifact.lock"):
-        if cache.is_dir():
-            restore_artifact(root, cache, fingerprint, True)
-            return
+    snapshots = snapshot_root(prep)
+    cache = snapshots / ("artifact-" + fingerprint)
+    with lock(snapshots, "artifact.lock"):
+        if snapshots != prep:
+            snapshot_root(prep)
+        if checked_unit(cache):
+            if artifact_valid(cache, fingerprint, require_web_dist=True):
+                restore_artifact(root, cache, fingerprint, True)
+                touch_snapshot(cache)
+                write_attempt_artifact_receipt(prep, snapshots, cache, fingerprint)
+                return
+            event("artifact_corruption", False, fingerprint)
+            shutil.rmtree(cache)
     # Never wait for the heavy slot while holding a snapshot lock: a builder
     # may already hold the heavy slot and need this same artifact lock.
     materialize_uncached_artifact(root, fingerprint)
 
 
 def restore_artifact(root: Path, cache: Path, fingerprint: str, reused: bool) -> None:
-    record = json.loads((cache / "receipt.json").read_text())
-    if record.get("input") != fingerprint or record.get("output") != directory_digest(cache / "dist"):
+    if not artifact_valid(cache, fingerprint, require_web_dist=True):
         raise ValueError("prepared artifact bytes or input identity changed")
     destination = root / "web/dist"
     shutil.rmtree(destination, ignore_errors=True)
@@ -248,23 +501,39 @@ def restore_artifact(root: Path, cache: Path, fingerprint: str, reused: bool) ->
 @serialized_preparation
 def materialize_uncached_artifact(root: Path, fingerprint: str) -> None:
     prep = preparation_root()
-    cache = prep / ("artifact-" + fingerprint)
-    with lock(prep, "artifact.lock"):
-        reused = cache.is_dir()
+    if prep is None:
+        raise ValueError("artifact preparation requires an attempt directory")
+    snapshots = snapshot_root(prep)
+    cache = snapshots / ("artifact-" + fingerprint)
+    with lock(snapshots, "artifact.lock"):
+        if snapshots != prep:
+            snapshot_root(prep)
+        reused = checked_unit(cache)
+        if reused and not artifact_valid(cache, fingerprint, require_web_dist=True):
+            event("artifact_corruption", False, fingerprint)
+            shutil.rmtree(cache)
+            reused = False
         if not reused:
             temporary = Path(tempfile.mkdtemp(prefix="artifact-build-", dir=prep))
-            try:
-                run(["npm", "run", "build", "--silent"], root)
-                run(["node", "scripts/build-v3-host-adapters.mjs"], root)
-                stage = temporary / "dist"
-                for script in ("stage-pr01-effects-ui.mjs", "stage-survey-ui.mjs", "stage-new-shell-ui.mjs"):
-                    run(["node", "scripts/" + script, "web/dist", str(stage)], root)
-                atomic_json(temporary / "receipt.json", {"input": fingerprint, "output": directory_digest(stage)})
-                temporary.rename(cache)
-            except BaseException:
-                # Keep failed preparation output as diagnostic evidence.
-                raise
+            run(["npm", "run", "build", "--silent"], root)
+            run(["node", "scripts/build-v3-host-adapters.mjs"], root)
+            web_dist = temporary / "web-dist"
+            shutil.copytree(root / "web/dist", web_dist, symlinks=True)
+            stage = temporary / "dist"
+            for script in ("stage-pr01-effects-ui.mjs", "stage-survey-ui.mjs", "stage-new-shell-ui.mjs"):
+                run(["node", "scripts/" + script, "web/dist", str(stage)], root)
+            atomic_json(temporary / "receipt.json", {
+                "input": fingerprint,
+                "output": directory_digest(stage),
+                "web_dist_output": directory_digest(web_dist),
+            })
+            if temporary.stat().st_dev != snapshots.stat().st_dev:
+                raise ValueError("artifact preparation snapshot must be atomically published on the same filesystem")
+            temporary.rename(cache)
+            reused = False
         restore_artifact(root, cache, fingerprint, reused)
+        touch_snapshot(cache)
+        write_attempt_artifact_receipt(prep, snapshots, cache, fingerprint)
 
 
 @serialized_preparation
@@ -282,6 +551,36 @@ def frontend_checks(root: Path, mode: str) -> None:
         if not match:
             raise ValueError("canonical frontend function is missing: " + name)
         functions.append(match.group())
+    stage_function = functions[2]
+    prep = preparation_root()
+    if mode == "stage" and prep is not None and os.environ.get("AICRM_TEST_PREP_CACHE"):
+        tests = reusable_stage_tests(stage_function)
+        if tests and reusable_build_frontend(functions[1]):
+            # This generated input can be tracked by the checkout. Refresh it
+            # before computing the identity, just as build_frontend does.
+            run(["node", "scripts/generate-ai-assistant-client.mjs"], root)
+            fingerprint = artifact_input(root)
+            snapshots = snapshot_root(prep)
+            cache = snapshots / ("artifact-" + fingerprint)
+            reused = False
+            with lock(snapshots, "artifact.lock"):
+                snapshot_root(prep)
+                if checked_unit(cache):
+                    if artifact_valid(cache, fingerprint, require_web_dist=True):
+                        restore_frontend_artifact(root, cache, fingerprint)
+                        touch_snapshot(cache)
+                        write_attempt_artifact_receipt(prep, snapshots, cache, fingerprint)
+                        reused = True
+                    else:
+                        event("artifact_corruption", False, fingerprint)
+                        shutil.rmtree(cache)
+            if reused:
+                # All four canonical stage tests are fresh on every attempt;
+                # only expensive build/transforms consume the snapshot.
+                for command in tests:
+                    run(command, root)
+                publish_artifact(root, root / "release/web/dist")
+                return
     entry = "build_frontend" if mode == "stage" else "run_frontend_and_stage_checks"
     script = "set -euo pipefail\nmode=" + mode + "\n" + "\n".join(functions) + "\n" + entry + "\nstage_frontend\n"
     # Serialize the complete build/check shell, including its npm/npx/Node
@@ -298,19 +597,38 @@ def publish_artifact(root: Path, stage: Path) -> None:
     if prep is None:
         return
     fingerprint = artifact_input(root)
-    cache = prep / ("artifact-" + fingerprint)
-    with lock(prep, "artifact.lock"):
-        if cache.exists():
-            record = json.loads((cache / "receipt.json").read_text())
-            if record.get("input") != fingerprint or record.get("output") != directory_digest(stage):
-                raise ValueError("repeated staging produced different artifact bytes")
-            return
+    snapshots = snapshot_root(prep)
+    cache = snapshots / ("artifact-" + fingerprint)
+    with lock(snapshots, "artifact.lock"):
+        if snapshots != prep:
+            snapshot_root(prep)
+        if checked_unit(cache):
+            if not artifact_valid(cache, fingerprint, require_web_dist=True):
+                event("artifact_corruption", False, fingerprint)
+                shutil.rmtree(cache)
+            else:
+                record = json.loads((cache / "receipt.json").read_text())
+                if (record.get("output") != directory_digest(stage)
+                        or record.get("web_dist_output") != directory_digest(root / "web/dist")):
+                    raise ValueError("repeated staging produced different artifact bytes")
+                touch_snapshot(cache)
+                write_attempt_artifact_receipt(prep, snapshots, cache, fingerprint)
+                event("artifact", True, fingerprint)
+                return
         if not (stage / "asset-manifest.json").is_file():
             raise ValueError("prepared release artifact lacks its manifest")
         temporary = Path(tempfile.mkdtemp(prefix="artifact-stage-", dir=prep))
         shutil.copytree(stage, temporary / "dist")
-        atomic_json(temporary / "receipt.json", {"input": fingerprint, "output": directory_digest(stage)})
+        shutil.copytree(root / "web/dist", temporary / "web-dist", symlinks=True)
+        atomic_json(temporary / "receipt.json", {
+            "input": fingerprint,
+            "output": directory_digest(stage),
+            "web_dist_output": directory_digest(temporary / "web-dist"),
+        })
+        if temporary.stat().st_dev != snapshots.stat().st_dev:
+            raise ValueError("artifact snapshot must be atomically published on the same filesystem")
         temporary.rename(cache)
+        write_attempt_artifact_receipt(prep, snapshots, cache, fingerprint)
         event("artifact", False, fingerprint)
 
 
