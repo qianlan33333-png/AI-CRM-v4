@@ -71,6 +71,38 @@ class CheckLifecycleTest(unittest.TestCase):
                     release._reclaim_policy_worktrees(config, repo, base)
                 self.assertTrue((policies/candidate).exists())
 
+    def test_policy_recovery_retains_existing_archive_index_and_rejects_unsafe_metadata(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw); _, _, policies, config=self.fixture(root)
+            repo,base,candidate,other=make_repository(root)
+            def checkout():
+                subprocess.run(['git','--git-dir='+str(repo),'worktree','add','--detach',
+                                str(policies/candidate),candidate],capture_output=True,check=True)
+            checkout(); marker=policies/(other+'.archived.json')
+            record={'original_path':str(policies/other),'archive':str(root/'evidence.tar.zst'),
+                    'raw_logs_preserved':True,'ended_source_and_artifact_archive':True}
+            release.atomic_json(marker,record); original=marker.read_bytes()
+            with patch.object(release,'_assert_build_account_idle'),release._locked(Path(config['lock'])):
+                result=release._reclaim_policy_worktrees(config,repo,base)
+                self.assertEqual(result['archive_indexes'],[str(marker.resolve())])
+                self.assertEqual(marker.read_bytes(),original)
+                self.assertFalse((policies/candidate).exists())
+                checkout()
+                for invalid in ({**record,'original_path':str(policies/candidate)},
+                                {**record,'raw_logs_preserved':False}, []):
+                    release.atomic_json(marker,invalid)
+                    with self.assertRaisesRegex(release.CheckEnvironmentError,'archive index'):
+                        release._reclaim_policy_worktrees(config,repo,base)
+                    self.assertTrue((policies/candidate).exists())
+                release.atomic_json(marker,record);marker.chmod(0o644)
+                with self.assertRaisesRegex(release.CheckEnvironmentError,'unsafe policy archive'):
+                    release._reclaim_policy_worktrees(config,repo,base)
+                self.assertTrue((policies/candidate).exists())
+                marker.unlink(); marker.symlink_to(root/'unknown.json')
+                with self.assertRaisesRegex(release.CheckEnvironmentError,'unsafe policy archive'):
+                    release._reclaim_policy_worktrees(config,repo,base)
+                self.assertTrue((policies/candidate).exists())
+
     def test_ten_distinct_policy_baselines_leave_only_main_and_current_checkout(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw); _, _, policies, config = self.fixture(root)

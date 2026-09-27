@@ -2076,11 +2076,31 @@ def _reclaim_policy_worktrees(config: dict, repo: Path, base_sha: str) -> dict:
             registered[Path(fields["worktree"]).resolve()] = fields.get("HEAD")
     planned = []
     retained = []
+    archive_indexes = []
     # Validate the entire inventory before removing any checkout. Unknown or
     # changed source stays available for diagnosis; a Git ref must preserve
     # each retired commit so historical rules can be reconstructed verbatim.
     paths = set(root.iterdir()) | {p for p in registered if p.parent == root and not p.exists()}
     for path in sorted(paths):
+        archived = re.fullmatch(r"([0-9a-f]{40})\.archived\.json", path.name)
+        if archived:
+            info = path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                    or info.st_mode & 0o077 or info.st_nlink != 1):
+                raise CheckEnvironmentError("unsafe policy archive index; retained source inventory")
+            try:
+                record = json.loads(path.read_text())
+                valid = (Path(record.get("original_path", "")).resolve() == root / archived.group(1)
+                         and record.get("raw_logs_preserved") is True
+                         and record.get("ended_source_and_artifact_archive") is True)
+            except (OSError, ValueError, TypeError, AttributeError):
+                valid = False
+            if not valid:
+                raise CheckEnvironmentError("invalid policy archive index; retained source inventory")
+            # This is retained evidence from the existing archival flow, not
+            # a source checkout or a new claim that archive bytes were checked.
+            archive_indexes.append(str(path))
+            continue
         if not SHA.fullmatch(path.name) or path.is_symlink() or (path.exists() and not path.is_dir()):
             raise CheckEnvironmentError("unrecognized policy checkout; retained source inventory")
         if path.name in pending or (path.name in keep and path.exists()):
@@ -2098,7 +2118,8 @@ def _reclaim_policy_worktrees(config: dict, repo: Path, base_sha: str) -> dict:
         planned.append({"path": str(path), "sha": path.name, "tree": _tree(repo, path.name),
                         "retained_refs": refs, "allocated_bytes": _allocated_bytes(path)})
     proof = directory / ("policy-reclaim-" + str(time.time_ns()) + ".json")
-    result = {"protected": sorted(keep), "retained": retained, "removed": [], "planned": planned,
+    result = {"protected": sorted(keep), "retained": retained, "archive_indexes": archive_indexes,
+              "removed": [], "planned": planned,
               "reclaimed_bytes": 0, "proof": str(proof) if planned else None}
     for item in planned:
         atomic_json(proof, result)
