@@ -343,6 +343,83 @@ class CheckLifecycleTest(unittest.TestCase):
             self.assertTrue(usage['go-build']['reused'])
             self.assertGreater(usage['go-build']['reclaimed_bytes'],0)
 
+    def test_cache_no_eviction_measures_once_and_does_not_read_source_refs(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw); _, build, _, config = self.fixture(root)
+            roots = {name: build / 'cache' / name for name in ('go-build', 'go-mod', 'npm', 'preparation')}
+            for name, directory in roots.items():
+                directory.mkdir(parents=True, mode=0o700)
+                destination = directory / ('artifact-' + 'a' * 64) if name == 'preparation' else directory / 'kept'
+                if name == 'preparation':
+                    destination.mkdir(); destination = destination / 'payload'
+                destination.write_bytes(b'x' * 8192)
+            measured = {name: release._allocated_bytes(directory) for name, directory in roots.items()}
+            original_scan = release._allocated_bytes
+            for limits in ({}, measured):
+                with self.subTest(limits=limits), patch.object(release.legacy, 'BUILD_ROOT', build), \
+                     patch.object(release.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())), \
+                     patch.object(release, '_assert_build_account_idle'), \
+                     patch.object(release, '_git', side_effect=AssertionError('no eviction needs no refs')), \
+                     patch.object(release, '_allocated_bytes', wraps=original_scan) as scans, \
+                     release._locked(Path(config['lock'])):
+                    config['check_capacity'] = {'cache_limits_bytes': limits}
+                    result = release._trim_check_caches(config)
+                    self.assertEqual(scans.call_count, 4)
+                    self.assertEqual({call.args[0] for call in scans.call_args_list}, set(roots.values()))
+                    for name, usage in result.items():
+                        self.assertEqual(usage['before_bytes'], measured[name])
+                        self.assertEqual(usage['after_bytes'], measured[name])
+                        self.assertEqual(usage['reclaimed_bytes'], 0)
+            unknown = roots['preparation'] / 'unknown'; unknown.mkdir()
+            with patch.object(release.legacy, 'BUILD_ROOT', build), \
+                 patch.object(release.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())), \
+                 patch.object(release, '_assert_build_account_idle'), release._locked(Path(config['lock'])):
+                for limit in (None, measured['preparation'] * 10):
+                    with self.assertRaisesRegex(release.CheckEnvironmentError, 'unrecognized'):
+                        release._trim_preparation_cache(config, limit)
+
+    def test_cache_no_eviction_still_rejects_invalid_limits(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw); _, build, _, config = self.fixture(root)
+            for name in ('go-build', 'go-mod', 'npm', 'preparation'):
+                (build / 'cache' / name).mkdir(parents=True, mode=0o700)
+            with patch.object(release.legacy, 'BUILD_ROOT', build), \
+                 patch.object(release.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())), \
+                 patch.object(release, '_assert_build_account_idle'), release._locked(Path(config['lock'])):
+                for name in ('go-build', 'go-mod', 'npm', 'preparation'):
+                    for bad in (0, -1, True, '8192'):
+                        config['check_capacity'] = {'cache_limits_bytes': {name: bad}}
+                        with self.subTest(name=name, bad=bad), self.assertRaises(release.CheckEnvironmentError):
+                            release._trim_check_caches(config)
+
+    def test_module_cache_over_budget_retains_referenced_units_and_checks_after_deletion(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw); _, build, _, config = self.fixture(root)
+            modules = build / 'cache/go-mod'
+            protected = modules / 'example.org/keep@v1.0.0'
+            retired = modules / 'example.org/old@v1.0.0'
+            downloads = modules / 'cache/download/example.org/old/@v'
+            for directory in (protected, retired, downloads):
+                directory.mkdir(parents=True)
+            (protected / 'source.go').write_bytes(b'p' * 8192)
+            (retired / 'source.go').write_bytes(b'r' * 8192)
+            (downloads / 'v1.0.0.zip').write_bytes(b'z' * 8192)
+            before = release._allocated_bytes(modules)
+            config.update(repo=str(root / 'authority.git'),
+                          check_capacity={'cache_limits_bytes': {'go-mod': before - 8192}})
+            original_scan = release._allocated_bytes
+            with patch.object(release.legacy, 'BUILD_ROOT', build), release._locked(Path(config['lock'])), \
+                 patch.object(release, '_git', return_value='refs/heads/main'), \
+                 patch.object(release, '_run', return_value=subprocess.CompletedProcess([], 0, 'example.org/keep v1.0.0 hash\n')), \
+                 patch.object(release, '_allocated_bytes', wraps=original_scan) as scans:
+                usage = release._trim_check_caches(config)['go-mod']
+                self.assertEqual(sum(call.args[0] == modules for call in scans.call_args_list), 2)
+            self.assertTrue((protected / 'source.go').is_file())
+            self.assertFalse(retired.exists())
+            self.assertFalse((downloads / 'v1.0.0.zip').exists())
+            self.assertEqual(usage['after_bytes'], release._allocated_bytes(modules))
+            self.assertLessEqual(usage['after_bytes'], usage['limit_bytes'])
+
     def test_preparation_cache_requires_opt_in_and_uses_actual_private_build_account(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw); _, build, _, config = self.fixture(root)
@@ -506,8 +583,11 @@ class CheckLifecycleTest(unittest.TestCase):
             config.update(state=str(root/'state.json'),repo=str(root/'authority.git'),stage_releases=str(releases))
             state={'installed_app':{'sha':names[0]},'main':{'sha':names[0]},'queue':[{'head_sha':names[2],'status':'pending'}]}
             with patch.object(release,'_load_state',return_value=state), \
-                 patch.object(release,'_git',return_value=names[0]), release._locked(Path(config['lock'])):
+                 patch.object(release,'_git',return_value=names[0]), \
+                 patch.object(release.builder,'verify_release_inventory',wraps=release.builder.verify_release_inventory) as verify, \
+                 release._locked(Path(config['lock'])):
                 result=release._reclaim_unreferenced_packages(config)
+                self.assertEqual(verify.call_count,3)  # current + duplicate + unreferenced history
             self.assertFalse(duplicate.exists())
             self.assertTrue((duplicate.parent/'domestic-release.json').exists())
             for name in names[:3]: self.assertTrue((releases/name).exists())
@@ -523,6 +603,14 @@ class CheckLifecycleTest(unittest.TestCase):
                  patch.object(release,'_git',return_value=names[0]), release._locked(Path(config['lock'])):
                 release._reclaim_unreferenced_packages(config)
             self.assertTrue((protected/'release/binary').exists())
+            duplicate.parent.unlink()
+            with patch.object(release,'_load_state',return_value=state), \
+                 patch.object(release,'_git',return_value=names[0]), \
+                 patch.object(release.builder,'verify_release_inventory',side_effect=AssertionError('nothing eligible for cleanup')), \
+                 release._locked(Path(config['lock'])):
+                result=release._reclaim_unreferenced_packages(config)
+                self.assertEqual(result['removed'],[])
+                for name in names[:3]: self.assertTrue((releases/name).exists())
 
     def test_timeout_terminates_only_the_attempt_process_group_before_cleanup(self):
         process=unittest.mock.Mock(pid=424242)

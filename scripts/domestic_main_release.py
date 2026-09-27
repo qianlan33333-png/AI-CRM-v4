@@ -2399,6 +2399,11 @@ def _trim_preparation_cache(config: dict, limit: int | None) -> dict | None:
     if limit is not None and (type(limit) is not int or limit <= 0):
         raise CheckEnvironmentError("preparation cache capacity must be positive and measured")
     before = _allocated_bytes(root)
+    if limit is None or before <= limit:
+        # No cache writer is active under the existing controller lock. With
+        # no eviction, the measured inventory is also the final inventory.
+        return {"before_bytes": before, "reclaimed_bytes": 0, "after_bytes": before,
+                "limit_bytes": limit, "removed": [], "reused": limit is not None}
     reclaimed = 0
     removed = []
     for unit in sorted(units, key=lambda item: item.stat().st_mtime_ns):
@@ -2428,6 +2433,7 @@ def _trim_check_caches(config: dict) -> dict:
         if limit is not None:
             if type(limit) is not int or limit <= 0:
                 raise CheckEnvironmentError("cache capacity must be positive and based on the host measurement")
+        if limit is not None and before > limit:
             # Content-addressed build/download entries are disposable; source,
             # toolchains and module trees are never evicted file by file.
             files = [value for value in root.rglob("*") if value.is_file() and not value.is_symlink()]
@@ -2437,7 +2443,8 @@ def _trim_check_caches(config: dict) -> dict:
                 reclaimed += value.stat().st_blocks * 512
                 value.unlink()
         result[name] = {"before_bytes":before, "reclaimed_bytes":reclaimed,
-                        "after_bytes":_allocated_bytes(root), "limit_bytes":limit, "reused":True}
+                        "after_bytes":_allocated_bytes(root) if limit is not None and before > limit else before,
+                        "limit_bytes":limit, "reused":True}
     modules = Path(legacy.BUILD_ROOT) / "cache/go-mod"
     if modules.exists():
         limit = limits.get("go-mod")
@@ -2446,6 +2453,7 @@ def _trim_check_caches(config: dict) -> dict:
         if limit is not None:
             if type(limit) is not int or limit <= 0:
                 raise CheckEnvironmentError("module cache capacity must be positive and measured")
+        if limit is not None and before > limit:
             protected = set()
             def escape(value):
                 return "".join("!" + char.lower() if char.isupper() else char for char in value)
@@ -2473,7 +2481,7 @@ def _trim_check_caches(config: dict) -> dict:
                         if value.is_file() and not value.is_symlink() and value.name.startswith(version + "."):
                             reclaimed += value.stat().st_blocks * 512
                             value.unlink()
-        after = _allocated_bytes(modules)
+        after = _allocated_bytes(modules) if limit is not None and before > limit else before
         result["go-mod"] = {"before_bytes":before, "after_bytes":after, "reclaimed_bytes":reclaimed,
                             "limit_bytes":limit, "reused":True, "protected_by":"all authoritative source refs go.sum"}
         if limit is not None and after > limit:
@@ -2516,6 +2524,11 @@ def _reclaim_unreferenced_packages(config: dict) -> dict:
         if path.name in pending:
             continue
         duplicate = releases.parent / "domestic/builds" / path.name / "release"
+        if path.name in protected and not duplicate.is_dir():
+            # This package is retained and has no duplicate eligible for
+            # reclamation. Its installation verification is separate from
+            # cleanup; do not reread every retained package byte per attempt.
+            continue
         installed_receipt = releases.parent / "domestic-receipts" / (path.name + ".json")
         # A read-back installation receipt proves this package is no longer
         # being built/accepted. Never infer completion merely from directory age.
@@ -2798,10 +2811,15 @@ try {
 }catch(e){evidence.launch_error=e.code||e.name||'unknown_error'}finally{
  if(child?.pid){
   const closed=new Promise(r=>child.exitCode!==null||child.signalCode?r():child.once('close',r));
+  const waitForClose=async timeout=>{
+   let timer;
+   try{await Promise.race([closed,new Promise(r=>timer=setTimeout(r,timeout))])}
+   finally{clearTimeout(timer)}
+  };
   try{process.kill(-child.pid,'SIGTERM')}catch{}
-  await Promise.race([closed,new Promise(r=>setTimeout(r,3000))]);
+  await waitForClose(3000);
   try{process.kill(-child.pid,'SIGKILL')}catch{}
-  await Promise.race([closed,new Promise(r=>setTimeout(r,2000))]);
+  await waitForClose(2000);
  }
  const redact=s=>(profile?s.replaceAll(profile,'<profile>'):s).replaceAll(os.tmpdir(),'<tmp>').replace(/https?:\\/\\/\\S+/g,'<url>');
  evidence.stderr_first=redact(first);evidence.stderr_tail=redact(tail);

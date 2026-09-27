@@ -57,8 +57,27 @@ server.serve_forever()
             def build(config,args,**kwargs):
                 env=dict(os.environ,TMPDIR=raw,AICRM_CHROMIUM_BINARY=str(binary),
                          AICRM_DATABASE_URL='must-not-reach-browser',FIXTURE_FATAL='1' if fatal else '0')
-                return subprocess.run(args,cwd=kwargs['cwd'],env=env,capture_output=True,text=True,
+                args=list(args)
+                if args[0]=='node':
+                    # Observe real pending timers at the final precheck output.
+                    # An already closed browser must not leave fallback waits
+                    # keeping Node alive after profile cleanup has completed.
+                    instrument="""const pendingTimers=new Set();
+const originalTimeout=globalThis.setTimeout,originalClear=globalThis.clearTimeout;
+globalThis.setTimeout=(fn,delay,...args)=>{
+ let timer;timer=originalTimeout(()=>{pendingTimers.delete(timer);fn(...args)},delay);
+ if(delay===3000||delay===2000)pendingTimers.add(timer);return timer;
+};
+globalThis.clearTimeout=timer=>{pendingTimers.delete(timer);originalClear(timer)};
+const originalLog=console.log;
+console.log=value=>originalLog(JSON.stringify({...JSON.parse(value),fixture_pending_timers:pendingTimers.size}));
+"""
+                    index=args.index('-e')+1;args[index]=instrument+args[index]
+                result=subprocess.run(args,cwd=kwargs['cwd'],env=env,capture_output=True,text=True,
                                       timeout=kwargs['timeout'],check=kwargs['check'])
+                if args[0]=='node':
+                    self.assertEqual(json.loads(result.stdout.splitlines()[-1])['fixture_pending_timers'],0)
+                return result
             policy=Path(__file__).resolve().parents[1]
             with patch.object(release,'_build_command',side_effect=build):
                 if fatal:
