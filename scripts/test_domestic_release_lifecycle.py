@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from scripts import domestic_main_release as release
+from scripts.test_domestic_release_controller import make_repository
 
 
 class CheckLifecycleTest(unittest.TestCase):
@@ -20,6 +21,102 @@ class CheckLifecycleTest(unittest.TestCase):
         config = {'work_root':str(work), 'lock':str(root/'control/controller.lock'),
                   'check_database_url':'postgres://synthetic@localhost/aicrm_test_lifecycle_acceptance_test'}
         return work, build, policy, config
+
+    def test_policy_recovery_preserves_main_current_pending_and_authoritative_history(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw); work, _, policies, config = self.fixture(root)
+            repo, base, candidate, other = make_repository(root)
+            for sha in (base, candidate, other):
+                subprocess.run(['git', '--git-dir='+str(repo), 'worktree', 'add', '--detach',
+                                str(policies/sha), sha], capture_output=True, check=True)
+            with patch.object(release, '_assert_build_account_idle'), release._locked(Path(config['lock'])):
+                ledger = release._lifecycle_directory(config)
+                pending = ledger/'pending-attempt.json'
+                release.atomic_json(pending, {'status':'evidence_saved_cleanup_pending','policy':str(policies/other)})
+                result = release._reclaim_policy_worktrees(config, repo, base)
+                self.assertEqual([r['sha'] for r in result['removed']], [candidate])
+                self.assertTrue((policies/base).is_dir())
+                self.assertTrue((policies/other).is_dir())
+                self.assertFalse((policies/candidate).exists())
+                self.assertEqual(json.loads(Path(result['proof']).read_text())['removed'], result['removed'])
+                release.atomic_json(pending, {'status':'reclaimed','policy':str(policies/other)})
+                self.assertEqual([r['sha'] for r in release._reclaim_policy_worktrees(config, repo, base)['removed']], [other])
+            for sha in (base, candidate, other):
+                subprocess.run(['git', '--git-dir='+str(repo), 'cat-file', '-e', sha+'^{commit}'], check=True)
+            self.assertEqual(release._resolve_ref(repo, 'refs/heads/main'), base)
+            self.assertEqual(release._resolve_ref(repo, 'refs/heads/codex/one'), candidate)
+            with self.assertRaisesRegex(release.ReleaseError, 'serial'):
+                release._reclaim_policy_worktrees(config, repo, base)
+
+    def test_policy_recovery_validates_all_sources_before_deletion(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw); _, _, policies, config = self.fixture(root)
+            repo, base, candidate, other = make_repository(root)
+            for sha in (candidate, other):
+                subprocess.run(['git', '--git-dir='+str(repo), 'worktree', 'add', '--detach',
+                                str(policies/sha), sha], capture_output=True, check=True)
+            with patch.object(release, '_assert_build_account_idle'), release._locked(Path(config['lock'])):
+                dirty = policies/other/'main.txt'; original = dirty.read_bytes(); dirty.write_text('unaccounted edit')
+                with self.assertRaisesRegex(release.CheckEnvironmentError, 'changed policy'):
+                    release._reclaim_policy_worktrees(config, repo, base)
+                self.assertTrue((policies/candidate).exists())
+                self.assertEqual(dirty.read_text(), 'unaccounted edit')
+                dirty.write_bytes(original)
+                unknown = policies/('a'*40); unknown.mkdir(); (unknown/'main.txt').write_text('unregistered source')
+                with self.assertRaisesRegex(release.CheckEnvironmentError, 'unregistered'):
+                    release._reclaim_policy_worktrees(config, repo, base)
+                self.assertTrue((policies/candidate).exists())
+                shutil.rmtree(unknown); unknown.symlink_to(policies/candidate, target_is_directory=True)
+                with self.assertRaisesRegex(release.CheckEnvironmentError, 'unrecognized'):
+                    release._reclaim_policy_worktrees(config, repo, base)
+                self.assertTrue((policies/candidate).exists())
+
+    def test_ten_distinct_policy_baselines_leave_only_main_and_current_checkout(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw); _, _, policies, config = self.fixture(root)
+            repo, base, _, _ = make_repository(root); source=root/'source'
+            subprocess.run(['git', '--git-dir='+str(repo), 'worktree', 'add', '--detach',
+                            str(policies/base), base], capture_output=True, check=True)
+            with patch.object(release, '_assert_build_account_idle'), release._locked(Path(config['lock'])):
+                history=[]
+                for number in range(10):
+                    (source/'round.txt').write_text(str(number))
+                    subprocess.run(['git', '-C', str(source), 'add', 'round.txt'], check=True)
+                    subprocess.run(['git', '-C', str(source), 'commit', '-m', 'round '+str(number)], capture_output=True, check=True)
+                    sha=release._worktree_git(source, 'rev-parse', 'HEAD');history.append(sha)
+                    subprocess.run(['git', '--git-dir='+str(repo), 'fetch', str(source),
+                                    'HEAD:refs/heads/codex/policy-history'], capture_output=True, check=True)
+                    subprocess.run(['git', '--git-dir='+str(repo), 'worktree', 'add', '--detach',
+                                    str(policies/sha), sha], capture_output=True, check=True)
+                    release._reclaim_policy_worktrees(config, repo, sha)
+                    self.assertEqual({p.name for p in policies.iterdir()}, {base,sha})
+                for sha in history:
+                    subprocess.run(['git', '--git-dir='+str(repo), 'cat-file', '-e', sha+'^{commit}'], check=True)
+
+    def test_interrupted_policy_removal_recovers_metadata_without_losing_unreferenced_source(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw); _, _, policies, config=self.fixture(root)
+            repo, base, candidate, other=make_repository(root)
+            for sha in (candidate,other):
+                subprocess.run(['git','--git-dir='+str(repo),'worktree','add','--detach',
+                                str(policies/sha),sha],capture_output=True,check=True)
+            # Model interruption after files disappear but before Git's
+            # worktree registry is removed; the next start must repair it.
+            shutil.rmtree(policies/candidate)
+            subprocess.run(['git','--git-dir='+str(repo),'update-ref','-d','refs/heads/codex/two'],check=True)
+            with release._locked(Path(config['lock'])):
+                with patch.object(release,'_assert_build_account_idle',side_effect=release.CheckEnvironmentError('live process')):
+                    with self.assertRaisesRegex(release.CheckEnvironmentError,'live process'):
+                        release._reclaim_policy_worktrees(config,repo,base)
+                with patch.object(release,'_assert_build_account_idle'):
+                    result=release._reclaim_policy_worktrees(config,repo,base)
+            self.assertEqual([r['sha'] for r in result['removed']],[candidate])
+            self.assertTrue((policies/other).exists())
+            self.assertEqual(len(result['retained']),1)
+            registry=release._git(repo,'worktree','list','--porcelain')
+            self.assertNotIn(str((policies/candidate).resolve()),registry)
+            subprocess.run(['git','--git-dir='+str(repo),'worktree','add','--detach',
+                            str(policies/candidate),candidate],capture_output=True,check=True)
 
     def test_ten_rounds_success_failure_timeout_and_interrupt_leave_no_generated_growth(self):
         with tempfile.TemporaryDirectory() as raw:

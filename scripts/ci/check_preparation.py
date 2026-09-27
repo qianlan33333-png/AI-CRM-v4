@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -51,6 +52,17 @@ def lock(root: Path, name: str):
 def heavy_slot(command: list[str], env: dict | None = None):
     environment = dict(os.environ if env is None else env)
     root = preparation_root()
+    managed_go = any(Path(word).name == "go" and index + 1 < len(command)
+                     and command[index + 1] in {"test", "vet"} for index, word in enumerate(command))
+    if root and managed_go:
+        # Go keeps vet, race, package selection and fresh test execution. Its
+        # native tool hook acquires the shared slot only for compilation/linking;
+        # cached test execution can overlap the single browser/build task.
+        tool = go_quoted_join([sys.executable, str(Path(__file__).resolve()), "go-tool"])
+        flag = go_quoted_join(["-toolexec=" + tool])
+        environment["GOFLAGS"] = (environment.get("GOFLAGS", "") + " " + flag).strip()
+        yield environment
+        return
     heavy = any(word in command for word in ("go", "npm", "npx")) or any(
         "run-donor-view-consumers" in word or "dev_preflight" in word or "build-v3" in word
         or "check_preparation.py" in word for word in command)
@@ -60,6 +72,33 @@ def heavy_slot(command: list[str], env: dict | None = None):
     with lock(root, "heavy.lock"):
         environment["AICRM_HEAVY_SLOT_HELD"] = "1"
         yield environment
+
+
+def go_quoted_join(words: list[str]) -> str:
+    # Match Go's cmd/internal/quoted.Join: these fields have no shell escapes.
+    result = []
+    for word in words:
+        if not any(char in word for char in " \t\r\n'\""):
+            result.append(word)
+        elif "'" not in word:
+            result.append("'" + word + "'")
+        elif '"' not in word:
+            result.append('"' + word + '"')
+        else:
+            raise ValueError("tool path cannot be represented in Go quoted flags")
+    return " ".join(result)
+
+
+def go_tool(command: list[str]) -> int:
+    if not command or not Path(command[0]).is_absolute():
+        raise ValueError("Go tool hook requires the actual absolute tool path")
+    heavy = Path(command[0]).name in {"compile", "asm", "link", "cgo", "cover", "preprofile"}
+    # Cache identity queries and vet analysis are light. Waiting for Chromium
+    # here would serialize even a warm, otherwise cached Go invocation.
+    if heavy and "-V=full" not in command[1:]:
+        with heavy_slot(["go", "build"]) as env:
+            return subprocess.run(command, env=env).returncode
+    return subprocess.run(command).returncode
 
 
 def serialized_preparation(function):
@@ -181,7 +220,6 @@ def artifact_input(root: Path) -> str:
                                      tool_input()], sort_keys=True).encode()).hexdigest()
 
 
-@serialized_preparation
 def materialize_artifact(root: Path) -> None:
     prep = preparation_root()
     if prep is None:
@@ -189,12 +227,31 @@ def materialize_artifact(root: Path) -> None:
     fingerprint = artifact_input(root)
     cache = prep / ("artifact-" + fingerprint)
     with lock(prep, "artifact.lock"):
+        if cache.is_dir():
+            restore_artifact(root, cache, fingerprint, True)
+            return
+    # Never wait for the heavy slot while holding a snapshot lock: a builder
+    # may already hold the heavy slot and need this same artifact lock.
+    materialize_uncached_artifact(root, fingerprint)
+
+
+def restore_artifact(root: Path, cache: Path, fingerprint: str, reused: bool) -> None:
+    record = json.loads((cache / "receipt.json").read_text())
+    if record.get("input") != fingerprint or record.get("output") != directory_digest(cache / "dist"):
+        raise ValueError("prepared artifact bytes or input identity changed")
+    destination = root / "web/dist"
+    shutil.rmtree(destination, ignore_errors=True)
+    shutil.copytree(cache / "dist", destination)
+    event("artifact", reused, fingerprint)
+
+
+@serialized_preparation
+def materialize_uncached_artifact(root: Path, fingerprint: str) -> None:
+    prep = preparation_root()
+    cache = prep / ("artifact-" + fingerprint)
+    with lock(prep, "artifact.lock"):
         reused = cache.is_dir()
-        if reused:
-            record = json.loads((cache / "receipt.json").read_text())
-            if record.get("input") != fingerprint or record.get("output") != directory_digest(cache / "dist"):
-                raise ValueError("prepared artifact bytes or input identity changed")
-        else:
+        if not reused:
             temporary = Path(tempfile.mkdtemp(prefix="artifact-build-", dir=prep))
             try:
                 run(["npm", "run", "build", "--silent"], root)
@@ -207,12 +264,10 @@ def materialize_artifact(root: Path) -> None:
             except BaseException:
                 # Keep failed preparation output as diagnostic evidence.
                 raise
-        destination = root / "web/dist"
-        shutil.rmtree(destination, ignore_errors=True)
-        shutil.copytree(cache / "dist", destination)
-        event("artifact", reused, fingerprint)
+        restore_artifact(root, cache, fingerprint, reused)
 
 
+@serialized_preparation
 def frontend_checks(root: Path, mode: str) -> None:
     # Keep the existing build/check command bodies as the single authority.
     # The release script itself remains unchanged; checks omit only its repeated
@@ -287,6 +342,8 @@ def cleanup_databases(prep: Path, raw: str) -> None:
 
 
 def main() -> None:
+    if sys.argv[1:2] == ["go-tool"]:
+        raise SystemExit(go_tool(sys.argv[2:]))
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("npm", "artifact", "stage", "check", "publish", "cleanup"))
     parser.add_argument("--prefix", default=".")

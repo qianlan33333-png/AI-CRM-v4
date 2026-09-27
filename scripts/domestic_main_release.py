@@ -2045,6 +2045,70 @@ def _recover_check_attempts(config: dict) -> list[dict]:
     return recovered
 
 
+def _reclaim_policy_worktrees(config: dict, repo: Path, base_sha: str) -> dict:
+    """Retire reconstructible rule checkouts, never authoritative Git refs."""
+    _require_cleanup_lock(config)
+    _assert_build_account_idle()
+    root = Path(config["work_root"]) / "trusted-policy"
+    if not root.exists() and not root.is_symlink():
+        return {"protected": [], "removed": [], "reclaimed_bytes": 0}
+    _safe_directory(root)
+    root = root.resolve()
+    keep = {_sha(base_sha, "check base SHA"), _resolve_ref(repo, "refs/heads/main")}
+    pending = set()
+    module = Path(__file__).resolve()
+    if module.is_relative_to(root) and SHA.fullmatch(module.relative_to(root).parts[0]):
+        keep.add(module.relative_to(root).parts[0])
+    directory = _lifecycle_directory(config)
+    for path in directory.glob("*-attempt.json"):
+        info = path.lstat()
+        if path.is_symlink() or info.st_uid != os.geteuid() or info.st_mode & 0o077 or info.st_nlink != 1:
+            raise CheckEnvironmentError("unsafe lifecycle evidence; retained policy checkouts")
+        record = json.loads(path.read_text())
+        policy = Path(record.get("policy", "")).resolve()
+        if record.get("status") != "reclaimed" and policy.parent == root:
+            keep.add(policy.name)
+            pending.add(policy.name)
+    registered = {}
+    for block in _git(repo, "worktree", "list", "--porcelain").split("\n\n"):
+        fields = dict(line.split(" ", 1) for line in block.splitlines() if " " in line)
+        if "worktree" in fields:
+            registered[Path(fields["worktree"]).resolve()] = fields.get("HEAD")
+    planned = []
+    retained = []
+    # Validate the entire inventory before removing any checkout. Unknown or
+    # changed source stays available for diagnosis; a Git ref must preserve
+    # each retired commit so historical rules can be reconstructed verbatim.
+    paths = set(root.iterdir()) | {p for p in registered if p.parent == root and not p.exists()}
+    for path in sorted(paths):
+        if not SHA.fullmatch(path.name) or path.is_symlink() or (path.exists() and not path.is_dir()):
+            raise CheckEnvironmentError("unrecognized policy checkout; retained source inventory")
+        if path.name in pending or (path.name in keep and path.exists()):
+            continue
+        if path.exists():
+            _safe_directory(path)
+        if (registered.get(path) != path.name or (path.exists() and (
+                _worktree_git(path, "rev-parse", "HEAD") != path.name
+                or _worktree_git(path, "status", "--porcelain", "--untracked-files=all")))):
+            raise CheckEnvironmentError("unregistered or changed policy checkout; retained source inventory")
+        refs = _git(repo, "for-each-ref", "--contains=" + path.name, "--format=%(refname)").splitlines()
+        if not refs:
+            retained.append({"path": str(path), "reason": "commit lacks an authoritative retention ref"})
+            continue
+        planned.append({"path": str(path), "sha": path.name, "tree": _tree(repo, path.name),
+                        "retained_refs": refs, "allocated_bytes": _allocated_bytes(path)})
+    proof = directory / ("policy-reclaim-" + str(time.time_ns()) + ".json")
+    result = {"protected": sorted(keep), "retained": retained, "removed": [], "planned": planned,
+              "reclaimed_bytes": 0, "proof": str(proof) if planned else None}
+    for item in planned:
+        atomic_json(proof, result)
+        _run(["git", f"--git-dir={repo}", "worktree", "remove", "--force", item["path"]], timeout=120)
+        result["removed"].append(item)
+        result["reclaimed_bytes"] += item["allocated_bytes"]
+        atomic_json(proof, result)
+    return result
+
+
 def _check_storage_mount(config: dict) -> dict:
     raw = config.get("check_storage_mount")
     if raw is None:
@@ -2604,6 +2668,7 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
     if report_dir.exists() or report_dir.is_symlink():
         raise ReleaseError("candidate check evidence path already exists; inspect before retry")
     recovered = _recover_check_attempts(config)
+    source_recovery = _reclaim_policy_worktrees(config, repo, base_sha)
     package_recovery = _reclaim_unreferenced_packages(config)
     archived_evidence = _archive_closed_check_evidence(config)
     cache_migration = _merge_legacy_check_caches(config)
@@ -2710,6 +2775,7 @@ print(json.dumps({lane: items for lane, items in missing.items() if items}))
         "business_assessment": plan.get("business_assessment"),
         "capacity":capacity, "storage":storage, "cache_usage":cache_usage, "recovered_attempts":recovered,
         "cache_migration":cache_migration,
+        "source_recovery":source_recovery,
         "package_recovery":package_recovery,
         "archived_evidence":archived_evidence,
         "artifact_lifecycle":json.loads((_lifecycle_directory(config) / (report_dir.name + "-attempt.json")).read_text()),
