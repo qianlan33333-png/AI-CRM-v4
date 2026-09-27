@@ -1720,6 +1720,9 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
         dependency_preparation = "not-applicable"
         if lane in {"frontend", "browser"} or (lane == "backend" and not backend_stages_dependencies):
             needs_dependencies = not (lane == "browser" and preparation_helper
+                # Continued backend commands may reuse stage evidence while
+                # its old disposable artifact has already been reclaimed.
+                and "backend" in lanes and not prior.get("backend")
                 and _lane_check_profile(enforced, profile) == "public-commerce-v1"
                 and not _browser_needs_npm(policy, checkout, lane_checks))
             dependency_preparation = "prepared" if needs_dependencies else "not-required-by-trusted-drivers"

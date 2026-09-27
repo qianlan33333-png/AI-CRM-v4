@@ -13,8 +13,9 @@ from scripts import domestic_main_release as release
 
 class AccelerationGateTest(unittest.TestCase):
     def test_omitting_unused_npm_still_executes_and_verifies_every_required_browser_journey(self):
-        for verified, needs_npm in ((True, False), (True, True), (False, False)):
-            with self.subTest(verified=verified, needs_npm=needs_npm), tempfile.TemporaryDirectory() as raw:
+        for verified, needs_npm, continued in ((True, False, False), (True, True, False),
+                                               (False, False, False), (True, False, True)):
+            with self.subTest(verified=verified, needs_npm=needs_npm, continued=continued), tempfile.TemporaryDirectory() as raw:
                 root = Path(raw)
                 (root / "scripts/ci").mkdir(parents=True)
                 (root / "scripts/ci/check_preparation.py").write_text("policy")
@@ -32,11 +33,17 @@ class AccelerationGateTest(unittest.TestCase):
                     return subprocess.CompletedProcess(args, 0, "", "")
                 def run(args, **kwargs):
                     directory = Path(args[args.index("--report-dir") + 1])
+                    if directory.name == "backend":
+                        self.receipt(directory, "backend", [{"Action": "pass", "Package": "example/required"}])
+                        return subprocess.CompletedProcess(args, 0)
                     self.receipt(directory, "browser", [{"Action": "pass", "Test": name} for name in names])
                     (directory / "summary.json").write_text(json.dumps({"required_browser_tests": names}))
                     return subprocess.CompletedProcess(args, 0)
                 enforced = {"selection_mode": "targeted", "selection_reasons": ["public-commerce-v1"] if verified else []}
-                config = {}
+                config = {"_required_go_packages": ["example/required"]}
+                if continued:
+                    config["_check_checkpoint"] = {"lanes": {"backend": {
+                        "status": "environment", "result": {"log_path": "earlier-protected-backend.log"}}}}
                 with patch.object(release, "_private_check_checkout", side_effect=checkout), \
                      patch.object(release, "_build_command", side_effect=build), \
                      patch.object(release, "_prepare_check_dependencies") as prepare, \
@@ -46,10 +53,10 @@ class AccelerationGateTest(unittest.TestCase):
                      patch.object(release, "_tree", return_value="c" * 40), \
                      patch.object(release, "_run_check_process", side_effect=run) as execute:
                     results = release._run_check_lanes(config, root, root, execution, reports, "a" * 40, "b" * 40,
-                        enforced, ["browser"], checks, [], "affected-packages", diagnostics)
-                self.assertEqual(execute.call_count, 1)
-                self.assertEqual(prepare.call_count, int(not verified or needs_npm))
-                self.assertEqual(dependency_guard.call_count, int(verified))
+                        enforced, ["backend", "browser"], checks, ["./example/required"], "affected-packages", diagnostics)
+                self.assertEqual(execute.call_count, 2)
+                self.assertEqual(prepare.call_count, int(not verified or needs_npm or continued))
+                self.assertEqual(dependency_guard.call_count, int(verified and not continued))
                 self.assertEqual(set(config["_check_snapshots"]["browser"]["required_browser_tests"]), set(names))
 
     def test_browser_dependency_decision_executes_only_trusted_policy_and_defaults_to_prepare(self):
