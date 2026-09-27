@@ -211,6 +211,52 @@ class AccelerationGateTest(unittest.TestCase):
             with self.assertRaisesRegex(release.ReleaseError, "command evidence"):
                 release._verify_lane_evidence(directory, "backend", "b" * 40, "c" * 40, [], [])
 
+    def test_legacy_browser_receipt_uses_complete_fixed_log_without_rewriting_receipt(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            check = {"lane": "browser", "test": "TestRequiredChromiumJourney"}
+            for missing_field in (False, True):
+                value = self.receipt(directory, "browser", [{"Test": check["test"], "Action": "pass"}])
+                (directory / "tests.jsonl").replace(directory / "browser-execution.log")
+                value["go_json_log"] = None
+                if missing_field:
+                    value.pop("go_json_log")
+                original = json.dumps(value)
+                (directory / "run.json").write_text(original)
+                verified = release._verify_lane_evidence(directory, "browser", "b"*40, "c"*40, [check], [])
+                self.assertEqual(verified, value)
+                self.assertEqual((directory / "run.json").read_text(), original)
+                self.assertEqual(release._lane_test_events(directory, value)[0]["Action"], "pass")
+
+    def test_legacy_browser_receipt_still_requires_identity_discovery_and_every_terminal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            for problem in ("missing_log", "empty_log", "failed", "skipped", "unfinished",
+                            "missing_discovery", "wrong_identity", "invalid_explicit_log", "missing_command"):
+                with self.subTest(problem=problem):
+                    value = self.receipt(directory, "browser", [{"Test":"TestRequiredChromiumJourney", "Action":"pass"}])
+                    log = directory / "browser-execution.log"
+                    (directory / "tests.jsonl").replace(log)
+                    value["go_json_log"] = None
+                    if problem == "missing_log": log.unlink()
+                    elif problem == "empty_log": log.write_text("")
+                    elif problem in {"failed", "skipped", "unfinished"}:
+                        action = {"failed":"fail", "skipped":"skip", "unfinished":"run"}[problem]
+                        log.write_text(json.dumps({"Test":"TestRequiredChromiumJourney", "Action":action}) + "\n")
+                    elif problem == "missing_discovery": (directory / "summary.json").unlink()
+                    elif problem == "wrong_identity": value["tree"] = "d"*40
+                    elif problem == "invalid_explicit_log": value["go_json_log"] = "../browser-execution.log"
+                    elif problem == "missing_command": value["commands"] = []
+                    (directory / "run.json").write_text(json.dumps(value))
+                    with self.assertRaises(release.CheckIncompleteError):
+                        release._verify_lane_evidence(directory, "browser", "b"*40, "c"*40, [], [])
+            value = self.receipt(directory, "backend", [{"Package":"example/required", "Action":"pass"}])
+            (directory / "tests.jsonl").replace(directory / "browser-execution.log")
+            value["go_json_log"] = None
+            (directory / "run.json").write_text(json.dumps(value))
+            with self.assertRaises(release.CheckIncompleteError):
+                release._verify_lane_evidence(directory, "backend", "b"*40, "c"*40, [], ["example/required"])
+
     def test_environment_block_keeps_candidate_pending_and_does_not_claim_regression(self):
         with tempfile.TemporaryDirectory() as temp:
             item = {"status": "checking", "attempt": 1}

@@ -1381,6 +1381,15 @@ def _verify_check_checkout_tree(repo: Path, head_sha: str, checkout: Path) -> in
     return count
 
 
+def _lane_test_log_name(receipt: dict[str, Any]) -> str | None:
+    name = receipt.get("go_json_log")
+    if name is None and receipt.get("lane") == "browser":
+        # The old trusted runner writes this fixed log without naming it in
+        # run.json. Keep its receipt intact and validate the actual evidence.
+        name = "browser-execution.log"
+    return name if isinstance(name, str) and Path(name).name == name else None
+
+
 def _verify_lane_evidence(lane_dir: Path, lane: str, head_sha: str, tree: str,
                           checks: list[dict[str, Any]], packages: list[str]) -> dict[str, Any]:
     try:
@@ -1400,8 +1409,8 @@ def _verify_lane_evidence(lane_dir: Path, lane: str, head_sha: str, tree: str,
             raise CheckIncompleteError("required check command evidence is missing or failed: " + lane)
     required_names = {check["test"] for check in checks if check.get("lane") == "browser" and check.get("test")}
     if lane in {"backend", "browser"}:
-        name = receipt.get("go_json_log")
-        if not isinstance(name, str) or Path(name).name != name:
+        name = _lane_test_log_name(receipt)
+        if name is None:
             raise CheckIncompleteError("trusted lane test evidence is missing: " + lane)
         try:
             events = []
@@ -1445,10 +1454,8 @@ def _verify_lane_evidence(lane_dir: Path, lane: str, head_sha: str, tree: str,
 
 
 def _lane_test_events(lane_dir: Path, receipt: dict[str, Any]) -> list[dict[str, Any]]:
-    name = receipt.get("go_json_log")
-    if name is None and receipt.get("lane") == "browser":
-        name = "browser-execution.log"
-    if not isinstance(name, str) or Path(name).name != name:
+    name = _lane_test_log_name(receipt)
+    if name is None:
         return []
     try:
         values = []
