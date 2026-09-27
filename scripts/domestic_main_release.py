@@ -1696,17 +1696,18 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
         # Pre-installing them here makes stage rehash the same writable copies.
         backend_stages_dependencies = preparation_helper and (
             enforced.get("selection_mode") == "full" or bool(packages))
-        if lane in {"frontend", "browser"} or (lane == "backend" and not backend_stages_dependencies):
-            _prepare_check_dependencies(config, checkout, [lane],
-                diagnostic_root / f"{head_sha}-{report_dir.name}-{lane}-npm-ci.log", policy=policy)
         # Let backend compile/link its first test binary before Chromium takes
-        # the shared heavy slot. Dependency copies above remain independent.
+        # the shared heavy slot. Browser dependency preparation uses that slot
+        # too, so it must also wait rather than block the first backend link.
         # This schedules work only: all mandatory browser assertions still run
         # if backend finishes without starting a test (including failure).
         waiting = time.monotonic()
         if lane == "browser":
             backend_running.wait()
         scheduler_wait = time.monotonic() - waiting
+        if lane in {"frontend", "browser"} or (lane == "backend" and not backend_stages_dependencies):
+            _prepare_check_dependencies(config, checkout, [lane],
+                diagnostic_root / f"{head_sha}-{report_dir.name}-{lane}-npm-ci.log", policy=policy)
         args = [lane, "--report-dir", str(lane_dir)]
         if _lane_check_profile(enforced, profile) == "public-commerce-v1":
             args.extend(["--profile", "public-commerce-v1"])

@@ -32,6 +32,8 @@ class AccelerationGateTest(unittest.TestCase):
                 diagnostics = root / "diagnostics"; diagnostics.mkdir()
                 browser_started = threading.Event()
                 backend_started = threading.Event()
+                backend_runtime = threading.Event()
+                browser_prepared = threading.Event()
                 def checkout(config, repo, path, sha):
                     path.mkdir(); return path
                 def build(config, args, **kwargs):
@@ -43,8 +45,10 @@ class AccelerationGateTest(unittest.TestCase):
                         backend_started.set()
                         # Package start / queued compiler is not test runtime.
                         release.atomic_json(directory / "progress.json", {"started_tests": 0, "status": "running"})
-                        self.assertFalse(browser_started.wait(0.1))
+                        self.assertFalse(browser_prepared.wait(0.1))
+                        self.assertFalse(browser_started.is_set())
                         if outcome == "running":
+                            backend_runtime.set()
                             release.atomic_json(directory / "progress.json", {"started_tests": 1, "status": "running"})
                             self.assertTrue(browser_started.wait(3), "browser must overlap backend runtime without a UI callback")
                         elif outcome == "environment":
@@ -57,9 +61,14 @@ class AccelerationGateTest(unittest.TestCase):
                         browser_started.set()
                         self.receipt(directory, "browser", [{"Action": "pass", "Test": "TestRequiredChromiumJourney"}])
                     return subprocess.CompletedProcess(args, 0)
+                def dependencies(config, checkout, lanes, *args, **kwargs):
+                    if "browser" in lanes:
+                        self.assertTrue(backend_started.is_set())
+                        if outcome == "running": self.assertTrue(backend_runtime.is_set())
+                        browser_prepared.set()
                 with patch.object(release, "_private_check_checkout", side_effect=checkout), \
                      patch.object(release, "_build_command", side_effect=build), \
-                     patch.object(release, "_prepare_check_dependencies"), \
+                     patch.object(release, "_prepare_check_dependencies", side_effect=dependencies), \
                      patch.object(release, "_check_env", return_value={}), \
                      patch.object(release, "_verify_check_checkout_tree"), \
                      patch.object(release, "_tree", return_value="c" * 40), \
@@ -73,6 +82,7 @@ class AccelerationGateTest(unittest.TestCase):
                         results = release._run_check_lanes(*args)
                         self.assertEqual([result["lane"] for result in results], ["browser", "backend"])
                 self.assertTrue(browser_started.is_set(), "backend errors must not drop mandatory browser checks")
+                self.assertTrue(browser_prepared.is_set(), "backend errors must still prepare mandatory browser dependencies")
 
     def test_maintenance_continuation_only_uses_protected_digest_and_exact_identity(self):
         with tempfile.TemporaryDirectory() as raw:
