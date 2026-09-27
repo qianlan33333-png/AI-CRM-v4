@@ -35,6 +35,13 @@ test("reports spawn failures without raw error data", () => {
   assert.doesNotMatch(diagnostic, /secret/);
 });
 
+test("preserves the first fatal when later warnings obscure the stderr tail", () => {
+  const diagnostic = chromiumStartupDiagnostic({signalCode:"SIGABRT",
+    stderr:"FATAL Socket path too long\n" + "later cpu-frequency warning\n".repeat(200)});
+  assert.match(diagnostic,/FATAL Socket path too long/);
+  assert.doesNotMatch(diagnostic,/cpu-frequency/);
+});
+
 test("bounds and redacts stderr for a signaled Chromium exit", () => {
   const profile = "/tmp/aicrm-access-chromium-sensitive-profile";
   const diagnostic = chromiumStartupDiagnostic({

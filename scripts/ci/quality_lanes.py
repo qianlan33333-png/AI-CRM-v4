@@ -77,13 +77,19 @@ def postgres_operations_ready() -> bool:
     """Exercise only owned synthetic CREATE/TEMPLATE/DROP operations."""
     if not os.environ.get("AICRM_DATABASE_URL") or not postgres_16_ready():
         return False
+    prep = check_preparation.preparation_root()
+    if prep is None:
+        return False  # CREATE must always have a recoverable attempt inventory.
     parsed = urlparse(os.environ["AICRM_DATABASE_URL"])
     env = dict(os.environ, PGHOST=parsed.hostname, PGPORT=str(parsed.port or 5432),
                PGUSER=unquote(parsed.username or ""), PGPASSWORD=unquote(parsed.password or ""),
                PGDATABASE=unquote(parsed.path.strip("/")),
                PGSSLMODE=parse_qs(parsed.query).get("sslmode", ["prefer"])[0])
-    template = "aicrm_test_probe_" + uuid.uuid4().hex[:16] + "_acceptance_test"
-    clone = template.replace("_probe_", "_probe_clone_")
+    template = "aicrm_test_tpl_" + uuid.uuid4().hex[:16] + "_acceptance_test"
+    clone = "aicrm_test_clone_" + uuid.uuid4().hex[:16] + "_acceptance_test"
+    for name in (template, clone):
+        check_preparation.atomic_json(prep / ("database-" + name + ".json"),
+                                      {"database":name, "purpose":"capability_probe"})
     def sql(statement: str) -> bool:
         return subprocess.run(["psql", "-X", "-v", "ON_ERROR_STOP=1", "-Atqc", statement],
                               env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -94,9 +100,16 @@ def postgres_operations_ready() -> bool:
             ready = (sql('ALTER DATABASE "' + template + '" ALLOW_CONNECTIONS false') and
                      sql('CREATE DATABASE "' + clone + '" TEMPLATE "' + template + '"'))
     finally:
-        # Both names were generated here, on a verified local synthetic DB.
-        ready = sql('DROP DATABASE IF EXISTS "' + clone + '"') and ready
-        ready = sql('DROP DATABASE IF EXISTS "' + template + '"') and ready
+        # A failed DROP retains its inventory for next-start recovery. Attempt
+        # both names even if psql times out while removing the first one.
+        for name in (clone, template):
+            try:
+                dropped = sql('DROP DATABASE IF EXISTS "' + name + '"')
+            except (OSError, subprocess.SubprocessError):
+                dropped = False
+            if dropped:
+                (prep / ("database-" + name + ".json")).unlink()
+            ready = dropped and ready
     return ready
 
 

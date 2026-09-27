@@ -95,10 +95,30 @@ class CheckCandidateError(ReleaseError):
 
 def _run(args: list[str], *, cwd: Path | None = None, input_text: str | None = None,
          input_path: Path | None = None, timeout: int = 600, check: bool = True,
-         umask: int = -1) -> subprocess.CompletedProcess[str]:
+         umask: int = -1, terminate_group: bool = False) -> subprocess.CompletedProcess[str]:
     if input_text is not None and input_path is not None:
         raise ValueError("command input must have one source")
-    if input_path is not None:
+    if terminate_group:
+        if input_path is not None:
+            raise ValueError("isolated command input must use text")
+        process = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, text=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   umask=umask, start_new_session=True)
+        try:
+            stdout, stderr = process.communicate(input_text, timeout=timeout)
+        except BaseException as error:
+            # Kill the command's group, including compilers and browser
+            # children, before an attempt's generated directories are removed.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.communicate()
+            if isinstance(error, subprocess.TimeoutExpired):
+                raise subprocess.TimeoutExpired(["isolated-build-command"], timeout) from None
+            raise
+        result = subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+    elif input_path is not None:
         with input_path.open("rb") as source:
             raw = subprocess.run(args, cwd=cwd, input=source.read(), stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE, timeout=timeout, umask=umask)
@@ -1090,11 +1110,13 @@ def _build_command(config: dict[str, Any], command: list[str], *, cwd: Path,
                    input_text: str | None = None, timeout: int = 60 * 60,
                    check: bool = True, safe_repository: Path | None = None,
                    umask: int = -1) -> subprocess.CompletedProcess[str]:
+    _check_storage_mount(config)
     env = _check_env(config, safe_repository)
     args = ["/usr/bin/sudo", "-n", "-u", legacy.BUILD_USER, "-H", "--", "/usr/bin/env", "-i"]
     args.extend([f"{key}={value}" for key, value in env.items()])
     args.extend(command)
-    return _run(args, cwd=cwd, input_text=input_text, timeout=timeout, check=check, umask=umask)
+    return _run(args, cwd=cwd, input_text=input_text, timeout=timeout, check=check,
+                umask=umask, terminate_group=True)
 
 
 def _trusted_runner_code() -> str:
@@ -1882,6 +1904,9 @@ def _process_alive(pid: int) -> bool:
 def _cleanup_attempt_record(config: dict, path: Path, record: dict) -> dict:
     """Only registered generated objects; evidence and Git authority stay put."""
     _require_cleanup_lock(config)
+    _check_storage_mount(config)
+    if record.get("guard_build_processes"):
+        _assert_build_account_idle()
     temporary = Path(record["temporary"])
     report = Path(record["report"])
     reports_root = Path(legacy.BUILD_ROOT) / "domestic-main-checks"
@@ -1894,10 +1919,19 @@ def _cleanup_attempt_record(config: dict, path: Path, record: dict) -> dict:
             raise ReleaseError("attempt lifecycle path changed to a symlink")
     prep = report / ".preparation"
     before = shutil.disk_usage(Path(config["work_root"])).free
+    scratch = Path(record["scratch"]) if record.get("scratch") else None
+    if scratch:
+        roots = {Path(config.get("check_execution_root", "/tmp")).resolve(), Path("/tmp").resolve()}
+        if (scratch.parent not in roots or not re.fullmatch(r"ac-[0-9a-f]{16}", scratch.name)
+                or scratch.is_symlink()):
+            raise ReleaseError("attempt scratch path is outside registered execution roots")
     generated = [temporary, prep, *[report / lane / ".venv" for lane in builder_ci_lanes()]]
+    if scratch:
+        generated.append(scratch)
     for value in generated:
         parent = value
-        while parent != (temporary.parent if value == temporary else report.parent):
+        boundary = scratch.parent if scratch and value == scratch else (temporary.parent if value == temporary else report.parent)
+        while parent != boundary:
             if parent.is_symlink():
                 raise ReleaseError("generated lifecycle object traverses a symlink")
             parent = parent.parent
@@ -1961,15 +1995,28 @@ for f in sorted(Path(sys.argv[1]).glob('database-*.json')):
         raise CheckEnvironmentError("synthetic database cleanup failed; retained attempt inventory")
 
 
+def _assert_build_account_idle() -> None:
+    # A killed controller may leave its build-account children alive. Defer
+    # crash recovery while any check process still uses that account.
+    processes = subprocess.run(["ps", "-u", legacy.BUILD_USER, "-o", "pid="],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+    # ps returns 1 for an empty account, not for a missing/invalid account.
+    if processes.returncode not in (0, 1) or (processes.returncode == 1 and
+            (processes.stdout.strip() or (processes.stderr or "").strip())):
+        raise CheckEnvironmentError("build account process inventory is unavailable; retained attempts")
+    try:
+        children = any(int(pid) != os.getpid() for pid in processes.stdout.split())
+    except ValueError as exc:
+        raise CheckEnvironmentError("build account process inventory is incomplete; retained attempts") from exc
+    if children:
+        raise CheckEnvironmentError("build account still has live processes; retained attempts and blocked new checks")
+
+
 def _recover_check_attempts(config: dict) -> list[dict]:
     directory = _lifecycle_directory(config)
     recovered = []
-    # A killed controller may leave its build-account children alive. Defer
-    # crash recovery while any check process still uses that account.
-    processes = subprocess.run(["ps", "-u", legacy.BUILD_USER, "-o", "comm="],
-                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=False)
-    children = any(Path(name.strip()).name.startswith(("go", "node", "npm", "chrome", "chromium"))
-                   for name in processes.stdout.splitlines())
+    _assert_build_account_idle()
+    pending = []
     for path in directory.glob("*-attempt.json"):
         if path.is_symlink():
             raise ReleaseError("lifecycle record is a symlink")
@@ -1979,16 +2026,45 @@ def _recover_check_attempts(config: dict) -> list[dict]:
         record = json.loads(path.read_text())
         if record.get("status") == "reclaimed":
             continue
-        if children or (_process_alive(record["pid"]) and
+        if (_process_alive(record["pid"]) and
                         not (record["pid"] == os.getpid() and record.get("status") == "evidence_saved_cleanup_pending")):
-            continue
+            raise CheckEnvironmentError("registered check controller is still alive; blocked new checks")
+        pending.append((path, record))
+    # Validate the entire inventory before deleting anything. A live
+    # controller discovered later must protect all shared attempt resources.
+    for path, record in pending:
         recovered.append(_cleanup_attempt_record(config, path, record))
     return recovered
 
 
-def _check_capacity(config: dict, filesystem: Path) -> dict:
+def _check_storage_mount(config: dict) -> dict:
+    raw = config.get("check_storage_mount")
+    if raw is None:
+        return {"mode":"root_filesystem"}
+    mount = Path(raw)
+    expected = config.get("check_storage_uuid")
+    if (not mount.is_absolute() or mount.is_symlink() or not os.path.ismount(mount)
+            or not isinstance(expected,str) or not expected):
+        raise CheckEnvironmentError("configured check data disk is not mounted; blocked root-disk fallback")
+    found = subprocess.run(["findmnt","-n","-o","UUID","--target",str(mount)],
+                           capture_output=True,text=True,check=False,timeout=15)
+    if found.returncode or found.stdout.strip() != expected:
+        raise CheckEnvironmentError("check data disk UUID differs from the configured disk")
+    device = mount.stat().st_dev
+    paths = config.get("check_storage_paths", [str(legacy.BUILD_ROOT)])
+    if not isinstance(paths,list) or not paths:
+        raise CheckEnvironmentError("check data disk requires its managed paths")
+    for raw_path in paths:
+        path=Path(raw_path)
+        if not path.is_absolute() or not path.exists() or path.stat().st_dev != device:
+            raise CheckEnvironmentError("managed check storage path is not on the configured data disk")
+    return {"mode":"data_disk","mount":str(mount),"uuid":expected,"managed_paths":paths,
+            "free_bytes":shutil.disk_usage(mount).free}
+
+
+def _check_capacity(config: dict, filesystem: Path, profile_key: str = "check_capacity") -> dict:
     free = shutil.disk_usage(filesystem).free
-    measured = config.get("check_capacity")
+    measured = config.get(profile_key)
     if not measured:
         if config.get("_check_capacity_calibration") is True:
             return {"mode":"calibration", "free_before_bytes":free}
@@ -2297,21 +2373,49 @@ def _archive_closed_check_evidence(config: dict) -> list[dict]:
 @contextmanager
 def _check_attempt_directory(config: dict, report: Path, policy: Path, head_sha: str):
     directory = _lifecycle_directory(config)
-    temporary = Path(tempfile.mkdtemp(prefix="domestic-main-check-", dir=Path(config["work_root"])))
+    execution_root = Path(config.get("check_execution_root", "/tmp"))
+    if not execution_root.is_absolute():
+        raise CheckEnvironmentError("check execution root must be absolute")
+    try:
+        execution_root = execution_root.resolve(strict=True)
+    except OSError as exc:
+        raise CheckEnvironmentError("check execution root is unavailable") from exc
+    if config.get("check_execution_root"):
+        _safe_directory(execution_root)
+    token = os.urandom(8).hex()
+    temporary = Path(config["work_root"]) / ("domestic-main-check-" + token)
+    scratch = execution_root / ("ac-" + token)
     record_path = directory / (report.name + "-attempt.json")
     helper = policy / "scripts/ci/check_preparation.py"
     record = {"schema":1, "pid":os.getpid(), "status":"active", "head_sha":head_sha,
-              "temporary":str(temporary), "report":str(report), "policy":str(policy),
+              "guard_build_processes":bool(config.get("_check_process_guard")),
+              "temporary":str(temporary), "scratch":str(scratch), "report":str(report), "policy":str(policy),
               "cleanup_helper_sha256":_file_sha256(helper) if helper.is_file() else None,
               "database_identity":_check_database_identity(config),
               "started_at_utc":_utc_now(), "retention":"generated objects until evidence saved; unresolved evidence retained"}
     atomic_json(record_path, record)
+    # Register names before creation so SIGKILL cannot leave untracked objects.
+    try:
+        temporary.mkdir(mode=0o700)
+        scratch.mkdir(mode=0o700)
+    except BaseException:
+        record["status"]="evidence_saved_cleanup_pending"
+        atomic_json(record_path,record)
+        _cleanup_attempt_record(config,record_path,record)
+        raise
+    config["_check_tmpdir"] = str(scratch)
     free_before = shutil.disk_usage(temporary).free
+    scratch_free_before = shutil.disk_usage(scratch).free
+    report_free_before = shutil.disk_usage(report).free
     minimum = {"free":free_before}
+    scratch_minimum = {"free":scratch_free_before}
+    report_minimum = {"free":report_free_before}
     stopped = threading.Event()
     def sample():
         while not stopped.wait(0.5):
             minimum["free"] = min(minimum["free"], shutil.disk_usage(temporary.parent).free)
+            scratch_minimum["free"] = min(scratch_minimum["free"], shutil.disk_usage(scratch.parent).free)
+            report_minimum["free"] = min(report_minimum["free"], shutil.disk_usage(report.parent).free)
     sampler = threading.Thread(target=sample, daemon=True)
     sampler.start()
     try:
@@ -2320,9 +2424,17 @@ def _check_attempt_directory(config: dict, report: Path, policy: Path, head_sha:
         stopped.set()
         sampler.join()
         minimum["free"] = min(minimum["free"], shutil.disk_usage(temporary.parent).free)
+        scratch_minimum["free"] = min(scratch_minimum["free"], shutil.disk_usage(scratch.parent).free)
+        report_minimum["free"] = min(report_minimum["free"], shutil.disk_usage(report.parent).free)
         record["status"] = "evidence_saved_cleanup_pending"
         record.update(free_before_bytes=free_before, minimum_free_bytes=minimum["free"],
-                      peak_disk_increment_bytes=max(0, free_before-minimum["free"]))
+                      peak_disk_increment_bytes=max(0, free_before-minimum["free"]),
+                      execution_free_before_bytes=scratch_free_before,
+                      execution_minimum_free_bytes=scratch_minimum["free"],
+                      execution_peak_disk_increment_bytes=max(0,scratch_free_before-scratch_minimum["free"]),
+                      report_storage_free_before_bytes=report_free_before,
+                      report_storage_minimum_free_bytes=report_minimum["free"],
+                      report_storage_peak_disk_increment_bytes=max(0,report_free_before-report_minimum["free"]))
         atomic_json(record_path, record)
         try:
             _cleanup_attempt_record(config, record_path, record)
@@ -2330,6 +2442,8 @@ def _check_attempt_directory(config: dict, report: Path, policy: Path, head_sha:
             record["cleanup_error_type"] = type(exc).__name__
             atomic_json(record_path, record)
             raise
+        finally:
+            config.pop("_check_tmpdir", None)
 
 
 def _discover_check_packages(config: dict, policy: Path, checkout: Path,
@@ -2351,8 +2465,124 @@ def _discover_check_packages(config: dict, policy: Path, checkout: Path,
     return sorted(set(inventory.stdout.splitlines()))
 
 
+def _check_execution_preflight(config: dict, policy: Path, checkout: Path,
+                               report: Path, browser_required: bool) -> dict:
+    code = """import json,os,stat
+from pathlib import Path
+p=Path(os.environ['TMPDIR']);fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY)
+try:
+ for part in p.parts[1:]:
+  nxt=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd);os.close(fd);fd=nxt
+ s=os.fstat(fd)
+ if s.st_uid!=os.geteuid() or stat.S_IMODE(s.st_mode)!=0o700: raise SystemExit(2)
+ print(json.dumps({'uid':s.st_uid,'mode':stat.S_IMODE(s.st_mode),'root':str(p.parent),'device':s.st_dev}))
+finally: os.close(fd)
+"""
+    result = _build_command(config,["/usr/bin/python3","-c",code],cwd=checkout,timeout=30,check=False)
+    if result.returncode:
+        raise CheckEnvironmentError("private TMPDIR cannot be opened under the actual build account")
+    try:
+        identity = json.loads(result.stdout.strip())
+    except ValueError as exc:
+        raise CheckIncompleteError("private TMPDIR capability evidence is missing") from exc
+    if not browser_required:
+        return identity
+    # Real DevTools startup catches socket-length, permission and launch
+    # failures that an executable --version check cannot detect.
+    browser_code = """import {resolveChromiumBinary} from %s;
+import {spawn,execFileSync} from 'node:child_process';
+import fs from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
+const env={...process.env};delete env.AICRM_DATABASE_URL;
+let binary=null,version=null,profile,child,first='',tail='',error;
+const evidence={devtools_ready:false,tmpdir_bytes:Buffer.byteLength(os.tmpdir())};
+try {
+ binary=resolveChromiumBinary();version=execFileSync(binary,['--version'],{encoding:'utf8',timeout:10000,env}).trim();
+ evidence.binary=binary;evidence.version=version;
+ profile=await fs.mkdtemp(path.join(os.tmpdir(),'p-'));
+ child=spawn(binary,['--headless=new','--no-sandbox','--remote-debugging-port=0','--user-data-dir='+profile,'--ignore-certificate-errors','--allow-insecure-localhost','about:blank'],{env,detached:true,stdio:['ignore','ignore','pipe']});
+ child.on('error',e=>error=e.code||e.name);
+ child.stderr.on('data',c=>{const text=String(c);first=(first+text).slice(0,16384);tail=(tail+text).slice(-16384)});
+ const end=Date.now()+30000;
+ while(Date.now()<end&&!error&&child.exitCode===null&&!child.signalCode){
+  try {
+   const port=(await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8')).split('\\n')[0];
+   if(/^\\d+$/.test(port)){
+    const response=await fetch('http://127.0.0.1:'+port+'/json/version',{signal:AbortSignal.timeout(2000)});
+    if(response.ok&&(await response.json()).webSocketDebuggerUrl){evidence.devtools_ready=true;break}
+   }
+  }catch{}
+  await new Promise(r=>setTimeout(r,50));
+ }
+ evidence.exit_code=child.exitCode;evidence.signal=child.signalCode;evidence.launch_error=error||null;
+}catch(e){evidence.launch_error=e.code||e.name||'unknown_error'}finally{
+ if(child?.pid){
+  const closed=new Promise(r=>child.exitCode!==null||child.signalCode?r():child.once('close',r));
+  try{process.kill(-child.pid,'SIGTERM')}catch{}
+  await Promise.race([closed,new Promise(r=>setTimeout(r,3000))]);
+  try{process.kill(-child.pid,'SIGKILL')}catch{}
+  await Promise.race([closed,new Promise(r=>setTimeout(r,2000))]);
+ }
+ const redact=s=>(profile?s.replaceAll(profile,'<profile>'):s).replaceAll(os.tmpdir(),'<tmp>').replace(/https?:\\/\\/\\S+/g,'<url>');
+ evidence.stderr_first=redact(first);evidence.stderr_tail=redact(tail);
+ await fs.writeFile(process.argv[1],JSON.stringify(evidence)+'\\n',{mode:0o600});
+ if(profile)await fs.rm(profile,{recursive:true,force:true});
+}
+console.log(JSON.stringify({binary,version,devtools_ready:evidence.devtools_ready}));
+process.exitCode=evidence.devtools_ready?0:2;
+""" % json.dumps((policy / "internal/webshell/chromium_binary.mjs").as_uri())
+    result = _build_command(config,["node","--input-type=module","-e",browser_code,
+                                   str(report / "browser-precheck.json")],cwd=checkout,timeout=90,check=False)
+    if result.returncode:
+        raise CheckEnvironmentError("real Chromium DevTools startup failed; see browser-precheck.json")
+    try:
+        identity["chromium"] = json.loads(result.stdout.splitlines()[-1])
+    except (ValueError, IndexError) as exc:
+        raise CheckIncompleteError("real Chromium startup evidence is missing") from exc
+    return identity
+
+
+def _check_database_capability(config: dict, checkout: Path, prep: Path) -> None:
+    # Bootstrap against an old trusted baseline without importing candidate
+    # policy. Every CREATE is registered before execution for crash recovery.
+    code = """import json,os,subprocess,sys,uuid
+from pathlib import Path
+from urllib.parse import urlsplit,unquote,parse_qs
+p=urlsplit(os.environ['AICRM_DATABASE_URL']);name=unquote(p.path.strip('/'))
+if p.hostname not in ('localhost','127.0.0.1','::1') or not (name=='aicrm_ci' or name.startswith('aicrm_test_')):raise SystemExit(21)
+env=dict(os.environ,PGHOST=p.hostname,PGPORT=str(p.port or 5432),PGUSER=unquote(p.username or ''),PGPASSWORD=unquote(p.password or ''),PGDATABASE=name,PGSSLMODE=parse_qs(p.query).get('sslmode',['prefer'])[0])
+def sql(q):
+ return subprocess.run(['psql','-X','-v','ON_ERROR_STOP=1','-Atqc',q],env=env,capture_output=True,text=True,timeout=15)
+version=sql('SHOW server_version_num')
+if version.returncode or not version.stdout.strip().startswith('16'):raise SystemExit(22)
+prep=Path(sys.argv[1]);names=['aicrm_test_'+kind+'_'+uuid.uuid4().hex[:16]+'_acceptance_test' for kind in ('tpl','clone')]
+for name in names:
+ target=prep/('database-'+name+'.json');temporary=target.with_suffix('.tmp')
+ with temporary.open('x') as out:
+  os.chmod(temporary,0o600);json.dump({'database':name,'purpose':'capability_probe'},out);out.flush();os.fsync(out.fileno())
+ os.replace(temporary,target)
+ready=False
+try:
+ ready=(sql('CREATE DATABASE "'+names[0]+'" TEMPLATE template0').returncode==0 and
+        sql('ALTER DATABASE "'+names[0]+'" ALLOW_CONNECTIONS false').returncode==0 and
+        sql('CREATE DATABASE "'+names[1]+'" TEMPLATE "'+names[0]+'"').returncode==0)
+finally:
+ for name in reversed(names):
+  try:dropped=sql('DROP DATABASE IF EXISTS "'+name+'"').returncode==0
+  except (OSError,subprocess.SubprocessError):dropped=False
+  if dropped:(prep/('database-'+name+'.json')).unlink()
+  ready=ready and dropped
+print(json.dumps({'ready':ready}))
+raise SystemExit(0 if ready else 23)
+"""
+    result = _build_command(config, ["/usr/bin/python3", "-c", code, str(prep)],
+                            cwd=checkout, timeout=120, check=False)
+    if result.returncode:
+        raise CheckEnvironmentError("PostgreSQL 16 synthetic CREATE/TEMPLATE/DROP failed under the actual build account")
+
+
 def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir: Path,
                   base_sha: str, head_sha: str, *, diagnostic_root: Path | None = None) -> dict[str, Any]:
+    storage = _check_storage_mount(config)  # Before recovery or any filesystem mutation.
     if report_dir.exists() or report_dir.is_symlink():
         raise ReleaseError("candidate check evidence path already exists; inspect before retry")
     recovered = _recover_check_attempts(config)
@@ -2361,6 +2591,8 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
     cache_migration = _merge_legacy_check_caches(config)
     cache_usage = _trim_check_caches(config)
     capacity = _check_capacity(config, Path(config["work_root"]))
+    if storage["mode"] == "data_disk":
+        storage["capacity"] = _check_capacity(config, Path(storage["mount"]), "check_storage_capacity")
     _build_command(config, ["/usr/bin/mkdir", "-m", "0700", "-p", str(report_dir)], cwd=Path("/"), timeout=30)
     report_info = report_dir.lstat()
     if not stat.S_ISDIR(report_info.st_mode) or report_info.st_uid != pwd.getpwnam(legacy.BUILD_USER).pw_uid or stat.S_IMODE(report_info.st_mode) != 0o700:
@@ -2370,40 +2602,7 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
     toolchain = _verify_build_toolchain(config)
     plan = _trusted_preflight_plan(config, policy, worktree, base_sha, head_sha)
     enforced, lanes, checks, packages, profile = _enforced_lanes(plan, changed_policy)
-    config = dict(config)
-    if (policy / "scripts/ci/check_preparation.py").is_file():
-        probe_code = """import sys,json
-from pathlib import Path
-sys.path.insert(0, str(Path(sys.argv[1]) / 'scripts/ci'))
-import quality_lanes
-quality_lanes.ROOT = Path(sys.argv[2])
-missing = {lane: quality_lanes.missing_prerequisites(lane) for lane in json.loads(sys.argv[3])}
-print(json.dumps({lane: items for lane, items in missing.items() if items}))
-"""
-        probe = _build_command(config, ["/usr/bin/python3", "-c", probe_code, str(policy),
-                               str(worktree), json.dumps(lanes)], cwd=worktree, timeout=180,
-                               check=False, safe_repository=worktree)
-        if probe.returncode:
-            raise CheckIncompleteError("actual build account prerequisite probe did not complete")
-        try:
-            missing = json.loads(probe.stdout.splitlines()[-1])
-        except (ValueError, IndexError) as exc:
-            raise CheckIncompleteError("actual build account prerequisite evidence is missing") from exc
-        if missing:
-            raise CheckEnvironmentError("required check prerequisites missing: " + json.dumps(missing, sort_keys=True))
-    if "browser" in lanes:
-        browser_code = """import {resolveChromiumBinary} from %s;
-import {execFileSync} from 'node:child_process';
-const path=resolveChromiumBinary();
-console.log(JSON.stringify({path, version:execFileSync(path,['--version'],{encoding:'utf8',timeout:20000}).trim()}));""" % json.dumps((policy / "internal/webshell/chromium_binary.mjs").as_uri())
-        browser = _build_command(config, ["node", "--input-type=module", "-e", browser_code],
-                                 cwd=policy, timeout=30, check=False)
-        if browser.returncode:
-            raise CheckEnvironmentError("Chromium executable probe failed under the actual build account")
-        try:
-            toolchain["chromium"] = json.loads(browser.stdout.splitlines()[-1])
-        except (ValueError, IndexError) as exc:
-            raise ReleaseError("Chromium executable probe returned incomplete evidence") from exc
+    config = dict(config, _check_process_guard=True)
 
     diagnostic_root = diagnostic_root or (Path(config["work_root"]) / "diagnostics")
     _safe_directory(diagnostic_root, create=True)
@@ -2418,8 +2617,7 @@ console.log(JSON.stringify({path, version:execFileSync(path,['--version'],{encod
         execution_parent.mkdir(mode=0o700)
         os.chown(execution_parent, build_info.pw_uid, build_info.pw_gid)
         os.chmod(execution_parent, 0o700)
-        attempt_tmp = execution_parent / "tmp"
-        attempt_tmp.mkdir(mode=0o700)
+        attempt_tmp = Path(config["_check_tmpdir"])
         os.chown(attempt_tmp, build_info.pw_uid, build_info.pw_gid)
         execution_worktree = _private_check_checkout(
             config, repo, execution_parent / "candidate", head_sha)
@@ -2427,6 +2625,29 @@ console.log(JSON.stringify({path, version:execFileSync(path,['--version'],{encod
         _build_command(config, ["/usr/bin/mkdir", "-m", "0700", str(prep)], cwd=execution_worktree, timeout=30)
         check_config = dict(config, _check_snapshots={}, _check_tmpdir=str(attempt_tmp))
         check_config["_check_preparation_dir"] = str(prep)
+        toolchain["execution"] = _check_execution_preflight(check_config, policy, execution_worktree, report_dir, "browser" in lanes)
+        if (policy / "scripts/ci/check_preparation.py").is_file():
+            probe_code = """import sys,json
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]) / 'scripts/ci'))
+import quality_lanes
+quality_lanes.ROOT = Path(sys.argv[2])
+missing = {lane: quality_lanes.missing_prerequisites(lane) for lane in json.loads(sys.argv[3])}
+print(json.dumps({lane: items for lane, items in missing.items() if items}))
+"""
+            probe = _build_command(check_config, ["/usr/bin/python3", "-c", probe_code, str(policy),
+                                   str(worktree), json.dumps(lanes)], cwd=worktree, timeout=180,
+                                   check=False, safe_repository=worktree)
+            if probe.returncode:
+                raise CheckIncompleteError("actual build account prerequisite probe did not complete")
+            try:
+                missing = json.loads(probe.stdout.splitlines()[-1])
+            except (ValueError, IndexError) as exc:
+                raise CheckIncompleteError("actual build account prerequisite evidence is missing") from exc
+            if missing:
+                raise CheckEnvironmentError("required check prerequisites missing: " + json.dumps(missing, sort_keys=True))
+        elif set(lanes) & {"backend", "browser"}:
+            _check_database_capability(check_config, execution_worktree, prep)
         if "backend" in lanes and (enforced["selection_mode"] == "full" or profile == "affected-packages"):
             check_config["_required_go_packages"] = _discover_check_packages(
                 check_config,policy,execution_worktree,plan,enforced)
@@ -2468,7 +2689,7 @@ console.log(JSON.stringify({path, version:execFileSync(path,['--version'],{encod
                               if changed_policy else enforced.get("selection_reasons")),
         "changed_paths": plan.get("changed_paths"), "toolchain": toolchain, "lane_results": lane_results,
         "business_assessment": plan.get("business_assessment"),
-        "capacity":capacity, "cache_usage":cache_usage, "recovered_attempts":recovered,
+        "capacity":capacity, "storage":storage, "cache_usage":cache_usage, "recovered_attempts":recovered,
         "cache_migration":cache_migration,
         "package_recovery":package_recovery,
         "archived_evidence":archived_evidence,

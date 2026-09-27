@@ -6,10 +6,13 @@ const safeErrorCategory = error => String(error?.code || error?.name || "unknown
   .replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 96);
 
 const boundedStderr = (stderr, profile) => {
-  const rendered = String(stderr || "").replaceAll(String(profile || ""), "<profile>")
+  const source = String(stderr || "");
+  const fatal = source.split(/\r?\n/).find(line => /FATAL|Check failed|Socket path too long|crashpad_handler/i.test(line));
+  const selected = fatal || source;
+  const rendered = (profile ? selected.replaceAll(String(profile), "<profile>") : selected)
     .replace(/https?:\/\/\S+/g, "<url>").replace(/[\u0000-\u001f\u007f]+/g, " ")
     .replace(/\s+/g, " ").trim();
-  return rendered ? rendered.slice(-320) : "none";
+  return rendered ? (fatal ? rendered.slice(0, 320) : rendered.slice(-320)) : "none";
 };
 
 // chromiumStartupDiagnostic distinguishes a failed child process from a live

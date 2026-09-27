@@ -269,10 +269,18 @@ def cleanup_databases(prep: Path, raw: str) -> None:
                PGUSER=unquote(parsed.username or ""), PGPASSWORD=unquote(parsed.password or ""),
                PGDATABASE=database, PGSSLMODE=parse_qs(parsed.query).get("sslmode", ["prefer"])[0])
     for file in sorted(prep.glob("database-*.json")):
+        if file.is_symlink():
+            raise ValueError("database inventory is a symlink")
         value = json.loads(file.read_text())
         name = value.get("database", "")
-        if not re.fullmatch(r"aicrm_test_(tpl|clone)_[0-9a-f]{16}_acceptance_test", name):
+        if (not re.fullmatch(r"aicrm_test_(tpl|clone)_[0-9a-f]{16}_acceptance_test", name)
+                or file.name != "database-" + name + ".json"):
             raise ValueError("unexpected database in preparation cleanup inventory")
+        owner = subprocess.run(["psql", "-X", "-Atqc",
+            "SELECT pg_get_userbyid(datdba)=current_user FROM pg_database WHERE datname='"+name+"'"],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=True, timeout=10)
+        if owner.stdout.strip() not in ("", "t"):
+            raise ValueError("inventoried database is not owned by the test account")
         subprocess.run(["psql", "-X", "-v", "ON_ERROR_STOP=1", "-qc", 'DROP DATABASE IF EXISTS "' + name + '"'],
                        env=env, stdout=subprocess.DEVNULL, check=True, timeout=30)
         file.unlink()

@@ -38,7 +38,8 @@ class QualityLaneTests(unittest.TestCase):
 
     def test_database_precheck_uses_owned_local_objects_and_never_special_parameter_privileges(self):
         url = "postgres://synthetic@localhost/aicrm_test_probe_acceptance_test?sslmode=disable"
-        with patch.dict(os.environ, {"AICRM_DATABASE_URL":url}), \
+        with tempfile.TemporaryDirectory() as prep, \
+             patch.dict(os.environ, {"AICRM_DATABASE_URL":url,"AICRM_TEST_PREP_DIR":prep}), \
              patch.object(quality_lanes, "postgres_16_ready", return_value=True), \
              patch.object(quality_lanes.subprocess, "run", return_value=subprocess.CompletedProcess([],0)) as run:
             self.assertTrue(quality_lanes.postgres_operations_ready())
@@ -49,6 +50,30 @@ class QualityLaneTests(unittest.TestCase):
         self.assertEqual(sum("DROP DATABASE" in command[-1] for command in commands), 2)
         self.assertNotIn("session_replication_role", rendered)
         self.assertNotIn("postgres://", rendered)
+
+    def test_database_probe_registers_before_create_and_retains_failed_drop(self):
+        with tempfile.TemporaryDirectory() as raw:
+            prep=Path(raw); seen=[]
+            def sql(args,**kwargs):
+                statement=args[-1];seen.append(statement)
+                if statement.startswith('CREATE DATABASE'):
+                    name=statement.split('"')[1]
+                    self.assertTrue((prep/('database-'+name+'.json')).is_file())
+                if statement.startswith('DROP DATABASE'):
+                    raise subprocess.TimeoutExpired(args,15)
+                return subprocess.CompletedProcess(args,0)
+            with patch.dict(os.environ,{'AICRM_DATABASE_URL':'postgres://role@localhost/aicrm_test_probe_acceptance_test','AICRM_TEST_PREP_DIR':raw}), \
+                 patch.object(quality_lanes,'postgres_16_ready',return_value=True), \
+                 patch.object(quality_lanes.subprocess,'run',side_effect=sql):
+                self.assertFalse(quality_lanes.postgres_operations_ready())
+            self.assertEqual(len(list(prep.glob('database-*.json'))),2)
+            self.assertEqual(sum(s.startswith('DROP DATABASE') for s in seen),2)
+
+    def test_database_probe_never_creates_without_attempt_inventory(self):
+        with patch.dict(os.environ,{'AICRM_DATABASE_URL':'postgres://role@localhost/aicrm_test_probe_acceptance_test'},clear=True), \
+             patch.object(quality_lanes,'postgres_16_ready',return_value=True), \
+             patch.object(quality_lanes.subprocess,'run') as sql:
+            self.assertFalse(quality_lanes.postgres_operations_ready());sql.assert_not_called()
 
     def test_timing_fingerprint_requires_exact_hosted_runner_image(self):
         base = {"GITHUB_ACTIONS": "true", "RUNNER_OS": "Linux", "RUNNER_ARCH": "X64"}

@@ -77,16 +77,81 @@ class CheckLifecycleTest(unittest.TestCase):
                     report=build/'domestic-main-checks'/('b'*40+'-'+suffix); report.mkdir()
                     release.atomic_json(directory/(suffix+'-attempt.json'), {'pid':pid,'status':'active',
                         'temporary':str(temporary),'report':str(report),'head_sha':'b'*40})
-                with patch.object(release,'_process_alive',side_effect=lambda pid:pid==10002), \
+                with patch.object(release,'_process_alive',return_value=False), \
                      patch.object(release.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'')):
                     recovered=release._recover_check_attempts(config)
-                self.assertEqual(len(recovered),1)
+                self.assertEqual(len(recovered),2)
                 self.assertFalse((work/'domestic-main-check-dead').exists())
-                self.assertTrue((work/'domestic-main-check-live').exists())
+                (work/'domestic-main-check-live').mkdir()
                 with patch.object(release,'_process_alive',return_value=False), \
-                     patch.object(release.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'go\n')):
-                    self.assertEqual(release._recover_check_attempts(config),[])
+                     patch.object(release.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'20001\n')):
+                    with self.assertRaisesRegex(release.CheckEnvironmentError,'live processes'):
+                        release._recover_check_attempts(config)
                 self.assertTrue((work/'domestic-main-check-live').exists())
+
+    def test_real_python_survivor_blocks_cleanup_and_next_check(self):
+        import sys
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw);work,build,policy,config=self.fixture(root)
+            directory=work/'domestic-main-check-orphan';directory.mkdir()
+            report=build/'domestic-main-checks'/('b'*40+'-orphan');report.mkdir()
+            worker=subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)'],cwd=directory)
+            try:
+                with patch.object(release.legacy,'BUILD_ROOT',build),release._locked(Path(config['lock'])):
+                    registry=release._lifecycle_directory(config)
+                    release.atomic_json(registry/'orphan-attempt.json',{'pid':99999999,'status':'active',
+                        'temporary':str(directory),'report':str(report),'head_sha':'b'*40})
+                    with patch.object(release.subprocess,'run',return_value=subprocess.CompletedProcess([],0,str(worker.pid)+'\n')):
+                        with self.assertRaises(release.CheckEnvironmentError):release._recover_check_attempts(config)
+                    self.assertTrue(directory.exists());self.assertIsNone(worker.poll())
+                    worker.terminate();worker.wait(timeout=10)
+                    with patch.object(release.subprocess,'run',return_value=subprocess.CompletedProcess([],1,'','')):
+                        self.assertEqual(len(release._recover_check_attempts(config)),1)
+                    self.assertFalse(directory.exists())
+            finally:
+                if worker.poll() is None:worker.terminate();worker.wait(timeout=10)
+
+    def test_live_controller_protects_all_attempts_before_any_reclamation(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw);work,build,policy,config=self.fixture(root)
+            with patch.object(release.legacy,'BUILD_ROOT',build),release._locked(Path(config['lock'])):
+                registry=release._lifecycle_directory(config)
+                for suffix,pid in [('first-dead',99999998),('last-live',os.getpid())]:
+                    temporary=work/('domestic-main-check-'+suffix);temporary.mkdir()
+                    report=build/'domestic-main-checks'/('b'*40+'-'+suffix);report.mkdir()
+                    release.atomic_json(registry/(suffix+'-attempt.json'),{'pid':pid,'status':'active',
+                        'temporary':str(temporary),'report':str(report),'head_sha':'b'*40})
+                with patch.object(release.subprocess,'run',return_value=subprocess.CompletedProcess([],1,'','')):
+                    with self.assertRaisesRegex(release.CheckEnvironmentError,'controller'):
+                        release._recover_check_attempts(config)
+                self.assertTrue((work/'domestic-main-check-first-dead').is_dir())
+
+    def test_short_scratch_registered_before_creation_and_reclaimed_on_interrupt(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw);work,build,policy,config=self.fixture(root)
+            report=build/'domestic-main-checks'/('b'*40+'-scratch');report.mkdir()
+            scratch=None
+            with patch.object(release.legacy,'BUILD_ROOT',build),release._locked(Path(config['lock'])):
+                with self.assertRaises(KeyboardInterrupt):
+                    with release._check_attempt_directory(config,report,policy,'b'*40):
+                        scratch=Path(config['_check_tmpdir'])
+                        record=json.loads(next((work/'check-lifecycle').glob('*-attempt.json')).read_text())
+                        self.assertEqual(record['scratch'],str(scratch));self.assertTrue(scratch.is_dir())
+                        self.assertLess(len(str(scratch).encode()),59)
+                        (scratch/'profile').mkdir();raise KeyboardInterrupt()
+                self.assertFalse(scratch.exists());self.assertNotIn('_check_tmpdir',config)
+
+    def test_cleanup_retains_registered_resources_while_build_children_survive(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw);work,build,policy,config=self.fixture(root)
+            temporary=work/'domestic-main-check-survivor';temporary.mkdir()
+            report=build/'domestic-main-checks'/('b'*40+'-survivor');report.mkdir()
+            record={'guard_build_processes':True,'temporary':str(temporary),'report':str(report),'head_sha':'b'*40}
+            with patch.object(release.legacy,'BUILD_ROOT',build),release._locked(Path(config['lock'])), \
+                 patch.object(release.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'20001\n')):
+                with self.assertRaisesRegex(release.CheckEnvironmentError,'live processes'):
+                    release._cleanup_attempt_record(config,work/'attempt.json',record)
+            self.assertTrue(temporary.is_dir())
 
     def test_capacity_blocks_before_work_and_lru_cache_keeps_recent_content(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -98,6 +163,10 @@ class CheckLifecycleTest(unittest.TestCase):
             with patch.object(release.shutil,'disk_usage',return_value=release.shutil._ntuple_diskusage(1000,900,100)):
                 with self.assertRaisesRegex(release.CheckEnvironmentError,'insufficient staging disk'):
                     release._check_capacity(config,work)
+            config['check_storage_capacity']=dict(config['check_capacity'],workspace_peak_bytes=1000)
+            with patch.object(release.shutil,'disk_usage',return_value=release.shutil._ntuple_diskusage(1000,900,100)):
+                with self.assertRaisesRegex(release.CheckEnvironmentError,'insufficient staging disk'):
+                    release._check_capacity(config,build,'check_storage_capacity')
             cache=build/'cache/go-build'; cache.mkdir(parents=True)
             old=cache/'old-d'; old.write_bytes(b'x'*8192); os.utime(old,(1,1))
             new=cache/'new-d'; new.write_bytes(b'y'*8192)
@@ -106,6 +175,21 @@ class CheckLifecycleTest(unittest.TestCase):
             self.assertFalse(old.exists()); self.assertTrue(new.exists())
             self.assertTrue(usage['go-build']['reused'])
             self.assertGreater(usage['go-build']['reclaimed_bytes'],0)
+
+    def test_missing_or_wrong_disk_blocks_before_root_disk_fallback(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw)
+            config={'check_storage_mount':raw,'check_storage_uuid':'expected','check_storage_paths':[raw]}
+            with patch.object(release.os.path,'ismount',return_value=False):
+                with self.assertRaisesRegex(release.CheckEnvironmentError,'fallback'):
+                    release._check_storage_mount(config)
+            with patch.object(release.os.path,'ismount',return_value=True), \
+                 patch.object(release.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'wrong\n')):
+                with self.assertRaisesRegex(release.CheckEnvironmentError,'UUID'):
+                    release._check_storage_mount(config)
+            with patch.object(release.os.path,'ismount',return_value=True), \
+                 patch.object(release.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'expected\n')):
+                self.assertEqual(release._check_storage_mount(config)['mode'],'data_disk')
 
     def test_cache_consolidation_verifies_bytes_and_retains_conflicting_old_entries(self):
         with tempfile.TemporaryDirectory() as raw:
