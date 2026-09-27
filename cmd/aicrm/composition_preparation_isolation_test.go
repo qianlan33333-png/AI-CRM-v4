@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
@@ -24,6 +27,11 @@ func TestCompositionPreparationDatabaseIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AICRM_TEST_PREP_DIR", directory)
+	t.Cleanup(func() {
+		if err := cleanupCompositionDatabases(directory, raw); err != nil {
+			t.Error(err)
+		}
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	first, cleanupFirst := preparedCompositionDatabase(t, ctx, raw)
@@ -96,13 +104,112 @@ func TestCompositionPreparationDatabaseIsolation(t *testing.T) {
 	if _, err = two.Exec(ctx, "INSERT INTO clone_isolation(value) VALUES('unaffected')"); err != nil {
 		t.Fatal("trigger leaked between databases")
 	}
-	// Template cleanup must occur after clone cleanups and closed application pools.
-	directory = testconfig.PreparationDirectory()
+}
+
+func TestCompositionPreparationCleanupUsesCreatingConnection(t *testing.T) {
+	raw, _ := platformconfig.DatabaseURL()
+	if raw == "" {
+		t.Skip("requires local synthetic PostgreSQL")
+	}
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AICRM_TEST_PREP_DIR", directory)
 	t.Cleanup(func() {
 		if err := cleanupCompositionDatabases(directory, raw); err != nil {
-			t.Fatal(err)
+			t.Error(err)
 		}
 	})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	_, cleanupClone := preparedCompositionDatabase(t, ctx, raw)
+	cleanupClone()
+	admin, err := pgxpool.New(ctx, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	// General fixture inventories share the attempt with composition templates.
+	fixture, err := testconfig.NewDatabaseName()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{fixture}.Sanitize()+" TEMPLATE template0"); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(directory, "database-*.json"))
+	if err != nil || len(files) != 2 {
+		t.Fatalf("expected a template and general fixture registration: %v", err)
+	}
+	var names []string
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), raw) {
+			t.Fatal("database connection escaped into preparation inventory")
+		}
+		var record compositionDatabasePreparation
+		if err = json.Unmarshal(data, &record); err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, record.Database)
+	}
+	// This is the installed smoke boundary: the actual connection came from a
+	// private input, while no global database URL exists at process teardown.
+	t.Setenv("AICRM_DATABASE_URL", "")
+	if err = cleanupCompositionDatabases(directory, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		var exists bool
+		if err = admin.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)", name).Scan(&exists); err != nil || exists {
+			t.Fatalf("registered database remained after cleanup: %v", err)
+		}
+	}
+	files, err = filepath.Glob(filepath.Join(directory, "database-*.json"))
+	if err != nil || len(files) != 0 {
+		t.Fatal("completed cleanup retained database registrations")
+	}
+}
+
+func TestCompositionPreparationCleanupRejectsChangedInventory(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := strings.Repeat("a", 64)
+	raw := "postgres://fixture@localhost/aicrm_test_cleanup"
+	if err := rememberCompositionCleanupContext(directory, raw, fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if err := rememberCompositionCleanupContext(directory, "postgres://other@localhost/aicrm_test_cleanup", fingerprint); err == nil {
+		t.Fatal("preparation accepted a different connection identity")
+	}
+	first, err := writeCompositionPreparation(directory, compositionDatabasePreparation{Database: "aicrm_test_tpl_0000000000000000_acceptance_test", Fingerprint: fingerprint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := writeCompositionPreparation(directory, compositionDatabasePreparation{Database: "aicrm_test_tpl_1111111111111111_acceptance_test", Fingerprint: strings.Repeat("b", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = cleanupCompositionDatabases(directory, ""); err == nil || !strings.Contains(err.Error(), "unsafe composition cleanup inventory") {
+		t.Fatal("mixed inventory was not rejected before connecting")
+	}
+	for _, file := range []string{first, second} {
+		if _, err = os.Stat(file); err != nil {
+			t.Fatal("cleanup partially removed invalid inventory")
+		}
+	}
+}
+
+func TestCompositionPreparationCleanupWithoutInventoryNeedsNoConnection(t *testing.T) {
+	if err := cleanupCompositionDatabases(t.TempDir(), ""); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestCompositionPreparationRejectsNonSyntheticDatabase(t *testing.T) {

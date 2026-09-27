@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -53,19 +54,48 @@ func TestMain(m *testing.M) {
 type compositionDatabasePreparation struct {
 	Database    string `json:"database"`
 	Fingerprint string `json:"fingerprint"`
+	Purpose     string `json:"purpose,omitempty"`
+}
+
+type compositionCleanupContext struct {
+	raw         string
+	fingerprint string
+}
+
+// Connection credentials stay in this process, never in preparation records.
+// The installed smoke supplies its connection through a private input file,
+// so the process environment is not the owner of that connection.
+var compositionCleanupContexts = struct {
+	sync.Mutex
+	byDirectory map[string]compositionCleanupContext
+}{byDirectory: make(map[string]compositionCleanupContext)}
+
+func rememberCompositionCleanupContext(directory, raw, fingerprint string) error {
+	compositionCleanupContexts.Lock()
+	defer compositionCleanupContexts.Unlock()
+	next := compositionCleanupContext{raw: raw, fingerprint: fingerprint}
+	if previous, ok := compositionCleanupContexts.byDirectory[directory]; ok && previous != next {
+		return fmt.Errorf("composition preparation connection identity changed")
+	}
+	compositionCleanupContexts.byDirectory[directory] = next
+	return nil
 }
 
 func compositionPreparationDirectory() (string, error) {
 	directory := testconfig.PreparationDirectory()
+	return directory, validateCompositionPreparationDirectory(directory)
+}
+
+func validateCompositionPreparationDirectory(directory string) error {
 	info, err := os.Lstat(directory)
 	if err != nil {
-		return "", err
+		return err
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !filepath.IsAbs(directory) || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 || !ok || int(stat.Uid) != os.Getuid() {
-		return "", fmt.Errorf("composition preparation requires a private check-owned directory")
+		return fmt.Errorf("composition preparation requires a private check-owned directory")
 	}
-	return directory, nil
+	return nil
 }
 
 func compositionSyntheticURL(raw string) (*url.URL, error) {
@@ -138,6 +168,9 @@ func preparedCompositionDatabase(t *testing.T, ctx context.Context, raw string) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = rememberCompositionCleanupContext(directory, raw, fingerprint); err != nil {
+		t.Fatal(err)
+	}
 	admin, err := pgxpool.New(ctx, raw)
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +217,7 @@ func preparedCompositionDatabase(t *testing.T, ctx context.Context, raw string) 
 		if err != nil {
 			fail(err)
 		}
-		if _, err = writeCompositionPreparation(directory, compositionDatabasePreparation{template, fingerprint}); err != nil {
+		if _, err = writeCompositionPreparation(directory, compositionDatabasePreparation{Database: template, Fingerprint: fingerprint}); err != nil {
 			fail(err)
 		}
 		if _, err = admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{template}.Sanitize()+" TEMPLATE template0"); err != nil {
@@ -222,7 +255,7 @@ func preparedCompositionDatabase(t *testing.T, ctx context.Context, raw string) 
 	if err != nil {
 		fail(err)
 	}
-	recordPath, err := writeCompositionPreparation(directory, compositionDatabasePreparation{clone, fingerprint})
+	recordPath, err := writeCompositionPreparation(directory, compositionDatabasePreparation{Database: clone, Fingerprint: fingerprint})
 	if err != nil {
 		fail(err)
 	}
@@ -269,17 +302,32 @@ func cleanupCompositionDatabases(directory, raw string) error {
 	if err != nil || len(records) == 0 {
 		return err
 	}
+	if err = validateCompositionPreparationDirectory(directory); err != nil {
+		return err
+	}
+	compositionCleanupContexts.Lock()
+	connection, captured := compositionCleanupContexts.byDirectory[directory]
+	compositionCleanupContexts.Unlock()
+	if captured {
+		raw = connection.raw
+	}
 	if _, err := compositionSyntheticURL(raw); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, raw)
-	if err != nil {
-		return err
+	if !captured {
+		connection.fingerprint, err = compositionPreparationFingerprint(raw)
+		if err != nil {
+			return err
+		}
 	}
-	defer pool.Close()
+	// Validate the complete inventory before deleting anything. General fixture
+	// registrations share this directory but intentionally have no fingerprint.
+	inventory := make([]compositionDatabasePreparation, 0, len(records))
 	for _, file := range records {
+		info, err := os.Lstat(file)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+			return fmt.Errorf("unsafe composition cleanup inventory")
+		}
 		data, err := os.ReadFile(file)
 		if err != nil {
 			return err
@@ -288,15 +336,30 @@ func cleanupCompositionDatabases(directory, raw string) error {
 		if err = json.Unmarshal(data, &record); err != nil {
 			return err
 		}
-		if !validCompositionDatabaseName(record.Database) {
+		if !validCompositionDatabaseName(record.Database) || filepath.Base(file) != "database-"+record.Database+".json" ||
+			(record.Fingerprint != "" && record.Fingerprint != connection.fingerprint) ||
+			(record.Fingerprint == "" && (record.Purpose != "fixture" || !strings.HasPrefix(record.Database, "aicrm_test_clone_"))) {
 			return fmt.Errorf("unsafe composition cleanup inventory")
 		}
+		inventory = append(inventory, record)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, raw)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	for index, record := range inventory {
 		if _, err = pool.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{record.Database}.Sanitize()); err != nil {
 			return err
 		}
-		if err = os.Remove(file); err != nil {
+		if err = os.Remove(records[index]); err != nil {
 			return err
 		}
 	}
+	compositionCleanupContexts.Lock()
+	delete(compositionCleanupContexts.byDirectory, directory)
+	compositionCleanupContexts.Unlock()
 	return nil
 }
