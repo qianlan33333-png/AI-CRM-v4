@@ -143,10 +143,9 @@ def _git(repo: Path, *args: str, timeout: int = 600, check: bool = True) -> str:
 
 
 def _source_blob(repo: Path, sha: str, path: str) -> bytes:
-    if _is_bare_repo(repo):
-        result = _run(["git", f"--git-dir={repo}", "show", f"{_sha(sha, 'source commit')}:{path}"])
-    else:
-        result = _run(["git", "-C", str(repo), "show", f"{_sha(sha, 'source commit')}:{path}"])
+    source = repo.resolve()
+    result = _run(["git", "-c", f"safe.directory={source}", "-C", str(source),
+                   "show", f"{_sha(sha, 'source commit')}:{path}"])
     return result.stdout.encode()
 
 

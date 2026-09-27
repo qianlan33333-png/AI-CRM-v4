@@ -100,6 +100,31 @@ class DomesticMainReleaseTests(unittest.TestCase):
             release._build_command({}, ["child"], cwd=Path("/"), check=False)
         self.assertEqual(run.call_args.kwargs["umask"], -1)
 
+    def test_source_blob_reads_exact_commit_from_bare_and_worktree_repositories(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bare, base, candidate, other = make_repository(root)
+            ordinary = root / "source"
+            linked = root / "linked"
+            subprocess.run(["git", f"--git-dir={bare}", "worktree", "add", "--detach",
+                            str(linked), candidate], check=True, stdout=subprocess.DEVNULL)
+
+            # The controller must read the requested commit's blob even when a
+            # worktree has unsaved edits and its current HEAD differs from it.
+            dirty = b"unsaved worktree content\n"
+            (ordinary / "main.txt").write_bytes(dirty)
+            (linked / "main.txt").write_bytes(dirty)
+            repositories = {"bare": bare, "ordinary": ordinary, "linked": linked}
+            for kind, repo in repositories.items():
+                with self.subTest(repository=kind):
+                    self.assertEqual(release._source_blob(repo, base, "main.txt"), b"main\n")
+                    self.assertEqual(release._source_blob(repo, candidate, "one.txt"), b"one\n")
+                    self.assertEqual(release._source_blob(repo, other, "two.txt"), b"two\n")
+                    with self.assertRaises(release.ReleaseError):
+                        release._source_blob(repo, "f" * 40, "main.txt")
+                    with self.assertRaises(release.ReleaseError):
+                        release._source_blob(repo, candidate, "missing-registered-file.txt")
+
     def test_check_report_prerequisite_probe_binds_real_git_base_and_head(self) -> None:
         # Execute the report's actual embedded probe and call expression. Only
         # sudo transport is replaced; env construction, the trusted prerequisite
