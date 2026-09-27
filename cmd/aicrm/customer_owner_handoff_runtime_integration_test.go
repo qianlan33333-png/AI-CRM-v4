@@ -632,15 +632,15 @@ func TestCustomerOwnerHandoffRiverSegmentsLocalOnly20000(t *testing.T) {
 		}
 	}()
 	deadline := time.Now().Add(150 * time.Second)
+	var completionState string
+	completed := false
 	for time.Now().Before(deadline) {
-		var updated, owners, jobs, effects int
-		err = native.QueryRow(ctx, `SELECT
-			(SELECT count(*) FROM customer_owner_handoff_lines WHERE batch_id=$1 AND state='local_updated'),
-			(SELECT count(*) FROM customer_local_owners WHERE source='owner_handoff_local_only'),
-			(SELECT count(*) FROM river_job WHERE kind='customer.owner-handoff.v1'),
-			(SELECT count(*) FROM external_effects WHERE kind='customer_owner_handoff')`, batch.ID).Scan(&updated, &owners, &jobs, &effects)
-		if err == nil && updated == handoffRows && owners == handoffRows && jobs == handoffRows/100 && effects == 0 {
-			return
+		// The last segment commits this projection with its line/owner writes.
+		// Poll the primary key; verify every original count once after completion.
+		err = native.QueryRow(ctx, `SELECT state FROM customer_owner_handoff_batches WHERE id=$1`, batch.ID).Scan(&completionState)
+		if err == nil && completionState == "completed" {
+			completed = true
+			break
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -653,5 +653,8 @@ func TestCustomerOwnerHandoffRiverSegmentsLocalOnly20000(t *testing.T) {
 		(SELECT count(*) FROM external_effects WHERE kind='customer_owner_handoff')`, batch.ID).Scan(&updated, &owners, &jobs, &effects); err != nil {
 		t.Fatal(err)
 	}
-	t.Fatalf("segment completion updated=%d owners=%d jobs=%d effects=%d", updated, owners, jobs, effects)
+	if completed && updated == handoffRows && owners == handoffRows && jobs == handoffRows/100 && effects == 0 {
+		return
+	}
+	t.Fatalf("segment completion state=%s updated=%d owners=%d jobs=%d effects=%d", completionState, updated, owners, jobs, effects)
 }
