@@ -195,6 +195,27 @@ func (r *Repository) ListServicePeriodMembers(ctx context.Context, query orderpo
 	return page, nil
 }
 
+func (r *Repository) CountServicePeriodMembers(ctx context.Context, productIDs []int64) (map[int64]int64, error) {
+	tx, err := platformpostgres.RequireTransaction(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `SELECT service_product_id,count(*) FROM order_service_entitlements WHERE service_product_id = ANY($1) GROUP BY service_product_id`, productIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := make(map[int64]int64, len(productIDs))
+	for rows.Next() {
+		var id, count int64
+		if err = rows.Scan(&id, &count); err != nil {
+			return nil, err
+		}
+		counts[id] = count
+	}
+	return counts, rows.Err()
+}
+
 func normalizedMemberGridQuery(query orderport.ServicePeriodMemberQuery) ([]orderport.MemberGridFilter, []orderport.MemberGridOrder, []orderport.MemberGridOrder) {
 	filters := append([]orderport.MemberGridFilter(nil), query.GridFilters...)
 	if query.RemainingDays != nil {

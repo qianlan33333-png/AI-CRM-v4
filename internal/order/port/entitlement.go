@@ -143,6 +143,9 @@ type AllianceCommand struct {
 type EntitlementService interface {
 	ListCustomerEntitlements(context.Context, int64, int32) (EntitlementPage, error)
 	ListServicePeriodMembers(context.Context, ServicePeriodMemberQuery) (ServicePeriodMemberPage, error)
+	// CountServicePeriodMembers returns the unfiltered member totals for the
+	// requested service products. Missing product IDs have a count of zero.
+	CountServicePeriodMembers(context.Context, []int64) (map[int64]int64, error)
 	// GetCustomerServicePeriodEntitlement is an exact, bounded public-state read.
 	// It avoids inferring a product row from a capped customer entitlement list.
 	GetCustomerServicePeriodEntitlement(context.Context, int64, int64) (Entitlement, bool, error)

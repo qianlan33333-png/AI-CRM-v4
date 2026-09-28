@@ -189,6 +189,10 @@ type memberGridPGEntitlements struct {
 	targetPage int
 }
 
+func (r *memberGridPGEntitlements) CountServicePeriodMembers(ctx context.Context, ids []int64) (map[int64]int64, error) {
+	return r.delegate.CountServicePeriodMembers(ctx, ids)
+}
+
 func (r *memberGridPGEntitlements) ListServicePeriodMembers(ctx context.Context, query orderport.ServicePeriodMemberQuery) (orderport.ServicePeriodMemberPage, error) {
 	page, err := r.delegate.ListServicePeriodMembers(ctx, query)
 	if err != nil {

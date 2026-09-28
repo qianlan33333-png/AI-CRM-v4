@@ -20,7 +20,11 @@ func TestProductUIAllowlistUsesDonorTemplateAndMountsDataPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, page := range []string{"products", "productForm", "spProducts", "spProductForm", "spProductData"} {
-		raw := "<!doctype html><body><div class=\"shell\"><template id=\"tpl\"><section data-page=\"" + page + "\">donor body</section></template></div></body>"
+		label := ""
+		if page == "spProducts" {
+			label = "已售卖数量"
+		}
+		raw := "<!doctype html><body><div class=\"shell\"><template id=\"tpl\"><section data-page=\"" + page + "\">donor body" + label + "</section></template></div></body>"
 		if err := os.WriteFile(filepath.Join(dist, "admin", page+".html"), []byte(raw), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -56,6 +60,11 @@ func TestProductUIAllowlistUsesDonorTemplateAndMountsDataPage(t *testing.T) {
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/admin/wechat-pay/products.html", nil))
 	if recorder.Code != http.StatusOK || rendered.page != "products" || !strings.Contains(rendered.body, "donor body") || rendered.assets.ProductCSS != "/product-assets/product-distribution.css" || rendered.assets.HostJS != "/product-assets/product-host.js" || rendered.assets.StandardHostJS != "/product-assets/standard-components-host.js" || len(rendered.assets.StandardCSS) != 5 || rendered.assets.StandardCSS[3] != "/product-assets/selection-dialog.css" || rendered.assets.StandardCSS[4] != "/product-assets/shared-detail-drawer.css" {
 		t.Fatalf("status=%d page=%q body=%q assets=%+v", recorder.Code, rendered.page, rendered.body, rendered.assets)
+	}
+	period := httptest.NewRecorder()
+	handler.ServeHTTP(period, httptest.NewRequest(http.MethodGet, "/admin/service-period-products", nil))
+	if period.Code != http.StatusOK || rendered.page != "spProducts" || !strings.Contains(rendered.body, "会员数量") || strings.Contains(rendered.body, "已售卖数量") {
+		t.Fatalf("period status=%d page=%q body=%q", period.Code, rendered.page, rendered.body)
 	}
 
 	recorder = httptest.NewRecorder()

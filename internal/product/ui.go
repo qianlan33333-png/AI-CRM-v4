@@ -197,7 +197,18 @@ func (h *productUI) template(page string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return donortemplate.Extract(string(raw))
+	body, err := donortemplate.Extract(string(raw))
+	if err != nil {
+		return "", err
+	}
+	if page == "spProducts" {
+		const oldLabel = "已售卖数量"
+		if strings.Count(body, oldLabel) != 1 {
+			return "", errors.New("service-period member label unavailable")
+		}
+		body = strings.Replace(body, oldLabel, "会员数量", 1)
+	}
+	return body, nil
 }
 
 type buildManifest struct {

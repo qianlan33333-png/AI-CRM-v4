@@ -6391,6 +6391,7 @@ components:
         lifecycle: {type: string, enum: [draft, enabled, disabled, archived]}
         enabled: {type: boolean}
         archived: {type: boolean}
+        member_count: {type: integer, format: int64, minimum: 0, description: "Unfiltered Order entitlement row count on admin list and detail reads; omitted from mutation responses."}
         version: {$ref: "#/components/schemas/PositiveID"}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}

@@ -556,6 +556,7 @@ export async function runAdminAdapterTests(): Promise<void> {
   try { orderDetailDto({ id: 12, record_origin: 'v1_history', historical_refunds: [{ order_id: 99, amount_minor: 1, order_amount_minor: 1, currency: 'CNY', status: 'refunded', reason: '' }] }); assert(false, 'mismatched historical refund accepted'); } catch { /* expected: mismatched order binding remains closed */ }
   assert(productPageDto({ id: 1, name: '商品', status: 'active', admin_projection: { ...productAdminProjection, status: 'active', enabled: true } }).tone === 'ok', 'product response mapping');
   assert(serviceProductPageDto({ id: 2, name: '周期', status: 'disabled', images: [], admin_projection: servicePeriodAdminProjection('disabled') }).tone === 'gray', 'service product response mapping');
+  assert(serviceProductPageDto({ id: 2, name: '周期', member_count: 93, images: [], admin_projection: servicePeriodAdminProjection('enabled') }).sold === '93', 'service product list displays authoritative member count');
   const couponProjection = couponPageDto({ name: '券', code: 'C', status: 'published', availability_status: 'active' });
   assert(couponProjection.status === 'published' && couponProjection.availabilityStatus === 'active' && couponProjection.tone === 'ok', 'coupon response mapping preserves lifecycle and availability separately');
   const imageRow = imagePageDto({ id: 11, file_name: 'a.png', enabled: false, original_url: '/api/admin/image-library/11/variants/original', thumb_320_url: '/api/admin/image-library/11/variants/thumb_320' });

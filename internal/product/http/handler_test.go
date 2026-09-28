@@ -171,6 +171,9 @@ type testMemberEntitlements struct {
 	page          orderport.ServicePeriodMemberPage
 	pages         []orderport.ServicePeriodMemberPage
 	queries       []orderport.ServicePeriodMemberQuery
+	counts        map[int64]int64
+	countIDs      []int64
+	countErr      error
 	remarkCmd     *orderport.RemarkCommand
 	remarkCalls   int
 	allianceCmd   *orderport.AllianceCommand
@@ -179,6 +182,10 @@ type testMemberEntitlements struct {
 
 func (stub *testMemberEntitlements) ListCustomerEntitlements(context.Context, int64, int32) (orderport.EntitlementPage, error) {
 	return orderport.EntitlementPage{}, nil
+}
+func (stub *testMemberEntitlements) CountServicePeriodMembers(_ context.Context, ids []int64) (map[int64]int64, error) {
+	stub.countIDs = append([]int64(nil), ids...)
+	return stub.counts, stub.countErr
 }
 func (stub *testMemberEntitlements) ListServicePeriodMembers(_ context.Context, query orderport.ServicePeriodMemberQuery) (orderport.ServicePeriodMemberPage, error) {
 	stub.mu.Lock()
@@ -573,6 +580,44 @@ func newHandlerForTest(t *testing.T) (*Handler, *testSecurity, *testCatalog, *te
 		t.Fatal(err)
 	}
 	return handler, security, catalog, lifecycle
+}
+
+func TestServicePeriodListCountsActualMembers(t *testing.T) {
+	handler, security, _, _ := newHandlerForTest(t)
+	service := handler.service.(*testServicePeriod)
+	second := service.product
+	second.ServiceProductID, second.ProductCode = 8, "sp-8"
+	service.page.Items = []productport.ServicePeriodProduct{service.product, second}
+	service.page.Total = 2
+	members := handler.members.(*testMemberEntitlements)
+	members.counts = map[int64]int64{7: 93}
+
+	list := httptest.NewRecorder()
+	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/admin/service-period-products", nil))
+	if list.Code != http.StatusOK || !reflect.DeepEqual(members.countIDs, []int64{7, 8}) || security.authCalls != 1 || security.csrfCalls != 0 {
+		t.Fatalf("list status=%d ids=%v auth=%d csrf=%d body=%s", list.Code, members.countIDs, security.authCalls, security.csrfCalls, list.Body.String())
+	}
+	var result struct {
+		Items []struct {
+			MemberCount *int64 `json:"member_count"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &result); err != nil || len(result.Items) != 2 || result.Items[0].MemberCount == nil || *result.Items[0].MemberCount != 93 || result.Items[1].MemberCount == nil || *result.Items[1].MemberCount != 0 {
+		t.Fatalf("list decode=%v body=%s", err, list.Body.String())
+	}
+
+	detail := httptest.NewRecorder()
+	handler.ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/api/admin/service-period-products/7", nil))
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"member_count":93`) {
+		t.Fatalf("detail status=%d body=%s", detail.Code, detail.Body.String())
+	}
+
+	members.countErr = errors.New("count unavailable")
+	failed := httptest.NewRecorder()
+	handler.ServeHTTP(failed, httptest.NewRequest(http.MethodGet, "/api/admin/service-period-products", nil))
+	if failed.Code == http.StatusOK || strings.Contains(failed.Body.String(), `"member_count":0`) {
+		t.Fatalf("count failure was hidden: status=%d body=%s", failed.Code, failed.Body.String())
+	}
 }
 
 func TestExternalPushTestTimelineReadsStatusAndDoesNotClaimDelivery(t *testing.T) {

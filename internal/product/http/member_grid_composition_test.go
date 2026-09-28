@@ -27,6 +27,9 @@ type compositionEntitlements struct {
 func (s *compositionEntitlements) ListCustomerEntitlements(context.Context, int64, int32) (orderport.EntitlementPage, error) {
 	return orderport.EntitlementPage{}, nil
 }
+func (s *compositionEntitlements) CountServicePeriodMembers(context.Context, []int64) (map[int64]int64, error) {
+	return map[int64]int64{}, nil
+}
 func (s *compositionEntitlements) GetCustomerServicePeriodEntitlement(context.Context, int64, int64) (orderport.Entitlement, bool, error) {
 	return orderport.Entitlement{}, false, nil
 }

@@ -17,6 +17,7 @@ import (
 type EntitlementStore interface {
 	ListCustomerEntitlements(context.Context, int64, int32) (orderport.EntitlementPage, error)
 	ListServicePeriodMembers(context.Context, orderport.ServicePeriodMemberQuery) (orderport.ServicePeriodMemberPage, error)
+	CountServicePeriodMembers(context.Context, []int64) (map[int64]int64, error)
 	GetCustomerServicePeriodEntitlement(context.Context, int64, int64) (orderport.Entitlement, bool, error)
 	FindEntitlementReceipt(context.Context, [32]byte) (orderport.Entitlement, [32]byte, string, bool, error)
 	UpdateEntitlementRemark(context.Context, orderport.RemarkCommand, [32]byte, [32]byte, time.Time) (orderport.Entitlement, error)
@@ -72,6 +73,36 @@ func (s *EntitlementApplication) ListServicePeriodMembers(ctx context.Context, q
 		return readErr
 	})
 	return page, err
+}
+
+func (s *EntitlementApplication) CountServicePeriodMembers(ctx context.Context, productIDs []int64) (map[int64]int64, error) {
+	if s == nil || len(productIDs) == 0 || len(productIDs) > 100 {
+		return nil, orderport.ErrConflict
+	}
+	counts := make(map[int64]int64, len(productIDs))
+	for _, id := range productIDs {
+		if id < 1 {
+			return nil, orderport.ErrConflict
+		}
+		counts[id] = 0
+	}
+	err := s.uow.Within(ctx, func(txctx context.Context) error {
+		read, err := s.store.CountServicePeriodMembers(txctx, productIDs)
+		if err != nil {
+			return err
+		}
+		for id, count := range read {
+			if _, requested := counts[id]; !requested || count < 0 {
+				return orderport.ErrConflict
+			}
+			counts[id] = count
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return counts, nil
 }
 
 func validMemberGridFilters(query orderport.ServicePeriodMemberQuery) bool {

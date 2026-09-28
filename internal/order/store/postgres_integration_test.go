@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -40,6 +41,47 @@ func nativeCommand(key string) orderport.CreateCommand {
 		Items:        []domain.ItemSnapshot{{LineNo: 1, ProductCode: "course", ProductName: "课程", UnitAmountMinor: 2500, Quantity: 1, LineAmountMinor: 2500}},
 		RecordOrigin: domain.RecordOriginNative,
 	}}
+}
+
+func TestPostgreSQLCountServicePeriodMembersIncludesExpiredAndEmptyProducts(t *testing.T) {
+	native, cleanup := orderIntegrationPool(t)
+	defer cleanup()
+	ctx := context.Background()
+	wrapper, err := platformpostgres.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uow, err := platformpostgres.NewUnitOfWork(wrapper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := orderapp.NewEntitlementApplication(uow, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for index, row := range []struct {
+		productID int64
+		status    string
+	}{{991, "active"}, {991, "expired"}, {992, "active"}} {
+		var customerID int64
+		if err = native.QueryRow(ctx, `INSERT INTO customers DEFAULT VALUES RETURNING id`).Scan(&customerID); err != nil {
+			t.Fatal(err)
+		}
+		key := fmt.Sprintf("count-member-%d", index)
+		digest := sha256.Sum256([]byte(key))
+		if _, err = native.Exec(ctx, `INSERT INTO order_service_entitlements(source_system,source_key,customer_id,service_product_id,product_name,status,start_at,end_at,remark,source_digest,created_at,updated_at) VALUES('test',$1,$2,$3,'周期商品',$4,$5,$6,'',$7,$5,$5)`, key, customerID, row.productID, row.status, now.Add(-time.Hour), now.Add(time.Hour), digest[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	counts, err := app.CountServicePeriodMembers(ctx, []int64{991, 992, 993})
+	if err != nil || counts[991] != 2 || counts[992] != 1 || counts[993] != 0 || len(counts) != 3 {
+		t.Fatalf("counts=%v err=%v", counts, err)
+	}
 }
 
 func TestPostgreSQLCustomerScopedReferenceReadDoesNotLeak(t *testing.T) {

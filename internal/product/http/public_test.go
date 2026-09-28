@@ -579,6 +579,9 @@ func (stub servicePeriodEntitlementStub) ListCustomerEntitlements(_ context.Cont
 func (servicePeriodEntitlementStub) ListServicePeriodMembers(context.Context, orderport.ServicePeriodMemberQuery) (orderport.ServicePeriodMemberPage, error) {
 	return orderport.ServicePeriodMemberPage{}, errors.New("unused")
 }
+func (servicePeriodEntitlementStub) CountServicePeriodMembers(context.Context, []int64) (map[int64]int64, error) {
+	return nil, errors.New("unused")
+}
 func (stub servicePeriodEntitlementStub) GetCustomerServicePeriodEntitlement(_ context.Context, customerID, productID int64) (orderport.Entitlement, bool, error) {
 	if customerID != 11 {
 		return orderport.Entitlement{}, false, errors.New("wrong customer")

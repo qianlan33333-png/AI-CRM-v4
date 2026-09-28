@@ -159,6 +159,9 @@ func (testEntitlements) ListCustomerEntitlements(context.Context, int64, int32) 
 func (testEntitlements) ListServicePeriodMembers(context.Context, orderport.ServicePeriodMemberQuery) (orderport.ServicePeriodMemberPage, error) {
 	return orderport.ServicePeriodMemberPage{Items: []orderport.Entitlement{}}, nil
 }
+func (testEntitlements) CountServicePeriodMembers(context.Context, []int64) (map[int64]int64, error) {
+	return map[int64]int64{}, nil
+}
 func (testEntitlements) GetCustomerServicePeriodEntitlement(context.Context, int64, int64) (orderport.Entitlement, bool, error) {
 	return orderport.Entitlement{}, false, nil
 }

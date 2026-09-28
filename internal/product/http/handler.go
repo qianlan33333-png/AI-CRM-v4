@@ -528,6 +528,22 @@ func (h *Handler) serviceRoot(w http.ResponseWriter, r *http.Request) {
 			resultError(w, err)
 			return
 		}
+		counts := map[int64]int64{}
+		if len(page.Items) > 0 {
+			if h.members == nil {
+				resultError(w, productapp.ErrUnavailable)
+				return
+			}
+			ids := make([]int64, 0, len(page.Items))
+			for _, item := range page.Items {
+				ids = append(ids, int64(item.ServiceProductID))
+			}
+			counts, err = h.members.CountServicePeriodMembers(r.Context(), ids)
+			if err != nil {
+				resultError(w, err)
+				return
+			}
+		}
 		items := make([]servicePeriodResponse, 0, len(page.Items))
 		for _, item := range page.Items {
 			response, responseErr := h.servicePeriodResponse(r.Context(), item)
@@ -535,6 +551,8 @@ func (h *Handler) serviceRoot(w http.ResponseWriter, r *http.Request) {
 				resultError(w, responseErr)
 				return
 			}
+			count := counts[int64(item.ServiceProductID)]
+			response.MemberCount = &count
 			items = append(items, response)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": page.OK, "items": items, "total": page.Total, "limit": page.Limit, "offset": page.Offset})
@@ -667,6 +685,17 @@ func (h *Handler) serviceDetail(w http.ResponseWriter, r *http.Request, id int64
 			resultError(w, responseErr)
 			return
 		}
+		if h.members == nil {
+			resultError(w, productapp.ErrUnavailable)
+			return
+		}
+		counts, countErr := h.members.CountServicePeriodMembers(r.Context(), []int64{id})
+		if countErr != nil {
+			resultError(w, countErr)
+			return
+		}
+		count := counts[id]
+		response.MemberCount = &count
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "product": response})
 	case http.MethodPut:
 		principal, ok := h.write(w, r)
@@ -1909,6 +1938,7 @@ func productResponseFrom(value productport.Product) (productResponse, error) {
 type servicePeriodResponse struct {
 	productport.ServicePeriodProduct
 	DistributionPolicy distributionPolicyResponse `json:"distribution_policy"`
+	MemberCount        *int64                     `json:"member_count,omitempty"`
 }
 
 func (h *Handler) servicePeriodResponse(ctx context.Context, value productport.ServicePeriodProduct) (servicePeriodResponse, error) {
