@@ -11,6 +11,7 @@ import governance_impact
 import impact_selection
 import go_affected_graph
 import commerce_checks
+import period_member_checks
 import os
 
 SCHEMA = 1
@@ -29,6 +30,8 @@ POLICY_FILES = (
     "scripts/ci/affected_shadow.py",
     "scripts/ci/go_affected_graph.py",
     "scripts/ci/commerce_checks.py",
+    "scripts/ci/period_member_checks.py",
+    "scripts/ci/cmd_test_groups.py",
     "scripts/ci/browser_npm_dependencies.mjs",
     "scripts/ci/check_preparation.py",
     "scripts/ci/verification.py",
@@ -40,6 +43,8 @@ EXECUTABLE_POLICY_FILES = {
     "scripts/dev_preflight.py", "scripts/ci/affected_plan.py", "scripts/ci/impact_selection.py",
     "scripts/ci/governance_impact.py", "scripts/ci/quality_lanes.py", "scripts/ci/affected_shadow.py",
     "scripts/ci/go_affected_graph.py", "scripts/ci/commerce_checks.py",
+    "scripts/ci/period_member_checks.py",
+    "scripts/ci/cmd_test_groups.py",
     "scripts/ci/check_preparation.py", "scripts/ci/verification.py",
 }
 POLICY_PREFIXES = (".github/workflows/", "docs/governance/", "scripts/ci/")
@@ -117,6 +122,8 @@ def planner_policy_fingerprint() -> str:
     """Hash the planner and selector code that actually produced this plan."""
     files = (Path(__file__).resolve(), Path(impact_selection.__file__).resolve(),
              Path(go_affected_graph.__file__).resolve(), Path(commerce_checks.__file__).resolve(),
+             Path(period_member_checks.__file__).resolve(),
+             Path(__file__).with_name("cmd_test_groups.py"),
              Path(__file__).with_name("quality_lanes.py"), Path(__file__).with_name("check_preparation.py"),
              Path(__file__).with_name("browser_npm_dependencies.mjs"))
     entries = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
@@ -290,6 +297,7 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
 
     report = None
     commerce = None
+    period_member = None
     analysis_error = None
     # POLICY_FILES contribute to the trace fingerprint, while only executable
     # gate/selector policy changes force the trusted full fallback. Human-facing
@@ -335,12 +343,17 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
             candidate, candidate_packages = package_candidate(report, graph_result, paths, policy_changed)
             commerce = (commerce_checks.selection(root, base_sha, head_sha, paths, graph_result)
                         if not policy_changed else None)
+            period_member = (period_member_checks.selection(root, base_sha, head_sha, paths, graph_result)
+                             if not policy_changed else None)
             if commerce is not None:
                 candidate = commerce
+            if period_member is not None:
+                candidate = period_member
             # Policy changes always use the trusted full gate. The first commerce
             # profile remains shadow-only until the release desk pins its
             # verified planner fingerprint after full/result comparison.
             enforced = (full_selection("trusted-policy-change-fallback") if policy_changed
+                        else period_member if period_member is not None and period_member.get("verified_scope") is True and os.environ.get("AICRM_VERIFIED_PERIOD_MEMBER_POLICY") == planner_policy_fingerprint()
                         else commerce if commerce is not None and os.environ.get("AICRM_VERIFIED_COMMERCE_POLICY") == planner_policy_fingerprint()
                         else impact_selection.select(report))
         except Exception as error:
@@ -376,7 +389,8 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
                                   if graph_valid and isinstance(graph_result, dict) else candidate_packages),
         "enforced": normalize_selection(enforced),
         "policy_changed": policy_changed,
-        "business_assessment": (commerce_checks.business_evidence(commerce, graph_result, paths)
+        "business_assessment": (period_member_checks.business_evidence(graph_result)
+                                if period_member is not None else commerce_checks.business_evidence(commerce, graph_result, paths)
                                 if commerce is not None else {
                                     "status": "requires_review",
                                     "changed_paths": paths,

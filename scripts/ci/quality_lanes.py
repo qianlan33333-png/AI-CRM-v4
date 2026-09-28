@@ -227,6 +227,29 @@ def replace_full_backend_test_with_packages(commands_: list[list[str]], packages
     return result
 
 
+def period_member_backend_commands(commands_: list[list[str]], packages: list[str], report_dir: Path) -> list[list[str]]:
+    """Keep complete Go suites but split the large composition package by tests."""
+    cmd_package = next((item for item in packages if item.endswith("/cmd/aicrm")), None)
+    if cmd_package is None:
+        raise ValueError("period member profile requires cmd/aicrm in the current graph")
+    focused = replace_full_backend_test_with_packages(commands_, packages)
+    other = sorted(set(packages) - {cmd_package})
+    if not other:
+        raise ValueError("period member profile has no other affected Go packages")
+    full_test = affected_package_test_command(packages)
+    grouped = [sys.executable, "scripts/ci/cmd_test_groups.py", "--mode", "run",
+               "--report-dir", str(report_dir / "cmd-test-groups")]
+    result = []
+    for command in focused:
+        if command == full_test:
+            result.extend([affected_package_test_command(other), grouped])
+        else:
+            result.append(command)
+    if grouped not in result:
+        raise ValueError("period member backend did not replace the cmd/aicrm test suite")
+    return result
+
+
 def _run_policy_fingerprint() -> str | None:
     ci_dir = str(ROOT / "scripts/ci")
     if ci_dir not in sys.path:
@@ -540,6 +563,22 @@ def run_recorded(command: list[str], env: dict[str, str] | None, lane: str,
                 code = completed.returncode
                 if code:
                     raise subprocess.CalledProcessError(code, command)
+                if any(value.endswith("/cmd_test_groups.py") for value in command) and report_dir is not None:
+                    summary = json.loads((report_dir / "cmd-test-groups" / "summary.json").read_text())
+                    if summary.get("status") != "passed" or summary.get("backend_tests", 0) < 1:
+                        raise ValueError("grouped cmd/aicrm tests lack a passing receipt")
+                    execution["cmd_test_groups"] = summary
+                    module_match = re.search(r"(?m)^module[ \t]+([^\s]+)", (ROOT / "go.mod").read_text())
+                    if module_match is None:
+                        raise ValueError("Go module path unavailable for grouped cmd receipt")
+                    cmd_import = module_match.group(1) + "/cmd/aicrm"
+                    required = execution.get("required_go_packages", [])
+                    if cmd_import in required:
+                        raise ValueError("grouped cmd/aicrm package already ran in a whole-package suite")
+                    execution["required_go_packages"] = sorted([*required, cmd_import])
+                    execution["required_packages"] = len(execution["required_go_packages"])
+                    execution["completed_packages"] = execution.get("completed_packages", 0) + 1
+                    execution["completed_tests"] = execution.get("completed_tests", 0) + summary["backend_tests"]
                 if "browser" in command and report_dir is not None:
                     browser_log = report_dir / "browser-execution.log"
                     if browser_log.is_file():
@@ -717,6 +756,28 @@ def focused_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[li
     return commands(lane, report_dir)
 
 
+def period_member_frontend_commands(report_dir: Path, checks: list[dict]) -> list[list[str]]:
+    """Validate the response schema, generated client, adapter and actual page."""
+    import period_member_checks
+    expected = set(period_member_checks.FRONTEND_CHECKS)
+    selected = {check.get("path") for check in checks if check.get("lane") == "frontend"}
+    if selected != expected or len(selected) != len(expected):
+        raise ValueError("period member frontend checks differ from the reviewed contract")
+    focused = focused_commands("frontend", report_dir, checks)
+    return [["npm", "run", "orval:check"],
+            ["node", "scripts/ci/generated_clients_contract.mjs"],
+            ["npm", "run", "build", "--silent"], *focused]
+
+
+def period_member_browser_commands(report_dir: Path, checks: list[dict]) -> list[list[str]]:
+    import period_member_checks
+    expected = set(period_member_checks.BROWSER_CHECKS)
+    selected = {(check.get("path"), check.get("test")) for check in checks if check.get("lane") == "browser"}
+    if selected != expected or len(selected) != len(expected):
+        raise ValueError("period member browser journeys differ from the reviewed contract")
+    return focused_commands("browser", report_dir, checks)
+
+
 def lane_environment(lane: str, report_dir: Path | None) -> dict[str, str]:
     env = dict(os.environ)
     if lane == "browser":
@@ -728,7 +789,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lane", choices=LANES)
     parser.add_argument("--report-dir", type=Path)
-    parser.add_argument("--profile", choices=("full", "tooling", "public-commerce-v1"), default="full")
+    parser.add_argument("--profile", choices=("full", "tooling", "public-commerce-v1", "period-member-read-v1"), default="full")
     parser.add_argument("--focus-checks-json", default=os.environ.get("AICRM_CI_FOCUS_CHECKS", ""))
     parser.add_argument("--focus-packages-json", default=os.environ.get("AICRM_CI_FOCUS_PACKAGES", ""))
     parser.add_argument("--resume-commands-json", default="[]")
@@ -772,7 +833,7 @@ def main() -> int:
                 raise ValueError("focused check and package lists must be JSON arrays")
             if packages and checks:
                 raise ValueError("package focus and named-check focus cannot be combined")
-            if packages and (args.lane != "backend" or args.profile not in {"full", "public-commerce-v1"}):
+            if packages and (args.lane != "backend" or args.profile not in {"full", "public-commerce-v1", "period-member-read-v1"}):
                 raise ValueError("affected package focus is only valid for the full backend lane")
             if args.profile == "tooling":
                 if args.lane != "preflight":
@@ -783,10 +844,18 @@ def main() -> int:
                     raise ValueError("commerce backend requires the complete affected package inventory")
                 lane_commands = commerce_commands(args.lane, args.report_dir, checks)
             else:
-                lane_commands = (focused_commands(args.lane, args.report_dir, checks)
+                lane_commands = (period_member_frontend_commands(args.report_dir, checks)
+                                 if args.profile == "period-member-read-v1" and args.lane == "frontend" else
+                                 period_member_browser_commands(args.report_dir, checks)
+                                 if args.profile == "period-member-read-v1" and args.lane == "browser" else
+                                 focused_commands(args.lane, args.report_dir, checks)
                                  if checks and args.lane != "preflight" else commands(args.lane, args.report_dir))
+            if args.profile == "period-member-read-v1" and args.lane == "backend" and not packages:
+                raise ValueError("period member backend requires the current Go package closure")
             if packages:
-                lane_commands = replace_full_backend_test_with_packages(lane_commands, packages)
+                lane_commands = (period_member_backend_commands(lane_commands, packages, args.report_dir)
+                                 if args.profile == "period-member-read-v1" else
+                                 replace_full_backend_test_with_packages(lane_commands, packages))
             execution["required_commands"] = len(lane_commands)
             execution["required_packages"] = len(packages)
             for command in lane_commands:

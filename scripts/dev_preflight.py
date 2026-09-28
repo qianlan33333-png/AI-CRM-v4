@@ -233,7 +233,7 @@ class Preflight:
                 or not isinstance(checks, list) or any(not isinstance(check, dict) for check in checks)
                 or not isinstance(packages, list) or any(not isinstance(item, str) or not item for item in packages)
                 or mode not in {"full", "targeted"}
-                or candidate_profile not in {"full", "tooling", "documentation", "affected", "affected-packages"}
+                or candidate_profile not in {"full", "tooling", "documentation", "affected", "affected-packages", "period-member-read-v1"}
                 or candidate_profile == "tooling" and (lanes != ["preflight"] or mode != "targeted")):
             raise ValueError("affected candidate selection is malformed")
 
@@ -269,7 +269,11 @@ class Preflight:
                 quality_profile = "tooling" if candidate_profile == "tooling" else "full"
                 command.extend(["--profile", quality_profile])
             lane_checks = [check for check in checks if check.get("lane") == lane]
+            if candidate_profile == "period-member-read-v1" and lane in {"frontend", "browser"}:
+                command.extend(["--profile", "period-member-read-v1"])
             if mode == "targeted" and lane == "backend" and packages:
+                if candidate_profile == "period-member-read-v1":
+                    command.extend(["--profile", "period-member-read-v1"])
                 command.extend(["--focus-packages-json", json.dumps(sorted(set(packages)), separators=(",", ":"))])
                 execution_scope = {"kind": "full-package-suites", "packages": sorted(set(packages))}
             elif mode == "targeted" and lane != "preflight" and lane != "backend" and lane_checks:
