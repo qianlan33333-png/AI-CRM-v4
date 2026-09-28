@@ -157,6 +157,10 @@
 .product-payment-fields textarea { min-height: 110px; resize: vertical; }
 .product-payment-fields input,
 .product-payment-fields select { min-height: 44px !important; height: 44px; }
+.product-payment-channel-field button { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 44px; padding: 10px 13px; border: 1px solid #D0D5DD; border-radius: 10px; background: #fff; color: #1D2939; font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.product-payment-channel-field button span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.product-payment-channel-field button span:last-child { flex: none; color: #3370FF; font-weight: 700; }
+.product-payment-channel-field button:focus-visible { outline: none; border-color: #3370FF; box-shadow: 0 0 0 3px rgba(51,112,255,.12); }
 .product-payment-param-row input { min-height: 44px !important; height: 44px; }
 [data-product-purchase-redirect] { border: 1px solid #E7EBF2; border-radius: 16px; padding: 18px; }
 .product-payment-fields input:focus,

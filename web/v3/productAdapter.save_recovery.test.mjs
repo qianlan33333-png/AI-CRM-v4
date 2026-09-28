@@ -48,7 +48,10 @@ async function verifyDefaultPolicyAtActualCreateAlias() {
           const body = JSON.parse(String(init.body || '{}'));
           return reply({ product_id: 201, product_kind: 'wechat_pay', ...body, revision: 1, configuration_reference: '', custom_params: JSON.parse(body.custom_params), custom_params_json: body.custom_params, updated_at: '2026-09-08T00:01:00Z' });
         }
-        if (url.pathname === '/api/admin/channels') return reply({ items: [{ id: 17, channel_name: '付款后添加企微', channel_code: 'paid-lead', status: 'active' }, { id: 18, channel_name: '已归档渠道', channel_code: 'archived', status: 'archived' }], total: 2 });
+        if (url.pathname === '/api/admin/channels') {
+          if (url.searchParams.get('status') === 'active') return reply({ channels: url.searchParams.get('q') ? [{ id: 61, channel_name: '99 元付款+黄小璨企微', channel_code: '2233444', status: 'active' }] : [{ id: 17, channel_name: '付款后添加企微', channel_code: 'paid-lead', status: 'active' }], next_cursor: '' });
+          return reply({ items: [{ id: 17, channel_name: '付款后添加企微', channel_code: 'paid-lead', status: 'active' }, { id: 18, channel_name: '已归档渠道', channel_code: 'archived', status: 'archived' }], total: 2 });
+        }
         if (url.pathname === '/api/admin/wecom/tags') return reply({ read_model_status: 'ready', groups: [], items: [], count: 0, total_tags: 0, tag_limit: 1000 });
         if (url.pathname === '/api/admin/image-library' || url.pathname === '/api/admin/attachment-library' || url.pathname === '/api/admin/mini-program-library' || url.pathname === '/api/admin/wecom/tag-groups' || url.pathname === '/api/admin/questionnaires' || url.pathname === '/api/admin/customers' || url.pathname === '/api/admin/orders' || url.pathname === '/api/admin/service-period-products' || url.pathname === '/api/admin/coupons') return reply({ items: [], total: 0, has_more: false });
         if (url.pathname === '/api/admin/config') return reply({ categories: [] });
@@ -64,7 +67,8 @@ async function verifyDefaultPolicyAtActualCreateAlias() {
   const policy = await waitFor(() => dom.window.document.querySelector('[data-distribution-policy]'), 'actual ordinary create alias must mount Product distribution controls');
   assert.equal(policy.querySelector('[data-distribution-policy-enabled]').checked, false, 'actual ordinary create alias starts with a disabled Product policy');
   const leadChannels = dom.window.document.querySelector('[data-product-purchase-lead-channel]');
-  assert.deepEqual([...leadChannels.options].map((option) => [option.value, option.textContent]), [['', '不配置引流渠道码'], ['17', '付款后添加企微']], 'new Product action must list active Channel resources and exclude archived choices');
+  assert.equal(leadChannels.type, 'hidden', 'Product keeps the selected Channel ID in its own form draft');
+  assert.equal(dom.window.document.querySelector('[data-product-purchase-channel-label]').textContent, '请选择渠道码');
   const pushPanel = await waitFor(() => dom.window.document.querySelector('[data-product-parity-push]'), 'new Product must mount the same external-push panel as edit');
   assert.equal(pushPanel.querySelector('[data-product-parity-push-url]')?.disabled, false, 'new Product external-push fields are editable before the first save');
   const pushEnabled = pushPanel.querySelector('[data-product-parity-push-enabled]');
@@ -85,14 +89,24 @@ async function verifyDefaultPolicyAtActualCreateAlias() {
   save.click();
   await waitFor(() => dom.window.document.querySelector('#fb-toast')?.textContent.includes('请选择引流渠道码'), 'QR action without a Channel must show an actionable validation message');
   assert.equal(calls.filter((call) => call.path === '/api/v1/products' && call.method === 'POST').length, 0, 'missing QR Channel must not send an invalid Product command');
-  leadChannels.value = '17'; leadChannels.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+  dom.window.document.querySelector('[data-product-purchase-channel-open]').click();
+  const channelPicker = await waitFor(() => dom.window.document.querySelector('[data-v3-selection-session="channel"]'), 'new Product opens the shared selector dialog');
+  const search = channelPicker.querySelector('[data-v3-picker-search-input]');
+  search.value = '99 元付款+黄小璨企微';
+  search.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+  channelPicker.querySelector('[data-v3-channel-search]').click();
+  const laterChannel = await waitFor(() => channelPicker.querySelector('[data-v3-channel-key$=":61"]'), 'search must find a Channel absent from the initial 50-row product catalog');
+  laterChannel.click();
+  channelPicker.querySelector('[data-v3-channel-confirm]').click();
+  assert.equal(leadChannels.value, '61', 'confirmation updates only the Product form draft');
+  assert.equal(dom.window.document.querySelector('[data-product-purchase-channel-label]').textContent, '99 元付款+黄小璨企微');
   save.click();
   await waitFor(() => calls.filter((call) => call.path === '/api/v1/products' && call.method === 'POST').length === 1, 'actual ordinary create alias must submit the first Product command');
   const create = calls.find((call) => call.path === '/api/v1/products' && call.method === 'POST');
   assert.deepEqual(JSON.parse(create.body).distribution_policy, { enabled: false, commission_rate_basis_points: 0, wait_days: 7, version: 0 }, 'actual ordinary create alias must atomically submit the default Product policy');
   assert.equal(JSON.parse(create.body).admin_projection.enabled, true, 'new Product is enabled by default in its first subject command');
   assert.equal(JSON.parse(create.body).admin_projection.status, 'active', 'new Product starts in the enabled lifecycle');
-  assert.equal(JSON.parse(create.body).admin_projection.lead_channel_id, 17, 'new Product action must persist the selected Channel resource');
+  assert.equal(JSON.parse(create.body).admin_projection.lead_channel_id, 61, 'new Product action must persist the searched Channel resource');
   await waitFor(() => calls.some((call) => call.path === '/api/admin/wechat-pay/products/201/external-push' && call.method === 'PUT'), 'first Product save must persist the parity external-push draft after receiving its ID');
   const pushWrite = calls.find((call) => call.path === '/api/admin/wechat-pay/products/201/external-push' && call.method === 'PUT');
   assert.deepEqual(JSON.parse(pushWrite.body), { enabled: true, webhook_url: 'https://hooks.example.test/new-product', push_type: 'paid_notify', expires_at_ts: null, day: null, frequency: null, remark: '', custom_params: '{}', expected_revision: 0 });

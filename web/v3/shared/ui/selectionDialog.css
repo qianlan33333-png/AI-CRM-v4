@@ -175,8 +175,8 @@
 }
 
 
-/* The staff picker is V3-owned; no frozen staff-picker layout is reused here. */
-[data-v3-selection-session="staff"].aicrm-v3-staff-picker-mask {
+/* Staff and Channel share the V3 selector presentation, not a business scope. */
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]).aicrm-v3-staff-picker-mask {
   position: fixed;
   z-index: 10020;
   inset: 0;
@@ -186,7 +186,7 @@
   background: rgb(15 23 42 / 48%);
 }
 
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker {
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker {
   box-sizing: border-box;
   position: relative;
   inset: auto;
@@ -206,29 +206,29 @@
   color: #172033;
 }
 
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__header,
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__tools,
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__footer {
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__header,
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__tools,
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__footer {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 14px 18px;
 }
 
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__header { justify-content: space-between; border-bottom: 1px solid #edf1f6; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__header h3 { margin: 2px 0 0; font-size: 18px; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__eyebrow { margin: 0; color: #637084; font-size: 12px; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__search { display: grid; gap: 6px; padding: 12px 18px 0; color: #475569; font-size: 13px; font-weight: 650; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__search input { min-width: 0; height: 38px; border: 1px solid #cdd7e4; border-radius: 8px; padding: 0 10px; color: #172033; font: inherit; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__tools { padding-top: 10px; padding-bottom: 8px; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__tools label { display: inline-flex; align-items: center; gap: 6px; color: #526176; font-size: 13px; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__tools select { min-width: 140px; min-height: 34px; border: 1px solid #cdd7e4; border-radius: 7px; padding: 0 8px; background: #fff; color: #334155; font: inherit; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__meta { min-height: 20px; padding: 0 18px 8px; color: #526176; font-size: 13px; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__status,
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__directory-hint { min-height: 20px; margin: 0; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__directory-hint { margin-top: 2px; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__header { justify-content: space-between; border-bottom: 1px solid #edf1f6; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__header h3 { margin: 2px 0 0; font-size: 18px; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__eyebrow { margin: 0; color: #637084; font-size: 12px; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__search { display: grid; gap: 6px; padding: 12px 18px 0; color: #475569; font-size: 13px; font-weight: 650; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__search input { min-width: 0; height: 38px; border: 1px solid #cdd7e4; border-radius: 8px; padding: 0 10px; color: #172033; font: inherit; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__tools { padding-top: 10px; padding-bottom: 8px; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__tools label { display: inline-flex; align-items: center; gap: 6px; color: #526176; font-size: 13px; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__tools select { min-width: 140px; min-height: 34px; border: 1px solid #cdd7e4; border-radius: 7px; padding: 0 8px; background: #fff; color: #334155; font: inherit; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__meta { min-height: 20px; padding: 0 18px 8px; color: #526176; font-size: 13px; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__status,
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__directory-hint { min-height: 20px; margin: 0; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__directory-hint { margin-top: 2px; }
 
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__selected {
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__selected {
   display: flex;
   max-height: min(136px, 20vh);
   flex-wrap: wrap;
@@ -237,8 +237,8 @@
   padding: 0 18px 10px;
 }
 
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__list { min-height: 0; overflow: auto; padding: 0 18px 14px; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__group {
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__list { min-height: 0; overflow: auto; padding: 0 18px 14px; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__group {
   display: block;
   width: auto;
   min-height: 0;
@@ -251,10 +251,10 @@
   font-weight: inherit;
   text-align: initial;
 }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__group + .aicrm-v3-staff-picker__group { margin-top: 14px; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__group h4 { position: sticky; z-index: 1; top: 0; margin: 0 0 7px; padding: 6px 0; background: #fff; color: #46566e; font-size: 13px; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__item,
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__selected-item {
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__group + .aicrm-v3-staff-picker__group { margin-top: 14px; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__group h4 { position: sticky; z-index: 1; top: 0; margin: 0 0 7px; padding: 6px 0; background: #fff; color: #46566e; font-size: 13px; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__item,
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__selected-item {
   display: grid;
   width: 100%;
   grid-template-columns: minmax(0, 1fr);
@@ -266,34 +266,34 @@
   color: #172033;
   text-align: left;
 }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__item + .aicrm-v3-staff-picker__item { margin-top: 8px; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__item:hover,
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__item:focus-visible { border-color: #4e7cf6; outline: 2px solid transparent; background: #f5f8ff; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__item.is-selected { border-color: #2563eb; background: #eaf1ff; box-shadow: inset 3px 0 #2563eb; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__item span,
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__selected-item span { color: #637084; font-size: 12px; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__selected-item { width: auto; min-width: 150px; cursor: pointer; background: #f7faff; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__empty { margin: 12px 0; color: #718096; font-size: 13px; text-align: center; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__footer { border-top: 1px solid #edf1f6; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__footer { flex-direction: row; flex-wrap: nowrap; justify-content: flex-start; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__footer > span { flex: 1; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__button,
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__plain { min-height: 34px; border: 1px solid #cdd7e4; border-radius: 7px; padding: 0 12px; background: #fff; color: #334155; font: inherit; font-size: 13px; cursor: pointer; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__plain { border-color: transparent; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker__button--primary { border-color: #2563eb; background: #2563eb; color: #fff; }
-[data-v3-selection-session="staff"] .aicrm-v3-staff-picker button:disabled { cursor: not-allowed; opacity: .58; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__item + .aicrm-v3-staff-picker__item { margin-top: 8px; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__item:hover,
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__item:focus-visible { border-color: #4e7cf6; outline: 2px solid transparent; background: #f5f8ff; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__item.is-selected { border-color: #2563eb; background: #eaf1ff; box-shadow: inset 3px 0 #2563eb; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__item span,
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__selected-item span { color: #637084; font-size: 12px; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__selected-item { width: auto; min-width: 150px; cursor: pointer; background: #f7faff; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__empty { margin: 12px 0; color: #718096; font-size: 13px; text-align: center; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__footer { border-top: 1px solid #edf1f6; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__footer { flex-direction: row; flex-wrap: nowrap; justify-content: flex-start; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__footer > span { flex: 1; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__button,
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__plain { min-height: 34px; border: 1px solid #cdd7e4; border-radius: 7px; padding: 0 12px; background: #fff; color: #334155; font: inherit; font-size: 13px; cursor: pointer; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__plain { border-color: transparent; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__button--primary { border-color: #2563eb; background: #2563eb; color: #fff; }
+:is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker button:disabled { cursor: not-allowed; opacity: .58; }
 
 @media (max-width: 420px) {
-  [data-v3-selection-session="staff"].aicrm-v3-staff-picker-mask { padding: 8px; }
-  [data-v3-selection-session="staff"] .aicrm-v3-staff-picker { width: calc(100vw - 16px); height: min(680px, calc(100vh - 16px)); max-height: calc(100vh - 16px); }
-  [data-v3-selection-session="staff"] .aicrm-v3-staff-picker__header,
-  [data-v3-selection-session="staff"] .aicrm-v3-staff-picker__tools,
-  [data-v3-selection-session="staff"] .aicrm-v3-staff-picker__footer { padding-right: 12px; padding-left: 12px; }
-  [data-v3-selection-session="staff"] .aicrm-v3-staff-picker__search,
-  [data-v3-selection-session="staff"] .aicrm-v3-staff-picker__meta,
-  [data-v3-selection-session="staff"] .aicrm-v3-staff-picker__selected,
-  [data-v3-selection-session="staff"] .aicrm-v3-staff-picker__list { padding-right: 12px; padding-left: 12px; }
-  [data-v3-selection-session="staff"] .aicrm-v3-staff-picker__tools { flex-wrap: wrap; }
-  [data-v3-selection-session="staff"] .aicrm-v3-staff-picker__tools label { flex: 1 1 100%; min-width: 0; }
-  [data-v3-selection-session="staff"] .aicrm-v3-staff-picker__tools select { min-width: 0; flex: 1 1 auto; }
+  :is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]).aicrm-v3-staff-picker-mask { padding: 8px; }
+  :is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker { width: calc(100vw - 16px); height: min(680px, calc(100vh - 16px)); max-height: calc(100vh - 16px); }
+  :is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__header,
+  :is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__tools,
+  :is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__footer { padding-right: 12px; padding-left: 12px; }
+  :is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__search,
+  :is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__meta,
+  :is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__selected,
+  :is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__list { padding-right: 12px; padding-left: 12px; }
+  :is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__tools { flex-wrap: wrap; }
+  :is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__tools label { flex: 1 1 100%; min-width: 0; }
+  :is([data-v3-selection-session="staff"], [data-v3-selection-session="channel"]) .aicrm-v3-staff-picker__tools select { min-width: 0; flex: 1 1 auto; }
 }

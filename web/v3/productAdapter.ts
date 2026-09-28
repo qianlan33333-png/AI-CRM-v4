@@ -18,6 +18,7 @@ import { formatShanghaiDateTime } from './adminDateTime';
 import { installMaterialPickerAdapter, type MaterialPickerLoadRequest, type MaterialPickerRecord } from './shared/ui/materialPickerAdapter';
 import { openShareQrDialog } from './shared/ui/shareQrDialog';
 import { renderMaterialThumbnail } from './shared/ui/materialThumbnailPresentation';
+import { openChannelPicker, type ChannelPickerPage, type ChannelPickerRecord } from './shared/ui/channelPickerAdapter';
 
 type RecordValue = Record<string, unknown>;
 type ProductProjection = Product & { resourceId: number };
@@ -1634,13 +1635,30 @@ function productActionProjection(prefix: string): RecordValue {
   return object(snapshot?.admin_projection);
 }
 
+async function loadProductLeadChannelPage(request: { query: string; cursor?: string; signal: AbortSignal }): Promise<ChannelPickerPage> {
+  const params = new URLSearchParams({ limit: '50', status: 'active' });
+  if (request.query.trim()) params.set('q', request.query.trim());
+  if (request.cursor) params.set('cursor', request.cursor);
+  const response = await fetch(`/api/admin/channels?${params}`, {
+    method: 'GET', credentials: 'same-origin', signal: request.signal, headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error(`渠道目录读取失败（HTTP ${response.status}）`);
+  const payload = object(await response.json());
+  if (!Array.isArray(payload.channels) || typeof payload.next_cursor !== 'string') throw new Error('渠道目录响应不完整，请重试。');
+  const items: ChannelPickerRecord[] = payload.channels.map((raw: unknown) => {
+    const channel = object(raw);
+    return { id: Number(channel.id), channel_name: String(channel.channel_name ?? ''), channel_code: String(channel.channel_code ?? ''), status: String(channel.status ?? '') };
+  });
+  return { items, nextCursor: payload.next_cursor || undefined };
+}
+
 function purchaseActionControls(prefix: string): HTMLElement | null {
   const action = document.getElementById(prefix === 'pf' ? 'product-action' : 'sp-action');
   if (!action || action.querySelector('[data-product-purchase-action]')) return null;
   const host = document.createElement('section');
   host.dataset.productPurchaseAction = '';
   host.className = 'product-payment-action';
-  host.innerHTML = `<div class="product-payment-panel__head"><h3>购买后动作</h3><label class="product-payment-switch"><span data-product-purchase-state>未启用</span><input type="checkbox" data-product-purchase-enabled aria-label="启用购买后动作配置"><i aria-hidden="true"></i></label></div><div data-product-purchase-body class="product-payment-panel__body" hidden><div class="product-payment-modes" data-product-purchase-modes role="group" aria-label="购买后动作模式"><label class="product-payment-mode"><input type="radio" name="${prefix}PurchaseActionMode" value="qr"><span>支付后展示引流二维码</span></label><label class="product-payment-mode"><input type="radio" name="${prefix}PurchaseActionMode" value="redirect"><span>支付完成后直接跳转</span></label></div><div data-product-purchase-lead class="product-payment-fields"><label>引流渠道码<select data-product-purchase-lead-channel><option value="">不配置引流渠道码</option></select></label><label>二维码主标题<input data-product-purchase-lead-title maxlength="40" placeholder="留空沿用：报名成功"></label><label>二维码副标题<input data-product-purchase-lead-subtitle maxlength="100" placeholder="留空沿用：扫码添加企微领取后续资料"></label></div><div data-product-purchase-redirect class="product-payment-fields" hidden><label>跳转类型<select data-product-purchase-target-type><option value="h5">H5 跳转地址</option><option value="url_link">动态 URL Link 接口</option></select></label><label data-product-purchase-h5>H5 跳转地址<input data-product-purchase-h5-url placeholder="https://example.com/landing 或 /internal/path"></label><label data-product-purchase-url-link hidden>动态 URL Link 接口<input data-product-purchase-url-link-source placeholder="https://ip.lhbl.com.cn/api/wxlink?from=qianlan_pay"></label><label data-product-purchase-url-link hidden>响应字段<input data-product-purchase-url-link-key placeholder="url_link" value="url_link"></label></div></div><div class="product-payment-panel__actions"><button class="product-payment-primary" data-product-purchase-save type="button">保存购买后动作</button></div>`;
+  host.innerHTML = `<div class="product-payment-panel__head"><h3>购买后动作</h3><label class="product-payment-switch"><span data-product-purchase-state>未启用</span><input type="checkbox" data-product-purchase-enabled aria-label="启用购买后动作配置"><i aria-hidden="true"></i></label></div><div data-product-purchase-body class="product-payment-panel__body" hidden><div class="product-payment-modes" data-product-purchase-modes role="group" aria-label="购买后动作模式"><label class="product-payment-mode"><input type="radio" name="${prefix}PurchaseActionMode" value="qr"><span>支付后展示引流二维码</span></label><label class="product-payment-mode"><input type="radio" name="${prefix}PurchaseActionMode" value="redirect"><span>支付完成后直接跳转</span></label></div><div data-product-purchase-lead class="product-payment-fields"><label>引流渠道码<div class="product-payment-channel-field"><button type="button" data-product-purchase-channel-open aria-label="选择引流渠道码"><span data-product-purchase-channel-label>请选择渠道码</span><span>选择</span></button><input type="hidden" data-product-purchase-lead-channel value=""></div></label><label>二维码主标题<input data-product-purchase-lead-title maxlength="40" placeholder="留空沿用：报名成功"></label><label>二维码副标题<input data-product-purchase-lead-subtitle maxlength="100" placeholder="留空沿用：扫码添加企微领取后续资料"></label></div><div data-product-purchase-redirect class="product-payment-fields" hidden><label>跳转类型<select data-product-purchase-target-type><option value="h5">H5 跳转地址</option><option value="url_link">动态 URL Link 接口</option></select></label><label data-product-purchase-h5>H5 跳转地址<input data-product-purchase-h5-url placeholder="https://example.com/landing 或 /internal/path"></label><label data-product-purchase-url-link hidden>动态 URL Link 接口<input data-product-purchase-url-link-source placeholder="https://ip.lhbl.com.cn/api/wxlink?from=qianlan_pay"></label><label data-product-purchase-url-link hidden>响应字段<input data-product-purchase-url-link-key placeholder="url_link" value="url_link"></label></div></div><div class="product-payment-panel__actions"><button class="product-payment-primary" data-product-purchase-save type="button">保存购买后动作</button></div>`;
   const retainedDonorFields = document.createElement('div');
   retainedDonorFields.hidden = true;
   while (action.firstChild) retainedDonorFields.append(action.firstChild);
@@ -1653,7 +1671,8 @@ function purchaseActionControls(prefix: string): HTMLElement | null {
   if (radio) radio.checked = true;
 
   const projection = productActionProjection(prefix);
-  const leadChannel = host.querySelector<HTMLSelectElement>('[data-product-purchase-lead-channel]')!;
+  const leadChannel = host.querySelector<HTMLInputElement>('[data-product-purchase-lead-channel]')!;
+  const leadLabel = host.querySelector<HTMLElement>('[data-product-purchase-channel-label]')!;
   const leadTitle = host.querySelector<HTMLInputElement>('[data-product-purchase-lead-title]')!;
   const leadSubtitle = host.querySelector<HTMLInputElement>('[data-product-purchase-lead-subtitle]')!;
   const targetType = host.querySelector<HTMLSelectElement>('[data-product-purchase-target-type]')!;
@@ -1661,14 +1680,43 @@ function purchaseActionControls(prefix: string): HTMLElement | null {
   const linkSource = host.querySelector<HTMLInputElement>('[data-product-purchase-url-link-source]')!;
   const linkKey = host.querySelector<HTMLInputElement>('[data-product-purchase-url-link-key]')!;
   const selectedChannel = projection.lead_channel_id == null ? '' : String(projection.lead_channel_id);
-  for (const channel of loadedLeadChannels) {
-    if (channel.status !== 'active') continue;
-    const id = Number(channel.id ?? channel.channel_id ?? channel.resourceId);
-    if (!Number.isSafeInteger(id) || id < 1) continue;
-    const option = document.createElement('option'); option.value = String(id); option.textContent = String(channel.name ?? channel.channel_name ?? `渠道 ${id}`); leadChannel.append(option);
-  }
-  if (selectedChannel && ![...leadChannel.options].some((option) => option.value === selectedChannel)) { const option = document.createElement('option'); option.value = selectedChannel; option.textContent = `已选渠道 ${selectedChannel}`; leadChannel.append(option); }
+  const knownChannel = loadedLeadChannels.find((channel) => Number(channel.id ?? channel.channel_id ?? channel.resourceId) === Number(selectedChannel));
+  let selectedChannelRecord: ChannelPickerRecord | undefined = knownChannel && selectedChannel ? {
+    id: Number(selectedChannel), channel_name: String(knownChannel.name ?? knownChannel.channel_name ?? `已选渠道 #${selectedChannel}`),
+    channel_code: String(knownChannel.code ?? knownChannel.channel_code ?? ''), status: String(knownChannel.status ?? ''),
+  } : undefined;
   leadChannel.value = selectedChannel;
+  leadLabel.textContent = selectedChannel
+    ? String(knownChannel?.name ?? knownChannel?.channel_name ?? `已选渠道 #${selectedChannel}`)
+    : '请选择渠道码';
+  if (selectedChannel && !knownChannel) {
+    void fetch(`/api/admin/channels/${encodeURIComponent(selectedChannel)}`, {
+      method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' },
+    }).then(async (response) => response.ok ? object(await response.json()) : undefined)
+      .then((payload) => {
+        const channel = object(payload?.channel);
+        if (!host.isConnected || leadChannel.value !== selectedChannel || Number(channel.id) !== Number(selectedChannel)) return;
+        const name = String(channel.channel_name ?? '').trim();
+        if (!name) return;
+        selectedChannelRecord = { id: Number(selectedChannel), channel_name: name, channel_code: String(channel.channel_code ?? ''), status: String(channel.status ?? '') };
+        leadLabel.textContent = name;
+      }).catch(() => undefined);
+  }
+  host.querySelector<HTMLButtonElement>('[data-product-purchase-channel-open]')!.addEventListener('click', () => {
+    const currentID = Number(leadChannel.value);
+    const selected = Number.isSafeInteger(currentID) && currentID > 0 ? selectedChannelRecord ?? {
+      id: currentID, channel_name: leadLabel.textContent || `已选渠道 #${currentID}`,
+    } : undefined;
+    openChannelPicker({
+      selected,
+      loadPage: loadProductLeadChannelPage,
+      onCommit(channel) {
+        leadChannel.value = channel ? String(channel.id) : '';
+        leadLabel.textContent = channel?.channel_name || '请选择渠道码';
+        selectedChannelRecord = channel;
+      },
+    });
+  });
   leadTitle.value = typeof projection.lead_qr_title === 'string' ? projection.lead_qr_title : '';
   leadSubtitle.value = typeof projection.lead_qr_subtitle === 'string' ? projection.lead_qr_subtitle : '';
   const target = object(projection.completion_target);
@@ -1734,7 +1782,7 @@ function adaptPurchaseActionWrite(init: RequestInit | undefined): RequestInit | 
   projection.purchase_action_enabled = action.enabled;
   projection.purchase_action_mode = action.mode;
   const host = document.querySelector<HTMLElement>('[data-product-purchase-action]');
-  const leadChannel = host?.querySelector<HTMLSelectElement>('[data-product-purchase-lead-channel]')?.value.trim() || '';
+  const leadChannel = host?.querySelector<HTMLInputElement>('[data-product-purchase-lead-channel]')?.value.trim() || '';
   const leadTitle = host?.querySelector<HTMLInputElement>('[data-product-purchase-lead-title]')?.value || '';
   const leadSubtitle = host?.querySelector<HTMLInputElement>('[data-product-purchase-lead-subtitle]')?.value || '';
   if (!action.enabled || action.mode !== 'qr') {

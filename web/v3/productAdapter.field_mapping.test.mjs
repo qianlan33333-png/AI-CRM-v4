@@ -34,7 +34,7 @@ for (const periodic of [false, true]) {
         const rawParams = String(body?.custom_params ?? '');
         config = { ...config, ...body, custom_params: JSON.parse(rawParams), custom_params_json: rawParams, revision: config.revision + 1 };
       }
-      const value = url.pathname.endsWith('/external-push/test') ? { state: 'outcome_unknown', effect_id: 'eer_test_1', delivery_id: 'dlv_test_1' } : url.pathname.endsWith('/external-push') ? config : url.pathname === '/api/v1/products' ? { items: [product] } : url.pathname === '/api/v1/products/101' ? product : url.pathname.endsWith('/101') ? { product } : { items: [], total: 0, has_more: false };
+      const value = url.pathname === '/api/admin/channels/14' ? { channel: { id: 14, channel_name: '已保存的后页渠道', channel_code: 'saved-later', status: 'active' } } : url.pathname.endsWith('/external-push/test') ? { state: 'outcome_unknown', effect_id: 'eer_test_1', delivery_id: 'dlv_test_1' } : url.pathname.endsWith('/external-push') ? config : url.pathname === '/api/v1/products' ? { items: [product] } : url.pathname === '/api/v1/products/101' ? product : url.pathname.endsWith('/101') ? { product } : { items: [], total: 0, has_more: false };
       return new Response(JSON.stringify(value), { status: url.pathname.endsWith('/test') ? 202 : 200, headers: { 'Content-Type': 'application/json' } });
     };
   } });
@@ -46,7 +46,9 @@ for (const periodic of [false, true]) {
   assert.equal(calls.some((call) => call.method === 'PUT' && call.path.endsWith('/external-push')), false, 'a pending configuration read cannot save an empty form');
   releasePanelRead();
   await waitFor(() => !d.querySelector('[data-product-parity-push-save]').disabled);
-  assert.equal(d.querySelector('[data-product-purchase-lead-channel]').tagName, 'SELECT');
+  assert.equal(d.querySelector('[data-product-purchase-lead-channel]').getAttribute('type'), 'hidden');
+  assert.ok(d.querySelector('[data-product-purchase-channel-open]'), 'Channel choice opens a dialog rather than a truncated select');
+  await waitFor(() => d.querySelector('[data-product-purchase-channel-label]')?.textContent === '已保存的后页渠道');
   assert.equal(d.querySelector('[data-product-parity-push-url]').value, config.webhook_url);
   assert.equal(d.querySelectorAll('[data-mapping-conversion], [data-external-push-configuration-save]').length, 0);
   for (const [id, value] of periodic ? [['spfName', '一致性商品'], ['spfCode', 'parity-fixture'], ['spfPrice', '9.90'], ['spfStock', '1']] : [['pfName', '一致性商品'], ['pfCode', 'parity-fixture'], ['pfPrice', '9.90'], ['pfStock', '1']]) {
