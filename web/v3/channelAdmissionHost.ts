@@ -7,6 +7,7 @@
 
 
 import { formatShanghaiDateTime } from './adminDateTime';
+import { installMaterialPickerAdapter, type MaterialPickerLoadRequest, type MaterialPickerRecord } from './shared/ui/materialPickerAdapter';
 import { createTagCatalogPageLoader, unresolvedTagRecord, type TagPickerRecord } from './shared/ui/tagPickerAdapter';
 
 type Json = Record<string, unknown>;
@@ -26,6 +27,58 @@ function escapeHTML(value: unknown): string {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[character] || character));
+}
+
+const channelMaterialEndpoints = {
+  image: '/api/admin/image-library',
+  miniprogram: '/api/admin/miniprogram-library',
+  attachment: '/api/admin/attachment-library',
+} as const;
+
+async function loadChannelMaterialPage(request: MaterialPickerLoadRequest): Promise<{ items: MaterialPickerRecord[]; nextCursor?: string }> {
+  if (!(request.type in channelMaterialEndpoints)) throw new Error('当前渠道不支持该素材类型。');
+  const kind = request.type as keyof typeof channelMaterialEndpoints;
+  const offset = Number(request.cursor || '0');
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('素材目录分页标记无效，请重新搜索。');
+  const query = new URLSearchParams({ limit: '50', offset: String(offset), enabled_only: 'true' });
+  if (request.query.trim()) query.set('q', request.query.trim());
+  const response = await nativeFetch(`${channelMaterialEndpoints[kind]}?${query.toString()}`, {
+    credentials: 'same-origin', headers: { Accept: 'application/json' }, signal: request.signal,
+  });
+  const payload = await response.json().catch(() => ({})) as Json;
+  if (!response.ok) {
+    const error = new Error(response.status === 401 || response.status === 403
+      ? '素材目录权限已失效，请重新登录后重试。' : '素材目录暂时无法加载，请稍后重试。') as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
+  if (!Array.isArray(payload.items)) throw new Error('素材目录数据异常，请重试。');
+  const items = payload.items.flatMap((raw): MaterialPickerRecord[] => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    const item = raw as Json;
+    const id = Number(item.id ?? item.library_id ?? item.resource_id);
+    if (!Number.isSafeInteger(id) || id < 1) return [];
+    const title = String(item.title || item.name || item.file_name || `素材 #${id}`);
+    const thumbnail = item.thumb_320_url || item.thumb_160_url || item.thumb_image_url || item.thumbnail_url || item.variant_url;
+    return [{
+      type: kind, library_id: id, title,
+      subtitle: String(item.description || item.appid || item.app_id || item.mime_type || item.file_name || ''),
+      thumbnail_url: typeof thumbnail === 'string' ? thumbnail : '',
+      mime_type: String(item.mime_type || ''), enabled: item.enabled !== false,
+      selectable: item.enabled !== false, metadata: item,
+    }];
+  });
+  return { items, nextCursor: payload.has_more === true && payload.items.length ? String(offset + payload.items.length) : undefined };
+}
+
+function installChannelMaterialPicker(): void {
+  installMaterialPickerAdapter({
+    source: 'channel-welcome-materials', scope: 'channel.welcome_content', loadPage: loadChannelMaterialPage,
+    accessLossMessage: (error) => {
+      const status = (error as { status?: unknown } | null)?.status;
+      return status === 401 || status === 403 ? '素材目录权限已失效；渠道草稿仍保留，请重新登录后重试。' : undefined;
+    },
+  });
 }
 
 function ids(value: unknown): string {
@@ -815,6 +868,7 @@ export async function startChannelAdmissionHost(): Promise<void> {
       }
     }
     await (window as Window & { AICRMStandardComponents?: { ready?: () => Promise<void> } }).AICRMStandardComponents?.ready?.();
+    installChannelMaterialPicker();
     installChannelEntryTagPicker(root);
     installSaveFeedbackTime(root);
     await executeChannelDonorScript();

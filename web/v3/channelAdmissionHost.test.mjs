@@ -11,6 +11,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const host = await buildTestBrowserBundle(path.join(root, 'web/v3/channelCenterAdapter.ts'));
 const donorForm = await fs.readFile(path.join(root, 'web/donors/standard-components-production/channel/channel_code_form.html'), 'utf8');
 const donorScript = await fs.readFile(path.join(root, 'web/donors/standard-components-production/channel/channel_admission_pages.js'), 'utf8');
+const composerScript = await fs.readFile(path.join(root, 'web/donors/ai-assistant-production/static/send_content_composer.js'), 'utf8');
 const pause = (ms = 15) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function waitFor(check, message) {
@@ -36,7 +37,7 @@ function channel(overrides = {}) {
   };
 }
 
-function createPage({ saved = channel(), mutations = [], creates = [], resourceID = '17', donorScriptStatus = 200, delayDonorScript = false, tagPickerReady = true, staffPickerReady = true, staffPickerAutoCommit = true, operationMembers = { status: 200, payload: { items: [{ staff_id: 12, user_id: 'wecom-alice', display_name: '测试客服' }] } } } = {}) {
+function createPage({ saved = channel(), mutations = [], creates = [], resourceID = '17', donorScriptStatus = 200, delayDonorScript = false, tagPickerReady = true, staffPickerReady = true, staffPickerAutoCommit = true, realComposer = false, materialListStatus = 200, operationMembers = { status: 200, payload: { items: [{ staff_id: 12, user_id: 'wecom-alice', display_name: '测试客服' }] } } } = {}) {
   const calls = [];
   let releaseDonorScript;
   const resourceAttribute = resourceID ? ` data-channel-resource-id="${resourceID}"` : '';
@@ -58,8 +59,9 @@ function createPage({ saved = channel(), mutations = [], creates = [], resourceI
         static now() { return NativeDate.parse('2026-09-30T16:01:02Z'); }
       };
       window.AdminConsole = { showToast() {} };
-      window.AICRMStandardComponents = { ready: async () => undefined };
-      window.AICRMSendContentComposer = { mount(_container, options) { window.__channelComposerOptions = options; } };
+      window.AICRMStandardComponents = { ready: async () => { if (realComposer) window.eval(composerScript); } };
+      if (!realComposer) window.AICRMSendContentComposer = { mount(_container, options) { window.__channelComposerOptions = options; } };
+      window.AICRMMaterialPicker = { open() { window.__frozenMaterialPickerCalled = true; } };
       window.AICRMWeComTagPicker = { open() { window.__frozenTagPickerCalled = true; } };
       if (tagPickerReady) window.AICRMTagPicker = { open(options) { window.__entryTagPickerOptions = options; options.onCommit({ selected: [{ source: 'local_tag_catalog', group_id: '4', group_name: '渠道标签', tag_id: '37', tag_name: '扫码入渠' }], added: [], removed: [] }); } };
       if (staffPickerReady) window.AICRMStaffPicker = { open(options) { window.__staffPickerOptions = options; if (staffPickerAutoCommit) options.onCommit({ selected: [{ source: 'channel_code.operation_members', staff_id: '12', user_id: 'wecom-alice', display_name: '测试客服', active: true }] }); } };
@@ -75,6 +77,14 @@ function createPage({ saved = channel(), mutations = [], creates = [], resourceI
           if (unknown.length) return response({code:'MALFORMED_REQUEST'}, 400);
         }
         if (method === 'GET' && url.pathname === '/api/admin/common/operation-members') return response(operationMembers.payload, operationMembers.status);
+        if (method === 'GET' && ['/api/admin/image-library', '/api/admin/miniprogram-library', '/api/admin/attachment-library'].includes(url.pathname)) {
+          const records = {
+            '/api/admin/image-library': [{ id: 101, name: '渠道海报', thumb_320_url: '/api/admin/image-library/101/variants/thumb_320', enabled: true }],
+            '/api/admin/miniprogram-library': [{ id: 201, name: '活动小程序', appid: 'wx-example', enabled: true }],
+            '/api/admin/attachment-library': [{ id: 301, name: '活动说明', file_name: 'guide.pdf', mime_type: 'application/pdf', enabled: true }],
+          };
+          return response(materialListStatus === 200 ? { items: records[url.pathname], has_more: false } : { code: 'FORBIDDEN' }, materialListStatus);
+        }
         if (method === 'GET' && url.pathname === '/api/admin/wecom/tags') return response({ read_model_status: 'ready', groups: [{ group_id: 4, group_name: '渠道标签' }], items: [{ tag_id: 37, group_id: 4, group_name: '渠道标签', tag_name: '扫码入渠' }], count: 1, total_tags: 1, tag_limit: 1000 });
         if (method === 'GET' && url.pathname === '/assets/standard-components/channel_code_form.html') return new Response(donorForm, { status: 200 });
         if (method === 'GET' && url.pathname === '/api/admin/channels/17') return response({ ok: true, channel: saved }, 200, { ETag: '"7"' });
@@ -444,6 +454,44 @@ try {
   assert.equal(delayedDonor.dom.window.document.querySelectorAll('[data-channel-bootstrap]').length, 1, 'delayed donor receives exactly one bootstrap payload');
   assert.equal(delayedDonor.calls.some((call) => call.method === 'POST' || call.method === 'PATCH'), false, 'delayed donor bootstrap must not save a channel');
 } finally { delayedDonor.dom.window.close(); }
+
+// The production welcome composer opens the byte-frozen picker. The Channel
+// Host must replace its obsolete AdminApi read with the authorised V4 Media
+// directories for all three material kinds, leaving persistence to Save.
+const channelMaterials = createPage({ realComposer: true });
+try {
+  const { document } = channelMaterials.dom.window;
+  await waitFor(() => document.querySelector('[data-send-content-composer-inline] [data-add-material="image"]'), 'real welcome composer must mount');
+  document.querySelector('[data-channel-panel="welcome"]').click();
+  for (const [kind, endpoint, id, field] of [
+    ['image', '/api/admin/image-library', '101', '[data-image-ids]'],
+    ['miniprogram', '/api/admin/miniprogram-library', '201', '[data-miniprogram-ids]'],
+    ['attachment', '/api/admin/attachment-library', '301', '[data-attachment-ids]'],
+  ]) {
+    document.querySelector(`[data-add-material="${kind}"]`).click();
+    await waitFor(() => document.querySelector('[data-v3-selection-session="material"] [data-v3-material-key]'), `${kind} must load from its V4 Media directory`);
+    const read = channelMaterials.calls.find((call) => call.method === 'GET' && call.path === endpoint);
+    assert.ok(read, `${kind} must read ${endpoint}`);
+    assert.match(read.search, /enabled_only=true/, `${kind} must list enabled materials`);
+    document.querySelector('[data-v3-material-key]').click();
+    document.querySelector('[data-v3-picker-confirm]').click();
+    await waitFor(() => document.querySelector(field)?.value === id, `${kind} selection must update only the welcome draft`);
+    assert.equal(document.querySelector('[data-v3-selection-session="material"]'), null, `${kind} picker must close after confirmed selection`);
+  }
+  assert.equal(channelMaterials.dom.window.__frozenMaterialPickerCalled, undefined, 'the obsolete picker must never perform its AdminApi read');
+  assert.equal(channelMaterials.calls.some((call) => call.path === '/api/admin/material-picker/items'), false, 'the obsolete picker route must not be requested');
+  assert.equal(channelMaterials.calls.some((call) => call.method === 'PATCH' || call.method === 'POST'), false, 'material selection must not save or send before channel Save');
+} finally { channelMaterials.dom.window.close(); }
+
+const deniedMaterials = createPage({ realComposer: true, materialListStatus: 403 });
+try {
+  const { document } = deniedMaterials.dom.window;
+  await waitFor(() => document.querySelector('[data-add-material="image"]'), 'denied material fixture must mount');
+  document.querySelector('[data-add-material="image"]').click();
+  await waitFor(() => document.querySelector('[data-v3-picker-status]')?.textContent.includes('权限已失效'), 'a denied Media directory must show the actual permission failure');
+  assert.equal(document.querySelector('[data-v3-picker-confirm]').disabled, true, 'lost Media permission must lock material confirmation');
+  assert.equal(deniedMaterials.calls.some((call) => call.method === 'PATCH' || call.method === 'POST'), false, 'a failed directory read must preserve the unsaved channel draft');
+} finally { deniedMaterials.dom.window.close(); }
 
 const saves = createPage({ mutations: [
   { headers: { ETag: '"8"' }, payload: { ok: true } },
