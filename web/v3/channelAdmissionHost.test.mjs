@@ -478,7 +478,10 @@ try {
     await waitFor(() => document.querySelector(field)?.value === id, `${kind} selection must update only the welcome draft`);
     assert.equal(document.querySelector('[data-v3-selection-session="material"]'), null, `${kind} picker must close after confirmed selection`);
   }
-  assert.equal(channelMaterials.dom.window.__frozenMaterialPickerCalled, undefined, 'the obsolete picker must never perform its AdminApi read');
+  assert.equal(channelMaterials.dom.window.__frozenMaterialPickerCalled, undefined, 'image, mini program and attachment must never invoke the obsolete picker');
+  document.querySelector('[data-add-material="group_invite"]').click();
+  assert.equal(channelMaterials.dom.window.__frozenMaterialPickerCalled, true, 'the unrelated group invite control must keep its existing picker route');
+  assert.equal(document.querySelector('[data-v3-selection-session="material"]'), null, 'group invites must not enter the Media material session');
   assert.equal(channelMaterials.calls.some((call) => call.path === '/api/admin/material-picker/items'), false, 'the obsolete picker route must not be requested');
   assert.equal(channelMaterials.calls.some((call) => call.method === 'PATCH' || call.method === 'POST'), false, 'material selection must not save or send before channel Save');
 } finally { channelMaterials.dom.window.close(); }

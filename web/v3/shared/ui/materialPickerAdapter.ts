@@ -33,6 +33,8 @@ export type MaterialPickerAdapterOptions = {
   source: string;
   /** The caller-authorised read scope; this component never widens it. */
   scope: string;
+  /** Material kinds handled here; omitted means every supported kind. */
+  types?: readonly MaterialType[];
   loadPage(request: MaterialPickerLoadRequest): Promise<MaterialPickerLoadPage>;
   /** Caller classifies an authenticated directory failure without making the shared UI infer a scope. */
   accessLossMessage?(error: unknown): string | undefined;
@@ -144,7 +146,7 @@ export function installMaterialPickerAdapter(config: MaterialPickerAdapterOption
       // Unknown caller types retain the frozen route. Every Media-owned
       // material type, including group-invite library records, stays within
       // this V3 temporary-selection adapter and never creates a binding.
-      if (!isMaterialType(type)) return donorOpen(options);
+      if (!isMaterialType(type) || (config.types && !config.types.includes(type))) return donorOpen(options);
       return openMaterialPicker(config, type, options);
     },
   };

@@ -73,7 +73,8 @@ async function loadChannelMaterialPage(request: MaterialPickerLoadRequest): Prom
 
 function installChannelMaterialPicker(): void {
   installMaterialPickerAdapter({
-    source: 'channel-welcome-materials', scope: 'channel.welcome_content', loadPage: loadChannelMaterialPage,
+    source: 'channel-welcome-materials', scope: 'channel.welcome_content',
+    types: ['image', 'miniprogram', 'attachment'], loadPage: loadChannelMaterialPage,
     accessLossMessage: (error) => {
       const status = (error as { status?: unknown } | null)?.status;
       return status === 401 || status === 403 ? '素材目录权限已失效；渠道草稿仍保留，请重新登录后重试。' : undefined;
