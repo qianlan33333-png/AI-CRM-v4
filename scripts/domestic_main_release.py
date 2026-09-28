@@ -1892,8 +1892,9 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
             if lane == "backend":
                 backend_running.set()
 
-    # Preflight remains a prerequisite. Only independent lanes overlap, with
-    # their expensive commands serialized by the attempt's heavy.lock.
+    # Preflight remains a prerequisite. Full checks include timing-sensitive
+    # database assertions, so run their lanes serially on the 2 GB host.
+    # Focused checks retain the existing overlap and shared heavy.lock.
     lane_results = []
     callback = config.get("_check_progress_callback")
     pending_lanes = list(lanes)
@@ -1908,7 +1909,7 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
         # maintenance validation must retain serial execution on this host.
         lane_results.extend(run_lane(lane) for lane in pending_lanes)
         return lane_results
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=1 if profile == "full" else 2) as executor:
         # Backend must own a worker even if the caller lists browser first;
         # otherwise both workers could wait for a backend still in the queue.
         if "backend" in pending_lanes:

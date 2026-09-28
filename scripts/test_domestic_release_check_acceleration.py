@@ -149,7 +149,7 @@ class AccelerationGateTest(unittest.TestCase):
                      patch.object(release, "_tree", return_value="c" * 40), \
                      patch.object(release, "_run_check_process", side_effect=run):
                     args = ({}, root, root, execution, reports, "a" * 40, "b" * 40,
-                            {"selection_mode": "full"}, ["browser", "backend"], [], [], "full", diagnostics)
+                            {"selection_mode": "targeted"}, ["browser", "backend"], [], [], "affected-packages", diagnostics)
                     if outcome in {"environment", "timeout"}:
                         with self.assertRaises(release.CheckEnvironmentError if outcome == "environment" else release.CheckIncompleteError):
                             release._run_check_lanes(*args)
@@ -484,6 +484,6 @@ class AccelerationGateTest(unittest.TestCase):
                  patch.object(release, "_run_check_process", side_effect=run):
                 results = release._run_check_lanes({}, root, root, execution, reports, "a"*40, "b"*40,
                     {"selection_mode":"full"}, ["preflight","backend","frontend","browser"], [], [], "full", diagnostics)
-            self.assertEqual(counter["maximum"], 2)
+            self.assertEqual(counter["maximum"], 1)
             self.assertEqual(len(set(checkouts)), 3)
             self.assertEqual([result["lane"] for result in results], ["preflight","backend","frontend","browser"])
