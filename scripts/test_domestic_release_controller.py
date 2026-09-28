@@ -2772,6 +2772,171 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
             with self.assertRaises(release.ReleaseError):
                 release._reconcile_identity(repo, state["in_flight"])
 
+    def test_intentional_stage_pause_survives_recovery_without_reinstall(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            app = {"sha": base, "tree": release._tree(repo, base), "manifest_sha256": "a" * 64}
+            state = release._new_state(base, app["tree"], app)
+            state["status"] = "blocked"
+            state["staging_out_of_sync"] = True
+            state["queue"] = [{
+                "candidate_id": candidate, "ref": "refs/heads/codex/one",
+                "head_sha": candidate, "base_sha": base,
+                "status": "stage_validation_pending",
+            }]
+            state["in_flight"] = {
+                "candidate_id": candidate, "head_sha": candidate,
+                "phase": "stage-validation-pending", "stage_install_started": True,
+                "stage_install_completed": True,
+            }
+            self.assertIsNone(release._recover_orphaned_inflight(root / "state.json", state))
+            self.assertEqual(state["queue"][0]["status"], "stage_validation_pending")
+            self.assertEqual(state["in_flight"]["phase"], "stage-validation-pending")
+            state["in_flight"]["stage_install_completed"] = False
+            with self.assertRaises(release.ReleaseError):
+                release._recover_orphaned_inflight(root / "state.json", state)
+
+    def test_stage_journey_receipt_binds_install_and_protected_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sha, tree, manifest = "a" * 40, "b" * 40, "c" * 64
+            directory = root / "stage-evidence"
+            directory.mkdir(mode=0o700)
+            log = directory / f"{sha}-product-list.log"
+            log.write_text("installed product list and permission journey: PASS\n")
+            log.chmod(0o600)
+            stage_receipt = {
+                "source_sha": sha, "manifest_sha256": manifest,
+                "installed_at_utc": "2026-09-28T10:00:00Z",
+            }
+            receipt = {
+                "schema_version": 1, "status": "passed", "source_sha": sha,
+                "source_tree": tree, "manifest_sha256": manifest,
+                "stage_receipt_sha256": hashlib.sha256(json.dumps(
+                    stage_receipt, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+                "verified_at_utc": "2026-09-28T10:01:00Z",
+                "checks": [{"name": "product-list", "status": "passed",
+                            "log": str(log), "log_sha256": hashlib.sha256(log.read_bytes()).hexdigest()}],
+            }
+            path = directory / f"{sha}.json"
+            path.write_text(json.dumps(receipt))
+            path.chmod(0o600)
+            inflight = {"head_sha": sha, "head_tree": tree,
+                        "release_manifest_sha256": manifest, "stage_receipt": stage_receipt}
+            self.assertEqual(release._read_stage_evidence({"work_root": str(root)}, inflight), receipt)
+            log.write_text("changed\n")
+            with self.assertRaises(release.ReleaseError):
+                release._read_stage_evidence({"work_root": str(root)}, inflight)
+            log.write_text("installed product list and permission journey: PASS\n")
+            receipt["verified_at_utc"] = "2026-09-28T09:59:00Z"
+            path.write_text(json.dumps(receipt))
+            with self.assertRaises(release.ReleaseError):
+                release._read_stage_evidence({"work_root": str(root)}, inflight)
+
+    def test_poll_waits_for_stage_evidence_and_promotes_same_attempt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            app = {"sha": base, "tree": release._tree(repo, base), "manifest_sha256": "a" * 64}
+            state = release._new_state(base, app["tree"], app)
+            state["status"] = "blocked"
+            state["staging_out_of_sync"] = True
+            item = {"candidate_id": candidate, "ref": "refs/heads/codex/one",
+                    "head_sha": candidate, "base_sha": base, "status": "stage_validation_pending"}
+            state["queue"] = [item]
+            state["in_flight"] = {
+                "candidate_id": candidate, "head_sha": candidate,
+                "phase": "stage-validation-pending", "stage_install_started": True,
+                "stage_install_completed": True, "release_manifest_sha256": "b" * 64,
+            }
+            config = {"repo": str(repo), "state": str(root / "state.json"),
+                      "lock": str(root / "controller.lock"), "work_root": str(root),
+                      "production_enabled": True, "controller_path": "/controller",
+                      "push_group": "push"}
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_is_bare_repo", return_value=True), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                 mock.patch.object(release, "verify_bare_repository"), \
+                 mock.patch.object(release, "_verify_controller_files"), \
+                 mock.patch.object(release, "_load_state", return_value=state), \
+                 mock.patch.object(release, "_read_stage_evidence", side_effect=[None, {"status": "passed"}]), \
+                 mock.patch.object(release, "_promote_staged_candidate",
+                                   return_value={"status": "completed", "main_sha": candidate}) as promote, \
+                 mock.patch.object(release, "process_candidate") as process:
+                waiting = release.poll(config, expected_candidate_sha=candidate)
+                completed = release.poll(config, expected_candidate_sha=candidate)
+            self.assertEqual(waiting["status"], "stage_validation_pending")
+            self.assertEqual(completed["status"], "completed")
+            promote.assert_called_once()
+            process.assert_not_called()
+
+
+    def test_stage_promotion_reuses_exact_artifact_and_never_reinstalls(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            tree = release._tree(repo, candidate)
+            manifest = "b" * 64
+            metadata = {"source_sha": candidate, "source_tree": tree,
+                        "release_files_sha256": manifest}
+            out = root / "builds" / candidate
+            (out / "release").mkdir(parents=True)
+            metadata_path = out / "domestic-release.json"
+            metadata_path.write_text(json.dumps(metadata))
+            bundle = root / "source-bundles" / f"{candidate}.bundle"
+            bundle.parent.mkdir()
+            bundle.write_text("exact bundle")
+            previous_app = {"sha": base, "tree": release._tree(repo, base),
+                            "manifest_sha256": "a" * 64}
+            installed_app = {"sha": candidate, "tree": tree, "manifest_sha256": manifest}
+            state = release._new_state(base, previous_app["tree"], previous_app)
+            state["status"] = "blocked"
+            state["staging_out_of_sync"] = True
+            item = {"candidate_id": candidate, "ref": "refs/heads/codex/one",
+                    "head_sha": candidate, "base_sha": base, "status": "stage_validation_pending",
+                    "started_at_utc": "2026-09-28T10:00:00Z"}
+            state["queue"] = [item]
+            state["in_flight"] = {
+                "candidate_id": candidate, "head_sha": candidate, "head_tree": tree,
+                "base_sha": base, "phase": "stage-validation-pending",
+                "stage_install_started": True, "stage_install_completed": True,
+                "release_metadata": metadata,
+                "release_manifest_sha256": manifest,
+                "package_metadata_sha256": hashlib.sha256(metadata_path.read_bytes()).hexdigest(),
+                "previous_installed_app": previous_app, "installed_app": installed_app,
+                "bundle_meta": {"bundle_sha256": hashlib.sha256(bundle.read_bytes()).hexdigest()},
+                "stage_receipt": {"source_sha": candidate, "manifest_sha256": manifest},
+                "check_receipt": {"status": "passed"},
+                "production_install_started": False, "commit_started": False,
+            }
+            receipt = {"source_sha": candidate, "manifest_sha256": manifest,
+                       "technical_status": "installed_healthy"}
+            config = {"repo": str(repo), "work_root": str(root), "prod_helper": "/helper"}
+            evidence = {"status": "passed", "checks": [{"name": "affected-page"}]}
+            with mock.patch.object(release.legacy, "verify_release_artifact"), \
+                 mock.patch.object(release.legacy, "verify_install_receipt"), \
+                 mock.patch.object(release, "_verify_stage_app"), \
+                 mock.patch.object(release, "_upload_and_store_bundle"), \
+                 mock.patch.object(release.legacy, "copy_payload",
+                                   return_value=("/incoming", "/metadata")), \
+                 mock.patch.object(release, "_production_ssh", return_value=json.dumps(receipt)), \
+                 mock.patch.object(release, "_verify_prod_app", return_value={"receipt": receipt}), \
+                 mock.patch.object(release, "_finalize_success",
+                                   return_value={"status": "completed"}) as finish, \
+                 mock.patch.object(release, "_build_candidate") as build, \
+                 mock.patch.object(release.legacy, "stage_install") as install:
+                result = release._promote_staged_candidate(
+                    config, root / "state.json", state, item, evidence)
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(item["stage_journey_receipt"], evidence)
+            finish.assert_called_once()
+            build.assert_not_called()
+            install.assert_not_called()
+
+
 
 if __name__ == "__main__":
     unittest.main()

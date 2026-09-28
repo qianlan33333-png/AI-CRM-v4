@@ -772,7 +772,8 @@ def _validate_state(state: Any) -> None:
 
 def _active_queue_item(state: dict[str, Any]) -> dict[str, Any] | None:
     for item in state["queue"]:
-        if item.get("status") in {"pending", "stale_base", "failed", "outcome_unknown"}:
+        if item.get("status") in {"pending", "stale_base", "failed", "outcome_unknown",
+                                  "stage_validation_pending"}:
             return item
     return None
 
@@ -802,6 +803,14 @@ def _recover_orphaned_inflight(state_path: Path, state: dict[str, Any]) -> str |
     inflight = state.get("in_flight")
     if not isinstance(inflight, dict) or state.get("status") == "outcome_unknown":
         return None
+    if state.get("status") == "blocked" and inflight.get("phase") == "stage-validation-pending":
+        item = next((candidate for candidate in state.get("queue", [])
+                     if candidate.get("candidate_id") == inflight.get("candidate_id")
+                     and candidate.get("head_sha") == inflight.get("head_sha")), None)
+        if (inflight.get("stage_install_completed") is not True or item is None
+                or item.get("status") != "stage_validation_pending"):
+            raise ReleaseError("staged pause has no exact completed installation attempt")
+        return None  # Intentional pause. The next poll must supply exact journey evidence.
     item = next((candidate for candidate in state.get("queue", [])
                  if candidate.get("candidate_id") == inflight.get("candidate_id")
                  and candidate.get("head_sha") == inflight.get("head_sha")), None)
@@ -3822,7 +3831,11 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
                 )
                 if smoke_receipt is None:
                     raise ReleaseError("required installed behavior check was not run")
-            phase = "source-backup"
+            # Keep the existing attempt and queue position while the release
+            # desk checks the exact installed package's affected business flow.
+            # A later poll resumes this attempt; it never rebuilds or reinstalls.
+            phase = "stage-validation-pending"
+            _safe_directory(Path(config["work_root"]) / "stage-evidence", create=True)
             state["in_flight"].update({"phase": phase, "runtime_changed": True,
                                        "release_manifest_sha256": metadata["release_files_sha256"],
                                        "release_metadata": metadata,
@@ -3837,35 +3850,12 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
                                        "bundle_meta": bundle_meta,
                                        "production_install_started": False,
                                        "commit_started": False})
-            _update_state(state_path, state)
-            _upload_and_store_bundle(config, bundle, bundle_meta)
-            incoming, remote_metadata = legacy.copy_payload(config, item["head_sha"], out / "release",
-                                                             out / "domestic-release.json", installed_app["sha"])
-            metadata_bytes = (out / "domestic-release.json").read_bytes()
-            metadata_sha = hashlib.sha256(metadata_bytes).hexdigest()
-            phase = "production-install"
-            state["in_flight"].update({"phase": phase, "production_install_started": True,
-                                       "candidate_sha": item["head_sha"], "candidate_tree": head_tree,
-                                       "previous_main_sha": old_main_sha,
-                                       "previous_installed_app": dict(installed_app),
-                                       "installed_app": {"sha": item["head_sha"], "tree": head_tree,
-                                                         "manifest_sha256": metadata["release_files_sha256"]},
-                                       "bundle_meta": bundle_meta,
-                                       "package_metadata_sha256": metadata_sha,
-                                       "release_metadata": metadata})
-            _update_state(state_path, state)
-            install_started = time.monotonic()
-            result = _production_ssh(
-                config, "sudo", "-n", config["prod_helper"], "--incoming", incoming,
-                "--metadata", remote_metadata, "--expected-sha", item["head_sha"],
-                "--metadata-sha256", metadata_sha, "--expected-base", installed_app["sha"], timeout=1800,
-            )
-            production_receipt = json.loads(result.splitlines()[-1])
-            production = _verify_prod_app(config, item["head_sha"], metadata["release_files_sha256"])
-            legacy.verify_install_receipt(production.get("receipt"), metadata, installed_app["sha"])
-            if production_receipt != production.get("receipt"):
-                raise ReleaseError("production installer response differs from independent readback")
-            installed_app = dict(state["in_flight"]["installed_app"])
+            item["status"] = "stage_validation_pending"
+            _update_state(state_path, state, status="blocked")
+            return {"status": "stage_validation_pending", "candidate_sha": item["head_sha"],
+                    "manifest_sha256": metadata["release_files_sha256"],
+                    "stage_receipt": stage_receipt,
+                    "stage_evidence_path": str(Path(config["work_root"]) / "stage-evidence" / f"{item['head_sha']}.json")}
         else:
             # Source-only commits still get a full production recovery bundle
             # and a verified production health readback, but never install the
@@ -3908,6 +3898,152 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
                                  installed_app, check_receipt, stage_receipt, production_receipt, started)
     except BaseException as exc:
         if state.get("in_flight", {}).get("commit_started") or state.get("in_flight", {}).get("production_install_started"):
+            _mark_unknown(state_path, state, phase, exc)
+        else:
+            _mark_failed(state_path, state, item, exc, phase)
+        raise
+
+
+def _stage_evidence_path(config: dict[str, Any], sha: str) -> Path:
+    return Path(config["work_root"]) / "stage-evidence" / f"{_sha(sha, 'stage candidate SHA')}.json"
+
+
+def _read_stage_evidence(config: dict[str, Any], inflight: dict[str, Any]) -> dict[str, Any] | None:
+    sha = _sha(inflight.get("head_sha"), "staged candidate SHA")
+    path = _stage_evidence_path(config, sha)
+    _safe_directory(path.parent)
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise ReleaseError("stage journey evidence path is unsafe")
+    info = path.lstat()
+    if info.st_uid != os.geteuid() or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600:
+        raise ReleaseError("stage journey evidence must be a protected controller receipt")
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ReleaseError("stage journey evidence is unreadable") from exc
+    stage_receipt = inflight.get("stage_receipt")
+    if not isinstance(stage_receipt, dict):
+        raise ReleaseError("staged attempt has no installation receipt")
+    stage_digest = hashlib.sha256(json.dumps(
+        stage_receipt, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    expected = {
+        "schema_version": 1, "status": "passed", "source_sha": sha,
+        "source_tree": inflight["head_tree"],
+        "manifest_sha256": inflight["release_manifest_sha256"],
+        "stage_receipt_sha256": stage_digest,
+    }
+    if not isinstance(receipt, dict) or any(receipt.get(key) != value for key, value in expected.items()):
+        raise ReleaseError("stage journey evidence differs from the exact installed attempt")
+    verified_at = _utc_string(receipt.get("verified_at_utc"), "stage journey time")
+    installed_at = _utc_string(stage_receipt.get("installed_at_utc"), "stage installation time")
+    if datetime.fromisoformat(verified_at.replace("Z", "+00:00")) < datetime.fromisoformat(installed_at.replace("Z", "+00:00")):
+        raise ReleaseError("stage journey predates the installed package")
+    checks = receipt.get("checks")
+    if not isinstance(checks, list) or not checks:
+        raise ReleaseError("stage journey evidence has no business checks")
+    names: set[str] = set()
+    for check in checks:
+        if not isinstance(check, dict):
+            raise ReleaseError("stage journey check is malformed")
+        name = check.get("name")
+        if (not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,79}", name)
+                or name in names or check.get("status") != "passed"):
+            raise ReleaseError("stage journey check is missing, repeated or unsuccessful")
+        names.add(name)
+        log_value = check.get("log")
+        if not isinstance(log_value, str) or not log_value:
+            raise ReleaseError("stage journey log path is missing")
+        log = Path(log_value)
+        if log.parent != path.parent or not log.name.startswith(f"{sha}-"):
+            raise ReleaseError("stage journey log is outside the exact protected evidence directory")
+        if log.is_symlink() or not log.is_file():
+            raise ReleaseError("stage journey log is missing or unsafe")
+        log_info = log.lstat()
+        if log_info.st_uid != os.geteuid() or log_info.st_nlink != 1 or stat.S_IMODE(log_info.st_mode) != 0o600:
+            raise ReleaseError("stage journey log is not protected")
+        if _file_sha256(log) != _digest(check.get("log_sha256"), "stage journey log digest"):
+            raise ReleaseError("stage journey log differs from its receipt")
+    return receipt
+
+
+def _promote_staged_candidate(config: dict[str, Any], state_path: Path, state: dict[str, Any],
+                              item: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    """Continue the original staged attempt after its exact installed journeys pass."""
+    repo = Path(config["repo"])
+    inflight = state.get("in_flight")
+    if (not isinstance(inflight, dict) or inflight.get("phase") != "stage-validation-pending"
+            or inflight.get("stage_install_completed") is not True
+            or item.get("status") != "stage_validation_pending"
+            or item.get("candidate_id") != inflight.get("candidate_id")
+            or item.get("head_sha") != inflight.get("head_sha")
+            or state.get("status") != "blocked"):
+        raise ReleaseError("no exact staged attempt is awaiting journey evidence")
+    sha = _sha(item["head_sha"], "staged candidate SHA")
+    tree = _sha(inflight["head_tree"], "staged candidate tree")
+    old_main = _sha(inflight["base_sha"], "staged base SHA")
+    if (_resolve_ref(repo, MAIN_REF) != old_main or state["main"]["sha"] != old_main
+            or _resolve_ref(repo, item["ref"]) != sha or _tree(repo, sha) != tree):
+        raise ReleaseError("staged candidate no longer matches domestic main or its exact ref")
+    metadata = inflight["release_metadata"]
+    previous_app = inflight["previous_installed_app"]
+    installed_app = inflight["installed_app"]
+    bundle_meta = inflight["bundle_meta"]
+    out = Path(config["work_root"]) / "builds" / sha
+    metadata_path = out / "domestic-release.json"
+    bundle = Path(config["work_root"]) / "source-bundles" / f"{sha}.bundle"
+    if (metadata_path.is_symlink() or not metadata_path.is_file()
+            or _file_sha256(metadata_path) != inflight["package_metadata_sha256"]
+            or json.loads(metadata_path.read_text()) != metadata):
+        raise ReleaseError("staged package metadata changed during journey validation")
+    legacy.verify_release_artifact(out / "release", metadata)
+    if (bundle.is_symlink() or not bundle.is_file()
+            or _file_sha256(bundle) != bundle_meta["bundle_sha256"]):
+        raise ReleaseError("staged source bundle changed during journey validation")
+    legacy.verify_install_receipt(inflight["stage_receipt"], metadata, previous_app["sha"])
+    _verify_stage_app(sha, metadata["release_files_sha256"])
+    phase = "source-backup"
+    started_at = _utc_string(item.get("started_at_utc"), "staged attempt start time")
+    elapsed = max(0.0, (datetime.now(timezone.utc) - datetime.fromisoformat(
+        started_at.replace("Z", "+00:00"))).total_seconds())
+    started = time.monotonic() - elapsed
+    try:
+        item["status"] = "checking"
+        inflight.update({"phase": phase, "stage_journey_receipt": evidence,
+                         "candidate_sha": sha, "candidate_tree": tree,
+                         "previous_main_sha": old_main})
+        _update_state(state_path, state, status="blocked")
+        _upload_and_store_bundle(config, bundle, bundle_meta)
+        incoming, remote_metadata = legacy.copy_payload(
+            config, sha, out / "release", metadata_path, previous_app["sha"])
+        phase = "production-install"
+        inflight.update({"phase": phase, "production_install_started": True})
+        _update_state(state_path, state)
+        result = _production_ssh(
+            config, "sudo", "-n", config["prod_helper"], "--incoming", incoming,
+            "--metadata", remote_metadata, "--expected-sha", sha,
+            "--metadata-sha256", inflight["package_metadata_sha256"],
+            "--expected-base", previous_app["sha"], timeout=1800,
+        )
+        production_receipt = json.loads(result.splitlines()[-1])
+        production = _verify_prod_app(config, sha, metadata["release_files_sha256"])
+        legacy.verify_install_receipt(production.get("receipt"), metadata, previous_app["sha"])
+        if production_receipt != production.get("receipt"):
+            raise ReleaseError("production installer response differs from independent readback")
+        _verify_stage_app(sha, metadata["release_files_sha256"])
+        item["stage_journey_receipt"] = evidence
+        if inflight.get("stage_smoke_receipt") is not None:
+            item["stage_smoke_receipt"] = inflight["stage_smoke_receipt"]
+        phase = "main-cas-and-cursor"
+        inflight.update({"phase": phase, "production_receipt": production_receipt,
+                         "commit_started": True})
+        _update_state(state_path, state, status="outcome_unknown")
+        return _finalize_success(
+            config, state_path, state, item, bundle_meta, old_main, installed_app,
+            inflight["check_receipt"], inflight["stage_receipt"], production_receipt, started)
+    except BaseException as exc:
+        if inflight.get("commit_started") or inflight.get("production_install_started"):
             _mark_unknown(state_path, state, phase, exc)
         else:
             _mark_failed(state_path, state, item, exc, phase)
@@ -4069,6 +4205,25 @@ def poll(config: dict[str, Any], *, expected_candidate_sha: str | None = None) -
         verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
         state = _load_state(state_path)
         _recover_orphaned_inflight(state_path, state)
+        inflight = state.get("in_flight")
+        if (state["status"] == "blocked" and isinstance(inflight, dict)
+                and inflight.get("phase") == "stage-validation-pending"):
+            front = _active_queue_item(state)
+            if front is None or front.get("head_sha") != inflight.get("head_sha"):
+                raise ReleaseError("staged attempt is not at the serial queue front")
+            if expected_candidate_sha is not None and expected_candidate_sha != front["head_sha"]:
+                return {"status": "candidate_not_at_queue_front",
+                        "requested_candidate_sha": expected_candidate_sha,
+                        "queue_head_sha": front["head_sha"], "main_sha": state["main"]["sha"]}
+            _verify_controller_files(config, repo, state["main"]["sha"],
+                                     sorted(builder.FIXED_CONTROLLER_FILES))
+            evidence = _read_stage_evidence(config, inflight)
+            if evidence is None:
+                return {"status": "stage_validation_pending",
+                        "candidate_sha": front["head_sha"],
+                        "manifest_sha256": inflight["release_manifest_sha256"],
+                        "stage_evidence_path": str(_stage_evidence_path(config, front["head_sha"]))}
+            return _promote_staged_candidate(config, state_path, state, front, evidence)
         if state["status"] == "outcome_unknown":
             raise ReleaseError("production outcome is unknown; use reconcile, never reinstall blindly")
         if state["status"] == "blocked":
@@ -4137,6 +4292,10 @@ def release_candidate(config: dict[str, Any], ref: str, head_sha: str, base_sha:
                 "queue_position": queue_position, "submission": submitted}
 
     result = poll(config, expected_candidate_sha=head_sha)
+    if result.get("status") == "stage_validation_pending":
+        return {"status": "stage_validation_pending", "candidate_sha": head_sha,
+                "queue_position": queue_position, "submission": submitted,
+                "release": result}
     if (result.get("main_sha") == head_sha
             and result.get("status") in {"completed", "ready", "candidate_not_at_queue_front"}):
         return {"status": "completed", "candidate_sha": head_sha, "main_sha": head_sha,
