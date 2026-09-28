@@ -19,7 +19,7 @@ const dom = new JSDOM('<!doctype html><main id="referral-root"></main>', { url: 
     if (url.pathname === '/api/v1/referral/campaigns/7') return json(campaign);
     if (url.pathname === '/api/v1/referral/campaigns/7/me') return json(joined ? { participation: { joined_at: '2026-09-18T00:00:00Z' }, team: { id: 9, name: '向阳队' }, direct_invitation_count: 0, personal_total_score: 0, personal_rank: 0, invitation_available: true } : { participation: null, team: null, direct_invitation_count: 0, personal_total_score: 0, personal_rank: 0, invitation_available: false });
     if (url.pathname === '/api/v1/referral/invitations/rfi_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefg') return json({ campaign, inviter_display_name: '林晓', inviter_avatar_url: '', inviter_team: { id: 9, name: '向阳队' } });
-    if (url.pathname === '/api/v1/referral/campaigns/7/leaderboard') return json({ kind: url.searchParams.get('kind'), period: url.searchParams.get('period'), items: [{ rank: 1, display_name: '小周', team_name: '向阳队', score: 5, mine: false }], my_entry: { rank: 31, display_name: '我', team_name: '向阳队', score: 2, mine: true } });
+    if (url.pathname === '/api/v1/referral/campaigns/7/leaderboard') return json({ kind: url.searchParams.get('kind'), period: url.searchParams.get('period'), items: [{ rank: 1, display_name: '小周', avatar_url: 'http://wx.qlogo.cn/avatar/0', team_name: '向阳队', score: 5, mine: false }, { rank: 2, display_name: '小林', team_name: '向阳队', score: 3, mine: false }], my_entry: { rank: 31, display_name: '我', team_name: '向阳队', score: 2, mine: true } });
     if (url.pathname === '/api/v1/referral/campaigns/7/participations') { joined = true; return json({ participation: { joined_at: '2026-09-18T00:00:00Z' }, team: { id: 9, name: '向阳队' }, direct_invitation_count: 0, personal_total_score: 0, personal_rank: 0, invitation_available: true }); }
     if (url.pathname === '/api/v1/referral/campaigns/7/invite') return json({ url: 'https://crm.example/referral/invite/rfi_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefg' });
     return json({ error: 'not_found' }, 404);
@@ -27,6 +27,11 @@ const dom = new JSDOM('<!doctype html><main id="referral-root"></main>', { url: 
 } });
 dom.window.eval(bundle);
 await waitFor(() => dom.window.document.querySelector('[data-testid="referral-activity-info"]'), 'activity info entry missing');
+await waitFor(() => dom.window.document.querySelectorAll('.referral-leaderboard__row .referral-avatar').length === 2, 'leaderboard avatars missing');
+const avatars = dom.window.document.querySelectorAll('.referral-leaderboard__row .referral-avatar');
+assert.equal(avatars[0].src, 'https://wx.qlogo.cn/avatar/0', 'provider HTTP avatar must display through HTTPS');
+assert.equal(avatars[0].referrerPolicy, 'no-referrer');
+assert.match(avatars[1].src, /^data:image\/svg\+xml,/, 'missing avatar still uses the existing fallback');
 dom.window.document.querySelector('[data-testid="referral-activity-info"]').click();
 await waitFor(() => dom.window.document.body.textContent.includes('林晓'), `invite preview must render the safe inviter display name: ${dom.window.document.body.textContent}`);
 dom.window.document.querySelector('[data-testid="referral-activity-info"]').click();

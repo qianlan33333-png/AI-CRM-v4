@@ -355,7 +355,17 @@ function avatar(url: string, name: string): HTMLElement {
   image.className = "referral-avatar";
   image.alt = `${name || "用户"}头像`;
   image.referrerPolicy = "no-referrer";
-  image.src = url || defaultAvatar;
+  let source = url;
+  if (url.startsWith("http://")) {
+    try {
+      const parsed = new URL(url);
+      if (["wx.qlogo.cn", "thirdwx.qlogo.cn", "mmhead.c2c.wechat.com", "mmhead.hk.wechat.com", "wework.qpic.cn", "wwcdn.weixin.qq.com"].includes(parsed.hostname.toLowerCase()) && !parsed.port && !parsed.username && !parsed.password) {
+        parsed.protocol = "https:";
+        source = parsed.href;
+      }
+    } catch { /* A malformed provider URL falls back on image load error. */ }
+  }
+  image.src = source || defaultAvatar;
   image.onerror = () => {
     image.onerror = null;
     image.src = defaultAvatar;

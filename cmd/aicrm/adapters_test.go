@@ -470,6 +470,27 @@ func TestSecurityHeadersAllowInvitationProviderImagesOnlyOnPublicInvitationPages
 	}
 }
 
+func TestSecurityHeadersAllowReferralAvatarHostsOnlyOnReferralPages(t *testing.T) {
+	handler := securityHeaders(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	for _, path := range []string{"/referral", "/referral?campaign=4", "/referral/invite/token"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		policy := response.Header().Get("Content-Security-Policy")
+		for _, host := range []string{"wx.qlogo.cn", "thirdwx.qlogo.cn", "mmhead.c2c.wechat.com", "mmhead.hk.wechat.com", "wework.qpic.cn", "wwcdn.weixin.qq.com"} {
+			if !strings.Contains(policy, "https://"+host) {
+				t.Fatalf("referral CSP lacks %s on %s: %q", host, path, policy)
+			}
+		}
+	}
+	for _, path := range []string{"/admin/referral", "/admin/channels", "/api/v1/referral/campaigns", "/"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if policy := response.Header().Get("Content-Security-Policy"); strings.Contains(policy, "https://wx.qlogo.cn") {
+			t.Fatalf("unrelated route permits referral avatars on %s: %q", path, policy)
+		}
+	}
+}
+
 func TestSecurityHeadersAllowDashboardRuntimeStyles(t *testing.T) {
 	handler := securityHeaders(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	response := httptest.NewRecorder()

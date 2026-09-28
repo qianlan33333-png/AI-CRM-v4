@@ -3269,6 +3269,11 @@ func securityHeaders(next http.Handler) http.Handler {
 			// image policy for the admin shell or API responses.
 			imageSource += " https://wework.qpic.cn"
 		}
+		if request.URL.Path == "/referral" || strings.HasPrefix(request.URL.Path, "/referral/") {
+			// Public referral pages show provider avatar URLs from the customer
+			// directory. Keep the allowance scoped to these pages and known hosts.
+			imageSource += " https://wx.qlogo.cn https://thirdwx.qlogo.cn https://mmhead.c2c.wechat.com https://mmhead.hk.wechat.com https://wework.qpic.cn https://wwcdn.weixin.qq.com"
+		}
 		contentPolicy := "default-src 'self'; script-src 'self' https://res.wx.qq.com; style-src " + styleSource + "; img-src " + imageSource + "; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'"
 		if request.URL.Path != webshell.SidebarPagePath && !strings.HasPrefix(request.URL.Path, "/api/sidebar/") {
 			writer.Header().Set("X-Frame-Options", "SAMEORIGIN")

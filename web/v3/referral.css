@@ -1051,10 +1051,10 @@ body:has(#referral-root) {
   cursor: pointer;
 }
 #referral-root.referral-mobile-detail .referral-hero {
-  min-height: 148px;
+  min-height: 108px;
   margin: 0;
   border-radius: 0;
-  padding: 28px 24px 56px;
+  padding: 24px 24px 38px;
   background: #fa4c25;
   box-shadow: none;
 }
@@ -1077,7 +1077,7 @@ body:has(#referral-root) {
   position: relative;
   z-index: 1;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: -30px 18px 14px;
+  margin: -26px 18px 14px;
 }
 #referral-root.referral-mobile-detail .referral-metric {
   border: 0;
