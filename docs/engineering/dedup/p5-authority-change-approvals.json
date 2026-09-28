@@ -1919,6 +1919,28 @@
       ],
       "reason": "Rebind the unchanged Alipay refund API and synchronized canonical index/lock authority change to domestic main 862634d. Independently recomputed complete before/after hashes equal the earlier reviewed 791 baseline; frozen donor payloads and authority libraries remain unchanged.",
       "review_reference": "Author review on 2026-09-28 of the exact 862634d baseline three-file Git authority diff and validated canonical source snapshots, using docs/prd/2026-09-26-alipay-refund.md. This auditable declaration is not independent human approval or proof of new-head Linux acceptance; installation and production readback remain required."
+    },
+    {
+      "base_commit": "d0566b40a0330b12abb9cba390dc6f73319cd924",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "c59f76be378762e696fba1298dc1e98647771f236941566b5cc0033e2cb3002d",
+          "head_sha256": "48e2e238fdea526bc848b877ac3448d006dd6ab6422d77a26f1a292d76e9b817"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "76da324f7c6643b01f971690c67dbf6ff72400471b3f968fdd80361e53089b43",
+          "head_sha256": "1760ca048a6cf06f589a8c339fab80019733f6258d59a76e9e27e1b5bef5d3b6"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "bb90cc43cc1a067c680d5c623181f2a68703c2d0f588d025d17ef8116ebfda95",
+          "head_sha256": "fa39f3d51761fde9609d8ad1b349948094541be5470be582d6bac48ee854be48"
+        }
+      ],
+      "reason": "Record the service-period member_count read contract and synchronized canonical OpenAPI index and lock for the authorized member-list count correction. Frozen donor payloads and unrelated API operations are unchanged.",
+      "review_reference": "Author review on 2026-09-28 of the exact three-file d0566b4 base diff, canonical source hashes and docs/prd/2026-09-28-period-product-member-count.md. This is an auditable author declaration, not independent human approval or evidence of Linux checks or production installation."
     }
   ]
 }
