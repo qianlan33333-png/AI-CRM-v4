@@ -27,7 +27,6 @@ CI_DIR = str(Path(__file__).resolve().parent)
 if CI_DIR not in sys.path:
     sys.path.insert(0, CI_DIR)
 import check_preparation
-from urllib.parse import parse_qs, unquote, urlparse
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -45,50 +44,12 @@ def command_available(name: str) -> bool:
 def is_local_test_database_url(value: str | None = None) -> bool:
     """Return whether a database URL targets the canonical local test database."""
     value = os.environ.get("AICRM_DATABASE_URL") if value is None else value
-    if not value:
-        return False
-    try:
-        parsed = urlparse(value)
-        hostname = parsed.hostname
-        _ = parsed.port
-        query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
-    except ValueError:
-        return False
-    if {name.lower() for name in query} & {
-            "database", "dbname", "host", "hostaddr", "service", "servicefile"}:
-        return False
-    database = unquote(parsed.path.strip("/"))
-    return (
-        parsed.scheme in {"postgres", "postgresql"}
-        and hostname in {"127.0.0.1", "localhost", "::1"}
-        and (database == "aicrm_ci" or database.startswith("aicrm_test_"))
-    )
+    return check_preparation.local_test_database_target(value) is not None
 
 
 def postgres_test_connection_environment(value: str) -> dict[str, str] | None:
     """Build a libpq environment pinned to the verified URL endpoint."""
-    if not is_local_test_database_url(value):
-        return None
-    try:
-        parsed = urlparse(value)
-        port = parsed.port or 5432
-        query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
-    except ValueError:
-        return None
-    env = dict(os.environ)
-    # Ambient libpq endpoint settings can override the checked URL. Strip the
-    # parameters that can load another endpoint, then set each target field.
-    for name in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE"):
-        env.pop(name, None)
-    env.update(
-        PGHOST=parsed.hostname or "",
-        PGPORT=str(port),
-        PGUSER=unquote(parsed.username or ""),
-        PGPASSWORD=unquote(parsed.password or ""),
-        PGDATABASE=unquote(parsed.path.strip("/")),
-        PGSSLMODE=query.get("sslmode", ["prefer"])[0],
-    )
-    return env
+    return check_preparation.postgres_test_connection_environment(value)
 
 
 def postgres_16_ready() -> bool:

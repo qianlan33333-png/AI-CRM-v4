@@ -23,6 +23,48 @@ import time
 from urllib.parse import parse_qs, unquote, urlsplit
 
 
+def local_test_database_target(raw: str | None):
+    """Parse only an explicit loopback synthetic database URL."""
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        parsed = urlsplit(raw)
+        hostname = parsed.hostname
+        port = parsed.port or 5432
+        query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
+    except ValueError:
+        return None
+    if {name.lower() for name in query} & {
+            "database", "dbname", "host", "hostaddr", "service", "servicefile"}:
+        return None
+    database = unquote(parsed.path.strip("/"))
+    if (parsed.scheme not in {"postgres", "postgresql"}
+            or hostname not in {"localhost", "127.0.0.1", "::1"}
+            or not (database == "aicrm_ci" or database.startswith("aicrm_test_"))):
+        return None
+    return parsed, database, port, query
+
+
+def postgres_test_connection_environment(raw: str) -> dict[str, str] | None:
+    """Pin libpq to a checked local test target and clear ambient redirects."""
+    target = local_test_database_target(raw)
+    if target is None:
+        return None
+    parsed, database, port, query = target
+    env = dict(os.environ)
+    for name in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE"):
+        env.pop(name, None)
+    env.update(
+        PGHOST=parsed.hostname or "",
+        PGPORT=str(port),
+        PGUSER=unquote(parsed.username or ""),
+        PGPASSWORD=unquote(parsed.password or ""),
+        PGDATABASE=database,
+        PGSSLMODE=query.get("sslmode", ["prefer"])[0],
+    )
+    return env
+
+
 def atomic_json(path: Path, value: dict) -> None:
     temporary = path.with_name(path.name + ".tmp-" + str(os.getpid()))
     temporary.write_text(json.dumps(value, sort_keys=True) + "\n")
@@ -633,14 +675,9 @@ def publish_artifact(root: Path, stage: Path) -> None:
 
 
 def cleanup_databases(prep: Path, raw: str) -> None:
-    parsed = urlsplit(raw)
-    database = unquote(parsed.path.lstrip("/"))
-    if (parsed.scheme not in {"postgres", "postgresql"} or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
-            or not (database == "aicrm_ci" or database.startswith("aicrm_test_"))):
+    env = postgres_test_connection_environment(raw)
+    if env is None:
         raise ValueError("cleanup requires an explicitly configured local synthetic database")
-    env = dict(os.environ, PGHOST=parsed.hostname, PGPORT=str(parsed.port or 5432),
-               PGUSER=unquote(parsed.username or ""), PGPASSWORD=unquote(parsed.password or ""),
-               PGDATABASE=database, PGSSLMODE=parse_qs(parsed.query).get("sslmode", ["prefer"])[0])
     for file in sorted(prep.glob("database-*.json")):
         if file.is_symlink():
             raise ValueError("database inventory is a symlink")

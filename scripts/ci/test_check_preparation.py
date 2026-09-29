@@ -362,11 +362,45 @@ class CheckPreparationTest(unittest.TestCase):
     def test_cleanup_rejects_non_synthetic_server_and_unowned_database(self):
         cache, _ = self.fixture()
         (cache / "database-bad.json").write_text(json.dumps({"database": "production"}))
-        for raw in ("postgres://role@10.0.4.1/aicrm_test_x", "postgres://role@localhost/production", "postgres://role@localhost/aicrm_test_x"):
+        for raw in (
+                "postgres://role@10.0.4.1/aicrm_test_x",
+                "postgres://role@localhost/production",
+                "postgres://role@localhost/aicrm_test_x",
+                "postgres://role@localhost/aicrm_test_x?dbname=production",
+                "postgres://role@localhost/aicrm_test_x?host=remote.example",
+                "postgres://role@localhost/aicrm_test_x?hostaddr=203.0.113.8",
+                "postgres://role@localhost/aicrm_test_x?service=production",
+        ):
             with self.subTest(raw=raw), patch.object(prep.subprocess, "run") as run:
                 with self.assertRaises(ValueError):
                     prep.cleanup_databases(cache, raw)
                 run.assert_not_called()
+
+    def test_cleanup_uses_pinned_local_libpq_environment(self):
+        cache, _ = self.fixture()
+        name = "aicrm_test_clone_aaaaaaaaaaaaaaaa_acceptance_test"
+        inventory = cache / ("database-" + name + ".json")
+        inventory.write_text(json.dumps({"database": name}))
+        ambient = {
+            "PGHOSTADDR": "203.0.113.8",
+            "PGSERVICE": "production",
+            "PGSERVICEFILE": "/tmp/production.pg_service.conf",
+        }
+        with patch.dict(os.environ, ambient), patch.object(prep.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = "t"
+            prep.cleanup_databases(
+                cache,
+                "postgres://role@127.0.0.1:5432/aicrm_test_anchor?sslmode=disable",
+            )
+        self.assertEqual(run.call_count, 2)
+        for call in run.call_args_list:
+            actual_env = call.kwargs["env"]
+            self.assertEqual(actual_env["PGHOST"], "127.0.0.1")
+            self.assertEqual(actual_env["PGDATABASE"], "aicrm_test_anchor")
+            for name in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE"):
+                self.assertNotIn(name, actual_env)
+        self.assertFalse(inventory.exists())
 
     def test_heavy_commands_serialize_across_processes(self):
         cache, _ = self.fixture()
