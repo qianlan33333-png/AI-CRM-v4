@@ -1196,6 +1196,7 @@ func TestClientReadFirstExternalContactFollowUsesOnlyFirstDetailEntry(t *testing
 		{name: "first even when later follow has valid tags", response: `{"errcode":0,"external_contact":{"external_userid":"external-1"},"follow_user":[{"userid":"first-staff","tags":[{"tag_id":7,"type":0}]},{"userid":"second-staff"}]}`, want: "first-staff"},
 		{name: "no contact", response: `{"errcode":84061,"errmsg":"not external contact"}`, unavailable: true},
 		{name: "no follower", response: `{"errcode":0,"external_contact":{"external_userid":"external-1"},"follow_user":[]}`, unavailable: true},
+		{name: "missing follower list", response: `{"errcode":0,"external_contact":{"external_userid":"external-1"}}`, unavailable: true},
 		{name: "first missing userid does not fall through", response: `{"errcode":0,"external_contact":{"external_userid":"external-1"},"follow_user":[{},{"userid":"second-staff"}]}`, unavailable: true},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {

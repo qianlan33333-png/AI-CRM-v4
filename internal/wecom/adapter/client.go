@@ -546,7 +546,10 @@ func (client *Client) ReadFirstExternalContactFollow(ctx context.Context, extern
 		return "", classifyDirectoryReadError(ErrResponse)
 	}
 	var follows []json.RawMessage
-	if len(payload.FollowUser) == 0 || json.Unmarshal(payload.FollowUser, &follows) != nil {
+	if len(payload.FollowUser) == 0 {
+		return "", wecomport.ErrFirstExternalContactFollowUnavailable
+	}
+	if json.Unmarshal(payload.FollowUser, &follows) != nil {
 		return "", classifyDirectoryReadError(ErrResponse)
 	}
 	if len(follows) == 0 {
