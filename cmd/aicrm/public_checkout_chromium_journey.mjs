@@ -126,6 +126,25 @@ try {
   assert.equal(ordinaryCheckpoint?.key, firstCheckpoint.key, "ordinary page keeps the original idempotency key");
   assert.equal(ordinaryCheckpoint?.payload?.promotion_context, promotionA, "ordinary page cannot replace paid attribution");
   assert.equal(await evaluate(cdp, "document.getElementById('couponPanel')?.hidden"), true, "paid result hides coupon selection");
+
+  // Simulate a WebView that has secure random bytes but no randomUUID. The
+  // rendered page must still create one recoverable checkout.
+  await evaluate(cdp, "sessionStorage.removeItem('aicrm.checkout.tab.v2:7:standard');true");
+  await visit(cdp, "/pay/course-7");
+  assert.equal(await evaluate(cdp, "(()=>{Object.defineProperty(window.crypto,'randomUUID',{value:undefined,configurable:true});return typeof window.crypto.getRandomValues==='function'&&typeof window.crypto.randomUUID==='undefined'})()"), true, "compatibility fixture exposes only secure random bytes");
+  await clickWithCoupon(cdp, 11);
+  await wait(cdp, "document.getElementById('buy')?.textContent==='已购买'", "secure random fallback checkout did not finish");
+  const fallbackCheckpoint = await evaluate(cdp, "JSON.parse(sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard') || 'null')");
+  assert.match(fallbackCheckpoint?.key || "", /^checkout-[0-9a-f]{32}$/, "fallback uses secure random bytes for a stable key");
+  assert.notEqual(fallbackCheckpoint?.merchant_order_no, firstCheckpoint.merchant_order_no, "fallback creates a distinct synthetic order");
+
+  // With neither API, the page stops before saving a checkpoint or posting.
+  await evaluate(cdp, "sessionStorage.removeItem('aicrm.checkout.tab.v2:7:standard');true");
+  await visit(cdp, "/pay/course-7");
+  await evaluate(cdp, "Object.defineProperty(window.crypto,'randomUUID',{value:undefined,configurable:true});Object.defineProperty(window.crypto,'getRandomValues',{value:undefined,configurable:true});true");
+  await clickWithCoupon(cdp, 12);
+  await wait(cdp, "document.getElementById('status')?.textContent==='订单未创建。当前浏览器不支持安全下单，请升级浏览器后重试。'", "missing secure random source was not explained");
+  assert.equal(await evaluate(cdp, "sessionStorage.getItem('aicrm.checkout.tab.v2:7:standard')"), null, "unsupported browser cannot save a new checkout checkpoint");
   if (cdp.exceptions.length) throw new Error(`page exceptions=${JSON.stringify(cdp.exceptions)}`);
   console.log("public_checkout_chromium: PASS");
 } finally {

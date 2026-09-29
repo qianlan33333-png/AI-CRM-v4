@@ -47,12 +47,13 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   elements.get('checkoutContent').hidden = true;
   const paymentOption=element(); paymentOption.value='wechat_pay';
   setGlobal('document', {getElementById(id) { return elements.get(id); }, querySelector() { return paymentOption; }, querySelectorAll() { return [paymentOption]; }, addEventListener() {}, createElement() { return element(); }});
-  setGlobal('window', {addEventListener(){}});
+  const browserCrypto = {randomUUID() { return 'fresh-checkout-key'; }};
+  setGlobal('window', {addEventListener(){}, crypto: browserCrypto});
   setGlobal('navigator', {userAgent});
   setGlobal('sessionStorage', {getItem(key) { return store.get(key) ?? null; }, setItem(key,value) {store.set(key,String(value));}, removeItem(key) {store.delete(key);} });
   setGlobal('localStorage', {getItem(key) { return store.get(key) ?? null; }, setItem(key, value) { store.set(key, String(value)); }, removeItem(key) { store.delete(key); }});
   setGlobal('location', {href: '', hash:fragment, replace(url){calls.push({replace:url});}, pathname: '/pay/course-7', search: '?utm_source=shared', assign(url) { calls.push({redirect: url}); if (redirectFailure) throw new Error('redirect blocked'); }});
-  setGlobal('crypto', {randomUUID() { return 'fresh-checkout-key'; }});
+  setGlobal('crypto', browserCrypto);
   setGlobal('WeixinJSBridge', {invoke() { throw new Error('paid reload must not invoke payment'); }});
   setGlobal('fetch', async (url, options = {}) => {
     calls.push({url: String(url), method: options.method ?? 'GET'});

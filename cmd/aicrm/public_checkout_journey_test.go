@@ -260,7 +260,7 @@ func TestPublicCheckoutBrowserJourney(t *testing.T) {
 	}
 
 	records := application.snapshot()
-	if len(records) != 4 {
+	if len(records) != 5 {
 		t.Fatalf("records=%+v", records)
 	}
 	lost := records["checkout-journey-1"]
@@ -276,6 +276,10 @@ func TestPublicCheckoutBrowserJourney(t *testing.T) {
 	}
 	if _, exists := records["checkout-journey-5"]; exists {
 		t.Fatalf("unavailable browser storage must block checkout request: %+v", records["checkout-journey-5"])
+	}
+	fallback := records["checkout-000102030405060708090a0b0c0d0e0f"]
+	if fallback.createCalls != 1 || fallback.command.CouponClaimID != 21 {
+		t.Fatalf("secure random fallback must create and recover one original checkout: %+v", fallback)
 	}
 	if platformconfig.ChromiumJourneyRequired() {
 		runPublicCheckoutChromiumJourney(t, public, root)
@@ -319,12 +323,19 @@ func runPublicCheckoutChromiumJourney(t *testing.T, public http.Handler, root st
 		t.Fatalf("public checkout Chromium journey: %v\n%s", err, output)
 	}
 	records := application.snapshot()
-	if len(records) != 1 {
+	if len(records) != 2 {
 		t.Fatalf("Chromium records=%+v", records)
 	}
 	for key, record := range records {
-		if record.createCalls != 2 || record.command.PromotionContext != "dpc_"+strings.Repeat("A", 43) || record.command.CouponClaimID != 11 {
+		if record.command.CouponClaimID != 11 || (record.createCalls != 2 && record.createCalls != 1) {
 			t.Fatalf("Chromium recovered record %q=%+v", key, record)
+		}
+		if strings.HasPrefix(key, "checkout-") && len(key) == len("checkout-")+32 {
+			if record.createCalls != 1 || record.command.PromotionContext != "" {
+				t.Fatalf("Chromium secure-random fallback record %q=%+v", key, record)
+			}
+		} else if record.createCalls != 2 || record.command.PromotionContext != "dpc_"+strings.Repeat("A", 43) {
+			t.Fatalf("Chromium original promotion record %q=%+v", key, record)
 		}
 	}
 }

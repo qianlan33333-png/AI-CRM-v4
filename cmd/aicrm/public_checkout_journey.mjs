@@ -40,7 +40,7 @@ async function getPage(cookie, path = "/pay/course-7") {
   return response.text();
 }
 
-async function runPage(storage, cookie, bridge, path = "/pay/course-7") {
+async function runPage(storage, cookie, bridge, path = "/pay/course-7", cryptoMode = "native") {
   const html = await getPage(cookie, path);
   const errors = [];
   const console = new VirtualConsole();
@@ -53,7 +53,12 @@ async function runPage(storage, cookie, bridge, path = "/pay/course-7") {
     beforeParse(window) {
       Object.defineProperty(window.navigator, "userAgent", { configurable: true, value: "MicroMessenger test" });
       Object.defineProperty(window, "sessionStorage", { configurable: true, value: storage });
-      Object.defineProperty(window, "crypto", { configurable: true, value: { randomUUID: () => `checkout-journey-${++keySequence}` } });
+      const crypto = cryptoMode === "native"
+        ? { randomUUID: () => `checkout-journey-${++keySequence}` }
+        : cryptoMode === "getRandomValues"
+          ? { getRandomValues(bytes) { bytes.forEach((_, index) => { bytes[index] = index; }); return bytes; } }
+          : {};
+      Object.defineProperty(window, "crypto", { configurable: true, value: crypto });
       Object.defineProperty(window, "AbortController", { configurable: true, value: globalThis.AbortController });
       window.WeixinJSBridge = {
         invoke(_method, _handoff, callback) {
@@ -271,3 +276,33 @@ legacy.window.document.getElementById("buy").click();
 await waitFor(legacy.window.document, "旧版订单恢复标识缺少付款会话绑定，已保留原标识，请勿重新下单", "legacy response-lost checkpoint");
 assert.equal(legacyStorage.values.size, 1, "legacy unbound recovery must remain and never create a new order");
 closePage(legacy);
+
+// Older embedded browsers may expose secure random bytes without randomUUID.
+// The fallback creates one recoverable checkout, and a later browser with no
+// random API must still reuse its saved merchant order instead of minting a key.
+const fallbackStorage = new SharedStorage();
+const fallback = await runPage(fallbackStorage, firstSession, normalBridge, "/pay/course-7", "getRandomValues");
+setPurchase(fallback, 21, "13800138000");
+fallback.window.document.getElementById("buy").click();
+await waitFor(fallback.window.document, "支付结果确认超时，原订单已保留，请稍后刷新查看", "secure random fallback checkout");
+const fallbackCheckpoint = JSON.parse([...fallbackStorage.values.values()][0]);
+assert.equal(fallbackCheckpoint.key, "checkout-000102030405060708090a0b0c0d0e0f");
+assert.equal(fallbackCheckpoint.create_attempted, true);
+assert.notEqual(fallbackCheckpoint.merchant_order_no, "");
+closePage(fallback);
+
+const fallbackReload = await runPage(fallbackStorage, firstSession, normalBridge, "/pay/course-7", "none");
+await waitFor(fallbackReload.window.document, "已恢复原订单，请继续确认支付。", "fallback checkout reload");
+fallbackReload.window.document.getElementById("buy").click();
+await waitFor(fallbackReload.window.document, "支付结果确认超时，原订单已保留，请稍后刷新查看", "fallback checkout recovery without random API");
+assert.equal(JSON.parse([...fallbackStorage.values.values()][0]).key, fallbackCheckpoint.key);
+closePage(fallbackReload);
+
+// No secure random API and no checkpoint must stop before saving or posting.
+const noCryptoStorage = new SharedStorage();
+const noCrypto = await runPage(noCryptoStorage, firstSession, normalBridge, "/pay/course-7", "none");
+setPurchase(noCrypto, 22, "13800138000");
+noCrypto.window.document.getElementById("buy").click();
+await waitFor(noCrypto.window.document, "订单未创建。当前浏览器不支持安全下单，请升级浏览器后重试。", "missing secure random source");
+assert.equal(noCryptoStorage.values.size, 0, "missing secure random source cannot save a new checkpoint");
+closePage(noCrypto);
