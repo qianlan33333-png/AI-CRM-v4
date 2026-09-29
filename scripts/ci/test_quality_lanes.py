@@ -261,6 +261,13 @@ class QualityLaneTests(unittest.TestCase):
         rejected = (
             "postgres://user:pass@db.example/aicrm_test_one",
             "postgres://user:pass@localhost/aicrm_production",
+            "postgres://user:pass@localhost/aicrm_test_one?dbname=production",
+            "postgres://user:pass@localhost/aicrm_test_one?database=production",
+            "postgres://user:pass@localhost/aicrm_test_one?host=db.example",
+            "postgres://user:pass@localhost/aicrm_test_one?hostaddr=203.0.113.8",
+            "postgres://user:pass@localhost/aicrm_test_one?service=production",
+            "postgres://user:pass@localhost/aicrm_test_one?servicefile=%2Ftmp%2Fpostgresql.conf&service=production",
+            "postgres://user:pass@localhost/aicrm_test_one?%64bname=production",
             "https://localhost/aicrm_test_one",
             "postgres://user:pass@[broken/aicrm_test_one",
         )
@@ -306,6 +313,44 @@ class QualityLaneTests(unittest.TestCase):
                     quality_lanes, "command_available", return_value=True), patch("subprocess.run") as run:
                 self.assertFalse(quality_lanes.postgres_16_ready())
                 run.assert_not_called()
+
+    def test_postgres_check_clears_ambient_endpoint_overrides(self):
+        environment = {
+            "AICRM_DATABASE_URL": "postgres://user:pass@127.0.0.1/aicrm_test_local?sslmode=disable",
+            "PGHOSTADDR": "203.0.113.8",
+            "PGSERVICE": "production",
+            "PGSERVICEFILE": "/tmp/production.pg_service.conf",
+        }
+        with patch.dict(os.environ, environment), patch.object(
+                quality_lanes, "command_available", return_value=True), patch("subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = "160000\n"
+            self.assertTrue(quality_lanes.postgres_16_ready())
+            actual_env = run.call_args.kwargs["env"]
+            self.assertEqual(actual_env["PGHOST"], "127.0.0.1")
+            self.assertEqual(actual_env["PGDATABASE"], "aicrm_test_local")
+            for name in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE"):
+                self.assertNotIn(name, actual_env)
+
+    def test_postgres_operations_check_uses_pinned_endpoint_environment(self):
+        environment = {
+            "AICRM_DATABASE_URL": "postgres://user:pass@127.0.0.1/aicrm_test_local?sslmode=disable",
+            "PGHOSTADDR": "203.0.113.8",
+            "PGSERVICE": "production",
+            "PGSERVICEFILE": "/tmp/production.pg_service.conf",
+        }
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, environment), patch.object(
+                quality_lanes, "postgres_16_ready", return_value=True), patch.object(
+                quality_lanes.check_preparation, "preparation_root", return_value=Path(temp)), patch(
+                "subprocess.run") as run:
+            run.return_value.returncode = 0
+            self.assertTrue(quality_lanes.postgres_operations_ready())
+            for call in run.call_args_list:
+                actual_env = call.kwargs["env"]
+                self.assertEqual(actual_env["PGHOST"], "127.0.0.1")
+                self.assertEqual(actual_env["PGDATABASE"], "aicrm_test_local")
+                for name in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE"):
+                    self.assertNotIn(name, actual_env)
 
     def test_version_match_is_exact_token_not_substring(self):
         with patch.object(quality_lanes, "command_available", return_value=True), patch("subprocess.run") as run:

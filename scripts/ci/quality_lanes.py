@@ -51,7 +51,11 @@ def is_local_test_database_url(value: str | None = None) -> bool:
         parsed = urlparse(value)
         hostname = parsed.hostname
         _ = parsed.port
+        query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
     except ValueError:
+        return False
+    if {name.lower() for name in query} & {
+            "database", "dbname", "host", "hostaddr", "service", "servicefile"}:
         return False
     database = unquote(parsed.path.strip("/"))
     return (
@@ -61,20 +65,39 @@ def is_local_test_database_url(value: str | None = None) -> bool:
     )
 
 
+def postgres_test_connection_environment(value: str) -> dict[str, str] | None:
+    """Build a libpq environment pinned to the verified URL endpoint."""
+    if not is_local_test_database_url(value):
+        return None
+    try:
+        parsed = urlparse(value)
+        port = parsed.port or 5432
+        query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
+    except ValueError:
+        return None
+    env = dict(os.environ)
+    # Ambient libpq endpoint settings can override the checked URL. Strip the
+    # parameters that can load another endpoint, then set each target field.
+    for name in ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE"):
+        env.pop(name, None)
+    env.update(
+        PGHOST=parsed.hostname or "",
+        PGPORT=str(port),
+        PGUSER=unquote(parsed.username or ""),
+        PGPASSWORD=unquote(parsed.password or ""),
+        PGDATABASE=unquote(parsed.path.strip("/")),
+        PGSSLMODE=query.get("sslmode", ["prefer"])[0],
+    )
+    return env
+
+
 def postgres_16_ready() -> bool:
     url = os.environ.get("AICRM_DATABASE_URL")
-    if not url or not command_available("psql") or not is_local_test_database_url(url):
+    if not url or not command_available("psql"):
         return False
-    try:
-        parsed = urlparse(url)
-        port = parsed.port or 5432
-    except ValueError:
+    env = postgres_test_connection_environment(url)
+    if env is None:
         return False
-    database = unquote(parsed.path.strip("/"))
-    query = parse_qs(parsed.query)
-    env = dict(os.environ, PGHOST=parsed.hostname, PGPORT=str(port),
-               PGUSER=unquote(parsed.username or ""), PGPASSWORD=unquote(parsed.password or ""),
-               PGDATABASE=database, PGSSLMODE=query.get("sslmode", ["prefer"])[0])
     result = subprocess.run(
         ["psql", "-Atqc", "SHOW server_version_num"], env=env,
         stdout=subprocess.PIPE,
@@ -100,11 +123,9 @@ def postgres_operations_ready() -> bool:
     prep = check_preparation.preparation_root()
     if prep is None:
         return False  # CREATE must always have a recoverable attempt inventory.
-    parsed = urlparse(os.environ["AICRM_DATABASE_URL"])
-    env = dict(os.environ, PGHOST=parsed.hostname, PGPORT=str(parsed.port or 5432),
-               PGUSER=unquote(parsed.username or ""), PGPASSWORD=unquote(parsed.password or ""),
-               PGDATABASE=unquote(parsed.path.strip("/")),
-               PGSSLMODE=parse_qs(parsed.query).get("sslmode", ["prefer"])[0])
+    env = postgres_test_connection_environment(os.environ["AICRM_DATABASE_URL"])
+    if env is None:
+        return False
     template = "aicrm_test_tpl_" + uuid.uuid4().hex[:16] + "_acceptance_test"
     clone = "aicrm_test_clone_" + uuid.uuid4().hex[:16] + "_acceptance_test"
     for name in (template, clone):

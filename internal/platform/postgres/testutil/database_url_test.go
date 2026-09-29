@@ -57,6 +57,13 @@ func TestIsLocalTestDatabaseURLMatchesCanonicalPreflightBoundary(t *testing.T) {
 	rejected := []string{
 		"postgres://user:pass@db.example/aicrm_test_one",
 		"postgres://user:pass@localhost/aicrm_production",
+		"postgres://user:pass@localhost/aicrm_test_one?dbname=production",
+		"postgres://user:pass@localhost/aicrm_test_one?database=production",
+		"postgres://user:pass@localhost/aicrm_test_one?host=db.example",
+		"postgres://user:pass@localhost/aicrm_test_one?hostaddr=203.0.113.8",
+		"postgres://user:pass@localhost/aicrm_test_one?service=production",
+		"postgres://user:pass@localhost/aicrm_test_one?servicefile=%2Ftmp%2Fpostgresql.conf&service=production",
+		"postgres://user:pass@localhost/aicrm_test_one?%64bname=production",
 		"https://localhost/aicrm_test_one",
 		"postgres://user:pass@[broken/aicrm_test_one",
 		"postgres://user:pass@localhost:not-a-port/aicrm_test_one",
