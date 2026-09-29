@@ -1087,7 +1087,34 @@ func TestPostgreSQLCommerceFundsHTTPJourney(t *testing.T) {
 	if duplicateFinal.Code != http.StatusOK {
 		t.Fatalf("duplicate final refund status=%d body=%s", duplicateFinal.Code, duplicateFinal.Body.String())
 	}
+	// The provider's payment fact is older than the completed refund, but this
+	// separately signed notification is delivered only after the refund has
+	// reached its terminal state. Alternate it with exact replays of the final
+	// refund notification so the 100-delivery sequence is stable and repeatable.
+	stalePaymentBody, stalePaymentHeaders := commerceFundsSignedCallback(t, platformKey, apiKey, "commerce-funds-payment-after-refund", "TRANSACTION.SUCCESS", map[string]any{"appid": "app", "mchid": "mch", "out_trade_no": merchant, "transaction_id": verifiedTransactionID, "trade_state": "SUCCESS", "success_time": paidAt.Format(time.RFC3339Nano), "amount": map[string]any{"total": 1000, "currency": "CNY"}})
+	const refundReplayCount = 50
+	const stalePaymentReplayCount = 50
+	matrixStartedAt := time.Now()
+	for index := 0; index < refundReplayCount; index++ {
+		refundReplay := httptest.NewRecorder()
+		handler.ServeHTTP(refundReplay, commerceFundsCallbackRequest("/api/public/wechat-pay/callbacks/refund", finalRefundBody, finalRefundHeaders))
+		if refundReplay.Code != http.StatusOK {
+			t.Fatalf("final refund replay %d/%d status=%d body=%s", index+1, refundReplayCount, refundReplay.Code, refundReplay.Body.String())
+		}
+		stalePaymentReplay := httptest.NewRecorder()
+		handler.ServeHTTP(stalePaymentReplay, commerceFundsCallbackRequest("/api/public/wechat-pay/callbacks/payment", stalePaymentBody, stalePaymentHeaders))
+		if stalePaymentReplay.Code != http.StatusOK {
+			t.Fatalf("post-refund stale payment replay %d/%d status=%d body=%s", index+1, stalePaymentReplayCount, stalePaymentReplay.Code, stalePaymentReplay.Body.String())
+		}
+	}
+	t.Logf("PAY-02 replay matrix completed: refund_replays=%d stale_payment_replays=%d total=%d duration=%s", refundReplayCount, stalePaymentReplayCount, refundReplayCount+stalePaymentReplayCount, time.Since(matrixStartedAt))
 	commerceFundsAssertFinal(t, ctx, pool, orderID, paymentID, merchant, firstEnd, firstUpdated)
+	deliveryLock.Lock()
+	finalDeliveries := len(deliveries)
+	deliveryLock.Unlock()
+	if finalDeliveries != 1 {
+		t.Fatalf("callback replay matrix repeated the local commerce delivery: deliveries=%d", finalDeliveries)
+	}
 }
 
 func commerceFundsInt64(value int64) *int64 { return &value }
@@ -1520,11 +1547,42 @@ func commerceFundsRefundedEntitlement(t *testing.T, ctx context.Context, pool *p
 func commerceFundsAssertFinal(t *testing.T, ctx context.Context, pool *pgxpool.Pool, orderID, paymentID int64, merchant string, firstEnd, firstUpdated time.Time) {
 	t.Helper()
 	var orderStatus, paymentStatus, redemptionStatus, entitlementStatus string
-	var completedRefunds, entitlementReceipts, callbackReceipts int
+	var orderCount, paymentCount, refundRows, completedRefunds, refundNumbers int
+	var entitlementReceipts, callbackReceipts, callbackEvents, verifiedCallbacks int
+	var grantReceipts, couponConsumes, paidEvents, paidOutbox, commercePushIntents int
+	var orderAmount, orderRefunded, paymentAmount, refundTotal int64
 	var endAt, updatedAt time.Time
-	err := pool.QueryRow(ctx, "SELECT (SELECT status FROM orders WHERE id=$1),(SELECT status FROM payments WHERE id=$2),(SELECT status FROM coupon_order_redemptions WHERE order_reference=$3),(SELECT status FROM order_service_entitlements WHERE last_order_id=$1),(SELECT count(*) FROM payment_refunds WHERE payment_id=$2 AND status='completed'),(SELECT count(*) FROM order_entitlement_fulfillment_receipts WHERE operation='refund' AND source_order_id=$1),(SELECT count(*) FROM payment_callback_receipts),(SELECT end_at FROM order_service_entitlements WHERE last_order_id=$1),(SELECT updated_at FROM order_service_entitlements WHERE last_order_id=$1)", orderID, paymentID, merchant).Scan(&orderStatus, &paymentStatus, &redemptionStatus, &entitlementStatus, &completedRefunds, &entitlementReceipts, &callbackReceipts, &endAt, &updatedAt)
-	if err != nil || orderStatus != "refunded" || paymentStatus != "paid" || redemptionStatus != "consumed" || entitlementStatus != "refunded" || completedRefunds != 2 || entitlementReceipts != 1 || callbackReceipts != 4 || !endAt.Equal(firstEnd) || !updatedAt.Equal(firstUpdated) {
-		t.Fatalf("final order=%q payment=%q redemption=%q entitlement=%q refunds=%d receipts=%d callbacks=%d end=%s updated=%s err=%v", orderStatus, paymentStatus, redemptionStatus, entitlementStatus, completedRefunds, entitlementReceipts, callbackReceipts, endAt, updatedAt, err)
+	err := pool.QueryRow(ctx, `
+		SELECT
+			(SELECT count(*) FROM orders WHERE merchant_order_no=$3),
+			(SELECT amount_minor FROM orders WHERE id=$1),
+			(SELECT refunded_minor FROM orders WHERE id=$1),
+			(SELECT status FROM orders WHERE id=$1),
+			(SELECT count(*) FROM payments WHERE order_id=$1),
+			(SELECT amount_minor FROM payments WHERE id=$2),
+			(SELECT status FROM payments WHERE id=$2),
+			(SELECT count(*) FROM payment_refunds WHERE payment_id=$2),
+			(SELECT count(*) FROM payment_refunds WHERE payment_id=$2 AND status='completed'),
+			(SELECT count(DISTINCT refund_no) FROM payment_refunds WHERE payment_id=$2 AND status='completed'),
+			(SELECT COALESCE(sum(amount_minor),0) FROM payment_refunds WHERE payment_id=$2 AND status='completed'),
+			(SELECT status FROM coupon_order_redemptions WHERE order_reference=$3),
+			(SELECT status FROM order_service_entitlements WHERE last_order_id=$1),
+			(SELECT count(*) FROM order_entitlement_fulfillment_receipts WHERE operation='grant' AND source_order_id=$1),
+			(SELECT count(*) FROM order_entitlement_fulfillment_receipts WHERE operation='refund' AND source_order_id=$1),
+			(SELECT count(*) FROM coupon_redemption_operation_receipts receipt JOIN coupon_order_redemptions redemption ON redemption.id=receipt.redemption_id WHERE redemption.order_reference=$3 AND receipt.operation='consume'),
+			(SELECT count(*) FROM order_paid_events WHERE order_id=$1),
+			(SELECT count(*) FROM order_outbox WHERE aggregate_id=$1 AND event_type='order.paid.v1'),
+			(SELECT count(*) FROM outbound_commerce_push_intents WHERE order_paid_event_id=(SELECT id FROM order_paid_events WHERE order_id=$1)),
+			(SELECT count(*) FROM payment_callback_receipts),
+			(SELECT count(DISTINCT event_digest) FROM payment_callback_receipts),
+			(SELECT count(*) FROM payment_callback_receipts WHERE signature_verified),
+			(SELECT end_at FROM order_service_entitlements WHERE last_order_id=$1),
+			(SELECT updated_at FROM order_service_entitlements WHERE last_order_id=$1)
+	`, orderID, paymentID, merchant).Scan(&orderCount, &orderAmount, &orderRefunded, &orderStatus, &paymentCount, &paymentAmount, &paymentStatus, &refundRows, &completedRefunds, &refundNumbers, &refundTotal, &redemptionStatus, &entitlementStatus, &grantReceipts, &entitlementReceipts, &couponConsumes, &paidEvents, &paidOutbox, &commercePushIntents, &callbackReceipts, &callbackEvents, &verifiedCallbacks, &endAt, &updatedAt)
+	const expectedAmount int64 = 1000
+	const expectedCallbackEvents = 5
+	if err != nil || orderCount != 1 || orderAmount != expectedAmount || orderRefunded != expectedAmount || orderStatus != "refunded" || paymentCount != 1 || paymentAmount != expectedAmount || paymentStatus != "paid" || refundRows != 2 || completedRefunds != 2 || refundNumbers != 2 || refundTotal != expectedAmount || redemptionStatus != "consumed" || entitlementStatus != "refunded" || grantReceipts != 1 || entitlementReceipts != 1 || couponConsumes != 1 || paidEvents != 1 || paidOutbox != 1 || commercePushIntents != 1 || callbackReceipts != expectedCallbackEvents || callbackEvents != expectedCallbackEvents || verifiedCallbacks != expectedCallbackEvents || !endAt.Equal(firstEnd) || !updatedAt.Equal(firstUpdated) {
+		t.Fatalf("final order_count=%d order_amount=%d order_refunded=%d order=%q payment_count=%d payment_amount=%d payment=%q refund_rows=%d completed_refunds=%d distinct_refund_numbers=%d refund_total=%d redemption=%q entitlement=%q grant_receipts=%d refund_receipts=%d coupon_consumes=%d paid_events=%d paid_outbox=%d commerce_push_intents=%d callback_receipts=%d distinct_callback_events=%d verified_callbacks=%d end=%s updated=%s err=%v", orderCount, orderAmount, orderRefunded, orderStatus, paymentCount, paymentAmount, paymentStatus, refundRows, completedRefunds, refundNumbers, refundTotal, redemptionStatus, entitlementStatus, grantReceipts, entitlementReceipts, couponConsumes, paidEvents, paidOutbox, commercePushIntents, callbackReceipts, callbackEvents, verifiedCallbacks, endAt, updatedAt, err)
 	}
 }
 
