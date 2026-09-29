@@ -44,10 +44,10 @@ func (PostgreSQLCustomerSyncStore) MachineContactRows(ctx context.Context, corpS
 			FROM wecom_customer_tag_observations t JOIN wecom_customer_sync_runs r ON r.id=t.last_seen_run_id AND r.status='succeeded'
 			WHERE t.customer_id=p.customer_id AND t.corp_scope=p.corp_scope
 		) tags ON true
-		LEFT JOIN LATERAL (
-			SELECT count(*) total_count,count(*) FILTER (WHERE active) active_count,max(updated_at) changed_at
-			FROM wecom_follow_relationships WHERE customer_id=p.customer_id AND corp_id=$2
-		) rel ON true
+		LEFT JOIN (
+			SELECT customer_id,count(*) total_count,count(*) FILTER (WHERE active) active_count,max(updated_at) changed_at
+			FROM wecom_follow_relationships WHERE corp_id=$2 GROUP BY customer_id
+		) rel ON rel.customer_id=p.customer_id
 		WHERE p.corp_scope=$1 ORDER BY p.customer_id`, corpScope, corpScope[11:])
 	if err != nil {
 		return nil, nil, err

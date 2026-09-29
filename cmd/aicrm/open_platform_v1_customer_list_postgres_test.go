@@ -16,6 +16,7 @@ import (
 	accessstore "github.com/qianlan33333-png/AI-CRM-v3/internal/access/store"
 	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
 	archivestore "github.com/qianlan33333-png/AI-CRM-v3/internal/messagearchive/store"
+	openplatformport "github.com/qianlan33333-png/AI-CRM-v3/internal/openplatform/port"
 	openplatformstore "github.com/qianlan33333-png/AI-CRM-v3/internal/openplatform/store"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/wecom"
@@ -70,6 +71,9 @@ func TestV4MachineContactWindowPostgreSQL(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err = native.Exec(ctx, `INSERT INTO customer_directory_projection(customer_id,customer_status,updated_at) VALUES($1,'active',$2)`, id, now.Add(-time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = native.Exec(ctx, `INSERT INTO wecom_follow_relationships(corp_id,employee_id,customer_id,active,updated_at) VALUES('synthetic',$1,$2,$3,$4)`, fmt.Sprintf("staff-%d", i), id, i == 0, now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -129,7 +133,7 @@ func TestV4MachineContactWindowPostgreSQL(t *testing.T) {
 	if err = json.Unmarshal(page["items"].([]json.RawMessage)[0], &observed); err != nil {
 		t.Fatal(err)
 	}
-	if observed["last_real_touch_at"] == nil || observed["safe_user_ref"] != fmt.Sprintf("CID-%d", ids[0]) || strings.Contains(string(page["items"].([]json.RawMessage)[0]), "private secret") {
+	if observed["last_real_touch_at"] == nil || observed["safe_user_ref"] != fmt.Sprintf("CID-%d", ids[0]) || observed["binding_status"] != "bound" || strings.Contains(string(page["items"].([]json.RawMessage)[0]), "private secret") {
 		t.Fatalf("unsafe archived touch projection: %+v", observed)
 	}
 	if _, err = native.Exec(ctx, `UPDATE wecom_external_contact_profiles SET updated_at=clock_timestamp() WHERE customer_id=$1`, ids[1]); err != nil {
@@ -179,5 +183,49 @@ func TestV4MachineContactWindowPostgreSQL(t *testing.T) {
 	}
 	if _, err = executor.v1ListCustomers(ctx, principal, json.RawMessage(`{"limit":100}`)); err == nil {
 		t.Fatal("incomplete sync became an empty page")
+	}
+	bulkItems := make([]openplatformport.CustomerWindowItem, 23540)
+	for index := range bulkItems {
+		bulkItems[index] = openplatformport.CustomerWindowItem{
+			Key: fmt.Sprintf("v4:customer:synthetic-%d", index), ChangedAt: now,
+			Data: json.RawMessage(fmt.Sprintf(`{"record_id":"v4:customer:synthetic-%d","updated_at":%q}`, index, now.Format(time.RFC3339))),
+		}
+	}
+	bulkWindow := openplatformport.CustomerWindow{
+		ID: strings.Repeat("a", 32), ClientID: "v4-synthetic-client", GrantDigest: strings.Repeat("b", 64),
+		From: now.Add(-time.Hour), To: now.Add(time.Second), ExpiresAt: now.Add(time.Hour), Items: bulkItems,
+	}
+	bulkCtx, bulkCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer bulkCancel()
+	started := time.Now()
+	if err = writeUOW.Within(bulkCtx, func(tx context.Context) error {
+		return (openplatformstore.CustomerWindows{}).FreezeCustomerWindow(tx, bulkWindow)
+	}); err != nil {
+		t.Fatalf("production-sized window freeze failed: %v", err)
+	}
+	t.Logf("production-sized contact window freeze: %s", time.Since(started))
+	if err = writeUOW.Within(ctx, func(tx context.Context) error {
+		window, readErr := (openplatformstore.CustomerWindows{}).ReadCustomerWindow(tx, bulkWindow.ID, 23500, 100)
+		if readErr != nil {
+			return readErr
+		}
+		if window.ItemCount != len(bulkItems) || len(window.Items) != 40 {
+			return fmt.Errorf("bulk window page mismatch: total=%d page=%d", window.ItemCount, len(window.Items))
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	duplicateWindow := bulkWindow
+	duplicateWindow.ID = strings.Repeat("c", 32)
+	duplicateWindow.Items = []openplatformport.CustomerWindowItem{bulkItems[0], bulkItems[0]}
+	if err = writeUOW.Within(ctx, func(tx context.Context) error {
+		return (openplatformstore.CustomerWindows{}).FreezeCustomerWindow(tx, duplicateWindow)
+	}); err == nil {
+		t.Fatal("duplicate contact records committed")
+	}
+	var retained int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM openplatform_customer_windows WHERE id=$1`, duplicateWindow.ID).Scan(&retained); err != nil || retained != 0 {
+		t.Fatalf("failed contact window retained header: count=%d err=%v", retained, err)
 	}
 }

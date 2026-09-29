@@ -2,9 +2,11 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	openplatformport "github.com/qianlan33333-png/AI-CRM-v3/internal/openplatform/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 )
@@ -25,13 +27,25 @@ func (CustomerWindows) FreezeCustomerWindow(ctx context.Context, window openplat
 	if _, err = tx.Exec(ctx, `INSERT INTO openplatform_customer_windows(id,client_id,grant_digest,from_time,to_time,item_count,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7)`, window.ID, window.ClientID, window.GrantDigest, window.From, window.To, len(window.Items), window.ExpiresAt); err != nil {
 		return err
 	}
-	for index, item := range window.Items {
+	for _, item := range window.Items {
 		if item.Key == "" || item.ChangedAt.IsZero() || len(item.Data) == 0 {
 			return errors.New("invalid contact window item")
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO openplatform_customer_window_items(window_id,ordinal,record_key,changed_at,projection) VALUES($1,$2,$3,$4,$5::jsonb)`, window.ID, index, item.Key, item.ChangedAt, []byte(item.Data)); err != nil {
-			return err
-		}
+	}
+	if len(window.Items) == 0 {
+		return nil
+	}
+	copied, err := tx.CopyFrom(ctx, pgx.Identifier{"openplatform_customer_window_items"},
+		[]string{"window_id", "ordinal", "record_key", "changed_at", "projection"},
+		pgx.CopyFromSlice(len(window.Items), func(index int) ([]any, error) {
+			item := window.Items[index]
+			return []any{window.ID, index, item.Key, item.ChangedAt, json.RawMessage(item.Data)}, nil
+		}))
+	if err != nil {
+		return err
+	}
+	if copied != int64(len(window.Items)) {
+		return errors.New("incomplete contact window copy")
 	}
 	return nil
 }
