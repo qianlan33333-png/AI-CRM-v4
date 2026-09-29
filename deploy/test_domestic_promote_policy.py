@@ -337,6 +337,31 @@ class InstallBackupPolicyTests(unittest.TestCase):
                 self.assertFalse((paths["RECEIPTS"] / f"{new_sha}.json").exists())
                 self.assertEqual(switch.call_count, 2)  # attempted candidate switch, then prior runtime rollback
 
+    def test_production_health_failure_restores_previous_runtime_release(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paths, incoming, old_sha, new_sha, content, content_hash = self.install_fixture(
+                root, role="production", migration=False
+            )
+            current = paths["CURRENT"]
+            with ExitStack() as stack:
+                for key, value in paths.items():
+                    stack.enter_context(mock.patch.object(installer, key, value))
+                stack.enter_context(mock.patch.object(installer, "require_host_role", return_value="production"))
+                stack.enter_context(mock.patch.object(installer.shutil, "which", return_value="/usr/bin/systemctl"))
+                stack.enter_context(mock.patch.object(installer, "verify_root_owned_release"))
+                stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(returncode=0, stdout="", stderr="")))
+                stack.enter_context(mock.patch.object(installer, "restart_services"))
+                readiness = stack.enter_context(
+                    mock.patch.object(installer, "readiness", side_effect=[RuntimeError("candidate health failed"), None])
+                )
+                with self.assertRaisesRegex(RuntimeError, "candidate health failed"):
+                    installer.install(incoming, content, old_sha, expected_sha=new_sha, metadata_sha256=content_hash)
+
+            self.assertEqual(current.resolve(), (paths["RELEASES"] / old_sha).resolve())
+            readiness.assert_has_calls([mock.call(new_sha, ()), mock.call(old_sha, ())])
+            self.assertFalse((paths["RECEIPTS"] / f"{new_sha}.json").exists())
+
     def test_production_backup_failure_prevents_runtime_switch(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

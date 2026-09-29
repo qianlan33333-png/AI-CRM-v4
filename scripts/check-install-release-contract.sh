@@ -5,12 +5,17 @@ installer="deploy/install-release.sh"
 ci_workflow=".github/workflows/ci.yml"
 quality_lanes="scripts/ci/quality_lanes.py"
 release_builder="scripts/run-donor-view-consumers.sh"
+domestic_release="scripts/domestic_main_release.py"
+domestic_promoter="deploy/domestic-promote.py"
+domestic_controller_tests="scripts/test_domestic_release_controller.py"
+domestic_installer_tests="scripts/test_domestic_release.py"
+domestic_promoter_tests="deploy/test_domestic_promote_policy.py"
 grep -qxF 'export PYTHONDONTWRITEBYTECODE=1' "$installer" || { echo "release hooks must not add unregistered Python cache files" >&2; exit 1; }
 grep -qF 'release host must be Linux x86_64' "$installer" || { echo "installer must reject non-Linux release hosts" >&2; exit 1; }
 grep -qF 'release binary is not Linux amd64 ELF' "$installer" || { echo "installer must reject non-Linux release binaries" >&2; exit 1; }
 canonical_backend_full_go_test() {
   grep -qF 'scripts/ci/quality_lanes.py backend' "$ci_workflow" &&
-    grep -qF '"go", "test", "-p", "1", "-race", "-count=1", "-timeout=15m", "./..."' "$quality_lanes"
+    grep -qF '"go", "test", "-json", "-p", "1", "-race", "-count=1", "-timeout=15m", "./..."' "$quality_lanes"
 }
 start_line="$(grep -nE '^if ! systemctl enable aicrm-effects-worker\.service \|\| ! systemctl restart aicrm-effects-worker\.service; then$' "$installer" | cut -d: -f1)"
 test -n "$start_line" || { echo "effects worker enable and restart must be rollback guarded" >&2; exit 1; }
@@ -201,14 +206,35 @@ grep -qF 'go build -trimpath -ldflags "-s -w" -o release/bin/aicrm-operation-cyc
 grep -qF 'go build -trimpath -ldflags "-s -w" -o release/bin/aicrm-operation-cycle-result ./cmd/operation-cycle-result' "$release_builder" || { echo "release workflow must build the OperationCycle result client" >&2; exit 1; }
 grep -qx 'test -x "$release_dir/bin/wecom-archive-sdk-runner"' "$installer" || { echo "release must include the WeCom archive SDK runner" >&2; exit 1; }
 grep -qF 'scripts/build-wecom-archive-sdk-runner-linux.sh release/bin/wecom-archive-sdk-runner' "$release_builder" || { echo "release workflow must build the real Linux cgo archive runner" >&2; exit 1; }
-grep -qF 'promote-staging-direct.sh' "$ci_workflow" || grep -qF 'deploy/promote-staging-release.sh' "$ci_workflow" || { echo "CI must promote the accepted staging package" >&2; exit 1; }
-if grep -A 80 '^  deploy:$' "$ci_workflow" | grep -qF 'run-donor-view-consumers.sh release-fast'; then
-  echo "production CI must not rebuild the release package" >&2
-  exit 1
-fi
-grep -A 3 '^  deploy:$' "$ci_workflow" | grep -qF "vars.AICRM_ENABLE_ACTIONS_DEPLOY == 'true'" || { echo "Actions deployment must require the explicit repository opt-in" >&2; exit 1; }
-grep -A 3 '^  deploy:$' "$ci_workflow" | grep -qF "vars.AICRM_CLOUD_DEPLOY_BREAKGLASS == 'true'" || { echo "Actions deployment must require the explicit break-glass opt-in" >&2; exit 1; }
-grep -A 5 '^  deploy:$' "$ci_workflow" | grep -qF "needs.check.result == 'success'" || { echo "Actions deployment must remain gated by the complete CI check" >&2; exit 1; }
+check_domestic_workbench_contract() {
+  for path in "$domestic_release" "$domestic_promoter" "$domestic_controller_tests" "$domestic_installer_tests" "$domestic_promoter_tests"; do
+    test -f "$path" || { echo "domestic release contract is missing $path" >&2; exit 1; }
+  done
+  if grep -qE '^  deploy:$' "$ci_workflow"; then
+    echo "GitHub CI must remain verification-only; production promotion belongs to the domestic workbench" >&2
+    exit 1
+  fi
+  grep -qF 'production promotion must run as root' "$domestic_release" || { echo "domestic promotion must remain root-only" >&2; exit 1; }
+  grep -qF 'human approval does not match this candidate, artifact and staging receipt' "$domestic_release" || { echo "domestic promotion must bind human approval to the exact artifact and staging receipt" >&2; exit 1; }
+  grep -qF 'legacy.verify_release_artifact(out / "release", metadata)' "$domestic_release" || { echo "staged promotion must reverify the accepted package before production copy" >&2; exit 1; }
+  grep -qF 'legacy.copy_payload(' "$domestic_release" || { echo "staged promotion must copy the existing accepted package" >&2; exit 1; }
+  grep -qF 'production installer response differs from independent readback' "$domestic_release" || { echo "production install must match independent readback" >&2; exit 1; }
+  grep -qF 'verify_payload(incoming, metadata)' "$domestic_promoter" || { echo "domestic installer must verify the complete incoming package manifest" >&2; exit 1; }
+  grep -qF 'if old_sha != expected_base:' "$domestic_promoter" || { echo "domestic installer must bind installation to the expected prior release" >&2; exit 1; }
+  grep -qF 'switch_to(old_path)' "$domestic_promoter" && grep -qF 'readiness(old_sha, extra_active)' "$domestic_promoter" || { echo "domestic install failure must restore and verify the previous release" >&2; exit 1; }
+  python3 -m unittest \
+    scripts.test_domestic_release_controller.DomesticMainReleaseTests.test_promote_rejects_a_different_artifact_or_staging_receipt \
+    scripts.test_domestic_release_controller.DomesticMainReleaseTests.test_stage_promotion_reuses_exact_artifact_and_never_reinstalls \
+    scripts.test_domestic_release.DomesticReleaseTest.test_health_failure_switches_back \
+    deploy.test_domestic_promote_policy.InstallBackupPolicyTests.test_production_backup_failure_prevents_runtime_switch \
+    deploy.test_domestic_promote_policy.InstallBackupPolicyTests.test_staging_migration_failure_stops_candidate_and_names_safe_synthetic_rebuild \
+    deploy.test_domestic_promote_policy.InstallBackupPolicyTests.test_production_health_failure_restores_previous_runtime_release \
+    deploy.test_domestic_promote_policy.HostEnvironmentContractTests.test_protected_environment_accepts_staging_and_production_permissions \
+    deploy.test_domestic_promote_policy.HostEnvironmentContractTests.test_protected_environment_rejects_unreadable_writable_linked_or_non_root_file \
+    deploy.test_domestic_promote_policy.HostContractTests.test_host_contract_uses_runuser_restricted_path_postgres16_and_real_systemd_user \
+    deploy.test_domestic_promote_policy.HostContractTests.test_production_host_contract_requires_backup_tools_on_restricted_path
+}
+check_domestic_workbench_contract
 grep -qF 'CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GOWORK=off' scripts/build-wecom-archive-sdk-runner-linux.sh || { echo "archive release runner must be a Linux amd64 cgo build" >&2; exit 1; }
 grep -qF 'scripts/run-go-with-donor-views.sh scripts/build-wecom-archive-sdk-runner-linux.sh "$work/runner"' scripts/check-wecom-message-archive-sdk.sh || { echo "official SDK ABI check must exercise the release runner builder" >&2; exit 1; }
 grep -qx 'test -x "$release_dir/bin/migrate-commerce-history"' "$installer" || { echo "release must reject a missing commerce history migration tool" >&2; exit 1; }
@@ -326,29 +352,15 @@ grep -qx 'exec 9>"$release_lock"' "$installer" || { echo "installer must hold a 
 grep -qx 'if ! flock -w 15 9; then' "$installer" || { echo "installer must serialize the release critical section with flock" >&2; exit 1; }
 grep -qx 'release_run_number="${3:-}"' "$installer" || { echo "installer must accept the CI run number" >&2; exit 1; }
 grep -qF 'last_successful_run_file=/opt/aicrm/last-successful-run-number' "$installer" || { echo "installer must retain the successful CI run marker" >&2; exit 1; }
-grep -qF 'promote-staging-direct.sh' .github/workflows/ci.yml || grep -qF 'deploy/promote-staging-release.sh' .github/workflows/ci.yml || { echo "CI must promote through the reviewed staging gate" >&2; exit 1; }
-grep -qF 'AICRM_SOURCE_BUNDLE' deploy/build-release-on-staging.sh || { echo "staging builds must require a local v4 source bundle" >&2; exit 1; }
-grep -qF 'scripts/verify-staging-source.py --manifest' deploy/build-release-on-staging.sh || { echo "staging builds must verify signed source freshness" >&2; exit 1; }
-grep -qF '/opt/aicrm/release-allowed-signers' deploy/build-release-on-staging-remote.sh || { echo "staging must use pinned allowed signers" >&2; exit 1; }
-grep -qF 'staging-build.lock' deploy/build-release-on-staging-remote.sh && grep -qF 'flock -x' deploy/build-release-on-staging-remote.sh || { echo "staging builds must be single-flight" >&2; exit 1; }
-grep -qF 'deploy/build-release-on-staging-remote.sh' deploy/build-release-on-staging.sh || { echo "staging build must use the reviewed remote builder" >&2; exit 1; }
-if grep -qF 'git clone --filter=blob:none' deploy/build-release-on-staging.sh; then
-  echo "staging build must not clone GitHub" >&2
-  exit 1
-fi
-grep -qF 'tree_sha' deploy/promote-staging-direct.sh deploy/promote-staging-release.sh || { echo "promotion must compare the merged tree with the accepted staging tree" >&2; exit 1; }
-grep -qF 'split -b 1m -a 4' deploy/upload-release-chunks.sh || { echo "release upload chunks must fit the slow production link attempt budget" >&2; exit 1; }
-grep -qF 'timeout 300s scp' deploy/upload-release-chunks.sh || { echo "each release chunk upload must be time bounded" >&2; exit 1; }
-grep -qF 'sha256sum --check --status' deploy/upload-release-chunks.sh || { echo "the reconstructed remote release must pass a SHA-256 check" >&2; exit 1; }
-grep -qF 'run-release-as-root.sh' deploy/promote-staging-direct.sh deploy/promote-staging-release.sh scripts/deploy-release-local.sh || { echo "promotion must execute the root lock wrapper" >&2; exit 1; }
+# Legacy GitHub/manual staging, chunk-upload, and promotion wrappers are not
+# called by the domestic controller. Their release contracts are covered by
+# the current controller/promoter behavior tests above; do not require those
+# obsolete entrypoints to remain the production path. Keep the host installer
+# ordering test below because both installer paths share install-release.lock.
 grep -qF 'if [[ "$0" == "/tmp/install-release-${release_sha}.sh" ]]; then' "$installer" || { echo "installer cleanup must be limited to its SHA-versioned path" >&2; exit 1; }
-grep -qF 'AICRM_HXC_SOURCE_DSN: ${{ secrets.AICRM_HXC_SOURCE_DSN }}' .github/workflows/ci.yml || { echo "CI must read the HXC DSN from Actions secrets" >&2; exit 1; }
-grep -qF 'AICRM_HXC_UNIONID_SCOPE: ${{ secrets.AICRM_HXC_UNIONID_SCOPE }}' .github/workflows/ci.yml || { echo "CI must read the HXC scope from Actions secrets" >&2; exit 1; }
-grep -qF 'sudo /usr/bin/bash ${remote_configurer} ${remote_config} ${GITHUB_SHA}' .github/workflows/ci.yml || { echo "CI must apply HXC configuration through the audited runtime configurer" >&2; exit 1; }
-grep -qF 'AICRM_WECHAT_PAY_H5_APP_ID: ${{ secrets.AICRM_WECHAT_PAY_H5_APP_ID }}' .github/workflows/ci.yml || { echo "CI must read the H5 OAuth AppID from Actions secrets" >&2; exit 1; }
-grep -qF 'AICRM_WECHAT_PAY_H5_APP_SECRET: ${{ secrets.AICRM_WECHAT_PAY_H5_APP_SECRET }}' .github/workflows/ci.yml || { echo "CI must read the H5 OAuth AppSecret from Actions secrets" >&2; exit 1; }
-grep -qF 'scp "${ssh_flags[@]}" deploy/configure-payment-h5-oauth-runtime.sh "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_configurer}"' .github/workflows/ci.yml || { echo "CI must upload the audited H5 OAuth runtime configurer" >&2; exit 1; }
-grep -qF 'sudo /usr/bin/bash ${remote_configurer} ${remote_config} ${GITHUB_SHA} skip-if-provider-disabled' .github/workflows/ci.yml || { echo "CI must explicitly skip H5 OAuth configuration only when payment is disabled" >&2; exit 1; }
+# Runtime credentials stay in protected host configuration; the GitHub
+# verification workflow does not inject or deploy them. Host boundary tests
+# are included in check_domestic_workbench_contract above.
 scripts/test-configure-hxc-runtime.sh
 scripts/test-configure-payment-h5-oauth-runtime.sh
 scripts/test-install-release-ordering.sh

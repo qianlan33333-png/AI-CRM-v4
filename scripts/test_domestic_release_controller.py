@@ -3015,11 +3015,25 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
             root = Path(temporary)
             repo, base, candidate, _other = make_repository(root)
             tree = release._tree(repo, candidate)
-            manifest = "b" * 64
+            out = root / "builds" / candidate
+            release_path = out / "release"
+            (release_path / "bin").mkdir(parents=True)
+            (release_path / "web/dist").mkdir(parents=True)
+            package_files = {
+                "bin/aicrm": b"accepted Linux application bytes",
+                "web/dist/index.html": b"accepted page bytes",
+            }
+            for name, content in package_files.items():
+                (release_path / name).write_bytes(content)
+            manifest_content = "".join(
+                f"{hashlib.sha256(package_files[name]).hexdigest()}  {name}\n"
+                for name in sorted(package_files)
+            )
+            manifest_path = release_path / "release-files.sha256"
+            manifest_path.write_text(manifest_content)
+            manifest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
             metadata = {"source_sha": candidate, "source_tree": tree,
                         "release_files_sha256": manifest}
-            out = root / "builds" / candidate
-            (out / "release").mkdir(parents=True)
             metadata_path = out / "domestic-release.json"
             metadata_path.write_text(json.dumps(metadata))
             bundle = root / "source-bundles" / f"{candidate}.bundle"
@@ -3044,21 +3058,22 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
                 "package_metadata_sha256": hashlib.sha256(metadata_path.read_bytes()).hexdigest(),
                 "previous_installed_app": previous_app, "installed_app": installed_app,
                 "bundle_meta": {"bundle_sha256": hashlib.sha256(bundle.read_bytes()).hexdigest()},
-                "stage_receipt": {"source_sha": candidate, "manifest_sha256": manifest},
+                "stage_receipt": {"source_sha": candidate, "source_tree": tree,
+                                  "manifest_sha256": manifest, "previous_sha": base,
+                                  "technical_status": "installed_healthy"},
                 "check_receipt": {"status": "passed"},
                 "production_install_started": False, "commit_started": False,
             }
-            receipt = {"source_sha": candidate, "manifest_sha256": manifest,
+            receipt = {"source_sha": candidate, "source_tree": tree,
+                       "manifest_sha256": manifest, "previous_sha": base,
                        "technical_status": "installed_healthy"}
             config = {"repo": str(repo), "work_root": str(root), "prod_helper": "/helper"}
             evidence = {"status": "passed", "checks": [{"name": "affected-page"}]}
-            with mock.patch.object(release.legacy, "verify_release_artifact"), \
-                 mock.patch.object(release.legacy, "verify_install_receipt"), \
-                 mock.patch.object(release, "_verify_stage_app"), \
+            with mock.patch.object(release, "_verify_stage_app"), \
                  mock.patch.object(release, "_upload_and_store_bundle"), \
                  mock.patch.object(release.legacy, "copy_payload",
-                                   return_value=("/incoming", "/metadata")), \
-                 mock.patch.object(release, "_production_ssh", return_value=json.dumps(receipt)), \
+                                   return_value=("/incoming", "/metadata")) as copy_payload, \
+                 mock.patch.object(release, "_production_ssh", return_value=json.dumps(receipt)) as production_install, \
                  mock.patch.object(release, "_verify_prod_app", return_value={"receipt": receipt}), \
                  mock.patch.object(release, "_finalize_success",
                                    return_value={"status": "completed"}) as finish, \
@@ -3071,6 +3086,13 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
             finish.assert_called_once()
             build.assert_not_called()
             install.assert_not_called()
+            copy_payload.assert_called_once_with(config, candidate, release_path, metadata_path, base)
+            production_install.assert_called_once_with(
+                config, "sudo", "-n", "/helper", "--incoming", "/incoming",
+                "--metadata", "/metadata", "--expected-sha", candidate,
+                "--metadata-sha256", hashlib.sha256(metadata_path.read_bytes()).hexdigest(),
+                "--expected-base", base, timeout=1800,
+            )
 
 
 

@@ -32,6 +32,7 @@ sha_first=5555555555555555555555555555555555555555
 sha_second=6666666666666666666666666666666666666666
 sha_recovered=7777777777777777777777777777777777777777
 sha_invalid_lock=9999999999999999999999999999999999999999
+sha_unsupported_host=4242424242424242424242424242424242424242
 sha_missing_commerce=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 sha_missing_archive=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 sha_missing_0066=cccccccccccccccccccccccccccccccccccccccc
@@ -135,6 +136,14 @@ if [[ "${1:-}" == -f ]]; then
 fi
 exec /usr/bin/readlink "$@"
 EOF
+cat > "$test_root/bin/uname" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  -s) printf '%s\n' "${AICRM_TEST_UNAME_S:-Linux}" ;;
+  -m) printf '%s\n' "${AICRM_TEST_UNAME_M:-x86_64}" ;;
+  *) exec /usr/bin/uname "$@" ;;
+esac
+EOF
 cat > "$test_root/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${AICRM_TEST_LOG}.systemctl"
@@ -186,13 +195,15 @@ sed \
 mv "$test_root/install-release.rewritten.sh" "$test_root/install-release.sh"
 chmod 0755 "$test_root/install-release.sh"
 
-# The installer now rejects anything other than Linux amd64 ELF binaries.
-# Build one inert real binary for the ordering fixture so this test exercises
-# release sequencing without relying on shell scripts that fail that gate.
-cat > "$test_root/fixture-main.c" <<'EOF'
-int main(void) { return 0; }
+# The installer accepts only Linux amd64 ELF binaries. Build one inert Linux
+# binary even when this fixture runs on macOS, so the test exercises the real
+# architecture gate instead of failing on the test host's own platform.
+cat > "$test_root/fixture-main.go" <<'EOF'
+package main
+
+func main() {}
 EOF
-cc -Os -s -o "$test_root/fixture-binary" "$test_root/fixture-main.c"
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$test_root/fixture-binary" "$test_root/fixture-main.go"
 
 make_release() {
   local sha="$1"
@@ -427,17 +438,32 @@ run_release() {
   local run_number="${2:-}"
   local label="$3"
   local effects_delay="${4:-0}"
+  local host_system="${5:-Linux}"
+  local host_machine="${6:-x86_64}"
   PATH="$test_root/bin:$PATH" \
     AICRM_TEST_LOCK_DIR="$test_root/install.lock" \
     AICRM_TEST_LOG="$test_root/install.log" \
     AICRM_TEST_LABEL="$label" \
     AICRM_TEST_EFFECTS_EXE_DELAY_CALLS="$effects_delay" \
+    AICRM_TEST_UNAME_S="$host_system" \
+    AICRM_TEST_UNAME_M="$host_machine" \
     AICRM_TEST_EFFECTS_READLINK_STATE="$test_root/effects-readlink-${sha}" \
     AICRM_TEST_EXPECTED_EXE="$test_root/aicrm/releases/${sha}/bin/aicrm" \
     "$test_root/install-release.sh" "/tmp/aicrm-${sha}.tar.gz" "$sha" "$run_number" >> "$test_root/installer.log" 2>&1
 }
 
-for sha in "$sha_one" "$sha_manual" "$sha_stale" "$sha_failed" "$sha_first" "$sha_second" "$sha_recovered" "$sha_invalid_lock"; do make_release "$sha"; done
+for sha in "$sha_one" "$sha_manual" "$sha_stale" "$sha_failed" "$sha_first" "$sha_second" "$sha_recovered" "$sha_invalid_lock" "$sha_unsupported_host"; do make_release "$sha"; done
+
+# Preserve the platform guard as a behavior assertion while the success path
+# below runs against a deterministic Linux amd64 fixture on every host.
+set +e
+run_release "$sha_unsupported_host" 98 unsupported-darwin 0 Darwin arm64
+unsupported_host_status=$?
+set -e
+[[ "$unsupported_host_status" == 6 ]] || fail "installer did not reject a non-Linux host"
+grep -qF 'release host must be Linux x86_64' "$test_root/installer.log" || fail "unsupported-host rejection did not explain the platform requirement"
+[[ ! -L "$test_root/aicrm/current" && -f "/tmp/aicrm-${sha_unsupported_host}.tar.gz" ]] || fail "unsupported host changed the active release or consumed its retry archive"
+
 for missing_release in \
   "$sha_missing_operation_runner:bin/aicrm-operation-cycle-runner" \
   "$sha_missing_operation_result:bin/aicrm-operation-cycle-result" \
