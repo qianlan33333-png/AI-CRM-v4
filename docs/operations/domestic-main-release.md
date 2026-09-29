@@ -31,10 +31,14 @@ Web 运行代码变化构建整个 Web 一次，避免遗漏共享 chunk 和动�
 
 决定收批后，`batch-seal` 要求最终累计版本覆盖各成员仍适用的业务旅程，冻结有序成员和生产基线。向人展示准确 `base/head/tree`、最终构件清单摘要、源码 bundle 摘要、预发安装与业务旅程收据、实际检查和未验证项。人工明确确认这整个批次的 `approval_digest` 后，发布工作台才调用 `promote`。控制器重新核对成员链、候选 ref、构件字节、预发正在运行的版本与健康、生产基线；任一身份变化，旧确认失效。等待期间不长期占用执行锁。
 
+封批后如又有需求要加入且生产尚未晋级，工作台先核对当前封批摘要、成员链、预发构件与收据、生产基线，再用 `batch-reopen --approval-digest <旧摘要>` 使旧审批失效并继续使用原批次。若重开本身更新控制器，附 `--sha/--ref` 指向已安装且通过相关 Linux 检查的准确源码候选；它原子地成为源码成员，业务应用不重装。该命令不写生产，保留旧封批收据。新候选由原开发任务沿当前预发 HEAD 更新；追加后重新封批、展示全新摘要并等待人工确认。
+
 ```sh
 sudo /usr/local/libexec/aicrm/domestic_main_release.py release --config /etc/aicrm/domestic-main-release.json --ref refs/heads/codex/<work-item> --head <SHA> --base <SHA>
 sudo /usr/local/libexec/aicrm/domestic_main_release.py poll --config /etc/aicrm/domestic-main-release.json
 sudo /usr/local/libexec/aicrm/domestic_main_release.py batch-seal --config /etc/aicrm/domestic-main-release.json
+# 仅在封批后新增候选且生产未晋级时，先使旧摘要失效：
+sudo /usr/local/libexec/aicrm/domestic_main_release.py batch-reopen --config /etc/aicrm/domestic-main-release.json --approval-digest <旧64位摘要> --ref refs/heads/codex/<reopen-controller> --sha <准确控制器SHA>
 # 仅在用户确认上一步完整身份之后：
 sudo /usr/local/libexec/aicrm/domestic_main_release.py promote --config /etc/aicrm/domestic-main-release.json --approval-digest <64位摘要>
 ```

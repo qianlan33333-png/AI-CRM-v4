@@ -4361,6 +4361,119 @@ def batch_seal(config: dict[str, Any]) -> dict[str, Any]:
         return result
 
 
+def batch_reopen(config: dict[str, Any], approval_digest: str, *,
+                 controller_sha: str | None = None,
+                 controller_ref: str | None = None) -> dict[str, Any]:
+    """Invalidate an unapproved seal so more candidates can enter staging."""
+    if os.geteuid() != 0:
+        raise ReleaseError("reopening a cumulative batch requires root")
+    config = _check_config(config)
+    expected = _digest(approval_digest, "sealed batch digest")
+    repo, state_path = Path(config["repo"]), Path(config["state"])
+    with _locked(Path(config["lock"]), nonblocking=True):
+        state = _load_state(state_path)
+        _recover_orphaned_inflight(state_path, state)
+        batch = state.get("batch")
+        if (not isinstance(batch, dict) or batch.get("status") != "sealed"
+                or state.get("status") != "blocked" or state.get("in_flight") is not None
+                or _active_queue_item(state) is not None):
+            raise ReleaseError("only an idle sealed batch can be reopened")
+        evidence = _batch_final_evidence(config, batch)
+        if evidence is None:
+            raise ReleaseError("sealed batch staging journey is missing")
+        current = _batch_approval_result(batch, evidence)["approval_digest"]
+        if current != expected or batch.get("approval_digest") != expected:
+            raise ReleaseError("sealed batch identity differs from the requested digest")
+        if (_resolve_ref(repo, MAIN_REF) != batch["base_sha"]
+                or state["main"]["tree"] != _tree(repo, batch["base_sha"])):
+            raise ReleaseError("production source base changed before batch reopening")
+        previous = batch["base_sha"]
+        for member in batch["members"]:
+            if (member["base_sha"] != previous
+                    or _resolve_ref(repo, member["ref"]) != member["head_sha"]
+                    or _tree(repo, member["head_sha"]) != member["head_tree"]):
+                raise ReleaseError("sealed batch member source identity changed")
+            _first_parent_chain(repo, previous, member["head_sha"])
+            previous = member["head_sha"]
+        app, baseline = batch["installed_app"], state["installed_app"]
+        _verify_stage_app(app["sha"], app["manifest_sha256"])
+        _verify_prod_app(config, baseline["sha"], baseline["manifest_sha256"])
+        cursor = _verify_production_cursor(config)["cursor"]
+        if (cursor.get("main_sha") != batch["base_sha"]
+                or cursor.get("installed_app_sha") != baseline["sha"]
+                or cursor.get("installed_manifest_sha256") != baseline["manifest_sha256"]):
+            raise ReleaseError("production cursor changed before batch reopening")
+        last = batch["members"][-1]
+        bundle = Path(config["work_root"]) / "source-bundles" / f"{batch['head_sha']}.bundle"
+        if (bundle.is_symlink() or not bundle.is_file()
+                or _file_sha256(bundle) != last["source_bundle_sha256"]):
+            raise ReleaseError("sealed batch source bundle changed")
+        metadata = Path(batch["production_metadata_path"])
+        if (metadata.is_symlink() or not metadata.is_file()
+                or _file_sha256(metadata) != batch["production_metadata_sha256"]):
+            raise ReleaseError("sealed batch production metadata changed")
+        controller_member = None
+        controller_check = None
+        if controller_sha is not None:
+            candidate = _sha(controller_sha, "reopen controller SHA")
+            if (controller_ref is None
+                    or _resolve_ref(repo, _assert_ref_name(controller_ref)) != candidate):
+                raise ReleaseError("reopen controller ref differs from its exact SHA")
+            _first_parent_chain(repo, batch["head_sha"], candidate)
+            worktree = _active_worktree(config, repo, candidate)
+            classification = _classify_candidate(worktree, batch["head_sha"], candidate)
+            if (classification["runtime_changed"]
+                    or "scripts/domestic_main_release.py" not in classification["controller_files"]):
+                raise ReleaseError("reopen controller candidate must be source-only and change the controller")
+            _verify_controller_files(config, repo, candidate,
+                                     sorted(builder.FIXED_CONTROLLER_FILES))
+            report = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate}-batch-reopen-{time.time_ns()}"
+            controller_check = _check_report(config, repo, worktree, report,
+                                             batch["head_sha"], candidate)
+            _, bundle_meta = _create_full_bundle(repo, Path(config["work_root"]), candidate,
+                                                  _tree(repo, candidate))
+            controller_member = _batch_member_record({
+                "candidate_id": candidate, "ref": controller_ref,
+                "base_sha": batch["head_sha"], "head_sha": candidate,
+                "head_tree": _tree(repo, candidate), "runtime_changed": False,
+                "installed_app": app, "check_receipt": controller_check,
+                "bundle_meta": bundle_meta,
+            }, None)
+        elif controller_ref is not None:
+            raise ReleaseError("reopen controller ref requires its exact SHA")
+        else:
+            _verify_controller_files(config, repo, batch.get("controller_source_sha", batch["base_sha"]),
+                                     sorted(builder.FIXED_CONTROLLER_FILES))
+        batch.setdefault("seal_history", []).append({
+            "approval_digest": expected,
+            "sealed_at_utc": batch["sealed_at_utc"],
+            "reopened_at_utc": _utc_now(),
+            "head_sha": batch["head_sha"],
+            "production_metadata_sha256": batch["production_metadata_sha256"],
+        })
+        for key in ("approval_digest", "sealed_at_utc", "final_journey_receipt",
+                    "production_metadata_path", "production_metadata_sha256"):
+            batch.pop(key, None)
+        if controller_member is not None:
+            batch["members"].append(controller_member)
+            batch["head_sha"] = controller_member["head_sha"]
+            batch["head_tree"] = controller_member["head_tree"]
+            batch["controller_source_sha"] = controller_member["head_sha"]
+            batch["reopen_controller_check_receipt"] = controller_check
+            state["queue"].append({"candidate_id": controller_member["candidate_id"],
+                                   "ref": controller_member["ref"],
+                                   "base_sha": controller_member["base_sha"],
+                                   "head_sha": controller_member["head_sha"],
+                                   "status": "staged", "check_receipt": controller_check,
+                                   "source_bundle": bundle_meta,
+                                   "submitted_at_utc": _utc_now()})
+        batch["status"] = "open"
+        _update_state(state_path, state, status="ready")
+        return {"status": "batch_open", "staged_head_sha": batch["head_sha"],
+                "member_count": len(batch["members"]), "invalidated_approval_digest": expected,
+                "production_written": False}
+
+
 def _approval_wait_result(inflight: dict[str, Any], evidence: dict[str, Any] | None) -> dict[str, Any]:
     """Show the exact object a human must approve; this function never writes production."""
     stage_receipt = inflight.get("stage_receipt")
@@ -5812,7 +5925,7 @@ def restricted_ssh() -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check", "batch-open", "batch-seal",
+    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check", "batch-open", "batch-seal", "batch-reopen",
                                             "poll", "promote", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
     parser.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG))
     parser.add_argument("--repo", type=Path)
@@ -5898,6 +6011,11 @@ def main(argv: list[str] | None = None) -> int:
             result = batch_open(config, controller_sha=args.sha, controller_ref=args.ref)
         elif args.action == "batch-seal":
             result = batch_seal(config)
+        elif args.action == "batch-reopen":
+            if not args.approval_digest:
+                parser.error("batch-reopen requires --approval-digest")
+            result = batch_reopen(config, args.approval_digest,
+                                  controller_sha=args.sha, controller_ref=args.ref)
         elif args.action == "submit":
             if os.geteuid() != 0:
                 raise ReleaseError("submit must run through the restricted root endpoint")
