@@ -50,6 +50,7 @@ type ContactDescriptionCoverage struct {
 func (handler CustomerSyncHTTPHandler) Routes() nethttp.Handler {
 	mux := nethttp.NewServeMux()
 	mux.HandleFunc("POST /api/admin/customer-sync-runs", handler.create)
+	mux.HandleFunc("POST /api/admin/wecom/unionid-refresh-runs", handler.createUnionIDRefresh)
 	mux.HandleFunc("GET /api/admin/customer-sync-runs", handler.list)
 	mux.HandleFunc("GET /api/admin/customer-sync-runs/{run_id}", handler.get)
 	mux.HandleFunc("POST /api/admin/wecom/contact-description-backfills", handler.createDescriptionBackfill)
@@ -73,7 +74,24 @@ func (handler CustomerSyncHTTPHandler) createDescriptionBackfill(response nethtt
 		writeSyncError(response, ErrContactDescriptionBackfillDisabled)
 		return
 	}
-	handler.createAuthorized(response, request, principal)
+	handler.createAuthorized(response, request, principal, "manual")
+}
+
+func (handler CustomerSyncHTTPHandler) createUnionIDRefresh(response nethttp.ResponseWriter, request *nethttp.Request) {
+	principal, err := handler.CSRF.AuthorizeCSRF(request.Context(), request)
+	if err != nil {
+		writeSyncError(response, err)
+		return
+	}
+	if !customerSyncMayWrite(principal) {
+		writeSyncError(response, accessdomain.ErrPermissionDenied)
+		return
+	}
+	if !handler.Service.UnionIDs.Ready() {
+		writeSyncError(response, ErrSyncNotReady)
+		return
+	}
+	handler.createAuthorized(response, request, principal, "unionid_refresh")
 }
 
 func (handler CustomerSyncHTTPHandler) create(response nethttp.ResponseWriter, request *nethttp.Request) {
@@ -86,10 +104,10 @@ func (handler CustomerSyncHTTPHandler) create(response nethttp.ResponseWriter, r
 		writeSyncError(response, accessdomain.ErrPermissionDenied)
 		return
 	}
-	handler.createAuthorized(response, request, principal)
+	handler.createAuthorized(response, request, principal, "manual")
 }
 
-func (handler CustomerSyncHTTPHandler) createAuthorized(response nethttp.ResponseWriter, request *nethttp.Request, principal accessdomain.Principal) {
+func (handler CustomerSyncHTTPHandler) createAuthorized(response nethttp.ResponseWriter, request *nethttp.Request, principal accessdomain.Principal, trigger string) {
 	if request.Body != nil && request.ContentLength > 0 {
 		writeSyncError(response, errors.New("body_not_allowed"))
 		return
@@ -100,7 +118,7 @@ func (handler CustomerSyncHTTPHandler) createAuthorized(response nethttp.Respons
 		return
 	}
 	digest := sha256.Sum256([]byte(rawKey))
-	run, replay, err := handler.Service.Create(request.Context(), CreateCustomerSyncRun{RunKey: "manual:" + hex.EncodeToString(digest[:]), Trigger: "manual",
+	run, replay, err := handler.Service.Create(request.Context(), CreateCustomerSyncRun{RunKey: trigger + ":" + hex.EncodeToString(digest[:]), Trigger: trigger,
 		CorpScope: "wecom-corp:" + handler.Service.CorpID, RequestedBy: principal.InternalID})
 	if err != nil {
 		writeSyncError(response, err)

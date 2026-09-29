@@ -79,6 +79,22 @@ type VerifiedProvisioner interface {
 	ProvisionVerifiedIdentity(context.Context, ProvisionCommand) (ProvisionResult, error)
 }
 
+// VerifiedIdentityLinker attaches a provider-verified fact to an already
+// resolved customer. Identity owns conflict and merge-candidate decisions.
+type VerifiedIdentityLinker interface {
+	LinkVerifiedIdentityToCustomer(context.Context, VerifiedLinkCommand) (VerifiedLinkResult, error)
+}
+
+type VerifiedLinkCommand struct {
+	CustomerID customerdomain.CustomerID
+	Fact       identitydomain.VerifiedFact
+	Evidence   identitydomain.LinkEvidence
+}
+
+type VerifiedLinkResult struct {
+	Status string
+}
+
 // ProvisionedCustomerObserver is a composition-owned bridge invoked only when
 // Identity creates a new canonical Customer root. Implementations may ensure
 // other domains' minimum local projections inside the caller's existing UoW;

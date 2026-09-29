@@ -144,6 +144,7 @@ type CustomerSyncService struct {
 	CorpID     string
 	Provider   wecomport.DirectoryProvider
 	Identity   identityport.VerifiedProvisioner
+	UnionIDs   ContactUnionIDLinker
 	Projection customerport.ProjectionWriter
 	Timeline   customerport.TimelineWriter
 	Store      CustomerSyncStore
@@ -189,7 +190,9 @@ func (service CustomerSyncService) Ready() bool {
 }
 
 func (service CustomerSyncService) Create(ctx context.Context, command CreateCustomerSyncRun) (CustomerSyncRun, bool, error) {
-	if !service.Ready() || command.CorpScope != "wecom-corp:"+service.CorpID || command.RequestedBy < 1 || command.Trigger != "manual" {
+	if !service.Ready() || command.CorpScope != "wecom-corp:"+service.CorpID || command.RequestedBy < 1 ||
+		(command.Trigger != "manual" && command.Trigger != "unionid_refresh") ||
+		(command.Trigger == "unionid_refresh" && !service.UnionIDs.Ready()) {
 		return CustomerSyncRun{}, false, ErrSyncNotReady
 	}
 	var run CustomerSyncRun
@@ -206,9 +209,10 @@ func (service CustomerSyncService) Create(ctx context.Context, command CreateCus
 		if createErr = service.Enqueuer.EnqueueCustomerSync(txContext, run.ID); createErr != nil {
 			return createErr
 		}
+		payload, _ := json.Marshal(map[string]string{"trigger": command.Trigger})
 		_, createErr = service.Audit.Append(txContext, platformaudit.Event{IdempotencyKey: idempotency.Key("wecom-sync-created:" + command.RunKey),
 			Action: "wecom.customer_sync_created", ActorType: "admin", ActorID: strconv.FormatInt(command.RequestedBy, 10),
-			ResourceType: "wecom_customer_sync", ResourceID: strconv.FormatInt(run.ID, 10), Payload: json.RawMessage(`{"trigger":"manual"}`)})
+			ResourceType: "wecom_customer_sync", ResourceID: strconv.FormatInt(run.ID, 10), Payload: payload})
 		return createErr
 	})
 	return run, replay, err
@@ -365,6 +369,11 @@ func (service CustomerSyncService) ingestPage(ctx context.Context, run CustomerS
 				return provisionErr
 			}
 			item.CustomerID, item.IdentityID = provision.CustomerID, provision.IdentityID
+			if service.UnionIDs.Ready() {
+				if _, linkErr := service.UnionIDs.Link(txContext, provision.CustomerID, contact.ExternalUserID, contact, "wecom.directory_sync", run.ID); linkErr != nil {
+					return linkErr
+				}
+			}
 			if provision.Created {
 				item.Outcome = "activated"
 			} else {
@@ -377,7 +386,7 @@ func (service CustomerSyncService) ingestPage(ctx context.Context, run CustomerS
 			if err := service.Store.UpsertProfileObservations(txContext, run.ID, run.CorpScope, provision.CustomerID, contact.FollowInfo, observedAt); err != nil {
 				return err
 			}
-			if service.DescriptionIntents != nil {
+			if service.DescriptionIntents != nil && run.Trigger != "unionid_refresh" {
 				for _, follow := range contact.FollowInfo {
 					if !follow.DescriptionProjected || follow.Description == nil || follow.EmployeeID == "" {
 						continue

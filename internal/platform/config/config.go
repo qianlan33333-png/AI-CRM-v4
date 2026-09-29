@@ -81,6 +81,7 @@ type WeCom struct {
 	Enabled                           bool
 	CallbackEnabled                   bool
 	CustomerSyncEnabled               bool
+	UnionIDOpenPlatformID             string
 	ContactDescriptionProviderEnabled bool
 	CorpID                            string
 	AgentID                           string
@@ -402,7 +403,8 @@ func Load() (Runtime, error) {
 		},
 		WeCom: WeCom{
 			CorpID: os.Getenv("AICRM_WECOM_CORP_ID"), AgentID: os.Getenv("AICRM_WECOM_AGENT_ID"),
-			MessageArchiveSecret: os.Getenv("AICRM_WECOM_MESSAGE_ARCHIVE_SECRET"), MessageArchiveRunnerPath: os.Getenv("AICRM_WECOM_MESSAGE_ARCHIVE_RUNNER_PATH"), MessageArchiveLibraryPath: os.Getenv("AICRM_WECOM_MESSAGE_ARCHIVE_LIBRARY_PATH"), MessageArchivePageLimit: DefaultMessageArchivePageLimit, MessageArchivePageBudget: DefaultMessageArchivePageBudget,
+			UnionIDOpenPlatformID: os.Getenv("AICRM_WECOM_UNIONID_OPEN_PLATFORM_ID"),
+			MessageArchiveSecret:  os.Getenv("AICRM_WECOM_MESSAGE_ARCHIVE_SECRET"), MessageArchiveRunnerPath: os.Getenv("AICRM_WECOM_MESSAGE_ARCHIVE_RUNNER_PATH"), MessageArchiveLibraryPath: os.Getenv("AICRM_WECOM_MESSAGE_ARCHIVE_LIBRARY_PATH"), MessageArchivePageLimit: DefaultMessageArchivePageLimit, MessageArchivePageBudget: DefaultMessageArchivePageBudget,
 			Secret: os.Getenv("AICRM_WECOM_SECRET"), ContactSecret: os.Getenv("AICRM_WECOM_CONTACT_SECRET"), CallbackToken: os.Getenv("AICRM_WECOM_CALLBACK_TOKEN"),
 			CallbackAESKey: os.Getenv("AICRM_WECOM_CALLBACK_AES_KEY"), ContextSigningKey: os.Getenv("AICRM_WECOM_CONTEXT_SIGNING_KEY"),
 			ChannelStateHMACKey:           os.Getenv("AICRM_CHANNEL_STATE_HMAC_KEY"),
@@ -726,6 +728,9 @@ func Load() (Runtime, error) {
 	}
 	if cfg.WeCom.CustomerSyncEnabled && (!cfg.WeCom.Enabled || strings.TrimSpace(cfg.WeCom.ContactSecret) != cfg.WeCom.ContactSecret || cfg.WeCom.ContactSecret == "") {
 		return Runtime{}, errors.New("enabled WeCom customer sync configuration is incomplete")
+	}
+	if cfg.WeCom.UnionIDOpenPlatformID != "" && (!cfg.WeCom.Enabled || cfg.WeCom.ContactSecret == "" || strings.TrimSpace(cfg.WeCom.UnionIDOpenPlatformID) != cfg.WeCom.UnionIDOpenPlatformID || strings.ContainsAny(cfg.WeCom.UnionIDOpenPlatformID, " \t\r\n")) {
+		return Runtime{}, errors.New("invalid WeCom UnionID Open Platform configuration")
 	}
 	if cfg.WeCom.ContactDescriptionProviderEnabled && (!cfg.Effects.ProviderEnabled || !cfg.WeCom.Enabled || strings.TrimSpace(cfg.WeCom.ContactSecret) != cfg.WeCom.ContactSecret || cfg.WeCom.ContactSecret == "") {
 		return Runtime{}, errors.New("enabled WeCom contact description provider requires External Effects, WeCom, and contact credentials")

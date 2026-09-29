@@ -131,6 +131,29 @@ func TestContactDescriptionBackfillRoutesRequireGateAndAuthorization(t *testing.
 	})
 }
 
+func TestUnionIDRefreshRouteRequiresAdminAndConfiguredScope(t *testing.T) {
+	path := "/api/admin/wecom/unionid-refresh-runs"
+	admin := accessdomain.Principal{Kind: accessdomain.KindAdmin, InternalID: 9, Roles: []accessdomain.Role{accessdomain.RoleAdmin}}
+	for _, test := range []struct {
+		name string
+		auth customerSyncHTTPAuth
+		want int
+	}{
+		{name: "unauthenticated", auth: customerSyncHTTPAuth{csrfErr: accessdomain.ErrAuthentication}, want: http.StatusUnauthorized},
+		{name: "viewer", auth: customerSyncHTTPAuth{csrfPrincipal: accessdomain.Principal{Kind: accessdomain.KindAdmin, InternalID: 3, Roles: []accessdomain.Role{accessdomain.RoleViewer}}}, want: http.StatusForbidden},
+		{name: "scope not configured", auth: customerSyncHTTPAuth{csrfPrincipal: admin}, want: http.StatusServiceUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := CustomerSyncHTTPHandler{CSRF: test.auth}.Routes()
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, path, nil))
+			if response.Code != test.want {
+				t.Fatalf("status=%d want=%d body=%q", response.Code, test.want, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestContactDescriptionCoverageLeavesUnsubmittedProjectedPairsVisible(t *testing.T) {
 	coverage, err := contactDescriptionCoverage(ContactDescriptionSourceCoverage{Observed: 5, Projected: 3, Omitted: 2}, outboundport.ContactDescriptionRunStats{Discovered: 2})
 	if err != nil || coverage.Observed != 5 || coverage.Projected != 3 || coverage.Omitted != 2 || coverage.Submitted != 2 || coverage.NotSubmitted != 1 {

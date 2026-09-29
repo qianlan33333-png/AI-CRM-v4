@@ -16,15 +16,19 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
 	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
+	outboundport "github.com/qianlan33333-png/AI-CRM-v3/internal/outbound/port"
 	platformaudit "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/audit"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	platformoutbox "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/outbox"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/wecom"
 	wecomport "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/port"
+	wecomprovider "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/provider"
 )
 
 type integrationDirectoryProvider struct{}
@@ -54,6 +58,13 @@ type pagedIntegrationDirectoryProvider struct {
 
 type integrationSyncEnqueuer struct{ runID int64 }
 
+type integrationDescriptionIntentSpy struct{ calls int }
+
+func (spy *integrationDescriptionIntentSpy) WriteContactDescriptionIntentWithin(context.Context, outboundport.ContactDescriptionIntentCommand) (outboundport.ContactDescriptionIntentResult, error) {
+	spy.calls++
+	return outboundport.ContactDescriptionIntentResult{}, nil
+}
+
 func (enqueuer *integrationSyncEnqueuer) EnqueueCustomerSync(_ context.Context, runID int64) error {
 	enqueuer.runID = runID
 	return nil
@@ -64,8 +75,9 @@ func (integrationDirectoryProvider) ListContactStaff(context.Context) ([]string,
 	return []string{"staff-integration"}, nil
 }
 func (integrationDirectoryProvider) BatchExternalContacts(context.Context, string, string, int) (wecomport.ExternalContactPage, error) {
-	return wecomport.ExternalContactPage{Contacts: []wecomport.ExternalContact{{ExternalUserID: "external-integration", Name: "Integration Customer", Gender: 1, Type: 1, CorpName: "Integration Corp",
-		FollowInfo: []wecomport.ExternalContactFollowInfo{{EmployeeID: "staff-integration", Tags: []wecomport.ExternalContactTag{{ProviderTagID: "provider-tag", Name: "重点客户", Type: 1}}}}}}}, nil
+	description := "existing provider description"
+	return wecomport.ExternalContactPage{Contacts: []wecomport.ExternalContact{{ExternalUserID: "external-integration", UnionID: "union-integration", Name: "Integration Customer", Gender: 1, Type: 1, CorpName: "Integration Corp",
+		FollowInfo: []wecomport.ExternalContactFollowInfo{{EmployeeID: "staff-integration", DescriptionProjected: true, Description: &description, Tags: []wecomport.ExternalContactTag{{ProviderTagID: "provider-tag", Name: "重点客户", Type: 1}}}}}}}, nil
 }
 
 func (provider integrationFailingDirectoryProvider) DirectoryReady() bool { return true }
@@ -140,7 +152,7 @@ func TestCustomerSyncJourneyPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := filepath.Join("..", "..")
-	for _, name := range []string{"0001_platform.sql", "0002_identity.sql", "0003_access.sql", "0004_wecom.sql", "0005_external_effects.sql", "0009_customer_activation.sql", "0022_customer_profile_sections.sql", "0086_wecom_profile_primary_owner.sql", "0093_customer_tag_commands.sql", "0153_wecom_customer_detail_projection.sql", "0170_wecom_contact_description_effect.sql", "0171_wecom_contact_description_source_coverage.sql"} {
+	for _, name := range []string{"0001_platform.sql", "0002_identity.sql", "0003_access.sql", "0004_wecom.sql", "0005_external_effects.sql", "0009_customer_activation.sql", "0022_customer_profile_sections.sql", "0086_wecom_profile_primary_owner.sql", "0093_customer_tag_commands.sql", "0153_wecom_customer_detail_projection.sql", "0170_wecom_contact_description_effect.sql", "0171_wecom_contact_description_source_coverage.sql", "0211_wecom_unionid_refresh.sql"} {
 		raw, readErr := os.ReadFile(filepath.Join(root, "migrations", name))
 		if readErr != nil {
 			t.Fatal(readErr)
@@ -164,7 +176,8 @@ func TestCustomerSyncJourneyPostgreSQL(t *testing.T) {
 	}
 	customerStore := customerstore.NewPostgreSQL()
 	enqueuer := &integrationSyncEnqueuer{}
-	service := wecom.CustomerSyncService{Enabled: true, CorpID: "integration-corp", Provider: integrationDirectoryProvider{}, Identity: identityapp.OneIDService{Store: identitystore.NewPostgresStore()}, Projection: customerStore, Timeline: customerStore, Store: wecom.NewPostgreSQLCustomerSyncStore(), Outbox: platformoutbox.NewPostgreSQL(), Enqueuer: enqueuer, Audit: audit, UOW: uow, Now: func() time.Time { return time.Now().UTC() }}
+	oneID := identityapp.OneIDService{Store: identitystore.NewPostgresStore()}
+	service := wecom.CustomerSyncService{Enabled: true, CorpID: "integration-corp", Provider: integrationDirectoryProvider{}, Identity: oneID, UnionIDs: wecom.ContactUnionIDLinker{Scope: "wechat-open-platform:integration", Identity: oneID}, Projection: customerStore, Timeline: customerStore, Store: wecom.NewPostgreSQLCustomerSyncStore(), Outbox: platformoutbox.NewPostgreSQL(), Enqueuer: enqueuer, Audit: audit, UOW: uow, Now: func() time.Time { return time.Now().UTC() }}
 	run, _, err := service.CreateScheduled(ctx, "initial", "initial:integration-customer-sync")
 	if err != nil {
 		t.Fatal(err)
@@ -186,15 +199,16 @@ func TestCustomerSyncJourneyPostgreSQL(t *testing.T) {
 	if run.Status != wecom.SyncSucceeded || run.Discovered != 1 || run.Activated != 1 || run.Projected != 1 {
 		t.Fatalf("run=%+v", run)
 	}
-	var identities, projections, receipts, pending, owners, tags, timeline int
+	var identities, unions, projections, receipts, pending, owners, tags, timeline int
 	if err = pool.Native().QueryRow(ctx, `SELECT (SELECT count(*) FROM customer_identities WHERE kind='wecom_external_userid' AND assurance='verified'),
+		(SELECT count(*) FROM customer_identities WHERE kind='unionid' AND scope_key='wechat-open-platform:integration' AND assurance='verified'),
 		(SELECT count(*) FROM customer_directory_projection),(SELECT count(*) FROM wecom_customer_sync_items WHERE run_id=$1),
 		(SELECT count(*) FROM outbox_events WHERE processed_at IS NULL),(SELECT count(*) FROM wecom_customer_owner_observations WHERE last_seen_run_id=$1),
-		(SELECT count(*) FROM wecom_customer_tag_observations WHERE last_seen_run_id=$1),(SELECT count(*) FROM customer_timeline_projection WHERE source_domain='wecom')`, run.ID).Scan(&identities, &projections, &receipts, &pending, &owners, &tags, &timeline); err != nil {
+		(SELECT count(*) FROM wecom_customer_tag_observations WHERE last_seen_run_id=$1),(SELECT count(*) FROM customer_timeline_projection WHERE source_domain='wecom')`, run.ID).Scan(&identities, &unions, &projections, &receipts, &pending, &owners, &tags, &timeline); err != nil {
 		t.Fatal(err)
 	}
-	if identities != 1 || projections != 1 || receipts != 1 || pending != 0 || owners != 1 || tags != 1 || timeline != 1 {
-		t.Fatalf("identities=%d projections=%d receipts=%d pending=%d owners=%d tags=%d timeline=%d", identities, projections, receipts, pending, owners, tags, timeline)
+	if identities != 1 || unions != 1 || projections != 1 || receipts != 1 || pending != 0 || owners != 1 || tags != 1 || timeline != 1 {
+		t.Fatalf("identities=%d unions=%d projections=%d receipts=%d pending=%d owners=%d tags=%d timeline=%d", identities, unions, projections, receipts, pending, owners, tags, timeline)
 	}
 	var primaryOwner string
 	var primaryRunID int64
@@ -203,6 +217,30 @@ func TestCustomerSyncJourneyPostgreSQL(t *testing.T) {
 	}
 	if primaryOwner != "staff-integration" || primaryRunID != run.ID {
 		t.Fatalf("primary owner=%q run=%d, want staff-integration/%d", primaryOwner, primaryRunID, run.ID)
+	}
+
+	// The dedicated full refresh reuses the durable directory traversal while
+	// withholding every contact-description write intent, even when Provider
+	// returned a projected description.
+	intents := &integrationDescriptionIntentSpy{}
+	refreshService := service
+	refreshService.DescriptionIntents = intents
+	refresh, replayed, err := refreshService.Create(ctx, wecom.CreateCustomerSyncRun{
+		RunKey: "unionid_refresh:integration", Trigger: "unionid_refresh", CorpScope: "wecom-corp:integration-corp", RequestedBy: 1,
+	})
+	if err != nil || replayed {
+		t.Fatalf("refresh create=%+v replayed=%t err=%v", refresh, replayed, err)
+	}
+	refreshWorker := wecom.NewCustomerSyncWorker()
+	if err = refreshWorker.BindService(refreshService); err != nil {
+		t.Fatal(err)
+	}
+	if err = refreshWorker.Work(ctx, &river.Job[wecom.CustomerSyncJobArgs]{JobRow: &rivertype.JobRow{Attempt: 1, MaxAttempts: 12}, Args: wecom.CustomerSyncJobArgs{RunID: refresh.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	refresh, err = refreshService.Get(ctx, refresh.ID)
+	if err != nil || refresh.Status != wecom.SyncSucceeded || refresh.Discovered != 1 || intents.calls != 0 {
+		t.Fatalf("refresh=%+v intents=%d err=%v", refresh, intents.calls, err)
 	}
 
 	var recoveryRunID int64
@@ -355,5 +393,34 @@ func TestCustomerSyncJourneyPostgreSQL(t *testing.T) {
 		WHERE identity.normalized_value='external-paged'
 		GROUP BY profile.primary_owner_userid`).Scan(&completedPrimary, &retainedOwners); err != nil || completedPrimary != "bob" || retainedOwners != 2 {
 		t.Fatalf("completed primary=%q owners=%d err=%v", completedPrimary, retainedOwners, err)
+	}
+	var firstCustomerID int64
+	if err = pool.Native().QueryRow(ctx, `SELECT customer_id FROM customer_identities WHERE kind='wecom_external_userid' AND normalized_value='external-integration'`).Scan(&firstCustomerID); err != nil {
+		t.Fatal(err)
+	}
+	if err = uow.Within(ctx, func(txContext context.Context) error {
+		status, linkErr := service.UnionIDs.Link(txContext, customerdomain.CustomerID(firstCustomerID), "external-integration", wecomport.ExternalContact{ExternalUserID: "external-integration", UnionID: "union-integration"}, "wecom.directory_sync", run.ID)
+		if linkErr != nil || status != "already_linked" {
+			t.Fatalf("replayed UnionID status=%q err=%v", status, linkErr)
+		}
+		other, factErr := wecomprovider.VerifiedExternalContact("integration-corp", "external-other", "wecom.directory_sync")
+		if factErr != nil {
+			return factErr
+		}
+		provisioned, provisionErr := oneID.ProvisionVerifiedIdentity(txContext, identityport.ProvisionCommand{Fact: other, IdempotencyKey: "integration-other"})
+		if provisionErr != nil {
+			return provisionErr
+		}
+		status, linkErr = service.UnionIDs.Link(txContext, provisioned.CustomerID, "external-other", wecomport.ExternalContact{ExternalUserID: "external-other", UnionID: "union-integration"}, "wecom.directory_sync", run.ID)
+		if linkErr != nil || status != "merge_candidate" {
+			t.Fatalf("cross-root UnionID status=%q err=%v", status, linkErr)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var candidates, unchangedOwner int
+	if err = pool.Native().QueryRow(ctx, `SELECT (SELECT count(*) FROM customer_merge_candidates WHERE status='open'),(SELECT count(*) FROM customer_identities WHERE kind='unionid' AND normalized_value='union-integration' AND customer_id=$1)`, firstCustomerID).Scan(&candidates, &unchangedOwner); err != nil || candidates != 1 || unchangedOwner != 1 {
+		t.Fatalf("candidate=%d original_owner=%d err=%v", candidates, unchangedOwner, err)
 	}
 }

@@ -74,6 +74,17 @@ type descriptionCallbackJobSpy struct {
 	inboxID int64
 }
 
+type unionIDCallbackJobSpy struct {
+	calls   int
+	inboxID int64
+}
+
+func (spy *unionIDCallbackJobSpy) EnqueueContactUnionIDObservation(_ context.Context, inboxID int64) error {
+	spy.calls++
+	spy.inboxID = inboxID
+	return nil
+}
+
 func (spy *descriptionCallbackJobSpy) EnqueueContactDescriptionObservation(_ context.Context, inboxID int64) error {
 	spy.calls++
 	spy.inboxID = inboxID
@@ -212,15 +223,16 @@ func TestInboxProcessorQueuesDescriptionJobOnlyAfterFullLifecycle(t *testing.T) 
 	identity := newMemoryLifecycleIdentity()
 	relationships := &lifecycleRelationships{}
 	jobs := &descriptionCallbackJobSpy{}
+	unionJobs := &unionIDCallbackJobSpy{}
 	auditService, err := platformaudit.NewService(&memoryAuditStore{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor := InboxProcessor{Enabled: true, CorpID: "corp-1", Inbox: inbox, UOW: directUOW{}, Lifecycle: lifecycleFor(identity, relationships, &lifecycleStates{}, &lifecycleReceipts{}), Receipts: &memoryCallbackReceipts{}, Audit: auditService, DescriptionJobs: jobs}
+	processor := InboxProcessor{Enabled: true, CorpID: "corp-1", Inbox: inbox, UOW: directUOW{}, Lifecycle: lifecycleFor(identity, relationships, &lifecycleStates{}, &lifecycleReceipts{}), Receipts: &memoryCallbackReceipts{}, Audit: auditService, DescriptionJobs: jobs, UnionIDJobs: unionJobs}
 	if count, processErr := processor.ProcessOnce(context.Background(), "description-test", 1); processErr != nil || count != 1 {
 		t.Fatalf("count=%d err=%v", count, processErr)
 	}
-	if jobs.calls != 1 || jobs.inboxID != accepted.Delivery.ID || identity.CustomerCount() != 1 || !relationships.active("corp-1", "employee-1", 1) {
-		t.Fatalf("job=%+v customers=%d relationship=%t", jobs, identity.CustomerCount(), relationships.active("corp-1", "employee-1", 1))
+	if jobs.calls != 1 || jobs.inboxID != accepted.Delivery.ID || unionJobs.calls != 1 || unionJobs.inboxID != accepted.Delivery.ID || identity.CustomerCount() != 1 || !relationships.active("corp-1", "employee-1", 1) {
+		t.Fatalf("description=%+v unionid=%+v customers=%d relationship=%t", jobs, unionJobs, identity.CustomerCount(), relationships.active("corp-1", "employee-1", 1))
 	}
 }

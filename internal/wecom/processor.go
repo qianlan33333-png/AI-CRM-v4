@@ -96,6 +96,7 @@ type InboxProcessor struct {
 	// a processed full-contact callback atomically enqueues a bounded detail
 	// observation job; the HTTP callback handler still only inboxes and ACKs.
 	DescriptionJobs ContactDescriptionCallbackJobEnqueuer
+	UnionIDJobs     ContactUnionIDCallbackJobEnqueuer
 	Receipts        callbackProcessingReceiptStore
 	Audit           *audit.Service
 	Now             func() time.Time
@@ -155,6 +156,11 @@ func (processor InboxProcessor) processDelivery(ctx context.Context, delivery we
 		if processor.DescriptionJobs != nil && event.ChangeType == ChangeAddExternalContact && result.CustomerID > 0 {
 			if err = processor.DescriptionJobs.EnqueueContactDescriptionObservation(txContext, delivery.ID); err != nil {
 				return callbackDeliveryError{code: "callback_description_enqueue", cause: err}
+			}
+		}
+		if processor.UnionIDJobs != nil && event.ChangeType == ChangeAddExternalContact && result.CustomerID > 0 {
+			if err = processor.UnionIDJobs.EnqueueContactUnionIDObservation(txContext, delivery.ID); err != nil {
+				return callbackDeliveryError{code: "callback_unionid_enqueue", cause: err}
 			}
 		}
 		codes, err := callbackResultCodes(result.Outcomes)

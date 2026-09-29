@@ -86,11 +86,24 @@ type callbackDescriptionTarget struct {
 	customerID customerdomain.CustomerID
 }
 
+type contactCallbackTargetLoader struct {
+	CorpID        string
+	Inbox         *webhook.Service
+	Identity      identityport.Resolver
+	Relationships FollowRelationshipStore
+	UOW           platformport.UnitOfWork
+}
+
+func (s ContactDescriptionCallbackService) targetLoader() contactCallbackTargetLoader {
+	return contactCallbackTargetLoader{CorpID: s.CorpID, Inbox: s.Inbox, Identity: s.Identity, Relationships: s.Relationships, UOW: s.UOW}
+}
+
 func (s ContactDescriptionCallbackService) Process(ctx context.Context, inboxID int64) error {
 	if !s.Ready() || inboxID < 1 {
 		return ErrSyncNotReady
 	}
-	target, skip, err := s.loadTarget(ctx, inboxID)
+	targets := s.targetLoader()
+	target, skip, err := targets.loadTarget(ctx, inboxID)
 	if err != nil || skip {
 		return err
 	}
@@ -117,7 +130,7 @@ func (s ContactDescriptionCallbackService) Process(ctx context.Context, inboxID 
 		Operation:                 outboundport.ContactDescriptionOperationWrite,
 	}
 	err = s.UOW.Within(ctx, func(txContext context.Context) error {
-		current, stale, loadErr := s.loadTargetWithin(txContext, inboxID)
+		current, stale, loadErr := targets.loadTargetWithin(txContext, inboxID)
 		if loadErr != nil || stale {
 			return loadErr
 		}
@@ -135,7 +148,7 @@ func (s ContactDescriptionCallbackService) Process(ctx context.Context, inboxID 
 	return err
 }
 
-func (s ContactDescriptionCallbackService) loadTarget(ctx context.Context, inboxID int64) (callbackDescriptionTarget, bool, error) {
+func (s contactCallbackTargetLoader) loadTarget(ctx context.Context, inboxID int64) (callbackDescriptionTarget, bool, error) {
 	var target callbackDescriptionTarget
 	var skip bool
 	err := s.UOW.Within(ctx, func(txContext context.Context) error {
@@ -146,7 +159,7 @@ func (s ContactDescriptionCallbackService) loadTarget(ctx context.Context, inbox
 	return target, skip, err
 }
 
-func (s ContactDescriptionCallbackService) loadTargetWithin(ctx context.Context, inboxID int64) (callbackDescriptionTarget, bool, error) {
+func (s contactCallbackTargetLoader) loadTargetWithin(ctx context.Context, inboxID int64) (callbackDescriptionTarget, bool, error) {
 	delivery, err := s.Inbox.Get(ctx, inboxID)
 	if err != nil {
 		return callbackDescriptionTarget{}, false, err

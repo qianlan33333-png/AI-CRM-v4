@@ -1423,6 +1423,21 @@ paths:
       responses:
         "200": {description: Non-PII durable stage and reconciled counts, content: {application/json: {schema: {$ref: "#/components/schemas/CustomerSyncRun"}}}}
         "404": {$ref: "#/components/responses/Error"}
+  /api/admin/wecom/unionid-refresh-runs:
+    post:
+      operationId: createWeComUnionIDRefreshRun
+      tags: [WeCom]
+      description: Starts a resumable full WeCom directory read and links verified UnionID facts through OneID. This run does not submit Provider write intents. Requires an explicitly configured WeChat Open Platform scope. Status is read through customer-sync-runs/{run_id}; completion does not imply that every Provider contact exposed a UnionID.
+      security: [{adminSession: [], csrfHeader: []}]
+      parameters: [{$ref: "#/components/parameters/RequiredIdempotencyKey"}]
+      responses:
+        "200": {description: Existing idempotent refresh run replay, content: {application/json: {schema: {$ref: "#/components/schemas/ContactDescriptionBackfillAccepted"}}}}
+        "202": {description: Durable full refresh run accepted, content: {application/json: {schema: {$ref: "#/components/schemas/ContactDescriptionBackfillAccepted"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Unavailable"}
   /api/admin/wecom/contact-description-backfills:
     post:
       operationId: createWeComContactDescriptionBackfill

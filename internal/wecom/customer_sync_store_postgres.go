@@ -97,7 +97,7 @@ func (PostgreSQLCustomerSyncStore) List(ctx context.Context, limit int) ([]Custo
 	rows, err := tx.Query(ctx, `SELECT id,run_key,trigger_type,status,COALESCE(resume_status,''),corp_scope,staff_ids,staff_index,provider_cursor,
 		discovered_count,activated_count,already_linked_count,conflict_count,terminal_failed_count,projected_count,stale_count,
 		version,COALESCE(last_error_code,''),COALESCE(requested_by,0),started_at,completed_at,created_at,updated_at
-		FROM wecom_customer_sync_runs WHERE trigger_type IN ('initial','daily','manual') ORDER BY created_at DESC,id DESC LIMIT $1`, limit)
+		FROM wecom_customer_sync_runs WHERE trigger_type IN ('initial','daily','manual','unionid_refresh') ORDER BY created_at DESC,id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}

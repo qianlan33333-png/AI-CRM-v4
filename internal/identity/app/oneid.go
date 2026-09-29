@@ -309,6 +309,14 @@ func (service OneIDService) LinkVerifiedIdentity(ctx context.Context, command Li
 	return service.Store.Link(ctx, command)
 }
 
+func (service OneIDService) LinkVerifiedIdentityToCustomer(ctx context.Context, command identityport.VerifiedLinkCommand) (identityport.VerifiedLinkResult, error) {
+	linked, err := service.LinkVerifiedIdentity(ctx, LinkCommand{SourceCustomerID: command.CustomerID, Target: command.Fact, Evidence: command.Evidence})
+	if err != nil {
+		return identityport.VerifiedLinkResult{}, err
+	}
+	return identityport.VerifiedLinkResult{Status: string(linked.Status)}, nil
+}
+
 func (service OneIDService) CreateLinkIntent(ctx context.Context, command LinkIntentCommand) (CreatedLinkIntent, error) {
 	if command.SourceCustomerID < 1 || !validLinkIntentPurpose(command.Purpose) || identitydomain.ValidateKind(command.TargetKind) != nil || command.TargetKind == identitydomain.KindPhone ||
 		(command.ExpectedScope != "" && identitydomain.ValidateNamespace(command.TargetKind, command.ExpectedScope) != nil) ||

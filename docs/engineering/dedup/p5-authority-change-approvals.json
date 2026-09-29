@@ -1941,6 +1941,28 @@
       ],
       "reason": "Record the service-period member_count read contract and synchronized canonical OpenAPI index and lock for the authorized member-list count correction. Frozen donor payloads and unrelated API operations are unchanged.",
       "review_reference": "Author review on 2026-09-28 of the exact three-file d0566b4 base diff, canonical source hashes and docs/prd/2026-09-28-period-product-member-count.md. This is an auditable author declaration, not independent human approval or evidence of Linux checks or production installation."
+    },
+    {
+      "base_commit": "d910f187b91fbe7110bfc09165ec65f7065731b4",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "48e2e238fdea526bc848b877ac3448d006dd6ab6422d77a26f1a292d76e9b817",
+          "head_sha256": "67c3db644a63081dcb92566a3bb4d3cc2b948207ddbd7679793477feb5652dd1"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "1760ca048a6cf06f589a8c339fab80019733f6258d59a76e9e27e1b5bef5d3b6",
+          "head_sha256": "e8e2c8017538742a0a3ff401ff9c3f52ea1a0714ad5c1950c85189c16c1e00d3"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "fa39f3d51761fde9609d8ad1b349948094541be5470be582d6bac48ee854be48",
+          "head_sha256": "10912e452b83ce51bc1d8629556dbc2a6803a80cdb5724326111e90f3e694ea1"
+        }
+      ],
+      "reason": "Add a dedicated authenticated WeCom UnionID refresh API while preserving the active OpenAPI source binding.",
+      "review_reference": "2026-09-30 user-authorized UnionID repair; CRM v4 release workbench review"
     }
   ]
 }

@@ -377,6 +377,10 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = river.AddWorkerSafely[wecom.ContactDescriptionCallbackJobArgs](effectWorkers, contactDescriptionCallbackWorker); err != nil {
 		return fail(err)
 	}
+	contactUnionIDCallbackWorker := wecom.NewContactUnionIDCallbackWorker()
+	if err = river.AddWorkerSafely[wecom.ContactUnionIDCallbackJobArgs](effectWorkers, contactUnionIDCallbackWorker); err != nil {
+		return fail(err)
+	}
 	staffDirectoryWorker := wecom.NewStaffDirectoryRefreshWorker()
 	if err = river.AddWorkerSafely[wecom.StaffDirectoryRefreshJobArgs](effectWorkers, staffDirectoryWorker); err != nil {
 		return fail(err)
@@ -500,6 +504,10 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	contactDescriptionCallbackEnqueuer, err := wecom.NewRiverContactDescriptionCallbackEnqueuer(effectClient)
+	if err != nil {
+		return fail(err)
+	}
+	contactUnionIDCallbackEnqueuer, err := wecom.NewRiverContactUnionIDCallbackEnqueuer(effectClient)
 	if err != nil {
 		return fail(err)
 	}
@@ -2137,6 +2145,20 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	callbackReceipts := wecom.NewPostgreSQLCallbackReceiptStore()
 	oauthStates := wecom.NewPostgreSQLOAuthStateStore()
+	unionScope := ""
+	if cfg.WeCom.UnionIDOpenPlatformID != "" {
+		unionScope = "wechat-open-platform:" + cfg.WeCom.UnionIDOpenPlatformID
+	}
+	contactUnionIDs := wecom.ContactUnionIDLinker{Scope: unionScope, Identity: oneID}
+	unionCallbackEnabled := cfg.WeCom.CallbackEnabled && contactUnionIDs.Ready()
+	if unionCallbackEnabled {
+		unionService := wecom.ContactUnionIDCallbackService{Enabled: true, CorpID: cfg.WeCom.CorpID,
+			Inbox: inboxService, Provider: providerClient, Resolver: oneID, Relationships: relationships,
+			UnionIDs: contactUnionIDs, UOW: uow}
+		if err = contactUnionIDCallbackWorker.BindService(unionService); err != nil {
+			return fail(err)
+		}
+	}
 	callbackDescriptionService := wecom.ContactDescriptionCallbackService{Enabled: cfg.WeCom.ContactDescriptionProviderEnabled && cfg.WeCom.CallbackEnabled,
 		CorpID: cfg.WeCom.CorpID, Inbox: inboxService, Provider: providerClient, Identity: oneID, Relationships: relationships, Intents: contactDescriptionIntents, UOW: uow}
 	if cfg.WeCom.ContactDescriptionProviderEnabled && cfg.WeCom.CallbackEnabled {
@@ -2155,9 +2177,12 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if cfg.WeCom.ContactDescriptionProviderEnabled && cfg.WeCom.CallbackEnabled {
 		weComProcessor.DescriptionJobs = contactDescriptionCallbackEnqueuer
 	}
+	if unionCallbackEnabled {
+		weComProcessor.UnionIDJobs = contactUnionIDCallbackEnqueuer
+	}
 	weComArchiveProcessor := wecom.ArchiveInboxProcessor{Enabled: cfg.WeCom.MessageArchiveEnabled, Inbox: inboxService, UOW: uow, Archive: archiveService}
 	customerSync := wecom.CustomerSyncService{Enabled: cfg.WeCom.CustomerSyncEnabled, CorpID: cfg.WeCom.CorpID, Provider: providerClient,
-		Identity: oneID, Projection: customerStore, Timeline: customerStore, Store: customerProfileStore, Outbox: platformoutbox.NewPostgreSQL(),
+		Identity: oneID, UnionIDs: contactUnionIDs, Projection: customerStore, Timeline: customerStore, Store: customerProfileStore, Outbox: platformoutbox.NewPostgreSQL(),
 		Enqueuer: customerSyncEnqueuer, DescriptionSourceCoverage: customerProfileStore, Audit: auditService, UOW: uow}
 	if cfg.WeCom.ContactDescriptionProviderEnabled {
 		customerSync.DescriptionIntents = contactDescriptionIntents
