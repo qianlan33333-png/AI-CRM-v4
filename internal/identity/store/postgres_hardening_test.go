@@ -385,9 +385,73 @@ func TestPostgresReverseRejectsEveryLaterRelatedMerge(t *testing.T) {
 	if !errors.Is(err, identityapp.ErrMergeNotReversible) {
 		t.Fatalf("first reverse after later reversed merge=%v", err)
 	}
-	assertCustomerState(t, h, loser.CustomerID, "merged", int64(survivor.CustomerID), firstMerge.Merge.FromVersionAfter, firstMerge.Merge.FromLineageAfter)
 	if third.CustomerID == loser.CustomerID {
 		t.Fatal("test roots unexpectedly overlap")
+	}
+	assertCustomerState(t, h, loser.CustomerID, "merged", int64(survivor.CustomerID), firstMerge.Merge.FromVersionAfter, firstMerge.Merge.FromLineageAfter)
+	assertCustomerState(t, h, third.CustomerID, "active", 0, secondMerge.Merge.FromVersionAfter+1, secondMerge.Merge.FromLineageAfter+1)
+	assertCustomerState(t, h, survivor.CustomerID, "active", 0, secondMerge.Merge.ToVersionAfter+1, secondMerge.Merge.ToLineageAfter+1)
+
+	var mergeRows int
+	var referencesConsistent bool
+	if err = h.pool.Native().QueryRow(context.Background(), `
+SELECT count(*),bool_and(
+    m.candidate_id=c.id AND m.candidate_left_customer_id=c.left_customer_id
+    AND m.candidate_right_customer_id=c.right_customer_id AND m.evidence_id=c.evidence_id
+    AND e.left_customer_id=c.left_customer_id AND e.right_customer_id=c.right_customer_id
+    AND m.to_customer_id=c.selected_survivor_customer_id
+    AND m.from_customer_id IN (c.left_customer_id,c.right_customer_id)
+    AND m.from_customer_id<>m.to_customer_id
+    AND m.from_customer_version_after=m.from_customer_version_before+1
+    AND m.to_customer_version_after=m.to_customer_version_before+1
+    AND m.from_lineage_version_after=m.from_lineage_version_before+1
+    AND m.to_lineage_version_after=m.to_lineage_version_before+1
+    AND c.status='confirmed' AND c.selected_survivor_customer_id=$3
+) FROM customer_merges m
+JOIN customer_merge_candidates c ON c.id=m.candidate_id
+JOIN identity_link_evidence e ON e.id=m.evidence_id
+WHERE m.id=ANY($1::bigint[]) AND m.from_customer_id=ANY($2::bigint[])`,
+		[]int64{firstMerge.Merge.ID, secondMerge.Merge.ID},
+		[]int64{int64(loser.CustomerID), int64(third.CustomerID)},
+		int64(survivor.CustomerID),
+	).Scan(&mergeRows, &referencesConsistent); err != nil {
+		t.Fatal(err)
+	}
+	if mergeRows != 2 || !referencesConsistent {
+		t.Fatalf("later-merge ledger rows=%d references_consistent=%t", mergeRows, referencesConsistent)
+	}
+	var firstStatus, secondStatus string
+	var firstReversedAt, secondReversedAt bool
+	if err = h.pool.Native().QueryRow(context.Background(), `SELECT reversible_status,reversed_at IS NOT NULL FROM customer_merges WHERE id=$1`, firstMerge.Merge.ID).Scan(&firstStatus, &firstReversedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err = h.pool.Native().QueryRow(context.Background(), `SELECT reversible_status,reversed_at IS NOT NULL FROM customer_merges WHERE id=$1`, secondMerge.Merge.ID).Scan(&secondStatus, &secondReversedAt); err != nil {
+		t.Fatal(err)
+	}
+	if firstStatus != "not_reversed" || firstReversedAt || secondStatus != "reversed" || !secondReversedAt {
+		t.Fatalf("merge states after failed old reverse: first=%s/%t second=%s/%t", firstStatus, firstReversedAt, secondStatus, secondReversedAt)
+	}
+	var firstMembers, secondMembers int
+	var firstMemberConsistent, secondMemberConsistent bool
+	if err = h.pool.Native().QueryRow(context.Background(), `
+SELECT count(*),bool_and(m.restored_at IS NULL AND m.identity_version_after_restore IS NULL
+    AND m.from_customer_id=$3 AND m.to_customer_id=$4
+    AND i.customer_id=$4 AND i.version=m.identity_version_after AND i.status='active')
+FROM customer_merge_identity_members m JOIN customer_identities i ON i.id=m.identity_id
+WHERE m.merge_id=$1 AND m.identity_id=$2`, firstMerge.Merge.ID, loser.IdentityID, int64(loser.CustomerID), int64(survivor.CustomerID)).Scan(&firstMembers, &firstMemberConsistent); err != nil {
+		t.Fatal(err)
+	}
+	if err = h.pool.Native().QueryRow(context.Background(), `
+SELECT count(*),bool_and(m.restored_at IS NOT NULL
+    AND m.identity_version_after_restore=m.identity_version_after+1
+    AND m.from_customer_id=$3 AND m.to_customer_id=$4
+    AND i.customer_id=$3 AND i.version=m.identity_version_after_restore AND i.status='active')
+FROM customer_merge_identity_members m JOIN customer_identities i ON i.id=m.identity_id
+WHERE m.merge_id=$1 AND m.identity_id=$2`, secondMerge.Merge.ID, third.IdentityID, int64(third.CustomerID), int64(survivor.CustomerID)).Scan(&secondMembers, &secondMemberConsistent); err != nil {
+		t.Fatal(err)
+	}
+	if firstMembers != 1 || !firstMemberConsistent || secondMembers != 1 || !secondMemberConsistent {
+		t.Fatalf("membership readback first=%d/%t second=%d/%t", firstMembers, firstMemberConsistent, secondMembers, secondMemberConsistent)
 	}
 }
 
@@ -771,7 +835,9 @@ func TestPostgresOppositeLinksDeduplicateAndMergeOrReverseOnlyOnce(t *testing.T)
 		t.Fatalf("opposite link: %s", safePostgresDiagnostic(err))
 	}
 	var candidateID int64
+	linkResultCount := 0
 	for id := range candidateIDs {
+		linkResultCount++
 		if candidateID == 0 {
 			candidateID = id
 		}
@@ -783,8 +849,8 @@ func TestPostgresOppositeLinksDeduplicateAndMergeOrReverseOnlyOnce(t *testing.T)
 	if err := h.pool.Native().QueryRow(context.Background(), `SELECT count(*) FROM customer_merge_candidates WHERE status='open'`).Scan(&openCandidates); err != nil {
 		t.Fatal(err)
 	}
-	if candidateID == 0 || openCandidates != 1 {
-		t.Fatalf("candidate=%d open=%d", candidateID, openCandidates)
+	if candidateID == 0 || openCandidates != 1 || linkResultCount != workers {
+		t.Fatalf("candidate=%d open=%d link_results=%d", candidateID, openCandidates, linkResultCount)
 	}
 
 	type confirmOutcome struct {
@@ -823,13 +889,24 @@ func TestPostgresOppositeLinksDeduplicateAndMergeOrReverseOnlyOnce(t *testing.T)
 	if confirmSuccess != 1 || confirmFailure != 1 || winner.Merge == nil {
 		t.Fatalf("confirm success=%d failure=%d winner=%+v", confirmSuccess, confirmFailure, winner)
 	}
-	var selected, mergeCount int64
-	if err := h.pool.Native().QueryRow(context.Background(), `SELECT selected_survivor_customer_id,(SELECT count(*) FROM customer_merges WHERE candidate_id=$1) FROM customer_merge_candidates WHERE id=$1`, candidateID).Scan(&selected, &mergeCount); err != nil {
-		t.Fatal(err)
+	assertOppositeMergeReferences(t, h, candidateID, left, right, winner)
+
+	// Replaying the same confirm request may be rejected at the response layer.
+	// The contract here is that it cannot migrate either root or identity twice.
+	replayCommand := identityapp.ConfirmMergeCommand{CandidateID: candidateID, SurvivorCustomerID: winner.CustomerID, Operator: "postgres-hardening-race"}
+	var replay identityapp.LinkResult
+	replayErr := h.run(func(ctx context.Context) error {
+		var err error
+		replay, err = h.service.ConfirmMerge(ctx, replayCommand)
+		return err
+	})
+	if replayErr == nil && (replay.Merge == nil || replay.Merge.ID != winner.Merge.ID) {
+		t.Fatalf("successful replay returned a different merge: first=%+v replay=%+v", winner.Merge, replay.Merge)
 	}
-	if selected != int64(winner.CustomerID) || mergeCount != 1 {
-		t.Fatalf("selected=%d winner=%d merges=%d", selected, winner.CustomerID, mergeCount)
+	if replayErr != nil && !errors.Is(replayErr, identityapp.ErrInvalidLinkCommand) && !errors.Is(replayErr, identityapp.ErrConcurrentIdentityChange) {
+		t.Fatalf("replayed confirmation failed unexpectedly: %s", safePostgresDiagnostic(replayErr))
 	}
+	assertOppositeMergeReferences(t, h, candidateID, left, right, winner)
 
 	reversals := make(chan error, 2)
 	reverseStart := make(chan struct{})
@@ -857,6 +934,134 @@ func TestPostgresOppositeLinksDeduplicateAndMergeOrReverseOnlyOnce(t *testing.T)
 	if reverseSuccess != 1 || reverseFailure != 1 {
 		t.Fatalf("reverse success=%d failure=%d", reverseSuccess, reverseFailure)
 	}
+	var reverseRows int
+	var reverseReferencesConsistent bool
+	err := h.pool.Native().QueryRow(context.Background(), `
+SELECT count(*),bool_and(m.reversible_status='reversed' AND m.reversed_at IS NOT NULL
+    AND c.status='confirmed' AND c.selected_survivor_customer_id=m.to_customer_id
+    AND m.candidate_left_customer_id=c.left_customer_id
+    AND m.candidate_right_customer_id=c.right_customer_id
+    AND m.evidence_id=c.evidence_id AND e.left_customer_id=c.left_customer_id
+    AND e.right_customer_id=c.right_customer_id)
+FROM customer_merges m
+JOIN customer_merge_candidates c ON c.id=m.candidate_id
+JOIN identity_link_evidence e ON e.id=m.evidence_id
+WHERE m.id=$1 AND m.candidate_id=$2`, winner.Merge.ID, candidateID).Scan(&reverseRows, &reverseReferencesConsistent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reverseRows != 1 || !reverseReferencesConsistent {
+		t.Fatalf("reversed merge references count=%d consistent=%t", reverseRows, reverseReferencesConsistent)
+	}
+	assertCustomerState(t, h, winner.Merge.FromCustomerID, "active", 0, winner.Merge.FromVersionAfter+1, winner.Merge.FromLineageAfter+1)
+	assertCustomerState(t, h, winner.Merge.ToCustomerID, "active", 0, winner.Merge.ToVersionAfter+1, winner.Merge.ToLineageAfter+1)
+	var restoredCount int
+	var restoredReferencesConsistent bool
+	err = h.pool.Native().QueryRow(context.Background(), `
+SELECT count(*),bool_and(m.restored_at IS NOT NULL
+    AND m.identity_version_after_restore=m.identity_version_after+1
+    AND i.customer_id=m.from_customer_id AND i.version=m.identity_version_after_restore
+    AND i.status='active')
+FROM customer_merge_identity_members m JOIN customer_identities i ON i.id=m.identity_id
+WHERE m.merge_id=$1`, winner.Merge.ID).Scan(&restoredCount, &restoredReferencesConsistent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restoredCount != 1 || !restoredReferencesConsistent {
+		t.Fatalf("reversed identity references count=%d consistent=%t", restoredCount, restoredReferencesConsistent)
+	}
+	var finalIdentityCount int
+	var finalIdentitiesConsistent bool
+	err = h.pool.Native().QueryRow(context.Background(), `SELECT count(*),bool_and((id=$2 AND customer_id=$4) OR (id=$3 AND customer_id=$5)) FROM customer_identities WHERE id=ANY($1::bigint[])`,
+		[]int64{left.IdentityID, right.IdentityID},
+		left.IdentityID, right.IdentityID,
+		int64(left.CustomerID), int64(right.CustomerID),
+	).Scan(&finalIdentityCount, &finalIdentitiesConsistent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalIdentityCount != 2 || !finalIdentitiesConsistent {
+		t.Fatalf("post-reverse identity references count=%d consistent=%t", finalIdentityCount, finalIdentitiesConsistent)
+	}
+}
+
+func assertOppositeMergeReferences(t *testing.T, h *postgresHarness, candidateID int64, left, right identityport.ProvisionResult, winner identityapp.LinkResult) {
+	t.Helper()
+	var mergeCount int64
+	var referencesConsistent bool
+	err := h.pool.Native().QueryRow(context.Background(), `
+SELECT count(*),bool_and(
+    c.status='confirmed'
+    AND ((c.left_customer_id=$2 AND c.right_customer_id=$3)
+      OR (c.left_customer_id=$3 AND c.right_customer_id=$2))
+    AND c.selected_survivor_customer_id=$4
+    AND e.left_customer_id=c.left_customer_id
+    AND e.right_customer_id=c.right_customer_id
+    AND e.strength=c.evidence_strength
+    AND m.candidate_id=c.id
+    AND m.candidate_left_customer_id=c.left_customer_id
+    AND m.candidate_right_customer_id=c.right_customer_id
+    AND m.evidence_id=c.evidence_id
+    AND m.from_customer_id IN (c.left_customer_id,c.right_customer_id)
+    AND m.to_customer_id=c.selected_survivor_customer_id
+    AND m.from_customer_id<>m.to_customer_id
+    AND m.from_customer_version_before=CASE WHEN m.from_customer_id=c.left_customer_id THEN c.left_customer_version ELSE c.right_customer_version END
+    AND m.to_customer_version_before=CASE WHEN m.to_customer_id=c.left_customer_id THEN c.left_customer_version ELSE c.right_customer_version END
+    AND m.from_customer_version_after=m.from_customer_version_before+1
+    AND m.to_customer_version_after=m.to_customer_version_before+1
+    AND m.from_lineage_version_after=m.from_lineage_version_before+1
+    AND m.to_lineage_version_after=m.to_lineage_version_before+1
+    AND loser.status='merged' AND loser.merged_into_customer_id=m.to_customer_id
+    AND loser.version=m.from_customer_version_after AND loser.lineage_version=m.from_lineage_version_after
+    AND survivor.status='active' AND survivor.merged_into_customer_id IS NULL
+    AND survivor.version=m.to_customer_version_after AND survivor.lineage_version=m.to_lineage_version_after
+    AND m.reversible_status='not_reversed'
+) FROM customer_merge_candidates c
+JOIN identity_link_evidence e ON e.id=c.evidence_id
+JOIN customer_merges m ON m.candidate_id=c.id
+JOIN customers loser ON loser.id=m.from_customer_id
+JOIN customers survivor ON survivor.id=m.to_customer_id
+WHERE c.id=$1`, candidateID, int64(left.CustomerID), int64(right.CustomerID), int64(winner.CustomerID)).Scan(&mergeCount, &referencesConsistent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mergeCount != 1 || !referencesConsistent {
+		t.Fatalf("merge ledger references count=%d consistent=%t", mergeCount, referencesConsistent)
+	}
+	expectedMovedIdentityID := left.IdentityID
+	if winner.Merge.FromCustomerID == right.CustomerID {
+		expectedMovedIdentityID = right.IdentityID
+	} else if winner.Merge.FromCustomerID != left.CustomerID {
+		t.Fatalf("merge source %d is outside candidate endpoints %d/%d", winner.Merge.FromCustomerID, left.CustomerID, right.CustomerID)
+	}
+	var memberCount int
+	var membersConsistent bool
+	err = h.pool.Native().QueryRow(context.Background(), `
+SELECT count(*),bool_and(
+    m.from_customer_id=$2 AND m.to_customer_id=$3
+    AND m.identity_version_after=m.identity_version_before+1
+    AND i.customer_id=$3 AND i.version=m.identity_version_after AND i.status='active'
+    AND m.identity_id=$4
+) FROM customer_merge_identity_members m
+JOIN customer_identities i ON i.id=m.identity_id
+WHERE m.merge_id=$1`, winner.Merge.ID, int64(winner.Merge.FromCustomerID), int64(winner.Merge.ToCustomerID), expectedMovedIdentityID).Scan(&memberCount, &membersConsistent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if memberCount != 1 || !membersConsistent {
+		t.Fatalf("merge identity references count=%d consistent=%t", memberCount, membersConsistent)
+	}
+	var identityCount int
+	var identityReferencesConsistent bool
+	err = h.pool.Native().QueryRow(context.Background(), `SELECT count(*),bool_and(customer_id=$2 AND status='active') FROM customer_identities WHERE id=ANY($1::bigint[])`, []int64{left.IdentityID, right.IdentityID}, int64(winner.Merge.ToCustomerID)).Scan(&identityCount, &identityReferencesConsistent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identityCount != 2 || !identityReferencesConsistent {
+		t.Fatalf("persisted identity references count=%d consistent=%t", identityCount, identityReferencesConsistent)
+	}
+	assertCustomerState(t, h, winner.Merge.FromCustomerID, "merged", int64(winner.Merge.ToCustomerID), winner.Merge.FromVersionAfter, winner.Merge.FromLineageAfter)
+	assertCustomerState(t, h, winner.Merge.ToCustomerID, "active", 0, winner.Merge.ToVersionAfter, winner.Merge.ToLineageAfter)
 }
 
 func TestPostgresOppositeDirectionCandidateUpgradePreservesCompositeEvidenceFK(t *testing.T) {
