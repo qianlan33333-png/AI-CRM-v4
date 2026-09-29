@@ -225,6 +225,8 @@ check_domestic_workbench_contract() {
   python3 -m unittest \
     scripts.test_domestic_release_controller.DomesticMainReleaseTests.test_promote_rejects_a_different_artifact_or_staging_receipt \
     scripts.test_domestic_release_controller.DomesticMainReleaseTests.test_stage_promotion_reuses_exact_artifact_and_never_reinstalls \
+    scripts.test_domestic_release_controller.CumulativeBatchTests.test_batch_promotion_installs_once_and_keeps_one_durable_attempt \
+    scripts.test_domestic_release_controller.CumulativeBatchTests.test_wrong_batch_approval_never_enters_production_path \
     scripts.test_domestic_release.DomesticReleaseTest.test_health_failure_switches_back \
     deploy.test_domestic_promote_policy.InstallBackupPolicyTests.test_production_backup_failure_prevents_runtime_switch \
     deploy.test_domestic_promote_policy.InstallBackupPolicyTests.test_staging_migration_failure_stops_candidate_and_names_safe_synthetic_rebuild \
