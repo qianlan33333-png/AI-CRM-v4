@@ -20,6 +20,7 @@ flowchart TD
 
 - L06：shipping acceptance 原先要求数据库名以后缀 `_acceptance_test` 结束，和现有 preflight 接受的 loopback `aicrm_ci` / `aicrm_test_*` 不一致。复用 `quality_lanes.is_local_test_database_url` 的既有边界，并保留 PostgreSQL 16 可达检查。
 - 目标校验同时拒绝 URL query 中可覆盖连接目标的 `host`、`hostaddr`、`database`、`dbname`、`service`、`servicefile`；libpq 探测清除同类环境覆盖变量后再按已校验 URL 连接。普通 `sslmode` 等非目标参数保留。
+- 当前 GitHub PostgreSQL 16 服务使用 `aicrm_test_acceptance_test` 与 `aicrm_ci`；发布检查的临时数据库名为 `aicrm_test_clone_<16 位 hex>_acceptance_test`。这些既有 loopback 命名均由回归测试覆盖。
 - L07：多个迁移测试直接拼接 `&search_path=`。复用标准库 `net/url` 的 query 解析和编码，集中到仅供 PostgreSQL 测试使用的 `internal/platform/postgres/testutil`；更新五个受影响迁移包。
 - PostgreSQL 的 [连接 URI 文档](https://www.postgresql.org/docs/16/libpq-connect.html) 定义 `?` 后的第一个参数以及 `&` 分隔的后续参数；Go [net/url 文档](https://pkg.go.dev/net/url) 提供 `URL.Query` / `Values.Encode` 处理 query。实现按这两个既有约定更新参数，不手工拼接分隔符。
 - 不改变允许的主机/数据库、数量或超时边界：继续使用 `docs/prd/2026-09-13-ci-evidence-and-outcome-classification.md` 已规定的 loopback `aicrm_ci` / `aicrm_test_*` 边界。拒绝能改写该既有目标的参数，以免检查目标与实际连接目标分离。保留现有数据库创建能力探测和测试运行入口。

@@ -47,6 +47,8 @@ func TestIsLocalTestDatabaseURLMatchesCanonicalPreflightBoundary(t *testing.T) {
 	accepted := []string{
 		"postgres://user:pass@localhost/aicrm_test_one",
 		"postgresql://user:pass@127.0.0.1/aicrm_test_payment_9bbbf28?sslmode=disable",
+		"postgres://postgres:postgres@127.0.0.1:5432/aicrm_test_acceptance_test?sslmode=disable",
+		"postgres://aicrm_test@127.0.0.1:5432/aicrm_test_clone_aaaaaaaaaaaaaaaa_acceptance_test?sslmode=disable",
 		"postgres://user:pass@[::1]/aicrm_ci",
 	}
 	for _, value := range accepted {
@@ -60,6 +62,7 @@ func TestIsLocalTestDatabaseURLMatchesCanonicalPreflightBoundary(t *testing.T) {
 		"postgres://user:pass@localhost/aicrm_test_one?dbname=production",
 		"postgres://user:pass@localhost/aicrm_test_one?database=production",
 		"postgres://user:pass@localhost/aicrm_test_one?host=db.example",
+		"postgres://user:pass@localhost/aicrm_test_one?host=localhost,remote.example",
 		"postgres://user:pass@localhost/aicrm_test_one?hostaddr=203.0.113.8",
 		"postgres://user:pass@localhost/aicrm_test_one?service=production",
 		"postgres://user:pass@localhost/aicrm_test_one?servicefile=%2Ftmp%2Fpostgresql.conf&service=production",
