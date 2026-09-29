@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -237,6 +238,28 @@ type integrationAdapter struct {
 func (a *integrationAdapter) Execute(context.Context, Envelope, Attempt) (AdapterResult, error) {
 	a.calls++
 	return a.result, a.err
+}
+
+type delayedIntegrationAdapter struct {
+	started chan Attempt
+	release <-chan struct{}
+	calls   atomic.Int32
+	result  AdapterResult
+}
+
+func (a *delayedIntegrationAdapter) Execute(ctx context.Context, _ Envelope, attempt Attempt) (AdapterResult, error) {
+	a.calls.Add(1)
+	select {
+	case a.started <- attempt:
+	case <-ctx.Done():
+		return AdapterResult{}, ctx.Err()
+	}
+	select {
+	case <-a.release:
+		return a.result, nil
+	case <-ctx.Done():
+		return AdapterResult{}, ctx.Err()
+	}
 }
 
 type integrationCompletionSink struct{ fail bool }
@@ -464,6 +487,95 @@ func TestPostgreSQLAttemptedLeaseRecoveryDoesNotRepeatProviderCall(t *testing.T)
 	}
 	if _, _, err = repository.Retry(ctx, ControlCommand{EffectID: expired.ID, ReceiptKey: digestForTest("expired-retry"), ActorAdminUserID: 7}); !errors.Is(err, ErrTransition) {
 		t.Fatalf("unknown recovery retried: %v", err)
+	}
+}
+
+func TestPostgreSQLLeaseRecoveryFencesDelayedProviderCompletionAndReplay(t *testing.T) {
+	pool, cleanup := effectIntegrationPool(t)
+	defer cleanup()
+	workers := river.NewWorkers()
+	if err := river.AddWorkerSafely[EffectJobArgs](workers, NewWorker(nil, nil)); err != nil {
+		t.Fatal(err)
+	}
+	client, err := platformjobqueue.NewInsertClient(pool, workers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := NewRepository(pool, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	envelope := envelopeForTest()
+	projection, _, err := repository.AcceptAndQueue(ctx, AcceptCommand{ReceiptKey: digestForTest("delayed-completion"), Envelope: envelope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	effectIDNumber, err := parseEffectID(projection.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jobID int64
+	if err = pool.QueryRow(ctx, `SELECT river_job_id FROM external_effect_jobs WHERE effect_id=$1 AND generation=1`, effectIDNumber).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"result":"delayed"}`)
+	artifact := ResultArtifact{Kind: "test.delayed-result.v1", Payload: payload, Digest: Hash("external-effect.artifact.v1", "test.delayed-result.v1", string(payload))}
+	release := make(chan struct{})
+	adapter := &delayedIntegrationAdapter{
+		started: make(chan Attempt, 1), release: release,
+		result: AdapterResult{Completion: StateExecuted, ReceiptDigest: digestForTest("late-success"), CallAttempted: true, RealExternalCallExecuted: true, Artifact: artifact},
+	}
+	firstAttempt := make(chan error, 1)
+	go func() { firstAttempt <- repository.RunAttempt(ctx, effectIDNumber, 1, jobID, adapter) }()
+	select {
+	case attempt := <-adapter.started:
+		if attempt.Number != 1 || attempt.Generation != 1 || attempt.Fence != 1 || attempt.EffectID != projection.ID {
+			t.Fatalf("provider attempt identity=%+v", attempt)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("provider attempt did not reach the controlled delay")
+	}
+	// Simulate lease expiry while the original provider call is still blocked.
+	// The UPDATE is scoped to this test's newly accepted effect and is not a
+	// signal to any shared worker or database.
+	if tag, updateErr := pool.Exec(ctx, `UPDATE external_effects SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1 AND generation=1 AND state='attempted'`, effectIDNumber); updateErr != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("expire test lease rows=%d err=%v", tag.RowsAffected(), updateErr)
+	}
+	if err = repository.RunAttempt(ctx, effectIDNumber, 1, jobID, nil); err != nil {
+		t.Fatalf("expired lease recovery=%v", err)
+	}
+	current, err := repository.Get(ctx, projection.ID)
+	if err != nil || current.State != StateUnknown {
+		t.Fatalf("lease recovery state=%+v err=%v", current, err)
+	}
+	close(release)
+	select {
+	case lateErr := <-firstAttempt:
+		if !errors.Is(lateErr, ErrTransition) {
+			t.Fatalf("late old-worker completion=%v, want fenced ErrTransition", lateErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("delayed provider call did not return after release")
+	}
+	// Replaying the same River job after the result has become unknown is a
+	// no-op; it cannot repeat the simulated provider call or clear the unknown.
+	if err = repository.RunAttempt(ctx, effectIDNumber, 1, jobID, adapter); err != nil {
+		t.Fatalf("unknown-result replay=%v", err)
+	}
+	current, err = repository.Get(ctx, projection.ID)
+	if err != nil || current.State != StateUnknown || adapter.calls.Load() != 1 {
+		t.Fatalf("replay state=%+v provider_calls=%d err=%v", current, adapter.calls.Load(), err)
+	}
+	var attemptState string
+	var recoveryReceipt Digest
+	var callAttempted bool
+	if err = pool.QueryRow(ctx, `SELECT state,receipt_digest,call_attempted FROM external_effect_attempts WHERE effect_id=$1 AND number=1 AND generation=1 AND fence=1`, effectIDNumber).Scan(&attemptState, &recoveryReceipt, &callAttempted); err != nil {
+		t.Fatal(err)
+	}
+	wantRecoveryReceipt := Hash("attempt-lease-expired", effectID(effectIDNumber), "1", "1", "1")
+	if State(attemptState) != StateUnknown || recoveryReceipt != wantRecoveryReceipt || callAttempted {
+		t.Fatalf("attempt fact state=%q receipt=%q call_attempted=%t", attemptState, recoveryReceipt, callAttempted)
 	}
 }
 

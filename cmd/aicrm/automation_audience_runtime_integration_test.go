@@ -1269,3 +1269,180 @@ func automationAudienceRuntimePool(t *testing.T) (*pgxpool.Pool, func()) {
 		admin.Close()
 	}
 }
+
+// OneID decision: the generation rows carry already-canonical customer IDs;
+// this journey preserves those IDs into the existing AI Assistant Owner and
+// does not resolve or provision identities. Persistence decision: concurrent
+// generation completion, the AI review plan, its recipient/content facts and
+// the Automation run link are verified in PostgreSQL through the shared UoW.
+// Provider decision: completion inputs are controlled and no Provider is called.
+func TestAutomationDynamicGenerationCreatesOnePendingReviewPlanPostgreSQL(t *testing.T) {
+	ctx := context.Background()
+	native, cleanup := automationAudienceRuntimePool(t)
+	defer cleanup()
+	wrapped, err := platformpostgres.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrapped.Close()
+	uow, err := platformpostgres.NewUnitOfWork(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	automationRepository, err := automationstore.NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aiRepository, err := aiassistantstore.NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segmentRepository, err := segmentstore.NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mediaRepository, err := mediastore.NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aiService, err := aiassistantapp.NewService(uow, aiRepository, automationAudienceAIRecipients{}, automationAudienceAIStaff{}, aiMaterialAdapter{capturer: mediaRepository, references: mediaRepository}, automationAudienceAIIdentities{}, identityquery.NewPostgreSQL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeService, err := automationapp.NewRuntimeService(uow, automationRepository, automationGenerationReviewExecutionReader{}, segmentRepository, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = runtimeService.SetReviewPlanIntake(aiService, automationGenerationReviewContentReader{}); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	var runID int64
+	if err = native.QueryRow(ctx, `INSERT INTO automation_runs(package_id,package_version,snapshot_id,agent_id,agent_published_version,binding_version,sender_set_version,preview_digest,state,target_count,skipped_count,created_by,created_at,updated_at)
+		VALUES(1,1,1,1,1,1,1,decode(repeat('1a',32),'hex'),'preparing',2,0,7,$1,$1) RETURNING id`, now).Scan(&runID); err != nil {
+		t.Fatal(err)
+	}
+	items := []automationdomain.GenerationItem{
+		automationGenerationReviewItem(runID, 1001, "eer_981101", now),
+		automationGenerationReviewItem(runID, 1002, "eer_981102", now),
+	}
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		created, createErr := automationRepository.CreateGenerationItems(tx, items)
+		if createErr != nil {
+			return createErr
+		}
+		for index := range created {
+			if bindErr := automationRepository.BindGenerationEffect(tx, created[index].ID, items[index].EffectID, now); bindErr != nil {
+				return bindErr
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	completionErrors := make(chan error, 2)
+	var wait sync.WaitGroup
+	complete := func(effectID string, state effectport.State, body string) {
+		defer wait.Done()
+		<-start
+		completion := automationGenerationReviewCompletion(effectID, state, body, now.Add(time.Minute))
+		completionErrors <- uow.Within(ctx, func(tx context.Context) error {
+			return runtimeService.CompleteGeneration(tx, completion)
+		})
+	}
+	wait.Add(2)
+	go complete("eer_981101", effectport.StateExecuted, "独立核对后可提交的建议")
+	go complete("eer_981102", effectport.StateUnknown, "")
+	close(start)
+	wait.Wait()
+	close(completionErrors)
+	for completionErr := range completionErrors {
+		if completionErr != nil {
+			t.Fatal(completionErr)
+		}
+	}
+
+	var planID int64
+	var planCount, targetCount, pendingCount int
+	var planState, sourceKind string
+	if err = native.QueryRow(ctx, `SELECT count(*),min(id),min(state),min(source_kind),min(target_count),min(pending_count) FROM ai_assistant_plans`).Scan(&planCount, &planID, &planState, &sourceKind, &targetCount, &pendingCount); err != nil {
+		t.Fatal(err)
+	}
+	if planCount != 1 || planID < 1 || planState != string(aiassistantport.PlanPendingReview) || sourceKind != "automation.dynamic_text_generation.v1" || targetCount != 1 || pendingCount != 1 {
+		t.Fatalf("persisted plan count=%d id=%d state=%q source=%q target=%d pending=%d", planCount, planID, planState, sourceKind, targetCount, pendingCount)
+	}
+	var linkedPlanID int64
+	var runState string
+	if err = native.QueryRow(ctx, `SELECT ai_plan_id,state FROM automation_runs WHERE id=$1`, runID).Scan(&linkedPlanID, &runState); err != nil {
+		t.Fatal(err)
+	}
+	if linkedPlanID != planID || runState != string(automationport.RunPendingReview) {
+		t.Fatalf("run plan=%d state=%q; plan=%d pending_review required", linkedPlanID, runState, planID)
+	}
+	var recipientCount, customerID, staffID int64
+	var reviewState, executionState, content string
+	if err = native.QueryRow(ctx, `SELECT count(*),min(recipient.customer_id),min(recipient.staff_id),min(recipient.review_state),min(recipient.execution_state),min(content.content_payload->0->>'text')
+		FROM ai_assistant_plan_recipients recipient
+		JOIN ai_assistant_content_versions content ON content.id=recipient.current_content_version_id
+		WHERE recipient.plan_id=$1`, planID).Scan(&recipientCount, &customerID, &staffID, &reviewState, &executionState, &content); err != nil {
+		t.Fatal(err)
+	}
+	if recipientCount != 1 || customerID != 1001 || staffID != 7 || reviewState != "pending_review" || executionState != "not_accepted" || content != "独立核对后可提交的建议" {
+		t.Fatalf("review recipient count=%d customer=%d staff=%d review=%q execution=%q content=%q", recipientCount, customerID, staffID, reviewState, executionState, content)
+	}
+	var unknownRecipients int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM ai_assistant_plan_recipients WHERE plan_id=$1 AND customer_id=1002`, planID).Scan(&unknownRecipients); err != nil || unknownRecipients != 0 {
+		t.Fatalf("unknown generation was included in the plan: count=%d err=%v", unknownRecipients, err)
+	}
+
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		return runtimeService.CompleteGeneration(tx, automationGenerationReviewCompletion("eer_981101", effectport.StateExecuted, "独立核对后可提交的建议", now.Add(time.Minute)))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var replayPlans int
+	var replayLinkedPlanID int64
+	if err = native.QueryRow(ctx, `SELECT (SELECT count(*) FROM ai_assistant_plans),(SELECT ai_plan_id FROM automation_runs WHERE id=$1)`, runID).Scan(&replayPlans, &replayLinkedPlanID); err != nil || replayPlans != 1 || replayLinkedPlanID != planID {
+		t.Fatalf("terminal replay plans=%d linked_plan=%d want one plan=%d err=%v", replayPlans, replayLinkedPlanID, planID, err)
+	}
+}
+
+type automationGenerationReviewContentReader struct{}
+
+type automationGenerationReviewExecutionReader struct{}
+
+func (automationGenerationReviewExecutionReader) AudienceExecutionConfiguration(_ context.Context, packageID segmentport.PackageID) (segmentport.ExecutionConfiguration, error) {
+	return segmentport.ExecutionConfiguration{PackageID: packageID, Ready: true}, nil
+}
+
+func (automationGenerationReviewContentReader) OutboundPublishedContent(context.Context, automationport.AgentID, int64) (automationport.OutboundPublishedContent, bool, error) {
+	return automationport.OutboundPublishedContent{}, false, nil
+}
+
+func automationGenerationReviewItem(runID, customerID int64, effectID string, now time.Time) automationdomain.GenerationItem {
+	digest := func(label string) [32]byte { return sha256.Sum256([]byte(label + ":" + effectID)) }
+	return automationdomain.GenerationItem{
+		RunID: runID, CustomerID: customerID, SenderStaffID: 7, AgentID: 1, AgentPublishedVersion: 1,
+		AgentCode: "dynamic_text", RolePrompt: "给出简洁建议", TaskPrompt: "结合冻结上下文生成一条消息",
+		Context:      automationport.GenerationContext{Questionnaire: "目标：增长", RecentChats: "想了解", Tags: "活跃", Activation: "activated"},
+		ModelPolicy:  automationport.GenerationModelPolicy{Mode: "enabled", Endpoint: "https://model.example.test/chat/completions", Model: "test-model", Temperature: 0.4},
+		SourceDigest: digest("source"), TargetDigest: digest("target"), PayloadDigest: digest("payload"),
+		PolicyDigest: digest("policy"), ReceiptKeyDigest: digest("receipt"), State: "accepted", CreatedAt: now, UpdatedAt: now, EffectID: effectID,
+	}
+}
+
+func automationGenerationReviewCompletion(effectID string, state effectport.State, body string, completedAt time.Time) automationport.GenerationCompletion {
+	completion := automationport.GenerationCompletion{
+		EffectID: effectID, State: state,
+		Attempt:       effectport.Attempt{EffectID: effectID, Number: 1, Generation: 1, Fence: 1},
+		ReceiptDigest: effectport.Hash("automation-generation-review-test", effectID), CompletedAt: completedAt, FailureCode: "generation_call_unknown",
+	}
+	if state == effectport.StateExecuted {
+		completion.Artifact = effectport.ResultArtifact{Kind: "automation.ai_agent_generate.text.v1", Payload: []byte(body)}
+		completion.Artifact.Digest = effectport.Hash("external-effect.artifact.v1", completion.Artifact.Kind, body)
+	}
+	return completion
+}

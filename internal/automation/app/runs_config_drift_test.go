@@ -117,11 +117,13 @@ func (*previewDriftStore) BindGenerationEffect(context.Context, int64, string, t
 type previewDriftReviewPlans struct {
 	aiassistantport.TransactionalIntake
 	aiassistantport.Reader
-	calls int
+	calls   int
+	command aiassistantport.CreatePlanCommand
 }
 
-func (s *previewDriftReviewPlans) CreatePlanWithin(context.Context, aiassistantport.CreatePlanCommand) (aiassistantport.CreatePlanResult, error) {
+func (s *previewDriftReviewPlans) CreatePlanWithin(_ context.Context, command aiassistantport.CreatePlanCommand) (aiassistantport.CreatePlanResult, error) {
 	s.calls++
+	s.command = command
 	return aiassistantport.CreatePlanResult{Plan: aiassistantport.Plan{ID: 94}}, nil
 }
 
@@ -223,6 +225,180 @@ func TestConfirmRunRejectsRuntimeConfigDriftForFixedAndDynamicContent(t *testing
 			}
 			if store.runCount != 0 || store.itemCount != 0 || store.completionCount != 0 || store.factCount != factsBeforeConfirm || plans.calls != 0 || effects.calls != 0 {
 				t.Fatalf("stale preview created effects: runs=%d generation_items=%d runtime_receipts=%d facts=%d review_plans=%d external_effects=%d", store.runCount, store.itemCount, store.completionCount, store.factCount-factsBeforeConfirm, plans.calls, effects.calls)
+			}
+		})
+	}
+}
+
+type previewExecutionConfigurationSequence struct {
+	items []segmentport.ExecutionConfiguration
+	reads int
+}
+
+func (r *previewExecutionConfigurationSequence) AudienceExecutionConfiguration(_ context.Context, _ segmentport.PackageID) (segmentport.ExecutionConfiguration, error) {
+	index := r.reads
+	r.reads++
+	if index >= len(r.items) {
+		index = len(r.items) - 1
+	}
+	return r.items[index], nil
+}
+
+type previewScopeSnapshots struct {
+	members     []segmentport.Member
+	memberReads []segmentport.SnapshotID
+}
+
+func (r *previewScopeSnapshots) PublishedSnapshot(context.Context, segmentport.PackageID) (segmentport.Snapshot, bool, error) {
+	return segmentport.Snapshot{}, false, nil
+}
+func (r *previewScopeSnapshots) Snapshot(context.Context, segmentport.SnapshotID) (segmentport.Snapshot, bool, error) {
+	return segmentport.Snapshot{}, false, nil
+}
+func (r *previewScopeSnapshots) Members(_ context.Context, id segmentport.SnapshotID, _ string, _ int) (segmentport.MemberPage, error) {
+	r.memberReads = append(r.memberReads, id)
+	return segmentport.MemberPage{Items: append([]segmentport.Member(nil), r.members...)}, nil
+}
+
+func previewFreezeConfiguration() segmentport.ExecutionConfiguration {
+	return segmentport.ExecutionConfiguration{
+		PackageID: 17, PackageVersion: 4, ConfigurationVersionID: 5,
+		Snapshot: segmentport.Snapshot{ID: 71, PackageID: 17, MemberCount: 3, State: segmentport.SnapshotPublished},
+		AgentID:  23, AgentPublishedVersion: 6, ContentDigest: [32]byte{1},
+		BindingVersion: 7, SenderSetVersion: 8, SenderStaffIDs: []int64{31, 32}, Ready: true,
+	}
+}
+
+func previewFreezeMembers() []segmentport.Member {
+	return []segmentport.Member{
+		{SnapshotID: 71, CustomerID: customerdomain.CustomerID(101)},
+		{SnapshotID: 71, CustomerID: customerdomain.CustomerID(102)},
+		{SnapshotID: 71, CustomerID: customerdomain.CustomerID(103)},
+	}
+}
+
+func newPreviewFreezeFixture(t *testing.T, configs []segmentport.ExecutionConfiguration, members []segmentport.Member, now *time.Time) (*RuntimeService, *previewDriftStore, *previewDriftReviewPlans, *previewScopeSnapshots) {
+	t.Helper()
+	store := &previewDriftStore{}
+	audience := &previewExecutionConfigurationSequence{items: configs}
+	snapshots := &previewScopeSnapshots{members: members}
+	config := configport.EffectiveSnapshot{Revision: 8, Source: configport.RuntimeSourcePublished, AutomationMaxRecipients: 10}
+	configReader := &runtimeConfigSequence{snapshots: []configport.EffectiveSnapshot{config, config}}
+	service, err := NewRuntimeServiceWithRuntimeConfig(directRuntimeUOW{}, store, audience, snapshots, configReader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return *now }
+	plans := &previewDriftReviewPlans{}
+	content := previewDriftContent{found: true, content: automationport.OutboundPublishedContent{
+		AgentID: automationport.AgentID(configs[0].AgentID), PublishedVersion: configs[0].AgentPublishedVersion,
+		Content: automationport.FixedContentPackage{ContentText: "预览批准后仍须再次核验当前设置。"}, ContentDigest: configs[0].ContentDigest,
+	}}
+	if err = service.SetReviewPlanIntake(plans, content); err != nil {
+		t.Fatal(err)
+	}
+	return service, store, plans, snapshots
+}
+
+func confirmPreviewCommand(preview automationdomain.RunPreview) RunConfirmCommand {
+	return RunConfirmCommand{
+		PackageID: preview.PackageID, PackageVersion: preview.PackageVersion,
+		SnapshotID: preview.SnapshotID, AgentID: preview.AgentID,
+		AgentPublishedVersion: preview.AgentPublishedVersion, PreviewDigest: PreviewDigestString(preview),
+		Actor: 42, IdempotencyKey: "preview-freeze-confirm-0001",
+	}
+}
+
+func TestPreviewFreezeKeepsSnapshotRecipientsAndSenderAssignmentsUntilExpiry(t *testing.T) {
+	now := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+	configuration := previewFreezeConfiguration()
+	service, store, plans, snapshots := newPreviewFreezeFixture(t, []segmentport.ExecutionConfiguration{configuration, configuration}, previewFreezeMembers(), &now)
+	preview, err := service.CreateBroadcastPreview(context.Background(), 17, 42)
+	if err != nil {
+		t.Fatalf("create preview: %v", err)
+	}
+	if preview.ExpiresAt != now.Add(15*time.Minute) || preview.PackageVersion != configuration.PackageVersion || preview.ConfigurationVersionID != int64(configuration.ConfigurationVersionID) || preview.SnapshotID != int64(configuration.Snapshot.ID) || preview.AgentID != configuration.AgentID || preview.AgentPublishedVersion != configuration.AgentPublishedVersion || preview.BindingVersion != configuration.BindingVersion || preview.SenderSetVersion != configuration.SenderSetVersion || preview.TargetCount != 3 {
+		t.Fatalf("preview did not freeze its scope/version/window: %+v", preview)
+	}
+
+	now = preview.ExpiresAt.Add(-time.Second)
+	run, err := service.ConfirmRun(context.Background(), confirmPreviewCommand(preview))
+	if err != nil || run.State != automationport.RunPendingReview || run.AIPlanID != 94 || store.runCount != 1 || plans.calls != 1 {
+		t.Fatalf("confirmation run=%+v run_count=%d plan_calls=%d err=%v", run, store.runCount, plans.calls, err)
+	}
+	if len(snapshots.memberReads) != 1 || snapshots.memberReads[0] != segmentport.SnapshotID(preview.SnapshotID) {
+		t.Fatalf("snapshot member reads=%v, want only frozen snapshot %d", snapshots.memberReads, preview.SnapshotID)
+	}
+	want := []aiassistantport.RecipientCandidate{
+		{CustomerID: 101, StaffID: 31, Content: []aiassistantport.ContentBlock{{Kind: aiassistantport.ContentText, Text: "预览批准后仍须再次核验当前设置。"}}},
+		{CustomerID: 102, StaffID: 32, Content: []aiassistantport.ContentBlock{{Kind: aiassistantport.ContentText, Text: "预览批准后仍须再次核验当前设置。"}}},
+		{CustomerID: 103, StaffID: 31, Content: []aiassistantport.ContentBlock{{Kind: aiassistantport.ContentText, Text: "预览批准后仍须再次核验当前设置。"}}},
+	}
+	if plans.command.IdempotencyKey != "automation-manual-review-preview-freeze-confirm-0001" || len(plans.command.Recipients) != len(want) {
+		t.Fatalf("review plan command=%+v", plans.command)
+	}
+	for index := range want {
+		got := plans.command.Recipients[index]
+		if got.CustomerID != want[index].CustomerID || got.StaffID != want[index].StaffID || len(got.Content) != 1 || got.Content[0] != want[index].Content[0] {
+			t.Fatalf("review recipient[%d]=%+v want=%+v", index, got, want[index])
+		}
+	}
+}
+
+func TestPreviewFreezeRejectsScopeAgentSenderAndPackageVersionDrift(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(*segmentport.ExecutionConfiguration)
+	}{
+		{name: "customer_snapshot", change: func(value *segmentport.ExecutionConfiguration) { value.Snapshot.ID++ }},
+		{name: "package_configuration", change: func(value *segmentport.ExecutionConfiguration) { value.PackageVersion++ }},
+		{name: "agent_published_version", change: func(value *segmentport.ExecutionConfiguration) { value.AgentPublishedVersion++ }},
+		{name: "sender_binding_version", change: func(value *segmentport.ExecutionConfiguration) { value.BindingVersion++ }},
+		{name: "sender_set_version", change: func(value *segmentport.ExecutionConfiguration) { value.SenderSetVersion++ }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			now := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+			original := previewFreezeConfiguration()
+			current := original
+			test.change(&current)
+			service, store, plans, _ := newPreviewFreezeFixture(t, []segmentport.ExecutionConfiguration{original, current}, previewFreezeMembers(), &now)
+			preview, err := service.CreateBroadcastPreview(context.Background(), 17, 42)
+			if err != nil {
+				t.Fatalf("create preview: %v", err)
+			}
+			factsBeforeConfirm := store.factCount
+			now = now.Add(time.Minute)
+			if _, err = service.ConfirmRun(context.Background(), confirmPreviewCommand(preview)); !errors.Is(err, ErrRuntimeConflict) {
+				t.Fatalf("drift confirmation err=%v, want ErrRuntimeConflict", err)
+			}
+			if store.runCount != 0 || store.itemCount != 0 || store.completionCount != 0 || store.factCount != factsBeforeConfirm || plans.calls != 0 {
+				t.Fatalf("drift created business results: runs=%d items=%d receipts=%d new_facts=%d plans=%d", store.runCount, store.itemCount, store.completionCount, store.factCount-factsBeforeConfirm, plans.calls)
+			}
+		})
+	}
+}
+
+func TestPreviewFreezeRejectsConfirmationAtFifteenMinuteExpiry(t *testing.T) {
+	for _, offset := range []time.Duration{0, time.Nanosecond} {
+		t.Run(map[time.Duration]string{0: "exact_expiry", time.Nanosecond: "after_expiry"}[offset], func(t *testing.T) {
+			now := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+			configuration := previewFreezeConfiguration()
+			service, store, plans, _ := newPreviewFreezeFixture(t, []segmentport.ExecutionConfiguration{configuration, configuration}, previewFreezeMembers(), &now)
+			preview, err := service.CreateBroadcastPreview(context.Background(), 17, 42)
+			if err != nil {
+				t.Fatalf("create preview: %v", err)
+			}
+			factsBeforeConfirm := store.factCount
+			now = preview.ExpiresAt.Add(offset)
+			command := confirmPreviewCommand(preview)
+			for attempt := 1; attempt <= 2; attempt++ {
+				if _, err = service.ConfirmRun(context.Background(), command); !errors.Is(err, ErrRuntimeConflict) {
+					t.Fatalf("expired confirmation attempt %d err=%v, want ErrRuntimeConflict", attempt, err)
+				}
+			}
+			if store.runCount != 0 || store.completionCount != 0 || store.factCount != factsBeforeConfirm || plans.calls != 0 {
+				t.Fatalf("expired preview created business results: runs=%d receipts=%d new_facts=%d plans=%d", store.runCount, store.completionCount, store.factCount-factsBeforeConfirm, plans.calls)
 			}
 		})
 	}
