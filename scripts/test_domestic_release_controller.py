@@ -3044,5 +3044,199 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
 
 
 
+class CumulativeBatchTests(unittest.TestCase):
+    def test_opening_existing_staged_attempt_preserves_production_base(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, staged, _ = make_repository(root)
+            app = {"sha": base, "tree": release._tree(repo, base), "manifest_sha256": "a" * 64}
+            staged_app = {"sha": staged, "tree": release._tree(repo, staged), "manifest_sha256": "b" * 64}
+            state = release._new_state(base, app["tree"], app)
+            state.update(status="blocked", staging_out_of_sync=True)
+            state["queue"] = [{"candidate_id": staged, "ref": "refs/heads/codex/one",
+                               "head_sha": staged, "base_sha": base, "status": "stage_validation_pending"}]
+            state["in_flight"] = {"candidate_id": staged, "ref": "refs/heads/codex/one",
+                                  "head_sha": staged, "head_tree": staged_app["tree"],
+                                  "base_sha": base, "phase": "stage-validation-pending",
+                                  "stage_install_started": True, "stage_install_completed": True,
+                                  "runtime_changed": True, "installed_app": staged_app,
+                                  "stage_receipt": {"source_sha": staged},
+                                  "check_receipt": {"status": "passed"},
+                                  "bundle_meta": {"bundle_sha256": "c" * 64}}
+            path = root / "state.json"
+            release.atomic_json(path, state)
+            config = {"repo": str(repo), "state": str(path), "lock": str(root / "lock"),
+                      "work_root": str(root), "production_enabled": True}
+            journey = {"status": "passed", "source_sha": staged,
+                       "checks": [{"name": "member-a", "status": "passed"}]}
+            real_load = release._load_state
+            load_local = lambda path: real_load(path, owner_uid=os.getuid())
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_load_state", side_effect=load_local), \
+                 mock.patch.object(release, "_safe_directory"), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_read_stage_evidence", return_value=journey), \
+                 mock.patch.object(release, "_verify_staged_member"), \
+                 mock.patch.object(release, "_verify_prod_app"), \
+                 mock.patch.object(release, "_verify_controller_files"):
+                result = release.batch_open(config)
+            observed = json.loads(path.read_text())
+            self.assertEqual(result["status"], "batch_open")
+            self.assertEqual(observed["main"]["sha"], base)
+            self.assertEqual(observed["installed_app"], app)
+            self.assertEqual(observed["batch"]["head_sha"], staged)
+            self.assertEqual(observed["batch"]["installed_app"], staged_app)
+            self.assertEqual(observed["queue"][0]["status"], "staged")
+            self.assertIsNone(observed["in_flight"])
+
+    def test_next_candidate_must_extend_current_staged_head(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, staged, other = make_repository(root)
+            app = {"sha": base, "tree": release._tree(repo, base), "manifest_sha256": "a" * 64}
+            state = release._new_state(base, app["tree"], app)
+            state["batch"] = {"status": "open", "base_sha": base,
+                              "head_sha": staged, "head_tree": release._tree(repo, staged),
+                              "installed_app": {"sha": staged, "tree": release._tree(repo, staged),
+                                                "manifest_sha256": "b" * 64},
+                              "members": [{"ref": "refs/heads/codex/one", "base_sha": base,
+                                           "head_sha": staged}]}
+            state["staging_out_of_sync"] = True
+            path = root / "state.json"
+            release.atomic_json(path, state)
+            real_load = release._load_state
+            with mock.patch.object(release, "_load_state", side_effect=lambda p: real_load(p, owner_uid=os.getuid())):
+                with self.assertRaisesRegex(release.ReleaseError, "base is stale"):
+                    release.submit_candidate(repo, path, "refs/heads/codex/two", other, base, root / "lock")
+            self.assertEqual(json.loads(path.read_text())["queue"], [])
+
+    def test_final_journey_must_cover_earlier_member(self) -> None:
+        batch = {"head_sha": "c" * 40, "head_tree": "d" * 40,
+                 "installed_app": {"manifest_sha256": "e" * 64},
+                 "stage_receipt": {"source_sha": "c" * 40},
+                 "members": [{"stage_check_names": ["member-a"]},
+                             {"stage_check_names": ["member-b"]}]}
+        with mock.patch.object(release, "_read_stage_evidence", return_value={
+                "checks": [{"name": "member-b", "status": "passed"}]}):
+            with self.assertRaisesRegex(release.ReleaseError, "omit an earlier"):
+                release._batch_final_evidence({"work_root": "/unused"}, batch)
+
+    def test_one_approval_digest_binds_member_order_package_and_final_journey(self) -> None:
+        def member(sha: str) -> dict:
+            return {"base_sha": "a" * 40, "head_sha": sha, "head_tree": "b" * 40,
+                    "runtime_changed": True, "check_receipt_sha256": "c" * 64,
+                    "stage_receipt_sha256": "d" * 64,
+                    "stage_journey_sha256": "e" * 64,
+                    "source_bundle_sha256": "f" * 64}
+        batch = {"base_sha": "a" * 40, "head_sha": "2" * 40,
+                 "head_tree": "b" * 40, "members": [member("1" * 40), member("2" * 40)],
+                 "installed_app": {"sha": "2" * 40, "tree": "b" * 40,
+                                   "manifest_sha256": "3" * 64},
+                 "stage_receipt": {"source_sha": "2" * 40},
+                 "production_metadata_sha256": "4" * 64}
+        journey = {"status": "passed", "checks": [{"name": "both"}]}
+        original = release._batch_approval_result(batch, journey)["approval_digest"]
+        batch["members"].reverse()
+        self.assertNotEqual(original, release._batch_approval_result(batch, journey)["approval_digest"])
+        batch["members"].reverse()
+        batch["installed_app"]["manifest_sha256"] = "5" * 64
+        self.assertNotEqual(original, release._batch_approval_result(batch, journey)["approval_digest"])
+        batch["installed_app"]["manifest_sha256"] = "3" * 64
+        journey["checks"].append({"name": "extra"})
+        self.assertNotEqual(original, release._batch_approval_result(batch, journey)["approval_digest"])
+
+    def test_batch_promotion_installs_once_and_keeps_one_durable_attempt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, staged, _ = make_repository(root)
+            tree = release._tree(repo, base)
+            staged_tree = release._tree(repo, staged)
+            baseline = {"sha": base, "tree": tree, "manifest_sha256": "a" * 64}
+            app = {"sha": staged, "tree": staged_tree, "manifest_sha256": "b" * 64}
+            state = release._new_state(base, tree, baseline)
+            item = {"candidate_id": staged, "ref": "refs/heads/codex/one",
+                    "base_sha": base, "head_sha": staged, "status": "staged",
+                    "check_receipt": {"status": "passed"},
+                    "source_bundle": {"bundle_sha256": "c" * 64}}
+            state["queue"] = [item]
+            state["status"] = "blocked"
+            state["staging_out_of_sync"] = True
+            metadata_path = root / "metadata.json"
+            release.atomic_json(metadata_path, {"source_sha": staged,
+                "release_files_sha256": app["manifest_sha256"]})
+            bundle = root / "source-bundles" / f"{staged}.bundle"
+            bundle.parent.mkdir()
+            bundle.write_bytes(b"source bundle")
+            item["source_bundle"]["bundle_sha256"] = release._file_sha256(bundle)
+            member = {"candidate_id": staged, "ref": item["ref"], "base_sha": base,
+                      "head_sha": staged, "head_tree": staged_tree,
+                      "source_bundle_sha256": release._file_sha256(bundle)}
+            state["batch"] = {"status": "sealed", "base_sha": base,
+                              "base_tree": tree, "head_sha": staged,
+                              "head_tree": staged_tree, "members": [member],
+                              "installed_app": app, "stage_receipt": {"source_sha": staged},
+                              "controller_source_sha": base,
+                              "production_metadata_path": str(metadata_path),
+                              "production_metadata_sha256": release._file_sha256(metadata_path)}
+            receipt = {"source_sha": staged, "manifest_sha256": app["manifest_sha256"],
+                       "technical_status": "installed_healthy"}
+            config = {"repo": str(repo), "work_root": str(root), "prod_helper": "/helper"}
+            def update(_path, current, **changes):
+                current.update(changes)
+                release._validate_state(current)
+            with mock.patch.object(release, "_verify_controller_files"), \
+                 mock.patch.object(release, "_verify_stage_app"), \
+                 mock.patch.object(release, "_verify_prod_app", return_value={"receipt": receipt}), \
+                 mock.patch.object(release, "_verify_production_cursor", return_value={"cursor": {
+                     "main_sha": base, "main_tree": tree, "installed_app_sha": base,
+                     "installed_manifest_sha256": baseline["manifest_sha256"]}}), \
+                 mock.patch.object(release, "_update_state", side_effect=update), \
+                 mock.patch.object(release, "_upload_and_store_bundle"), \
+                 mock.patch.object(release.legacy, "verify_release_artifact"), \
+                 mock.patch.object(release.legacy, "copy_payload", return_value=("/incoming", "/metadata")), \
+                 mock.patch.object(release.legacy, "verify_install_receipt"), \
+                 mock.patch.object(release, "_production_ssh", return_value=json.dumps(receipt)) as remote, \
+                 mock.patch.object(release, "_finalize_success", return_value={"status": "completed"}) as finish:
+                result = release._promote_batch(config, root / "state.json", state,
+                                                {"status": "passed"})
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(state["batch"]["status"], "promoting")
+            self.assertEqual(state["in_flight"]["batch_member_heads"], [staged])
+            self.assertEqual(remote.call_count, 1)
+            finish.assert_called_once()
+
+    def test_wrong_batch_approval_never_enters_production_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, staged, _ = make_repository(root)
+            state = release._new_state(base, release._tree(repo, base), {
+                "sha": base, "tree": release._tree(repo, base), "manifest_sha256": "a" * 64})
+            state["status"] = "blocked"
+            state["staging_out_of_sync"] = True
+            state["batch"] = {"status": "sealed", "base_sha": base,
+                "head_sha": staged, "members": [{"base_sha": base, "head_sha": staged}],
+                "installed_app": {"sha": staged, "tree": release._tree(repo, staged),
+                                  "manifest_sha256": "b" * 64},
+                "approval_digest": "c" * 64}
+            config = {"repo": str(repo), "state": str(root / "state.json"),
+                      "lock": str(root / "lock"), "production_enabled": True,
+                      "controller_path": "/controller", "push_group": "push"}
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                 mock.patch.object(release, "verify_bare_repository"), \
+                 mock.patch.object(release, "_load_state", return_value=state), \
+                 mock.patch.object(release, "_batch_final_evidence", return_value={"status": "passed"}), \
+                 mock.patch.object(release, "_batch_approval_result", return_value={
+                     "approval_digest": "d" * 64}) as approval, \
+                 mock.patch.object(release, "_promote_batch") as production:
+                with self.assertRaisesRegex(release.ReleaseError, "human approval does not match"):
+                    release.promote(config, "c" * 64)
+            approval.assert_called_once()
+            production.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

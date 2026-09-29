@@ -745,6 +745,17 @@ def _validate_state(state: Any) -> None:
         raise ReleaseError("domestic main ledger in-flight record is invalid")
     if "staging_out_of_sync" in state and not isinstance(state["staging_out_of_sync"], bool):
         raise ReleaseError("staging synchronization marker is invalid")
+    if state.get("batch") is not None:
+        _batch_tip(state)
+        batch = state["batch"]
+        app = batch.get("installed_app")
+        if not isinstance(app, dict):
+            raise ReleaseError("cumulative staging application is missing")
+        _sha(app.get("sha"), "cumulative staging application SHA")
+        _sha(app.get("tree"), "cumulative staging application tree")
+        _digest(app.get("manifest_sha256"), "cumulative staging application manifest")
+        if state.get("staging_out_of_sync") is not True:
+            raise ReleaseError("cumulative staging must be recorded as ahead of production")
     ack = state.get("archive_ack")
     if ack is not None:
         if not isinstance(ack, dict) or ack.get("observed_by") != "manual_cli":
@@ -778,6 +789,40 @@ def _active_queue_item(state: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _batch_tip(state: dict[str, Any]) -> str:
+    batch = state.get("batch")
+    if batch is None:
+        return _sha(state["main"]["sha"], "domestic main SHA")
+    if not isinstance(batch, dict) or batch.get("status") not in {"open", "sealed", "promoting"}:
+        raise ReleaseError("cumulative staging batch is invalid")
+    if batch["status"] == "promoting" and (state.get("status") != "outcome_unknown"
+                                             or not isinstance(state.get("in_flight"), dict)):
+        raise ReleaseError("promoting batch lost its durable in-flight attempt")
+    if batch.get("base_sha") != state["main"]["sha"]:
+        raise ReleaseError("cumulative staging base differs from domestic main")
+    members = batch.get("members")
+    if not isinstance(members, list) or not members:
+        raise ReleaseError("cumulative staging batch has no members")
+    previous = batch["base_sha"]
+    for member in members:
+        if not isinstance(member, dict) or member.get("base_sha") != previous:
+            raise ReleaseError("cumulative staging member chain is broken")
+        previous = _sha(member.get("head_sha"), "staged member head")
+    if batch.get("head_sha") != previous:
+        raise ReleaseError("cumulative staging tip differs from its members")
+    return previous
+
+
+def _active_queue_position(state: dict[str, Any], item: dict[str, Any]) -> int:
+    active = [entry for entry in state["queue"] if entry.get("status") in {
+        "pending", "stale_base", "failed", "outcome_unknown",
+        "stage_validation_pending", "source_approval_pending",
+    }]
+    if item not in active:
+        raise ReleaseError("candidate is not in the active queue")
+    return active.index(item) + 1
+
+
 def _new_state(main_sha: str, main_tree: str, installed_app: dict[str, str]) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -789,6 +834,7 @@ def _new_state(main_sha: str, main_tree: str, installed_app: dict[str, str]) -> 
             "manifest_sha256": _digest(installed_app.get("manifest_sha256"), "baseline app manifest"),
         },
         "queue": [],
+        "batch": None,
         "in_flight": None,
         "controller_maintenance": None,
         "staging_out_of_sync": False,
@@ -885,15 +931,30 @@ def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base
             raise ReleaseError("an exact candidate is awaiting human approval; finish it before submitting another")
         if state["status"] == "outcome_unknown":
             raise ReleaseError("production outcome is unknown; reconcile before submitting another candidate")
-        if state.get("staging_out_of_sync") is True:
+        batch = state.get("batch")
+        if state.get("staging_out_of_sync") is True and batch is None:
             raise ReleaseError("staging differs from the last production version; restore the verified application and synthetic database, then run ack-stage-reset")
         actual_main = _resolve_ref(repo, MAIN_REF)
-        if actual_main != state["main"]["sha"] or base_sha != actual_main:
-            raise ReleaseError("candidate base is stale; update and recheck the development branch from current domestic main")
+        expected_base = _batch_tip(state)
+        if actual_main != state["main"]["sha"] or base_sha != expected_base:
+            raise ReleaseError("candidate base is stale; update and recheck from the current cumulative staging head")
+        retry_front = _active_queue_item(state)
+        retryable_block = (state["status"] == "blocked" and retry_front is not None
+                           and retry_front.get("status") == "failed"
+                           and retry_front.get("ref") == ref)
+        if retryable_block and retry_front.get("failure", {}).get("required_recovery"):
+            retryable_block = (state.get("stage_reset_acknowledged_at_utc", "")
+                               >= retry_front["failure"]["recorded_at_utc"])
+        if batch is not None and (batch["status"] != "open"
+                                  or (state["status"] != "ready" and not retryable_block)
+                                  or state.get("in_flight") is not None):
+            raise ReleaseError("cumulative staging batch is not open for another candidate")
         actual_head = _resolve_ref(repo, ref)
         if actual_head != head_sha:
             raise ReleaseError("submitted head does not match the exact pushed branch head")
-        _first_parent_chain(repo, base_sha, head_sha)
+        _first_parent_chain(repo, expected_base, head_sha)
+        if batch is not None and any(member["ref"] == ref for member in batch["members"]):
+            raise ReleaseError("a staged member ref cannot be reused in the same batch")
         _pin_candidate(repo, head_sha)
         entries = state["queue"]
         queue_identity_before = [tuple(item.get(key) for key in ("candidate_id", "ref", "head_sha", "base_sha"))
@@ -910,7 +971,7 @@ def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base
                 environment_retry = same.get("failure", {}).get("kind") == "environment"
                 if same["status"] in {"pending", "stale_base"} and not environment_retry:
                     return {"status": same["status"], "candidate_id": same["candidate_id"], "head_sha": head_sha,
-                            "base_sha": base_sha, "queue_position": entries.index(same) + 1}
+                            "base_sha": base_sha, "queue_position": _active_queue_position(state, same)}
                 # Keep attempts monotonic so every retry gets a fresh evidence directory.
                 same.update({"status": "pending", "submitted_at_utc": _utc_now()})
                 if not environment_retry:
@@ -920,7 +981,7 @@ def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base
                 state["updated_at_utc"] = _utc_now()
                 atomic_json(state_path, state)
                 return {"status": "pending", "candidate_id": same["candidate_id"], "head_sha": head_sha,
-                        "base_sha": base_sha, "queue_position": entries.index(same) + 1}
+                        "base_sha": base_sha, "queue_position": _active_queue_position(state, same)}
             same.update({
                 "candidate_id": head_sha,
                 "head_sha": head_sha,
@@ -963,7 +1024,7 @@ def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base
         state["updated_at_utc"] = _utc_now()
         atomic_json(state_path, state)
         return {"status": item["status"], "candidate_id": item["candidate_id"], "head_sha": head_sha,
-                "base_sha": base_sha, "queue_position": entries.index(item) + 1}
+                "base_sha": base_sha, "queue_position": _active_queue_position(state, item)}
 
 
 def _policy_worktree(repo: Path, work_root: Path, base_sha: str, push_group: str) -> Path:
@@ -2546,10 +2607,14 @@ def _trim_check_caches(config: dict) -> dict:
 def _reclaim_unreferenced_packages(config: dict) -> dict:
     _require_cleanup_lock(config)
     state = _load_state(Path(config["state"]))
-    if state.get("staging_out_of_sync") or (state.get("in_flight") and state["in_flight"].get("phase") != "checks"):
+    batch = state.get("batch")
+    if ((state.get("staging_out_of_sync") and
+         (not isinstance(batch, dict) or batch.get("status") != "open"))
+            or (state.get("in_flight") and state["in_flight"].get("phase") != "checks")):
         return {"status":"protected_unresolved_install", "removed":[]}
     releases = Path(config.get("stage_releases", "/opt/aicrm/releases"))
-    current = state["installed_app"]["sha"]
+    current = (batch["installed_app"] if isinstance(batch, dict)
+               else state["installed_app"])["sha"]
     if (releases.parent / "current").resolve() != (releases / current).resolve():
         return {"status":"current_identity_unavailable", "removed":[]}
     receipt_path = releases.parent / "domestic-receipts" / (current + ".json")
@@ -2558,12 +2623,16 @@ def _reclaim_unreferenced_packages(config: dict) -> dict:
     current_receipt = json.loads(receipt_path.read_text())
     if current_receipt.get("source_sha") != current:
         return {"status":"current_receipt_identity_unavailable", "removed":[]}
+    if isinstance(batch, dict) and (current_receipt != batch.get("stage_receipt")
+                                    or current_receipt.get("manifest_sha256") != batch["installed_app"]["manifest_sha256"]):
+        return {"status":"cumulative_stage_receipt_changed", "removed":[]}
     previous = current_receipt.get("previous_sha")
     if not isinstance(previous, str) or not SHA.fullmatch(previous):
         return {"status":"rollback_identity_unavailable", "removed":[]}
     refs = set(_git(Path(config["repo"]), "for-each-ref", "--format=%(objectname)").splitlines())
     pending = {item["head_sha"] for item in state.get("queue", []) if item.get("status") != "completed"}
-    protected = refs | pending | {current, previous, state["main"]["sha"]}
+    protected = refs | pending | {current, previous, state["main"]["sha"],
+                                  state["installed_app"]["sha"]}
     removed = []
     proof = _lifecycle_directory(config) / ("packages-" + str(time.time_ns()) + ".json")
     snapshots = {"protected":sorted(protected), "removed":removed}
@@ -3464,9 +3533,12 @@ def _validate_stage_reset(state: dict[str, Any], stage_app: dict[str, str],
                           prod_app: dict[str, str]) -> None:
     if state.get("status") != "blocked" or state.get("staging_out_of_sync") is not True:
         raise ReleaseError("no failed staging transaction is awaiting reset acknowledgement")
-    expected = state.get("installed_app")
-    if not isinstance(expected, dict) or stage_app != expected or prod_app != expected:
-        raise ReleaseError("stage and production must both read back the last verified application before clearing the staging block")
+    expected_prod = state.get("installed_app")
+    batch = state.get("batch")
+    expected_stage = batch.get("installed_app") if isinstance(batch, dict) else expected_prod
+    if (not isinstance(expected_prod, dict) or not isinstance(expected_stage, dict)
+            or stage_app != expected_stage or prod_app != expected_prod):
+        raise ReleaseError("stage and production must read back their last independently verified applications")
 
 
 def acknowledge_stage_reset(config: dict[str, Any]) -> dict[str, Any]:
@@ -3491,13 +3563,13 @@ def acknowledge_stage_reset(config: dict[str, Any]) -> dict[str, Any]:
             if item is None or item.get("status") != "failed":
                 raise ReleaseError("staging reset cannot clear an unrecorded interrupted candidate")
             state["in_flight"] = None
-        state["staging_out_of_sync"] = False
+        state["staging_out_of_sync"] = state.get("batch") is not None
         state["stage_reset_acknowledged_at_utc"] = _utc_now()
         # Preserve blocked state and failed queue item. The developer must
         # explicitly resubmit a corrected or rebased branch after this check.
         _update_state(state_path, state, status="blocked")
         return {"status": "stage_reset_verified", "installed_app_sha": prod_app["sha"],
-                "main_sha": state["main"]["sha"]}
+                "staged_app_sha": stage_app["sha"], "main_sha": state["main"]["sha"]}
 
 
 def _reconcile_identity(repo: Path, inflight: dict[str, Any]) -> tuple[str, str, str, dict[str, Any], dict[str, str], dict[str, str], bool]:
@@ -3529,15 +3601,19 @@ def _reconcile_identity(repo: Path, inflight: dict[str, Any]) -> tuple[str, str,
         return identity
 
     runtime_changed = inflight.get("runtime_changed")
+    batch_mode = isinstance(inflight.get("batch_member_heads"), list)
+    if batch_mode:
+        runtime_changed = True
     if not isinstance(runtime_changed, bool):
         raise ReleaseError("in-flight runtime change classification is missing")
     installed_app = app_identity(inflight.get("installed_app"), "in-flight installed app")
     previous_app = app_identity(inflight.get("previous_installed_app"), "in-flight previous app")
     if runtime_changed:
         metadata = inflight.get("release_metadata")
-        if (installed_app["sha"] != sha or installed_app["tree"] != tree
-                or not isinstance(metadata, dict) or metadata.get("source_sha") != sha
-                or metadata.get("source_tree") != tree
+        if ((not batch_mode and (installed_app["sha"] != sha or installed_app["tree"] != tree))
+                or (batch_mode and not _is_ancestor(repo, installed_app["sha"], sha))
+                or not isinstance(metadata, dict) or metadata.get("source_sha") != installed_app["sha"]
+                or metadata.get("source_tree") != installed_app["tree"]
                 or metadata.get("release_files_sha256") != installed_app["manifest_sha256"]):
             raise ReleaseError("in-flight application package identity is incomplete")
     elif installed_app != previous_app:
@@ -3686,6 +3762,23 @@ def _finalize_success(config: dict[str, Any], state_path: Path, state: dict[str,
     item["production_receipt"] = production_receipt
     item["source_bundle"] = bundle_meta
     item["duration_seconds"] = round(time.monotonic() - started, 1)
+    batch = state.get("batch")
+    batch_heads = None
+    if isinstance(batch, dict):
+        if batch.get("status") not in {"sealed", "promoting"} or batch.get("head_sha") != candidate_sha:
+            raise ReleaseError("completed batch differs from the production source cursor")
+        batch_heads = [member["head_sha"] for member in batch["members"]]
+        for member in batch["members"]:
+            queued = next((entry for entry in state["queue"]
+                           if entry.get("candidate_id") == member["candidate_id"]
+                           and entry.get("head_sha") == member["head_sha"]), None)
+            if queued is None:
+                raise ReleaseError("completed batch member is absent from the serial queue")
+            queued["status"] = "completed"
+            queued["completed_at_utc"] = item["completed_at_utc"]
+            queued["batch_final_head_sha"] = candidate_sha
+            queued["production_receipt"] = production_receipt
+        state["batch"] = None
     state["installed_app"] = installed_app
     state["staging_out_of_sync"] = False
     state["in_flight"] = None
@@ -3704,6 +3797,8 @@ def _finalize_success(config: dict[str, Any], state_path: Path, state: dict[str,
                              "github_pending_first_parent_count": pending if pending is not None else "unknown",
                              "status": "ready", "completed_at_utc": item["completed_at_utc"],
                              "duration_seconds": item["duration_seconds"]}
+    if batch_heads is not None:
+        state["last_release"]["batch_member_heads"] = batch_heads
     _update_state(state_path, state, status="ready")
     return {"status": "completed", "main_sha": candidate_sha, "main_tree": candidate_tree,
             "installed_app_sha": installed_app["sha"], "source_bundle_sha256": bundle_meta["bundle_sha256"],
@@ -3758,9 +3853,10 @@ def _build_candidate(config: dict[str, Any], sha: str, base: str,
 
 def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
     repo = Path(config["repo"])
-    old_main_sha = _resolve_ref(repo, MAIN_REF)
-    if old_main_sha != state["main"]["sha"]:
+    domestic_main_sha = _resolve_ref(repo, MAIN_REF)
+    if domestic_main_sha != state["main"]["sha"]:
         raise ReleaseError("domestic main differs from the durable release ledger")
+    old_main_sha = _batch_tip(state)
     if item["base_sha"] != old_main_sha:
         item["status"] = "stale_base"
         item["failure"] = {"phase": "base-check", "expected_base": old_main_sha,
@@ -3813,7 +3909,8 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
         check_receipt = _check_report(check_config, repo, source_worktree, report_dir, old_main_sha, item["head_sha"])
         paths = check_receipt["changed_paths"]
         runtime_changed = bool(classification.get("runtime_changed"))
-        installed_app = dict(state["installed_app"])
+        batch = state.get("batch")
+        installed_app = dict(batch["installed_app"] if batch else state["installed_app"])
         metadata = None
         stage_receipt = None
         smoke_receipt = None
@@ -3829,7 +3926,8 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
                     != installed_app["manifest_sha256"]):
                 raise ReleaseError("incremental base package differs from the installed application receipt")
             _verify_stage_app(build_base, installed_app["manifest_sha256"])
-            _verify_prod_app(config, build_base, installed_app["manifest_sha256"])
+            production_base_app = state["installed_app"]
+            _verify_prod_app(config, production_base_app["sha"], production_base_app["manifest_sha256"])
             build_config = dict(config, repo=str(source_worktree))
             out, metadata = _build_candidate(build_config, item["head_sha"], build_base,
                                              base_release, validation_scope_base=old_main_sha)
@@ -3891,6 +3989,29 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
                     "stage_receipt": stage_receipt,
                     "stage_evidence_path": str(Path(config["work_root"]) / "stage-evidence" / f"{item['head_sha']}.json")}
         else:
+            if batch is not None:
+                # A source-only member advances the cumulative source tip but
+                # leaves the exact staged application bytes in place.
+                _verify_stage_app(installed_app["sha"], installed_app["manifest_sha256"])
+                state["in_flight"].update({"phase": "source-approval-pending", "runtime_changed": False,
+                                           "check_receipt": check_receipt,
+                                           "controller_receipt": controller_receipt,
+                                           "bundle_meta": bundle_meta,
+                                           "installed_app": installed_app})
+                member = _batch_member_record(state["in_flight"], None)
+                batch["members"].append(member)
+                batch["head_sha"] = item["head_sha"]
+                batch["head_tree"] = head_tree
+                if controller_files:
+                    batch["controller_source_sha"] = item["head_sha"]
+                item["status"] = "staged"
+                item["check_receipt"] = check_receipt
+                item["source_bundle"] = bundle_meta
+                state["in_flight"] = None
+                _update_state(state_path, state, status="ready")
+                return {"status": "batch_open", "staged_head_sha": item["head_sha"],
+                        "staged_app_sha": installed_app["sha"], "member_count": len(batch["members"]),
+                        "production_written": False}
             # Source-only changes also wait for human promotion before any
             # production source or cursor write.
             phase = "source-approval-pending"
@@ -4000,6 +4121,244 @@ def _read_stage_evidence(config: dict[str, Any], inflight: dict[str, Any]) -> di
         if _file_sha256(log) != _digest(check.get("log_sha256"), "stage journey log digest"):
             raise ReleaseError("stage journey log differs from its receipt")
     return receipt
+
+
+def _batch_member_record(inflight: dict[str, Any], evidence: dict[str, Any] | None) -> dict[str, Any]:
+    check = inflight.get("check_receipt")
+    bundle = inflight.get("bundle_meta")
+    app = inflight.get("installed_app")
+    if not isinstance(check, dict) or check.get("status") != "passed" or not isinstance(bundle, dict) or not isinstance(app, dict):
+        raise ReleaseError("staged member lacks its checks, source bundle or application identity")
+    stage_receipt = inflight.get("stage_receipt")
+    runtime = inflight.get("runtime_changed") is True
+    if runtime and (not isinstance(stage_receipt, dict) or evidence is None):
+        raise ReleaseError("runtime member lacks exact installed journey evidence")
+    digest = lambda value: hashlib.sha256(json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {
+        "candidate_id": inflight["candidate_id"], "ref": inflight["ref"],
+        "base_sha": _sha(inflight["base_sha"], "member base SHA"),
+        "head_sha": _sha(inflight["head_sha"], "member head SHA"),
+        "head_tree": _sha(inflight["head_tree"], "member tree"),
+        "runtime_changed": runtime,
+        "installed_app": dict(app),
+        "check_receipt_sha256": digest(check),
+        "stage_receipt_sha256": digest(stage_receipt) if runtime else None,
+        "stage_journey_sha256": digest(evidence) if runtime else None,
+        "stage_check_names": [entry["name"] for entry in evidence["checks"]] if runtime else [],
+        "source_bundle_sha256": _digest(bundle["bundle_sha256"], "member bundle SHA"),
+    }
+
+
+def _verify_staged_member(config: dict[str, Any], repo: Path,
+                          inflight: dict[str, Any], evidence: dict[str, Any]) -> None:
+    sha = _sha(inflight["head_sha"], "staged member SHA")
+    if (_resolve_ref(repo, inflight["ref"]) != sha or _tree(repo, sha) != inflight["head_tree"]
+            or not _first_parent_chain(repo, inflight["base_sha"], sha)):
+        raise ReleaseError("staged member source identity changed")
+    app = inflight.get("installed_app")
+    if not isinstance(app, dict) or app.get("sha") != sha:
+        raise ReleaseError("staged runtime member has no exact application")
+    _verify_stage_app(sha, app["manifest_sha256"])
+    bundle = Path(config["work_root"]) / "source-bundles" / f"{sha}.bundle"
+    if bundle.is_symlink() or not bundle.is_file() or _file_sha256(bundle) != inflight["bundle_meta"]["bundle_sha256"]:
+        raise ReleaseError("staged member source bundle changed")
+    if evidence.get("source_sha") != sha:
+        raise ReleaseError("staged member journey source changed")
+
+
+def _accept_staged_batch_member(config: dict[str, Any], state_path: Path,
+                                state: dict[str, Any], item: dict[str, Any],
+                                evidence: dict[str, Any]) -> dict[str, Any]:
+    batch, inflight = state.get("batch"), state.get("in_flight")
+    if (not isinstance(batch, dict) or batch.get("status") != "open"
+            or not isinstance(inflight, dict) or inflight.get("base_sha") != _batch_tip(state)
+            or item.get("head_sha") != inflight.get("head_sha")):
+        raise ReleaseError("staged candidate is not the next member of the open batch")
+    repo = Path(config["repo"])
+    _verify_staged_member(config, repo, inflight, evidence)
+    baseline = state["installed_app"]
+    _verify_prod_app(config, baseline["sha"], baseline["manifest_sha256"])
+    member = _batch_member_record(inflight, evidence)
+    batch["members"].append(member)
+    batch["head_sha"] = member["head_sha"]
+    batch["head_tree"] = member["head_tree"]
+    batch["installed_app"] = dict(inflight["installed_app"])
+    batch["stage_receipt"] = dict(inflight["stage_receipt"])
+    item["status"] = "staged"
+    item["check_receipt"] = inflight["check_receipt"]
+    item["stage_receipt"] = inflight["stage_receipt"]
+    item["stage_journey_receipt"] = evidence
+    item["source_bundle"] = inflight["bundle_meta"]
+    state["in_flight"] = None
+    state["staging_out_of_sync"] = True
+    _update_state(state_path, state, status="ready")
+    return {"status": "batch_open", "staged_head_sha": member["head_sha"],
+            "staged_app_sha": batch["installed_app"]["sha"],
+            "member_count": len(batch["members"]), "production_written": False}
+
+
+def batch_open(config: dict[str, Any], *, controller_sha: str | None = None,
+               controller_ref: str | None = None) -> dict[str, Any]:
+    """Adopt a verified single staged attempt without touching production."""
+    if os.geteuid() != 0:
+        raise ReleaseError("opening a cumulative batch requires root")
+    config = _check_config(config)
+    repo, state_path = Path(config["repo"]), Path(config["state"])
+    with _locked(Path(config["lock"]), nonblocking=True):
+        state = _load_state(state_path)
+        _recover_orphaned_inflight(state_path, state)
+        if state.get("batch") is not None or state.get("status") != "blocked":
+            raise ReleaseError("no single staged attempt is available to open a batch")
+        inflight, item = state.get("in_flight"), _active_queue_item(state)
+        if (not isinstance(inflight, dict) or inflight.get("phase") != "stage-validation-pending"
+                or inflight.get("stage_install_completed") is not True
+                or item is None or item.get("head_sha") != inflight.get("head_sha")):
+            raise ReleaseError("batch opening requires the exact installed queue-front attempt")
+        evidence = _read_stage_evidence(config, inflight)
+        if evidence is None:
+            raise ReleaseError("batch opening requires completed staging journeys")
+        if _resolve_ref(repo, MAIN_REF) != state["main"]["sha"]:
+            raise ReleaseError("domestic main changed before batch opening")
+        checked_controller = state["main"]["sha"]
+        controller_check = None
+        if controller_sha is not None:
+            checked_controller = _sha(controller_sha, "batch controller source SHA")
+            if controller_ref is None or _resolve_ref(repo, _assert_ref_name(controller_ref)) != checked_controller:
+                raise ReleaseError("batch controller source ref differs from its exact SHA")
+            _first_parent_chain(repo, inflight["head_sha"], checked_controller)
+            worktree = _active_worktree(config, repo, checked_controller)
+            if _classify_candidate(worktree, inflight["head_sha"], checked_controller)["runtime_changed"]:
+                raise ReleaseError("batch controller bootstrap may not include another runtime change")
+            _verify_controller_files(config, repo, checked_controller,
+                                     sorted(builder.FIXED_CONTROLLER_FILES))
+            report = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{checked_controller}-batch-bootstrap-{time.time_ns()}"
+            controller_check = _check_report(config, repo, worktree, report,
+                                             inflight["head_sha"], checked_controller)
+        else:
+            _verify_controller_files(config, repo, checked_controller,
+                                     sorted(builder.FIXED_CONTROLLER_FILES))
+        _verify_staged_member(config, repo, inflight, evidence)
+        baseline = state["installed_app"]
+        _verify_prod_app(config, baseline["sha"], baseline["manifest_sha256"])
+        member = _batch_member_record(inflight, evidence)
+        state["batch"] = {"status": "open", "base_sha": state["main"]["sha"],
+                          "base_tree": state["main"]["tree"],
+                          "head_sha": member["head_sha"], "head_tree": member["head_tree"],
+                          "installed_app": dict(inflight["installed_app"]),
+                          "stage_receipt": dict(inflight["stage_receipt"]),
+                          "members": [member], "opened_at_utc": _utc_now(),
+                          "controller_source_sha": checked_controller,
+                          "controller_check_receipt": controller_check}
+        item["status"] = "staged"
+        item["check_receipt"] = inflight["check_receipt"]
+        item["stage_receipt"] = inflight["stage_receipt"]
+        item["stage_journey_receipt"] = evidence
+        item["source_bundle"] = inflight["bundle_meta"]
+        state["in_flight"] = None
+        state["staging_out_of_sync"] = True
+        _update_state(state_path, state, status="ready")
+        return {"status": "batch_open", "base_sha": state["batch"]["base_sha"],
+                "staged_head_sha": member["head_sha"], "member_count": 1,
+                "production_written": False}
+
+
+def _batch_final_evidence(config: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any] | None:
+    app = batch["installed_app"]
+    evidence = _read_stage_evidence(config, {
+        "head_sha": batch["head_sha"], "head_tree": batch["head_tree"],
+        "release_manifest_sha256": app["manifest_sha256"],
+        "stage_receipt": batch["stage_receipt"],
+    })
+    if evidence is None:
+        return None
+    required = {name for member in batch["members"] for name in member["stage_check_names"]}
+    observed = {check["name"] for check in evidence["checks"]}
+    if not required <= observed:
+        raise ReleaseError("final cumulative staging journeys omit an earlier member check")
+    return evidence
+
+
+def _batch_approval_result(batch: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    def digest(value: dict[str, Any]) -> str:
+        return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                         separators=(",", ":")).encode()).hexdigest()
+    identity = {
+        "base_sha": batch["base_sha"], "head_sha": batch["head_sha"],
+        "head_tree": batch["head_tree"],
+        "members": [{key: member[key] for key in (
+            "base_sha", "head_sha", "head_tree", "runtime_changed",
+            "check_receipt_sha256", "stage_receipt_sha256",
+            "stage_journey_sha256", "source_bundle_sha256")}
+                    for member in batch["members"]],
+        "installed_app": dict(batch["installed_app"]),
+        "stage_receipt_sha256": digest(batch["stage_receipt"]),
+        "final_journey_sha256": digest(evidence),
+        "source_bundle_sha256": batch["members"][-1]["source_bundle_sha256"],
+        "production_metadata_sha256": batch["production_metadata_sha256"],
+    }
+    return {"status": "awaiting_human_approval", "approval": identity,
+            "approval_digest": digest(identity), "production_written": False}
+
+
+def batch_seal(config: dict[str, Any]) -> dict[str, Any]:
+    """Freeze the currently installed cumulative package for one human approval."""
+    if os.geteuid() != 0:
+        raise ReleaseError("sealing a cumulative batch requires root")
+    config = _check_config(config)
+    repo, state_path = Path(config["repo"]), Path(config["state"])
+    with _locked(Path(config["lock"]), nonblocking=True):
+        state = _load_state(state_path)
+        batch = state.get("batch")
+        if (not isinstance(batch, dict) or batch.get("status") != "open"
+                or state.get("status") != "ready" or state.get("in_flight") is not None
+                or _active_queue_item(state) is not None):
+            raise ReleaseError("cumulative batch is not ready to seal")
+        if _resolve_ref(repo, MAIN_REF) != state["main"]["sha"]:
+            raise ReleaseError("production source base changed before batch sealing")
+        tip = _batch_tip(state)
+        last = batch["members"][-1]
+        if _resolve_ref(repo, last["ref"]) != tip or _tree(repo, tip) != batch["head_tree"]:
+            raise ReleaseError("final staged source identity changed")
+        app = batch["installed_app"]
+        _verify_stage_app(app["sha"], app["manifest_sha256"])
+        baseline = state["installed_app"]
+        _verify_prod_app(config, baseline["sha"], baseline["manifest_sha256"])
+        stage_release = Path(config.get("stage_releases", "/opt/aicrm/releases")) / app["sha"]
+        if builder.verify_release_inventory(stage_release, allow_release_env=True) != app["manifest_sha256"]:
+            raise ReleaseError("final staged package inventory changed")
+        bundle = Path(config["work_root"]) / "source-bundles" / f"{tip}.bundle"
+        if bundle.is_symlink() or not bundle.is_file() or _file_sha256(bundle) != last["source_bundle_sha256"]:
+            raise ReleaseError("final cumulative source bundle changed")
+        evidence = _batch_final_evidence(config, batch)
+        if evidence is None:
+            raise ReleaseError("final cumulative staging journey is missing")
+        out = Path(config["work_root"]) / "builds" / app["sha"]
+        source_metadata = json.loads((out / "domestic-release.json").read_text())
+        if (source_metadata.get("source_sha") != app["sha"]
+                or source_metadata.get("release_files_sha256") != app["manifest_sha256"]):
+            raise ReleaseError("final staged build metadata differs from its installed package")
+        legacy.verify_release_artifact(out / "release", source_metadata)
+        baseline_app = state["installed_app"]["sha"]
+        changed = _git(repo, "diff", "--name-only", "--no-renames", baseline_app, app["sha"]).splitlines()
+        promotion_metadata = dict(source_metadata)
+        promotion_metadata.update({"base_sha": baseline_app, "changed_paths": changed,
+                                   "migrations_changed": any(path.startswith("migrations/") for path in changed)})
+        metadata_dir = Path(config["work_root"]) / "batch-evidence"
+        _safe_directory(metadata_dir, create=True)
+        metadata_path = metadata_dir / f"{tip}.production-metadata.json"
+        if metadata_path.exists() or metadata_path.is_symlink():
+            raise ReleaseError("existing batch promotion metadata requires inspection")
+        atomic_json(metadata_path, promotion_metadata)
+        batch["production_metadata_path"] = str(metadata_path)
+        batch["production_metadata_sha256"] = _file_sha256(metadata_path)
+        batch["status"] = "sealed"
+        batch["final_journey_receipt"] = evidence
+        batch["sealed_at_utc"] = _utc_now()
+        result = _batch_approval_result(batch, evidence)
+        batch["approval_digest"] = result["approval_digest"]
+        _update_state(state_path, state, status="blocked")
+        return result
 
 
 def _approval_wait_result(inflight: dict[str, Any], evidence: dict[str, Any] | None) -> dict[str, Any]:
@@ -4296,6 +4655,15 @@ def poll(config: dict[str, Any], *, expected_candidate_sha: str | None = None) -
         state = _load_state(state_path)
         _recover_orphaned_inflight(state_path, state)
         inflight = state.get("in_flight")
+        batch = state.get("batch")
+        if isinstance(batch, dict) and batch.get("status") == "sealed":
+            evidence = _batch_final_evidence(config, batch)
+            if evidence is None:
+                raise ReleaseError("sealed batch lost its final staging journey")
+            result = _batch_approval_result(batch, evidence)
+            if result["approval_digest"] != batch.get("approval_digest"):
+                raise ReleaseError("sealed batch approval identity changed")
+            return result
         if (state["status"] == "blocked" and isinstance(inflight, dict)
                 and inflight.get("phase") == "stage-validation-pending"):
             front = _active_queue_item(state)
@@ -4305,7 +4673,9 @@ def poll(config: dict[str, Any], *, expected_candidate_sha: str | None = None) -
                 return {"status": "candidate_not_at_queue_front",
                         "requested_candidate_sha": expected_candidate_sha,
                         "queue_head_sha": front["head_sha"], "main_sha": state["main"]["sha"]}
-            _verify_controller_files(config, repo, state["main"]["sha"],
+            controller_sha = (state["batch"].get("controller_source_sha", state["main"]["sha"])
+                              if state.get("batch") else state["main"]["sha"])
+            _verify_controller_files(config, repo, controller_sha,
                                      sorted(builder.FIXED_CONTROLLER_FILES))
             evidence = _read_stage_evidence(config, inflight)
             if evidence is None:
@@ -4313,6 +4683,8 @@ def poll(config: dict[str, Any], *, expected_candidate_sha: str | None = None) -
                         "candidate_sha": front["head_sha"],
                         "manifest_sha256": inflight["release_manifest_sha256"],
                         "stage_evidence_path": str(_stage_evidence_path(config, front["head_sha"]))}
+            if state.get("batch") is not None:
+                return _accept_staged_batch_member(config, state_path, state, front, evidence)
             return _approval_wait_result(inflight, evidence)
         if (state["status"] == "blocked" and isinstance(inflight, dict)
                 and inflight.get("phase") == "source-approval-pending"):
@@ -4338,13 +4710,25 @@ def poll(config: dict[str, Any], *, expected_candidate_sha: str | None = None) -
                         "requested_candidate_sha": expected_candidate_sha,
                         "queue_head_sha": front.get("head_sha"),
                         "main_sha": state["main"]["sha"]}
+        batch = state.get("batch")
         maintenance = state.get("controller_maintenance")
         if maintenance is None:
-            _verify_controller_files(config, repo, state["main"]["sha"], sorted(builder.FIXED_CONTROLLER_FILES))
+            controller_sha = batch.get("controller_source_sha", state["main"]["sha"]) if batch else state["main"]["sha"]
+            _verify_controller_files(config, repo, controller_sha, sorted(builder.FIXED_CONTROLLER_FILES))
         else:
             _verify_controller_maintenance_candidate(config, repo, state)
+        if batch is not None:
+            baseline = state["installed_app"]
+            _verify_prod_app(config, baseline["sha"], baseline["manifest_sha256"])
+            stage_app = batch["installed_app"]
+            _verify_stage_app(stage_app["sha"], stage_app["manifest_sha256"])
         item = _active_queue_item(state)
         if item is None:
+            if batch is not None:
+                return {"status": "batch_open", "base_sha": batch["base_sha"],
+                        "staged_head_sha": batch["head_sha"],
+                        "staged_app_sha": batch["installed_app"]["sha"],
+                        "member_count": len(batch["members"]), "production_written": False}
             return {"status": "ready", "main_sha": state["main"]["sha"], "queue_depth": 0}
         result = process_candidate(config, state_path, state, item)
         if result.get("status") != "completed":
@@ -4385,6 +4769,16 @@ def promote(config: dict[str, Any], approval_digest: str) -> dict[str, Any]:
         verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
         state = _load_state(state_path)
         _recover_orphaned_inflight(state_path, state)
+        batch = state.get("batch")
+        if isinstance(batch, dict) and batch.get("status") == "sealed":
+            evidence = _batch_final_evidence(config, batch)
+            if evidence is None:
+                raise ReleaseError("final batch staging journey is missing")
+            approval = _batch_approval_result(batch, evidence)
+            if (approval["approval_digest"] != expected
+                    or batch.get("approval_digest") != expected):
+                raise ReleaseError("human approval does not match the sealed cumulative batch")
+            return _promote_batch(config, state_path, state, evidence)
         inflight = state.get("in_flight")
         item = _active_queue_item(state)
         if (state.get("status") != "blocked" or not isinstance(inflight, dict)
@@ -4411,6 +4805,94 @@ def promote(config: dict[str, Any], approval_digest: str) -> dict[str, Any]:
         return _promote_source_candidate(config, state_path, state, item)
 
 
+def _promote_batch(config: dict[str, Any], state_path: Path, state: dict[str, Any],
+                   evidence: dict[str, Any]) -> dict[str, Any]:
+    """Install the final staged package once, then advance one source cursor."""
+    repo = Path(config["repo"])
+    batch = state["batch"]
+    tip, base = _batch_tip(state), batch["base_sha"]
+    app, baseline = batch["installed_app"], state["installed_app"]
+    last = batch["members"][-1]
+    item = next((entry for entry in state["queue"]
+                 if entry.get("candidate_id") == last["candidate_id"]
+                 and entry.get("head_sha") == tip), None)
+    if (item is None or state.get("in_flight") is not None
+            or _resolve_ref(repo, MAIN_REF) != base
+            or _resolve_ref(repo, last["ref"]) != tip
+            or _tree(repo, tip) != batch["head_tree"]):
+        raise ReleaseError("sealed batch source identity changed before promotion")
+    for member in batch["members"]:
+        if (_resolve_ref(repo, member["ref"]) != member["head_sha"]
+                or _tree(repo, member["head_sha"]) != member["head_tree"]
+                or not _first_parent_chain(repo, member["base_sha"], member["head_sha"])):
+            raise ReleaseError("sealed batch member source identity changed")
+    _verify_controller_files(config, repo, batch.get("controller_source_sha", base),
+                             sorted(builder.FIXED_CONTROLLER_FILES))
+    _verify_stage_app(app["sha"], app["manifest_sha256"])
+    _verify_prod_app(config, baseline["sha"], baseline["manifest_sha256"])
+    cursor = _verify_production_cursor(config)["cursor"]
+    if (cursor.get("main_sha") != base or cursor.get("main_tree") != batch["base_tree"]
+            or cursor.get("installed_app_sha") != baseline["sha"]
+            or cursor.get("installed_manifest_sha256") != baseline["manifest_sha256"]):
+        raise ReleaseError("production cursor changed before batch promotion")
+    metadata_path = Path(batch["production_metadata_path"])
+    if (metadata_path.is_symlink() or not metadata_path.is_file()
+            or _file_sha256(metadata_path) != batch["production_metadata_sha256"]):
+        raise ReleaseError("approved production transfer metadata changed")
+    metadata = json.loads(metadata_path.read_text())
+    if metadata.get("source_sha") != app["sha"] or metadata.get("release_files_sha256") != app["manifest_sha256"]:
+        raise ReleaseError("approved metadata does not describe the final staged package")
+    out = Path(config["work_root"]) / "builds" / app["sha"]
+    legacy.verify_release_artifact(out / "release", metadata)
+    bundle = Path(config["work_root"]) / "source-bundles" / f"{tip}.bundle"
+    if bundle.is_symlink() or not bundle.is_file() or _file_sha256(bundle) != last["source_bundle_sha256"]:
+        raise ReleaseError("approved final source bundle changed")
+    bundle_meta = item.get("source_bundle")
+    if not isinstance(bundle_meta, dict) or bundle_meta.get("bundle_sha256") != last["source_bundle_sha256"]:
+        raise ReleaseError("final batch member lost its source bundle receipt")
+    started = time.monotonic()
+    state["in_flight"] = {"candidate_id": last["candidate_id"], "head_sha": tip,
+                          "head_tree": batch["head_tree"], "base_sha": base,
+                          "phase": "batch-source-backup", "production_install_started": False,
+                          "commit_started": False, "batch_member_heads": [m["head_sha"] for m in batch["members"]],
+                          "installed_app": dict(app), "previous_installed_app": dict(baseline),
+                          "runtime_changed": True,
+                          "bundle_meta": bundle_meta, "stage_journey_receipt": evidence,
+                          "release_metadata": metadata,
+                          "package_metadata_sha256": batch["production_metadata_sha256"]}
+    batch["status"] = "promoting"
+    _update_state(state_path, state, status="outcome_unknown")
+    phase = "batch-source-backup"
+    try:
+        _upload_and_store_bundle(config, bundle, bundle_meta)
+        incoming, remote_metadata = legacy.copy_payload(
+            config, app["sha"], out / "release", metadata_path, baseline["sha"])
+        phase = "batch-production-install"
+        state["in_flight"].update({"phase": phase, "production_install_started": True})
+        _update_state(state_path, state, status="outcome_unknown")
+        result = _production_ssh(config, "sudo", "-n", config["prod_helper"],
+                                 "--incoming", incoming, "--metadata", remote_metadata,
+                                 "--expected-sha", app["sha"],
+                                 "--metadata-sha256", batch["production_metadata_sha256"],
+                                 "--expected-base", baseline["sha"], timeout=1800)
+        production_receipt = json.loads(result.splitlines()[-1])
+        production = _verify_prod_app(config, app["sha"], app["manifest_sha256"])
+        legacy.verify_install_receipt(production.get("receipt"), metadata, baseline["sha"])
+        if production_receipt != production.get("receipt"):
+            raise ReleaseError("batch production installer response differs from readback")
+        _verify_stage_app(app["sha"], app["manifest_sha256"])
+        phase = "batch-main-cas-and-cursor"
+        state["in_flight"].update({"phase": phase, "production_receipt": production_receipt,
+                                   "commit_started": True})
+        _update_state(state_path, state, status="outcome_unknown")
+        return _finalize_success(config, state_path, state, item, bundle_meta, base,
+                                 app, item["check_receipt"], batch["stage_receipt"],
+                                 production_receipt, started)
+    except BaseException as exc:
+        _mark_unknown(state_path, state, phase, exc)
+        raise
+
+
 def release_candidate(config: dict[str, Any], ref: str, head_sha: str, base_sha: str,
                       supersedes_candidate_id: str | None = None) -> dict[str, Any]:
     """Submit an exact candidate, then process it only if it is queue front."""
@@ -4432,7 +4914,7 @@ def release_candidate(config: dict[str, Any], ref: str, head_sha: str, base_sha:
                 "queue_position": queue_position, "submission": submitted}
 
     result = poll(config, expected_candidate_sha=head_sha)
-    if result.get("status") in {"stage_validation_pending", "awaiting_human_approval"}:
+    if result.get("status") in {"stage_validation_pending", "awaiting_human_approval", "batch_open"}:
         return {"status": result["status"], "candidate_sha": head_sha,
                 "queue_position": queue_position, "submission": submitted,
                 "release": result}
@@ -4482,7 +4964,7 @@ def reconcile(config: dict[str, Any]) -> dict[str, Any]:
             raise ReleaseError("in-flight candidate is not in the durable queue")
         if runtime_changed:
             manifest = installed_app["manifest_sha256"]
-            production = _verify_prod_app(config, sha, manifest)
+            production = _verify_prod_app(config, installed_app["sha"], manifest)
             metadata = inflight.get("release_metadata")
             legacy.verify_install_receipt(production.get("receipt"), metadata,
                                           previous_installed_app["sha"])
@@ -4514,6 +4996,19 @@ def reconcile(config: dict[str, Any]) -> dict[str, Any]:
         state["staging_out_of_sync"] = False
         item.update({"status": "completed", "completed_at_utc": _utc_now(), "reconciled": True,
                      "production_receipt": receipt_body})
+        batch = state.get("batch")
+        if isinstance(batch, dict):
+            if batch.get("head_sha") != sha or inflight.get("batch_member_heads") != [
+                    member["head_sha"] for member in batch["members"]]:
+                raise ReleaseError("unknown batch outcome differs from durable member order")
+            for member in batch["members"]:
+                queued = next((entry for entry in state["queue"] if entry.get("head_sha") == member["head_sha"]), None)
+                if queued is None:
+                    raise ReleaseError("reconciled batch member is absent from queue")
+                queued.update({"status": "completed", "completed_at_utc": item["completed_at_utc"],
+                               "reconciled": True, "batch_final_head_sha": sha,
+                               "production_receipt": receipt_body})
+            state["batch"] = None
         state["in_flight"] = None
         state["last_release"] = {"main_sha": sha, "main_tree": tree,
                                  "installed_app_sha": installed_app["sha"],
@@ -4523,6 +5018,8 @@ def reconcile(config: dict[str, Any]) -> dict[str, Any]:
                                  "github_sync_observed_by": "manual_cli" if state.get("archive_ack") else "unknown",
                                  "github_pending_first_parent_count": _pending_archive_count(repo, (state.get("archive_ack") or {}).get("sha"), sha) if state.get("archive_ack") else "unknown",
                                  "status": "ready", "reconciled_at_utc": _utc_now()}
+        if isinstance(batch, dict):
+            state["last_release"]["batch_member_heads"] = inflight["batch_member_heads"]
         _update_state(state_path, state, status="ready")
         return {"status": "reconciled", "main_sha": sha, "main_tree": tree,
                 "installed_app_sha": installed_app["sha"], "cursor": cursor}
@@ -5197,7 +5694,7 @@ def verify(config: dict[str, Any], *, candidate_sha: str | None = None) -> dict[
     with _locked(Path(config["lock"]), nonblocking=True):
         repository = verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
         state = _load_state(state_path)
-        if state.get("staging_out_of_sync") is True:
+        if state.get("staging_out_of_sync") is True and state.get("batch") is None:
             raise ReleaseError("staging reset has not been acknowledged after an interrupted candidate")
         if repository["main_sha"] != state["main"]["sha"] or repository["main_tree"] != state["main"]["tree"]:
             raise ReleaseError("domestic bare main does not match its durable ledger")
@@ -5212,7 +5709,9 @@ def verify(config: dict[str, Any], *, candidate_sha: str | None = None) -> dict[
                 installed_app=installed_app,
             )
         else:
-            _verify_controller_files(config, repo, repository["main_sha"], sorted(builder.FIXED_CONTROLLER_FILES))
+            batch = state.get("batch")
+            controller_sha = batch.get("controller_source_sha", repository["main_sha"]) if batch else repository["main_sha"]
+            _verify_controller_files(config, repo, controller_sha, sorted(builder.FIXED_CONTROLLER_FILES))
         cursor = _verify_production_cursor(config)["cursor"]
         if candidate_sha is not None and cursor.get("source_bundle_sha256") != overlay["source_bundle_sha256"]:
             raise ReleaseError("production cursor source bundle differs from the helper overlay")
@@ -5220,11 +5719,14 @@ def verify(config: dict[str, Any], *, candidate_sha: str | None = None) -> dict[
             raise ReleaseError("production source cursor does not match domestic main")
         if cursor.get("installed_app_sha") != state["installed_app"]["sha"] or cursor.get("installed_manifest_sha256") != state["installed_app"]["manifest_sha256"]:
             raise ReleaseError("production installed app does not match domestic ledger")
-        stage = legacy.stage_readback(state["installed_app"]["sha"])
-        legacy.verify_readback(stage, state["installed_app"]["sha"], state["installed_app"]["manifest_sha256"])
+        stage_identity = state["batch"]["installed_app"] if state.get("batch") else state["installed_app"]
+        stage = legacy.stage_readback(stage_identity["sha"])
+        legacy.verify_readback(stage, stage_identity["sha"], stage_identity["manifest_sha256"])
         return {"status": "verified", "main_sha": repository["main_sha"], "main_tree": repository["main_tree"],
                 "installed_app_sha": state["installed_app"]["sha"], "queue_depth": len(state["queue"]),
-                "pending_candidate_sha": (_active_queue_item(state) or {}).get("head_sha")}
+                "pending_candidate_sha": (_active_queue_item(state) or {}).get("head_sha"),
+                "staged_head_sha": state["batch"]["head_sha"] if state.get("batch") else None,
+                "staged_app_sha": stage_identity["sha"]}
 
 
 def _submit_stdin(config: dict[str, Any], payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -5310,7 +5812,7 @@ def restricted_ssh() -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check",
+    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check", "batch-open", "batch-seal",
                                             "poll", "promote", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
     parser.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG))
     parser.add_argument("--repo", type=Path)
@@ -5392,6 +5894,10 @@ def main(argv: list[str] | None = None) -> int:
             if not args.sha:
                 parser.error("maintenance-check requires --sha <candidate SHA>")
             result = maintenance_check(config, args.sha)
+        elif args.action == "batch-open":
+            result = batch_open(config, controller_sha=args.sha, controller_ref=args.ref)
+        elif args.action == "batch-seal":
+            result = batch_seal(config)
         elif args.action == "submit":
             if os.geteuid() != 0:
                 raise ReleaseError("submit must run through the restricted root endpoint")
@@ -5428,7 +5934,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     if args.action == "release" and result.get("status") not in {
-            "completed", "stage_validation_pending", "awaiting_human_approval"}:
+            "completed", "stage_validation_pending", "awaiting_human_approval", "batch_open"}:
         return 2
     return 0
 

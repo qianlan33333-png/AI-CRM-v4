@@ -1,5 +1,7 @@
 # CRM v4 国内发布工作台
 
+累计预发的设计与边界见 [PRD](../prd/2026-09-29-cumulative-staging-batch-promotion.md)。同一预发环境依次运行 P+A、P+A+B；每项安装和相关验证仍串行，生产保持 P。封批后人工确认最终累计版本，生产只安装这份最终构件一次。
+
 国内裸仓库 `main` 是源码权威。开发任务交付准确 `base/head/tree` 和行为说明；唯一发布工作台使用现有候选队列、串行锁、attempt 与收据。GitHub 人工择机归档，不参与日常晋级。预备机维持 2 核 2GB；普通发布不备份数据库，只有生产迁移前备份。
 
 ## 一条发布路径
@@ -10,9 +12,12 @@ flowchart TD
  B --> C[执行检查并审计实际运行的测试]
  C --> D[构建一份完整构件并核对摘要与资源闭包]
  D --> E[安装预发并读回本次业务行为]
- E --> F[待人工确认: 候选 构件 预发收据]
- F -->|未确认| F
- F -->|确认身份吻合| G[同包晋级生产]
+ E --> F{继续纳入候选?}
+ F -->|是| A
+ F -->|否| I[最终累计版本复查整批旅程]
+ I --> J[待人工确认: 有序成员 最终构件 预发收据]
+ J -->|未确认| J
+ J -->|确认身份吻合| G[同包晋级生产]
  G --> H[生产摘要 版本 服务 健康与业务读回]
 ```
 
@@ -20,15 +25,16 @@ flowchart TD
 
 Web 运行代码变化构建整个 Web 一次，避免遗漏共享 chunk 和动态 import。受影响 Go 程序按依赖图重建；迁移和静态载荷单独汇总。一次 attempt 拥有自己的工作目录，非空旧产物拒绝重用。最终只写一次完整文件清单，核对基包与已安装摘要的绑定和页面资源闭包。构建器合同测试在构建工具变化时执行，不夹进每次页面打包。
 
-## 预发完成后的人工晋级
+## 累计预发与人工晋级
 
-`release` 只提交并准备候选；运行时代码会停在 `stage_validation_pending`。发布工作台完成本次业务旅程，形成与安装收据绑定的受保护预发证据。`poll` 只能返回 `awaiting_human_approval` 和 `approval_digest`，不会写生产。源码或工具候选也会在检查后等待人工确认，不直接更新生产源码游标。
+`release` 提交并检查队首候选；运行时代码安装到预发后停在 `stage_validation_pending`。发布工作台完成本次业务旅程，形成与安装收据绑定的受保护预发证据；`poll` 将它纳入开放批次，允许下一项从累计预发 HEAD 出发。源码或工具候选也纳入批次，不直接更新生产源码游标。下一项先由原开发任务更新自己的分支与验证，工作台不代为解决冲突。
 
-向人展示准确 `base/head/tree`、最终构件清单摘要、源码 bundle 摘要、预发安装与业务旅程收据、实际检查和未验证项。人工明确确认这个 `approval_digest` 后，发布工作台才调用 `promote`。控制器重新核对候选 ref、构件字节、预发正在运行的版本与健康；任一身份变化，旧确认失效，重新预发与确认。等待期间保持队首，但不长期占用执行锁。
+决定收批后，`batch-seal` 要求最终累计版本覆盖各成员仍适用的业务旅程，冻结有序成员和生产基线。向人展示准确 `base/head/tree`、最终构件清单摘要、源码 bundle 摘要、预发安装与业务旅程收据、实际检查和未验证项。人工明确确认这整个批次的 `approval_digest` 后，发布工作台才调用 `promote`。控制器重新核对成员链、候选 ref、构件字节、预发正在运行的版本与健康、生产基线；任一身份变化，旧确认失效。等待期间不长期占用执行锁。
 
 ```sh
 sudo /usr/local/libexec/aicrm/domestic_main_release.py release --config /etc/aicrm/domestic-main-release.json --ref refs/heads/codex/<work-item> --head <SHA> --base <SHA>
 sudo /usr/local/libexec/aicrm/domestic_main_release.py poll --config /etc/aicrm/domestic-main-release.json
+sudo /usr/local/libexec/aicrm/domestic_main_release.py batch-seal --config /etc/aicrm/domestic-main-release.json
 # 仅在用户确认上一步完整身份之后：
 sudo /usr/local/libexec/aicrm/domestic_main_release.py promote --config /etc/aicrm/domestic-main-release.json --approval-digest <64位摘要>
 ```
