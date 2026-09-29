@@ -3334,6 +3334,56 @@ class CumulativeBatchTests(unittest.TestCase):
                     release.submit_candidate(repo, path, "refs/heads/codex/two", other, base, root / "lock")
             self.assertEqual(json.loads(path.read_text())["queue"], [])
 
+    def test_failed_batch_front_can_be_replaced_by_exact_new_ref_without_losing_position(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, staged, old = make_repository(root)
+            source = root / "source"
+            subprocess.run(["git", "-C", str(source), "checkout", "codex/one"],
+                           check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(["git", "-C", str(source), "checkout", "-b", "codex/retry"],
+                           check=True, stdout=subprocess.DEVNULL)
+            (source / "retry.txt").write_text("retry\n")
+            subprocess.run(["git", "-C", str(source), "add", "retry.txt"], check=True)
+            subprocess.run(["git", "-C", str(source), "commit", "-m", "retry"],
+                           check=True, stdout=subprocess.DEVNULL)
+            new = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"],
+                                          text=True).strip()
+            new_ref = "refs/heads/codex/retry"
+            subprocess.run(["git", f"--git-dir={repo}", "fetch", "--no-tags", str(source),
+                            f"{new}:{new_ref}"], check=True, stdout=subprocess.DEVNULL)
+            tree = release._tree(repo, base)
+            state = release._new_state(base, tree, {
+                "sha": base, "tree": tree, "manifest_sha256": "a" * 64})
+            state.update(status="blocked", staging_out_of_sync=True)
+            state["batch"] = {"status": "open", "base_sha": base, "head_sha": staged,
+                              "head_tree": release._tree(repo, staged),
+                              "installed_app": {"sha": staged, "tree": release._tree(repo, staged),
+                                                "manifest_sha256": "b" * 64},
+                              "members": [{"base_sha": base, "head_sha": staged,
+                                           "ref": "refs/heads/codex/one"}]}
+            state["queue"] = [{"candidate_id": staged, "ref": "refs/heads/codex/one",
+                               "base_sha": base, "head_sha": staged, "status": "staged"},
+                              {"candidate_id": old, "ref": "refs/heads/codex/two",
+                               "base_sha": staged, "head_sha": old, "status": "failed",
+                               "attempt": 1, "failure": {"phase": "checks", "kind": "unknown",
+                                                         "candidate_verdict": "not_evaluated"},
+                               "attempt_history": [{"attempt": 1, "phase": "checks"}]}]
+            path = root / "state.json"
+            release.atomic_json(path, state)
+            real_load = release._load_state
+            with mock.patch.object(release, "_load_state", side_effect=lambda p: real_load(p, owner_uid=os.getuid())), \
+                 mock.patch.object(release, "_safe_directory"), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()):
+                result = release.submit_candidate(repo, path, new_ref, new, staged,
+                                                  root / "lock", old)
+            observed = json.loads(path.read_text())
+            self.assertEqual(result["status"], "pending")
+            self.assertEqual(len(observed["queue"]), 2)
+            self.assertEqual(observed["queue"][1]["head_sha"], new)
+            self.assertEqual(observed["queue"][1]["supersedes_head_sha"], old)
+            self.assertEqual(observed["queue"][1]["attempt_history"][0]["phase"], "checks")
+
     def test_final_journey_must_cover_earlier_member(self) -> None:
         batch = {"head_sha": "c" * 40, "head_tree": "d" * 40,
                  "installed_app": {"manifest_sha256": "e" * 64},

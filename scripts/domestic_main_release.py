@@ -941,7 +941,8 @@ def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base
         retry_front = _active_queue_item(state)
         retryable_block = (state["status"] == "blocked" and retry_front is not None
                            and retry_front.get("status") == "failed"
-                           and retry_front.get("ref") == ref)
+                           and (retry_front.get("ref") == ref
+                                or retry_front.get("candidate_id") == supersedes_candidate_id))
         if retryable_block and retry_front.get("failure", {}).get("required_recovery"):
             retryable_block = (state.get("stage_reset_acknowledged_at_utc", "")
                                >= retry_front["failure"]["recorded_at_utc"])
