@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	accessstore "github.com/qianlan33333-png/AI-CRM-v3/internal/access/store"
@@ -14,6 +15,7 @@ import (
 	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
 	identityquery "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/query"
 	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
+	operationport "github.com/qianlan33333-png/AI-CRM-v3/internal/operationcycle/port"
 	outbound "github.com/qianlan33333-png/AI-CRM-v3/internal/outbound"
 	queue "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/jobqueue"
 	pg "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
@@ -21,6 +23,12 @@ import (
 	"testing"
 	"time"
 )
+
+type journeyExcelStrategyReader struct{}
+
+func (journeyExcelStrategyReader) OperationCycleStrategy(_ context.Context, key string) (operationport.Strategy, error) {
+	return operationport.Strategy{Key: key, Title: key, Status: "active", Version: 1, Definition: json.RawMessage(`{}`), Snapshot: json.RawMessage(`{}`)}, nil
+}
 
 func TestPostgreSQLExcelImportReviewDeferredSendAndReceiptJourney(t *testing.T) {
 	native, cleanup := aiAssistantHTTPJourneyPool(t)
@@ -158,9 +166,80 @@ func TestPostgreSQLExcelImportReviewDeferredSendAndReceiptJourney(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	firstBeforeEdit, currentContent, err := service.GetRecipient(ctx, current.ID, page.Items[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewedFirst, err := service.ReviewRecipient(ctx, ai.ReviewRecipientCommand{Actor: who, PlanID: current.ID, RecipientID: firstBeforeEdit.ID, ExpectedVersion: firstBeforeEdit.Version, Decision: ai.ReviewApproved, IdempotencyKey: "approve-content-before-edit"})
+	if err != nil || reviewedFirst.ReviewState != ai.ReviewApproved {
+		t.Fatalf("initial content review: state=%s err=%v", reviewedFirst.ReviewState, err)
+	}
+	current, err = service.GetPlan(ctx, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stalePreview, err := service.PreviewApproval(ctx, ai.PreviewApprovalCommand{Actor: who, PlanID: current.ID, ExpectedVersion: current.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	editedBlocks := append([]ai.ContentBlock(nil), currentContent.Blocks...)
+	editedBlocks[0].Text = "edited after review"
+	if _, err = service.UpdateContent(ctx, ai.UpdateContentCommand{Actor: who, PlanID: current.ID, RecipientID: firstBeforeEdit.ID, ExpectedVersion: reviewedFirst.Version, IdempotencyKey: "edit-reviewed-content-before-submit", Blocks: editedBlocks}); err != nil {
+		t.Fatalf("edit reviewed content: %v", err)
+	}
+	firstAfterEdit, _, err := service.GetRecipient(ctx, current.ID, firstBeforeEdit.ID)
+	if err != nil || firstAfterEdit.ReviewState != ai.ReviewPending {
+		t.Fatalf("content edit did not reset review: state=%s err=%v", firstAfterEdit.ReviewState, err)
+	}
+	editedPlan, err := service.GetPlan(ctx, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if editedPlan.Version <= stalePreview.PlanVersion {
+		t.Fatalf("content edit did not advance the approval version: preview=%d plan=%d", stalePreview.PlanVersion, editedPlan.Version)
+	}
+	readEffectCounts := func() ([5]int, error) {
+		var counts [5]int
+		queryErr := native.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM outbound_private_message_intents),
+			(SELECT count(*) FROM ai_assistant_effect_bindings),
+			(SELECT count(*) FROM external_effects),
+			(SELECT count(*) FROM external_effect_jobs),
+			(SELECT count(*) FROM river_job)`).Scan(&counts[0], &counts[1], &counts[2], &counts[3], &counts[4])
+		return counts, queryErr
+	}
+	beforeStaleApproval, err := readEffectCounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if beforeStaleApproval != ([5]int{}) {
+		t.Fatalf("fixture already has external effects before stale approval: intents/bindings/effects/effect_jobs/river_jobs=%v", beforeStaleApproval)
+	}
+	staleApproval := ai.ApprovePlanCommand{Actor: who, PlanID: current.ID, ExpectedVersion: editedPlan.Version, PreviewDigest: stalePreview.PreviewDigest, IdempotencyKey: "approve-stale-content-preview"}
+	if _, err = service.ApprovePlan(ctx, staleApproval); !errors.Is(err, aiapp.ErrConflict) {
+		t.Fatalf("approval accepted the pre-edit digest: %v", err)
+	}
+	afterStaleApproval, err := readEffectCounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterStaleApproval != beforeStaleApproval {
+		t.Fatalf("stale approval created outbound/EER work: before=%v after=%v", beforeStaleApproval, afterStaleApproval)
+	}
+	reviewedAfterEdit, err := service.ReviewRecipient(ctx, ai.ReviewRecipientCommand{Actor: who, PlanID: editedPlan.ID, RecipientID: firstAfterEdit.ID, ExpectedVersion: firstAfterEdit.Version, Decision: ai.ReviewApproved, IdempotencyKey: "approve-content-after-edit"})
+	if err != nil || reviewedAfterEdit.ReviewState != ai.ReviewApproved {
+		t.Fatalf("fresh review after content edit: state=%s err=%v", reviewedAfterEdit.ReviewState, err)
+	}
+	current, err = service.GetPlan(ctx, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	preview, err := service.PreviewApproval(ctx, ai.PreviewApprovalCommand{Actor: who, PlanID: current.ID, ExpectedVersion: current.Version})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if preview.PreviewDigest == stalePreview.PreviewDigest {
+		t.Fatal("edited and freshly reviewed content retained the pre-edit approval digest")
 	}
 	approval := ai.ApprovePlanCommand{Actor: who, PlanID: current.ID, ExpectedVersion: current.Version, PreviewDigest: preview.PreviewDigest, IdempotencyKey: "approve-excel-fixture"}
 	if _, err = service.ApprovePlan(ctx, approval); err != nil {
@@ -228,6 +307,145 @@ func TestPostgreSQLExcelImportReviewDeferredSendAndReceiptJourney(t *testing.T) 
 	// Queued content is immutable even if the caller submits a stale UI edit.
 	if _, err = service.UpdateContent(ctx, ai.UpdateContentCommand{Actor: who, PlanID: current.ID, RecipientID: first.ID, ExpectedVersion: first.Version, IdempotencyKey: "edit-after-submit", Blocks: command.Recipients[0].Content}); err == nil {
 		t.Fatal("queued content changed")
+	}
+}
+
+func TestPostgreSQLExcelBatchReplacementRejectsStaleDigestAndResolvesCurrentTarget(t *testing.T) {
+	native, cleanup := aiAssistantHTTPJourneyPool(t)
+	defer cleanup()
+	ctx := context.Background()
+	wrapped, err := pg.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrapped.Close()
+	uow, err := pg.NewUnitOfWork(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedAIAssistantHTTPJourney(t, native)
+	for _, query := range []string{
+		`INSERT INTO customers(id,status) OVERRIDING SYSTEM VALUE VALUES(92,'active')`,
+		`INSERT INTO customer_identities(customer_id,kind,scope_key,normalized_value,assurance,source,normalizer_version,status,verified_at) VALUES(92,'unionid','wechat-open-platform:fixture','replacement-union','verified','airev-fixture',1,'active',clock_timestamp())`,
+		`INSERT INTO customer_identities(customer_id,kind,scope_key,normalized_value,assurance,source,normalizer_version,status,verified_at) VALUES(92,'wecom_external_userid','wecom-corp:corp-1','external-2','verified','airev-fixture',1,'active',clock_timestamp())`,
+	} {
+		if _, err = native.Exec(ctx, query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo, err := aistore.NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities := identityquery.NewPostgreSQL()
+	oneid := identityapp.OneIDService{Store: identitystore.NewPostgresStore()}
+	service, err := aiapp.NewService(uow, repo, journeyCustomerReader{}, aiStaffSnapshotAdapter{repository: accessstore.NewPostgreSQL()}, journeyTextMaterials{}, oneid, identities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.BindExcelBatchStrategyReader(journeyExcelStrategyReader{}); err != nil {
+		t.Fatal(err)
+	}
+	workers := river.NewWorkers()
+	module := effects.NewModuleRegistration()
+	if err = module.RegisterWorkers(workers); err != nil {
+		t.Fatal(err)
+	}
+	client, err := queue.NewInsertClient(native, workers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effectsRepo, err := effects.NewRepository(native, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := outbound.NewPrivateMessageRepository(native, effectsRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.BindOutbound(writer, true); err != nil {
+		t.Fatal(err)
+	}
+	service.ExcelSnapshot = func(context.Context, ai.PlanID, int64) (string, error) { return "replacement-snapshot", nil }
+	who := ai.Actor{Kind: ai.ActorAdmin, ID: 9}
+	scope := "wechat-open-platform:fixture"
+	card := ai.ExcelCard{AppID: "fixture-app", Path: "pages/article/article?lesson_id=1", Title: "案例"}
+	created, err := service.CreateOperationExcelBatch(ctx, ai.ExcelBatchCommand{
+		Actor: who, IdempotencyKey: "airev-target-batch-create", BatchKey: "airev-target-batch", StrategyKey: "airev.review", Name: "AIREV target replacement",
+		Scope: scope, FileDigest: effect.Hash("airev-target-original"), Rows: []ai.ExcelBatchRow{{UnionID: "original-union", SenderUserID: "sender-original", Text: "original reviewed content", Card: card}}, OccurredAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := service.ApplyExcelCover(ctx, who, created.Plan.ID, created.Plan.Version, "airev-target-cover", effect.Hash("airev-target-cover-bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	previewBeforeReplacement, err := service.PreviewOperationExcelBatch(ctx, ai.PreviewApprovalCommand{Actor: who, PlanID: current.ID, ExpectedVersion: current.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := service.ReplaceOperationExcelBatch(ctx, ai.ReplaceExcelBatchCommand{
+		Actor: who, PlanID: current.ID, ExpectedVersion: current.Version, IdempotencyKey: "airev-target-replace-file", Scope: scope,
+		FileDigest: effect.Hash("airev-target-replacement"), Rows: []ai.ExcelBatchRow{{UnionID: "replacement-union", SenderUserID: "sender-replacement", Text: "replacement reviewed content", Card: card}}, OccurredAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("replace batch recipient: %v", err)
+	}
+	meta, err := service.OperationExcelBatch(ctx, updated.ID)
+	if err != nil || meta.Revision != 2 {
+		t.Fatalf("replacement revision=%d err=%v", meta.Revision, err)
+	}
+	recipients, err := service.OperationExcelBatchRecipients(ctx, updated.ID, meta.Revision, "", 10)
+	if err != nil || len(recipients.Items) != 1 || recipients.Items[0].DeferredTarget == nil || recipients.Items[0].DeferredTarget.UnionID != "replacement-union" || recipients.Items[0].DeferredTarget.SenderUserID != "sender-replacement" {
+		t.Fatalf("current replacement recipient=%+v err=%v", recipients.Items, err)
+	}
+	readEffectCounts := func() ([5]int, error) {
+		var counts [5]int
+		queryErr := native.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM outbound_private_message_intents),
+			(SELECT count(*) FROM ai_assistant_effect_bindings),
+			(SELECT count(*) FROM external_effects),
+			(SELECT count(*) FROM external_effect_jobs),
+			(SELECT count(*) FROM river_job)`).Scan(&counts[0], &counts[1], &counts[2], &counts[3], &counts[4])
+		return counts, queryErr
+	}
+	beforeStaleApproval, err := readEffectCounts()
+	if err != nil || beforeStaleApproval != ([5]int{}) {
+		t.Fatalf("unexpected outbound/EER work before stale approval: counts=%v err=%v", beforeStaleApproval, err)
+	}
+	staleApproval := ai.ApprovePlanCommand{Actor: who, PlanID: updated.ID, ExpectedVersion: updated.Version, PreviewDigest: previewBeforeReplacement.PreviewDigest, IdempotencyKey: "airev-target-approve-stale-preview"}
+	if _, err = service.ApproveOperationExcelBatch(ctx, staleApproval); !errors.Is(err, aiapp.ErrConflict) {
+		t.Fatalf("replacement recipient accepted prior approval digest: %v", err)
+	}
+	afterStaleApproval, err := readEffectCounts()
+	if err != nil || afterStaleApproval != beforeStaleApproval {
+		t.Fatalf("stale approval created outbound/EER work: before=%v after=%v err=%v", beforeStaleApproval, afterStaleApproval, err)
+	}
+	currentPreview, err := service.PreviewOperationExcelBatch(ctx, ai.PreviewApprovalCommand{Actor: who, PlanID: updated.ID, ExpectedVersion: updated.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentPreview.PreviewDigest == previewBeforeReplacement.PreviewDigest {
+		t.Fatal("recipient replacement retained the prior approval digest")
+	}
+	approved, err := service.ApproveOperationExcelBatch(ctx, ai.ApprovePlanCommand{Actor: who, PlanID: updated.ID, ExpectedVersion: updated.Version, PreviewDigest: currentPreview.PreviewDigest, IdempotencyKey: "airev-target-approve-fresh-preview"})
+	if err != nil {
+		t.Fatalf("fresh replacement review could not be approved: %v", err)
+	}
+	afterFreshApproval, err := readEffectCounts()
+	if err != nil || afterFreshApproval != ([5]int{1, 1, 1, 1, 1}) {
+		t.Fatalf("fresh approval effect counts=%v err=%v", afterFreshApproval, err)
+	}
+	currentRecipient, content, err := service.GetRecipient(ctx, approved.ID, recipients.Items[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := fmt.Sprintf("aiassistant:%d:%d:%d", approved.ID, currentRecipient.ID, content.ID)
+	targets := aiPrivateTargetResolver{uow: uow, identities: identities, corpID: "corp-1", resolver: oneid, trusted: identities, deferred: repo}
+	target, err := targets.ResolveDeferredPrivateMessageTarget(ctx, ref)
+	if err != nil || target.ExternalUserID != "external-2" || target.StaffUserID != "sender-replacement" {
+		t.Fatalf("target oracle did not resolve replacement identity: %+v %v", target, err)
 	}
 }
 
