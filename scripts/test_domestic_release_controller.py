@@ -2574,6 +2574,36 @@ class DomesticMainReleaseTests(unittest.TestCase):
     def test_generated_trusted_runner_is_valid_python(self) -> None:
         compile(release._trusted_runner_code(), "<trusted-runner>", "exec")
 
+    def test_focused_backend_chromium_journey_enables_required_browser_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            policy, candidate = root / "policy", root / "candidate"
+            (policy / "scripts/ci").mkdir(parents=True)
+            candidate.mkdir()
+            (policy / "scripts/ci/quality_lanes.py").write_text('''import json
+from pathlib import Path
+ROOT = Path('.')
+def commands(*args):
+    return []
+def focused_commands(*args):
+    return []
+def run_recorded(command, env, lane, report_dir, execution):
+    return env.get('AICRM_REQUIRE_CHROMIUM_JOURNEY')
+def main():
+    prefix = ['bash', 'scripts/run-go-with-donor-views.sh', 'go', 'test', '-json', '-run']
+    selected = run_recorded(prefix + ['^TestPaymentChromiumJourney$', './cmd/aicrm'],
+                            {}, 'backend', None, {})
+    ordinary = run_recorded(prefix + ['^TestPayment$', './cmd/aicrm'],
+                            {}, 'backend', None, {})
+    print(json.dumps({'selected': selected, 'ordinary': ordinary}))
+    return 0
+''')
+            result = subprocess.run(
+                [sys.executable, "-c", release._trusted_runner_code(), str(policy), str(candidate)],
+                cwd=candidate, capture_output=True, text=True, check=True,
+            )
+            self.assertEqual(json.loads(result.stdout), {"selected": "1", "ordinary": None})
+
     def test_trusted_runner_passes_only_lane_and_preflight_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

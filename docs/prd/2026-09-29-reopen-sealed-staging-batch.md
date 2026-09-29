@@ -33,4 +33,6 @@ flowchart TD
 
 原位替换允许原开发任务使用新 ref 保留旧候选证据，但必须提供被替换队首的准确候选 ID，且新提交以新的累计 HEAD 为第一父基线。保留原队列位置与失败 attempt 历史；需要预发恢复确认的失败仍按原恢复边界执行。
 
+支付候选的定向 backend 检查再次显示“命令成功、收据不完整”：被选中的 `TestPostgreSQLPaymentActionsPublicCheckoutChromiumJourney` 因缺少显式 Chromium 开关而 skip。只对 backend 中明确按名称选中的 Chromium Journey 传入 `AICRM_REQUIRE_CHROMIUM_JOURNEY=1`，让原断言真实执行；普通 Go 测试不改变环境，也不把 skip 记成通过。工具修复走同一开放批次的源码成员，原支付候选保留队首，再由原开发任务沿新 HEAD 重提。
+
 五项影响：对外只增加发布工具命令；不改变业务事务、身份、Provider 或页面；关联发布控制器、账本和合同测试；验证成功、错误摘要、预发改变、生产游标改变均不会误写生产。OneID 不涉及；Persistence 仅原发布账本；External Effects 仅预发控制状态，生产部署仍需独立人工批准。新增摘要参数复用现有封批对象身份校验，防止重开另一个批次；无数量和等待时限限制。

@@ -1261,6 +1261,14 @@ def trusted_focused(lane, report_dir, checks):
 
 def trusted_run_recorded(command, env, lane, report_dir, execution):
     actual = list(command)
+    # Focused Chromium journeys selected in the backend lane require the same
+    # explicit opt-in as the dedicated browser lane. Without it, go test exits
+    # successfully after skipping the named journey, leaving incomplete checks.
+    if (lane == 'backend' and actual[:4] ==
+            ['bash', 'scripts/run-go-with-donor-views.sh', 'go', 'test']
+            and '-run' in actual and
+            'ChromiumJourney' in actual[actual.index('-run') + 1]):
+        env = dict(env, AICRM_REQUIRE_CHROMIUM_JOURNEY='1')
     prefix = ['bash', 'scripts/run-go-with-donor-views.sh', 'go', 'test', '-json',
               '-p', '1', '-race', '-count=1']
     if (lane == 'backend' and actual[:len(prefix)] == prefix
