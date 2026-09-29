@@ -1270,6 +1270,578 @@ func automationAudienceRuntimePool(t *testing.T) (*pgxpool.Pool, func()) {
 	}
 }
 
+// TestAUTO02PersistentPreviewConfirmRejectsStaleStateReadbackPostgreSQL
+// exercises the persisted preview -> HTTP confirm boundary against PostgreSQL.
+// All identities/customers are synthetic, and this fixture deliberately does
+// not register an outbound or External Effects worker/provider.
+func TestAUTO02PersistentPreviewConfirmRejectsStaleStateReadbackPostgreSQL(t *testing.T) {
+	ctx := context.Background()
+	native, cleanup := automationAudienceRuntimePool(t)
+	defer cleanup()
+	wrapped, err := platformpostgres.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrapped.Close()
+	uow, err := platformpostgres.NewUnitOfWork(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segmentRepo, err := segmentstore.NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	automationRepo, err := automationstore.NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configRepo, err := configstore.NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aiRepo, err := aiassistantstore.NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staffID := automationAudienceInsertProviderStaff(t, ctx, native)
+	if staffID != 1 {
+		t.Fatalf("fixture principal is fixed to admin ID 1, inserted staff ID=%d", staffID)
+	}
+	customers := automationAudienceInsertProviderCustomers(t, ctx, native)
+
+	workers := river.NewWorkers()
+	refreshWorker := segment.NewAudienceRefreshWorker()
+	memberWorker := segment.NewAudienceMemberEventDispatchWorker()
+	if err = river.AddWorkerSafely[segment.AudienceRefreshJobArgs](workers, refreshWorker); err != nil {
+		t.Fatal(err)
+	}
+	if err = river.AddWorkerSafely[segment.AudienceMemberEventDispatchJobArgs](workers, memberWorker); err != nil {
+		t.Fatal(err)
+	}
+	client, err := platformjobqueue.NewInsertClient(native, workers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshJobs, err := segment.NewRiverRefreshEnqueuer(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberJobs, err := segment.NewRiverMemberEventEnqueuer(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &automationAudienceSource{}
+	evaluator, err := segmentapp.NewEvaluator(segmentcompiler.Compiler{}, source, automationAudienceCanonical{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshots, err := segmentapp.NewSnapshotService(uow, segmentRepo, evaluator, refreshJobs, memberJobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = refreshWorker.BindService(snapshots); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)
+	packageID := automationAudiencePackage(t, ctx, uow, segmentRepo, now)
+	agentService := automationapp.NewAgentService(uow, automationRepo, automationRepo)
+	agent, err := agentService.Create(ctx, automationport.CreateCommand{Agent: automationport.Agent{
+		AgentName: "AUTO-02 synthetic fixed script", AgentCode: "auto02-synthetic-fixed-script",
+		AutomationType: automationport.AutomationTypeFixedScript, Status: automationport.AgentStatusPaused,
+		DraftRolePrompt: "Synthetic test role", DraftTaskPrompt: "Synthetic test task",
+		FixedContentPackage: automationport.FixedContentPackage{ContentText: "Synthetic preview confirmation body."},
+	}, Actor: staffID, IdempotencyKey: "auto02-agent-create-synthetic-0001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err = agentService.SetStatus(ctx, automationport.MutationCommand{ID: agent.ID, Actor: staffID, IdempotencyKey: "auto02-agent-activate-synthetic-0001"}, automationport.AgentStatusActive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, found, err := agentService.PublishedAgent(ctx, agent.ID)
+	if err != nil || !found {
+		t.Fatalf("published synthetic agent found=%v err=%v", found, err)
+	}
+	staffReader := automationOpsStaffAdapter{uow: uow, users: accessstore.NewPostgreSQL()}
+	execution, err := segmentapp.NewExecutionService(uow, segmentRepo, agentService, staffReader, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packageVersion := auto02PackageVersion(t, ctx, native, packageID)
+	binding, err := execution.PutBinding(ctx, segmentapp.BindingCommand{
+		PackageID: packageID, ExpectedPackageVersion: packageVersion, AgentID: agent.ID,
+		ExpectedPublishedVersion: published.PublishedVersion,
+		ExpectedAgentDigest:      automationAudienceCombinedDigest(published.ContentDigest, published.MaterialsDigest),
+		Actor:                    staffID, IdempotencyKey: "auto02-binding-initial-synthetic-0001",
+	})
+	if err != nil || binding.ID < 1 {
+		t.Fatalf("initial binding=%+v err=%v", binding, err)
+	}
+	packageVersion = auto02PackageVersion(t, ctx, native, packageID)
+	if _, err = execution.ReplaceSenders(ctx, segmentapp.SendersCommand{PackageID: packageID, ExpectedPackageVersion: packageVersion, ProviderMemberIDs: []string{"sender-a"}, Actor: staffID, IdempotencyKey: "auto02-senders-initial-synthetic-0001"}); err != nil {
+		t.Fatal(err)
+	}
+
+	runtimeConfig, err := configapp.NewRuntimeReleaseService(uow, configRepo, configRepo, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeConfig := auto02PublishRecipientLimit(t, ctx, runtimeConfig, 0, 3, "initial")
+	aiService, err := aiassistantapp.NewService(uow, aiRepo, automationAudienceAIRecipients{}, automationAudienceAIStaff{}, aiMaterialAdapter{capturer: nil, references: nil}, automationAudienceAIIdentities{}, identityquery.NewPostgreSQL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeService, err := automationapp.NewRuntimeService(uow, automationRepo, execution, snapshots, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = runtimeService.SetRuntimeConfig(runtimeConfig, runtimeConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err = runtimeService.SetReviewPlanIntake(aiService, agentService); err != nil {
+		t.Fatal(err)
+	}
+	if err = memberWorker.Bind(snapshots, automationAudienceEnrollmentSink{runtime: runtimeService}); err != nil {
+		t.Fatal(err)
+	}
+	jobRuntime, err := platformjobqueue.NewRuntime(native, workers, segment.AudienceRefreshQueue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := automationAudienceStartRuntime(t, jobRuntime)
+	var stopOnce sync.Once
+	stopRuntime := func() { stopOnce.Do(stop) }
+	defer stopRuntime()
+	t.Cleanup(stopRuntime)
+
+	packageVersion = auto02PackageVersion(t, ctx, native, packageID)
+	if packageVersion < 1 {
+		t.Fatalf("package version=%d", packageVersion)
+	}
+	refreshSnapshot := func(want []customerdomain.CustomerID, key string) int64 {
+		t.Helper()
+		previous, hadPrevious, readErr := snapshots.PublishedSnapshot(ctx, segmentport.PackageID(packageID))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		source.Set(want)
+		sourceCheck, sourceErr := source.Evaluate(ctx, segmentport.Definition{}, now)
+		t.Logf("AUTO02_REFRESH_REQUEST key=%s intended_customer_count=%d source_readback_count=%d source_error=%v", key, len(want), len(sourceCheck.CustomerIDs), sourceErr)
+		if sourceErr != nil || len(sourceCheck.CustomerIDs) != len(want) {
+			t.Fatalf("synthetic source fixture did not accept intended set: intended=%d readback=%d err=%v", len(want), len(sourceCheck.CustomerIDs), sourceErr)
+		}
+		accepted, acceptErr := snapshots.AcceptRefresh(ctx, segmentapp.RefreshCommand{PackageID: packageID, Actor: staffID, IdempotencyKey: key, ReferenceTime: now, RefreshKind: segmentdomain.RefreshDaily})
+		if acceptErr != nil || accepted.RiverJobID == nil {
+			t.Fatalf("accept synthetic refresh=%+v err=%v", accepted, acceptErr)
+		}
+		var current segmentport.Snapshot
+		automationAudienceEventuallyWithDiagnostics(t, "AUTO-02 persisted snapshot refresh", func() bool {
+			var exists bool
+			current, exists, readErr = snapshots.PublishedSnapshot(ctx, segmentport.PackageID(packageID))
+			return readErr == nil && exists && current.MemberCount == int64(len(want)) && (!hadPrevious || current.ID != previous.ID)
+		}, func() string {
+			refresh, refreshErr := snapshots.GetRefresh(ctx, accepted.ID)
+			var jobState string
+			var jobAttempt int
+			jobErr := native.QueryRow(ctx, `SELECT state,attempt FROM river_job WHERE id=$1`, *accepted.RiverJobID).Scan(&jobState, &jobAttempt)
+			return fmt.Sprintf("refresh=%+v refreshErr=%v river_state=%s river_attempt=%d riverErr=%v previous=%+v current=%+v readErr=%v", refresh, refreshErr, jobState, jobAttempt, jobErr, previous, current, readErr)
+		})
+		automationAudienceEventually(t, "AUTO-02 refresh queue idle", func() bool {
+			var active int
+			readErr = native.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE queue=$1 AND state NOT IN ('completed','discarded','cancelled')`, segment.AudienceRefreshQueue).Scan(&active)
+			return readErr == nil && active == 0
+		})
+		persistedIDs := auto02SnapshotCustomerIDs(t, ctx, native, int64(current.ID))
+		expectedIDs := make([]int64, len(want))
+		for index, id := range want {
+			expectedIDs[index] = int64(id)
+		}
+		if fmt.Sprint(persistedIDs) != fmt.Sprint(expectedIDs) {
+			t.Fatalf("full-refresh snapshot member readback=%v want=%v", persistedIDs, expectedIDs)
+		}
+		t.Logf("AUTO02_SNAPSHOT key=%s snapshot_id=%d member_count=%d persisted_customer_ids=%v", key, current.ID, current.MemberCount, persistedIDs)
+		return int64(current.ID)
+	}
+	initialSnapshotID := refreshSnapshot(customers, "auto02-snapshot-initial-synthetic-0001")
+	t.Logf("AUTO02_MARKER package_id=%d agent_id=%d synthetic_staff_ids=[%d] initial_snapshot_id=%d synthetic_customer_ids=%v", packageID, agent.ID, staffID, initialSnapshotID, auto02SnapshotCustomerIDs(t, ctx, native, initialSnapshotID))
+
+	handler, err := automationhttp.NewRuntimeHandler(runtimeService, automationAudienceSecurity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newPreview := func() auto02HTTPPreview {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/admin/ai-audience/packages/"+automationAudienceInt(packageID)+"/broadcast-previews", nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("create persisted preview status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+		var preview auto02HTTPPreview
+		if err := json.Unmarshal(recorder.Body.Bytes(), &preview); err != nil {
+			t.Fatal(err)
+		}
+		if preview.SnapshotID < 1 || preview.AgentID < 1 || preview.AgentPublishedVersion < 1 || len(preview.PreviewDigest) != 64 || preview.ExpectedPackageVersion < 1 {
+			t.Fatalf("invalid preview response=%+v", preview)
+		}
+		previewRow, readErr := auto02ReadPreview(t, ctx, native, preview.PreviewDigest)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if previewRow.ID < 1 || previewRow.PackageID != packageID || previewRow.TargetCount < 1 || previewRow.SnapshotID != preview.SnapshotID || previewRow.PackageVersion != preview.ExpectedPackageVersion {
+			t.Fatalf("HTTP preview/persisted row mismatch: http=%+v row=%+v", preview, previewRow)
+		}
+		return preview
+	}
+	confirmAndAssertRejected := func(name string, preview auto02HTTPPreview, confirmKey string, change func(*auto02HTTPPreview), wantStatus int, wantCode string) {
+		t.Helper()
+		if change != nil {
+			change(&preview)
+		}
+		persistedPreview := auto02ReadPreviewMust(t, ctx, native, preview.PreviewDigest)
+		before := auto02EffectReadback(t, ctx, native)
+		status, code, body := auto02ConfirmHTTP(handler, packageID, preview, confirmKey)
+		after := auto02EffectReadback(t, ctx, native)
+		t.Logf("AUTO02_CASE name=%q preview_row=%+v request=%+v confirm_key=%s status=%d error=%q body=%s effects_before=%+v effects_after=%+v", name, persistedPreview, preview, confirmKey, status, code, body, before, after)
+		if status != wantStatus || code != wantCode {
+			t.Fatalf("%s rejected confirmation status/code=%d/%q want=%d/%q body=%s", name, status, code, wantStatus, wantCode, body)
+		}
+		if before != after {
+			t.Fatalf("%s rejection changed persisted effects/jobs: before=%+v after=%+v", name, before, after)
+		}
+	}
+
+	// Client-supplied old package version is rejected against the persisted preview.
+	preview := newPreview()
+	previewRow, err := auto02ReadPreview(t, ctx, native, preview.PreviewDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("AUTO02_OLD_VERSION preview_package_version=%d request_package_version=%d current_package_version=%d", previewRow.PackageVersion, preview.ExpectedPackageVersion+1, auto02PackageVersion(t, ctx, native, packageID))
+	confirmAndAssertRejected("request_old_package_version", preview, "auto02-confirm-old-package-0001", func(p *auto02HTTPPreview) { p.ExpectedPackageVersion++ }, http.StatusConflict, "automation_runtime_conflict")
+
+	// Advance only this private-schema preview's expiry. The migration marks the
+	// row append-only; the test temporarily disables that one trigger to model
+	// elapsed wall time without a 15-minute sleep, then immediately restores it.
+	preview = newPreview()
+	if _, err = native.Exec(ctx, `ALTER TABLE automation_run_previews DISABLE TRIGGER automation_run_previews_append_only`); err != nil {
+		t.Fatalf("private-schema preview expiry fixture disable trigger: %v", err)
+	}
+	triggerDisabled := true
+	defer func() {
+		if triggerDisabled {
+			if _, restoreErr := native.Exec(context.Background(), `ALTER TABLE automation_run_previews ENABLE TRIGGER automation_run_previews_append_only`); restoreErr != nil {
+				t.Errorf("restore private-schema append-only trigger: %v", restoreErr)
+			}
+		}
+	}()
+	if _, err = native.Exec(ctx, `UPDATE automation_run_previews SET expires_at=created_at+interval '1 microsecond' WHERE preview_digest=decode($1,'hex')`, preview.PreviewDigest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = native.Exec(ctx, `ALTER TABLE automation_run_previews ENABLE TRIGGER automation_run_previews_append_only`); err != nil {
+		t.Fatalf("restore private-schema preview append-only trigger: %v", err)
+	}
+	triggerDisabled = false
+	time.Sleep(2 * time.Millisecond)
+	expiredRow, err := auto02ReadPreview(t, ctx, native, preview.PreviewDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("AUTO02_EXPIRED_PREVIEW created_at=%s expires_at=%s", expiredRow.CreatedAt.Format(time.RFC3339Nano), expiredRow.ExpiresAt.Format(time.RFC3339Nano))
+	confirmAndAssertRejected("expired_persisted_preview", preview, "auto02-confirm-expired-preview-0001", nil, http.StatusConflict, "automation_runtime_conflict")
+
+	// A real refresh replaces the published snapshot while the saved preview stays immutable.
+	preview = newPreview()
+	newSnapshotID := refreshSnapshot(customers[:1], "auto02-snapshot-drift-synthetic-0001")
+	if newSnapshotID == preview.SnapshotID {
+		t.Fatalf("snapshot did not advance: preview=%d current=%d", preview.SnapshotID, newSnapshotID)
+	}
+	oldIDs := auto02SnapshotCustomerIDs(t, ctx, native, preview.SnapshotID)
+	newIDs := auto02SnapshotCustomerIDs(t, ctx, native, newSnapshotID)
+	t.Logf("AUTO02_SNAPSHOT_DRIFT preview_snapshot=%d preview_customer_ids=%v current_snapshot=%d current_customer_ids=%v", preview.SnapshotID, oldIDs, newSnapshotID, newIDs)
+	confirmAndAssertRejected("published_snapshot_changed", preview, "auto02-confirm-snapshot-drift-0001", nil, http.StatusConflict, "automation_runtime_conflict")
+
+	// Publish a changed Agent version after the preview. Current precheck records
+	// content_version_drift; old confirmation remains rejected before any plan/run.
+	preview = newPreview()
+	if _, err = agentService.SetStatus(ctx, automationport.MutationCommand{ID: agent.ID, Actor: staffID, IdempotencyKey: "auto02-agent-pause-synthetic-0001"}, automationport.AgentStatusPaused); err != nil {
+		t.Fatal(err)
+	}
+	changedTask := "Synthetic AUTO-02 task revision two"
+	if _, err = agentService.Update(ctx, automationport.UpdateCommand{ID: agent.ID, TaskPrompt: &changedTask, Actor: staffID, IdempotencyKey: "auto02-agent-edit-synthetic-0001"}); err != nil {
+		t.Fatal(err)
+	}
+	updatedAgent, err := agentService.Publish(ctx, automationport.MutationCommand{ID: agent.ID, Actor: staffID, IdempotencyKey: "auto02-agent-publish-synthetic-0001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedAgent, err = agentService.SetStatus(ctx, automationport.MutationCommand{ID: agent.ID, Actor: staffID, IdempotencyKey: "auto02-agent-reactivate-synthetic-0001"}, automationport.AgentStatusActive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	precheck, err := execution.Precheck(ctx, packageID)
+	hasContentVersionDrift := false
+	for _, reason := range precheck.Reasons {
+		if reason == "content_version_drift" {
+			hasContentVersionDrift = true
+		}
+	}
+	if err != nil || precheck.Ready || !hasContentVersionDrift {
+		t.Fatalf("after Agent publication precheck=%+v err=%v", precheck, err)
+	}
+	t.Logf("AUTO02_CURRENT_AGENT_DRIFT preview_published_version=%d current_published_version=%d precheck_reasons=%v", preview.AgentPublishedVersion, updatedAgent.PublishedVersion, precheck.Reasons)
+	confirmAndAssertRejected("agent_published_version_changed", preview, "auto02-confirm-agent-drift-0001", nil, http.StatusUnprocessableEntity, "automation_runtime_not_ready")
+	packageVersion = auto02PackageVersion(t, ctx, native, packageID)
+	updatedPublished, found, err := agentService.PublishedAgent(ctx, agent.ID)
+	if err != nil || !found {
+		t.Fatalf("read changed published Agent found=%v err=%v", found, err)
+	}
+	if _, err = execution.PutBinding(ctx, segmentapp.BindingCommand{PackageID: packageID, ExpectedPackageVersion: packageVersion, AgentID: agent.ID, ExpectedPublishedVersion: updatedPublished.PublishedVersion, ExpectedAgentDigest: automationAudienceCombinedDigest(updatedPublished.ContentDigest, updatedPublished.MaterialsDigest), Actor: staffID, IdempotencyKey: "auto02-rebind-current-agent-0001"}); err != nil {
+		t.Fatalf("fixture restore current Agent binding: %v", err)
+	}
+
+	// Rebind the same published Agent through the supported service. PutBinding
+	// advances both package and binding versions, so this is a composite stale
+	// preview path; it does not isolate the binding-version guard by itself.
+	preview = newPreview()
+	previewRow, err = auto02ReadPreview(t, ctx, native, preview.PreviewDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packageVersion = auto02PackageVersion(t, ctx, native, packageID)
+	rebound, err := execution.PutBinding(ctx, segmentapp.BindingCommand{PackageID: packageID, ExpectedPackageVersion: packageVersion, AgentID: agent.ID, ExpectedPublishedVersion: updatedPublished.PublishedVersion, ExpectedAgentDigest: automationAudienceCombinedDigest(updatedPublished.ContentDigest, updatedPublished.MaterialsDigest), Actor: staffID, IdempotencyKey: "auto02-binding-rebind-synthetic-0001"})
+	if err != nil || rebound.Version == previewRow.BindingVersion {
+		t.Fatalf("same-Agent binding drift preview_version=%d new_binding=%+v err=%v", previewRow.BindingVersion, rebound, err)
+	}
+	currentBindingConfig, err := execution.AudienceExecutionConfiguration(ctx, segmentport.PackageID(packageID))
+	if err != nil || !currentBindingConfig.Ready ||
+		currentBindingConfig.PackageVersion != previewRow.PackageVersion+1 ||
+		int64(currentBindingConfig.ConfigurationVersionID) != previewRow.ConfigurationVersionID ||
+		int64(currentBindingConfig.Snapshot.ID) != previewRow.SnapshotID ||
+		currentBindingConfig.AgentID != previewRow.AgentID ||
+		currentBindingConfig.AgentPublishedVersion != previewRow.AgentPublishedVersion ||
+		currentBindingConfig.BindingVersion != previewRow.BindingVersion+1 ||
+		currentBindingConfig.BindingVersion != rebound.Version ||
+		currentBindingConfig.SenderSetVersion != previewRow.SenderSetVersion {
+		t.Fatalf("current rebind execution config=%+v binding=%+v err=%v", currentBindingConfig, rebound, err)
+	}
+	currentBindingRuntimeConfig, err := runtimeConfig.EffectiveSnapshot(ctx)
+	if err != nil || currentBindingRuntimeConfig.Revision != previewRow.RuntimeConfigRevision || int64(currentBindingRuntimeConfig.AutomationMaxRecipients) != previewRow.MaxRecipientsPerRun {
+		t.Fatalf("binding rebind changed runtime config current=%+v preview=%+v err=%v", currentBindingRuntimeConfig, previewRow, err)
+	}
+	t.Logf("AUTO02_BINDING_PUT_MUTATION preview_package_version=%d current_package_version=%d preview_configuration_version=%d current_configuration_version=%d preview_snapshot=%d current_snapshot=%d preview_agent=%d current_agent=%d preview_agent_published_version=%d current_agent_published_version=%d preview_binding_version=%d current_binding_version=%d preview_sender_set_version=%d current_sender_set_version=%d runtime_revision=%d runtime_cap=%d independent_binding_guard=REVIEW", previewRow.PackageVersion, currentBindingConfig.PackageVersion, previewRow.ConfigurationVersionID, currentBindingConfig.ConfigurationVersionID, previewRow.SnapshotID, currentBindingConfig.Snapshot.ID, previewRow.AgentID, currentBindingConfig.AgentID, previewRow.AgentPublishedVersion, currentBindingConfig.AgentPublishedVersion, previewRow.BindingVersion, currentBindingConfig.BindingVersion, previewRow.SenderSetVersion, currentBindingConfig.SenderSetVersion, currentBindingRuntimeConfig.Revision, currentBindingRuntimeConfig.AutomationMaxRecipients)
+	confirmAndAssertRejected("binding_version_changed", preview, "auto02-confirm-binding-drift-0001", nil, http.StatusConflict, "automation_runtime_conflict")
+
+	// Change the persisted sender identity through the supported service, then
+	// reject the preview frozen against the previous sender set.
+	preview = newPreview()
+	previewSenderSet, err := auto02SenderState(t, ctx, native, packageID, auto02ReadPreviewMust(t, ctx, native, preview.PreviewDigest).SenderSetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var senderB int64
+	if err = native.QueryRow(ctx, `INSERT INTO admin_users(username,password_hash,display_name,wecom_userid,login_enabled) VALUES('auto02-sender-b','$argon2id$runtime','AUTO-02 sender B','sender-b',false) RETURNING id`).Scan(&senderB); err != nil {
+		t.Fatal(err)
+	}
+	packageVersion = auto02PackageVersion(t, ctx, native, packageID)
+	newSenders, err := execution.ReplaceSenders(ctx, segmentapp.SendersCommand{PackageID: packageID, ExpectedPackageVersion: packageVersion, ProviderMemberIDs: []string{"sender-b"}, Actor: staffID, IdempotencyKey: "auto02-senders-replace-synthetic-0001"})
+	if err != nil || len(newSenders.Members) != 1 || int64(newSenders.Members[0].StaffID) != senderB {
+		t.Fatalf("changed sender set=%+v staff_b=%d err=%v", newSenders, senderB, err)
+	}
+	currentSenderSet, err := auto02SenderState(t, ctx, native, packageID, newSenders.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("AUTO02_SENDER_DRIFT preview_sender_version=%d preview_senders=%v current_sender_version=%d current_senders=%v", previewSenderSet.Version, previewSenderSet.ProviderUserIDs, currentSenderSet.Version, currentSenderSet.ProviderUserIDs)
+	confirmAndAssertRejected("sender_identity_changed", preview, "auto02-confirm-sender-drift-0001", nil, http.StatusConflict, "automation_runtime_conflict")
+
+	// Restore a two-recipient snapshot, create a cap=3 preview, then lower the
+	// published cap to 1. Confirmation must not persist a review plan or run.
+	refreshSnapshot(customers, "auto02-snapshot-cap-synthetic-0001")
+	preview = newPreview()
+	previewRow, err = auto02ReadPreview(t, ctx, native, preview.PreviewDigest)
+	if err != nil || previewRow.TargetCount != 2 || previewRow.MaxRecipientsPerRun != 3 || previewRow.RuntimeConfigRevision != activeConfig.ID {
+		t.Fatalf("pre-cap persisted preview=%+v active_config=%+v err=%v", previewRow, activeConfig, err)
+	}
+	loweredConfig := auto02PublishRecipientLimit(t, ctx, runtimeConfig, activeConfig.ID, 1, "lowered")
+	currentConfig, err := runtimeConfig.EffectiveSnapshot(ctx)
+	if err != nil || currentConfig.Revision != loweredConfig.ID || currentConfig.AutomationMaxRecipients != 1 {
+		t.Fatalf("lowered current config=%+v release=%+v err=%v", currentConfig, loweredConfig, err)
+	}
+	t.Logf("AUTO02_RECIPIENT_CAP preview_targets=%d preview_cap=%d preview_revision=%d current_cap=%d current_revision=%d", previewRow.TargetCount, previewRow.MaxRecipientsPerRun, previewRow.RuntimeConfigRevision, currentConfig.AutomationMaxRecipients, currentConfig.Revision)
+	confirmAndAssertRejected("recipient_cap_lowered", preview, "auto02-confirm-recipient-cap-0001", nil, http.StatusConflict, "automation_runtime_conflict")
+}
+
+type auto02HTTPPreview struct {
+	SnapshotID             int64  `json:"snapshot_id"`
+	AgentID                int64  `json:"agent_id"`
+	AgentPublishedVersion  int64  `json:"agent_published_version"`
+	PreviewDigest          string `json:"preview_digest"`
+	ExpectedPackageVersion int64  `json:"expected_package_version"`
+}
+
+type auto02PersistedPreview struct {
+	ID, PackageID, PackageVersion, SnapshotID, ConfigurationVersionID int64
+	AgentID, AgentPublishedVersion, BindingVersion, SenderSetVersion  int64
+	TargetCount, RuntimeConfigRevision, MaxRecipientsPerRun           int64
+	CreatedAt, ExpiresAt                                              time.Time
+}
+
+type auto02EffectSnapshot struct {
+	AutomationRuns, AutomationRunRecipients, ConfirmReceipts int64
+	RunAuditEvents, RunOutboxEvents                          int64
+	AIPlans, AIPlanRecipients, AIReceipts, AIAuditEvents     int64
+	AIOutboxEvents, ExternalEffects, ExternalAttempts        int64
+	OutboundIntents, OutboundReceipts, ConfirmConfigUsage    int64
+	RiverJobs                                                int64
+	PreviewRowsDigest, RiverJobStates                        string
+}
+
+func auto02PackageVersion(t *testing.T, ctx context.Context, pool *pgxpool.Pool, packageID int64) int64 {
+	t.Helper()
+	var version int64
+	if err := pool.QueryRow(ctx, `SELECT version FROM segment_audience_packages WHERE id=$1`, packageID).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	return version
+}
+
+func auto02PublishRecipientLimit(t *testing.T, ctx context.Context, service *configapp.RuntimeReleaseService, base int64, limit int, suffix string) configport.RuntimeRelease {
+	t.Helper()
+	value, err := json.Marshal(limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := service.CreateRuntimeReleaseDraft(ctx, configport.RuntimeReleaseDraftCommand{ExpectedBaseRevision: base, Settings: []configport.RuntimeSetting{{Key: configport.AutomationOperationsMaxRecipientsPerRun, Value: value}}, Actor: "auto02-synthetic-fixture", IdempotencyKey: "auto02-config-create-" + suffix + "-0001"})
+	if err != nil {
+		t.Fatalf("create recipient limit %d release: %v", limit, err)
+	}
+	validated, err := service.ValidateRuntimeRelease(ctx, configport.RuntimeReleaseMutationCommand{ReleaseID: draft.ID, Actor: "auto02-synthetic-fixture", IdempotencyKey: "auto02-config-validate-" + suffix + "-0001"})
+	if err != nil {
+		t.Fatalf("validate recipient limit %d release: %v", limit, err)
+	}
+	published, err := service.PublishRuntimeRelease(ctx, configport.RuntimeReleasePublishCommand{ReleaseID: validated.ID, ExpectedBaseRevision: base, ExpectedChecksum: validated.Checksum, Actor: "auto02-synthetic-fixture", IdempotencyKey: "auto02-config-publish-" + suffix + "-0001"})
+	if err != nil {
+		t.Fatalf("publish recipient limit %d release: %v", limit, err)
+	}
+	return published
+}
+
+func auto02ReadPreview(t *testing.T, ctx context.Context, pool *pgxpool.Pool, digest string) (auto02PersistedPreview, error) {
+	t.Helper()
+	var row auto02PersistedPreview
+	err := pool.QueryRow(ctx, `SELECT id,package_id,package_version,snapshot_id,configuration_version_id,agent_id,agent_published_version,binding_version,sender_set_version,target_count,runtime_config_revision,max_recipients_per_run,created_at,expires_at FROM automation_run_previews WHERE preview_digest=decode($1,'hex')`, digest).Scan(&row.ID, &row.PackageID, &row.PackageVersion, &row.SnapshotID, &row.ConfigurationVersionID, &row.AgentID, &row.AgentPublishedVersion, &row.BindingVersion, &row.SenderSetVersion, &row.TargetCount, &row.RuntimeConfigRevision, &row.MaxRecipientsPerRun, &row.CreatedAt, &row.ExpiresAt)
+	return row, err
+}
+
+func auto02ReadPreviewMust(t *testing.T, ctx context.Context, pool *pgxpool.Pool, digest string) auto02PersistedPreview {
+	t.Helper()
+	row, err := auto02ReadPreview(t, ctx, pool, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return row
+}
+
+func auto02SnapshotCustomerIDs(t *testing.T, ctx context.Context, pool *pgxpool.Pool, snapshotID int64) []int64 {
+	t.Helper()
+	rows, err := pool.Query(ctx, `SELECT customer_id FROM segment_audience_snapshot_members WHERE snapshot_id=$1 ORDER BY customer_id`, snapshotID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	ids := []int64{}
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return ids
+}
+
+type auto02SenderSnapshot struct {
+	Version         int64
+	ProviderUserIDs []string
+}
+
+func auto02SenderState(t *testing.T, ctx context.Context, pool *pgxpool.Pool, packageID, version int64) (auto02SenderSnapshot, error) {
+	t.Helper()
+	rows, err := pool.Query(ctx, `SELECT s.version,u.wecom_userid FROM segment_audience_sender_sets s JOIN segment_audience_sender_set_members m ON m.sender_set_id=s.id JOIN admin_users u ON u.id=m.staff_id WHERE s.package_id=$1 AND s.version=$2 ORDER BY m.sort_order`, packageID, version)
+	if err != nil {
+		return auto02SenderSnapshot{}, err
+	}
+	defer rows.Close()
+	out := auto02SenderSnapshot{ProviderUserIDs: []string{}}
+	for rows.Next() {
+		var rowVersion int64
+		var userID string
+		if err = rows.Scan(&rowVersion, &userID); err != nil {
+			return auto02SenderSnapshot{}, err
+		}
+		out.Version = rowVersion
+		out.ProviderUserIDs = append(out.ProviderUserIDs, userID)
+	}
+	if err = rows.Err(); err != nil {
+		return auto02SenderSnapshot{}, err
+	}
+	if out.Version != version || len(out.ProviderUserIDs) == 0 {
+		return auto02SenderSnapshot{}, fmt.Errorf("sender set version %d has no persisted members", version)
+	}
+	return out, nil
+}
+
+func auto02ConfirmHTTP(handler http.Handler, packageID int64, preview auto02HTTPPreview, key string) (int, string, string) {
+	body, _ := json.Marshal(map[string]any{"snapshot_id": preview.SnapshotID, "agent_id": preview.AgentID, "agent_published_version": preview.AgentPublishedVersion, "preview_digest": preview.PreviewDigest, "expected_package_version": preview.ExpectedPackageVersion})
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/ai-audience/packages/"+automationAudienceInt(packageID)+"/runs", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", key)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	var payload struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(recorder.Body.Bytes(), &payload)
+	return recorder.Code, payload.Error, recorder.Body.String()
+}
+
+func auto02EffectReadback(t *testing.T, ctx context.Context, pool *pgxpool.Pool) auto02EffectSnapshot {
+	t.Helper()
+	var row auto02EffectSnapshot
+	err := pool.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM automation_runs),
+		(SELECT count(*) FROM automation_run_recipients),
+		(SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation='confirm_run'),
+		(SELECT count(*) FROM automation_runtime_audit_events WHERE resource_kind='run'),
+		(SELECT count(*) FROM automation_runtime_outbox WHERE aggregate_kind='run'),
+		(SELECT count(*) FROM ai_assistant_plans),
+		(SELECT count(*) FROM ai_assistant_plan_recipients),
+		(SELECT count(*) FROM ai_assistant_operation_receipts),
+		(SELECT count(*) FROM ai_assistant_audit_events),
+		(SELECT count(*) FROM ai_assistant_outbox),
+		(SELECT count(*) FROM external_effects),
+		(SELECT count(*) FROM external_effect_attempts),
+		(SELECT count(*) FROM outbound_message_intents),
+		(SELECT count(*) FROM outbound_message_receipts),
+		(SELECT count(*) FROM config_runtime_usage WHERE role='api' AND operation='confirm'),
+		(SELECT count(*) FROM river_job),
+		(SELECT md5(coalesce(string_agg(id::text || ':' || encode(preview_digest,'hex') || ':' || snapshot_id::text || ':' || package_version::text || ':' || expires_at::text, ',' ORDER BY id),'')) FROM automation_run_previews),
+		(SELECT coalesce(string_agg(id::text || ':' || kind || ':' || state || ':' || attempt::text, ',' ORDER BY id),'') FROM river_job)`).Scan(
+		&row.AutomationRuns, &row.AutomationRunRecipients, &row.ConfirmReceipts, &row.RunAuditEvents, &row.RunOutboxEvents,
+		&row.AIPlans, &row.AIPlanRecipients, &row.AIReceipts, &row.AIAuditEvents, &row.AIOutboxEvents,
+		&row.ExternalEffects, &row.ExternalAttempts, &row.OutboundIntents, &row.OutboundReceipts, &row.ConfirmConfigUsage, &row.RiverJobs,
+		&row.PreviewRowsDigest, &row.RiverJobStates)
+	if err != nil {
+		t.Fatalf("AUTO-02 effect readback: %v", err)
+	}
+	return row
+}
+
 // OneID decision: the generation rows carry already-canonical customer IDs;
 // this journey preserves those IDs into the existing AI Assistant Owner and
 // does not resolve or provision identities. Persistence decision: concurrent
