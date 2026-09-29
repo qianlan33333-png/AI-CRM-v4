@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	accessstore "github.com/qianlan33333-png/AI-CRM-v3/internal/access/store"
@@ -227,5 +228,175 @@ func TestPostgreSQLExcelImportReviewDeferredSendAndReceiptJourney(t *testing.T) 
 	// Queued content is immutable even if the caller submits a stale UI edit.
 	if _, err = service.UpdateContent(ctx, ai.UpdateContentCommand{Actor: who, PlanID: current.ID, RecipientID: first.ID, ExpectedVersion: first.Version, IdempotencyKey: "edit-after-submit", Blocks: command.Recipients[0].Content}); err == nil {
 		t.Fatal("queued content changed")
+	}
+}
+
+func TestPostgreSQLApprovalFaultRollsBackReviewAndExternalEffectChain(t *testing.T) {
+	native, cleanup := aiAssistantHTTPJourneyPool(t)
+	defer cleanup()
+	ctx := context.Background()
+	wrapped, err := pg.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrapped.Close()
+	uow, err := pg.NewUnitOfWork(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedAIAssistantHTTPJourney(t, native)
+	repo, err := aistore.NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities := identityquery.NewPostgreSQL()
+	oneid := identityapp.OneIDService{Store: identitystore.NewPostgresStore()}
+	service, err := aiapp.NewService(uow, repo, journeyCustomerReader{}, aiStaffSnapshotAdapter{repository: accessstore.NewPostgreSQL()}, journeyTextMaterials{}, oneid, identities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workers := river.NewWorkers()
+	module := effects.NewModuleRegistration()
+	if err = module.RegisterWorkers(workers); err != nil {
+		t.Fatal(err)
+	}
+	client, err := queue.NewInsertClient(native, workers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effectsRepo, err := effects.NewRepository(native, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := outbound.NewPrivateMessageRepository(native, effectsRepo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.BindOutbound(writer, true); err != nil {
+		t.Fatal(err)
+	}
+
+	who := ai.Actor{Kind: ai.ActorAdmin, ID: 9}
+	created, err := service.CreatePlan(ctx, ai.CreatePlanCommand{
+		Actor: who, IdempotencyKey: "airev05-atomic-plan-create-01", Name: "AIREV-05 atomic approval fixture",
+		SourceKind: "manual", SourceDigest: effect.Hash("airev05", "atomic-approval-source"),
+		Recipients: []ai.RecipientCandidate{{CustomerID: 91, StaffID: 9, Content: []ai.ContentBlock{{Kind: ai.ContentText, Text: "synthetic approval fixture"}}}},
+		OccurredAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := service.ListRecipients(ctx, ai.RecipientPageQuery{PlanID: created.Plan.ID})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("recipient page=%+v err=%v", page, err)
+	}
+	recipient := page.Items[0]
+	if _, err = service.ReviewRecipient(ctx, ai.ReviewRecipientCommand{Actor: who, PlanID: created.Plan.ID, RecipientID: recipient.ID, ExpectedVersion: recipient.Version, Decision: ai.ReviewApproved, IdempotencyKey: "airev05-atomic-recipient-review-01"}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := service.GetPlan(ctx, created.Plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewApproval(ctx, ai.PreviewApprovalCommand{Actor: who, PlanID: plan.ID, ExpectedVersion: plan.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval := ai.ApprovePlanCommand{Actor: who, PlanID: plan.ID, ExpectedVersion: plan.Version, PreviewDigest: preview.PreviewDigest, IdempotencyKey: "airev05-atomic-plan-approve-01"}
+	beforePlan := plan
+	beforeRecipient, _, err := service.GetRecipient(ctx, plan.ID, recipient.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type approvalCounts struct {
+		operationReceipts, completedReceipts, reviewDecisions, auditEvents, outboxEvents int
+		bindings, outboundIntents, acceptReceipts, queueReceipts, effects, generations   int
+		effectJobs, attempts, riverJobs                                                  int
+	}
+	keyDigest := sha256.Sum256([]byte(approval.IdempotencyKey))
+	intentPattern := fmt.Sprintf("aiassistant:%d:%%", plan.ID)
+	readCounts := func() approvalCounts {
+		t.Helper()
+		var counts approvalCounts
+		err := native.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM ai_assistant_operation_receipts WHERE operation='plan_approve' AND actor_scope='admin:9' AND key_digest=$1),
+			(SELECT count(*) FROM ai_assistant_operation_receipts WHERE operation='plan_approve' AND actor_scope='admin:9' AND key_digest=$1 AND state='completed'),
+			(SELECT count(*) FROM ai_assistant_review_decisions WHERE plan_id=$2 AND recipient_id IS NULL AND decision='approved'),
+			(SELECT count(*) FROM ai_assistant_audit_events WHERE plan_id=$2 AND operation=$3),
+			(SELECT count(*) FROM ai_assistant_outbox WHERE plan_id=$2 AND event_type=$3),
+			(SELECT count(*) FROM ai_assistant_effect_bindings b JOIN ai_assistant_plan_recipients r ON r.id=b.recipient_id WHERE r.plan_id=$2),
+			(SELECT count(*) FROM outbound_private_message_intents WHERE source_reference LIKE $4),
+			(SELECT count(*) FROM external_effect_operation_receipts WHERE operation='accept'),
+			(SELECT count(*) FROM external_effect_operation_receipts WHERE operation='queue'),
+			(SELECT count(*) FROM external_effects),
+			(SELECT count(*) FROM external_effect_generations),
+			(SELECT count(*) FROM external_effect_jobs),
+			(SELECT count(*) FROM external_effect_attempts),
+			(SELECT count(*) FROM river_job)`, keyDigest[:], plan.ID, ai.EventPlanApproved, intentPattern).Scan(
+			&counts.operationReceipts, &counts.completedReceipts, &counts.reviewDecisions, &counts.auditEvents, &counts.outboxEvents,
+			&counts.bindings, &counts.outboundIntents, &counts.acceptReceipts, &counts.queueReceipts, &counts.effects,
+			&counts.generations, &counts.effectJobs, &counts.attempts, &counts.riverJobs,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return counts
+	}
+	if got := readCounts(); got != (approvalCounts{}) {
+		t.Fatalf("approval/effect records exist before injected approval: %+v", got)
+	}
+
+	if _, err = native.Exec(ctx, `CREATE FUNCTION airev05_fail_approved_outbox() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			IF NEW.event_type = 'aiassistant.plan_approved.v1' THEN
+				RAISE EXCEPTION 'AIREV-05 injected outbox failure' USING ERRCODE='P0001';
+			END IF;
+			RETURN NEW;
+		END;
+		$$`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = native.Exec(ctx, `CREATE TRIGGER airev05_fail_approved_outbox BEFORE INSERT ON ai_assistant_outbox FOR EACH ROW EXECUTE FUNCTION airev05_fail_approved_outbox()`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.ApprovePlan(ctx, approval); err == nil {
+		t.Fatal("approval unexpectedly passed the injected PostgreSQL outbox fault")
+	} else {
+		var sqlErr interface{ SQLState() string }
+		if !errors.As(err, &sqlErr) || sqlErr.SQLState() != "P0001" {
+			t.Fatalf("approval error=%v, want injected PostgreSQL SQLSTATE P0001", err)
+		}
+	}
+	if _, err = native.Exec(ctx, `DROP TRIGGER airev05_fail_approved_outbox ON ai_assistant_outbox`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = native.Exec(ctx, `DROP FUNCTION airev05_fail_approved_outbox()`); err != nil {
+		t.Fatal(err)
+	}
+
+	afterPlan, err := service.GetPlan(ctx, plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterRecipient, _, err := service.GetRecipient(ctx, plan.ID, recipient.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterPlan.State != beforePlan.State || afterPlan.Version != beforePlan.Version || afterPlan.PendingCount != beforePlan.PendingCount || afterPlan.ApprovedCount != beforePlan.ApprovedCount ||
+		afterRecipient.ReviewState != beforeRecipient.ReviewState || afterRecipient.ExecutionState != beforeRecipient.ExecutionState || afterRecipient.Version != beforeRecipient.Version || afterRecipient.EffectID != beforeRecipient.EffectID {
+		t.Fatalf("injected failure left partial approval: plan before=%+v after=%+v recipient before=%+v after=%+v", beforePlan, afterPlan, beforeRecipient, afterRecipient)
+	}
+	if got := readCounts(); got != (approvalCounts{}) {
+		t.Fatalf("injected failure left partial approval/effect records: %+v", got)
+	}
+
+	approved, err := service.ApprovePlan(ctx, approval)
+	if err != nil || approved.State != ai.PlanDispatching {
+		t.Fatalf("same-key approval retry=%+v err=%v", approved, err)
+	}
+	want := approvalCounts{operationReceipts: 1, completedReceipts: 1, reviewDecisions: 1, auditEvents: 1, outboxEvents: 1, bindings: 1, outboundIntents: 1, acceptReceipts: 1, queueReceipts: 1, effects: 1, generations: 1, effectJobs: 1, riverJobs: 1}
+	if got := readCounts(); got != want {
+		t.Fatalf("same-key approval retry left duplicate or missing records: got=%+v want=%+v", got, want)
 	}
 }
