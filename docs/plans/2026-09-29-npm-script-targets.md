@@ -1,6 +1,6 @@
 # npm 本地脚本入口修复
 
-基线：国内 `main` `73de4fb8ea9626077a39e3fafbc6724eae824201`，tree `73854f20095fad075a945fb09fe0403f37ae4de9`。本候选沿用已授权的 npm 入口完整性父 brief，只补当前 V4 基线复核与本次小范围决策。
+基线：累计源码 `746fc36b9e1d93135b6ff783b27f303d98755c4b`，tree `d7c245cfb791c3c864d2cae94f9f230c532e1e97`，parent `39d68958930a860fc7ac6a6fea780549147e0717`。本候选沿用已授权的 npm 入口完整性父 brief，只补当前 V4 基线复核与本次小范围决策。
 
 ## 业务判断流程
 
@@ -14,11 +14,17 @@ flowchart TD
 
 ## 当前基线核对与选择
 
-基线声明的 `edge:contract`、`release:contract`、`deploy:check` 分别指向不存在的脚本；三条命令在基线上均实测退出 127。其源路径仍出现在冻结的 V2 donor package 清单中，但当前仓库没有这些脚本，也没有 G2 edge 或 Cloudflare 部署实现。当前国内发布入口是 `scripts/domestic_main_release.py`。GitHub CI 调用 `scripts/ci/quality_lanes.py`；frontend lane 会用 `npm run orval:check`，但当前 workflow 不运行根 `npm run ci`，也不调用这三个旧别名。根 `npm run ci` 是本地脚本链，不是正式发布器。
+精确基线仍声明 `edge:contract`、`release:contract`、`deploy:check`，分别指向不存在的文件。基线 worktree 上按仓库固定 Node `v24.18.0` / npm `11.12.1` 逐条运行这三个 npm alias，均以 shell `No such file or directory` 退出 127；原始输出见 `/Users/qianlan/Documents/Codex/2026-09-30/npm-script-targets-746fc36/evidence/npm-alias-base-repro.log`。路径仍出现在冻结的 V2 donor package 清单中，但当前源码没有这些脚本，也没有 G2 edge 或 Cloudflare 部署实现。候选删除这三个旧 alias；不改冻结 donor 清单。
+
+正式准备路径会物化 fresh checkout 的 donor source views。GitHub frontend lane 先经 `.github/actions/ci-setup` 安装锁定的 Node/npm、依赖并运行 `node scripts/prepare-donor-source-views.mjs`，再进入 canonical quality lane；国内主发布构建和 `scripts/run-donor-view-consumers.sh` 也会执行同一准备命令。此次在干净候选上仅执行 `npm ci` 后直接冷启动 `npm test`，新守卫通过，但 `transport-contract` 因视图尚未物化、esbuild 无法解析 `./transport` 等模块而退出 1，日志见 `/Users/qianlan/Documents/Codex/2026-09-30/npm-script-targets-746fc36/evidence/npm-test-cold-no-donor-prep.log`。随后按正式路径运行 `bash scripts/run-donor-view-consumers.sh check`，准备视图后的 `npm test` 和完整前端检查通过，日志见 `/Users/qianlan/Documents/Codex/2026-09-30/npm-script-targets-746fc36/evidence/donor-view-consumers-check.log`。因此冷启动错误归因于缺少正式前置准备；本候选不把准备逻辑偷偷加进 `npm test`。
+
+此前 `25ef514` 首轮 `npm test` 中 `admin.test.ts` 经 `funnelGrid` → `DataWorkspace` → `tabulator-tables` 报 `ReferenceError: document is not defined`，在 `e412` 也曾出现，后来重跑通过。当前精确 `746` 候选的准备后回归未复现该异常；保留历史首次失败为 **FLAKY**，不以它作为当前 blocker，也不改测试运行器或 UI。
+
+当前国内发布入口是 `scripts/domestic_main_release.py`。GitHub CI 调用 `scripts/ci/quality_lanes.py`；frontend lane 会运行 canonical frontend verification，但当前 workflow 不运行根 `npm run ci`，也不调用这三个旧别名。根 `npm run ci` 是本地脚本链，不是正式发布器。
 
 旧 `scripts/check-install-release-contract.sh` 需要单独审查：当前 `.github/workflows/ci.yml` 与 `scripts/ci/quality_lanes.py` 未直接调用它；`scripts/ci/local_first_gate.py` 将它列为 `OPERATOR_ONLY` 路径，`scripts/domestic_release_build.py` 将它列为 `CI_ONLY_FILES`，这些分类本身都不执行该脚本。历史验收台账曾记录 CI 执行此检查。基线与候选实跑都在原断言 `CI must promote the accepted staging package` 处退出 1；当前国内发布文档并未证明该旧断言由等价检查替代。本候选保留该脚本及断言，不把它报作通过，作为独立发布门禁审查项留给发布/CI 维护者处理。
 
-基线上 `scripts/check-pr03-frontend-donor-manifest.sh` 首次因 source-view 视图未物化而失败；运行 `fast` 完成视图准备后重跑通过，冻结 donor 摘要未变。
+旧 PRD 记录的 donor manifest 首轮失败及准备后结果属于当时的专项审计。本候选以此次正式 frontend preparation/check 的实跑为准，不复用旧 SHA 的绿灯。
 
 | 旧 npm 名称 | 决定 | 现行合同边界 |
 | --- | --- | --- |
@@ -40,12 +46,12 @@ flowchart TD
 - **Persistence：stateless。** 不访问数据库、不写业务状态；回归仅使用临时目录。
 - **External Effects：不涉及。** 不联网、不调用 Provider、不部署、不发送消息。
 - **页面影响：无 UI 改动。** 现有 npm 测试内容保持不变。
-- **PRD delta：** 延续父 brief 的“清除悬空入口并防止回归”；当前 main 的复核将修复范围收窄为本地 npm 中三个不存在的 V2 别名。现行国内发布器及 GitHub quality lanes 不依赖这些别名；旧安装合同脚本目前失败且是否应更新仍待单独审查，不由本候选声称等价覆盖。
+- **PRD delta：** 延续父 brief 的“清除悬空入口并防止回归”；精确 `746` 复核仍确认本地 npm 中三个 V2 别名指向不存在的文件。正式 CI/国内构建会准备 source views；冷启动 `npm test` 的缺视图错误不据此增添隐式前置门槛。旧安装合同断言是否应更新仍待独立审查，不由本候选声称等价覆盖。
+- **限制必要性：不涉及新增限制。** 只增加 package script 文件目标静态回归，不改依赖、版本门槛、网络权限或部署路径。
 
 ## 验证与边界
 
-- 修复前在精确基线 `73de4fb8ea9626077a39e3fafbc6724eae824201` 上分别执行 `npm run edge:contract`、`npm run release:contract`、`npm run deploy:check`，均因目标文件不存在退出 127；首轮原始输出留档。
-- 候选入口守卫：`npm run qa:script-targets` 和 `python3 scripts/qa/test_package_script_targets.py` 均为 5/5；`python3 scripts/ci/test_workflow_contract.py` 为 7/7；`python3 -m unittest scripts.test_domestic_release scripts.test_domestic_release_build` 为 99/99；工具链 ownership、冻结 donor 检查通过。
-- V4 `python3 scripts/dev_preflight.py fast --report-dir <evidence>` 通过；本候选无 Go 改动，不运行 compile。机器为 Node `v24.21.0`/npm `11.19.0`，与仓库固定 `v24.18.0`/`11.12.1` 不同，因此未运行完整 `npm run ci`。
-- `bash scripts/check-install-release-contract.sh` 在基线和候选均以退出 1 重现原始断言 `CI must promote the accepted staging package`；该失败作为待审门禁保留，非本候选通过项。
-- 最终 `affected --dry-run` 因 `package.json` 是全局输入选择 `preflight, backend, frontend, browser, archive-sdk`；dry-run 未执行这些 lane，不作为回归通过声明。
+- 修复前准确基线三个失效 alias 均复现退出 127，见 `/Users/qianlan/Documents/Codex/2026-09-30/npm-script-targets-746fc36/evidence/npm-alias-base-repro.log`。
+- `python3 scripts/qa/test_package_script_targets.py` 为 5/5；正式 `scripts/run-donor-view-consumers.sh check` 在固定 Node `v24.18.0` / npm `11.12.1` 下退出 0。其准备后的 `npm test` 包含脚本守卫，浏览器/前端回归报告 `447 通过 / 0 失败`，其余 frontend host、组件和 staging contracts 均通过；完整原始输出见 `evidence/donor-view-consumers-check.log`。
+- 冷启动错误和旧 Tabulator `document` 首次失败均单独保留，不能并入正式准备后的结果，也不能把旧 FLAKY 当作当前失败或绿灯。
+- 最终候选 fast、affected 计划与执行及准确 HEAD/tree 单独记录在 `/Users/qianlan/Documents/Codex/2026-09-30/npm-script-targets-746fc36/` 外部证据目录；只报告实际运行的 lane。无 Go 改动，不运行 compile。旧 `check-install-release-contract.sh` 的失败只见旧候选记录，本次不宣称在准确 `746` 上验证。
