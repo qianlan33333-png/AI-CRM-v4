@@ -33,6 +33,8 @@ Web 运行代码变化构建整个 Web 一次，避免遗漏共享 chunk 和动�
 
 封批后如又有需求要加入且生产尚未晋级，工作台先核对当前封批摘要、成员链、预发构件与收据、生产基线，再用 `batch-reopen --approval-digest <旧摘要>` 使旧审批失效并继续使用原批次。若重开本身更新控制器，附 `--sha/--ref` 指向已安装且通过相关 Linux 检查的准确源码候选；它原子地成为源码成员，业务应用不重装。该命令不写生产，保留旧封批收据。新候选由原开发任务沿当前预发 HEAD 更新；追加后重新封批、展示全新摘要并等待人工确认。
 
+若开放批次队首在检查准备阶段被标记为“未评价”，而修复该环境需更新控制器，使用 `batch-tool-repair --failed-candidate <队首SHA> --sha <工具SHA> --ref <工具ref>`。控制器验证工具修复的 Linux 检查和完整 bundle 后将其记为批次源码成员，保留原业务队首的失败收据与顺序；原开发任务再从新的累计 HEAD 重提该候选。此入口不接受已被代码测试判失败的候选，也不安装业务应用或生产。
+
 ```sh
 sudo /usr/local/libexec/aicrm/domestic_main_release.py release --config /etc/aicrm/domestic-main-release.json --ref refs/heads/codex/<work-item> --head <SHA> --base <SHA>
 sudo /usr/local/libexec/aicrm/domestic_main_release.py poll --config /etc/aicrm/domestic-main-release.json

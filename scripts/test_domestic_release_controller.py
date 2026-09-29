@@ -3045,6 +3045,77 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
 
 
 class CumulativeBatchTests(unittest.TestCase):
+    def test_tool_repair_keeps_unevaluated_business_candidate_at_queue_front(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, staged, failed = make_repository(root)
+            tree, staged_tree = release._tree(repo, base), release._tree(repo, staged)
+            baseline = {"sha": base, "tree": tree, "manifest_sha256": "a" * 64}
+            app = {"sha": staged, "tree": staged_tree, "manifest_sha256": "b" * 64}
+            state = release._new_state(base, tree, baseline)
+            state.update(status="blocked", staging_out_of_sync=True)
+            state["batch"] = {"status": "open", "base_sha": base, "head_sha": staged,
+                              "head_tree": staged_tree, "installed_app": app,
+                              "members": [{"base_sha": base, "head_sha": staged,
+                                           "ref": "refs/heads/codex/one"}]}
+            front = {"candidate_id": failed, "ref": "refs/heads/codex/two",
+                     "base_sha": staged, "head_sha": failed, "status": "failed",
+                     "failure": {"phase": "checks", "kind": "unknown",
+                                 "candidate_verdict": "not_evaluated"}}
+            state["queue"] = [{"candidate_id": staged, "ref": "refs/heads/codex/one",
+                               "base_sha": base, "head_sha": staged, "status": "staged"}, front]
+            member = {"candidate_id": "f" * 40, "ref": "refs/heads/codex/tool",
+                      "base_sha": staged, "head_sha": "f" * 40,
+                      "head_tree": "e" * 40, "check_receipt_sha256": "d" * 64}
+            config = {"repo": str(repo), "state": str(root / "state.json"),
+                      "lock": str(root / "lock")}
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_load_state", return_value=state), \
+                 mock.patch.object(release, "_verify_stage_app"), \
+                 mock.patch.object(release, "_verify_prod_app"), \
+                 mock.patch.object(release, "_verify_production_cursor", return_value={"cursor": {
+                     "main_sha": base, "installed_app_sha": base,
+                     "installed_manifest_sha256": baseline["manifest_sha256"]}}), \
+                 mock.patch.object(release, "_checked_batch_controller_member", return_value=(
+                     member, {"status": "passed"}, {"bundle_sha256": "c" * 64})) as checked, \
+                 mock.patch.object(release, "_update_state") as update:
+                front["failure"]["candidate_verdict"] = "failed"
+                with self.assertRaisesRegex(release.ReleaseError, "cannot bypass"):
+                    release.batch_tool_repair(config, failed, member["head_sha"], member["ref"])
+                checked.assert_not_called()
+                front["failure"]["candidate_verdict"] = "not_evaluated"
+                result = release.batch_tool_repair(config, failed,
+                                                   member["head_sha"], member["ref"])
+            self.assertEqual(result["status"], "batch_tool_repaired")
+            self.assertFalse(result["production_written"])
+            self.assertEqual([x["head_sha"] for x in state["queue"]],
+                             [staged, member["head_sha"], failed])
+            self.assertIs(release._active_queue_item(state), front)
+            self.assertEqual(state["batch"]["head_sha"], member["head_sha"])
+            update.assert_called_once()
+
+    def test_exact_source_views_require_openapi_embed_in_disposable_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            checkout = Path(temporary)
+            index = checkout / "web/donor-sources/source-index.json"
+            index.parent.mkdir(parents=True)
+            index.write_text("{}")
+            source = checkout / "internal/config/http/openapi.go"
+            source.parent.mkdir(parents=True)
+            source.write_text("package http")
+            with mock.patch.object(release, "_build_command", return_value=subprocess.CompletedProcess(
+                    [], 0, "", "")):
+                with self.assertRaisesRegex(release.CheckIncompleteError, "OpenAPI embed view"):
+                    release._prepare_exact_source_views({}, checkout, checkout)
+            def materialize(*args, **kwargs):
+                source.with_name("openapi.yaml").write_text("openapi: 3.0.0\n")
+                return subprocess.CompletedProcess([], 0, "", "")
+            with mock.patch.object(release, "_build_command", side_effect=materialize) as prepare:
+                release._prepare_exact_source_views({}, checkout, checkout)
+            prepare.assert_called_once()
+
     def test_reopen_adopts_exact_checked_source_only_controller_member(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

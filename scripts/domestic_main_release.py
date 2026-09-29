@@ -1838,6 +1838,9 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                         reused_duration_seconds=snapshot["result"].get("duration_seconds"))
         checkout = (execution_worktree if lane == "preflight" else
                     _private_check_checkout(config, repo, execution_worktree.parent / ("candidate-" + lane), head_sha))
+        # Package discovery and each lane use separate clean checkouts. Embed
+        # views prepared for discovery are therefore absent from the lane copy.
+        _prepare_exact_source_views(config, policy, checkout)
         preparation_helper = (policy / "scripts/ci/check_preparation.py").is_file()
         # The canonical backend stage prepares both dependency trees itself.
         # Pre-installing them here makes stage rehash the same writable copies.
@@ -2860,16 +2863,24 @@ def _check_attempt_directory(config: dict, report: Path, policy: Path, head_sha:
             config.pop("_check_tmpdir", None)
 
 
-def _discover_check_packages(config: dict, policy: Path, checkout: Path,
-                             plan: dict, enforced: dict) -> list[str]:
-    # The graph and actual tests materialize these same exact-source embed
-    # inputs. Never generate them in the protected authority worktree.
+def _prepare_exact_source_views(config: dict, policy: Path, checkout: Path) -> None:
+    """Materialize generated embed inputs in each disposable exact-head checkout."""
     if (checkout / "web/donor-sources/source-index.json").is_file():
         prepared = _build_command(config,["node",str(policy / "scripts/prepare-donor-source-views.mjs"),
                                   "--root",str(checkout)],cwd=checkout,timeout=180,
                                   check=False,safe_repository=checkout)
         if prepared.returncode:
             raise CheckIncompleteError("exact-source embed preparation did not complete")
+        if ((checkout / "internal/config/http/openapi.go").is_file()
+                and not (checkout / "internal/config/http/openapi.yaml").is_file()):
+            raise CheckIncompleteError("exact-source OpenAPI embed view was not materialized")
+
+
+def _discover_check_packages(config: dict, policy: Path, checkout: Path,
+                             plan: dict, enforced: dict) -> list[str]:
+    # The graph and actual tests materialize these same exact-source embed
+    # inputs. Never generate them in the protected authority worktree.
+    _prepare_exact_source_views(config, policy, checkout)
     expressions = (["./"+item["dir"] for item in plan["graph_result"]["selected_packages"]]
                    if enforced["selection_mode"] == "targeted" else ["./..."])
     inventory = _build_command(config,["go","list","-f","{{.ImportPath}}",*expressions],
@@ -4361,6 +4372,53 @@ def batch_seal(config: dict[str, Any]) -> dict[str, Any]:
         return result
 
 
+def _checked_batch_controller_member(config: dict[str, Any], repo: Path,
+                                     batch: dict[str, Any], candidate: str,
+                                     ref: str, label: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    candidate = _sha(candidate, "batch controller SHA")
+    ref = _assert_ref_name(ref)
+    if _resolve_ref(repo, ref) != candidate:
+        raise ReleaseError("batch controller ref differs from its exact SHA")
+    _first_parent_chain(repo, batch["head_sha"], candidate)
+    worktree = _active_worktree(config, repo, candidate)
+    classification = _classify_candidate(worktree, batch["head_sha"], candidate)
+    if (classification["runtime_changed"]
+            or "scripts/domestic_main_release.py" not in classification["controller_files"]):
+        raise ReleaseError("batch controller candidate must be source-only and change the controller")
+    _verify_controller_files(config, repo, candidate, sorted(builder.FIXED_CONTROLLER_FILES))
+    report = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate}-{label}-{time.time_ns()}"
+    check = _check_report(config, repo, worktree, report, batch["head_sha"], candidate)
+    _pin_candidate(repo, candidate)
+    _, bundle = _create_full_bundle(repo, Path(config["work_root"]), candidate,
+                                     _tree(repo, candidate))
+    member = _batch_member_record({
+        "candidate_id": candidate, "ref": ref,
+        "base_sha": batch["head_sha"], "head_sha": candidate,
+        "head_tree": _tree(repo, candidate), "runtime_changed": False,
+        "installed_app": batch["installed_app"], "check_receipt": check,
+        "bundle_meta": bundle,
+    }, None)
+    return member, check, bundle
+
+
+def _append_batch_controller_member(state: dict[str, Any], member: dict[str, Any],
+                                    check: dict[str, Any], bundle: dict[str, Any],
+                                    *, before: dict[str, Any] | None = None) -> None:
+    batch = state["batch"]
+    batch["members"].append(member)
+    batch["head_sha"] = member["head_sha"]
+    batch["head_tree"] = member["head_tree"]
+    batch["controller_source_sha"] = member["head_sha"]
+    queued = {"candidate_id": member["candidate_id"], "ref": member["ref"],
+              "base_sha": member["base_sha"], "head_sha": member["head_sha"],
+              "status": "staged", "check_receipt": check, "source_bundle": bundle,
+              "submitted_at_utc": _utc_now()}
+    if before is None:
+        state["queue"].append(queued)
+    else:
+        state["queue"].insert(state["queue"].index(before), queued)
+
+
 def batch_reopen(config: dict[str, Any], approval_digest: str, *,
                  controller_sha: str | None = None,
                  controller_ref: str | None = None) -> dict[str, Any]:
@@ -4415,31 +4473,10 @@ def batch_reopen(config: dict[str, Any], approval_digest: str, *,
         controller_member = None
         controller_check = None
         if controller_sha is not None:
-            candidate = _sha(controller_sha, "reopen controller SHA")
-            if (controller_ref is None
-                    or _resolve_ref(repo, _assert_ref_name(controller_ref)) != candidate):
-                raise ReleaseError("reopen controller ref differs from its exact SHA")
-            _first_parent_chain(repo, batch["head_sha"], candidate)
-            worktree = _active_worktree(config, repo, candidate)
-            classification = _classify_candidate(worktree, batch["head_sha"], candidate)
-            if (classification["runtime_changed"]
-                    or "scripts/domestic_main_release.py" not in classification["controller_files"]):
-                raise ReleaseError("reopen controller candidate must be source-only and change the controller")
-            _verify_controller_files(config, repo, candidate,
-                                     sorted(builder.FIXED_CONTROLLER_FILES))
-            report = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate}-batch-reopen-{time.time_ns()}"
-            controller_check = _check_report(config, repo, worktree, report,
-                                             batch["head_sha"], candidate)
-            _pin_candidate(repo, candidate)
-            _, bundle_meta = _create_full_bundle(repo, Path(config["work_root"]), candidate,
-                                                  _tree(repo, candidate))
-            controller_member = _batch_member_record({
-                "candidate_id": candidate, "ref": controller_ref,
-                "base_sha": batch["head_sha"], "head_sha": candidate,
-                "head_tree": _tree(repo, candidate), "runtime_changed": False,
-                "installed_app": app, "check_receipt": controller_check,
-                "bundle_meta": bundle_meta,
-            }, None)
+            if controller_ref is None:
+                raise ReleaseError("reopen controller SHA requires its exact ref")
+            controller_member, controller_check, bundle_meta = _checked_batch_controller_member(
+                config, repo, batch, controller_sha, controller_ref, "batch-reopen")
         elif controller_ref is not None:
             raise ReleaseError("reopen controller ref requires its exact SHA")
         else:
@@ -4456,22 +4493,63 @@ def batch_reopen(config: dict[str, Any], approval_digest: str, *,
                     "production_metadata_path", "production_metadata_sha256"):
             batch.pop(key, None)
         if controller_member is not None:
-            batch["members"].append(controller_member)
-            batch["head_sha"] = controller_member["head_sha"]
-            batch["head_tree"] = controller_member["head_tree"]
-            batch["controller_source_sha"] = controller_member["head_sha"]
+            _append_batch_controller_member(state, controller_member, controller_check, bundle_meta)
             batch["reopen_controller_check_receipt"] = controller_check
-            state["queue"].append({"candidate_id": controller_member["candidate_id"],
-                                   "ref": controller_member["ref"],
-                                   "base_sha": controller_member["base_sha"],
-                                   "head_sha": controller_member["head_sha"],
-                                   "status": "staged", "check_receipt": controller_check,
-                                   "source_bundle": bundle_meta,
-                                   "submitted_at_utc": _utc_now()})
         batch["status"] = "open"
         _update_state(state_path, state, status="ready")
         return {"status": "batch_open", "staged_head_sha": batch["head_sha"],
                 "member_count": len(batch["members"]), "invalidated_approval_digest": expected,
+                "production_written": False}
+
+
+def batch_tool_repair(config: dict[str, Any], failed_candidate: str,
+                      controller_sha: str, controller_ref: str) -> dict[str, Any]:
+    """Stage a checked source-only controller fix ahead of an unevaluated queue front."""
+    if os.geteuid() != 0:
+        raise ReleaseError("batch tool repair requires root")
+    config = _check_config(config)
+    failed_candidate = _sha(failed_candidate, "failed candidate SHA")
+    repo, state_path = Path(config["repo"]), Path(config["state"])
+    with _locked(Path(config["lock"]), nonblocking=True):
+        state = _load_state(state_path)
+        _recover_orphaned_inflight(state_path, state)
+        batch, front = state.get("batch"), _active_queue_item(state)
+        if (not isinstance(batch, dict) or batch.get("status") != "open"
+                or state.get("status") != "blocked" or state.get("in_flight") is not None
+                or front is None or front.get("status") != "failed"
+                or front.get("head_sha") != failed_candidate):
+            raise ReleaseError("batch tool repair requires the exact unevaluated queue front")
+        failure = front.get("failure") or {}
+        if (failure.get("phase") != "checks"
+                or failure.get("candidate_verdict") != "not_evaluated"
+                or failure.get("kind") not in {"unknown", "environment"}):
+            raise ReleaseError("batch tool repair cannot bypass a candidate failure")
+        if (_resolve_ref(repo, MAIN_REF) != batch["base_sha"]
+                or _tree(repo, batch["base_sha"]) != state["main"]["tree"]):
+            raise ReleaseError("production source base changed before batch tool repair")
+        last = batch["members"][-1]
+        if (_resolve_ref(repo, last["ref"]) != batch["head_sha"]
+                or _tree(repo, batch["head_sha"]) != batch["head_tree"]):
+            raise ReleaseError("current cumulative source head changed before tool repair")
+        app, baseline = batch["installed_app"], state["installed_app"]
+        _verify_stage_app(app["sha"], app["manifest_sha256"])
+        _verify_prod_app(config, baseline["sha"], baseline["manifest_sha256"])
+        cursor = _verify_production_cursor(config)["cursor"]
+        if (cursor.get("main_sha") != batch["base_sha"]
+                or cursor.get("installed_app_sha") != baseline["sha"]
+                or cursor.get("installed_manifest_sha256") != baseline["manifest_sha256"]):
+            raise ReleaseError("production cursor changed before batch tool repair")
+        member, check, bundle = _checked_batch_controller_member(
+            config, repo, batch, controller_sha, controller_ref, "batch-tool-repair")
+        _append_batch_controller_member(state, member, check, bundle, before=front)
+        batch.setdefault("tool_repairs", []).append({
+            "head_sha": member["head_sha"], "failed_candidate": failed_candidate,
+            "check_receipt_sha256": member["check_receipt_sha256"],
+            "recorded_at_utc": _utc_now(),
+        })
+        _update_state(state_path, state, status="blocked")
+        return {"status": "batch_tool_repaired", "staged_head_sha": member["head_sha"],
+                "blocked_candidate_sha": failed_candidate, "member_count": len(batch["members"]),
                 "production_written": False}
 
 
@@ -5926,7 +6004,7 @@ def restricted_ssh() -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check", "batch-open", "batch-seal", "batch-reopen",
+    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check", "batch-open", "batch-seal", "batch-reopen", "batch-tool-repair",
                                             "poll", "promote", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
     parser.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG))
     parser.add_argument("--repo", type=Path)
@@ -5938,6 +6016,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--supersedes-candidate")
     parser.add_argument("--sha")
     parser.add_argument("--approval-digest", help="digest of the exact candidate, artifact and staging readback approved by a person")
+    parser.add_argument("--failed-candidate", help="exact unevaluated queue-front candidate for a batch tool repair")
     parser.add_argument("--calibrate-check-capacity", action="store_true",
                         help="maintenance-only measurement before setting same-host disk/cache budgets")
     parser.add_argument("--tree")
@@ -6017,6 +6096,10 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("batch-reopen requires --approval-digest")
             result = batch_reopen(config, args.approval_digest,
                                   controller_sha=args.sha, controller_ref=args.ref)
+        elif args.action == "batch-tool-repair":
+            if not (args.failed_candidate and args.sha and args.ref):
+                parser.error("batch-tool-repair requires --failed-candidate, --sha and --ref")
+            result = batch_tool_repair(config, args.failed_candidate, args.sha, args.ref)
         elif args.action == "submit":
             if os.geteuid() != 0:
                 raise ReleaseError("submit must run through the restricted root endpoint")
