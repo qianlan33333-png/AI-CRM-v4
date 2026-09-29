@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	postgresurltestutil "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres/testutil"
 )
 
 // TestPostgreSQLOwnerHandoffHistoryExtractApplyReplayVerify exercises the
@@ -213,7 +214,14 @@ func ownerHistoryDatabase(t *testing.T, ctx context.Context) (string, *pgxpool.P
 		pool.Close()
 		t.Fatalf("apply current Access login fixture contract: %v", err)
 	}
-	return databaseURL + "&search_path=" + schema, pool, func() {
+	searchPathURL, err := postgresurltestutil.WithSearchPath(databaseURL, schema)
+	if err != nil {
+		pool.Close()
+		_, _ = admin.Exec(context.Background(), "DROP SCHEMA "+identifier+" CASCADE")
+		admin.Close()
+		t.Fatal(err)
+	}
+	return searchPathURL, pool, func() {
 		pool.Close()
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

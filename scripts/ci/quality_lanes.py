@@ -42,17 +42,37 @@ def command_available(name: str) -> bool:
     return shutil.which(name) is not None
 
 
+def is_local_test_database_url(value: str | None = None) -> bool:
+    """Return whether a database URL targets the canonical local test database."""
+    value = os.environ.get("AICRM_DATABASE_URL") if value is None else value
+    if not value:
+        return False
+    try:
+        parsed = urlparse(value)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError:
+        return False
+    database = unquote(parsed.path.strip("/"))
+    return (
+        parsed.scheme in {"postgres", "postgresql"}
+        and hostname in {"127.0.0.1", "localhost", "::1"}
+        and (database == "aicrm_ci" or database.startswith("aicrm_test_"))
+    )
+
+
 def postgres_16_ready() -> bool:
     url = os.environ.get("AICRM_DATABASE_URL")
-    if not url or not command_available("psql"):
+    if not url or not command_available("psql") or not is_local_test_database_url(url):
         return False
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+        port = parsed.port or 5432
+    except ValueError:
+        return False
     database = unquote(parsed.path.strip("/"))
-    if (parsed.scheme not in {"postgres", "postgresql"} or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
-            or not (database == "aicrm_ci" or database.startswith("aicrm_test_"))):
-        return False
     query = parse_qs(parsed.query)
-    env = dict(os.environ, PGHOST=parsed.hostname, PGPORT=str(parsed.port or 5432),
+    env = dict(os.environ, PGHOST=parsed.hostname, PGPORT=str(port),
                PGUSER=unquote(parsed.username or ""), PGPASSWORD=unquote(parsed.password or ""),
                PGDATABASE=database, PGSSLMODE=query.get("sslmode", ["prefer"])[0])
     result = subprocess.run(

@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	postgresurltestutil "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres/testutil"
 )
 
 func TestSnapshotRejectsNonUUIDAndDigestDrift(t *testing.T) {
@@ -83,9 +84,9 @@ func TestDryRunApplyReplayVerifyAndDrift(t *testing.T) {
 		}
 	}
 	directory, raw := writeSnapshot(t, validRecord(t))
-	configuredURL := rawURL + "?search_path=" + schema
-	if strings.Contains(rawURL, "?") {
-		configuredURL = rawURL + "&search_path=" + schema
+	configuredURL, err := postgresurltestutil.WithSearchPath(rawURL, schema)
+	if err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv("AICRM_DATABASE_URL", configuredURL)
 	base := []string{"--snapshot-dir=" + directory, "--expected-count=1", "--manifest-sha256=" + hexDigest(raw), "--actor-admin-user-id=7"}

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -21,18 +20,18 @@ import (
 	orderstore "github.com/qianlan33333-png/AI-CRM-v3/internal/order/store"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
+	postgresurltestutil "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres/testutil"
 )
 
 // Run with scripts/accept-shipping-address-staging.sh. The test creates and
-// removes its own schema inside a dedicated staging acceptance database.
+// removes its own schema inside an isolated loopback PostgreSQL test database.
 func TestPostgreSQLShippingAddressSnapshotAndTransactionDetailAcceptance(t *testing.T) {
 	rawURL, err := platformconfig.DatabaseURL()
 	if err != nil {
-		t.Fatal("shipping acceptance requires a dedicated staging database")
+		t.Fatal("shipping acceptance requires AICRM_DATABASE_URL")
 	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil || !strings.HasSuffix(strings.TrimPrefix(parsed.Path, "/"), "_acceptance_test") {
-		t.Fatal("shipping acceptance requires a dedicated *_acceptance_test database")
+	if !postgresurltestutil.IsLocalTestDatabaseURL(rawURL) {
+		t.Fatal("shipping acceptance requires loopback PostgreSQL database aicrm_ci or aicrm_test_*")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()

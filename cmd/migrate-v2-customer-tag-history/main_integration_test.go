@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	postgresurltestutil "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres/testutil"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 )
@@ -136,7 +137,11 @@ func TestCustomerTagHistoryCLIExtractDryRunApplyReplayVerifyAndDrift(t *testing.
 	badSchema := newSourceSchema(t, ctx, url)
 	defer dropSourceSchema(ctx, url, badSchema)
 	badURL := filepath.Join(t.TempDir(), "bad-v2-readonly-url")
-	if err = os.WriteFile(badURL, []byte(url+"&search_path="+badSchema+"\n"), 0600); err != nil {
+	badSourceURL, urlErr := postgresurltestutil.WithSearchPath(url, badSchema)
+	if urlErr != nil {
+		t.Fatal(urlErr)
+	}
+	if err = os.WriteFile(badURL, []byte(badSourceURL+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err = run(ctx, []string{"--mode=extract", "--source-database-url-file=" + badURL, "--snapshot=" + filepath.Join(t.TempDir(), "drift.json"), "--wecom-corp-id=corp-test"}); err == nil {
@@ -233,7 +238,11 @@ func urlWithSchema(t *testing.T, url string, pool *pgxpool.Pool) string {
 	if err := pool.QueryRow(context.Background(), "SELECT current_schema()").Scan(&schema); err != nil {
 		t.Fatal(err)
 	}
-	return url + "&search_path=" + schema
+	configured, err := postgresurltestutil.WithSearchPath(url, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return configured
 }
 
 // This is the frozen v2 migration 0039 external_effect_job table contract.

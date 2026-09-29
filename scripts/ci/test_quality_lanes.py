@@ -252,6 +252,25 @@ class QualityLaneTests(unittest.TestCase):
             self.assertIn("PostgreSQL 16 reachable through AICRM_DATABASE_URL",
                           quality_lanes.missing_prerequisites("browser"))
 
+    def test_local_database_policy_matches_canonical_isolation_boundary(self):
+        accepted = (
+            "postgres://user:pass@localhost/aicrm_test_one",
+            "postgresql://user:pass@127.0.0.1/aicrm_test_payment_9bbbf28?sslmode=disable",
+            "postgres://user:pass@[::1]/aicrm_ci",
+        )
+        rejected = (
+            "postgres://user:pass@db.example/aicrm_test_one",
+            "postgres://user:pass@localhost/aicrm_production",
+            "https://localhost/aicrm_test_one",
+            "postgres://user:pass@[broken/aicrm_test_one",
+        )
+        for value in accepted:
+            with self.subTest(value=value):
+                self.assertTrue(quality_lanes.is_local_test_database_url(value))
+        for value in rejected:
+            with self.subTest(value=value):
+                self.assertFalse(quality_lanes.is_local_test_database_url(value))
+
     def test_browser_requires_chromium_but_frontend_does_not(self):
         def available(name):
             return name != "google-chrome"
@@ -272,6 +291,17 @@ class QualityLaneTests(unittest.TestCase):
 
     def test_postgres_rejects_remote_or_shared_database_without_connecting(self):
         for url in ("postgres://user:pass@10.0.0.2:5432/aicrm_test_isolated", "postgres://user:pass@127.0.0.1:5432/aicrm_shared"):
+            with self.subTest(url=url), patch.dict(os.environ, {"AICRM_DATABASE_URL": url}), patch.object(
+                    quality_lanes, "command_available", return_value=True), patch("subprocess.run") as run:
+                self.assertFalse(quality_lanes.postgres_16_ready())
+                run.assert_not_called()
+
+    def test_postgres_rejects_malformed_database_urls_without_connecting(self):
+        urls = (
+            "postgres://user:pass@[broken/aicrm_test_isolated",
+            "postgres://user:pass@localhost:not-a-port/aicrm_test_isolated",
+        )
+        for url in urls:
             with self.subTest(url=url), patch.dict(os.environ, {"AICRM_DATABASE_URL": url}), patch.object(
                     quality_lanes, "command_available", return_value=True), patch("subprocess.run") as run:
                 self.assertFalse(quality_lanes.postgres_16_ready())

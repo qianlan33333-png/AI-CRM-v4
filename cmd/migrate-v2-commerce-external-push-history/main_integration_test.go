@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	postgresurltestutil "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres/testutil"
 )
 
 // frozenV1DeliveryRow and frozenV1Snapshot exactly mirror the 73cdaa legacy
@@ -378,7 +379,11 @@ func commercePushHistoryPools(t *testing.T, ctx context.Context) (*pgxpool.Pool,
 }
 func withSearchPath(t *testing.T, url, schema string) string {
 	t.Helper()
-	return url + "&search_path=" + schema
+	configured, err := postgresurltestutil.WithSearchPath(url, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return configured
 }
 func commercePushHistoryTargetSchema(t *testing.T) string {
 	t.Helper()
