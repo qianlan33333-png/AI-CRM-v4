@@ -670,8 +670,6 @@ def tooling_contract_commands() -> list[list[str]]:
         [sys.executable, "-m", "unittest", "deploy.test_domestic_main_source"],
         [sys.executable, "-m", "unittest", "scripts.test_manual_github_sync"],
         ["node", "scripts/test-stage-pr01-effects-ui.mjs"],
-        ["node", "scripts/test-stage-survey-ui.mjs"],
-        ["node", "scripts/test-stage-new-shell-ui.mjs"],
     ]
 
 

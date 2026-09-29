@@ -879,6 +879,10 @@ def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base
         _is_bare_repo(repo) or (_ for _ in ()).throw(ReleaseError("domestic source repository is unavailable"))
         state = _load_state(state_path)
         _recover_orphaned_inflight(state_path, state)
+        inflight = state.get("in_flight")
+        if (state.get("status") == "blocked" and isinstance(inflight, dict)
+                and inflight.get("phase") in {"source-approval-pending", "stage-validation-pending"}):
+            raise ReleaseError("an exact candidate is awaiting human approval; finish it before submitting another")
         if state["status"] == "outcome_unknown":
             raise ReleaseError("production outcome is unknown; reconcile before submitting another candidate")
         if state.get("staging_out_of_sync") is True:
@@ -4397,7 +4401,10 @@ def promote(config: dict[str, Any], approval_digest: str) -> dict[str, Any]:
         approval = _approval_wait_result(inflight, evidence)
         if approval["approval_digest"] != expected:
             raise ReleaseError("human approval does not match this candidate, artifact and staging receipt")
-        _verify_controller_files(config, repo, state["main"]["sha"],
+        # A controller-maintenance candidate has installed its exact checked
+        # bytes on staging before this pause, while domestic main still points
+        # at the prior source. Bind promotion to the approved candidate.
+        _verify_controller_files(config, repo, inflight["head_sha"],
                                  sorted(builder.FIXED_CONTROLLER_FILES))
         if phase == "stage-validation-pending":
             return _promote_staged_candidate(config, state_path, state, item, evidence)

@@ -97,7 +97,9 @@ def select(root: Path, base: str, head: str, paths: list[str], graph: dict,
     if any(not path.startswith(("web/", "internal/", "cmd/", "pkg/")) for path in app):
         return {"mode": "full", "lanes": ["preflight", "backend", "frontend", "browser", "archive-sdk"],
                 "checks": [], "reason": "unknown-runtime-input", "profile": "full"}, []
-    if any(path.startswith("web/v3/shared/") or path.endswith((".css", ".scss"))
+    if any(path.startswith("web/v3/shared/") or
+           (path.endswith((".css", ".scss")) and Path(path).stem.lower() in
+            {"global", "base", "tokens", "theme", "styles", "common", "shared"})
            for path in app):
         # Shared UI and global style consumers are not proven by adjacent tests.
         return {"mode": "full", "lanes": ["preflight", "frontend", "browser"],
@@ -150,6 +152,9 @@ def select(root: Path, base: str, head: str, paths: list[str], graph: dict,
 
     hints = _domain_hints(root, base, head, paths)
     if hints:
+        for file in sorted((root / "web/v3").glob("*.test.mjs")):
+            if any(hint in file.stem.lower() for hint in hints):
+                checks.append({"lane": "frontend", "path": file.relative_to(root).as_posix()})
         for file in sorted((root / "cmd/aicrm").glob("*_chromium*_test.go")):
             relative = file.relative_to(root).as_posix()
             if not any(hint in file.stem for hint in hints):

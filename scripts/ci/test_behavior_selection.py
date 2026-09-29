@@ -116,6 +116,19 @@ class BehaviorSelectionTest(unittest.TestCase):
         self.assertEqual(choice["reason"], "shared-web-consumers-unknown")
         self.assertIn("browser", choice["lanes"])
 
+    def test_page_css_uses_its_page_check_and_journey(self) -> None:
+        self.write("web/v3/referral.css", ".referral { gap: 4px }\n")
+        self.commit("css baseline")
+        base = self.sha()
+        self.write("web/v3/referral.css", ".referral { gap: 2px }\n")
+        self.commit("css tune")
+        choice, _ = behavior_selection.select(self.root, base, self.sha(),
+                                              ["web/v3/referral.css"], {"selected_packages": []})
+        self.assertEqual(choice["profile"], "behavior")
+        self.assertIn({"lane": "frontend", "path": "web/v3/referralCenter.test.mjs"}, choice["checks"])
+        self.assertIn({"lane": "browser", "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
+                       "test": "TestReferralChromiumJourney"}, choice["checks"])
+
     def test_node_journey_fixture_runs_its_go_host_test(self) -> None:
         self.write("internal/product/http/service_period_public_journey.mjs", "// changed journey\n")
         self.write("internal/product/http/public_test.go",

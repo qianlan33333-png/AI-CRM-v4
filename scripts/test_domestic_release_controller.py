@@ -1212,6 +1212,24 @@ class DomesticMainReleaseTests(unittest.TestCase):
             self.assertEqual(result["status"], "pending")
             self.assertEqual(state["queue"][0]["attempt"], 4)
 
+    def test_source_approval_wait_cannot_be_replaced_by_a_new_submission(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, other = make_repository(root)
+            app = {"sha": base, "tree": release._tree(repo, base), "manifest_sha256": "a" * 64}
+            state = release._new_state(base, app["tree"], app)
+            state.update(status="blocked", queue=[{"candidate_id": candidate,
+                "ref": "refs/heads/codex/one", "head_sha": candidate,
+                "base_sha": base, "status": "source_approval_pending"}],
+                in_flight={"candidate_id": candidate, "head_sha": candidate,
+                           "phase": "source-approval-pending"})
+            before = json.dumps(state, sort_keys=True)
+            with mock.patch.object(release, "_load_state", return_value=state):
+                with self.assertRaisesRegex(release.ReleaseError, "awaiting human approval"):
+                    release.submit_candidate(repo, root / "state.json", "refs/heads/codex/two",
+                                             other, base, root / "lock")
+            self.assertEqual(json.dumps(state, sort_keys=True), before)
+
     def test_environment_retry_reactivates_queue_and_keeps_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2903,7 +2921,7 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
                  mock.patch.object(release, "_locked", return_value=nullcontext()), \
                  mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
                  mock.patch.object(release, "verify_bare_repository"), \
-                 mock.patch.object(release, "_verify_controller_files"), \
+                 mock.patch.object(release, "_verify_controller_files") as verify_controller, \
                  mock.patch.object(release, "_load_state", return_value=state), \
                  mock.patch.object(release, "_read_stage_evidence", return_value=evidence), \
                  mock.patch.object(release, "_promote_staged_candidate",
@@ -2918,6 +2936,8 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
                 evidence["status"] = "passed"
                 self.assertEqual(release.promote(config, exact)["status"], "completed")
                 install.assert_called_once()
+                verify_controller.assert_called_once_with(config, repo, candidate,
+                    sorted(release.builder.FIXED_CONTROLLER_FILES))
 
     def test_source_only_release_also_waits_for_exact_human_approval(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -2945,7 +2965,7 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
                  mock.patch.object(release, "_locked", return_value=nullcontext()), \
                  mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
                  mock.patch.object(release, "verify_bare_repository"), \
-                 mock.patch.object(release, "_verify_controller_files"), \
+                 mock.patch.object(release, "_verify_controller_files") as verify_controller, \
                  mock.patch.object(release, "_load_state", return_value=state), \
                  mock.patch.object(release, "_promote_source_candidate",
                                    return_value={"status": "completed"}) as promote_source:
@@ -2956,6 +2976,8 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
                 promote_source.assert_not_called()
                 self.assertEqual(release.promote(config, exact)["status"], "completed")
                 promote_source.assert_called_once()
+                verify_controller.assert_called_once_with(config, repo, candidate,
+                    sorted(release.builder.FIXED_CONTROLLER_FILES))
 
 
     def test_stage_promotion_reuses_exact_artifact_and_never_reinstalls(self) -> None:
