@@ -1963,6 +1963,28 @@
       ],
       "reason": "Add a dedicated authenticated WeCom UnionID refresh API while preserving the active OpenAPI source binding.",
       "review_reference": "2026-09-30 user-authorized UnionID repair; CRM v4 release workbench review"
+    },
+    {
+      "base_commit": "0a736d5c5d2b71758479e566ce3955e14b11b94c",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "67c3db644a63081dcb92566a3bb4d3cc2b948207ddbd7679793477feb5652dd1",
+          "head_sha256": "21bd335875e2691f17fdc1e7ca3542e094324d9e382868b3459591ac9aec8322"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "e8e2c8017538742a0a3ff401ff9c3f52ea1a0714ad5c1950c85189c16c1e00d3",
+          "head_sha256": "3e1f0191e5f321f1b06e4a14dbe023aa7260898cbdae57ec41834758fe3ffa42"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "10912e452b83ce51bc1d8629556dbc2a6803a80cdb5724326111e90f3e694ea1",
+          "head_sha256": "e0b70200e910c5a079ad425690ad8c22621dfe4169bc6790c535049876e96ae2"
+        }
+      ],
+      "reason": "Document the active Alipay callback contract, including its form limit and Origin precedence, with source-index and lock hashes bound to the OpenAPI bytes.",
+      "review_reference": "/Users/qianlan/Documents/Codex/2026-09-30/crm-v4-qa-api-callback-contract-candidate/port-auto-bfa/independent-review-0a-966.md"
     }
   ]
 }
