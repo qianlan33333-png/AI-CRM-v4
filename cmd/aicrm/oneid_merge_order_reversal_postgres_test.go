@@ -17,11 +17,12 @@ import (
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 )
 
-// This order is explicitly created for the selected survivor. Reversal should
-// restore the snapshotted loser identity without rewriting that order's owner.
-// A native pending order does not invoke a payment provider or produce an
-// external effect.
-func TestPostgreSQLIdentityMergeReversePreservesOrderAndRestoredIdentity(t *testing.T) {
+// The loser-origin order is created while the loser is still active; the
+// survivor-origin order is created after merge. Reversal restores the
+// snapshotted loser identity without rewriting either order's owner. Native
+// pending orders do not invoke a payment provider or produce an external
+// effect.
+func TestPostgreSQLIdentityMergeReversePreservesOrderOriginsAndRestoredIdentity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	databaseURL, cleanup := adminAccessCompositionDatabase(t, ctx)
@@ -47,6 +48,25 @@ func TestPostgreSQLIdentityMergeReversePreservesOrderAndRestoredIdentity(t *test
 		t.Fatal(err)
 	}
 	orders := orderapp.NewService(uow, orderRepository)
+	createPendingOrder := func(customerID int64, origin string) orderdomain.Snapshot {
+		t.Helper()
+		command := orderport.PaymentOrderCommand{
+			Provider: orderdomain.ProviderWeChatPay, MerchantOrderNo: "M-ONEID-MERGE-" + origin,
+			PayerCustomerID: customerID, BeneficiaryCustomerID: customerID,
+			ProductID: 991, ProductCode: "oneid-merge-order", ProductName: "Synthetic order history", ProductVersion: 1,
+			ProductType: "standard_product", UnitAmountMinor: 1000, Currency: "CNY",
+			ActorScope: "oneid-merge-order-history-" + origin, IdempotencyKey: "oneid-merge-order-history-" + origin + "-001",
+		}
+		var order orderdomain.Snapshot
+		if createErr := uow.Within(ctx, func(tx context.Context) error {
+			var innerErr error
+			order, innerErr = orders.CreatePaymentOrderWithin(tx, command)
+			return innerErr
+		}); createErr != nil {
+			t.Fatalf("create %s pending order: %v", origin, createErr)
+		}
+		return order
+	}
 
 	survivorFact := oneIDMergeOrderFact(t, identitydomain.KindWeComExternalUserID, "wecom-corp:merge-order", "survivor")
 	loserFact := oneIDMergeOrderFact(t, identitydomain.KindAlipayOAuthUserID, "alipay-app:merge-order", "loser")
@@ -69,6 +89,8 @@ func TestPostgreSQLIdentityMergeReversePreservesOrderAndRestoredIdentity(t *test
 	}); err != nil {
 		t.Fatal(err)
 	}
+	loserOriginOrder := createPendingOrder(loser.CustomerID, "loser-origin")
+	assertOneIDMergeOrderOwner(t, ctx, native, loserOriginOrder.ID, loser.CustomerID, "before merge")
 
 	evidence := identitydomain.LinkEvidence{
 		Type: "test", Strength: identitydomain.EvidenceStrong, Source: "oneid.merge.order.test",
@@ -100,31 +122,10 @@ func TestPostgreSQLIdentityMergeReversePreservesOrderAndRestoredIdentity(t *test
 	if merged.Merge == nil || int64(merged.Merge.FromCustomerID) != loser.CustomerID || int64(merged.Merge.ToCustomerID) != survivor.CustomerID {
 		t.Fatalf("unexpected merge direction: %+v", merged.Merge)
 	}
+	assertOneIDMergeOrderOwner(t, ctx, native, loserOriginOrder.ID, loser.CustomerID, "after merge")
 
-	command := orderport.PaymentOrderCommand{
-		Provider: orderdomain.ProviderWeChatPay, MerchantOrderNo: "M-ONEID-MERGE-ORDER-001",
-		PayerCustomerID: survivor.CustomerID, BeneficiaryCustomerID: survivor.CustomerID,
-		ProductID: 991, ProductCode: "oneid-merge-order", ProductName: "Synthetic order history", ProductVersion: 1,
-		ProductType: "standard_product", UnitAmountMinor: 1000, Currency: "CNY",
-		ActorScope: "oneid-merge-order-history", IdempotencyKey: "oneid-merge-order-history-001",
-	}
-	var order orderdomain.Snapshot
-	if err = uow.Within(ctx, func(tx context.Context) error {
-		var createErr error
-		order, createErr = orders.CreatePaymentOrderWithin(tx, command)
-		return createErr
-	}); err != nil {
-		t.Fatal(err)
-	}
-	var orderPayer, orderBeneficiary int64
-	var orderStatus, recordOrigin string
-	var effectEligible bool
-	if err = native.QueryRow(ctx, `SELECT payer_customer_id,beneficiary_customer_id,status,record_origin,effect_eligible FROM orders WHERE id=$1`, order.ID).Scan(&orderPayer, &orderBeneficiary, &orderStatus, &recordOrigin, &effectEligible); err != nil {
-		t.Fatal(err)
-	}
-	if orderPayer != survivor.CustomerID || orderBeneficiary != survivor.CustomerID || orderStatus != "pending_payment" || recordOrigin != "native" || !effectEligible {
-		t.Fatalf("unexpected order readback payer=%d beneficiary=%d status=%s origin=%s effect_eligible=%t", orderPayer, orderBeneficiary, orderStatus, recordOrigin, effectEligible)
-	}
+	survivorOriginOrder := createPendingOrder(survivor.CustomerID, "survivor-origin")
+	assertOneIDMergeOrderOwner(t, ctx, native, survivorOriginOrder.ID, survivor.CustomerID, "after merge")
 
 	reverseErr := uow.Within(ctx, func(tx context.Context) error {
 		_, revertErr := identities.RevertConfirmedMerge(tx, merged.Merge.ID)
@@ -147,9 +148,11 @@ func TestPostgreSQLIdentityMergeReversePreservesOrderAndRestoredIdentity(t *test
 	if err = native.QueryRow(ctx, `SELECT customer_id FROM customer_identities WHERE id=$1`, loser.IdentityID).Scan(&identityOwner); err != nil {
 		t.Fatal(err)
 	}
-	if err = native.QueryRow(ctx, `SELECT count(*) FROM orders WHERE id=$1 AND payer_customer_id=$2 AND beneficiary_customer_id=$2 AND status='pending_payment' AND record_origin='native' AND effect_eligible`, order.ID, survivor.CustomerID).Scan(&orderCount); err != nil {
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM orders WHERE id=ANY($1::bigint[])`, []int64{loserOriginOrder.ID, survivorOriginOrder.ID}).Scan(&orderCount); err != nil {
 		t.Fatal(err)
 	}
+	assertOneIDMergeOrderOwner(t, ctx, native, loserOriginOrder.ID, loser.CustomerID, "after reversal")
+	assertOneIDMergeOrderOwner(t, ctx, native, survivorOriginOrder.ID, survivor.CustomerID, "after reversal")
 	var restoredMembers int
 	var restoredMemberMatches bool
 	if err = native.QueryRow(ctx, `SELECT count(*),bool_and(m.restored_at IS NOT NULL AND m.identity_version_after_restore=m.identity_version_after+1 AND i.customer_id=m.from_customer_id AND i.version=m.identity_version_after_restore AND i.status='active') FROM customer_merge_identity_members m JOIN customer_identities i ON i.id=m.identity_id WHERE m.merge_id=$1 AND m.identity_id=$2`, merged.Merge.ID, loser.IdentityID).Scan(&restoredMembers, &restoredMemberMatches); err != nil {
@@ -159,15 +162,30 @@ func TestPostgreSQLIdentityMergeReversePreservesOrderAndRestoredIdentity(t *test
 	if err = native.QueryRow(ctx, `SELECT count(*) FROM customer_merges WHERE candidate_id=$1`, candidate.Candidate.ID).Scan(&mergeCount); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("order-history reverse readback: customers=%d/%d merge=%s reversed_at=%t loser=%s->%d v=%d/%d survivor=%s v=%d/%d restored_identity_owner=%d restored_members=%d match=%t order_id=%d payer=%d beneficiary=%d rows=%d", survivor.CustomerID, loser.CustomerID, reversibleStatus, reversedAtSet, loserStatus, loserMergedTo, loserVersion, loserLineage, survivorStatus, survivorVersion, survivorLineage, identityOwner, restoredMembers, restoredMemberMatches, order.ID, orderPayer, orderBeneficiary, orderCount)
+	t.Logf("order-origin reverse readback: customers=%d/%d merge=%s reversed_at=%t loser=%s->%d v=%d/%d survivor=%s v=%d/%d restored_identity_owner=%d restored_members=%d match=%t loser_order_id=%d loser_owner=%d survivor_order_id=%d survivor_owner=%d order_rows=%d", survivor.CustomerID, loser.CustomerID, reversibleStatus, reversedAtSet, loserStatus, loserMergedTo, loserVersion, loserLineage, survivorStatus, survivorVersion, survivorLineage, identityOwner, restoredMembers, restoredMemberMatches, loserOriginOrder.ID, loser.CustomerID, survivorOriginOrder.ID, survivor.CustomerID, orderCount)
 	if reverseErr != nil {
-		t.Fatalf("reverse after survivor order history failed: %v", reverseErr)
+		t.Fatalf("reverse after both order origins failed: %v", reverseErr)
 	}
-	if reversibleStatus != "reversed" || !reversedAtSet || loserStatus != "active" || loserMergedTo != 0 || survivorStatus != "active" || identityOwner != loser.CustomerID || orderCount != 1 || restoredMembers != 1 || !restoredMemberMatches || mergeCount != 1 {
+	if reversibleStatus != "reversed" || !reversedAtSet || loserStatus != "active" || loserMergedTo != 0 || survivorStatus != "active" || identityOwner != loser.CustomerID || orderCount != 2 || restoredMembers != 1 || !restoredMemberMatches || mergeCount != 1 {
 		t.Fatalf("reverse failed to preserve independently owned references: merge=%s reversed_at=%t loser=%s->%d survivor=%s identity_owner=%d restored_members=%d restored_match=%t merge_count=%d order_rows=%d", reversibleStatus, reversedAtSet, loserStatus, loserMergedTo, survivorStatus, identityOwner, restoredMembers, restoredMemberMatches, mergeCount, orderCount)
 	}
 	if loserVersion != merged.Merge.FromVersionAfter+1 || loserLineage != merged.Merge.FromLineageAfter+1 || survivorVersion != merged.Merge.ToVersionAfter+1 || survivorLineage != merged.Merge.ToLineageAfter+1 {
 		t.Fatalf("reversal lineage/version steps differ from ledger: loser=%d/%d merge_after=%d/%d survivor=%d/%d merge_after=%d/%d", loserVersion, loserLineage, merged.Merge.FromVersionAfter, merged.Merge.FromLineageAfter, survivorVersion, survivorLineage, merged.Merge.ToVersionAfter, merged.Merge.ToLineageAfter)
+	}
+}
+
+func assertOneIDMergeOrderOwner(t *testing.T, ctx context.Context, pool *pgxpool.Pool, orderID, customerID int64, stage string) {
+	t.Helper()
+	var payer, beneficiary int64
+	var status, recordOrigin string
+	var effectEligible bool
+	err := pool.QueryRow(ctx, `SELECT payer_customer_id,beneficiary_customer_id,status,record_origin,effect_eligible FROM orders WHERE id=$1`, orderID).Scan(&payer, &beneficiary, &status, &recordOrigin, &effectEligible)
+	if err != nil {
+		t.Fatalf("read %s order %d: %v", stage, orderID, err)
+	}
+	t.Logf("%s order readback: id=%d payer=%d beneficiary=%d status=%s origin=%s effect_eligible=%t", stage, orderID, payer, beneficiary, status, recordOrigin, effectEligible)
+	if payer != customerID || beneficiary != customerID || status != "pending_payment" || recordOrigin != "native" || !effectEligible {
+		t.Fatalf("%s order %d owner/status changed: payer=%d beneficiary=%d status=%s origin=%s effect_eligible=%t want_owner=%d", stage, orderID, payer, beneficiary, status, recordOrigin, effectEligible, customerID)
 	}
 }
 
