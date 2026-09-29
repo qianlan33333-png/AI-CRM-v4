@@ -42,8 +42,9 @@ await wechat.elements.copyPay.click();
 assert.equal(wechat.copied, signed, "fallback copies the original signed URL");
 
 const browser = visit(bridge, "Chrome Android");
-assert.equal(browser.redirected, signed, "external browser opens the same signed URL");
-assert.equal(browser.elements.openPay.hidden, false, "manual continuation remains available");
+assert.equal(browser.redirected, "", "loading or refreshing the continuation never opens payment");
+assert.equal(browser.elements.openPay.hidden, false, "the signed URL requires an explicit click");
+assert.equal(browser.elements.openPay.href, signed, "the click retains the same signed order URL");
 
 for (const bad of [
   "https://evil.example/gateway.do?method=alipay.trade.wap.pay&app_id=a&sign=s&biz_content=x",

@@ -34,8 +34,8 @@ async function settle() {
   for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve));
 }
 
-function boot(store, completion, redirectFailure = false, sessionAuthorized = true, setup = '', purchase = {purchase_state:'available',can_purchase:true}, userAgent='MicroMessenger', renewal=false, details=false, fragment='') {
-  const calls = [], elements = new Map();
+function boot(store, completion, redirectFailure = false, sessionAuthorized = true, setup = '', purchase = {purchase_state:'available',can_purchase:true}, userAgent='MicroMessenger', renewal=false, details=false, fragment='', bridgeInvoke=null) {
+  const calls = [], elements = new Map(), documentEvents = new Map(), windowEvents = new Map();
   const setGlobal = (name, value) => Object.defineProperty(globalThis, name, {value, configurable: true, writable: true});
   const element = () => ({hidden: false, disabled: false, dataset: {}, value: '0', checked: true, textContent: '', href: '', children: [], attributes: new Map(), addEventListener(type, listener) { this.listener ??= {}; this.listener[type] = listener; }, appendChild(child) { this.children.push(child); }, replaceChildren(...children) {this.children=children;this.textContent="";}, setAttribute(name, value) { this.attributes.set(name, String(value)); }, removeAttribute(name) { this.attributes.delete(name); }, set src(value) { this.source = value; queueMicrotask(() => this.listener?.load?.({target: this})); }, get src() { return this.source; }});
   for (const id of ['price', 'buy', 'status', 'coupon', 'couponPanel', 'couponStatus', 'refreshCoupons', 'wechatNotice', 'mobile', 'payableAmount', 'footerAmount', 'discountAmount', 'identityGate', 'identityTitle', 'identityMessage', 'authFeedback', 'authContinue', 'checkoutContent','paymentDetails','mobilePanel','paymentMethod','product','footer','productName','alipayGuide','alipayGuideMessage','alipayPaymentURL','alipayCopy','alipayPaid','alipayClose']) elements.set(id, element());
@@ -46,15 +46,15 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   elements.get('identityGate').parentElement = {dataset: {}};
   elements.get('checkoutContent').hidden = true;
   const paymentOption=element(); paymentOption.value='wechat_pay';
-  setGlobal('document', {getElementById(id) { return elements.get(id); }, querySelector() { return paymentOption; }, querySelectorAll() { return [paymentOption]; }, addEventListener() {}, createElement() { return element(); }});
+  setGlobal('document', {hidden:false, getElementById(id) { return elements.get(id); }, querySelector() { return paymentOption; }, querySelectorAll() { return [paymentOption]; }, addEventListener(name, callback) {documentEvents.set(name, callback)}, removeEventListener(name) {documentEvents.delete(name)}, createElement() { return element(); }});
   const browserCrypto = {randomUUID() { return 'fresh-checkout-key'; }};
-  setGlobal('window', {addEventListener(){}, crypto: browserCrypto});
+  setGlobal('window', {addEventListener(name, callback){windowEvents.set(name, callback)}, crypto: browserCrypto});
   setGlobal('navigator', {userAgent});
   setGlobal('sessionStorage', {getItem(key) { return store.get(key) ?? null; }, setItem(key,value) {store.set(key,String(value));}, removeItem(key) {store.delete(key);} });
   setGlobal('localStorage', {getItem(key) { return store.get(key) ?? null; }, setItem(key, value) { store.set(key, String(value)); }, removeItem(key) { store.delete(key); }});
   setGlobal('location', {href: '', hash:fragment, replace(url){calls.push({replace:url});}, pathname: '/pay/course-7', search: '?utm_source=shared', assign(url) { calls.push({redirect: url}); if (redirectFailure) throw new Error('redirect blocked'); }});
   setGlobal('crypto', browserCrypto);
-  setGlobal('WeixinJSBridge', {invoke() { throw new Error('paid reload must not invoke payment'); }});
+  setGlobal('WeixinJSBridge', {invoke(...args) {if(bridgeInvoke) return bridgeInvoke(...args);throw new Error('paid reload must not invoke payment'); }});
   setGlobal('fetch', async (url, options = {}) => {
     calls.push({url: String(url), method: options.method ?? 'GET'});
     if (String(url) === '/api/v1/wechat-pay/checkout-session') return sessionAuthorized===503?response({code:'unavailable'},503):(typeof sessionAuthorized === 'function' ? sessionAuthorized() : sessionAuthorized) ? response({checkout_session_binding: 'a'.repeat(43),can_create_checkout:sessionAuthorized!=='consumed'}) : response({code: 'payment_session_required'}, 401);
@@ -64,7 +64,7 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
     return response(completion);
   });
   Function(script + '\n' + setup)();
-  return {calls, elements};
+  return {calls, elements, documentEvents, windowEvents};
 }
 
 // An unauthenticated WeChat visitor sees the required login gate,
@@ -105,6 +105,32 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   assert.equal(JSON.parse(store.get(storageKey)).terminal_status, 'paid');
   assert.equal(run.calls.filter(call => call.url === '/api/v1/wechat-pay/checkouts/M-paid-7').length, 1);
   assert.equal(run.calls.some(call => call.method === 'POST'), false);
+}
+
+// Cancelling a pending WeChat sheet must not let visibility/page restoration
+// call the bridge again. A second explicit button click may reuse that order.
+{
+  const checkpoint=JSON.parse(paidCheckpoint());
+  delete checkpoint.terminal_status;
+  const store=new Map([[storageKey,JSON.stringify(checkpoint)]]);
+  let bridgeCalls=0;
+  const run=boot(store,{status:'awaiting_payment',ready:true,handoff:{appId:'wx-test',package:'prepay_id=original'}},false,true,'',{purchase_state:'pending',can_purchase:true},'MicroMessenger',false,false,'',(_method,_handoff,callback)=>{bridgeCalls++;callback({err_msg:'get_brand_wcpay_request:cancel'})});
+  await settle();
+  assert.equal(run.elements.get('buy').disabled,false,'restored unpaid order offers explicit continuation');
+  run.elements.get('buy').listener.click();
+  for(let i=0;i<12&&run.elements.get('buy').disabled;i++)await settle();
+  assert.equal(bridgeCalls,1,'the first click opens one WeChat sheet');
+  assert.equal(run.elements.get('buy').disabled,false,'cancel returns control to the button');
+  run.documentEvents.get('visibilitychange')();
+  run.windowEvents.get('pageshow')({persisted:true});
+  await settle();
+  assert.equal(bridgeCalls,1,'returning to the page only checks payment status');
+  assert.equal(run.calls.some(call=>call.method==='POST'),false,'status recovery retains the original order');
+  run.elements.get('buy').listener.click();
+  run.documentEvents.get('visibilitychange')();
+  await settle();
+  assert.equal(bridgeCalls,2,'a second click can reopen the same WeChat payment');
+  run.windowEvents.get('pagehide')();
 }
 
 // If the browser cannot complete a redirect, the paid checkpoint remains.
@@ -460,16 +486,16 @@ if(process.argv[2]){
  }
 }
 
-// Opening the original WeChat URL in a fresh system browser consumes the
-// fragment before auth/bootstrap; no checkout POST, session or OAuth is used.
+// Opening the original WeChat URL in a fresh system browser only reaches the
+// explicit continuation page; no provider navigation, checkout POST or OAuth.
 {
  const signed='https://openapi.alipay.com/gateway.do?method=alipay.trade.wap.pay&app_id=fixture&sign=synthetic&biz_content='+encodeURIComponent(JSON.stringify({out_trade_no:'M-original'}));
  const run=boot(new Map(),{},false,false,'',{purchase_state:'available',can_purchase:true},'Chrome',false,false,'#alipay='+encodeURIComponent(signed));
- await settle();assert.equal(run.calls.filter(call=>call.url).length,0);assert.equal(run.calls[0].replace,signed);
+ await settle();assert.equal(run.calls.filter(call=>call.url).length,0);assert.equal(run.calls[0].replace,'/pay/alipay/continue#'+encodeURIComponent(signed));
  const encrypted=new URL(signed);encrypted.searchParams.set('encrypt_type','AES');encrypted.searchParams.set('biz_content',Buffer.alloc(32,7).toString('base64'));
  const cipherURL=encrypted.href;
  const cipherRun=boot(new Map(),{},false,false,'',{purchase_state:'available',can_purchase:true},'Chrome',false,false,'#alipay='+encodeURIComponent(cipherURL));
- await settle();assert.equal(cipherRun.calls.filter(call=>call.url).length,0);assert.equal(cipherRun.calls[0].replace,cipherURL,'encrypted original URL reaches Alipay unchanged without OAuth or another order');
+ await settle();assert.equal(cipherRun.calls.filter(call=>call.url).length,0);assert.equal(cipherRun.calls[0].replace,'/pay/alipay/continue#'+encodeURIComponent(cipherURL),'encrypted original URL reaches the manual continuation without OAuth or another order');
  for(const bad of [cipherURL.replace('encrypt_type=AES','encrypt_type=other'),cipherURL+'&encrypt_type=AES',cipherURL.replace(/biz_content=[^&]+/,'biz_content=invalid')]){
   const blocked=boot(new Map(),{},false,false,'',{purchase_state:'available',can_purchase:true},'Chrome',false,false,'#alipay='+encodeURIComponent(bad));
   await settle();assert.equal(blocked.calls.length,0);assert.match(blocked.elements.get('identityTitle').textContent,/付款链接暂不可用/);

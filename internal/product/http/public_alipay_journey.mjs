@@ -87,10 +87,13 @@ window.document.getElementById('alipayCopy').click();
 await settle();
 assert.equal(copied, signedURL, 'the synthetic signed payment URL is returned to the user unchanged');
 
+window.document.getElementById('alipayClose').click();
+assert.equal(window.document.getElementById('alipayGuide').hidden, true, 'closing the payment guide returns to the original order');
+assert.equal(buy.disabled, false, 'the original order can be resumed by an explicit click');
 window.document.dispatchEvent(new window.Event('visibilitychange'));
 await settle();
 assert.equal(records.size, 1, 'readback does not create a new order');
-assert.equal(window.document.getElementById('alipayGuide').hidden, false, 'pending provider status keeps the link available');
+assert.equal(window.document.getElementById('alipayGuide').hidden, true, 'visibility readback cannot reopen a closed payment guide');
 window.document.dispatchEvent(new window.Event('visibilitychange'));
 await settle();
 assert.equal(window.document.getElementById('alipayGuide').hidden, true);
@@ -339,6 +342,20 @@ encryptedPage.window.fetch=async(url,options={})=>{assert.notEqual(options.metho
  return {ok:true,status:200,json:async()=>body};
 };
 encryptedPage.window.eval(encryptedPage.window.document.querySelector('script:last-of-type').textContent);await settle();
-assert.ok(encryptedReads>0);assert.equal(encryptedPage.window.document.getElementById('alipayGuide').hidden,false);assert.equal(encryptedPage.window.location.hash,'#alipay='+encodeURIComponent(encryptedLink.href));assert.equal(encryptedPage.window.document.getElementById('alipayPaymentURL').value,encryptedLink.href);
+assert.ok(encryptedReads>0);assert.equal(encryptedPage.window.document.getElementById('alipayGuide').hidden,true,'restoring an unpaid order only reads its status');
+assert.equal(encryptedPage.window.document.getElementById('buy').disabled,false);
+encryptedPage.window.document.getElementById('buy').click();
+encryptedPage.window.document.dispatchEvent(new encryptedPage.window.Event('visibilitychange'));
+await settle();
+assert.equal(encryptedPage.window.document.getElementById('alipayGuide').hidden,false,'explicit click can reopen the original guide');
+assert.equal(encryptedPage.window.location.hash,'#alipay='+encodeURIComponent(encryptedLink.href));assert.equal(encryptedPage.window.document.getElementById('alipayPaymentURL').value,encryptedLink.href);
+encryptedPage.window.document.getElementById('alipayClose').click();
+encryptedPage.window.document.dispatchEvent(new encryptedPage.window.Event('visibilitychange'));
+await settle();
+assert.equal(encryptedPage.window.document.getElementById('alipayGuide').hidden,true,'closing then returning cannot prompt again');
+encryptedPage.window.document.getElementById('buy').click();
+encryptedPage.window.document.dispatchEvent(new encryptedPage.window.Event('visibilitychange'));
+await settle();
+assert.equal(encryptedPage.window.document.getElementById('alipayGuide').hidden,false,'second explicit click can reuse the same order');
 
 for (const page of [encryptedPage,dom,reload,desktop,rejected,ambiguousRetry,firstUnauthorized,afterReauthorization,originRejected,ambiguousNewBinding,ambiguousOriginRetry]) {page.window.dispatchEvent(new page.window.Event("pagehide"));page.window.close();}
