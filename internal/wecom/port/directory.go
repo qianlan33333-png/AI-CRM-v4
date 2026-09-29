@@ -1,8 +1,15 @@
 package port
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 var ErrDirectoryDisabled = directoryError("wecom directory provider disabled")
+
+// A valid detail with no first following employee, or a confirmed missing
+// relationship, ends a product-paid tag attempt without a Provider write.
+var ErrFirstExternalContactFollowUnavailable = errors.New("first external contact follow unavailable")
 
 type directoryError string
 
@@ -105,6 +112,12 @@ type ContactStaffProfileReader interface {
 // boundary only; it cannot mark, unmark, or otherwise mutate WeCom state.
 type ExternalContactReader interface {
 	ReadExternalContact(context.Context, string) (ExternalContact, error)
+}
+
+// FirstExternalContactFollowReader projects only follow_user[0].userid from a
+// live customer detail. It does not select a local CRM owner or fallback staff.
+type FirstExternalContactFollowReader interface {
+	ReadFirstExternalContactFollow(context.Context, string) (string, error)
 }
 
 // ExternalContactDescriptionTarget is the minimum trusted projection needed

@@ -119,9 +119,9 @@ type TagCommandCompletionWriter interface {
 	CompleteTagCommand(context.Context, TagCommandCompletion) error
 }
 
-// TagCommandTargetGate only exposes local IDs and a binding digest to Customer.
-// It selects an eligible following staff, verifies the trusted identity and
-// active Tag binding, and produces a frozen fact without exposing provider IDs.
+// TagCommandTargetGate only exposes local IDs and digests to Customer.
+// The source selects the target policy; product_paid_purchase resolves its
+// following employee from live contact detail after the payment commits.
 type TagCommandTargetGate interface {
-	FreezeTagCommandTarget(context.Context, TagCommandTarget) (FrozenTagCommandTarget, error)
+	FreezeTagCommandTarget(context.Context, string, TagCommandTarget) (FrozenTagCommandTarget, error)
 }

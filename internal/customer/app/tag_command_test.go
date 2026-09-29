@@ -55,7 +55,7 @@ func (s *tagTestStore) CreateTagCommandLine(_ context.Context, _ int64, t custom
 
 type tagGate struct{}
 
-func (tagGate) FreezeTagCommandTarget(_ context.Context, t customerport.TagCommandTarget) (customerport.FrozenTagCommandTarget, error) {
+func (tagGate) FreezeTagCommandTarget(_ context.Context, _ string, t customerport.TagCommandTarget) (customerport.FrozenTagCommandTarget, error) {
 	t.StaffID = 9
 	return customerport.FrozenTagCommandTarget{TagCommandTarget: t, BindingDigest: string(effectport.Hash("binding")), TargetDigest: string(effectport.Hash("target"))}, nil
 }
@@ -118,8 +118,27 @@ func TestTagCommandOneEffectPerCustomerAndStableReplayDigest(t *testing.T) {
 
 type rejectTagGate struct{}
 
-func (rejectTagGate) FreezeTagCommandTarget(context.Context, customerport.TagCommandTarget) (customerport.FrozenTagCommandTarget, error) {
+func (rejectTagGate) FreezeTagCommandTarget(context.Context, string, customerport.TagCommandTarget) (customerport.FrozenTagCommandTarget, error) {
 	return customerport.FrozenTagCommandTarget{}, errors.New("unavailable")
+}
+
+type unavailableTagGate struct{}
+
+func (unavailableTagGate) FreezeTagCommandTarget(context.Context, string, customerport.TagCommandTarget) (customerport.FrozenTagCommandTarget, error) {
+	return customerport.FrozenTagCommandTarget{}, customerport.ErrTagCommandUnavailable
+}
+
+func TestTagCommandInfrastructureFailureDoesNotBecomeTargetRejection(t *testing.T) {
+	store := &tagTestStore{}
+	effects := &tagEffects{}
+	svc, err := NewTagCommandService(tagTestUOW{}, store, effects, unavailableTagGate{}, tagAudit{}, tagOutbox{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.SubmitTagCommand(context.Background(), customerport.TagCommand{Source: "product_paid_purchase", SourceRef: "paid-event:1", IdempotencyKey: "paid-event:1", OccurredAt: time.Now(), Targets: []customerport.TagCommandTarget{{CustomerID: 1, AddTagIDs: []int64{1}}}})
+	if !errors.Is(err, customerport.ErrTagCommandUnavailable) || store.state != "" || effects.calls != 0 {
+		t.Fatalf("err=%v state=%q effects=%d", err, store.state, effects.calls)
+	}
 }
 
 func TestTagCommandAllRejectedStartsRejected(t *testing.T) {

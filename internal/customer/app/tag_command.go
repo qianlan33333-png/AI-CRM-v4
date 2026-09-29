@@ -54,7 +54,7 @@ func (s *TagCommandService) PreviewTagCommand(ctx context.Context, c customerpor
 	}
 	result := customerport.TagCommandResult{State: "preview", Lines: make([]customerport.TagCommandLine, 0, len(c.Targets))}
 	for _, target := range canonicalTargets(c.Targets) {
-		frozen, err := s.gate.FreezeTagCommandTarget(ctx, target)
+		frozen, err := s.gate.FreezeTagCommandTarget(ctx, c.Source, target)
 		if err != nil {
 			result.Lines = append(result.Lines, customerport.TagCommandLine{CustomerID: target.CustomerID, StaffID: target.StaffID, AddTagIDs: append([]int64(nil), target.AddTagIDs...), RemoveTagIDs: append([]int64(nil), target.RemoveTagIDs...), State: "rejected", RejectReason: "target_unavailable"})
 			continue
@@ -126,8 +126,11 @@ func (s *TagCommandService) SubmitTagCommandWithin(ctx context.Context, c custom
 	}
 	result := customerport.TagCommandResult{ID: id, State: "queued", Lines: make([]customerport.TagCommandLine, 0, len(c.Targets))}
 	for index, target := range c.Targets {
-		frozen, freezeErr := s.gate.FreezeTagCommandTarget(ctx, target)
+		frozen, freezeErr := s.gate.FreezeTagCommandTarget(ctx, c.Source, target)
 		if freezeErr != nil {
+			if errors.Is(freezeErr, customerport.ErrTagCommandUnavailable) {
+				return customerport.TagCommandResult{}, freezeErr
+			}
 			line, lineErr := s.store.CreateRejectedTagCommandLine(ctx, id, target, "target_unavailable")
 			if lineErr != nil {
 				return customerport.TagCommandResult{}, lineErr

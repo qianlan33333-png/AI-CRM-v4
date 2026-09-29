@@ -113,6 +113,54 @@ func TestTagCommandPostgreSQLCompletionFenceAndReplay(t *testing.T) {
 		t.Fatalf("state=%q err=%v", state, err)
 	}
 }
+
+func TestProductPaidTagCommandPersistsDeferredStaffAndDispatches(t *testing.T) {
+	url, err := platformconfig.DatabaseURL()
+	if err != nil {
+		t.Skip("AICRM_DATABASE_URL is not configured")
+	}
+	ctx := context.Background()
+	pool, clean := tagCommandPGPool(t, ctx, url)
+	defer clean()
+	if _, err = pool.Native().Exec(ctx, `INSERT INTO customers(id,status) OVERRIDING SYSTEM VALUE VALUES(1,'active')`); err != nil {
+		t.Fatal(err)
+	}
+	uow, err := platformpostgres.NewUnitOfWork(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := TagCommandPostgreSQL{}
+	sourceDigest := string(effectport.Hash("product-paid-source"))
+	err = uow.Within(ctx, func(tx context.Context) error {
+		commandID, createErr := store.CreateTagCommand(tx, customerport.TagCommand{Source: "product_paid_purchase", SourceRef: "paid-event:1", IdempotencyKey: "paid-event:1", OccurredAt: time.Now()}, [32]byte{1})
+		if createErr != nil {
+			return createErr
+		}
+		_, createErr = store.CreateTagCommandLine(tx, commandID, customerport.FrozenTagCommandTarget{TagCommandTarget: customerport.TagCommandTarget{CustomerID: 1, AddTagIDs: []int64{130}}, BindingDigest: string(effectport.Hash("binding")), TargetDigest: string(effectport.Hash("product-target"))}, sourceDigest, effectport.Projection{ID: "eer_1", State: effectport.StateQueued}, effectport.Receipt{ID: "eerop_1", QueueReceiptID: "eerop_2"})
+		return createErr
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var staffNull bool
+	if err = pool.Native().QueryRow(ctx, `SELECT staff_id IS NULL FROM customer_tag_command_lines WHERE source_ref_digest=$1`, sourceDigest).Scan(&staffNull); err != nil || !staffNull {
+		t.Fatalf("staff nullable=%t err=%v", staffNull, err)
+	}
+	err = uow.Within(ctx, func(tx context.Context) error {
+		dispatch, readErr := store.ReadTagCommandDispatch(tx, sourceDigest)
+		if readErr != nil {
+			return readErr
+		}
+		if dispatch.Source != "product_paid_purchase" || dispatch.CustomerID != 1 || dispatch.StaffID != 0 || dispatch.TargetDigest != string(effectport.Hash("product-target")) {
+			t.Fatalf("dispatch=%+v", dispatch)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func tagCommandPGPool(t *testing.T, ctx context.Context, url string) (*platformpostgres.Pool, func()) {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig(url)

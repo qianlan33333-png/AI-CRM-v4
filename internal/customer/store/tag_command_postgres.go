@@ -172,7 +172,11 @@ func (TagCommandPostgreSQL) CreateTagCommandLine(ctx context.Context, commandID 
 		target.RemoveTagIDs = []int64{}
 	}
 	var l customerport.TagCommandLine
-	err = tx.QueryRow(ctx, `INSERT INTO customer_tag_command_lines(command_id,customer_id,staff_id,add_tag_ids,remove_tag_ids,binding_digest,target_digest,source_ref_digest,effect_ref,accept_receipt_ref,queue_receipt_ref,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, commandID, target.CustomerID, target.StaffID, target.AddTagIDs, target.RemoveTagIDs, target.BindingDigest, target.TargetDigest, source, effect.ID, receipt.ID, receipt.QueueReceiptID, effect.State).Scan(&l.ID)
+	var staff any
+	if target.StaffID > 0 {
+		staff = target.StaffID
+	}
+	err = tx.QueryRow(ctx, `INSERT INTO customer_tag_command_lines(command_id,customer_id,staff_id,add_tag_ids,remove_tag_ids,binding_digest,target_digest,source_ref_digest,effect_ref,accept_receipt_ref,queue_receipt_ref,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, commandID, target.CustomerID, staff, target.AddTagIDs, target.RemoveTagIDs, target.BindingDigest, target.TargetDigest, source, effect.ID, receipt.ID, receipt.QueueReceiptID, effect.State).Scan(&l.ID)
 	l.CustomerID, l.StaffID, l.AddTagIDs, l.RemoveTagIDs, l.BindingDigest, l.TargetDigest, l.EffectRef, l.AcceptReceiptRef, l.QueueReceiptRef, l.State = target.CustomerID, target.StaffID, target.AddTagIDs, target.RemoveTagIDs, target.BindingDigest, target.TargetDigest, effect.ID, receipt.ID, receipt.QueueReceiptID, string(effect.State)
 	return l, err
 }
@@ -182,7 +186,7 @@ func (TagCommandPostgreSQL) ReadTagCommandDispatch(ctx context.Context, source s
 		return customerport.TagCommandDispatch{}, err
 	}
 	var d customerport.TagCommandDispatch
-	err = tx.QueryRow(ctx, `SELECT line.effect_ref,command.source,line.customer_id,line.staff_id,line.add_tag_ids,line.remove_tag_ids,line.binding_digest,line.target_digest FROM customer_tag_command_lines line JOIN customer_tag_commands command ON command.id=line.command_id WHERE line.source_ref_digest=$1`, source).Scan(&d.EffectRef, &d.Source, &d.CustomerID, &d.StaffID, &d.AddTagIDs, &d.RemoveTagIDs, &d.BindingDigest, &d.TargetDigest)
+	err = tx.QueryRow(ctx, `SELECT line.effect_ref,command.source,line.customer_id,COALESCE(line.staff_id,0),line.add_tag_ids,line.remove_tag_ids,line.binding_digest,line.target_digest FROM customer_tag_command_lines line JOIN customer_tag_commands command ON command.id=line.command_id WHERE line.source_ref_digest=$1`, source).Scan(&d.EffectRef, &d.Source, &d.CustomerID, &d.StaffID, &d.AddTagIDs, &d.RemoveTagIDs, &d.BindingDigest, &d.TargetDigest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return customerport.TagCommandDispatch{}, customerport.ErrTagCommandUnavailable
 	}

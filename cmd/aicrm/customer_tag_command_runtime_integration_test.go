@@ -317,14 +317,14 @@ func (runtimeTagCatalogGate) Get(context.Context) (tagdomain.ExecutionGate, erro
 
 type runtimeTagGate struct{}
 
-func (runtimeTagGate) FreezeTagCommandTarget(_ context.Context, target customerport.TagCommandTarget) (customerport.FrozenTagCommandTarget, error) {
+func (runtimeTagGate) FreezeTagCommandTarget(_ context.Context, _ string, target customerport.TagCommandTarget) (customerport.FrozenTagCommandTarget, error) {
 	target.StaffID = 1
 	return customerport.FrozenTagCommandTarget{TagCommandTarget: target, BindingDigest: string(effectport.Hash("runtime-tag-binding")), TargetDigest: string(effectport.Hash("customer.tag.command.target.v1", "runtime-staff", "runtime-external"))}, nil
 }
 
 type customerTagCompositionGate struct{}
 
-func (customerTagCompositionGate) FreezeTagCommandTarget(_ context.Context, target customerport.TagCommandTarget) (customerport.FrozenTagCommandTarget, error) {
+func (customerTagCompositionGate) FreezeTagCommandTarget(_ context.Context, _ string, target customerport.TagCommandTarget) (customerport.FrozenTagCommandTarget, error) {
 	target.StaffID = 1
 	return customerport.FrozenTagCommandTarget{TagCommandTarget: target, BindingDigest: string(effectport.Hash("tag-command-integration-binding")), TargetDigest: string(effectport.Hash("tag-command-integration-target"))}, nil
 }

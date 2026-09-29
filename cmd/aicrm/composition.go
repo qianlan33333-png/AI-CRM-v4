@@ -2027,6 +2027,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
+	if err = customerTagProvider.SetProductPaidTagContactReader(productPaidTagContactAdapter{uow: uow, corpID: cfg.WeCom.CorpID, identities: queries, contacts: providerClient}); err != nil {
+		return fail(err)
+	}
 	contactDescriptionIntents, err := outbound.NewContactDescriptionIntentStore(pool.Native(), effectRepository)
 	if err != nil {
 		return fail(err)

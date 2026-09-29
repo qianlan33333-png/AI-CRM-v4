@@ -25,6 +25,17 @@ type customerTagContactStub struct {
 	err   error
 }
 
+type productPaidContactStub struct {
+	value wecomport.CurrentExternalContact
+	err   error
+	calls int
+}
+
+func (s *productPaidContactStub) FirstProductPaidContact(context.Context, customerdomain.CustomerID) (wecomport.CurrentExternalContact, error) {
+	s.calls++
+	return s.value, s.err
+}
+
 func (s customerTagContactStub) CurrentExternalContact(context.Context, customerdomain.CustomerID, int64) (wecomport.CurrentExternalContact, error) {
 	return s.value, s.err
 }
@@ -80,6 +91,39 @@ func TestCustomerTagProviderOneTrustedMultiTagCall(t *testing.T) {
 	result, err := customerTagProviderFixture(t, true, d, wecomport.CurrentExternalContact{EmployeeUserID: "staff-9", ExternalUserID: "external-42"}, w).Execute(context.Background(), customerTagEnvelope(d), effectport.Attempt{EffectID: "eer_7", Number: 1, Generation: 1, Fence: 1})
 	if err != nil || result.Completion != effectport.StateExecuted || w.calls != 1 || w.employee != "staff-9" || w.external != "external-42" || len(w.add) != 2 || len(w.remove) != 1 || !result.RealExternalCallExecuted {
 		t.Fatalf("result=%+v err=%v writer=%+v", result, err, w)
+	}
+}
+
+func TestProductPaidTagUsesFirstLiveFollowWithoutLocalStaff(t *testing.T) {
+	d := customerport.TagCommandDispatch{EffectRef: "eer_7", Source: "product_paid_purchase", CustomerID: 42, AddTagIDs: []int64{1},
+		TargetDigest:  string(effectport.Hash("customer.tag.command.product-target.v1", "external-42")),
+		BindingDigest: string(effectport.Hash("customer.tag.command.binding.v1", "provider-a", ""))}
+	writer := &customerTagWriterStub{}
+	contacts := &productPaidContactStub{value: wecomport.CurrentExternalContact{ExternalUserID: "external-42", EmployeeUserID: "first-staff"}}
+	provider := customerTagProviderFixture(t, true, d, wecomport.CurrentExternalContact{}, writer)
+	if err := provider.SetProductPaidTagContactReader(contacts); err != nil {
+		t.Fatal(err)
+	}
+	result, err := provider.Execute(context.Background(), customerTagEnvelope(d), effectport.Attempt{EffectID: "eer_7", Number: 1, Generation: 1, Fence: 1})
+	if err != nil || result.Completion != effectport.StateExecuted || contacts.calls != 1 || writer.calls != 1 || writer.employee != "first-staff" || writer.external != "external-42" || len(writer.add) != 1 || writer.add[0] != "provider-a" {
+		t.Fatalf("result=%+v err=%v contacts=%d writer=%+v", result, err, contacts.calls, writer)
+	}
+	contacts.err = wecomport.ErrFirstExternalContactFollowUnavailable
+	writer.calls = 0
+	result, err = provider.Execute(context.Background(), customerTagEnvelope(d), effectport.Attempt{EffectID: "eer_7", Number: 1, Generation: 1, Fence: 1})
+	if err != nil || result.Completion != effectport.StateFinalFailed || string(result.Artifact.Payload) != "contact_unavailable" || writer.calls != 0 {
+		t.Fatalf("missing follow result=%+v err=%v writes=%d", result, err, writer.calls)
+	}
+	contacts.err = errors.New("identity read unavailable")
+	result, err = provider.Execute(context.Background(), customerTagEnvelope(d), effectport.Attempt{EffectID: "eer_7", Number: 1, Generation: 1, Fence: 1})
+	if err == nil || result.Completion != effectport.StateRetryable || result.CallAttempted || writer.calls != 0 {
+		t.Fatalf("transient read result=%+v err=%v writes=%d", result, err, writer.calls)
+	}
+	contacts.err = nil
+	contacts.value.ExternalUserID = "other-external"
+	result, err = provider.Execute(context.Background(), customerTagEnvelope(d), effectport.Attempt{EffectID: "eer_7", Number: 1, Generation: 1, Fence: 1})
+	if err != nil || result.Completion != effectport.StateFinalFailed || string(result.Artifact.Payload) != "target_changed" || writer.calls != 0 {
+		t.Fatalf("identity drift result=%+v err=%v writes=%d", result, err, writer.calls)
 	}
 }
 func TestCustomerTagProviderRefusesFrozenTargetOrBindingDriftWithoutCall(t *testing.T) {

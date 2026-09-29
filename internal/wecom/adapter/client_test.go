@@ -1188,6 +1188,47 @@ func TestClientReadExternalContactUsesDirectoryReadCredentialAndReturnsFollowTag
 	}
 }
 
+func TestClientReadFirstExternalContactFollowUsesOnlyFirstDetailEntry(t *testing.T) {
+	for _, fixture := range []struct {
+		name, response, want string
+		unavailable          bool
+	}{
+		{name: "first even when later follow has valid tags", response: `{"errcode":0,"external_contact":{"external_userid":"external-1"},"follow_user":[{"userid":"first-staff","tags":[{"tag_id":7,"type":0}]},{"userid":"second-staff"}]}`, want: "first-staff"},
+		{name: "no contact", response: `{"errcode":84061,"errmsg":"not external contact"}`, unavailable: true},
+		{name: "no follower", response: `{"errcode":0,"external_contact":{"external_userid":"external-1"},"follow_user":[]}`, unavailable: true},
+		{name: "first missing userid does not fall through", response: `{"errcode":0,"external_contact":{"external_userid":"external-1"},"follow_user":[{},{"userid":"second-staff"}]}`, unavailable: true},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/cgi-bin/gettoken":
+					_, _ = w.Write([]byte(`{"errcode":0,"access_token":"contact-token","expires_in":120}`))
+				case "/cgi-bin/externalcontact/get":
+					if r.URL.Query().Get("external_userid") != "external-1" {
+						t.Fatalf("wrong customer detail request")
+					}
+					_, _ = w.Write([]byte(fixture.response))
+				default:
+					t.Fatalf("unexpected endpoint=%s", r.URL.Path)
+				}
+			}))
+			defer server.Close()
+			client, err := NewDirectory(Config{Enabled: true, CorpID: "corp", ContactSecret: "contact-secret", APIBase: server.URL, HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			staff, err := client.ReadFirstExternalContactFollow(context.Background(), "external-1")
+			if fixture.unavailable {
+				if !errors.Is(err, wecomport.ErrFirstExternalContactFollowUnavailable) || staff != "" {
+					t.Fatalf("staff=%q err=%v", staff, err)
+				}
+			} else if err != nil || staff != fixture.want {
+				t.Fatalf("staff=%q err=%v", staff, err)
+			}
+		})
+	}
+}
+
 func TestClientReadExternalContactDescriptionTargetProjectsOnlyRequestedRelationship(t *testing.T) {
 	tests := []struct {
 		name        string

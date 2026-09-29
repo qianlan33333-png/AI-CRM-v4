@@ -515,6 +515,55 @@ func (client *Client) ReadExternalContactDescriptionTarget(ctx context.Context, 
 	return result, nil
 }
 
+// ReadFirstExternalContactFollow reads the provider's first follow_user only.
+// Unrelated contact fields and later followers cannot change this selection.
+func (client *Client) ReadFirstExternalContactFollow(ctx context.Context, externalUserID string) (string, error) {
+	if !client.DirectoryReady() || invalid(externalUserID) {
+		return "", wecomport.ErrDirectoryDisabled
+	}
+	token, err := client.contactAccessToken(ctx)
+	if err != nil {
+		return "", classifyDirectoryReadError(err)
+	}
+	payload, err := client.requestExternalContactDescriptionTarget(ctx, externalUserID, token)
+	if directoryTokenExpired(err) {
+		token, err = client.refreshDirectoryToken(ctx)
+		if err == nil {
+			payload, err = client.requestExternalContactDescriptionTarget(ctx, externalUserID, token)
+		}
+		if err != nil {
+			return "", classifyDirectoryRefreshError(err)
+		}
+	}
+	if err != nil {
+		var failure *providerResponseError
+		if errors.As(err, &failure) && failure.errCode == 84061 {
+			return "", wecomport.ErrFirstExternalContactFollowUnavailable
+		}
+		return "", classifyDirectoryReadError(err)
+	}
+	if payload.ExternalContact.ExternalUserID != externalUserID {
+		return "", classifyDirectoryReadError(ErrResponse)
+	}
+	var follows []json.RawMessage
+	if len(payload.FollowUser) == 0 || json.Unmarshal(payload.FollowUser, &follows) != nil {
+		return "", classifyDirectoryReadError(ErrResponse)
+	}
+	if len(follows) == 0 {
+		return "", wecomport.ErrFirstExternalContactFollowUnavailable
+	}
+	var first struct {
+		UserID string `json:"userid"`
+	}
+	if json.Unmarshal(follows[0], &first) != nil {
+		return "", classifyDirectoryReadError(ErrResponse)
+	}
+	if invalid(first.UserID) {
+		return "", wecomport.ErrFirstExternalContactFollowUnavailable
+	}
+	return first.UserID, nil
+}
+
 type externalContactDescriptionTargetResponse struct {
 	ErrCode         json.RawMessage `json:"errcode"`
 	ExternalContact struct {

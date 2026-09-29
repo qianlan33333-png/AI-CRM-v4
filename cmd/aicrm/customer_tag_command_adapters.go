@@ -28,9 +28,40 @@ type customerTagCommandGate struct {
 	identities    identityport.ExternalIdentityValueReader
 }
 
-func (g customerTagCommandGate) FreezeTagCommandTarget(ctx context.Context, t customerport.TagCommandTarget) (customerport.FrozenTagCommandTarget, error) {
+func (g customerTagCommandGate) FreezeTagCommandTarget(ctx context.Context, source string, t customerport.TagCommandTarget) (customerport.FrozenTagCommandTarget, error) {
 	var out customerport.FrozenTagCommandTarget
 	err := withinCustomerTagCommandUOW(ctx, g.uow, func(tx context.Context) error {
+		if source == "product_paid_purchase" {
+			// Product has no employee choice at payment time. Freeze the verified
+			// external identity and tag binding here; Outbound reads the live
+			// contact detail and selects follow_user[0] after commit.
+			if t.StaffID != 0 {
+				return errors.New("product tag staff must be selected from contact detail")
+			}
+			external, found, identityErr := g.identities.VerifiedExternalIdentityValue(tx, t.CustomerID, identitydomain.KindWeComExternalUserID, "wecom-corp:"+g.corpID)
+			if identityErr != nil {
+				return customerport.ErrTagCommandUnavailable
+			}
+			if !found {
+				return errors.New("product tag identity unavailable")
+			}
+			add, ok, bindingErr := tagProviderIDs(tx, g.tags, t.AddTagIDs)
+			if bindingErr != nil {
+				return customerport.ErrTagCommandUnavailable
+			}
+			if !ok {
+				return errors.New("product tag binding unavailable")
+			}
+			remove, ok, bindingErr := tagProviderIDs(tx, g.tags, t.RemoveTagIDs)
+			if bindingErr != nil {
+				return customerport.ErrTagCommandUnavailable
+			}
+			if !ok {
+				return errors.New("product tag binding unavailable")
+			}
+			out = customerport.FrozenTagCommandTarget{TagCommandTarget: t, BindingDigest: string(effectport.Hash("customer.tag.command.binding.v1", providerIDJoin(add), providerIDJoin(remove))), TargetDigest: string(effectport.Hash("customer.tag.command.product-target.v1", external))}
+			return nil
+		}
 		var user accessdomain.User
 		var err error
 		if t.StaffID > 0 {
@@ -53,11 +84,17 @@ func (g customerTagCommandGate) FreezeTagCommandTarget(ctx context.Context, t cu
 		if identityErr != nil || !found {
 			return errors.New("customer tag identity unavailable")
 		}
-		add, ok := tagProviderIDs(tx, g.tags, t.AddTagIDs)
+		add, ok, bindingErr := tagProviderIDs(tx, g.tags, t.AddTagIDs)
+		if bindingErr != nil {
+			return customerport.ErrTagCommandUnavailable
+		}
 		if !ok {
 			return errors.New("customer tag binding unavailable")
 		}
-		remove, ok := tagProviderIDs(tx, g.tags, t.RemoveTagIDs)
+		remove, ok, bindingErr := tagProviderIDs(tx, g.tags, t.RemoveTagIDs)
+		if bindingErr != nil {
+			return customerport.ErrTagCommandUnavailable
+		}
 		if !ok {
 			return errors.New("customer tag binding unavailable")
 		}
@@ -71,16 +108,19 @@ func (g customerTagCommandGate) FreezeTagCommandTarget(ctx context.Context, t cu
 // Type alias keeps the boundary explicit without making Customer import WeCom.
 type customerportCustomerID = customerdomain.CustomerID
 
-func tagProviderIDs(ctx context.Context, tags tagport.ProviderTagBindingReader, ids []int64) ([]string, bool) {
+func tagProviderIDs(ctx context.Context, tags tagport.ProviderTagBindingReader, ids []int64) ([]string, bool, error) {
 	out := make([]string, 0, len(ids))
 	for _, id := range ids {
 		value, found, err := tags.ProviderTagID(ctx, id)
-		if err != nil || !found {
-			return nil, false
+		if err != nil {
+			return nil, false, err
+		}
+		if !found {
+			return nil, false, nil
 		}
 		out = append(out, value)
 	}
-	return out, true
+	return out, true, nil
 }
 func providerIDJoin(ids []string) string {
 	out := ""
@@ -130,3 +170,35 @@ func withinCustomerTagCommandUOW(ctx context.Context, uow platformport.UnitOfWor
 
 var _ customerport.TagCommandTargetGate = customerTagCommandGate{}
 var _ customerport.TagCommandDispatchReader = customerTagCommandReaderAdapter{}
+
+// productPaidTagContactAdapter keeps the identity lookup inside a short local
+// read transaction and performs the live WeCom detail read only after it ends.
+type productPaidTagContactAdapter struct {
+	uow        platformport.UnitOfWork
+	corpID     string
+	identities identityport.ExternalIdentityValueReader
+	contacts   wecomport.FirstExternalContactFollowReader
+}
+
+func (a productPaidTagContactAdapter) FirstProductPaidContact(ctx context.Context, customerID customerdomain.CustomerID) (wecomport.CurrentExternalContact, error) {
+	var external string
+	err := a.uow.Within(ctx, func(tx context.Context) error {
+		value, found, readErr := a.identities.VerifiedExternalIdentityValue(tx, customerID, identitydomain.KindWeComExternalUserID, "wecom-corp:"+a.corpID)
+		if readErr != nil {
+			return readErr
+		}
+		if !found {
+			return wecomport.ErrFirstExternalContactFollowUnavailable
+		}
+		external = value
+		return nil
+	})
+	if err != nil {
+		return wecomport.CurrentExternalContact{}, err
+	}
+	firstEmployee, err := a.contacts.ReadFirstExternalContactFollow(ctx, external)
+	if err != nil {
+		return wecomport.CurrentExternalContact{}, err
+	}
+	return wecomport.CurrentExternalContact{ExternalUserID: external, EmployeeUserID: firstEmployee}, nil
+}

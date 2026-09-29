@@ -7,6 +7,7 @@ import (
 	"time"
 
 	channelport "github.com/qianlan33333-png/AI-CRM-v3/internal/channel/port"
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	tagport "github.com/qianlan33333-png/AI-CRM-v3/internal/tag/port"
@@ -21,9 +22,16 @@ type CustomerTagProvider struct {
 	channelEntryTagEnabled bool
 	reader                 customerport.TagCommandDispatchReader
 	contacts               wecomport.CurrentExternalContactReader
+	productContacts        ProductPaidTagContactReader
 	tags                   tagport.ProviderTagBindingReader
 	writer                 wecomport.CustomerTagWriter
 	observer               wecomport.CustomerTagObservationRefresher
+}
+
+// ProductPaidTagContactReader resolves the verified customer identity and
+// reads the first follow_user from live WeCom detail outside the payment UoW.
+type ProductPaidTagContactReader interface {
+	FirstProductPaidContact(context.Context, customerdomain.CustomerID) (wecomport.CurrentExternalContact, error)
 }
 
 // CustomerTagProviderConfig separates a normal Customer-originated command
@@ -44,6 +52,14 @@ func NewCustomerTagProvider(config CustomerTagProviderConfig, reader customerpor
 	}
 	return provider, nil
 }
+
+func (p *CustomerTagProvider) SetProductPaidTagContactReader(reader ProductPaidTagContactReader) error {
+	if p == nil || reader == nil || p.productContacts != nil {
+		return errors.New("product paid tag contact reader unavailable")
+	}
+	p.productContacts = reader
+	return nil
+}
 func (p *CustomerTagProvider) Execute(ctx context.Context, e effectport.Envelope, attempt effectport.Attempt) (effectport.AdapterResult, error) {
 	if p == nil || !e.Valid() || e.Kind != effectport.KindCustomerTagCommand || e.PolicyVersionHash != effectport.Hash("customer.tag.command.policy.v1") {
 		return customerTagFinal("invalid_command", effectport.Hash("customer.tag.invalid")), nil
@@ -58,12 +74,35 @@ func (p *CustomerTagProvider) Execute(ctx context.Context, e effectport.Envelope
 	if attempt.EffectID == "" || d.EffectRef != attempt.EffectID {
 		return customerTagFinal("effect_mismatch", effectport.Hash("customer.tag.effect-mismatch", d.EffectRef)), nil
 	}
-	contact, err := p.contacts.CurrentExternalContact(ctx, d.CustomerID, d.StaffID)
-	if err == nil && effectport.Hash("customer.tag.command.target.v1", contact.EmployeeUserID, contact.ExternalUserID) != effectport.Digest(d.TargetDigest) {
-		return customerTagFinal("target_changed", effectport.Hash("customer.tag.target-changed", d.EffectRef)), nil
-	}
-	if err != nil {
-		return customerTagFinal("target_changed", effectport.Hash("customer.tag.target-changed", d.EffectRef)), nil
+	var contact wecomport.CurrentExternalContact
+	if d.Source == "product_paid_purchase" && d.StaffID == 0 {
+		// Legacy product commands already froze a staff ID and continue through
+		// the original branch below. New commands select the first live follower.
+		if p.productContacts == nil {
+			return customerTagFinal("provider_disabled", effectport.Hash("customer.tag.product-reader-disabled", d.EffectRef)), nil
+		}
+		contact, err = p.productContacts.FirstProductPaidContact(ctx, d.CustomerID)
+		if errors.Is(err, wecomport.ErrFirstExternalContactFollowUnavailable) {
+			return customerTagFinal("contact_unavailable", effectport.Hash("customer.tag.contact-unavailable", d.EffectRef)), nil
+		}
+		if err != nil {
+			if errors.Is(err, wecomport.ErrDirectoryDisabled) {
+				return customerTagFinal("provider_disabled", effectport.Hash("customer.tag.product-reader-disabled", d.EffectRef)), nil
+			}
+			var failure wecomport.DirectoryFailure
+			if !errors.As(err, &failure) || failure.DirectoryFailureRetryable() {
+				return effectport.AdapterResult{Completion: effectport.StateRetryable, ReceiptDigest: effectport.Hash("customer.tag.contact-read-retry", d.EffectRef, strconv.Itoa(int(attempt.Number)))}, err
+			}
+			return customerTagFinal("contact_read_failed", effectport.Hash("customer.tag.contact-read-failed", d.EffectRef)), nil
+		}
+		if effectport.Hash("customer.tag.command.product-target.v1", contact.ExternalUserID) != effectport.Digest(d.TargetDigest) {
+			return customerTagFinal("target_changed", effectport.Hash("customer.tag.target-changed", d.EffectRef)), nil
+		}
+	} else {
+		contact, err = p.contacts.CurrentExternalContact(ctx, d.CustomerID, d.StaffID)
+		if err != nil || effectport.Hash("customer.tag.command.target.v1", contact.EmployeeUserID, contact.ExternalUserID) != effectport.Digest(d.TargetDigest) {
+			return customerTagFinal("target_changed", effectport.Hash("customer.tag.target-changed", d.EffectRef)), nil
+		}
 	}
 	add, ok := p.providerTags(ctx, d.AddTagIDs)
 	if !ok {
