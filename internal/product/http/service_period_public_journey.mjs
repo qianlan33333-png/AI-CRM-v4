@@ -15,7 +15,7 @@ async function getPage(path, cookie) {
   return response.text();
 }
 
-async function runPage(path, cookie) {
+async function runPage(path, cookie, expectedButtonText) {
   const html = await getPage(path, cookie);
   const errors = [];
   let refreshes = 0;
@@ -36,14 +36,21 @@ async function runPage(path, cookie) {
       };
     },
   });
-  for (let attempt = 0; attempt < 80 && refreshes === 0; attempt += 1) await sleep(10);
-  await sleep(30);
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (errors.length) break;
+    const button = dom.window.document.getElementById('servicePeriodPayButton');
+    if (refreshes > 0 && button?.textContent === expectedButtonText) break;
+    await sleep(10);
+  }
   assert.equal(errors.length, 0, errors.map((error) => error.stack || error.message).join("\n"));
   assert.equal(refreshes, 1, "details refresh only the read-only service-period state");
+  assert.equal(dom.window.document.getElementById('servicePeriodPayButton')?.textContent,
+    expectedButtonText, 'service-period query did not reach the expected terminal state');
   return dom;
 }
 
-const active = await runPage("/s/term-31", trustedCookie);
+const active = await runPage("/s/term-31", trustedCookie, '立即续费');
 const activeDocument = active.window.document;
 assert.equal(activeDocument.getElementById('identityGate'), null);
 assert.equal(activeDocument.getElementById('checkoutContent'), null);
@@ -56,7 +63,7 @@ active.window.close();
 
 // A legacy fragment cannot mint an entitlement. Without the existing opaque
 // Payment OAuth cookie the page offers a WeChat-open prompt, never personal facts.
-const untrusted = await runPage("/s/term-31#aicrm_ctx=untrusted-external-id", "");
+const untrusted = await runPage("/s/term-31#aicrm_ctx=untrusted-external-id", "", '请在微信中打开');
 const untrustedDocument = untrusted.window.document;
 assert.equal(untrustedDocument.getElementById('identityGate'), null);
 assert.equal(untrustedDocument.getElementById('checkoutContent'), null);

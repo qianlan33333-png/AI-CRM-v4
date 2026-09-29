@@ -669,7 +669,28 @@ def tooling_contract_commands() -> list[list[str]]:
         [sys.executable, "-m", "unittest", "discover", "-s", "deploy", "-p", "test_domestic_promote*.py"],
         [sys.executable, "-m", "unittest", "deploy.test_domestic_main_source"],
         [sys.executable, "-m", "unittest", "scripts.test_manual_github_sync"],
+        ["node", "scripts/test-stage-pr01-effects-ui.mjs"],
+        ["node", "scripts/test-stage-survey-ui.mjs"],
+        ["node", "scripts/test-stage-new-shell-ui.mjs"],
     ]
+
+
+def behavior_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[list[str]]:
+    """Execute only the selected behavior checks, without unrelated lane setup."""
+    if lane == "preflight":
+        base, head = os.environ.get("AICRM_DEDUP_BASE_SHA"), os.environ.get("AICRM_DEDUP_HEAD_SHA")
+        if not base or not head:
+            raise ValueError("exact base/head are required for the behavior plan")
+        return [["git", "diff", "--check", base, head]]
+    selected = focused_commands(lane, report_dir, checks)
+    if lane == "backend":
+        # The race detector is chosen only by an explicit concurrency check;
+        # ordinary functional tests do not carry a global race surcharge.
+        return [command if any(check.get("concurrency") is True for check in checks)
+                else [arg for arg in command if arg != "-race"] for command in selected]
+    if lane == "browser":
+        return selected[-1:]
+    return selected
 
 
 def commerce_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[list[str]]:
@@ -789,7 +810,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lane", choices=LANES)
     parser.add_argument("--report-dir", type=Path)
-    parser.add_argument("--profile", choices=("full", "tooling", "public-commerce-v1", "period-member-read-v1"), default="full")
+    parser.add_argument("--profile", choices=("full", "tooling", "documentation", "behavior", "public-commerce-v1", "period-member-read-v1"), default="full")
     parser.add_argument("--focus-checks-json", default=os.environ.get("AICRM_CI_FOCUS_CHECKS", ""))
     parser.add_argument("--focus-packages-json", default=os.environ.get("AICRM_CI_FOCUS_PACKAGES", ""))
     parser.add_argument("--resume-commands-json", default="[]")
@@ -835,10 +856,17 @@ def main() -> int:
                 raise ValueError("package focus and named-check focus cannot be combined")
             if packages and (args.lane != "backend" or args.profile not in {"full", "public-commerce-v1", "period-member-read-v1"}):
                 raise ValueError("affected package focus is only valid for the full backend lane")
-            if args.profile == "tooling":
+            if args.profile == "documentation":
+                base, head = os.environ.get("AICRM_DEDUP_BASE_SHA"), os.environ.get("AICRM_DEDUP_HEAD_SHA")
+                if args.lane != "preflight" or not base or not head:
+                    raise ValueError("documentation check requires exact base/head")
+                lane_commands = [["git", "diff", "--check", base, head]]
+            elif args.profile == "tooling":
                 if args.lane != "preflight":
                     raise ValueError("tooling profile is only valid for the preflight receipt lane")
                 lane_commands = tooling_contract_commands()
+            elif args.profile == "behavior":
+                lane_commands = behavior_commands(args.lane, args.report_dir, checks)
             elif args.profile == "public-commerce-v1":
                 if args.lane == "backend" and not packages:
                     raise ValueError("commerce backend requires the complete affected package inventory")

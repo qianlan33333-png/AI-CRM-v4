@@ -133,7 +133,7 @@ Do not assume the current adapter participates in the caller's Unit of Work. Ver
 
 ## Completion Evidence
 
-默认采用 [日常国内发布](../../docs/operations/domestic-main-release.md)：准确候选与相关测试 → 国内构建一次 → 预发安装和受影响合成旅程 → 同包生产 → 版本、完整摘要、服务及健康读回 → 同一任务完成源码基线对齐。
+默认采用 [日常国内发布](../../docs/operations/domestic-main-release.md)：准确候选与相关测试 → 国内构建一次 → 预发安装和受影响合成旅程 → 人工确认准确候选、构件及预发收据 → 同包生产 → 版本、完整摘要、服务及健康读回 → 同一任务完成源码基线对齐。
 
 开发交付只需准确 base/head/tree、相关测试结果、简短影响说明和未验证项。发布者保留各步骤的既有收据；没有 GitHub PR、merge-preview、freshness attestation、四级 handoff 或 ACK 前置。文档/skill 在本地校验后生效，不要求应用构建、预发安装或生产发布。
 

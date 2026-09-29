@@ -36,7 +36,7 @@ Read repository `AGENTS.md` and `skills/aicrm-v3-development/SKILL.md`. Use the 
 - Use the Product Design plugin/skill before implementing any sidebar, customer-facing, or admin UI.
 - 发布由同一负责人完成；需要代理时使用一个 `gpt-6-luna` max agent，负责本次发布全程，不为构建、交接、观察各开任务。其他开发模型不受限。
 - Preserve exact head/tree and test scope in candidate evidence. Unknown, shared, migration, executable check-policy, or release-path changes remain conservative.
-- `python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` prints a candidate plan. A normal local run executes its lanes, complete tests for affected Go packages (including new tests), and mapped checks. Missing environment or execution evidence is incomplete. 发布者核对准确 SHA/tree、影响范围、环境和结果；相同适用 Linux 证据可复用，不因为进入发布阶段重跑相同测试。macOS 证据不替代必需 Linux 验证。
+- `python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` prints a candidate plan. A normal local run executes its lanes, named changed tests and whole affected packages only where a narrower relationship is unknown. Missing environment or execution evidence is incomplete. 发布者核对准确 SHA/tree、影响范围、环境和结果；相同适用 Linux 证据可复用，不因为进入发布阶段重跑相同测试。macOS 证据不替代必需 Linux 验证。
 - The former PR2 ten-PR shadow trial remains historical evidence for the GitHub gate. Domestic cutover does not prove a faster check safe or faster. Keep unverified categories on complete checks; a confirmed omission or unknown receipt closes the relevant fast path.
 
 Routine implementation choices within an authorized PRD do not need another confirmation. Revisit the brief only when business scope, data ownership, or an external contract materially changes.

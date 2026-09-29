@@ -1,4 +1,4 @@
-"""Contracts for exact-source and trusted-policy affected shadow plans."""
+"""Contracts for exact-source behavior check plans."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -10,7 +10,7 @@ import impact_selection
 
 
 class AffectedPlanTest(unittest.TestCase):
-    def test_browser_dependency_parser_changes_invalidate_rules_and_require_full_verification(self):
+    def test_browser_dependency_parser_change_runs_release_tool_contracts(self):
         _, root, base, _ = self.repo()
         target = root / "scripts/ci/browser_npm_dependencies.mjs"
         target.parent.mkdir(parents=True)
@@ -21,7 +21,7 @@ class AffectedPlanTest(unittest.TestCase):
         with patch.object(affected_plan, "analyze_trusted_base", return_value=self.report([target.relative_to(root).as_posix()])):
             plan = affected_plan.build_plan(root, base, head, graph_result=self.graph_for(root, base, head))
         self.assertTrue(plan["policy_changed"])
-        self.assertEqual(plan["enforced"]["selection_mode"], "full")
+        self.assertEqual(plan["enforced"]["profile"], "tooling")
         self.assertNotEqual(affected_plan.repository_policy_fingerprint(root, base),
                             affected_plan.repository_policy_fingerprint(root, head))
         previous = affected_plan.planner_policy_fingerprint()
@@ -85,8 +85,8 @@ class AffectedPlanTest(unittest.TestCase):
                           return_value=self.report(["docs/prd/example.md"])):
             plan = affected_plan.build_plan(root, base, head)
         self.assertEqual(plan["schema"], 1)
-        self.assertEqual(plan["mode"], "shadow")
-        self.assertEqual(plan["observed_mode"], "shadow")
+        self.assertEqual(plan["mode"], "enforced")
+        self.assertEqual(plan["observed_mode"], "enforced")
         self.assertEqual(plan["baseline_sha"], base)
         self.assertEqual(plan["head_sha"], head)
         self.assertEqual(len(plan["baseline_tree"]), 40)
@@ -95,7 +95,7 @@ class AffectedPlanTest(unittest.TestCase):
         self.assertEqual(set(plan["policy_fingerprints"]), {"planner", "repository_head"})
         self.assertEqual(plan["candidate"]["selected_lanes"], ["preflight"])
         self.assertEqual(plan["candidate"]["selected_checks"], [])
-        self.assertEqual(plan["candidate"]["selection_reasons"], ["documentation-only"])
+        self.assertEqual(plan["candidate"]["selection_reasons"], ["documentation"])
         self.assertEqual(plan["enforced"]["selected_lanes"], ["preflight"])
         self.assertEqual(plan["graph_result"]["status"], "not_required")
         self.assertEqual(plan["graph_result"]["proof"], "registered_docs_or_tooling_only")
@@ -141,10 +141,12 @@ class AffectedPlanTest(unittest.TestCase):
 
     def test_unmapped_path_selection_is_full_even_on_clean_source(self):
         directory, root, base, head = self.repo()
-        report = {"risk": "low", "changed_paths": ["new-runtime.toml"], "direct": [], "checks": []}
+        (root / "new-runtime.toml").write_text("unknown = true\n")
+        subprocess.run(["git", "add", "new-runtime.toml"], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-qm", "unknown runtime"], cwd=root, check=True)
+        head = affected_plan.resolve_commit(root, "HEAD")
         graph_result = self.graph_for(root, base, head)
-        with patch.object(affected_plan, "analyze_trusted_base", return_value=report), \
-                patch.object(affected_plan.go_affected_graph, "build_graph", return_value=graph_result):
+        with patch.object(affected_plan.go_affected_graph, "build_graph", return_value=graph_result):
             plan = affected_plan.build_plan(root, base, head)
         self.assertTrue(plan["evidence_eligible"])
         self.assertEqual(plan["candidate"]["selection_mode"], "full")
@@ -190,9 +192,7 @@ class AffectedPlanTest(unittest.TestCase):
         self.assertEqual(plan["candidate"]["selected_lanes"], ["preflight"])
         self.assertEqual(plan["candidate"]["profile"], "documentation")
         self.assertEqual(plan["graph_result"]["status"], "not_required")
-        # The existing trusted selector still sees the mixed skill/documentation
-        # commit as full; the candidate is observed without changing that gate.
-        self.assertEqual(plan["enforced"]["selection_mode"], "full")
+        self.assertEqual(plan["enforced"]["selection_mode"], "targeted")
         self.assertNotEqual(affected_plan.repository_policy_fingerprint(root, base),
                             affected_plan.repository_policy_fingerprint(root, head))
 

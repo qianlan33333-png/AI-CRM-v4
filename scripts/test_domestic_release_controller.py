@@ -303,7 +303,7 @@ class DomesticMainReleaseTests(unittest.TestCase):
     def test_trusted_preflight_plan_uses_022_umask_for_snapshot_materialization(self) -> None:
         base_sha, head_sha, head_tree = "a" * 40, "b" * 40, "c" * 40
         plan = {
-            "selection_source": "trusted-baseline-registry-and-go-test-graph",
+            "selection_source": "trusted-base-behavior-and-go-graph",
             "baseline_sha": base_sha,
             "head_sha": head_sha,
             "head_tree": head_tree,
@@ -1102,21 +1102,18 @@ class DomesticMainReleaseTests(unittest.TestCase):
             self.assertEqual(state["status"], "blocked")
             save.assert_called_once()
 
-    def test_policy_changes_cannot_request_targeted_lanes(self) -> None:
+    def test_policy_changes_use_targeted_tooling_contracts_after_transition(self) -> None:
         targeted = {"enforced": {"selection_mode": "targeted", "selected_lanes": ["preflight"],
                                  "selected_checks": [], "profile": "tooling"},
                     "candidate_go_packages": []}
-        with self.assertRaises(release.ReleaseError):
-            release._enforced_lanes(targeted, ["scripts/ci/quality_lanes.py"])
+        _enforced, lanes, checks, packages, profile = release._enforced_lanes(
+            targeted, ["scripts/ci/quality_lanes.py"])
+        self.assertEqual((lanes, checks, packages, profile), (["preflight"], [], [], "tooling"))
         full = {"enforced": {"selection_mode": "full", "selected_lanes": list(release.builder_ci_lanes()),
                               "selected_checks": [], "profile": "full"},
                 "candidate_go_packages": []}
-        _enforced, lanes, checks, packages, profile = release._enforced_lanes(
-            full, ["scripts/ci/quality_lanes.py"])
-        self.assertEqual(lanes, list(release.builder_ci_lanes()))
-        self.assertEqual(checks, [])
-        self.assertEqual(packages, [])
-        self.assertEqual(profile, "full")
+        with self.assertRaises(release.ReleaseError):
+            release._enforced_lanes(full, ["scripts/ci/quality_lanes.py"])
 
     def test_interrupted_release_is_classified_before_any_retry(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -2834,7 +2831,7 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
             with self.assertRaises(release.ReleaseError):
                 release._read_stage_evidence({"work_root": str(root)}, inflight)
 
-    def test_poll_waits_for_stage_evidence_and_promotes_same_attempt(self) -> None:
+    def test_poll_waits_for_stage_evidence_and_then_requires_human_approval(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             repo, base, candidate, _other = make_repository(root)
@@ -2847,8 +2844,11 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
             state["queue"] = [item]
             state["in_flight"] = {
                 "candidate_id": candidate, "head_sha": candidate,
+                "base_sha": base, "head_tree": release._tree(repo, candidate),
                 "phase": "stage-validation-pending", "stage_install_started": True,
                 "stage_install_completed": True, "release_manifest_sha256": "b" * 64,
+                "bundle_meta": {"bundle_sha256": "c" * 64},
+                "stage_receipt": {"source_sha": candidate},
             }
             config = {"repo": str(repo), "state": str(root / "state.json"),
                       "lock": str(root / "controller.lock"), "work_root": str(root),
@@ -2867,11 +2867,95 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
                                    return_value={"status": "completed", "main_sha": candidate}) as promote, \
                  mock.patch.object(release, "process_candidate") as process:
                 waiting = release.poll(config, expected_candidate_sha=candidate)
-                completed = release.poll(config, expected_candidate_sha=candidate)
+                approval = release.poll(config, expected_candidate_sha=candidate)
             self.assertEqual(waiting["status"], "stage_validation_pending")
-            self.assertEqual(completed["status"], "completed")
-            promote.assert_called_once()
+            self.assertEqual(approval["status"], "awaiting_human_approval")
+            self.assertFalse(approval["production_written"])
+            self.assertEqual(approval["approval"]["head_sha"], candidate)
+            promote.assert_not_called()
             process.assert_not_called()
+
+    def test_promote_rejects_a_different_artifact_or_staging_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            app = {"sha": base, "tree": release._tree(repo, base), "manifest_sha256": "a" * 64}
+            state = release._new_state(base, app["tree"], app)
+            state.update(status="blocked", staging_out_of_sync=True)
+            state["queue"] = [{"candidate_id": candidate, "ref": "refs/heads/codex/one",
+                               "head_sha": candidate, "base_sha": base,
+                               "status": "stage_validation_pending"}]
+            inflight = {"candidate_id": candidate, "head_sha": candidate,
+                        "head_tree": release._tree(repo, candidate), "base_sha": base,
+                        "phase": "stage-validation-pending", "stage_install_started": True,
+                        "stage_install_completed": True, "release_manifest_sha256": "b" * 64,
+                        "bundle_meta": {"bundle_sha256": "c" * 64},
+                        "stage_receipt": {"source_sha": candidate}}
+            state["in_flight"] = inflight
+            config = {"repo": str(repo), "state": str(root / "state.json"),
+                      "lock": str(root / "controller.lock"), "work_root": str(root),
+                      "production_enabled": True, "controller_path": "/controller",
+                      "push_group": "push"}
+            evidence = {"status": "passed", "source_sha": candidate}
+            exact = release._approval_wait_result(inflight, evidence)["approval_digest"]
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                 mock.patch.object(release, "verify_bare_repository"), \
+                 mock.patch.object(release, "_verify_controller_files"), \
+                 mock.patch.object(release, "_load_state", return_value=state), \
+                 mock.patch.object(release, "_read_stage_evidence", return_value=evidence), \
+                 mock.patch.object(release, "_promote_staged_candidate",
+                                   return_value={"status": "completed"}) as install:
+                with self.assertRaises(release.ReleaseError):
+                    release.promote(config, "d" * 64)
+                install.assert_not_called()
+                evidence["status"] = "failed"
+                with self.assertRaises(release.ReleaseError):
+                    release.promote(config, exact)
+                install.assert_not_called()
+                evidence["status"] = "passed"
+                self.assertEqual(release.promote(config, exact)["status"], "completed")
+                install.assert_called_once()
+
+    def test_source_only_release_also_waits_for_exact_human_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo, base, candidate, _other = make_repository(root)
+            app = {"sha": base, "tree": release._tree(repo, base), "manifest_sha256": "a" * 64}
+            state = release._new_state(base, app["tree"], app)
+            state["status"] = "blocked"
+            state["queue"] = [{"candidate_id": candidate, "ref": "refs/heads/codex/one",
+                               "head_sha": candidate, "base_sha": base,
+                               "status": "source_approval_pending"}]
+            inflight = {"candidate_id": candidate, "head_sha": candidate,
+                        "head_tree": release._tree(repo, candidate), "base_sha": base,
+                        "phase": "source-approval-pending", "installed_app": app,
+                        "bundle_meta": {"bundle_sha256": "c" * 64}}
+            state["in_flight"] = inflight
+            config = {"repo": str(repo), "state": str(root / "state.json"),
+                      "lock": str(root / "controller.lock"), "work_root": str(root),
+                      "production_enabled": True, "controller_path": "/controller",
+                      "push_group": "push"}
+            exact = release._approval_wait_result(inflight, None)["approval_digest"]
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_is_bare_repo", return_value=True), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                 mock.patch.object(release, "verify_bare_repository"), \
+                 mock.patch.object(release, "_verify_controller_files"), \
+                 mock.patch.object(release, "_load_state", return_value=state), \
+                 mock.patch.object(release, "_promote_source_candidate",
+                                   return_value={"status": "completed"}) as promote_source:
+                self.assertEqual(release.poll(config)["status"], "awaiting_human_approval")
+                promote_source.assert_not_called()
+                with self.assertRaises(release.ReleaseError):
+                    release.promote(config, "d" * 64)
+                promote_source.assert_not_called()
+                self.assertEqual(release.promote(config, exact)["status"], "completed")
+                promote_source.assert_called_once()
 
 
     def test_stage_promotion_reuses_exact_artifact_and_never_reinstalls(self) -> None:

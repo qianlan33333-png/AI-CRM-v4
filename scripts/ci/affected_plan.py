@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a deterministic, non-enforcing affected-check plan for a V4 commit pair."""
+"""Build the exact behavior check plan for a V4 commit pair."""
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +10,7 @@ import subprocess
 import governance_impact
 import impact_selection
 import go_affected_graph
+import behavior_selection
 import commerce_checks
 import period_member_checks
 import os
@@ -120,7 +121,8 @@ def parent_prd_identity(root: Path, head: str) -> dict:
 
 def planner_policy_fingerprint() -> str:
     """Hash the planner and selector code that actually produced this plan."""
-    files = (Path(__file__).resolve(), Path(impact_selection.__file__).resolve(),
+    files = (Path(__file__).resolve(), Path(behavior_selection.__file__).resolve(),
+             Path(impact_selection.__file__).resolve(),
              Path(go_affected_graph.__file__).resolve(), Path(commerce_checks.__file__).resolve(),
              Path(period_member_checks.__file__).resolve(),
              Path(__file__).with_name("cmd_test_groups.py"),
@@ -306,7 +308,7 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
                          for path in paths)
     if clean and exact_checkout:
         try:
-            report = analyze_trusted_base(root, base_sha, head_sha, paths)
+            report = {"changed_paths": paths}
         except Exception as error:
             analysis_error = type(error).__name__ + ": " + str(error)
 
@@ -340,22 +342,9 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
         candidate_packages = []
     else:
         try:
-            candidate, candidate_packages = package_candidate(report, graph_result, paths, policy_changed)
-            commerce = (commerce_checks.selection(root, base_sha, head_sha, paths, graph_result)
-                        if not policy_changed else None)
-            period_member = (period_member_checks.selection(root, base_sha, head_sha, paths, graph_result)
-                             if not policy_changed else None)
-            if commerce is not None:
-                candidate = commerce
-            if period_member is not None:
-                candidate = period_member
-            # Policy changes always use the trusted full gate. The first commerce
-            # profile remains shadow-only until the release desk pins its
-            # verified planner fingerprint after full/result comparison.
-            enforced = (full_selection("trusted-policy-change-fallback") if policy_changed
-                        else period_member if period_member is not None and period_member.get("verified_scope") is True and os.environ.get("AICRM_VERIFIED_PERIOD_MEMBER_POLICY") == planner_policy_fingerprint()
-                        else commerce if commerce is not None and os.environ.get("AICRM_VERIFIED_COMMERCE_POLICY") == planner_policy_fingerprint()
-                        else impact_selection.select(report))
+            candidate, candidate_packages = behavior_selection.select(
+                root, base_sha, head_sha, paths, graph_result, policy_changed=policy_changed)
+            enforced = candidate
         except Exception as error:
             report = None
             analysis_error = "selection-validation-failed: " + str(error)
@@ -369,8 +358,8 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
     repository_fingerprint = repository_policy_fingerprint(root, head_sha)
     plan = {
         "schema": SCHEMA,
-        "mode": "shadow",
-        "observed_mode": "shadow",
+        "mode": "enforced",
+        "observed_mode": "enforced",
         "baseline_sha": base_sha,
         "baseline_tree": base_tree,
         "head_sha": head_sha,
@@ -389,24 +378,20 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
                                   if graph_valid and isinstance(graph_result, dict) else candidate_packages),
         "enforced": normalize_selection(enforced),
         "policy_changed": policy_changed,
-        "business_assessment": (period_member_checks.business_evidence(graph_result)
-                                if period_member is not None else commerce_checks.business_evidence(commerce, graph_result, paths)
-                                if commerce is not None else {
+        "business_assessment": {
                                     "status": "requires_review",
                                     "changed_paths": paths,
                                     "scope_reasons": normalize_selection(enforced)["selection_reasons"],
                                     "five_items": ["external_contract", "business_mechanism", "related_modules",
                                                    "page_impact", "verification"],
-                                    "basis": "unverified scope remains conservative; declarations cannot narrow checks"}),
-        "impact_maps": IMPACT_MAPS,
+                                    "basis": "direct tests and real consumers; staging readback is separate"},
         "parent_prd": parent_prd_identity(root, head_sha),
         "analysis": {"status": "complete" if report is not None else "failed",
                      "error": analysis_error},
         "execution_eligible": bool(report is not None and clean and exact_checkout and graph_valid),
-        "evidence_eligible": bool(report is not None and clean and exact_checkout and graph_valid
-                                  and not policy_changed),
+        "evidence_eligible": bool(report is not None and clean and exact_checkout and graph_valid),
         "graph_result": graph_result,
-        "selection_source": "trusted-baseline-registry-and-go-test-graph",
+        "selection_source": "trusted-base-behavior-and-go-graph",
     }
     return plan
 

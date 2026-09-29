@@ -78,7 +78,7 @@ def verify_journey_results(path: Path, expected: list[str]) -> dict:
 
 
 def build_affected_plan(base: str, head: str) -> dict:
-    """Load the shadow planner without changing the existing local phases."""
+    """Load the exact base/head behavior plan."""
     ci_dir = str(ROOT / "scripts/ci")
     if ci_dir not in sys.path:
         sys.path.insert(0, ci_dir)
@@ -89,15 +89,14 @@ def build_affected_plan(base: str, head: str) -> dict:
 def exact_affected_plan_source_binding(plan: dict, current: dict, root: Path = ROOT) -> bool:
     """Validate the clean SHA/tree/policy binding without requiring sample eligibility.
 
-    `evidence_eligible` controls whether a shadow run can count toward the PR
-    trial. A clean plan that conservatively selected all lanes (for example,
-    because policy changed) is still valid for local execution.
+    A clean plan that conservatively selected all lanes remains valid for
+    local execution.
     """
     if not isinstance(plan, dict) or not isinstance(current, dict):
         return False
     source = plan.get("source")
     if (not isinstance(source, dict) or plan.get("schema") != 1
-            or plan.get("observed_mode") != "shadow" or plan.get("source_clean") is not True
+            or plan.get("observed_mode") not in {"enforced", "shadow"} or plan.get("source_clean") is not True
             or source.get("working_tree_clean") is not True or source.get("head_matches") is not True
             or source.get("status") != [] or current.get("status") != []):
         return False
@@ -233,7 +232,7 @@ class Preflight:
                 or not isinstance(checks, list) or any(not isinstance(check, dict) for check in checks)
                 or not isinstance(packages, list) or any(not isinstance(item, str) or not item for item in packages)
                 or mode not in {"full", "targeted"}
-                or candidate_profile not in {"full", "tooling", "documentation", "affected", "affected-packages", "period-member-read-v1"}
+                or candidate_profile not in {"full", "tooling", "documentation", "behavior", "affected", "affected-packages", "period-member-read-v1"}
                 or candidate_profile == "tooling" and (lanes != ["preflight"] or mode != "targeted")):
             raise ValueError("affected candidate selection is malformed")
 
@@ -266,12 +265,18 @@ class Preflight:
                 # documentation/affected profiles use the ordinary full
                 # preflight command set; only an explicit tooling candidate
                 # uses the dedicated tooling contract commands.
-                quality_profile = "tooling" if candidate_profile == "tooling" else "full"
+                quality_profile = candidate_profile if candidate_profile in {"tooling", "documentation", "behavior"} else "full"
                 command.extend(["--profile", quality_profile])
             lane_checks = [check for check in checks if check.get("lane") == lane]
+            if candidate_profile == "behavior" and lane != "preflight":
+                command.extend(["--profile", "behavior", "--focus-checks-json",
+                                json.dumps(lane_checks, separators=(",", ":"))])
+                execution_scope = {"kind": "mapped-checks", "checks": lane_checks}
             if candidate_profile == "period-member-read-v1" and lane in {"frontend", "browser"}:
                 command.extend(["--profile", "period-member-read-v1"])
-            if mode == "targeted" and lane == "backend" and packages:
+            if candidate_profile == "behavior" and lane != "preflight":
+                pass
+            elif mode == "targeted" and lane == "backend" and packages:
                 if candidate_profile == "period-member-read-v1":
                     command.extend(["--profile", "period-member-read-v1"])
                 command.extend(["--focus-packages-json", json.dumps(sorted(set(packages)), separators=(",", ":"))])
@@ -352,29 +357,32 @@ class Preflight:
             return "incomplete"
         if execution["failed_lanes"]:
             return "failed"
-        graph = plan.get("graph_result")
-        if not isinstance(graph, dict):
-            self.report["affected_collection"] = {"result": "incomplete",
-                                                   "error": "plan has no bound package graph receipt"}
-            return "incomplete"
-        ci_dir = str(ROOT / "scripts/ci")
-        if ci_dir not in sys.path:
-            sys.path.insert(0, ci_dir)
         try:
-            import affected_shadow
-            local_runs = []
-            for lane in lanes:
-                lane_receipt = dict(next(item["receipt"] for item in self.report["lanes"]
-                                         if item["name"] == lane))
-                go_log = lane_receipt.get("go_json_log")
-                if go_log:
-                    lane_receipt["go_json_log"] = str((affected_dir / lane / go_log).resolve())
-                local_runs.append(lane_receipt)
-            collection = affected_shadow.collect_execution(plan, graph, local_runs, allow_local=True)
-            self.report["affected_collection"] = collection
-            if not collection["required_results_passed"]:
-                return "failed"
-        except (OSError, ValueError, KeyError, StopIteration) as error:
+            for item in self.report["lanes"]:
+                lane, receipt = item["name"], item["receipt"]
+                expected = [check for check in checks if check.get("lane") == lane]
+                if not expected:
+                    continue
+                actual_commands = receipt["commands"]
+                for check in expected:
+                    name = check.get("test")
+                    path = check.get("path")
+                    if name and lane in {"backend", "browser"}:
+                        log_name = receipt.get("go_json_log")
+                        if not log_name:
+                            raise ValueError(lane + " has no Go test log")
+                        log = affected_dir / lane / log_name
+                        events = [json.loads(line) for line in log.read_text().splitlines()
+                                  if line.startswith("{")]
+                        if not any(event.get("Test") == name and event.get("Action") == "pass" for event in events):
+                            raise ValueError(name + " has no passing terminal event")
+                        if any(event.get("Test") == name and event.get("Action") in {"fail", "skip"} for event in events):
+                            raise ValueError(name + " failed or skipped")
+                    elif lane == "frontend" and not any(path in command for command in actual_commands):
+                        raise ValueError(path + " was not executed")
+            self.report["affected_collection"] = {"result": "passed", "required_results_passed": True,
+                                                   "measurement_eligible": False, "evidence_kind": "local_only"}
+        except (OSError, ValueError, KeyError, TypeError) as error:
             self.report["affected_collection"] = {"result": "incomplete", "error": str(error)}
             return "incomplete"
         return "passed"

@@ -50,6 +50,7 @@ CI_ONLY_FILES = {
     # Loaded only by the HTTP package test's Node process; the production
     # host embeds member_grid_host.js, not this journey.
     "internal/product/http/member_grid_host/member_grid_journey.mjs",
+    "internal/product/http/service_period_public_journey.mjs",
     "scripts/dev_preflight.py",
     "scripts/check-architecture.py",
     "scripts/check-config-definition-import-boundary.sh",
@@ -302,10 +303,6 @@ def classify_paths(paths: Iterable[str]) -> Classification:
                 full_reason = full_reason or "component_dependency_or_service_change"
             else:
                 full_reason = full_reason or "unknown_component_payload"
-            continue
-
-        if normalized.startswith(("internal/platform/", "internal/externaleffects/")):
-            full_reason = full_reason or "shared_runtime_infrastructure"
             continue
 
         if (
@@ -796,16 +793,13 @@ def _build_frontend(root: Path) -> None:
 
     release_dist = root / "release/web/dist"
     if release_dist.exists():
+        if release_dist.is_symlink():
+            raise BuildError("release web output is a symlink")
         shutil.rmtree(release_dist)
-    release_dist.mkdir(parents=True, exist_ok=True)
     stages = [
         ["node", "scripts/stage-pr01-effects-ui.mjs", "web/dist", "release/web/dist"],
-        ["node", "scripts/test-stage-pr01-effects-ui.mjs"],
-        ["node", "scripts/test-groupops-history-release.mjs", "web/dist", "release/web/dist"],
         ["node", "scripts/stage-survey-ui.mjs", "web/dist", "release/web/dist"],
-        ["node", "scripts/test-stage-survey-ui.mjs", "web/dist", "release/web/dist"],
         ["node", "scripts/stage-new-shell-ui.mjs", "web/dist", "release/web/dist"],
-        ["node", "scripts/test-stage-new-shell-ui.mjs", "web/dist", "release/web/dist"],
     ]
     for command in stages:
         _run(command, cwd=root)

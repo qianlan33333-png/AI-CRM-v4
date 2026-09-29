@@ -166,10 +166,13 @@ class DomesticReleaseBuildTests(unittest.TestCase):
         self.assertFalse(ci.full_build)
         self.assertEqual(ci.build_mode, "none")
 
-    def test_shared_or_unclassified_paths_still_force_full_build(self) -> None:
-        for path in ("go.mod", "scripts/run-donor-view-consumers.sh", "deploy/unknown.service", "internal/platform/release.go", "components/unknown/worker.py"):
+    def test_unclassified_paths_still_force_full_build(self) -> None:
+        for path in ("go.mod", "scripts/run-donor-view-consumers.sh", "deploy/unknown.service", "components/unknown/worker.py"):
             with self.subTest(path=path):
                 self.assertTrue(builder.classify_paths([path]).full_build)
+        shared = builder.classify_paths(["internal/platform/release.go"])
+        self.assertFalse(shared.full_build)
+        self.assertEqual(shared.graph_paths, ["internal/platform/release.go"])
 
     def test_browser_diagnostic_helper_does_not_turn_maintenance_into_app_install(self) -> None:
         helper = builder.classify_paths(["internal/webshell/chromium_launch.mjs",

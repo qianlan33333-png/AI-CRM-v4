@@ -67,5 +67,5 @@ govulncheck ./...
 
 每个能力先做一次业务判断、参考检索和简短父 PRD；同一 Codex 任务中，每条开发线使用独立 `codex/<work-item>` worktree/分支。一个候选交付可单独上线的最小完整行为或明确缺陷，相关测试同行。涉及用户页或后台 UI 时先使用 Product Design。详见[开发入口](docs/development-before-start.md)。
 
-日常发布采用已实测的热修同包路径：准确候选与相关测试 → 国内构建一次 → 预发安装和受影响合成旅程 → 内网晋级同一包 → 生产完整读回 → 同一任务完成源码 main/收据对齐。GitHub 仅由用户人工择机归档，不要求 PR/check、merge-preview 或 handoff ACK。发布失败由同一负责人处理，需要代理时使用一个 `gpt-6-luna` max agent。文档/skill 本地生效，不构建或安装应用。日常操作见[国内发布](docs/operations/domestic-main-release.md)。基线对账与发布工具维护仅在实际需要时处理，未验证的定时器保持关闭。
+日常发布采用已实测的热修同包路径：准确候选与相关测试 → 国内构建一次 → 预发安装和受影响合成旅程 → 人工确认准确候选、构件与预发收据 → 内网晋级同一包 → 生产完整读回 → 同一任务完成源码 main/收据对齐。GitHub 仅由用户人工择机归档，不要求 PR/check、merge-preview 或 handoff ACK。发布失败由同一负责人处理，需要代理时使用一个 `gpt-6-luna` max agent。文档/skill 本地生效，不构建或安装应用。日常操作见[国内发布](docs/operations/domestic-main-release.md)。基线对账与发布工具维护仅在实际需要时处理，未验证的定时器保持关闭。
 普通发布不备份数据库；生产迁移前才备份。真实支付、扫码等业务验收在技术安装后独立记录。GitHub 不自动同步、没有同步周期；人工同步须先确认国内 `main` 与生产源码收据相同、GitHub 是其祖先，才普通快进推送并读回 SHA。若两台国内机器在归档前同时丢失，GitHub 可能缺少尚未同步的提交。

@@ -64,37 +64,3 @@ class CommerceChecksTest(unittest.TestCase):
         allowed = base.replace('if true', 'if false') + '// retry comment\nfunc retryPeriodDetailOAuth() bool { return true }\n'
         self.assertEqual(commerce_checks.without_oauth_functions(base), commerce_checks.without_oauth_functions(allowed))
         self.assertNotEqual(commerce_checks.without_oauth_functions(base), commerce_checks.without_oauth_functions(base.replace('verify()', 'ignoreSignature()')))
-
-    def test_unverified_planner_stays_shadow_and_policy_changes_stay_full(self):
-        import affected_plan
-        import os
-        import subprocess
-        import tempfile
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            for path, name in commerce_checks.JOURNEY_FILES.items():
-                target = root / path; target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text('package main\nfunc ' + name + '(t *testing.T) {}\n')
-            target = root / 'internal/product/http/service_period_public.go'
-            target.parent.mkdir(parents=True)
-            target.write_text('package http\nconst view = 1\n')
-            for args in (['init','-q'],['config','user.name','Fixture'],['config','user.email','fixture@example.invalid'],['add','.'],['commit','-qm','base']):
-                subprocess.run(['git',*args],cwd=root,check=True)
-            base = subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
-            target.write_text('package http\nconst view = 2\n')
-            subprocess.run(['git','commit','-qam','view'],cwd=root,check=True)
-            head = subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
-            paths=['internal/product/http/service_period_public.go']
-            graph={**self.graph(),'schema':1,'baseline_sha':base,'head_sha':head,
-                   'baseline_tree':affected_plan.tree_for(root,base),'head_tree':affected_plan.tree_for(root,head),
-                   'changed_paths':paths,'graph_fingerprint':'f'*64}
-            report={'risk':'high','changed_paths':paths,'direct':[], 'affected':[], 'checks':[]}
-            with patch.object(affected_plan,'analyze_trusted_base',return_value=report):
-                with patch.dict(os.environ,{'AICRM_VERIFIED_COMMERCE_POLICY':''}):
-                    unverified=affected_plan.build_plan(root,base,head,graph_result=graph)
-                with patch.dict(os.environ,{'AICRM_VERIFIED_COMMERCE_POLICY':affected_plan.planner_policy_fingerprint()}):
-                    verified=affected_plan.build_plan(root,base,head,graph_result=graph)
-            self.assertEqual(unverified['candidate']['selection_mode'],'targeted')
-            self.assertEqual(unverified['enforced']['selection_mode'],'full')
-            self.assertEqual(verified['enforced']['selected_lanes'],['preflight','backend','browser'])
-            self.assertEqual(len(verified['candidate_go_packages']),3)

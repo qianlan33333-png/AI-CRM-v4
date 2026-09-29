@@ -69,8 +69,10 @@ func TestCPUProfileRealFiveSecondsSanitizedPrivateAndReadable(t *testing.T) {
 	if err != nil || len(parsed.Sample) == 0 {
 		t.Fatalf("real profile did not parse: %v", err)
 	}
-	if parsed.DurationNanos < int64(5*time.Second) {
-		t.Fatalf("profile duration=%d", parsed.DurationNanos)
+	// pprof measures its own start/stop interval, which can be a few
+	// milliseconds shorter than Capture's five-second wall clock wait.
+	if parsed.DurationNanos < int64(4500*time.Millisecond) || parsed.DurationNanos > int64(10*time.Second) {
+		t.Fatalf("profile duration is inconsistent with the five-second capture: %d", parsed.DurationNanos)
 	}
 	for _, sample := range parsed.Sample {
 		if len(sample.Label)+len(sample.NumLabel)+len(sample.NumUnit) != 0 {

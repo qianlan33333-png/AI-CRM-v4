@@ -773,7 +773,7 @@ def _validate_state(state: Any) -> None:
 def _active_queue_item(state: dict[str, Any]) -> dict[str, Any] | None:
     for item in state["queue"]:
         if item.get("status") in {"pending", "stale_base", "failed", "outcome_unknown",
-                                  "stage_validation_pending"}:
+                                  "stage_validation_pending", "source_approval_pending"}:
             return item
     return None
 
@@ -802,6 +802,13 @@ def _recover_orphaned_inflight(state_path: Path, state: dict[str, Any]) -> str |
     """Durably classify a transaction left behind by SIGKILL, timeout, or reboot."""
     inflight = state.get("in_flight")
     if not isinstance(inflight, dict) or state.get("status") == "outcome_unknown":
+        return None
+    if state.get("status") == "blocked" and inflight.get("phase") == "source-approval-pending":
+        item = next((candidate for candidate in state.get("queue", [])
+                     if candidate.get("candidate_id") == inflight.get("candidate_id")
+                     and candidate.get("head_sha") == inflight.get("head_sha")), None)
+        if item is None or item.get("status") != "source_approval_pending":
+            raise ReleaseError("source approval pause has no exact queued candidate")
         return None
     if state.get("status") == "blocked" and inflight.get("phase") == "stage-validation-pending":
         item = next((candidate for candidate in state.get("queue", [])
@@ -1230,17 +1237,20 @@ def _trusted_preflight_plan(config: dict[str, Any], policy: Path, candidate: Pat
         raise ReleaseError("trusted impact analysis did not return a valid plan") from exc
     enforced = plan.get("enforced") if isinstance(plan, dict) else None
     lanes = enforced.get("selected_lanes") if isinstance(enforced, dict) else None
-    if (plan.get("selection_source") != "trusted-baseline-registry-and-go-test-graph"
+    source = plan.get("selection_source")
+    legacy_transition = (source == "trusted-baseline-registry-and-go-test-graph"
+                         and plan.get("policy_changed") is True
+                         and isinstance(enforced, dict)
+                         and enforced.get("selection_mode") == "full"
+                         and lanes == list(builder_ci_lanes())
+                         and plan.get("graph_result", {}).get("graph_valid") is True)
+    if (source not in {"trusted-base-behavior-and-go-graph", "trusted-baseline-registry-and-go-test-graph"}
+            or (source != "trusted-base-behavior-and-go-graph" and not legacy_transition)
             or plan.get("baseline_sha") != base_sha or plan.get("head_sha") != head_sha
             or plan.get("head_tree") != _worktree_git(candidate, "rev-parse", "HEAD^{tree}")
             or plan.get("source_clean") is not True or plan.get("source", {}).get("head_matches") is not True
             or plan.get("source", {}).get("status") != []
-            or not (plan.get("evidence_eligible") is True or
-                    ((plan.get("policy_changed") is True or
-                      enforced.get("selection_reasons") == ["trusted-policy-change-fallback"])
-                     and enforced.get("selection_mode") == "full"
-                     and lanes == list(builder_ci_lanes())
-                     and plan.get("graph_result", {}).get("graph_valid") is True))
+            or (plan.get("evidence_eligible") is not True and not legacy_transition)
             or not isinstance(lanes, list) or not lanes
             or any(lane not in builder_ci_lanes() for lane in lanes)):
         raise ReleaseError("trusted impact plan failed exact source or lane validation")
@@ -1273,16 +1283,19 @@ def _enforced_lanes(plan: dict[str, Any], changed_policy: list[str]) -> tuple[di
         raise ReleaseError("trusted impact plan has no enforced selection")
     lanes = enforced.get("selected_lanes")
     checks = enforced.get("selected_checks", [])
-    packages = plan.get("candidate_go_packages", [])
+    packages = [] if enforced.get("profile") == "behavior" else plan.get("candidate_go_packages", [])
     profile = enforced.get("profile", "full")
     if not isinstance(lanes, list) or not lanes or any(lane not in builder_ci_lanes() for lane in lanes):
         raise ReleaseError("trusted impact plan selected an invalid lane set")
-    if changed_policy and (enforced.get("selection_mode") != "full" or tuple(lanes) != builder_ci_lanes()):
-        raise ReleaseError("trusted base policy did not force every lane for a policy change")
+    if changed_policy and not ((profile == "tooling" and lanes == ["preflight"])
+                               or (plan.get("selection_source") == "trusted-base-behavior-and-go-graph"
+                                   and profile == "full" and enforced.get("selection_mode") == "full"
+                                   and "policy-and-runtime-changed" in enforced.get("selection_reasons", []))
+                               or (plan.get("selection_source") == "trusted-baseline-registry-and-go-test-graph"
+                                   and profile == "full" and tuple(lanes) == builder_ci_lanes())):
+        raise ReleaseError("trusted base policy did not select the release-tool contracts")
     if not isinstance(checks, list) or not isinstance(packages, list):
         raise ReleaseError("trusted impact plan contains an invalid focused test set")
-    if changed_policy:
-        return enforced, list(builder_ci_lanes()), [], [], "full"
     return enforced, lanes, checks, packages, profile
 
 
@@ -1460,6 +1473,15 @@ def _verify_lane_evidence(lane_dir: Path, lane: str, head_sha: str, tree: str,
             if any(terminal.get(package) != "pass" and not
                    (terminal.get(package) == "skip" and package in no_tests) for package in packages):
                 raise CheckIncompleteError("required affected package was missing or skipped")
+        if lane == "backend":
+            required_backend = {(str(Path(check["path"]).parent), check["test"])
+                                for check in checks if check.get("lane") == "backend" and check.get("test")}
+            terminal_tests = {(event.get("Package", ""), event.get("Test")): event.get("Action")
+                              for event in events if event.get("Test") and event.get("Action") in {"pass", "skip", "fail"}}
+            if any(not any(package.endswith("/" + directory) and test == name and action == "pass"
+                           for (package, test), action in terminal_tests.items())
+                   for directory, name in required_backend):
+                raise CheckIncompleteError("required named Go test was missing, skipped or failed")
         if lane == "browser":
             try:
                 summary = json.loads((lane_dir / "summary.json").read_text())
@@ -1783,10 +1805,12 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
             _prepare_check_dependencies(config, checkout, [lane],
                 diagnostic_root / f"{head_sha}-{report_dir.name}-{lane}-npm-ci.log", policy=policy)
         args = [lane, "--report-dir", str(lane_dir)]
-        if _lane_check_profile(enforced, profile) == "public-commerce-v1":
+        if profile == "behavior":
+            args.extend(["--profile", "behavior"])
+        elif _lane_check_profile(enforced, profile) == "public-commerce-v1":
             args.extend(["--profile", "public-commerce-v1"])
         elif lane == "preflight":
-            args.extend(["--profile", "tooling" if profile == "tooling" else "full"])
+            args.extend(["--profile", profile if profile in {"tooling", "documentation"} else "full"])
         continued_names = []
         if lane == "browser" and snapshot.get("required_browser_tests"):
             passed = {event["Test"] for event in snapshot["events"] if event.get("Action") == "pass" and event.get("Test")}
@@ -3047,10 +3071,9 @@ print(json.dumps({lane: items for lane, items in missing.items() if items}))
         "baseline_tree": plan["baseline_tree"], "head_sha": head_sha, "head_tree": plan["head_tree"],
         "policy_fingerprint": plan["policy_fingerprint"],
         "trusted_policy_sha": base_sha,
-        "selection_mode": "full" if changed_policy else enforced["selection_mode"],
+        "selection_mode": enforced["selection_mode"],
         "profile": profile, "selected_lanes": lanes,
-        "selection_reasons": (sorted(set((enforced.get("selection_reasons") or []) + ["trusted-base-policy-change-forced-full"]))
-                              if changed_policy else enforced.get("selection_reasons")),
+        "selection_reasons": enforced.get("selection_reasons"),
         "changed_paths": plan.get("changed_paths"), "toolchain": toolchain, "lane_results": lane_results,
         "business_assessment": plan.get("business_assessment"),
         "capacity":capacity, "storage":storage, "cache_usage":cache_usage, "recovered_attempts":recovered,
@@ -3797,6 +3820,12 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
             phase = "build"
             build_base = installed_app["sha"]
             base_release = Path(config.get("stage_releases", "/opt/aicrm/releases")) / build_base
+            if (not base_release.is_dir() or base_release.is_symlink()
+                    or builder.verify_release_inventory(base_release, allow_release_env=True)
+                    != installed_app["manifest_sha256"]):
+                raise ReleaseError("incremental base package differs from the installed application receipt")
+            _verify_stage_app(build_base, installed_app["manifest_sha256"])
+            _verify_prod_app(config, build_base, installed_app["manifest_sha256"])
             build_config = dict(config, repo=str(source_worktree))
             out, metadata = _build_candidate(build_config, item["head_sha"], build_base,
                                              base_release, validation_scope_base=old_main_sha)
@@ -3858,10 +3887,9 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
                     "stage_receipt": stage_receipt,
                     "stage_evidence_path": str(Path(config["work_root"]) / "stage-evidence" / f"{item['head_sha']}.json")}
         else:
-            # Source-only commits still get a full production recovery bundle
-            # and a verified production health readback, but never install the
-            # application package or execute migrations.
-            phase = "source-backup"
+            # Source-only changes also wait for human promotion before any
+            # production source or cursor write.
+            phase = "source-approval-pending"
             state["in_flight"].update({"phase": phase, "runtime_changed": False,
                                        "check_receipt": check_receipt,
                                        "controller_receipt": controller_receipt,
@@ -3873,9 +3901,10 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
                                        "candidate_sha": item["head_sha"],
                                        "candidate_tree": head_tree,
                                        "previous_main_sha": old_main_sha})
-            _update_state(state_path, state)
-            _upload_and_store_bundle(config, bundle, bundle_meta)
-            _verify_prod_app(config, installed_app["sha"], installed_app["manifest_sha256"])
+            item["status"] = "source_approval_pending"
+            _verify_stage_app(installed_app["sha"], installed_app["manifest_sha256"])
+            _update_state(state_path, state, status="blocked")
+            return _approval_wait_result(state["in_flight"], None)
 
         # A source-only commit advances the recovery cursor, but must leave the
         # exact application package independently healthy on both hosts.
@@ -3967,6 +3996,62 @@ def _read_stage_evidence(config: dict[str, Any], inflight: dict[str, Any]) -> di
         if _file_sha256(log) != _digest(check.get("log_sha256"), "stage journey log digest"):
             raise ReleaseError("stage journey log differs from its receipt")
     return receipt
+
+
+def _approval_wait_result(inflight: dict[str, Any], evidence: dict[str, Any] | None) -> dict[str, Any]:
+    """Show the exact object a human must approve; this function never writes production."""
+    stage_receipt = inflight.get("stage_receipt")
+    identity = {
+        "base_sha": _sha(inflight["base_sha"], "approval base"),
+        "head_sha": _sha(inflight["head_sha"], "approval head"),
+        "head_tree": _sha(inflight["head_tree"], "approval tree"),
+        "manifest_sha256": _digest(
+            (inflight["release_manifest_sha256"] if evidence is not None
+             else inflight["installed_app"]["manifest_sha256"]), "approval manifest"),
+        "source_bundle_sha256": _digest(inflight["bundle_meta"]["bundle_sha256"], "approval bundle"),
+        "stage_receipt_sha256": (hashlib.sha256(json.dumps(
+            stage_receipt, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            if evidence is not None else None),
+        "stage_journey_sha256": (hashlib.sha256(json.dumps(
+            evidence, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            if evidence is not None else None),
+    }
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {"status": "awaiting_human_approval", "approval": identity,
+            "approval_digest": digest, "production_written": False}
+
+
+def _promote_source_candidate(config: dict[str, Any], state_path: Path, state: dict[str, Any],
+                              item: dict[str, Any]) -> dict[str, Any]:
+    """Advance a source-only candidate after its exact approval, without installing an app."""
+    repo, inflight = Path(config["repo"]), state["in_flight"]
+    sha, tree, base = inflight["head_sha"], inflight["head_tree"], inflight["base_sha"]
+    if (_resolve_ref(repo, MAIN_REF) != base or state["main"]["sha"] != base
+            or _resolve_ref(repo, item["ref"]) != sha or _tree(repo, sha) != tree):
+        raise ReleaseError("approved source candidate no longer matches its base and ref")
+    bundle = Path(config["work_root"]) / "source-bundles" / f"{sha}.bundle"
+    bundle_meta = inflight["bundle_meta"]
+    if bundle.is_symlink() or not bundle.is_file() or _file_sha256(bundle) != bundle_meta["bundle_sha256"]:
+        raise ReleaseError("approved source bundle changed")
+    app = inflight["installed_app"]
+    _verify_stage_app(app["sha"], app["manifest_sha256"])
+    _verify_prod_app(config, app["sha"], app["manifest_sha256"])
+    started_at = _utc_string(item.get("started_at_utc"), "source attempt start time")
+    elapsed = max(0.0, (datetime.now(timezone.utc) - datetime.fromisoformat(
+        started_at.replace("Z", "+00:00"))).total_seconds())
+    phase = "source-backup"
+    try:
+        item["status"] = "checking"
+        inflight.update({"phase": phase, "commit_started": True})
+        _update_state(state_path, state, status="outcome_unknown")
+        _upload_and_store_bundle(config, bundle, bundle_meta)
+        _verify_prod_app(config, app["sha"], app["manifest_sha256"])
+        return _finalize_success(config, state_path, state, item, bundle_meta, base,
+                                 app, inflight["check_receipt"], None, None,
+                                 time.monotonic() - elapsed)
+    except BaseException as exc:
+        _mark_unknown(state_path, state, phase, exc)
+        raise
 
 
 def _promote_staged_candidate(config: dict[str, Any], state_path: Path, state: dict[str, Any],
@@ -4224,7 +4309,17 @@ def poll(config: dict[str, Any], *, expected_candidate_sha: str | None = None) -
                         "candidate_sha": front["head_sha"],
                         "manifest_sha256": inflight["release_manifest_sha256"],
                         "stage_evidence_path": str(_stage_evidence_path(config, front["head_sha"]))}
-            return _promote_staged_candidate(config, state_path, state, front, evidence)
+            return _approval_wait_result(inflight, evidence)
+        if (state["status"] == "blocked" and isinstance(inflight, dict)
+                and inflight.get("phase") == "source-approval-pending"):
+            front = _active_queue_item(state)
+            if front is None or front.get("head_sha") != inflight.get("head_sha"):
+                raise ReleaseError("source approval attempt is not at the queue front")
+            if expected_candidate_sha is not None and expected_candidate_sha != front["head_sha"]:
+                return {"status": "candidate_not_at_queue_front",
+                        "requested_candidate_sha": expected_candidate_sha,
+                        "queue_head_sha": front["head_sha"], "main_sha": state["main"]["sha"]}
+            return _approval_wait_result(inflight, None)
         if state["status"] == "outcome_unknown":
             raise ReleaseError("production outcome is unknown; use reconcile, never reinstall blindly")
         if state["status"] == "blocked":
@@ -4272,6 +4367,43 @@ def poll(config: dict[str, Any], *, expected_candidate_sha: str | None = None) -
         return result
 
 
+def promote(config: dict[str, Any], approval_digest: str) -> dict[str, Any]:
+    """The sole production entry, called only after a person approves this digest."""
+    if os.geteuid() != 0:
+        raise ReleaseError("production promotion must run as root")
+    config = _check_config(config)
+    if config.get("production_enabled") is not True:
+        raise ReleaseError("production promotion is disabled")
+    expected = _digest(approval_digest, "human approval digest")
+    repo, state_path = Path(config["repo"]), Path(config["state"])
+    with _locked(Path(config["lock"]), nonblocking=True):
+        _assert_legacy_release_path_stopped()
+        verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
+        state = _load_state(state_path)
+        _recover_orphaned_inflight(state_path, state)
+        inflight = state.get("in_flight")
+        item = _active_queue_item(state)
+        if (state.get("status") != "blocked" or not isinstance(inflight, dict)
+                or item is None or item.get("candidate_id") != inflight.get("candidate_id")):
+            raise ReleaseError("no exact candidate is waiting for human approval")
+        phase = inflight.get("phase")
+        evidence = None
+        if phase == "stage-validation-pending":
+            evidence = _read_stage_evidence(config, inflight)
+            if evidence is None:
+                raise ReleaseError("required staging journey has not completed")
+        elif phase != "source-approval-pending":
+            raise ReleaseError("candidate is not ready for production promotion")
+        approval = _approval_wait_result(inflight, evidence)
+        if approval["approval_digest"] != expected:
+            raise ReleaseError("human approval does not match this candidate, artifact and staging receipt")
+        _verify_controller_files(config, repo, state["main"]["sha"],
+                                 sorted(builder.FIXED_CONTROLLER_FILES))
+        if phase == "stage-validation-pending":
+            return _promote_staged_candidate(config, state_path, state, item, evidence)
+        return _promote_source_candidate(config, state_path, state, item)
+
+
 def release_candidate(config: dict[str, Any], ref: str, head_sha: str, base_sha: str,
                       supersedes_candidate_id: str | None = None) -> dict[str, Any]:
     """Submit an exact candidate, then process it only if it is queue front."""
@@ -4293,8 +4425,8 @@ def release_candidate(config: dict[str, Any], ref: str, head_sha: str, base_sha:
                 "queue_position": queue_position, "submission": submitted}
 
     result = poll(config, expected_candidate_sha=head_sha)
-    if result.get("status") == "stage_validation_pending":
-        return {"status": "stage_validation_pending", "candidate_sha": head_sha,
+    if result.get("status") in {"stage_validation_pending", "awaiting_human_approval"}:
+        return {"status": result["status"], "candidate_sha": head_sha,
                 "queue_position": queue_position, "submission": submitted,
                 "release": result}
     if (result.get("main_sha") == head_sha
@@ -5172,7 +5304,7 @@ def restricted_ssh() -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check",
-                                            "poll", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
+                                            "poll", "promote", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
     parser.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG))
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--seed-repo", type=Path)
@@ -5182,6 +5314,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base")
     parser.add_argument("--supersedes-candidate")
     parser.add_argument("--sha")
+    parser.add_argument("--approval-digest", help="digest of the exact candidate, artifact and staging readback approved by a person")
     parser.add_argument("--calibrate-check-capacity", action="store_true",
                         help="maintenance-only measurement before setting same-host disk/cache budgets")
     parser.add_argument("--tree")
@@ -5274,6 +5407,10 @@ def main(argv: list[str] | None = None) -> int:
             result = _archive_ack_stdin(config)
         elif args.action == "poll":
             result = poll(config)
+        elif args.action == "promote":
+            if not args.approval_digest:
+                parser.error("promote requires --approval-digest from the staged review result")
+            result = promote(config, args.approval_digest)
         elif args.action == "reconcile":
             result = reconcile(config)
         else:
@@ -5283,7 +5420,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"domestic main release stopped: {type(exc).__name__}", file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    if args.action == "release" and result.get("status") != "completed":
+    if args.action == "release" and result.get("status") not in {
+            "completed", "stage_validation_pending", "awaiting_human_approval"}:
         return 2
     return 0
 
