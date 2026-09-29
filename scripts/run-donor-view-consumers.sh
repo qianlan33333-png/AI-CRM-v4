@@ -152,8 +152,6 @@ build_frontend() {
 
 stage_frontend() {
     mkdir -p release
-    # Earlier build steps can materialize this directory. The staging script
-    # requires a fresh destination and creates it from the verified manifest.
     rm -rf -- release/web/dist
     node scripts/stage-pr01-effects-ui.mjs web/dist release/web/dist
     node scripts/test-stage-pr01-effects-ui.mjs
@@ -164,6 +162,23 @@ stage_frontend() {
     node scripts/test-stage-new-shell-ui.mjs web/dist release/web/dist
 }
 
+stage_release_fast() {
+    mkdir -p release
+    # A release-fast attempt owns a fresh checkout. Never erase an existing
+    # output here: its origin is unknown to this script.
+    if [[ -L release/web/dist ]] || { [[ -e release/web/dist ]] && [[ ! -d release/web/dist ]]; }; then
+      echo "release/web/dist is not an owned directory" >&2
+      exit 2
+    fi
+    if [[ -d release/web/dist ]] && [[ -n "$(find release/web/dist -mindepth 1 -print -quit)" ]]; then
+      echo "release/web/dist already contains output; start a fresh attempt" >&2
+      exit 2
+    fi
+    node scripts/stage-pr01-effects-ui.mjs web/dist release/web/dist
+    node scripts/stage-survey-ui.mjs web/dist release/web/dist
+    node scripts/stage-new-shell-ui.mjs web/dist release/web/dist
+}
+
 case "$mode" in
   stage)
     build_frontend
@@ -172,20 +187,12 @@ case "$mode" in
   release-fast)
     build_release_binaries
     build_frontend
-    stage_frontend
+    stage_release_fast
     cp -R migrations deploy release/
     mkdir -p release/components/excel-batches
     cp components/excel-batches/batches.py components/excel-batches/requirements.txt components/excel-batches/aicrm-excel-batches.service release/components/excel-batches/
-    (
-      cd release
-      LC_ALL=C find . -type f ! -name release-files.sha256 -print0 \
-        | sort -z \
-        | xargs -0 sha256sum > release-files.sha256
-      sha256sum --strict --check release-files.sha256
-    )
-    archive="aicrm-${GITHUB_SHA:?GITHUB_SHA is required}.tar.gz"
-    python3 scripts/create-release-archive.py release "$archive"
-    python3 scripts/write-release-provenance.py "$archive" "${archive%.tar.gz}.provenance.json"
+    # The domestic builder writes and checks the final inventory once after
+    # adding every overlay. Archive creation is an optional delivery action.
     ;;
   check)
     run_frontend_and_stage_checks

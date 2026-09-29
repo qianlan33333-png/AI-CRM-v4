@@ -109,7 +109,12 @@ try {
     assert.throws(() => execFileSync(process.execPath, ['scripts/stage-pr01-effects-ui.mjs', source, rejectedStage], { stdio: 'pipe' }), `stage must reject missing passive standard asset ${passive}`);
     fs.writeFileSync(sourceFile, bytes);
   }
+  const linkStage = path.join(root, 'link-stage');
+  fs.mkdirSync(stage);
+  fs.symlinkSync(stage, linkStage);
+  assert.throws(() => execFileSync(process.execPath, ['scripts/stage-pr01-effects-ui.mjs', source, linkStage], { stdio: 'pipe' }), 'a symlink stage must be rejected');
   execFileSync(process.execPath, ['scripts/stage-pr01-effects-ui.mjs', source, stage], { stdio: 'inherit' });
+  assert.throws(() => execFileSync(process.execPath, ['scripts/stage-pr01-effects-ui.mjs', source, stage], { stdio: 'pipe' }), 'a nonempty stage must not be reused');
   const staged = fs.readdirSync(stage, { recursive: true }).map((entry) => String(entry).split(path.sep).join('/')).sort();
   for (const file of standardComponentFiles) assert.ok(staged.includes(`assets/standard-components/${file}`), `stage omitted standard component asset ${file}`);
   assert.ok(staged.includes('assets/standard-host.js'), 'stage omitted stable standard component Host');

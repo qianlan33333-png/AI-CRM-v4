@@ -20,7 +20,10 @@ const copy = (relative) => {
 };
 
 if (!fs.statSync(source).isDirectory()) fail(`missing build directory: ${source}`);
-if (fs.existsSync(stage)) fail(`refusing to overwrite an existing stage: ${stage}`);
+const stageInfo = fs.lstatSync(stage, { throwIfNoEntry: false });
+if (stageInfo && (stageInfo.isSymbolicLink() || !stageInfo.isDirectory() || fs.readdirSync(stage).length)) {
+  fail(`refusing to overwrite a nonempty or invalid stage: ${stage}`);
+}
 if (!fs.statSync(manifestPath).isFile()) fail('missing asset-manifest.json');
 
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
