@@ -22,14 +22,14 @@ flowchart TD
 
 当前国内发布入口是 `scripts/domestic_main_release.py`。GitHub CI 调用 `scripts/ci/quality_lanes.py`；frontend lane 会运行 canonical frontend verification，但当前 workflow 不运行根 `npm run ci`，也不调用这三个旧别名。根 `npm run ci` 是本地脚本链，不是正式发布器。
 
-旧 `scripts/check-install-release-contract.sh` 需要单独审查：当前 `.github/workflows/ci.yml` 与 `scripts/ci/quality_lanes.py` 未直接调用它；`scripts/ci/local_first_gate.py` 将它列为 `OPERATOR_ONLY` 路径，`scripts/domestic_release_build.py` 将它列为 `CI_ONLY_FILES`，这些分类本身都不执行该脚本。历史验收台账曾记录 CI 执行此检查。基线与候选实跑都在原断言 `CI must promote the accepted staging package` 处退出 1；当前国内发布文档并未证明该旧断言由等价检查替代。本候选保留该脚本及断言，不把它报作通过，作为独立发布门禁审查项留给发布/CI 维护者处理。
+`scripts/check-install-release-contract.sh` 当前检查安装器与国内工作台发布合同，包括：GitHub CI 不得出现 production deploy job、生产晋级必须 root-only、人工批准需绑定精确制品与 staging receipt、预发包在晋级前重新校验并复用、安装结果需独立读回，以及安装失败需恢复上一版本。当前脚本没有旧断言 `CI must promote the accepted staging package`。它未由 `.github/workflows/ci.yml` 或 `scripts/ci/quality_lanes.py` 直接调用；`scripts/ci/local_first_gate.py` 将其归为发布 guard，`scripts/domestic_release_build.py` 将其列入不打包的 `CI_ONLY_FILES`，这些分类不是脚本执行证据。本候选不修改它；准确候选的合同脚本实跑结果与 GitHub CI 调用边界分别记录，不把静态合同测试称为国内发布收据。
 
 旧 PRD 记录的 donor manifest 首轮失败及准备后结果属于当时的专项审计。本候选以此次正式 frontend preparation/check 的实跑为准，不复用旧 SHA 的绿灯。
 
 | 旧 npm 名称 | 决定 | 现行合同边界 |
 | --- | --- | --- |
 | `edge:contract` | 明确退役失效别名，并从本地 `ci` 链删除调用；不创建无法证明语义的替代脚本 | 当前 V4 主发布流程没有 G2/Cloudflare edge 部署实现；GitHub quality lane 不运行此别名 |
-| `release:contract` | 明确退役失效别名，并从本地 `ci` 链删除调用；不宣称旧断言已有替代 | 当前 V4 发布通过国内发布器；GitHub quality lane 不运行此别名。旧安装合同脚本的失败断言单独待审，不由本候选修改或判为通过 |
+| `release:contract` | 明确退役失效别名，并从本地 `ci` 链删除调用；不创建无法证明语义的替代脚本 | 当前 V4 发布通过国内发布器；GitHub quality lane 不运行此 npm alias。独立安装合同脚本验证国内发布边界，但不是这个已缺失的 V2 npm 目标 |
 | `deploy:check` | 明确退役未被本地 `ci` 调用的失效别名 | 当前发布工作流不调用此 V2 目标，也没有对应脚本 |
 
 保留现有 `npm test` 的全部业务/页面回归，并在其第一步加入只读静态守卫：检查 root `package.json` 中字面引用的 `scripts/`、`web/scripts/` 本地文件存在且位于仓库内。未加网络、数据库、用户数据、部署或工具版本限制；未修改依赖与 lockfile。
@@ -46,7 +46,7 @@ flowchart TD
 - **Persistence：stateless。** 不访问数据库、不写业务状态；回归仅使用临时目录。
 - **External Effects：不涉及。** 不联网、不调用 Provider、不部署、不发送消息。
 - **页面影响：无 UI 改动。** 现有 npm 测试内容保持不变。
-- **PRD delta：** 延续父 brief 的“清除悬空入口并防止回归”；精确 `c2cf1fb6` 复核仍确认本地 npm 中三个 V2 别名指向不存在的文件。正式 CI/国内构建会准备 source views；冷启动 `npm test` 的缺视图错误不据此增添隐式前置门槛。旧安装合同断言是否应更新仍待独立审查，不由本候选声称等价覆盖。
+- **PRD delta：** 延续父 brief 的“清除悬空入口并防止回归”；精确 `c2cf1fb6` 复核仍确认本地 npm 中三个 V2 别名指向不存在的文件。正式 CI/国内构建会准备 source views；冷启动 `npm test` 的缺视图错误不据此增添隐式前置门槛。独立安装合同当前已断言国内工作台发布边界；本候选不修改或重新定义该合同。
 - **限制必要性：不涉及新增限制。** 只增加 package script 文件目标静态回归，不改依赖、版本门槛、网络权限或部署路径。
 
 ## 验证与边界
@@ -54,4 +54,4 @@ flowchart TD
 - 修复前准确基线三个失效 alias 均复现退出 127，见 `/Users/qianlan/Documents/Codex/2026-09-30/npm-script-targets-c2cf1fb6/evidence/npm-alias-base-repro-c2cf1fb6.log`。
 - 最终候选的准确 HEAD/tree、固定 Node/npm 版本、脚本 guard、正式 `scripts/run-donor-view-consumers.sh check` 与 affected 结果写入同目录的 round summary；affected 计划及执行摘要保留完整 lane evidence。
 - 冷启动错误和旧 Tabulator `document` 首次失败均单独保留，不能并入正式准备后的结果，也不能把旧 FLAKY 当作当前失败或绿灯。
-- 最终候选 fast、affected 计划与执行及准确 HEAD/tree 单独记录在 `/Users/qianlan/Documents/Codex/2026-09-30/npm-script-targets-c2cf1fb6/` 外部证据目录；只报告实际运行的 lane。无 Go 改动，不运行 compile。旧 `check-install-release-contract.sh` 的失败只见旧候选记录，本次不宣称在准确 `c2cf1fb6` 上验证。
+- 最终候选 fast、脚本目标 guard、安装合同脚本、affected 计划与准确 HEAD/tree 单独记录在 `/Users/qianlan/Documents/Codex/2026-09-30/npm-script-targets-c2cf1fb6/` 外部证据目录；只报告实际运行的 lane。无 Go 改动，不运行 compile。此前候选日志中对 `check-install-release-contract.sh` 旧断言失败的描述已由当前源码与准确候选实跑更正；它不作为本候选的失败或待办。
