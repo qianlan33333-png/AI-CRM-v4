@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -533,15 +534,46 @@ func TestPublicProductMediaUsesOnlyEnabledProductImageBindings(t *testing.T) {
 
 type servicePeriodPublicStub struct {
 	product productport.CheckoutProduct
-	code    string
 }
 
 func (stub *servicePeriodPublicStub) ReadPublicServicePeriodByCode(_ context.Context, code string) (productport.CheckoutProduct, error) {
-	stub.code = code
 	if code != stub.product.Code {
 		return productport.CheckoutProduct{}, errors.New("not found")
 	}
 	return stub.product, nil
+}
+
+func TestServicePeriodPublicHandlerSupportsConcurrentReads(t *testing.T) {
+	reader := &servicePeriodPublicStub{product: productport.CheckoutProduct{
+		ID: 71, ProductType: productport.ProductOptionServicePeriod, Code: "term-31", Name: "31 天服务期", PriceMinor: 12800, Currency: "CNY", Version: 4, ServicePeriodDurationDays: 31,
+	}}
+	handler, err := NewServicePeriodPublicHandler(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const requests = 16
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make(chan string, requests)
+	for range requests {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/s/term-31", nil))
+			if response.Code != http.StatusOK {
+				errs <- fmt.Sprintf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
 }
 
 type servicePeriodTestUOW struct{}
@@ -750,8 +782,8 @@ func TestPublicServicePeriodUsesExactCodeAndSeparateCheckoutRoute(t *testing.T) 
 	}
 	page := httptest.NewRecorder()
 	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/s/term-31", nil))
-	if page.Code != http.StatusOK || reader.code != "term-31" || !strings.Contains(page.Body.String(), `id="servicePeriodStateCard"`) || !strings.Contains(page.Body.String(), "<strong>31 天</strong>") || !strings.Contains(page.Body.String(), `"checkout_url":"/s/term-31/pay"`) || strings.Contains(page.Body.String(), `id="checkoutContent"`) {
-		t.Fatalf("page status=%d code=%q body=%s", page.Code, reader.code, page.Body.String())
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `id="servicePeriodStateCard"`) || !strings.Contains(page.Body.String(), "<strong>31 天</strong>") || !strings.Contains(page.Body.String(), `"checkout_url":"/s/term-31/pay"`) || strings.Contains(page.Body.String(), `id="checkoutContent"`) {
+		t.Fatalf("page status=%d body=%s", page.Code, page.Body.String())
 	}
 	payment := httptest.NewRecorder()
 	handler.ServeHTTP(payment, httptest.NewRequest(http.MethodGet, "/s/term-31/pay", nil))
