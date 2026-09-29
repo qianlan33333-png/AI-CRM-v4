@@ -3118,6 +3118,7 @@ class CumulativeBatchTests(unittest.TestCase):
             self.assertEqual(state["batch"]["controller_source_sha"], controller)
             self.assertEqual([x["head_sha"] for x in state["batch"]["members"]], [staged, controller])
             self.assertEqual(state["queue"][-1]["status"], "staged")
+            self.assertEqual(git(repo, "rev-parse", release._candidate_ref(controller)), controller)
             update.assert_called_once()
             check.assert_called_once()
 

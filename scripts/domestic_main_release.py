@@ -4430,6 +4430,7 @@ def batch_reopen(config: dict[str, Any], approval_digest: str, *,
             report = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate}-batch-reopen-{time.time_ns()}"
             controller_check = _check_report(config, repo, worktree, report,
                                              batch["head_sha"], candidate)
+            _pin_candidate(repo, candidate)
             _, bundle_meta = _create_full_bundle(repo, Path(config["work_root"]), candidate,
                                                   _tree(repo, candidate))
             controller_member = _batch_member_record({
