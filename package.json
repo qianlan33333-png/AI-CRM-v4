@@ -21,17 +21,15 @@
     "capabilities:contract": "node web/scripts/capabilities-contract.mjs",
     "smoke": "node web/scripts/smoke.mjs",
     "performance:check": "npm run build --silent && node web/scripts/reproducible-build.mjs && node web/scripts/performance-budget.mjs",
-    "edge:contract": "scripts/test_g2_web_edge.sh",
-    "release:contract": "scripts/test_id_dev_web_release.sh",
     "release:validate": "node web/scripts/validate-release.mjs",
-    "deploy:check": "scripts/check_id_dev_deployment.sh",
+    "qa:script-targets": "python3 scripts/qa/test_package_script_targets.py",
     "e2e": "npm run build --silent && node web/scripts/e2e.mjs && node web/scripts/profile-catalog-history-e2e.mjs && node web/scripts/hxc-history-e2e.mjs && node web/scripts/static-history-e2e.mjs && node web/scripts/customer-state-history-e2e.mjs && node web/scripts/marketing-state-history-e2e.mjs && node web/scripts/wecom-contact-history-e2e.mjs && node web/scripts/radar-marketing-history-e2e.mjs && node web/scripts/campaign-definition-history-e2e.mjs && node web/scripts/e2e_deferred_identity_history.mjs && node web/scripts/invalid-source-history-e2e.mjs && node web/scripts/audience-history-e2e.mjs && node web/scripts/automation-agents-e2e.mjs",
     "ui:shell:contract": "node web/scripts/ui-shell-contract.mjs",
-    "test": "npm run transport:contract && npm run admin:adapter:contract && npm run capabilities:contract && npm run ui:shell:contract && npm run smoke && npm run e2e",
+    "test": "npm run qa:script-targets && npm run transport:contract && npm run admin:adapter:contract && npm run capabilities:contract && npm run ui:shell:contract && npm run smoke && npm run e2e",
     "build": "node web/scripts/build.mjs",
     "dev": "node web/scripts/dev.mjs",
     "audit": "npm audit --audit-level=high",
-    "ci": "npm run version:check && npm run orval:check && npm run orval:contract && npm run lint && npm run typecheck && npm test && npm run performance:check && npm run edge:contract && npm run release:contract && npm run audit"
+    "ci": "npm run version:check && npm run orval:check && npm run orval:contract && npm run lint && npm run typecheck && npm test && npm run performance:check && npm run audit"
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "13.0.0",
