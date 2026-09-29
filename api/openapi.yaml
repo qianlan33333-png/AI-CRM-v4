@@ -4128,6 +4128,70 @@ paths:
       security: [{wechatPaySignature: []}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
       responses: {"200": {description: Verified and idempotently settled}, "401": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}, "503": {$ref: "#/components/responses/Unavailable"}}
+  /api/public/alipay/callback:
+    post:
+      operationId: receiveAlipayCallback
+      tags: [Transactions]
+      description: Receives the configured Alipay notification URL as an application/x-www-form-urlencoded POST. This public provider callback does not use an admin session or CSRF token; the server verifies the configured Alipay app ID and provider signature before applying the notification. The outer cross-site guard rejects a nonempty Origin that does not match the configured public origin. A configured matching Origin is authoritative even if Sec-Fetch-Site reports cross-site. If Origin is absent, requests marked cross-site by Sec-Fetch-Site are rejected; otherwise the request proceeds to signature verification. The form remains open to provider-defined string fields because the verifier consumes the complete signed form. Refund-shaped fields describe current-adapter compatibility or legacy input only; this operation does not define the separate alipay.trade.refund.apply API or any asynchronous-refund callback contract.
+      security: []
+      requestBody:
+        required: true
+        description: The encoded form body is limited to 64 KiB. Malformed forms and bodies over this limit return 400.
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                app_id: {type: string}
+                auth_app_id: {type: string}
+                notify_id: {type: string}
+                notify_time: {type: string}
+                notify_type: {type: string}
+                charset: {type: string}
+                version: {type: string}
+                sign_type: {type: string}
+                sign: {type: string}
+                out_trade_no: {type: string}
+                trade_no: {type: string}
+                trade_status: {type: string}
+                total_amount: {type: string}
+                receipt_amount: {type: string}
+                invoice_amount: {type: string}
+                buyer_pay_amount: {type: string}
+                point_amount: {type: string}
+                buyer_id: {type: string}
+                buyer_open_id: {type: string}
+                seller_id: {type: string}
+                subject: {type: string}
+                body: {type: string}
+                gmt_create: {type: string}
+                gmt_payment: {type: string}
+                fund_bill_list: {type: string}
+                passback_params: {type: string}
+                voucher_detail_list: {type: string}
+                out_request_no: {type: string, description: "Optional current-adapter compatibility field; its presence does not assert an official asynchronous refund notification."}
+                refund_amount: {type: string, description: "Optional current-adapter compatibility field; its presence does not assert an official asynchronous refund notification."}
+                refund_status: {type: string, description: "Optional legacy provider field; the callback verifier does not use it to select or confirm a refund result."}
+                refund_fee: {type: string, description: "Optional provider field; the callback verifier does not use it as the normalized refund amount."}
+                refund_reason: {type: string, description: "Optional provider field; the callback verifier does not normalize it into the verified callback."}
+                gmt_refund: {type: string, description: "Optional legacy provider timestamp; when valid it can be used as the callback occurrence time, but it does not select or confirm a refund result."}
+              additionalProperties: {type: string}
+      responses:
+        "200":
+          description: Verified callback accepted and applied; the plain-text acknowledgement prevents an Alipay retry.
+          content:
+            text/plain:
+              schema: {type: string, enum: [success]}
+        "400":
+          description: Malformed form or request body over 64 KiB.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "401": {$ref: "#/components/responses/Error"}
+        "403":
+          description: Cross-site guard rejected a mismatched nonempty Origin, or a cross-site Sec-Fetch-Site value when Origin is absent.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Unavailable"}
   /api/public/wechat-pay/callbacks/refund:
     post:
       operationId: receiveWechatPayRefundCallback
