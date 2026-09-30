@@ -2006,7 +2006,7 @@
         }
       ],
       "reason": "Document the Payment-owned EER manual-reconcile eligibility and keep the canonical OpenAPI index and lock bound to the updated contract.",
-      "review_reference": "2026-09-30 delegated PAY05/EER candidate under /Users/qianlan/Documents/Codex/2026-09-29/crm-v4-qa-resume/repo-out/pay05-eer-terminal-reconcile-brief-20260930.md; parent review of the exact authority diff is pending."
+      "review_reference": "/Users/qianlan/Documents/Codex/2026-09-29/crm-v4-qa-resume/evidence/pay05-eer-authority-review-20260930.md"
     }
   ]
 }
