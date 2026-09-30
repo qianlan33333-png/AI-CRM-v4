@@ -19,13 +19,16 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	accessdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/access/domain"
+	aiassistantport "github.com/qianlan33333-png/AI-CRM-v3/internal/aiassistant/port"
 	automationapp "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/app"
 	automationdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/domain"
 	automationhttp "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/http"
 	automationport "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/port"
 	automationprovider "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/provider"
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
+	segmentport "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/port"
 )
 
 type promptChainSecurity struct{}
@@ -145,6 +148,53 @@ func promptChainSavePublishActivate(t *testing.T, handler http.Handler, id int64
 	}
 }
 
+// Only the other domains' stable read/acceptance ports are synthetic here.
+// Preview, confirmation, prompt reading, owner UoW, item freezing and dispatch
+// all execute the production Automation implementations against PostgreSQL.
+type promptChainAudience struct {
+	configuration segmentport.ExecutionConfiguration
+}
+
+func (p promptChainAudience) AudienceExecutionConfiguration(context.Context, segmentport.PackageID) (segmentport.ExecutionConfiguration, error) {
+	return p.configuration, nil
+}
+
+type promptChainMembers struct{ automationSnapshotReader }
+
+func (promptChainMembers) Members(context.Context, segmentport.SnapshotID, string, int) (segmentport.MemberPage, error) {
+	return segmentport.MemberPage{Items: []segmentport.Member{{SnapshotID: 71, CustomerID: 1001}}}, nil
+}
+
+type promptChainContexts struct{ reads []customerdomain.CustomerID }
+
+func (p *promptChainContexts) FreezeGenerationContext(_ context.Context, id customerdomain.CustomerID) (automationport.GenerationContext, error) {
+	p.reads = append(p.reads, id)
+	return automationport.GenerationContext{Questionnaire: "synthetic customer 1001 questionnaire", RecentChats: "synthetic customer 1001 chats", Tags: "synthetic-tag", Activation: "synthetic-active"}, nil
+}
+
+type promptChainPolicy struct {
+	policy automationport.GenerationModelPolicy
+}
+
+func (p promptChainPolicy) GenerationModelPolicy(context.Context) (automationport.GenerationModelPolicy, error) {
+	return p.policy, nil
+}
+
+type promptChainPlans struct {
+	aiassistantport.TransactionalIntake
+	aiassistantport.Reader
+}
+type promptChainEffects struct {
+	calls    int
+	envelope effectport.Envelope
+}
+
+func (p *promptChainEffects) AcceptAndQueueWithin(_ context.Context, command effectport.AcceptCommand) (effectport.Projection, effectport.Receipt, error) {
+	p.calls++
+	p.envelope = command.Envelope
+	return effectport.Projection{ID: "eer_1", State: effectport.StateQueued}, effectport.Receipt{QueueReceiptID: "synthetic-acceptance"}, nil
+}
+
 func testPromptChain(t *testing.T, role, task string) {
 	native, service, runtimeService, repository, uow, handler, cleanup := promptChainService(t)
 	defer cleanup()
@@ -223,29 +273,57 @@ func testPromptChain(t *testing.T, role, task string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runID := insertGenerationTestRun(t, native)
-	item := generationTestItem(runID, 1001, "eer_1")
-	item.AgentID, item.AgentPublishedVersion, item.AgentCode = int64(published.AgentID), published.PublishedVersion, published.AgentCode
-	item.RolePrompt, item.TaskPrompt, item.ModelPolicy = published.RolePrompt, published.TaskPrompt, policy
+	configuration := segmentport.ExecutionConfiguration{PackageID: 17, PackageVersion: 4, ConfigurationVersionID: 5, Snapshot: segmentport.Snapshot{ID: 71, PackageID: 17, MemberCount: 1, State: segmentport.SnapshotPublished}, AgentID: id, AgentPublishedVersion: published.PublishedVersion, BindingVersion: 7, SenderSetVersion: 8, SenderStaffIDs: []int64{31}, Ready: true}
+	runtimeService, err = automationapp.NewRuntimeService(uow, repository, promptChainAudience{configuration}, promptChainMembers{}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = runtimeService.SetReviewPlanIntake(&promptChainPlans{}, service); err != nil {
+		t.Fatal(err)
+	}
+	effects, contexts := &promptChainEffects{}, &promptChainContexts{}
+	if err = runtimeService.SetDynamicGenerationDependencies(effects, contexts, service, promptChainPolicy{policy}); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := runtimeService.CreateBroadcastPreview(ctx, 17, 7)
+	if err != nil {
+		t.Fatalf("create long prompt preview: %v", err)
+	}
+	command := automationapp.RunConfirmCommand{PackageID: 17, PackageVersion: 4, SnapshotID: 71, AgentID: id, AgentPublishedVersion: published.PublishedVersion, PreviewDigest: hex.EncodeToString(preview.PreviewDigest[:]), Actor: 7, IdempotencyKey: "prompt-full-chain-confirm"}
+	run, err := runtimeService.ConfirmRun(ctx, command)
+	if err != nil {
+		t.Fatalf("confirm long prompt dynamic run: %v", err)
+	}
+	replay, err := runtimeService.ConfirmRun(ctx, command)
+	if err != nil || replay.ID != run.ID || effects.calls != 1 || len(contexts.reads) != 1 || contexts.reads[0] != 1001 {
+		t.Fatalf("confirmation replay/customer mismatch: run=%d replay=%d accepts=%d reads=%v err=%v", run.ID, replay.ID, effects.calls, contexts.reads, err)
+	}
+	var runs, items, receipts int
+	if err := native.QueryRow(ctx, `SELECT (SELECT count(*) FROM automation_runs),(SELECT count(*) FROM automation_generation_items),(SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation='confirm_run' AND state='completed')`).Scan(&runs, &items, &receipts); err != nil || runs != 1 || items != 1 || receipts != 1 {
+		t.Fatalf("confirmation replay counts runs/items/receipts=%d/%d/%d err=%v", runs, items, receipts, err)
+	}
+	var item automationdomain.GenerationItem
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		var err error
+		item, err = repository.GenerationByEffect(tx, "eer_1")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if item.RunID != run.ID || item.CustomerID != 1001 || item.SenderStaffID != 31 || item.RolePrompt != role || item.TaskPrompt != task {
+		t.Fatal("confirmation did not freeze exact prompts for synthetic customer")
+	}
+	expectedContext := automationport.GenerationContext{Questionnaire: "synthetic customer 1001 questionnaire", RecentChats: "synthetic customer 1001 chats", Tags: "synthetic-tag", Activation: "synthetic-active"}
+	if item.Context != expectedContext {
+		t.Fatal("frozen context differs from independent expected customer data")
+	}
 	// Upgrading from 0115 retains both nonempty checks, and never rewrites frozen data.
 	var nonemptyChecks int
 	if err := native.QueryRow(ctx, `SELECT count(*) FROM pg_constraint WHERE conrelid='automation_generation_items'::regclass AND conname IN ('automation_generation_items_role_prompt_check','automation_generation_items_task_prompt_check') AND pg_get_constraintdef(oid) NOT LIKE '%16000%'`).Scan(&nonemptyChecks); err != nil || nonemptyChecks != 2 {
 		t.Fatalf("prompt migration checks=%d err=%v", nonemptyChecks, err)
 	}
-	var createdItem automationdomain.GenerationItem
-	err = uow.Within(ctx, func(tx context.Context) error {
-		items, createErr := repository.CreateGenerationItems(tx, []automationdomain.GenerationItem{item})
-		if createErr != nil {
-			return createErr
-		}
-		createdItem = items[0]
-		return repository.BindGenerationEffect(tx, createdItem.ID, "eer_1", time.Now().UTC())
-	})
-	if err != nil {
-		t.Fatalf("insert synthetic queued generation row: %v", err)
-	}
 	for _, column := range []string{"role_prompt", "task_prompt"} {
-		if _, err := native.Exec(ctx, "UPDATE automation_generation_items SET "+column+"='' WHERE id=$1", createdItem.ID); err == nil {
+		if _, err := native.Exec(ctx, "UPDATE automation_generation_items SET "+column+"='' WHERE id=$1", item.ID); err == nil {
 			t.Fatalf("database accepted empty %s", column)
 		}
 	}
@@ -254,6 +332,9 @@ func testPromptChain(t *testing.T, role, task string) {
 		t.Fatalf("DB GenerationDispatch found=%v role=%d/%d task=%d/%d err=%v", found, len([]byte(dispatch.RolePrompt)), len([]byte(role)), len([]byte(dispatch.TaskPrompt)), len([]byte(task)), err)
 	}
 	payloadDigest := effectport.Digest(dispatch.PayloadDigest)
+	if payloadDigest != effects.envelope.PayloadDigest {
+		t.Fatal("accepted payload differs from dispatch")
+	}
 	provider, err := automationprovider.NewGenerationProvider(config, runtimeService)
 	if err != nil {
 		t.Fatal(err)

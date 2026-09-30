@@ -25,6 +25,6 @@ flowchart LR
 
 ## 验证与边界
 
-私有PG16测试覆盖ASCII、CJK、emoji超过旧阈值的HTTP创建/更新、发布/激活、HTTP和SQL字节相等、PublishedGeneration、冻结generation item、dispatch及loopback Provider完整system/user序列，Provider HTTP拒绝保持明确失败。负向校验包含空冻结Prompt、错误发布版本；现有模块全集继续覆盖授权、重复/取消、版本变化和客户隔离。真实页面使用原登录/session/CSRF，输入长Prompt后保存、刷新、发布并服务端精确读回。
+私有PG16测试覆盖ASCII、CJK、emoji超过旧阈值的HTTP创建/更新、发布/激活、HTTP和SQL字节相等、PublishedGeneration、真实CreateBroadcastPreview/ConfirmRun/confirmDynamicRun、冻结generation item、dispatch及loopback Provider完整system/user序列，Provider HTTP拒绝保持明确失败。确认重复请求只保留一个run/item/完成收据及一次接受调用；人群、客户上下文及EER接受稳定Port使用合成stub，不冒称实际EER/River受理验收。负向校验包含空冻结Prompt、错误发布版本；现有模块全集继续覆盖授权、重复/取消、版本变化和客户隔离。真实页面使用原登录/session/CSRF，输入长Prompt后保存、刷新、发布并服务端精确读回。
 
 L40负责完整HTTP body解析；在合入L40前，本候选使用各自小于128KiB的独立字段PATCH，不能将此称为大于128KiB的单请求验收。最终组合请求须在L40累计基线重验。真实Provider/资金、Linux受信任检查、共享预发和生产均由发布工作台另验，E3负载/长稳暂停。
