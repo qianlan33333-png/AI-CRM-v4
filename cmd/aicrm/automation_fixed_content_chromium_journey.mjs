@@ -171,7 +171,8 @@ try {
   await evaluate(cdp, "(() => { window.__automationFixedContentRequests=window.__automationFixedContentBootRequests; return true; })()");
 
   if (process.env.AICRM_AUTOMATION_PROMPT_TEST === "true") {
-    const role = "中".repeat(20001), task = "R".repeat(24000);
+    const role = "中".repeat(20001), task = "🚀".repeat(24000);
+    if (Buffer.byteLength(JSON.stringify({role_prompt:role,task_prompt:task})) <= 128*1024) throw new Error("prompt journey must exceed former HTTP reader limit");
     async function openPrompts() {
       await evaluate(cdp, `(() => { const tab=[...document.querySelectorAll('nav button')].find(n=>n.textContent?.replace(/\\s/g,'')==='3Prompt配置'); if (!tab) throw new Error('prompt tab missing'); tab.dataset.promptJourneyTab='1'; return true; })()`);
       await pointerClick(cdp, '[data-prompt-journey-tab="1"]', 'open prompt tab');

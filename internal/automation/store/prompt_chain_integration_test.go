@@ -127,18 +127,15 @@ func promptChainCreate(t *testing.T, handler http.Handler, code, role, task stri
 func promptChainSavePublishActivate(t *testing.T, handler http.Handler, id int64, role, task, suffix string) {
 	t.Helper()
 	path := "/api/admin/automation-agents/" + strconv.FormatInt(id, 10)
-	var response *httptest.ResponseRecorder
-	for field, value := range map[string]string{"role_prompt": role, "task_prompt": task} {
-		body, err := json.Marshal(map[string]string{field: value})
-		if err != nil {
-			t.Fatal(err)
-		}
-		response = promptChainRequest(t, handler, http.MethodPatch, path, "prompt-update-"+suffix+field, body)
-		if response.Code != http.StatusOK {
-			t.Fatalf("update %s status=%d", field, response.Code)
-		}
-		t.Logf("HTTP PATCH %s request_bytes=%d sha256=%s", field, len(body), promptChainHash(body))
+	body, err := json.Marshal(map[string]string{"role_prompt": role, "task_prompt": task})
+	if err != nil {
+		t.Fatal(err)
 	}
+	response := promptChainRequest(t, handler, http.MethodPatch, path, "prompt-update-"+suffix, body)
+	if response.Code != http.StatusOK {
+		t.Fatalf("combined prompt update status=%d request_bytes=%d", response.Code, len(body))
+	}
+	t.Logf("HTTP PATCH combined role/task request_bytes=%d sha256=%s", len(body), promptChainHash(body))
 	for _, step := range []struct{ tail, key string }{{"/publish", "publish"}, {"/activate", "activate"}} {
 		response = promptChainRequest(t, handler, http.MethodPost, path+step.tail, "scratch-"+step.key+"-key-"+suffix, nil)
 		if response.Code != http.StatusOK {
@@ -199,7 +196,7 @@ func testPromptChain(t *testing.T, role, task string) {
 	native, service, runtimeService, repository, uow, handler, cleanup := promptChainService(t)
 	defer cleanup()
 	ctx := context.Background()
-	initialRole, initialTask := role, "task-initial"
+	initialRole, initialTask := "initial-"+role, "initial-"+task
 	id := promptChainCreate(t, handler, "prompt_full_chain", initialRole, initialTask, "pass-001")
 
 	promptChainSavePublishActivate(t, handler, id, role, task, "pass-001")
@@ -348,7 +345,7 @@ func testPromptChain(t *testing.T, role, task string) {
 	}
 	t.Logf("DB GenerationDispatch effect=%s item=%d state=queued role_bytes=%d role_sha256=%s task_bytes=%d task_sha256=%s", dispatch.EffectID, dispatch.ItemID, len([]byte(dispatch.RolePrompt)), promptChainHash([]byte(dispatch.RolePrompt)), len([]byte(dispatch.TaskPrompt)), promptChainHash([]byte(dispatch.TaskPrompt)))
 	t.Logf("PROVIDER local httptest request_bytes=%d request_sha256=%s system_bytes=%d system_sha256=%s user_task_prefix_bytes=%d task_sha256=%s; Adapter completion=%s (loopback synthetic only)", len(observedProviderBody), promptChainHash(observedProviderBody), len([]byte(observedSystem)), promptChainHash([]byte(observedSystem)), len([]byte(task)), promptChainHash([]byte(task)), result.Completion)
-	t.Logf("PASS save→publish→read→DB GenerationDispatch→provider byte-equality: separate role/task PATCH requests; DB+published+generation row+provider system/task bytes exact beyond former prompt bounds")
+	t.Logf("PASS save→publish→read→DB GenerationDispatch→provider byte-equality: combined role/task PATCH request; DB+published+generation row+provider system/task bytes exact beyond former prompt bounds")
 	reject = true
 	rejected, err := provider.Execute(ctx, effectport.Envelope{Owner: effectport.OwnerAutomation, Kind: effectport.KindAIAgentGenerate, PayloadDigest: payloadDigest}, effectport.Attempt{EffectID: "eer_1", Number: 1, Generation: 1, Fence: 1})
 	if err != nil || rejected.Completion != effectport.StateFinalFailed || rejected.FailureCode != "generation_http_rejected" || !rejected.CallAttempted {

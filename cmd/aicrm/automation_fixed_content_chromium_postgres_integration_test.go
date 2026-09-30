@@ -149,7 +149,7 @@ func runAutomationContentJourney(t *testing.T, lifecycle bool) {
 		t.Fatal(err)
 	}
 	if promptJourney {
-		if payload.Agent.DraftRolePrompt != strings.Repeat("中", 20001) || payload.Agent.DraftTaskPrompt != strings.Repeat("R", 24000) || payload.Agent.DraftVersion != 2 || payload.Agent.PublishedVersion != 2 {
+		if payload.Agent.DraftRolePrompt != strings.Repeat("中", 20001) || payload.Agent.DraftTaskPrompt != strings.Repeat("🚀", 24000) || payload.Agent.DraftVersion != 2 || payload.Agent.PublishedVersion != 2 {
 			t.Fatalf("long prompt authenticated server readback mismatch: role=%d task=%d versions=%d/%d", len(payload.Agent.DraftRolePrompt), len(payload.Agent.DraftTaskPrompt), payload.Agent.DraftVersion, payload.Agent.PublishedVersion)
 		}
 		return

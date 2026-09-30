@@ -2009,7 +2009,7 @@
       "review_reference": "/Users/qianlan/Documents/Codex/2026-09-29/crm-v4-qa-resume/evidence/pay05-eer-authority-review-e3fed-20260930.md"
     },
     {
-      "base_commit": "769b11e30c9adce1299938944ac048147fab67b5",
+      "base_commit": "78efa522dde77e9beae48a82c647e2d98adec118",
       "changes": [
         {
           "path": "api/openapi.yaml",
