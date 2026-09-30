@@ -1384,6 +1384,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = openPlatformExecutor.BindV1OperationAudit(accessRepository, uow); err != nil {
 		return fail(err)
 	}
+	if err = openPlatformExecutor.BindV1MachineMutationFence(machineService, uow); err != nil {
+		return fail(err)
+	}
 	if err = openPlatformExecutor.BindV1AI(aiService, aiService, uow); err != nil {
 		return fail(err)
 	}

@@ -51,14 +51,14 @@ func (executor *openPlatformExecutor) Available(_ context.Context, principal acc
 		openplatformport.OperationCoreMembers:          executor.coreAudience != nil,
 		openplatformport.OperationCoreMemberOperations: executor.coreAudience != nil,
 		openplatformport.OperationCoreMemberHistory:    executor.coreAudience != nil,
-		openplatformport.OperationCorePushRecord:       executor.coreAudience != nil,
+		openplatformport.OperationCorePushRecord:       executor.coreAudience != nil && executor.machineMutationAuth != nil && executor.machineMutationUOW != nil && executor.operationAudit != nil,
 		openplatformport.OperationCustomerResolve:      executor.identity != nil,
 		openplatformport.OperationCustomerContext:      executor.profiles != nil,
 		openplatformport.OperationCustomerList:         executor.contacts != nil && executor.contactStatuses != nil && executor.contactStaff != nil && executor.contactWindows != nil && executor.contactReadUOW != nil && executor.contactWriteUOW != nil && len(executor.v1ExternalCursorKey) >= 16,
 		// Activities and AI are enabled only by their explicit V1 binders. The
 		// legacy compatibility readers are deliberately not a substitute.
 		openplatformport.OperationCustomerActivities:       executor.activities != nil,
-		openplatformport.OperationAIReviewPlanCreate:       executor.aiMachineIntake != nil && executor.aiMachineReader != nil && executor.aiUOW != nil,
+		openplatformport.OperationAIReviewPlanCreate:       executor.aiMachineIntake != nil && executor.aiMachineReader != nil && executor.aiUOW != nil && executor.machineMutationAuth != nil && executor.operationAudit != nil,
 		openplatformport.OperationGet:                      executor.aiMachineReader != nil,
 		openplatformport.OperationOrderList:                executor.v1Orders != nil && executor.v1Refunds != nil,
 		openplatformport.OperationOrderGet:                 executor.v1Orders != nil && executor.v1Refunds != nil,

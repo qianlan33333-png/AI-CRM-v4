@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	accessdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/access/domain"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
@@ -16,6 +17,10 @@ import (
 func coreAudienceError(err error) error {
 	if err == nil {
 		return nil
+	}
+	var operationError *openplatformport.OperationError
+	if errors.As(err, &operationError) {
+		return err
 	}
 	code := openplatformport.ErrorDependencyUnavailable
 	switch err.Error() {
@@ -100,7 +105,18 @@ func (e *openPlatformExecutor) v1CoreAudience(ctx context.Context, in openplatfo
 		} else if len(key) < 16 {
 			key = fmt.Sprintf("audience-header-%x", sha256.Sum256([]byte(key)))
 		}
-		result, err := e.coreAudience.RecordSupervisedPush(ctx, in.Principal.ClientID, key, push)
+		if e.machineMutationUOW == nil || e.machineMutationAuth == nil {
+			return openplatformport.Result{}, openplatformport.NewError(openplatformport.ErrorDependencyUnavailable, "machine write authorization is unavailable")
+		}
+		var result segmentport.CorePush
+		err := e.machineMutationUOW.Within(ctx, func(tx context.Context) error {
+			if authErr := e.authorizeMachineMutationWithin(tx, in.Principal, openplatformport.OperationCorePushRecord); authErr != nil {
+				return authErr
+			}
+			var writeErr error
+			result, writeErr = e.coreAudience.RecordSupervisedPushWithin(tx, in.Principal.ClientID, key, push)
+			return writeErr
+		})
 		return openplatformport.Result{Data: result}, coreAudienceError(err)
 	}
 	var input struct {

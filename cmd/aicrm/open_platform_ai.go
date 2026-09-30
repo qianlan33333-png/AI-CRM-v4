@@ -46,7 +46,7 @@ type v1OperationInput struct {
 }
 
 func (executor *openPlatformExecutor) v1CreateAIReviewPlan(ctx context.Context, principal accessdomain.MachinePrincipal, raw json.RawMessage, idempotencyKey, requestID string) (openplatformport.Result, error) {
-	if executor == nil || executor.aiMachineIntake == nil || executor.aiUOW == nil || executor.operationAudit == nil {
+	if executor == nil || executor.aiMachineIntake == nil || executor.aiUOW == nil || executor.operationAudit == nil || executor.machineMutationAuth == nil {
 		return openplatformport.Result{}, openplatformport.NewError(openplatformport.ErrorDependencyUnavailable, "AI review plans are unavailable")
 	}
 	var input v1AIReviewPlanInput
@@ -74,6 +74,9 @@ func (executor *openPlatformExecutor) v1CreateAIReviewPlan(ctx context.Context, 
 	command := aiassistantport.MachineCreatePlanCommand{Actor: actor, IdempotencyKey: idempotencyKey, Name: input.Name, SourceKind: input.SourceKind, SourceDigest: input.SourceDigest, Recipients: input.Recipients, OccurredAt: time.Now().UTC()}
 	var result aiassistantport.MachineCreatePlanResult
 	err = executor.aiUOW.Within(ctx, func(tx context.Context) error {
+		if authErr := executor.authorizeMachineMutationWithin(tx, principal, openplatformport.OperationAIReviewPlanCreate); authErr != nil {
+			return authErr
+		}
 		var createErr error
 		result, createErr = executor.aiMachineIntake.CreateMachinePlanWithin(tx, command)
 		if createErr != nil {
@@ -99,7 +102,7 @@ func (executor *openPlatformExecutor) v1CreateAIReviewPlan(ctx context.Context, 
 // approval of this source kind is disabled until authoritative send gates and
 // the synthetic allowlist are composed.
 func (executor *openPlatformExecutor) v1CreateWorkbenchPackage(ctx context.Context, principal accessdomain.MachinePrincipal, input v1AIReviewPlanInput, idempotencyKey, requestID string) (openplatformport.Result, error) {
-	if executor.workbenchUnions == nil || executor.identity == nil || executor.contacts == nil || executor.contactStatuses == nil || executor.contactStaff == nil || executor.operationAudit == nil || executor.aiUOW == nil || len(executor.scopes.SurveyUnionScopes) != 1 {
+	if executor.workbenchUnions == nil || executor.identity == nil || executor.contacts == nil || executor.contactStatuses == nil || executor.contactStaff == nil || executor.operationAudit == nil || executor.aiUOW == nil || executor.machineMutationAuth == nil || len(executor.scopes.SurveyUnionScopes) != 1 {
 		return openplatformport.Result{}, openplatformport.NewError(openplatformport.ErrorDependencyUnavailable, "workbench identity scope is unavailable")
 	}
 	if input.Package == nil || !input.Package.Valid() || input.Package.MemberCount != len(input.Members) || len(input.Members) < 1 || len(input.Members) > 10 || len(input.Recipients) != 0 || len(input.Content) == 0 || len(input.Content) > aiassistantport.MaxMessagesPerTarget || strings.TrimSpace(input.Name) == "" || !stringIn(principal.OwnerScope["corp_id"], principal.CorpID) {
@@ -224,6 +227,9 @@ func (executor *openPlatformExecutor) v1CreateWorkbenchPackage(ctx context.Conte
 			return openplatformport.NewDetailedError(openplatformport.ErrorConflict, "workbench package contains rejected members", map[string]any{"created": false, "members": decisions})
 		}
 		command := aiassistantport.MachineCreatePlanCommand{Actor: actor, IdempotencyKey: idempotencyKey, Name: input.Name, SourceKind: "scrm_workbench", SourceDigest: effectport.Digest(input.Package.SourceFingerprint), Recipients: recipients, Package: input.Package, OccurredAt: time.Now().UTC()}
+		if authErr := executor.authorizeMachineMutationWithin(tx, principal, openplatformport.OperationAIReviewPlanCreate); authErr != nil {
+			return authErr
+		}
 		result, readErr = executor.aiMachineIntake.CreateMachinePlanWithin(tx, command)
 		if readErr != nil {
 			return v1AIError(readErr)
@@ -303,6 +309,10 @@ func parseV1AIReviewPlanOperationID(value string) (aiassistantport.PlanID, error
 }
 
 func v1AIError(err error) error {
+	var operationError *openplatformport.OperationError
+	if errors.As(err, &operationError) {
+		return err
+	}
 	// AI's stable Port intentionally exposes only errors, not its app package.
 	// Invalid or conflicting machine commands are never treated as an accepted
 	// operation; unavailable ownership/read failures remain retryable at the

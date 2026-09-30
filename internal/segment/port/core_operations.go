@@ -102,6 +102,10 @@ type CoreRecommendation struct {
 // It never authenticates a caller itself and cannot trigger message delivery.
 type CoreSupervision interface {
 	RecordSupervisedPush(context.Context, string, string, CorePush) (CorePush, error)
+	// RecordSupervisedPushWithin uses the caller's existing Unit of Work. It
+	// must not open a nested transaction and keeps its receipt/facts atomic
+	// with the owner mutation and any caller-owned authorization fence.
+	RecordSupervisedPushWithin(context.Context, string, string, CorePush) (CorePush, error)
 }
 
 // CoreOperationsReader exposes the existing audience snapshot and its CRM-owned

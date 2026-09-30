@@ -95,6 +95,8 @@ type openPlatformExecutor struct {
 	activities          *openPlatformActivityReaders
 	activityNow         func() time.Time
 	operationAudit      *openPlatformOperationAuditor
+	machineMutationAuth accessport.MachineMutationAuthorizer
+	machineMutationUOW  platformport.UnitOfWork
 	aiMachineIntake     aiassistantport.MachineTransactionalIntake
 	aiMachineReader     aiassistantport.MachineReader
 	aiUOW               platformport.UnitOfWork
@@ -205,6 +207,42 @@ func (executor *openPlatformExecutor) BindV1OperationAudit(writer openPlatformMa
 	}
 	executor.operationAudit = &openPlatformOperationAuditor{writer: writer, uow: uow}
 	return nil
+}
+
+// BindV1MachineMutationFence installs Access's in-transaction machine grant
+// revalidator and the Unit of Work shared by machine write owners. A protected
+// write is unavailable unless both are composed; the fence stays held until
+// the owner's receipt, business state, and audit commit together.
+func (executor *openPlatformExecutor) BindV1MachineMutationFence(authorizer accessport.MachineMutationAuthorizer, uow platformport.UnitOfWork) error {
+	if executor == nil || authorizer == nil || uow == nil {
+		return errOpenPlatformRouteUnavailable
+	}
+	executor.machineMutationAuth, executor.machineMutationUOW = authorizer, uow
+	return nil
+}
+
+func (executor *openPlatformExecutor) authorizeMachineMutationWithin(ctx context.Context, principal accessdomain.MachinePrincipal, operation openplatformport.OperationID) error {
+	if executor == nil || executor.machineMutationAuth == nil {
+		return openplatformport.NewError(openplatformport.ErrorDependencyUnavailable, "machine write authorization is unavailable")
+	}
+	descriptor, ok := openplatformport.DescriptorForOperation(operation)
+	if !ok || descriptor.RequiredScope != "write" {
+		return openplatformport.NewError(openplatformport.ErrorDependencyUnavailable, "machine write authorization is unavailable")
+	}
+	err := executor.machineMutationAuth.AuthorizeMachineMutationWithin(ctx, principal, accessport.MachineMutationRequirement{
+		Audience: principal.Audience, Scope: descriptor.RequiredScope, Capability: string(descriptor.Capability),
+	})
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, accessdomain.ErrMachineCredential), errors.Is(err, accessdomain.ErrMachineClientDisabled), errors.Is(err, accessdomain.ErrMachineClientExpired), errors.Is(err, accessdomain.ErrMachineReissueRequired):
+		return openplatformport.NewError(openplatformport.ErrorAuthentication, "machine credentials are no longer valid")
+	case errors.Is(err, accessdomain.ErrMachineAudience), errors.Is(err, accessdomain.ErrMachineScope):
+		return openplatformport.NewError(openplatformport.ErrorPermission, "machine write grant is no longer valid")
+	default:
+		return openplatformport.NewError(openplatformport.ErrorDependencyUnavailable, "machine write authorization is unavailable")
+	}
 }
 
 // BindV1CustomerActivities installs the four owner-owned projections needed

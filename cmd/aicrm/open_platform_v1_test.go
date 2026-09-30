@@ -366,13 +366,15 @@ func TestV1CustomerScopeOwnerFailureIsUnavailableBeforeContextOrActivities(t *te
 }
 
 type v1AIMachineStub struct {
-	command aiassistantport.MachineCreatePlanCommand
-	create  aiassistantport.MachineCreatePlanResult
-	status  aiassistantport.MachineOperationStatus
-	err     error
+	command     aiassistantport.MachineCreatePlanCommand
+	createCalls int
+	create      aiassistantport.MachineCreatePlanResult
+	status      aiassistantport.MachineOperationStatus
+	err         error
 }
 
 func (stub *v1AIMachineStub) CreateMachinePlanWithin(_ context.Context, command aiassistantport.MachineCreatePlanCommand) (aiassistantport.MachineCreatePlanResult, error) {
+	stub.createCalls++
 	stub.command = command
 	return stub.create, stub.err
 }
@@ -399,6 +401,8 @@ func TestV1AICreateAndStatusUseMachineActorAndAtomicAudit(t *testing.T) {
 	if err := executor.BindV1AI(ai, ai, directUnitOfWork{}); err != nil {
 		t.Fatal(err)
 	}
+	authorizer := &openPlatformMachineMutationAuthorizerStub{}
+	bindOpenPlatformTestMachineMutationFence(t, executor, authorizer)
 	writePrincipal := accessdomain.MachinePrincipal{ClientID: "client-a", ClientRecord: 7, Scopes: []string{"write"}, Capabilities: []string{string(openplatformport.CapabilityAIReviewPlanCreate)}}
 	sourceDigest := effectport.Hash("v1-ai-test")
 	input, _ := json.Marshal(map[string]any{"name": "review", "source_kind": "open_platform", "source_digest": sourceDigest, "recipients": []any{map[string]any{"customer_id": 42, "staff_id": 8, "content": []any{map[string]any{"kind": "text", "text": "hello"}}}}})
@@ -406,8 +410,8 @@ func TestV1AICreateAndStatusUseMachineActorAndAtomicAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ai.command.Actor.Reference != "machine:client-a" || ai.command.Actor.StaffID != 0 || audit.calls != 1 || audit.audit.Outcome != "succeeded" || !strings.Contains(string(audit.audit.Details), "request_id_digest") {
-		t.Fatalf("command=%+v audit=%+v", ai.command, audit.audit)
+	if ai.command.Actor.Reference != "machine:client-a" || ai.command.Actor.StaffID != 0 || audit.calls != 1 || audit.audit.Outcome != "succeeded" || !strings.Contains(string(audit.audit.Details), "request_id_digest") || authorizer.calls != 1 || authorizer.requirement.Capability != "ai.review_plan.create" {
+		t.Fatalf("command=%+v audit=%+v authorization=%+v", ai.command, audit.audit, authorizer)
 	}
 	if data := created.Data.(map[string]any); data["operation_id"] != "ai_review_plan:12" || data["review_state"] != aiassistantport.ReviewPending {
 		t.Fatalf("create=%#v", data)

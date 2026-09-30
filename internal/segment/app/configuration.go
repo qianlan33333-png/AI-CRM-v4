@@ -514,36 +514,49 @@ func (s *Service) mutate(ctx context.Context, operation string, actor segmentpor
 	if !s.ready() || !actor.Valid() || len(key) < 16 || len(key) > 128 || strings.TrimSpace(key) != key || apply == nil {
 		return nil, ErrInvalid
 	}
-	now := s.now().UTC()
-	reservation := segmentstore.Reservation{Operation: operation, ActorScope: actorScope(actor), ActorKind: string(actor.Kind), ActorRef: actor.Reference, KeyDigest: sha256.Sum256([]byte(key)), PayloadDigest: sha256.Sum256(payload), CreatedAt: now}
 	var result json.RawMessage
 	err := s.uow.Within(ctx, func(tx context.Context) error {
-		receipt, owned, err := s.store.Reserve(tx, reservation)
-		if err != nil {
-			return err
-		}
-		if !owned {
-			if receipt.State != "completed" || len(receipt.ResultSnapshot) == 0 {
-				return ErrConflict
-			}
-			result = append(result[:0], receipt.ResultSnapshot...)
-			return nil
-		}
-		value, event, err := apply(tx)
-		if err != nil {
-			return err
-		}
-		result, err = json.Marshal(value)
-		if err != nil {
-			return err
-		}
-		if _, err = s.store.AppendMutationFacts(tx, event); err != nil {
-			return err
-		}
-		_, err = s.store.Complete(tx, receipt.ID, result, now)
+		var err error
+		result, err = s.mutateWithin(tx, operation, actor, key, payload, apply)
 		return err
 	})
 	return result, err
+}
+
+// mutateWithin keeps the durable receipt, owner mutation, fact, and completion
+// inside the transaction supplied by the caller. It does not open a nested UOW.
+func (s *Service) mutateWithin(ctx context.Context, operation string, actor segmentport.MutationActor, key string, payload json.RawMessage, apply func(context.Context) (any, segmentstore.MutationFact, error)) (json.RawMessage, error) {
+	if !s.ready() || !actor.Valid() || len(key) < 16 || len(key) > 128 || strings.TrimSpace(key) != key || apply == nil {
+		return nil, ErrInvalid
+	}
+	now := s.now().UTC()
+	reservation := segmentstore.Reservation{Operation: operation, ActorScope: actorScope(actor), ActorKind: string(actor.Kind), ActorRef: actor.Reference, KeyDigest: sha256.Sum256([]byte(key)), PayloadDigest: sha256.Sum256(payload), CreatedAt: now}
+	var result json.RawMessage
+	receipt, owned, err := s.store.Reserve(ctx, reservation)
+	if err != nil {
+		return nil, err
+	}
+	if !owned {
+		if receipt.State != "completed" || len(receipt.ResultSnapshot) == 0 {
+			return nil, ErrConflict
+		}
+		return append(result[:0], receipt.ResultSnapshot...), nil
+	}
+	value, event, err := apply(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result, err = json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = s.store.AppendMutationFacts(ctx, event); err != nil {
+		return nil, err
+	}
+	if _, err = s.store.Complete(ctx, receipt.ID, result, now); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 type actorConfigurationStore interface {

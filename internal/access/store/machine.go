@@ -14,6 +14,7 @@ import (
 )
 
 var _ accessport.MachineRepository = (*PostgreSQL)(nil)
+var _ accessport.MachineClientMutationRepository = (*PostgreSQL)(nil)
 var _ accessport.MachineHistoricalRepository = (*PostgreSQL)(nil)
 var _ accessport.MachineHistoricalVerificationRepository = (*PostgreSQL)(nil)
 var _ accessport.MachineHistoricalAuditRepository = (*PostgreSQL)(nil)
@@ -29,6 +30,26 @@ func (*PostgreSQL) MachineClientByID(ctx context.Context, clientID string, lock 
 		query += ` FOR UPDATE OF c`
 	}
 	client, err := scanMachineClient(database.QueryRow(ctx, query, clientID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.MachineClient{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.MachineClient{}, err
+	}
+	client.Capabilities, err = machineCapabilities(ctx, database, client.ID)
+	return client, err
+}
+
+// MachineClientForMutation locks the Access-owned credential row in the
+// caller's transaction. Access revocation writers use FOR UPDATE on this same
+// row, so exactly one side can pass the commit boundary first. Ordinary SQL
+// reads remain compatible with this shared row lock.
+func (*PostgreSQL) MachineClientForMutation(ctx context.Context, clientID string) (domain.MachineClient, error) {
+	database, err := tx(ctx)
+	if err != nil {
+		return domain.MachineClient{}, err
+	}
+	client, err := scanMachineClient(database.QueryRow(ctx, machineClientSelect+` WHERE c.client_id=$1 FOR SHARE OF c`, clientID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.MachineClient{}, domain.ErrNotFound
 	}

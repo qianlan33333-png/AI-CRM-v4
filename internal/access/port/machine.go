@@ -21,6 +21,29 @@ type MachineRepository interface {
 	ListMachineAudit(context.Context, int64, int) ([]MachineAuditEntry, error)
 }
 
+// MachineClientMutationRepository exposes an Access-owned row fence for a
+// caller's existing PostgreSQL Unit of Work. MachineClientForMutation must
+// acquire a shared row lock that conflicts with Access grant/revocation writes.
+type MachineClientMutationRepository interface {
+	MachineClientForMutation(context.Context, string) (domain.MachineClient, error)
+}
+
+// MachineMutationRequirement is the operation's already-catalogued machine
+// authorization boundary. Access rechecks the token snapshot and live grants
+// while the caller's business transaction holds the client-row fence.
+type MachineMutationRequirement struct {
+	Audience   string
+	Scope      string
+	Capability string
+}
+
+// MachineMutationAuthorizer is used only inside the same Unit of Work that
+// commits a protected business mutation. Implementations must not open a
+// nested transaction; the row fence lasts until that Unit of Work ends.
+type MachineMutationAuthorizer interface {
+	AuthorizeMachineMutationWithin(context.Context, domain.MachinePrincipal, MachineMutationRequirement) error
+}
+
 // The following DTOs are the stable Access boundary consumed by the machine
 // HTTP host. They contain no secret hash or administrator role.
 type CreateMachineClientInput struct {

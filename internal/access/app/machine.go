@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"reflect"
 	"strings"
 	"time"
 	"unicode"
@@ -138,6 +139,7 @@ type HistoricalMachineImportInput = accessport.HistoricalMachineImportInput
 type HistoricalMachineImportResult = accessport.HistoricalMachineImportResult
 
 var _ accessport.MachineTokenIssuer = (*MachineService)(nil)
+var _ accessport.MachineMutationAuthorizer = (*MachineService)(nil)
 var _ accessport.MachineManagement = (*MachineService)(nil)
 
 func NewMachineService(repository accessport.MachineRepository, uow platformport.UnitOfWork, passwords Passwords, config MachineConfig) (*MachineService, error) {
@@ -643,6 +645,59 @@ func (service *MachineService) authenticateJWT(ctx context.Context, token, audie
 		return nil
 	})
 	return principal, err
+}
+
+// AuthorizeMachineMutationWithin revalidates a machine principal against
+// current Access state while the caller's business Unit of Work holds a shared
+// lock on the credential row. The caller must invoke it before any business
+// receipt, audit, outbox, or domain write. Access revocation paths take FOR
+// UPDATE on the same row and advance AuthVersion in that transaction.
+func (service *MachineService) AuthorizeMachineMutationWithin(ctx context.Context, principal domain.MachinePrincipal, requirement accessport.MachineMutationRequirement) error {
+	if service == nil || principal.ClientID == "" || principal.ClientRecord < 1 || requirement.Audience == "" || requirement.Scope == "" || requirement.Capability == "" {
+		return domain.ErrMachineCredential
+	}
+	if _, ok := machineAudiences[requirement.Audience]; !ok {
+		return domain.ErrMachineAudience
+	}
+	if _, ok := machineScopes[requirement.Scope]; !ok {
+		return domain.ErrMachineScope
+	}
+	if _, ok := machineCapabilities[requirement.Capability]; !ok {
+		return domain.ErrMachineScope
+	}
+	repository, ok := service.repository.(accessport.MachineClientMutationRepository)
+	if !ok || repository == nil {
+		return domain.ErrMachineIssuerUnready
+	}
+	client, err := repository.MachineClientForMutation(ctx, principal.ClientID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.ErrMachineCredential
+	}
+	if err != nil {
+		return err
+	}
+	if client.ID != principal.ClientRecord || client.ClientID != principal.ClientID || client.AuthVersion != principal.AuthVersion || principal.DirectKey != (client.Purpose == "direct_api_key") || client.CorpID != principal.CorpID || !reflect.DeepEqual(client.OwnerScope, principal.OwnerScope) {
+		return domain.ErrMachineCredential
+	}
+	if !client.Enabled {
+		return domain.ErrMachineClientDisabled
+	}
+	if client.ReissueRequired {
+		return domain.ErrMachineReissueRequired
+	}
+	if client.ExpiresAt != nil && !service.config.Now().UTC().Before(*client.ExpiresAt) {
+		return domain.ErrMachineClientExpired
+	}
+	if principal.Audience != requirement.Audience || !containsMachine(client.Audiences, requirement.Audience) {
+		return domain.ErrMachineAudience
+	}
+	if !principal.HasScope(requirement.Scope) || !containsMachine(client.Scopes, requirement.Scope) {
+		return domain.ErrMachineScope
+	}
+	if !principal.HasCapability(requirement.Capability) || !containsMachine(client.Capabilities, requirement.Capability) {
+		return domain.ErrMachineScope
+	}
+	return nil
 }
 
 func (service *MachineService) authorizeClient(client domain.MachineClient, audience string, requestedScopes []string, source netip.Addr) error {

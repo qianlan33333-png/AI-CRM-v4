@@ -67,13 +67,15 @@ func TestV1WorkbenchPackageFreezesOnlyResolvedIDsAndRejectsPartial(t *testing.T)
 	if err := executor.BindV1OperationAudit(audit, directUnitOfWork{}); err != nil {
 		t.Fatal(err)
 	}
+	authorizer := &openPlatformMachineMutationAuthorizerStub{}
+	bindOpenPlatformTestMachineMutationFence(t, executor, authorizer)
 	principal := accessdomain.MachinePrincipal{ClientID: "client-a", ClientRecord: 7, CorpID: "corp-main", Scopes: []string{"write"}, Capabilities: []string{string(openplatformport.CapabilityAIReviewPlanCreate), string(openplatformport.CapabilityWorkbenchPackageCreate)}, OwnerScope: accessdomain.OwnerScope{"corp_id": {"corp-main"}, "owner_userid": {"staff-1"}, "customer_id": {"42"}}}
 	pkg := aiassistantport.MachinePackageMetadata{AudiencePackageID: "aud-1", AudienceVersion: "v1", CopyPackageID: "copy-1", CopyVersion: "v1", StrategyVersion: "v1", ProductFactVersion: "v1", SourceFingerprint: string(effectport.Hash("synthetic-source")), ApprovalRevision: "rev-1", ClientReference: "synthetic-1", MemberCount: 1}
 	input, _ := json.Marshal(map[string]any{"name": "synthetic review", "package": pkg, "members": []any{map[string]any{"union_id": "union-synthetic-42", "owner_userid": "staff-1"}}, "content": []any{map[string]any{"kind": "text", "text": "test only"}}})
 	invocation := openplatformport.Invocation{Operation: openplatformport.OperationAIReviewPlanCreate, Principal: principal, IdempotencyKey: strings.Repeat("a", 16), Input: input}
 	_, err := executor.Invoke(context.Background(), invocation)
-	if openplatformport.ErrorCodeOf(err) != openplatformport.ErrorConflict || ai.command.SourceKind != "" || audit.calls != 1 {
-		t.Fatalf("rejected err=%v command=%+v audit=%d", err, ai.command, audit.calls)
+	if openplatformport.ErrorCodeOf(err) != openplatformport.ErrorConflict || ai.command.SourceKind != "" || audit.calls != 1 || authorizer.calls != 0 {
+		t.Fatalf("rejected err=%v command=%+v audit=%d authorization=%d", err, ai.command, audit.calls, authorizer.calls)
 	}
 	decisions, ok := openplatformport.ErrorDetailsOf(err).(map[string]any)
 	if !ok || decisions["created"] != false {
@@ -84,11 +86,18 @@ func TestV1WorkbenchPackageFreezesOnlyResolvedIDsAndRejectsPartial(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ai.command.SourceKind != "scrm_workbench" || len(ai.command.Recipients) != 1 || ai.command.Recipients[0].CustomerID != 42 || ai.command.Recipients[0].StaffID != 9 || ai.command.Package == nil || verified.scope != "wechat-open-platform:shared" {
-		t.Fatalf("unsafe command: %+v", ai.command)
+	if ai.command.SourceKind != "scrm_workbench" || len(ai.command.Recipients) != 1 || ai.command.Recipients[0].CustomerID != 42 || ai.command.Recipients[0].StaffID != 9 || ai.command.Package == nil || verified.scope != "wechat-open-platform:shared" || authorizer.calls != 1 {
+		t.Fatalf("unsafe command: %+v authorization=%+v", ai.command, authorizer)
 	}
 	encoded, _ := json.Marshal(created.Data)
 	if strings.Contains(string(encoded), "union-synthetic-42") || strings.Contains(string(encoded), "test only") || !strings.Contains(string(encoded), "automatic_send_allowed") {
 		t.Fatalf("unsafe response: %s", encoded)
+	}
+	// A previously admitted workbench-shaped request cannot reach AI intake
+	// when Access reports the current credential as revoked.
+	authorizer.err = accessdomain.ErrMachineCredential
+	_, err = executor.Invoke(context.Background(), invocation)
+	if openplatformport.ErrorCodeOf(err) != openplatformport.ErrorAuthentication || authorizer.calls != 2 || ai.createCalls != 1 || ai.command.SourceKind != "scrm_workbench" {
+		t.Fatalf("revoked workbench create err=%v authorization=%d intake_calls=%d command=%+v", err, authorizer.calls, ai.createCalls, ai.command)
 	}
 }

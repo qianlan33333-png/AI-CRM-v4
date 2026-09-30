@@ -29,6 +29,8 @@ import (
 	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	openplatformhttp "github.com/qianlan33333-png/AI-CRM-v3/internal/openplatform/http"
+	openplatformport "github.com/qianlan33333-png/AI-CRM-v3/internal/openplatform/port"
+	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 )
 
@@ -124,6 +126,67 @@ func TestOpenPlatformV1AIReviewPlanPostgreSQLJourney(t *testing.T) {
 	}
 	assertOpenPlatformV1AICounts(t, native, 1, 1, 1, 1, 1, 1)
 
+	// Pause a second real REST request after bearer authentication but before
+	// the executor opens its owner Unit of Work. Revocation must win at the
+	// transactional Access fence and leave every AI owner row unchanged while
+	// retaining the executor's explicit authentication-denial operation audit.
+	raceClient, err := machine.CreateV1(ctx, admin, accessapp.CreateMachineClientInput{
+		ClientID: "v1.ai-race-machine", DisplayName: "V1 AI revocation race", Purpose: "external_agent",
+		Audiences: []string{"external_integration"}, Scopes: []string{"write"},
+		Capabilities: []string{"ai.review_plan.create", "operation.read"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = machine.Activate(ctx, admin, raceClient.Client.ClientID, raceClient.Secret, true); err != nil {
+		t.Fatal(err)
+	}
+	raceToken, err := machine.IssueClientCredentialsToken(ctx, accessapp.ClientCredentialsInput{ClientID: raceClient.Client.ClientID, ClientSecret: raceClient.Secret, Audience: "external_integration", RequestedScopes: []string{"write"}, SourceIP: netip.MustParseAddr("203.0.113.50")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := &auth02CoreFenceGate{entered: make(chan openplatformport.Invocation, 1), resume: make(chan struct{})}
+	raceHandler := newOpenPlatformV1AIHandlerWithOperations(t, native, uow, machine, audit, func(delegate openplatformport.OperationService) openplatformport.OperationService {
+		gate.delegate = delegate
+		return gate
+	})
+	raceRequestBody := openPlatformV1AIRequestBody(t, "v1-ai-revocation-race")
+	raceResponse := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		race := httptest.NewRequest(http.MethodPost, "https://crm.example.test/open/v1/ai/review-plans", strings.NewReader(raceRequestBody))
+		race.Header.Set("Authorization", "Bearer "+raceToken.AccessToken)
+		race.Header.Set("Content-Type", "application/json")
+		race.Header.Set("Idempotency-Key", "v1-ai-revocation-race-0001")
+		race.RemoteAddr = "203.0.113.50:443"
+		race.TLS = &tlsState
+		response := httptest.NewRecorder()
+		raceHandler.Routes().ServeHTTP(response, race)
+		raceResponse <- response
+	}()
+	select {
+	case invocation := <-gate.entered:
+		if invocation.Operation != openplatformport.OperationAIReviewPlanCreate || !invocation.Principal.HasCapability(string(openplatformport.CapabilityAIReviewPlanCreate)) {
+			t.Fatalf("AI request was not admitted with pre-revoke grant: %+v", invocation)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("AI request did not reach the post-auth operation gate")
+	}
+	remainingCapabilities := []string{"operation.read"}
+	if _, err = machine.PatchV1(ctx, admin, raceClient.Client.ClientID, accessapp.PatchMachineClientInput{Capabilities: &remainingCapabilities}); err != nil {
+		t.Fatal(err)
+	}
+	close(gate.resume)
+	select {
+	case response := <-raceResponse:
+		if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), `"authentication"`) {
+			t.Fatalf("in-flight stale AI create status=%d body=%s", response.Code, response.Body.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("in-flight AI create did not finish after release")
+	}
+	assertOpenPlatformV1AICounts(t, native, 1, 1, 1, 1, 1, 2)
+	assertOpenPlatformV1AIOperationAuditOutcome(t, native, "authentication", 1)
+
 	// The REST and MCP transports share AI's client-scoped idempotency receipt.
 	// Replaying the same payload from the same machine must return the original
 	// operation, while a changed payload with that key is a conflict.
@@ -150,7 +213,7 @@ func TestOpenPlatformV1AIReviewPlanPostgreSQLJourney(t *testing.T) {
 	if mcpConflictResponse.Code != http.StatusOK || !strings.Contains(mcpConflictResponse.Body.String(), `"category":"conflict"`) {
 		t.Fatalf("MCP replay conflict status=%d body=%s", mcpConflictResponse.Code, mcpConflictResponse.Body.String())
 	}
-	assertOpenPlatformV1AICounts(t, native, 1, 1, 1, 1, 1, 3)
+	assertOpenPlatformV1AICounts(t, native, 1, 1, 1, 1, 1, 4)
 
 	// Reconstruct Access, AI and the V1 handler over a new pool. MCP must read
 	// the durable AI state and preserve the creator-scoped machine boundary.
@@ -254,11 +317,95 @@ func TestOpenPlatformV1AIReviewPlanPostgreSQLJourney(t *testing.T) {
 	if narrowedReplayResponse.Code != http.StatusForbidden || !strings.Contains(narrowedReplayResponse.Body.String(), `"permission"`) {
 		t.Fatalf("narrowed grant replay status=%d body=%s", narrowedReplayResponse.Code, narrowedReplayResponse.Body.String())
 	}
+	staleMCPReplay := httptest.NewRequest(http.MethodPost, "https://crm.example.test/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":"stale-replay","method":"tools/call","params":{"name":"create_ai_review_plan","arguments":`+requestBody+`}}`))
+	staleMCPReplay.Header.Set("Authorization", "Bearer "+writeToken.AccessToken)
+	staleMCPReplay.Header.Set("Content-Type", "application/json")
+	staleMCPReplay.Header.Set("Idempotency-Key", "v1-ai-rest-key-0001")
+	staleMCPReplay.RemoteAddr = "203.0.113.50:443"
+	staleMCPReplay.TLS = &tlsState
+	staleMCPReplayResponse := httptest.NewRecorder()
+	restartedHandler.Routes().ServeHTTP(staleMCPReplayResponse, staleMCPReplay)
+	if staleMCPReplayResponse.Code != http.StatusOK || !strings.Contains(staleMCPReplayResponse.Body.String(), `"category":"authentication"`) || strings.Contains(staleMCPReplayResponse.Body.String(), `"isError":false`) {
+		t.Fatalf("stale MCP replay status=%d body=%s", staleMCPReplayResponse.Code, staleMCPReplayResponse.Body.String())
+	}
+	assertOpenPlatformV1AICounts(t, native, 1, 1, 1, 1, 1, 7)
+	assertOpenPlatformV1AIOperationAuditOutcome(t, native, "authentication", 1)
 
-	// REST create, MCP replay/conflict, restarted MCP status, denied status and
-	// the narrowed-grant denial append six operation audits. The failed create
-	// and stale-token attempt append none.
-	assertOpenPlatformV1AICounts(t, native, 1, 1, 1, 1, 1, 6)
+	// REST create, the admitted in-flight denial, MCP replay/conflict, restarted
+	// MCP status, denied status and narrowed-grant denial append seven operation
+	// audits. Failed create and stale-bearer REST/MCP attempts append no new audit.
+	assertOpenPlatformV1AICounts(t, native, 1, 1, 1, 1, 1, 7)
+
+	// In the reverse lock order, let the real AI PostgreSQL owner UOW create its
+	// pending plan and hold the Access FOR SHARE fence. Revocation must wait for
+	// that plan/audit transaction to commit before it completes.
+	writeFirstClient, err := machine.CreateV1(ctx, admin, accessapp.CreateMachineClientInput{
+		ClientID: "v1.ai-write-first-machine", DisplayName: "V1 AI write-first", Purpose: "external_agent",
+		Audiences: []string{"external_integration"}, Scopes: []string{"write"},
+		Capabilities: []string{"ai.review_plan.create", "operation.read"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = machine.Activate(ctx, admin, writeFirstClient.Client.ClientID, writeFirstClient.Secret, true); err != nil {
+		t.Fatal(err)
+	}
+	writeFirstToken, err := machine.IssueClientCredentialsToken(ctx, accessapp.ClientCredentialsInput{ClientID: writeFirstClient.Client.ClientID, ClientSecret: writeFirstClient.Secret, Audience: "external_integration", RequestedScopes: []string{"write"}, SourceIP: netip.MustParseAddr("203.0.113.50")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pausedUOW := &auth02CoreFencePausingUOW{delegate: uow, entered: make(chan struct{}), release: make(chan struct{})}
+	defer pausedUOW.releaseWrite()
+	writeFirstAudit := &openPlatformV1AIAuditWriter{delegate: accessRepository}
+	writeFirstHandler := newOpenPlatformV1AIHandlerWithUOWs(t, native, pausedUOW, uow, machine, writeFirstAudit, nil)
+	writeFirstBody := openPlatformV1AIRequestBody(t, "v1-ai-write-first")
+	writeFirstResponse := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		request := httptest.NewRequest(http.MethodPost, "https://crm.example.test/open/v1/ai/review-plans", strings.NewReader(writeFirstBody))
+		request.Header.Set("Authorization", "Bearer "+writeFirstToken.AccessToken)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Idempotency-Key", "v1-ai-write-first-0001")
+		request.RemoteAddr = "203.0.113.50:443"
+		request.TLS = &tlsState
+		response := httptest.NewRecorder()
+		writeFirstHandler.Routes().ServeHTTP(response, request)
+		writeFirstResponse <- response
+	}()
+	select {
+	case <-pausedUOW.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("AI owner UOW did not reach its pre-commit hold")
+	}
+	assertOpenPlatformV1AICounts(t, native, 1, 1, 1, 1, 1, 7)
+	writeFirstRevocation := make(chan error, 1)
+	go func() {
+		_, revokeErr := machine.PatchV1(ctx, admin, writeFirstClient.Client.ClientID, accessapp.PatchMachineClientInput{Capabilities: &noAI})
+		writeFirstRevocation <- revokeErr
+	}()
+	waitForAUTH02ClientRowLockWaits(t, native, writeFirstClient.Client.ClientID, 1)
+	select {
+	case err := <-writeFirstRevocation:
+		t.Fatalf("Access revocation completed before AI owner UOW commit: %v", err)
+	default:
+	}
+	pausedUOW.releaseWrite()
+	select {
+	case response := <-writeFirstResponse:
+		if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"review_state":"pending_review"`) {
+			t.Fatalf("write-first AI create status=%d body=%s", response.Code, response.Body.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("AI owner UOW did not commit after release")
+	}
+	select {
+	case err := <-writeFirstRevocation:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Access revocation did not finish after AI owner UOW commit")
+	}
+	assertOpenPlatformV1AICounts(t, native, 2, 2, 2, 2, 2, 8)
 }
 
 var tlsState = tls.ConnectionState{}
@@ -278,12 +425,20 @@ func (writer *openPlatformV1AIAuditWriter) AppendMachineAudit(ctx context.Contex
 }
 
 func newOpenPlatformV1AIHandler(t *testing.T, native *pgxpool.Pool, uow *platformpostgres.UnitOfWork, machine *accessapp.MachineService, audit *openPlatformV1AIAuditWriter) *openplatformhttp.Handler {
+	return newOpenPlatformV1AIHandlerWithOperations(t, native, uow, machine, audit, nil)
+}
+
+func newOpenPlatformV1AIHandlerWithOperations(t *testing.T, native *pgxpool.Pool, uow *platformpostgres.UnitOfWork, machine *accessapp.MachineService, audit *openPlatformV1AIAuditWriter, wrapOperations func(openplatformport.OperationService) openplatformport.OperationService) *openplatformhttp.Handler {
+	return newOpenPlatformV1AIHandlerWithUOWs(t, native, uow, uow, machine, audit, wrapOperations)
+}
+
+func newOpenPlatformV1AIHandlerWithUOWs(t *testing.T, native *pgxpool.Pool, ownerUOW, rateLimiterUOW platformport.UnitOfWork, machine *accessapp.MachineService, audit *openPlatformV1AIAuditWriter, wrapOperations func(openplatformport.OperationService) openplatformport.OperationService) *openplatformhttp.Handler {
 	t.Helper()
-	aiRepository, err := aiassistantstore.NewPostgreSQL(native, uow)
+	aiRepository, err := aiassistantstore.NewPostgreSQL(native, ownerUOW)
 	if err != nil {
 		t.Fatal(err)
 	}
-	aiService, err := aiassistantapp.NewService(uow, aiRepository, openPlatformV1AICustomers{}, openPlatformV1AIStaff{}, openPlatformV1AIMaterials{}, openPlatformV1AIIdentities{}, openPlatformV1AIIdentities{})
+	aiService, err := aiassistantapp.NewService(ownerUOW, aiRepository, openPlatformV1AICustomers{}, openPlatformV1AIStaff{}, openPlatformV1AIMaterials{}, openPlatformV1AIIdentities{}, openPlatformV1AIIdentities{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,17 +446,24 @@ func newOpenPlatformV1AIHandler(t *testing.T, native *pgxpool.Pool, uow *platfor
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = executor.BindV1OperationAudit(audit, uow); err != nil {
+	if err = executor.BindV1OperationAudit(audit, ownerUOW); err != nil {
 		t.Fatal(err)
 	}
-	if err = executor.BindV1AI(aiService, aiService, uow); err != nil {
+	if err = executor.BindV1MachineMutationFence(machine, ownerUOW); err != nil {
 		t.Fatal(err)
 	}
-	rateLimiter, err := accessapp.NewMachineRequestRateLimiter(accessstore.NewPostgreSQL(), uow, accessapp.MachineRequestRateLimitConfig{})
+	if err = executor.BindV1AI(aiService, aiService, ownerUOW); err != nil {
+		t.Fatal(err)
+	}
+	var operations openplatformport.OperationService = executor
+	if wrapOperations != nil {
+		operations = wrapOperations(executor)
+	}
+	rateLimiter, err := accessapp.NewMachineRequestRateLimiter(accessstore.NewPostgreSQL(), rateLimiterUOW, accessapp.MachineRequestRateLimitConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := openplatformhttp.NewHandler(openplatformhttp.Config{MachineAuthentication: machine, RateLimiter: rateLimiter, AdminAuthentication: openPlatformMachineAdmin{}, Management: machine, Operations: executor, Executor: executor, SessionCookieName: "session", CSRFCookieName: "csrf", PublicOrigin: "https://crm.example.test"})
+	handler, err := openplatformhttp.NewHandler(openplatformhttp.Config{MachineAuthentication: machine, RateLimiter: rateLimiter, AdminAuthentication: openPlatformMachineAdmin{}, Management: machine, Operations: operations, Executor: executor, SessionCookieName: "session", CSRFCookieName: "csrf", PublicOrigin: "https://crm.example.test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,6 +534,14 @@ func assertOpenPlatformV1AICounts(t *testing.T, native *pgxpool.Pool, plans, rec
 		(SELECT count(*) FROM access_machine_audit WHERE action='open_platform_operation')`).Scan(&gotPlans, &gotRecipients, &gotContents, &gotReceipts, &gotEvents, &gotOutbox, &gotOperationAudits)
 	if err != nil || gotPlans != plans || gotRecipients != recipients || gotContents != contents || gotReceipts != receipts || gotEvents != events || gotOutbox != events || gotOperationAudits != operationAudits {
 		t.Fatalf("plans=%d recipients=%d contents=%d receipts=%d events=%d outbox=%d operation_audits=%d err=%v", gotPlans, gotRecipients, gotContents, gotReceipts, gotEvents, gotOutbox, gotOperationAudits, err)
+	}
+}
+
+func assertOpenPlatformV1AIOperationAuditOutcome(t *testing.T, native *pgxpool.Pool, outcome string, expected int) {
+	t.Helper()
+	var got int
+	if err := native.QueryRow(context.Background(), `SELECT count(*) FROM access_machine_audit WHERE action='open_platform_operation' AND outcome=$1`, outcome).Scan(&got); err != nil || got != expected {
+		t.Fatalf("open-platform operation audit outcome %q count=%d want=%d err=%v", outcome, got, expected, err)
 	}
 }
 

@@ -36,6 +36,9 @@ func (s *coreAudienceStub) RecordSupervisedPush(_ context.Context, source, key s
 	s.key = key
 	return p, nil
 }
+func (s *coreAudienceStub) RecordSupervisedPushWithin(ctx context.Context, source, key string, p segmentport.CorePush) (segmentport.CorePush, error) {
+	return s.RecordSupervisedPush(ctx, source, key, p)
+}
 func TestV1CoreAudienceAuthorizationAndScope(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -58,6 +61,10 @@ func TestV1CoreAudienceAuthorizationAndScope(t *testing.T) {
 			e := v1ExecutorForTest(t, &openPlatformIdentityStub{}, &openPlatformProfileStub{})
 			s := &coreAudienceStub{}
 			e.coreAudience = s
+			if err := e.BindV1OperationAudit(&openPlatformMachineAuditStub{}, directUnitOfWork{}); err != nil {
+				t.Fatal(err)
+			}
+			bindOpenPlatformTestMachineMutationFence(t, e, &openPlatformMachineMutationAuthorizerStub{})
 			_, err := e.Invoke(context.Background(), openplatformport.Invocation{Operation: tc.op, Principal: accessdomain.MachinePrincipal{ClientID: "node-a", CorpID: "corp-main", Scopes: []string{tc.scope}, Capabilities: []string{tc.cap}, OwnerScope: tc.owner}, Input: json.RawMessage(tc.input), IdempotencyKey: tc.key})
 			if err == nil || openplatformport.ErrorCodeOf(err) != tc.want || s.calls != 0 {
 				t.Fatalf("err=%v calls=%d", err, s.calls)
@@ -69,6 +76,11 @@ func TestV1CoreAudienceScopeFilteringAndPushSource(t *testing.T) {
 	e := v1ExecutorForTest(t, &openPlatformIdentityStub{}, &openPlatformProfileStub{})
 	s := &coreAudienceStub{}
 	e.coreAudience = s
+	if err := e.BindV1OperationAudit(&openPlatformMachineAuditStub{}, directUnitOfWork{}); err != nil {
+		t.Fatal(err)
+	}
+	authorizer := &openPlatformMachineMutationAuthorizerStub{}
+	bindOpenPlatformTestMachineMutationFence(t, e, authorizer)
 	p := accessdomain.MachinePrincipal{ClientID: "node-a", Scopes: []string{"read", "write"}, Capabilities: []string{"audience.product.read", "audience.member.read", "audience.push.write"}, OwnerScope: accessdomain.OwnerScope{"package_id": {"2"}, "customer_id": {"7"}}}
 	r, err := e.Invoke(context.Background(), openplatformport.Invocation{Operation: openplatformport.OperationCoreProducts, Principal: p, Input: json.RawMessage(`{}`)})
 	if err != nil || len(r.Data.(map[string]any)["items"].([]segmentport.CoreProduct)) != 1 {
@@ -83,7 +95,16 @@ func TestV1CoreAudienceScopeFilteringAndPushSource(t *testing.T) {
 		t.Fatalf("scope pagination=%+v", page)
 	}
 	_, err = e.Invoke(context.Background(), openplatformport.Invocation{Operation: openplatformport.OperationCorePushRecord, Principal: p, Input: json.RawMessage(`{"push_id":"business-push-1","customer_id":7,"package_id":2,"materials":[{"kind":"miniprogram","id":1}],"status":"reported","status_version":1,"occurred_at":"2026-09-18T01:00:00Z"}`), IdempotencyKey: "push-report-00000001"})
-	if err != nil || s.source != "node-a" || s.key != "push-report-00000001" {
-		t.Fatalf("push source=%q err=%v", s.source, err)
+	if err != nil || s.source != "node-a" || s.key != "push-report-00000001" || authorizer.calls != 1 || authorizer.requirement.Scope != "write" || authorizer.requirement.Capability != "audience.push.write" {
+		t.Fatalf("push source=%q calls=%d requirement=%+v err=%v", s.source, authorizer.calls, authorizer.requirement, err)
+	}
+	// A revoked machine may still present the old principal snapshot to the
+	// shared executor (the real Access implementation compares auth_version and
+	// current grants); authorization runs before Segment can replay a receipt.
+	ownerCallsBeforeRevokedReplay := s.calls
+	authorizer.err = accessdomain.ErrMachineCredential
+	_, err = e.Invoke(context.Background(), openplatformport.Invocation{Operation: openplatformport.OperationCorePushRecord, Principal: p, Input: json.RawMessage(`{"push_id":"business-push-1","customer_id":7,"package_id":2,"materials":[{"kind":"miniprogram","id":1}],"status":"reported","status_version":1,"occurred_at":"2026-09-18T01:00:00Z"}`), IdempotencyKey: "push-report-00000001"})
+	if openplatformport.ErrorCodeOf(err) != openplatformport.ErrorAuthentication || s.calls != ownerCallsBeforeRevokedReplay || authorizer.calls != 2 {
+		t.Fatalf("revoked replay err=%v segment_calls=%d authorization_calls=%d", err, s.calls, authorizer.calls)
 	}
 }

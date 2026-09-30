@@ -121,6 +121,19 @@ func (c *CoreOperations) mutate(ctx context.Context, op string, actor segmentpor
 	})
 	return out, classify(e)
 }
+
+func (c *CoreOperations) mutateWithin(ctx context.Context, op string, actor segmentport.MutationActor, key string, input any, apply func(context.Context) (any, int64, error)) (json.RawMessage, error) {
+	if !c.ready() {
+		return nil, ErrNotReady
+	}
+	payload := mutationPayload(op, actor, input)
+	out, err := c.service.mutateWithin(ctx, op, actor, key, payload, func(tx context.Context) (any, segmentstore.MutationFact, error) {
+		v, id, applyErr := apply(tx)
+		fact := segmentstore.MutationFact{ResourceKind: "core_operations", ResourceID: id, Operation: op, EventType: "audience.core." + op + ".v1", ActorID: actor.StaffID, ActorKind: string(actor.Kind), ActorRef: actor.Reference, Payload: json.RawMessage(`{"changed":true}`), IdempotencyKey: key, OccurredAt: c.service.now().UTC()}
+		return v, fact, applyErr
+	})
+	return out, classify(err)
+}
 func (c *CoreOperations) Products(ctx context.Context) (out []segmentport.CoreProduct, e error) {
 	if !c.ready() {
 		return nil, ErrNotReady
@@ -242,15 +255,26 @@ func (c *CoreOperations) ChangeAssignment(ctx context.Context, in CoreAssignment
 	}
 	return
 }
-func (c *CoreOperations) RecordPush(ctx context.Context, in CorePushCommand) (out segmentport.CorePush, e error) {
+func (c *CoreOperations) RecordPush(ctx context.Context, in CorePushCommand) (segmentport.CorePush, error) {
+	return c.recordPush(ctx, in, false)
+}
+
+// RecordPushWithin participates in a caller-owned UOW so Access authorization
+// can remain fenced through the Segment record, durable receipt, facts, and
+// commit. ctx must already carry the Segment/PostgreSQL transaction.
+func (c *CoreOperations) RecordPushWithin(ctx context.Context, in CorePushCommand) (segmentport.CorePush, error) {
+	return c.recordPush(ctx, in, true)
+}
+
+func (c *CoreOperations) recordPush(ctx context.Context, in CorePushCommand, within bool) (out segmentport.CorePush, err error) {
 	if !c.ready() {
 		return out, ErrNotReady
 	}
-	if e = ValidateCorePush(in.Push, c.service.now().UTC()); e != nil {
-		return out, e
+	if err = ValidateCorePush(in.Push, c.service.now().UTC()); err != nil {
+		return out, err
 	}
-	if e = c.canonicalCustomer(ctx, in.Push.CustomerID); e != nil {
-		return out, e
+	if err = c.canonicalCustomer(ctx, in.Push.CustomerID); err != nil {
+		return out, err
 	}
 	// The source comes from the authenticated node, not the JSON body.
 	if !in.Actor.Valid() {
@@ -260,17 +284,25 @@ func (c *CoreOperations) RecordPush(ctx context.Context, in CorePushCommand) (ou
 	in.Push.ID = 0
 	in.Push.AssignmentID = 0
 	in.Push.OccurredAt = in.Push.OccurredAt.UTC().Truncate(time.Microsecond)
-	raw, e := c.mutate(ctx, "push_recorded", in.Actor, in.IdempotencyKey, in.Push, func(tx context.Context) (any, int64, error) {
-		if _, e := c.service.store.GetPackage(tx, in.Push.PackageID); e != nil {
-			return nil, 0, e
+	apply := func(tx context.Context) (any, int64, error) {
+		if _, getErr := c.service.store.GetPackage(tx, in.Push.PackageID); getErr != nil {
+			return nil, 0, getErr
 		}
-		p, e := c.store.RecordCorePush(tx, in.Push, c.service.now().UTC())
-		return p, p.ID, e
-	})
-	if e == nil {
-		e = json.Unmarshal(raw, &out)
+		push, putErr := c.store.RecordCorePush(tx, in.Push, c.service.now().UTC())
+		return push, push.ID, putErr
 	}
-	return
+	var raw json.RawMessage
+	if within {
+		raw, err = c.mutateWithin(ctx, "push_recorded", in.Actor, in.IdempotencyKey, in.Push, apply)
+	} else {
+		raw, err = c.mutate(ctx, "push_recorded", in.Actor, in.IdempotencyKey, in.Push, func(tx context.Context) (any, int64, error) {
+			return apply(tx)
+		})
+	}
+	if err == nil {
+		err = json.Unmarshal(raw, &out)
+	}
+	return out, err
 }
 func (c *CoreOperations) MemberDetail(ctx context.Context, packageID, customerID int64, cursor string, limit int) (out segmentport.CoreMemberDetail, e error) {
 	if !c.ready() {
@@ -300,6 +332,15 @@ func (c *CoreOperations) RecordSupervisedPush(ctx context.Context, client, key s
 	}
 	push.Source = actor.Reference
 	return c.RecordPush(ctx, CorePushCommand{Push: push, Actor: actor, IdempotencyKey: key})
+}
+
+func (c *CoreOperations) RecordSupervisedPushWithin(ctx context.Context, client, key string, push segmentport.CorePush) (segmentport.CorePush, error) {
+	actor, err := segmentport.MachineMutationActor(client)
+	if err != nil {
+		return segmentport.CorePush{}, ErrInvalid
+	}
+	push.Source = actor.Reference
+	return c.RecordPushWithin(ctx, CorePushCommand{Push: push, Actor: actor, IdempotencyKey: key})
 }
 
 func (c *CoreOperations) BindReevaluation(queue interface {
