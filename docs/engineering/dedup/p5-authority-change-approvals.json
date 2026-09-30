@@ -1985,6 +1985,28 @@
       ],
       "reason": "Document the active Alipay callback contract, including its form limit and Origin precedence, with source-index and lock hashes bound to the OpenAPI bytes.",
       "review_reference": "/Users/qianlan/Documents/Codex/2026-09-30/crm-v4-qa-api-callback-contract-candidate/port-auto-bfa/independent-review-0a-966.md"
+    },
+    {
+      "base_commit": "657f02fd400388e59348bbce37312ad0fa4e4df0",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "21bd335875e2691f17fdc1e7ca3542e094324d9e382868b3459591ac9aec8322",
+          "head_sha256": "5835c9239f89a86931d615a5870568844b83e045302fa4e4483455864fb6811f"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "3e1f0191e5f321f1b06e4a14dbe023aa7260898cbdae57ec41834758fe3ffa42",
+          "head_sha256": "6afb916ec0e6adcd9dc0881942ae6821b34f42f2aae2067280ac80718c93be04"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "e0b70200e910c5a079ad425690ad8c22621dfe4169bc6790c535049876e96ae2",
+          "head_sha256": "48208ecfab97fdececd10976ff9019aff87fa6bfb224949a72abc7a3b9aeb52b"
+        }
+      ],
+      "reason": "Document the Payment-owned EER manual-reconcile eligibility and keep the canonical OpenAPI index and lock bound to the updated contract.",
+      "review_reference": "2026-09-30 delegated PAY05/EER candidate under /Users/qianlan/Documents/Codex/2026-09-29/crm-v4-qa-resume/repo-out/pay05-eer-terminal-reconcile-brief-20260930.md; parent review of the exact authority diff is pending."
     }
   ]
 }

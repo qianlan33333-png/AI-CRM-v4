@@ -518,6 +518,12 @@ func (r *Repository) controlWithin(ctx context.Context, tx pgx.Tx, command Contr
 	if err != nil {
 		return Projection{}, Receipt{}, err
 	}
+	if operation == "reconcile" && Owner(owner) == OwnerPayment {
+		// Payment owns refund evidence and its terminal predicates. Generic EER
+		// control accepts only an operator-supplied digest, so it cannot prove a
+		// Payment refund outcome or safely close a Payment-owned effect attempt.
+		return Projection{}, Receipt{}, ErrReconcileRequired
+	}
 	if operation == "reconcile" && Kind(kind) == KindOutboundMedia && lane == port.LaneOutboundMedia {
 		switch command.ReconciliationOutcome {
 		case "no_effect":

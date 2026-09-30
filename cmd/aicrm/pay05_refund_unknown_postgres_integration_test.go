@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
+	accessdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/access/domain"
 	couponapp "github.com/qianlan33333-png/AI-CRM-v3/internal/coupon/app"
 	couponport "github.com/qianlan33333-png/AI-CRM-v3/internal/coupon/port"
 	couponstore "github.com/qianlan33333-png/AI-CRM-v3/internal/coupon/store"
@@ -76,6 +78,19 @@ type pay05RefundReconciler struct {
 	mu      sync.Mutex
 	queries map[string]*pay05RefundQuery
 	calls   map[string]int
+}
+
+type pay05EffectsRequestSecurity struct {
+	principal accessdomain.Principal
+	csrfErr   error
+}
+
+func (s pay05EffectsRequestSecurity) Authenticate(context.Context, *http.Request) (accessdomain.Principal, error) {
+	return s.principal, nil
+}
+
+func (s pay05EffectsRequestSecurity) AuthorizeCSRF(context.Context, *http.Request) (accessdomain.Principal, error) {
+	return s.principal, s.csrfErr
 }
 
 func (r *pay05RefundReconciler) QueryPayment(context.Context, string) (paymentport.WeChatPayPaymentQuery, error) {
@@ -369,6 +384,11 @@ func TestPAY05PostgreSQLRefundUnknownAndDerivedReversal(t *testing.T) {
 		t.Fatal("PROCESSING refund query unexpectedly completed the reconciliation worker")
 	}
 	pay05AssertCommerce(t, ctx, pool, orderID, paymentID, claim.ClaimID, merchant, "paid", 0, "active", "consumed", "redeemed", "held", 0, 200, commissionID)
+	var refundAEffectID int64
+	if err = pool.QueryRow(ctx, `SELECT external_effect_id FROM payment_refunds WHERE id=$1`, refundA.ID).Scan(&refundAEffectID); err != nil {
+		t.Fatal(err)
+	}
+	pay05AssertGenericPaymentReconcileRejected(t, ctx, pool, effectRepository, refundA.ID, "eer_"+strconv.FormatInt(refundAEffectID, 10))
 	if err = pay05RunPaymentReconciliationJob(t, ctx, pool, reconciliationWorker, refundA.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -489,6 +509,97 @@ func pay05AssertEffectAndRefund(t *testing.T, ctx context.Context, pool *pgxpool
 	if gotEffect != effectState || gotRefund != refundState || calls != 1 || realCalls != 0 {
 		t.Fatalf("synthetic unknown state effect=%q refund=%q attempts=%d real_calls=%d", gotEffect, gotRefund, calls, realCalls)
 	}
+}
+
+type pay05ReconcileState struct {
+	refundStatus       string
+	effectOwner        string
+	effectKind         string
+	reconciliation     string
+	paymentEvidence    string
+	reconciliationRows int
+	effectState        string
+	attemptState       string
+	attemptEvidence    string
+	attemptCount       int
+	providerCallCount  int
+	reconcileReceipts  int
+}
+
+func pay05AssertGenericPaymentReconcileRejected(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repository *effects.Repository, refundID int64, effectID string) {
+	t.Helper()
+	readState := func() pay05ReconcileState {
+		t.Helper()
+		var state pay05ReconcileState
+		err := pool.QueryRow(ctx, `SELECT refund.status,effect.owner,effect.kind,reconciliation.outcome,encode(reconciliation.evidence_digest,'hex'),
+			(SELECT count(*) FROM payment_reconciliations recorded WHERE recorded.refund_id=refund.id),effect.state,attempt.state,COALESCE(attempt.evidence_digest,''),effect.attempt_count,
+			(SELECT count(*) FROM external_effect_attempts counted WHERE counted.effect_id=effect.id AND counted.real_external_call_executed),
+			(SELECT count(*) FROM external_effect_operation_receipts receipt WHERE receipt.effect_id=effect.id AND receipt.operation='reconcile')
+			FROM payment_refunds refund
+			JOIN payment_reconciliations reconciliation ON reconciliation.refund_id=refund.id
+			JOIN external_effects effect ON effect.id=refund.external_effect_id
+			JOIN external_effect_attempts attempt ON attempt.effect_id=effect.id AND attempt.generation=effect.generation
+			WHERE refund.id=$1
+			ORDER BY reconciliation.id DESC LIMIT 1`, refundID).Scan(&state.refundStatus, &state.effectOwner, &state.effectKind, &state.reconciliation, &state.paymentEvidence, &state.reconciliationRows, &state.effectState, &state.attemptState, &state.attemptEvidence, &state.attemptCount, &state.providerCallCount, &state.reconcileReceipts)
+		if err != nil {
+			t.Fatalf("read PAY05 reconcile state: %v", err)
+		}
+		return state
+	}
+	before := readState()
+	if before.refundStatus != "outcome_unknown" || before.effectOwner != string(effectport.OwnerPayment) || before.effectKind != string(effectport.KindWeChatPayRefund) || before.reconciliation != "pending" || before.reconciliationRows != 1 || before.effectState != "outcome_unknown" || before.attemptState != "outcome_unknown" || before.attemptCount != 1 || before.providerCallCount != 0 || before.reconcileReceipts != 0 {
+		t.Fatalf("PAY05 precondition refund=%+v", before)
+	}
+
+	admin := accessdomain.Principal{InternalID: 7, Kind: accessdomain.KindAdmin, Roles: []accessdomain.Role{accessdomain.RoleAdmin}}
+	viewer := accessdomain.Principal{InternalID: 8, Kind: accessdomain.KindAdmin, Roles: []accessdomain.Role{accessdomain.RoleViewer}}
+	for _, test := range []struct {
+		name     string
+		security pay05EffectsRequestSecurity
+		wantCode int
+		wantBody string
+	}{
+		{name: "missing csrf", security: pay05EffectsRequestSecurity{principal: admin, csrfErr: fmt.Errorf("missing synthetic csrf")}, wantCode: http.StatusForbidden, wantBody: "csrf_required"},
+		{name: "viewer", security: pay05EffectsRequestSecurity{principal: viewer}, wantCode: http.StatusForbidden, wantBody: "permission_denied"},
+	} {
+		handler, err := effects.NewHTTPHandler(repository, test.security)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := pay05PostGenericReconcile(t, handler, effectID, "pay05-reconcile-"+test.name, effectport.Hash("pay05-admin-pending", test.name))
+		if response.Code != test.wantCode || !strings.Contains(response.Body.String(), test.wantBody) {
+			t.Fatalf("PAY05 %s reconcile status=%d body=%q", test.name, response.Code, response.Body.String())
+		}
+		if after := readState(); after != before {
+			t.Fatalf("PAY05 %s denial mutated payment/EER state before=%+v after=%+v", test.name, before, after)
+		}
+	}
+
+	handler, err := effects.NewHTTPHandler(repository, pay05EffectsRequestSecurity{principal: admin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "pay05-reconcile-admin-pending"
+	firstDigest := effectport.Hash("pay05-admin-pending", "first")
+	for _, digest := range []effects.Digest{firstDigest, firstDigest, effectport.Hash("pay05-admin-pending", "conflicting-replay")} {
+		response := pay05PostGenericReconcile(t, handler, effectID, key, digest)
+		if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "state_conflict") {
+			t.Fatalf("PAY05 generic Payment reconcile status=%d body=%q", response.Code, response.Body.String())
+		}
+		if after := readState(); after != before {
+			t.Fatalf("PAY05 generic reconcile mutated payment/EER state before=%+v after=%+v", before, after)
+		}
+	}
+}
+
+func pay05PostGenericReconcile(t *testing.T, handler http.Handler, effectID, idempotencyKey string, evidence effects.Digest) *httptest.ResponseRecorder {
+	t.Helper()
+	body := fmt.Sprintf(`{"evidence_digest":%q,"outcome":"pending"}`, evidence)
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/external-effects/"+effectID+"/reconcile", strings.NewReader(body))
+	request.Header.Set("Idempotency-Key", idempotencyKey)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
 }
 
 func pay05SeedCommission(t *testing.T, ctx context.Context, pool *pgxpool.Pool, promoterID, buyerID, orderID int64, paidAt time.Time, merchant string) int64 {

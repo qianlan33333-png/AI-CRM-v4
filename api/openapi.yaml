@@ -1107,11 +1107,11 @@ paths:
   /api/admin/external-effects/{id}/reconcile:
     post:
       operationId: reconcileExternalEffect
-      description: Records digest-only manual evidence for outcome_unknown; it never replays a provider call.
+      description: Records manual evidence for eligible outcome_unknown effects without replaying a provider call. Payment-owned effects return 409 and must be reconciled through the Payment owner’s verified refund query or callback path.
       security: [{adminSession: [], csrfHeader: []}]
       parameters: [{$ref: "#/components/parameters/ExternalEffectID"}, {$ref: "#/components/parameters/IdempotencyKey"}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [evidence_digest], properties: {evidence_digest: {$ref: "#/components/schemas/Digest"}}}}}}
-      responses: {"200": {description: Reconciled local effect projection, content: {application/json: {schema: {$ref: "#/components/schemas/ExternalEffectProjection"}}}}, "400": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}}
+      responses: {"200": {description: Reconciled local effect projection, content: {application/json: {schema: {$ref: "#/components/schemas/ExternalEffectProjection"}}}}, "400": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {description: Effect is not eligible for generic manual reconciliation, including Payment-owned effects, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}}
   /api/admin/push-center/sections:
     get:
       operationId: getPushCenterSections
