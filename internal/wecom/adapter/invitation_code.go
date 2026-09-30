@@ -9,77 +9,87 @@ import (
 	"slices"
 )
 
-// Only outbound receives this writer. Always bind one existing group and
-// explicitly disable automatic group creation.
+// Legacy plans bind existing groups and explicitly disable automatic creation.
 func (c *Client) CreateInvitationCode(ctx context.Context, chat string) (w.InvitationCode, error) {
 	return c.CreateInvitationCodeForGroups(ctx, []string{chat})
 }
-
 func (c *Client) CreateInvitationCodeForGroups(ctx context.Context, chats []string) (w.InvitationCode, error) {
-	if !c.DirectoryReady() || len(chats) == 0 || len(chats) > 5 {
+	return c.writeInvitationCode(ctx, "", chats, nil)
+}
+func (c *Client) UpdateInvitationCodeForGroups(ctx context.Context, id string, chats []string) (w.InvitationCode, error) {
+	if invalid(id) {
 		return w.InvitationCode{}, w.WrapProviderWriteError(ErrResponse, false)
 	}
+	return c.writeInvitationCode(ctx, id, chats, nil)
+}
+func (c *Client) CreateNativeInvitationCode(ctx context.Context, chats []string, o w.InvitationJoinWayOptions) (w.InvitationCode, error) {
+	return c.writeInvitationCode(ctx, "", chats, &o)
+}
+func (c *Client) UpdateNativeInvitationCode(ctx context.Context, id string, chats []string, o w.InvitationJoinWayOptions) (w.InvitationCode, error) {
+	if invalid(id) {
+		return w.InvitationCode{}, w.WrapProviderWriteError(ErrResponse, false)
+	}
+	return c.writeInvitationCode(ctx, id, chats, &o)
+}
+func (c *Client) writeInvitationCode(ctx context.Context, id string, chats []string, o *w.InvitationJoinWayOptions) (w.InvitationCode, error) {
+	code := w.InvitationCode{ConfigID: id}
+	if !c.DirectoryReady() || len(chats) == 0 || len(chats) > 5 || (o != nil && !o.Valid()) {
+		return code, w.WrapProviderWriteError(ErrResponse, false)
+	}
+	seen := map[string]bool{}
 	for _, chat := range chats {
-		if invalid(chat) {
-			return w.InvitationCode{}, w.WrapProviderWriteError(ErrResponse, false)
+		if invalid(chat) || seen[chat] {
+			return code, w.WrapProviderWriteError(ErrResponse, false)
 		}
+		seen[chat] = true
 	}
 	token, err := c.contactAccessToken(ctx)
 	if err != nil {
-		return w.InvitationCode{}, w.WrapProviderWriteError(err, false)
+		return code, w.WrapProviderWriteError(err, false)
 	}
-	body, _ := json.Marshal(map[string]any{"scene": 2, "auto_create_room": 0, "chat_id_list": chats})
-	result, err := c.requestJSON(ctx, http.MethodPost, "/cgi-bin/externalcontact/groupchat/add_join_way", url.Values{"access_token": {token}}, body)
-	if err != nil {
-		return w.InvitationCode{}, w.WrapProviderWriteError(err, true)
-	}
-	if invalid(result.ConfigID) {
-		return w.InvitationCode{}, w.WrapProviderWriteError(ErrResponse, true)
-	}
-	body, _ = json.Marshal(map[string]string{"config_id": result.ConfigID})
-	detail, err := c.requestJSON(ctx, http.MethodPost, "/cgi-bin/externalcontact/groupchat/get_join_way", url.Values{"access_token": {token}}, body)
-	if err != nil {
-		return w.InvitationCode{ConfigID: result.ConfigID}, w.WrapProviderWriteError(err, true)
-	}
-	if !validJoinWayReadback(detail.JoinWay.ConfigID, detail.JoinWay.Scene, detail.JoinWay.AutoCreateRoom, detail.JoinWay.ChatIDs, detail.JoinWay.QRCode, result.ConfigID, chats) {
-		return w.InvitationCode{ConfigID: result.ConfigID}, w.WrapProviderWriteError(ErrResponse, true)
-	}
-	return w.InvitationCode{ConfigID: result.ConfigID, QRCode: detail.JoinWay.QRCode}, nil
-}
-
-func (c *Client) UpdateInvitationCodeForGroups(ctx context.Context, configID string, chats []string) (w.InvitationCode, error) {
-	if !c.DirectoryReady() || invalid(configID) || len(chats) == 0 || len(chats) > 5 {
-		return w.InvitationCode{ConfigID: configID}, w.WrapProviderWriteError(ErrResponse, false)
-	}
-	for _, chat := range chats {
-		if invalid(chat) {
-			return w.InvitationCode{ConfigID: configID}, w.WrapProviderWriteError(ErrResponse, false)
+	body := map[string]any{"scene": 2, "auto_create_room": 0, "chat_id_list": chats}
+	if o != nil {
+		if o.AutoCreateRoom {
+			body["auto_create_room"] = 1
+			body["room_base_name"] = o.RoomBaseName
+			body["room_base_id"] = o.RoomBaseID
 		}
+		// Empty values are intentional: update replaces previously configured data.
+		body["remark"] = o.Remark
+		body["state"] = o.State
 	}
-	token, err := c.contactAccessToken(ctx)
+	path := "/cgi-bin/externalcontact/groupchat/add_join_way"
+	if id != "" {
+		path = "/cgi-bin/externalcontact/groupchat/update_join_way"
+		body["config_id"] = id
+	}
+	raw, _ := json.Marshal(body)
+	result, err := c.requestJSON(ctx, http.MethodPost, path, url.Values{"access_token": {token}}, raw)
 	if err != nil {
-		return w.InvitationCode{ConfigID: configID}, w.WrapProviderWriteError(err, false)
+		return code, w.WrapProviderWriteError(err, true)
 	}
-	// update_join_way replaces the configuration. Keep the original QR scene
-	// and manual group policy when switching its bound customer group.
-	body, _ := json.Marshal(map[string]any{"config_id": configID, "scene": 2, "auto_create_room": 0, "chat_id_list": chats})
-	if _, err = c.requestJSON(ctx, http.MethodPost, "/cgi-bin/externalcontact/groupchat/update_join_way", url.Values{"access_token": {token}}, body); err != nil {
-		return w.InvitationCode{ConfigID: configID}, w.WrapProviderWriteError(err, true)
+	if id == "" {
+		code.ConfigID = result.ConfigID
 	}
-	body, _ = json.Marshal(map[string]string{"config_id": configID})
-	detail, err := c.requestJSON(ctx, http.MethodPost, "/cgi-bin/externalcontact/groupchat/get_join_way", url.Values{"access_token": {token}}, body)
+	if invalid(code.ConfigID) {
+		return code, w.WrapProviderWriteError(ErrResponse, true)
+	}
+	raw, _ = json.Marshal(map[string]string{"config_id": code.ConfigID})
+	detail, err := c.requestJSON(ctx, http.MethodPost, "/cgi-bin/externalcontact/groupchat/get_join_way", url.Values{"access_token": {token}}, raw)
 	if err != nil {
-		return w.InvitationCode{ConfigID: configID}, w.WrapProviderWriteError(err, true)
+		return code, w.WrapProviderWriteError(err, true)
 	}
-	if !validJoinWayReadback(detail.JoinWay.ConfigID, detail.JoinWay.Scene, detail.JoinWay.AutoCreateRoom, detail.JoinWay.ChatIDs, detail.JoinWay.QRCode, configID, chats) {
-		return w.InvitationCode{ConfigID: configID}, w.WrapProviderWriteError(ErrResponse, true)
+	j := detail.JoinWay
+	auto := 0
+	if o != nil && o.AutoCreateRoom {
+		auto = 1
 	}
-	return w.InvitationCode{ConfigID: configID, QRCode: detail.JoinWay.QRCode}, nil
-}
-
-func validJoinWayReadback(configID string, scene, autoCreateRoom int, actualChats []string, qrCode, expectedConfigID string, expectedChats []string) bool {
-	if configID != expectedConfigID || scene != 2 || autoCreateRoom != 0 || !validProviderHTTPS(qrCode) || len(actualChats) != len(expectedChats) {
-		return false
+	if j.ConfigID != code.ConfigID || j.Scene != 2 || j.AutoCreateRoom != auto || !validProviderHTTPS(j.QRCode) || !slices.Equal(slices.Sorted(slices.Values(j.ChatIDs)), slices.Sorted(slices.Values(chats))) {
+		return code, w.WrapProviderWriteError(ErrResponse, true)
 	}
-	return slices.Equal(slices.Sorted(slices.Values(actualChats)), slices.Sorted(slices.Values(expectedChats)))
+	if o != nil && (j.Remark != o.Remark || j.ChannelState != o.State || (o.AutoCreateRoom && (j.RoomBaseName != o.RoomBaseName || j.RoomBaseID != o.RoomBaseID))) {
+		return code, w.WrapProviderWriteError(ErrResponse, true)
+	}
+	code.QRCode = j.QRCode
+	return code, nil
 }

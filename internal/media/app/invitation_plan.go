@@ -7,6 +7,7 @@ import (
 	g "github.com/qianlan33333-png/AI-CRM-v3/internal/groupops/port"
 	d "github.com/qianlan33333-png/AI-CRM-v3/internal/media/domain"
 	p "github.com/qianlan33333-png/AI-CRM-v3/internal/media/port"
+	"reflect"
 	"time"
 )
 
@@ -33,6 +34,9 @@ func (s *InvitationService) Save(ctx context.Context, v p.InvitationInput, actor
 	if !s.WriteEnabled {
 		old, err := s.Store.ReadInvitationPlan(ctx, v.ID)
 		if err != nil || old.Token == "" {
+			return p.InvitationPlan{}, errors.New("invitation code provider disabled")
+		}
+		if v.Mode != old.Mode || !reflect.DeepEqual(v.NativeOptions, old.NativeOptions) {
 			return p.InvitationPlan{}, errors.New("invitation code provider disabled")
 		}
 		known := map[string]bool{}

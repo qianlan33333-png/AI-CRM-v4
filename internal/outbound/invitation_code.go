@@ -21,6 +21,34 @@ func (p *InvitationCodeProvider) Execute(ctx context.Context, env e.Envelope, a 
 	if p == nil || !p.Enabled || p.Provider == nil || p.Store == nil || env.Kind != e.KindInvitationCode || !env.Valid() {
 		return fail, nil
 	}
+	if env.PolicyVersionHash == e.Hash("invitation.code.policy.v3") {
+		store, ok := p.Store.(m.InvitationPlanCodeStore)
+		if !ok {
+			return fail, nil
+		}
+		intent, err := store.ReadInvitationPlanCodeIntent(ctx, string(env.SourceRefDigest))
+		if err != nil {
+			return e.AdapterResult{Completion: e.StateRetryable, ReceiptDigest: e.Hash("invitation.native-code.read")}, err
+		}
+		if intent.EffectID != a.EffectID || intent.NativeOptions == nil || !intent.NativeOptions.Valid() {
+			return fail, nil
+		}
+		expected := m.NativeInvitationEnvelope(intent.InviteID, env.SourceRefDigest, intent.ChatIDs, *intent.NativeOptions)
+		if expected.Fingerprint() != env.Fingerprint() {
+			return fail, nil
+		}
+		native, ok := p.Provider.(w.NativeInvitationCodeProvider)
+		if !ok {
+			return fail, errors.New("native invitation provider unavailable")
+		}
+		var code w.InvitationCode
+		if intent.ConfigID == "" {
+			code, err = native.CreateNativeInvitationCode(ctx, intent.ChatIDs, *intent.NativeOptions)
+		} else {
+			code, err = native.UpdateNativeInvitationCode(ctx, intent.ConfigID, intent.ChatIDs, *intent.NativeOptions)
+		}
+		return p.finishPlan(code, err, env, store)
+	}
 	if planStore, ok := p.Store.(m.InvitationPlanCodeStore); ok && env.PolicyVersionHash == e.Hash("invitation.code.policy.v2") {
 		intent, err := planStore.ReadInvitationPlanCodeIntent(ctx, string(env.SourceRefDigest))
 		if err != nil {
@@ -98,7 +126,7 @@ func (s InvitationCodeCompletionSink) CompleteEffect(ctx context.Context, ref st
 		v.ConfigID = code.ConfigID
 		v.QRCode = code.QRCode
 	}
-	if env.PolicyVersionHash == e.Hash("invitation.code.policy.v2") {
+	if env.PolicyVersionHash == e.Hash("invitation.code.policy.v2") || env.PolicyVersionHash == e.Hash("invitation.code.policy.v3") {
 		if ps, ok := s.Store.(m.InvitationPlanCodeStore); ok {
 			return ps.CompleteInvitationPlanCode(ctx, v)
 		}

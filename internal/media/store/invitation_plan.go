@@ -15,13 +15,16 @@ import (
 	"strings"
 )
 
-const invitationSelect = `SELECT m.id,m.name,m.title,m.description,COALESCE(m.cover_image_id,0),m.enabled,m.version,m.join_url,COALESCE(p.public_token,''),COALESCE(p.mode,''),p.threshold,COALESCE(p.state,'legacy'),COALESCE(p.current_chat_id,''),COALESCE(p.bindings,'[]'::jsonb),COALESCE(j.config_id,''),COALESCE(j.qr_code,''),COALESCE(j.state,'') FROM media_group_invites m LEFT JOIN media_invitation_plans p ON m.id=p.invite_id LEFT JOIN media_invitation_join_ways j ON m.id=j.invite_id `
+const invitationSelect = `SELECT m.id,m.name,m.title,m.description,COALESCE(m.cover_image_id,0),m.enabled,m.version,m.join_url,COALESCE(p.public_token,''),COALESCE(p.mode,''),p.threshold,COALESCE(p.state,'legacy'),COALESCE(p.current_chat_id,''),COALESCE(p.bindings,'[]'::jsonb),COALESCE(j.config_id,''),COALESCE(j.qr_code,''),COALESCE(j.state,''),p.native_options FROM media_group_invites m LEFT JOIN media_invitation_plans p ON m.id=p.invite_id LEFT JOIN media_invitation_join_ways j ON m.id=j.invite_id `
 
 func scanInvitation(row pgx.Row) (v p.InvitationPlan, err error) {
-	var raw []byte
-	err = row.Scan(&v.ID, &v.Name, &v.Title, &v.Description, &v.CoverImageID, &v.Enabled, &v.Version, &v.JoinURL, &v.Token, &v.Mode, &v.Threshold, &v.State, &v.CurrentChatID, &raw, &v.ProviderConfigID, &v.ProviderQRCode, &v.ProviderState)
+	var raw, nativeRaw []byte
+	err = row.Scan(&v.ID, &v.Name, &v.Title, &v.Description, &v.CoverImageID, &v.Enabled, &v.Version, &v.JoinURL, &v.Token, &v.Mode, &v.Threshold, &v.State, &v.CurrentChatID, &raw, &v.ProviderConfigID, &v.ProviderQRCode, &v.ProviderState, &nativeRaw)
 	if err == nil {
 		err = json.Unmarshal(raw, &v.Bindings)
+		if err == nil && len(nativeRaw) > 0 {
+			err = json.Unmarshal(nativeRaw, &v.NativeOptions)
+		}
 	}
 	return
 }
@@ -119,7 +122,7 @@ func (r *Repository) SaveInvitationPlan(ctx context.Context, input p.InvitationI
 		}
 		// Retired entries stay as history. Active entry cannot be silently reordered.
 		for _, b := range old.Bindings {
-			if b.Retired {
+			if b.Retired && input.Mode != "native" {
 				bindings = append(bindings, p.InvitationBinding{ChatID: b.ChatID, Retired: true})
 			}
 		}
@@ -134,10 +137,10 @@ func (r *Repository) SaveInvitationPlan(ctx context.Context, input p.InvitationI
 				bindings = append(bindings, p.InvitationBinding{ChatID: id})
 			}
 		}
-		if old.Mode != "" && input.Mode != old.Mode {
+		if old.Mode != "" && input.Mode != old.Mode && input.Mode != "native" {
 			return ErrConflict
 		}
-		if old.Mode == "sequence" && old.CurrentChatID != "" {
+		if old.Mode == "sequence" && input.Mode == "sequence" && old.CurrentChatID != "" {
 			next := ""
 			for _, b := range bindings {
 				if !b.Retired {
@@ -181,7 +184,8 @@ func (r *Repository) SaveInvitationPlan(ctx context.Context, input p.InvitationI
 			return err
 		}
 		braw, _ := json.Marshal(bindings)
-		_, err = tx.Exec(ctx, `INSERT INTO media_invitation_plans(invite_id,public_token,mode,threshold,bindings) VALUES($1,$2,$3,$4,$5) ON CONFLICT(invite_id) DO UPDATE SET mode=EXCLUDED.mode,threshold=EXCLUDED.threshold,bindings=EXCLUDED.bindings`, id, token, input.Mode, input.Threshold, braw)
+		nativeRaw, _ := json.Marshal(input.NativeOptions)
+		_, err = tx.Exec(ctx, `INSERT INTO media_invitation_plans(invite_id,public_token,mode,threshold,bindings,native_options) VALUES($1,$2,$3,$4,$5,NULLIF($6::jsonb,'null'::jsonb)) ON CONFLICT(invite_id) DO UPDATE SET mode=EXCLUDED.mode,threshold=EXCLUDED.threshold,bindings=EXCLUDED.bindings,native_options=EXCLUDED.native_options`, id, token, input.Mode, input.Threshold, braw, nativeRaw)
 		if err != nil {
 			return err
 		}
@@ -195,19 +199,37 @@ func (r *Repository) SaveInvitationPlan(ctx context.Context, input p.InvitationI
 				break
 			}
 		}
-		idsRaw, _ := json.Marshal([]string{target})
+		ids := []string{target}
+		if input.Mode == "native" {
+			ids = append([]string(nil), input.ChatIDs...)
+		}
+		idsRaw, _ := json.Marshal(ids)
 		planSource := e.Hash("media.invitation.join-way.v2", strconv.FormatInt(id, 10), string(idsRaw))
+		if input.Mode == "native" {
+			planSource = e.Hash("media.invitation.join-way.v3", strconv.FormatInt(id, 10), strconv.FormatInt(input.Version, 10), string(p.NativeInvitationPayload(ids, *input.NativeOptions)))
+		}
 		var previousSource, previousState string
-		err = tx.QueryRow(ctx, `SELECT source_digest,state FROM media_invitation_join_ways WHERE invite_id=$1 FOR UPDATE`, id).Scan(&previousSource, &previousState)
+		var previousIDs, previousNative []byte
+		err = tx.QueryRow(ctx, `SELECT source_digest,state,chat_ids,native_options FROM media_invitation_join_ways WHERE invite_id=$1 FOR UPDATE`, id).Scan(&previousSource, &previousState, &previousIDs, &previousNative)
+		sameConfig := false
+		if err == nil && input.Mode == "native" {
+			var previous p.InvitationPlanCodeIntent
+			if json.Unmarshal(previousIDs, &previous.ChatIDs) == nil && len(previousNative) > 0 && json.Unmarshal(previousNative, &previous.NativeOptions) == nil && previous.NativeOptions != nil {
+				sameConfig = string(p.NativeInvitationPayload(previous.ChatIDs, *previous.NativeOptions)) == string(p.NativeInvitationPayload(ids, *input.NativeOptions))
+			}
+			if sameConfig {
+				planSource = e.Digest(previousSource)
+			}
+		}
 		changed := false
 		if errors.Is(err, pgx.ErrNoRows) {
-			_, err = tx.Exec(ctx, `INSERT INTO media_invitation_join_ways(invite_id,source_digest,chat_ids) VALUES($1,$2,$3)`, id, string(planSource), idsRaw)
+			_, err = tx.Exec(ctx, `INSERT INTO media_invitation_join_ways(invite_id,source_digest,chat_ids,native_options) VALUES($1,$2,$3,NULLIF($4::jsonb,'null'::jsonb))`, id, string(planSource), idsRaw, nativeRaw)
 			changed = true
 		} else if err == nil && previousSource != string(planSource) {
 			if previousState != "executed" && previousState != "reconciled" {
 				return ErrConflict // Unresolved Provider result cannot be replaced.
 			}
-			_, err = tx.Exec(ctx, `UPDATE media_invitation_join_ways SET source_digest=$2,chat_ids=$3,state='accepted' WHERE invite_id=$1`, id, string(planSource), idsRaw)
+			_, err = tx.Exec(ctx, `UPDATE media_invitation_join_ways SET source_digest=$2,chat_ids=$3,native_options=NULLIF($4::jsonb,'null'::jsonb),state='accepted' WHERE invite_id=$1`, id, string(planSource), idsRaw, nativeRaw)
 			changed = true
 		}
 		if err != nil {
@@ -215,6 +237,9 @@ func (r *Repository) SaveInvitationPlan(ctx context.Context, input p.InvitationI
 		}
 		if changed {
 			env := e.Envelope{Owner: e.OwnerOutbound, Kind: e.KindInvitationCode, SourceRefDigest: planSource, TargetRefDigest: e.Hash("invitation.plan.target.v2", strconv.FormatInt(id, 10)), PayloadDigest: e.Hash("invitation.plan-code.v2", string(idsRaw)), PolicyVersionHash: e.Hash("invitation.code.policy.v2")}
+			if input.Mode == "native" {
+				env = p.NativeInvitationEnvelope(id, planSource, ids, *input.NativeOptions)
+			}
 			projection, _, err := effects.AcceptAndQueueWithin(ctx, e.AcceptCommand{ReceiptKey: planSource, Envelope: env})
 			if err != nil {
 				return err
@@ -316,13 +341,16 @@ func (r *Repository) ReadInvitationCodeIntent(ctx context.Context, source string
 }
 
 func (r *Repository) ReadInvitationPlanCodeIntent(ctx context.Context, source string) (v p.InvitationPlanCodeIntent, err error) {
-	var raw []byte
+	var raw, nativeRaw []byte
 	err = r.Within(ctx, func(ctx context.Context) error {
 		tx, _ := pg.RequireTransaction(ctx)
-		return tx.QueryRow(ctx, `SELECT invite_id,chat_ids,source_digest,effect_id::text,config_id FROM media_invitation_join_ways WHERE source_digest=$1`, source).Scan(&v.InviteID, &raw, &v.SourceDigest, &v.EffectID, &v.ConfigID)
+		return tx.QueryRow(ctx, `SELECT invite_id,chat_ids,source_digest,effect_id::text,config_id,native_options FROM media_invitation_join_ways WHERE source_digest=$1`, source).Scan(&v.InviteID, &raw, &v.SourceDigest, &v.EffectID, &v.ConfigID, &nativeRaw)
 	})
 	if err == nil {
 		err = json.Unmarshal(raw, &v.ChatIDs)
+		if err == nil && len(nativeRaw) > 0 {
+			err = json.Unmarshal(nativeRaw, &v.NativeOptions)
+		}
 	}
 	return
 }

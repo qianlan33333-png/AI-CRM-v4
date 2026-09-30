@@ -24,7 +24,7 @@ const maxInvitationQRBytes = 2 << 20
 var officialJoinPath = regexp.MustCompile(`^/gm/[A-Za-z0-9_-]{8,128}$`)
 
 func officialQRCodeReady(plan p.InvitationPlan) bool {
-	return plan.Token != "" && plan.Enabled && plan.State == "active" && plan.CurrentChatID != "" &&
+	return plan.Token != "" && plan.Enabled && plan.State == "active" && (plan.Mode == "native" || plan.CurrentChatID != "") &&
 		(plan.ProviderState == "executed" || plan.ProviderState == "reconciled") &&
 		plan.ProviderConfigID != "" && plan.ProviderQRCode != ""
 }

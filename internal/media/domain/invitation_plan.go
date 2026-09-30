@@ -22,7 +22,14 @@ func ValidateInvitationInput(v p.InvitationInput) error {
 		if v.Threshold == nil || *v.Threshold < 1 || *v.Threshold > 200 {
 			return ErrInvitationPlan
 		}
+	} else if v.Mode == "native" {
+		if len(v.ChatIDs) > 5 || v.Threshold != nil || v.NativeOptions == nil || !v.NativeOptions.Valid() {
+			return ErrInvitationPlan
+		}
 	} else {
+		return ErrInvitationPlan
+	}
+	if v.Mode != "native" && v.NativeOptions != nil {
 		return ErrInvitationPlan
 	}
 	seen := map[string]bool{}
@@ -42,6 +49,15 @@ func EvaluateInvitation(plan p.InvitationPlan, groups map[string]g.CatalogGroup,
 	plan.CurrentChatID = ""
 	if !plan.Enabled {
 		plan.State = "paused"
+		return plan
+	}
+	// Native allocation is a provider decision. A full or stale local seed
+	// group must not hide a QR that can allocate or create another group.
+	if plan.Mode == "native" {
+		plan.State = "preparing"
+		if (plan.ProviderState == "executed" || plan.ProviderState == "reconciled") && plan.ProviderQRCode != "" {
+			plan.State = "active"
+		}
 		return plan
 	}
 	threshold := 200

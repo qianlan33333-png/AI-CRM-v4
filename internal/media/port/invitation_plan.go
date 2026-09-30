@@ -3,6 +3,7 @@ package port
 import (
 	"context"
 	"errors"
+	w "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/port"
 	"time"
 )
 
@@ -15,35 +16,37 @@ type InvitationBinding struct {
 	CodeState string `json:"code_state"`
 }
 type InvitationPlan struct {
-	ID               int64               `json:"id"`
-	Name             string              `json:"name"`
-	Title            string              `json:"title"`
-	Description      string              `json:"description"`
-	CoverImageID     int64               `json:"cover_image_id"`
-	Mode             string              `json:"mode"`
-	Threshold        *int                `json:"threshold"`
-	Enabled          bool                `json:"enabled"`
-	Version          int64               `json:"version"`
-	Token            string              `json:"token"`
-	JoinURL          string              `json:"join_url"`
-	State            string              `json:"state"`
-	CurrentChatID    string              `json:"current_chat_id"`
-	Bindings         []InvitationBinding `json:"bindings"`
-	ProviderConfigID string              `json:"provider_config_id,omitempty"`
-	ProviderQRCode   string              `json:"provider_qr_code,omitempty"`
-	ProviderState    string              `json:"provider_state,omitempty"`
+	NativeOptions    *w.InvitationJoinWayOptions `json:"native_options,omitempty"`
+	ID               int64                       `json:"id"`
+	Name             string                      `json:"name"`
+	Title            string                      `json:"title"`
+	Description      string                      `json:"description"`
+	CoverImageID     int64                       `json:"cover_image_id"`
+	Mode             string                      `json:"mode"`
+	Threshold        *int                        `json:"threshold"`
+	Enabled          bool                        `json:"enabled"`
+	Version          int64                       `json:"version"`
+	Token            string                      `json:"token"`
+	JoinURL          string                      `json:"join_url"`
+	State            string                      `json:"state"`
+	CurrentChatID    string                      `json:"current_chat_id"`
+	Bindings         []InvitationBinding         `json:"bindings"`
+	ProviderConfigID string                      `json:"provider_config_id,omitempty"`
+	ProviderQRCode   string                      `json:"provider_qr_code,omitempty"`
+	ProviderState    string                      `json:"provider_state,omitempty"`
 }
 type InvitationInput struct {
-	ID           int64    `json:"id"`
-	Version      int64    `json:"version"`
-	Name         string   `json:"name"`
-	Title        string   `json:"title"`
-	Description  string   `json:"description"`
-	CoverImageID int64    `json:"cover_image_id"`
-	Mode         string   `json:"mode"`
-	Threshold    *int     `json:"threshold"`
-	Enabled      bool     `json:"enabled"`
-	ChatIDs      []string `json:"chat_ids"`
+	NativeOptions *w.InvitationJoinWayOptions `json:"native_options,omitempty"`
+	ID            int64                       `json:"id"`
+	Version       int64                       `json:"version"`
+	Name          string                      `json:"name"`
+	Title         string                      `json:"title"`
+	Description   string                      `json:"description"`
+	CoverImageID  int64                       `json:"cover_image_id"`
+	Mode          string                      `json:"mode"`
+	Threshold     *int                        `json:"threshold"`
+	Enabled       bool                        `json:"enabled"`
+	ChatIDs       []string                    `json:"chat_ids"`
 }
 type InvitationSwitch struct {
 	From string    `json:"from"`
@@ -56,11 +59,12 @@ type InvitationCodeIntent struct {
 	EffectID     string
 }
 type InvitationPlanCodeIntent struct {
-	InviteID     int64
-	ChatIDs      []string
-	SourceDigest string
-	EffectID     string
-	ConfigID     string
+	NativeOptions *w.InvitationJoinWayOptions
+	InviteID      int64
+	ChatIDs       []string
+	SourceDigest  string
+	EffectID      string
+	ConfigID      string
 }
 type InvitationCodeCompletion struct {
 	EffectID string

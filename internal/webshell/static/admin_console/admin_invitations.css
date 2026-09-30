@@ -4,8 +4,8 @@
 #invitationWorkspace>nav button[aria-selected=true]{color:#1677ff;border-bottom-color:#1677ff;background:transparent}
 #invitationWorkspace input:not([type=checkbox]),#invitationWorkspace select,#invitationWorkspace textarea{box-sizing:border-box;min-height:38px;border:1px solid #d0d5dd;border-radius:4px;background:white;color:#344054;padding:8px 12px;font:inherit;max-width:100%}
 #invitationWorkspace textarea{width:420px;min-height:76px;vertical-align:top}
-#invitationForm>p>label{display:grid;grid-template-columns:110px minmax(0,420px);align-items:center;gap:12px}
-#invitationForm>p>label:has(input[type=checkbox]){display:flex}
+#invitationForm>p>label,#nativeInvitationFields>p>label{display:grid;grid-template-columns:110px minmax(0,420px);align-items:center;gap:12px}
+#invitationForm>p>label:has(input[type=checkbox]),#nativeInvitationFields>p>label:has(input[type=checkbox]){display:flex}
 #invitationForm [name=threshold]{max-width:180px}
 #invitationWorkspace code{overflow-wrap:anywhere;font-size:12px}
 #invitationWorkspace .aud-table{min-width:760px}
@@ -26,7 +26,7 @@
 #invitationGroupOptions td{padding:10px 16px}
 #invitationWorkspace h2{font-size:18px;margin:24px 0 20px}
 #invitationWorkspace [hidden]{display:none!important}
-@media(max-width:600px){#invitationWorkspace{padding:12px}#invitationForm>p>label{grid-template-columns:1fr}#directorySearch{align-items:flex-start;flex-wrap:wrap}#invitationActions{gap:6px}}
+@media(max-width:600px){#invitationWorkspace{padding:12px}#invitationForm>p>label,#nativeInvitationFields>p>label{grid-template-columns:1fr}#directorySearch{align-items:flex-start;flex-wrap:wrap}#invitationActions{gap:6px}}
 
 #invitationWorkspace .aud-pagination{justify-content:flex-end;gap:12px;padding:18px 0 0}
 #directoryPage{margin-right:auto}

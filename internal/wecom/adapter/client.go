@@ -802,6 +802,10 @@ type response struct {
 		ConfigID       string   `json:"config_id"`
 		Scene          int      `json:"scene"`
 		AutoCreateRoom int      `json:"auto_create_room"`
+		RoomBaseName   string   `json:"room_base_name"`
+		RoomBaseID     int      `json:"room_base_id"`
+		Remark         string   `json:"remark"`
+		ChannelState   string   `json:"state"`
 		ChatIDs        []string `json:"chat_id_list"`
 		QRCode         string   `json:"qr_code"`
 	} `json:"join_way"`

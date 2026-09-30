@@ -3,6 +3,8 @@ package domain
 import (
 	g "github.com/qianlan33333-png/AI-CRM-v3/internal/groupops/port"
 	p "github.com/qianlan33333-png/AI-CRM-v3/internal/media/port"
+	w "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/port"
+	"strings"
 	"testing"
 	"time"
 )
@@ -69,5 +71,47 @@ func TestInvitationSingleDoesNotRetire(t *testing.T) {
 	out := EvaluateInvitation(plan, facts, now)
 	if out.State != "full" || out.Bindings[0].Retired {
 		t.Fatal(out)
+	}
+}
+
+func TestNativeInvitationDelegatesFullAndStaleGroupsToWeCom(t *testing.T) {
+	now := time.Now()
+	plan := p.InvitationPlan{Mode: "native", Enabled: true, ProviderState: "executed", ProviderQRCode: "https://wework.qpic.cn/code", Bindings: []p.InvitationBinding{{ChatID: "a"}}}
+	old := now.Add(-24 * time.Hour)
+	for _, facts := range []map[string]g.CatalogGroup{nil, {"a": {MemberCount: 200, ObservedAt: &now}}, {"a": {MemberCount: 500, ObservedAt: &old}}} {
+		out := EvaluateInvitation(plan, facts, now)
+		if out.State != "active" || out.CurrentChatID != "" || out.Bindings[0].Retired {
+			t.Fatalf("native allocation overridden: %+v", out)
+		}
+	}
+	plan.ProviderState = "outcome_unknown"
+	if out := EvaluateInvitation(plan, nil, now); out.State != "preparing" {
+		t.Fatal(out)
+	}
+	plan.Enabled = false
+	if out := EvaluateInvitation(plan, nil, now); out.State != "paused" {
+		t.Fatal(out)
+	}
+}
+
+func TestNativeInvitationOfficialParameterBoundaries(t *testing.T) {
+	good := p.InvitationInput{Name: "原生", Title: "入群", Mode: "native", ChatIDs: []string{"a", "b", "c", "d", "e"}, NativeOptions: &w.InvitationJoinWayOptions{AutoCreateRoom: true, RoomBaseName: strings.Repeat("群", 40), Remark: strings.Repeat("备", 30), State: strings.Repeat("渠", 30)}}
+	if err := ValidateInvitationInput(good); err != nil {
+		t.Fatal("valid UTF8 params", err)
+	}
+	tests := []p.InvitationInput{good, good, good, good, good}
+	tests[0].ChatIDs = append(append([]string(nil), good.ChatIDs...), "f")
+	tests[1].NativeOptions = nil
+	for i := 2; i < 5; i++ {
+		o := *good.NativeOptions
+		tests[i].NativeOptions = &o
+	}
+	tests[2].NativeOptions.RoomBaseName += "群"
+	tests[3].NativeOptions.Remark += "备"
+	tests[4].NativeOptions.State += "渠"
+	for i, v := range tests {
+		if ValidateInvitationInput(v) == nil {
+			t.Fatalf("invalid native case %d accepted", i)
+		}
 	}
 }

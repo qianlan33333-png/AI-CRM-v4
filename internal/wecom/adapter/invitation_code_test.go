@@ -81,3 +81,61 @@ func TestInvitationCodeBindsOneGroupAndPreservesUnknownReceipt(t *testing.T) {
 		t.Fatal("stale group readback must remain unresolved", code, err)
 	}
 }
+
+func TestNativeInvitationWritesAndReadsAllOfficialOptions(t *testing.T) {
+	calls := 0
+	var saved map[string]any
+	corrupt := false
+	server := httptest.NewServer(http.HandlerFunc(func(out http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/cgi-bin/gettoken":
+			out.Write([]byte(`{"errcode":0,"access_token":"fixture","expires_in":7200}`))
+		case "/cgi-bin/externalcontact/groupchat/add_join_way", "/cgi-bin/externalcontact/groupchat/update_join_way":
+			calls++
+			if err := json.NewDecoder(r.Body).Decode(&saved); err != nil {
+				t.Error(err)
+			}
+			out.Write([]byte(`{"errcode":0,"config_id":"native-config"}`))
+		case "/cgi-bin/externalcontact/groupchat/get_join_way":
+			copy := map[string]any{}
+			for k, v := range saved {
+				copy[k] = v
+			}
+			copy["config_id"] = "native-config"
+			copy["qr_code"] = "https://wework.qpic.cn/native-code"
+			if corrupt {
+				copy["auto_create_room"] = 0
+			}
+			json.NewEncoder(out).Encode(map[string]any{"errcode": 0, "join_way": copy})
+		default:
+			t.Error(r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	c, err := NewDirectory(Config{Enabled: true, CorpID: "corp", ContactSecret: "fixture", APIBase: server.URL, HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{"a", "b", "c", "d", "e"}
+	o := w.InvitationJoinWayOptions{AutoCreateRoom: true, RoomBaseName: "活动群", RoomBaseID: 10, Remark: "秋季活动", State: "native-source"}
+	code, err := c.CreateNativeInvitationCode(context.Background(), ids, o)
+	if err != nil || code.ConfigID != "native-config" || saved["auto_create_room"] != float64(1) || saved["room_base_name"] != o.RoomBaseName || saved["room_base_id"] != float64(10) || saved["remark"] != o.Remark || saved["state"] != o.State {
+		t.Fatalf("native params not delivered: %+v %v %+v", code, err, saved)
+	}
+	o.AutoCreateRoom = false
+	o.Remark = ""
+	o.State = ""
+	code, err = c.UpdateNativeInvitationCode(context.Background(), code.ConfigID, ids, o)
+	if err != nil || saved["auto_create_room"] != float64(0) || saved["remark"] != "" || saved["state"] != "" || saved["config_id"] != "native-config" {
+		t.Fatal(code, err, saved)
+	}
+	if _, err = c.CreateNativeInvitationCode(context.Background(), append(ids, "f"), o); err == nil || calls != 2 {
+		t.Fatal("over-limit input reached Provider", err, calls)
+	}
+	o.AutoCreateRoom = true
+	corrupt = true
+	code, err = c.UpdateNativeInvitationCode(context.Background(), "native-config", ids, o)
+	if err == nil || !w.ProviderCallAttempted(err) || code.ConfigID != "native-config" || code.QRCode != "" {
+		t.Fatal("mismatched readback must retain unresolved config", code, err)
+	}
+}

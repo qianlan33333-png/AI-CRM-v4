@@ -22,21 +22,25 @@ import (
 	w "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/port"
 )
 
-type invitationVirtualEffects struct{}
+type invitationVirtualEffects struct{ fail bool }
 
-func (invitationVirtualEffects) AcceptAndQueueWithin(ctx context.Context, command e.AcceptCommand) (e.Projection, e.Receipt, error) {
+func (f invitationVirtualEffects) AcceptAndQueueWithin(ctx context.Context, command e.AcceptCommand) (e.Projection, e.Receipt, error) {
 	tx, err := pg.RequireTransaction(ctx)
 	if err != nil {
 		return e.Projection{}, e.Receipt{}, err
 	}
 	var id int64
 	err = tx.QueryRow(ctx, `INSERT INTO invitation_effect_probe(digest) VALUES($1) ON CONFLICT(digest) DO UPDATE SET digest=EXCLUDED.digest RETURNING id`, string(command.ReceiptKey)).Scan(&id)
+	if f.fail {
+		err = fmt.Errorf("forced native acceptance failure")
+	}
 	return e.Projection{ID: fmt.Sprintf("eer_%d", id)}, e.Receipt{}, err
 }
 
 type invitationVirtualProvider struct {
 	creates, updates int
 	qr, config       string
+	nativeOptions    w.InvitationJoinWayOptions
 }
 
 func (v *invitationVirtualProvider) CreateInvitationCode(context.Context, string) (w.InvitationCode, error) {
@@ -53,6 +57,23 @@ func (v *invitationVirtualProvider) UpdateInvitationCodeForGroups(_ context.Cont
 	v.updates++
 	if configID != v.config || len(ids) != 1 || ids[0] != "b" {
 		return w.InvitationCode{}, fmt.Errorf("updated config/groups: %q %v", configID, ids)
+	}
+	return w.InvitationCode{ConfigID: v.config, QRCode: v.qr}, nil
+}
+
+func (v *invitationVirtualProvider) CreateNativeInvitationCode(_ context.Context, ids []string, o w.InvitationJoinWayOptions) (w.InvitationCode, error) {
+	v.creates++
+	v.nativeOptions = o
+	if len(ids) != 2 {
+		return w.InvitationCode{}, fmt.Errorf("native initial groups %v", ids)
+	}
+	return w.InvitationCode{ConfigID: v.config, QRCode: v.qr}, nil
+}
+func (v *invitationVirtualProvider) UpdateNativeInvitationCode(_ context.Context, id string, ids []string, o w.InvitationJoinWayOptions) (w.InvitationCode, error) {
+	v.updates++
+	v.nativeOptions = o
+	if id != v.config || len(ids) != 2 {
+		return w.InvitationCode{}, fmt.Errorf("native update changed identity %s %v", id, ids)
 	}
 	return w.InvitationCode{ConfigID: v.config, QRCode: v.qr}, nil
 }
@@ -85,7 +106,7 @@ func TestInvitationVirtualAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer native.Close()
-	for _, name := range []string{"0007_media.sql", "0195_media_invitation_plans.sql", "0204_media_invitation_join_ways.sql"} {
+	for _, name := range []string{"0007_media.sql", "0195_media_invitation_plans.sql", "0204_media_invitation_join_ways.sql", "0215_media_native_invitation.sql"} {
 		body, readErr := os.ReadFile(filepath.Join("../../migrations", name))
 		if readErr != nil {
 			t.Fatal(readErr)
@@ -213,4 +234,89 @@ func TestInvitationVirtualAcceptance(t *testing.T) {
 		t.Fatalf("stable QR or Provider call mismatch: state=%q chat=%q config=%q qr=%q creates=%d updates=%d", final.State, final.CurrentChatID, final.ProviderConfigID, final.ProviderQRCode, provider.creates, provider.updates)
 	}
 	t.Logf("phase=switch_confirmed config_stable=%t qr_stable=%t creates=%d updates=%d", true, true, provider.creates, provider.updates)
+	// Convert the existing plan without changing its public token or provider QR.
+	nativeInput := p.InvitationInput{ID: final.ID, Version: final.Version, Name: final.Name, Title: final.Title, Enabled: true, Mode: "native", ChatIDs: []string{"a", "b"}, NativeOptions: &w.InvitationJoinWayOptions{AutoCreateRoom: true, RoomBaseName: "活动群", RoomBaseID: 10, State: "trial"}}
+	if _, err = repo.SaveInvitationPlan(ctx, nativeInput, 1, "native-rollback-00001", "https://crm.example", invitationVirtualEffects{fail: true}); err == nil {
+		t.Fatal("native acceptance rollback missing")
+	}
+	unchanged, readErr := repo.ReadInvitationPlan(ctx, final.ID)
+	if readErr != nil || unchanged.Mode != "sequence" || unchanged.Version != final.Version {
+		t.Fatal("native rollback changed plan", unchanged, readErr)
+	}
+	converted, err := repo.SaveInvitationPlan(ctx, nativeInput, 1, "native-convert-00001", "https://crm.example", effects)
+	if err != nil || converted.Token != final.Token || converted.ProviderConfigID != final.ProviderConfigID || converted.ProviderState != "accepted" || converted.NativeOptions == nil {
+		t.Fatalf("conversion failed %+v %v", converted, err)
+	}
+	if out := d.EvaluateInvitation(converted, nil, now); out.State != "preparing" {
+		t.Fatal("old QR visible during native update", out)
+	}
+	runNative := func() {
+		t.Helper()
+		var source string
+		if err := native.QueryRow(ctx, `SELECT source_digest FROM media_invitation_join_ways WHERE invite_id=$1`, final.ID).Scan(&source); err != nil {
+			t.Fatal(err)
+		}
+		intent, err := repo.ReadInvitationPlanCodeIntent(ctx, source)
+		if err != nil || intent.NativeOptions == nil {
+			t.Fatal(intent, err)
+		}
+		env := p.NativeInvitationEnvelope(intent.InviteID, e.Digest(source), intent.ChatIDs, *intent.NativeOptions)
+		attempt := e.Attempt{EffectID: intent.EffectID, Number: 1}
+		result, err := adapter.Execute(ctx, env, attempt)
+		if err != nil || result.Completion != e.StateExecuted {
+			t.Fatal(result, err)
+		}
+		if err = uow.Within(ctx, func(tx context.Context) error { return sink.CompleteEffect(tx, intent.EffectID, env, attempt, result) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A different configuration cannot replace an unresolved native effect.
+	nativeInput.Version = converted.Version
+	changedOptions := *nativeInput.NativeOptions
+	changedOptions.AutoCreateRoom = false
+	nativeInput.NativeOptions = &changedOptions
+	if _, err = repo.SaveInvitationPlan(ctx, nativeInput, 1, "native-unresolved-0001", "https://crm.example", effects); err == nil {
+		t.Fatal("unresolved native intent overwritten")
+	}
+	runNative()
+	nativePlan, err := repo.ReadInvitationPlan(ctx, final.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nativePlan.NativeOptions == nil || !nativePlan.NativeOptions.AutoCreateRoom || provider.creates != 1 || provider.updates != 2 {
+		t.Fatal("native options not delivered", nativePlan, provider)
+	}
+	confirmedNative := d.EvaluateInvitation(nativePlan, map[string]g.CatalogGroup{"a": {MemberCount: 200, ObservedAt: &now}, "b": {MemberCount: 500, ObservedAt: &now}}, now)
+	if confirmedNative.State != "active" || confirmedNative.CurrentChatID != "" {
+		t.Fatal("native full groups hidden", confirmedNative)
+	}
+	if err = repo.ApplyInvitationEvaluationWithEffects(ctx, nativePlan, confirmedNative, effects); err != nil {
+		t.Fatal(err)
+	}
+	nativePlan, err = repo.ReadInvitationPlan(ctx, final.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameInput := nativeInput
+	sameInput.NativeOptions = nativePlan.NativeOptions
+	sameInput.Version = nativePlan.Version
+	same, err := repo.SaveInvitationPlan(ctx, sameInput, 1, "native-unchanged-0001", "https://crm.example", effects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM invitation_effect_probe`).Scan(&count); err != nil || count != 3 {
+		t.Fatal("unchanged native config queued another write", count, err)
+	}
+	nativeInput.Version = same.Version
+	updated, err := repo.SaveInvitationPlan(ctx, nativeInput, 1, "native-auto-off-00001", "https://crm.example", effects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runNative()
+	updated, err = repo.ReadInvitationPlan(ctx, updated.ID)
+	if err != nil || updated.Token != final.Token || updated.ProviderConfigID != provider.config || updated.ProviderQRCode != provider.qr || updated.NativeOptions.AutoCreateRoom || provider.nativeOptions.AutoCreateRoom || provider.creates != 1 || provider.updates != 3 {
+		t.Fatal("native update failed", updated, err, provider)
+	}
+	t.Log("phase=native_accepted full_groups_delegated=true rollback=true unresolved_guard=true auto_on_off=true stable_link_and_qr=true")
+
 }

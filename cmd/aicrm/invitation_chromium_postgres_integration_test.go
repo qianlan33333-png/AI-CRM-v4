@@ -125,4 +125,28 @@ func TestPostgreSQLInvitationHostChromiumJourney(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatal(response.Status)
 	}
+	var nativeID int64
+	if err = f.application.pool.Native().QueryRow(f.ctx, `SELECT id FROM media_group_invites WHERE name='原生浏览器邀请'`).Scan(&nativeID); err != nil {
+		t.Fatal(err)
+	}
+	nativePlan, err := f.application.invitationService.Store.ReadInvitationPlan(f.ctx, nativeID)
+	if err != nil || nativePlan.Mode != "native" || nativePlan.NativeOptions == nil || !nativePlan.NativeOptions.AutoCreateRoom || nativePlan.NativeOptions.RoomBaseName != "原生测试群" || nativePlan.NativeOptions.RoomBaseID != 10 || nativePlan.NativeOptions.State != "browser-native" || len(nativePlan.Bindings) != 2 {
+		t.Fatal("native Host readback", nativePlan, err)
+	}
+	if _, err = f.application.pool.Native().Exec(f.ctx, `UPDATE media_invitation_join_ways SET state='executed',config_id='native-fixture',qr_code='https://example.test/native-code' WHERE invite_id=$1`, nativeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.application.pool.Native().Exec(f.ctx, `UPDATE group_ops_directory_groups SET member_count=200,observed_at=clock_timestamp()-interval '1 day' WHERE chat_reference IN ('chromium-group-1','chromium-group-2')`); err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	f.application.handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/gi/"+nativePlan.Token+"?format=json", nil))
+	var public struct {
+		State  string `json:"state"`
+		QRCode string `json:"qr_code"`
+	}
+	if res.Code != 200 || json.Unmarshal(res.Body.Bytes(), &public) != nil || public.State != "active" || public.QRCode != "https://example.test/native-code" {
+		t.Fatal("native full seed group hid QR", res.Code, res.Body.String())
+	}
+
 }

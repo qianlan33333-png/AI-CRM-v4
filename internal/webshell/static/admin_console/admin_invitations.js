@@ -17,15 +17,20 @@ if (root) {
     $("invitationHistory").hidden = true;
   }, renderSelected = function() {
     $("selectedInvitationGroups").innerHTML = selected.map((id, i) => {
-      const retired = editing?.bindings.find((b) => b.chat_id === id)?.retired;
-      const locked = retired || editing?.mode === "sequence" && editing?.current_chat_id === id;
+      const native = form.elements.mode.value === "native", retired = !native && editing?.bindings.find((b) => b.chat_id === id)?.retired;
+      const locked = retired || !native && editing?.mode === "sequence" && editing?.current_chat_id === id;
       return `<li>${esc(groupName(cache.get(id)))} <code>${esc(id)}</code> ${retired ? "\u5DF2\u5207\u51FA" : ""}<button class="aud-btn" type="button" data-up="${i}" ${locked || i === 0 ? "disabled" : ""}>\u4E0A\u79FB</button><button class="aud-btn" type="button" data-remove="${i}" ${locked ? "disabled" : ""}>\u79FB\u9664</button></li>`;
     }).join("");
   }, mode = function() {
-    const multi = form.elements.mode.value === "sequence";
+    const value = form.elements.mode.value, multi = value === "sequence", native = value === "native";
     $("thresholdField").hidden = !multi;
     form.elements.threshold.required = multi;
-    $("invitationRuleNote").textContent = multi ? "\u6309\u914D\u7F6E\u987A\u5E8F\u627F\u63A5\uFF0C\u8FBE\u5230\u9608\u503C\u65F6\u5207\u6362\u3002\u5DF2\u5207\u51FA\u7684\u7FA4\u4E0D\u4F1A\u56DE\u6D41\uFF1B\u5B9E\u9645\u4EBA\u6570\u53EF\u80FD\u56E0\u540C\u6B65\u95F4\u9694\u8D85\u8FC7\u9608\u503C\u3002" : "\u56FA\u5B9A\u4F7F\u7528\u4E00\u4E2A\u7FA4\uFF0C\u4E0D\u81EA\u52A8\u8F6E\u66FF\u3002\u9009\u62E9\u5176\u4ED6\u7FA4\u53EF\u66FF\u6362\u5F53\u524D\u7ED1\u5B9A\u3002";
+    $("nativeInvitationFields").hidden = !native;
+    const auto = native && form.elements.auto_create_room.checked;
+    form.elements.room_base_name.disabled = !auto;
+    form.elements.room_base_id.disabled = !auto;
+    $("invitationRuleNote").textContent = native ? "\u7531\u4F01\u5FAE\u5206\u914D\u5165\u7FA4\uFF0C\u4E0D\u6309\u672C\u5730\u4EBA\u6570\u8F6E\u66FF\u6216\u505C\u6B62\u5165\u53E3\u3002\u7FA4\u6EE1\u540E\u662F\u5426\u5EFA\u7FA4\u7531\u4E0A\u65B9\u8BBE\u7F6E\u51B3\u5B9A\u3002" : multi ? "\u6309\u914D\u7F6E\u987A\u5E8F\u627F\u63A5\uFF0C\u8FBE\u5230\u9608\u503C\u65F6\u5207\u6362\u3002\u5DF2\u5207\u51FA\u7684\u7FA4\u4E0D\u4F1A\u56DE\u6D41\uFF1B\u5B9E\u9645\u4EBA\u6570\u53EF\u80FD\u56E0\u540C\u6B65\u95F4\u9694\u8D85\u8FC7\u9608\u503C\u3002" : "\u56FA\u5B9A\u4F7F\u7528\u4E00\u4E2A\u7FA4\uFF0C\u4E0D\u81EA\u52A8\u8F6E\u66FF\u3002\u9009\u62E9\u5176\u4ED6\u7FA4\u53EF\u66FF\u6362\u5F53\u524D\u7ED1\u5B9A\u3002";
+    renderSelected();
   };
   const $ = (id) => document.getElementById(id), form = $("invitationForm");
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -67,8 +72,12 @@ if (root) {
       }
     }
     $("invitationRows").innerHTML = plans.map((p) => {
-      const g = cache.get(p.current_chat_id), ready = p.enabled && p.state === "active" && p.current_chat_id && ["executed", "reconciled"].includes(p.provider_state) && p.provider_config_id && p.provider_qr_code;
-      return `<tr><td>${esc(p.name)}</td><td>${!p.token ? "\u65E7\u9080\u8BF7" : p.mode === "single" ? "\u56FA\u5B9A\u5355\u7FA4" : `\u591A\u7FA4 \xB7 ${p.threshold} \u4EBA`}</td><td>${p.current_chat_id ? `${esc(groupName(g))}<br><code>${esc(p.current_chat_id)}</code>` : "\u2014"}</td><td>${g?.observed_at ? g.member_count : "\u2014"}<br>${esc(when(g?.observed_at))}</td><td>${esc(names[p.state] || p.state)}</td><td><button class="aud-btn" data-edit="${p.id}">${p.token ? "\u7F16\u8F91" : "\u7ED1\u5B9A\u5347\u7EA7"}</button><button class="aud-btn" data-link="${p.id}">\u590D\u5236\u94FE\u63A5</button>${p.token && !p.provider_state && p.enabled ? `<button class="aud-btn" data-upgrade="${p.id}" ${writeEnabled ? "" : "disabled"}>\u5347\u7EA7\u56FA\u5B9A\u4F01\u5FAE\u7801</button>` : ""}<button class="aud-btn" data-qr="${p.id}" ${ready ? "" : "disabled"} title="${ready ? "\u4E0B\u8F7D\u4F01\u5FAE\u5B98\u65B9\u4E8C\u7EF4\u7801" : "\u56FA\u5B9A\u4F01\u5FAE\u7801\u786E\u8BA4\u540E\u53EF\u4E0B\u8F7D"}">\u4E0B\u8F7D\u4F01\u5FAE\u5165\u7FA4\u7801</button><button class="aud-btn" data-history="${p.id}">\u5207\u6362\u8BB0\u5F55</button></td></tr>`;
+      const native = p.mode === "native", ready = p.enabled && p.state === "active" && (native || p.current_chat_id) && ["executed", "reconciled"].includes(p.provider_state) && p.provider_config_id && p.provider_qr_code, bindings = p.bindings.filter((b) => !b.retired), fallback = bindings[0]?.chat_id || p.bindings.at(-1)?.chat_id;
+      const ids = native ? bindings.map((b) => b.chat_id) : [p.current_chat_id || fallback].filter(Boolean);
+      const groups = ids.map((id) => cache.get(id)), modeLabel = native ? `\u4F01\u5FAE\u539F\u751F \xB7 ${p.native_options?.auto_create_room ? "\u81EA\u52A8\u5EFA\u7FA4" : "\u4E0D\u81EA\u52A8\u5EFA\u7FA4"}` : p.mode === "single" ? "\u56FA\u5B9A\u5355\u7FA4" : `\u591A\u7FA4 \xB7 ${p.threshold} \u4EBA`;
+      const groupLabel = ids.map((id, i) => `${esc(groupName(groups[i]))}<br><code>${esc(id)}</code>`).join("<br>");
+      const countLabel = groups.map((g) => g?.observed_at ? `${esc(groupName(g))}\uFF1A${g.member_count} \u4EBA<br>${esc(when(g.observed_at))}` : "\u7FA4\u4FE1\u606F\u5F85\u540C\u6B65").join("<br>");
+      return `<tr><td>${esc(p.name)}</td><td>${!p.token ? "\u65E7\u9080\u8BF7" : modeLabel}</td><td>${native ? "\u4F01\u5FAE\u5206\u914D \xB7 \u521D\u59CB\u5173\u8054\u7FA4<br>" : p.current_chat_id ? "" : "\u5F53\u524D\u65E0\u627F\u63A5\u7FA4<br>"}${groupLabel || "\u2014"}</td><td>${countLabel || "\u2014"}</td><td>${esc(native && p.state === "active" ? "\u4F01\u5FAE\u5DF2\u914D\u7F6E" : names[p.state] || p.state)}</td><td><button class="aud-btn" data-edit="${p.id}">${p.token ? "\u7F16\u8F91" : "\u7ED1\u5B9A\u5347\u7EA7"}</button><button class="aud-btn" data-link="${p.id}">\u590D\u5236\u94FE\u63A5</button>${p.token && !p.provider_state && p.enabled ? `<button class="aud-btn" data-upgrade="${p.id}" ${writeEnabled ? "" : "disabled"}>\u5347\u7EA7\u56FA\u5B9A\u4F01\u5FAE\u7801</button>` : ""}<button class="aud-btn" data-qr="${p.id}" ${ready ? "" : "disabled"}>\u4E0B\u8F7D\u4F01\u5FAE\u5165\u7FA4\u7801</button><button class="aud-btn" data-history="${p.id}">\u5207\u6362\u8BB0\u5F55</button></td></tr>`;
     }).join("") || '<tr><td colspan="6">\u6682\u65E0\u9080\u8BF7\u8BA1\u5212</td></tr>';
   }
   async function status() {
@@ -99,6 +108,7 @@ if (root) {
     $("groupOptionsMore").hidden = optionOffset >= p.total;
   }
   async function edit(plan) {
+    notice("");
     tab("plans");
     editing = plan;
     selected = plan ? plan.bindings.map((b) => b.chat_id) : [];
@@ -106,12 +116,17 @@ if (root) {
     form.elements.name.value = plan?.name || "";
     form.elements.title.value = plan?.title || "";
     form.elements.description.value = plan?.description || "";
-    form.elements.mode.value = plan?.mode || "single";
-    form.elements.mode.disabled = Boolean(plan?.token);
+    form.elements.mode.value = plan?.mode || "native";
+    form.elements.mode.disabled = false;
+    for (const option of form.elements.mode.options) option.disabled = Boolean(plan?.token) && option.value !== plan.mode && option.value !== "native";
     form.elements.threshold.value = plan?.threshold ?? "";
     form.elements.enabled.checked = plan?.enabled ?? true;
+    form.elements.auto_create_room.checked = plan?.native_options?.auto_create_room ?? true;
+    form.elements.room_base_name.value = plan?.native_options?.room_base_name || "";
+    form.elements.room_base_id.value = plan?.native_options?.room_base_id ?? 1;
+    form.elements.join_remark.value = plan?.native_options?.remark || "";
+    form.elements.join_state.value = plan?.native_options?.state || "";
     mode();
-    renderSelected();
     $("plansPanel").hidden = true;
     $("directoryPanel").hidden = true;
     $("invitationEditor").hidden = false;
@@ -179,7 +194,13 @@ if (root) {
       }
       if (b.dataset.add) {
         if (form.elements.mode.value === "single") selected = [b.dataset.add];
-        else if (!selected.includes(b.dataset.add)) selected.push(b.dataset.add);
+        else if (!selected.includes(b.dataset.add)) {
+          if (form.elements.mode.value === "native" && selected.length >= 5) {
+            notice("\u4F01\u5FAE\u539F\u751F\u5165\u7FA4\u65B9\u5F0F\u6700\u591A\u5173\u8054 5 \u4E2A\u7FA4");
+            return;
+          }
+          selected.push(b.dataset.add);
+        }
         renderSelected();
       }
       if (b.dataset.remove !== void 0) {
@@ -188,7 +209,7 @@ if (root) {
       }
       if (b.dataset.up !== void 0) {
         const i = Number(b.dataset.up), prev = selected[i - 1];
-        if (editing?.bindings.find((x) => x.chat_id === prev)?.retired || editing?.current_chat_id === prev) {
+        if (form.elements.mode.value !== "native" && (editing?.bindings.find((x) => x.chat_id === prev)?.retired || editing?.current_chat_id === prev)) {
           notice("\u5F53\u524D\u627F\u63A5\u7FA4\u53CA\u5DF2\u5207\u51FA\u7FA4\u4E0D\u80FD\u8C03\u6574\u987A\u5E8F");
           return;
         }
@@ -222,6 +243,7 @@ if (root) {
   $("findInvitationGroup").onclick = () => run(() => options());
   $("groupOptionsMore").onclick = () => run(() => options(false));
   form.elements.mode.onchange = mode;
+  form.elements.auto_create_room.onchange = mode;
   form.onsubmit = (e) => {
     e.preventDefault();
     if (busy) return;
@@ -233,6 +255,17 @@ if (root) {
           return;
         }
         const input = { id: editing?.id || 0, version: editing?.version || 0, name: form.elements.name.value.trim(), title: form.elements.title.value.trim(), description: form.elements.description.value, cover_image_id: editing?.cover_image_id || 0, mode: form.elements.mode.value, threshold: form.elements.mode.value === "sequence" ? Number(form.elements.threshold.value) : null, enabled: form.elements.enabled.checked, chat_ids: selected };
+        if (input.mode === "native") {
+          if (selected.length > 5) {
+            notice("\u4F01\u5FAE\u539F\u751F\u5165\u7FA4\u65B9\u5F0F\u6700\u591A\u5173\u8054 5 \u4E2A\u7FA4");
+            return;
+          }
+          input.native_options = { auto_create_room: form.elements.auto_create_room.checked, room_base_name: form.elements.room_base_name.value, room_base_id: Number(form.elements.room_base_id.value), remark: form.elements.join_remark.value, state: form.elements.join_state.value };
+          if ([...input.native_options.room_base_name].length > 40 || [...input.native_options.remark].length > 30 || [...input.native_options.state].length > 30) {
+            notice("\u7FA4\u540D\u524D\u7F00\u6700\u591A 40 \u4E2A\u5B57\u7B26\uFF0C\u5907\u6CE8\u548C\u5165\u7FA4\u6E20\u9053\u6807\u8BB0\u6700\u591A 30 \u4E2A\u5B57\u7B26");
+            return;
+          }
+        }
         await api("group-invitations", input);
         notice("\u5DF2\u4FDD\u5B58\uFF0C\u5B98\u65B9\u7FA4\u7801\u786E\u8BA4\u6210\u529F\u540E\u53EF\u5165\u7FA4");
         tab("plans");

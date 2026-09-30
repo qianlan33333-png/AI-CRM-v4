@@ -163,6 +163,22 @@ try {
   await waitFor(cdp,"document.querySelector('#invitationRows').textContent.includes('浏览器邀请计划')",'save failed');
   if(!await evaluate(cdp,"Boolean(document.querySelector('#invitationRows [data-qr]')?.disabled) && document.querySelector('#invitationRows [data-qr]')?.textContent.includes('下载企微入群码')"))throw new Error('unconfirmed Provider QR must not be downloadable');
   await capture('invitation-plans');
+  await click('#createInvitation');
+  if(!await evaluate(cdp,"document.querySelector('[name=mode]').value==='native' && document.querySelector('[name=auto_create_room]').checked && !document.querySelector('#nativeInvitationFields').hidden"))throw new Error('native mode must be the default');
+  await evaluate(cdp,`(() => {const f=document.querySelector('#invitationForm');f.elements.name.value='原生浏览器邀请';f.elements.title.value='企微原生入群';f.elements.room_base_name.value='原生测试群';f.elements.room_base_id.value='10';f.elements.join_remark.value='测试备注';f.elements.join_state.value='browser-native';})()`);
+  await click('[data-add="chromium-group-1"]');await click('[data-add="chromium-group-2"]');
+  await click('[name=auto_create_room]');
+  if(!await evaluate(cdp,"document.querySelector('[name=room_base_name]').disabled && document.querySelector('[name=room_base_id]').disabled"))throw new Error('auto-create-off must disable naming fields');
+  await click('[name=auto_create_room]');
+  await resize(1440,1600);
+  await capture('invitation-native-editor');
+  await resize(1440);
+  await click('#invitationForm button[type=submit]');
+  await waitFor(cdp,"document.querySelector('#invitationRows').textContent.includes('原生浏览器邀请') && document.querySelector('#invitationRows').textContent.includes('企微原生 · 自动建群')",'native save failed');
+  await capture('invitation-native-plans');
+  await evaluate(cdp,"[...document.querySelectorAll('#invitationRows tr')].find(r=>r.textContent.includes('原生浏览器邀请')).querySelector('[data-edit]').click()");
+  await waitFor(cdp,"!document.querySelector('#invitationEditor').hidden && document.querySelector('[name=room_base_name]').value==='原生测试群'",'native persisted options not reread');
+  if(!await evaluate(cdp,"document.querySelector('[name=auto_create_room]').checked && document.querySelector('[name=room_base_id]').value==='10' && document.querySelector('[name=join_state]').value==='browser-native' && document.querySelector('[name=join_remark]').value==='测试备注' && document.querySelectorAll('#selectedInvitationGroups li').length===2"))throw new Error('native readback differs');
   if(exceptions.length)throw new Error('runtime exceptions: '+JSON.stringify(exceptions));
   console.log('invitation_chromium: PASS screenshots='+screenshotDirectory);
 } catch (error) {

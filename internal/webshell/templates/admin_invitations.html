@@ -16,8 +16,16 @@
    <p><label>计划名称 <input name="name" required maxlength="100"></label></p>
    <p><label>对外标题 <input name="title" required maxlength="60"></label></p>
    <p><label>说明 <textarea name="description" maxlength="250"></textarea></label></p>
-   <h3>承接规则</h3><p><label>模式 <select name="mode"><option value="single">固定单群</option><option value="sequence">多群顺序轮替</option></select></label></p>
+   <h3>承接规则</h3><p><label>模式 <select name="mode"><option value="native">企微原生分流</option><option value="single">固定单群</option><option value="sequence">多群顺序轮替</option></select></label></p>
    <p id="thresholdField" hidden><label>换群人数 <input name="threshold" type="number" min="1" max="200" step="1" placeholder="请输入 1—200 的整数"></label></p>
+   <section id="nativeInvitationFields" hidden>
+    <p><label><input name="auto_create_room" type="checkbox" checked>满群后由企微自动建群</label></p>
+    <p><label>新群名称前缀 <input name="room_base_name" placeholder="例如：活动交流群"></label></p>
+    <p><label>起始序号 <input name="room_base_id" type="number" step="1" value="1"></label></p>
+    <p><label>企微备注 <input name="join_remark" placeholder="可选，最多 30 个字符"></label></p>
+    <p><label>入群渠道标记 <input name="join_state" placeholder="可选，最多 30 个字符"></label></p>
+    <p>初始关联最多 5 个群，由企微分配入群。自动建群的容量和可用性以企微实际结果为准。</p>
+   </section>
    <p><label><input name="enabled" type="checkbox" checked>启用计划</label></p>
    <p id="invitationRuleNote">按下面的顺序承接。已切出的群不会自动回流，当前承接群不能调整顺序。</p>
    <h3>承接群聊</h3><ol id="selectedInvitationGroups"></ol>
