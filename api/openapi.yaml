@@ -1111,7 +1111,7 @@ paths:
       security: [{adminSession: [], csrfHeader: []}]
       parameters: [{$ref: "#/components/parameters/ExternalEffectID"}, {$ref: "#/components/parameters/IdempotencyKey"}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [evidence_digest], properties: {evidence_digest: {$ref: "#/components/schemas/Digest"}}}}}}
-      responses: {"200": {description: Reconciled local effect projection, content: {application/json: {schema: {$ref: "#/components/schemas/ExternalEffectProjection"}}}}, "400": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {description: Effect is not eligible for generic manual reconciliation, including Payment-owned effects, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}}
+      responses: {"200": {description: Reconciled local effect projection, content: {application/json: {schema: {$ref: "#/components/schemas/ExternalEffectProjection"}}}}, "400": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {description: "Effect is not eligible for generic manual reconciliation, including Payment-owned effects", content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}}
   /api/admin/push-center/sections:
     get:
       operationId: getPushCenterSections

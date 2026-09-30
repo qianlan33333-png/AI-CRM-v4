@@ -1992,17 +1992,17 @@
         {
           "path": "api/openapi.yaml",
           "base_sha256": "21bd335875e2691f17fdc1e7ca3542e094324d9e382868b3459591ac9aec8322",
-          "head_sha256": "5835c9239f89a86931d615a5870568844b83e045302fa4e4483455864fb6811f"
+          "head_sha256": "5b0b0827b6ce110d6c078d6491ebe45867bfd0a71a40415d6e4e2754044f2d23"
         },
         {
           "path": "web/donor-sources/source-index.json",
           "base_sha256": "3e1f0191e5f321f1b06e4a14dbe023aa7260898cbdae57ec41834758fe3ffa42",
-          "head_sha256": "6afb916ec0e6adcd9dc0881942ae6821b34f42f2aae2067280ac80718c93be04"
+          "head_sha256": "3fe2eb5c47fe2374ddd06c5840728200a52fee8836303eb1a9d7c0debfb9dea2"
         },
         {
           "path": "web/donor-sources/source-lock.json",
           "base_sha256": "e0b70200e910c5a079ad425690ad8c22621dfe4169bc6790c535049876e96ae2",
-          "head_sha256": "48208ecfab97fdececd10976ff9019aff87fa6bfb224949a72abc7a3b9aeb52b"
+          "head_sha256": "fc82d6f7235cfe9cf5e0bc8b53e00ef7a47398aa5455176fb3b27a236d8f30b1"
         }
       ],
       "reason": "Document the Payment-owned EER manual-reconcile eligibility and keep the canonical OpenAPI index and lock bound to the updated contract.",
