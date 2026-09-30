@@ -2039,6 +2039,28 @@
       ],
       "reason": "L10 removes arbitrary Agent role/task prompt length bounds from the active OpenAPI and generated type annotations; removes two dormant editor maxlength attributes without changing active layout. Canonical index/lock track only those exact byte changes.",
       "review_reference": "/Users/qianlan/Documents/Codex/2026-09-30/crm-v4-qa-resume/evidence/l10-prompt-full-chain-20260930/p5-source-authority-review-20260930.md"
+    },
+    {
+      "base_commit": "ba75230f61af5815ae32bbdb0df276be1f629605",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "f122b26d9c4694e13fc26c5426160b10bdaec46768594850ea27230dc2749465",
+          "head_sha256": "491cdd082fe75aafc015fb037968e5818359cd6e566d33e40cb8c46642191fce"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "d6466dfb889eb5922ec84f706edc7ed95091b4952c698313ac84b88fb3e283b6",
+          "head_sha256": "bdca0ac99af00af2fde33c88f529cb7de93dcd568feb890983192a15a26b5cb3"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "75c1cd3fcd94f1d5dbcb94f30ef2fcf38638470e54e8272f370e3a54c5cb593e",
+          "head_sha256": "df06cb6e8deb9cce5f3def6b79b9c43ad498a0f952ae6cfa05243f92b8b21516"
+        }
+      ],
+      "reason": "Add the administrator- and CSRF-protected full_refresh request contract for controlled package #27 recomputation, and rebind only the active OpenAPI authority index and lock to the exact canonical bytes. Frozen donors are unchanged.",
+      "review_reference": "2026-09-30 user-authorized package #27 friend-at-payment PRD and root-reviewed release cutover requirement; this is an auditable author declaration, not independent approval or deployment evidence."
     }
   ]
 }

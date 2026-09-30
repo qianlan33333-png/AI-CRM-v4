@@ -39,6 +39,26 @@
       "mode": "100644"
     },
     {
+      "id": "production-0881be6631204c46b258137fd12138b1a8bbb37f",
+      "library_id": "production-dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f",
+      "canonical_path": "web/donor-sources/production-dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f/static/config_center.css",
+      "source_path": "aicrm_next/app/admin_console/static/admin_console/config_center.css",
+      "source_git_blob_sha": "0881be6631204c46b258137fd12138b1a8bbb37f",
+      "content_sha256": "b0963b207fe385f8f84bb8c709aa383ed0b1ea148dec096e5e51f9a3dc4b71c4",
+      "bytes": 8367,
+      "mode": "100644"
+    },
+    {
+      "id": "production-1da6a57139ade71f33de45e818e5e6fb3199f3ea",
+      "library_id": "production-dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f",
+      "canonical_path": "web/donor-sources/production-dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f/static/image_resource_loader.js",
+      "source_path": "aicrm_next/app/admin_console/static/admin_console/image_resource_loader.js",
+      "source_git_blob_sha": "1da6a57139ade71f33de45e818e5e6fb3199f3ea",
+      "content_sha256": "38090abd86d19b7027841e7035bb8e8b12548487914a98a893fd71a5ec51187d",
+      "bytes": 14096,
+      "mode": "100644"
+    },
+    {
       "id": "v2-0143e5cfc32d1a7d9c5a5e94cec9ef71ba201e1c",
       "library_id": "v2-6bfbe5816bb89913c70adaca87d6a486260e016e",
       "canonical_path": "web/donor-sources/v2-6bfbe5816bb89913c70adaca87d6a486260e016e/web/src/admin/templates/couponData.html",
@@ -759,33 +779,13 @@
       "mode": "100644"
     },
     {
-      "id": "v3-openapi-f8545a21f771ed2d0a9390a6f5aee33ceac799f0",
+      "id": "v3-openapi-6a3a879d1833e7e95cdfb0ccdb3d6584db52e511",
       "library_id": "v3-api-a7084a754c225d76920d630bea33d1802070879f",
       "canonical_path": "api/openapi.yaml",
       "source_path": "api/openapi.yaml",
-      "source_git_blob_sha": "a17fc6b32228a4f0daa55b2ef8cd244e245c9b2e",
-      "content_sha256": "f122b26d9c4694e13fc26c5426160b10bdaec46768594850ea27230dc2749465",
-      "bytes": 757331,
-      "mode": "100644"
-    },
-    {
-      "id": "production-0881be6631204c46b258137fd12138b1a8bbb37f",
-      "library_id": "production-dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f",
-      "canonical_path": "web/donor-sources/production-dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f/static/config_center.css",
-      "source_path": "aicrm_next/app/admin_console/static/admin_console/config_center.css",
-      "source_git_blob_sha": "0881be6631204c46b258137fd12138b1a8bbb37f",
-      "content_sha256": "b0963b207fe385f8f84bb8c709aa383ed0b1ea148dec096e5e51f9a3dc4b71c4",
-      "bytes": 8367,
-      "mode": "100644"
-    },
-    {
-      "id": "production-1da6a57139ade71f33de45e818e5e6fb3199f3ea",
-      "library_id": "production-dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f",
-      "canonical_path": "web/donor-sources/production-dd8d60dd8ddb983aca2ec88cc9e65a9f7563f79f/static/image_resource_loader.js",
-      "source_path": "aicrm_next/app/admin_console/static/admin_console/image_resource_loader.js",
-      "source_git_blob_sha": "1da6a57139ade71f33de45e818e5e6fb3199f3ea",
-      "content_sha256": "38090abd86d19b7027841e7035bb8e8b12548487914a98a893fd71a5ec51187d",
-      "bytes": 14096,
+      "source_git_blob_sha": "6a3a879d1833e7e95cdfb0ccdb3d6584db52e511",
+      "content_sha256": "491cdd082fe75aafc015fb037968e5818359cd6e566d33e40cb8c46642191fce",
+      "bytes": 759232,
       "mode": "100644"
     }
   ],
@@ -793,11 +793,11 @@
     {
       "module": "v3_openapi_contract",
       "logical_path": "api/openapi.yaml",
-      "content_id": "v3-openapi-f8545a21f771ed2d0a9390a6f5aee33ceac799f0",
+      "content_id": "v3-openapi-6a3a879d1833e7e95cdfb0ccdb3d6584db52e511",
       "source_repository": "https://github.com/qianlan33333-png/AI-CRM-v3.git",
       "source_commit": "a7084a754c225d76920d630bea33d1802070879f",
       "source_path": "api/openapi.yaml",
-      "source_git_blob_sha": "a17fc6b32228a4f0daa55b2ef8cd244e245c9b2e",
+      "source_git_blob_sha": "6a3a879d1833e7e95cdfb0ccdb3d6584db52e511",
       "mode": "100644",
       "usage": "active_canonical_contract_source",
       "freeze_gate": "scripts/validate-openapi.mjs",
@@ -807,11 +807,11 @@
     {
       "module": "config_http",
       "logical_path": "internal/config/http/openapi.yaml",
-      "content_id": "v3-openapi-f8545a21f771ed2d0a9390a6f5aee33ceac799f0",
+      "content_id": "v3-openapi-6a3a879d1833e7e95cdfb0ccdb3d6584db52e511",
       "source_repository": "https://github.com/qianlan33333-png/AI-CRM-v3.git",
       "source_commit": "a7084a754c225d76920d630bea33d1802070879f",
       "source_path": "api/openapi.yaml",
-      "source_git_blob_sha": "a17fc6b32228a4f0daa55b2ef8cd244e245c9b2e",
+      "source_git_blob_sha": "6a3a879d1833e7e95cdfb0ccdb3d6584db52e511",
       "mode": "100644",
       "usage": "go_embed_compatibility_view",
       "freeze_gate": "internal/config/http/handler_test.go",
@@ -4046,7 +4046,7 @@
   "views": [
     {
       "target_path": "internal/config/http/openapi.yaml",
-      "content_id": "v3-openapi-f8545a21f771ed2d0a9390a6f5aee33ceac799f0",
+      "content_id": "v3-openapi-6a3a879d1833e7e95cdfb0ccdb3d6584db52e511",
       "enabled": true
     },
     {
