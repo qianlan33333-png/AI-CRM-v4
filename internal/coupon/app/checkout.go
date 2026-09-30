@@ -91,6 +91,9 @@ func (s *CheckoutService) ReserveWithin(ctx context.Context, c couponport.Reserv
 	}
 	r, e := s.store.ReserveCoupon(ctx, c, sha256.Sum256([]byte(c.IdempotencyKey)), sha256.Sum256(payload), c.ReservedAt)
 	if e != nil {
+		if errors.Is(e, ErrNoEligibleCoupon) {
+			return couponport.ReservationSnapshot{}, couponport.ErrClaimNotEligible
+		}
 		return couponport.ReservationSnapshot{}, classifyCheckout(e)
 	}
 	return r, nil

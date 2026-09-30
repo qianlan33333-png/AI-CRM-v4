@@ -297,7 +297,7 @@ func (s *Service) CreatePaymentOrderWithin(ctx context.Context, command orderpor
 	}
 	checkout, err := s.reserveCheckout(ctx, command, createdAt)
 	if err != nil {
-		return domain.Snapshot{}, err
+		return domain.Snapshot{}, classify(err)
 	}
 	input := domain.NewOrderInput{
 		Provider: command.Provider, SourceSystem: "v3-checkout", SourceKey: command.MerchantOrderNo,
@@ -1195,7 +1195,7 @@ func classify(err error) error {
 		return nil
 	case errors.Is(err, orderport.ErrNotFound):
 		return orderport.ErrNotFound
-	case errors.Is(err, orderport.ErrConflict), errors.Is(err, domain.ErrInvalidOrder), errors.Is(err, domain.ErrInvalidSettlement), errors.Is(err, domain.ErrInvalidTransition), errors.Is(err, domain.ErrVersionConflict):
+	case errors.Is(err, orderport.ErrConflict), errors.Is(err, couponport.ErrClaimNotEligible), errors.Is(err, domain.ErrInvalidOrder), errors.Is(err, domain.ErrInvalidSettlement), errors.Is(err, domain.ErrInvalidTransition), errors.Is(err, domain.ErrVersionConflict):
 		return orderport.ErrConflict
 	default:
 		return orderport.ErrUnavailable

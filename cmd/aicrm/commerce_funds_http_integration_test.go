@@ -843,7 +843,10 @@ func TestPostgreSQLCommerceFundsHTTPJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	days := int32(7)
-	rules := couponapp.NewService(uow, coupons, commerceCheckoutProductFacts{17: {ID: 17, ProductType: productport.ProductOptionServicePeriod, Currency: "CNY", PriceMinor: product.PriceMinor}}, coupons)
+	rules := couponapp.NewService(uow, coupons, commerceCheckoutProductFacts{
+		17: {ID: 17, ProductType: productport.ProductOptionServicePeriod, Currency: "CNY", PriceMinor: product.PriceMinor},
+		18: {ID: 18, ProductType: productport.ProductOptionServicePeriod, Currency: "CNY", PriceMinor: product.PriceMinor},
+	}, coupons)
 	rule, err := rules.Create(ctx, couponport.UpsertCommand{Coupon: couponport.Coupon{Name: "资金联合券", DiscountAmountTotal: 200, TotalIssueLimit: 1, PerUserIssueLimit: 1, ClaimStartsAt: now.Add(-time.Hour), ClaimEndsAt: now.Add(time.Hour), ValidityMode: couponport.ValidityRelativeDays, RelativeValidityDays: &days, TargetRefs: []string{"service_period:17"}}, Actor: 1, IdempotencyKey: "commerce-funds-rule-create-0001"})
 	if err != nil {
 		t.Fatal(err)
@@ -852,6 +855,17 @@ func TestPostgreSQLCommerceFundsHTTPJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	claim, err := couponCheckout.Claim(ctx, couponport.ClaimCommand{CouponID: rule.ID, HolderCustomerID: customerID, ActorScope: "commerce-funds-payer", IdempotencyKey: "commerce-funds-claim-0001", ClaimedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongProductRule, err := rules.Create(ctx, couponport.UpsertCommand{Coupon: couponport.Coupon{Name: "仅限另一商品的券", DiscountAmountTotal: 200, TotalIssueLimit: 1, PerUserIssueLimit: 1, ClaimStartsAt: now.Add(-time.Hour), ClaimEndsAt: now.Add(time.Hour), ValidityMode: couponport.ValidityRelativeDays, RelativeValidityDays: &days, TargetRefs: []string{"service_period:18"}}, Actor: 1, IdempotencyKey: "commerce-funds-wrong-product-rule-0001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = rules.Publish(ctx, wrongProductRule.ID, 1, "commerce-funds-wrong-product-publish-0001"); err != nil {
+		t.Fatal(err)
+	}
+	wrongProductClaim, err := couponCheckout.Claim(ctx, couponport.ClaimCommand{CouponID: wrongProductRule.ID, HolderCustomerID: customerID, ActorScope: "commerce-funds-payer", IdempotencyKey: "commerce-funds-wrong-product-claim-0001", ClaimedAt: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -875,20 +889,82 @@ func TestPostgreSQLCommerceFundsHTTPJourney(t *testing.T) {
 	if binding == "" || binding == sessionCookie.Value {
 		t.Fatalf("binding is not opaque=%q", binding)
 	}
+	postCheckout := func(payload map[string]any, key string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/wechat-pay/checkouts", bytes.NewReader(commerceFundsJSON(t, payload)))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Idempotency-Key", key)
+		request.AddCookie(sessionCookie)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	assertFailedCouponCheckoutLeavesNoWrites := func(claimID int64) {
+		t.Helper()
+		var orderCount, paymentCount, redemptionCount, redemptionReceiptCount, effectCount, orderReceiptCount, paymentReceiptCount int
+		var claimStatus string
+		err = pool.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM orders),
+			(SELECT count(*) FROM payments),
+			(SELECT count(*) FROM coupon_order_redemptions WHERE claim_id=$1),
+			(SELECT count(*) FROM coupon_redemption_operation_receipts),
+			(SELECT count(*) FROM external_effects),
+			(SELECT count(*) FROM order_operation_receipts),
+			(SELECT count(*) FROM payment_operation_receipts),
+			(SELECT status FROM coupon_customer_claims WHERE id=$1)`, claimID).Scan(&orderCount, &paymentCount, &redemptionCount, &redemptionReceiptCount, &effectCount, &orderReceiptCount, &paymentReceiptCount, &claimStatus)
+		if err != nil || orderCount != 0 || paymentCount != 0 || redemptionCount != 0 || redemptionReceiptCount != 0 || effectCount != 0 || orderReceiptCount != 0 || paymentReceiptCount != 0 || claimStatus != "available" {
+			t.Fatalf("rejected coupon checkout writes orders=%d payments=%d redemptions=%d redemption_receipts=%d order_receipts=%d payment_receipts=%d effects=%d claim=%q err=%v", orderCount, paymentCount, redemptionCount, redemptionReceiptCount, orderReceiptCount, paymentReceiptCount, effectCount, claimStatus, err)
+		}
+	}
+
+	wrongProductPayload := map[string]any{"product_id": 17, "product_kind": "service_period", "coupon_claim_id": wrongProductClaim.ClaimID, "beneficiary_selection": "payer_self", "checkout_session_binding": binding}
+	wrongProductResponse := postCheckout(wrongProductPayload, "commerce-funds-wrong-product-checkout-0001")
+	assertFailedCouponCheckoutLeavesNoWrites(wrongProductClaim.ClaimID)
+	wrongProductError := commerceFundsObject(t, wrongProductResponse, http.StatusConflict)
+	if wrongProductError["code"] != "conflict" {
+		t.Fatalf("wrong-product coupon error=%#v", wrongProductError)
+	}
+
+	// Exercise a genuine PostgreSQL write failure after the eligibility read.
+	// The same failure boundary must remain a server error while rolling back
+	// the Order receipt, payment, coupon reservation and effect acceptance.
+	if _, err = pool.Exec(ctx, `CREATE FUNCTION coup04_fail_coupon_reservation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic coupon reservation database failure'; END $$`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `CREATE TRIGGER coup04_fail_coupon_reservation BEFORE INSERT ON coupon_order_redemptions FOR EACH ROW EXECUTE FUNCTION coup04_fail_coupon_reservation()`); err != nil {
+		t.Fatal(err)
+	}
+	storeFailurePayload := map[string]any{"product_id": 17, "product_kind": "service_period", "coupon_claim_id": claim.ClaimID, "beneficiary_selection": "payer_self", "checkout_session_binding": binding}
+	storeFailureResponse := postCheckout(storeFailurePayload, "commerce-funds-coupon-store-failure-0001")
+	storeFailureError := commerceFundsObject(t, storeFailureResponse, http.StatusServiceUnavailable)
+	if storeFailureError["code"] != "unavailable" {
+		t.Fatalf("coupon store failure error=%#v", storeFailureError)
+	}
+	assertFailedCouponCheckoutLeavesNoWrites(claim.ClaimID)
+	if _, err = pool.Exec(ctx, `DROP TRIGGER coup04_fail_coupon_reservation ON coupon_order_redemptions`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `DROP FUNCTION coup04_fail_coupon_reservation()`); err != nil {
+		t.Fatal(err)
+	}
 
 	checkoutPayload := map[string]any{"product_id": 17, "product_kind": "service_period", "coupon_claim_id": claim.ClaimID, "beneficiary_selection": "payer_self", "checkout_session_binding": binding}
-	checkoutRequest := httptest.NewRequest(http.MethodPost, "/api/v1/wechat-pay/checkouts", bytes.NewReader(commerceFundsJSON(t, checkoutPayload)))
-	checkoutRequest.Header.Set("Content-Type", "application/json")
-	checkoutRequest.Header.Set("Idempotency-Key", "commerce-funds-checkout-0001")
-	checkoutRequest.AddCookie(sessionCookie)
-	checkoutResponse := httptest.NewRecorder()
-	handler.ServeHTTP(checkoutResponse, checkoutRequest)
+	checkoutResponse := postCheckout(checkoutPayload, "commerce-funds-checkout-0001")
 	checkout := commerceFundsObject(t, checkoutResponse, http.StatusAccepted)
 	orderID := commerceFundsInt(t, checkout, "order_id")
 	paymentID := commerceFundsInt(t, checkout, "payment_id")
 	merchant := commerceFundsString(t, checkout, "merchant_order_no")
 	commerceFundsAssertReserved(t, ctx, pool, orderID, paymentID, claim.ClaimID)
 	commerceFundsAssertUnpaidOrderHasNoCommerceDeliveries(t, handler, merchant)
+	replayResponse := postCheckout(checkoutPayload, "commerce-funds-checkout-0001")
+	replay := commerceFundsObject(t, replayResponse, http.StatusAccepted)
+	if commerceFundsInt(t, replay, "order_id") != orderID || commerceFundsInt(t, replay, "payment_id") != paymentID || commerceFundsString(t, replay, "merchant_order_no") != merchant {
+		t.Fatalf("coupon checkout replay changed order/payment: first=%#v replay=%#v", checkout, replay)
+	}
+	var orderCount, paymentCount, effectCount int
+	if err = pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM orders),(SELECT count(*) FROM payments),(SELECT count(*) FROM external_effects)`).Scan(&orderCount, &paymentCount, &effectCount); err != nil || orderCount != 1 || paymentCount != 1 || effectCount != 1 {
+		t.Fatalf("coupon checkout replay duplicated writes orders=%d payments=%d effects=%d err=%v", orderCount, paymentCount, effectCount, err)
+	}
 
 	unknownBody, unknownHeaders := commerceFundsSignedCallback(t, platformKey, apiKey, "commerce-funds-unknown", "TRANSACTION.SUCCESS", map[string]any{"appid": "app", "mchid": "mch", "out_trade_no": "v3pay_unknown_funds", "transaction_id": "tx-unknown", "trade_state": "SUCCESS", "success_time": now.Format(time.RFC3339Nano), "amount": map[string]any{"total": 1000, "currency": "CNY"}})
 	unknown := httptest.NewRecorder()

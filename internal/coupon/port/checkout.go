@@ -2,8 +2,15 @@ package port
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrClaimNotEligible is returned by the OrderCouponCoordinator when an
+// explicitly selected claim cannot be reserved for the requested checkout.
+// Infrastructure failures use other errors so callers can retain 5xx
+// semantics.
+var ErrClaimNotEligible = errors.New("coupon claim not eligible for checkout")
 
 // ClaimCommand contains a canonical Customer reference supplied by a trusted
 // host adapter. It deliberately accepts no channel identity and cannot create
