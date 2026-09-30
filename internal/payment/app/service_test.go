@@ -897,3 +897,49 @@ func TestServicePeriodPurchaseRemainsRenewableDespiteStandardOwned(t *testing.T)
 		t.Fatal("period renewal was not created")
 	}
 }
+
+func TestProductAlipayPolicyRejectsBeforeEffectsAndPreservesReplay(t *testing.T) {
+	for _, kind := range []productport.ProductOptionType{productport.ProductOptionStandard, productport.ProductOptionServicePeriod} {
+		for _, provider := range []string{"wechat_pay", "alipay"} {
+			t.Run(string(kind)+"/"+provider, func(t *testing.T) {
+				store := &storeStub{}
+				orders := &checkoutOrderStub{items: []orderdomain.ItemSnapshot{{LineNo: 1, ProductCode: "policy-5", ProductName: "支付商品", UnitAmountMinor: 8800, Quantity: 1, LineAmountMinor: 8800}}}
+				effects := &effectStub{}
+				products := &checkoutProductStub{product: productport.CheckoutProduct{ID: 5, ProductType: kind, Code: "policy-5", Name: "支付商品", PriceMinor: 8800, Currency: "CNY", Version: 3, ServicePeriodDurationDays: 30, AlipayDisabled: true}}
+				sessions := &oneShotSessionStub{actor: paymentport.SessionActor{PayerIdentityID: 4, PayerCustomerID: 11, BeneficiarySelection: paymentport.BeneficiarySelectionUnresolved, Channel: domain.ChannelH5Official}}
+				service := NewService(uowStub{}, store, orders, sessions, effects)
+				_ = service.SetCheckoutProductReader(products)
+				command := paymentport.CreateCommand{ProductID: 5, ProductType: string(kind), Provider: provider, BeneficiarySelection: paymentport.BeneficiarySelectionPayerSelf, SessionToken: "pays_policy_session_00000005", CheckoutSessionBinding: paymentport.CheckoutSessionBinding("pays_policy_session_00000005"), ActorScope: "public-checkout", IdempotencyKey: "checkout-policy-key-0005"}
+				if provider == "alipay" {
+					command.Channel = domain.ChannelAlipayWap
+				}
+				payment, err := service.Create(context.Background(), command)
+				if provider == "alipay" {
+					if !errors.Is(err, paymentport.ErrProductPaymentMethodDisabled) || orders.command.ProductID != 0 || store.payment.ID != 0 || sessions.consumed || len(store.paymentIntentSnapshot) != 0 || effects.within {
+						t.Fatalf("rejected checkout made effects: payment=%+v err=%v", payment, err)
+					}
+					products.product.AlipayDisabled = false
+					// The stub UoW has no rollback; restore it to the pre-rejection
+					// state before simulating a later allowed checkout.
+					store = &storeStub{}
+					orders = &checkoutOrderStub{items: []orderdomain.ItemSnapshot{{LineNo: 1, ProductCode: "policy-5", ProductName: "支付商品", UnitAmountMinor: 8800, Quantity: 1, LineAmountMinor: 8800}}}
+					effects = &effectStub{}
+					sessions = &oneShotSessionStub{actor: paymentport.SessionActor{PayerIdentityID: 4, PayerCustomerID: 11, BeneficiarySelection: paymentport.BeneficiarySelectionUnresolved, Channel: domain.ChannelH5Official}}
+					service = NewService(uowStub{}, store, orders, sessions, effects)
+					_ = service.SetCheckoutProductReader(products)
+					payment, err = service.Create(context.Background(), command)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				store.payment.MerchantOrderNo = orders.command.MerchantOrderNo
+				products.product.AlipayDisabled = true
+				calls := products.calls
+				replay, err := service.Create(context.Background(), command)
+				if err != nil || replay.ID != payment.ID || products.calls != calls {
+					t.Fatalf("policy change broke original replay: %+v %v", replay, err)
+				}
+			})
+		}
+	}
+}

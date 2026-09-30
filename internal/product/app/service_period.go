@@ -239,7 +239,11 @@ func (service *ServicePeriodService) ReadServicePeriodPublicPresentationByCode(c
 			seen[id] = true
 		}
 	}
-	checkout := productport.CheckoutProduct{ID: projected.ServiceProductID, ProductType: productport.ProductOptionServicePeriod, Code: projected.ProductCode, Name: projected.Name, PriceMinor: projected.PriceMinor, Currency: projected.Currency, Version: projected.Version, Images: append([]string(nil), projected.Images...), DetailMedia: presentation.Media, LeadChannelID: presentation.LeadChannelID, LeadQRTitle: presentation.LeadQRTitle, LeadQRSubtitle: presentation.LeadQRSubtitle, CompletionBlocksLeadQR: presentation.CompletionBlocksLeadQR, ServicePeriodDurationDays: duration}
+	disabled, policyErr := ProductAlipayDisabled(projected.AdminProjection)
+	if policyErr != nil {
+		return productport.CheckoutProduct{}, false, policyErr
+	}
+	checkout := productport.CheckoutProduct{AlipayDisabled: disabled, ID: projected.ServiceProductID, ProductType: productport.ProductOptionServicePeriod, Code: projected.ProductCode, Name: projected.Name, PriceMinor: projected.PriceMinor, Currency: projected.Currency, Version: projected.Version, Images: append([]string(nil), projected.Images...), DetailMedia: presentation.Media, LeadChannelID: presentation.LeadChannelID, LeadQRTitle: presentation.LeadQRTitle, LeadQRSubtitle: presentation.LeadQRSubtitle, CompletionBlocksLeadQR: presentation.CompletionBlocksLeadQR, ServicePeriodDurationDays: duration}
 	return checkout, projected.Enabled && projected.Lifecycle == productport.ServicePeriodEnabled, nil
 }
 
@@ -322,6 +326,7 @@ func (service *ServicePeriodService) CreateServicePeriodProduct(ctx context.Cont
 }
 
 func (service *ServicePeriodService) UpdateServicePeriodProduct(ctx context.Context, command productport.UpdateServicePeriodProductCommand) (productport.ServicePeriodProduct, error) {
+	alipaySupplied := hasAlipayPolicy(command.AdminProjection)
 	normalized, digest, err := normalizeServicePeriodUpdate(command)
 	if err != nil {
 		return productport.ServicePeriodProduct{}, err
@@ -345,6 +350,8 @@ func (service *ServicePeriodService) UpdateServicePeriodProduct(ctx context.Cont
 			projectionSource := normalized.AdminProjection
 			if len(projectionSource) == 0 {
 				projectionSource = current.LegacyAdminProjection
+			} else if !alipaySupplied {
+				projectionSource = preserveAlipayPolicy(projectionSource, current.LegacyAdminProjection)
 			}
 			images := normalized.Images
 			if images == nil {

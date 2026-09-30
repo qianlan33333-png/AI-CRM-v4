@@ -106,6 +106,7 @@ type ProductArchiveIntent = { key: string; body: string };
 const productArchiveIntents = new Map<string, ProductArchiveIntent>();
 
 type ProductSaveContext = {
+  alipayEnabled?: boolean;
   contactCollectionLevel?: ContactCollectionLevel;
   productID?: number;
   opened: RecordValue | undefined;
@@ -373,6 +374,52 @@ function syncDistributionPolicyControls(raw: unknown, submitted: DistributionPol
   host.querySelector<HTMLElement>('[data-distribution-policy-fields]')?.classList.toggle('is-disabled', !policy.enabled);
 }
 
+function editorAlipayEnabled(): boolean {
+  const route = productEditorRoute();
+  if (!route) return true;
+  const snapshot = route.prefix === 'pf' ? openedProductPayloads.get(route.id) : periodicSnapshots.get(route.id);
+  if (!snapshot) throw new Error('支付方式正在读取，请稍候后再保存。');
+  const value = object(snapshot.admin_projection).alipay_enabled;
+  if (value !== undefined && typeof value !== 'boolean') throw new Error('商品支付方式响应无效');
+  return value !== false;
+}
+
+function mountAlipayPolicyControls(): void {
+  const prefix = productPrefix();
+  if (!prefix || document.querySelector('[data-product-alipay-enabled]')) return;
+  const route = productEditorRoute();
+  if (route && !(prefix === 'pf' ? openedProductPayloads.has(route.id) : periodicSnapshots.has(route.id))) return;
+  const anchor = document.getElementById(prefix === 'pf' ? 'product-sale' : 'sp-sale');
+  const fields = Array.from(anchor?.children || []).find((node) => node instanceof HTMLElement && node.style.display === 'grid' && node.style.gridTemplateColumns);
+  if (!(fields instanceof HTMLElement)) return;
+  const field = document.createElement('div'); field.style.cssText = 'display:grid;gap:6px;align-content:start';
+  const label = document.createElement('label'); label.className = 'product-distribution-policy__toggle';
+  const input = document.createElement('input'); input.type = 'checkbox'; input.dataset.productAlipayEnabled = ''; input.checked = editorAlipayEnabled();
+  const hint = document.createElement('div'); hint.style.cssText = 'color:#8F959E;font-size:12px;line-height:18px'; hint.id = `${prefix}AlipayHint`; input.setAttribute('aria-describedby', hint.id);
+  label.append(input, document.createTextNode('支持支付宝支付'));
+  const update = () => { hint.textContent = input.checked ? '支持支付宝和微信支付' : '仅支持微信支付'; };
+  input.addEventListener('change', update); update(); field.append(label, hint); fields.append(field);
+}
+
+function currentAlipayEnabled(): boolean {
+  if (newProductEditor() || distributionPolicyDimensionSelected()) {
+    const control = document.querySelector<HTMLInputElement>('[data-product-alipay-enabled]');
+    if (!control && !newProductEditor()) throw new Error('支付方式尚未加载，未提交保存。');
+    return control?.checked ?? true;
+  }
+  return editorAlipayEnabled();
+}
+
+function adaptAlipayPolicyWrite(init?: RequestInit): RequestInit | undefined {
+  if (typeof init?.body !== 'string') return init;
+  const body = object(JSON.parse(init.body));
+  // Freeze the explicit click's choice with its idempotency key. Later edits
+  // while this command awaits reads must belong to the next save.
+  const enabled = productSaveContext?.alipayEnabled ?? currentAlipayEnabled();
+  body.admin_projection = { ...object(body.admin_projection), alipay_enabled: enabled };
+  return { ...init, body: JSON.stringify(body) };
+}
+
 function mountNewServicePeriodDuration(): void {
   if (typeof document === 'undefined' || !document.documentElement || !newProductEditor() || productPrefix() !== 'spf' || document.getElementById('spfDurationDays')) return;
   const sale = document.getElementById('sp-sale');
@@ -430,6 +477,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     const body = JSON.parse(String(nextInit?.body || '{}'));
     nextInit = { ...nextInit, body: JSON.stringify({ ...body, duration_days: duration }) };
   }
+  if (isDistributionProductSubjectWrite(url, method)) nextInit = adaptAlipayPolicyWrite(nextInit);
   if (isPurchaseActionSubjectWrite(url, method)) nextInit = adaptPurchaseActionWrite(nextInit);
   if (isDistributionProductSubjectWrite(url, method)) nextInit = adaptDistributionPolicyWrite(nextInit);
   if ((url.pathname === '/api/v1/products' || /^\/api\/v1\/products\/[1-9][0-9]*$/.test(url.pathname)) && (method === 'POST' || method === 'PUT') && typeof nextInit?.body === 'string') {
@@ -509,10 +557,11 @@ api.saveProduct = (input) => {
       return Promise.reject(new Error(`商品编码「${code}」已存在，请更换商品编码。`));
     }
   }
+  const alipayEnabled = currentAlipayEnabled();
   const projection = input.adminProjection as (typeof input.adminProjection & { contactCollectionLevel?: ContactCollectionLevel });
   const level = contactCollectionLevelFrom((document.getElementById('pfContactCollectionLevel') as HTMLSelectElement | null)?.value || projection?.contactCollectionLevel || (projection?.requireMobile ? 'mobile' : 'none'));
   // Include the level before fingerprinting so a changed selection is a new intent.
-  if (input.adminProjection) input = { ...input, adminProjection: { ...input.adminProjection, requireMobile: level !== 'none', contactCollectionLevel: level } as typeof input.adminProjection };
+  if (input.adminProjection) input = { ...input, adminProjection: { ...input.adminProjection, requireMobile: level !== 'none', contactCollectionLevel: level, alipayEnabled } as typeof input.adminProjection };
   const recovered = pendingExternalPush;
   if (recovered && input.id === recovered.productID && subjectFingerprint(input) === recovered.subjectFingerprint) {
     productSaveInFlight = recoverExternalPush(input, recovered);
@@ -530,6 +579,7 @@ api.saveProduct = (input) => {
     ? { ...input, adminProjection: { ...input.adminProjection, status: creating ? 'active' : input.adminProjection.status, enabled: creating ? true : input.adminProjection.enabled, requireMobile: level !== 'none', contact_collection_level: level } as typeof input.adminProjection & { contact_collection_level: ContactCollectionLevel } }
     : input;
   const context: ProductSaveContext = {
+    alipayEnabled,
     contactCollectionLevel: level,
     productID,
     opened: productID ? openedProductPayloads.get(productID) : undefined,
@@ -603,9 +653,12 @@ api.saveProduct = (input) => {
 const donorSaveServiceProduct = api.saveServiceProduct.bind(api);
 api.saveServiceProduct = (input) => {
   if (productSaveInFlight) return productSaveInFlight;
+  const alipayEnabled = currentAlipayEnabled();
+  input = { ...input, adminProjection: { ...input.adminProjection, alipayEnabled } as typeof input.adminProjection };
   const keys = stableProductSaveKeys(input);
   const productID = input.id;
   const context: ProductSaveContext = {
+    alipayEnabled,
     productID,
     opened: productID ? periodicSnapshots.get(productID) : undefined,
     subjectKey: keys.subjectKey,
@@ -2176,6 +2229,8 @@ const purchaseActionObserver = observeProductDocument(mountPurchaseActionControl
 mountPurchaseActionControls();
 const legacyParityPushObserver = observeProductDocument(mountLegacyParityPushPanel);
 mountLegacyParityPushPanel();
+const alipayPolicyObserver = observeProductDocument(mountAlipayPolicyControls);
+mountAlipayPolicyControls();
 const distributionPolicyObserver = observeProductDocument(mountDistributionPolicyControls);
 mountDistributionPolicyControls();
 const servicePeriodDurationObserver = observeProductDocument(mountNewServicePeriodDuration);

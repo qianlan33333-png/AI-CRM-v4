@@ -356,6 +356,7 @@ func (s *Service) Create(ctx context.Context, command productport.CreateCommand)
 // Update performs a native v2 compare-and-swap. Product code, images, and the
 // legacy compatibility projection intentionally remain outside this contract.
 func (s *Service) Update(ctx context.Context, command productport.UpdateCommand) (productport.Product, error) {
+	alipaySupplied := hasAlipayPolicy(command.LegacyAdminProjection)
 	command, digest, err := normalizeUpdate(command)
 	policy, policyErr := normalizedDistributionPolicy(command.DistributionPolicy, false)
 	if policyErr != nil {
@@ -422,6 +423,8 @@ func (s *Service) Update(ctx context.Context, command productport.UpdateCommand)
 		}
 		if len(command.LegacyAdminProjection) == 0 {
 			command.LegacyAdminProjection = append(json.RawMessage(nil), current.LegacyAdminProjection...)
+		} else if !alipaySupplied {
+			command.LegacyAdminProjection = preserveAlipayPolicy(command.LegacyAdminProjection, current.LegacyAdminProjection)
 		}
 		nextLifecycle, projectionErr := projectLocalProduct(productport.Product{
 			ID: current.ID, ProductCode: current.ProductCode, Name: command.Name, Description: command.Description,
@@ -643,6 +646,7 @@ func CanonicalLegacyAdminProjection(raw json.RawMessage) (json.RawMessage, error
 		"enabled":                     json.RawMessage(`false`),
 		"buy_button_text":             json.RawMessage(`""`),
 		"require_mobile":              json.RawMessage(`false`),
+		"alipay_enabled":              json.RawMessage(`true`),
 		"contact_collection_level":    json.RawMessage(`"none"`),
 		"lead_program_id":             json.RawMessage(`null`),
 		"lead_channel_id":             json.RawMessage(`null`),
@@ -678,9 +682,9 @@ func CanonicalLegacyAdminProjection(raw json.RawMessage) (json.RawMessage, error
 			return nil, ErrInvalidProduct
 		}
 	}
-	for _, key := range []string{"enabled", "require_mobile", "completion_redirect_enabled", "purchase_action_enabled"} {
+	for _, key := range []string{"enabled", "alipay_enabled", "require_mobile", "completion_redirect_enabled", "purchase_action_enabled"} {
 		var value bool
-		if json.Unmarshal(defaults[key], &value) != nil {
+		if key == "alipay_enabled" && string(defaults[key]) == "null" || json.Unmarshal(defaults[key], &value) != nil {
 			return nil, ErrInvalidProduct
 		}
 	}
@@ -750,6 +754,11 @@ func CanonicalLegacyAdminProjection(raw json.RawMessage) (json.RawMessage, error
 				return nil, ErrInvalidProduct
 			}
 		}
+	}
+	// Keep historical absent-field command digests stable across this release.
+	// Missing policy means enabled without rewriting an old request or receipt.
+	if _, suppliedPolicy := supplied["alipay_enabled"]; !suppliedPolicy {
+		delete(defaults, "alipay_enabled")
 	}
 	canonical, err := json.Marshal(defaults)
 	if err != nil {

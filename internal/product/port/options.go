@@ -137,14 +137,16 @@ type PublicDetailMedia struct {
 }
 
 type CheckoutProduct struct {
-	ID            ID
-	ProductType   ProductOptionType
-	Code          string
-	Name          string
-	PriceMinor    int64
-	Currency      string
-	Version       int64
-	RequireMobile bool
+	ID          ID
+	ProductType ProductOptionType
+	Code        string
+	Name        string
+	PriceMinor  int64
+	Currency    string
+	Version     int64
+	// AlipayDisabled defaults to false for historical products. Product owns this policy.
+	AlipayDisabled bool
+	RequireMobile  bool
 	// ContactCollectionLevel controls the buyer contact fields collected by
 	// the public checkout. It is none, mobile, or shipping_address.
 	ContactCollectionLevel string

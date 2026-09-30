@@ -6339,6 +6339,7 @@ components:
         enabled: {type: boolean}
         buy_button_text: {type: string, maxLength: 2048}
         require_mobile: {type: boolean}
+        alipay_enabled: {type: boolean, description: "Supports Alipay for new checkouts. Missing means enabled on create and preserves the saved policy on update; WeChat remains supported."}
         lead_program_id: {type: [integer, "null"], format: int64, minimum: 1}
         lead_channel_id: {type: [integer, "null"], format: int64, minimum: 1}
         lead_qr_title: {type: string, maxLength: 2048}

@@ -13,6 +13,7 @@ import (
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/payment/domain"
 )
 
+var ErrProductPaymentMethodDisabled = errors.New("product payment method disabled")
 var ErrInvalid = errors.New("invalid payment command")
 var ErrConflict = errors.New("payment conflict")
 var ErrNotFound = errors.New("payment not found")

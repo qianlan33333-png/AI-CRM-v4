@@ -163,7 +163,11 @@ func (reader *TargetReader) ReadCheckoutProductWithin(ctx context.Context, kind 
 				level = "none"
 			}
 		}
-		return productport.CheckoutProduct{ID: item.ID, ProductType: kind, Code: item.ProductCode, Name: item.Name, PriceMinor: item.PriceMinor, Currency: item.Currency, Version: item.Version, RequireMobile: level != "none", ContactCollectionLevel: level, Images: append([]string(nil), item.Images...), PostPurchaseAction: action}, nil
+		disabled, policyErr := ProductAlipayDisabled(item.LegacyAdminProjection)
+		if policyErr != nil {
+			return productport.CheckoutProduct{}, policyErr
+		}
+		return productport.CheckoutProduct{ID: item.ID, ProductType: kind, AlipayDisabled: disabled, Code: item.ProductCode, Name: item.Name, PriceMinor: item.PriceMinor, Currency: item.Currency, Version: item.Version, RequireMobile: level != "none", ContactCollectionLevel: level, Images: append([]string(nil), item.Images...), PostPurchaseAction: action}, nil
 	case productport.ProductOptionServicePeriod:
 		item, err := reader.period.store.GetServicePeriodProductForUpdate(ctx, id)
 		if err != nil {
@@ -181,7 +185,11 @@ func (reader *TargetReader) ReadCheckoutProductWithin(ctx context.Context, kind 
 		if actionErr != nil {
 			return productport.CheckoutProduct{}, actionErr
 		}
-		return productport.CheckoutProduct{ID: projected.ServiceProductID, ProductType: kind, Code: projected.ProductCode, Name: projected.Name, PriceMinor: projected.PriceMinor, Currency: projected.Currency, Version: projected.Version, Images: append([]string(nil), projected.Images...), PostPurchaseAction: action, ServicePeriodDurationDays: duration}, nil
+		disabled, policyErr := ProductAlipayDisabled(projected.AdminProjection)
+		if policyErr != nil {
+			return productport.CheckoutProduct{}, policyErr
+		}
+		return productport.CheckoutProduct{ID: projected.ServiceProductID, ProductType: kind, AlipayDisabled: disabled, Code: projected.ProductCode, Name: projected.Name, PriceMinor: projected.PriceMinor, Currency: projected.Currency, Version: projected.Version, Images: append([]string(nil), projected.Images...), PostPurchaseAction: action, ServicePeriodDurationDays: duration}, nil
 	default:
 		return productport.CheckoutProduct{}, ErrInvalidProduct
 	}

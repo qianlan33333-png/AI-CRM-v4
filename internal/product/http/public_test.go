@@ -893,3 +893,34 @@ func TestPublicServicePeriodDetailPreservesOriginalPostersAndLoadingOrder(t *tes
 		t.Fatal("poster loading priority changed")
 	}
 }
+
+func TestProductAlipayPolicyControlsBothPaymentRoutes(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		product := enabledPublicProduct(7, "policy-7")
+		if disabled {
+			product.LegacyAdminProjection = json.RawMessage(`{"schema_version":1,"status":"active","enabled":true,"alipay_enabled":false}`)
+		}
+		ordinary, err := NewPublicHandler(&testCatalog{product: product})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ordinary.SetPaymentMethods(true, true)
+		reader := &servicePeriodPublicStub{product: productport.CheckoutProduct{ID: 71, ProductType: productport.ProductOptionServicePeriod, Code: "policy-period", Name: "周期商品", PriceMinor: 990, Currency: "CNY", Version: 1, ServicePeriodDurationDays: 30, AlipayDisabled: disabled}}
+		period, err := NewServicePeriodPublicHandler(reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		period.SetPaymentMethods(true, true)
+		for _, route := range []struct {
+			handler http.Handler
+			path    string
+		}{{ordinary, "/pay/policy-7"}, {period, "/s/policy-period/pay"}} {
+			result := httptest.NewRecorder()
+			route.handler.ServeHTTP(result, httptest.NewRequest(http.MethodGet, route.path, nil))
+			body := result.Body.String()
+			if result.Code != http.StatusOK || strings.Contains(body, `name="paymentMethod" value="alipay"`) == disabled || !strings.Contains(body, `name="paymentMethod" value="wechat_pay"`) {
+				t.Fatalf("%s disabled=%v status=%d payment options mismatch", route.path, disabled, result.Code)
+			}
+		}
+	}
+}

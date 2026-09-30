@@ -1476,6 +1476,8 @@ func decodeJSON(writer http.ResponseWriter, request *http.Request, destination a
 
 func resultError(writer http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, paymentport.ErrProductPaymentMethodDisabled):
+		writeError(writer, http.StatusConflict, "product_payment_method_disabled")
 	case errors.Is(err, paymentport.ErrAlreadyPurchased):
 		writeError(writer, http.StatusConflict, "already_purchased")
 	case errors.Is(err, paymentport.ErrPurchasePending):

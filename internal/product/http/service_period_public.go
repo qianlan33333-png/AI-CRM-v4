@@ -139,7 +139,7 @@ func (h *ServicePeriodPublicHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Security-Policy", publicCommerceContentSecurityPolicy())
 	if available && payment {
-		view := publicProductPageView{Product: public, Payment: true, Presentation: publicPresentationTemplateFor(presentation), WeChatPayEnabled: h.wechatPayEnabled, AlipayEnabled: h.alipayEnabled}
+		view := publicProductPageView{Product: public, Payment: true, Presentation: publicPresentationTemplateFor(presentation), WeChatPayEnabled: h.wechatPayEnabled, AlipayEnabled: h.alipayEnabled && !product.AlipayDisabled}
 		if err = publicProductPage.Execute(w, view); err != nil {
 			return
 		}

@@ -2061,6 +2061,28 @@
       ],
       "reason": "Add the administrator- and CSRF-protected full_refresh request contract for controlled package #27 recomputation, and rebind only the active OpenAPI authority index and lock to the exact canonical bytes. Frozen donors are unchanged.",
       "review_reference": "2026-09-30 user-authorized package #27 friend-at-payment PRD and root-reviewed release cutover requirement; this is an auditable author declaration, not independent approval or deployment evidence."
+    },
+    {
+      "base_commit": "cb7cf3b9911bbcfcc04763ee94fc536976a1e46a",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "491cdd082fe75aafc015fb037968e5818359cd6e566d33e40cb8c46642191fce",
+          "head_sha256": "e1b39cb165154e7dd3166a0e46d86e4f24af5936735d86ccd42a122a5c7d1980"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "bdca0ac99af00af2fde33c88f529cb7de93dcd568feb890983192a15a26b5cb3",
+          "head_sha256": "157c5d83b58b390703dc65ec12a0c5ca01408317d1ae3bc2f952bd37546d371d"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "df06cb6e8deb9cce5f3def6b79b9c43ad498a0f952ae6cfa05243f92b8b21516",
+          "head_sha256": "ed66453ef85ebe595b657b9e7e8732779c1bf5484f3b60a094d0379f13eccb58"
+        }
+      ],
+      "reason": "Advertise the optional product alipay_enabled setting in the active ProductAdminProjection contract; rebind its canonical OpenAPI identity and lock to the exact bytes. No frozen donor payload changes.",
+      "review_reference": "docs/prd/2026-09-30-product-alipay-toggle.md; user-authorized unchanged product payment policy rebased to the release workbench cumulative cb7cf3b9 base, author-reviewed exact base/head declaration. This records the author declaration, not independent approval or deployment evidence."
     }
   ]
 }

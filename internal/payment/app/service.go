@@ -317,6 +317,9 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 				}
 				return paymentport.ErrConflict
 			}
+			if c.Provider == string(domain.ProviderAlipay) && product.AlipayDisabled {
+				return paymentport.ErrProductPaymentMethodDisabled
+			}
 			level := product.ContactCollectionLevel
 			if level == "" {
 				if product.RequireMobile {
@@ -1558,7 +1561,7 @@ func classify(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, paymentport.ErrAlreadyPurchased), errors.Is(err, paymentport.ErrPurchasePending):
+	case errors.Is(err, paymentport.ErrProductPaymentMethodDisabled), errors.Is(err, paymentport.ErrAlreadyPurchased), errors.Is(err, paymentport.ErrPurchasePending):
 		return err
 	case errors.Is(err, paymentport.ErrNotFound), errors.Is(err, orderport.ErrNotFound):
 		return paymentport.ErrNotFound
