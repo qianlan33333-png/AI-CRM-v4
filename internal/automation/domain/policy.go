@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -105,13 +106,20 @@ func canonicalAction(kind automationport.ActionKind, raw json.RawMessage) (json.
 		return json.Marshal(in)
 	case automationport.ActionOutboundMessage:
 		var in struct {
-			AgentID int64 `json:"agent_id"`
+			AgentID             int64   `json:"agent_id"`
+			DeferredCustomerIDs []int64 `json:"deferred_customer_ids,omitempty"`
 		}
 		if decoder.Decode(&in) != nil || in.AgentID < 1 {
 			return nil, ErrInvalidPolicy
 		}
 		if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 			return nil, ErrInvalidPolicy
+		}
+		sort.Slice(in.DeferredCustomerIDs, func(i, j int) bool { return in.DeferredCustomerIDs[i] < in.DeferredCustomerIDs[j] })
+		for i, customerID := range in.DeferredCustomerIDs {
+			if customerID < 1 || (i > 0 && in.DeferredCustomerIDs[i-1] == customerID) {
+				return nil, ErrInvalidPolicy
+			}
 		}
 		return json.Marshal(in)
 	default:

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -73,6 +74,10 @@ func (s *missingPolicyReceiptStore) ActivePoliciesForPackage(context.Context, in
 		return append([]automationdomain.PolicyVersion(nil), s.policyReads[read]...), nil
 	}
 	return append([]automationdomain.PolicyVersion(nil), s.activePolicies...), nil
+}
+
+func (s *missingPolicyReceiptStore) LockActivePoliciesForPackage(ctx context.Context, packageID int64) ([]automationdomain.PolicyVersion, error) {
+	return s.ActivePoliciesForPackage(ctx, packageID)
 }
 
 func (s *missingPolicyReceiptStore) EnrollmentForSource(_ context.Context, policyVersionID int64, eventDigest [32]byte, customerID int64) (automationdomain.Enrollment, bool, error) {
@@ -143,7 +148,7 @@ func (s *missingPolicyReceiptStore) CompleteRuntime(_ context.Context, id int64,
 func (s *missingPolicyReceiptStore) ListMemberEventDispatchDiagnostics(_ context.Context, packageID, _ int64, _ int) ([]MemberEventDispatchDiagnostic, string, error) {
 	items := []MemberEventDispatchDiagnostic{}
 	for _, receipt := range s.receipts {
-		if receipt.Operation != MemberEventMissingPolicyOperation || receipt.State != "completed" {
+		if (receipt.Operation != MemberEventMissingPolicyOperation && receipt.Operation != MemberEventDeferredOperation) || receipt.State != "completed" {
 			continue
 		}
 		var item MemberEventDispatchDiagnostic
@@ -155,6 +160,7 @@ func (s *missingPolicyReceiptStore) ListMemberEventDispatchDiagnostics(_ context
 			items = append(items, item)
 		}
 	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID > items[j].ID })
 	return items, "", nil
 }
 
@@ -189,6 +195,24 @@ func (reader missingPolicyPublishedContent) OutboundPublishedContent(_ context.C
 type missingPolicyContentFreezer struct{}
 
 func (missingPolicyContentFreezer) FreezeOutboundContent(context.Context, automationport.OutboundPublishedContent) (json.RawMessage, [32]byte, error) {
+	content := json.RawMessage(`{"content_text":"member entered"}`)
+	return content, sha256.Sum256(content), nil
+}
+
+type countingPublishedContent struct {
+	content automationport.OutboundPublishedContent
+	calls   *int
+}
+
+func (reader countingPublishedContent) OutboundPublishedContent(_ context.Context, agentID automationport.AgentID, version int64) (automationport.OutboundPublishedContent, bool, error) {
+	*reader.calls++
+	return reader.content, reader.content.AgentID == agentID && reader.content.PublishedVersion == version, nil
+}
+
+type countingContentFreezer struct{ calls *int }
+
+func (freezer countingContentFreezer) FreezeOutboundContent(context.Context, automationport.OutboundPublishedContent) (json.RawMessage, [32]byte, error) {
+	*freezer.calls++
 	content := json.RawMessage(`{"content_text":"member entered"}`)
 	return content, sha256.Sum256(content), nil
 }
@@ -329,5 +353,141 @@ func TestMemberEnteredPolicyPausedDuringDispatchStillGetsDiagnostic(t *testing.T
 	items, _, err := service.MemberEventDispatchDiagnostics(context.Background(), int64(event.PackageID), 0, 50)
 	if err != nil || len(items) != 1 || items[0].Reason != "no_active_policy" {
 		t.Fatalf("diagnostics=%+v err=%v", items, err)
+	}
+}
+
+func TestDeferredCustomerGetsDurableSkippedEnrollmentAndNewPayerStillSends(t *testing.T) {
+	contentDigest := sha256.Sum256([]byte("published outbound content"))
+	configuration := segmentport.ExecutionConfiguration{
+		PackageID: 27, PackageVersion: 3, ConfigurationVersionID: 43, Ready: true,
+		AgentID: 73, AgentPublishedVersion: 2, ContentDigest: contentDigest,
+		BindingVersion: 5, SenderSetVersion: 6, SenderStaffIDs: []int64{17},
+	}
+	approval := int64(17)
+	policy := automationdomain.PolicyVersion{
+		ID: 51, PolicyID: 9, Version: 1, PackageID: 27,
+		TriggerKind: automationport.TriggerAudienceMemberEnteredV1, TriggerEnabled: true,
+		ActionKind:   automationport.ActionOutboundMessage,
+		ActionConfig: json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[7001,7002]}`),
+		QuietHours:   json.RawMessage(`{}`), SingleRunLimit: 10, ApprovalStaffID: &approval,
+		Digest: [32]byte{1}, CreatedBy: approval,
+	}
+	store := &missingPolicyReceiptStore{activePolicies: []automationdomain.PolicyVersion{policy}}
+	service, err := NewRuntimeService(directRuntimeUOW{}, store, missingPolicyAudience{configuration: configuration}, missingPolicySnapshots{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := automationport.OutboundPublishedContent{
+		AgentID: automationport.AgentID(configuration.AgentID), PublishedVersion: configuration.AgentPublishedVersion,
+		Content: automationport.FixedContentPackage{ContentText: "member entered"}, ContentDigest: contentDigest,
+	}
+	contentReads, freezerCalls := 0, 0
+	service.content = countingPublishedContent{content: published, calls: &contentReads}
+	service.contentFreezer = countingContentFreezer{calls: &freezerCalls}
+	messages := &missingPolicyMessageAccepter{}
+	service.messages = messages
+
+	event := segmentport.MemberEnteredV1{
+		EventID: "audmem_deferred_001", PackageID: 27, SnapshotID: 902,
+		ConfigurationVersionID: 43, CustomerID: 7001,
+		OccurredAt: time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC),
+	}
+	enrollments, err := service.EnrollAudienceMember(context.Background(), event)
+	if err != nil || len(enrollments) != 1 || enrollments[0].State != "skipped" {
+		t.Fatalf("deferred enrollment=%+v err=%v", enrollments, err)
+	}
+	var frozen struct {
+		SkipReason string `json:"skip_reason"`
+	}
+	if json.Unmarshal(enrollments[0].ActionSnapshot, &frozen) != nil || frozen.SkipReason != "historical_identity_merge_deferred" {
+		t.Fatalf("skipped enrollment snapshot=%s", enrollments[0].ActionSnapshot)
+	}
+	if strings.Contains(string(enrollments[0].ActionSnapshot), "deferred_customer_ids") {
+		t.Fatalf("skipped enrollment redundantly copied the full deferred-ID list: %s", enrollments[0].ActionSnapshot)
+	}
+	if store.runCalls != 0 || messages.calls != 0 || contentReads != 0 || freezerCalls != 0 || store.bindEffectCalls != 0 {
+		t.Fatalf("deferred event created run/outbound/content read/freeze/effect=%d/%d/%d/%d/%d", store.runCalls, messages.calls, contentReads, freezerCalls, store.bindEffectCalls)
+	}
+
+	items, _, err := service.MemberEventDispatchDiagnostics(context.Background(), 27, 0, 50)
+	if err != nil || len(items) != 1 || items[0].State != "skipped" || items[0].Reason != "historical_identity_merge_deferred" || items[0].PolicyID != policy.PolicyID || items[0].PolicyVersionID != policy.ID {
+		t.Fatalf("deferred diagnostics=%+v err=%v", items, err)
+	}
+	for _, receipt := range store.receipts {
+		if receipt.Operation == MemberEventDeferredOperation && (strings.Contains(string(receipt.Result), event.EventID) || strings.Contains(string(receipt.Result), "7001")) {
+			t.Fatalf("deferred diagnostic contains raw event/customer identifier: %s", receipt.Result)
+		}
+	}
+
+	// A later policy version changes the enrollment uniqueness key. The stable
+	// policy+event receipt must still stop this historical event before runs or
+	// Outbound acceptance.
+	version2 := policy
+	version2.ID, version2.Version, version2.Digest = 52, 2, [32]byte{2}
+	store.activePolicies = []automationdomain.PolicyVersion{version2}
+	if replay, replayErr := service.EnrollAudienceMember(context.Background(), event); replayErr != nil || len(replay) != 0 {
+		t.Fatalf("cross-version deferred replay=%+v err=%v", replay, replayErr)
+	}
+	if len(store.enrollments) != 1 || store.runCalls != 0 || messages.calls != 0 || contentReads != 0 || freezerCalls != 0 {
+		t.Fatalf("cross-version replay changed enrollments/runs/outbound/content/freeze=%d/%d/%d/%d/%d", len(store.enrollments), store.runCalls, messages.calls, contentReads, freezerCalls)
+	}
+
+	newPayer := event
+	newPayer.EventID = "audmem_new_payer_001"
+	newPayer.CustomerID = 8001
+	if sent, sendErr := service.EnrollAudienceMember(context.Background(), newPayer); sendErr != nil || len(sent) != 1 || sent[0].State != "accepted" {
+		t.Fatalf("new payer enrollment=%+v err=%v", sent, sendErr)
+	}
+	if store.runCalls != 1 || messages.calls != 1 || contentReads != 1 || freezerCalls != 1 || store.bindEffectCalls != 1 {
+		t.Fatalf("new payer run/outbound/content read/freeze/effect=%d/%d/%d/%d/%d", store.runCalls, messages.calls, contentReads, freezerCalls, store.bindEffectCalls)
+	}
+}
+
+func TestMemberEventVersionChangeDuringDispatchRetriesAgainstCurrentPolicy(t *testing.T) {
+	contentDigest := sha256.Sum256([]byte("published outbound content"))
+	configuration := segmentport.ExecutionConfiguration{
+		PackageID: 27, PackageVersion: 3, ConfigurationVersionID: 43, Ready: true,
+		AgentID: 73, AgentPublishedVersion: 2, ContentDigest: contentDigest,
+		BindingVersion: 5, SenderSetVersion: 6, SenderStaffIDs: []int64{17},
+	}
+	approval := int64(17)
+	version1 := automationdomain.PolicyVersion{
+		ID: 61, PolicyID: 12, Version: 1, PackageID: 27,
+		TriggerKind: automationport.TriggerAudienceMemberEnteredV1, TriggerEnabled: true,
+		ActionKind: automationport.ActionOutboundMessage, ActionConfig: json.RawMessage(`{"agent_id":73}`),
+		QuietHours: json.RawMessage(`{}`), SingleRunLimit: 10, ApprovalStaffID: &approval,
+		Digest: [32]byte{1}, CreatedBy: approval,
+	}
+	version2 := version1
+	version2.ID, version2.Version, version2.Digest = 62, 2, [32]byte{2}
+	store := &missingPolicyReceiptStore{policyReads: [][]automationdomain.PolicyVersion{{version1}, {version2}}}
+	service, err := NewRuntimeService(directRuntimeUOW{}, store, missingPolicyAudience{configuration: configuration}, missingPolicySnapshots{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := automationport.OutboundPublishedContent{
+		AgentID: automationport.AgentID(configuration.AgentID), PublishedVersion: configuration.AgentPublishedVersion,
+		Content: automationport.FixedContentPackage{ContentText: "member entered"}, ContentDigest: contentDigest,
+	}
+	service.content = missingPolicyPublishedContent{content: published}
+	service.contentFreezer = missingPolicyContentFreezer{}
+	messages := &missingPolicyMessageAccepter{}
+	service.messages = messages
+	event := segmentport.MemberEnteredV1{
+		EventID: "audmem_cutover_retry_001", PackageID: 27, SnapshotID: 905,
+		ConfigurationVersionID: 43, CustomerID: 87650001,
+		OccurredAt: time.Date(2026, 9, 30, 10, 5, 0, 0, time.UTC),
+	}
+	if enrollments, dispatchErr := service.EnrollAudienceMember(context.Background(), event); !errors.Is(dispatchErr, ErrRuntimeNotReady) || len(enrollments) != 0 {
+		t.Fatalf("stale dispatch enrollments=%+v err=%v, want retry without a terminal receipt", enrollments, dispatchErr)
+	}
+	if len(store.receipts) != 0 || len(store.enrollments) != 0 || store.runCalls != 0 || messages.calls != 0 {
+		t.Fatalf("stale dispatch wrote receipts/enrollments/runs/outbound=%d/%d/%d/%d", len(store.receipts), len(store.enrollments), store.runCalls, messages.calls)
+	}
+	if enrollments, dispatchErr := service.EnrollAudienceMember(context.Background(), event); dispatchErr != nil || len(enrollments) != 1 {
+		t.Fatalf("retry against current policy enrollments=%+v err=%v", enrollments, dispatchErr)
+	}
+	if len(store.enrollments) != 1 || store.runCalls != 1 || messages.calls != 1 || store.reserveCalls != 0 {
+		t.Fatalf("retry enrollments/runs/outbound/terminal-receipts=%d/%d/%d/%d", len(store.enrollments), store.runCalls, messages.calls, store.reserveCalls)
 	}
 }

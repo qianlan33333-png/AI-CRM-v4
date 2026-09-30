@@ -3,10 +3,11 @@ package domain
 import (
 	"encoding/json"
 	"errors"
-	automationport "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/port"
-	segmentport "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/port"
 	"testing"
 	"time"
+
+	automationport "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/port"
+	segmentport "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/port"
 )
 
 func TestPolicyVersionClosesTriggerActionAndExecutionPolicy(t *testing.T) {
@@ -26,6 +27,54 @@ func TestPolicyVersionClosesTriggerActionAndExecutionPolicy(t *testing.T) {
 	_, err = NewPolicyVersion(1, 2, 2, automationport.TriggerAudienceMemberEnteredV1, automationport.ActionRecord, json.RawMessage(`{"record_type":"entered"}`), json.RawMessage(`{"timezone":"Mars/Olympus","start":"22:00","end":"08:00"}`), 1000, &approval, 3, created)
 	if !errors.Is(err, ErrInvalidPolicy) {
 		t.Fatalf("expected valid IANA timezone, got %v", err)
+	}
+}
+
+func TestOutboundDeferredCustomerIDsAreCanonicalAndValidated(t *testing.T) {
+	approval := int64(9)
+	created := time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)
+	version, err := NewPolicyVersion(1, 1, 27, automationport.TriggerAudienceMemberEnteredV1, automationport.ActionOutboundMessage, json.RawMessage(`{"agent_id":14,"deferred_customer_ids":[9002,9001,9003]}`), json.RawMessage(`{}`), 100, &approval, 9, created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(version.ActionConfig), `{"agent_id":14,"deferred_customer_ids":[9001,9002,9003]}`; got != want {
+		t.Fatalf("canonical action config=%s, want %s", got, want)
+	}
+	if version.Digest == ([32]byte{}) {
+		t.Fatal("deferred customer list must be covered by the policy digest")
+	}
+	for _, raw := range []string{
+		`{"agent_id":14,"deferred_customer_ids":[1,1]}`,
+		`{"agent_id":14,"deferred_customer_ids":[0]}`,
+		`{"agent_id":14,"deferred_customer_ids":[-1]}`,
+	} {
+		if _, err := NewPolicyVersion(1, 2, 27, automationport.TriggerAudienceMemberEnteredV1, automationport.ActionOutboundMessage, json.RawMessage(raw), json.RawMessage(`{}`), 100, &approval, 9, created); !errors.Is(err, ErrInvalidPolicy) {
+			t.Errorf("NewPolicyVersion(%s) error=%v, want invalid policy", raw, err)
+		}
+	}
+
+	// There is no business-level item cap; the existing HTTP request-size
+	// limit remains the transport boundary for an audited deployment list.
+	ids := make([]int64, 512)
+	for index := range ids {
+		ids[index] = int64(index + 1)
+	}
+	largeConfig, err := json.Marshal(struct {
+		AgentID             int64   `json:"agent_id"`
+		DeferredCustomerIDs []int64 `json:"deferred_customer_ids"`
+	}{AgentID: 14, DeferredCustomerIDs: ids})
+	if err != nil {
+		t.Fatal(err)
+	}
+	largeVersion, err := NewPolicyVersion(1, 3, 27, automationport.TriggerAudienceMemberEnteredV1, automationport.ActionOutboundMessage, largeConfig, json.RawMessage(`{}`), 100, &approval, 9, created)
+	if err != nil {
+		t.Fatalf("NewPolicyVersion with 512 deferred IDs returned %v", err)
+	}
+	var canonical struct {
+		DeferredCustomerIDs []int64 `json:"deferred_customer_ids"`
+	}
+	if err := json.Unmarshal(largeVersion.ActionConfig, &canonical); err != nil || len(canonical.DeferredCustomerIDs) != len(ids) {
+		t.Fatalf("canonical deferred list has %d IDs, err=%v; want %d", len(canonical.DeferredCustomerIDs), err, len(ids))
 	}
 }
 

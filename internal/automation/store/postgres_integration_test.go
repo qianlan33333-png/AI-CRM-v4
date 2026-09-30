@@ -37,6 +37,19 @@ func (r automationExecutionReader) AudienceExecutionConfiguration(context.Contex
 	return segmentport.ExecutionConfiguration{PackageID: r.packageID, Ready: true}, nil
 }
 
+type automationReadyExecutionReader struct {
+	packageID segmentport.PackageID
+	agentID   int64
+}
+
+func (r automationReadyExecutionReader) AudienceExecutionConfiguration(context.Context, segmentport.PackageID) (segmentport.ExecutionConfiguration, error) {
+	return segmentport.ExecutionConfiguration{
+		PackageID: r.packageID, Ready: true, AgentID: r.agentID,
+		AgentPublishedVersion: 2, ContentDigest: sha256.Sum256([]byte("published automation content")),
+		BindingVersion: 5, SenderSetVersion: 6, SenderStaffIDs: []int64{7},
+	}, nil
+}
+
 type automationSnapshotReader struct{}
 
 func (automationSnapshotReader) PublishedSnapshot(context.Context, segmentport.PackageID) (segmentport.Snapshot, bool, error) {
@@ -166,12 +179,12 @@ func TestPostgreSQLPolicyCreateVersionLifecycleAndReplayJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	packageID := segmentport.PackageID(17)
-	service, err := automationapp.NewRuntimeService(uow, repository, automationExecutionReader{packageID: packageID}, automationSnapshotReader{}, 1)
+	service, err := automationapp.NewRuntimeService(uow, repository, automationReadyExecutionReader{packageID: packageID, agentID: 73}, automationSnapshotReader{}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	approval := int64(7)
-	command := automationapp.PolicyCommand{Code: "pg-lifecycle", Name: "PostgreSQL lifecycle", PackageID: packageID, TriggerKind: automationport.TriggerAudienceMemberEnteredV1, ActionKind: automationport.ActionRecord, ActionConfig: json.RawMessage(`{"record_type":"entry"}`), QuietHours: json.RawMessage(`{"timezone":"UTC","start":"22:00","end":"08:00"}`), SingleRunLimit: 10, ApprovalStaffID: &approval, Actor: 7, IdempotencyKey: "policy-postgres-create-0001"}
+	command := automationapp.PolicyCommand{Code: "pg-lifecycle", Name: "PostgreSQL lifecycle", PackageID: packageID, TriggerKind: automationport.TriggerAudienceMemberEnteredV1, ActionKind: automationport.ActionOutboundMessage, ActionConfig: json.RawMessage(`{"agent_id":73}`), QuietHours: json.RawMessage(`{"timezone":"UTC","start":"22:00","end":"08:00"}`), SingleRunLimit: 10, ApprovalStaffID: &approval, Actor: 7, IdempotencyKey: "policy-postgres-create-0001"}
 	created, err := service.CreatePolicy(ctx, command)
 	if err != nil || created.Version != 2 || created.Lifecycle != automationdomain.PolicyPaused {
 		t.Fatalf("created=%+v err=%v", created, err)
@@ -207,12 +220,25 @@ func TestPostgreSQLPolicyCreateVersionLifecycleAndReplayJourney(t *testing.T) {
 	if err != nil || replayed.ID != active.ID || replayed.Version != active.Version {
 		t.Fatalf("active replay=%+v err=%v", replayed, err)
 	}
-	paused, err := service.TransitionPolicy(ctx, automationapp.PolicyLifecycleCommand{PolicyID: created.ID, ExpectedVersion: active.Version, Actor: 7, Target: automationdomain.PolicyPaused, IdempotencyKey: "policy-postgres-pause-0001"})
-	if err != nil || paused.Lifecycle != automationdomain.PolicyPaused || paused.Version != 5 {
+	activeVersionCommand := command
+	activeVersionCommand.PolicyID = created.ID
+	activeVersionCommand.ExpectedVersion = active.Version
+	activeVersionCommand.ActionConfig = json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[9002,9001]}`)
+	activeVersionCommand.IdempotencyKey = "policy-postgres-active-defer-0001"
+	activeVersion, err := service.PutPolicyVersion(ctx, activeVersionCommand)
+	if err != nil || activeVersion.Version != 3 {
+		t.Fatalf("active deferral version=%+v err=%v", activeVersion, err)
+	}
+	currentPolicy, currentVersion, err := service.Policy(ctx, created.ID)
+	if err != nil || currentPolicy.Lifecycle != automationdomain.PolicyActive || currentPolicy.Version != 5 || currentVersion.ID != activeVersion.ID || string(currentVersion.ActionConfig) != `{"agent_id":73,"deferred_customer_ids":[9001,9002]}` {
+		t.Fatalf("active policy/current version=%+v/%+v err=%v", currentPolicy, currentVersion, err)
+	}
+	paused, err := service.TransitionPolicy(ctx, automationapp.PolicyLifecycleCommand{PolicyID: created.ID, ExpectedVersion: currentPolicy.Version, Actor: 7, Target: automationdomain.PolicyPaused, IdempotencyKey: "policy-postgres-pause-0001"})
+	if err != nil || paused.Lifecycle != automationdomain.PolicyPaused || paused.Version != 6 {
 		t.Fatalf("paused=%+v err=%v", paused, err)
 	}
 	archived, err := service.TransitionPolicy(ctx, automationapp.PolicyLifecycleCommand{PolicyID: created.ID, ExpectedVersion: paused.Version, Actor: 7, Target: automationdomain.PolicyArchived, IdempotencyKey: "policy-postgres-archive-0001"})
-	if err != nil || archived.Lifecycle != automationdomain.PolicyArchived || archived.ArchivedAt == nil || archived.Version != 6 {
+	if err != nil || archived.Lifecycle != automationdomain.PolicyArchived || archived.ArchivedAt == nil || archived.Version != 7 {
 		t.Fatalf("archived=%+v err=%v", archived, err)
 	}
 	if _, err = service.TransitionPolicy(ctx, automationapp.PolicyLifecycleCommand{PolicyID: created.ID, ExpectedVersion: archived.Version, Actor: 7, Target: automationdomain.PolicyArchived, IdempotencyKey: "policy-postgres-archive-0002"}); !errors.Is(err, automationapp.ErrRuntimeConflict) {

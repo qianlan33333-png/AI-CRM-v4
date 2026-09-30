@@ -128,6 +128,21 @@ func (r *Repository) SetCurrentPolicyVersion(ctx context.Context, policyID, vers
 	}
 	return p, e
 }
+
+// SetCurrentActivePolicyVersion performs the exact-pointer swap used when an
+// active policy only acquires append-only deferred customer IDs. The app layer
+// validates that narrow contract under LockPolicy in the same transaction.
+func (r *Repository) SetCurrentActivePolicyVersion(ctx context.Context, policyID, versionID, expected, actor int64, now time.Time) (automationdomain.Policy, error) {
+	t, e := tx(ctx)
+	if e != nil {
+		return automationdomain.Policy{}, e
+	}
+	p, e := scanPolicy(t.QueryRow(ctx, `UPDATE automation_policies SET current_version_id=$2,version=version+1,updated_by=$4,updated_at=$5 WHERE id=$1 AND version=$3 AND lifecycle='active' RETURNING `+policyColumns, policyID, versionID, expected, actor, now))
+	if errors.Is(e, automationapp.ErrRuntimeNotFound) {
+		return p, automationapp.ErrRuntimeConflict
+	}
+	return p, e
+}
 func (r *Repository) CurrentPolicyVersion(ctx context.Context, policyID int64) (automationdomain.PolicyVersion, error) {
 	t, e := tx(ctx)
 	if e != nil {
@@ -147,11 +162,27 @@ func (r *Repository) SetPolicyLifecycle(ctx context.Context, id, expected, actor
 	return p, e
 }
 func (r *Repository) ActivePoliciesForPackage(ctx context.Context, packageID int64) ([]automationdomain.PolicyVersion, error) {
+	return r.activePoliciesForPackage(ctx, packageID, false)
+}
+
+// LockActivePoliciesForPackage takes share locks on active policy rows until
+// the caller's UoW commits. An active version replacement takes an exclusive
+// row lock, so the final member-event decision either commits against the old
+// version before the replacement or sees the new version and retries.
+func (r *Repository) LockActivePoliciesForPackage(ctx context.Context, packageID int64) ([]automationdomain.PolicyVersion, error) {
+	return r.activePoliciesForPackage(ctx, packageID, true)
+}
+
+func (r *Repository) activePoliciesForPackage(ctx context.Context, packageID int64, lock bool) ([]automationdomain.PolicyVersion, error) {
 	t, e := tx(ctx)
 	if e != nil {
 		return nil, e
 	}
-	rows, e := t.Query(ctx, `SELECT `+policyVersionJoinColumns+` FROM automation_policies p JOIN automation_policy_versions v ON v.id=p.current_version_id AND v.policy_id=p.id WHERE p.lifecycle='active' AND v.package_id=$1 AND v.trigger_enabled ORDER BY p.id`, packageID)
+	query := `SELECT ` + policyVersionJoinColumns + ` FROM automation_policies p JOIN automation_policy_versions v ON v.id=p.current_version_id AND v.policy_id=p.id WHERE p.lifecycle='active' AND v.package_id=$1 AND v.trigger_enabled ORDER BY p.id`
+	if lock {
+		query += ` FOR SHARE OF p`
+	}
+	rows, e := t.Query(ctx, query, packageID)
 	if e != nil {
 		return nil, e
 	}
@@ -310,9 +341,9 @@ func (r *Repository) ListMemberEventDispatchDiagnostics(ctx context.Context, pac
 		return nil, "", err
 	}
 	rows, err := t.Query(ctx, `SELECT id,result_snapshot FROM automation_runtime_operation_receipts
-		WHERE operation=$1 AND actor_scope=$2 AND state='completed'
-		  AND ($3=0 OR id<$3) AND result_snapshot->>'package_id'=$4
-		ORDER BY id DESC LIMIT $5`, automationapp.MemberEventMissingPolicyOperation, automationapp.MemberEventDispatchActorScope, cursor, strconv.FormatInt(packageID, 10), limit+1)
+		WHERE operation IN ($1,$2) AND actor_scope=$3 AND state='completed'
+		  AND ($4=0 OR id<$4) AND result_snapshot->>'package_id'=$5
+		ORDER BY id DESC LIMIT $6`, automationapp.MemberEventMissingPolicyOperation, automationapp.MemberEventDeferredOperation, automationapp.MemberEventDispatchActorScope, cursor, strconv.FormatInt(packageID, 10), limit+1)
 	if err != nil {
 		return nil, "", err
 	}
@@ -325,7 +356,7 @@ func (r *Repository) ListMemberEventDispatchDiagnostics(ctx context.Context, pac
 		if err = rows.Scan(&id, &raw); err != nil {
 			return nil, "", err
 		}
-		if err = json.Unmarshal(raw, &item); err != nil || item.PackageID != packageID || item.SnapshotID < 1 || item.ConfigurationVersionID < 1 || len(item.EventDigest) != 64 || item.State != "unconfigured" || item.Reason != "no_active_policy" || item.OccurredAt.IsZero() || item.RecordedAt.IsZero() {
+		if err = json.Unmarshal(raw, &item); err != nil || !validMemberEventDispatchDiagnostic(item, packageID) {
 			return nil, "", automationapp.ErrRuntimeConflict
 		}
 		item.ID = id
@@ -340,6 +371,20 @@ func (r *Repository) ListMemberEventDispatchDiagnostics(ctx context.Context, pac
 		out = out[:limit]
 	}
 	return out, next, nil
+}
+
+func validMemberEventDispatchDiagnostic(item automationapp.MemberEventDispatchDiagnostic, packageID int64) bool {
+	if item.PackageID != packageID || item.SnapshotID < 1 || item.ConfigurationVersionID < 1 || len(item.EventDigest) != 64 || item.OccurredAt.IsZero() || item.RecordedAt.IsZero() {
+		return false
+	}
+	switch {
+	case item.State == "unconfigured" && item.Reason == "no_active_policy":
+		return item.PolicyID == 0 && item.PolicyVersionID == 0
+	case item.State == "skipped" && item.Reason == "historical_identity_merge_deferred":
+		return item.PolicyID > 0 && item.PolicyVersionID > 0
+	default:
+		return false
+	}
 }
 
 func (r *Repository) AppendRuntimeFact(ctx context.Context, f automationapp.RuntimeFact) error {

@@ -1,12 +1,14 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,9 +39,11 @@ type RuntimeStore interface {
 	NextPolicyVersion(context.Context, int64) (int64, error)
 	CreatePolicyVersion(context.Context, automationdomain.PolicyVersion) (automationdomain.PolicyVersion, error)
 	SetCurrentPolicyVersion(context.Context, int64, int64, int64, int64, time.Time) (automationdomain.Policy, error)
+	SetCurrentActivePolicyVersion(context.Context, int64, int64, int64, int64, time.Time) (automationdomain.Policy, error)
 	CurrentPolicyVersion(context.Context, int64) (automationdomain.PolicyVersion, error)
 	SetPolicyLifecycle(context.Context, int64, int64, int64, automationdomain.PolicyLifecycle, time.Time) (automationdomain.Policy, error)
 	ActivePoliciesForPackage(context.Context, int64) ([]automationdomain.PolicyVersion, error)
+	LockActivePoliciesForPackage(context.Context, int64) ([]automationdomain.PolicyVersion, error)
 	EnrollmentForSource(context.Context, int64, [32]byte, int64) (automationdomain.Enrollment, bool, error)
 	CreateEnrollment(context.Context, automationdomain.Enrollment) (automationdomain.Enrollment, bool, error)
 	RuntimeReceipt(context.Context, string, string, [32]byte, [32]byte) (RuntimeReceipt, bool, error)
@@ -279,16 +283,54 @@ func (s *RuntimeService) PutPolicyVersion(ctx context.Context, c PolicyCommand) 
 	if c.PolicyID < 1 || c.ExpectedVersion < 1 || !validRuntimeMutation(c.Actor, c.IdempotencyKey) {
 		return automationdomain.PolicyVersion{}, ErrRuntimeInvalid
 	}
-	now := s.now().UTC()
 	payload, _ := json.Marshal(c)
 	var output automationdomain.PolicyVersion
-	err := s.runtimeMutation(ctx, "put_policy_version", c.Actor, c.IdempotencyKey, payload, func(tx context.Context) (any, RuntimeFact, error) {
+	if replayed, err := s.replayRuntimeMutation(ctx, "put_policy_version", c.Actor, c.IdempotencyKey, payload, &output); err != nil {
+		return output, runtimeClassify(err)
+	} else if replayed {
+		return output, nil
+	}
+	now := s.now().UTC()
+	candidate, err := automationdomain.NewPolicyVersion(c.PolicyID, 1, c.PackageID, c.TriggerKind, c.ActionKind, c.ActionConfig, c.QuietHours, c.SingleRunLimit, c.ApprovalStaffID, c.Actor, now)
+	if err != nil {
+		return output, runtimeClassify(err)
+	}
+	currentPolicy, currentVersion, err := s.Policy(ctx, c.PolicyID)
+	if err != nil {
+		return output, err
+	}
+	activeValidated := currentPolicy.Lifecycle == automationdomain.PolicyActive
+	if currentPolicy.Lifecycle == automationdomain.PolicyArchived {
+		return output, ErrRuntimeConflict
+	}
+	if activeValidated {
+		if !activeDeferredCustomerIDsOnlyUpdate(currentVersion, candidate) {
+			return output, ErrRuntimeConflict
+		}
+		configuration, configErr := s.audiences.AudienceExecutionConfiguration(ctx, candidate.PackageID)
+		if configErr != nil {
+			return output, ErrRuntimeUnavailable
+		}
+		if !configuration.Ready || !policyExecutionConfigurationMatches(candidate, configuration) {
+			return output, ErrRuntimeNotReady
+		}
+	}
+	err = s.runtimeMutation(ctx, "put_policy_version", c.Actor, c.IdempotencyKey, payload, func(tx context.Context) (any, RuntimeFact, error) {
 		p, e := s.store.LockPolicy(tx, c.PolicyID)
 		if e != nil {
 			return output, RuntimeFact{}, e
 		}
-		if p.Version != c.ExpectedVersion || p.Lifecycle != automationdomain.PolicyPaused {
+		if p.Version != c.ExpectedVersion || p.Lifecycle == automationdomain.PolicyArchived || (p.Lifecycle == automationdomain.PolicyActive && !activeValidated) {
 			return output, RuntimeFact{}, ErrRuntimeConflict
+		}
+		if p.Lifecycle == automationdomain.PolicyActive {
+			lockedVersion, loadErr := s.store.CurrentPolicyVersion(tx, p.ID)
+			if loadErr != nil {
+				return output, RuntimeFact{}, loadErr
+			}
+			if lockedVersion.ID != currentVersion.ID || lockedVersion.Digest != currentVersion.Digest || !activeDeferredCustomerIDsOnlyUpdate(lockedVersion, candidate) {
+				return output, RuntimeFact{}, ErrRuntimeConflict
+			}
 		}
 		version, e := s.store.NextPolicyVersion(tx, p.ID)
 		if e != nil {
@@ -302,11 +344,90 @@ func (s *RuntimeService) PutPolicyVersion(ctx context.Context, c PolicyCommand) 
 		if e != nil {
 			return output, RuntimeFact{}, e
 		}
-		_, e = s.store.SetCurrentPolicyVersion(tx, p.ID, output.ID, p.Version, c.Actor, now)
+		if p.Lifecycle == automationdomain.PolicyActive {
+			_, e = s.store.SetCurrentActivePolicyVersion(tx, p.ID, output.ID, p.Version, c.Actor, now)
+		} else {
+			_, e = s.store.SetCurrentPolicyVersion(tx, p.ID, output.ID, p.Version, c.Actor, now)
+		}
 		return output, runtimeFact("policy", p.ID, "version", "automation.policy.versioned.v1", c.Actor, c.IdempotencyKey, now), e
 	}, &output)
 	return output, runtimeClassify(err)
 }
+
+// replayRuntimeMutation checks an existing idempotency receipt before active
+// policy preflight. A replay must return its original immutable result even if
+// a later policy version has since changed the deferred ID set.
+func (s *RuntimeService) replayRuntimeMutation(ctx context.Context, operation string, actor int64, key string, payload json.RawMessage, target any) (bool, error) {
+	if s == nil || !validRuntimeMutation(actor, key) {
+		return false, ErrRuntimeInvalid
+	}
+	var found bool
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		receipt, exists, err := s.store.RuntimeReceipt(tx, operation, fmt.Sprintf("admin:%d", actor), sha256.Sum256([]byte(key)), sha256.Sum256(payload))
+		if err != nil || !exists {
+			return err
+		}
+		found = true
+		if receipt.State != "completed" || len(receipt.Result) == 0 {
+			return ErrRuntimeConflict
+		}
+		return json.Unmarshal(receipt.Result, target)
+	})
+	return found, err
+}
+
+// An active policy can atomically acquire historical deferrals only. Its
+// trigger, package, action, agent, schedule, run limit, and approver remain
+// unchanged, and existing deferrals may only be retained or added.
+func activeDeferredCustomerIDsOnlyUpdate(current, next automationdomain.PolicyVersion) bool {
+	if current.PolicyID != next.PolicyID || current.PackageID != next.PackageID || current.TriggerKind != next.TriggerKind || current.TriggerEnabled != next.TriggerEnabled || current.ActionKind != automationport.ActionOutboundMessage || next.ActionKind != automationport.ActionOutboundMessage || !bytes.Equal(current.QuietHours, next.QuietHours) || current.SingleRunLimit != next.SingleRunLimit || !sameOptionalInt64(current.ApprovalStaffID, next.ApprovalStaffID) {
+		return false
+	}
+	var currentAction, nextAction struct {
+		AgentID             int64   `json:"agent_id"`
+		DeferredCustomerIDs []int64 `json:"deferred_customer_ids"`
+	}
+	if json.Unmarshal(current.ActionConfig, &currentAction) != nil || json.Unmarshal(next.ActionConfig, &nextAction) != nil || currentAction.AgentID < 1 || currentAction.AgentID != nextAction.AgentID {
+		return false
+	}
+	i, j := 0, 0
+	for i < len(currentAction.DeferredCustomerIDs) && j < len(nextAction.DeferredCustomerIDs) {
+		if currentAction.DeferredCustomerIDs[i] == nextAction.DeferredCustomerIDs[j] {
+			i++
+			j++
+		} else if currentAction.DeferredCustomerIDs[i] > nextAction.DeferredCustomerIDs[j] {
+			j++
+		} else {
+			return false
+		}
+	}
+	return i == len(currentAction.DeferredCustomerIDs)
+}
+
+func sameOptionalInt64(left, right *int64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func sameActivePolicyVersionSet(observed, current []automationdomain.PolicyVersion) bool {
+	if len(observed) != len(current) {
+		return false
+	}
+	byID := make(map[int64]automationdomain.PolicyVersion, len(observed))
+	for _, version := range observed {
+		byID[version.ID] = version
+	}
+	for _, version := range current {
+		prior, found := byID[version.ID]
+		if !found || prior.PolicyID != version.PolicyID || prior.Digest != version.Digest {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *RuntimeService) TransitionPolicy(ctx context.Context, c PolicyLifecycleCommand) (automationdomain.Policy, error) {
 	if c.PolicyID < 1 || c.ExpectedVersion < 1 || !validRuntimeMutation(c.Actor, c.IdempotencyKey) || (c.Target != automationdomain.PolicyActive && c.Target != automationdomain.PolicyPaused && c.Target != automationdomain.PolicyArchived) {
 		return automationdomain.Policy{}, ErrRuntimeInvalid
@@ -437,6 +558,140 @@ func missingPolicyReceiptDigests(event segmentport.MemberEnteredV1) ([32]byte, [
 	return keyDigest, sha256.Sum256(raw), nil
 }
 
+func deferredEventReceiptDigests(policyID int64, event segmentport.MemberEnteredV1) ([32]byte, [32]byte, error) {
+	if policyID < 1 {
+		return [32]byte{}, [32]byte{}, ErrRuntimeInvalid
+	}
+	raw, err := json.Marshal(struct {
+		PolicyID int64                       `json:"policy_id"`
+		Event    segmentport.MemberEnteredV1 `json:"event"`
+	}{PolicyID: policyID, Event: event})
+	if err != nil {
+		return [32]byte{}, [32]byte{}, err
+	}
+	eventDigest := sha256.Sum256([]byte(event.EventID))
+	key := MemberEventDeferredOperation + ":" + fmt.Sprint(event.PackageID) + ":" + fmt.Sprint(policyID) + ":" + hex.EncodeToString(eventDigest[:])
+	return sha256.Sum256([]byte(key)), sha256.Sum256(raw), nil
+}
+
+func policyDefersCustomer(version automationdomain.PolicyVersion, customerID int64) (bool, error) {
+	if version.ActionKind != automationport.ActionOutboundMessage {
+		return false, nil
+	}
+	var action struct {
+		AgentID             int64   `json:"agent_id"`
+		DeferredCustomerIDs []int64 `json:"deferred_customer_ids"`
+	}
+	if json.Unmarshal(version.ActionConfig, &action) != nil || action.AgentID < 1 {
+		return false, ErrRuntimeConflict
+	}
+	for index, id := range action.DeferredCustomerIDs {
+		if id < 1 || (index > 0 && action.DeferredCustomerIDs[index-1] >= id) {
+			return false, ErrRuntimeConflict
+		}
+	}
+	index := sort.Search(len(action.DeferredCustomerIDs), func(index int) bool {
+		return action.DeferredCustomerIDs[index] >= customerID
+	})
+	return index < len(action.DeferredCustomerIDs) && action.DeferredCustomerIDs[index] == customerID, nil
+}
+
+func (s *RuntimeService) deferredReceiptWithin(ctx context.Context, policyID int64, event segmentport.MemberEnteredV1) (bool, error) {
+	keyDigest, payloadDigest, err := deferredEventReceiptDigests(policyID, event)
+	if err != nil {
+		return false, ErrRuntimeUnavailable
+	}
+	receipt, found, err := s.store.RuntimeReceipt(ctx, MemberEventDeferredOperation, MemberEventDispatchActorScope, keyDigest, payloadDigest)
+	if err != nil || !found {
+		return false, err
+	}
+	if receipt.State != "completed" || len(receipt.Result) == 0 {
+		return false, ErrRuntimeConflict
+	}
+	var diagnostic MemberEventDispatchDiagnostic
+	if json.Unmarshal(receipt.Result, &diagnostic) != nil || diagnostic.PackageID != int64(event.PackageID) || diagnostic.PolicyID != policyID || diagnostic.State != "skipped" || diagnostic.Reason != "historical_identity_merge_deferred" {
+		return false, ErrRuntimeConflict
+	}
+	return true, nil
+}
+
+func (s *RuntimeService) recordDeferredEnrollmentWithin(ctx context.Context, event segmentport.MemberEnteredV1, version automationdomain.PolicyVersion, eventDigest [32]byte, now time.Time) (automationdomain.Enrollment, bool, error) {
+	keyDigest, payloadDigest, err := deferredEventReceiptDigests(version.PolicyID, event)
+	if err != nil {
+		return automationdomain.Enrollment{}, false, ErrRuntimeUnavailable
+	}
+	if found, e := s.deferredReceiptWithin(ctx, version.PolicyID, event); e != nil || found {
+		return automationdomain.Enrollment{}, false, e
+	}
+	receipt, owned, err := s.store.ReserveRuntime(ctx, RuntimeReservation{
+		Operation: MemberEventDeferredOperation, ActorScope: MemberEventDispatchActorScope,
+		KeyDigest: keyDigest, PayloadDigest: payloadDigest, CreatedAt: now,
+	})
+	if err != nil {
+		return automationdomain.Enrollment{}, false, err
+	}
+	if !owned {
+		if receipt.State != "completed" || len(receipt.Result) == 0 {
+			return automationdomain.Enrollment{}, false, ErrRuntimeConflict
+		}
+		return automationdomain.Enrollment{}, false, nil
+	}
+
+	const reason = "historical_identity_merge_deferred"
+	snapshotFields := map[string]any{
+		"action_kind":              version.ActionKind,
+		"package_id":               event.PackageID,
+		"snapshot_id":              event.SnapshotID,
+		"configuration_version_id": event.ConfigurationVersionID,
+		"customer_id":              event.CustomerID,
+		"policy_version_id":        version.ID,
+		"policy_digest":            hex.EncodeToString(version.Digest[:]),
+		"skip_reason":              reason,
+	}
+	snapshot, _ := json.Marshal(snapshotFields)
+	actionDigest := sha256.Sum256(snapshot)
+	enrollment, created, err := s.store.CreateEnrollment(ctx, automationdomain.Enrollment{
+		PolicyID: version.PolicyID, PolicyVersionID: version.ID, SourceEventDigest: eventDigest,
+		CustomerID: int64(event.CustomerID), ActionKind: version.ActionKind, ActionSnapshot: snapshot,
+		ActionDigest: actionDigest, State: "skipped", CreatedAt: now,
+	})
+	if err != nil {
+		return automationdomain.Enrollment{}, false, err
+	}
+	if !enrollmentMatchesMemberEnteredEvent(enrollment, version, event) || enrollment.State != "skipped" {
+		return automationdomain.Enrollment{}, false, ErrRuntimeConflict
+	}
+	var frozen struct {
+		SkipReason string `json:"skip_reason"`
+	}
+	if json.Unmarshal(enrollment.ActionSnapshot, &frozen) != nil || frozen.SkipReason != reason {
+		return automationdomain.Enrollment{}, false, ErrRuntimeConflict
+	}
+	if created {
+		payload, _ := json.Marshal(map[string]any{
+			"enrollment_id": enrollment.ID, "policy_id": version.PolicyID,
+			"policy_version_id": version.ID, "reason": reason,
+		})
+		if err = s.store.AppendRuntimeFact(ctx, runtimeFact("enrollment", enrollment.ID, "defer", "automation.enrollment.deferred.v1", version.CreatedBy, hex.EncodeToString(eventDigest[:])+fmt.Sprint(version.PolicyID), now, payload)); err != nil {
+			return automationdomain.Enrollment{}, false, err
+		}
+	}
+	diagnostic := MemberEventDispatchDiagnostic{
+		PackageID: int64(event.PackageID), SnapshotID: int64(event.SnapshotID),
+		ConfigurationVersionID: int64(event.ConfigurationVersionID), PolicyID: version.PolicyID,
+		PolicyVersionID: version.ID, EventDigest: hex.EncodeToString(eventDigest[:]),
+		State: "skipped", Reason: reason, OccurredAt: event.OccurredAt.UTC(), RecordedAt: now,
+	}
+	result, err := json.Marshal(diagnostic)
+	if err != nil {
+		return automationdomain.Enrollment{}, false, ErrRuntimeUnavailable
+	}
+	if err = s.store.CompleteRuntime(ctx, receipt.ID, result, now); err != nil {
+		return automationdomain.Enrollment{}, false, err
+	}
+	return enrollment, true, nil
+}
+
 func (s *RuntimeService) missingPolicyReceiptWithin(ctx context.Context, keyDigest, payloadDigest [32]byte) (bool, error) {
 	receipt, found, err := s.store.RuntimeReceipt(ctx, MemberEventMissingPolicyOperation, MemberEventDispatchActorScope, keyDigest, payloadDigest)
 	if err != nil || !found {
@@ -459,6 +714,7 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 	}
 	observed := []automationdomain.PolicyVersion{}
 	previouslyUnconfigured := false
+	deferredByPolicy := map[int64]bool{}
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		var e error
 		previouslyUnconfigured, e = s.missingPolicyReceiptWithin(tx, missingKey, missingPayload)
@@ -466,7 +722,17 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 			return e
 		}
 		observed, e = s.store.ActivePoliciesForPackage(tx, int64(event.PackageID))
-		return e
+		if e != nil {
+			return e
+		}
+		for _, version := range observed {
+			recorded, receiptErr := s.deferredReceiptWithin(tx, version.PolicyID, event)
+			if receiptErr != nil {
+				return receiptErr
+			}
+			deferredByPolicy[version.PolicyID] = recorded
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, runtimeClassify(err)
@@ -505,7 +771,14 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 	needsOutbound := false
 	for _, version := range observed {
 		_, replay := existingByVersion[version.ID]
-		needsOutbound = needsOutbound || (!replay && version.ActionKind == automationport.ActionOutboundMessage)
+		if replay || deferredByPolicy[version.PolicyID] {
+			continue
+		}
+		deferred, deferErr := policyDefersCustomer(version, int64(event.CustomerID))
+		if deferErr != nil {
+			return nil, deferErr
+		}
+		needsOutbound = needsOutbound || (!deferred && version.ActionKind == automationport.ActionOutboundMessage)
 	}
 	var configuration segmentport.ExecutionConfiguration
 	var published automationport.OutboundPublishedContent
@@ -546,13 +819,25 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 		if e != nil || previouslyUnconfigured {
 			return e
 		}
-		versions, e := s.store.ActivePoliciesForPackage(tx, int64(event.PackageID))
+		versions, e := s.store.LockActivePoliciesForPackage(tx, int64(event.PackageID))
 		if e != nil {
 			return e
 		}
 		if len(versions) == 0 {
 			noLongerActive = true
 			return nil
+		}
+		if !sameActivePolicyVersionSet(observed, versions) {
+			// Do not acknowledge an event using a stale policy snapshot. River
+			// retries it against the current active version set.
+			return ErrRuntimeNotReady
+		}
+		for _, v := range versions {
+			recorded, receiptErr := s.deferredReceiptWithin(tx, v.PolicyID, event)
+			if receiptErr != nil {
+				return receiptErr
+			}
+			deferredByPolicy[v.PolicyID] = recorded
 		}
 		var runtimeConfig configport.EffectiveSnapshot
 		if needsOutbound {
@@ -564,7 +849,7 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 		for _, v := range versions {
 			prior, wasObserved := observedByID[v.ID]
 			if !wasObserved || prior.Digest != v.Digest {
-				continue
+				return ErrRuntimeNotReady
 			}
 			// Re-read in the write transaction to close the check/create race. A
 			// stored enrollment is a replay only when its immutable source facts
@@ -577,6 +862,24 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 					return ErrRuntimeConflict
 				}
 				output = append(output, existing)
+				continue
+			}
+			if deferredByPolicy[v.PolicyID] {
+				continue
+			}
+			deferred, deferErr := policyDefersCustomer(v, int64(event.CustomerID))
+			if deferErr != nil {
+				return deferErr
+			}
+			if deferred {
+				enrollment, created, deferErr := s.recordDeferredEnrollmentWithin(tx, event, v, eventDigest, now)
+				if deferErr != nil {
+					return deferErr
+				}
+				if created {
+					output = append(output, enrollment)
+				}
+				deferredByPolicy[v.PolicyID] = true
 				continue
 			}
 			if v.ActionKind == automationport.ActionOutboundMessage && !policyExecutionConfigurationMatches(v, configuration) {
