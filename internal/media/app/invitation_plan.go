@@ -8,6 +8,7 @@ import (
 	d "github.com/qianlan33333-png/AI-CRM-v3/internal/media/domain"
 	p "github.com/qianlan33333-png/AI-CRM-v3/internal/media/port"
 	"reflect"
+	"slices"
 	"time"
 )
 
@@ -39,6 +40,15 @@ func (s *InvitationService) Save(ctx context.Context, v p.InvitationInput, actor
 		if v.Mode != old.Mode || !reflect.DeepEqual(v.NativeOptions, old.NativeOptions) {
 			return p.InvitationPlan{}, errors.New("invitation code provider disabled")
 		}
+		if v.Mode == "native" {
+			ids := make([]string, 0, len(old.Bindings))
+			for _, b := range old.Bindings {
+				ids = append(ids, b.ChatID)
+			}
+			if !slices.Equal(v.ChatIDs, ids) {
+				return p.InvitationPlan{}, errors.New("invitation code provider disabled")
+			}
+		}
 		known := map[string]bool{}
 		for _, b := range old.Bindings {
 			known[b.ChatID] = true
@@ -50,7 +60,9 @@ func (s *InvitationService) Save(ctx context.Context, v p.InvitationInput, actor
 		}
 	}
 	for _, id := range v.ChatIDs {
-		if !v.Enabled {
+		// A disabled native writer allows only local edits; those do not
+		// require a live directory Provider for already-bound targets.
+		if !v.Enabled || (!s.WriteEnabled && v.Mode == "native") {
 			continue
 		}
 		fact, err := s.Catalog.ReadCatalogGroup(ctx, id)

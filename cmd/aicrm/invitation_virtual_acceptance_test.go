@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	e "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	g "github.com/qianlan33333-png/AI-CRM-v3/internal/groupops/port"
+	mediaApp "github.com/qianlan33333-png/AI-CRM-v3/internal/media/app"
 	d "github.com/qianlan33333-png/AI-CRM-v3/internal/media/domain"
 	p "github.com/qianlan33333-png/AI-CRM-v3/internal/media/port"
 	mediaStore "github.com/qianlan33333-png/AI-CRM-v3/internal/media/store"
@@ -76,6 +77,17 @@ func (v *invitationVirtualProvider) UpdateNativeInvitationCode(_ context.Context
 		return w.InvitationCode{}, fmt.Errorf("native update changed identity %s %v", id, ids)
 	}
 	return w.InvitationCode{ConfigID: v.config, QRCode: v.qr}, nil
+}
+
+type invitationVirtualCatalog struct{ g.Catalog }
+
+func (invitationVirtualCatalog) ReadCatalogGroup(_ context.Context, id string) (g.CatalogGroup, error) {
+	now := time.Now().UTC().Add(-24 * time.Hour)
+	return g.CatalogGroup{ChatID: id, MemberCount: 200, ObservedAt: &now}, nil
+}
+
+func (invitationVirtualCatalog) RefreshCatalogGroup(context.Context, string) (g.CatalogGroup, error) {
+	return g.CatalogGroup{}, fmt.Errorf("directory provider disabled")
 }
 
 // TestInvitationVirtualAcceptance checks the complete local intent, Provider
@@ -317,6 +329,26 @@ func TestInvitationVirtualAcceptance(t *testing.T) {
 	if err != nil || updated.Token != final.Token || updated.ProviderConfigID != provider.config || updated.ProviderQRCode != provider.qr || updated.NativeOptions.AutoCreateRoom || provider.nativeOptions.AutoCreateRoom || provider.creates != 1 || provider.updates != 3 {
 		t.Fatal("native update failed", updated, err, provider)
 	}
+	service := &mediaApp.InvitationService{Store: repo, Catalog: invitationVirtualCatalog{}, Effects: effects, Origin: "https://crm.example", WriteEnabled: false}
+	disabledInput := nativeInput
+	disabledInput.Version = updated.Version
+	disabledInput.NativeOptions = updated.NativeOptions
+	for i, ids := range [][]string{{"a"}, {"b", "a"}} {
+		disabledInput.ChatIDs = ids
+		if _, err = service.Save(ctx, disabledInput, 1, fmt.Sprintf("native-disabled-change-%d", i)); err == nil {
+			t.Fatal("disabled native writer accepted a Provider group-list mutation")
+		}
+	}
+	disabledInput.ChatIDs = []string{"a", "b"}
+	disabledInput.Name = "updated local metadata"
+	metadata, err := service.Save(ctx, disabledInput, 1, "native-disabled-metadata-1")
+	if err != nil || metadata.Name != disabledInput.Name || metadata.ProviderConfigID != updated.ProviderConfigID {
+		t.Fatal("disabled writer must still allow local metadata", metadata, err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM invitation_effect_probe`).Scan(&count); err != nil || count != 4 {
+		t.Fatal("disabled native save queued a Provider effect", count, err)
+	}
+	t.Log("phase=native_disabled_writer group_target_mutations_denied=true local_metadata_allowed=true zero_extra_effects=true")
 	t.Log("phase=native_accepted full_groups_delegated=true rollback=true unresolved_guard=true auto_on_off=true stable_link_and_qr=true")
 
 }

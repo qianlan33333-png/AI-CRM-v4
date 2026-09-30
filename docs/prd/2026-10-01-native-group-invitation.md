@@ -48,3 +48,8 @@ OneID不涉及：配置群ID，不匹配、建客或改变归属。Persistence�
 ### 官方二维码地址兼容补修
 
 企微get_join_way文档示例返回http://p.qpic.cn二维码。Adapter与现有二维码下载层统一仅接受wework.qpic.cn/p.qpic.cn官方图片域，将HTTP归一化为HTTPS；拒绝任意域、伪子域、userinfo、显式端口及fragment。参数和config_id读回核验不变。补修从原生能力候选fa4f59aa继续，作为明确Provider兼容缺陷交付，复用本PRD和UI QA。
+
+
+### Provider停用边界补修
+
+停用企微邀请写入时，原生计划的完整关联群列表、mode与native_options都不能变更；允许保留配置下修改本地名称、标题、启用状态。复用现有停用保护，避免沿用旧模式的“删除备用群”逻辑误生成原生update_join_way意图。PG验收先复现删群仍被接受，再证明删群/重排被拒绝、本地名称在群目录过期且读取Provider不可用时仍可保存，且零新增Provider意图。此补修不新增任意限额、不改迁移或UI。
