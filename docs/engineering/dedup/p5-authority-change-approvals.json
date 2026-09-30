@@ -2006,7 +2006,7 @@
         }
       ],
       "reason": "Document the Payment-owned EER manual-reconcile eligibility and keep the canonical OpenAPI index and lock bound to the updated contract.",
-      "review_reference": "2026-09-30 PAY05/EER candidate rebased onto e3fedb71d4ea40294c846f2970475ff97b8e168e; exact authority review for this base is pending."
+      "review_reference": "/Users/qianlan/Documents/Codex/2026-09-29/crm-v4-qa-resume/evidence/pay05-eer-authority-review-e3fed-20260930.md"
     }
   ]
 }
