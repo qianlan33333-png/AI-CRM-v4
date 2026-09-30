@@ -45,6 +45,7 @@ type RuntimeStore interface {
 	ActivePoliciesForPackage(context.Context, int64) ([]automationdomain.PolicyVersion, error)
 	LockActivePoliciesForPackage(context.Context, int64) ([]automationdomain.PolicyVersion, error)
 	EnrollmentForSource(context.Context, int64, [32]byte, int64) (automationdomain.Enrollment, bool, error)
+	CustomerPolicyEnrollment(context.Context, int64, int64) (automationdomain.Enrollment, bool, error)
 	CreateEnrollment(context.Context, automationdomain.Enrollment) (automationdomain.Enrollment, bool, error)
 	RuntimeReceipt(context.Context, string, string, [32]byte, [32]byte) (RuntimeReceipt, bool, error)
 	LockMemberEventDispatch(context.Context, [32]byte) error
@@ -376,18 +377,21 @@ func (s *RuntimeService) replayRuntimeMutation(ctx context.Context, operation st
 	return found, err
 }
 
-// An active policy can atomically acquire historical deferrals only. Its
-// trigger, package, action, agent, schedule, run limit, and approver remain
-// unchanged, and existing deferrals may only be retained or added.
+// An active policy can atomically acquire historical deferrals and opt into
+// one-time customer enrollment. Its trigger, package, action, agent, schedule,
+// run limit, and approver remain unchanged; deferrals only grow and once-only
+// behavior can only be enabled, never removed.
 func activeDeferredCustomerIDsOnlyUpdate(current, next automationdomain.PolicyVersion) bool {
 	if current.PolicyID != next.PolicyID || current.PackageID != next.PackageID || current.TriggerKind != next.TriggerKind || current.TriggerEnabled != next.TriggerEnabled || current.ActionKind != automationport.ActionOutboundMessage || next.ActionKind != automationport.ActionOutboundMessage || !bytes.Equal(current.QuietHours, next.QuietHours) || current.SingleRunLimit != next.SingleRunLimit || !sameOptionalInt64(current.ApprovalStaffID, next.ApprovalStaffID) {
 		return false
 	}
 	var currentAction, nextAction struct {
-		AgentID             int64   `json:"agent_id"`
-		DeferredCustomerIDs []int64 `json:"deferred_customer_ids"`
+		AgentID                int64      `json:"agent_id"`
+		DeferredCustomerIDs    []int64    `json:"deferred_customer_ids"`
+		OncePerCustomer        bool       `json:"once_per_customer"`
+		DeferBeforeFirstPaidAt *time.Time `json:"defer_before_first_paid_at"`
 	}
-	if json.Unmarshal(current.ActionConfig, &currentAction) != nil || json.Unmarshal(next.ActionConfig, &nextAction) != nil || currentAction.AgentID < 1 || currentAction.AgentID != nextAction.AgentID {
+	if json.Unmarshal(current.ActionConfig, &currentAction) != nil || json.Unmarshal(next.ActionConfig, &nextAction) != nil || currentAction.AgentID < 1 || currentAction.AgentID != nextAction.AgentID || (currentAction.OncePerCustomer && !nextAction.OncePerCustomer) || (currentAction.DeferBeforeFirstPaidAt != nil && !sameOptionalTime(currentAction.DeferBeforeFirstPaidAt, nextAction.DeferBeforeFirstPaidAt)) {
 		return false
 	}
 	i, j := 0, 0
@@ -402,6 +406,13 @@ func activeDeferredCustomerIDsOnlyUpdate(current, next automationdomain.PolicyVe
 		}
 	}
 	return i == len(currentAction.DeferredCustomerIDs)
+}
+
+func sameOptionalTime(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.UTC().Equal(right.UTC())
 }
 
 func sameOptionalInt64(left, right *int64) bool {
@@ -574,26 +585,161 @@ func deferredEventReceiptDigests(policyID int64, event segmentport.MemberEntered
 	return sha256.Sum256([]byte(key)), sha256.Sum256(raw), nil
 }
 
-func policyDefersCustomer(version automationdomain.PolicyVersion, customerID int64) (bool, error) {
-	if version.ActionKind != automationport.ActionOutboundMessage {
-		return false, nil
-	}
-	var action struct {
-		AgentID             int64   `json:"agent_id"`
-		DeferredCustomerIDs []int64 `json:"deferred_customer_ids"`
-	}
-	if json.Unmarshal(version.ActionConfig, &action) != nil || action.AgentID < 1 {
-		return false, ErrRuntimeConflict
+type outboundPolicyActionConfig struct {
+	AgentID                int64      `json:"agent_id"`
+	DeferredCustomerIDs    []int64    `json:"deferred_customer_ids"`
+	OncePerCustomer        bool       `json:"once_per_customer"`
+	DeferBeforeFirstPaidAt *time.Time `json:"defer_before_first_paid_at"`
+}
+
+func outboundActionConfigForPolicy(version automationdomain.PolicyVersion) (outboundPolicyActionConfig, error) {
+	var action outboundPolicyActionConfig
+	if version.ActionKind != automationport.ActionOutboundMessage || json.Unmarshal(version.ActionConfig, &action) != nil || action.AgentID < 1 || (action.DeferBeforeFirstPaidAt != nil && (action.DeferBeforeFirstPaidAt.IsZero() || !action.OncePerCustomer)) {
+		return outboundPolicyActionConfig{}, ErrRuntimeConflict
 	}
 	for index, id := range action.DeferredCustomerIDs {
 		if id < 1 || (index > 0 && action.DeferredCustomerIDs[index-1] >= id) {
-			return false, ErrRuntimeConflict
+			return outboundPolicyActionConfig{}, ErrRuntimeConflict
 		}
 	}
-	index := sort.Search(len(action.DeferredCustomerIDs), func(index int) bool {
-		return action.DeferredCustomerIDs[index] >= customerID
+	return action, nil
+}
+
+type memberEventCustomerOnceResult struct {
+	PolicyID     int64  `json:"policy_id"`
+	PackageID    int64  `json:"package_id"`
+	Outcome      string `json:"outcome"`
+	EnrollmentID int64  `json:"enrollment_id,omitempty"`
+}
+
+func customerPolicyOnceReceiptDigests(policyID, customerID int64) ([32]byte, [32]byte, error) {
+	if policyID < 1 || customerID < 1 {
+		return [32]byte{}, [32]byte{}, ErrRuntimeInvalid
+	}
+	payload, err := json.Marshal(struct {
+		PolicyID   int64 `json:"policy_id"`
+		CustomerID int64 `json:"customer_id"`
+	}{PolicyID: policyID, CustomerID: customerID})
+	if err != nil {
+		return [32]byte{}, [32]byte{}, err
+	}
+	key := MemberEventCustomerOnceOperation + ":" + fmt.Sprint(policyID) + ":" + fmt.Sprint(customerID)
+	return sha256.Sum256([]byte(key)), sha256.Sum256(payload), nil
+}
+
+func validateCustomerPolicyOnceReceipt(receipt RuntimeReceipt, policyID int64) error {
+	if receipt.Operation != MemberEventCustomerOnceOperation || receipt.ActorScope != MemberEventDispatchActorScope || receipt.State != "completed" || len(receipt.Result) == 0 {
+		return ErrRuntimeConflict
+	}
+	var result memberEventCustomerOnceResult
+	if json.Unmarshal(receipt.Result, &result) != nil || result.PolicyID != policyID || result.PackageID < 1 || result.EnrollmentID < 0 || (result.Outcome != "enrolled" && result.Outcome != "deferred" && result.Outcome != "prior_enrollment") {
+		return ErrRuntimeConflict
+	}
+	return nil
+}
+
+func (s *RuntimeService) customerPolicyOnceReceiptWithin(ctx context.Context, policyID, customerID int64) (bool, error) {
+	keyDigest, payloadDigest, err := customerPolicyOnceReceiptDigests(policyID, customerID)
+	if err != nil {
+		return false, err
+	}
+	receipt, found, err := s.store.RuntimeReceipt(ctx, MemberEventCustomerOnceOperation, MemberEventDispatchActorScope, keyDigest, payloadDigest)
+	if err != nil || !found {
+		return false, err
+	}
+	if err = validateCustomerPolicyOnceReceipt(receipt, policyID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *RuntimeService) reserveCustomerPolicyOnceWithin(ctx context.Context, policyID, customerID int64, now time.Time) (RuntimeReceipt, bool, error) {
+	keyDigest, payloadDigest, err := customerPolicyOnceReceiptDigests(policyID, customerID)
+	if err != nil {
+		return RuntimeReceipt{}, false, err
+	}
+	receipt, owned, err := s.store.ReserveRuntime(ctx, RuntimeReservation{
+		Operation: MemberEventCustomerOnceOperation, ActorScope: MemberEventDispatchActorScope,
+		KeyDigest: keyDigest, PayloadDigest: payloadDigest, CreatedAt: now,
 	})
-	return index < len(action.DeferredCustomerIDs) && action.DeferredCustomerIDs[index] == customerID, nil
+	if err != nil {
+		return RuntimeReceipt{}, false, err
+	}
+	if !owned {
+		if err = validateCustomerPolicyOnceReceipt(receipt, policyID); err != nil {
+			return RuntimeReceipt{}, false, err
+		}
+		return receipt, false, nil
+	}
+	if receipt.State != "reserved" || receipt.Operation != MemberEventCustomerOnceOperation || receipt.ActorScope != MemberEventDispatchActorScope {
+		return RuntimeReceipt{}, false, ErrRuntimeConflict
+	}
+	return receipt, true, nil
+}
+
+func (s *RuntimeService) completeCustomerPolicyOnceWithin(ctx context.Context, receipt RuntimeReceipt, version automationdomain.PolicyVersion, outcome string, enrollmentID int64, now time.Time) error {
+	result, err := json.Marshal(memberEventCustomerOnceResult{
+		PolicyID: version.PolicyID, PackageID: int64(version.PackageID),
+		Outcome: outcome, EnrollmentID: enrollmentID,
+	})
+	if err != nil {
+		return ErrRuntimeUnavailable
+	}
+	return s.store.CompleteRuntime(ctx, receipt.ID, result, now)
+}
+
+func customerOnceOutcomeForEnrollment(enrollment automationdomain.Enrollment) string {
+	if enrollment.State == "skipped" {
+		return "deferred"
+	}
+	return "enrolled"
+}
+
+const (
+	memberEventDeferredHistoricalMergeReason  = "historical_identity_merge_deferred"
+	memberEventDeferredFirstPaidCutoffReason  = "historical_first_paid_before_cutoff"
+	memberEventDeferredFirstPaidMissingReason = "first_paid_at_missing_deferred"
+)
+
+func validMemberEventDeferralReason(reason string) bool {
+	return reason == memberEventDeferredHistoricalMergeReason || reason == memberEventDeferredFirstPaidCutoffReason || reason == memberEventDeferredFirstPaidMissingReason
+}
+
+func policyMemberEventDeferralReason(version automationdomain.PolicyVersion, event segmentport.MemberEnteredV1) (string, error) {
+	if version.ActionKind != automationport.ActionOutboundMessage {
+		return "", nil
+	}
+	action, err := outboundActionConfigForPolicy(version)
+	if err != nil {
+		return "", err
+	}
+	index := sort.Search(len(action.DeferredCustomerIDs), func(index int) bool {
+		return action.DeferredCustomerIDs[index] >= int64(event.CustomerID)
+	})
+	if index < len(action.DeferredCustomerIDs) && action.DeferredCustomerIDs[index] == int64(event.CustomerID) {
+		return memberEventDeferredHistoricalMergeReason, nil
+	}
+	if action.DeferBeforeFirstPaidAt == nil {
+		return "", nil
+	}
+	if event.FirstPaidAt == nil || event.FirstPaidAt.IsZero() {
+		return memberEventDeferredFirstPaidMissingReason, nil
+	}
+	if event.FirstPaidAt.UTC().Before(action.DeferBeforeFirstPaidAt.UTC()) {
+		return memberEventDeferredFirstPaidCutoffReason, nil
+	}
+	return "", nil
+}
+
+func policyOncePerCustomer(version automationdomain.PolicyVersion) (bool, error) {
+	if version.ActionKind != automationport.ActionOutboundMessage {
+		return false, nil
+	}
+	action, err := outboundActionConfigForPolicy(version)
+	if err != nil {
+		return false, err
+	}
+	return action.OncePerCustomer, nil
 }
 
 func (s *RuntimeService) deferredReceiptWithin(ctx context.Context, policyID int64, event segmentport.MemberEnteredV1) (bool, error) {
@@ -609,13 +755,16 @@ func (s *RuntimeService) deferredReceiptWithin(ctx context.Context, policyID int
 		return false, ErrRuntimeConflict
 	}
 	var diagnostic MemberEventDispatchDiagnostic
-	if json.Unmarshal(receipt.Result, &diagnostic) != nil || diagnostic.PackageID != int64(event.PackageID) || diagnostic.PolicyID != policyID || diagnostic.State != "skipped" || diagnostic.Reason != "historical_identity_merge_deferred" {
+	if json.Unmarshal(receipt.Result, &diagnostic) != nil || diagnostic.PackageID != int64(event.PackageID) || diagnostic.PolicyID != policyID || diagnostic.State != "skipped" || !validMemberEventDeferralReason(diagnostic.Reason) {
 		return false, ErrRuntimeConflict
 	}
 	return true, nil
 }
 
-func (s *RuntimeService) recordDeferredEnrollmentWithin(ctx context.Context, event segmentport.MemberEnteredV1, version automationdomain.PolicyVersion, eventDigest [32]byte, now time.Time) (automationdomain.Enrollment, bool, error) {
+func (s *RuntimeService) recordDeferredEnrollmentWithin(ctx context.Context, event segmentport.MemberEnteredV1, version automationdomain.PolicyVersion, eventDigest [32]byte, reason string, now time.Time, onceReceipt *RuntimeReceipt) (automationdomain.Enrollment, bool, error) {
+	if !validMemberEventDeferralReason(reason) {
+		return automationdomain.Enrollment{}, false, ErrRuntimeInvalid
+	}
 	keyDigest, payloadDigest, err := deferredEventReceiptDigests(version.PolicyID, event)
 	if err != nil {
 		return automationdomain.Enrollment{}, false, ErrRuntimeUnavailable
@@ -637,7 +786,6 @@ func (s *RuntimeService) recordDeferredEnrollmentWithin(ctx context.Context, eve
 		return automationdomain.Enrollment{}, false, nil
 	}
 
-	const reason = "historical_identity_merge_deferred"
 	snapshotFields := map[string]any{
 		"action_kind":              version.ActionKind,
 		"package_id":               event.PackageID,
@@ -647,6 +795,12 @@ func (s *RuntimeService) recordDeferredEnrollmentWithin(ctx context.Context, eve
 		"policy_version_id":        version.ID,
 		"policy_digest":            hex.EncodeToString(version.Digest[:]),
 		"skip_reason":              reason,
+	}
+	if event.FirstPaidAt != nil && !event.FirstPaidAt.IsZero() {
+		snapshotFields["first_paid_at"] = event.FirstPaidAt.UTC()
+	}
+	if action, actionErr := outboundActionConfigForPolicy(version); actionErr == nil && action.DeferBeforeFirstPaidAt != nil {
+		snapshotFields["defer_before_first_paid_at"] = action.DeferBeforeFirstPaidAt.UTC()
 	}
 	snapshot, _ := json.Marshal(snapshotFields)
 	actionDigest := sha256.Sum256(snapshot)
@@ -689,6 +843,11 @@ func (s *RuntimeService) recordDeferredEnrollmentWithin(ctx context.Context, eve
 	if err = s.store.CompleteRuntime(ctx, receipt.ID, result, now); err != nil {
 		return automationdomain.Enrollment{}, false, err
 	}
+	if onceReceipt != nil {
+		if err = s.completeCustomerPolicyOnceWithin(ctx, *onceReceipt, version, "deferred", enrollment.ID, now); err != nil {
+			return automationdomain.Enrollment{}, false, err
+		}
+	}
 	return enrollment, true, nil
 }
 
@@ -715,6 +874,8 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 	observed := []automationdomain.PolicyVersion{}
 	previouslyUnconfigured := false
 	deferredByPolicy := map[int64]bool{}
+	onceConsumedByPolicy := map[int64]bool{}
+	priorEnrollmentByPolicy := map[int64]automationdomain.Enrollment{}
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		var e error
 		previouslyUnconfigured, e = s.missingPolicyReceiptWithin(tx, missingKey, missingPayload)
@@ -731,6 +892,28 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 				return receiptErr
 			}
 			deferredByPolicy[version.PolicyID] = recorded
+			once, onceErr := policyOncePerCustomer(version)
+			if onceErr != nil {
+				return onceErr
+			}
+			if !once {
+				continue
+			}
+			consumed, onceErr := s.customerPolicyOnceReceiptWithin(tx, version.PolicyID, int64(event.CustomerID))
+			if onceErr != nil {
+				return onceErr
+			}
+			if consumed {
+				onceConsumedByPolicy[version.PolicyID] = true
+				continue
+			}
+			priorEnrollment, found, lookupErr := s.store.CustomerPolicyEnrollment(tx, version.PolicyID, int64(event.CustomerID))
+			if lookupErr != nil {
+				return lookupErr
+			}
+			if found {
+				priorEnrollmentByPolicy[version.PolicyID] = priorEnrollment
+			}
 		}
 		return nil
 	})
@@ -771,14 +954,17 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 	needsOutbound := false
 	for _, version := range observed {
 		_, replay := existingByVersion[version.ID]
-		if replay || deferredByPolicy[version.PolicyID] {
+		if replay || deferredByPolicy[version.PolicyID] || onceConsumedByPolicy[version.PolicyID] {
 			continue
 		}
-		deferred, deferErr := policyDefersCustomer(version, int64(event.CustomerID))
+		if _, found := priorEnrollmentByPolicy[version.PolicyID]; found {
+			continue
+		}
+		deferredReason, deferErr := policyMemberEventDeferralReason(version, event)
 		if deferErr != nil {
 			return nil, deferErr
 		}
-		needsOutbound = needsOutbound || (!deferred && version.ActionKind == automationport.ActionOutboundMessage)
+		needsOutbound = needsOutbound || (deferredReason == "" && version.ActionKind == automationport.ActionOutboundMessage)
 	}
 	var configuration segmentport.ExecutionConfiguration
 	var published automationport.OutboundPublishedContent
@@ -851,6 +1037,10 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 			if !wasObserved || prior.Digest != v.Digest {
 				return ErrRuntimeNotReady
 			}
+			once, onceErr := policyOncePerCustomer(v)
+			if onceErr != nil {
+				return onceErr
+			}
 			// Re-read in the write transaction to close the check/create race. A
 			// stored enrollment is a replay only when its immutable source facts
 			// still match; a reused EventID may never change package, snapshot,
@@ -861,18 +1051,80 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 				if !enrollmentMatchesMemberEnteredEvent(existing, v, event) {
 					return ErrRuntimeConflict
 				}
+				if once {
+					consumed, receiptErr := s.customerPolicyOnceReceiptWithin(tx, v.PolicyID, int64(event.CustomerID))
+					if receiptErr != nil {
+						return receiptErr
+					}
+					if !consumed {
+						receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(event.CustomerID), now)
+						if reserveErr != nil {
+							return reserveErr
+						}
+						if owned {
+							if reserveErr = s.completeCustomerPolicyOnceWithin(tx, receipt, v, customerOnceOutcomeForEnrollment(existing), existing.ID, now); reserveErr != nil {
+								return reserveErr
+							}
+						}
+					}
+				}
 				output = append(output, existing)
 				continue
 			}
-			if deferredByPolicy[v.PolicyID] {
+			var onceReceipt *RuntimeReceipt
+			if once {
+				consumed, receiptErr := s.customerPolicyOnceReceiptWithin(tx, v.PolicyID, int64(event.CustomerID))
+				if receiptErr != nil {
+					return receiptErr
+				}
+				if consumed {
+					continue
+				}
+				priorEnrollment, found, lookupErr := s.store.CustomerPolicyEnrollment(tx, v.PolicyID, int64(event.CustomerID))
+				if lookupErr != nil {
+					return lookupErr
+				}
+				if found {
+					receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(event.CustomerID), now)
+					if reserveErr != nil {
+						return reserveErr
+					}
+					if owned {
+						if reserveErr = s.completeCustomerPolicyOnceWithin(tx, receipt, v, "prior_enrollment", priorEnrollment.ID, now); reserveErr != nil {
+							return reserveErr
+						}
+					}
+					continue
+				}
+				if deferredByPolicy[v.PolicyID] {
+					receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(event.CustomerID), now)
+					if reserveErr != nil {
+						return reserveErr
+					}
+					if owned {
+						if reserveErr = s.completeCustomerPolicyOnceWithin(tx, receipt, v, "deferred", 0, now); reserveErr != nil {
+							return reserveErr
+						}
+					}
+					continue
+				}
+				receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(event.CustomerID), now)
+				if reserveErr != nil {
+					return reserveErr
+				}
+				if !owned {
+					continue
+				}
+				onceReceipt = &receipt
+			} else if deferredByPolicy[v.PolicyID] {
 				continue
 			}
-			deferred, deferErr := policyDefersCustomer(v, int64(event.CustomerID))
+			deferredReason, deferErr := policyMemberEventDeferralReason(v, event)
 			if deferErr != nil {
 				return deferErr
 			}
-			if deferred {
-				enrollment, created, deferErr := s.recordDeferredEnrollmentWithin(tx, event, v, eventDigest, now)
+			if deferredReason != "" {
+				enrollment, created, deferErr := s.recordDeferredEnrollmentWithin(tx, event, v, eventDigest, deferredReason, now, onceReceipt)
 				if deferErr != nil {
 					return deferErr
 				}
@@ -886,6 +1138,9 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 				return ErrRuntimeNotReady
 			}
 			snapshotFields := map[string]any{"action_kind": v.ActionKind, "action_config": json.RawMessage(v.ActionConfig), "package_id": event.PackageID, "snapshot_id": event.SnapshotID, "configuration_version_id": event.ConfigurationVersionID, "customer_id": event.CustomerID, "policy_version_id": v.ID, "policy_digest": hex.EncodeToString(v.Digest[:])}
+			if event.FirstPaidAt != nil && !event.FirstPaidAt.IsZero() {
+				snapshotFields["first_paid_at"] = event.FirstPaidAt.UTC()
+			}
 			if v.ActionKind == automationport.ActionOutboundMessage {
 				if runtimeConfig.AutomationMaxRecipients < 1 {
 					return ErrRuntimeNotReady
@@ -914,6 +1169,11 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 			if !enrollmentMatchesMemberEnteredEvent(enrollment, v, event) {
 				return ErrRuntimeConflict
 			}
+			if onceReceipt != nil && !owned {
+				if e = s.completeCustomerPolicyOnceWithin(tx, *onceReceipt, v, customerOnceOutcomeForEnrollment(enrollment), enrollment.ID, now); e != nil {
+					return e
+				}
+			}
 			output = append(output, enrollment)
 			if owned {
 				payload, _ := json.Marshal(map[string]any{"enrollment_id": enrollment.ID, "policy_id": v.PolicyID, "customer_id": event.CustomerID, "action_kind": v.ActionKind})
@@ -928,6 +1188,11 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 					if e = s.acceptEnrollmentMessage(tx, event, v, configuration, published, enrollment, actionDigest, runtimeConfig, actor, now); e != nil {
 						return e
 					}
+				}
+			}
+			if onceReceipt != nil && owned {
+				if e = s.completeCustomerPolicyOnceWithin(tx, *onceReceipt, v, customerOnceOutcomeForEnrollment(enrollment), enrollment.ID, now); e != nil {
+					return e
 				}
 			}
 		}
@@ -957,6 +1222,7 @@ func enrollmentMatchesMemberEnteredEvent(enrollment automationdomain.Enrollment,
 		ConfigurationVersionID int64                     `json:"configuration_version_id"`
 		CustomerID             int64                     `json:"customer_id"`
 		PolicyVersionID        int64                     `json:"policy_version_id"`
+		FirstPaidAt            *time.Time                `json:"first_paid_at,omitempty"`
 	}
 	if json.Unmarshal(enrollment.ActionSnapshot, &frozen) != nil {
 		return false
@@ -966,7 +1232,8 @@ func enrollmentMatchesMemberEnteredEvent(enrollment automationdomain.Enrollment,
 		frozen.SnapshotID == int64(event.SnapshotID) &&
 		frozen.ConfigurationVersionID == int64(event.ConfigurationVersionID) &&
 		frozen.CustomerID == int64(event.CustomerID) &&
-		frozen.PolicyVersionID == version.ID
+		frozen.PolicyVersionID == version.ID &&
+		sameOptionalTime(frozen.FirstPaidAt, event.FirstPaidAt)
 }
 
 func (s *RuntimeService) acceptEnrollmentMessage(ctx context.Context, event segmentport.MemberEnteredV1, version automationdomain.PolicyVersion, configuration segmentport.ExecutionConfiguration, published automationport.OutboundPublishedContent, enrollment automationdomain.Enrollment, actionDigest [32]byte, runtimeConfig configport.EffectiveSnapshot, actor int64, now time.Time) error {

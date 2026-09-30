@@ -17,10 +17,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	aiassistantport "github.com/qianlan33333-png/AI-CRM-v3/internal/aiassistant/port"
 	automationapp "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/app"
 	automationdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/domain"
 	automationport "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/port"
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	outboundport "github.com/qianlan33333-png/AI-CRM-v3/internal/outbound/port"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	segmentport "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/port"
@@ -48,6 +51,59 @@ func (r automationReadyExecutionReader) AudienceExecutionConfiguration(context.C
 		AgentPublishedVersion: 2, ContentDigest: sha256.Sum256([]byte("published automation content")),
 		BindingVersion: 5, SenderSetVersion: 6, SenderStaffIDs: []int64{7},
 	}, nil
+}
+
+type automationIntegrationPublishedContent struct {
+	content automationport.OutboundPublishedContent
+}
+
+func (reader automationIntegrationPublishedContent) OutboundPublishedContent(_ context.Context, agentID automationport.AgentID, version int64) (automationport.OutboundPublishedContent, bool, error) {
+	return reader.content, reader.content.AgentID == agentID && reader.content.PublishedVersion == version, nil
+}
+
+type automationIntegrationReviewGateway struct{}
+
+func (automationIntegrationReviewGateway) CreatePlanWithin(context.Context, aiassistantport.CreatePlanCommand) (aiassistantport.CreatePlanResult, error) {
+	return aiassistantport.CreatePlanResult{}, nil
+}
+func (automationIntegrationReviewGateway) ListPlans(context.Context, aiassistantport.PlanListQuery) (aiassistantport.PlanPage, error) {
+	return aiassistantport.PlanPage{}, nil
+}
+func (automationIntegrationReviewGateway) GetPlan(context.Context, aiassistantport.PlanID) (aiassistantport.Plan, error) {
+	return aiassistantport.Plan{}, nil
+}
+func (automationIntegrationReviewGateway) ListRecipients(context.Context, aiassistantport.RecipientPageQuery) (aiassistantport.RecipientPage, error) {
+	return aiassistantport.RecipientPage{}, nil
+}
+func (automationIntegrationReviewGateway) GetRecipient(context.Context, aiassistantport.PlanID, aiassistantport.RecipientID) (aiassistantport.Recipient, aiassistantport.ContentVersion, error) {
+	return aiassistantport.Recipient{}, aiassistantport.ContentVersion{}, nil
+}
+
+type automationIntegrationContentFreezer struct{}
+
+func (automationIntegrationContentFreezer) FreezeOutboundContent(context.Context, automationport.OutboundPublishedContent) (json.RawMessage, [32]byte, error) {
+	snapshot := json.RawMessage(`{"content_text":"member entered"}`)
+	return snapshot, sha256.Sum256(snapshot), nil
+}
+
+type automationIntegrationMessageAccepter struct {
+	mu       sync.Mutex
+	calls    int
+	failNext bool
+}
+
+func (accepter *automationIntegrationMessageAccepter) AcceptMessageWithin(ctx context.Context, _ outboundport.MessageIntent) (outboundport.MessageAcceptance, error) {
+	if _, err := platformpostgres.RequireTransaction(ctx); err != nil {
+		return outboundport.MessageAcceptance{}, err
+	}
+	accepter.mu.Lock()
+	defer accepter.mu.Unlock()
+	accepter.calls++
+	if accepter.failNext {
+		accepter.failNext = false
+		return outboundport.MessageAcceptance{}, errors.New("test outbound acceptance failure")
+	}
+	return outboundport.MessageAcceptance{MessageIntentID: int64(accepter.calls), EffectID: "effect-test"}, nil
 }
 
 type automationSnapshotReader struct{}
@@ -223,15 +279,22 @@ func TestPostgreSQLPolicyCreateVersionLifecycleAndReplayJourney(t *testing.T) {
 	activeVersionCommand := command
 	activeVersionCommand.PolicyID = created.ID
 	activeVersionCommand.ExpectedVersion = active.Version
-	activeVersionCommand.ActionConfig = json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[9002,9001]}`)
+	activeVersionCommand.ActionConfig = json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[9002,9001],"once_per_customer":true,"defer_before_first_paid_at":"2026-09-30T02:58:14Z"}`)
 	activeVersionCommand.IdempotencyKey = "policy-postgres-active-defer-0001"
 	activeVersion, err := service.PutPolicyVersion(ctx, activeVersionCommand)
 	if err != nil || activeVersion.Version != 3 {
 		t.Fatalf("active deferral version=%+v err=%v", activeVersion, err)
 	}
 	currentPolicy, currentVersion, err := service.Policy(ctx, created.ID)
-	if err != nil || currentPolicy.Lifecycle != automationdomain.PolicyActive || currentPolicy.Version != 5 || currentVersion.ID != activeVersion.ID || string(currentVersion.ActionConfig) != `{"agent_id":73,"deferred_customer_ids":[9001,9002]}` {
+	if err != nil || currentPolicy.Lifecycle != automationdomain.PolicyActive || currentPolicy.Version != 5 || currentVersion.ID != activeVersion.ID || string(currentVersion.ActionConfig) != `{"agent_id":73,"deferred_customer_ids":[9001,9002],"once_per_customer":true,"defer_before_first_paid_at":"2026-09-30T02:58:14Z"}` {
 		t.Fatalf("active policy/current version=%+v/%+v err=%v", currentPolicy, currentVersion, err)
+	}
+	removeOnceCommand := activeVersionCommand
+	removeOnceCommand.ExpectedVersion = currentPolicy.Version
+	removeOnceCommand.ActionConfig = json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[9001,9002]}`)
+	removeOnceCommand.IdempotencyKey = "policy-postgres-active-remove-once-0001"
+	if _, err = service.PutPolicyVersion(ctx, removeOnceCommand); !errors.Is(err, automationapp.ErrRuntimeConflict) {
+		t.Fatalf("active policy once_per_customer removal err=%v, want conflict", err)
 	}
 	paused, err := service.TransitionPolicy(ctx, automationapp.PolicyLifecycleCommand{PolicyID: created.ID, ExpectedVersion: currentPolicy.Version, Actor: 7, Target: automationdomain.PolicyPaused, IdempotencyKey: "policy-postgres-pause-0001"})
 	if err != nil || paused.Lifecycle != automationdomain.PolicyPaused || paused.Version != 6 {
@@ -698,5 +761,171 @@ func automationIntegrationPoolWithMigrations(t *testing.T, migrations []string) 
 		defer cancel()
 		_, _ = admin.Exec(cleanup, "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
 		admin.Close(cleanup)
+	}
+}
+
+func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing.T) {
+	native, cleanup := automationIntegrationPoolWithMigrations(t, []string{
+		"0005_external_effects.sql",
+		"0013_automation_agents.sql",
+		"0043_automation_runtime.sql",
+		"0044_outbound_automation_messages.sql",
+		"0089_outbound_message_content_snapshots.sql",
+	})
+	defer cleanup()
+	ctx := context.Background()
+	wrapped, err := platformpostgres.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrapped.Close()
+	uow, err := platformpostgres.NewUnitOfWork(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const packageID = segmentport.PackageID(27)
+	service, err := automationapp.NewRuntimeService(uow, repository, automationReadyExecutionReader{packageID: packageID, agentID: 73}, automationSnapshotReader{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentDigest := sha256.Sum256([]byte("published automation content"))
+	content := automationIntegrationPublishedContent{content: automationport.OutboundPublishedContent{
+		AgentID: 73, PublishedVersion: 2, Content: automationport.FixedContentPackage{ContentText: "member entered"}, ContentDigest: contentDigest,
+	}}
+	messages := &automationIntegrationMessageAccepter{failNext: true}
+	if err = service.SetMessageAccepter(messages); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.SetReviewPlanIntake(automationIntegrationReviewGateway{}, content); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.SetOutboundContentFreezer(automationIntegrationContentFreezer{}); err != nil {
+		t.Fatal(err)
+	}
+	approval := int64(7)
+	created, err := service.CreatePolicy(ctx, automationapp.PolicyCommand{
+		Code: "member-once-per-customer", Name: "Member once per customer", PackageID: packageID,
+		TriggerKind: automationport.TriggerAudienceMemberEnteredV1, ActionKind: automationport.ActionOutboundMessage,
+		ActionConfig: json.RawMessage(`{"agent_id":73,"once_per_customer":true}`), QuietHours: json.RawMessage(`{}`),
+		SingleRunLimit: 100, ApprovalStaffID: &approval, Actor: approval, IdempotencyKey: "member-once-policy-create-0001",
+	})
+	if err != nil || created.Lifecycle != automationdomain.PolicyPaused {
+		t.Fatalf("create once policy=%+v err=%v", created, err)
+	}
+	active, err := service.TransitionPolicy(ctx, automationapp.PolicyLifecycleCommand{
+		PolicyID: created.ID, ExpectedVersion: created.Version, Actor: approval,
+		Target: automationdomain.PolicyActive, IdempotencyKey: "member-once-policy-active-0001",
+	})
+	if err != nil || active.Lifecycle != automationdomain.PolicyActive {
+		t.Fatalf("activate once policy=%+v err=%v", active, err)
+	}
+
+	makeEvent := func(eventID string, customerID int64, snapshotID int64) segmentport.MemberEnteredV1 {
+		return segmentport.MemberEnteredV1{
+			EventID: eventID, PackageID: packageID, SnapshotID: segmentport.SnapshotID(snapshotID),
+			ConfigurationVersionID: 43, CustomerID: customerdomain.CustomerID(customerID),
+			OccurredAt: time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC),
+		}
+	}
+	failedEvent := makeEvent("audmem_once_rollback_001", 87654321, 901)
+	if enrollments, dispatchErr := service.EnrollAudienceMember(ctx, failedEvent); dispatchErr == nil || len(enrollments) != 0 {
+		t.Fatalf("failed Outbound accept enrollments=%+v err=%v; want transaction failure", enrollments, dispatchErr)
+	}
+	var failedEnrollments, failedRuns, failedReceipts int
+	for query, target := range map[string]*int{
+		`SELECT count(*) FROM automation_enrollments WHERE policy_id=$1 AND customer_id=$2`:                &failedEnrollments,
+		`SELECT count(*) FROM automation_runs`:                                                             &failedRuns,
+		`SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$3 AND actor_scope=$4`: &failedReceipts,
+	} {
+		var queryErr error
+		if target == &failedReceipts {
+			queryErr = native.QueryRow(ctx, query, created.ID, failedEvent.CustomerID, automationapp.MemberEventCustomerOnceOperation, automationapp.MemberEventDispatchActorScope).Scan(target)
+		} else if target == &failedEnrollments {
+			queryErr = native.QueryRow(ctx, query, created.ID, failedEvent.CustomerID).Scan(target)
+		} else {
+			queryErr = native.QueryRow(ctx, query).Scan(target)
+		}
+		if queryErr != nil {
+			t.Fatal(queryErr)
+		}
+	}
+	if failedEnrollments != 0 || failedRuns != 0 || failedReceipts != 0 {
+		t.Fatalf("failed UoW leaked enrollment/run/once receipt=%d/%d/%d", failedEnrollments, failedRuns, failedReceipts)
+	}
+
+	if enrollments, retryErr := service.EnrollAudienceMember(ctx, failedEvent); retryErr != nil || len(enrollments) != 1 || enrollments[0].State != "accepted" {
+		t.Fatalf("same-event retry enrollments=%+v err=%v", enrollments, retryErr)
+	}
+	if replay, replayErr := service.EnrollAudienceMember(ctx, failedEvent); replayErr != nil || len(replay) != 1 || replay[0].State != "accepted" {
+		t.Fatalf("exact source replay enrollments=%+v err=%v", replay, replayErr)
+	}
+	if reentry, reentryErr := service.EnrollAudienceMember(ctx, makeEvent("audmem_once_reentry_001", 87654321, 902)); reentryErr != nil || len(reentry) != 0 {
+		t.Fatalf("new-event same-customer reentry enrollments=%+v err=%v", reentry, reentryErr)
+	}
+
+	concurrentEvents := []segmentport.MemberEnteredV1{
+		makeEvent("audmem_once_concurrent_001", 87654322, 903),
+		makeEvent("audmem_once_concurrent_002", 87654322, 904),
+	}
+	type dispatchResult struct {
+		enrollments []automationdomain.Enrollment
+		err         error
+	}
+	results := make(chan dispatchResult, len(concurrentEvents))
+	var wg sync.WaitGroup
+	for _, event := range concurrentEvents {
+		wg.Add(1)
+		go func(event segmentport.MemberEnteredV1) {
+			defer wg.Done()
+			enrollments, dispatchErr := service.EnrollAudienceMember(ctx, event)
+			results <- dispatchResult{enrollments: enrollments, err: dispatchErr}
+		}(event)
+	}
+	wg.Wait()
+	close(results)
+	acceptedEvents := 0
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent member event error: %v", result.err)
+		}
+		if len(result.enrollments) > 1 {
+			t.Fatalf("one member event created multiple enrollments: %+v", result.enrollments)
+		}
+		if len(result.enrollments) == 1 {
+			acceptedEvents++
+			if result.enrollments[0].State != "accepted" {
+				t.Fatalf("concurrent winning enrollment=%+v", result.enrollments[0])
+			}
+		}
+	}
+	if acceptedEvents != 1 {
+		t.Fatalf("concurrent distinct EventIDs accepted %d enrollments, want exactly one", acceptedEvents)
+	}
+
+	var onceReceipts, incompleteReceipts, enrollments, runs int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2`, automationapp.MemberEventCustomerOnceOperation, automationapp.MemberEventDispatchActorScope).Scan(&onceReceipts); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2 AND state<>'completed'`, automationapp.MemberEventCustomerOnceOperation, automationapp.MemberEventDispatchActorScope).Scan(&incompleteReceipts); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_enrollments WHERE policy_id=$1`, created.ID).Scan(&enrollments); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runs WHERE policy_id=$1`, created.ID).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if onceReceipts != 2 || incompleteReceipts != 0 || enrollments != 2 || runs != 2 {
+		t.Fatalf("once receipts/incomplete/enrollments/runs=%d/%d/%d/%d; want 2/0/2/2", onceReceipts, incompleteReceipts, enrollments, runs)
+	}
+	messages.mu.Lock()
+	acceptCalls := messages.calls
+	messages.mu.Unlock()
+	if acceptCalls != 3 {
+		t.Fatalf("transactional Outbound acceptance calls=%d, want failed attempt plus two unique accepted customers", acceptCalls)
 	}
 }

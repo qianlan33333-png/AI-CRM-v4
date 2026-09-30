@@ -8,6 +8,7 @@ import (
 const (
 	MemberEventMissingPolicyOperation = "member_event_no_active_policy"
 	MemberEventDeferredOperation      = "member_event_deferred"
+	MemberEventCustomerOnceOperation  = "member_event_customer_once"
 	MemberEventDispatchActorScope     = "system:segment-member-event-dispatch"
 )
 
