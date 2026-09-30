@@ -1,4 +1,4 @@
-var OwnerHandoffHost = (() => {
+(() => {
   var __create = Object.create;
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -6506,7 +6506,7 @@ var OwnerHandoffHost = (() => {
 
   // node_modules/fflate/esm/browser.js
   var ch2 = {};
-  var wk = function(c, id, msg, transfer, cb) {
+  var wk = (function(c, id, msg, transfer, cb) {
     var w = new Worker(ch2[id] || (ch2[id] = URL.createObjectURL(new Blob([
       c + ';addEventListener("error",function(e){e=e.error;postMessage({$e$:[e.message,e.code,e.stack]})})'
     ], { type: "text/javascript" }))));
@@ -6522,7 +6522,7 @@ var OwnerHandoffHost = (() => {
     };
     w.postMessage(msg, transfer);
     return w;
-  };
+  });
   var u8 = Uint8Array;
   var u16 = Uint16Array;
   var i32 = Int32Array;
@@ -6627,7 +6627,7 @@ var OwnerHandoffHost = (() => {
   }
   var x;
   var i;
-  var hMap = function(cd, mb, r) {
+  var hMap = (function(cd, mb, r) {
     var s = cd.length;
     var i = 0;
     var l = new u16(mb);
@@ -6662,7 +6662,7 @@ var OwnerHandoffHost = (() => {
       }
     }
     return co;
-  };
+  });
   var flt = new u8(288);
   for (i = 0; i < 144; ++i)
     flt[i] = 8;
@@ -7179,7 +7179,7 @@ var OwnerHandoffHost = (() => {
     }
     return slc(o, 0, pre + shft(pos) + post);
   };
-  var crct = /* @__PURE__ */ function() {
+  var crct = /* @__PURE__ */ (function() {
     var t = new Int32Array(256);
     for (var i = 0; i < 256; ++i) {
       var c = i, k = 9;
@@ -7188,7 +7188,7 @@ var OwnerHandoffHost = (() => {
       t[i] = c;
     }
     return t;
-  }();
+  })();
   var crc = function() {
     var c = -1;
     return {
@@ -8982,7 +8982,7 @@ var OwnerHandoffHost = (() => {
     };
     return _getPrototypeOf(o);
   }
-  var InvalidSpreadsheetError = /* @__PURE__ */ function(_Error) {
+  var InvalidSpreadsheetError = /* @__PURE__ */ (function(_Error) {
     _inherits(InvalidSpreadsheetError2, _Error);
     var _super = _createSuper(InvalidSpreadsheetError2);
     function InvalidSpreadsheetError2(message) {
@@ -8993,7 +8993,7 @@ var OwnerHandoffHost = (() => {
       return _this;
     }
     return _createClass(InvalidSpreadsheetError2);
-  }(/* @__PURE__ */ _wrapNativeSuper(Error));
+  })(/* @__PURE__ */ _wrapNativeSuper(Error));
 
   // node_modules/read-excel-file/modules/xml/parseXml.js
   function parseXml(xml, state, onOpenTag, onCloseTag, onText, onProgress) {
@@ -9200,7 +9200,7 @@ var OwnerHandoffHost = (() => {
     };
     return _getPrototypeOf2(o);
   }
-  var UnzipError = /* @__PURE__ */ function(_Error) {
+  var UnzipError = /* @__PURE__ */ (function(_Error) {
     _inherits2(UnzipError2, _Error);
     var _super = _createSuper2(UnzipError2);
     function UnzipError2() {
@@ -9208,7 +9208,7 @@ var OwnerHandoffHost = (() => {
       return _super.apply(this, arguments);
     }
     return _createClass2(UnzipError2);
-  }(/* @__PURE__ */ _wrapNativeSuper2(Error));
+  })(/* @__PURE__ */ _wrapNativeSuper2(Error));
   function createUnzipError(error) {
     var unzipError = new UnzipError(error.message);
     if (error.stack) {
@@ -9410,7 +9410,7 @@ var OwnerHandoffHost = (() => {
     INVALID_ZIP: "Couldn't unzip `.xlsx` file contents",
     NO_DATA: "No data"
   };
-  var InvalidInputError = /* @__PURE__ */ function(_Error) {
+  var InvalidInputError = /* @__PURE__ */ (function(_Error) {
     _inherits3(InvalidInputError2, _Error);
     var _super = _createSuper3(InvalidInputError2);
     function InvalidInputError2(code, cause) {
@@ -9423,7 +9423,7 @@ var OwnerHandoffHost = (() => {
       return _this;
     }
     return _createClass3(InvalidInputError2);
-  }(/* @__PURE__ */ _wrapNativeSuper3(Error));
+  })(/* @__PURE__ */ _wrapNativeSuper3(Error));
 
   // node_modules/read-excel-file/modules/export/filterZipArchiveEntry.js
   function filterZipArchiveEntry(_ref) {
@@ -10985,7 +10985,7 @@ var OwnerHandoffHost = (() => {
     };
     return _getPrototypeOf4(o);
   }
-  var SheetNotFoundError = /* @__PURE__ */ function(_Error) {
+  var SheetNotFoundError = /* @__PURE__ */ (function(_Error) {
     _inherits4(SheetNotFoundError2, _Error);
     var _super = _createSuper4(SheetNotFoundError2);
     function SheetNotFoundError2(sheet, sheets) {
@@ -10998,7 +10998,7 @@ var OwnerHandoffHost = (() => {
       return _this;
     }
     return _createClass4(SheetNotFoundError2);
-  }(/* @__PURE__ */ _wrapNativeSuper4(Error));
+  })(/* @__PURE__ */ _wrapNativeSuper4(Error));
 
   // node_modules/read-excel-file/modules/xlsx/parseSpreadsheetContents.js
   function _typeof8(o) {
@@ -11197,9 +11197,9 @@ var OwnerHandoffHost = (() => {
     var _loop = function _loop3() {
       var filePath = _Object$keys[_i];
       var fileInfo = filesInfo[filePath];
-      results[fileInfo.name] = contents[filePath] === void 0 ? fileInfo.fallback === void 0 ? function() {
+      results[fileInfo.name] = contents[filePath] === void 0 ? fileInfo.fallback === void 0 ? (function() {
         throw new InvalidSpreadsheetError('"'.concat(filePath, '" file not found inside the `.xlsx` file'));
-      }() : fileInfo.fallback : fileInfo.parse(contents[filePath], parseXml2);
+      })() : fileInfo.fallback : fileInfo.parse(contents[filePath], parseXml2);
     };
     for (var _i = 0, _Object$keys = Object.keys(filesInfo); _i < _Object$keys.length; _i++) {
       _loop();
@@ -11364,7 +11364,7 @@ var OwnerHandoffHost = (() => {
     };
     return _getPrototypeOf5(o);
   }
-  var InvalidError = /* @__PURE__ */ function(_Error) {
+  var InvalidError = /* @__PURE__ */ (function(_Error) {
     _inherits5(InvalidError2, _Error);
     var _super = _createSuper5(InvalidError2);
     function InvalidError2(reason) {
@@ -11375,7 +11375,7 @@ var OwnerHandoffHost = (() => {
       return _this;
     }
     return _createClass5(InvalidError2);
-  }(/* @__PURE__ */ _wrapNativeSuper5(Error));
+  })(/* @__PURE__ */ _wrapNativeSuper5(Error));
 
   // node_modules/read-excel-file/modules/parseSheetData/types/Number.js
   function NumberType(value) {
@@ -12381,6 +12381,38 @@ var OwnerHandoffHost = (() => {
     const walker = document.createTreeWalker(page, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) node.nodeValue = (node.nodeValue || "").replace(replacement, "");
   }
+  function adaptFrozenDonorCopy(page) {
+    const transfer = page.querySelector("input[data-include-wecom-transfer]");
+    if (transfer) {
+      transfer.checked = true;
+      transfer.disabled = true;
+    }
+    const exact = [
+      ["h1", "\u5BA2\u6237\u8D1F\u8D23\u4EBA\u8FC1\u79FB / \u5728\u804C\u7EE7\u627F", "\u7528\u6237\u8D1F\u8D23\u4EBA\u8FC1\u79FB / \u5728\u804C\u7EE7\u627F"],
+      [".owner-migration-subtitle", "\u5148\u5B8C\u6210\u4F01\u5FAE\u5BA2\u6237\u8F6C\u63A5\uFF0C\u518D\u540C\u6B65 CRM \u672C\u5730\u5F52\u5C5E\uFF1B\u6267\u884C\u524D\u5FC5\u987B\u9884\u89C8\u3002", "\u901A\u8FC7\u4F01\u5FAE\u5B98\u65B9\u63A5\u53E3\u8F6C\u63A5\u7528\u6237\uFF1BCRM \u8DDF\u8FDB\u4FE1\u606F\u5728\u8D44\u6599\u5237\u65B0\u540E\u66F4\u65B0\u3002\u6267\u884C\u524D\u5FC5\u987B\u9884\u89C8\u3002"],
+      [".owner-migration-switch-line span", "\u5148\u8C03\u7528\u4F01\u5FAE\u5B98\u65B9\u8F6C\u63A5\u63A5\u53E3\uFF1B\u4F01\u5FAE\u6210\u529F\u7684\u5BA2\u6237\u624D\u540C\u6B65 CRM\u3002", "\u8C03\u7528\u4F01\u5FAE\u5B98\u65B9\u8F6C\u63A5\u63A5\u53E3\uFF1BCRM \u8D44\u6599\u7531\u7EDF\u4E00\u540C\u6B65\u66F4\u65B0\u3002"],
+      ["[data-confirm-phrase-input]", "\u786E\u8BA4\u5C06 0 \u4E2A\u5BA2\u6237\u4ECE source \u8FC1\u79FB\u5230 target", "\u786E\u8BA4\u5C06 0 \u4E2A\u7528\u6237\u4ECE source \u8FC1\u79FB\u5230 target"]
+    ];
+    exact.forEach(([selector, source, target]) => {
+      page.querySelectorAll(selector).forEach((node) => {
+        if (node.textContent?.trim() === source) node.textContent = target;
+        if (node instanceof HTMLInputElement && node.placeholder === source) node.placeholder = target;
+      });
+    });
+    const replacements = /* @__PURE__ */ new Map([
+      ["\u8FC1\u79FB\u539F\u8D1F\u8D23\u4EBA\u5F53\u524D\u5168\u90E8\u5019\u9009\u5BA2\u6237\u3002\u4FDD\u7559\u73B0\u6709\u80FD\u529B\u3002", "\u8FC1\u79FB\u539F\u8D1F\u8D23\u4EBA\u5F53\u524D\u5168\u90E8\u5019\u9009\u7528\u6237\u3002\u4FDD\u7559\u73B0\u6709\u80FD\u529B\u3002"],
+      ["\u53EA\u8FC1\u79FB Excel \u4E2D\u6807\u8BB0\u4E3A\u201C\u662F\u201D\u7684\u5BA2\u6237\u3002", "\u53EA\u8FC1\u79FB Excel \u4E2D\u6807\u8BB0\u4E3A\u201C\u662F\u201D\u7684\u7528\u6237\u3002"],
+      ["\u53BB\u91CD\u540E\u5BA2\u6237\u6570", "\u53BB\u91CD\u540E\u7528\u6237\u6570"],
+      ["\u53EF\u8FC1\u79FB\u5BA2\u6237", "\u53EF\u8FC1\u79FB\u7528\u6237"],
+      ["\u4E0D\u53EF\u8FC1\u79FB\u5BA2\u6237", "\u4E0D\u53EF\u8FC1\u79FB\u7528\u6237"],
+      ["\u8BF7\u6C42\u5BA2\u6237\u6570", "\u8BF7\u6C42\u7528\u6237\u6570"]
+    ]);
+    page.querySelectorAll(".owner-migration-hint, .owner-migration-stat-label").forEach((node) => {
+      const source = node.textContent?.trim() || "";
+      const target = replacements.get(source);
+      if (target) node.textContent = target;
+    });
+  }
   async function mountFrozenDonor(stage) {
     const response = await fetch(donorURL, { credentials: "same-origin" });
     if (!response.ok) throw requestFailure("\u8D1F\u8D23\u4EBA\u8FC1\u79FB\u9875\u9762\u6682\u4E0D\u53EF\u7528\uFF0C\u8BF7\u5237\u65B0\u540E\u91CD\u8BD5\u3002", response.status);
@@ -12390,6 +12422,7 @@ var OwnerHandoffHost = (() => {
     if (!page || !style) throw new Error("\u51BB\u7ED3\u9875\u9762\u4E0D\u542B\u8FC1\u79FB\u5DE5\u4F5C\u53F0");
     const cloned = page.cloneNode(true);
     scrubFrozenServerPlaceholders(cloned);
+    adaptFrozenDonorCopy(cloned);
     stage.replaceChildren(style.cloneNode(true), cloned);
     const mounted = stage.querySelector("[data-owner-migration-page]");
     if (!mounted) throw new Error("\u51BB\u7ED3\u8FC1\u79FB\u9875\u9762\u672A\u6302\u8F7D");
@@ -12502,8 +12535,8 @@ var OwnerHandoffHost = (() => {
     };
     root.querySelectorAll("[data-owner-picker]").forEach((button) => button.addEventListener("click", () => choose(button.dataset.ownerPicker)));
   }
-  function currentMode(root) {
-    return query(root, "[data-include-wecom-transfer]").checked ? "wecom_then_crm" : "local_only";
+  function currentMode(_root) {
+    return "wecom_then_crm";
   }
   function ownerID(root, kind) {
     return Number(query(root, `[data-owner-userid="${kind}"]`).value);
@@ -12515,17 +12548,17 @@ var OwnerHandoffHost = (() => {
     return query(root, 'input[name="scope_type"]:checked').value;
   }
   function transferStatusLabel(status) {
-    return { 0: "\u672C\u5730\u8FC1\u79FB", 1: "\u4F01\u5FAE\u8F6C\u63A5\u5DF2\u5B8C\u6210", 2: "\u4F01\u5FAE\u8F6C\u63A5\u5904\u7406\u4E2D", 3: "\u5BA2\u6237\u62D2\u7EDD\u63A5\u66FF", 4: "\u76EE\u6807\u6210\u5458\u5BA2\u6237\u4E0A\u9650", 5: "\u672A\u627E\u5230\u4F01\u5FAE\u8F6C\u63A5\u8BB0\u5F55" }[status] || "\u4F01\u5FAE\u8F6C\u63A5\u72B6\u6001\u5F85\u786E\u8BA4";
+    return { 0: "\u672C\u5730\u8FC1\u79FB", 1: "\u4F01\u5FAE\u8F6C\u63A5\u5DF2\u5B8C\u6210", 2: "\u4F01\u5FAE\u8F6C\u63A5\u5904\u7406\u4E2D", 3: "\u7528\u6237\u62D2\u7EDD\u63A5\u66FF", 4: "\u76EE\u6807\u6210\u5458\u7528\u6237\u4E0A\u9650", 5: "\u672A\u627E\u5230\u4F01\u5FAE\u8F6C\u63A5\u8BB0\u5F55" }[status] || "\u4F01\u5FAE\u8F6C\u63A5\u72B6\u6001\u5F85\u786E\u8BA4";
   }
   function ownerMigrationStateLabel(state) {
     return {
       ready: "\u53EF\u8FC1\u79FB",
       skipped_by_file: "\u5DF2\u6309\u6587\u4EF6\u8DF3\u8FC7",
       not_under_source_owner: "\u8D1F\u8D23\u4EBA\u4E0D\u4E00\u81F4",
-      not_found: "\u672A\u627E\u5230\u5BA2\u6237",
+      not_found: "\u672A\u627E\u5230\u7528\u6237",
       conflict: "\u8FC1\u79FB\u51B2\u7A81",
       unresolved: "\u5F85\u6838\u5B9E",
-      missing_external_userid: "\u7F3A\u5C11\u5BA2\u6237\u6807\u8BC6",
+      missing_external_userid: "\u7F3A\u5C11\u7528\u6237\u6807\u8BC6",
       invalid_move_flag: "\u8FC1\u79FB\u6807\u8BB0\u65E0\u6548",
       duplicate: "\u6587\u4EF6\u91CD\u590D",
       accepted: "\u5DF2\u53D7\u7406",
@@ -12544,8 +12577,8 @@ var OwnerHandoffHost = (() => {
   }
   function ownerMigrationReason(reason) {
     return {
-      "external_userid is required": "\u7F3A\u5C11\u5BA2\u6237\u6807\u8BC6\u3002",
-      "duplicate external_userid; first row is kept": "\u6587\u4EF6\u4E2D\u5B58\u5728\u91CD\u590D\u5BA2\u6237\u6807\u8BC6\uFF0C\u5DF2\u4FDD\u7559\u9996\u6B21\u51FA\u73B0\u7684\u8BB0\u5F55\u3002",
+      "external_userid is required": "\u7F3A\u5C11\u7528\u6237\u6807\u8BC6\u3002",
+      "duplicate external_userid; first row is kept": "\u6587\u4EF6\u4E2D\u5B58\u5728\u91CD\u590D\u7528\u6237\u6807\u8BC6\uFF0C\u5DF2\u4FDD\u7559\u9996\u6B21\u51FA\u73B0\u7684\u8BB0\u5F55\u3002",
       "Excel marked skip": "\u5DF2\u6309\u6587\u4EF6\u6807\u8BB0\u8DF3\u8FC7\u3002",
       "no executable rows": "\u6CA1\u6709\u53EF\u6267\u884C\u8FC1\u79FB\u884C\u3002",
       "\u662F\u5426\u8FC1\u79FB\u5B57\u6BB5\u975E\u6CD5": "\u8FC1\u79FB\u6807\u8BB0\u65E0\u6548\u3002",
@@ -12558,7 +12591,7 @@ var OwnerHandoffHost = (() => {
     }[reason] || "\u8FC1\u79FB\u539F\u56E0\u5F85\u786E\u8BA4\u3002";
   }
   function ownerMigrationModeLabel(mode) {
-    return { local_only: "\u4EC5\u672C\u5730\u8FC1\u79FB", wecom_then_crm: "\u5148\u4F01\u5FAE\u8F6C\u63A5\u540E\u672C\u5730\u8FC1\u79FB" }[mode] || "\u8FC1\u79FB\u65B9\u5F0F\u5F85\u786E\u8BA4";
+    return { local_only: "\u4EC5\u672C\u5730\u8FC1\u79FB", wecom_then_crm: "\u4F01\u5FAE\u5B98\u65B9\u8F6C\u63A5" }[mode] || "\u8FC1\u79FB\u65B9\u5F0F\u5F85\u786E\u8BA4";
   }
   function downloadBlob(filename, blob) {
     const url = URL.createObjectURL(blob);
@@ -12637,13 +12670,13 @@ var OwnerHandoffHost = (() => {
     const ready = rows.filter((row) => row.State === "ready").length;
     const skipped = rows.filter((row) => row.State === "skipped_by_file").length;
     const blocked = rows.length - ready - skipped;
-    query(root, "[data-preview-basic]").textContent = `${scope === "excel_include" ? "Excel \u6307\u5B9A\u540D\u5355" : "\u5168\u90E8\u5BA2\u6237"} \xB7 \u539F\u8D1F\u8D23\u4EBA #${source} \u2192 \u76EE\u6807\u8D1F\u8D23\u4EBA #${target} \xB7 ${ready} \u4E2A\u53EF\u8FC1\u79FB\u5BA2\u6237\uFF1B${blocked} \u4E2A\u4E0D\u53EF\u8FC1\u79FB\u3002`;
+    query(root, "[data-preview-basic]").textContent = `${scope === "excel_include" ? "Excel \u6307\u5B9A\u540D\u5355" : "\u5168\u90E8\u7528\u6237"} \xB7 \u539F\u8D1F\u8D23\u4EBA #${source} \u2192 \u76EE\u6807\u8D1F\u8D23\u4EBA #${target} \xB7 ${ready} \u4E2A\u53EF\u8FC1\u79FB\u7528\u6237\uFF1B${blocked} \u4E2A\u4E0D\u53EF\u8FC1\u79FB\u3002`;
     const values = { total_rows: rows.length, unique_external_userids: new Set(rows.map((row) => row.ExternalUserID).filter(Boolean)).size, ready, skipped_by_file: skipped, blocked, crm_updates: ready };
     Object.entries(values).forEach(([name, value]) => {
       const node = root.querySelector(`[data-preview-stat="${name}"]`);
       if (node) node.textContent = String(value);
     });
-    query(root, "[data-preview-rows]").innerHTML = rows.map((row) => `<tr><td>${row.Line}</td><td><code>${esc(row.ExternalUserID)}</code></td><td>${esc(row.CustomerDisplayName)}</td><td>${esc(row.MoveFlag)}</td><td>${esc(row.CurrentOwnerUserID)}</td><td><span class="owner-migration-status owner-migration-status--${row.State === "ready" ? "ready" : row.State === "skipped_by_file" ? "skip" : "block"}">${esc(ownerMigrationStateLabel(row.State))}</span></td><td>${esc(ownerMigrationReason(row.Reason))}</td></tr>`).join("") || '<tr><td colspan="7" class="owner-migration-empty">\u5F53\u524D\u8303\u56F4\u6CA1\u6709\u5019\u9009\u5BA2\u6237\u3002</td></tr>';
+    query(root, "[data-preview-rows]").innerHTML = rows.map((row) => `<tr><td>${row.Line}</td><td><code>${esc(row.ExternalUserID)}</code></td><td>${esc(row.CustomerDisplayName)}</td><td>${esc(row.MoveFlag)}</td><td>${esc(row.CurrentOwnerUserID)}</td><td><span class="owner-migration-status owner-migration-status--${row.State === "ready" ? "ready" : row.State === "skipped_by_file" ? "skip" : "block"}">${esc(ownerMigrationStateLabel(row.State))}</span></td><td>${esc(ownerMigrationReason(row.Reason))}</td></tr>`).join("") || '<tr><td colspan="7" class="owner-migration-empty">\u5F53\u524D\u8303\u56F4\u6CA1\u6709\u5019\u9009\u7528\u6237\u3002</td></tr>';
     query(root, "[data-download-errors]").disabled = blocked === 0;
     query(root, "[data-execute]").disabled = ready === 0;
   }
@@ -12661,7 +12694,7 @@ var OwnerHandoffHost = (() => {
       `\u8FC1\u79FB\u6279\u6B21\uFF1A${batch.ID}`,
       `\u8FC1\u79FB\u65B9\u5F0F\uFF1A${ownerMigrationModeLabel(batch.Mode)}`,
       `\u6279\u6B21\u72B6\u6001\uFF1A${ownerMigrationStateLabel(batch.State)}`,
-      ...(batch.Lines || []).map((line) => `\u7B2C ${line.Line} \u884C\uFF0C\u5BA2\u6237 #${line.CustomerID}\uFF1A${ownerMigrationStateLabel(line.State)}\uFF1B\u4F01\u5FAE\u8F6C\u63A5\uFF1A${transferStatusLabel(line.TransferStatus)}`)
+      ...(batch.Lines || []).map((line) => `\u7B2C ${line.Line} \u884C\uFF0C\u7528\u6237 #${line.CustomerID}\uFF1A${ownerMigrationStateLabel(line.State)}\uFF1B\u4F01\u5FAE\u8F6C\u63A5\uFF1A${transferStatusLabel(line.TransferStatus)}`)
     ].join("\n");
   }
   async function boot() {
@@ -12787,7 +12820,7 @@ var OwnerHandoffHost = (() => {
             setNotice("\u6587\u4EF6\u6CA1\u6709\u53EF\u6267\u884C\u8FC1\u79FB\u884C\uFF0C\u5DF2\u4FDD\u7559\u9010\u884C\u6821\u9A8C\u7ED3\u679C\uFF0C\u4E0D\u80FD\u786E\u8BA4\u6267\u884C\u3002", "ok");
             return;
           }
-          preview = await api("/api/admin/customers/owner-handoffs/previews", { method: "POST", body: JSON.stringify({ mode: currentMode(root), scope, source_staff_id: source, target_staff_id: target, customer_ids: [], external_userids: scope === "excel_include" ? fileExternalIDs : [], welcome_message: query(root, "[data-transfer-welcome-msg]").value, confirmation_phrase: `\u786E\u8BA4\u5C06\u5F53\u524D\u5019\u9009\u5BA2\u6237\u8FC1\u79FB\u5230 ${target}`, idempotency_key: key() }) });
+          preview = await api("/api/admin/customers/owner-handoffs/previews", { method: "POST", body: JSON.stringify({ mode: currentMode(root), scope, source_staff_id: source, target_staff_id: target, customer_ids: [], external_userids: scope === "excel_include" ? fileExternalIDs : [], welcome_message: query(root, "[data-transfer-welcome-msg]").value, confirmation_phrase: `\u786E\u8BA4\u5C06\u5F53\u524D\u5019\u9009\u7528\u6237\u8FC1\u79FB\u5230 ${target}`, idempotency_key: key() }) });
           displayedRows = renderPreview(root, preview, scope, importedRows, sourceUserID);
           setNotice("\u9884\u89C8\u5DF2\u751F\u6210\uFF0C\u8BF7\u9010\u5B57\u8F93\u5165\u786E\u8BA4\u77ED\u8BED\u3002", "ok");
         } catch (error) {

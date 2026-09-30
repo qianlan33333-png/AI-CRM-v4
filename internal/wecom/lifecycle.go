@@ -4,9 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -150,7 +148,7 @@ func (service ExternalContactLifecycle) ProcessWithin(ctx context.Context, fact 
 		return ExternalContactLifecycleResult{}, ErrInvalidExternalContactLifecycle
 	}
 	var result ExternalContactLifecycleResult
-	if !fact.supported() {
+	if !fact.supported() || !fact.entrant() {
 		result.Outcomes = []CallbackOutcome{OutcomeIgnored}
 		return result, nil
 	}
@@ -197,41 +195,7 @@ func (service ExternalContactLifecycle) ProcessWithin(ctx context.Context, fact 
 	} else {
 		result.Outcomes = append(result.Outcomes, OutcomeCustomerCreated)
 	}
-	if fact.EmployeeUserID != "" {
-		active := !fact.deletesRelationship()
-		application, err := service.Relationships.ApplyCallbackEvent(ctx, CallbackFollowRelationship{
-			CallbackID: fact.CallbackID, CorpID: fact.CorpID, EmployeeID: fact.EmployeeUserID,
-			CustomerID: customerID, ChangeType: fact.ChangeType, Active: active, OccurredAt: fact.OccurredAt,
-		})
-		if err != nil {
-			return ExternalContactLifecycleResult{}, err
-		}
-		if application.Applied && application.Active {
-			result.Outcomes = append(result.Outcomes, OutcomeRelationshipActivated)
-		} else if application.Applied {
-			result.Outcomes = append(result.Outcomes, OutcomeRelationshipDeactivated)
-		}
-	}
-	if !fact.deletesRelationship() && (service.Directory != nil || service.Outbox != nil) {
-		if service.Directory == nil || service.Outbox == nil {
-			return ExternalContactLifecycleResult{}, ErrInvalidExternalContactLifecycle
-		}
-		if err := service.Directory.ActivateDirectoryCustomer(ctx, customerID, "wecom_callback", fact.OccurredAt); err != nil {
-			return ExternalContactLifecycleResult{}, err
-		}
-		payload, err := json.Marshal(map[string]any{"customer_id": customerID, "source": "wecom_callback"})
-		if err != nil {
-			return ExternalContactLifecycleResult{}, err
-		}
-		if _, err = service.Outbox.Append(ctx, platformoutbox.Event{
-			AggregateType: "customer", AggregateID: strconv.FormatInt(int64(customerID), 10),
-			Type: "customer.directory_callback_activated", Version: 1,
-			IdempotencyKey: callbackProjectionKey(fact.CallbackID),
-			Payload:        payload, OccurredAt: fact.OccurredAt, Processed: true,
-		}); err != nil {
-			return ExternalContactLifecycleResult{}, err
-		}
-	}
+
 	if fact.entrant() {
 		if err := service.correlateEntrant(ctx, fact, customerID, &result); err != nil {
 			return ExternalContactLifecycleResult{}, err

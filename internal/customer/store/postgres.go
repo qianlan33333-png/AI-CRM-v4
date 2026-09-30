@@ -328,9 +328,8 @@ func (PostgreSQL) List(ctx context.Context, query customerapp.Query) (customerap
 	}
 	rows, err := tx.Query(ctx, `
 		SELECT directory.customer_id,directory.customer_status,directory.display_name,directory.avatar_url,directory.oneid_label,directory.phone_masked,
-			COALESCE(directory.phone_assurance,''),directory.activation_status,directory.last_synced_at,directory.updated_at,owner.staff_id
+			COALESCE(directory.phone_assurance,''),directory.activation_status,directory.last_synced_at,directory.updated_at,NULL::bigint
 		FROM customer_directory_projection directory
-		LEFT JOIN customer_local_owners owner ON owner.customer_id=directory.customer_id
 		WHERE directory.updated_at <= $1
 		  AND ($2::text='' OR directory.display_name ILIKE '%'||$2||'%' OR directory.oneid_label ILIKE '%'||$2||'%')
 		  AND ($3::text='' OR directory.customer_status=$3)
@@ -363,7 +362,6 @@ func (PostgreSQL) List(ctx context.Context, query customerapp.Query) (customerap
 		return customerapp.PageData{}, err
 	}
 	err = tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM customer_directory_projection directory
-		LEFT JOIN customer_local_owners owner ON owner.customer_id=directory.customer_id
 		WHERE directory.updated_at <= $1
 		AND ($2::text='' OR directory.display_name ILIKE '%'||$2||'%' OR directory.oneid_label ILIKE '%'||$2||'%')
 		AND ($3::text='' OR directory.customer_status=$3) AND ($4::text='' OR directory.activation_status=$4)
@@ -384,30 +382,10 @@ func (PostgreSQL) List(ctx context.Context, query customerapp.Query) (customerap
 }
 
 // CustomerIDsForOwner is a Customer-owned authority lookup.  It deliberately
-// uses only customer_local_owners; active WeCom follow relationships remain a
+// is retired in favor of the composition-owned directory read Port; a
 // separate Provider fact and cannot be presented or filtered as CRM ownership.
-func (PostgreSQL) CustomerIDsForOwner(ctx context.Context, staffID int64, limit int) ([]customerdomain.CustomerID, error) {
-	if staffID < 1 || limit < 1 || limit > customerapp.MaximumFilterCandidates+1 {
-		return nil, customerapp.ErrInvalidQuery
-	}
-	tx, err := platformpostgres.RequireTransaction(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := tx.Query(ctx, `SELECT customer_id FROM customer_local_owners WHERE staff_id=$1 ORDER BY customer_id LIMIT $2`, staffID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := make([]customerdomain.CustomerID, 0)
-	for rows.Next() {
-		var id customerdomain.CustomerID
-		if err = rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		result = append(result, id)
-	}
-	return result, rows.Err()
+func (PostgreSQL) CustomerIDsForOwner(context.Context, int64, int) ([]customerdomain.CustomerID, error) {
+	return nil, customerapp.ErrInvalidQuery
 }
 
 func customerIDs(values []customerdomain.CustomerID) []int64 {

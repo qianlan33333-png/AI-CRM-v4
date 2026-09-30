@@ -13,7 +13,7 @@
   {{if .AudienceList}}
   <link rel="stylesheet" href="/static/admin_console/admin_audience.css?v=production-shell-41f80a11-mime2">
   {{with presentationAssets}}{{if .ConfirmationDialogCSS}}<link rel="stylesheet" href="{{.ConfirmationDialogCSS}}">{{end}}{{if .ConfirmationDialogScript}}<script type="module" src="{{.ConfirmationDialogScript}}"></script>{{end}}{{end}}
-  <script defer src="/static/admin_console/admin_audience_detail.js?v=audience-direct-push-controls-v1"></script>
+  <script defer src="/static/admin_console/admin_audience_detail.js?v=audience-directory-source-v2"></script>
   {{end}}
   {{if .AudienceDetail}}
   <link rel="stylesheet" href="/static/admin_console/automation_capability_selector.css?v=production-shell-41f80a11-mime2">
@@ -22,7 +22,7 @@
   <link rel="stylesheet" href="/static/admin_console/admin_audience_detail.css?v=production-shell-41f80a11-mime2">
   {{with presentationAssets}}{{if .ConfirmationDialogCSS}}<link rel="stylesheet" href="{{.ConfirmationDialogCSS}}">{{end}}{{if .ConfirmationDialogScript}}<script type="module" src="{{.ConfirmationDialogScript}}"></script>{{end}}{{end}}
   <script defer src="/static/admin_console/operation_member_picker_dd8d60d.js?v=audience-sender-picker-v2"></script>
-  <script defer src="/static/admin_console/admin_audience_detail.js?v=audience-sender-picker-v1"></script>
+  <script defer src="/static/admin_console/admin_audience_detail.js?v=audience-directory-source-v2"></script>
   <script defer src="/static/admin_console/template_parameter_form.js?v=dd8-frozen-ab63c644"></script>
   <script defer src="/static/admin_console/admin_audience_template_host.js?v=prd05-template-empty-v2"></script>
   {{end}}
@@ -58,11 +58,11 @@
   <script type="module" src="{{.MediaAssets.MaterialLibraryHostJS}}"></script>
   {{end}}
   {{if .Customers}}
-  <link rel="stylesheet" href="/static/admin_console/admin_customers.css?v=customer-profile-v3">
+  <link rel="stylesheet" href="/static/admin_console/admin_customers.css?v=wecom-profile-history-20260930">
   <link rel="stylesheet" href="/assets/standard-components/wecom_tag_picker.css">
   {{with presentationAssets}}{{if .SelectionDialogCSS}}<link rel="stylesheet" href="{{.SelectionDialogCSS}}">{{end}}{{end}}
   <script type="module" src="/assets/standard-components/standard_components_host.js"></script>
-  <script defer src="/static/admin_console/admin_customers.js?v=operations-profile-20260917"></script>
+  <script defer src="/static/admin_console/admin_customers.js?v=wecom-profile-history-20260930"></script>
   {{end}}
   {{if .MessageArchive}}
   <link rel="stylesheet" href="/static/admin_console/message_archive.css?v=message-archive-v1">

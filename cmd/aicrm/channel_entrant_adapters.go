@@ -75,15 +75,12 @@ func (adapter channelEntrantActionReaderAdapter) FreezePublishedWelcomeMessage(c
 type entrantStaffReader interface {
 	UserByID(context.Context, int64, bool) (accessdomain.User, error)
 }
-type entrantRelationshipReader interface {
-	IsActive(context.Context, string, string, customerdomain.CustomerID) (bool, error)
-}
 type channelCurrentContactAdapter struct {
-	uow           platformport.UnitOfWork
-	corpID        string
-	staff         entrantStaffReader
-	relationships entrantRelationshipReader
-	identities    identityport.ExternalIdentityValueReader
+	uow    platformport.UnitOfWork
+	corpID string
+	staff  entrantStaffReader
+
+	identities identityport.ExternalIdentityValueReader
 }
 
 func (adapter channelCurrentContactAdapter) CurrentExternalContact(ctx context.Context, customerID customerdomain.CustomerID, staffID int64) (wecomport.CurrentExternalContact, error) {
@@ -93,10 +90,7 @@ func (adapter channelCurrentContactAdapter) CurrentExternalContact(ctx context.C
 		if err != nil || !user.Active || user.WeComUserID == "" {
 			return errors.New("current channel staff unavailable")
 		}
-		active, err := adapter.relationships.IsActive(tx, adapter.corpID, user.WeComUserID, customerID)
-		if err != nil || !active {
-			return errors.New("current WeCom relationship unavailable")
-		}
+
 		value, found, err := adapter.identities.VerifiedExternalIdentityValue(tx, customerID, identitydomain.KindWeComExternalUserID, "wecom-corp:"+adapter.corpID)
 		if err != nil || !found {
 			return errors.New("current WeCom identity unavailable")

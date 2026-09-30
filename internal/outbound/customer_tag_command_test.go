@@ -227,7 +227,7 @@ func (stub *customerTagObservationStub) RefreshCustomerTagObservation(context.Co
 	return stub.err
 }
 
-func TestCustomerTagProviderKeepsExecutedWhenObservationReadFails(t *testing.T) {
+func TestCustomerTagProviderExecutesWithoutMutatingDirectoryObservations(t *testing.T) {
 	d := customerTagDispatch()
 	writer := &customerTagWriterStub{}
 	observer := &customerTagObservationStub{err: errors.New("readback unavailable")}
@@ -236,7 +236,7 @@ func TestCustomerTagProviderKeepsExecutedWhenObservationReadFails(t *testing.T) 
 		t.Fatal(err)
 	}
 	result, executeErr := provider.Execute(context.Background(), customerTagEnvelope(d), effectport.Attempt{EffectID: "eer_7", Number: 1, Generation: 1, Fence: 1})
-	if executeErr != nil || result.Completion != effectport.StateExecuted || !result.CallAttempted || !result.RealExternalCallExecuted || writer.calls != 1 || observer.calls != 1 {
+	if executeErr != nil || result.Completion != effectport.StateExecuted || !result.CallAttempted || !result.RealExternalCallExecuted || writer.calls != 1 || observer.calls != 0 {
 		t.Fatalf("result=%+v executeErr=%v writes=%d observations=%d", result, executeErr, writer.calls, observer.calls)
 	}
 }

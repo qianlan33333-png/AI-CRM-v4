@@ -112,11 +112,11 @@ func TestContactDescriptionCallbackWorkerReadsOnlyOneProcessedFullContact(t *tes
 		t.Fatal(err)
 	}
 	customerID := customerdomain.CustomerID(19)
-	relationships := &memoryRelationships{active: map[string]bool{relationshipKey("corp-1", "employee-1", customerID): true}}
+
 	identity := &descriptionCallbackIdentity{result: identityport.ResolveResult{Status: identityport.ResolveFound, CustomerID: customerID, IdentityID: 5}}
 	reader := &descriptionCallbackReader{target: wecomport.ExternalContactDescriptionTarget{Description: description, Projected: true}}
 	intents := &descriptionCallbackIntentWriter{}
-	service := ContactDescriptionCallbackService{Enabled: true, CorpID: "corp-1", Inbox: inbox, Provider: reader, Identity: identity, Relationships: relationships, Intents: intents, UOW: directUOW{}}
+	service := ContactDescriptionCallbackService{Enabled: true, CorpID: "corp-1", Inbox: inbox, Provider: reader, Identity: identity, Intents: intents, UOW: directUOW{}}
 	worker := NewContactDescriptionCallbackWorker()
 	if err = worker.BindService(service); err != nil {
 		t.Fatal(err)
@@ -164,10 +164,10 @@ func TestContactDescriptionCallbackWorkerSkipsNonFullAndNeverReplansUnknown(t *t
 				t.Fatal(err)
 			}
 			customerID := customerdomain.CustomerID(19)
-			relationships := &memoryRelationships{active: map[string]bool{relationshipKey("corp-1", "employee-1", customerID): true}}
+
 			reader := &descriptionCallbackReader{target: wecomport.ExternalContactDescriptionTarget{Description: description, Projected: true}}
 			intents := &descriptionCallbackIntentWriter{err: testCase.intentErr}
-			service := ContactDescriptionCallbackService{Enabled: true, CorpID: "corp-1", Inbox: inbox, Provider: reader, Identity: &descriptionCallbackIdentity{result: identityport.ResolveResult{Status: identityport.ResolveFound, CustomerID: customerID}}, Relationships: relationships, Intents: intents, UOW: directUOW{}}
+			service := ContactDescriptionCallbackService{Enabled: true, CorpID: "corp-1", Inbox: inbox, Provider: reader, Identity: &descriptionCallbackIdentity{result: identityport.ResolveResult{Status: identityport.ResolveFound, CustomerID: customerID}}, Intents: intents, UOW: directUOW{}}
 			if err = service.Process(context.Background(), 45); err != nil {
 				t.Fatal(err)
 			}
@@ -196,10 +196,10 @@ func TestContactDescriptionCallbackWorkerRejectsInvalidTargetReaderDetail(t *tes
 		t.Fatal(err)
 	}
 	customerID := customerdomain.CustomerID(19)
-	relationships := &memoryRelationships{active: map[string]bool{relationshipKey("corp-1", "employee-1", customerID): true}}
+
 	reader := &descriptionCallbackReader{err: errors.New("provider target mismatch")}
 	intents := &descriptionCallbackIntentWriter{}
-	service := ContactDescriptionCallbackService{Enabled: true, CorpID: "corp-1", Inbox: inbox, Provider: reader, Identity: &descriptionCallbackIdentity{result: identityport.ResolveResult{Status: identityport.ResolveFound, CustomerID: customerID}}, Relationships: relationships, Intents: intents, UOW: directUOW{}}
+	service := ContactDescriptionCallbackService{Enabled: true, CorpID: "corp-1", Inbox: inbox, Provider: reader, Identity: &descriptionCallbackIdentity{result: identityport.ResolveResult{Status: identityport.ResolveFound, CustomerID: customerID}}, Intents: intents, UOW: directUOW{}}
 	if err = service.Process(context.Background(), 46); err == nil || len(intents.commands) != 0 {
 		t.Fatalf("err=%v intents=%+v", err, intents.commands)
 	}
@@ -232,7 +232,7 @@ func TestInboxProcessorQueuesDescriptionJobOnlyAfterFullLifecycle(t *testing.T) 
 	if count, processErr := processor.ProcessOnce(context.Background(), "description-test", 1); processErr != nil || count != 1 {
 		t.Fatalf("count=%d err=%v", count, processErr)
 	}
-	if jobs.calls != 1 || jobs.inboxID != accepted.Delivery.ID || unionJobs.calls != 1 || unionJobs.inboxID != accepted.Delivery.ID || identity.CustomerCount() != 1 || !relationships.active("corp-1", "employee-1", 1) {
+	if jobs.calls != 1 || jobs.inboxID != accepted.Delivery.ID || unionJobs.calls != 1 || unionJobs.inboxID != accepted.Delivery.ID || identity.CustomerCount() != 1 || len(relationships.values) != 0 {
 		t.Fatalf("description=%+v unionid=%+v customers=%d relationship=%t", jobs, unionJobs, identity.CustomerCount(), relationships.active("corp-1", "employee-1", 1))
 	}
 }

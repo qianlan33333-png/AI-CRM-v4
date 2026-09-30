@@ -117,12 +117,12 @@ func (r *Repository) BeginRefresh(ctx context.Context, runID int64, now time.Tim
 	return run, snapshot, err
 }
 
-const snapshotColumns = `id,package_id,configuration_version_id,refresh_run_id,state,reference_time,member_count,member_digest,source_watermark_digest,created_at,published_at`
+const snapshotColumns = `id,package_id,configuration_version_id,refresh_run_id,state,reference_time,member_count,member_digest,source_watermark_digest,created_at,published_at,source_watermarks`
 
 func scanSnapshot(row pgx.Row) (segmentdomain.Snapshot, error) {
 	var item segmentdomain.Snapshot
 	var memberDigest, watermarkDigest []byte
-	err := row.Scan(&item.ID, &item.PackageID, &item.ConfigurationVersionID, &item.RefreshRunID, &item.State, &item.ReferenceTime, &item.MemberCount, &memberDigest, &watermarkDigest, &item.CreatedAt, &item.PublishedAt)
+	err := row.Scan(&item.ID, &item.PackageID, &item.ConfigurationVersionID, &item.RefreshRunID, &item.State, &item.ReferenceTime, &item.MemberCount, &memberDigest, &watermarkDigest, &item.CreatedAt, &item.PublishedAt, &item.SourceWatermarks)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return item, ErrNotFound
 	}
@@ -344,7 +344,7 @@ func (r *Repository) PublishRefreshWithActor(ctx context.Context, runID int64, e
 		return segmentdomain.PublishedRefresh{}, ErrConflict
 	}
 	memberDigest := segmentdomain.DigestMembers(ids)
-	snapshot, err = scanSnapshot(t.QueryRow(ctx, `UPDATE segment_audience_snapshots SET state='published',member_count=$2,member_digest=$3,source_watermark_digest=$4,published_at=$5 WHERE id=$1 AND state='preparing' RETURNING `+snapshotColumns, snapshot.ID, len(ids), memberDigest[:], watermarkDigest[:], now))
+	snapshot, err = scanSnapshot(t.QueryRow(ctx, `UPDATE segment_audience_snapshots SET source_watermarks=(SELECT source_watermarks FROM segment_audience_refresh_runs WHERE id=segment_audience_snapshots.refresh_run_id),state='published',member_count=$2,member_digest=$3,source_watermark_digest=$4,published_at=$5 WHERE id=$1 AND state='preparing' RETURNING `+snapshotColumns, snapshot.ID, len(ids), memberDigest[:], watermarkDigest[:], now))
 	if err != nil {
 		return segmentdomain.PublishedRefresh{}, err
 	}
@@ -402,7 +402,7 @@ func (r *Repository) PublishedSnapshot(ctx context.Context, packageID segmentpor
 	if err != nil {
 		return segmentport.Snapshot{}, false, err
 	}
-	row := t.QueryRow(ctx, `SELECT s.id,s.package_id,s.configuration_version_id,s.state,s.reference_time,s.member_count,s.member_digest,s.source_watermark_digest,s.published_at
+	row := t.QueryRow(ctx, `SELECT s.id,s.package_id,s.configuration_version_id,s.state,s.reference_time,s.member_count,s.member_digest,s.source_watermark_digest,s.published_at,s.source_watermarks
 		FROM segment_audience_packages p JOIN segment_audience_snapshots s ON s.id=p.published_snapshot_id AND s.package_id=p.id WHERE p.id=$1 AND s.state='published'`, packageID)
 	return scanPortSnapshot(row)
 }
@@ -412,14 +412,14 @@ func (r *Repository) Snapshot(ctx context.Context, snapshotID segmentport.Snapsh
 	if err != nil {
 		return segmentport.Snapshot{}, false, err
 	}
-	return scanPortSnapshot(t.QueryRow(ctx, `SELECT id,package_id,configuration_version_id,state,reference_time,member_count,member_digest,source_watermark_digest,published_at FROM segment_audience_snapshots WHERE id=$1 AND state='published'`, snapshotID))
+	return scanPortSnapshot(t.QueryRow(ctx, `SELECT id,package_id,configuration_version_id,state,reference_time,member_count,member_digest,source_watermark_digest,published_at,source_watermarks FROM segment_audience_snapshots WHERE id=$1 AND state='published'`, snapshotID))
 }
 
 func scanPortSnapshot(row pgx.Row) (segmentport.Snapshot, bool, error) {
 	var out segmentport.Snapshot
 	var state string
 	var member, watermark []byte
-	err := row.Scan(&out.ID, &out.PackageID, &out.ConfigurationVersionID, &state, &out.ReferenceTime, &out.MemberCount, &member, &watermark, &out.PublishedAt)
+	err := row.Scan(&out.ID, &out.PackageID, &out.ConfigurationVersionID, &state, &out.ReferenceTime, &out.MemberCount, &member, &watermark, &out.PublishedAt, &out.SourceWatermarks)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, false, nil
 	}

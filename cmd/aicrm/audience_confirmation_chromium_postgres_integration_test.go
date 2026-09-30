@@ -36,7 +36,7 @@ func TestPostgreSQLAudienceConfirmationCompositionPreflight(t *testing.T) {
 	for _, marker := range []string{
 		`confirmationDialogHost-`,
 		`confirmationDialogStyles-`,
-		`admin_audience_detail.js?v=audience-direct-push-controls-v1`,
+		`admin_audience_detail.js?v=audience-directory-source-v2`,
 	} {
 		if !bytes.Contains(page.Body.Bytes(), []byte(marker)) {
 			t.Fatalf("audience confirmation shell lacks real asset %q", marker)

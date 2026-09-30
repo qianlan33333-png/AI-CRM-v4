@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	accessdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/access/domain"
+	channelport "github.com/qianlan33333-png/AI-CRM-v3/internal/channel/port"
+	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	outboundport "github.com/qianlan33333-png/AI-CRM-v3/internal/outbound/port"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/platform/idempotency"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
@@ -26,6 +28,9 @@ type CustomerSyncCSRF interface {
 }
 
 type CustomerSyncHTTPHandler struct {
+	Canonical            customerport.CanonicalCustomerResolver
+	StaffNames           DirectoryStaffNames
+	CustomerChannels     channelport.CustomerActivityReader
 	Service              CustomerSyncService
 	Auth                 CustomerSyncAuthenticator
 	CSRF                 CustomerSyncCSRF
@@ -57,6 +62,9 @@ func (handler CustomerSyncHTTPHandler) Routes() nethttp.Handler {
 	mux.HandleFunc("GET /api/admin/wecom/contact-description-backfills/{run_id}", handler.getDescriptionBackfill)
 	mux.HandleFunc("GET /api/admin/wecom/contact-description-backfills/{run_id}/readback", handler.getDescriptionBackfill)
 	mux.HandleFunc("POST /api/admin/wecom/contact-description-backfills/{run_id}/readback", handler.scheduleDescriptionReadback)
+	mux.HandleFunc("GET /api/admin/wecom/customer-profiles/{customer_id}", handler.directoryRead)
+	mux.HandleFunc("GET /api/admin/wecom/customer-profiles/{customer_id}/tag-history", handler.directoryRead)
+	mux.HandleFunc("GET /api/admin/wecom/customer-profiles/{customer_id}/tag-history/statistics", handler.directoryRead)
 	return mux
 }
 
@@ -74,7 +82,7 @@ func (handler CustomerSyncHTTPHandler) createDescriptionBackfill(response nethtt
 		writeSyncError(response, ErrContactDescriptionBackfillDisabled)
 		return
 	}
-	handler.createAuthorized(response, request, principal, "manual")
+	handler.createAuthorized(response, request, principal, "description_backfill")
 }
 
 func (handler CustomerSyncHTTPHandler) createUnionIDRefresh(response nethttp.ResponseWriter, request *nethttp.Request) {

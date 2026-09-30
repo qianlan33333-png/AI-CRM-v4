@@ -150,11 +150,11 @@ func TestProcessorProcessesDuplicateDeliveryOnce(t *testing.T) {
 	if count, err := processor.ProcessOnce(context.Background(), "oneshot", 10); err != nil || count != 0 {
 		t.Fatalf("replay count=%d err=%v", count, err)
 	}
-	if identity.CustomerCount() != 1 || !relationships.active("wx-corp", "employee-1", 1) {
+	if identity.CustomerCount() != 1 || len(relationships.values) != 0 {
 		t.Fatalf("customers=%d relationship_active=%v", identity.CustomerCount(), relationships.active("wx-corp", "employee-1", 1))
 	}
 	if len(receipts.values) != 1 || receipts.values[0].ResultingInboxStatus != webhook.StatusProcessed ||
-		!sameCallbackResults(receipts.values[0].ResultCodes, []CallbackResultCode{CallbackChannelUnmatched, CallbackCustomerCreated, CallbackRelationshipActivated}) {
+		!sameCallbackResults(receipts.values[0].ResultCodes, []CallbackResultCode{CallbackChannelUnmatched, CallbackCustomerCreated}) {
 		t.Fatalf("callback receipts=%+v", receipts.values)
 	}
 }

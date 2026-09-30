@@ -63,11 +63,21 @@ type ExternalContactFollowInfo struct {
 	// field is not evidence that the description is empty and must not enable a
 	// destructive replacement write.
 	DescriptionProjected bool
+	TagsProjected        bool
 	Tags                 []ExternalContactTag
+	// Personal labels without a Provider ID are display facts only. Their
+	// identity/rename cannot be inferred for the immutable ID-based history.
+	UnidentifiedTags []ExternalContactTag
+	AddWay           *int16
+	State            *string
+	OperUserID       *string
+	RemarkCorpName   *string
+	RemarkMobiles    []string
 }
 
 type ExternalContactTag struct {
 	ProviderTagID string
+	GroupName     string
 	Name          string
 	Type          int16
 }

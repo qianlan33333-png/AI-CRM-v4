@@ -25,10 +25,10 @@ func TestExternalContactLifecycleCreatesCustomerAndKeepsUnboundEmployeeRelations
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := result.Outcomes, []CallbackOutcome{OutcomeCustomerCreated, OutcomeRelationshipActivated, OutcomeChannelUnmatched}; !sameOutcomes(got, want) {
+	if got, want := result.Outcomes, []CallbackOutcome{OutcomeCustomerCreated, OutcomeChannelUnmatched}; !sameOutcomes(got, want) {
 		t.Fatalf("outcomes=%v want=%v", got, want)
 	}
-	if result.CustomerID < 1 || identity.CustomerCount() != 1 || !relationships.active("wx-corp", "unbound-employee", result.CustomerID) {
+	if result.CustomerID < 1 || identity.CustomerCount() != 1 || len(relationships.values) != 0 {
 		t.Fatalf("customer=%d count=%d relationships=%+v", result.CustomerID, identity.CustomerCount(), relationships.values)
 	}
 	// No staff/account resolver exists in this use case: the unbound WeCom
@@ -64,107 +64,6 @@ func TestExternalContactLifecycleStateResultsNeverBlockOneID(t *testing.T) {
 				t.Fatalf("receipt=%+v", receipts.values)
 			}
 		})
-	}
-}
-
-func TestExternalContactLifecycleEditRepairsAndDeletesNeverProvision(t *testing.T) {
-	identity := newMemoryLifecycleIdentity()
-	relationships := &lifecycleRelationships{}
-	service := lifecycleFor(identity, relationships, &lifecycleStates{}, &lifecycleReceipts{})
-
-	edited, err := service.ProcessWithin(context.Background(), lifecycleFact(t, ChangeEditExternalContact, "callback-edit", "external-edit", "employee", ""))
-	if err != nil || !sameOutcomes(edited.Outcomes, []CallbackOutcome{OutcomeCustomerCreated, OutcomeRelationshipActivated}) {
-		t.Fatalf("edit=%+v err=%v", edited, err)
-	}
-	deleteFact := lifecycleFact(t, ChangeDelExternalContact, "callback-del", "external-edit", "employee", "")
-	deleteFact.OccurredAt = time.Unix(1_788_336_001, 0).UTC()
-	deleted, err := service.ProcessWithin(context.Background(), deleteFact)
-	if err != nil || !sameOutcomes(deleted.Outcomes, []CallbackOutcome{OutcomeCustomerResolved, OutcomeRelationshipDeactivated}) || deleted.CustomerID != edited.CustomerID {
-		t.Fatalf("delete=%+v edit=%+v err=%v", deleted, edited, err)
-	}
-	missing, err := service.ProcessWithin(context.Background(), lifecycleFact(t, ChangeDelFollowUser, "callback-missing", "not-known", "employee", ""))
-	if err != nil || !sameOutcomes(missing.Outcomes, []CallbackOutcome{OutcomeIgnored}) || identity.CustomerCount() != 1 {
-		t.Fatalf("missing delete=%+v customers=%d err=%v", missing, identity.CustomerCount(), err)
-	}
-	if relationships.active("wx-corp", "employee", edited.CustomerID) {
-		t.Fatal("delete should retain but deactivate the employee relationship")
-	}
-}
-
-func TestExternalContactLifecycleOlderAddDoesNotReactivateNewerDeleteOrReportIt(t *testing.T) {
-	identity := newMemoryLifecycleIdentity()
-	relationships := &lifecycleRelationships{}
-	service := lifecycleFor(identity, relationships, &lifecycleStates{}, &lifecycleReceipts{})
-
-	added := lifecycleFact(t, ChangeAddExternalContact, "callback-add-new", "external-ordered", "employee", "")
-	added.OccurredAt = time.Unix(300, 0).UTC()
-	addedResult, err := service.ProcessWithin(context.Background(), added)
-	if err != nil {
-		t.Fatal(err)
-	}
-	deleted := lifecycleFact(t, ChangeDelFollowUser, "callback-delete-newer", "external-ordered", "employee", "")
-	deleted.OccurredAt = time.Unix(400, 0).UTC()
-	if result, err := service.ProcessWithin(context.Background(), deleted); err != nil || !sameOutcomes(result.Outcomes, []CallbackOutcome{OutcomeCustomerResolved, OutcomeRelationshipDeactivated}) {
-		t.Fatalf("newer delete=%+v err=%v", result, err)
-	}
-	olderAdd := lifecycleFact(t, ChangeAddExternalContact, "callback-add-old", "external-ordered", "employee", "")
-	olderAdd.OccurredAt = time.Unix(350, 0).UTC()
-	result, err := service.ProcessWithin(context.Background(), olderAdd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !sameOutcomes(result.Outcomes, []CallbackOutcome{OutcomeIgnored}) || result.CustomerID != 0 {
-		t.Fatalf("older add must be ignored before OneID/channel effects: %+v", result)
-	}
-	if relationships.active("wx-corp", "employee", addedResult.CustomerID) {
-		t.Fatal("older add reactivated relationship after newer delete")
-	}
-}
-
-func TestExternalContactLifecycleDeleteExternalContactOnlyDeactivatesNamedEmployee(t *testing.T) {
-	identity := newMemoryLifecycleIdentity()
-	relationships := &lifecycleRelationships{}
-	service := lifecycleFor(identity, relationships, &lifecycleStates{}, &lifecycleReceipts{})
-
-	first := lifecycleFact(t, ChangeAddExternalContact, "callback-add-first", "external-full-delete", "employee-1", "")
-	first.OccurredAt = time.Unix(300, 0).UTC()
-	second := lifecycleFact(t, ChangeAddExternalContact, "callback-add-second", "external-full-delete", "employee-2", "")
-	second.OccurredAt = time.Unix(301, 0).UTC()
-	for _, fact := range []ExternalContactLifecycleFact{first, second} {
-		if _, err := service.ProcessWithin(context.Background(), fact); err != nil {
-			t.Fatal(err)
-		}
-	}
-	deleted := lifecycleFact(t, ChangeDelExternalContact, "callback-delete-one", "external-full-delete", "employee-1", "")
-	deleted.OccurredAt = time.Unix(400, 0).UTC()
-	result, err := service.ProcessWithin(context.Background(), deleted)
-	if err != nil || !sameOutcomes(result.Outcomes, []CallbackOutcome{OutcomeCustomerResolved, OutcomeRelationshipDeactivated}) {
-		t.Fatalf("delete employee=%+v err=%v", result, err)
-	}
-	if relationships.active("wx-corp", "employee-1", result.CustomerID) || !relationships.active("wx-corp", "employee-2", result.CustomerID) {
-		t.Fatalf("only named employee relationship must be inactive: %+v", relationships.values)
-	}
-}
-
-func TestExternalContactLifecycleUnknownDeleteSuppressesOlderDelayedAdd(t *testing.T) {
-	identity := newMemoryLifecycleIdentity()
-	relationships := &lifecycleRelationships{}
-	service := lifecycleFor(identity, relationships, &lifecycleStates{}, &lifecycleReceipts{})
-
-	deleted := lifecycleFact(t, ChangeDelFollowUser, "callback-delete-newer", "external-late", "employee-1", "")
-	deleted.OccurredAt = time.Unix(400, 0).UTC()
-	result, err := service.ProcessWithin(context.Background(), deleted)
-	if err != nil || !sameOutcomes(result.Outcomes, []CallbackOutcome{OutcomeIgnored}) {
-		t.Fatalf("unknown delete=%+v err=%v", result, err)
-	}
-	olderAdd := lifecycleFact(t, ChangeAddExternalContact, "callback-add-older", "external-late", "employee-1", "")
-	olderAdd.OccurredAt = time.Unix(300, 0).UTC()
-	result, err = service.ProcessWithin(context.Background(), olderAdd)
-	if err != nil || !sameOutcomes(result.Outcomes, []CallbackOutcome{OutcomeIgnored}) || result.CustomerID != 0 {
-		t.Fatalf("older add=%+v err=%v", result, err)
-	}
-	if identity.CustomerCount() != 0 {
-		t.Fatalf("older add after unknown delete created %d ghost customers", identity.CustomerCount())
 	}
 }
 
@@ -214,11 +113,11 @@ func TestExternalContactLifecycleConflictCannotAttributeOrWriteRelationship(t *t
 func TestExternalContactLifecycleUsesCanonicalCustomerFromIdentityPort(t *testing.T) {
 	relationships := &lifecycleRelationships{}
 	service := lifecycleFor(canonicalLifecycleIdentity{customerID: 99}, relationships, &lifecycleStates{}, &lifecycleReceipts{})
-	result, err := service.ProcessWithin(context.Background(), lifecycleFact(t, ChangeEditExternalContact, "callback-canonical", "external-canonical", "employee", ""))
-	if err != nil || result.CustomerID != 99 || !sameOutcomes(result.Outcomes, []CallbackOutcome{OutcomeCustomerResolved, OutcomeRelationshipActivated}) {
+	result, err := service.ProcessWithin(context.Background(), lifecycleFact(t, ChangeAddExternalContact, "callback-canonical", "external-canonical", "employee", ""))
+	if err != nil || result.CustomerID != 99 || !sameOutcomes(result.Outcomes, []CallbackOutcome{OutcomeCustomerResolved, OutcomeChannelUnmatched}) {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
-	if !relationships.active("wx-corp", "employee", 99) {
+	if len(relationships.values) != 0 {
 		t.Fatalf("canonical root was not used: %+v", relationships.values)
 	}
 }
@@ -582,4 +481,22 @@ type lifecycleTransactionMarker struct{}
 func lifecycleMarker(ctx context.Context) string {
 	value, _ := ctx.Value(lifecycleTransactionMarker{}).(string)
 	return value
+}
+
+func TestExternalContactLifecycleEditAndDeleteAreAuditOnly(t *testing.T) {
+	for _, change := range []string{ChangeEditExternalContact, ChangeDelExternalContact, ChangeDelFollowUser} {
+		t.Run(change, func(t *testing.T) {
+			identity := newMemoryLifecycleIdentity()
+			relations := &lifecycleRelationships{}
+			receipts := &lifecycleReceipts{}
+			service := lifecycleFor(identity, relations, &lifecycleStates{}, receipts)
+			result, err := service.ProcessWithin(context.Background(), lifecycleFact(t, change, "audit-only-"+change, "unknown-contact", "employee", ""))
+			if err != nil || result.CustomerID != 0 || !sameOutcomes(result.Outcomes, []CallbackOutcome{OutcomeIgnored}) {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			if identity.CustomerCount() != 0 || len(relations.values) != 0 || len(receipts.values) != 0 {
+				t.Fatal("non-add callback mutated customer or directory state")
+			}
+		})
+	}
 }

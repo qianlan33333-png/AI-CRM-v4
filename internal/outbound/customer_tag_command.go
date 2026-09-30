@@ -134,9 +134,7 @@ func (p *CustomerTagProvider) Execute(ctx context.Context, e effectport.Envelope
 	// mark_tag has an explicit Provider success. Observation is a subsequent
 	// read-only WeCom fact: its failure never rewrites this executed result and
 	// never triggers a second mark_tag call.
-	if p.observer != nil {
-		_ = p.observer.RefreshCustomerTagObservation(ctx, d.EffectRef, d.CustomerID, contact.EmployeeUserID, contact.ExternalUserID)
-	}
+
 	return effectport.AdapterResult{Completion: effectport.StateExecuted, ReceiptDigest: effectport.Hash("customer.tag.executed", d.EffectRef, strconv.Itoa(int(attempt.Number))), CallAttempted: true, RealExternalCallExecuted: true}, nil
 }
 

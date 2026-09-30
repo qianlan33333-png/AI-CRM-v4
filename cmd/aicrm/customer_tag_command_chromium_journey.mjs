@@ -86,7 +86,7 @@ try {
     await delay(250);
     const rendered = await evaluate(cdp, "document.querySelector('#customer-tag-batch-result')?.textContent || ''");
     if (
-      rendered.includes('用户 #1：已执行；观察标签：fixture group / fixture add（已生效）') &&
+      rendered.includes('用户 #1：已执行；观察标签：fixture before write（已生效）') &&
       rendered.includes('用户 #2：结果待核实；观察标签：暂无已观察标签') &&
       !rendered.includes('：executed') &&
       !rendered.includes('：outcome_unknown') &&
@@ -94,5 +94,13 @@ try {
     ) break;
     if (attempt === 19) throw new Error(`explicit result refresh did not render durable outcomes: ${rendered}`);
   }
+  await cdp.call("Page.navigate", { url: `${baseURL}/admin/customers/1` });
+  await waitFor(cdp, "document.querySelector('#customer-wecom-profile')?.innerText.includes('fixture before write')", "published WeCom profile did not render");
+  const profileText = await evaluate(cdp,"document.querySelector('#customer-wecom-profile').innerText");
+  if (!profileText.includes('基线登记 2026-09-30') || !profileText.includes('CRM 渠道进入历史') || profileText.includes('时间暂时无法显示')) throw new Error('directory dates, baseline or separate CRM history are missing: '+profileText);
+  await evaluate(cdp,"document.querySelector('#customer-wecom-profile summary').click(); true");
+  await waitFor(cdp,"document.querySelector('#customer-wecom-profile .customer-wecom-history')?.innerText.includes('fixture before write')", "tag baseline history did not render");
+  await evaluate(cdp,"(() => {const form=document.querySelector('.customer-wecom-history-filters'); form.querySelector('[name=from_date]').value='2026-09-30'; form.querySelector('[name=to_date]').value='2026-09-30'; form.requestSubmit(); return true;})()");
+  await waitFor(cdp,"document.querySelector('.customer-wecom-history')?.innerText.includes('基线登记')", "date filter lost baseline registration");
   console.log("customer_tag_command_chromium: PASS");
 } catch (error) { failed = true; throw error; } finally { if (cdp) cdp.close(); if (browser && browser.exitCode === null && browser.signalCode === null) { browser.kill("SIGTERM"); await browserExit(browser); } const removed = await removeProfile(profile); if (!removed && !failed) throw new Error("Chromium test profile cleanup did not complete"); }

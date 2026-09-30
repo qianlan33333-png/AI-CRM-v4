@@ -341,12 +341,27 @@ func (client *Client) BatchExternalContacts(ctx context.Context, staffID, cursor
 	if err != nil {
 		return wecomport.ExternalContactPage{}, classifyDirectoryReadError(err)
 	}
+	if payload.ExternalContactList == nil {
+		return wecomport.ExternalContactPage{}, classifyDirectoryReadError(ErrResponse)
+	}
 	page := wecomport.ExternalContactPage{Contacts: make([]wecomport.ExternalContact, 0, len(payload.ExternalContactList)), NextCursor: strings.TrimSpace(payload.NextCursor)}
+	detailIndices := []int{}
 	for _, item := range payload.ExternalContactList {
 		contact := item.ExternalContact
 		contact.ExternalUserID = strings.TrimSpace(contact.ExternalUserID)
 		if contact.ExternalUserID == "" || contact.Gender < 0 || contact.Gender > 2 || contact.Type < 0 || contact.Type > 3 {
 			return wecomport.ExternalContactPage{}, classifyDirectoryReadError(ErrResponse)
+		}
+		if item.FollowInfo == nil {
+			return wecomport.ExternalContactPage{}, classifyDirectoryReadError(ErrResponse)
+		}
+		// The documented batch projection carries tag_id, without names or
+		// personal labels. Hydrate complete details rather than treating an
+		// omitted tags object as an empty set or inventing tag identities.
+		if item.FollowInfo.TagIDs != nil {
+			detailIndices = append(detailIndices, len(page.Contacts))
+			page.Contacts = append(page.Contacts, wecomport.ExternalContact{ExternalUserID: contact.ExternalUserID})
+			continue
 		}
 		followInfo := make([]wecomport.ExternalContactFollowInfo, 0, 1)
 		if item.FollowInfo != nil {
@@ -364,19 +379,51 @@ func (client *Client) BatchExternalContacts(ctx context.Context, staffID, cursor
 				return wecomport.ExternalContactPage{}, classifyDirectoryReadError(ErrResponse)
 			}
 			followedAt := providerFollowedAt(follow.CreateTime)
-			value := wecomport.ExternalContactFollowInfo{EmployeeID: follow.UserID, FollowedAt: followedAt, Remark: remark, Description: description, DescriptionProjected: descriptionProjected, Tags: make([]wecomport.ExternalContactTag, 0, len(follow.Tags))}
+			value := wecomport.ExternalContactFollowInfo{EmployeeID: follow.UserID, FollowedAt: followedAt, Remark: remark, Description: description, DescriptionProjected: descriptionProjected, TagsProjected: follow.Tags != nil, AddWay: follow.AddWay, State: follow.State, OperUserID: follow.OperUserID, RemarkCorpName: follow.RemarkCorpName, RemarkMobiles: follow.RemarkMobiles, Tags: make([]wecomport.ExternalContactTag, 0, len(follow.Tags))}
 			for _, tag := range follow.Tags {
 				tag.ID, tag.Name = strings.TrimSpace(tag.ID), strings.TrimSpace(tag.Name)
-				if tag.ID == "" || invalid(tag.ID) || invalidOptional(tag.Name) || tag.Type < 1 || tag.Type > 2 {
+				if tag.ID == "" || invalid(tag.ID) || invalidOptional(tag.Name) || tag.Type < 1 || tag.Type > 3 {
 					return wecomport.ExternalContactPage{}, classifyDirectoryReadError(ErrResponse)
 				}
-				value.Tags = append(value.Tags, wecomport.ExternalContactTag{ProviderTagID: tag.ID, Name: tag.Name, Type: tag.Type})
+				value.Tags = append(value.Tags, wecomport.ExternalContactTag{ProviderTagID: tag.ID, Name: tag.Name, GroupName: tag.GroupName, Type: tag.Type})
+			}
+			if !value.TagsProjected {
+				value.Tags = nil
 			}
 			followInfo = append(followInfo, value)
 		}
 		page.Contacts = append(page.Contacts, wecomport.ExternalContact{ExternalUserID: contact.ExternalUserID,
 			Name: strings.TrimSpace(contact.Name), AvatarURL: strings.TrimSpace(contact.Avatar), Gender: contact.Gender,
 			Type: contact.Type, CorpName: strings.TrimSpace(contact.CorpName), UnionID: strings.TrimSpace(contact.UnionID), FollowInfo: followInfo})
+	}
+	// Bounded Provider reads; no transaction, persistent queue or write effect
+	// belongs to this adapter. One failure rejects the whole staged page.
+	errorsByIndex := make([]error, len(page.Contacts))
+	jobs := make(chan int, len(detailIndices))
+	var workers sync.WaitGroup
+	for worker := 0; worker < min(4, len(detailIndices)); worker++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				contact, readErr := client.ReadExternalContact(ctx, page.Contacts[index].ExternalUserID)
+				if readErr != nil {
+					errorsByIndex[index] = readErr
+					continue
+				}
+				page.Contacts[index] = contact
+			}
+		}()
+	}
+	for _, index := range detailIndices {
+		jobs <- index
+	}
+	close(jobs)
+	workers.Wait()
+	for _, readErr := range errorsByIndex {
+		if readErr != nil {
+			return wecomport.ExternalContactPage{}, readErr
+		}
 	}
 	return page, nil
 }
@@ -411,14 +458,21 @@ func (client *Client) ReadExternalContact(ctx context.Context, externalUserID st
 		return wecomport.ExternalContact{}, classifyDirectoryReadError(ErrResponse)
 	}
 	var rawFollows []struct {
-		UserID      string          `json:"userid"`
-		CreateTime  json.RawMessage `json:"createtime"`
-		Remark      *string         `json:"remark"`
-		Description json.RawMessage `json:"description"`
-		Tags        []struct {
-			ID   string `json:"tag_id"`
-			Name string `json:"name"`
-			Type int16  `json:"type"`
+		UserID         string          `json:"userid"`
+		AddWay         *int16          `json:"add_way"`
+		State          *string         `json:"state"`
+		OperUserID     *string         `json:"oper_userid"`
+		RemarkCorpName *string         `json:"remark_corp_name"`
+		RemarkMobiles  []string        `json:"remark_mobiles"`
+		CreateTime     json.RawMessage `json:"createtime"`
+		Remark         *string         `json:"remark"`
+		Description    json.RawMessage `json:"description"`
+		Tags           []struct {
+			ID        string `json:"tag_id"`
+			Name      string `json:"name"`
+			TagName   string `json:"tag_name"`
+			GroupName string `json:"group_name"`
+			Type      int16  `json:"type"`
 		} `json:"tags"`
 	}
 	if len(payload.FollowUser) == 0 || json.Unmarshal(payload.FollowUser, &rawFollows) != nil || rawFollows == nil {
@@ -439,13 +493,23 @@ func (client *Client) ReadExternalContact(ctx context.Context, externalUserID st
 			return wecomport.ExternalContact{}, classifyDirectoryReadError(ErrResponse)
 		}
 		followedAt := providerFollowedAt(follow.CreateTime)
-		entry := wecomport.ExternalContactFollowInfo{EmployeeID: follow.UserID, FollowedAt: followedAt, Remark: remark, Description: description, DescriptionProjected: descriptionProjected, Tags: make([]wecomport.ExternalContactTag, 0, len(follow.Tags))}
+		entry := wecomport.ExternalContactFollowInfo{EmployeeID: follow.UserID, FollowedAt: followedAt, Remark: remark, Description: description, DescriptionProjected: descriptionProjected, TagsProjected: follow.Tags != nil, AddWay: follow.AddWay, State: follow.State, OperUserID: follow.OperUserID, RemarkCorpName: follow.RemarkCorpName, RemarkMobiles: follow.RemarkMobiles, Tags: make([]wecomport.ExternalContactTag, 0, len(follow.Tags))}
 		for _, tag := range follow.Tags {
+			if tag.Name == "" {
+				tag.Name = tag.TagName
+			}
 			tag.ID, tag.Name = strings.TrimSpace(tag.ID), strings.TrimSpace(tag.Name)
-			if invalid(tag.ID) || invalidOptional(tag.Name) || tag.Type < 1 || tag.Type > 2 {
+			if tag.Type == 2 && tag.ID == "" && !invalid(tag.Name) {
+				entry.UnidentifiedTags = append(entry.UnidentifiedTags, wecomport.ExternalContactTag{Name: tag.Name, GroupName: tag.GroupName, Type: tag.Type})
+				continue
+			}
+			if invalid(tag.ID) || invalidOptional(tag.Name) || tag.Type < 1 || tag.Type > 3 {
 				return wecomport.ExternalContact{}, classifyDirectoryReadError(ErrResponse)
 			}
-			entry.Tags = append(entry.Tags, wecomport.ExternalContactTag{ProviderTagID: tag.ID, Name: tag.Name, Type: tag.Type})
+			entry.Tags = append(entry.Tags, wecomport.ExternalContactTag{ProviderTagID: tag.ID, Name: tag.Name, GroupName: tag.GroupName, Type: tag.Type})
+		}
+		if !entry.TagsProjected {
+			entry.Tags = nil
 		}
 		followInfo = append(followInfo, entry)
 	}
@@ -879,14 +943,21 @@ type response struct {
 		// batch/get_by_user is called with one staff ID, and WeCom returns the
 		// corresponding relationship as one object rather than an array.
 		FollowInfo *struct {
-			UserID      string          `json:"userid"`
-			CreateTime  json.RawMessage `json:"createtime"`
-			Remark      *string         `json:"remark"`
-			Description json.RawMessage `json:"description"`
-			Tags        []struct {
-				ID   string `json:"tag_id"`
-				Name string `json:"tag_name"`
-				Type int16  `json:"type"`
+			UserID         string          `json:"userid"`
+			TagIDs         []string        `json:"tag_id"`
+			AddWay         *int16          `json:"add_way"`
+			State          *string         `json:"state"`
+			OperUserID     *string         `json:"oper_userid"`
+			RemarkCorpName *string         `json:"remark_corp_name"`
+			RemarkMobiles  []string        `json:"remark_mobiles"`
+			CreateTime     json.RawMessage `json:"createtime"`
+			Remark         *string         `json:"remark"`
+			Description    json.RawMessage `json:"description"`
+			Tags           []struct {
+				ID        string `json:"tag_id"`
+				Name      string `json:"tag_name"`
+				GroupName string `json:"group_name"`
+				Type      int16  `json:"type"`
 			} `json:"tags"`
 		} `json:"follow_info"`
 	} `json:"external_contact_list"`

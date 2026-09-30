@@ -80,10 +80,10 @@ func TestContactUnionIDCallbackReadsDetailAfterProcessedAdd(t *testing.T) {
 	}
 	customerID := customerdomain.CustomerID(19)
 	resolver := &descriptionCallbackIdentity{result: identityport.ResolveResult{Status: identityport.ResolveFound, CustomerID: customerID}}
-	relationships := &memoryRelationships{active: map[string]bool{relationshipKey("corp-1", "employee-1", customerID): true}}
+
 	spy := &unionLinkSpy{status: "attached"}
 	reader := &unionContactReader{contact: wecomport.ExternalContact{ExternalUserID: "external-1", UnionID: "union-1"}}
-	service := ContactUnionIDCallbackService{Enabled: true, CorpID: "corp-1", Inbox: inbox, Provider: reader, Resolver: resolver, Relationships: relationships,
+	service := ContactUnionIDCallbackService{Enabled: true, CorpID: "corp-1", Inbox: inbox, Provider: reader, Resolver: resolver,
 		UnionIDs: ContactUnionIDLinker{Scope: "wechat-open-platform:wx-test", Identity: spy}, UOW: directUOW{}}
 	if err = service.Process(context.Background(), 88); err != nil || reader.calls != 1 || len(spy.commands) != 1 || spy.commands[0].Fact.Reference().Source != "wecom.callback_detail" {
 		t.Fatalf("processed err=%v reads=%d links=%d", err, reader.calls, len(spy.commands))

@@ -290,3 +290,16 @@
     border-bottom: 1px solid var(--line-soft);
   }
 }
+
+.customer-wecom-profile { margin: 16px 0; }
+.customer-wecom-heading { margin: 20px 0 12px; font-size: 14px; font-weight: 600; }
+.customer-wecom-follow { padding: 14px 0; border-top: 1px solid var(--line-soft); }
+.customer-wecom-follow .admin-profile-grid { margin-top: 10px; }
+.customer-wecom-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.customer-wecom-tag { padding: 5px 9px; background: var(--brand-soft); color: var(--brand-hover); border-radius: 4px; font-size: 12px; overflow-wrap: anywhere; }
+.customer-wecom-history { margin-top: 16px; border-top: 1px solid var(--line-soft); padding-top: 14px; }
+.customer-wecom-history summary { cursor: pointer; font-weight: 600; }
+.customer-wecom-history-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 14px 0; }
+.customer-wecom-history-filters label { display: grid; gap: 6px; font-size: 12px; color: var(--text-2); }
+.customer-wecom-history-filters input { min-width: 0; width: 155px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 4px; font: inherit; color: var(--text-1); background: var(--surface, #fff); }
+.customer-wecom-history .admin-table { min-width: 650px; }

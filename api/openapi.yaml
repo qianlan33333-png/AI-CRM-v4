@@ -1407,10 +1407,11 @@ paths:
         "200": {description: Non-PII sync run summaries, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/CustomerSyncRun"}}}}}}}
     post:
       operationId: createCustomerSyncRun
-      description: SuperAdmin only. The customer-contact provider is disabled by default.
+      description: Authenticated Admin or SuperAdmin only. Accepts no body. Starts a Provider-read-only full refresh or reuses the active full run; never submits contact-description writes. The customer-contact provider is disabled by default.
       security: [{adminSession: [], csrfHeader: []}]
       parameters: [{$ref: "#/components/parameters/RequiredIdempotencyKey"}]
       responses:
+        "200": {description: Idempotent replay or active full run reused, content: {application/json: {schema: {$ref: "#/components/schemas/ContactDescriptionBackfillAccepted"}}}}
         "202": {description: New durable full-sync run, content: {application/json: {schema: {type: object, required: [run, replayed], properties: {run: {$ref: "#/components/schemas/CustomerSyncRun"}, replayed: {type: boolean}}}}}}
         "403": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
@@ -1423,6 +1424,93 @@ paths:
       responses:
         "200": {description: Non-PII durable stage and reconciled counts, content: {application/json: {schema: {$ref: "#/components/schemas/CustomerSyncRun"}}}}
         "404": {$ref: "#/components/responses/Error"}
+  /api/admin/wecom/customer-profiles/{customer_id}:
+    get:
+      operationId: getWeComCustomerProfile
+      tags: [WeCom]
+      summary: Published WeCom customer profile
+      description: >-
+        Requires an authenticated admin principal; staff principals are denied.
+        Resolves the customer through the canonical OneID port and reads published local facts only.
+        No Provider call, refresh job or directory write is triggered. Unknown or repeated query parameters are rejected.
+        Accepts no query parameters. Missing and initializing profiles are successful responses with explicit availability;
+        uninitialized publication timestamps may be the Go zero timestamp and its counters may be zero.
+        channel_history contains at most the latest 50 CRM channel events, separate from WeCom add-way/state.
+        Failure to read CRM channel history is reported by channel_history_status without inventing an empty known history.
+      security: [{adminSession: []}]
+      parameters:
+        - {$ref: "#/components/parameters/CustomerID"}
+      responses:
+        "200": {description: Published WeCom customer profile, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryCustomerProfile"}}}}
+        "400": {description: "Invalid customer ID, date range, pagination or query", content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "401": {description: Authentication required, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "403": {description: Authenticated principal is not an admin, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "404": {description: Backing sync fact not found, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "503": {description: Published directory reader or canonical resolution is not configured, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "500": {description: Internal read failure, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+  /api/admin/wecom/customer-profiles/{customer_id}/tag-history:
+    get:
+      operationId: listWeComCustomerTagHistory
+      tags: [WeCom]
+      summary: Immutable tag baseline and change history
+      description: >-
+        Requires an authenticated admin principal; staff principals are denied.
+        Resolves the customer through the canonical OneID port and reads published local facts only.
+        No Provider call, refresh job or directory write is triggered. Unknown or repeated query parameters are rejected.
+        Date bounds are inclusive Beijing registration dates: initialization baseline is registered as 2026-09-30,
+        while later changes use their discovery date. Provider operation time is unknown unless explicitly present.
+        from_date must not exceed to_date. Empty employee/tag/date filters mean no filter.
+        Events are ordered by descending event ID. Pass next_before_id as before_id to continue;
+        an omitted next_before_id means there is no next page. Renames alone do not generate events.
+      security: [{adminSession: []}]
+      parameters:
+        - {$ref: "#/components/parameters/CustomerID"}
+        - {name: employee_id, in: query, schema: {type: string}, description: WeCom employee ID; empty means all employees}
+        - {name: tag_id, in: query, schema: {type: string}, description: Stable Provider tag ID; empty means all tags}
+        - {name: from_date, in: query, schema: {type: string}, description: Inclusive YYYY-MM-DD registration date; empty means unbounded}
+        - {name: to_date, in: query, schema: {type: string}, description: Inclusive YYYY-MM-DD registration date; empty means unbounded}
+        - {name: before_id, in: query, schema: {type: integer, format: int64, minimum: 0, default: 0}, description: Exclusive event ID cursor; zero means newest}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 50}}
+      responses:
+        "200": {description: Immutable tag baseline and change history, content: {application/json: {schema: {$ref: "#/components/schemas/WeComTagHistoryPage"}}}}
+        "400": {description: "Invalid customer ID, date range, pagination or query", content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "401": {description: Authentication required, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "403": {description: Authenticated principal is not an admin, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "404": {description: Backing sync fact not found, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "503": {description: Published directory reader or canonical resolution is not configured, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "500": {description: Internal read failure, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+  /api/admin/wecom/customer-profiles/{customer_id}/tag-history/statistics:
+    get:
+      operationId: getWeComCustomerTagHistoryStatistics
+      tags: [WeCom]
+      summary: Tag change statistics by registration date
+      description: >-
+        Requires an authenticated admin principal; staff principals are denied.
+        Resolves the customer through the canonical OneID port and reads published local facts only.
+        No Provider call, refresh job or directory write is triggered. Unknown or repeated query parameters are rejected.
+        Date bounds are inclusive Beijing registration dates: initialization baseline is registered as 2026-09-30,
+        while later changes use their discovery date. Provider operation time is unknown unless explicitly present.
+        from_date must not exceed to_date. Empty employee/tag/date filters mean no filter.
+        Without employee_id, counts use customer-level tag union transitions; with employee_id they use that employee's events.
+        Baseline counts remain separate from added, removed and readded. before_id and limit are accepted and validated
+        for compatibility with the history query but do not truncate grouped statistics.
+      security: [{adminSession: []}]
+      parameters:
+        - {$ref: "#/components/parameters/CustomerID"}
+        - {name: employee_id, in: query, schema: {type: string}, description: WeCom employee ID; empty means all employees}
+        - {name: tag_id, in: query, schema: {type: string}, description: Stable Provider tag ID; empty means all tags}
+        - {name: from_date, in: query, schema: {type: string}, description: Inclusive YYYY-MM-DD registration date; empty means unbounded}
+        - {name: to_date, in: query, schema: {type: string}, description: Inclusive YYYY-MM-DD registration date; empty means unbounded}
+        - {name: before_id, in: query, schema: {type: integer, format: int64, minimum: 0, default: 0}, description: Exclusive event ID cursor; zero means newest}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000, default: 50}}
+      responses:
+        "200": {description: Tag change statistics by registration date, content: {application/json: {schema: {$ref: "#/components/schemas/WeComTagHistoryStatistics"}}}}
+        "400": {description: "Invalid customer ID, date range, pagination or query", content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "401": {description: Authentication required, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "403": {description: Authenticated principal is not an admin, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "404": {description: Backing sync fact not found, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "503": {description: Published directory reader or canonical resolution is not configured, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
+        "500": {description: Internal read failure, content: {application/json: {schema: {$ref: "#/components/schemas/WeComDirectoryReadError"}}}}
   /api/admin/wecom/unionid-refresh-runs:
     post:
       operationId: createWeComUnionIDRefreshRun
@@ -8345,13 +8433,148 @@ components:
       additionalProperties: false
       required: [customer_id, items, next_cursor, source_status, as_of, truncated]
       properties: {customer_id: {$ref: "#/components/schemas/PositiveID"}, items: {type: array, items: {$ref: "#/components/schemas/CustomerChatActivityItem"}}, next_cursor: {type: string}, source_status: {type: string, enum: [ready, degraded]}, source_error_code: {type: string}, as_of: {type: [string, "null"], format: date-time}, truncated: {type: boolean}}
+    WeComDirectoryReadError:
+      type: object
+      additionalProperties: false
+      required: [ok, error]
+      properties:
+        ok: {type: boolean, const: false}
+        error: {type: string, enum: [invalid_request, authentication_required, permission_denied, sync_run_not_found, provider_disabled, internal_error]}
+    WeComDirectoryPublication:
+      type: object
+      additionalProperties: false
+      required: [revision, run_id, observed_at, full_observed_at, complete, baseline_initialized, baseline_date]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        run_id: {type: integer, format: int64, minimum: 0}
+        observed_at: {type: string, format: date-time}
+        full_observed_at: {type: string, format: date-time, description: Last successful complete full-sync capture; incremental contacts do not advance it}
+        complete: {type: boolean}
+        baseline_initialized: {type: boolean}
+        baseline_date: {type: string, description: '2026-09-30 registration date; empty before initialization'}
+    WeComDirectoryTag:
+      type: object
+      additionalProperties: false
+      required: [tag_id, name, group_name, type, status, observed_at]
+      properties:
+        tag_id: {type: string}
+        name: {type: string}
+        group_name: {type: string}
+        type: {type: integer, enum: [1, 2, 3]}
+        status: {type: string, enum: [active, stale]}
+        observed_at: {type: string, format: date-time}
+        period_started_at: {type: string, format: date-time, description: Discovery time starting the current presence period; distinct from baseline registration date}
+        period_start_kind: {type: string, enum: [baseline, added, readded]}
+        baseline_date: {type: string, format: date}
+    WeComProviderDisplayTag:
+      type: object
+      additionalProperties: false
+      required: [ProviderTagID, GroupName, Name, Type]
+      properties:
+        ProviderTagID: {type: string, description: Empty for personal labels without a stable Provider ID; no ID-based change history is inferred}
+        GroupName: {type: string}
+        Name: {type: string}
+        Type: {type: integer, enum: [1, 2, 3]}
+    WeComDirectoryFollowDetails:
+      type: object
+      additionalProperties: false
+      description: Preserves the existing Go projection field casing; null differs from a known empty Provider field.
+      required: [EmployeeID, FollowedAt, Remark, Description, DescriptionProjected, TagsProjected, Tags, UnidentifiedTags, AddWay, State, OperUserID, RemarkCorpName, RemarkMobiles]
+      properties:
+        EmployeeID: {type: string}
+        FollowedAt: {type: [string, "null"], format: date-time, description: Trusted Provider friendship time; null means unknown}
+        Remark: {type: [string, "null"]}
+        Description: {type: [string, "null"]}
+        DescriptionProjected: {type: boolean}
+        TagsProjected: {type: boolean, description: False means omitted tags; it is not evidence of removal}
+        Tags: {type: [array, "null"], items: {$ref: "#/components/schemas/WeComProviderDisplayTag"}, description: Cleared to null on profile reads; stable-ID current state is in the follow tags array}
+        UnidentifiedTags: {type: [array, "null"], items: {$ref: "#/components/schemas/WeComProviderDisplayTag"}, description: Display-only personal labels whose add/remove dates remain unknown}
+        AddWay: {type: [integer, "null"]}
+        State: {type: [string, "null"]}
+        OperUserID: {type: [string, "null"]}
+        RemarkCorpName: {type: [string, "null"]}
+        RemarkMobiles: {type: [array, "null"], items: {type: string}}
+    WeComDirectoryFollow:
+      type: object
+      additionalProperties: false
+      required: [employee_id, employee_name, status, observed_at, details, tags]
+      properties:
+        employee_id: {type: string}
+        employee_name: {type: string, description: Empty when a display name is unavailable}
+        status: {type: string, enum: [active, stale]}
+        observed_at: {type: string, format: date-time}
+        details: {$ref: "#/components/schemas/WeComDirectoryFollowDetails"}
+        tags: {type: array, items: {$ref: "#/components/schemas/WeComDirectoryTag"}}
+    WeComDirectoryCustomerProfile:
+      type: object
+      additionalProperties: false
+      required: [customer_id, availability, captured_at, display_name, corp_name, gender, contact_type, avatar_url, publication, follow_users, channel_history, channel_history_status]
+      properties:
+        customer_id: {$ref: "#/components/schemas/PositiveID"}
+        availability: {type: string, enum: [active, conflict, stale, missing, initializing]}
+        captured_at: {type: string, format: date-time}
+        display_name: {type: string}
+        corp_name: {type: string}
+        gender: {type: integer}
+        contact_type: {type: integer}
+        avatar_url: {type: string}
+        publication: {$ref: "#/components/schemas/WeComDirectoryPublication"}
+        follow_users: {type: array, items: {$ref: "#/components/schemas/WeComDirectoryFollow"}}
+        channel_history: {type: array, maxItems: 50, items: {$ref: "#/components/schemas/CustomerTimelineItem"}}
+        channel_history_status: {type: string, enum: [available, unavailable]}
+    WeComTagHistoryEvent:
+      type: object
+      additionalProperties: false
+      required: [id, customer_id, employee_id, employee_name, tag_id, tag_type, name, group_name, event_type, reason, discovered_at, discovered_date, registration_date, from_revision, to_revision, run_id, customer_transition]
+      properties:
+        id: {$ref: "#/components/schemas/PositiveID"}
+        customer_id: {$ref: "#/components/schemas/PositiveID"}
+        employee_id: {type: string}
+        employee_name: {type: string}
+        tag_id: {type: string}
+        tag_type: {type: integer, enum: [1, 2, 3]}
+        name: {type: string, description: Observed name at the event; later renames do not rewrite it}
+        group_name: {type: string}
+        event_type: {type: string, enum: [baseline, added, removed, readded]}
+        reason: {type: string, enum: [initial_baseline, tag_set_changed, follow_not_observed]}
+        discovered_at: {type: string, format: date-time}
+        discovered_date: {type: string, format: date, description: Beijing date of actual capture}
+        registration_date: {type: string, format: date, description: Baseline is registered as 2026-09-30; other changes use the discovery date}
+        previous_observed_at: {type: string, format: date-time}
+        provider_operated_at: {type: string, format: date-time, description: Omitted when the actual Provider operation time is unknown}
+        from_revision: {type: integer, format: int64, minimum: 0}
+        to_revision: {type: integer, format: int64, minimum: 0}
+        run_id: {$ref: "#/components/schemas/PositiveID"}
+        customer_transition: {type: boolean, description: Whether the event changed the customer's union across employees}
+    WeComTagHistoryPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/WeComTagHistoryEvent"}}
+        next_before_id: {$ref: "#/components/schemas/PositiveID"}
+    WeComTagHistoryStatistic:
+      type: object
+      additionalProperties: false
+      required: [date, event_type, event_count, customer_count]
+      properties:
+        date: {type: string, format: date}
+        event_type: {type: string, enum: [baseline, added, removed, readded]}
+        event_count: {type: integer, format: int64, minimum: 0}
+        customer_count: {type: integer, format: int64, minimum: 0}
+    WeComTagHistoryStatistics:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/WeComTagHistoryStatistic"}}
     CustomerSyncRun:
       type: object
       additionalProperties: false
       required: [run_id, trigger, status, staff_index, discovered, activated, already_linked, conflict, terminal_failed, projected, stale, created_at, updated_at]
       properties:
         run_id: {$ref: "#/components/schemas/PositiveID"}
-        trigger: {type: string, enum: [initial, daily, manual]}
+        trigger: {type: string, enum: [initial, daily, manual, tag_refresh, unionid_refresh, new_contact, description_backfill]}
         status: {type: string, enum: [queued, listing_staff, fetching_profiles, ingesting, reconciling, succeeded, failed_retryable, failed_terminal]}
         staff_index: {type: integer, minimum: 0}
         discovered: {type: integer, minimum: 0}

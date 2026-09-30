@@ -79,9 +79,10 @@ type Preview struct {
 }
 
 type WatermarkSummary struct {
-	Source string    `json:"source"`
-	AsOf   time.Time `json:"as_of"`
-	Fresh  bool      `json:"fresh"`
+	Version int64     `json:"version,omitempty"`
+	Source  string    `json:"source"`
+	AsOf    time.Time `json:"as_of"`
+	Fresh   bool      `json:"fresh"`
 }
 
 func NewSnapshotService(uow platformport.UnitOfWork, store RefreshStore, evaluator *Evaluator, enqueuer RefreshEnqueuer, events MemberEventEnqueuer) (*SnapshotService, error) {
@@ -370,9 +371,22 @@ func (s *SnapshotService) ProcessRefresh(ctx context.Context, runID int64) error
 	memberDigest := segmentdomain.DigestMembers(evaluation.CustomerIDs)
 	watermarkDigest := digestWatermarks(evaluation.Watermarks)
 	err = s.uow.Within(ctx, func(tx context.Context) error {
+		rebase := false
+		if sourceStore, ok := s.store.(interface {
+			PrepareRefreshSources(context.Context, int64, []segmentport.SourceWatermark) (bool, error)
+		}); ok {
+			var sourceErr error
+			rebase, sourceErr = sourceStore.PrepareRefreshSources(tx, runID, evaluation.Watermarks)
+			if sourceErr != nil {
+				return sourceErr
+			}
+		}
 		published, e := s.publishRefresh(tx, runID, int64(len(evaluation.CustomerIDs)), memberDigest, watermarkDigest, actor, s.now().UTC())
 		if e != nil {
 			return e
+		}
+		if rebase {
+			return nil
 		}
 		created, e := s.createMemberEnteredEvents(tx, published.Snapshot, published.PreviousSnapshotID, actor, published.Snapshot.ReferenceTime)
 		if e != nil || created == 0 {
@@ -427,7 +441,7 @@ func makePreview(packageID, configurationID int64, e segmentport.Evaluation) Pre
 	w := digestWatermarks(e.Watermarks)
 	summary := make([]WatermarkSummary, len(e.Watermarks))
 	for i, item := range e.Watermarks {
-		summary[i] = WatermarkSummary{item.Source, item.AsOf, item.Fresh}
+		summary[i] = WatermarkSummary{Source: item.Source, AsOf: item.AsOf, Fresh: item.Fresh, Version: item.Version}
 	}
 	sort.Slice(summary, func(i, j int) bool { return summary[i].Source < summary[j].Source })
 	return Preview{packageID, configurationID, e.ReferenceAt, len(e.CustomerIDs), hex.EncodeToString(m[:]), summary, hex.EncodeToString(w[:])}

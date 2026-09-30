@@ -39,7 +39,6 @@ import (
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	platformjobqueue "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/jobqueue"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
-	"github.com/qianlan33333-png/AI-CRM-v3/internal/wecom"
 	wecomadapter "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/adapter"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -130,7 +129,7 @@ func TestAIAssistantSignedHTTPRiverWeComJourney(t *testing.T) {
 	if err = service.BindReconciler(effects); err != nil {
 		t.Fatal(err)
 	}
-	privateProvider, err := outbound.NewPrivateMessageProvider(true, privateWriter, aiPrivateTargetResolver{uow: uow, identities: identities, access: accessRepository, relationships: wecom.NewPostgreSQLFollowRelationshipStore(), corpID: "corp-1"}, aiPrivatePayloadReader{content: aiStore}, wecomClient)
+	privateProvider, err := outbound.NewPrivateMessageProvider(true, privateWriter, aiPrivateTargetResolver{uow: uow, identities: identities, access: accessRepository, corpID: "corp-1"}, aiPrivatePayloadReader{content: aiStore}, wecomClient)
 	if err != nil {
 		t.Fatal(err)
 	}

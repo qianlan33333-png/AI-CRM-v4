@@ -12,7 +12,7 @@ const source = process.env.AICRM_OWNER_HANDOFF_TEST_SOURCE;
 const target = process.env.AICRM_OWNER_HANDOFF_TEST_TARGET;
 const sourceUserID = process.env.AICRM_OWNER_HANDOFF_TEST_SOURCE_USERID;
 const targetUserID = process.env.AICRM_OWNER_HANDOFF_TEST_TARGET_USERID;
-const requestedMode = process.env.AICRM_OWNER_HANDOFF_TEST_MODE || "both";
+const requestedMode = process.env.AICRM_OWNER_HANDOFF_TEST_MODE || "wecom_then_crm";
 const requestedScope = process.env.AICRM_OWNER_HANDOFF_TEST_SCOPE || "all";
 const parseOptionalBoolean = name => {
   const value = process.env[name];
@@ -82,7 +82,7 @@ const preflightRuntimeExpressions = () => [
   `!document.querySelector('[data-owner-handoff-host] [data-import-summary]').hidden`,
   `(() => { const root=document.querySelector('[data-owner-handoff-host] [data-owner-migration-page]'); const wecom=root.querySelector('[data-include-wecom-transfer]'); wecom.checked=true; wecom.dispatchEvent(new Event('change',{bubbles:true})); root.querySelector('[data-preview]').click(); return true; })()`,
   `Boolean(document.querySelector('[data-owner-handoff-host] [data-preview-content]:not([hidden])'))`,
-  `(() => { const text=document.querySelector('[data-owner-handoff-host] [data-preview-rows]').textContent; return ["browser-external","文件重复","缺少客户标识","迁移标记无效","已按文件跳过","负责人不一致"].every(value => text.includes(value)); })()`,
+  `(() => { const text=document.querySelector('[data-owner-handoff-host] [data-preview-rows]').textContent; return ["browser-external","文件重复","缺少用户标识","迁移标记无效","已按文件跳过","负责人不一致"].every(value => text.includes(value)); })()`,
   downloadBlockedRowsExpression(),
   `document.querySelector('[data-owner-handoff-host] [data-confirm-phrase-display]').textContent`,
   `(() => { const root=document.querySelector('[data-owner-handoff-host] [data-owner-migration-page]'); const input=root.querySelector('[data-confirm-phrase-input]'); input.value=${JSON.stringify("确认迁移")}; input.dispatchEvent(new Event('input',{bubbles:true})); root.querySelector('[data-execute]').click(); return true; })()`,
@@ -274,11 +274,12 @@ try {
       await evaluate(uploadLegacyFileExpression(), "excel_fixture_upload");
       await waitFor(`!document.querySelector("[data-owner-handoff-host] [data-import-summary]").hidden`, "old .xls import did not parse");
     }
+    await waitFor(`(() => { const transfer=document.querySelector('[data-owner-handoff-host] input[data-include-wecom-transfer]'); return Boolean(transfer?.checked && transfer?.disabled); })()`, "retired local mode is still selectable");
     await evaluate(`(() => { const root=document.querySelector('[data-owner-handoff-host] [data-owner-migration-page]'); const wecom=root.querySelector('[data-include-wecom-transfer]'); wecom.checked=${mode === "wecom_then_crm"}; wecom.dispatchEvent(new Event('change',{bubbles:true})); root.querySelector('[data-preview]').click(); return true; })()`);
     await waitFor("Boolean(document.querySelector('[data-owner-handoff-host] [data-preview-content]:not([hidden])'))",`${mode} preview was not persisted through actual HTTP API`);
     if (scope === "excel_include") {
-      await waitFor(`(() => { const text=document.querySelector("[data-owner-handoff-host] [data-preview-rows]").textContent; return ["browser-external","文件重复","缺少客户标识","迁移标记无效","已按文件跳过","负责人不一致"].every(value => text.includes(value)); })()`, "Excel preview did not render the localized donor row states or fields");
-      await readDownloadedWorkbook("owner_migration_blocked_rows.xlsx", ["行号", "external_userid", "状态", "原因", "文件重复", "缺少客户标识", "迁移标记无效", "负责人不一致"], () => evaluate(downloadBlockedRowsExpression(), "blocked_rows_download"));
+      await waitFor(`(() => { const text=document.querySelector("[data-owner-handoff-host] [data-preview-rows]").textContent; return ["browser-external","文件重复","缺少用户标识","迁移标记无效","已按文件跳过","负责人不一致"].every(value => text.includes(value)); })()`, "Excel preview did not render the localized donor row states or fields");
+      await readDownloadedWorkbook("owner_migration_blocked_rows.xlsx", ["行号", "external_userid", "状态", "原因", "文件重复", "缺少用户标识", "迁移标记无效", "负责人不一致"], () => evaluate(downloadBlockedRowsExpression(), "blocked_rows_download"));
     }
     const phrase=await evaluate("document.querySelector('[data-owner-handoff-host] [data-confirm-phrase-display]').textContent");
     await evaluate(`(() => { const root=document.querySelector('[data-owner-handoff-host] [data-owner-migration-page]'); const input=root.querySelector('[data-confirm-phrase-input]'); input.value=${JSON.stringify(phrase)}; input.dispatchEvent(new Event('input',{bubbles:true})); root.querySelector('[data-execute]').click(); return true; })()`);
@@ -306,17 +307,8 @@ try {
     await readDownloadedWorkbook("owner_migration_result.xlsx", ["行号", "external_userid", "迁移状态", "企微转接状态", mode === "wecom_then_crm" ? "browser-external" : "本地迁移", mode === "wecom_then_crm" ? "企微转接已完成" : "本地迁移"], () =>
       evaluate(downloadResultRowsExpression(), "result_rows_download"));
   };
-  if (requestedMode === "local_only") {
-    await run("local_only");
-  } else if (requestedMode === "wecom_then_crm") {
-    await run("wecom_then_crm");
-  } else {
-    await run("local_only");
-    const secondNav=cdp.next("Page.frameNavigated",params=>Boolean(params.frame&&!params.frame.parentId),"second owner migration navigation did not complete");
-    await cdp.call("Page.navigate",{url:`/admin/owner-migration`}); await secondNav;
-    await waitFor("Boolean(document.querySelector('[data-owner-handoff-host] [data-owner-migration-page]'))","owner handoff Host did not mount after second navigation");
-    await run("wecom_then_crm");
-  }
+  if (requestedMode !== "wecom_then_crm") throw new Error("local-only owner migration is retired");
+  await run("wecom_then_crm");
   console.log("owner_handoff_chromium: PASS");
 } catch (error) { failed=true; throw error; } finally {
   if(cdp) cdp.close();

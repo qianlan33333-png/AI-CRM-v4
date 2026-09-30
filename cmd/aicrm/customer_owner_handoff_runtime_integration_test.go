@@ -392,7 +392,7 @@ func TestCustomerOwnerHandoffRiverExecutesFrozenTransferThenLocalCAS(t *testing.
 			(SELECT count(*) FROM customer_owner_handoff_lines WHERE batch_id=$1 AND state='provider_accepted'),
 			(SELECT count(*) FROM external_effects WHERE kind='customer_owner_handoff' AND state='executed'),
 			(SELECT count(*) FROM customer_local_owners WHERE staff_id=$2 AND source='owner_handoff_wecom_then_crm')`, batch.ID, targetID).Scan(&acceptedLines, &acceptedEffects, &localOwners)
-		if err == nil && acceptedLines == handoffRows && acceptedEffects == 2 && localOwners == handoffRows {
+		if err == nil && acceptedLines == handoffRows && acceptedEffects == 2 && localOwners == 0 {
 			break
 		}
 		time.Sleep(25 * time.Millisecond)
@@ -401,7 +401,7 @@ func TestCustomerOwnerHandoffRiverExecutesFrozenTransferThenLocalCAS(t *testing.
 	if err = native.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM customer_owner_handoff_lines WHERE batch_id=$1 AND state='provider_accepted'),
 		(SELECT count(*) FROM external_effects WHERE kind='customer_owner_handoff' AND state='executed'),
-		(SELECT count(*) FROM customer_local_owners WHERE staff_id=$2 AND source='owner_handoff_wecom_then_crm')`, batch.ID, targetID).Scan(&acceptedLines, &executedEffects, &localOwners); err != nil || acceptedLines != handoffRows || executedEffects != 2 || localOwners != handoffRows {
+		(SELECT count(*) FROM customer_local_owners WHERE staff_id=$2 AND source='owner_handoff_wecom_then_crm')`, batch.ID, targetID).Scan(&acceptedLines, &executedEffects, &localOwners); err != nil || acceptedLines != handoffRows || executedEffects != 2 || localOwners != 0 {
 		t.Fatalf("completion lines=%d effects=%d owners=%d err=%v", acceptedLines, executedEffects, localOwners, err)
 	}
 	writer.mu.Lock()
@@ -418,243 +418,16 @@ var _ pgx.Tx
 // maximum with the actual River runtime. local_only still has no
 // provider/EER write, but each segment commits its local CAS/audit/outbox facts
 // before it atomically creates the following River job.
-func TestCustomerOwnerHandoffRiverSegmentsLocalOnly20000(t *testing.T) {
-	native, cleanup := channelWelcomeIntegrationPool(t)
-	defer cleanup()
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
-	defer cancel()
-	_, source, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate owner-handoff runtime migration")
+func TestCustomerOwnerHandoffLocalOnlyRequestIsRejectedBeforeQueue(t *testing.T) {
+	// No store, UoW or enqueuer is available: validation must reject local mode
+	// before accessing any of them, including a formerly valid 20k request.
+	ids := make([]customerdomain.CustomerID, 20000)
+	for i := range ids {
+		ids[i] = customerdomain.CustomerID(i + 1)
 	}
-	migration, err := os.ReadFile(filepath.Join(filepath.Dir(source), "..", "..", "migrations", "0092_customer_owner_handoff.sql"))
-	if err != nil {
-		t.Fatal(err)
+	service := &customerapp.OwnerHandoffService{}
+	_, err := service.PreviewOwnerHandoff(context.Background(), customerport.OwnerHandoffPreviewCommand{ActorAdminUserID: 1, Mode: customerport.OwnerHandoffLocalOnly, SourceStaffID: 1, TargetStaffID: 2, CorpScope: "wecom-corp:fixture", CustomerIDs: ids, ConfirmationPhrase: "CONFIRM"})
+	if !errors.Is(err, customerapp.ErrOwnerHandoffInvalid) {
+		t.Fatalf("local-only err=%v", err)
 	}
-	if _, err = native.Exec(ctx, string(migration)); err != nil {
-		t.Fatal(err)
-	}
-	pool, err := platformpostgres.Wrap(native, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	uow, err := platformpostgres.NewUnitOfWork(pool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	workers := river.NewWorkers()
-	if err = river.AddWorkerSafely[customer.OwnerHandoffBatchJobArgs](workers, customer.NewOwnerHandoffBatchWorker()); err != nil {
-		t.Fatal(err)
-	}
-	insert, err := platformjobqueue.NewInsertClient(native, workers)
-	if err != nil {
-		t.Fatal(err)
-	}
-	enqueuer, err := customer.NewRiverOwnerHandoffEnqueuer(insert)
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := customer.NewPostgreSQLOwnerHandoffStore()
-	staff := accessstore.NewPostgreSQL()
-	var sourceID, targetID int64
-	const handoffRows = 20000
-	ids := make([]customerdomain.CustomerID, 0, handoffRows)
-	candidates := make([]customerport.OwnerHandoffCandidate, 0, handoffRows)
-	if err = uow.Within(ctx, func(txctx context.Context) error {
-		tx, txErr := platformpostgres.RequireTransaction(txctx)
-		if txErr != nil {
-			return txErr
-		}
-		if txErr = tx.QueryRow(txctx, `INSERT INTO admin_users(username,password_hash,display_name,wecom_userid,is_active,login_enabled) VALUES('handoff-segment-source','$argon2id$fixture','Former','segment-former',false,false) RETURNING id`).Scan(&sourceID); txErr != nil {
-			return txErr
-		}
-		if txErr = tx.QueryRow(txctx, `INSERT INTO admin_users(username,password_hash,display_name,wecom_userid,is_active,login_enabled) VALUES('handoff-segment-target','$argon2id$fixture','Next','segment-next',true,false) RETURNING id`).Scan(&targetID); txErr != nil {
-			return txErr
-		}
-		// These are fixture customers, not the handoff being verified. Seed the
-		// same 20,000 rows in one statement instead of 20,000 round trips; the
-		// complete preview, confirm, River interruption and restart still run.
-		rows, txErr := tx.Query(txctx, `WITH seeded AS (
-			INSERT INTO customers(status) SELECT 'active' FROM generate_series(1,$1::integer) RETURNING id
-		) SELECT id FROM seeded ORDER BY id`, handoffRows)
-		if txErr != nil {
-			return txErr
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var customerID customerdomain.CustomerID
-			if txErr = rows.Scan(&customerID); txErr != nil {
-				return txErr
-			}
-			index := len(ids)
-			ids = append(ids, customerID)
-			candidates = append(candidates, customerport.OwnerHandoffCandidate{CustomerID: customerID, State: "ready", RelationshipDigest: sha256.Sum256([]byte(fmt.Sprintf("segment-%d", index)))})
-		}
-		if txErr = rows.Err(); txErr != nil {
-			return txErr
-		}
-		if len(ids) != handoffRows {
-			return fmt.Errorf("owner-handoff fixture seeded %d customers, expected %d", len(ids), handoffRows)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	audit, err := platformaudit.NewService(platformaudit.NewPostgreSQLStore())
-	if err != nil {
-		t.Fatal(err)
-	}
-	service, err := customerapp.NewOwnerHandoffService(uow, store, staff, ownerHandoffRuntimeResolver{candidates: candidates}, audit, platformoutbox.NewPostgreSQL())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = service.SetBatchEnqueuer(enqueuer); err != nil {
-		t.Fatal(err)
-	}
-	preview, err := service.PreviewOwnerHandoff(ctx, customerport.OwnerHandoffPreviewCommand{ActorAdminUserID: sourceID, Mode: customerport.OwnerHandoffLocalOnly, SourceStaffID: sourceID, TargetStaffID: targetID, CorpScope: "wecom-corp:runtime", CustomerIDs: ids, ConfirmationPhrase: "CONFIRM", IdempotencyKey: "segment-preview-20000"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	batch, err := service.ConfirmOwnerHandoff(ctx, customerport.OwnerHandoffConfirmCommand{ActorAdminUserID: sourceID, PreviewID: preview.ID, PreviewHash: preview.Hash, ConfirmationPhrase: "CONFIRM", IdempotencyKey: "segment-confirm-20000"})
-	if err != nil || len(batch.Lines) != handoffRows || batch.State != "accepted" {
-		t.Fatalf("accept batch=%+v err=%v", batch, err)
-	}
-	runCtx, stopRun := context.WithCancel(ctx)
-	// Commit segment zero, then wait until River has actually claimed segment
-	// one. This makes the shutdown boundary deterministic under -race: the
-	// successor must be returned to River durably without calling the service.
-	firstSegmentCommitted := make(chan struct{}, 1)
-	firstLaterSegmentClaimed := make(chan struct{}, 1)
-	firstLaterSegmentReleased := make(chan struct{}, 1)
-	firstInterrupt := make(chan struct{})
-	firstWorker := customer.NewOwnerHandoffBatchWorker()
-	if err = firstWorker.Bind(interruptAfterOwnerHandoffSegment{service: service, segmentZeroCommitted: firstSegmentCommitted, laterSegmentClaimed: firstLaterSegmentClaimed, laterSegmentReleased: firstLaterSegmentReleased, interrupt: firstInterrupt}); err != nil {
-		t.Fatal(err)
-	}
-	workers = river.NewWorkers()
-	if err = river.AddWorkerSafely[customer.OwnerHandoffBatchJobArgs](workers, firstWorker); err != nil {
-		t.Fatal(err)
-	}
-	firstRuntime, err := platformjobqueue.NewRuntime(native, workers, customer.OwnerHandoffQueue)
-	if err != nil {
-		t.Fatal(err)
-	}
-	firstDone := make(chan error, 1)
-	go func() { firstDone <- firstRuntime.Run(runCtx) }()
-	var releaseFirstRuntimeOnce sync.Once
-	releaseFirstRuntime := func() {
-		releaseFirstRuntimeOnce.Do(func() {
-			stopRun()
-			close(firstInterrupt)
-		})
-	}
-	defer releaseFirstRuntime()
-	select {
-	case <-firstSegmentCommitted:
-		// The explicit boundary above distinguishes a slow River claim from a
-		// failed first Customer segment. Runtime shutdown is checked below.
-	case <-time.After(30 * time.Second):
-		var updated, queued, jobs int
-		queryErr := native.QueryRow(ctx, `SELECT
-			(SELECT count(*) FROM customer_owner_handoff_lines WHERE batch_id=$1 AND state='local_updated'),
-			(SELECT count(*) FROM customer_owner_handoff_lines WHERE batch_id=$1 AND state='queued'),
-			(SELECT count(*) FROM river_job WHERE kind='customer.owner-handoff.v1')`, batch.ID).Scan(&updated, &queued, &jobs)
-		releaseFirstRuntime()
-		select {
-		case <-firstDone:
-		case <-time.After(20 * time.Second):
-		}
-		t.Fatalf("first owner-handoff segment did not commit within bounded start window: updated=%d queued=%d jobs=%d query_err=%v", updated, queued, jobs, queryErr)
-	}
-	select {
-	case <-firstLaterSegmentClaimed:
-	case <-time.After(30 * time.Second):
-		releaseFirstRuntime()
-		select {
-		case <-firstDone:
-		case <-time.After(20 * time.Second):
-		}
-		t.Fatal("first owner-handoff successor was not claimed before interruption")
-	}
-	var heldUpdated int
-	if err = native.QueryRow(ctx, `SELECT count(*) FROM customer_owner_handoff_lines WHERE batch_id=$1 AND state='local_updated'`, batch.ID).Scan(&heldUpdated); err != nil || heldUpdated != 100 {
-		t.Fatalf("claimed successor entered Customer service before interruption: updated=%d err=%v", heldUpdated, err)
-	}
-	releaseFirstRuntime()
-	select {
-	case <-firstLaterSegmentReleased:
-	case <-time.After(20 * time.Second):
-		t.Fatal("first owner-handoff successor did not leave the interruption gate")
-	}
-	select {
-	case runErr := <-firstDone:
-		if runErr != nil && runErr != context.Canceled {
-			t.Fatalf("first runtime stop: %v", runErr)
-		}
-	case <-time.After(20 * time.Second):
-		t.Fatal("first owner-handoff runtime did not stop after its successor was released")
-	}
-	var firstUpdated, firstQueued, resumableJobs int
-	if err = native.QueryRow(ctx, `SELECT
-		count(*) FILTER (WHERE state='local_updated'),
-		count(*) FILTER (WHERE state='queued')
-		FROM customer_owner_handoff_lines WHERE batch_id=$1`, batch.ID).Scan(&firstUpdated, &firstQueued); err != nil || firstUpdated != 100 || firstQueued != handoffRows-100 {
-		t.Fatalf("first segment updated=%d queued=%d err=%v", firstUpdated, firstQueued, err)
-	}
-	if err = native.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind='customer.owner-handoff.v1' AND state IN ('available','scheduled')`).Scan(&resumableJobs); err != nil || resumableJobs != 1 {
-		t.Fatalf("interrupted successor resumable_jobs=%d err=%v", resumableJobs, err)
-	}
-	restartWorker := customer.NewOwnerHandoffBatchWorker()
-	if err = restartWorker.Bind(service); err != nil {
-		t.Fatal(err)
-	}
-	workers = river.NewWorkers()
-	if err = river.AddWorkerSafely[customer.OwnerHandoffBatchJobArgs](workers, restartWorker); err != nil {
-		t.Fatal(err)
-	}
-	restartRuntime, err := platformjobqueue.NewRuntime(native, workers, customer.OwnerHandoffQueue)
-	if err != nil {
-		t.Fatal(err)
-	}
-	restartCtx, restartStop := context.WithCancel(ctx)
-	restartDone := make(chan error, 1)
-	go func() { restartDone <- restartRuntime.Run(restartCtx) }()
-	defer func() {
-		restartStop()
-		select {
-		case runErr := <-restartDone:
-			if runErr != nil && runErr != context.Canceled {
-				t.Errorf("restart runtime stop: %v", runErr)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("owner-handoff restart runtime did not stop")
-		}
-	}()
-	deadline := time.Now().Add(150 * time.Second)
-	var completionState string
-	completed := false
-	for time.Now().Before(deadline) {
-		// The last segment commits this projection with its line/owner writes.
-		// Poll the primary key; verify every original count once after completion.
-		err = native.QueryRow(ctx, `SELECT state FROM customer_owner_handoff_batches WHERE id=$1`, batch.ID).Scan(&completionState)
-		if err == nil && completionState == "completed" {
-			completed = true
-			break
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-
-	var updated, owners, jobs, effects int
-	if err = native.QueryRow(ctx, `SELECT
-		(SELECT count(*) FROM customer_owner_handoff_lines WHERE batch_id=$1 AND state='local_updated'),
-		(SELECT count(*) FROM customer_local_owners WHERE source='owner_handoff_local_only'),
-		(SELECT count(*) FROM river_job WHERE kind='customer.owner-handoff.v1'),
-		(SELECT count(*) FROM external_effects WHERE kind='customer_owner_handoff')`, batch.ID).Scan(&updated, &owners, &jobs, &effects); err != nil {
-		t.Fatal(err)
-	}
-	if completed && updated == handoffRows && owners == handoffRows && jobs == handoffRows/100 && effects == 0 {
-		return
-	}
-	t.Fatalf("segment completion state=%s updated=%d owners=%d jobs=%d effects=%d", completionState, updated, owners, jobs, effects)
 }

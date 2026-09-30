@@ -1,6 +1,6 @@
 {
   "registry_version": 1,
-  "registry_sha256": "6112848673b45f3d2daee1e16681b109679191ea5ecc08f203fec10bb926b7ce",
+  "registry_sha256": "abffae74539218eaaf327c2a6a8b4f562304ff5ba96f1b46dd0ccea618a7502e",
   "inventory_scope": "committed_registry",
   "items": [
     {
@@ -5985,11 +5985,37 @@
     },
     {
       "kind": "table",
+      "name": "wecom_customer_follow_staging",
+      "owner": "wecom",
+      "policy": "runtime_coordination",
+      "reason": "全量同步的未发布员工资料和原始观察时钟；发布事务删除，失败任务保留用于恢复。",
+      "source": "migrations/0216_wecom_profile_publication.sql",
+      "cleanup_entrypoint": "",
+      "policy_id": "",
+      "coverage_status": "owner_managed",
+      "gap_code": "",
+      "authorization_expiry": "not_assessed"
+    },
+    {
+      "kind": "table",
       "name": "wecom_customer_owner_observations",
       "owner": "wecom",
       "policy": "owner_projection",
       "reason": "客户-员工关系的当前 Provider 观察、last_seen_run_id/stale_at 投影；不能误删正式本地 Owner 或历史交接证据。",
       "source": "migrations/0022_customer_profile_sections.sql",
+      "cleanup_entrypoint": "",
+      "policy_id": "",
+      "coverage_status": "owner_managed",
+      "gap_code": "",
+      "authorization_expiry": "not_assessed"
+    },
+    {
+      "kind": "table",
+      "name": "wecom_customer_profile_staging",
+      "owner": "wecom",
+      "policy": "runtime_coordination",
+      "reason": "全量同步的未发布客户资料；同步服务在发布同一事务删除，失败任务保留用于恢复，不允许通用清理。",
+      "source": "migrations/0216_wecom_profile_publication.sql",
       "cleanup_entrypoint": "",
       "policy_id": "",
       "coverage_status": "owner_managed",
@@ -6024,6 +6050,19 @@
     },
     {
       "kind": "table",
+      "name": "wecom_customer_tag_history",
+      "owner": "wecom",
+      "policy": "permanent",
+      "reason": "不可覆盖的标签基线与增减事实、版本和采集时间，历史统计持续依赖；不按时间删除。",
+      "source": "migrations/0216_wecom_profile_publication.sql",
+      "cleanup_entrypoint": "",
+      "policy_id": "",
+      "coverage_status": "protected",
+      "gap_code": "",
+      "authorization_expiry": "not_assessed"
+    },
+    {
+      "kind": "table",
       "name": "wecom_customer_tag_observations",
       "owner": "wecom",
       "policy": "owner_projection",
@@ -6042,6 +6081,19 @@
       "policy": "runtime_coordination",
       "reason": "customer/corp/employee 的观察版本水位保护标签结果新旧顺序；跟随 Owner 替换，禁止通用年龄删除。",
       "source": "migrations/0093_customer_tag_commands.sql",
+      "cleanup_entrypoint": "",
+      "policy_id": "",
+      "coverage_status": "owner_managed",
+      "gap_code": "",
+      "authorization_expiry": "not_assessed"
+    },
+    {
+      "kind": "table",
+      "name": "wecom_directory_publications",
+      "owner": "wecom",
+      "policy": "owner_projection",
+      "reason": "企微统一目录的已发布版本、完整性和基线标记；只由同步发布事务推进，不允许按年龄删除。",
+      "source": "migrations/0216_wecom_profile_publication.sql",
       "cleanup_entrypoint": "",
       "policy_id": "",
       "coverage_status": "owner_managed",

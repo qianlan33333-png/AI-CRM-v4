@@ -60,6 +60,7 @@ type Package struct {
 }
 
 type Snapshot struct {
+	SourceWatermarks       json.RawMessage        `json:"source_watermarks"`
 	ID                     SnapshotID             `json:"id"`
 	PackageID              PackageID              `json:"package_id"`
 	ConfigurationVersionID ConfigurationVersionID `json:"configuration_version_id"`

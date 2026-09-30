@@ -195,7 +195,7 @@ func (processor InboxProcessor) processDelivery(ctx context.Context, delivery we
 		// The older durable observer remains a fallback for details that did not
 		// contain a UnionID during inline processing. Do not read and relink a
 		// verified pair a second time after this callback has committed it.
-		if processor.UnionIDJobs != nil && unionFact == nil && event.ChangeType == ChangeAddExternalContact && result.CustomerID > 0 {
+		if processor.UnionIDJobs != nil && event.ChangeType == ChangeAddExternalContact && result.CustomerID > 0 {
 			if err = processor.UnionIDJobs.EnqueueContactUnionIDObservation(txContext, delivery.ID); err != nil {
 				return callbackDeliveryError{code: "callback_unionid_enqueue", cause: err}
 			}

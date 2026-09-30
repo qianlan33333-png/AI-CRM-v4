@@ -20,7 +20,7 @@ import (
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 )
 
-func TestPostgreSQLOwnerHandoffDoesNotOverwriteOwnerAddedAfterPreview(t *testing.T) {
+func TestPostgreSQLOwnerHandoffRetiredAssignmentHasNoWrites(t *testing.T) {
 	databaseURL, err := platformconfig.DatabaseURL()
 	if err != nil {
 		t.Skip("AICRM_DATABASE_URL is not configured; skipping owner-handoff PostgreSQL integration test")
@@ -53,47 +53,24 @@ func TestPostgreSQLOwnerHandoffDoesNotOverwriteOwnerAddedAfterPreview(t *testing
 	}
 
 	store := NewPostgreSQLOwnerHandoffStore()
-	at := time.Date(2026, 9, 6, 2, 0, 0, 0, time.UTC)
-	// A preview that saw no customer_local_owners row freezes expected version
-	// zero.  Another accepted command wins first; this confirmation must not
-	// turn zero into a wildcard and replace that owner.
 	if err = uow.Within(ctx, func(tx context.Context) error {
-		_, assignErr := store.AssignLocalOwner(tx, customerID, firstStaff, 0, "owner_handoff_local_only", at)
-		return assignErr
-	}); err != nil {
-		t.Fatalf("first assignment: %v", err)
-	}
-	if err = uow.Within(ctx, func(tx context.Context) error {
-		_, assignErr := store.AssignLocalOwner(tx, customerID, secondStaff, 0, "owner_handoff_local_only", at.Add(time.Second))
-		return assignErr
-	}); !errors.Is(err, ErrOwnerHandoffConflict) {
-		t.Fatalf("expected frozen-empty conflict, got %v", err)
-	}
-	if err = uow.Within(ctx, func(tx context.Context) error {
-		owner, found, readErr := store.LocalOwner(tx, customerID, false)
-		if readErr != nil {
-			return readErr
+		_, e := store.AssignLocalOwner(tx, customerID, firstStaff, 0, "owner_handoff_local_only", time.Now())
+		if !errors.Is(e, ErrOwnerHandoffConflict) {
+			return fmt.Errorf("retired local assignment err=%v", e)
 		}
-		if !found || owner.StaffID != firstStaff || owner.Version != 1 || owner.Source != "owner_handoff_local_only" {
-			t.Fatalf("owner was overwritten: %+v found=%t", owner, found)
+		native, _ := platformpostgres.RequireTransaction(tx)
+		var count int
+		if e = native.QueryRow(tx, `SELECT count(*) FROM customer_local_owners`).Scan(&count); e != nil {
+			return e
+		}
+		if count != 0 {
+			return errors.New("retired local assignment wrote a row")
 		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err = uow.Within(ctx, func(tx context.Context) error {
-		owner, assignErr := store.AssignLocalOwner(tx, customerID, secondStaff, 1, "owner_handoff_wecom_then_crm", at.Add(2*time.Second))
-		if assignErr != nil {
-			return assignErr
-		}
-		if owner.StaffID != secondStaff || owner.Version != 2 || owner.Source != "owner_handoff_wecom_then_crm" {
-			t.Fatalf("cas update=%+v", owner)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func ownerHandoffPool(t *testing.T, ctx context.Context, databaseURL string) (*platformpostgres.Pool, func()) {
@@ -245,8 +222,8 @@ func TestPostgreSQLOwnerHandoffExecutionUsesFrozenCiphertextAndFourDigests(t *te
 		if txErr = tx.QueryRow(txctx, `SELECT count(*) FROM customer_local_owners WHERE customer_id=$1`, customerID).Scan(&localCount); txErr != nil {
 			return txErr
 		}
-		if lineState != "provider_accepted" || localCount != 1 {
-			t.Fatalf("accepted transfer must CAS local owner once state=%s owners=%d", lineState, localCount)
+		if lineState != "provider_accepted" || localCount != 0 {
+			t.Fatalf("accepted transfer must preserve only Provider result state=%s owners=%d", lineState, localCount)
 		}
 		return nil
 	}); err != nil {
@@ -434,7 +411,7 @@ func TestPostgreSQLOwnerHandoffCompletionPreservesAttentionAndReplaysReceipt(t *
 		if e = tx.QueryRow(txctx, `SELECT version FROM customer_local_owners WHERE customer_id=$1`, secondCustomer).Scan(&ownerVersion); e != nil {
 			return e
 		}
-		if batchState != "needs_attention" || secondState != "cas_conflict" || ownerVersion != 1 {
+		if batchState != "needs_attention" || secondState != "provider_accepted" || ownerVersion != 1 {
 			t.Fatalf("batch=%s line=%s version=%d", batchState, secondState, ownerVersion)
 		}
 		return nil
@@ -450,7 +427,7 @@ func TestPostgreSQLOwnerHandoffCompletionPreservesAttentionAndReplaysReceipt(t *
 			return e
 		}
 		batch, changed, e := store.RecordOwnerHandoffTransferResult(txctx, read, "", []customerport.OwnerHandoffTransferObservation{{ExternalUserID: "completion-external", Status: 1, TakeoverTime: 100}})
-		if e != nil || changed != 1 || len(batch.Lines) != 2 || batch.Lines[1].State != "cas_conflict" || batch.Lines[1].TransferStatus != 1 {
+		if e != nil || changed != 1 || len(batch.Lines) != 2 || batch.Lines[1].State != "observed" || batch.Lines[1].TransferStatus != 1 {
 			t.Fatalf("readback err=%v changed=%d batch=%+v", e, changed, batch)
 		}
 		return nil
@@ -567,7 +544,7 @@ func TestPostgreSQLOwnerHandoffUnknownArtifactKeepsKnownRows(t *testing.T) {
 		if txErr = tx.QueryRow(txctx, `SELECT count(*) FROM customer_local_owners WHERE staff_id=$1 AND source='owner_handoff_wecom_then_crm'`, target).Scan(&localOwners); txErr != nil {
 			return txErr
 		}
-		if fmt.Sprint(states) != "[provider_accepted final_failed outcome_unknown]" || localOwners != 1 {
+		if fmt.Sprint(states) != "[provider_accepted final_failed outcome_unknown]" || localOwners != 0 {
 			t.Fatalf("states=%v localOwners=%d", states, localOwners)
 		}
 		return nil

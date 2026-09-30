@@ -1670,3 +1670,35 @@ func TestPrivateMessageRejectsPreparedMediaWithBytes(t *testing.T) {
 		t.Fatalf("prepared material with bytes attempted=%v calls=%d err=%v", attempted, calls, err)
 	}
 }
+
+func TestBatchDirectoryMissingListOrFollowFieldCannotMeanDeletion(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		wantErr    bool
+	}{
+		{"missing list", `{"errcode":0}`, true},
+		{"null list", `{"errcode":0,"external_contact_list":null}`, true},
+		{"explicit empty list", `{"errcode":0,"external_contact_list":[]}`, false},
+		{"missing follow", `{"errcode":0,"external_contact_list":[{"external_contact":{"external_userid":"synthetic"}}]}`, true},
+		{"null follow", `{"errcode":0,"external_contact_list":[{"external_contact":{"external_userid":"synthetic"},"follow_info":null}]}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/cgi-bin/gettoken" {
+					_, _ = w.Write([]byte(`{"errcode":0,"access_token":"synthetic-token","expires_in":120}`))
+					return
+				}
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			c, err := NewDirectory(Config{Enabled: true, CorpID: "synthetic", ContactSecret: "synthetic-secret", APIBase: server.URL, HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			page, err := c.BatchExternalContacts(context.Background(), "synthetic-staff", "", 100)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("missing-field contract: contacts=%d err=%v", len(page.Contacts), err)
+			}
+		})
+	}
+}

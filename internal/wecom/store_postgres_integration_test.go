@@ -158,142 +158,20 @@ func TestPostgreSQLWeComStoresIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("follow relationships are employee scoped and same-second deletion wins", func(t *testing.T) {
-		var customerID int64
-		if err := pool.Native().QueryRow(ctx, `INSERT INTO customers (status) VALUES ('active') RETURNING id`).Scan(&customerID); err != nil {
-			t.Fatal(err)
-		}
+	t.Run("retired relationship writer rejects every callback", func(t *testing.T) {
 		store := NewPostgreSQLFollowRelationshipStore()
-		base := time.Unix(1_788_336_000, 0).UTC()
-		first := CallbackFollowRelationship{CallbackID: "callback-100", CorpID: "wx-corp", EmployeeID: "employee-one", CustomerID: customerdomain.CustomerID(customerID), ChangeType: ChangeAddExternalContact, Active: true, OccurredAt: base}
-		if _, err := store.ApplyCallbackEvent(ctx, first); !errors.Is(err, platformpostgres.ErrTransactionNeeded) {
-			t.Fatalf("relationship transaction boundary error=%v", err)
-		}
-		var firstApplication FollowRelationshipApplication
-		if err := unit.Within(ctx, func(txContext context.Context) error {
-			var applyErr error
-			firstApplication, applyErr = store.ApplyCallbackEvent(txContext, first)
-			return applyErr
-		}); err != nil || !firstApplication.Applied || !firstApplication.Active {
-			t.Fatalf("first application=%+v err=%v", firstApplication, err)
-		}
-		edit := first
-		edit.CallbackID = "callback-edit"
-		edit.ChangeType = ChangeEditExternalContact
-		edit.OccurredAt = base.Add(5 * time.Second)
-		if err := unit.Within(ctx, func(txContext context.Context) error {
-			_, applyErr := store.ApplyCallbackEvent(txContext, edit)
-			return applyErr
-		}); err != nil {
-			t.Fatal(err)
-		}
-		var followedAt *time.Time
-		if err := pool.Native().QueryRow(ctx, `SELECT followed_at FROM wecom_follow_relationships WHERE corp_id='wx-corp' AND employee_id='employee-one' AND customer_id=$1`, customerID).Scan(&followedAt); err != nil || followedAt == nil || !followedAt.Equal(base) {
-			t.Fatalf("edit did not preserve original follow time: followed_at=%v err=%v", followedAt, err)
-		}
-		second := first
-		second.CallbackID = "callback-101"
-		second.EmployeeID = "employee-two"
-		if err := unit.Within(ctx, func(txContext context.Context) error {
-			application, applyErr := store.ApplyCallbackEvent(txContext, second)
-			if applyErr == nil && (!application.Applied || !application.Active) {
-				return errors.New("second employee was not activated")
-			}
-			return applyErr
-		}); err != nil {
-			t.Fatal(err)
-		}
-
-		deleteOne := first
-		deleteOne.CallbackID = "callback-200"
-		deleteOne.ChangeType = ChangeDelFollowUser
-		deleteOne.Active = false
-		deleteOne.OccurredAt = base.Add(20 * time.Second)
-		if err := unit.Within(ctx, func(txContext context.Context) error {
-			application, applyErr := store.ApplyCallbackEvent(txContext, deleteOne)
-			if applyErr == nil && (!application.Applied || application.Active) {
-				return errors.New("employee-one was not deactivated")
-			}
-			return applyErr
-		}); err != nil {
-			t.Fatal(err)
-		}
-		lateAdd := first
-		lateAdd.CallbackID = "callback-150"
-		lateAdd.OccurredAt = base.Add(10 * time.Second)
-		if err := unit.Within(ctx, func(txContext context.Context) error {
-			application, applyErr := store.ApplyCallbackEvent(txContext, lateAdd)
-			if applyErr == nil && (application.Applied || application.Active) {
-				return errors.New("older add reactivated employee-one")
-			}
-			return applyErr
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if err := pool.Native().QueryRow(ctx, `SELECT followed_at FROM wecom_follow_relationships WHERE corp_id='wx-corp' AND employee_id='employee-one' AND customer_id=$1`, customerID).Scan(&followedAt); err != nil || followedAt != nil {
-			t.Fatalf("delete/late replay retained follow time: followed_at=%v err=%v", followedAt, err)
-		}
-		readd := first
-		readd.CallbackID = "callback-readd"
-		readd.OccurredAt = base.Add(30 * time.Second)
-		if err := unit.Within(ctx, func(txContext context.Context) error {
-			_, applyErr := store.ApplyCallbackEvent(txContext, readd)
-			return applyErr
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if err := pool.Native().QueryRow(ctx, `SELECT followed_at FROM wecom_follow_relationships WHERE corp_id='wx-corp' AND employee_id='employee-one' AND customer_id=$1`, customerID).Scan(&followedAt); err != nil || followedAt == nil || !followedAt.Equal(readd.OccurredAt) {
-			t.Fatalf("re-add did not reset follow time: followed_at=%v err=%v", followedAt, err)
-		}
-		var callbackContacts []wecomport.AudienceContact
-		if err := unit.Within(ctx, func(txContext context.Context) error {
-			var readErr error
-			callbackContacts, readErr = store.AudienceContactsForCustomers(txContext, time.Now().UTC().Add(time.Hour), []customerdomain.CustomerID{customerdomain.CustomerID(customerID)})
-			return readErr
-		}); err != nil {
-			t.Fatal(err)
-		}
-		foundCallbackTime := false
-		for _, contact := range callbackContacts {
-			if contact.OwnerUserID == "employee-one" && contact.Status == "active" && contact.FollowedAt != nil && contact.FollowedAt.Equal(readd.OccurredAt) {
-				foundCallbackTime = true
+		for _, change := range []string{ChangeAddExternalContact, ChangeEditExternalContact, ChangeDelFollowUser, ChangeDelExternalContact} {
+			err := unit.Within(ctx, func(tx context.Context) error {
+				_, e := store.ApplyCallbackEvent(tx, CallbackFollowRelationship{CallbackID: "retired-" + change, CorpID: "wx-corp", EmployeeID: "employee", CustomerID: 1, ChangeType: change, Active: true, OccurredAt: time.Now().UTC()})
+				return e
+			})
+			if !errors.Is(err, ErrInvalidFollowRelationship) {
+				t.Fatalf("change=%s err=%v", change, err)
 			}
 		}
-		if !foundCallbackTime {
-			t.Fatalf("audience read did not return active callback add time: %+v", callbackContacts)
-		}
-		if err := unit.Within(ctx, func(txContext context.Context) error {
-			active, activeErr := store.IsActive(txContext, "wx-corp", "employee-two", customerdomain.CustomerID(customerID))
-			if activeErr == nil && !active {
-				return errors.New("employee-one deletion changed employee-two")
-			}
-			return activeErr
-		}); err != nil {
-			t.Fatal(err)
-		}
-
-		sameSecondDelete := second
-		sameSecondDelete.CallbackID = "callback-delete-same-second"
-		sameSecondDelete.Active = false
-		if err := unit.Within(ctx, func(txContext context.Context) error {
-			application, applyErr := store.ApplyCallbackEvent(txContext, sameSecondDelete)
-			if applyErr == nil && (!application.Applied || application.Active) {
-				return errors.New("same-second deletion did not win")
-			}
-			return applyErr
-		}); err != nil {
-			t.Fatal(err)
-		}
-		sameSecondAdd := second
-		sameSecondAdd.CallbackID = "zzzz-callback-add-hash-order-must-not-win"
-		if err := unit.Within(ctx, func(txContext context.Context) error {
-			application, applyErr := store.ApplyCallbackEvent(txContext, sameSecondAdd)
-			if applyErr == nil && (application.Applied || application.Active) {
-				return errors.New("same-second callback hash reactivated relationship")
-			}
-			return applyErr
-		}); err != nil {
-			t.Fatal(err)
+		var n int
+		if err := pool.Native().QueryRow(ctx, `SELECT count(*) FROM wecom_follow_relationships`).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("legacy rows=%d err=%v", n, err)
 		}
 	})
 
@@ -509,7 +387,7 @@ func TestPostgreSQLWeComStoresIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("processor commits relationship receipt audit and Inbox together", func(t *testing.T) {
+	t.Run("processor commits audit and Inbox without writing directory", func(t *testing.T) {
 		var customerID int64
 		if err := pool.Native().QueryRow(ctx, `INSERT INTO customers (status) VALUES ('active') RETURNING id`).Scan(&customerID); err != nil {
 			t.Fatal(err)
@@ -558,8 +436,8 @@ func TestPostgreSQLWeComStoresIntegration(t *testing.T) {
 		}
 		if err = unit.Within(ctx, func(txContext context.Context) error {
 			active, activeErr := relationships.IsActive(txContext, "wx-corp", "processor-employee", customerdomain.CustomerID(customerID))
-			if activeErr == nil && !active {
-				return errors.New("follow relationship is not active")
+			if activeErr == nil && active {
+				return errors.New("callback wrote directory before trusted synchronization")
 			}
 			return activeErr
 		}); err != nil {
@@ -568,7 +446,7 @@ func TestPostgreSQLWeComStoresIntegration(t *testing.T) {
 	})
 }
 
-func TestPostgreSQLAudienceContactsUseRelationshipFacts(t *testing.T) {
+func TestPostgreSQLAudienceContactsUsePublishedDirectoryFacts(t *testing.T) {
 	pool, cleanup := wecomIntegrationPool(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -617,6 +495,9 @@ func TestPostgreSQLAudienceContactsUseRelationshipFacts(t *testing.T) {
 	if _, err := pool.Native().Exec(ctx, `INSERT INTO wecom_follow_relationships(corp_id,employee_id,customer_id,active,created_at,updated_at) VALUES('test','owner-a',$1,true,$2,$3),('test','owner-b',$4,true,$2,$3)`, first, now.Add(-48*time.Hour), now, second); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Native().Exec(ctx, `INSERT INTO wecom_customer_owner_observations(customer_id,corp_scope,employee_id,relationship_status,last_seen_run_id,observed_at,followed_at,updated_at) VALUES($1,'wecom-corp:test','owner-a','active',$3,$4,$4,$4),($2,'wecom-corp:test','owner-b','active',$3,$4,$4,$4)`, first, second, runID, now.Add(-48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 	var facts []wecomport.AudienceContact
 	if err := unit.Within(ctx, func(tx context.Context) error {
 		var e error
@@ -634,7 +515,7 @@ func TestPostgreSQLAudienceContactsUseRelationshipFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := unit.Within(ctx, func(tx context.Context) error {
-		ids, e := (PostgreSQLFollowRelationshipStore{}).AudienceRecognizedContacts(tx, "wecom-corp:test", now.Add(time.Hour))
+		ids, e := (PostgreSQLFollowRelationshipStore{}).AudienceRecognizedContacts(tx, "wecom-corp:test", now.Add(-time.Second))
 		if e != nil {
 			return e
 		}
@@ -656,7 +537,7 @@ func TestPostgreSQLAudienceContactsUseRelationshipFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := unit.Within(ctx, func(tx context.Context) error {
-		ids, e := (PostgreSQLFollowRelationshipStore{}).AudienceRecognizedContacts(tx, "wecom-corp:test", now.Add(time.Hour))
+		ids, e := (PostgreSQLFollowRelationshipStore{}).AudienceRecognizedContacts(tx, "wecom-corp:test", now.Add(-time.Second))
 		if e != nil {
 			return e
 		}
@@ -670,140 +551,29 @@ func TestPostgreSQLAudienceContactsUseRelationshipFacts(t *testing.T) {
 
 }
 
-func TestPostgreSQLAudienceContactsUseCallbackFactsBeforeProfileAndRespectCompletedDirectory(t *testing.T) {
+func TestPostgreSQLCallbackWithoutPublishedProfileCannotQualifyAudience(t *testing.T) {
 	pool, cleanup := wecomIntegrationPool(t)
 	defer cleanup()
 	ctx := context.Background()
-	unit, err := platformpostgres.NewUnitOfWork(pool)
-	if err != nil {
+	unit, _ := platformpostgres.NewUnitOfWork(pool)
+	var customer int64
+	if err := pool.Native().QueryRow(ctx, `INSERT INTO customers(status) VALUES('active') RETURNING id`).Scan(&customer); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
-	insertRun := func(key, status string, startedAt, completedAt *time.Time) int64 {
-		t.Helper()
-		var runID int64
-		if err := pool.Native().QueryRow(ctx, `INSERT INTO wecom_customer_sync_runs(run_key,trigger_type,status,corp_scope,started_at,completed_at)
-			VALUES($1,'manual',$2,'wecom-corp:test',$3,$4) RETURNING id`, key, status, startedAt, completedAt).Scan(&runID); err != nil {
-			t.Fatal(err)
-		}
-		return runID
-	}
-	insertCustomer := func() int64 {
-		t.Helper()
-		var customerID int64
-		if err := pool.Native().QueryRow(ctx, `INSERT INTO customers(status) VALUES('active') RETURNING id`).Scan(&customerID); err != nil {
-			t.Fatal(err)
-		}
-		return customerID
-	}
-	insertProfile := func(customerID, runID int64, externalID, activationStatus string, staleAt *time.Time, updatedAt time.Time) {
-		t.Helper()
-		var identityID int64
-		if err := pool.Native().QueryRow(ctx, `INSERT INTO customer_identities(customer_id,kind,scope_key,normalized_value,assurance,source,normalizer_version,verified_at)
-			VALUES($1,'wecom_external_userid','wecom-corp:test',$2,'verified','test-fixture',1,$3) RETURNING id`, customerID, externalID, now).Scan(&identityID); err != nil {
-			t.Fatal(err)
-		}
-		digest := sha256.Sum256([]byte(externalID))
-		if _, err := pool.Native().Exec(ctx, `INSERT INTO wecom_external_contact_profiles(
-			customer_id,corp_scope,external_identity_id,activation_status,profile_digest,last_seen_run_id,fetched_at,stale_at,updated_at
-		) VALUES($1,'wecom-corp:test',$2,$3,$4,$5,$6,$7,$8)`, customerID, identityID, activationStatus, digest[:], runID, now, staleAt, updatedAt); err != nil {
-			t.Fatal(err)
-		}
-	}
-	applyCallback := func(customerID int64, employeeID, callbackID string, active bool, occurredAt time.Time) {
-		t.Helper()
-		err := unit.Within(ctx, func(tx context.Context) error {
-			_, applyErr := NewPostgreSQLFollowRelationshipStore().ApplyCallbackEvent(tx, CallbackFollowRelationship{
-				CallbackID: callbackID, CorpID: "test", EmployeeID: employeeID,
-				CustomerID: customerdomain.CustomerID(customerID), Active: active, OccurredAt: occurredAt,
-			})
-			return applyErr
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	readStatuses := func(reference time.Time) map[customerdomain.CustomerID]map[string]string {
-		t.Helper()
-		var facts []wecomport.AudienceContact
-		if err := unit.Within(ctx, func(tx context.Context) error {
-			var readErr error
-			facts, readErr = PostgreSQLFollowRelationshipStore{}.AudienceContacts(tx, reference)
-			return readErr
-		}); err != nil {
-			t.Fatal(err)
-		}
-		statuses := map[customerdomain.CustomerID]map[string]string{}
-		for _, fact := range facts {
-			if statuses[fact.CustomerID] == nil {
-				statuses[fact.CustomerID] = map[string]string{}
-			}
-			statuses[fact.CustomerID][fact.OwnerUserID] = fact.Status
-		}
-		return statuses
-	}
-
-	// Authenticated callback facts are usable immediately, before directory sync
-	// has created an external-contact profile; a later delete stays inactive.
-	noProfile := insertCustomer()
-	addAt := now.Add(time.Minute)
-	applyCallback(noProfile, "owner-no-profile", "audience-no-profile-add", true, addAt)
-	if got := readStatuses(time.Now().UTC().Add(time.Hour))[customerdomain.CustomerID(noProfile)]["owner-no-profile"]; got != "active" {
-		t.Fatalf("callback without profile status=%q", got)
-	}
-	deleteAt := addAt.Add(time.Minute)
-	applyCallback(noProfile, "owner-no-profile", "audience-no-profile-delete", false, deleteAt)
-	if got := readStatuses(time.Now().UTC().Add(time.Hour))[customerdomain.CustomerID(noProfile)]["owner-no-profile"]; got != "deleted" {
-		t.Fatalf("delete callback without profile status=%q", got)
-	}
-
-	// A verified add newer than an old stale profile revives that relationship.
-	oldRunStarted, oldRunCompleted := now, now.Add(10*time.Second)
-	oldRun := insertRun("audience-callback-old-directory", "succeeded", &oldRunStarted, &oldRunCompleted)
-	oldStale := now.Add(20 * time.Second)
-	oldProfileCustomer := insertCustomer()
-	insertProfile(oldProfileCustomer, oldRun, "old-stale-profile", "stale", &oldStale, oldStale)
-	newAddAt := now.Add(30 * time.Second)
-	applyCallback(oldProfileCustomer, "owner-old-profile", "audience-old-profile-add", true, newAddAt)
-	if got := readStatuses(time.Now().UTC().Add(time.Hour))[customerdomain.CustomerID(oldProfileCustomer)]["owner-old-profile"]; got != "active" {
-		t.Fatalf("new callback after old stale profile status=%q", got)
-	}
-
-	// A complete run started after the callback is newer evidence. If that run
-	// does not observe this Owner relationship, the callback cannot resurrect it.
-	newRunStarted, newRunCompleted := newAddAt.Add(time.Second), newAddAt.Add(2*time.Second)
-	newRun := insertRun("audience-callback-new-directory", "succeeded", &newRunStarted, &newRunCompleted)
-	if _, err := pool.Native().Exec(ctx, `UPDATE wecom_external_contact_profiles
-		SET activation_status='active',stale_at=NULL,last_seen_run_id=$2,fetched_at=$3,updated_at=$3
-		WHERE customer_id=$1`, oldProfileCustomer, newRun, newRunCompleted); err != nil {
+	if _, err := pool.Native().Exec(ctx, `INSERT INTO wecom_follow_relationships(corp_id,employee_id,customer_id,active) VALUES('corp','employee',$1,true)`, customer); err != nil {
 		t.Fatal(err)
 	}
-	if got := readStatuses(time.Now().UTC().Add(time.Hour))[customerdomain.CustomerID(oldProfileCustomer)]["owner-old-profile"]; got != "deleted" {
-		t.Fatalf("older callback after newer complete directory status=%q", got)
-	}
-
-	// In-progress and failed profile rows cannot overrule a verified callback.
-	baselineStarted, baselineCompleted := now.Add(40*time.Second), now.Add(41*time.Second)
-	insertRun("audience-callback-failure-baseline", "succeeded", &baselineStarted, &baselineCompleted)
-	failedStarted := now.Add(50 * time.Second)
-	failedRun := insertRun("audience-callback-failed-directory", "failed_terminal", &failedStarted, nil)
-	failedCustomer := insertCustomer()
-	insertProfile(failedCustomer, failedRun, "failed-directory-profile", "active", nil, failedStarted)
-	failedCallbackAt := now.Add(51 * time.Second)
-	applyCallback(failedCustomer, "owner-failed-directory", "audience-failed-directory-add", true, failedCallbackAt)
-
-	partialStarted := now.Add(60 * time.Second)
-	partialRun := insertRun("audience-callback-partial-directory", "ingesting", &partialStarted, nil)
-	partialCustomer := insertCustomer()
-	insertProfile(partialCustomer, partialRun, "partial-directory-profile", "active", nil, partialStarted)
-	partialCallbackAt := now.Add(61 * time.Second)
-	applyCallback(partialCustomer, "owner-partial-directory", "audience-partial-directory-add", true, partialCallbackAt)
-	statuses := readStatuses(time.Now().UTC().Add(time.Hour))
-	if got := statuses[customerdomain.CustomerID(failedCustomer)]["owner-failed-directory"]; got != "active" {
-		t.Fatalf("callback overridden by failed directory run status=%q", got)
-	}
-	if got := statuses[customerdomain.CustomerID(partialCustomer)]["owner-partial-directory"]; got != "active" {
-		t.Fatalf("callback overridden by partial directory run status=%q", got)
+	if err := unit.Within(ctx, func(tx context.Context) error {
+		facts, e := PostgreSQLFollowRelationshipStore{}.AudienceContacts(tx, time.Now().UTC())
+		if e != nil {
+			return e
+		}
+		if len(facts) != 0 {
+			t.Fatalf("callback-only contact qualified: %+v", facts)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -896,6 +666,9 @@ func TestPostgreSQLAudienceContactsIncludeCompletedDirectoryOwnersAndRejectUnsaf
 	future := insertCustomer()
 	insertProfile(future, "wecom-corp:test", "future-owner-profile", "active", successRun, "", nil)
 	insertOwnerObservation(future, "wecom-corp:test", "future-owner", "active", "", successRun, reference.Add(time.Minute))
+	if _, err := pool.Native().Exec(ctx, `UPDATE wecom_customer_owner_observations SET followed_at=$2 WHERE customer_id=$1`, future, reference.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 
 	staleOwner := insertCustomer()
 	insertProfile(staleOwner, "wecom-corp:test", "stale-owner-profile", "active", successRun, "old-cached-owner", &successRun)
@@ -1233,5 +1006,6 @@ func wecomMigrationPaths(t *testing.T) []string {
 		filepath.Join(root, "migrations", "0153_wecom_customer_detail_projection.sql"),
 		filepath.Join(root, "migrations", "0171_wecom_contact_description_source_coverage.sql"),
 		filepath.Join(root, "migrations", "0213_wecom_followed_at.sql"),
+		filepath.Join(root, "migrations", "0216_wecom_profile_publication.sql"),
 	}
 }

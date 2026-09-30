@@ -120,13 +120,21 @@ func TestRetentionCoveragePreservesGapsAndExactPolicyBindings(t *testing.T) {
 			t.Fatalf("wrong policy binding %s: %+v", name, item)
 		}
 	}
-	if out.AllowlistPolicyCount != 9 || out.Summary.ScheduledResources != 9 || out.Summary.GapResources != 37 || out.Summary.SecurityTTLResources != 13 || out.Summary.MixedPayloadResources != 19 || out.Summary.UnclassifiedResources != 1 || out.Summary.CoordinationResources != 13 {
+	if out.AllowlistPolicyCount != 9 || out.Summary.ScheduledResources != 9 || out.Summary.GapResources != 37 || out.Summary.SecurityTTLResources != 13 || out.Summary.MixedPayloadResources != 19 || out.Summary.UnclassifiedResources != 1 || out.Summary.CoordinationResources != 15 {
 		t.Fatalf("configured policies hid coverage gaps: %+v", out.Summary)
 	}
 	for _, name := range []string{"openplatform_customer_windows", "openplatform_customer_window_items"} {
 		if item := items["table:"+name]; item.Policy != "security_ttl" || item.CoverageStatus != "gap" || item.GapCode != "security_ttl_physical_cleanup_missing" {
 			t.Fatalf("contact window cleanup gap was hidden: %+v", item)
 		}
+	}
+	for _, name := range []string{"wecom_directory_publications", "wecom_customer_profile_staging", "wecom_customer_follow_staging"} {
+		if item := items["table:"+name]; item.CoverageStatus != "owner_managed" || item.PolicyID != "" {
+			t.Fatal("sync lifecycle became eligible for generic cleanup", item)
+		}
+	}
+	if item := items["table:wecom_customer_tag_history"]; item.Policy != "permanent" || item.CoverageStatus != "protected" || item.PolicyID != "" {
+		t.Fatal("immutable tag history is not protected", item)
 	}
 	for _, item := range out.Items {
 		if item.Policy == "security_ttl" && (item.CoverageStatus != "gap" || item.AuthorizationExpiry != "owner_security_ttl" || item.PolicyID != "" || item.CleanupEntrypoint != "") {

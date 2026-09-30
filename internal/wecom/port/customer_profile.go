@@ -19,6 +19,7 @@ type OwnerObservation struct {
 type TagObservation struct {
 	ProviderTagID string
 	ObservedName  string
+	GroupName     string
 	ProviderType  int16
 	Status        string
 	ObservedAt    time.Time

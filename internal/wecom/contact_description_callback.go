@@ -67,18 +67,18 @@ func (e *RiverContactDescriptionCallbackEnqueuer) EnqueueContactDescriptionObser
 // follow-up read explicit. It never writes WeCom: after the real detail read it
 // atomically accepts an Outbound intent, which is the sole owner of the write.
 type ContactDescriptionCallbackService struct {
-	Enabled       bool
-	CorpID        string
-	Inbox         *webhook.Service
-	Provider      wecomport.ExternalContactDescriptionTargetReader
-	Identity      identityport.Resolver
-	Relationships FollowRelationshipStore
-	Intents       outboundport.ContactDescriptionIntentWriter
-	UOW           platformport.UnitOfWork
+	Enabled  bool
+	CorpID   string
+	Inbox    *webhook.Service
+	Provider wecomport.ExternalContactDescriptionTargetReader
+	Identity identityport.Resolver
+
+	Intents outboundport.ContactDescriptionIntentWriter
+	UOW     platformport.UnitOfWork
 }
 
 func (s ContactDescriptionCallbackService) Ready() bool {
-	return s.Enabled && s.CorpID != "" && s.Inbox != nil && s.Provider != nil && s.Identity != nil && s.Relationships != nil && s.Intents != nil && s.UOW != nil
+	return s.Enabled && s.CorpID != "" && s.Inbox != nil && s.Provider != nil && s.Identity != nil && s.Intents != nil && s.UOW != nil
 }
 
 type callbackDescriptionTarget struct {
@@ -87,15 +87,15 @@ type callbackDescriptionTarget struct {
 }
 
 type contactCallbackTargetLoader struct {
-	CorpID        string
-	Inbox         *webhook.Service
-	Identity      identityport.Resolver
-	Relationships FollowRelationshipStore
-	UOW           platformport.UnitOfWork
+	CorpID   string
+	Inbox    *webhook.Service
+	Identity identityport.Resolver
+
+	UOW platformport.UnitOfWork
 }
 
 func (s ContactDescriptionCallbackService) targetLoader() contactCallbackTargetLoader {
-	return contactCallbackTargetLoader{CorpID: s.CorpID, Inbox: s.Inbox, Identity: s.Identity, Relationships: s.Relationships, UOW: s.UOW}
+	return contactCallbackTargetLoader{CorpID: s.CorpID, Inbox: s.Inbox, Identity: s.Identity, UOW: s.UOW}
 }
 
 func (s ContactDescriptionCallbackService) Process(ctx context.Context, inboxID int64) error {
@@ -186,13 +186,7 @@ func (s contactCallbackTargetLoader) loadTargetWithin(ctx context.Context, inbox
 	if resolved.Status != identityport.ResolveFound || resolved.CustomerID < 1 {
 		return callbackDescriptionTarget{}, true, nil
 	}
-	active, err := s.Relationships.IsActive(ctx, s.CorpID, event.UserID, resolved.CustomerID)
-	if err != nil {
-		return callbackDescriptionTarget{}, false, err
-	}
-	if !active {
-		return callbackDescriptionTarget{}, true, nil
-	}
+
 	return callbackDescriptionTarget{event: event, customerID: resolved.CustomerID}, false, nil
 }
 

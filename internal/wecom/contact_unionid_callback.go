@@ -49,30 +49,35 @@ func (e *RiverContactUnionIDCallbackEnqueuer) EnqueueContactUnionIDObservation(c
 }
 
 type ContactUnionIDCallbackService struct {
-	Enabled       bool
-	CorpID        string
-	Inbox         *webhook.Service
-	Provider      wecomport.ExternalContactReader
-	Resolver      identityport.Resolver
-	Relationships FollowRelationshipStore
-	UnionIDs      ContactUnionIDLinker
-	UOW           platformport.UnitOfWork
+	Sync     *CustomerSyncService
+	Enabled  bool
+	CorpID   string
+	Inbox    *webhook.Service
+	Provider wecomport.ExternalContactReader
+	Resolver identityport.Resolver
+
+	UnionIDs ContactUnionIDLinker
+	UOW      platformport.UnitOfWork
 }
 
 func (s ContactUnionIDCallbackService) Ready() bool {
-	return s.Enabled && s.CorpID != "" && s.Inbox != nil && s.Provider != nil && s.Resolver != nil && s.Relationships != nil && s.UnionIDs.Ready() && s.UOW != nil
+	return s.Enabled && s.CorpID != "" && s.Inbox != nil && s.Provider != nil && s.Resolver != nil && (s.Sync != nil || s.UnionIDs.Ready()) && s.UOW != nil
 }
 
 func (s ContactUnionIDCallbackService) Process(ctx context.Context, inboxID int64) error {
 	if !s.Ready() || inboxID < 1 {
 		return ErrSyncNotReady
 	}
-	// The existing callback target gate validates the processed inbox, active
-	// follow relationship and canonical OneID root before and after the read.
-	targets := contactCallbackTargetLoader{CorpID: s.CorpID, Inbox: s.Inbox, Identity: s.Resolver, Relationships: s.Relationships, UOW: s.UOW}
+	// Validate the processed inbox and canonical OneID root before and after
+	// the Provider read. Local relationship records do not gate known targets.
+	targets := contactCallbackTargetLoader{CorpID: s.CorpID, Inbox: s.Inbox, Identity: s.Resolver, UOW: s.UOW}
 	target, skip, err := targets.loadTarget(ctx, inboxID)
 	if err != nil || skip {
 		return err
+	}
+	observedAt := time.Now().UTC()
+	if s.Sync != nil {
+		observedAt = s.Sync.now()
 	}
 	contact, err := s.Provider.ReadExternalContact(ctx, target.event.ExternalUserID)
 	if err != nil {
@@ -86,8 +91,15 @@ func (s ContactUnionIDCallbackService) Process(ctx context.Context, inboxID int6
 		if current.customerID != target.customerID || current.event.ExternalUserID != target.event.ExternalUserID {
 			return nil
 		}
-		_, linkErr := s.UnionIDs.Link(txContext, current.customerID, current.event.ExternalUserID, contact, "wecom.callback_detail", inboxID)
-		return linkErr
+		if s.UnionIDs.Ready() {
+			if _, linkErr := s.UnionIDs.Link(txContext, current.customerID, current.event.ExternalUserID, contact, "wecom.callback_detail", inboxID); linkErr != nil {
+				return linkErr
+			}
+		}
+		if s.Sync != nil {
+			return s.Sync.PublishNewContactWithin(txContext, inboxID, contact, observedAt)
+		}
+		return nil
 	})
 }
 

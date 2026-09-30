@@ -369,6 +369,10 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = effectsModule.RegisterWorkers(effectWorkers); err != nil {
 		return fail(err)
 	}
+	customerSyncDailyWorker := &wecom.CustomerSyncDailyWorker{}
+	if err = river.AddWorkerSafely[wecom.CustomerSyncDailyArgs](effectWorkers, customerSyncDailyWorker); err != nil {
+		return fail(err)
+	}
 	customerSyncWorker := wecom.NewCustomerSyncWorker()
 	if err = river.AddWorkerSafely[wecom.CustomerSyncJobArgs](effectWorkers, customerSyncWorker); err != nil {
 		return fail(err)
@@ -415,6 +419,10 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	audienceMemberEventWorker := segment.NewAudienceMemberEventDispatchWorker()
 	if err = river.AddWorkerSafely[segment.AudienceMemberEventDispatchJobArgs](effectWorkers, audienceMemberEventWorker); err != nil {
+		return fail(err)
+	}
+	directoryPublicationWorker := &segment.DirectoryPublicationWorker{}
+	if err = river.AddWorkerSafely[segment.DirectoryPublicationArgs](effectWorkers, directoryPublicationWorker); err != nil {
 		return fail(err)
 	}
 	audienceScheduleWorker := segment.NewAudienceScheduleScanWorker()
@@ -624,6 +632,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	periodicJobs := []*river.PeriodicJob{segment.AudienceSchedulePeriodicJob(), automation.DirectPushReconcilePeriodicJob()}
+	if cfg.WeCom.CustomerSyncEnabled {
+		periodicJobs = append(periodicJobs, wecom.CustomerSyncDailyPeriodicJob())
+	}
 	if cfg.Ops.Enabled {
 		periodicJobs = append(periodicJobs, adminops.InspectionPeriodicJobs()...)
 	}
@@ -763,6 +774,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
+	directoryPublicationWorker.UOW = uow
+	directoryPublicationWorker.Store = segmentRepository
+	directoryPublicationWorker.Refresh = segmentSnapshots
 	if err = audienceRefreshWorker.BindService(segmentSnapshots); err != nil {
 		return fail(err)
 	}
@@ -1346,6 +1360,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 
 	customerProfileStore := wecom.NewPostgreSQLCustomerSyncStore()
 	legacyAudienceSource.PrimaryOwners = customerProfileStore
+	legacyAudienceSource.Publication = customerProfileStore
 	sidebarProfiles.Numbers = queries
 	openPlatformTimeline := customerTimelineAdapter{uow: uow, reader: customerStore}
 	openPlatformScopes := configuredOpenPlatformScopes(cfg.WeCom.CorpID, []string{cfg.HXCDashboard.UnionIDScope, "wechat-open-platform:" + cfg.Survey.OAuthOpenPlatformID}, []string{cfg.Survey.OAuthAppID, cfg.WeChatPay.AppID, cfg.WeChatPay.H5AppID, cfg.WeChatShop.AppID})
@@ -1421,7 +1436,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	relationships := wecom.NewPostgreSQLFollowRelationshipStore()
-	customerTagCommands, err := customerapp.NewTagCommandService(uow, customerstore.TagCommandPostgreSQL{}, effectRepository, customerTagCommandGate{uow: uow, corpID: cfg.WeCom.CorpID, owners: customerProfileStore, staff: accessRepository, relationships: relationships, tags: tagRepository, identities: queries}, auditService, platformoutbox.NewPostgreSQL())
+	customerTagCommands, err := customerapp.NewTagCommandService(uow, customerstore.TagCommandPostgreSQL{}, effectRepository, customerTagCommandGate{uow: uow, corpID: cfg.WeCom.CorpID, owners: customerProfileStore, staff: accessRepository, tags: tagRepository, identities: queries}, auditService, platformoutbox.NewPostgreSQL())
 	if err != nil {
 		return fail(err)
 	}
@@ -1440,12 +1455,13 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	legacyAudienceSource.PrimaryOwners = customerProfileStore
+	legacyAudienceSource.Publication = customerProfileStore
 	ownerHandoffCipher, cipherErr := customer.NewOwnerHandoffCipher(cfg.Survey.DataKey)
 	if cipherErr != nil {
 		return fail(cipherErr)
 	}
 	ownerHandoffStore := customer.NewPostgreSQLOwnerHandoffStoreWithCipher(ownerHandoffCipher)
-	ownerHandoffService, ownerServiceErr := customerapp.NewOwnerHandoffService(uow, ownerHandoffStore, accessRepository, customerOwnerHandoffCandidates{staff: accessRepository, relationships: relationships, relationshipLister: relationships, primaries: customerProfileStore, primaryLister: customerProfileStore, identities: queries, owners: ownerHandoffStore}, auditService, platformoutbox.NewPostgreSQL())
+	ownerHandoffService, ownerServiceErr := customerapp.NewOwnerHandoffService(uow, ownerHandoffStore, accessRepository, customerOwnerHandoffCandidates{staff: accessRepository, relationshipLister: relationships, identities: queries}, auditService, platformoutbox.NewPostgreSQL())
 	if ownerServiceErr != nil {
 		return fail(ownerServiceErr)
 	}
@@ -1465,7 +1481,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	outboundCompletionSink.WithCustomerOwnerHandoff(ownerHandoffCompletion)
 	customerHandler, err := customerhttp.NewHandler(customerhttp.Config{UnitOfWork: uow, Auth: requestSecurity, CSRF: requestSecurity,
-		Directory: customerapp.Directory{Numbers: queries, Store: customerStore, SigningKey: cursorSigningKey, Tags: customerDirectoryTagFilter{bindings: tagRepository, members: customerProfileStore}}, Store: customerStore, Identities: queries, Audit: auditService,
+		Directory: customerapp.Directory{Numbers: queries, Store: customerStore, SigningKey: cursorSigningKey, OwnerCustomers: customerDirectoryOwnerFilter{users: accessRepository, follows: relationships, corpScope: "wecom-corp:" + cfg.WeCom.CorpID}, Tags: customerDirectoryTagFilter{bindings: tagRepository, members: customerProfileStore}}, Store: customerStore, Identities: queries, Audit: auditService,
 		Canonical:   canonicalCustomerAdapter{reader: queries},
 		Owners:      customerOwnerAdapter{uow: uow, observations: customerProfileStore, users: accessRepository, owners: ownerHandoffStore},
 		Tags:        customerTagAdapter{uow: uow, observations: customerProfileStore, names: tagRepository},
@@ -2022,7 +2038,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if (cfg.WeCom.ChannelWelcomeProviderEnabled || cfg.WeCom.ChannelTagProviderEnabled) && cfg.WeCom.CallbackEnabled {
 		entrantProvider := outbound.NewChannelEntrantProvider(
 			channelEntrantActionReaderAdapter{uow: uow, source: channelEntrantActions}, channelEntrantActionReaderAdapter{uow: uow, source: channelEntrantActions}, uow, welcomeGrantStore,
-			channelCurrentContactAdapter{uow: uow, corpID: cfg.WeCom.CorpID, staff: accessRepository, relationships: relationships, identities: queries},
+			channelCurrentContactAdapter{uow: uow, corpID: cfg.WeCom.CorpID, staff: accessRepository, identities: queries},
 			channelProviderTagAdapter{uow: uow, tags: tagRepository}, providerClient,
 		)
 		channelEntrantProvider = channelEntrantProviderGate{welcome: cfg.WeCom.ChannelWelcomeProviderEnabled, tag: cfg.WeCom.ChannelTagProviderEnabled, source: entrantProvider}
@@ -2036,8 +2052,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	// legacy Channel Tag/callback capability boundary by persisted source.
 	// Readback is enabled only after one of those write paths was authorized;
 	// CustomerTagProvider calls it only after a confirmed mark_tag success.
-	customerTagObservationRefresh := wecom.CustomerTagObservationService{Enabled: genericCustomerTagEnabled || channelEntryTagEnabled, CorpID: cfg.WeCom.CorpID, Provider: providerClient, Store: customerProfileStore, UOW: uow}
-	customerTagProvider, err := outbound.NewCustomerTagProvider(outbound.CustomerTagProviderConfig{GenericEnabled: genericCustomerTagEnabled, ChannelEntryTagEnabled: channelEntryTagEnabled}, customerTagCommandReaderAdapter{uow: uow, source: customerstore.TagCommandPostgreSQL{}}, channelCurrentContactAdapter{uow: uow, corpID: cfg.WeCom.CorpID, staff: accessRepository, relationships: relationships, identities: queries}, channelProviderTagAdapter{uow: uow, tags: tagRepository}, providerClient, customerTagObservationRefresh)
+	customerTagProvider, err := outbound.NewCustomerTagProvider(outbound.CustomerTagProviderConfig{GenericEnabled: genericCustomerTagEnabled, ChannelEntryTagEnabled: channelEntryTagEnabled}, customerTagCommandReaderAdapter{uow: uow, source: customerstore.TagCommandPostgreSQL{}}, channelCurrentContactAdapter{uow: uow, corpID: cfg.WeCom.CorpID, staff: accessRepository, identities: queries}, channelProviderTagAdapter{uow: uow, tags: tagRepository}, providerClient)
 	if err != nil {
 		return fail(err)
 	}
@@ -2063,7 +2078,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	excelBridge := &aiexcel.Bridge{Client: excelClient, App: aiService, Repo: aiRepository, Receipts: privateWriter, Provider: providerClient, Security: requestSecurity, Authorizer: accessapp.AIAssistantAuthorizer{}, Scope: "wechat-open-platform:" + cfg.Survey.OAuthOpenPlatformID, Covers: mediaRepository, Strategies: operationCycleExcelStrategyPageAdapter{read: operationService}}
 	excelWorker.Bridge = excelBridge
 	aiService.ExcelSnapshot = excelBridge.PrepareSnapshot
-	privateProvider, err := outbound.NewPrivateMessageProvider(cfg.AIAssistant.DispatchEnabled, privateWriter, aiPrivateTargetResolver{deferred: aiRepository, resolver: oneID, trusted: queries, uow: uow, identities: queries, access: accessRepository, relationships: relationships, corpID: cfg.WeCom.CorpID}, aiPrivatePayloadReader{excel: excelClient, content: aiRepository, images: mediaService, materials: mediaRepository, attachments: mediaService, uow: uow, capturer: mediaRepository, sources: materialSources, preparer: materialPreparation, scopeDigest: materialScopeDigest}, providerClient)
+	privateProvider, err := outbound.NewPrivateMessageProvider(cfg.AIAssistant.DispatchEnabled, privateWriter, aiPrivateTargetResolver{deferred: aiRepository, resolver: oneID, trusted: queries, uow: uow, identities: queries, access: accessRepository, corpID: cfg.WeCom.CorpID}, aiPrivatePayloadReader{excel: excelClient, content: aiRepository, images: mediaService, materials: mediaRepository, attachments: mediaService, uow: uow, capturer: mediaRepository, sources: materialSources, preparer: materialPreparation, scopeDigest: materialScopeDigest}, providerClient)
 	if err != nil {
 		return fail(err)
 	}
@@ -2156,17 +2171,10 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		unionScope = "wechat-open-platform:" + cfg.WeCom.UnionIDOpenPlatformID
 	}
 	contactUnionIDs := wecom.ContactUnionIDLinker{Scope: unionScope, Identity: oneID}
-	unionCallbackEnabled := cfg.WeCom.CallbackEnabled && contactUnionIDs.Ready()
-	if unionCallbackEnabled {
-		unionService := wecom.ContactUnionIDCallbackService{Enabled: true, CorpID: cfg.WeCom.CorpID,
-			Inbox: inboxService, Provider: providerClient, Resolver: oneID, Relationships: relationships,
-			UnionIDs: contactUnionIDs, UOW: uow}
-		if err = contactUnionIDCallbackWorker.BindService(unionService); err != nil {
-			return fail(err)
-		}
-	}
+	unionCallbackEnabled := cfg.WeCom.CallbackEnabled && (contactUnionIDs.Ready() || cfg.WeCom.CustomerSyncEnabled)
+
 	callbackDescriptionService := wecom.ContactDescriptionCallbackService{Enabled: cfg.WeCom.ContactDescriptionProviderEnabled && cfg.WeCom.CallbackEnabled,
-		CorpID: cfg.WeCom.CorpID, Inbox: inboxService, Provider: providerClient, Identity: oneID, Relationships: relationships, Intents: contactDescriptionIntents, UOW: uow}
+		CorpID: cfg.WeCom.CorpID, Inbox: inboxService, Provider: providerClient, Identity: oneID, Intents: contactDescriptionIntents, UOW: uow}
 	if cfg.WeCom.ContactDescriptionProviderEnabled && cfg.WeCom.CallbackEnabled {
 		if err = contactDescriptionCallbackWorker.BindService(callbackDescriptionService); err != nil {
 			return fail(err)
@@ -2191,9 +2199,19 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	customerSync := wecom.CustomerSyncService{Enabled: cfg.WeCom.CustomerSyncEnabled, CorpID: cfg.WeCom.CorpID, Provider: providerClient,
 		UnionIDOpenPlatformID: cfg.WeCom.UnionIDOpenPlatformID, Identity: oneID, IdentityResolver: oneID, IdentityLinker: oneID,
 		UnionIDs: contactUnionIDs, Projection: customerStore, Timeline: customerStore, Store: customerProfileStore, Outbox: platformoutbox.NewPostgreSQL(),
-		Enqueuer: customerSyncEnqueuer, DescriptionSourceCoverage: customerProfileStore, Audit: auditService, UOW: uow}
+		Enqueuer: customerSyncEnqueuer, PublicationNotifier: segment.DirectoryPublicationEnqueuer{Client: effectClient}, DescriptionSourceCoverage: customerProfileStore, Audit: auditService, UOW: uow}
 	if cfg.WeCom.ContactDescriptionProviderEnabled {
 		customerSync.DescriptionIntents = contactDescriptionIntents
+	}
+	customerSyncDailyWorker.Service = &customerSync
+	if unionCallbackEnabled {
+		unionService := wecom.ContactUnionIDCallbackService{Enabled: true, CorpID: cfg.WeCom.CorpID, Inbox: inboxService, Provider: providerClient, Resolver: oneID, UnionIDs: contactUnionIDs, UOW: uow}
+		if cfg.WeCom.CustomerSyncEnabled {
+			unionService.Sync = &customerSync
+		}
+		if err = contactUnionIDCallbackWorker.BindService(unionService); err != nil {
+			return fail(err)
+		}
 	}
 	if err = customerSyncWorker.BindService(customerSync); err != nil && cfg.WeCom.CustomerSyncEnabled {
 		return fail(err)
@@ -2216,7 +2234,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	hxcDashboard := hxcapp.Service{Enabled: cfg.HXCDashboard.Enabled, Scope: cfg.HXCDashboard.UnionIDScope, SubjectKey: []byte(cfg.HXCDashboard.SubjectHMACKey), Source: hxcSource, Identity: hxcIdentity, RegistrationCoverage: queries, IdentityWriteEnabled: cfg.HXCDashboard.IdentityWriteEnabled, UnionIDVerified: cfg.HXCDashboard.UnionIDVerified, Store: hxcRepository, Enqueuer: hxcEnqueuer, Audit: auditService, UOW: uow}
 	hxcDashboardWorker.Service = &hxcDashboard
 	hxcHandler := hxchttp.Handler{Service: hxcDashboard, Store: hxcRepository, Auth: requestSecurity, Key: []byte(cfg.HXCDashboard.SubjectHMACKey)}
-	syncHandler := wecom.CustomerSyncHTTPHandler{Service: customerSync, Auth: requestSecurity, CSRF: requestSecurity,
+	syncHandler := wecom.CustomerSyncHTTPHandler{Service: customerSync, Auth: requestSecurity, CSRF: requestSecurity, Canonical: canonicalCustomerAdapter{reader: queries}, StaffNames: accessRepository, CustomerChannels: channelAcquisition,
 		DescriptionEnabled: cfg.WeCom.ContactDescriptionProviderEnabled, DescriptionStatus: contactDescriptionIntents, DescriptionReadbacks: contactDescriptionIntents, UOW: uow}
 	sidebarContextTokens := wecom.ContextTokenService{CorpID: cfg.WeCom.CorpID, SigningKey: []byte(cfg.WeCom.ContextSigningKey), TTL: cfg.WeCom.ContextTokenTTL}
 	callbackDispatcher := wecom.CallbackEventDispatcher{ExternalContact: wecom.ExternalContactCallbackDispatcher{StateDigester: callbackStateDigester, Inbox: inboxService, UOW: uow, WelcomeGrants: welcomeGrantStore, WelcomeActions: channelEntrantActions, States: channelAcquisition}}
@@ -2921,6 +2939,7 @@ func routeApplicationWithProductsCouponsGroupOpsAndCycles(health, access, identi
 
 func mountWeComAdminAPIs(mux *http.ServeMux, callback, sync http.Handler) {
 	mux.Handle("/api/admin/wecom/", callback)
+	mux.Handle("/api/admin/wecom/customer-profiles/", sync)
 	mux.Handle("/api/admin/wecom/unionid-refresh-runs", sync)
 	mux.Handle("/api/admin/wecom/contact-description-backfills", sync)
 	mux.Handle("/api/admin/wecom/contact-description-backfills/", sync)

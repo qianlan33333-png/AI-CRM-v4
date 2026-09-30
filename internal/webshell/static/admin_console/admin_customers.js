@@ -51,6 +51,7 @@
   let detailID = "";
   let clearPhoneTimer = 0;
   let tagSelectorsPending = null;
+  let syncPollTimer = 0;
   const selectedCustomers = new Set();
   const acceptedTagCommands = new Map();
 
@@ -162,6 +163,7 @@
       return "自动恢复次数已用尽；已保留已提交进度，等待管理员处理。";
     }
     return ({
+      provider_scope_changed: "企微可见员工范围缩小，本轮资料保留上次成功状态。",
       provider_disabled: "企微目录读取未启用。",
       provider_permission_denied: "企微目录读取权限不足。",
       provider_credentials_invalid: "企微目录凭据无效或持续失效。",
@@ -189,22 +191,26 @@
   async function loadSync() {
     if (!el.syncSummary || !el.syncMetrics) return;
     try {
-      const data = await request(api.sync + "?limit=1");
+      window.clearTimeout(syncPollTimer);
+      const data = await request(api.sync + "?limit=100");
       const run = (data.items || [])[0];
       el.syncMetrics.replaceChildren();
       if (!run) {
         el.syncSummary.textContent = "尚无企微全量同步轮次。";
         return;
       }
+      const lastSuccess = (data.items || []).find((item) => item.status === "succeeded");
+      const seconds = run.completed_at && run.started_at ? Math.round((new Date(run.completed_at) - new Date(run.started_at)) / 1000) : null;
       const failure = run.status === "failed_retryable" || run.status === "failed_terminal";
-      el.syncSummary.textContent = "最近轮次 #" + run.run_id + "：" + syncLabel(run.status) + "，开始 " + date(run.started_at || run.created_at) + (run.completed_at ? "，完成 " + date(run.completed_at) : "") + (failure ? "。" + syncFailureDetail(run.last_error_code) : "");
+      el.syncSummary.textContent = "最近轮次 #" + run.run_id + "：" + syncLabel(run.status) + "，开始 " + date(run.started_at || run.created_at) + (run.completed_at ? "，完成 " + date(run.completed_at) : "") + (failure ? "。" + syncFailureDetail(run.last_error_code) : "") + "。每天北京时间 01:00 全量刷新。最近成功：" + (lastSuccess ? date(lastSuccess.completed_at) : "尚未完成") + (seconds !== null ? "；耗时 " + seconds + " 秒" : "");
+      if (!["succeeded", "failed_terminal"].includes(run.status)) syncPollTimer = window.setTimeout(loadSync, 5000);
       el.syncMetrics.append(
         syncMetric("发现", run.discovered),
         syncMetric("新激活", run.activated),
         syncMetric("已绑定", run.already_linked),
         syncMetric("冲突", run.conflict),
         syncMetric("终止失败", run.terminal_failed),
-        syncMetric("已投影", run.projected),
+        syncMetric("已发布", run.status === "succeeded" ? run.projected : 0),
       );
     } catch (error) {
       el.syncSummary.textContent = error.status === 503 ? "企微用户同步当前未启用。" : "同步状态暂时不可用。";
@@ -800,6 +806,93 @@
     }));
   }
 
+
+  const tagEventLabels = { baseline: "基线登记", added: "新增", removed: "移除", readded: "重新添加" };
+  function wecomText(tag, name, className) {
+    const node = document.createElement(tag); node.textContent = name; if (className) node.className = className; return node;
+  }
+  async function loadWecomProfile(customerID) {
+    const existing = document.getElementById("customer-wecom-profile"); if (existing) existing.remove();
+    const card = document.createElement("section"); card.id = "customer-wecom-profile"; card.className = "admin-card customer-record-card customer-wecom-profile";
+    card.append(wecomText("h2", "企微信息"));
+    const content = document.createElement("div"); emptyRecords(content, "正在读取已同步的企微资料…"); card.append(content); el.sections360.before(card);
+    const endpoint = "/api/admin/wecom/customer-profiles/" + encodeURIComponent(customerID);
+    try {
+      const profile = await request(endpoint); if (!card.isConnected) return;
+      content.replaceChildren();
+      if (!["active", "stale"].includes(profile.availability)) {
+        emptyRecords(content, profile.availability === "initializing" ? "企微资料正在初始化，完成后可查看标签基线和跟进信息。" : "当前没有已发布的企微资料；缺失资料不代表未添加好友。"); return;
+      }
+      const publication = profile.publication || {};
+      content.append(wecomText("p", "实际同步时间：" + date(profile.captured_at || publication.observed_at) + " · 资料版本 " + publication.revision + (profile.availability === "stale" ? " · 本轮未观察到联系人，保留上次资料" : ""), "customer-section-note"));
+      if (publication.complete === false) content.append(wecomText("p", "本轮部分资料缺失或不可见；保留已知状态，人群成员等待完整刷新后更新。", "customer-section-note"));
+      const basics = document.createElement("div"); basics.className = "admin-profile-grid";
+      basics.append(profileField("企微名称", profile.display_name), profileField("企业", profile.corp_name || "—"), profileField("客户类型", profile.contact_type === 1 ? "微信客户" : profile.contact_type === 2 ? "企业微信客户" : "未知"), profileField("性别", ({1:"男",2:"女"})[profile.gender] || "未知")); content.append(basics);
+      const followers = Array.isArray(profile.follow_users) ? profile.follow_users : [];
+      const active = followers.filter((f) => f.status === "active");
+      content.append(wecomText("h3", "跟进员工 · " + active.length, "customer-wecom-heading"));
+      followers.forEach((f) => {
+        const detail = f.details || {};
+        const row = document.createElement("div"); row.className = "customer-wecom-follow";
+        row.append(wecomText("strong", f.employee_name || "员工名称不可见"), wecomText("span", " · " + f.employee_id + (f.status !== "active" ? " · 本轮未观察到" : ""), "customer-section-note"));
+        const fields = document.createElement("div"); fields.className = "admin-profile-grid";
+        fields.append(profileField("员工备注", detail.Remark ?? "未返回"), profileField("客户描述", detail.Description ?? "未返回"), profileField("企微加好友时间", detail.FollowedAt ? date(detail.FollowedAt) : "未返回"), profileField("企微添加方式", wecomAddWay(detail.AddWay)));
+        row.append(fields);
+        row.append(wecomText("p", "企微来源参数：" + (detail.State ?? "未返回") + " · 采集于 " + date(f.observed_at), "customer-section-note"));
+        const tags = document.createElement("div"); tags.className = "customer-wecom-tags";
+        (f.tags || []).filter((tag) => tag.status === "active").forEach((tag) => {
+          const label = tag.name || "标签名称未返回";
+          const start = tag.period_start_kind === "baseline" ? "基线登记 " + (tag.baseline_date || "2026-09-30") : (tagEventLabels[tag.period_start_kind] || "新增") + "发现 " + date(tag.period_started_at);
+          tags.append(wecomText("span", label + " · " + (tag.baseline_date && tag.period_start_kind !== "baseline" ? "基线登记 " + tag.baseline_date + " · " : "") + start, "customer-wecom-tag"));
+        });
+        (detail.UnidentifiedTags || []).forEach((tag) => {
+          tags.append(wecomText("span", (tag.Name || "个人标签") + " · 个人标签，无稳定标识，增减日期未知", "customer-wecom-tag"));
+        });
+        if (!detail.TagsProjected) tags.append(wecomText("span", "本次未返回标签，保留上次已知状态", "customer-section-note"));
+        else if (!tags.childNodes.length) tags.append(wecomText("span", "企微明确返回空标签集合", "customer-section-note"));
+        row.append(tags); content.append(row);
+      });
+      if (!followers.length) emptyRecords(content, "没有可见的跟进员工资料。");
+      content.append(wecomText("h3", "CRM 渠道进入历史", "customer-wecom-heading"));
+      const channels = document.createElement("div");
+      if (profile.channel_history_status !== "available") emptyRecords(channels, "渠道历史暂时不可用；企微来源信息仍可单独查看。");
+      else if (!(profile.channel_history || []).length) emptyRecords(channels, "没有已确认的 CRM 渠道进入记录。");
+      else recordTable(channels, ["进入时间", "CRM 渠道"], profile.channel_history.map((e) => [date(e.occurred_at), e.title]));
+      content.append(channels);
+      const history = document.createElement("details"); history.className = "customer-wecom-history";
+      history.append(wecomText("summary", "标签增减记录"));
+      history.append(wecomText("p", "已有标签按 2026-09-30 基线登记；后续日期表示同步发现变化的日期，企微实际操作时间未知。", "customer-section-note"));
+      const form = document.createElement("form"); form.className = "customer-wecom-history-filters";
+      const inputs = {};
+      [["from_date", "开始日期", "date"], ["to_date", "结束日期", "date"], ["employee_id", "员工 ID", "text"], ["tag_id", "标签 ID", "text"]].forEach(([name, label, type]) => {
+        const field = document.createElement("label"); field.append(wecomText("span", label)); const input = document.createElement("input"); input.name=name; input.type=type; inputs[name]=input; field.append(input); form.append(field);
+      });
+      const search = wecomText("button", "查询", "admin-button admin-button--primary"); search.type="submit"; form.append(search); history.append(form);
+      const records = document.createElement("div"); history.append(records);
+      const more = wecomText("button", "下一页", "admin-button admin-button--ghost"); more.type="button"; more.hidden=true; history.append(more);
+      let cursor=0; let historyBusy=false; let appliedQuery=new URLSearchParams();
+      async function queryHistory(reset) {
+        if (historyBusy) return; historyBusy=true; search.disabled=true; more.disabled=true;
+        if (reset) {cursor=0; appliedQuery=new URLSearchParams(); Object.entries(inputs).forEach(([key,input])=>{if(input.value) appliedQuery.set(key,input.value);});}
+        const query=new URLSearchParams(appliedQuery); query.set("limit","25"); if(cursor) query.set("before_id",String(cursor));
+        try {
+          const page=await request(endpoint+"/tag-history?"+query); records.replaceChildren();
+          if (!page.items.length) emptyRecords(records,"此条件下没有标签变更记录。");
+          else recordTable(records,["登记日期", "员工", "标签", "变化", "实际采集时间"],page.items.map((e)=>[e.registration_date, e.employee_name || e.employee_id, e.name || e.tag_id, (tagEventLabels[e.event_type] || e.event_type)+(e.reason === "follow_not_observed" ? "（跟进未观察到）" : ""),date(e.discovered_at)]));
+          cursor=page.next_before_id || 0; more.hidden=!cursor;
+        } catch (_error) {records.replaceChildren(); emptyRecords(records,"标签历史读取失败，请重新查询。已同步的当前标签仍可查看。"); more.hidden=true;}
+        finally {historyBusy=false;search.disabled=false;more.disabled=false;}
+      }
+      form.addEventListener("submit",(e)=>{e.preventDefault();void queryHistory(true);}); more.addEventListener("click",()=>{void queryHistory(false);});
+      history.addEventListener("toggle",()=>{if(history.open && !records.childNodes.length) void queryHistory(true);}); content.append(history);
+    } catch (_error) {content.replaceChildren();emptyRecords(content,"企微资料暂时不可用，请稍后重新打开档案；不会触发资料写入。");}
+  }
+  function wecomAddWay(value) {
+    if (value === null || value === undefined) return "未返回";
+    const labels={0:"未知来源",1:"扫描二维码",2:"搜索手机号",3:"名片分享",4:"群聊",5:"手机号通讯录",6:"微信联系人",7:"微信好友申请",8:"第三方应用",9:"邮箱搜索",10:"视频号",201:"内部成员共享",202:"管理员分配"};
+    return labels[value] || "企微添加方式 " + value;
+  }
+
   async function loadDetail(id) {
     detailID = String(id);
     try {
@@ -842,6 +935,7 @@
 		sectionCard("最近触点", data.recent_touchpoints, renderTouchpointRecords)
       );
 	  el.sections360.hidden = false;
+      void loadWecomProfile(item && item.customer_id || id);
     } catch (error) {
       el.detailState.className = "admin-state admin-state--inline admin-state--error";
       el.detailState.replaceChildren();
@@ -857,10 +951,10 @@
     el.syncStart.disabled = true;
     try {
       await request(api.sync, { method: "POST", headers: { "X-CSRF-Token": csrf(), "Idempotency-Key": "manual-ui-" + crypto.randomUUID() } });
-      showAlert("已创建企微用户同步轮次。", true);
+      showAlert("企微资料全量刷新已受理，重复请求会复用进行中的任务。", true);
       await loadSync();
     } catch (error) {
-      showAlert(error.status === 403 ? "仅 SuperAdmin 可重拉企微用户。" : error.status === 503 ? "企微用户同步未启用或凭据未就绪。" : "无法创建同步轮次。", false);
+      showAlert(error.status === 403 ? "当前账号无权执行全量刷新。" : error.status === 503 ? "企微用户同步未启用或凭据未就绪。" : "无法创建同步轮次。", false);
     } finally {
       el.syncStart.disabled = false;
     }

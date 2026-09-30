@@ -128,7 +128,7 @@ func TestStandaloneHandlerRendersAdminLoginSidebarAndAssets(t *testing.T) {
 				"当前分组暂无人群包",
 				"admin_console.js",
 				"admin_audience.css",
-				"admin_audience_detail.js?v=audience-direct-push-controls-v1",
+				"admin_audience_detail.js?v=audience-directory-source-v2",
 			},
 			notContain: []string{
 				"功能待接入",
@@ -152,7 +152,7 @@ func TestStandaloneHandlerRendersAdminLoginSidebarAndAssets(t *testing.T) {
 				"发送记录",
 				"admin_audience_detail.css",
 				"operation_member_picker_dd8d60d.js?v=audience-sender-picker-v2",
-				"admin_audience_detail.js?v=audience-sender-picker-v1",
+				"admin_audience_detail.js?v=audience-directory-source-v2",
 				"template_parameter_form.js?v=dd8-frozen-ab63c644",
 				"admin_audience_template_host.js?v=prd05-template-empty-v2",
 			},

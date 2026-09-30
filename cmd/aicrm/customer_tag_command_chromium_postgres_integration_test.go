@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 )
 
@@ -112,11 +113,15 @@ func TestPostgreSQLCustomerTagCommandChromiumJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	var providerTagID, observedName, observationStatus string
+	var historyCount int
 	if err = application.pool.Native().QueryRow(ctx, `SELECT provider_tag_id,observed_name,observation_status FROM wecom_customer_tag_observations WHERE customer_id=1 AND observation_status='active'`).Scan(&providerTagID, &observedName, &observationStatus); err != nil {
 		t.Fatal(err)
 	}
+	if err = application.pool.Native().QueryRow(ctx, `SELECT count(*) FROM wecom_customer_tag_history`).Scan(&historyCount); err != nil {
+		t.Fatal(err)
+	}
 	writes, reads = provider.Counts()
-	if executed != 1 || unknown != 1 || writes != 2 || reads < 1 || providerTagID != "fixture-provider-add" || observedName != "fixture observed" || observationStatus != "active" {
+	if executed != 1 || unknown != 1 || writes != 2 || reads != 0 || historyCount != 1 || providerTagID != "fixture-provider-seed" || observedName != "fixture before write" || observationStatus != "active" {
 		t.Fatalf("durable outcomes executed=%d unknown=%d provider_tag_id=%q observed_name=%q observation_status=%q provider_writes=%d provider_reads=%d", executed, unknown, providerTagID, observedName, observationStatus, writes, reads)
 	}
 }
@@ -228,7 +233,13 @@ func seedCustomerTagChromiumJourney(ctx context.Context, application *composedAp
 	if err != nil {
 		return err
 	}
-	_, err = pool.Exec(ctx, `INSERT INTO wecom_follow_relationships(corp_id,employee_id,customer_id,active) VALUES('fixture-corp','fixture-staff',1,true),('fixture-corp','fixture-staff',2,true);
+	if _, err = pool.Exec(ctx, `INSERT INTO wecom_directory_publications(corp_scope,revision,last_run_id,observed_at,full_observed_at,complete,baseline_initialized) VALUES('wecom-corp:fixture-corp',1,$1,clock_timestamp(),clock_timestamp(),true,true);
+ INSERT INTO wecom_customer_owner_observations(customer_id,corp_scope,employee_id,relationship_status,last_seen_run_id,observed_at,detail) VALUES(1,'wecom-corp:fixture-corp','fixture-staff','active',$1,clock_timestamp(),'{"Remark":"Profile history fixture","TagsProjected":true}');
+ INSERT INTO wecom_customer_tag_observations(customer_id,corp_scope,employee_id,provider_tag_id,provider_tag_type,observed_name,observation_status,last_seen_run_id,observed_at,period_started_at,period_start_kind,baseline_date) VALUES(1,'wecom-corp:fixture-corp','fixture-staff','fixture-provider-seed',1,'fixture before write','active',$1,clock_timestamp(),clock_timestamp(),'baseline','2026-09-30');
+ INSERT INTO wecom_customer_tag_history(customer_id,corp_scope,employee_id,provider_tag_type,provider_tag_id,observed_name,event_type,reason,discovered_at,discovered_date,registration_date,from_revision,to_revision,run_id,customer_transition,customer_event_type) VALUES(1,'wecom-corp:fixture-corp','fixture-staff',1,'fixture-provider-seed','fixture before write','baseline','initial_baseline',clock_timestamp(),(clock_timestamp() AT TIME ZONE 'Asia/Shanghai')::date,'2026-09-30',0,1,$1,true,'baseline');`, pgx.QueryExecModeSimpleProtocol, runID); err != nil {
+		return err
+	}
+	_, err = pool.Exec(ctx, `
 		INSERT INTO customer_directory_projection(customer_id,customer_status,display_name,oneid_label,activation_status,source,last_synced_at,updated_at) VALUES
 		(1,'active','fixture one','customer #1','active','chromium_fixture',clock_timestamp(),clock_timestamp()),
 		(2,'active','fixture two','customer #2','active','chromium_fixture',clock_timestamp(),clock_timestamp());

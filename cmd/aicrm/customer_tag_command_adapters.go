@@ -19,13 +19,13 @@ import (
 // customerTagCommandGate is a Composition-only bridge across the stable Access,
 // WeCom and Tag read ports. It returns no provider identifiers to Customer.
 type customerTagCommandGate struct {
-	uow           platformport.UnitOfWork
-	corpID        string
-	owners        wecomport.AudiencePrimaryOwnerReader
-	staff         accessport.Repository
-	relationships entrantRelationshipReader
-	tags          tagport.ProviderTagBindingReader
-	identities    identityport.ExternalIdentityValueReader
+	uow    platformport.UnitOfWork
+	corpID string
+	owners wecomport.AudiencePrimaryOwnerReader
+	staff  accessport.Repository
+
+	tags       tagport.ProviderTagBindingReader
+	identities identityport.ExternalIdentityValueReader
 }
 
 func (g customerTagCommandGate) FreezeTagCommandTarget(ctx context.Context, source string, t customerport.TagCommandTarget) (customerport.FrozenTagCommandTarget, error) {
@@ -76,10 +76,7 @@ func (g customerTagCommandGate) FreezeTagCommandTarget(ctx context.Context, sour
 		if err != nil || !user.Active || user.WeComUserID == "" {
 			return errors.New("customer tag staff unavailable")
 		}
-		active, err := g.relationships.IsActive(tx, g.corpID, user.WeComUserID, t.CustomerID)
-		if err != nil || !active {
-			return errors.New("customer tag relationship unavailable")
-		}
+
 		external, found, identityErr := g.identities.VerifiedExternalIdentityValue(tx, t.CustomerID, identitydomain.KindWeComExternalUserID, "wecom-corp:"+g.corpID)
 		if identityErr != nil || !found {
 			return errors.New("customer tag identity unavailable")

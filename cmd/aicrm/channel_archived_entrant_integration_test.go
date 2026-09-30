@@ -68,7 +68,7 @@ func TestArchivedRuntimeChannelCompletesEntrantWithoutEffects(t *testing.T) {
 		t.Fatal(err)
 	}
 	if inboxStatus != "processed" || !containsAll(resultCodes, "channel_attributed", "ignored") ||
-		customers != 1 || identities != 1 || relationships != 1 || entrants != 1 ||
+		customers != 1 || identities != 1 || relationships != 0 || entrants != 1 ||
 		assignments != 0 || actions != 0 || tagCommands != 0 || effects != 0 ||
 		errorCode != "" || processingReceipts != 1 || retryReceipts != 0 {
 		t.Fatalf("inbox=%s results=%q error=%q processing_receipts=%d retry_receipts=%d customers=%d identities=%d relationships=%d entrants=%d assignments=%d actions=%d tag_commands=%d effects=%d", inboxStatus, resultCodes, errorCode, processingReceipts, retryReceipts, customers, identities, relationships, entrants, assignments, actions, tagCommands, effects)

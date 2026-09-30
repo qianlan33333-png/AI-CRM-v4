@@ -649,6 +649,9 @@
       try {
         const result = await optional(`${API}/ai-audience/packages/${packageID}/members?limit=100`);
         state.snapshot = result?.snapshot || null;
+        const sourceInfo = byID("wecomSourceVersion");
+        const wecomSource = (state.snapshot?.source_watermarks || []).find((item) => item.source === "wecom.directory.published.v2");
+        if (sourceInfo) sourceInfo.textContent = wecomSource ? `企微资料版本 ${wecomSource.version} · 实际采集时间 ${formatTime(wecomSource.as_of)} · ${wecomSource.fresh ? "完整可用" : "资料待刷新"}` : state.snapshot ? ((state.pkg?.membership_mode === "rule") ? "企微资料来源尚未校准；校准时不会触发历史成员运营。" : "当前人群使用自身领域资料。") : "尚无已发布资料版本。";
         const items = result?.items || [];
         byID("memberTotal").textContent = result ? `${result.snapshot.member_count} 人` : "尚无快照";
         byID("memberRows").innerHTML = items.length ? items.map((item) => `<tr><td>用户 #${item.customer_id}</td><td><span class="ai-pill${item.identity_disposition === "resolved" ? "" : " gray"}">${escapeHTML(identityDispositionLabel(item.identity_disposition))}</span></td><td>${formatTime(item.operations?.assignments?.find(a => !a.ended_at)?.entered_at || item.entered_at)}</td><td>${escapeHTML(item.operations?.assignments?.find(a => !a.ended_at)?.reason || "—")}</td><td>${escapeHTML(item.operations?.stats?.push_count ?? "—")}</td><td>${escapeHTML(item.operations?.stats?.visit_count ?? "未接入")}</td><td><button type="button" class="ai-btn" data-core-member="${Number(item.customer_id)}" data-core-package="${packageID}">运营明细</button></td></tr>`).join("") : `<tr><td class="ai-empty" colspan="7">${result ? "当前快照为空" : "尚未发布人群快照"}</td></tr>`;

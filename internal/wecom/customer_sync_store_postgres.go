@@ -30,6 +30,11 @@ func (PostgreSQLCustomerSyncStore) Create(ctx context.Context, command CreateCus
 	if err != nil {
 		return CustomerSyncRun{}, false, err
 	}
+	if command.Trigger != "new_contact" {
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('wecom.directory.creation.v1',0))`); err != nil {
+			return CustomerSyncRun{}, false, err
+		}
+	}
 	var run CustomerSyncRun
 	err = tx.QueryRow(ctx, `SELECT id,run_key,trigger_type,status,COALESCE(resume_status,''),corp_scope,staff_ids,staff_index,provider_cursor,
 		discovered_count,activated_count,already_linked_count,conflict_count,terminal_failed_count,projected_count,stale_count,
@@ -40,6 +45,18 @@ func (PostgreSQLCustomerSyncStore) Create(ctx context.Context, command CreateCus
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return CustomerSyncRun{}, false, err
+	}
+	if command.Trigger != "new_contact" {
+		active, found, readErr := (PostgreSQLCustomerSyncStore{}).Active(ctx)
+		if readErr != nil {
+			return CustomerSyncRun{}, false, readErr
+		}
+		if found {
+			if active.Trigger != command.Trigger && (active.Trigger == "description_backfill" || command.Trigger == "description_backfill") {
+				return CustomerSyncRun{}, false, ErrSyncConflict
+			}
+			return active, true, nil
+		}
 	}
 	err = tx.QueryRow(ctx, `INSERT INTO wecom_customer_sync_runs(run_key,trigger_type,status,corp_scope,requested_by)
 		VALUES($1,$2,'queued',$3,$4) RETURNING id`, command.RunKey, command.Trigger, command.CorpScope, command.RequestedBy).Scan(&run.ID)
@@ -63,7 +80,7 @@ func (PostgreSQLCustomerSyncStore) Active(ctx context.Context) (CustomerSyncRun,
 	err = tx.QueryRow(ctx, `SELECT id,run_key,trigger_type,status,COALESCE(resume_status,''),corp_scope,staff_ids,staff_index,provider_cursor,
 		discovered_count,activated_count,already_linked_count,conflict_count,terminal_failed_count,projected_count,stale_count,
 		version,COALESCE(last_error_code,''),COALESCE(requested_by,0),started_at,completed_at,created_at,updated_at
-		FROM wecom_customer_sync_runs WHERE status IN ('queued','listing_staff','fetching_profiles','ingesting','reconciling','failed_retryable') ORDER BY id LIMIT 1`).Scan(runScan(&run)...)
+		FROM wecom_customer_sync_runs WHERE trigger_type <> 'new_contact' AND status IN ('queued','listing_staff','fetching_profiles','ingesting','reconciling','failed_retryable') ORDER BY id LIMIT 1`).Scan(runScan(&run)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CustomerSyncRun{}, false, nil
 	}
@@ -182,7 +199,8 @@ func (PostgreSQLCustomerSyncStore) UpsertProfile(ctx context.Context, runID int6
 		ON CONFLICT(customer_id) DO UPDATE SET external_identity_id=EXCLUDED.external_identity_id,display_name=EXCLUDED.display_name,
 		avatar_url=EXCLUDED.avatar_url,gender=EXCLUDED.gender,contact_type=EXCLUDED.contact_type,corp_name=EXCLUDED.corp_name,
 		activation_status='active',profile_digest=EXCLUDED.profile_digest,last_seen_run_id=EXCLUDED.last_seen_run_id,fetched_at=EXCLUDED.fetched_at,
-		stale_at=NULL,version=wecom_external_contact_profiles.version+1,updated_at=EXCLUDED.updated_at`, provision.CustomerID, corpScope, provision.IdentityID,
+		stale_at=NULL,version=wecom_external_contact_profiles.version+1,updated_at=EXCLUDED.updated_at
+ WHERE wecom_external_contact_profiles.fetched_at < EXCLUDED.fetched_at`, provision.CustomerID, corpScope, provision.IdentityID,
 		contact.Name, contact.AvatarURL, contact.Gender, contact.Type, contact.CorpName, digest[:], runID, fetchedAt)
 	return err
 }
@@ -194,6 +212,15 @@ func (PostgreSQLCustomerSyncStore) UpsertProfileObservations(ctx context.Context
 	tx, err := platformpostgres.RequireTransaction(ctx)
 	if err != nil {
 		return err
+	}
+	// A later complete detail also excludes employees that had never been
+	// stored. Per-employee clocks alone cannot fence these missing rows.
+	var superseded bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM wecom_external_contact_profiles WHERE customer_id=$1 AND corp_scope=$2 AND complete_follow_observed_at>$3)`, customerID, corpScope, observedAt.UTC()).Scan(&superseded); err != nil {
+		return err
+	}
+	if superseded {
+		return nil
 	}
 	// FollowInfo is a provider observation returned for this page, not a claim
 	// that this page is the customer's complete follow-user set. The request
@@ -209,7 +236,7 @@ func (PostgreSQLCustomerSyncStore) UpsertProfileObservations(ctx context.Context
 	for employeeID, follow := range owners {
 		seenTags := map[string]struct{}{}
 		for _, tag := range follow.Tags {
-			if tag.ProviderTagID == "" || tag.Type < 1 || tag.Type > 2 {
+			if tag.ProviderTagID == "" || tag.Type < 1 || tag.Type > 3 {
 				return ErrSyncCAS
 			}
 			seenTags[tag.ProviderTagID] = struct{}{}
@@ -218,13 +245,18 @@ func (PostgreSQLCustomerSyncStore) UpsertProfileObservations(ctx context.Context
 		// This Provider read is authoritative for the current relationship
 		// observation. A missing createtime must clear an older projected value;
 		// carrying it forward could misclassify a delete/re-add as a pre-payment
-		// friendship. Callback edit events preserve their timestamp separately.
-		if _, err = tx.Exec(ctx, `INSERT INTO wecom_customer_owner_observations(customer_id,corp_scope,employee_id,remark,relationship_status,last_seen_run_id,observed_at,followed_at)
+		// friendship. Edit callbacks never alter this Provider fact.
+		ownerWrite, writeErr := tx.Exec(ctx, `INSERT INTO wecom_customer_owner_observations(customer_id,corp_scope,employee_id,remark,relationship_status,last_seen_run_id,observed_at,followed_at)
 			VALUES($1,$2,$3,$4,'active',$5,$6,$7) ON CONFLICT(customer_id,corp_scope,employee_id) DO UPDATE SET
 			remark=EXCLUDED.remark,relationship_status='active',last_seen_run_id=EXCLUDED.last_seen_run_id,observed_at=EXCLUDED.observed_at,
-			followed_at=EXCLUDED.followed_at,stale_at=NULL,updated_at=clock_timestamp()`,
-			customerID, corpScope, employeeID, follow.Remark, runID, observedAt.UTC(), follow.FollowedAt); err != nil {
-			return err
+			followed_at=EXCLUDED.followed_at,stale_at=NULL,updated_at=clock_timestamp()
+ WHERE wecom_customer_owner_observations.observed_at < EXCLUDED.observed_at`,
+			customerID, corpScope, employeeID, follow.Remark, runID, observedAt.UTC(), follow.FollowedAt)
+		if writeErr != nil {
+			return writeErr
+		}
+		if ownerWrite.RowsAffected() == 0 {
+			continue
 		}
 		// This run-scoped ledger is intentionally separate from the current owner
 		// projection: a later sync may replace last_seen_run_id while this run's
@@ -246,6 +278,13 @@ func (PostgreSQLCustomerSyncStore) UpsertProfileObservations(ctx context.Context
 			return advanceErr
 		}
 		if !advanced {
+			continue
+		}
+		detail, _ := json.Marshal(follow)
+		if _, err = tx.Exec(ctx, `UPDATE wecom_customer_owner_observations SET detail=$4 WHERE customer_id=$1 AND corp_scope=$2 AND employee_id=$3 AND observed_at=$5`, customerID, corpScope, employeeID, detail, observedAt.UTC()); err != nil {
+			return err
+		}
+		if !follow.TagsProjected && follow.Tags == nil {
 			continue
 		}
 		if err = replaceCustomerTagObservation(ctx, tx, customerID, corpScope, employeeID, follow.Tags, runID, observedAt); err != nil {
@@ -276,6 +315,9 @@ func (PostgreSQLCustomerSyncStore) ContactDescriptionSourceCoverage(ctx context.
 // deliberately does not select a primary owner: that policy, including
 // cross-scope conflict handling, belongs to AudiencePrimaryOwners.
 func (PostgreSQLCustomerSyncStore) CustomerBusinessDetails(ctx context.Context, customerIDs []customerdomain.CustomerID) ([]wecomport.CustomerBusinessDetail, error) {
+	if err := lockDirectoryRead(ctx); err != nil {
+		return nil, err
+	}
 	if len(customerIDs) > maximumAudiencePrimaryOwnerBatch {
 		return nil, ErrSyncCAS
 	}
@@ -371,7 +413,7 @@ func (PostgreSQLCustomerSyncStore) StaleCustomers(ctx context.Context, runID int
 		return nil, err
 	}
 	rows, err := tx.Query(ctx, `UPDATE wecom_external_contact_profiles SET activation_status='stale',stale_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp()
-		WHERE last_seen_run_id<>$1 AND activation_status<>'stale' RETURNING customer_id`, runID)
+		WHERE last_seen_run_id<>$1 AND NOT EXISTS (SELECT 1 FROM wecom_customer_sync_items i WHERE i.run_id=$1 AND i.customer_id=wecom_external_contact_profiles.customer_id AND i.outcome='conflict') AND NOT EXISTS (SELECT 1 FROM wecom_customer_owner_observations o WHERE o.customer_id=wecom_external_contact_profiles.customer_id AND o.relationship_status='active' AND o.employee_id NOT IN (SELECT jsonb_array_elements_text(staff_ids) FROM wecom_customer_sync_runs WHERE id=$1)) AND activation_status<>'stale' AND fetched_at <= (SELECT COALESCE(started_at,created_at) FROM wecom_customer_sync_runs WHERE id=$1) AND corp_scope=(SELECT corp_scope FROM wecom_customer_sync_runs WHERE id=$1) RETURNING customer_id`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -395,14 +437,14 @@ func (PostgreSQLCustomerSyncStore) ReconcileProfileObservations(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE wecom_customer_owner_observations SET relationship_status='stale',followed_at=NULL,stale_at=$2,updated_at=$2
+	if _, err = tx.Exec(ctx, `UPDATE wecom_customer_owner_observations SET relationship_status='stale',followed_at=NULL,observed_at=(SELECT COALESCE(started_at,created_at) FROM wecom_customer_sync_runs WHERE id=$1),stale_at=$2,updated_at=$2
 		WHERE corp_scope=(SELECT corp_scope FROM wecom_customer_sync_runs WHERE id=$1)
-		AND last_seen_run_id<>$1 AND relationship_status='active'`, runID, at.UTC()); err != nil {
+		AND last_seen_run_id<>$1 AND NOT EXISTS (SELECT 1 FROM wecom_customer_sync_items i WHERE i.run_id=$1 AND i.customer_id=wecom_customer_owner_observations.customer_id AND i.outcome='conflict') AND relationship_status='active' AND observed_at <= (SELECT COALESCE(started_at,created_at) FROM wecom_customer_sync_runs WHERE id=$1) AND employee_id IN (SELECT jsonb_array_elements_text(staff_ids) FROM wecom_customer_sync_runs WHERE id=$1)`, runID, at.UTC()); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE wecom_customer_tag_observations observation SET observation_status='stale',stale_at=$2,updated_at=$2
+	_, err = tx.Exec(ctx, `UPDATE wecom_customer_tag_observations observation SET observation_status='stale',absence_reason='follow_not_observed',stale_at=$2,updated_at=$2
 		WHERE observation.corp_scope=(SELECT corp_scope FROM wecom_customer_sync_runs WHERE id=$1)
-		AND observation.last_seen_run_id<>$1 AND observation.observation_status='active'
+		AND observation.last_seen_run_id<>$1 AND observation.observation_status='active' AND EXISTS (SELECT 1 FROM wecom_customer_owner_observations o WHERE o.customer_id=observation.customer_id AND o.corp_scope=observation.corp_scope AND o.employee_id=observation.employee_id AND o.relationship_status='stale' AND o.updated_at=$2)
 		-- This row predicate is intentionally independent of the watermark
 		-- subquery. PostgreSQL rechecks it after waiting on a refresh's row
 		-- lock, so an older reconciliation statement cannot stale the refresh's
@@ -464,6 +506,9 @@ func (PostgreSQLCustomerSyncStore) RefreshProfilePrimaryOwners(ctx context.Conte
 }
 
 func (PostgreSQLCustomerSyncStore) CustomerOwnerObservations(ctx context.Context, customerID customerdomain.CustomerID) ([]wecomport.OwnerObservation, error) {
+	if err := lockDirectoryRead(ctx); err != nil {
+		return nil, err
+	}
 	if customerID < 1 {
 		return nil, ErrSyncNotFound
 	}
@@ -489,6 +534,9 @@ func (PostgreSQLCustomerSyncStore) CustomerOwnerObservations(ctx context.Context
 }
 
 func (PostgreSQLCustomerSyncStore) AudiencePrimaryOwners(ctx context.Context, customerIDs []customerdomain.CustomerID) ([]wecomport.AudiencePrimaryOwner, error) {
+	if err := lockDirectoryRead(ctx); err != nil {
+		return nil, err
+	}
 	if len(customerIDs) > maximumAudiencePrimaryOwnerBatch {
 		return nil, ErrSyncCAS
 	}
@@ -562,6 +610,9 @@ func (PostgreSQLCustomerSyncStore) AudiencePrimaryOwners(ctx context.Context, cu
 }
 
 func (PostgreSQLCustomerSyncStore) CustomerTagObservations(ctx context.Context, customerID customerdomain.CustomerID) ([]wecomport.TagObservation, error) {
+	if err := lockDirectoryRead(ctx); err != nil {
+		return nil, err
+	}
 	if customerID < 1 {
 		return nil, ErrSyncNotFound
 	}
@@ -569,10 +620,9 @@ func (PostgreSQLCustomerSyncStore) CustomerTagObservations(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT provider_tag_id,observed_name,provider_tag_type,observation_status,max(observed_at)
-		FROM wecom_customer_tag_observations WHERE customer_id=$1
-		GROUP BY provider_tag_id,observed_name,provider_tag_type,observation_status
-		ORDER BY (observation_status='active') DESC,max(observed_at) DESC,provider_tag_id`, customerID)
+	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (provider_tag_type,provider_tag_id) provider_tag_id,observed_name,group_name,provider_tag_type,observation_status,observed_at
+ FROM wecom_customer_tag_observations t WHERE customer_id=$1 AND EXISTS(SELECT 1 FROM wecom_customer_sync_runs r WHERE r.id=t.last_seen_run_id AND r.status='succeeded')
+ ORDER BY provider_tag_type,provider_tag_id,(observation_status='active') DESC,observed_at DESC`, customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -580,7 +630,7 @@ func (PostgreSQLCustomerSyncStore) CustomerTagObservations(ctx context.Context, 
 	items := []wecomport.TagObservation{}
 	for rows.Next() {
 		var item wecomport.TagObservation
-		if err = rows.Scan(&item.ProviderTagID, &item.ObservedName, &item.ProviderType, &item.Status, &item.ObservedAt); err != nil {
+		if err = rows.Scan(&item.ProviderTagID, &item.ObservedName, &item.GroupName, &item.ProviderType, &item.Status, &item.ObservedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -594,6 +644,9 @@ func (PostgreSQLCustomerSyncStore) CustomerTagObservations(ctx context.Context, 
 // result.  Stale and in-progress observations do not describe a current
 // filter result.
 func (PostgreSQLCustomerSyncStore) ListCustomerIDsForProviderTag(ctx context.Context, providerTagID string, limit int) ([]customerdomain.CustomerID, error) {
+	if err := lockDirectoryRead(ctx); err != nil {
+		return nil, err
+	}
 	if !validFollowText(providerTagID, 128) || limit < 1 || limit > maxProviderTagFilterCandidates {
 		return nil, ErrSyncCAS
 	}
@@ -701,34 +754,11 @@ func (scanner staffJSONScanner) Scan(src any) error {
 // full-directory stale reconciliation; the next completed directory sync does
 // that. The synthetic successful run exists only to preserve the immutable
 // observation provenance FK already used by this WeCom-owned projection.
-func (PostgreSQLCustomerSyncStore) RecordCustomerTagRefresh(ctx context.Context, corpScope string, customerID customerdomain.CustomerID, employeeID string, tags []wecomport.ExternalContactTag, observedAt time.Time, runKey string) error {
-	if customerID < 1 || corpScope == "" || employeeID == "" || observedAt.IsZero() || runKey == "" {
-		return ErrSyncCAS
-	}
-	tx, err := platformpostgres.RequireTransaction(ctx)
-	if err != nil {
-		return err
-	}
-	var runID int64
-	err = tx.QueryRow(ctx, `INSERT INTO wecom_customer_sync_runs(run_key,trigger_type,status,corp_scope,staff_ids,completed_at)
-		VALUES($1,'tag_refresh','succeeded',$2,jsonb_build_array($3::text),$4) RETURNING id`, runKey, corpScope, employeeID, observedAt.UTC()).Scan(&runID)
-	if err != nil {
-		return err
-	}
-	advanced, err := advanceCustomerTagObservation(ctx, tx, customerID, corpScope, employeeID, runID, observedAt)
-	if err != nil {
-		return err
-	}
-	if !advanced {
-		return nil
-	}
-	return replaceCustomerTagObservation(ctx, tx, customerID, corpScope, employeeID, tags, runID, observedAt)
+// Retired: business tag commands may not mutate directory observations.
+func (PostgreSQLCustomerSyncStore) RecordCustomerTagRefresh(context.Context, string, customerdomain.CustomerID, string, []wecomport.ExternalContactTag, time.Time, string) error {
+	return ErrSyncNotReady
 }
 
-// advanceCustomerTagObservation is the sole version gate for complete tag
-// sets. The insert/update obtains a row lock; the lock remains held until the
-// caller finishes staling and replacing that exact customer/scope/employee
-// set in the same transaction.
 func advanceCustomerTagObservation(ctx context.Context, tx pgx.Tx, customerID customerdomain.CustomerID, corpScope, employeeID string, runID int64, observedAt time.Time) (bool, error) {
 	var version int64
 	err := tx.QueryRow(ctx, `INSERT INTO wecom_customer_tag_refresh_watermarks(customer_id,corp_scope,employee_id,last_seen_run_id,observed_at,observation_version)
@@ -743,26 +773,39 @@ func advanceCustomerTagObservation(ctx context.Context, tx pgx.Tx, customerID cu
 }
 
 func replaceCustomerTagObservation(ctx context.Context, tx pgx.Tx, customerID customerdomain.CustomerID, corpScope, employeeID string, tags []wecomport.ExternalContactTag, runID int64, observedAt time.Time) error {
-	seen := make(map[string]struct{}, len(tags))
 	for _, tag := range tags {
-		if tag.ProviderTagID == "" || tag.Type < 1 || tag.Type > 2 {
+		if tag.ProviderTagID == "" || tag.Type < 1 || tag.Type > 3 {
 			return ErrSyncCAS
 		}
-		seen[tag.ProviderTagID] = struct{}{}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE wecom_customer_tag_observations SET observation_status='stale',stale_at=$4,updated_at=$4
-		WHERE customer_id=$1 AND corp_scope=$2 AND employee_id=$3 AND observation_status='active'`, customerID, corpScope, employeeID, observedAt.UTC()); err != nil {
+	if err := appendTagSetDiff(ctx, tx, customerID, corpScope, employeeID, tags, runID, observedAt); err != nil {
 		return err
 	}
+	// Only absent keys become stale; unchanged tags retain their period start.
+	keys := make([]map[string]any, 0, len(tags))
+	for _, t := range tags {
+		keys = append(keys, map[string]any{"id": t.ProviderTagID, "type": t.Type})
+	}
+	raw, _ := json.Marshal(keys)
+	if _, err := tx.Exec(ctx, `UPDATE wecom_customer_tag_observations o SET observation_status='stale',absence_reason='tag_removed',stale_at=$4,updated_at=$4
+ WHERE customer_id=$1 AND corp_scope=$2 AND employee_id=$3 AND observation_status='active'
+ AND NOT EXISTS(SELECT 1 FROM jsonb_to_recordset($5::jsonb) AS t(id text,type smallint) WHERE t.id=o.provider_tag_id AND t.type=o.provider_tag_type)`, customerID, corpScope, employeeID, observedAt.UTC(), raw); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
 	for _, tag := range tags {
-		if _, duplicate := seen[tag.ProviderTagID]; !duplicate {
+		key := strconv.Itoa(int(tag.Type)) + ":" + tag.ProviderTagID
+		if seen[key] {
 			continue
 		}
-		delete(seen, tag.ProviderTagID)
-		if _, err := tx.Exec(ctx, `INSERT INTO wecom_customer_tag_observations(customer_id,corp_scope,employee_id,provider_tag_id,provider_tag_type,observed_name,observation_status,last_seen_run_id,observed_at)
-			VALUES($1,$2,$3,$4,$5,$6,'active',$7,$8) ON CONFLICT(customer_id,corp_scope,employee_id,provider_tag_id) DO UPDATE SET
-			provider_tag_type=EXCLUDED.provider_tag_type,observed_name=EXCLUDED.observed_name,observation_status='active',last_seen_run_id=EXCLUDED.last_seen_run_id,
-			observed_at=EXCLUDED.observed_at,stale_at=NULL,updated_at=clock_timestamp()`, customerID, corpScope, employeeID, tag.ProviderTagID, tag.Type, tag.Name, runID, observedAt.UTC()); err != nil {
+		seen[key] = true
+		if _, err := tx.Exec(ctx, `INSERT INTO wecom_customer_tag_observations(customer_id,corp_scope,employee_id,provider_tag_id,provider_tag_type,observed_name,group_name,observation_status,last_seen_run_id,observed_at,period_started_at,period_start_kind,baseline_date)
+  SELECT $1,$2,$3,$4,$5,$6,$9,'active',$7,$8,$8,COALESCE(h.event_type,'added'),CASE WHEN h.event_type='baseline' THEN h.registration_date ELSE NULL END
+  FROM (SELECT 1) dummy LEFT JOIN LATERAL(SELECT event_type,registration_date FROM wecom_customer_tag_history WHERE run_id=$7 AND customer_id=$1 AND corp_scope=$2 AND employee_id=$3 AND provider_tag_type=$5 AND provider_tag_id=$4 AND event_type<>'removed' ORDER BY id DESC LIMIT 1) h ON true
+  ON CONFLICT(customer_id,corp_scope,employee_id,provider_tag_type,provider_tag_id) DO UPDATE SET observed_name=EXCLUDED.observed_name,group_name=EXCLUDED.group_name,
+  period_started_at=CASE WHEN (wecom_customer_tag_observations.observation_status<>'active' AND wecom_customer_tag_observations.absence_reason IS DISTINCT FROM 'follow_not_observed') OR wecom_customer_tag_observations.period_started_at IS NULL THEN EXCLUDED.period_started_at ELSE wecom_customer_tag_observations.period_started_at END,
+  period_start_kind=CASE WHEN (wecom_customer_tag_observations.observation_status<>'active' AND wecom_customer_tag_observations.absence_reason IS DISTINCT FROM 'follow_not_observed') OR wecom_customer_tag_observations.period_started_at IS NULL THEN EXCLUDED.period_start_kind ELSE wecom_customer_tag_observations.period_start_kind END,
+  baseline_date=COALESCE(wecom_customer_tag_observations.baseline_date,EXCLUDED.baseline_date),observation_status='active',absence_reason=NULL,last_seen_run_id=EXCLUDED.last_seen_run_id,observed_at=EXCLUDED.observed_at,stale_at=NULL,updated_at=clock_timestamp()`, customerID, corpScope, employeeID, tag.ProviderTagID, tag.Type, tag.Name, runID, observedAt.UTC(), tag.GroupName); err != nil {
 			return err
 		}
 	}
@@ -776,6 +819,9 @@ var _ CustomerTagObservationStore = PostgreSQLCustomerSyncStore{}
 // by another active completed owner observation. It deliberately exposes IDs
 // only; Customer retains local-owner precedence and performs no WeCom write.
 func (PostgreSQLCustomerSyncStore) ListOwnerHandoffPrimaryOwnerCustomerIDs(ctx context.Context, corpScope, ownerUserID string, limit int) ([]customerdomain.CustomerID, error) {
+	if err := lockDirectoryRead(ctx); err != nil {
+		return nil, err
+	}
 	if !validFollowText(corpScope, 512) || !validFollowText(ownerUserID, 1024) || limit < 1 || limit > 20001 {
 		return nil, ErrSyncCAS
 	}

@@ -17,6 +17,9 @@ import (
 // does not infer an employee from any other contact relation and never writes
 // the existing WeCom projection.
 func (PostgreSQLFollowRelationshipStore) OwnerHandoffRelationship(ctx context.Context, customerID customerdomain.CustomerID, corpScope, employeeUserID string) (wecomport.OwnerHandoffRelationship, error) {
+	if err := lockDirectoryRead(ctx); err != nil {
+		return wecomport.OwnerHandoffRelationship{}, err
+	}
 	corpID, ok := ownerHandoffCorpID(corpScope)
 	if !ok || customerID < 1 || !validFollowText(employeeUserID, 1024) {
 		return wecomport.OwnerHandoffRelationship{}, ErrInvalidFollowRelationship
@@ -27,7 +30,7 @@ func (PostgreSQLFollowRelationshipStore) OwnerHandoffRelationship(ctx context.Co
 	}
 	var active bool
 	var updated time.Time
-	err = tx.QueryRow(ctx, `SELECT active,updated_at FROM wecom_follow_relationships WHERE corp_id=$1 AND employee_id=$2 AND customer_id=$3`, corpID, employeeUserID, customerID).Scan(&active, &updated)
+	err = tx.QueryRow(ctx, `SELECT o.relationship_status='active',o.updated_at FROM wecom_customer_owner_observations o JOIN wecom_customer_sync_runs r ON r.id=o.last_seen_run_id AND r.status='succeeded' WHERE o.corp_scope='wecom-corp:'||$1 AND o.employee_id=$2 AND customer_id=$3`, corpID, employeeUserID, customerID).Scan(&active, &updated)
 	if err == pgx.ErrNoRows {
 		return wecomport.OwnerHandoffRelationship{CustomerID: customerID, CorpScope: corpScope, EmployeeUserID: employeeUserID}, nil
 	}
@@ -52,15 +55,18 @@ var _ wecomport.OwnerHandoffRelationshipLister = PostgreSQLFollowRelationshipSto
 // ListOwnerHandoffCustomerIDs reads only current source follow relations for
 // the explicit all-range operation. It never infers a source employee.
 func (PostgreSQLFollowRelationshipStore) ListOwnerHandoffCustomerIDs(ctx context.Context, corpScope, employeeUserID string, limit int) ([]customerdomain.CustomerID, error) {
+	if err := lockDirectoryRead(ctx); err != nil {
+		return nil, err
+	}
 	corpID, ok := ownerHandoffCorpID(corpScope)
-	if !ok || !validFollowText(employeeUserID, 1024) || limit < 1 || limit > 20001 {
+	if !ok || !validFollowText(employeeUserID, 1024) || limit < 1 || limit > 100001 {
 		return nil, ErrInvalidFollowRelationship
 	}
 	tx, err := platformpostgres.RequireTransaction(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT customer_id FROM wecom_follow_relationships WHERE corp_id=$1 AND employee_id=$2 AND active=true ORDER BY customer_id LIMIT $3`, corpID, employeeUserID, limit)
+	rows, err := tx.Query(ctx, `SELECT o.customer_id FROM wecom_customer_owner_observations o JOIN wecom_customer_sync_runs r ON r.id=o.last_seen_run_id AND r.status='succeeded' WHERE o.corp_scope='wecom-corp:'||$1 AND o.employee_id=$2 AND relationship_status='active' ORDER BY customer_id LIMIT $3`, corpID, employeeUserID, limit)
 	if err != nil {
 		return nil, err
 	}

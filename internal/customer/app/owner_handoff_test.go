@@ -145,7 +145,7 @@ func (s *ownerHandoffStoreStub) CreateLocalOnlyOwnerHandoffBatch(_ context.Conte
 	return s.batch, nil
 }
 
-func TestOwnerHandoffLocalOnlyAllowsInactiveSourceButRevalidatesFrozenRelation(t *testing.T) {
+func TestOwnerHandoffLocalOnlyIsRetiredWithoutMutatingOwners(t *testing.T) {
 	digest := [32]byte{1}
 	store := &ownerHandoffStoreStub{owners: map[customerdomain.CustomerID]customerport.LocalOwner{}}
 	service, err := NewOwnerHandoffService(ownerHandoffDirectUOW{}, store, ownerHandoffStaffStub{1: {ID: 1, Active: false}, 2: {ID: 2, Active: true}}, ownerHandoffResolverStub{candidates: []customerport.OwnerHandoffCandidate{{CustomerID: 7, RelationshipDigest: digest, State: "ready"}}}, ownerHandoffAuditStub{}, ownerHandoffOutboxStub{})
@@ -159,16 +159,10 @@ func TestOwnerHandoffLocalOnlyAllowsInactiveSourceButRevalidatesFrozenRelation(t
 	service.now = func() time.Time { return fixed }
 	service.newID = func() (string, error) { return "preview-1", nil }
 	preview, err := service.PreviewOwnerHandoff(context.Background(), customerport.OwnerHandoffPreviewCommand{ActorAdminUserID: 1, Mode: customerport.OwnerHandoffLocalOnly, SourceStaffID: 1, TargetStaffID: 2, CorpScope: "wecom-corp:fixture", CustomerIDs: []customerdomain.CustomerID{7}, ConfirmationPhrase: "CONFIRM", IdempotencyKey: "preview-key"})
-	if err != nil || preview.ID != "preview-1" {
-		t.Fatalf("preview=%+v err=%v", preview, err)
+	if !errors.Is(err, ErrOwnerHandoffInvalid) || preview.ID != "" || len(store.owners) != 0 || store.batch.ID != "" {
+		t.Fatalf("retired local mode accepted: preview=%+v store=%+v err=%v", preview, store, err)
 	}
-	batch, err := service.ConfirmOwnerHandoff(context.Background(), customerport.OwnerHandoffConfirmCommand{ActorAdminUserID: 1, PreviewID: preview.ID, PreviewHash: preview.Hash, ConfirmationPhrase: "CONFIRM", IdempotencyKey: "confirm-key"})
-	if err == nil {
-		err = service.ProcessOwnerHandoffBatch(context.Background(), batch.ID, 0)
-	}
-	if err != nil || store.owners[7].StaffID != 2 {
-		t.Fatalf("batch=%+v owner=%+v err=%v", batch, store.owners[7], err)
-	}
+
 }
 
 func TestOwnerHandoffConfirmRejectsRelationDriftAndInactiveTarget(t *testing.T) {
@@ -176,16 +170,17 @@ func TestOwnerHandoffConfirmRejectsRelationDriftAndInactiveTarget(t *testing.T) 
 	changed := [32]byte{2}
 	store := &ownerHandoffStoreStub{owners: map[customerdomain.CustomerID]customerport.LocalOwner{}}
 	resolver := ownerHandoffResolverStub{candidates: []customerport.OwnerHandoffCandidate{{CustomerID: 8, RelationshipDigest: frozen, State: "ready"}}}
-	service, err := NewOwnerHandoffService(ownerHandoffDirectUOW{}, store, ownerHandoffStaffStub{1: {ID: 1}, 2: {ID: 2, Active: true}}, resolver, ownerHandoffAuditStub{}, ownerHandoffOutboxStub{})
+	service, err := NewOwnerHandoffService(ownerHandoffDirectUOW{}, store, ownerHandoffStaffStub{1: {ID: 1, Active: true, WeComUserID: "source"}, 2: {ID: 2, Active: true, WeComUserID: "target"}}, resolver, ownerHandoffAuditStub{}, ownerHandoffOutboxStub{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = service.SetBatchEnqueuer(ownerHandoffBatchEnqueuerStub{}); err != nil {
 		t.Fatal(err)
 	}
+	service.SetWeComProviderEnabled(true)
 	service.now = func() time.Time { return time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC) }
 	service.newID = func() (string, error) { return "preview-2", nil }
-	preview, err := service.PreviewOwnerHandoff(context.Background(), customerport.OwnerHandoffPreviewCommand{ActorAdminUserID: 1, Mode: customerport.OwnerHandoffLocalOnly, SourceStaffID: 1, TargetStaffID: 2, CorpScope: "wecom-corp:fixture", CustomerIDs: []customerdomain.CustomerID{8}, ConfirmationPhrase: "CONFIRM", IdempotencyKey: "preview-key"})
+	preview, err := service.PreviewOwnerHandoff(context.Background(), customerport.OwnerHandoffPreviewCommand{ActorAdminUserID: 1, Mode: customerport.OwnerHandoffWeComThenCRM, SourceStaffID: 1, TargetStaffID: 2, CorpScope: "wecom-corp:fixture", CustomerIDs: []customerdomain.CustomerID{8}, ConfirmationPhrase: "CONFIRM", IdempotencyKey: "preview-key"})
 	if err != nil {
 		t.Fatal(err)
 	}

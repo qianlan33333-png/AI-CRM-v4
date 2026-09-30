@@ -196,20 +196,17 @@ func (a aiMaterialAdapter) RegisterMaterialReference(ctx context.Context, block 
 	return a.references.RegisterMediaReference(ctx, mediaport.MaterialReference{MaterialKind: block.MaterialKind, MaterialID: block.MaterialID, Owner: "aiassistant.content-version", ReferenceDigest: string(reference)})
 }
 
-type aiFollowReader interface {
-	IsActive(context.Context, string, string, customerdomain.CustomerID) (bool, error)
-}
 type aiPrivateTargetResolver struct {
 	deferred interface {
 		LoadDeferredTarget(context.Context, string) (aiassistantport.DeferredTarget, error)
 	}
-	resolver      identityport.Resolver
-	trusted       identityport.ExternalIdentityValueReader
-	uow           platformport.UnitOfWork
-	identities    identityport.OutboundWeComIdentityReader
-	access        accessport.Repository
-	relationships aiFollowReader
-	corpID        string
+	resolver   identityport.Resolver
+	trusted    identityport.ExternalIdentityValueReader
+	uow        platformport.UnitOfWork
+	identities identityport.OutboundWeComIdentityReader
+	access     accessport.Repository
+
+	corpID string
 }
 
 func (a aiPrivateTargetResolver) ResolvePrivateMessageTarget(ctx context.Context, customerID customerdomain.CustomerID, staffID int64) (outbound.PrivateMessageTarget, error) {
@@ -223,10 +220,7 @@ func (a aiPrivateTargetResolver) ResolvePrivateMessageTarget(ctx context.Context
 		if err != nil || !found {
 			return errors.New("customer channel identity unavailable")
 		}
-		active, err := a.relationships.IsActive(tx, a.corpID, user.WeComUserID, customerID)
-		if err != nil || !active {
-			return errors.New("customer relationship unavailable")
-		}
+
 		target = outbound.PrivateMessageTarget{ExternalUserID: external, StaffUserID: user.WeComUserID}
 		return nil
 	})

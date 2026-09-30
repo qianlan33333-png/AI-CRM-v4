@@ -10,7 +10,7 @@ import (
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 )
 
-func TestPostgreSQLEditCallbackKeepsCompletedDirectoryFollowTime(t *testing.T) {
+func TestPostgreSQLRetiredCallbacksPreservePublishedFriendTimeUntilSync(t *testing.T) {
 	pool, cleanup := wecomIntegrationPool(t)
 	defer cleanup()
 	unit, err := platformpostgres.NewUnitOfWork(pool)
@@ -74,8 +74,8 @@ func TestPostgreSQLEditCallbackKeepsCompletedDirectoryFollowTime(t *testing.T) {
 				Active: active, OccurredAt: at,
 			})
 			return applyErr
-		}); err != nil {
-			t.Fatal(err)
+		}); err != ErrInvalidFollowRelationship {
+			t.Fatalf("retired callback write accepted: %v", err)
 		}
 	}
 	apply(olderFriend, "edit-older-callback", ChangeEditExternalContact, true, editAt)
@@ -83,23 +83,15 @@ func TestPostgreSQLEditCallbackKeepsCompletedDirectoryFollowTime(t *testing.T) {
 	apply(deletedFriend, "edit-delete-callback", ChangeDelExternalContact, false, editAt.Add(-time.Minute))
 	apply(deletedFriend, "edit-after-delete-callback", ChangeEditExternalContact, true, editAt)
 
-	for _, row := range []struct {
-		id   int64
-		want *time.Time
-	}{
-		{olderFriend, &followedAt},
-		{unknownFriend, nil},
-		{deletedFriend, nil},
-	} {
-		var got *time.Time
-		if err := pool.Native().QueryRow(ctx, `SELECT followed_at FROM wecom_follow_relationships
-			WHERE corp_id='test' AND employee_id='huangyoucan' AND customer_id=$1`, row.id).Scan(&got); err != nil {
-			t.Fatal(err)
-		}
-		if row.want == nil && got != nil || row.want != nil && (got == nil || !got.Equal(*row.want)) {
-			t.Fatalf("customer %d followed_at=%v, want %v", row.id, got, row.want)
-		}
+	var legacyRows int
+	if err := pool.Native().QueryRow(ctx, `SELECT count(*) FROM wecom_follow_relationships`).Scan(&legacyRows); err != nil || legacyRows != 0 {
+		t.Fatalf("callback recreated legacy relationships: %d %v", legacyRows, err)
 	}
+	var retained *time.Time
+	if err := pool.Native().QueryRow(ctx, `SELECT followed_at FROM wecom_customer_owner_observations WHERE customer_id=$1`, deletedFriend).Scan(&retained); err != nil || retained == nil || !retained.Equal(followedAt) {
+		t.Fatalf("delete/edit callback modified Provider facts: %v %v", retained, err)
+	}
+
 	var got []struct {
 		customerID customerdomain.CustomerID
 		followedAt *time.Time
@@ -127,8 +119,8 @@ func TestPostgreSQLEditCallbackKeepsCompletedDirectoryFollowTime(t *testing.T) {
 		t.Fatalf("audience did not retain completed directory follow time: %+v", got)
 	}
 
-	// A subsequent successful directory read can heal an older edit callback
-	// whose add time was unknown, without changing the customer's root.
+	// Only a later successful directory read supplies unknown friendship time.
+	// Another edit leaves that fact unchanged and never changes the OneID root.
 	refreshedAt := editAt.Add(10 * time.Second)
 	var refreshRunID int64
 	if err := pool.Native().QueryRow(ctx, `INSERT INTO wecom_customer_sync_runs
@@ -159,20 +151,10 @@ func TestPostgreSQLEditCallbackKeepsCompletedDirectoryFollowTime(t *testing.T) {
 	}
 	apply(unknownFriend, "edit-healed-callback", ChangeEditExternalContact, true, editAt.Add(20*time.Second))
 	apply(deletedFriend, "edit-still-deleted-callback", ChangeEditExternalContact, true, editAt.Add(30*time.Second))
-	for _, row := range []struct {
-		id   int64
-		want *time.Time
-	}{
-		{unknownFriend, &followedAt},
-		{deletedFriend, nil},
-	} {
-		var followed *time.Time
-		if err := pool.Native().QueryRow(ctx, `SELECT followed_at FROM wecom_follow_relationships
-			WHERE corp_id='test' AND employee_id='huangyoucan' AND customer_id=$1`, row.id).Scan(&followed); err != nil {
-			t.Fatal(err)
-		}
-		if row.want == nil && followed != nil || row.want != nil && (followed == nil || !followed.Equal(*row.want)) {
-			t.Fatalf("customer %d followed_at after recheck=%v, want %v", row.id, followed, row.want)
-		}
+	if err := pool.Native().QueryRow(ctx, `SELECT followed_at FROM wecom_customer_owner_observations WHERE customer_id=$1`, unknownFriend).Scan(&retained); err != nil || retained == nil || !retained.Equal(followedAt) {
+		t.Fatalf("synced friendship time changed after edit: %v %v", retained, err)
+	}
+	if err := pool.Native().QueryRow(ctx, `SELECT count(*) FROM wecom_follow_relationships`).Scan(&legacyRows); err != nil || legacyRows != 0 {
+		t.Fatalf("legacy rows after sync and callback: %d %v", legacyRows, err)
 	}
 }

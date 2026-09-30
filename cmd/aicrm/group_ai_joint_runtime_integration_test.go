@@ -44,7 +44,6 @@ import (
 	segmentcompiler "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/compiler"
 	segmentport "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/port"
 	segmentstore "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/store"
-	"github.com/qianlan33333-png/AI-CRM-v3/internal/wecom"
 	wecomadapter "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/adapter"
 	"github.com/riverqueue/river"
 )
@@ -181,7 +180,7 @@ func TestAIAssistantAndGroupOpsShareRiverOutboundAndEffects(t *testing.T) {
 	if err = continuation.Bind(groupRuntime); err != nil {
 		t.Fatal(err)
 	}
-	privateProvider, err := outbound.NewPrivateMessageProvider(true, privateWriter, aiPrivateTargetResolver{uow: uow, identities: identities, access: accessRepository, relationships: wecom.NewPostgreSQLFollowRelationshipStore(), corpID: "corp-1"}, aiPrivatePayloadReader{content: aiStore}, privateWeCom)
+	privateProvider, err := outbound.NewPrivateMessageProvider(true, privateWriter, aiPrivateTargetResolver{uow: uow, identities: identities, access: accessRepository, corpID: "corp-1"}, aiPrivatePayloadReader{content: aiStore}, privateWeCom)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -510,7 +509,7 @@ func TestAutomationAIAssistantAndGroupOpsShareRiverRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	privateProvider, err := outbound.NewPrivateMessageProvider(true, privateWriter, aiPrivateTargetResolver{uow: uow, identities: identities, access: accessRepository, relationships: wecom.NewPostgreSQLFollowRelationshipStore(), corpID: "runtime-corp"}, aiPrivatePayloadReader{content: aiRepo, images: mediaService, materials: mediaRepo, attachments: mediaService, uow: uow, capturer: mediaRepo, sources: mediaRepo, preparer: materialPreparation, scopeDigest: materialScopeDigest}, automationWriter)
+	privateProvider, err := outbound.NewPrivateMessageProvider(true, privateWriter, aiPrivateTargetResolver{uow: uow, identities: identities, access: accessRepository, corpID: "runtime-corp"}, aiPrivatePayloadReader{content: aiRepo, images: mediaService, materials: mediaRepo, attachments: mediaService, uow: uow, capturer: mediaRepo, sources: mediaRepo, preparer: materialPreparation, scopeDigest: materialScopeDigest}, automationWriter)
 	if err != nil {
 		t.Fatal(err)
 	}

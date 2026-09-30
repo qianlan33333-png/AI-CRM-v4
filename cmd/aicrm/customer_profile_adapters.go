@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 
 	accessdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/access/domain"
@@ -75,26 +76,7 @@ func (customerOwnerAdapter) CapabilityStatus() customerport.SectionStatus {
 func (adapter customerOwnerAdapter) CustomerOwners(ctx context.Context, id customerdomain.CustomerID) (customerport.OwnerPage, error) {
 	page := customerport.OwnerPage{Items: []customerport.OwnerItem{}, Status: customerport.SectionStatus{State: customerport.SectionReady}}
 	err := adapter.uow.Within(ctx, func(tx context.Context) error {
-		// The explicit CRM owner is authoritative after a local-only or
-		// accepted WeCom handoff. Follow observations remain useful context but
-		// cannot overwrite this Customer-owned projection.
-		if adapter.owners != nil {
-			local, found, localErr := adapter.owners.LocalOwner(tx, id, false)
-			if localErr != nil {
-				return localErr
-			}
-			if found {
-				user, lookupErr := adapter.users.UserByID(tx, local.StaffID, false)
-				if lookupErr != nil {
-					page.Status.State, page.Status.ErrorCode = customerport.SectionDegraded, "local_owner_staff_unavailable"
-					page.Items = append(page.Items, customerport.OwnerItem{DisplayName: "本地负责人待同步", Status: "local_owner", Source: local.Source, ObservedAt: local.UpdatedAt})
-				} else {
-					page.Items = append(page.Items, customerport.OwnerItem{DisplayName: user.DisplayName, Status: "local_owner", Source: local.Source, ObservedAt: local.UpdatedAt})
-				}
-				updated := local.UpdatedAt
-				page.Status.AsOf = &updated
-			}
-		}
+
 		observations, err := adapter.observations.CustomerOwnerObservations(tx, id)
 		if err != nil {
 			return err
@@ -158,17 +140,17 @@ func (adapter customerTagAdapter) CustomerTags(ctx context.Context, id customerd
 		}
 		seen := map[string]struct{}{}
 		for _, observation := range observations {
-			name, group := "", ""
-			if mapped, exists := byID[observation.ProviderTagID]; exists {
-				name, group = mapped.Name, mapped.GroupName
-			} else if observation.ProviderType == 2 && observation.ObservedName != "" {
-				name = observation.ObservedName
+			name, group := observation.ObservedName, observation.GroupName
+			if name == "" && observation.ProviderType == 1 {
+				if mapped, exists := byID[observation.ProviderTagID]; exists {
+					name, group = mapped.Name, mapped.GroupName
+				}
 			}
 			if name == "" {
 				name = "标签名称待同步"
 				page.Status.State, page.Status.ErrorCode = customerport.SectionDegraded, "tag_catalog_name_missing"
 			}
-			key := name + "\x00" + group + "\x00" + observation.Status
+			key := fmt.Sprintf("%d:%s:%s", observation.ProviderType, observation.ProviderTagID, observation.Status)
 			if _, duplicate := seen[key]; duplicate {
 				continue
 			}
@@ -274,4 +256,25 @@ func (disabledCustomerChatActivity) CapabilityStatus() customerport.SectionStatu
 }
 func (disabledCustomerChatActivity) CustomerChatActivity(context.Context, customerdomain.CustomerID, customerport.PageQuery) (customerport.ChatActivityPage, error) {
 	return customerport.ChatActivityPage{}, customerport.ErrCapabilityNotReady
+}
+
+// customerDirectoryOwnerFilter resolves a staff ID through Access and reads
+// WeCom's published follow users. It does not invent a CRM assignment.
+type customerDirectoryOwnerFilter struct {
+	users interface {
+		UserByID(context.Context, int64, bool) (accessdomain.User, error)
+	}
+	follows   wecomport.OwnerHandoffRelationshipLister
+	corpScope string
+}
+
+func (a customerDirectoryOwnerFilter) CustomerIDsForOwner(ctx context.Context, staffID int64, limit int) ([]customerdomain.CustomerID, error) {
+	user, err := a.users.UserByID(ctx, staffID, false)
+	if err != nil {
+		return nil, err
+	}
+	if user.WeComUserID == "" {
+		return []customerdomain.CustomerID{}, nil
+	}
+	return a.follows.ListOwnerHandoffCustomerIDs(ctx, a.corpScope, user.WeComUserID, limit)
 }

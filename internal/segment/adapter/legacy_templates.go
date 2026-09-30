@@ -26,6 +26,7 @@ import (
 // matching, Provider call, or customer write. Each condition fails closed when
 // its factual Owner is unavailable.
 type LegacyTemplateSource struct {
+	Publication        wecomport.DirectoryPublicationReader
 	Groups             wecomport.AudienceGroupMembershipReader
 	GroupCandidates    wecomport.CandidateGroupMembershipReader
 	Contacts           wecomport.AudienceContactReader
@@ -53,6 +54,14 @@ func (s LegacyTemplateSource) Evaluate(ctx context.Context, definition segmentpo
 	var ast segmentdsl.AST
 	if json.Unmarshal(definition.Expression, &ast) != nil || ast.SchemaVersion != 1 || reference.IsZero() {
 		return segmentport.Evaluation{}, ErrCustomerReadUnavailable
+	}
+	var publication *wecomport.DirectoryPublication
+	if s.Publication != nil {
+		p, readErr := s.Publication.DirectoryPublication(ctx, s.PrimaryOwnerCorpScope)
+		if readErr != nil || !p.BaselineInitialized || !p.Complete || reference.Sub(p.FullObservedAt) > 24*time.Hour {
+			return segmentport.Evaluation{}, ErrCustomerReadUnavailable
+		}
+		publication = &p
 	}
 	var ids []int64
 	var qualifiedPaidOrders map[customerdomain.CustomerID]segmentport.PaidOrderFact
@@ -89,8 +98,11 @@ func (s LegacyTemplateSource) Evaluate(ctx context.Context, definition segmentpo
 	for _, id := range ids {
 		customers = append(customers, customerdomain.CustomerID(id))
 	}
-	digest := sha256.Sum256([]byte(string(ast.Template) + "\x00" + reference.UTC().Format(time.RFC3339Nano)))
-	return segmentport.Evaluation{CustomerIDs: customers, QualifiedPaidOrder: qualifiedPaidOrders, ReferenceAt: reference.UTC(), Watermarks: []segmentport.SourceWatermark{{Source: "owner.audience-facts.v1", AsOf: reference.UTC(), Fresh: true, SafeDigest: digest}}}, nil
+	watermark := segmentport.SourceWatermark{Source: "owner.audience-facts.v1", AsOf: reference.UTC(), Fresh: true, SafeDigest: sha256.Sum256([]byte(string(ast.Template) + "\x00" + reference.UTC().Format(time.RFC3339Nano)))}
+	if publication != nil {
+		watermark = segmentport.SourceWatermark{Source: "wecom.directory.published.v2", Version: publication.Revision, AsOf: publication.ObservedAt, Fresh: publication.Complete && reference.Sub(publication.FullObservedAt) <= 24*time.Hour, SafeDigest: sha256.Sum256([]byte(strconv.FormatInt(publication.Revision, 10)))}
+	}
+	return segmentport.Evaluation{CustomerIDs: customers, QualifiedPaidOrder: qualifiedPaidOrders, ReferenceAt: reference.UTC(), Watermarks: []segmentport.SourceWatermark{watermark}}, nil
 }
 
 func (s LegacyTemplateSource) ownerReferences(ctx context.Context, params map[string]json.RawMessage) (map[string]json.RawMessage, error) {

@@ -73,7 +73,7 @@ func TestV4MachineContactWindowPostgreSQL(t *testing.T) {
 		if _, err = native.Exec(ctx, `INSERT INTO customer_directory_projection(customer_id,customer_status,updated_at) VALUES($1,'active',$2)`, id, now.Add(-time.Minute)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = native.Exec(ctx, `INSERT INTO wecom_follow_relationships(corp_id,employee_id,customer_id,active,updated_at) VALUES('synthetic',$1,$2,$3,$4)`, fmt.Sprintf("staff-%d", i), id, i == 0, now); err != nil {
+		if _, err = native.Exec(ctx, `INSERT INTO wecom_customer_owner_observations(corp_scope,employee_id,customer_id,relationship_status,observed_at,stale_at,last_seen_run_id) VALUES('wecom-corp:synthetic',$1,$2,$3,$4,$5,$6)`, fmt.Sprintf("staff-%d", i), id, activation, now, removed, runID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -181,8 +181,8 @@ func TestV4MachineContactWindowPostgreSQL(t *testing.T) {
 	if _, err = native.Exec(ctx, `INSERT INTO wecom_customer_sync_runs(run_key,trigger_type,status,corp_scope) VALUES('v4-incomplete-run','manual','queued','wecom-corp:synthetic')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = executor.v1ListCustomers(ctx, principal, json.RawMessage(`{"limit":100}`)); err == nil {
-		t.Fatal("incomplete sync became an empty page")
+	if during, readErr := executor.v1ListCustomers(ctx, principal, json.RawMessage(`{"limit":100}`)); readErr != nil || during.Data.(map[string]any)["item_count"] != 3 {
+		t.Fatalf("staged refresh must preserve last complete population: %v", readErr)
 	}
 	bulkItems := make([]openplatformport.CustomerWindowItem, 23540)
 	for index := range bulkItems {

@@ -245,7 +245,7 @@ func segmentRuntimeMigrationNames(includeMutationActor bool) []string {
 	if includeMutationActor {
 		names = append(names, "0097_segment_audience_mutation_actor.sql")
 	}
-	names = append(names, "0214_segment_member_paid_fact.sql")
+	names = append(names, "0214_segment_member_paid_fact.sql", "0217_segment_directory_source_rebase.sql")
 	return names
 }
 

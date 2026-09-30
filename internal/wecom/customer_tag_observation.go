@@ -2,8 +2,6 @@ package wecom
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"time"
 
@@ -32,44 +30,8 @@ type CustomerTagObservationService struct {
 	Now      func() time.Time
 }
 
-func (service CustomerTagObservationService) RefreshCustomerTagObservation(ctx context.Context, effectRef string, customerID customerdomain.CustomerID, employeeID, externalUserID string) error {
-	if !service.Enabled || service.CorpID == "" || service.Provider == nil || service.Store == nil || service.UOW == nil || effectRef == "" || customerID < 1 || employeeID == "" || externalUserID == "" {
-		return ErrCustomerTagObservationUnavailable
-	}
-	// Capture the observation time before the network read. Two independent
-	// readbacks can return out of order; using the completion time would let an
-	// older Provider response that was delayed in transit overwrite a newer
-	// observed contact state.
-	observedAt := time.Now().UTC()
-	if service.Now != nil {
-		observedAt = service.Now().UTC()
-	}
-	contact, err := service.Provider.ReadExternalContact(ctx, externalUserID)
-	if err != nil {
-		return err
-	}
-	if contact.ExternalUserID != externalUserID {
-		return ErrCustomerTagObservationUnavailable
-	}
-	var tags []wecomport.ExternalContactTag
-	found := false
-	for _, follow := range contact.FollowInfo {
-		if follow.EmployeeID == employeeID {
-			tags = append([]wecomport.ExternalContactTag(nil), follow.Tags...)
-			found = true
-			break
-		}
-	}
-	if !found {
-		return ErrCustomerTagObservationUnavailable
-	}
-	// The immutable effect reference supplies the run identity; the persisted key
-	// never retains the Provider contact or employee identifier.
-	sum := sha256.Sum256([]byte("wecom.tag.refresh.v1\x00" + effectRef))
-	key := "tag-refresh:" + hex.EncodeToString(sum[:])
-	return service.UOW.Within(ctx, func(tx context.Context) error {
-		return service.Store.RecordCustomerTagRefresh(tx, "wecom-corp:"+service.CorpID, customerID, employeeID, tags, observedAt, key)
-	})
+func (service CustomerTagObservationService) RefreshCustomerTagObservation(context.Context, string, customerdomain.CustomerID, string, string) error {
+	return ErrCustomerTagObservationUnavailable
 }
 
 var _ wecomport.CustomerTagObservationRefresher = CustomerTagObservationService{}

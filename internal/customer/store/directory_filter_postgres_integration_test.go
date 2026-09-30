@@ -47,10 +47,8 @@ func TestDirectoryFilterPredicatesKeepPageAndTotalInLockstepPostgreSQL(t *testin
 	var page customerapp.PageData
 	err = uow.Within(ctx, func(tx context.Context) error {
 		var readErr error
-		ownerIDs, readErr = repository.CustomerIDsForOwner(tx, 9, 100)
-		if readErr != nil {
-			return readErr
-		}
+		// IDs come from the composition-owned WeCom read Port. The Customer store applies only the supplied intersection.
+		ownerIDs = []customerdomain.CustomerID{1, 2}
 		page, readErr = repository.List(tx, customerapp.Query{
 			Limit:     2,
 			Watermark: time.Date(2026, 9, 8, 11, 0, 0, 0, time.UTC),
@@ -67,7 +65,7 @@ func TestDirectoryFilterPredicatesKeepPageAndTotalInLockstepPostgreSQL(t *testin
 	if len(ownerIDs) != 2 || ownerIDs[0] != 1 || ownerIDs[1] != 2 {
 		t.Fatalf("ownerIDs=%v", ownerIDs)
 	}
-	if page.Count != 1 || page.TotalIsEstimate || len(page.Items) != 1 || page.Items[0].CustomerID != 2 || page.Items[0].OwnerStaffID == nil || *page.Items[0].OwnerStaffID != 9 {
+	if page.Count != 1 || page.TotalIsEstimate || len(page.Items) != 1 || page.Items[0].CustomerID != 2 || page.Items[0].OwnerStaffID != nil {
 		t.Fatalf("page=%+v", page)
 	}
 }

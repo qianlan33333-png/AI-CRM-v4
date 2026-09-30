@@ -18,6 +18,7 @@ import (
 	customerapp "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/app"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
+	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	platformaudit "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/audit"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	platformoutbox "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/outbox"
@@ -45,7 +46,7 @@ func (r ownerHandoffPGResolver) ResolveOwnerHandoffCandidates(_ context.Context,
 	return []customerport.OwnerHandoffCandidate{r.candidate}, nil
 }
 
-func TestPostgreSQLOwnerHandoffLocalOnlyPreviewConfirmIsAtomic(t *testing.T) {
+func TestPostgreSQLOwnerHandoffLocalOnlyIsRejectedBeforePersistence(t *testing.T) {
 	databaseURL, err := platformconfig.DatabaseURL()
 	if err != nil {
 		t.Skip("AICRM_DATABASE_URL is not configured; skipping owner-handoff PostgreSQL journey")
@@ -84,50 +85,14 @@ func TestPostgreSQLOwnerHandoffLocalOnlyPreviewConfirmIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	preview, err := service.PreviewOwnerHandoff(ctx, customerport.OwnerHandoffPreviewCommand{ActorAdminUserID: source, Mode: customerport.OwnerHandoffLocalOnly, SourceStaffID: source, TargetStaffID: target, CorpScope: "wecom-corp:fixture", CustomerIDs: []customerdomain.CustomerID{customerID}, ConfirmationPhrase: "CONFIRM", IdempotencyKey: "preview-owner-handoff"})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, customerapp.ErrOwnerHandoffInvalid) || preview.ID != "" {
+		t.Fatalf("retired local preview=%+v err=%v", preview, err)
 	}
-	batch, err := service.ConfirmOwnerHandoff(ctx, customerport.OwnerHandoffConfirmCommand{ActorAdminUserID: source, PreviewID: preview.ID, PreviewHash: preview.Hash, ConfirmationPhrase: "CONFIRM", IdempotencyKey: "confirm-owner-handoff"})
-	if err != nil {
-		t.Fatal(err)
+	var rows int
+	if err = pool.Native().QueryRow(ctx, `SELECT (SELECT count(*) FROM customer_local_owners)+(SELECT count(*) FROM customer_owner_handoff_batches)+(SELECT count(*) FROM customer_owner_handoff_previews)`).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("retired mode wrote rows=%d err=%v", rows, err)
 	}
-	if len(batch.Lines) != 1 || batch.Lines[0].State != "queued" {
-		t.Fatalf("accepted batch=%+v", batch)
-	}
-	if err = service.ProcessOwnerHandoffBatch(ctx, batch.ID, 0); err != nil {
-		t.Fatal(err)
-	}
-	if err = uow.Within(ctx, func(txctx context.Context) error {
-		owner, found, e := customer.NewPostgreSQLOwnerHandoffStore().LocalOwner(txctx, customerID, false)
-		if e != nil {
-			return e
-		}
-		if !found || owner.StaffID != target || owner.Source != "owner_handoff_local_only" {
-			t.Fatalf("owner=%+v found=%t", owner, found)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = service.ConfirmOwnerHandoff(ctx, customerport.OwnerHandoffConfirmCommand{ActorAdminUserID: source, PreviewID: preview.ID, PreviewHash: preview.Hash, ConfirmationPhrase: "CONFIRM", IdempotencyKey: "confirm-owner-other-key"}); !errors.Is(err, customerapp.ErrOwnerHandoffDrift) {
-		t.Fatalf("second key for one preview=%v", err)
-	}
-	if err = uow.Within(ctx, func(txctx context.Context) error {
-		tx, e := platformpostgres.RequireTransaction(txctx)
-		if e != nil {
-			return e
-		}
-		var batches int
-		if e = tx.QueryRow(txctx, `SELECT count(*) FROM customer_owner_handoff_batches WHERE preview_id=$1`, preview.ID).Scan(&batches); e != nil {
-			return e
-		}
-		if batches != 1 {
-			t.Fatalf("one preview created %d batches", batches)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+
 }
 
 func ownerHandoffAppPool(t *testing.T, ctx context.Context, databaseURL string) (*platformpostgres.Pool, func()) {
@@ -202,7 +167,7 @@ func (failingOwnerHandoffAudit) Append(context.Context, platformaudit.Event) (pl
 	return platformaudit.Event{}, errors.New("audit unavailable")
 }
 
-func TestPostgreSQLOwnerHandoffLocalOnlyRollsBackWhenAuditFails(t *testing.T) {
+func TestPostgreSQLOwnerHandoffWeComBatchRollsBackWhenAuditFails(t *testing.T) {
 	databaseURL, err := platformconfig.DatabaseURL()
 	if err != nil {
 		t.Skip("AICRM_DATABASE_URL is not configured; skipping owner-handoff PostgreSQL journey")
@@ -232,14 +197,18 @@ func TestPostgreSQLOwnerHandoffLocalOnlyRollsBackWhenAuditFails(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	service, err := customerapp.NewOwnerHandoffService(uow, customer.NewPostgreSQLOwnerHandoffStore(), ownerHandoffPGStaff{source: {ID: source, WeComUserID: "source-x", Active: true}, target: {ID: target, WeComUserID: "target-y", Active: true}}, ownerHandoffPGResolver{candidate: customerport.OwnerHandoffCandidate{CustomerID: customerID, RelationshipDigest: [32]byte{9}, State: "ready"}}, failingOwnerHandoffAudit{}, platformoutbox.NewPostgreSQL())
+	service, err := customerapp.NewOwnerHandoffService(uow, ownerHandoffPGEncryptedStore(t), ownerHandoffPGStaff{source: {ID: source, WeComUserID: "source-x", Active: true}, target: {ID: target, WeComUserID: "target-y", Active: true}}, ownerHandoffPGResolver{candidate: customerport.OwnerHandoffCandidate{CustomerID: customerID, RelationshipDigest: [32]byte{9}, State: "ready", SourceUserID: "source-x", TargetUserID: "target-y", ExternalUserID: "synthetic-external"}}, failingOwnerHandoffAudit{}, platformoutbox.NewPostgreSQL())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = service.SetBatchEnqueuer(ownerHandoffPGEnqueuer{}); err != nil {
 		t.Fatal(err)
 	}
-	preview, err := service.PreviewOwnerHandoff(ctx, customerport.OwnerHandoffPreviewCommand{ActorAdminUserID: source, Mode: customerport.OwnerHandoffLocalOnly, SourceStaffID: source, TargetStaffID: target, CorpScope: "wecom-corp:fixture", CustomerIDs: []customerdomain.CustomerID{customerID}, ConfirmationPhrase: "CONFIRM", IdempotencyKey: "preview-owner-failure"})
+	service.SetWeComProviderEnabled(true)
+	if err = service.SetExternalEffectAccepter(ownerHandoffPGEffectStub{}); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.PreviewOwnerHandoff(ctx, customerport.OwnerHandoffPreviewCommand{ActorAdminUserID: source, Mode: customerport.OwnerHandoffWeComThenCRM, SourceStaffID: source, TargetStaffID: target, CorpScope: "wecom-corp:fixture", CustomerIDs: []customerdomain.CustomerID{customerID}, ConfirmationPhrase: "CONFIRM", IdempotencyKey: "preview-owner-failure"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,6 +303,10 @@ func TestPostgreSQLOwnerHandoffRejectsNewPreviewAfterUnknownTransfer(t *testing.
 		t.Fatal(err)
 	}
 	service.SetWeComProviderEnabled(true)
+	service.SetWeComProviderEnabled(true)
+	if err = service.SetExternalEffectAccepter(ownerHandoffPGEffectStub{}); err != nil {
+		t.Fatal(err)
+	}
 	preview, err := service.PreviewOwnerHandoff(ctx, customerport.OwnerHandoffPreviewCommand{ActorAdminUserID: source, Mode: customerport.OwnerHandoffWeComThenCRM, SourceStaffID: source, TargetStaffID: target, CorpScope: "wecom-corp:fixture", CustomerIDs: []customerdomain.CustomerID{customerID}, ConfirmationPhrase: "CONFIRM", IdempotencyKey: "new-preview-after-unknown"})
 	if err != nil {
 		t.Fatal(err)
@@ -360,4 +333,19 @@ func TestPostgreSQLOwnerHandoffRejectsNewPreviewAfterUnknownTransfer(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func ownerHandoffPGEncryptedStore(t *testing.T) *customer.PostgreSQLOwnerHandoffStore {
+	t.Helper()
+	cipher, err := customer.NewOwnerHandoffCipher("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return customer.NewPostgreSQLOwnerHandoffStoreWithCipher(cipher)
+}
+
+type ownerHandoffPGEffectStub struct{}
+
+func (ownerHandoffPGEffectStub) AcceptAndQueueWithin(context.Context, effectport.AcceptCommand) (effectport.Projection, effectport.Receipt, error) {
+	return effectport.Projection{ID: "synthetic-effect"}, effectport.Receipt{ID: "synthetic-receipt"}, nil
 }

@@ -3420,6 +3420,13 @@
       "reason": "Authorization keeps existing shorter expires_at/revocation/consumption rules; physical cleanup not yet connected to an Owner port. Historical attribution references must be retained.",
       "cleanup": "disabled"
     },
+    "referral_campaign_posters": {
+      "owner": "referral",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "活动当前发布的海报原图快照，供公开下载时叠加邀请人专属二维码；发布替换由管理员显式操作和审计记录约束。",
+      "source": "migrations/0210_referral_campaign_posters.sql"
+    },
     "referral_campaign_snapshots": {
       "owner": "referral",
       "policy": "permanent",
@@ -3435,13 +3442,6 @@
       "reason": "保存可被业务操作引用的配置/定义/结果版本或当前选择，Owner 读取依赖其稳定含义；历史效果不能由后续版本覆盖。 核验字段：state, version, name, cover_url, description, reward_rules, starts_at, ends_at。",
       "source": "migrations/0185_referral_core.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/referral_campaigns"
-    },
-    "referral_campaign_posters": {
-      "owner": "referral",
-      "policy": "permanent",
-      "cleanup": "disabled",
-      "reason": "活动当前发布的海报原图快照，供公开下载时叠加邀请人专属二维码；发布替换由管理员显式操作和审计记录约束。",
-      "source": "migrations/0210_referral_campaign_posters.sql"
     },
     "referral_current_relationships": {
       "owner": "referral",
@@ -4148,6 +4148,14 @@
       "source": "migrations/0171_wecom_contact_description_source_coverage.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/wecom_contact_description_source_observations"
     },
+    "wecom_customer_follow_staging": {
+      "owner": "wecom",
+      "policy": "runtime_coordination",
+      "cleanup": "disabled",
+      "reason": "全量同步的未发布员工资料和原始观察时钟；发布事务删除，失败任务保留用于恢复。",
+      "source": "migrations/0216_wecom_profile_publication.sql",
+      "classification_evidence": "docs/prd/2026-09-30-wecom-profile-history.md#数据生命周期"
+    },
     "wecom_customer_owner_observations": {
       "owner": "wecom",
       "policy": "owner_projection",
@@ -4155,6 +4163,14 @@
       "reason": "客户-员工关系的当前 Provider 观察、last_seen_run_id/stale_at 投影；不能误删正式本地 Owner 或历史交接证据。",
       "source": "migrations/0022_customer_profile_sections.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/wecom_customer_owner_observations"
+    },
+    "wecom_customer_profile_staging": {
+      "owner": "wecom",
+      "policy": "runtime_coordination",
+      "cleanup": "disabled",
+      "reason": "全量同步的未发布客户资料；同步服务在发布同一事务删除，失败任务保留用于恢复，不允许通用清理。",
+      "source": "migrations/0216_wecom_profile_publication.sql",
+      "classification_evidence": "docs/prd/2026-09-30-wecom-profile-history.md#数据生命周期"
     },
     "wecom_customer_sync_items": {
       "owner": "wecom",
@@ -4172,6 +4188,14 @@
       "source": "migrations/0009_customer_activation.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/wecom_customer_sync_runs"
     },
+    "wecom_customer_tag_history": {
+      "owner": "wecom",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "不可覆盖的标签基线与增减事实、版本和采集时间，历史统计持续依赖；不按时间删除。",
+      "source": "migrations/0216_wecom_profile_publication.sql",
+      "classification_evidence": "docs/prd/2026-09-30-wecom-profile-history.md#数据生命周期"
+    },
     "wecom_customer_tag_observations": {
       "owner": "wecom",
       "policy": "owner_projection",
@@ -4187,6 +4211,14 @@
       "reason": "customer/corp/employee 的观察版本水位保护标签结果新旧顺序；跟随 Owner 替换，禁止通用年龄删除。",
       "source": "migrations/0093_customer_tag_commands.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/wecom_customer_tag_refresh_watermarks"
+    },
+    "wecom_directory_publications": {
+      "owner": "wecom",
+      "policy": "owner_projection",
+      "cleanup": "disabled",
+      "reason": "企微统一目录的已发布版本、完整性和基线标记；只由同步发布事务推进，不允许按年龄删除。",
+      "source": "migrations/0216_wecom_profile_publication.sql",
+      "classification_evidence": "docs/prd/2026-09-30-wecom-profile-history.md#数据生命周期"
     },
     "wecom_external_contact_event_cursors": {
       "owner": "wecom",

@@ -902,15 +902,15 @@
       "mode": "100644"
     },
     {
-      "id": "v3-openapi-82d10be01f7b4dde6ff19e5ea8ebf783133dae7c",
+      "id": "v3-openapi-2aaeb014e2c75dd8ad216b3b461bd586edf2fc80",
       "library_id": "v3-api-a7084a754c225d76920d630bea33d1802070879f",
       "source_repository": "https://github.com/qianlan33333-png/AI-CRM-v3.git",
       "source_commit": "a7084a754c225d76920d630bea33d1802070879f",
       "canonical_path": "api/openapi.yaml",
       "source_path": "api/openapi.yaml",
-      "source_git_blob_sha": "82d10be01f7b4dde6ff19e5ea8ebf783133dae7c",
-      "content_sha256": "e1b39cb165154e7dd3166a0e46d86e4f24af5936735d86ccd42a122a5c7d1980",
-      "bytes": 759423,
+      "source_git_blob_sha": "2aaeb014e2c75dd8ad216b3b461bd586edf2fc80",
+      "content_sha256": "a9e0dd80a6286153a16aeb07da38a05ac2d710ead9a4f0b6e4d0f98521d282d1",
+      "bytes": 776319,
       "mode": "100644"
     }
   ]

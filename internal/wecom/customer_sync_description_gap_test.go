@@ -2,8 +2,6 @@ package wecom
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"testing"
 	"time"
 
@@ -78,56 +76,18 @@ func (audit *descriptionGapAudit) Append(_ context.Context, event platformaudit.
 	return event, nil
 }
 
-func TestCustomerSyncKeepsDescriptionReplanGapWithoutBlockingIdentityProjection(t *testing.T) {
-	tests := []struct {
-		name       string
-		writeErr   error
-		wantErr    error
-		wantCode   string
-		wantInsert int
-	}{
-		{name: "immutable description plan is an auditable optional gap", writeErr: port.ErrContactDescriptionReplanRequired, wantCode: "contact_description_replan_required", wantInsert: 1},
-		{name: "in flight plan failure remains fatal", writeErr: port.ErrContactDescriptionInFlight, wantErr: port.ErrContactDescriptionInFlight},
-	}
-	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
+func TestFullDirectorySyncNeverSubmitsDescriptionWrites(t *testing.T) {
+	for _, trigger := range []string{"manual", "daily", "unionid_refresh"} {
+		t.Run(trigger, func(t *testing.T) {
 			store := &descriptionGapSyncStore{}
-			writer := &descriptionGapWriter{err: testCase.writeErr}
+			writer := &descriptionGapWriter{err: port.ErrContactDescriptionInFlight}
 			audit := &descriptionGapAudit{}
 			identity := newMemoryLifecycleIdentity()
-			service := CustomerSyncService{
-				CorpID: "corp-1", Identity: identity, IdentityResolver: identity, IdentityLinker: identity,
-				Projection: descriptionGapProjection{}, Timeline: descriptionGapTimeline{},
-				Store: store, Outbox: descriptionGapOutbox{}, DescriptionIntents: writer, Audit: audit, UOW: directUOW{},
-			}
+			service := CustomerSyncService{CorpID: "corp-1", Identity: identity, IdentityResolver: identity, IdentityLinker: identity, Projection: descriptionGapProjection{}, Timeline: descriptionGapTimeline{}, Store: store, Outbox: descriptionGapOutbox{}, DescriptionIntents: writer, Audit: audit, UOW: directUOW{}}
 			description := "existing note"
-			contact := wecomport.ExternalContact{
-				ExternalUserID: "external-1",
-				FollowInfo:     []wecomport.ExternalContactFollowInfo{{EmployeeID: "staff-1", Description: &description, DescriptionProjected: true}},
-			}
-			err := service.ingestPage(context.Background(), CustomerSyncRun{ID: 44, CorpScope: "corp-1", Trigger: "scheduled", Version: 3}, "staff-1",
-				wecomport.ExternalContactPage{Contacts: []wecomport.ExternalContact{contact}}, time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC))
-			if testCase.wantErr != nil {
-				if !errors.Is(err, testCase.wantErr) || store.inserted != 0 {
-					t.Fatalf("err=%v inserted=%d want fatal %v", err, store.inserted, testCase.wantErr)
-				}
-				return
-			}
-			if err != nil || store.inserted != testCase.wantInsert || store.item.ErrorCode != testCase.wantCode {
-				t.Fatalf("err=%v inserted=%d item=%+v", err, store.inserted, store.item)
-			}
-			if store.profile != 1 || store.observed != 1 || store.pageCounts != 1 {
-				t.Fatalf("sync projection stopped at note conflict: profile=%d observations=%d page=%d", store.profile, store.observed, store.pageCounts)
-			}
-			if writer.calls != 1 || len(audit.events) != 1 {
-				t.Fatalf("description writes=%d audit events=%d", writer.calls, len(audit.events))
-			}
-			var payload map[string]any
-			if err := json.Unmarshal(audit.events[0].Payload, &payload); err != nil {
-				t.Fatal(err)
-			}
-			if payload["contact_description_replan_required"] != float64(1) || payload["pii"] != false {
-				t.Fatalf("page audit payload=%s", audit.events[0].Payload)
+			err := service.ingestPage(context.Background(), CustomerSyncRun{ID: 44, CorpScope: "corp-1", Trigger: trigger, Version: 3}, "staff-1", wecomport.ExternalContactPage{Contacts: []wecomport.ExternalContact{{ExternalUserID: "external-1", FollowInfo: []wecomport.ExternalContactFollowInfo{{EmployeeID: "staff-1", Description: &description, DescriptionProjected: true}}}}}, time.Now().UTC())
+			if err != nil || store.inserted != 1 || writer.calls != 0 || len(audit.events) != 1 {
+				t.Fatalf("err=%v inserted=%d writes=%d audits=%d", err, store.inserted, writer.calls, len(audit.events))
 			}
 		})
 	}

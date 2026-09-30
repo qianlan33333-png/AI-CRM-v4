@@ -3,6 +3,7 @@ package domain
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -25,17 +26,20 @@ const (
 type RefreshKind string
 
 const (
-	RefreshLegacy      RefreshKind = "legacy"
-	RefreshManual      RefreshKind = "manual"
-	RefreshIncremental RefreshKind = "incremental"
-	RefreshDaily       RefreshKind = "daily"
+	RefreshSourceRebase RefreshKind = "source_rebase"
+	RefreshLegacy       RefreshKind = "legacy"
+	RefreshManual       RefreshKind = "manual"
+	RefreshIncremental  RefreshKind = "incremental"
+	RefreshDaily        RefreshKind = "daily"
 )
 
 func ValidRefreshKind(value RefreshKind) bool {
-	return value == RefreshLegacy || value == RefreshManual || value == RefreshIncremental || value == RefreshDaily
+	return value == RefreshSourceRebase || value == RefreshLegacy || value == RefreshManual || value == RefreshIncremental || value == RefreshDaily
 }
 
-func (value RefreshKind) IsComplete() bool { return value == RefreshDaily || value == RefreshLegacy }
+func (value RefreshKind) IsComplete() bool {
+	return value == RefreshSourceRebase || value == RefreshDaily || value == RefreshLegacy
+}
 
 type RefreshRun struct {
 	ID                     int64        `json:"id"`
@@ -59,17 +63,18 @@ type PublishedRefresh struct {
 }
 
 type Snapshot struct {
-	ID                     int64      `json:"id"`
-	PackageID              int64      `json:"package_id"`
-	ConfigurationVersionID int64      `json:"configuration_version_id"`
-	RefreshRunID           int64      `json:"refresh_run_id"`
-	State                  string     `json:"state"`
-	ReferenceTime          time.Time  `json:"reference_time"`
-	MemberCount            int64      `json:"member_count"`
-	MemberDigest           [32]byte   `json:"-"`
-	SourceWatermarkDigest  [32]byte   `json:"-"`
-	CreatedAt              time.Time  `json:"created_at"`
-	PublishedAt            *time.Time `json:"published_at,omitempty"`
+	SourceWatermarks       json.RawMessage `json:"source_watermarks"`
+	ID                     int64           `json:"id"`
+	PackageID              int64           `json:"package_id"`
+	ConfigurationVersionID int64           `json:"configuration_version_id"`
+	RefreshRunID           int64           `json:"refresh_run_id"`
+	State                  string          `json:"state"`
+	ReferenceTime          time.Time       `json:"reference_time"`
+	MemberCount            int64           `json:"member_count"`
+	MemberDigest           [32]byte        `json:"-"`
+	SourceWatermarkDigest  [32]byte        `json:"-"`
+	CreatedAt              time.Time       `json:"created_at"`
+	PublishedAt            *time.Time      `json:"published_at,omitempty"`
 }
 
 // SnapshotMemberFact contains only immutable, canonical qualifying-payment

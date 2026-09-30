@@ -152,7 +152,7 @@ func TestCustomerSyncJourneyPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := filepath.Join("..", "..")
-	for _, name := range []string{"0001_platform.sql", "0002_identity.sql", "0003_access.sql", "0004_wecom.sql", "0005_external_effects.sql", "0009_customer_activation.sql", "0022_customer_profile_sections.sql", "0086_wecom_profile_primary_owner.sql", "0093_customer_tag_commands.sql", "0153_wecom_customer_detail_projection.sql", "0170_wecom_contact_description_effect.sql", "0171_wecom_contact_description_source_coverage.sql", "0211_wecom_unionid_refresh.sql", "0213_wecom_followed_at.sql"} {
+	for _, name := range []string{"0001_platform.sql", "0002_identity.sql", "0003_access.sql", "0004_wecom.sql", "0005_external_effects.sql", "0009_customer_activation.sql", "0022_customer_profile_sections.sql", "0086_wecom_profile_primary_owner.sql", "0093_customer_tag_commands.sql", "0153_wecom_customer_detail_projection.sql", "0170_wecom_contact_description_effect.sql", "0171_wecom_contact_description_source_coverage.sql", "0211_wecom_unionid_refresh.sql", "0213_wecom_followed_at.sql", "0216_wecom_profile_publication.sql"} {
 		raw, readErr := os.ReadFile(filepath.Join(root, "migrations", name))
 		if readErr != nil {
 			t.Fatal(readErr)
@@ -349,6 +349,12 @@ func TestCustomerSyncJourneyPostgreSQL(t *testing.T) {
 	// after the first employee commits must retain that relationship without
 	// publishing a partial primary; retrying the same durable run then derives
 	// the provider's lexicographically first owner from its complete scope.
+	// The fixture changes the provider's complete staff universe for this next
+	// scenario. Align its previously known visibility rather than simulating a
+	// permission loss (covered separately by publication-scope tests).
+	if _, err = pool.Native().Exec(ctx, `UPDATE wecom_customer_sync_runs SET staff_ids='["staff-a","staff-b"]' WHERE status='succeeded'`); err != nil {
+		t.Fatal(err)
+	}
 	pagedProvider := &pagedIntegrationDirectoryProvider{failStaffB: true}
 	pagedService := service
 	pagedService.Provider = pagedProvider
@@ -367,15 +373,10 @@ func TestCustomerSyncJourneyPostgreSQL(t *testing.T) {
 	if err != nil || pagedRun.Status != wecom.SyncFailedRetryable || pagedRun.StaffIndex != 1 {
 		t.Fatalf("partial paged run=%+v err=%v", pagedRun, err)
 	}
-	var partialPrimary string
 	var retainedOwners int
-	if err = pool.Native().QueryRow(ctx, `SELECT COALESCE(profile.primary_owner_userid,''),count(observation.employee_id)
-		FROM wecom_external_contact_profiles profile
-		JOIN customer_identities identity ON identity.id=profile.external_identity_id
-		LEFT JOIN wecom_customer_owner_observations observation ON observation.customer_id=profile.customer_id AND observation.corp_scope=profile.corp_scope AND observation.relationship_status='active'
-		WHERE identity.normalized_value='external-paged'
-		GROUP BY profile.primary_owner_userid`).Scan(&partialPrimary, &retainedOwners); err != nil || partialPrimary != "" || retainedOwners != 1 {
-		t.Fatalf("partial primary=%q retained owners=%d err=%v", partialPrimary, retainedOwners, err)
+	var publishedProfiles, stagedProfiles int
+	if err = pool.Native().QueryRow(ctx, `SELECT (SELECT count(*) FROM wecom_external_contact_profiles p JOIN customer_identities i ON i.id=p.external_identity_id WHERE i.normalized_value='external-paged'),(SELECT count(*) FROM wecom_customer_profile_staging WHERE run_id=$1)`, pagedRun.ID).Scan(&publishedProfiles, &stagedProfiles); err != nil || publishedProfiles != 0 || stagedProfiles != 1 {
+		t.Fatalf("partial publication=%d staged=%d err=%v", publishedProfiles, stagedProfiles, err)
 	}
 	pagedProvider.recoverStaffB()
 	if err = pagedWorker.Work(ctx, &river.Job[wecom.CustomerSyncJobArgs]{JobRow: &rivertype.JobRow{Attempt: 2, MaxAttempts: 12}, Args: wecom.CustomerSyncJobArgs{RunID: pagedRun.ID}}); err != nil {

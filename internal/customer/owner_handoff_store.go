@@ -33,62 +33,12 @@ func NewPostgreSQLOwnerHandoffStoreWithCipher(cipher *OwnerHandoffCipher) *Postg
 	return &PostgreSQLOwnerHandoffStore{cipher: cipher}
 }
 
-func (*PostgreSQLOwnerHandoffStore) LocalOwner(ctx context.Context, customerID customerdomain.CustomerID, lock bool) (LocalOwner, bool, error) {
-	if customerID < 1 {
-		return LocalOwner{}, false, ErrOwnerHandoffConflict
-	}
-	tx, err := platformpostgres.RequireTransaction(ctx)
-	if err != nil {
-		return LocalOwner{}, false, err
-	}
-	query := "SELECT customer_id,staff_id,version,source,updated_at FROM customer_local_owners WHERE customer_id=$1"
-	if lock {
-		query += " FOR UPDATE"
-	}
-	var owner LocalOwner
-	err = tx.QueryRow(ctx, query, customerID).Scan(&owner.CustomerID, &owner.StaffID, &owner.Version, &owner.Source, &owner.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return LocalOwner{}, false, nil
-	}
-	return owner, err == nil, err
+// Compatibility reads return no local ownership: WeCom owns service staff.
+func (*PostgreSQLOwnerHandoffStore) LocalOwner(context.Context, customerdomain.CustomerID, bool) (LocalOwner, bool, error) {
+	return LocalOwner{}, false, nil
 }
-
-func (store *PostgreSQLOwnerHandoffStore) AssignLocalOwner(ctx context.Context, customerID customerdomain.CustomerID, targetStaffID, expectedVersion int64, source string, now time.Time) (LocalOwner, error) {
-	if customerID < 1 || targetStaffID < 1 || (source != "owner_handoff_local_only" && source != "owner_handoff_wecom_then_crm") {
-		return LocalOwner{}, ErrOwnerHandoffConflict
-	}
-	owner, found, err := store.LocalOwner(ctx, customerID, true)
-	if err != nil {
-		return LocalOwner{}, err
-	}
-	// Zero is the frozen version for a preview row with no local owner.  It
-	// must never authorize replacing an owner which appeared after preview.
-	if found && owner.Version != expectedVersion {
-		return LocalOwner{}, ErrOwnerHandoffConflict
-	}
-	if !found && expectedVersion != 0 {
-		return LocalOwner{}, ErrOwnerHandoffConflict
-	}
-	tx, err := platformpostgres.RequireTransaction(ctx)
-	if err != nil {
-		return LocalOwner{}, err
-	}
-	if !found {
-		// A concurrent insert after the preview's zero-version read is a normal
-		// CAS conflict. ON CONFLICT keeps this transaction usable so the caller
-		// can persist its per-line conflict fact instead of receiving 23505.
-		err = tx.QueryRow(ctx, "INSERT INTO customer_local_owners(customer_id,staff_id,version,source,updated_at) VALUES($1,$2,1,$3,$4) ON CONFLICT (customer_id) DO NOTHING RETURNING version,updated_at", customerID, targetStaffID, source, now.UTC()).Scan(&owner.Version, &owner.UpdatedAt)
-	} else {
-		err = tx.QueryRow(ctx, "UPDATE customer_local_owners SET staff_id=$2,version=version+1,source=$3,updated_at=$4 WHERE customer_id=$1 AND version=$5 RETURNING version,updated_at", customerID, targetStaffID, source, now.UTC(), owner.Version).Scan(&owner.Version, &owner.UpdatedAt)
-	}
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) || isUniqueViolation(err) {
-			return LocalOwner{}, ErrOwnerHandoffConflict
-		}
-		return LocalOwner{}, err
-	}
-	owner.CustomerID, owner.StaffID, owner.Source = customerID, targetStaffID, source
-	return owner, nil
+func (*PostgreSQLOwnerHandoffStore) AssignLocalOwner(context.Context, customerdomain.CustomerID, int64, int64, string, time.Time) (LocalOwner, error) {
+	return LocalOwner{}, ErrOwnerHandoffConflict
 }
 
 func isUniqueViolation(err error) bool {
@@ -515,54 +465,10 @@ func (store *PostgreSQLOwnerHandoffStore) RecomputeOwnerHandoffBatchState(ctx co
 	return nil
 }
 
-func (store *PostgreSQLOwnerHandoffStore) CreateLocalOnlyOwnerHandoffBatch(ctx context.Context, record customerport.OwnerHandoffBatchRecord) (customerport.OwnerHandoffBatch, error) {
-	if record.Preview.Preview.Mode != customerport.OwnerHandoffLocalOnly || record.ActorID < 1 || record.Idempotency == "" || len(record.Lines) != len(record.Preview.Candidates) {
-		return customerport.OwnerHandoffBatch{}, ErrOwnerHandoffConflict
-	}
-	tx, err := platformpostgres.RequireTransaction(ctx)
-	if err != nil {
-		return customerport.OwnerHandoffBatch{}, err
-	}
-	batchID, err := ownerHandoffStoreID()
-	if err != nil {
-		return customerport.OwnerHandoffBatch{}, err
-	}
-	var created time.Time
-	err = tx.QueryRow(ctx, `INSERT INTO customer_owner_handoff_batches(id,preview_id,actor_admin_user_id,idempotency_key,request_digest,mode,source_staff_id,target_staff_id,corp_scope,state) VALUES($1,$2,$3,$4,$5,'local_only',$6,$7,$8,'accepted') ON CONFLICT (actor_admin_user_id,idempotency_key) DO NOTHING RETURNING created_at`, batchID, record.Preview.Preview.ID, record.ActorID, record.Idempotency, record.RequestDigest[:], record.Preview.Preview.SourceStaffID, record.Preview.Preview.TargetStaffID, record.Preview.Preview.CorpScope).Scan(&created)
-	if errors.Is(err, pgx.ErrNoRows) {
-		prior, priorDigest, found, readErr := store.OwnerHandoffBatchByIdempotency(ctx, record.ActorID, record.Idempotency)
-		if readErr != nil {
-			return customerport.OwnerHandoffBatch{}, readErr
-		}
-		if !found || priorDigest != record.RequestDigest {
-			return customerport.OwnerHandoffBatch{}, ErrOwnerHandoffConflict
-		}
-		return prior, nil
-	}
-	if err != nil {
-		return customerport.OwnerHandoffBatch{}, err
-	}
-	// The preview already owns all immutable candidates. Copying its rows with
-	// one INSERT … SELECT avoids 20k client/server round trips while preserving
-	// the exact frozen scope and line numbers for River segments.
-	command, err := tx.Exec(ctx, `INSERT INTO customer_owner_handoff_lines(batch_id,line_no,customer_id,mode,source_staff_id,target_staff_id,expected_local_owner_version,relation_digest,state)
-		SELECT $1,line_no,customer_id,'local_only',$2,$3,expected_local_owner_version,relation_digest,CASE WHEN state='ready' THEN 'queued' ELSE state END
-		FROM customer_owner_handoff_preview_rows WHERE preview_id=$4 ORDER BY line_no`, batchID, record.Preview.Preview.SourceStaffID, record.Preview.Preview.TargetStaffID, record.Preview.Preview.ID)
-	if err != nil {
-		return customerport.OwnerHandoffBatch{}, err
-	}
-	if command.RowsAffected() != int64(len(record.Lines)) {
-		return customerport.OwnerHandoffBatch{}, ErrOwnerHandoffConflict
-	}
-	if _, err = tx.Exec(ctx, `UPDATE customer_owner_handoff_previews SET executed_batch_id=$2 WHERE id=$1 AND executed_batch_id IS NULL`, record.Preview.Preview.ID, batchID); err != nil {
-		return customerport.OwnerHandoffBatch{}, err
-	}
-	return customerport.OwnerHandoffBatch{ID: batchID, Mode: customerport.OwnerHandoffLocalOnly, State: "accepted", Lines: append([]customerport.OwnerHandoffLine(nil), record.Lines...), CreatedAt: created.UTC(), UpdatedAt: created.UTC()}, nil
+func (store *PostgreSQLOwnerHandoffStore) CreateLocalOnlyOwnerHandoffBatch(context.Context, customerport.OwnerHandoffBatchRecord) (customerport.OwnerHandoffBatch, error) {
+	return customerport.OwnerHandoffBatch{}, ErrOwnerHandoffConflict
 }
 
-// CreateWeComOwnerHandoffBatch copies the already encrypted, preview-bound
-// snapshots.  It intentionally does not decrypt or re-encrypt identifiers;
-// the preview ID remains the AEAD binding throughout execution.
 func (store *PostgreSQLOwnerHandoffStore) CreateWeComOwnerHandoffBatch(ctx context.Context, record customerport.OwnerHandoffBatchRecord) (customerport.OwnerHandoffBatch, error) {
 	if record.Preview.Preview.Mode != customerport.OwnerHandoffWeComThenCRM || record.ActorID < 1 || record.Idempotency == "" || len(record.Lines) != len(record.Preview.Candidates) {
 		return customerport.OwnerHandoffBatch{}, ErrOwnerHandoffConflict
@@ -761,7 +667,7 @@ func (store *PostgreSQLOwnerHandoffStore) CompleteOwnerHandoffEffect(ctx context
 			break
 		}
 		expectedState, expectedDigest := ownerHandoffCompletionProjection(completion, item.line, defaultDigest, lineCompletion, lineDigests)
-		if expectedState == "" || (item.state != expectedState && !(expectedState == "provider_accepted" && item.state == "cas_conflict")) || !bytes.Equal(item.digest, expectedDigest) {
+		if expectedState == "" || (item.state != expectedState && !(expectedState == "provider_accepted" && (item.state == "cas_conflict" || item.state == "observed"))) || !bytes.Equal(item.digest, expectedDigest) {
 			return ErrOwnerHandoffConflict
 		}
 	}
@@ -804,14 +710,7 @@ func (store *PostgreSQLOwnerHandoffStore) CompleteOwnerHandoffEffect(ctx context
 		if state == "" {
 			return ErrOwnerHandoffConflict
 		}
-		if state == "provider_accepted" {
-			if _, assignErr := store.AssignLocalOwner(ctx, item.customer, item.target, item.expectedVersion, "owner_handoff_wecom_then_crm", time.Now().UTC()); assignErr != nil {
-				if !errors.Is(assignErr, ErrOwnerHandoffConflict) {
-					return assignErr
-				}
-				state = "cas_conflict"
-			}
-		}
+
 		command, updateErr := tx.Exec(ctx, `UPDATE customer_owner_handoff_lines SET state=$3,result_digest=$4,effect_attempt=$5,effect_generation=$6,effect_fence=$7,updated_at=clock_timestamp()
 			WHERE batch_id=$1 AND line_no=$2 AND effect_id=$8 AND state IN ('queued','retryable_failed')`, batchID, item.line, state, digest, completion.Attempt, completion.Generation, completion.Fence, completion.EffectID)
 		if updateErr != nil {
@@ -1113,26 +1012,6 @@ var _ customerport.OwnerHandoffCompletionWriter = (*PostgreSQLOwnerHandoffStore)
 
 // ListOwnerHandoffCustomerIDs is a bounded Customer-owned lookup for the
 // all-range page action. It is separate from point reads used during preview.
-func (store *PostgreSQLOwnerHandoffStore) ListOwnerHandoffCustomerIDs(ctx context.Context, staffID int64, limit int) ([]customerdomain.CustomerID, error) {
-	if staffID < 1 || limit < 1 || limit > 20001 {
-		return nil, errors.New("invalid owner handoff range")
-	}
-	tx, err := platformpostgres.RequireTransaction(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := tx.Query(ctx, `SELECT customer_id FROM customer_local_owners WHERE staff_id=$1 ORDER BY customer_id LIMIT $2`, staffID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	ids := make([]customerdomain.CustomerID, 0)
-	for rows.Next() {
-		var id customerdomain.CustomerID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+func (store *PostgreSQLOwnerHandoffStore) ListOwnerHandoffCustomerIDs(context.Context, int64, int) ([]customerdomain.CustomerID, error) {
+	return []customerdomain.CustomerID{}, nil
 }

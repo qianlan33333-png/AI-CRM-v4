@@ -95,10 +95,12 @@ function adaptFrozenDonorCopy(page: HTMLElement): void {
   // The donor remains byte-frozen. Adapt only its known static labels after
   // mounting; imported values, legacy file headers and protocol tokens stay
   // untouched.
+  const transfer = page.querySelector<HTMLInputElement>("input[data-include-wecom-transfer]");
+  if (transfer) { transfer.checked = true; transfer.disabled = true; }
   const exact: Array<[string, string, string]> = [
     ["h1", "客户负责人迁移 / 在职继承", "用户负责人迁移 / 在职继承"],
-    [".owner-migration-subtitle", "先完成企微客户转接，再同步 CRM 本地归属；执行前必须预览。", "先完成企微用户转接，再同步 CRM 本地归属；执行前必须预览。"],
-    [".owner-migration-switch-line span", "先调用企微官方转接接口；企微成功的客户才同步 CRM。", "先调用企微官方转接接口；企微成功的用户才同步 CRM。"],
+    [".owner-migration-subtitle", "先完成企微客户转接，再同步 CRM 本地归属；执行前必须预览。", "通过企微官方接口转接用户；CRM 跟进信息在资料刷新后更新。执行前必须预览。"],
+    [".owner-migration-switch-line span", "先调用企微官方转接接口；企微成功的客户才同步 CRM。", "调用企微官方转接接口；CRM 资料由统一同步更新。"],
     ["[data-confirm-phrase-input]", "确认将 0 个客户从 source 迁移到 target", "确认将 0 个用户从 source 迁移到 target"],
   ];
   exact.forEach(([selector, source, target]) => {
@@ -246,7 +248,7 @@ function installPicker(root: HTMLElement, directory: OwnerStaffDirectory): void 
   root.querySelectorAll<HTMLButtonElement>("[data-owner-picker]").forEach(button => button.addEventListener("click", () => choose(button.dataset.ownerPicker as "source" | "target")));
 }
 
-function currentMode(root: ParentNode): string { return query<HTMLInputElement>(root, "[data-include-wecom-transfer]").checked ? "wecom_then_crm" : "local_only"; }
+function currentMode(_root: ParentNode): string { return "wecom_then_crm"; }
 function ownerID(root: ParentNode, kind: "source" | "target"): number { return Number(query<HTMLInputElement>(root, `[data-owner-userid="${kind}"]`).value); }
 function ownerUserID(root: ParentNode, kind: "source" | "target", directory: OwnerStaffDirectory): string {
   return text(directory.get(ownerID(root, kind))?.UserID);
@@ -286,7 +288,7 @@ function ownerMigrationReason(reason: string): string {
 }
 
 function ownerMigrationModeLabel(mode: string): string {
-  return ({ local_only: "仅本地迁移", wecom_then_crm: "先企微转接后本地迁移" } as Record<string, string>)[mode] || "迁移方式待确认";
+  return ({ local_only: "仅本地迁移", wecom_then_crm: "企微官方转接" } as Record<string, string>)[mode] || "迁移方式待确认";
 }
 function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);

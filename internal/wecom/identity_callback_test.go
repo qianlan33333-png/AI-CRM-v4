@@ -67,7 +67,7 @@ func TestInboxProcessorLinksCallbackUnionIDToExistingPayerRoot(t *testing.T) {
 	if reader.calls != 1 || reader.requested != externalID {
 		t.Fatalf("provider detail reads=%d requested=%q", reader.calls, reader.requested)
 	}
-	if !relationships.active("corp-1", "employee-1", buyerCustomerID) || len(entrantReceipts.values) != 1 || entrantReceipts.values[0].CustomerID != buyerCustomerID {
+	if len(relationships.values) != 0 || len(entrantReceipts.values) != 1 || entrantReceipts.values[0].CustomerID != buyerCustomerID {
 		t.Fatalf("payer root was not used: relationships=%+v entrant=%+v", relationships.values, entrantReceipts.values)
 	}
 	if _, found := identity.byKey[memoryIdentityKey("wecom-corp:corp-1", externalID)]; !found {

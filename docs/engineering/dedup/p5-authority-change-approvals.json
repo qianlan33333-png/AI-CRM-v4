@@ -2083,6 +2083,28 @@
       ],
       "reason": "Advertise the optional product alipay_enabled setting in the active ProductAdminProjection contract; rebind its canonical OpenAPI identity and lock to the exact bytes. No frozen donor payload changes.",
       "review_reference": "docs/prd/2026-09-30-product-alipay-toggle.md; user-authorized unchanged product payment policy rebased to the release workbench cumulative cb7cf3b9 base, author-reviewed exact base/head declaration. This records the author declaration, not independent approval or deployment evidence."
+    },
+    {
+      "base_commit": "6bf3ca9d10b865a612ae9d64778ed82707c94d47",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "e1b39cb165154e7dd3166a0e46d86e4f24af5936735d86ccd42a122a5c7d1980",
+          "head_sha256": "a9e0dd80a6286153a16aeb07da38a05ac2d710ead9a4f0b6e4d0f98521d282d1"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "157c5d83b58b390703dc65ec12a0c5ca01408317d1ae3bc2f952bd37546d371d",
+          "head_sha256": "5f166b9c10c8484711ee8a8ac9dac98d84deb7887c4a3ddafb691448f85dd832"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "ed66453ef85ebe595b657b9e7e8732779c1bf5484f3b60a094d0379f13eccb58",
+          "head_sha256": "1bfd9a53a9ff6b7daa18a334b4c8b1b2fb2b4856b28af9245b7a819217dce287"
+        }
+      ],
+      "reason": "Complete the user-approved unified WeCom directory and immutable tag-history API contract, including three read-only customer-profile/history/statistics routes and actual sync triggers/replay responses; bind the active canonical OpenAPI and embed view to its exact bytes. No frozen donor payload or checker policy changes.",
+      "review_reference": "User's explicit 'PLEASE IMPLEMENT THIS PLAN: 企微客户资料统一同步与标签变更历史' in original task 01a0f25f-76de-7893-a18c-3f4109bbb827; docs/prd/2026-09-30-wecom-profile-history.md. Release workbench 01a0ead7-26cf-7b01-87d9-f68df10eaebe identified the missing API contract in the 8b411061 callback and independently verified the contract/binding-only diff in the 0f2c215a callback. Author reviewed these exact changes against cumulative base 6bf3ca9d. This records existing user business authorization and author review, not a new independent approval, production authorization or deployment evidence."
     }
   ]
 }

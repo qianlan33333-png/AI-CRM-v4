@@ -158,7 +158,7 @@ func (users localOwnerProfileUsers) UserByWeComUserID(_ context.Context, id stri
 	return user, nil
 }
 
-func TestCustomerOwnerAdapterShowsExplicitLocalOwnerBeforeWeComFacts(t *testing.T) {
+func TestCustomerOwnerAdapterIgnoresFormerLocalOwnerAndReadsPublishedWeComFacts(t *testing.T) {
 	now := time.Date(2026, 9, 6, 9, 0, 0, 0, time.UTC)
 	page, err := (customerOwnerAdapter{
 		uow:          profileTestUOW{},
@@ -166,7 +166,7 @@ func TestCustomerOwnerAdapterShowsExplicitLocalOwnerBeforeWeComFacts(t *testing.
 		users:        localOwnerProfileUsers{byID: map[int64]accessdomain.User{9: {ID: 9, DisplayName: "新负责人"}}, byWeCom: map[string]accessdomain.User{"former": {DisplayName: "旧跟进员工"}}},
 		owners:       localOwnerProfileStore{owner: customerport.LocalOwner{CustomerID: 42, StaffID: 9, Version: 2, Source: "owner_handoff_wecom_then_crm", UpdatedAt: now}, found: true},
 	}).CustomerOwners(context.Background(), 42)
-	if err != nil || len(page.Items) != 2 || page.Items[0].DisplayName != "新负责人" || page.Items[0].Status != "local_owner" || page.Items[0].Source != "owner_handoff_wecom_then_crm" || page.Items[1].Source != "wecom_follow" {
+	if err != nil || len(page.Items) != 1 || page.Items[0].DisplayName != "旧跟进员工" || page.Items[0].Status != "active" || page.Items[0].Source != "wecom_follow" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
 }

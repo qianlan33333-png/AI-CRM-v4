@@ -10,6 +10,9 @@ import (
 )
 
 func (PostgreSQLFollowRelationshipStore) AudienceRecognizedContacts(ctx context.Context, scope string, at time.Time) ([]customerdomain.CustomerID, error) {
+	if err := lockDirectoryRead(ctx); err != nil {
+		return nil, err
+	}
 	if at.IsZero() || !strings.HasPrefix(scope, "wecom-corp:") || len(scope) <= len("wecom-corp:") {
 		return nil, ErrInvalidFollowRelationship
 	}
@@ -17,7 +20,7 @@ func (PostgreSQLFollowRelationshipStore) AudienceRecognizedContacts(ctx context.
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT customer_id FROM wecom_external_contact_profiles WHERE corp_scope=$1 AND activation_status IN ('active','stale') AND updated_at <= $2 ORDER BY customer_id`, scope, at.UTC())
+	rows, err := tx.Query(ctx, `SELECT p.customer_id FROM wecom_external_contact_profiles p JOIN wecom_customer_sync_runs r ON r.id=p.last_seen_run_id AND r.status='succeeded' WHERE p.corp_scope=$1 AND p.activation_status IN ('active','stale') ORDER BY p.customer_id`, scope)
 	if err != nil {
 		return nil, err
 	}

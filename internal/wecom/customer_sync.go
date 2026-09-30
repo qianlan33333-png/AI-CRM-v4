@@ -152,6 +152,7 @@ type CustomerSyncService struct {
 	Projection            customerport.ProjectionWriter
 	Timeline              customerport.TimelineWriter
 	Store                 CustomerSyncStore
+	PublicationNotifier   wecomport.DirectoryPublicationNotifier
 	Outbox                platformoutbox.Service
 	Enqueuer              CustomerSyncJobEnqueuer
 	// DescriptionIntents is optional until the composition root supplies the
@@ -194,8 +195,9 @@ func (service CustomerSyncService) Ready() bool {
 }
 
 func (service CustomerSyncService) Create(ctx context.Context, command CreateCustomerSyncRun) (CustomerSyncRun, bool, error) {
-	if !service.Ready() || command.CorpScope != "wecom-corp:"+service.CorpID || command.RequestedBy < 1 ||
-		(command.Trigger != "manual" && command.Trigger != "unionid_refresh") ||
+	if !service.Ready() || command.CorpScope != "wecom-corp:"+service.CorpID || (command.RequestedBy < 1 && command.Trigger != "daily") ||
+		(command.Trigger != "manual" && command.Trigger != "unionid_refresh" && command.Trigger != "daily" && command.Trigger != "description_backfill") ||
+		(command.Trigger == "description_backfill" && (service.DescriptionIntents == nil || service.IdentityResolver == nil)) ||
 		(command.Trigger == "unionid_refresh" && !service.UnionIDs.Ready()) {
 		return CustomerSyncRun{}, false, ErrSyncNotReady
 	}
@@ -348,6 +350,9 @@ func syncRetryCode(err error) string {
 }
 
 func (service CustomerSyncService) ingestPage(ctx context.Context, run CustomerSyncRun, staffID string, page wecomport.ExternalContactPage, observedAt time.Time) error {
+	if run.Trigger == "description_backfill" {
+		return service.ingestDescriptionBackfillPage(ctx, run, staffID, page, observedAt)
+	}
 	now := service.now()
 	return service.UOW.Within(ctx, func(txContext context.Context) error {
 		var activated, linked, conflicts, terminal, projected, descriptionReplanRequired int64
@@ -438,51 +443,40 @@ func (service CustomerSyncService) ingestPage(ctx context.Context, run CustomerS
 					item.Outcome = "already_linked"
 				}
 			}
-			if err := service.Store.UpsertProfileObservations(txContext, run.ID, run.CorpScope, provision.CustomerID, contact.FollowInfo, observedAt); err != nil {
-				return err
-			}
-			if service.DescriptionIntents != nil && run.Trigger != "unionid_refresh" {
-				for _, follow := range contact.FollowInfo {
-					if !follow.DescriptionProjected || follow.Description == nil || follow.EmployeeID == "" {
-						continue
-					}
-					externalDigest := effectDigest(contact.ExternalUserID)
-					observedDigest := outboundport.ContactDescriptionObservedDigest(*follow.Description)
-					target := outboundport.ContactDescriptionTargetDigest(follow.EmployeeID, contact.ExternalUserID)
-					payload := outboundport.ContactDescriptionPayloadDigest(observedDigest)
-					_, enqueueErr := service.DescriptionIntents.WriteContactDescriptionIntentWithin(txContext, outboundport.ContactDescriptionIntentCommand{
-						CustomerID: provision.CustomerID, EmployeeUserID: follow.EmployeeID,
-						SourceDigest: effectDigest("wecom.contact.description.source.v1", "run", strconv.FormatInt(run.ID, 10), run.CorpScope, follow.EmployeeID, string(externalDigest), string(observedDigest)),
-						TargetDigest: target, ObservedDescriptionDigest: observedDigest, PayloadDigest: payload,
-						ReceiptKey: outboundport.ContactDescriptionRelationshipKey(run.CorpScope, follow.EmployeeID, externalDigest), SourceRunID: run.ID,
-						// A manual run is an explicit administrator backfill/replan. It
-						// may make a new immutable plan only after the former plan is
-						// terminal and non-unknown; routine/callback maintenance cannot.
-						Replan: run.Trigger == "manual", Operation: outboundport.ContactDescriptionOperationWrite,
-					})
-					if enqueueErr != nil {
-						if errors.Is(enqueueErr, outboundport.ErrContactDescriptionReplanRequired) {
-							// Description intents are an optional profile-maintenance
-							// effect. Preserve this exact gap on the sync item and in the
-							// page audit, while allowing the independent directory/OneID
-							// projection to complete. Other failures still roll back the
-							// page because their effect state is not safely ignorable.
-							if item.ErrorCode == "" {
-								item.ErrorCode = "contact_description_replan_required"
-							}
-							descriptionReplanRequired++
-							continue
-						}
-						return enqueueErr
-					}
-				}
-			}
+
 			inserted, insertErr := service.Store.InsertItem(txContext, run.ID, run.CorpScope, item)
 			if insertErr != nil {
 				return insertErr
 			}
+			if staging, ok := service.Store.(directoryPublicationStore); ok {
+				if identityConflictProjection {
+					if inserted {
+						conflicts++
+					}
+					continue
+				}
+				if err := staging.StageContact(txContext, run.ID, provision, contact, observedAt); err != nil {
+					return err
+				}
+				if inserted {
+					if identityConflictProjection {
+						conflicts++
+					} else {
+						projected++
+						if provision.Created {
+							activated++
+						} else {
+							linked++
+						}
+					}
+				}
+				continue
+			}
 			if !inserted && !identityConflictProjection {
 				continue
+			}
+			if err := service.Store.UpsertProfileObservations(txContext, run.ID, run.CorpScope, provision.CustomerID, contact.FollowInfo, observedAt); err != nil {
+				return err
 			}
 			profileDigest := sha256.Sum256(payload)
 			if err := service.Store.UpsertProfile(txContext, run.ID, run.CorpScope, provision, contact, profileDigest, now); err != nil {
@@ -542,10 +536,30 @@ func (service CustomerSyncService) ingestPage(ctx context.Context, run CustomerS
 func effectDigest(parts ...string) effectport.Digest { return effectport.Hash(parts...) }
 
 func (service CustomerSyncService) reconcile(ctx context.Context, run CustomerSyncRun) error {
+	if run.Trigger == "description_backfill" {
+		return service.completeDescriptionBackfill(ctx, run)
+	}
 	now := service.now()
 	return service.UOW.Within(ctx, func(txContext context.Context) error {
 		if run.Discovered != run.Activated+run.AlreadyLinked+run.Conflict+run.TerminalFailed || run.Projected != run.Activated+run.AlreadyLinked {
 			return ErrSyncCAS
+		}
+		if run.TerminalFailed > 0 {
+			return service.Store.Terminate(txContext, run.ID, "incomplete_directory")
+		}
+		if scopeReader, ok := service.Store.(interface {
+			PublicationScopeComplete(context.Context, CustomerSyncRun) (bool, error)
+		}); ok {
+			complete, err := scopeReader.PublicationScopeComplete(txContext, run)
+			if err != nil {
+				return err
+			}
+			if !complete {
+				return service.Store.Terminate(txContext, run.ID, "provider_scope_changed")
+			}
+		}
+		if err := service.publishStaged(txContext, run, now); err != nil {
+			return err
 		}
 		staleIDs, err := service.Store.StaleCustomers(txContext, run.ID)
 		if err != nil {
@@ -575,6 +589,14 @@ func (service CustomerSyncService) reconcile(ctx context.Context, run CustomerSy
 		}
 		if err = service.Store.Complete(txContext, run.ID, run.Version, stale); err != nil {
 			return errSyncCompletion
+		}
+		if publication, ok := service.Store.(directoryPublicationStore); ok {
+			if err = publication.EndPublication(txContext, run, now); err != nil {
+				return err
+			}
+			if err = service.notifyPublication(txContext, run.CorpScope); err != nil {
+				return err
+			}
 		}
 		_, err = service.Audit.Append(txContext, platformaudit.Event{IdempotencyKey: idempotency.Key("wecom-sync-complete:" + strconv.FormatInt(run.ID, 10)),
 			Action: "wecom.customer_sync_succeeded", ActorType: "system", ResourceType: "wecom_customer_sync", ResourceID: strconv.FormatInt(run.ID, 10),

@@ -10,6 +10,7 @@ import (
 const MaximumEvaluationMembers = 100000
 
 type SourceWatermark struct {
+	Version    int64     `json:"version,omitempty"`
 	Source     string    `json:"source"`
 	AsOf       time.Time `json:"as_of"`
 	Fresh      bool      `json:"fresh"`

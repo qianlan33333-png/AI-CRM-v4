@@ -8,9 +8,12 @@ import (
 	wecomport "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/port"
 )
 
-// MachineContactRows fails while a directory run is incomplete. A caller may
-// then retry the same watermark rather than treating a partial import as empty.
+// MachineContactRows reads the last complete publication while another refresh
+// is staged. Its shared publication lock pins every query to one revision.
 func (PostgreSQLCustomerSyncStore) MachineContactRows(ctx context.Context, corpScope string) ([]wecomport.MachineContactRow, []wecomport.MachineUnresolvedRow, error) {
+	if err := lockDirectoryRead(ctx); err != nil {
+		return nil, nil, err
+	}
 	if len(corpScope) < 12 || corpScope[:11] != "wecom-corp:" {
 		return nil, nil, errors.New("invalid corp scope")
 	}
@@ -19,7 +22,7 @@ func (PostgreSQLCustomerSyncStore) MachineContactRows(ctx context.Context, corpS
 		return nil, nil, err
 	}
 	var status string
-	if err = tx.QueryRow(ctx, `SELECT status FROM wecom_customer_sync_runs WHERE corp_scope=$1 ORDER BY id DESC LIMIT 1`, corpScope).Scan(&status); err != nil || status != "succeeded" {
+	if err = tx.QueryRow(ctx, `SELECT status FROM wecom_customer_sync_runs WHERE corp_scope=$1 AND status='succeeded' AND trigger_type IN ('initial','daily','manual','unionid_refresh') ORDER BY id DESC LIMIT 1`, corpScope).Scan(&status); err != nil || status != "succeeded" {
 		return nil, nil, errors.New("completed contact directory unavailable")
 	}
 	rows, err := tx.Query(ctx, `SELECT p.customer_id,
@@ -46,9 +49,9 @@ func (PostgreSQLCustomerSyncStore) MachineContactRows(ctx context.Context, corpS
 		) tags ON true
 		LEFT JOIN (
 			SELECT customer_id,count(*) total_count,count(*) FILTER (WHERE active) active_count,max(updated_at) changed_at
-			FROM wecom_follow_relationships WHERE corp_id=$2 GROUP BY customer_id
+			FROM (SELECT customer_id,relationship_status='active' active,updated_at FROM wecom_customer_owner_observations o WHERE corp_scope=$1 AND EXISTS(SELECT 1 FROM wecom_customer_sync_runs r WHERE r.id=o.last_seen_run_id AND r.status='succeeded')) follows GROUP BY customer_id
 		) rel ON rel.customer_id=p.customer_id
-		WHERE p.corp_scope=$1 ORDER BY p.customer_id`, corpScope, corpScope[11:])
+		WHERE p.corp_scope=$1 ORDER BY p.customer_id`, corpScope)
 	if err != nil {
 		return nil, nil, err
 	}

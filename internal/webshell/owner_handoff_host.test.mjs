@@ -172,7 +172,7 @@ const visibleStates = await mountFixture({
   ],
   operator: "管理员 #42",
 }, 200, true, false, true);
-if (JSON.stringify(visibleStates.preview_states) !== JSON.stringify(["可迁移", "结果待核实"]) || !visibleStates.preview_reasons.includes("迁移原因待确认。") || visibleStates.batch_id !== "batch-1" || !visibleStates.execution_log.includes("迁移方式：先企微转接后本地迁移") || !visibleStates.execution_log.includes("批次状态：已受理") || !visibleStates.execution_log.includes("结果待核实") || visibleStates.execution_log.includes("wecom_then_crm") || visibleStates.execution_log.includes("outcome_unknown")) throw new Error(`owner handoff Host must present states in Chinese while retaining the response-bound batch reference ${JSON.stringify(visibleStates)}`);
+if (JSON.stringify(visibleStates.preview_states) !== JSON.stringify(["可迁移", "结果待核实"]) || !visibleStates.preview_reasons.includes("迁移原因待确认。") || visibleStates.batch_id !== "batch-1" || !visibleStates.execution_log.includes("迁移方式：企微官方转接") || !visibleStates.execution_log.includes("批次状态：已受理") || !visibleStates.execution_log.includes("结果待核实") || visibleStates.execution_log.includes("wecom_then_crm") || visibleStates.execution_log.includes("outcome_unknown")) throw new Error(`owner handoff Host must present states in Chinese while retaining the response-bound batch reference ${JSON.stringify(visibleStates)}`);
 
 const previewFailure = await mountFixture({
   staff: [

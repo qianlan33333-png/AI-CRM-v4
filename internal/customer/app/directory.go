@@ -113,12 +113,16 @@ type TagCustomerMatcher interface {
 	CustomerIDsForTag(context.Context, int64, int) ([]customerdomain.CustomerID, error)
 }
 
+type OwnerCustomerReader interface {
+	CustomerIDsForOwner(context.Context, int64, int) ([]customerdomain.CustomerID, error)
+}
 type Directory struct {
-	Numbers    identityport.CustomerPublicNumbers
-	Store      Store
-	Now        func() time.Time
-	SigningKey []byte
-	Tags       TagCustomerMatcher
+	OwnerCustomers OwnerCustomerReader
+	Numbers        identityport.CustomerPublicNumbers
+	Store          Store
+	Now            func() time.Time
+	SigningKey     []byte
+	Tags           TagCustomerMatcher
 }
 
 type ListRequest struct {
@@ -147,9 +151,13 @@ func (directory Directory) List(ctx context.Context, request ListRequest) (Page,
 		request.Limit = DefaultLimit
 	}
 	if request.Filters.OwnerStaffID > 0 {
-		ids, err := directory.Store.CustomerIDsForOwner(ctx, request.Filters.OwnerStaffID, MaximumFilterCandidates+1)
+		source := directory.OwnerCustomers
+		if source == nil {
+			source = directory.Store
+		}
+		ids, err := source.CustomerIDsForOwner(ctx, request.Filters.OwnerStaffID, MaximumFilterCandidates+1)
 		if err != nil || len(ids) > MaximumFilterCandidates {
-			return Page{}, fmt.Errorf("%w: local owner projection", ErrFilterUnavailable)
+			return Page{}, fmt.Errorf("%w: published WeCom staff projection", ErrFilterUnavailable)
 		}
 		request.Filters.OwnerCustomerIDs = sortedUniqueCustomerIDs(ids)
 		request.Filters.OwnerMatchNone = len(request.Filters.OwnerCustomerIDs) == 0
