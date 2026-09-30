@@ -120,6 +120,78 @@ func TestAlipayAcceptanceSignedCallbackRejectsTamperAndWrongApp(t *testing.T) {
 	}
 }
 
+func TestAlipayAcceptanceSignedCallbackKindSpecificTimestamps(t *testing.T) {
+	provider, signer := alipayContractFixture(t, "")
+	sign := func(values url.Values) {
+		t.Helper()
+		signature, err := signer.SignValues(values, nsign.WithIgnore("sign", "sign_type", "alipay_cert_sn"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		values.Set("sign", base64.StdEncoding.EncodeToString(signature))
+	}
+	copyValues := func(source url.Values) url.Values {
+		result := make(url.Values, len(source))
+		for key, entries := range source {
+			result[key] = append([]string(nil), entries...)
+		}
+		return result
+	}
+	refundValues := url.Values{
+		"app_id": {"test-alipay-app"}, "notify_id": {"notify-kind-specific-refund-1"},
+		"out_trade_no": {"merchant-test-1"}, "trade_no": {"trade-test-1"},
+		"out_request_no": {"refund-test-1"}, "refund_amount": {"1.20"},
+		"trade_status": {"TRADE_SUCCESS"}, "gmt_payment": {"2026-09-30 15:48:58"},
+		"gmt_refund": {"2026-09-30 16:08:58"}, "notify_time": {"2026-09-30 16:18:58"}, "sign_type": {"RSA2"},
+	}
+	wantPaymentAt := time.Date(2026, 9, 30, 7, 48, 58, 0, time.UTC)
+	wantRefundAt := time.Date(2026, 9, 30, 8, 8, 58, 0, time.UTC)
+	wantNotifyAt := time.Date(2026, 9, 30, 8, 18, 58, 0, time.UTC)
+	verify := func(values url.Values, kind string, want time.Time) {
+		t.Helper()
+		sign(values)
+		got, err := provider.VerifyValues(context.Background(), values)
+		if err != nil || got.Kind != kind || !got.OccurredAt.Equal(want) {
+			t.Fatalf("signed %s timestamp got kind=%q occurred_at=%s want=%s err=%v", kind, got.Kind, got.OccurredAt, want, err)
+		}
+	}
+
+	// Payment keeps its existing precedence even if a refund field is present.
+	paymentValues := url.Values{
+		"app_id": {"test-alipay-app"}, "notify_id": {"notify-kind-specific-payment-1"},
+		"out_trade_no": {"merchant-test-1"}, "trade_no": {"trade-test-1"},
+		"trade_status": {"TRADE_SUCCESS"}, "total_amount": {"9.90"},
+		"gmt_payment": {"2026-09-30 15:48:58"}, "gmt_refund": {"2026-09-30 16:08:58"},
+		"notify_time": {"2026-09-30 16:18:58"}, "sign_type": {"RSA2"},
+	}
+	verify(paymentValues, "payment", wantPaymentAt)
+
+	verify(copyValues(refundValues), "refund", wantRefundAt)
+	refundOnly := copyValues(refundValues)
+	delete(refundOnly, "gmt_payment")
+	refundOnly.Set("notify_id", "notify-kind-specific-refund-only-1")
+	verify(refundOnly, "refund", wantRefundAt)
+
+	notifyFallback := copyValues(refundValues)
+	delete(notifyFallback, "gmt_refund")
+	notifyFallback.Set("notify_id", "notify-kind-specific-refund-fallback-1")
+	verify(notifyFallback, "refund", wantNotifyAt)
+
+	// If neither refund time is usable, preserve receive-time fallback and do
+	// not substitute the original payment timestamp.
+	receiveFallback := copyValues(refundValues)
+	delete(receiveFallback, "gmt_refund")
+	delete(receiveFallback, "notify_time")
+	receiveFallback.Set("notify_id", "notify-kind-specific-refund-receive-time-1")
+	sign(receiveFallback)
+	started := time.Now().UTC()
+	got, err := provider.VerifyValues(context.Background(), receiveFallback)
+	finished := time.Now().UTC()
+	if err != nil || got.Kind != "refund" || got.OccurredAt.Before(started) || got.OccurredAt.After(finished) || got.OccurredAt.Equal(wantPaymentAt) {
+		t.Fatalf("refund receive-time fallback got kind=%q occurred_at=%s payment_at=%s err=%v", got.Kind, got.OccurredAt, wantPaymentAt, err)
+	}
+}
+
 func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 	var provider *Alipay
 	var signer *alipaysdk.Client

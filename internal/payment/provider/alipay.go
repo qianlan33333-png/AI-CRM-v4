@@ -380,7 +380,13 @@ func (a *Alipay) VerifyValues(ctx context.Context, values url.Values) (CallbackR
 		return CallbackResult{}, ErrInvalidCallback
 	}
 	occurred := time.Now().UTC()
-	for _, key := range []string{"gmt_payment", "gmt_refund", "notify_time"} {
+	timestampKeys := []string{"gmt_payment", "gmt_refund", "notify_time"}
+	if kind == "refund" {
+		// The payment event time can predate refund acceptance. Refund callbacks
+		// use their own event time, then the signed notification time fallback.
+		timestampKeys = []string{"gmt_refund", "notify_time"}
+	}
+	for _, key := range timestampKeys {
 		if raw := values.Get(key); raw != "" {
 			if parsed, parseErr := time.ParseInLocation("2006-01-02 15:04:05", raw, time.FixedZone("CST", 8*60*60)); parseErr == nil {
 				occurred = parsed.UTC()
