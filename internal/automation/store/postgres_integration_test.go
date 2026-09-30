@@ -48,7 +48,7 @@ type automationReadyExecutionReader struct {
 
 func (r automationReadyExecutionReader) AudienceExecutionConfiguration(context.Context, segmentport.PackageID) (segmentport.ExecutionConfiguration, error) {
 	return segmentport.ExecutionConfiguration{
-		PackageID: r.packageID, Ready: true, AgentID: r.agentID,
+		PackageID: r.packageID, PackageVersion: 3, Ready: true, AgentID: r.agentID,
 		AgentPublishedVersion: 2, ContentDigest: sha256.Sum256([]byte("published automation content")),
 		BindingVersion: 5, SenderSetVersion: 6, SenderStaffIDs: []int64{7},
 	}, nil
@@ -293,14 +293,20 @@ func TestPostgreSQLPolicyCreateVersionLifecycleAndReplayJourney(t *testing.T) {
 	activeVersionCommand := command
 	activeVersionCommand.PolicyID = created.ID
 	activeVersionCommand.ExpectedVersion = active.Version
-	activeVersionCommand.ActionConfig = json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[9002,9001],"once_per_customer":true,"defer_before_first_paid_at":"2026-09-30T02:58:14Z"}`)
+	activeVersionCommand.ActionConfig = json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[9002,9001],"once_per_customer":true,"defer_before_paid_at":"2026-09-30T02:58:14Z"}`)
 	activeVersionCommand.IdempotencyKey = "policy-postgres-active-defer-0001"
 	activeVersion, err := service.PutPolicyVersion(ctx, activeVersionCommand)
 	if err != nil || activeVersion.Version != 3 {
 		t.Fatalf("active deferral version=%+v err=%v", activeVersion, err)
 	}
 	currentPolicy, currentVersion, err := service.Policy(ctx, created.ID)
-	if err != nil || currentPolicy.Lifecycle != automationdomain.PolicyActive || currentPolicy.Version != 5 || currentVersion.ID != activeVersion.ID || string(currentVersion.ActionConfig) != `{"agent_id":73,"deferred_customer_ids":[9001,9002],"once_per_customer":true,"defer_before_first_paid_at":"2026-09-30T02:58:14Z"}` {
+	var activeAction struct {
+		AgentID             int64     `json:"agent_id"`
+		DeferredCustomerIDs []int64   `json:"deferred_customer_ids"`
+		OncePerCustomer     bool      `json:"once_per_customer"`
+		DeferBeforePaidAt   time.Time `json:"defer_before_paid_at"`
+	}
+	if json.Unmarshal(currentVersion.ActionConfig, &activeAction) != nil || err != nil || currentPolicy.Lifecycle != automationdomain.PolicyActive || currentPolicy.Version != 5 || currentVersion.ID != activeVersion.ID || activeAction.AgentID != 73 || !activeAction.OncePerCustomer || !activeAction.DeferBeforePaidAt.Equal(time.Date(2026, 9, 30, 2, 58, 14, 0, time.UTC)) || len(activeAction.DeferredCustomerIDs) != 2 || activeAction.DeferredCustomerIDs[0] != 9001 || activeAction.DeferredCustomerIDs[1] != 9002 {
 		t.Fatalf("active policy/current version=%+v/%+v err=%v", currentPolicy, currentVersion, err)
 	}
 	removeOnceCommand := activeVersionCommand
@@ -784,7 +790,11 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 		"0013_automation_agents.sql",
 		"0043_automation_runtime.sql",
 		"0044_outbound_automation_messages.sql",
+		"0087_automation_manual_ai_review.sql",
 		"0089_outbound_message_content_snapshots.sql",
+		"0015_config_adminops.sql",
+		"0094_runtime_config_releases.sql",
+		"0115_automation_dynamic_text_generation.sql",
 	})
 	defer cleanup()
 	ctx := context.Background()
@@ -806,7 +816,7 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	lineage := []customerdomain.CustomerID{87654322, 87654323}
+	lineage := []customerdomain.CustomerID{87654323, 87654322}
 	if err = service.SetLockedCanonicalLineageReader(automationIntegrationLineageReader{lineages: map[customerdomain.CustomerID][]customerdomain.CustomerID{
 		87654322: lineage,
 		87654323: lineage,
@@ -831,7 +841,7 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 	created, err := service.CreatePolicy(ctx, automationapp.PolicyCommand{
 		Code: "member-once-per-customer", Name: "Member once per customer", PackageID: packageID,
 		TriggerKind: automationport.TriggerAudienceMemberEnteredV1, ActionKind: automationport.ActionOutboundMessage,
-		ActionConfig: json.RawMessage(`{"agent_id":73,"once_per_customer":true}`), QuietHours: json.RawMessage(`{}`),
+		ActionConfig: json.RawMessage(`{"agent_id":73,"once_per_customer":true,"defer_before_paid_at":"2026-09-30T10:00:00Z"}`), QuietHours: json.RawMessage(`{}`),
 		SingleRunLimit: 100, ApprovalStaffID: &approval, Actor: approval, IdempotencyKey: "member-once-policy-create-0001",
 	})
 	if err != nil || created.Lifecycle != automationdomain.PolicyPaused {
@@ -846,9 +856,19 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 	}
 
 	makeEvent := func(eventID string, customerID int64, snapshotID int64) segmentport.MemberEnteredV1 {
+		paidAt := time.Date(2026, 9, 30, 11, 0, 0, 0, time.UTC)
+		paidOrderID := int64(1200 + snapshotID)
 		return segmentport.MemberEnteredV1{
 			EventID: eventID, PackageID: packageID, SnapshotID: segmentport.SnapshotID(snapshotID),
+			ConfigurationVersionID: 43, CustomerID: customerdomain.CustomerID(customerID), PaidOrderID: &paidOrderID, PaidAt: &paidAt,
+			OccurredAt: time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC),
+		}
+	}
+	makePaidQualifiedEvent := func(eventID string, customerID int64, snapshotID int64) segmentport.MemberPaidQualifiedV1 {
+		return segmentport.MemberPaidQualifiedV1{
+			EventID: eventID, PackageID: packageID, SnapshotID: segmentport.SnapshotID(snapshotID),
 			ConfigurationVersionID: 43, CustomerID: customerdomain.CustomerID(customerID),
+			PaidOrderID: int64(1300 + snapshotID), PaidAt: time.Date(2026, 9, 30, 11, 0, 0, 0, time.UTC),
 			OccurredAt: time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC),
 		}
 	}
@@ -860,11 +880,11 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 	for query, target := range map[string]*int{
 		`SELECT count(*) FROM automation_enrollments WHERE policy_id=$1 AND customer_id=$2`:                &failedEnrollments,
 		`SELECT count(*) FROM automation_runs`:                                                             &failedRuns,
-		`SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$3 AND actor_scope=$4`: &failedReceipts,
+		`SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2`: &failedReceipts,
 	} {
 		var queryErr error
 		if target == &failedReceipts {
-			queryErr = native.QueryRow(ctx, query, created.ID, failedEvent.CustomerID, automationapp.MemberEventCustomerOnceOperation, automationapp.MemberEventDispatchActorScope).Scan(target)
+			queryErr = native.QueryRow(ctx, query, automationapp.MemberEventCustomerOnceAcceptedOperation, automationapp.MemberEventDispatchActorScope).Scan(target)
 		} else if target == &failedEnrollments {
 			queryErr = native.QueryRow(ctx, query, created.ID, failedEvent.CustomerID).Scan(target)
 		} else {
@@ -888,9 +908,9 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 		t.Fatalf("new-event same-customer reentry enrollments=%+v err=%v", reentry, reentryErr)
 	}
 
-	concurrentEvents := []segmentport.MemberEnteredV1{
-		makeEvent("audmem_once_concurrent_001", 87654322, 903),
-		makeEvent("audmem_once_concurrent_002", 87654323, 904),
+	concurrentEvents := []segmentport.MemberPaidQualifiedV1{
+		makePaidQualifiedEvent("audpaid_once_concurrent_001", 87654322, 903),
+		makePaidQualifiedEvent("audpaid_once_concurrent_002", 87654323, 904),
 	}
 	type dispatchResult struct {
 		enrollments []automationdomain.Enrollment
@@ -900,9 +920,9 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 	var wg sync.WaitGroup
 	for _, event := range concurrentEvents {
 		wg.Add(1)
-		go func(event segmentport.MemberEnteredV1) {
+		go func(event segmentport.MemberPaidQualifiedV1) {
 			defer wg.Done()
-			enrollments, dispatchErr := service.EnrollAudienceMember(ctx, event)
+			enrollments, dispatchErr := service.EnrollAudienceMemberPaidQualified(ctx, event)
 			results <- dispatchResult{enrollments: enrollments, err: dispatchErr}
 		}(event)
 	}
@@ -926,15 +946,30 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 	if acceptedEvents != 1 {
 		t.Fatalf("concurrent distinct EventIDs accepted %d enrollments, want exactly one", acceptedEvents)
 	}
-	if replay, replayErr := service.EnrollAudienceMember(ctx, makeEvent("audmem_once_concurrent_replay_003", 87654323, 905)); replayErr != nil || len(replay) != 0 {
+	if replay, replayErr := service.EnrollAudienceMemberPaidQualified(ctx, makePaidQualifiedEvent("audpaid_once_concurrent_replay_003", 87654323, 905)); replayErr != nil || len(replay) != 0 {
 		t.Fatalf("later alias EventID replay enrollments=%+v err=%v", replay, replayErr)
 	}
 
+	historical := makeEvent("audmem_once_historical_skip_001", 87654324, 906)
+	historical.PaidAt = ptrTimeForAutomationIntegration(time.Date(2026, 9, 30, 9, 0, 0, 0, time.UTC))
+	if skipped, skipErr := service.EnrollAudienceMember(ctx, historical); skipErr != nil || len(skipped) != 1 || skipped[0].State != "skipped" {
+		t.Fatalf("historical member entry=%+v err=%v; want event-level skip", skipped, skipErr)
+	}
+	paidQualified := segmentport.MemberPaidQualifiedV1{
+		EventID: "audpaid_qualified_after_skip_001", PackageID: packageID, SnapshotID: 907,
+		ConfigurationVersionID: 43, CustomerID: historical.CustomerID, PaidOrderID: 2300,
+		PaidAt:     time.Date(2026, 9, 30, 11, 0, 0, 0, time.UTC),
+		OccurredAt: time.Date(2026, 9, 30, 12, 30, 0, 0, time.UTC),
+	}
+	if accepted, acceptErr := service.EnrollAudienceMemberPaidQualified(ctx, paidQualified); acceptErr != nil || len(accepted) != 1 || accepted[0].State != "accepted" {
+		t.Fatalf("later qualifying payment after historical skip=%+v err=%v", accepted, acceptErr)
+	}
+
 	var onceReceipts, incompleteReceipts, enrollments, runs int
-	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2`, automationapp.MemberEventCustomerOnceOperation, automationapp.MemberEventDispatchActorScope).Scan(&onceReceipts); err != nil {
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2`, automationapp.MemberEventCustomerOnceAcceptedOperation, automationapp.MemberEventDispatchActorScope).Scan(&onceReceipts); err != nil {
 		t.Fatal(err)
 	}
-	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2 AND state<>'completed'`, automationapp.MemberEventCustomerOnceOperation, automationapp.MemberEventDispatchActorScope).Scan(&incompleteReceipts); err != nil {
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2 AND state<>'completed'`, automationapp.MemberEventCustomerOnceAcceptedOperation, automationapp.MemberEventDispatchActorScope).Scan(&incompleteReceipts); err != nil {
 		t.Fatal(err)
 	}
 	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_enrollments WHERE policy_id=$1`, created.ID).Scan(&enrollments); err != nil {
@@ -943,10 +978,10 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runs WHERE policy_id=$1`, created.ID).Scan(&runs); err != nil {
 		t.Fatal(err)
 	}
-	if onceReceipts != 2 || incompleteReceipts != 0 || enrollments != 2 || runs != 2 {
-		t.Fatalf("once receipts/incomplete/enrollments/runs=%d/%d/%d/%d; want 2/0/2/2", onceReceipts, incompleteReceipts, enrollments, runs)
+	if onceReceipts != 3 || incompleteReceipts != 0 || enrollments != 4 || runs != 3 {
+		t.Fatalf("once receipts/incomplete/enrollments/runs=%d/%d/%d/%d; want 3/0/4/3", onceReceipts, incompleteReceipts, enrollments, runs)
 	}
-	for customerID, want := range map[int64]int{87654322: 1, 87654323: 0} {
+	for customerID, want := range map[int64]int{87654322: 0, 87654323: 1} {
 		payload, marshalErr := json.Marshal(struct {
 			PolicyID   int64 `json:"policy_id"`
 			CustomerID int64 `json:"customer_id"`
@@ -954,10 +989,10 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 		if marshalErr != nil {
 			t.Fatal(marshalErr)
 		}
-		keyDigest := sha256.Sum256([]byte(automationapp.MemberEventCustomerOnceOperation + ":" + strconv.FormatInt(created.ID, 10) + ":" + strconv.FormatInt(customerID, 10)))
+		keyDigest := sha256.Sum256([]byte(automationapp.MemberEventCustomerOnceAcceptedOperation + ":" + strconv.FormatInt(created.ID, 10) + ":" + strconv.FormatInt(customerID, 10)))
 		payloadDigest := sha256.Sum256(payload)
 		var count int
-		if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2 AND key_digest=$3 AND payload_digest=$4`, automationapp.MemberEventCustomerOnceOperation, automationapp.MemberEventDispatchActorScope, keyDigest[:], payloadDigest[:]).Scan(&count); err != nil {
+		if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2 AND key_digest=$3 AND payload_digest=$4`, automationapp.MemberEventCustomerOnceAcceptedOperation, automationapp.MemberEventDispatchActorScope, keyDigest[:], payloadDigest[:]).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count != want {
@@ -967,7 +1002,9 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 	messages.mu.Lock()
 	acceptCalls := messages.calls
 	messages.mu.Unlock()
-	if acceptCalls != 3 {
-		t.Fatalf("transactional Outbound acceptance calls=%d, want failed attempt plus two unique accepted customers", acceptCalls)
+	if acceptCalls != 4 {
+		t.Fatalf("transactional Outbound acceptance calls=%d, want failed attempt plus three unique accepted customers", acceptCalls)
 	}
 }
+
+func ptrTimeForAutomationIntegration(value time.Time) *time.Time { return &value }

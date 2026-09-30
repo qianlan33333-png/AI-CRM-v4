@@ -226,9 +226,9 @@ func (r *Repository) EnrollmentForSource(ctx context.Context, policyVersionID in
 	return out, true, nil
 }
 
-// CustomerPolicyEnrollment finds the earliest immutable enrollment for one
-// canonical customer under a policy, regardless of policy version or source
-// event. It supports policies that opt into one-time-per-customer execution.
+// CustomerPolicyEnrollment finds an already accepted Outbound enrollment for
+// one canonical customer under a policy. Historical skipped diagnostics do
+// not consume the once-per-customer acceptance slot.
 func (r *Repository) CustomerPolicyEnrollment(ctx context.Context, policyID, customerID int64) (automationdomain.Enrollment, bool, error) {
 	t, err := tx(ctx)
 	if err != nil {
@@ -237,7 +237,7 @@ func (r *Repository) CustomerPolicyEnrollment(ctx context.Context, policyID, cus
 	var out automationdomain.Enrollment
 	var source, digest, action []byte
 	var kind string
-	err = t.QueryRow(ctx, `SELECT id,policy_id,policy_version_id,source_event_digest,customer_id,action_kind,action_snapshot,action_digest,state,created_at FROM automation_enrollments WHERE policy_id=$1 AND customer_id=$2 ORDER BY id LIMIT 1`, policyID, customerID).Scan(&out.ID, &out.PolicyID, &out.PolicyVersionID, &source, &out.CustomerID, &kind, &action, &digest, &out.State, &out.CreatedAt)
+	err = t.QueryRow(ctx, `SELECT id,policy_id,policy_version_id,source_event_digest,customer_id,action_kind,action_snapshot,action_digest,state,created_at FROM automation_enrollments WHERE policy_id=$1 AND customer_id=$2 AND action_kind='outbound_message' AND state='accepted' ORDER BY id LIMIT 1`, policyID, customerID).Scan(&out.ID, &out.PolicyID, &out.PolicyVersionID, &source, &out.CustomerID, &kind, &action, &digest, &out.State, &out.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return automationdomain.Enrollment{}, false, nil
 	}
@@ -408,7 +408,7 @@ func validMemberEventDispatchDiagnostic(item automationapp.MemberEventDispatchDi
 	switch {
 	case item.State == "unconfigured" && item.Reason == "no_active_policy":
 		return item.PolicyID == 0 && item.PolicyVersionID == 0
-	case item.State == "skipped" && item.Reason == "historical_identity_merge_deferred":
+	case item.State == "skipped" && (item.Reason == automationapp.MemberEventDeferredHistoricalMergeReason || item.Reason == automationapp.MemberEventDeferredPaidCutoffReason || item.Reason == automationapp.MemberEventDeferredPaidMissingReason):
 		return item.PolicyID > 0 && item.PolicyVersionID > 0
 	default:
 		return false

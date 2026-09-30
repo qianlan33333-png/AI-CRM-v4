@@ -33,11 +33,11 @@ func TestPolicyVersionClosesTriggerActionAndExecutionPolicy(t *testing.T) {
 func TestOutboundDeferredCustomerIDsAreCanonicalAndValidated(t *testing.T) {
 	approval := int64(9)
 	created := time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)
-	version, err := NewPolicyVersion(1, 1, 27, automationport.TriggerAudienceMemberEnteredV1, automationport.ActionOutboundMessage, json.RawMessage(`{"agent_id":14,"deferred_customer_ids":[9002,9001,9003],"once_per_customer":true,"defer_before_first_paid_at":"2026-09-30T10:58:14+08:00"}`), json.RawMessage(`{}`), 100, &approval, 9, created)
+	version, err := NewPolicyVersion(1, 1, 27, automationport.TriggerAudienceMemberEnteredV1, automationport.ActionOutboundMessage, json.RawMessage(`{"agent_id":14,"deferred_customer_ids":[9002,9001,9003],"once_per_customer":true,"defer_before_paid_at":"2026-09-30T10:58:14+08:00"}`), json.RawMessage(`{}`), 100, &approval, 9, created)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(version.ActionConfig), `{"agent_id":14,"deferred_customer_ids":[9001,9002,9003],"once_per_customer":true,"defer_before_first_paid_at":"2026-09-30T02:58:14Z"}`; got != want {
+	if got, want := string(version.ActionConfig), `{"agent_id":14,"deferred_customer_ids":[9001,9002,9003],"once_per_customer":true,"defer_before_paid_at":"2026-09-30T02:58:14Z"}`; got != want {
 		t.Fatalf("canonical action config=%s, want %s", got, want)
 	}
 	if version.Digest == ([32]byte{}) {
@@ -51,9 +51,9 @@ func TestOutboundDeferredCustomerIDsAreCanonicalAndValidated(t *testing.T) {
 		`{"agent_id":14,"deferred_customer_ids":[1,1]}`,
 		`{"agent_id":14,"deferred_customer_ids":[0]}`,
 		`{"agent_id":14,"deferred_customer_ids":[-1]}`,
-		`{"agent_id":14,"defer_before_first_paid_at":"2026-09-30T02:58:14Z"}`,
-		`{"agent_id":14,"once_per_customer":true,"defer_before_first_paid_at":"0001-01-01T00:00:00Z"}`,
-		`{"agent_id":14,"once_per_customer":true,"defer_before_first_paid_at":"not-a-time"}`,
+		`{"agent_id":14,"defer_before_paid_at":"2026-09-30T02:58:14Z"}`,
+		`{"agent_id":14,"once_per_customer":true,"defer_before_paid_at":"0001-01-01T00:00:00Z"}`,
+		`{"agent_id":14,"once_per_customer":true,"defer_before_paid_at":"not-a-time"}`,
 	} {
 		if _, err := NewPolicyVersion(1, 2, 27, automationport.TriggerAudienceMemberEnteredV1, automationport.ActionOutboundMessage, json.RawMessage(raw), json.RawMessage(`{}`), 100, &approval, 9, created); !errors.Is(err, ErrInvalidPolicy) {
 			t.Errorf("NewPolicyVersion(%s) error=%v, want invalid policy", raw, err)

@@ -107,6 +107,7 @@ type PackageReader interface {
 }
 
 const EventAudienceMemberEnteredV1 = "audience.member_entered.v1"
+const EventAudienceMemberPaidQualifiedV1 = "audience.member_paid_qualified.v1"
 
 type MemberEnteredV1 struct {
 	EventID                string                    `json:"event_id"`
@@ -114,6 +115,22 @@ type MemberEnteredV1 struct {
 	SnapshotID             SnapshotID                `json:"snapshot_id"`
 	ConfigurationVersionID ConfigurationVersionID    `json:"configuration_version_id"`
 	CustomerID             customerdomain.CustomerID `json:"customer_id"`
-	FirstPaidAt            *time.Time                `json:"first_paid_at,omitempty"`
+	PaidOrderID            *int64                    `json:"paid_order_id,omitempty"`
+	PaidAt                 *time.Time                `json:"paid_at,omitempty"`
+	OccurredAt             time.Time                 `json:"occurred_at"`
+}
+
+// MemberPaidQualifiedV1 is a durable fact that an already-enrolled audience
+// member advanced to a newer qualifying paid order. It is distinct from
+// MemberEnteredV1 so replay and enrollment receipts cannot conflate entry
+// membership with a later qualifying payment.
+type MemberPaidQualifiedV1 struct {
+	EventID                string                    `json:"event_id"`
+	PackageID              PackageID                 `json:"package_id"`
+	SnapshotID             SnapshotID                `json:"snapshot_id"`
+	ConfigurationVersionID ConfigurationVersionID    `json:"configuration_version_id"`
+	CustomerID             customerdomain.CustomerID `json:"customer_id"`
+	PaidOrderID            int64                     `json:"paid_order_id"`
+	PaidAt                 time.Time                 `json:"paid_at"`
 	OccurredAt             time.Time                 `json:"occurred_at"`
 }

@@ -6,10 +6,19 @@ import (
 )
 
 const (
-	MemberEventMissingPolicyOperation = "member_event_no_active_policy"
-	MemberEventDeferredOperation      = "member_event_deferred"
-	MemberEventCustomerOnceOperation  = "member_event_customer_once"
-	MemberEventDispatchActorScope     = "system:segment-member-event-dispatch"
+	MemberEventMissingPolicyOperation        = "member_event_no_active_policy"
+	MemberEventDeferredOperation             = "member_event_deferred"
+	MemberEventSourceFactsOperation          = "member_event_source_facts_v1"
+	MemberEventDeferredHistoricalMergeReason = "historical_identity_merge_deferred"
+	MemberEventDeferredPaidCutoffReason      = "historical_paid_before_cutoff"
+	MemberEventDeferredPaidMissingReason     = "paid_at_missing_deferred"
+	// MemberEventCustomerOnceOperation is the legacy namespace. It remains read
+	// compatible so historical accepted receipts still protect aliases; new
+	// accepted-only reservations use the v2 namespace below, leaving legacy
+	// completed "deferred" receipts non-terminal for later qualifying payments.
+	MemberEventCustomerOnceOperation         = "member_event_customer_once"
+	MemberEventCustomerOnceAcceptedOperation = "member_event_customer_once_accepted_v2"
+	MemberEventDispatchActorScope            = "system:segment-member-event-dispatch"
 )
 
 type RuntimeReceipt struct {

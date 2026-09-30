@@ -19,3 +19,11 @@ func (s automationMemberEventSink) HandleAudienceMemberEntered(ctx context.Conte
 	_, err := s.runtime.EnrollAudienceMember(ctx, event)
 	return err
 }
+
+func (s automationMemberEventSink) HandleAudienceMemberPaidQualified(ctx context.Context, event segmentport.MemberPaidQualifiedV1) error {
+	if s.runtime == nil {
+		return errors.New("automation member-event sink is unavailable")
+	}
+	_, err := s.runtime.EnrollAudienceMemberPaidQualified(ctx, event)
+	return err
+}

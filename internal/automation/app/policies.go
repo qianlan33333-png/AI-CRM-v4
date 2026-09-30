@@ -97,6 +97,67 @@ type RuntimeService struct {
 	runtimeUsage      configport.UsageRecorder
 	now               func() time.Time
 }
+
+// audienceMemberEventSource keeps the immutable Segment event kind alongside
+// its facts while sharing the existing enrollment Unit of Work. Member-entered
+// source digests remain EventID-based for backwards compatibility; the new
+// paid-qualified source digest is namespaced by event kind and EventID. Its
+// immutable order/time facts are bound by the durable receipt payload and the
+// enrollment snapshot, allowing a changed replay to conflict on the same key.
+type audienceMemberEventSource struct {
+	kind  string
+	event segmentport.MemberEnteredV1
+}
+
+func enteredEventSource(event segmentport.MemberEnteredV1) audienceMemberEventSource {
+	return audienceMemberEventSource{kind: segmentport.EventAudienceMemberEnteredV1, event: event}
+}
+
+func paidQualifiedEventSource(event segmentport.MemberPaidQualifiedV1) audienceMemberEventSource {
+	orderID := event.PaidOrderID
+	paidAt := event.PaidAt.UTC()
+	return audienceMemberEventSource{
+		kind: segmentport.EventAudienceMemberPaidQualifiedV1,
+		event: segmentport.MemberEnteredV1{
+			EventID: event.EventID, PackageID: event.PackageID, SnapshotID: event.SnapshotID,
+			ConfigurationVersionID: event.ConfigurationVersionID, CustomerID: event.CustomerID,
+			PaidOrderID: &orderID, PaidAt: &paidAt, OccurredAt: event.OccurredAt,
+		},
+	}
+}
+
+func (source audienceMemberEventSource) paidQualified() bool {
+	return source.kind == segmentport.EventAudienceMemberPaidQualifiedV1
+}
+
+func (source audienceMemberEventSource) hasPaidFacts() bool {
+	return source.paidQualified() || (source.event.PaidOrderID != nil && source.event.PaidAt != nil)
+}
+
+func (source audienceMemberEventSource) digest() ([32]byte, error) {
+	if source.kind == segmentport.EventAudienceMemberEnteredV1 {
+		return sha256.Sum256([]byte(source.event.EventID)), nil
+	}
+	if !source.paidQualified() {
+		return [32]byte{}, ErrRuntimeInvalid
+	}
+	return sha256.Sum256([]byte(source.kind + "\x00" + source.event.EventID)), nil
+}
+
+func (source audienceMemberEventSource) valid() bool {
+	event := source.event
+	if event.EventID == "" || event.PackageID < 1 || event.CustomerID < 1 || event.OccurredAt.IsZero() {
+		return false
+	}
+	if source.paidQualified() {
+		return event.SnapshotID > 0 && event.ConfigurationVersionID > 0 && event.PaidOrderID != nil && *event.PaidOrderID > 0 && event.PaidAt != nil && !event.PaidAt.IsZero()
+	}
+	if source.kind != segmentport.EventAudienceMemberEnteredV1 || (event.PaidOrderID == nil) != (event.PaidAt == nil) {
+		return false
+	}
+	return event.PaidOrderID == nil || (*event.PaidOrderID > 0 && !event.PaidAt.IsZero())
+}
+
 type PolicyCommand struct {
 	Code, Name                string
 	PolicyID, ExpectedVersion int64
@@ -395,16 +456,16 @@ func (s *RuntimeService) replayRuntimeMutation(ctx context.Context, operation st
 // run limit, and approver remain unchanged; deferrals only grow and once-only
 // behavior can only be enabled, never removed.
 func activeDeferredCustomerIDsOnlyUpdate(current, next automationdomain.PolicyVersion) bool {
-	if current.PolicyID != next.PolicyID || current.PackageID != next.PackageID || current.TriggerKind != next.TriggerKind || current.TriggerEnabled != next.TriggerEnabled || current.ActionKind != automationport.ActionOutboundMessage || next.ActionKind != automationport.ActionOutboundMessage || !bytes.Equal(current.QuietHours, next.QuietHours) || current.SingleRunLimit != next.SingleRunLimit || !sameOptionalInt64(current.ApprovalStaffID, next.ApprovalStaffID) {
+	if current.PolicyID != next.PolicyID || current.PackageID != next.PackageID || current.TriggerKind != next.TriggerKind || current.TriggerEnabled != next.TriggerEnabled || current.ActionKind != automationport.ActionOutboundMessage || next.ActionKind != automationport.ActionOutboundMessage || !sameJSONDocument(current.QuietHours, next.QuietHours) || current.SingleRunLimit != next.SingleRunLimit || !sameOptionalInt64(current.ApprovalStaffID, next.ApprovalStaffID) {
 		return false
 	}
 	var currentAction, nextAction struct {
-		AgentID                int64      `json:"agent_id"`
-		DeferredCustomerIDs    []int64    `json:"deferred_customer_ids"`
-		OncePerCustomer        bool       `json:"once_per_customer"`
-		DeferBeforeFirstPaidAt *time.Time `json:"defer_before_first_paid_at"`
+		AgentID             int64      `json:"agent_id"`
+		DeferredCustomerIDs []int64    `json:"deferred_customer_ids"`
+		OncePerCustomer     bool       `json:"once_per_customer"`
+		DeferBeforePaidAt   *time.Time `json:"defer_before_paid_at"`
 	}
-	if json.Unmarshal(current.ActionConfig, &currentAction) != nil || json.Unmarshal(next.ActionConfig, &nextAction) != nil || currentAction.AgentID < 1 || currentAction.AgentID != nextAction.AgentID || (currentAction.OncePerCustomer && !nextAction.OncePerCustomer) || (currentAction.DeferBeforeFirstPaidAt != nil && !sameOptionalTime(currentAction.DeferBeforeFirstPaidAt, nextAction.DeferBeforeFirstPaidAt)) {
+	if json.Unmarshal(current.ActionConfig, &currentAction) != nil || json.Unmarshal(next.ActionConfig, &nextAction) != nil || currentAction.AgentID < 1 || currentAction.AgentID != nextAction.AgentID || (currentAction.OncePerCustomer && !nextAction.OncePerCustomer) || (currentAction.DeferBeforePaidAt != nil && !sameOptionalTime(currentAction.DeferBeforePaidAt, nextAction.DeferBeforePaidAt)) {
 		return false
 	}
 	i, j := 0, 0
@@ -419,6 +480,16 @@ func activeDeferredCustomerIDsOnlyUpdate(current, next automationdomain.PolicyVe
 		}
 	}
 	return i == len(currentAction.DeferredCustomerIDs)
+}
+
+func sameJSONDocument(left, right []byte) bool {
+	var leftValue, rightValue any
+	if json.Unmarshal(left, &leftValue) != nil || json.Unmarshal(right, &rightValue) != nil {
+		return false
+	}
+	leftJSON, leftErr := json.Marshal(leftValue)
+	rightJSON, rightErr := json.Marshal(rightValue)
+	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
 }
 
 func sameOptionalTime(left, right *time.Time) bool {
@@ -598,16 +669,114 @@ func deferredEventReceiptDigests(policyID int64, event segmentport.MemberEntered
 	return sha256.Sum256([]byte(key)), sha256.Sum256(raw), nil
 }
 
+func deferredEventReceiptDigestsForSource(policyID int64, source audienceMemberEventSource) ([32]byte, [32]byte, error) {
+	if !source.paidQualified() {
+		return deferredEventReceiptDigests(policyID, source.event)
+	}
+	if policyID < 1 {
+		return [32]byte{}, [32]byte{}, ErrRuntimeInvalid
+	}
+	raw, err := json.Marshal(struct {
+		PolicyID  int64                       `json:"policy_id"`
+		EventKind string                      `json:"event_kind"`
+		Event     segmentport.MemberEnteredV1 `json:"event"`
+	}{PolicyID: policyID, EventKind: source.kind, Event: source.event})
+	if err != nil {
+		return [32]byte{}, [32]byte{}, err
+	}
+	eventDigest, err := source.digest()
+	if err != nil {
+		return [32]byte{}, [32]byte{}, err
+	}
+	key := MemberEventDeferredOperation + ":" + fmt.Sprint(source.event.PackageID) + ":" + fmt.Sprint(policyID) + ":" + hex.EncodeToString(eventDigest[:])
+	return sha256.Sum256([]byte(key)), sha256.Sum256(raw), nil
+}
+
+type memberEventSourceFactsReceiptResult struct {
+	EventKind string `json:"event_kind"`
+	State     string `json:"state"`
+}
+
+func memberEventSourceFactsReceiptDigests(source audienceMemberEventSource) ([32]byte, [32]byte, error) {
+	if !source.valid() {
+		return [32]byte{}, [32]byte{}, ErrRuntimeInvalid
+	}
+	raw, err := json.Marshal(struct {
+		EventKind string                      `json:"event_kind"`
+		Event     segmentport.MemberEnteredV1 `json:"event"`
+	}{EventKind: source.kind, Event: source.event})
+	if err != nil {
+		return [32]byte{}, [32]byte{}, err
+	}
+	eventDigest, err := source.digest()
+	if err != nil {
+		return [32]byte{}, [32]byte{}, err
+	}
+	return eventDigest, sha256.Sum256(raw), nil
+}
+
+func validateMemberEventSourceFactsReceipt(receipt RuntimeReceipt, source audienceMemberEventSource) error {
+	if receipt.Operation != MemberEventSourceFactsOperation || receipt.ActorScope != MemberEventDispatchActorScope || receipt.State != "completed" || len(receipt.Result) == 0 {
+		return ErrRuntimeConflict
+	}
+	var result memberEventSourceFactsReceiptResult
+	if json.Unmarshal(receipt.Result, &result) != nil || result.EventKind != source.kind || result.State != "processed" {
+		return ErrRuntimeConflict
+	}
+	return nil
+}
+
+func (s *RuntimeService) memberEventSourceFactsReceiptWithin(ctx context.Context, source audienceMemberEventSource) (bool, error) {
+	keyDigest, payloadDigest, err := memberEventSourceFactsReceiptDigests(source)
+	if err != nil {
+		return false, err
+	}
+	receipt, found, err := s.store.RuntimeReceipt(ctx, MemberEventSourceFactsOperation, MemberEventDispatchActorScope, keyDigest, payloadDigest)
+	if err != nil || !found {
+		return false, err
+	}
+	return true, validateMemberEventSourceFactsReceipt(receipt, source)
+}
+
+func (s *RuntimeService) reserveMemberEventSourceFactsWithin(ctx context.Context, source audienceMemberEventSource, now time.Time) (RuntimeReceipt, bool, error) {
+	keyDigest, payloadDigest, err := memberEventSourceFactsReceiptDigests(source)
+	if err != nil {
+		return RuntimeReceipt{}, false, err
+	}
+	receipt, owned, err := s.store.ReserveRuntime(ctx, RuntimeReservation{
+		Operation: MemberEventSourceFactsOperation, ActorScope: MemberEventDispatchActorScope,
+		KeyDigest: keyDigest, PayloadDigest: payloadDigest, CreatedAt: now,
+	})
+	if err != nil {
+		return RuntimeReceipt{}, false, err
+	}
+	if !owned {
+		return receipt, false, validateMemberEventSourceFactsReceipt(receipt, source)
+	}
+	if receipt.State != "reserved" || receipt.Operation != MemberEventSourceFactsOperation || receipt.ActorScope != MemberEventDispatchActorScope {
+		return RuntimeReceipt{}, false, ErrRuntimeConflict
+	}
+	return receipt, true, nil
+}
+
+func (s *RuntimeService) completeMemberEventSourceFactsWithin(ctx context.Context, receipt RuntimeReceipt, source audienceMemberEventSource, now time.Time) error {
+	result, err := json.Marshal(memberEventSourceFactsReceiptResult{EventKind: source.kind, State: "processed"})
+	if err != nil {
+		return ErrRuntimeUnavailable
+	}
+	return s.store.CompleteRuntime(ctx, receipt.ID, result, now)
+}
+
 type outboundPolicyActionConfig struct {
-	AgentID                int64      `json:"agent_id"`
-	DeferredCustomerIDs    []int64    `json:"deferred_customer_ids"`
-	OncePerCustomer        bool       `json:"once_per_customer"`
-	DeferBeforeFirstPaidAt *time.Time `json:"defer_before_first_paid_at"`
+	AgentID             int64      `json:"agent_id"`
+	DeferredCustomerIDs []int64    `json:"deferred_customer_ids"`
+	OncePerCustomer     bool       `json:"once_per_customer"`
+	DeferBeforePaidAt   *time.Time `json:"defer_before_paid_at"`
 }
 
 func outboundActionConfigForPolicy(version automationdomain.PolicyVersion) (outboundPolicyActionConfig, error) {
 	var action outboundPolicyActionConfig
-	if version.ActionKind != automationport.ActionOutboundMessage || json.Unmarshal(version.ActionConfig, &action) != nil || action.AgentID < 1 || (action.DeferBeforeFirstPaidAt != nil && (action.DeferBeforeFirstPaidAt.IsZero() || !action.OncePerCustomer)) {
+	if version.ActionKind != automationport.ActionOutboundMessage || json.Unmarshal(version.ActionConfig, &action) != nil || action.AgentID < 1 || (action.DeferBeforePaidAt != nil && (action.DeferBeforePaidAt.IsZero() || !action.OncePerCustomer)) {
 		return outboundPolicyActionConfig{}, ErrRuntimeConflict
 	}
 	for index, id := range action.DeferredCustomerIDs {
@@ -626,6 +795,14 @@ type memberEventCustomerOnceResult struct {
 }
 
 func customerPolicyOnceReceiptDigests(policyID, customerID int64) ([32]byte, [32]byte, error) {
+	return customerPolicyOnceReceiptDigestsForOperation(MemberEventCustomerOnceOperation, policyID, customerID)
+}
+
+func customerPolicyOnceAcceptedReceiptDigests(policyID, customerID int64) ([32]byte, [32]byte, error) {
+	return customerPolicyOnceReceiptDigestsForOperation(MemberEventCustomerOnceAcceptedOperation, policyID, customerID)
+}
+
+func customerPolicyOnceReceiptDigestsForOperation(operation string, policyID, customerID int64) ([32]byte, [32]byte, error) {
 	if policyID < 1 || customerID < 1 {
 		return [32]byte{}, [32]byte{}, ErrRuntimeInvalid
 	}
@@ -636,34 +813,46 @@ func customerPolicyOnceReceiptDigests(policyID, customerID int64) ([32]byte, [32
 	if err != nil {
 		return [32]byte{}, [32]byte{}, err
 	}
-	key := MemberEventCustomerOnceOperation + ":" + fmt.Sprint(policyID) + ":" + fmt.Sprint(customerID)
+	key := operation + ":" + fmt.Sprint(policyID) + ":" + fmt.Sprint(customerID)
 	return sha256.Sum256([]byte(key)), sha256.Sum256(payload), nil
 }
 
-func validateCustomerPolicyOnceReceipt(receipt RuntimeReceipt, policyID int64) error {
-	if receipt.Operation != MemberEventCustomerOnceOperation || receipt.ActorScope != MemberEventDispatchActorScope || receipt.State != "completed" || len(receipt.Result) == 0 {
-		return ErrRuntimeConflict
+func validateCustomerPolicyOnceReceipt(receipt RuntimeReceipt, policyID int64, acceptedOnly bool) (bool, error) {
+	if (receipt.Operation != MemberEventCustomerOnceOperation && receipt.Operation != MemberEventCustomerOnceAcceptedOperation) || receipt.ActorScope != MemberEventDispatchActorScope || receipt.State != "completed" || len(receipt.Result) == 0 {
+		return false, ErrRuntimeConflict
 	}
 	var result memberEventCustomerOnceResult
 	if json.Unmarshal(receipt.Result, &result) != nil || result.PolicyID != policyID || result.PackageID < 1 || result.EnrollmentID < 0 || (result.Outcome != "enrolled" && result.Outcome != "deferred" && result.Outcome != "prior_enrollment") {
-		return ErrRuntimeConflict
+		return false, ErrRuntimeConflict
 	}
-	return nil
+	if acceptedOnly && result.Outcome == "deferred" {
+		return false, nil
+	}
+	if receipt.Operation == MemberEventCustomerOnceAcceptedOperation && result.Outcome == "deferred" {
+		return false, ErrRuntimeConflict
+	}
+	return result.Outcome == "enrolled" || result.Outcome == "prior_enrollment", nil
 }
 
 func (s *RuntimeService) customerPolicyOnceReceiptWithin(ctx context.Context, policyID, customerID int64) (bool, error) {
-	keyDigest, payloadDigest, err := customerPolicyOnceReceiptDigests(policyID, customerID)
-	if err != nil {
-		return false, err
+	for _, operation := range []string{MemberEventCustomerOnceAcceptedOperation, MemberEventCustomerOnceOperation} {
+		keyDigest, payloadDigest, err := customerPolicyOnceReceiptDigestsForOperation(operation, policyID, customerID)
+		if err != nil {
+			return false, err
+		}
+		receipt, found, err := s.store.RuntimeReceipt(ctx, operation, MemberEventDispatchActorScope, keyDigest, payloadDigest)
+		if err != nil || !found {
+			if err != nil {
+				return false, err
+			}
+			continue
+		}
+		consumed, validateErr := validateCustomerPolicyOnceReceipt(receipt, policyID, operation == MemberEventCustomerOnceOperation)
+		if validateErr != nil || consumed {
+			return consumed, validateErr
+		}
 	}
-	receipt, found, err := s.store.RuntimeReceipt(ctx, MemberEventCustomerOnceOperation, MemberEventDispatchActorScope, keyDigest, payloadDigest)
-	if err != nil || !found {
-		return false, err
-	}
-	if err = validateCustomerPolicyOnceReceipt(receipt, policyID); err != nil {
-		return false, err
-	}
-	return true, nil
+	return false, nil
 }
 
 func (s *RuntimeService) lockedCanonicalLineageWithin(ctx context.Context, customerID customerdomain.CustomerID) ([]customerdomain.CustomerID, error) {
@@ -721,30 +910,33 @@ func (s *RuntimeService) customerPolicyEnrollmentForLineageWithin(ctx context.Co
 }
 
 func (s *RuntimeService) reserveCustomerPolicyOnceWithin(ctx context.Context, policyID, customerID int64, now time.Time) (RuntimeReceipt, bool, error) {
-	keyDigest, payloadDigest, err := customerPolicyOnceReceiptDigests(policyID, customerID)
+	keyDigest, payloadDigest, err := customerPolicyOnceAcceptedReceiptDigests(policyID, customerID)
 	if err != nil {
 		return RuntimeReceipt{}, false, err
 	}
 	receipt, owned, err := s.store.ReserveRuntime(ctx, RuntimeReservation{
-		Operation: MemberEventCustomerOnceOperation, ActorScope: MemberEventDispatchActorScope,
+		Operation: MemberEventCustomerOnceAcceptedOperation, ActorScope: MemberEventDispatchActorScope,
 		KeyDigest: keyDigest, PayloadDigest: payloadDigest, CreatedAt: now,
 	})
 	if err != nil {
 		return RuntimeReceipt{}, false, err
 	}
 	if !owned {
-		if err = validateCustomerPolicyOnceReceipt(receipt, policyID); err != nil {
+		if _, err = validateCustomerPolicyOnceReceipt(receipt, policyID, false); err != nil {
 			return RuntimeReceipt{}, false, err
 		}
 		return receipt, false, nil
 	}
-	if receipt.State != "reserved" || receipt.Operation != MemberEventCustomerOnceOperation || receipt.ActorScope != MemberEventDispatchActorScope {
+	if receipt.State != "reserved" || receipt.Operation != MemberEventCustomerOnceAcceptedOperation || receipt.ActorScope != MemberEventDispatchActorScope {
 		return RuntimeReceipt{}, false, ErrRuntimeConflict
 	}
 	return receipt, true, nil
 }
 
 func (s *RuntimeService) completeCustomerPolicyOnceWithin(ctx context.Context, receipt RuntimeReceipt, version automationdomain.PolicyVersion, outcome string, enrollmentID int64, now time.Time) error {
+	if outcome != "enrolled" && outcome != "prior_enrollment" {
+		return ErrRuntimeConflict
+	}
 	result, err := json.Marshal(memberEventCustomerOnceResult{
 		PolicyID: version.PolicyID, PackageID: int64(version.PackageID),
 		Outcome: outcome, EnrollmentID: enrollmentID,
@@ -756,20 +948,14 @@ func (s *RuntimeService) completeCustomerPolicyOnceWithin(ctx context.Context, r
 }
 
 func customerOnceOutcomeForEnrollment(enrollment automationdomain.Enrollment) string {
-	if enrollment.State == "skipped" {
-		return "deferred"
+	if enrollment.State == "accepted" {
+		return "enrolled"
 	}
-	return "enrolled"
+	return ""
 }
 
-const (
-	memberEventDeferredHistoricalMergeReason  = "historical_identity_merge_deferred"
-	memberEventDeferredFirstPaidCutoffReason  = "historical_first_paid_before_cutoff"
-	memberEventDeferredFirstPaidMissingReason = "first_paid_at_missing_deferred"
-)
-
 func validMemberEventDeferralReason(reason string) bool {
-	return reason == memberEventDeferredHistoricalMergeReason || reason == memberEventDeferredFirstPaidCutoffReason || reason == memberEventDeferredFirstPaidMissingReason
+	return reason == MemberEventDeferredHistoricalMergeReason || reason == MemberEventDeferredPaidCutoffReason || reason == MemberEventDeferredPaidMissingReason
 }
 
 func policyMemberEventDeferralReason(version automationdomain.PolicyVersion, event segmentport.MemberEnteredV1) (string, error) {
@@ -784,16 +970,16 @@ func policyMemberEventDeferralReason(version automationdomain.PolicyVersion, eve
 		return action.DeferredCustomerIDs[index] >= int64(event.CustomerID)
 	})
 	if index < len(action.DeferredCustomerIDs) && action.DeferredCustomerIDs[index] == int64(event.CustomerID) {
-		return memberEventDeferredHistoricalMergeReason, nil
+		return MemberEventDeferredHistoricalMergeReason, nil
 	}
-	if action.DeferBeforeFirstPaidAt == nil {
+	if action.DeferBeforePaidAt == nil {
 		return "", nil
 	}
-	if event.FirstPaidAt == nil || event.FirstPaidAt.IsZero() {
-		return memberEventDeferredFirstPaidMissingReason, nil
+	if event.PaidAt == nil || event.PaidAt.IsZero() {
+		return MemberEventDeferredPaidMissingReason, nil
 	}
-	if event.FirstPaidAt.UTC().Before(action.DeferBeforeFirstPaidAt.UTC()) {
-		return memberEventDeferredFirstPaidCutoffReason, nil
+	if event.PaidAt.UTC().Before(action.DeferBeforePaidAt.UTC()) {
+		return MemberEventDeferredPaidCutoffReason, nil
 	}
 	return "", nil
 }
@@ -809,8 +995,33 @@ func policyOncePerCustomer(version automationdomain.PolicyVersion) (bool, error)
 	return action.OncePerCustomer, nil
 }
 
-func (s *RuntimeService) deferredReceiptWithin(ctx context.Context, policyID int64, event segmentport.MemberEnteredV1) (bool, error) {
-	keyDigest, payloadDigest, err := deferredEventReceiptDigests(policyID, event)
+func policyAcceptsPaidQualifiedEvent(version automationdomain.PolicyVersion) (bool, error) {
+	if version.TriggerKind != automationport.TriggerAudienceMemberEnteredV1 || version.ActionKind != automationport.ActionOutboundMessage {
+		return false, nil
+	}
+	action, err := outboundActionConfigForPolicy(version)
+	if err != nil {
+		return false, err
+	}
+	return action.OncePerCustomer && action.DeferBeforePaidAt != nil, nil
+}
+
+func paidQualifiedPolicies(versions []automationdomain.PolicyVersion) ([]automationdomain.PolicyVersion, error) {
+	selected := make([]automationdomain.PolicyVersion, 0, len(versions))
+	for _, version := range versions {
+		accepts, err := policyAcceptsPaidQualifiedEvent(version)
+		if err != nil {
+			return nil, err
+		}
+		if accepts {
+			selected = append(selected, version)
+		}
+	}
+	return selected, nil
+}
+
+func (s *RuntimeService) deferredReceiptForSourceWithin(ctx context.Context, policyID int64, source audienceMemberEventSource) (bool, error) {
+	keyDigest, payloadDigest, err := deferredEventReceiptDigestsForSource(policyID, source)
 	if err != nil {
 		return false, ErrRuntimeUnavailable
 	}
@@ -822,21 +1033,22 @@ func (s *RuntimeService) deferredReceiptWithin(ctx context.Context, policyID int
 		return false, ErrRuntimeConflict
 	}
 	var diagnostic MemberEventDispatchDiagnostic
-	if json.Unmarshal(receipt.Result, &diagnostic) != nil || diagnostic.PackageID != int64(event.PackageID) || diagnostic.PolicyID != policyID || diagnostic.State != "skipped" || !validMemberEventDeferralReason(diagnostic.Reason) {
+	if json.Unmarshal(receipt.Result, &diagnostic) != nil || diagnostic.PackageID != int64(source.event.PackageID) || diagnostic.PolicyID != policyID || diagnostic.State != "skipped" || !validMemberEventDeferralReason(diagnostic.Reason) {
 		return false, ErrRuntimeConflict
 	}
 	return true, nil
 }
 
-func (s *RuntimeService) recordDeferredEnrollmentWithin(ctx context.Context, event segmentport.MemberEnteredV1, version automationdomain.PolicyVersion, eventDigest [32]byte, reason string, now time.Time, onceReceipt *RuntimeReceipt) (automationdomain.Enrollment, bool, error) {
+func (s *RuntimeService) recordDeferredEnrollmentWithin(ctx context.Context, source audienceMemberEventSource, version automationdomain.PolicyVersion, eventDigest [32]byte, reason string, now time.Time) (automationdomain.Enrollment, bool, error) {
+	event := source.event
 	if !validMemberEventDeferralReason(reason) {
 		return automationdomain.Enrollment{}, false, ErrRuntimeInvalid
 	}
-	keyDigest, payloadDigest, err := deferredEventReceiptDigests(version.PolicyID, event)
+	keyDigest, payloadDigest, err := deferredEventReceiptDigestsForSource(version.PolicyID, source)
 	if err != nil {
 		return automationdomain.Enrollment{}, false, ErrRuntimeUnavailable
 	}
-	if found, e := s.deferredReceiptWithin(ctx, version.PolicyID, event); e != nil || found {
+	if found, e := s.deferredReceiptForSourceWithin(ctx, version.PolicyID, source); e != nil || found {
 		return automationdomain.Enrollment{}, false, e
 	}
 	receipt, owned, err := s.store.ReserveRuntime(ctx, RuntimeReservation{
@@ -863,11 +1075,17 @@ func (s *RuntimeService) recordDeferredEnrollmentWithin(ctx context.Context, eve
 		"policy_digest":            hex.EncodeToString(version.Digest[:]),
 		"skip_reason":              reason,
 	}
-	if event.FirstPaidAt != nil && !event.FirstPaidAt.IsZero() {
-		snapshotFields["first_paid_at"] = event.FirstPaidAt.UTC()
+	if event.PaidAt != nil && !event.PaidAt.IsZero() {
+		snapshotFields["paid_at"] = event.PaidAt.UTC()
 	}
-	if action, actionErr := outboundActionConfigForPolicy(version); actionErr == nil && action.DeferBeforeFirstPaidAt != nil {
-		snapshotFields["defer_before_first_paid_at"] = action.DeferBeforeFirstPaidAt.UTC()
+	if event.PaidOrderID != nil {
+		snapshotFields["paid_order_id"] = *event.PaidOrderID
+	}
+	if source.paidQualified() {
+		snapshotFields["event_kind"] = source.kind
+	}
+	if action, actionErr := outboundActionConfigForPolicy(version); actionErr == nil && action.DeferBeforePaidAt != nil {
+		snapshotFields["defer_before_paid_at"] = action.DeferBeforePaidAt.UTC()
 	}
 	snapshot, _ := json.Marshal(snapshotFields)
 	actionDigest := sha256.Sum256(snapshot)
@@ -879,7 +1097,7 @@ func (s *RuntimeService) recordDeferredEnrollmentWithin(ctx context.Context, eve
 	if err != nil {
 		return automationdomain.Enrollment{}, false, err
 	}
-	if !enrollmentMatchesMemberEnteredEvent(enrollment, version, event) || enrollment.State != "skipped" {
+	if !enrollmentMatchesMemberEvent(enrollment, version, source) || enrollment.State != "skipped" {
 		return automationdomain.Enrollment{}, false, ErrRuntimeConflict
 	}
 	var frozen struct {
@@ -910,11 +1128,6 @@ func (s *RuntimeService) recordDeferredEnrollmentWithin(ctx context.Context, eve
 	if err = s.store.CompleteRuntime(ctx, receipt.ID, result, now); err != nil {
 		return automationdomain.Enrollment{}, false, err
 	}
-	if onceReceipt != nil {
-		if err = s.completeCustomerPolicyOnceWithin(ctx, *onceReceipt, version, "deferred", enrollment.ID, now); err != nil {
-			return automationdomain.Enrollment{}, false, err
-		}
-	}
 	return enrollment, true, nil
 }
 
@@ -930,31 +1143,67 @@ func (s *RuntimeService) missingPolicyReceiptWithin(ctx context.Context, keyDige
 }
 
 func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segmentport.MemberEnteredV1) ([]automationdomain.Enrollment, error) {
-	if s == nil || event.PackageID < 1 || event.CustomerID < 1 || event.EventID == "" || event.OccurredAt.IsZero() {
+	return s.enrollAudienceMemberEvent(ctx, enteredEventSource(event))
+}
+
+func (s *RuntimeService) EnrollAudienceMemberPaidQualified(ctx context.Context, event segmentport.MemberPaidQualifiedV1) ([]automationdomain.Enrollment, error) {
+	return s.enrollAudienceMemberEvent(ctx, paidQualifiedEventSource(event))
+}
+
+func (s *RuntimeService) enrollAudienceMemberEvent(ctx context.Context, source audienceMemberEventSource) ([]automationdomain.Enrollment, error) {
+	event := source.event
+	if s == nil || !source.valid() {
 		return nil, ErrRuntimeInvalid
 	}
-	eventDigest := sha256.Sum256([]byte(event.EventID))
-	missingKey, missingPayload, err := missingPolicyReceiptDigests(event)
+	eventDigest, err := source.digest()
 	if err != nil {
 		return nil, ErrRuntimeUnavailable
 	}
+	var missingKey, missingPayload [32]byte
+	if !source.paidQualified() {
+		missingKey, missingPayload, err = missingPolicyReceiptDigests(event)
+		if err != nil {
+			return nil, ErrRuntimeUnavailable
+		}
+	} else {
+		// The paid-qualified fact is not a missing-policy terminal receipt. Its
+		// durable Segment event must remain retryable until the opted-in policy
+		// is active. This digest only serializes concurrent policy cutovers.
+		missingKey = eventDigest
+	}
 	observed := []automationdomain.PolicyVersion{}
 	previouslyUnconfigured := false
+	sourceFactsAlreadyProcessed := false
 	deferredByPolicy := map[int64]bool{}
 	onceConsumedByPolicy := map[int64]bool{}
 	priorEnrollmentByPolicy := map[int64]automationdomain.Enrollment{}
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		var e error
-		previouslyUnconfigured, e = s.missingPolicyReceiptWithin(tx, missingKey, missingPayload)
-		if e != nil || previouslyUnconfigured {
+		if !source.paidQualified() {
+			previouslyUnconfigured, e = s.missingPolicyReceiptWithin(tx, missingKey, missingPayload)
+			if e != nil || previouslyUnconfigured {
+				return e
+			}
+		}
+		sourceFactsAlreadyProcessed, e = s.memberEventSourceFactsReceiptWithin(tx, source)
+		if e != nil {
 			return e
 		}
 		observed, e = s.store.ActivePoliciesForPackage(tx, int64(event.PackageID))
 		if e != nil {
 			return e
 		}
+		if source.paidQualified() {
+			observed, e = paidQualifiedPolicies(observed)
+			if e != nil {
+				return e
+			}
+			if len(observed) == 0 {
+				return ErrRuntimeNotReady
+			}
+		}
 		for _, version := range observed {
-			recorded, receiptErr := s.deferredReceiptWithin(tx, version.PolicyID, event)
+			recorded, receiptErr := s.deferredReceiptForSourceWithin(tx, version.PolicyID, source)
 			if receiptErr != nil {
 				return receiptErr
 			}
@@ -991,14 +1240,20 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 		return nil, nil
 	}
 	if len(observed) == 0 {
+		if sourceFactsAlreadyProcessed {
+			return nil, nil
+		}
+		if source.paidQualified() {
+			return nil, ErrRuntimeNotReady
+		}
 		if err = s.recordMissingActivePolicy(ctx, event); err != nil {
 			return nil, runtimeClassify(err)
 		}
 		return nil, nil
 	}
 	// Check the immutable source receipt before reading current execution
-	// configuration. A replay of the same member-entered fact must return its
-	// already-frozen enrollment even if a later Config release is active.
+	// configuration. Replays return their frozen enrollment; paid-qualified
+	// facts use a distinct source digest from member-entered events.
 	existingByVersion := make(map[int64]automationdomain.Enrollment, len(observed))
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		for _, version := range observed {
@@ -1007,7 +1262,7 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 				return e
 			}
 			if found {
-				if !enrollmentMatchesMemberEnteredEvent(existing, version, event) {
+				if !enrollmentMatchesMemberEvent(existing, version, source) {
 					return ErrRuntimeConflict
 				}
 				existingByVersion[version.ID] = existing
@@ -1063,20 +1318,32 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 	output := []automationdomain.Enrollment{}
 	noLongerActive := false
 	previouslyUnconfigured = false
+	var sourceFactsReceipt RuntimeReceipt
+	sourceFactsReceiptOwned := false
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		if e := s.store.LockMemberEventDispatch(tx, missingKey); e != nil {
 			return e
 		}
 		var e error
-		previouslyUnconfigured, e = s.missingPolicyReceiptWithin(tx, missingKey, missingPayload)
-		if e != nil || previouslyUnconfigured {
-			return e
+		if !source.paidQualified() {
+			previouslyUnconfigured, e = s.missingPolicyReceiptWithin(tx, missingKey, missingPayload)
+			if e != nil || previouslyUnconfigured {
+				return e
+			}
 		}
 		versions, e := s.store.LockActivePoliciesForPackage(tx, int64(event.PackageID))
 		if e != nil {
 			return e
 		}
-		if len(versions) == 0 {
+		if source.paidQualified() {
+			versions, e = paidQualifiedPolicies(versions)
+			if e != nil {
+				return e
+			}
+			if len(versions) == 0 {
+				return ErrRuntimeNotReady
+			}
+		} else if len(versions) == 0 {
 			noLongerActive = true
 			return nil
 		}
@@ -1084,6 +1351,12 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 			// Do not acknowledge an event using a stale policy snapshot. River
 			// retries it against the current active version set.
 			return ErrRuntimeNotReady
+		}
+		if source.hasPaidFacts() {
+			sourceFactsReceipt, sourceFactsReceiptOwned, e = s.reserveMemberEventSourceFactsWithin(tx, source, now)
+			if e != nil {
+				return e
+			}
 		}
 		onceLineage := []customerdomain.CustomerID{event.CustomerID}
 		onceCanonicalCustomerID := event.CustomerID
@@ -1103,7 +1376,7 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 			break
 		}
 		for _, v := range versions {
-			recorded, receiptErr := s.deferredReceiptWithin(tx, v.PolicyID, event)
+			recorded, receiptErr := s.deferredReceiptForSourceWithin(tx, v.PolicyID, source)
 			if receiptErr != nil {
 				return receiptErr
 			}
@@ -1125,17 +1398,17 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 			if onceErr != nil {
 				return onceErr
 			}
-			// Re-read in the write transaction to close the check/create race. A
-			// stored enrollment is a replay only when its immutable source facts
-			// still match; a reused EventID may never change package, snapshot,
-			// configuration, or customer merely because Config has advanced.
+			// Re-read in the write transaction to close the check/create race.
 			if existing, found, lookupErr := s.store.EnrollmentForSource(tx, v.ID, eventDigest, int64(event.CustomerID)); lookupErr != nil {
 				return lookupErr
 			} else if found {
-				if !enrollmentMatchesMemberEnteredEvent(existing, v, event) {
+				if !enrollmentMatchesMemberEvent(existing, v, source) {
 					return ErrRuntimeConflict
 				}
-				if once {
+				// A historical skipped enrollment is an event-level terminal
+				// diagnostic only. It must never consume the customer-level once
+				// reservation needed by a later qualifying payment.
+				if once && existing.State != "skipped" {
 					consumed, receiptErr := s.customerPolicyOnceReceiptForLineageWithin(tx, v.PolicyID, onceLineage)
 					if receiptErr != nil {
 						return receiptErr
@@ -1154,6 +1427,10 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 				}
 				output = append(output, existing)
 				continue
+			}
+			deferredReason, deferErr := policyMemberEventDeferralReason(v, event)
+			if deferErr != nil {
+				return deferErr
 			}
 			var onceReceipt *RuntimeReceipt
 			if once {
@@ -1181,34 +1458,23 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 					continue
 				}
 				if deferredByPolicy[v.PolicyID] {
+					continue
+				}
+				if deferredReason == "" {
 					receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(onceCanonicalCustomerID), now)
 					if reserveErr != nil {
 						return reserveErr
 					}
-					if owned {
-						if reserveErr = s.completeCustomerPolicyOnceWithin(tx, receipt, v, "deferred", 0, now); reserveErr != nil {
-							return reserveErr
-						}
+					if !owned {
+						continue
 					}
-					continue
+					onceReceipt = &receipt
 				}
-				receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(onceCanonicalCustomerID), now)
-				if reserveErr != nil {
-					return reserveErr
-				}
-				if !owned {
-					continue
-				}
-				onceReceipt = &receipt
 			} else if deferredByPolicy[v.PolicyID] {
 				continue
 			}
-			deferredReason, deferErr := policyMemberEventDeferralReason(v, event)
-			if deferErr != nil {
-				return deferErr
-			}
 			if deferredReason != "" {
-				enrollment, created, deferErr := s.recordDeferredEnrollmentWithin(tx, event, v, eventDigest, deferredReason, now, onceReceipt)
+				enrollment, created, deferErr := s.recordDeferredEnrollmentWithin(tx, source, v, eventDigest, deferredReason, now)
 				if deferErr != nil {
 					return deferErr
 				}
@@ -1222,8 +1488,14 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 				return ErrRuntimeNotReady
 			}
 			snapshotFields := map[string]any{"action_kind": v.ActionKind, "action_config": json.RawMessage(v.ActionConfig), "package_id": event.PackageID, "snapshot_id": event.SnapshotID, "configuration_version_id": event.ConfigurationVersionID, "customer_id": event.CustomerID, "policy_version_id": v.ID, "policy_digest": hex.EncodeToString(v.Digest[:])}
-			if event.FirstPaidAt != nil && !event.FirstPaidAt.IsZero() {
-				snapshotFields["first_paid_at"] = event.FirstPaidAt.UTC()
+			if event.PaidAt != nil && !event.PaidAt.IsZero() {
+				snapshotFields["paid_at"] = event.PaidAt.UTC()
+			}
+			if event.PaidOrderID != nil {
+				snapshotFields["paid_order_id"] = *event.PaidOrderID
+			}
+			if source.paidQualified() {
+				snapshotFields["event_kind"] = source.kind
 			}
 			if v.ActionKind == automationport.ActionOutboundMessage {
 				if runtimeConfig.AutomationMaxRecipients < 1 {
@@ -1247,10 +1519,7 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 			if e != nil {
 				return e
 			}
-			// A concurrent writer can win the unique tuple after the re-read above.
-			// Its stored snapshot must satisfy the same source-fact check, without
-			// comparing the current runtime Config revision or limit.
-			if !enrollmentMatchesMemberEnteredEvent(enrollment, v, event) {
+			if !enrollmentMatchesMemberEvent(enrollment, v, source) {
 				return ErrRuntimeConflict
 			}
 			if onceReceipt != nil && !owned {
@@ -1260,7 +1529,7 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 			}
 			output = append(output, enrollment)
 			if owned {
-				payload, _ := json.Marshal(map[string]any{"enrollment_id": enrollment.ID, "policy_id": v.PolicyID, "customer_id": event.CustomerID, "action_kind": v.ActionKind})
+				payload, _ := json.Marshal(map[string]any{"enrollment_id": enrollment.ID, "policy_id": v.PolicyID, "customer_id": event.CustomerID, "action_kind": v.ActionKind, "event_kind": source.kind})
 				actor := v.CreatedBy
 				if v.ApprovalStaffID != nil {
 					actor = *v.ApprovalStaffID
@@ -1269,7 +1538,7 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 					return e
 				}
 				if v.ActionKind == automationport.ActionOutboundMessage {
-					if e = s.acceptEnrollmentMessage(tx, event, v, configuration, published, enrollment, actionDigest, runtimeConfig, actor, now); e != nil {
+					if e = s.acceptEnrollmentMessage(tx, event, eventDigest, v, configuration, published, enrollment, actionDigest, runtimeConfig, actor, now); e != nil {
 						return e
 					}
 				}
@@ -1280,22 +1549,35 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 				}
 			}
 		}
+		if sourceFactsReceiptOwned {
+			if e = s.completeMemberEventSourceFactsWithin(tx, sourceFactsReceipt, source, now); e != nil {
+				return e
+			}
+		}
 		return nil
 	})
 	if err == nil && previouslyUnconfigured {
 		return nil, nil
 	}
 	if err == nil && noLongerActive {
+		if source.paidQualified() {
+			return nil, ErrRuntimeNotReady
+		}
 		err = s.recordMissingActivePolicy(ctx, event)
+	}
+	if err != nil {
+		// Do not expose enrollments accumulated inside a Unit of Work that rolled
+		// back after an Outbound acceptance or later receipt/audit failure.
+		return nil, runtimeClassify(err)
 	}
 	return output, runtimeClassify(err)
 }
 
-// enrollmentMatchesMemberEnteredEvent validates only immutable Segment facts
-// captured in an enrollment. Runtime Config values deliberately remain outside
-// this comparison: the historical snapshot retains them for execution, while a
-// replay of the same source event may occur after a later release is active.
-func enrollmentMatchesMemberEnteredEvent(enrollment automationdomain.Enrollment, version automationdomain.PolicyVersion, event segmentport.MemberEnteredV1) bool {
+// enrollmentMatchesMemberEvent validates only immutable Segment facts captured
+// in an enrollment. Runtime Config values deliberately remain outside this
+// comparison so a replay remains valid after a later Config release.
+func enrollmentMatchesMemberEvent(enrollment automationdomain.Enrollment, version automationdomain.PolicyVersion, source audienceMemberEventSource) bool {
+	event := source.event
 	if enrollment.PolicyID != version.PolicyID || enrollment.PolicyVersionID != version.ID || enrollment.CustomerID != int64(event.CustomerID) || enrollment.ActionKind != version.ActionKind {
 		return false
 	}
@@ -1306,7 +1588,9 @@ func enrollmentMatchesMemberEnteredEvent(enrollment automationdomain.Enrollment,
 		ConfigurationVersionID int64                     `json:"configuration_version_id"`
 		CustomerID             int64                     `json:"customer_id"`
 		PolicyVersionID        int64                     `json:"policy_version_id"`
-		FirstPaidAt            *time.Time                `json:"first_paid_at,omitempty"`
+		EventKind              string                    `json:"event_kind,omitempty"`
+		PaidOrderID            *int64                    `json:"paid_order_id,omitempty"`
+		PaidAt                 *time.Time                `json:"paid_at,omitempty"`
 	}
 	if json.Unmarshal(enrollment.ActionSnapshot, &frozen) != nil {
 		return false
@@ -1317,10 +1601,17 @@ func enrollmentMatchesMemberEnteredEvent(enrollment automationdomain.Enrollment,
 		frozen.ConfigurationVersionID == int64(event.ConfigurationVersionID) &&
 		frozen.CustomerID == int64(event.CustomerID) &&
 		frozen.PolicyVersionID == version.ID &&
-		sameOptionalTime(frozen.FirstPaidAt, event.FirstPaidAt)
+		frozen.EventKind == func() string {
+			if source.paidQualified() {
+				return source.kind
+			}
+			return ""
+		}() &&
+		sameOptionalInt64(frozen.PaidOrderID, event.PaidOrderID) &&
+		sameOptionalTime(frozen.PaidAt, event.PaidAt)
 }
 
-func (s *RuntimeService) acceptEnrollmentMessage(ctx context.Context, event segmentport.MemberEnteredV1, version automationdomain.PolicyVersion, configuration segmentport.ExecutionConfiguration, published automationport.OutboundPublishedContent, enrollment automationdomain.Enrollment, actionDigest [32]byte, runtimeConfig configport.EffectiveSnapshot, actor int64, now time.Time) error {
+func (s *RuntimeService) acceptEnrollmentMessage(ctx context.Context, event segmentport.MemberEnteredV1, eventDigest [32]byte, version automationdomain.PolicyVersion, configuration segmentport.ExecutionConfiguration, published automationport.OutboundPublishedContent, enrollment automationdomain.Enrollment, actionDigest [32]byte, runtimeConfig configport.EffectiveSnapshot, actor int64, now time.Time) error {
 	if s.messages == nil || len(configuration.SenderStaffIDs) == 0 {
 		return ErrRuntimeNotReady
 	}
@@ -1328,7 +1619,6 @@ func (s *RuntimeService) acceptEnrollmentMessage(ctx context.Context, event segm
 	if err != nil || len(contentSnapshot) == 0 || contentSnapshotDigest == ([32]byte{}) {
 		return ErrRuntimeNotReady
 	}
-	eventDigest := sha256.Sum256([]byte(event.EventID))
 	previewDigest := sha256.Sum256(append(append(append([]byte{}, eventDigest[:]...), version.Digest[:]...), actionDigest[:]...))
 	if !validRuntimeConfigSnapshot(runtimeConfig) || runtimeConfig.AutomationMaxRecipients < 1 {
 		return ErrRuntimeNotReady

@@ -106,10 +106,10 @@ func canonicalAction(kind automationport.ActionKind, raw json.RawMessage) (json.
 		return json.Marshal(in)
 	case automationport.ActionOutboundMessage:
 		var in struct {
-			AgentID                int64      `json:"agent_id"`
-			DeferredCustomerIDs    []int64    `json:"deferred_customer_ids,omitempty"`
-			OncePerCustomer        bool       `json:"once_per_customer,omitempty"`
-			DeferBeforeFirstPaidAt *time.Time `json:"defer_before_first_paid_at,omitempty"`
+			AgentID             int64      `json:"agent_id"`
+			DeferredCustomerIDs []int64    `json:"deferred_customer_ids,omitempty"`
+			OncePerCustomer     bool       `json:"once_per_customer,omitempty"`
+			DeferBeforePaidAt   *time.Time `json:"defer_before_paid_at,omitempty"`
 		}
 		if decoder.Decode(&in) != nil || in.AgentID < 1 {
 			return nil, ErrInvalidPolicy
@@ -123,12 +123,12 @@ func canonicalAction(kind automationport.ActionKind, raw json.RawMessage) (json.
 				return nil, ErrInvalidPolicy
 			}
 		}
-		if in.DeferBeforeFirstPaidAt != nil {
-			if in.DeferBeforeFirstPaidAt.IsZero() || !in.OncePerCustomer {
+		if in.DeferBeforePaidAt != nil {
+			if in.DeferBeforePaidAt.IsZero() || !in.OncePerCustomer {
 				return nil, ErrInvalidPolicy
 			}
-			cutoff := in.DeferBeforeFirstPaidAt.UTC()
-			in.DeferBeforeFirstPaidAt = &cutoff
+			cutoff := in.DeferBeforePaidAt.UTC()
+			in.DeferBeforePaidAt = &cutoff
 		}
 		return json.Marshal(in)
 	default:

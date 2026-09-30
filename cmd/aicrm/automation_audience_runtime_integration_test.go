@@ -788,6 +788,11 @@ func (s automationAudienceEnrollmentSink) HandleAudienceMemberEntered(ctx contex
 	return err
 }
 
+func (s automationAudienceEnrollmentSink) HandleAudienceMemberPaidQualified(ctx context.Context, e segmentport.MemberPaidQualifiedV1) error {
+	_, err := s.runtime.EnrollAudienceMemberPaidQualified(ctx, e)
+	return err
+}
+
 // automationAudienceRecordingProvider preserves the exact adapter error in a
 // failing integration fixture. It delegates every runtime call unchanged.
 type automationAudienceRecordingProvider struct {

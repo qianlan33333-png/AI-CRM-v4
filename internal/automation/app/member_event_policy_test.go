@@ -106,7 +106,7 @@ func (s *missingPolicyReceiptStore) CustomerPolicyEnrollment(_ context.Context, 
 	var selected automationdomain.Enrollment
 	found := false
 	for _, enrollment := range s.enrollments {
-		if enrollment.PolicyID == policyID && enrollment.CustomerID == customerID && (!found || enrollment.ID < selected.ID) {
+		if enrollment.PolicyID == policyID && enrollment.CustomerID == customerID && enrollment.ActionKind == automationport.ActionOutboundMessage && enrollment.State == "accepted" && (!found || enrollment.ID < selected.ID) {
 			selected, found = enrollment, true
 		}
 	}
@@ -293,6 +293,53 @@ func TestMemberEnteredWithoutActivePolicyPersistsIdempotentDiagnosticOnly(t *tes
 	}
 }
 
+func TestPaidQualifiedWithoutOptedInPolicyRemainsRetryable(t *testing.T) {
+	store := &missingPolicyReceiptStore{}
+	service, err := NewRuntimeService(directRuntimeUOW{}, store, missingPolicyAudience{}, missingPolicySnapshots{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := segmentport.MemberPaidQualifiedV1{
+		EventID: "audpaid_unconfigured_001", PackageID: 27, SnapshotID: 902,
+		ConfigurationVersionID: 43, CustomerID: 7001, PaidOrderID: 1182,
+		PaidAt:     time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC),
+		OccurredAt: time.Date(2026, 9, 30, 12, 1, 0, 0, time.UTC),
+	}
+	if enrollments, dispatchErr := service.EnrollAudienceMemberPaidQualified(context.Background(), event); !errors.Is(dispatchErr, ErrRuntimeNotReady) || len(enrollments) != 0 {
+		t.Fatalf("paid-qualified event without opt-in policy=%+v err=%v; want retryable not-ready", enrollments, dispatchErr)
+	}
+	if store.reserveCalls != 0 || store.completeCalls != 0 || len(store.receipts) != 0 || len(store.enrollments) != 0 {
+		t.Fatalf("unconfigured paid-qualified fact was terminally recorded: reserve/completed/receipts/enrollments=%d/%d/%d/%d", store.reserveCalls, store.completeCalls, len(store.receipts), len(store.enrollments))
+	}
+}
+
+func TestPaidAtCutoffEqualityIsEligibleAndLegacyEventDigestIsStable(t *testing.T) {
+	approval := int64(17)
+	cutoff := time.Date(2026, 9, 30, 9, 0, 0, 0, time.UTC)
+	version := automationdomain.PolicyVersion{
+		ID: 52, PolicyID: 9, Version: 2, PackageID: 27,
+		TriggerKind: automationport.TriggerAudienceMemberEnteredV1, TriggerEnabled: true,
+		ActionKind:   automationport.ActionOutboundMessage,
+		ActionConfig: json.RawMessage(`{"agent_id":73,"once_per_customer":true,"defer_before_paid_at":"2026-09-30T09:00:00Z"}`),
+		QuietHours:   json.RawMessage(`{}`), SingleRunLimit: 10, ApprovalStaffID: &approval,
+	}
+	orderID := int64(1182)
+	event := segmentport.MemberEnteredV1{
+		EventID: "audmem_cutoff_equal_001", PackageID: 27, SnapshotID: 902,
+		ConfigurationVersionID: 43, CustomerID: 7001, PaidOrderID: &orderID, PaidAt: &cutoff,
+		OccurredAt: cutoff.Add(time.Minute),
+	}
+	if reason, err := policyMemberEventDeferralReason(version, event); err != nil || reason != "" {
+		t.Fatalf("paid time equal to cutoff reason=%q err=%v; want eligible", reason, err)
+	}
+	legacy := event
+	legacy.PaidOrderID, legacy.PaidAt = nil, nil
+	legacyDigest, err := enteredEventSource(legacy).digest()
+	if err != nil || legacyDigest != sha256.Sum256([]byte(legacy.EventID)) {
+		t.Fatalf("legacy member-entered digest=%x err=%v; want EventID-only hash", legacyDigest, err)
+	}
+}
+
 func TestMemberEventMissingPolicyReceiptBlocksReplayAfterPolicyActivation(t *testing.T) {
 	contentDigest := sha256.Sum256([]byte("published outbound content"))
 	configuration := segmentport.ExecutionConfiguration{
@@ -396,7 +443,7 @@ func TestDeferredCustomerGetsDurableSkippedEnrollmentAndNewPayerStillSends(t *te
 		ID: 51, PolicyID: 9, Version: 1, PackageID: 27,
 		TriggerKind: automationport.TriggerAudienceMemberEnteredV1, TriggerEnabled: true,
 		ActionKind:   automationport.ActionOutboundMessage,
-		ActionConfig: json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[7001,7002],"once_per_customer":true,"defer_before_first_paid_at":"2026-09-30T09:00:00Z"}`),
+		ActionConfig: json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[7001,7002],"once_per_customer":true,"defer_before_paid_at":"2026-09-30T09:00:00Z"}`),
 		QuietHours:   json.RawMessage(`{}`), SingleRunLimit: 10, ApprovalStaffID: &approval,
 		Digest: [32]byte{1}, CreatedBy: approval,
 	}
@@ -424,7 +471,9 @@ func TestDeferredCustomerGetsDurableSkippedEnrollmentAndNewPayerStillSends(t *te
 		OccurredAt: time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC),
 	}
 	listedPaidAt := time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)
-	event.FirstPaidAt = &listedPaidAt
+	listedPaidOrderID := int64(1182)
+	event.PaidOrderID = &listedPaidOrderID
+	event.PaidAt = &listedPaidAt
 	enrollments, err := service.EnrollAudienceMember(context.Background(), event)
 	if err != nil || len(enrollments) != 1 || enrollments[0].State != "skipped" {
 		t.Fatalf("deferred enrollment=%+v err=%v", enrollments, err)
@@ -467,20 +516,23 @@ func TestDeferredCustomerGetsDurableSkippedEnrollmentAndNewPayerStillSends(t *te
 	beforeCutoff := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
 	lateHistorical := event
 	lateHistorical.EventID, lateHistorical.SnapshotID, lateHistorical.CustomerID = "audmem_cutoff_history_001", 906, 7003
-	lateHistorical.FirstPaidAt = &beforeCutoff
+	lateHistoricalPaidOrderID := int64(1190)
+	lateHistorical.PaidOrderID = &lateHistoricalPaidOrderID
+	lateHistorical.PaidAt = &beforeCutoff
 	if skipped, skipErr := service.EnrollAudienceMember(context.Background(), lateHistorical); skipErr != nil || len(skipped) != 1 || skipped[0].State != "skipped" {
 		t.Fatalf("cutoff-old first payment enrollment=%+v err=%v", skipped, skipErr)
 	}
 	var cutoffSkipped struct {
-		SkipReason  string    `json:"skip_reason"`
-		FirstPaidAt time.Time `json:"first_paid_at"`
+		SkipReason string    `json:"skip_reason"`
+		PaidAt     time.Time `json:"paid_at"`
 	}
-	if json.Unmarshal(store.enrollments[memberEventEnrollmentKey{policyVersionID: version2.ID, eventDigest: sha256.Sum256([]byte(lateHistorical.EventID)), customerID: int64(lateHistorical.CustomerID)}].ActionSnapshot, &cutoffSkipped) != nil || cutoffSkipped.SkipReason != memberEventDeferredFirstPaidCutoffReason || !cutoffSkipped.FirstPaidAt.Equal(beforeCutoff) {
+	if json.Unmarshal(store.enrollments[memberEventEnrollmentKey{policyVersionID: version2.ID, eventDigest: sha256.Sum256([]byte(lateHistorical.EventID)), customerID: int64(lateHistorical.CustomerID)}].ActionSnapshot, &cutoffSkipped) != nil || cutoffSkipped.SkipReason != MemberEventDeferredPaidCutoffReason || !cutoffSkipped.PaidAt.Equal(beforeCutoff) {
 		t.Fatalf("cutoff skip evidence=%+v", cutoffSkipped)
 	}
 	missingPaidAt := event
 	missingPaidAt.EventID, missingPaidAt.SnapshotID, missingPaidAt.CustomerID = "audmem_cutoff_missing_001", 907, 7004
-	missingPaidAt.FirstPaidAt = nil
+	missingPaidAt.PaidOrderID = nil
+	missingPaidAt.PaidAt = nil
 	if skipped, skipErr := service.EnrollAudienceMember(context.Background(), missingPaidAt); skipErr != nil || len(skipped) != 1 || skipped[0].State != "skipped" {
 		t.Fatalf("missing first-paid time must fail closed: enrollment=%+v err=%v", skipped, skipErr)
 	}
@@ -492,16 +544,16 @@ func TestDeferredCustomerGetsDurableSkippedEnrollmentAndNewPayerStillSends(t *te
 	for _, item := range cutoffDiagnostics {
 		cutoffReasons[item.Reason] = true
 	}
-	if !cutoffReasons[memberEventDeferredHistoricalMergeReason] || !cutoffReasons[memberEventDeferredFirstPaidCutoffReason] || !cutoffReasons[memberEventDeferredFirstPaidMissingReason] {
+	if !cutoffReasons[MemberEventDeferredHistoricalMergeReason] || !cutoffReasons[MemberEventDeferredPaidCutoffReason] || !cutoffReasons[MemberEventDeferredPaidMissingReason] {
 		t.Fatalf("cutoff diagnostics do not explain each terminal skip: %+v", cutoffDiagnostics)
 	}
 	listedReentry := event
 	listedReentry.EventID = "audmem_deferred_reentry_001"
 	listedReentry.SnapshotID++
-	if replay, replayErr := service.EnrollAudienceMember(context.Background(), listedReentry); replayErr != nil || len(replay) != 0 {
-		t.Fatalf("listed customer with a new event ID was not durably deferred: %+v err=%v", replay, replayErr)
+	if replay, replayErr := service.EnrollAudienceMember(context.Background(), listedReentry); replayErr != nil || len(replay) != 1 || replay[0].State != "skipped" {
+		t.Fatalf("listed customer with a new event ID did not get its own durable skip: %+v err=%v", replay, replayErr)
 	}
-	if len(store.enrollments) != 3 || store.runCalls != 0 || messages.calls != 0 {
+	if len(store.enrollments) != 4 || store.runCalls != 0 || messages.calls != 0 {
 		t.Fatalf("listed reentry changed enrollment/run/outbound=%d/%d/%d", len(store.enrollments), store.runCalls, messages.calls)
 	}
 
@@ -509,20 +561,23 @@ func TestDeferredCustomerGetsDurableSkippedEnrollmentAndNewPayerStillSends(t *te
 	newPayer.EventID = "audmem_new_payer_001"
 	newPayer.CustomerID = 8001
 	newPayerPaidAt := time.Date(2026, 9, 30, 9, 30, 0, 0, time.UTC)
-	newPayer.FirstPaidAt = &newPayerPaidAt
+	newPayerPaidOrderID := int64(1191)
+	newPayer.PaidOrderID = &newPayerPaidOrderID
+	newPayer.PaidAt = &newPayerPaidAt
 	if sent, sendErr := service.EnrollAudienceMember(context.Background(), newPayer); sendErr != nil || len(sent) != 1 || sent[0].State != "accepted" {
 		t.Fatalf("new payer enrollment=%+v err=%v", sent, sendErr)
 	}
 	var sentSnapshot struct {
-		FirstPaidAt time.Time `json:"first_paid_at"`
+		PaidAt      time.Time `json:"paid_at"`
+		PaidOrderID int64     `json:"paid_order_id"`
 	}
 	sentEnrollment := store.enrollments[memberEventEnrollmentKey{policyVersionID: version2.ID, eventDigest: sha256.Sum256([]byte(newPayer.EventID)), customerID: int64(newPayer.CustomerID)}]
-	if json.Unmarshal(sentEnrollment.ActionSnapshot, &sentSnapshot) != nil || !sentSnapshot.FirstPaidAt.Equal(newPayerPaidAt) {
-		t.Fatalf("accepted enrollment did not freeze trusted first-paid time: snapshot=%s", sentEnrollment.ActionSnapshot)
+	if json.Unmarshal(sentEnrollment.ActionSnapshot, &sentSnapshot) != nil || !sentSnapshot.PaidAt.Equal(newPayerPaidAt) || sentSnapshot.PaidOrderID != newPayerPaidOrderID {
+		t.Fatalf("accepted enrollment did not freeze trusted paid-order time: snapshot=%s", sentEnrollment.ActionSnapshot)
 	}
-	changedFirstPaidAt := newPayer
-	changedFirstPaidAt.FirstPaidAt = &beforeCutoff
-	if replay, replayErr := service.EnrollAudienceMember(context.Background(), changedFirstPaidAt); len(replay) != 0 || !errors.Is(replayErr, ErrRuntimeConflict) {
+	changedPaidAt := newPayer
+	changedPaidAt.PaidAt = &beforeCutoff
+	if replay, replayErr := service.EnrollAudienceMember(context.Background(), changedPaidAt); len(replay) != 0 || !errors.Is(replayErr, ErrRuntimeConflict) {
 		t.Fatalf("same EventID with changed trusted first-paid time=%+v err=%v; want conflict", replay, replayErr)
 	}
 	if store.runCalls != 1 || messages.calls != 1 || contentReads != 1 || freezerCalls != 1 || store.bindEffectCalls != 1 {
@@ -540,16 +595,29 @@ func TestDeferredCustomerGetsDurableSkippedEnrollmentAndNewPayerStillSends(t *te
 	if replay, replayErr := service.EnrollAudienceMember(context.Background(), newPayerReentry); replayErr != nil || len(replay) != 0 {
 		t.Fatalf("cross-version once-per-customer reentry=%+v err=%v; want no new enrollment", replay, replayErr)
 	}
+	if replay, replayErr := service.EnrollAudienceMember(context.Background(), newPayer); replayErr != nil || len(replay) != 0 {
+		t.Fatalf("same paid fact replay after policy version change=%+v err=%v", replay, replayErr)
+	}
+	changedPaidAtAfterVersion := newPayer
+	changedPaidAtAfterVersion.PaidAt = &beforeCutoff
+	if replay, replayErr := service.EnrollAudienceMember(context.Background(), changedPaidAtAfterVersion); len(replay) != 0 || !errors.Is(replayErr, ErrRuntimeConflict) {
+		t.Fatalf("changed member-entered paid facts after policy version change=%+v err=%v; want source conflict", replay, replayErr)
+	}
+	removedPaidFactsAfterVersion := newPayer
+	removedPaidFactsAfterVersion.PaidAt, removedPaidFactsAfterVersion.PaidOrderID = nil, nil
+	if replay, replayErr := service.EnrollAudienceMember(context.Background(), removedPaidFactsAfterVersion); len(replay) != 0 || !errors.Is(replayErr, ErrRuntimeConflict) {
+		t.Fatalf("member-entered replay that removes its paid facts after policy version change=%+v err=%v; want source conflict", replay, replayErr)
+	}
 	for _, historicalReplay := range []segmentport.MemberEnteredV1{lateHistorical, missingPaidAt} {
 		if replay, replayErr := service.EnrollAudienceMember(context.Background(), historicalReplay); replayErr != nil || len(replay) != 0 {
 			t.Fatalf("cross-version historical cutoff replay %q=%+v err=%v", historicalReplay.EventID, replay, replayErr)
 		}
 	}
-	if len(store.enrollments) != 4 || store.runCalls != 1 || messages.calls != 1 || contentReads != 1 || freezerCalls != 1 || store.bindEffectCalls != 1 {
+	if len(store.enrollments) != 5 || store.runCalls != 1 || messages.calls != 1 || contentReads != 1 || freezerCalls != 1 || store.bindEffectCalls != 1 {
 		t.Fatalf("reentry changed enrollments/run/outbound/content/freeze/effect=%d/%d/%d/%d/%d/%d", len(store.enrollments), store.runCalls, messages.calls, contentReads, freezerCalls, store.bindEffectCalls)
 	}
 	for _, receipt := range store.receipts {
-		if receipt.Operation == MemberEventCustomerOnceOperation && (strings.Contains(string(receipt.Result), "7001") || strings.Contains(string(receipt.Result), "8001")) {
+		if (receipt.Operation == MemberEventCustomerOnceOperation || receipt.Operation == MemberEventCustomerOnceAcceptedOperation) && (strings.Contains(string(receipt.Result), "7001") || strings.Contains(string(receipt.Result), "8001")) {
 			t.Fatalf("customer once receipt result leaked a raw Customer ID: %s", receipt.Result)
 		}
 	}
@@ -591,7 +659,7 @@ func TestOncePerCustomerBackfillsPriorPolicyEnrollment(t *testing.T) {
 	}
 	var onceReceipts int
 	for _, receipt := range store.receipts {
-		if receipt.Operation == MemberEventCustomerOnceOperation && receipt.State == "completed" {
+		if receipt.Operation == MemberEventCustomerOnceAcceptedOperation && receipt.State == "completed" {
 			onceReceipts++
 		}
 	}
@@ -600,21 +668,27 @@ func TestOncePerCustomerBackfillsPriorPolicyEnrollment(t *testing.T) {
 	}
 }
 
-func TestOncePerCustomerBackfillsPriorSkippedEnrollment(t *testing.T) {
+func TestHistoricalAndMissingPaidTimeSkipsDoNotBlockLaterPaidQualifiedEvent(t *testing.T) {
 	contentDigest := sha256.Sum256([]byte("published outbound content"))
 	configuration := segmentport.ExecutionConfiguration{PackageID: 27, PackageVersion: 3, ConfigurationVersionID: 43, Ready: true, AgentID: 73, AgentPublishedVersion: 2, ContentDigest: contentDigest, BindingVersion: 5, SenderSetVersion: 6, SenderStaffIDs: []int64{17}}
 	approval := int64(17)
+	cutoff := time.Date(2026, 9, 30, 9, 0, 0, 0, time.UTC)
 	version := automationdomain.PolicyVersion{
 		ID: 52, PolicyID: 9, Version: 2, PackageID: 27,
 		TriggerKind: automationport.TriggerAudienceMemberEnteredV1, TriggerEnabled: true,
-		ActionKind: automationport.ActionOutboundMessage, ActionConfig: json.RawMessage(`{"agent_id":73,"once_per_customer":true}`),
+		ActionKind: automationport.ActionOutboundMessage, ActionConfig: json.RawMessage(`{"agent_id":73,"once_per_customer":true,"defer_before_paid_at":"2026-09-30T09:00:00Z"}`),
 		QuietHours: json.RawMessage(`{}`), SingleRunLimit: 10, ApprovalStaffID: &approval,
 		Digest: [32]byte{2}, CreatedBy: approval,
 	}
 	store := &missingPolicyReceiptStore{activePolicies: []automationdomain.PolicyVersion{version}, enrollments: map[memberEventEnrollmentKey]automationdomain.Enrollment{}}
-	priorEventDigest := sha256.Sum256([]byte("audmem_prior_skipped_version_001"))
-	priorSnapshot, _ := json.Marshal(map[string]any{"action_kind": automationport.ActionOutboundMessage, "package_id": 27, "snapshot_id": 901, "configuration_version_id": 43, "customer_id": 8003, "policy_version_id": 51, "skip_reason": "historical_identity_merge_deferred"})
-	store.enrollments[memberEventEnrollmentKey{policyVersionID: 51, eventDigest: priorEventDigest, customerID: 8003}] = automationdomain.Enrollment{ID: 8, PolicyID: 9, PolicyVersionID: 51, SourceEventDigest: priorEventDigest, CustomerID: 8003, ActionKind: automationport.ActionOutboundMessage, ActionSnapshot: priorSnapshot, State: "skipped"}
+	// Simulate the legacy implementation's immutable per-customer deferred
+	// receipt. It must remain readable for audit but cannot consume once.
+	legacyKey, legacyPayload, err := customerPolicyOnceReceiptDigests(version.PolicyID, 8003)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyDeferred, _ := json.Marshal(memberEventCustomerOnceResult{PolicyID: version.PolicyID, PackageID: int64(version.PackageID), Outcome: "deferred"})
+	store.receipts = map[[32]byte]RuntimeReceipt{legacyKey: {ID: 8, Operation: MemberEventCustomerOnceOperation, ActorScope: MemberEventDispatchActorScope, State: "completed", KeyDigest: legacyKey, PayloadDigest: legacyPayload, Result: legacyDeferred}}
 	service, err := NewRuntimeService(directRuntimeUOW{}, store, missingPolicyAudience{configuration: configuration}, missingPolicySnapshots{}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -626,26 +700,83 @@ func TestOncePerCustomerBackfillsPriorSkippedEnrollment(t *testing.T) {
 	service.messages = messages
 	service.content = missingPolicyPublishedContent{content: automationport.OutboundPublishedContent{AgentID: 73, PublishedVersion: 2, Content: automationport.FixedContentPackage{ContentText: "member entered"}, ContentDigest: contentDigest}}
 	service.contentFreezer = missingPolicyContentFreezer{}
-	event := segmentport.MemberEnteredV1{EventID: "audmem_prior_skipped_version_reentry_001", PackageID: 27, SnapshotID: 905, ConfigurationVersionID: 43, CustomerID: 8003, OccurredAt: time.Date(2026, 9, 30, 11, 0, 0, 0, time.UTC)}
-	if enrollments, dispatchErr := service.EnrollAudienceMember(context.Background(), event); dispatchErr != nil || len(enrollments) != 0 {
-		t.Fatalf("reentry with a prior skipped enrollment=%+v err=%v", enrollments, dispatchErr)
+	beforeCutoff := cutoff.Add(-time.Hour)
+	orderID := int64(1182)
+	legacyEntry := segmentport.MemberEnteredV1{
+		EventID: "audmem_prior_skipped_version_reentry_001", PackageID: 27, SnapshotID: 905,
+		ConfigurationVersionID: 43, CustomerID: 8003, PaidOrderID: &orderID, PaidAt: &beforeCutoff,
+		OccurredAt: time.Date(2026, 9, 30, 11, 0, 0, 0, time.UTC),
 	}
-	if messages.calls != 0 || store.runCalls != 0 || store.bindEffectCalls != 0 || store.completeCalls != 1 || len(store.receipts) != 1 {
-		t.Fatalf("prior skipped-enrollment backfill run/outbound/effect/receipt completions/receipts=%d/%d/%d/%d/%d", store.runCalls, messages.calls, store.bindEffectCalls, store.completeCalls, len(store.receipts))
+	if enrollments, dispatchErr := service.EnrollAudienceMember(context.Background(), legacyEntry); dispatchErr != nil || len(enrollments) != 1 || enrollments[0].State != "skipped" {
+		t.Fatalf("historical entry skip=%+v err=%v", enrollments, dispatchErr)
 	}
-	var receipt memberEventCustomerOnceResult
+	missingTime := legacyEntry
+	missingTime.EventID, missingTime.SnapshotID = "audmem_missing_paid_at_001", 906
+	missingTime.PaidAt, missingTime.PaidOrderID = nil, nil
+	if enrollments, dispatchErr := service.EnrollAudienceMember(context.Background(), missingTime); dispatchErr != nil || len(enrollments) != 1 || enrollments[0].State != "skipped" {
+		t.Fatalf("missing-time entry skip=%+v err=%v", enrollments, dispatchErr)
+	}
 	for _, storedReceipt := range store.receipts {
-		if json.Unmarshal(storedReceipt.Result, &receipt) != nil || storedReceipt.Operation != MemberEventCustomerOnceOperation || receipt.Outcome != "prior_enrollment" || receipt.EnrollmentID != 8 {
-			t.Fatalf("prior skipped enrollment receipt=%s", storedReceipt.Result)
+		if storedReceipt.Operation == MemberEventCustomerOnceAcceptedOperation {
+			t.Fatalf("a historical skip reserved the accepted-once operation: %+v", storedReceipt)
 		}
 	}
-	reentry := event
-	reentry.EventID, reentry.SnapshotID = "audmem_prior_skipped_version_reentry_002", 906
-	if enrollments, dispatchErr := service.EnrollAudienceMember(context.Background(), reentry); dispatchErr != nil || len(enrollments) != 0 {
-		t.Fatalf("reentry after skipped-history receipt=%+v err=%v", enrollments, dispatchErr)
+	qualified := segmentport.MemberPaidQualifiedV1{
+		EventID: "audmem_paid_qualified_001", PackageID: 27, SnapshotID: 907, ConfigurationVersionID: 43,
+		CustomerID: 8003, PaidOrderID: 2218, PaidAt: cutoff.Add(time.Hour),
+		OccurredAt: time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC),
 	}
-	if messages.calls != 0 || store.runCalls != 0 || store.bindEffectCalls != 0 || store.completeCalls != 1 || len(store.receipts) != 1 {
-		t.Fatalf("second skipped-history reentry changed run/outbound/effect/receipt completions/receipts=%d/%d/%d/%d/%d", store.runCalls, messages.calls, store.bindEffectCalls, store.completeCalls, len(store.receipts))
+	if enrollments, dispatchErr := service.EnrollAudienceMemberPaidQualified(context.Background(), qualified); dispatchErr != nil || len(enrollments) != 1 || enrollments[0].State != "accepted" {
+		t.Fatalf("later qualifying payment=%+v err=%v", enrollments, dispatchErr)
+	}
+	var frozen struct {
+		EventKind   string    `json:"event_kind"`
+		PaidOrderID int64     `json:"paid_order_id"`
+		PaidAt      time.Time `json:"paid_at"`
+	}
+	acceptedDigest := sha256.Sum256([]byte(segmentport.EventAudienceMemberPaidQualifiedV1 + "\x00" + qualified.EventID))
+	accepted := store.enrollments[memberEventEnrollmentKey{policyVersionID: version.ID, eventDigest: acceptedDigest, customerID: int64(qualified.CustomerID)}]
+	if json.Unmarshal(accepted.ActionSnapshot, &frozen) != nil || frozen.EventKind != segmentport.EventAudienceMemberPaidQualifiedV1 || frozen.PaidOrderID != qualified.PaidOrderID || !frozen.PaidAt.Equal(qualified.PaidAt) {
+		t.Fatalf("paid-qualified source facts not frozen: snapshot=%s", accepted.ActionSnapshot)
+	}
+	changed := qualified
+	changed.PaidOrderID++
+	if enrollments, dispatchErr := service.EnrollAudienceMemberPaidQualified(context.Background(), changed); len(enrollments) != 0 || !errors.Is(dispatchErr, ErrRuntimeConflict) {
+		t.Fatalf("same paid-qualified EventID with changed order=%+v err=%v; want conflict", enrollments, dispatchErr)
+	}
+	paidQualifiedSource := paidQualifiedEventSource(qualified)
+	sourceKey, sourcePayload, digestErr := memberEventSourceFactsReceiptDigests(paidQualifiedSource)
+	if digestErr != nil {
+		t.Fatal(digestErr)
+	}
+	sourceReceipt, sourceReceiptFound, receiptErr := store.RuntimeReceipt(context.Background(), MemberEventSourceFactsOperation, MemberEventDispatchActorScope, sourceKey, sourcePayload)
+	if receiptErr != nil || !sourceReceiptFound || validateMemberEventSourceFactsReceipt(sourceReceipt, paidQualifiedSource) != nil {
+		t.Fatalf("paid-qualified source-fact receipt=%+v found=%v err=%v", sourceReceipt, sourceReceiptFound, receiptErr)
+	}
+	version2 := version
+	version2.ID, version2.Version, version2.Digest = 53, 3, [32]byte{3}
+	store.activePolicies = []automationdomain.PolicyVersion{version2}
+	if replay, replayErr := service.EnrollAudienceMemberPaidQualified(context.Background(), qualified); replayErr != nil || len(replay) != 0 {
+		t.Fatalf("same paid-qualified fact after policy version change=%+v err=%v; want once suppression", replay, replayErr)
+	}
+	changedAfterVersion := qualified
+	changedAfterVersion.PaidAt = cutoff.Add(2 * time.Hour)
+	if replay, replayErr := service.EnrollAudienceMemberPaidQualified(context.Background(), changedAfterVersion); len(replay) != 0 || !errors.Is(replayErr, ErrRuntimeConflict) {
+		t.Fatalf("changed paid-qualified fact after policy version change=%+v err=%v; want source conflict", replay, replayErr)
+	}
+	reentry := qualified
+	reentry.EventID, reentry.SnapshotID, reentry.PaidOrderID, reentry.PaidAt = "audmem_paid_qualified_002", 908, 2219, cutoff.Add(2*time.Hour)
+	if enrollments, dispatchErr := service.EnrollAudienceMemberPaidQualified(context.Background(), reentry); dispatchErr != nil || len(enrollments) != 0 {
+		t.Fatalf("second qualifying payment consumed same customer's once slot: %+v err=%v", enrollments, dispatchErr)
+	}
+	acceptedOnceReceipts := 0
+	for _, receipt := range store.receipts {
+		if receipt.Operation == MemberEventCustomerOnceAcceptedOperation && receipt.State == "completed" {
+			acceptedOnceReceipts++
+		}
+	}
+	if acceptedOnceReceipts != 1 || messages.calls != 1 || store.runCalls != 1 || store.bindEffectCalls != 1 || len(store.enrollments) != 3 {
+		t.Fatalf("once/skip results: accepted receipts=%d outbound=%d runs=%d effects=%d enrollments=%d", acceptedOnceReceipts, messages.calls, store.runCalls, store.bindEffectCalls, len(store.enrollments))
 	}
 }
 
@@ -662,7 +793,7 @@ func TestOncePerCustomerChecksPriorReceiptsAndEnrollmentsAcrossLockedLineage(t *
 				QuietHours: json.RawMessage(`{}`), SingleRunLimit: 10, ApprovalStaffID: &approval,
 				Digest: [32]byte{2}, CreatedBy: approval,
 			}
-			const canonical, formerRoot = customerdomain.CustomerID(8100), customerdomain.CustomerID(8101)
+			const canonical, formerRoot = customerdomain.CustomerID(8101), customerdomain.CustomerID(8100)
 			store := &missingPolicyReceiptStore{activePolicies: []automationdomain.PolicyVersion{version}, enrollments: map[memberEventEnrollmentKey]automationdomain.Enrollment{}}
 			if scenario == "prior_once_receipt" {
 				keyDigest, payloadDigest, digestErr := customerPolicyOnceReceiptDigests(version.PolicyID, int64(formerRoot))
@@ -695,7 +826,11 @@ func TestOncePerCustomerChecksPriorReceiptsAndEnrollmentsAcrossLockedLineage(t *
 			if lineageReader.calls != 1 || messages.calls != 0 || store.runCalls != 0 || store.bindEffectCalls != 0 {
 				t.Fatalf("lineage lookups/outbound/run/effect=%d/%d/%d/%d", lineageReader.calls, messages.calls, store.runCalls, store.bindEffectCalls)
 			}
-			canonicalKey, canonicalPayload, digestErr := customerPolicyOnceReceiptDigests(version.PolicyID, int64(canonical))
+			canonicalKey, canonicalPayload, digestErr := customerPolicyOnceAcceptedReceiptDigests(version.PolicyID, int64(canonical))
+			if digestErr != nil {
+				t.Fatal(digestErr)
+			}
+			legacyCanonicalKey, legacyCanonicalPayload, digestErr := customerPolicyOnceReceiptDigests(version.PolicyID, int64(canonical))
 			if digestErr != nil {
 				t.Fatal(digestErr)
 			}
@@ -703,14 +838,14 @@ func TestOncePerCustomerChecksPriorReceiptsAndEnrollmentsAcrossLockedLineage(t *
 				if store.reserveCalls != 0 || store.completeCalls != 0 || len(store.receipts) != 1 {
 					t.Fatalf("alias once receipt was not treated as terminal: reserve/complete/receipts=%d/%d/%d", store.reserveCalls, store.completeCalls, len(store.receipts))
 				}
-				if _, found, readErr := store.RuntimeReceipt(context.Background(), MemberEventCustomerOnceOperation, MemberEventDispatchActorScope, canonicalKey, canonicalPayload); readErr != nil || found {
+				if _, found, readErr := store.RuntimeReceipt(context.Background(), MemberEventCustomerOnceOperation, MemberEventDispatchActorScope, legacyCanonicalKey, legacyCanonicalPayload); readErr != nil || found {
 					t.Fatalf("alias receipt unexpectedly copied to current root: found=%v err=%v", found, readErr)
 				}
 			} else {
 				if store.reserveCalls != 1 || store.completeCalls != 1 || len(store.receipts) != 1 {
 					t.Fatalf("alias prior enrollment receipt reserve/complete/receipts=%d/%d/%d", store.reserveCalls, store.completeCalls, len(store.receipts))
 				}
-				receipt, found, readErr := store.RuntimeReceipt(context.Background(), MemberEventCustomerOnceOperation, MemberEventDispatchActorScope, canonicalKey, canonicalPayload)
+				receipt, found, readErr := store.RuntimeReceipt(context.Background(), MemberEventCustomerOnceAcceptedOperation, MemberEventDispatchActorScope, canonicalKey, canonicalPayload)
 				var result memberEventCustomerOnceResult
 				if readErr != nil || !found || json.Unmarshal(receipt.Result, &result) != nil || result.Outcome != "prior_enrollment" || result.EnrollmentID != 42 {
 					t.Fatalf("alias enrollment was not backfilled under current canonical root: receipt=%+v found=%v err=%v", receipt, found, readErr)
@@ -731,9 +866,16 @@ func TestActivePolicyOncePerCustomerCanOnlyBeEnabled(t *testing.T) {
 	}
 	enabled := current
 	enabled.ID, enabled.Version = 52, 2
-	enabled.ActionConfig = json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[7001,7002],"once_per_customer":true,"defer_before_first_paid_at":"2026-09-30T02:58:14Z"}`)
+	enabled.ActionConfig = json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[7001,7002],"once_per_customer":true,"defer_before_paid_at":"2026-09-30T02:58:14Z"}`)
 	if !activeDeferredCustomerIDsOnlyUpdate(current, enabled) {
 		t.Fatal("active policy must allow adding deferred IDs and enabling once_per_customer")
+	}
+	jsonFormattedCurrent := current
+	jsonFormattedCurrent.QuietHours = json.RawMessage(`{"end":"08:00","start":"22:00","timezone":"UTC"}`)
+	jsonFormattedNext := enabled
+	jsonFormattedNext.QuietHours = json.RawMessage(`{"timezone":"UTC","start":"22:00","end":"08:00"}`)
+	if !activeDeferredCustomerIDsOnlyUpdate(jsonFormattedCurrent, jsonFormattedNext) {
+		t.Fatal("active policy update must compare quiet-hours JSON by meaning, not JSONB key order or whitespace")
 	}
 	disabled := enabled
 	disabled.ID, disabled.Version = 53, 3
@@ -749,7 +891,7 @@ func TestActivePolicyOncePerCustomerCanOnlyBeEnabled(t *testing.T) {
 	}
 	changedCutoff := enabled
 	changedCutoff.ID, changedCutoff.Version = 55, 5
-	changedCutoff.ActionConfig = json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[7001,7002],"once_per_customer":true,"defer_before_first_paid_at":"2026-09-30T02:58:15Z"}`)
+	changedCutoff.ActionConfig = json.RawMessage(`{"agent_id":73,"deferred_customer_ids":[7001,7002],"once_per_customer":true,"defer_before_paid_at":"2026-09-30T02:58:15Z"}`)
 	if activeDeferredCustomerIDsOnlyUpdate(enabled, changedCutoff) {
 		t.Fatal("active policy must not change an already established first-paid cutoff")
 	}
@@ -846,7 +988,7 @@ func TestMemberEventVersionChangeDuringDispatchRetriesAgainstCurrentPolicy(t *te
 	}
 	onceReceiptFound := false
 	for _, receipt := range store.receipts {
-		onceReceiptFound = onceReceiptFound || receipt.Operation == MemberEventCustomerOnceOperation
+		onceReceiptFound = onceReceiptFound || receipt.Operation == MemberEventCustomerOnceAcceptedOperation
 	}
 	if len(store.enrollments) != 1 || store.runCalls != 1 || messages.calls != 1 || store.reserveCalls != 1 || store.completeCalls != 1 || len(store.receipts) != 1 || !onceReceiptFound {
 		t.Fatalf("retry enrollments/runs/outbound/once reservations/completions/receipts=%d/%d/%d/%d/%d/%d", len(store.enrollments), store.runCalls, messages.calls, store.reserveCalls, store.completeCalls, len(store.receipts))
