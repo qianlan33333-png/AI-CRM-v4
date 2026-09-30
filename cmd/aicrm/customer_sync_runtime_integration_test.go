@@ -305,7 +305,7 @@ func customerSyncRuntimePool(t *testing.T) (*pgxpool.Pool, func()) {
 		t.Fatal("locate customer sync runtime test")
 	}
 	base := filepath.Join(filepath.Dir(source), "..", "..", "migrations")
-	for _, migration := range []string{"0001_platform.sql", "0002_identity.sql", "0003_access.sql", "0004_wecom.sql", "0005_external_effects.sql", "0009_customer_activation.sql", "0022_customer_profile_sections.sql", "0086_wecom_profile_primary_owner.sql", "0093_customer_tag_commands.sql", "0125_outbound_material_preparation.sql", "0153_wecom_customer_detail_projection.sql", "0170_wecom_contact_description_effect.sql", "0171_wecom_contact_description_source_coverage.sql"} {
+	for _, migration := range []string{"0001_platform.sql", "0002_identity.sql", "0003_access.sql", "0004_wecom.sql", "0005_external_effects.sql", "0009_customer_activation.sql", "0022_customer_profile_sections.sql", "0086_wecom_profile_primary_owner.sql", "0093_customer_tag_commands.sql", "0125_outbound_material_preparation.sql", "0153_wecom_customer_detail_projection.sql", "0170_wecom_contact_description_effect.sql", "0171_wecom_contact_description_source_coverage.sql", "0213_wecom_followed_at.sql"} {
 		sql, readErr := os.ReadFile(filepath.Join(base, migration))
 		if readErr != nil {
 			native.Close()
