@@ -215,10 +215,14 @@ func (PostgreSQLCustomerSyncStore) UpsertProfileObservations(ctx context.Context
 			seenTags[tag.ProviderTagID] = struct{}{}
 		}
 		projected := follow.DescriptionProjected && follow.Description != nil
+		// This Provider read is authoritative for the current relationship
+		// observation. A missing createtime must clear an older projected value;
+		// carrying it forward could misclassify a delete/re-add as a pre-payment
+		// friendship. Callback edit events preserve their timestamp separately.
 		if _, err = tx.Exec(ctx, `INSERT INTO wecom_customer_owner_observations(customer_id,corp_scope,employee_id,remark,relationship_status,last_seen_run_id,observed_at,followed_at)
 			VALUES($1,$2,$3,$4,'active',$5,$6,$7) ON CONFLICT(customer_id,corp_scope,employee_id) DO UPDATE SET
 			remark=EXCLUDED.remark,relationship_status='active',last_seen_run_id=EXCLUDED.last_seen_run_id,observed_at=EXCLUDED.observed_at,
-			followed_at=COALESCE(EXCLUDED.followed_at,wecom_customer_owner_observations.followed_at),stale_at=NULL,updated_at=clock_timestamp()`,
+			followed_at=EXCLUDED.followed_at,stale_at=NULL,updated_at=clock_timestamp()`,
 			customerID, corpScope, employeeID, follow.Remark, runID, observedAt.UTC(), follow.FollowedAt); err != nil {
 			return err
 		}

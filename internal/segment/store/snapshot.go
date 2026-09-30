@@ -164,15 +164,19 @@ func (r *Repository) stageRefreshBatch(ctx context.Context, runID int64, ordinal
 		return ErrInvalid
 	}
 	ids := make([]customerdomain.CustomerID, len(facts))
-	firstPaidAtValues := make([]string, len(facts))
+	paidAtValues := make([]string, len(facts))
+	paidOrderIDs := make([]int64, len(facts))
 	for i, fact := range facts {
 		id := fact.CustomerID
-		if id < 1 || (i > 0 && facts[i-1].CustomerID >= id) || fact.FirstPaidAt != nil && fact.FirstPaidAt.IsZero() {
+		if id < 1 || (i > 0 && facts[i-1].CustomerID >= id) ||
+			(fact.PaidAt == nil && fact.PaidOrderID != 0) ||
+			(fact.PaidAt != nil && (fact.PaidAt.IsZero() || fact.PaidOrderID < 1)) {
 			return ErrInvalid
 		}
 		ids[i] = id
-		if fact.FirstPaidAt != nil {
-			firstPaidAtValues[i] = fact.FirstPaidAt.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
+		if fact.PaidAt != nil {
+			paidAtValues[i] = fact.PaidAt.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
+			paidOrderIDs[i] = fact.PaidOrderID
 		}
 	}
 	if digest != segmentdomain.DigestMembers(ids) || factDigest != ([32]byte{}) && factDigest != segmentdomain.DigestSnapshotMemberFacts(facts) {
@@ -207,14 +211,14 @@ func (r *Repository) stageRefreshBatch(ctx context.Context, runID int64, ordinal
 	for index, id := range ids {
 		memberIDs[index] = int64(id)
 	}
-	if _, err = t.Exec(ctx, `INSERT INTO segment_audience_snapshot_members(snapshot_id,customer_id,entered_at,identity_disposition,first_paid_at)
-		SELECT $1,candidate.customer_id,COALESCE(previous.entered_at,$4),'resolved',NULLIF(candidate.first_paid_at,'')::timestamptz
-		FROM unnest($2::bigint[],$3::text[]) AS candidate(customer_id,first_paid_at)
+	if _, err = t.Exec(ctx, `INSERT INTO segment_audience_snapshot_members(snapshot_id,customer_id,entered_at,identity_disposition,paid_at,paid_order_id)
+		SELECT $1,candidate.customer_id,COALESCE(previous.entered_at,$5),'resolved',NULLIF(candidate.paid_at,'')::timestamptz,NULLIF(candidate.paid_order_id,0)
+		FROM unnest($2::bigint[],$3::text[],$4::bigint[]) AS candidate(customer_id,paid_at,paid_order_id)
 		LEFT JOIN segment_audience_snapshot_members previous ON previous.snapshot_id=(
 			SELECT package.published_snapshot_id
 			FROM segment_audience_snapshots snapshot JOIN segment_audience_packages package ON package.id=snapshot.package_id
 			WHERE snapshot.id=$1
-		) AND previous.customer_id=candidate.customer_id`, snapshotID, memberIDs, firstPaidAtValues, now); err != nil {
+		) AND previous.customer_id=candidate.customer_id`, snapshotID, memberIDs, paidAtValues, paidOrderIDs, now); err != nil {
 		if unique(err) {
 			return ErrConflict
 		}
@@ -311,8 +315,8 @@ func (r *Repository) PublishRefreshWithActor(ctx context.Context, runID int64, e
 		}
 	}
 	if !run.RefreshKind.IsComplete() && previousID != nil {
-		if _, err = t.Exec(ctx, `INSERT INTO segment_audience_snapshot_members(snapshot_id,customer_id,entered_at,identity_disposition,first_paid_at)
-			SELECT $1,previous.customer_id,previous.entered_at,'resolved',previous.first_paid_at FROM segment_audience_snapshot_members previous
+		if _, err = t.Exec(ctx, `INSERT INTO segment_audience_snapshot_members(snapshot_id,customer_id,entered_at,identity_disposition,paid_at,paid_order_id)
+			SELECT $1,previous.customer_id,previous.entered_at,'resolved',previous.paid_at,previous.paid_order_id FROM segment_audience_snapshot_members previous
 			WHERE previous.snapshot_id=$2 AND NOT EXISTS (SELECT 1 FROM segment_audience_snapshot_members added WHERE added.snapshot_id=$1 AND added.customer_id=previous.customer_id)`, snapshot.ID, *previousID); err != nil {
 			return segmentdomain.PublishedRefresh{}, err
 		}
@@ -484,8 +488,8 @@ func (r *Repository) CreateMemberEnteredEventsWithActor(ctx context.Context, sna
 	if err != nil {
 		return 0, err
 	}
-	result, err := t.Exec(ctx, `INSERT INTO segment_audience_member_events(event_id,package_id,snapshot_id,configuration_version_id,customer_id,first_paid_at,occurred_at)
-		SELECT 'audmem_' || ($1::bigint)::text || '_' || current.customer_id::text,$2::bigint,$1::bigint,$3::bigint,current.customer_id,current.first_paid_at,$5::timestamptz
+	entered, err := t.Exec(ctx, `INSERT INTO segment_audience_member_events(event_id,event_kind,package_id,snapshot_id,configuration_version_id,customer_id,paid_at,paid_order_id,occurred_at)
+		SELECT 'audmem_' || ($1::bigint)::text || '_' || current.customer_id::text,'audience.member_entered.v1',$2::bigint,$1::bigint,$3::bigint,current.customer_id,current.paid_at,current.paid_order_id,$5::timestamptz
 		FROM segment_audience_snapshot_members current
 		WHERE current.snapshot_id=$1::bigint
 		  AND ($4::bigint IS NULL OR NOT EXISTS (SELECT 1 FROM segment_audience_snapshot_members previous WHERE previous.snapshot_id=$4::bigint AND previous.customer_id=current.customer_id))
@@ -493,12 +497,34 @@ func (r *Repository) CreateMemberEnteredEventsWithActor(ctx context.Context, sna
 	if err != nil {
 		return 0, err
 	}
-	created := result.RowsAffected()
+	created := entered.RowsAffected()
+	var qualified int64
+	if previousSnapshotID != nil {
+		result, qualifiedErr := t.Exec(ctx, `INSERT INTO segment_audience_member_events(event_id,event_kind,package_id,snapshot_id,configuration_version_id,customer_id,paid_at,paid_order_id,occurred_at)
+			SELECT 'audpay_' || ($1::bigint)::text || '_' || current.customer_id::text || '_' || current.paid_order_id::text,
+				'audience.member_paid_qualified.v1',$2::bigint,$1::bigint,$3::bigint,current.customer_id,current.paid_at,current.paid_order_id,$5::timestamptz
+			FROM segment_audience_snapshot_members current
+			JOIN segment_audience_snapshot_members previous ON previous.snapshot_id=$4::bigint AND previous.customer_id=current.customer_id
+			WHERE current.snapshot_id=$1::bigint
+			  AND current.paid_at IS NOT NULL AND current.paid_order_id IS NOT NULL
+			  AND (previous.paid_at IS NULL OR current.paid_at>previous.paid_at OR
+				(current.paid_at=previous.paid_at AND (previous.paid_order_id IS NULL OR current.paid_order_id>previous.paid_order_id)))
+			ON CONFLICT(snapshot_id,customer_id) DO NOTHING`, snapshot.ID, snapshot.PackageID, snapshot.ConfigurationVersionID, *previousSnapshotID, occurredAt.UTC())
+		if qualifiedErr != nil {
+			return 0, qualifiedErr
+		}
+		qualified = result.RowsAffected()
+	}
+	created += qualified
 	if created == 0 {
 		return 0, nil
 	}
-	payload := []byte(`{"snapshot_id":` + strconv.FormatInt(snapshot.ID, 10) + `,"package_id":` + strconv.FormatInt(snapshot.PackageID, 10) + `,"event_count":` + strconv.FormatInt(created, 10) + `}`)
-	_, err = r.AppendMutationFacts(ctx, MutationFact{ResourceKind: "member_event_batch", ResourceID: snapshot.ID, Operation: "create", EventType: "audience.member_entered.batch.v1", ActorID: actor.StaffID, ActorKind: actor.Kind, ActorRef: actor.Reference, Payload: payload, IdempotencyKey: "member-events:" + strconv.FormatInt(snapshot.ID, 10), OccurredAt: occurredAt.UTC()})
+	eventType := "audience.member_entered.batch.v1"
+	if qualified > 0 {
+		eventType = "audience.member_events.batch.v1"
+	}
+	payload := []byte(`{"snapshot_id":` + strconv.FormatInt(snapshot.ID, 10) + `,"package_id":` + strconv.FormatInt(snapshot.PackageID, 10) + `,"event_count":` + strconv.FormatInt(created, 10) + `,"member_entered_count":` + strconv.FormatInt(entered.RowsAffected(), 10) + `,"member_paid_qualified_count":` + strconv.FormatInt(qualified, 10) + `}`)
+	_, err = r.AppendMutationFacts(ctx, MutationFact{ResourceKind: "member_event_batch", ResourceID: snapshot.ID, Operation: "create", EventType: eventType, ActorID: actor.StaffID, ActorKind: actor.Kind, ActorRef: actor.Reference, Payload: payload, IdempotencyKey: "member-events:" + strconv.FormatInt(snapshot.ID, 10), OccurredAt: occurredAt.UTC()})
 	return created, err
 }
 
@@ -518,20 +544,41 @@ func (r *Repository) MemberEvents(ctx context.Context, snapshotID segmentport.Sn
 	if err != nil {
 		return segmentport.MemberEventPage{}, err
 	}
-	rows, err := t.Query(ctx, `SELECT id,event_id,package_id,snapshot_id,configuration_version_id,customer_id,first_paid_at,occurred_at FROM segment_audience_member_events WHERE snapshot_id=$1 AND id>$2 ORDER BY id LIMIT $3`, snapshotID, after, limit+1)
+	rows, err := t.Query(ctx, `SELECT id,event_kind,event_id,package_id,snapshot_id,configuration_version_id,customer_id,paid_at,paid_order_id,occurred_at FROM segment_audience_member_events WHERE snapshot_id=$1 AND id>$2 ORDER BY id LIMIT $3`, snapshotID, after, limit+1)
 	if err != nil {
 		return segmentport.MemberEventPage{}, err
 	}
 	defer rows.Close()
-	page := segmentport.MemberEventPage{Items: []segmentport.MemberEnteredV1{}}
+	page := segmentport.MemberEventPage{Items: []segmentport.MemberEventV1{}}
 	ids := []int64{}
 	for rows.Next() {
 		var rowID int64
-		var item segmentport.MemberEnteredV1
-		if err = rows.Scan(&rowID, &item.EventID, &item.PackageID, &item.SnapshotID, &item.ConfigurationVersionID, &item.CustomerID, &item.FirstPaidAt, &item.OccurredAt); err != nil {
+		var kind string
+		var eventID string
+		var packageID segmentport.PackageID
+		var eventSnapshotID segmentport.SnapshotID
+		var configurationVersionID segmentport.ConfigurationVersionID
+		var customerID customerdomain.CustomerID
+		var paidAt *time.Time
+		var paidOrderID *int64
+		var occurredAt time.Time
+		if err = rows.Scan(&rowID, &kind, &eventID, &packageID, &eventSnapshotID, &configurationVersionID, &customerID, &paidAt, &paidOrderID, &occurredAt); err != nil {
 			return page, err
 		}
 		ids = append(ids, rowID)
+		var item segmentport.MemberEventV1
+		item.Kind = kind
+		switch kind {
+		case segmentport.EventAudienceMemberEnteredV1:
+			item.MemberEntered = &segmentport.MemberEnteredV1{EventID: eventID, PackageID: packageID, SnapshotID: eventSnapshotID, ConfigurationVersionID: configurationVersionID, CustomerID: customerID, PaidOrderID: paidOrderID, PaidAt: paidAt, OccurredAt: occurredAt}
+		case segmentport.EventAudienceMemberPaidQualifiedV1:
+			if paidAt == nil || paidOrderID == nil || *paidOrderID < 1 {
+				return page, ErrConflict
+			}
+			item.PaidQualified = &segmentport.MemberPaidQualifiedV1{EventID: eventID, PackageID: packageID, SnapshotID: eventSnapshotID, ConfigurationVersionID: configurationVersionID, CustomerID: customerID, PaidOrderID: *paidOrderID, PaidAt: *paidAt, OccurredAt: occurredAt}
+		default:
+			return page, ErrConflict
+		}
 		page.Items = append(page.Items, item)
 	}
 	if err = rows.Err(); err != nil {

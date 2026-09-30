@@ -199,7 +199,7 @@ func TestRefreshStagesHundredThousandMembersAndPublishesOnce(t *testing.T) {
 	}
 }
 
-func TestRefreshStagesFirstPaidEvidenceWithTheMember(t *testing.T) {
+func TestRefreshStagesQualifiedPaidOrderEvidenceWithTheMember(t *testing.T) {
 	paidAt := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 	ids := []customerdomain.CustomerID{71}
 	definition := json.RawMessage(`{"schema_version":1,"template_key":"active_contacts","parameters":{"within_days":"30"}}`)
@@ -208,14 +208,14 @@ func TestRefreshStagesFirstPaidEvidenceWithTheMember(t *testing.T) {
 		config: segmentdomain.ConfigurationVersion{ID: 3, PackageID: 1, Definition: definition, CreatedBy: 4},
 		events: 1,
 	}
-	evaluator, _ := NewEvaluator(segmentcompiler.Compiler{}, sourceStub{ids: ids, firstPaidAt: map[customerdomain.CustomerID]time.Time{71: paidAt}}, passthroughCanonical{})
+	evaluator, _ := NewEvaluator(segmentcompiler.Compiler{}, sourceStub{ids: ids, qualifiedPaidOrder: map[customerdomain.CustomerID]segmentport.PaidOrderFact{71: {PaidOrderID: 801, PaidAt: paidAt}}}, passthroughCanonical{})
 	eventQueue := &memberEventEnqueueStub{}
 	service, _ := NewSnapshotService(directUOW{}, store, evaluator, &enqueueStub{}, eventQueue)
 	service.now = func() time.Time { return paidAt.Add(2 * time.Hour) }
 	if err := service.ProcessRefresh(context.Background(), 7); err != nil {
 		t.Fatal(err)
 	}
-	if len(store.memberFacts) != 1 || store.memberFacts[0].CustomerID != 71 || store.memberFacts[0].FirstPaidAt == nil || !store.memberFacts[0].FirstPaidAt.Equal(paidAt) || eventQueue.calls != 1 {
+	if len(store.memberFacts) != 1 || store.memberFacts[0].CustomerID != 71 || store.memberFacts[0].PaidOrderID != 801 || store.memberFacts[0].PaidAt == nil || !store.memberFacts[0].PaidAt.Equal(paidAt) || eventQueue.calls != 1 {
 		t.Fatalf("staged member facts=%+v event_jobs=%d", store.memberFacts, eventQueue.calls)
 	}
 }

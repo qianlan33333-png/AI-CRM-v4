@@ -363,10 +363,7 @@ func (client *Client) BatchExternalContacts(ctx context.Context, staffID, cursor
 			if descriptionErr != nil {
 				return wecomport.ExternalContactPage{}, classifyDirectoryReadError(ErrResponse)
 			}
-			followedAt, followedErr := providerFollowedAt(follow.CreateTime)
-			if followedErr != nil {
-				return wecomport.ExternalContactPage{}, classifyDirectoryReadError(followedErr)
-			}
+			followedAt := providerFollowedAt(follow.CreateTime)
 			value := wecomport.ExternalContactFollowInfo{EmployeeID: follow.UserID, FollowedAt: followedAt, Remark: remark, Description: description, DescriptionProjected: descriptionProjected, Tags: make([]wecomport.ExternalContactTag, 0, len(follow.Tags))}
 			for _, tag := range follow.Tags {
 				tag.ID, tag.Name = strings.TrimSpace(tag.ID), strings.TrimSpace(tag.Name)
@@ -415,7 +412,7 @@ func (client *Client) ReadExternalContact(ctx context.Context, externalUserID st
 	}
 	var rawFollows []struct {
 		UserID      string          `json:"userid"`
-		CreateTime  int64           `json:"createtime"`
+		CreateTime  json.RawMessage `json:"createtime"`
 		Remark      *string         `json:"remark"`
 		Description json.RawMessage `json:"description"`
 		Tags        []struct {
@@ -441,10 +438,7 @@ func (client *Client) ReadExternalContact(ctx context.Context, externalUserID st
 		if descriptionErr != nil {
 			return wecomport.ExternalContact{}, classifyDirectoryReadError(ErrResponse)
 		}
-		followedAt, followedErr := providerFollowedAt(follow.CreateTime)
-		if followedErr != nil {
-			return wecomport.ExternalContact{}, classifyDirectoryReadError(followedErr)
-		}
+		followedAt := providerFollowedAt(follow.CreateTime)
 		entry := wecomport.ExternalContactFollowInfo{EmployeeID: follow.UserID, FollowedAt: followedAt, Remark: remark, Description: description, DescriptionProjected: descriptionProjected, Tags: make([]wecomport.ExternalContactTag, 0, len(follow.Tags))}
 		for _, tag := range follow.Tags {
 			tag.ID, tag.Name = strings.TrimSpace(tag.ID), strings.TrimSpace(tag.Name)
@@ -882,7 +876,7 @@ type response struct {
 		// corresponding relationship as one object rather than an array.
 		FollowInfo *struct {
 			UserID      string          `json:"userid"`
-			CreateTime  int64           `json:"createtime"`
+			CreateTime  json.RawMessage `json:"createtime"`
 			Remark      *string         `json:"remark"`
 			Description json.RawMessage `json:"description"`
 			Tags        []struct {
@@ -2277,17 +2271,16 @@ func invalidOptional(value string) bool {
 
 // externalContactRemark keeps the provider-projected text. A remark may be
 // multi-line; only NUL is rejected because PostgreSQL cannot retain it.
-func providerFollowedAt(seconds int64) (*time.Time, error) {
-	if seconds == 0 {
-		return nil, nil
-	}
-	// Accept only values representable as a civil timestamp. A malformed or
-	// implausibly large Provider value must not become a fabricated chronology.
-	if seconds < 0 || seconds > 253402300799 {
-		return nil, ErrResponse
+func providerFollowedAt(raw json.RawMessage) *time.Time {
+	// Treat missing, zero, malformed, and out-of-range Provider values as
+	// unknown chronology. In particular, a directory refresh must clear an old
+	// followed_at when the current relationship has no trustworthy add time.
+	seconds, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
+	if err != nil || seconds <= 0 || seconds > 253402300799 {
+		return nil
 	}
 	value := time.Unix(seconds, 0).UTC()
-	return &value, nil
+	return &value
 }
 
 func externalContactRemark(value *string) (*string, error) {

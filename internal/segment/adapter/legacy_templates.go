@@ -55,7 +55,7 @@ func (s LegacyTemplateSource) Evaluate(ctx context.Context, definition segmentpo
 		return segmentport.Evaluation{}, ErrCustomerReadUnavailable
 	}
 	var ids []int64
-	var firstPaidAt map[customerdomain.CustomerID]time.Time
+	var qualifiedPaidOrders map[customerdomain.CustomerID]segmentport.PaidOrderFact
 	var err error
 	if ast.Parameters, err = s.ownerReferences(ctx, ast.Parameters); err != nil {
 		return segmentport.Evaluation{}, err
@@ -70,7 +70,7 @@ func (s LegacyTemplateSource) Evaluate(ctx context.Context, definition segmentpo
 	case segmentdsl.QuestionnaireChoiceAnswers:
 		ids, err = s.questionnaire(ctx, ast.Parameters, reference)
 	case segmentdsl.PaidOrder:
-		ids, firstPaidAt, err = s.paid(ctx, ast.Parameters, reference)
+		ids, qualifiedPaidOrders, err = s.paid(ctx, ast.Parameters, reference)
 	case segmentdsl.ChannelEntry:
 		ids, err = s.channel(ctx, ast.Parameters, reference)
 	case segmentdsl.RadarFirstClickElapsed:
@@ -90,7 +90,7 @@ func (s LegacyTemplateSource) Evaluate(ctx context.Context, definition segmentpo
 		customers = append(customers, customerdomain.CustomerID(id))
 	}
 	digest := sha256.Sum256([]byte(string(ast.Template) + "\x00" + reference.UTC().Format(time.RFC3339Nano)))
-	return segmentport.Evaluation{CustomerIDs: customers, FirstPaidAt: firstPaidAt, ReferenceAt: reference.UTC(), Watermarks: []segmentport.SourceWatermark{{Source: "owner.audience-facts.v1", AsOf: reference.UTC(), Fresh: true, SafeDigest: digest}}}, nil
+	return segmentport.Evaluation{CustomerIDs: customers, QualifiedPaidOrder: qualifiedPaidOrders, ReferenceAt: reference.UTC(), Watermarks: []segmentport.SourceWatermark{{Source: "owner.audience-facts.v1", AsOf: reference.UTC(), Fresh: true, SafeDigest: digest}}}, nil
 }
 
 func (s LegacyTemplateSource) ownerReferences(ctx context.Context, params map[string]json.RawMessage) (map[string]json.RawMessage, error) {
@@ -468,7 +468,7 @@ func (s LegacyTemplateSource) questionnaire(ctx context.Context, p map[string]js
 	}
 	return idsFrom(out), nil
 }
-func (s LegacyTemplateSource) paid(ctx context.Context, p map[string]json.RawMessage, at time.Time) ([]int64, map[customerdomain.CustomerID]time.Time, error) {
+func (s LegacyTemplateSource) paid(ctx context.Context, p map[string]json.RawMessage, at time.Time) ([]int64, map[customerdomain.CustomerID]segmentport.PaidOrderFact, error) {
 	if s.Orders == nil {
 		return nil, nil, ErrCustomerReadUnavailable
 	}
@@ -504,7 +504,8 @@ func (s LegacyTemplateSource) paid(ctx context.Context, p map[string]json.RawMes
 		}
 	}
 	if !friendGate {
-		return s.paidLegacy(ctx, p, at, products, from, to, scoped, require, orders)
+		ids, _, legacyErr := s.paidLegacy(ctx, p, at, products, from, to, scoped, require, orders)
+		return ids, nil, legacyErr
 	}
 	friendOwners := map[string]bool{}
 	values, err := listParam(p, "friend_owner_staff_ids")
@@ -533,57 +534,9 @@ func (s LegacyTemplateSource) paid(ctx context.Context, p map[string]json.RawMes
 			payerIDs = append(payerIDs, fact.CustomerID)
 		}
 	}
-	var purchaseHistory []orderport.PaidAudiencePurchase
-	if friendGate {
-		historyReader, ok := s.Orders.(orderport.PaidAudiencePurchaseHistoryReader)
-		if !ok {
-			return nil, nil, ErrCustomerReadUnavailable
-		}
-		purchaseHistory, e = historyReader.PaidAudiencePurchaseHistory(ctx, products, at)
-		if e != nil {
-			return nil, nil, ErrCustomerReadUnavailable
-		}
-		for _, purchase := range purchaseHistory {
-			if purchase.OrderID < 1 || purchase.CustomerID < 1 || !contains(products, purchase.ProductCode) {
-				return nil, nil, ErrCustomerReadUnavailable
-			}
-			payerIDs = append(payerIDs, purchase.CustomerID)
-		}
-	}
 	orderRoots, e := s.canonicalCustomerMap(ctx, payerIDs)
 	if e != nil {
 		return nil, nil, e
-	}
-
-	type purchaseKey struct {
-		customer customerdomain.CustomerID
-		product  string
-	}
-	type firstPurchase struct {
-		orderID   int64
-		at        time.Time
-		unknownAt bool
-	}
-	firstByProduct := map[purchaseKey]firstPurchase{}
-	if friendGate {
-		for _, purchase := range purchaseHistory {
-			root := orderRoots[purchase.CustomerID]
-			if root < 1 {
-				return nil, nil, ErrCustomerReadUnavailable
-			}
-			key := purchaseKey{customer: root, product: purchase.ProductCode}
-			first := firstByProduct[key]
-			if purchase.PaidAt == nil {
-				first.unknownAt = true
-				firstByProduct[key] = first
-				continue
-			}
-			if first.at.IsZero() || purchase.PaidAt.Before(first.at) || purchase.PaidAt.Equal(first.at) && purchase.OrderID < first.orderID {
-				first.orderID = purchase.OrderID
-				first.at = purchase.PaidAt.UTC()
-			}
-			firstByProduct[key] = first
-		}
 	}
 
 	contactCustomerIDs := make([]customerdomain.CustomerID, 0, len(orderRoots)*2)
@@ -626,27 +579,26 @@ func (s LegacyTemplateSource) paid(ctx context.Context, p map[string]json.RawMes
 	}
 
 	out := map[int64]bool{}
-	var firstPaidAtByCustomer map[customerdomain.CustomerID]time.Time
+	var qualifiedPaidOrderByCustomer map[customerdomain.CustomerID]segmentport.PaidOrderFact
 	if friendGate {
-		firstPaidAtByCustomer = make(map[customerdomain.CustomerID]time.Time)
+		qualifiedPaidOrderByCustomer = make(map[customerdomain.CustomerID]segmentport.PaidOrderFact)
 	}
 	for _, fact := range targetOrders {
 		root := orderRoots[fact.CustomerID]
 		if root < 1 {
 			return nil, nil, ErrCustomerReadUnavailable
 		}
+		if friendGate && (fact.OrderID < 1 || fact.CustomerID < 1 || fact.PaidAt == nil || fact.PaidAt.IsZero() || fact.PaidAt.After(at)) {
+			continue
+		}
 		if scoped && !owner(p, fact.OwnerReference) {
 			continue
 		}
 		if friendGate {
-			first := firstByProduct[purchaseKey{customer: root, product: fact.ProductCode}]
-			if first.unknownAt || first.at.IsZero() || fact.OrderID != first.orderID || fact.PaidAt == nil || !fact.PaidAt.Equal(first.at) {
-				continue
-			}
 			followedAt := verifiedFriendAt[root]
 			// Provider and callback timestamps are second-granularity. Equal
 			// seconds cannot prove the relationship preceded the purchase.
-			if followedAt.IsZero() || followedAt.Unix() >= first.at.Unix() {
+			if followedAt.IsZero() || followedAt.Unix() >= fact.PaidAt.Unix() {
 				continue
 			}
 		}
@@ -661,13 +613,14 @@ func (s LegacyTemplateSource) paid(ctx context.Context, p map[string]json.RawMes
 		}
 		out[int64(root)] = true
 		if friendGate {
-			firstPaidAt := firstByProduct[purchaseKey{customer: root, product: fact.ProductCode}].at
-			if current, exists := firstPaidAtByCustomer[root]; !exists || firstPaidAt.Before(current) {
-				firstPaidAtByCustomer[root] = firstPaidAt
+			candidate := segmentport.PaidOrderFact{PaidOrderID: fact.OrderID, PaidAt: fact.PaidAt.UTC()}
+			current, exists := qualifiedPaidOrderByCustomer[root]
+			if !exists || candidate.PaidAt.After(current.PaidAt) || candidate.PaidAt.Equal(current.PaidAt) && candidate.PaidOrderID > current.PaidOrderID {
+				qualifiedPaidOrderByCustomer[root] = candidate
 			}
 		}
 	}
-	return idsFrom(out), firstPaidAtByCustomer, nil
+	return idsFrom(out), qualifiedPaidOrderByCustomer, nil
 }
 
 // paidLegacy preserves the historical behavior for all paid-order packages

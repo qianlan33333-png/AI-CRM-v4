@@ -18,12 +18,19 @@ type SourceWatermark struct {
 
 type Evaluation struct {
 	CustomerIDs []customerdomain.CustomerID
-	// FirstPaidAt carries immutable, canonical first-purchase evidence for the
-	// subset of evaluated members that need downstream historical-send policy.
-	// It is absent for legacy template evaluations that do not establish it.
-	FirstPaidAt map[customerdomain.CustomerID]time.Time
-	Watermarks  []SourceWatermark
-	ReferenceAt time.Time
+	// QualifiedPaidOrder carries the latest qualifying current-paid order for
+	// each evaluated member that needs downstream payment-event policy. It is
+	// absent for legacy template evaluations that do not establish this fact.
+	QualifiedPaidOrder map[customerdomain.CustomerID]PaidOrderFact
+	Watermarks         []SourceWatermark
+	ReferenceAt        time.Time
+}
+
+// PaidOrderFact is stable order-owner evidence copied into a Segment snapshot
+// and its durable member event. It never contains Provider/customer identity.
+type PaidOrderFact struct {
+	PaidOrderID int64
+	PaidAt      time.Time
 }
 
 // DefinitionSource evaluates a closed, validated definition. It cannot accept

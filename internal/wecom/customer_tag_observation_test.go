@@ -89,6 +89,41 @@ func TestCustomerTagObservationRefreshPostgreSQLPersistsOnlyProviderReadback(t *
 	}
 }
 
+func TestDirectoryMissingFollowedAtClearsPriorFriendTime(t *testing.T) {
+	pool, cleanup := wecomIntegrationPool(t)
+	defer cleanup()
+	unit, err := platformpostgres.NewUnitOfWork(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	customerID := newObservationCustomer(t, ctx, pool.Native())
+	oldAt := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
+	oldRun := seedObservationRun(t, ctx, pool.Native(), "followed-at-known", "manual", "wecom-corp:followed-at", "staff-1", oldAt)
+	store := PostgreSQLCustomerSyncStore{}
+	if err = unit.Within(ctx, func(tx context.Context) error {
+		return store.UpsertProfileObservations(tx, oldRun, "wecom-corp:followed-at", customerID, []wecomport.ExternalContactFollowInfo{{EmployeeID: "staff-1", FollowedAt: &oldAt}}, oldAt)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	newRunAt := oldAt.Add(24 * time.Hour)
+	newRun := seedObservationRun(t, ctx, pool.Native(), "followed-at-unknown", "manual", "wecom-corp:followed-at", "staff-1", newRunAt)
+	if err = unit.Within(ctx, func(tx context.Context) error {
+		return store.UpsertProfileObservations(tx, newRun, "wecom-corp:followed-at", customerID, []wecomport.ExternalContactFollowInfo{{EmployeeID: "staff-1"}}, newRunAt)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var followedAt *time.Time
+	if err = pool.Native().QueryRow(ctx, `SELECT followed_at FROM wecom_customer_owner_observations WHERE customer_id=$1 AND corp_scope='wecom-corp:followed-at' AND employee_id='staff-1'`, customerID).Scan(&followedAt); err != nil {
+		t.Fatal(err)
+	}
+	if followedAt != nil {
+		t.Fatalf("unknown Provider createtime must not inherit a prior relationship time: %v", followedAt)
+	}
+}
+
 func TestProviderTagCustomerListerUsesOnlyActiveOfficialTagsFromCompletedRuns(t *testing.T) {
 	pool, cleanup := wecomIntegrationPool(t)
 	defer cleanup()

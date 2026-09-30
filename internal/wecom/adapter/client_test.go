@@ -1188,6 +1188,42 @@ func TestClientReadExternalContactUsesDirectoryReadCredentialAndReturnsFollowTag
 	}
 }
 
+func TestReadExternalContactTreatsUntrustworthyCreateTimeAsUnknown(t *testing.T) {
+	for _, fixture := range []struct {
+		name, createTime string
+	}{
+		{name: "missing"},
+		{name: "null", createTime: `,"createtime":null`},
+		{name: "zero", createTime: `,"createtime":0`},
+		{name: "negative", createTime: `,"createtime":-1`},
+		{name: "out of range", createTime: `,"createtime":253402300800`},
+		{name: "wrong type", createTime: `,"createtime":"not-a-time"`},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/cgi-bin/gettoken":
+					_, _ = w.Write([]byte(`{"errcode":0,"access_token":"contact-token","expires_in":120}`))
+				case "/cgi-bin/externalcontact/get":
+					response := `{"errcode":0,"external_contact":{"external_userid":"external-1"},"follow_user":[{"userid":"staff-1"` + fixture.createTime + `}]}`
+					_, _ = w.Write([]byte(response))
+				default:
+					t.Fatalf("unexpected endpoint=%s", r.URL.Path)
+				}
+			}))
+			defer server.Close()
+			client, err := NewDirectory(Config{Enabled: true, CorpID: "corp", ContactSecret: "contact-secret", APIBase: server.URL, HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			contact, err := client.ReadExternalContact(context.Background(), "external-1")
+			if err != nil || len(contact.FollowInfo) != 1 || contact.FollowInfo[0].FollowedAt != nil {
+				t.Fatalf("contact=%+v err=%v; untrustworthy createtime must stay unknown", contact, err)
+			}
+		})
+	}
+}
+
 func TestClientReadFirstExternalContactFollowUsesOnlyFirstDetailEntry(t *testing.T) {
 	for _, fixture := range []struct {
 		name, response, want string

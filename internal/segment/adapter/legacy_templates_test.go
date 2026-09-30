@@ -24,7 +24,6 @@ type legacyFacts struct {
 	contacts     []wecomport.AudienceContact
 	survey       []surveyport.AudienceChoiceAnswer
 	orders       []orderport.PaidAudienceOrder
-	purchases    []orderport.PaidAudiencePurchase
 	channels     []channelport.AudienceEntry
 	radar        []radarport.AudienceFirstClick
 	shared       map[customerdomain.CustomerID]hxcport.SharedFacts
@@ -65,15 +64,6 @@ func (f legacyFacts) FirstCompleteAudienceChoices(context.Context, time.Time) ([
 }
 func (f legacyFacts) PaidAudienceOrders(context.Context, time.Time) ([]orderport.PaidAudienceOrder, error) {
 	return f.orders, nil
-}
-func (f legacyFacts) PaidAudiencePurchaseHistory(_ context.Context, products []string, _ time.Time) ([]orderport.PaidAudiencePurchase, error) {
-	out := make([]orderport.PaidAudiencePurchase, 0)
-	for _, purchase := range f.purchases {
-		if contains(products, purchase.ProductCode) {
-			out = append(out, purchase)
-		}
-	}
-	return out, nil
 }
 func (f legacyFacts) AudienceEntries(context.Context, time.Time) ([]channelport.AudienceEntry, error) {
 	return f.channels, nil
@@ -229,80 +219,47 @@ func TestLegacyTemplateSourcesEvaluateFrozenConditions(t *testing.T) {
 	}
 }
 
-func TestPaidFriendAtPurchaseUsesOnlyCanonicalFirstPaidOrder(t *testing.T) {
-	cutover := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	at := cutover.Add(48 * time.Hour)
-	paidAt := func(offset time.Duration) *time.Time {
-		value := cutover.Add(offset)
-		return &value
-	}
-	followedAt := func(offset time.Duration) *time.Time {
-		value := cutover.Add(offset)
-		return &value
-	}
+func TestPaidFriendAtPaymentUsesCurrentOrdersAndLatestQualifiedFact(t *testing.T) {
+	base := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	reference := base.Add(48 * time.Hour)
+	paidAt := func(offset time.Duration) *time.Time { value := base.Add(offset); return &value }
 	orders := []orderport.PaidAudienceOrder{
 		{OrderID: 101, CustomerID: 1, ProductCode: "334465678", PaidAt: paidAt(time.Hour)},
+		// The earlier payment predates friendship; the later current paid order qualifies.
 		{OrderID: 201, CustomerID: 2, ProductCode: "334465678", PaidAt: paidAt(2 * time.Hour)},
-		{OrderID: 301, CustomerID: 3, ProductCode: "334465678", PaidAt: paidAt(3 * time.Hour)},
-		{OrderID: 401, CustomerID: 4, ProductCode: "334465678", PaidAt: paidAt(4 * time.Hour)},
-		// The first payment order was refunded; the current second order cannot
-		// masquerade as the first-purchase trigger.
-		{OrderID: 502, CustomerID: 5, ProductCode: "334465678", PaidAt: paidAt(6 * time.Hour)},
-		// The early payment lives on a merged payer alias. The currently paid
-		// second order must not trigger on the surviving canonical root.
-		{OrderID: 602, CustomerID: 62, ProductCode: "334465678", PaidAt: paidAt(8 * time.Hour)},
-		// This canonical lineage's first order remains currently paid and qualifies.
-		{OrderID: 701, CustomerID: 71, ProductCode: "334465678", PaidAt: paidAt(10 * time.Hour)},
-		// Historical first purchase may remain an eligible audience member; the
-		// immutable purchase time is carried to Automation for send suppression.
-		{OrderID: 801, CustomerID: 8, ProductCode: "334465678", PaidAt: func() *time.Time { v := cutover.Add(-time.Second); return &v }()},
-		// The first-ever paid order was refunded before this second active order.
-		{OrderID: 902, CustomerID: 9, ProductCode: "334465678", PaidAt: paidAt(12 * time.Hour)},
+		{OrderID: 202, CustomerID: 2, ProductCode: "334465678", PaidAt: paidAt(8 * time.Hour)},
+		{OrderID: 301, CustomerID: 3, ProductCode: "334465678", PaidAt: paidAt(6 * time.Hour)},
+		{OrderID: 401, CustomerID: 4, ProductCode: "334465678", PaidAt: paidAt(9 * time.Hour)},
+		{OrderID: 501, CustomerID: 5, ProductCode: "334465678", PaidAt: nil},
+		{OrderID: 601, CustomerID: 6, ProductCode: "334465678", PaidAt: paidAt(49 * time.Hour)},
+		{OrderID: 700, CustomerID: 7, ProductCode: "334465678", PaidAt: paidAt(2 * time.Hour)},
+		// Aliases merge to customer 70; the greater order ID breaks a timestamp tie.
+		{OrderID: 701, CustomerID: 61, ProductCode: "334465678", PaidAt: paidAt(5 * time.Hour)},
+		{OrderID: 702, CustomerID: 62, ProductCode: "334465678", PaidAt: paidAt(5 * time.Hour)},
+		{OrderID: 901, CustomerID: 9, ProductCode: "another-product", PaidAt: paidAt(10 * time.Hour)},
 	}
-	purchases := []orderport.PaidAudiencePurchase{
-		{OrderID: 101, CustomerID: 1, ProductCode: "334465678", PaidAt: paidAt(time.Hour)},
-		{OrderID: 201, CustomerID: 2, ProductCode: "334465678", PaidAt: paidAt(2 * time.Hour)},
-		{OrderID: 301, CustomerID: 3, ProductCode: "334465678", PaidAt: paidAt(3 * time.Hour)},
-		{OrderID: 401, CustomerID: 4, ProductCode: "334465678", PaidAt: paidAt(4 * time.Hour)},
-		{OrderID: 501, CustomerID: 5, ProductCode: "334465678", PaidAt: paidAt(5 * time.Hour)},
-		{OrderID: 502, CustomerID: 5, ProductCode: "334465678", PaidAt: paidAt(6 * time.Hour)},
-		{OrderID: 601, CustomerID: 61, ProductCode: "334465678", PaidAt: paidAt(7 * time.Hour)},
-		{OrderID: 602, CustomerID: 62, ProductCode: "334465678", PaidAt: paidAt(8 * time.Hour)},
-		{OrderID: 701, CustomerID: 71, ProductCode: "334465678", PaidAt: paidAt(10 * time.Hour)},
-		{OrderID: 801, CustomerID: 8, ProductCode: "334465678", PaidAt: func() *time.Time { v := cutover.Add(-time.Second); return &v }()},
-		{OrderID: 901, CustomerID: 9, ProductCode: "334465678", PaidAt: paidAt(11 * time.Hour)},
-		{OrderID: 902, CustomerID: 9, ProductCode: "334465678", PaidAt: paidAt(12 * time.Hour)},
-	}
-	facts := legacyFacts{
-		orders: orders, purchases: purchases,
-		contacts: []wecomport.AudienceContact{
-			{CustomerID: 1, OwnerUserID: "bob", Status: "active", FollowedAt: followedAt(30 * time.Minute)},
-			{CustomerID: 2, OwnerUserID: "bob", Status: "active", FollowedAt: followedAt(2 * time.Hour)}, // same Unix second as payment
-			{CustomerID: 3, OwnerUserID: "bob", Status: "active", FollowedAt: followedAt(4 * time.Hour)}, // added after payment
-			{CustomerID: 4, OwnerUserID: "bob", Status: "active", FollowedAt: followedAt(time.Hour)},     // unknown paid history blocks
-			{CustomerID: 5, OwnerUserID: "bob", Status: "active", FollowedAt: followedAt(4 * time.Hour)},
-			{CustomerID: 70, OwnerUserID: "bob", Status: "active", FollowedAt: followedAt(6 * time.Hour)},
-			{CustomerID: 72, OwnerUserID: "bob", Status: "active", FollowedAt: followedAt(9 * time.Hour)},
-			{CustomerID: 8, OwnerUserID: "bob", Status: "active", FollowedAt: func() *time.Time { v := cutover.Add(-time.Minute); return &v }()},
-			{CustomerID: 9, OwnerUserID: "bob", Status: "active", FollowedAt: followedAt(10 * time.Hour)},
-		},
-	}
-	// Make one paid order's history time unknown while preserving its current
-	// order paid_at; the earliest event must still fail closed.
-	facts.purchases[3].PaidAt = nil
-
+	facts := legacyFacts{orders: orders, contacts: []wecomport.AudienceContact{
+		{CustomerID: 1, OwnerUserID: "bob", Status: "active", FollowedAt: paidAt(30 * time.Minute)},
+		{CustomerID: 2, OwnerUserID: "bob", Status: "active", FollowedAt: paidAt(3 * time.Hour)},
+		{CustomerID: 3, OwnerUserID: "bob", Status: "active", FollowedAt: paidAt(7 * time.Hour)},                 // added after payment
+		{CustomerID: 4, OwnerUserID: "bob", Status: "active", FollowedAt: paidAt(9*time.Hour + time.Nanosecond)}, // same Unix second
+		{CustomerID: 5, OwnerUserID: "bob", Status: "active", FollowedAt: paidAt(time.Hour)},
+		{CustomerID: 6, OwnerUserID: "bob", Status: "active", FollowedAt: paidAt(time.Hour)},
+		{CustomerID: 7, OwnerUserID: "bob", Status: "active"}, // unknown followed_at
+		{CustomerID: 70, OwnerUserID: "bob", Status: "active", FollowedAt: paidAt(time.Hour)},
+	}}
 	definition := legacyDefinition(t, segmentdsl.PaidOrder, `{"product_codes":["334465678"],"paid_at_from":"","paid_at_to":"","owner_scope":"all","owner_staff_ids":[],"require_active_wecom_contact":true,"require_wecom_friend_at_paid_time":true,"friend_owner_staff_ids":["9"]}`)
-	source := LegacyTemplateSource{
-		Contacts: facts, Orders: facts, Owners: facts,
-		CanonicalCustomers: canonicalCustomerMap{61: 70, 62: 70, 71: 72},
-	}
-	result, err := source.Evaluate(context.Background(), definition, at)
+	source := LegacyTemplateSource{Contacts: facts, Orders: facts, Owners: facts, CanonicalCustomers: canonicalCustomerMap{61: 70, 62: 70}}
+	result, err := source.Evaluate(context.Background(), definition, reference)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertAudienceIDs(t, result, 1, 8, 72)
-	if len(result.FirstPaidAt) != 3 || !result.FirstPaidAt[1].Equal(*paidAt(time.Hour)) || !result.FirstPaidAt[8].Equal(*purchases[9].PaidAt) || !result.FirstPaidAt[72].Equal(*paidAt(10 * time.Hour)) {
-		t.Fatalf("canonical first-paid evidence=%v", result.FirstPaidAt)
+	assertAudienceIDs(t, result, 1, 2, 70)
+	if len(result.QualifiedPaidOrder) != 3 ||
+		result.QualifiedPaidOrder[1].PaidOrderID != 101 || !result.QualifiedPaidOrder[1].PaidAt.Equal(*paidAt(time.Hour)) ||
+		result.QualifiedPaidOrder[2].PaidOrderID != 202 || !result.QualifiedPaidOrder[2].PaidAt.Equal(*paidAt(8 * time.Hour)) ||
+		result.QualifiedPaidOrder[70].PaidOrderID != 702 || !result.QualifiedPaidOrder[70].PaidAt.Equal(*paidAt(5 * time.Hour)) {
+		t.Fatalf("canonical latest qualified order facts=%v", result.QualifiedPaidOrder)
 	}
 }
 
@@ -310,9 +267,8 @@ func TestPaidAudienceResolvesMergedPayerBeforeContactJoin(t *testing.T) {
 	at := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 	paidAt := at.Add(-time.Hour)
 	facts := legacyFacts{
-		orders:    []orderport.PaidAudienceOrder{{OrderID: 801, CustomerID: 61, ProductCode: "course", PaidAt: &paidAt}},
-		purchases: []orderport.PaidAudiencePurchase{{OrderID: 801, CustomerID: 61, ProductCode: "course", PaidAt: &paidAt}},
-		contacts:  []wecomport.AudienceContact{{CustomerID: 70, OwnerUserID: "bob", Status: "active", FollowedAt: func() *time.Time { v := paidAt.Add(-time.Minute); return &v }()}},
+		orders:   []orderport.PaidAudienceOrder{{OrderID: 801, CustomerID: 61, ProductCode: "course", PaidAt: &paidAt}},
+		contacts: []wecomport.AudienceContact{{CustomerID: 70, OwnerUserID: "bob", Status: "active", FollowedAt: func() *time.Time { v := paidAt.Add(-time.Minute); return &v }()}},
 	}
 	source := LegacyTemplateSource{
 		Contacts: facts, Orders: facts, Owners: facts,
@@ -324,8 +280,8 @@ func TestPaidAudienceResolvesMergedPayerBeforeContactJoin(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertAudienceIDs(t, result, 70)
-	if !result.FirstPaidAt[70].Equal(paidAt) {
-		t.Fatalf("first-paid evidence=%v", result.FirstPaidAt)
+	if fact := result.QualifiedPaidOrder[70]; fact.PaidOrderID != 801 || !fact.PaidAt.Equal(paidAt) {
+		t.Fatalf("qualified order evidence=%v", result.QualifiedPaidOrder)
 	}
 }
 
@@ -334,9 +290,8 @@ func TestPaidFriendGateFailsClosedWithoutCanonicalResolverForEqualRawIDs(t *test
 	paidAt := at.Add(-time.Hour)
 	followedAt := paidAt.Add(-time.Minute)
 	facts := legacyFacts{
-		orders:    []orderport.PaidAudienceOrder{{OrderID: 801, CustomerID: 70, ProductCode: "course", PaidAt: &paidAt}},
-		purchases: []orderport.PaidAudiencePurchase{{OrderID: 801, CustomerID: 70, ProductCode: "course", PaidAt: &paidAt}},
-		contacts:  []wecomport.AudienceContact{{CustomerID: 70, OwnerUserID: "bob", Status: "active", FollowedAt: &followedAt}},
+		orders:   []orderport.PaidAudienceOrder{{OrderID: 801, CustomerID: 70, ProductCode: "course", PaidAt: &paidAt}},
+		contacts: []wecomport.AudienceContact{{CustomerID: 70, OwnerUserID: "bob", Status: "active", FollowedAt: &followedAt}},
 	}
 	source := LegacyTemplateSource{Contacts: facts, Orders: facts, Owners: facts}
 	definition := legacyDefinition(t, segmentdsl.PaidOrder, `{"product_codes":["course"],"paid_at_from":"","paid_at_to":"","owner_scope":"all","owner_staff_ids":[],"require_active_wecom_contact":true,"require_wecom_friend_at_paid_time":true,"friend_owner_staff_ids":["9"]}`)
@@ -344,7 +299,7 @@ func TestPaidFriendGateFailsClosedWithoutCanonicalResolverForEqualRawIDs(t *test
 	if !errors.Is(err, ErrCustomerReadUnavailable) {
 		t.Fatalf("err=%v want canonical OneID resolution failure", err)
 	}
-	if len(result.CustomerIDs) != 0 || len(result.FirstPaidAt) != 0 {
+	if len(result.CustomerIDs) != 0 || len(result.QualifiedPaidOrder) != 0 {
 		t.Fatalf("fail-closed result=%+v", result)
 	}
 }
@@ -354,9 +309,8 @@ func TestPaidFriendGateFailsClosedWhenCanonicalResolutionErrors(t *testing.T) {
 	paidAt := at.Add(-time.Hour)
 	followedAt := paidAt.Add(-time.Minute)
 	facts := legacyFacts{
-		orders:    []orderport.PaidAudienceOrder{{OrderID: 801, CustomerID: 70, ProductCode: "course", PaidAt: &paidAt}},
-		purchases: []orderport.PaidAudiencePurchase{{OrderID: 801, CustomerID: 70, ProductCode: "course", PaidAt: &paidAt}},
-		contacts:  []wecomport.AudienceContact{{CustomerID: 70, OwnerUserID: "bob", Status: "active", FollowedAt: &followedAt}},
+		orders:   []orderport.PaidAudienceOrder{{OrderID: 801, CustomerID: 70, ProductCode: "course", PaidAt: &paidAt}},
+		contacts: []wecomport.AudienceContact{{CustomerID: 70, OwnerUserID: "bob", Status: "active", FollowedAt: &followedAt}},
 	}
 	source := LegacyTemplateSource{Contacts: facts, Orders: facts, Owners: facts, CanonicalCustomers: failingCanonicalCustomerResolver{}}
 	definition := legacyDefinition(t, segmentdsl.PaidOrder, `{"product_codes":["course"],"paid_at_from":"","paid_at_to":"","owner_scope":"all","owner_staff_ids":[],"require_active_wecom_contact":true,"require_wecom_friend_at_paid_time":true,"friend_owner_staff_ids":["9"]}`)
@@ -364,7 +318,7 @@ func TestPaidFriendGateFailsClosedWhenCanonicalResolutionErrors(t *testing.T) {
 	if !errors.Is(err, ErrCustomerReadUnavailable) {
 		t.Fatalf("err=%v want canonical OneID resolution failure", err)
 	}
-	if len(result.CustomerIDs) != 0 || len(result.FirstPaidAt) != 0 {
+	if len(result.CustomerIDs) != 0 || len(result.QualifiedPaidOrder) != 0 {
 		t.Fatalf("fail-closed result=%+v", result)
 	}
 }
@@ -383,8 +337,8 @@ func TestPaidOrderWithoutFriendGatePreservesRawIDJoin(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertAudienceIDs(t, result)
-	if len(result.FirstPaidAt) != 0 {
-		t.Fatalf("non-opt-in package gained friend-gate evidence: %v", result.FirstPaidAt)
+	if len(result.QualifiedPaidOrder) != 0 {
+		t.Fatalf("non-opt-in package gained friend-gate evidence: %v", result.QualifiedPaidOrder)
 	}
 }
 

@@ -46,15 +46,21 @@ func (e *Evaluator) Evaluate(ctx context.Context, raw json.RawMessage, reference
 	if err != nil || len(canonical) != len(result.CustomerIDs) || len(canonical) > segmentport.MaximumEvaluationMembers {
 		return segmentport.Evaluation{}, ErrEvaluationUnavailable
 	}
-	firstPaidAt := map[customerdomain.CustomerID]time.Time(nil)
-	if len(result.FirstPaidAt) > 0 {
-		firstPaidAt = make(map[customerdomain.CustomerID]time.Time, len(result.FirstPaidAt))
+	qualifiedPaidOrder := map[customerdomain.CustomerID]segmentport.PaidOrderFact(nil)
+	if result.QualifiedPaidOrder != nil {
+		if len(result.QualifiedPaidOrder) != len(result.CustomerIDs) {
+			return segmentport.Evaluation{}, ErrEvaluationUnavailable
+		}
+		qualifiedPaidOrder = make(map[customerdomain.CustomerID]segmentport.PaidOrderFact, len(result.QualifiedPaidOrder))
 		for index, id := range result.CustomerIDs {
-			if paidAt, found := result.FirstPaidAt[id]; found {
-				root := canonical[index]
-				if existing, present := firstPaidAt[root]; !present || paidAt.Before(existing) {
-					firstPaidAt[root] = paidAt.UTC()
-				}
+			fact, found := result.QualifiedPaidOrder[id]
+			if !found || fact.PaidOrderID < 1 || fact.PaidAt.IsZero() || fact.PaidAt.After(reference.UTC()) {
+				return segmentport.Evaluation{}, ErrEvaluationUnavailable
+			}
+			fact.PaidAt = fact.PaidAt.UTC()
+			root := canonical[index]
+			if existing, present := qualifiedPaidOrder[root]; !present || fact.PaidAt.After(existing.PaidAt) || fact.PaidAt.Equal(existing.PaidAt) && fact.PaidOrderID > existing.PaidOrderID {
+				qualifiedPaidOrder[root] = fact
 			}
 		}
 	}
@@ -69,6 +75,6 @@ func (e *Evaluator) Evaluate(ctx context.Context, raw json.RawMessage, reference
 		}
 	}
 	result.CustomerIDs = stable
-	result.FirstPaidAt = firstPaidAt
+	result.QualifiedPaidOrder = qualifiedPaidOrder
 	return result, nil
 }

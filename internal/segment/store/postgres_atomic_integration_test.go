@@ -334,7 +334,7 @@ func TestPostgreSQLAudienceMemberEventsUseTypedSnapshotParameters(t *testing.T) 
 	}
 }
 
-func TestPostgreSQLFirstPaidMemberFactRetryDigestAndEventRoundTrip(t *testing.T) {
+func TestPostgreSQLQualifiedPaidOrderFactRetryDigestAndEventRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	native, cleanup := segmentDatabase(t, ctx)
 	defer cleanup()
@@ -407,7 +407,7 @@ func TestPostgreSQLFirstPaidMemberFactRetryDigestAndEventRoundTrip(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	facts := []segmentdomain.SnapshotMemberFact{{CustomerID: 71, FirstPaidAt: &firstPaidAt}}
+	facts := []segmentdomain.SnapshotMemberFact{{CustomerID: 71, PaidOrderID: 801, PaidAt: &firstPaidAt}}
 	memberDigest := segmentdomain.DigestMembers([]customerdomain.CustomerID{71})
 	stage := func(items []segmentdomain.SnapshotMemberFact) error {
 		return uow.Within(ctx, func(tx context.Context) error {
@@ -421,8 +421,11 @@ func TestPostgreSQLFirstPaidMemberFactRetryDigestAndEventRoundTrip(t *testing.T)
 		t.Fatalf("identical staging retry: %v", err)
 	}
 	changedAt := firstPaidAt.Add(time.Second)
-	if err = stage([]segmentdomain.SnapshotMemberFact{{CustomerID: 71, FirstPaidAt: &changedAt}}); !errors.Is(err, ErrConflict) {
+	if err = stage([]segmentdomain.SnapshotMemberFact{{CustomerID: 71, PaidOrderID: 801, PaidAt: &changedAt}}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed fact retry error=%v want conflict", err)
+	}
+	if err = stage([]segmentdomain.SnapshotMemberFact{{CustomerID: 71, PaidOrderID: 802, PaidAt: &firstPaidAt}}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed paid order retry error=%v want conflict", err)
 	}
 	var published segmentdomain.PublishedRefresh
 	if err = uow.Within(ctx, func(tx context.Context) error {
@@ -452,8 +455,101 @@ func TestPostgreSQLFirstPaidMemberFactRetryDigestAndEventRoundTrip(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Items) != 1 || page.Items[0].FirstPaidAt == nil || !page.Items[0].FirstPaidAt.Equal(firstPaidAt) {
-		t.Fatalf("member event first-paid evidence=%+v", page.Items)
+	if len(page.Items) != 1 || page.Items[0].Kind != segmentport.EventAudienceMemberEnteredV1 || page.Items[0].MemberEntered == nil ||
+		page.Items[0].MemberEntered.PaidOrderID == nil || *page.Items[0].MemberEntered.PaidOrderID != 801 ||
+		page.Items[0].MemberEntered.PaidAt == nil || !page.Items[0].MemberEntered.PaidAt.Equal(firstPaidAt) {
+		t.Fatalf("member event paid order evidence=%+v", page.Items)
+	}
+}
+
+func TestPostgreSQLPaidQualifiedEventAdvancesExistingMemberWithoutReentry(t *testing.T) {
+	ctx := context.Background()
+	native, cleanup := segmentDatabase(t, ctx)
+	defer cleanup()
+	wrapped, err := platformpostgres.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uow, err := platformpostgres.NewUnitOfWork(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paidAt := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	newPaidAt := paidAt.Add(time.Hour)
+	thirdAt := newPaidAt.Add(time.Hour)
+	var packageID, configurationID int64
+	if err = native.QueryRow(ctx, `INSERT INTO segment_audience_packages(code,name,created_by,created_actor_kind,created_actor_ref,updated_by,updated_actor_kind,updated_actor_ref,created_at,updated_at) VALUES('paid-qualified-events','paid qualified events',7,'admin','admin:7',7,'admin','admin:7',$1,$1) RETURNING id`, paidAt).Scan(&packageID); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `INSERT INTO segment_audience_configuration_versions(package_id,version,schema_version,definition,digest,created_by,created_actor_kind,created_actor_ref,created_at) VALUES($1,1,1,'{"schema_version":1,"expression":{"kind":"all"}}',decode(repeat('00',32),'hex'),7,'admin','admin:7',$2) RETURNING id`, packageID, paidAt).Scan(&configurationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = native.Exec(ctx, `UPDATE segment_audience_packages SET current_configuration_version_id=$2 WHERE id=$1`, packageID, configurationID); err != nil {
+		t.Fatal(err)
+	}
+	createSnapshot := func(seq int, reference time.Time, paidOrderID int64, qualificationAt time.Time) int64 {
+		t.Helper()
+		var runID, snapshotID int64
+		digest := make([]byte, 32)
+		digest[0] = byte(seq)
+		if err := native.QueryRow(ctx, `INSERT INTO segment_audience_refresh_runs(package_id,configuration_version_id,source_key_digest,reference_time,state,created_at,updated_at,completed_at) VALUES($1,$2,$3,$4,'published',$4,$4,$4) RETURNING id`, packageID, configurationID, digest, reference).Scan(&runID); err != nil {
+			t.Fatal(err)
+		}
+		if err := native.QueryRow(ctx, `INSERT INTO segment_audience_snapshots(package_id,configuration_version_id,refresh_run_id,state,reference_time,member_count,member_digest,source_watermark_digest,created_at,published_at) VALUES($1,$2,$3,'published',$4,1,decode(repeat('02',32),'hex'),decode(repeat('03',32),'hex'),$4,$4) RETURNING id`, packageID, configurationID, runID, reference).Scan(&snapshotID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := native.Exec(ctx, `INSERT INTO segment_audience_snapshot_members(snapshot_id,customer_id,entered_at,identity_disposition,paid_at,paid_order_id) VALUES($1,71,$2,'resolved',$3,$4)`, snapshotID, paidAt, qualificationAt, paidOrderID); err != nil {
+			t.Fatal(err)
+		}
+		return snapshotID
+	}
+	priorID := createSnapshot(1, paidAt, 801, paidAt)
+	currentID := createSnapshot(2, newPaidAt.Add(time.Minute), 802, newPaidAt)
+	unchangedID := createSnapshot(3, thirdAt, 802, newPaidAt)
+	if _, err = native.Exec(ctx, `UPDATE segment_audience_packages SET published_snapshot_id=$2 WHERE id=$1`, packageID, unchangedID); err != nil {
+		t.Fatal(err)
+	}
+	create := func(snapshotID, previousID int64) int64 {
+		t.Helper()
+		var created int64
+		err := uow.Within(ctx, func(tx context.Context) error {
+			var createErr error
+			created, createErr = repo.CreateMemberEnteredEvents(tx, segmentdomain.Snapshot{ID: snapshotID, PackageID: packageID, ConfigurationVersionID: configurationID, State: "published", ReferenceTime: thirdAt}, &previousID, 7, thirdAt)
+			return createErr
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return created
+	}
+	if created := create(currentID, priorID); created != 1 {
+		t.Fatalf("new qualifying order should create one durable paid-qualified event, got %d", created)
+	}
+	if created := create(currentID, priorID); created != 0 {
+		t.Fatalf("replaying the same snapshot should not create events, got %d", created)
+	}
+	if created := create(unchangedID, currentID); created != 0 {
+		t.Fatalf("unchanged order fact on the next refresh should not create an event, got %d", created)
+	}
+	var page segmentport.MemberEventPage
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		var readErr error
+		page, readErr = repo.MemberEvents(tx, segmentport.SnapshotID(currentID), "", 10)
+		return readErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Kind != segmentport.EventAudienceMemberPaidQualifiedV1 || page.Items[0].PaidQualified == nil ||
+		page.Items[0].PaidQualified.CustomerID != 71 || page.Items[0].PaidQualified.PaidOrderID != 802 || !page.Items[0].PaidQualified.PaidAt.Equal(newPaidAt) {
+		t.Fatalf("paid-qualified durable readback=%+v", page.Items)
+	}
+	var enteredCount int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM segment_audience_member_events WHERE snapshot_id=$1 AND event_kind=$2`, currentID, segmentport.EventAudienceMemberEnteredV1).Scan(&enteredCount); err != nil || enteredCount != 0 {
+		t.Fatalf("existing member must not be re-entered: count=%d err=%v", enteredCount, err)
 	}
 }
 

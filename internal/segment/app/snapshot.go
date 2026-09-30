@@ -337,19 +337,19 @@ func (s *SnapshotService) ProcessRefresh(ctx context.Context, runID int64) error
 		}
 		batch := evaluation.CustomerIDs[start:end]
 		digest := segmentdomain.DigestMembers(batch)
-		if len(evaluation.FirstPaidAt) > 0 {
+		if len(evaluation.QualifiedPaidOrder) > 0 {
 			stager, ok := s.store.(refreshMemberFactStager)
-			if !ok || len(evaluation.FirstPaidAt) != len(evaluation.CustomerIDs) {
+			if !ok || len(evaluation.QualifiedPaidOrder) != len(evaluation.CustomerIDs) {
 				return ErrNotReady
 			}
 			facts := make([]segmentdomain.SnapshotMemberFact, 0, len(batch))
 			for _, customerID := range batch {
-				firstPaidAt, found := evaluation.FirstPaidAt[customerID]
-				if !found || firstPaidAt.IsZero() {
+				paidOrder, found := evaluation.QualifiedPaidOrder[customerID]
+				if !found || paidOrder.PaidOrderID < 1 || paidOrder.PaidAt.IsZero() {
 					return ErrInvalid
 				}
-				value := firstPaidAt.UTC()
-				facts = append(facts, segmentdomain.SnapshotMemberFact{CustomerID: customerID, FirstPaidAt: &value})
+				value := paidOrder.PaidAt.UTC()
+				facts = append(facts, segmentdomain.SnapshotMemberFact{CustomerID: customerID, PaidOrderID: paidOrder.PaidOrderID, PaidAt: &value})
 			}
 			err = s.uow.Within(ctx, func(tx context.Context) error {
 				return stager.StageRefreshBatchWithMemberFacts(tx, runID, ordinal, facts, digest, s.now().UTC())

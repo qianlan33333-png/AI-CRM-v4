@@ -27,22 +27,6 @@ type PaidAudienceReader interface {
 	PaidAudienceOrders(context.Context, time.Time) ([]PaidAudienceOrder, error)
 }
 
-// PaidAudiencePurchase is one order's first immutable paid transition, even
-// when the order is no longer currently paid. A nil PaidAt is an explicit
-// unknown for a current paid order with no trustworthy history timestamp.
-type PaidAudiencePurchase struct {
-	OrderID     int64
-	CustomerID  customerdomain.CustomerID
-	ProductCode string
-	PaidAt      *time.Time
-}
-
-// PaidAudiencePurchaseHistoryReader is a narrow history read used only by an
-// explicitly configured first-purchase audience rule.
-type PaidAudiencePurchaseHistoryReader interface {
-	PaidAudiencePurchaseHistory(context.Context, []string, time.Time) ([]PaidAudiencePurchase, error)
-}
-
 // HistoricalAudienceProductReader validates an exact retained order-item code
 // when its original product no longer exists in the current catalog. It never
 // resolves titles, aliases, external identities or creates a product.

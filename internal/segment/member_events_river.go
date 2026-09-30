@@ -47,6 +47,7 @@ func (e *RiverMemberEventEnqueuer) EnqueueMemberEventsWithin(ctx context.Context
 
 type AudienceMemberEventSink interface {
 	HandleAudienceMemberEntered(context.Context, segmentport.MemberEnteredV1) error
+	HandleAudienceMemberPaidQualified(context.Context, segmentport.MemberPaidQualifiedV1) error
 }
 
 type AudienceMemberEventDispatchWorker struct {
@@ -82,7 +83,21 @@ func (w *AudienceMemberEventDispatchWorker) Work(ctx context.Context, job *river
 			return err
 		}
 		for _, event := range page.Items {
-			if err = w.sink.HandleAudienceMemberEntered(ctx, event); err != nil {
+			switch event.Kind {
+			case segmentport.EventAudienceMemberEnteredV1:
+				if event.MemberEntered == nil || event.PaidQualified != nil {
+					return errors.New("audience member-entered event payload mismatch")
+				}
+				err = w.sink.HandleAudienceMemberEntered(ctx, *event.MemberEntered)
+			case segmentport.EventAudienceMemberPaidQualifiedV1:
+				if event.PaidQualified == nil || event.MemberEntered != nil {
+					return errors.New("audience paid-qualified event payload mismatch")
+				}
+				err = w.sink.HandleAudienceMemberPaidQualified(ctx, *event.PaidQualified)
+			default:
+				return errors.New("unknown audience member event kind")
+			}
+			if err != nil {
 				return err
 			}
 		}

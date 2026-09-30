@@ -1402,13 +1402,13 @@ func TestPostgreSQLPaidAudienceOrdersUsePayerAndPaymentEvidence(t *testing.T) {
 	}
 	// The first row proves that payer identity, rather than the beneficiary,
 	// is what reaches the audience. A partial refund is never paid-only.
-	payerOrder := insert("payer", "paid", 101, 202, 0, &paidOutside)
-	partialOrder := insert("partial", "partially_refunded", 303, 303, 40, &paidOutside)
-	closedOrder := insert("closed-after-paid", "closed", 505, 505, 100, &paidOutside)
+	insert("payer", "paid", 101, 202, 0, &paidOutside)
+	insert("partial", "partially_refunded", 303, 303, 40, &paidOutside)
+	insert("closed-after-paid", "closed", 505, 505, 100, &paidOutside)
 	// This historical paid row has no payment-time evidence. It remains
 	// eligible for an unbounded paid audience but has a nil timestamp for the
 	// template's half-open time window to reject.
-	unknownTimeOrder := insert("unknown-time", "paid", 404, 404, 0, nil)
+	insert("unknown-time", "paid", 404, 404, 0, nil)
 	var facts []orderport.PaidAudienceOrder
 	if err = uow.Within(ctx, func(tx context.Context) error {
 		var readErr error
@@ -1435,25 +1435,6 @@ func TestPostgreSQLPaidAudienceOrdersUsePayerAndPaymentEvidence(t *testing.T) {
 	}
 	if _, exists := byCustomer[303]; exists {
 		t.Fatalf("partially refunded order leaked into paid facts=%+v", facts)
-	}
-	var history []orderport.PaidAudiencePurchase
-	if err = uow.Within(ctx, func(tx context.Context) error {
-		var readErr error
-		history, readErr = repository.PaidAudiencePurchaseHistory(tx, []string{"course"}, created)
-		return readErr
-	}); err != nil {
-		t.Fatal(err)
-	}
-	historyByOrder := map[int64]orderport.PaidAudiencePurchase{}
-	for _, fact := range history {
-		historyByOrder[fact.OrderID] = fact
-	}
-	if len(historyByOrder) != 4 || historyByOrder[payerOrder].PaidAt == nil ||
-		!historyByOrder[payerOrder].PaidAt.Equal(paidOutside) ||
-		historyByOrder[partialOrder].PaidAt == nil ||
-		historyByOrder[closedOrder].PaidAt == nil ||
-		historyByOrder[unknownTimeOrder].PaidAt != nil {
-		t.Fatalf("historical paid transitions=%+v", history)
 	}
 }
 

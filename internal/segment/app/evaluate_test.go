@@ -13,13 +13,13 @@ import (
 )
 
 type sourceStub struct {
-	ids         []customerdomain.CustomerID
-	firstPaidAt map[customerdomain.CustomerID]time.Time
-	err         error
+	ids                []customerdomain.CustomerID
+	qualifiedPaidOrder map[customerdomain.CustomerID]segmentport.PaidOrderFact
+	err                error
 }
 
 func (s sourceStub) Evaluate(_ context.Context, _ segmentport.Definition, at time.Time) (segmentport.Evaluation, error) {
-	return segmentport.Evaluation{CustomerIDs: s.ids, FirstPaidAt: s.firstPaidAt, ReferenceAt: at}, s.err
+	return segmentport.Evaluation{CustomerIDs: s.ids, QualifiedPaidOrder: s.qualifiedPaidOrder, ReferenceAt: at}, s.err
 }
 
 type canonicalStub struct {
@@ -46,5 +46,41 @@ func TestEvaluatorFailsClosedOnResolverConflict(t *testing.T) {
 	_, err := evaluator.Evaluate(context.Background(), json.RawMessage(`{"schema_version":1,"template_key":"active_contacts","parameters":{"within_days":"30"}}`), time.Now().UTC())
 	if !errors.Is(err, ErrEvaluationUnavailable) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestEvaluatorKeepsLatestQualifiedPaymentAcrossCanonicalAliases(t *testing.T) {
+	paidAt := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	secondPaidAt := paidAt.Add(time.Second)
+	evaluator, err := NewEvaluator(segmentcompiler.Compiler{}, sourceStub{
+		ids: []customerdomain.CustomerID{61, 62},
+		qualifiedPaidOrder: map[customerdomain.CustomerID]segmentport.PaidOrderFact{
+			61: {PaidOrderID: 801, PaidAt: paidAt},
+			62: {PaidOrderID: 802, PaidAt: secondPaidAt},
+		},
+	}, canonicalStub{ids: []customerdomain.CustomerID{70, 70}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := evaluator.Evaluate(context.Background(), json.RawMessage(`{"schema_version":1,"template_key":"active_contacts","parameters":{"within_days":"30"}}`), secondPaidAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.CustomerIDs) != 1 || result.CustomerIDs[0] != 70 || result.QualifiedPaidOrder[70].PaidOrderID != 802 || !result.QualifiedPaidOrder[70].PaidAt.Equal(secondPaidAt) {
+		t.Fatalf("canonical qualified payment result=%+v", result)
+	}
+}
+
+func TestEvaluatorFailsClosedWhenOptInFactIsMissing(t *testing.T) {
+	evaluator, err := NewEvaluator(segmentcompiler.Compiler{}, sourceStub{
+		ids:                []customerdomain.CustomerID{9},
+		qualifiedPaidOrder: map[customerdomain.CustomerID]segmentport.PaidOrderFact{},
+	}, canonicalStub{ids: []customerdomain.CustomerID{9}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = evaluator.Evaluate(context.Background(), json.RawMessage(`{"schema_version":1,"template_key":"active_contacts","parameters":{"within_days":"30"}}`), time.Now().UTC())
+	if !errors.Is(err, ErrEvaluationUnavailable) {
+		t.Fatalf("missing opt-in paid fact error=%v", err)
 	}
 }
