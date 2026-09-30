@@ -55,3 +55,7 @@ flowchart TD
 | 验证证据 | 精准单测、PG/River 联合旅程、企微协议测试、预发与生产读回分开；不得把 queue/HTTP 200 当发送成功。 |
 
 新增限制只复用已有 OneID 的 verified scope、候选审核和 Outbound 效果门；不新增任意数量/时段门槛。若历史合并确认或发送会造成不可逆影响，在执行前展示逐项证据与待执行范围；回退使用现有 policy pause 和 Provider gate，已被企微接受的任务只能按原键对账，不能撤回或重发。本次不新增数据库迁移，不手工改跨域表。
+
+## 2026-09-30 补充：UnionID 历史刷新入口
+
+生产已完成同一开放平台 scope 的配置与 12 个真实付款联系人 UnionID 抽样核对，包 #27 的 canonical 发送人及 active 策略也已读回；尚未发生策略激活后的新付款，真实自动发送仍待观察。历史补齐接口 `POST /api/admin/wecom/unionid-refresh-runs` 的 WeCom Handler 已存在并要求管理员、CSRF、配置就绪与幂等键，但组合根未将它挂入 `/api/admin/wecom/`，生产请求返回 404，无法启动历史刷新。本候选把该精确路径接到原 Handler，并测试入口路由与回调路由不互相遮蔽。业务流程、OneID/Provider read 边界及原验收标准沿用上文；不涉及新增限制、数据库迁移、UI 或 Provider 写入。五项影响：对外接口从 404 恢复既有 202/200/错误合同；业务机制仅启用已有持久同步任务；关联组合根、WeCom 同步 Handler 与 Access；页面无新增；验证为路由回归、原 Handler 鉴权测试、编译及生产状态读回。

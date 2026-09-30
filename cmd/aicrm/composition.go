@@ -2269,9 +2269,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	adminAPIs := http.NewServeMux()
 	adminAPIs.Handle("/api/admin/oneid/", oneIDHandler.Routes())
-	adminAPIs.Handle("/api/admin/wecom/", callbackAdminHandler.Routes())
-	adminAPIs.Handle("/api/admin/wecom/contact-description-backfills", syncHandler.Routes())
-	adminAPIs.Handle("/api/admin/wecom/contact-description-backfills/", syncHandler.Routes())
+	mountWeComAdminAPIs(adminAPIs, callbackAdminHandler.Routes(), syncHandler.Routes())
 	adminAPIs.Handle("/api/admin/channel-acquisition-entrant-receipts/", entrantAdminHandler.Routes())
 	adminAPIs.Handle("/api/admin/customers", customerHandler.Routes())
 	adminAPIs.Handle("/api/admin/customers/", customerHandler.Routes())
@@ -2913,6 +2911,13 @@ func routeApplicationWithProductsCouponsAndCycles(health, access, identity, effe
 
 func routeApplicationWithProductsCouponsGroupOpsAndCycles(health, access, identity, effects, pushCenter, effectsUI, mediaHandler, mediaUI, tagHandler, tagUI, productHandler, productUI, couponHandler, couponUI, channelHandler, groupOpsHandler, groupOpsUI, operationUI, weCom, shell http.Handler, authentication accessAuthentication, publicOrigin string) (http.Handler, error) {
 	return routeApplicationWithProductsCouponsGroupOpsAutomationAndCycles(health, access, identity, effects, pushCenter, effectsUI, mediaHandler, mediaUI, tagHandler, tagUI, productHandler, productUI, couponHandler, couponUI, channelHandler, groupOpsHandler, groupOpsUI, http.NotFoundHandler(), http.NotFoundHandler(), operationUI, http.NotFoundHandler(), http.NotFoundHandler(), weCom, shell, authentication, publicOrigin)
+}
+
+func mountWeComAdminAPIs(mux *http.ServeMux, callback, sync http.Handler) {
+	mux.Handle("/api/admin/wecom/", callback)
+	mux.Handle("/api/admin/wecom/unionid-refresh-runs", sync)
+	mux.Handle("/api/admin/wecom/contact-description-backfills", sync)
+	mux.Handle("/api/admin/wecom/contact-description-backfills/", sync)
 }
 
 func routeApplicationWithProductsCouponsGroupOpsAutomationAndCycles(health, access, identity, effects, pushCenter, effectsUI, mediaHandler, mediaUI, tagHandler, tagUI, productHandler, productUI, couponHandler, couponUI, channelHandler, groupOpsHandler, groupOpsUI, automationHandler, automationUI, operationUI, configHandler, configUI, weCom, shell http.Handler, authentication accessAuthentication, publicOrigin string, h5Origins ...string) (http.Handler, error) {

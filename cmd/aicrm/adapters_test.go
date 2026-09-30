@@ -686,6 +686,33 @@ func TestApplicationRouterAndAdminAPIsMountRecoveryAndWeChatPayRefundPrefixesExa
 	}
 }
 
+func TestApplicationRouterMountsUnionIDRefreshWithoutShadowingWeComCallbacks(t *testing.T) {
+	marker := func(name string) http.Handler {
+		return http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writer.Header().Set("X-Owner", name)
+			writer.WriteHeader(http.StatusNoContent)
+		})
+	}
+	adminAPIs := http.NewServeMux()
+	mountWeComAdminAPIs(adminAPIs, marker("callback"), marker("sync"))
+	handler, err := routeApplication(marker("health"), marker("access"), adminAPIs, marker("wecom"), marker("shell"), &fakeAccessAuthentication{}, "https://crm.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ path, owner string }{
+		{path: "/api/admin/wecom/unionid-refresh-runs", owner: "sync"},
+		{path: "/api/admin/wecom/contact-description-backfills", owner: "sync"},
+		{path: "/api/admin/wecom/contact-description-backfills/7", owner: "sync"},
+		{path: "/api/admin/wecom/callback-retries", owner: "callback"},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, test.path, nil))
+		if response.Code != http.StatusNoContent || response.Header().Get("X-Owner") != test.owner {
+			t.Fatalf("path=%s status=%d owner=%q want=%q", test.path, response.Code, response.Header().Get("X-Owner"), test.owner)
+		}
+	}
+}
+
 func TestApplicationRouterAndAdminAPIsEnforceRecoveryAuthenticationBeforeAcceptance(t *testing.T) {
 	post := func(handler http.Handler) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPost, "/api/admin/wechat-pay/profit-sharing/receivers/psrecv_9/recover", strings.NewReader(`{"evidence_reference":"route-regression"}`))
