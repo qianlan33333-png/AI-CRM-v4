@@ -252,6 +252,9 @@ func testPromptChain(t *testing.T, role, task string) {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
+		if len(request.Messages) != 2 || request.Messages[0].Role != "system" || request.Messages[1].Role != "user" {
+			t.Error("provider prompt message order changed")
+		}
 		for _, message := range request.Messages {
 			switch message.Role {
 			case "system":
