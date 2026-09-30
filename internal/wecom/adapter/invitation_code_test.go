@@ -86,6 +86,7 @@ func TestNativeInvitationWritesAndReadsAllOfficialOptions(t *testing.T) {
 	calls := 0
 	var saved map[string]any
 	corrupt := false
+	qrURL := "https://wework.qpic.cn/native-code"
 	server := httptest.NewServer(http.HandlerFunc(func(out http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/cgi-bin/gettoken":
@@ -102,7 +103,7 @@ func TestNativeInvitationWritesAndReadsAllOfficialOptions(t *testing.T) {
 				copy[k] = v
 			}
 			copy["config_id"] = "native-config"
-			copy["qr_code"] = "https://wework.qpic.cn/native-code"
+			copy["qr_code"] = qrURL
 			if corrupt {
 				copy["auto_create_room"] = 0
 			}
@@ -122,11 +123,12 @@ func TestNativeInvitationWritesAndReadsAllOfficialOptions(t *testing.T) {
 	if err != nil || code.ConfigID != "native-config" || saved["auto_create_room"] != float64(1) || saved["room_base_name"] != o.RoomBaseName || saved["room_base_id"] != float64(10) || saved["remark"] != o.Remark || saved["state"] != o.State {
 		t.Fatalf("native params not delivered: %+v %v %+v", code, err, saved)
 	}
+	qrURL = "http://p.qpic.cn/wwhead/native-code"
 	o.AutoCreateRoom = false
 	o.Remark = ""
 	o.State = ""
 	code, err = c.UpdateNativeInvitationCode(context.Background(), code.ConfigID, ids, o)
-	if err != nil || saved["auto_create_room"] != float64(0) || saved["remark"] != "" || saved["state"] != "" || saved["config_id"] != "native-config" {
+	if err != nil || saved["auto_create_room"] != float64(0) || saved["remark"] != "" || saved["state"] != "" || saved["config_id"] != "native-config" || code.QRCode != "https://p.qpic.cn/wwhead/native-code" {
 		t.Fatal(code, err, saved)
 	}
 	if _, err = c.CreateNativeInvitationCode(context.Background(), append(ids, "f"), o); err == nil || calls != 2 {
@@ -138,4 +140,13 @@ func TestNativeInvitationWritesAndReadsAllOfficialOptions(t *testing.T) {
 	if err == nil || !w.ProviderCallAttempted(err) || code.ConfigID != "native-config" || code.QRCode != "" {
 		t.Fatal("mismatched readback must retain unresolved config", code, err)
 	}
+	corrupt = false
+	for _, invalidQR := range []string{"http://attacker.test/code", "https://p.qpic.cn.attacker.test/code", "http://user:pass@p.qpic.cn/code", "http://p.qpic.cn:8080/code"} {
+		qrURL = invalidQR
+		code, err = c.UpdateNativeInvitationCode(context.Background(), "native-config", ids, o)
+		if err == nil || !w.ProviderCallAttempted(err) || code.ConfigID != "native-config" || code.QRCode != "" {
+			t.Fatal("untrusted QR must remain unresolved", code, err)
+		}
+	}
+
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 )
 
 // Legacy plans bind existing groups and explicitly disable automatic creation.
@@ -80,16 +81,33 @@ func (c *Client) writeInvitationCode(ctx context.Context, id string, chats []str
 		return code, w.WrapProviderWriteError(err, true)
 	}
 	j := detail.JoinWay
+	qr, qrOK := normalizeInvitationQRCode(j.QRCode)
 	auto := 0
 	if o != nil && o.AutoCreateRoom {
 		auto = 1
 	}
-	if j.ConfigID != code.ConfigID || j.Scene != 2 || j.AutoCreateRoom != auto || !validProviderHTTPS(j.QRCode) || !slices.Equal(slices.Sorted(slices.Values(j.ChatIDs)), slices.Sorted(slices.Values(chats))) {
+	if j.ConfigID != code.ConfigID || j.Scene != 2 || j.AutoCreateRoom != auto || !qrOK || !slices.Equal(slices.Sorted(slices.Values(j.ChatIDs)), slices.Sorted(slices.Values(chats))) {
 		return code, w.WrapProviderWriteError(ErrResponse, true)
 	}
 	if o != nil && (j.Remark != o.Remark || j.ChannelState != o.State || (o.AutoCreateRoom && (j.RoomBaseName != o.RoomBaseName || j.RoomBaseID != o.RoomBaseID))) {
 		return code, w.WrapProviderWriteError(ErrResponse, true)
 	}
-	code.QRCode = j.QRCode
+	code.QRCode = qr
 	return code, nil
+}
+
+// The documented join-way readback may use HTTP for qpic images. Retain only
+// official image hosts and expose them over TLS, as the download path does.
+func normalizeInvitationQRCode(raw string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Port() != "" || u.Fragment != "" {
+		return "", false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "wework.qpic.cn" && host != "p.qpic.cn" {
+		return "", false
+	}
+	u.Scheme = "https"
+	u.Host = host
+	return u.String(), true
 }
