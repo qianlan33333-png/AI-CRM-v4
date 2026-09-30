@@ -421,7 +421,7 @@ func parseID(s string) (automationport.AgentID, bool) {
 	return automationport.AgentID(v), e == nil && v > 0 && strconv.FormatInt(v, 10) == s
 }
 func decode(r *http.Request, v any) error {
-	d := json.NewDecoder(io.LimitReader(r.Body, 128<<10))
+	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if e := d.Decode(v); e != nil {
 		return e
