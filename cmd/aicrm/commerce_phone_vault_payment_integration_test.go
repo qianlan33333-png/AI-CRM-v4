@@ -5,8 +5,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +26,7 @@ import (
 	orderapp "github.com/qianlan33333-png/AI-CRM-v3/internal/order/app"
 	orderdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
+	ordersecure "github.com/qianlan33333-png/AI-CRM-v3/internal/order/secure"
 	orderstore "github.com/qianlan33333-png/AI-CRM-v3/internal/order/store"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/outbound"
 	paymentapp "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/app"
@@ -78,9 +83,9 @@ func (t commercePhoneVaultTargets) CommercePushTarget(_ context.Context, referen
 
 // TestPostgreSQLCommercePhoneVaultPaymentSettlement exercises the live
 // callback-shaped UoW with Identity's actual PostgreSQL query and Phone Vault.
-// A declared or ambiguous phone is never sent: the Order, Payment and callback
-// receipt commit with a planned identity-unavailable intent. A verified vault
-// fact retains the encrypted EER acceptance path.
+// A submitted order contact is sent without verified phone identity. Direct
+// orders without that contact retain the existing vault policy. Callback replay
+// and the real Outbound Provider adapter preserve one encrypted effect.
 func TestPostgreSQLCommercePhoneVaultPaymentSettlement(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
@@ -122,13 +127,38 @@ func TestPostgreSQLCommercePhoneVaultPaymentSettlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	orderService := orderapp.NewService(uow, orders)
+	contactCipher, err := ordersecure.NewContactCipher(base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = orderService.SetContactCipher(contactCipher); err != nil {
+		t.Fatal(err)
+	}
+	var receivedPhone, receivedBuyer string
+	calls := 0
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var body struct {
+			Event string `json:"event"`
+			Phone string `json:"phone_number"`
+			Buyer struct {
+				Phone string `json:"phone"`
+			} `json:"buyer"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.Event != "transaction.paid" {
+			t.Error("incorrect payment webhook")
+		}
+		receivedPhone, receivedBuyer = body.Phone, body.Buyer.Phone
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer receiver.Close()
 	vault, err := identitysecure.NewPhoneVault(base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	identities := identityquery.NewPostgreSQL(vault)
 	target := outbound.CommercePushTarget{
-		Reference: "phone-vault-target", Slot: "phone-vault-slot", Endpoint: "https://push.example.test/paid", Version: "v1",
+		Reference: "phone-vault-target", Slot: "phone-vault-slot", Endpoint: receiver.URL, Version: "v1", AllowLoopbackHTTP: true,
 		BuyerID:          outbound.CommercePushIdentity{Kind: identitydomain.KindWeComExternalUserID, Scope: "wecom-corp:phone-vault"},
 		BuyerOpenID:      outbound.CommercePushIdentity{Kind: identitydomain.KindMPOpenID, Scope: "wechat-app:phone-vault"},
 		BuyerUnionID:     outbound.CommercePushIdentity{Kind: identitydomain.KindUnionID, Scope: "wechat-open-platform:phone-vault"},
@@ -146,6 +176,18 @@ func TestPostgreSQLCommercePhoneVaultPaymentSettlement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	commerce.SetFieldMappingReaders(orderService, nil)
+	sink, err := outbound.NewCommercePushCompletionSink(commerce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = effectStore.SetCompletionSink(sink); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := outbound.NewCommercePushProvider(true, commerce, commercePhoneVaultTargets{target: target}, commerceCipher)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err = orderService.SetPaidEventConsumer(commerce); err != nil {
 		t.Fatal(err)
 	}
@@ -156,10 +198,14 @@ func TestPostgreSQLCommercePhoneVaultPaymentSettlement(t *testing.T) {
 		name              string
 		assurances        []identitydomain.Assurance
 		storePhoneSecrets bool
+		enteredPhone      bool
 		wantIntent        string
 		wantEffectID      bool
 	}{
-		{name: "declared_phone_is_planned", assurances: []identitydomain.Assurance{identitydomain.AssuranceDeclared}, storePhoneSecrets: true, wantIntent: "planned_identity_unavailable"},
+		{name: "entered_phone_with_declared_identity_sends", assurances: []identitydomain.Assurance{identitydomain.AssuranceDeclared}, storePhoneSecrets: true, enteredPhone: true, wantIntent: "queued", wantEffectID: true},
+		{name: "entered_phone_without_phone_identity_sends", enteredPhone: true, wantIntent: "queued", wantEffectID: true},
+		{name: "entered_phone_with_ambiguous_verified_identity_sends", assurances: []identitydomain.Assurance{identitydomain.AssuranceVerified, identitydomain.AssuranceVerified}, storePhoneSecrets: true, enteredPhone: true, wantIntent: "queued", wantEffectID: true},
+		{name: "declared_phone_without_order_contact_is_planned", assurances: []identitydomain.Assurance{identitydomain.AssuranceDeclared}, storePhoneSecrets: true, wantIntent: "planned_identity_unavailable"},
 		{name: "verified_phone_queues_encrypted_effect", assurances: []identitydomain.Assurance{identitydomain.AssuranceVerified}, storePhoneSecrets: true, wantIntent: "queued", wantEffectID: true},
 		{name: "multiple_verified_phones_are_planned", assurances: []identitydomain.Assurance{identitydomain.AssuranceVerified, identitydomain.AssuranceVerified}, storePhoneSecrets: true, wantIntent: "planned_identity_unavailable"},
 		{name: "verified_phone_without_vault_ciphertext_is_planned", assurances: []identitydomain.Assurance{identitydomain.AssuranceVerified}, wantIntent: "planned_identity_unavailable"},
@@ -174,6 +220,17 @@ func TestPostgreSQLCommercePhoneVaultPaymentSettlement(t *testing.T) {
 			if createErr != nil {
 				t.Fatal(createErr)
 			}
+			if testCase.enteredPhone {
+				frozen, e := contactCipher.Encrypt("+8613900139000")
+				if e != nil {
+					t.Fatal(e)
+				}
+				if e = uow.Within(ctx, func(tx context.Context) error {
+					return orders.InsertContactSnapshot(tx, order.ID, frozen, 1, time.Now())
+				}); e != nil {
+					t.Fatal(e)
+				}
+			}
 			payment, createErr := paymentService.Create(ctx, paymentport.CreateCommand{OrderID: order.ID, SessionToken: token, CheckoutSessionBinding: paymentport.CheckoutSessionBinding(token), ActorScope: "commerce-phone-payment", IdempotencyKey: fmt.Sprintf("commerce-phone-payment-create-%02d", index)})
 			if createErr != nil {
 				t.Fatal(createErr)
@@ -184,7 +241,8 @@ func TestPostgreSQLCommercePhoneVaultPaymentSettlement(t *testing.T) {
 			at := time.Now().UTC().Add(time.Second).Add(time.Duration(index) * time.Nanosecond).Add(789 * time.Nanosecond)
 			eventDigest := sha256.Sum256([]byte("commerce-phone-event-" + testCase.name))
 			bodyDigest := sha256.Sum256([]byte("commerce-phone-body-" + testCase.name))
-			callbackErr := paymentService.ApplyVerifiedCallback(ctx, paymentprovider.CallbackResult{Kind: "payment", AppID: "fixture-app", MerchantOrderNo: payment.MerchantOrderNo, ProviderTransactionReference: fmt.Sprintf("commerce-phone-transaction-%02d", index), ProviderTransactionDigest: string(effectport.Hash("wechatpay.transaction", fmt.Sprintf("commerce-phone-transaction-%02d", index))), AmountMinor: 29900, Currency: "CNY", OccurredAt: at, EventDigest: eventDigest, BodyDigest: bodyDigest})
+			callback := paymentprovider.CallbackResult{Kind: "payment", AppID: "fixture-app", MerchantOrderNo: payment.MerchantOrderNo, ProviderTransactionReference: fmt.Sprintf("commerce-phone-transaction-%02d", index), ProviderTransactionDigest: string(effectport.Hash("wechatpay.transaction", fmt.Sprintf("commerce-phone-transaction-%02d", index))), AmountMinor: 29900, Currency: "CNY", OccurredAt: at, EventDigest: eventDigest, BodyDigest: bodyDigest}
+			callbackErr := paymentService.ApplyVerifiedCallback(ctx, callback)
 			if callbackErr != nil {
 				t.Fatal(callbackErr)
 			}
@@ -205,6 +263,58 @@ func TestPostgreSQLCommercePhoneVaultPaymentSettlement(t *testing.T) {
 			if intentState != testCase.wantIntent || (effectID != "") != testCase.wantEffectID {
 				t.Fatalf("commerce intent state=%q effect=%t want state=%q effect=%t", intentState, effectID != "", testCase.wantIntent, testCase.wantEffectID)
 			}
+			if !testCase.enteredPhone {
+				return
+			}
+			if e := paymentService.ApplyVerifiedCallback(ctx, callback); e != nil {
+				t.Fatal(e)
+			}
+			var count int
+			if e := pool.QueryRow(ctx, `SELECT count(*) FROM outbound_commerce_push_intents i JOIN order_paid_events pe ON pe.id=i.order_paid_event_id WHERE pe.order_id=$1`, order.ID).Scan(&count); e != nil || count != 1 {
+				t.Fatal("callback replay duplicated intent", e)
+			}
+			var effect, generation, job int64
+			if e := pool.QueryRow(ctx, `SELECT e.id,e.generation,j.river_job_id FROM external_effects e JOIN external_effect_jobs j ON j.effect_id=e.id AND j.generation=e.generation WHERE 'eer_'||e.id::text=$1`, effectID).Scan(&effect, &generation, &job); e != nil {
+				t.Fatal(e)
+			}
+			// Neither queue arguments nor EER/audit projections may contain either
+			// the E.164 contact or its domestic digits.
+			var safeRows string
+			if e := pool.QueryRow(ctx, `SELECT row_to_json(e)::text || row_to_json(j)::text FROM external_effects e JOIN external_effect_jobs ej ON ej.effect_id=e.id JOIN river_job j ON j.id=ej.river_job_id WHERE e.id=$1`, effect).Scan(&safeRows); e != nil {
+				t.Fatal(e)
+			}
+			if strings.Contains(safeRows, "13900139000") {
+				t.Fatal("phone leaked to EER or queue")
+			}
+			beforeCalls := calls
+			if e := effectStore.RunAttempt(ctx, effect, generation, job, provider); e != nil {
+				t.Fatal(e)
+			}
+			if calls != beforeCalls+1 || receivedPhone != "13900139000" || receivedBuyer != "13900139000" {
+				t.Fatal("entered phone not sent through actual Provider adapter")
+			}
+			if e := effectStore.RunAttempt(ctx, effect, generation, job, provider); e != nil {
+				t.Fatal(e)
+			}
+			if calls != beforeCalls+1 {
+				t.Fatal("completed job replay sent twice")
+			}
+			if e := pool.QueryRow(ctx, `SELECT state FROM outbound_commerce_push_intents WHERE effect_id=$1`, effectID).Scan(&intentState); e != nil || intentState != "provider_accepted" {
+				t.Fatal("missing provider acceptance", e)
+			}
+			if e := pool.QueryRow(ctx, `SELECT count(*) FROM customer_identities WHERE customer_id=$1 AND kind='phone' AND assurance='declared'`, customerID).Scan(&count); e != nil {
+				t.Fatal(e)
+			}
+			expectedDeclared := 0
+			for _, assurance := range testCase.assurances {
+				if assurance == identitydomain.AssuranceDeclared {
+					expectedDeclared++
+				}
+			}
+			if count != expectedDeclared {
+				t.Fatal("submitted contact changed identity assurance")
+			}
+
 		})
 	}
 	t.Run("merged_lower_id_reads_only_the_canonical_root_phone", func(t *testing.T) {

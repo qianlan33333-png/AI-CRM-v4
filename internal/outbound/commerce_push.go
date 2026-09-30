@@ -587,18 +587,11 @@ func (s *CommercePushService) paidPayload(ctx context.Context, event orderport.P
 	if err != nil {
 		return nil, false, err
 	}
-	buyerPhone, buyerPhoneUnavailable, err := s.optionalPhone(ctx, event.Order.PayerCustomerID, target.BuyerPhone)
+	buyerPhone, beneficiaryPhone, phoneUnavailable, err := s.paidPhones(ctx, event, target)
 	if err != nil {
 		return nil, false, err
 	}
-	// The frozen sender emits the configured beneficiary selector when it has a
-	// trusted value and otherwise preserves the old empty-string behavior. It
-	// never derives a phone from order metadata or an unverified identity.
-	beneficiaryPhone, beneficiaryPhoneUnavailable, err := s.optionalPhone(ctx, event.Order.BeneficiaryCustomerID, target.BeneficiaryPhone)
-	if err != nil {
-		return nil, false, err
-	}
-	if buyerPhoneUnavailable || beneficiaryPhoneUnavailable {
+	if phoneUnavailable {
 		return nil, true, nil
 	}
 	order := struct {
@@ -662,6 +655,37 @@ func (s *CommercePushService) paidPayload(ctx context.Context, event orderport.P
 	body.Transaction.SuccessTime = commerceUTC(event.OccurredAt)
 	raw, marshalErr := json.Marshal(body)
 	return raw, false, marshalErr
+}
+
+// paidPhones uses the contact submitted for this order as a delivery fact,
+// without treating it as a verified customer identity. The immutable Order
+// snapshot is decrypted through its owning Port only for the encrypted intent.
+func (s *CommercePushService) paidPhones(ctx context.Context, event orderport.PaidEvent, target CommercePushTarget) (buyer, beneficiary string, missing bool, err error) {
+	if s.checkoutMobile != nil {
+		mobile, found, readErr := s.checkoutMobile.ReadCheckoutMobileWithin(ctx, event.OrderID)
+		if readErr != nil {
+			return "", "", false, readErr
+		}
+		if found {
+			// Order validates and freezes CN11 in E.164 form; the legacy webhook
+			// expects the domestic digits. Do not read a later customer phone.
+			beneficiary = strings.TrimPrefix(mobile, "+86")
+			if event.Order.PayerCustomerID != nil && event.Order.BeneficiaryCustomerID != nil && *event.Order.PayerCustomerID == *event.Order.BeneficiaryCustomerID {
+				return beneficiary, beneficiary, false, nil
+			}
+			// A gift's contact belongs to the beneficiary. Missing payer phone
+			// metadata must not prevent delivery to the entered order contact.
+			buyer, _, err = s.optionalPhone(ctx, event.Order.PayerCustomerID, target.BuyerPhone)
+			return buyer, beneficiary, false, err
+		}
+	}
+	// Direct orders without a submitted contact retain their existing policy.
+	buyer, buyerMissing, err := s.optionalPhone(ctx, event.Order.PayerCustomerID, target.BuyerPhone)
+	if err != nil {
+		return "", "", false, err
+	}
+	beneficiary, beneficiaryMissing, err := s.optionalPhone(ctx, event.Order.BeneficiaryCustomerID, target.BeneficiaryPhone)
+	return buyer, beneficiary, buyerMissing || beneficiaryMissing, err
 }
 
 func (s *CommercePushService) optionalIdentity(ctx context.Context, customerID *int64, selector CommercePushIdentity) (string, error) {
