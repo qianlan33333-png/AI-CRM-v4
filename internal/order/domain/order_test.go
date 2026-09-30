@@ -128,3 +128,37 @@ func TestHistoricalPayerAttributionIsScopedAndIdempotent(t *testing.T) {
 		t.Fatal("historical payer attribution replaced an existing customer")
 	}
 }
+
+func TestVerifiedAlipayPaymentPreservesEventAndStateTimes(t *testing.T) {
+	input := nativeInput()
+	input.Provider = ProviderAlipay
+	at := input.CreatedAt
+	input.CreatedAt = at.Add(456789 * time.Microsecond)
+	order, err := NewOrder(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paid, event, err := order.ApplyVerifiedAlipayPayment(1, at)
+	if err != nil || !paid.UpdatedAt.Equal(order.UpdatedAt) || !event.OccurredAt.Equal(at) {
+		t.Fatalf("paid=%+v event=%+v err=%v", paid, event, err)
+	}
+	if _, _, err = order.ApplySettlement(1, StatusPaid, 0, at); !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("generic settlement broadened: %v", err)
+	}
+	if _, _, err = order.ApplyVerifiedAlipayPayment(2, at); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("CAS bypass: %v", err)
+	}
+	if _, _, err = order.ApplyVerifiedAlipayPayment(1, at.Add(-time.Second)); !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("older second accepted: %v", err)
+	}
+	if _, _, err = paid.ApplyVerifiedAlipayPayment(2, at); err == nil {
+		t.Fatal("paid order resettled")
+	}
+	if _, _, err = paid.ApplySettlement(2, StatusPartiallyRefunded, 1, at); err == nil {
+		t.Fatal("refund time guard broadened")
+	}
+	order.Provider = ProviderWeChatPay
+	if _, _, err = order.ApplyVerifiedAlipayPayment(1, at); err == nil {
+		t.Fatal("other provider accepted")
+	}
+}

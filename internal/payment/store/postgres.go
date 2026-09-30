@@ -1019,7 +1019,7 @@ func (r *Repository) UpdatePaymentSettlement(ctx context.Context, p domain.Payme
 	if providerDigest != "" && !effectport.ValidDigest(effectport.Digest(providerDigest)) {
 		return domain.Payment{}, paymentport.ErrConflict
 	}
-	result, e := t.Exec(ctx, `UPDATE payments SET status=$2,provider_transaction_reference=NULLIF($3,''),provider_transaction_digest=NULLIF($4,''),paid_confirmed_at=CASE WHEN $2='paid' THEN COALESCE(paid_confirmed_at,$6) ELSE paid_confirmed_at END,version=$5,updated_at=$6 WHERE id=$1 AND version=$7`, p.ID, p.Status, p.ProviderTransactionReference, providerDigest, p.Version, p.UpdatedAt, p.Version-1)
+	result, e := t.Exec(ctx, `UPDATE payments SET status=$2,provider_transaction_reference=NULLIF($3,''),provider_transaction_digest=NULLIF($4,''),paid_confirmed_at=CASE WHEN $2='paid' THEN COALESCE(paid_confirmed_at,$8,$6) ELSE paid_confirmed_at END,version=$5,updated_at=$6 WHERE id=$1 AND version=$7`, p.ID, p.Status, p.ProviderTransactionReference, providerDigest, p.Version, p.UpdatedAt, p.Version-1, p.PaidConfirmedAt)
 	if e != nil || result.RowsAffected() != 1 {
 		if e != nil {
 			return domain.Payment{}, mapError(e)
@@ -1029,7 +1029,11 @@ func (r *Repository) UpdatePaymentSettlement(ctx context.Context, p domain.Payme
 	if e = recordSettlement(ctx, t, "callback", "payment", p.ID, receipt, providerDigest, p.UpdatedAt); e != nil {
 		return domain.Payment{}, e
 	}
-	if e = appendFacts(ctx, t, "payment.settled", p.ID, "provider", p.UpdatedAt); e != nil {
+	occurredAt := p.UpdatedAt
+	if p.Status == domain.StatusPaid && p.PaidConfirmedAt != nil {
+		occurredAt = p.PaidConfirmedAt.UTC()
+	}
+	if e = appendFacts(ctx, t, "payment.settled", p.ID, "provider", occurredAt); e != nil {
 		return domain.Payment{}, e
 	}
 	return p, nil

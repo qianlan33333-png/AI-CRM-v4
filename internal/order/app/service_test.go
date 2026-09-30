@@ -215,7 +215,7 @@ func (s *memoryStore) UpdateSettlement(_ context.Context, order domain.Order, _ 
 	return order, nil
 }
 
-func (s *memoryStore) AppendPaidEvent(_ context.Context, snapshot domain.Snapshot) (orderport.PaidEvent, bool, error) {
+func (s *memoryStore) AppendPaidEvent(_ context.Context, snapshot domain.Snapshot, occurredAt time.Time) (orderport.PaidEvent, bool, error) {
 	if event, ok := s.paid[snapshot.ID]; ok {
 		if event.OrderVersion != snapshot.Version || event.SourceDigest != orderport.NewPaidEventSourceDigest(snapshot.ID, snapshot.Version) {
 			return orderport.PaidEvent{}, false, orderport.ErrConflict
@@ -223,7 +223,7 @@ func (s *memoryStore) AppendPaidEvent(_ context.Context, snapshot domain.Snapsho
 		event.Order = snapshot
 		return event, false, nil
 	}
-	event := orderport.PaidEvent{ID: int64(len(s.paid) + 1), OrderID: snapshot.ID, OrderVersion: snapshot.Version, DomainEventOutboxID: int64(len(s.paid) + 1), OccurredAt: snapshot.UpdatedAt.UTC(), SourceDigest: orderport.NewPaidEventSourceDigest(snapshot.ID, snapshot.Version), Order: snapshot}
+	event := orderport.PaidEvent{ID: int64(len(s.paid) + 1), OrderID: snapshot.ID, OrderVersion: snapshot.Version, DomainEventOutboxID: int64(len(s.paid) + 1), OccurredAt: occurredAt.UTC(), SourceDigest: orderport.NewPaidEventSourceDigest(snapshot.ID, snapshot.Version), Order: snapshot}
 	if checkout, found := s.checkout[snapshot.ID]; found {
 		event.CheckoutProductID, event.CheckoutGrossAmountMinor = checkout.ProductID, checkout.GrossAmountMinor
 	}

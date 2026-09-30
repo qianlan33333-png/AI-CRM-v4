@@ -1247,7 +1247,11 @@ func (s *Service) ReconcileAlipayPayment(ctx context.Context, paymentID int64) (
 		if outcome == "final_failed" {
 			next = domain.StatusFailed
 		}
-		locked, inner = locked.Settle(locked.Version, next, query.OccurredAt)
+		if next == domain.StatusPaid {
+			locked, inner = locked.SettleVerifiedAlipayPayment(locked.Version, query.OccurredAt)
+		} else {
+			locked, inner = locked.Settle(locked.Version, next, query.OccurredAt)
+		}
 		if inner != nil {
 			return inner
 		}
@@ -1370,7 +1374,11 @@ func (s *Service) ApplyVerifiedCallback(ctx context.Context, callback paymentpro
 			if err != nil || replay {
 				return err
 			}
-			payment, err = payment.Settle(payment.Version, domain.StatusPaid, callback.OccurredAt)
+			if payment.Provider == domain.ProviderAlipay {
+				payment, err = payment.SettleVerifiedAlipayPayment(payment.Version, callback.OccurredAt)
+			} else {
+				payment, err = payment.Settle(payment.Version, domain.StatusPaid, callback.OccurredAt)
+			}
 			if err != nil {
 				return err
 			}

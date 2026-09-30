@@ -662,13 +662,13 @@ func (r *Repository) RecordExport(ctx context.Context, receipt orderapp.ExportRe
 // AppendPaidEvent persists the first native paid event next to the Order state
 // transition. It is idempotent by the immutable order/version pair and writes
 // the Order outbox fact before returning the event to the composition consumer.
-func (r *Repository) AppendPaidEvent(ctx context.Context, snapshot domain.Snapshot) (orderport.PaidEvent, bool, error) {
+func (r *Repository) AppendPaidEvent(ctx context.Context, snapshot domain.Snapshot, occurredAt time.Time) (orderport.PaidEvent, bool, error) {
 	tx, err := transaction(ctx)
 	if err != nil {
 		return orderport.PaidEvent{}, false, err
 	}
 	if snapshot.ID < 1 || snapshot.Version < 2 || snapshot.Status != domain.StatusPaid ||
-		snapshot.RecordOrigin != domain.RecordOriginNative || !snapshot.EffectEligible || snapshot.UpdatedAt.IsZero() {
+		snapshot.RecordOrigin != domain.RecordOriginNative || !snapshot.EffectEligible || snapshot.UpdatedAt.IsZero() || occurredAt.IsZero() {
 		return orderport.PaidEvent{}, false, ErrInvalid
 	}
 	source := orderport.NewPaidEventSourceDigest(snapshot.ID, snapshot.Version)
@@ -677,7 +677,7 @@ func (r *Repository) AppendPaidEvent(ctx context.Context, snapshot domain.Snapsh
 	err = tx.QueryRow(ctx, `INSERT INTO order_paid_events(order_id,order_version,source_digest,occurred_at)
 VALUES($1,$2,$3,$4)
 ON CONFLICT(order_id) DO NOTHING
-RETURNING id,order_id,order_version,source_digest,occurred_at`, snapshot.ID, snapshot.Version, source[:], snapshot.UpdatedAt.UTC()).Scan(
+RETURNING id,order_id,order_version,source_digest,occurred_at`, snapshot.ID, snapshot.Version, source[:], occurredAt.UTC()).Scan(
 		&event.ID, &event.OrderID, &event.OrderVersion, &returnedSource, &event.OccurredAt,
 	)
 	created := err == nil

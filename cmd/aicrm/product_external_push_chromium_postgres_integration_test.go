@@ -71,7 +71,8 @@ type productExternalPushChromiumFixtureOptions struct {
 	h5PublicOrigin string
 	// alipayGateway is a loopback-only synthetic server used by the full
 	// Alipay journey, including post-handoff reconciliation reads.
-	alipayGateway string
+	alipayGateway       string
+	alipayQueryResponse func(string) map[string]string
 }
 
 // TestPostgreSQLProductExternalPushCompositionPreflight runs in every real
@@ -225,7 +226,7 @@ func newProductExternalPushChromiumFixtureWithOptions(t *testing.T, timeout time
 	if options.enableAlipay {
 		privateKeyPath, publicKey := virtualAlipayFixtureCredentials(t)
 		if alipayGateway == "" {
-			alipayGateway = newVirtualAlipayGateway(t, privateKeyPath).URL
+			alipayGateway = newVirtualAlipayGatewayWithResponse(t, privateKeyPath, options.alipayQueryResponse).URL
 		}
 		runtime.Alipay = platformconfig.Alipay{
 			Enabled: true, AppID: "virtual-alipay-test-app", PrivateKeyPath: privateKeyPath,

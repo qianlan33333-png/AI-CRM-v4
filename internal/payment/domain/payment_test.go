@@ -54,3 +54,29 @@ func TestRefundPartialFullAndUnknown(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestVerifiedAlipaySecondPrecisionIsNarrow(t *testing.T) {
+	at := time.Date(2026, 9, 30, 1, 2, 3, 0, time.UTC)
+	p := Payment{Provider: ProviderAlipay, Status: StatusAwaitingPayment, Version: 2, CreatedAt: at.Add(time.Microsecond), UpdatedAt: at.Add(999999 * time.Microsecond)}
+	settled, err := p.SettleVerifiedAlipayPayment(2, at)
+	if err != nil || settled.PaidConfirmedAt == nil || !settled.PaidConfirmedAt.Equal(at) || !settled.UpdatedAt.Equal(p.UpdatedAt) {
+		t.Fatalf("settled=%+v err=%v", settled, err)
+	}
+	if _, err = p.Settle(2, StatusPaid, at); !errors.Is(err, ErrTransition) {
+		t.Fatalf("generic settlement broadened: %v", err)
+	}
+	if _, err = p.SettleVerifiedAlipayPayment(1, at); !errors.Is(err, ErrVersion) {
+		t.Fatalf("CAS bypass: %v", err)
+	}
+	if _, err = p.SettleVerifiedAlipayPayment(2, at.Add(-time.Second)); !errors.Is(err, ErrTransition) {
+		t.Fatalf("older second accepted: %v", err)
+	}
+	p.Provider = ProviderWeChatPay
+	if _, err = p.SettleVerifiedAlipayPayment(2, at); !errors.Is(err, ErrTransition) {
+		t.Fatalf("other provider accepted: %v", err)
+	}
+	p.Provider, p.Status = ProviderAlipay, StatusPaid
+	if _, err = p.SettleVerifiedAlipayPayment(2, at); !errors.Is(err, ErrTransition) {
+		t.Fatalf("terminal paid resettled: %v", err)
+	}
+}

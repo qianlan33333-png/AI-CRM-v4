@@ -113,6 +113,26 @@ func (p Payment) Settle(expected int64, status Status, now time.Time) (Payment, 
 	return p, nil
 }
 
+// SettleVerifiedAlipayPayment separates the signed second-resolution payment
+// fact from monotonic local bookkeeping. Only an overlapping second can
+// precede the last local update; older facts retain the normal rejection.
+func (p Payment) SettleVerifiedAlipayPayment(expected int64, occurredAt time.Time) (Payment, error) {
+	if p.Provider != ProviderAlipay || p.Historical || occurredAt.IsZero() {
+		return Payment{}, ErrTransition
+	}
+	stateAt := occurredAt.UTC()
+	if stateAt.Before(p.UpdatedAt) && stateAt.Truncate(time.Second).Equal(p.UpdatedAt.UTC().Truncate(time.Second)) {
+		stateAt = p.UpdatedAt
+	}
+	settled, err := p.Settle(expected, StatusPaid, stateAt)
+	if err != nil {
+		return Payment{}, err
+	}
+	confirmed := occurredAt.UTC()
+	settled.PaidConfirmedAt = &confirmed
+	return settled, nil
+}
+
 // RestorePaidConfirmation records a Provider-verified original success time
 // for a legacy native payment already marked paid but missing that immutable
 // fact. It cannot settle a new payment, change an existing confirmation, or

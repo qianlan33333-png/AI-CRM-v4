@@ -232,6 +232,24 @@ func (o Order) WithVerifiedProviderTransaction(reference string) (Order, error) 
 	return updated, nil
 }
 
+// ApplyVerifiedAlipayPayment retains Provider time on the event while keeping
+// the order's local update monotonic across Alipay's second precision.
+func (o Order) ApplyVerifiedAlipayPayment(expectedVersion int64, occurredAt time.Time) (Order, StatusEvent, error) {
+	if o.Provider != ProviderAlipay || o.RecordOrigin != RecordOriginNative || !o.EffectEligible || o.Status != StatusPendingPayment || occurredAt.IsZero() {
+		return Order{}, StatusEvent{}, ErrInvalidSettlement
+	}
+	stateAt := occurredAt.UTC()
+	if stateAt.Before(o.UpdatedAt) && stateAt.Truncate(time.Second).Equal(o.UpdatedAt.UTC().Truncate(time.Second)) {
+		stateAt = o.UpdatedAt
+	}
+	updated, event, err := o.ApplySettlement(expectedVersion, StatusPaid, 0, stateAt)
+	if err != nil {
+		return Order{}, StatusEvent{}, err
+	}
+	event.OccurredAt = occurredAt.UTC()
+	return updated, event, nil
+}
+
 func (o Order) ApplySettlement(expectedVersion int64, next Status, refundedMinor int64, at time.Time) (Order, StatusEvent, error) {
 	if expectedVersion != o.Version {
 		return Order{}, StatusEvent{}, ErrVersionConflict

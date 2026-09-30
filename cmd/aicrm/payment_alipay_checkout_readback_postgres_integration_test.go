@@ -334,6 +334,10 @@ func virtualAlipayFixtureCredentials(t *testing.T) (string, string) {
 }
 
 func newVirtualAlipayGateway(t *testing.T, privateKeyPath string) *httptest.Server {
+	return newVirtualAlipayGatewayWithResponse(t, privateKeyPath, nil)
+}
+
+func newVirtualAlipayGatewayWithResponse(t *testing.T, privateKeyPath string, queryResponse func(string) map[string]string) *httptest.Server {
 	t.Helper()
 	privatePEM, err := os.ReadFile(privateKeyPath)
 	if err != nil {
@@ -357,10 +361,14 @@ func newVirtualAlipayGateway(t *testing.T, privateKeyPath string) *httptest.Serv
 			http.Error(w, "invalid synthetic query", http.StatusBadRequest)
 			return
 		}
-		body, err := json.Marshal(map[string]string{
+		response := map[string]string{
 			"code": "10000", "msg": "Success", "out_trade_no": request.OutTradeNo,
 			"trade_status": "WAIT_BUYER_PAY", "total_amount": "99.00",
-		})
+		}
+		if queryResponse != nil {
+			response = queryResponse(request.OutTradeNo)
+		}
+		body, err := json.Marshal(response)
 		if err != nil {
 			t.Errorf("marshal synthetic Alipay response: %v", err)
 			http.Error(w, "invalid synthetic response", http.StatusInternalServerError)

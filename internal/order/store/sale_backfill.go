@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
@@ -85,6 +86,11 @@ WHERE order_id=$1 AND order_version=$2`, orderID, event.OrderVersion).Scan(&paid
 		return orderport.PaidSaleBackfillFact{}, orderport.ErrConflict
 	}
 	current.Status, current.Version, current.UpdatedAt, current.RefundedMinor = domain.StatusPaid, event.OrderVersion, event.OccurredAt, 0
+	// Provider second precision may overlap the local creation microsecond.
+	// Reconstruct a valid snapshot without changing the immutable event time.
+	if current.Provider == domain.ProviderAlipay && current.UpdatedAt.Before(current.CreatedAt) && current.UpdatedAt.Truncate(time.Second).Equal(current.CreatedAt.UTC().Truncate(time.Second)) {
+		current.UpdatedAt = current.CreatedAt
+	}
 	event.Order = current
 	checkout, err := r.ReadCheckoutSnapshot(ctx, orderID)
 	if err != nil {

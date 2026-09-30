@@ -93,7 +93,7 @@ type Store interface {
 	Export(context.Context, ListFilter, int32) ([]domain.Order, error)
 	RecordExport(context.Context, ExportReceipt) (ExportReceipt, bool, error)
 	UpdateSettlement(context.Context, domain.Order, domain.StatusEvent, string) (domain.Order, error)
-	AppendPaidEvent(context.Context, domain.Snapshot) (orderport.PaidEvent, bool, error)
+	AppendPaidEvent(context.Context, domain.Snapshot, time.Time) (orderport.PaidEvent, bool, error)
 	Import(context.Context, string, [32]byte, domain.Order) (domain.Order, bool, error)
 	InsertCheckoutSnapshot(context.Context, orderport.CheckoutSnapshot) error
 	ReadCheckoutSnapshot(context.Context, int64) (orderport.CheckoutSnapshot, error)
@@ -428,7 +428,13 @@ func (s *Service) SettlePaymentWithin(ctx context.Context, command orderport.Pay
 	} else if current.Status != domain.StatusPendingPayment {
 		return domain.Snapshot{}, orderport.ErrConflict
 	}
-	updated, event, err := current.ApplySettlement(current.Version, next, refunded, command.OccurredAt.UTC())
+	var updated domain.Order
+	var event domain.StatusEvent
+	if current.Provider == domain.ProviderAlipay && next == domain.StatusPaid {
+		updated, event, err = current.ApplyVerifiedAlipayPayment(current.Version, command.OccurredAt.UTC())
+	} else {
+		updated, event, err = current.ApplySettlement(current.Version, next, refunded, command.OccurredAt.UTC())
+	}
 	if err != nil {
 		return domain.Snapshot{}, orderport.ErrConflict
 	}
@@ -445,7 +451,7 @@ func (s *Service) SettlePaymentWithin(ctx context.Context, command orderport.Pay
 	if err = s.applyCheckoutSettlement(ctx, updated.Snapshot(), command); err != nil {
 		return domain.Snapshot{}, err
 	}
-	if err = s.consumeFirstNativePaidEvent(ctx, current.Snapshot(), updated.Snapshot()); err != nil {
+	if err = s.consumeFirstNativePaidEvent(ctx, current.Snapshot(), updated.Snapshot(), event.OccurredAt); err != nil {
 		return domain.Snapshot{}, err
 	}
 	if command.RefundedDelta > 0 && s.refundEvents != nil {
@@ -1102,7 +1108,7 @@ func (s *Service) ApplySettlement(ctx context.Context, command orderport.Settlem
 			if settleErr != nil {
 				return settleErr
 			}
-			if settleErr = s.consumeFirstNativePaidEvent(tx, current.Snapshot(), updated.Snapshot()); settleErr != nil {
+			if settleErr = s.consumeFirstNativePaidEvent(tx, current.Snapshot(), updated.Snapshot(), event.OccurredAt); settleErr != nil {
 				return settleErr
 			}
 		}
@@ -1145,12 +1151,12 @@ func (s *Service) ImportHistorical(ctx context.Context, command orderport.Histor
 // a native, effect-eligible order first transitions into paid. The consumer is
 // optional only for old direct-library callers; cmd/aicrm always injects the
 // Outbound bridge so a live settlement cannot commit a split intent/effect.
-func (s *Service) consumeFirstNativePaidEvent(ctx context.Context, previous, current domain.Snapshot) error {
+func (s *Service) consumeFirstNativePaidEvent(ctx context.Context, previous, current domain.Snapshot, occurredAt time.Time) error {
 	if previous.Status == domain.StatusPaid || current.Status != domain.StatusPaid ||
 		current.RecordOrigin != domain.RecordOriginNative || !current.EffectEligible || current.Version == previous.Version {
 		return nil
 	}
-	event, created, err := s.store.AppendPaidEvent(ctx, current)
+	event, created, err := s.store.AppendPaidEvent(ctx, current, occurredAt)
 	if err != nil {
 		return classify(err)
 	}
