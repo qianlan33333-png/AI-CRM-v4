@@ -114,5 +114,6 @@ type MemberEnteredV1 struct {
 	SnapshotID             SnapshotID                `json:"snapshot_id"`
 	ConfigurationVersionID ConfigurationVersionID    `json:"configuration_version_id"`
 	CustomerID             customerdomain.CustomerID `json:"customer_id"`
+	FirstPaidAt            *time.Time                `json:"first_paid_at,omitempty"`
 	OccurredAt             time.Time                 `json:"occurred_at"`
 }

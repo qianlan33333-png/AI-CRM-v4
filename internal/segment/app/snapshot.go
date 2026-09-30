@@ -19,6 +19,7 @@ import (
 
 type RefreshStore interface {
 	GetPackage(context.Context, int64) (segmentdomain.Package, error)
+	LockPackage(context.Context, int64) (segmentdomain.Package, error)
 	CurrentConfiguration(context.Context, int64) (segmentdomain.ConfigurationVersion, error)
 	Configuration(context.Context, int64) (segmentdomain.ConfigurationVersion, error)
 	ReserveRefresh(context.Context, segmentdomain.RefreshRun) (segmentdomain.RefreshRun, bool, error)
@@ -44,6 +45,10 @@ type MemberEventEnqueuer interface {
 	EnqueueMemberEventsWithin(context.Context, segmentport.SnapshotID) (int64, error)
 }
 
+type refreshMemberFactStager interface {
+	StageRefreshBatchWithMemberFacts(context.Context, int64, int, []segmentdomain.SnapshotMemberFact, [32]byte, time.Time) error
+}
+
 type SnapshotService struct {
 	uow       platformport.UnitOfWork
 	store     RefreshStore
@@ -60,6 +65,7 @@ type RefreshCommand struct {
 	IdempotencyKey string                    `json:"-"`
 	ReferenceTime  time.Time                 `json:"reference_time"`
 	RefreshKind    segmentdomain.RefreshKind `json:"refresh_kind"`
+	FullRefresh    bool                      `json:"-"`
 }
 
 type Preview struct {
@@ -152,6 +158,12 @@ func (s *SnapshotService) AcceptRefresh(ctx context.Context, command RefreshComm
 	if s == nil || err != nil || command.PackageID < 1 || len(command.IdempotencyKey) < 16 || len(command.IdempotencyKey) > 128 || strings.TrimSpace(command.IdempotencyKey) != command.IdempotencyKey {
 		return segmentdomain.RefreshRun{}, ErrInvalid
 	}
+	if command.FullRefresh {
+		if command.RefreshKind != "" && command.RefreshKind != segmentdomain.RefreshDaily {
+			return segmentdomain.RefreshRun{}, ErrInvalid
+		}
+		command.RefreshKind = segmentdomain.RefreshDaily
+	}
 	if command.RefreshKind != "" && !segmentdomain.ValidRefreshKind(command.RefreshKind) {
 		return segmentdomain.RefreshRun{}, ErrInvalid
 	}
@@ -164,11 +176,20 @@ func (s *SnapshotService) AcceptRefresh(ctx context.Context, command RefreshComm
 	source := sha256.Sum256([]byte(actorScopedIdempotencyMaterial(actor, command.IdempotencyKey)))
 	var result segmentdomain.RefreshRun
 	err = s.uow.Within(ctx, func(tx context.Context) error {
-		pkg, e := s.store.GetPackage(tx, command.PackageID)
+		var pkg segmentdomain.Package
+		var e error
+		if command.FullRefresh {
+			pkg, e = s.store.LockPackage(tx, command.PackageID)
+		} else {
+			pkg, e = s.store.GetPackage(tx, command.PackageID)
+		}
 		if e != nil {
 			return e
 		}
 		if pkg.Lifecycle == segmentdomain.Archived {
+			return ErrConflict
+		}
+		if command.FullRefresh && pkg.Lifecycle != segmentdomain.Paused {
 			return ErrConflict
 		}
 		config, e := s.store.CurrentConfiguration(tx, command.PackageID)
@@ -212,6 +233,12 @@ func (s *SnapshotService) AcceptRefreshWithin(ctx context.Context, command Refre
 	if s == nil || err != nil || command.PackageID < 1 || len(command.IdempotencyKey) < 16 || len(command.IdempotencyKey) > 128 || strings.TrimSpace(command.IdempotencyKey) != command.IdempotencyKey {
 		return segmentdomain.RefreshRun{}, ErrInvalid
 	}
+	if command.FullRefresh {
+		if command.RefreshKind != "" && command.RefreshKind != segmentdomain.RefreshDaily {
+			return segmentdomain.RefreshRun{}, ErrInvalid
+		}
+		command.RefreshKind = segmentdomain.RefreshDaily
+	}
 	if command.RefreshKind != "" && !segmentdomain.ValidRefreshKind(command.RefreshKind) {
 		return segmentdomain.RefreshRun{}, ErrInvalid
 	}
@@ -222,11 +249,19 @@ func (s *SnapshotService) AcceptRefreshWithin(ctx context.Context, command Refre
 	}
 	now := s.now().UTC()
 	source := sha256.Sum256([]byte(actorScopedIdempotencyMaterial(actor, command.IdempotencyKey)))
-	pkg, err := s.store.GetPackage(ctx, command.PackageID)
+	var pkg segmentdomain.Package
+	if command.FullRefresh {
+		pkg, err = s.store.LockPackage(ctx, command.PackageID)
+	} else {
+		pkg, err = s.store.GetPackage(ctx, command.PackageID)
+	}
 	if err != nil {
 		return segmentdomain.RefreshRun{}, classify(err)
 	}
 	if pkg.Lifecycle == segmentdomain.Archived {
+		return segmentdomain.RefreshRun{}, ErrConflict
+	}
+	if command.FullRefresh && pkg.Lifecycle != segmentdomain.Paused {
 		return segmentdomain.RefreshRun{}, ErrConflict
 	}
 	config, err := s.store.CurrentConfiguration(ctx, command.PackageID)
@@ -302,9 +337,28 @@ func (s *SnapshotService) ProcessRefresh(ctx context.Context, runID int64) error
 		}
 		batch := evaluation.CustomerIDs[start:end]
 		digest := segmentdomain.DigestMembers(batch)
-		err = s.uow.Within(ctx, func(tx context.Context) error {
-			return s.store.StageRefreshBatch(tx, runID, ordinal, batch, digest, s.now().UTC())
-		})
+		if len(evaluation.FirstPaidAt) > 0 {
+			stager, ok := s.store.(refreshMemberFactStager)
+			if !ok || len(evaluation.FirstPaidAt) != len(evaluation.CustomerIDs) {
+				return ErrNotReady
+			}
+			facts := make([]segmentdomain.SnapshotMemberFact, 0, len(batch))
+			for _, customerID := range batch {
+				firstPaidAt, found := evaluation.FirstPaidAt[customerID]
+				if !found || firstPaidAt.IsZero() {
+					return ErrInvalid
+				}
+				value := firstPaidAt.UTC()
+				facts = append(facts, segmentdomain.SnapshotMemberFact{CustomerID: customerID, FirstPaidAt: &value})
+			}
+			err = s.uow.Within(ctx, func(tx context.Context) error {
+				return stager.StageRefreshBatchWithMemberFacts(tx, runID, ordinal, facts, digest, s.now().UTC())
+			})
+		} else {
+			err = s.uow.Within(ctx, func(tx context.Context) error {
+				return s.store.StageRefreshBatch(tx, runID, ordinal, batch, digest, s.now().UTC())
+			})
+		}
 		if err != nil {
 			return classify(err)
 		}

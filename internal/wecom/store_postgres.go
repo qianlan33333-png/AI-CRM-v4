@@ -29,6 +29,7 @@ type followRelationshipEvent struct {
 	CorpID     string
 	EmployeeID string
 	CustomerID customerdomain.CustomerID
+	ChangeType string
 	Active     bool
 	OccurredAt time.Time
 	Digest     [32]byte
@@ -167,7 +168,7 @@ func (store *PostgreSQLFollowRelationshipStore) ApplyCallbackEvent(ctx context.C
 	event := followRelationshipEvent{
 		CallbackID: relationship.CallbackID, CorpID: relationship.CorpID,
 		EmployeeID: relationship.EmployeeID, CustomerID: relationship.CustomerID,
-		Active: relationship.Active, OccurredAt: databaseTimestamp(relationship.OccurredAt),
+		ChangeType: relationship.ChangeType, Active: relationship.Active, OccurredAt: databaseTimestamp(relationship.OccurredAt),
 	}
 	event.Digest = callbackFollowRelationshipDigest(event)
 	result, err := store.apply(ctx, event)
@@ -198,11 +199,12 @@ func (*PostgreSQLFollowRelationshipStore) apply(ctx context.Context, event follo
 		err = tx.QueryRow(ctx, `
 			INSERT INTO wecom_follow_relationships (
 				corp_id, employee_id, customer_id, active, version,
-				last_event_at, last_callback_id, last_event_digest
-			) VALUES ($1, $2, $3, $4, 1, $5, $6, $7)
+				last_event_at, last_callback_id, last_event_digest, followed_at
+			) VALUES ($1, $2, $3, $4, 1, $5, $6, $7,
+				CASE WHEN $4 AND $8 IN ('add_external_contact','add_half_external_contact') THEN $5 ELSE NULL END)
 			RETURNING active, version, last_event_at, last_callback_id`,
 			event.CorpID, event.EmployeeID, event.CustomerID, event.Active,
-			event.OccurredAt, event.CallbackID, event.Digest[:],
+			event.OccurredAt, event.CallbackID, event.Digest[:], event.ChangeType,
 		).Scan(&result.Active, &result.Version, &result.LastEventAt, &result.LastCallbackID)
 		if err != nil {
 			return followRelationshipApplyResult{}, err
@@ -231,6 +233,12 @@ func (*PostgreSQLFollowRelationshipStore) apply(ctx context.Context, event follo
 	err = tx.QueryRow(ctx, `
 		UPDATE wecom_follow_relationships
 		SET active = $4,
+			followed_at = CASE
+				WHEN NOT $4 THEN NULL
+				WHEN $9 IN ('add_external_contact','add_half_external_contact') THEN $5
+				WHEN active THEN followed_at
+				ELSE NULL
+			END,
 			version = version + 1,
 			last_event_at = $5,
 			last_callback_id = $6,
@@ -239,7 +247,7 @@ func (*PostgreSQLFollowRelationshipStore) apply(ctx context.Context, event follo
 		WHERE corp_id = $1 AND employee_id = $2 AND customer_id = $3 AND version = $8
 		RETURNING active, version, last_event_at, last_callback_id`,
 		event.CorpID, event.EmployeeID, event.CustomerID, event.Active,
-		event.OccurredAt, event.CallbackID, event.Digest[:], current.Version,
+		event.OccurredAt, event.CallbackID, event.Digest[:], current.Version, event.ChangeType,
 	).Scan(&result.Active, &result.Version, &result.LastEventAt, &result.LastCallbackID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return followRelationshipApplyResult{}, ErrFollowRelationshipConcurrent
@@ -381,6 +389,9 @@ func followRelationshipDigest(relationship FollowRelationship) [32]byte {
 }
 
 func callbackFollowRelationshipDigest(event followRelationshipEvent) [32]byte {
+	// CallbackID is the Inbox idempotency key, derived from the complete
+	// authenticated callback plaintext (including ChangeType). Keep this v1
+	// digest shape stable so existing relationship replays remain equivalent.
 	value := strings.Join([]string{
 		"callback-follow-v1",
 		event.CallbackID,

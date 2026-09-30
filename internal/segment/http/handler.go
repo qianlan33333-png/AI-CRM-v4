@@ -991,11 +991,16 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request, packageID int6
 	}
 	var in struct {
 		ReferenceTime time.Time `json:"reference_time"`
+		FullRefresh   bool      `json:"full_refresh"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	run, err := h.snapshots.AcceptRefresh(r.Context(), segmentapp.RefreshCommand{PackageID: packageID, Actor: p.InternalID, IdempotencyKey: key, ReferenceTime: in.ReferenceTime})
+	command := segmentapp.RefreshCommand{PackageID: packageID, Actor: p.InternalID, IdempotencyKey: key, ReferenceTime: in.ReferenceTime, FullRefresh: in.FullRefresh}
+	if in.FullRefresh {
+		command.RefreshKind = segmentdomain.RefreshDaily
+	}
+	run, err := h.snapshots.AcceptRefresh(r.Context(), command)
 	if err != nil {
 		resultError(w, err)
 		return

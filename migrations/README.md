@@ -13,6 +13,8 @@ v3 从新的 Schema 基线开始，不复制 production 或 V2 的完整 migrati
 - `0084_hxc_shared_facts.sql`：HXC既有发布投影的原登录、使用、学习、打开记录及会员来源字段；旧代明确未加载，不改变OneID归属或新增同步器。
 - `0090_survey_oauth_state_redirect.sql`：修正 Survey OAuth state 的旧 redirect 正则，使既有 Host `/h5/all.html` 与 `/h5/one.html` 回跳可持久化；forward-only，不修改已保存 state 或身份事实。
 - `0086_wecom_profile_primary_owner.sql`：WeCom 完整目录同步后从受信 follow 集合恢复主负责人事实；空集合保留旧值，旧存量在下一次完整同步前保持 unknown。
+- `0212_wecom_followed_at.sql`：WeCom Owner 为目录观察与已验签关系回调新增 nullable 好友添加时间投影；不从旧行时间推断或回填，回调添加/编辑/删除分别按关系生命周期写入、保留、清空。
+- `0213_segment_member_first_paid_at.sql`：Segment 将可证明的 canonical 商品首购时间从 refresh staging 持久化到 snapshot member 与 append-only member-entered event；旧事件保留 NULL，批次重试将资格时间纳入事实摘要。
 - `0091_survey_assessment_business_keys.sql`：修正 Survey 测评维度和类型业务键的 ASCII-only 约束，保留旧版中文、内部空格和斜杠键；forward-only，不转换既有键或放宽通用 opaque 标识。
 
 - `0097_segment_audience_mutation_actor.sql`：Segment/Audience 将既有人工 `admin:<id>` 审计与幂等投影前向填充为 `actor_kind`/`actor_ref`，并支持可追溯的机器主体；不把 machine client 映射为管理员 ID。

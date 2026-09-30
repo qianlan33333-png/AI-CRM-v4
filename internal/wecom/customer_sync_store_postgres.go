@@ -215,10 +215,11 @@ func (PostgreSQLCustomerSyncStore) UpsertProfileObservations(ctx context.Context
 			seenTags[tag.ProviderTagID] = struct{}{}
 		}
 		projected := follow.DescriptionProjected && follow.Description != nil
-		if _, err = tx.Exec(ctx, `INSERT INTO wecom_customer_owner_observations(customer_id,corp_scope,employee_id,remark,relationship_status,last_seen_run_id,observed_at)
-			VALUES($1,$2,$3,$4,'active',$5,$6) ON CONFLICT(customer_id,corp_scope,employee_id) DO UPDATE SET
-			remark=EXCLUDED.remark,relationship_status='active',last_seen_run_id=EXCLUDED.last_seen_run_id,observed_at=EXCLUDED.observed_at,stale_at=NULL,updated_at=clock_timestamp()`,
-			customerID, corpScope, employeeID, follow.Remark, runID, observedAt.UTC()); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO wecom_customer_owner_observations(customer_id,corp_scope,employee_id,remark,relationship_status,last_seen_run_id,observed_at,followed_at)
+			VALUES($1,$2,$3,$4,'active',$5,$6,$7) ON CONFLICT(customer_id,corp_scope,employee_id) DO UPDATE SET
+			remark=EXCLUDED.remark,relationship_status='active',last_seen_run_id=EXCLUDED.last_seen_run_id,observed_at=EXCLUDED.observed_at,
+			followed_at=COALESCE(EXCLUDED.followed_at,wecom_customer_owner_observations.followed_at),stale_at=NULL,updated_at=clock_timestamp()`,
+			customerID, corpScope, employeeID, follow.Remark, runID, observedAt.UTC(), follow.FollowedAt); err != nil {
 			return err
 		}
 		// This run-scoped ledger is intentionally separate from the current owner
@@ -390,7 +391,7 @@ func (PostgreSQLCustomerSyncStore) ReconcileProfileObservations(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE wecom_customer_owner_observations SET relationship_status='stale',stale_at=$2,updated_at=$2
+	if _, err = tx.Exec(ctx, `UPDATE wecom_customer_owner_observations SET relationship_status='stale',followed_at=NULL,stale_at=$2,updated_at=$2
 		WHERE corp_scope=(SELECT corp_scope FROM wecom_customer_sync_runs WHERE id=$1)
 		AND last_seen_run_id<>$1 AND relationship_status='active'`, runID, at.UTC()); err != nil {
 		return err

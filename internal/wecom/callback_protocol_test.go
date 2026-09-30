@@ -176,6 +176,10 @@ func TestCallbackIdempotencyDigestUsesFullPlaintextCorpAndVersion(t *testing.T) 
 	if stableCallbackKey("wx-corp", plain) == stableCallbackKey("wx-corp", append(append([]byte(nil), plain...), []byte(" ")...)) {
 		t.Fatal("stable callback key omitted full plaintext")
 	}
+	changedType := []byte(strings.Replace(string(plain), "add_external_contact", "edit_external_contact", 1))
+	if stableCallbackKey("wx-corp", changedType) == stableCallbackKey("wx-corp", plain) {
+		t.Fatal("stable callback key omitted ChangeType from authenticated plaintext")
+	}
 }
 
 func TestHMACStateDigesterIsScopedAndFixedSize(t *testing.T) {

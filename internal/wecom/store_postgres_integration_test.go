@@ -165,7 +165,7 @@ func TestPostgreSQLWeComStoresIntegration(t *testing.T) {
 		}
 		store := NewPostgreSQLFollowRelationshipStore()
 		base := time.Unix(1_788_336_000, 0).UTC()
-		first := CallbackFollowRelationship{CallbackID: "callback-100", CorpID: "wx-corp", EmployeeID: "employee-one", CustomerID: customerdomain.CustomerID(customerID), Active: true, OccurredAt: base}
+		first := CallbackFollowRelationship{CallbackID: "callback-100", CorpID: "wx-corp", EmployeeID: "employee-one", CustomerID: customerdomain.CustomerID(customerID), ChangeType: ChangeAddExternalContact, Active: true, OccurredAt: base}
 		if _, err := store.ApplyCallbackEvent(ctx, first); !errors.Is(err, platformpostgres.ErrTransactionNeeded) {
 			t.Fatalf("relationship transaction boundary error=%v", err)
 		}
@@ -176,6 +176,20 @@ func TestPostgreSQLWeComStoresIntegration(t *testing.T) {
 			return applyErr
 		}); err != nil || !firstApplication.Applied || !firstApplication.Active {
 			t.Fatalf("first application=%+v err=%v", firstApplication, err)
+		}
+		edit := first
+		edit.CallbackID = "callback-edit"
+		edit.ChangeType = ChangeEditExternalContact
+		edit.OccurredAt = base.Add(5 * time.Second)
+		if err := unit.Within(ctx, func(txContext context.Context) error {
+			_, applyErr := store.ApplyCallbackEvent(txContext, edit)
+			return applyErr
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var followedAt *time.Time
+		if err := pool.Native().QueryRow(ctx, `SELECT followed_at FROM wecom_follow_relationships WHERE corp_id='wx-corp' AND employee_id='employee-one' AND customer_id=$1`, customerID).Scan(&followedAt); err != nil || followedAt == nil || !followedAt.Equal(base) {
+			t.Fatalf("edit did not preserve original follow time: followed_at=%v err=%v", followedAt, err)
 		}
 		second := first
 		second.CallbackID = "callback-101"
@@ -192,6 +206,7 @@ func TestPostgreSQLWeComStoresIntegration(t *testing.T) {
 
 		deleteOne := first
 		deleteOne.CallbackID = "callback-200"
+		deleteOne.ChangeType = ChangeDelFollowUser
 		deleteOne.Active = false
 		deleteOne.OccurredAt = base.Add(20 * time.Second)
 		if err := unit.Within(ctx, func(txContext context.Context) error {
@@ -214,6 +229,38 @@ func TestPostgreSQLWeComStoresIntegration(t *testing.T) {
 			return applyErr
 		}); err != nil {
 			t.Fatal(err)
+		}
+		if err := pool.Native().QueryRow(ctx, `SELECT followed_at FROM wecom_follow_relationships WHERE corp_id='wx-corp' AND employee_id='employee-one' AND customer_id=$1`, customerID).Scan(&followedAt); err != nil || followedAt != nil {
+			t.Fatalf("delete/late replay retained follow time: followed_at=%v err=%v", followedAt, err)
+		}
+		readd := first
+		readd.CallbackID = "callback-readd"
+		readd.OccurredAt = base.Add(30 * time.Second)
+		if err := unit.Within(ctx, func(txContext context.Context) error {
+			_, applyErr := store.ApplyCallbackEvent(txContext, readd)
+			return applyErr
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := pool.Native().QueryRow(ctx, `SELECT followed_at FROM wecom_follow_relationships WHERE corp_id='wx-corp' AND employee_id='employee-one' AND customer_id=$1`, customerID).Scan(&followedAt); err != nil || followedAt == nil || !followedAt.Equal(readd.OccurredAt) {
+			t.Fatalf("re-add did not reset follow time: followed_at=%v err=%v", followedAt, err)
+		}
+		var callbackContacts []wecomport.AudienceContact
+		if err := unit.Within(ctx, func(txContext context.Context) error {
+			var readErr error
+			callbackContacts, readErr = store.AudienceContactsForCustomers(txContext, base.Add(time.Minute), []customerdomain.CustomerID{customerdomain.CustomerID(customerID)})
+			return readErr
+		}); err != nil {
+			t.Fatal(err)
+		}
+		foundCallbackTime := false
+		for _, contact := range callbackContacts {
+			if contact.OwnerUserID == "employee-one" && contact.Status == "active" && contact.FollowedAt != nil && contact.FollowedAt.Equal(readd.OccurredAt) {
+				foundCallbackTime = true
+			}
+		}
+		if !foundCallbackTime {
+			t.Fatalf("audience read did not return active callback add time: %+v", callbackContacts)
 		}
 		if err := unit.Within(ctx, func(txContext context.Context) error {
 			active, activeErr := store.IsActive(txContext, "wx-corp", "employee-two", customerdomain.CustomerID(customerID))
@@ -1185,5 +1232,6 @@ func wecomMigrationPaths(t *testing.T) []string {
 		filepath.Join(root, "migrations", "0093_customer_tag_commands.sql"),
 		filepath.Join(root, "migrations", "0153_wecom_customer_detail_projection.sql"),
 		filepath.Join(root, "migrations", "0171_wecom_contact_description_source_coverage.sql"),
+		filepath.Join(root, "migrations", "0212_wecom_followed_at.sql"),
 	}
 }

@@ -13,12 +13,13 @@ import (
 )
 
 type sourceStub struct {
-	ids []customerdomain.CustomerID
-	err error
+	ids         []customerdomain.CustomerID
+	firstPaidAt map[customerdomain.CustomerID]time.Time
+	err         error
 }
 
 func (s sourceStub) Evaluate(_ context.Context, _ segmentport.Definition, at time.Time) (segmentport.Evaluation, error) {
-	return segmentport.Evaluation{CustomerIDs: s.ids, ReferenceAt: at}, s.err
+	return segmentport.Evaluation{CustomerIDs: s.ids, FirstPaidAt: s.firstPaidAt, ReferenceAt: at}, s.err
 }
 
 type canonicalStub struct {

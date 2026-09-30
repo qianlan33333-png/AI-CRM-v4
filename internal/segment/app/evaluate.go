@@ -43,8 +43,20 @@ func (e *Evaluator) Evaluate(ctx context.Context, raw json.RawMessage, reference
 		return segmentport.Evaluation{}, ErrEvaluationUnavailable
 	}
 	canonical, err := e.canonical.CanonicalCustomers(ctx, result.CustomerIDs)
-	if err != nil || len(canonical) > segmentport.MaximumEvaluationMembers {
+	if err != nil || len(canonical) != len(result.CustomerIDs) || len(canonical) > segmentport.MaximumEvaluationMembers {
 		return segmentport.Evaluation{}, ErrEvaluationUnavailable
+	}
+	firstPaidAt := map[customerdomain.CustomerID]time.Time(nil)
+	if len(result.FirstPaidAt) > 0 {
+		firstPaidAt = make(map[customerdomain.CustomerID]time.Time, len(result.FirstPaidAt))
+		for index, id := range result.CustomerIDs {
+			if paidAt, found := result.FirstPaidAt[id]; found {
+				root := canonical[index]
+				if existing, present := firstPaidAt[root]; !present || paidAt.Before(existing) {
+					firstPaidAt[root] = paidAt.UTC()
+				}
+			}
+		}
 	}
 	sort.Slice(canonical, func(i, j int) bool { return canonical[i] < canonical[j] })
 	stable := make([]customerdomain.CustomerID, 0, len(canonical))
@@ -57,5 +69,6 @@ func (e *Evaluator) Evaluate(ctx context.Context, raw json.RawMessage, reference
 		}
 	}
 	result.CustomerIDs = stable
+	result.FirstPaidAt = firstPaidAt
 	return result, nil
 }

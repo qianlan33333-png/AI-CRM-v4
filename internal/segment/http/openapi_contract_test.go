@@ -60,7 +60,55 @@ type audienceOpenAPISchema struct {
 }
 
 type audienceOpenAPIProperty struct {
-	Enum []string `yaml:"enum"`
+	Type        string   `yaml:"type"`
+	Default     *bool    `yaml:"default"`
+	Description string   `yaml:"description"`
+	Enum        []string `yaml:"enum"`
+}
+
+func TestAudienceFullRefreshOpenAPIContract(t *testing.T) {
+	document, err := os.ReadFile(filepath.Join("..", "..", "..", "api", "openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec audienceOpenAPISpec
+	if err = yaml.Unmarshal(document, &spec); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/api/admin/ai-audience/packages/{package_id}/refresh",
+		"/api/admin/ai-audience/packages/{package_id}/refresh-runs",
+	} {
+		pathNode, ok := spec.Paths[path]
+		if !ok {
+			t.Fatalf("missing admin audience refresh endpoint %s", path)
+		}
+		var operations map[string]audienceOpenAPIOperation
+		if err = pathNode.Decode(&operations); err != nil {
+			t.Fatal(err)
+		}
+		operation, ok := operations["post"]
+		if !ok || !operation.RequestBody.Required || operation.RequestBody.Content["application/json"].Schema.Ref != "#/components/schemas/AutomationOpsRefreshRequest" {
+			t.Fatalf("refresh request contract %s=%+v", path, operation)
+		}
+		if len(operation.Security) != 1 || len(operation.Security[0]) != 2 || operation.Responses["202"].Content["application/json"].Schema.Ref != "#/components/schemas/AutomationOpsRefreshRunEnvelope" {
+			t.Fatalf("refresh security/responses %s=%+v", path, operation)
+		}
+	}
+	var schemaNodes map[string]yaml.Node
+	schemasNode := spec.Components["schemas"]
+	if err = schemasNode.Decode(&schemaNodes); err != nil {
+		t.Fatal(err)
+	}
+	var request audienceOpenAPISchema
+	requestNode := schemaNodes["AutomationOpsRefreshRequest"]
+	if err = requestNode.Decode(&request); err != nil {
+		t.Fatal(err)
+	}
+	fullRefresh := request.Properties["full_refresh"]
+	if request.AdditionalProperties || len(request.Required) != 0 || fullRefresh.Type != "boolean" || fullRefresh.Default == nil || *fullRefresh.Default || !strings.Contains(fullRefresh.Description, "paused") {
+		t.Fatalf("refresh request schema=%+v", request)
+	}
 }
 
 func TestAudienceWebhookOpenAPIContractMatchesCanonicalHandler(t *testing.T) {

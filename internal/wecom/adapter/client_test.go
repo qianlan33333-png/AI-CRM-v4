@@ -331,7 +331,7 @@ func TestCustomerDirectoryProviderListsStaffAndBatchPage(t *testing.T) {
 			// Production pages with 100 contacts can legitimately exceed the old
 			// 64 KiB OAuth-oriented limit. Unknown Provider fields must remain
 			// safely ignored without making the response unbounded.
-			payload := `{"errcode":0,"next_cursor":"next-1","external_contact_list":[{"external_contact":{"external_userid":"ext-1","name":"Alice","avatar":"https://example/avatar","type":1,"gender":2,"corp_name":"Example","unionid":"union-ignored-here"},"follow_info":{"userid":"staff-1","description":"manual note","tags":[{"tag_id":"tag-1","tag_name":"重点客户","type":1}]}}],"provider_padding":"` + strings.Repeat("x", 70<<10) + `"}`
+			payload := `{"errcode":0,"next_cursor":"next-1","external_contact_list":[{"external_contact":{"external_userid":"ext-1","name":"Alice","avatar":"https://example/avatar","type":1,"gender":2,"corp_name":"Example","unionid":"union-ignored-here"},"follow_info":{"userid":"staff-1","createtime":1788336000,"description":"manual note","tags":[{"tag_id":"tag-1","tag_name":"重点客户","type":1}]}}],"provider_padding":"` + strings.Repeat("x", 70<<10) + `"}`
 			_, _ = writer.Write([]byte(payload))
 		default:
 			t.Fatalf("unexpected path=%s", request.URL.Path)
@@ -348,7 +348,7 @@ func TestCustomerDirectoryProviderListsStaffAndBatchPage(t *testing.T) {
 	if err != nil || page.NextCursor != "next-1" || len(page.Contacts) != 1 || page.Contacts[0].ExternalUserID != "ext-1" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
-	if len(page.Contacts[0].FollowInfo) != 1 || page.Contacts[0].FollowInfo[0].EmployeeID != "staff-1" || page.Contacts[0].FollowInfo[0].Description == nil || *page.Contacts[0].FollowInfo[0].Description != "manual note" || len(page.Contacts[0].FollowInfo[0].Tags) != 1 || page.Contacts[0].FollowInfo[0].Tags[0].ProviderTagID != "tag-1" {
+	if len(page.Contacts[0].FollowInfo) != 1 || page.Contacts[0].FollowInfo[0].EmployeeID != "staff-1" || page.Contacts[0].FollowInfo[0].FollowedAt == nil || !page.Contacts[0].FollowInfo[0].FollowedAt.Equal(time.Unix(1788336000, 0).UTC()) || page.Contacts[0].FollowInfo[0].Description == nil || *page.Contacts[0].FollowInfo[0].Description != "manual note" || len(page.Contacts[0].FollowInfo[0].Tags) != 1 || page.Contacts[0].FollowInfo[0].Tags[0].ProviderTagID != "tag-1" {
 		t.Fatalf("follow info=%+v", page.Contacts[0].FollowInfo)
 	}
 }
@@ -1172,7 +1172,7 @@ func TestClientReadExternalContactUsesDirectoryReadCredentialAndReturnsFollowTag
 			if r.URL.Query().Get("access_token") != "contact-token" || r.URL.Query().Get("external_userid") != "external-1" {
 				t.Fatalf("read query=%s", r.URL.RawQuery)
 			}
-			_, _ = w.Write([]byte(`{"errcode":0,"external_contact":{"external_userid":"external-1","name":"Contact","avatar":"https://avatar.example/1","type":1,"gender":2,"corp_name":"Example"},"follow_user":[{"userid":"staff-1","description":"operator note","tags":[{"tag_id":"tag-1","name":"Tag one","type":1}]}]}`))
+			_, _ = w.Write([]byte(`{"errcode":0,"external_contact":{"external_userid":"external-1","name":"Contact","avatar":"https://avatar.example/1","type":1,"gender":2,"corp_name":"Example"},"follow_user":[{"userid":"staff-1","createtime":1788336000,"description":"operator note","tags":[{"tag_id":"tag-1","name":"Tag one","type":1}]}]}`))
 		default:
 			t.Fatalf("unexpected endpoint=%s", r.URL.Path)
 		}
@@ -1183,7 +1183,7 @@ func TestClientReadExternalContactUsesDirectoryReadCredentialAndReturnsFollowTag
 		t.Fatal(err)
 	}
 	contact, err := client.ReadExternalContact(context.Background(), "external-1")
-	if err != nil || contact.ExternalUserID != "external-1" || len(contact.FollowInfo) != 1 || contact.FollowInfo[0].EmployeeID != "staff-1" || contact.FollowInfo[0].Description == nil || *contact.FollowInfo[0].Description != "operator note" || len(contact.FollowInfo[0].Tags) != 1 || contact.FollowInfo[0].Tags[0].ProviderTagID != "tag-1" {
+	if err != nil || contact.ExternalUserID != "external-1" || len(contact.FollowInfo) != 1 || contact.FollowInfo[0].EmployeeID != "staff-1" || contact.FollowInfo[0].FollowedAt == nil || !contact.FollowInfo[0].FollowedAt.Equal(time.Unix(1788336000, 0).UTC()) || contact.FollowInfo[0].Description == nil || *contact.FollowInfo[0].Description != "operator note" || len(contact.FollowInfo[0].Tags) != 1 || contact.FollowInfo[0].Tags[0].ProviderTagID != "tag-1" {
 		t.Fatalf("contact=%+v err=%v", contact, err)
 	}
 }

@@ -206,7 +206,10 @@ func validDefinition(input DefinitionInput) bool {
 		from, fromOK := stringOf(input.Parameters, "paid_at_from")
 		to, toOK := stringOf(input.Parameters, "paid_at_to")
 		_, contactOK := boolOf(input.Parameters, "require_active_wecom_contact")
-		return owner && ok && validStrings(products, 1, 100) && fromOK && toOK && validWindow(from, to) && contactOK && keys(input.Parameters, "product_codes", "paid_at_from", "paid_at_to", "owner_scope", "owner_staff_ids", "require_active_wecom_contact")
+		baseKeys := keys(input.Parameters, "product_codes", "paid_at_from", "paid_at_to", "owner_scope", "owner_staff_ids", "require_active_wecom_contact")
+		friendKeys := keys(input.Parameters, "product_codes", "paid_at_from", "paid_at_to", "owner_scope", "owner_staff_ids", "require_active_wecom_contact", "require_wecom_friend_at_paid_time", "friend_owner_staff_ids")
+		return owner && ok && validStrings(products, 1, 100) && fromOK && toOK && validWindow(from, to) && contactOK &&
+			(baseKeys || friendKeys && validPaidFriendRule(input.Parameters))
 	case "channel_entry":
 		channels, ok := stringsOf(input.Parameters, "channel_codes", 1, 100)
 		minimum, minOK := nonNegative(input.Parameters, "entered_days_min")
@@ -225,6 +228,18 @@ func validDefinition(input DefinitionInput) bool {
 	default:
 		return false
 	}
+}
+
+func validPaidFriendRule(values map[string]json.RawMessage) bool {
+	required, requiredOK := boolOf(values, "require_wecom_friend_at_paid_time")
+	owners, ownersOK := stringsOf(values, "friend_owner_staff_ids", 0, 100)
+	if !requiredOK || !ownersOK || !validStaffIDs(owners) {
+		return false
+	}
+	if !required {
+		return len(owners) == 0
+	}
+	return len(owners) > 0
 }
 
 func keys(values map[string]json.RawMessage, expected ...string) bool {

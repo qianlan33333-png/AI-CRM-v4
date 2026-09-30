@@ -68,6 +68,7 @@ type CallbackFollowRelationship struct {
 	CorpID     string
 	EmployeeID string
 	CustomerID customerdomain.CustomerID
+	ChangeType string
 	Active     bool
 	OccurredAt time.Time
 }

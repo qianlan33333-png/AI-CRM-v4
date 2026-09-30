@@ -72,12 +72,41 @@ type Snapshot struct {
 	PublishedAt            *time.Time `json:"published_at,omitempty"`
 }
 
+// SnapshotMemberFact contains only immutable, canonical evidence copied from
+// the evaluation into the published snapshot and its member-entered event.
+type SnapshotMemberFact struct {
+	CustomerID  customerdomain.CustomerID
+	FirstPaidAt *time.Time
+}
+
 func DigestMembers(ids []customerdomain.CustomerID) [32]byte {
 	h := sha256.New()
 	var value [8]byte
 	for _, id := range ids {
 		binary.BigEndian.PutUint64(value[:], uint64(id))
 		_, _ = h.Write(value[:])
+	}
+	var digest [32]byte
+	copy(digest[:], h.Sum(nil))
+	return digest
+}
+
+func DigestSnapshotMemberFacts(facts []SnapshotMemberFact) [32]byte {
+	h := sha256.New()
+	var idBytes [8]byte
+	for _, fact := range facts {
+		binary.BigEndian.PutUint64(idBytes[:], uint64(fact.CustomerID))
+		_, _ = h.Write(idBytes[:])
+		if fact.FirstPaidAt == nil {
+			_, _ = h.Write([]byte{0})
+			continue
+		}
+		_, _ = h.Write([]byte{1})
+		value := fact.FirstPaidAt.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
+		var length [4]byte
+		binary.BigEndian.PutUint32(length[:], uint32(len(value)))
+		_, _ = h.Write(length[:])
+		_, _ = h.Write([]byte(value))
 	}
 	var digest [32]byte
 	copy(digest[:], h.Sum(nil))

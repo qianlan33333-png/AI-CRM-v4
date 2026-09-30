@@ -746,7 +746,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	segmentService := segmentapp.NewService(uow, segmentRepository)
 	// Populate this composition-owned adapter as its Owner stores are built
 	// below. The process has not started serving requests at this point.
-	legacyAudienceSource := &segmentadapter.LegacyTemplateSource{Groups: wecom.PostgreSQLGroupMembershipFacts{}, GroupCandidates: wecom.GroupCandidateFacts{Identity: queries}, Radar: radarRepository, PrimaryOwnerCorpScope: "wecom-corp:" + cfg.WeCom.CorpID}
+	legacyAudienceSource := &segmentadapter.LegacyTemplateSource{Groups: wecom.PostgreSQLGroupMembershipFacts{}, GroupCandidates: wecom.GroupCandidateFacts{Identity: queries}, Radar: radarRepository, PrimaryOwnerCorpScope: "wecom-corp:" + cfg.WeCom.CorpID, CanonicalCustomers: canonicalCustomerAdapter{reader: queries}}
 	segmentEvaluator, err := segmentapp.NewEvaluator(segmentcompiler.Compiler{}, segmentapp.CoreSource{UOW: uow, Reader: segmentRepository, Fallback: segmentadapter.CustomerSource{UoW: uow, Customers: customerStore, Legacy: legacyAudienceSource}}, segmentadapter.CanonicalCustomers{UoW: uow, Resolver: canonicalCustomerAdapter{reader: queries}})
 	if err != nil {
 		return fail(err)

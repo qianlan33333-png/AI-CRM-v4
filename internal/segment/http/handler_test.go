@@ -134,6 +134,17 @@ func (snapshotApplication) Members(context.Context, segmentport.SnapshotID, stri
 	return segmentport.MemberPage{}, nil
 }
 
+type refreshCapture struct {
+	snapshotApplication
+	command segmentapp.RefreshCommand
+	err     error
+}
+
+func (s *refreshCapture) AcceptRefresh(_ context.Context, command segmentapp.RefreshCommand) (segmentdomain.RefreshRun, error) {
+	s.command = command
+	return segmentdomain.RefreshRun{ID: 88, RefreshKind: command.RefreshKind, State: segmentdomain.RefreshQueued}, s.err
+}
+
 type previewDefinitionCapture struct {
 	snapshotApplication
 	definition json.RawMessage
@@ -221,6 +232,73 @@ func TestPackageListProjectsPublishedSnapshotCountAndTime(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"member_count":23460`) || !strings.Contains(response.Body.String(), `"published_at":"2026-09-04T08:30:00Z"`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestFullRefreshRequestKeepsAdminCSRFAndIdempotencyContracts(t *testing.T) {
+	admin := accessdomain.Principal{InternalID: 7, Kind: accessdomain.KindAdmin, Roles: []accessdomain.Role{accessdomain.RoleAdmin}}
+	viewer := accessdomain.Principal{InternalID: 7, Kind: accessdomain.KindAdmin, Roles: []accessdomain.Role{accessdomain.RoleViewer}}
+	full := &refreshCapture{}
+	handler, err := NewRuntimeHandler(fakeApplication{}, full, fakeSecurity{principal: admin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/ai-audience/packages/27/refresh", strings.NewReader(`{"full_refresh":true}`))
+	request.Header.Set("Idempotency-Key", "package27-full-refresh-2026-09")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || full.command.PackageID != 27 || !full.command.FullRefresh || full.command.RefreshKind != segmentdomain.RefreshDaily || full.command.IdempotencyKey != "package27-full-refresh-2026-09" {
+		t.Fatalf("full refresh status=%d command=%+v body=%s", response.Code, full.command, response.Body.String())
+	}
+	fullRunCollection := &refreshCapture{}
+	runsHandler, err := NewRuntimeHandler(fakeApplication{}, fullRunCollection, fakeSecurity{principal: admin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runsRequest := httptest.NewRequest(http.MethodPost, "/api/admin/ai-audience/packages/27/refresh-runs", strings.NewReader(`{"full_refresh":true}`))
+	runsRequest.Header.Set("Idempotency-Key", "package27-full-refresh-runs-2026-09")
+	runsResponse := httptest.NewRecorder()
+	runsHandler.ServeHTTP(runsResponse, runsRequest)
+	if runsResponse.Code != http.StatusAccepted || !fullRunCollection.command.FullRefresh || fullRunCollection.command.RefreshKind != segmentdomain.RefreshDaily {
+		t.Fatalf("refresh-runs full refresh status=%d command=%+v body=%s", runsResponse.Code, fullRunCollection.command, runsResponse.Body.String())
+	}
+
+	for _, fixture := range []struct {
+		name     string
+		security fakeSecurity
+		key      string
+		want     int
+	}{
+		{name: "viewer", security: fakeSecurity{principal: viewer}, key: "package27-full-refresh-2026-09", want: http.StatusForbidden},
+		{name: "csrf", security: fakeSecurity{principal: admin, csrfErr: errors.New("csrf")}, key: "package27-full-refresh-2026-09", want: http.StatusForbidden},
+		{name: "idempotency key required", security: fakeSecurity{principal: admin}, want: http.StatusBadRequest},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			capture := &refreshCapture{}
+			securedHandler, createErr := NewRuntimeHandler(fakeApplication{}, capture, fixture.security)
+			if createErr != nil {
+				t.Fatal(createErr)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/ai-audience/packages/27/refresh", strings.NewReader(`{"full_refresh":true}`))
+			if fixture.key != "" {
+				req.Header.Set("Idempotency-Key", fixture.key)
+			}
+			got := httptest.NewRecorder()
+			securedHandler.ServeHTTP(got, req)
+			if got.Code != fixture.want || capture.command.FullRefresh {
+				t.Fatalf("status=%d command=%+v body=%s", got.Code, capture.command, got.Body.String())
+			}
+		})
+	}
+
+	defaultRefresh := &refreshCapture{}
+	defaultHandler, _ := NewRuntimeHandler(fakeApplication{}, defaultRefresh, fakeSecurity{principal: admin})
+	defaultRequest := httptest.NewRequest(http.MethodPost, "/api/admin/ai-audience/packages/27/refresh-runs", strings.NewReader(`{}`))
+	defaultRequest.Header.Set("Idempotency-Key", "package27-refresh-default-01")
+	defaultResponse := httptest.NewRecorder()
+	defaultHandler.ServeHTTP(defaultResponse, defaultRequest)
+	if defaultResponse.Code != http.StatusAccepted || defaultRefresh.command.FullRefresh || defaultRefresh.command.RefreshKind != "" {
+		t.Fatalf("default refresh status=%d command=%+v body=%s", defaultResponse.Code, defaultRefresh.command, defaultResponse.Body.String())
 	}
 }
 

@@ -145,13 +145,38 @@ func scanSnapshot(row pgx.Row) (segmentdomain.Snapshot, error) {
 }
 
 func (r *Repository) StageRefreshBatch(ctx context.Context, runID int64, ordinal int, ids []customerdomain.CustomerID, digest [32]byte, now time.Time) error {
-	if runID < 1 || ordinal < 0 || len(ids) < 1 || len(ids) > 1000 || digest != segmentdomain.DigestMembers(ids) {
+	facts := make([]segmentdomain.SnapshotMemberFact, len(ids))
+	for index, id := range ids {
+		facts[index].CustomerID = id
+	}
+	return r.stageRefreshBatch(ctx, runID, ordinal, facts, digest, [32]byte{}, now)
+}
+
+func (r *Repository) StageRefreshBatchWithMemberFacts(ctx context.Context, runID int64, ordinal int, facts []segmentdomain.SnapshotMemberFact, digest [32]byte, now time.Time) error {
+	if len(facts) < 1 || len(facts) > 1000 {
 		return ErrInvalid
 	}
-	for i, id := range ids {
-		if id < 1 || (i > 0 && ids[i-1] >= id) {
+	return r.stageRefreshBatch(ctx, runID, ordinal, facts, digest, segmentdomain.DigestSnapshotMemberFacts(facts), now)
+}
+
+func (r *Repository) stageRefreshBatch(ctx context.Context, runID int64, ordinal int, facts []segmentdomain.SnapshotMemberFact, digest, factDigest [32]byte, now time.Time) error {
+	if runID < 1 || ordinal < 0 || len(facts) < 1 || len(facts) > 1000 || now.IsZero() {
+		return ErrInvalid
+	}
+	ids := make([]customerdomain.CustomerID, len(facts))
+	firstPaidAtValues := make([]string, len(facts))
+	for i, fact := range facts {
+		id := fact.CustomerID
+		if id < 1 || (i > 0 && facts[i-1].CustomerID >= id) || fact.FirstPaidAt != nil && fact.FirstPaidAt.IsZero() {
 			return ErrInvalid
 		}
+		ids[i] = id
+		if fact.FirstPaidAt != nil {
+			firstPaidAtValues[i] = fact.FirstPaidAt.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
+		}
+	}
+	if digest != segmentdomain.DigestMembers(ids) || factDigest != ([32]byte{}) && factDigest != segmentdomain.DigestSnapshotMemberFacts(facts) {
+		return ErrInvalid
 	}
 	t, err := tx(ctx)
 	if err != nil {
@@ -167,10 +192,10 @@ func (r *Repository) StageRefreshBatch(ctx context.Context, runID int64, ordinal
 		return err
 	}
 	var existingCount int
-	var existingDigest []byte
-	err = t.QueryRow(ctx, `SELECT member_count,member_digest FROM segment_audience_refresh_batches WHERE refresh_run_id=$1 AND batch_ordinal=$2`, runID, ordinal).Scan(&existingCount, &existingDigest)
+	var existingDigest, existingFactDigest []byte
+	err = t.QueryRow(ctx, `SELECT member_count,member_digest,member_fact_digest FROM segment_audience_refresh_batches WHERE refresh_run_id=$1 AND batch_ordinal=$2`, runID, ordinal).Scan(&existingCount, &existingDigest, &existingFactDigest)
 	if err == nil {
-		if existingCount != len(ids) || len(existingDigest) != sha256.Size || string(existingDigest) != string(digest[:]) {
+		if existingCount != len(ids) || len(existingDigest) != sha256.Size || string(existingDigest) != string(digest[:]) || len(existingFactDigest) != sha256.Size || string(existingFactDigest) != string(factDigest[:]) {
 			return ErrConflict
 		}
 		return nil
@@ -182,21 +207,21 @@ func (r *Repository) StageRefreshBatch(ctx context.Context, runID int64, ordinal
 	for index, id := range ids {
 		memberIDs[index] = int64(id)
 	}
-	if _, err = t.Exec(ctx, `INSERT INTO segment_audience_snapshot_members(snapshot_id,customer_id,entered_at,identity_disposition)
-		SELECT $1,candidate.customer_id,COALESCE(previous.entered_at,$3),'resolved'
-		FROM unnest($2::bigint[]) AS candidate(customer_id)
+	if _, err = t.Exec(ctx, `INSERT INTO segment_audience_snapshot_members(snapshot_id,customer_id,entered_at,identity_disposition,first_paid_at)
+		SELECT $1,candidate.customer_id,COALESCE(previous.entered_at,$4),'resolved',NULLIF(candidate.first_paid_at,'')::timestamptz
+		FROM unnest($2::bigint[],$3::text[]) AS candidate(customer_id,first_paid_at)
 		LEFT JOIN segment_audience_snapshot_members previous ON previous.snapshot_id=(
 			SELECT package.published_snapshot_id
 			FROM segment_audience_snapshots snapshot JOIN segment_audience_packages package ON package.id=snapshot.package_id
 			WHERE snapshot.id=$1
-		) AND previous.customer_id=candidate.customer_id`, snapshotID, memberIDs, now); err != nil {
+		) AND previous.customer_id=candidate.customer_id`, snapshotID, memberIDs, firstPaidAtValues, now); err != nil {
 		if unique(err) {
 			return ErrConflict
 		}
 		return err
 	}
-	_, err = t.Exec(ctx, `INSERT INTO segment_audience_refresh_batches(refresh_run_id,batch_ordinal,first_customer_id,last_customer_id,member_count,member_digest,completed_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7)`, runID, ordinal, ids[0], ids[len(ids)-1], len(ids), digest[:], now)
+	_, err = t.Exec(ctx, `INSERT INTO segment_audience_refresh_batches(refresh_run_id,batch_ordinal,first_customer_id,last_customer_id,member_count,member_digest,member_fact_digest,completed_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, runID, ordinal, ids[0], ids[len(ids)-1], len(ids), digest[:], factDigest[:], now)
 	if err != nil {
 		return err
 	}
@@ -286,8 +311,8 @@ func (r *Repository) PublishRefreshWithActor(ctx context.Context, runID int64, e
 		}
 	}
 	if !run.RefreshKind.IsComplete() && previousID != nil {
-		if _, err = t.Exec(ctx, `INSERT INTO segment_audience_snapshot_members(snapshot_id,customer_id,entered_at,identity_disposition)
-			SELECT $1,previous.customer_id,previous.entered_at,'resolved' FROM segment_audience_snapshot_members previous
+		if _, err = t.Exec(ctx, `INSERT INTO segment_audience_snapshot_members(snapshot_id,customer_id,entered_at,identity_disposition,first_paid_at)
+			SELECT $1,previous.customer_id,previous.entered_at,'resolved',previous.first_paid_at FROM segment_audience_snapshot_members previous
 			WHERE previous.snapshot_id=$2 AND NOT EXISTS (SELECT 1 FROM segment_audience_snapshot_members added WHERE added.snapshot_id=$1 AND added.customer_id=previous.customer_id)`, snapshot.ID, *previousID); err != nil {
 			return segmentdomain.PublishedRefresh{}, err
 		}
@@ -459,8 +484,8 @@ func (r *Repository) CreateMemberEnteredEventsWithActor(ctx context.Context, sna
 	if err != nil {
 		return 0, err
 	}
-	result, err := t.Exec(ctx, `INSERT INTO segment_audience_member_events(event_id,package_id,snapshot_id,configuration_version_id,customer_id,occurred_at)
-		SELECT 'audmem_' || ($1::bigint)::text || '_' || current.customer_id::text,$2::bigint,$1::bigint,$3::bigint,current.customer_id,$5::timestamptz
+	result, err := t.Exec(ctx, `INSERT INTO segment_audience_member_events(event_id,package_id,snapshot_id,configuration_version_id,customer_id,first_paid_at,occurred_at)
+		SELECT 'audmem_' || ($1::bigint)::text || '_' || current.customer_id::text,$2::bigint,$1::bigint,$3::bigint,current.customer_id,current.first_paid_at,$5::timestamptz
 		FROM segment_audience_snapshot_members current
 		WHERE current.snapshot_id=$1::bigint
 		  AND ($4::bigint IS NULL OR NOT EXISTS (SELECT 1 FROM segment_audience_snapshot_members previous WHERE previous.snapshot_id=$4::bigint AND previous.customer_id=current.customer_id))
@@ -493,7 +518,7 @@ func (r *Repository) MemberEvents(ctx context.Context, snapshotID segmentport.Sn
 	if err != nil {
 		return segmentport.MemberEventPage{}, err
 	}
-	rows, err := t.Query(ctx, `SELECT id,event_id,package_id,snapshot_id,configuration_version_id,customer_id,occurred_at FROM segment_audience_member_events WHERE snapshot_id=$1 AND id>$2 ORDER BY id LIMIT $3`, snapshotID, after, limit+1)
+	rows, err := t.Query(ctx, `SELECT id,event_id,package_id,snapshot_id,configuration_version_id,customer_id,first_paid_at,occurred_at FROM segment_audience_member_events WHERE snapshot_id=$1 AND id>$2 ORDER BY id LIMIT $3`, snapshotID, after, limit+1)
 	if err != nil {
 		return segmentport.MemberEventPage{}, err
 	}
@@ -503,7 +528,7 @@ func (r *Repository) MemberEvents(ctx context.Context, snapshotID segmentport.Sn
 	for rows.Next() {
 		var rowID int64
 		var item segmentport.MemberEnteredV1
-		if err = rows.Scan(&rowID, &item.EventID, &item.PackageID, &item.SnapshotID, &item.ConfigurationVersionID, &item.CustomerID, &item.OccurredAt); err != nil {
+		if err = rows.Scan(&rowID, &item.EventID, &item.PackageID, &item.SnapshotID, &item.ConfigurationVersionID, &item.CustomerID, &item.FirstPaidAt, &item.OccurredAt); err != nil {
 			return page, err
 		}
 		ids = append(ids, rowID)

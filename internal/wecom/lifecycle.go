@@ -201,7 +201,7 @@ func (service ExternalContactLifecycle) ProcessWithin(ctx context.Context, fact 
 		active := !fact.deletesRelationship()
 		application, err := service.Relationships.ApplyCallbackEvent(ctx, CallbackFollowRelationship{
 			CallbackID: fact.CallbackID, CorpID: fact.CorpID, EmployeeID: fact.EmployeeUserID,
-			CustomerID: customerID, Active: active, OccurredAt: fact.OccurredAt,
+			CustomerID: customerID, ChangeType: fact.ChangeType, Active: active, OccurredAt: fact.OccurredAt,
 		})
 		if err != nil {
 			return ExternalContactLifecycleResult{}, err

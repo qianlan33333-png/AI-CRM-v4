@@ -10,6 +10,7 @@ import (
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	segmentdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/domain"
+	segmentport "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/port"
 )
 
 func TestPostgreSQLAudienceConfigurationAtomicity(t *testing.T) {
@@ -333,6 +334,129 @@ func TestPostgreSQLAudienceMemberEventsUseTypedSnapshotParameters(t *testing.T) 
 	}
 }
 
+func TestPostgreSQLFirstPaidMemberFactRetryDigestAndEventRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	native, cleanup := segmentDatabase(t, ctx)
+	defer cleanup()
+	wrapped, err := platformpostgres.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uow, err := platformpostgres.NewUnitOfWork(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	firstPaidAt := now.Add(-24 * time.Hour)
+	var packageID, configurationID int64
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		group, createErr := segmentdomain.NewGroup("首购事实", 1, 7, now)
+		if createErr != nil {
+			return createErr
+		}
+		group, createErr = repo.CreateGroup(tx, group)
+		if createErr != nil {
+			return createErr
+		}
+		pkg, createErr := segmentdomain.NewPackage("first-paid-facts", "首购事实", &group.ID, 7, now)
+		if createErr != nil {
+			return createErr
+		}
+		pkg, createErr = repo.CreatePackage(tx, pkg)
+		if createErr != nil {
+			return createErr
+		}
+		config, createErr := segmentdomain.NewConfigurationVersion(pkg.ID, 1, json.RawMessage(`{"schema_version":1,"expression":{"kind":"all"}}`), "", "manual", 7, now)
+		if createErr != nil {
+			return createErr
+		}
+		config, createErr = repo.CreateConfigurationVersion(tx, config)
+		if createErr != nil {
+			return createErr
+		}
+		if _, createErr = repo.SetCurrentConfiguration(tx, pkg.ID, config.ID, pkg.Version, 7, now); createErr != nil {
+			return createErr
+		}
+		packageID, configurationID = pkg.ID, config.ID
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var refreshID int64
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		run, owned, reserveErr := repo.ReserveRefresh(tx, segmentdomain.RefreshRun{
+			PackageID: packageID, ConfigurationVersionID: configurationID,
+			SourceKeyDigest: [32]byte{41}, ReferenceTime: now, RefreshKind: segmentdomain.RefreshDaily, CreatedAt: now, UpdatedAt: now,
+		})
+		if reserveErr != nil {
+			return reserveErr
+		}
+		if !owned {
+			return errors.New("refresh reservation was not owned")
+		}
+		refreshID = run.ID
+		if _, reserveErr = repo.AttachRefreshJob(tx, run.ID, 42, now); reserveErr != nil {
+			return reserveErr
+		}
+		_, _, reserveErr = repo.BeginRefresh(tx, run.ID, now)
+		return reserveErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+	facts := []segmentdomain.SnapshotMemberFact{{CustomerID: 71, FirstPaidAt: &firstPaidAt}}
+	memberDigest := segmentdomain.DigestMembers([]customerdomain.CustomerID{71})
+	stage := func(items []segmentdomain.SnapshotMemberFact) error {
+		return uow.Within(ctx, func(tx context.Context) error {
+			return repo.StageRefreshBatchWithMemberFacts(tx, refreshID, 0, items, memberDigest, now)
+		})
+	}
+	if err = stage(facts); err != nil {
+		t.Fatal(err)
+	}
+	if err = stage(facts); err != nil {
+		t.Fatalf("identical staging retry: %v", err)
+	}
+	changedAt := firstPaidAt.Add(time.Second)
+	if err = stage([]segmentdomain.SnapshotMemberFact{{CustomerID: 71, FirstPaidAt: &changedAt}}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed fact retry error=%v want conflict", err)
+	}
+	var published segmentdomain.PublishedRefresh
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		var publishErr error
+		published, publishErr = repo.PublishRefresh(tx, refreshID, 1, memberDigest, [32]byte{43}, 7, now)
+		return publishErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		created, createErr := repo.CreateMemberEnteredEvents(tx, published.Snapshot, published.PreviousSnapshotID, 7, now)
+		if createErr != nil {
+			return createErr
+		}
+		if created != 1 {
+			return errors.New("expected one member-entered event")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var page segmentport.MemberEventPage
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		var readErr error
+		page, readErr = repo.MemberEvents(tx, segmentport.SnapshotID(published.Snapshot.ID), "", 10)
+		return readErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].FirstPaidAt == nil || !page.Items[0].FirstPaidAt.Equal(firstPaidAt) {
+		t.Fatalf("member event first-paid evidence=%+v", page.Items)
+	}
+}
+
 func TestPostgreSQLRefreshKindsPreserveIncrementalMembersAndDailyExits(t *testing.T) {
 	ctx := context.Background()
 	native, cleanup := segmentDatabase(t, ctx)
@@ -398,6 +522,9 @@ func TestPostgreSQLRefreshKindsPreserveIncrementalMembersAndDailyExits(t *testin
 				return e
 			}
 			if len(ids) > 0 {
+				if e = repo.StageRefreshBatch(tx, run.ID, 0, ids, segmentdomain.DigestMembers(ids), reference); e != nil {
+					return e
+				}
 				if e = repo.StageRefreshBatch(tx, run.ID, 0, ids, segmentdomain.DigestMembers(ids), reference); e != nil {
 					return e
 				}

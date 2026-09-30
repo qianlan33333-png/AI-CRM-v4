@@ -56,4 +56,12 @@ func TestPaidWindowRequiresRFC3339AfterHostDatetimeConversion(t *testing.T) {
 	if _, err := CanonicalDefinition(localControlValue); !errors.Is(err, ErrUnsupportedDefinition) {
 		t.Fatalf("datetime-local value bypassed Go AST validation: %v", err)
 	}
+	friendAtPayment := json.RawMessage(`{"schema_version":1,"template_key":"paid_order","parameters":{"product_codes":["334465678"],"paid_at_from":"","paid_at_to":"","owner_scope":"all","owner_staff_ids":[],"require_active_wecom_contact":true,"require_wecom_friend_at_paid_time":true,"friend_owner_staff_ids":["10"]}}`)
+	if _, err := CanonicalDefinition(friendAtPayment); err != nil {
+		t.Fatalf("friend-at-first-payment parameters rejected: %v", err)
+	}
+	friendGateWithoutOwner := json.RawMessage(`{"schema_version":1,"template_key":"paid_order","parameters":{"product_codes":["334465678"],"paid_at_from":"","paid_at_to":"","owner_scope":"all","owner_staff_ids":[],"require_active_wecom_contact":true,"require_wecom_friend_at_paid_time":true,"friend_owner_staff_ids":[]}}`)
+	if _, err := CanonicalDefinition(friendGateWithoutOwner); !errors.Is(err, ErrUnsupportedDefinition) {
+		t.Fatalf("friend gate without its exact employee was accepted: %v", err)
+	}
 }

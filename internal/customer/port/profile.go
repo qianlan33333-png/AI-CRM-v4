@@ -37,6 +37,12 @@ type CanonicalCustomerResolver interface {
 	ResolveCanonicalCustomer(context.Context, customerdomain.CustomerID) (CanonicalCustomer, error)
 }
 
+// CanonicalCustomerBatchResolver resolves a bounded set through the same
+// OneID root authority without per-customer database round trips.
+type CanonicalCustomerBatchResolver interface {
+	ResolveCanonicalCustomers(context.Context, []customerdomain.CustomerID) ([]CanonicalCustomer, error)
+}
+
 type PageQuery struct {
 	Limit     int
 	Watermark time.Time

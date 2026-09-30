@@ -3,6 +3,7 @@ package port
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 var ErrDirectoryDisabled = directoryError("wecom directory provider disabled")
@@ -45,6 +46,9 @@ type ExternalContact struct {
 
 type ExternalContactFollowInfo struct {
 	EmployeeID string
+	// FollowedAt is the Provider-authenticated time this employee added the
+	// external contact. A nil value means the Provider omitted an exact time.
+	FollowedAt *time.Time
 	// Remark is nil when the Provider response did not project this field. An
 	// explicit empty string remains distinct from not-yet-projected history.
 	Remark *string

@@ -18,6 +18,10 @@ type SourceWatermark struct {
 
 type Evaluation struct {
 	CustomerIDs []customerdomain.CustomerID
+	// FirstPaidAt carries immutable, canonical first-purchase evidence for the
+	// subset of evaluated members that need downstream historical-send policy.
+	// It is absent for legacy template evaluations that do not establish it.
+	FirstPaidAt map[customerdomain.CustomerID]time.Time
 	Watermarks  []SourceWatermark
 	ReferenceAt time.Time
 }

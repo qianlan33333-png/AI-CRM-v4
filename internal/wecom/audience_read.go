@@ -4,11 +4,35 @@ import (
 	"context"
 	"time"
 
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	wecomport "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/port"
 )
 
 func (PostgreSQLFollowRelationshipStore) AudienceContacts(ctx context.Context, reference time.Time) ([]wecomport.AudienceContact, error) {
+	return readAudienceContacts(ctx, reference, nil)
+}
+
+func (PostgreSQLFollowRelationshipStore) AudienceContactsForCustomers(ctx context.Context, reference time.Time, customerIDs []customerdomain.CustomerID) ([]wecomport.AudienceContact, error) {
+	if len(customerIDs) == 0 {
+		return []wecomport.AudienceContact{}, nil
+	}
+	if len(customerIDs) > wecomport.MaxAudienceContactCustomerIDs {
+		return nil, ErrInvalidFollowRelationship
+	}
+	seen := make(map[customerdomain.CustomerID]bool, len(customerIDs))
+	ids := make([]int64, 0, len(customerIDs))
+	for _, id := range customerIDs {
+		if id < 1 || seen[id] {
+			return nil, ErrInvalidFollowRelationship
+		}
+		seen[id] = true
+		ids = append(ids, int64(id))
+	}
+	return readAudienceContacts(ctx, reference, ids)
+}
+
+func readAudienceContacts(ctx context.Context, reference time.Time, customerIDs []int64) ([]wecomport.AudienceContact, error) {
 	if reference.IsZero() {
 		return nil, ErrInvalidFollowRelationship
 	}
@@ -20,7 +44,7 @@ func (PostgreSQLFollowRelationshipStore) AudienceContacts(ctx context.Context, r
 		SELECT profile.customer_id,profile.corp_scope,profile.activation_status,
 			profile.last_seen_run_id,profile.updated_at
 		FROM wecom_external_contact_profiles profile
-		WHERE profile.updated_at <= $1
+		WHERE profile.updated_at <= $1 AND ($2::bigint[] IS NULL OR profile.customer_id=ANY($2))
 	), completed_profiles AS (
 		SELECT profile.*
 		FROM profiles profile
@@ -42,14 +66,16 @@ func (PostgreSQLFollowRelationshipStore) AudienceContacts(ctx context.Context, r
 			AND observation_run.status='succeeded' AND observation_run.completed_at <= $1
 		WHERE observation.relationship_status='active' AND observation.primary_owner_userid<>''
 			AND observation.updated_at <= $1 AND observation.observed_at <= $1
+			AND ($2::bigint[] IS NULL OR observation.customer_id=ANY($2))
 	), ambiguous_owners AS (
 		SELECT customer_id
 		FROM owner_values
+		WHERE ($2::bigint[] IS NULL OR customer_id=ANY($2))
 		GROUP BY customer_id
 		HAVING count(DISTINCT owner_userid)>1
 	), directory_contacts AS (
 		SELECT observation.customer_id,observation.corp_scope,observation.last_seen_run_id AS run_id,
-			observation.employee_id AS owner_userid,observation.observed_at
+			observation.employee_id AS owner_userid,observation.observed_at,observation.followed_at
 		FROM wecom_customer_owner_observations observation
 		JOIN completed_profiles profile ON profile.customer_id=observation.customer_id
 			AND profile.corp_scope=observation.corp_scope
@@ -58,9 +84,10 @@ func (PostgreSQLFollowRelationshipStore) AudienceContacts(ctx context.Context, r
 			AND observation_run.status='succeeded' AND observation_run.completed_at <= $1
 		WHERE observation.relationship_status='active' AND observation.updated_at <= $1
 			AND observation.observed_at <= $1
+			AND ($2::bigint[] IS NULL OR observation.customer_id=ANY($2))
 			AND NOT EXISTS (SELECT 1 FROM ambiguous_owners ambiguous WHERE ambiguous.customer_id=observation.customer_id)
 	), candidates AS (
-		SELECT customer_id,owner_userid,'active'::text AS status,observed_at FROM directory_contacts
+		SELECT customer_id,owner_userid,'active'::text AS status,observed_at,followed_at FROM directory_contacts
 		UNION ALL
 		SELECT relationship.customer_id,relationship.employee_id,
 			CASE WHEN NOT relationship.active
@@ -78,10 +105,12 @@ func (PostgreSQLFollowRelationshipStore) AudienceContacts(ctx context.Context, r
 						)
 				)
 			THEN 'deleted' ELSE 'active' END,
-			relationship.last_event_at
+			relationship.last_event_at,
+			CASE WHEN relationship.active THEN relationship.followed_at ELSE NULL END
 		FROM wecom_follow_relationships relationship
 		WHERE relationship.last_event_at IS NOT NULL AND relationship.updated_at <= $1
 			AND relationship.last_event_at <= $1
+			AND ($2::bigint[] IS NULL OR relationship.customer_id=ANY($2))
 		UNION ALL
 		SELECT relationship.customer_id,relationship.employee_id,
 			CASE WHEN relationship.active AND profile.activation_status='active'
@@ -89,21 +118,23 @@ func (PostgreSQLFollowRelationshipStore) AudienceContacts(ctx context.Context, r
 				AND profile_run.status='succeeded' AND profile_run.completed_at <= $1
 				AND NOT EXISTS (SELECT 1 FROM ambiguous_owners ambiguous WHERE ambiguous.customer_id=relationship.customer_id)
 			THEN 'active' ELSE 'deleted' END,
-			COALESCE(relationship.last_event_at,relationship.created_at)
+			COALESCE(relationship.last_event_at,relationship.created_at),
+			CASE WHEN relationship.active THEN relationship.followed_at ELSE NULL END
 		FROM wecom_follow_relationships relationship
 		JOIN profiles profile ON profile.customer_id=relationship.customer_id
 			AND profile.corp_scope='wecom-corp:' || relationship.corp_id
 		LEFT JOIN wecom_customer_sync_runs profile_run ON profile_run.id=profile.last_seen_run_id
 		WHERE relationship.last_event_at IS NULL AND relationship.updated_at <= $1
 			AND relationship.created_at <= $1
+			AND ($2::bigint[] IS NULL OR relationship.customer_id=ANY($2))
 	), ranked AS (
-		SELECT customer_id,owner_userid,status,observed_at,
+		SELECT customer_id,owner_userid,status,observed_at,followed_at,
 			row_number() OVER (PARTITION BY customer_id,owner_userid
 				ORDER BY observed_at DESC,CASE WHEN status='deleted' THEN 1 ELSE 0 END DESC) AS position
 		FROM candidates
 	)
-	SELECT customer_id,owner_userid,status,observed_at
-	FROM ranked WHERE position=1 ORDER BY customer_id,owner_userid`, reference.UTC())
+	SELECT customer_id,owner_userid,status,observed_at,followed_at
+	FROM ranked WHERE position=1 ORDER BY customer_id,owner_userid`, reference.UTC(), nullableCustomerIDs(customerIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +142,7 @@ func (PostgreSQLFollowRelationshipStore) AudienceContacts(ctx context.Context, r
 	out := []wecomport.AudienceContact{}
 	for rows.Next() {
 		var item wecomport.AudienceContact
-		if err = rows.Scan(&item.CustomerID, &item.OwnerUserID, &item.Status, &item.ObservedAt); err != nil {
+		if err = rows.Scan(&item.CustomerID, &item.OwnerUserID, &item.Status, &item.ObservedAt, &item.FollowedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
@@ -120,3 +151,11 @@ func (PostgreSQLFollowRelationshipStore) AudienceContacts(ctx context.Context, r
 }
 
 var _ wecomport.AudienceContactReader = PostgreSQLFollowRelationshipStore{}
+var _ wecomport.AudienceContactsForCustomersReader = PostgreSQLFollowRelationshipStore{}
+
+func nullableCustomerIDs(ids []int64) []int64 {
+	if len(ids) == 0 {
+		return nil
+	}
+	return ids
+}
