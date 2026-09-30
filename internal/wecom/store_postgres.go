@@ -194,6 +194,36 @@ func (*PostgreSQLFollowRelationshipStore) apply(ctx context.Context, event follo
 	if err != nil {
 		return followRelationshipApplyResult{}, err
 	}
+	var directoryFollowedAt *time.Time
+	if event.Active && event.ChangeType == ChangeEditExternalContact && (!found || current.Active) {
+		// An edit is not a new follow. A completed Provider directory run
+		// may supply its original add time. For an existing callback row,
+		// require a directory read begun after the last callback: it must not
+		// resurrect a relationship deleted after the directory observation.
+		var afterLastCallback any
+		if found {
+			afterLastCallback = current.LastEventAt
+		}
+		err = tx.QueryRow(ctx, `SELECT observation.followed_at
+				FROM wecom_customer_owner_observations observation
+				JOIN wecom_customer_sync_runs run ON run.id=observation.last_seen_run_id
+					AND run.corp_scope=observation.corp_scope
+				WHERE observation.customer_id=$1
+					AND observation.corp_scope='wecom-corp:' || $2
+					AND observation.employee_id=$3
+					AND observation.relationship_status='active'
+					AND observation.followed_at IS NOT NULL
+					AND observation.followed_at < $4
+					AND observation.observed_at <= $4
+					AND run.status='succeeded'
+					AND run.completed_at <= $4
+					AND ($5::timestamptz IS NULL OR run.started_at > $5)`,
+			event.CustomerID, event.CorpID, event.EmployeeID, event.OccurredAt, afterLastCallback,
+		).Scan(&directoryFollowedAt)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return followRelationshipApplyResult{}, err
+		}
+	}
 	if !found {
 		var result followRelationshipApplyResult
 		err = tx.QueryRow(ctx, `
@@ -201,10 +231,12 @@ func (*PostgreSQLFollowRelationshipStore) apply(ctx context.Context, event follo
 				corp_id, employee_id, customer_id, active, version,
 				last_event_at, last_callback_id, last_event_digest, followed_at
 			) VALUES ($1, $2, $3, $4, 1, $5::timestamptz, $6, $7,
-				CASE WHEN $4 AND $8 IN ('add_external_contact','add_half_external_contact') THEN $5::timestamptz ELSE NULL::timestamptz END)
+				CASE WHEN $4 AND $8 IN ('add_external_contact','add_half_external_contact') THEN $5::timestamptz
+					WHEN $4 AND $8='edit_external_contact' THEN $9::timestamptz
+					ELSE NULL::timestamptz END)
 			RETURNING active, version, last_event_at, last_callback_id`,
 			event.CorpID, event.EmployeeID, event.CustomerID, event.Active,
-			event.OccurredAt, event.CallbackID, event.Digest[:], event.ChangeType,
+			event.OccurredAt, event.CallbackID, event.Digest[:], event.ChangeType, directoryFollowedAt,
 		).Scan(&result.Active, &result.Version, &result.LastEventAt, &result.LastCallbackID)
 		if err != nil {
 			return followRelationshipApplyResult{}, err
@@ -236,7 +268,8 @@ func (*PostgreSQLFollowRelationshipStore) apply(ctx context.Context, event follo
 			followed_at = CASE
 				WHEN NOT $4 THEN NULL
 				WHEN $9 IN ('add_external_contact','add_half_external_contact') THEN $5::timestamptz
-				WHEN active THEN followed_at
+				WHEN active AND followed_at IS NOT NULL THEN followed_at
+				WHEN active AND $9='edit_external_contact' THEN $10::timestamptz
 				ELSE NULL
 			END,
 			version = version + 1,
@@ -247,7 +280,7 @@ func (*PostgreSQLFollowRelationshipStore) apply(ctx context.Context, event follo
 		WHERE corp_id = $1 AND employee_id = $2 AND customer_id = $3 AND version = $8
 		RETURNING active, version, last_event_at, last_callback_id`,
 		event.CorpID, event.EmployeeID, event.CustomerID, event.Active,
-		event.OccurredAt, event.CallbackID, event.Digest[:], current.Version, event.ChangeType,
+		event.OccurredAt, event.CallbackID, event.Digest[:], current.Version, event.ChangeType, directoryFollowedAt,
 	).Scan(&result.Active, &result.Version, &result.LastEventAt, &result.LastCallbackID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return followRelationshipApplyResult{}, ErrFollowRelationshipConcurrent
