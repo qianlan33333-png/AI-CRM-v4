@@ -97,7 +97,7 @@ type PublishedGeneration struct {
 }
 
 func (p PublishedGeneration) Valid() bool {
-	return p.AgentID > 0 && p.PublishedVersion > 0 && p.AgentCode != "" && len(p.AgentCode) <= 120 && p.RolePrompt != "" && len(p.RolePrompt) <= 16000 && p.TaskPrompt != "" && len(p.TaskPrompt) <= 16000
+	return p.AgentID > 0 && p.PublishedVersion > 0 && p.AgentCode != "" && len(p.AgentCode) <= 120 && p.RolePrompt != "" && p.TaskPrompt != ""
 }
 
 type PublishedGenerationReader interface {

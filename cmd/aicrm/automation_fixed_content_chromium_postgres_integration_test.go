@@ -34,7 +34,12 @@ func TestPostgreSQLAutomationLifecycleChromiumJourney(t *testing.T) {
 	runAutomationContentJourney(t, true)
 }
 
+func TestPostgreSQLAutomationLongPromptChromiumJourney(t *testing.T) {
+	runAutomationContentJourney(t, false)
+}
+
 func runAutomationContentJourney(t *testing.T, lifecycle bool) {
+	promptJourney := strings.Contains(t.Name(), "LongPrompt")
 	if !platformconfig.ChromiumJourneyRequired() {
 		t.Skip("set AICRM_REQUIRE_CHROMIUM_JOURNEY=1")
 	}
@@ -102,12 +107,17 @@ func runAutomationContentJourney(t *testing.T, lifecycle bool) {
 		"AICRM_AUTOMATION_CONTENT_TEST_IMAGE_ID="+strconv.FormatInt(imageID, 10),
 		"AICRM_AUTOMATION_CONTENT_SCREENSHOT_DIR="+screenshots,
 		"AICRM_AUTOMATION_LIFECYCLE_TEST="+strconv.FormatBool(lifecycle),
+		"AICRM_AUTOMATION_PROMPT_TEST="+strconv.FormatBool(promptJourney),
 	)
 	output, err := command.CombinedOutput()
 	if err != nil || !strings.Contains(string(output), "automation_fixed_content_chromium: PASS") {
 		t.Fatalf("automation fixed-content Chromium journey err=%v output=%s", err, strings.TrimSpace(string(output)))
 	}
-	for _, name := range []string{"automation-fixed-content-1280.png", "automation-fixed-content-1440.png", "automation-fixed-content-360.png", "automation-fixed-content-420.png"} {
+	screenshotNames := []string{"automation-fixed-content-1280.png", "automation-fixed-content-1440.png", "automation-fixed-content-360.png", "automation-fixed-content-420.png"}
+	if promptJourney {
+		screenshotNames = []string{"automation-prompt-before.png", "automation-prompt-saved.png"}
+	}
+	for _, name := range screenshotNames {
 		info, statErr := os.Stat(filepath.Join(screenshots, name))
 		if statErr != nil || info.Size() < 512 {
 			t.Fatalf("automation fixed-content screenshot=%s exists=%t size=%d", name, statErr == nil, func() int64 {
@@ -137,6 +147,12 @@ func runAutomationContentJourney(t *testing.T, lifecycle bool) {
 	}
 	if err = json.Unmarshal(readback.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
+	}
+	if promptJourney {
+		if payload.Agent.DraftRolePrompt != strings.Repeat("中", 20001) || payload.Agent.DraftTaskPrompt != strings.Repeat("R", 24000) || payload.Agent.DraftVersion != 2 || payload.Agent.PublishedVersion != 2 {
+			t.Fatalf("long prompt authenticated server readback mismatch: role=%d task=%d versions=%d/%d", len(payload.Agent.DraftRolePrompt), len(payload.Agent.DraftTaskPrompt), payload.Agent.DraftVersion, payload.Agent.PublishedVersion)
+		}
+		return
 	}
 	expectedPublished := int64(1)
 	if lifecycle {
@@ -184,6 +200,9 @@ func createAutomationFixedContentImage(t *testing.T, handler http.Handler, sessi
 func createAutomationFixedContentAgent(t *testing.T, handler http.Handler, session, csrf string) int64 {
 	t.Helper()
 	body := []byte(`{"agent_name":"浏览器固定话术","agent_code":"automation_fixed_chromium","automation_type":"fixed_script","role_prompt":"保留角色 Prompt","task_prompt":"保留任务 Prompt","legacy_configuration":{"keep":"legacy"}}`)
+	if strings.Contains(t.Name(), "LongPrompt") {
+		body = bytes.Replace(body, []byte(`"automation_type":"fixed_script"`), []byte(`"automation_type":"agent"`), 1)
+	}
 	response := automationFixedContentRequest(t, handler, http.MethodPost, "/api/admin/automation-agents", body, session, csrf, "automation-fixed-content-create")
 	if response.Code != http.StatusOK {
 		t.Fatalf("seed agent status=%d body=%s", response.Code, response.Body.String())

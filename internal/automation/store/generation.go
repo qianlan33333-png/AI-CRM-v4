@@ -22,7 +22,7 @@ import (
 var generationFailureCode = regexp.MustCompile(`^[a-z0-9_]{1,80}$`)
 
 func validGenerationItem(item automationdomain.GenerationItem) bool {
-	return item.RunID > 0 && item.CustomerID > 0 && item.SenderStaffID > 0 && item.AgentID > 0 && item.AgentPublishedVersion > 0 && item.AgentCode != "" && len(item.AgentCode) <= 120 && item.RolePrompt != "" && len(item.RolePrompt) <= 16000 && item.TaskPrompt != "" && len(item.TaskPrompt) <= 16000 && item.Context.Valid() && item.ModelPolicy.Valid() && item.SourceDigest != ([32]byte{}) && item.TargetDigest != ([32]byte{}) && item.PayloadDigest != ([32]byte{}) && item.PolicyDigest != ([32]byte{}) && item.ReceiptKeyDigest != ([32]byte{}) && item.State == "accepted" && !item.CreatedAt.IsZero()
+	return item.RunID > 0 && item.CustomerID > 0 && item.SenderStaffID > 0 && item.AgentID > 0 && item.AgentPublishedVersion > 0 && item.AgentCode != "" && len(item.AgentCode) <= 120 && item.RolePrompt != "" && item.TaskPrompt != "" && item.Context.Valid() && item.ModelPolicy.Valid() && item.SourceDigest != ([32]byte{}) && item.TargetDigest != ([32]byte{}) && item.PayloadDigest != ([32]byte{}) && item.PolicyDigest != ([32]byte{}) && item.ReceiptKeyDigest != ([32]byte{}) && item.State == "accepted" && !item.CreatedAt.IsZero()
 }
 
 func (r *Repository) CreateGenerationItems(ctx context.Context, items []automationdomain.GenerationItem) ([]automationdomain.GenerationItem, error) {

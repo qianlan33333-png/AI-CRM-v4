@@ -619,7 +619,7 @@ func automationIntegrationPool(t *testing.T) (*pgxpool.Pool, func()) {
 
 func automationRuntimeIntegrationPool(t *testing.T) (*pgxpool.Pool, func()) {
 	t.Helper()
-	pool, cleanup := automationIntegrationPoolWithMigrations(t, []string{"0005_external_effects.sql", "0013_automation_agents.sql", "0043_automation_runtime.sql", "0087_automation_manual_ai_review.sql", "0015_config_adminops.sql", "0094_runtime_config_releases.sql", "0115_automation_dynamic_text_generation.sql"})
+	pool, cleanup := automationIntegrationPoolWithMigrations(t, []string{"0005_external_effects.sql", "0013_automation_agents.sql", "0043_automation_runtime.sql", "0087_automation_manual_ai_review.sql", "0015_config_adminops.sql", "0094_runtime_config_releases.sql", "0115_automation_dynamic_text_generation.sql", "0212_automation_prompt_length_unbounded.sql"})
 	return pool, cleanup
 }
 

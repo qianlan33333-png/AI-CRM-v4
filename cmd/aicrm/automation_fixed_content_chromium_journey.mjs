@@ -170,6 +170,37 @@ try {
   if (closure.page !== "agentEdit" || !closure.frozen || !closure.host || !closure.picker || closure.role !== "保留角色 Prompt" || closure.task !== "保留任务 Prompt") throw new Error(`incorrect fixed Agent runtime closure: ${JSON.stringify(closure)}`);
   await evaluate(cdp, "(() => { window.__automationFixedContentRequests=window.__automationFixedContentBootRequests; return true; })()");
 
+  if (process.env.AICRM_AUTOMATION_PROMPT_TEST === "true") {
+    const role = "中".repeat(20001), task = "R".repeat(24000);
+    async function openPrompts() {
+      await evaluate(cdp, `(() => { const tab=[...document.querySelectorAll('nav button')].find(n=>n.textContent?.replace(/\\s/g,'')==='3Prompt配置'); if (!tab) throw new Error('prompt tab missing'); tab.dataset.promptJourneyTab='1'; return true; })()`);
+      await pointerClick(cdp, '[data-prompt-journey-tab="1"]', 'open prompt tab');
+      await waitFor(cdp, "Boolean(document.querySelector('#agentRolePrompt')?.getClientRects().length)", 'visible prompts');
+    }
+    await openPrompts();
+    await capture(cdp, 'automation-prompt-before.png');
+    const limits = await evaluate(cdp, "['agentRolePrompt','agentTaskPrompt'].map(id=>document.getElementById(id).maxLength)");
+    if (limits.some(value=>value!==-1)) throw new Error('active editor still limits prompts');
+    for (const [id, value] of [['agentRolePrompt',role],['agentTaskPrompt',task]]) {
+      await evaluate(cdp, `(() => { const e=document.getElementById(${JSON.stringify(id)}); e.focus(); e.select(); return true; })()`);
+      await cdp.call('Input.insertText', {text:value});
+      if (!await evaluate(cdp, `document.getElementById(${JSON.stringify(id)}).value===${JSON.stringify(value)}`)) throw new Error('real browser input clipped '+id);
+    }
+    await pointerClick(cdp, '[data-agent-save]', 'save complete long prompt');
+    await waitFor(cdp, `fetch('/api/admin/automation-agents/${agentID}').then(r=>r.json()).then(d=>d.agent.draft_role_prompt===${JSON.stringify(role)} && d.agent.draft_task_prompt===${JSON.stringify(task)} && d.agent.draft_version===2)`, 'saved prompt server readback');
+    await cdp.call('Page.reload');
+    await waitFor(cdp, `document.querySelector('#agentRolePrompt')?.value===${JSON.stringify(role)} && document.querySelector('#agentTaskPrompt')?.value===${JSON.stringify(task)}`, 'refreshed prompt byte equality');
+    await openPrompts();
+    await capture(cdp, 'automation-prompt-saved.png');
+    await cdp.call("Page.navigate", {url:`${baseURL}/admin/automation-agents`});
+    await waitFor(cdp, "document.querySelector('[data-agent-action=pause]')?.textContent==='启用'", 'paused prompt agent');
+    await pointerClick(cdp, '[data-agent-action=pause]', 'enable prompt agent');
+    await waitFor(cdp, "document.querySelector('#fb-ok')?.textContent==='启用'", 'enable confirmation');
+    await pointerClick(cdp, '#fb-ok', 'confirm enable');
+    await waitFor(cdp, "document.querySelector('#fb-ok')?.textContent==='发布并启用'", 'publish prompt confirmation');
+    await pointerClick(cdp, '#fb-ok', 'publish long prompt');
+    await waitFor(cdp, `fetch('/api/admin/automation-agents/${agentID}').then(r=>r.json()).then(d=>d.agent.status==='active' && d.agent.published_version===2 && d.agent.published_role_prompt===${JSON.stringify(role)} && d.agent.published_task_prompt===${JSON.stringify(task)})`, 'published prompt exact server readback');
+  } else {
   const contentTab = await evaluate(cdp, `(() => {
     const tab = [...document.querySelectorAll('nav button')].find(node => node.textContent?.replace(/\\s/g, '') === '4固定素材');
     if (!(tab instanceof HTMLButtonElement)) return false;
@@ -243,6 +274,7 @@ try {
     await waitFor(cdp, "document.querySelector('[data-agent-action=pause]')?.textContent==='启用' && document.body.innerText.includes('已暂停')", "paused state readback");
     const paused = await evaluate(cdp, `fetch('/api/admin/automation-agents/${agentID}').then(r=>r.json()).then(d=>d.agent)`);
     if (paused.status !== 'paused' || paused.execution_enabled !== false) throw new Error('pause did not persist');
+  }
   }
   console.log(`automation_fixed_content_chromium: PASS screenshots=${screenshotDirectory}`);
 } catch (error) {

@@ -21,7 +21,6 @@ import (
 const (
 	maxAgentName      = 120
 	maxAgentCode      = 120
-	maxPrompt         = 20_000
 	maxContentText    = 4_000
 	maxLegacyConfig   = 100_000
 	maxIdempotencyKey = 128
@@ -370,7 +369,7 @@ func normalizeCreate(item automationport.Agent, actor int64) (automationport.Age
 	if !validText(item.AgentName, maxAgentName) || item.AgentName == "" || !validCode(item.AgentCode) || !validType(item.AutomationType) || item.Status != automationport.AgentStatusPaused || item.ExecutionEnabled {
 		return automationport.Agent{}, ErrInvalidAgent
 	}
-	if !validText(item.DraftRolePrompt, maxPrompt) || !validText(item.DraftTaskPrompt, maxPrompt) {
+	if !validPrompt(item.DraftRolePrompt) || !validPrompt(item.DraftTaskPrompt) {
 		return automationport.Agent{}, ErrInvalidAgent
 	}
 	content, err := normalizeContent(item.FixedContentPackage, item.AutomationType)
@@ -412,7 +411,7 @@ func applyUpdate(item automationport.Agent, input automationport.UpdateCommand) 
 	if input.Status != nil {
 		item.Status, item.ExecutionEnabled = *input.Status, false
 	}
-	if !validText(item.AgentName, maxAgentName) || item.AgentName == "" || !validType(item.AutomationType) || !validStatus(item.Status) || item.Status == automationport.AgentStatusArchived || item.ExecutionEnabled || !validText(item.DraftRolePrompt, maxPrompt) || !validText(item.DraftTaskPrompt, maxPrompt) {
+	if !validText(item.AgentName, maxAgentName) || item.AgentName == "" || !validType(item.AutomationType) || !validStatus(item.Status) || item.Status == automationport.AgentStatusArchived || item.ExecutionEnabled || !validPrompt(item.DraftRolePrompt) || !validPrompt(item.DraftTaskPrompt) {
 		return automationport.Agent{}, ErrInvalidAgent
 	}
 	if input.FixedContentPackage != nil {
@@ -684,6 +683,10 @@ func ready(s *Service) bool {
 func validMutation(actor int64, key string) bool {
 	return actor > 0 && len(key) >= 16 && len(key) <= maxIdempotencyKey && strings.TrimSpace(key) == key
 }
+func validPrompt(value string) bool {
+	return strings.TrimSpace(value) == value
+}
+
 func validText(value string, limit int) bool {
 	return len([]rune(value)) <= limit && strings.TrimSpace(value) == value
 }

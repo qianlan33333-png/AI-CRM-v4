@@ -11466,9 +11466,7 @@ export interface LegacyAutomationAgentCreateRequest {
   agent_code: string;
   automation_type?: LegacyAutomationAgentCreateRequestAutomationType;
   status?: LegacyAutomationAgentCreateRequestStatus;
-  /** @maxLength 20000 */
   role_prompt?: string;
-  /** @maxLength 20000 */
   task_prompt?: string;
   fixed_content_package?: LegacyAutomationAgentFixedContent;
   legacy_configuration?: LegacyAutomationAgentCreateRequestLegacyConfiguration;
@@ -11503,9 +11501,7 @@ export interface LegacyAutomationAgentUpdateRequest {
   agent_name?: string;
   automation_type?: LegacyAutomationAgentUpdateRequestAutomationType;
   status?: LegacyAutomationAgentUpdateRequestStatus;
-  /** @maxLength 20000 */
   role_prompt?: string;
-  /** @maxLength 20000 */
   task_prompt?: string;
   fixed_content_package?: LegacyAutomationAgentFixedContent;
   legacy_configuration?: LegacyAutomationAgentUpdateRequestLegacyConfiguration;
