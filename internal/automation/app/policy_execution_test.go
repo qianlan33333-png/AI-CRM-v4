@@ -56,3 +56,11 @@ func TestNextAllowedExecutionSameDay(t *testing.T) {
 		t.Fatalf("scheduled at %s, want %s", got, want)
 	}
 }
+
+func TestNextAllowedExecutionWithoutQuietHoursIsImmediate(t *testing.T) {
+	raw := json.RawMessage(`{}`)
+	now := time.Date(2026, 9, 29, 23, 9, 0, 0, time.FixedZone("CST", 8*60*60))
+	if got := nextAllowedExecution(now, raw); !got.IsZero() {
+		t.Fatalf("quiet_hours=%s scheduled at %s, want immediate execution", raw, got)
+	}
+}

@@ -183,7 +183,13 @@ func (r *Repository) StageRefreshBatch(ctx context.Context, runID int64, ordinal
 		memberIDs[index] = int64(id)
 	}
 	if _, err = t.Exec(ctx, `INSERT INTO segment_audience_snapshot_members(snapshot_id,customer_id,entered_at,identity_disposition)
-		SELECT $1,member_id,$3,'resolved' FROM unnest($2::bigint[]) AS member_id`, snapshotID, memberIDs, now); err != nil {
+		SELECT $1,candidate.customer_id,COALESCE(previous.entered_at,$3),'resolved'
+		FROM unnest($2::bigint[]) AS candidate(customer_id)
+		LEFT JOIN segment_audience_snapshot_members previous ON previous.snapshot_id=(
+			SELECT package.published_snapshot_id
+			FROM segment_audience_snapshots snapshot JOIN segment_audience_packages package ON package.id=snapshot.package_id
+			WHERE snapshot.id=$1
+		) AND previous.customer_id=candidate.customer_id`, snapshotID, memberIDs, now); err != nil {
 		if unique(err) {
 			return ErrConflict
 		}
@@ -263,10 +269,26 @@ func (r *Repository) PublishRefreshWithActor(ctx context.Context, runID int64, e
 	if err = stagedRows.Err(); err != nil || int64(len(staged)) != expectedCount || segmentdomain.DigestMembers(staged) != expectedMemberDigest {
 		return segmentdomain.PublishedRefresh{}, ErrConflict
 	}
+	if previousID != nil {
+		// Snapshot members are append-only. StageRefreshBatch captures the prior
+		// entered_at when it inserts each member; reject a concurrent publish if
+		// it changed the baseline before this snapshot could be published.
+		var entryTimeConflict bool
+		if err = t.QueryRow(ctx, `SELECT EXISTS(
+			SELECT 1 FROM segment_audience_snapshot_members staged
+			JOIN segment_audience_snapshot_members previous ON previous.snapshot_id=$2 AND previous.customer_id=staged.customer_id
+			WHERE staged.snapshot_id=$1 AND staged.entered_at IS DISTINCT FROM previous.entered_at
+		)`, snapshot.ID, *previousID).Scan(&entryTimeConflict); err != nil {
+			return segmentdomain.PublishedRefresh{}, err
+		}
+		if entryTimeConflict {
+			return segmentdomain.PublishedRefresh{}, ErrConflict
+		}
+	}
 	if !run.RefreshKind.IsComplete() && previousID != nil {
 		if _, err = t.Exec(ctx, `INSERT INTO segment_audience_snapshot_members(snapshot_id,customer_id,entered_at,identity_disposition)
-			SELECT $1,previous.customer_id,$2,'resolved' FROM segment_audience_snapshot_members previous
-			WHERE previous.snapshot_id=$3 AND NOT EXISTS (SELECT 1 FROM segment_audience_snapshot_members added WHERE added.snapshot_id=$1 AND added.customer_id=previous.customer_id)`, snapshot.ID, now, *previousID); err != nil {
+			SELECT $1,previous.customer_id,previous.entered_at,'resolved' FROM segment_audience_snapshot_members previous
+			WHERE previous.snapshot_id=$2 AND NOT EXISTS (SELECT 1 FROM segment_audience_snapshot_members added WHERE added.snapshot_id=$1 AND added.customer_id=previous.customer_id)`, snapshot.ID, *previousID); err != nil {
 			return segmentdomain.PublishedRefresh{}, err
 		}
 	}

@@ -263,6 +263,36 @@ func TestWeakLinkCreatesCandidateWithoutMerge(t *testing.T) {
 	}
 }
 
+func TestNarrowVerifiedIdentityLinkPortAttachesAndReturnsCrossRootCandidate(t *testing.T) {
+	store, service, wecom, alipay, _ := twoRoots(t)
+	unionFact := verifiedFact(t, identitydomain.KindUnionID, "wechat-open-platform:platform-1", "union-new")
+	attached, err := service.LinkVerifiedIdentityToCustomer(context.Background(), identityport.VerifiedLinkCommand{
+		CustomerID: wecom.CustomerID, Fact: unionFact, Evidence: evidence(identitydomain.EvidenceStrong),
+	})
+	if err != nil || attached.Status != "attached" || attached.CustomerID != wecom.CustomerID || attached.IdentityID < 1 {
+		t.Fatalf("same-root link=%+v err=%v", attached, err)
+	}
+	reference := unionFact.Reference()
+	resolved, err := service.Resolve(context.Background(), identitydomain.Reference{
+		Kind: reference.Kind, Scope: reference.Scope, Value: reference.NormalizedValue,
+		Assurance: reference.Assurance, Source: reference.Source,
+	})
+	if err != nil || resolved.Status != identityport.ResolveFound || resolved.CustomerID != wecom.CustomerID {
+		t.Fatalf("attached UnionID resolution=%+v err=%v", resolved, err)
+	}
+
+	knownAlipayFact := verifiedFact(t, identitydomain.KindAlipayOAuthUserID, "alipay-app:main:production", "ali-1")
+	candidate, err := service.LinkVerifiedIdentityToCustomer(context.Background(), identityport.VerifiedLinkCommand{
+		CustomerID: wecom.CustomerID, Fact: knownAlipayFact, Evidence: evidence(identitydomain.EvidenceStrong),
+	})
+	if err != nil || candidate.Status != "merge_candidate" || candidate.MergeCandidateID < 1 {
+		t.Fatalf("cross-root result=%+v err=%v", candidate, err)
+	}
+	if store.Root(wecom.CustomerID) != wecom.CustomerID || store.Root(alipay.CustomerID) != alipay.CustomerID {
+		t.Fatalf("narrow Identity port merged roots: wecom=%d alipay=%d", store.Root(wecom.CustomerID), store.Root(alipay.CustomerID))
+	}
+}
+
 func TestWeakEvidenceCannotAttachANewIdentity(t *testing.T) {
 	store := NewMemoryStore()
 	service := OneIDService{Store: store}

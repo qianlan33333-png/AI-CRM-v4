@@ -92,7 +92,10 @@ type VerifiedLinkCommand struct {
 }
 
 type VerifiedLinkResult struct {
-	Status string
+	Status           string
+	CustomerID       customerdomain.CustomerID
+	IdentityID       int64
+	MergeCandidateID int64
 }
 
 // ProvisionedCustomerObserver is a composition-owned bridge invoked only when

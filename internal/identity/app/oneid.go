@@ -310,11 +310,18 @@ func (service OneIDService) LinkVerifiedIdentity(ctx context.Context, command Li
 }
 
 func (service OneIDService) LinkVerifiedIdentityToCustomer(ctx context.Context, command identityport.VerifiedLinkCommand) (identityport.VerifiedLinkResult, error) {
+	if service.Store == nil {
+		return identityport.VerifiedLinkResult{}, ErrInvalidLinkCommand
+	}
 	linked, err := service.LinkVerifiedIdentity(ctx, LinkCommand{SourceCustomerID: command.CustomerID, Target: command.Fact, Evidence: command.Evidence})
 	if err != nil {
 		return identityport.VerifiedLinkResult{}, err
 	}
-	return identityport.VerifiedLinkResult{Status: string(linked.Status)}, nil
+	result := identityport.VerifiedLinkResult{Status: string(linked.Status), CustomerID: linked.CustomerID, IdentityID: linked.IdentityID}
+	if linked.Candidate != nil {
+		result.MergeCandidateID = linked.Candidate.ID
+	}
+	return result, nil
 }
 
 func (service OneIDService) CreateLinkIntent(ctx context.Context, command LinkIntentCommand) (CreatedLinkIntent, error) {

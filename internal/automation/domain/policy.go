@@ -119,16 +119,32 @@ func canonicalAction(kind automationport.ActionKind, raw json.RawMessage) (json.
 	}
 }
 func canonicalQuietHours(raw json.RawMessage) (json.RawMessage, error) {
-	var in QuietHours
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&in) != nil || in.Timezone == "" || len(in.Timezone) > 100 || !clock(in.Start) || !clock(in.End) || in.Start == in.End {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return nil, ErrInvalidPolicy
 	}
-	if _, zoneErr := time.LoadLocation(in.Timezone); zoneErr != nil {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(trimmed, &fields) != nil || fields == nil {
+		return nil, ErrInvalidPolicy
+	}
+	var in QuietHours
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&in) != nil {
 		return nil, ErrInvalidPolicy
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, ErrInvalidPolicy
+	}
+	if len(fields) == 0 {
+		// An empty object is the explicit "no quiet hours" policy. Keep it an
+		// object because the persisted JSONB contract requires an object.
+		return json.RawMessage(`{}`), nil
+	}
+	if in.Timezone == "" || len(in.Timezone) > 100 || !clock(in.Start) || !clock(in.End) || in.Start == in.End {
+		return nil, ErrInvalidPolicy
+	}
+	if _, zoneErr := time.LoadLocation(in.Timezone); zoneErr != nil {
 		return nil, ErrInvalidPolicy
 	}
 	return json.Marshal(in)

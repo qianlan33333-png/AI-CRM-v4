@@ -158,6 +158,9 @@ func TestLegacyTemplateSourcesEvaluateFrozenConditions(t *testing.T) {
 		// A time window is [from,to); unknown PaidAt cannot enter it. Owner scope
 		// remains effective even when the active-contact switch is false.
 		{"paid-payer-window-owner", `{"product_codes":["paid-course"],"paid_at_from":"2026-09-05T09:00:00Z","paid_at_to":"2026-09-05T12:00:00Z","owner_scope":"specified","owner_staff_ids":["19"],"require_active_wecom_contact":false}`, segmentdsl.PaidOrder, []customerdomain.CustomerID{1}},
+		// Active-contact qualification still applies the resolved employee scope;
+		// deleted observations and contacts assigned to another employee do not enter.
+		{"paid-payer-active-owner", `{"product_codes":["paid-course"],"paid_at_from":"","paid_at_to":"","owner_scope":"specified","owner_staff_ids":["19"],"require_active_wecom_contact":true}`, segmentdsl.PaidOrder, []customerdomain.CustomerID{1}},
 		{"channel-entry", `{"channel_codes":["channel-7"],"entered_days_min":2,"entered_days_max":3,"owner_scope":"specified","owner_staff_ids":["19"],"require_active_wecom_contact":true}`, segmentdsl.ChannelEntry, []customerdomain.CustomerID{1}},
 		// The source supplies the immutable first click, so a later click cannot
 		// reset this three-day elapsed result.

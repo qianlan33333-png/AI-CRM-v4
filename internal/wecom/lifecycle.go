@@ -65,6 +65,7 @@ type ExternalContactLifecycleFact struct {
 	WelcomeGrantRef  string
 	OccurredAt       time.Time
 	VerifiedIdentity identitydomain.VerifiedFact
+	VerifiedUnionID  *identitydomain.VerifiedFact
 }
 
 func (fact ExternalContactLifecycleFact) Valid() bool {
@@ -80,9 +81,16 @@ func (fact ExternalContactLifecycleFact) Valid() bool {
 		return false
 	}
 	reference := fact.VerifiedIdentity.Reference()
-	return reference.Kind == identitydomain.KindWeComExternalUserID &&
-		reference.Scope == "wecom-corp:"+fact.CorpID && reference.NormalizedValue == fact.ExternalUserID &&
-		reference.Assurance == identitydomain.AssuranceVerified && reference.Source == "wecom.callback"
+	if reference.Kind != identitydomain.KindWeComExternalUserID || reference.Scope != "wecom-corp:"+fact.CorpID ||
+		reference.NormalizedValue != fact.ExternalUserID || reference.Assurance != identitydomain.AssuranceVerified || reference.Source != "wecom.callback" {
+		return false
+	}
+	if fact.VerifiedUnionID != nil {
+		union := fact.VerifiedUnionID.Reference()
+		return fact.VerifiedUnionID.Valid() && union.Kind == identitydomain.KindUnionID &&
+			strings.HasPrefix(union.Scope, "wechat-open-platform:") && union.Source == "wecom.callback_detail"
+	}
+	return true
 }
 
 func (fact ExternalContactLifecycleFact) entrant() bool {
@@ -247,6 +255,22 @@ func externalContactIdentityDigest(fact ExternalContactLifecycleFact) [32]byte {
 }
 
 func (service ExternalContactLifecycle) resolveCustomer(ctx context.Context, fact ExternalContactLifecycleFact) (customerdomain.CustomerID, bool, bool, error) {
+	if fact.VerifiedUnionID != nil {
+		linker, _ := service.Identity.(identityport.VerifiedIdentityLinker)
+		pairDigest := sha256.Sum256([]byte(strings.Join([]string{
+			"wecom-callback-unionid-pair-v1", fact.CorpID, fact.ExternalUserID,
+			fact.VerifiedUnionID.Reference().Scope, fact.VerifiedUnionID.Reference().NormalizedValue,
+		}, "\x00")))
+		outcome, err := resolveOrBindWeComContact(ctx, service.Identity, service.Identity, linker, fact.VerifiedIdentity,
+			fact.VerifiedUnionID, fact.CallbackID, contactLinkEvidence("wecom.callback_detail", fact.CallbackID, pairDigest))
+		if err != nil {
+			return 0, false, false, err
+		}
+		if outcome.Conflict || outcome.Provision.CustomerID < 1 || outcome.Provision.IdentityID < 1 {
+			return 0, false, true, nil
+		}
+		return outcome.Provision.CustomerID, !outcome.Provision.Created, false, nil
+	}
 	reference := fact.VerifiedIdentity.Reference()
 	resolved, err := service.Identity.Resolve(ctx, identitydomain.Reference{
 		Kind: reference.Kind, Scope: reference.Scope, Value: reference.NormalizedValue,

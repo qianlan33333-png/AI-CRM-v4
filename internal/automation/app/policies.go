@@ -43,9 +43,11 @@ type RuntimeStore interface {
 	EnrollmentForSource(context.Context, int64, [32]byte, int64) (automationdomain.Enrollment, bool, error)
 	CreateEnrollment(context.Context, automationdomain.Enrollment) (automationdomain.Enrollment, bool, error)
 	RuntimeReceipt(context.Context, string, string, [32]byte, [32]byte) (RuntimeReceipt, bool, error)
+	LockMemberEventDispatch(context.Context, [32]byte) error
 	ReserveRuntime(context.Context, RuntimeReservation) (RuntimeReceipt, bool, error)
 	CompleteRuntime(context.Context, int64, json.RawMessage, time.Time) error
 	AppendRuntimeFact(context.Context, RuntimeFact) error
+	ListMemberEventDispatchDiagnostics(context.Context, int64, int64, int) ([]MemberEventDispatchDiagnostic, string, error)
 	CreatePreview(context.Context, automationdomain.RunPreview) (automationdomain.RunPreview, error)
 	PreviewByDigest(context.Context, [32]byte) (automationdomain.RunPreview, error)
 	CreateRun(context.Context, automationdomain.RuntimeRun, []automationdomain.RuntimeRecipient) (automationdomain.RuntimeRun, []automationdomain.RuntimeRecipient, error)
@@ -347,19 +349,136 @@ func (s *RuntimeService) TransitionPolicy(ctx context.Context, c PolicyLifecycle
 	}, &output)
 	return output, runtimeClassify(err)
 }
+
+// MemberEventDispatchDiagnostics returns immutable diagnostics for events
+// whose dispatch found no active package policy. The page is read-only and
+// scoped to a single package.
+func (s *RuntimeService) MemberEventDispatchDiagnostics(ctx context.Context, packageID, cursor int64, limit int) ([]MemberEventDispatchDiagnostic, string, error) {
+	if s == nil || packageID < 1 || cursor < 0 || limit < 1 || limit > 100 {
+		return nil, "", ErrRuntimeInvalid
+	}
+	var items []MemberEventDispatchDiagnostic
+	var next string
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		var e error
+		items, next, e = s.store.ListMemberEventDispatchDiagnostics(tx, packageID, cursor, limit)
+		return e
+	})
+	return items, next, runtimeClassify(err)
+}
+
+// recordMissingActivePolicy persists a replay-safe receipt before the
+// existing River member-event job is acknowledged. A later policy activation
+// does not replay this event; replay remains an explicit operator action.
+func (s *RuntimeService) recordMissingActivePolicy(ctx context.Context, event segmentport.MemberEnteredV1) error {
+	keyDigest, payloadDigest, err := missingPolicyReceiptDigests(event)
+	if err != nil {
+		return ErrRuntimeUnavailable
+	}
+	eventDigest := sha256.Sum256([]byte(event.EventID))
+	now := s.now().UTC()
+	diagnostic := MemberEventDispatchDiagnostic{
+		PackageID:              int64(event.PackageID),
+		SnapshotID:             int64(event.SnapshotID),
+		ConfigurationVersionID: int64(event.ConfigurationVersionID),
+		EventDigest:            hex.EncodeToString(eventDigest[:]),
+		State:                  "unconfigured",
+		Reason:                 "no_active_policy",
+		OccurredAt:             event.OccurredAt.UTC(),
+		RecordedAt:             now,
+	}
+	result, err := json.Marshal(diagnostic)
+	if err != nil {
+		return ErrRuntimeUnavailable
+	}
+	return s.uow.Within(ctx, func(tx context.Context) error {
+		if e := s.store.LockMemberEventDispatch(tx, keyDigest); e != nil {
+			return e
+		}
+		if recorded, e := s.missingPolicyReceiptWithin(tx, keyDigest, payloadDigest); e != nil || recorded {
+			return e
+		}
+		versions, e := s.store.ActivePoliciesForPackage(tx, int64(event.PackageID))
+		if e != nil {
+			return e
+		}
+		if len(versions) > 0 {
+			// A policy became active after the first read. Let the River job retry
+			// under that policy instead of committing a stale no-policy receipt.
+			return ErrRuntimeNotReady
+		}
+		receipt, owned, e := s.store.ReserveRuntime(tx, RuntimeReservation{
+			Operation:     MemberEventMissingPolicyOperation,
+			ActorScope:    MemberEventDispatchActorScope,
+			KeyDigest:     keyDigest,
+			PayloadDigest: payloadDigest,
+			CreatedAt:     now,
+		})
+		if e != nil {
+			return e
+		}
+		if !owned {
+			if receipt.State != "completed" || len(receipt.Result) == 0 {
+				return ErrRuntimeConflict
+			}
+			return nil
+		}
+		return s.store.CompleteRuntime(tx, receipt.ID, result, now)
+	})
+}
+
+func missingPolicyReceiptDigests(event segmentport.MemberEnteredV1) ([32]byte, [32]byte, error) {
+	raw, err := json.Marshal(event)
+	if err != nil {
+		return [32]byte{}, [32]byte{}, err
+	}
+	eventDigest := sha256.Sum256([]byte(event.EventID))
+	keyDigest := sha256.Sum256([]byte(MemberEventMissingPolicyOperation + ":" + fmt.Sprint(event.PackageID) + ":" + hex.EncodeToString(eventDigest[:])))
+	return keyDigest, sha256.Sum256(raw), nil
+}
+
+func (s *RuntimeService) missingPolicyReceiptWithin(ctx context.Context, keyDigest, payloadDigest [32]byte) (bool, error) {
+	receipt, found, err := s.store.RuntimeReceipt(ctx, MemberEventMissingPolicyOperation, MemberEventDispatchActorScope, keyDigest, payloadDigest)
+	if err != nil || !found {
+		return false, err
+	}
+	if receipt.State != "completed" || len(receipt.Result) == 0 {
+		return false, ErrRuntimeConflict
+	}
+	return true, nil
+}
+
 func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segmentport.MemberEnteredV1) ([]automationdomain.Enrollment, error) {
 	if s == nil || event.PackageID < 1 || event.CustomerID < 1 || event.EventID == "" || event.OccurredAt.IsZero() {
 		return nil, ErrRuntimeInvalid
 	}
 	eventDigest := sha256.Sum256([]byte(event.EventID))
+	missingKey, missingPayload, err := missingPolicyReceiptDigests(event)
+	if err != nil {
+		return nil, ErrRuntimeUnavailable
+	}
 	observed := []automationdomain.PolicyVersion{}
-	err := s.uow.Within(ctx, func(tx context.Context) error {
+	previouslyUnconfigured := false
+	err = s.uow.Within(ctx, func(tx context.Context) error {
 		var e error
+		previouslyUnconfigured, e = s.missingPolicyReceiptWithin(tx, missingKey, missingPayload)
+		if e != nil || previouslyUnconfigured {
+			return e
+		}
 		observed, e = s.store.ActivePoliciesForPackage(tx, int64(event.PackageID))
 		return e
 	})
-	if err != nil || len(observed) == 0 {
+	if err != nil {
 		return nil, runtimeClassify(err)
+	}
+	if previouslyUnconfigured {
+		return nil, nil
+	}
+	if len(observed) == 0 {
+		if err = s.recordMissingActivePolicy(ctx, event); err != nil {
+			return nil, runtimeClassify(err)
+		}
+		return nil, nil
 	}
 	// Check the immutable source receipt before reading current execution
 	// configuration. A replay of the same member-entered fact must return its
@@ -416,10 +535,24 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 	}
 	now := s.now().UTC()
 	output := []automationdomain.Enrollment{}
+	noLongerActive := false
+	previouslyUnconfigured = false
 	err = s.uow.Within(ctx, func(tx context.Context) error {
+		if e := s.store.LockMemberEventDispatch(tx, missingKey); e != nil {
+			return e
+		}
+		var e error
+		previouslyUnconfigured, e = s.missingPolicyReceiptWithin(tx, missingKey, missingPayload)
+		if e != nil || previouslyUnconfigured {
+			return e
+		}
 		versions, e := s.store.ActivePoliciesForPackage(tx, int64(event.PackageID))
 		if e != nil {
 			return e
+		}
+		if len(versions) == 0 {
+			noLongerActive = true
+			return nil
 		}
 		var runtimeConfig configport.EffectiveSnapshot
 		if needsOutbound {
@@ -497,6 +630,12 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 		}
 		return nil
 	})
+	if err == nil && previouslyUnconfigured {
+		return nil, nil
+	}
+	if err == nil && noLongerActive {
+		err = s.recordMissingActivePolicy(ctx, event)
+	}
 	return output, runtimeClassify(err)
 }
 

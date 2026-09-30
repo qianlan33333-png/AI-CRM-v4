@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -247,6 +248,18 @@ func (r *Repository) RuntimeReceipt(ctx context.Context, operation, actorScope s
 	return out, true, nil
 }
 
+// LockMemberEventDispatch serializes the final no-policy receipt and active
+// enrollment decision for the same Segment event. The transaction owns this
+// lock until its receipt or enrollment writes commit.
+func (r *Repository) LockMemberEventDispatch(ctx context.Context, keyDigest [32]byte) error {
+	t, err := tx(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = t.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, hex.EncodeToString(keyDigest[:]))
+	return err
+}
+
 func (r *Repository) ReserveRuntime(ctx context.Context, in automationapp.RuntimeReservation) (automationapp.RuntimeReceipt, bool, error) {
 	t, e := tx(ctx)
 	if e != nil {
@@ -287,6 +300,48 @@ func (r *Repository) CompleteRuntime(ctx context.Context, id int64, result json.
 	}
 	return nil
 }
+
+func (r *Repository) ListMemberEventDispatchDiagnostics(ctx context.Context, packageID, cursor int64, limit int) ([]automationapp.MemberEventDispatchDiagnostic, string, error) {
+	if packageID < 1 || cursor < 0 || limit < 1 || limit > 100 {
+		return nil, "", automationapp.ErrRuntimeInvalid
+	}
+	t, err := tx(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	rows, err := t.Query(ctx, `SELECT id,result_snapshot FROM automation_runtime_operation_receipts
+		WHERE operation=$1 AND actor_scope=$2 AND state='completed'
+		  AND ($3=0 OR id<$3) AND result_snapshot->>'package_id'=$4
+		ORDER BY id DESC LIMIT $5`, automationapp.MemberEventMissingPolicyOperation, automationapp.MemberEventDispatchActorScope, cursor, strconv.FormatInt(packageID, 10), limit+1)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	out := []automationapp.MemberEventDispatchDiagnostic{}
+	for rows.Next() {
+		var id int64
+		var raw []byte
+		var item automationapp.MemberEventDispatchDiagnostic
+		if err = rows.Scan(&id, &raw); err != nil {
+			return nil, "", err
+		}
+		if err = json.Unmarshal(raw, &item); err != nil || item.PackageID != packageID || item.SnapshotID < 1 || item.ConfigurationVersionID < 1 || len(item.EventDigest) != 64 || item.State != "unconfigured" || item.Reason != "no_active_policy" || item.OccurredAt.IsZero() || item.RecordedAt.IsZero() {
+			return nil, "", automationapp.ErrRuntimeConflict
+		}
+		item.ID = id
+		out = append(out, item)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if len(out) > limit {
+		next = strconv.FormatInt(out[limit-1].ID, 10)
+		out = out[:limit]
+	}
+	return out, next, nil
+}
+
 func (r *Repository) AppendRuntimeFact(ctx context.Context, f automationapp.RuntimeFact) error {
 	if f.ID < 1 || f.Actor < 1 || f.Kind == "" || f.EventType == "" {
 		return ErrInvalid

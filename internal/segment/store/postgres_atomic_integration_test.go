@@ -387,38 +387,71 @@ func TestPostgreSQLRefreshKindsPreserveIncrementalMembersAndDailyExits(t *testin
 	publish := func(kind segmentdomain.RefreshKind, reference time.Time, ids []customerdomain.CustomerID, key byte) (segmentdomain.PublishedRefresh, error) {
 		var out segmentdomain.PublishedRefresh
 		err := uow.Within(ctx, func(tx context.Context) error {
-			run, owned, e := repo.ReserveRefresh(tx, segmentdomain.RefreshRun{PackageID: packageID, ConfigurationVersionID: configurationID, SourceKeyDigest: [32]byte{key}, ReferenceTime: reference, RefreshKind: kind, CreatedAt: now, UpdatedAt: now})
+			run, owned, e := repo.ReserveRefresh(tx, segmentdomain.RefreshRun{PackageID: packageID, ConfigurationVersionID: configurationID, SourceKeyDigest: [32]byte{key}, ReferenceTime: reference, RefreshKind: kind, CreatedAt: reference, UpdatedAt: reference})
 			if e != nil || !owned {
 				return e
 			}
-			if _, e = repo.AttachRefreshJob(tx, run.ID, int64(key), now); e != nil {
+			if _, e = repo.AttachRefreshJob(tx, run.ID, int64(key), reference); e != nil {
 				return e
 			}
-			if _, _, e = repo.BeginRefresh(tx, run.ID, now); e != nil {
+			if _, _, e = repo.BeginRefresh(tx, run.ID, reference); e != nil {
 				return e
 			}
 			if len(ids) > 0 {
-				if e = repo.StageRefreshBatch(tx, run.ID, 0, ids, segmentdomain.DigestMembers(ids), now); e != nil {
+				if e = repo.StageRefreshBatch(tx, run.ID, 0, ids, segmentdomain.DigestMembers(ids), reference); e != nil {
 					return e
 				}
 			}
-			out, e = repo.PublishRefresh(tx, run.ID, int64(len(ids)), segmentdomain.DigestMembers(ids), [32]byte{}, 7, now)
+			out, e = repo.PublishRefresh(tx, run.ID, int64(len(ids)), segmentdomain.DigestMembers(ids), [32]byte{}, 7, reference)
 			return e
 		})
 		return out, err
+	}
+	createEnteredEvents := func(published segmentdomain.PublishedRefresh, at time.Time) (int64, error) {
+		var created int64
+		err := uow.Within(ctx, func(tx context.Context) error {
+			var createErr error
+			created, createErr = repo.CreateMemberEnteredEvents(tx, published.Snapshot, published.PreviousSnapshotID, 7, at)
+			return createErr
+		})
+		return created, err
 	}
 	first, err := publish(segmentdomain.RefreshDaily, now, []customerdomain.CustomerID{1, 2}, 1)
 	if err != nil || first.Snapshot.MemberCount != 2 || first.ExitedMemberCount != 0 {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
+	if created, createErr := createEnteredEvents(first, now); createErr != nil || created != 2 {
+		t.Fatalf("first entered events=%d err=%v", created, createErr)
+	}
 	incremental, err := publish(segmentdomain.RefreshIncremental, now.Add(time.Minute), []customerdomain.CustomerID{3}, 2)
 	if err != nil || incremental.Snapshot.MemberCount != 3 || incremental.ExitedMemberCount != 0 {
 		t.Fatalf("incremental=%+v err=%v", incremental, err)
 	}
+	if created, createErr := createEnteredEvents(incremental, now.Add(time.Minute)); createErr != nil || created != 1 {
+		t.Fatalf("incremental entered events=%d err=%v", created, createErr)
+	}
+	assertEnteredAt := func(snapshotID, customerID int64, want time.Time) {
+		t.Helper()
+		var enteredAt time.Time
+		if queryErr := native.QueryRow(ctx, `SELECT entered_at FROM segment_audience_snapshot_members WHERE snapshot_id=$1 AND customer_id=$2`, snapshotID, customerID).Scan(&enteredAt); queryErr != nil {
+			t.Fatal(queryErr)
+		}
+		if !enteredAt.Equal(want) {
+			t.Fatalf("snapshot=%d customer=%d entered_at=%s want=%s", snapshotID, customerID, enteredAt, want)
+		}
+	}
+	assertEnteredAt(incremental.Snapshot.ID, 1, now)
+	assertEnteredAt(incremental.Snapshot.ID, 2, now)
+	assertEnteredAt(incremental.Snapshot.ID, 3, now.Add(time.Minute))
 	daily, err := publish(segmentdomain.RefreshDaily, now.Add(2*time.Minute), []customerdomain.CustomerID{1, 3}, 3)
 	if err != nil || daily.Snapshot.MemberCount != 2 || daily.ExitedMemberCount != 1 {
 		t.Fatalf("daily=%+v err=%v", daily, err)
 	}
+	if created, createErr := createEnteredEvents(daily, now.Add(2*time.Minute)); createErr != nil || created != 0 {
+		t.Fatalf("daily entered events=%d err=%v", created, createErr)
+	}
+	assertEnteredAt(daily.Snapshot.ID, 1, now)
+	assertEnteredAt(daily.Snapshot.ID, 3, now.Add(time.Minute))
 	var exits int
 	if err = native.QueryRow(ctx, `SELECT count(*) FROM segment_audience_member_exit_events WHERE snapshot_id=$1 AND customer_id=2`, daily.Snapshot.ID).Scan(&exits); err != nil || exits != 1 {
 		t.Fatalf("daily exits=%d err=%v", exits, err)

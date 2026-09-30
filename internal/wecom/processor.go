@@ -14,10 +14,12 @@ import (
 	"time"
 
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
+	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/platform/audit"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/platform/idempotency"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/platform/webhook"
+	wecomport "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/port"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/provider"
 )
 
@@ -92,6 +94,11 @@ type InboxProcessor struct {
 	Inbox     *webhook.Service
 	UOW       platformport.UnitOfWork
 	Lifecycle ExternalContactLifecycle
+	// Directory is used for a bounded, read-only detail lookup before opening
+	// the lifecycle UoW. Its authenticated response can supply a verified
+	// UnionID for OneID; it cannot mutate WeCom.
+	Directory             wecomport.ExternalContactReader
+	UnionIDOpenPlatformID string
 	// DescriptionJobs is optional while the contract is disabled. When enabled,
 	// a processed full-contact callback atomically enqueues a bounded detail
 	// observation job; the HTTP callback handler still only inboxes and ACKs.
@@ -140,12 +147,38 @@ func (problem callbackDeliveryError) Error() string { return problem.code }
 func (problem callbackDeliveryError) Unwrap() error { return problem.cause }
 
 func (processor InboxProcessor) processDelivery(ctx context.Context, delivery webhook.Delivery) error {
-	processErr := processor.UOW.Within(ctx, func(txContext context.Context) error {
-		event, problem := processor.decodeDelivery(delivery)
-		if problem != nil {
-			return problem
+	event, problem := processor.decodeDelivery(delivery)
+	if problem != nil {
+		return processor.recordDeliveryFailure(ctx, delivery, asCallbackDeliveryError(problem))
+	}
+	var unionFact *identitydomain.VerifiedFact
+	if callbackEntrant(event.ChangeType) && processor.UnionIDOpenPlatformID != "" {
+		if processor.Directory == nil {
+			return processor.recordDeliveryFailure(ctx, delivery, callbackDeliveryError{code: "callback_contact_detail_unavailable", terminal: true})
 		}
-		fact, problem := processor.lifecycleFact(delivery, event)
+		contact, err := processor.Directory.ReadExternalContact(ctx, event.ExternalUserID)
+		if err != nil {
+			problem := callbackDeliveryError{code: "callback_contact_detail_read_failed"}
+			var failure wecomport.DirectoryFailure
+			if errors.As(err, &failure) && !failure.DirectoryFailureRetryable() {
+				problem.terminal = true
+			}
+			return processor.recordDeliveryFailure(ctx, delivery, problem)
+		}
+		if contact.ExternalUserID != event.ExternalUserID {
+			return processor.recordDeliveryFailure(ctx, delivery, callbackDeliveryError{code: "callback_contact_detail_identity_mismatch", terminal: true})
+		}
+		if contact.UnionID != "" {
+			verified, verifyErr := provider.VerifiedContactUnionID(event.ExternalUserID,
+				"wechat-open-platform:"+processor.UnionIDOpenPlatformID, "wecom.callback_detail", contact)
+			if verifyErr != nil {
+				return processor.recordDeliveryFailure(ctx, delivery, callbackDeliveryError{code: "callback_contact_unionid_invalid", terminal: true})
+			}
+			unionFact = &verified
+		}
+	}
+	processErr := processor.UOW.Within(ctx, func(txContext context.Context) error {
+		fact, problem := processor.lifecycleFact(delivery, event, unionFact)
 		if problem != nil {
 			return problem
 		}
@@ -158,7 +191,10 @@ func (processor InboxProcessor) processDelivery(ctx context.Context, delivery we
 				return callbackDeliveryError{code: "callback_description_enqueue", cause: err}
 			}
 		}
-		if processor.UnionIDJobs != nil && event.ChangeType == ChangeAddExternalContact && result.CustomerID > 0 {
+		// The older durable observer remains a fallback for details that did not
+		// contain a UnionID during inline processing. Do not read and relink a
+		// verified pair a second time after this callback has committed it.
+		if processor.UnionIDJobs != nil && unionFact == nil && event.ChangeType == ChangeAddExternalContact && result.CustomerID > 0 {
 			if err = processor.UnionIDJobs.EnqueueContactUnionIDObservation(txContext, delivery.ID); err != nil {
 				return callbackDeliveryError{code: "callback_unionid_enqueue", cause: err}
 			}
@@ -178,10 +214,18 @@ func (processor InboxProcessor) processDelivery(ctx context.Context, delivery we
 	// failure. This guarantees a lifecycle error cannot commit a partial OneID,
 	// relationship or entrant write. The failure receipt and Inbox transition
 	// then commit together in a clean transaction.
+	return processor.recordDeliveryFailure(ctx, delivery, asCallbackDeliveryError(processErr))
+}
+
+func asCallbackDeliveryError(err error) callbackDeliveryError {
 	var problem callbackDeliveryError
-	if !errors.As(processErr, &problem) {
-		problem = callbackDeliveryError{code: "callback_processing", cause: processErr}
+	if errors.As(err, &problem) {
+		return problem
 	}
+	return callbackDeliveryError{code: "callback_processing", cause: err}
+}
+
+func (processor InboxProcessor) recordDeliveryFailure(ctx context.Context, delivery webhook.Delivery, problem callbackDeliveryError) error {
 	status := webhook.StatusRetryable
 	codes := []CallbackResultCode(nil)
 	if problem.terminal || delivery.AttemptCount >= delivery.MaxAttempts {
@@ -192,6 +236,10 @@ func (processor InboxProcessor) processDelivery(ctx context.Context, delivery we
 	return processor.UOW.Within(ctx, func(txContext context.Context) error {
 		return processor.finalize(txContext, delivery, eventType, changeType, status, codes, problem.code, 0)
 	})
+}
+
+func callbackEntrant(changeType string) bool {
+	return changeType == ChangeAddExternalContact || changeType == ChangeAddHalfExternalContact
 }
 
 func (processor InboxProcessor) decodeDelivery(delivery webhook.Delivery) (CallbackEvent, error) {
@@ -218,7 +266,7 @@ func (processor InboxProcessor) decodeDelivery(delivery webhook.Delivery) (Callb
 	return event, nil
 }
 
-func (processor InboxProcessor) lifecycleFact(delivery webhook.Delivery, event CallbackEvent) (ExternalContactLifecycleFact, error) {
+func (processor InboxProcessor) lifecycleFact(delivery webhook.Delivery, event CallbackEvent, unionFact *identitydomain.VerifiedFact) (ExternalContactLifecycleFact, error) {
 	verified, err := provider.VerifiedExternalContact(processor.CorpID, event.ExternalUserID, "wecom.callback")
 	if err != nil {
 		return ExternalContactLifecycleFact{}, callbackDeliveryError{code: "invalid_verified_fact", terminal: true, cause: err}
@@ -237,7 +285,7 @@ func (processor InboxProcessor) lifecycleFact(delivery webhook.Delivery, event C
 		ChangeType: event.ChangeType, ExternalUserID: event.ExternalUserID, EmployeeUserID: event.UserID,
 		HasState: event.StatePresent, StateDigest: stateDigest, OccurredAt: time.Unix(event.CreateTime, 0).UTC(),
 		WelcomeGrantRef:  event.WelcomeGrantRef,
-		VerifiedIdentity: verified,
+		VerifiedIdentity: verified, VerifiedUnionID: unionFact,
 	}
 	if !fact.Valid() {
 		return ExternalContactLifecycleFact{}, callbackDeliveryError{code: "invalid_callback_fact", terminal: true}

@@ -539,6 +539,26 @@ func (identity *memoryLifecycleIdentity) ProvisionVerifiedIdentity(ctx context.C
 	return created, nil
 }
 
+func (identity *memoryLifecycleIdentity) LinkVerifiedIdentityToCustomer(_ context.Context, command identityport.VerifiedLinkCommand) (identityport.VerifiedLinkResult, error) {
+	identity.mu.Lock()
+	defer identity.mu.Unlock()
+	if command.CustomerID < 1 || !command.Fact.Valid() || !command.Evidence.Valid() {
+		return identityport.VerifiedLinkResult{Status: "conflict"}, nil
+	}
+	reference := command.Fact.Reference()
+	key := memoryIdentityKey(reference.Scope, reference.NormalizedValue)
+	if existing, found := identity.byKey[key]; found {
+		if existing.CustomerID != command.CustomerID {
+			return identityport.VerifiedLinkResult{Status: "merge_candidate", MergeCandidateID: 1}, nil
+		}
+		return identityport.VerifiedLinkResult{Status: "already_linked", CustomerID: existing.CustomerID, IdentityID: existing.IdentityID}, nil
+	}
+	identity.nextUserID++
+	linked := identityport.ProvisionResult{CustomerID: command.CustomerID, IdentityID: int64(identity.nextUserID)}
+	identity.byKey[key] = linked
+	return identityport.VerifiedLinkResult{Status: "attached", CustomerID: linked.CustomerID, IdentityID: linked.IdentityID}, nil
+}
+
 func (identity *memoryLifecycleIdentity) CustomerCount() int {
 	identity.mu.Lock()
 	defer identity.mu.Unlock()

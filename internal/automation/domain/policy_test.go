@@ -40,6 +40,21 @@ func TestCustomerTagTriggerIsPersistedDisabled(t *testing.T) {
 	}
 }
 
+func TestPolicyVersionAcceptsExplicitNoQuietHours(t *testing.T) {
+	approval := int64(9)
+	version, err := NewPolicyVersion(1, 1, 27, automationport.TriggerAudienceMemberEnteredV1, automationport.ActionOutboundMessage, json.RawMessage(`{"agent_id":14}`), json.RawMessage(`{}`), 100, &approval, 9, time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(version.QuietHours) != `{}` {
+		t.Fatalf("quiet hours=%s, want explicit empty object", version.QuietHours)
+	}
+	_, err = NewPolicyVersion(1, 2, 27, automationport.TriggerAudienceMemberEnteredV1, automationport.ActionOutboundMessage, json.RawMessage(`{"agent_id":14}`), json.RawMessage(`{"timezone":"","start":"","end":""}`), 100, &approval, 9, time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC))
+	if !errors.Is(err, ErrInvalidPolicy) {
+		t.Fatalf("empty quiet-hour fields must not masquerade as explicit no quiet hours: %v", err)
+	}
+}
+
 func TestPolicyRejectsMissingApprovalAndUnsafeLimit(t *testing.T) {
 	_, err := NewPolicyVersion(1, 1, 2, automationport.TriggerAudienceMemberEnteredV1, automationport.ActionRecord, json.RawMessage(`{"record_type":"entered"}`), json.RawMessage(`{"timezone":"UTC","start":"22:00","end":"08:00"}`), 100001, nil, 3, time.Now())
 	if !errors.Is(err, ErrInvalidPolicy) {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -216,6 +217,164 @@ func TestPostgreSQLPolicyCreateVersionLifecycleAndReplayJourney(t *testing.T) {
 	}
 	if _, err = service.TransitionPolicy(ctx, automationapp.PolicyLifecycleCommand{PolicyID: created.ID, ExpectedVersion: archived.Version, Actor: 7, Target: automationdomain.PolicyArchived, IdempotencyKey: "policy-postgres-archive-0002"}); !errors.Is(err, automationapp.ErrRuntimeConflict) {
 		t.Fatalf("second archive err=%v", err)
+	}
+}
+
+func TestPostgreSQLMemberEnteredWithoutPolicyPersistsQueryableDiagnosticReceipt(t *testing.T) {
+	native, cleanup := automationRuntimeIntegrationPool(t)
+	defer cleanup()
+	ctx := context.Background()
+	wrapped, err := platformpostgres.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrapped.Close()
+	uow, err := platformpostgres.NewUnitOfWork(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := automationapp.NewRuntimeService(uow, repository, automationExecutionReader{packageID: 27}, automationSnapshotReader{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseTime := time.Date(2026, 9, 29, 15, 9, 0, 0, time.UTC)
+	events := []segmentport.MemberEnteredV1{
+		{EventID: "audmem_902_87654321", PackageID: 27, SnapshotID: 902, ConfigurationVersionID: 43, CustomerID: 87654321, OccurredAt: baseTime},
+		{EventID: "audmem_903_87654322", PackageID: 27, SnapshotID: 903, ConfigurationVersionID: 43, CustomerID: 87654322, OccurredAt: baseTime.Add(time.Minute)},
+	}
+	for _, event := range events {
+		if enrollments, dispatchErr := service.EnrollAudienceMember(ctx, event); dispatchErr != nil || len(enrollments) != 0 {
+			t.Fatalf("dispatch event %q enrollments=%v err=%v", event.EventID, enrollments, dispatchErr)
+		}
+	}
+	if enrollments, replayErr := service.EnrollAudienceMember(ctx, events[0]); replayErr != nil || len(enrollments) != 0 {
+		t.Fatalf("replayed event enrollments=%v err=%v", enrollments, replayErr)
+	}
+	page, next, err := service.MemberEventDispatchDiagnostics(ctx, 27, 0, 1)
+	if err != nil || len(page) != 1 || next == "" {
+		t.Fatalf("first diagnostic page=%+v next=%q err=%v", page, next, err)
+	}
+	cursor, err := strconv.ParseInt(next, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, secondNext, err := service.MemberEventDispatchDiagnostics(ctx, 27, cursor, 1)
+	if err != nil || len(second) != 1 || secondNext != "" {
+		t.Fatalf("second diagnostic page=%+v next=%q err=%v", second, secondNext, err)
+	}
+	if page[0].Reason != "no_active_policy" || second[0].Reason != "no_active_policy" || page[0].PackageID != 27 || second[0].PackageID != 27 {
+		t.Fatalf("diagnostics=%+v %+v", page[0], second[0])
+	}
+	var receipts, enrollments, runs, leakedIDs int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2`, automationapp.MemberEventMissingPolicyOperation, automationapp.MemberEventDispatchActorScope).Scan(&receipts); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_enrollments`).Scan(&enrollments); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runs`).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE result_snapshot::text LIKE '%87654321%' OR result_snapshot::text LIKE '%audmem_902_87654321%'`).Scan(&leakedIDs); err != nil {
+		t.Fatal(err)
+	}
+	if receipts != 2 || enrollments != 0 || runs != 0 || leakedIDs != 0 {
+		t.Fatalf("diagnostic receipts/enrollments/runs/raw identifiers=%d/%d/%d/%d", receipts, enrollments, runs, leakedIDs)
+	}
+}
+
+func TestPostgreSQLMemberEventMissingPolicyReceiptBlocksLateReplay(t *testing.T) {
+	native, cleanup := automationRuntimeIntegrationPool(t)
+	defer cleanup()
+	ctx := context.Background()
+	wrapped, err := platformpostgres.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrapped.Close()
+	uow, err := platformpostgres.NewUnitOfWork(wrapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const packageID = segmentport.PackageID(27)
+	service, err := automationapp.NewRuntimeService(uow, repository, automationExecutionReader{packageID: packageID}, automationSnapshotReader{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseTime := time.Date(2026, 9, 30, 16, 0, 0, 0, time.UTC)
+	event := segmentport.MemberEnteredV1{
+		EventID: "audmem_release_desk_pg_001", PackageID: packageID, SnapshotID: 902,
+		ConfigurationVersionID: 43, CustomerID: 87654321, OccurredAt: baseTime,
+	}
+	if enrollments, dispatchErr := service.EnrollAudienceMember(ctx, event); dispatchErr != nil || len(enrollments) != 0 {
+		t.Fatalf("unconfigured dispatch enrollments=%v err=%v", enrollments, dispatchErr)
+	}
+
+	approval := int64(7)
+	created, err := service.CreatePolicy(ctx, automationapp.PolicyCommand{
+		Code: "late-member-event", Name: "Late member event delivery", PackageID: packageID,
+		TriggerKind: automationport.TriggerAudienceMemberEnteredV1, ActionKind: automationport.ActionRecord,
+		ActionConfig: json.RawMessage(`{"record_type":"entry"}`), QuietHours: json.RawMessage(`{}`),
+		SingleRunLimit: 10, ApprovalStaffID: &approval, Actor: approval, IdempotencyKey: "late-member-event-policy-create-001",
+	})
+	if err != nil || created.Lifecycle != automationdomain.PolicyPaused {
+		t.Fatalf("created policy=%+v err=%v", created, err)
+	}
+	active, err := service.TransitionPolicy(ctx, automationapp.PolicyLifecycleCommand{
+		PolicyID: created.ID, ExpectedVersion: created.Version, Actor: approval,
+		Target: automationdomain.PolicyActive, IdempotencyKey: "late-member-event-policy-active-001",
+	})
+	if err != nil || active.Lifecycle != automationdomain.PolicyActive {
+		t.Fatalf("active policy=%+v err=%v", active, err)
+	}
+
+	if enrollments, replayErr := service.EnrollAudienceMember(ctx, event); replayErr != nil || len(enrollments) != 0 {
+		t.Fatalf("same EventID replay after activation enrollments=%v err=%v", enrollments, replayErr)
+	}
+	changedPayload := event
+	changedPayload.CustomerID++
+	if enrollments, replayErr := service.EnrollAudienceMember(ctx, changedPayload); len(enrollments) != 0 || replayErr == nil || !errors.Is(replayErr, automationapp.ErrRuntimeConflict) {
+		t.Fatalf("same EventID with changed payload enrollments=%v err=%v", enrollments, replayErr)
+	}
+
+	newEvent := event
+	newEvent.EventID = "audmem_release_desk_pg_002"
+	enrollments, err := service.EnrollAudienceMember(ctx, newEvent)
+	if err != nil || len(enrollments) != 1 || enrollments[0].CustomerID != int64(newEvent.CustomerID) {
+		t.Fatalf("new EventID enrollments=%+v err=%v", enrollments, err)
+	}
+
+	oldDigest := sha256.Sum256([]byte(event.EventID))
+	newDigest := sha256.Sum256([]byte(newEvent.EventID))
+	var oldEventEnrollments, newEventEnrollments, diagnosticReceipts, totalEnrollments, runs, outboundEffects int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_enrollments WHERE source_event_digest=$1`, oldDigest[:]).Scan(&oldEventEnrollments); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_enrollments WHERE source_event_digest=$1`, newDigest[:]).Scan(&newEventEnrollments); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_enrollments`).Scan(&totalEnrollments); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2`, automationapp.MemberEventMissingPolicyOperation, automationapp.MemberEventDispatchActorScope).Scan(&diagnosticReceipts); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runs`).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM external_effects WHERE owner='outbound'`).Scan(&outboundEffects); err != nil {
+		t.Fatal(err)
+	}
+	if oldEventEnrollments != 0 || newEventEnrollments != 1 || totalEnrollments != 1 || diagnosticReceipts != 1 || runs != 0 || outboundEffects != 0 {
+		t.Fatalf("old/new/total enrollments, diagnostics, runs, outbound effects=%d/%d/%d/%d/%d/%d", oldEventEnrollments, newEventEnrollments, totalEnrollments, diagnosticReceipts, runs, outboundEffects)
 	}
 }
 

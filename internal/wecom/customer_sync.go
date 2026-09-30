@@ -11,6 +11,7 @@ import (
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	outboundport "github.com/qianlan33333-png/AI-CRM-v3/internal/outbound/port"
 	platformaudit "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/audit"
@@ -140,16 +141,19 @@ type CustomerSyncStore interface {
 }
 
 type CustomerSyncService struct {
-	Enabled    bool
-	CorpID     string
-	Provider   wecomport.DirectoryProvider
-	Identity   identityport.VerifiedProvisioner
-	UnionIDs   ContactUnionIDLinker
-	Projection customerport.ProjectionWriter
-	Timeline   customerport.TimelineWriter
-	Store      CustomerSyncStore
-	Outbox     platformoutbox.Service
-	Enqueuer   CustomerSyncJobEnqueuer
+	Enabled               bool
+	CorpID                string
+	UnionIDOpenPlatformID string
+	Provider              wecomport.DirectoryProvider
+	Identity              identityport.VerifiedProvisioner
+	IdentityResolver      identityport.Resolver
+	IdentityLinker        identityport.VerifiedIdentityLinker
+	UnionIDs              ContactUnionIDLinker
+	Projection            customerport.ProjectionWriter
+	Timeline              customerport.TimelineWriter
+	Store                 CustomerSyncStore
+	Outbox                platformoutbox.Service
+	Enqueuer              CustomerSyncJobEnqueuer
 	// DescriptionIntents is optional until the composition root supplies the
 	// Outbound-owned immutable dispatch store. Its nil default preserves the
 	// current read-only directory sync behavior.
@@ -346,7 +350,7 @@ func syncRetryCode(err error) string {
 func (service CustomerSyncService) ingestPage(ctx context.Context, run CustomerSyncRun, staffID string, page wecomport.ExternalContactPage, observedAt time.Time) error {
 	now := service.now()
 	return service.UOW.Within(ctx, func(txContext context.Context) error {
-		var activated, linked, conflicts, terminal, projected int64
+		var activated, linked, conflicts, terminal, projected, descriptionReplanRequired int64
 		for _, contact := range page.Contacts {
 			payload, _ := json.Marshal(contact)
 			item := SyncItem{ExternalUserID: contact.ExternalUserID, ExternalUserIDDigest: sha256.Sum256([]byte(contact.ExternalUserID)),
@@ -363,25 +367,76 @@ func (service CustomerSyncService) ingestPage(ctx context.Context, run CustomerS
 				}
 				continue
 			}
-			provision, provisionErr := service.Identity.ProvisionVerifiedIdentity(txContext, identityport.ProvisionCommand{Fact: fact,
-				IdempotencyKey: "wecom-sync:" + strconv.FormatInt(run.ID, 10) + ":" + itemDigestKey(item.ExternalUserIDDigest)})
-			if provisionErr != nil {
-				return provisionErr
-			}
-			item.CustomerID, item.IdentityID = provision.CustomerID, provision.IdentityID
-			if service.UnionIDs.Ready() {
-				if _, linkErr := service.UnionIDs.Link(txContext, provision.CustomerID, contact.ExternalUserID, contact, "wecom.directory_sync", run.ID); linkErr != nil {
-					return linkErr
+			eventKey := "wecom-sync:" + strconv.FormatInt(run.ID, 10) + ":" + itemDigestKey(item.ExternalUserIDDigest)
+			useEarlyLink := service.IdentityResolver != nil && service.IdentityLinker != nil && service.UnionIDOpenPlatformID != ""
+			var outcome contactIdentityOutcome
+			if useEarlyLink {
+				var unionFact *identitydomain.VerifiedFact
+				if contact.UnionID != "" {
+					verifiedUnion, verifyErr := wecomprovider.VerifiedContactUnionID(contact.ExternalUserID,
+						"wechat-open-platform:"+service.UnionIDOpenPlatformID, "wecom.directory_sync", contact)
+					if verifyErr != nil {
+						item.Outcome, item.ErrorCode = "conflict", "invalid_unionid_contact_pair"
+						inserted, insertErr := service.Store.InsertItem(txContext, run.ID, run.CorpScope, item)
+						if insertErr != nil {
+							return insertErr
+						}
+						if inserted {
+							conflicts++
+						}
+						continue
+					}
+					unionFact = &verifiedUnion
+				}
+				var provisionErr error
+				outcome, provisionErr = resolveOrBindWeComContact(txContext, service.IdentityResolver, service.Identity, service.IdentityLinker,
+					fact, unionFact, eventKey, contactLinkEvidence("wecom.directory_sync", eventKey, item.PayloadDigest))
+				if provisionErr != nil {
+					return provisionErr
+				}
+			} else {
+				provision, provisionErr := service.Identity.ProvisionVerifiedIdentity(txContext, identityport.ProvisionCommand{Fact: fact, IdempotencyKey: eventKey})
+				if provisionErr != nil {
+					return provisionErr
+				}
+				outcome.Provision = provision
+				if service.UnionIDs.Ready() {
+					status, linkErr := service.UnionIDs.Link(txContext, provision.CustomerID, contact.ExternalUserID, contact, "wecom.directory_sync", run.ID)
+					if linkErr != nil {
+						return linkErr
+					}
+					outcome.Conflict = status == "merge_candidate" || status == "conflict"
 				}
 			}
-			if provision.Created {
-				item.Outcome = "activated"
+			provision := outcome.Provision
+			// A cross-root candidate still carries a verified external-contact
+			// root. Keep that root's current profile and Owner observations alive
+			// so reconciliation does not stale a real WeCom contact while human
+			// review is pending. The SyncItem remains a conflict, and this branch
+			// never substitutes the payer/UnionID root for the external root.
+			identityConflictProjection := outcome.Conflict && provision.CustomerID > 0 && provision.IdentityID > 0
+			if outcome.Conflict || provision.CustomerID < 1 || provision.IdentityID < 1 {
+				if !identityConflictProjection {
+					item.CustomerID, item.IdentityID = provision.CustomerID, provision.IdentityID
+					item.Outcome, item.ErrorCode = "conflict", "verified_identity_link_unresolved"
+					inserted, insertErr := service.Store.InsertItem(txContext, run.ID, run.CorpScope, item)
+					if insertErr != nil {
+						return insertErr
+					}
+					if inserted {
+						conflicts++
+					}
+					continue
+				}
+				item.CustomerID, item.IdentityID = provision.CustomerID, provision.IdentityID
+				item.Outcome, item.ErrorCode = "conflict", "verified_identity_link_unresolved"
 			} else {
-				item.Outcome = "already_linked"
-			}
-			inserted, insertErr := service.Store.InsertItem(txContext, run.ID, run.CorpScope, item)
-			if insertErr != nil {
-				return insertErr
+				item.CustomerID, item.IdentityID = provision.CustomerID, provision.IdentityID
+				if provision.Created {
+					item.Outcome = "activated"
+				} else {
+					item.Outcome = "already_linked"
+				}
 			}
 			if err := service.Store.UpsertProfileObservations(txContext, run.ID, run.CorpScope, provision.CustomerID, contact.FollowInfo, observedAt); err != nil {
 				return err
@@ -406,11 +461,27 @@ func (service CustomerSyncService) ingestPage(ctx context.Context, run CustomerS
 						Replan: run.Trigger == "manual", Operation: outboundport.ContactDescriptionOperationWrite,
 					})
 					if enqueueErr != nil {
+						if errors.Is(enqueueErr, outboundport.ErrContactDescriptionReplanRequired) {
+							// Description intents are an optional profile-maintenance
+							// effect. Preserve this exact gap on the sync item and in the
+							// page audit, while allowing the independent directory/OneID
+							// projection to complete. Other failures still roll back the
+							// page because their effect state is not safely ignorable.
+							if item.ErrorCode == "" {
+								item.ErrorCode = "contact_description_replan_required"
+							}
+							descriptionReplanRequired++
+							continue
+						}
 						return enqueueErr
 					}
 				}
 			}
-			if !inserted {
+			inserted, insertErr := service.Store.InsertItem(txContext, run.ID, run.CorpScope, item)
+			if insertErr != nil {
+				return insertErr
+			}
+			if !inserted && !identityConflictProjection {
 				continue
 			}
 			profileDigest := sha256.Sum256(payload)
@@ -434,11 +505,17 @@ func (service CustomerSyncService) ingestPage(ctx context.Context, run CustomerS
 				Type: "customer.directory_profile_projected", Version: 1, IdempotencyKey: "wecom-profile:" + strconv.FormatInt(run.ID, 10) + ":" + itemDigestKey(item.ExternalUserIDDigest), Payload: outboxPayload, OccurredAt: now, Processed: true}); err != nil {
 				return err
 			}
-			projected++
-			if provision.Created {
-				activated++
-			} else {
-				linked++
+			if inserted {
+				if identityConflictProjection {
+					conflicts++
+				} else {
+					projected++
+					if provision.Created {
+						activated++
+					} else {
+						linked++
+					}
+				}
 			}
 		}
 		nextIndex, nextCursor, nextStatus := run.StaffIndex, page.NextCursor, SyncIngesting
@@ -451,9 +528,13 @@ func (service CustomerSyncService) ingestPage(ctx context.Context, run CustomerS
 		if err := service.Store.AddCountsAndAdvance(txContext, run.ID, run.Version, activated, linked, conflicts, terminal, projected, nextIndex, nextCursor, nextStatus); err != nil {
 			return err
 		}
-		_, err := service.Audit.Append(txContext, platformaudit.Event{IdempotencyKey: idempotency.Key("wecom-sync-page:" + strconv.FormatInt(run.ID, 10) + ":" + strconv.Itoa(run.StaffIndex) + ":" + cursorKey(run.ProviderCursor)),
+		pageAuditPayload, err := json.Marshal(map[string]any{"pii": false, "contact_description_replan_required": descriptionReplanRequired})
+		if err != nil {
+			return err
+		}
+		_, err = service.Audit.Append(txContext, platformaudit.Event{IdempotencyKey: idempotency.Key("wecom-sync-page:" + strconv.FormatInt(run.ID, 10) + ":" + strconv.Itoa(run.StaffIndex) + ":" + cursorKey(run.ProviderCursor)),
 			Action: "wecom.customer_sync_page_committed", ActorType: "system", ResourceType: "wecom_customer_sync", ResourceID: strconv.FormatInt(run.ID, 10),
-			Payload: json.RawMessage(`{"pii":false}`), OccurredAt: now})
+			Payload: pageAuditPayload, OccurredAt: now})
 		return err
 	})
 }

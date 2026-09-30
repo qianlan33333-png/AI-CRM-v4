@@ -2168,6 +2168,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	weComProcessor := wecom.InboxProcessor{
 		Enabled: cfg.WeCom.CallbackEnabled, CorpID: cfg.WeCom.CorpID, Inbox: inboxService, UOW: uow,
+		Directory: providerClient, UnionIDOpenPlatformID: cfg.WeCom.UnionIDOpenPlatformID,
 		Lifecycle: wecom.ExternalContactLifecycle{
 			Identity: oneID, Relationships: relationships, States: channelAcquisition, Entrants: channelAcquisition, Actions: channelEntrantActions,
 			Directory: customerStore, Outbox: platformoutbox.NewPostgreSQL(),
@@ -2182,7 +2183,8 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	weComArchiveProcessor := wecom.ArchiveInboxProcessor{Enabled: cfg.WeCom.MessageArchiveEnabled, Inbox: inboxService, UOW: uow, Archive: archiveService}
 	customerSync := wecom.CustomerSyncService{Enabled: cfg.WeCom.CustomerSyncEnabled, CorpID: cfg.WeCom.CorpID, Provider: providerClient,
-		Identity: oneID, UnionIDs: contactUnionIDs, Projection: customerStore, Timeline: customerStore, Store: customerProfileStore, Outbox: platformoutbox.NewPostgreSQL(),
+		UnionIDOpenPlatformID: cfg.WeCom.UnionIDOpenPlatformID, Identity: oneID, IdentityResolver: oneID, IdentityLinker: oneID,
+		UnionIDs: contactUnionIDs, Projection: customerStore, Timeline: customerStore, Store: customerProfileStore, Outbox: platformoutbox.NewPostgreSQL(),
 		Enqueuer: customerSyncEnqueuer, DescriptionSourceCoverage: customerProfileStore, Audit: auditService, UOW: uow}
 	if cfg.WeCom.ContactDescriptionProviderEnabled {
 		customerSync.DescriptionIntents = contactDescriptionIntents
