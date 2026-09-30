@@ -23,7 +23,7 @@ flowchart TD
 ## 复用与分类
 
 - 参考并复用父 brief 的 OneID、Segment 首入和自动话术行为合同；不复制旧仓实现。
-- OneID：读取 Segment 事件提供的 canonical `CustomerID`，以及由可信 paid-order 事实源汇总整个 Identity lineage 得到的 `FirstPaidAt`；不做身份匹配、建客或合并。
+- OneID：读取 Segment 事件提供的 immutable `CustomerID`，并在 Automation 最终 UoW 通过 `LockedCanonicalLineageReader` 锁定当前 canonical root 与全部历史 alias。客户级一次收据以当前 root 为键，同时检查 lineage 中任意 alias 的既有收据和 enrollment；root 后续变化不会绕开历史消费记录。`FirstPaidAt` 由可信 paid-order 事实源汇总整个 Identity lineage；不做身份匹配、建客或合并。
 - Persistence：在 Automation 最终入组 UoW 内复用 `automation_runtime_operation_receipts`，以策略 ID + canonical CustomerID 派生稳定键。它与 enrollment、audit/Outbox 及 Outbound 接受一起提交或回滚；首次读取到该策略任何版本的旧 enrollment 时，会在跳过新入组的同一事务内补全一次收据。无新表或迁移。
 - External Effects：暂缓客户不调用 Outbound/EER。一次触发未消费的新客户沿用既有 Outbound Port；Provider 执行不持有 Automation 数据库锁。
 - 页面影响：无。使用现有受保护策略 PATCH API；`action_config` 已是开放对象，不增加对外接口形状或 OpenAPI 示例。
@@ -35,7 +35,7 @@ flowchart TD
 1. `outbound_message.action_config` 接收可选 `deferred_customer_ids`、`defer_before_first_paid_at` 和 `once_per_customer`。Customer ID 必须为正数且名单无重复；名单按升序规范化后参与版本摘要。时间 cutoff 为规范化 UTC 的可信 timestamp，必须与 `once_per_customer: true` 同时配置。没有该 opt-in 时不改变原有策略行为。
 2. Segment 的 `MemberEnteredV1.FirstPaidAt *time.Time` 由可信付款事实源按完整 OneID lineage 提供目标商品首次 `paid_at`，并随 immutable entered event 持久化/读回。`FirstPaidAt < defer_before_first_paid_at` 时 skip；等于或晚于 cutoff 正常处理。cutoff 启用但事件缺时间/时间为零时 fail closed，留下 `first_paid_at_missing_deferred` skip 及终态收据，禁止用 event/snapshot/sync time 猜测。
 3. 活动策略只有在其余字段不变时才能追加暂缓 ID、单向添加 cutoff，并可从 `once_per_customer: false` 单向启用为 `true`；不得删除已有 ID、修改已配置 cutoff 或关闭一次触发。原活动版本行的最终共享锁保证并发成员事件要么在版本替换前提交，要么在重试后读到新版本。
-4. 一次触发收据按策略 ID + canonical CustomerID 唯一，跨 EventID、Segment snapshot 和策略版本有效。第一次命中 ID/cutoff/缺失时间暂缓时，`skipped` enrollment、事件诊断收据和客户级终态收据在同一 UoW 提交；第一次正常触发时，enrollment、run/recipient、Outbound 接受、审计与客户级收据在同一 UoW 提交。失败回滚后可安全重试。
+4. 一次触发收据按策略 ID + 当前 canonical CustomerID 唯一，跨 EventID、Segment snapshot 和策略版本有效。最终 UoW 锁定完整 Identity lineage 后，会检查每个 alias 的既有客户收据及历史 enrollment；首次消费后再合并到新的 survivor root，仍能从 alias 找回原收据。第一次命中 ID/cutoff/缺失时间暂缓时，`skipped` enrollment、事件诊断收据和客户级终态收据在同一 UoW 提交；第一次正常触发时，enrollment、run/recipient、Outbound 接受、审计与客户级收据在同一 UoW 提交。失败回滚后可安全重试。
 5. 开启一次触发时，如客户在该策略任一版本已存在 enrollment，则新版本不重复创建 run/Outbound，并在同一事务补全客户级消费收据。这覆盖策略切换前已提交的旧版本事件；切换中的旧事件由活动策略行锁确保提交或重试，不会静默落入无策略窗口。
 6. 名单按首次目标商品付款时的好友资格和 canonical payer-root 重算，不能沿用旧的 253 根超集。静态名单无法覆盖筛选时尚未入账、上线后才回填的历史首购记录，因此 cutoff 必须作用于事件所带可信 `FirstPaidAt`；这 46 位首购时合格的历史客户保留为包成员但由 Automation cutoff 暂缓发送。首购时不是指定员工有效好友的客户以后加好友或复购也不改变首次资格。
 7. 列表命中记录 `historical_identity_merge_deferred`；首购早于 cutoff 记录 `historical_first_paid_before_cutoff`；cutoff 开启而事件时间缺失记录 `first_paid_at_missing_deferred`。这三种情况均不建 run、recipient 或 Outbound。已消费的一次触发客户后来离包再入、换 EventID 或跨策略版本重放时不再发送；未启用该选项的策略不受影响。

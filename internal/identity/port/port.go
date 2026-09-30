@@ -28,9 +28,9 @@ type Resolver interface {
 }
 
 // CanonicalLineageReader is the narrow, read-only OneID bridge for domains
-// that retain immutable customer IDs at ingestion.  It returns the current
-// canonical root and only the historical roots which currently resolve to it;
-// callers must not copy merge rules or rewrite their historical facts.
+// that retain immutable customer IDs at ingestion. It returns the current
+// canonical root first, followed by historical roots which currently resolve
+// to it; callers must not copy merge rules or rewrite historical facts.
 type CanonicalLineageReader interface {
 	CanonicalLineage(context.Context, customerdomain.CustomerID) ([]customerdomain.CustomerID, error)
 }
@@ -52,7 +52,8 @@ type TrustedCanonicalCustomerReader interface {
 	HasActiveVerifiedIdentity(context.Context, customerdomain.CustomerID) (bool, error)
 }
 
-// LockedCanonicalLineageReader pins roots against concurrent merge for the caller UoW.
+// LockedCanonicalLineageReader pins roots against concurrent merge for the
+// caller UoW. It preserves CanonicalLineageReader's root-first ordering.
 type LockedCanonicalLineageReader interface {
 	LockedCanonicalLineage(context.Context, customerdomain.CustomerID) ([]customerdomain.CustomerID, error)
 }

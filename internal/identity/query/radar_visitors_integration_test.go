@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -70,6 +71,26 @@ func TestAdminRadarVisitorIdentityProjectionMatchesCanonicalLineageAndFailsClose
 	}
 	assertCanonicalAgreementFailure(t, ctx, uow, reader, "missing", customerdomain.CustomerID(root+999), query.ErrNotFound)
 
+	lowAlias := insertRadarVisitorCustomer(t, native, "active", nil)
+	highSurvivor := insertRadarVisitorCustomer(t, native, "active", nil)
+	if _, err = native.Exec(ctx, `UPDATE customers SET status='merged',merged_into_customer_id=$2,merged_at=CURRENT_TIMESTAMP WHERE id=$1`, lowAlias, highSurvivor); err != nil {
+		t.Fatal(err)
+	}
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		for name, read := range map[string]func(context.Context, customerdomain.CustomerID) ([]customerdomain.CustomerID, error){
+			"canonical": reader.CanonicalLineage,
+			"locked":    reader.LockedCanonicalLineage,
+		} {
+			lineage, readErr := read(tx, customerdomain.CustomerID(lowAlias))
+			if readErr != nil || len(lineage) != 2 || lineage[0] != customerdomain.CustomerID(highSurvivor) || lineage[1] != customerdomain.CustomerID(lowAlias) {
+				return fmt.Errorf("%s high-ID survivor lineage=%v err=%v", name, lineage, readErr)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	if _, err = native.Exec(ctx, `ALTER TABLE customers DROP CONSTRAINT ck_customers_merged_state`); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +113,7 @@ func TestAdminRadarVisitorIdentityProjectionMatchesCanonicalLineageAndFailsClose
 		if readErr != nil {
 			return readErr
 		}
-		if len(lineage) != len(withinBoundary) || lineage[len(lineage)-1] != customerdomain.CustomerID(withinBoundary[len(withinBoundary)-1]) {
+		if len(lineage) != len(withinBoundary) || lineage[0] != customerdomain.CustomerID(withinBoundary[len(withinBoundary)-1]) {
 			t.Fatalf("127-pointer existing lineage root=%v", lineage)
 		}
 		projection, readErr := reader.AdminRadarVisitorIdentities(tx, "wecom-corp:radar-visitor", []customerdomain.CustomerID{customerdomain.CustomerID(withinBoundary[0])})

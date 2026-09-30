@@ -13,6 +13,8 @@ import (
 
 	automationdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/domain"
 	automationport "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/port"
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	outboundport "github.com/qianlan33333-png/AI-CRM-v3/internal/outbound/port"
 	segmentport "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/port"
 )
@@ -56,6 +58,21 @@ type missingPolicyReceiptStore struct {
 	runCalls          int
 	bindEffectCalls   int
 	runtimeFactCalls  int
+}
+
+type memberEventLockedLineageReader struct {
+	lineages map[customerdomain.CustomerID][]customerdomain.CustomerID
+	calls    int
+}
+
+var _ identityport.LockedCanonicalLineageReader = (*memberEventLockedLineageReader)(nil)
+
+func (reader *memberEventLockedLineageReader) LockedCanonicalLineage(_ context.Context, customerID customerdomain.CustomerID) ([]customerdomain.CustomerID, error) {
+	reader.calls++
+	if lineage, found := reader.lineages[customerID]; found {
+		return append([]customerdomain.CustomerID(nil), lineage...), nil
+	}
+	return []customerdomain.CustomerID{customerID}, nil
 }
 
 type memberEventEnrollmentKey struct {
@@ -388,6 +405,9 @@ func TestDeferredCustomerGetsDurableSkippedEnrollmentAndNewPayerStillSends(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = service.SetLockedCanonicalLineageReader(&memberEventLockedLineageReader{}); err != nil {
+		t.Fatal(err)
+	}
 	published := automationport.OutboundPublishedContent{
 		AgentID: automationport.AgentID(configuration.AgentID), PublishedVersion: configuration.AgentPublishedVersion,
 		Content: automationport.FixedContentPackage{ContentText: "member entered"}, ContentDigest: contentDigest,
@@ -555,6 +575,9 @@ func TestOncePerCustomerBackfillsPriorPolicyEnrollment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = service.SetLockedCanonicalLineageReader(&memberEventLockedLineageReader{}); err != nil {
+		t.Fatal(err)
+	}
 	messages := &missingPolicyMessageAccepter{}
 	service.messages = messages
 	service.content = missingPolicyPublishedContent{content: automationport.OutboundPublishedContent{AgentID: 73, PublishedVersion: 2, Content: automationport.FixedContentPackage{ContentText: "member entered"}, ContentDigest: contentDigest}}
@@ -596,6 +619,9 @@ func TestOncePerCustomerBackfillsPriorSkippedEnrollment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = service.SetLockedCanonicalLineageReader(&memberEventLockedLineageReader{}); err != nil {
+		t.Fatal(err)
+	}
 	messages := &missingPolicyMessageAccepter{}
 	service.messages = messages
 	service.content = missingPolicyPublishedContent{content: automationport.OutboundPublishedContent{AgentID: 73, PublishedVersion: 2, Content: automationport.FixedContentPackage{ContentText: "member entered"}, ContentDigest: contentDigest}}
@@ -620,6 +646,77 @@ func TestOncePerCustomerBackfillsPriorSkippedEnrollment(t *testing.T) {
 	}
 	if messages.calls != 0 || store.runCalls != 0 || store.bindEffectCalls != 0 || store.completeCalls != 1 || len(store.receipts) != 1 {
 		t.Fatalf("second skipped-history reentry changed run/outbound/effect/receipt completions/receipts=%d/%d/%d/%d/%d", store.runCalls, messages.calls, store.bindEffectCalls, store.completeCalls, len(store.receipts))
+	}
+}
+
+func TestOncePerCustomerChecksPriorReceiptsAndEnrollmentsAcrossLockedLineage(t *testing.T) {
+	for _, scenario := range []string{"prior_once_receipt", "prior_enrollment"} {
+		t.Run(scenario, func(t *testing.T) {
+			contentDigest := sha256.Sum256([]byte("published outbound content"))
+			configuration := segmentport.ExecutionConfiguration{PackageID: 27, PackageVersion: 3, ConfigurationVersionID: 43, Ready: true, AgentID: 73, AgentPublishedVersion: 2, ContentDigest: contentDigest, BindingVersion: 5, SenderSetVersion: 6, SenderStaffIDs: []int64{17}}
+			approval := int64(17)
+			version := automationdomain.PolicyVersion{
+				ID: 52, PolicyID: 9, Version: 2, PackageID: 27,
+				TriggerKind: automationport.TriggerAudienceMemberEnteredV1, TriggerEnabled: true,
+				ActionKind: automationport.ActionOutboundMessage, ActionConfig: json.RawMessage(`{"agent_id":73,"once_per_customer":true}`),
+				QuietHours: json.RawMessage(`{}`), SingleRunLimit: 10, ApprovalStaffID: &approval,
+				Digest: [32]byte{2}, CreatedBy: approval,
+			}
+			const canonical, formerRoot = customerdomain.CustomerID(8100), customerdomain.CustomerID(8101)
+			store := &missingPolicyReceiptStore{activePolicies: []automationdomain.PolicyVersion{version}, enrollments: map[memberEventEnrollmentKey]automationdomain.Enrollment{}}
+			if scenario == "prior_once_receipt" {
+				keyDigest, payloadDigest, digestErr := customerPolicyOnceReceiptDigests(version.PolicyID, int64(formerRoot))
+				if digestErr != nil {
+					t.Fatal(digestErr)
+				}
+				result, _ := json.Marshal(memberEventCustomerOnceResult{PolicyID: version.PolicyID, PackageID: int64(version.PackageID), Outcome: "enrolled", EnrollmentID: 42})
+				store.receipts = map[[32]byte]RuntimeReceipt{keyDigest: {ID: 1, Operation: MemberEventCustomerOnceOperation, ActorScope: MemberEventDispatchActorScope, State: "completed", KeyDigest: keyDigest, PayloadDigest: payloadDigest, Result: result}}
+			} else {
+				priorEventDigest := sha256.Sum256([]byte("audmem_alias_prior_enrollment"))
+				priorSnapshot, _ := json.Marshal(map[string]any{"action_kind": automationport.ActionOutboundMessage, "package_id": 27, "snapshot_id": 901, "configuration_version_id": 43, "customer_id": formerRoot, "policy_version_id": 51})
+				store.enrollments[memberEventEnrollmentKey{policyVersionID: 51, eventDigest: priorEventDigest, customerID: int64(formerRoot)}] = automationdomain.Enrollment{ID: 42, PolicyID: version.PolicyID, PolicyVersionID: 51, SourceEventDigest: priorEventDigest, CustomerID: int64(formerRoot), ActionKind: automationport.ActionOutboundMessage, ActionSnapshot: priorSnapshot, State: "accepted"}
+			}
+			service, err := NewRuntimeService(directRuntimeUOW{}, store, missingPolicyAudience{configuration: configuration}, missingPolicySnapshots{}, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lineageReader := &memberEventLockedLineageReader{lineages: map[customerdomain.CustomerID][]customerdomain.CustomerID{canonical: {canonical, formerRoot}}}
+			if err = service.SetLockedCanonicalLineageReader(lineageReader); err != nil {
+				t.Fatal(err)
+			}
+			messages := &missingPolicyMessageAccepter{}
+			service.messages = messages
+			service.content = missingPolicyPublishedContent{content: automationport.OutboundPublishedContent{AgentID: 73, PublishedVersion: 2, Content: automationport.FixedContentPackage{ContentText: "member entered"}, ContentDigest: contentDigest}}
+			service.contentFreezer = missingPolicyContentFreezer{}
+			event := segmentport.MemberEnteredV1{EventID: "audmem_alias_lineage_reentry_001", PackageID: 27, SnapshotID: 905, ConfigurationVersionID: 43, CustomerID: canonical, OccurredAt: time.Date(2026, 9, 30, 11, 0, 0, 0, time.UTC)}
+			if enrollments, dispatchErr := service.EnrollAudienceMember(context.Background(), event); dispatchErr != nil || len(enrollments) != 0 {
+				t.Fatalf("lineage reentry enrollments=%+v err=%v", enrollments, dispatchErr)
+			}
+			if lineageReader.calls != 1 || messages.calls != 0 || store.runCalls != 0 || store.bindEffectCalls != 0 {
+				t.Fatalf("lineage lookups/outbound/run/effect=%d/%d/%d/%d", lineageReader.calls, messages.calls, store.runCalls, store.bindEffectCalls)
+			}
+			canonicalKey, canonicalPayload, digestErr := customerPolicyOnceReceiptDigests(version.PolicyID, int64(canonical))
+			if digestErr != nil {
+				t.Fatal(digestErr)
+			}
+			if scenario == "prior_once_receipt" {
+				if store.reserveCalls != 0 || store.completeCalls != 0 || len(store.receipts) != 1 {
+					t.Fatalf("alias once receipt was not treated as terminal: reserve/complete/receipts=%d/%d/%d", store.reserveCalls, store.completeCalls, len(store.receipts))
+				}
+				if _, found, readErr := store.RuntimeReceipt(context.Background(), MemberEventCustomerOnceOperation, MemberEventDispatchActorScope, canonicalKey, canonicalPayload); readErr != nil || found {
+					t.Fatalf("alias receipt unexpectedly copied to current root: found=%v err=%v", found, readErr)
+				}
+			} else {
+				if store.reserveCalls != 1 || store.completeCalls != 1 || len(store.receipts) != 1 {
+					t.Fatalf("alias prior enrollment receipt reserve/complete/receipts=%d/%d/%d", store.reserveCalls, store.completeCalls, len(store.receipts))
+				}
+				receipt, found, readErr := store.RuntimeReceipt(context.Background(), MemberEventCustomerOnceOperation, MemberEventDispatchActorScope, canonicalKey, canonicalPayload)
+				var result memberEventCustomerOnceResult
+				if readErr != nil || !found || json.Unmarshal(receipt.Result, &result) != nil || result.Outcome != "prior_enrollment" || result.EnrollmentID != 42 {
+					t.Fatalf("alias enrollment was not backfilled under current canonical root: receipt=%+v found=%v err=%v", receipt, found, readErr)
+				}
+			}
+		})
 	}
 }
 
@@ -720,6 +817,9 @@ func TestMemberEventVersionChangeDuringDispatchRetriesAgainstCurrentPolicy(t *te
 	store := &missingPolicyReceiptStore{policyReads: [][]automationdomain.PolicyVersion{{version1}, {version2}}}
 	service, err := NewRuntimeService(directRuntimeUOW{}, store, missingPolicyAudience{configuration: configuration}, missingPolicySnapshots{}, 10)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.SetLockedCanonicalLineageReader(&memberEventLockedLineageReader{}); err != nil {
 		t.Fatal(err)
 	}
 	published := automationport.OutboundPublishedContent{

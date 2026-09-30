@@ -23,6 +23,7 @@ import (
 	automationport "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/port"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	outboundport "github.com/qianlan33333-png/AI-CRM-v3/internal/outbound/port"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
@@ -90,6 +91,19 @@ type automationIntegrationMessageAccepter struct {
 	mu       sync.Mutex
 	calls    int
 	failNext bool
+}
+
+type automationIntegrationLineageReader struct {
+	lineages map[customerdomain.CustomerID][]customerdomain.CustomerID
+}
+
+var _ identityport.LockedCanonicalLineageReader = automationIntegrationLineageReader{}
+
+func (reader automationIntegrationLineageReader) LockedCanonicalLineage(_ context.Context, customerID customerdomain.CustomerID) ([]customerdomain.CustomerID, error) {
+	if lineage, ok := reader.lineages[customerID]; ok {
+		return append([]customerdomain.CustomerID(nil), lineage...), nil
+	}
+	return []customerdomain.CustomerID{customerID}, nil
 }
 
 func (accepter *automationIntegrationMessageAccepter) AcceptMessageWithin(ctx context.Context, _ outboundport.MessageIntent) (outboundport.MessageAcceptance, error) {
@@ -792,6 +806,13 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	lineage := []customerdomain.CustomerID{87654322, 87654323}
+	if err = service.SetLockedCanonicalLineageReader(automationIntegrationLineageReader{lineages: map[customerdomain.CustomerID][]customerdomain.CustomerID{
+		87654322: lineage,
+		87654323: lineage,
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	contentDigest := sha256.Sum256([]byte("published automation content"))
 	content := automationIntegrationPublishedContent{content: automationport.OutboundPublishedContent{
 		AgentID: 73, PublishedVersion: 2, Content: automationport.FixedContentPackage{ContentText: "member entered"}, ContentDigest: contentDigest,
@@ -869,7 +890,7 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 
 	concurrentEvents := []segmentport.MemberEnteredV1{
 		makeEvent("audmem_once_concurrent_001", 87654322, 903),
-		makeEvent("audmem_once_concurrent_002", 87654322, 904),
+		makeEvent("audmem_once_concurrent_002", 87654323, 904),
 	}
 	type dispatchResult struct {
 		enrollments []automationdomain.Enrollment
@@ -905,6 +926,9 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 	if acceptedEvents != 1 {
 		t.Fatalf("concurrent distinct EventIDs accepted %d enrollments, want exactly one", acceptedEvents)
 	}
+	if replay, replayErr := service.EnrollAudienceMember(ctx, makeEvent("audmem_once_concurrent_replay_003", 87654323, 905)); replayErr != nil || len(replay) != 0 {
+		t.Fatalf("later alias EventID replay enrollments=%+v err=%v", replay, replayErr)
+	}
 
 	var onceReceipts, incompleteReceipts, enrollments, runs int
 	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2`, automationapp.MemberEventCustomerOnceOperation, automationapp.MemberEventDispatchActorScope).Scan(&onceReceipts); err != nil {
@@ -921,6 +945,24 @@ func TestPostgreSQLOncePerCustomerReceiptIsAtomicAndSerializesReentry(t *testing
 	}
 	if onceReceipts != 2 || incompleteReceipts != 0 || enrollments != 2 || runs != 2 {
 		t.Fatalf("once receipts/incomplete/enrollments/runs=%d/%d/%d/%d; want 2/0/2/2", onceReceipts, incompleteReceipts, enrollments, runs)
+	}
+	for customerID, want := range map[int64]int{87654322: 1, 87654323: 0} {
+		payload, marshalErr := json.Marshal(struct {
+			PolicyID   int64 `json:"policy_id"`
+			CustomerID int64 `json:"customer_id"`
+		}{PolicyID: created.ID, CustomerID: customerID})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		keyDigest := sha256.Sum256([]byte(automationapp.MemberEventCustomerOnceOperation + ":" + strconv.FormatInt(created.ID, 10) + ":" + strconv.FormatInt(customerID, 10)))
+		payloadDigest := sha256.Sum256(payload)
+		var count int
+		if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation=$1 AND actor_scope=$2 AND key_digest=$3 AND payload_digest=$4`, automationapp.MemberEventCustomerOnceOperation, automationapp.MemberEventDispatchActorScope, keyDigest[:], payloadDigest[:]).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != want {
+			t.Fatalf("once receipt count for current canonical root %d=%d, want %d", customerID, count, want)
+		}
 	}
 	messages.mu.Lock()
 	acceptCalls := messages.calls

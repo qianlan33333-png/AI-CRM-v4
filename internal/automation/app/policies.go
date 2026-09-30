@@ -18,6 +18,7 @@ import (
 	configport "github.com/qianlan33333-png/AI-CRM-v3/internal/config/port"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	outboundport "github.com/qianlan33333-png/AI-CRM-v3/internal/outbound/port"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 	segmentport "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/port"
@@ -82,6 +83,7 @@ type RuntimeService struct {
 	store             RuntimeStore
 	audiences         segmentport.ExecutionConfigurationReader
 	snapshots         segmentport.SnapshotReader
+	identityLineage   identityport.LockedCanonicalLineageReader
 	messages          outboundport.TransactionalMessageAccepter
 	effects           effectport.TransactionalReconciler
 	reviewPlans       reviewPlanGateway
@@ -186,6 +188,17 @@ func (s *RuntimeService) SetMessageAccepter(messages outboundport.TransactionalM
 		return ErrRuntimeNotReady
 	}
 	s.messages = messages
+	return nil
+}
+
+// SetLockedCanonicalLineageReader binds the read-only OneID seam used by
+// once-per-customer enrollment. Production must provide it before serving
+// member events; the final enrollment UoW holds these locks through commit.
+func (s *RuntimeService) SetLockedCanonicalLineageReader(reader identityport.LockedCanonicalLineageReader) error {
+	if s == nil || reader == nil {
+		return ErrRuntimeNotReady
+	}
+	s.identityLineage = reader
 	return nil
 }
 
@@ -653,6 +666,60 @@ func (s *RuntimeService) customerPolicyOnceReceiptWithin(ctx context.Context, po
 	return true, nil
 }
 
+func (s *RuntimeService) lockedCanonicalLineageWithin(ctx context.Context, customerID customerdomain.CustomerID) ([]customerdomain.CustomerID, error) {
+	if s == nil || s.identityLineage == nil {
+		return nil, ErrRuntimeNotReady
+	}
+	lineage, err := s.identityLineage.LockedCanonicalLineage(ctx, customerID)
+	if err != nil {
+		return nil, ErrRuntimeUnavailable
+	}
+	if len(lineage) == 0 || lineage[0] < 1 {
+		return nil, ErrRuntimeConflict
+	}
+	seen := make(map[customerdomain.CustomerID]struct{}, len(lineage))
+	containsRequested := false
+	for _, id := range lineage {
+		if id < 1 {
+			return nil, ErrRuntimeConflict
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return nil, ErrRuntimeConflict
+		}
+		seen[id] = struct{}{}
+		containsRequested = containsRequested || id == customerID
+	}
+	if !containsRequested {
+		return nil, ErrRuntimeConflict
+	}
+	return lineage, nil
+}
+
+func (s *RuntimeService) customerPolicyOnceReceiptForLineageWithin(ctx context.Context, policyID int64, lineage []customerdomain.CustomerID) (bool, error) {
+	for _, customerID := range lineage {
+		consumed, err := s.customerPolicyOnceReceiptWithin(ctx, policyID, int64(customerID))
+		if err != nil || consumed {
+			return consumed, err
+		}
+	}
+	return false, nil
+}
+
+func (s *RuntimeService) customerPolicyEnrollmentForLineageWithin(ctx context.Context, policyID int64, lineage []customerdomain.CustomerID) (automationdomain.Enrollment, bool, error) {
+	var selected automationdomain.Enrollment
+	found := false
+	for _, customerID := range lineage {
+		enrollment, exists, err := s.store.CustomerPolicyEnrollment(ctx, policyID, int64(customerID))
+		if err != nil {
+			return automationdomain.Enrollment{}, false, err
+		}
+		if exists && (!found || enrollment.ID < selected.ID) {
+			selected, found = enrollment, true
+		}
+	}
+	return selected, found, nil
+}
+
 func (s *RuntimeService) reserveCustomerPolicyOnceWithin(ctx context.Context, policyID, customerID int64, now time.Time) (RuntimeReceipt, bool, error) {
 	keyDigest, payloadDigest, err := customerPolicyOnceReceiptDigests(policyID, customerID)
 	if err != nil {
@@ -1018,6 +1085,23 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 			// retries it against the current active version set.
 			return ErrRuntimeNotReady
 		}
+		onceLineage := []customerdomain.CustomerID{event.CustomerID}
+		onceCanonicalCustomerID := event.CustomerID
+		for _, version := range versions {
+			once, onceErr := policyOncePerCustomer(version)
+			if onceErr != nil {
+				return onceErr
+			}
+			if !once {
+				continue
+			}
+			onceLineage, e = s.lockedCanonicalLineageWithin(tx, event.CustomerID)
+			if e != nil {
+				return e
+			}
+			onceCanonicalCustomerID = onceLineage[0]
+			break
+		}
 		for _, v := range versions {
 			recorded, receiptErr := s.deferredReceiptWithin(tx, v.PolicyID, event)
 			if receiptErr != nil {
@@ -1052,12 +1136,12 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 					return ErrRuntimeConflict
 				}
 				if once {
-					consumed, receiptErr := s.customerPolicyOnceReceiptWithin(tx, v.PolicyID, int64(event.CustomerID))
+					consumed, receiptErr := s.customerPolicyOnceReceiptForLineageWithin(tx, v.PolicyID, onceLineage)
 					if receiptErr != nil {
 						return receiptErr
 					}
 					if !consumed {
-						receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(event.CustomerID), now)
+						receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(onceCanonicalCustomerID), now)
 						if reserveErr != nil {
 							return reserveErr
 						}
@@ -1073,19 +1157,19 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 			}
 			var onceReceipt *RuntimeReceipt
 			if once {
-				consumed, receiptErr := s.customerPolicyOnceReceiptWithin(tx, v.PolicyID, int64(event.CustomerID))
+				consumed, receiptErr := s.customerPolicyOnceReceiptForLineageWithin(tx, v.PolicyID, onceLineage)
 				if receiptErr != nil {
 					return receiptErr
 				}
 				if consumed {
 					continue
 				}
-				priorEnrollment, found, lookupErr := s.store.CustomerPolicyEnrollment(tx, v.PolicyID, int64(event.CustomerID))
+				priorEnrollment, found, lookupErr := s.customerPolicyEnrollmentForLineageWithin(tx, v.PolicyID, onceLineage)
 				if lookupErr != nil {
 					return lookupErr
 				}
 				if found {
-					receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(event.CustomerID), now)
+					receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(onceCanonicalCustomerID), now)
 					if reserveErr != nil {
 						return reserveErr
 					}
@@ -1097,7 +1181,7 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 					continue
 				}
 				if deferredByPolicy[v.PolicyID] {
-					receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(event.CustomerID), now)
+					receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(onceCanonicalCustomerID), now)
 					if reserveErr != nil {
 						return reserveErr
 					}
@@ -1108,7 +1192,7 @@ func (s *RuntimeService) EnrollAudienceMember(ctx context.Context, event segment
 					}
 					continue
 				}
-				receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(event.CustomerID), now)
+				receipt, owned, reserveErr := s.reserveCustomerPolicyOnceWithin(tx, v.PolicyID, int64(onceCanonicalCustomerID), now)
 				if reserveErr != nil {
 					return reserveErr
 				}

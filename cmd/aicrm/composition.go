@@ -789,6 +789,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
+	if err = automationRuntime.SetLockedCanonicalLineageReader(queries); err != nil {
+		return fail(err)
+	}
 	if err = automationRuntime.SetMessageAccepter(outboundMessages); err != nil {
 		return fail(err)
 	}

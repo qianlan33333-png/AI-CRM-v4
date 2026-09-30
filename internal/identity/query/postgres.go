@@ -104,9 +104,10 @@ func NewPostgreSQL(phoneVault ...*identitysecure.PhoneVault) PostgreSQL {
 	return store
 }
 
-// CanonicalLineage returns the canonical root and records which are currently
-// merged into it. It reads only Identity-owned customer merge state and is
-// intentionally a stable read Port rather than an Archive-side table join.
+// CanonicalLineage returns the canonical root first, followed by records which
+// are currently merged into it. It reads only Identity-owned customer merge
+// state and is intentionally a stable read Port rather than a cross-domain
+// table join.
 func (PostgreSQL) CanonicalLineage(ctx context.Context, customerID customerdomain.CustomerID) ([]customerdomain.CustomerID, error) {
 	if customerID < 1 {
 		return nil, ErrInvalidQuery
@@ -154,7 +155,7 @@ func (PostgreSQL) CanonicalLineage(ctx context.Context, customerID customerdomai
 		SELECT customer.id, descendants.visited||customer.id, customer.id=ANY(descendants.visited)
 		FROM descendants JOIN customers customer ON customer.merged_into_customer_id=descendants.id
 		WHERE customer.status='merged' AND NOT descendants.cycle
-	) SELECT id,cycle FROM descendants ORDER BY id`, current)
+	) SELECT id,cycle FROM descendants ORDER BY CASE WHEN id=$1::bigint THEN 0 ELSE 1 END, id`, current)
 	if err != nil {
 		return nil, fmt.Errorf("query canonical descendants: %w", err)
 	}
