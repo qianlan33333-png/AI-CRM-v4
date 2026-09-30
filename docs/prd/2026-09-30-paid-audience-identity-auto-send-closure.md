@@ -1,12 +1,13 @@
 # 商品 334465678：付款身份、人群增量与自动话术闭环
 
+- **现行合同提示：** 本文下方的生产诊断数据与首次方案流程图是初始调查时点的历史记录。用户随后明确把资格改为“本次付款时是否已是 HuangYouCan 好友”，并要求已有包成员后续合格付款可产生独立 durable event；当前资格、`member_paid_qualified`、cutoff、once 和操作切换合同以[人群包 #27 付款时好友 PRD](2026-09-30-package27-friend-at-payment.md)为准，覆盖本文早期仅新成员 `member_entered` 触发的规则。旧的 88 人首购统计不得作为当前资格或发送结论。
 - 状态：本任务已授权实施；生产配置和真实发送须逐项读回。
 - 原始诊断基线：V4 国内 `main@195a5bb9d46f341ae8d57fdc65e58af9da007ede`；最终候选重放到累计预发基线 `d0023676d6d366a07fdeb5ec47a34b3c68dc2441`。旧 `AI-CRM` 仅作行为参考，不作代码或运行时来源。
 - 当前生产只读事实（2026-09-30）：包 #27 为 `every_3m`、`paid_order(product=334465678, require_active_wecom_contact=true)`，29 名成员、29 条进入事件；固定话术 Agent #14 active；`automation_policies`、enrollment、run、自动发送 intent 均为 0。9 月 29 日付款 122 与包 26 的差额中，33 名已有企微目录活跃 Owner 观察但缺 follow 表行，另 63 名付款 Customer 根未对应到企微档案；此前只读 Provider 比对有 62 名的 scoped UnionID 精确候选，1 名未确认。9 月 23–29 日 daily 目录同步均因可选联系人备注意图返回 `contact description explicit replan required` 而终态失败；9 月 29 日手动同步成功。
 - 同日稍后只读复核：包当前快照有 31 名成员，sender set #5 仅含内部 staff #45 (`huangyoucan`)；企微 `/cgi-bin/user/get` 对大小写两种输入均返回 canonical `userid=HuangYouCan`，对应内部 staff #10。31 名中与 staff #10 有效跟进的为 6 名，staff #45 为 0 名；31 名均至少有其他有效跟进。应把发送人集合换为 staff #10，并对其余目标的该账号发送资格单独核验，不能因为客户有其他员工跟进就假定黄有璨可发送。
 - 生产运行配置只读复核：付款 OAuth Open Platform scope 已配置，企微身份链路读取的 `AICRM_WECOM_UNIONID_OPEN_PLATFORM_ID` 尚未配置。预发和生产在启用身份关联前，须核实两路 Provider 身份属于同一个开放平台，并设置企微 scope；只看到配置字符串相同不足以证明 Provider 关联成功。此项由发布指挥台在准确候选晋级时处理。
 
-## 业务判断
+## 初始诊断流程（历史记录；现行规则见上方补充 PRD）
 
 ```mermaid
 flowchart TD

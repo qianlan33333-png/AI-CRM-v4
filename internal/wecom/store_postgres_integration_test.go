@@ -248,7 +248,7 @@ func TestPostgreSQLWeComStoresIntegration(t *testing.T) {
 		var callbackContacts []wecomport.AudienceContact
 		if err := unit.Within(ctx, func(txContext context.Context) error {
 			var readErr error
-			callbackContacts, readErr = store.AudienceContactsForCustomers(txContext, base.Add(time.Minute), []customerdomain.CustomerID{customerdomain.CustomerID(customerID)})
+			callbackContacts, readErr = store.AudienceContactsForCustomers(txContext, time.Now().UTC().Add(time.Hour), []customerdomain.CustomerID{customerdomain.CustomerID(customerID)})
 			return readErr
 		}); err != nil {
 			t.Fatal(err)
@@ -1232,6 +1232,6 @@ func wecomMigrationPaths(t *testing.T) []string {
 		filepath.Join(root, "migrations", "0093_customer_tag_commands.sql"),
 		filepath.Join(root, "migrations", "0153_wecom_customer_detail_projection.sql"),
 		filepath.Join(root, "migrations", "0171_wecom_contact_description_source_coverage.sql"),
-		filepath.Join(root, "migrations", "0212_wecom_followed_at.sql"),
+		filepath.Join(root, "migrations", "0213_wecom_followed_at.sql"),
 	}
 }

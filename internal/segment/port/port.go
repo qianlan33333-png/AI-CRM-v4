@@ -85,7 +85,7 @@ type MemberPage struct {
 }
 
 type MemberEventPage struct {
-	Items      []MemberEnteredV1
+	Items      []MemberEventV1
 	NextCursor string
 }
 

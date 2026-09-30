@@ -1404,7 +1404,7 @@ func TestPostgreSQLPaidAudienceOrdersUsePayerAndPaymentEvidence(t *testing.T) {
 	// is what reaches the audience. A partial refund is never paid-only.
 	insert("payer", "paid", 101, 202, 0, &paidOutside)
 	insert("partial", "partially_refunded", 303, 303, 40, &paidOutside)
-	insert("closed-after-paid", "closed", 505, 505, 100, &paidOutside)
+	insert("closed-after-paid", "closed", 505, 505, 0, &paidOutside)
 	// This historical paid row has no payment-time evidence. It remains
 	// eligible for an unbounded paid audience but has a nil timestamp for the
 	// template's half-open time window to reject.

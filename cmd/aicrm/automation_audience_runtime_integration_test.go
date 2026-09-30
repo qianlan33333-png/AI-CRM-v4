@@ -43,9 +43,11 @@ import (
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	externaleffects "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
 	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	identityquery "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/query"
+	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
 	mediaapp "github.com/qianlan33333-png/AI-CRM-v3/internal/media/app"
 	mediastore "github.com/qianlan33333-png/AI-CRM-v3/internal/media/store"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/outbound"
@@ -54,6 +56,7 @@ import (
 	platformjobqueue "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/jobqueue"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/segment"
+	segmentadapter "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/adapter"
 	segmentapp "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/app"
 	segmentcompiler "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/compiler"
 	segmentdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/domain"
@@ -210,7 +213,9 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	customerIDs := automationAudienceInsertProviderCustomers(t, ctx, native)
 	source := &automationAudienceSource{}
 	source.Set(customerIDs[:1])
-	evaluator, err := segmentapp.NewEvaluator(segmentcompiler.Compiler{}, source, automationAudienceCanonical{})
+	evaluator, err := segmentapp.NewEvaluator(segmentcompiler.Compiler{}, source, segmentadapter.CanonicalCustomers{
+		UoW: uow, Resolver: canonicalCustomerAdapter{reader: identityquery.NewPostgreSQL()},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,6 +327,9 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = runtimeService.SetLockedCanonicalLineageReader(identityquery.NewPostgreSQL()); err != nil {
+		t.Fatal(err)
+	}
 	if err = runtimeService.SetRuntimeConfig(runtimeConfig, runtimeConfig); err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +345,7 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	if err = runtimeService.SetEffectReconciler(effects); err != nil {
 		t.Fatal(err)
 	}
-	if err = memberWorker.Bind(snapshots, automationAudienceEnrollmentSink{runtime: runtimeService}); err != nil {
+	if err = memberWorker.Bind(snapshots, automationMemberEventSink{runtime: runtimeService}); err != nil {
 		t.Fatal(err)
 	}
 	if err = effectWorker.BindRepository(effects); err != nil {
@@ -719,30 +727,262 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 		return exits == 1 && entered == 0 && intents == 2 && wecomServer.Calls() == 4
 	})
 	stopRuntime()
+	automationAudiencePaidQualifiedJourney(t, ctx, native, uow, segmentRepo, source, snapshots, staffID, agent, publishedAgent, execution, runtimeService, runtime, wecomServer, provider, frozenPayloads, now)
 }
 
 type automationAudienceSource struct {
-	mu  sync.RWMutex
-	ids []customerdomain.CustomerID
+	mu        sync.RWMutex
+	ids       []customerdomain.CustomerID
+	paidFacts map[customerdomain.CustomerID]segmentport.PaidOrderFact
 }
 
 func (s *automationAudienceSource) Set(ids []customerdomain.CustomerID) {
 	s.mu.Lock()
 	s.ids = append([]customerdomain.CustomerID(nil), ids...)
+	s.paidFacts = nil
+	s.mu.Unlock()
+}
+
+func (s *automationAudienceSource) SetQualified(ids []customerdomain.CustomerID, facts map[customerdomain.CustomerID]segmentport.PaidOrderFact) {
+	s.mu.Lock()
+	s.ids = append([]customerdomain.CustomerID(nil), ids...)
+	s.paidFacts = make(map[customerdomain.CustomerID]segmentport.PaidOrderFact, len(facts))
+	for id, fact := range facts {
+		s.paidFacts[id] = fact
+	}
 	s.mu.Unlock()
 }
 
 func (s *automationAudienceSource) Evaluate(_ context.Context, _ segmentport.Definition, reference time.Time) (segmentport.Evaluation, error) {
 	s.mu.RLock()
 	ids := append([]customerdomain.CustomerID(nil), s.ids...)
+	facts := make(map[customerdomain.CustomerID]segmentport.PaidOrderFact, len(s.paidFacts))
+	for id, fact := range s.paidFacts {
+		facts[id] = fact
+	}
 	s.mu.RUnlock()
-	return segmentport.Evaluation{CustomerIDs: ids, ReferenceAt: reference.UTC()}, nil
+	if len(facts) == 0 {
+		facts = nil
+	}
+	return segmentport.Evaluation{CustomerIDs: ids, QualifiedPaidOrder: facts, ReferenceAt: reference.UTC()}, nil
 }
 
 type automationAudienceCanonical struct{}
 
 func (automationAudienceCanonical) CanonicalCustomers(_ context.Context, ids []customerdomain.CustomerID) ([]customerdomain.CustomerID, error) {
 	return ids, nil
+}
+
+func automationAudiencePaidQualifiedJourney(t *testing.T, ctx context.Context, native *pgxpool.Pool, uow *platformpostgres.UnitOfWork, segmentRepo *segmentstore.Repository, source *automationAudienceSource, snapshots *segmentapp.SnapshotService, staffID int64, agent automationport.Agent, publishedAgent automationport.PublishedAgent, execution *segmentapp.ExecutionService, runtimeService *automationapp.RuntimeService, runtime *platformjobqueue.Runtime, wecomServer *automationAudienceWeComServer, provider *automationAudienceRecordingProvider, frozenPayloads *automationAudienceFrozenPayloadRecorder, now time.Time) {
+	cutoff := time.Date(2026, 9, 30, 9, 0, 0, 0, time.UTC)
+	definition, err := segmentapp.CanonicalDefinition(json.RawMessage(`{"schema_version":1,"template_key":"paid_order","parameters":{"product_codes":["334465678"],"paid_at_from":"","paid_at_to":"","owner_scope":"all","owner_staff_ids":[],"require_active_wecom_contact":true,"require_wecom_friend_at_paid_time":true,"friend_owner_staff_ids":["10"]}}`))
+	if err != nil {
+		t.Fatalf("canonical paid/friend definition: %v", err)
+	}
+	packageID := automationAudiencePackageWithDefinition(t, ctx, uow, segmentRepo, now, "paid-friend-at-payment", definition)
+	combined := automationAudienceCombinedDigest(publishedAgent.ContentDigest, publishedAgent.MaterialsDigest)
+	binding, err := execution.PutBinding(ctx, segmentapp.BindingCommand{PackageID: packageID, ExpectedPackageVersion: 2, AgentID: agent.ID, ExpectedPublishedVersion: publishedAgent.PublishedVersion, ExpectedAgentDigest: combined, Actor: staffID, IdempotencyKey: "paid-friend-binding-0001"})
+	if err != nil || binding.ID < 1 {
+		t.Fatalf("paid/friend binding=%+v err=%v", binding, err)
+	}
+	if _, err = execution.ReplaceSenders(ctx, segmentapp.SendersCommand{PackageID: packageID, ExpectedPackageVersion: 3, ProviderMemberIDs: []string{"sender-a"}, Actor: staffID, IdempotencyKey: "paid-friend-senders-0001"}); err != nil {
+		t.Fatalf("paid/friend sender set: %v", err)
+	}
+	actionConfig, err := json.Marshal(map[string]any{"agent_id": agent.ID, "once_per_customer": true, "defer_before_paid_at": cutoff.Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatalf("paid/friend policy create: %v", err)
+	}
+	approval := staffID
+	policy, err := runtimeService.CreatePolicy(ctx, automationapp.PolicyCommand{
+		Code: "paid-friend-at-payment", Name: "Paid friend at payment", PackageID: segmentport.PackageID(packageID),
+		TriggerKind: automationport.TriggerAudienceMemberEnteredV1, ActionKind: automationport.ActionOutboundMessage,
+		ActionConfig: actionConfig, QuietHours: automationAudienceNonBlockingQuietHours(time.Now()), SingleRunLimit: 100,
+		ApprovalStaffID: &approval, Actor: staffID, IdempotencyKey: "paid-friend-policy-0001",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	customers := automationAudienceInsertProviderCustomersWithExternalIDs(t, ctx, native, []string{"runtime-paid-friend-1"})
+	source.Set(nil)
+	stop := automationAudienceStartRuntime(t, runtime)
+	defer stop()
+	baseline, err := snapshots.AcceptRefresh(ctx, segmentapp.RefreshCommand{PackageID: packageID, Actor: staffID, IdempotencyKey: "paid-friend-baseline-0001", ReferenceTime: cutoff.Add(-2 * time.Hour)})
+	if err != nil || baseline.RiverJobID == nil {
+		t.Fatalf("paid/friend baseline=%+v err=%v", baseline, err)
+	}
+	automationAudienceEventually(t, "paid/friend empty baseline", func() bool {
+		item, found, readErr := snapshots.PublishedSnapshot(ctx, segmentport.PackageID(packageID))
+		return readErr == nil && found && item.MemberCount == 0
+	})
+	if precheck, precheckErr := execution.Precheck(ctx, packageID); precheckErr != nil || !precheck.Ready {
+		t.Fatalf("paid/friend precheck=%+v err=%v", precheck, precheckErr)
+	}
+	if _, err = runtimeService.TransitionPolicy(ctx, automationapp.PolicyLifecycleCommand{PolicyID: policy.ID, ExpectedVersion: policy.Version, Actor: staffID, Target: automationdomain.PolicyActive, IdempotencyKey: "paid-friend-policy-activate-0001"}); err != nil {
+		t.Fatalf("activate paid/friend policy: %v", err)
+	}
+
+	oldPaidAt := cutoff.Add(-time.Hour)
+	source.SetQualified([]customerdomain.CustomerID{customers[0]}, map[customerdomain.CustomerID]segmentport.PaidOrderFact{customers[0]: {PaidOrderID: 701, PaidAt: oldPaidAt}})
+	oldRefresh, err := snapshots.AcceptRefresh(ctx, segmentapp.RefreshCommand{PackageID: packageID, Actor: staffID, IdempotencyKey: "paid-friend-old-paid-0001", ReferenceTime: cutoff.Add(-30 * time.Minute)})
+	if err != nil || oldRefresh.RiverJobID == nil {
+		t.Fatalf("accept historical paid event=%+v err=%v", oldRefresh, err)
+	}
+	automationAudienceEventually(t, "historical payment is skipped without a send", func() bool {
+		var members, entered, skipped, intents int
+		if native.QueryRow(ctx, `SELECT count(*) FROM segment_audience_snapshot_members WHERE snapshot_id=(SELECT published_snapshot_id FROM segment_audience_packages WHERE id=$1) AND customer_id=$2`, packageID, customers[0]).Scan(&members) != nil || members != 1 {
+			return false
+		}
+		if native.QueryRow(ctx, `SELECT count(*) FROM segment_audience_member_events WHERE package_id=$1 AND event_kind='audience.member_entered.v1' AND customer_id=$2`, packageID, customers[0]).Scan(&entered) != nil || entered != 1 {
+			return false
+		}
+		if native.QueryRow(ctx, `SELECT count(*) FROM automation_enrollments WHERE policy_id=$1 AND state='skipped'`, policy.ID).Scan(&skipped) != nil || skipped != 1 {
+			return false
+		}
+		if native.QueryRow(ctx, `SELECT count(*) FROM outbound_message_intents intent JOIN automation_enrollments enrollment ON enrollment.id=intent.source_id WHERE enrollment.policy_id=$1`, policy.ID).Scan(&intents) != nil {
+			return false
+		}
+		return intents == 0
+	})
+
+	// Use the production OneID application/store to merge the two verified
+	// identity roots only after the historical skip is committed. The survivor
+	// owns the active WeCom contact; the alias carries a different verified
+	// first-party identity, matching the allowed OneID merge contract.
+	identities := identityapp.OneIDService{Store: identitystore.NewPostgresStore()}
+	aliasFact, err := identitydomain.NewVerifiedFact(identitydomain.ProviderVerifiedIdentityInput{Kind: identitydomain.KindFirstPartyMemberID, Scope: "first-party:runtime", Value: "runtime-paid-friend-member-1", Source: "runtime-paid-friend-journey"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var aliasCustomer customerdomain.CustomerID
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		provisioned, provisionErr := identities.ProvisionCustomerFromVerifiedIdentity(tx, aliasFact)
+		aliasCustomer = provisioned.CustomerID
+		return provisionErr
+	}); err != nil || aliasCustomer < 1 {
+		t.Fatalf("provision verified alias identity id=%d err=%v", aliasCustomer, err)
+	}
+	evidence := identitydomain.LinkEvidence{Type: "test", Strength: identitydomain.EvidenceStrong, Source: "runtime.paid.friend.journey", EventID: "paid-friend-merge", Digest: "paid-friend-merge-evidence", PolicyVersion: "test-v1"}
+	var candidate identityapp.LinkResult
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		var linkErr error
+		candidate, linkErr = identities.LinkVerifiedIdentity(tx, identityapp.LinkCommand{SourceCustomerID: customers[0], Target: aliasFact, Evidence: evidence})
+		return linkErr
+	}); err != nil {
+		t.Fatalf("OneID link candidate: %v", err)
+	}
+	if candidate.Candidate == nil {
+		t.Fatalf("OneID link did not produce a candidate: %+v", candidate)
+	}
+	var merged identityapp.LinkResult
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		var mergeErr error
+		merged, mergeErr = identities.ConfirmMerge(tx, identityapp.ConfirmMergeCommand{CandidateID: candidate.Candidate.ID, SurvivorCustomerID: customers[0], Operator: "paid-friend-journey-test"})
+		return mergeErr
+	}); err != nil {
+		t.Fatalf("OneID confirm merge: %v", err)
+	}
+	if merged.Merge == nil || merged.Merge.FromCustomerID != aliasCustomer || merged.Merge.ToCustomerID != customers[0] {
+		t.Fatalf("OneID merge result=%+v", merged)
+	}
+
+	qualifiedAt := cutoff.Add(time.Minute)
+	source.SetQualified([]customerdomain.CustomerID{aliasCustomer}, map[customerdomain.CustomerID]segmentport.PaidOrderFact{aliasCustomer: {PaidOrderID: 702, PaidAt: qualifiedAt}})
+	qualified, err := snapshots.AcceptRefresh(ctx, segmentapp.RefreshCommand{PackageID: packageID, Actor: staffID, IdempotencyKey: "paid-friend-qualified-after-merge-0001", RefreshKind: segmentdomain.RefreshIncremental, ReferenceTime: qualifiedAt.Add(time.Second)})
+	if err != nil || qualified.RiverJobID == nil {
+		t.Fatalf("accept later alias payment=%+v err=%v", qualified, err)
+	}
+	automationAudienceEventuallyWithDiagnostics(t, "later alias payment reaches one provider-accepted message", func() bool {
+		var members, entered, paidEvents, accepted, intents int
+		if native.QueryRow(ctx, `SELECT count(*) FROM segment_audience_snapshot_members WHERE snapshot_id=(SELECT published_snapshot_id FROM segment_audience_packages WHERE id=$1) AND customer_id=$2`, packageID, customers[0]).Scan(&members) != nil || members != 1 {
+			return false
+		}
+		if native.QueryRow(ctx, `SELECT count(*) FROM segment_audience_member_events WHERE package_id=$1 AND event_kind='audience.member_entered.v1' AND customer_id=$2`, packageID, customers[0]).Scan(&entered) != nil || entered != 1 {
+			return false
+		}
+		if native.QueryRow(ctx, `SELECT count(*) FROM segment_audience_member_events WHERE package_id=$1 AND event_kind='audience.member_paid_qualified.v1' AND customer_id=$2 AND paid_order_id=702 AND paid_at=$3`, packageID, customers[0], qualifiedAt).Scan(&paidEvents) != nil || paidEvents != 1 {
+			return false
+		}
+		if native.QueryRow(ctx, `SELECT count(*) FROM automation_enrollments WHERE policy_id=$1 AND state='accepted'`, policy.ID).Scan(&accepted) != nil || accepted != 1 {
+			return false
+		}
+		if native.QueryRow(ctx, `SELECT count(*) FROM outbound_message_intents intent JOIN automation_enrollments enrollment ON enrollment.id=intent.source_id WHERE enrollment.policy_id=$1 AND intent.state='provider_accepted'`, policy.ID).Scan(&intents) != nil || intents != 1 {
+			return false
+		}
+		return wecomServer.Calls() == 5
+	}, func() string { return automationAudienceRuntimeDiagnostics(ctx, native, provider, frozenPayloads) })
+	var messageID string
+	if err = native.QueryRow(ctx, `SELECT receipt.message_id FROM outbound_message_receipts receipt JOIN outbound_message_intents intent ON intent.id=receipt.message_intent_id JOIN automation_enrollments enrollment ON enrollment.id=intent.source_id WHERE enrollment.policy_id=$1 AND intent.state='provider_accepted'`, policy.ID).Scan(&messageID); err != nil || messageID == "" {
+		t.Fatalf("provider receipt message ID=%q err=%v", messageID, err)
+	}
+
+	var eventCount int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM segment_audience_member_events WHERE package_id=$1 AND event_kind='audience.member_paid_qualified.v1'`, packageID).Scan(&eventCount); err != nil || eventCount != 1 {
+		t.Fatalf("initial paid-qualified events=%d err=%v", eventCount, err)
+	}
+	repeat, err := snapshots.AcceptRefresh(ctx, segmentapp.RefreshCommand{PackageID: packageID, Actor: staffID, IdempotencyKey: "paid-friend-qualified-repeat-0001", RefreshKind: segmentdomain.RefreshIncremental, ReferenceTime: qualifiedAt.Add(2 * time.Second)})
+	if err != nil || repeat.RiverJobID == nil {
+		t.Fatalf("accept unchanged alias fact=%+v err=%v", repeat, err)
+	}
+	repeatReference := qualifiedAt.Add(2 * time.Second)
+	automationAudienceEventually(t, "unchanged fact refresh publishes without a new event or intent", func() bool {
+		if !automationAudienceRefreshPublished(ctx, native, packageID, repeatReference) {
+			return false
+		}
+		var events, intents int
+		if native.QueryRow(ctx, `SELECT count(*) FROM segment_audience_member_events WHERE package_id=$1 AND event_kind='audience.member_paid_qualified.v1'`, packageID).Scan(&events) != nil || events != 1 {
+			return false
+		}
+		if native.QueryRow(ctx, `SELECT count(*) FROM outbound_message_intents intent JOIN automation_enrollments enrollment ON enrollment.id=intent.source_id WHERE enrollment.policy_id=$1`, policy.ID).Scan(&intents) != nil {
+			return false
+		}
+		return intents == 1
+	})
+
+	newerAt := cutoff.Add(2 * time.Minute)
+	source.SetQualified([]customerdomain.CustomerID{aliasCustomer}, map[customerdomain.CustomerID]segmentport.PaidOrderFact{aliasCustomer: {PaidOrderID: 703, PaidAt: newerAt}})
+	newerReference := newerAt.Add(time.Second)
+	newer, err := snapshots.AcceptRefresh(ctx, segmentapp.RefreshCommand{PackageID: packageID, Actor: staffID, IdempotencyKey: "paid-friend-qualified-newer-0001", RefreshKind: segmentdomain.RefreshIncremental, ReferenceTime: newerReference})
+	if err != nil || newer.RiverJobID == nil {
+		t.Fatalf("accept newer paid fact=%+v err=%v", newer, err)
+	}
+	automationAudienceEventually(t, "newer payment event cannot create a second intent", func() bool {
+		if !automationAudienceRefreshAndDispatchCompleted(ctx, native, packageID, newerReference) {
+			return false
+		}
+		var events, accepted, intents int
+		if native.QueryRow(ctx, `SELECT count(*) FROM segment_audience_member_events WHERE package_id=$1 AND event_kind='audience.member_paid_qualified.v1' AND paid_order_id IN (702,703)`, packageID).Scan(&events) != nil || events != 2 {
+			return false
+		}
+		if native.QueryRow(ctx, `SELECT count(*) FROM automation_enrollments WHERE policy_id=$1 AND state='accepted'`, policy.ID).Scan(&accepted) != nil || accepted != 1 {
+			return false
+		}
+		if native.QueryRow(ctx, `SELECT count(*) FROM outbound_message_intents intent JOIN automation_enrollments enrollment ON enrollment.id=intent.source_id WHERE enrollment.policy_id=$1`, policy.ID).Scan(&intents) != nil || intents != 1 {
+			return false
+		}
+		return wecomServer.Calls() == 5
+	})
+}
+
+func automationAudienceRefreshPublished(ctx context.Context, native *pgxpool.Pool, packageID int64, reference time.Time) bool {
+	var published bool
+	err := native.QueryRow(ctx, `SELECT EXISTS(
+		SELECT 1 FROM segment_audience_refresh_runs run
+		JOIN segment_audience_snapshots snapshot ON snapshot.refresh_run_id=run.id
+		WHERE run.package_id=$1 AND run.reference_time=$2 AND run.state='published' AND snapshot.state='published'
+	)`, packageID, reference).Scan(&published)
+	return err == nil && published
+}
+
+func automationAudienceRefreshAndDispatchCompleted(ctx context.Context, native *pgxpool.Pool, packageID int64, reference time.Time) bool {
+	var completed bool
+	err := native.QueryRow(ctx, `SELECT EXISTS(
+		SELECT 1 FROM segment_audience_refresh_runs run
+		JOIN segment_audience_snapshots snapshot ON snapshot.refresh_run_id=run.id
+		JOIN river_job job ON job.kind='segment.audience-member-entered-dispatch.v1'
+			AND job.args->>'snapshot_id'=snapshot.id::text AND job.state='completed'
+		WHERE run.package_id=$1 AND run.reference_time=$2 AND run.state='published' AND snapshot.state='published'
+	)`, packageID, reference).Scan(&completed)
+	return err == nil && completed
 }
 
 // These fixtures provide only already-canonical Customer and active-staff
@@ -903,7 +1143,8 @@ func (s *automationAudienceWeComServer) handle(w http.ResponseWriter, r *http.Re
 			return
 		}
 		validAttachments := len(body.Attachments) == 4 && body.Attachments[0].MessageType == "image" && body.Attachments[0].Image.MediaID != "" && body.Attachments[1].MessageType == "miniprogram" && body.Attachments[1].MiniProgram.Title == "Runtime card revised" && body.Attachments[1].MiniProgram.PicMediaID != "" && body.Attachments[1].MiniProgram.AppID == "wx-runtime" && body.Attachments[1].MiniProgram.Page == "pages/runtime" && body.Attachments[2].MessageType == "file" && body.Attachments[2].File.MediaID != "" && body.Attachments[3].MessageType == "link" && body.Attachments[3].Link.Title == "Join runtime group" && body.Attachments[3].Link.Desc == "Runtime group" && body.Attachments[3].Link.URL == "https://work.weixin.qq.com/gm/runtime"
-		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || body.ChatType != "single" || len(body.External) != 1 || (body.External[0] != "runtime-external-1" && body.External[0] != "runtime-external-2") || body.Sender != "sender-a" || body.Text.Content != "runtime hello" || !validAttachments {
+		validRecipient := len(body.External) == 1 && (body.External[0] == "runtime-external-1" || body.External[0] == "runtime-external-2" || body.External[0] == "runtime-paid-friend-1" || body.External[0] == "runtime-paid-friend-2")
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || body.ChatType != "single" || !validRecipient || body.Sender != "sender-a" || body.Text.Content != "runtime hello" || !validAttachments {
 			s.record("invalid signed message body")
 			http.Error(w, "bad message body", http.StatusBadRequest)
 			return
@@ -992,9 +1233,16 @@ func automationAudienceInsertProviderStaff(t *testing.T, ctx context.Context, po
 }
 
 func automationAudienceInsertProviderCustomers(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []customerdomain.CustomerID {
+	return automationAudienceInsertProviderCustomersWithExternalIDs(t, ctx, pool, []string{"runtime-external-1", "runtime-external-2"})
+}
+
+func automationAudienceInsertProviderCustomersWithExternalIDs(t *testing.T, ctx context.Context, pool *pgxpool.Pool, externalIDs []string) []customerdomain.CustomerID {
 	t.Helper()
-	ids := make([]customerdomain.CustomerID, 0, 2)
-	for _, external := range []string{"runtime-external-1", "runtime-external-2"} {
+	ids := make([]customerdomain.CustomerID, 0, len(externalIDs))
+	for _, external := range externalIDs {
+		if external == "" {
+			t.Fatal("provider customer fixture requires a non-empty external identity")
+		}
 		var id int64
 		if err := pool.QueryRow(ctx, `INSERT INTO customers DEFAULT VALUES RETURNING id`).Scan(&id); err != nil {
 			t.Fatal(err)
@@ -1082,10 +1330,16 @@ func (automationAudienceSecurity) AuthorizeCSRF(context.Context, *http.Request) 
 }
 
 func automationAudiencePackage(t *testing.T, ctx context.Context, uow *platformpostgres.UnitOfWork, repo *segmentstore.Repository, now time.Time) int64 {
+	definition := json.RawMessage(`{"schema_version":1,"template_key":"wecom_contact_registration","parameters":{"owner_scope":"all","owner_staff_ids":[],"contact_statuses":["active"],"registration_status":"any"}}`)
+	return automationAudiencePackageWithDefinition(t, ctx, uow, repo, now, "automation-runtime", definition)
+}
+
+func automationAudiencePackageWithDefinition(t *testing.T, ctx context.Context, uow *platformpostgres.UnitOfWork, repo *segmentstore.Repository, now time.Time, code string, definition json.RawMessage) int64 {
 	t.Helper()
 	var packageID int64
 	err := uow.Within(ctx, func(tx context.Context) error {
-		group, err := segmentdomain.NewGroup("automation runtime", 1, 1, now)
+		groupName := "automation runtime " + code
+		group, err := segmentdomain.NewGroup(groupName, 1, 1, now)
 		if err != nil {
 			return err
 		}
@@ -1093,7 +1347,7 @@ func automationAudiencePackage(t *testing.T, ctx context.Context, uow *platformp
 		if err != nil {
 			return err
 		}
-		pkg, err := segmentdomain.NewPackage("automation-runtime", "automation runtime", &group.ID, 1, now)
+		pkg, err := segmentdomain.NewPackage(code, groupName, &group.ID, 1, now)
 		if err != nil {
 			return err
 		}
@@ -1101,7 +1355,7 @@ func automationAudiencePackage(t *testing.T, ctx context.Context, uow *platformp
 		if err != nil {
 			return err
 		}
-		config, err := segmentdomain.NewConfigurationVersion(pkg.ID, 1, json.RawMessage(`{"schema_version":1,"template_key":"wecom_contact_registration","parameters":{"owner_scope":"all","owner_staff_ids":[],"contact_statuses":["active"],"registration_status":"any"}}`), "", "manual", 1, now)
+		config, err := segmentdomain.NewConfigurationVersion(pkg.ID, 1, definition, "", "manual", 1, now)
 		if err != nil {
 			return err
 		}
@@ -1117,7 +1371,7 @@ func automationAudiencePackage(t *testing.T, ctx context.Context, uow *platformp
 		return nil
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("create audience package %q: %v", code, err)
 	}
 	return packageID
 }
@@ -1248,7 +1502,7 @@ func automationAudienceRuntimePool(t *testing.T) (*pgxpool.Pool, func()) {
 	if !ok {
 		t.Fatal("locate automation audience journey")
 	}
-	for _, name := range []string{"0001_platform.sql", "0002_identity.sql", "0003_access.sql", "0005_external_effects.sql", "0007_media.sql", "0013_automation_agents.sql", "0015_config_adminops.sql", "0036_ai_assistant_review.sql", "0037_outbound_private_messages.sql", "0039_segment_audience_configuration.sql", "0040_segment_audience_snapshots.sql", "0041_segment_audience_webhooks.sql", "0042_segment_audience_execution_bindings.sql", "0043_automation_runtime.sql", "0044_outbound_automation_messages.sql", "0045_segment_audience_member_events.sql", "0046_automation_run_reconciliations.sql", "0048_segment_audience_schedule_state.sql", "0053_segment_audience_member_event_fact_kinds.sql", "0083_segment_audience_refresh_modes.sql", "0085_segment_audience_refresh_kind.sql", "0087_automation_manual_ai_review.sql", "0089_outbound_message_content_snapshots.sql", "0094_runtime_config_releases.sql", "0097_segment_audience_mutation_actor.sql", "0100_ai_assistant_machine_actor.sql", "0115_automation_dynamic_text_generation.sql", "0120_excel_batches.sql", "0121_excel_delivery_receipts.sql", "0124_operation_excel_batch_lifecycle.sql", "0125_outbound_material_preparation.sql", "0126_media_material_source_snapshots.sql", "0201_automation_audience_direct_push.sql"} {
+	for _, name := range []string{"0001_platform.sql", "0002_identity.sql", "0003_access.sql", "0004_wecom.sql", "0005_external_effects.sql", "0007_media.sql", "0009_customer_activation.sql", "0013_automation_agents.sql", "0015_config_adminops.sql", "0022_customer_profile_sections.sql", "0036_ai_assistant_review.sql", "0037_outbound_private_messages.sql", "0039_segment_audience_configuration.sql", "0040_segment_audience_snapshots.sql", "0041_segment_audience_webhooks.sql", "0042_segment_audience_execution_bindings.sql", "0043_automation_runtime.sql", "0044_outbound_automation_messages.sql", "0045_segment_audience_member_events.sql", "0046_automation_run_reconciliations.sql", "0048_segment_audience_schedule_state.sql", "0053_segment_audience_member_event_fact_kinds.sql", "0083_segment_audience_refresh_modes.sql", "0085_segment_audience_refresh_kind.sql", "0087_automation_manual_ai_review.sql", "0089_outbound_message_content_snapshots.sql", "0094_runtime_config_releases.sql", "0097_segment_audience_mutation_actor.sql", "0100_ai_assistant_machine_actor.sql", "0115_automation_dynamic_text_generation.sql", "0120_excel_batches.sql", "0121_excel_delivery_receipts.sql", "0124_operation_excel_batch_lifecycle.sql", "0125_outbound_material_preparation.sql", "0126_media_material_source_snapshots.sql", "0201_automation_audience_direct_push.sql", "0212_automation_prompt_length_unbounded.sql", "0213_wecom_followed_at.sql", "0214_segment_member_paid_fact.sql"} {
 		sql, readErr := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "migrations", name))
 		if readErr != nil {
 			native.Close()

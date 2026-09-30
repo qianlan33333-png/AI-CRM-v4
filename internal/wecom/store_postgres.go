@@ -200,8 +200,8 @@ func (*PostgreSQLFollowRelationshipStore) apply(ctx context.Context, event follo
 			INSERT INTO wecom_follow_relationships (
 				corp_id, employee_id, customer_id, active, version,
 				last_event_at, last_callback_id, last_event_digest, followed_at
-			) VALUES ($1, $2, $3, $4, 1, $5, $6, $7,
-				CASE WHEN $4 AND $8 IN ('add_external_contact','add_half_external_contact') THEN $5 ELSE NULL END)
+			) VALUES ($1, $2, $3, $4, 1, $5::timestamptz, $6, $7,
+				CASE WHEN $4 AND $8 IN ('add_external_contact','add_half_external_contact') THEN $5::timestamptz ELSE NULL::timestamptz END)
 			RETURNING active, version, last_event_at, last_callback_id`,
 			event.CorpID, event.EmployeeID, event.CustomerID, event.Active,
 			event.OccurredAt, event.CallbackID, event.Digest[:], event.ChangeType,
@@ -235,12 +235,12 @@ func (*PostgreSQLFollowRelationshipStore) apply(ctx context.Context, event follo
 		SET active = $4,
 			followed_at = CASE
 				WHEN NOT $4 THEN NULL
-				WHEN $9 IN ('add_external_contact','add_half_external_contact') THEN $5
+				WHEN $9 IN ('add_external_contact','add_half_external_contact') THEN $5::timestamptz
 				WHEN active THEN followed_at
 				ELSE NULL
 			END,
 			version = version + 1,
-			last_event_at = $5,
+			last_event_at = $5::timestamptz,
 			last_callback_id = $6,
 			last_event_digest = $7,
 			updated_at = clock_timestamp()
