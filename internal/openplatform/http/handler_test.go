@@ -439,6 +439,21 @@ func TestOAuthCredentialRateLimitAndBodyBound(t *testing.T) {
 	}
 }
 
+func TestOAuthRejectsCredentialsInURLQuery(t *testing.T) {
+	limiter := &handlerRateLimiterStub{}
+	handler, err := NewHandler(Config{MachineAuthentication: handlerMachineStub{}, RateLimiter: limiter, AdminAuthentication: handlerAdminStub{}, Management: handlerManagementStub{}, Operations: &handlerOperationStub{}, SessionCookieName: "session", CSRFCookieName: "csrf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "https://crm.example.com/oauth/token?grant_type=client_credentials&client_id=client-a&client_secret=secret", nil)
+	request.TLS = &tls.ConnectionState{}
+	response := httptest.NewRecorder()
+	handler.Routes().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"error":"invalid_request"`) || limiter.credentialHit != 0 {
+		t.Fatalf("query credentials status=%d limiter_hits=%d body=%s", response.Code, limiter.credentialHit, response.Body.String())
+	}
+}
+
 func TestV1RequestDeadlinePropagatesToOperation(t *testing.T) {
 	operations := &handlerOperationStub{waitForDeadline: true}
 	handler, err := NewHandler(Config{MachineAuthentication: handlerMachineStub{principal: accessdomain.MachinePrincipal{ClientID: "client-a", ClientRecord: 7}}, RateLimiter: &handlerRateLimiterStub{}, AdminAuthentication: handlerAdminStub{}, Management: handlerManagementStub{}, Operations: operations, SessionCookieName: "session", CSRFCookieName: "csrf", RequestTimeout: time.Millisecond})

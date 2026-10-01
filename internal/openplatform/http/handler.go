@@ -187,6 +187,13 @@ func (handler *Handler) token(response http.ResponseWriter, request *http.Reques
 	if !ok {
 		return
 	}
+	// The token contract accepts credentials only in the form body or Basic
+	// header. ParseForm also merges URL query parameters, which would allow a
+	// client secret to be accepted from a URL exposed to access logs.
+	if request.URL.RawQuery != "" {
+		writeOAuthError(response, http.StatusBadRequest, "invalid_request")
+		return
+	}
 	if err := request.ParseForm(); err != nil {
 		writeOAuthError(response, http.StatusBadRequest, "invalid_request")
 		return
