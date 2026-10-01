@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 import subprocess
+import input_scope
+import host_contracts
 from pathlib import Path
 
 
@@ -76,12 +78,15 @@ def select(root: Path, base: str, head: str, paths: list[str], graph: dict,
            *, policy_changed: bool = False) -> tuple[dict, list[str]]:
     if not paths:
         raise ValueError("empty candidate has no behavior to check")
-    app = [path for path in paths if not (
-        (path.startswith(("docs/", "skills/")) and path.endswith(".md"))
-        or path in {"AGENTS.md", "README.md"})]
+    inputs = graph.get('input_scope') or input_scope.resolve(root, base, head, paths)
+    owned = {p for package in graph.get('selected_packages',[]) for p in package.get('source_files',[])+package.get('embed_files',[])}
+    app = [path for path in paths if not input_scope.document(path) or path in owned]
+    app = [p for p in app if p not in inputs['mapped']]
+    app += [p for values in inputs['mapped'].values() for p in values if not p.endswith('_test.go')]
+    app = sorted(set(app))
     if not app:
         return {"mode": "targeted", "lanes": ["preflight"], "checks": [],
-                "reason": "documentation", "profile": "documentation"}, []
+                "reason": "documentation", "profile": "behavior" if inputs["contracts"] else "documentation"}, []
     tooling_only = all(path.startswith(("scripts/", "deploy/", ".github/")) for path in app)
     if tooling_only:
         return {"mode": "targeted", "lanes": ["preflight"], "checks": [],
@@ -90,10 +95,13 @@ def select(root: Path, base: str, head: str, paths: list[str], graph: dict,
         # The candidate may not narrow checks for its own runtime changes.
         return {"mode": "full", "lanes": ["preflight", "backend", "frontend", "browser", "archive-sdk"],
                 "checks": [], "reason": "policy-and-runtime-changed", "profile": "full"}, []
-    if any(path.startswith("migrations/") or path in {"go.mod", "go.sum", "package.json", "package-lock.json"}
-           for path in app):
-        return {"mode": "full", "lanes": ["preflight", "backend", "frontend", "browser", "archive-sdk"],
-                "checks": [], "reason": "global-input-or-migration", "profile": "full"}, []
+    if inputs['unknown']:
+        reasons=sorted(set(inputs['unknown'].values()))
+        lanes=['preflight']
+        if graph.get('selected_packages') or any(p.endswith('.go') for p in paths) or any(not r.startswith('npm') for r in reasons):lanes.append('backend')
+        if any(r.startswith(('npm','api')) for r in reasons):lanes.append('frontend')
+        lanes.append('browser')
+        return {'mode':'full','lanes':lanes,'checks':[], 'reason':','.join(reasons),'profile':'full'}, []
     if any(not path.startswith(("web/", "internal/", "cmd/", "pkg/")) for path in app):
         return {"mode": "full", "lanes": ["preflight", "backend", "frontend", "browser", "archive-sdk"],
                 "checks": [], "reason": "unknown-runtime-input", "profile": "full"}, []
@@ -113,25 +121,19 @@ def select(root: Path, base: str, head: str, paths: list[str], graph: dict,
                          and path.endswith("_test.go")]
         named = [(path, name) for path in changed_tests
                  for name in changed_go_tests(root, base, head, path)]
-        hints = _domain_hints(root, base, head, paths)
-        # A changed test in this broad package is not proof that every changed
-        # production behavior was tested. Require a matching behavior hint;
-        # otherwise run the package suite rather than an unrelated named test.
-        covered = {hint for hint in hints if any(hint in name.lower() for _, name in named)}
-        narrow = directory == "cmd/aicrm" and named and hints and covered == hints
-        if narrow:
-            checks.extend({"lane": "backend", "path": path, "test": name}
-                          for path, name in named if not name.endswith("ChromiumJourney")
-                          and any(hint in name.lower() for hint in hints))
+        grouped = host_contracts.select(root, paths, graph) if directory == 'cmd/aicrm' else None
+        if grouped is not None:
+            checks.extend(grouped)
         else:
-            # No exact test relationship is known: execute the entire affected
-            # package, including when a shared package has no test files.
-            source = next((path for path in package.get("source_files", []) if path.endswith(".go")), None)
-            if source is None:
-                raise ValueError("affected Go package has no source path")
-            checks.append({"lane": "backend", "path": source})
-        checks.extend({"lane": "browser", "path": path, "test": name}
-                      for path, name in named if name.endswith("ChromiumJourney"))
+            source = next((path for path in package.get('source_files', []) if path.endswith('.go')), None)
+            if source is None:raise ValueError('affected Go package has no source path')
+            checks.append({'lane':'backend','path':source})
+            # A complete Host backend excludes Chromium, so retain its complete
+            # discovered browser class whenever shared Host code changes.
+            if directory == 'cmd/aicrm':
+                for carrier in sorted((root/'cmd/aicrm').glob('*_test.go')):
+                    checks.extend({'lane':'browser','path':carrier.relative_to(root).as_posix(),'test':name}
+                                  for name in TEST.findall(carrier.read_text()) if name.endswith('ChromiumJourney'))
 
     for path in paths:
         if path.endswith((".test.mjs", ".test.js")):

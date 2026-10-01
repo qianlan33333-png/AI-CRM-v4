@@ -2318,9 +2318,68 @@ def read_domestic_main() -> dict:
         }
 
 
+def reclaim_obsolete_releases() -> dict:
+    """One install lock, exact current receipt, current/previous/live references.
+
+    Reclaim disposable package directories only. Never age-delete database,
+    backup, source, upload or audit paths. Unknown/symlink packages stay protected.
+    """
+    require_host_role("production")
+    with _production_release_lock():
+        cursor = _read_main_state()
+        _, receipt = _reverify_main_cursor(cursor)
+        current = current_sha()
+        if current != cursor["installed_app_sha"]:
+            raise RuntimeError("cleanup current differs from verified cursor")
+        readiness(current)
+        protected = {current}
+        previous = receipt.get("previous_sha")
+        if isinstance(previous, str) and SHA.fullmatch(previous):
+            protected.add(previous)
+        for process in Path("/proc").glob("[0-9]*"):
+            for name in ("exe", "cwd"):
+                try:
+                    target = (process / name).resolve(strict=True)
+                    relative = target.relative_to(RELEASES.resolve())
+                    if relative.parts and SHA.fullmatch(relative.parts[0]):
+                        protected.add(relative.parts[0])
+                except (OSError, ValueError):
+                    pass
+        removed, skipped = [], []
+        for package in sorted(RELEASES.iterdir()):
+            if package.name in protected:
+                continue
+            if (not SHA.fullmatch(package.name) or package.is_symlink()
+                    or not package.is_dir() or package.resolve().parent != RELEASES.resolve()):
+                skipped.append(package.name)
+                continue
+            # Only expected installer payload roots may be retired automatically.
+            allowed = {"bin", "web", "migrations", "deploy", "components",
+                       "release.env", "release-files.sha256", "domestic-release.json"}
+            if any(child.name not in allowed for child in package.iterdir()):
+                skipped.append(package.name)
+                continue
+            unsafe = False
+            for directory, dirs, files in os.walk(package, followlinks=False):
+                for name in dirs + files:
+                    child = Path(directory) / name
+                    info = child.lstat()
+                    if (info.st_uid != 0 or info.st_dev != package.stat().st_dev
+                            or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))):
+                        unsafe = True
+            if unsafe:
+                skipped.append(package.name)
+                continue
+            shutil.rmtree(package)
+            removed.append(package.name)
+        return {"status": "completed", "protected": sorted(protected),
+                "removed": removed, "skipped_unknown": skipped}
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     source = p.add_mutually_exclusive_group(required=True)
+    source.add_argument("--reclaim-obsolete-releases", action="store_true")
     source.add_argument("--incoming", type=Path)
     source.add_argument("--retry-existing", action="store_true", help="reuse a checksum-verified orphan under the install lock")
     source.add_argument("--check-host-contract", action="store_true", help="read-only check of role, PostgreSQL 16, service user, paths, and systemd")
@@ -2356,6 +2415,12 @@ def main() -> None:
     args = p.parse_args()
     if os.geteuid() != 0:
         raise SystemExit("root required")
+    if args.reclaim_obsolete_releases:
+        if any(value is not None for key, value in vars(args).items()
+               if key != "reclaim_obsolete_releases" and not isinstance(value, bool)) or args.allow_baseline_transition:
+            p.error("package cleanup accepts no install or source metadata")
+        print(json.dumps(reclaim_obsolete_releases(), sort_keys=True))
+        return
     if args.check_host_contract:
         if (
             any(value is not None for value in (args.metadata, args.expected_sha, args.metadata_sha256, args.expected_base, args.source_sha, args.expected_manifest_sha256))

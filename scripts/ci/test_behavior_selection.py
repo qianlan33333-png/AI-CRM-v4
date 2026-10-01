@@ -54,27 +54,18 @@ class BehaviorSelectionTest(unittest.TestCase):
         self.assertEqual(choice["profile"], "behavior")
         self.assertEqual(choice["lanes"], ["preflight", "backend", "frontend", "browser"])
         self.assertEqual(packages, [])
-        self.assertEqual(choice["checks"], [
-            {"lane": "backend", "path": "cmd/aicrm/adapters_test.go", "test": "TestReferralCSP"},
-            {"lane": "browser", "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
-             "test": "TestReferralChromiumJourney"},
-            {"lane": "frontend", "path": "web/v3/referralCenter.test.mjs"},
-        ])
-        backend = quality_lanes.behavior_commands("backend", self.root, choice["checks"])
-        self.assertEqual(len(backend), 1)
-        self.assertNotIn("-race", backend[0])
-        self.assertIn("^(TestReferralCSP)$", backend[0])
-        browser = quality_lanes.behavior_commands("browser", self.root, choice["checks"])
-        self.assertEqual(len(browser), 1)
-        self.assertIn("TestReferralChromiumJourney", browser[0])
-        self.assertNotIn("pip", " ".join(browser[0]))
+        self.assertIn({'lane':'backend','path':'cmd/aicrm/composition.go'},choice['checks'])
+        self.assertIn({'lane':'browser','path':'cmd/aicrm/referral_chromium_postgres_integration_test.go','test':'TestReferralChromiumJourney'},choice['checks'])
+        # A new named test cannot authorize omission of shared Host behavior.
+        backend=quality_lanes.behavior_commands('backend',self.root,choice['checks'])
+        self.assertNotIn('^(TestReferralCSP)$',' '.join(backend[0]))
 
     def test_unmapped_composition_falls_back_to_package_suite(self) -> None:
         self.write("cmd/aicrm/composition.go", "package main\nfunc route() { _ = 2 }\n")
         self.commit("unmapped composition")
         choice, _ = behavior_selection.select(self.root, self.base, self.sha(),
                                               ["cmd/aicrm/composition.go"], self.graph())
-        self.assertEqual(choice["checks"], [{"lane": "backend", "path": "cmd/aicrm/composition.go"}])
+        self.assertIn({"lane": "backend", "path": "cmd/aicrm/composition.go"}, choice["checks"])
 
     def test_unrelated_new_test_does_not_hide_composition_change(self) -> None:
         self.write("cmd/aicrm/composition.go", 'package main\nfunc route() { _ = "/referral" }\n')

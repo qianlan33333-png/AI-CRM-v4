@@ -25,6 +25,9 @@ POLICY_FILES = (
     ".github/workflows/ci.yml",
     "scripts/dev_preflight.py",
     "scripts/ci/affected_plan.py",
+    "scripts/ci/input_scope.py",
+    "scripts/ci/host_contracts.py",
+    "scripts/ci/host-contracts.json",
     "scripts/ci/impact_selection.py",
     "scripts/ci/governance_impact.py",
     "scripts/ci/quality_lanes.py",
@@ -48,7 +51,7 @@ EXECUTABLE_POLICY_FILES = {
     "scripts/ci/cmd_test_groups.py",
     "scripts/ci/check_preparation.py", "scripts/ci/verification.py",
 }
-POLICY_PREFIXES = (".github/workflows/", "docs/governance/", "scripts/ci/")
+POLICY_PREFIXES = (".github/workflows/", "scripts/ci/")
 PAYMENT_LEAF_PREFIX = "internal/payment/"
 PAYMENT_BROWSER_CHECK = {
     "lane": "browser",
@@ -59,7 +62,7 @@ IMPACT_MAPS = {
     "sql": {
         "embedded_files": "Go EmbedFiles, TestEmbedFiles, and XTestEmbedFiles package ownership",
         "migration_prefix": "migrations/",
-        "migration_change": "protected-full-selection",
+        "migration_change": "table-owner-and-read-consumers",
     },
     "api": {
         "prefix": "api/",
@@ -126,6 +129,8 @@ def planner_policy_fingerprint() -> str:
              Path(go_affected_graph.__file__).resolve(), Path(commerce_checks.__file__).resolve(),
              Path(period_member_checks.__file__).resolve(),
              Path(__file__).with_name("cmd_test_groups.py"),
+             Path(__file__).with_name("input_scope.py"), Path(__file__).with_name("host_contracts.py"),
+             Path(__file__).with_name("host-contracts.json"),
              Path(__file__).with_name("quality_lanes.py"), Path(__file__).with_name("check_preparation.py"),
              Path(__file__).with_name("browser_npm_dependencies.mjs"))
     entries = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
@@ -378,6 +383,7 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
                                   if graph_valid and isinstance(graph_result, dict) else candidate_packages),
         "enforced": normalize_selection(enforced),
         "policy_changed": policy_changed,
+        "input_scope": graph_result.get("input_scope", {}) if isinstance(graph_result, dict) else {},
         "business_assessment": {
                                     "status": "requires_review",
                                     "changed_paths": paths,

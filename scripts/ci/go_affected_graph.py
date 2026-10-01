@@ -344,12 +344,16 @@ def build_graph(repo: Path, base: str, head: str, go: str = "go", node: str = "n
         _checkout_snapshot(repo, head_sha, head_root)
         base_inventory = go_list_inventory(base_root, go, node)
         head_inventory = go_list_inventory(head_root, go, node)
-    closure = affected_closure(base_inventory, head_inventory, paths)
+    import input_scope
+    inputs = input_scope.resolve(repo, base_sha, head_sha, paths)
+    consumer_paths = sorted({p for values in inputs['mapped'].values() for p in values if p.endswith('.go')})
+    closure = affected_closure(base_inventory, head_inventory, sorted(set(paths) | set(consumer_paths)))
     graph_digest_payload = {
         "base_tree": base_tree, "head_tree": head_tree,
         "base_edges": base_inventory["edges"], "head_edges": head_inventory["edges"],
         "base_packages": base_inventory["packages"], "head_packages": head_inventory["packages"],
         "changed_paths": paths,
+        "input_scope": inputs,
         "direct_path_owners": closure["direct_path_owners"],
         "affected_package_dirs": closure["affected_package_dirs"],
         "selected_packages": closure["selected_packages"],
@@ -365,6 +369,7 @@ def build_graph(repo: Path, base: str, head: str, go: str = "go", node: str = "n
         "module": head_inventory["module"],
         "graph_fingerprint": graph_digest,
         "go_list_args": list(GO_LIST_ARGS),
+        "input_scope": inputs,
         **closure,
     }
 

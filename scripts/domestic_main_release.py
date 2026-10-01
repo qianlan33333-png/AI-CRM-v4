@@ -1342,7 +1342,7 @@ def _check_policy_changes(repo: Path, base_sha: str, head_sha: str) -> list[str]
         "scripts/ci/affected_shadow.py", "scripts/ci/go_affected_graph.py",
         "scripts/ci/verification.py", "docs/governance/capability-impact.json",
     }
-    return sorted(path for path in paths if path in fixed_policy_files or path.startswith((".github/workflows/", "scripts/ci/", "docs/governance/")))
+    return sorted(path for path in paths if path in fixed_policy_files or path.startswith((".github/workflows/", "scripts/ci/")))
 
 
 def builder_ci_lanes() -> tuple[str, ...]:
@@ -1986,9 +1986,16 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                           resumed_from=snapshot["result"]["log_path"])
         return result
 
+    failure_stop = threading.Event()
     def run_lane(lane: str) -> dict[str, Any]:
+        if failure_stop.is_set():
+            raise CheckIncompleteError('previous lane failed; this lane was not evaluated')
         try:
             return execute_lane(lane)
+        except BaseException as error:
+            if isinstance(error, ReleaseError) and not isinstance(error, (CheckEnvironmentError, CheckIncompleteError)):
+                failure_stop.set()
+            raise
         finally:
             if lane == "backend":
                 backend_running.set()
@@ -2036,6 +2043,11 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                     lane_results.append(future.result())
                 except ReleaseError as error:
                     failures.append(error)
+                    if not isinstance(error, (CheckEnvironmentError, CheckIncompleteError)):
+                        for queued in pending: queued.cancel()
+                    # Stop submitting later expensive lanes after a concrete failure.
+                    if any(f.cancelled() for f in pending):
+                        pending = {f:l for f,l in pending.items() if not f.cancelled()}
             if callback:
                 stages = []
                 for lane in lanes:
@@ -3820,6 +3832,14 @@ def _finalize_success(config: dict[str, Any], state_path: Path, state: dict[str,
     if batch_heads is not None:
         state["last_release"]["batch_member_heads"] = batch_heads
     _update_state(state_path, state, status="ready")
+    cleanup = None
+    try:
+        cleanup = _production_ssh(config, "sudo", "-n", config["prod_helper"],
+                                  "--reclaim-obsolete-releases", timeout=120)
+    except (ReleaseError, OSError, subprocess.SubprocessError):
+        cleanup = {"status": "maintenance-pending"}
+    state["last_release"]["package_cleanup"] = cleanup
+    _update_state(state_path, state, status="ready")
     return {"status": "completed", "main_sha": candidate_sha, "main_tree": candidate_tree,
             "installed_app_sha": installed_app["sha"], "source_bundle_sha256": bundle_meta["bundle_sha256"],
             "duration_seconds": item["duration_seconds"], "cursor": cursor}
@@ -4321,8 +4341,8 @@ def _batch_approval_result(batch: dict[str, Any], evidence: dict[str, Any]) -> d
             "approval_digest": digest(identity), "production_written": False}
 
 
-def batch_seal(config: dict[str, Any]) -> dict[str, Any]:
-    """Freeze the currently installed cumulative package for one human approval."""
+def batch_seal(config: dict[str, Any], *, expected_head: str | None = None) -> dict[str, Any]:
+    """Freeze the current package and bind its internal authorization digest."""
     if os.geteuid() != 0:
         raise ReleaseError("sealing a cumulative batch requires root")
     config = _check_config(config)
@@ -4337,6 +4357,8 @@ def batch_seal(config: dict[str, Any]) -> dict[str, Any]:
         if _resolve_ref(repo, MAIN_REF) != state["main"]["sha"]:
             raise ReleaseError("production source base changed before batch sealing")
         tip = _batch_tip(state)
+        if expected_head is not None and tip != _sha(expected_head, "authorized batch head"):
+            raise ReleaseError("batch scope changed after production authorization")
         last = batch["members"][-1]
         if _resolve_ref(repo, last["ref"]) != tip or _tree(repo, tip) != batch["head_tree"]:
             raise ReleaseError("final staged source identity changed")
@@ -4956,8 +4978,59 @@ def poll(config: dict[str, Any], *, expected_candidate_sha: str | None = None) -
         return result
 
 
+def status_snapshot(config: dict[str, Any]) -> dict[str, Any]:
+    """Atomic, read-only queue snapshot; no hashing payloads or polling hosts."""
+    state = _load_state(Path(config['state']))
+    item = _active_queue_item(state)
+    return {'status':state['status'],'main':state['main'],'installed_app':state['installed_app'],
+            'in_flight': {k:state['in_flight'].get(k) for k in ('head_sha','phase','check_progress')} if state.get('in_flight') else None,
+            'queue_head': {k:item.get(k) for k in ('head_sha','status','attempt','failure')} if item else None,
+            'batch':{k:state['batch'].get(k) for k in ('head_sha','status','approval_digest')} if state.get('batch') else None,
+            'updated_at_utc':state.get('updated_at_utc')}
+
+
+def promote_authorized(config: dict[str, Any], head_sha: str, authorization_reference: str) -> dict[str, Any]:
+    """Desk supplies the already received human command; digest stays internal.
+
+    Bind the authorized scope to the exact staged head. Keep existing digest,
+    one writer, health, baseline and outcome_unknown protections in promote.
+    """
+    if os.geteuid() != 0:
+        raise ReleaseError('production promotion must run as root')
+    if not isinstance(authorization_reference,str) or not authorization_reference.strip():
+        raise ReleaseError('original human production authorization reference required')
+    head_sha = _sha(head_sha,'authorized production head')
+    config = _check_config(config)
+    with _locked(Path(config['lock']),nonblocking=True):
+        state = _load_state(Path(config['state']))
+        batch = state.get('batch')
+        target = batch or state.get('in_flight') or {}
+        if target.get('head_sha') != head_sha:
+            raise ReleaseError('production authorization scope differs from staged head')
+        if state.get('status') == 'outcome_unknown':
+            raise ReleaseError('unknown installation requires read-only reconciliation')
+        target['production_authorization']={'reference':authorization_reference,'head_sha':head_sha,'recorded_at_utc':_utc_now()}
+        _update_state(Path(config['state']),state)
+        if batch:
+            if batch.get('status')=='sealed':
+                evidence=_batch_final_evidence(config,batch)
+                if evidence is None:raise ReleaseError('final staging journey missing')
+                digest=_batch_approval_result(batch,evidence)['approval_digest']
+            elif batch.get('status')=='open':digest=None
+            else:raise ReleaseError('batch is not ready for authorized promotion')
+        else:
+            inflight=state.get('in_flight') or {}
+            if inflight.get('phase') not in {'source-approval-pending','stage-validation-pending'}:
+                raise ReleaseError('candidate is not ready for authorized promotion')
+            evidence=_read_stage_evidence(config,inflight) if inflight.get('phase')=='stage-validation-pending' else None
+            if inflight.get('phase')=='stage-validation-pending' and evidence is None:raise ReleaseError('required staging journey missing')
+            digest=_approval_wait_result(inflight,evidence)['approval_digest']
+    if digest is None: digest=batch_seal(config,expected_head=head_sha)['approval_digest']
+    return promote(config,digest)
+
+
 def promote(config: dict[str, Any], approval_digest: str) -> dict[str, Any]:
-    """The sole production entry, called only after a person approves this digest."""
+    """The sole production entry, called with an internally bound digest after human production authorization."""
     if os.geteuid() != 0:
         raise ReleaseError("production promotion must run as root")
     config = _check_config(config)
@@ -6014,7 +6087,7 @@ def restricted_ssh() -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check", "batch-open", "batch-seal", "batch-reopen", "batch-tool-repair",
-                                            "poll", "promote", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
+                                            "poll", "status", "promote", "promote-authorized", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
     parser.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG))
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--seed-repo", type=Path)
@@ -6024,6 +6097,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base")
     parser.add_argument("--supersedes-candidate")
     parser.add_argument("--sha")
+    parser.add_argument("--authorization-reference", help="reference to the already received human production command")
     parser.add_argument("--approval-digest", help="digest of the exact candidate, artifact and staging readback approved by a person")
     parser.add_argument("--failed-candidate", help="exact unevaluated queue-front candidate for a batch tool repair")
     parser.add_argument("--calibrate-check-capacity", action="store_true",
@@ -6131,6 +6205,11 @@ def main(argv: list[str] | None = None) -> int:
             result = _archive_ack_stdin(config)
         elif args.action == "poll":
             result = poll(config)
+        elif args.action == 'status':
+            result = status_snapshot(config)
+        elif args.action == 'promote-authorized':
+            if not args.head or not args.authorization_reference:parser.error('promote-authorized requires --head and --authorization-reference')
+            result = promote_authorized(config,args.head,args.authorization_reference)
         elif args.action == "promote":
             if not args.approval_digest:
                 parser.error("promote requires --approval-digest from the staged review result")

@@ -63,6 +63,8 @@ CI_ONLY_FILES = {
 }
 # Developer-machine archive operations are neither installed controller
 # binaries nor application runtime. Keep this separate from FIXED_CONTROLLER_FILES.
+MAINTENANCE_ONLY_PREFIXES = ("cmd/migrate-wecom-directory-retire/",)
+
 OPERATOR_ONLY_FILES = {
     "scripts/manual_github_sync.py",
 }
@@ -271,7 +273,7 @@ def classify_paths(paths: Iterable[str]) -> Classification:
             controller_files.append(normalized)
             continue
 
-        if normalized in OPERATOR_ONLY_FILES:
+        if normalized in OPERATOR_ONLY_FILES or normalized.startswith(MAINTENANCE_ONLY_PREFIXES):
             continue
 
         if normalized in DEPLOY_SAMPLE_CONFIGS:
@@ -583,6 +585,7 @@ def _make_plan(repo: Path, base_sha: str, target_sha: str, target_root: Path | N
     changed = _changed_paths(repo, base_sha, target_sha)
     tree = _tree_sha(repo, target_sha)
     classification = classify_paths(changed)
+    _maintenance_application_guard(repo, target_sha, classification)
     if not classification.runtime_changed:
         return classification.as_json(base_sha, target_sha, tree, [])
     try:
@@ -648,12 +651,24 @@ def plan(
     return result
 
 
+def _maintenance_application_guard(repo: Path, target_sha: str, result: Classification) -> None:
+    maintenance = [p for p in result.changed_paths if p.startswith(MAINTENANCE_ONLY_PREFIXES)]
+    if maintenance:
+        commands = _release_commands(repo, target_sha)
+        if any(any(p.startswith(c.package.removeprefix('./') + '/') for p in maintenance) for c in commands):
+            result.runtime_changed = result.full_build = True
+            result.full_build_reason = 'maintenance-command-added-to-application'
+
+
+
 def classify(repo_path: str | Path, base_value: str, target_value: str) -> dict[str, Any]:
     """Cheap impact check with no checkout or execution of target source."""
     repo = Path(repo_path).resolve()
     base_sha = _resolve_commit(repo, base_value)
     target_sha = _resolve_commit(repo, target_value)
     result = classify_paths(_changed_paths(repo, base_sha, target_sha))
+    _maintenance_application_guard(repo, target_sha, result)
+
     return {
         "runtime_changed": result.runtime_changed,
         "full_build": result.full_build,

@@ -681,7 +681,14 @@ def behavior_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[l
         base, head = os.environ.get("AICRM_DEDUP_BASE_SHA"), os.environ.get("AICRM_DEDUP_HEAD_SHA")
         if not base or not head:
             raise ValueError("exact base/head are required for the behavior plan")
-        return [["git", "diff", "--check", base, head]]
+        result = [['git','diff','--check',base,head]]
+        paths=subprocess.check_output(['git','diff','--name-only',base,head],cwd=ROOT,text=True).splitlines()
+        if any(p.startswith('api/') or p.endswith('.go') and '/http/' in p or p=='cmd/aicrm/composition.go' for p in paths):
+            result.append(['node','scripts/check-openapi-route-parity.mjs'])
+        if any(p.startswith('migrations/') for p in paths):result.append([sys.executable,'scripts/check-migration-sequence.py'])
+        if any(p in {'web/donor-sources/source-index.json','web/donor-sources/source-lock.json'} for p in paths):result.append(['node','scripts/prepare-donor-source-views.mjs'])
+        if 'docs/governance/retention-registry.json' in paths:result.append([sys.executable,'scripts/check-retention-registry.py'])
+        return result
     selected = focused_commands(lane, report_dir, checks)
     if lane == "backend":
         # The race detector is chosen only by an explicit concurrency check;

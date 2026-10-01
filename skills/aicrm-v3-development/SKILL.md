@@ -153,3 +153,7 @@ These are review prompts, not universal feature gates. Apply only the relevant t
 ## Stop Conditions
 
 Stop and report instead of improvising when the design would cause identity misattribution, implicit customer creation, cross-domain table writes, independent commits that can split one required transaction, duplicate Provider effects, blind retry of `outcome_unknown`, or a second execution/identity kernel.
+
+## 2026-10-01 发布复盘落地
+
+遵循 [最小发布流程](../../docs/operations/domestic-main-release.md)（仓库根目录路径）。用户“部署到生产机”是当前已说明范围的生产授权，工作台内部绑定SHA/摘要后直接完成必要检查、预发、晋级、独立读回；相关修复继承授权，不重复询问，无关新范围单列。影响按实际消费者：资料图片/资源登记不等同可执行策略；OpenAPI按路由及消费者、SQL按表及消费者、锁文件按依赖消费者。未知关系扩大对应阶段并记明原因。Host合同按可信测试文件映射，文件变化或未登记自动纳入；共享Host变化完整验证。文档/工具无应用载荷变化时仅源码推进。只要求适用收据，同包已安装先读回恢复；无变化只用控制器status轻量查询。沿用既有准备器、单锁、队列和River；不制造第二套审批或验收框架。
