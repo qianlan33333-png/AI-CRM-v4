@@ -283,11 +283,18 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 			return e
 		}
 		if claimed {
+			// Read Committed can observe a concurrent commit between the first
+			// receipt SELECT and the claim SELECT. Recover that same-key receipt
+			// (including payload conflict checks) before rejecting another key.
+			stored, found, e = s.store.FindSubmissionByKey(tx, questionnaire.ID, submissionKeyDigest, payloadDigest)
+			if e != nil {
+				return e
+			}
 			completionConfiguration, e = s.store.GetOperationConfiguration(tx, questionnaire.ID)
 			if e != nil {
 				return e
 			}
-			alreadySubmitted = true
+			alreadySubmitted = !found
 			return nil
 		}
 
