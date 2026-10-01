@@ -4,10 +4,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { zipSync } from 'fflate';
+import { JSDOM } from 'jsdom';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const outdir = fs.mkdtempSync(path.join(os.tmpdir(), 'aicrm-admin-adapter-'));
 await build({ entryPoints: { 'automationHistory.test': path.join(root, 'src/api/automationHistory.test.ts'), 'memberGridHistory.test': path.join(root, 'src/api/memberGridHistory.test.ts'), 'messageHistory.test': path.join(root, 'src/api/messageHistory.test.ts'), 'contactHistory.test': path.join(root, 'src/api/contactHistory.test.ts'), 'audienceHistory.test': path.join(root, 'src/api/audienceHistory.test.ts'), 'admin.test': path.join(root, 'src/api/admin.test.ts'), 'external_effects.test': path.join(root, 'src/api/external_effects.test.ts'), 'push_observability.test': path.join(root, 'src/api/push_observability.test.ts'), 'servicePeriodHistory.test': path.join(root, 'src/api/servicePeriodHistory.test.ts'), 'couponHistory.test': path.join(root, 'src/api/couponHistory.test.ts'), 'groupOpsHistory.test': path.join(root, 'src/api/groupOpsHistory.test.ts'), 'groupOpsDirectory.test': path.join(root, 'src/api/groupOpsDirectory.test.ts'), 'wecomAcquisitionLinks.test': path.join(root, 'src/api/wecomAcquisitionLinks.test.ts'), 'orvalBlobFetch.test': path.join(root, 'src/api/orvalBlobFetch.test.ts'), ownerReassignmentFile: path.join(root, 'src/admin/ownerReassignmentFile.ts') }, bundle: true, platform: 'node', format: 'esm', outdir, logLevel: 'warning' });
+// admin.test imports the grid surface, whose Tabulator dependency creates a
+// template during module evaluation. Give that import the browser DOM it uses.
+const savedDOM = { window: globalThis.window, document: globalThis.document };
+const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' });
+globalThis.window = dom.window;
+globalThis.document = dom.window.document;
 try {
   await build({ entryPoints: [path.join(root, 'src/api/campaignHistory.test.ts')], bundle: true, platform: 'node', format: 'esm', outdir, logLevel: 'warning' });
   await (await import(pathToFileURL(path.join(outdir, 'campaignHistory.test.js')).href)).runCampaignHistoryAdapterTests();
@@ -101,4 +108,9 @@ try {
   if (paddedWorkbook.size >= 1024 * 1024) throw new Error('inflated workbook test archive must stay below the compressed file limit');
   await expectRejectedFile(paddedWorkbook, 'Excel 文件无法解析');
   console.log('admin-adapter-contract: PASS');
-} finally { fs.rmSync(outdir, { recursive: true, force: true }); }
+} finally {
+  globalThis.window = savedDOM.window;
+  globalThis.document = savedDOM.document;
+  dom.window.close();
+  fs.rmSync(outdir, { recursive: true, force: true });
+}
