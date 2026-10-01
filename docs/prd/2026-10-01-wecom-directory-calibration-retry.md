@@ -42,3 +42,11 @@ flowchart TD
 ```
 
 复用现有Segment FailRefresh与UoW；无新表、队列、任务或取消SQL。参考 [River Worker.Work合同](https://pkg.go.dev/github.com/riverqueue/river#Worker)：成功返回nil由原worker正常完成任务；业务失败原因仍在run收据，不能冒称已发布。来源不可用、未被新参考时间替代的任务继续原重试；时间相等不丢弃；第一次统一来源校准仍保留。执行中被超越仍受最后原子发布保护，下次重试立即收尾。真PG验证queued、已有staging及并发已登记校准，永久旧run不调用来源评估、保持成员/事件/审计/既有幂等收据，之后真实变化正常处理。对外HTTP/DDL/OneID/Provider/页面不变，影响仅Segment内部刷新恢复及关联运营读取，沿父PRD五项影响和正常发布检查。
+
+## 旧表退休的预演对照（手动工具补充）
+
+业务流程：完整资料和六包校准 → 全量迁移备份/隔离恢复 → dry-run导出两旧表 → 人工工具执行接收相同备份与预演收据 → 当前事务锁内重导出 → 逐表行数及SHA一致才DROP并提交；任何差异回滚且保留表/失败导出。
+
+现有工具已经持有发布advisory锁与旧表ACCESS EXCLUSIVE锁，但两次运行之间不共享锁。参考 [PostgreSQL 显式锁](https://www.postgresql.org/docs/16/explicit-locking.html)，事务锁不能证明前一事务退出后的数据不变。复用既有导出/收据/UoW和完整备份校验，仅新增`--expected-export-receipt`，执行时必须是受信任私有文件、dry-run状态、同一备份及允许的唯一表项；实际锁内导出与该收据行数/摘要匹配，提交收据记录期望文件SHA。原guard和两表范围不变。
+
+分类：无OneID匹配/建客/合并；仅显式手动Segment/WeCom迁移表退休、运行时不import；无内部任务/Provider/外部效果/UI。命令行合同新增必需执行输入；普通应用发布不执行此工具，应用构件可继续c942。关联范围为迁移备份和旧表导出退休。真实PG证明缺收据、行数变化、同数量内容变化不删除，预演一致正常执行；保留原完整基线/人群/在途/备份拒绝测试。不增加审批、第二套状态机或新退休表。

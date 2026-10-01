@@ -79,40 +79,91 @@ func TestRetirementRequiresBackupCalibrationAndExportsBeforeDropPostgreSQL(t *te
 	}
 	t.Setenv("AICRM_DATABASE_URL", u.String())
 	privateDir := func() string { p := filepath.Join(t.TempDir(), "exports"); return p }
-	if err = run(ctx, privateDir(), backup, true); err == nil {
+	if err = run(ctx, privateDir(), backup, "", true); err == nil {
 		t.Fatal("uninitialized baseline allowed retirement")
 	}
 	if _, err = fixture.Exec(ctx, "UPDATE wecom_directory_publications SET baseline_initialized=true"); err != nil {
 		t.Fatal(err)
 	}
-	if err = run(ctx, privateDir(), backup, true); err == nil {
+	if err = run(ctx, privateDir(), backup, "", true); err == nil {
 		t.Fatal("uncalibrated audience allowed retirement")
 	}
 	if _, err = fixture.Exec(ctx, `UPDATE segment_audience_snapshots SET source_watermarks='[{"source":"wecom.directory.published.v2"}]'; INSERT INTO customer_owner_handoff_batches VALUES('local_only','executing')`); err != nil {
 		t.Fatal(err)
 	}
-	if err = run(ctx, privateDir(), backup, true); err == nil {
+	if err = run(ctx, privateDir(), backup, "", true); err == nil {
 		t.Fatal("in-flight local ownership allowed retirement")
 	}
 	if _, err = fixture.Exec(ctx, `DELETE FROM customer_owner_handoff_batches; INSERT INTO wecom_customer_sync_runs VALUES('ingesting')`); err != nil {
 		t.Fatal(err)
 	}
-	if err = run(ctx, privateDir(), backup, true); err == nil {
+	if err = run(ctx, privateDir(), backup, "", true); err == nil {
 		t.Fatal("in-flight refresh allowed retirement")
 	}
 	if _, err = fixture.Exec(ctx, "DELETE FROM wecom_customer_sync_runs"); err != nil {
 		t.Fatal(err)
 	}
 	dry := privateDir()
-	if err = run(ctx, dry, backup, false); err != nil {
+	if err = run(ctx, dry, backup, "", false); err != nil {
 		t.Fatal(err)
 	}
 	var exists bool
 	if err = fixture.QueryRow(ctx, "SELECT to_regclass('wecom_follow_relationships') IS NOT NULL").Scan(&exists); err != nil || !exists {
 		t.Fatalf("dry run modified tables: %v", err)
 	}
+	// Execution requires the reviewed dry-run receipt. Differences are detected
+	// after the actual locked export, before either DROP is attempted.
+	assertTables := func() {
+		t.Helper()
+		var present bool
+		if e := fixture.QueryRow(ctx, "SELECT to_regclass('wecom_follow_relationships') IS NOT NULL AND to_regclass('customer_local_owners') IS NOT NULL").Scan(&present); e != nil || !present {
+			t.Fatalf("rejected execution deleted a table: %v", e)
+		}
+	}
+	if e := run(ctx, privateDir(), backup, "", true); e == nil {
+		t.Fatal("execution without reviewed export receipt allowed")
+	}
+	assertTables()
+	dryRaw, e := os.ReadFile(filepath.Join(dry, "export-receipt.json"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	var wrong map[string]any
+	if e = json.Unmarshal(dryRaw, &wrong); e != nil {
+		t.Fatal(e)
+	}
+	wrong["database_backup_sha256"] = strings.Repeat("0", 64)
+	wrongRaw, e := json.Marshal(wrong)
+	if e != nil {
+		t.Fatal(e)
+	}
+	wrongPath := filepath.Join(t.TempDir(), "wrong-backup-receipt.json")
+	if e = os.WriteFile(wrongPath, wrongRaw, 0600); e != nil {
+		t.Fatal(e)
+	}
+	if e = run(ctx, privateDir(), backup, wrongPath, true); e == nil {
+		t.Fatal("receipt for another backup allowed retirement")
+	}
+	assertTables()
+	if _, e := fixture.Exec(ctx, "INSERT INTO customer_local_owners VALUES(2,10)"); e != nil {
+		t.Fatal(e)
+	}
+	if e := run(ctx, privateDir(), backup, filepath.Join(dry, "export-receipt.json"), true); e == nil {
+		t.Fatal("changed row count allowed retirement")
+	}
+	assertTables()
+	if _, e := fixture.Exec(ctx, "DELETE FROM customer_local_owners WHERE customer_id=2; UPDATE wecom_follow_relationships SET employee_id='synthetic-changed' WHERE customer_id=1"); e != nil {
+		t.Fatal(e)
+	}
+	if e := run(ctx, privateDir(), backup, filepath.Join(dry, "export-receipt.json"), true); e == nil {
+		t.Fatal("changed content with same row count allowed retirement")
+	}
+	assertTables()
+	if _, e := fixture.Exec(ctx, "UPDATE wecom_follow_relationships SET employee_id='synthetic-a' WHERE customer_id=1"); e != nil {
+		t.Fatal(e)
+	}
 	output := privateDir()
-	if err = run(ctx, output, backup, true); err != nil {
+	if err = run(ctx, output, backup, filepath.Join(dry, "export-receipt.json"), true); err != nil {
 		t.Fatal(err)
 	}
 	if err = fixture.QueryRow(ctx, "SELECT to_regclass('wecom_follow_relationships') IS NOT NULL OR to_regclass('customer_local_owners') IS NOT NULL").Scan(&exists); err != nil || exists {
@@ -121,6 +172,7 @@ func TestRetirementRequiresBackupCalibrationAndExportsBeforeDropPostgreSQL(t *te
 	var receipt struct {
 		Committed bool          `json:"committed"`
 		Exports   []tableExport `json:"exports"`
+		Expected  string        `json:"expected_export_receipt_sha256"`
 	}
 	bytes, err := os.ReadFile(filepath.Join(output, "retirement-receipt.json"))
 	if err != nil {
@@ -128,6 +180,14 @@ func TestRetirementRequiresBackupCalibrationAndExportsBeforeDropPostgreSQL(t *te
 	}
 	if err = json.Unmarshal(bytes, &receipt); err != nil {
 		t.Fatal(err)
+	}
+	dryBytes, err := os.ReadFile(filepath.Join(dry, "export-receipt.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dryHash := sha256.Sum256(dryBytes)
+	if receipt.Expected != hex.EncodeToString(dryHash[:]) {
+		t.Fatal("execution did not bind reviewed receipt")
 	}
 	if !receipt.Committed || len(receipt.Exports) != 2 {
 		t.Fatal("missing committed export receipt")
@@ -153,7 +213,7 @@ func TestRetirementRejectsInvalidBackupBeforeConnecting(t *testing.T) {
 	if err := os.WriteFile(backup, []byte("PGDMPinvalid"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(context.Background(), filepath.Join(t.TempDir(), "exports"), backup, true); err == nil {
+	if err := run(context.Background(), filepath.Join(t.TempDir(), "exports"), backup, "", true); err == nil {
 		t.Fatal("unreadable archive accepted")
 	}
 }

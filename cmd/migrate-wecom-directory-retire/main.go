@@ -25,9 +25,10 @@ import (
 func main() {
 	output := flag.String("output-dir", "", "private directory for old table exports and checksums")
 	backup := flag.String("database-backup", "", "existing PostgreSQL custom-format full migration backup")
+	expected := flag.String("expected-export-receipt", "", "reviewed dry-run export receipt required when executing")
 	execute := flag.Bool("execute", false, "drop retired tables after exporting; default exports and rolls back")
 	flag.Parse()
-	if err := run(context.Background(), *output, *backup, *execute); err != nil {
+	if err := run(context.Background(), *output, *backup, *expected, *execute); err != nil {
 		fmt.Fprintln(os.Stderr, "directory retirement refused:", err)
 		os.Exit(1)
 	}
@@ -40,7 +41,7 @@ type tableExport struct {
 	File   string `json:"file"`
 }
 
-func run(ctx context.Context, output, backup string, execute bool) error {
+func run(ctx context.Context, output, backup, expected string, execute bool) error {
 	if !filepath.IsAbs(output) || !filepath.IsAbs(backup) {
 		return errors.New("absolute output and backup paths are required")
 	}
@@ -102,6 +103,14 @@ func run(ctx context.Context, output, backup string, execute bool) error {
 	if !ready {
 		return errors.New("full directory, audience calibration or in-flight task checks are incomplete")
 	}
+	var reviewed []tableExport
+	var reviewedHash string
+	if execute {
+		reviewed, reviewedHash, err = readExpectedExports(expected, backupHash)
+		if err != nil {
+			return err
+		}
+	}
 	tables := []string{"wecom_follow_relationships", "customer_local_owners"}
 	exports := []tableExport{}
 	for _, table := range tables {
@@ -152,12 +161,18 @@ func run(ctx context.Context, output, backup string, execute bool) error {
 		exports = append(exports, tableExport{table, count, hex.EncodeToString(digest.Sum(nil)), filename})
 	}
 	receipt := map[string]any{"created_at": time.Now().UTC(), "database_backup_sha256": backupHash, "exports": exports, "execute_requested": execute, "committed": false}
+	if execute {
+		receipt["expected_export_receipt_sha256"] = reviewedHash
+	}
 	if err = writeReceipt(output, "export-receipt.json", receipt); err != nil {
 		return err
 	}
 	if !execute {
 		fmt.Println("retired tables exported; dry run rolled back")
 		return nil
+	}
+	if !sameExports(reviewed, exports) {
+		return errors.New("locked exports differ from reviewed dry run; tables retained")
 	}
 	for _, e := range exports {
 		if _, err = tx.Exec(ctx, `DROP TABLE `+pgx.Identifier{e.Table}.Sanitize()); err != nil {
@@ -180,4 +195,56 @@ func writeReceipt(output, name string, value any) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(output, name), append(raw, '\n'), 0600)
+}
+
+// The release coordinator supplies the private dry-run receipt. Bind execution
+// to that exact file and backup; compare its exports while the table locks are
+// still held, before issuing any destructive statement.
+func readExpectedExports(path, backupHash string) ([]tableExport, string, error) {
+	if !filepath.IsAbs(path) {
+		return nil, "", errors.New("absolute reviewed dry-run receipt path is required")
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 1024*1024 {
+		return nil, "", errors.New("reviewed receipt must be a private regular file")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", errors.New("reviewed receipt unavailable")
+	}
+	var receipt struct {
+		Backup    string        `json:"database_backup_sha256"`
+		Execute   bool          `json:"execute_requested"`
+		Committed bool          `json:"committed"`
+		Exports   []tableExport `json:"exports"`
+	}
+	if err = json.Unmarshal(raw, &receipt); err != nil || receipt.Execute || receipt.Committed || receipt.Backup != backupHash || receipt.Exports == nil {
+		return nil, "", errors.New("reviewed receipt must identify a dry run with the same backup")
+	}
+	seen := map[string]bool{}
+	for _, e := range receipt.Exports {
+		digest, decodeErr := hex.DecodeString(e.SHA256)
+		if (e.Table != "wecom_follow_relationships" && e.Table != "customer_local_owners") || seen[e.Table] || e.File != e.Table+".ndjson" || e.Rows < 0 || decodeErr != nil || len(digest) != sha256.Size {
+			return nil, "", errors.New("reviewed receipt contains invalid export metadata")
+		}
+		seen[e.Table] = true
+	}
+	digest := sha256.Sum256(raw)
+	return receipt.Exports, hex.EncodeToString(digest[:]), nil
+}
+func sameExports(expected, actual []tableExport) bool {
+	if len(expected) != len(actual) {
+		return false
+	}
+	byTable := map[string]tableExport{}
+	for _, e := range expected {
+		byTable[e.Table] = e
+	}
+	for _, e := range actual {
+		old, ok := byTable[e.Table]
+		if !ok || old.Rows != e.Rows || old.SHA256 != e.SHA256 || old.File != e.File {
+			return false
+		}
+	}
+	return true
 }
