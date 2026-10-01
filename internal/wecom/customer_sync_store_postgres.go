@@ -471,7 +471,11 @@ func (PostgreSQLCustomerSyncStore) RefreshProfilePrimaryOwners(ctx context.Conte
 	if err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `WITH candidates AS (
+	// The run has just updated thousands of rows in this transaction, while
+	// planner statistics still describe the preceding run. Materialize the
+	// aggregate once rather than letting a tiny row estimate inline it under
+	// a per-observation nested loop during full publication.
+	if _, err = tx.Exec(ctx, `WITH candidates AS MATERIALIZED (
 		SELECT profile.customer_id,profile.corp_scope,min(observation.employee_id) AS primary_owner_userid
 		FROM wecom_external_contact_profiles profile
 		JOIN wecom_customer_owner_observations observation
@@ -487,7 +491,7 @@ func (PostgreSQLCustomerSyncStore) RefreshProfilePrimaryOwners(ctx context.Conte
 		AND (profile.primary_owner_userid IS DISTINCT FROM candidate.primary_owner_userid OR profile.primary_owner_run_id IS DISTINCT FROM $1)`, runID, at.UTC()); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `WITH candidates AS (
+	_, err = tx.Exec(ctx, `WITH candidates AS MATERIALIZED (
 		SELECT profile.customer_id,profile.corp_scope,min(observation.employee_id) AS primary_owner_userid
 		FROM wecom_external_contact_profiles profile
 		JOIN wecom_customer_owner_observations observation

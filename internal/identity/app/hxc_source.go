@@ -32,16 +32,47 @@ type HXCSourceService struct {
 	VerifiedIdentity HXCVerifiedIdentityFactory
 }
 
+type reviewedHXCAccountStore interface {
+	ReviewedHXCAccount(context.Context, identityport.HXCSubject) (identityport.HXCSubjectResult, bool, error)
+}
+
 func (service HXCSourceService) InspectHXCSubjects(ctx context.Context, subjects []identityport.HXCSubject) ([]identityport.HXCSubjectResult, error) {
 	if service.Inspector == nil {
 		return nil, ErrHXCSourceNotReady
 	}
-	return service.Inspector.InspectHXCSubjects(ctx, subjects)
+	results, err := service.Inspector.InspectHXCSubjects(ctx, subjects)
+	if err != nil {
+		return nil, err
+	}
+	if reviewed, ok := service.Store.(reviewedHXCAccountStore); ok {
+		if len(results) != len(subjects) {
+			return nil, ErrHXCInspectionMismatch
+		}
+		for i, subject := range subjects {
+			result, found, reviewErr := reviewed.ReviewedHXCAccount(ctx, subject)
+			if reviewErr != nil {
+				return nil, reviewErr
+			}
+			if found {
+				results[i] = result
+			}
+		}
+	}
+	return results, nil
 }
 
 func (service HXCSourceService) ApplyHXCSubject(ctx context.Context, subject identityport.HXCSubject) (identityport.HXCSubjectResult, error) {
 	if service.Inspector == nil || service.Store == nil || service.OneID.Store == nil || subject.RuleVersion == "" {
 		return identityport.HXCSubjectResult{}, ErrHXCSourceNotReady
+	}
+	if reviewed, ok := service.Store.(reviewedHXCAccountStore); ok {
+		result, found, err := reviewed.ReviewedHXCAccount(ctx, subject)
+		if err != nil {
+			return identityport.HXCSubjectResult{}, err
+		}
+		if found {
+			return service.Store.PersistHXCResolution(ctx, subject, result)
+		}
 	}
 	if replay, found, err := service.Store.ReplayHXCResolution(ctx, subject); err != nil {
 		return identityport.HXCSubjectResult{}, err

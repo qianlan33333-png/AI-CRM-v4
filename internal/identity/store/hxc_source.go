@@ -58,6 +58,13 @@ func (store *PostgresStore) ReplayHXCResolution(ctx context.Context, subject ide
 			return identityport.HXCSubjectResult{}, false, nil
 		}
 	}
+	if reviewed, found, reviewErr := store.ReviewedHXCAccount(ctx, subject); reviewErr != nil {
+		return identityport.HXCSubjectResult{}, false, reviewErr
+	} else if found && (result.CustomerID != reviewed.CustomerID || result.MatchedBy != reviewed.MatchedBy || result.Disposition != reviewed.Disposition || result.Reason != reviewed.Reason) {
+		// The original receipt remains immutable; append a corrected outcome
+		// instead of replaying the old phone-based customer attribution.
+		return identityport.HXCSubjectResult{}, false, nil
+	}
 	return result, true, nil
 }
 
