@@ -5,7 +5,7 @@
 3. 一个候选包含完整可上线行为或明确缺陷及回归测试；接口、调用方、数据库需一起生效时一起交付。UI 编码前使用 Product Design。
 4. 按 [核心 skill 的限制必要性判断](../skills/aicrm-v3-development/SKILL.md#限制必要性判断奥卡姆剃刀原则) 决定不加、复用或增加最小必要约束；无新增限制写一句“不涉及新增限制”。
 5. 本地执行适用 `fast`、Go 编译及相关测试。`affected --base SHA --head SHA --dry-run` 显示计划；缺环境、未知影响或关键测试未执行不能报通过。支付/权限/订单即使一行也验证相关链路。
-6. 提交准确 base/head/tree、测试结果与简短变化说明给唯一工作台，按 [日常国内发布](operations/domestic-main-release.md) 完成。开放批次中的 base 是工作台给出的当前累计预发 HEAD；候选过期由原开发者更新重验，发布者不代为解决冲突。
+6. 实际推送国内准确候选 ref 后，重新读取 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json`，通过 `send_message_to_thread` 将原开发任务 ID、base/head/tree/ref、五项影响、测试收据、未验证项和已有授权范围投递给其 `thread_id`；不只写“等待发布”，不自行安装共享预发或生产。按 [日常国内发布](operations/domestic-main-release.md) 完成。开放批次中的 base 是工作台给出的当前累计预发 HEAD；候选过期由原开发者更新重验，发布者不代为解决冲突。
 
 本地文档/skill 校验后即生效，不等待 GitHub 合并，不做应用安装。GitHub 仅人工归档；不自动推送、不设同步周期。预备机用合成数据和虚拟 Provider；仅生产迁移前备份数据库。累计预发最终版本完成整批适用验证后，已有生产授权即内部绑定有序成员、最终构件摘要及预发收据并一次晋级生产；尚无生产授权时等待用户部署命令。技术安装、真实业务验收分别记录，后者不占技术通道。
 

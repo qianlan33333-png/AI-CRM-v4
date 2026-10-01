@@ -18,7 +18,7 @@ Use this skill after reading the repository `AGENTS.md`. Its purpose is to make 
 
 ## Small-step delivery
 
-Follow `skills/aicrm-v3-development-frontdoor/SKILL.md`: keep the parent brief in one Codex task, deliver one independently releasable behavior or defect with its tests in each candidate, and use Product Design before UI implementation. Split by behavior, without line-count quotas. An authorized parent brief carries into child candidates; request a new decision only for material scope or contract changes. Release-failure diagnosis and fixes use a separate `gpt-6-luna` max agent; other tasks are not restricted to that model.
+Follow `skills/aicrm-v3-development-frontdoor/SKILL.md`: keep the parent brief in one Codex task, deliver one independently releasable behavior or defect with its tests in each candidate, and use Product Design before UI implementation. Split by behavior, without line-count quotas. An authorized parent brief carries into child candidates; request a new decision only for material scope or contract changes. The routed release workbench owns publication; the original developer fixes code or baseline failures. Use a separate agent only when explicitly requested by the user or applicable instructions; other tasks are not restricted to a model.
 
 
 每个候选固定说明对外合同、业务机制、关联模块、页面影响和验证证据，按 [开发入口五项判断](../aicrm-v3-development-frontdoor/SKILL.md#五项影响判断) 用准确 diff、依赖图和可信映射复核。高风险加强相关断言；未知影响不能仅靠作者声明缩减检查。
@@ -133,7 +133,9 @@ Do not assume the current adapter participates in the caller's Unit of Work. Ver
 
 ## Completion Evidence
 
-默认采用 [日常国内发布](../../docs/operations/domestic-main-release.md)：准确候选与相关测试 → 国内构建一次 → 预发安装和受影响合成旅程 → 人工确认准确候选、构件及预发收据 → 同包生产 → 版本、完整摘要、服务及健康读回 → 同一任务完成源码基线对齐。
+默认采用 [日常国内发布](../../docs/operations/domestic-main-release.md)：准确候选与相关测试 → 国内构建一次 → 预发安装和受影响合成旅程 → 已有部署命令则内部绑定准确候选、构件及预发收据 → 同包生产 → 版本、完整摘要、服务及健康读回 → 唯一工作台完成源码基线对齐。尚无生产授权时等待用户部署命令；已有授权不重复询问。
+
+国内准确候选 ref 实际推送后，读取 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json`，通过 `send_message_to_thread` 将原任务 ID、base/head/tree/ref、五项影响、测试收据、未验证项和授权范围实际交付其 `thread_id`。开发任务不安装共享预发或生产；工作台开始、恢复及发布写操作前核对路由，不指向自己即停止写操作。更换对话继续使用原队列、锁、attempt 和收据，具体交接见发布文档，不在本 skill 固定对话 ID。
 
 开发交付只需准确 base/head/tree、相关测试结果、简短影响说明和未验证项。发布者保留各步骤的既有收据；没有 GitHub PR、merge-preview、freshness attestation、四级 handoff 或 ACK 前置。文档/skill 在本地校验后生效，不要求应用构建、预发安装或生产发布。
 

@@ -1,9 +1,9 @@
 ---
 name: aicrm-v3-frontend-consistency
-description: Keep AI-CRM-v3 admin, WeCom sidebar, H5, and public frontend work consistent by reusing verified project components and extending or adding shared components when needed. Use for any page, interaction, selector, media, style, or frontend asset change.
+description: Keep AI-CRM-v4 admin, WeCom sidebar, H5, and public frontend work consistent by reusing verified project components and extending or adding shared components when needed. Use for any page, interaction, selector, media, style, or frontend asset change. The v3 skill path remains for compatibility.
 ---
 
-# AI-CRM-v3 Frontend Consistency
+# AI-CRM-v4 Frontend Consistency
 
 先阅读仓库 `AGENTS.md`、`skills/aicrm-v3-development/SKILL.md`，再按需读取 [组件索引](references/component-map.md)。本 Skill 适用于所有前端设计、开发、修改和审查；纯后端且无前端可观察影响的工作除外。它管理前端复用和边界，不替代业务、OneID、持久化或外部效果设计。
 
@@ -22,9 +22,9 @@ description: Keep AI-CRM-v3 admin, WeCom sidebar, H5, and public frontend work c
 ## 复用与装配
 
 1. 从组件索引选择已存在的页面、公共组件或领域组件，复用其交互、状态、无权限和错误语义。
-2. 管理端只通过 v3 `admin_base` 单壳和各领域 adapter 装配；不得引入第二侧边栏、donor 外层 HTML 或另一套页面框架。
+2. 管理端只通过当前 V4 `admin_base` 单壳和各领域 adapter 装配；不得引入第二侧边栏、donor 外层 HTML 或另一套页面框架。已有 `web/v3` 路径是本仓兼容名称，不代表旧仓可用于开发或部署。
 3. 企微侧边栏复用其 sidebar 壳与受限 bootstrap 契约；H5 与公共页各自从已有入口挂载，不能借用管理端壳。
-4. 冻结 donor 仅是行为和视觉证据。adapter、兼容和新增公共组件写在 v3-owned 路径，不能修改 donor 快照。
+4. 本仓冻结 donor 仅是行为和视觉证据。adapter、兼容和新增公共组件写在当前 V4 拥有的路径，不能修改 donor 快照，也不读取旧仓运行时作为验收。
 
 保持已选终端的字体、色彩、间距、布局，以及按钮、表单、表格、分页和弹窗的一致性；搜索、预选、取消、数量、权限校验和错误状态也属于组件合同。
 
@@ -41,6 +41,8 @@ description: Keep AI-CRM-v3 admin, WeCom sidebar, H5, and public frontend work c
 ## 交付记录
 
 在 PRD 或 PR 使用以下简表：参考页面｜复用组件｜公共扩展／新增｜受影响调用｜Product Design skill／作用／结果｜验收证据。仅在需要定位入口或组件缺口时读取 [组件索引](references/component-map.md)。
+
+发布按 [唯一工作台交接](../../docs/operations/domestic-main-release.md#工作台交接和当前基线)：国内准确候选 ref 实际推送后，重新读取 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json`，通过 `send_message_to_thread` 向其 `thread_id` 实际交付原任务 ID、base/head/tree/ref、五项影响、测试收据、未验证项和授权范围。前端开发任务不自行安装共享预发或生产，不沿用旧工作台 ID；已有“部署到生产机”授权不重复确认。
 
 ## 治理参考
 

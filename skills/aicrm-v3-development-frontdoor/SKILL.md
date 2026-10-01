@@ -34,7 +34,7 @@ Read repository `AGENTS.md` and `skills/aicrm-v3-development/SKILL.md`. Use the 
 
 - Keep the implementation and its child candidates in the same Codex task. Each candidate delivers one independently releasable, reversible user-visible behavior or clear defect with related tests. Split by behavior, not line or file quota. 日常候选是国内 `codex/*` 分支的准确 SHA/base；GitHub PR 仅作人工归档，不决定部署。
 - Use the Product Design plugin/skill before implementing any sidebar, customer-facing, or admin UI.
-- 发布由同一负责人完成；需要代理时使用一个 `gpt-6-luna` max agent，负责本次发布全程，不为构建、交接、观察各开任务。其他开发模型不受限。
+- 发布由唯一路由指定的工作台完成；仅用户或适用规则明确要求代理时，使用一个 `gpt-6-luna` max agent 负责本次发布全程，不为构建、交接、观察各开任务。其他开发模型不受限。
 - Preserve exact head/tree and test scope in candidate evidence. Unknown, shared, migration, executable check-policy, or release-path changes remain conservative.
 - `python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` prints a candidate plan. A normal local run executes its lanes, named changed tests and whole affected packages only where a narrower relationship is unknown. Missing environment or execution evidence is incomplete. 发布者核对准确 SHA/tree、影响范围、环境和结果；相同适用 Linux 证据可复用，不因为进入发布阶段重跑相同测试。macOS 证据不替代必需 Linux 验证。
 - The former PR2 ten-PR shadow trial remains historical evidence for the GitHub gate. Domestic cutover does not prove a faster check safe or faster. Keep unverified categories on complete checks; a confirmed omission or unknown receipt closes the relevant fast path.
@@ -43,7 +43,7 @@ Routine implementation choices within an authorized PRD do not need another conf
 
 ## 日常交付
 
-使用 [日常国内发布](../../docs/operations/domestic-main-release.md)。开发者只提供准确候选、相关测试和变化说明；不创建 merge-preview、handoff 事件或延期验收日期。普通发布沿用热修同包路径，工具维护和完整基线初始化只在实际需要时处理；源码、收据和生产身份不一致仍停止并对账。
+使用 [日常国内发布](../../docs/operations/domestic-main-release.md#工作台交接和当前基线)。国内准确候选 ref 实际推送后，读取 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json`，通过 `send_message_to_thread` 向其 `thread_id` 实际投递原任务 ID、base/head/tree/ref、五项影响、测试收据、未验证项和授权范围；不硬编码旧工作台 ID，不只写“等待发布”，不自行安装共享预发或生产。不创建 merge-preview、handoff 事件或延期验收日期。普通发布沿用同包路径和现有队列/锁；源码、收据和生产身份出现无法解释的不一致时停止对账。
 
 ## 2026-10-01 发布复盘落地
 

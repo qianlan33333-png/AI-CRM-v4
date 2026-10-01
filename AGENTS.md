@@ -4,6 +4,8 @@
 
 使用 [开发入口](docs/development-before-start.md) 和 [日常国内发布](docs/operations/domestic-main-release.md)。用户已选择国内源码、GitHub 人工择机归档；GitHub PR/check、merge-preview、freshness、handoff ACK 与观察占位不是日常部署门禁。旧发布说明只作历史查询。
 
+唯一发布工作台由 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json` 的 `thread_id` 指定，不在 skill 或旧对话中固定 ID。开发任务实际推送国内准确候选 ref 后，重新读取路由并通过 `send_message_to_thread` 投递原任务 ID、base/head/tree/ref、五项影响、测试收据、未验证项和已有授权范围；仅写“等待发布”不算交付。开发任务不自行安装共享预发或生产。工作台在开始、恢复和发布写操作前核对路由；不指向自己即停止发布写操作。更换对话只交接现有队列、锁、attempt 和收据，按发布文档执行，不初始化第二条发布路径。
+
 每个开发任务使用独立 `codex/<work-item>` worktree/分支，一个能力只准备一次业务流程、参考和简短父 PRD。复用已授权 brief，相关测试随完整行为交付。UI 编码前使用 Product Design；新增限制先应用核心 skill 的必要性判断。
 
 同一发布者持串行锁核对准确源码和影响，逐项运行相关检查、各构建一次、依次安装累计预发版本与相关业务旅程。开放批次的下一候选从已核验的累计预发 HEAD 出发，生产源码和应用保持原基线。最终累计版本覆盖整批适用旅程后，已有“部署到生产机”授权即内部封批、绑定有序成员、最终构件和预发收据并直接继续；尚无生产授权时等待用户部署命令。随后生产保存最终源码 bundle、内网晋级同一最终包一次、生产完整读回，最后完成源码 main/收据对齐。需要代理时用一个 `gpt-6-luna` max agent；不按预发、交接和观察拆任务。
