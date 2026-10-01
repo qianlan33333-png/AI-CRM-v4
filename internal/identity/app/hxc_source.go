@@ -42,10 +42,11 @@ type sharedHXCPhoneStore interface {
 }
 
 func (service HXCSourceService) sharedPhoneInput(ctx context.Context, subject identityport.HXCSubject) (identityport.HXCSubject, bool, error) {
-	if subject.ConflictReason != "" && subject.ConflictReason != identityport.HXCReasonDuplicatePhone {
+	ambiguousCustomer := subject.PhoneAssociationAmbiguous && subject.ConflictReason == identityport.HXCReasonDuplicateCustomer
+	if subject.ConflictReason != "" && subject.ConflictReason != identityport.HXCReasonDuplicatePhone && !ambiguousCustomer {
 		return subject, false, nil
 	}
-	shared := subject.ConflictReason == identityport.HXCReasonDuplicatePhone
+	shared := subject.ConflictReason == identityport.HXCReasonDuplicatePhone || ambiguousCustomer
 	if !shared {
 		if history, ok := service.Store.(sharedHXCPhoneStore); ok {
 			var err error

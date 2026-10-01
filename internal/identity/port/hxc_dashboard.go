@@ -52,9 +52,11 @@ type HXCSubject struct {
 	UnionID         string
 	UnionIDVerified bool
 	Phone           string
-	SourceUpdatedAt time.Time
-	ConflictReason  HXCReason
-	RuleVersion     string
+	// PhoneAssociationAmbiguous is a trusted batch fact that only degrades phone evidence.
+	PhoneAssociationAmbiguous bool
+	SourceUpdatedAt           time.Time
+	ConflictReason            HXCReason
+	RuleVersion               string
 }
 
 type HXCSubjectResult struct {

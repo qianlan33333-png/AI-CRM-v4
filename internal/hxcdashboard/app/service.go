@@ -209,12 +209,53 @@ func (s Service) project(ctx context.Context, snapshot hxcport.Snapshot, applyId
 			owners[int64(result.CustomerID)] = append(owners[int64(result.CustomerID)], i)
 		}
 	}
+	var ambiguous []identityport.HXCSubject
 	for _, positions := range owners {
-		if len(positions) > 1 {
-			for _, i := range positions {
-				subjects[i].ConflictReason = identityport.HXCReasonDuplicateCustomer
+		if len(positions) < 2 {
+			continue
+		}
+		strongPosition, strongCount := -1, 0
+		for _, i := range positions {
+			result := results[i]
+			if subjects[i].UnionIDVerified && subjects[i].UnionID != "" && result.UnionCustomerID == result.CustomerID &&
+				(result.MatchedBy == identityport.HXCMatchUnionID || result.MatchedBy == identityport.HXCMatchBoth) {
+				strongPosition, strongCount = i, strongCount+1
+			}
+		}
+		for _, i := range positions {
+			if strongCount == 1 && i == strongPosition {
+				continue
+			}
+			subjects[i].ConflictReason = identityport.HXCReasonDuplicateCustomer
+			if strongCount == 1 {
+				// The provider's distinct account must not borrow the UnionID account's phone root.
+				// Identity owns reinspection and retains the original encrypted observation.
+				subjects[i].PhoneAssociationAmbiguous = true
+				ambiguous = append(ambiguous, subjects[i])
+			} else {
 				results[i] = identityport.HXCSubjectResult{Position: i, Disposition: identityport.HXCConflict, MatchedBy: identityport.HXCMatchNone, Reason: identityport.HXCReasonDuplicateCustomer}
 			}
+		}
+	}
+	for start := 0; start < len(ambiguous); start += 1000 {
+		end := start + 1000
+		if end > len(ambiguous) {
+			end = len(ambiguous)
+		}
+		var batch []identityport.HXCSubjectResult
+		err := s.UOW.Within(ctx, func(txCtx context.Context) error {
+			var inspectErr error
+			batch, inspectErr = s.Identity.InspectHXCSubjects(txCtx, ambiguous[start:end])
+			return inspectErr
+		})
+		if err != nil {
+			return domain.Projection{}, err
+		}
+		if len(batch) != end-start {
+			return domain.Projection{}, errors.New("HXC identity result count mismatch")
+		}
+		for _, result := range batch {
+			results[result.Position] = result
 		}
 	}
 	if applyIdentities {

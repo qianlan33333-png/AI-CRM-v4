@@ -187,6 +187,73 @@ func TestHXCSharedPhoneAccountsIntegration(t *testing.T) {
 	if got := apply(old); !got.Replayed || got.Reason != identityport.HXCReasonDuplicateUnionID {
 		t.Fatalf("batch conflict change did not append an idempotent receipt: %+v", got)
 	}
+	// A unique UnionID account keeps its root when a separate phone-only account
+	// had borrowed it. The old complete-batch conflict must not replay forever.
+	strong := hxcIntegrationSubject("unique-union-owner", "stable-source", "shared-union", "")
+	if got := apply(strong); got.CustomerID != unionRoot.CustomerID || got.Replayed {
+		t.Fatalf("initial strong account=%+v", got)
+	}
+	strong.ConflictReason = identityport.HXCReasonDuplicateCustomer
+	if got := apply(strong); got.Reason != identityport.HXCReasonDuplicateCustomer || got.Disposition != identityport.HXCConflict {
+		t.Fatalf("duplicate batch=%+v", got)
+	}
+	strong.ConflictReason = ""
+	if got := apply(strong); got.CustomerID != unionRoot.CustomerID || got.Replayed {
+		t.Fatalf("expired batch conflict=%+v", got)
+	}
+	if got := apply(strong); !got.Replayed || got.CustomerID != unionRoot.CustomerID {
+		t.Fatalf("matched-conflict-matched replay=%+v", got)
+	}
+	// Recurring conflicts append a receipt for the current conflict rather than
+	// returning an immutable receipt whose historical conflict was resolved.
+	strong.ConflictReason = identityport.HXCReasonDuplicateCustomer
+	if got := apply(strong); got.Replayed || got.ConflictID == 0 {
+		t.Fatalf("recurring conflict=%+v", got)
+	}
+	if got := apply(strong); !got.Replayed {
+		t.Fatalf("recurring conflict retry=%+v", got)
+	}
+	strong.ConflictReason = ""
+	if got := apply(strong); got.CustomerID != unionRoot.CustomerID {
+		t.Fatalf("second recovery=%+v", got)
+	}
+	weak := hxcIntegrationSubject("independent-phone-account", "stable-weak", "", "13800138000")
+	within(func(tx context.Context) error {
+		_, err := repository.PersistHXCResolution(tx, weak, identityport.HXCSubjectResult{Disposition: identityport.HXCMatched, MatchedBy: identityport.HXCMatchPhone, Reason: identityport.HXCReasonMatchedPhone, CustomerID: phoneRoot.CustomerID})
+		return err
+	})
+	weak.ConflictReason = identityport.HXCReasonDuplicateCustomer
+	weak.PhoneAssociationAmbiguous = true
+	if got := apply(weak); got.Disposition != identityport.HXCUnmatched || got.CustomerID != 0 || got.Reason != identityport.HXCReasonMissingIdentity || got.Replayed {
+		t.Fatalf("independent phone account=%+v", got)
+	}
+	weakState := func() string {
+		t.Helper()
+		var snapshot string
+		if err := pool.Native().QueryRow(ctx, `SELECT json_build_object('subject',row_to_json(s),
+		 'observations',(SELECT json_agg(row_to_json(o) ORDER BY o.id) FROM identity_source_observations o WHERE o.subject_id=s.id),
+		 'receipts',(SELECT json_agg(row_to_json(r) ORDER BY r.id) FROM identity_source_resolution_receipts r WHERE r.subject_id=s.id))::text
+		 FROM identity_source_subjects s WHERE s.subject_digest=$1`, weak.SubjectDigest[:]).Scan(&snapshot); err != nil {
+			t.Fatal(err)
+		}
+		return snapshot
+	}
+	beforeRetry := weakState()
+	if got := apply(weak); !got.Replayed {
+		t.Fatalf("independent phone retry=%+v", got)
+	}
+	if afterRetry := weakState(); afterRetry != beforeRetry {
+		t.Fatal("independent account retry changed subject, observation or receipt")
+	}
+	weak.PhoneAssociationAmbiguous, weak.ConflictReason = false, ""
+	if got := apply(weak); !got.Replayed || got.CustomerID != 0 {
+		t.Fatalf("historical phone ambiguity lost=%+v", got)
+	}
+	weak.ConflictReason = identityport.HXCReasonDuplicateUnionID
+	weak.PhoneAssociationAmbiguous = true
+	if got := apply(weak); got.Disposition != identityport.HXCConflict || got.Reason != identityport.HXCReasonDuplicateUnionID {
+		t.Fatalf("ambiguity fact bypassed strong conflict=%+v", got)
+	}
 	var roots, phoneBindings, merges, identityConflicts int
 	if err := pool.Native().QueryRow(ctx, `SELECT (SELECT count(*) FROM customers),(SELECT count(*) FROM customer_identities WHERE kind='phone'),(SELECT count(*) FROM customer_merge_candidates),(SELECT count(*) FROM customer_identity_conflicts)`).Scan(&roots, &phoneBindings, &merges, &identityConflicts); err != nil {
 		t.Fatal(err)

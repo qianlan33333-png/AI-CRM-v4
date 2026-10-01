@@ -84,3 +84,98 @@ func TestProjectApplyVerifiesExactReplayForEverySubject(t *testing.T) {
 		t.Fatalf("replay closure not proven: projection=%#v completed=%d", projection, resolver.completed)
 	}
 }
+
+// accountIdentity exercises HXC's batch decision while Identity still owns
+// matching and the ambiguity policy. Strong and phone-only results share root77.
+type accountIdentity struct {
+	testIdentity
+}
+
+func (r *accountIdentity) InspectHXCSubjects(_ context.Context, subjects []identityport.HXCSubject) ([]identityport.HXCSubjectResult, error) {
+	r.seen = append(r.seen, subjects...)
+	out := make([]identityport.HXCSubjectResult, 0, len(subjects))
+	for _, subject := range subjects {
+		result := identityport.HXCSubjectResult{Position: subject.Position, Disposition: identityport.HXCUnmatched, MatchedBy: identityport.HXCMatchNone, Reason: identityport.HXCReasonMissingIdentity}
+		ambiguous := subject.PhoneAssociationAmbiguous && subject.ConflictReason == identityport.HXCReasonDuplicateCustomer
+		switch {
+		case subject.ConflictReason != "" && !ambiguous:
+			result.Disposition, result.Reason = identityport.HXCConflict, subject.ConflictReason
+		case subject.UnionIDVerified && (subject.UnionID == "strong" || subject.UnionID == "second"):
+			result.Disposition, result.MatchedBy, result.Reason = identityport.HXCMatched, identityport.HXCMatchUnionID, identityport.HXCReasonMatchedUnionID
+			result.CustomerID, result.UnionCustomerID = 77, 77
+		case !ambiguous && subject.Phone != "":
+			result.Disposition, result.MatchedBy, result.Reason = identityport.HXCMatched, identityport.HXCMatchPhone, identityport.HXCReasonMatchedPhone
+			result.CustomerID, result.PhoneCustomerID = 77, 77
+		case subject.UnionID != "":
+			result.Reason = identityport.HXCReasonNoMatch
+		}
+		out = append(out, result)
+	}
+	return out, nil
+}
+func (r *accountIdentity) ApplyHXCSubject(ctx context.Context, subject identityport.HXCSubject) (identityport.HXCSubjectResult, error) {
+	values, err := r.InspectHXCSubjects(ctx, []identityport.HXCSubject{subject})
+	if r.applies == nil {
+		r.applies = map[[32]byte]int{}
+	}
+	r.applies[subject.SubjectDigest]++
+	values[0].Replayed = r.applies[subject.SubjectDigest] > 1
+	return values[0], err
+}
+func TestProjectPreservesUniqueUnionAccountWithoutBorrowingPhone(t *testing.T) {
+	cases := []struct {
+		name                          string
+		unions                        []string
+		verified                      bool
+		matched, unmatched, conflicts int64
+	}{
+		{"strong-and-phone", []string{"strong", ""}, true, 1, 1, 0},
+		{"strong-and-unknown-union", []string{"strong", "unknown"}, true, 1, 1, 0},
+		{"multiple-strong", []string{"strong", "second"}, true, 0, 0, 2},
+		{"only-phone", []string{"", ""}, true, 0, 0, 2},
+		{"unverified-union", []string{"strong", ""}, false, 0, 0, 2},
+		{"duplicate-union", []string{"strong", "strong"}, true, 0, 0, 2},
+	}
+	for _, tc := range cases {
+		for _, apply := range []bool{false, true} {
+			t.Run(tc.name+map[bool]string{false: "/preview", true: "/apply"}[apply], func(t *testing.T) {
+				resolver := &accountIdentity{}
+				service := Service{Scope: "wechat-open-platform:platform-1", SubjectKey: []byte("01234567890123456789012345678901"), Identity: resolver, UnionIDVerified: tc.verified, UOW: testUOW{}}
+				now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+				snapshot := hxcport.Snapshot{AsOf: now, Complete: true, Rows: []domain.SourceRow{
+					{HXCUserID: "first", UnionID: tc.unions[0], Phone: "13800138000", SourceUpdatedAt: now},
+					{HXCUserID: "second", UnionID: tc.unions[1], Phone: "13900139000", SourceUpdatedAt: now},
+				}}
+				projection, err := service.project(context.Background(), snapshot, apply)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if projection.Counts.Matched != tc.matched || projection.Counts.Unmatched != tc.unmatched || projection.Counts.Conflict != tc.conflicts {
+					t.Fatalf("counts=%+v", projection.Counts)
+				}
+				if apply && projection.IdentityReplayVerified != 2 {
+					t.Fatal("exact replay not verified")
+				}
+				for _, row := range projection.Rows {
+					if row.Phone != "" || row.UnionID != "" || row.HXCUserID != "" {
+						t.Fatal("raw identity in projection")
+					}
+				}
+				if tc.matched == 1 {
+					found := false
+					for _, input := range resolver.seen {
+						if input.PhoneAssociationAmbiguous {
+							found = true
+							if input.Position != 1 || input.Phone != "13900139000" || input.ConflictReason != identityport.HXCReasonDuplicateCustomer {
+								t.Fatal("wrong original ambiguity input")
+							}
+						}
+					}
+					if !found {
+						t.Fatal("weak phone was not reinspected through Identity Port")
+					}
+				}
+			})
+		}
+	}
+}
