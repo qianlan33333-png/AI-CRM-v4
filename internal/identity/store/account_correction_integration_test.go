@@ -215,6 +215,56 @@ func TestDistinctWeComAccountCorrectionIntegration(t *testing.T) {
 				return err
 			})
 		}
+		subject.ConflictReason = identityport.HXCReasonDuplicatePhone
+		within(func(tx context.Context) error {
+			_, err := source.ApplyHXCSubject(tx, subject)
+			if err != nil {
+				return err
+			}
+			replay, err := source.ApplyHXCSubject(tx, subject)
+			if err == nil && (!replay.Replayed || replay.CustomerID != left.CustomerID) {
+				return fmt.Errorf("reviewed shared-phone account must replay: %+v", replay)
+			}
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+		beforeRetry := snapshot()
+		var beforeObservations string
+		if err := pool.Native().QueryRow(ctx, `SELECT COALESCE(string_agg(id::text||':'||version::text||':'||last_seen_at::text,',' ORDER BY id),'') FROM identity_source_observations`).Scan(&beforeObservations); err != nil {
+			t.Fatal(err)
+		}
+		within(func(tx context.Context) error {
+			replay, err := source.ApplyHXCSubject(tx, subject)
+			if err == nil && !replay.Replayed {
+				return errors.New("reviewed shared-phone retry was not replayed")
+			}
+			return err
+		})
+		var afterObservations string
+		if err := pool.Native().QueryRow(ctx, `SELECT COALESCE(string_agg(id::text||':'||version::text||':'||last_seen_at::text,',' ORDER BY id),'') FROM identity_source_observations`).Scan(&afterObservations); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot() != beforeRetry || beforeObservations != afterObservations {
+			t.Fatal("reviewed replay changed versions or appended receipts")
+		}
+		strong := subject
+		strong.ConflictReason = identityport.HXCReasonDuplicateUnionID
+		within(func(tx context.Context) error {
+			_, found, err := repository.ReviewedHXCAccount(tx, strong)
+			if found {
+				return errors.New("review bypassed a strong UnionID conflict")
+			}
+			if err != nil {
+				return err
+			}
+			results, err := source.InspectHXCSubjects(tx, []identityport.HXCSubject{strong})
+			if err == nil && (len(results) != 1 || results[0].Disposition != identityport.HXCConflict || results[0].Reason != identityport.HXCReasonDuplicateUnionID) {
+				return errors.New("strong conflict was cleared")
+			}
+			return err
+		})
 		var newCandidates, phones, merges int
 		if err := pool.Native().QueryRow(ctx, `SELECT (SELECT count(*) FROM customer_merge_candidates WHERE status='open'),(SELECT count(*) FROM customer_identities WHERE kind='phone' AND customer_id=$1 AND status='active'),(SELECT count(*) FROM customer_merges)`, right.CustomerID).Scan(&newCandidates, &phones, &merges); err != nil || newCandidates != 0 || phones != 1 || merges != 0 {
 			t.Fatal("HXC recreated cross-account effects")

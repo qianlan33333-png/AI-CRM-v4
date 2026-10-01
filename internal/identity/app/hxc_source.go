@@ -107,6 +107,11 @@ func (service HXCSourceService) ApplyHXCSubject(ctx context.Context, subject ide
 			return identityport.HXCSubjectResult{}, err
 		}
 		if found {
+			// This exact account has already been reviewed using verified UnionID.
+			// Its shared phone is an observation, not a replay-blocking conflict.
+			if subject.ConflictReason == identityport.HXCReasonDuplicatePhone {
+				subject.ConflictReason = ""
+			}
 			return service.Store.PersistHXCResolution(ctx, subject, result)
 		}
 	}
