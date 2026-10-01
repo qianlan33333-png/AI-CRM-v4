@@ -249,22 +249,24 @@ func TestDistinctWeComAccountCorrectionIntegration(t *testing.T) {
 		if snapshot() != beforeRetry || beforeObservations != afterObservations {
 			t.Fatal("reviewed replay changed versions or appended receipts")
 		}
-		strong := subject
-		strong.ConflictReason = identityport.HXCReasonDuplicateUnionID
-		within(func(tx context.Context) error {
-			_, found, err := repository.ReviewedHXCAccount(tx, strong)
-			if found {
-				return errors.New("review bypassed a strong UnionID conflict")
-			}
-			if err != nil {
+		for _, reason := range []identityport.HXCReason{identityport.HXCReasonDuplicateUnionID, identityport.HXCReasonDuplicateCustomer} {
+			strong := subject
+			strong.ConflictReason = reason
+			within(func(tx context.Context) error {
+				_, found, err := repository.ReviewedHXCAccount(tx, strong)
+				if found {
+					return errors.New("review bypassed a strong batch conflict")
+				}
+				if err != nil {
+					return err
+				}
+				results, err := source.InspectHXCSubjects(tx, []identityport.HXCSubject{strong})
+				if err == nil && (len(results) != 1 || results[0].Disposition != identityport.HXCConflict || results[0].Reason != reason) {
+					return errors.New("strong conflict was cleared")
+				}
 				return err
-			}
-			results, err := source.InspectHXCSubjects(tx, []identityport.HXCSubject{strong})
-			if err == nil && (len(results) != 1 || results[0].Disposition != identityport.HXCConflict || results[0].Reason != identityport.HXCReasonDuplicateUnionID) {
-				return errors.New("strong conflict was cleared")
-			}
-			return err
-		})
+			})
+		}
 		var newCandidates, phones, merges int
 		if err := pool.Native().QueryRow(ctx, `SELECT (SELECT count(*) FROM customer_merge_candidates WHERE status='open'),(SELECT count(*) FROM customer_identities WHERE kind='phone' AND customer_id=$1 AND status='active'),(SELECT count(*) FROM customer_merges)`, right.CustomerID).Scan(&newCandidates, &phones, &merges); err != nil || newCandidates != 0 || phones != 1 || merges != 0 {
 			t.Fatal("HXC recreated cross-account effects")

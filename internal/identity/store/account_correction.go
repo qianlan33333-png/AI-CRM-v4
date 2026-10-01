@@ -188,7 +188,7 @@ func (store *PostgresStore) CorrectDistinctWeComAccounts(ctx context.Context, cm
 // active provider-verified UnionID. Sharing a phone cannot reunify these roots.
 func (store *PostgresStore) ReviewedHXCAccount(ctx context.Context, subject identityport.HXCSubject) (identityport.HXCSubjectResult, bool, error) {
 	var result identityport.HXCSubjectResult
-	if !subject.UnionIDVerified || subject.UnionID == "" || subject.ConflictReason == identityport.HXCReasonDuplicateUnionID {
+	if !subject.UnionIDVerified || subject.UnionID == "" || (subject.ConflictReason == identityport.HXCReasonDuplicateUnionID || subject.ConflictReason == identityport.HXCReasonDuplicateCustomer) {
 		return result, false, nil
 	}
 	tx, err := platformpostgres.RequireTransaction(ctx)
