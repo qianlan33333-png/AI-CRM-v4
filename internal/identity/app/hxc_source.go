@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"strings"
 
 	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
@@ -36,11 +37,46 @@ type reviewedHXCAccountStore interface {
 	ReviewedHXCAccount(context.Context, identityport.HXCSubject) (identityport.HXCSubjectResult, bool, error)
 }
 
+type sharedHXCPhoneStore interface {
+	HistoricalSharedHXCPhone(context.Context, identityport.HXCSubject) (bool, error)
+}
+
+func (service HXCSourceService) sharedPhoneInput(ctx context.Context, subject identityport.HXCSubject) (identityport.HXCSubject, bool, error) {
+	if subject.ConflictReason != "" && subject.ConflictReason != identityport.HXCReasonDuplicatePhone {
+		return subject, false, nil
+	}
+	shared := subject.ConflictReason == identityport.HXCReasonDuplicatePhone
+	if !shared {
+		if history, ok := service.Store.(sharedHXCPhoneStore); ok {
+			var err error
+			shared, err = history.HistoricalSharedHXCPhone(ctx, subject)
+			if err != nil {
+				return subject, false, err
+			}
+		}
+	}
+	if shared {
+		subject.Phone, subject.ConflictReason = "", ""
+		if !strings.HasSuffix(subject.RuleVersion, identityport.HXCSharedPhoneRuleSuffix) {
+			subject.RuleVersion += identityport.HXCSharedPhoneRuleSuffix
+		}
+	}
+	return subject, shared, nil
+}
+
 func (service HXCSourceService) InspectHXCSubjects(ctx context.Context, subjects []identityport.HXCSubject) ([]identityport.HXCSubjectResult, error) {
 	if service.Inspector == nil {
 		return nil, ErrHXCSourceNotReady
 	}
-	results, err := service.Inspector.InspectHXCSubjects(ctx, subjects)
+	inputs := make([]identityport.HXCSubject, len(subjects))
+	for i, subject := range subjects {
+		input, _, err := service.sharedPhoneInput(ctx, subject)
+		if err != nil {
+			return nil, err
+		}
+		inputs[i] = input
+	}
+	results, err := service.Inspector.InspectHXCSubjects(ctx, inputs)
 	if err != nil {
 		return nil, err
 	}
@@ -74,14 +110,23 @@ func (service HXCSourceService) ApplyHXCSubject(ctx context.Context, subject ide
 			return service.Store.PersistHXCResolution(ctx, subject, result)
 		}
 	}
-	if replay, found, err := service.Store.ReplayHXCResolution(ctx, subject); err != nil {
+	input, shared, err := service.sharedPhoneInput(ctx, subject)
+	if err != nil {
+		return identityport.HXCSubjectResult{}, err
+	}
+	// Persist the original observations with a new rule receipt; never attach the
+	// ambiguous phone. Reinspect so a formerly unknown UnionID can gain a root.
+	if shared {
+		subject.RuleVersion = input.RuleVersion
+		subject.ConflictReason = ""
+	} else if replay, found, err := service.Store.ReplayHXCResolution(ctx, subject); err != nil {
 		return identityport.HXCSubjectResult{}, err
 	} else if found {
 		replay.Position = subject.Position
 		replay.Replayed = true
 		return replay, nil
 	}
-	results, err := service.Inspector.InspectHXCSubjects(ctx, []identityport.HXCSubject{subject})
+	results, err := service.Inspector.InspectHXCSubjects(ctx, []identityport.HXCSubject{input})
 	if err != nil {
 		return identityport.HXCSubjectResult{}, err
 	}
@@ -89,6 +134,9 @@ func (service HXCSourceService) ApplyHXCSubject(ctx context.Context, subject ide
 		return identityport.HXCSubjectResult{}, ErrHXCInspectionMismatch
 	}
 	result := results[0]
+	if shared {
+		return service.Store.PersistHXCResolution(ctx, subject, result)
+	}
 	switch {
 	case result.Disposition == identityport.HXCMatched && result.MatchedBy == identityport.HXCMatchUnionID && subject.Phone != "":
 		attached, attachErr := service.OneID.AttachDeclaredPhoneToCustomer(ctx, identityport.DeclaredPhoneCommand{

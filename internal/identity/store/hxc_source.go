@@ -18,7 +18,24 @@ import (
 )
 
 func hxcReceiptKey(subject identityport.HXCSubject, result identityport.HXCSubjectResult) [32]byte {
-	return sha256.Sum256([]byte("hxc\x00" + hex.EncodeToString(subject.SubjectDigest[:]) + "\x00" + subject.RuleVersion + "\x00" + hex.EncodeToString(subject.PayloadDigest[:]) + "\x00" + string(result.Disposition) + "\x00" + string(result.MatchedBy) + "\x00" + strconv.FormatInt(int64(result.CustomerID), 10) + "\x00" + strconv.FormatInt(result.MergeCandidateID, 10)))
+	return sha256.Sum256([]byte("hxc\x00" + hex.EncodeToString(subject.SubjectDigest[:]) + "\x00" + subject.RuleVersion + "\x00" + hex.EncodeToString(subject.PayloadDigest[:]) + "\x00" + string(result.Disposition) + "\x00" + string(result.MatchedBy) + "\x00" + string(result.Reason) + "\x00" + strconv.FormatInt(int64(result.CustomerID), 10) + "\x00" + strconv.FormatInt(result.MergeCandidateID, 10)))
+}
+
+func (store *PostgresStore) HistoricalSharedHXCPhone(ctx context.Context, subject identityport.HXCSubject) (bool, error) {
+	tx, err := platformpostgres.RequireTransaction(ctx)
+	if err != nil {
+		return false, err
+	}
+	var shared bool
+	err = tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM identity_source_subjects s WHERE s.source_system='hxc' AND s.subject_digest=$1
+		AND (EXISTS (SELECT 1 FROM identity_source_conflicts c WHERE c.subject_id=s.id AND c.reason_code=$2)
+		OR EXISTS (SELECT 1 FROM identity_source_resolution_receipts r WHERE r.subject_id=s.id AND right(r.rule_version,length($3))=$3)))`,
+		subject.SubjectDigest[:], identityport.HXCReasonDuplicatePhone, identityport.HXCSharedPhoneRuleSuffix).Scan(&shared)
+	if err != nil {
+		return false, persistenceFailure(err)
+	}
+	return shared, nil
 }
 
 func (store *PostgresStore) ReplayHXCResolution(ctx context.Context, subject identityport.HXCSubject) (identityport.HXCSubjectResult, bool, error) {
@@ -42,6 +59,11 @@ func (store *PostgresStore) ReplayHXCResolution(ctx context.Context, subject ide
 	}
 	if string(payloadDigest) != string(subject.PayloadDigest[:]) {
 		return identityport.HXCSubjectResult{}, false, identityapp.ErrDeclaredPayloadMismatch
+	}
+	// Duplicate flags depend on the complete source batch, not just this row's
+	// payload. A new strong conflict must not replay a prior successful match.
+	if subject.ConflictReason != "" && result.Reason != subject.ConflictReason {
+		return identityport.HXCSubjectResult{}, false, nil
 	}
 	if customerID != nil {
 		result.CustomerID = customerdomain.CustomerID(*customerID)
@@ -78,7 +100,7 @@ func (store *PostgresStore) PersistHXCResolution(ctx context.Context, subject id
 	}
 	if replay, found, replayErr := store.ReplayHXCResolution(ctx, subject); replayErr != nil {
 		return identityport.HXCSubjectResult{}, replayErr
-	} else if found {
+	} else if found && replay.Disposition == result.Disposition && replay.MatchedBy == result.MatchedBy && replay.CustomerID == result.CustomerID && replay.Reason == result.Reason && replay.MergeCandidateID == result.MergeCandidateID {
 		replay.Position, replay.Replayed = subject.Position, true
 		return replay, nil
 	}

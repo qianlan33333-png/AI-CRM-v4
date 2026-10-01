@@ -11,6 +11,10 @@ type HXCDisposition string
 type HXCMatchSource string
 type HXCReason string
 
+// HXCSharedPhoneRuleSuffix records that a source account's phone is ambiguous.
+// Keep this marker in immutable receipts even after the duplicate leaves a batch.
+const HXCSharedPhoneRuleSuffix = ":shared-phone-union-only-v1"
+
 const (
 	HXCMatched   HXCDisposition = "matched"
 	HXCUnmatched HXCDisposition = "unmatched"
