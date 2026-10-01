@@ -62,6 +62,7 @@ func TestPublishedDirectoryCutoverCalibratesSilentlyThenTriggersRealChangesPostg
 	evaluator, _ := NewEvaluator(segmentcompiler.Compiler{}, source, scheduleRuntimeCanonical{})
 	events := &memberEventEnqueueStub{}
 	service, _ := NewSnapshotService(uow, repo, evaluator, &scheduleRuntimeEnqueuer{}, events)
+	service.now = func() time.Time { return now }
 	refresh := func(key string) {
 		t.Helper()
 		now = now.Add(time.Minute)

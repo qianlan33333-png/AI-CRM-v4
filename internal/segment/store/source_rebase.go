@@ -3,9 +3,78 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strconv"
+	"time"
+
 	segmentdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/domain"
 	segmentport "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/port"
 )
+
+// ReserveSourceCalibrationReference replaces a queued historical reference
+// once, before staging the first unified-source evaluation. Retries retain the
+// reserved clock, and concurrent reservations remain silent calibrations.
+func (r *Repository) ReserveSourceCalibrationReference(ctx context.Context, runID int64, watermarks []segmentport.SourceWatermark, actor Actor, now time.Time) (time.Time, error) {
+	unified := false
+	for _, w := range watermarks {
+		unified = unified || w.Source == "wecom.directory.published.v2"
+	}
+	if !unified {
+		return time.Time{}, nil
+	}
+	if !actor.Valid() || now.IsZero() {
+		return time.Time{}, ErrInvalid
+	}
+	t, err := tx(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var packageID int64
+	if err = t.QueryRow(ctx, `SELECT package_id FROM segment_audience_refresh_runs WHERE id=$1`, runID).Scan(&packageID); err != nil {
+		return time.Time{}, err
+	}
+	var previous *int64
+	var configuration int64
+	if err = t.QueryRow(ctx, `SELECT published_snapshot_id,current_configuration_version_id FROM segment_audience_packages WHERE id=$1 FOR UPDATE`, packageID).Scan(&previous, &configuration); err != nil {
+		return time.Time{}, err
+	}
+	var reference time.Time
+	var kind segmentdomain.RefreshKind
+	var state segmentdomain.RefreshState
+	var runConfiguration int64
+	if err = t.QueryRow(ctx, `SELECT reference_time,refresh_kind,state,configuration_version_id FROM segment_audience_refresh_runs WHERE id=$1 FOR UPDATE`, runID).Scan(&reference, &kind, &state, &runConfiguration); err != nil {
+		return time.Time{}, err
+	}
+	if runConfiguration != configuration || (state != segmentdomain.RefreshEvaluating && state != segmentdomain.RefreshStaging) {
+		return time.Time{}, ErrConflict
+	}
+	if kind == segmentdomain.RefreshSourceRebase {
+		return reference, nil
+	}
+	if previous == nil {
+		return time.Time{}, nil
+	}
+	var oldUnified bool
+	if err = t.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM segment_audience_snapshots s CROSS JOIN LATERAL jsonb_array_elements(s.source_watermarks) w WHERE s.id=$1 AND w->>'source'='wecom.directory.published.v2')`, *previous).Scan(&oldUnified); err != nil {
+		return time.Time{}, err
+	}
+	if oldUnified {
+		return time.Time{}, nil
+	}
+	if _, err = t.Exec(ctx, `UPDATE segment_audience_refresh_runs SET reference_time=$2,refresh_kind='source_rebase',updated_at=$2 WHERE id=$1 AND state IN ('evaluating','staging')`, runID, now.UTC()); err != nil {
+		return time.Time{}, err
+	}
+	// BeginRefresh has already allocated the preparing snapshot. Its reference
+	// must move with the run before any calibration members are staged.
+	if _, err = t.Exec(ctx, `UPDATE segment_audience_snapshots SET reference_time=$2 WHERE refresh_run_id=$1 AND state='preparing'`, runID, now.UTC()); err != nil {
+		return time.Time{}, err
+	}
+	payload, err := json.Marshal(map[string]any{"previous_reference_time": reference, "calibration_reference_time": now.UTC(), "reason": "unified_directory_initial_calibration"})
+	if err != nil {
+		return time.Time{}, err
+	}
+	_, err = r.AppendMutationFacts(ctx, MutationFact{ResourceKind: "refresh_run", ResourceID: runID, Operation: "calibrate_source", EventType: "audience.source_calibration.reserved.v1", ActorID: actor.StaffID, ActorKind: actor.Kind, ActorRef: actor.Reference, Payload: payload, IdempotencyKey: "source-calibration-reference:" + strconv.FormatInt(runID, 10), OccurredAt: now.UTC()})
+	return now.UTC(), err
+}
 
 // PrepareRefreshSources holds the same package lock as publication. Only an
 // existing snapshot created with the former source is calibrated; new packages
@@ -16,7 +85,8 @@ func (r *Repository) PrepareRefreshSources(ctx context.Context, runID int64, wat
 		return false, err
 	}
 	var packageID int64
-	if err = t.QueryRow(ctx, `SELECT package_id FROM segment_audience_refresh_runs WHERE id=$1`, runID).Scan(&packageID); err != nil {
+	var kind segmentdomain.RefreshKind
+	if err = t.QueryRow(ctx, `SELECT package_id,refresh_kind FROM segment_audience_refresh_runs WHERE id=$1`, runID).Scan(&packageID, &kind); err != nil {
 		return false, err
 	}
 	var previous *int64
@@ -27,13 +97,16 @@ func (r *Repository) PrepareRefreshSources(ctx context.Context, runID int64, wat
 	for _, w := range watermarks {
 		unified = unified || w.Source == "wecom.directory.published.v2"
 	}
-	rebase := false
+	if kind == segmentdomain.RefreshSourceRebase && !unified {
+		return false, ErrConflict
+	}
+	rebase := kind == segmentdomain.RefreshSourceRebase
 	if unified && previous != nil {
 		var old bool
 		if err = t.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM segment_audience_snapshots s CROSS JOIN LATERAL jsonb_array_elements(s.source_watermarks) w WHERE s.id=$1 AND w->>'source'='wecom.directory.published.v2')`, *previous).Scan(&old); err != nil {
 			return false, err
 		}
-		rebase = !old
+		rebase = rebase || !old
 	}
 	raw, err := json.Marshal(watermarks)
 	if err != nil {

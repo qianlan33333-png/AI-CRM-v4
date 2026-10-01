@@ -327,9 +327,33 @@ func (s *SnapshotService) ProcessRefresh(ctx context.Context, runID int64) error
 	if err != nil {
 		return classify(err)
 	}
+	actor, actorErr := storedMutationActor(config.CreatedBy, config.CreatedActorKind, config.CreatedActorRef)
+	if actorErr != nil {
+		return ErrInvalid
+	}
 	evaluation, err := s.evaluator.Evaluate(ctx, config.Definition, run.ReferenceTime)
 	if err != nil {
 		return err
+	}
+	if calibration, ok := s.store.(interface {
+		ReserveSourceCalibrationReference(context.Context, int64, []segmentport.SourceWatermark, segmentstore.Actor, time.Time) (time.Time, error)
+	}); ok {
+		var reference time.Time
+		err = s.uow.Within(ctx, func(tx context.Context) error {
+			var reserveErr error
+			reference, reserveErr = calibration.ReserveSourceCalibrationReference(tx, runID, evaluation.Watermarks, storeActor(actor), s.now().UTC())
+			return reserveErr
+		})
+		if err != nil {
+			return classify(err)
+		}
+		if !reference.IsZero() && !reference.Equal(run.ReferenceTime) {
+			run.ReferenceTime = reference
+			evaluation, err = s.evaluator.Evaluate(ctx, config.Definition, reference)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	for start, ordinal := 0, 0; start < len(evaluation.CustomerIDs); start, ordinal = start+1000, ordinal+1 {
 		end := start + 1000
@@ -363,10 +387,6 @@ func (s *SnapshotService) ProcessRefresh(ctx context.Context, runID int64) error
 		if err != nil {
 			return classify(err)
 		}
-	}
-	actor, actorErr := storedMutationActor(config.CreatedBy, config.CreatedActorKind, config.CreatedActorRef)
-	if actorErr != nil {
-		return ErrInvalid
 	}
 	memberDigest := segmentdomain.DigestMembers(evaluation.CustomerIDs)
 	watermarkDigest := digestWatermarks(evaluation.Watermarks)

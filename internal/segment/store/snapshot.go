@@ -59,12 +59,23 @@ func (r *Repository) ReserveRefresh(ctx context.Context, run segmentdomain.Refre
 	if err != nil {
 		return run, false, err
 	}
-	if existing.ConfigurationVersionID != run.ConfigurationVersionID || !existing.ReferenceTime.Equal(run.ReferenceTime) {
+	if existing.ConfigurationVersionID != run.ConfigurationVersionID {
+		return run, false, ErrConflict
+	}
+	if existing.RefreshKind == segmentdomain.RefreshSourceRebase {
+		var reserved, originalReference bool
+		if err = t.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM segment_audience_outbox WHERE aggregate_kind='refresh_run' AND aggregate_id=$1 AND event_type='audience.source_calibration.reserved.v1'),EXISTS(SELECT 1 FROM segment_audience_outbox WHERE aggregate_kind='refresh_run' AND aggregate_id=$1 AND event_type='audience.source_calibration.reserved.v1' AND (payload->>'previous_reference_time')::timestamptz=$2)`, existing.ID, run.ReferenceTime).Scan(&reserved, &originalReference); err != nil {
+			return run, false, err
+		}
+		if (reserved && !originalReference) || (!reserved && !existing.ReferenceTime.Equal(run.ReferenceTime)) {
+			return run, false, ErrConflict
+		}
+	} else if !existing.ReferenceTime.Equal(run.ReferenceTime) {
 		return run, false, ErrConflict
 	}
 	// A daily request may join an accepted/queued incremental occurrence, but
 	// must never replace a run once its partial result has started.
-	if run.RefreshKind == segmentdomain.RefreshDaily && existing.RefreshKind != segmentdomain.RefreshDaily {
+	if run.RefreshKind == segmentdomain.RefreshDaily && existing.RefreshKind != segmentdomain.RefreshDaily && existing.RefreshKind != segmentdomain.RefreshSourceRebase {
 		if existing.State != segmentdomain.RefreshAccepted && existing.State != segmentdomain.RefreshQueued {
 			return run, false, ErrConflict
 		}
