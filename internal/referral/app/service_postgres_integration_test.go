@@ -430,16 +430,18 @@ func TestPostgreSQLReferralReversalOnlyReviewsRelatedOrAmbiguousRewards(t *testi
 	}
 }
 
-func TestPostgreSQLReferralCaptainMustJoinOwnTeamAndIsUniquePerCampaign(t *testing.T) {
-	t.Skip("team captains are reporting-only; participation no longer grants captain authority")
+func TestPostgreSQLReferralCaptainAssignmentDoesNotChangeParticipationAndIsUniquePerCampaign(t *testing.T) {
 	h := newReferralPostgreSQLHarness(t)
 	defer h.cleanup()
 	campaign, captainTeam, otherTeam := h.createCampaignWithTeams(t, "队长归队活动", 761, 762)
-	if _, err := h.service.JoinCampaign(context.Background(), referralport.JoinCampaignCommand{Actor: referralActor(761, h.clock), CampaignID: campaign.ID, TeamID: otherTeam.ID, IdempotencyKey: "captain-761-wrong-team"}); !errors.Is(err, referralport.ErrConflict) {
-		t.Fatalf("captain joined another team err=%v", err)
+	mine, err := h.service.JoinCampaign(context.Background(), referralport.JoinCampaignCommand{Actor: referralActor(761, h.clock), CampaignID: campaign.ID, TeamID: otherTeam.ID, IdempotencyKey: "captain-761-other-team"})
+	if err != nil || mine.Participation == nil || mine.Participation.TeamID != otherTeam.ID || mine.Team == nil || mine.Team.ID != otherTeam.ID || !mine.IsCaptain || mine.CaptainTeam == nil || mine.CaptainTeam.ID != captainTeam.ID {
+		t.Fatalf("reporting captain assignment rewrote participation mine=%+v err=%v", mine, err)
 	}
-	if _, err := h.service.JoinCampaign(context.Background(), referralport.JoinCampaignCommand{Actor: referralActor(761, h.clock), CampaignID: campaign.ID, TeamID: captainTeam.ID, IdempotencyKey: "captain-761-own-team"}); err != nil {
-		t.Fatalf("captain could not join own team err=%v", err)
+	invite := h.issue(t, campaign.ID, 761, "captain-761-other-team-invite")
+	joined := h.joinInvite(t, campaign.ID, 763, invite, "captain-761-other-team-join")
+	if joined.Participation == nil || joined.Participation.TeamID != otherTeam.ID || joined.Participation.InviterTeamID != otherTeam.ID {
+		t.Fatalf("invitation used reporting captain team instead of joined team: %+v", joined.Participation)
 	}
 	draft, err := h.admin.CreateCampaign(context.Background(), referralport.CreateCampaignCommand{ActorAdminID: 9001, Name: "队长唯一草稿", StartsAt: h.clock.Add(time.Hour), EndsAt: h.clock.Add(48 * time.Hour), IdempotencyKey: "create-captain-unique-draft"})
 	if err != nil {
@@ -611,8 +613,7 @@ func TestPostgreSQLReferralAdminActivityDetailsAndStableExports(t *testing.T) {
 	}
 }
 
-func TestPostgreSQLReferralCreateTeamSerializesWithCaptainParticipation(t *testing.T) {
-	t.Skip("team assignment is a reporting dimension and does not lock participation")
+func TestPostgreSQLReferralConcurrentTeamAssignmentPreservesExistingParticipation(t *testing.T) {
 	h := newReferralPostgreSQLHarness(t)
 	defer h.cleanup()
 
@@ -641,17 +642,12 @@ func TestPostgreSQLReferralCreateTeamSerializesWithCaptainParticipation(t *testi
 	if err := h.pool.QueryRow(context.Background(), `SELECT count(*) FROM referral_participations WHERE campaign_id=$1 AND customer_id=883`, campaign.ID).Scan(&participationCount); err != nil {
 		t.Fatal(err)
 	}
-	switch {
-	case createErr == nil:
-		if joinErr == nil || teamCount != 1 || participationCount != 0 {
-			t.Fatalf("team assignment should block conflicting join createErr=%v joinErr=%v teams=%d participations=%d", createErr, joinErr, teamCount, participationCount)
-		}
-	case joinErr == nil:
-		if !errors.Is(createErr, referralport.ErrCaptainIneligible) || teamCount != 0 || participationCount != 1 {
-			t.Fatalf("first participation should block captain assignment createErr=%v joinErr=%v teams=%d participations=%d", createErr, joinErr, teamCount, participationCount)
-		}
-	default:
-		t.Fatalf("one concurrent command must succeed createErr=%v joinErr=%v", createErr, joinErr)
+	if createErr != nil || joinErr != nil || teamCount != 1 || participationCount != 1 {
+		t.Fatalf("concurrent reporting assignment or join was lost createErr=%v joinErr=%v teams=%d participations=%d", createErr, joinErr, teamCount, participationCount)
+	}
+	mine, err := h.service.MyCampaign(context.Background(), referralActor(883, h.clock), campaign.ID)
+	if err != nil || mine.Participation == nil || mine.Participation.TeamID != existingTeam.ID || mine.CaptainTeam == nil || mine.CaptainTeam.ID == existingTeam.ID {
+		t.Fatalf("concurrent assignment rewrote the immutable joined team mine=%+v err=%v", mine, err)
 	}
 }
 
