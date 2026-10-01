@@ -19,9 +19,11 @@ import (
 type backlogRebaseSource struct {
 	cutover                               time.Time
 	unified, unavailable, failCurrentOnce bool
+	calls                                 int
 }
 
 func (s *backlogRebaseSource) Evaluate(_ context.Context, _ segmentport.Definition, at time.Time) (segmentport.Evaluation, error) {
+	s.calls++
 	if s.unavailable {
 		return segmentport.Evaluation{}, ErrUnavailable
 	}
@@ -187,8 +189,12 @@ func TestDirectoryBacklogCalibratesAtCurrentTimeAndRejectsHistoricalReplayPostgr
 				if r.ID == first.ID {
 					continue
 				}
-				if e := f.service.ProcessRefresh(ctx, r.ID); !errors.Is(e, ErrConflict) {
-					t.Fatalf("old run %d unexpectedly published: %v", r.ID, e)
+				if e := f.service.ProcessRefresh(ctx, r.ID); e != nil {
+					t.Fatalf("old run %d did not terminate: %v", r.ID, e)
+				}
+				failed, e := f.service.GetRefresh(ctx, r.ID)
+				if e != nil || failed.State != segmentdomain.RefreshFailed {
+					t.Fatalf("old run %d unexpectedly published: %s/%v", r.ID, failed.State, e)
 				}
 			}
 			if e := f.service.ProcessRefresh(ctx, first.ID); e != nil {
@@ -280,8 +286,11 @@ func TestConcurrentReservedDirectoryCalibrationsRemainSilentPostgreSQL(t *testin
 				t.Fatal(e)
 			}
 			e := f.service.ProcessRefresh(ctx, second.ID)
-			if newerFirst && !errors.Is(e, ErrConflict) {
-				t.Fatalf("older calibration overwrote newer: %v", e)
+			if newerFirst {
+				failed, readErr := f.service.GetRefresh(ctx, second.ID)
+				if e != nil || readErr != nil || failed.State != segmentdomain.RefreshFailed {
+					t.Fatalf("older calibration did not terminate: %s/%v/%v", failed.State, e, readErr)
+				}
 			}
 			if !newerFirst && e != nil {
 				t.Fatal(e)
@@ -344,4 +353,76 @@ func TestDirectoryCalibrationReservationRollsBackWithSnapshotAndAuditPostgreSQL(
 	if saved.RefreshKind != segmentdomain.RefreshDaily || !saved.ReferenceTime.Equal(old) || !ref.Equal(old) || audits != 0 {
 		t.Fatalf("non-atomic reservation: run=%+v snapshot=%v audits=%d", saved, ref, audits)
 	}
+}
+
+func TestSupersededRefreshFinishesWithoutSourceEvaluationPostgreSQL(t *testing.T) {
+	for _, staged := range []bool{false, true} {
+		t.Run(fmt.Sprintf("staged_%t", staged), func(t *testing.T) {
+			f := newBacklogFixture(t)
+			ctx := context.Background()
+			cutover := f.now
+			old := f.accept(t, "superseded-old-run-001", cutover.Add(-4*time.Hour))
+			if staged {
+				if e := f.service.uow.Within(ctx, func(tx context.Context) error {
+					if _, _, e := f.service.store.BeginRefresh(tx, old.ID, f.now); e != nil {
+						return e
+					}
+					ids := []customerdomain.CustomerID{1}
+					return f.service.store.StageRefreshBatch(tx, old.ID, 0, ids, segmentdomain.DigestMembers(ids), f.now)
+				}); e != nil {
+					t.Fatal(e)
+				}
+			}
+			f.source.unified = true
+			current := f.accept(t, "superseded-current-run-002", cutover)
+			if e := f.service.ProcessRefresh(ctx, current.ID); e != nil {
+				t.Fatal(e)
+			}
+			f.assertQuiet(t, cutover)
+			calls := f.source.calls
+			f.source.unavailable = true
+			for i := 0; i < 2; i++ {
+				if e := f.service.ProcessRefresh(ctx, old.ID); e != nil {
+					t.Fatalf("permanently superseded task retried: %v", e)
+				}
+			}
+			if f.source.calls != calls {
+				t.Fatal("superseded run performed source evaluation")
+			}
+			var state, code, snapshotState string
+			var completed bool
+			if e := f.native.QueryRow(ctx, `SELECT r.state,r.error_code,r.completed_at IS NOT NULL,s.state FROM segment_audience_refresh_runs r JOIN segment_audience_snapshots s ON s.refresh_run_id=r.id WHERE r.id=$1`, old.ID).Scan(&state, &code, &completed, &snapshotState); e != nil {
+				t.Fatal(e)
+			}
+			if state != "failed" || code != "reference_superseded" || !completed || snapshotState != "failed" {
+				t.Fatalf("terminal receipt=%s/%s/%t/%s", state, code, completed, snapshotState)
+			}
+			replay := f.accept(t, "superseded-old-run-001", old.ReferenceTime)
+			if replay.ID != old.ID || replay.State != segmentdomain.RefreshFailed {
+				t.Fatal("old idempotent receipt replaced")
+			}
+			f.assertQuiet(t, cutover)
+			f.source.unavailable = false
+			equal := f.accept(t, "superseded-equal-run-003", cutover)
+			if e := f.service.ProcessRefresh(ctx, equal.ID); e != nil {
+				t.Fatal(e)
+			}
+			run, e := f.service.GetRefresh(ctx, equal.ID)
+			if e != nil || run.State != segmentdomain.RefreshPublished {
+				t.Fatalf("equal reference discarded: %v/%s", e, run.State)
+			}
+		})
+	}
+}
+
+func TestFirstDirectoryCalibrationPreservesReferenceBeforeFormerSnapshotPostgreSQL(t *testing.T) {
+	f := newBacklogFixture(t)
+	ctx := context.Background()
+	cutover := f.now
+	old := f.accept(t, "calibration-before-former-ref", cutover.Add(-8*time.Hour))
+	f.source.unified = true
+	if e := f.service.ProcessRefresh(ctx, old.ID); e != nil {
+		t.Fatal(e)
+	}
+	f.assertQuiet(t, cutover)
 }

@@ -316,16 +316,42 @@ func (s *SnapshotService) ProcessRefresh(ctx context.Context, runID int64) error
 	}
 	var run segmentdomain.RefreshRun
 	var config segmentdomain.ConfigurationVersion
+	superseded := false
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		var e error
 		run, _, e = s.store.BeginRefresh(tx, runID, s.now().UTC())
-		if e == nil {
-			config, e = s.store.Configuration(tx, run.ConfigurationVersionID)
+		if e != nil {
+			return e
 		}
+		published, found, e := s.store.PublishedSnapshot(tx, segmentport.PackageID(run.PackageID))
+		if e != nil {
+			return e
+		}
+		// Preserve the first source calibration, which may replace an old
+		// reference with the current time. Once the unified baseline exists,
+		// publication cannot move backwards: a strictly older run is terminal.
+		unified := false
+		if found {
+			var watermarks []segmentport.SourceWatermark
+			if e = json.Unmarshal(published.SourceWatermarks, &watermarks); e != nil {
+				return e
+			}
+			for _, watermark := range watermarks {
+				unified = unified || watermark.Source == "wecom.directory.published.v2"
+			}
+		}
+		if unified && published.ReferenceTime.After(run.ReferenceTime) {
+			superseded = true
+			return s.store.FailRefresh(tx, runID, "reference_superseded", s.now().UTC())
+		}
+		config, e = s.store.Configuration(tx, run.ConfigurationVersionID)
 		return e
 	})
 	if err != nil {
 		return classify(err)
+	}
+	if superseded {
+		return nil
 	}
 	actor, actorErr := storedMutationActor(config.CreatedBy, config.CreatedActorKind, config.CreatedActorRef)
 	if actorErr != nil {

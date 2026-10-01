@@ -27,3 +27,18 @@ flowchart TD
 获得可信v2水位且原已发布快照未有v2时，在包锁内一次性将该run登记为source_rebase，把旧reference改为当前校准时点并记录前后时间审计；在暂存之前重新评估。重试复用已登记时点，不能向后漂移或退回旧时间。并发已登记的校准仍保持静默，较旧发布依靠既有时间保护拒绝。没有已有快照的新包保持正常初次入组；source不可用保留原快照。原idempotency、执行和历史收据保留。后续真实变化正常触发。
 
 分类：OneID仅沿用客户主根及既有canonical Port，不匹配/建客/合并；Persistence是现有Segment-owned run/reference/audit同UoW；内部任务复用River；没有Provider读写或新增外部效果。新增限制仅修复已证明的首次校准时间漏洞，复用原时间保护。接口/DDL/组成根/页面不变；关联Segment刷新、成员资格与运营入组，必须验证真实PG积压时序及后续正常链路，工作台在准确候选上执行受影响检查和安装读回。
+
+## 已被新快照永久替代的刷新收尾（19:30现场补充）
+
+19:27生产四个worker被旧reference的第9/10次任务占用；311条旧run已暂存、124条评估中，#20的新校准job仍available/attempt0。统一基线已发布后的时间单调保护决定这些旧任务永远不能成功，继续调用完整来源评估没有业务价值。
+
+```mermaid
+flowchart TD
+    A[原River任务取到旧刷新] --> B[Owner同一事务读取run和已发布快照]
+    B --> C{统一基线已发布且参考时间严格晚于run?}
+    C -- 是 --> D[保留run及准备快照 改为failed/reference_superseded]
+    D --> E[提交后返回成功 同一River任务终态]
+    C -- 否 --> F[原有评估 校准和单调发布保护]
+```
+
+复用现有Segment FailRefresh与UoW；无新表、队列、任务或取消SQL。参考 [River Worker.Work合同](https://pkg.go.dev/github.com/riverqueue/river#Worker)：成功返回nil由原worker正常完成任务；业务失败原因仍在run收据，不能冒称已发布。来源不可用、未被新参考时间替代的任务继续原重试；时间相等不丢弃；第一次统一来源校准仍保留。执行中被超越仍受最后原子发布保护，下次重试立即收尾。真PG验证queued、已有staging及并发已登记校准，永久旧run不调用来源评估、保持成员/事件/审计/既有幂等收据，之后真实变化正常处理。对外HTTP/DDL/OneID/Provider/页面不变，影响仅Segment内部刷新恢复及关联运营读取，沿父PRD五项影响和正常发布检查。
