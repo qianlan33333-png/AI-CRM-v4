@@ -41,3 +41,8 @@ class InputScopes(unittest.TestCase):
   self.write('package.json','{"a":1}');self.write('internal/payment/app/a.go','package app\nconst changed=1\n');h=self.commit()
   choice,_=behavior_selection.select(self.r,b,h,['package.json','internal/payment/app/a.go'],{'selected_packages':[{'dir':'internal/payment/app'}]})
   self.assertIn('backend',choice['lanes'])
+
+ def test_retention_validator_and_design_review_do_not_force_all_lanes(self):
+  self.write('scripts/check-retention-registry.py','old');b=self.commit();self.write('scripts/check-retention-registry.py','new');h=self.commit()
+  choice,_=behavior_selection.select(self.r,b,h,['scripts/check-retention-registry.py','design-qa.md'],{'selected_packages':[]})
+  self.assertEqual(choice['lanes'],['preflight']);self.assertEqual(choice['profile'],'behavior')

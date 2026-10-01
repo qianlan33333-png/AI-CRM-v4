@@ -24,7 +24,7 @@ def source_contents(root, rev):
 
 
 def document(path):
-    return path in {'AGENTS.md','README.md'} or path.startswith('skills/') and path.endswith('.md') or path.startswith('docs/') and (Path(path).suffix.lower() in {'.md','.mdx','.png','.jpg','.jpeg','.svg','.webp','.pdf'} or path.startswith('docs/engineering/dedup/') and path.endswith('.json'))
+    return path in {'AGENTS.md','README.md','design-qa.md'} or path.startswith('skills/') and path.endswith('.md') or path.startswith('docs/') and (Path(path).suffix.lower() in {'.md','.mdx','.png','.jpg','.jpeg','.svg','.webp','.pdf'} or path.startswith('docs/engineering/dedup/') and path.endswith('.json'))
 
 
 def api_blocks(source):
@@ -101,6 +101,8 @@ def resolve(root:Path,base:str,head:str,paths:list[str]):
                 checks.append('source-binding')
             except (KeyError,ValueError,subprocess.SubprocessError):unknown[path]='source-binding-unmapped'
             continue
+        if path=='scripts/check-retention-registry.py':
+            mapped[path]=[];checks.append('retention');continue
         if path=='docs/governance/retention-registry.json':
             mapped[path]=[];checks.append('retention');continue
         if path.startswith('api/'):

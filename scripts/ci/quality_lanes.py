@@ -687,7 +687,8 @@ def behavior_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[l
             result.append(['node','scripts/check-openapi-route-parity.mjs'])
         if any(p.startswith('migrations/') for p in paths):result.append([sys.executable,'scripts/check-migration-sequence.py'])
         if any(p in {'web/donor-sources/source-index.json','web/donor-sources/source-lock.json'} for p in paths):result.append(['node','scripts/prepare-donor-source-views.mjs'])
-        if 'docs/governance/retention-registry.json' in paths:result.append([sys.executable,'scripts/check-retention-registry.py'])
+        if any(p in {'docs/governance/retention-registry.json','scripts/check-retention-registry.py'} for p in paths):
+            result.extend([[sys.executable,'scripts/check-retention-registry.py'],[sys.executable,'-m','unittest','scripts.test_retention_registry']])
         return result
     selected = focused_commands(lane, report_dir, checks)
     if lane == "backend":
