@@ -116,6 +116,53 @@ class GoInventoryTests(unittest.TestCase):
         self.assertIn({"consumer": "internal/consumer", "dependency": "internal/helper",
                        "kind": "internal-test"}, inventory["edges"])
 
+    @unittest.skipUnless(shutil.which("go"), "Go toolchain is required for the package graph fixture")
+    def test_sql_consumers_preserve_exact_diff_binding_and_downstream_selection(self):
+        import affected_plan
+
+        fixture = self.root / "sql-fixture"
+        (fixture / "internal/ledger").mkdir(parents=True)
+        (fixture / "internal/api").mkdir(parents=True)
+        (fixture / "migrations").mkdir()
+        (fixture / "go.mod").write_text("module example.test/crm\n\ngo 1.22\n")
+        (fixture / "internal/ledger/store.go").write_text(
+            'package ledger\n\nconst Query = "SELECT id FROM orders"\n')
+        (fixture / "internal/api/service.go").write_text(
+            'package api\n\nimport "example.test/crm/internal/ledger"\n'
+            'func Query() string { return ledger.Query }\n')
+        migration = "migrations/0001_orders.sql"
+        (fixture / migration).write_text("CREATE TABLE orders (id bigint);\n")
+
+        def git(*args):
+            return subprocess.check_output(
+                ["git", "-c", "user.name=release-fixture", "-c",
+                 "user.email=release-fixture@example.invalid", *args],
+                cwd=fixture, text=True).strip()
+
+        git("init", "--quiet")
+        git("add", ".")
+        git("commit", "--quiet", "-m", "base fixture")
+        base = git("rev-parse", "HEAD")
+        (fixture / migration).write_text(
+            "CREATE TABLE orders (id bigint);\nALTER TABLE orders ADD COLUMN amount bigint;\n")
+        git("add", ".")
+        git("commit", "--quiet", "-m", "SQL change")
+        head = git("rev-parse", "HEAD")
+
+        result = graph.build_graph(fixture, base, head)
+        self.assertEqual(result["changed_paths"], [migration])
+        self.assertEqual(result["input_scope"]["mapped"][migration],
+                         ["internal/ledger/store.go"])
+        self.assertEqual(result["affected_package_dirs"], ["internal/api", "internal/ledger"])
+        self.assertEqual([item["dir"] for item in result["selected_packages"]],
+                         ["internal/api", "internal/ledger"])
+        binding = (base, git("rev-parse", base + "^{tree}"),
+                   head, git("rev-parse", head + "^{tree}"), [migration])
+        self.assertEqual(affected_plan.validate_graph(result, *binding), (True, None))
+        altered = dict(result, changed_paths=["internal/ledger/store.go", migration])
+        self.assertEqual(affected_plan.validate_graph(altered, *binding),
+                         (False, "package-graph-changed-paths-mismatch"))
+
     def test_test_import_dependency_closes_over_consumer(self):
         base = {
             "packages": {

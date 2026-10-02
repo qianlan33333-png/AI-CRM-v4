@@ -371,6 +371,9 @@ def build_graph(repo: Path, base: str, head: str, go: str = "go", node: str = "n
         "go_list_args": list(GO_LIST_ARGS),
         "input_scope": inputs,
         **closure,
+        # Consumer paths widen the closure, while source binding must retain
+        # the exact committed diff validated by affected_plan.
+        "changed_paths": paths,
     }
 
 
