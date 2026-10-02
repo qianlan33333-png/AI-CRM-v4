@@ -2642,9 +2642,15 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		}
 	}
 	if cfg.Ops.Enabled {
-		handler = platformdiagnostics.Middleware(handler, cfg.ReleaseSHA, opsRecord)
+		handler = platformdiagnostics.MiddlewareWithClientErrorFilter(handler, cfg.ReleaseSHA, opsRecord, observePublicSurveyClientError)
 	}
 	return &composedApplication{invitationService: invitationService, catalogService: catalogService, pool: pool, handler: handler, authentication: authentication, management: management, weComProcessor: weComProcessor, weComArchiveProcessor: weComArchiveProcessor, effectsRuntime: effectsRuntime, paymentDistribution: paymentService, paymentReconciliation: paymentService, paymentSession: paymentSession, channelEntrantActions: channelEntrantActions, customerSync: customerSync, hxcDashboard: hxcDashboard, hxcSource: hxcSource, adminOps: adminOpsProjection, release: releaseObservation, diagnostics: diagnostics}, nil
+}
+
+func observePublicSurveyClientError(method, route string) bool {
+	// Public questionnaire requests are dispatched by this mounted prefix,
+	// rather than a ServeMux wildcard pattern. No concrete slug enters logs.
+	return method == http.MethodPost && route == "/api/public/questionnaires/"
 }
 
 func mountMessageArchive(next, archive http.Handler) (http.Handler, error) {

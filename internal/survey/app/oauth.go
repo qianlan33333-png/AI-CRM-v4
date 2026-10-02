@@ -89,7 +89,9 @@ func (s *OAuthService) Complete(ctx context.Context, stateToken, code string) (s
 	}
 	fact, err := s.provider.Exchange(ctx, code)
 	if err != nil {
-		return "", "", surveyport.ErrUnavailable
+		// The consumed state owns the fixed answer route. The HTTP layer may
+		// return a pending submission there without issuing an identity session.
+		return "", state.Redirect, surveyport.ErrUnavailable
 	}
 	reference := fact.Reference()
 	declared := identitydomain.Reference{Kind: reference.Kind, Scope: reference.Scope, Value: reference.NormalizedValue, Assurance: identitydomain.AssuranceVerified, Source: reference.Source}
@@ -97,7 +99,7 @@ func (s *OAuthService) Complete(ctx context.Context, stateToken, code string) (s
 	identity := surveyport.SubmissionIdentity{State: surveyport.IdentityUnresolved, EvidenceDigest: hex.EncodeToString(evidence[:])}
 	session, err := randomToken()
 	if err != nil {
-		return "", "", surveyport.ErrUnavailable
+		return "", state.Redirect, surveyport.ErrUnavailable
 	}
 	sessionDigest := sha256.Sum256([]byte(session))
 	err = s.uow.Within(ctx, func(tx context.Context) error {
@@ -124,7 +126,7 @@ func (s *OAuthService) Complete(ctx context.Context, stateToken, code string) (s
 		return s.store.CreateIdentitySession(tx, sessionDigest, identity, now.Add(30*time.Minute), now)
 	})
 	if err != nil {
-		return "", "", surveyport.ErrUnavailable
+		return "", state.Redirect, surveyport.ErrUnavailable
 	}
 	return session, state.Redirect, nil
 }

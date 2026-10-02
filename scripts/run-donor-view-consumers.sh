@@ -74,6 +74,7 @@ run_frontend_and_stage_checks() {
   node web/v3/h5AuthAdapter.test.mjs
   node web/v3/surveyCompletionAction.test.mjs
   node web/v3/surveyPublicHost.test.mjs
+  node web/v3/surveySubmissionResume.test.mjs
   node web/v3/h5ControllerTime.test.mjs
   node web/v3/fieldMappingEditor.test.mjs
   node web/v3/productAdapter.field_mapping.test.mjs

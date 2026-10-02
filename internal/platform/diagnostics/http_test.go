@@ -305,3 +305,32 @@ func TestRegisteredRouteNormalizesOnlyStaticSupportedTemplates(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectedClientFailuresRetainSafeRouteAndLocalCorrelation(t *testing.T) {
+	logs := captureLogs(t)
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/selected/{slug}/submissions", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(401) })
+	mux.HandleFunc("POST /api/other/{slug}", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(400) })
+	var observations []Observation
+	h := MiddlewareWithClientErrorFilter(mux, testRelease, func(_ context.Context, o Observation) error { observations = append(observations, o); return nil }, func(method, route string) bool {
+		return method == http.MethodPost && route == "/api/selected/{slug}/submissions"
+	})
+	req := httptest.NewRequest("POST", "/api/selected/fixture-private-slug/submissions?phone=fixture-private-phone", strings.NewReader("fixture-private-body"))
+	req.Header.Set("Cookie", "fixture-private-cookie")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if len(observations) != 1 {
+		t.Fatal("selected quick 401 was not retained")
+	}
+	o := observations[0]
+	if o.Code != "http_client_error_401" || o.Status != 401 || o.RouteTemplate != "/api/selected/{slug}/submissions" || o.Correlation != w.Header().Get("X-AICRM-Diagnostic-ID") {
+		t.Fatalf("unexpected safe observation: %+v", o)
+	}
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/api/other/fixture-private-slug", nil))
+	if len(observations) != 1 {
+		t.Fatal("unselected client failures changed policy")
+	}
+	if strings.Contains(logs.String(), "fixture-private") {
+		t.Fatal("client failure diagnostics leaked request input")
+	}
+}

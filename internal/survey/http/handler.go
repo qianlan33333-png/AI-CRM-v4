@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
@@ -442,6 +443,9 @@ func (h *Handler) publicQuestionnaire(w http.ResponseWriter, r *http.Request, ta
 			resultError(w, err)
 			return
 		}
+		// This pairwise context only protects a local answer draft from being
+		// resumed under another verified identity. It is not an auth credential.
+		w.Header().Set("X-Aicrm-Survey-Authorization-Context", surveyAuthorizationContext(slug, identity))
 		writeJSON(w, 200, publicDefinition(q))
 		return
 	}
@@ -531,7 +535,11 @@ func (h *Handler) oauthStart(w http.ResponseWriter, r *http.Request) {
 		resultError(w, err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "survey_oauth_return", Value: r.URL.Query().Get("slug"), Path: "/api/h5/surveys/oauth/callback", MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	returnContext := r.URL.Query().Get("slug")
+	if r.URL.Query().Get("resume") == "submit" {
+		returnContext += ".submit"
+	}
+	http.SetCookie(w, &http.Cookie{Name: "survey_oauth_return", Value: returnContext, Path: "/api/h5/surveys/oauth/callback", MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, location, http.StatusSeeOther)
 }
@@ -546,9 +554,16 @@ func (h *Handler) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, redirect, err := h.oauth.Complete(r.Context(), r.URL.Query().Get("state"), r.URL.Query().Get("code"))
+	prior, priorErr := r.Cookie("survey_oauth_return")
+	resume := priorErr == nil && surveySubmissionResumeRedirect(redirect, prior.Value)
 	if err != nil {
-		if prior, e := r.Cookie("survey_oauth_return"); e == nil && prior.Value != "" {
-			http.Redirect(w, r, "/h5/auth.html?oauth_error=1&slug="+url.QueryEscape(prior.Value), http.StatusSeeOther)
+		if resume {
+			w.Header().Set("Cache-Control", "no-store")
+			http.Redirect(w, r, redirect+"&resume=submit&oauth_error=1", http.StatusSeeOther)
+			return
+		}
+		if priorErr == nil && prior.Value != "" {
+			http.Redirect(w, r, "/h5/auth.html?oauth_error=1&slug="+url.QueryEscape(strings.TrimSuffix(prior.Value, ".submit")), http.StatusSeeOther)
 		} else {
 			http.Redirect(w, r, "/h5/error.html?code=survey_oauth_failed", http.StatusSeeOther)
 		}
@@ -556,7 +571,25 @@ func (h *Handler) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: "__Host-aicrm_survey_identity", Value: session, Path: "/", MaxAge: 1800, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	w.Header().Set("Cache-Control", "no-store")
+	if resume {
+		redirect += "&resume=submit"
+	}
 	http.Redirect(w, r, redirect, http.StatusSeeOther)
+}
+
+func surveySubmissionResumeRedirect(target, returnContext string) bool {
+	// The cookie only selects UX continuity, never a destination or permission.
+	// Match the exact route supplied by a successfully consumed OAuth state.
+	slug, resume := strings.CutSuffix(returnContext, ".submit")
+	return resume && validPublicSlug(slug) && (target == "/h5/all.html?slug="+slug || target == "/h5/one.html?slug="+slug)
+}
+
+func surveyAuthorizationContext(slug string, identity surveyport.SubmissionIdentity) string {
+	if identity.CustomerID == nil || identity.State != surveyport.IdentityResolved || len(identity.EvidenceDigest) != 64 {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(fmt.Sprintf("survey-resume-v1\x00%s\x00%d\x00%s", slug, *identity.CustomerID, identity.EvidenceDigest)))
+	return fmt.Sprintf("%x", digest)
 }
 
 func (h *Handler) publicEntry(w http.ResponseWriter, r *http.Request, slug string) {

@@ -173,6 +173,7 @@ func (s *operationRouteSurvey) QueueCompletionTest(context.Context, surveyport.I
 
 type routeOAuth struct {
 	completeErr error
+	redirect    string
 	enabled     bool
 	identity    surveyport.SubmissionIdentity
 }
@@ -182,8 +183,15 @@ func (routeOAuth) Start(context.Context, string) (string, error) {
 	return "https://open.weixin.qq.com/authorize", nil
 }
 func (o routeOAuth) Complete(context.Context, string, string) (string, string, error) {
+	if o.completeErr != nil {
+		return "", o.redirect, o.completeErr
+	}
+	if o.redirect != "" {
+		return "session", o.redirect, o.completeErr
+	}
 	return "session", "/h5/all.html?slug=growth", o.completeErr
 }
+
 func (o routeOAuth) ResolveSession(context.Context, string) (surveyport.SubmissionIdentity, error) {
 	return o.identity, nil
 }
@@ -342,6 +350,75 @@ func TestPublicSurveyCannotBypassOAuth(t *testing.T) {
 		handler.ServeHTTP(response, httptest.NewRequest(method, path, nil))
 		if response.Code != nethttp.StatusUnauthorized || !strings.Contains(response.Body.String(), "survey_oauth_required") {
 			t.Fatalf("path=%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestSurveyAuthorizationContextIsPairwiseAndDoesNotAuthorizeRequests(t *testing.T) {
+	firstID, secondID := customerdomain.CustomerID(42), customerdomain.CustomerID(43)
+	identity := surveyport.SubmissionIdentity{State: surveyport.IdentityResolved, CustomerID: &firstID, EvidenceDigest: strings.Repeat("a", 64)}
+	context := surveyAuthorizationContext("growth", identity)
+	if len(context) != 64 || context == identity.EvidenceDigest || context == surveyAuthorizationContext("other", identity) {
+		t.Fatal("resume context must be opaque and questionnaire scoped")
+	}
+	identity.CustomerID = &secondID
+	if context == surveyAuthorizationContext("growth", identity) {
+		t.Fatal("another Customer received the same context")
+	}
+	identity.CustomerID = &firstID
+	identity.EvidenceDigest = strings.Repeat("b", 64)
+	if context == surveyAuthorizationContext("growth", identity) {
+		t.Fatal("another verified identity received the same context")
+	}
+	identity.EvidenceDigest = strings.Repeat("a", 64)
+	handler := newRouteHandler(t, routeOAuth{enabled: true, identity: identity})
+	request := httptest.NewRequest(nethttp.MethodGet, "/api/public/questionnaires/growth", nil)
+	request.AddCookie(&nethttp.Cookie{Name: "__Host-aicrm_survey_identity", Value: strings.Repeat("a", 43)})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != 200 || response.Header().Get("X-Aicrm-Survey-Authorization-Context") != context {
+		t.Fatalf("header response=%d", response.Code)
+	}
+	request = httptest.NewRequest(nethttp.MethodPost, "/api/public/questionnaires/growth/submissions", nil)
+	request.Header.Set("X-Aicrm-Survey-Authorization-Context", context)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != 401 {
+		t.Fatal("resume context authorized a submission without an OAuth session")
+	}
+}
+
+func TestOAuthSubmissionResumeDenialReturnsToAnswerRoute(t *testing.T) {
+	for _, display := range []string{"all", "one"} {
+		target := "/h5/" + display + ".html?slug=growth"
+		handler := newRouteHandler(t, routeOAuth{enabled: true, redirect: target, completeErr: errors.New("denied")})
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(nethttp.MethodGet, "/api/h5/surveys/oauth/callback?state=opaque", nil)
+		request.AddCookie(&nethttp.Cookie{Name: "survey_oauth_return", Value: "growth.submit"})
+		handler.ServeHTTP(response, request)
+		if response.Code != 303 || response.Header().Get("Location") != target+"&resume=submit&oauth_error=1" || len(response.Result().Cookies()) != 0 {
+			t.Fatalf("denial returned %d %q", response.Code, response.Header().Get("Location"))
+		}
+	}
+	if surveySubmissionResumeRedirect("/h5/all.html?slug=growth", "growth") {
+		t.Fatal("ordinary OAuth must not resume a submission")
+	}
+	for _, target := range []string{"https://evil.example/h5/all.html?slug=growth", "//evil.example/h5/all.html?slug=growth", "/h5/all.html?slug=growth&next=https://evil.example", "/h5/all.html?slug=growth#token", "/h5/auth.html?slug=growth", "/h5/all.html?slug=other", ""} {
+		if surveySubmissionResumeRedirect(target, "growth.submit") {
+			t.Fatalf("unsafe resume redirect accepted %q", target)
+		}
+	}
+}
+
+func TestOAuthSubmissionResumeCookieCannotReplaceConsumedState(t *testing.T) {
+	for _, target := range []string{"", "/h5/all.html?slug=other"} {
+		handler := newRouteHandler(t, routeOAuth{enabled: true, redirect: target, completeErr: errors.New("invalid state")})
+		request := httptest.NewRequest(nethttp.MethodGet, "/api/h5/surveys/oauth/callback?state=opaque", nil)
+		request.AddCookie(&nethttp.Cookie{Name: "survey_oauth_return", Value: "growth.submit"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if strings.Contains(response.Header().Get("Location"), "resume=submit") || len(response.Result().Cookies()) != 0 {
+			t.Fatal("return cookie substituted another/missing state or created a session")
 		}
 	}
 }

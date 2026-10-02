@@ -249,7 +249,9 @@ func validateAnswer(question surveyport.Question, answer surveyport.SubmissionAn
 			maximum = *question.Validation.MaximumLength
 		}
 		length := utf8.RuneCountInString(answer.TextValue)
-		if answer.TextValue != strings.TrimSpace(answer.TextValue) || !utf8.ValidString(answer.TextValue) || length < minimum || length > maximum {
+		// Free text may legitimately start/end with spaces or line breaks.
+		// Preserve the original answer; only required blank text is rejected.
+		if question.Required && strings.TrimSpace(answer.TextValue) == "" || !utf8.ValidString(answer.TextValue) || length < minimum || length > maximum {
 			return ErrInvalidAnswer
 		}
 	case surveyport.QuestionMobile:

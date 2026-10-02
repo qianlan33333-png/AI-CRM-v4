@@ -54,14 +54,17 @@ func (s *oauthStore) ReadIdentitySession(_ context.Context, digest [32]byte, _ t
 	return s.identity, nil
 }
 
-type oauthProvider struct{ fact identitydomain.VerifiedFact }
+type oauthProvider struct {
+	fact identitydomain.VerifiedFact
+	err  error
+}
 
 func (oauthProvider) Enabled() bool { return true }
 func (oauthProvider) AuthorizationURL(state string) string {
 	return "https://provider.example/oauth?state=" + state
 }
 func (p oauthProvider) Exchange(context.Context, string) (identitydomain.VerifiedFact, error) {
-	return p.fact, nil
+	return p.fact, p.err
 }
 
 type oauthIdentity struct{}
@@ -107,5 +110,22 @@ func TestOAuthStartPreservesMissingQuestionnaireWithoutCreatingState(t *testing.
 	}
 	if store.stateDigest != ([32]byte{}) {
 		t.Fatal("OAuth state was persisted for missing questionnaire")
+	}
+}
+
+func TestOAuthSubmissionResumePreservesAnswersRouteOnProviderDenial(t *testing.T) {
+	store := &oauthStore{}
+	service := NewOAuthService(oauthUOW{}, store, oauthProvider{err: errors.New("denied")}, oauthIdentity{})
+	location, err := service.Start(context.Background(), "growth-test")
+	if err != nil || store.state.Redirect != "/h5/all.html?slug=growth-test" {
+		t.Fatalf("resume route=%q err=%v", store.state.Redirect, err)
+	}
+	state := strings.TrimPrefix(location, "https://provider.example/oauth?state=")
+	session, redirect, err := service.Complete(context.Background(), state, "")
+	if err == nil || session != "" || redirect != store.state.Redirect || store.sessionDigest != ([32]byte{}) {
+		t.Fatalf("denied resume session=%q redirect=%q err=%v", session, redirect, err)
+	}
+	if _, redirect, err = service.Complete(context.Background(), state, ""); err == nil || redirect != "" {
+		t.Fatal("consumed resume state must not replay its return context")
 	}
 }

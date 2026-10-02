@@ -45,12 +45,14 @@ export function completionActionFromCarrier(value: unknown): CompletionAction {
   return completionAction(value && typeof value === 'object' ? (value as CompletionCarrier).completion_action : undefined);
 }
 
-export async function readPublicSurvey(slug: string): Promise<PublicSurveyDefinition> {
-  return unwrapGenerated(await getPublicSurvey(slug, apiRequestOptions())) as PublicSurveyDefinition;
+export async function readPublicSurvey(slug: string): Promise<PublicSurveyDefinition & { authorizationContext: string }> {
+  const response = await getPublicSurvey(slug, apiRequestOptions());
+  const definition = unwrapGenerated(response) as PublicSurveyDefinition;
+  return { ...definition, authorizationContext: response.headers.get('X-Aicrm-Survey-Authorization-Context') || '' };
 }
 
-export async function submitSurvey(slug: string, request: PublicSurveySubmissionRequest): Promise<{ completionAction: CompletionAction }> {
-  const result = unwrapGenerated(await submitPublicSurvey(slug, request, apiRequestOptions())) as CompletionCarrier;
+export async function submitSurvey(slug: string, request: PublicSurveySubmissionRequest, signal?: AbortSignal): Promise<{ completionAction: CompletionAction }> {
+  const result = unwrapGenerated(await submitPublicSurvey(slug, request, apiRequestOptions({ signal }))) as CompletionCarrier;
   return { completionAction: completionActionFromCarrier(result) };
 }
 

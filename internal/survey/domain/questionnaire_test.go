@@ -96,3 +96,21 @@ func TestScoreRulesAreOrderedAndNonOverlapping(t *testing.T) {
 		t.Fatalf("overlap error=%v", err)
 	}
 }
+
+func TestTextareaSubmissionPreservesOuterWhitespaceRegression(t *testing.T) {
+	question := surveyport.Question{ID: 1, Type: surveyport.QuestionTextarea, Required: true}
+	for _, value := range []string{"内容\n", " 内容 ", "\n第一段\n第二段\n"} {
+		if err := ValidateAnswers([]surveyport.Question{question}, []surveyport.SubmissionAnswer{{QuestionID: 1, TextValue: value}}); err != nil {
+			t.Errorf("normal free-text whitespace rejected: %v", err)
+		}
+	}
+	for _, value := range []string{"", " \n\t"} {
+		if err := ValidateAnswers([]surveyport.Question{question}, []surveyport.SubmissionAnswer{{QuestionID: 1, TextValue: value}}); !errors.Is(err, ErrInvalidAnswer) {
+			t.Fatal("required blank textarea accepted")
+		}
+	}
+	question.Validation.MaximumLength = intPointer(2)
+	if err := ValidateAnswers([]surveyport.Question{question}, []surveyport.SubmissionAnswer{{QuestionID: 1, TextValue: "内容\n"}}); !errors.Is(err, ErrInvalidAnswer) {
+		t.Fatal("outer whitespace bypassed configured length")
+	}
+}

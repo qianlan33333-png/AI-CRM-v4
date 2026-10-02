@@ -2105,6 +2105,28 @@
       ],
       "reason": "Complete the user-approved unified WeCom directory and immutable tag-history API contract, including three read-only customer-profile/history/statistics routes and actual sync triggers/replay responses; bind the active canonical OpenAPI and embed view to its exact bytes. No frozen donor payload or checker policy changes.",
       "review_reference": "User's explicit 'PLEASE IMPLEMENT THIS PLAN: 企微客户资料统一同步与标签变更历史' in original task 01a0f25f-76de-7893-a18c-3f4109bbb827; docs/prd/2026-09-30-wecom-profile-history.md. Release workbench 01a0ead7-26cf-7b01-87d9-f68df10eaebe identified the missing API contract in the 8b411061 callback and independently verified the contract/binding-only diff in the 0f2c215a callback. Author reviewed these exact changes against cumulative base 6bf3ca9d. This records existing user business authorization and author review, not a new independent approval, production authorization or deployment evidence."
+    },
+    {
+      "base_commit": "b30de6bc8ab054608828d6f260b94ea1c3b8576a",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a9e0dd80a6286153a16aeb07da38a05ac2d710ead9a4f0b6e4d0f98521d282d1",
+          "head_sha256": "1f1e2c496b1e274a5035214d7d1e03c7d496b0494c8f96f9ed2dc02d6b226bcf"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "5f166b9c10c8484711ee8a8ac9dac98d84deb7887c4a3ddafb691448f85dd832",
+          "head_sha256": "8fb48cb45890a5e3f07d512ae7f876ff47e2a3eea35f506e0d69229c4bea1c5c"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "1bfd9a53a9ff6b7daa18a334b4c8b1b2fb2b4856b28af9245b7a819217dce287",
+          "head_sha256": "d54f9e9f7dde5c992b65ddb982af166c7e7c6aaed4b39b00b29ac934203aa5ce"
+        }
+      ],
+      "reason": "Bind the user-authorized survey submission reauthorization header and resume query contract to the active canonical OpenAPI bytes. No frozen source payload or checker policy changes.",
+      "review_reference": "docs/prd/2026-10-02-survey-submit-reauthorization.md; user instruction in task 01a0fc12-c877-7d00-8104-846d77920c98: 按照目前查到的信息完成本次开发优化。都解决掉. Exact base-bound author declaration, not independent review or production deployment evidence."
     }
   ]
 }

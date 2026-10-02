@@ -3804,7 +3804,13 @@ paths:
       tags: [SurveyPublic]
       description: Requires a valid HttpOnly Survey OAuth session. A Customer that has already submitted receives already_submitted and a safe completion action instead of a definition.
       responses:
-        "200": {description: Published immutable survey, content: {application/json: {schema: {$ref: "#/components/schemas/SurveyPublicDefinition"}}}}
+        "200":
+          description: Published immutable survey
+          headers:
+            X-Aicrm-Survey-Authorization-Context:
+              description: Opaque questionnaire-scoped verified respondent context for local draft continuity. Not an authentication credential.
+              schema: {type: string, pattern: '^[a-f0-9]{64}$'}
+          content: {application/json: {schema: {$ref: "#/components/schemas/SurveyPublicDefinition"}}}
         "401": {description: survey_oauth_required, content: {application/json: {schema: {$ref: "#/components/schemas/SurveyPublicError"}}}}
         "409": {description: survey_identity_conflict or already_submitted, content: {application/json: {schema: {$ref: "#/components/schemas/SurveyPublicConflictError"}}}}
         "503": {description: survey_oauth_unavailable, content: {application/json: {schema: {$ref: "#/components/schemas/SurveyPublicError"}}}}
@@ -3834,7 +3840,7 @@ paths:
         "409": {description: survey_identity_conflict, content: {application/json: {schema: {$ref: "#/components/schemas/SurveyPublicError"}}}}
         "503": {description: survey_oauth_unavailable, content: {application/json: {schema: {$ref: "#/components/schemas/SurveyPublicError"}}}}
   /api/h5/surveys/oauth/start:
-    get: {operationId: startSurveyOAuth, description: User-click initiated snsapi_userinfo authorization. Display mode is derived from the published server-side definition., parameters: [{name: slug, in: query, required: true, schema: {type: string, pattern: '^[a-z0-9][a-z0-9-]{0,127}$'}}], responses: {"303": {description: Redirect to WeChat OAuth}, "400": {description: survey_wechat_required}, "404": {description: questionnaire_not_found}, "503": {description: survey_oauth_unavailable}}}
+    get: {operationId: startSurveyOAuth, description: User-click initiated snsapi_userinfo authorization. Display mode is derived from the published server-side definition. resume=submit returns directly to the answer route after authorization., parameters: [{name: slug, in: query, required: true, schema: {type: string, pattern: '^[a-z0-9][a-z0-9-]{0,127}$'}}, {name: resume, in: query, schema: {type: string, enum: [submit]}}], responses: {"303": {description: Redirect to WeChat OAuth}, "400": {description: survey_wechat_required}, "404": {description: questionnaire_not_found}, "503": {description: survey_oauth_unavailable}}}
   /api/h5/surveys/oauth/callback:
     get: {operationId: completeSurveyOAuth, parameters: [{name: code, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 512}}, {name: state, in: query, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}}], responses: {"303": {description: Verified identity session and safe H5 redirect; the session cookie is HttpOnly Secure SameSite Lax}}}
   /api/h5/surveys/session:

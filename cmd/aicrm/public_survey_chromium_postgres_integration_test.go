@@ -19,7 +19,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	channelport "github.com/qianlan33333-png/AI-CRM-v3/internal/channel/port"
-	customerapp "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/app"
 	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
 	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
 	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
@@ -127,6 +126,7 @@ func TestPostgreSQLPublicSurveyPresentationChromiumJourney(t *testing.T) {
 type publicSurveyPresentationChromiumFixture struct {
 	ctx            context.Context
 	native         *pgxpool.Pool
+	cipher         *surveysecure.Cipher
 	submissions    *surveyapp.SubmissionService
 	server         *httptest.Server
 	browserURL     string
@@ -142,7 +142,12 @@ type publicSurveyPresentationChromiumFixture struct {
 	leadQRURL      string
 }
 
-func newPublicSurveyPresentationChromiumFixture(t *testing.T) *publicSurveyPresentationChromiumFixture {
+type publicSurveyBrowserOptions struct {
+	reauthorization bool
+	display         surveyport.AnswerDisplayMode
+}
+
+func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicSurveyBrowserOptions) *publicSurveyPresentationChromiumFixture {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	t.Cleanup(cancel)
@@ -179,11 +184,7 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T) *publicSurveyPrese
 	submissions := surveyapp.NewSubmissionService(uow, repository, cipher)
 	oneID := identityapp.OneIDService{Store: identitystore.NewPostgresStore()}
 	projection := customerstore.NewPostgreSQL()
-	collectedPhones, err := customerapp.NewCollectedPhoneService(oneID, projection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = submissions.BindCollectedPhone(collectedPhones); err != nil {
+	if err = submissions.BindCollectedPhone(collectedPhoneTestRecorder(t)); err != nil {
 		t.Fatal(err)
 	}
 	if err = submissions.BindCustomerTimeline(projection); err != nil {
@@ -218,6 +219,16 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T) *publicSurveyPrese
 		t.Fatal(err)
 	}
 	success := publicSurveyPresentationDefinition("public-survey-ui", surveyport.DisplayAllInOne, "公开问卷体验", "请完成以下必答题后提交。")
+	if len(options) > 0 && options[0].reauthorization {
+		if options[0].display != "" {
+			success.AnswerDisplayMode = options[0].display
+		}
+		maximum := 1
+		for i := 1; i < 6; i++ {
+			success.Questions = append(success.Questions, surveyport.Question{Type: surveyport.QuestionSingleChoice, Title: "选择当前状态", Required: true, SortOrder: i, Validation: surveyport.Validation{MaximumSelections: &maximum}, Options: []surveyport.Option{{Text: "已确认", TagCodes: []string{}, SortOrder: 0}, {Text: "待确认", TagCodes: []string{}, SortOrder: 1}}})
+		}
+		success.Questions = append(success.Questions, surveyport.Question{Type: surveyport.QuestionMobile, Title: "手机号", Required: true, SortOrder: 6, Options: []surveyport.Option{}}, surveyport.Question{Type: surveyport.QuestionTextarea, Title: "补充说明", Required: true, SortOrder: 7, Options: []surveyport.Option{}})
+	}
 	success, err = definitions.Create(ctx, surveyport.CreateCommand{Questionnaire: success, ActorID: actorID, IdempotencyKey: "public-survey-ui-create-0001"})
 	if err != nil {
 		t.Fatal(err)
@@ -298,7 +309,11 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T) *publicSurveyPrese
 		t.Fatal("Survey OAuth start omitted state")
 	}
 	callback := surveyJourneyServe(t, api, http.MethodGet, "/api/h5/surveys/oauth/callback?state="+url.QueryEscape(state)+"&code=public-survey-browser-code", nil, "", nil, "")
-	if callback.Code != http.StatusSeeOther || callback.Header().Get("Location") != "/h5/all.html?slug="+success.Slug || transport.calls != 2 {
+	answerPath := "/h5/all.html?slug=" + success.Slug
+	if success.AnswerDisplayMode == surveyport.DisplayOneByOne {
+		answerPath = "/h5/one.html?slug=" + success.Slug
+	}
+	if callback.Code != http.StatusSeeOther || callback.Header().Get("Location") != answerPath || transport.calls != 2 {
 		t.Fatalf("Survey OAuth callback status=%d redirect=%q calls=%d", callback.Code, callback.Header().Get("Location"), transport.calls)
 	}
 	cookies := callback.Result().Cookies()
@@ -315,7 +330,7 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T) *publicSurveyPrese
 	}
 	secondCallback := surveyJourneyServe(t, api, http.MethodGet, "/api/h5/surveys/oauth/callback?state="+url.QueryEscape(secondState)+"&code=public-survey-browser-code", nil, "", nil, "")
 	secondCookies := secondCallback.Result().Cookies()
-	if secondCallback.Code != http.StatusSeeOther || secondCallback.Header().Get("Location") != "/h5/all.html?slug="+success.Slug || len(secondCookies) != 1 || secondCookies[0].Name != "__Host-aicrm_survey_identity" || len(secondCookies[0].Value) != 43 || secondCookies[0].Value == cookies[0].Value {
+	if secondCallback.Code != http.StatusSeeOther || secondCallback.Header().Get("Location") != answerPath || len(secondCookies) != 1 || secondCookies[0].Name != "__Host-aicrm_survey_identity" || len(secondCookies[0].Value) != 43 || secondCookies[0].Value == cookies[0].Value {
 		t.Fatalf("second Survey OAuth callback does not establish an independent session: status=%d location=%q cookies=%d", secondCallback.Code, secondCallback.Header().Get("Location"), len(secondCookies))
 	}
 
@@ -387,7 +402,7 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T) *publicSurveyPrese
 		}
 		screenshots = configured
 	}
-	return &publicSurveyPresentationChromiumFixture{ctx: ctx, native: native, submissions: submissions, server: server, browserURL: origin, success: success, failure: failure, redirect: redirect, leadQR: leadQR, session: cookies[0].Value, secondSession: secondCookies[0].Value, script: source, screenshots: screenshots, redirectTarget: redirectTarget, leadQRURL: leadQRURL}
+	return &publicSurveyPresentationChromiumFixture{ctx: ctx, native: native, cipher: cipher, submissions: submissions, server: server, browserURL: origin, success: success, failure: failure, redirect: redirect, leadQR: leadQR, session: cookies[0].Value, secondSession: secondCookies[0].Value, script: source, screenshots: screenshots, redirectTarget: redirectTarget, leadQRURL: leadQRURL}
 }
 
 // The journey fixture crosses only Survey's two public read Ports. Its local

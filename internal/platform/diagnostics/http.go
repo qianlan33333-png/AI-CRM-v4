@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -116,6 +117,13 @@ func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 // Middleware never trusts inbound IDs, URLs, bodies, error/panic text or stack
 // traces. Invalid release metadata becomes unknown instead of entering logs.
 func Middleware(next http.Handler, release string, record Recorder) http.Handler {
+	return MiddlewareWithClientErrorFilter(next, release, record, nil)
+}
+
+// MiddlewareWithClientErrorFilter allows composition to opt selected registered
+// routes into 4xx diagnostics without logging request paths, bodies or identity.
+// Other routes retain the existing server-error/slow-request policy.
+func MiddlewareWithClientErrorFilter(next http.Handler, release string, record Recorder, observeClientError func(method, route string) bool) http.Handler {
 	if !validRelease(release) {
 		release = "unknown"
 	}
@@ -146,11 +154,14 @@ func Middleware(next http.Handler, release string, record Recorder) http.Handler
 				if status == 0 {
 					status = http.StatusOK
 				}
-				if status < 500 && duration < 3*time.Second {
+				clientFailure := status >= 400 && status < 500 && observeClientError != nil && observeClientError(r.Method, registeredRoute(r.Pattern))
+				if status < 500 && duration < 3*time.Second && !clientFailure {
 					return
 				}
 				if status >= 500 {
 					code = "http_server_error"
+				} else if clientFailure {
+					code = "http_client_error_" + strconv.Itoa(status)
 				}
 			}
 			observation := Observation{Code: code, Correlation: id, RouteTemplate: registeredRoute(r.Pattern), ReleaseSHA: release, Status: status, Duration: duration}
