@@ -10,7 +10,7 @@ const page = fs.readFileSync(path.join(root, 'web/dist/h5/auth.html'), 'utf8');
 const host = await buildTestBrowserBundle(path.join(root, 'web/v3/h5AuthAdapter.ts'));
 assert.equal(/<script type="module" src="\.\.\/assets\/h5-/.test(page), false, 'auth page must not mount the frozen auto-OAuth controller');
 
-async function render({ search = '?slug=growth', status = 401, ua = 'MicroMessenger', hanging = false } = {}) {
+async function render({ search = '?slug=growth', status = 401, ua = 'MicroMessenger', hanging = false, sessionBody = {} } = {}) {
   const calls = [];
   const dom = new JSDOM(page, {
     url: `https://test.invalid/h5/auth.html${search}`,
@@ -21,7 +21,7 @@ async function render({ search = '?slug=growth', status = 401, ua = 'MicroMessen
       window.fetch = async (url, options={}) => {
         calls.push(url);
         if(hanging)return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new window.DOMException('Aborted','AbortError')),{once:true}));
-        return { ok: status === 200, status };
+        return { ok: status === 200, status, json:async()=>sessionBody };
       };
     },
   });
@@ -61,7 +61,7 @@ assert.equal(outside.calls.length, 0);
 assert.match(outside.screen.textContent, /请在微信中打开/);
 assert.equal(outside.screen.querySelector('.auth-button')?.hidden, true);
 outside.dom.window.close();
-for(const config of [{status:503},{hanging:true}]){
+for(const config of [{status:503},{hanging:true},{status:200,sessionBody:{}},{status:200,sessionBody:{authorized:true,identity_state:'pending',display:'all',submitted:false}}]){
   const recoverable=await render(config);
   assert.equal(recoverable.calls.length,1,'transient read failure never launches OAuth or automatically retries');
   const retry=recoverable.screen.querySelector('.auth-button');

@@ -43,9 +43,19 @@ if (document.body.dataset.page === 'auth') {
   else if (query.has('oauth_error')) showRequired('微信授权未完成，请点击按钮重新授权。');
   else if (!inWechat) showRequired();
   else {
-    void surveyRead((signal) => fetch(`/api/h5/surveys/session?slug=${encodeURIComponent(slug)}`, {
-      signal, credentials: 'same-origin', headers: { Accept: 'application/json' },
-    })).then((response) => {
+    void surveyRead(async (signal) => {
+      const response = await fetch(`/api/h5/surveys/session?slug=${encodeURIComponent(slug)}`, {
+        signal, credentials: 'same-origin', headers: { Accept: 'application/json' },
+      });
+      if (response.ok) {
+        const body = await response.json() as { authorized?: unknown; identity_state?: unknown; display?: unknown; submitted?: unknown };
+        if (body?.authorized !== true || body.identity_state !== 'resolved' ||
+            !['all', 'one'].includes(String(body.display)) || typeof body.submitted !== 'boolean') {
+          throw new Error('Incomplete session response');
+        }
+      }
+      return response;
+    }).then((response) => {
       if (response.ok) {
         location.replace(`/q/${encodeURIComponent(slug)}`);
       } else if (response.status === 401) {
