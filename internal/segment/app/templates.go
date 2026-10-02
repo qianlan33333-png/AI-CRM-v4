@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	segmentport "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/port"
 	"io"
 	"strconv"
 	"strings"
@@ -146,6 +147,22 @@ func CanonicalDefinition(raw json.RawMessage) (json.RawMessage, error) {
 }
 
 func validDefinition(input DefinitionInput) bool {
+	if raw, present := input.Parameters["activation"]; present {
+		if input.TemplateKey != "paid_order" && input.TemplateKey != "questionnaire_submissions" {
+			return false
+		}
+		if _, err := segmentport.ParseActivation(raw, input.TemplateKey == "paid_order"); err != nil {
+			return false
+		}
+		base := make(map[string]json.RawMessage, len(input.Parameters)-1)
+		for key, value := range input.Parameters {
+			if key != "activation" {
+				base[key] = value
+			}
+		}
+		input.Parameters = base
+		return validDefinition(input)
+	}
 	owner := validOwner(input.Parameters)
 	switch input.TemplateKey {
 	case "core_ai_product":

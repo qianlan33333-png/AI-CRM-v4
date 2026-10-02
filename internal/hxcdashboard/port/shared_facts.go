@@ -35,6 +35,7 @@ type SharedFacts struct {
 	FormallyLoggedIn                       bool
 	FormalLoginAt                          *time.Time
 	HasTokenUsage                          bool
+	LastTokenUsedAt, TokenUsageObservedAt  *time.Time
 	LearningPlanFound                      bool
 	LearningPlanStatus                     string
 	LearningPlanCurrent, LearningPlanTotal *int64

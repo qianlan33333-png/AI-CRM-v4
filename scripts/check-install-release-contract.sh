@@ -65,7 +65,7 @@ grep -qxF 'ExecStart=/usr/bin/env AICRM_ROLE=worker AICRM_CUSTOMER_SYNC_TRIGGER=
   exit 1
 }
 grep -qxF 'ExecStart=/usr/bin/env AICRM_ROLE=worker AICRM_HXC_SYNC_TRIGGER=scheduled /opt/aicrm/current/bin/aicrm' deploy/aicrm-hxc-dashboard-refresh.service || { echo "HXC refresh must use the durable worker trigger" >&2; exit 1; }
-grep -qxF 'OnCalendar=*-*-* 03,09,15,21:15:00 Asia/Shanghai' deploy/aicrm-hxc-dashboard-refresh.timer || { echo "HXC refresh timer must run at the four approved Beijing times" >&2; exit 1; }
+grep -qxF 'OnCalendar=*-*-* *:15:00 Asia/Shanghai' deploy/aicrm-hxc-dashboard-refresh.timer || { echo "HXC refresh timer must run hourly at minute 15 Beijing time" >&2; exit 1; }
 grep -qxF 'ExecStart=/opt/aicrm/current/bin/migrate-hxc-daily-lessons --mode sync --actor-admin-user-id 2' deploy/aicrm-hxc-daily-lessons-sync.service || { echo "HXC daily lesson sync must use the immutable UUID importer" >&2; exit 1; }
 grep -qxF 'OnCalendar=*-*-* 10:00:00 Asia/Shanghai' deploy/aicrm-hxc-daily-lessons-sync.timer || { echo "HXC daily lesson sync must run at 10:00 Beijing time" >&2; exit 1; }
 grep -qx 'install -m 0644 "$release_dir/deploy/aicrm-hxc-daily-lessons-sync.service" /etc/systemd/system/aicrm-hxc-daily-lessons-sync.service' "$installer" || { echo "installer must install the HXC daily lesson sync service" >&2; exit 1; }
@@ -182,7 +182,9 @@ for migration_contract in \
   '0098_message_archive_historical_projection.sql:Archive historical external projection' \
   '0099_survey_historical_external_projection.sql:Survey historical external projection' \
   '0100_ai_assistant_machine_actor.sql:AI Assistant machine actor' \
-  '0124_operation_excel_batch_lifecycle.sql:Excel operation batch lifecycle'; do
+  '0124_operation_excel_batch_lifecycle.sql:Excel operation batch lifecycle' \
+  '0218_hxc_token_usage_time.sql:HXC token usage observation' \
+  '0219_segment_hourly_refresh.sql:Segment hourly incremental refresh'; do
   migration="${migration_contract%%:*}"
   label="${migration_contract#*:}"
   test -f "migrations/${migration}" || {

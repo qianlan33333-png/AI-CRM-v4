@@ -75,11 +75,19 @@ func (s LegacyTemplateSource) Evaluate(ctx context.Context, definition segmentpo
 	case segmentdsl.WeComContactRegistration:
 		ids, err = s.wecom(ctx, ast.Parameters, reference)
 	case segmentdsl.QuestionnaireSubmissions:
-		ids, err = s.submissions(ctx, ast.Parameters, reference)
+		if _, enabled := ast.Parameters["activation"]; enabled {
+			ids, err = s.activationSubmissions(ctx, ast.Parameters, reference)
+		} else {
+			ids, err = s.submissions(ctx, ast.Parameters, reference)
+		}
 	case segmentdsl.QuestionnaireChoiceAnswers:
 		ids, err = s.questionnaire(ctx, ast.Parameters, reference)
 	case segmentdsl.PaidOrder:
-		ids, qualifiedPaidOrders, err = s.paid(ctx, ast.Parameters, reference)
+		if _, enabled := ast.Parameters["activation"]; enabled {
+			ids, qualifiedPaidOrders, err = s.activationPaid(ctx, ast.Parameters, reference)
+		} else {
+			ids, qualifiedPaidOrders, err = s.paid(ctx, ast.Parameters, reference)
+		}
 	case segmentdsl.ChannelEntry:
 		ids, err = s.channel(ctx, ast.Parameters, reference)
 	case segmentdsl.RadarFirstClickElapsed:

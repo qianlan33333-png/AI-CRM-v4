@@ -732,6 +732,39 @@ func (h *Handler) normalizeSurveyReferences(ctx context.Context, raw json.RawMes
 	if definition.TemplateKey == "questionnaire_submissions" {
 		return h.normalizeSubmissionReferences(ctx, raw, definition.Parameters)
 	}
+	if definition.TemplateKey == "paid_order" {
+		activationRaw, enabled := definition.Parameters["activation"]
+		if !enabled {
+			return raw, nil
+		}
+		activation, err := segmentport.ParseActivation(activationRaw, true)
+		if err != nil {
+			return nil, errReferenceInvalid
+		}
+		if len(activation.QuestionnaireIDs) == 0 {
+			return raw, nil
+		}
+		if h.surveys == nil {
+			return nil, errReferenceUnavailable
+		}
+		for index, value := range activation.QuestionnaireIDs {
+			id, found, err := h.surveys.ResolveAudienceQuestionnaire(ctx, value)
+			if err != nil {
+				return nil, errReferenceUnavailable
+			}
+			if !found || id == "" {
+				return nil, errReferenceUnknown
+			}
+			activation.QuestionnaireIDs[index] = id
+		}
+		encoded, err := json.Marshal(activation)
+		if err != nil {
+			return nil, errReferenceInvalid
+		}
+		definition.Parameters["activation"] = encoded
+		return marshalNormalizedOwnerDefinition(raw, definition.Parameters)
+	}
+
 	if definition.TemplateKey != "questionnaire_choice_answers" {
 		return raw, nil
 	}

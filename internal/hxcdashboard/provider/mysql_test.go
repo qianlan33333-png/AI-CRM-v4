@@ -14,7 +14,7 @@ type sharedFactsScanner struct {
 
 func (s sharedFactsScanner) Scan(dest ...any) error {
 	s.testing.Helper()
-	if len(dest) != 41 {
+	if len(dest) != 42 {
 		s.testing.Fatalf("shared-facts scan destinations=%d", len(dest))
 	}
 	beijing := time.Date(2026, 9, 5, 9, 0, 0, 0, sourceLocation)
@@ -54,6 +54,7 @@ func (s sharedFactsScanner) Scan(dest ...any) error {
 	*dest[38].(*sql.NullString) = sql.NullString{String: "standard", Valid: true}
 	*dest[39].(*sql.NullTime) = sql.NullTime{Time: beijing.Add(48 * time.Hour), Valid: true}
 	*dest[40].(*time.Time) = beijing
+	*dest[41].(*sourceNullTime) = sourceNullTime{Time: beijing.Add(-time.Hour), Valid: true}
 	return nil
 }
 
@@ -62,6 +63,9 @@ func TestSharedFactsScannerPreservesMembershipSourceAndNullableLearningPlan(t *t
 		row, err := scanSourceRow(sharedFactsScanner{testing: t, plan: plan}, time.Date(2026, 9, 5, 0, 0, 0, 0, sourceLocation))
 		if err != nil {
 			t.Fatal(err)
+		}
+		if row.TokenUsageObservedAt == nil || !row.TokenUsageObservedAt.Equal(time.Date(2026, 9, 5, 0, 0, 0, 0, sourceLocation)) || row.LastTokenUsedAt == nil || row.LastTokenUsedAt.Location() != sourceLocation {
+			t.Fatalf("token timestamps lost source timezone or observation: %+v", row)
 		}
 		if row.MembershipSource != "user_id" || row.MembershipStatus != "active" || row.MembershipExpiresAt == nil || !row.IsMember || !row.MembershipRecordFound {
 			t.Fatalf("membership source facts=%+v", row)

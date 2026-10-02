@@ -1,8 +1,8 @@
 [Unit]
-Description=Refresh AI CRM HXC dashboard every six hours
+Description=Refresh AI CRM HXC dashboard hourly
 
 [Timer]
-OnCalendar=*-*-* 03,09,15,21:15:00 Asia/Shanghai
+OnCalendar=*-*-* *:15:00 Asia/Shanghai
 Persistent=true
 RandomizedDelaySec=0
 Unit=aicrm-hxc-dashboard-refresh.service

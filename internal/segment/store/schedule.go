@@ -23,6 +23,7 @@ func (r *Repository) ScheduledConfigurations(ctx context.Context, limit int) ([]
 		CROSS JOIN LATERAL (
 			SELECT 'legacy'::text AS kind,c.refresh_cron_utc AS cron_utc WHERE c.refresh_mode='legacy_custom' AND c.refresh_cron_utc IS NOT NULL
 			UNION ALL SELECT 'incremental','*/3 * * * *' WHERE c.refresh_mode IN ('every_3m','every_3m_plus_daily_0200')
+			UNION ALL SELECT 'incremental','0 * * * *' WHERE c.refresh_mode='every_1h'
 			UNION ALL SELECT 'daily','0 18 * * *' WHERE c.refresh_mode IN ('daily_0200','every_3m_plus_daily_0200')
 		) scheduled
 		LEFT JOIN segment_audience_schedule_states s ON s.configuration_version_id=c.id AND s.schedule_kind=scheduled.kind
@@ -86,7 +87,7 @@ func currentScheduleMatches(mode, legacyCron, kind, cron string) bool {
 	case "legacy":
 		return mode == "legacy_custom" && legacyCron == cron
 	case "incremental":
-		return (mode == "every_3m" || mode == "every_3m_plus_daily_0200") && cron == "*/3 * * * *"
+		return (mode == "every_1h" && cron == "0 * * * *") || (mode == "every_3m" || mode == "every_3m_plus_daily_0200") && cron == "*/3 * * * *"
 	case "daily":
 		return (mode == "daily_0200" || mode == "every_3m_plus_daily_0200") && cron == "0 18 * * *"
 	default:

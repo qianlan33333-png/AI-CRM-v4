@@ -51,6 +51,7 @@ type SourceRow struct {
 	// deliberately separate from dashboard display-stage fields.
 	FormallyLoggedIn, HasTokenUsage        bool
 	FormalLoginAt, CardLastOpenedAt        *time.Time
+	LastTokenUsedAt, TokenUsageObservedAt  *time.Time
 	LearningPlanFound                      bool
 	LearningPlanStatus                     string
 	LearningPlanCurrent, LearningPlanTotal *int64

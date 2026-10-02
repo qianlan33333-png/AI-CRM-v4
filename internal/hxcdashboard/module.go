@@ -22,7 +22,7 @@ func (*ModuleRegistration) Readiness(ctx context.Context, pool *pgxpool.Pool) er
 		NOT EXISTS (SELECT 1 FROM unnest(ARRAY['hxc_dashboard_versions','hxc_dashboard_rows','hxc_registration_coverage','hxc_dashboard_views','hxc_dashboard_view_receipts','hxc_dashboard_shares','hxc_dashboard_share_key']) required(name) WHERE to_regclass(current_schema() || '.' || required.name) IS NULL)
 AND NOT EXISTS (SELECT 1 FROM unnest(ARRAY[
  'hxc_dashboard_versions.shared_facts_available',
- 'hxc_dashboard_rows.formally_logged_in','hxc_dashboard_rows.formal_login_at','hxc_dashboard_rows.has_token_usage',
+ 'hxc_dashboard_rows.formally_logged_in','hxc_dashboard_rows.formal_login_at','hxc_dashboard_rows.has_token_usage','hxc_dashboard_rows.last_token_used_at','hxc_dashboard_rows.token_usage_observed_at',
  'hxc_dashboard_rows.learning_plan_found','hxc_dashboard_rows.learning_plan_status','hxc_dashboard_rows.learning_plan_current','hxc_dashboard_rows.learning_plan_total',
  'hxc_dashboard_rows.card_open_count_7d','hxc_dashboard_rows.card_last_opened_at',
  'hxc_dashboard_rows.membership_record_found','hxc_dashboard_rows.is_member','hxc_dashboard_rows.membership_source','hxc_dashboard_rows.membership_status','hxc_dashboard_rows.membership_expires_at',

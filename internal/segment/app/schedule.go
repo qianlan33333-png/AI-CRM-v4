@@ -57,7 +57,7 @@ func ValidateRefresh(mode, expression string) error {
 	switch mode {
 	case "legacy_custom":
 		return ValidateRefreshCronUTC(expression)
-	case "manual", "every_3m", "daily_0200", "every_3m_plus_daily_0200":
+	case "manual", "every_1h", "every_3m", "daily_0200", "every_3m_plus_daily_0200":
 		if expression != "" {
 			return ErrInvalid
 		}

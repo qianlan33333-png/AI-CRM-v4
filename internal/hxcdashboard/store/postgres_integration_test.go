@@ -122,7 +122,7 @@ func hxcIntegrationPool(t *testing.T) (*pgxpool.Pool, *platformpostgres.UnitOfWo
 		admin.Close()
 		t.Fatal(err)
 	}
-	for _, migration := range []string{"0028_hxc_dashboard.sql", "0064_hxc_dashboard_identity_v2.sql", "0084_hxc_shared_facts.sql", "0138_hxc_registration_coverage.sql"} {
+	for _, migration := range []string{"0028_hxc_dashboard.sql", "0064_hxc_dashboard_identity_v2.sql", "0084_hxc_shared_facts.sql", "0138_hxc_registration_coverage.sql", "0218_hxc_token_usage_time.sql"} {
 		contents, readErr := os.ReadFile(hxcMigrationPath(t, migration))
 		if readErr != nil {
 			t.Fatal(readErr)
@@ -185,7 +185,7 @@ func TestSharedFactsPublishedGenerationAndLegacyAvailability(t *testing.T) {
 	used := now.Add(-2 * time.Hour)
 	base := func(customer int64, available bool) domain.Projection {
 		current, total := int64(3), int64(4)
-		return domain.Projection{AsOf: now, SharedFactsAvailable: available, Counts: domain.Counts{Total: 1, ActiveUsed: 1, Matched: 1, MatchedByUnionID: 1}, Rows: []domain.ProjectionRow{{SubjectDigest: [32]byte{byte(customer)}, UserRef: "HXC-000000000077", Stage: domain.ActiveUsed, SourceRow: domain.SourceRow{SubscriptionTier: "standard", SubscriptionExpiresAt: &future, MembershipAttribution: "none", FormallyLoggedIn: true, FormalLoginAt: &login, HasTokenUsage: true, LearningPlanFound: true, LearningPlanStatus: "active", LearningPlanCurrent: &current, LearningPlanTotal: &total, CardOpenCount7D: 0, CardLastOpenedAt: &opened, MembershipRecordFound: true, IsMember: true, MembershipSource: "user_id", MembershipStatus: "active", MembershipExpiresAt: &pastMembership, LastUsedAt: &used, SourceUpdatedAt: now, CapabilityUsage: []byte(`{}`), FocusTopics: []byte(`[]`)}, CustomerID: domainCustomer(customer), IdentityState: domain.Matched, MatchedBy: "unionid", IdentityReasonCode: "matched_unionid"}}}
+		return domain.Projection{AsOf: now, SharedFactsAvailable: available, Counts: domain.Counts{Total: 1, ActiveUsed: 1, Matched: 1, MatchedByUnionID: 1}, Rows: []domain.ProjectionRow{{SubjectDigest: [32]byte{byte(customer)}, UserRef: "HXC-000000000077", Stage: domain.ActiveUsed, SourceRow: domain.SourceRow{SubscriptionTier: "standard", SubscriptionExpiresAt: &future, MembershipAttribution: "none", FormallyLoggedIn: true, FormalLoginAt: &login, HasTokenUsage: true, LastTokenUsedAt: &used, TokenUsageObservedAt: &now, LearningPlanFound: true, LearningPlanStatus: "active", LearningPlanCurrent: &current, LearningPlanTotal: &total, CardOpenCount7D: 0, CardLastOpenedAt: &opened, MembershipRecordFound: true, IsMember: true, MembershipSource: "user_id", MembershipStatus: "active", MembershipExpiresAt: &pastMembership, LastUsedAt: &used, SourceUpdatedAt: now, CapabilityUsage: []byte(`{}`), FocusTopics: []byte(`[]`)}, CustomerID: domainCustomer(customer), IdentityState: domain.Matched, MatchedBy: "unionid", IdentityReasonCode: "matched_unionid"}}}
 	}
 	publish("shared-facts-available", base(77, true))
 	pinnedVersion, err := store.CurrentSharedFactsVersion(ctx)
@@ -202,6 +202,9 @@ func TestSharedFactsPublishedGenerationAndLegacyAvailability(t *testing.T) {
 	}
 	if got.ExpiresAt == nil || !got.ExpiresAt.Equal(pastMembership) || got.ActiveAt(now) || !got.ExpiredAt(now) {
 		t.Fatalf("membership expiry must come from membership source, not subscription: %+v", got)
+	}
+	if got.LastTokenUsedAt == nil || !got.LastTokenUsedAt.Equal(used) || got.TokenUsageObservedAt == nil || !got.TokenUsageObservedAt.Equal(now) {
+		t.Fatalf("token timestamps were not published/read back: %+v", got)
 	}
 	publish("shared-facts-legacy", base(78, false))
 	currentVersion, err := store.CurrentSharedFactsVersion(ctx)

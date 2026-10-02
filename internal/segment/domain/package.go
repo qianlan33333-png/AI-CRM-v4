@@ -212,7 +212,7 @@ func validActor(id int64, kind, reference string) bool {
 }
 
 func validRefreshMode(mode string) bool {
-	return mode == "manual" || mode == "every_3m" || mode == "daily_0200" || mode == "every_3m_plus_daily_0200" || mode == "legacy_custom"
+	return mode == "manual" || mode == "every_1h" || mode == "every_3m" || mode == "daily_0200" || mode == "every_3m_plus_daily_0200" || mode == "legacy_custom"
 }
 
 func invalidOptionalID(id *int64) bool { return id != nil && *id < 1 }

@@ -116,3 +116,21 @@ func TestScheduledRefreshPreservesMachineMutationActor(t *testing.T) {
 		t.Fatalf("machine schedule actor lost: %+v", command)
 	}
 }
+
+func TestHourlyModeUsesIncrementalKindAndCollapsesMissedHours(t *testing.T) {
+	if ValidateRefresh("every_1h", "") != nil || ValidateRefresh("every_1h", "*/3 * * * *") == nil {
+		t.Fatal("hourly validation mismatch")
+	}
+	created := time.Date(2026, 10, 2, 4, 1, 0, 0, time.UTC)
+	now := created.Add(5 * time.Hour)
+	store := &scheduleStoreStub{items: []segmentdomain.ScheduledConfiguration{{PackageID: 8, ConfigurationVersionID: 9, CronUTC: "0 * * * *", Kind: "incremental", Actor: 4, ConfigurationCreatedAt: created}}}
+	accepter := &scheduledAccepterStub{}
+	service, _ := NewScheduledRefreshService(directUOW{}, store, accepter)
+	service.now = func() time.Time { return now }
+	if e := service.ScanScheduled(context.Background()); e != nil {
+		t.Fatal(e)
+	}
+	if len(accepter.commands) != 1 || accepter.commands[0].RefreshKind != segmentdomain.RefreshIncremental || !accepter.commands[0].ReferenceTime.Equal(now.Truncate(time.Hour)) || !store.next.Equal(now.Truncate(time.Hour).Add(time.Hour)) {
+		t.Fatalf("commands=%+v next=%v", accepter.commands, store.next)
+	}
+}

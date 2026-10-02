@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -63,5 +64,23 @@ func TestPaidWindowRequiresRFC3339AfterHostDatetimeConversion(t *testing.T) {
 	friendGateWithoutOwner := json.RawMessage(`{"schema_version":1,"template_key":"paid_order","parameters":{"product_codes":["334465678"],"paid_at_from":"","paid_at_to":"","owner_scope":"all","owner_staff_ids":[],"require_active_wecom_contact":true,"require_wecom_friend_at_paid_time":true,"friend_owner_staff_ids":[]}}`)
 	if _, err := CanonicalDefinition(friendGateWithoutOwner); !errors.Is(err, ErrUnsupportedDefinition) {
 		t.Fatalf("friend gate without its exact employee was accepted: %v", err)
+	}
+}
+
+func TestActivationDefinitionExtendsOnlyExistingPaidAndSubmissionTemplates(t *testing.T) {
+	paid := `{"schema_version":1,"template_key":"paid_order","parameters":{"product_codes":["334465678"],"paid_at_from":"","paid_at_to":"","owner_scope":"all","owner_staff_ids":[],"require_active_wecom_contact":false,"activation":%s}}`
+	for _, v := range []string{`{"elapsed_hours_min":12,"elapsed_hours_max":36,"questionnaire_status":"unsubmitted","questionnaire_ids":["16"]}`, `{"enrollment_override":{"at":"2026-10-02T12:00:00+08:00","order_ids":[11,12]}}`} {
+		if _, e := CanonicalDefinition(json.RawMessage(fmt.Sprintf(paid, v))); e != nil {
+			t.Fatal(e)
+		}
+	}
+	for _, v := range []string{`null`, `{"elapsed_hours_min":36,"elapsed_hours_max":12}`, `{"elapsed_hours_min":-1}`, `{"elapsed_hours_min":12.5}`, `{"elapsed_hours_min":9223372036854775807}`, `{"questionnaire_status":"unsubmitted"}`, `{"token_usage_status":"unused_7d"}`, `{"registration_status":"unknown"}`, `{"sql":"select 1"}`, `{"enrollment_override":{"at":"2026-10-02T12:00:00+08:00","order_ids":[11,11]}}`} {
+		if _, e := CanonicalDefinition(json.RawMessage(fmt.Sprintf(paid, v))); !errors.Is(e, ErrUnsupportedDefinition) {
+			t.Fatalf("invalid activation accepted: %s err=%v", v, e)
+		}
+	}
+	submitted := json.RawMessage(`{"schema_version":1,"template_key":"questionnaire_submissions","parameters":{"questionnaire_ids":["16"],"owner_scope":"all","owner_staff_ids":[],"require_wecom_identity":false,"activation":{"elapsed_hours_min":12,"token_usage_status":"unused_7d"}}}`)
+	if _, e := CanonicalDefinition(submitted); e != nil {
+		t.Fatal(e)
 	}
 }
