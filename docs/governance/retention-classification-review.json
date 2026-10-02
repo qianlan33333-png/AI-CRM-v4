@@ -6807,6 +6807,32 @@
         "result_conflict_id"
       ]
     },
+    "identity_phone_canonical_recoveries": {
+      "owner": "identity",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "原手机号invalid收据与已审核canonical恢复的不可覆盖关联审计，删除会导致同源重复恢复。",
+      "source": "migrations/0220_identity_phone_canonical_recovery.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/identity_phone_canonical_recoveries",
+      "evidence": {
+        "ddl_line": 4,
+        "columns": [
+          "original_key_digest",
+          "original_payload_digest",
+          "original_customer_id",
+          "target_customer_id",
+          "target_lineage_version",
+          "lineage_digest",
+          "merge_ids",
+          "recovery_key_digest"
+        ],
+        "foreign_keys": [
+          "identity_declared_phone_receipts",
+          "customers"
+        ],
+        "owner_contract": "internal/identity/store/phone_recovery.go#PhoneRecovery"
+      }
+    },
     "identity_phone_import_receipts": {
       "previous_policy": "protected_unclassified",
       "owner": "identity",

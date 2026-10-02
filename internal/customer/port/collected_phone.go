@@ -21,3 +21,10 @@ type CollectedPhoneCommand struct {
 type CollectedPhoneRecorder interface {
 	CollectPhoneWithin(context.Context, CollectedPhoneCommand) (identityport.DeclaredAttachResult, error)
 }
+
+// Maintenance-only canonical recovery preserves all source receipts. It is
+// separate from interactive collection and requires an existing invalid key.
+type CollectedPhoneCanonicalRecovery interface {
+	InspectCollectedPhoneRecoveryWithin(context.Context, CollectedPhoneCommand) (identityport.PhoneRecoveryResult, error)
+	RecoverCollectedPhoneWithin(context.Context, CollectedPhoneCommand) (identityport.PhoneRecoveryResult, error)
+}

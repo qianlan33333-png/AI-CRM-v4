@@ -1,6 +1,6 @@
 {
   "registry_version": 1,
-  "registry_sha256": "abffae74539218eaaf327c2a6a8b4f562304ff5ba96f1b46dd0ccea618a7502e",
+  "registry_sha256": "aea5e9521894eab7ad7ef059fdfb30b9a77d6b4cebdab7995c5c77ec8b15c823",
   "inventory_scope": "committed_registry",
   "items": [
     {
@@ -2731,6 +2731,19 @@
       "policy_id": "",
       "coverage_status": "gap",
       "gap_code": "mixed_payload_owner_split_required",
+      "authorization_expiry": "not_assessed"
+    },
+    {
+      "kind": "table",
+      "name": "identity_phone_canonical_recoveries",
+      "owner": "identity",
+      "policy": "permanent",
+      "reason": "原手机号invalid收据与已审核canonical恢复的不可覆盖关联审计，删除会导致同源重复恢复。",
+      "source": "migrations/0220_identity_phone_canonical_recovery.sql",
+      "cleanup_entrypoint": "",
+      "policy_id": "",
+      "coverage_status": "protected",
+      "gap_code": "",
       "authorization_expiry": "not_assessed"
     },
     {

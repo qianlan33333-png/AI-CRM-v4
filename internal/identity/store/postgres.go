@@ -31,6 +31,14 @@ import (
 type PostgresStore struct {
 	phoneVault       *identitysecure.PhoneVault
 	observationVault *identitysecure.ObservationVault
+	canonicalRoots   identityport.CanonicalCustomerRootsReader
+}
+
+// WithCanonicalPhoneRecovery supplies Identity's existing read authority.
+// Recovery's final write still uses the Owner's sorted root locks and re-read.
+func (s *PostgresStore) WithCanonicalPhoneRecovery(r identityport.CanonicalCustomerRootsReader) *PostgresStore {
+	s.canonicalRoots = r
+	return s
 }
 
 func NewPostgresStore(phoneVault ...*identitysecure.PhoneVault) *PostgresStore {

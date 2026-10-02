@@ -60,3 +60,33 @@ func (s *SubmissionService) ReplayCollectedPhoneWithin(ctx context.Context, id i
 	err = s.store.RecordPhoneBinding(ctx, a.SubmissionID, a.AnswerID, int64(*a.CustomerID), result.IdentityID, status, evidence, a.CollectedAt)
 	return result, err
 }
+
+func (s *SubmissionService) InspectCollectedPhoneRecoveryWithin(ctx context.Context, id int64) (identityport.PhoneRecoveryResult, error) {
+	return s.recoverCollectedPhone(ctx, id, false)
+}
+func (s *SubmissionService) RecoverCollectedPhoneWithin(ctx context.Context, id int64) (identityport.PhoneRecoveryResult, error) {
+	return s.recoverCollectedPhone(ctx, id, true)
+}
+func (s *SubmissionService) recoverCollectedPhone(ctx context.Context, id int64, apply bool) (identityport.PhoneRecoveryResult, error) {
+	store, ok := s.store.(collectedPhoneAnswerStore)
+	if !ok {
+		return identityport.PhoneRecoveryResult{}, surveyport.ErrUnavailable
+	}
+	p, ok := s.collectedPhones.(customerport.CollectedPhoneCanonicalRecovery)
+	if !ok {
+		return identityport.PhoneRecoveryResult{}, surveyport.ErrUnavailable
+	}
+	a, err := store.ReadCollectedPhoneAnswerWithin(ctx, id)
+	if err != nil {
+		return identityport.PhoneRecoveryResult{}, err
+	}
+	if a.CustomerID == nil || *a.CustomerID < 1 {
+		return identityport.PhoneRecoveryResult{Disposition: "unknown_source"}, nil
+	}
+	c := customerport.CollectedPhoneCommand{DeclaredPhoneCommand: identityport.DeclaredPhoneCommand{CustomerID: *a.CustomerID, Phone: a.Phone, Source: "survey", SourceEventID: fmt.Sprintf("submission:%d:answer:%d", a.SubmissionID, a.AnswerID), IdempotencyKey: fmt.Sprintf("survey-phone:%d:%d", a.SubmissionID, a.AnswerID)}, CollectedAt: a.CollectedAt, Historical: true}
+	// The original survey binding receipt remains untouched, including invalid.
+	if !apply {
+		return p.InspectCollectedPhoneRecoveryWithin(ctx, c)
+	}
+	return p.RecoverCollectedPhoneWithin(ctx, c)
+}

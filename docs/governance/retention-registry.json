@@ -2186,6 +2186,14 @@
       "source": "migrations/0002_identity.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/identity_link_intents"
     },
+    "identity_phone_canonical_recoveries": {
+      "owner": "identity",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "原手机号invalid收据与已审核canonical恢复的不可覆盖关联审计，删除会导致同源重复恢复。",
+      "source": "migrations/0220_identity_phone_canonical_recovery.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/identity_phone_canonical_recoveries"
+    },
     "identity_phone_import_receipts": {
       "owner": "identity",
       "policy": "permanent",

@@ -58,3 +58,36 @@ func TestApplyReportsReplayOutcomeAndResumesAfterFailedItem(t *testing.T) {
 		t.Fatalf("report=%+v err=%v", r, e)
 	}
 }
+
+type recoverySourceStub struct {
+	sourceStub
+	inspected, recovered int
+}
+
+func (s *recoverySourceStub) InspectRecovery(context.Context, int64) (identityport.PhoneRecoveryResult, error) {
+	s.inspected++
+	return identityport.PhoneRecoveryResult{Disposition: "recoverable"}, nil
+}
+func (s *recoverySourceStub) Recover(context.Context, int64) (identityport.PhoneRecoveryResult, error) {
+	s.recovered++
+	return identityport.PhoneRecoveryResult{Disposition: "recovered"}, nil
+}
+func TestCanonicalRecoveryRequiresFixedWatermarkAndNeverUsesOriginalApply(t *testing.T) {
+	s := &recoverySourceStub{}
+	for _, tc := range []struct {
+		name    string
+		through int64
+	}{{"all", 9}, {"order", 0}} {
+		if _, e := replay(context.Background(), directUOW{}, s, "recover-canonical", tc.name, 0, tc.through); e == nil {
+			t.Fatal("unbounded recovery accepted")
+		}
+	}
+	r, e := replay(context.Background(), directUOW{}, s, "inspect", "order", 0, 9)
+	if e != nil || s.inspected != 2 || s.recovered != 0 || s.calls != 0 || r.Outcomes["recoverable"] != 2 {
+		t.Fatalf("inspect=%+v err=%v", r, e)
+	}
+	r, e = replay(context.Background(), directUOW{}, s, "recover-canonical", "order", 0, 9)
+	if e != nil || s.recovered != 2 || s.calls != 0 || r.Candidates != 2 || r.LastCompletedID != 9 {
+		t.Fatalf("bounded=%+v err=%v", r, e)
+	}
+}

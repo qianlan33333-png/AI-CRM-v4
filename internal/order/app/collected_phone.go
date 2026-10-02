@@ -51,3 +51,33 @@ func (s *Service) ReplayCollectedPhoneWithin(ctx context.Context, id int64) (ide
 	return s.collectedPhones.CollectPhoneWithin(ctx, customerport.CollectedPhoneCommand{DeclaredPhoneCommand: identityport.DeclaredPhoneCommand{
 		CustomerID: customerdomain.CustomerID(*snap.PayerCustomerID), Phone: phone, Source: "order", SourceEventID: fmt.Sprintf("order:%d:contact", id), IdempotencyKey: fmt.Sprintf("order-phone:%d", id)}, CollectedAt: snap.CreatedAt, Historical: true})
 }
+
+func (s *Service) InspectCollectedPhoneRecoveryWithin(ctx context.Context, id int64) (identityport.PhoneRecoveryResult, error) {
+	return s.recoverCollectedPhone(ctx, id, false)
+}
+func (s *Service) RecoverCollectedPhoneWithin(ctx context.Context, id int64) (identityport.PhoneRecoveryResult, error) {
+	return s.recoverCollectedPhone(ctx, id, true)
+}
+func (s *Service) recoverCollectedPhone(ctx context.Context, id int64, apply bool) (identityport.PhoneRecoveryResult, error) {
+	p, ok := s.collectedPhones.(customerport.CollectedPhoneCanonicalRecovery)
+	if !ok {
+		return identityport.PhoneRecoveryResult{}, orderport.ErrUnavailable
+	}
+	o, err := s.store.Get(ctx, id, false)
+	if err != nil {
+		return identityport.PhoneRecoveryResult{}, err
+	}
+	a := o.Snapshot()
+	phone, found, err := s.ReadCheckoutMobileWithin(ctx, id)
+	if err != nil {
+		return identityport.PhoneRecoveryResult{}, err
+	}
+	if !found || a.PayerCustomerID == nil {
+		return identityport.PhoneRecoveryResult{Disposition: "unknown_source"}, nil
+	}
+	c := customerport.CollectedPhoneCommand{DeclaredPhoneCommand: identityport.DeclaredPhoneCommand{CustomerID: customerdomain.CustomerID(*a.PayerCustomerID), Phone: phone, Source: "order", SourceEventID: fmt.Sprintf("order:%d:contact", id), IdempotencyKey: fmt.Sprintf("order-phone:%d", id)}, CollectedAt: a.CreatedAt, Historical: true}
+	if !apply {
+		return p.InspectCollectedPhoneRecoveryWithin(ctx, c)
+	}
+	return p.RecoverCollectedPhoneWithin(ctx, c)
+}
