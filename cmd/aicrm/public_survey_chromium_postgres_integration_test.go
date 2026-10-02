@@ -23,6 +23,7 @@ import (
 	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
 	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	surveymodule "github.com/qianlan33333-png/AI-CRM-v3/internal/survey"
 	surveyapp "github.com/qianlan33333-png/AI-CRM-v3/internal/survey/app"
@@ -154,7 +155,9 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 	_, source, _, _ := runtime.Caller(0)
 	root := filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
 	t.Chdir(root)
-	preparePublicSurveyPresentationChromiumArtifacts(t, root)
+	if testconfig.InstalledSurvey().Binary == "" {
+		preparePublicSurveyPresentationChromiumArtifacts(t, root)
+	}
 	databaseURL, cleanup := adminAccessCompositionDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	native, err := pgxpool.New(ctx, databaseURL)
@@ -182,8 +185,11 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 	}
 	definitions := surveyapp.NewService(uow, repository)
 	submissions := surveyapp.NewSubmissionService(uow, repository, cipher)
-	oneID := identityapp.OneIDService{Store: identitystore.NewPostgresStore()}
 	projection := customerstore.NewPostgreSQL()
+	oneID := identityapp.OneIDService{
+		Store:               identitystore.NewPostgresStore(),
+		ProvisionedCustomer: customerProvisionedDirectoryAdapter{writer: projection},
+	}
 	if err = submissions.BindCollectedPhone(collectedPhoneTestRecorder(t)); err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +408,9 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 		}
 		screenshots = configured
 	}
-	return &publicSurveyPresentationChromiumFixture{ctx: ctx, native: native, cipher: cipher, submissions: submissions, server: server, browserURL: origin, success: success, failure: failure, redirect: redirect, leadQR: leadQR, session: cookies[0].Value, secondSession: secondCookies[0].Value, script: source, screenshots: screenshots, redirectTarget: redirectTarget, leadQRURL: leadQRURL}
+	fixture := &publicSurveyPresentationChromiumFixture{ctx: ctx, native: native, cipher: cipher, submissions: submissions, server: server, browserURL: origin, success: success, failure: failure, redirect: redirect, leadQR: leadQR, session: cookies[0].Value, secondSession: secondCookies[0].Value, script: source, screenshots: screenshots, redirectTarget: redirectTarget, leadQRURL: leadQRURL}
+	useInstalledPublicSurveyFixture(t, fixture, databaseURL)
+	return fixture
 }
 
 // The journey fixture crosses only Survey's two public read Ports. Its local

@@ -127,3 +127,11 @@ flowchart TD
 登录入口的200响应也校验既有authorized/resolved/display/submitted投影并在同一读取预算内解码；空响应或非resolved响应留在现有重试入口，不把HTTP200当登录成功并反复往返问卷入口。
 
 最终截图复核补充：输入时只移除过期的字段/运输错误节点，不重挂载输入框，保护移动焦点和IME。已确认定义变化的提示及原重读按钮不能被编辑/翻页清除；重读前不重复发送同一已失效定义。真实Host验证修正输入后旧提示消失，DOM合同验证输入节点未重挂载。
+
+### 同包安装验证入口
+
+工作台复核要求源代码合同与已安装包验收分开。复用现有all/one Chromium恢复旅程，增加显式可选的已安装模式：源码只准备合成账号及独立PG16克隆库并读回，浏览器所有页面与API都代理到指定包中的应用二进制，静态页面由该包web/dist提供。入口scripts/run-installed-survey-recovery.sh核对干净准确源码、二进制SHA256和Host source_sha，工作台传入/opt/aicrm/current/bin/aicrm及同包目录，不重新构建或安装。
+
+覆盖两种布局的编辑草稿、拒绝/允许官方授权回跳、真实401阻止写入、授权后只自动继续一次、提交已经落库后502同键只落库一次，以及经真实管理员登录/CSRF连续复制三次新slug且原链接不变。官方授权地址及OAuth Adapter保持原代码，合成微信响应仅经严格api.weixin.qq.com CONNECT白名单转到本机TLS fixture；短时CA仅该测试进程在Linux通过SSL_CERT_FILE信任，其他Provider禁用，不访问真实微信、不改系统证书。禁止用生产连接或业务账号，入口只接受loopback且明确_acceptance_test数据库，随后复用既有克隆/清理机制。
+
+OneID测试账号同样通过既有ProvisionedCustomer目录Port创建最小客户投影，避免只有源码fixture能运行而整包readiness拒绝；不引入运行时身份捷径。Persistence仅一次性测试库；External Effects仅受控Provider读取，写Provider默认禁用。本补充为验证入口，无应用API/页面/数据库/发布控制器变化，无新发布通道。macOS可验证实际二进制的响应丢失及复制路径，但其系统TLS不消费SSL_CERT_FILE，不冒称安装OAuth旅程通过；完整四组同包OAuth/响应丢失合同由工作台Linux执行，源码旅程与安装旅程收据分别记录。
