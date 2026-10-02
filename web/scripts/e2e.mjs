@@ -605,7 +605,7 @@ async function loadPage(rel, { id, q, automationHistoryHttp = false, campaignHis
           if (url.pathname === '/api/public/questionnaires/uat-survey/submissions') {
             const status = h5Http.submissionStatuses?.[submissionAttempt++] ?? 202;
             if (status === 'network') throw new Error('network outcome unknown');
-            return json(status === 202 ? { completion_action: { type: 'default' }, receipt: { questionnaire_id: 7, definition_version: 3, submission_id: 901 } } : { code: 'unavailable' }, status);
+            return json(status === 202 ? { completion_action: { type: 'default' }, result_token: 'r'.repeat(43), receipt: { questionnaire_id: 7, questionnaire_slug: 'uat-survey', definition_version: 3, submission_id: 901 } } : { code: 'unavailable' }, status);
           }
           if (url.pathname === '/api/public/survey-submission-results/query') return json(h5Http.result, h5Http.resultStatus || 200);
           return json({ code: 'unexpected_h5_request' }, 500);
@@ -3088,6 +3088,9 @@ console.log('h5/all.html（真实定义、答案与幂等重试）');
 {
   const dom = await loadPage('h5/all.html', { q: 'slug=uat-survey', h5Http: { definition: h5Definition, submissionStatuses: ['network', 503, 202] } });
   const d = dom.window.document;
+  // Exercise a host without the layout API; do not mask the failure with a
+  // global no-op. Real viewport scrolling is asserted by Chromium journeys.
+  delete dom.window.HTMLElement.prototype.scrollIntoView;
   const calls = dom.window.__h5HttpTest.calls;
   const submissions = () => calls.filter((call) => call.path.endsWith('/submissions'));
   ok('H5 渲染服务端题目/选项，不显示 Seed 题目且文本不执行 HTML', d.querySelectorAll('[data-question-id]').length === 4 && d.body.textContent.includes(h5Definition.title) && d.body.textContent.includes('真实多选') && !d.body.textContent.includes('你目前最想解决') && !d.querySelector('#screen script'));
@@ -3095,6 +3098,7 @@ console.log('h5/all.html（真实定义、答案与幂等重试）');
   click(dom, d.querySelector('[data-h5-submit]'));
   await sleep(20);
   ok('H5 未答必答题不发送提交请求', submissions().length === 0 && d.querySelector('[data-h5-error]')?.textContent.includes('真实单选一'));
+  ok('H5 缺少滚动API仍显示校验错误并允许继续提交', !d.querySelector('[data-h5-submit]')?.disabled && typeof dom.window.HTMLElement.prototype.scrollIntoView === 'undefined');
   for (const id of [12, 21, 31, 32, 33]) click(dom, d.querySelector(`[data-option-id="${id}"]`));
   click(dom, d.querySelector('[data-h5-submit]'));
   await sleep(20);
@@ -3111,7 +3115,21 @@ console.log('h5/all.html（真实定义、答案与幂等重试）');
   click(dom, d.querySelector('[data-option-id="11"]'));
   click(dom, d.querySelector('[data-h5-submit]'));
   await sleep(30);
-  ok('H5 改答案使用新key并按真实 completion action 结束答题页', submissions().length === 3 && submissions()[2].body.submission_key !== firstKey && submissions()[2].body.answers[0].option_ids[0] === 11 && !d.querySelector('[data-h5-receipt]') && !d.querySelector('[data-h5-result-link]'));
+  ok('H5 改答案使用新key并按真实 completion action 结束答题页', submissions().length === 3 && submissions()[2].body.submission_key !== firstKey && submissions()[2].body.answers[0].option_ids[0] === 11 && !d.querySelector('[data-question-id]') && !d.querySelector('[data-h5-receipt]') && !d.querySelector('[data-h5-result-link]'));
+  dom.window.close();
+}
+
+for (const display of ['all_in_one', 'one_by_one']) {
+  const one = display === 'one_by_one';
+  const dom = await loadPage(`h5/${one ? 'one' : 'all'}.html`, { q: 'slug=uat-survey', h5Http: { definition: { ...h5Definition, answer_display_mode: display } } });
+  const d = dom.window.document;
+  const scrolls = [];
+  // Record the native-method contract only. jsdom cannot prove visibility;
+  // the actual Host Chromium assertions still require an in-viewport error.
+  dom.window.HTMLElement.prototype.scrollIntoView = function (options) { scrolls.push({ element: this, options }); };
+  click(dom, d.querySelector(one ? '[data-h5-next]' : '[data-h5-submit]'));
+  await sleep(20);
+  ok(`H5 ${display} 保持错误节点滚动契约`, scrolls.length === 1 && scrolls[0].element === d.querySelector('[data-h5-error]') && scrolls[0].options.block === 'center' && dom.window.__h5HttpTest.calls.every((call) => !call.path.endsWith('/submissions')));
   dom.window.close();
 }
 

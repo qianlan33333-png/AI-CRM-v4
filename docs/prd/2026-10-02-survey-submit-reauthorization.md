@@ -135,3 +135,13 @@ flowchart TD
 覆盖两种布局的编辑草稿、拒绝/允许官方授权回跳、真实401阻止写入、授权后只自动继续一次、提交已经落库后502同键只落库一次，以及经真实管理员登录/CSRF连续复制三次新slug且原链接不变。官方授权地址及OAuth Adapter保持原代码，合成微信响应仅经严格api.weixin.qq.com CONNECT白名单转到本机TLS fixture；短时CA仅该测试进程在Linux通过SSL_CERT_FILE信任，其他Provider禁用，不访问真实微信、不改系统证书。禁止用生产连接或业务账号，入口只接受loopback且明确_acceptance_test数据库，随后复用既有克隆/清理机制。
 
 OneID测试账号同样通过既有ProvisionedCustomer目录Port创建最小客户投影，避免只有源码fixture能运行而整包readiness拒绝；不引入运行时身份捷径。Persistence仅一次性测试库；External Effects仅受控Provider读取，写Provider默认禁用。本补充为验证入口，无应用API/页面/数据库/发布控制器变化，无新发布通道。macOS可验证实际二进制的响应丢失及复制路径，但其系统TLS不消费SSL_CERT_FILE，不冒称安装OAuth旅程通过；完整四组同包OAuth/响应丢失合同由工作台Linux执行，源码旅程与安装旅程收据分别记录。
+
+### Linux前端失败后的兼容性修复
+
+9192e50的完整frontend第6项在原npm test中复现：缺少Element.scrollIntoView实现时，点击漏填提交抛TypeError。参考[jsdom官方未实现平台部分](https://github.com/jsdom/jsdom#unimplemented-parts-of-the-web-platform)与[MDN scrollIntoView合同](https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollIntoView)，复用已有错误/重试流程，只在方法存在时调用滚动；没有该可选布局能力仍显示错误并保留可编辑/重试入口。真实浏览器仍执行原滚动，不引入视觉变化或新设计。
+
+回归保留jsdom缺方法的真实bundle点击/网络失败/同键重试流程，不用全局空实现遮蔽；另记录all/one方法存在时确实调用当前错误节点且block=center，Chromium仍要求错误真实进入视口。旧H5测试成功fixture同时补齐既有questionnaire_slug/result_token收据字段，使成功路径消费真实有效合同；不放松生产收据校验。复现失败后重跑整个canonical frontend阶段和受影响真实Host旅程，准确新HEAD重新计算可信影响，再提交原ref，保留旧Linux失败收据和队首顺序。
+
+本增量OneID不涉及身份变化，Persistence/External Effects不涉及新状态或Provider效果，不涉及新增限制。五项影响：外部HTTP合同不变；业务提交/幂等不变；直接消费者为H5 controller及e2e/Chromium旅程；页面仅无布局API时不抛异常，原滚动可用时行为保持；验证分开记录本机完整前端与工作台Linux门禁/安装，生产授权范围未扩大。
+
+完整前端继续发现H5结果时间测试的旧手写API替身缺少surveyRead导出。移除该替身，让原时间断言直接消费真实Controller/依赖图，并禁止纯渲染发出网络请求；不改变上海时间语义。原失败已单独复现，修复后再从头执行完整frontend，避免只补当前失败脚本。

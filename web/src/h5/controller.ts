@@ -226,7 +226,7 @@ export class H5Controller extends PageBase {
   private refresh(revealError = false): void {
     this.__render?.();
     if (revealError && this.error) {
-      document.querySelector<HTMLElement>('#screen [data-h5-error]')?.scrollIntoView({ block: 'center' });
+      document.querySelector<HTMLElement>('#screen [data-h5-error]')?.scrollIntoView?.({ block: 'center' });
     }
   }
 
