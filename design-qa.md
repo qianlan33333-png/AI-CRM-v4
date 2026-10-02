@@ -1,3 +1,26 @@
+# 周期商品购买信息收集 Product Design QA · 2026-10-02
+
+final result: passed（本次视觉范围；本地真实 Chromium 保存与付款三档通过；已安装合同由工作台核验，真实支付及真实外推未验证）
+
+## 视觉依据与比较
+
+源为用户图2普通商品，以及当前生产登录后的普通商品68/周期商品12。证据目录 `/Users/qianlan/.codex/visualizations/2026/10/02/01a0fd0c-59bd-7150-b8dc-fb78fdefaca7`：`01-production-ordinary.png`、`02-production-periodic.png`、`06-local-periodic-final.png`。实现截图来自隔离PostgreSQL16与当前V4真实Host，合成周期商品1，通过认证HTTP保存并重新加载，非静态原型。
+
+生产截图1613×1002，DOM viewport1612×1007；本地截图1603×998，临时viewport1613×1004/实际DOM宽1603。亮色、售卖信息、shipping_address选中，按内容区对齐比较，原始设备密度未知，不声称整页像素相等。全图并排`04-design-comparison.png`与控件裁取`05-control-comparison.png`保留首轮差异；最终截图及DOM字体读回确认修复结果。周期原有商品编码/价格位置与普通商品不同，保留本页面排列，只复用同款控件。
+
+## Findings 与迭代
+
+- P1（已修）：首次真实浏览器检查发现新控件在隐藏的购买后动作区；移至可见售卖信息价格旁，并加入closest('#sp-sale')回归断言。
+- P2（已修）：首轮组合比较发现周期提示字12px且灰色，比普通商品14px/22px暗淡；统一到既有text颜色rgb(31,35,41)和14px/22px，最终浏览器计算样式已读回。
+- 最终无剩余本次P0/P1/P2视觉问题。三档原生select、字段标签、边框/圆角、行距及蓝色保存按钮沿用现有壳；无新图片/图标或布局重设计。未开展移动管理后台重设计。
+
+## 功能证据边界
+
+JSDOM合同验证新建/编辑、三档序列化、权威读回、其他维度隔离、CAS及幂等头；隔离库真实认证HTTP保存并在Host回读shipping_address/version2/enabled。本地HTTP浏览器POST被现有HTTPS Origin校验拒绝，没有削弱安全检查；已安装HTTPS浏览器保存旅程由发布工作台补齐。周期公开付款页在Provider disabled及非微信身份时正确提示微信打开；三档付款字段及地区数据由Handler/领域测试验证。没有进行生产商品保存、支付或外推启用/真实发送。
+
+
+---
+
 **Findings**
 
 - Prior P1: one-by-one input hint wrapper was incorrectly presented as a question border, nesting borders around the textarea. Fixed by giving the real question the same title/required/hint/input structure and padding as all-in-one; the hint wrapper has no border. Both modes retain one textarea border.

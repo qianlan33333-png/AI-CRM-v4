@@ -81,6 +81,8 @@ run_frontend_and_stage_checks() {
   node web/v3/productAdapter.save_recovery.test.mjs
   node web/v3/productAdapter.material_order.test.mjs
   node web/v3/productAdapter.sp_material.test.mjs
+  node web/v3/productAdapter.contact_collection.test.mjs
+  node web/v3/productAdapter.periodic_contact_collection.test.mjs
   node web/v3/productAdapter.period_share.test.mjs
   node web/v3/productAdapter.archive.test.mjs
   node web/v3/orderAdapter.test.mjs

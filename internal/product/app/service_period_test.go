@@ -563,3 +563,42 @@ func TestServicePeriodPublicReaderIncludesUploadedImages(t *testing.T) {
 		t.Fatalf("uploaded media=%+v want=%+v", public.DetailMedia, want)
 	}
 }
+
+func TestServicePeriodContactCollectionFlowsToPublicAndLockedCheckout(t *testing.T) {
+	for _, tc := range []struct{ name, raw, want string }{
+		{"none", `{"schema_version":1,"status":"service_period_enabled","enabled":true,"contact_collection_level":"none"}`, "none"},
+		{"mobile", `{"schema_version":1,"status":"service_period_enabled","enabled":true,"contact_collection_level":"mobile"}`, "mobile"},
+		{"shipping", `{"schema_version":1,"status":"service_period_enabled","enabled":true,"contact_collection_level":"shipping_address"}`, "shipping_address"},
+		{"legacy_mobile", `{"schema_version":1,"status":"service_period_enabled","enabled":true,"require_mobile":true}`, "mobile"},
+		{"legacy_none", `{"schema_version":1,"status":"service_period_enabled","enabled":true,"require_mobile":false}`, "none"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, _, _ := newServicePeriodFixture()
+			created, err := service.CreateServicePeriodProduct(context.Background(), productport.CreateServicePeriodProductCommand{
+				ProductCode: "contact-" + tc.name, Name: "Contact", PriceMinor: 990, Currency: "CNY", DurationDays: 30, StockQuantity: 1,
+				AdminProjection: json.RawMessage(tc.raw), Actor: 75, IdempotencyKey: "contact-create-" + tc.name,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = service.SetServicePeriodProductEnabled(context.Background(), productport.SetServicePeriodProductEnabledCommand{ID: created.ServiceProductID, ExpectedVersion: created.Version, Enabled: true, Actor: 75, IdempotencyKey: "contact-enable-" + tc.name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			public, err := service.ReadPublicServicePeriodByCode(context.Background(), created.ProductCode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reader := &TargetReader{ordinary: &Service{}, period: service}
+			checkout, err := reader.ReadCheckoutProductWithin(context.Background(), productport.ProductOptionServicePeriod, created.ServiceProductID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, got := range []productport.CheckoutProduct{public, checkout} {
+				if got.ContactCollectionLevel != tc.want || got.RequireMobile != (tc.want != "none") || got.ServicePeriodDurationDays != 30 {
+					t.Fatalf("contact policy lost: %+v", got)
+				}
+			}
+		})
+	}
+}

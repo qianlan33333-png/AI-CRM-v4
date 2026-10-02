@@ -243,7 +243,11 @@ func (service *ServicePeriodService) ReadServicePeriodPublicPresentationByCode(c
 	if policyErr != nil {
 		return productport.CheckoutProduct{}, false, policyErr
 	}
-	checkout := productport.CheckoutProduct{AlipayDisabled: disabled, ID: projected.ServiceProductID, ProductType: productport.ProductOptionServicePeriod, Code: projected.ProductCode, Name: projected.Name, PriceMinor: projected.PriceMinor, Currency: projected.Currency, Version: projected.Version, Images: append([]string(nil), projected.Images...), DetailMedia: presentation.Media, LeadChannelID: presentation.LeadChannelID, LeadQRTitle: presentation.LeadQRTitle, LeadQRSubtitle: presentation.LeadQRSubtitle, CompletionBlocksLeadQR: presentation.CompletionBlocksLeadQR, ServicePeriodDurationDays: duration}
+	level, contactErr := ProductContactCollectionLevel(projected.AdminProjection)
+	if contactErr != nil {
+		return productport.CheckoutProduct{}, false, contactErr
+	}
+	checkout := productport.CheckoutProduct{RequireMobile: level != "none", ContactCollectionLevel: level, AlipayDisabled: disabled, ID: projected.ServiceProductID, ProductType: productport.ProductOptionServicePeriod, Code: projected.ProductCode, Name: projected.Name, PriceMinor: projected.PriceMinor, Currency: projected.Currency, Version: projected.Version, Images: append([]string(nil), projected.Images...), DetailMedia: presentation.Media, LeadChannelID: presentation.LeadChannelID, LeadQRTitle: presentation.LeadQRTitle, LeadQRSubtitle: presentation.LeadQRSubtitle, CompletionBlocksLeadQR: presentation.CompletionBlocksLeadQR, ServicePeriodDurationDays: duration}
 	return checkout, projected.Enabled && projected.Lifecycle == productport.ServicePeriodEnabled, nil
 }
 

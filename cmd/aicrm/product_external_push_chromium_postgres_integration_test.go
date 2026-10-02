@@ -55,6 +55,8 @@ type productExternalPushChromiumFixture struct {
 	historicalOrderReference string
 	dataKey                  []byte
 	alipayGateway            string
+	alipayPrivateKeyPath     string
+	alipayPublicKey          string
 }
 
 type productExternalPushChromiumFixtureOptions struct {
@@ -342,7 +344,9 @@ func newProductExternalPushChromiumFixtureWithOptions(t *testing.T, timeout time
 		productID: productID, serviceProductID: serviceProductID,
 		materialFirstID: materialFirstID, materialLaterID: materialLaterID,
 		historicalOrderReference: historicalOrderReference, dataKey: dataKey,
-		alipayGateway: alipayGateway,
+		alipayGateway:        alipayGateway,
+		alipayPrivateKeyPath: runtime.Alipay.PrivateKeyPath,
+		alipayPublicKey:      runtime.Alipay.AlipayPublicKey,
 	}
 }
 

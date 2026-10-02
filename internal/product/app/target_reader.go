@@ -189,7 +189,11 @@ func (reader *TargetReader) ReadCheckoutProductWithin(ctx context.Context, kind 
 		if policyErr != nil {
 			return productport.CheckoutProduct{}, policyErr
 		}
-		return productport.CheckoutProduct{ID: projected.ServiceProductID, ProductType: kind, AlipayDisabled: disabled, Code: projected.ProductCode, Name: projected.Name, PriceMinor: projected.PriceMinor, Currency: projected.Currency, Version: projected.Version, Images: append([]string(nil), projected.Images...), PostPurchaseAction: action, ServicePeriodDurationDays: duration}, nil
+		level, contactErr := ProductContactCollectionLevel(projected.AdminProjection)
+		if contactErr != nil {
+			return productport.CheckoutProduct{}, contactErr
+		}
+		return productport.CheckoutProduct{RequireMobile: level != "none", ContactCollectionLevel: level, ID: projected.ServiceProductID, ProductType: kind, AlipayDisabled: disabled, Code: projected.ProductCode, Name: projected.Name, PriceMinor: projected.PriceMinor, Currency: projected.Currency, Version: projected.Version, Images: append([]string(nil), projected.Images...), PostPurchaseAction: action, ServicePeriodDurationDays: duration}, nil
 	default:
 		return productport.CheckoutProduct{}, ErrInvalidProduct
 	}

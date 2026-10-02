@@ -924,3 +924,27 @@ func TestProductAlipayPolicyControlsBothPaymentRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestServicePeriodPaymentPageUsesSavedContactCollection(t *testing.T) {
+	for _, level := range []string{"none", "mobile", "shipping_address"} {
+		t.Run(level, func(t *testing.T) {
+			reader := &servicePeriodPublicStub{product: productport.CheckoutProduct{ID: 71, ProductType: productport.ProductOptionServicePeriod, Code: "collection-period", Name: "周期商品", PriceMinor: 990, Currency: "CNY", Version: 1, ServicePeriodDurationDays: 30, RequireMobile: level != "none", ContactCollectionLevel: level}}
+			h, err := NewServicePeriodPublicHandler(reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response := httptest.NewRecorder()
+			h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/s/collection-period/pay", nil))
+			html := response.Body.String()
+			if response.Code != 200 || strings.Contains(html, `id="mobilePanel"`) != (level != "none") || strings.Contains(html, `id="shippingPanel"`) != (level == "shipping_address") {
+				t.Fatalf("level=%s status=%d wrong contact panels", level, response.Code)
+			}
+			if !strings.Contains(html, "const level='"+level+"'") {
+				t.Fatal("checkout validation lost collection policy")
+			}
+			if level == "shipping_address" && !strings.Contains(html, "北京市") {
+				t.Fatal("shipping region catalog missing")
+			}
+		})
+	}
+}

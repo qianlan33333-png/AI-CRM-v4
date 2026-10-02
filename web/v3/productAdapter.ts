@@ -480,13 +480,13 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
   if (isDistributionProductSubjectWrite(url, method)) nextInit = adaptAlipayPolicyWrite(nextInit);
   if (isPurchaseActionSubjectWrite(url, method)) nextInit = adaptPurchaseActionWrite(nextInit);
   if (isDistributionProductSubjectWrite(url, method)) nextInit = adaptDistributionPolicyWrite(nextInit);
-  if ((url.pathname === '/api/v1/products' || /^\/api\/v1\/products\/[1-9][0-9]*$/.test(url.pathname)) && (method === 'POST' || method === 'PUT') && typeof nextInit?.body === 'string') {
+  if (isPurchaseActionSubjectWrite(url, method) && typeof nextInit?.body === 'string') {
     try {
       const body = object(JSON.parse(nextInit.body));
       const projection = object(body.admin_projection);
       // The frozen DTO serializer omits new fields. Carry the captured command
       // value across that boundary instead of deriving shipping from a boolean.
-      const level = context?.contactCollectionLevel ?? contactCollectionLevelFrom(projection.contact_collection_level ?? (projection.require_mobile === true ? 'mobile' : 'none'));
+      const level = context?.contactCollectionLevel ?? currentContactCollectionLevel();
       nextInit = { ...nextInit, body: JSON.stringify({ ...body, admin_projection: { ...projection, require_mobile: level !== 'none', contact_collection_level: level } }) };
     } catch { /* the Product API validates malformed JSON */ }
   }
@@ -558,8 +558,7 @@ api.saveProduct = (input) => {
     }
   }
   const alipayEnabled = currentAlipayEnabled();
-  const projection = input.adminProjection as (typeof input.adminProjection & { contactCollectionLevel?: ContactCollectionLevel });
-  const level = contactCollectionLevelFrom((document.getElementById('pfContactCollectionLevel') as HTMLSelectElement | null)?.value || projection?.contactCollectionLevel || (projection?.requireMobile ? 'mobile' : 'none'));
+  const level = currentContactCollectionLevel();
   // Include the level before fingerprinting so a changed selection is a new intent.
   if (input.adminProjection) input = { ...input, adminProjection: { ...input.adminProjection, requireMobile: level !== 'none', contactCollectionLevel: level, alipayEnabled } as typeof input.adminProjection };
   const recovered = pendingExternalPush;
@@ -654,11 +653,13 @@ const donorSaveServiceProduct = api.saveServiceProduct.bind(api);
 api.saveServiceProduct = (input) => {
   if (productSaveInFlight) return productSaveInFlight;
   const alipayEnabled = currentAlipayEnabled();
-  input = { ...input, adminProjection: { ...input.adminProjection, alipayEnabled } as typeof input.adminProjection };
+  const level = currentContactCollectionLevel();
+  input = { ...input, adminProjection: { ...input.adminProjection, alipayEnabled, requireMobile: level !== 'none', contactCollectionLevel: level } as typeof input.adminProjection };
   const keys = stableProductSaveKeys(input);
   const productID = input.id;
   const context: ProductSaveContext = {
     alipayEnabled,
+    contactCollectionLevel: level,
     productID,
     opened: productID ? periodicSnapshots.get(productID) : undefined,
     subjectKey: keys.subjectKey,
@@ -1550,25 +1551,51 @@ type ContactCollectionLevel = 'none' | 'mobile' | 'shipping_address';
 function contactCollectionLevelFrom(value: unknown): ContactCollectionLevel {
   return value === 'shipping_address' || value === 'mobile' ? value : 'none';
 }
+function openedContactProjection(): Record<string, unknown> {
+  const route = productEditorRoute();
+  const opened = route ? route.prefix === 'pf' ? openedProductPayloads.get(route.id) : periodicSnapshots.get(route.id) : undefined;
+  return object(object(opened).admin_projection);
+}
+function savedContactCollectionLevel(): ContactCollectionLevel {
+  const raw = openedContactProjection();
+  return contactCollectionLevelFrom(raw.contact_collection_level ?? (raw.require_mobile === true ? 'mobile' : 'none'));
+}
+function currentContactCollectionLevel(): ContactCollectionLevel {
+  const prefix = productPrefix();
+  if (newProductEditor() || distributionPolicyDimensionSelected()) {
+    const control = document.getElementById(`${prefix}ContactCollectionLevel`) as HTMLSelectElement | null;
+    if (!control) throw new Error('购买信息收集尚未加载，未提交保存。');
+    return contactCollectionLevelFrom(control.value);
+  }
+  return savedContactCollectionLevel();
+}
 function mountContactCollectionPanel(): void {
-  if (document.body?.dataset.page !== 'productForm') return;
-  const legacy = document.getElementById('pfRequireMobile');
-  if (!(legacy instanceof HTMLSelectElement)) return;
-  const host = legacy.parentElement;
+  const prefix = productPrefix();
+  if (!prefix) return;
+  const route = productEditorRoute();
+  if (route && !(prefix === 'pf' ? openedProductPayloads.has(route.id) : periodicSnapshots.has(route.id))) return;
+  if (document.getElementById(`${prefix}ContactCollectionLevel`)) return;
+  const legacy = document.getElementById(`${prefix}RequireMobile`);
+  const price = document.getElementById(`${prefix}Price`);
+  const host = prefix === 'pf' && legacy instanceof HTMLSelectElement ? legacy.parentElement : price?.parentElement?.parentElement;
   if (!(host instanceof HTMLElement)) return;
-  if (document.getElementById('pfContactCollectionLevel')) return;
   const panel = document.createElement('div');
   panel.style.cssText = 'display:grid;gap:6px';
-  panel.innerHTML = '<label for="pfContactCollectionLevel" style="color:#646A73;font-size:12px">购买信息收集</label><select id="pfContactCollectionLevel" style="width:100%;min-height:36px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;padding:0 10px;font-size:13px;box-sizing:border-box"><option value="none">不收集</option><option value="mobile" selected>仅手机号</option><option value="shipping_address">收货人信息</option></select><div id="pfContactCollectionHint" style="color:#8F959E;font-size:12px;line-height:18px"></div>';
-  const select = panel.querySelector<HTMLSelectElement>('#pfContactCollectionLevel');
-  const hint = panel.querySelector<HTMLElement>('#pfContactCollectionHint');
+  panel.innerHTML = `<label for="${prefix}ContactCollectionLevel" style="color:var(--text,#1F2329);font-size:14px;line-height:22px">购买信息收集</label><select id="${prefix}ContactCollectionLevel" aria-describedby="${prefix}ContactCollectionHint" style="width:100%;min-height:36px;border:1px solid #DEE0E3;border-radius:6px;background:#fff;padding:0 10px;font-size:13px;box-sizing:border-box"><option value="none">不收集</option><option value="mobile">仅手机号</option><option value="shipping_address">收货人信息</option></select><div id="${prefix}ContactCollectionHint" style="color:var(--text,#1F2329);font-size:14px;line-height:22px"></div>`;
+  const select = panel.querySelector<HTMLSelectElement>('select');
+  const hint = panel.querySelector<HTMLElement>(`#${prefix}ContactCollectionHint`);
   if (!select || !hint) return;
-  legacy.style.display = 'none';
-  host.querySelector('label')?.setAttribute('hidden', '');
-  host.append(panel);
-  const opened = loadedProducts[0] ? openedProductPayloads.get(loadedProducts[0].resourceId) : undefined;
-  const raw = object(object(opened).admin_projection);
-  select.value = contactCollectionLevelFrom(raw.contact_collection_level ?? (opened ? (raw.require_mobile === true ? 'mobile' : 'none') : 'mobile'));
+  if (prefix === 'pf' && legacy instanceof HTMLSelectElement) {
+    legacy.style.display = 'none';
+    host.querySelector('label')?.setAttribute('hidden', '');
+    host.append(panel);
+  } else {
+    if (legacy instanceof HTMLSelectElement) legacy.parentElement?.setAttribute('hidden', '');
+    const priceHost = price?.parentElement;
+    if (!priceHost || !host.contains(priceHost)) return;
+    priceHost.after(panel);
+  }
+  select.value = route ? savedContactCollectionLevel() : 'mobile';
   const update = (): void => { hint.textContent = select.value === 'shipping_address' ? '付款页将要求手机号、收件人、省市区和详细地址。' : ''; };
   select.addEventListener('change', update);
   update();

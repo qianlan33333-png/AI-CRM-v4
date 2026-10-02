@@ -3,12 +3,14 @@ package http
 import (
 	"context"
 	"errors"
+	"html/template"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	addresscatalog "github.com/qianlan33333-png/AI-CRM-v3/internal/address/port"
 	channelport "github.com/qianlan33333-png/AI-CRM-v3/internal/channel/port"
 	mediaport "github.com/qianlan33333-png/AI-CRM-v3/internal/media/port"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
@@ -126,7 +128,19 @@ func (h *ServicePeriodPublicHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 	if promotionContext == "" {
 		clearLegacyPromotionCookies(w)
 	}
-	public := publicProduct{ID: product.ID, Name: product.Name, PriceMinor: product.PriceMinor, Currency: product.Currency, PaymentPath: publicPaymentPath("/s/"+url.PathEscape(product.Code)+"/pay", promotionContext), PromotionContext: promotionContext, BuyButtonText: "立即报名", ProductKind: "service_period", CouponTargetRef: "service_period:" + strconv.FormatInt(int64(product.ID), 10), ServicePeriodDurationDays: product.ServicePeriodDurationDays, Images: publicDetailMedia(product.Code, product.DetailMedia), RegionOptionsJSON: "[]"}
+	level := product.ContactCollectionLevel
+	if level == "" {
+		if product.RequireMobile {
+			level = "mobile"
+		} else {
+			level = "none"
+		}
+	}
+	regionOptions := template.JS("[]")
+	if level == "shipping_address" {
+		regionOptions = template.JS(addresscatalog.OptionsJSON())
+	}
+	public := publicProduct{RequireMobile: level != "none", ContactCollectionLevel: level, ID: product.ID, Name: product.Name, PriceMinor: product.PriceMinor, Currency: product.Currency, PaymentPath: publicPaymentPath("/s/"+url.PathEscape(product.Code)+"/pay", promotionContext), PromotionContext: promotionContext, BuyButtonText: "立即报名", ProductKind: "service_period", CouponTargetRef: "service_period:" + strconv.FormatInt(int64(product.ID), 10), ServicePeriodDurationDays: product.ServicePeriodDurationDays, Images: publicDetailMedia(product.Code, product.DetailMedia), RegionOptionsJSON: regionOptions}
 	presentation := PublicPresentationAssets{}
 	if h.presentationAssets.bound() {
 		presentation, err = h.presentationAssets.resolved()
