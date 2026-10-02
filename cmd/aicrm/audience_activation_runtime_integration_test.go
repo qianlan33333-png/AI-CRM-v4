@@ -76,7 +76,10 @@ func TestActivationHourlyConfigurationHTTPSaveReadbackAndStickyPublication(t *te
 		t.Fatal(e)
 	}
 	config := segmentapp.NewService(uow, repo)
-	at := time.Now().UTC()
+	// The JSON override and the persisted refresh must describe the same
+	// instant at the inclusive 12-hour boundary. PostgreSQL stores microseconds;
+	// a nanosecond fixture would place the read-back refresh just before it.
+	at := time.Now().UTC().Truncate(time.Microsecond)
 	anchor := at.Add(-12 * time.Hour)
 	paid := anchor.Add(-48 * time.Hour)
 	facts := &activationRuntimeFacts{orders: []orderport.PaidAudienceOrder{{OrderID: 1, CustomerID: 1, ProductCode: "334465678", PaidAt: &paid}, {OrderID: 2, CustomerID: 2, ProductCode: "334465678", PaidAt: &paid}}, submissions: []surveyport.AudienceSubmission{{CustomerID: 2, QuestionnaireID: 16, SubmittedAt: anchor}}}
@@ -136,6 +139,9 @@ func TestActivationHourlyConfigurationHTTPSaveReadbackAndStickyPublication(t *te
 		run, e := snapshots.AcceptRefresh(ctx, segmentapp.RefreshCommand{PackageID: pkg.ID, Actor: 1, IdempotencyKey: fmt.Sprintf("activation-refresh-%04d", i), ReferenceTime: reference})
 		if e != nil {
 			t.Fatal(e)
+		}
+		if !run.ReferenceTime.Equal(reference) {
+			t.Fatalf("round=%d refresh instant changed: requested=%s persisted=%s", i, reference.Format(time.RFC3339Nano), run.ReferenceTime.Format(time.RFC3339Nano))
 		}
 		if e = snapshots.ProcessRefresh(ctx, run.ID); e != nil {
 			t.Fatal(e)
