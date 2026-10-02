@@ -43,6 +43,7 @@ try{
  await evaluate(cdp,"document.querySelector('[data-h5-submit]').scrollIntoView();document.querySelector('[data-h5-submit]').click();true");
  await wait(cdp,"(()=>{const error=document.querySelector('#screen [data-h5-error]');const rect=error?.getBoundingClientRect();return error?.textContent&&rect.top>=0&&rect.bottom<=innerHeight&&document.querySelector('[data-h5-submit]')?.disabled===false;})()",'missing answer did not reveal the existing error or unlock submission');
  await evaluate(cdp,`(()=>{for(const card of document.querySelectorAll('#screen [data-question-id]'))card.querySelector('label')?.click();const set=(node,value)=>{if(!node)return;node.value=value;node.dispatchEvent(new Event('input',{bubbles:true}));};set(document.querySelector('#screen input'),'13800000000');set(document.querySelector('#screen textarea'),${JSON.stringify(text)});return true;})()`);
+ if(await evaluate(cdp,"Boolean(document.querySelector('#screen [data-h5-error]'))"))throw new Error('corrected input left stale validation feedback');
  await evaluate(cdp,"document.querySelector('[data-h5-submit]').scrollIntoView();true");
  const capture=async(name)=>{await evaluate(cdp,'document.fonts.ready');const image=await cdp.call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,(one?'one-':'all-')+name),Buffer.from(image.data,'base64'),{mode:0o600});};
  await capture('survey-reauth-filled-390.png');

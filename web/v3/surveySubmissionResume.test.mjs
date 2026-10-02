@@ -114,7 +114,8 @@ for(const display of ['all_in_one','one_by_one']){
   const invalid=harness({display});await invalid.controller.init();await invalid.controller.submit();
   assert.equal(invalid.posts.length,0,'validation still precedes submission');
   assert.ok(invalid.revealed,'missing required answers reveal the existing error');
-  invalid.fill();invalid.controller.setText(invalid.controller.definition.questions[2],{target:{value:' \n\t'}});await invalid.controller.submit();assert.equal(invalid.posts.length,0,'required whitespace-only text is rejected before sending');
+  const inputNode=invalid.window.document.createElement('textarea');invalid.window.document.getElementById('screen').append(inputNode);
+  invalid.fill();invalid.controller.setText(invalid.controller.definition.questions[2],{target:{value:''}});await invalid.controller.submit();invalid.controller.setText(invalid.controller.definition.questions[2],{target:{value:'修正后文字'}});assert.equal(invalid.window.document.querySelector('[data-h5-error]'),null,'editing removes stale feedback without remounting active input');assert.equal(inputNode.isConnected,true);invalid.controller.setText(invalid.controller.definition.questions[2],{target:{value:' \n\t'}});await invalid.controller.submit();assert.equal(invalid.posts.length,0,'required whitespace-only text is rejected before sending');
   const hanging=harness({display,pending:true});await hanging.controller.init();hanging.fill();await hanging.controller.submit();
   assert.equal(hanging.controller.renderVals().submitting,false,'lost response releases the submit lock');
   assert.match(hanging.controller.renderVals().error,/结果暂未确认/);
@@ -180,6 +181,9 @@ for(const display of ['all_in_one','one_by_one']){
   const stale=harness({display,status:409,postBody:{error:'definition_version_conflict'}});await stale.controller.init();stale.fill();await stale.controller.submit();
   assert.equal(stale.controller.renderVals().canRetry,true,'version changes expose current retry instead of trapping stale submission');
   assert.equal(stale.controller.textAnswers.get(3),'\n保留文字答案\n','old answers stay visible until respondent elects to reload');
+  stale.controller.setText(stale.controller.definition.questions[2],{target:{value:'修改文字也必须先重读新题'}});
+  assert.equal(stale.controller.renderVals().canRetry,true,'editing does not dismiss definition-change recovery');
+  await stale.controller.submit();assert.equal(stale.posts.length,1,'known stale definition does not keep reposting rejected answers');
   stale.window.fetch=async()=>Response.json({...definition,version:2,answer_display_mode:display},{headers:{'X-Aicrm-Survey-Authorization-Context':'a'.repeat(64)}});
   await stale.controller.init();assert.equal(stale.controller.textAnswers.size,0,'definition change never maps old question IDs silently');
   assert.match(stale.controller.renderVals().error,/内容已更新/);

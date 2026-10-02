@@ -373,7 +373,7 @@ export class H5Controller extends PageBase {
     if (next.join(',') !== previous.join(',')) this.submissionKey = '';
     this.answers.set(question.id, next);
     this.saveDraft();
-    this.error = '';
+    if (!this.definitionStale) this.error = '';
     this.refresh();
   }
 
@@ -383,7 +383,12 @@ export class H5Controller extends PageBase {
     if (value !== (this.textAnswers.get(question.id) || '')) this.submissionKey = '';
     this.textAnswers.set(question.id, value);
     this.saveDraft();
-    this.error = '';
+    if (this.error && !this.definitionStale) {
+      this.error = '';
+      // Remove only stale feedback. A full render here remounts the active
+      // textarea and can interrupt mobile focus/IME composition.
+      document.querySelector('#screen [data-h5-error]')?.remove();
+    }
   }
 
   private questionError(question: V3SurveyQuestion): string {
@@ -405,6 +410,7 @@ export class H5Controller extends PageBase {
 
   private async submit(afterAuthorization = false): Promise<void> {
     if (!this.definition || this.submitting || this.submitted) return;
+    if (this.definitionStale) { this.refresh(true); return; }
     this.error = this.definition.questions.map((question) => this.questionError(question)).find(Boolean) || '';
     if (this.error) { this.refresh(true); return; }
     const answers: V3SurveySubmissionAnswer[] = this.definition.questions
@@ -452,13 +458,13 @@ export class H5Controller extends PageBase {
 
   private move(delta: number): void {
     if (!this.definition || this.submitting || this.submitted) return;
-    if (delta > 0) {
+    if (delta > 0 && !this.definitionStale) {
       this.error = this.questionError(this.definition.questions[this.questionIndex]);
       if (this.error) { this.refresh(true); return; }
     }
     this.questionIndex = Math.max(0, Math.min(this.definition.questions.length - 1, this.questionIndex + delta));
     this.saveDraft();
-    this.error = '';
+    if (!this.definitionStale) this.error = '';
     this.refresh();
   }
 
