@@ -309,7 +309,9 @@ make_release() {
     0098_message_archive_historical_projection.sql \
     0099_survey_historical_external_projection.sql \
     0100_ai_assistant_machine_actor.sql \
-    0124_operation_excel_batch_lifecycle.sql; do
+    0124_operation_excel_batch_lifecycle.sql \
+    0218_hxc_token_usage_time.sql \
+    0219_segment_hourly_refresh.sql; do
     : > "$release/migrations/$migration"
   done
   : > "$release/web/dist/asset-manifest.json"
