@@ -1917,7 +1917,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	accessHandler, err := accesshttp.NewHandler(accesshttp.Config{
-		Renderer: renderer, Auth: authentication, Management: management, CookieSecure: true, CookiePath: "/",
+		PublicOrigin: cfg.PublicOrigin, Renderer: renderer, Auth: authentication, Management: management, CookieSecure: true, CookiePath: "/",
 	})
 	if err != nil {
 		return fail(err)
@@ -2558,6 +2558,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	handler = mountOpsGovernance(handler, opsInspectionHTTP, opsRetentionHTTP, opsCPUProfileHTTP, opsGovernanceOutcomesHTTP)
 	handler = mountInvitations(handler, invitationHandler)
 	handler = openplatformhttp.Mount(handler, openPlatformHandler.Routes())
+	handler = mountCLIHuman(handler, authentication)
 	handler = mountOpenPlatformUI(handler, shellHandler, authentication)
 	handler = mountMemberGridUI(handler, memberGridUI)
 	handler = mountOwnerHandoffUI(handler, requireAdminSession(authentication, ownerHandoffUI))

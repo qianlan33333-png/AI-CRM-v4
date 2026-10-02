@@ -1,0 +1,688 @@
+[
+  {
+    "id": "owner.distribution.list-distributors",
+    "group": "distribution",
+    "command": "list-distributors",
+    "summary": "list distributors",
+    "owner": "distribution",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/distribution/distributors",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.distribution.get-distributors",
+    "group": "distribution",
+    "command": "get-distributors",
+    "summary": "get distributors",
+    "owner": "distribution",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/distribution/distributors/{id}",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.distribution.list-orders",
+    "group": "distribution",
+    "command": "list-orders",
+    "summary": "list orders",
+    "owner": "distribution",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/distribution/orders",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.distribution.get-orders",
+    "group": "distribution",
+    "command": "get-orders",
+    "summary": "get orders",
+    "owner": "distribution",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/distribution/orders/{id}",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.distribution.list-exceptions",
+    "group": "distribution",
+    "command": "list-exceptions",
+    "summary": "list exceptions",
+    "owner": "distribution",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/distribution/exceptions",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.distribution.get-exceptions",
+    "group": "distribution",
+    "command": "get-exceptions",
+    "summary": "get exceptions",
+    "owner": "distribution",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/distribution/exceptions/{id}",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.distribution.distributor-orders",
+    "group": "distribution",
+    "command": "distributor-orders",
+    "summary": "distributor orders",
+    "owner": "distribution",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/distribution/distributors/{id}/orders",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.distribution.enable-distributor",
+    "group": "distribution",
+    "command": "enable-distributor",
+    "summary": "enable distributor",
+    "owner": "distribution",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "POST",
+      "path": "/api/admin/distribution/distributors/{id}/enable",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  },
+  {
+    "id": "owner.distribution.disable-distributor",
+    "group": "distribution",
+    "command": "disable-distributor",
+    "summary": "disable distributor",
+    "owner": "distribution",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "POST",
+      "path": "/api/admin/distribution/distributors/{id}/disable",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  },
+  {
+    "id": "owner.distribution.reconcile",
+    "group": "distribution",
+    "command": "reconcile",
+    "summary": "reconcile",
+    "owner": "distribution",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "POST",
+      "path": "/api/admin/distribution/exceptions/{id}/reconcile",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  },
+  {
+    "id": "owner.distribution.recoveries",
+    "group": "distribution",
+    "command": "recoveries",
+    "summary": "recoveries",
+    "owner": "distribution",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "POST",
+      "path": "/api/admin/distribution/exceptions/{id}/recoveries",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  },
+  {
+    "id": "owner.distribution.merchant-liabilities",
+    "group": "distribution",
+    "command": "merchant-liabilities",
+    "summary": "merchant liabilities",
+    "owner": "distribution",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "POST",
+      "path": "/api/admin/distribution/exceptions/{id}/merchant-liabilities",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  },
+  {
+    "id": "owner.referral.list-product-options",
+    "group": "referral",
+    "command": "list-product-options",
+    "summary": "list product options",
+    "owner": "referral",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/referral/product-options",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.referral.list-campaigns",
+    "group": "referral",
+    "command": "list-campaigns",
+    "summary": "list campaigns",
+    "owner": "referral",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/referral/campaigns",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.referral.list-referrals",
+    "group": "referral",
+    "command": "list-referrals",
+    "summary": "list referrals",
+    "owner": "referral",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/referral/referrals",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.referral.list-relationship-history",
+    "group": "referral",
+    "command": "list-relationship-history",
+    "summary": "list relationship history",
+    "owner": "referral",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/referral/relationship-history",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.referral.list-rewards",
+    "group": "referral",
+    "command": "list-rewards",
+    "summary": "list rewards",
+    "owner": "referral",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/referral/rewards",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.referral.create-campaign",
+    "group": "referral",
+    "command": "create-campaign",
+    "summary": "create campaign",
+    "owner": "referral",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "POST",
+      "path": "/api/admin/referral/campaigns",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  },
+  {
+    "id": "owner.referral.create-reward",
+    "group": "referral",
+    "command": "create-reward",
+    "summary": "create reward",
+    "owner": "referral",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "POST",
+      "path": "/api/admin/referral/rewards",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  },
+  {
+    "id": "owner.referral.get-campaign",
+    "group": "referral",
+    "command": "get-campaign",
+    "summary": "get campaign",
+    "owner": "referral",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/referral/campaigns/{id}",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.referral.update-campaign",
+    "group": "referral",
+    "command": "update-campaign",
+    "summary": "update campaign",
+    "owner": "referral",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "PUT",
+      "path": "/api/admin/referral/campaigns/{id}",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  },
+  {
+    "id": "owner.referral.set-posters",
+    "group": "referral",
+    "command": "set-posters",
+    "summary": "set posters",
+    "owner": "referral",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "PUT",
+      "path": "/api/admin/referral/campaigns/{id}/posters",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  },
+  {
+    "id": "owner.referral.set-state",
+    "group": "referral",
+    "command": "set-state",
+    "summary": "set state",
+    "owner": "referral",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "POST",
+      "path": "/api/admin/referral/campaigns/{id}/state",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  },
+  {
+    "id": "owner.referral.create-team",
+    "group": "referral",
+    "command": "create-team",
+    "summary": "create team",
+    "owner": "referral",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "POST",
+      "path": "/api/admin/referral/campaigns/{id}/teams",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  },
+  {
+    "id": "owner.referral.list-participants",
+    "group": "referral",
+    "command": "list-participants",
+    "summary": "list participants",
+    "owner": "referral",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/referral/campaigns/{id}/participants",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.referral.list-invitations",
+    "group": "referral",
+    "command": "list-invitations",
+    "summary": "list invitations",
+    "owner": "referral",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/referral/campaigns/{id}/invitations",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.referral.export-campaign",
+    "group": "referral",
+    "command": "export-campaign",
+    "summary": "export campaign",
+    "owner": "referral",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/referral/campaigns/{id}/export",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.referral.participant-invitations",
+    "group": "referral",
+    "command": "participant-invitations",
+    "summary": "participant invitations",
+    "owner": "referral",
+    "execution": "read",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "GET",
+      "path": "/api/admin/referral/campaigns/{id}/participants/{customer_id}/invitations",
+      "auth": "human",
+      "body": {},
+      "content_type": "",
+      "idempotency_required": false
+    }
+  },
+  {
+    "id": "owner.referral.reverse-participation",
+    "group": "referral",
+    "command": "reverse-participation",
+    "summary": "reverse participation",
+    "owner": "referral",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "POST",
+      "path": "/api/admin/referral/participations/{id}/reverse",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  },
+  {
+    "id": "owner.referral.revoke-invitation",
+    "group": "referral",
+    "command": "revoke-invitation",
+    "summary": "revoke invitation",
+    "owner": "referral",
+    "execution": "owner_contract",
+    "implementation": "owner_handler",
+    "evidence": "source_handler_only",
+    "prerequisites": [
+      "current human session",
+      "owner route permission and domain validation"
+    ],
+    "binding": {
+      "method": "POST",
+      "path": "/api/admin/referral/invitations/{id}/revoke",
+      "auth": "human",
+      "body": {
+        "type": "object"
+      },
+      "content_type": "application/json",
+      "idempotency_required": true
+    }
+  }
+]

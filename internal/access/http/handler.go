@@ -53,6 +53,7 @@ type Management interface {
 }
 
 type Config struct {
+	PublicOrigin string
 	Renderer     Renderer
 	Auth         Authentication
 	Management   Management
@@ -61,6 +62,7 @@ type Config struct {
 }
 
 type Handler struct {
+	publicOrigin string
 	renderer     Renderer
 	auth         Authentication
 	management   Management
@@ -81,12 +83,14 @@ func NewHandler(config Config) (*Handler, error) {
 	if config.CookiePath[0] != '/' {
 		return nil, errors.New("access cookie path must be absolute")
 	}
-	return &Handler{renderer: config.Renderer, auth: config.Auth, management: config.Management,
+	return &Handler{publicOrigin: strings.TrimRight(config.PublicOrigin, "/"), renderer: config.Renderer, auth: config.Auth, management: config.Management,
 		cookieSecure: config.CookieSecure, cookiePath: config.CookiePath}, nil
 }
 
 func (handler *Handler) Routes() nethttp.Handler {
 	mux := nethttp.NewServeMux()
+	mux.HandleFunc("GET /api/admin/access/cli/login-challenge", handler.cliLoginChallenge)
+	mux.HandleFunc("GET /api/admin/access/cli/session", handler.cliSession)
 	mux.HandleFunc("GET /login", handler.loginPage)
 	mux.HandleFunc("POST /login", handler.login)
 	mux.HandleFunc("POST /logout", handler.logout)

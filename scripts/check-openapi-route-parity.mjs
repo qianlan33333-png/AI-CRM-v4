@@ -4,10 +4,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import SwaggerParser from '@apidevtools/swagger-parser';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const cliSpecification = await SwaggerParser.validate(path.join(repository, 'api/cli-v2.yaml'));
 const explicitServeMuxRoute = /\bmux\.Handle(?:Func)?\(\s*"(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) (\/[^" ]*)"/g;
 const serverSourceRoots = ['internal', 'cmd'];
 
 const routeContracts = [
+  ['get', '/api/admin/access/cli/login-challenge', 'none', null, 'internal/access/http/handler.go', 'mux.HandleFunc("GET /api/admin/access/cli/login-challenge", handler.cliLoginChallenge)'],
+  ['get', '/api/admin/access/cli/session', 'adminSession', null, 'internal/access/http/handler.go', 'mux.HandleFunc("GET /api/admin/access/cli/session", handler.cliSession)'],
+  ['get', '/api/admin/cli/capabilities', 'adminSession', null, 'cmd/aicrm/cli_catalog.go', 'mux.HandleFunc("GET /api/admin/cli/capabilities", serve)'],
+  ['post', '/api/admin/cli/can-i', 'adminSession+csrfHeader', null, 'cmd/aicrm/cli_catalog.go', 'mux.HandleFunc("POST /api/admin/cli/can-i", serve)'],
+  ['get', '/open/v2/cli/context', 'machineBearer', null, 'internal/openplatform/http/handler.go', 'mux.HandleFunc("GET /open/v2/cli/context", handler.cliContext)'],
+  ['post', '/open/v2/cli/can-i', 'machineBearer', null, 'internal/openplatform/http/handler.go', 'mux.HandleFunc("POST /open/v2/cli/can-i", handler.cliCanI)'],
   ['post', '/oauth/token', 'none', null, 'internal/openplatform/http/handler.go', 'mux.HandleFunc("POST /oauth/token", handler.token)'],
   ['get', '/mcp', 'machineBearer', null, 'internal/openplatform/http/handler.go', 'mux.HandleFunc("GET /mcp", handler.mcpMetadata)'],
   ['post', '/mcp', 'machineBearer', 'optional-header', 'internal/openplatform/http/handler.go', 'mux.HandleFunc("POST /mcp", handler.mcp)'],
@@ -162,7 +169,11 @@ export function assertRetiredRoutesAbsent(specification, retiredRoutes = retired
   }
 }
 
-export function assertOpenAPIRouteParity(specification) {
+export function assertOpenAPIRouteParity(specification, additive = cliSpecification) {
+  for (const route of Object.keys(additive.paths ?? {})) {
+    if (specification.paths?.[route]) fail(`additive CLI route ${route} overlaps an existing business contract`);
+  }
+  specification = { ...specification, paths: { ...specification.paths, ...additive.paths } };
   const cache = new Map();
   assertExplicitRoutesDocumented(specification);
   for (const [method, route, security, idempotency, source, registration] of routeContracts) {

@@ -1,0 +1,494 @@
+[
+  {
+    "id": "candidate.wecom.staff-external-profile",
+    "group": "wecom",
+    "command": "staff-external-profile",
+    "summary": "成员对外信息",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.strategy-tags",
+    "group": "wecom",
+    "command": "strategy-tags",
+    "summary": "规则组客户标签",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.customer-strategies",
+    "group": "wecom",
+    "command": "customer-strategies",
+    "summary": "客户联系规则组",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.on-job-customer-transfer",
+    "group": "wecom",
+    "command": "on-job-customer-transfer",
+    "summary": "在职客户继承",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.on-job-group-transfer",
+    "group": "wecom",
+    "command": "on-job-group-transfer",
+    "summary": "在职客户群继承",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.resigned-members",
+    "group": "wecom",
+    "command": "resigned-members",
+    "summary": "离职待分配成员",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.resigned-customer-transfer",
+    "group": "wecom",
+    "command": "resigned-customer-transfer",
+    "summary": "离职客户继承",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.resigned-group-transfer",
+    "group": "wecom",
+    "command": "resigned-group-transfer",
+    "summary": "离职客户群继承",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.group-id-conversion",
+    "group": "wecom",
+    "command": "group-id-conversion",
+    "summary": "客户群标识转换",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.contact-ways",
+    "group": "wecom",
+    "command": "contact-ways",
+    "summary": "联系我",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.join-ways",
+    "group": "wecom",
+    "command": "join-ways",
+    "summary": "加入群聊",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.acquisition-customers",
+    "group": "wecom",
+    "command": "acquisition-customers",
+    "summary": "获客链接客户",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.acquisition-quota",
+    "group": "wecom",
+    "command": "acquisition-quota",
+    "summary": "获客额度",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.acquisition-statistics",
+    "group": "wecom",
+    "command": "acquisition-statistics",
+    "summary": "推广有效率与多次收消息详情",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.customer-broadcast",
+    "group": "wecom",
+    "command": "customer-broadcast",
+    "summary": "客户群发完整旅程",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.group-broadcast",
+    "group": "wecom",
+    "command": "group-broadcast",
+    "summary": "客户群群发完整旅程",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.broadcast-remind-cancel",
+    "group": "wecom",
+    "command": "broadcast-remind-cancel",
+    "summary": "群发提醒与停止",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.broadcast-results",
+    "group": "wecom",
+    "command": "broadcast-results",
+    "summary": "群发成员任务与发送结果",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.customer-welcome",
+    "group": "wecom",
+    "command": "customer-welcome",
+    "summary": "新客户欢迎语",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.group-welcome",
+    "group": "wecom",
+    "command": "group-welcome",
+    "summary": "入群欢迎模板",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.moments",
+    "group": "wecom",
+    "command": "moments",
+    "summary": "朋友圈发表与停止",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.moment-records",
+    "group": "wecom",
+    "command": "moment-records",
+    "summary": "朋友圈记录与互动",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.moment-strategies",
+    "group": "wecom",
+    "command": "moment-strategies",
+    "summary": "朋友圈规则组",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.contact-statistics",
+    "group": "wecom",
+    "command": "contact-statistics",
+    "summary": "联系客户统计",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.group-statistics",
+    "group": "wecom",
+    "command": "group-statistics",
+    "summary": "群聊统计",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.product-albums",
+    "group": "wecom",
+    "command": "product-albums",
+    "summary": "商品图册",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.intercept-rules",
+    "group": "wecom",
+    "command": "intercept-rules",
+    "summary": "敏感词规则",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.subscription-messages",
+    "group": "wecom",
+    "command": "subscription-messages",
+    "summary": "客户订阅消息",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.wecom.client-actions",
+    "group": "wecom",
+    "command": "client-actions",
+    "summary": "员工客户端动作",
+    "owner": "wecom/outbound",
+    "execution": "provider_contract_unverified",
+    "implementation": "requires_contract_review",
+    "evidence": "research_only",
+    "prerequisites": [
+      "current Provider contract",
+      "owning business Port",
+      "authorization and result journey"
+    ],
+    "blocked_reason": "Candidate capability; verify existing owner implementation and current Provider requirements before registering execution"
+  },
+  {
+    "id": "candidate.period-products.manual-renewal",
+    "group": "period-products",
+    "command": "manual-renewal",
+    "summary": "人工续期和到期时间调整",
+    "owner": "period-products",
+    "execution": "business_contract_missing",
+    "implementation": "requires_new_contract",
+    "evidence": "research_only",
+    "prerequisites": [
+      "approved owning business contract"
+    ],
+    "blocked_reason": "No verified business write contract; ordinary field edits cannot implement this action"
+  },
+  {
+    "id": "candidate.distribution.payout",
+    "group": "distribution",
+    "command": "payout",
+    "summary": "真实佣金打款",
+    "owner": "distribution",
+    "execution": "business_contract_missing",
+    "implementation": "requires_new_contract",
+    "evidence": "research_only",
+    "prerequisites": [
+      "approved owning business contract"
+    ],
+    "blocked_reason": "No verified business write contract; ordinary field edits cannot implement this action"
+  }
+]

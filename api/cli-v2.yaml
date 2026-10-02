@@ -1,0 +1,119 @@
+openapi: 3.1.0
+info:
+  title: CRM CLI identity and discovery API
+  version: 2.0.0
+  description: Additive CLI contracts. Business V1 operations retain their owning contracts.
+paths:
+  /api/admin/access/cli/login-challenge:
+    get:
+      operationId: getCLILoginChallenge
+      summary: Existing Access login nonce for terminal login
+      security: []
+      responses:
+        '200': {description: No-store nonce and Secure HttpOnly login cookie; no session created, content: {application/json: {schema: {type: object, required: [login_csrf_token, login_path], properties: {login_csrf_token: {type: string}, login_path: {type: string, const: /login}}}}}}
+  /api/admin/access/cli/session:
+    get:
+      operationId: getCLISelfSession
+      summary: Current authenticated human session without credentials
+      security: [{adminSession: []}]
+      responses:
+        '200': {description: Current account and session version checked by Access, content: {application/json: {schema: {type: object, required: [kind, actor_id, roles, session_version, server_origin], properties: {kind: {type: string, const: human}, actor_id: {type: integer}, roles: {type: array, items: {type: string}}, session_version: {type: integer}, server_origin: {type: string}}}}}}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/admin/cli/capabilities:
+    get:
+      operationId: getCLIHumanCatalog
+      summary: Compiled inventory for authenticated human discovery
+      description: Metadata is not a grant. Machine bindings are unavailable to the human session. Owning routes still authorize every execution.
+      security: [{adminSession: []}]
+      responses:
+        '200': {description: No-store catalog and current human role context, content: {application/json: {schema: {$ref: '#/components/schemas/HumanCatalog'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/admin/cli/can-i:
+    post:
+      operationId: checkCLIHumanPermission
+      summary: Read-only human action check with normal CSRF transport
+      security: [{adminSession: [], csrfHeader: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [operation_id], properties: {operation_id: {type: string}, resource: {type: object}}}}}}
+      responses:
+        '200': {description: denied or requires_resource_check; owning route remains authoritative, content: {application/json: {schema: {$ref: '#/components/schemas/PermissionDecision'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /open/v2/cli/context:
+    get:
+      operationId: getCLIMachineContext
+      summary: Current independent machine grants and available V1 operations
+      security: [{machineBearer: []}]
+      responses:
+        '200': {description: Current machine grants and composed availability; no secrets, content: {application/json: {schema: {$ref: '#/components/schemas/MachineContext'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /open/v2/cli/can-i:
+    post:
+      operationId: checkCLIMachinePermission
+      summary: Machine permission check without executing or impersonating
+      security: [{machineBearer: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [operation_id], properties: {operation_id: {type: string}, resource: {type: object}}}}}}
+      responses:
+        '200': {description: Provider readiness and execution authorization remain separate, content: {application/json: {schema: {$ref: '#/components/schemas/PermissionDecision'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+components:
+  schemas:
+    PermissionDecision:
+      type: object
+      required: [operation_id, decision, reason, authorization_at_execution]
+      properties:
+        operation_id: {type: string}
+        decision: {type: string, enum: [allowed, denied, requires_resource_check]}
+        reason: {type: string}
+        authorization_at_execution: {type: boolean, const: true}
+        provider_conditions: {type: string}
+    HumanCatalog:
+      type: object
+      required: [kind, actor_id, roles, catalog, authorization_at_execution]
+      properties:
+        kind: {type: string, const: human}
+        actor_id: {type: integer}
+        roles: {type: array, items: {type: string}}
+        catalog: {type: object, description: Versioned compiled metadata; machine executable bindings are removed from this projection, additionalProperties: true}
+        authorization_at_execution: {type: boolean, const: true}
+    MachineContext:
+      type: object
+      required: [version, kind, server_origin, client_id, corp_id, owner_scope, scopes, capabilities, operations, authorization_at_execution]
+      properties:
+        version: {type: integer, const: 2}
+        kind: {type: string, const: machine}
+        server_origin: {type: string}
+        client_id: {type: string}
+        corp_id: {type: string}
+        owner_scope: {type: [object, 'null'], additionalProperties: {type: array, items: {type: string}}}
+        scopes: {type: [array, 'null'], items: {type: string}}
+        capabilities: {type: [array, 'null'], items: {type: string}}
+        operations: {type: [array, 'null'], items: {$ref: '#/components/schemas/OperationDescriptor'}}
+        authorization_at_execution: {type: boolean, const: true}
+    OperationDescriptor:
+      type: object
+      required: [operation_id, rest_method, rest_path, mcp_tool, capability, required_scope, schema_version]
+      properties:
+        operation_id: {type: string}
+        rest_method: {type: string}
+        rest_path: {type: string}
+        mcp_tool: {type: string}
+        capability: {type: string}
+        required_scope: {type: string}
+        schema_version: {type: string}
+        activity_types: {type: array, items: {type: string}}
+        activity_item_fields: {type: array, items: {type: string}}
+  securitySchemes:
+    adminSession: {type: apiKey, in: cookie, name: aicrm_admin_session}
+    csrfHeader: {type: apiKey, in: header, name: X-CSRF-Token}
+    machineBearer: {type: http, scheme: bearer, bearerFormat: opaque}
+  responses:
+    Error:
+      description: Structured error from the owning authentication or HTTP contract
+    Unavailable:
+      description: Required dependency unavailable; no business execution performed

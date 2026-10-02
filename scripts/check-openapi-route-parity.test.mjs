@@ -21,6 +21,21 @@ test('rejects OR security where admin session and CSRF must be one requirement',
   );
 });
 
+test('CLI contracts must cover new routes and keep machine and human CSRF distinct', async () => {
+  const specification = await SwaggerParser.validate(path.join(repository, 'api/openapi.yaml'));
+  const additive = await SwaggerParser.validate(path.join(repository, 'api/cli-v2.yaml'));
+  assert.doesNotThrow(() => assertOpenAPIRouteParity(specification, additive));
+  const missing = structuredClone(additive);
+  delete missing.paths['/open/v2/cli/can-i'];
+  assert.throws(() => assertOpenAPIRouteParity(specification, missing), /explicit ServeMux route POST \/open\/v2\/cli\/can-i.*missing from OpenAPI/);
+  const broad = structuredClone(additive);
+  broad.paths['/api/admin/cli/can-i'].post.security = [{ adminSession: [] }, { csrfHeader: [] }];
+  assert.throws(() => assertOpenAPIRouteParity(specification, broad), /POST \/api\/admin\/cli\/can-i security must be/);
+  const overlap = structuredClone(additive);
+  overlap.paths['/open/v1/capabilities'] = specification.paths['/open/v1/capabilities'];
+  assert.throws(() => assertOpenAPIRouteParity(specification, overlap), /overlaps an existing business contract/);
+});
+
 test('rejects a retired Excel import operation restored to OpenAPI', () => {
   assert.throws(
     () => assertRetiredRoutesAbsent({ paths: { '/api/admin/operation-batches/imports': { post: {} } } }),

@@ -81,6 +81,8 @@ func NewHandler(config Config) (*Handler, error) {
 
 func (handler *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /open/v2/cli/context", handler.cliContext)
+	mux.HandleFunc("POST /open/v2/cli/can-i", handler.cliCanI)
 	mux.HandleFunc("POST /oauth/token", handler.token)
 	mux.HandleFunc("POST /open/v1/audience/push-records", handler.coreSupervisedPush)
 	mux.HandleFunc("GET /open/v1/audience/core-products", handler.coreOperationsRead)
@@ -140,6 +142,7 @@ func Mount(next, machine http.Handler) http.Handler {
 	}
 	mux := http.NewServeMux()
 	for _, route := range []string{
+		"GET /open/v2/cli/context", "POST /open/v2/cli/can-i",
 		"POST /oauth/token", "GET /mcp", "POST /mcp",
 		"GET /open/v1/capabilities", "POST /open/v1/customers:resolve",
 		"GET /open/v1/customers",

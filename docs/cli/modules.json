@@ -1,0 +1,295 @@
+[
+  {
+    "group": "overview",
+    "name": "经营总览",
+    "sections": [
+      "指标",
+      "付费明细"
+    ],
+    "category": "总览"
+  },
+  {
+    "group": "customers",
+    "name": "用户激活 / 用户列表",
+    "sections": [
+      "列表",
+      "360详情",
+      "身份",
+      "敏感字段",
+      "同步"
+    ],
+    "category": "用户"
+  },
+  {
+    "group": "dashboard",
+    "name": "漏斗 / 数据看板",
+    "sections": [
+      "漏斗",
+      "分析",
+      "视图",
+      "分享",
+      "刷新"
+    ],
+    "category": "用户"
+  },
+  {
+    "group": "wecom",
+    "name": "企微标签管理",
+    "sections": [
+      "标签组",
+      "企业标签",
+      "客户标签",
+      "历史"
+    ],
+    "category": "用户"
+  },
+  {
+    "group": "audience",
+    "name": "自动化运营",
+    "sections": [
+      "分组",
+      "人群包",
+      "规则",
+      "成员",
+      "刷新",
+      "核心产品",
+      "发送关联"
+    ],
+    "category": "运营"
+  },
+  {
+    "group": "automation",
+    "name": "自动化话术",
+    "sections": [
+      "资产",
+      "提示词",
+      "固定内容",
+      "策略",
+      "运行"
+    ],
+    "category": "运营"
+  },
+  {
+    "group": "cycles",
+    "name": "运营闭环",
+    "sections": [
+      "策略",
+      "提案",
+      "动作",
+      "批次",
+      "报告"
+    ],
+    "category": "运营"
+  },
+  {
+    "group": "group-ops",
+    "name": "群运营计划",
+    "sections": [
+      "计划",
+      "员工",
+      "群",
+      "节点",
+      "内容包",
+      "执行"
+    ],
+    "category": "运营"
+  },
+  {
+    "group": "group-invitations",
+    "name": "群邀请",
+    "sections": [
+      "计划",
+      "版本",
+      "二维码",
+      "群目录",
+      "入群方式"
+    ],
+    "category": "运营"
+  },
+  {
+    "group": "channels",
+    "name": "渠道码中心",
+    "sections": [
+      "渠道",
+      "负责人",
+      "欢迎语",
+      "资产",
+      "归因",
+      "统计"
+    ],
+    "category": "运营"
+  },
+  {
+    "group": "ai",
+    "name": "AI 助手",
+    "sections": [
+      "计划",
+      "名单",
+      "审阅",
+      "效果"
+    ],
+    "category": "运营"
+  },
+  {
+    "group": "orders",
+    "name": "交易管理",
+    "sections": [
+      "订单",
+      "支付",
+      "导入",
+      "退款",
+      "结账恢复"
+    ],
+    "category": "交易"
+  },
+  {
+    "group": "products",
+    "name": "商品管理",
+    "sections": [
+      "商品",
+      "字段",
+      "购买动作",
+      "分销规则",
+      "推送"
+    ],
+    "category": "交易"
+  },
+  {
+    "group": "period-products",
+    "name": "周期商品管理",
+    "sections": [
+      "商品",
+      "会员",
+      "期限",
+      "表格",
+      "视图",
+      "协作",
+      "分享"
+    ],
+    "category": "交易"
+  },
+  {
+    "group": "coupons",
+    "name": "优惠券",
+    "sections": [
+      "配置",
+      "规则",
+      "领取",
+      "使用",
+      "统计"
+    ],
+    "category": "交易"
+  },
+  {
+    "group": "distribution",
+    "name": "分销管理",
+    "sections": [
+      "分销员",
+      "订单",
+      "佣金",
+      "结算",
+      "异常"
+    ],
+    "category": "分销"
+  },
+  {
+    "group": "referral",
+    "name": "裂变活动",
+    "sections": [
+      "活动",
+      "海报",
+      "团队",
+      "参与",
+      "邀请",
+      "奖励",
+      "纠错"
+    ],
+    "category": "分销"
+  },
+  {
+    "group": "questionnaires",
+    "name": "问卷",
+    "sections": [
+      "设计",
+      "发布",
+      "答卷",
+      "分析",
+      "导出",
+      "联动"
+    ],
+    "category": "内容素材"
+  },
+  {
+    "group": "radar",
+    "name": "内容雷达",
+    "sections": [
+      "链接",
+      "访问",
+      "访客",
+      "统计",
+      "导出"
+    ],
+    "category": "内容素材"
+  },
+  {
+    "group": "materials",
+    "name": "素材库",
+    "sections": [
+      "图片",
+      "小程序",
+      "附件",
+      "分片上传",
+      "邀请素材",
+      "媒体租约"
+    ],
+    "category": "内容素材"
+  },
+  {
+    "group": "owners",
+    "name": "负责人迁移",
+    "sections": [
+      "预览",
+      "确认",
+      "批次",
+      "CRM归属",
+      "企微接替"
+    ],
+    "category": "系统设置"
+  },
+  {
+    "group": "ops",
+    "name": "运行治理",
+    "sections": [
+      "外部效果",
+      "任务",
+      "推送",
+      "巡检",
+      "问题",
+      "数据保留"
+    ],
+    "category": "系统设置"
+  },
+  {
+    "group": "config",
+    "name": "配置",
+    "sections": [
+      "应用",
+      "模型",
+      "配置版本",
+      "账号权限"
+    ],
+    "category": "系统设置"
+  },
+  {
+    "group": "schema",
+    "name": "API 文档",
+    "sections": [
+      "能力发现",
+      "Schema",
+      "版本",
+      "示例",
+      "诊断"
+    ],
+    "category": "系统设置"
+  }
+]

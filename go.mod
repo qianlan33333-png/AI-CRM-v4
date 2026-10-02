@@ -3,17 +3,25 @@ module github.com/qianlan33333-png/AI-CRM-v3
 go 1.26.6
 
 require (
-	github.com/makiuchi-d/gozxing v0.1.1
 	github.com/jackc/pgx/v5 v5.9.2
+	github.com/makiuchi-d/gozxing v0.1.1
+	github.com/spf13/cobra v1.10.2
+	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/crypto v0.51.0
 	golang.org/x/net v0.55.0
+	golang.org/x/term v0.43.0
 )
 
 require (
+	al.essio.dev/pkg/shellescape v1.5.1 // indirect
+	github.com/danieljoos/wincred v1.2.2 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/smartwalle/alipay/v3 v3.2.31 // indirect
 	github.com/smartwalle/ncrypto v1.0.4 // indirect
 	github.com/smartwalle/ngx v1.1.2 // indirect
 	github.com/smartwalle/nsign v1.0.9 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
 )
 
 require (
