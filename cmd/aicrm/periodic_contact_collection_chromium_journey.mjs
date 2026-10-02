@@ -99,10 +99,24 @@ async function checkout(cdp,prefix,level) {
   await cdp.call('Emulation.setUserAgentOverride',{userAgent:'Mozilla/5.0'});
 }
 const profile=await fs.mkdtemp(path.join(os.tmpdir(),'aicrm-contact-chromium-'));
-let child,cdp;
+let child,childClosed,cdp,journeyError;
+async function stopChromium(child) {
+  if(!child)return;
+  async function waitForClose() {
+    let timer;
+    try{return await Promise.race([childClosed.then(()=>true),new Promise(resolve=>{timer=setTimeout(()=>resolve(false),3000);})]);}
+    finally{clearTimeout(timer);}
+  }
+  child.kill('SIGTERM');
+  if(!await waitForClose()) {
+    child.kill('SIGKILL');
+    assert.ok(await waitForClose(),'Chromium did not close after SIGKILL');
+  }
+}
 try {
   // Test-only self-signed loopback server, matching existing Host journeys.
   child=spawn(resolveChromiumBinary(),['--headless=new','--no-sandbox','--ignore-certificate-errors','--allow-insecure-localhost','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore'});
+  childClosed=new Promise(resolve=>child.once('close',resolve));
   let port;
   for(let i=0;i<160;i++){try{port=(await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8')).split('\n')[0];if(/^\d+$/.test(port))break;}catch{}await delay(50);}
   if(!/^\d+$/.test(port||''))throw new Error('Chromium did not start');
@@ -150,8 +164,17 @@ try {
   const evidence=await fs.mkdtemp(path.join(os.tmpdir(),'aicrm-contact-screenshots-'));
   for(const prefix of ['pf','spf'])await fs.copyFile(path.join(profile,prefix+'-contact.png'),path.join(evidence,prefix+'-contact.png'));
   console.log(`periodic_contact_collection_chromium: PASS screenshots=${evidence}`);
+} catch(error) {
+  journeyError=error;
+  throw error;
 } finally {
-  cdp?.socket.close();
-  if(child&&child.exitCode===null){child.kill('SIGTERM');await Promise.race([new Promise(resolve=>child.once('exit',resolve)),delay(3000)]);if(child.exitCode===null)child.kill('SIGKILL');}
-  await fs.rm(profile,{recursive:true,force:true});
+  try {
+    cdp?.socket.close();
+    await stopChromium(child);
+    // Chromium subprocesses can release profile cache files just after close.
+    await fs.rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});
+  } catch(cleanupError) {
+    if(journeyError)throw new AggregateError([journeyError,cleanupError],'contact journey and Chromium cleanup failed');
+    throw cleanupError;
+  }
 }
