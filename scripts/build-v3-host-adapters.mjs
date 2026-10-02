@@ -373,6 +373,9 @@ const completionDoneCarrier = `<div style="flex:1;min-height:100vh;min-height:10
 for (const page of ['auth', 'all', 'one', 'result', 'error', 'done']) {
   const documentPath = path.join(dist, 'h5', `${page}.html`);
   let html = fs.readFileSync(documentPath, 'utf8');
+  // Demo screen labels are not questionnaire titles. The authenticated
+  // Controller replaces this neutral initial title with the actual title.
+  if (page === 'all' || page === 'one') html = html.replace(/<title>[^<]*<\/title>/, '<title>问卷</title>');
   if (!html.includes(frozenH5Reference)) throw new Error(`${page}.html does not reference the declared frozen H5 entry`);
   if (html.includes(h5AuthReference) || html.includes(surveyPublicReference) || html.includes(surveyPublicStylesheet) || html.includes(sharedVisualTokensStylesheet)) throw new Error(`${page}.html already contains the H5 public Survey presentation`);
   if (page === 'done') {

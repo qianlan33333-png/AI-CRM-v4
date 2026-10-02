@@ -56,9 +56,11 @@ const harness=({draft,query='',status=401,context='a'.repeat(64),version=1,readS
 
 for(const display of ['all_in_one','one_by_one']){
   const original=harness({display});await original.controller.init();original.fill();
+  assert.equal(original.window.document.title, definition.title, 'browser title is the actual questionnaire title');
   await original.controller.submit();
   assert.equal(original.posts.length,1);
   assert.equal(original.navigations.length,1,'401 starts direct official OAuth navigation');
+  assert.equal(original.controller.renderVals().error, '', '401 goes directly to official authorization without a banner');
   const draft=original.window.sessionStorage.getItem(key);
   assert.ok(draft,'answers are saved before leaving the page');
   assert.deepEqual(JSON.parse(draft).textAnswers,[[2,'13800000000'],[3,'\n保留文字答案\n']]);
@@ -73,6 +75,8 @@ for(const display of ['all_in_one','one_by_one']){
   await denied.controller.init();
   assert.equal(denied.posts.length,0);
   assert.equal(denied.navigations.length,0,'denial never loops automatically');
+  assert.equal(denied.controller.renderVals().error, '', 'canceling official authorization restores the form without an authorization warning');
+  assert.equal(denied.window.document.title, definition.title);
   assert.equal(denied.controller.textAnswers.get(3),'\n保留文字答案\n');
   denied.controller.setText(denied.controller.definition.questions[2],{target:{value:'修改后的答案'}});
   await denied.controller.submit();
@@ -83,6 +87,18 @@ for(const display of ['all_in_one','one_by_one']){
   const expiredAgain=harness({draft,display,query:'&resume=submit'});await expiredAgain.controller.init();
   assert.equal(expiredAgain.posts.length,1);
   assert.equal(expiredAgain.navigations.length,0,'second 401 stops automatic reauthorization');
+  assert.equal(expiredAgain.controller.renderVals().error, '', 'second 401 leaves the original submit action without a warning banner');
+  const deniedWithSession=harness({draft,display,query:'&resume=submit&oauth_error=1',status:201});
+  await deniedWithSession.controller.init();
+  assert.equal(deniedWithSession.posts.length,0,'denied callback never auto-submits even if another session still exists');
+  assert.equal(deniedWithSession.controller.renderVals().error,'');
+  deniedWithSession.controller.setText(deniedWithSession.controller.definition.questions[2],{target:{value:''}});
+  await deniedWithSession.controller.submit();
+  assert.equal(deniedWithSession.navigations.length,0,'edited missing answer is validated before restarting authorization');
+  deniedWithSession.controller.setText(deniedWithSession.controller.definition.questions[2],{target:{value:'恢复的完整答案'}});
+  await deniedWithSession.controller.submit();
+  assert.equal(deniedWithSession.posts.length,1,'a valid existing session submits normally after cancellation without forcing another OAuth');
+  assert.equal(deniedWithSession.controller.submitted,true);
 
   for(const config of [{context:'b'.repeat(64)},{version:2}]){
     const changed=harness({draft,display,query:'&resume=submit',status:201,...config});await changed.controller.init();
@@ -103,6 +119,6 @@ for(const display of ['all_in_one','one_by_one']){
   assert.equal(hanging.navigations.length,0,'unknown result never triggers authorization or automatic replay');
   await hanging.controller.submit();
   assert.deepEqual(hanging.posts[0],hanging.posts[1],'manual timeout retry retains the same payload and key');
-  for(const item of [original,resumed,denied,expiredAgain,unavailable,invalid,hanging])item.dom.window.close();
+  for(const item of [original,resumed,denied,deniedWithSession,expiredAgain,unavailable,invalid,hanging])item.dom.window.close();
 }
 console.log('survey-submission-resume: PASS');

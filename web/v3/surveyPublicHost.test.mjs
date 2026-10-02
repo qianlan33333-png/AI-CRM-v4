@@ -137,8 +137,8 @@ for (const [raw, expected, detail] of [
   assert.equal(screen.querySelector("[data-v3-survey-error-detail]")?.textContent, detail, `${detail} remains a secondary diagnostic`);
   assert.ok(screen.querySelector("[data-h5-submit]"), `${detail} does not clear the Owner retry control or draft`);
   if (detail.includes('401')) {
-    assert.equal(screen.querySelector('[data-v3-survey-reauthorize]')?.getAttribute('href'), '/h5/auth.html?slug=survey', 'expired session has one explicit login action');
-    assert.equal(screen.querySelector('[data-h5-submit]')?.disabled, true, 'expired session cannot resubmit until login');
+    assert.equal(screen.querySelector('[data-v3-survey-reauthorize]'), null, 'authorization is owned by submit, without a separate login-page action');
+    assert.equal(screen.querySelector('[data-h5-submit]')?.disabled, false, 'presentation must not lock the original authorization retry action');
   }
 }
 

@@ -1,36 +1,46 @@
-# 企微原生群邀请 Product Design QA
+**Findings**
+
+- Prior P1: one-by-one input hint wrapper was incorrectly presented as a question border, nesting borders around the textarea. Fixed by giving the real question the same title/required/hint/input structure and padding as all-in-one; the hint wrapper has no border. Both modes retain one textarea border.
+- Prior P1: fixed demo navigation and generated screen labels appeared in mobile questionnaire pages. Removed before template mount; actual authenticated definition title now supplies document.title. Neutral initial HTML title is 问卷.
+- Prior P1: canceled authorization added a red authorization warning. Removed in the Controller; answers and original submit remain. Every user submit checks the current Owner session; successful official authorization auto-continues once with the original key.
+
+**Visual Truth and Evidence**
+
+- Source: /var/folders/dq/56xlfzsx05zc7vqhbl7lgv6c0000gn/T/codex-clipboard-2ff82c77-ef86-4513-b2e4-c73868aa4736.png (1170×2532, normalized to 390×844, source density3). Browser-owned navigation/status/home areas excluded (content crop y91–822).
+- Selected truth is existing all-in-one card/input styling; the user keeps all/one behavior and requests no new design. Pagination/progress/footer differences are intentional.
+- Implementation: /tmp/crm-survey-diagnosis-20261002/revision-mobile/one-choice-iab.png and one-text-iab.png; each390×744, CSSviewport390×744, density1 verified before capture. Local visual fixture serves actual built H5/Host/CSS with two reference-content questions, local-only simulated reads; it is not business acceptance.
+- Full comparison: /tmp/crm-survey-diagnosis-20261002/revision-mobile/comparison-full.png (780×744), source left / one selected choice right. Same source choice text and selected third option; source all-in-one shows the next card while one-by-one intentionally shows one card.
+- Focused comparison: /tmp/crm-survey-diagnosis-20261002/revision-mobile/comparison-input.png (724×230), source left / one textarea right. Same question and synthetic answer text; current right screenshot intentionally has input focus. Its existing blue focus ring and Chromium resize handle differ from the unfocused iOS source; no second wrapper border exists.
+- All-in-one local capture: all-iab.png; DOM/title/choice/text interaction inspected. In-app browser later changed viewport on navigation (433×826 observed), so this capture is supplemental and not used for exact scale assertions. Real Host browser journeys independently use390×844 mobile emulation.
+
+**Required Fidelity Surfaces**
+
+- Typography: existing H5 system font and18px title/16px control hierarchy retained; Chinese wrapping aligns in normalized question and text regions. OS antialiasing differs as expected.
+- Spacing/layout: shared16px question padding, existing12px card and option radius, hint-before-input hierarchy preserved; one page's progress and previous/next controls are intentional. No fake mobile nav and no viewport-hidden submit control.
+- Colors/tokens: existing Survey gray borders, white panels, blue selection/focus and primary action reused. Focus/unfocused states are distinguished.
+- Image quality/assets: no new visual assets; native browser chrome is excluded from app content. No generated phone frame or icons introduced.
+- Copy/content: real questionnaire title observed in tab, required indicator now retained in one mode. No authorization banner in canceled submit flow, no demo growth header. Next/previous instructions remain relevant only in one mode.
+
+**Interaction Evidence and Limits**
+
+In-app browser: choice selection, next-question, textarea editing, title readback, no console errors in the functioning preview. Initial stale tab sync failed; fresh tab worked. Temporary local fixture404 bug corrected without changing app source. The in-app viewport drift is recorded above.
+
+Actual Host+independent PG16 regression adds assertions for title/no-demo-navigation, outer card border, unbordered hint, cancellation without error or separate login action, and unchanged answer/key replay. Existing full presentation journey covers all/one valid submission,503 retry and double click. Final exact-head receipts are handed off separately. Real WeChat official UI remains Provider-controlled and not validated by synthetic browser.
+
+**Comparison History**
+
+1. User supplied before images show nested borders, fixed growth title/navigation and red auth warning (P1 findings above).
+2. Current screenshots opened alongside source in full and focused comparison canvases after fixes. No remaining actionable P0/P1/P2 issue in the requested card/nav/copy scope. The blue focus ring is the existing native interaction state, not extra wrapping.
+
+**Implementation Checklist**
+
+- Shared question card hierarchy and supported/unsupported title preservation implemented.
+- Demo navigation removed; real browser title bound to authenticated definition.
+- Cancel/error401 handled by original submit flow, no authorization reminder/extra login button.
+- Exact-head checks/build/real Host regression and release handoff recorded outside source.
+
+**Follow-up Polish**
+
+No new design polish added. Real iOS/WeChat title refresh and official consent UI require production business acceptance.
 
 final result: passed
-
-## 视觉依据和实现证据
-
-- Source visual truth：用户提供的表格截图 `/var/folders/dq/56xlfzsx05zc7vqhbl7lgv6c0000gn/T/codex-clipboard-837a7c21-4d39-4cdf-82d2-0e78e952debd.png`，2282×194；同一 V4 Host 原有表单布局截图 `/Users/qianlan/Downloads/新CRM/release-control/evidence/group-native-20261001/screenshots/invitation-editor.png`，1440×900。
-- Implementation：同目录 `invitation-native-editor.png`（1440×1600）、`invitation-native-plans.png`（1440×900），真实 Host 登录后 Chromium 渲染及 API 保存/数据库读回。
-- Full-view comparison：同目录 `design-full-comparison.png`，原有表单和新原生表单并排；表单内容区宽度相同，截图高度不同以展示新增参数，其额外高度是授权功能导致，不比较画布空白。
-- Focused comparison：同目录 `design-table-comparison.png`，源表格裁取内容区2128×174并归一化到1144×94，新列表内容区1144×277，组合在同一张图。原图设备密度未知，按内容宽度归一化；新截图CSS viewport与图片1:1、deviceScaleFactor=1。
-- State：亮色管理后台，邀请计划页、新建表单；旧顺序轮替与新原生分流均有两个合成群，源图是固定群未同步。模式、状态、行高因业务内容有意不同，不主张像素一致。
-- 辅助交互预览：通过 cua_repl 的 IAB 打开本机只读模拟API预览 `http://127.0.0.1:8796/admin/group-invitations`，检查默认原生模式、自动开关及900宽度，错误日志为空。该预览不作为持久化证据；持久化由真实Host旅程证明。
-
-## Findings
-
-没有剩余的新增 P0/P1/P2 问题。保留现有管理后台桌面布局与群目录分页；移动端后台未做重设计。900宽度沿用原管理壳的最小宽度及滚动，新增字段未覆盖其他控件。公共H5布局没有修改。
-
-- 字体：继续使用既有管理壳字体、14px正文、15px分区标题、现有字段/表格字重；原生字段与旧字段标签左边缘、输入框左边缘对齐。群ID用既有等宽字体；中文未截断。
-- 间距：复用110px标签列/420px输入列、12px间距与原有分区分隔线。新增四个参数自然增加表单长度，保存按钮可通过现有页面滚动访问。原生双群行比源图单群行高是信息量变化。
-- 颜色：白色内容区、浅灰表头、蓝色操作链接/选中导航/checkbox维持原有token；未确认群码下载保持禁用浅蓝，未误显示成功。
-- 图片与图标：无新增图片资产；真实Host截图保留管理壳原图标，未用CSS/SVG/emoji重造已有资产；本地只读mock预览不作为资产完整性证据。
-- 文案：明确“企微分配 · 初始关联群”“企微原生 · 自动建群”及容量以企微结果为准；群码准备中不冒充已建群，实际200人及群目录过期不等于原生入口不可用。
-
-## Comparison history
-
-在正式组合比较前，实际浏览器复核发现新建表单残留上一笔保存提示，已在进入编辑时清空；原生列表初始群增加明确标签。修改后重跑完整Host旅程，重新捕获并组合上述 full-view 与 focused 图片。最终组合比较未发现需要继续修改的视觉差异。
-
-## Implementation checklist
-
-- 已通过：原生默认、自动开/关字段禁用、中文前缀/序号/备注/state输入、选群、保存、列表显示、重新打开回读、旧顺序模式和未确认下载禁用。
-- 已通过：真实Host浏览器runtime exception为0；IAB本地预览error log为0；PostgreSQL持久配置读回及200人/过期初始群公共JSON入口仍active。
-- 未验证：真实企微扫码、满群自动建出新群、第六个及以后实际群生命周期。这些需要真实Provider行为，不由合成验收替代。
-
-## Follow-up polish
-
-无本次必须处理的P3项。

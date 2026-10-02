@@ -68,7 +68,6 @@ export class H5Controller extends PageBase {
 	private slug = '';
   private done = false;
   private doneAction: CompletionAction = { type: 'default' };
-  private authorizationNeeded = false;
 
   constructor(readonly page: string) { super(); }
 
@@ -135,6 +134,7 @@ export class H5Controller extends PageBase {
           const definition = await readPublicSurvey(slug) as V3SurveyDefinition;
           this.validateDefinition(definition, slug);
           this.definition = definition;
+          document.title = definition.title;
           const draft = this.readResumeDraft();
           if (draft) {
             if (!definition.authorizationContext || definition.authorizationContext !== draft.definition.authorizationContext) {
@@ -145,9 +145,7 @@ export class H5Controller extends PageBase {
               this.error = '问卷内容已更新，旧答案尚未提交。请核对当前题目后重新填写并提交。';
             } else {
               this.restoreResumeDraft(draft);
-              this.authorizationNeeded = query.has('oauth_error');
-              resumeSubmit = returningFromAuthorization && !this.authorizationNeeded;
-              if (this.authorizationNeeded) this.error = '微信授权未完成，答案已保留。授权后才能提交。';
+              resumeSubmit = returningFromAuthorization && !query.has('oauth_error');
             }
           }
         }
@@ -162,9 +160,9 @@ export class H5Controller extends PageBase {
 		if (draft) {
           this.validateDefinition(draft.definition, this.slug);
           this.definition = draft.definition;
+          document.title = draft.definition.title;
           this.restoreResumeDraft(draft);
-          this.authorizationNeeded = true;
-          this.error = '微信授权未完成，答案已保留。授权后才能提交。';
+          this.error = '';
           return;
         }
 		location.replace(`/q/${encodeURIComponent(this.slug)}`);
@@ -245,7 +243,6 @@ export class H5Controller extends PageBase {
 
   private resumeAuthorization(): void {
     if (!this.definition) return;
-    this.authorizationNeeded = true;
     if (!/MicroMessenger/i.test(navigator.userAgent || '')) {
       this.error = '请在微信中打开原问卷，完成授权后提交。当前答案仍在本页。';
       this.refresh(true);
@@ -353,7 +350,6 @@ export class H5Controller extends PageBase {
 
   private async submit(afterAuthorization = false): Promise<void> {
     if (!this.definition || this.submitting || this.submitted) return;
-    if (this.authorizationNeeded) { this.resumeAuthorization(); return; }
     this.error = this.definition.questions.map((question) => this.questionError(question)).find(Boolean) || '';
     if (this.error) { this.refresh(true); return; }
     const answers: V3SurveySubmissionAnswer[] = this.definition.questions
@@ -375,8 +371,7 @@ export class H5Controller extends PageBase {
     } catch (error) {
       if (isAlreadySubmitted(error)) this.complete(completionActionFromCarrier(error.details));
       else if (error instanceof ApiError && error.status === 401) {
-        this.authorizationNeeded = true;
-        this.error = '提交前需要重新完成微信授权，答案已保留。';
+        this.error = '';
         if (!afterAuthorization) this.resumeAuthorization();
       }
       else this.error = request.signal.aborted

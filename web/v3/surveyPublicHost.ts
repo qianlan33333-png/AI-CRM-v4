@@ -109,6 +109,49 @@ if (supportedPages.has(page) && page !== 'auth') {
 
   const markTemplate = (): void => {
     const content = template.content;
+    if (page === "all" || page === "one") {
+      // Browser/WeChat owns mobile navigation. Remove the frozen demo bar
+      // before rendering; the Controller sets the real document title.
+      const demoNavigation = content.firstElementChild;
+      if (!demoNavigation?.querySelector("svg") ||
+          !demoNavigation.textContent?.includes("增长诊断测评")) {
+        throw new Error("问卷导航模板已变化，请核对移动页面");
+      }
+      demoNavigation.remove();
+    }
+    if (page === "one") {
+      const question = templateDescendants<HTMLElement>(content, "[data-question-id]")[0];
+      const ready = templateDescendants<HTMLTemplateElement>(content, "template")
+        .find((item) => item.dataset.scIf === "{{ ready }}");
+      const panel = ready?.content.firstElementChild as HTMLElement | null;
+      const title = panel && Array.from(panel.children)
+        .find((item) => item.textContent?.trim() === "{{ qTitle }}");
+      if (!question || !panel || !title) throw new Error("逐题模板已变化，请核对答题卡");
+      panel.dataset.v3SurveyStepPanel = "";
+      // Reuse the all-in-one card's title/hint/input hierarchy. Only the
+      // question card and its input have borders, never the hint wrapper.
+      title.remove();
+      question.style.cssText = "background:#fff;border-radius:14px;padding:16px 16px 18px;margin-top:20px";
+      const heading = document.createElement("div");
+      heading.style.cssText = "font-size:15px;font-weight:600;line-height:22px;margin-bottom:4px";
+      heading.append(document.createTextNode("{{ question.title }} "));
+      const required = document.createElement("span");
+      required.style.color = "#F54A45";
+      required.textContent = "{{ question.required }}";
+      heading.append(required);
+      const hint = question.firstElementChild as HTMLElement;
+      hint.style.cssText = "font-size:13px;color:#A6AAB0;margin-bottom:12px";
+      const inputs = hint.nextElementSibling as HTMLElement;
+      inputs.style.marginTop = "0";
+      for (const input of templateDescendants<HTMLTextAreaElement>(question, "textarea")) {
+        input.style.minHeight = "96px";
+      }
+      question.prepend(heading);
+      for (const unsupported of templateDescendants<HTMLElement>(content, "[data-h5-unsupported]")) {
+        unsupported.style.cssText = question.style.cssText + ";opacity:.6";
+        unsupported.prepend(heading.cloneNode(true));
+      }
+    }
     for (const card of templateDescendants<HTMLElement>(
       content,
       "[data-question-id]",
@@ -247,17 +290,6 @@ if (supportedPages.has(page) && page !== 'auth') {
     detail.textContent = `问题详情：HTTP ${unauthorized ? "401" : forbidden ? "403" : status}`;
     error.prepend(recovery);
     error.append(detail);
-    if (unauthorized && (page === 'all' || page === 'one')) {
-      const slug = new URLSearchParams(location.search).get('slug') || '';
-      if (validPublicSlug(slug)) {
-        const action = document.createElement('a');
-        action.dataset.v3SurveyReauthorize = '';
-        action.className = 'auth-button';
-        action.href = `/h5/auth.html?slug=${encodeURIComponent(slug)}`;
-        action.textContent = '授权并继续';
-        error.append(action);
-      }
-    }
   };
 
   const decorate = (): void => {
@@ -294,12 +326,6 @@ if (supportedPages.has(page) && page !== 'auth') {
       error.setAttribute("aria-live", "assertive");
       error.dataset.v3SurveyError = "";
       improveTransportError(error);
-    }
-    if (screen.querySelector('[data-v3-survey-reauthorize]')) {
-      for (const button of Array.from(screen.querySelectorAll<HTMLButtonElement>('[data-h5-submit]'))) {
-        button.disabled = true;
-        button.setAttribute('aria-disabled', 'true');
-      }
     }
     for (const receipt of Array.from(
       screen.querySelectorAll<HTMLElement>(

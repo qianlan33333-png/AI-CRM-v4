@@ -88,7 +88,9 @@ func TestPostgreSQLPublicSurveyReauthorizationChromiumJourney(t *testing.T) {
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			if len(payloads) != 2 || !bytes.Equal(payloads[0], payloads[1]) || starts != 2 {
+			// Every explicit click checks the real Owner session, including after
+			// denial. A valid session may have been restored in another tab.
+			if len(payloads) != 3 || !bytes.Equal(payloads[0], payloads[1]) || !bytes.Equal(payloads[0], payloads[2]) || starts != 2 {
 				t.Fatalf("reauthorization payloads=%d starts=%d; the original payload/key must replay", len(payloads), starts)
 			}
 			var writes, answers int

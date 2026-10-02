@@ -31,6 +31,8 @@ try{
  await cdp.call('Network.setCookie',{name:'__Host-aicrm_survey_identity',value:session,url:base,path:'/',secure:true,httpOnly:true,sameSite:'Lax'});
  await cdp.call('Page.navigate',{url:base+'/q/'+slug});
  await wait(cdp,one?"document.querySelectorAll('#screen [data-question-id]').length===1":"document.querySelectorAll('#screen [data-question-id]').length===8",'questionnaire did not render');
+ const presentation=await evaluate(cdp,`(()=>{const card=document.querySelector('#screen [data-question-id]');const hint=card?.children[1];return {title:document.title,demoNavigation:document.querySelector('#screen svg')!==null,questionTitle:card?.firstElementChild?.textContent,cardBorder:getComputedStyle(card).borderTopWidth,hintBorder:getComputedStyle(hint).borderTopWidth};})()`);
+ if(presentation.title!=='公开问卷体验'||presentation.demoNavigation||!presentation.questionTitle?.includes('必答')||presentation.cardBorder!=='1px'||presentation.hintBorder!=='0px')throw new Error('mobile questionnaire title or shared card hierarchy failed: '+JSON.stringify(presentation));
  if(one){
   for(let index=0;index<7;index++){
    const previous=await evaluate(cdp,"document.querySelector('#screen [data-question-id]').dataset.questionId");
@@ -48,6 +50,7 @@ try{
  await wait(cdp,`location.pathname===${JSON.stringify(answerPath)} && location.search.includes('oauth_error=1') && document.querySelector('#screen textarea')?.value===${JSON.stringify(text)} && document.querySelector('[data-h5-submit]')?.disabled===false`,'denial did not preserve the editable original form');
  const restored=await evaluate(cdp,`(()=>{const draft=JSON.parse(sessionStorage.getItem('survey.submit-resume:'+${JSON.stringify(slug)}));return {phone:(!${one}&&document.querySelector('#screen input')?.value)||draft.textAnswers.find(([,value])=>value==='13800000000')?.[1],choices:draft.answers.filter(([,ids])=>ids.length>0).length,newDialogs:document.querySelectorAll('[role="dialog"]').length};})()`);
  if(restored.phone!=='13800000000'||restored.choices!==6||restored.newDialogs!==0)throw new Error('denial answer or unchanged UI contract failed');
+ if(await evaluate(cdp,"Boolean(document.querySelector('#screen [data-h5-error], #screen [data-v3-survey-reauthorize]'))"))throw new Error('authorization denial must not add a warning banner or separate login action');
  await evaluate(cdp,"document.querySelector('[data-h5-submit]').scrollIntoView();true");await capture('survey-reauth-denied-390.png');
  await evaluate(cdp,"document.querySelector('[data-h5-submit]').click();true");
  await wait(cdp,"location.pathname==='/h5/done.html' && document.querySelector('[data-h5-done] h1')?.textContent==='收到你的问卷'",'reauthorization did not continue the original submission');
