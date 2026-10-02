@@ -268,7 +268,7 @@ func TestSubmissionAlreadySubmittedReturnsSafeCompletionActionAfterRollbackBound
 		t.Fatal(err)
 	}
 	service := NewSubmissionService(uow, store, cipher)
-	service.phoneAttacher, service.phoneProjection = completionPhoneAttacher{}, completionProjection{}
+	service.collectedPhones = completionPhoneAttacher{}
 	resolver := &publicCompletionResolverStub{uow: uow, url: "https://go.example.test/complete", found: true}
 	if err = service.BindPublicCompletionTarget(resolver); err != nil {
 		t.Fatal(err)
@@ -289,7 +289,7 @@ func TestSubmissionAcceptsAndBindsConfiguredCompletionOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := NewSubmissionService(oauthUOW{}, store, cipher)
-	service.phoneAttacher, service.phoneProjection = completionPhoneAttacher{}, completionProjection{}
+	service.collectedPhones = completionPhoneAttacher{}
 	accepter := &completionAccepter{}
 	if err = service.BindCompletionIntent(accepter); err != nil {
 		t.Fatal(err)
@@ -315,7 +315,7 @@ func TestSubmissionRetainsReceiptAndClaimBeforeMutablePublicValidation(t *testin
 		t.Fatal(err)
 	}
 	service := NewSubmissionService(oauthUOW{}, store, cipher)
-	service.phoneAttacher, service.phoneProjection = completionPhoneAttacher{}, completionProjection{}
+	service.collectedPhones = completionPhoneAttacher{}
 	resolver := &publicCompletionResolverStub{url: "https://go.example.test/complete", found: true}
 	if err = service.BindPublicCompletionTarget(resolver); err != nil {
 		t.Fatal(err)
@@ -445,4 +445,8 @@ func TestQueueCompletionTestFreezesSyntheticRequestAndReplaysSameEffect(t *testi
 	if _, err = service.QueueCompletionTest(context.Background(), q.ID, 8, "survey-completion-test-command-0002"); !errors.Is(err, surveyport.ErrNotFound) || accepter.calls != 3 {
 		t.Fatalf("archived questionnaire accepted a new test err=%v calls=%d", err, accepter.calls)
 	}
+}
+
+func (completionPhoneAttacher) CollectPhoneWithin(context.Context, customerport.CollectedPhoneCommand) (identityport.DeclaredAttachResult, error) {
+	return identityport.DeclaredAttachResult{}, nil
 }

@@ -11,7 +11,6 @@ import (
 
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
-	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	surveyapp "github.com/qianlan33333-png/AI-CRM-v3/internal/survey/app"
 	surveyport "github.com/qianlan33333-png/AI-CRM-v3/internal/survey/port"
@@ -63,8 +62,7 @@ func (s *submissionClaimEffectAccepter) AcceptCompletionWithin(context.Context, 
 
 // The fixture has only a textarea; these required bindings must never be used.
 type submissionClaimPhoneBinding struct {
-	identityport.DeclaredPhoneAttacher
-	customerport.ProjectionWriter
+	customerport.CollectedPhoneRecorder
 }
 
 func TestPostgreSQLSubmissionClaimConcurrentReceiptReplay(t *testing.T) {
@@ -126,7 +124,7 @@ func TestPostgreSQLSubmissionClaimConcurrentReceiptReplay(t *testing.T) {
 			newService := func(store surveyapp.SubmissionStore) *surveyapp.SubmissionService {
 				service := surveyapp.NewSubmissionService(uow, store, cipher)
 				binding := submissionClaimPhoneBinding{}
-				if err := service.BindDeclaredPhone(binding, binding); err != nil {
+				if err := service.BindCollectedPhone(binding); err != nil {
 					t.Fatal(err)
 				}
 				service.BindSubmissionObserver(observer)

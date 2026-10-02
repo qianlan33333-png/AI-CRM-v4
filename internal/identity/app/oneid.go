@@ -209,7 +209,7 @@ type Store interface {
 }
 
 func (service OneIDService) AttachDeclaredPhoneToCustomer(ctx context.Context, command identityport.DeclaredPhoneCommand) (identityport.DeclaredAttachResult, error) {
-	if service.Store == nil || command.CustomerID < 1 || command.Source != "survey" && command.Source != "phone_import" && command.Source != "sidebar" && command.Source != "hxc" || command.SourceEventID == "" || len(command.SourceEventID) > 200 || command.IdempotencyKey == "" || len(command.IdempotencyKey) > 200 {
+	if service.Store == nil || command.CustomerID < 1 || command.Source != "survey" && command.Source != "phone_import" && command.Source != "sidebar" && command.Source != "hxc" && command.Source != "order" || command.SourceEventID == "" || len(command.SourceEventID) > 200 || command.IdempotencyKey == "" || len(command.IdempotencyKey) > 200 {
 		return identityport.DeclaredAttachResult{Status: identityport.DeclaredInvalid}, nil
 	}
 	normalized, err := identitydomain.Normalize(identitydomain.Reference{Kind: identitydomain.KindPhone, Scope: "phone:cn11", Value: command.Phone, Assurance: identitydomain.AssuranceDeclared, Source: command.Source})

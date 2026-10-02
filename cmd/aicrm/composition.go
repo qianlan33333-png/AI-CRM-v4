@@ -314,6 +314,10 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	customerStore := customerstore.NewPostgreSQL()
 	oneID := identityapp.OneIDService{Store: identityRepository, ProvisionedCustomer: customerProvisionedDirectoryAdapter{writer: customerStore}}
+	collectedPhones, err := customerapp.NewCollectedPhoneService(oneID, customerStore)
+	if err != nil {
+		return fail(err)
+	}
 	queries := identityquery.NewPostgreSQL(phoneVault)
 	hxcIdentity := identityapp.HXCSourceService{Inspector: queries, Store: identityRepository, OneID: oneID, VerifiedIdentity: identityadapter.HXCVerifiedUnionIDFactory{Enabled: cfg.HXCDashboard.UnionIDVerified}}
 	paymentRepository := paymentstore.NewPostgreSQL()
@@ -1046,7 +1050,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = surveySubmissions.BindCustomerTimeline(customerStore); err != nil {
 		return fail(err)
 	}
-	if err = surveySubmissions.BindDeclaredPhone(oneID, customerStore); err != nil {
+	if err = surveySubmissions.BindCollectedPhone(collectedPhones); err != nil {
 		return fail(err)
 	}
 	outboundCompletionSink.WithSurveyCompletion(surveyCompletionSink)
@@ -1328,6 +1332,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	segmentBindings.Handler.BindAudienceProductReferences(audienceProductReferenceAdapter{products: productCatalog, historical: orderRepository, uow: uow})
 	legacyAudienceSource.Orders = orderRepository
 	orderService := orderapp.NewService(uow, orderRepository)
+	if err = orderService.SetCollectedPhoneRecorder(collectedPhones); err != nil {
+		return fail(err)
+	}
 	commercePushService.SetFieldMappingReaders(orderService, customerStore)
 	if err = orderService.SetCheckoutCouponCoordinator(couponCheckout); err != nil {
 		return fail(err)

@@ -19,6 +19,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	channelport "github.com/qianlan33333-png/AI-CRM-v3/internal/channel/port"
+	customerapp "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/app"
 	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
 	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
 	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
@@ -178,7 +179,11 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T) *publicSurveyPrese
 	submissions := surveyapp.NewSubmissionService(uow, repository, cipher)
 	oneID := identityapp.OneIDService{Store: identitystore.NewPostgresStore()}
 	projection := customerstore.NewPostgreSQL()
-	if err = submissions.BindDeclaredPhone(oneID, projection); err != nil {
+	collectedPhones, err := customerapp.NewCollectedPhoneService(oneID, projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = submissions.BindCollectedPhone(collectedPhones); err != nil {
 		t.Fatal(err)
 	}
 	if err = submissions.BindCustomerTimeline(projection); err != nil {

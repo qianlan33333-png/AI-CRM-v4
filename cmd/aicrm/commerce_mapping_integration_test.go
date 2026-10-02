@@ -79,6 +79,9 @@ func TestPostgreSQLCommerceLegacyPaidIgnoresHistoricalMappingAndExpiry(t *testin
 		t.Fatal(err)
 	}
 	orderService := orderapp.NewService(uow, orders)
+	if err = orderService.SetCollectedPhoneRecorder(collectedPhoneTestRecorder(t)); err != nil {
+		t.Fatal(err)
+	}
 	contact, err := ordersecure.NewContactCipher(base64.RawStdEncoding.EncodeToString(make([]byte, 32)))
 	if err != nil {
 		t.Fatal(err)

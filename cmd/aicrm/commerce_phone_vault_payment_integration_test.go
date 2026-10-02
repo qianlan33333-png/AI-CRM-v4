@@ -127,6 +127,9 @@ func TestPostgreSQLCommercePhoneVaultPaymentSettlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	orderService := orderapp.NewService(uow, orders)
+	if err = orderService.SetCollectedPhoneRecorder(collectedPhoneTestRecorder(t)); err != nil {
+		t.Fatal(err)
+	}
 	contactCipher, err := ordersecure.NewContactCipher(base64.RawStdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
 	if err != nil {
 		t.Fatal(err)

@@ -18,6 +18,9 @@ import (
 
 	addresscatalog "github.com/qianlan33333-png/AI-CRM-v3/internal/address/port"
 	couponport "github.com/qianlan33333-png/AI-CRM-v3/internal/coupon/port"
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
+	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
@@ -120,6 +123,7 @@ type Service struct {
 		Encrypt(string) ([]byte, error)
 		KeyVersion() int16
 	}
+	collectedPhones            customerport.CollectedPhoneRecorder
 	coupons                    couponport.OrderCouponCoordinator
 	entitlements               orderport.ServicePeriodEntitlementCoordinator
 	paidEvents                 orderport.PaidEventConsumer
@@ -353,6 +357,9 @@ func (s *Service) CreatePaymentOrderWithin(ctx context.Context, command orderpor
 		return domain.Snapshot{}, classify(err)
 	}
 	if len(phoneCiphertext) > 0 {
+		if s.collectedPhones == nil {
+			return domain.Snapshot{}, orderport.ErrUnavailable
+		}
 		contactStore, ok := s.store.(interface {
 			InsertContactSnapshot(context.Context, int64, []byte, int16, time.Time) error
 		})
@@ -366,6 +373,14 @@ func (s *Service) CreatePaymentOrderWithin(ctx context.Context, command orderpor
 		})
 		if !ok || shippingStore.InsertShippingAddressSnapshot(ctx, persisted.Snapshot().ID, command.ShippingAddress, input.CreatedAt) != nil {
 			return domain.Snapshot{}, orderport.ErrUnavailable
+		}
+	}
+	if command.MobileE164 != "" {
+		if _, err = s.collectedPhones.CollectPhoneWithin(ctx, customerport.CollectedPhoneCommand{
+			DeclaredPhoneCommand: identityport.DeclaredPhoneCommand{CustomerID: customerdomain.CustomerID(command.PayerCustomerID), Phone: command.MobileE164, Source: "order", SourceEventID: fmt.Sprintf("order:%d:contact", checkout.OrderID), IdempotencyKey: fmt.Sprintf("order-phone:%d", checkout.OrderID)},
+			CollectedAt:          input.CreatedAt,
+		}); err != nil {
+			return domain.Snapshot{}, classify(err)
 		}
 	}
 	result := persisted.Snapshot()

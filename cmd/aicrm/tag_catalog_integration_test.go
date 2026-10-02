@@ -439,7 +439,7 @@ func TestPostgreSQLSurveySyntheticPushSurvivesRepositoryRestartAndDoesNotBlindRe
 	if err = service.BindCompletionIdentity(provider); err != nil {
 		t.Fatal(err)
 	}
-	if err = service.BindDeclaredPhone(surveyCompletionNoopPhone{}, surveyCompletionNoopProjection{}); err != nil {
+	if err = service.BindCollectedPhone(surveyCompletionNoopPhone{}); err != nil {
 		t.Fatal(err)
 	}
 	config, err := service.GetOperationConfiguration(ctx, surveyport.ID(questionnaire))
@@ -717,4 +717,8 @@ func applySurveyCompletionMigrations(t *testing.T, ctx context.Context, pool *pg
 			t.Fatalf("apply %s: %v", name, err)
 		}
 	}
+}
+
+func (surveyCompletionNoopPhone) CollectPhoneWithin(context.Context, customerport.CollectedPhoneCommand) (identityport.DeclaredAttachResult, error) {
+	return identityport.DeclaredAttachResult{}, nil
 }

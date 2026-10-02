@@ -10,6 +10,8 @@ import (
 	"time"
 
 	couponport "github.com/qianlan33333-png/AI-CRM-v3/internal/coupon/port"
+	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 )
@@ -319,6 +321,10 @@ func TestCreatePaymentOrderWithinAlipayReplaysWithoutDuplicateOrder(t *testing.T
 func TestCreatePaymentOrderWithinEncryptsRequiredContactSnapshot(t *testing.T) {
 	store := newMemoryStore()
 	service := NewService(directUOW{}, store)
+	collected := &orderCollectedPhoneStub{}
+	if err := service.SetCollectedPhoneRecorder(collected); err != nil {
+		t.Fatal(err)
+	}
 	if err := service.SetContactCipher(contactCipherStub{}); err != nil {
 		t.Fatal(err)
 	}
@@ -330,6 +336,12 @@ func TestCreatePaymentOrderWithinEncryptsRequiredContactSnapshot(t *testing.T) {
 	order, err := service.CreatePaymentOrderWithin(context.Background(), command)
 	if err != nil || len(store.contacts[order.ID]) < 28 || strings.Contains(string(order.Items[0].ProductName), command.MobileE164) {
 		t.Fatalf("order=%+v contact=%x err=%v", order, store.contacts[order.ID], err)
+	}
+	if collected.calls != 1 || collected.command.CustomerID != 11 || collected.command.Source != "order" || collected.command.Phone != command.MobileE164 {
+		t.Fatal("order did not collect contact for payer")
+	}
+	if _, err = service.CreatePaymentOrderWithin(context.Background(), command); err != nil || collected.calls != 1 {
+		t.Fatal("receipt replay collected contact twice", err)
 	}
 	command.MobileE164 = "+8612812345678"
 	if _, err = service.CreatePaymentOrderWithin(context.Background(), command); !errors.Is(err, orderport.ErrConflict) {
@@ -660,4 +672,15 @@ func TestCustomerActivitiesUseCustomerScopedWatermarkedKeysetAndRelationship(t *
 	if err != nil || len(missing.Items) != 0 {
 		t.Fatalf("future-only relationship must not leak before watermark page=%+v err=%v", missing, err)
 	}
+}
+
+type orderCollectedPhoneStub struct {
+	calls   int
+	command customerport.CollectedPhoneCommand
+}
+
+func (s *orderCollectedPhoneStub) CollectPhoneWithin(_ context.Context, c customerport.CollectedPhoneCommand) (identityport.DeclaredAttachResult, error) {
+	s.calls++
+	s.command = c
+	return identityport.DeclaredAttachResult{Status: identityport.DeclaredAttached, CustomerID: c.CustomerID, IdentityID: 77}, nil
 }

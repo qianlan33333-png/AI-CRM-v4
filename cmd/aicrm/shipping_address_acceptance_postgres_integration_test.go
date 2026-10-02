@@ -55,6 +55,9 @@ func TestPostgreSQLShippingAddressSnapshotAndTransactionDetailAcceptance(t *test
 		t.Fatal(err)
 	}
 	service := orderapp.NewService(uow, repository)
+	if err = service.SetCollectedPhoneRecorder(collectedPhoneTestRecorder(t)); err != nil {
+		t.Fatal(err)
+	}
 	cipher, err := ordersecure.NewContactCipher(base64.RawStdEncoding.EncodeToString(make([]byte, 32)))
 	if err != nil || service.SetContactCipher(cipher) != nil {
 		t.Fatalf("contact cipher unavailable: %v", err)
