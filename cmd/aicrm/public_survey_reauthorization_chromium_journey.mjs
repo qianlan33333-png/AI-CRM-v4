@@ -46,7 +46,21 @@ try{
  await evaluate(cdp,"document.querySelector('[data-h5-submit]').scrollIntoView();true");
  const capture=async(name)=>{await evaluate(cdp,'document.fonts.ready');const image=await cdp.call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,(one?'one-':'all-')+name),Buffer.from(image.data,'base64'),{mode:0o600});};
  await capture('survey-reauth-filled-390.png');
- await evaluate(cdp,"document.querySelector('[data-h5-submit]').click();true");
+ // A normal refresh must restore both mobile/Unicode text and pagination,
+ // without posting or requiring an OAuth callback marker.
+ await cdp.call('Page.reload');
+ await wait(cdp,`document.querySelector('#screen textarea')?.value===${JSON.stringify(text)} && document.querySelector('[data-h5-submit]')?.disabled===false`,'ordinary reload lost answers or progress');
+ await evaluate(cdp,"document.querySelector('[data-h5-submit]').scrollIntoView();document.querySelector('[data-h5-submit]').click();true");
+ if(process.env.AICRM_PUBLIC_SURVEY_BROWSER_RECOVERY==='lost-response'){
+  await wait(cdp,"document.querySelector('#screen [data-h5-error]')?.textContent.includes('502') && document.querySelector('[data-h5-submit]')?.disabled===false",'unconfirmed committed response locked submission');
+  if(await evaluate(cdp,`document.querySelector('#screen textarea')?.value!==${JSON.stringify(text)}`))throw new Error('lost response discarded input');
+  await capture('survey-lost-response-390.png');
+  await evaluate(cdp,"document.querySelector('[data-h5-submit]').click();document.querySelector('[data-h5-submit]')?.click();true");
+  await wait(cdp,"location.pathname==='/h5/done.html' && document.querySelector('[data-h5-done] h1')?.textContent==='收到你的问卷'",'same-key retry failed to recover committed response');
+  if(await evaluate(cdp,`Boolean(sessionStorage.getItem('survey.submit-resume:'+${JSON.stringify(slug)}))`))throw new Error('recovered completion did not clear draft');
+  console.log('lost_response_chromium: PASS');socket.close();
+ }else{
+
  await wait(cdp,`location.pathname===${JSON.stringify(answerPath)} && location.search.includes('oauth_error=1') && document.querySelector('#screen textarea')?.value===${JSON.stringify(text)} && document.querySelector('[data-h5-submit]')?.disabled===false`,'denial did not preserve the editable original form');
  const restored=await evaluate(cdp,`(()=>{const draft=JSON.parse(sessionStorage.getItem('survey.submit-resume:'+${JSON.stringify(slug)}));return {phone:(!${one}&&document.querySelector('#screen input')?.value)||draft.textAnswers.find(([,value])=>value==='13800000000')?.[1],choices:draft.answers.filter(([,ids])=>ids.length>0).length,newDialogs:document.querySelectorAll('[role="dialog"]').length};})()`);
  if(restored.phone!=='13800000000'||restored.choices!==6||restored.newDialogs!==0)throw new Error('denial answer or unchanged UI contract failed');
@@ -57,6 +71,7 @@ try{
  if(await evaluate(cdp,`Boolean(sessionStorage.getItem('survey.submit-resume:'+${JSON.stringify(slug)}))`))throw new Error('completed answers were not cleared');
  await capture('survey-reauth-completed-390.png');
  console.log('reauthorization_chromium: PASS');socket.close();
+ }
 }catch(error){
  if(error.skip)console.log('reauthorization_chromium: SKIP_DEVTOOLS');else throw error;
 }finally{

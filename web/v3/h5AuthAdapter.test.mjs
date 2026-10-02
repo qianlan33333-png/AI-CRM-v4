@@ -10,21 +10,23 @@ const page = fs.readFileSync(path.join(root, 'web/dist/h5/auth.html'), 'utf8');
 const host = await buildTestBrowserBundle(path.join(root, 'web/v3/h5AuthAdapter.ts'));
 assert.equal(/<script type="module" src="\.\.\/assets\/h5-/.test(page), false, 'auth page must not mount the frozen auto-OAuth controller');
 
-async function render({ search = '?slug=growth', status = 401, ua = 'MicroMessenger' } = {}) {
+async function render({ search = '?slug=growth', status = 401, ua = 'MicroMessenger', hanging = false } = {}) {
   const calls = [];
   const dom = new JSDOM(page, {
     url: `https://test.invalid/h5/auth.html${search}`,
     runScripts: 'outside-only',
     beforeParse(window) {
       Object.defineProperty(window.navigator, 'userAgent', { configurable: true, value: ua });
-      window.fetch = async (url) => {
+      if(hanging){const schedule=window.setTimeout.bind(window);window.setTimeout=(fn,ms)=>{assert.equal(ms,15000);return schedule(fn,1)}}
+      window.fetch = async (url, options={}) => {
         calls.push(url);
+        if(hanging)return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new window.DOMException('Aborted','AbortError')),{once:true}));
         return { ok: status === 200, status };
       };
     },
   });
   dom.window.eval(host);
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 10));
   return { dom, calls, screen: dom.window.document.getElementById('screen') };
 }
 
@@ -59,4 +61,12 @@ assert.equal(outside.calls.length, 0);
 assert.match(outside.screen.textContent, /请在微信中打开/);
 assert.equal(outside.screen.querySelector('.auth-button')?.hidden, true);
 outside.dom.window.close();
+for(const config of [{status:503},{hanging:true}]){
+  const recoverable=await render(config);
+  assert.equal(recoverable.calls.length,1,'transient read failure never launches OAuth or automatically retries');
+  const retry=recoverable.screen.querySelector('.auth-button');
+  assert.equal(retry.hidden,false);assert.equal(retry.textContent,'重试');
+  assert.equal(retry.href,'https://test.invalid/h5/auth.html?slug=growth','retry reads the existing page without widening authority');
+  recoverable.dom.window.close();
+}
 console.log('required Survey login gate: PASS');

@@ -1,3 +1,5 @@
+import { surveyRead } from './surveyPublicApi';
+
 // Product Design selected the required-login gate. Survey's Owner still
 // validates the slug/session, owns OAuth state and controls submission.
 if (document.body.dataset.page === 'auth') {
@@ -30,19 +32,20 @@ if (document.body.dataset.page === 'auth') {
       message.textContent = '请复制当前链接到微信中打开，登录后才能填写问卷。';
     }
   };
-  const showBlocked = (reason: string) => {
+  const showBlocked = (reason: string, retry = false) => {
     title.textContent = '暂时无法继续填写';
     message.textContent = reason;
     feedback.hidden = true;
-    action.hidden = true;
+    action.hidden = !retry;
+    if (retry) { action.textContent = '重试'; action.href = location.href; }
   };
   if (!validSlug) showBlocked('问卷链接无效，请从原问卷入口重新打开。');
   else if (query.has('oauth_error')) showRequired('微信授权未完成，请点击按钮重新授权。');
   else if (!inWechat) showRequired();
   else {
-    void fetch(`/api/h5/surveys/session?slug=${encodeURIComponent(slug)}`, {
-      credentials: 'same-origin', headers: { Accept: 'application/json' },
-    }).then((response) => {
+    void surveyRead((signal) => fetch(`/api/h5/surveys/session?slug=${encodeURIComponent(slug)}`, {
+      signal, credentials: 'same-origin', headers: { Accept: 'application/json' },
+    })).then((response) => {
       if (response.ok) {
         location.replace(`/q/${encodeURIComponent(slug)}`);
       } else if (response.status === 401) {
@@ -50,10 +53,10 @@ if (document.body.dataset.page === 'auth') {
       } else if (response.status === 409) {
         showBlocked('当前微信身份存在冲突，请联系管理员处理后再填写。');
       } else if (response.status === 503) {
-        showBlocked('微信授权暂不可用，请稍后重新打开此页面。');
+        showBlocked('微信登录暂不可用，请稍后重试。', true);
       } else {
-        showBlocked('微信登录状态暂不可用，请稍后重新打开此页面。');
+        showBlocked('微信登录状态暂不可用，请稍后重试。', true);
       }
-    }).catch(() => showBlocked('网络连接失败，请检查网络后重新打开此页面。'));
+    }).catch(() => showBlocked('网络连接失败或读取超时，请检查网络后重试。', true));
   }
 }

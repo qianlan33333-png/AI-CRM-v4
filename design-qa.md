@@ -41,6 +41,6 @@ Actual Host+independent PG16 regression adds assertions for title/no-demo-naviga
 
 **Follow-up Polish**
 
-No new design polish added. Real iOS/WeChat title refresh and official consent UI require production business acceptance.
+No new design polish added. Stability follow-up reuses the same error/retry control for stalled reads or a changed definition and the auth gate's existing action for read retry. Ordinary draft restoration does not add a banner or automatic submission. Actual mobile Host journeys additionally reload a filled questionnaire and recover a gateway failure after a real Owner commit. Real iOS/WeChat title refresh and official consent UI require production business acceptance.
 
 final result: passed

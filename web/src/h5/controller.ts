@@ -5,6 +5,7 @@ import {
   readPublicSurvey,
   readSurveyResult,
   submitSurvey,
+  surveyRead,
   type CompletionAction,
 } from '../../v3/surveyPublicApi';
 import { toast } from '../shared/ui/feedback';
@@ -45,6 +46,8 @@ const SUPPORTED_TYPES = ['single_choice', 'multi_choice', 'textarea', 'mobile'];
 
 type SubmissionResumeDraft = {
   schema: 1;
+  savedAt?: number;
+  pendingSubmit?: boolean;
   definition: V3SurveyDefinition;
   answers: [number, number[]][];
   textAnswers: [number, string][];
@@ -67,6 +70,7 @@ export class H5Controller extends PageBase {
   private submitted = false;
 	private slug = '';
   private done = false;
+  private definitionStale = false;
   private doneAction: CompletionAction = { type: 'default' };
 
   constructor(readonly page: string) { super(); }
@@ -78,7 +82,7 @@ export class H5Controller extends PageBase {
 		else if (new URLSearchParams(location.search).has('oauth_error')) this.error = '微信授权未完成，请重试';
 		else if (/MicroMessenger/i.test(navigator.userAgent || '')) {
 			try {
-				const session = await fetch(`/api/h5/surveys/session?slug=${encodeURIComponent(this.slug)}`, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+				const session = await surveyRead((signal) => fetch(`/api/h5/surveys/session?slug=${encodeURIComponent(this.slug)}`, { signal, credentials: 'same-origin', headers: { Accept: 'application/json' } }));
 				if (session.ok) {
 					try { sessionStorage.removeItem('survey.oauth:' + this.slug); } catch {}
 					const body = await session.json() as { display?: string; submitted?: unknown; completion_action?: unknown };
@@ -97,7 +101,9 @@ export class H5Controller extends PageBase {
 		return;
 	}
 	if (!['all', 'one', 'result', 'done'].includes(this.page)) return;
+    if (this.loading || this.submitting) return;
     this.loading = true;
+    this.definitionStale = false;
     this.error = '';
     this.unsupportedTypes = new Set();
     this.refresh();
@@ -120,9 +126,11 @@ export class H5Controller extends PageBase {
 		if (!/^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?$/.test(slug)) throw new Error('缺少有效公开问卷 slug，不能填写或提交');
 		this.slug = slug;
         if (this.page === 'done') {
-          const session = await fetch(`/api/h5/surveys/session?slug=${encodeURIComponent(slug)}`, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-          if (!session.ok) throw new Error('问卷完成状态暂不可读取');
-          const body = await session.json() as { submitted?: unknown; completion_action?: unknown };
+          const body = await surveyRead(async (signal) => {
+            const session = await fetch(`/api/h5/surveys/session?slug=${encodeURIComponent(slug)}`, { signal, credentials: 'same-origin', headers: { Accept: 'application/json' } });
+            if (!session.ok) throw new Error('问卷完成状态暂不可读取');
+            return await session.json() as { submitted?: unknown; completion_action?: unknown };
+          });
           if (body.submitted !== true) throw new Error('当前问卷尚未提交');
           this.doneAction = completionAction(body.completion_action);
           if (this.doneAction.type === 'redirect') {
@@ -133,9 +141,13 @@ export class H5Controller extends PageBase {
         } else {
           const definition = await readPublicSurvey(slug) as V3SurveyDefinition;
           this.validateDefinition(definition, slug);
+          const draft = this.readResumeDraft() || this.snapshotDraft();
           this.definition = definition;
+          this.answers.clear();
+          this.textAnswers.clear();
+          this.submissionKey = '';
+          this.questionIndex = 0;
           document.title = definition.title;
-          const draft = this.readResumeDraft();
           if (draft) {
             if (!definition.authorizationContext || definition.authorizationContext !== draft.definition.authorizationContext) {
               this.clearResumeDraft();
@@ -145,8 +157,16 @@ export class H5Controller extends PageBase {
               this.error = '问卷内容已更新，旧答案尚未提交。请核对当前题目后重新填写并提交。';
             } else {
               this.restoreResumeDraft(draft);
-              resumeSubmit = returningFromAuthorization && !query.has('oauth_error');
+              resumeSubmit = returningFromAuthorization && !query.has('oauth_error') && draft.pendingSubmit !== false;
             }
+          }
+          const expectedPage = definition.answer_display_mode === 'one_by_one' ? 'one' : 'all';
+          if (this.page !== expectedPage) {
+            this.saveDraft(resumeSubmit);
+            const destination = new URL(location.href);
+            destination.pathname = `/h5/${expectedPage}.html`;
+            location.replace(destination.href);
+            return;
           }
         }
       }
@@ -223,15 +243,51 @@ export class H5Controller extends PageBase {
       const draft = JSON.parse(raw) as SubmissionResumeDraft;
       if (draft.schema !== 1 || draft.definition?.slug !== this.slug ||
           !/^[a-f0-9]{64}$/.test(draft.definition.authorizationContext || '') ||
-          !validToken(draft.submissionKey) || !Number.isSafeInteger(draft.questionIndex) || draft.questionIndex < 0 ||
+          !(draft.submissionKey === '' || validToken(draft.submissionKey)) ||
+          (draft.pendingSubmit !== undefined && typeof draft.pendingSubmit !== 'boolean') ||
+          (draft.savedAt !== undefined && (!Number.isFinite(draft.savedAt) || draft.savedAt > Date.now() || Date.now() - draft.savedAt > 24 * 60 * 60 * 1000)) || !Number.isSafeInteger(draft.questionIndex) || draft.questionIndex < 0 ||
           !Array.isArray(draft.answers) || !draft.answers.every((item) => Array.isArray(item) && item.length === 2 && validID(item[0]) && Array.isArray(item[1]) && item[1].every(validID)) ||
           !Array.isArray(draft.textAnswers) || !draft.textAnswers.every((item) => Array.isArray(item) && item.length === 2 && validID(item[0]) && typeof item[1] === 'string')) {
         this.clearResumeDraft();
         return null;
       }
-      this.validateDefinition(draft.definition, this.slug);
+      const unsupported = this.unsupportedTypes;
+      try { this.validateDefinition(draft.definition, this.slug); }
+      finally { this.unsupportedTypes = unsupported; }
+      const questions = new Map(draft.definition.questions.map((question) => [question.id, question]));
+      const choiceIDs = new Set<number>();
+      const textIDs = new Set<number>();
+      for (const [id, options] of draft.answers) {
+        const question = questions.get(id);
+        if (!question || !['single_choice', 'multi_choice'].includes(question.type) || choiceIDs.has(id) ||
+            new Set(options).size !== options.length || options.some((optionID) => !question.options.some((option) => option.id === optionID))) {
+          this.clearResumeDraft(); return null;
+        }
+        choiceIDs.add(id);
+      }
+      for (const [id] of draft.textAnswers) {
+        const question = questions.get(id);
+        if (!question || !['textarea', 'mobile'].includes(question.type) || textIDs.has(id)) {
+          this.clearResumeDraft(); return null;
+        }
+        textIDs.add(id);
+      }
       return draft;
     } catch { this.clearResumeDraft(); return null; }
+  }
+
+  private snapshotDraft(pendingSubmit = false): SubmissionResumeDraft | null {
+    if (!this.definition || !/^[a-f0-9]{64}$/.test(this.definition.authorizationContext || '')) return null;
+    return { schema: 1, savedAt: Date.now(), pendingSubmit, definition: this.definition,
+      answers: [...this.answers], textAnswers: [...this.textAnswers],
+      submissionKey: this.submissionKey, questionIndex: this.questionIndex };
+  }
+
+  private saveDraft(pendingSubmit = false): boolean {
+    const draft = this.snapshotDraft(pendingSubmit);
+    if (!draft) return false;
+    try { sessionStorage.setItem(this.resumeDraftKey(), JSON.stringify(draft)); return true; }
+    catch { return false; } // Ordinary filling/submission still works without storage.
   }
 
   private restoreResumeDraft(draft: SubmissionResumeDraft): void {
@@ -253,11 +309,8 @@ export class H5Controller extends PageBase {
       this.refresh(true);
       return;
     }
-    const draft: SubmissionResumeDraft = { schema: 1, definition: this.definition,
-      answers: [...this.answers], textAnswers: [...this.textAnswers],
-      submissionKey: this.submissionKey ||= this.newSubmissionKey(), questionIndex: this.questionIndex };
-    try { sessionStorage.setItem(this.resumeDraftKey(), JSON.stringify(draft)); }
-    catch {
+    this.submissionKey ||= this.newSubmissionKey();
+    if (!this.saveDraft(true)) {
       this.error = '浏览器未能保存答案，尚未跳转。请保留当前页面并允许浏览器存储后重试。';
       this.refresh(true);
       return;
@@ -319,6 +372,7 @@ export class H5Controller extends PageBase {
     next.sort((a, b) => a - b);
     if (next.join(',') !== previous.join(',')) this.submissionKey = '';
     this.answers.set(question.id, next);
+    this.saveDraft();
     this.error = '';
     this.refresh();
   }
@@ -328,6 +382,7 @@ export class H5Controller extends PageBase {
     const value = String((event.target as HTMLInputElement | HTMLTextAreaElement).value || '');
     if (value !== (this.textAnswers.get(question.id) || '')) this.submissionKey = '';
     this.textAnswers.set(question.id, value);
+    this.saveDraft();
     this.error = '';
   }
 
@@ -366,6 +421,7 @@ export class H5Controller extends PageBase {
       // One key per unchanged answer set in this filling lifecycle. Unknown
       // network outcomes retry the same request; editing answers clears the key.
       this.submissionKey ||= this.newSubmissionKey();
+      this.saveDraft();
       const receipt = await submitSurvey(this.definition.slug, { version: this.definition.version, submission_key: this.submissionKey, answers }, request.signal);
       this.complete(receipt.completionAction);
     } catch (error) {
@@ -373,6 +429,11 @@ export class H5Controller extends PageBase {
       else if (error instanceof ApiError && error.status === 401) {
         this.error = '';
         if (!afterAuthorization) this.resumeAuthorization();
+      }
+      else if (error instanceof ApiError && error.status === 409 &&
+               (error.details as { error?: unknown } | null)?.error === 'definition_version_conflict') {
+        this.definitionStale = true;
+        this.error = '问卷内容已更新，当前答案尚未提交。请点击重试读取最新题目后重新填写。';
       }
       else this.error = request.signal.aborted
         ? '提交结果暂未确认，答案已保留；未修改答案时可安全重试。'
@@ -396,6 +457,7 @@ export class H5Controller extends PageBase {
       if (this.error) { this.refresh(true); return; }
     }
     this.questionIndex = Math.max(0, Math.min(this.definition.questions.length - 1, this.questionIndex + delta));
+    this.saveDraft();
     this.error = '';
     this.refresh();
   }
@@ -445,7 +507,7 @@ export class H5Controller extends PageBase {
       canNext: ready && stepMode && this.questionIndex < questions.length - 1 && !this.submitting,
       canSubmit: ready && (!stepMode || this.questionIndex === questions.length - 1) && !this.submitting,
       submitting: this.submitting,
-      canRetry: !this.loading && !!this.error && !definition,
+      canRetry: !this.loading && !this.submitting && !!this.error && (!definition || this.definitionStale),
 	  blockedReason: this.page === 'auth'
 		? (this.error || (/MicroMessenger/i.test(navigator.userAgent || '') ? '授权仅用于识别本次问卷所属客户，不会发送短信。' : '请复制当前链接并在微信内打开。'))
         : '后端能力未就绪：当前页面没有可用的报名、支付、续费、二维码或完成状态契约；未执行任何外部操作。',

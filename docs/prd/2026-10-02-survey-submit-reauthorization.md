@@ -99,3 +99,27 @@ flowchart TD
 ```
 
 OneID：不涉及，问卷公开slug不是客户身份；数据库questionnaire ID继续由既有Owner生成，不替换客户主键。Persistence：本地PG事务，原问卷只读并锁定，随机标识只在拥有新幂等reservation时生成；重放取已存结果。External Effects：不涉及Provider或外部写入。不涉及新增限制，沿用slug字符/唯一约束；不改历史slug、不迁移数据库、不新增后台控件。五项影响：HTTP结构和路径规则不变，新副本public_path更短；复制机制和关联资料沿旧流程，只有slug分配变化；消费者为Survey app/store、已有后台复制HTTP和公开读取/OAuth；无UI布局新增变化，原答题/资料界面消费新链接；验证覆盖长源slug、递归复制长度不增长、同秒不同复制标识唯一、同键重放不再建副本、原/新链接均能按Owner读取。
+
+## 最终交包前稳定性扩展
+
+用户授权增加对抗性测试并按成熟方案系统补齐打开、填写、提交的恢复路径。参考[SurveyJS草稿恢复](https://surveyjs.io/form-library/examples/save-and-restore-user-responses-to-complete-survey/documentation)的按答案/分页变化保存和完成清理、[Typeform断网说明](https://help.typeform.com/hc/en-us/articles/360039114711-Can-I-use-forms-without-an-internet-connection)的保留答案直到连接恢复，以及[SurveyMonkey响应状态](https://help.surveymonkey.com/en/surveymonkey/analyze/response-statuses/)的字段验证后才推进与完成。采用适合当前Owner的恢复模式，不引入第三方问卷框架或自动网络重试。
+
+```mermaid
+flowchart TD
+ A[读取问卷或登录状态] --> B{15秒内获得可信响应}
+ B -->|否| C[结束等待 原错误区域和重试入口]
+ B -->|是| D[按身份 问卷 版本校验临时草稿]
+ D --> E[作答和翻页时保存当前标签页草稿]
+ E --> F[用户点击提交 校验必填 手机号 长度]
+ F --> G{返回可信提交收据}
+ G -->|是| H[清理草稿 跳转完成]
+ G -->|网络未知或错误| I[保留答案 原键 原按钮手动重试]
+ G -->|授权失效| J[既有官方授权恢复]
+ G -->|定义变化| K[明确内容变化 用原重试入口读取最新问卷]
+```
+
+复用Survey presentation seam的生成API、现有错误/重试/提交控件和身份作用域sessionStorage。OneID仍只消费可信授权上下文，不新增匹配/合并。Persistence为同一标签页24小时临时草稿，普通编辑/分页/发起提交即保存，按slug、可信身份上下文和不可变定义版本隔离，完成删除；存储受限不阻止普通提交，授权跳转前必须先确保答案保存。External Effects不新增写入或重试内核。
+
+新增限制必要性：读取15秒预算复用Host预算，解决一直转圈；24小时草稿保留窗用于避免长期残留个人答案，不限制问卷答题时长；2xx必须满足既有OpenAPI提交收据结构且slug/version匹配，解决代理空响应被误判成功。定义变更不猜测题目映射，保留当前表单直到用户点击现有重试入口重新读取；all/one路由按Owner返回的实际布局纠正，避免后台切模式后的旧入口无法正常作答。
+
+五项影响：无HTTP/数据库新字段或迁移，前端更严格消费已有收据；业务新增编辑草稿与有限读取等待，不自动网络重提；消费者为public API/H5 controller/auth adapter及现有Host旅程；无新页面、弹窗、导航或设计，沿用Product Design已核验控件；验证增加读超时/恢复、刷新草稿与幂等键、双击、存储异常/损坏/过期、身份和版本变化、旧布局入口、异常2xx、Unicode与手机输入、真实PG唯一提交与收据。真实微信、iOS/Android及共享Linux预发分别列未验证，不用桌面模拟冒充Provider验收。

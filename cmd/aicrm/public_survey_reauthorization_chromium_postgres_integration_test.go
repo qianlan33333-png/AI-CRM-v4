@@ -122,3 +122,72 @@ func TestPostgreSQLPublicSurveyReauthorizationChromiumJourney(t *testing.T) {
 	}
 
 }
+
+// An Owner commit followed by a gateway failure is outcome-unknown to the
+// browser. Retry must recover the original receipt without a second write.
+func TestPostgreSQLPublicSurveyLostResponseChromiumJourney(t *testing.T) {
+	if !platformconfig.ChromiumJourneyRequired() {
+		t.Skip("set AICRM_REQUIRE_CHROMIUM_JOURNEY=1 to run the required Chromium journey")
+	}
+	for _, display := range []surveyport.AnswerDisplayMode{surveyport.DisplayAllInOne, surveyport.DisplayOneByOne} {
+		t.Run(string(display), func(t *testing.T) {
+			fixture := newPublicSurveyPresentationChromiumFixture(t, publicSurveyBrowserOptions{reauthorization: true, display: display})
+			original := fixture.server.Config.Handler
+			var mu sync.Mutex
+			var payloads [][]byte
+			fixture.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/api/public/questionnaires/"+fixture.success.Slug+"/submissions" {
+					original.ServeHTTP(w, r)
+					return
+				}
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				mu.Lock()
+				payloads = append(payloads, body)
+				first := len(payloads) == 1
+				mu.Unlock()
+				if first {
+					recorder := httptest.NewRecorder()
+					original.ServeHTTP(recorder, r)
+					if recorder.Code != http.StatusCreated {
+						t.Errorf("expected original committed response, got %d", recorder.Code)
+					}
+					// Discard the already committed receipt, as a failing gateway can.
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadGateway)
+					_, _ = w.Write([]byte(`{"error":"controlled_gateway_failure"}`))
+					return
+				}
+				original.ServeHTTP(w, r)
+			})
+			command := exec.CommandContext(fixture.ctx, "node", filepath.Join(filepath.Dir(fixture.script), "public_survey_reauthorization_chromium_journey.mjs"))
+			command.Env = append(os.Environ(), "AICRM_PUBLIC_SURVEY_BROWSER_URL="+fixture.browserURL, "AICRM_PUBLIC_SURVEY_BROWSER_SESSION="+fixture.session, "AICRM_PUBLIC_SURVEY_BROWSER_SUCCESS_SLUG="+fixture.success.Slug, "AICRM_PUBLIC_SURVEY_SCREENSHOT_DIR="+fixture.screenshots, "AICRM_PUBLIC_SURVEY_BROWSER_DISPLAY="+string(display), "AICRM_PUBLIC_SURVEY_BROWSER_RECOVERY=lost-response")
+			output, err := command.CombinedOutput()
+			if strings.Contains(string(output), "reauthorization_chromium: SKIP_DEVTOOLS") && runtime.GOOS == "darwin" {
+				t.Skip("local Chromium DevTools unavailable; Linux journey required")
+			}
+			if err != nil || !strings.Contains(string(output), "lost_response_chromium: PASS") {
+				t.Fatalf("lost response journey err=%v output=%s", err, output)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if len(payloads) != 2 || !bytes.Equal(payloads[0], payloads[1]) {
+				t.Fatalf("requests=%d; unknown outcome must retry the original payload/key", len(payloads))
+			}
+			var writes, answers, claims int
+			if err = fixture.native.QueryRow(fixture.ctx, `SELECT count(*) FROM survey_submissions WHERE questionnaire_id=$1`, fixture.success.ID).Scan(&writes); err != nil || writes != 1 {
+				t.Fatalf("writes=%d err=%v", writes, err)
+			}
+			if err = fixture.native.QueryRow(fixture.ctx, `SELECT count(*) FROM survey_submission_answers WHERE submission_id IN (SELECT id FROM survey_submissions WHERE questionnaire_id=$1)`, fixture.success.ID).Scan(&answers); err != nil || answers != 8 {
+				t.Fatalf("answers=%d err=%v", answers, err)
+			}
+			if err = fixture.native.QueryRow(fixture.ctx, `SELECT count(*) FROM survey_submission_claims WHERE questionnaire_id=$1`, fixture.success.ID).Scan(&claims); err != nil || claims != 1 {
+				t.Fatalf("claims=%d err=%v", claims, err)
+			}
+		})
+	}
+}

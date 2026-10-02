@@ -10,15 +10,15 @@ const definition={id:1,slug,version:1,title:'恢复测试',description:'',mode:'
   {id:2,type:'mobile',title:'手机号',required:true,options:[]},
   {id:3,type:'textarea',title:'说明',required:true,options:[]}
 ]};
-const harness=({draft,query='',status=401,context='a'.repeat(64),version=1,readStatus=200,display='all_in_one',pending=false}={})=>{
+const harness=({draft,query='',status=401,context='a'.repeat(64),version=1,readStatus=200,display='all_in_one',pending=false,readPending=false,postBody,storageBroken=false,pageDisplay=display}={})=>{
   const virtualConsole=new VirtualConsole();
   const navigations=[];
   virtualConsole.on('jsdomError',e=>{if(e.message.includes('navigation'))navigations.push(e);else throw e});
-  const dom=new JSDOM('<body><div id="screen"><div data-h5-error></div></div></body>',{url:`https://test.invalid/h5/${display==='one_by_one'?'one':'all'}.html?slug=${slug}${query}`,runScripts:'outside-only',virtualConsole});
+  const dom=new JSDOM('<body><div id="screen"><div data-h5-error></div></div></body>',{url:`https://test.invalid/h5/${pageDisplay==='one_by_one'?'one':'all'}.html?slug=${slug}${query}`,runScripts:'outside-only',virtualConsole});
   const {window}=dom;
   let revealed=0;
   window.HTMLElement.prototype.scrollIntoView=()=>{revealed++;};
-  if(pending){
+  if(pending || readPending){
     const schedule=window.setTimeout.bind(window);
     window.setTimeout=(fn,ms)=>{assert.equal(ms,15_000);return schedule(fn,1);};
   }
@@ -29,13 +29,15 @@ const harness=({draft,query='',status=401,context='a'.repeat(64),version=1,readS
     if(options.method==='POST'){
       posts.push(JSON.parse(options.body));
       if(pending)return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new window.DOMException('Aborted','AbortError')),{once:true}));
-      return Response.json(status===201?{completion_action:{type:'default'}}:{error:status===401?'survey_oauth_required':'survey_unavailable'},{status});
+      return Response.json(postBody || (status===201?{receipt:{questionnaire_id:1,questionnaire_slug:slug,definition_version:version,submission_id:1},result_token:'r'.repeat(43),completion_action:{type:'default'}}:{error:status===401?'survey_oauth_required':'survey_unavailable'}),{status});
     }
+    if(readPending)return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new window.DOMException('Aborted','AbortError')),{once:true}));
     return Response.json(readStatus===200?{...definition,version,answer_display_mode:display}:{error:'survey_oauth_required'},{status:readStatus,headers:{'X-Aicrm-Survey-Authorization-Context':context}});
   };
   if(draft)window.sessionStorage.setItem(key,draft);
+  if(storageBroken)window.Storage.prototype.setItem=()=>{throw new window.DOMException('Quota','QuotaExceededError')};
   window.eval(bundle+';globalThis.ResumeTest=ResumeTest;');
-  const controller=new window.ResumeTest.H5Controller(display==='one_by_one'?'one':'all');
+  const controller=new window.ResumeTest.H5Controller(pageDisplay==='one_by_one'?'one':'all');
   const fill=()=>{
     const vals=controller.renderVals();
     // Advance one-by-one only through the real Controller's navigation.
@@ -119,6 +121,78 @@ for(const display of ['all_in_one','one_by_one']){
   assert.equal(hanging.navigations.length,0,'unknown result never triggers authorization or automatic replay');
   await hanging.controller.submit();
   assert.deepEqual(hanging.posts[0],hanging.posts[1],'manual timeout retry retains the same payload and key');
+
+  const reading=harness({display,readPending:true});await reading.controller.init();
+  assert.equal(reading.controller.renderVals().loading,false);
+  assert.equal(reading.controller.renderVals().canRetry,true,'hanging definition read exposes existing retry');
+  assert.match(reading.controller.renderVals().error,/读取超时/);
+
+  const editing=harness({display,status:503});await editing.controller.init();editing.fill();
+  const editDraft=editing.window.sessionStorage.getItem(key);
+  assert.ok(editDraft,'ordinary filling saves before an OAuth request');
+  const refresh=harness({display,draft:editDraft,status:201});await refresh.controller.init();
+  assert.equal(refresh.posts.length,0,'refresh restores progress without auto-submitting');
+  assert.equal(refresh.controller.textAnswers.get(3),'\n保留文字答案\n');
+  if(display==='one_by_one')assert.equal(refresh.controller.questionIndex,2);
+  await editing.controller.submit();
+  const reload=harness({display,draft:editing.window.sessionStorage.getItem(key),status:503});await reload.controller.init();await reload.controller.submit();
+  assert.deepEqual(reload.posts[0],editing.posts[0],'reload after failure retains exact payload/key');
+
+  const doubleClick=harness({display,pending:true});await doubleClick.controller.init();doubleClick.fill();
+  await Promise.all([doubleClick.controller.submit(),doubleClick.controller.submit(),doubleClick.controller.submit()]);
+  assert.equal(doubleClick.posts.length,1,'rapid clicks produce one in-flight request');
+
+  for(const brokenReceipt of [{}, {receipt:{submission_id:1,questionnaire_id:1,questionnaire_slug:'other-survey',definition_version:1},result_token:'r'.repeat(43)}]){
+    const invalidReceipt=harness({display,status:201,postBody:brokenReceipt});await invalidReceipt.controller.init();invalidReceipt.fill();await invalidReceipt.controller.submit();
+    assert.equal(invalidReceipt.controller.submitted,false,'malformed/wrong-questionnaire 2xx does not confirm completion');
+    assert.ok(invalidReceipt.window.sessionStorage.getItem(key),'unconfirmed receipt keeps draft');
+    assert.match(invalidReceipt.controller.renderVals().error,/响应不完整/);
+    invalidReceipt.dom.window.close();
+  }
+  const storageDenied=harness({display,storageBroken:true});await storageDenied.controller.init();storageDenied.fill();await storageDenied.controller.submit();
+  assert.equal(storageDenied.navigations.length,0,'failed draft write never navigates to OAuth and loses answers');
+  assert.equal(storageDenied.controller.renderVals().canSubmit,true);
+  assert.match(storageDenied.controller.renderVals().error,/未能保存答案/);
+  const noStorageSuccess=harness({display,storageBroken:true,status:201});await noStorageSuccess.controller.init();noStorageSuccess.fill();await noStorageSuccess.controller.submit();
+  assert.equal(noStorageSuccess.controller.submitted,true,'storage quota does not block ordinary authenticated submit');
+
+  const corrupted=harness({display,draft:'{invalid'});await corrupted.controller.init();assert.equal(corrupted.controller.textAnswers.size,0);
+  for(const damage of [d=>d.answers[0][1].push(9999),d=>d.textAnswers.push([9999,'stale field']),d=>d.answers.push(d.answers[0])]){
+    const damagedDraft=JSON.parse(editDraft);damage(damagedDraft);
+    const damaged=harness({display,draft:JSON.stringify(damagedDraft)});await damaged.controller.init();
+    assert.equal(damaged.controller.textAnswers.size,0,'damaged foreign/duplicate IDs are discarded before exposing an unsubmitable draft');
+    assert.equal(damaged.controller.renderVals().canNext || damaged.controller.renderVals().canSubmit,true);
+    damaged.dom.window.close();
+  }
+  for(const invalidPhone of ['+86 13800000000','1380000000','１３８００００００００','1380000000a']){
+    const mobile=harness({display});await mobile.controller.init();mobile.fill();
+    mobile.controller.setText(mobile.controller.definition.questions[1],{target:{value:invalidPhone}});
+    await mobile.controller.submit();assert.equal(mobile.posts.length,0,'invalid mobile text is explained before network request');
+    assert.match(mobile.controller.renderVals().error,/11位中国大陆手机号/);
+    mobile.dom.window.close();
+  }
+  const notPending=JSON.parse(editDraft);notPending.pendingSubmit=false;
+  const forgedResume=harness({display,draft:JSON.stringify(notPending),query:'&resume=submit',status:201});await forgedResume.controller.init();
+  assert.equal(forgedResume.posts.length,0,'editing drafts cannot auto-submit just because the URL contains resume');
+  forgedResume.dom.window.close();
+  const expiredDraft=JSON.parse(editDraft);expiredDraft.savedAt=Date.now()-25*60*60*1000;
+  const expired=harness({display,draft:JSON.stringify(expiredDraft)});await expired.controller.init();assert.equal(expired.controller.textAnswers.size,0,'expired temporary draft is not restored');
+  const stale=harness({display,status:409,postBody:{error:'definition_version_conflict'}});await stale.controller.init();stale.fill();await stale.controller.submit();
+  assert.equal(stale.controller.renderVals().canRetry,true,'version changes expose current retry instead of trapping stale submission');
+  assert.equal(stale.controller.textAnswers.get(3),'\n保留文字答案\n','old answers stay visible until respondent elects to reload');
+  stale.window.fetch=async()=>Response.json({...definition,version:2,answer_display_mode:display},{headers:{'X-Aicrm-Survey-Authorization-Context':'a'.repeat(64)}});
+  await stale.controller.init();assert.equal(stale.controller.textAnswers.size,0,'definition change never maps old question IDs silently');
+  assert.match(stale.controller.renderVals().error,/内容已更新/);
+
+  const wrongMode=harness({display,pageDisplay:display==='one_by_one'?'all_in_one':'one_by_one'});await wrongMode.controller.init();
+  assert.equal(wrongMode.navigations.length,1,'old layout entry follows current Owner definition');
+  assert.equal(wrongMode.posts.length,0);
+  const unicode=harness({display,status:201});await unicode.controller.init();unicode.fill();
+  const textarea=unicode.controller.definition.questions[2];textarea.minimum_length=2;textarea.maximum_length=2;
+  unicode.controller.setText(textarea,{target:{value:'𠮷🙂'}});await unicode.controller.submit();
+  assert.equal(unicode.posts[0].answers.find(a=>a.question_id===3).text_value,'𠮷🙂','Unicode scalar count matches Go rune validation');
+  for(const item of [reading,editing,refresh,reload,doubleClick,storageDenied,noStorageSuccess,corrupted,expired,stale,wrongMode,unicode])item.dom.window.close();
+
   for(const item of [original,resumed,denied,deniedWithSession,expiredAgain,unavailable,invalid,hanging])item.dom.window.close();
 }
 console.log('survey-submission-resume: PASS');
