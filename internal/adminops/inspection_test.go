@@ -212,7 +212,9 @@ func (a *inspectionTestAccepter) AcceptAndQueueWithin(ctx context.Context, c eff
 func TestPostgreSQLInspectionReportAtomicAcceptanceImmutableReplayAndObserver(t *testing.T) {
 	pool, uow := inspectionTestPool(t)
 	ctx := context.Background()
-	now := time.Now().UTC()
+	// Keep the replay minute inside this report's hour, independent of the
+	// wall-clock minute at which the suite starts. A new hour is tested below.
+	now := time.Now().UTC().Truncate(time.Hour).Add(30 * time.Minute)
 	a := &inspectionTestAccepter{fail: true}
 	s, e := NewInspectionService(pool, uow, nil, a, InspectionOptions{ReleaseSHA: "test", NotificationEnabled: true, NotificationTargetRef: "ops-primary", Now: func() time.Time { return now }})
 	if e != nil {
@@ -260,6 +262,23 @@ func TestPostgreSQLInspectionReportAtomicAcceptanceImmutableReplayAndObserver(t 
 	list, e := s.Reports(ctx)
 	if e != nil || len(list) != 1 || list[0].EffectState != "outcome_unknown" {
 		t.Fatalf("report=%+v %v", list, e)
+	}
+	originalEnvelope := a.envelope
+	now = now.Truncate(time.Hour).Add(time.Hour)
+	next, e := s.PrepareReport(ctx, now)
+	if e != nil || next.ID == r.ID || next.EffectID == r.EffectID || !next.HourKey.Equal(now) {
+		t.Fatalf("new hour did not create an independent report: next=%+v previous=%+v err=%v", next, r, e)
+	}
+	nextReplay, e := s.PrepareReport(ctx, now.Add(time.Minute))
+	if e != nil || nextReplay.ID != next.ID || string(nextReplay.Content) != string(next.Content) {
+		t.Fatalf("changed next-hour replay %v", e)
+	}
+	if e = pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM adminops_inspection_reports),(SELECT count(*) FROM inspection_test_acceptances)`).Scan(&reports, &accepts); e != nil || reports != 2 || accepts != 2 {
+		t.Fatalf("hourly report/effect counts %d/%d %v", reports, accepts, e)
+	}
+	loaded, e = s.LoadOpsReportPayload(ctx, originalEnvelope)
+	if e != nil || string(loaded.Content) != string(r.Content) {
+		t.Fatalf("new hour changed the previous immutable payload %v", e)
 	}
 }
 
