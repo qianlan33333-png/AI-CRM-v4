@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -151,7 +152,13 @@ func (s *Service) Duplicate(ctx context.Context, id surveyport.ID, actor int64, 
 		source.ID, source.Version, source.CreatedBy = 0, 1, actor
 		source.Name += " copy"
 		source.Title += " 副本"
-		source.Slug = fmt.Sprintf("%s-copy-%d", strings.TrimSuffix(source.Slug, "-"), now.Unix())
+		// A new public identifier is independent of the source and clock. It is
+		// generated only for the owned mutation; replays return its receipt.
+		var publicID [16]byte
+		if _, err := rand.Read(publicID[:]); err != nil {
+			return surveyport.Questionnaire{}, err
+		}
+		source.Slug = "q-" + hex.EncodeToString(publicID[:])
 		source.Status = surveyport.StatusDraft
 		for qi := range source.Questions {
 			source.Questions[qi].ID = 0

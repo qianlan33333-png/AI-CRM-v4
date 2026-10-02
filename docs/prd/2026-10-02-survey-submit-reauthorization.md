@@ -83,3 +83,19 @@ flowchart TD
 OneID/Persistence/External Effects沿用父PRD：复用既有Identity Port验证、sessionStorage恢复、原提交UoW/幂等、Provider读取；不改身份归属、不加队列或写入效果。不涉及新增限制。五项影响：API和数据库合同无新增变化；业务变更仅授权提示/提交时机；消费者为H5 controller、Survey public Host/CSS及其构建和实际Host旅程；页面为all/one，其他H5独立页面保持既有行为；验证覆盖两种布局的真实标题、无仿导航、单层输入框、取消无提示、同键自动提交、身份/版本隔离、503与超时恢复。原候选的400和安全诊断修复仍全部保留。Linux、共享预发、生产与真实微信验收由工作台分别记录。本次授权为修复并重新投递工作台，没有新增生产部署命令。
 
 每次用户明确点击提交都以原提交Owner端实际会话判定为准，不缓存「需要授权」为强制跳转状态；授权取消后若会话仍有效（或另一标签已恢复），本页直接正常提交。若仍无授权，Owner再次401才进入官方OAuth。取消回跳不自动提交、不自动授权；授权成功自动续交只一次。新增回归验证有效旧会话取消后普通提交，以及无会话取消后额外401不产生业务写入、三个请求保持同一幂等键。
+
+## 新复制问卷使用独立公开标识
+
+用户新增授权：保留所有既有问卷链接，只修改从本候选上线后发生的复制。当前Survey Service.Duplicate将source.Slug与copy、秒级时间拼接，造成复制链增长，且同一秒复制同源会得到同slug。复用既有复制Port/HTTP、PG唯一约束、Reserve/Complete幂等收据及audit/outbox同一UoW。参考[Go官方crypto/rand](https://pkg.go.dev/crypto/rand#Read)随机标识生成；使用q-加16字节随机值的小写hex（34字符），不增加依赖、不携带源slug/时间/客户标识。
+
+```mermaid
+flowchart TD
+  A[管理员复制既有问卷] --> B[鉴权和既有复制幂等收据]
+  B -->|已完成同键请求| C[返回同一副本和原生成标识]
+  B -->|新复制命令| D[读取原问卷且保留原链接]
+  D --> E[生成全新独立随机公开slug]
+  E --> F[副本及幂等收据审计Outbox同事务提交]
+  F --> G[新副本继续复制仍生成相同长度新标识]
+```
+
+OneID：不涉及，问卷公开slug不是客户身份；数据库questionnaire ID继续由既有Owner生成，不替换客户主键。Persistence：本地PG事务，原问卷只读并锁定，随机标识只在拥有新幂等reservation时生成；重放取已存结果。External Effects：不涉及Provider或外部写入。不涉及新增限制，沿用slug字符/唯一约束；不改历史slug、不迁移数据库、不新增后台控件。五项影响：HTTP结构和路径规则不变，新副本public_path更短；复制机制和关联资料沿旧流程，只有slug分配变化；消费者为Survey app/store、已有后台复制HTTP和公开读取/OAuth；无UI布局新增变化，原答题/资料界面消费新链接；验证覆盖长源slug、递归复制长度不增长、同秒不同复制标识唯一、同键重放不再建副本、原/新链接均能按Owner读取。

@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,7 +75,7 @@ func TestQuestionnaireLifecycleCreatesDuplicatesAndPublishesIdempotently(t *test
 		t.Fatalf("create=%+v err=%v", created, err)
 	}
 	copy, err := service.Duplicate(context.Background(), 7, 3, "questionnaire-duplicate-lifecycle-0002")
-	if err != nil || copy.ID != 101 || copy.Status != surveyport.StatusDraft || copy.Slug != "growth-copy-1788570123" || copy.Questions[0].ID != 0 {
+	if err != nil || copy.ID != 101 || copy.Status != surveyport.StatusDraft || !validSlug(copy.Slug) || !strings.HasPrefix(copy.Slug, "q-") || len(copy.Slug) != 34 || copy.Questions[0].ID != 0 {
 		t.Fatalf("duplicate=%+v err=%v", copy, err)
 	}
 	replay, err := service.Duplicate(context.Background(), 7, 3, "questionnaire-duplicate-lifecycle-0002")
@@ -83,6 +85,36 @@ func TestQuestionnaireLifecycleCreatesDuplicatesAndPublishesIdempotently(t *test
 	published, err := service.Publish(context.Background(), 7, 1, 3, "questionnaire-publish-lifecycle-0003")
 	if err != nil || published.Status != surveyport.StatusPublished || store.published != 1 {
 		t.Fatalf("publish=%+v err=%v calls=%d", published, err, store.published)
+	}
+}
+
+func TestQuestionnaireRecursiveCopiesKeepIndependentSlugsAndReplay(t *testing.T) {
+	originalSlug := strings.Repeat("copy-chain-", 11) + "origin"
+	store := &lifecycleStore{source: surveyport.Questionnaire{ID: 7, Name: "原问卷", Title: "原问卷", Slug: originalSlug, Status: surveyport.StatusPublished, Mode: surveyport.ModeSurvey, AnswerDisplayMode: surveyport.DisplayAllInOne, Questions: []surveyport.Question{{Type: surveyport.QuestionTextarea, Title: "需求", Required: true}}}}
+	service := NewService(oauthUOW{}, store)
+	// All copies happen at the same time: seconds cannot provide uniqueness.
+	service.now = func() time.Time { return time.Date(2026, 10, 2, 1, 0, 0, 0, time.UTC) }
+	seen := map[string]bool{originalSlug: true}
+	original := store.source
+	for i := range 20 {
+		if i == 1 {
+			store.source = original // A second same-source, same-second command.
+		}
+		sourceSlug := store.source.Slug
+		key := fmt.Sprintf("questionnaire-recursive-copy-%04d", i)
+		copy, err := service.Duplicate(context.Background(), store.source.ID, 3, key)
+		if err != nil || !validSlug(copy.Slug) || len(copy.Slug) != 34 || !strings.HasPrefix(copy.Slug, "q-") || seen[copy.Slug] || strings.Contains(copy.Slug, "copy") {
+			t.Fatalf("copy %d slug=%q err=%v", i, copy.Slug, err)
+		}
+		if store.source.Slug != sourceSlug {
+			t.Fatal("copy changed the source link")
+		}
+		replay, err := service.Duplicate(context.Background(), store.source.ID, 3, key)
+		if err != nil || replay.ID != copy.ID || replay.Slug != copy.Slug || len(store.created) != i+1 {
+			t.Fatalf("copy replay %d result=%+v creates=%d err=%v", i, replay, len(store.created), err)
+		}
+		seen[copy.Slug] = true
+		store.source = copy
 	}
 }
 
