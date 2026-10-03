@@ -64,6 +64,28 @@ func StrictJSON(data []byte, out any) error {
 	return nil
 }
 
+// resolveParameterSchema follows local references before choosing the wire
+// parameter parser. Validation and serialization must use the same type.
+func resolveParameterSchema(schema map[string]any, definitions map[string]any) (map[string]any, error) {
+	seen := map[string]bool{}
+	for {
+		ref, ok := schema["$ref"].(string)
+		if !ok {
+			return schema, nil
+		}
+		if seen[ref] {
+			return nil, fail("validation", "cyclic parameter schema reference", 2)
+		}
+		seen[ref] = true
+		name := strings.TrimPrefix(ref, "#/components/schemas/")
+		next, ok := definitions[name].(map[string]any)
+		if !ok {
+			return nil, fail("validation", "unresolved schema reference", 2)
+		}
+		schema = next
+	}
+}
+
 // Validate supplies local structural checks. Domain rules remain server-owned.
 func Validate(value any, schema map[string]any, definitions map[string]any) error {
 	if ref, ok := schema["$ref"].(string); ok {

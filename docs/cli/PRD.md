@@ -82,3 +82,5 @@ Origin绑定/不转发重定向凭证：防跨环境秘密泄露；复用HTTPS s
 预发 `cli-access` 使用安装包核对 challenge 登录合同、未认证 self-session/能力发现拒绝及实际 Origin 配置；CLI→TLS→PostgreSQL 登录/客户范围/撤权旅程由选定测试证明。生产独立读回版本、摘要、ready、worker 及上述认证入口；认证接口存在不能代替 qianlan 实际账号/HXC 数据验收。沿用唯一工作台的原队列与收据，CLI 授权不扩大至其他成员。
 
 最终上线候选基线为 `449f8180babad320d47da557af70f4f58cec26f2`（由唯一工作台提供）。重新生成目录，只同步已有 automation-runs 的 `package_id` 查询、`total` 响应及已声明错误；仍为 549 项/24 模块，不新增业务或权限。原认证/权限代码未变化，复用原有效局部证据；目录直接消费者补 CLI/生成器合同，Linux PostgreSQL及安装验证绑定最终候选。
+
+对齐后复现：`admin.listAutomationRuns --query package_id=27 --dry-run` 因 `$ref` 数值参数未在解析前展开，错误地报告 expected integer。修复仅在查询参数选择解析器前解析本地 Schema 引用，沿用现有整数/布尔/数组校验及原始 HTTP 序列化；非法数值、缺失或循环引用仍拒绝。已补登记接口27/20正常查询与非数值/小数/溢出拒绝回归。该修复是无状态客户端参数处理，不改身份、服务端授权、OneID、任务或 Provider 效果，属于本次已授权候选的相关修复。

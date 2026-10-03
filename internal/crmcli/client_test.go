@@ -79,6 +79,37 @@ func TestDeclaredQueryArraysFollowTheirSerializationAndRejectAmbiguity(t *testin
 		}
 	}
 }
+func TestReferencedQueryParameterUsesDeclaredScalarType(t *testing.T) {
+	op, ok := catalog.Find("admin.listAutomationRuns")
+	if !ok {
+		t.Fatal("missing automation history operation")
+	}
+	path, _, _, err := BuildRequest(op, CallInput{Query: map[string]string{"package_id": "27", "limit": "20"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(path)
+	if err != nil || u.Path != "/api/admin/automation-runs" || u.Query().Get("package_id") != "27" || u.Query().Get("limit") != "20" {
+		t.Fatalf("unexpected registered query serialization: %s, %v", path, err)
+	}
+	for _, value := range []string{"abc", "27.5", "9223372036854775808"} {
+		if _, _, _, err := BuildRequest(op, CallInput{Query: map[string]string{"package_id": value}}); err == nil {
+			t.Fatalf("accepted invalid integer %q", value)
+		}
+	}
+	// Boolean references resolve too; invalid metadata must fail locally.
+	defs := map[string]any{"Flag": map[string]any{"type": "boolean"}, "Cycle": map[string]any{"$ref": "#/components/schemas/Cycle"}}
+	s, err := resolveParameterSchema(map[string]any{"$ref": "#/components/schemas/Flag"}, defs)
+	if err != nil || s["type"] != "boolean" {
+		t.Fatalf("boolean reference: %v %v", s, err)
+	}
+	for _, ref := range []string{"Cycle", "Missing"} {
+		if _, err := resolveParameterSchema(map[string]any{"$ref": "#/components/schemas/" + ref}, defs); err == nil {
+			t.Fatalf("accepted invalid reference %q", ref)
+		}
+	}
+}
+
 func TestRedirectNeverLeaksCredentialAndWrongIdentityNeverDispatches(t *testing.T) {
 	leaked := 0
 	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaked++ }))

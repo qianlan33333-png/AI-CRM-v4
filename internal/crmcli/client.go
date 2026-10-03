@@ -321,6 +321,11 @@ func BuildRequest(op catalog.Operation, input CallInput) (string, string, io.Rea
 		}
 		if present {
 			if s, ok := p["schema"].(map[string]any); ok {
+				resolved, err := resolveParameterSchema(s, catalog.Load().Schemas)
+				if err != nil {
+					return "", "", nil, err
+				}
+				s = resolved
 				var value any = v
 				switch s["type"] {
 				case "array":
