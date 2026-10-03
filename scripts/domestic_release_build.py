@@ -53,6 +53,7 @@ CI_ONLY_FILES = {
     "internal/product/http/service_period_public_journey.mjs",
     "scripts/dev_preflight.py",
     "scripts/run-installed-periodic-contact.sh",
+    "scripts/run-installed-audience.sh",
     "scripts/check-architecture.py",
     "scripts/check-config-definition-import-boundary.sh",
     "scripts/check-hxc-identity-boundaries.sh",
@@ -248,6 +249,16 @@ def _is_frontend_asset(path: str) -> bool:
     return suffix == ".json" and "static" in normalized.parts
 
 
+APPLICATION_SOURCE_REGISTRIES = {
+    "web/donor-sources/source-index.json",
+    "web/donor-sources/source-lock.json",
+}
+
+
+def _requires_frontend_build(path: str) -> bool:
+    return path.startswith("web/") and path not in APPLICATION_SOURCE_REGISTRIES and not _is_test_or_document(path)
+
+
 def classify_paths(paths: Iterable[str]) -> Classification:
     """Classify release impact without consulting local or external state."""
     changed = sorted(set(paths))
@@ -283,6 +294,13 @@ def classify_paths(paths: Iterable[str]) -> Classification:
             continue
 
         runtime_changed = True
+
+        if normalized == "api/openapi.yaml" or normalized in APPLICATION_SOURCE_REGISTRIES:
+            # OpenAPI is materialized into config/http before the application
+            # build. Registry metadata selects those existing source views;
+            # it is not a new npm input or a changed maintenance program.
+            graph_paths.append(path)
+            continue
 
         if normalized.startswith("migrations/"):
             if PurePosixPath(normalized).suffix.lower() == ".sql":
@@ -897,11 +915,11 @@ def build(repo_path: str | Path, base_value: str, target_value: str,
                 assert base_release is not None
                 _copy_release(base_release, release_in_source)
                 if plan_value["frontend_changed"] and any(
-                    path.startswith("web/") for path in plan_value["changed_paths"]
-                    if not _is_test_or_document(path)
+                    _requires_frontend_build(path) for path in plan_value["changed_paths"]
                 ):
                     _build_frontend(source)
                 if go_commands:
+                    _materialize_source_views(source)
                     _build_go_commands(source, go_commands, command_inventory)
 
                 for relative in plan_value.get("package_overlays", []):

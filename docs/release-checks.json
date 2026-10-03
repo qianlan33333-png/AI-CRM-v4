@@ -1,15 +1,8 @@
 {
   "schema": 1,
-  "baseline_sha": "1f397fab62b04630aeee857c0dc82e9fe4b23652",
+  "baseline_sha": "0bb4f0fe7ca4b4196f2003d6bf04467b12046a78",
   "checks": [
-    {"lane": "preflight", "path": "scripts/ci/test_ai_check_plan.py"},
-    {"lane": "preflight", "path": "scripts/ci/test_affected_plan.py"},
-    {"lane": "preflight", "path": "scripts/ci/test_behavior_selection.py"},
-    {"lane": "preflight", "path": "scripts/ci/test_quality_lanes.py"},
-    {"lane": "preflight", "path": "scripts/test_domestic_release_extreme.py"},
-    {"lane": "preflight", "path": "scripts/test_domestic_release_minimal.py"},
-    {"lane": "preflight", "path": "scripts/test_domestic_release_build.py"},
-    {"lane": "preflight", "path": "scripts/test_dev_preflight.py"}
+    {"lane": "preflight", "path": "scripts/test_domestic_release_build.py"}
   ],
   "installed_checks": []
 }

@@ -446,6 +446,48 @@ class DomesticReleaseBuildTests(unittest.TestCase):
                 ],
             )
 
+    def test_openapi_registry_and_embedded_page_rebuild_only_application(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="domestic-release-contract-") as temporary:
+            root = Path(temporary)
+            repo = root / "repo"
+            repo.mkdir()
+            self._init_go_fixture(repo)
+            base_sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+            for relative in ("api/openapi.yaml", *sorted(builder.APPLICATION_SOURCE_REGISTRIES)):
+                path = repo / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("updated contract input\n", encoding="utf-8")
+            (repo / "internal/webshell/static/payment.html").write_text("<h1>New history</h1>\n")
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "update contract and embedded page"], check=True)
+            head = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+            prior = root / "prior"
+            (prior / "bin").mkdir(parents=True)
+            (prior / "web/dist").mkdir(parents=True)
+            (prior / "bin/aicrm").write_bytes(b"old application")
+            (prior / "bin/migrate-customer").write_bytes(b"unchanged maintenance program")
+            (prior / "web/dist/host.js").write_bytes(b"unchanged Host")
+            builder.write_release_inventory(prior)
+
+            def compile_application(source, commands, inventory):
+                self.assertEqual(commands, ["./cmd/aicrm"])
+                self.assertEqual((source / "api/openapi.yaml").read_text(), "updated contract input\n")
+                (source / "release/bin/aicrm").write_bytes(b"new application")
+
+            with mock.patch.object(builder, "_materialize_source_views") as materialized, mock.patch.object(builder, "_build_go_commands", side_effect=compile_application) as compiled, mock.patch.object(builder, "_build_frontend", side_effect=AssertionError("registry metadata must not rebuild npm Host")):
+                result = builder.build(repo, base_sha, head, prior, root / "out")
+            manifest = result
+            release = root / "out/release"
+            compiled.assert_called_once()
+            materialized.assert_called_once()
+            self.assertFalse(builder.classify_paths(["scripts/run-installed-audience.sh"]).runtime_changed)
+            self.assertFalse(manifest["full_build"])
+            self.assertEqual(manifest["go_commands"], ["./cmd/aicrm"])
+            self.assertEqual((release / "bin/aicrm").read_bytes(), b"new application")
+            self.assertEqual((release / "bin/migrate-customer").read_bytes(), b"unchanged maintenance program")
+            self.assertEqual((release / "web/dist/host.js").read_bytes(), b"unchanged Host")
+            builder.verify_release_inventory(release)
+
     @staticmethod
     def _snapshot(root: Path) -> dict[str, bytes]:
         return {
