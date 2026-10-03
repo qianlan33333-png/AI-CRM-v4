@@ -1,11 +1,19 @@
 {
   "schema": 1,
-  "baseline_sha": "52270f0db6d5f016501f20cc294ef4da6caac4ca",
+  "baseline_sha": "d994b4a3a47efdce9637040f878b3a9e72095a41",
   "checks": [
     {
-      "lane": "preflight",
-      "path": "scripts/test_domestic_release_build.py"
+      "lane": "backend",
+      "package": "./internal/access/maintenance",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/recover-access-password"
     }
+  ],
+  "build_commands": [
+    "./cmd/recover-access-password"
   ],
   "installed_checks": []
 }
