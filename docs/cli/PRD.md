@@ -72,3 +72,11 @@ Origin绑定/不转发重定向凭证：防跨环境秘密泄露；复用HTTPS s
 准确HEAD/tree运行fast、compile、修改包完整测试和适用Host测试；Mac证据不替代Linux安装旅程。
 后续推送国内codex/crm-cli-system后按动态路由向唯一工作台交付；无当前生产部署授权。
 删除新增CLI与自我查询入口可撤销本次应用变化；不要求数据库逆向迁移。
+
+## 2026-10-03 上线授权与验证增量
+
+用户明确要求“上线吧。然后我来做后续测试”，授权当前 CLI 候选上线生产；qianlan 真实登录及 HXC 查询由用户安装后验收。复用本父 PRD，不增加业务或 Provider 写入范围，不涉及 UI 编码或数据库迁移。原候选收据仍只证明其原版本，当前候选依据国内累计源码更新。
+
+短清单见 `docs/release-checks.json`：CLI 传输及生成器、Access 登录/会话、OpenPlatform V1/V2、Host 身份发现与 PostgreSQL 撤权旅程、OpenAPI 路由一致性。直接消费者为 Composition 路由、现有认证管理与客户读取；不要求无关页面/支付/企微发送全量回归。
+
+预发 `cli-access` 使用安装包核对 challenge 登录合同、未认证 self-session/能力发现拒绝及实际 Origin 配置；CLI→TLS→PostgreSQL 登录/客户范围/撤权旅程由选定测试证明。生产独立读回版本、摘要、ready、worker 及上述认证入口；认证接口存在不能代替 qianlan 实际账号/HXC 数据验收。沿用唯一工作台的原队列与收据，CLI 授权不扩大至其他成员。
