@@ -41,8 +41,10 @@ OneID：只消费现有可信授权投影，不增加匹配/建客。Persistence
 | 业务机制 | 原身份、版本、幂等、事务、外推规则不变；超时不自动重试、不把迟到响应当成功 |
 | 关联模块 | H5Controller、surveyPublicApi及其all/one/auth/result/done读取消费者；原Survey/Outbound合同用测试核对 |
 | 页面影响 | 复用现有错误卡/Toast，保持题卡、文案层级及官方授权方式 |
-| 验证 | 基线失败复现，双布局DOM与输入恢复/同键/迟到响应对抗合同；8b347d0本机通过证据保留，原测试输入未改结果按输入复用；当前13项源码清单尚待Linux执行，最终安装包覆盖恢复合同 |
+| 验证 | 基线失败复现，双布局DOM与输入恢复/同键/迟到响应对抗合同；8b347d0本机通过证据保留，原测试输入未改结果按输入复用；工作台已验证9d86ffb的7backend（5命令/93通过事件），4项纯逻辑frontend待执行；2项HTML资源合同后移，最终安装包覆盖恢复合同 |
 
 验收：输入事件缺失仍按当前可见值提交；翻页前保存文本；同输入失败重试同键；独立deadline包括授权入口响应体，前台恢复/历史页恢复后重查原截止时间，晚到成功不清答案；缺少AbortController仍可提交并结束停滞等待；二次401不静默/不循环。新增实际Host双布局旅程在无input事件下填写，并独立解密合成PostgreSQL数据核对原始手机号和文本，同时验证响应丢失后的同键重试只写一次。
 
-docs/release-checks.json保留7项backend和6项frontend直接合同及7项installed名称。Presentation/Completion测试文件、断言和历史通过证据保留，本次未改这两条源码旅程，不再作为重复的源码Host前置。OAuth恢复、响应丢失及新增NativeInput三个旅程支持既有安装二进制模式，复用run-installed-survey-recovery入口，改用既有preflight具名发现/结果验证，避免维护手工正则。Linux最终包执行这三个旅程的all/one六组和源码/二进制/Host摘要读回一次，填写同一stage-evidence，不新增发布路径。源代码本机五个旅程不替代最终安装验收。发布只向唯一路由工作台交接。回退前端应用包不动提交记录和历史链接。真实微信设备和目标用户重试为独立业务验收。
+docs/release-checks.json保留7项backend和4项纯逻辑frontend前置。原7项installed名称不变，追加installed-survey-auth-render与installed-survey-public-host-render。h5AuthAdapter.test.mjs和surveyPublicHost.test.mjs读取web/dist HTML，精简前置不构建Host时第一项在加载文件阶段失败，未运行到业务断言。两条测试文件和全部断言不改；工作台在最终构建后，从已核验同SHA包复制web/dist到隔离测试checkout，以现有根npm锁文件缓存执行原Node测试，不重新安装npm或构建Host，日志封入原stage-evidence。原已通过的Linux后端93事件收据保留复用。
+
+Presentation/Completion测试文件、断言和历史通过证据保留，本次未改这两条源码旅程，不再作为重复的源码Host前置。OAuth恢复、响应丢失及新增NativeInput三个旅程支持既有安装二进制模式，复用run-installed-survey-recovery入口，改用既有preflight具名发现/结果验证，避免维护手工正则。Linux最终包执行这三个旅程的all/one六组和源码/二进制/Host摘要读回一次，连同两项资源合同填写同一stage-evidence，不新增发布路径。源代码本机五个旅程不替代最终安装验收。发布只向唯一路由工作台交接。回退前端应用包不动提交记录和历史链接。真实微信设备和目标用户重试为独立业务验收。

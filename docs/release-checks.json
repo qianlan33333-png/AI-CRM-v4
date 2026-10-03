@@ -36,15 +36,7 @@
     },
     {
       "lane": "frontend",
-      "path": "web/v3/h5AuthAdapter.test.mjs"
-    },
-    {
-      "lane": "frontend",
       "path": "web/v3/surveyCompletionAction.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveyPublicHost.test.mjs"
     },
     {
       "lane": "frontend",
@@ -66,6 +58,8 @@
     "journey1-installed-lost-response-one",
     "journey1-installed-native-input-all",
     "journey1-installed-native-input-one",
-    "journey1-installed-source-binary-host-readback"
+    "journey1-installed-source-binary-host-readback",
+    "installed-survey-auth-render",
+    "installed-survey-public-host-render"
   ]
 }
