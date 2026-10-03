@@ -26,7 +26,7 @@ func validateInstalledAudienceArtifacts(t *testing.T, input testconfig.Installed
 		SourceSHA string            `json:"source_sha"`
 		Entries   map[string]string `json:"entries"`
 	}
-	if err != nil || !filepath.IsAbs(input.Binary) || !filepath.IsAbs(input.Root) || !validDomesticReleaseSHA(input.SHA) || hex.EncodeToString(digest[:]) != input.BinarySHA256 || manifestErr != nil || json.Unmarshal(manifestBytes, &manifest) != nil || manifest.SourceSHA != input.SHA {
+	if err != nil || !filepath.IsAbs(input.Binary) || !filepath.IsAbs(input.Root) || !validDomesticReleaseSHA(input.SHA) || hex.EncodeToString(digest[:]) != input.BinarySHA256 || manifestErr != nil || json.Unmarshal(manifestBytes, &manifest) != nil || !validDomesticReleaseSHA(manifest.SourceSHA) {
 		t.Fatal("installed Audience binary/Host binding mismatch")
 	}
 	for _, entry := range []string{"groupopsHost", "groupopsStyles", "confirmationDialogHost", "confirmationDialogStyles"} {
@@ -34,7 +34,9 @@ func validateInstalledAudienceArtifacts(t *testing.T, input testconfig.Installed
 			t.Fatalf("installed Audience Host lacks %s", entry)
 		}
 	}
-	t.Log("reusing installed Audience Host; source Host/npm preparation omitted")
+	// The workbench verifies the complete package inventory before/after these
+	// journeys. Unchanged Host bytes may retain an older, real build identity.
+	t.Logf("reusing installed Audience Host host_source_sha=%s; source Host/npm preparation omitted", manifest.SourceSHA)
 }
 
 // Source composition only seeds the isolated database and supplies readback.

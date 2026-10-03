@@ -19,7 +19,8 @@ try:
     if not re.fullmatch('[0-9a-f]{40}',head) or not re.fullmatch('[0-9a-f]{64}',digest):raise ValueError()
     if not binary.is_absolute() or not root.is_absolute() or not binary.is_file() or not os.access(binary,os.X_OK):raise ValueError()
     if hashlib.sha256(binary.read_bytes()).hexdigest()!=digest:raise ValueError()
-    if json.loads((root/'web/dist/asset-manifest.json').read_text())['source_sha']!=head:raise ValueError()
+    host_sha=json.loads((root/'web/dist/asset-manifest.json').read_text())['source_sha']
+    if not isinstance(host_sha,str) or not re.fullmatch('[0-9a-f]{40}',host_sha):raise ValueError()
     if subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()!=head or subprocess.check_output(['git','status','--porcelain'],text=True).strip():raise ValueError()
 except Exception:
     sys.exit('requires exact clean V4 SHA, matching supplied binary/Host, and explicit loopback aicrm_test_*_acceptance_test PostgreSQL')

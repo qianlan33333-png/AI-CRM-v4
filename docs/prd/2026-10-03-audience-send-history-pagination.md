@@ -64,7 +64,7 @@ OneID：不新增身份解析/归属，仅沿既有只读运行投影返回现�
 
 ## 安装夹具补齐
 
-仅补测试夹具：Audience 读取可选 `AICRM_INSTALLED_AUDIENCE_{BINARY,ROOT,SHA,BINARY_SHA256}`，以独立进程启动给定安装二进制。复用已有隔离 PG、API 进程退出与 readyz 校验、TLS 反向代理；Browser 的页面、API、资源全部来自给定包，源码仅准备合成数据和数据库读回。二进制 SHA256、Host manifest source_sha、readyz release_sha 一起绑定；不继承生产环境、不启用 Provider 或效果 worker。安装模式只检查安装 Host，略过源码 Host/npm 准备。
+仅补测试夹具：Audience 读取可选 `AICRM_INSTALLED_AUDIENCE_{BINARY,ROOT,SHA,BINARY_SHA256}`，以独立进程启动给定安装二进制。复用已有隔离 PG、API 进程退出与 readyz 校验、TLS 反向代理；Browser 的页面、API、资源全部来自给定包，源码仅准备合成数据和数据库读回。二进制 SHA256 与 readyz release_sha 绑定本次应用；安装根和 Host 文件由工作台前后 `_verify_stage_app` 的完整包摘要绑定。Host manifest source_sha 可以保留上次真实构建的合法 SHA，并在日志明确记录 host_source_sha，不伪改复用资源元数据；不继承生产环境、不启用 Provider 或效果 worker。安装模式只检查安装 Host，略过源码 Host/npm 准备。
 
 源码清单只留原 6 backend + 2 frontend，两项具名 Chromium 留在既有 installed_checks，在最终预发包上运行一次。工作台调用 `scripts/run-installed-audience.sh --binary <包二进制> --root <包目录> --sha <准确SHA> --binary-sha256 <摘要>`，要求准确 clean 源码与显式 loopback `aicrm_test_*_acceptance_test` 数据库。确认旅程是归档对话框取消不写、确认只写一次与生命周期读回，不是 Provider 发送。
 
