@@ -69,3 +69,5 @@ OneID：不新增身份解析/归属，仅沿既有只读运行投影返回现�
 源码清单只留原 6 backend + 2 frontend，两项具名 Chromium 留在既有 installed_checks，在最终预发包上运行一次。工作台调用 `scripts/run-installed-audience.sh --binary <包二进制> --root <包目录> --sha <准确SHA> --binary-sha256 <摘要>`，要求准确 clean 源码与显式 loopback `aicrm_test_*_acceptance_test` 数据库。确认旅程是归档对话框取消不写、确认只写一次与生命周期读回，不是 Provider 发送。
 
 国内仓禁止强推，控制器拒绝第一父链 merge：停止旧 merge ref，改由同 tree、无 merge 的 a5b6e755 继续 `codex/audience-send-history-release-20261003`，同一任务、能力、交付顺序与发布通道不变。
+
+最终候选仅同步已核验构建工具主线 `9b3855e8bccddf995c6d31268ea9b98491367833`，清单 baseline/合同基线随之更新。使用线性 `codex/audience-send-history-release-20261003-r2` 正常推送；前两 ref 留历史且停止交付。业务、测试夹具与最新本地已通过输入字节不变，8 项源码检查及具名安装模式本地证据复用，最终 Linux 同包验收仍由工作台执行。
