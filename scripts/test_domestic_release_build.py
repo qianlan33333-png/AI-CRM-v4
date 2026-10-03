@@ -480,7 +480,8 @@ class DomesticReleaseBuildTests(unittest.TestCase):
             release = root / "out/release"
             compiled.assert_called_once()
             materialized.assert_called_once()
-            self.assertFalse(builder.classify_paths(["scripts/run-installed-audience.sh"]).runtime_changed)
+            for wrapper in ("audience", "survey-recovery", "phone-canonical-recovery"):
+                self.assertFalse(builder.classify_paths([f"scripts/run-installed-{wrapper}.sh"]).runtime_changed)
             self.assertFalse(manifest["full_build"])
             self.assertEqual(manifest["go_commands"], ["./cmd/aicrm"])
             self.assertEqual((release / "bin/aicrm").read_bytes(), b"new application")

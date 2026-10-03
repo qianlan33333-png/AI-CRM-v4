@@ -54,6 +54,8 @@ CI_ONLY_FILES = {
     "scripts/dev_preflight.py",
     "scripts/run-installed-periodic-contact.sh",
     "scripts/run-installed-audience.sh",
+    "scripts/run-installed-survey-recovery.sh",
+    "scripts/run-installed-phone-canonical-recovery.sh",
     "scripts/check-architecture.py",
     "scripts/check-config-definition-import-boundary.sh",
     "scripts/check-hxc-identity-boundaries.sh",

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "0bb4f0fe7ca4b4196f2003d6bf04467b12046a78",
+  "baseline_sha": "9b3855e8bccddf995c6d31268ea9b98491367833",
   "checks": [
     {"lane": "preflight", "path": "scripts/test_domestic_release_build.py"}
   ],
