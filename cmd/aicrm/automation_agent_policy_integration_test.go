@@ -17,6 +17,8 @@ import (
 	automationport "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/port"
 	automationprovider "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/provider"
 	automationstore "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/store"
+	configapp "github.com/qianlan33333-png/AI-CRM-v3/internal/config/app"
+	configstore "github.com/qianlan33333-png/AI-CRM-v3/internal/config/store"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	effects "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
@@ -136,6 +138,19 @@ func TestAgentMemberPolicyGenerationAndAtomicOutboundPostgreSQL(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Match the production runtime's real Config-owned usage validation.
+			// A synthetic context alone cannot catch an unsupported usage operation.
+			configRepo, err := configstore.NewPostgreSQL(native, uow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runtimeConfig, err := configapp.NewRuntimeReleaseService(uow, configRepo, configRepo, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = runtime.SetRuntimeConfig(runtimeConfig, runtimeConfig); err != nil {
+				t.Fatal(err)
+			}
 			workers := river.NewWorkers()
 			if err = river.AddWorkerSafely[effects.EffectJobArgs](workers, effects.NewWorker(nil, nil)); err != nil {
 				t.Fatal(err)
@@ -222,7 +237,7 @@ func TestAgentMemberPolicyGenerationAndAtomicOutboundPostgreSQL(t *testing.T) {
 				t.Fatal("generation acceptance failure did not roll back")
 			}
 			var leaked int
-			if err = native.QueryRow(ctx, `SELECT (SELECT count(*) FROM automation_enrollments)+(SELECT count(*) FROM automation_runs)+(SELECT count(*) FROM automation_generation_items)+(SELECT count(*) FROM external_effects)+(SELECT count(*) FROM river_job)+(SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation='member_event_customer_once_accepted_v2')`).Scan(&leaked); err != nil || leaked != 0 {
+			if err = native.QueryRow(ctx, `SELECT (SELECT count(*) FROM automation_enrollments)+(SELECT count(*) FROM automation_runs)+(SELECT count(*) FROM automation_generation_items)+(SELECT count(*) FROM external_effects)+(SELECT count(*) FROM river_job)+(SELECT count(*) FROM config_runtime_usage)+(SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation='member_event_customer_once_accepted_v2')`).Scan(&leaked); err != nil || leaked != 0 {
 				t.Fatalf("rollback leaked %d: %v", leaked, err)
 			}
 			rows, err := runtime.EnrollAudienceMember(ctx, event)
@@ -235,6 +250,10 @@ func TestAgentMemberPolicyGenerationAndAtomicOutboundPostgreSQL(t *testing.T) {
 			event.EventID = "audmem_agent_policy_reentry"
 			if replay, e := runtime.EnrollAudienceMember(ctx, event); e != nil || len(replay) != 0 {
 				t.Fatal("reentry duplicated generation", e)
+			}
+			var usageCount int
+			if err = native.QueryRow(ctx, `SELECT count(*) FROM config_runtime_usage WHERE role='worker' AND operation='execution' AND subject_kind='automation_run'`).Scan(&usageCount); err != nil || usageCount != 1 {
+				t.Fatalf("real Config usage accepted exactly once: count=%d err=%v", usageCount, err)
 			}
 			var item automationdomain.GenerationItem
 			var effectID, jobID int64

@@ -29,3 +29,9 @@ OneID：读取原 canonical customer，复用原成员事件及一次性 lineage
 五项影响：接口不新增；业务自动策略增加 Agent 生成分支；直接模块 automation、Composition、generation context；无 UI；相关 Automation 与 Composition 用例及 PG 接受/重放旅程。回退使用旧固定 Agent 及原包绑定，保留原一次性收据，运行未知先只读对账。
 
 参考：[DeepSeek 官方首次调用](https://api-docs.deepseek.com/zh-cn/)、[Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)、[Temporal Durable AI](https://docs.temporal.io/ai)。采用其持久化模型步骤思路，复用本仓 EER/River，不引入 Temporal 或 SDK。
+
+## 自然运行发现的相关修复
+
+18:01 自然刷新新增一条 B0 原事件。问卷、聊天、标签、画像的生产实际 Adapter 在 PostgreSQL read-only 下均读取成功，冻结上下文有效；无生成 item / 新 Outbound 接受。事务失败点是新分支登记 Config-owned usage 使用 `policy_generation`，现有合同仅接受 preview / confirm / execution，故整事务回滚。复用既有 worker/execution 登记，不扩大配置中心合同、不加限制或表。原队列自动重试原事件，保留 once 与生成/发送幂等键，未人为重放或补发。
+
+回归在原 Agent PG 接受/完成/重放旅程绑定真实 Config RuntimeReleaseService 与 store，增加 usage/其他状态一起回滚、重放仅一个 execution usage 的断言。修复前真实服务复现同样 runtime unavailable，修复后四个分支重跑。生产只读上下文诊断不写生产、不调用模型/企微、不打印客户内容或密钥；与合成旅程分开记录。

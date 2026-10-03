@@ -101,7 +101,7 @@ func (s *RuntimeService) acceptEnrollmentGeneration(ctx context.Context, event s
 	if err = s.store.BindGenerationEffect(ctx, items[0].ID, projection.ID, now); err != nil {
 		return err
 	}
-	if err = s.recordRuntimeConfigUsage(ctx, runtimeConfig, "worker", "policy_generation", "automation_run", created.ID, now); err != nil {
+	if err = s.recordRuntimeConfigUsage(ctx, runtimeConfig, "worker", "execution", "automation_run", created.ID, now); err != nil {
 		return err
 	}
 	factPayload, _ := json.Marshal(map[string]any{"run_id": created.ID, "enrollment_id": enrollment.ID, "policy_id": version.PolicyID, "generation_effect_id": projection.ID})
