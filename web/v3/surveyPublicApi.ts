@@ -48,14 +48,34 @@ export function completionActionFromCarrier(value: unknown): CompletionAction {
 
 // Keep stalled public reads finite, including response-body decoding. This is
 // a wait budget only; it neither retries requests nor changes Owner authority.
-export async function surveyRead<T>(read: (signal: AbortSignal) => Promise<T>): Promise<T> {
-  const request = new AbortController();
-  const timer = window.setTimeout(() => request.abort(), 15_000);
-  try { return await read(request.signal); }
-  catch (error) {
-    if (request.signal.aborted) throw new Error('读取超时，请检查网络后重试');
-    throw error;
-  } finally { window.clearTimeout(timer); }
+export async function surveyRead<T>(read: (signal: AbortSignal | undefined) => Promise<T>, timeoutMessage = '读取超时，请检查网络后重试'): Promise<T> {
+  const request = typeof AbortController === 'function' ? new AbortController() : undefined;
+  const expiresAt = Date.now() + 15_000;
+  let expired = false;
+  let expire!: () => void;
+  // Some embedded transports do not reject when aborted. The deadline must
+  // settle independently, including a stalled response body. A late result
+  // cannot reach the Controller or clear its unknown-outcome draft.
+  const deadline = new Promise<never>((_, reject) => {
+    expire = () => {
+      if (expired) return;
+      expired = true;
+      reject(new Error(timeoutMessage));
+      request?.abort();
+    };
+  });
+  const checkDeadline = (): void => { if (Date.now() >= expiresAt) expire(); };
+  const timer = window.setTimeout(expire, 15_000);
+  // iOS may suspend timers in the background or keep the page in BFCache.
+  // Recheck elapsed time when it returns, without replaying the request.
+  window.addEventListener('pageshow', checkDeadline);
+  document.addEventListener('visibilitychange', checkDeadline);
+  try { return await Promise.race([Promise.resolve().then(() => read(request?.signal)), deadline]); }
+  finally {
+    window.clearTimeout(timer);
+    window.removeEventListener('pageshow', checkDeadline);
+    document.removeEventListener('visibilitychange', checkDeadline);
+  }
 }
 
 export async function readPublicSurvey(slug: string): Promise<PublicSurveyDefinition & { authorizationContext: string }> {

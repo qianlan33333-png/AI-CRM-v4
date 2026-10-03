@@ -26,5 +26,7 @@ except Exception:
     sys.exit('requires a clean exact-SHA V4 source, matching binary/Host package and explicit local isolated acceptance_test PostgreSQL database')
 PY
 export AICRM_REQUIRE_CHROMIUM_JOURNEY=1
-exec bash scripts/run-go-with-donor-views.sh go test -json -p 1 -count=1 -timeout=8m \
-  -run '^TestPostgreSQLPublicSurvey(Reauthorization|LostResponse)ChromiumJourney$' ./cmd/aicrm
+exec python3 scripts/dev_preflight.py browser \
+  --journey TestPostgreSQLPublicSurveyReauthorizationChromiumJourney \
+  --journey TestPostgreSQLPublicSurveyLostResponseChromiumJourney \
+  --journey TestPostgreSQLPublicSurveyNativeInputRecoveryChromiumJourney

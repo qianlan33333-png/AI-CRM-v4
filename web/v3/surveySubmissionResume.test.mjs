@@ -10,7 +10,7 @@ const definition={id:1,slug,version:1,title:'恢复测试',description:'',mode:'
   {id:2,type:'mobile',title:'手机号',required:true,options:[]},
   {id:3,type:'textarea',title:'说明',required:true,options:[]}
 ]};
-const harness=({draft,query='',status=401,context='a'.repeat(64),version=1,readStatus=200,display='all_in_one',pending=false,readPending=false,postBody,storageBroken=false,pageDisplay=display}={})=>{
+const harness=({draft,query='',status=401,context='a'.repeat(64),version=1,readStatus=200,display='all_in_one',pending=false,readPending=false,ignoreAbort=false,bodyPending=false,authBodyPending=false,postBody,storageBroken=false,noAbort=false,freezeDeadline=false,pageDisplay=display}={})=>{
   const virtualConsole=new VirtualConsole();
   const navigations=[];
   virtualConsole.on('jsdomError',e=>{if(e.message.includes('navigation'))navigations.push(e);else throw e});
@@ -18,20 +18,24 @@ const harness=({draft,query='',status=401,context='a'.repeat(64),version=1,readS
   const {window}=dom;
   let revealed=0;
   window.HTMLElement.prototype.scrollIntoView=()=>{revealed++;};
-  if(pending || readPending){
+  if(pending || readPending || bodyPending || authBodyPending){
     const schedule=window.setTimeout.bind(window);
-    window.setTimeout=(fn,ms)=>{assert.equal(ms,15_000);return schedule(fn,1);};
+    window.setTimeout=(fn,ms)=>schedule(fn,ms===15_000?1:ms);
   }
+  if(noAbort)window.AbortController=undefined;
+  if(freezeDeadline){const schedule=window.setTimeout.bind(window);window.setTimeout=(fn,ms)=>ms===15_000?0:schedule(fn,ms);}
   Object.defineProperty(window.navigator,'userAgent',{value:'MicroMessenger/8.0'});
   window.Headers=Headers;
-  const posts=[];
+  const posts=[];const latePosts=[];
   window.fetch=async(url,options={})=>{
     if(options.method==='POST'){
       posts.push(JSON.parse(options.body));
-      if(pending)return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new window.DOMException('Aborted','AbortError')),{once:true}));
+      if(pending)return new Promise((resolve,reject)=>{latePosts.push(resolve);if(!ignoreAbort)options.signal.addEventListener('abort',()=>reject(new window.DOMException('Aborted','AbortError')),{once:true});});
+      if(bodyPending)return {status:201,headers:new Headers(),text:()=>new Promise(()=>{})};
       return Response.json(postBody || (status===201?{receipt:{questionnaire_id:1,questionnaire_slug:slug,definition_version:version,submission_id:1},result_token:'r'.repeat(43),completion_action:{type:'default'}}:{error:status===401?'survey_oauth_required':'survey_unavailable'}),{status});
     }
-    if(readPending)return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new window.DOMException('Aborted','AbortError')),{once:true}));
+    if(authBodyPending)return {ok:true,status:200,json:()=>new Promise(()=>{})};
+    if(readPending)return new Promise((_,reject)=>{if(!ignoreAbort)options.signal.addEventListener('abort',()=>reject(new window.DOMException('Aborted','AbortError')),{once:true});});
     return Response.json(readStatus===200?{...definition,version,answer_display_mode:display}:{error:'survey_oauth_required'},{status:readStatus,headers:{'X-Aicrm-Survey-Authorization-Context':context}});
   };
   if(draft)window.sessionStorage.setItem(key,draft);
@@ -53,8 +57,65 @@ const harness=({draft,query='',status=401,context='a'.repeat(64),version=1,readS
       controller.renderVals().questions[2].input({target:{value:'\n保留文字答案\n'}});
     }
   };
-  return {dom,window,controller,posts,navigations,fill,get revealed(){return revealed;}};
+  return {dom,window,controller,posts,navigations,fill,releasePost:(index)=>latePosts[index](Response.json({receipt:{questionnaire_id:1,questionnaire_slug:slug,definition_version:version,submission_id:1},result_token:'r'.repeat(43),completion_action:{type:'default'}},{status:201})),get revealed(){return revealed;}};
 };
+
+for(const display of ['all_in_one','one_by_one']){
+  const restoredInput=harness({display,status:201});await restoredInput.controller.init();
+  const input=(id,value)=>{
+    const element=restoredInput.window.document.createElement(id===2?'input':'textarea');
+    element.dataset.textQuestionId=String(id);element.value=value;
+    restoredInput.window.document.getElementById('screen').append(element);return element;
+  };
+  if(display==='one_by_one'){
+    restoredInput.controller.renderVals().questions[0].options[0].pick();restoredInput.controller.move(1);
+    const mobile=input(2,'13800000000');restoredInput.controller.move(1);mobile.remove();
+    assert.equal(restoredInput.controller.textAnswers.get(2),'13800000000','next captures restored native mobile without an input event');
+  }else{
+    input(2,'13800000000');
+    // Selecting another question rerenders the all-in-one page; first capture native input.
+    restoredInput.controller.renderVals().questions[0].options[0].pick();
+    assert.equal(restoredInput.controller.textAnswers.get(2),'13800000000','choice rerender preserves native restored mobile without input event');
+  }
+  input(3,'\n输入法已完成的答案\n');
+  await restoredInput.controller.submit();
+  assert.equal(restoredInput.posts.length,1,'submit reads actual visible values without depending on input/change delivery');
+  assert.equal(restoredInput.posts[0].answers.find(a=>a.question_id===3).text_value,'\n输入法已完成的答案\n');
+  restoredInput.dom.window.close();
+
+  for(const config of [{pending:true,ignoreAbort:true},{bodyPending:true},{pending:true,ignoreAbort:true,noAbort:true}]){
+    const transport=harness({display,...config});await transport.controller.init();transport.fill();
+    await Promise.race([transport.controller.submit(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('non-cooperative transport remained locked')),250))]);
+    assert.equal(transport.controller.renderVals().submitting,false);
+    assert.match(transport.controller.renderVals().error,/结果暂未确认/);
+    await transport.controller.submit();assert.equal(transport.posts.length,2);
+    assert.deepEqual(transport.posts[0],transport.posts[1],'original key/payload survive non-cooperative fetch or body timeout');
+    if(config.pending){transport.releasePost(0);await new Promise(r=>setTimeout(r,5));assert.equal(transport.controller.submitted,false,'late success cannot clear draft or redirect after a timed-out attempt');assert.ok(transport.window.sessionStorage.getItem(key));}
+    transport.dom.window.close();
+  }
+  const read=harness({display,readPending:true,ignoreAbort:true});
+  await Promise.race([read.controller.init(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('non-cooperative read remained locked')),250))]);
+  assert.equal(read.controller.renderVals().canRetry,true);
+  assert.match(read.controller.renderVals().error,/读取超时/);read.dom.window.close();
+}
+for(const eventName of ['pageshow','visibilitychange']){
+  const background=harness({pending:true,ignoreAbort:true,freezeDeadline:true});await background.controller.init();background.fill();
+  const pending=background.controller.submit();await Promise.resolve();
+  const now=background.window.Date.now();background.window.Date.now=()=>now+16_000;
+  (eventName==='pageshow'?background.window:background.window.document).dispatchEvent(new background.window.Event(eventName));
+  await pending;assert.equal(background.controller.renderVals().submitting,false,'foreground or BFCache restore expires overdue waits even with a frozen timer');
+  assert.match(background.controller.renderVals().error,/结果暂未确认/);assert.equal(background.posts.length,1);
+  background.releasePost(0);await new Promise(r=>setTimeout(r,5));assert.equal(background.controller.submitted,false);background.dom.window.close();
+}
+const auth=harness({authBodyPending:true});const authController=new auth.window.ResumeTest.H5Controller('auth');
+await Promise.race([authController.init(),new Promise((_,reject)=>setTimeout(()=>reject(new Error('authorization response body remained locked')),250))]);
+assert.match(authController.renderVals().error,/读取失败/);assert.equal(auth.navigations.length,0,'expired authorization read cannot start a new OAuth');auth.dom.window.close();
+const legacy=harness({status:201,noAbort:true});await legacy.controller.init();legacy.fill();await legacy.controller.submit();assert.equal(legacy.controller.submitted,true,'missing AbortController does not leave a lock before the guarded request');legacy.dom.window.close();
+for(const scroll of [undefined,()=>{throw new Error('embedded scroll failure')}]){
+  const feedback=harness();await feedback.controller.init();feedback.window.HTMLElement.prototype.scrollIntoView=scroll;
+  await feedback.controller.submit();assert.equal(feedback.controller.renderVals().canSubmit,true);assert.equal(feedback.window.document.querySelector('#fb-toast').hidden,false);assert.match(feedback.window.document.querySelector('#fb-toast').textContent,/请选择/);feedback.dom.window.close();
+}
+console.log('survey-native-input-and-hard-deadline: PASS');
 
 for(const display of ['all_in_one','one_by_one']){
   const original=harness({display});await original.controller.init();original.fill();
@@ -90,6 +151,8 @@ for(const display of ['all_in_one','one_by_one']){
   assert.equal(expiredAgain.posts.length,1);
   assert.equal(expiredAgain.navigations.length,0,'second 401 stops automatic reauthorization');
   assert.equal(expiredAgain.controller.renderVals().error, '', 'second 401 leaves the original submit action without a warning banner');
+  assert.equal(expiredAgain.window.document.querySelector('#fb-toast').hidden,false,'second 401 gives existing lightweight feedback instead of silently stopping');
+  const missingCallbackSession=harness({draft,display,query:'&resume=submit',readStatus:401});await missingCallbackSession.controller.init();assert.equal(missingCallbackSession.posts.length,0);assert.equal(missingCallbackSession.navigations.length,0);assert.equal(missingCallbackSession.controller.renderVals().error,'');assert.equal(missingCallbackSession.window.document.querySelector('#fb-toast').hidden,false);missingCallbackSession.dom.window.close();
   const deniedWithSession=harness({draft,display,query:'&resume=submit&oauth_error=1',status:201});
   await deniedWithSession.controller.init();
   assert.equal(deniedWithSession.posts.length,0,'denied callback never auto-submits even if another session still exists');

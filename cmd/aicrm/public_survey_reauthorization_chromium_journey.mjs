@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 const base=process.env.AICRM_PUBLIC_SURVEY_BROWSER_URL, session=process.env.AICRM_PUBLIC_SURVEY_BROWSER_SESSION, slug=process.env.AICRM_PUBLIC_SURVEY_BROWSER_SUCCESS_SLUG;
 const screenshots=process.env.AICRM_PUBLIC_SURVEY_SCREENSHOT_DIR;
 const one=process.env.AICRM_PUBLIC_SURVEY_BROWSER_DISPLAY==='one_by_one';
+const nativeInput=process.env.AICRM_PUBLIC_SURVEY_BROWSER_NATIVE_INPUT==='1';
 const answerPath='/h5/'+(one?'one':'all')+'.html';
 const text='\n保留完整文字答案\n';
 if(!base?.startsWith('https://')||!/^[A-Za-z0-9_-]{43}$/.test(session||'')||!/^[a-z0-9-]+$/.test(slug||'')||!path.isAbsolute(screenshots||''))throw new Error('invalid controlled reauthorization journey');
@@ -36,26 +37,29 @@ try{
  if(one){
   for(let index=0;index<7;index++){
    const previous=await evaluate(cdp,"document.querySelector('#screen [data-question-id]').dataset.questionId");
-   await evaluate(cdp,`(()=>{const choice=document.querySelector('#screen label');if(choice)choice.click();else{const input=document.querySelector('#screen input');input.value='13800000000';input.dispatchEvent(new Event('input',{bubbles:true}));}document.querySelector('[data-h5-next]').click();return true;})()`);
+   await evaluate(cdp,`(()=>{const choice=document.querySelector('#screen label');if(choice)choice.click();else{const input=document.querySelector('#screen input');input.value='13800000000';if(!${nativeInput})input.dispatchEvent(new Event('input',{bubbles:true}));}document.querySelector('[data-h5-next]').click();return true;})()`);
    await wait(cdp,`document.querySelector('#screen [data-question-id]')?.dataset.questionId!==${JSON.stringify(previous)}`,'step navigation did not advance');
   }
  }
  await evaluate(cdp,"document.querySelector('[data-h5-submit]').scrollIntoView();document.querySelector('[data-h5-submit]').click();true");
  await wait(cdp,"(()=>{const error=document.querySelector('#screen [data-h5-error]');const rect=error?.getBoundingClientRect();return error?.textContent&&rect.top>=0&&rect.bottom<=innerHeight&&document.querySelector('[data-h5-submit]')?.disabled===false;})()",'missing answer did not reveal the existing error or unlock submission');
- await evaluate(cdp,`(()=>{for(const card of document.querySelectorAll('#screen [data-question-id]'))card.querySelector('label')?.click();const set=(node,value)=>{if(!node)return;node.value=value;node.dispatchEvent(new Event('input',{bubbles:true}));};set(document.querySelector('#screen input'),'13800000000');set(document.querySelector('#screen textarea'),${JSON.stringify(text)});return true;})()`);
- if(await evaluate(cdp,"Boolean(document.querySelector('#screen [data-h5-error]'))"))throw new Error('corrected input left stale validation feedback');
+ await evaluate(cdp,`(()=>{const set=(node,value)=>{if(!node)return;node.value=value;if(!${nativeInput})node.dispatchEvent(new Event('input',{bubbles:true}));};if(${nativeInput}){set(document.querySelector('#screen input'),'13800000000');set(document.querySelector('#screen textarea'),${JSON.stringify(text)});}for(const card of document.querySelectorAll('#screen [data-question-id]'))card.querySelector('label')?.click();set(document.querySelector('#screen input'),'13800000000');set(document.querySelector('#screen textarea'),${JSON.stringify(text)});return true;})()`);
+ if(!nativeInput && await evaluate(cdp,"Boolean(document.querySelector('#screen [data-h5-error]'))"))throw new Error('corrected input left stale validation feedback');
  await evaluate(cdp,"document.querySelector('[data-h5-submit]').scrollIntoView();true");
- const capture=async(name)=>{await evaluate(cdp,'document.fonts.ready');const image=await cdp.call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,(one?'one-':'all-')+name),Buffer.from(image.data,'base64'),{mode:0o600});};
+ const capture=async(name)=>{await evaluate(cdp,'document.fonts.ready');const image=await cdp.call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,(nativeInput?'native-':'')+(one?'one-':'all-')+name),Buffer.from(image.data,'base64'),{mode:0o600});};
  await capture('survey-reauth-filled-390.png');
  // A normal refresh must restore both mobile/Unicode text and pagination,
  // without posting or requiring an OAuth callback marker.
- await cdp.call('Page.reload');
- await wait(cdp,`document.querySelector('#screen textarea')?.value===${JSON.stringify(text)} && document.querySelector('[data-h5-submit]')?.disabled===false`,'ordinary reload lost answers or progress');
+ if(!nativeInput){
+  await cdp.call('Page.reload');
+  await wait(cdp,`document.querySelector('#screen textarea')?.value===${JSON.stringify(text)} && document.querySelector('[data-h5-submit]')?.disabled===false`,'ordinary reload lost answers or progress');
+ }
  await evaluate(cdp,"document.querySelector('[data-h5-submit]').scrollIntoView();document.querySelector('[data-h5-submit]').click();true");
  if(process.env.AICRM_PUBLIC_SURVEY_BROWSER_RECOVERY==='lost-response'){
   await wait(cdp,"document.querySelector('#screen [data-h5-error]')?.textContent.includes('502') && document.querySelector('[data-h5-submit]')?.disabled===false",'unconfirmed committed response locked submission');
   if(await evaluate(cdp,`document.querySelector('#screen textarea')?.value!==${JSON.stringify(text)}`))throw new Error('lost response discarded input');
   await capture('survey-lost-response-390.png');
+  if(nativeInput && await evaluate(cdp,"document.querySelector('#fb-toast')?.hidden!==false"))throw new Error('native-input submission failure did not provide visible feedback');
   await evaluate(cdp,"document.querySelector('[data-h5-submit]').click();document.querySelector('[data-h5-submit]')?.click();true");
   await wait(cdp,"location.pathname==='/h5/done.html' && document.querySelector('[data-h5-done] h1')?.textContent==='收到你的问卷'",'same-key retry failed to recover committed response');
   if(await evaluate(cdp,`Boolean(sessionStorage.getItem('survey.submit-resume:'+${JSON.stringify(slug)}))`))throw new Error('recovered completion did not clear draft');

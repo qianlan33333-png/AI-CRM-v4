@@ -1,50 +1,71 @@
 {
   "schema": 1,
-  "baseline_sha": "e3bc92d5fdea1ee28a810d9a66dd04cf39602ebf",
+  "baseline_sha": "6ceb3aec82aafde04bd7523d780982effdf9367b",
   "checks": [
     {
       "lane": "backend",
-      "path": "internal/automation/app/runs_projection_test.go",
-      "test": "TestProjectAIPlanNeedsAttentionDistinguishesRetryableAndUnknown"
+      "package": "./internal/survey/app"
     },
     {
       "lane": "backend",
-      "path": "internal/automation/http/run_history_test.go",
-      "test": "TestRunHistoryQueryScopeValidationAndAuthorization"
+      "package": "./internal/survey/http"
     },
     {
       "lane": "backend",
-      "path": "internal/automation/store/run_history_integration_test.go",
-      "test": "TestPostgreSQLRunHistoryFiltersBeforePaginationAndCountsAllPages",
+      "package": "./internal/survey/port"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/automation_audience_runtime_integration_test.go",
-      "test": "TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL",
-      "postgres": true
+      "path": "internal/outbound/survey_completion_test.go",
+      "test": "TestSurveyCompletionProviderPostsSignedPayloadToWhitelistedTarget"
     },
     {
       "lane": "backend",
-      "path": "internal/webshell/handler_test.go",
-      "test": "TestStandaloneHandlerRendersAdminLoginSidebarAndAssets"
+      "path": "internal/outbound/survey_completion_test.go",
+      "test": "TestSurveyCompletionProviderTimeoutIsOutcomeUnknownAfterCall"
     },
     {
       "lane": "backend",
-      "path": "internal/webshell/handler_test.go",
-      "test": "TestAudienceTemplateControllerIsFrozenDD8Asset"
+      "path": "internal/outbound/survey_completion_test.go",
+      "test": "TestSurveyCompletionSinkRecordsCallFactsWithoutInferringProviderResult"
     },
     {
       "lane": "frontend",
-      "path": "internal/webshell/static/admin_console/admin_audience_send_history.test.mjs"
+      "path": "web/v3/h5AuthAdapter.test.mjs"
     },
     {
       "lane": "frontend",
-      "path": "internal/webshell/static/admin_console/admin_audience_template_host.test.mjs"
+      "path": "web/v3/surveyCompletionAction.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyPublicHost.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveySubmissionResume.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/h5ControllerTime.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyAdapter.test.mjs"
     }
   ],
   "installed_checks": [
-    "audience-send-history",
-    "audience-confirmation"
+    "journey1-installed-reauthorization-all",
+    "journey1-installed-reauthorization-one",
+    "journey1-installed-lost-response-all",
+    "journey1-installed-lost-response-one",
+    "journey1-installed-native-input-all",
+    "journey1-installed-native-input-one",
+    "journey1-installed-source-binary-host-readback"
   ]
 }

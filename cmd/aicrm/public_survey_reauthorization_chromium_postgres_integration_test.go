@@ -126,6 +126,17 @@ func TestPostgreSQLPublicSurveyReauthorizationChromiumJourney(t *testing.T) {
 // An Owner commit followed by a gateway failure is outcome-unknown to the
 // browser. Retry must recover the original receipt without a second write.
 func TestPostgreSQLPublicSurveyLostResponseChromiumJourney(t *testing.T) {
+	runPublicSurveyLostResponseChromiumJourney(t, false)
+}
+
+// Safari/history-restored native values may be visible without input events.
+// Exercise the actual H5 Host, then independently read the protected PG data.
+func TestPostgreSQLPublicSurveyNativeInputRecoveryChromiumJourney(t *testing.T) {
+	runPublicSurveyLostResponseChromiumJourney(t, true)
+}
+
+func runPublicSurveyLostResponseChromiumJourney(t *testing.T, nativeInput bool) {
+	t.Helper()
 	if !platformconfig.ChromiumJourneyRequired() {
 		t.Skip("set AICRM_REQUIRE_CHROMIUM_JOURNEY=1 to run the required Chromium journey")
 	}
@@ -166,6 +177,9 @@ func TestPostgreSQLPublicSurveyLostResponseChromiumJourney(t *testing.T) {
 			})
 			command := exec.CommandContext(fixture.ctx, "node", filepath.Join(filepath.Dir(fixture.script), "public_survey_reauthorization_chromium_journey.mjs"))
 			command.Env = append(os.Environ(), "AICRM_PUBLIC_SURVEY_BROWSER_URL="+fixture.browserURL, "AICRM_PUBLIC_SURVEY_BROWSER_SESSION="+fixture.session, "AICRM_PUBLIC_SURVEY_BROWSER_SUCCESS_SLUG="+fixture.success.Slug, "AICRM_PUBLIC_SURVEY_SCREENSHOT_DIR="+fixture.screenshots, "AICRM_PUBLIC_SURVEY_BROWSER_DISPLAY="+string(display), "AICRM_PUBLIC_SURVEY_BROWSER_RECOVERY=lost-response")
+			if nativeInput {
+				command.Env = append(command.Env, "AICRM_PUBLIC_SURVEY_BROWSER_NATIVE_INPUT=1")
+			}
 			output, err := command.CombinedOutput()
 			if strings.Contains(string(output), "reauthorization_chromium: SKIP_DEVTOOLS") && runtime.GOOS == "darwin" {
 				t.Skip("local Chromium DevTools unavailable; Linux journey required")
@@ -187,6 +201,18 @@ func TestPostgreSQLPublicSurveyLostResponseChromiumJourney(t *testing.T) {
 			}
 			if err = fixture.native.QueryRow(fixture.ctx, `SELECT count(*) FROM survey_submission_claims WHERE questionnaire_id=$1`, fixture.success.ID).Scan(&claims); err != nil || claims != 1 {
 				t.Fatalf("claims=%d err=%v", claims, err)
+			}
+			if nativeInput {
+				for kind, expected := range map[string]string{"mobile": "13800000000", "textarea": "\n保留完整文字答案\n"} {
+					var encrypted []byte
+					if err = fixture.native.QueryRow(fixture.ctx, `SELECT a.text_value_ciphertext FROM survey_submission_answers a JOIN survey_submissions s ON s.id=a.submission_id WHERE s.questionnaire_id=$1 AND a.question_type=$2`, fixture.success.ID, kind).Scan(&encrypted); err != nil {
+						t.Fatal(err)
+					}
+					plain, decryptErr := fixture.cipher.Decrypt(encrypted)
+					if decryptErr != nil || plain != expected {
+						t.Fatalf("native %s value did not survive the real submission and receipt recovery", kind)
+					}
+				}
 			}
 		})
 	}

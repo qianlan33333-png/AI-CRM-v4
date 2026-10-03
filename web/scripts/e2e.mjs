@@ -3167,7 +3167,10 @@ console.log('h5/all.html（严格 11 位大陆手机号）');
   click(dom, d.querySelector('[data-h5-submit]'));
   await sleep(20);
   ok('手机号题拒绝 +86 且请求前失败', dom.window.__h5HttpTest.calls.every((call) => !call.path.endsWith('/submissions')) && d.querySelector('[data-h5-error]')?.textContent.includes('11位中国大陆手机号'));
-  input(dom, field, '13800138000');
+  // Validation rerenders the form. Edit the currently connected field, as a
+  // real browser user does, rather than dispatching on its detached old node.
+  const correctedField = d.querySelector('[data-text-question-id="105"]');
+  input(dom, correctedField, '13800138000');
   click(dom, d.querySelector('[data-h5-submit]'));
   await sleep(30);
   const call = dom.window.__h5HttpTest.calls.find((entry) => entry.path.endsWith('/submissions'));

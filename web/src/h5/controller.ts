@@ -82,15 +82,18 @@ export class H5Controller extends PageBase {
 		else if (new URLSearchParams(location.search).has('oauth_error')) this.error = '微信授权未完成，请重试';
 		else if (/MicroMessenger/i.test(navigator.userAgent || '')) {
 			try {
-				const session = await surveyRead((signal) => fetch(`/api/h5/surveys/session?slug=${encodeURIComponent(this.slug)}`, { signal, credentials: 'same-origin', headers: { Accept: 'application/json' } }));
+				const { session, body } = await surveyRead(async (signal) => {
+					const session = await fetch(`/api/h5/surveys/session?slug=${encodeURIComponent(this.slug)}`, { signal, credentials: 'same-origin', headers: { Accept: 'application/json' } });
+					const body = session.ok ? await session.json() as { display?: string; submitted?: unknown; completion_action?: unknown } : undefined;
+					return { session, body };
+				});
 				if (session.ok) {
 					try { sessionStorage.removeItem('survey.oauth:' + this.slug); } catch {}
-					const body = await session.json() as { display?: string; submitted?: unknown; completion_action?: unknown };
-            if (body.submitted === true) {
-              this.complete(completionAction(body.completion_action));
+            if (body!.submitted === true) {
+              this.complete(completionAction(body!.completion_action));
               return;
             }
-					location.replace(`/h5/${body.display === 'one' ? 'one' : 'all'}.html?slug=${encodeURIComponent(this.slug)}`);
+					location.replace(`/h5/${body!.display === 'one' ? 'one' : 'all'}.html?slug=${encodeURIComponent(this.slug)}`);
 				} else if (session.status === 401) this.startOAuth(false);
 				else if (session.status === 409) this.error = '当前微信身份存在冲突，请联系管理员处理后再填写';
 				else if (session.status === 503) this.error = '微信授权暂不可用，请稍后再试';
@@ -183,6 +186,7 @@ export class H5Controller extends PageBase {
           document.title = draft.definition.title;
           this.restoreResumeDraft(draft);
           this.error = '';
+          if (returningFromAuthorization && !query.has('oauth_error')) this.authorizationRetryNotice();
           return;
         }
 		location.replace(`/q/${encodeURIComponent(this.slug)}`);
@@ -226,8 +230,35 @@ export class H5Controller extends PageBase {
   private refresh(revealError = false): void {
     this.__render?.();
     if (revealError && this.error) {
-      document.querySelector<HTMLElement>('#screen [data-h5-error]')?.scrollIntoView?.({ block: 'center' });
+      // Reuse the existing feedback layer near the submit action. Scrolling
+      // alone may be unavailable or ineffective in an embedded mobile view.
+      toast(this.error, true);
+      try { document.querySelector<HTMLElement>('#screen [data-h5-error]')?.scrollIntoView?.({ block: 'center' }); } catch {}
     }
+  }
+
+  private authorizationRetryNotice(): void {
+    toast('微信登录状态未能保持，请再次点击提交重试，答案已保留。', true);
+  }
+
+  private captureVisibleText(): void {
+    if (!this.definition) return;
+    const visible = this.definition.answer_display_mode === 'one_by_one'
+      ? this.definition.questions.slice(this.questionIndex, this.questionIndex + 1)
+      : this.definition.questions;
+    const questions = new Map(visible.map((question) => [question.id, question]));
+    let changed = false;
+    for (const input of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('#screen input[data-text-question-id], #screen textarea[data-text-question-id]')) {
+      const question = questions.get(Number(input.dataset.textQuestionId));
+      if (!question || !this.supported(question) || !['mobile', 'textarea'].includes(question.type)) continue;
+      if (input.value !== (this.textAnswers.get(question.id) || '')) {
+        this.textAnswers.set(question.id, input.value);
+        changed = true;
+      }
+    }
+    // Native/history-restored input values need not have emitted input/change.
+    // Capture before a choice rerender, navigation or submission removes them.
+    if (changed) { this.submissionKey = ''; this.saveDraft(); }
   }
 
   private resumeDraftKey(): string { return 'survey.submit-resume:' + this.slug; }
@@ -366,6 +397,7 @@ export class H5Controller extends PageBase {
 
   private select(question: V3SurveyQuestion, optionID: number): void {
     if (this.submitting || this.submitted || !this.supported(question)) return;
+    this.captureVisibleText();
     const previous = this.answers.get(question.id) || [];
     const next = question.type === 'single_choice' ? [optionID]
       : previous.includes(optionID) ? previous.filter((id) => id !== optionID) : [...previous, optionID];
@@ -411,6 +443,7 @@ export class H5Controller extends PageBase {
   private async submit(afterAuthorization = false): Promise<void> {
     if (!this.definition || this.submitting || this.submitted) return;
     if (this.definitionStale) { this.refresh(true); return; }
+    this.captureVisibleText();
     this.error = this.definition.questions.map((question) => this.questionError(question)).find(Boolean) || '';
     if (this.error) { this.refresh(true); return; }
     const answers: V3SurveySubmissionAnswer[] = this.definition.questions
@@ -421,31 +454,27 @@ export class H5Controller extends PageBase {
     // Match the Host's 15-second HTTP write budget. A lost response remains
     // outcome-unknown: release the UI lock, retain the original key, and let
     // the user retry rather than starting a second logical submission.
-    const request = new AbortController();
-    const timeout = window.setTimeout(() => request.abort(), 15_000);
     try {
       // One key per unchanged answer set in this filling lifecycle. Unknown
       // network outcomes retry the same request; editing answers clears the key.
       this.submissionKey ||= this.newSubmissionKey();
       this.saveDraft();
-      const receipt = await submitSurvey(this.definition.slug, { version: this.definition.version, submission_key: this.submissionKey, answers }, request.signal);
+      const receipt = await surveyRead((signal) => submitSurvey(this.definition!.slug, { version: this.definition!.version, submission_key: this.submissionKey, answers }, signal), '提交结果暂未确认，答案已保留；未修改答案时可安全重试。');
       this.complete(receipt.completionAction);
     } catch (error) {
       if (isAlreadySubmitted(error)) this.complete(completionActionFromCarrier(error.details));
       else if (error instanceof ApiError && error.status === 401) {
         this.error = '';
         if (!afterAuthorization) this.resumeAuthorization();
+        else this.authorizationRetryNotice();
       }
       else if (error instanceof ApiError && error.status === 409 &&
                (error.details as { error?: unknown } | null)?.error === 'definition_version_conflict') {
         this.definitionStale = true;
         this.error = '问卷内容已更新，当前答案尚未提交。请点击重试读取最新题目后重新填写。';
       }
-      else this.error = request.signal.aborted
-        ? '提交结果暂未确认，答案已保留；未修改答案时可安全重试。'
-        : error instanceof Error ? error.message : '提交失败；未修改答案时可安全重试';
+      else this.error = error instanceof Error ? error.message : '提交失败；未修改答案时可安全重试';
     } finally {
-      window.clearTimeout(timeout);
       this.submitting = false;
       this.refresh(true);
     }
@@ -458,6 +487,7 @@ export class H5Controller extends PageBase {
 
   private move(delta: number): void {
     if (!this.definition || this.submitting || this.submitted) return;
+    this.captureVisibleText();
     if (delta > 0 && !this.definitionStale) {
       this.error = this.questionError(this.definition.questions[this.questionIndex]);
       if (this.error) { this.refresh(true); return; }
