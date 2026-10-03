@@ -84,3 +84,19 @@ Origin绑定/不转发重定向凭证：防跨环境秘密泄露；复用HTTPS s
 最终上线候选基线为 `449f8180babad320d47da557af70f4f58cec26f2`（由唯一工作台提供）。重新生成目录，只同步已有 automation-runs 的 `package_id` 查询、`total` 响应及已声明错误；仍为 549 项/24 模块，不新增业务或权限。原认证/权限代码未变化，复用原有效局部证据；目录直接消费者补 CLI/生成器合同，Linux PostgreSQL及安装验证绑定最终候选。
 
 对齐后复现：`admin.listAutomationRuns --query package_id=27 --dry-run` 因 `$ref` 数值参数未在解析前展开，错误地报告 expected integer。修复仅在查询参数选择解析器前解析本地 Schema 引用，沿用现有整数/布尔/数组校验及原始 HTTP 序列化；非法数值、缺失或循环引用仍拒绝。已补登记接口27/20正常查询与非数值/小数/溢出拒绝回归。该修复是无状态客户端参数处理，不改身份、服务端授权、OneID、任务或 Provider 效果，属于本次已授权候选的相关修复。
+
+## 2026-10-03 本机真实登录：HTTP/1 ALPN 修复
+
+复用已授权 CLI 父 brief。qianlan 密码已完成维护恢复及生产 HTTPS 登录读回；真实 Darwin CLI 对同一 challenge 的 GET 报 transport/EOF，Python/curl 正常。Go `DefaultTransport.Clone` 保留已初始化的 TLS `NextProtos` 包含 h2；CLI 的 wire transport 只启用 HTTP/1，服务器却协商到 h2。支持 HTTP/2 的真实 TLS 夹具在原代码复现失败，公开生产 GET 在显式 NextProtos=http/1.1 时 200。
+
+```mermaid
+flowchart LR
+ A[CLI 登录] --> B[TLS ALPN 与 HTTP/1 transport 一致]
+ B --> C[GET challenge]
+ C --> D[原有认证与密钥环]
+ D --> E[授权 HXC 查询及快照读回]
+```
+
+参考当前 Go 1.26.6 标准库 `net/http/transport.go` 的 Clone、Protocols、TLS ALPN 初始化逻辑，沿用父 PRD 的 Go/Cobra 和 HTTP 客户端约定。只在克隆出的 TLS 配置中明确宣告 http/1.1；保留证书验证、默认密钥交换、Origin 绑定、不重定向和写请求禁止盲目重试。没有新增限制。
+
+OneID：不涉及，不解析或关联客户。Persistence/External Effects：本修复是无状态 HTTP 传输，沿用已有认证及业务边界，不新增任务/Provider 调用。无 UI、迁移或服务端接口变化。直接消费者仅 cmd/aicrm-cli；cmd/aicrm 的引用为测试文件。回归使用启用 HTTP/2 的 TLS 服务，证书通过独立 RootCA 验证，GET/POST 均必须为 HTTP/1.1，整包 CRMCLI 测试同时覆盖凭据和失败边界。候选构建本机客户端并进行真实 qianlan 登录和只读 HXC 查询；服务器发布仍由唯一工作台判断实际消费者与载荷。

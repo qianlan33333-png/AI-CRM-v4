@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -86,6 +87,12 @@ func NewClient(origin string, credential Credential, timeout time.Duration) (*Cl
 		// decisions in the business Owner rather than the transport.
 		t.Protocols = new(http.Protocols)
 		t.Protocols.SetHTTP1(true)
+		// Clone can retain the default transport's initialized HTTP/2 ALPN.
+		// Keep TLS negotiation consistent with the HTTP/1-only wire transport.
+		if t.TLSClientConfig == nil {
+			t.TLSClientConfig = &tls.Config{}
+		}
+		t.TLSClientConfig.NextProtos = []string{"http/1.1"}
 		transport = t
 	}
 	return &Client{Origin: origin, Credential: credential, HTTP: &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil

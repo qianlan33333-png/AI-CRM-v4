@@ -3,6 +3,8 @@ package crmcli
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io"
@@ -21,6 +23,41 @@ import (
 
 func testOperation(method, path, auth string) catalog.Operation {
 	return catalog.Operation{ID: "test", Binding: &catalog.Binding{Method: method, Path: path, Auth: auth, ContentType: "application/json"}}
+}
+
+func TestHTTP1TransportNegotiatesHTTP1WithHTTP2EnabledServer(t *testing.T) {
+	protocols := make(chan int, 2)
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		protocols <- r.ProtoMajor
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	server.EnableHTTP2 = true
+	server.TLS = &tls.Config{NextProtos: []string{"h2", "http/1.1"}}
+	server.StartTLS()
+	defer server.Close()
+	client, err := NewClient(server.URL, Credential{}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := client.HTTP.Transport.(*http.Transport)
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = &tls.Config{}
+	}
+	transport.TLSClientConfig.RootCAs = roots
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		response, err := client.request(context.Background(), method, "/probe", "", nil, "")
+		if err != nil {
+			t.Fatalf("%s over production-compatible TLS failed: %v", method, err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		response.Body.Close()
+		if response.ProtoMajor != 1 || response.TLS.NegotiatedProtocol != "http/1.1" || <-protocols != 1 {
+			t.Fatal("HTTP/1 transport negotiated HTTP/2")
+		}
+	}
 }
 func TestOriginBindingAndRegisteredPathIsolation(t *testing.T) {
 	for _, v := range []string{"http://crm.test", "https://u:p@crm.test", "https://crm.test/path", "https://crm.test?token=x"} {

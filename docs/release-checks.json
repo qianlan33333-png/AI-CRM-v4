@@ -1,19 +1,14 @@
 {
   "schema": 1,
-  "baseline_sha": "39d6c8219d80cbda650f103aa16ccac007569446",
+  "baseline_sha": "973ed2e8fd1ae93c95f4a70760b9f34c89e0e7f3",
   "checks": [
     {
-      "lane": "frontend",
-      "path": "web/v3/surveySubmissionResume.test.mjs"
+      "lane": "backend",
+      "package": "./internal/crmcli"
     }
   ],
-  "installed_checks": [
-    "installed-survey-public-host-render",
-    "journey1-installed-reauthorization-all",
-    "journey1-installed-reauthorization-one",
-    "journey1-installed-lost-response-all",
-    "journey1-installed-lost-response-one",
-    "journey1-installed-native-input-all",
-    "journey1-installed-native-input-one"
-  ]
+  "build_commands": [
+    "./cmd/aicrm-cli"
+  ],
+  "installed_checks": []
 }
