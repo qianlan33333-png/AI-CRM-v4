@@ -67,7 +67,8 @@ CI_ONLY_FILES = {
 }
 # Developer-machine archive operations are neither installed controller
 # binaries nor application runtime. Keep this separate from FIXED_CONTROLLER_FILES.
-MAINTENANCE_ONLY_PREFIXES = ("cmd/migrate-wecom-directory-retire/",)
+MAINTENANCE_ONLY_PREFIXES = ("cmd/migrate-wecom-directory-retire/",
+                             "cmd/recover-access-password/", "internal/access/maintenance/")
 
 OPERATOR_ONLY_FILES = {
     "scripts/manual_github_sync.py",
@@ -677,6 +678,17 @@ def _maintenance_application_guard(repo: Path, target_sha: str, result: Classifi
         if any(any(p.startswith(c.package.removeprefix('./') + '/') for p in maintenance) for c in commands):
             result.runtime_changed = result.full_build = True
             result.full_build_reason = 'maintenance-command-added-to-application'
+        if any(p.startswith('internal/access/maintenance/') for p in maintenance):
+            consumers = subprocess.run(
+                ['git', '-C', str(repo), 'grep', '-l', '-F', 'internal/access/maintenance"',
+                 target_sha, '--', '*.go'], capture_output=True, text=True, check=False)
+            if consumers.returncode not in (0, 1):
+                raise BuildError('maintenance consumer lookup failed')
+            paths = [line.partition(':')[2] for line in consumers.stdout.splitlines()]
+            if any(not p.endswith('_test.go') and not p.startswith(MAINTENANCE_ONLY_PREFIXES)
+                   for p in paths):
+                result.runtime_changed = result.full_build = True
+                result.full_build_reason = 'maintenance-library-used-by-application'
 
 
 

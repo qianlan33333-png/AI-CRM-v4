@@ -1,79 +1,11 @@
 {
   "schema": 1,
-  "baseline_sha": "449f8180babad320d47da557af70f4f58cec26f2",
+  "baseline_sha": "52270f0db6d5f016501f20cc294ef4da6caac4ca",
   "checks": [
     {
-      "lane": "backend",
-      "package": "./internal/crmcli"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/generate-cli-catalog"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/access/http"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/openplatform/http"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/openplatform/port"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/access/app",
-      "test": "TestSessionReplayAfterLogoutAndCSRFValidation"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/access/app",
-      "test": "TestSessionVersionInvalidatesExistingSession"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/access/app",
-      "test": "TestMachineTokenRotateAndDisableImmediatelyInvalidateBearer"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/access/app",
-      "test": "TestMachineClientCredentialsEnforcesAudienceScopeAndCIDR"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/access/app",
-      "test": "TestMachineV1GrantPatchRevokesBearerAndRecordsControlAudit"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestCLIHumanDiscoveryDoesNotPromoteRolesOrIdentity"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestCLIMachineCanIChecksTrustedResourceAndNeverExecutes"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestCLIExistingAccessHTTPLoginAndLogoutJourney"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestCLIPostgreSQLAuthenticationCustomerAndGrantRevocationJourney",
-      "postgres": true
-    },
-    {
-      "lane": "frontend",
-      "path": "scripts/check-openapi-route-parity.test.mjs"
+      "lane": "preflight",
+      "path": "scripts/test_domestic_release_build.py"
     }
   ],
-  "installed_checks": [
-    "cli-access"
-  ]
+  "installed_checks": []
 }

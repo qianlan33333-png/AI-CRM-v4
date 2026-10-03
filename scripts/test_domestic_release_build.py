@@ -17,6 +17,33 @@ import domestic_release_build as builder
 
 
 class DomesticReleaseBuildTests(unittest.TestCase):
+    def test_access_recovery_stays_source_only_until_application_uses_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            self._init_git_fixture(repo)
+            base = subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip()
+            library = repo / 'internal/access/maintenance/password.go'
+            library.parent.mkdir(parents=True)
+            library.write_text('package maintenance\n')
+            command = repo / 'cmd/recover-access-password/main.go'
+            command.parent.mkdir(parents=True)
+            command.write_text('package main\nimport _ "example.test/crm/internal/access/maintenance"\n')
+            subprocess.run(['git', '-C', str(repo), 'add', '.'], check=True)
+            subprocess.run(['git', '-C', str(repo), 'commit', '-qm', 'maintenance only'], check=True)
+            self.assertFalse(builder.classify(repo, base, 'HEAD')['runtime_changed'])
+            application = repo / 'cmd/aicrm/main.go'
+            application.parent.mkdir(parents=True)
+            application.write_text('package main\nimport _ "example.test/crm/internal/access/maintenance"\n')
+            subprocess.run(['git', '-C', str(repo), 'add', '.'], check=True)
+            subprocess.run(['git', '-C', str(repo), 'commit', '-qm', 'application consumer'], check=True)
+            consumer_base = subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip()
+            library.write_text('package maintenance\n// changed implementation\n')
+            subprocess.run(['git', '-C', str(repo), 'add', '.'], check=True)
+            subprocess.run(['git', '-C', str(repo), 'commit', '-qm', 'maintenance change'], check=True)
+            result = builder.classify(repo, consumer_base, 'HEAD')
+            self.assertTrue(result['runtime_changed'])
+            self.assertTrue(result['full_build'])
+
     def test_classify_does_not_execute_target_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repo = Path(temporary)
