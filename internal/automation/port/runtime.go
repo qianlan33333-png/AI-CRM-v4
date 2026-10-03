@@ -85,6 +85,13 @@ type OutboundContentFreezer interface {
 	FreezeOutboundContent(context.Context, OutboundPublishedContent) (json.RawMessage, [32]byte, error)
 }
 
+// GeneratedOutboundContentFreezer freezes local Media sources before model
+// acceptance and combines the result with text without any current-data read.
+type GeneratedOutboundContentFreezer interface {
+	FreezeGenerationTemplate(context.Context, OutboundPublishedContent) (json.RawMessage, [32]byte, error)
+	CompleteGeneratedContent(json.RawMessage, [32]byte, string) (json.RawMessage, [32]byte, error)
+}
+
 type PublishedAgentReader interface {
 	PublishedAgent(context.Context, AgentID) (PublishedAgent, bool, error)
 }

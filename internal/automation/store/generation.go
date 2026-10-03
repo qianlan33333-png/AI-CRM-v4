@@ -204,6 +204,18 @@ func (r *Repository) SettleGeneration(ctx context.Context, completion automation
 		return item, run, false, fmt.Errorf("audit generation completion: %w", err)
 	}
 	item.State, item.GeneratedText, item.FailureCode, item.AttemptCount, item.UpdatedAt, item.CompletedAt = state, text, failure, completion.Attempt.Number, completed, &completed
+	if run.PolicyID > 0 && state != "executed" {
+		if item.Context.PolicyDelivery == nil {
+			return item, run, false, automationapp.ErrRuntimeConflict
+		}
+		recipientState := "final_failed"
+		if state == "outcome_unknown" {
+			recipientState = "outcome_unknown"
+		}
+		if _, err = t.Exec(ctx, `UPDATE automation_run_recipients SET state=$2,updated_at=$3 WHERE id=$1 AND run_id=$4 AND effect_id IS NULL`, item.Context.PolicyDelivery.RecipientID, recipientState, completed, run.ID); err != nil {
+			return item, run, false, err
+		}
+	}
 	var queued, unknown, succeeded int64
 	err = t.QueryRow(ctx, `SELECT count(*) FILTER (WHERE state IN ('accepted','queued')),count(*) FILTER (WHERE state='outcome_unknown'),count(*) FILTER (WHERE state='executed') FROM automation_generation_items WHERE run_id=$1`, item.RunID).Scan(&queued, &unknown, &succeeded)
 	if err != nil {
@@ -226,6 +238,21 @@ func (r *Repository) SettleGeneration(ctx context.Context, completion automation
 	// Unknown and failed items are terminal exclusions. They must not block the
 	// successful subset from entering the existing human-review flow.
 	return item, run, allFinal && succeeded > 0 && run.AIPlanID == 0, nil
+}
+
+func (r *Repository) StartGeneratedPolicyRun(ctx context.Context, runID int64, now time.Time) error {
+	t, err := tx(ctx)
+	if err != nil {
+		return err
+	}
+	tag, err := t.Exec(ctx, `UPDATE automation_runs SET state='executing',updated_at=$2,completed_at=NULL WHERE id=$1 AND policy_id IS NOT NULL AND state='preparing' AND ai_plan_id IS NULL`, runID, now.UTC())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return automationapp.ErrRuntimeConflict
+	}
+	return nil
 }
 
 func nullableText(value string) any {

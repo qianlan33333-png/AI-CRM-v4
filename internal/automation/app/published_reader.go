@@ -21,11 +21,15 @@ func (s *Service) PublishedAgent(ctx context.Context, id automationport.AgentID)
 	if agent.Status == automationport.AgentStatusArchived || agent.PublishedVersion < 1 {
 		return automationport.PublishedAgent{}, false, nil
 	}
+	return publishedAgentMetadata(agent), true, nil
+}
+
+func publishedAgentMetadata(agent automationport.Agent) automationport.PublishedAgent {
 	contentInput := map[string]any{"automation_type": agent.AutomationType, "published_role_prompt": agent.PublishedRolePrompt, "published_task_prompt": agent.PublishedTaskPrompt, "content_text": agent.FixedContentPackage.ContentText}
 	contentRaw, _ := json.Marshal(contentInput)
 	materialsInput := map[string]any{"images": agent.FixedContentPackage.ImageLibraryIDs, "mini_programs": agent.FixedContentPackage.MiniprogramLibraryIDs, "attachments": agent.FixedContentPackage.AttachmentLibraryIDs, "group_invites": agent.FixedContentPackage.GroupInviteLibraryIDs, "dynamic_card": agent.FixedContentPackage.DynamicMiniprogramCard}
 	materialsRaw, _ := json.Marshal(materialsInput)
-	return automationport.PublishedAgent{AgentID: agent.ID, AutomationType: agent.AutomationType, Status: agent.Status, PublishedVersion: agent.PublishedVersion, ContentDigest: sha256.Sum256(contentRaw), MaterialsDigest: sha256.Sum256(materialsRaw)}, true, nil
+	return automationport.PublishedAgent{AgentID: agent.ID, AutomationType: agent.AutomationType, Status: agent.Status, PublishedVersion: agent.PublishedVersion, ContentDigest: sha256.Sum256(contentRaw), MaterialsDigest: sha256.Sum256(materialsRaw)}
 }
 
 var _ automationport.PublishedAgentReader = (*Service)(nil)
@@ -62,7 +66,9 @@ func (s *Service) PublishedGeneration(ctx context.Context, id automationport.Age
 	if agent.AutomationType != automationport.AutomationTypeAgent || agent.Status != automationport.AgentStatusActive || agent.PublishedVersion != version {
 		return automationport.PublishedGeneration{}, false, nil
 	}
-	published := automationport.PublishedGeneration{AgentID: agent.ID, PublishedVersion: agent.PublishedVersion, AgentCode: agent.AgentCode, RolePrompt: agent.PublishedRolePrompt, TaskPrompt: agent.PublishedTaskPrompt}
+	published := automationport.PublishedGeneration{AgentID: agent.ID, PublishedVersion: agent.PublishedVersion, AgentCode: agent.AgentCode, RolePrompt: agent.PublishedRolePrompt, TaskPrompt: agent.PublishedTaskPrompt, Materials: agent.FixedContentPackage}
+	metadata := publishedAgentMetadata(agent)
+	published.ContentDigest, published.MaterialsDigest = metadata.ContentDigest, metadata.MaterialsDigest
 	return published, published.Valid(), nil
 }
 

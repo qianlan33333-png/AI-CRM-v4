@@ -70,6 +70,7 @@ type RuntimeStore interface {
 	SettleGeneration(context.Context, automationport.GenerationCompletion) (automationdomain.GenerationItem, automationdomain.RuntimeRun, bool, error)
 	GenerationItemsForPlan(context.Context, int64) ([]automationdomain.GenerationItem, error)
 	AttachGenerationPlan(context.Context, int64, int64, time.Time) error
+	StartGeneratedPolicyRun(context.Context, int64, time.Time) error
 	GenerationProgress(context.Context, int64) (automationport.GenerationProgress, error)
 	GenerationItems(context.Context, int64, int64, int) ([]automationport.GenerationItem, string, error)
 }
@@ -1290,6 +1291,7 @@ func (s *RuntimeService) enrollAudienceMemberEvent(ctx context.Context, source a
 	}
 	var configuration segmentport.ExecutionConfiguration
 	var published automationport.OutboundPublishedContent
+	var generation *policyGenerationInput
 	if needsOutbound {
 		configuration, err = s.audiences.AudienceExecutionConfiguration(ctx, event.PackageID)
 		if err != nil {
@@ -1306,7 +1308,12 @@ func (s *RuntimeService) enrollAudienceMemberEvent(ctx context.Context, source a
 		if err != nil {
 			return nil, ErrRuntimeUnavailable
 		}
-		if !found || published.ContentDigest != configuration.ContentDigest {
+		if !found {
+			generation, err = s.preparePolicyGeneration(ctx, event.CustomerID, configuration)
+			if err != nil {
+				return nil, err
+			}
+		} else if published.ContentDigest != configuration.ContentDigest {
 			return nil, ErrRuntimeNotReady
 		}
 	}
@@ -1538,7 +1545,12 @@ func (s *RuntimeService) enrollAudienceMemberEvent(ctx context.Context, source a
 					return e
 				}
 				if v.ActionKind == automationport.ActionOutboundMessage {
-					if e = s.acceptEnrollmentMessage(tx, event, eventDigest, v, configuration, published, enrollment, actionDigest, runtimeConfig, actor, now); e != nil {
+					if generation != nil {
+						e = s.acceptEnrollmentGeneration(tx, event, eventDigest, v, configuration, *generation, enrollment, actionDigest, runtimeConfig, actor, now)
+					} else {
+						e = s.acceptEnrollmentMessage(tx, event, eventDigest, v, configuration, published, enrollment, actionDigest, runtimeConfig, actor, now)
+					}
+					if e != nil {
 						return e
 					}
 				}

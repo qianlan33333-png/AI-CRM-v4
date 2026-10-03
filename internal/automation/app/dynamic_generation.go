@@ -142,8 +142,8 @@ func (s *RuntimeService) GenerationDispatch(ctx context.Context, effectID string
 }
 
 // CompleteGeneration is the Automation side of the EER completion router. It
-// stores a valid model result and atomically creates exactly one existing AI
-// Assistant pending-review plan when the last item has settled successfully.
+// stores a valid model result and atomically continues automatic policy sends
+// or creates the existing manual pending-review plan after successful settlement.
 func (s *RuntimeService) CompleteGeneration(ctx context.Context, completion automationport.GenerationCompletion) error {
 	if s == nil || s.reviewPlans == nil {
 		return ErrRuntimeNotReady
@@ -151,6 +151,9 @@ func (s *RuntimeService) CompleteGeneration(ctx context.Context, completion auto
 	_, run, createPlan, err := s.store.SettleGeneration(ctx, completion)
 	if err != nil || !createPlan {
 		return err
+	}
+	if run.PolicyID > 0 {
+		return s.completePolicyGeneration(ctx, run, completion.CompletedAt.UTC())
 	}
 	items, err := s.store.GenerationItemsForPlan(ctx, run.ID)
 	if err != nil || len(items) == 0 {

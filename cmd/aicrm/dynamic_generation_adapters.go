@@ -62,8 +62,17 @@ func (a dynamicGenerationContextAdapter) FreezeGenerationContext(ctx context.Con
 }
 
 func generationQuestionnaireContext(items []surveyport.Submission) string {
+	if len(items) == 0 {
+		return ""
+	}
+	latest := items[0]
+	for _, item := range items[1:] {
+		if item.SubmittedAt.After(latest.SubmittedAt) || (item.SubmittedAt.Equal(latest.SubmittedAt) && item.ID > latest.ID) {
+			latest = item
+		}
+	}
 	var lines []string
-	for _, item := range items {
+	for _, item := range []surveyport.Submission{latest} {
 		lines = append(lines, fmt.Sprintf("[%s] %s", item.SubmittedAt.UTC().Format(time.RFC3339), item.QuestionnaireTitle))
 		for _, answer := range item.Answers {
 			values := make([]string, 0, len(answer.SelectedOptions)+1)

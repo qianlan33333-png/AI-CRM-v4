@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -71,5 +73,39 @@ func TestBoundedGenerationTextPreservesUTF8AndByteLimit(t *testing.T) {
 	value := boundedGenerationText(strings.Repeat("你", 9000))
 	if len(value) > 16000 || !strings.HasSuffix(value, "...") || !utf8.ValidString(value) {
 		t.Fatalf("value length=%d valid=%t", len(value), utf8.ValidString(value))
+	}
+}
+
+func TestGenerationQuestionnaireUsesLatestSubmissionOnly(t *testing.T) {
+	old := surveyport.Submission{ID: 1, QuestionnaireTitle: "旧问卷", SubmittedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), Answers: []surveyport.AnswerSnapshot{{QuestionTitle: "方向", TextValueMasked: "旧方向"}}}
+	latest := surveyport.Submission{ID: 3, QuestionnaireTitle: "最新问卷", SubmittedAt: old.SubmittedAt.Add(time.Hour), Answers: []surveyport.AnswerSnapshot{{QuestionTitle: "方向", TextValueMasked: "新的副业方向"}}}
+	other := latest
+	other.ID, other.QuestionnaireTitle = 2, "同秒较早提交"
+	value := generationQuestionnaireContext([]surveyport.Submission{old, other, latest})
+	if !strings.Contains(value, "最新问卷") || !strings.Contains(value, "新的副业方向") || strings.Contains(value, "旧方向") || strings.Contains(value, "同秒较早提交") {
+		t.Fatal("mixed stale questionnaire context:", value)
+	}
+	if generationQuestionnaireContext(nil) != "" {
+		t.Fatal("missing questionnaire must remain unknown")
+	}
+}
+
+func TestGeneratedOutboundTemplateRetainsFrozenSources(t *testing.T) {
+	freezer := automationOutboundContentFreezer{}
+	raw := json.RawMessage(`{"schema_version":1,"sources":[{"kind":"miniprogram","id":1070,"source_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`)
+	digest := sha256.Sum256(raw)
+	completed, actual, err := freezer.CompleteGeneratedContent(raw, digest, "看到你正在探索副业方向，先从一个小验证开始吧。")
+	if err != nil || sha256.Sum256(completed) != actual {
+		t.Fatal("completion failed", err)
+	}
+	var snapshot frozenAutomationContent
+	if json.Unmarshal(completed, &snapshot) != nil || len(snapshot.Sources) != 1 || snapshot.Sources[0].ID != 1070 || !strings.Contains(snapshot.ContentText, "副业方向") {
+		t.Fatal("frozen material lost or output missing")
+	}
+	if _, _, err = freezer.CompleteGeneratedContent(append(raw, ' '), digest, "text"); err == nil {
+		t.Fatal("accepted changed template")
+	}
+	if _, _, err = freezer.CompleteGeneratedContent(raw, digest, "  "); err == nil {
+		t.Fatal("accepted empty generation")
 	}
 }

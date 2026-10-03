@@ -2,6 +2,7 @@ package port
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"strings"
 	"time"
@@ -19,11 +20,30 @@ type GenerationContext struct {
 	RecentChats   string `json:"recent_chats"`
 	Tags          string `json:"tags"`
 	Activation    string `json:"activation"`
+	// PolicyDelivery is an opaque, frozen automatic-send continuation. It is
+	// never included in model messages; manual runs leave it nil.
+	PolicyDelivery *GeneratedPolicyDelivery `json:"policy_delivery,omitempty"`
+}
+
+type GeneratedPolicyDelivery struct {
+	EnrollmentID int64 `json:"enrollment_id"`
+	RecipientID  int64 `json:"recipient_id"`
+	// Byte encoding preserves the exact opaque snapshot through JSONB; a
+	// nested RawMessage would be reformatted and invalidate its digest.
+	ContentTemplate []byte          `json:"content_template"`
+	TemplateDigest  [32]byte        `json:"template_digest"`
+	PolicyDigest    [32]byte        `json:"policy_digest"`
+	QuietHours      json.RawMessage `json:"quiet_hours"`
 }
 
 func (c GenerationContext) Valid() bool {
 	for _, value := range []string{c.Questionnaire, c.RecentChats, c.Tags, c.Activation} {
 		if len(value) > 16000 {
+			return false
+		}
+	}
+	if d := c.PolicyDelivery; d != nil {
+		if d.EnrollmentID < 1 || d.RecipientID < 1 || !json.Valid(d.ContentTemplate) || sha256.Sum256(d.ContentTemplate) != d.TemplateDigest || d.PolicyDigest == ([32]byte{}) || !json.Valid(d.QuietHours) {
 			return false
 		}
 	}
@@ -94,6 +114,9 @@ type PublishedGeneration struct {
 	AgentCode        string
 	RolePrompt       string
 	TaskPrompt       string
+	Materials        FixedContentPackage
+	ContentDigest    [32]byte
+	MaterialsDigest  [32]byte
 }
 
 func (p PublishedGeneration) Valid() bool {

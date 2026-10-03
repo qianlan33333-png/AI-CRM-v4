@@ -287,6 +287,25 @@ type automationOutboundContentFreezer struct {
 }
 
 func (a automationOutboundContentFreezer) FreezeOutboundContent(ctx context.Context, content automationport.OutboundPublishedContent) (json.RawMessage, [32]byte, error) {
+	return a.freeze(ctx, content, false)
+}
+
+func (a automationOutboundContentFreezer) FreezeGenerationTemplate(ctx context.Context, content automationport.OutboundPublishedContent) (json.RawMessage, [32]byte, error) {
+	content.Content.ContentText = ""
+	return a.freeze(ctx, content, true)
+}
+
+func (a automationOutboundContentFreezer) CompleteGeneratedContent(raw json.RawMessage, digest [32]byte, text string) (json.RawMessage, [32]byte, error) {
+	var snapshot frozenAutomationContent
+	if sha256.Sum256(raw) != digest || json.Unmarshal(raw, &snapshot) != nil || snapshot.SchemaVersion != 1 || snapshot.ContentText != "" || strings.TrimSpace(text) == "" {
+		return nil, [32]byte{}, errors.New("invalid generated content template")
+	}
+	snapshot.ContentText = strings.TrimSpace(text)
+	completed, err := json.Marshal(snapshot)
+	return completed, sha256.Sum256(completed), err
+}
+
+func (a automationOutboundContentFreezer) freeze(ctx context.Context, content automationport.OutboundPublishedContent, allowEmpty bool) (json.RawMessage, [32]byte, error) {
 	if a.capturer == nil || content.AgentID < 1 || content.PublishedVersion < 1 || len(content.Content.DynamicMiniprogramCard) != 0 {
 		return nil, [32]byte{}, errors.New("automation content freezer unavailable")
 	}
@@ -315,7 +334,7 @@ func (a automationOutboundContentFreezer) FreezeOutboundContent(ctx context.Cont
 			snapshot.Sources[index] = frozenAutomationMaterialSource{Kind: source.Reference.Kind, ID: source.Reference.ID, SourceDigest: source.SourceDigest}
 		}
 	}
-	if snapshot.ContentText == "" && len(snapshot.Sources) == 0 {
+	if !allowEmpty && snapshot.ContentText == "" && len(snapshot.Sources) == 0 {
 		return nil, [32]byte{}, errors.New("automation content is empty")
 	}
 	raw, err := json.Marshal(snapshot)

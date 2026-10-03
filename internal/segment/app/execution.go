@@ -315,7 +315,8 @@ func (s *ExecutionService) Precheck(ctx context.Context, packageID int64) (Prech
 			// A manually confirmed audience run may bind either immutable fixed
 			// content or a published dynamic Agent. The latter is still held at
 			// the Automation boundary until per-customer generation and existing
-			// AI review complete; automatic policy sends remain fixed-content only.
+			// AI review complete. Approved member policies instead freeze one
+			// Agent generation and hand its result to the existing Outbound owner.
 			if agent.AutomationType != automationport.AutomationTypeFixedScript && agent.AutomationType != automationport.AutomationTypeAgent {
 				result.Reasons = append(result.Reasons, "agent_execution_not_supported")
 			}
