@@ -14986,7 +14986,13 @@
               }
             }
           },
-          "description": "Automation runs"
+          "description": "Automation runs and matching historical total"
+        },
+        "400": {
+          "$ref": "#/components/responses/Error"
+        },
+        "401": {
+          "$ref": "#/components/responses/Error"
         },
         "403": {
           "$ref": "#/components/responses/Error"
@@ -15001,6 +15007,13 @@
         "path": "/api/admin/automation-runs",
         "auth": "human",
         "parameters": [
+          {
+            "in": "query",
+            "name": "package_id",
+            "schema": {
+              "$ref": "#/components/schemas/PositiveID"
+            }
+          },
           {
             "in": "query",
             "name": "limit",
@@ -38049,11 +38062,18 @@
         "next_cursor": {
           "maxLength": 512,
           "type": "string"
+        },
+        "total": {
+          "description": "All matching historical runs, independent of cursor. Not current members or delivered recipients.",
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
         "items",
-        "next_cursor"
+        "next_cursor",
+        "total"
       ],
       "type": "object"
     },
