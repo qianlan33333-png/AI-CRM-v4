@@ -593,6 +593,19 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	if !callerOK {
 		t.Fatal("cannot locate runtime audience test source")
 	}
+	// This selected Go contract launches jsdom before the frontend lane runs.
+	// Reuse the root lockfile cache without preparing any Host/web/v3 assets.
+	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(testFile), "..", ".."))
+	prepare := exec.CommandContext(ctx, "python3", "scripts/ci/check_preparation.py", "npm")
+	prepare.Dir = repositoryRoot
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "AICRM_DATABASE_URL=") {
+			prepare.Env = append(prepare.Env, entry)
+		}
+	}
+	if output, err := prepare.CombinedOutput(); err != nil {
+		t.Fatalf("prepare audience jsdom dependencies: %v output=%s", err, strings.TrimSpace(string(output)))
+	}
 	detailScript := filepath.Join(filepath.Dir(testFile), "..", "..", "internal", "webshell", "static", "admin_console", "admin_audience_manual_broadcast_pg.test.mjs")
 	detailUI := exec.CommandContext(ctx, "node", detailScript)
 	detailUI.Env = append(os.Environ(), "AICRM_RUNTIME_TEST_URL="+detailServer.URL, "AICRM_RUNTIME_TEST_PACKAGE_ID="+automationAudienceInt(packageID))
