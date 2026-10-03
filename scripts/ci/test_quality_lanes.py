@@ -72,6 +72,45 @@ class QualityLaneTests(unittest.TestCase):
             self.assertEqual(execution["started_tests"], 1)
             self.assertEqual(execution["completed_tests"], 1)
 
+    def test_ai_selected_backend_rejects_empty_skipped_and_missing_named_tests(self):
+        wrapper = ["bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-json", "-p", "1",
+                   "-timeout=15m"]
+        cases = [
+            (wrapper + ["./internal/a"],
+             [{"lane": "backend", "path": "internal/a/a.go", "package": "./internal/a"}],
+             '{"Action":"pass","Package":"example.invalid/crm/internal/a"}\n',
+             "no passing Test events"),
+            (wrapper + ["./internal/a"],
+             [{"lane": "backend", "path": "internal/a/a.go", "package": "./internal/a"}],
+             ('{"Action":"skip","Package":"example.invalid/crm/internal/a",'
+              '"Test":"TestSkipped"}\n{"Action":"pass",'
+              '"Package":"example.invalid/crm/internal/a"}\n'),
+             "skipped selected tests"),
+            (wrapper + ["-run", "^(TestSelected)$", "./internal/a"],
+             [{"lane": "backend", "path": "internal/a/a_test.go", "package": "./internal/a",
+               "test": "TestSelected"}],
+             ('{"Action":"pass","Package":"example.invalid/crm/internal/a",'
+              '"Test":"TestOther"}\n{"Action":"pass",'
+              '"Package":"example.invalid/crm/internal/a"}\n'),
+             "did not pass selected tests"),
+        ]
+        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
+            root = Path(temp)
+            for index, (command, checks, events, reason) in enumerate(cases):
+                report = root / ("report-" + str(index))
+                process = unittest.mock.Mock(stdout=io.StringIO(events))
+                process.wait.return_value = 0
+                execution = {"commands": [], "profile": "ai-selected", "selected_checks": checks}
+                with self.subTest(reason=reason), \
+                        patch.object(quality_lanes, "ROOT", root), \
+                        patch.object(quality_lanes.check_preparation, "heavy_slot",
+                                     return_value=contextlib.nullcontext(None)), \
+                        patch.object(quality_lanes.subprocess, "check_output",
+                                     return_value="example.invalid/crm/internal/a\n"), \
+                        patch.object(quality_lanes.subprocess, "Popen", return_value=process), \
+                        self.assertRaisesRegex(ValueError, reason):
+                    quality_lanes.run_recorded(command, None, "backend", report, execution)
+
     def test_go_continuation_runs_complete_unfinished_packages_and_retains_suite_flags(self):
         with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
             root = Path(temp)
@@ -226,12 +265,120 @@ class QualityLaneTests(unittest.TestCase):
         self.assertEqual(quality_lanes.focused_commands("frontend", Path("/tmp/evidence"), checks),
                          [["node", "web/scripts/ui-shell-contract.mjs"]])
 
-    def test_unsupported_focused_mapping_falls_back_to_full_lane(self):
-        commands = quality_lanes.focused_commands(
-            "backend", Path("/tmp/evidence"),
-            [{"lane": "backend", "path": "internal/media/app/service.go", "test": "TestUnsafe.*"}],
-        )
-        self.assertIn("./...", commands[-1])
+    def test_unsupported_focused_mapping_fails_without_widening_to_full_lane(self):
+        with self.assertRaisesRegex(ValueError, "unsupported focused backend test"):
+            quality_lanes.focused_commands(
+                "backend", Path("/tmp/evidence"),
+                [{"lane": "backend", "path": "internal/media/app/service_test.go", "test": "TestUnsafe.*"}],
+            )
+
+    def test_ai_selected_backend_uses_native_cache_and_only_adds_explicit_safety_flags(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "internal/example").mkdir(parents=True)
+            (root / "internal/example/example_test.go").write_text(
+                "package example\nfunc TestUnit(t *testing.T) {}\nfunc TestPostgreSQLFlow(t *testing.T) {}\n")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Fixture"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=root, check=True)
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "fixtures"], cwd=root, check=True)
+            regular = {"lane": "backend", "path": "internal/example/example_test.go",
+                       "package": "./internal/example", "test": "TestUnit"}
+            database = {"lane": "backend", "path": "internal/example/example_test.go",
+                        "package": "./internal/example", "test": "TestPostgreSQLFlow", "postgres": True}
+            with patch.object(quality_lanes, "ROOT", root):
+                regular_command = quality_lanes.ai_selected_commands("backend", Path(temp), [regular])[0]
+                database_command = quality_lanes.ai_selected_commands("backend", Path(temp), [database])[0]
+            self.assertNotIn("-race", regular_command)
+            self.assertNotIn("-count=1", regular_command)
+            self.assertIn("-run", regular_command)
+            self.assertIn("-count=1", database_command)
+            self.assertNotIn("-race", database_command)
+            self.assertNotIn("./...", regular_command)
+
+    def test_ai_selected_lanes_run_only_the_named_python_node_browser_or_shell_check(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixtures = {
+                "scripts/ci/test_contract.py": "import unittest\nclass T(unittest.TestCase): pass\n",
+                "web/v3/product.test.mjs": "// node test\n",
+                "cmd/aicrm/product_chromium_test.go":
+                    "package main\nfunc TestProductChromiumJourney(t *testing.T) {}\n",
+                "cmd/aicrm/sdk_test.sh": "#!/bin/sh\nexit 0\n",
+            }
+            for relative, content in fixtures.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Fixture"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=root, check=True)
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "fixtures"], cwd=root, check=True)
+            with patch.object(quality_lanes, "ROOT", root):
+                python = quality_lanes.ai_selected_commands("preflight", Path(temp), [
+                    {"lane": "preflight", "path": "scripts/ci/test_contract.py"}])[0]
+                frontend = quality_lanes.ai_selected_commands("frontend", Path(temp), [
+                    {"lane": "frontend", "path": "web/v3/product.test.mjs"}])[0]
+                browser = quality_lanes.ai_selected_commands("browser", Path(temp), [
+                    {"lane": "browser", "path": "cmd/aicrm/product_chromium_test.go",
+                     "test": "TestProductChromiumJourney"}])[0]
+                shell = quality_lanes.ai_selected_commands("archive-sdk", Path(temp), [
+                    {"lane": "archive-sdk", "path": "cmd/aicrm/sdk_test.sh"}])[0]
+            self.assertEqual(python[-4:], ["-s", "scripts/ci", "-p", "test_contract.py"])
+            self.assertIn("unittest", python)
+            self.assertEqual(frontend, ["node", "web/v3/product.test.mjs"])
+            self.assertEqual(browser[1:3], ["scripts/dev_preflight.py", "browser"])
+            self.assertIn("TestProductChromiumJourney", browser)
+            self.assertNotIn("--group", browser)
+            self.assertNotIn("npm", browser)
+            self.assertEqual(shell, ["bash", "cmd/aicrm/sdk_test.sh"])
+
+    def test_ai_selected_preflight_does_not_require_go_node_or_npm(self):
+        with patch.object(quality_lanes, "command_available", return_value=True) as available, \
+                patch.object(quality_lanes, "exact_version") as exact, \
+                patch.object(quality_lanes, "postgres_16_ready") as postgres:
+            self.assertEqual(quality_lanes.ai_selected_prerequisites(
+                "preflight", [{"path": "scripts/ci/test_contract.py"}]), [])
+        exact.assert_not_called()
+        postgres.assert_not_called()
+
+    def test_ai_preflight_unittest_requires_a_real_non_skipped_test_result(self):
+        command = [sys.executable, "-m", "unittest", "discover", "-s", "scripts/ci",
+                   "-p", "test_contract.py"]
+        with tempfile.TemporaryDirectory() as temp, contextlib.redirect_stdout(io.StringIO()):
+            root = Path(temp)
+            report = root / "report"
+            execution = {"commands": []}
+            passed = subprocess.CompletedProcess(command, 0, "Ran 1 test in 0.001s\n\nOK\n")
+            with patch.object(quality_lanes, "ROOT", root), \
+                    patch.object(quality_lanes.check_preparation, "heavy_slot", return_value=contextlib.nullcontext(None)), \
+                    patch.object(quality_lanes.subprocess, "run", return_value=passed):
+                quality_lanes.run_recorded(command, None, "preflight", report, execution)
+            self.assertEqual(execution["unittest_results"], [{"command": command, "tests_run": 1,
+                                                               "skipped": 0, "result": "passed"}])
+
+            nested_summaries = ("Ran 1 test in 0.001s\n\nOK (skipped=1)\n"
+                                "Ran 2 tests in 0.002s\n\nOK\n")
+            nested_result = subprocess.CompletedProcess(command, 0, nested_summaries)
+            nested_execution = {"commands": []}
+            with patch.object(quality_lanes, "ROOT", root), \
+                    patch.object(quality_lanes.check_preparation, "heavy_slot", return_value=contextlib.nullcontext(None)), \
+                    patch.object(quality_lanes.subprocess, "run", return_value=nested_result):
+                quality_lanes.run_recorded(command, None, "preflight", report, nested_execution)
+            self.assertEqual(nested_execution["unittest_results"][0]["tests_run"], 2)
+            self.assertEqual(nested_execution["unittest_results"][0]["skipped"], 0)
+
+            for output, reason in (("Ran 0 tests in 0.000s\n\nOK\n", "zero tests"),
+                                   ("Ran 1 test in 0.001s\n\nOK (skipped=1)\n", "skipped 1")):
+                failed_execution = {"commands": []}
+                result = subprocess.CompletedProcess(command, 0, output)
+                with patch.object(quality_lanes, "ROOT", root), \
+                        patch.object(quality_lanes.check_preparation, "heavy_slot", return_value=contextlib.nullcontext(None)), \
+                        patch.object(quality_lanes.subprocess, "run", return_value=result), \
+                        self.assertRaisesRegex(ValueError, reason):
+                    quality_lanes.run_recorded(command, None, "preflight", report, failed_execution)
 
     def test_backend_keeps_full_race_coverage_with_bounded_package_timeout(self):
         commands = quality_lanes.commands("backend", Path("/tmp/evidence"))

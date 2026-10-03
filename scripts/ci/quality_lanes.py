@@ -12,7 +12,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import sys
@@ -27,6 +27,7 @@ CI_DIR = str(Path(__file__).resolve().parent)
 if CI_DIR not in sys.path:
     sys.path.insert(0, CI_DIR)
 import check_preparation
+import ai_check_plan
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -177,6 +178,57 @@ def missing_prerequisites(lane: str) -> list[str]:
                 missing.append(item)
         elif not command_available(item):
             missing.append(item)
+    return missing
+
+
+def _check_requires_postgres(check: dict) -> bool:
+    return (check.get("postgres") is True
+            or "postgres" in str(check.get("path", "")).lower()
+            or "integration" in str(check.get("path", "")).lower()
+            or "postgresql" in str(check.get("test", "")).lower())
+
+
+def ai_selected_prerequisites(lane: str, checks: list[dict]) -> list[str]:
+    """Check only the runtime needed by the selected check commands."""
+    missing = []
+    if lane == "preflight":
+        if any(Path(check["path"]).suffix == ".py" for check in checks) and not command_available("python3"):
+            missing.append("python3")
+        if any(Path(check["path"]).suffix == ".sh" for check in checks) and not command_available("bash"):
+            missing.append("bash")
+    elif lane == "backend":
+        if not command_available("bash"):
+            missing.append("bash")
+        if not exact_version(["go", "version"], "go1.26.6"):
+            missing.append("Go 1.26.6")
+        if any(_check_requires_postgres(check) for check in checks):
+            if not postgres_16_ready():
+                missing.append("PostgreSQL 16 reachable through AICRM_DATABASE_URL")
+            elif not postgres_operations_ready():
+                missing.append("PostgreSQL 16 synthetic database CREATE/TEMPLATE/DROP under the actual account")
+    elif lane == "frontend":
+        if not exact_version(["node", "--version"], "v" + NODE_VERSION):
+            missing.append("Node " + NODE_VERSION)
+    elif lane == "browser":
+        if not command_available("bash"):
+            missing.append("bash")
+        if not exact_version(["go", "version"], "go1.26.6"):
+            missing.append("Go 1.26.6")
+        if not exact_version(["node", "--version"], "v" + NODE_VERSION):
+            missing.append("Node " + NODE_VERSION)
+        if not command_available("python3"):
+            missing.append("python3")
+        if not postgres_16_ready():
+            missing.append("PostgreSQL 16 reachable through AICRM_DATABASE_URL")
+        elif not postgres_operations_ready():
+            missing.append("PostgreSQL 16 synthetic database CREATE/TEMPLATE/DROP under the actual account")
+        if platform.system() != "Linux" or platform.machine() not in {"x86_64", "amd64"}:
+            missing.append("Linux amd64 browser environment")
+        if not chromium_ready():
+            missing.append("Chromium executable (existing resolver)")
+    elif lane == "archive-sdk":
+        if not command_available("bash"):
+            missing.append("bash")
     return missing
 
 
@@ -465,6 +517,8 @@ def reusable_validation(command: list[str]) -> bool:
     if "go" in command:
         return "vet" in command and "test" not in command
     if "-m" in command and "unittest" in command:
+        if _is_named_unittest_discovery(command):
+            return False
         return True
     if command[0] == "node":
         return len(command) == 2 and not re.search(r"(?:generate|prepare|stage|build)[-_]", Path(command[1]).name)
@@ -473,6 +527,56 @@ def reusable_validation(command: list[str]) -> bool:
     if command[0] == "bash":
         return len(command) > 1 and Path(command[1]).name.startswith(("check-", "test-"))
     return len(command) == 2 and Path(command[1]).name.startswith("test_")
+
+
+def _is_named_unittest_discovery(command: list[str]) -> bool:
+    if not ("unittest" in command and "discover" in command and "-p" in command):
+        return False
+    pattern = command[command.index("-p") + 1]
+    return not any(character in pattern for character in "*?[]")
+
+
+def _verify_named_unittest_output(command: list[str], output: str, execution: dict) -> None:
+    if not _is_named_unittest_discovery(command):
+        return
+    ran_matches = list(re.finditer(r"(?m)^Ran (\d+) tests? in ", output))
+    if not ran_matches:
+        raise ValueError("selected unittest discovery did not report a test count")
+    summary_matches = list(re.finditer(r"(?m)^OK(?: \(skipped=(\d+)\))?$", output))
+    if not summary_matches:
+        raise ValueError("selected unittest discovery did not report an OK summary")
+    tests_run = int(ran_matches[-1].group(1))
+    skipped = int(summary_matches[-1].group(1) or 0)
+    execution.setdefault("unittest_results", []).append({"command": command,
+        "tests_run": tests_run, "skipped": skipped, "result": "passed" if tests_run > 0 and skipped == 0 else "failed"})
+    if tests_run <= 0:
+        raise ValueError("selected unittest discovery ran zero tests")
+    if skipped:
+        raise ValueError("selected unittest discovery skipped " + str(skipped) + " tests")
+
+
+def _verify_ai_go_test_events(command: list[str], events: list[dict], execution: dict) -> None:
+    if execution.get("profile") != "ai-selected":
+        return
+    packages = [value for value in command if value.startswith("./")]
+    if len(packages) != 1:
+        raise ValueError("ai-selected Go check must name exactly one package")
+    package = packages[0]
+    checks = [check for check in execution.get("selected_checks", [])
+              if check.get("lane") == "backend" and check.get("package") == package]
+    if not checks:
+        raise ValueError("ai-selected Go command has no matching selected check: " + package)
+    skipped = sorted({event["test"] for event in events if event.get("action") == "skip"})
+    if skipped:
+        raise ValueError("ai-selected Go check skipped selected tests: " + ", ".join(skipped))
+    passed = {event["test"] for event in events
+              if event.get("action") == "pass" and "/" not in event.get("test", "")}
+    if not passed:
+        raise ValueError("ai-selected Go check reported no passing Test events: " + package)
+    expected = {check["test"] for check in checks if check.get("test")}
+    if expected and not expected.issubset(passed):
+        raise ValueError("ai-selected Go check did not pass selected tests: "
+                         + ", ".join(sorted(expected - passed)))
 
 
 def run_recorded(command: list[str], env: dict[str, str] | None, lane: str,
@@ -507,6 +611,7 @@ def run_recorded(command: list[str], env: dict[str, str] | None, lane: str,
                 log_path = report_dir / (lane + "-go-test.jsonl")
                 mode = "a" if log_path.exists() else "w"
                 actual = command
+                ai_test_events = []
                 if lane == "backend" and "-run" not in command:
                     expressions = [value for value in command if value.startswith("./")]
                     inventory = subprocess.check_output(
@@ -552,6 +657,8 @@ def run_recorded(command: list[str], env: dict[str, str] | None, lane: str,
                             _progress(report_dir, lane, execution, command, "running")
                             last_progress = time.monotonic()
                         if item.get("Test") and item.get("Action") in {"pass", "fail", "skip"}:
+                            ai_test_events.append({"package": item.get("Package"),
+                                                   "test": item["Test"], "action": item["Action"]})
                             execution["completed_tests"] = execution.get("completed_tests", 0) + 1
                             if "/" not in item["Test"] and item.get("Elapsed", 0) >= 1:
                                 execution.setdefault("slow_tests", []).append({"package": item.get("Package"),
@@ -560,9 +667,24 @@ def run_recorded(command: list[str], env: dict[str, str] | None, lane: str,
                 execution["go_json_log"] = log_path.name
                 if code:
                     raise subprocess.CalledProcessError(code, command)
+                if lane == "backend":
+                    _verify_ai_go_test_events(command, ai_test_events, execution)
             else:
-                completed = subprocess.run(command, cwd=ROOT, env=child_env, check=False)
+                capture_unittest = lane == "preflight" and _is_named_unittest_discovery(command)
+                completed = subprocess.run(command, cwd=ROOT, env=child_env, check=False,
+                                           stdout=subprocess.PIPE if capture_unittest else None,
+                                           stderr=subprocess.STDOUT if capture_unittest else None,
+                                           text=capture_unittest)
                 code = completed.returncode
+                if capture_unittest:
+                    output = completed.stdout or ""
+                    print(output, end="", flush=True)
+                    if code == 0:
+                        try:
+                            _verify_named_unittest_output(command, output, execution)
+                        except ValueError:
+                            code = 2
+                            raise
                 if code:
                     raise subprocess.CalledProcessError(code, command)
                 if any(value.endswith("/cmd_test_groups.py") for value in command) and report_dir is not None:
@@ -701,6 +823,65 @@ def behavior_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[l
     return selected
 
 
+def ai_selected_commands(lane: str, report_dir: Path | None, checks: list[dict]) -> list[list[str]]:
+    """Build commands from validated paths and names, with no lane-wide fallback."""
+    if report_dir is None:
+        raise ValueError("ai-selected lane requires --report-dir")
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    normalized = [ai_check_plan.validate_check(ROOT, head, check) for check in checks]
+    selected = [check for check in normalized if check["lane"] == lane]
+    if not selected or len(selected) != len(normalized):
+        raise ValueError("ai-selected checks must name only the requested lane: " + lane)
+
+    if lane == "preflight":
+        result = []
+        for check in selected:
+            path = check["path"]
+            if path.endswith(".py"):
+                result.append([sys.executable, "-m", "unittest", "discover", "-s",
+                               str(PurePosixPath(path).parent), "-p", PurePosixPath(path).name])
+            else:
+                result.append(["bash", path])
+        return result
+    if lane == "backend":
+        grouped: dict[str, dict] = {}
+        for check in selected:
+            item = grouped.setdefault(check["package"], {"tests": set(), "whole": False,
+                                                           "race": False, "fresh": False})
+            if check.get("test"):
+                item["tests"].add(check["test"])
+            else:
+                item["whole"] = True
+            item["race"] = item["race"] or check.get("race") is True
+            item["fresh"] = (item["fresh"] or check.get("fresh") is True
+                             or _check_requires_postgres(check))
+        result = []
+        for package, item in sorted(grouped.items()):
+            command = ["bash", "scripts/run-go-with-donor-views.sh", "go", "test", "-json", "-p", "1"]
+            if item["race"]:
+                command.append("-race")
+            if item["fresh"]:
+                command.append("-count=1")
+            command.extend(["-timeout=15m"])
+            if item["tests"] and not item["whole"]:
+                pattern = "^(" + "|".join(re.escape(name) for name in sorted(item["tests"])) + ")$"
+                command.extend(["-run", pattern])
+            command.append(package)
+            result.append(command)
+        return result
+    if lane == "frontend":
+        return [["node", path] for path in sorted({check["path"] for check in selected})]
+    if lane == "browser":
+        command = [sys.executable, "scripts/dev_preflight.py", "browser"]
+        for name in sorted({check["test"] for check in selected}):
+            command.extend(["--journey", name])
+        command.extend(["--report-dir", str(report_dir)])
+        return [command]
+    if lane == "archive-sdk":
+        return [["bash", path] for path in sorted({check["path"] for check in selected})]
+    raise ValueError("unknown lane: " + lane)
+
+
 def commerce_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[list[str]]:
     """Preparation for the trusted bounded commerce mapping, not a generic fast lane.
 
@@ -724,9 +905,7 @@ def commerce_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[l
 
 
 def focused_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[list[str]]:
-    """Run registered checks for a lane, falling back to its full lane when a
-    check cannot be expressed safely as a focused command.
-    """
+    """Run registered checks for a lane, rejecting mappings that are not safe."""
     selected = [check for check in checks if check.get("lane") == lane]
     if not selected:
         raise ValueError("focused lane has no registered checks: " + lane)
@@ -735,10 +914,10 @@ def focused_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[li
         for check in selected:
             path = Path(check.get("path", ""))
             if path.suffix != ".go" or not path.parts or ".." in path.parts:
-                return commands(lane, report_dir)
+                raise ValueError("unsupported focused backend path: " + str(path))
             test = check.get("test")
             if test is not None and not re.fullmatch(r"Test[A-Za-z0-9_]+", test):
-                return commands(lane, report_dir)
+                raise ValueError("unsupported focused backend test: " + str(test))
             packages.setdefault(path.parent.as_posix(), set())
             if test:
                 packages[path.parent.as_posix()].add(test)
@@ -757,7 +936,7 @@ def focused_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[li
         for check in selected:
             path = Path(check.get("path", ""))
             if path.suffix not in {".mjs", ".js"} or not path.parts or ".." in path.parts:
-                return commands(lane, report_dir)
+                raise ValueError("unsupported focused frontend path: " + str(path))
             paths.append(path.as_posix())
         return [["node", path] for path in sorted(set(paths))]
     if lane == "browser":
@@ -767,7 +946,7 @@ def focused_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[li
             path = Path(check.get("path", ""))
             if (not isinstance(name, str) or not re.fullmatch(r"Test[A-Za-z0-9_]*ChromiumJourney", name)
                     or not path.as_posix().startswith("cmd/aicrm/") or path.suffix != ".go"):
-                return commands(lane, report_dir)
+                raise ValueError("unsupported focused browser check: " + str(check))
             names.append(name)
         command = [sys.executable, "scripts/dev_preflight.py", "browser"]
         for name in sorted(set(names)):
@@ -779,10 +958,10 @@ def focused_commands(lane: str, report_dir: Path, checks: list[dict]) -> list[li
         for check in selected:
             path = Path(check.get("path", ""))
             if path.suffix != ".sh" or not path.parts or ".." in path.parts:
-                return commands(lane, report_dir)
+                raise ValueError("unsupported focused archive-sdk path: " + str(path))
             paths.append(path.as_posix())
         return [["bash", path] for path in sorted(set(paths))]
-    return commands(lane, report_dir)
+    raise ValueError("lane does not support focused checks: " + lane)
 
 
 def period_member_frontend_commands(report_dir: Path, checks: list[dict]) -> list[list[str]]:
@@ -818,7 +997,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lane", choices=LANES)
     parser.add_argument("--report-dir", type=Path)
-    parser.add_argument("--profile", choices=("full", "tooling", "documentation", "behavior", "public-commerce-v1", "period-member-read-v1"), default="full")
+    parser.add_argument("--profile", choices=("full", "tooling", "documentation", "behavior", "ai-selected", "public-commerce-v1", "period-member-read-v1"), default="full")
     parser.add_argument("--focus-checks-json", default=os.environ.get("AICRM_CI_FOCUS_CHECKS", ""))
     parser.add_argument("--focus-packages-json", default=os.environ.get("AICRM_CI_FOCUS_PACKAGES", ""))
     parser.add_argument("--resume-commands-json", default="[]")
@@ -827,7 +1006,8 @@ def main() -> int:
     args = parser.parse_args()
     started = time.monotonic()
     execution = {"commands": [], "go_json_log": None, "command_results": [],
-                 "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+                 "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                 "profile": args.profile}
     owned_preparation = None
     if not os.environ.get("AICRM_TEST_PREP_DIR"):
         owned_preparation = tempfile.TemporaryDirectory(prefix="aicrm-check-preparation-")
@@ -845,8 +1025,25 @@ def main() -> int:
                 not isinstance(command, list) or not command or any(not isinstance(value, str) for value in command)
                 for command in execution["resume_commands"])):
             raise ValueError("continued command inventory must contain command arrays")
+        checks = json.loads(args.focus_checks_json) if args.focus_checks_json else []
+        packages = json.loads(args.focus_packages_json) if args.focus_packages_json else []
+        if (not isinstance(checks, list) or any(not isinstance(check, dict) for check in checks)
+                or not isinstance(packages, list)
+                or any(not isinstance(package, str) for package in packages)):
+            raise ValueError("focused check and package lists must be JSON arrays")
+        if packages and checks:
+            raise ValueError("package focus and named-check focus cannot be combined")
+        if args.profile == "ai-selected":
+            if packages:
+                raise ValueError("ai-selected checks carry backend package paths in checks")
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+            checks = [ai_check_plan.validate_check(ROOT, head, check) for check in checks]
+            if not checks or any(check["lane"] != args.lane for check in checks):
+                raise ValueError("ai-selected checks must be present for the requested lane: " + args.lane)
+            execution["selected_checks"] = checks
         _clear_lane_outputs(args.report_dir, args.lane)
-        missing = missing_prerequisites(args.lane)
+        missing = (ai_selected_prerequisites(args.lane, checks) if args.profile == "ai-selected"
+                   else missing_prerequisites(args.lane))
         if missing:
             execution["failure_kind"] = "environment"
             print("missing required local environment: " + ", ".join(missing), file=sys.stderr)
@@ -854,14 +1051,6 @@ def main() -> int:
         elif args.check_prerequisites:
             result, exit_code = "success", 0
         else:
-            checks = json.loads(args.focus_checks_json) if args.focus_checks_json else []
-            packages = json.loads(args.focus_packages_json) if args.focus_packages_json else []
-            if (not isinstance(checks, list) or any(not isinstance(check, dict) for check in checks)
-                    or not isinstance(packages, list)
-                    or any(not isinstance(package, str) for package in packages)):
-                raise ValueError("focused check and package lists must be JSON arrays")
-            if packages and checks:
-                raise ValueError("package focus and named-check focus cannot be combined")
             if packages and (args.lane != "backend" or args.profile not in {"full", "public-commerce-v1", "period-member-read-v1"}):
                 raise ValueError("affected package focus is only valid for the full backend lane")
             if args.profile == "documentation":
@@ -875,6 +1064,8 @@ def main() -> int:
                 lane_commands = tooling_contract_commands()
             elif args.profile == "behavior":
                 lane_commands = behavior_commands(args.lane, args.report_dir, checks)
+            elif args.profile == "ai-selected":
+                lane_commands = ai_selected_commands(args.lane, args.report_dir, checks)
             elif args.profile == "public-commerce-v1":
                 if args.lane == "backend" and not packages:
                     raise ValueError("commerce backend requires the complete affected package inventory")
@@ -915,15 +1106,30 @@ def main() -> int:
                 "artifact_builds": sum(record["kind"] == "artifact" and not record["reused"] for record in records),
                 "artifact_copies": sum(record["kind"] == "artifact" for record in records)}
         if owned_preparation:
-            try:
-                if prep and list(prep.glob("database-*.json")):
+            database_cleanup_failed = False
+            if prep and list(prep.glob("database-*.json")):
+                try:
                     check_preparation.cleanup_databases(prep, os.environ["AICRM_DATABASE_URL"])
-                owned_preparation.cleanup()
-            except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
-                print("attempt cleanup failed: " + str(error), file=sys.stderr)
-                result, exit_code = "failed", 2
-            finally:
-                os.environ.pop("AICRM_TEST_PREP_DIR", None)
+                except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+                    print("attempt database cleanup failed: " + str(error), file=sys.stderr)
+                    result, exit_code = "failed", 2
+                    database_cleanup_failed = True
+            if not database_cleanup_failed:
+                try:
+                    owned_preparation.cleanup()
+                except OSError as error:
+                    unresolved_databases = bool(prep and list(prep.glob("database-*.json")))
+                    if result == "success" and exit_code == 0 and not unresolved_databases:
+                        warning = "attempt temporary directory cleanup failed after checks passed: " + str(error)
+                        execution["cleanup_warning"] = warning
+                        print("warning: " + warning, file=sys.stderr)
+                    else:
+                        print("attempt cleanup failed: " + str(error), file=sys.stderr)
+                        result, exit_code = "failed", 2
+                except (ValueError, KeyError, subprocess.SubprocessError) as error:
+                    print("attempt cleanup failed: " + str(error), file=sys.stderr)
+                    result, exit_code = "failed", 2
+            os.environ.pop("AICRM_TEST_PREP_DIR", None)
         _progress(args.report_dir, args.lane, execution, None, result)
         _write_lane_receipt(args.report_dir, args.lane, execution, started, result, exit_code)
     return exit_code

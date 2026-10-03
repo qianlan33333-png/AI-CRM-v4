@@ -1,89 +1,78 @@
-# CRM v4 国内发布工作台
+# CRM V4 极简国内发布
 
-累计预发的设计与边界见 [PRD](../prd/2026-09-29-cumulative-staging-batch-promotion.md)。同一预发环境依次运行 P+A、P+A+B；每项安装和相关验证仍串行，生产保持 P。最终累计版本按已有生产授权内部封批；尚无授权时等待部署命令。生产只安装这份最终构件一次。
+依据 [已批准的方案](../prd/2026-10-03-extreme-release.md)。普通发布由本地 AI 选择改动包及直接业务消费者，不递归证明整个依赖闭包，不因未知、共享文件或规则改动自动全量。
 
-国内裸仓库 `main` 是源码权威。开发任务交付准确 `base/head/tree` 和行为说明；唯一发布工作台使用现有候选队列、串行锁、attempt 与收据。GitHub 人工择机归档，不参与日常晋级。预备机维持 2 核 2GB；普通发布不备份数据库，只有生产迁移前备份。
+## 四步
 
-## 一条发布路径
+1. AI 读实际 diff、直接调用点和字段使用者，给出短清单。
+2. 运行选中检查；纯单元使用原生缓存，相关环境检查只执行一次。
+3. 最终累计源码构建一次、安装预发一次，完成清单中的相关冒烟。
+4. 已有当前范围的部署授权，内部绑定候选/构件/收据，直接同包生产并独立读回。
 
 ```mermaid
-flowchart TD
- A[固定 base/head/tree 与完整差异] --> B[按变更行为和真实消费者选择检查]
- B --> C[执行检查并审计实际运行的测试]
- C --> D[构建一份完整构件并核对摘要与资源闭包]
- D --> E[安装预发并读回本次业务行为]
- E --> F{继续纳入候选?}
- F -->|是| A
- F -->|否| I[最终累计版本复查整批旅程]
- I --> J{已有生产授权?}
- J -->|无| K[等待用户部署命令]
- K --> J
- J -->|有| L[内部绑定有序成员 最终构件 预发收据]
- L --> G[同包晋级生产]
- G --> H[生产摘要 版本 服务 健康与业务读回]
+flowchart LR
+ A[AI 短清单] --> B[相关检查与源码累计]
+ B --> C[最终 Linux 构建一次]
+ C --> D[预发相关冒烟]
+ D --> E[已有授权 同包生产]
+ E --> F[版本 服务 相关认证读取]
 ```
 
-按准确差异、Go base/head 消费图、变更测试及页面入口选择检查；`cmd/aicrm/*`、`internal/platform/*` 不再凭目录标签触发全仓。具名 Go 测试必须在 JSON 事件里出现 `pass`，`skip` 和 `[no tests to run]` 都不是通过。无法确定消费者时先调查，再扩大到相关包或页面；只有无法界定的消费者才扩大对应阶段；迁移按表消费者，依赖按import，执行策略变更由可信基线检查。选检规则由候选的可信基线执行，候选不能为自己缩减清单。
+## AI 清单
 
-Web 运行代码变化构建整个 Web 一次，避免遗漏共享 chunk 和动态 import。受影响 Go 程序按依赖图重建；迁移和静态载荷单独汇总。一次 attempt 拥有自己的工作目录，非空旧产物拒绝重用。最终只写一次完整文件清单，核对基包与已安装摘要的绑定和页面资源闭包。构建器合同测试在构建工具变化时执行，不夹进每次页面打包。
+候选在 `docs/release-checks.json` 中保存清单；发布器从准确候选 Git tree 读取，与该源码一起交付。`baseline_sha` 是当前累计源码 base；每次候选更新清单。
 
-## 累计预发与一次授权晋级
+```json
+{
+  "baseline_sha": "<准确base SHA>",
+  "checks": [
+    {"lane": "backend", "package": "./internal/product/app"},
+    {"lane": "backend", "path": "internal/payment/app/service_test.go", "test": "TestExample"},
+    {"lane": "frontend", "path": "web/v3/productAdapter.periodic_contact_collection.test.mjs"}
+  ],
+  "installed_checks": ["periodic-contact"]
+}
+```
 
-`release` 提交并检查队首候选；运行时代码安装到预发后停在 `stage_validation_pending`。发布工作台完成本次业务旅程，形成与安装收据绑定的受保护预发证据；`poll` 将它纳入开放批次，允许下一项从累计预发 HEAD 出发。源码或工具候选也纳入批次，不直接更新生产源码游标。下一项先由原开发任务更新自己的分支与验证，工作台不代为解决冲突。
+示例路径与用例以当前候选真实文件为准。小包整包测，大包用 `test` 选择具名用例。`installed_checks` 是既有预发收据中的检查名称；批次合并去重后在最终安装包上覆盖。相关并发检查显式加 `race: true`，PostgreSQL 用例显式加 `postgres: true`。需要额外维护程序时用 `build_commands: ["./cmd/<已有发布程序>"]`。
 
-用户说“部署到生产机”或明确要求部署当前整批，就是本次范围的生产授权，覆盖相关检查、预发、内部封批、同包晋级和独立读回；不要再次索取口令。工作台记录原指令和当前有序成员，内部 `batch-seal` 冻结 `base/head/tree`、构件与收据并生成 `approval_digest`，通过后直接调用 `promote`。相关修复沿用授权，无关新候选不得自动加入。尚无生产授权时只预发；确有新业务范围或不可逆操作超出授权才询问。控制器继续自动核对成员链、准确ref、同包字节、预发健康及生产基线。摘要是对象绑定与防重账本，不是第二次人类审批。
-封批后如又有需求要加入且生产尚未晋级，工作台先核对当前封批摘要、成员链、预发构件与收据、生产基线，再用 `batch-reopen --approval-digest <旧摘要>` 使旧审批失效并继续使用原批次。若重开本身更新控制器，附 `--sha/--ref` 指向已安装且通过相关 Linux 检查的准确源码候选；它原子地成为源码成员，业务应用不重装。该命令不写生产，保留旧封批收据。新候选由原开发任务沿当前预发 HEAD 更新；追加后重新封批；既有授权的修复直接继续，新增无关范围另列。
-
-若开放批次队首在检查准备阶段被标记为“未评价”，而修复该环境需更新控制器，使用 `batch-tool-repair --failed-candidate <队首SHA> --sha <工具SHA> --ref <工具ref>`。控制器验证工具修复的 Linux 检查和完整 bundle 后将其记为批次源码成员，保留原业务队首的失败收据与顺序；原开发任务再从新的累计 HEAD 重提该候选。此入口不接受已被代码测试判失败的候选，也不安装业务应用或生产。
+清单只预检路径、语法和用例存在，拒绝空匹配、skip 和失败。无清单时自动找改动包附近合同；找不到就由 AI 补清单，禁止转全仓。全量只通过明确的维护命令 `dev_preflight.py full` 执行。
 
 ```sh
-sudo /usr/local/libexec/aicrm/domestic_main_release.py release --config /etc/aicrm/domestic-main-release.json --ref refs/heads/codex/<work-item> --head <SHA> --base <SHA>
-sudo /usr/local/libexec/aicrm/domestic_main_release.py poll --config /etc/aicrm/domestic-main-release.json
-sudo /usr/local/libexec/aicrm/domestic_main_release.py batch-seal --config /etc/aicrm/domestic-main-release.json
-# 仅在封批后新增候选且生产未晋级时，先使旧摘要失效：
-sudo /usr/local/libexec/aicrm/domestic_main_release.py batch-reopen --config /etc/aicrm/domestic-main-release.json --approval-digest <旧64位摘要> --ref refs/heads/codex/<reopen-controller> --sha <准确控制器SHA>
-# 已有本次生产授权时，内部封批后直接继续：
-sudo /usr/local/libexec/aicrm/domestic_main_release.py promote --config /etc/aicrm/domestic-main-release.json --approval-digest <64位摘要>
+python3 scripts/dev_preflight.py affected --base <base> --head <head> --dry-run
+python3 scripts/dev_preflight.py affected --base <base> --head <head> --report-dir <仓外结果目录>
 ```
 
-晋级只传预发已安装的同一包，生产不编译。生产安装结果不明时只读对账同一 attempt、运行版本、收据与源码游标，禁止猜测成功或盲目重装。真实支付、扫码和 Provider 效果单独列出业务验收状态，不以健康检查冒称完成。
+## 批次先累计源码
+
+国内裸仓库 `main` 是权威源码，GitHub 人工归档。沿用原队列、锁、attempt 和安装器；预备机保持 2 核 2GB。`release` 检查候选后将运行时成员纳入现有批次，状态为 `prepared`，返回累计 `source_head_sha`；此时应用尚未更新。下一成员从该源码 HEAD 出发。
+
+所有预期成员纳入后运行 `batch-stage`，只构建并安装最终包一次，停在 `stage_validation_pending`。使用现有旅程脚本在该包上完成 AI 选定的业务检查，保存在既有 stage-evidence。`poll` 接受最终预发结果。已有范围授权即可 `promote-authorized`，内部封批和同包晋级；不再询问确认。
+
+```sh
+sudo /usr/local/libexec/aicrm/domestic_main_release.py release --config /etc/aicrm/domestic-main-release.json --ref refs/heads/codex/<work-item> --head <head> --base <base>
+sudo /usr/local/libexec/aicrm/domestic_main_release.py batch-stage --config /etc/aicrm/domestic-main-release.json
+# 在最终安装包完成短清单中的合成业务旅程，使用现有收据格式。
+sudo /usr/local/libexec/aicrm/domestic_main_release.py poll --config /etc/aicrm/domestic-main-release.json
+sudo /usr/local/libexec/aicrm/domestic_main_release.py promote-authorized --config /etc/aicrm/domestic-main-release.json --head <最终head> --authorization-reference <用户原命令引用>
+```
+
+测试、文档、无应用载荷的工具变动只推进源码，不重建重装应用。固定控制器变动使用原 `maintenance-check`：从准确候选控制器执行选中合同，通过后在原锁内安装准确工具字节并保留回退，再释放同一源码候选。维护结果用于同候选继续，不重复执行相同检查。
+
+已安装验收直接使用安装二进制和页面资源；常驻 Go/npm 缓存，依赖按锁文件变化准备。Go 与 Chromium 在小机器上错开执行。业务断言全部完成且进程停止后的临时目录删除失败记警告；身份、数据库归属、进程状态和业务结果不明仍停止。
+
+## 失败、恢复与读回
+
+检查失败停止后续发布写操作，修复后只重跑失败用例及修复影响范围。检查输入未变的通过结果可复用；不重新证明整个仓库。安装失败或状态不明，只读原 attempt、版本与服务对账，禁止盲目重装。保留上一完整包供兼容条件下回退。
+
+生产独立读取应用 SHA/摘要、API ready、worker 状态及相关认证接口或页面。普通发布不备份数据库，生产迁移前才备份并验证相关数据。真实支付、扫码、Provider 和接收方结果单列，不占技术发布通道、不冒称已成功。GitHub PR/check、merge-preview、ACK、观察等待不设日常门禁。
 
 ## 工作台交接和当前基线
 
-工作台身份由 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json` 的 `thread_id` 唯一指定。每次开始、恢复及发布写操作前读取；不指向本任务即停止发布写操作。开发任务推送国内准确候选 ref 后，重新读取路由并实际通过 `send_message_to_thread` 交付原任务 ID、base/head/tree/ref、五项影响、测试收据、未验证项和已有授权范围；不能沿用旧对话 ID。旧任务可解释历史结果，但不再接收发布或驱动控制器。
+唯一工作台每次从 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json` 的 `thread_id` 读取。工作台开始、恢复、发布写操作前核对路由；不指向自己即停止写操作。更换工作台继续沿用原队列、锁、in_flight、批次和收据，不初始化第二路径、不自动启用 timer/heartbeat；timer 状态以主机实测为准。
 
-更换工作台只转移对话入口，保留既有控制器、唯一队列、锁、in_flight、开放批次、attempt 与收据。新任务先只读待命；旧任务完成当前操作后，在既有控制器锁内核对状态、两机当前应用、生产源码游标及 timer，并将最小交接读回保存在本机 `release-control`。未知安装先对账；存在 in_flight 时先恢复收尾，不通过切换任务重试安装。旧任务停止发起新发布，再原子替换路由文件并通知新任务读取交接；切换后旧任务不再写发布状态。新工作台独立读回一致后进入待命，后续已授权候选沿原接收顺序处理。新任务的任命本身不授权新业务版本晋级，不自动建立 heartbeat 或启用发布 timer；timer 启停只以主机实测为准。
+开发任务实际推送国内准确候选后，重新读路由，通过 `send_message_to_thread` 投递原任务 ID、base/head/tree/ref、简短五项影响、AI 清单、相关测试结果、未验证项及授权范围；不自行安装共享预发或生产。五项影响只说明对外合同、业务机制、关联模块、页面影响、验证证据，不要求完整依赖图证明。
 
-```mermaid
-flowchart TD
- A[用户任命新工作台] --> B[新任务只读待命]
- B --> C[旧任务收尾 在既有锁内读回]
- C --> D[保存最小交接 原子切换唯一路由]
- D --> E[新任务独立核对路由和现场状态]
- E --> F[原队列 原锁 原收据继续处理授权候选]
-```
+用户“部署到生产机”即已说明范围授权，相关修复继承授权，无关新范围另列。原开发者处理代码或基线失败并保留队首顺序。源码与应用 SHA 因源码-only 改动合法不同，不视为失败。无状态变化用控制器 `status` 轻量读取。
 
-### 开发交付消息
-
-```text
-原开发任务 ID：
-国内候选 ref / base / head / tree：
-五项影响与依据：对外合同、业务机制、关联模块、页面、验证
-准确源码对应的命令、结果和收据路径；未验证项：
-已有预发/生产授权原消息及范围：
-```
-
-工作台根据实际消费者复核适用检查；收到“部署到生产机”后沿上述一次授权流程直接执行。代码/基线失败按已有用户授权回告原任务并保留队首顺序；未获授权向其他对话发送消息时，先在本任务报告失败。文档/skill 变化只推进源码；源码 SHA 与应用 SHA 合法不同不构成失败。
-
-2026-09-29 交接审查时，旧工作台已将裂变头像候选 `c6f2f34cfb4570f9c7b416f145ae55a43361f1f0` 安装到预发和生产，并使国内 `main` 对齐；构建时使用了临时修补，本方案将其纳入源码修复。旧结果不证明真实微信登录头像视觉验收。历史初始化与恢复细节见 `domestic-main-bootstrap.md`。
-
-
-### 一次授权入口与轻量观察
-
-收到用户“部署到生产机”后，工作台记录原消息引用并绑定已说明的准确范围，内部完成封批/摘要计算和晋级，不再索取确认口令：
-
-```sh
-sudo /usr/local/libexec/aicrm/domestic_main_release.py promote-authorized --config /etc/aicrm/domestic-main-release.json --head <已验证最终head> --authorization-reference <原生产命令消息引用>
-```
-
-正常轮询用同一控制器 `status --config /etc/aicrm/domestic-main-release.json`；状态变化、安装、异常和恢复边界再完整对账。生产成功收口后，固定安装器在同一安装锁下自动回收无引用旧构件，保留当前/上一包与进程引用；回收失败记录为维护待办，不把已成功安装改成未知安装状态。数据库与业务收据不在清理范围。
+旧已安装累计批次仍按原收据收尾，新批次采用源码累计。`batch-reopen`、`batch-tool-repair` 继续只用于原状态的具体修复，不作为普通发布新增环节。

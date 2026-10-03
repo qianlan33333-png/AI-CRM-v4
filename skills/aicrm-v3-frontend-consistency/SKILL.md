@@ -32,11 +32,11 @@ description: Keep AI-CRM-v4 admin, WeCom sidebar, H5, and public frontend work c
 
 按以下顺序处理：配置已有组件、组合已有组件、扩展公共组件、新增公共组件。在当前任务授权范围内，常规公共组件扩展或新增无需额外批准，但必须服务至少一个可复用的前端能力，放在公共位置并在组件索引中登记；禁止在单一页面私造平行组件或复制现有组件。
 
-新增或扩展前，确认它不承担领域写入、身份解析、Provider 调用或效果状态机。页面只调用其领域 HTTP/Port adapter；选择器按页面授权范围读取，不以组件为由扩大数据读取范围。修改共享组件时保留默认行为，列出受影响调用点并回归它们。
+新增或扩展前，确认它不承担领域写入、身份解析、Provider 调用或效果状态机。页面只调用其领域 HTTP/Port adapter；选择器按页面授权范围读取，不以组件为由扩大数据读取范围。修改共享组件时保留默认行为，由 AI 选择本次直接使用方的相关用例，不自动全页面回归。
 
 ## 验证
 
-验证复用或公共组件在实际挂载终端的关键交互、加载、空态、失败、无权限和真实 HTTP 回读，并在同一视口与参考页面对照。按影响运行相关 `typecheck`、`build`、`ui:shell:contract`、Journey 或冻结检查；仅文档改动不要求业务测试。不要用 Mock、静态成功提示或截图替代业务结果。
+验证复用或公共组件在实际挂载终端的关键交互、加载、空态、失败、无权限和真实 HTTP 回读，并在同一视口与参考页面对照。按 AI 清单运行相关 adapter/组件或页面旅程，类型检查和资源完整编译归入一次最终构建；仅文档改动不要求业务测试。不要用 Mock、静态成功提示或截图替代业务结果。
 
 ## 交付记录
 
@@ -47,3 +47,7 @@ description: Keep AI-CRM-v4 admin, WeCom sidebar, H5, and public frontend work c
 ## 治理参考
 
 仅借鉴 [Ant Design DESIGN.md](https://github.com/ant-design/ant-design/blob/master/DESIGN.md) 的 token、语义状态和组件目录治理，以及其 [权威组件清单](https://github.com/ant-design/ant-design/blob/master/.github/copilot-instructions.md) 的“禁止虚构组件”原则；不引入 Ant Design、React 或任何 UI 依赖。
+
+## 2026-10-03 极简发布
+
+遵循唯一 [发布流程](../../docs/operations/domestic-main-release.md) 和 [获批 PRD](../../docs/prd/2026-10-03-extreme-release.md)。本地 AI 列相关包及具名用例；取消日常全量回退和重复准备，源码先累计，最终构建/预发各一次，已有授权同包生产并独立读回。失败只修复并重跑受影响检查；安装不明停止写入对账。沿用现有队列/锁/attempt，不增加审批或新发布通道。

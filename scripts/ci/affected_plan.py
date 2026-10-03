@@ -11,6 +11,7 @@ import governance_impact
 import impact_selection
 import go_affected_graph
 import behavior_selection
+import ai_check_plan
 import commerce_checks
 import period_member_checks
 import os
@@ -22,6 +23,7 @@ POLICY_FILES = (
     "docs/development-before-start.md",
     "docs/prd/2026-09-24-small-step-impact-checks.md",
     "docs/governance/capability-impact.json",
+    "docs/release-checks.json",
     ".github/workflows/ci.yml",
     "scripts/dev_preflight.py",
     "scripts/ci/affected_plan.py",
@@ -125,6 +127,7 @@ def parent_prd_identity(root: Path, head: str) -> dict:
 def planner_policy_fingerprint() -> str:
     """Hash the planner and selector code that actually produced this plan."""
     files = (Path(__file__).resolve(), Path(behavior_selection.__file__).resolve(),
+             Path(ai_check_plan.__file__).resolve(),
              Path(impact_selection.__file__).resolve(),
              Path(go_affected_graph.__file__).resolve(), Path(commerce_checks.__file__).resolve(),
              Path(period_member_checks.__file__).resolve(),
@@ -213,13 +216,19 @@ def graph_not_required(paths: list[str]) -> bool:
 
 def non_go_graph_receipt(base_sha: str, base_tree: str, head_sha: str, head_tree: str,
                          paths: list[str]) -> dict:
+    return selection_graph_receipt(base_sha, base_tree, head_sha, head_tree, paths,
+                                   "registered_docs_or_tooling_only")
+
+
+def selection_graph_receipt(base_sha: str, base_tree: str, head_sha: str, head_tree: str,
+                            paths: list[str], proof: str) -> dict:
     payload = json.dumps(
-        {"schema": 1, "status": "not_required", "proof": "registered_docs_or_tooling_only",
+        {"schema": 1, "status": "not_required", "proof": proof,
          "baseline_sha": base_sha, "baseline_tree": base_tree, "head_sha": head_sha,
          "head_tree": head_tree, "changed_paths": paths},
         sort_keys=True, separators=(",", ":")).encode()
     return {
-        "schema": 1, "status": "not_required", "proof": "registered_docs_or_tooling_only",
+        "schema": 1, "status": "not_required", "proof": proof,
         "baseline_sha": base_sha, "baseline_tree": base_tree, "head_sha": head_sha,
         "head_tree": head_tree, "changed_paths": paths, "graph_valid": True,
         "unowned_go_paths": [], "selected_packages": [],
@@ -286,11 +295,10 @@ def package_candidate(report: dict, graph: dict, paths: list[str], policy_change
 
 
 def build_plan(root: Path, base: str, head: str, graph_result: dict | None = None) -> dict:
-    """Return candidate and current enforced selections bound to exact Git trees.
+    """Return a short check plan bound to the exact base and candidate trees.
 
-    The current candidate and exact enforced selector are both retained. A
-    supplied graph is accepted only when every source binding and changed path
-    matches; ordinary CLI use builds the graph from isolated base/head trees.
+    The candidate-owned AI list wins when present. The fallback selects changed
+    packages and direct/adjacent checks without constructing a dependency graph.
     """
     root = root.resolve()
     base_sha = resolve_commit(root, base)
@@ -301,61 +309,30 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
     checked_out_head = git(root, "rev-parse", "HEAD")
     clean = not status
     exact_checkout = checked_out_head == head_sha
+    if not clean:
+        raise ValueError("affected check planning requires a clean working tree")
+    if not exact_checkout:
+        raise ValueError("affected check planning requires head to be checked out")
 
-    report = None
-    commerce = None
-    period_member = None
-    analysis_error = None
-    # POLICY_FILES contribute to the trace fingerprint, while only executable
-    # gate/selector policy changes force the trusted full fallback. Human-facing
-    # instructions, PRDs, and skill descriptions remain ordinary documentation.
     policy_changed = any(path in EXECUTABLE_POLICY_FILES or path.startswith(POLICY_PREFIXES)
                          for path in paths)
-    if clean and exact_checkout:
-        try:
-            report = {"changed_paths": paths}
-        except Exception as error:
-            analysis_error = type(error).__name__ + ": " + str(error)
-
-    graph_problem = None
-    graph_valid = False
-    if report is not None:
-        try:
-            if graph_result is None and graph_not_required(paths):
-                graph_result = non_go_graph_receipt(base_sha, base_tree, head_sha, head_tree, paths)
-            elif graph_result is None:
-                graph_result = go_affected_graph.build_graph(root, base_sha, head_sha)
-            graph_valid, graph_problem = validate_graph(
-                graph_result, base_sha, base_tree, head_sha, head_tree, paths)
-        except Exception as error:
-            graph_problem = "package-graph-failed: " + type(error).__name__ + ": " + str(error)
-            graph_result = None
-    if report is None:
-        if not clean:
-            reason = "dirty-working-tree"
-        elif not exact_checkout:
-            reason = "head-is-not-checked-out"
-        else:
-            reason = "impact-analysis-failed"
-        analysis_error = analysis_error or reason
-        candidate = full_selection(reason)
-        enforced = full_selection(reason)
-        candidate_packages = []
-    elif not graph_valid:
-        candidate = full_selection(graph_problem or "invalid-package-graph")
-        enforced = impact_selection.select(report)
-        candidate_packages = []
+    manifest = ai_check_plan.load_manifest(root, base_sha, head_sha)
+    if manifest is None:
+        candidate = behavior_selection.select_light(root, base_sha, head_sha, paths)
+        installed_checks = []
+        build_commands = []
+        proof = ("registered_docs_or_tooling_only" if graph_not_required(paths)
+                 else "lightweight_changed_packages_and_direct_checks")
     else:
-        try:
-            candidate, candidate_packages = behavior_selection.select(
-                root, base_sha, head_sha, paths, graph_result, policy_changed=policy_changed)
-            enforced = candidate
-        except Exception as error:
-            report = None
-            analysis_error = "selection-validation-failed: " + str(error)
-            candidate = full_selection("selection-validation-failed")
-            enforced = full_selection("selection-validation-failed")
-            candidate_packages = []
+        candidate = ai_check_plan.selection(manifest)
+        installed_checks = manifest["installed_checks"]
+        build_commands = manifest["build_commands"]
+        proof = "local_ai_check_list"
+    enforced = candidate
+    candidate_packages = []
+    graph_result = selection_graph_receipt(base_sha, base_tree, head_sha, head_tree, paths, proof)
+    analysis_error = None
+    report = {"changed_paths": paths}
 
     source = {"checked_out_head": checked_out_head, "head_matches": exact_checkout,
               "working_tree_clean": clean, "status": status}
@@ -378,9 +355,9 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
         "candidate": normalize_selection(candidate),
         "selected_lanes": normalize_selection(candidate)["selected_lanes"],
         "selected_checks": normalize_selection(candidate)["selected_checks"],
-        "candidate_go_packages": (sorted({item["import_path"] for item in graph_result.get("selected_packages", [])
-                                          if isinstance(item, dict) and isinstance(item.get("import_path"), str)})
-                                  if graph_valid and isinstance(graph_result, dict) else candidate_packages),
+        "candidate_go_packages": candidate_packages,
+        "installed_checks": installed_checks,
+        "build_commands": build_commands,
         "enforced": normalize_selection(enforced),
         "policy_changed": policy_changed,
         "input_scope": graph_result.get("input_scope", {}) if isinstance(graph_result, dict) else {},
@@ -394,10 +371,10 @@ def build_plan(root: Path, base: str, head: str, graph_result: dict | None = Non
         "parent_prd": parent_prd_identity(root, head_sha),
         "analysis": {"status": "complete" if report is not None else "failed",
                      "error": analysis_error},
-        "execution_eligible": bool(report is not None and clean and exact_checkout and graph_valid),
-        "evidence_eligible": bool(report is not None and clean and exact_checkout and graph_valid),
+        "execution_eligible": bool(report is not None and clean and exact_checkout),
+        "evidence_eligible": bool(report is not None and clean and exact_checkout),
         "graph_result": graph_result,
-        "selection_source": "trusted-base-behavior-and-go-graph",
+        "selection_source": candidate.get("selection_source", "lightweight-changed-paths"),
     }
     return plan
 
@@ -410,7 +387,11 @@ def main() -> int:
     parser.add_argument("--base", required=True)
     parser.add_argument("--head", required=True)
     args = parser.parse_args()
-    plan = build_plan(args.root, args.base, args.head)
+    try:
+        plan = build_plan(args.root, args.base, args.head)
+    except (OSError, ValueError) as error:
+        print(str(error), file=sys.stderr)
+        return 2
     print(json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     return 0 if plan["evidence_eligible"] else 2
 

@@ -1,4 +1,5 @@
-"""Contracts for exact-source behavior check plans."""
+"""Contracts for exact-source check plans and short-list selection."""
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -6,195 +7,115 @@ import unittest
 from unittest.mock import patch
 
 import affected_plan
-import impact_selection
 
 
 class AffectedPlanTest(unittest.TestCase):
-    def test_browser_dependency_parser_change_runs_release_tool_contracts(self):
-        _, root, base, _ = self.repo()
-        target = root / "scripts/ci/browser_npm_dependencies.mjs"
-        target.parent.mkdir(parents=True)
-        target.write_text('export const inspect = () => false;\n')
-        subprocess.run(["git", "add", "."], cwd=root, check=True)
-        subprocess.run(["git", "commit", "-qm", "change dependency rule"], cwd=root, check=True)
-        head = affected_plan.resolve_commit(root, "HEAD")
-        with patch.object(affected_plan, "analyze_trusted_base", return_value=self.report([target.relative_to(root).as_posix()])):
-            plan = affected_plan.build_plan(root, base, head, graph_result=self.graph_for(root, base, head))
-        self.assertTrue(plan["policy_changed"])
-        self.assertEqual(plan["enforced"]["profile"], "tooling")
-        self.assertNotEqual(affected_plan.repository_policy_fingerprint(root, base),
-                            affected_plan.repository_policy_fingerprint(root, head))
-        previous = affected_plan.planner_policy_fingerprint()
-        read = Path.read_bytes
-        with patch.object(Path, "read_bytes", autospec=True, side_effect=lambda path:
-                read(path) + (b"changed-parser" if path.name == target.name else b"")):
-            self.assertNotEqual(previous, affected_plan.planner_policy_fingerprint())
-
     def repo(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        root = Path(directory.name)
-        (root / "docs/prd").mkdir(parents=True)
-        (root / "docs/prd/example.md").write_text("before\n")
-        (root / "docs/operations").mkdir(parents=True)
-        (root / "docs/operations/domestic-release.md").write_text("release guide before\n")
-        (root / "docs/development-before-start.md").write_text("development guide before\n")
-        (root / "skills/aicrm-v3-development-frontdoor").mkdir(parents=True)
-        (root / "skills/aicrm-v3-development-frontdoor/SKILL.md").write_text("frontdoor skill before\n")
-        (root / "skills/aicrm-v3-development").mkdir(parents=True)
-        (root / "skills/aicrm-v3-development/SKILL.md").write_text("skill before\n")
-        for command in (
-            ["git", "init", "-q"],
-            ["git", "config", "user.email", "test@example.invalid"],
-            ["git", "config", "user.name", "test"],
-            ["git", "add", "."],
-            ["git", "commit", "-qm", "base"],
-        ):
-            subprocess.run(command, cwd=root, check=True)
-        base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-        (root / "docs/prd/example.md").write_text("after\n")
-        subprocess.run(["git", "add", "."], cwd=root, check=True)
-        subprocess.run(["git", "commit", "-qm", "head"], cwd=root, check=True)
-        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-        return directory, root, base, head
-
-    @staticmethod
-    def report(paths):
-        return {"risk": "low", "changed_paths": paths, "direct": [], "affected": [], "checks": []}
-
-    @staticmethod
-    def graph_for(root, base, head):
-        base_sha = affected_plan.resolve_commit(root, base)
-        head_sha = affected_plan.resolve_commit(root, head)
-        return {
-            "schema": 1,
-            "baseline_sha": base_sha,
-            "baseline_tree": affected_plan.tree_for(root, base_sha),
-            "head_sha": head_sha,
-            "head_tree": affected_plan.tree_for(root, head_sha),
-            "changed_paths": affected_plan.changed_paths(root, base, head),
-            "graph_valid": True,
-            "unowned_go_paths": [],
-            "selected_packages": [],
-            "graph_fingerprint": "f" * 64,
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        files = {
+            "go.mod": "module example.invalid/crm\n\ngo 1.26\n",
+            "docs/prd/example.md": "before\n",
+            "scripts/ci/quality_lanes.py": "# baseline runner\n",
+            "scripts/ci/test_contract.py": "import unittest\nclass Contract(unittest.TestCase): pass\n",
+            "internal/catalog/catalog.go": "package catalog\nfunc Name() string { return \"catalog\" }\n",
+            "internal/catalog/catalog_test.go": "package catalog\nfunc TestCatalogName(t *testing.T) {}\n",
+            "internal/order/order.go":
+                'package order\nimport "example.invalid/crm/internal/catalog"\nvar _ = catalog.Name()\n',
+            "internal/order/order_test.go": "package order\nfunc TestOrder(t *testing.T) {}\n",
         }
+        for relative, content in files.items():
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+        for command in (["git", "init", "-q"], ["git", "config", "user.email", "test@example.invalid"],
+                        ["git", "config", "user.name", "test"], ["git", "add", "."],
+                        ["git", "commit", "-qm", "base"]):
+            subprocess.run(command, cwd=root, check=True)
+        base = self.sha(root)
+        (root / "docs/prd/example.md").write_text("after\n")
+        self.commit(root, "documentation")
+        return root, base, self.sha(root)
 
-    def test_plan_schema_binds_commit_trees_policy_and_package_graph(self):
-        directory, root, base, head = self.repo()
-        with patch.object(affected_plan, "analyze_trusted_base",
-                          return_value=self.report(["docs/prd/example.md"])):
+    @staticmethod
+    def sha(root):
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+
+    @staticmethod
+    def commit(root, message):
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-qm", message], cwd=root, check=True)
+
+    def test_documentation_plan_keeps_receipt_fields_without_building_graph(self):
+        root, base, head = self.repo()
+        with patch.object(affected_plan.go_affected_graph, "build_graph",
+                          side_effect=AssertionError("default planning must not build the dependency graph")):
             plan = affected_plan.build_plan(root, base, head)
-        self.assertEqual(plan["schema"], 1)
-        self.assertEqual(plan["mode"], "enforced")
-        self.assertEqual(plan["observed_mode"], "enforced")
+        self.assertTrue(plan["evidence_eligible"])
         self.assertEqual(plan["baseline_sha"], base)
         self.assertEqual(plan["head_sha"], head)
-        self.assertEqual(len(plan["baseline_tree"]), 40)
-        self.assertEqual(len(plan["head_tree"]), 40)
-        self.assertEqual(len(plan["policy_fingerprint"]), 64)
-        self.assertEqual(set(plan["policy_fingerprints"]), {"planner", "repository_head"})
-        self.assertEqual(plan["candidate"]["selected_lanes"], ["preflight"])
-        self.assertEqual(plan["candidate"]["selected_checks"], [])
-        self.assertEqual(plan["candidate"]["selection_reasons"], ["documentation"])
-        self.assertEqual(plan["enforced"]["selected_lanes"], ["preflight"])
-        self.assertEqual(plan["graph_result"]["status"], "not_required")
-        self.assertEqual(plan["graph_result"]["proof"], "registered_docs_or_tooling_only")
-        self.assertTrue(plan["evidence_eligible"])
-
-    def test_dirty_tree_cannot_produce_narrow_candidate_evidence(self):
-        directory, root, base, head = self.repo()
-        (root / "docs/prd/example.md").write_text("uncommitted\n")
-        plan = affected_plan.build_plan(root, base, head)
-        self.assertFalse(plan["source"]["working_tree_clean"])
-        self.assertFalse(plan["evidence_eligible"])
-        self.assertEqual(plan["candidate"]["selection_mode"], "full")
-        self.assertEqual(plan["candidate"]["selection_reasons"], ["dirty-working-tree"])
-        self.assertEqual(plan["enforced"]["selection_mode"], "full")
-
-    def test_unbound_graph_result_fails_closed(self):
-        directory, root, base, head = self.repo()
-        with patch.object(affected_plan, "analyze_trusted_base",
-                                     return_value=self.report(["docs/prd/example.md"])):
-            plan = affected_plan.build_plan(root, base, head, graph_result={"status": "complete"})
-        self.assertFalse(plan["evidence_eligible"])
-        self.assertEqual(plan["candidate"]["selection_mode"], "full")
-        self.assertEqual(plan["candidate"]["selection_reasons"], ["missing-or-unsupported-package-graph"])
-
-    def test_graph_changed_paths_or_unowned_go_files_fail_closed(self):
-        directory, root, base, head = self.repo()
-        graph_result = self.graph_for(root, base, head)
-        graph_result["changed_paths"] = ["wrong.go"]
-        with patch.object(affected_plan, "analyze_trusted_base",
-                                     return_value=self.report(["docs/prd/example.md"])):
-            plan = affected_plan.build_plan(root, base, head, graph_result=graph_result)
-        self.assertFalse(plan["evidence_eligible"])
-        self.assertEqual(plan["candidate"]["selection_reasons"], ["package-graph-changed-paths-mismatch"])
-
-        graph_result = self.graph_for(root, base, head)
-        graph_result["graph_valid"] = False
-        graph_result["unowned_go_paths"] = ["internal/new/file.go"]
-        with directory, patch.object(affected_plan, "analyze_trusted_base",
-                                     return_value=self.report(["docs/prd/example.md"])):
-            plan = affected_plan.build_plan(root, base, head, graph_result=graph_result)
-        self.assertFalse(plan["evidence_eligible"])
-        self.assertEqual(plan["candidate"]["selection_reasons"], ["package-graph-has-unowned-go-paths"])
-
-    def test_unmapped_path_selection_is_full_even_on_clean_source(self):
-        directory, root, base, head = self.repo()
-        (root / "new-runtime.toml").write_text("unknown = true\n")
-        subprocess.run(["git", "add", "new-runtime.toml"], cwd=root, check=True)
-        subprocess.run(["git", "commit", "-qm", "unknown runtime"], cwd=root, check=True)
-        head = affected_plan.resolve_commit(root, "HEAD")
-        graph_result = self.graph_for(root, base, head)
-        with patch.object(affected_plan.go_affected_graph, "build_graph", return_value=graph_result):
-            plan = affected_plan.build_plan(root, base, head)
-        self.assertTrue(plan["evidence_eligible"])
-        self.assertEqual(plan["candidate"]["selection_mode"], "full")
-        self.assertEqual(plan["candidate"]["selected_lanes"], list(impact_selection.LANES))
-
-    def test_payment_leaf_gets_bounded_package_and_browser_candidate(self):
-        graph_result = {"selected_packages": [{"import_path": "m/internal/payment/app"},
-                                               {"import_path": "m/cmd/aicrm"}]}
-        candidate, packages = affected_plan.package_candidate(
-            {"risk": "high", "direct": ["commerce"], "checks": [
-                {"lane": "backend", "path": "internal/product/app/unrelated_test.go", "test": "TestUnrelated"},
-                {"lane": "browser", "path": "cmd/aicrm/old_test.go", "test": "TestOldChromiumJourney"},
-            ]}, graph_result, ["internal/payment/app/state.go"], policy_changed=False)
-        self.assertEqual(candidate["mode"], "targeted")
-        self.assertEqual(candidate["lanes"], ["preflight", "backend", "browser"])
-        self.assertEqual(packages, ["m/cmd/aicrm", "m/internal/payment/app"])
-        self.assertEqual(candidate["checks"], [affected_plan.PAYMENT_BROWSER_CHECK])
-
-    def test_policy_change_uses_full_trusted_fallback(self):
-        candidate, packages = affected_plan.package_candidate(
-            self.report(["scripts/ci/impact_selection.py"]), {"selected_packages": []},
-            ["scripts/ci/impact_selection.py"], policy_changed=True)
-        self.assertEqual(candidate["mode"], "full")
-        self.assertEqual(candidate["reason"], "policy-change-requires-full")
-        self.assertEqual(packages, [])
-
-    def test_skills_and_tooling_guide_stay_light_but_remain_fingerprinted(self):
-        directory, root, base, previous_head = self.repo()
-        (root / "skills/aicrm-v3-development/SKILL.md").write_text("skill after\n")
-        (root / "skills/aicrm-v3-development-frontdoor/SKILL.md").write_text("frontdoor skill after\n")
-        (root / "docs/development-before-start.md").write_text("development guide after\n")
-        subprocess.run(["git", "add", "."], cwd=root, check=True)
-        subprocess.run(["git", "commit", "-qm", "update skills and tooling guide"], cwd=root, check=True)
-        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-        paths = affected_plan.changed_paths(root, base, head)
-        self.assertIn("skills/aicrm-v3-development/SKILL.md", paths)
-        self.assertIn("skills/aicrm-v3-development-frontdoor/SKILL.md", paths)
-        self.assertIn("docs/development-before-start.md", paths)
-        with patch.object(affected_plan, "analyze_trusted_base", return_value=self.report(paths)):
-            plan = affected_plan.build_plan(root, base, head)
-        self.assertTrue(plan["evidence_eligible"])
-        self.assertEqual(plan["candidate"]["selection_mode"], "targeted")
-        self.assertEqual(plan["candidate"]["selected_lanes"], ["preflight"])
         self.assertEqual(plan["candidate"]["profile"], "documentation")
-        self.assertEqual(plan["graph_result"]["status"], "not_required")
-        self.assertEqual(plan["enforced"]["selection_mode"], "targeted")
-        self.assertNotEqual(affected_plan.repository_policy_fingerprint(root, base),
-                            affected_plan.repository_policy_fingerprint(root, head))
+        self.assertEqual(plan["graph_result"]["proof"], "registered_docs_or_tooling_only")
+        self.assertEqual(plan["candidate_go_packages"], [])
+
+    def test_candidate_manifest_beats_policy_and_graph_fallbacks(self):
+        root, _, baseline = self.repo()
+        target = root / "scripts/ci/quality_lanes.py"
+        target.write_text("# modified runner contract\n")
+        manifest = {
+            "baseline_sha": baseline,
+            "checks": [{"lane": "preflight", "path": "scripts/ci/test_contract.py"}],
+            "installed_checks": ["periodic-contact", {"name": "questionnaire-recovery"}],
+            "build_commands": ["./cmd/aicrm"],
+        }
+        (root / "docs/release-checks.json").write_text(json.dumps(manifest))
+        self.commit(root, "runner and selected checks")
+        head = self.sha(root)
+        with patch.object(affected_plan.go_affected_graph, "build_graph",
+                          side_effect=AssertionError("AI list must bypass graph")), \
+                patch.object(affected_plan, "analyze_trusted_base",
+                             side_effect=AssertionError("AI list must bypass governance mapping")):
+            plan = affected_plan.build_plan(root, baseline, head, graph_result={"invalid": True})
+        self.assertTrue(plan["policy_changed"])
+        self.assertEqual(plan["candidate"]["profile"], "ai-selected")
+        self.assertEqual(plan["selection_source"], "local-ai-check-list")
+        self.assertEqual(plan["selected_checks"], manifest["checks"])
+        self.assertEqual(plan["candidate_go_packages"], [])
+        self.assertEqual(plan["installed_checks"], ["periodic-contact", "questionnaire-recovery"])
+        self.assertEqual(plan["build_commands"], ["./cmd/aicrm"])
+        self.assertEqual(plan["graph_result"]["proof"], "local_ai_check_list")
+
+    def test_dirty_or_wrong_head_source_fails_explicitly(self):
+        root, base, head = self.repo()
+        (root / "docs/prd/example.md").write_text("uncommitted\n")
+        with self.assertRaisesRegex(ValueError, "clean working tree"):
+            affected_plan.build_plan(root, base, head)
+        (root / "docs/prd/example.md").write_text("after\n")
+        with self.assertRaisesRegex(ValueError, "head to be checked out"):
+            affected_plan.build_plan(root, base, base)
+
+    def test_unknown_runtime_requires_a_list_instead_of_full_fallback(self):
+        root, _, base = self.repo()
+        (root / "new-runtime.toml").write_text("unknown = true\n")
+        self.commit(root, "unknown runtime")
+        with self.assertRaisesRegex(ValueError, "docs/release-checks.json is required"):
+            affected_plan.build_plan(root, base, self.sha(root))
+
+    def test_missing_manifest_selects_changed_and_one_hop_go_packages(self):
+        root, _, base = self.repo()
+        target = root / "internal/catalog/catalog.go"
+        target.write_text('package catalog\nfunc Name() string { return "updated" }\n')
+        self.commit(root, "catalog change")
+        head = self.sha(root)
+        with patch.object(affected_plan.go_affected_graph, "build_graph",
+                          side_effect=AssertionError("light selector must not build the dependency graph")):
+            plan = affected_plan.build_plan(root, base, head)
+        self.assertEqual(plan["candidate"]["profile"], "ai-selected")
+        self.assertEqual(plan["selection_source"], "adjacent-behavior-checks")
+        packages = {check["package"] for check in plan["selected_checks"]}
+        self.assertEqual(packages, {"./internal/catalog", "./internal/order"})
+        self.assertEqual(plan["candidate_go_packages"], [])
 
 
 if __name__ == "__main__":

@@ -175,6 +175,8 @@ try {
     await fs.rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:100});
   } catch(cleanupError) {
     if(journeyError)throw new AggregateError([journeyError,cleanupError],'contact journey and Chromium cleanup failed');
-    throw cleanupError;
+    if(child?.exitCode===null&&child?.signalCode===null)throw cleanupError;
+    if(!['ENOTEMPTY','EBUSY','EACCES','EPERM'].includes(cleanupError.code))throw cleanupError;
+    console.warn(`contact journey cleanup warning: ${cleanupError.code}`);
   }
 }

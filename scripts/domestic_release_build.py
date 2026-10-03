@@ -52,6 +52,7 @@ CI_ONLY_FILES = {
     "internal/product/http/member_grid_host/member_grid_journey.mjs",
     "internal/product/http/service_period_public_journey.mjs",
     "scripts/dev_preflight.py",
+    "scripts/run-installed-periodic-contact.sh",
     "scripts/check-architecture.py",
     "scripts/check-config-definition-import-boundary.sh",
     "scripts/check-hxc-identity-boundaries.sh",
@@ -601,29 +602,27 @@ def _make_plan(repo: Path, base_sha: str, target_sha: str, target_root: Path | N
         return classification.as_json(base_sha, target_sha, tree, [item.package for item in commands])
 
     if classification.graph_paths:
+        # Normal releases compile the application once. Explicit changed tools
+        # and the AI's requested tools join that command; no base/head reverse
+        # dependency graph or speculative rebuild of all maintenance binaries.
+        selected = {item.package for item in commands if item.package == "./cmd/aicrm"}
+        for item in commands:
+            directory = item.package.removeprefix("./") + "/"
+            if any(path.startswith(directory) for path in classification.graph_paths):
+                selected.add(item.package)
+        manifest_path = "docs/release-checks.json"
         try:
-            if target_root is not None:
-                package_map, command_graphs = _go_packages(target_root, commands)
-                with TemporaryWorktree(repo, base_sha) as baseline_source:
-                    baseline_package_map, baseline_graphs = _go_packages(baseline_source, commands)
-            else:
-                with TemporaryWorktree(repo, target_sha) as source:
-                    package_map, command_graphs = _go_packages(source, commands)
-                with TemporaryWorktree(repo, base_sha) as baseline_source:
-                    baseline_package_map, baseline_graphs = _go_packages(baseline_source, commands)
-            affected = affected_go_commands(
-                classification.graph_paths,
-                commands,
-                package_map,
-                command_graphs,
-                previous_package_map=baseline_package_map,
-                previous_command_graphs=baseline_graphs,
-            )
-            return classification.as_json(base_sha, target_sha, tree, affected)
-        except (BuildError, json.JSONDecodeError):
-            classification.full_build = True
-            classification.full_build_reason = "dependency_graph_unavailable"
-            return classification.as_json(base_sha, target_sha, tree, [item.package for item in commands])
+            raw = _git_file(repo, target_sha, manifest_path)
+        except BuildError:
+            raw = "{}"
+        requested = json.loads(raw).get("build_commands", [])
+        allowed = {item.package for item in commands}
+        if not isinstance(requested, list) or any(value not in allowed for value in requested):
+            raise BuildError("AI build commands must name existing release programs")
+        selected.update(requested)
+        if not selected:
+            raise BuildError("no application or directly changed program selected for runtime inputs")
+        return classification.as_json(base_sha, target_sha, tree, sorted(selected))
 
     return classification.as_json(base_sha, target_sha, tree, [])
 

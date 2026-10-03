@@ -27,6 +27,7 @@ import (
 	accesshttp "github.com/qianlan33333-png/AI-CRM-v3/internal/access/http"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/outbound"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 )
 
 // TestPostgreSQLProductExternalPushChromiumJourney uses the real Access
@@ -174,7 +175,15 @@ func newProductExternalPushChromiumFixtureWithOptions(t *testing.T, timeout time
 		t.Fatal("locate Chromium product journey")
 	}
 	repository := filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
-	t.Chdir(repository)
+	installed := testconfig.InstalledProduct()
+	if installed.Binary != "" {
+		if !filepath.IsAbs(installed.Root) {
+			t.Fatal("installed fixture needs an absolute package root")
+		}
+		t.Chdir(installed.Root)
+	} else {
+		t.Chdir(repository)
+	}
 	prepareProductExternalPushChromiumArtifacts(t, repository)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -565,6 +574,19 @@ func productExternalPushAdminMutation(t *testing.T, handler http.Handler, method
 // journey non-reproducible and turn an absent Host into a misleading 503.
 func prepareProductExternalPushChromiumArtifacts(t *testing.T, repository string) {
 	t.Helper()
+	if installed := testconfig.InstalledProduct(); installed.Binary != "" {
+		content, err := os.ReadFile(installed.Binary)
+		digest := sha256.Sum256(content)
+		manifestBytes, manifestErr := os.ReadFile(filepath.Join(installed.Root, "web", "dist", "asset-manifest.json"))
+		var manifest struct {
+			SourceSHA string `json:"source_sha"`
+		}
+		if err != nil || !filepath.IsAbs(installed.Binary) || !validDomesticReleaseSHA(installed.SHA) || hex.EncodeToString(digest[:]) != installed.BinarySHA256 || manifestErr != nil || json.Unmarshal(manifestBytes, &manifest) != nil || manifest.SourceSHA != installed.SHA {
+			t.Fatal("installed fixture binary/Host binding mismatch")
+		}
+		t.Log("reusing installed Product Host; source artifact preparation omitted")
+		return
+	}
 	command := exec.Command("python3", "scripts/ci/check_preparation.py", "artifact")
 	command.Dir = repository
 	output, err := command.CombinedOutput()

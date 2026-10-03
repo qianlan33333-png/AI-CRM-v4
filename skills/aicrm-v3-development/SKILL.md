@@ -21,7 +21,7 @@ Use this skill after reading the repository `AGENTS.md`. Its purpose is to make 
 Follow `skills/aicrm-v3-development-frontdoor/SKILL.md`: keep the parent brief in one Codex task, deliver one independently releasable behavior or defect with its tests in each candidate, and use Product Design before UI implementation. Split by behavior, without line-count quotas. An authorized parent brief carries into child candidates; request a new decision only for material scope or contract changes. The routed release workbench owns publication; the original developer fixes code or baseline failures. Use a separate agent only when explicitly requested by the user or applicable instructions; other tasks are not restricted to a model.
 
 
-每个候选固定说明对外合同、业务机制、关联模块、页面影响和验证证据，按 [开发入口五项判断](../aicrm-v3-development-frontdoor/SKILL.md#五项影响判断) 用准确 diff、依赖图和可信映射复核。高风险加强相关断言；未知影响不能仅靠作者声明缩减检查。
+每个候选固定说明对外合同、业务机制、关联模块、页面影响和验证证据，按 [开发入口五项判断](../aicrm-v3-development-frontdoor/SKILL.md#五项影响判断) 简短说明；本地 AI 根据准确 diff 和直接消费者选择包/用例。高风险加强本次相关断言，未知或共享文件不自动全量。
 
 ## Start With a Two-Axis Classification
 
@@ -156,6 +156,6 @@ These are review prompts, not universal feature gates. Apply only the relevant t
 
 Stop and report instead of improvising when the design would cause identity misattribution, implicit customer creation, cross-domain table writes, independent commits that can split one required transaction, duplicate Provider effects, blind retry of `outcome_unknown`, or a second execution/identity kernel.
 
-## 2026-10-01 发布复盘落地
+## 2026-10-03 极简发布
 
-遵循 [最小发布流程](../../docs/operations/domestic-main-release.md)（仓库根目录路径）。用户“部署到生产机”是当前已说明范围的生产授权，工作台内部绑定SHA/摘要后直接完成必要检查、预发、晋级、独立读回；相关修复继承授权，不重复询问，无关新范围单列。影响按实际消费者：资料图片/资源登记不等同可执行策略；OpenAPI按路由及消费者、SQL按表及消费者、锁文件按依赖消费者。未知关系扩大对应阶段并记明原因。Host合同按可信测试文件映射，文件变化或未登记自动纳入；共享Host变化完整验证。文档/工具无应用载荷变化时仅源码推进。只要求适用收据，同包已安装先读回恢复；无变化只用控制器status轻量查询。沿用既有准备器、单锁、队列和River；不制造第二套审批或验收框架。
+遵循唯一 [发布流程](../../docs/operations/domestic-main-release.md) 和 [获批 PRD](../../docs/prd/2026-10-03-extreme-release.md)。本地 AI 列相关包及具名用例；取消日常全量回退和重复准备，源码先累计，最终构建/预发各一次，已有授权同包生产并独立读回。失败只修复并重跑受影响检查；安装不明停止写入对账。沿用现有队列/锁/attempt，不增加审批或新发布通道。

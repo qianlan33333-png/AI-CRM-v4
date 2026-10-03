@@ -1260,7 +1260,7 @@ def trusted_focused(lane, report_dir, checks):
     return rewrite(original_focused(lane, report_dir, checks))
 
 def trusted_run_recorded(command, env, lane, report_dir, execution):
-    actual = list(command)
+    actual = rewrite([list(command)])[0]
     # Focused Chromium journeys selected in the backend lane require the same
     # explicit opt-in as the dedicated browser lane. Without it, go test exits
     # successfully after skipping the named journey, leaving incomplete checks.
@@ -1304,7 +1304,7 @@ def _trusted_preflight_plan(config: dict[str, Any], policy: Path, candidate: Pat
                             cwd=policy, timeout=900, check=False, safe_repository=candidate,
                             umask=0o022)
     if result.returncode != 0:
-        raise ReleaseError("trusted impact analysis failed; candidate is held for full review")
+        raise ReleaseError("selected check plan failed; supply or repair the local AI check list")
     try:
         plan = json.loads(result.stdout.splitlines()[-1])
     except (IndexError, json.JSONDecodeError) as exc:
@@ -1318,8 +1318,8 @@ def _trusted_preflight_plan(config: dict[str, Any], policy: Path, candidate: Pat
                          and enforced.get("selection_mode") == "full"
                          and lanes == list(builder_ci_lanes())
                          and plan.get("graph_result", {}).get("graph_valid") is True)
-    if (source not in {"trusted-base-behavior-and-go-graph", "trusted-baseline-registry-and-go-test-graph"}
-            or (source != "trusted-base-behavior-and-go-graph" and not legacy_transition)
+    if (source not in {"local-ai-check-list", "adjacent-behavior-checks", "trusted-base-behavior-and-go-graph", "trusted-baseline-registry-and-go-test-graph"}
+            or (source not in {"local-ai-check-list", "adjacent-behavior-checks", "trusted-base-behavior-and-go-graph"} and not legacy_transition)
             or plan.get("baseline_sha") != base_sha or plan.get("head_sha") != head_sha
             or plan.get("head_tree") != _worktree_git(candidate, "rev-parse", "HEAD^{tree}")
             or plan.get("source_clean") is not True or plan.get("source", {}).get("head_matches") is not True
@@ -1357,11 +1357,11 @@ def _enforced_lanes(plan: dict[str, Any], changed_policy: list[str]) -> tuple[di
         raise ReleaseError("trusted impact plan has no enforced selection")
     lanes = enforced.get("selected_lanes")
     checks = enforced.get("selected_checks", [])
-    packages = [] if enforced.get("profile") == "behavior" else plan.get("candidate_go_packages", [])
+    packages = [] if enforced.get("profile") in {"behavior", "ai-selected"} else plan.get("candidate_go_packages", [])
     profile = enforced.get("profile", "full")
     if not isinstance(lanes, list) or not lanes or any(lane not in builder_ci_lanes() for lane in lanes):
         raise ReleaseError("trusted impact plan selected an invalid lane set")
-    if changed_policy and not ((profile == "tooling" and lanes == ["preflight"])
+    if changed_policy and profile != "ai-selected" and not ((profile == "tooling" and lanes == ["preflight"])
                                or (plan.get("selection_source") == "trusted-base-behavior-and-go-graph"
                                    and profile == "full" and enforced.get("selection_mode") == "full"
                                    and "policy-and-runtime-changed" in enforced.get("selection_reasons", []))
@@ -1865,7 +1865,7 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
             backend_running.wait()
         scheduler_wait = time.monotonic() - waiting
         dependency_preparation = "not-applicable"
-        if lane in {"frontend", "browser"} or (lane == "backend" and not backend_stages_dependencies):
+        if lane in {"frontend", "browser"} or (lane == "backend" and not backend_stages_dependencies and profile != "ai-selected"):
             needs_dependencies = not (lane == "browser" and preparation_helper
                 # Continued backend commands may reuse stage evidence while
                 # its old disposable artifact has already been reclaimed.
@@ -1882,8 +1882,8 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
             _prepare_check_dependencies(config, checkout, [lane],
                 diagnostic_root / f"{head_sha}-{report_dir.name}-{lane}-npm-ci.log", policy=policy)
         args = [lane, "--report-dir", str(lane_dir)]
-        if profile == "behavior":
-            args.extend(["--profile", "behavior"])
+        if profile in {"behavior", "ai-selected"}:
+            args.extend(["--profile", profile])
         elif _lane_check_profile(enforced, profile) == "public-commerce-v1":
             args.extend(["--profile", "public-commerce-v1"])
         elif lane == "preflight":
@@ -1899,7 +1899,7 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                                for name in continued_names]
         if enforced.get("selection_mode") == "targeted" and lane == "backend" and packages:
             args.extend(["--focus-packages-json", json.dumps(sorted(set(packages)), separators=(",", ":"))])
-        elif (enforced.get("selection_mode") == "targeted" or continued_names) and lane != "preflight" and lane_checks:
+        elif (enforced.get("selection_mode") == "targeted" or continued_names) and (lane != "preflight" or profile == "ai-selected") and lane_checks:
             args.extend(["--focus-checks-json", json.dumps(lane_checks, separators=(",", ":"))])
         if snapshot and (policy / "scripts/ci/check_preparation.py").is_file():
             args.extend(["--resume-commands-json", json.dumps(snapshot.get("passed_commands", []), separators=(",", ":"))])
@@ -2017,7 +2017,7 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
         # maintenance validation must retain serial execution on this host.
         lane_results.extend(run_lane(lane) for lane in pending_lanes)
         return lane_results
-    with ThreadPoolExecutor(max_workers=1 if profile == "full" else 2) as executor:
+    with ThreadPoolExecutor(max_workers=1 if profile in {"full", "ai-selected"} else 2) as executor:
         # Backend must own a worker even if the caller lists browser first;
         # otherwise both workers could wait for a backend still in the queue.
         if "backend" in pending_lanes:
@@ -2879,7 +2879,15 @@ def _check_attempt_directory(config: dict, report: Path, policy: Path, head_sha:
                 # Cleanup blockage cannot relabel a product assertion or an
                 # unknown interrupted execution as a resumable environment fault.
                 raise original_error from exc
-            raise
+            if not isinstance(exc, OSError):
+                raise
+            # Tolerate only disposable filesystem cleanup. An OSError can also
+            # occur before database cleanup or process inspection completes.
+            if list((report / ".preparation").glob("database-*.json")):
+                raise CheckEnvironmentError("test database cleanup is unresolved; retained attempt") from exc
+            _assert_build_account_idle()
+            record["cleanup_warning"] = type(exc).__name__
+            atomic_json(record_path, record)
         finally:
             config.pop("_check_tmpdir", None)
 
@@ -3066,7 +3074,8 @@ print(json.dumps({'database':name}))
 
 
 def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir: Path,
-                  base_sha: str, head_sha: str, *, diagnostic_root: Path | None = None) -> dict[str, Any]:
+                  base_sha: str, head_sha: str, *, diagnostic_root: Path | None = None,
+                  candidate_policy: bool = False) -> dict[str, Any]:
     storage = _check_storage_mount(config)  # Before recovery or any filesystem mutation.
     if report_dir.exists() or report_dir.is_symlink():
         raise ReleaseError("candidate check evidence path already exists; inspect before retry")
@@ -3083,7 +3092,8 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
     report_info = report_dir.lstat()
     if not stat.S_ISDIR(report_info.st_mode) or report_info.st_uid != pwd.getpwnam(legacy.BUILD_USER).pw_uid or stat.S_IMODE(report_info.st_mode) != 0o700:
         raise ReleaseError("check evidence directory is not owned by the isolated build account")
-    policy = _policy_worktree(repo, Path(config["work_root"]), base_sha, config["push_group"])
+    policy_sha = head_sha if candidate_policy else base_sha
+    policy = _policy_worktree(repo, Path(config["work_root"]), policy_sha, config["push_group"])
     changed_policy = _check_policy_changes(repo, base_sha, head_sha)
     toolchain = _verify_build_toolchain(config)
     plan = _trusted_preflight_plan(config, policy, worktree, base_sha, head_sha)
@@ -3115,7 +3125,7 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
         if preparation_cache is not None:
             check_config["_check_preparation_cache"] = str(preparation_cache)
         toolchain["execution"] = _check_execution_preflight(check_config, policy, execution_worktree, report_dir, "browser" in lanes)
-        if (policy / "scripts/ci/check_preparation.py").is_file():
+        if profile != "ai-selected" and (policy / "scripts/ci/check_preparation.py").is_file():
             probe_code = """import sys,json
 from pathlib import Path
 sys.path.insert(0, str(Path(sys.argv[1]) / 'scripts/ci'))
@@ -3136,7 +3146,7 @@ print(json.dumps({lane: items for lane, items in missing.items() if items}))
                 raise CheckIncompleteError("actual build account prerequisite evidence is missing") from exc
             if missing:
                 raise CheckEnvironmentError("required check prerequisites missing: " + json.dumps(missing, sort_keys=True))
-        elif set(lanes) & {"backend", "browser"}:
+        elif profile != "ai-selected" and set(lanes) & {"backend", "browser"}:
             _check_database_capability(check_config, execution_worktree, prep)
         if "backend" in lanes and (enforced["selection_mode"] == "full" or profile == "affected-packages"):
             check_config["_required_go_packages"] = _discover_check_packages(
@@ -3146,7 +3156,11 @@ print(json.dumps({lane: items for lane, items in missing.items() if items}))
         if previous_path:
             prior = _load_check_checkpoint(Path(previous_path),diagnostic_root,continuation_identity)
         check_config["_check_checkpoint"] = prior
-        if set(lanes) & {"backend", "browser"}:
+        database_needed = (bool(set(lanes) & {"backend", "browser"}) if profile != "ai-selected" else
+                           "browser" in lanes or any(c.get("postgres") or "PostgreSQL" in c.get("test", "") or
+                           "postgres" in c.get("path", "").lower() or "integration" in c.get("path", "").lower()
+                           for c in checks if c.get("lane") == "backend"))
+        if database_needed:
             check_config["_check_attempt_database"] = _create_check_attempt_database(
                 check_config, execution_worktree, prep)
         try:
@@ -3175,7 +3189,8 @@ print(json.dumps({lane: items for lane, items in missing.items() if items}))
         "schema_version": 1, "status": "passed", "baseline_sha": base_sha,
         "baseline_tree": plan["baseline_tree"], "head_sha": head_sha, "head_tree": plan["head_tree"],
         "policy_fingerprint": plan["policy_fingerprint"],
-        "trusted_policy_sha": base_sha,
+        "trusted_policy_sha": policy_sha,
+        "installed_checks": plan.get("installed_checks", []),
         "selection_mode": enforced["selection_mode"],
         "profile": profile, "selected_lanes": lanes,
         "selection_reasons": enforced.get("selection_reasons"),
@@ -3716,7 +3731,8 @@ def _update_state(path: Path, state: dict[str, Any], **changes: Any) -> None:
     atomic_json(path, state)
 
 
-def _maintenance_check_checkpoint(config: dict[str, Any], marker: dict[str, Any]) -> str | None:
+def _maintenance_check_checkpoint(config: dict[str, Any], marker: dict[str, Any], *,
+                                  return_receipt: bool = False) -> str | dict[str, Any] | None:
     """Resolve the completed capsule through the existing receipt digest.
 
     Keep the maintenance marker compatible with installed older controllers;
@@ -3746,6 +3762,8 @@ def _maintenance_check_checkpoint(config: dict[str, Any], marker: dict[str, Any]
                 or receipt.get("head_sha") != marker["candidate_sha"]
                 or receipt.get("head_tree") != marker["candidate_tree"]):
             raise ReleaseError("maintenance check receipt identity differs from marker")
+        if return_receipt:
+            return receipt
         checkpoint = receipt.get("check_checkpoint")
         if checkpoint is None:
             return None
@@ -3891,13 +3909,129 @@ def _build_candidate(config: dict[str, Any], sha: str, base: str,
         os.umask(old_umask)
 
 
+def profile_requires_legacy_smoke(check_receipt: dict[str, Any]) -> bool:
+    return check_receipt.get("profile") != "ai-selected"
+
+
+def _installed_check_names(values: list[Any]) -> set[str]:
+    names = {value if isinstance(value, str) else value.get("name", "") for value in values}
+    if any(not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,79}", name) for name in names):
+        raise ReleaseError("AI installed check names must match the existing journey receipt names")
+    return names
+
+
+def _accept_prepared_member(config, state_path, state, item, check, bundle, tree, controller):
+    """Advance the existing batch's source only; no application build/install."""
+    if check.get("status") != "passed":
+        raise ReleaseError("cannot accumulate a member without passing selected checks")
+    batch = state.get("batch")
+    if batch is None:
+        batch = state["batch"] = {"status": "open", "mode": "source-accumulated",
+            "base_sha": state["main"]["sha"], "base_tree": state["main"]["tree"],
+            "installed_app": dict(state["installed_app"]), "members": [],
+            "controller_source_sha": state["main"]["sha"], "opened_at_utc": _utc_now()}
+    expected = batch.get("head_sha", batch["base_sha"])
+    if item["base_sha"] != expected:
+        raise ReleaseError("prepared member does not continue the cumulative source tip")
+    names = sorted(_installed_check_names(check.get("installed_checks", [])))
+    member = {"candidate_id": item["candidate_id"], "ref": item["ref"],
+        "base_sha": item["base_sha"], "head_sha": item["head_sha"], "head_tree": tree,
+        "runtime_changed": True, "deferred_install": True,
+        "installed_app": dict(batch["installed_app"]),
+        "check_receipt_sha256": hashlib.sha256(json.dumps(check, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+        "installed_checks": names, "stage_check_names": names,
+        "stage_receipt_sha256": None, "stage_journey_sha256": None,
+        "source_bundle_sha256": bundle["bundle_sha256"]}
+    batch["members"].append(member)
+    batch.update(head_sha=item["head_sha"], head_tree=tree)
+    item.update(status="prepared", check_receipt=check, source_bundle=bundle,
+                controller_receipt=controller, prepared_at_utc=_utc_now())
+    state["in_flight"] = None
+    state["staging_out_of_sync"] = True  # Source ahead; installed_app remains explicit.
+    _update_state(state_path, state, status="ready")
+    return {"status": "batch_open", "mode": "source-accumulated", "source_head_sha": item["head_sha"],
+            "staged_app_sha": batch["installed_app"]["sha"], "member_count": len(batch["members"]),
+            "next_action": "batch-stage after collecting the intended members", "production_written": False}
+
+
+def _prepared_batch_checks(repo, state):
+    batch = state["batch"]
+    receipts = []
+    for member in batch["members"]:
+        item = next((q for q in state["queue"] if q["head_sha"] == member["head_sha"]), None)
+        if item is None or item.get("check_receipt", {}).get("status") != "passed":
+            raise ReleaseError("prepared batch member lost its selected check result")
+        receipt = item["check_receipt"]
+        digest = hashlib.sha256(json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        if digest != member["check_receipt_sha256"]:
+            raise ReleaseError("prepared member selected-check receipt changed")
+        if _resolve_ref(repo, member["ref"]) != member["head_sha"]:
+            raise ReleaseError("prepared member source ref changed")
+        receipts.append(receipt)
+    result = dict(receipts[-1])
+    result.update(baseline_sha=batch["base_sha"], baseline_tree=batch["base_tree"],
+                  changed_paths=_git(repo, "diff", "--name-only", "--no-renames", batch["base_sha"], batch["head_sha"]).splitlines(),
+                  installed_checks=sorted({name for r in receipts for name in _installed_check_names(r.get("installed_checks", []))}),
+                  check_scope="selected-member-checks; final application build and installed journeys",
+                  member_check_receipts=[m["check_receipt_sha256"] for m in batch["members"]])
+    return result
+
+
+def batch_stage(config: dict[str, Any]) -> dict[str, Any]:
+    """Build/install the accumulated final source once under the original lock."""
+    if os.geteuid() != 0:
+        raise ReleaseError("final batch staging requires root")
+    config = _check_config(config)
+    if config.get("production_enabled") is not True:
+        raise ReleaseError("release is disabled until verified cutover")
+    repo, state_path = Path(config["repo"]), Path(config["state"])
+    with _locked(Path(config["lock"]), nonblocking=True):
+        _assert_legacy_release_path_stopped()
+        state = _load_state(state_path)
+        batch = state.get("batch")
+        if state["status"] != "ready" or state.get("in_flight") is not None or _active_queue_item(state):
+            raise ReleaseError("final batch staging requires an idle resolved queue")
+        if not batch or batch.get("mode") != "source-accumulated" or batch.get("status") != "open":
+            raise ReleaseError("no accumulated source batch is ready")
+        tip = _batch_tip(state)
+        if batch.get("final_stage_head") == tip:
+            return {"status": "batch_open", "source_head_sha": tip, "already_staged": True}
+        if _resolve_ref(repo, MAIN_REF) != batch["base_sha"]:
+            raise ReleaseError("production source baseline changed before final staging")
+        _verify_controller_files(config, repo, batch.get("controller_source_sha", batch["base_sha"]), sorted(builder.FIXED_CONTROLLER_FILES))
+        baseline = state["installed_app"]
+        _verify_prod_app(config, baseline["sha"], baseline["manifest_sha256"])
+        app = batch["installed_app"]
+        _verify_stage_app(app["sha"], app["manifest_sha256"])
+        item = next(q for q in state["queue"] if q["head_sha"] == tip)
+        return process_candidate(dict(config, _final_batch_stage=True), state_path, state, item)
+
+
+def _accept_final_batch_stage(config, state_path, state, item, evidence):
+    batch, inflight = state["batch"], state["in_flight"]
+    if inflight.get("head_sha") != batch["head_sha"] or inflight.get("base_sha") != batch["base_sha"]:
+        raise ReleaseError("final installed attempt differs from accumulated source")
+    _verify_staged_member(config, Path(config["repo"]), inflight, evidence)
+    required = {name for member in batch["members"] for name in member.get("stage_check_names", [])}
+    if not required.issubset({check["name"] for check in evidence["checks"]}):
+        raise ReleaseError("final installed evidence omits an AI-selected member journey")
+    batch.update(installed_app=dict(inflight["installed_app"]), stage_receipt=dict(inflight["stage_receipt"]),
+                 final_stage_head=inflight["head_sha"])
+    item.update(status="staged", stage_receipt=inflight["stage_receipt"], stage_journey_receipt=evidence)
+    state["in_flight"] = None
+    _update_state(state_path, state, status="ready")
+    return {"status": "batch_open", "source_head_sha": batch["head_sha"],
+            "staged_app_sha": batch["installed_app"]["sha"], "member_count": len(batch["members"]), "production_written": False}
+
+
 def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
     repo = Path(config["repo"])
     domestic_main_sha = _resolve_ref(repo, MAIN_REF)
     if domestic_main_sha != state["main"]["sha"]:
         raise ReleaseError("domestic main differs from the durable release ledger")
-    old_main_sha = _batch_tip(state)
-    if item["base_sha"] != old_main_sha:
+    final_batch = bool(config.get("_final_batch_stage"))
+    old_main_sha = state["batch"]["base_sha"] if final_batch else _batch_tip(state)
+    if item["base_sha"] != old_main_sha and not final_batch:
         item["status"] = "stale_base"
         item["failure"] = {"phase": "base-check", "expected_base": old_main_sha,
                            "candidate_base": item["base_sha"], "recorded_at_utc": _utc_now()}
@@ -3946,9 +4080,16 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
             check_config["_check_resume_checkpoint"] = _maintenance_check_checkpoint(config, maintenance_marker)
         if item.get("failure", {}).get("kind") == "environment" and item["failure"].get("check_checkpoint"):
             check_config["_check_resume_checkpoint"] = item["failure"].get("check_checkpoint")
-        check_receipt = _check_report(check_config, repo, source_worktree, report_dir, old_main_sha, item["head_sha"])
+        if final_batch:
+            check_receipt = _prepared_batch_checks(repo, state)
+        elif maintenance_marker and maintenance_marker.get("candidate_sha") == item["head_sha"]:
+            check_receipt = _maintenance_check_checkpoint(config, maintenance_marker, return_receipt=True)
+            if check_receipt is None:
+                raise ReleaseError("checked controller receipt is missing; stop before publication")
+        else:
+            check_receipt = _check_report(check_config, repo, source_worktree, report_dir, old_main_sha, item["head_sha"])
         paths = check_receipt["changed_paths"]
-        runtime_changed = bool(classification.get("runtime_changed"))
+        runtime_changed = bool(classification.get("runtime_changed")) or final_batch
         batch = state.get("batch")
         installed_app = dict(batch["installed_app"] if batch else state["installed_app"])
         metadata = None
@@ -3956,6 +4097,11 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
         smoke_receipt = None
         production_receipt = None
         bundle, bundle_meta = _create_full_bundle(repo, Path(config["work_root"]), item["head_sha"], head_tree)
+
+        if (not final_batch and runtime_changed and
+                (batch is None or batch.get("mode") == "source-accumulated")):
+            return _accept_prepared_member(config, state_path, state, item, check_receipt,
+                                           bundle_meta, head_tree, controller_receipt)
 
         if runtime_changed:
             phase = "build"
@@ -3990,7 +4136,7 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
             _verify_stage_app(item["head_sha"], metadata["release_files_sha256"])
             state["in_flight"].update({"stage_install_completed": True, "stage_receipt": stage_receipt})
             _update_state(state_path, state)
-            smoke_required = _needs_installed_alipay_smoke(paths)
+            smoke_required = (profile_requires_legacy_smoke(check_receipt) and _needs_installed_alipay_smoke(paths))
             if smoke_required:
                 phase = "stage-smoke"
                 _update_state(state_path, state, in_flight={**state["in_flight"], "phase": phase})
@@ -4021,7 +4167,7 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
                                        "controller_receipt": controller_receipt,
                                        "bundle_meta": bundle_meta,
                                        "production_install_started": False,
-                                       "commit_started": False})
+                                       "commit_started": False, "final_batch_stage": final_batch})
             item["status"] = "stage_validation_pending"
             _update_state(state_path, state, status="blocked")
             return {"status": "stage_validation_pending", "candidate_sha": item["head_sha"],
@@ -4160,6 +4306,9 @@ def _read_stage_evidence(config: dict[str, Any], inflight: dict[str, Any]) -> di
             raise ReleaseError("stage journey log is not protected")
         if _file_sha256(log) != _digest(check.get("log_sha256"), "stage journey log digest"):
             raise ReleaseError("stage journey log differs from its receipt")
+    selected = _installed_check_names((inflight.get("check_receipt") or {}).get("installed_checks", []))
+    if not selected.issubset(names):
+        raise ReleaseError("stage receipt omits an AI-selected installed journey")
     return receipt
 
 
@@ -4181,11 +4330,12 @@ def _batch_member_record(inflight: dict[str, Any], evidence: dict[str, Any] | No
         "head_sha": _sha(inflight["head_sha"], "member head SHA"),
         "head_tree": _sha(inflight["head_tree"], "member tree"),
         "runtime_changed": runtime,
+        "installed_checks": check.get("installed_checks", []),
         "installed_app": dict(app),
         "check_receipt_sha256": digest(check),
         "stage_receipt_sha256": digest(stage_receipt) if runtime else None,
         "stage_journey_sha256": digest(evidence) if runtime else None,
-        "stage_check_names": [entry["name"] for entry in evidence["checks"]] if runtime else [],
+        "stage_check_names": [entry["name"] for entry in evidence["checks"]] if runtime else sorted(_installed_check_names(check.get("installed_checks", []))),
         "source_bundle_sha256": _digest(bundle["bundle_sha256"], "member bundle SHA"),
     }
 
@@ -4359,6 +4509,8 @@ def batch_seal(config: dict[str, Any], *, expected_head: str | None = None) -> d
         tip = _batch_tip(state)
         if expected_head is not None and tip != _sha(expected_head, "authorized batch head"):
             raise ReleaseError("batch scope changed after production authorization")
+        if batch.get("mode") == "source-accumulated" and batch.get("final_stage_head") != tip:
+            raise ReleaseError("run batch-stage once for the final accumulated source before sealing")
         last = batch["members"][-1]
         if _resolve_ref(repo, last["ref"]) != tip or _tree(repo, tip) != batch["head_tree"]:
             raise ReleaseError("final staged source identity changed")
@@ -4723,7 +4875,7 @@ def _promote_staged_candidate(config: dict[str, Any], state_path: Path, state: d
 
 
 def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, Any]:
-    """Test a fixed-controller candidate with the currently installed trusted policy.
+    """Test an authorized fixed-controller candidate with its exact selected policy.
 
     This never installs candidate code or promotes an application. The operator
     reviews this receipt, installs the exact controller bytes with rollback,
@@ -4764,7 +4916,7 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
         if not controller_files:
             raise ReleaseError("candidate does not contain a registered fixed-controller change")
         report_dir = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate_sha}-maintenance-{time.time_ns()}"
-        check_receipt = _check_report(config, repo, worktree, report_dir, main_sha, candidate_sha)
+        check_receipt = _check_report(config, repo, worktree, report_dir, main_sha, candidate_sha, candidate_policy=True)
         python_controller_files = [path for path in controller_files if path.endswith(".py")]
         compile_code = (
             "from pathlib import Path; import sys; root=Path(sys.argv[1]); "
@@ -4907,7 +5059,9 @@ def poll(config: dict[str, Any], *, expected_candidate_sha: str | None = None) -
                         "manifest_sha256": inflight["release_manifest_sha256"],
                         "stage_evidence_path": str(_stage_evidence_path(config, front["head_sha"]))}
             if state.get("batch") is not None:
-                return _accept_staged_batch_member(config, state_path, state, front, evidence)
+                return (_accept_final_batch_stage(config, state_path, state, front, evidence)
+                        if inflight.get("final_batch_stage") else
+                        _accept_staged_batch_member(config, state_path, state, front, evidence))
             return _approval_wait_result(inflight, evidence)
         if (state["status"] == "blocked" and isinstance(inflight, dict)
                 and inflight.get("phase") == "source-approval-pending"):
@@ -6086,7 +6240,7 @@ def restricted_ssh() -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check", "batch-open", "batch-seal", "batch-reopen", "batch-tool-repair",
+    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check", "batch-open", "batch-stage", "batch-seal", "batch-reopen", "batch-tool-repair",
                                             "poll", "status", "promote", "promote-authorized", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
     parser.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG))
     parser.add_argument("--repo", type=Path)
@@ -6172,6 +6326,8 @@ def main(argv: list[str] | None = None) -> int:
             result = maintenance_check(config, args.sha)
         elif args.action == "batch-open":
             result = batch_open(config, controller_sha=args.sha, controller_ref=args.ref)
+        elif args.action == "batch-stage":
+            result = batch_stage(config)
         elif args.action == "batch-seal":
             result = batch_seal(config)
         elif args.action == "batch-reopen":

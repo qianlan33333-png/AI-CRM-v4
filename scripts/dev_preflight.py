@@ -232,7 +232,7 @@ class Preflight:
                 or not isinstance(checks, list) or any(not isinstance(check, dict) for check in checks)
                 or not isinstance(packages, list) or any(not isinstance(item, str) or not item for item in packages)
                 or mode not in {"full", "targeted"}
-                or candidate_profile not in {"full", "tooling", "documentation", "behavior", "affected", "affected-packages", "period-member-read-v1"}
+                or candidate_profile not in {"full", "tooling", "documentation", "behavior", "ai-selected", "affected", "affected-packages", "period-member-read-v1"}
                 or candidate_profile == "tooling" and (lanes != ["preflight"] or mode != "targeted")):
             raise ValueError("affected candidate selection is malformed")
 
@@ -265,16 +265,16 @@ class Preflight:
                 # documentation/affected profiles use the ordinary full
                 # preflight command set; only an explicit tooling candidate
                 # uses the dedicated tooling contract commands.
-                quality_profile = candidate_profile if candidate_profile in {"tooling", "documentation", "behavior"} else "full"
+                quality_profile = candidate_profile if candidate_profile in {"tooling", "documentation", "behavior", "ai-selected"} else "full"
                 command.extend(["--profile", quality_profile])
             lane_checks = [check for check in checks if check.get("lane") == lane]
-            if candidate_profile == "behavior" and lane != "preflight":
-                command.extend(["--profile", "behavior", "--focus-checks-json",
+            if candidate_profile == "ai-selected" or candidate_profile == "behavior" and lane != "preflight":
+                command.extend(["--profile", candidate_profile, "--focus-checks-json",
                                 json.dumps(lane_checks, separators=(",", ":"))])
                 execution_scope = {"kind": "mapped-checks", "checks": lane_checks}
             if candidate_profile == "period-member-read-v1" and lane in {"frontend", "browser"}:
                 command.extend(["--profile", "period-member-read-v1"])
-            if candidate_profile == "behavior" and lane != "preflight":
+            if candidate_profile == "ai-selected" or candidate_profile == "behavior" and lane != "preflight":
                 pass
             elif mode == "targeted" and lane == "backend" and packages:
                 if candidate_profile == "period-member-read-v1":

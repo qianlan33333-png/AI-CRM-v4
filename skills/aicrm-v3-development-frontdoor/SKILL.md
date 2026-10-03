@@ -28,16 +28,15 @@ Read repository `AGENTS.md` and `skills/aicrm-v3-development/SKILL.md`. Use the 
 | 页面影响 | 页面、入口、展示和交互；后端变化也须评估 |
 | 验证证据 | 模块完整测试、连接合同、业务旅程、最终输出及未覆盖项 |
 
-作者声明由准确 diff、生产／测试／embed 依赖图和可信检查映射复核；填写“无影响”不能缩减检查。影响可靠时执行本模块全集、关联合同及最终输出；影响无法界定时扩大相关阶段，必要时全仓并说明原因。高风险加强相关断言，不直接扩大到无关业务。共享、迁移、策略和未验证类别保守执行；规则经完整结果对照后逐类启用。页面能力开发继续使用 Product Design。
+本地 AI 根据准确 diff、直接调用点和字段直接消费者给出相关包/具名用例短清单。取消完整依赖闭包、登记证明、全量对照和未知自动扩散。小包整包测，大包选用例；身份、支付、权限与数据变动只加强对应合同。局部证据明确标注范围，不能称全量回归。
 
 ## Small-step delivery
 
 - Keep the implementation and its child candidates in the same Codex task. Each candidate delivers one independently releasable, reversible user-visible behavior or clear defect with related tests. Split by behavior, not line or file quota. 日常候选是国内 `codex/*` 分支的准确 SHA/base；GitHub PR 仅作人工归档，不决定部署。
 - Use the Product Design plugin/skill before implementing any sidebar, customer-facing, or admin UI.
 - 发布由唯一路由指定的工作台完成；仅用户或适用规则明确要求代理时，使用一个 `gpt-6-luna` max agent 负责本次发布全程，不为构建、交接、观察各开任务。其他开发模型不受限。
-- Preserve exact head/tree and test scope in candidate evidence. Unknown, shared, migration, executable check-policy, or release-path changes remain conservative.
-- `python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` prints a candidate plan. A normal local run executes its lanes, named changed tests and whole affected packages only where a narrower relationship is unknown. Missing environment or execution evidence is incomplete. 发布者核对准确 SHA/tree、影响范围、环境和结果；相同适用 Linux 证据可复用，不因为进入发布阶段重跑相同测试。macOS 证据不替代必需 Linux 验证。
-- The former PR2 ten-PR shadow trial remains historical evidence for the GitHub gate. Domestic cutover does not prove a faster check safe or faster. Keep unverified categories on complete checks; a confirmed omission or unknown receipt closes the relevant fast path.
+- Preserve exact head/tree and selected scope. Unknown/shared/policy changes use the AI list; no automatic full fallback.
+- `python3 scripts/dev_preflight.py affected --base SHA --head SHA --dry-run` shows the AI plan in `docs/release-checks.json`. Run only its checks; reuse valid unit results and test caches. Required Linux/PG/browser checks execute once in that environment. Empty/skip/unknown results are incomplete. Failures rerun only affected checks.
 
 Routine implementation choices within an authorized PRD do not need another confirmation. Revisit the brief only when business scope, data ownership, or an external contract materially changes.
 
@@ -45,6 +44,6 @@ Routine implementation choices within an authorized PRD do not need another conf
 
 使用 [日常国内发布](../../docs/operations/domestic-main-release.md#工作台交接和当前基线)。国内准确候选 ref 实际推送后，读取 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json`，通过 `send_message_to_thread` 向其 `thread_id` 实际投递原任务 ID、base/head/tree/ref、五项影响、测试收据、未验证项和授权范围；不硬编码旧工作台 ID，不只写“等待发布”，不自行安装共享预发或生产。不创建 merge-preview、handoff 事件或延期验收日期。普通发布沿用同包路径和现有队列/锁；源码、收据和生产身份出现无法解释的不一致时停止对账。
 
-## 2026-10-01 发布复盘落地
+## 2026-10-03 极简发布
 
-遵循 [最小发布流程](../../docs/operations/domestic-main-release.md)（仓库根目录路径）。用户“部署到生产机”是当前已说明范围的生产授权，工作台内部绑定SHA/摘要后直接完成必要检查、预发、晋级、独立读回；相关修复继承授权，不重复询问，无关新范围单列。影响按实际消费者：资料图片/资源登记不等同可执行策略；OpenAPI按路由及消费者、SQL按表及消费者、锁文件按依赖消费者。未知关系扩大对应阶段并记明原因。Host合同按可信测试文件映射，文件变化或未登记自动纳入；共享Host变化完整验证。文档/工具无应用载荷变化时仅源码推进。只要求适用收据，同包已安装先读回恢复；无变化只用控制器status轻量查询。沿用既有准备器、单锁、队列和River；不制造第二套审批或验收框架。
+遵循唯一 [发布流程](../../docs/operations/domestic-main-release.md) 和 [获批 PRD](../../docs/prd/2026-10-03-extreme-release.md)。本地 AI 列相关包及具名用例；取消日常全量回退和重复准备，源码先累计，最终构建/预发各一次，已有授权同包生产并独立读回。失败只修复并重跑受影响检查；安装不明停止写入对账。沿用现有队列/锁/attempt，不增加审批或新发布通道。

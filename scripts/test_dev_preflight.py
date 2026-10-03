@@ -394,6 +394,27 @@ class AffectedPreflight(unittest.TestCase):
             preflight_command = next(command for command in commands if command[2] == "preflight")
             self.assertEqual(preflight_command[preflight_command.index("--profile") + 1], "tooling")
 
+    def test_ai_plan_keeps_named_backend_and_selected_preflight_without_full_fallback(self):
+        plan = self.plan(lanes=("preflight", "backend"), profile="ai-selected")
+        plan["candidate"]["selected_checks"] = [
+            {"lane": "preflight", "path": "scripts/test_dev_preflight.py"},
+            {"lane": "backend", "path": "internal/payment/app/service_test.go", "test": "TestPayment"},
+        ]
+        commands = []
+        with tempfile.TemporaryDirectory() as directory:
+            check, _, run, source = self.prepare_check(directory, plan)
+            def capture(name, command, env=None):
+                commands.append(command)
+                return run(name, command, env)
+            with patch.object(check, "run", side_effect=capture), patch.object(check, "source_snapshot", return_value=source), patch.object(dev_preflight, "exact_affected_plan_source_binding", return_value=True):
+                self.assertEqual(check.affected(plan), "passed")
+        self.assertEqual(len(commands), 2)
+        for command in commands:
+            self.assertIn("ai-selected", command)
+            self.assertIn("--focus-checks-json", command)
+            self.assertNotIn("--focus-packages-json", command)
+        self.assertIn("TestPayment", commands[1][-1])
+
     def test_affected_dry_run_prints_plan_without_running_checks(self):
         plan = {"mode": "shadow", "evidence_eligible": True, "candidate": {"selected_lanes": ["preflight"]}}
         output = io.StringIO()

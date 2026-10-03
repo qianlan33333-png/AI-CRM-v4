@@ -6,7 +6,6 @@ import unittest
 from pathlib import Path
 
 import behavior_selection
-import quality_lanes
 
 
 class BehaviorSelectionTest(unittest.TestCase):
@@ -17,9 +16,15 @@ class BehaviorSelectionTest(unittest.TestCase):
         for command in (["git", "init", "-q"], ["git", "config", "user.name", "Fixture"],
                         ["git", "config", "user.email", "fixture@example.invalid"]):
             subprocess.run(command, cwd=self.root, check=True)
+        self.write("go.mod", "module example.invalid/crm\n\ngo 1.26\n")
+        self.write("internal/catalog/catalog.go", "package catalog\nfunc Name() string { return \"catalog\" }\n")
+        self.write("internal/catalog/catalog_test.go", "package catalog\nfunc TestCatalogName(t *testing.T) {}\n")
+        self.write("internal/order/order.go",
+                   'package order\nimport "example.invalid/crm/internal/catalog"\nvar _ = catalog.Name()\n')
+        self.write("internal/order/order_test.go", "package order\nfunc TestOrder(t *testing.T) {}\n")
         self.write("cmd/aicrm/composition.go", "package main\nfunc route() {}\n")
         self.write("cmd/aicrm/adapters_test.go", "package main\nfunc TestUnrelated(t *testing.T) {}\n")
-        self.write("cmd/aicrm/referral_chromium_postgres_integration_test.go",
+        self.write("cmd/aicrm/referral_chromium_test.go",
                    "package main\nfunc TestReferralChromiumJourney(t *testing.T) {}\n")
         self.write("web/v3/referralCenter.ts", "export const view = 1;\n")
         self.write("web/v3/referralCenter.test.mjs", "// old check\n")
@@ -38,101 +43,86 @@ class BehaviorSelectionTest(unittest.TestCase):
     def sha(self) -> str:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=self.root, text=True).strip()
 
-    def graph(self) -> dict:
-        return {"selected_packages": [{"dir": "cmd/aicrm", "import_path": "m/cmd/aicrm",
-                                        "source_files": ["cmd/aicrm/composition.go"]}]}
+    def select(self, paths):
+        return behavior_selection.select_light(self.root, self.base, self.sha(), paths)
 
-    def test_page_specific_csp_uses_direct_tests_and_real_journey(self) -> None:
+    def test_changed_package_selects_only_itself_and_one_hop_importers(self):
+        self.write("internal/catalog/catalog.go", 'package catalog\nfunc Name() string { return "updated" }\n')
+        self.commit("catalog update")
+        choice = self.select(["internal/catalog/catalog.go"])
+        self.assertEqual(choice["profile"], "ai-selected")
+        self.assertEqual(choice["selection_source"], "adjacent-behavior-checks")
+        self.assertEqual({check["package"] for check in choice["checks"]},
+                         {"./internal/catalog", "./internal/order"})
+        self.assertNotIn("./cmd/aicrm", {check["package"] for check in choice["checks"]})
+
+    def test_cmd_host_source_requires_a_named_check_instead_of_a_package_suite(self):
         self.write("cmd/aicrm/composition.go", 'package main\nfunc route() { _ = "/referral" }\n')
-        self.write("cmd/aicrm/adapters_test.go", "package main\nfunc TestUnrelated(t *testing.T) {}\nfunc TestReferralCSP(t *testing.T) {}\n")
-        self.write("web/v3/referralCenter.ts", "export const view = 2;\n")
-        self.write("web/v3/referralCenter.test.mjs", "// new check\n")
-        self.commit("referral")
-        paths = subprocess.check_output(["git", "diff", "--name-only", self.base, "HEAD"],
-                                        cwd=self.root, text=True).splitlines()
-        choice, packages = behavior_selection.select(self.root, self.base, self.sha(), paths, self.graph())
-        self.assertEqual(choice["profile"], "behavior")
-        self.assertEqual(choice["lanes"], ["preflight", "backend", "frontend", "browser"])
-        self.assertEqual(packages, [])
-        self.assertIn({'lane':'backend','path':'cmd/aicrm/composition.go'},choice['checks'])
-        self.assertIn({'lane':'browser','path':'cmd/aicrm/referral_chromium_postgres_integration_test.go','test':'TestReferralChromiumJourney'},choice['checks'])
-        # A new named test cannot authorize omission of shared Host behavior.
-        backend=quality_lanes.behavior_commands('backend',self.root,choice['checks'])
-        self.assertNotIn('^(TestReferralCSP)$',' '.join(backend[0]))
+        self.commit("host route update")
+        with self.assertRaisesRegex(ValueError, "docs/release-checks.json is required"):
+            self.select(["cmd/aicrm/composition.go"])
 
-    def test_unmapped_composition_falls_back_to_package_suite(self) -> None:
-        self.write("cmd/aicrm/composition.go", "package main\nfunc route() { _ = 2 }\n")
-        self.commit("unmapped composition")
-        choice, _ = behavior_selection.select(self.root, self.base, self.sha(),
-                                              ["cmd/aicrm/composition.go"], self.graph())
-        self.assertIn({"lane": "backend", "path": "cmd/aicrm/composition.go"}, choice["checks"])
-
-    def test_unrelated_new_test_does_not_hide_composition_change(self) -> None:
+    def test_changed_named_host_test_does_not_expand_to_browser_or_full_lane(self):
         self.write("cmd/aicrm/composition.go", 'package main\nfunc route() { _ = "/referral" }\n')
-        self.write("cmd/aicrm/adapters_test.go", "package main\nfunc TestUnrelated(t *testing.T) {}\nfunc TestPayments(t *testing.T) {}\n")
-        self.commit("mixed")
-        choice, _ = behavior_selection.select(self.root, self.base, self.sha(),
-                                              ["cmd/aicrm/composition.go", "cmd/aicrm/adapters_test.go"], self.graph())
-        self.assertIn({"lane": "backend", "path": "cmd/aicrm/composition.go"}, choice["checks"])
-        self.assertNotIn({"lane": "backend", "path": "cmd/aicrm/adapters_test.go", "test": "TestPayments"},
-                         choice["checks"])
+        self.write("cmd/aicrm/adapters_test.go",
+                   "package main\nfunc TestUnrelated(t *testing.T) {}\nfunc TestReferralCSP(t *testing.T) {}\n")
+        self.commit("host route and named check")
+        choice = self.select(["cmd/aicrm/composition.go", "cmd/aicrm/adapters_test.go"])
+        self.assertEqual(choice["lanes"], ["backend"])
+        self.assertIn({"lane": "backend", "path": "cmd/aicrm/adapters_test.go",
+                       "package": "./cmd/aicrm", "test": "TestReferralCSP"}, choice["checks"])
+        self.assertNotIn("./cmd/aicrm", [check.get("package") for check in choice["checks"]
+                                         if check.get("test") is None])
 
-    def test_unknown_runtime_and_policy_are_handled_separately(self) -> None:
+    def test_changed_chromium_test_runs_only_its_named_browser_journey(self):
+        self.write("cmd/aicrm/referral_chromium_test.go",
+                   "package main\nfunc TestReferralChromiumJourney(t *testing.T) { _ = 1 }\n")
+        self.commit("browser journey")
+        choice = self.select(["cmd/aicrm/referral_chromium_test.go"])
+        self.assertEqual(choice["lanes"], ["browser"])
+        self.assertEqual(choice["checks"], [{"lane": "browser", "path": "cmd/aicrm/referral_chromium_test.go",
+                                              "test": "TestReferralChromiumJourney"}])
+
+    def test_adjacent_web_test_is_selected_without_shared_or_browser_expansion(self):
+        self.write("web/v3/shared/ui/widget.ts", "export const widget = 2;\n")
+        self.write("web/v3/shared/ui/widget.test.mjs", "// direct node test\n")
+        self.commit("shared component")
+        choice = self.select(["web/v3/shared/ui/widget.ts", "web/v3/shared/ui/widget.test.mjs"])
+        self.assertEqual(choice["lanes"], ["frontend"])
+        self.assertEqual(choice["checks"], [{"lane": "frontend", "path": "web/v3/shared/ui/widget.test.mjs"}])
+
+    def test_go_fixture_change_selects_its_referencing_test_and_deleted_test_is_not_emitted(self):
+        fixture = "internal/order/checkout_journey.mjs"
+        self.write(fixture, "// journey fixture\n")
+        self.write("internal/order/order_test.go",
+                   'package order\nfunc TestCheckoutJourney(t *testing.T) { _ = "checkout_journey.mjs" }\n')
+        self.commit("journey fixture")
+        base = self.sha()
+        self.write(fixture, "// revised journey fixture\n")
+        self.commit("journey update")
+        choice = behavior_selection.select_light(self.root, base, self.sha(), [fixture])
+        self.assertEqual(choice["checks"], [{"lane": "backend", "path": "internal/order/order_test.go",
+                                              "package": "./internal/order", "test": "TestCheckoutJourney"}])
+
+        test_path = "internal/order/order_test.go"
+        (self.root / test_path).unlink()
+        self.commit("delete consumer test")
+        with self.assertRaisesRegex(ValueError, "docs/release-checks.json is required"):
+            behavior_selection.select_light(self.root, self.sha(), self.sha(), [test_path])
+
+    def test_unknown_runtime_path_requires_a_list_instead_of_full_fallback(self):
         self.write("unknown-runtime.toml", "new=true\n")
-        self.commit("unknown")
-        unknown, _ = behavior_selection.select(self.root, self.base, self.sha(),
-                                               ["unknown-runtime.toml"], {"selected_packages": []})
-        self.assertEqual(unknown["mode"], "full")
-        tooling, _ = behavior_selection.select(self.root, self.base, self.sha(),
-                                               ["scripts/ci/behavior_selection.py"],
-                                               {"selected_packages": []}, policy_changed=True)
-        self.assertEqual(tooling["profile"], "tooling")
+        self.commit("unknown runtime")
+        with self.assertRaisesRegex(ValueError, "docs/release-checks.json is required"):
+            self.select(["unknown-runtime.toml"])
 
-    def test_policy_and_runtime_change_cannot_select_only_tool_contracts(self) -> None:
-        self.write("cmd/aicrm/composition.go", 'package main\nfunc route() { _ = "/referral" }\n')
-        self.commit("runtime with selector")
-        choice, _ = behavior_selection.select(self.root, self.base, self.sha(),
-                                              ["scripts/ci/behavior_selection.py", "cmd/aicrm/composition.go"],
-                                              self.graph(), policy_changed=True)
-        self.assertEqual(choice["mode"], "full")
-        self.assertIn("backend", choice["lanes"])
-
-    def test_shared_web_with_adjacent_test_widens_to_consumers(self) -> None:
-        self.write("web/v3/shared/ui/widget.ts", "export const widget = 1;\n")
-        self.write("web/v3/shared/ui/widget.test.mjs", "// direct check\n")
-        self.commit("shared")
-        choice, _ = behavior_selection.select(self.root, self.base, self.sha(),
-                                              ["web/v3/shared/ui/widget.ts", "web/v3/shared/ui/widget.test.mjs"],
-                                              {"selected_packages": []})
-        self.assertEqual(choice["reason"], "shared-web-consumers-unknown")
-        self.assertIn("browser", choice["lanes"])
-
-    def test_page_css_uses_its_page_check_and_journey(self) -> None:
-        self.write("web/v3/referral.css", ".referral { gap: 4px }\n")
-        self.commit("css baseline")
-        base = self.sha()
-        self.write("web/v3/referral.css", ".referral { gap: 2px }\n")
-        self.commit("css tune")
-        choice, _ = behavior_selection.select(self.root, base, self.sha(),
-                                              ["web/v3/referral.css"], {"selected_packages": []})
-        self.assertEqual(choice["profile"], "behavior")
-        self.assertIn({"lane": "frontend", "path": "web/v3/referralCenter.test.mjs"}, choice["checks"])
-        self.assertIn({"lane": "browser", "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
-                       "test": "TestReferralChromiumJourney"}, choice["checks"])
-
-    def test_node_journey_fixture_runs_its_go_host_test(self) -> None:
-        self.write("internal/product/http/service_period_public_journey.mjs", "// changed journey\n")
-        self.write("internal/product/http/public_test.go",
-                   'package http\nfunc TestServicePeriodPublicBrowserJourney(t *testing.T) { _ = "service_period_public_journey.mjs" }\n')
-        self.commit("fixture baseline")
-        base = self.sha()
-        self.write("internal/product/http/service_period_public_journey.mjs", "// revised journey\n")
-        self.commit("fixture update")
-        choice, _ = behavior_selection.select(self.root, base, self.sha(),
-                                              ["internal/product/http/service_period_public_journey.mjs"],
-                                              {"selected_packages": []})
-        self.assertIn({"lane": "backend", "path": "internal/product/http/public_test.go",
-                       "test": "TestServicePeriodPublicBrowserJourney"}, choice["checks"])
+    def test_documentation_only_stays_light(self):
+        self.write("docs/example.md", "doc\n")
+        self.commit("documentation")
+        choice = self.select(["docs/example.md"])
+        self.assertEqual(choice["profile"], "documentation")
+        self.assertEqual(choice["lanes"], ["preflight"])
+        self.assertEqual(choice["checks"], [])
 
 
 if __name__ == "__main__":
