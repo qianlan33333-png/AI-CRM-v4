@@ -1,19 +1,19 @@
 {
   "schema": 1,
-  "baseline_sha": "d994b4a3a47efdce9637040f878b3a9e72095a41",
+  "baseline_sha": "39d6c8219d80cbda650f103aa16ccac007569446",
   "checks": [
     {
-      "lane": "backend",
-      "package": "./internal/access/maintenance",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/recover-access-password"
+      "lane": "frontend",
+      "path": "web/v3/surveySubmissionResume.test.mjs"
     }
   ],
-  "build_commands": [
-    "./cmd/recover-access-password"
-  ],
-  "installed_checks": []
+  "installed_checks": [
+    "installed-survey-public-host-render",
+    "journey1-installed-reauthorization-all",
+    "journey1-installed-reauthorization-one",
+    "journey1-installed-lost-response-all",
+    "journey1-installed-lost-response-one",
+    "journey1-installed-native-input-all",
+    "journey1-installed-native-input-one"
+  ]
 }

@@ -172,18 +172,32 @@ assert.ok(
   retry instanceof dom.window.HTMLButtonElement,
   "fresh retry control must exist",
 );
+let ownerClicks = 0;
+let ownerButtonDisabled;
+let ownerButtonBusy;
+retry.addEventListener("click", () => {
+  // Older WebKit can omit this target listener for a trusted MouseEvent if
+  // an ancestor capture listener disables the control first. JSDOM does not
+  // emulate that omission, so assert the event-phase boundary explicitly.
+  ownerButtonDisabled = retry.disabled;
+  ownerButtonBusy = retry.getAttribute("aria-busy");
+  ownerClicks++;
+});
 retry.dispatchEvent(
   new dom.window.MouseEvent("click", { bubbles: true, cancelable: true }),
 );
+assert.equal(ownerClicks, 1, "the original Owner listener receives the submit click");
+assert.equal(ownerButtonDisabled, false, "Host must leave the control enabled until the Owner receives the click");
+assert.equal(ownerButtonBusy, null, "Host must not infer an in-flight request before the Owner starts one");
 assert.equal(
   retry.disabled,
-  true,
-  "first user click receives an immediate visual duplicate-click lock",
+  false,
+  "a click alone cannot create a presentation lock without Owner submitting state",
 );
 assert.equal(
-  retry.getAttribute("aria-disabled"),
-  "true",
-  "duplicate-click lock is visible to assistive technology",
+  screen.dataset.v3SurveySubmitting,
+  undefined,
+  "Host busy state comes only from the existing rendered Owner marker",
 );
 dom.window.close();
 

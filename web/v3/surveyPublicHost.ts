@@ -305,6 +305,8 @@ if (supportedPages.has(page) && page !== 'auth') {
       // Keep any Owner-controlled disabled state intact.  The all-in-one
       // template retains its submit control while `submitting` is true, so
       // only that explicit, stable state adds a busy lock here.
+      // Never disable it during click capture: older WebKit can then skip
+      // the Owner's target listener. The Controller locks synchronously.
       if (isSubmitting) {
         button.disabled = true;
         button.setAttribute("aria-disabled", "true");
@@ -359,24 +361,6 @@ if (supportedPages.has(page) && page !== 'auth') {
       subtree: true,
       characterData: true,
     });
-    screen.addEventListener(
-      "click",
-      (event) => {
-        const target =
-          event.target instanceof Element
-            ? event.target.closest<HTMLButtonElement>("[data-h5-submit]")
-            : null;
-        if (!target || target.disabled) return;
-        // Do not prevent the frozen controller's handler.  The immediate visual
-        // lock closes the second-click window while its existing submitting
-        // guard and stable submission key retain their authoritative behavior.
-        target.disabled = true;
-        target.setAttribute("aria-disabled", "true");
-        target.setAttribute("aria-busy", "true");
-        screen.dataset.v3SurveySubmitting = "true";
-      },
-      true,
-    );
     decorate();
   }
 }
