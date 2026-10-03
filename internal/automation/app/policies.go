@@ -58,7 +58,7 @@ type RuntimeStore interface {
 	PreviewByDigest(context.Context, [32]byte) (automationdomain.RunPreview, error)
 	CreateRun(context.Context, automationdomain.RuntimeRun, []automationdomain.RuntimeRecipient) (automationdomain.RuntimeRun, []automationdomain.RuntimeRecipient, error)
 	BindRecipientEffect(context.Context, int64, string, time.Time) error
-	ListRuns(context.Context, int64, int) ([]automationdomain.RuntimeRun, string, error)
+	ListRunPage(context.Context, int64, int64, int) (RunPage, error)
 	Run(context.Context, int64) (automationdomain.RuntimeRun, error)
 	RunRecipients(context.Context, int64, int64, int) ([]automationdomain.RuntimeRecipient, string, error)
 	RecipientForEffect(context.Context, int64, string) (automationdomain.RuntimeRecipient, error)

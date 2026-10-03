@@ -194,7 +194,7 @@
     function storedRefreshSchedule() {
       const mode = String(state.configuration?.refresh_mode || "");
       const cron = typeof state.configuration?.refresh_cron_utc === "string" ? state.configuration.refresh_cron_utc : "";
-      if (["manual", "every_3m", "daily_0200", "every_3m_plus_daily_0200", "legacy_custom"].includes(mode)) return { mode, cron };
+      if (["manual", "every_1h", "every_3m", "daily_0200", "every_3m_plus_daily_0200", "legacy_custom"].includes(mode)) return { mode, cron };
       return { mode: cron ? "legacy_custom" : "manual", cron };
     }
 
@@ -209,6 +209,7 @@
 
     function refreshScheduleLabel(schedule) {
       switch (schedule.mode) {
+        case "every_1h": return "每小时增量";
         case "every_3m": return "每 3 分钟";
         case "daily_0200": return "每日 02:00";
         case "every_3m_plus_daily_0200": return "每 3 分钟 + 每日 02:00";
@@ -240,6 +241,7 @@
         case "daily_0200": incremental.value = "off"; daily.value = "daily_0200"; break;
         case "every_3m_plus_daily_0200": incremental.value = "incremental_3m"; daily.value = "daily_0200"; break;
         case "manual": incremental.value = "off"; daily.value = "off"; break;
+        case "every_1h": incremental.value = "off"; daily.value = "off"; break;
         case "legacy_custom": incremental.value = "off"; daily.value = "off"; break;
       }
       state.refreshInitial = { mode: schedule.mode, cron: schedule.cron, incremental: incremental.value, daily: daily.value };

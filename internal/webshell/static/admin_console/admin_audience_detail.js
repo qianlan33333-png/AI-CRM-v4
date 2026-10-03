@@ -380,6 +380,11 @@
     const packageID = Number(match[1]);
     const state = { pkg: null, config: null, binding: null, senders: null, senderSelections: [], snapshot: null, agents: [], policies: [], preview: null, runs: [], dependencyIssues: [], busy: false };
     let currentPanel = "basic";
+    const runPageSize = 100;
+    let runPage = 0;
+    let runCursors = [""];
+    let runNextCursor = "";
+    let runRequestVersion = 0;
 
     const optional = async (path, label = "") => {
       try { return await request(path); }
@@ -416,7 +421,7 @@
       byID("coreProductConfigLink").hidden = pkg?.membership_mode === "rule";
       document.querySelectorAll("[data-rule-config]").forEach(node => { node.hidden = pkg?.membership_mode !== "rule"; });
       byID("manualRefreshBtn").hidden = pkg?.membership_mode !== "rule";
-      byID("summaryMode").textContent = state.config?.refresh_cron_utc ? `计划 ${state.config.refresh_cron_utc}` : "手动";
+      byID("summaryMode").textContent = state.config?.refresh_mode === "every_1h" ? "每小时增量" : state.config?.refresh_cron_utc ? `计划 ${state.config.refresh_cron_utc}` : "手动";
       byID("summaryStatus").textContent = lifecycleLabel(pkg?.lifecycle);
       byID("packageNameInput").value = pkg?.name || "";
       byID("packageDefinitionInput").value = state.config?.definition ? JSON.stringify(state.config.definition, null, 2) : "";
@@ -659,16 +664,36 @@
       } catch (error) { const detail = errorState(error); byID("memberRows").innerHTML = `<tr><td class="ai-empty" colspan="7">${escapeHTML(detail.message)}</td></tr>`; }
     }
 
-    async function loadRuns() {
+    function renderRunPagination(loading = false) {
+      byID("sendRecordPrevBtn").disabled = loading || runPage === 0;
+      byID("sendRecordNextBtn").disabled = loading || !runNextCursor;
+    }
+
+    byID("sendRecordPrevBtn").addEventListener("click", () => void loadRuns(runPage - 1));
+    byID("sendRecordNextBtn").addEventListener("click", () => void loadRuns(runPage + 1));
+
+    async function loadRuns(targetPage = 0) {
+      const cursor = targetPage === runPage + 1 ? runNextCursor : runCursors[targetPage];
+      if (targetPage < 0 || (targetPage > 0 && !cursor)) return;
+      const version = ++runRequestVersion;
+      renderRunPagination(true);
       setStatus(byID("sendRecordStatusLine"), "正在读取持久运行与收件人效果状态…");
       try {
-        const [runOutcome, directOutcome] = await Promise.allSettled([request(`${API}/automation-runs?limit=100`), optional(`${API}/ai-audience/packages/${packageID}/direct-pushes`, "接口发送记录")]);
+        const query = new URLSearchParams({ package_id: String(packageID), limit: String(runPageSize) });
+        if (cursor) query.set("cursor", cursor);
+        const [runOutcome, directOutcome] = await Promise.allSettled([request(`${API}/automation-runs?${query}`), optional(`${API}/ai-audience/packages/${packageID}/direct-pushes`, "接口发送记录")]);
+        if (version !== runRequestVersion) return;
         if (runOutcome.status === "rejected") throw runOutcome.reason;
         const result = runOutcome.value;
+        if (!Number.isSafeInteger(result.total) || result.total < 0) throw new APIError(503, "运行总数暂不可读取，请刷新重试。");
         const directResult = directOutcome.status === "fulfilled" ? directOutcome.value : null;
-        state.runs = (result.items || []).filter((run) => run.package_id === packageID);
+        state.runs = result.items || [];
         state.directPushRecords = directResult?.items || [];
-        byID("sendRecordTotal").textContent = `${state.runs.length} 次运行 · ${state.directPushRecords.length} 条接口推送`;
+        runPage = targetPage;
+        runCursors = targetPage === 0 ? [""] : [...runCursors.slice(0, targetPage), cursor];
+        runNextCursor = result.next_cursor || "";
+        byID("sendRecordTotal").textContent = `累计 ${result.total.toLocaleString("zh-CN")} 次运行 · ${directResult ? `接口推送最近 ${state.directPushRecords.length} 条` : "接口推送暂不可读取"}`;
+        byID("sendRecordPageLabel").textContent = `运行第 ${result.total ? runPage + 1 : 0} / ${Math.ceil(result.total / runPageSize)} 页 · 本页 ${state.runs.length} 次运行`;
         const runRows = state.runs.map((run) => {
           const generated = run.generation || {};
           const dynamic = Number(generated.total || 0) > 0;
@@ -684,8 +709,14 @@
         byID("sendRecordRows").innerHTML = [...directRows, ...runRows].join("") || `<tr><td class="ai-empty" colspan="7">尚无真实运行记录</td></tr>`;
         byID("sendRecordRows").querySelectorAll("[data-run-id]").forEach((node) => node.addEventListener("click", () => loadRecipients(Number(node.dataset.runId))));
         byID("sendRecordRows").querySelectorAll("[data-generation-run-id]").forEach((node) => node.addEventListener("click", () => loadGenerationItems(Number(node.dataset.generationRunId))));
-        setStatus(byID("sendRecordStatusLine"), directOutcome.status === "fulfilled" ? "固定发送、动态生成和接口推送均读取持久状态；失败和未知项会明确展示。" : "原有发送记录已读取；接口推送记录暂不可读取。", directOutcome.status === "fulfilled" ? "success" : "error");
-      } catch (error) { const detail = errorState(error); setStatus(byID("sendRecordStatusLine"), detail.message, "error"); }
+        setStatus(byID("sendRecordStatusLine"), directResult ? "运行历史按本包分页，累计运行数不代表发送人数或送达人数；接口推送单独展示最近最多 100 条。" : "运行历史已读取；接口推送记录暂不可读取。", directResult ? "success" : "error");
+      } catch (error) {
+        if (version !== runRequestVersion) return;
+        const detail = errorState(error);
+        setStatus(byID("sendRecordStatusLine"), detail.message, "error");
+      } finally {
+        if (version === runRequestVersion) renderRunPagination();
+      }
     }
 
     async function loadGenerationItems(runID) {

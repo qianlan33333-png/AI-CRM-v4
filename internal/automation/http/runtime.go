@@ -285,18 +285,35 @@ func (h *RuntimeHandler) runs(w http.ResponseWriter, r *http.Request) {
 		if _, ok := h.principal(w, r, false); !ok {
 			return
 		}
-		cursor, _ := strconv.ParseInt(r.URL.Query().Get("cursor"), 10, 64)
+		var packageID, cursor int64
+		for name, value := range map[string]*int64{"package_id": &packageID, "cursor": &cursor} {
+			if raw, present := r.URL.Query()[name]; present {
+				if len(raw) != 1 {
+					runtimeError(w, automationapp.ErrRuntimeInvalid)
+					return
+				}
+				if name == "cursor" && raw[0] == "0" {
+					continue
+				}
+				parsed, valid := strictInt(raw[0])
+				if !valid {
+					runtimeError(w, automationapp.ErrRuntimeInvalid)
+					return
+				}
+				*value = parsed
+			}
+		}
 		limit := queryLimit(r, 50)
-		items, next, e := h.service.ListRuns(r.Context(), cursor, limit)
+		page, e := h.service.ListRunPage(r.Context(), packageID, cursor, limit)
 		if e != nil {
 			runtimeError(w, e)
 			return
 		}
-		out := make([]any, len(items))
-		for i := range items {
-			out[i] = runDTO(items[i])
+		out := make([]any, len(page.Items))
+		for i := range page.Items {
+			out[i] = runDTO(page.Items[i])
 		}
-		writeJSON(w, 200, map[string]any{"items": out, "next_cursor": next})
+		writeJSON(w, 200, map[string]any{"items": out, "next_cursor": page.NextCursor, "total": page.Total})
 		return
 	}
 	parts := strings.Split(tail, "/")

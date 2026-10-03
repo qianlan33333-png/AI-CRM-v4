@@ -577,34 +577,36 @@ func scanRun(row pgx.Row) (automationdomain.RuntimeRun, error) {
 	out.State = automationport.RunState(state)
 	return out, nil
 }
-func (r *Repository) ListRuns(ctx context.Context, cursor int64, limit int) ([]automationdomain.RuntimeRun, string, error) {
+func (r *Repository) ListRunPage(ctx context.Context, packageID, cursor int64, limit int) (automationapp.RunPage, error) {
 	t, e := tx(ctx)
 	if e != nil {
-		return nil, "", e
+		return automationapp.RunPage{}, e
 	}
-	query := `SELECT ` + runColumns + ` FROM automation_runs WHERE ($1=0 OR id<$1) ORDER BY id DESC LIMIT $2`
-	rows, e := t.Query(ctx, query, cursor, limit+1)
+	page := automationapp.RunPage{Items: []automationdomain.RuntimeRun{}}
+	if e = t.QueryRow(ctx, `SELECT count(*) FROM automation_runs WHERE ($1=0 OR package_id=$1)`, packageID).Scan(&page.Total); e != nil {
+		return automationapp.RunPage{}, e
+	}
+	query := `SELECT ` + runColumns + ` FROM automation_runs WHERE ($1=0 OR id<$1) AND ($3=0 OR package_id=$3) ORDER BY id DESC LIMIT $2`
+	rows, e := t.Query(ctx, query, cursor, limit+1, packageID)
 	if e != nil {
-		return nil, "", e
+		return automationapp.RunPage{}, e
 	}
 	defer rows.Close()
-	out := []automationdomain.RuntimeRun{}
 	for rows.Next() {
 		item, scanErr := scanRun(rows)
 		if scanErr != nil {
-			return nil, "", scanErr
+			return automationapp.RunPage{}, scanErr
 		}
-		out = append(out, item)
+		page.Items = append(page.Items, item)
 	}
 	if e = rows.Err(); e != nil {
-		return nil, "", e
+		return automationapp.RunPage{}, e
 	}
-	next := ""
-	if len(out) > limit {
-		next = strconv.FormatInt(out[limit-1].ID, 10)
-		out = out[:limit]
+	if len(page.Items) > limit {
+		page.NextCursor = strconv.FormatInt(page.Items[limit-1].ID, 10)
+		page.Items = page.Items[:limit]
 	}
-	return out, next, nil
+	return page, nil
 }
 func (r *Repository) Run(ctx context.Context, id int64) (automationdomain.RuntimeRun, error) {
 	t, e := tx(ctx)

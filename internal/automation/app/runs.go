@@ -244,28 +244,32 @@ func PreviewDigestString(p automationdomain.RunPreview) string {
 	return hex.EncodeToString(p.PreviewDigest[:])
 }
 func (s *RuntimeService) ListRuns(ctx context.Context, cursor int64, limit int) ([]automationdomain.RuntimeRun, string, error) {
-	if cursor < 0 || limit < 1 || limit > 100 {
-		return nil, "", ErrRuntimeInvalid
+	page, err := s.ListRunPage(ctx, 0, cursor, limit)
+	return page.Items, page.NextCursor, err
+}
+
+func (s *RuntimeService) ListRunPage(ctx context.Context, packageID, cursor int64, limit int) (RunPage, error) {
+	if packageID < 0 || cursor < 0 || limit < 1 || limit > 100 {
+		return RunPage{}, ErrRuntimeInvalid
 	}
-	var out []automationdomain.RuntimeRun
-	var next string
+	var page RunPage
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		var e error
-		out, next, e = s.store.ListRuns(tx, cursor, limit)
+		page, e = s.store.ListRunPage(tx, packageID, cursor, limit)
 		return e
 	})
 	if err != nil {
-		return out, next, runtimeClassify(err)
+		return RunPage{}, runtimeClassify(err)
 	}
-	for index := range out {
-		if err = s.projectAIPlanState(ctx, &out[index]); err != nil {
-			return nil, "", err
+	for index := range page.Items {
+		if err = s.projectAIPlanState(ctx, &page.Items[index]); err != nil {
+			return RunPage{}, err
 		}
-		if err = s.projectGenerationProgress(ctx, &out[index]); err != nil {
-			return nil, "", err
+		if err = s.projectGenerationProgress(ctx, &page.Items[index]); err != nil {
+			return RunPage{}, err
 		}
 	}
-	return out, next, nil
+	return page, nil
 }
 func (s *RuntimeService) Run(ctx context.Context, id int64) (automationdomain.RuntimeRun, error) {
 	if id < 1 {

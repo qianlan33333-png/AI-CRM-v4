@@ -3,7 +3,17 @@ package app
 import (
 	"encoding/json"
 	"time"
+
+	automationdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/domain"
 )
+
+// RunPage.Total counts all runs in the requested package (or all packages
+// when PackageID is zero), independently of the continuation cursor.
+type RunPage struct {
+	Items      []automationdomain.RuntimeRun
+	NextCursor string
+	Total      int64
+}
 
 const (
 	MemberEventMissingPolicyOperation        = "member_event_no_active_policy"

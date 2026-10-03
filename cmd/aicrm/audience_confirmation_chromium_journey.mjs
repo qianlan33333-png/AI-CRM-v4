@@ -155,6 +155,34 @@ try {
   const closure = await evaluate(cdp, "(() => ({css:[...document.styleSheets].some(sheet=>String(sheet.href||'').includes('confirmationDialogStyles-')),script:[...document.scripts].some(script=>String(script.src||'').includes('confirmationDialogHost-')),route:location.pathname}))()");
   if (!closure.css || !closure.script || closure.route !== "/admin/automation-conversion") throw new Error("Audience shell did not load the real confirmation asset closure: " + JSON.stringify(closure));
 
+  if (process.env.AICRM_AUDIENCE_TEST_SCENARIO === "send-history") {
+    await cdp.call("Page.navigate", { url: baseURL + "/admin/automation-conversion/packages/" + packageID });
+    await waitFor(cdp, "Boolean(document.querySelector('[data-panel=\"records\"]'))", "detail shell did not mount");
+    await click('[data-panel="records"]');
+    await waitFor(cdp, "document.querySelector('#sendRecordTotal')?.textContent.includes('累计 105 次运行') && !document.querySelector('#sendRecordNextBtn').disabled", "scoped first page and historical total did not load");
+    const ids = () => evaluate(cdp, "[...document.querySelectorAll('#sendRecordRows [data-run-id]')].map(node=>Number(node.dataset.runId))");
+    const first = await ids();
+    if (first.length !== 100 || first[0] !== 105 || first.at(-1) !== 6) throw new Error("first page leaked, omitted or reordered history: " + JSON.stringify(first));
+    await capture("audience-history-first");
+    await click('#sendRecordNextBtn');
+    await waitFor(cdp, "document.querySelector('#sendRecordPageLabel')?.textContent.includes('第 2 / 2 页')", "last page did not load");
+    const last = await ids();
+    if (JSON.stringify(last) !== '[5,4,3,2,1]') throw new Error("last page lost historical records: " + JSON.stringify(last));
+    if (!await evaluate(cdp, "document.querySelector('#sendRecordNextBtn').disabled && document.querySelector('#sendRecordTotal').textContent.includes('累计 105 次运行')")) throw new Error("last page controls or total are incorrect");
+    await capture("audience-history-last");
+    await click('#sendRecordPrevBtn');
+    await waitFor(cdp, "document.querySelector('#sendRecordPageLabel')?.textContent.includes('第 1 / 2 页')", "previous page did not load");
+    if (JSON.stringify(await ids()) !== JSON.stringify(first)) throw new Error("previous page did not preserve run order");
+    await click('#sendRecordNextBtn');
+    await waitFor(cdp, "document.querySelector('#sendRecordPageLabel')?.textContent.includes('第 2 / 2 页')", "second next page did not load");
+    await click('#saveCurrentDimensionBtn');
+    await waitFor(cdp, "document.querySelector('#sendRecordPageLabel')?.textContent.includes('第 1 / 2 页')", "refresh did not reset history to first page");
+    await resize(390);
+    await capture("audience-history-390");
+    const historyWrites = requests.filter(request => request.method !== 'GET' && (request.path.startsWith('/api/admin/automation-runs') || /\/(runs|refresh|direct-push)$/.test(request.path)));
+    if (historyWrites.length || exceptions.length) throw new Error("history journey mutated runtime or threw: " + JSON.stringify({historyWrites,exceptions}));
+    console.log("audience_send_history_chromium: PASS screenshots=" + screenshotDirectory);
+  } else {
   if (!await click('[data-action="archive"][data-package-id="' + packageID + '"]')) throw new Error("archive control was unavailable");
   await waitFor(cdp, "Boolean(document.querySelector('[data-v3-confirmation-dialog][open]'))", "archive did not open the shared confirmation dialog");
   for (const width of [1440, 1280, 390]) {
@@ -180,6 +208,7 @@ try {
   if (archiveRequests.length !== 1) throw new Error("confirmed archive command count=" + archiveRequests.length + " requests=" + JSON.stringify(requests));
   if (exceptions.length) throw new Error("Audience confirmation had runtime exceptions: " + JSON.stringify(exceptions));
   console.log("audience_confirmation_chromium: PASS screenshots=" + screenshotDirectory);
+  }
 } catch (error) {
   failed = true;
   throw error;

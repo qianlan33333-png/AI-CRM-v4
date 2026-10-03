@@ -2127,6 +2127,28 @@
       ],
       "reason": "Bind the user-authorized survey submission reauthorization header and resume query contract to the active canonical OpenAPI bytes. No frozen source payload or checker policy changes.",
       "review_reference": "docs/prd/2026-10-02-survey-submit-reauthorization.md; user instruction in task 01a0fc12-c877-7d00-8104-846d77920c98: 按照目前查到的信息完成本次开发优化。都解决掉. Exact base-bound author declaration, not independent review or production deployment evidence."
+    },
+    {
+      "base_commit": "0bb4f0fe7ca4b4196f2003d6bf04467b12046a78",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "1f1e2c496b1e274a5035214d7d1e03c7d496b0494c8f96f9ed2dc02d6b226bcf",
+          "head_sha256": "75eaf8fcd6ad1ea90ffd97533cac01636111c30bc63d2e09a25256ec4d292842"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "8fb48cb45890a5e3f07d512ae7f876ff47e2a3eea35f506e0d69229c4bea1c5c",
+          "head_sha256": "f392cbda3a95c1e884b91ca43891d50ae9d994e674200b7a93afe844d080dfe9"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "d54f9e9f7dde5c992b65ddb982af166c7e7c6aaed4b39b00b29ac934203aa5ce",
+          "head_sha256": "7de9900587385f8d3e054722ac60a2032aee1a213394dc9791369b52cddec631"
+        }
+      ],
+      "reason": "Bind the user-authorized package-scoped automation run-history pagination and total-count read contract to its canonical OpenAPI and existing embed view. No frozen donor payload or checker policy changes.",
+      "review_reference": "User instruction 修复下这个问题，不然后续取数会有问题 in task 01a0ffa2-8a4d-7bd3-a3b4-f562a2b1a02a; docs/prd/2026-10-03-audience-send-history-pagination.md. Exact base-bound author review of the additive read contract, not independent review or production authorization."
     }
   ]
 }

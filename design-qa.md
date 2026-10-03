@@ -67,3 +67,33 @@ Actual Host+independent PG16 regression adds assertions for title/no-demo-naviga
 No new design polish added. Stability follow-up reuses the same error/retry control for stalled reads or a changed definition and the auth gate's existing action for read retry. Ordinary draft restoration does not add a banner or automatic submission. Actual mobile Host journeys additionally reload a filled questionnaire and recover a gateway failure after a real Owner commit. Real iOS/WeChat title refresh and official consent UI require production business acceptance.
 
 final result: passed
+
+---
+
+# 人群包发送历史修复：Product Design 验证
+
+视觉目标：用户提供的生产详情截图 `/var/folders/dq/56xlfzsx05zc7vqhbl7lgv6c0000gn/T/codex-clipboard-a616b370-fdbb-490d-b994-382e4e73e3e8.png`，以及现有 V4 `admin_audience_detail` 页面。实现采用既有组件和 CSS，只接入已存在的分页、增加口径说明和修正数据标签；不是页面重设计或原型发布。
+
+实际实现截图：`/Users/qianlan/Downloads/新CRM/release-control/audience-send-history-20261003/screenshots/audience-history-first.png`、`audience-history-last.png`、`audience-history-390.png`。实际登录、真实 V4 Composition、隔离 PostgreSQL 16、最终 Host 资源；记录是合成测试数据，Provider disabled。
+
+## 对照证据和边界
+
+用户截图 2324×1478 物理像素，原始 CSS 视口/密度未提供；本地浏览器 1440×900 CSS/物理像素，deviceScaleFactor=1，移动补充为 390×900。两张图在同一次工具输出中打开，按详情内容区域对照。原图只含侧栏局部，本地含完整侧栏；数据、暂停/运行状态与预检警告不同，来自隔离 fixture，不属于视觉偏差。本次不声称逐像素克隆或生产状态相同。
+
+全图对照：仍为四列摘要、左侧六步导航、右侧发送记录表。新说明占一个文本行，是明确的预期变更。焦点对照：累计运行数胶囊、运行行/收件人按钮、既有分页控件；最后一页 5 条历史运行，总数仍为 105。首尾页截图与真实 HTTP/数据库读回共同验证，没有用图片或 mock 代替持久业务证据。
+
+## 五项表面
+
+- 字体：使用既有管理端字体、字号、字重及 ai-label；新增说明清楚可读。
+- 间距/布局：复用原 ai-summary-grid、ai-pagination、按钮、表格和导航，不新增布局系统；说明行是预期增加。390 视口保持现有表格横向滚动。
+- 颜色：复用原灰色统计胶囊、语义状态和按钮颜色，无新增 token。
+- 图像/资产：本改动无新增图像或图标，既有壳资产保持原样。
+- 文案：明确“当前人数”不是累计发送人数，“累计运行数”不是送达人数；接口推送明确是最近最多 100 条，读取失败不伪报为零。
+
+## 交互和结果
+
+真实 Chromium 已验证本包筛选、首/末页、上一页、刷新回第一页、总数独立于分页、无发送/刷新写入、无 runtime exception。JSDOM 补充请求失败不推进页码，以及旧请求不会覆盖较新刷新结果；hourly 配置展示正确，保存其他字段保留原计划。
+
+没有发现此修复范围内的 P0/P1/P2 问题。尚未执行 Linux 预发安装旅程、生产页面读回或真实 Provider/收件人验收；这些是发布证据，不能由本地验证替代。
+
+final result: passed

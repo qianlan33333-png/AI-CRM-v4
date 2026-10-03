@@ -119,7 +119,7 @@ const dom = new JSDOM(`<!doctype html><html><body>${template}</body></html>`, {
         { id: 2, customer_id: 102, sender_staff_id: 8, effect_id: "eer_202", state: "final_failed", failure_code: "generation_response_invalid" },
         { id: 3, customer_id: 103, sender_staff_id: 8, effect_id: "eer_203", state: "outcome_unknown", failure_code: "generation_call_unknown" },
       ] });
-      if (url.pathname === "/api/admin/automation-runs" && (!init.method || init.method === "GET")) return json({ items: broadcastRuns, next_cursor: "" });
+      if (url.pathname === "/api/admin/automation-runs" && (!init.method || init.method === "GET")) return json({ items: broadcastRuns, total: broadcastRuns.length, next_cursor: "" });
       if (url.pathname === "/api/admin/automations" && init.method === "POST") {
         policyWrites.push(JSON.parse(init.body));
         return json({ policy: { id: 31 } });
@@ -416,5 +416,15 @@ await wait(20);
 confirmations.shift().resolve({ confirmed: true });
 await wait(120);
 if (policyArchives.length !== 2 || !policyArchives[1].headers["idempotency-key"]) throw new Error(`policy archive retry did not submit exactly one original command: ${JSON.stringify(policyArchives)}`);
+// A stored hourly plan must be shown and preserved when saving other fields.
+config = { ...config, refresh_mode: "every_1h", refresh_cron_utc: "" };
+document.querySelector("#templateParameterForm").replaceChildren();
+await wait(220);
+if (document.querySelector("#summaryMode").textContent !== "每小时增量") throw new Error("hourly plan was mislabeled as manual");
+document.querySelector('[data-panel="basic"]').click();
+await wait(30);
+document.querySelector("#savePackageBtn").click();
+await wait(140);
+if (writes.at(-1)?.refresh_mode !== "every_1h") throw new Error("saving other fields replaced the stored hourly plan");
 dom.window.close();
 console.log("admin-audience-template-host-browser: PASS");

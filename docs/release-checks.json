@@ -2,7 +2,59 @@
   "schema": 1,
   "baseline_sha": "9b3855e8bccddf995c6d31268ea9b98491367833",
   "checks": [
-    {"lane": "preflight", "path": "scripts/test_domestic_release_build.py"}
+    {
+      "lane": "backend",
+      "path": "internal/automation/app/runs_projection_test.go",
+      "test": "TestProjectAIPlanNeedsAttentionDistinguishesRetryableAndUnknown"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/automation/http/run_history_test.go",
+      "test": "TestRunHistoryQueryScopeValidationAndAuthorization"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/automation/store/run_history_integration_test.go",
+      "test": "TestPostgreSQLRunHistoryFiltersBeforePaginationAndCountsAllPages",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/automation_audience_runtime_integration_test.go",
+      "test": "TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/webshell/handler_test.go",
+      "test": "TestStandaloneHandlerRendersAdminLoginSidebarAndAssets"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/webshell/handler_test.go",
+      "test": "TestAudienceTemplateControllerIsFrozenDD8Asset"
+    },
+    {
+      "lane": "frontend",
+      "path": "internal/webshell/static/admin_console/admin_audience_send_history.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "internal/webshell/static/admin_console/admin_audience_template_host.test.mjs"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/audience_send_history_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLAudienceSendHistoryChromiumJourney"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/audience_confirmation_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLAudienceConfirmationChromiumJourney"
+    }
   ],
-  "installed_checks": []
+  "installed_checks": [
+    "audience-send-history",
+    "audience-confirmation"
+  ]
 }
