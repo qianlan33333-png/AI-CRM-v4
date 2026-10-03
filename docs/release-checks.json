@@ -1,14 +1,16 @@
 {
   "schema": 1,
-  "baseline_sha": "973ed2e8fd1ae93c95f4a70760b9f34c89e0e7f3",
+  "baseline_sha": "02c4ef8bc2a49b5a8ab284e4efe72beeb267634e",
   "checks": [
     {
-      "lane": "backend",
-      "package": "./internal/crmcli"
+      "lane": "preflight",
+      "path": "scripts/test_domestic_release_build.py"
     }
   ],
   "build_commands": [
     "./cmd/aicrm-cli"
   ],
-  "installed_checks": []
+  "installed_checks": [
+    "cli-transport-artifact"
+  ]
 }

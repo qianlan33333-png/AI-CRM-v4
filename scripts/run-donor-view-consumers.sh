@@ -111,6 +111,7 @@ run_frontend_and_stage_checks() {
 build_release_binaries() {
   mkdir -p release/bin
   go build -trimpath -ldflags "-s -w" -o release/bin/aicrm ./cmd/aicrm
+  go build -trimpath -ldflags "-s -w" -o release/bin/aicrm-cli ./cmd/aicrm-cli
   go build -trimpath -ldflags "-s -w" -o release/bin/aicrm-operation-cycle-runner ./cmd/operation-cycle-runner
   go build -trimpath -ldflags "-s -w" -o release/bin/aicrm-operation-cycle-result ./cmd/operation-cycle-result
   scripts/build-wecom-archive-sdk-runner-linux.sh release/bin/wecom-archive-sdk-runner

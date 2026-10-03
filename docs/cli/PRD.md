@@ -100,3 +100,5 @@ flowchart LR
 参考当前 Go 1.26.6 标准库 `net/http/transport.go` 的 Clone、Protocols、TLS ALPN 初始化逻辑，沿用父 PRD 的 Go/Cobra 和 HTTP 客户端约定。只在克隆出的 TLS 配置中明确宣告 http/1.1；保留证书验证、默认密钥交换、Origin 绑定、不重定向和写请求禁止盲目重试。没有新增限制。
 
 OneID：不涉及，不解析或关联客户。Persistence/External Effects：本修复是无状态 HTTP 传输，沿用已有认证及业务边界，不新增任务/Provider 调用。无 UI、迁移或服务端接口变化。直接消费者仅 cmd/aicrm-cli；cmd/aicrm 的引用为测试文件。回归使用启用 HTTP/2 的 TLS 服务，证书通过独立 RootCA 验证，GET/POST 均必须为 HTTP/1.1，整包 CRMCLI 测试同时覆盖凭据和失败边界。候选构建本机客户端并进行真实 qianlan 登录和只读 HXC 查询；服务器发布仍由唯一工作台判断实际消费者与载荷。
+
+正式构件交付：工作台核对发现 `build_commands` 请求的 CLI 尚未加入既有 release 程序清单。本次在原 `build_release_binaries` 加入 `aicrm-cli`，让同一正式包交付 Linux 客户端，并保留开发侧已验证的 Darwin 客户端。没有新发布通道、服务、定时器或业务能力；新增程序清单由已有构建合同及最终安装后的 CLI HTTPS challenge 读取验证，读取后因无密码安全停止，不创建生产登录会话。
