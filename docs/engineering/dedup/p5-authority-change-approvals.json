@@ -2129,7 +2129,7 @@
       "review_reference": "docs/prd/2026-10-02-survey-submit-reauthorization.md; user instruction in task 01a0fc12-c877-7d00-8104-846d77920c98: 按照目前查到的信息完成本次开发优化。都解决掉. Exact base-bound author declaration, not independent review or production deployment evidence."
     },
     {
-      "base_commit": "9b3855e8bccddf995c6d31268ea9b98491367833",
+      "base_commit": "e3bc92d5fdea1ee28a810d9a66dd04cf39602ebf",
       "changes": [
         {
           "path": "api/openapi.yaml",
