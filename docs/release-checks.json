@@ -1,16 +1,31 @@
 {
   "schema": 1,
-  "baseline_sha": "02c4ef8bc2a49b5a8ab284e4efe72beeb267634e",
+  "baseline_sha": "fa1ca473c4e88378168ffe50286a96aadf4bcc46",
   "checks": [
     {
-      "lane": "preflight",
-      "path": "scripts/test_domestic_release_build.py"
+      "lane": "frontend",
+      "path": "internal/webshell/static/admin_console/admin_access_password_reset.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "internal/webshell/static/admin_console/admin_access_committed_search.test.mjs"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/access/store/governance_behavior_postgres_integration_test.go",
+      "test": "TestPostgreSQLGovernancePasswordResetLoginJourney",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/webshell/handler_test.go",
+      "test": "TestRendererAccessContractConsumesNextAndMapsLoginErrors"
     }
+  ],
+  "installed_checks": [
+    "installed-access-password-ui"
   ],
   "build_commands": [
     "./cmd/aicrm-cli"
-  ],
-  "installed_checks": [
-    "cli-transport-artifact"
   ]
 }

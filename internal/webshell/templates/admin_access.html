@@ -100,7 +100,12 @@
         <div class="admin-form-actions"><button class="admin-button admin-button--secondary" type="submit">保存绑定</button><button class="admin-button admin-button--ghost" id="admin-access-unbind" type="button">解除绑定</button></div>
       </form>
       <form id="admin-access-password-form" class="admin-form-grid admin-form-grid--stacked" hidden>
-        <label><span>重置密码</span><input id="admin-access-new-password" name="password" type="password" autocomplete="new-password" minlength="12" required></label>
+        <label><span>密码登录账号</span><input id="admin-access-login-username" type="text" readonly autocomplete="off" aria-describedby="admin-access-password-hint"></label>
+        <div class="admin-form-actions"><button id="admin-access-copy-username" class="admin-button admin-button--ghost" type="button">复制登录账号</button></div>
+        <p id="admin-access-similar-account" class="admin-muted" hidden></p>
+        <label><span>新密码</span><input id="admin-access-new-password" name="password" type="password" autocomplete="new-password" minlength="12" required aria-describedby="admin-access-password-hint"></label>
+        <p id="admin-access-password-hint" class="admin-muted">至少 12 个字符。账号登录请使用上方的后台账号；企微账号用于企业微信登录。重置后旧密码及旧会话失效；停用的账号仍需启用登录。</p>
+        <p id="admin-access-password-result" class="admin-alert" role="status" aria-live="polite" hidden></p>
         <div class="admin-form-actions"><button class="admin-button admin-button--secondary" type="submit">重置密码</button></div>
       </form>
     </section>
@@ -143,5 +148,5 @@
     </div>
   </div>
 </section>
-<script defer src="/static/admin_console/admin_access.js?v=operations-staff-names-20260917"></script>
+<script defer src="/static/admin_console/admin_access.js?v=password-reset-login-account-20261003"></script>
 {{end}}

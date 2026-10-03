@@ -21,7 +21,7 @@
     loading: byID("admin-access-loading"), empty: byID("admin-access-empty"), filterEmpty: byID("admin-access-filter-empty"),
     listError: byID("admin-access-list-error"), listErrorMessage: byID("admin-access-list-error-message"), tableWrap: byID("admin-access-table-wrap"), usersBody: byID("admin-access-users-body"),
     noPermission: byID("admin-access-no-permission"), superCard: byID("admin-access-super"), superTitle: byID("admin-access-super-title"), superDetail: byID("admin-access-super-detail"), transfer: byID("admin-access-transfer"),
-    drawer: byID("admin-access-drawer"), drawerBackdrop: byID("admin-access-drawer-backdrop"), drawerClose: byID("admin-access-drawer-close"), drawerUser: byID("admin-access-drawer-user"), drawerActions: byID("admin-access-drawer-actions"), rolePanel: byID("admin-access-role-panel"), roleForm: byID("admin-access-role-form"), advancedPanel: byID("admin-access-advanced-panel"), bindingForm: byID("admin-access-binding-form"), wecomInput: byID("admin-access-wecom-userid"), unbind: byID("admin-access-unbind"), passwordForm: byID("admin-access-password-form"), passwordInput: byID("admin-access-new-password"),
+    drawer: byID("admin-access-drawer"), drawerBackdrop: byID("admin-access-drawer-backdrop"), drawerClose: byID("admin-access-drawer-close"), drawerUser: byID("admin-access-drawer-user"), drawerActions: byID("admin-access-drawer-actions"), rolePanel: byID("admin-access-role-panel"), roleForm: byID("admin-access-role-form"), advancedPanel: byID("admin-access-advanced-panel"), bindingForm: byID("admin-access-binding-form"), wecomInput: byID("admin-access-wecom-userid"), unbind: byID("admin-access-unbind"), passwordForm: byID("admin-access-password-form"), passwordInput: byID("admin-access-new-password"), loginUsername: byID("admin-access-login-username"), copyUsername: byID("admin-access-copy-username"), similarAccount: byID("admin-access-similar-account"), passwordResult: byID("admin-access-password-result"),
     provisionDialog: byID("admin-access-provision-dialog"), provisionClose: byID("admin-access-provision-close"), provisionStep: byID("admin-access-provision-step"), provisionHint: byID("admin-access-provision-hint"), employeeStep: byID("admin-access-provision-employee-step"), employeeSearch: byID("admin-access-employee-search"), employeeStatus: byID("admin-access-employee-search-status"), employeeResults: byID("admin-access-employee-results"), provisionRoleStep: byID("admin-access-provision-role-step"), provisionConfirm: byID("admin-access-provision-confirm-step"), provisionBack: byID("admin-access-provision-back"), provisionNext: byID("admin-access-provision-next"), provisionSubmit: byID("admin-access-provision-submit"),
     transferDialog: byID("admin-access-transfer-dialog"), transferClose: byID("admin-access-transfer-close"), transferTarget: byID("admin-access-transfer-target"), transferSubmit: byID("admin-access-transfer-submit"),
   };
@@ -33,6 +33,7 @@
   let actor = {};
   let capabilities = {};
   let selectedUserID = "";
+  let drawerRevision = 0;
   let provisionStep = 1;
   let selectedEmployee = null;
   let employeeItems = [];
@@ -191,16 +192,20 @@
       return refreshed;
     } catch (error) { if (error.status === 401 || error.status === 403) clearSensitiveView(); setAlert(errorMessage(error), "error"); return false; }
   }
-  function closeDrawer() { selectedUserID = ""; elements.drawer.hidden = true; elements.drawerBackdrop.hidden = true; elements.drawerActions.replaceChildren(); elements.rolePanel.hidden = true; elements.advancedPanel.hidden = true; }
+  function closeDrawer() { drawerRevision += 1; elements.passwordForm.reset(); setPasswordResult("", ""); selectedUserID = ""; elements.drawer.hidden = true; elements.drawerBackdrop.hidden = true; elements.drawerActions.replaceChildren(); elements.rolePanel.hidden = true; elements.advancedPanel.hidden = true; }
   function openDrawer(user) {
     if (!user || !hasAction(user)) { closeDrawer(); return; }
-    selectedUserID = String(user.admin_user_id); elements.drawerUser.textContent = `${user.display_name || "未命名员工"} · ${user.wecom_userid || "未绑定企微账号"}`; elements.drawerActions.replaceChildren();
+    drawerRevision += 1; selectedUserID = String(user.admin_user_id); elements.drawerUser.textContent = `${user.display_name || "未命名员工"} · ${user.wecom_userid || "未绑定企微账号"}`; elements.drawerActions.replaceChildren();
     const actions = user.actions || {};
     if (actions.set_login_enabled === true) { const button = actionButton(user.login_enabled ? "停用登录" : "启用登录", "toggle-login", user); elements.drawerActions.appendChild(button); }
     elements.rolePanel.hidden = actions.change_role !== true;
     if (actions.change_role === true) { const input = elements.roleForm.querySelector(`input[value="${user.role}"]`); if (input) input.checked = true; }
     const canBind = actions.bind_wecom_userid === true; const canReset = actions.reset_password === true;
-    elements.advancedPanel.hidden = !(canBind || canReset); elements.bindingForm.hidden = !canBind; elements.passwordForm.hidden = !canReset; elements.wecomInput.value = canBind ? String(user.wecom_userid || "") : ""; elements.passwordForm.reset();
+    elements.advancedPanel.hidden = !(canBind || canReset); elements.bindingForm.hidden = !canBind; elements.passwordForm.hidden = !canReset; elements.wecomInput.value = canBind ? String(user.wecom_userid || "") : ""; elements.passwordForm.reset(); elements.loginUsername.value = canReset ? String(user.username || "") : ""; setPasswordResult("", "");
+    const binding = String(user.wecom_userid || "");
+    const similar = binding && users.some((candidate) => String(candidate.admin_user_id) !== selectedUserID && String(candidate.wecom_userid || "").toLowerCase() === binding.toLowerCase());
+    elements.similarAccount.hidden = !similar;
+    elements.similarAccount.textContent = similar ? `存在大小写相似的企微账号。这是独立账号（员工编号 ${user.admin_user_id}）；本次只重置当前员工，请核对绑定“${binding}”和上方登录账号。` : "";
     elements.drawer.hidden = false; elements.drawerBackdrop.hidden = false; elements.drawerClose.focus();
   }
   function setProvisionStep(step) {
@@ -294,7 +299,36 @@
   elements.roleForm.addEventListener("submit", (event) => { event.preventDefault(); const user = selectedUser(); const role = elements.roleForm.querySelector('input[name="role"]:checked'); if (!user || !role || user.actions.change_role !== true) return; const submit = event.currentTarget.querySelector('button[type="submit"]'); submit.disabled = true; void mutate(api.role(user.admin_user_id), "PUT", { role: role.value }, "员工权限已更新。").then((ok) => { if (ok) openDrawer(selectedUser()); }).finally(() => { submit.disabled = false; }); });
   elements.bindingForm.addEventListener("submit", (event) => { event.preventDefault(); const user = selectedUser(); const value = String(elements.wecomInput.value || "").trim(); if (!user || !value || user.actions.bind_wecom_userid !== true) { setAlert("请输入企微账号。", "error"); return; } if (typeof window.confirm === "function" && !window.confirm(`确定将企微账号绑定为“${value}”吗？`)) return; const submit = event.currentTarget.querySelector('button[type="submit"]'); submit.disabled = true; void mutate(api.wecom(user.admin_user_id), "PUT", { wecom_userid: value }, "企微账号已更新。").then((ok) => { if (ok) openDrawer(selectedUser()); }).finally(() => { submit.disabled = false; }); });
   elements.unbind.addEventListener("click", () => { const user = selectedUser(); if (!user || user.actions.bind_wecom_userid !== true) return; if (typeof window.confirm === "function" && !window.confirm("确定解除该员工的企微账号绑定吗？")) return; elements.unbind.disabled = true; void mutate(api.wecom(user.admin_user_id), "PUT", { wecom_userid: "" }, "企微账号绑定已解除。").then((ok) => { if (ok) openDrawer(selectedUser()); }).finally(() => { elements.unbind.disabled = false; }); });
-  elements.passwordForm.addEventListener("submit", (event) => { event.preventDefault(); const user = selectedUser(); const password = String(elements.passwordInput.value || ""); if (!user || !password || user.actions.reset_password !== true) { setAlert("请输入新密码。", "error"); return; } const submit = event.currentTarget.querySelector('button[type="submit"]'); submit.disabled = true; void mutate(api.password(user.admin_user_id), "PUT", { password }, "密码已重置。").then((ok) => { if (ok) openDrawer(selectedUser()); }).finally(() => { submit.disabled = false; }); });
+  function setPasswordResult(message, tone) {
+    elements.passwordResult.textContent = message;
+    elements.passwordResult.className = "admin-alert" + (tone === "success" ? " admin-alert--success" : " admin-alert--error");
+    elements.passwordResult.hidden = !message;
+  }
+  elements.copyUsername.addEventListener("click", () => {
+    const user = selectedUser(); if (!user || !user.username) return;
+    const targetID = selectedUserID; const revision = drawerRevision;
+    if (!navigator.clipboard || !navigator.clipboard.writeText) { elements.loginUsername.focus(); elements.loginUsername.select(); setPasswordResult("请复制已选中的后台登录账号。", "success"); return; }
+    void navigator.clipboard.writeText(String(user.username)).then(() => { if (selectedUserID === targetID && drawerRevision === revision) setPasswordResult("后台登录账号已复制。", "success"); }).catch(() => { if (selectedUserID === targetID && drawerRevision === revision) { elements.loginUsername.focus(); elements.loginUsername.select(); setPasswordResult("请手动复制上方后台登录账号。", "error"); } });
+  });
+  elements.passwordInput.addEventListener("invalid", () => { setPasswordResult("请输入至少 12 个字符的新密码。", "error"); });
+  elements.passwordForm.addEventListener("submit", (event) => {
+    event.preventDefault(); const user = selectedUser(); const password = String(elements.passwordInput.value || "");
+    if (!user || user.actions.reset_password !== true || !user.username) { setPasswordResult("无法重置该员工密码，请重新读取员工信息。", "error"); return; }
+    if (password.length < 12) { setPasswordResult("请输入至少 12 个字符的新密码。", "error"); return; }
+    const submit = event.currentTarget.querySelector('button[type="submit"]'); if (submit.disabled) return;
+    const targetID = selectedUserID; const revision = drawerRevision; submit.disabled = true; setPasswordResult("正在重置密码…", "success");
+    void requestJSON(api.password(user.admin_user_id), { method: "PUT", body: JSON.stringify({ password }), headers: { "Idempotency-Key": requestKey() } }).then((payload) => {
+      if (payload.ok !== true) throw new Error("reset receipt missing");
+      if (selectedUserID !== targetID || drawerRevision !== revision) return;
+      elements.passwordInput.value = "";
+      setPasswordResult(`密码已重置。请使用上方后台登录账号和新密码登录；旧密码及旧会话已失效。${user.login_enabled ? "" : "该账号仍处于停用状态，请先启用登录。"}`, "success");
+    }).catch((error) => {
+      if (selectedUserID !== targetID || drawerRevision !== revision) return;
+      elements.passwordInput.value = "";
+      if (error.status === 401 || error.status === 403) { clearSensitiveView(); setAlert(errorMessage(error), "error"); return; }
+      setPasswordResult(!error.status || error.status >= 500 ? "未能确认重置结果。请先核对原操作的审计记录或用新密码登录，避免重复提交。" : errorMessage(error), "error");
+    }).finally(() => { submit.disabled = false; });
+  });
   elements.employeeSearch.addEventListener("input", () => {
     employeeCommittedQuery = String(elements.employeeSearch.value || "").trim();
     // This input listener receives only the shared explicit commit event.

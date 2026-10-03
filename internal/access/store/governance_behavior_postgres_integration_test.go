@@ -555,3 +555,74 @@ type governanceTestRenderer struct{}
 func (governanceTestRenderer) Render(context.Context, http.ResponseWriter, int, string, map[string]any) error {
 	return nil
 }
+
+// Reset uses the exact local account, never a case-folded WeCom alias.
+func TestPostgreSQLGovernancePasswordResetLoginJourney(t *testing.T) {
+	if environmentValue("AICRM_DATABASE_URL") == "" {
+		t.Skip("AICRM_DATABASE_URL required")
+	}
+	f := newGovernanceBehaviorFixture(t)
+	var targets []domain.User
+	for i, binding := range []string{"StaffFixture", "stafffixture"} {
+		f.directory.put(binding, binding)
+		user, err := f.management.ProvisionEnterpriseEmployee(f.ctx, f.principal(f.owner), accessapp.ProvisionEnterpriseEmployeeInput{WeComUserID: binding, Role: domain.RoleAdmin, IdempotencyKey: fmt.Sprintf("password-fixture-%d", i)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		targets = append(targets, user)
+	}
+	target, other := targets[1], f.user(t, targets[0].ID)
+	if err := f.management.ResetGovernancePassword(f.ctx, f.principal(f.owner), accessapp.ResetPasswordInput{TargetID: target.ID, Password: "old-fixture-password", IdempotencyKey: "seed-password-journey"}); err != nil {
+		t.Fatal(err)
+	}
+	old, err := f.authentication.Login(f.ctx, accessapp.LoginCommand{Username: target.Username, Password: "old-fixture-password", Remote: "127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := f.user(t, target.ID)
+	ownerSession := f.login(t, "owner")
+	routes := mustGovernanceHTTPRoutes(t, f)
+	path := fmt.Sprintf("/api/admin/access/users/%d/password", target.ID)
+	reset := func(password, key string) int {
+		r := httptest.NewRecorder()
+		routes.ServeHTTP(r, f.httpRequest(t, http.MethodPut, path, ownerSession, key, map[string]any{"password": password}))
+		return r.Code
+	}
+	if code := reset("short", "short-reset"); code != http.StatusBadRequest {
+		t.Fatalf("short password status=%d", code)
+	}
+	if after := f.user(t, target.ID); after.PasswordHash != before.PasswordHash || after.SessionVersion != before.SessionVersion {
+		t.Fatal("rejected password changed account")
+	}
+	for i := 0; i < 2; i++ {
+		if code := reset("new-fixture-password", "confirmed-reset"); code != http.StatusOK {
+			t.Fatalf("reset status=%d", code)
+		}
+	}
+	after := f.user(t, target.ID)
+	if after.SessionVersion != before.SessionVersion+1 {
+		t.Fatal("reset replay incremented version twice")
+	}
+	if after.Username != target.Username || after.WeComUserID != target.WeComUserID {
+		t.Fatal("reset changed identity")
+	}
+	if _, err = f.authentication.Authenticate(f.ctx, old.SessionToken); !errors.Is(err, domain.ErrAuthentication) {
+		t.Fatalf("old session survived: %v", err)
+	}
+	if _, err = f.authentication.Login(f.ctx, accessapp.LoginCommand{Username: target.Username, Password: "old-fixture-password", Remote: "127.0.0.1"}); !errors.Is(err, domain.ErrInvalidCredentials) {
+		t.Fatalf("old password survived: %v", err)
+	}
+	fresh, err := f.authentication.Login(f.ctx, accessapp.LoginCommand{Username: target.Username, Password: "new-fixture-password", Remote: "127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.User.ID != target.ID {
+		t.Fatal("new password logged into another employee")
+	}
+	if _, err = f.authentication.Login(f.ctx, accessapp.LoginCommand{Username: target.WeComUserID, Password: "new-fixture-password", Remote: "127.0.0.1"}); !errors.Is(err, domain.ErrInvalidCredentials) {
+		t.Fatalf("WeCom alias unexpectedly used: %v", err)
+	}
+	if current := f.user(t, other.ID); current.PasswordHash != other.PasswordHash || current.SessionVersion != other.SessionVersion {
+		t.Fatal("other case-sensitive employee changed")
+	}
+}
