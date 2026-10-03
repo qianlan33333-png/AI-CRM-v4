@@ -52,12 +52,20 @@ OneID：不新增身份解析/归属，仅沿既有只读运行投影返回现�
 
 ## 基线更新与短清单
 
-候选更新至国内主线 `0bb4f0fe7ca4b4196f2003d6bf04467b12046a78`，业务修复字节保持不变，复用前述 165 项及两项浏览器通过收据。按极简发布规则，`docs/release-checks.json` 选 10 项直接合同，不因共享模板脚本版本引用扩散到全量 Host。
+候选更新至国内主线 `0bb4f0fe7ca4b4196f2003d6bf04467b12046a78`，业务修复字节保持不变，复用前述 165 项及两项浏览器通过收据。按极简发布规则，`docs/release-checks.json` 选 8 项源码直接合同，不因共享模板脚本版本引用扩散到全量 Host。
 
 - Automation：运行状态投影；HTTP 筛包、total、参数拒绝与既有鉴权；PG 完整三页/空页/全系统兼容。
 - 直接调用方：`TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL` 覆盖原全系统 `ListRuns` 与真实手动发送详情读回，保持 AI plan/progress 投影兼容。
 - Webshell：详情/列表资产与模板绑定；两项 JSDOM 验证分页错误恢复、旧请求、every_1h 展示及保存保留。
 - 真实 Host：本包历史翻页与现有发送确认两项 Chromium；不涉及支付、其他后台页面或发布控制器实现测试。
-- installed_checks：`audience-send-history` 与 `audience-confirmation`。在最终预发包使用已认证页面/接口覆盖本包完整页和累计总数、当前人数口径与每小时增量显示，以及原 preview/confirm 的隔离 Provider-disabled 合同；本地源码 Composition 通过不冒称安装包验收。
+- installed_checks：`audience-send-history` 与 `audience-confirmation`。在最终预发包使用已认证页面/接口覆盖本包完整页和累计总数、当前人数口径与每小时增量显示，以及原归档取消/确认的隔离 Provider-disabled 合同；本地源码 Composition 通过不冒称安装包验收。
 
 纯单元沿 Go 原生缓存；PG/真实浏览器按清单具名执行。新增基线的工具检查已由发布工作台完成，本候选不重复全仓 fast/compile，不修改控制器或新增安装通道。
+
+## 安装夹具补齐
+
+仅补测试夹具：Audience 读取可选 `AICRM_INSTALLED_AUDIENCE_{BINARY,ROOT,SHA,BINARY_SHA256}`，以独立进程启动给定安装二进制。复用已有隔离 PG、API 进程退出与 readyz 校验、TLS 反向代理；Browser 的页面、API、资源全部来自给定包，源码仅准备合成数据和数据库读回。二进制 SHA256、Host manifest source_sha、readyz release_sha 一起绑定；不继承生产环境、不启用 Provider 或效果 worker。安装模式只检查安装 Host，略过源码 Host/npm 准备。
+
+源码清单只留原 6 backend + 2 frontend，两项具名 Chromium 留在既有 installed_checks，在最终预发包上运行一次。工作台调用 `scripts/run-installed-audience.sh --binary <包二进制> --root <包目录> --sha <准确SHA> --binary-sha256 <摘要>`，要求准确 clean 源码与显式 loopback `aicrm_test_*_acceptance_test` 数据库。确认旅程是归档对话框取消不写、确认只写一次与生命周期读回，不是 Provider 发送。
+
+国内仓禁止强推，控制器拒绝第一父链 merge：停止旧 merge ref，改由同 tree、无 merge 的 a5b6e755 继续 `codex/audience-send-history-release-20261003`，同一任务、能力、交付顺序与发布通道不变。

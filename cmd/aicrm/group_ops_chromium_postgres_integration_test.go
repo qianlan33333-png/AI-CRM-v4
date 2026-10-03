@@ -42,6 +42,7 @@ type groupOpsChromiumFixture struct {
 	radarImageID       int64
 	radarAttachmentID  int64
 	radarUploadPath    string
+	dataKey            []byte
 }
 
 func TestPostgreSQLGroupOpsStandardHostCompositionPreflight(t *testing.T) {
@@ -132,12 +133,21 @@ func TestPostgreSQLGroupOpsStandardHostChromiumJourney(t *testing.T) {
 }
 
 func newGroupOpsChromiumFixture(t *testing.T) *groupOpsChromiumFixture {
+	return newGroupOpsChromiumFixtureWithArtifactRoot(t, "")
+}
+
+// Audience installed journeys seed/read back with source stores, but resolve
+// their artifact closure from the independently supplied package directory.
+func newGroupOpsChromiumFixtureWithArtifactRoot(t *testing.T, artifactRoot string) *groupOpsChromiumFixture {
 	t.Helper()
 	_, source, _, ok := goruntime.Caller(0)
 	if !ok {
 		t.Fatal("locate Group Ops Chromium journey")
 	}
 	repository := filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
+	if artifactRoot != "" {
+		repository = artifactRoot
+	}
 	t.Chdir(repository)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	t.Cleanup(cancel)
@@ -200,7 +210,7 @@ func newGroupOpsChromiumFixture(t *testing.T) *groupOpsChromiumFixture {
 	radarUploadPath := seedGroupOpsRadarUploadFile(t)
 	server.Config.Handler = application.handler
 	server.StartTLS()
-	return &groupOpsChromiumFixture{ctx: ctx, application: application, server: server, script: filepath.Join(filepath.Dir(source), "group_ops_chromium_journey.mjs"), planID: planID, ownerStaffID: actorID, replacementStaffID: replacementStaffID, composerImageIDs: media.composerImageIDs, radarImageID: media.radarImageID, radarAttachmentID: radarAttachmentID, radarUploadPath: radarUploadPath}
+	return &groupOpsChromiumFixture{ctx: ctx, application: application, server: server, script: filepath.Join(filepath.Dir(source), "group_ops_chromium_journey.mjs"), planID: planID, ownerStaffID: actorID, replacementStaffID: replacementStaffID, composerImageIDs: media.composerImageIDs, radarImageID: media.radarImageID, radarAttachmentID: radarAttachmentID, radarUploadPath: radarUploadPath, dataKey: dataKey}
 }
 
 // seedGroupOpsChromiumImages uses the normal Media tables only. The browser

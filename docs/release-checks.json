@@ -41,16 +41,6 @@
     {
       "lane": "frontend",
       "path": "internal/webshell/static/admin_console/admin_audience_template_host.test.mjs"
-    },
-    {
-      "lane": "browser",
-      "path": "cmd/aicrm/audience_send_history_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLAudienceSendHistoryChromiumJourney"
-    },
-    {
-      "lane": "browser",
-      "path": "cmd/aicrm/audience_confirmation_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLAudienceConfirmationChromiumJourney"
     }
   ],
   "installed_checks": [

@@ -14,6 +14,7 @@ import (
 
 	accesshttp "github.com/qianlan33333-png/AI-CRM-v3/internal/access/http"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 )
 
 // OneID is not involved: this Journey only authenticates the existing local
@@ -85,8 +86,17 @@ func TestPostgreSQLAudienceConfirmationChromiumJourney(t *testing.T) {
 
 func newAudienceConfirmationChromiumFixture(t *testing.T) *audienceConfirmationChromiumFixture {
 	t.Helper()
-	fixture := newGroupOpsChromiumFixture(t)
+	input := testconfig.InstalledAudience()
+	artifactRoot := ""
+	if input.Binary != "" {
+		validateInstalledAudienceArtifacts(t, input)
+		artifactRoot = input.Root
+	}
+	fixture := newGroupOpsChromiumFixtureWithArtifactRoot(t, artifactRoot)
 	repository := filepath.Clean(filepath.Join(filepath.Dir(fixture.script), "..", ".."))
+	if artifactRoot != "" {
+		repository = artifactRoot
+	}
 	prepareAudienceConfirmationChromiumArtifacts(t, repository)
 	screenshots := t.TempDir()
 	if configured := platformconfig.AudienceConfirmationScreenshotDirectory(); configured != "" {
@@ -122,7 +132,9 @@ func newAudienceConfirmationChromiumFixture(t *testing.T) *audienceConfirmationC
 	if err = json.NewDecoder(response.Body).Decode(&created); err != nil || created.Package.ID < 1 {
 		t.Fatalf("decode local audience package err=%v payload=%s", err, response.Body.String())
 	}
-	return &audienceConfirmationChromiumFixture{groupOpsChromiumFixture: fixture, packageID: created.Package.ID, screenshots: screenshots}
+	result := &audienceConfirmationChromiumFixture{groupOpsChromiumFixture: fixture, packageID: created.Package.ID, screenshots: screenshots}
+	useInstalledAudienceFixture(t, result, input)
+	return result
 }
 
 func prepareAudienceConfirmationChromiumArtifacts(t *testing.T, repository string) {
