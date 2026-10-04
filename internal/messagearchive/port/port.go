@@ -67,6 +67,11 @@ type CustomerQuery struct {
 	Watermark   time.Time
 	AfterAt     time.Time
 	AfterID     int64
+
+	// AuthoredByCustomerOnly restricts messages to a resolved external sender
+	// in the current customer's canonical lineage. Conversation membership or
+	// customer_to_staff direction alone does not establish authorship.
+	AuthoredByCustomerOnly bool
 }
 
 type CustomerPage struct {

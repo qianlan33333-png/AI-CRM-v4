@@ -1,15 +1,26 @@
 {
   "schema": 1,
-  "baseline_sha": "2ad0c8ae9ddbfb9ee45d09d348427dcbf355e310",
+  "baseline_sha": "977e00fdfbb27ec62271a8297892d628326b3370",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/automation/app"
+      "path": "cmd/aicrm/dynamic_generation_adapters_test.go",
+      "test": "Test(DynamicGenerationContextFreezesOnlyApprovedReadPorts|GenerationQuestionnaireUsesLatestSubmissionOnly|BoundedGenerationTextPreservesUTF8AndByteLimit|GeneratedOutboundTemplateRetainsFrozenSources)"
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/automation_agent_policy_integration_test.go",
-      "test": "TestAgentMemberPolicyGenerationAndAtomicOutboundPostgreSQL",
+      "package": "./internal/messagearchive/app"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/messagearchive/store/customer_authorship_postgres_test.go",
+      "test": "TestCustomerAuthorshipFiltersBeforePaginationPostgreSQL",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/messagearchive/store/external_v1_postgres_integration_test.go",
+      "test": "TestPostgreSQLV1ChatRecordsScopeBeforeKeysetAndFreezeEnd",
       "postgres": true
     }
   ],

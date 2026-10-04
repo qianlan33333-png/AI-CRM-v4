@@ -203,13 +203,17 @@ func (PostgreSQL) CustomerMessages(ctx context.Context, query archiveport.Custom
 		LEFT JOIN message_archive_participants staff ON staff.message_id=message.id AND staff.actor_type='staff'
 		LEFT JOIN message_archive_media media ON media.message_id=message.id
 		WHERE customer_participant.customer_id_at_ingest=ANY($1) AND ($2 OR message.occurred_at >= $3)
+		AND (NOT $13::boolean OR EXISTS(SELECT 1 FROM message_archive_participants authored_sender
+			WHERE authored_sender.message_id=message.id AND authored_sender.participant_role='sender'
+			AND authored_sender.actor_type='external_customer' AND authored_sender.resolution_status='found'
+			AND authored_sender.customer_id_at_ingest=ANY($1)))
 		AND message.occurred_at <= $4 AND ($5='' OR message.conversation_type=$5)
 		AND (message.occurred_at,message.id) < ($6,$7) AND ($8='' OR message.content_text ILIKE '%' || $8 || '%')
 		AND ($9='' OR message.msgtype=$9)
 		AND ($10=0 OR EXISTS(SELECT 1 FROM message_archive_participants staff_filter WHERE staff_filter.message_id=message.id AND staff_filter.staff_user_id=$10))
 		AND ($11='' OR ($11='customer_to_staff' AND EXISTS(SELECT 1 FROM message_archive_participants direction_sender WHERE direction_sender.message_id=message.id AND direction_sender.participant_role='sender' AND direction_sender.actor_type='external_customer')) OR ($11='staff_to_customer' AND EXISTS(SELECT 1 FROM message_archive_participants direction_sender WHERE direction_sender.message_id=message.id AND direction_sender.participant_role='sender' AND direction_sender.actor_type='staff')))
 		GROUP BY message.id,message.conversation_type,message.msgtype,message.occurred_at,message.content_text,message.provider_payload
-		ORDER BY message.occurred_at DESC,message.id DESC LIMIT $12`, ids, query.StartAt.IsZero(), query.StartAt, query.Watermark, query.ChatType, afterAt(query), afterID, query.Search, query.MessageType, query.StaffUserID, query.Direction, query.Limit)
+		ORDER BY message.occurred_at DESC,message.id DESC LIMIT $12`, ids, query.StartAt.IsZero(), query.StartAt, query.Watermark, query.ChatType, afterAt(query), afterID, query.Search, query.MessageType, query.StaffUserID, query.Direction, query.Limit, query.AuthoredByCustomerOnly)
 	if err != nil {
 		return archiveport.CustomerPage{}, err
 	}

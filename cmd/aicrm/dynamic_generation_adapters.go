@@ -37,7 +37,7 @@ func (a dynamicGenerationContextAdapter) FreezeGenerationContext(ctx context.Con
 	if err != nil {
 		return automationport.GenerationContext{}, fmt.Errorf("read questionnaire context: %w", err)
 	}
-	messages, err := a.messages.CustomerMessages(ctx, archiveport.CustomerQuery{CustomerID: customerID, Limit: 20, Watermark: watermark})
+	messages, err := a.messages.CustomerMessages(ctx, archiveport.CustomerQuery{CustomerID: customerID, AuthoredByCustomerOnly: true, Limit: 20, Watermark: watermark})
 	if err != nil {
 		return automationport.GenerationContext{}, fmt.Errorf("read recent chat context: %w", err)
 	}

@@ -35,3 +35,28 @@ OneID：读取原 canonical customer，复用原成员事件及一次性 lineage
 18:01 自然刷新新增一条 B0 原事件。问卷、聊天、标签、画像的生产实际 Adapter 在 PostgreSQL read-only 下均读取成功，冻结上下文有效；无生成 item / 新 Outbound 接受。事务失败点是新分支登记 Config-owned usage 使用 `policy_generation`，现有合同仅接受 preview / confirm / execution，故整事务回滚。复用既有 worker/execution 登记，不扩大配置中心合同、不加限制或表。原队列自动重试原事件，保留 once 与生成/发送幂等键，未人为重放或补发。
 
 回归在原 Agent PG 接受/完成/重放旅程绑定真实 Config RuntimeReleaseService 与 store，增加 usage/其他状态一起回滚、重放仅一个 execution usage 的断言。修复前真实服务复现同样 runtime unavailable，修复后四个分支重跑。生产只读上下文诊断不写生产、不调用模型/企微、不打印客户内容或密钥；与合成旅程分开记录。
+
+
+## 2026-10-04：聊天发言归属修复
+
+生产只读复现：一条 B1 第3版生成记录，把用户作为接收者的三条群消息混入上下文，产生“你在群里聊”的错误归属。该记录在00:00:20生成，短模板在00:00:57发布；已冻结的旧任务保持原版本，不是缓存。另一用户未提交问卷，命中A2固定话术，属于原业务分支。
+
+```mermaid
+flowchart LR
+ A[本人最新问卷] --> C[冻结 Agent 上下文]
+ B[当前 OneID lineage] --> D[Archive 仅查询本人作为可信 sender 的消息]
+ D --> E[按时间筛选后取最近20条]
+ E --> C
+ C --> F[已发布短模板生成]
+ F --> G[原 Outbound 发送与一次性收据]
+```
+
+参考：LangChain 官方消息合同 https://reference.langchain.com/javascript/langchain-core/messages/Message 将角色/来源视为上下文的一部分。本仓 Archive 已保留 participant_role、actor_type、customer_id_at_ingest、resolution_status，直接复用，不引入新的身份匹配或队列。
+
+最小改动：为稳定 CustomerQuery 增加默认false的 AuthoredByCustomerOnly 过滤；在 Archive Store 内按 canonical lineage + sender + external_customer + found 筛选，且在 ORDER/LIMIT 前执行。仅 Agent 聚合器启用。保留用户本人私聊和群聊发言，排除其他客户、员工、robot/unknown/未解析发言。后台聊天展示继续使用默认完整会话视图。
+
+OneID：仅读取原 CanonicalLineage，不改身份或归属。Persistence：仅 owner 读取语义，无迁移、历史数据写入。External Effects：原冻结/生成/发送路径与幂等不变；不人工重放、撤回或重发已提交消息。UI：无页面代码变动。不涉及新增任意资源阈值；本人发言过滤来自用户明确要求及已证实归属缺陷。
+
+验证：真实 PG 对其他成员群发言、员工私聊、unknown sender、本人私聊/群聊及 lineage 成员发言进行隔离；过滤在分页前生效，watermark/keyset与默认会话查询保持原行为。聚合器具名测试核对查询标志，最新问卷继续优先。已安装包认证 Archive 读取保持完整会话，Agent 冻结上下文只含本人消息；生产只读内容核验不输出 PII/原文。
+
+历史已冻结/Provider接受的任务不改内容；本次修复只作用于新冻结上下文。A分支文案不属于本修复范围。

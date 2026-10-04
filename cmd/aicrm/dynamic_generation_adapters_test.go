@@ -64,7 +64,7 @@ func TestDynamicGenerationContextFreezesOnlyApprovedReadPorts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if surveys.query.CustomerID != 42 || surveys.query.Limit != 20 || !surveys.query.Watermark.Equal(watermark) || messages.query.CustomerID != 42 || messages.query.Limit != 20 || !messages.query.Watermark.Equal(watermark) || messages.query.Watermark.Location() != time.UTC || !value.Valid() || !strings.Contains(value.Questionnaire, "入营问卷") || !strings.Contains(value.RecentChats, "想了解课程") || !strings.Contains(value.Tags, "阶段/活跃") || !strings.Contains(value.Activation, "activated") {
+	if surveys.query.CustomerID != 42 || surveys.query.Limit != 20 || !surveys.query.Watermark.Equal(watermark) || messages.query.CustomerID != 42 || !messages.query.AuthoredByCustomerOnly || messages.query.Limit != 20 || !messages.query.Watermark.Equal(watermark) || messages.query.Watermark.Location() != time.UTC || !value.Valid() || !strings.Contains(value.Questionnaire, "入营问卷") || !strings.Contains(value.RecentChats, "想了解课程") || !strings.Contains(value.Tags, "阶段/活跃") || !strings.Contains(value.Activation, "activated") {
 		t.Fatalf("queries survey=%+v messages=%+v value=%+v", surveys.query, messages.query, value)
 	}
 }
