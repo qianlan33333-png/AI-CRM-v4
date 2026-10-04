@@ -98,6 +98,68 @@
       "lane": "backend",
       "package": "./internal/config/http",
       "test": "TestOpenAPIDownloadIsAuthenticatedAndMatchesTheReleaseSource"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/store",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/distribution/http",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/coupon/app",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/coupon/http",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/coupon/store",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/product_scoped_share_postgres_integration_test.go",
+      "test": "TestPostgreSQLProductScopedShareBoundsAndArchivedRevocation",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/distribution_self_read_phase2_postgres_integration_test.go",
+      "test": "TestPostgreSQLDistributionSelfReadHTTPIsolation",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/commerce_funds_http_integration_test.go",
+      "test": "TestPostgreSQLCommerceFundsHTTPJourney",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/referral_h5_oauth_postgres_integration_test.go",
+      "test": "TestPostgreSQLReferralH5OAuthReturnRoundTrip",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/product_webkit_phase2_postgres_test.go",
+      "test": "TestPostgreSQLProductWebKitPhase2Journey",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/product_activity_context_postgres_integration_test.go",
+      "test": "TestPostgreSQLProductActivityContextHTTPIdempotencyAndExpiry",
+      "postgres": true,
+      "race": true
     }
   ],
   "build_commands": [

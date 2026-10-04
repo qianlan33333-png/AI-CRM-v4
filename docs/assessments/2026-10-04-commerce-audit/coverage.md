@@ -22,7 +22,7 @@
 |---|---|---|
 | 普通商品：`/admin/wechat-pay/products`；`/api/v1/products`；`/api/admin/wechat-pay/products/*` | 名称/编码/描述、CNY整数分、库存配置、图片、兼容projection；草稿、启停、归档、删除、复制、分享；Product版本CAS、operation receipt、audit/outbox；Media公开原图绑定 | app/store/handler关键区段与全域回归，真实HTTP清空/复制/重放；UI素材/保存脚本。没有独立SKU变体/多规格库存模型，不虚构该能力 |
 | 服务期商品：`/admin/service-period-products`；对应admin API；`/s/{code}`、`/s/{code}/pay`、`/api/h5/service-period-products/{code}` | 同商品配置，duration、服务期definition、支付宝策略；付款人/受益人、Order权益；详情只读可信session | 图片边界修复、政策/联系人矩阵、历史权益与退款store真实PG；新支付宝缺时→原query→权益起点；未完成旧Safari真机完整购买链 |
-| 图片与素材选择、表单历史值、支付方式、联系人/地址、会员数与会员grid | 兼容字段的 nil/[]/false/省略语义；Media目录证明；Order entitlement读；grid视图/分享/collaborator owner与readonly角色 | Product域测试包括真实grid CRUD/CAS及HTTP权限；素材JSDOM。全部后台tab、外部分享令牌、辅助技术未逐屏审查 |
+| 图片与素材选择、表单历史值、支付方式、联系人/地址、会员数与会员grid | 兼容字段的 nil/[]/false/省略语义；Media目录证明；Order entitlement读；grid视图/分享/collaborator owner与readonly角色 | Product域测试包括真实grid CRUD/CAS及HTTP权限；素材JSDOM。全部后台tab和辅助技术未逐屏审查；外部成员分享的实际撤销/字段范围已于第二阶段验证 |
 | 购买后标签/完成二维码或跳转；商品外推配置、字段映射、测试/投递读回 | Product冻结动作，Order paid consumer，Channel QR，Outbound/EER效果；配置与accepted事实归Product，真实效果不归Product | 配置域与paid action事务测试；真实PG+Chromium付款完成/旧管理入口一致性。真实企微、外推接收方、网络最终回执未验收 |
 | 公开普通详情/购买：`/p/{code}`、`/pay/{code}`；checkout-session、purchase-status、微信/支付宝checkout | 可信付款session+binding；服务端锁Product冻结当前价格/启用状态与Order snapshot；优惠券claim、电话密文、地址、promotion/activity context；请求恢复使用原key | HTTP字段/OpenAPI，真实PG冻结价/同键重放/联系方式矩阵，真实Chromium公共购买。优惠券领取全流程与跨OAuth身份恢复未独立穷举 |
 | Order/Payment：原单查询、签名通知、退款与权益 | pending→paid/failed；退款预留→确认/失败；整数分、累计退款上限；payment/order锁、receipt、history、audit、outbox；同UoW消费者发权益/裂变销售/分销佣金；EER+River异步 | 全域真实PG；并发通知只一次、下游失败回滚、退款未知/查询先于回调、权益赠与隔离、部分/全额退款撤权；原query查询失败/重复通知。Provider均本地合成、无真钱 |
@@ -42,7 +42,7 @@
 
 明确剩余项：
 
-- Referral product-context入口要求幂等key但每次发行新短期context：已确认低风险契约不一致；未证实重复计佣/下单，未为其新增收据或迁移。后续应选定“随机发行”还是“同key返回同token”的业务合同再统一。
+- Referral product-context同键契约及期限不一致已在第二阶段修复并由真实HTTP/PG验证；不据此推导历史重复计佣。见下方增量。
 - `stock_quantity`当前是非负配置字段，checkout不扣减；没有0=无限/售罄、预占/释放的合同。不能直接把该字段改造成库存余额，也不能据此宣称库存售卖已验证。
 - 未完整逐行审完所有商品、支付Provider/退款HTTP、grid与外推适配器；未逐屏验证后台全部tab、券领取、全部服务期身份/OAuth恢复组合、海报/导出、所有权限矩阵。
 - 无真实微信/支付宝沙箱账号或production Provider最终验收；无真实资金、分账、提现、消息。无旧iOS/WebKit真机/可信触摸。未跑完整仓库全量、所有模块race、Linux installed readback或生产部署。
@@ -51,3 +51,21 @@
 ## 验证收据
 
 环境为Mac、隔离PostgreSQL16、localhost:55464随机schema，Go1.26.6；首次环境运行用系统Node24.21.0，最终前端检查改用已安装的锁定Node24.18.0/npm11.12.1。原数据库、冻结donor与原工作树没有业务写入。具体最终命令、pass/fail/skip、最终SHA/tree及是否清理数据库服务，以工作区外 `commerce-evidence/final-receipt.json` 为准。原始JSONL/日志均保存在该目录，避免把大量运行日志混入候选源码。
+
+## 第二阶段增量（继续51e0516，未回退源码）
+
+| 缺陷与影响 | 最小修复 | 业务验收与原始证据 |
+|---|---|---|
+| 归档周期商品的原匿名成员分享仍可读，但管理员无法撤销（404） | 创建仍锁可写商品；撤销仅锁历史商品，已有Store只做enabled=false及resource/id/version匹配 | 实际composition登录、CSRF/Viewer拒绝，跨商品409不撤销原分享、匿名基础+访客过滤、无私有字段、归档新分享404、原分享撤销/重放200、旧token410；phase2-share-scopes-after.txt |
+| 本人佣金读取非法cursor误报503 | 入口复用已有正整数游标合同返回400 | 实际Order结算生成交错两客户佣金，真实Distribution session，汇总/分页/foreign cursor/篡改参数/错用途或过期cookie隔离；phase2-distribution-self-final-pass.txt |
+| WeChat通用退款接受超长或非法退款单号，接受后不能由Provider执行 | 仅确认WeChat订单后按官方64 ASCII及字符集合拒绝，原raw receipt payload不变，其他Provider不变 | 修复前65字符/slash接受，后400且不调用app，合法64及允许符号仍接受；payment/http目标用例和Coupon真实PG。修复前后文件是工具结果摘要而非原stdout |
+| 已认证裂变product-context同actor/key重复签发、跨campaign同键不冲突，cookie固定24h与DB活动期限不同 | 既有actor receipt锁+同UoW，分域HMAC派生token，不保存raw token；回执引用campaign；0222只扩展操作白名单 | 真实HTTP/PG同键原token/期限、不同campaign409、不同actor独立、两并发首次一context一receipt、过期旧键重放原快照、新键拒绝、下游过期不冻结归因；context-phase2-concurrent-after.txt |
+| 普通与周期后台清空图片后PG []、HTTP null违反数组合同 | 两个HTTP响应边界构造非nil空数组，保留请求字段语义 | 两实际WebKit引擎tap删除后真实PUT/GET/PG复现；phase2-webkit-entry-after.log及webkit15.4-service-images-null-before.log，最终以准确HEAD WebKit回执为准 |
+
+0222真实旧库升级保留campaign_posters原回执JSON和append-only trigger，旧result_kind及唯一键不变；完整Referral app PG包含奖励、关系撤销、海报、活动close、销售退款与升级。初稿遗漏campaign_posters被回归捕获并修正；属于候选实现中间回归，非旧版本业务bug。迁移仅隔离测试，未在生产运行。
+
+WebKit旅程范围是实际15.4/26.0引擎的商品HTML/JS、真实tap、无input值恢复、手动原key重试、价格1234↔12.34、最后图片PUT[]/GET/PG、有无身份服务期。WeChat UA及OAuth拒绝返回tab态模拟；checkout POST及全部外部请求拦截，其他后台API真实PG。无物理iPhone或Provider验收。原Safari UA/重复图片seed/授权按钮disabled/Go期望名称错误为夹具问题，保留失败日志，不计业务缺陷。最终运行结果见final-receipt-phase2.json。
+
+仍未覆盖：库存0/有限量销售规则待用户回答；退款compat自动编号跨管理员同key碰撞尚未复现且未改生成算法；真实Provider查询/支付/退款/分账到账、完整OAuth实际账号恢复、后台全部tab/grid/角色、所有海报/团队/导出UI/kill-restart任务矩阵、券领取逐客户端、完整问卷/其他模块、Linux安装与真实手机。当前单企业系统只验证客户对象隔离。后续不得把本地fixture或包PASS解释为这些能力验收。
+
+最终提交SHA/tree、干净状态、检查通过/失败尝试/skip和PG清理以工作区外final-receipt-phase2.json为准；firstwave final-receipt.json保留历史51e0516证据，不作为最终新候选回执。
