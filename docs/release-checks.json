@@ -77,6 +77,18 @@
       "lane": "backend",
       "package": "./internal/order",
       "path": "internal/order/ui_test.go"
+    },
+    {
+      "lane": "frontend",
+      "path": "scripts/verify-donor-sources.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "scripts/validate-openapi.mjs"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/config/http"
     }
   ],
   "build_commands": [

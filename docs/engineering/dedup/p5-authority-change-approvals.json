@@ -2149,6 +2149,28 @@
       ],
       "reason": "Bind the user-authorized package-scoped automation run-history pagination and total-count read contract to its canonical OpenAPI and existing embed view. No frozen donor payload or checker policy changes.",
       "review_reference": "User instruction 修复下这个问题，不然后续取数会有问题 in task 01a0ffa2-8a4d-7bd3-a3b4-f562a2b1a02a; docs/prd/2026-10-03-audience-send-history-pagination.md. Exact base-bound author review of the additive read contract, not independent review or production authorization."
+    },
+    {
+      "base_commit": "c3160a063af24ffc7b2fd724eb1ab5d74b45f003",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "75eaf8fcd6ad1ea90ffd97533cac01636111c30bc63d2e09a25256ec4d292842",
+          "head_sha256": "f7b6eaa17b7dc6ef77604e050ce93f18ad5921fc47068957eb3114d002688ef7"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "f392cbda3a95c1e884b91ca43891d50ae9d994e674200b7a93afe844d080dfe9",
+          "head_sha256": "46f21ded00970fc882c11f471c18b5fd4ecd3ecdf635adba42faf52327544ba6"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "7de9900587385f8d3e054722ac60a2032aee1a213394dc9791369b52cddec631",
+          "head_sha256": "db2229edda4cc7b37e807db7d3e63ef08c3e88c7d516d06a9e5a71291c59d93d"
+        }
+      ],
+      "reason": "Bind the authorized external-history order read contract and current V4 embed view to exact reviewed API bytes. Frozen source payloads and checker policy are unchanged.",
+      "review_reference": "User PLEASE IMPLEMENT THIS PLAN and latest zero/missing-time exclusions and refund phone-only instruction in task 01a1050e-a192-7913-a3dd-56f9dc949cb5; docs/prd/2026-10-04-external-order-history.md. Author declaration under existing user scope, not independent approval or deployment evidence."
     }
   ]
 }
