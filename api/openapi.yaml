@@ -4178,16 +4178,31 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required: [product_id, product_kind, beneficiary_selection, checkout_session_binding]
-              properties:
-                product_id: {$ref: "#/components/schemas/PositiveID"}
-                product_kind: {type: string, enum: [standard, service_period]}
-                beneficiary_selection: {type: string, enum: [payer_self], description: Confirms that the server-bound trusted payer is also the beneficiary. Customer IDs are never accepted from the browser.}
-                coupon_claim_id: {type: integer, minimum: 0, description: Payment-owned coupon claim reference; zero means no claim.}
-                checkout_session_binding: {type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: Opaque marker issued for the current trusted payment session; it prevents a response-lost checkpoint from creating a new order after session renewal.}
-                mobile: {type: string, pattern: "^\\+861[3-9][0-9]{9}$", description: Encrypted Order contact snapshot only; never an identity claim.}
+              allOf:
+                - {$ref: "#/components/schemas/PublicPaymentCheckoutRequest"}
+                - type: object
+                  properties:
+                    provider: {type: string, enum: [wechat_pay]}
+                    channel: {type: string, enum: ["", mini_program, h5_official_account]}
+      responses: {"202": {description: "Order, Payment and effect accepted atomically", content: {application/json: {schema: {type: object, required: [order_id, merchant_order_no, payment_id, status, effect_id], properties: {order_id: {$ref: "#/components/schemas/PositiveID"}, merchant_order_no: {type: string, minLength: 1, maxLength: 200}, payment_id: {$ref: "#/components/schemas/PositiveID"}, status: {type: string}, effect_id: {$ref: "#/components/schemas/ExternalEffectID"}}}}}}, "400": {$ref: "#/components/responses/Error"}, "401": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}, "503": {$ref: "#/components/responses/Unavailable"}}
+  /api/v1/alipay/checkouts:
+    post:
+      operationId: createAlipayCheckout
+      tags: [Transactions]
+      security: [{paymentSession: []}]
+      parameters: [{$ref: "#/components/parameters/RequiredIdempotencyKey"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: "#/components/schemas/PublicPaymentCheckoutRequest"}
+                - type: object
+                  required: [channel]
+                  properties:
+                    provider: {type: string, enum: [alipay]}
+                    channel: {type: string, enum: [alipay_wap, alipay_page]}
       responses: {"202": {description: "Order, Payment and effect accepted atomically", content: {application/json: {schema: {type: object, required: [order_id, merchant_order_no, payment_id, status, effect_id], properties: {order_id: {$ref: "#/components/schemas/PositiveID"}, merchant_order_no: {type: string, minLength: 1, maxLength: 200}, payment_id: {$ref: "#/components/schemas/PositiveID"}, status: {type: string}, effect_id: {$ref: "#/components/schemas/ExternalEffectID"}}}}}}, "400": {$ref: "#/components/responses/Error"}, "401": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}, "503": {$ref: "#/components/responses/Unavailable"}}
   /api/v1/wechat-pay/checkouts/{merchant_order_no}:
     get:
@@ -4272,7 +4287,7 @@ paths:
               additionalProperties: {type: string}
       responses:
         "200":
-          description: Verified callback accepted and applied; the plain-text acknowledgement prevents an Alipay retry.
+          description: Verified callback accepted; a payment notification without a valid gmt_payment atomically queues the original trade query before settlement. The plain-text acknowledgement prevents an Alipay retry.
           content:
             text/plain:
               schema: {type: string, enum: [success]}
@@ -6736,6 +6751,30 @@ components:
         alliance: {type: string, maxLength: 500}
         version: {$ref: "#/components/schemas/PositiveID"}
         updated_at: {type: string, format: date-time}
+    PublicPaymentCheckoutRequest:
+      type: object
+      additionalProperties: false
+      required: [product_id, product_kind, beneficiary_selection, checkout_session_binding]
+      description: The server freezes price, contact requirements and attribution from the product and trusted session. Browser contact fields are encrypted Order snapshots and never identity claims. Optional provider defaults to the path provider; the path constrains its accepted channels.
+      properties:
+        product_id: {$ref: "#/components/schemas/PositiveID"}
+        product_kind: {type: string, enum: [standard, service_period]}
+        beneficiary_selection: {type: string, enum: [payer_self]}
+        coupon_claim_id: {type: integer, minimum: 0, description: Zero means no coupon claim.}
+        checkout_session_binding: {type: string, pattern: "^[A-Za-z0-9_-]{43}$"}
+        provider: {type: string, enum: [wechat_pay, alipay]}
+        channel: {type: string, enum: ["", mini_program, h5_official_account, alipay_wap, alipay_page]}
+        contact_collection_level: {type: string, enum: ["", none, mobile, shipping_address], description: The current product policy remains authoritative.}
+        mobile: {type: string, pattern: "^\\+861[3-9][0-9]{9}$"}
+        recipient_name: {type: string}
+        province_code: {type: string}
+        province_name: {type: string}
+        city_code: {type: string}
+        city_name: {type: string}
+        district_code: {type: string}
+        district_name: {type: string}
+        detail_address: {type: string}
+        promotion_context: {type: string, pattern: "^(dpc_[A-Za-z0-9_-]{43})?$", description: Opaque Distribution credential; commission and participants are validated and frozen server-side.}
     PaymentRefundEffectAccepted:
       type: object
       additionalProperties: false

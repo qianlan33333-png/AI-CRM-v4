@@ -87,6 +87,31 @@ function assertGovernanceUnknownContracts(specification) {
   }
 }
 
+function assertPublicCheckoutContracts(specification) {
+  const parserPath = require.resolve('@apidevtools/swagger-parser');
+  const Ajv = require(require.resolve('ajv', { paths: [path.dirname(parserPath)] }));
+  const common = {
+    product_id: 41, product_kind: 'standard', beneficiary_selection: 'payer_self',
+    coupon_claim_id: 0, checkout_session_binding: 's'.repeat(43),
+    contact_collection_level: 'shipping_address', mobile: '+8613812345678',
+    recipient_name: '收件人', province_code: '110000', province_name: '北京市',
+    city_code: '110100', city_name: '北京市', district_code: '110101', district_name: '东城区',
+    detail_address: '测试地址1号', promotion_context: 'dpc_' + 'p'.repeat(43),
+  };
+  for (const [provider, channels] of [['wechat-pay', ['h5_official_account']], ['alipay', ['alipay_wap', 'alipay_page']]]) {
+    const operation = specification.paths[`/api/v1/${provider}/checkouts`]?.post;
+    assert.ok(operation, `missing ${provider} checkout contract`);
+    const validate = new Ajv({ allErrors: true, strict: false }).compile(operation.requestBody.content['application/json'].schema);
+    for (const channel of channels) {
+      const body = { ...common, provider: provider === 'wechat-pay' ? 'wechat_pay' : provider, channel };
+      assert.equal(validate(body), true, `valid ${provider} checkout rejected: ${JSON.stringify(validate.errors)}`);
+      assert.equal(validate({ ...body, customer_id: 99 }), false, 'checkout must reject browser identity claims');
+      assert.equal(validate({ ...body, amount_minor: 1 }), false, 'checkout must reject browser prices');
+      assert.equal(validate({ ...body, provider: provider === 'alipay' ? 'wechat_pay' : 'alipay' }), false, 'checkout path must constrain provider');
+    }
+  }
+}
+
 try {
   // Keep the repository's normal OpenAPI structural validation.  The
   // dereferenced copy below is only for compiling the local DTO examples.
@@ -96,6 +121,7 @@ try {
   assertGroupOpsPlanListItemExamples(dereferenced);
   assertSurveyCompletionContracts(specification);
   assertGovernanceUnknownContracts(specification);
+  assertPublicCheckoutContracts(dereferenced);
   console.log(`validated OpenAPI ${specification.openapi}: ${Object.keys(specification.paths).length} paths`);
 } catch (error) {
   console.error(`OpenAPI validation failed: ${error instanceof Error ? error.message : String(error)}`);
