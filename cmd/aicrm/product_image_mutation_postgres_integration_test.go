@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -71,6 +72,22 @@ func TestPostgreSQLProductImageEditorClearAndCopy(t *testing.T) {
 		after := productExternalPushAdminMutation(t, fixture.application.handler, http.MethodGet, product.path, "", session, csrf, "")
 		if after.Code != 200 {
 			t.Fatalf("final read: %d", after.Code)
+		}
+		// The wire contract declares an array: len(nil)==0 must not hide a
+		// null response after a successful persisted clear or empty copy.
+		for _, result := range [][]byte{cleared.Body.Bytes(), replay.Body.Bytes(), copied.Body.Bytes(), copiedAgain.Body.Bytes(), after.Body.Bytes()} {
+			var response map[string]json.RawMessage
+			if err := json.Unmarshal(result, &response); err != nil {
+				t.Fatal(err)
+			}
+			if envelope, ok := response["product"]; ok {
+				if err := json.Unmarshal(envelope, &response); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !bytes.Equal(bytes.TrimSpace(response["images"]), []byte("[]")) {
+				t.Fatalf("%s empty images wire contract: %s", product.path, result)
+			}
 		}
 	}
 }
