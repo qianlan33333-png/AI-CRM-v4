@@ -407,7 +407,15 @@ func (h *Handler) commissions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	page, err := h.earnings.ListCommissions(r.Context(), actor, status, r.URL.Query().Get("cursor"), limit)
+	cursor := r.URL.Query().Get("cursor")
+	if cursor != "" {
+		value, err := strconv.ParseInt(cursor, 10, 64)
+		if err != nil || value < 1 || cursor != strconv.FormatInt(value, 10) {
+			writeError(w, http.StatusBadRequest, "invalid_request")
+			return
+		}
+	}
+	page, err := h.earnings.ListCommissions(r.Context(), actor, status, cursor, limit)
 	if err != nil {
 		resultError(w, err)
 		return
