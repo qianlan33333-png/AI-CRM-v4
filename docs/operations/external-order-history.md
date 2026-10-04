@@ -18,7 +18,7 @@ migrate-external-orders --mode reconcile --union-scope "$SCOPE" --csv "$CSV1" --
 
 新核查基线：10442 行、10417 唯一、25 重复；Union 4342、Phone 40、Skipped 1449，共 4382 笔实单；`Amount=489366640` 分、`Refund=0`。剔除无时间 835、非退款零元 2516；退款来源 1235 行，匹配 1152 行，只补手机号。所有选中来源合计待补 2087 位客户（同一客户去重），选中跨客户冲突 17，属于原已确认 26 笔；不补不移冲突号。执行前重读，任何新归属或歧义先联系原用户。`PhoneOnlyFilled` 见 JSON `refund_phone_only_filled`，是实际由退款来源首次补入的数量，包含其可能也有正常订单的客户。
 
-侧边栏完整资源合同 `web/v3/sidebarOneIDPresentation.test.mjs` 在最终安装包验收执行，检查名 `sidebar-oneid-presentation`。准确私有验收 checkout 的 `web/dist` 使用该安装包的真实页面和资源，复用原 npm 依赖；此用例的源码测试 bundle 与安装资源证据分别记录。
+订单与侧边栏完整资源合同 `web/v3/orderAdapter.test.mjs`、`web/v3/sidebarOneIDPresentation.test.mjs` 在最终安装包验收执行，检查名分别为 `order-presentation`、`sidebar-oneid-presentation`。准确私有验收 checkout 的 `web/dist` 使用该安装包的真实页面和资源，复用原 npm 依赖；源码测试 bundle 与安装资源证据分别记录。真实 Chromium 合同在本机准确源码已通过；正式 Linux 同一旅程使用准确安装 API/工具执行，不在源码阶段重复构建整套页面。
 
 本地真实认证浏览器旅程已通过。安装包用 `scripts/run-installed-external-order-history.sh --binary <package>/bin/aicrm --root <package> --sha <sha> --binary-sha256 <digest> --tool <package>/bin/migrate-external-orders` 在隔离验收库复验；沿用当前工作台原 stage-evidence 的 external-order-history 检查名，不新建发布通道。
 

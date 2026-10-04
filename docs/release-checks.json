@@ -61,11 +61,6 @@
       "test": "TestSidebarBusinessTimelineExternalHistoryUnknownTimeLabelsImport"
     },
     {
-      "lane": "browser",
-      "path": "cmd/aicrm/external_order_history_journey_test.go",
-      "test": "TestPostgreSQLExternalOrderHistoryChromiumJourney"
-    },
-    {
       "lane": "backend",
       "package": "./internal/order",
       "path": "internal/order/ui_test.go"
@@ -83,10 +78,6 @@
       "package": "./internal/config/http",
       "path": "internal/config/http/handler_test.go",
       "test": "TestOpenAPIDownloadIsAuthenticatedAndMatchesTheReleaseSource"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/orderAdapter.test.mjs"
     }
   ],
   "build_commands": [
@@ -94,6 +85,7 @@
   ],
   "installed_checks": [
     "external-order-history",
+    "order-presentation",
     "sidebar-oneid-presentation"
   ]
 }
