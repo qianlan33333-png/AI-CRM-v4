@@ -71,29 +71,7 @@ try {
   await checkoutPage.goto(baseURL + '/pay/' + env.AICRM_PHASE2_STANDARD_CODE, { waitUntil: 'domcontentloaded' });
   await checkoutPage.locator('#checkoutContent').waitFor({ state: 'visible', timeout: 30000 });
   runtime.userAgent = await checkoutPage.evaluate(() => navigator.userAgent);
-  const checkoutInput = await checkoutPage.evaluate(() => {
-    const get = id => document.getElementById(id);
-    const province = get('province');
-    const city = get('city');
-    const district = get('district');
-    if (!(province instanceof HTMLSelectElement) || province.options.length < 2) throw new Error('province options unavailable');
-    province.value = province.options[1].value;
-    province.dispatchEvent(new Event('change', { bubbles: true }));
-    if (!(city instanceof HTMLSelectElement) || city.options.length < 2) throw new Error('city options unavailable');
-    city.value = city.options[1].value;
-    city.dispatchEvent(new Event('change', { bubbles: true }));
-    if (!(district instanceof HTMLSelectElement) || district.options.length < 2) throw new Error('district options unavailable');
-    district.value = district.options[1].value;
-    get('mobile').value = '13800138000';
-    get('recipientName').value = '浏览器测试收件人';
-    get('detailAddress').value = '测试路 12 号';
-    return {
-      province: province.value, provinceName: province.options[province.selectedIndex].textContent,
-      city: city.value, cityName: city.options[city.selectedIndex].textContent,
-      district: district.value, districtName: district.options[district.selectedIndex].textContent,
-      inputEvents: window.__phase2InputEvents,
-    };
-  });
+  const checkoutInput = await restoreShippingInputs(checkoutPage);
   assert.equal(checkoutInput.inputEvents.mobile || 0, 0, 'restored mobile value must not require an input event');
   assert.equal(checkoutInput.inputEvents.recipientName || 0, 0, 'restored recipient value must not require an input event');
   assert.equal(checkoutInput.inputEvents.detailAddress || 0, 0, 'restored address value must not require an input event');
@@ -139,6 +117,36 @@ try {
   assert.equal(trustedServiceState.authenticated, true, 'trusted local session should read the actual service-period identity boundary');
   assert.equal(await servicePage.locator('#servicePeriodPayButton').textContent().then(text => text.trim()), '立即报名');
   await servicePage.screenshot({ path: path.join(screenshotDir, '04-service-period-trusted-identity.png'), fullPage: true });
+
+  // Exercise the distinct service-period payment entry as well as its detail
+  // identity page. This request is intercepted locally, as for ordinary pay.
+  const periodCheckout = await context.newPage();
+  periodCheckout.on('pageerror', error => pageErrors.push(String(error.message || error)));
+  const periodPosts = [];
+  await periodCheckout.route('**/api/v1/wechat-pay/checkouts', async route => {
+    const request = route.request();
+    if (request.method() !== 'POST') return route.continue();
+    periodPosts.push({ key: request.headers()['idempotency-key'], body: JSON.parse(request.postData() || '{}') });
+    await route.fulfill({ status: 503, contentType: 'application/json', body: '{"code":"fixture_response_lost"}' });
+  });
+  await periodCheckout.goto(baseURL + '/s/' + env.AICRM_PHASE2_SERVICE_CODE + '/pay', { waitUntil: 'domcontentloaded' });
+  await periodCheckout.locator('#checkoutContent').waitFor({ state: 'visible', timeout: 30000 });
+  await restoreShippingInputs(periodCheckout);
+  await periodCheckout.locator('#buy').tap();
+  await waitFor(() => periodPosts.length === 1, 'service-period checkout POST was not observed', 10000);
+  await waitFor(async () => (await periodCheckout.locator('#buy').textContent()).trim() === '重试原请求', 'service-period original request recovery missing', 10000);
+  assert.equal(periodPosts[0].body.product_kind, 'service_period');
+  assert.equal(periodPosts[0].body.product_id, Number(env.AICRM_PHASE2_SERVICE_ID));
+  assert.equal(periodPosts[0].body.mobile, '+8613800138000');
+  assert.equal(periodPosts[0].body.detail_address, '测试路 12 号');
+  assert.equal(periodPosts[0].body.beneficiary_selection, 'payer_self');
+  await periodCheckout.locator('#buy').tap();
+  await waitFor(() => periodPosts.length === 2, 'service-period manual retry was not observed', 10000);
+  assert.equal(periodPosts[1].key, periodPosts[0].key);
+  assert.deepEqual(periodPosts[1].body, periodPosts[0].body);
+  await delay(500);
+  assert.equal(periodPosts.length, 2, 'service-period failed retry must not loop');
+  await periodCheckout.screenshot({ path: path.join(screenshotDir, '04a-service-period-payment-original-retry.png'), fullPage: true });
 
   const anonymousContext = await browser.newContext(browserOptions);
   await blockExternalRequests(anonymousContext);
@@ -192,6 +200,7 @@ try {
       sameIdempotencyKey: checkoutPosts[0].key === checkoutPosts[1].key,
       addressPayload: receiptPayload,
     },
+    servicePeriodCheckout: { postCount: periodPosts.length, productKind: periodPosts[0].body.product_kind, sameIdempotencyKey: periodPosts[0].key === periodPosts[1].key, samePayload: true, providerIntercepted: true },
     servicePeriod: {
       trustedAuthenticated: trustedServiceState.authenticated,
       anonymousAuthenticated: anonymousResponses[anonymousResponses.length - 1].authenticated,
@@ -205,6 +214,32 @@ try {
 } finally {
   if (releaseFirstCheckout) releaseFirstCheckout();
   await browser.close();
+}
+
+async function restoreShippingInputs(page) {
+  return page.evaluate(() => {
+    const get = id => document.getElementById(id);
+    const province = get('province');
+    const city = get('city');
+    const district = get('district');
+    if (!(province instanceof HTMLSelectElement) || province.options.length < 2) throw new Error('province options unavailable');
+    province.value = province.options[1].value;
+    province.dispatchEvent(new Event('change', { bubbles: true }));
+    if (!(city instanceof HTMLSelectElement) || city.options.length < 2) throw new Error('city options unavailable');
+    city.value = city.options[1].value;
+    city.dispatchEvent(new Event('change', { bubbles: true }));
+    if (!(district instanceof HTMLSelectElement) || district.options.length < 2) throw new Error('district options unavailable');
+    district.value = district.options[1].value;
+    get('mobile').value = '13800138000';
+    get('recipientName').value = '浏览器测试收件人';
+    get('detailAddress').value = '测试路 12 号';
+    return {
+      province: province.value, provinceName: province.options[province.selectedIndex].textContent,
+      city: city.value, cityName: city.options[city.selectedIndex].textContent,
+      district: district.value, districtName: district.options[district.selectedIndex].textContent,
+      inputEvents: window.__phase2InputEvents,
+    };
+  });
 }
 
 async function blockExternalRequests(context) {

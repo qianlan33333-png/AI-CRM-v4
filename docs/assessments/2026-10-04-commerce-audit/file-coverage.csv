@@ -5,6 +5,7 @@ cmd/aicrm/commerce_checkout_integration_test.go,inventory_only,yes,key_sections 
 cmd/aicrm/commerce_mapping_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/commerce_phone_vault_payment_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/composition.go,key_sections,no,key_sections does not mean every line reviewed; tests passing does not verify external Providers
+cmd/aicrm/coupon_public_claim_phase2_postgres_integration_test.go,authored_regression,yes,Actual composition/HTTP/PG; see final receipt; trusted admin seam injected only in refund scope case
 cmd/aicrm/distribution_chromium_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/distribution_product_policy_chromium_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/distribution_product_policy_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
@@ -22,6 +23,7 @@ cmd/aicrm/payment_alipay_checkout_readback_postgres_integration_test.go,inventor
 cmd/aicrm/payment_alipay_refund_timestamp_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/payment_alipay_second_precision_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/payment_alipay_unknown_time_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
+cmd/aicrm/payment_refund_actor_scope_postgres_integration_test.go,authored_regression,yes,Actual composition/HTTP/PG; see final receipt; trusted admin seam injected only in refund scope case
 cmd/aicrm/prod04_product_beneficiary_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/product_alipay_policy_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/product_image_mutation_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers

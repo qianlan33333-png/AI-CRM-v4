@@ -66,8 +66,16 @@
 
 WebKit旅程范围是实际15.4/26.0引擎的商品HTML/JS、真实tap、无input值恢复、手动原key重试、价格1234↔12.34、最后图片PUT[]/GET/PG、有无身份服务期。WeChat UA及OAuth拒绝返回tab态模拟；checkout POST及全部外部请求拦截，其他后台API真实PG。无物理iPhone或Provider验收。原Safari UA/重复图片seed/授权按钮disabled/Go期望名称错误为夹具问题，保留失败日志，不计业务缺陷。最终运行结果见final-receipt-phase2.json。
 
-仍未覆盖：库存0/有限量销售规则待用户回答；退款compat自动编号跨管理员同key碰撞尚未复现且未改生成算法；真实Provider查询/支付/退款/分账到账、完整OAuth实际账号恢复、后台全部tab/grid/角色、所有海报/团队/导出UI/kill-restart任务矩阵、券领取逐客户端、完整问卷/其他模块、Linux安装与真实手机。当前单企业系统只验证客户对象隔离。后续不得把本地fixture或包PASS解释为这些能力验收。
+仍未覆盖：库存0/有限量销售规则待用户回答；退款跨管理员同key碰撞已在交付补核复现并修复；真实Provider查询/支付/退款/分账到账、完整OAuth实际账号恢复、后台全部tab/grid/角色、所有海报/团队/导出UI/kill-restart任务矩阵、券领取逐客户端、完整问卷/其他模块、Linux安装与真实手机。当前单企业系统只验证客户对象隔离。后续不得把本地fixture或包PASS解释为这些能力验收。
 
 最终提交SHA/tree、干净状态、检查通过/失败尝试/skip和PG清理以工作区外final-receipt-phase2.json为准；firstwave final-receipt.json保留历史51e0516证据，不作为最终新候选回执。
 
 准确3069f9e组合检查发现普通copy仍直接输出LocalProduct images:null，已扩展该投影的最小修复。保留旧失败收据，最终候选另见final-receipt-phase2.json。增强实际HTTP回归同时检查PUT、同键重放、空图复制/重放、GET的wire []，不以len(nil)==0替代合同。
+
+## 交付补核增量
+
+实际HTTP/PG证明不同管理员对不同支付使用同key，compat自动退款编号因只哈希key而撞全局refund_no，generic明确不同refund_no仍因EER全局accept键不含actor而409。最小修复只补全既有actor-scoped合同的两处键；旧compat编号由已有Payment+actor+key回执恢复，完整载荷照常校验。两入口各两actor各一refund/各一effect；同键原载荷重放、改金额409、旧编号重放通过；worker停用，无Provider执行。原始refund-scope-before.log/after.log及最终准确源码收据。
+
+补齐两项明确核心路径：WebKit15.4/26实际操作/s/{code}/pay，恢复无input地址、tap购买、当地503后手动沿原key/原body重试，无自动循环；checkout POST仍拦截。真实composition领券从管理员登录/CSRF创建、发布、分享到可信payer cookie公共页、拒绝匿名/客户字段篡改、并发同键同claim/期限、额度拒绝、适用商品可用券读回，PG issued_count=1、claim=1、holder来自session、claim receipt=1。没有新增Coupon生产逻辑；201/envelope和receipt表期望错误归为夹具。
+
+具体剩余核心入口与外部条件分类见完整报告新增“逐项未验证清单”；海报、战队、奖励撤销、导出、grid等已有PG/HTTP合同测试，不把“未完成所有UI组合”写成这些能力完全未审。

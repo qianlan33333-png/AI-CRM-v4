@@ -160,6 +160,18 @@
       "test": "TestPostgreSQLProductActivityContextHTTPIdempotencyAndExpiry",
       "postgres": true,
       "race": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/payment_refund_actor_scope_postgres_integration_test.go",
+      "test": "TestPostgreSQLRefundHTTPActorScopedKeysAndLegacyReplay",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/coupon_public_claim_phase2_postgres_integration_test.go",
+      "test": "TestPostgreSQLCouponPublicClaimHTTPReplayAndHolder",
+      "postgres": true
     }
   ],
   "build_commands": [
