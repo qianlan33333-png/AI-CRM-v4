@@ -193,6 +193,14 @@ func (s *AdminService) SetCampaignState(ctx context.Context, command referralpor
 		if err != nil {
 			return err
 		}
+		now := s.now().UTC()
+		// EndsAt is the authoritative close boundary even if the durable close
+		// worker is delayed. Preserve the queued transition to Ended and its
+		// ranking snapshot instead of allowing a late admin state change to turn
+		// the campaign into Disabled, which the close worker intentionally skips.
+		if !now.Before(current.EndsAt) {
+			return referralport.ErrConflict
+		}
 		if current.Config().TeamMode == referraldomain.TeamModeIndividual && command.Target == referraldomain.CampaignActive {
 			hasTeam, teamErr := s.store.HasTeamParticipationWithin(tx, current.ID)
 			if teamErr != nil {
@@ -202,7 +210,6 @@ func (s *AdminService) SetCampaignState(ctx context.Context, command referralpor
 				return referralport.ErrConflict
 			}
 		}
-		now := s.now().UTC()
 		next, err := current.Transition(command.ExpectedVersion, command.Target, now)
 		if err != nil {
 			return mapDomainError(err)
