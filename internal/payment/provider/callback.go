@@ -56,7 +56,10 @@ type CallbackResult struct {
 	AmountMinor                  int64
 	Currency                     string
 	OccurredAt                   time.Time
-	Provider                     paymentdomain.Provider
+	// Alipay may sign a notification without a usable gmt_payment. Its
+	// notification timestamp is not evidence of when the buyer paid.
+	AlipayPaymentTimeUnknown bool
+	Provider                 paymentdomain.Provider
 }
 
 func NewCallbackVerifier(keys map[string]*rsa.PublicKey, apiV3Key []byte, appID, merchantID string, additionalAppIDs ...string) (*CallbackVerifier, error) {

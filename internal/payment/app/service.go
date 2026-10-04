@@ -1373,6 +1373,19 @@ func (s *Service) ApplyVerifiedCallback(ctx context.Context, callback paymentpro
 				_, err = s.store.ClaimCallback(tx, callbackProvider, callback.EventDigest, callback.BodyDigest, "payment", "replayed", payment.ID)
 				return err
 			}
+			// A signed notification confirms the trade, but notify_time (or
+			// receive time) cannot establish when the buyer paid. Reuse the
+			// original-trade query before recording paid-time-dependent facts.
+			if callback.Provider == domain.ProviderAlipay && callback.AlipayPaymentTimeUnknown {
+				if s.reconcileJobs == nil || s.alipayReconciler == nil {
+					return paymentport.ErrUnavailable
+				}
+				replay, err := s.store.ClaimCallback(tx, callbackProvider, callback.EventDigest, callback.BodyDigest, "payment", "query_required", payment.ID)
+				if err != nil || replay {
+					return err
+				}
+				return s.reconcileJobs.EnqueueWithin(tx, paymentport.ReconciliationTarget{Provider: domain.ProviderAlipay, PaymentID: payment.ID})
+			}
 			replay, err := s.store.ClaimCallback(tx, callbackProvider, callback.EventDigest, callback.BodyDigest, "payment", "settled", payment.ID)
 			if err != nil || replay {
 				return err

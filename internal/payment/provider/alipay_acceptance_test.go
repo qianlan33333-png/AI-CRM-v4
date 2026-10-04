@@ -98,7 +98,7 @@ func TestAlipayAcceptanceSignedCallbackRejectsTamperAndWrongApp(t *testing.T) {
 	}
 	sign(values)
 	got, err := provider.VerifyValues(context.Background(), values)
-	if err != nil || got.Kind != "payment" || got.MerchantOrderNo != "merchant-test-1" || got.AmountMinor != 990 || got.ProviderTransactionReference != "trade-test-1" {
+	if err != nil || got.Kind != "payment" || got.MerchantOrderNo != "merchant-test-1" || got.AmountMinor != 990 || got.ProviderTransactionReference != "trade-test-1" || !got.AlipayPaymentTimeUnknown {
 		t.Fatalf("signed callback normalization failed: kind=%q merchant=%q amount=%d err=%v", got.Kind, got.MerchantOrderNo, got.AmountMinor, err)
 	}
 	tampered := url.Values{}
@@ -165,6 +165,20 @@ func TestAlipayAcceptanceSignedCallbackKindSpecificTimestamps(t *testing.T) {
 		"notify_time": {"2026-09-30 16:18:58"}, "sign_type": {"RSA2"},
 	}
 	verify(paymentValues, "payment", wantPaymentAt)
+	for _, raw := range []string{"", "bad-date"} {
+		v := copyValues(paymentValues)
+		v.Set("gmt_payment", raw)
+		v.Set("notify_id", "unknown-payment-time-"+raw)
+		sign(v)
+		got, err := provider.VerifyValues(context.Background(), v)
+		if err != nil || !got.AlipayPaymentTimeUnknown || got.OccurredAt.Equal(wantPaymentAt) {
+			t.Fatalf("missing/invalid gmt_payment was trusted: %+v err=%v", got, err)
+		}
+	}
+	sign(paymentValues)
+	if got, err := provider.VerifyValues(context.Background(), paymentValues); err != nil || got.AlipayPaymentTimeUnknown {
+		t.Fatalf("valid gmt_payment requires unnecessary query: %+v err=%v", got, err)
+	}
 
 	verify(copyValues(refundValues), "refund", wantRefundAt)
 	refundOnly := copyValues(refundValues)

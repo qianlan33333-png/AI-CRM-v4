@@ -380,6 +380,7 @@ func (a *Alipay) VerifyValues(ctx context.Context, values url.Values) (CallbackR
 		return CallbackResult{}, ErrInvalidCallback
 	}
 	occurred := time.Now().UTC()
+	paymentTimeUnknown := kind == "payment"
 	timestampKeys := []string{"gmt_payment", "gmt_refund", "notify_time"}
 	if kind == "refund" {
 		// The payment event time can predate refund acceptance. Refund callbacks
@@ -390,6 +391,9 @@ func (a *Alipay) VerifyValues(ctx context.Context, values url.Values) (CallbackR
 		if raw := values.Get(key); raw != "" {
 			if parsed, parseErr := time.ParseInLocation("2006-01-02 15:04:05", raw, time.FixedZone("CST", 8*60*60)); parseErr == nil {
 				occurred = parsed.UTC()
+				if kind == "payment" && key == "gmt_payment" {
+					paymentTimeUnknown = false
+				}
 				break
 			}
 		}
@@ -400,7 +404,7 @@ func (a *Alipay) VerifyValues(ctx context.Context, values url.Values) (CallbackR
 		Kind: kind, MerchantOrderNo: notification.MerchantOrderNo, RefundNo: notification.RefundRequestNo,
 		AppID: notification.AppID, ProviderTransactionReference: notification.TradeNo, ProviderTransactionDigest: string(transactionDigest),
 		ProviderRefundDigest: string(effectport.Hash("alipay.refund", notification.RefundRequestNo, notification.TradeNo)),
-		AmountMinor:          minor, Currency: "CNY", OccurredAt: occurred, Provider: paymentdomain.ProviderAlipay,
+		AmountMinor:          minor, Currency: "CNY", OccurredAt: occurred, AlipayPaymentTimeUnknown: paymentTimeUnknown, Provider: paymentdomain.ProviderAlipay,
 	}, nil
 }
 

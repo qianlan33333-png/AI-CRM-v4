@@ -80,7 +80,9 @@ func TestPostgreSQLAlipaySignedSecondPrecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := time.Date(2026, 9, 20, 1, 2, 3, 0, time.UTC)
-	for i, tc := range []struct{ first, field, kind string }{{"callback", "notify_time", "standard"}, {"callback", "gmt_payment", "service_period"}, {"query", "gmt_payment", "standard"}} {
+	// Actual payment time drives the second-precision assertions. Notifications
+	// without gmt_payment are covered by the original-query integration test.
+	for i, tc := range []struct{ first, field, kind string }{{"callback", "gmt_payment", "standard"}, {"callback", "gmt_payment", "service_period"}, {"query", "gmt_payment", "standard"}} {
 		t.Run(tc.first+"_"+tc.field+"_"+tc.kind, func(t *testing.T) {
 			session := issuePublicCommerceTrustedH5SessionWithKey(t, f, fmt.Sprintf("alipay-second-session-%d", i))
 			productID := f.productID
