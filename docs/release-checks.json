@@ -46,10 +46,6 @@
       "postgres": true
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/orderAdapter.test.mjs"
-    },
-    {
       "lane": "backend",
       "path": "cmd/aicrm/sidebar_business_timeline_test.go",
       "test": "TestSidebarBusinessTimelineNamedSourcesAndCrossSourceKeyset"
@@ -70,10 +66,6 @@
       "test": "TestPostgreSQLExternalOrderHistoryChromiumJourney"
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/sidebarOneIDPresentation.test.mjs"
-    },
-    {
       "lane": "backend",
       "package": "./internal/order",
       "path": "internal/order/ui_test.go"
@@ -91,6 +83,10 @@
       "package": "./internal/config/http",
       "path": "internal/config/http/handler_test.go",
       "test": "TestOpenAPIDownloadIsAuthenticatedAndMatchesTheReleaseSource"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/externalOrderHistoryPresentation.test.mjs"
     }
   ],
   "build_commands": [
