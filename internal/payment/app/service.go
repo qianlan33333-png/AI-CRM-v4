@@ -578,7 +578,7 @@ func (s *Service) RequestRefund(ctx context.Context, c paymentport.RefundCommand
 		} else if refund.Provider == domain.ProviderAlipay {
 			kind = effectport.KindAlipayRefund
 		}
-		intent := effectport.PaymentV1Intent{Kind: kind, ReceiptKey: effectport.Hash("payment.refund.v1", c.IdempotencyKey), SourceRefDigest: effectport.Hash("payment.refund", strconv.FormatInt(refund.ID, 10)), TargetRefDigest: effectport.Hash("payment", strconv.FormatInt(payment.ID, 10)), PayloadDigest: effectport.Hash("payment.refund.payload", refund.RefundNo, strconv.FormatInt(refund.AmountMinor, 10), refund.Reason, c.ProviderOrderID, c.ProductID, c.SKUID, strconv.FormatInt(c.RefundCount, 10), c.ReasonCode), PolicyVersionHash: effectport.Hash("payment.refund.policy", "v1")}
+		intent := effectport.PaymentV1Intent{Kind: kind, ReceiptKey: effectport.Hash("payment.refund.v1", c.ActorScope, c.IdempotencyKey), SourceRefDigest: effectport.Hash("payment.refund", strconv.FormatInt(refund.ID, 10)), TargetRefDigest: effectport.Hash("payment", strconv.FormatInt(payment.ID, 10)), PayloadDigest: effectport.Hash("payment.refund.payload", refund.RefundNo, strconv.FormatInt(refund.AmountMinor, 10), refund.Reason, c.ProviderOrderID, c.ProductID, c.SKUID, strconv.FormatInt(c.RefundCount, 10), c.ReasonCode), PolicyVersionHash: effectport.Hash("payment.refund.policy", "v1")}
 		accept, ok := intent.AcceptCommand()
 		if !ok {
 			return paymentport.ErrInvalid

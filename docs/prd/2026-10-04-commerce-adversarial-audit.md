@@ -42,3 +42,5 @@ WeChat通用退款HTTP入口的必要限制：商户退款编号若超Provider�
 WebKit真实PUT/GET及PG复现普通/周期商品空图片响应null违反既有OpenAPI数组合同。只在HTTP响应构造非nil空数组，OneID/任务/外部效果不涉及，保持已有本地业务事务与请求省略/清空语义；浏览器作为相关回归，生产UI不改。
 
 同一真实HTTP合同回归进一步证明普通copy直接JSON返回LocalProduct投影为null；仅将该投影保持空数组，不改复制业务/收据/库存。
+
+交付补核真实HTTP/PG证明两个管理员对不同支付使用同key：compat自动编号和generic EER accept收据均因全局键缺actor而409。只补全既有actor-scoped退款合同的编号/accept键；老compat编号从原Payment+actor+key回执恢复，完整载荷仍由原app校验。既有同UoW外部效果接受不改调度/Provider/状态或旧记录，OneID不涉及新增解析。本地效果worker停用。

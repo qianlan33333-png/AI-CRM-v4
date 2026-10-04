@@ -720,8 +720,23 @@ func (handler *Handler) compatRefund(writer http.ResponseWriter, request *http.R
 		writeError(writer, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	digest := sha256.Sum256([]byte(key))
-	refund, err := handler.app.RequestRefund(request.Context(), paymentport.RefundCommand{PaymentID: payment.ID, AmountMinor: body.AmountMinor, RefundNo: "RF-" + fmt.Sprintf("%x", digest[:12]), Reason: body.Reason, ActorScope: "admin:" + strconv.FormatInt(principal.InternalID, 10), IdempotencyKey: key})
+	actorScope := "admin:" + strconv.FormatInt(principal.InternalID, 10)
+	digest := sha256.Sum256([]byte(actorScope + "\x00" + key))
+	refundNo := "RF-" + fmt.Sprintf("%x", digest[:12])
+	// Preserve the exact generated number in an older accepted command. The
+	// application still compares the full payload, so changing amount/reason
+	// on replay cannot bypass its actor-scoped receipt contract.
+	if recovery, ok := handler.app.(RefundRecoveryApplication); ok {
+		stored, found, readErr := recovery.FindRefundRecoveryReceipt(request.Context(), provider, orderRef, actorScope, key)
+		if readErr != nil {
+			resultError(writer, readErr)
+			return
+		}
+		if found {
+			refundNo = stored.RefundNo
+		}
+	}
+	refund, err := handler.app.RequestRefund(request.Context(), paymentport.RefundCommand{PaymentID: payment.ID, AmountMinor: body.AmountMinor, RefundNo: refundNo, Reason: body.Reason, ActorScope: actorScope, IdempotencyKey: key})
 	if err != nil {
 		resultError(writer, err)
 		return
