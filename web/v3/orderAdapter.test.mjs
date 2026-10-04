@@ -1128,3 +1128,35 @@ try {
   }
 } finally { aliDom.window.close(); }
 console.log('Alipay refund uses existing form, exact scope, partial amount, and durable intent: PASS');
+
+for (const originalTime of [null, '2024-01-01T19:04:05Z']) {
+  const externalCalls=[];
+  const externalDom=new JSDOM(`<!doctype html><body data-page="orderDetail"><div><div><h2>订单详情</h2></div><div></div></div><div><div><h2>事件时间线</h2></div><div></div></div><div><div><h2>V1 历史只读</h2></div><div></div></div></body>`, {
+    url:'https://test.invalid/admin/orderDetail.html?id=external-1&provider=external_history',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:new VirtualConsole(),
+    beforeParse(window){browserRuntime(window);window.fetch=async input=>{const url=new URL(typeof input==='string'?input:input.url,window.location.href);externalCalls.push(url);return new Response(JSON.stringify({record_origin:'v1_history',provider:'external_history',merchant_order_no:'external-1',product_name:'原组合商品',amount_yuan:'123.45',refunded_minor:2001,source_after_sales:'部分退款',source_status:'已完成',source_paid_at:originalTime,imported_at:'2026-10-04T04:00:00Z',created_at:'2026-10-04T04:00:00Z',status:'partially_refunded',payer_id:101,payer_customer_number:'CID-101',payer_name:'客户甲',distribution:[],distribution_read_state:'available'}),{status:200,headers:{'Content-Type':'application/json'}})}}
+  });
+  try {
+    externalDom.window.eval(host);await new Promise(resolve=>setTimeout(resolve,65));
+    await externalDom.window.fetch('/api/admin/refunds');await externalDom.window.fetch('/api/admin/wechat-pay/orders/external-1/external-push-deliveries');await pause();
+    const body=externalDom.window.document.body.textContent;
+    assert.match(body,/外部历史订单/);assert.match(body,/历史已退款金额.*¥20.01/);assert.match(body,/原组合商品/);
+    assert.match(body,originalTime?/原支付时间2024-01-02 03:04:05/:/原支付时间原时间未知/);
+    assert.match(body,/导入时间2026-10-04 12:00:00/);
+    assert.equal(externalCalls.filter(u=>u.pathname==='/api/admin/refunds'||u.pathname.includes('deliveries')).length,0,'historical summary never requests transaction/refund/provider records');
+    assert.equal(externalDom.window.document.querySelectorAll('button,input').length,0,'history has no executable refund or replay controls');
+    assert.match(body,/CID-101/);
+  }finally{externalDom.window.close()}
+}
+console.log('external history original time, refund summary, customer and read-only journey: PASS');
+
+const externalListCalls=[];
+const externalListDom=new JSDOM(`<!doctype html><body><input id="orderTransactionId"><input id="orderProductCode"><input id="orderMobile"><button>导出微信支付 CSV</button><table><thead><tr><th>创建时间</th><th>微信 / 平台单号</th><th>付款人 / 客户身份</th><th>商品</th><th>金额</th><th>状态</th><th>支付来源</th><th>操作</th></tr></thead><tbody><tr><td>2026-10-04T04:00:00Z</td><td><div>external-list-1</div></td><td><div>客户甲</div><div>customer:101</div></td><td>零元历史</td><td>0.00</td><td>closed</td><td>外部历史订单</td><td><a>查看详情</a></td></tr></tbody></table></body>`,{
+  url:'https://test.invalid/admin/orders',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:new VirtualConsole(),beforeParse(window){browserRuntime(window);window.URL.createObjectURL=()=> 'blob:test-history';window.URL.revokeObjectURL=()=>{};window.fetch=async(input,init)=>{const url=new URL(typeof input==='string'?input:input.url,window.location.href);externalListCalls.push({url,init});if(url.pathname==='/api/admin/exports')return new Response('原时间未知',{status:200});return new Response(JSON.stringify({items:[{id:801,merchant_order_no:'external-list-1',provider:'external_history',provider_label:'外部历史订单',record_origin:'v1_history',source_paid_at:null,created_at:'2026-10-04T04:00:00Z',amount_yuan:'0.00',status:'closed',detail_url:'/admin/orderDetail.html?id=external-list-1&provider=external_history',payer_id:101,payer_customer_number:'CID-101',distribution_read_state:'available',distribution:[]}]}),{status:200,headers:{'Content-Type':'application/json'}})}}
+});
+try{
+ externalListDom.window.eval(host);const controller=new externalListDom.window.OrderControllerFixture({mode:'http'},'orders');controller.db=await externalListDom.window.OrderAdapterApi.loadDb({page:'orders'});controller.renderVals();externalListDom.window.document.querySelector('tbody tr').append(externalListDom.window.document.createElement('span'));await pause();
+ assert.equal(externalListDom.window.document.querySelector('tbody tr td').textContent,'原时间未知');
+ assert.equal(new URL(externalListDom.window.document.querySelector('tbody tr').dataset.orderDetailUrl).searchParams.get('provider'),'external_history');
+ const button=externalListDom.window.document.getElementById('order-export-all');assert.ok(button);button.click();await pause();const exported=externalListCalls.find(c=>c.url.pathname==='/api/admin/exports');assert.ok(exported);assert.deepEqual(JSON.parse(exported.init.body),{resource:'orders',format:'csv',filter:{}});assert.ok(new Headers(exported.init.headers).get('Idempotency-Key'));
+}finally{externalListDom.window.close()}
+console.log('external history list original time, scoped detail and all-order CSV export journey: PASS');

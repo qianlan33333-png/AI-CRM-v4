@@ -267,6 +267,8 @@ func detailProvider(values url.Values) (domain.Provider, bool, bool) {
 		return domain.ProviderWeChatShop, true, true
 	case "alipay":
 		return domain.ProviderAlipay, true, true
+	case "external_history":
+		return domain.ProviderExternalHistory, true, true
 	default:
 		return "", false, false
 	}
@@ -419,6 +421,8 @@ func parseListQuery(values url.Values) (orderport.ListQuery, bool) {
 			query.Provider = domain.ProviderWeChatShop
 		case "alipay":
 			query.Provider = domain.ProviderAlipay
+		case "external_history":
+			query.Provider = domain.ProviderExternalHistory
 		default:
 			return query, false
 		}
@@ -455,6 +459,12 @@ func parseListQuery(values url.Values) (orderport.ListQuery, bool) {
 }
 
 type orderResponse struct {
+	SourcePaidAt     *time.Time `json:"source_paid_at"`
+	ImportedAt       *time.Time `json:"imported_at,omitempty"`
+	SourceStatus     string     `json:"source_status,omitempty"`
+	SourceAfterSales string     `json:"source_after_sales,omitempty"`
+	RefundedMinor    int64      `json:"refunded_minor"`
+
 	PayerCustomerNumber    string           `json:"payer_customer_number,omitempty"`
 	ID                     int64            `json:"id"`
 	RecordOrigin           string           `json:"record_origin"`
@@ -602,6 +612,8 @@ func responseFrom(order domain.Snapshot, customers map[customerdomain.CustomerID
 		label = "微信小店"
 	} else if order.Provider == domain.ProviderAlipay {
 		label = "支付宝"
+	} else if order.Provider == domain.ProviderExternalHistory {
+		label = "外部历史订单"
 	}
 	origin := string(order.RecordOrigin)
 	if order.RecordOrigin == domain.RecordOriginHistory {
@@ -626,7 +638,14 @@ func responseFrom(order domain.Snapshot, customers map[customerdomain.CustomerID
 			payerNumber = display.CustomerNumber
 		}
 	}
-	return orderResponse{PayerCustomerNumber: payerNumber, ID: order.ID, RecordOrigin: origin, CreatedAt: order.CreatedAt, MerchantOrderNo: order.MerchantOrderNo, OutTradeNo: order.MerchantOrderNo, OrderNo: order.SourceKey, PlatformTransactionNo: order.ProviderTransactionNo, TransactionID: order.ProviderTransactionNo, PayerName: payerName, PayerID: payer, PayerPhoneMasked: payerPhoneMasked, ProductCode: productCode, ProductName: productName, AmountYuan: fmt.Sprintf("%d.%02d", order.Amount.AmountMinor/100, order.Amount.AmountMinor%100), Currency: order.Amount.Currency, Status: order.Status, StatusLabel: string(order.Status), Provider: provider, ProviderLabel: label, DetailURL: "/admin/orderDetail.html?" + url.Values{"id": {order.MerchantOrderNo}, "provider": {provider}}.Encode()}
+	response := orderResponse{RefundedMinor: order.RefundedMinor, PayerCustomerNumber: payerNumber, ID: order.ID, RecordOrigin: origin, CreatedAt: order.CreatedAt, MerchantOrderNo: order.MerchantOrderNo, OutTradeNo: order.MerchantOrderNo, OrderNo: order.SourceKey, PlatformTransactionNo: order.ProviderTransactionNo, TransactionID: order.ProviderTransactionNo, PayerName: payerName, PayerID: payer, PayerPhoneMasked: payerPhoneMasked, ProductCode: productCode, ProductName: productName, AmountYuan: fmt.Sprintf("%d.%02d", order.Amount.AmountMinor/100, order.Amount.AmountMinor%100), Currency: order.Amount.Currency, Status: order.Status, StatusLabel: string(order.Status), Provider: provider, ProviderLabel: label, DetailURL: "/admin/orderDetail.html?" + url.Values{"id": {order.MerchantOrderNo}, "provider": {provider}}.Encode()}
+	if f := order.ExternalHistory; f != nil {
+		response.SourcePaidAt = f.SourcePaidAt
+		response.ImportedAt = &f.ImportedAt
+		response.SourceStatus = f.SourceStatus
+		response.SourceAfterSales = f.SourceAfterSales
+	}
+	return response
 }
 
 func (h *Handler) payerDisplays(ctx context.Context, orders []domain.Snapshot) map[customerdomain.CustomerID]customerport.DirectoryContactDisplay {

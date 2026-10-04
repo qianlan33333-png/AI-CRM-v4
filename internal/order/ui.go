@@ -102,7 +102,7 @@ func validUIQuery(r *http.Request, page string) bool {
 }
 
 func validDetailProvider(provider string) bool {
-	return provider == "wechat" || provider == "wechat_pay" || provider == "wechat_shop" || provider == "alipay"
+	return provider == "wechat" || provider == "wechat_pay" || provider == "wechat_shop" || provider == "alipay" || provider == "external_history"
 }
 
 type buildManifest struct {

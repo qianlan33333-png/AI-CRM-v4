@@ -16,6 +16,7 @@ import { sidebarScopedOptions } from "./runtime";
 /** 后端 orderport.Page + domain.Snapshot 投影。 */
 interface BackendOrderSnapshot {
   created_at: string;
+  external_history?: {source_paid_at: string | null; imported_at: string};
   merchant_order_no: string;
   amount: { amount_minor: number; currency: string };
   status: string;
@@ -27,7 +28,7 @@ function mapOrder(snapshot: BackendOrderSnapshot): SidebarOrderItem {
   const line = Array.isArray(snapshot.items) ? snapshot.items[0] : undefined;
   const amountMinor = Number(snapshot.amount?.amount_minor) || 0;
   return {
-    created_at: snapshot.created_at,
+    created_at: snapshot.provider === "external_history" ? (snapshot.external_history?.source_paid_at || "原时间未知") : snapshot.created_at,
     merchant_order_no: snapshot.merchant_order_no ?? "",
     product_code: line?.product_code ?? "",
     product_name: line?.product_name ?? "",

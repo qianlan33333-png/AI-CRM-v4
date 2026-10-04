@@ -892,8 +892,8 @@ export class SidebarBridge {
             status_label: orderStatusLabel(String(item.status || "")),
             // Snapshot has no paid_at field. Keep creation time truthfully
             // labeled by the renderer rather than presenting it as payment.
-            paid_at: item.paid_at ? date(item.paid_at) : "",
-            created_at: item.created_at ? date(item.created_at) : "",
+            paid_at: item.provider === "external_history" ? (item.external_history?.source_paid_at ? date(item.external_history.source_paid_at) : "原时间未知") : (item.paid_at ? date(item.paid_at) : ""),
+            created_at: item.provider === "external_history" ? "" : (item.created_at ? date(item.created_at) : ""),
             refund_label: Number.isFinite(refundedMinor) && refundedMinor > 0 ? formatMoney(refundedMinor, amount.currency) : "",
             detail_url: item.detail_url || "",
           };

@@ -53,6 +53,7 @@ func TestOrderDetailUIAcceptsOnlyCanonicalProviderQuery(t *testing.T) {
 		{"wechat alias", "?id=M-1&provider=wechat", true},
 		{"wechat pay", "?id=M-1&provider=wechat_pay", true},
 		{"alipay", "?id=M-1&provider=alipay", true},
+		{"external history", "?id=M-1&provider=external_history", true},
 		{"unknown provider", "?id=M-1&provider=unknown", false},
 		{"duplicate provider", "?id=M-1&provider=wechat&provider=alipay", false},
 		{"unrelated query", "?id=M-1&source=dom", false},

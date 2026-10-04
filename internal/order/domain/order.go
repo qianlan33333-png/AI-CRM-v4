@@ -19,9 +19,10 @@ var (
 type Provider string
 
 const (
-	ProviderWeChatPay  Provider = "wechat_pay"
-	ProviderWeChatShop Provider = "wechat_shop"
-	ProviderAlipay     Provider = "alipay"
+	ProviderWeChatPay       Provider = "wechat_pay"
+	ProviderWeChatShop      Provider = "wechat_shop"
+	ProviderAlipay          Provider = "alipay"
+	ProviderExternalHistory Provider = "external_history"
 )
 
 type Status string
@@ -82,21 +83,30 @@ type NewOrderInput struct {
 }
 
 // Snapshot is the persistence-safe, immutable projection of an aggregate.
+type ExternalHistoryFacts struct {
+	SourcePaidAt     *time.Time `json:"source_paid_at"`
+	ImportedAt       time.Time  `json:"imported_at"`
+	SourceStatus     string     `json:"source_status"`
+	SourceAfterSales string     `json:"source_after_sales"`
+}
+
+// ExternalHistory is only present on imported third-party order snapshots.
 type Snapshot struct {
-	ID                    int64          `json:"id"`
-	Provider              Provider       `json:"provider"`
-	SourceSystem          string         `json:"source_system"`
-	SourceKey             string         `json:"source_key"`
-	MerchantOrderNo       string         `json:"merchant_order_no"`
-	ProviderTransactionNo string         `json:"provider_transaction_no,omitempty"`
-	PayerCustomerID       *int64         `json:"payer_customer_id,omitempty"`
-	BeneficiaryCustomerID *int64         `json:"beneficiary_customer_id,omitempty"`
-	Amount                Money          `json:"amount"`
-	RefundedMinor         int64          `json:"refunded_minor"`
-	Status                Status         `json:"status"`
-	Items                 []ItemSnapshot `json:"items"`
-	RecordOrigin          RecordOrigin   `json:"record_origin"`
-	EffectEligible        bool           `json:"effect_eligible"`
+	ExternalHistory       *ExternalHistoryFacts `json:"external_history,omitempty"`
+	ID                    int64                 `json:"id"`
+	Provider              Provider              `json:"provider"`
+	SourceSystem          string                `json:"source_system"`
+	SourceKey             string                `json:"source_key"`
+	MerchantOrderNo       string                `json:"merchant_order_no"`
+	ProviderTransactionNo string                `json:"provider_transaction_no,omitempty"`
+	PayerCustomerID       *int64                `json:"payer_customer_id,omitempty"`
+	BeneficiaryCustomerID *int64                `json:"beneficiary_customer_id,omitempty"`
+	Amount                Money                 `json:"amount"`
+	RefundedMinor         int64                 `json:"refunded_minor"`
+	Status                Status                `json:"status"`
+	Items                 []ItemSnapshot        `json:"items"`
+	RecordOrigin          RecordOrigin          `json:"record_origin"`
+	EffectEligible        bool                  `json:"effect_eligible"`
 	// ProfitSharingRequired is frozen only after Distribution accepted a
 	// positive attribution in the active Order/Payment UoW. Browser payloads
 	// never bind this server-derived payment instruction fact.
@@ -107,6 +117,7 @@ type Snapshot struct {
 }
 
 type Order struct {
+	ExternalHistory       *ExternalHistoryFacts
 	ID                    int64
 	Provider              Provider
 	SourceSystem          string
@@ -178,7 +189,8 @@ func NewOrder(input NewOrderInput) (Order, error) {
 
 func Restore(snapshot Snapshot) (Order, error) {
 	order := Order{
-		ID: snapshot.ID, Provider: snapshot.Provider, SourceSystem: snapshot.SourceSystem, SourceKey: snapshot.SourceKey,
+		ExternalHistory: cloneExternalHistory(snapshot.ExternalHistory),
+		ID:              snapshot.ID, Provider: snapshot.Provider, SourceSystem: snapshot.SourceSystem, SourceKey: snapshot.SourceKey,
 		MerchantOrderNo: snapshot.MerchantOrderNo, ProviderTransactionNo: snapshot.ProviderTransactionNo,
 		PayerCustomerID: cloneID(snapshot.PayerCustomerID), BeneficiaryCustomerID: cloneID(snapshot.BeneficiaryCustomerID),
 		Amount: snapshot.Amount, RefundedMinor: snapshot.RefundedMinor, Status: snapshot.Status,
@@ -195,7 +207,8 @@ func (o Order) Items() []ItemSnapshot { return cloneItems(o.items) }
 
 func (o Order) Snapshot() Snapshot {
 	return Snapshot{
-		ID: o.ID, Provider: o.Provider, SourceSystem: o.SourceSystem, SourceKey: o.SourceKey,
+		ExternalHistory: cloneExternalHistory(o.ExternalHistory),
+		ID:              o.ID, Provider: o.Provider, SourceSystem: o.SourceSystem, SourceKey: o.SourceKey,
 		MerchantOrderNo: o.MerchantOrderNo, ProviderTransactionNo: o.ProviderTransactionNo,
 		PayerCustomerID: cloneID(o.PayerCustomerID), BeneficiaryCustomerID: cloneID(o.BeneficiaryCustomerID),
 		Amount: o.Amount, RefundedMinor: o.RefundedMinor, Status: o.Status, Items: o.Items(),
@@ -272,7 +285,26 @@ func (o Order) ApplySettlement(expectedVersion int64, next Status, refundedMinor
 	return updated, event, nil
 }
 
+func cloneExternalHistory(f *ExternalHistoryFacts) *ExternalHistoryFacts {
+	if f == nil {
+		return nil
+	}
+	copy := *f
+	if f.SourcePaidAt != nil {
+		paid := *f.SourcePaidAt
+		copy.SourcePaidAt = &paid
+	}
+	return &copy
+}
 func validate(o Order) error {
+	if o.Provider == ProviderExternalHistory {
+		if o.RecordOrigin != RecordOriginHistory || o.EffectEligible || o.ExternalHistory == nil || o.ExternalHistory.ImportedAt.IsZero() || o.ExternalHistory.SourceStatus == "" || o.ProviderTransactionNo != "" || !validID(o.PayerCustomerID) || !validID(o.BeneficiaryCustomerID) {
+			return ErrInvalidOrder
+		}
+	} else if o.ExternalHistory != nil {
+		return ErrInvalidOrder
+	}
+
 	if !validProvider(o.Provider) || !validText(o.SourceSystem, 100) || !validText(o.SourceKey, 200) || !validText(o.MerchantOrderNo, 200) || len(o.ProviderTransactionNo) > 200 || o.ProviderTransactionNo != strings.TrimSpace(o.ProviderTransactionNo) ||
 		o.Amount.AmountMinor < 1 || !validCurrency(o.Amount.Currency) || o.Version < 1 || o.CreatedAt.IsZero() || o.UpdatedAt.Before(o.CreatedAt) ||
 		(o.RecordOrigin != RecordOriginNative && o.RecordOrigin != RecordOriginHistory) || o.EffectEligible != (o.RecordOrigin == RecordOriginNative) ||
@@ -338,7 +370,7 @@ func mayTransition(from, to Status) bool {
 }
 
 func validProvider(provider Provider) bool {
-	return provider == ProviderWeChatPay || provider == ProviderWeChatShop || provider == ProviderAlipay
+	return provider == ProviderWeChatPay || provider == ProviderWeChatShop || provider == ProviderAlipay || provider == ProviderExternalHistory
 }
 
 func validCurrency(value string) bool {

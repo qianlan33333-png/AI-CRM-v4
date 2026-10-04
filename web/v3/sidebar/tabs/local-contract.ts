@@ -46,6 +46,7 @@ const ORDER_PROVIDER_LABELS: Record<string, string> = {
   wechat_pay: "微信支付",
   wechat_shop: "微信小店",
   alipay: "支付宝",
+  external_history: "外部历史订单",
 };
 
 export function orderStatusLabel(status: string): string {

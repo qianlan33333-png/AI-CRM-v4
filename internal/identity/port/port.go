@@ -146,6 +146,7 @@ type DeclaredIdentityAttacher interface {
 // Customer. It cannot provision or merge roots. IdempotencyKey is stored only
 // as a digest; SourceEventID must not contain the phone value.
 type DeclaredPhoneCommand struct {
+	OnlyIfEmpty    bool
 	CustomerID     customerdomain.CustomerID
 	Phone          string
 	Source         string
@@ -264,4 +265,15 @@ type AdminRadarVisitorIdentity struct {
 type AdminRadarVisitorIdentityReader interface {
 	AdminRadarVisitorIdentities(context.Context, string, []customerdomain.CustomerID) (map[customerdomain.CustomerID]AdminRadarVisitorIdentity, error)
 	SearchAdminRadarVisitorCustomers(context.Context, string, string, []customerdomain.CustomerID, int) ([]customerdomain.CustomerID, error)
+}
+
+// CustomerIdentityLocker serializes an empty-phone check with identity writers.
+type CustomerIdentityLocker interface {
+	LockActiveCustomerWithin(context.Context, customerdomain.CustomerID) error
+}
+
+// DeclaredPhoneReceiptReader verifies an existing local receipt without writing.
+// The command binds source content and customer; no plaintext identity is exposed.
+type DeclaredPhoneReceiptReader interface {
+	ReadDeclaredPhoneReceiptWithin(context.Context, DeclaredPhoneCommand) (DeclaredAttachResult, bool, error)
 }

@@ -3875,7 +3875,7 @@ paths:
       parameters:
         - {$ref: "#/components/parameters/Limit"}
         - {name: cursor, in: query, schema: {type: string, maxLength: 512}}
-        - {name: provider, in: query, schema: {type: string, enum: [wechat, wechat_pay, wechat_shop, alipay]}}
+        - {name: provider, in: query, schema: {type: string, enum: [wechat, wechat_pay, wechat_shop, alipay, external_history]}}
         - {name: status, in: query, schema: {type: string, enum: [pending_payment, paid, partially_refunded, refunded, cancelled, payment_failed, closed]}}
         - {name: order_ref, in: query, schema: {type: string, maxLength: 200}}
         - {name: customer_id, in: query, schema: {$ref: "#/components/schemas/PositiveID"}}
@@ -6175,7 +6175,12 @@ components:
       properties:
         id: {$ref: "#/components/schemas/PositiveID"}
         record_origin: {type: string, enum: [native, v1_history]}
-        created_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time, description: "Internal ordering time; external historical presentation uses source_paid_at exclusively."}
+        source_paid_at: {type: [string, "null"], format: date-time}
+        imported_at: {type: string, format: date-time}
+        source_status: {type: string}
+        source_after_sales: {type: string}
+        refunded_minor: {type: integer, format: int64, minimum: 0}
         merchant_order_no: {type: string, maxLength: 200}
         out_trade_no: {type: string, maxLength: 200, description: "Compatibility alias of merchant_order_no."}
         order_no: {type: string, maxLength: 200, description: "Source order reference; administrative presentation should use merchant_order_no."}
@@ -6190,7 +6195,7 @@ components:
         currency: {type: string, pattern: "^[A-Z]{3}$"}
         status: {type: string}
         status_label: {type: string}
-        provider: {type: string, enum: [wechat, wechat_shop, alipay]}
+        provider: {type: string, enum: [wechat, wechat_shop, alipay, external_history]}
         provider_label: {type: string}
         detail_url: {type: string, maxLength: 2048}
         refundable_amount_total: {type: integer, format: int64, minimum: 0}

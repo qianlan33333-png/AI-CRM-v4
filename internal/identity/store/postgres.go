@@ -124,7 +124,7 @@ func (store *PostgresStore) AttachDeclaredPhone(ctx context.Context, command ide
 		return identityport.DeclaredAttachResult{}, errStore
 	}
 	keyDigest := sha256.Sum256([]byte(command.IdempotencyKey))
-	payloadDigest := sha256.Sum256([]byte(strconv.FormatInt(int64(command.CustomerID), 10) + "\x00" + ref.NormalizedValue + "\x00" + command.Source + "\x00" + command.SourceEventID))
+	payloadDigest := declaredPhonePayloadDigest(command, ref.NormalizedValue)
 	var priorOutcome string
 	var priorPayload []byte
 	var priorCustomer, priorIdentity *int64
@@ -153,6 +153,15 @@ func (store *PostgresStore) AttachDeclaredPhone(ctx context.Context, command ide
 	}
 	if err != nil {
 		return identityport.DeclaredAttachResult{}, persistenceFailure(err)
+	}
+	if command.OnlyIfEmpty {
+		var exists bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM customer_identities WHERE customer_id=$1 AND kind='phone' AND status='active')`, command.CustomerID).Scan(&exists); err != nil {
+			return identityport.DeclaredAttachResult{}, persistenceFailure(err)
+		}
+		if exists {
+			return identityport.DeclaredAttachResult{Status: identityport.DeclaredInvalid}, nil
+		}
 	}
 	lookup := store.phoneVault.LookupDigest(ref.NormalizedValue)
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "phone:cn11:"+hex.EncodeToString(lookup[:])); err != nil {
@@ -1296,4 +1305,19 @@ func consumptionFingerprint(command identityapp.ConsumeLinkIntentCommand) string
 		_, _ = h.Write([]byte(f))
 	}
 	return base64.RawStdEncoding.EncodeToString(h.Sum(nil))
+}
+
+func (store *PostgresStore) LockActiveCustomerWithin(ctx context.Context, id customerdomain.CustomerID) error {
+	tx, err := platformpostgres.RequireTransaction(ctx)
+	if err != nil {
+		return err
+	}
+	var active bool
+	if err = tx.QueryRow(ctx, `SELECT status='active' FROM customers WHERE id=$1 FOR UPDATE`, id).Scan(&active); err != nil {
+		return persistenceFailure(err)
+	}
+	if !active {
+		return identityapp.ErrResolveConflict
+	}
+	return nil
 }

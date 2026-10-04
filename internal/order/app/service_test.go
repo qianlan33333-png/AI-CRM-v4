@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"regexp"
@@ -683,4 +684,21 @@ func (s *orderCollectedPhoneStub) CollectPhoneWithin(_ context.Context, c custom
 	s.calls++
 	s.command = c
 	return identityport.DeclaredAttachResult{Status: identityport.DeclaredAttached, CustomerID: c.CustomerID, IdentityID: 77}, nil
+}
+
+func TestExternalHistoryCSVPreservesUnknownOriginalTimeAndRefund(t *testing.T) {
+	id := int64(1)
+	at := time.Date(2026, 10, 4, 4, 0, 0, 0, time.UTC)
+	s := domain.Snapshot{Provider: domain.ProviderExternalHistory, SourceSystem: "external-order-csv", SourceKey: "source", MerchantOrderNo: "source", PayerCustomerID: &id, BeneficiaryCustomerID: &id, Amount: domain.Money{AmountMinor: 200, Currency: "CNY"}, RefundedMinor: 100, Status: domain.StatusPartiallyRefunded, Items: []domain.ItemSnapshot{{LineNo: 1, ProductCode: "combo/A", ProductName: "原组合", UnitAmountMinor: 200, Quantity: 1, LineAmountMinor: 200}}, RecordOrigin: domain.RecordOriginHistory, Version: 1, CreatedAt: at, UpdatedAt: at, ExternalHistory: &domain.ExternalHistoryFacts{ImportedAt: at, SourceStatus: "已完成", SourceAfterSales: "部分退款"}}
+	o, e := domain.Restore(s)
+	if e != nil {
+		t.Fatal(e)
+	}
+	rows, e := csv.NewReader(strings.NewReader(string(encodeCSV([]domain.Order{o})))).ReadAll()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(rows) != 2 || rows[1][0] != "原时间未知" || rows[1][3] != "外部历史订单" || rows[1][8] != "200" || rows[1][12] != "100" || rows[1][13] != "已完成" || rows[1][14] != "部分退款" || rows[1][15] != "2026-10-04 12:00:00" {
+		t.Fatalf("history export %v", rows)
+	}
 }

@@ -126,3 +126,33 @@ func TestSidebarBusinessTimelineSourceFailureIsNotEmptySuccess(t *testing.T) {
 		t.Fatalf("page=%+v err=%v", p, err)
 	}
 }
+
+type externalTimelineOrderFixture struct {
+	at      time.Time
+	unknown bool
+}
+
+func (f externalTimelineOrderFixture) CustomerActivities(context.Context, orderport.CustomerActivityQuery) (orderport.CustomerActivityPage, error) {
+	return orderport.CustomerActivityPage{Items: []orderport.CustomerActivity{{OrderID: 2, Provider: "external_history", Status: "closed", OriginalTimeUnknown: f.unknown, ProductNames: []string{"历史"}, OccurredAt: f.at}}}, nil
+}
+func TestSidebarBusinessTimelineExternalHistoryUnknownTimeLabelsImport(t *testing.T) {
+	at := time.Now().Add(-time.Hour).UTC()
+	a := businessTimelineFixture{at: at}
+	timeline := sidebarBusinessTimeline{surveys: timelineSurveyFixture{a}, orders: externalTimelineOrderFixture{at: at, unknown: true}, radar: timelineRadarFixture{a}, channels: timelineChannelFixture{a}, uow: timelineUOW{}}
+	page, e := timeline.CustomerTimeline(context.Background(), 42, customerport.PageQuery{Watermark: time.Now(), Limit: 20})
+	if e != nil {
+		t.Fatal(e)
+	}
+	found := false
+	for _, v := range page.Items {
+		if v.EventType == "order.history_imported" {
+			found = true
+			if !strings.Contains(v.Title, "补录历史订单（原时间未知") {
+				t.Fatal("unknown time shown as creation")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing imported activity")
+	}
+}

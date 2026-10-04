@@ -21,7 +21,7 @@ func (s *Repository) PaidAudienceOrders(ctx context.Context, reference time.Time
 	}
 	rows, err := tx.Query(ctx, `SELECT o.id,o.payer_customer_id,i.product_code,''::text,(SELECT MIN(h.occurred_at) FROM order_status_history h WHERE h.order_id=o.id AND h.to_status='paid')
 		FROM orders o JOIN order_items i ON i.order_id=o.id
-		WHERE o.status='paid' AND o.payer_customer_id IS NOT NULL
+		WHERE o.status='paid' AND o.payer_customer_id IS NOT NULL AND o.provider<>'external_history'
 		ORDER BY o.id,i.line_no`)
 	if err != nil {
 		return nil, err

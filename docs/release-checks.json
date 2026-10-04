@@ -1,45 +1,88 @@
 {
   "schema": 1,
-  "baseline_sha": "977e00fdfbb27ec62271a8297892d628326b3370",
+  "baseline_sha": "c3160a063af24ffc7b2fd724eb1ab5d74b45f003",
   "checks": [
     {
       "lane": "backend",
-      "path": "cmd/aicrm/dynamic_generation_adapters_test.go",
-      "test": "TestDynamicGenerationContextFreezesOnlyApprovedReadPorts"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/dynamic_generation_adapters_test.go",
-      "test": "TestGenerationQuestionnaireUsesLatestSubmissionOnly"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/dynamic_generation_adapters_test.go",
-      "test": "TestBoundedGenerationTextPreservesUTF8AndByteLimit"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/dynamic_generation_adapters_test.go",
-      "test": "TestGeneratedOutboundTemplateRetainsFrozenSources"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/messagearchive/app"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/messagearchive/store/customer_authorship_postgres_test.go",
-      "test": "TestCustomerAuthorshipFiltersBeforePaginationPostgreSQL",
+      "package": "./cmd/migrate-external-orders",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/messagearchive/store/external_v1_postgres_integration_test.go",
-      "test": "TestPostgreSQLV1ChatRecordsScopeBeforeKeysetAndFreezeEnd",
+      "package": "./internal/order/domain"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/order/app"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/order/http"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/identity/app"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/customer/app"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/store/postgres_integration_test.go",
+      "test": "TestPostgreSQLHistoricalImportIsEffectIneligibleAndReplayableAcrossRuns",
       "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/store/postgres_integration_test.go",
+      "test": "TestPostgreSQLPaidAudienceOrdersUsePayerAndPaymentEvidence",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/store/postgres_integration_test.go",
+      "test": "TestPostgreSQLCustomerScopedReferenceReadDoesNotLeak",
+      "postgres": true
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/orderAdapter.test.mjs"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/sidebar_business_timeline_test.go",
+      "test": "TestSidebarBusinessTimelineNamedSourcesAndCrossSourceKeyset"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/sidebar_business_timeline_test.go",
+      "test": "TestSidebarBusinessTimelineSourceFailureIsNotEmptySuccess"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/sidebar_business_timeline_test.go",
+      "test": "TestSidebarBusinessTimelineExternalHistoryUnknownTimeLabelsImport"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/external_order_history_journey_test.go",
+      "test": "TestPostgreSQLExternalOrderHistoryChromiumJourney"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/sidebarOneIDPresentation.test.mjs"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/order",
+      "path": "internal/order/ui_test.go"
     }
   ],
+  "build_commands": [
+    "./cmd/migrate-external-orders"
+  ],
   "installed_checks": [
-    "automation-agent-policy"
+    "external-order-history"
   ]
 }

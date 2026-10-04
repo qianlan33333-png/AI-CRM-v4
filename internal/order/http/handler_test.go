@@ -356,3 +356,13 @@ func TestOrderDistributionReadUsesSameRolesAsDistributionAdmin(t *testing.T) {
 		t.Fatalf("unauthorized read code=%d calls=%v", response.Code, reader.calls)
 	}
 }
+
+func TestExternalHistoryResponsePreservesNullableTimeAndReadOnlySource(t *testing.T) {
+	id := int64(101)
+	at := time.Date(2026, 10, 4, 4, 0, 0, 0, time.UTC)
+	s := domain.Snapshot{Provider: domain.ProviderExternalHistory, RecordOrigin: domain.RecordOriginHistory, PayerCustomerID: &id, BeneficiaryCustomerID: &id, Amount: domain.Money{AmountMinor: 200, Currency: "CNY"}, RefundedMinor: 100, CreatedAt: at, ExternalHistory: &domain.ExternalHistoryFacts{ImportedAt: at, SourceStatus: "已完成", SourceAfterSales: "部分退款"}}
+	r := responseFrom(s, nil)
+	if r.ProviderLabel != "外部历史订单" || r.RecordOrigin != "v1_history" || r.SourcePaidAt != nil || r.ImportedAt == nil || r.RefundedMinor != 100 || r.RefundableAmountTotal != 0 {
+		t.Fatalf("response %+v", r)
+	}
+}

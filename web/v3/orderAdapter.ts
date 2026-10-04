@@ -137,6 +137,7 @@ function installOrderListCorrelation(): void {
         // receives the server-owned provider label for that legacy column.
         const providerLabel = text(records[index].provider_label, text(records[index].provider, ''));
         if (providerLabel) row.pay = providerLabel;
+        if (records[index].provider === 'external_history') row.time = externalOrderTime(records[index]);
         // Symbols survive the frozen DTO's object-spread render path but are
         // absent from JSON, Object.keys, DOM text, clipboard data, and exports.
         Object.defineProperty(row, orderCorrelation, {
@@ -221,7 +222,7 @@ function detailProvider(): string | undefined | null {
   const values = new URL(location.href).searchParams.getAll('provider');
   if (values.length === 0) return undefined;
   const value = values[0]?.trim() || '';
-  return values.length === 1 && ['wechat', 'wechat_pay', 'wechat_shop', 'alipay'].includes(value) ? value : null;
+  return values.length === 1 && ['wechat', 'wechat_pay', 'wechat_shop', 'alipay', 'external_history'].includes(value) ? value : null;
 }
 
 function currentDetailAPIURL(reference: string): URL | undefined {
@@ -470,7 +471,7 @@ async function primeOrderDetail(): Promise<void> {
     // unavailable; withholding the whole order would invite a merchant-only
     // fallback to a different provider's row.
     detailContext.order = order;
-    if (!refundScope(order)) detailContext.refundsUnavailable = true;
+    if (!refundScope(order)) detailContext.refundsUnavailable = order.provider !== 'external_history';
   } catch {
     detailContext.refundsUnavailable = true;
   } finally {
@@ -538,6 +539,10 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     markDetailReadUnavailable('effects');
     return new Response(JSON.stringify({ items: [], effects: [], total: 0, unavailable: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
+  if (deliveryMatch && detailProvider() === 'external_history') {
+    detailContext.effects=[]; detailContext.effectsUnavailable=false; schedulePresentation();
+    return new Response(JSON.stringify({items:[],effects:[],total:0}),{status:200,headers:{'Content-Type':'application/json'}});
+  }
   if (deliveryMatch) {
     const provider = detailProvider();
     if (provider === null) return unavailableDeliveries();
@@ -548,6 +553,9 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
 
   if (isOrderDetailPage() && url.pathname === '/api/admin/refunds') {
     const scope = refundScope(detailContext.order);
+    if (!scope && detailContext.order?.provider === 'external_history') {
+      detailContext.refunds=[];detailContext.refundsUnavailable=false;schedulePresentation();return emptyScopedRefundPage();
+    }
     if (!scope) {
       detailContext.refundsUnavailable = true;
       schedulePresentation();
@@ -599,7 +607,30 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
   }
 };
 
+function externalOrderTime(order: DetailRecord): string {
+ return order.source_paid_at ? formatShanghaiDateTime(order.source_paid_at) : '原时间未知';
+}
+function installAllOrderExport(): void {
+ if (document.getElementById('order-export-all')) return;
+ const reference = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim() === '导出微信支付 CSV');
+ if (!reference?.parentElement) return;
+ const button = element('button', '导出全部订单 CSV') as HTMLButtonElement;
+ button.id='order-export-all'; button.type='button';button.style.cssText=reference.style.cssText;
+ button.addEventListener('click', async () => {
+  if (inputValue('orderMobile')) {showOrderMessage('当前手机号或外部联系人 ID 筛选暂不支持导出。请清空该筛选后再导出。');return;}
+  const filters:Record<string,string>={};
+  for (const [field,id] of [['order_ref','orderTransactionId'],['product','orderProductCode'],['status','orderStatus'],['created_from','orderCreatedFrom'],['created_to','orderCreatedTo']]) {const value=inputValue(id);if(value)filters[field]=value;}
+  button.disabled=true;
+  try {
+   const response=await originalFetch('/api/admin/exports',apiRequestOptions({method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':`order-export-${crypto.randomUUID()}`},body:JSON.stringify({resource:'orders',format:'csv',filter:filters})}));
+   if(!response.ok)throw new Error('export failed');
+   const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download='订单历史.csv';link.click();URL.revokeObjectURL(url);
+  } catch {showOrderMessage('订单导出失败，请稍后重试。');} finally {button.disabled=false;}
+ });
+ reference.parentElement.appendChild(button);
+}
 function applyOrderPresentation(): void {
+ installAllOrderExport();
   const table = Array.from(document.querySelectorAll('table')).find((candidate) => candidate.querySelector('thead')?.textContent?.includes('微信 / 平台单号'));
   if (!table) return;
   const header = table.querySelectorAll('th')[2];
@@ -610,6 +641,12 @@ function applyOrderPresentation(): void {
     const cells = row.querySelectorAll<HTMLTableCellElement>('td');
     if (cells.length < 3) return;
     const created = cells[0];
+    const current = recordsMatchRenderedRows ? latestOrderList[index] : undefined;
+    if (current?.provider === 'external_history') {
+      delete created.dataset.orderCreatedAt;
+      const label = externalOrderTime(current);
+      if (created.textContent !== label) created.textContent = label;
+    }
     const raw = created.dataset.orderCreatedAt || created.textContent?.trim() || '';
     if (!created.dataset.orderCreatedAt && /T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/.test(raw)) created.dataset.orderCreatedAt = raw;
     if (created.dataset.orderCreatedAt) {
@@ -778,7 +815,10 @@ function replaceRefundPanel(order: DetailRecord): void {
   oldPanel.appendChild(header);
   const body = element('div');
   body.style.cssText = 'padding:16px;display:grid;gap:10px';
-  if (detailContext.refundsUnavailable) {
+  if (order.provider === 'external_history') {
+    body.appendChild(element('p', `历史已退款金额：${moneyFromMinor(order.refunded_minor)}`));
+    body.appendChild(element('p', text(order.source_after_sales, '源报表未标注售后状态')));
+  } else if (detailContext.refundsUnavailable) {
     const warning = element('p', '退款记录暂不可读取，为避免混入其他订单记录，本页未展示退款列表，也不能确认新的退款申请。');
     warning.style.cssText = 'margin:0;color:#8F5A16;font-size:13px';
     body.appendChild(warning);
@@ -1374,18 +1414,25 @@ function applyOrderDetailPresentation(): void {
   card.appendChild(header);
   appendDetailSection(card, '订单信息', [
     ['商户订单号', text(order.merchant_order_no)],
-    ['创建时间', formatShanghaiDateTime(order.created_at)],
+    [order.provider === 'external_history' ? '原支付时间' : '创建时间', order.provider === 'external_history' ? externalOrderTime(order) : formatShanghaiDateTime(order.created_at)],
+    ...(order.provider === 'external_history' ? [['导入时间', formatShanghaiDateTime(order.imported_at)], ['源订单状态', text(order.source_status)]] as Array<[string,string]> : []),
     ['订单状态', order.record_origin === 'native' ? commerceStatusLabel('order', order.status_label || order.status) : `历史记录：${commerceStatusLabel('order', order.status_label || order.status)}`],
   ]);
   appendDetailSection(card, '支付信息', [
     ['支付来源', commerceProviderLabel(order.provider)],
-    [order.provider === 'alipay' ? '支付宝交易单号' : '微信支付交易单号', text(order.transaction_id)],
+    ...(order.provider === 'external_history' ? [] : [[order.provider === 'alipay' ? '支付宝交易单号' : '微信支付交易单号', text(order.transaction_id)]] as Array<[string,string]>),
   ]);
   appendDetailSection(card, '买家信息', [
     ['买家', text(order.payer_name, '未提供')],
     ['用户编号', text(order.payer_customer_number, customerReference(order.payer_id))],
     ['手机号', text(order.payer_phone_masked, '未提供')],
   ]);
+  const customerId = String(order.payer_id).replace(/^customer:/, '');
+  if (order.provider === 'external_history' && /^[1-9][0-9]*$/.test(customerId)) {
+    const customerLink = element('a', '查看客户资料') as HTMLAnchorElement;
+    customerLink.href = `/admin/customerDetail.html?id=${encodeURIComponent(customerId)}`;
+    card.lastElementChild?.appendChild(customerLink);
+  }
   const collectionLevel = order.contact_collection_level === 'shipping_address' || order.contact_collection_level === 'mobile' ? order.contact_collection_level : 'none';
   const shippingRows: Array<[string, string]> = [['收集层级', collectionLevel === 'shipping_address' ? '收货人信息' : collectionLevel === 'mobile' ? '仅手机号' : '未收集']];
   if (collectionLevel !== 'none') shippingRows.push(['收货手机号', text(order.shipping_mobile_masked, '未提供')]);
@@ -1399,7 +1446,7 @@ function applyOrderDetailPresentation(): void {
   appendDetailSection(card, '商品与金额', [
     ['商品名称', names.join('、') || text(order.product_name, '未提供')],
     ['付款金额', money(order.amount_yuan)],
-    ['当前可退金额', moneyFromMinor(order.refundable_amount_total)],
+    [order.provider === 'external_history' ? '历史已退款金额' : '当前可退金额', moneyFromMinor(order.provider === 'external_history' ? order.refunded_minor : order.refundable_amount_total)],
   ]);
   appendDistributionDetailSections(card, order);
   replaceExternalEffectsPanel();

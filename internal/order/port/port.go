@@ -227,15 +227,16 @@ type CustomerActivityQuery struct {
 }
 
 type CustomerActivity struct {
-	ProductNames  []string            `json:"product_names,omitempty"`
-	OrderID       int64               `json:"order_id"`
-	Relationship  string              `json:"relationship"`
-	Provider      domain.Provider     `json:"provider"`
-	Status        domain.Status       `json:"status"`
-	Amount        domain.Money        `json:"amount"`
-	RefundedMinor int64               `json:"refunded_minor"`
-	RecordOrigin  domain.RecordOrigin `json:"record_origin"`
-	OccurredAt    time.Time           `json:"occurred_at"`
+	OriginalTimeUnknown bool                `json:"original_time_unknown,omitempty"`
+	ProductNames        []string            `json:"product_names,omitempty"`
+	OrderID             int64               `json:"order_id"`
+	Relationship        string              `json:"relationship"`
+	Provider            domain.Provider     `json:"provider"`
+	Status              domain.Status       `json:"status"`
+	Amount              domain.Money        `json:"amount"`
+	RefundedMinor       int64               `json:"refunded_minor"`
+	RecordOrigin        domain.RecordOrigin `json:"record_origin"`
+	OccurredAt          time.Time           `json:"occurred_at"`
 }
 
 type CustomerActivityPage struct {
@@ -471,4 +472,10 @@ type PaymentCoordinator interface {
 	PaymentReservationReader
 	CreatePaymentOrderWithin(context.Context, PaymentOrderCommand) (domain.Snapshot, error)
 	SettlePaymentWithin(context.Context, PaymentSettlementCommand) (domain.Snapshot, error)
+}
+
+// ExternalHistoryRepository participates in the caller's shared transaction.
+type ExternalHistoryRepository interface {
+	LookupExternalHistoryWithin(context.Context, string, string, [32]byte) (domain.Snapshot, bool, error)
+	ImportHistoricalWithin(context.Context, HistoricalImportCommand) (domain.Snapshot, bool, error)
 }

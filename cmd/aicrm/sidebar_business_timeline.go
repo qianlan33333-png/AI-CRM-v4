@@ -100,8 +100,16 @@ func (a sidebarBusinessTimeline) CustomerTimeline(ctx context.Context, id custom
 		if v.Relationship == "beneficiary" {
 			action = "受益订单（" + state + "）："
 		}
+		eventType := "order.created"
+		if v.Provider == "external_history" {
+			action = "历史订单（" + state + "）："
+			if v.OriginalTimeUnknown {
+				action = "补录历史订单（原时间未知，" + state + "）："
+				eventType = "order.history_imported"
+			}
+		}
 		title := action + timelineObjectName(strings.Join(v.ProductNames, "、"), "订单", v.OrderID)
-		if !add(2, v.OrderID, "order.created", title, "order", v.OccurredAt) {
+		if !add(2, v.OrderID, eventType, title, "order", v.OccurredAt) {
 			return unavailable()
 		}
 	}

@@ -157,6 +157,11 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`
 	if err != nil {
 		return domain.Order{}, mapError(err)
 	}
+	if f := snapshot.ExternalHistory; f != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO order_external_history_facts(order_id,source_paid_at,imported_at,source_status,source_after_sales) VALUES($1,$2,$3,$4,$5)`, snapshot.ID, f.SourcePaidAt, f.ImportedAt, f.SourceStatus, f.SourceAfterSales); err != nil {
+			return domain.Order{}, mapError(err)
+		}
+	}
 	for _, item := range snapshot.Items {
 		if _, err = tx.Exec(ctx, `INSERT INTO order_items(order_id,line_no,product_id,product_version,product_code,product_name,unit_amount_minor,quantity,line_amount_minor) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, snapshot.ID, item.LineNo, item.ProductID, item.ProductVersion, item.ProductCode, item.ProductName, item.UnitAmountMinor, item.Quantity, item.LineAmountMinor); err != nil {
 			return domain.Order{}, mapError(err)
@@ -181,6 +186,10 @@ func (r *Repository) Get(ctx context.Context, id int64, forUpdate bool) (domain.
 		query += ` FOR UPDATE`
 	}
 	snapshot, err := scanOrder(tx.QueryRow(ctx, query, id))
+	if err != nil {
+		return domain.Order{}, err
+	}
+	snapshot.ExternalHistory, err = readExternalHistory(ctx, tx, snapshot)
 	if err != nil {
 		return domain.Order{}, err
 	}
@@ -347,10 +356,10 @@ func orderFilterSQL(filter orderapp.ListFilter) (string, []any) {
 		conditions = append(conditions, `EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id=orders.id AND (oi.product_code ILIKE `+placeholder+` OR oi.product_name ILIKE `+placeholder+`))`)
 	}
 	if filter.CreatedFrom != nil {
-		add(`created_at>=?`, filter.CreatedFrom.UTC())
+		add(`(CASE WHEN provider='external_history' THEN (SELECT source_paid_at FROM order_external_history_facts f WHERE f.order_id=orders.id) ELSE created_at END)>=?`, filter.CreatedFrom.UTC())
 	}
 	if filter.CreatedTo != nil {
-		add(`created_at<?`, filter.CreatedTo.UTC())
+		add(`(CASE WHEN provider='external_history' THEN (SELECT source_paid_at FROM order_external_history_facts f WHERE f.order_id=orders.id) ELSE created_at END)<?`, filter.CreatedTo.UTC())
 	}
 	if filter.CreatedThrough != nil {
 		add(`created_at<=?`, filter.CreatedThrough.UTC())
@@ -412,6 +421,10 @@ func (r *Repository) queryOrders(ctx context.Context, before *orderapp.Cursor, l
 	}
 	orders := make([]domain.Order, 0, len(snapshots))
 	for _, snapshot := range snapshots {
+		snapshot.ExternalHistory, err = readExternalHistory(ctx, tx, snapshot)
+		if err != nil {
+			return nil, err
+		}
 		snapshot.Items, err = loadItems(ctx, tx, snapshot.ID)
 		if err != nil {
 			return nil, err
@@ -478,6 +491,10 @@ func (r *Repository) findByReference(ctx context.Context, provider domain.Provid
 
 	result := make([]domain.Order, 0, len(snapshots))
 	for _, snapshot := range snapshots {
+		snapshot.ExternalHistory, err = readExternalHistory(ctx, tx, snapshot)
+		if err != nil {
+			return nil, err
+		}
 		snapshot.Items, err = loadItems(ctx, tx, snapshot.ID)
 		if err != nil {
 			return nil, err

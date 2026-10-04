@@ -363,3 +363,19 @@ func (service OneIDService) RevertConfirmedMerge(ctx context.Context, mergeID in
 func validLinkIntentPurpose(purpose LinkIntentPurpose) bool {
 	return purpose == LinkIntentBindWeCom || purpose == LinkIntentBindProviderIdentity
 }
+
+func (s OneIDService) LockActiveCustomerWithin(ctx context.Context, id customerdomain.CustomerID) error {
+	locker, ok := s.Store.(identityport.CustomerIdentityLocker)
+	if !ok {
+		return ErrResolveConflict
+	}
+	return locker.LockActiveCustomerWithin(ctx, id)
+}
+
+func (s OneIDService) ReadDeclaredPhoneReceiptWithin(ctx context.Context, c identityport.DeclaredPhoneCommand) (identityport.DeclaredAttachResult, bool, error) {
+	reader, ok := s.Store.(identityport.DeclaredPhoneReceiptReader)
+	if !ok {
+		return identityport.DeclaredAttachResult{}, false, ErrDeclaredPayloadMismatch
+	}
+	return reader.ReadDeclaredPhoneReceiptWithin(ctx, c)
+}

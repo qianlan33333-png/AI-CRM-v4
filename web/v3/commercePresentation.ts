@@ -50,6 +50,7 @@ export function commerceProviderLabel(raw: unknown): string {
     case 'wechat_pay': return '微信支付';
     case 'wechat_shop': return '微信小店';
     case 'alipay': return '支付宝';
+    case 'external_history': return '外部历史订单';
     default: return '支付来源待确认';
   }
 }

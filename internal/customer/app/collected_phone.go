@@ -11,6 +11,14 @@ import (
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 )
 
+type HistoricalPhoneDisplayProjection interface {
+	ProjectHistoricalPhoneWithoutActivity(context.Context, customerdomain.CustomerID, string, string, time.Time) error
+}
+
+type EmptyCollectedPhoneProjection interface {
+	PhoneDisplayEmptyWithin(context.Context, customerdomain.CustomerID) (bool, error)
+}
+
 type CollectedPhoneProjection interface {
 	ProjectCollectedPhone(context.Context, customerdomain.CustomerID, string, string, time.Time, bool) error
 }
@@ -30,6 +38,26 @@ func NewCollectedPhoneService(phones identityport.DeclaredPhoneAttacher, project
 func (s *CollectedPhoneService) CollectPhoneWithin(ctx context.Context, c customerport.CollectedPhoneCommand) (identityport.DeclaredAttachResult, error) {
 	if s == nil || s.phones == nil || s.projection == nil || c.CollectedAt.IsZero() {
 		return identityport.DeclaredAttachResult{}, ErrInvalidQuery
+	}
+	if c.OnlyIfEmpty {
+		locker, ok := s.phones.(identityport.CustomerIdentityLocker)
+		if !ok {
+			return identityport.DeclaredAttachResult{}, ErrInvalidQuery
+		}
+		if err := locker.LockActiveCustomerWithin(ctx, c.CustomerID); err != nil {
+			return identityport.DeclaredAttachResult{}, err
+		}
+		projection, ok := s.projection.(EmptyCollectedPhoneProjection)
+		if !ok {
+			return identityport.DeclaredAttachResult{}, ErrInvalidQuery
+		}
+		empty, err := projection.PhoneDisplayEmptyWithin(ctx, c.CustomerID)
+		if err != nil {
+			return identityport.DeclaredAttachResult{}, err
+		}
+		if !empty {
+			return identityport.DeclaredAttachResult{Status: identityport.DeclaredInvalid}, nil
+		}
 	}
 	// Checkout freezes E.164; questionnaires collect CN11. Normalize once using
 	// Identity's existing contract before calling its ownership boundary.
@@ -51,7 +79,15 @@ func (s *CollectedPhoneService) CollectPhoneWithin(ctx context.Context, c custom
 		}
 		phone := normalized.NormalizedValue
 		masked := phone[:3] + "****" + phone[7:]
-		err = s.projection.ProjectCollectedPhone(ctx, c.CustomerID, masked, c.Source, c.CollectedAt, c.Historical)
+		if c.OnlyIfEmpty && c.Historical {
+			projection, ok := s.projection.(HistoricalPhoneDisplayProjection)
+			if !ok {
+				return result, ErrInvalidQuery
+			}
+			err = projection.ProjectHistoricalPhoneWithoutActivity(ctx, c.CustomerID, masked, c.Source, c.CollectedAt)
+		} else {
+			err = s.projection.ProjectCollectedPhone(ctx, c.CustomerID, masked, c.Source, c.CollectedAt, c.Historical)
+		}
 	}
 	return result, err
 }

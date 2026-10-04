@@ -764,7 +764,7 @@ func (s *Service) CustomerActivities(ctx context.Context, query orderport.Custom
 		}
 		page.Items = append(page.Items, orderport.CustomerActivity{OrderID: snapshot.ID, Relationship: relationship, ProductNames: names,
 			Provider: snapshot.Provider, Status: snapshot.Status, Amount: snapshot.Amount, RefundedMinor: snapshot.RefundedMinor,
-			RecordOrigin: snapshot.RecordOrigin, OccurredAt: snapshot.CreatedAt})
+			RecordOrigin: snapshot.RecordOrigin, OccurredAt: snapshot.CreatedAt, OriginalTimeUnknown: snapshot.ExternalHistory != nil && snapshot.ExternalHistory.SourcePaidAt == nil})
 	}
 	return page, nil
 }
@@ -904,7 +904,7 @@ func (s *Service) GetByReferenceForProvider(ctx context.Context, provider domain
 }
 
 func validProvider(provider domain.Provider) bool {
-	return provider == domain.ProviderWeChatPay || provider == domain.ProviderWeChatShop || provider == domain.ProviderAlipay
+	return provider == domain.ProviderWeChatPay || provider == domain.ProviderWeChatShop || provider == domain.ProviderAlipay || provider == domain.ProviderExternalHistory
 }
 
 func (s *Service) GetByReferenceForCustomer(ctx context.Context, reference string, customerID int64) (domain.Snapshot, error) {
@@ -988,7 +988,7 @@ func validListQuery(query orderport.ListQuery) bool {
 	if query.CustomerID < 0 || query.Offset < 0 || query.Offset > 1000000 || (query.Cursor != "" && query.Offset != 0) || len(query.OrderRef) > 200 || len(query.Product) > 200 {
 		return false
 	}
-	if query.Provider != "" && query.Provider != domain.ProviderWeChatPay && query.Provider != domain.ProviderWeChatShop && query.Provider != domain.ProviderAlipay {
+	if query.Provider != "" && query.Provider != domain.ProviderWeChatPay && query.Provider != domain.ProviderWeChatShop && query.Provider != domain.ProviderAlipay && query.Provider != domain.ProviderExternalHistory {
 		return false
 	}
 	if query.Status != "" {
@@ -1010,14 +1010,19 @@ func filterFrom(query orderport.ListQuery) ListFilter {
 
 func encodeCSV(orders []domain.Order) []byte {
 	var builder strings.Builder
-	builder.WriteString("created_at,merchant_order_no,provider_transaction_no,provider,payer_customer_id,beneficiary_customer_id,product_code,product_name,amount_minor,currency,status,record_origin\r\n")
+	builder.WriteString("created_at,merchant_order_no,provider_transaction_no,provider,payer_customer_id,beneficiary_customer_id,product_code,product_name,amount_minor,currency,status,record_origin,refunded_minor,source_status,source_after_sales,imported_at\r\n")
 	for _, order := range orders {
 		snapshot := order.Snapshot()
 		productCode, productName := "", ""
 		if len(snapshot.Items) > 0 {
 			productCode, productName = snapshot.Items[0].ProductCode, snapshot.Items[0].ProductName
 		}
-		values := []string{presentationtime.FormatShanghaiDateTime(snapshot.CreatedAt), snapshot.MerchantOrderNo, snapshot.ProviderTransactionNo, orderProviderLabel(snapshot.Provider), optionalID(snapshot.PayerCustomerID), optionalID(snapshot.BeneficiaryCustomerID), productCode, productName, strconv.FormatInt(snapshot.Amount.AmountMinor, 10), snapshot.Amount.Currency, orderStatusLabel(snapshot.Status), orderRecordOriginLabel(snapshot.RecordOrigin)}
+		values := []string{orderOriginalTime(snapshot), snapshot.MerchantOrderNo, snapshot.ProviderTransactionNo, orderProviderLabel(snapshot.Provider), optionalID(snapshot.PayerCustomerID), optionalID(snapshot.BeneficiaryCustomerID), productCode, productName, strconv.FormatInt(snapshot.Amount.AmountMinor, 10), snapshot.Amount.Currency, orderStatusLabel(snapshot.Status), orderRecordOriginLabel(snapshot.RecordOrigin), strconv.FormatInt(snapshot.RefundedMinor, 10), "", "", ""}
+		if f := snapshot.ExternalHistory; f != nil {
+			values[len(values)-3] = f.SourceStatus
+			values[len(values)-2] = f.SourceAfterSales
+			values[len(values)-1] = presentationtime.FormatShanghaiDateTime(f.ImportedAt)
+		}
 		for index, value := range values {
 			if index > 0 {
 				builder.WriteByte(',')
@@ -1037,6 +1042,8 @@ func orderProviderLabel(value domain.Provider) string {
 		return "微信小店"
 	case domain.ProviderAlipay:
 		return "支付宝"
+	case domain.ProviderExternalHistory:
+		return "外部历史订单"
 	default:
 		return "支付来源待确认"
 	}
@@ -1252,4 +1259,14 @@ func decodeCursor(value string) (Cursor, error) {
 		return Cursor{}, errors.New("invalid cursor id")
 	}
 	return Cursor{CreatedAt: createdAt.UTC(), ID: id}, nil
+}
+
+func orderOriginalTime(s domain.Snapshot) string {
+	if f := s.ExternalHistory; f != nil {
+		if f.SourcePaidAt == nil {
+			return "原时间未知"
+		}
+		return presentationtime.FormatShanghaiDateTime(*f.SourcePaidAt)
+	}
+	return presentationtime.FormatShanghaiDateTime(s.CreatedAt)
 }
