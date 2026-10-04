@@ -60,7 +60,7 @@
 | 本人佣金读取非法cursor误报503 | 入口复用已有正整数游标合同返回400 | 实际Order结算生成交错两客户佣金，真实Distribution session，汇总/分页/foreign cursor/篡改参数/错用途或过期cookie隔离；phase2-distribution-self-final-pass.txt |
 | WeChat通用退款接受超长或非法退款单号，接受后不能由Provider执行 | 仅确认WeChat订单后按官方64 ASCII及字符集合拒绝，原raw receipt payload不变，其他Provider不变 | 修复前65字符/slash接受，后400且不调用app，合法64及允许符号仍接受；payment/http目标用例和Coupon真实PG。修复前后文件是工具结果摘要而非原stdout |
 | 已认证裂变product-context同actor/key重复签发、跨campaign同键不冲突，cookie固定24h与DB活动期限不同 | 既有actor receipt锁+同UoW，分域HMAC派生token，不保存raw token；回执引用campaign；0222只扩展操作白名单 | 真实HTTP/PG同键原token/期限、不同campaign409、不同actor独立、两并发首次一context一receipt、过期旧键重放原快照、新键拒绝、下游过期不冻结归因；context-phase2-concurrent-after.txt |
-| 普通与周期后台清空图片后PG []、HTTP null违反数组合同 | 两个HTTP响应边界构造非nil空数组，保留请求字段语义 | 两实际WebKit引擎tap删除后真实PUT/GET/PG复现；phase2-webkit-entry-after.log及webkit15.4-service-images-null-before.log，最终以准确HEAD WebKit回执为准 |
+| 普通与周期后台清空图片后PG []、HTTP null违反数组合同 | 两个HTTP响应边界及直接返回的LocalProduct投影构造非nil空数组，保留请求字段语义 | 两实际WebKit引擎tap删除后真实PUT/GET/PG复现；phase2-webkit-entry-after.log及webkit15.4-service-images-null-before.log，最终以准确HEAD WebKit回执为准 |
 
 0222真实旧库升级保留campaign_posters原回执JSON和append-only trigger，旧result_kind及唯一键不变；完整Referral app PG包含奖励、关系撤销、海报、活动close、销售退款与升级。初稿遗漏campaign_posters被回归捕获并修正；属于候选实现中间回归，非旧版本业务bug。迁移仅隔离测试，未在生产运行。
 
@@ -69,3 +69,5 @@ WebKit旅程范围是实际15.4/26.0引擎的商品HTML/JS、真实tap、无inpu
 仍未覆盖：库存0/有限量销售规则待用户回答；退款compat自动编号跨管理员同key碰撞尚未复现且未改生成算法；真实Provider查询/支付/退款/分账到账、完整OAuth实际账号恢复、后台全部tab/grid/角色、所有海报/团队/导出UI/kill-restart任务矩阵、券领取逐客户端、完整问卷/其他模块、Linux安装与真实手机。当前单企业系统只验证客户对象隔离。后续不得把本地fixture或包PASS解释为这些能力验收。
 
 最终提交SHA/tree、干净状态、检查通过/失败尝试/skip和PG清理以工作区外final-receipt-phase2.json为准；firstwave final-receipt.json保留历史51e0516证据，不作为最终新候选回执。
+
+准确3069f9e组合检查发现普通copy仍直接输出LocalProduct images:null，已扩展该投影的最小修复。保留旧失败收据，最终候选另见final-receipt-phase2.json。增强实际HTTP回归同时检查PUT、同键重放、空图复制/重放、GET的wire []，不以len(nil)==0替代合同。

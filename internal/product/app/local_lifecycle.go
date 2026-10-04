@@ -584,7 +584,7 @@ func projectLocalProduct(product productport.Product) (productport.LocalProduct,
 	result := productport.LocalProduct{
 		ID: product.ID, ProductCode: product.ProductCode, Name: product.Name, Description: product.Description,
 		PriceMinor: product.PriceMinor, Currency: product.Currency, StockQuantity: product.StockQuantity,
-		Images: append([]string(nil), product.Images...), CreatedBy: product.CreatedBy,
+		Images: append([]string{}, product.Images...), CreatedBy: product.CreatedBy,
 		CreatedAt: product.CreatedAt, UpdatedAt: product.UpdatedAt, Lifecycle: lifecycle, Enabled: enabled, Version: product.Version,
 	}
 	if !validLocalProductSnapshot(result) {
