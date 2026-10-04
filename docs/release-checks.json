@@ -86,13 +86,14 @@
     },
     {
       "lane": "frontend",
-      "path": "web/v3/externalOrderHistoryPresentation.test.mjs"
+      "path": "web/v3/orderAdapter.test.mjs"
     }
   ],
   "build_commands": [
     "./cmd/migrate-external-orders"
   ],
   "installed_checks": [
-    "external-order-history"
+    "external-order-history",
+    "sidebar-oneid-presentation"
   ]
 }

@@ -18,6 +18,8 @@ migrate-external-orders --mode reconcile --union-scope "$SCOPE" --csv "$CSV1" --
 
 新核查基线：10442 行、10417 唯一、25 重复；Union 4342、Phone 40、Skipped 1449，共 4382 笔实单；`Amount=489366640` 分、`Refund=0`。剔除无时间 835、非退款零元 2516；退款来源 1235 行，匹配 1152 行，只补手机号。所有选中来源合计待补 2087 位客户（同一客户去重），选中跨客户冲突 17，属于原已确认 26 笔；不补不移冲突号。执行前重读，任何新归属或歧义先联系原用户。`PhoneOnlyFilled` 见 JSON `refund_phone_only_filled`，是实际由退款来源首次补入的数量，包含其可能也有正常订单的客户。
 
+侧边栏完整资源合同 `web/v3/sidebarOneIDPresentation.test.mjs` 在最终安装包验收执行，检查名 `sidebar-oneid-presentation`。准确私有验收 checkout 的 `web/dist` 使用该安装包的真实页面和资源，复用原 npm 依赖；此用例的源码测试 bundle 与安装资源证据分别记录。
+
 本地真实认证浏览器旅程已通过。安装包用 `scripts/run-installed-external-order-history.sh --binary <package>/bin/aicrm --root <package> --sha <sha> --binary-sha256 <digest> --tool <package>/bin/migrate-external-orders` 在隔离验收库复验；沿用当前工作台原 stage-evidence 的 external-order-history 检查名，不新建发布通道。
 
 执行后保留 stdout 汇总与 exit code，在订单 Owner 的 `order_import_runs`/`order_import_receipts` 独立核对 run key、source_digest、imported/replayed、订单金额/退款总和、原时间未知数、external_history/no-effects；对照 Identity 的 declared/order 来源收据与加密号码记录、Customer 手机号展示核对实际补录数。逐笔 `reconcile` 核查客户归属、商品快照、金额、状态、原支付时间和来源摘要。
