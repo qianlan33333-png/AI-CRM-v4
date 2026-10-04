@@ -12,8 +12,17 @@ func (s *MemberGridWorkspaceService) SaveScopedShare(ctx context.Context, v read
 		return out, ErrUnavailable
 	}
 	err = s.uow.Within(ctx, func(tx context.Context) error {
-		if e := s.lockWritableMemberGridProduct(tx, productport.ID(v.ResourceID)); e != nil {
-			return e
+		if v.ID == 0 {
+			if e := s.lockWritableMemberGridProduct(tx, productport.ID(v.ResourceID)); e != nil {
+				return e
+			}
+		} else {
+			// Revocation only disables an existing capability. Historical
+			// membership remains readable after archive, so its public share
+			// must remain revocable without reopening product/workspace writes.
+			if _, e := s.store.GetServicePeriodProductForUpdate(tx, productport.ID(v.ResourceID)); e != nil {
+				return e
+			}
 		}
 		receipt, replay, e := s.reserveMemberGrid(tx, "scoped_share.set", a, key, struct {
 			Share  readshare.Share
