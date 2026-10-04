@@ -95,6 +95,13 @@ type ProductActivityContext struct {
 	ExpiresAt, CreatedAt  time.Time
 }
 
+// ProductActivityContextCredential is the opaque checkout cookie and the
+// persisted context's immutable expiry returned to the HTTP boundary.
+type ProductActivityContextCredential struct {
+	Token     string
+	ExpiresAt time.Time
+}
+
 // ProductSaleContextReader is a Referral-owned lookup used by the checkout
 // coordinator. The raw activity token stays at the trusted boundary; only its
 // digest and the resulting campaign/product facts are frozen in Order.

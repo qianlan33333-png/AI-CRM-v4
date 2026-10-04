@@ -26,6 +26,38 @@ func (r *Repository) InsertProductActivityContextWithin(ctx context.Context, val
 	return mapError(err)
 }
 
+// ReadProductActivityContextByDigestWithin returns the immutable stored
+// snapshot for an idempotent issuance replay, including after expiry.
+func (r *Repository) ReadProductActivityContextByDigestWithin(ctx context.Context, digest [sha256.Size]byte) (referralport.ProductActivityContext, error) {
+	tx, err := transaction(ctx)
+	if err != nil {
+		return referralport.ProductActivityContext{}, err
+	}
+	if digest == ([sha256.Size]byte{}) {
+		return referralport.ProductActivityContext{}, ErrInvalid
+	}
+	var value referralport.ProductActivityContext
+	var storedDigest []byte
+	var metric string
+	err = tx.QueryRow(ctx, `SELECT context_digest,campaign_id,product_id,product_type,sales_metric,state,expires_at,created_at
+FROM referral_product_activity_contexts WHERE context_digest=$1`, digest[:]).Scan(&storedDigest, &value.CampaignID, &value.ProductID, &value.ProductType, &metric, &value.State, &value.ExpiresAt, &value.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return referralport.ProductActivityContext{}, referralport.ErrNotFound
+	}
+	if err != nil {
+		return referralport.ProductActivityContext{}, mapError(err)
+	}
+	if len(storedDigest) != sha256.Size {
+		return referralport.ProductActivityContext{}, referralport.ErrUnavailable
+	}
+	copy(value.ContextDigest[:], storedDigest)
+	value.SalesMetric = referralport.SalesMetric(metric)
+	if value.ContextDigest != digest || value.CampaignID < 1 || value.ProductID < 1 || (value.ProductType != "standard_product" && value.ProductType != "service_period") || !value.SalesMetric.Valid() || value.State != "active" || value.ExpiresAt.IsZero() || value.CreatedAt.IsZero() {
+		return referralport.ProductActivityContext{}, referralport.ErrUnavailable
+	}
+	return value, nil
+}
+
 func (r *Repository) ReadProductSaleContextWithin(ctx context.Context, digest [sha256.Size]byte, productID int64, productType string, at time.Time) (referralport.ProductSaleContext, error) {
 	tx, err := transaction(ctx)
 	if err != nil {

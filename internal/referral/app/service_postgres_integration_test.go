@@ -988,6 +988,10 @@ func assertCount(t *testing.T, pool *pgxpool.Pool, query string, expected int64,
 }
 
 func referralPostgreSQLPool(t *testing.T) (*pgxpool.Pool, func()) {
+	return referralPostgreSQLPoolWithContextReceipts(t, true)
+}
+
+func referralPostgreSQLPoolWithContextReceipts(t *testing.T, contextReceipts bool) (*pgxpool.Pool, func()) {
 	t.Helper()
 	databaseURL, err := platformconfig.DatabaseURL()
 	if err != nil {
@@ -1029,7 +1033,10 @@ func referralPostgreSQLPool(t *testing.T) (*pgxpool.Pool, func()) {
 		t.Fatal("locate referral migrations")
 	}
 	root := filepath.Join(filepath.Dir(file), "..", "..", "..")
-	for _, name := range []string{"0001_platform.sql", "0185_referral_core.sql", "0198_referral_activity_config.sql", "0199_referral_individual_invitation.sql", "0210_referral_campaign_posters.sql"} {
+	for _, name := range []string{"0001_platform.sql", "0185_referral_core.sql", "0198_referral_activity_config.sql", "0199_referral_individual_invitation.sql", "0210_referral_campaign_posters.sql", "0222_referral_product_activity_context_receipt.sql"} {
+		if name == "0222_referral_product_activity_context_receipt.sql" && !contextReceipts {
+			continue
+		}
 		body, readErr := os.ReadFile(filepath.Join(root, "migrations", name))
 		if readErr != nil {
 			pool.Close()

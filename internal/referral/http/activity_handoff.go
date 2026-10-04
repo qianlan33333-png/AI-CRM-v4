@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	referralport "github.com/qianlan33333-png/AI-CRM-v3/internal/referral/port"
 )
@@ -18,7 +17,7 @@ import (
 var promotionPath = regexp.MustCompile(`^/d/(dpc_[A-Za-z0-9_-]{16,})$`)
 
 type activityContextIssuer interface {
-	IssuePublicProductActivityContext(context.Context, int64) (string, error)
+	IssuePublicProductActivityContext(context.Context, int64) (referralport.ProductActivityContextCredential, error)
 }
 
 func (h *Handler) activitySignature(campaignID int64, token string) string {
@@ -75,12 +74,12 @@ func (h *Handler) activityHandoff(w http.ResponseWriter, r *http.Request, tail s
 		resultError(w, referralport.ErrUnavailable)
 		return
 	}
-	token, err := issuer.IssuePublicProductActivityContext(r.Context(), campaignID)
+	credential, err := issuer.IssuePublicProductActivityContext(r.Context(), campaignID)
 	if err != nil {
 		resultError(w, err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "aicrm_referral_activity_context", Value: token, Path: "/", HttpOnly: true, Secure: h.cookieSecure, SameSite: http.SameSiteLaxMode, Expires: time.Now().UTC().Add(24 * time.Hour)})
+	http.SetCookie(w, &http.Cookie{Name: "aicrm_referral_activity_context", Value: credential.Token, Path: "/", HttpOnly: true, Secure: h.cookieSecure, SameSite: http.SameSiteLaxMode, Expires: credential.ExpiresAt.UTC()})
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, "/d/"+parts[1], http.StatusSeeOther)
 }

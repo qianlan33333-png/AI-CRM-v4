@@ -67,30 +67,80 @@ type serviceStore interface {
 	LeaderboardRowsWithin(context.Context, int64, referralport.LeaderboardKind, int64, time.Time, time.Time, int32, int32, int64, int64) ([]referralport.LeaderboardEntry, *referralport.LeaderboardEntry, error)
 	ListSalesLeaderboardRowsWithin(context.Context, int64, referralport.LeaderboardKind, referraldomain.LeaderboardMetric, int64, time.Time, time.Time, int32, int32, int64, int64) ([]referralport.LeaderboardEntry, *referralport.LeaderboardEntry, error)
 	InsertProductActivityContextWithin(context.Context, referralport.ProductActivityContext) error
+	ReadProductActivityContextByDigestWithin(context.Context, [sha256.Size]byte) (referralport.ProductActivityContext, error)
 }
 
 // IssueProductActivityContext mints an opaque, same-origin checkout context.
 // It is deliberately separate from invitation credentials and contains no
 // customer supplied identity or redirect URL.
-func (s *Service) IssueProductActivityContext(ctx context.Context, actor referralport.TrustedSessionActor, campaignID int64, idempotencyKey string) (string, error) {
+func (s *Service) IssueProductActivityContext(ctx context.Context, actor referralport.TrustedSessionActor, campaignID int64, idempotencyKey string) (referralport.ProductActivityContextCredential, error) {
 	if s == nil || !actor.Valid() || campaignID < 1 || !validKey(idempotencyKey) {
-		return "", referralport.ErrConflict
+		return referralport.ProductActivityContextCredential{}, referralport.ErrConflict
 	}
-	return s.issueProductActivityContext(ctx, campaignID)
+	actorScope := customerScope(actor.CustomerID)
+	token, err := s.activityContextTokens.issue(actorScope, campaignID, idempotencyKey)
+	if err != nil {
+		return referralport.ProductActivityContextCredential{}, referralport.ErrUnavailable
+	}
+	digest := sha256.Sum256([]byte(token))
+	payload := productActivityContextPayload(campaignID)
+	var credential referralport.ProductActivityContextCredential
+	err = s.uow.Within(ctx, func(tx context.Context) error {
+		if err := s.store.LockOperationReceiptWithin(tx, "issue_product_activity_context", actorScope, idempotencyKey); err != nil {
+			return err
+		}
+		if receipt, found, err := s.store.ReadOperationReceiptWithin(tx, "issue_product_activity_context", actorScope, idempotencyKey); err != nil || found {
+			if err != nil {
+				return err
+			}
+			if receipt.PayloadDigest != payload || receipt.ResultKind != "campaign" || receipt.ResultID != campaignID {
+				return referralport.ErrConflict
+			}
+			stored, readErr := s.store.ReadProductActivityContextByDigestWithin(tx, digest)
+			if readErr != nil {
+				return readErr
+			}
+			if stored.CampaignID != campaignID || stored.State != "active" || stored.ContextDigest != digest {
+				return referralport.ErrUnavailable
+			}
+			credential = referralport.ProductActivityContextCredential{Token: token, ExpiresAt: stored.ExpiresAt}
+			return nil
+		}
+		campaign, err := s.store.ReadCampaignWithin(tx, campaignID, true)
+		if err != nil {
+			return err
+		}
+		now := s.now().UTC()
+		if campaign.Config().QualificationMode != referraldomain.QualificationProductPurchase || !campaign.AcceptingAt(now) {
+			return referralport.ErrCampaignUnavailable
+		}
+		stored := referralport.ProductActivityContext{ContextDigest: digest, CampaignID: campaign.ID, ProductID: campaign.ProductID, ProductType: campaign.ProductType, SalesMetric: referralport.SalesMetricAmount, State: "active", ExpiresAt: campaign.EndsAt, CreatedAt: now}
+		if err := s.store.InsertProductActivityContextWithin(tx, stored); err != nil {
+			return err
+		}
+		// The receipt references its owning campaign; the operation identifies
+		// context issuance and its deterministic token addresses the snapshot.
+		if err := s.store.AppendOperationReceiptWithin(tx, "issue_product_activity_context", actorScope, idempotencyKey, payload, "campaign", campaign.ID, now); err != nil {
+			return err
+		}
+		credential = referralport.ProductActivityContextCredential{Token: token, ExpiresAt: stored.ExpiresAt}
+		return nil
+	})
+	return credential, err
 }
 
 // IssuePublicProductActivityContext is used only by the signed, campaign-bound
 // promotion handoff. It conveys no customer or promoter identity; Order still
 // freezes both from its own trusted checkout and Distribution credential.
-func (s *Service) IssuePublicProductActivityContext(ctx context.Context, campaignID int64) (string, error) {
+func (s *Service) IssuePublicProductActivityContext(ctx context.Context, campaignID int64) (referralport.ProductActivityContextCredential, error) {
 	if s == nil || campaignID < 1 {
-		return "", referralport.ErrConflict
+		return referralport.ProductActivityContextCredential{}, referralport.ErrConflict
 	}
 	return s.issueProductActivityContext(ctx, campaignID)
 }
 
-func (s *Service) issueProductActivityContext(ctx context.Context, campaignID int64) (string, error) {
-	var token string
+func (s *Service) issueProductActivityContext(ctx context.Context, campaignID int64) (referralport.ProductActivityContextCredential, error) {
+	var credential referralport.ProductActivityContextCredential
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		campaign, err := s.store.ReadCampaignWithin(tx, campaignID, true)
 		if err != nil {
@@ -103,25 +153,31 @@ func (s *Service) issueProductActivityContext(ctx context.Context, campaignID in
 		if _, err := cryptoRandRead(buf); err != nil {
 			return referralport.ErrUnavailable
 		}
-		token = "rpa_" + base64.RawURLEncoding.EncodeToString(buf)
+		token := "rpa_" + base64.RawURLEncoding.EncodeToString(buf)
 		digest := sha256.Sum256([]byte(token))
-		return s.store.InsertProductActivityContextWithin(tx, referralport.ProductActivityContext{ContextDigest: digest, CampaignID: campaign.ID, ProductID: campaign.ProductID, ProductType: campaign.ProductType, SalesMetric: referralport.SalesMetricAmount, State: "active", ExpiresAt: campaign.EndsAt, CreatedAt: s.now().UTC()})
+		stored := referralport.ProductActivityContext{ContextDigest: digest, CampaignID: campaign.ID, ProductID: campaign.ProductID, ProductType: campaign.ProductType, SalesMetric: referralport.SalesMetricAmount, State: "active", ExpiresAt: campaign.EndsAt, CreatedAt: s.now().UTC()}
+		if err := s.store.InsertProductActivityContextWithin(tx, stored); err != nil {
+			return err
+		}
+		credential = referralport.ProductActivityContextCredential{Token: token, ExpiresAt: stored.ExpiresAt}
+		return nil
 	})
-	return token, err
+	return credential, err
 }
 
 type Service struct {
-	uow           platformport.UnitOfWork
-	store         serviceStore
-	origin        string
-	tokens        invitationTokenIssuer
-	closeJobs     CampaignCloseEnqueuer
-	audit         *platformaudit.Service
-	outbox        platformoutbox.Appender
-	qualification referralport.PurchaseQualificationReader
-	attributions  distributionport.FrozenOrderAttributionReader
-	timeline      platformaudit.TimelineReader
-	now           func() time.Time
+	uow                   platformport.UnitOfWork
+	store                 serviceStore
+	origin                string
+	tokens                invitationTokenIssuer
+	activityContextTokens productActivityContextTokenIssuer
+	closeJobs             CampaignCloseEnqueuer
+	audit                 *platformaudit.Service
+	outbox                platformoutbox.Appender
+	qualification         referralport.PurchaseQualificationReader
+	attributions          distributionport.FrozenOrderAttributionReader
+	timeline              platformaudit.TimelineReader
+	now                   func() time.Time
 }
 
 func NewService(uow platformport.UnitOfWork, store serviceStore, origin, tokenDataKey string, closeJobs CampaignCloseEnqueuer, audit *platformaudit.Service, outbox platformoutbox.Appender) (*Service, error) {
@@ -132,7 +188,11 @@ func NewService(uow platformport.UnitOfWork, store serviceStore, origin, tokenDa
 	if err != nil {
 		return nil, referralport.ErrUnavailable
 	}
-	return &Service{uow: uow, store: store, origin: strings.TrimRight(origin, "/"), tokens: tokens, closeJobs: closeJobs, audit: audit, outbox: outbox, now: time.Now}, nil
+	activityContextTokens, err := newProductActivityContextTokenIssuer(tokenDataKey)
+	if err != nil {
+		return nil, referralport.ErrUnavailable
+	}
+	return &Service{uow: uow, store: store, origin: strings.TrimRight(origin, "/"), tokens: tokens, activityContextTokens: activityContextTokens, closeJobs: closeJobs, audit: audit, outbox: outbox, now: time.Now}, nil
 }
 
 // SetPurchaseQualificationReader wires the existing Distribution qualification
@@ -776,6 +836,9 @@ func joinPayload(command referralport.JoinCampaignCommand) [sha256.Size]byte {
 }
 func issuePayload(campaignID int64) [sha256.Size]byte {
 	return sha256.Sum256([]byte("referral.invitation.v1:campaign=" + strconv.FormatInt(campaignID, 10)))
+}
+func productActivityContextPayload(campaignID int64) [sha256.Size]byte {
+	return sha256.Sum256([]byte("referral.product_activity_context.v1:campaign=" + strconv.FormatInt(campaignID, 10)))
 }
 func relationshipSnapshot(value referraldomain.Relationship) referralport.RelationshipSnapshot {
 	return referralport.RelationshipSnapshot{RelationshipID: value.ID, Version: value.Version, CustomerID: value.CustomerID, ReferrerCustomerID: value.ReferrerCustomerID, SourceCampaignID: value.SourceCampaignID, InvitationID: value.InvitationID, EffectiveAt: value.EffectiveAt}

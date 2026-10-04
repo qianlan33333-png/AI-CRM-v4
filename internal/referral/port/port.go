@@ -251,7 +251,7 @@ type PublicApplication interface {
 	MyCampaign(context.Context, TrustedSessionActor, int64) (MyCampaign, error)
 	ListMyInvites(context.Context, TrustedSessionActor, int64, string, int32) (InvitePage, error)
 	Leaderboard(context.Context, LeaderboardQuery) (LeaderboardPage, error)
-	IssueProductActivityContext(context.Context, TrustedSessionActor, int64, string) (string, error)
+	IssueProductActivityContext(context.Context, TrustedSessionActor, int64, string) (ProductActivityContextCredential, error)
 }
 
 type CreateCampaignCommand struct {

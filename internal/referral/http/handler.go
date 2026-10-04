@@ -355,13 +355,13 @@ func (h *Handler) productContext(w http.ResponseWriter, r *http.Request, campaig
 	if !ok {
 		return
 	}
-	token, err := h.public.IssueProductActivityContext(r.Context(), actor, campaignID, key)
+	credential, err := h.public.IssueProductActivityContext(r.Context(), actor, campaignID, key)
 	if err != nil {
 		resultError(w, err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "aicrm_referral_activity_context", Value: token, Path: "/", HttpOnly: true, Secure: h.cookieSecure, SameSite: http.SameSiteLaxMode, Expires: time.Now().UTC().Add(24 * time.Hour)})
-	writeJSON(w, http.StatusCreated, map[string]any{"expires_at": time.Now().UTC().Add(24 * time.Hour)})
+	http.SetCookie(w, &http.Cookie{Name: "aicrm_referral_activity_context", Value: credential.Token, Path: "/", HttpOnly: true, Secure: h.cookieSecure, SameSite: http.SameSiteLaxMode, Expires: credential.ExpiresAt.UTC()})
+	writeJSON(w, http.StatusCreated, map[string]any{"expires_at": credential.ExpiresAt.UTC()})
 }
 
 func (h *Handler) invitationHandoff(w http.ResponseWriter, r *http.Request, token string) {
