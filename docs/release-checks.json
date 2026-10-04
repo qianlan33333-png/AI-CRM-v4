@@ -1,91 +1,107 @@
 {
   "schema": 1,
-  "baseline_sha": "c3160a063af24ffc7b2fd724eb1ab5d74b45f003",
+  "baseline_sha": "94d4b845f9d9ddcc30e7e05432032ba1677fac5a",
   "checks": [
     {
       "lane": "backend",
-      "package": "./cmd/migrate-external-orders",
+      "package": "./internal/product/app",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/order/domain"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/order/app"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/order/http"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/identity/app"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/customer/app"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/order/store/postgres_integration_test.go",
-      "test": "TestPostgreSQLHistoricalImportIsEffectIneligibleAndReplayableAcrossRuns",
+      "package": "./internal/product/store",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/order/store/postgres_integration_test.go",
-      "test": "TestPostgreSQLPaidAudienceOrdersUsePayerAndPaymentEvidence",
+      "package": "./internal/product/http",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/order/store/postgres_integration_test.go",
-      "test": "TestPostgreSQLCustomerScopedReferenceReadDoesNotLeak",
+      "package": "./internal/payment/app",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/sidebar_business_timeline_test.go",
-      "test": "TestSidebarBusinessTimelineNamedSourcesAndCrossSourceKeyset"
+      "package": "./internal/payment/provider",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/sidebar_business_timeline_test.go",
-      "test": "TestSidebarBusinessTimelineSourceFailureIsNotEmptySuccess"
+      "package": "./internal/payment/http",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/sidebar_business_timeline_test.go",
-      "test": "TestSidebarBusinessTimelineExternalHistoryUnknownTimeLabelsImport"
+      "package": "./internal/order/app",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/order",
-      "path": "internal/order/ui_test.go"
+      "package": "./internal/order/store",
+      "postgres": true
     },
     {
-      "lane": "frontend",
-      "path": "scripts/verify-donor-sources.mjs"
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/http",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/distribution/app",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/distribution/store",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/payment_alipay_unknown_time_postgres_integration_test.go",
+      "test": "TestPostgreSQLAlipayUnknownPaymentTimeQueuesOriginalQuery",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/payment_alipay_second_precision_postgres_integration_test.go",
+      "test": "TestPostgreSQLAlipaySignedSecondPrecision",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/product_image_mutation_postgres_integration_test.go",
+      "test": "TestPostgreSQLProductImageEditorClearAndCopy",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/payment_alipay_callback_postgres_integration_test.go",
+      "test": "TestPostgreSQLAlipayConcurrentCallbacksSettleOnceAndRollback",
+      "postgres": true
     },
     {
       "lane": "frontend",
       "path": "scripts/validate-openapi.mjs"
     },
     {
+      "lane": "frontend",
+      "path": "web/v3/product_transport_deadline.test.mjs"
+    },
+    {
       "lane": "backend",
       "package": "./internal/config/http",
-      "path": "internal/config/http/handler_test.go",
       "test": "TestOpenAPIDownloadIsAuthenticatedAndMatchesTheReleaseSource"
     }
   ],
   "build_commands": [
-    "./cmd/migrate-external-orders"
+    "./cmd/aicrm"
   ],
-  "installed_checks": [
-    "external-order-history",
-    "order-presentation",
-    "sidebar-oneid-presentation"
-  ]
+  "installed_checks": []
 }

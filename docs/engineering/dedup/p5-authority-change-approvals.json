@@ -2171,6 +2171,28 @@
       ],
       "reason": "Bind the authorized external-history order read contract and current V4 embed view to exact reviewed API bytes. Frozen source payloads and checker policy are unchanged.",
       "review_reference": "User PLEASE IMPLEMENT THIS PLAN and latest zero/missing-time exclusions and refund phone-only instruction in task 01a1050e-a192-7913-a3dd-56f9dc949cb5; docs/prd/2026-10-04-external-order-history.md. Author declaration under existing user scope, not independent approval or deployment evidence."
+    },
+    {
+      "base_commit": "94d4b845f9d9ddcc30e7e05432032ba1677fac5a",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "f7b6eaa17b7dc6ef77604e050ce93f18ad5921fc47068957eb3114d002688ef7",
+          "head_sha256": "1862040c32d7f3257d211314e90a92aeffe61b3a576fc1330aa49ade1e446bc3"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "46f21ded00970fc882c11f471c18b5fd4ecd3ecdf635adba42faf52327544ba6",
+          "head_sha256": "fa1c908104e5945358900f7736c0b1a53830c6a6da1f61903002fdc2d1e642c7"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "db2229edda4cc7b37e807db7d3e63ef08c3e88c7d516d06a9e5a71291c59d93d",
+          "head_sha256": "8bd16472a83cd718102147f497ffe0d5500b9ff05befd9ac0f1bffd9814e0ea5"
+        }
+      ],
+      "reason": "User-authorized commerce audit: correct demonstrated checkout DTO/schema mismatch; synchronize only the active OpenAPI contract, preserving all frozen donors. Local candidate only; no deployment approval.",
+      "review_reference": "docs/prd/2026-10-04-commerce-adversarial-audit.md; delegated source thread 01a0f20a-12d2-7078-934f-baf57f0e101d; checkout-contract-before/after evidence"
     }
   ]
 }
