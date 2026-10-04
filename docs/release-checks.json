@@ -88,7 +88,9 @@
     },
     {
       "lane": "backend",
-      "package": "./internal/config/http"
+      "package": "./internal/config/http",
+      "path": "internal/config/http/handler_test.go",
+      "test": "TestOpenAPIDownloadIsAuthenticatedAndMatchesTheReleaseSource"
     }
   ],
   "build_commands": [
