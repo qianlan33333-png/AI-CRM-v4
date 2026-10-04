@@ -459,6 +459,50 @@ func TestRefundConfirmationHonorsProviderBoundary(t *testing.T) {
 		}
 	})
 }
+
+func TestWeChatPayGenericRefundReferenceMatchesProviderContract(t *testing.T) {
+	transactionID := "4500000365202609101828595865"
+	payment := domain.Payment{ID: 9, Provider: domain.ProviderWeChatPay, MerchantOrderNo: "v3pay_order", Status: domain.StatusPaid, ProviderTransactionDigest: string(effectport.Hash("wechatpay.transaction", transactionID))}
+	post := func(refundNo string) (*httptest.ResponseRecorder, *appStub) {
+		t.Helper()
+		application := &appStub{payment: payment}
+		handler, err := NewHandler(application, nil, securityStub{}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := json.Marshal(map[string]any{"amount_minor": 200, "refund_no": refundNo, "reason": "客户申请", "transaction_id_confirmation": transactionID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/admin/payments/9/refunds", strings.NewReader(string(body)))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Idempotency-Key", "wechat-refund-reference-key-0001")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response, application
+	}
+
+	for _, refundNo := range []string{strings.Repeat("R", 65), "refund/invalid"} {
+		response, application := post(refundNo)
+		if response.Code != http.StatusBadRequest || application.refundCalls != 0 {
+			t.Errorf("invalid WeChat refund reference %q status=%d app_calls=%d body=%s", refundNo, response.Code, application.refundCalls, response.Body.String())
+		}
+	}
+
+	refundNo := "aA0_-|@*" + strings.Repeat("Z", 56)
+	response, application := post(refundNo)
+	if response.Code != http.StatusAccepted || application.refundCalls != 1 || application.refund.RefundNo != refundNo {
+		t.Fatalf("valid 64-character WeChat refund reference status=%d calls=%d command=%+v body=%s", response.Code, application.refundCalls, application.refund, response.Body.String())
+	}
+
+	// The domain trims outer whitespace before persisting the refund number.
+	// Keep the original command value intact so retries hash the same payload.
+	legacyInput := " " + refundNo + " "
+	response, application = post(legacyInput)
+	if response.Code != http.StatusAccepted || application.refundCalls != 1 || application.refund.RefundNo != legacyInput {
+		t.Fatalf("normalized legacy reference status=%d calls=%d command=%+v body=%s", response.Code, application.refundCalls, application.refund, response.Body.String())
+	}
+}
 func TestCheckoutAcceptsOnlyOpaqueCookieIdentity(t *testing.T) {
 	application := &appStub{}
 	handler, _ := NewHandler(application, nil, securityStub{}, true)

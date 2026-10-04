@@ -1140,6 +1140,15 @@ func (handler *Handler) refund(writer http.ResponseWriter, request *http.Request
 		writeError(writer, http.StatusBadRequest, "invalid_request")
 		return
 	}
+	// WeChat Pay's domestic refund API accepts merchant refund numbers up to
+	// 64 ASCII characters and only the documented [0-9A-Za-z_-|@*] set. The
+	// application trims surrounding whitespace before persisting the number,
+	// so validate that normalized form without changing the command payload used
+	// by the actor-scoped idempotency receipt.
+	if payment.Provider == domain.ProviderWeChatPay && !validWeChatRefundReference(body.RefundNo) {
+		writeError(writer, http.StatusBadRequest, "invalid_request")
+		return
+	}
 	refund, err := handler.app.RequestRefund(request.Context(), paymentport.RefundCommand{PaymentID: paymentID, AmountMinor: body.AmountMinor, RefundNo: body.RefundNo, Reason: body.Reason, ActorScope: "admin:" + strconv.FormatInt(principal.InternalID, 10), IdempotencyKey: request.Header.Get("Idempotency-Key")})
 	if err != nil {
 		resultError(writer, err)
@@ -1150,6 +1159,21 @@ func (handler *Handler) refund(writer http.ResponseWriter, request *http.Request
 
 func validTransactionConfirmation(value string) bool {
 	return value != "" && len(value) <= 200 && value == strings.TrimSpace(value)
+}
+
+func validWeChatRefundReference(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		char := value[i]
+		if (char >= '0' && char <= '9') || (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z') || char == '_' || char == '-' || char == '|' || char == '@' || char == '*' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // matchesVerifiedWeChatTransaction compares the operator-entered provider
