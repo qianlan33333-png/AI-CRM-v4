@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -215,7 +216,7 @@ func (service *LocalProductLifecycleService) CopyLocalProduct(ctx context.Contex
 			PriceMinor:            source.PriceMinor,
 			Currency:              source.Currency,
 			StockQuantity:         source.StockQuantity,
-			Images:                append([]string(nil), source.Images...),
+			Images:                slices.Clone(source.Images),
 			LegacyAdminProjection: projection,
 			Actor:                 normalized.Actor,
 			IdempotencyKey:        normalized.IdempotencyKey,

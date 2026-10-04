@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -374,7 +375,7 @@ func (service *ServicePeriodService) UpdateServicePeriodProduct(ctx context.Cont
 				Currency:              normalized.Currency,
 				DurationDays:          normalized.DurationDays,
 				StockQuantity:         normalized.StockQuantity,
-				Images:                append([]string(nil), images...),
+				Images:                slices.Clone(images),
 				LegacyAdminProjection: projection,
 			}, projected.Lifecycle, true, nil
 		},
@@ -502,7 +503,7 @@ func (service *ServicePeriodService) CopyServicePeriodProduct(ctx context.Contex
 			PriceMinor:            source.PriceMinor,
 			Currency:              source.Currency,
 			StockQuantity:         source.StockQuantity,
-			Images:                append([]string(nil), source.Images...),
+			Images:                slices.Clone(source.Images),
 			LegacyAdminProjection: projection,
 			Actor:                 normalized.Actor,
 			IdempotencyKey:        normalized.IdempotencyKey,
@@ -603,7 +604,7 @@ func (service *ServicePeriodService) updateServicePeriod(ctx context.Context, wr
 				return updateErr
 			}
 			result, updateErr = projectServicePeriodProduct(updated, storeUpdate.DurationDays)
-			if updateErr != nil || result.Version != projected.Version+1 || result.ServiceProductID != projected.ServiceProductID || result.ProductCode != projected.ProductCode || result.DurationDays != storeUpdate.DurationDays || !result.CreatedAt.Equal(projected.CreatedAt) || result.Lifecycle != target || !reflect.DeepEqual(result.Images, storeUpdate.Images) || !jsonEquivalent(result.AdminProjection, storeUpdate.LegacyAdminProjection) {
+			if updateErr != nil || result.Version != projected.Version+1 || result.ServiceProductID != projected.ServiceProductID || result.ProductCode != projected.ProductCode || result.DurationDays != storeUpdate.DurationDays || !result.CreatedAt.Equal(projected.CreatedAt) || result.Lifecycle != target || !slices.Equal(result.Images, storeUpdate.Images) || !jsonEquivalent(result.AdminProjection, storeUpdate.LegacyAdminProjection) {
 				return ErrUnavailable
 			}
 			if write.policy != nil && service.policy != nil {
@@ -870,7 +871,8 @@ func normalizeServicePeriodCreate(command productport.CreateServicePeriodProduct
 }
 
 func normalizeServicePeriodUpdate(command productport.UpdateServicePeriodProductCommand) (productport.UpdateServicePeriodProductCommand, [32]byte, error) {
-	command.Images = append([]string(nil), command.Images...)
+	// Preserve [] as an explicit clear; nil means an older caller omitted images.
+	command.Images = slices.Clone(command.Images)
 	command.Name = strings.TrimSpace(command.Name)
 	command.Description = strings.TrimSpace(command.Description)
 	command.Currency = strings.ToUpper(strings.TrimSpace(command.Currency))
