@@ -2326,18 +2326,31 @@ async function verifiedProductInitialMaterial(url: string): Promise<ProductMater
   // The current frozen product draft can contain a few library originals.  A
   // direct record read proves those IDs for this scope, but may not keep a
   // click waiting indefinitely or outlive the page which started it.
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), productMetadataReadTimeoutMilliseconds);
+  let controller: AbortController | undefined;
+  try { if (typeof AbortController === 'function') controller = new AbortController(); } catch {}
+  let timedOut = false;
+  let timer: number | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => {
+      timedOut = true;
+      try { controller?.abort(); } catch {}
+      reject(new Error('初始素材目录确认超时；请重试。'));
+    }, productMetadataReadTimeoutMilliseconds);
+  });
   try {
-    const response = await donorFetch(new URL(`/api/admin/image-library/${pending.library_id}`, location.origin), { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' }, signal: controller.signal });
-    if (!response.ok) return pending;
-    const payload = object(await response.json().catch(() => ({})));
-    const material = productMaterialRecord(object(payload.item ?? payload.image));
-    return material?.library_id === pending.library_id ? material : pending;
+    return await Promise.race([Promise.resolve().then(async () => {
+      const requestOptions: RequestInit = { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' } };
+      if (controller) requestOptions.signal = controller.signal;
+      const response = await donorFetch(new URL(`/api/admin/image-library/${pending.library_id}`, location.origin), requestOptions);
+      if (!response.ok) return pending;
+      const payload = object(await response.json().catch(() => ({})));
+      const material = productMaterialRecord(object(payload.item ?? payload.image));
+      return material?.library_id === pending.library_id ? material : pending;
+    }), deadline]);
   } catch {
-    return productInitialMaterial(url, controller.signal.aborted ? '初始素材目录确认超时；请重试。' : '素材状态待当前目录确认') || pending;
+    return productInitialMaterial(url, timedOut || controller?.signal.aborted ? '初始素材目录确认超时；请重试。' : '素材状态待当前目录确认') || pending;
   } finally {
-    window.clearTimeout(timer);
+    if (timer !== undefined) window.clearTimeout(timer);
   }
 }
 

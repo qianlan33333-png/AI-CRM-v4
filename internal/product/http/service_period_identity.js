@@ -52,19 +52,28 @@
       async function refreshState(showLoading) {
         if (initialState.available === false) return;
         const generation = ++readGeneration;
-        if (activeRead) activeRead.abort();
-        const controller = new AbortController();
+        if (activeRead) try { activeRead.abort(); } catch (_) {}
+        let controller;
+        try { if (typeof AbortController === "function") controller = new AbortController(); } catch (_) {}
         activeRead = controller;
         if (showLoading) stateMessage("正在查询服务权益…", "正在查询", null, "正在查询服务权益");
         card.setAttribute("aria-busy", "true");
         // Match the existing public commerce request budget, not an OAuth retry.
-        const deadline = setTimeout(function () { controller.abort(); }, 10000);
+        let deadline;
+        const deadlineRead = new Promise(function (_, reject) {
+          deadline = setTimeout(function () {
+            if (controller) try { controller.abort(); } catch (_) {}
+            reject(new Error("request timeout"));
+          }, 10000);
+        });
         try {
-          const response = await fetch(window.location.pathname.replace(/^\/s\//, "/api/h5/service-period-products/") + window.location.search, {
-            credentials: "same-origin", cache: "no-store", signal: controller.signal
-          });
-          if (!response.ok) throw new Error("state unavailable");
-          const state = await response.json();
+          const state = await Promise.race([Promise.resolve().then(async function () {
+            const requestOptions = { credentials: "same-origin", cache: "no-store" };
+            if (controller) requestOptions.signal = controller.signal;
+            const response = await fetch(window.location.pathname.replace(/^\/s\//, "/api/h5/service-period-products/") + window.location.search, requestOptions);
+            if (!response.ok) throw new Error("state unavailable");
+            return response.json();
+          }), deadlineRead]);
           if (!state || state.ok !== true || typeof state.authenticated !== "boolean" ||
               !state.entitlement || !["none", "active", "expired"].includes(state.entitlement.status)) {
             throw new Error("invalid state");
@@ -85,7 +94,7 @@
 
       function suspendRead() {
         ++readGeneration;
-        if (activeRead) activeRead.abort();
+        if (activeRead) try { activeRead.abort(); } catch (_) {}
         activeRead = null;
       }
       window.addEventListener("pagehide", suspendRead);
