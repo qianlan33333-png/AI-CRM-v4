@@ -5,7 +5,22 @@
     {
       "lane": "backend",
       "path": "cmd/aicrm/dynamic_generation_adapters_test.go",
-      "test": "Test(DynamicGenerationContextFreezesOnlyApprovedReadPorts|GenerationQuestionnaireUsesLatestSubmissionOnly|BoundedGenerationTextPreservesUTF8AndByteLimit|GeneratedOutboundTemplateRetainsFrozenSources)"
+      "test": "TestDynamicGenerationContextFreezesOnlyApprovedReadPorts"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/dynamic_generation_adapters_test.go",
+      "test": "TestGenerationQuestionnaireUsesLatestSubmissionOnly"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/dynamic_generation_adapters_test.go",
+      "test": "TestBoundedGenerationTextPreservesUTF8AndByteLimit"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/dynamic_generation_adapters_test.go",
+      "test": "TestGeneratedOutboundTemplateRetainsFrozenSources"
     },
     {
       "lane": "backend",
