@@ -112,6 +112,16 @@ type Run struct {
 	CreatedAt             time.Time
 }
 
+// ManualAudienceRunApprovalSource exposes only the linkage facts AI
+// Assistant needs to revalidate a pending manual audience approval.
+type ManualAudienceRunApprovalSource struct {
+	AIPlanID               int64
+	PackageID              segmentport.PackageID
+	SnapshotID             segmentport.SnapshotID
+	ConfigurationVersionID segmentport.ConfigurationVersionID
+	State                  RunState
+}
+
 type RunRecipient struct {
 	ID         RunRecipientID
 	RunID      RunID

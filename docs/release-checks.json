@@ -1,56 +1,19 @@
 {
   "schema": 1,
-  "baseline_sha": "641d75779c46dc32b7db05d057580dd2f7a4d849",
+  "baseline_sha": "c58b0a7cf71c0410dde557c2a0f4bbb6af723bc2",
   "checks": [
-    {
-      "lane": "backend",
-      "package": "./internal/order/app"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/order/http"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/order/store",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/store",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/store",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/crmcli"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/order_export_postgres_integration_test.go",
-      "test": "TestPostgreSQLUnifiedOrderExportHTTPAndCLI",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/config/http",
-      "test": "TestOpenAPIDownloadIsAuthenticatedAndMatchesTheReleaseSource"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/orderAdapter.test.mjs"
-    },
     {
       "lane": "frontend",
       "path": "scripts/validate-openapi.mjs"
     }
   ],
-  "build_commands": [],
+  "build_commands": [
+    "./cmd/migrate-collected-phones"
+  ],
   "installed_checks": [
-    "commerce-readback"
+    "commerce-readback",
+    "periodic-contact",
+    "audience-send-history",
+    "audience-confirmation"
   ]
 }

@@ -154,19 +154,31 @@ type IdentityTargetDisposition struct {
 }
 
 type Service struct {
-	ExcelSnapshot   func(context.Context, aiassistantport.PlanID, int64) (string, error)
-	uow             platformport.UnitOfWork
-	store           Store
-	customers       CustomerReader
-	staff           StaffReader
-	materials       MaterialResolver
-	identities      identityport.Resolver
-	trustedValues   identityport.ExternalIdentityValueReader
-	outbound        outboundport.PrivateMessageIntentWriter
-	dispatchEnabled bool
-	reconciler      effectport.UnknownReconciler
-	excelStrategies operationport.StrategyReader
-	now             func() time.Time
+	ExcelSnapshot             func(context.Context, aiassistantport.PlanID, int64) (string, error)
+	manualAudienceRunApproval func(context.Context, aiassistantport.PlanID) error
+	uow                       platformport.UnitOfWork
+	store                     Store
+	customers                 CustomerReader
+	staff                     StaffReader
+	materials                 MaterialResolver
+	identities                identityport.Resolver
+	trustedValues             identityport.ExternalIdentityValueReader
+	outbound                  outboundport.PrivateMessageIntentWriter
+	dispatchEnabled           bool
+	reconciler                effectport.UnknownReconciler
+	excelStrategies           operationport.StrategyReader
+	now                       func() time.Time
+}
+
+// BindManualAudienceRunApprovalValidator installs Automation's transactional
+// retirement check for newly accepted manual audience-run plans. The callback
+// is required for this source kind and receives the AI acceptance transaction.
+func (s *Service) BindManualAudienceRunApprovalValidator(validate func(context.Context, aiassistantport.PlanID) error) error {
+	if s == nil || validate == nil {
+		return ErrUnavailable
+	}
+	s.manualAudienceRunApproval = validate
+	return nil
 }
 
 // BindExcelBatchStrategyReader supplies the only cross-domain dependency for
@@ -859,6 +871,14 @@ func (s *Service) approvePlan(ctx context.Context, command aiassistantport.Appro
 		preview := approvalPreview(plan, recipients, contents)
 		if preview.PreviewDigest != command.PreviewDigest {
 			return ErrConflict
+		}
+		if plan.SourceKind == "automation.manual_audience_run.v1" {
+			if s.manualAudienceRunApproval == nil {
+				return ErrUnavailable
+			}
+			if err = s.manualAudienceRunApproval(tx, plan.ID); err != nil {
+				return err
+			}
 		}
 		aggregate, err := aiassistantdomain.Restore(plan)
 		if err != nil || aggregate.MarkApproved(command.ExpectedVersion, s.nowUTC()) != nil {

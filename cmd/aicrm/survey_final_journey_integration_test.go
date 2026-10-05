@@ -435,9 +435,38 @@ func TestSurveyOAuthSubmissionResultJourneyPostgreSQL(t *testing.T) {
 	question := publishResult.Questionnaire.Questions[0]
 	submissionKey := surveyJourneyPublicKey("oauth-submission")
 	answer := map[string]any{"version": publishResult.Questionnaire.DefinitionVersion, "submission_key": submissionKey, "answers": []map[string]any{{"question_id": question.ID, "option_ids": []surveyport.ID{question.Options[0].ID}}}}
+	// The published API contract permits 200 Unicode characters for each
+	// public attribution field; byte counts must not reject valid metadata.
+	answer["source_channel"] = strings.Repeat("渠", 200)
+	answer["campaign_id"] = strings.Repeat("😀", 200)
 	submitBody, err := json.Marshal(answer)
 	if err != nil {
 		t.Fatal(err)
+	}
+	legacyStaffBody, err := json.Marshal(map[string]any{
+		"version":        publishResult.Questionnaire.DefinitionVersion,
+		"submission_key": submissionKey,
+		"answers":        answer["answers"],
+		"staff_id":       "client-supplied-owner",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var submissionsBeforeLegacyRequest int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM survey_submissions WHERE questionnaire_id=$1`, publishResult.Questionnaire.ID).Scan(&submissionsBeforeLegacyRequest); err != nil {
+		t.Fatal(err)
+	}
+	legacyStaffRejected := surveyJourneyServe(t, handler, http.MethodPost, "/api/public/questionnaires/oauth-journey/submissions", legacyStaffBody, "", cookies, "")
+	var legacyStaffError struct {
+		Code string `json:"code"`
+	}
+	mustSurveyJourneyJSON(t, legacyStaffRejected, &legacyStaffError)
+	var submissionsAfterLegacyRequest int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM survey_submissions WHERE questionnaire_id=$1`, publishResult.Questionnaire.ID).Scan(&submissionsAfterLegacyRequest); err != nil {
+		t.Fatal(err)
+	}
+	if legacyStaffRejected.Code != http.StatusBadRequest || legacyStaffError.Code != "invalid_public_input" || submissionsAfterLegacyRequest != submissionsBeforeLegacyRequest {
+		t.Fatalf("legacy staff_id request status=%d code=%q submissions before=%d after=%d body=%s", legacyStaffRejected.Code, legacyStaffError.Code, submissionsBeforeLegacyRequest, submissionsAfterLegacyRequest, legacyStaffRejected.Body.String())
 	}
 	concurrentSubmissions := surveyJourneyConcurrentSubmit(handler, "/api/public/questionnaires/oauth-journey/submissions", submitBody, cookies)
 	for _, submitted := range concurrentSubmissions {
@@ -451,6 +480,25 @@ func TestSurveyOAuthSubmissionResultJourneyPostgreSQL(t *testing.T) {
 		ResultToken string                       `json:"result_token"`
 	}
 	mustSurveyJourneyJSON(t, submitted, &submissionResult)
+	storedMetadata, err := submissions.GetSubmission(ctx, submissionResult.Receipt.SubmissionID)
+	if err != nil || storedMetadata.SourceChannel != answer["source_channel"] || storedMetadata.CampaignID != answer["campaign_id"] || storedMetadata.StaffID != "" {
+		t.Fatalf("valid Unicode metadata must persist intact: error=%v", err)
+	}
+	for _, field := range []string{"source_channel", "campaign_id"} {
+		overflow := make(map[string]any, len(answer))
+		for key, value := range answer {
+			overflow[key] = value
+		}
+		overflow[field] = strings.Repeat("界", 201)
+		overflowBody, e := json.Marshal(overflow)
+		if e != nil {
+			t.Fatal(e)
+		}
+		rejected := surveyJourneyServe(t, handler, http.MethodPost, "/api/public/questionnaires/oauth-journey/submissions", overflowBody, "", cookies, "")
+		if rejected.Code != http.StatusBadRequest {
+			t.Fatalf("%s above contract limit: status=%d", field, rejected.Code)
+		}
+	}
 	if submissionResult.Receipt.SubmissionID < 1 || submissionResult.ResultToken == "" || submissionResult.Receipt.ResultToken != "" {
 		t.Fatalf("submission receipt=%+v token=%q", submissionResult.Receipt, submissionResult.ResultToken)
 	}
@@ -511,8 +559,13 @@ func TestSurveyOAuthSubmissionResultJourneyPostgreSQL(t *testing.T) {
 	if _, err = definitions.Publish(ctx, edited.ID, edited.Version, actorID, "survey-oauth-republish-0001"); err != nil {
 		t.Fatal(err)
 	}
+	// Simulate an imported historical row: its old owner attribution remains
+	// readable through Submission while new submissions leave the column blank.
+	if _, err = native.Exec(ctx, `UPDATE survey_submissions SET staff_id='legacy-imported-owner' WHERE id=$1`, submissionResult.Receipt.SubmissionID); err != nil {
+		t.Fatal(err)
+	}
 	historical, err := submissions.GetSubmission(ctx, submissionResult.Receipt.SubmissionID)
-	if err != nil || historical.DefinitionVersion != initialDefinitionVersion || historical.QuestionnaireTitle != "OAuth journey" || len(historical.Answers) != 1 || len(historical.Answers[0].SelectedOptions) != 1 || historical.Answers[0].SelectedOptions[0].OptionText != "Yes" {
+	if err != nil || historical.DefinitionVersion != initialDefinitionVersion || historical.QuestionnaireTitle != "OAuth journey" || historical.StaffID != "legacy-imported-owner" || len(historical.Answers) != 1 || len(historical.Answers[0].SelectedOptions) != 1 || historical.Answers[0].SelectedOptions[0].OptionText != "Yes" {
 		t.Fatalf("historical submission=%+v err=%v", historical, err)
 	}
 	analytics := surveyJourneyServe(t, handler, http.MethodGet, fmt.Sprintf("/api/admin/questionnaires/%d/results", publishResult.Questionnaire.ID), nil, "", nil, "")

@@ -71,8 +71,8 @@ func templateCatalog() []Template {
 		{Key: "member_excluding_group_paid", Available: true, TemplateVersion: 1, Label: "有效会员排除群与已购商品", Description: "有效会员，排除指定群成员与指定已购商品；群事实缺失或过期时停止刷新。", DefaultRefreshMode: "daily_0200", Fields: append(owner(), TemplateField{Name: "exclude_group_chat", Label: "排除的企微群引用", Type: "string", Required: true}, TemplateField{Name: "excluded_product_codes", Label: "排除的已购商品编码", Type: "string_list", Required: true, MinItems: &minimumOne})},
 		{Key: "hxc_registration", Available: true, TemplateVersion: 1, Label: "黄小璨注册状态", Description: "有效企微联系人，按完整黄小璨来源的注册覆盖证据筛选；未知不纳入。", DefaultRefreshMode: "every_3m", Fields: append(owner(), TemplateField{Name: "registration_status", Label: "黄小璨注册状态", Type: "enum", Required: true, Enum: []string{"registered", "unregistered"}, Default: "unregistered"})},
 		{Key: "wecom_contact_registration", Available: true, TemplateVersion: 1, Label: "企微联系人与注册状态", Description: "按负责人、企微联系人状态和注册状态圈选。", DefaultRefreshMode: "every_3m", Fields: append(owner(), TemplateField{Name: "contact_statuses", Label: "联系人状态", Type: "enum_list", Required: true, Enum: []string{"active", "deleted"}, Default: []string{"active"}}, TemplateField{Name: "registration_status", Label: "注册状态", Type: "enum", Required: true, Enum: []string{"any", "registered", "unregistered"}, Default: "any"})},
-		{Key: "questionnaire_submissions", Available: true, TemplateVersion: 1, Label: "问卷提交", Description: "提交任一所选问卷且已归属客户；不限题型、答案或提交次数。", DefaultRefreshMode: "every_3m", Fields: append(withOwner([]TemplateField{{Name: "questionnaires", Label: "问卷", Type: "reference_list", Required: true, Reference: "questionnaire", MinItems: &minimumOne}}), TemplateField{Name: "require_wecom_identity", Label: "要求已识别企微身份（不限制联系人状态）", Type: "boolean", Required: true, Default: true})},
-		{Key: "questionnaire_choice_answers", Available: true, TemplateVersion: 1, Label: "问卷选择题答案", Description: "按首次完整提交的选择题答案圈选；题间 AND、题内选项 OR。", DefaultRefreshMode: "every_3m", Fields: withOwner([]TemplateField{{Name: "questionnaire", Label: "问卷", Type: "reference", Required: true, Reference: "questionnaire"}, {Name: "conditions", Label: "题目条件", Type: "condition_list", Required: true, MinItems: &minimumOne}})},
+		{Key: "questionnaire_submissions", Available: true, TemplateVersion: 1, Label: "问卷提交", Description: "提交任一所选问卷且已归属客户；不限题型、答案或提交次数。", DefaultRefreshMode: "every_3m", Fields: append([]TemplateField{{Name: "questionnaires", Label: "问卷", Type: "reference_list", Required: true, Reference: "questionnaire", MinItems: &minimumOne}}, TemplateField{Name: "require_wecom_identity", Label: "要求已识别企微身份（不限制联系人状态）", Type: "boolean", Required: true, Default: true})},
+		{Key: "questionnaire_choice_answers", Available: true, TemplateVersion: 1, Label: "问卷选择题答案", Description: "按首次完整提交的选择题答案圈选；题间 AND、题内选项 OR。", DefaultRefreshMode: "every_3m", Fields: []TemplateField{{Name: "questionnaire", Label: "问卷", Type: "reference", Required: true, Reference: "questionnaire"}, {Name: "conditions", Label: "题目条件", Type: "condition_list", Required: true, MinItems: &minimumOne}}},
 		{Key: "paid_order", Available: true, TemplateVersion: 1, Label: "已支付订单", Description: "按商品、支付时间、负责人和有效企微联系人圈选。", DefaultRefreshMode: "every_3m", Fields: append(withOwner([]TemplateField{{Name: "products", Label: "商品", Type: "reference_list", Required: true, Reference: "product", MinItems: &minimumOne}, {Name: "paid_at_from", Label: "支付时间起点", Type: "datetime"}, {Name: "paid_at_to", Label: "支付时间终点（不含）", Type: "datetime"}}), TemplateField{Name: "require_active_wecom_contact", Label: "要求有效企微联系人", Type: "boolean", Required: true, Default: true})},
 		{Key: "channel_entry", Available: true, TemplateVersion: 1, Label: "渠道进入", Description: "按渠道和距进入时间窗口圈选。", DefaultRefreshMode: "every_3m", Fields: append(withOwner([]TemplateField{{Name: "channels", Label: "渠道", Type: "reference_list", Required: true, Reference: "channel", MinItems: &minimumOne}, {Name: "entered_days_min", Label: "距进入最少天数", Type: "integer", Required: true, Default: 0, Minimum: intPointer(0)}, {Name: "entered_days_max", Label: "距进入最大天数（不含）", Type: "integer", Minimum: intPointer(1)}}), TemplateField{Name: "require_active_wecom_contact", Label: "要求有效企微联系人", Type: "boolean", Required: true, Default: true})},
 		{Key: "radar_first_click_elapsed", Available: true, TemplateVersion: 1, Label: "雷达首次点击距今", Description: "多个雷达 OR，以首次可归因点击为时间锚点。", DefaultRefreshMode: "every_3m", Fields: withOwner([]TemplateField{{Name: "radars", Label: "雷达", Type: "reference_list", Required: true, Reference: "radar", MinItems: &minimumOne}, {Name: "elapsed_min", Label: "最小经过时间", Type: "integer", Required: true, Default: 0, Minimum: intPointer(0)}, {Name: "elapsed_max", Label: "最大经过时间（不含）", Type: "integer", Minimum: intPointer(1)}, {Name: "elapsed_unit", Label: "时间单位", Type: "enum", Required: true, Enum: []string{"hour", "day"}, Default: "day"}})},
@@ -102,9 +102,9 @@ func DefaultDefinition(templateKey string) (json.RawMessage, error) {
 	case "wecom_contact_registration":
 		parameters = map[string]any{"owner_scope": "all", "owner_staff_ids": []string{}, "contact_statuses": []string{"active"}, "registration_status": "any"}
 	case "questionnaire_submissions":
-		parameters = map[string]any{"questionnaire_ids": []string{"__configure__"}, "owner_scope": "all", "owner_staff_ids": []string{}, "require_wecom_identity": true}
+		parameters = map[string]any{"questionnaire_ids": []string{"__configure__"}, "require_wecom_identity": true}
 	case "questionnaire_choice_answers":
-		parameters = map[string]any{"questionnaire_id": "__configure__", "conditions": []any{map[string]any{"question_id": "__configure__", "option_ids": []string{"__configure__"}}}, "owner_scope": "all", "owner_staff_ids": []string{}}
+		parameters = map[string]any{"questionnaire_id": "__configure__", "conditions": []any{map[string]any{"question_id": "__configure__", "option_ids": []string{"__configure__"}}}}
 	case "paid_order":
 		parameters = map[string]any{"product_codes": []string{"__configure__"}, "paid_at_from": "", "paid_at_to": "", "owner_scope": "all", "owner_staff_ids": []string{}, "require_active_wecom_contact": true}
 	case "channel_entry":
@@ -197,10 +197,10 @@ func validDefinition(input DefinitionInput) bool {
 	case "questionnaire_submissions":
 		ids, ok := stringsOf(input.Parameters, "questionnaire_ids", 1, 100)
 		_, boolOK := boolOf(input.Parameters, "require_wecom_identity")
-		return owner && ok && validStrings(ids, 1, 100) && boolOK && keys(input.Parameters, "questionnaire_ids", "owner_scope", "owner_staff_ids", "require_wecom_identity")
+		return ok && validStrings(ids, 1, 100) && boolOK && surveyKeys(input, "questionnaire_ids", "require_wecom_identity")
 	case "questionnaire_choice_answers":
 		questionnaire, ok := stringOf(input.Parameters, "questionnaire_id")
-		if !owner || !ok || questionnaire == "" || !keys(input.Parameters, "questionnaire_id", "conditions", "owner_scope", "owner_staff_ids") {
+		if !ok || questionnaire == "" || !surveyKeys(input, "questionnaire_id", "conditions") {
 			return false
 		}
 		var conditions []struct {
@@ -245,6 +245,15 @@ func validDefinition(input DefinitionInput) bool {
 	default:
 		return false
 	}
+}
+
+// Preserve legacy all/empty definitions byte-semantically; new definitions do
+// not need employee metadata. Specified selections stay explicitly invalid.
+func surveyKeys(input DefinitionInput, expected ...string) bool {
+	if segmentport.SurveyOwnerSelectionRetired(input.TemplateKey, input.Parameters) {
+		return false
+	}
+	return keys(input.Parameters, expected...) || keys(input.Parameters, append(expected, "owner_scope", "owner_staff_ids")...)
 }
 
 func validPaidFriendRule(values map[string]json.RawMessage) bool {

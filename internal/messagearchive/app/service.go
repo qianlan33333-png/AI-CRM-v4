@@ -54,11 +54,12 @@ type MediaReference struct {
 }
 
 type SyncRun struct {
-	CorpScope         string
-	Trigger           string
-	WebhookDeliveryID int64
-	StartSeq          uint64
-	StartedAt         time.Time
+	CorpScope               string
+	Trigger                 string
+	WebhookDeliveryID       int64
+	StartSeq                uint64
+	StartedAt               time.Time
+	RecoverPreviousAttempts bool
 }
 type SyncRunFinish struct {
 	EndSeq     uint64
@@ -128,7 +129,7 @@ func (service Service) ProcessArchiveDelivery(ctx context.Context, delivery arch
 		return ErrProviderPage
 	}
 	started := service.now().UTC()
-	cursor, err := service.cursor(ctx)
+	cursor, err := service.cursor(ctx, delivery)
 	if err != nil {
 		return err
 	}
@@ -137,15 +138,21 @@ func (service Service) ProcessArchiveDelivery(ctx context.Context, delivery arch
 		return err
 	}
 	endCursor := cursor
-	finish := func(status, code string) {
-		finishCtx := context.Background()
-		_ = service.UOW.Within(finishCtx, func(tx context.Context) error {
+	finish := func(status, code string) error {
+		finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return service.UOW.Within(finishCtx, func(tx context.Context) error {
+			if err := delivery.RequireCurrentAttempt(tx); err != nil {
+				return err
+			}
 			return service.Store.FinishRun(tx, runID, SyncRunFinish{EndSeq: endCursor, Status: status, ErrorCode: code, FinishedAt: service.now().UTC()})
 		})
 	}
 	defer func() {
 		if resultErr != nil {
-			finish("failed", safeErrorCode(resultErr))
+			if finishErr := finish("failed", safeErrorCode(resultErr)); finishErr != nil {
+				resultErr = errors.Join(resultErr, archiveport.ErrRunFinalizationFailed, finishErr)
+			}
 		}
 	}()
 
@@ -156,6 +163,9 @@ func (service Service) ProcessArchiveDelivery(ctx context.Context, delivery arch
 		}
 		if len(encrypted) == 0 {
 			if err = service.UOW.Within(ctx, func(tx context.Context) error {
+				if err := delivery.RequireCurrentAttempt(tx); err != nil {
+					return err
+				}
 				return service.Store.FinishRun(tx, runID, SyncRunFinish{EndSeq: cursor, Status: "succeeded", FinishedAt: service.now().UTC()})
 			}); err != nil {
 				return err
@@ -172,7 +182,7 @@ func (service Service) ProcessArchiveDelivery(ctx context.Context, delivery arch
 		messages, issues, trusted, next, normalizeErr := service.normalizePage(encrypted, plain)
 		if normalizeErr != nil {
 			if len(issues) == 1 {
-				if recordErr := service.recordBlockedIssue(ctx, issues[0]); recordErr != nil {
+				if recordErr := service.recordBlockedIssue(ctx, delivery, issues[0]); recordErr != nil {
 					return recordErr
 				}
 			}
@@ -183,6 +193,9 @@ func (service Service) ProcessArchiveDelivery(ctx context.Context, delivery arch
 		// while this transaction is held.
 		var committed BatchResult
 		err = service.UOW.Within(ctx, func(tx context.Context) error {
+			if err := delivery.RequireCurrentAttempt(tx); err != nil {
+				return err
+			}
 			if resolveErr := service.resolveParticipants(tx, messages, trusted); resolveErr != nil {
 				return resolveErr
 			}
@@ -192,7 +205,7 @@ func (service Service) ProcessArchiveDelivery(ctx context.Context, delivery arch
 			return commitErr
 		})
 		if errors.Is(err, ErrCursorAdvanced) {
-			cursor, err = service.cursor(ctx)
+			cursor, err = service.cursor(ctx, delivery)
 			if err != nil {
 				return err
 			}
@@ -308,9 +321,12 @@ func (service Service) resolveParticipants(ctx context.Context, messages []domai
 	return nil
 }
 
-func (service Service) cursor(ctx context.Context) (uint64, error) {
+func (service Service) cursor(ctx context.Context, delivery archiveport.InboxDelivery) (uint64, error) {
 	var value uint64
 	err := service.UOW.Within(ctx, func(tx context.Context) error {
+		if err := delivery.RequireCurrentAttempt(tx); err != nil {
+			return err
+		}
 		var err error
 		value, err = service.Store.CommittedCursor(tx, service.CorpScope)
 		return err
@@ -320,8 +336,11 @@ func (service Service) cursor(ctx context.Context) (uint64, error) {
 func (service Service) startRun(ctx context.Context, delivery archiveport.InboxDelivery, cursor uint64, started time.Time) (int64, error) {
 	var id int64
 	err := service.UOW.Within(ctx, func(tx context.Context) error {
+		if err := delivery.RequireCurrentAttempt(tx); err != nil {
+			return err
+		}
 		var err error
-		id, err = service.Store.StartRun(tx, SyncRun{CorpScope: service.CorpScope, Trigger: "notify", WebhookDeliveryID: delivery.ID, StartSeq: cursor, StartedAt: started})
+		id, err = service.Store.StartRun(tx, SyncRun{CorpScope: service.CorpScope, Trigger: "notify", WebhookDeliveryID: delivery.ID, StartSeq: cursor, StartedAt: started, RecoverPreviousAttempts: delivery.CheckCurrentAttempt != nil})
 		return err
 	})
 	return id, err
@@ -591,8 +610,11 @@ func attachTrustedParticipants(message *domain.Message, identities []wecomport.T
 	}
 }
 
-func (service Service) recordBlockedIssue(ctx context.Context, issue IngestIssue) error {
+func (service Service) recordBlockedIssue(ctx context.Context, delivery archiveport.InboxDelivery, issue IngestIssue) error {
 	return service.UOW.Within(ctx, func(tx context.Context) error {
+		if err := delivery.RequireCurrentAttempt(tx); err != nil {
+			return err
+		}
 		return service.Store.RecordBlockedIssue(tx, service.CorpScope, issue, service.now().UTC())
 	})
 }

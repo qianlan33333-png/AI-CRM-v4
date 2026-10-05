@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"math"
@@ -352,6 +353,113 @@ func TestCreateCanonicalLegacyProjectionParticipatesInIdempotency(t *testing.T) 
 	if events.events[0].Type != productport.EventProductCreated || string(events.events[0].Payload) != `{"product_id":1,"actor":7}` {
 		t.Fatalf("event = %+v", events.events[0])
 	}
+}
+
+func TestCreateReplaysLegacyStockSnapshotWithoutWideningPayloadCompatibility(t *testing.T) {
+	store := &productTestStore{productReceipts: map[string]Receipt{}}
+	events := &productTestEvents{}
+	service := NewService(&productTestUoW{}, store, events)
+	command := productport.CreateCommand{
+		ProductCode: "old-stock-create", Name: "旧商品", Description: "说明", PriceMinor: 1200, Currency: "CNY", StockQuantity: 17,
+		Images: []string{}, Actor: 7, IdempotencyKey: "old-stock-create-key-001", LegacyAdminProjection: DefaultLegacyAdminProjection(),
+	}
+	normalized, _, err := normalize(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := productport.Product{
+		ID: 71, ProductCode: normalized.ProductCode, Name: normalized.Name, Description: normalized.Description,
+		PriceMinor: normalized.PriceMinor, Currency: normalized.Currency, Images: normalized.Images,
+		CreatedBy: normalized.Actor, CreatedAt: time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC), Version: 1, LegacyAdminProjection: normalized.LegacyAdminProjection,
+	}
+	snapshot := retiredStockProductSnapshot(t, result, 17)
+	keyDigest := sha256.Sum256([]byte(command.IdempotencyKey))
+	reservation := Reservation{Operation: "create", ActorScope: "admin:7", KeyDigest: keyDigest}
+	payloadDigest := legacyProductCreateDigest(normalized, 17)
+	store.productReceipts[receiptKey(reservation)] = Receipt{
+		ID: 1, Operation: reservation.Operation, ActorScope: reservation.ActorScope, KeyDigest: keyDigest,
+		PayloadDigest: payloadDigest, State: "completed", ResultSnapshot: snapshot,
+	}
+
+	replayed, err := service.Create(context.Background(), command)
+	if err != nil || replayed.ID != result.ID || replayed.StockQuantity != 0 || store.createCalls != 0 || len(events.events) != 0 {
+		t.Fatalf("legacy stock create replay=%+v err=%v creates=%d events=%d", replayed, err, store.createCalls, len(events.events))
+	}
+	changed := command
+	changed.Name = "same key but changed product"
+	if _, err = service.Create(context.Background(), changed); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed product payload error=%v, want conflict", err)
+	}
+	var tampered map[string]json.RawMessage
+	if err = json.Unmarshal(snapshot, &tampered); err != nil {
+		t.Fatal(err)
+	}
+	tampered["unknown_snapshot_field"] = json.RawMessage(`true`)
+	tamperedSnapshot, _ := json.Marshal(tampered)
+	receipt := store.productReceipts[receiptKey(reservation)]
+	receipt.ResultSnapshot = tamperedSnapshot
+	store.productReceipts[receiptKey(reservation)] = receipt
+	if _, err = service.Create(context.Background(), command); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unknown snapshot field error=%v, want unavailable", err)
+	}
+}
+
+func TestUpdateReplaysLegacyStockSnapshotWithoutWideningPayloadCompatibility(t *testing.T) {
+	store := &productTestStore{productReceipts: map[string]Receipt{}}
+	service := NewService(&productTestUoW{}, store, &productTestEvents{})
+	command := productport.UpdateCommand{
+		ID: 72, ExpectedVersion: 4, Name: "更新旧商品", Description: "说明", PriceMinor: 1500, Currency: "CNY", StockQuantity: 9,
+		Images: []string{"https://img.example.test/product.png"}, Actor: 7, IdempotencyKey: "old-stock-update-key-01",
+		LegacyAdminProjection: DefaultLegacyAdminProjection(),
+	}
+	normalized, _, err := normalizeUpdate(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := productport.Product{
+		ID: command.ID, ProductCode: "old-stock-update", Name: normalized.Name, Description: normalized.Description,
+		PriceMinor: normalized.PriceMinor, Currency: normalized.Currency, Images: normalized.Images,
+		CreatedBy: normalized.Actor, CreatedAt: time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC), Version: 5, LegacyAdminProjection: normalized.LegacyAdminProjection,
+	}
+	snapshot := retiredStockProductSnapshot(t, result, 9)
+	keyDigest := sha256.Sum256([]byte(command.IdempotencyKey))
+	reservation := Reservation{Operation: "update", ActorScope: "admin:7", KeyDigest: keyDigest}
+	payloadDigest := legacyProductUpdateDigest(normalized, 9)
+	store.productReceipts[receiptKey(reservation)] = Receipt{
+		ID: 2, Operation: reservation.Operation, ActorScope: reservation.ActorScope, KeyDigest: keyDigest,
+		PayloadDigest: payloadDigest, State: "completed", ResultSnapshot: snapshot,
+	}
+
+	replayed, err := service.Update(context.Background(), command)
+	if err != nil || replayed.ID != result.ID || replayed.StockQuantity != 0 || len(store.products) != 0 {
+		t.Fatalf("legacy stock update replay=%+v err=%v products=%d", replayed, err, len(store.products))
+	}
+	changed := command
+	changed.PriceMinor++
+	if _, err = service.Update(context.Background(), changed); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed update payload error=%v, want conflict", err)
+	}
+}
+
+func retiredStockProductSnapshot(t *testing.T, product productport.Product, stock int32) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(product)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	stockJSON, _ := json.Marshal(stock)
+	snapshot["stock_quantity"] = stockJSON
+	raw, err = json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func TestListLegacyReturnsBoundedOffsetPageAndExactTotal(t *testing.T) {

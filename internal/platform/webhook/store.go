@@ -172,6 +172,21 @@ func (*PostgreSQLStore) Get(ctx context.Context, id int64) (Delivery, error) {
 	return delivery, err
 }
 
+func (*PostgreSQLStore) RequireCurrentClaim(ctx context.Context, id int64, provider string, attempt int) error {
+	tx, err := platformpostgres.RequireTransaction(ctx)
+	if err != nil {
+		return err
+	}
+	var current int64
+	err = tx.QueryRow(ctx, `SELECT id FROM webhook_inbox
+		WHERE id=$1 AND provider=$2 AND status='processing' AND attempt_count=$3
+		FOR UPDATE`, id, provider, attempt).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrConcurrentUpdate
+	}
+	return err
+}
+
 type deliveryScanner interface {
 	Scan(...any) error
 }

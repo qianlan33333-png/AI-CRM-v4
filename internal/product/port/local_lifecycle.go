@@ -25,13 +25,14 @@ const (
 // contract; the write service preserves it only through its typed Product
 // repository boundary.
 type LocalProduct struct {
-	ID            ID                    `json:"id"`
-	ProductCode   string                `json:"product_code"`
-	Name          string                `json:"name"`
-	Description   string                `json:"description"`
-	PriceMinor    int64                 `json:"price_minor"`
-	Currency      string                `json:"currency"`
-	StockQuantity int32                 `json:"stock_quantity"`
+	ID          ID     `json:"id"`
+	ProductCode string `json:"product_code"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	PriceMinor  int64  `json:"price_minor"`
+	Currency    string `json:"currency"`
+	// StockQuantity is retained only to decode old idempotency snapshots.
+	StockQuantity int32                 `json:"-"`
 	Images        []string              `json:"images"`
 	CreatedBy     int64                 `json:"created_by"`
 	CreatedAt     time.Time             `json:"created_at"`

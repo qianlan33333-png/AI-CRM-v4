@@ -140,13 +140,13 @@ func (r *Repository) LockDirectPushRate(ctx context.Context, packageID int64, cu
 	_, err = t.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, fmt.Sprintf("audience-direct-push:%d:%d", packageID, customerID))
 	return err
 }
-func (r *Repository) CountRecentDirectPushes(ctx context.Context, packageID int64, customerID customerdomain.CustomerID, after time.Time) (int, error) {
+func (r *Repository) CountRecentDirectPushes(ctx context.Context, packageID int64, customerIDs []customerdomain.CustomerID, after time.Time) (int, error) {
 	t, err := tx(ctx)
 	if err != nil {
 		return 0, err
 	}
 	var n int
-	err = t.QueryRow(ctx, `SELECT count(*) FROM automation_audience_push_items WHERE package_id=$1 AND customer_id=$2 AND created_at>$3 AND send_state<>'cancelled'`, packageID, customerID, after.UTC()).Scan(&n)
+	err = t.QueryRow(ctx, `SELECT count(*) FROM automation_audience_push_items WHERE package_id=$1 AND customer_id=ANY($2::bigint[]) AND created_at>$3 AND send_state<>'cancelled'`, packageID, customerIDs, after.UTC()).Scan(&n)
 	return n, err
 }
 

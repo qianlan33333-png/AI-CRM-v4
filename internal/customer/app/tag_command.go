@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	platformaudit "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/audit"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/platform/idempotency"
 	platformoutbox "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/outbox"
@@ -33,6 +35,7 @@ type TagCommandService struct {
 	store   TagCommandStore
 	effects effectport.TransactionalAccepter
 	gate    customerport.TagCommandTargetGate
+	lineage identityport.WriteLockedCanonicalLineagesReader
 	audit   interface {
 		Append(context.Context, platformaudit.Event) (platformaudit.Event, error)
 	}
@@ -47,6 +50,14 @@ func NewTagCommandService(uow platformport.UnitOfWork, store TagCommandStore, ef
 		return nil, customerport.ErrTagCommandUnavailable
 	}
 	return &TagCommandService{uow: uow, store: store, effects: effects, gate: gate, audit: audit, outbox: outbox, now: time.Now}, nil
+}
+
+func (s *TagCommandService) BindCanonicalLineages(reader identityport.WriteLockedCanonicalLineagesReader) error {
+	if s == nil || reader == nil {
+		return customerport.ErrTagCommandInvalid
+	}
+	s.lineage = reader
+	return nil
 }
 func (s *TagCommandService) PreviewTagCommand(ctx context.Context, c customerport.TagCommand) (customerport.TagCommandResult, error) {
 	if s == nil || s.gate == nil || !validTagCommand(c) {
@@ -95,7 +106,39 @@ func (s *TagCommandService) SubmitTagCommandWithin(ctx context.Context, c custom
 	// Lock each canonical Customer row before accepting a different command.
 	// This makes concurrent opposite add/remove requests deterministic and
 	// keeps an outcome_unknown effect bound to its original key until terminal.
-	if err = s.store.LockTagCommandTargets(ctx, canonical); err != nil {
+	idleTargets := canonical
+	if s.lineage != nil {
+		ids := make([]customerdomain.CustomerID, len(canonical))
+		for i, target := range canonical {
+			ids[i] = target.CustomerID
+		}
+		lineages, e := s.lineage.WriteLockedCanonicalLineages(ctx, ids)
+		if e != nil {
+			return customerport.TagCommandResult{}, customerport.ErrTagCommandUnavailable
+		}
+		all := make(map[customerdomain.CustomerID]struct{})
+		roots := make(map[customerdomain.CustomerID]struct{})
+		for i, id := range ids {
+			members := lineages[id]
+			if len(members) == 0 || members[0] < 1 {
+				return customerport.TagCommandResult{}, customerport.ErrTagCommandUnavailable
+			}
+			if _, duplicate := roots[members[0]]; duplicate {
+				return customerport.TagCommandResult{}, customerport.ErrTagCommandConflict
+			}
+			roots[members[0]] = struct{}{}
+			canonical[i].CustomerID = members[0]
+			for _, member := range members {
+				all[member] = struct{}{}
+			}
+		}
+		c.Targets = canonicalTargets(canonical)
+		idleTargets = make([]customerport.TagCommandTarget, 0, len(all))
+		for id := range all {
+			idleTargets = append(idleTargets, customerport.TagCommandTarget{CustomerID: id})
+		}
+		idleTargets = canonicalTargets(idleTargets)
+	} else if err = s.store.LockTagCommandTargets(ctx, canonical); err != nil {
 		return customerport.TagCommandResult{}, err
 	}
 	// A same-key concurrent caller may have committed while this transaction
@@ -110,7 +153,7 @@ func (s *TagCommandService) SubmitTagCommandWithin(ctx context.Context, c custom
 		}
 		return prior, nil
 	}
-	if err = s.store.EnsureTagCommandTargetsIdle(ctx, canonical); err != nil {
+	if err = s.store.EnsureTagCommandTargetsIdle(ctx, idleTargets); err != nil {
 		return customerport.TagCommandResult{}, err
 	}
 	id, err := s.store.CreateTagCommand(ctx, c, digest)

@@ -38,7 +38,7 @@ func (s LegacyTemplateSource) submissions(ctx context.Context, p map[string]json
 	}
 	out := map[int64]bool{}
 	for _, f := range facts {
-		if f.CustomerID <= 0 || f.SubmittedAt.IsZero() || f.SubmittedAt.After(at) || !contains(ids, strconv.FormatInt(int64(f.QuestionnaireID), 10)) || !owner(p, f.StaffID) {
+		if f.CustomerID <= 0 || f.SubmittedAt.IsZero() || f.SubmittedAt.After(at) || !contains(ids, strconv.FormatInt(int64(f.QuestionnaireID), 10)) {
 			continue
 		}
 		if require && !recognized[int64(f.CustomerID)] {

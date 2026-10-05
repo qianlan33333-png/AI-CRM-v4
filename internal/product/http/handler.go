@@ -226,7 +226,7 @@ func (h *Handler) ordinaryRoot(w http.ResponseWriter, r *http.Request) {
 		}
 		product, err := h.catalog.Create(r.Context(), productport.CreateCommand{
 			ProductCode: body.ProductCode, Name: body.Name, Description: body.Description,
-			PriceMinor: body.PriceMinor, Currency: body.Currency, StockQuantity: body.StockQuantity,
+			PriceMinor: body.PriceMinor, Currency: body.Currency,
 			Images: body.Images, LegacyAdminProjection: projection, Actor: principal.InternalID,
 			DistributionPolicy: body.DistributionPolicy.command(), IdempotencyKey: key,
 		})
@@ -333,7 +333,7 @@ func (h *Handler) ordinaryTail(w http.ResponseWriter, r *http.Request, tail stri
 		product, updateErr := h.catalog.Update(r.Context(), productport.UpdateCommand{
 			ID: productport.ID(id), ExpectedVersion: body.ExpectedVersion, Name: body.Name,
 			Description: body.Description, PriceMinor: body.PriceMinor, Currency: body.Currency,
-			StockQuantity: body.StockQuantity, Images: body.Images, LegacyAdminProjection: body.AdminProjection,
+			Images: body.Images, LegacyAdminProjection: body.AdminProjection,
 			Actor: principal.InternalID, DistributionPolicy: body.DistributionPolicy.command(), IdempotencyKey: key,
 		})
 		if updateErr != nil {
@@ -581,7 +581,7 @@ func (h *Handler) serviceRoot(w http.ResponseWriter, r *http.Request) {
 		}
 		product, err := h.service.CreateServicePeriodProduct(r.Context(), productport.CreateServicePeriodProductCommand{
 			ProductCode: body.ProductCode, Name: body.Name, Description: body.Description,
-			PriceMinor: body.PriceMinor, Currency: body.Currency, DurationDays: body.DurationDays, StockQuantity: body.StockQuantity,
+			PriceMinor: body.PriceMinor, Currency: body.Currency, DurationDays: body.DurationDays,
 			Images: body.Images, AdminProjection: projection, Actor: principal.InternalID, DistributionPolicy: body.DistributionPolicy.command(), IdempotencyKey: key,
 		})
 		if err != nil {
@@ -719,7 +719,7 @@ func (h *Handler) serviceDetail(w http.ResponseWriter, r *http.Request, id int64
 		product, err := h.service.UpdateServicePeriodProduct(r.Context(), productport.UpdateServicePeriodProductCommand{
 			ID: productport.ID(id), ExpectedVersion: body.ExpectedVersion, Name: body.Name,
 			Description: body.Description, PriceMinor: body.PriceMinor, Currency: body.Currency,
-			DurationDays: body.DurationDays, StockQuantity: body.StockQuantity, Images: body.Images, AdminProjection: body.AdminProjection,
+			DurationDays: body.DurationDays, Images: body.Images, AdminProjection: body.AdminProjection,
 			Actor: principal.InternalID, DistributionPolicy: body.DistributionPolicy.command(), IdempotencyKey: key,
 		})
 		if err != nil {
@@ -1658,7 +1658,7 @@ type createRequest struct {
 	Description        string                     `json:"description"`
 	PriceMinor         int64                      `json:"price_minor"`
 	Currency           string                     `json:"currency"`
-	StockQuantity      int32                      `json:"stock_quantity"`
+	StockQuantity      json.RawMessage            `json:"stock_quantity"`
 	Images             []string                   `json:"images"`
 	AdminProjection    json.RawMessage            `json:"admin_projection"`
 	DistributionPolicy *distributionPolicyRequest `json:"distribution_policy"`
@@ -1670,7 +1670,7 @@ type updateRequest struct {
 	Description        string                     `json:"description"`
 	PriceMinor         int64                      `json:"price_minor"`
 	Currency           string                     `json:"currency"`
-	StockQuantity      int32                      `json:"stock_quantity"`
+	StockQuantity      json.RawMessage            `json:"stock_quantity"`
 	Images             []string                   `json:"images"`
 	AdminProjection    json.RawMessage            `json:"admin_projection"`
 	DistributionPolicy *distributionPolicyRequest `json:"distribution_policy"`
@@ -1683,7 +1683,7 @@ type serviceCreateRequest struct {
 	PriceMinor         int64                      `json:"price_minor"`
 	Currency           string                     `json:"currency"`
 	DurationDays       int32                      `json:"duration_days"`
-	StockQuantity      int32                      `json:"stock_quantity"`
+	StockQuantity      json.RawMessage            `json:"stock_quantity"`
 	Images             []string                   `json:"images"`
 	AdminProjection    json.RawMessage            `json:"admin_projection"`
 	DistributionPolicy *distributionPolicyRequest `json:"distribution_policy"`
@@ -1696,7 +1696,7 @@ type serviceUpdateRequest struct {
 	PriceMinor         int64                      `json:"price_minor"`
 	Currency           string                     `json:"currency"`
 	DurationDays       int32                      `json:"duration_days"`
-	StockQuantity      int32                      `json:"stock_quantity"`
+	StockQuantity      json.RawMessage            `json:"stock_quantity"`
 	Images             []string                   `json:"images"`
 	AdminProjection    json.RawMessage            `json:"admin_projection"`
 	DistributionPolicy *distributionPolicyRequest `json:"distribution_policy"`
@@ -1912,7 +1912,6 @@ type productResponse struct {
 	Description        string                            `json:"description"`
 	PriceMinor         int64                             `json:"price_minor"`
 	Currency           string                            `json:"currency"`
-	StockQuantity      int32                             `json:"stock_quantity"`
 	Images             []string                          `json:"images"`
 	AdminProjection    json.RawMessage                   `json:"admin_projection"`
 	CreatedBy          int64                             `json:"created_by"`
@@ -1932,7 +1931,7 @@ func productResponseFrom(value productport.Product) (productResponse, error) {
 	if err != nil || value.PaidOrderCount < 0 || value.RefundOrderCount < 0 || value.SoldCount < 0 || value.SoldCount != maxInt64(0, value.PaidOrderCount-value.RefundOrderCount) {
 		return productResponse{}, productapp.ErrUnavailable
 	}
-	return productResponse{ID: value.ID, ProductCode: value.ProductCode, Name: value.Name, Description: value.Description, PriceMinor: value.PriceMinor, Currency: value.Currency, StockQuantity: value.StockQuantity, Images: append([]string{}, value.Images...), AdminProjection: append(json.RawMessage(nil), value.LegacyAdminProjection...), CreatedBy: value.CreatedBy, CreatedAt: value.CreatedAt.UTC(), UpdatedAt: value.UpdatedAt.UTC(), Version: value.Version, Lifecycle: local.Lifecycle, Enabled: local.Enabled, PaidOrderCount: value.PaidOrderCount, RefundOrderCount: value.RefundOrderCount, SoldCount: value.SoldCount}, nil
+	return productResponse{ID: value.ID, ProductCode: value.ProductCode, Name: value.Name, Description: value.Description, PriceMinor: value.PriceMinor, Currency: value.Currency, Images: append([]string{}, value.Images...), AdminProjection: append(json.RawMessage(nil), value.LegacyAdminProjection...), CreatedBy: value.CreatedBy, CreatedAt: value.CreatedAt.UTC(), UpdatedAt: value.UpdatedAt.UTC(), Version: value.Version, Lifecycle: local.Lifecycle, Enabled: local.Enabled, PaidOrderCount: value.PaidOrderCount, RefundOrderCount: value.RefundOrderCount, SoldCount: value.SoldCount}, nil
 }
 
 type servicePeriodResponse struct {

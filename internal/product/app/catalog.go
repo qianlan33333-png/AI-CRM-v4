@@ -296,7 +296,7 @@ func (s *Service) Create(ctx context.Context, command productport.CreateCommand)
 		if !validReceipt(receipt, reservation) {
 			return ErrUnavailable
 		}
-		if subtle.ConstantTimeCompare(receipt.PayloadDigest[:], digest[:]) != 1 {
+		if owned && subtle.ConstantTimeCompare(receipt.PayloadDigest[:], digest[:]) != 1 {
 			return ErrConflict
 		}
 		if !owned {
@@ -308,8 +308,15 @@ func (s *Service) Create(ctx context.Context, command productport.CreateCommand)
 				return ErrUnavailable
 			}
 			canonical, e := snapshotJSON(snapshot)
-			if e != nil || !jsonEquivalent(canonical, receipt.ResultSnapshot) {
+			if e != nil || !jsonEquivalentIgnoringRetiredStock(canonical, receipt.ResultSnapshot) {
 				return ErrUnavailable
+			}
+			if subtle.ConstantTimeCompare(receipt.PayloadDigest[:], digest[:]) != 1 {
+				stock, hasRetiredStock := retiredStockFromSnapshot(receipt.ResultSnapshot)
+				legacyDigest := legacyProductCreateDigest(command, stock)
+				if !hasRetiredStock || subtle.ConstantTimeCompare(receipt.PayloadDigest[:], legacyDigest[:]) != 1 {
+					return ErrConflict
+				}
 			}
 			result = snapshot
 			return nil
@@ -318,6 +325,7 @@ func (s *Service) Create(ctx context.Context, command productport.CreateCommand)
 		if e != nil {
 			return e
 		}
+		result.StockQuantity = 0
 		if !validProduct(result) {
 			return ErrUnavailable
 		}
@@ -382,7 +390,7 @@ func (s *Service) Update(ctx context.Context, command productport.UpdateCommand)
 		if !validReceipt(receipt, reservation) {
 			return ErrUnavailable
 		}
-		if subtle.ConstantTimeCompare(receipt.PayloadDigest[:], digest[:]) != 1 {
+		if owned && subtle.ConstantTimeCompare(receipt.PayloadDigest[:], digest[:]) != 1 {
 			return ErrConflict
 		}
 		if !owned {
@@ -393,8 +401,15 @@ func (s *Service) Update(ctx context.Context, command productport.UpdateCommand)
 				return ErrUnavailable
 			}
 			canonical, e := snapshotJSON(result)
-			if e != nil || !jsonEquivalent(canonical, receipt.ResultSnapshot) {
+			if e != nil || !jsonEquivalentIgnoringRetiredStock(canonical, receipt.ResultSnapshot) {
 				return ErrUnavailable
+			}
+			if subtle.ConstantTimeCompare(receipt.PayloadDigest[:], digest[:]) != 1 {
+				stock, hasRetiredStock := retiredStockFromSnapshot(receipt.ResultSnapshot)
+				legacyDigest := legacyProductUpdateDigest(command, stock)
+				if !hasRetiredStock || subtle.ConstantTimeCompare(receipt.PayloadDigest[:], legacyDigest[:]) != 1 {
+					return ErrConflict
+				}
 			}
 			return nil
 		}
@@ -428,7 +443,7 @@ func (s *Service) Update(ctx context.Context, command productport.UpdateCommand)
 		}
 		nextLifecycle, projectionErr := projectLocalProduct(productport.Product{
 			ID: current.ID, ProductCode: current.ProductCode, Name: command.Name, Description: command.Description,
-			PriceMinor: command.PriceMinor, Currency: command.Currency, StockQuantity: command.StockQuantity, Images: command.Images,
+			PriceMinor: command.PriceMinor, Currency: command.Currency, Images: command.Images,
 			CreatedBy: current.CreatedBy, CreatedAt: current.CreatedAt, UpdatedAt: current.UpdatedAt, Version: current.Version,
 			LegacyAdminProjection: command.LegacyAdminProjection,
 		})
@@ -447,10 +462,10 @@ func (s *Service) Update(ctx context.Context, command productport.UpdateCommand)
 			!result.CreatedAt.Equal(current.CreatedAt) || !reflect.DeepEqual(result.Images, command.Images) ||
 			!jsonEquivalent(result.LegacyAdminProjection, command.LegacyAdminProjection) ||
 			result.Name != command.Name || result.Description != command.Description ||
-			result.PriceMinor != command.PriceMinor || result.Currency != command.Currency ||
-			result.StockQuantity != command.StockQuantity {
+			result.PriceMinor != command.PriceMinor || result.Currency != command.Currency {
 			return ErrUnavailable
 		}
+		result.StockQuantity = 0
 		if s.policy != nil {
 			if e = saveDistributionPolicyWithin(tx, s.policy, result.ID, distributiondomain.ProductTypeStandard, policy, command.Actor, command.IdempotencyKey); e != nil {
 				return e
@@ -491,12 +506,13 @@ func normalizeUpdate(c productport.UpdateCommand) (productport.UpdateCommand, [3
 	c.Name = strings.TrimSpace(c.Name)
 	c.Description = strings.TrimSpace(c.Description)
 	c.Currency = strings.ToUpper(strings.TrimSpace(c.Currency))
+	c.StockQuantity = 0
 	var projection json.RawMessage
 	var err error
 	if len(c.LegacyAdminProjection) > 0 {
 		projection, err = CanonicalLegacyAdminProjection(c.LegacyAdminProjection)
 	}
-	if c.ID < 1 || c.ExpectedVersion < 1 || c.ExpectedVersion == math.MaxInt64 || c.Actor < 1 || c.Name == "" || len(c.Name) > 200 || len(c.Description) > 10000 || c.PriceMinor < 0 || c.StockQuantity < 0 || len(c.Currency) != 3 || len(c.Images) > 20 || !validIdempotencyKey(c.IdempotencyKey) || err != nil {
+	if c.ID < 1 || c.ExpectedVersion < 1 || c.ExpectedVersion == math.MaxInt64 || c.Actor < 1 || c.Name == "" || len(c.Name) > 200 || len(c.Description) > 10000 || c.PriceMinor < 0 || len(c.Currency) != 3 || len(c.Images) > 20 || !validIdempotencyKey(c.IdempotencyKey) || err != nil {
 		return productport.UpdateCommand{}, [32]byte{}, ErrInvalidProduct
 	}
 	if projection != nil {
@@ -513,11 +529,10 @@ func normalizeUpdate(c productport.UpdateCommand) (productport.UpdateCommand, [3
 		ExpectedVersion             int64
 		Name, Description, Currency string
 		PriceMinor                  int64
-		StockQuantity               int32
 		Images                      []string
 		LegacyAdminProjection       json.RawMessage
 		DistributionPolicy          *productport.DistributionPolicy
-	}{int64(c.ID), c.ExpectedVersion, c.Name, c.Description, c.Currency, c.PriceMinor, c.StockQuantity, c.Images, c.LegacyAdminProjection, c.DistributionPolicy})
+	}{int64(c.ID), c.ExpectedVersion, c.Name, c.Description, c.Currency, c.PriceMinor, c.Images, c.LegacyAdminProjection, c.DistributionPolicy})
 	if err != nil {
 		return productport.UpdateCommand{}, [32]byte{}, ErrInvalidProduct
 	}
@@ -534,8 +549,9 @@ func normalize(c productport.CreateCommand) (productport.CreateCommand, [32]byte
 	c.ProductCode = strings.TrimSpace(c.ProductCode)
 	c.Description = strings.TrimSpace(c.Description)
 	c.Currency = strings.ToUpper(strings.TrimSpace(c.Currency))
+	c.StockQuantity = 0
 	projection, err := CanonicalLegacyAdminProjection(c.LegacyAdminProjection)
-	if c.Actor < 1 || c.ProductCode == "" || len(c.ProductCode) > 200 || c.Name == "" || len(c.Name) > 200 || len(c.Description) > 10000 || c.PriceMinor < 0 || c.StockQuantity < 0 || len(c.Currency) != 3 || len(c.Images) > 20 || !validIdempotencyKey(c.IdempotencyKey) || err != nil {
+	if c.Actor < 1 || c.ProductCode == "" || len(c.ProductCode) > 200 || c.Name == "" || len(c.Name) > 200 || len(c.Description) > 10000 || c.PriceMinor < 0 || len(c.Currency) != 3 || len(c.Images) > 20 || !validIdempotencyKey(c.IdempotencyKey) || err != nil {
 		return productport.CreateCommand{}, [32]byte{}, ErrInvalidProduct
 	}
 	c.LegacyAdminProjection = projection
@@ -549,18 +565,17 @@ func normalize(c productport.CreateCommand) (productport.CreateCommand, [32]byte
 		ProductCode                 string
 		Name, Description, Currency string
 		PriceMinor                  int64
-		StockQuantity               int32
 		Images                      []string
 		LegacyAdminProjection       json.RawMessage
 		DistributionPolicy          *productport.DistributionPolicy
-	}{c.ProductCode, c.Name, c.Description, c.Currency, c.PriceMinor, c.StockQuantity, c.Images, c.LegacyAdminProjection, c.DistributionPolicy})
+	}{c.ProductCode, c.Name, c.Description, c.Currency, c.PriceMinor, c.Images, c.LegacyAdminProjection, c.DistributionPolicy})
 	if err != nil {
 		return productport.CreateCommand{}, [32]byte{}, ErrInvalidProduct
 	}
 	return c, sha256.Sum256(canonical), nil
 }
 func validProduct(p productport.Product) bool {
-	normalized, _, e := normalize(productport.CreateCommand{ProductCode: p.ProductCode, Name: p.Name, Description: p.Description, Currency: p.Currency, PriceMinor: p.PriceMinor, StockQuantity: p.StockQuantity, Images: p.Images, LegacyAdminProjection: p.LegacyAdminProjection, Actor: p.CreatedBy, IdempotencyKey: strings.Repeat("v", 16)})
+	normalized, _, e := normalize(productport.CreateCommand{ProductCode: p.ProductCode, Name: p.Name, Description: p.Description, Currency: p.Currency, PriceMinor: p.PriceMinor, Images: p.Images, LegacyAdminProjection: p.LegacyAdminProjection, Actor: p.CreatedBy, IdempotencyKey: strings.Repeat("v", 16)})
 	// New disabled projection keys may be introduced after an existing Product
 	// was persisted. Canonicalization is lossless for those rows, and 0117
 	// backfills this particular pair on upgrade. Do not make an already-paid
@@ -594,6 +609,65 @@ func validReceipt(r Receipt, x Reservation) bool {
 	return r.ID > 0 && r.Operation == x.Operation && r.ActorScope == x.ActorScope && subtle.ConstantTimeCompare(r.KeyDigest[:], x.KeyDigest[:]) == 1
 }
 func snapshotJSON(p productport.Product) (json.RawMessage, error) { return json.Marshal(p) }
+
+func legacyProductCreateDigest(c productport.CreateCommand, stock int32) [32]byte {
+	canonical, _ := json.Marshal(struct {
+		ProductCode                 string
+		Name, Description, Currency string
+		PriceMinor                  int64
+		StockQuantity               int32
+		Images                      []string
+		LegacyAdminProjection       json.RawMessage
+		DistributionPolicy          *productport.DistributionPolicy
+	}{c.ProductCode, c.Name, c.Description, c.Currency, c.PriceMinor, stock, c.Images, c.LegacyAdminProjection, c.DistributionPolicy})
+	return sha256.Sum256(canonical)
+}
+
+func legacyProductUpdateDigest(c productport.UpdateCommand, stock int32) [32]byte {
+	canonical, _ := json.Marshal(struct {
+		ID                          int64
+		ExpectedVersion             int64
+		Name, Description, Currency string
+		PriceMinor                  int64
+		StockQuantity               int32
+		Images                      []string
+		LegacyAdminProjection       json.RawMessage
+		DistributionPolicy          *productport.DistributionPolicy
+	}{int64(c.ID), c.ExpectedVersion, c.Name, c.Description, c.Currency, c.PriceMinor, stock, c.Images, c.LegacyAdminProjection, c.DistributionPolicy})
+	return sha256.Sum256(canonical)
+}
+
+func retiredStockFromSnapshot(raw []byte) (int32, bool) {
+	var snapshot map[string]json.RawMessage
+	if json.Unmarshal(raw, &snapshot) != nil {
+		return 0, false
+	}
+	field, exists := snapshot["stock_quantity"]
+	if !exists {
+		return 0, false
+	}
+	var stock int32
+	if json.Unmarshal(field, &stock) != nil || stock < 0 {
+		return 0, false
+	}
+	return stock, true
+}
+
+func jsonEquivalentIgnoringRetiredStock(current, stored []byte) bool {
+	var snapshot map[string]json.RawMessage
+	if json.Unmarshal(stored, &snapshot) != nil || snapshot == nil {
+		return false
+	}
+	if field, exists := snapshot["stock_quantity"]; exists {
+		var stock int32
+		if json.Unmarshal(field, &stock) != nil || stock < 0 {
+			return false
+		}
+		delete(snapshot, "stock_quantity")
+	}
+	withoutStock, err := json.Marshal(snapshot)
+	return err == nil && jsonEquivalent(current, withoutStock)
+}
 func jsonEquivalent(a, b []byte) bool {
 	x, ok := decodeJSON(a)
 	if !ok {

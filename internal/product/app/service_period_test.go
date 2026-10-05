@@ -38,7 +38,7 @@ func TestServicePeriodCreateReplayAndPayloadConflict(t *testing.T) {
 		PriceMinor:     19900,
 		Currency:       "cny",
 		DurationDays:   31,
-		StockQuantity:  8,
+		StockQuantity:  -8,
 		Actor:          41,
 		IdempotencyKey: "period-create-key-0001",
 	}
@@ -47,7 +47,7 @@ func TestServicePeriodCreateReplayAndPayloadConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Lifecycle != productport.ServicePeriodDraft || created.Enabled || created.Archived || created.Version != 1 || created.Currency != "CNY" {
+	if created.Lifecycle != productport.ServicePeriodDraft || created.Enabled || created.Archived || created.Version != 1 || created.Currency != "CNY" || created.StockQuantity != 0 {
 		t.Fatalf("created=%+v", created)
 	}
 	replayed, err := service.CreateServicePeriodProduct(context.Background(), command)
@@ -65,6 +65,121 @@ func TestServicePeriodCreateReplayAndPayloadConflict(t *testing.T) {
 	if store.createCalls != 1 || len(events.events) != 1 {
 		t.Fatalf("conflict mutated calls/events=%d/%d", store.createCalls, len(events.events))
 	}
+}
+
+func TestServicePeriodReplaysLegacyStockCreateAndUpdateReceiptsPrecisely(t *testing.T) {
+	t.Run("create", func(t *testing.T) {
+		service, store, events := newServicePeriodFixture()
+		command := productport.CreateServicePeriodProductCommand{
+			ProductCode: "period-old-stock", Name: "周期旧商品", Description: "说明", PriceMinor: 9900, Currency: "CNY",
+			DurationDays: 30, StockQuantity: 17, Actor: 52, IdempotencyKey: "period-old-stock-create-01",
+		}
+		normalized, _, err := normalizeServicePeriodCreate(command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projection, err := servicePeriodProjectionForLifecycle(nil, productport.ServicePeriodDraft)
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Date(2026, 8, 21, 1, 2, 3, 0, time.UTC)
+		result := productport.ServicePeriodProduct{
+			ServiceProductID: 81, ProductCode: normalized.ProductCode, Name: normalized.Name, Description: normalized.Description,
+			PriceMinor: normalized.PriceMinor, Currency: normalized.Currency, DurationDays: normalized.DurationDays,
+			Images: []string{}, AdminProjection: projection, Lifecycle: productport.ServicePeriodDraft,
+			Version: 1, CreatedAt: now, UpdatedAt: now,
+		}
+		snapshot := retiredStockServicePeriodSnapshot(t, result, 17)
+		keyDigest := sha256.Sum256([]byte(command.IdempotencyKey))
+		actorScope := servicePeriodActorScope(command.Actor)
+		reservation := Reservation{Operation: "create", ActorScope: actorScope, KeyDigest: keyDigest}
+		store.receipts[servicePeriodReceiptMapKey(reservation.Operation, actorScope, keyDigest)] = Receipt{
+			ID: 81, Operation: reservation.Operation, ActorScope: actorScope, KeyDigest: keyDigest,
+			PayloadDigest: legacyServicePeriodCreateDigest(normalized, 17), State: "completed", ResultSnapshot: snapshot,
+		}
+
+		replayed, err := service.CreateServicePeriodProduct(context.Background(), command)
+		if err != nil || replayed.ServiceProductID != result.ServiceProductID || replayed.StockQuantity != 0 || store.createCalls != 0 || len(events.events) != 0 {
+			t.Fatalf("legacy create replay=%+v err=%v creates=%d events=%d", replayed, err, store.createCalls, len(events.events))
+		}
+		changed := command
+		changed.Name = "same key with changed product"
+		if _, err = service.CreateServicePeriodProduct(context.Background(), changed); !errors.Is(err, ErrConflict) {
+			t.Fatalf("changed create payload error=%v, want conflict", err)
+		}
+		var tampered map[string]json.RawMessage
+		if err = json.Unmarshal(snapshot, &tampered); err != nil {
+			t.Fatal(err)
+		}
+		tampered["unknown_snapshot_field"] = json.RawMessage(`true`)
+		tamperedSnapshot, _ := json.Marshal(tampered)
+		receipt := store.receipts[servicePeriodReceiptMapKey(reservation.Operation, actorScope, keyDigest)]
+		receipt.ResultSnapshot = tamperedSnapshot
+		store.receipts[servicePeriodReceiptMapKey(reservation.Operation, actorScope, keyDigest)] = receipt
+		if _, err = service.CreateServicePeriodProduct(context.Background(), command); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("unknown create snapshot field error=%v, want unavailable", err)
+		}
+	})
+
+	t.Run("update", func(t *testing.T) {
+		service, store, events := newServicePeriodFixture()
+		command := productport.UpdateServicePeriodProductCommand{
+			ID: 82, ExpectedVersion: 4, Name: "周期更新旧商品", Description: "说明", PriceMinor: 12000, Currency: "CNY",
+			DurationDays: 60, StockQuantity: 19, Images: []string{}, Actor: 52, IdempotencyKey: "period-old-stock-update-01",
+		}
+		normalized, _, err := normalizeServicePeriodUpdate(command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projection, err := servicePeriodProjectionForLifecycle(nil, productport.ServicePeriodDraft)
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Date(2026, 8, 21, 1, 2, 3, 0, time.UTC)
+		result := productport.ServicePeriodProduct{
+			ServiceProductID: command.ID, ProductCode: "period-old-stock-update", Name: normalized.Name, Description: normalized.Description,
+			PriceMinor: normalized.PriceMinor, Currency: normalized.Currency, DurationDays: normalized.DurationDays,
+			Images: []string{}, AdminProjection: projection, Lifecycle: productport.ServicePeriodDraft,
+			Version: 5, CreatedAt: now, UpdatedAt: now,
+		}
+		snapshot := retiredStockServicePeriodSnapshot(t, result, 19)
+		keyDigest := sha256.Sum256([]byte(command.IdempotencyKey))
+		actorScope := servicePeriodActorScope(command.Actor)
+		reservation := Reservation{Operation: "update", ActorScope: actorScope, KeyDigest: keyDigest}
+		store.receipts[servicePeriodReceiptMapKey(reservation.Operation, actorScope, keyDigest)] = Receipt{
+			ID: 82, Operation: reservation.Operation, ActorScope: actorScope, KeyDigest: keyDigest,
+			PayloadDigest: legacyServicePeriodUpdateDigest(normalized, 19), State: "completed", ResultSnapshot: snapshot,
+		}
+
+		replayed, err := service.UpdateServicePeriodProduct(context.Background(), command)
+		if err != nil || replayed.ServiceProductID != result.ServiceProductID || replayed.StockQuantity != 0 || store.updateCalls != 0 || len(events.events) != 0 {
+			t.Fatalf("legacy update replay=%+v err=%v updates=%d events=%d", replayed, err, store.updateCalls, len(events.events))
+		}
+		changed := command
+		changed.PriceMinor++
+		if _, err = service.UpdateServicePeriodProduct(context.Background(), changed); !errors.Is(err, ErrConflict) {
+			t.Fatalf("changed update payload error=%v, want conflict", err)
+		}
+	})
+}
+
+func retiredStockServicePeriodSnapshot(t *testing.T, product productport.ServicePeriodProduct, stock int32) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(product)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	stockJSON, _ := json.Marshal(stock)
+	snapshot["stock_quantity"] = stockJSON
+	raw, err = json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func TestServicePeriodCASCopyEnableDisableArchiveAndReferenceRetention(t *testing.T) {
@@ -96,7 +211,7 @@ func TestServicePeriodCASCopyEnableDisableArchiveAndReferenceRetention(t *testin
 		PriceMinor:      29900,
 		Currency:        "cny",
 		DurationDays:    62,
-		StockQuantity:   9,
+		StockQuantity:   -9,
 		Images:          []string{"https://cdn.example.test/service-period.png"},
 		AdminProjection: json.RawMessage(`{"schema_version":1,"status":"service_period_draft","enabled":false,"buy_button_text":"立即订阅","require_mobile":true}`),
 		Actor:           52,
@@ -137,7 +252,7 @@ func TestServicePeriodCASCopyEnableDisableArchiveAndReferenceRetention(t *testin
 	if err != nil || copied.ServiceProductID == disabled.ServiceProductID || copied.Version != 1 || copied.Lifecycle != productport.ServicePeriodDraft || copied.Enabled || copied.Archived {
 		t.Fatalf("copied=%+v err=%v", copied, err)
 	}
-	if copied.PriceMinor != disabled.PriceMinor || copied.StockQuantity != disabled.StockQuantity || copied.ProductCode == disabled.ProductCode || !reflect.DeepEqual(copied.Images, disabled.Images) || !strings.Contains(string(copied.AdminProjection), `"buy_button_text":"立即订阅"`) {
+	if copied.PriceMinor != disabled.PriceMinor || copied.StockQuantity != 0 || copied.ProductCode == disabled.ProductCode || !reflect.DeepEqual(copied.Images, disabled.Images) || !strings.Contains(string(copied.AdminProjection), `"buy_button_text":"立即订阅"`) {
 		t.Fatalf("copy did not retain stable local Product facts: source=%+v copy=%+v", disabled, copied)
 	}
 	replayedCopy, err := service.CopyServicePeriodProduct(context.Background(), productport.CopyServicePeriodProductCommand{

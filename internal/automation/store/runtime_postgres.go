@@ -615,6 +615,36 @@ func (r *Repository) Run(ctx context.Context, id int64) (automationdomain.Runtim
 	}
 	return scanRun(t.QueryRow(ctx, `SELECT `+runColumns+` FROM automation_runs WHERE id=$1`, id))
 }
+
+// RunByAIPlanWithin returns the append-only preview linkage for the pending
+// Automation run that created an AI manual-audience review plan. The run row
+// lock is taken in the caller's transaction so approval cannot race a run
+// lifecycle change.
+func (r *Repository) RunByAIPlanWithin(ctx context.Context, aiPlanID int64) (automationport.ManualAudienceRunApprovalSource, bool, error) {
+	var out automationport.ManualAudienceRunApprovalSource
+	if aiPlanID < 1 {
+		return out, false, automationapp.ErrRuntimeInvalid
+	}
+	t, err := tx(ctx)
+	if err != nil {
+		return out, false, err
+	}
+	var state string
+	err = t.QueryRow(ctx, `SELECT run.ai_plan_id,run.package_id,run.snapshot_id,preview.configuration_version_id,run.state
+		FROM automation_runs run
+		JOIN automation_run_previews preview ON preview.preview_digest=run.preview_digest
+		WHERE run.ai_plan_id=$1
+		FOR UPDATE OF run`, aiPlanID).Scan(&out.AIPlanID, &out.PackageID, &out.SnapshotID, &out.ConfigurationVersionID, &state)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, false, nil
+	}
+	if err != nil {
+		return out, false, err
+	}
+	out.State = automationport.RunState(state)
+	return out, true, nil
+}
+
 func (r *Repository) RunRecipients(ctx context.Context, runID, cursor int64, limit int) ([]automationdomain.RuntimeRecipient, string, error) {
 	t, e := tx(ctx)
 	if e != nil {

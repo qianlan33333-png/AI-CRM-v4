@@ -45,15 +45,23 @@ func (processor ArchiveInboxProcessor) ProcessOnce(ctx context.Context, owner st
 	return len(deliveries), nil
 }
 func (processor ArchiveInboxProcessor) process(ctx context.Context, delivery webhook.Delivery) error {
-	err := processor.Archive.ProcessArchiveDelivery(ctx, archiveport.InboxDelivery{ID: delivery.ID, IdempotencyKey: string(delivery.IdempotencyKey), Attempt: delivery.AttemptCount, MaxAttempts: delivery.MaxAttempts, ReceivedAt: delivery.ReceivedAt, Payload: append([]byte(nil), delivery.Payload...)})
+	err := processor.Archive.ProcessArchiveDelivery(ctx, archiveport.InboxDelivery{ID: delivery.ID, IdempotencyKey: string(delivery.IdempotencyKey), Attempt: delivery.AttemptCount, MaxAttempts: delivery.MaxAttempts, ReceivedAt: delivery.ReceivedAt, Payload: append([]byte(nil), delivery.Payload...), CheckCurrentAttempt: func(tx context.Context) error {
+		return processor.Inbox.RequireCurrentClaim(tx, delivery.ID, archiveCallbackProvider, delivery.AttemptCount)
+	}})
 	status, code := webhook.StatusProcessed, ""
+	finalizationFailed := errors.Is(err, archiveport.ErrRunFinalizationFailed)
 	budgetExhausted := errors.Is(err, archiveport.ErrWorkBudgetExceeded)
 	if err != nil {
 		status, code = webhook.StatusRetryable, "archive_processing_failed"
+		if finalizationFailed {
+			code = "archive_run_finalization_failed"
+		}
 		if budgetExhausted {
 			// This means the preceding page committed and the current notification
 			// still has more pages. It is progress, not a failed provider call.
-			code = "work_budget_exhausted"
+			if !finalizationFailed {
+				code = "work_budget_exhausted"
+			}
 		} else if delivery.AttemptCount >= delivery.MaxAttempts {
 			status = webhook.StatusFailed
 		}

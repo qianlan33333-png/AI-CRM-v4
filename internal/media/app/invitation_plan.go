@@ -28,6 +28,14 @@ type InvitationService struct {
 	WriteEnabled bool
 }
 
+// Local edits remain available while writes are disabled. If a save actually
+// needs a new Provider intent, reject it inside its existing transaction.
+type disabledInvitationEffects struct{}
+
+func (disabledInvitationEffects) AcceptAndQueueWithin(context.Context, e.AcceptCommand) (e.Projection, e.Receipt, error) {
+	return e.Projection{}, e.Receipt{}, errors.New("invitation code provider disabled")
+}
+
 func (s *InvitationService) Save(ctx context.Context, v p.InvitationInput, actor int64, key string) (p.InvitationPlan, error) {
 	if d.ValidateInvitationInput(v) != nil {
 		return p.InvitationPlan{}, d.ErrInvitationPlan
@@ -73,7 +81,11 @@ func (s *InvitationService) Save(ctx context.Context, v p.InvitationInput, actor
 			return p.InvitationPlan{}, errors.New("group details unavailable")
 		}
 	}
-	plan, err := s.Store.SaveInvitationPlan(ctx, v, actor, key, s.Origin, s.Effects)
+	effects := s.Effects
+	if !s.WriteEnabled {
+		effects = disabledInvitationEffects{}
+	}
+	plan, err := s.Store.SaveInvitationPlan(ctx, v, actor, key, s.Origin, effects)
 	if err != nil {
 		return plan, err
 	}
@@ -94,6 +106,12 @@ func (s *InvitationService) evaluate(ctx context.Context, plan p.InvitationPlan)
 		}
 	}
 	next := d.EvaluateInvitation(plan, facts, time.Now().UTC())
+	if !s.WriteEnabled && next.CurrentChatID != "" && next.CurrentChatID != plan.CurrentChatID {
+		// Retire a full group locally, but never expose its successor under
+		// the old official QR or accept an update the disabled writer will fail.
+		next.State, next.CurrentChatID = "preparing", ""
+		return s.Store.ApplyInvitationEvaluation(ctx, plan, next)
+	}
 	if withEffects, ok := s.Store.(interface {
 		ApplyInvitationEvaluationWithEffects(context.Context, p.InvitationPlan, p.InvitationPlan, e.TransactionalAccepter) error
 	}); ok && s.Effects != nil {

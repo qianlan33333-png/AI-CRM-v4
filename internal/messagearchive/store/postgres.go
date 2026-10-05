@@ -50,6 +50,16 @@ func (PostgreSQL) StartRun(ctx context.Context, run app.SyncRun) (int64, error) 
 	if err != nil {
 		return 0, err
 	}
+	// The caller holds and validates the current Inbox claim in this UoW.
+	// Older attempts cannot commit another page or finalize after that claim
+	// advanced. Preserve their committed counters and cursor history.
+	if run.RecoverPreviousAttempts && run.WebhookDeliveryID > 0 {
+		if _, err = tx.Exec(ctx, `UPDATE message_archive_sync_runs
+			SET status='failed',error_code='previous_attempt_unfinished',finished_at=$3
+			WHERE corp_scope=$1 AND webhook_delivery_id=$2 AND status='running'`, run.CorpScope, run.WebhookDeliveryID, run.StartedAt); err != nil {
+			return 0, err
+		}
+	}
 	var id int64
 	err = tx.QueryRow(ctx, `INSERT INTO message_archive_sync_runs(corp_scope,trigger_type,webhook_delivery_id,start_seq,end_seq,status,started_at)
 		VALUES($1,$2,NULLIF($3,0),$4,$4,'running',$5) RETURNING id`, run.CorpScope, run.Trigger, run.WebhookDeliveryID, int64(run.StartSeq), run.StartedAt).Scan(&id)

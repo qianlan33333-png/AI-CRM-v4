@@ -1290,9 +1290,20 @@ func (s *RuntimeService) enrollAudienceMemberEvent(ctx context.Context, source a
 		needsOutbound = needsOutbound || (deferredReason == "" && version.ActionKind == automationport.ActionOutboundMessage)
 	}
 	var configuration segmentport.ExecutionConfiguration
+	var memberEventSnapshot segmentport.Snapshot
 	var published automationport.OutboundPublishedContent
 	var generation *policyGenerationInput
 	if needsOutbound {
+		if _, supportsSurveyRetirement := s.audiences.(segmentport.RetiredSurveyConfigurationReader); supportsSurveyRetirement {
+			var found bool
+			memberEventSnapshot, found, err = s.snapshots.Snapshot(ctx, event.SnapshotID)
+			if err != nil {
+				return nil, ErrRuntimeUnavailable
+			}
+			if !found || memberEventSnapshot.ID != event.SnapshotID || memberEventSnapshot.PackageID != event.PackageID || memberEventSnapshot.State != segmentport.SnapshotPublished {
+				return nil, ErrRuntimeNotReady
+			}
+		}
 		configuration, err = s.audiences.AudienceExecutionConfiguration(ctx, event.PackageID)
 		if err != nil {
 			return nil, ErrRuntimeUnavailable
@@ -1358,6 +1369,11 @@ func (s *RuntimeService) enrollAudienceMemberEvent(ctx context.Context, source a
 			// Do not acknowledge an event using a stale policy snapshot. River
 			// retries it against the current active version set.
 			return ErrRuntimeNotReady
+		}
+		if needsOutbound {
+			if e = s.rejectRetiredSurveyMemberEventWithin(tx, event, memberEventSnapshot); e != nil {
+				return e
+			}
 		}
 		if source.hasPaidFacts() {
 			sourceFactsReceipt, sourceFactsReceiptOwned, e = s.reserveMemberEventSourceFactsWithin(tx, source, now)
@@ -1660,6 +1676,40 @@ func (s *RuntimeService) acceptEnrollmentMessage(ctx context.Context, event segm
 	}
 	payload, _ := json.Marshal(map[string]any{"run_id": created.ID, "enrollment_id": enrollment.ID, "policy_id": version.PolicyID, "policy_version": version.Version, "recipient_id": recipient.ID, "effect_id": acceptance.EffectID, "runtime_config_revision": runtimeConfig.Revision})
 	return s.store.AppendRuntimeFact(ctx, runtimeFact("run", created.ID, "enroll", "automation.run.queued.v1", actor, fmt.Sprintf("%x", previewDigest), now, payload))
+}
+
+// rejectRetiredSurveyMemberEventWithin rechecks the immutable configuration
+// named by an outbound event, its published snapshot's bound configuration,
+// and the package's current configuration inside the enrollment transaction.
+// It only rejects retired Survey owner-selection history; it does not make a
+// compatible historical event stale just because a newer snapshot exists.
+func (s *RuntimeService) rejectRetiredSurveyMemberEventWithin(ctx context.Context, event segmentport.MemberEnteredV1, snapshot segmentport.Snapshot) error {
+	reader, supported := s.audiences.(segmentport.RetiredSurveyConfigurationReader)
+	if !supported {
+		return nil
+	}
+	if snapshot.ID != event.SnapshotID || snapshot.PackageID != event.PackageID || snapshot.State != segmentport.SnapshotPublished {
+		return ErrRuntimeNotReady
+	}
+	eventRetired, err := reader.SurveyOwnerSelectionRetiredAtWithin(ctx, event.ConfigurationVersionID)
+	if err != nil {
+		return err
+	}
+	snapshotRetired := false
+	if snapshot.ConfigurationVersionID != event.ConfigurationVersionID {
+		snapshotRetired, err = reader.SurveyOwnerSelectionRetiredAtWithin(ctx, snapshot.ConfigurationVersionID)
+		if err != nil {
+			return err
+		}
+	}
+	currentRetired, err := reader.SurveyOwnerSelectionRetiredForPackageWithin(ctx, event.PackageID)
+	if err != nil {
+		return err
+	}
+	if eventRetired || snapshotRetired || currentRetired {
+		return ErrRuntimeNotReady
+	}
+	return nil
 }
 
 func policyExecutionConfigurationMatches(version automationdomain.PolicyVersion, configuration segmentport.ExecutionConfiguration) bool {

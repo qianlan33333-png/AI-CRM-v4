@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -82,5 +83,33 @@ func TestActivationDefinitionExtendsOnlyExistingPaidAndSubmissionTemplates(t *te
 	submitted := json.RawMessage(`{"schema_version":1,"template_key":"questionnaire_submissions","parameters":{"questionnaire_ids":["16"],"owner_scope":"all","owner_staff_ids":[],"require_wecom_identity":false,"activation":{"elapsed_hours_min":12,"token_usage_status":"unused_7d"}}}`)
 	if _, e := CanonicalDefinition(submitted); e != nil {
 		t.Fatal(e)
+	}
+}
+
+func TestQuestionnaireTemplatesRetireEmployeeAudienceWithoutBroadeningHistory(t *testing.T) {
+	for _, item := range Templates() {
+		if item.Key != "questionnaire_submissions" && item.Key != "questionnaire_choice_answers" {
+			continue
+		}
+		for _, field := range item.Fields {
+			if strings.HasPrefix(field.Name, "owner_") {
+				t.Fatalf("retired employee field remains: %s/%s", item.Key, field.Name)
+			}
+		}
+		raw, err := DefaultDefinition(item.Key)
+		if err != nil || strings.Contains(string(raw), "owner_") {
+			t.Fatalf("new default retains employee input: %s, %v", raw, err)
+		}
+	}
+	base := `{"schema_version":1,"template_key":"questionnaire_submissions","parameters":{"questionnaire_ids":["16"],"require_wecom_identity":false%s}}`
+	for _, owners := range []string{"", `,"owner_scope":"all","owner_staff_ids":[]`} {
+		if _, err := CanonicalDefinition(json.RawMessage(fmt.Sprintf(base, owners))); err != nil {
+			t.Fatalf("same unrestricted respondent semantics rejected: %s %v", owners, err)
+		}
+	}
+	for _, owners := range []string{`,"owner_scope":"specified","owner_staff_ids":["9"]`, `,"owner_scope":"all","owner_staff_ids":["9"]`} {
+		if _, err := CanonicalDefinition(json.RawMessage(fmt.Sprintf(base, owners))); !errors.Is(err, ErrUnsupportedDefinition) {
+			t.Fatalf("retired selection silently accepted: %s %v", owners, err)
+		}
 	}
 }

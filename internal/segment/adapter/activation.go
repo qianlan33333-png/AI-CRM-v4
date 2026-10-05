@@ -227,7 +227,7 @@ func (s LegacyTemplateSource) activationSubmissions(ctx context.Context, p map[s
 	raw := []customerdomain.CustomerID{}
 	selected := evaluatedSubmissions{}
 	for _, f := range facts {
-		if f.CustomerID > 0 && !f.SubmittedAt.IsZero() && !f.SubmittedAt.After(at) && contains(qids, strconv.FormatInt(int64(f.QuestionnaireID), 10)) && owner(p, f.StaffID) {
+		if f.CustomerID > 0 && !f.SubmittedAt.IsZero() && !f.SubmittedAt.After(at) && contains(qids, strconv.FormatInt(int64(f.QuestionnaireID), 10)) {
 			raw = append(raw, f.CustomerID)
 			selected = append(selected, f)
 		}
@@ -247,7 +247,7 @@ func (s LegacyTemplateSource) activationSubmissions(ctx context.Context, p map[s
 	}
 	first := map[customerdomain.CustomerID]time.Time{}
 	for _, f := range facts {
-		if !contains(qids, strconv.FormatInt(int64(f.QuestionnaireID), 10)) || !owner(p, f.StaffID) || f.SubmittedAt.IsZero() || f.SubmittedAt.After(at) {
+		if !contains(qids, strconv.FormatInt(int64(f.QuestionnaireID), 10)) || f.SubmittedAt.IsZero() || f.SubmittedAt.After(at) {
 			continue
 		}
 		root := roots[f.CustomerID]

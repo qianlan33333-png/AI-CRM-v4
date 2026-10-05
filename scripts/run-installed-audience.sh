@@ -27,4 +27,4 @@ except Exception:
 PY
 export AICRM_REQUIRE_CHROMIUM_JOURNEY=1
 exec bash scripts/run-go-with-donor-views.sh go test -json -p 1 -count=1 -timeout=8m \
-  -run '^TestPostgreSQLAudience(SendHistory|Confirmation)ChromiumJourney$' ./cmd/aicrm
+  -run '^(TestPostgreSQLAudienceSendHistoryChromiumJourney|TestPostgreSQLAudienceConfirmationChromiumJourney|TestSurveyAudienceOwnerRetirementChromiumJourney)$' ./cmd/aicrm

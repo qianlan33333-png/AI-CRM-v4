@@ -22,22 +22,23 @@ const (
 // products row. It intentionally excludes legacy_admin_projection, actor
 // identity, provider material, receipts, and other opaque metadata.
 type ServicePeriodProduct struct {
-	ServiceProductID ID                     `json:"service_product_id"`
-	ProductCode      string                 `json:"product_code"`
-	Name             string                 `json:"name"`
-	Description      string                 `json:"description"`
-	PriceMinor       int64                  `json:"price_minor"`
-	Currency         string                 `json:"currency"`
-	DurationDays     int32                  `json:"duration_days"`
-	StockQuantity    int32                  `json:"stock_quantity"`
-	Images           []string               `json:"images"`
-	AdminProjection  json.RawMessage        `json:"admin_projection"`
-	Lifecycle        ServicePeriodLifecycle `json:"lifecycle"`
-	Enabled          bool                   `json:"enabled"`
-	Archived         bool                   `json:"archived"`
-	Version          int64                  `json:"version"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
+	ServiceProductID ID     `json:"service_product_id"`
+	ProductCode      string `json:"product_code"`
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	PriceMinor       int64  `json:"price_minor"`
+	Currency         string `json:"currency"`
+	DurationDays     int32  `json:"duration_days"`
+	// StockQuantity is retained only to decode old idempotency snapshots.
+	StockQuantity   int32                  `json:"-"`
+	Images          []string               `json:"images"`
+	AdminProjection json.RawMessage        `json:"admin_projection"`
+	Lifecycle       ServicePeriodLifecycle `json:"lifecycle"`
+	Enabled         bool                   `json:"enabled"`
+	Archived        bool                   `json:"archived"`
+	Version         int64                  `json:"version"`
+	CreatedAt       time.Time              `json:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at"`
 }
 
 type ServicePeriodPage struct {
@@ -49,12 +50,13 @@ type ServicePeriodPage struct {
 }
 
 type CreateServicePeriodProductCommand struct {
-	ProductCode        string
-	Name               string
-	Description        string
-	PriceMinor         int64
-	Currency           string
-	DurationDays       int32
+	ProductCode  string
+	Name         string
+	Description  string
+	PriceMinor   int64
+	Currency     string
+	DurationDays int32
+	// Deprecated: accepted for source compatibility; service-period commands ignore it.
 	StockQuantity      int32
 	Images             []string
 	AdminProjection    json.RawMessage
@@ -64,13 +66,14 @@ type CreateServicePeriodProductCommand struct {
 }
 
 type UpdateServicePeriodProductCommand struct {
-	ID                 ID
-	ExpectedVersion    int64
-	Name               string
-	Description        string
-	PriceMinor         int64
-	Currency           string
-	DurationDays       int32
+	ID              ID
+	ExpectedVersion int64
+	Name            string
+	Description     string
+	PriceMinor      int64
+	Currency        string
+	DurationDays    int32
+	// Deprecated: accepted for source compatibility; service-period commands ignore it.
 	StockQuantity      int32
 	Images             []string
 	AdminProjection    json.RawMessage

@@ -1,3 +1,4 @@
+import { productSourceTestPage } from '../scripts/product-source-test-page.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 import { buildTestBrowserBundle } from '../scripts/test-browser-bundle.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const page = fs.readFileSync(path.join(root, 'web/dist/admin/productForm.html'), 'utf8');
+const page = productSourceTestPage('productForm.html');
 const host = await buildTestBrowserBundle(path.join(root, 'web/v3/productAdapter.ts'));
 const admin = await buildTestBrowserBundle(path.join(root, 'web/src/admin/main.ts'));
 const standardMaterialPicker = fs.readFileSync(path.join(root, 'web/donors/ai-assistant-production/static/material_picker.js'), 'utf8');
@@ -79,7 +80,7 @@ async function verifyDefaultPolicyAtActualCreateAlias() {
   actionEnabled.checked = true; actionEnabled.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
   const qr = dom.window.document.querySelector('input[name="pfPurchaseActionMode"][value="qr"]');
   qr.checked = true; qr.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
-  for (const [id, value] of [['pfName', '默认分销商品'], ['pfCode', 'default-policy-product'], ['pfPrice', '0.02'], ['pfStock', '1']]) {
+  for (const [id, value] of [['pfName', '默认分销商品'], ['pfCode', 'default-policy-product'], ['pfPrice', '0.02']]) {
     const field = dom.window.document.getElementById(id);
     field.value = value;
     field.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
@@ -103,6 +104,7 @@ async function verifyDefaultPolicyAtActualCreateAlias() {
   save.click();
   await waitFor(() => calls.filter((call) => call.path === '/api/v1/products' && call.method === 'POST').length === 1, 'actual ordinary create alias must submit the first Product command');
   const create = calls.find((call) => call.path === '/api/v1/products' && call.method === 'POST');
+  assert.equal(Object.hasOwn(JSON.parse(create.body), 'stock_quantity'), false, 'new ordinary Product create omits retired stock');
   assert.deepEqual(JSON.parse(create.body).distribution_policy, { enabled: false, commission_rate_basis_points: 0, wait_days: 7, version: 0 }, 'actual ordinary create alias must atomically submit the default Product policy');
   assert.equal(JSON.parse(create.body).admin_projection.enabled, true, 'new Product is enabled by default in its first subject command');
   assert.equal(JSON.parse(create.body).admin_projection.status, 'active', 'new Product starts in the enabled lifecycle');
@@ -140,7 +142,7 @@ async function verifyDuplicateCodeIsExplainedBeforeCreate() {
   });
   dom.window.eval(host); dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
   await waitFor(() => dom.window.document.getElementById('pfName'), 'duplicate-code form must mount');
-  for (const [id, value] of [['pfName', '定金'], ['pfCode', '123'], ['pfPrice', '100'], ['pfStock', '1']]) dom.window.document.getElementById(id).value = value;
+  for (const [id, value] of [['pfName', '定金'], ['pfCode', '123'], ['pfPrice', '100']]) dom.window.document.getElementById(id).value = value;
   [...dom.window.document.querySelectorAll('button')].find((button) => button.textContent.trim() === '保存当前维度').click();
   await waitFor(() => dom.window.document.querySelector('#fb-toast')?.textContent.includes('商品编码「123」已存在'), 'duplicate code must have a business error');
   assert.equal(calls.filter((call) => call.path === '/api/v1/products' && call.method === 'POST').length, 0, 'known duplicate code must not POST');
@@ -251,7 +253,7 @@ qr.checked = true; qr.dispatchEvent(new dom.window.Event('change', { bubbles: tr
 dom.window.document.querySelector('[data-product-purchase-lead-channel]').value = '17';
 assert.equal(dom.window.document.querySelector('[data-product-purchase-lead]').hidden, false, 'QR fields must appear only for QR mode');
 assert.equal(dom.window.document.querySelector('[data-product-purchase-redirect]').hidden, true, 'redirect fields must stay hidden in QR mode');
-for (const [id, value] of [['pfName', '恢复商品'], ['pfCode', 'recovery-product'], ['pfPrice', '0.02'], ['pfStock', '1']]) {
+for (const [id, value] of [['pfName', '恢复商品'], ['pfCode', 'recovery-product'], ['pfPrice', '0.02']]) {
   const field = dom.window.document.getElementById(id);
   field.value = value;
   field.dispatchEvent(new dom.window.Event('input', { bubbles: true }));

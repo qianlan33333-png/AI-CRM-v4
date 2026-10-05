@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	segmentport "github.com/qianlan33333-png/AI-CRM-v3/internal/segment/port"
 	"io"
 )
 
@@ -61,7 +62,7 @@ func Parse(raw json.RawMessage) (AST, error) {
 	default:
 		return AST{}, ErrInvalid
 	}
-	if len(wire.Parameters) == 0 {
+	if len(wire.Parameters) == 0 || segmentport.SurveyOwnerSelectionRetired(string(wire.TemplateKey), wire.Parameters) {
 		return AST{}, ErrInvalid
 	}
 	if wire.TemplateKey == ActiveContacts {

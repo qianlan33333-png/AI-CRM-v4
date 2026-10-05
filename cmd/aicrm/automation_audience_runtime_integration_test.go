@@ -339,6 +339,9 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	if err = runtimeService.SetReviewPlanIntake(aiService, automationService); err != nil {
 		t.Fatal(err)
 	}
+	if err = aiService.BindManualAudienceRunApprovalValidator(runtimeService.ValidateManualAudienceRunApproval); err != nil {
+		t.Fatal(err)
+	}
 	if err = runtimeService.SetOutboundContentFreezer(automationOutboundContentFreezer{capturer: mediaRepo}); err != nil {
 		t.Fatal(err)
 	}
@@ -638,6 +641,51 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	if err != nil || plan.State != aiassistantport.PlanPendingReview || plan.TargetCount != 2 {
 		t.Fatalf("manual plan=%+v err=%v", plan, err)
 	}
+	// Keep a genuine legacy specified-owner definition in the database and
+	// link pending AI plans to it as if they had been frozen before retirement.
+	// These cases exercise the approval callback with the actual PostgreSQL
+	// UoW, while the existing all+empty package above remains the valid control.
+	retiredConfigID := automationAudienceInsertRetiredOwnerConfiguration(t, ctx, uow, segmentRepo, packageID, staffID, now)
+	retiredFrozenPlan := automationAudienceSeedPendingManualRun(t, ctx, uow, automationRepo, aiService, segmentRepo, packageID, published, retiredConfigID, agent, publishedAgent, customerIDs[0], staffID, "retired-frozen-config")
+	assertManualPlanApprovalBlocked(t, ctx, native, aiService, retiredFrozenPlan, staffID, "retired-frozen-approve-0001")
+	cleanConfigID := automationAudienceInsertCleanOwnerlessConfiguration(t, ctx, uow, segmentRepo, packageID, staffID, now)
+	unboundAIService, err := aiassistantapp.NewService(uow, aiRepo, automationAudienceAIRecipients{}, automationAudienceAIStaff{}, aiMaterialAdapter{capturer: mediaRepo, references: mediaRepo}, automationAudienceAIIdentities{}, identityquery.NewPostgreSQL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = unboundAIService.BindOutbound(privateWriter, true); err != nil {
+		t.Fatal(err)
+	}
+	unboundPlan := automationAudienceSeedPendingManualRun(t, ctx, uow, automationRepo, unboundAIService, segmentRepo, packageID, published, cleanConfigID, agent, publishedAgent, customerIDs[0], staffID, "missing-approval-gate")
+	assertManualPlanApprovalBlocked(t, ctx, native, unboundAIService, unboundPlan, staffID, "missing-gate-approve-0001")
+	var currentPackage segmentdomain.Package
+	err = uow.Within(ctx, func(tx context.Context) error {
+		var readErr error
+		currentPackage, readErr = segmentRepo.GetPackage(tx, packageID)
+		return readErr
+	})
+	if err != nil || currentPackage.CurrentConfigurationVersionID == nil {
+		t.Fatalf("load current audience package for approval retirement case: package=%+v err=%v", currentPackage, err)
+	}
+	originalConfigurationID := *currentPackage.CurrentConfigurationVersionID
+	var retiredCurrentPackageVersion int64
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		updated, updateErr := segmentRepo.SetCurrentConfiguration(tx, packageID, retiredConfigID, currentPackage.Version, staffID, now.Add(time.Minute))
+		if updateErr == nil {
+			retiredCurrentPackageVersion = updated.Version
+		}
+		return updateErr
+	}); err != nil {
+		t.Fatalf("set retired current audience configuration for approval regression: %v", err)
+	}
+	retiredCurrentPlan := automationAudienceSeedPendingManualRun(t, ctx, uow, automationRepo, aiService, segmentRepo, packageID, published, cleanConfigID, agent, publishedAgent, customerIDs[0], staffID, "retired-current-config")
+	assertManualPlanApprovalBlocked(t, ctx, native, aiService, retiredCurrentPlan, staffID, "retired-current-approve-0001")
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		_, restoreErr := segmentRepo.SetCurrentConfiguration(tx, packageID, originalConfigurationID, retiredCurrentPackageVersion, staffID, now.Add(2*time.Minute))
+		return restoreErr
+	}); err != nil {
+		t.Fatalf("restore current audience configuration after retirement regression: %v", err)
+	}
 	var effectCount, runRecipientCount int
 	if err = native.QueryRow(ctx, `SELECT count(*) FROM external_effects`).Scan(&effectCount); err != nil || effectCount != 2 {
 		t.Fatalf("confirmation effects=%d err=%v", effectCount, err)
@@ -649,8 +697,46 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	if err != nil || approvalPreview.EligibleCount != 2 {
 		t.Fatalf("review preview=%+v err=%v", approvalPreview, err)
 	}
-	if _, err = aiService.ApprovePlan(ctx, aiassistantport.ApprovePlanCommand{Actor: aiassistantport.Actor{Kind: aiassistantport.ActorAdmin, ID: staffID}, PlanID: plan.ID, ExpectedVersion: plan.Version, PreviewDigest: approvalPreview.PreviewDigest, IdempotencyKey: "audience-runtime-manual-approve-0001"}); err != nil {
+	manualApprovalCommand := aiassistantport.ApprovePlanCommand{Actor: aiassistantport.Actor{Kind: aiassistantport.ActorAdmin, ID: staffID}, PlanID: plan.ID, ExpectedVersion: plan.Version, PreviewDigest: approvalPreview.PreviewDigest, IdempotencyKey: "audience-runtime-manual-approve-0001"}
+	approvedPlan, approveErr := aiService.ApprovePlan(ctx, manualApprovalCommand)
+	if approveErr != nil {
+		err = approveErr
 		t.Fatal(err)
+	}
+	var replayRetiredPackageVersion int64
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		pkg, lockErr := segmentRepo.LockPackage(tx, packageID)
+		if lockErr != nil {
+			return lockErr
+		}
+		updated, updateErr := segmentRepo.SetCurrentConfiguration(tx, packageID, retiredConfigID, pkg.Version, staffID, now.Add(3*time.Minute))
+		if updateErr == nil {
+			replayRetiredPackageVersion = updated.Version
+		}
+		return updateErr
+	}); err != nil {
+		t.Fatalf("set retired current configuration before approval receipt replay: %v", err)
+	}
+	var privateIntentsBeforeReplay int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM outbound_private_message_intents`).Scan(&privateIntentsBeforeReplay); err != nil {
+		t.Fatal(err)
+	}
+	replayedPlan, replayErr := aiService.ApprovePlan(ctx, manualApprovalCommand)
+	if replayErr != nil || replayedPlan.ID != approvedPlan.ID || replayedPlan.State != approvedPlan.State {
+		t.Fatalf("accepted manual approval receipt replay changed result: approved=%+v replayed=%+v err=%v", approvedPlan, replayedPlan, replayErr)
+	}
+	var privateIntentsAfterReplay int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM outbound_private_message_intents`).Scan(&privateIntentsAfterReplay); err != nil {
+		t.Fatal(err)
+	}
+	if privateIntentsAfterReplay != privateIntentsBeforeReplay {
+		t.Fatalf("manual approval receipt replay wrote EER intents: before=%d after=%d", privateIntentsBeforeReplay, privateIntentsAfterReplay)
+	}
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		_, restoreErr := segmentRepo.SetCurrentConfiguration(tx, packageID, originalConfigurationID, replayRetiredPackageVersion, staffID, now.Add(4*time.Minute))
+		return restoreErr
+	}); err != nil {
+		t.Fatalf("restore current audience configuration after receipt replay: %v", err)
 	}
 	if _, _, projectionErr := runtimeService.ListRuns(ctx, 0, 100); projectionErr != nil {
 		planValue, planErr := aiService.GetPlan(ctx, plan.ID)
@@ -741,6 +827,119 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	})
 	stopRuntime()
 	automationAudiencePaidQualifiedJourney(t, ctx, native, uow, segmentRepo, source, snapshots, staffID, agent, publishedAgent, execution, runtimeService, runtime, wecomServer, provider, frozenPayloads, now)
+}
+
+func automationAudienceInsertRetiredOwnerConfiguration(t *testing.T, ctx context.Context, uow *platformpostgres.UnitOfWork, repo *segmentstore.Repository, packageID, staffID int64, now time.Time) int64 {
+	t.Helper()
+	var configurationID int64
+	err := uow.Within(ctx, func(tx context.Context) error {
+		version, err := repo.NextConfigurationVersion(tx, packageID)
+		if err != nil {
+			return err
+		}
+		definition := json.RawMessage(fmt.Sprintf(`{"schema_version":1,"template_key":"questionnaire_submissions","parameters":{"questionnaire_ids":["16"],"owner_scope":"specified","owner_staff_ids":["%d"],"require_wecom_identity":false}}`, staffID))
+		configuration, err := segmentdomain.NewConfigurationVersion(packageID, version, definition, "", "manual", staffID, now.Add(time.Minute))
+		if err != nil {
+			return err
+		}
+		created, err := repo.CreateConfigurationVersion(tx, configuration)
+		configurationID = created.ID
+		return err
+	})
+	if err != nil {
+		t.Fatalf("create retired owner configuration: %v", err)
+	}
+	return configurationID
+}
+
+func automationAudienceInsertCleanOwnerlessConfiguration(t *testing.T, ctx context.Context, uow *platformpostgres.UnitOfWork, repo *segmentstore.Repository, packageID, staffID int64, now time.Time) int64 {
+	t.Helper()
+	var configurationID int64
+	err := uow.Within(ctx, func(tx context.Context) error {
+		version, err := repo.NextConfigurationVersion(tx, packageID)
+		if err != nil {
+			return err
+		}
+		definition := json.RawMessage(`{"schema_version":1,"template_key":"questionnaire_submissions","parameters":{"questionnaire_ids":["16"],"require_wecom_identity":false}}`)
+		configuration, err := segmentdomain.NewConfigurationVersion(packageID, version, definition, "", "manual", staffID, now.Add(2*time.Minute))
+		if err != nil {
+			return err
+		}
+		created, err := repo.CreateConfigurationVersion(tx, configuration)
+		configurationID = created.ID
+		return err
+	})
+	if err != nil {
+		t.Fatalf("create clean ownerless configuration: %v", err)
+	}
+	return configurationID
+}
+
+func automationAudienceSeedPendingManualRun(t *testing.T, ctx context.Context, uow *platformpostgres.UnitOfWork, automationRepo *automationstore.Repository, aiService *aiassistantapp.Service, segmentRepo *segmentstore.Repository, packageID int64, snapshot segmentport.Snapshot, configurationID int64, agent automationport.Agent, publishedAgent automationport.PublishedAgent, customerID customerdomain.CustomerID, staffID int64, key string) aiassistantport.Plan {
+	t.Helper()
+	planResult, err := aiService.CreatePlan(ctx, aiassistantport.CreatePlanCommand{
+		Actor: aiassistantport.Actor{Kind: aiassistantport.ActorAdmin, ID: staffID}, IdempotencyKey: "approval-retirement-plan-" + key,
+		Name: "Retired owner approval " + key, SourceKind: "automation.manual_audience_run.v1", SourceDigest: effectport.Hash("automation.manual-audience-run", key),
+		Recipients: []aiassistantport.RecipientCandidate{{CustomerID: customerID, StaffID: staffID, Content: []aiassistantport.ContentBlock{{Kind: aiassistantport.ContentText, Text: "review before sending"}}}}, OccurredAt: time.Now().UTC(),
+	})
+	if err != nil || planResult.Plan.ID < 1 {
+		t.Fatalf("create linked pending manual plan %q: plan=%+v err=%v", key, planResult.Plan, err)
+	}
+	var pkg segmentdomain.Package
+	err = uow.Within(ctx, func(tx context.Context) error {
+		var readErr error
+		pkg, readErr = segmentRepo.GetPackage(tx, packageID)
+		return readErr
+	})
+	if err != nil {
+		t.Fatalf("read package for linked manual run %q: %v", key, err)
+	}
+	now := time.Now().UTC()
+	digest := sha256.Sum256([]byte("approval-retirement-preview:" + key))
+	preview := automationdomain.RunPreview{PackageID: packageID, PackageVersion: pkg.Version, SnapshotID: int64(snapshot.ID), ConfigurationVersionID: configurationID, AgentID: int64(agent.ID), AgentPublishedVersion: publishedAgent.PublishedVersion, BindingVersion: 1, SenderSetVersion: 1, TargetCount: 1, PreviewDigest: digest, CreatedBy: staffID, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}
+	err = uow.Within(ctx, func(tx context.Context) error {
+		var createErr error
+		preview, createErr = automationRepo.CreatePreview(tx, preview)
+		if createErr != nil {
+			return createErr
+		}
+		_, _, createErr = automationRepo.CreateRun(tx, automationdomain.RuntimeRun{PackageID: packageID, PackageVersion: pkg.Version, SnapshotID: int64(snapshot.ID), AgentID: int64(agent.ID), AgentPublishedVersion: publishedAgent.PublishedVersion, AIPlanID: int64(planResult.Plan.ID), BindingVersion: preview.BindingVersion, SenderSetVersion: preview.SenderSetVersion, PreviewDigest: digest, State: automationport.RunPendingReview, TargetCount: 1, CreatedBy: staffID, CreatedAt: now, UpdatedAt: now}, nil)
+		return createErr
+	})
+	if err != nil {
+		t.Fatalf("seed linked pending manual run %q: %v", key, err)
+	}
+	return planResult.Plan
+}
+
+func assertManualPlanApprovalBlocked(t *testing.T, ctx context.Context, native *pgxpool.Pool, aiService *aiassistantapp.Service, plan aiassistantport.Plan, staffID int64, key string) {
+	t.Helper()
+	preview, err := aiService.PreviewApproval(ctx, aiassistantport.PreviewApprovalCommand{Actor: aiassistantport.Actor{Kind: aiassistantport.ActorAdmin, ID: staffID}, PlanID: plan.ID, ExpectedVersion: plan.Version})
+	if err != nil || preview.EligibleCount != 1 {
+		t.Fatalf("manual retirement review preview %q=%+v err=%v", key, preview, err)
+	}
+	var before int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM outbound_private_message_intents`).Scan(&before); err != nil {
+		t.Fatalf("count private intents before blocked approval %q: %v", key, err)
+	}
+	_, err = aiService.ApprovePlan(ctx, aiassistantport.ApprovePlanCommand{Actor: aiassistantport.Actor{Kind: aiassistantport.ActorAdmin, ID: staffID}, PlanID: plan.ID, ExpectedVersion: plan.Version, PreviewDigest: preview.PreviewDigest, IdempotencyKey: key})
+	if err == nil {
+		t.Fatalf("manual AI plan %d was accepted despite a required fail-closed approval gate", plan.ID)
+	}
+	current, readErr := aiService.GetPlan(ctx, plan.ID)
+	if readErr != nil || current.State != aiassistantport.PlanPendingReview || current.Version != plan.Version {
+		t.Fatalf("blocked manual plan changed: plan=%+v err=%v approval_err=%v", current, readErr, err)
+	}
+	var after, runPending int
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM outbound_private_message_intents`).Scan(&after); err != nil {
+		t.Fatalf("count private intents after blocked approval %q: %v", key, err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM automation_runs WHERE ai_plan_id=$1 AND state='pending_review'`, plan.ID).Scan(&runPending); err != nil {
+		t.Fatalf("read linked pending run %q: %v", key, err)
+	}
+	if before != after || runPending != 1 {
+		t.Fatalf("blocked approval %q wrote EER or changed pending run: private_intents=%d/%d pending_runs=%d", key, before, after, runPending)
+	}
 }
 
 type automationAudienceSource struct {

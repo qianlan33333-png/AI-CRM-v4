@@ -197,6 +197,9 @@ func (s *SnapshotService) AcceptRefresh(ctx context.Context, command RefreshComm
 		if e != nil {
 			return e
 		}
+		if segmentport.SurveyDefinitionOwnerSelectionRetired(config.Definition) {
+			return ErrUnsupportedDefinition
+		}
 		if isCoreDefinition(config.Definition) {
 			return ErrConflict
 		}
@@ -268,6 +271,9 @@ func (s *SnapshotService) AcceptRefreshWithin(ctx context.Context, command Refre
 	config, err := s.store.CurrentConfiguration(ctx, command.PackageID)
 	if err != nil {
 		return segmentdomain.RefreshRun{}, classify(err)
+	}
+	if segmentport.SurveyDefinitionOwnerSelectionRetired(config.Definition) {
+		return segmentdomain.RefreshRun{}, ErrUnsupportedDefinition
 	}
 	if isCoreDefinition(config.Definition) {
 		return segmentdomain.RefreshRun{}, ErrConflict

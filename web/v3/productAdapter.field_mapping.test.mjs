@@ -1,3 +1,4 @@
+import { productSourceTestPage } from '../scripts/product-source-test-page.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { JSDOM, VirtualConsole } from 'jsdom';
@@ -11,7 +12,7 @@ const waitFor = async (check) => {
 const projection = { schema_version: 1, status: 'active', enabled: true, buy_button_text: '立即购买', require_mobile: false, lead_program_id: null, lead_channel_id: 14, lead_qr_title: '旧标题', lead_qr_subtitle: '旧副标题', completion_redirect_enabled: false, completion_redirect_url: '', completion_target: null, purchase_action_enabled: true, purchase_action_mode: 'qr', wecom_tagging: {}, slices: [] };
 
 for (const periodic of [false, true]) {
-  const page = fs.readFileSync(periodic ? 'web/dist/admin/spProductForm.html' : 'web/dist/admin/productForm.html', 'utf8');
+  const page = productSourceTestPage(periodic ? 'spProductForm.html' : 'productForm.html');
   const calls = [];
   let rejectNextPushSave = false;
   let externalPushReads = 0;
@@ -41,6 +42,8 @@ for (const periodic of [false, true]) {
   dom.window.eval(host); dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
   const d = dom.window.document;
   await waitFor(() => d.querySelector('[data-product-purchase-action]') && d.querySelector('[data-product-parity-push]')).catch((error) => { console.log(JSON.stringify(calls), d.querySelector('#stage')?.textContent, d.querySelector('#stage')?.innerHTML?.slice(0, 1200)); throw error; });
+  await waitFor(() => !d.getElementById(periodic ? 'spfStock' : 'pfStock'));
+  assert.doesNotMatch(d.body.textContent, /库存/, 'the frozen stock form field is removed from the mounted Product editor');
   assert.equal(d.querySelector('[data-product-parity-push-save]').disabled, true, 'external-push controls remain locked until their read finishes');
   d.querySelector('[data-product-parity-push-save]').click();
   assert.equal(calls.some((call) => call.method === 'PUT' && call.path.endsWith('/external-push')), false, 'a pending configuration read cannot save an empty form');
@@ -51,7 +54,7 @@ for (const periodic of [false, true]) {
   await waitFor(() => d.querySelector('[data-product-purchase-channel-label]')?.textContent === '已保存的后页渠道');
   assert.equal(d.querySelector('[data-product-parity-push-url]').value, config.webhook_url);
   assert.equal(d.querySelectorAll('[data-mapping-conversion], [data-external-push-configuration-save]').length, 0);
-  for (const [id, value] of periodic ? [['spfName', '一致性商品'], ['spfCode', 'parity-fixture'], ['spfPrice', '9.90'], ['spfStock', '1']] : [['pfName', '一致性商品'], ['pfCode', 'parity-fixture'], ['pfPrice', '9.90'], ['pfStock', '1']]) {
+  for (const [id, value] of periodic ? [['spfName', '一致性商品'], ['spfCode', 'parity-fixture'], ['spfPrice', '9.90']] : [['pfName', '一致性商品'], ['pfCode', 'parity-fixture'], ['pfPrice', '9.90']]) {
     const field = d.getElementById(id); field.value = value; field.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
   }
   const actionEnabled = d.querySelector('[data-product-purchase-enabled]'); actionEnabled.checked = true; actionEnabled.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
@@ -62,11 +65,13 @@ for (const periodic of [false, true]) {
   const subjectWrite = (call) => call.method === 'PUT' && !call.path.endsWith('/external-push') && !call.path.endsWith('/external-push/test');
   await waitFor(() => calls.some(subjectWrite)).catch((error) => { console.log(JSON.stringify(calls), d.querySelector('#fb-toast, #product-v3-toast')?.textContent); throw error; });
   const redirectWrite = calls.find(subjectWrite).body.admin_projection;
+  assert.equal(Object.hasOwn(calls.find(subjectWrite).body, 'stock_quantity'), false, 'legacy Product response fields never flow into updates');
   assert.equal(redirectWrite.purchase_action_mode, 'redirect');
   assert.deepEqual(redirectWrite.completion_target.url_link, { enabled: true, url: '', source_url: 'https://link.example.test/source', response_url_key: 'destination' });
   targetType.value = 'h5'; targetType.dispatchEvent(new dom.window.Event('change', { bubbles: true })); d.querySelector('[data-product-purchase-h5-url]').value = '/paid/complete'; d.querySelector('[data-product-purchase-save]').click();
   await waitFor(() => calls.filter(subjectWrite).length >= 2);
   const h5Write = calls.filter(subjectWrite).at(-1).body.admin_projection;
+  assert.equal(Object.hasOwn(calls.filter(subjectWrite).at(-1).body, 'stock_quantity'), false, 'subsequent Product updates stay stockless');
   assert.equal(h5Write.completion_target.h5_url, '/paid/complete');
   actionEnabled.checked = false; actionEnabled.dispatchEvent(new dom.window.Event('change', { bubbles: true })); d.querySelector('[data-product-purchase-save]').click();
   await waitFor(() => calls.filter(subjectWrite).length >= 3);
@@ -117,7 +122,7 @@ for (const periodic of [false, true]) {
 }
 
 {
-  const page = fs.readFileSync('web/dist/admin/productForm.html', 'utf8');
+  const page = productSourceTestPage('productForm.html');
   const product = { id: 101, product_code: 'bad-response-fixture', name: '坏响应商品', price_minor: 990, currency: 'CNY', stock_quantity: 1, description: '', images: [], version: 1, lifecycle: 'enabled', enabled: true, paid_order_count: 0, refund_order_count: 0, sold_count: 0, created_at: '2026-09-08T00:00:00Z', updated_at: '2026-09-08T00:00:00Z', admin_projection: projection };
   const bad = { product_id: 101, product_kind: 'wechat_pay', enabled: true, revision: 1 };
   const dom = new JSDOM(page, { url: 'https://example.test/admin/productForm.html?id=101', runScripts: 'outside-only', pretendToBeVisual: true, beforeParse(window) {

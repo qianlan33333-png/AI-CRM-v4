@@ -14,15 +14,54 @@ import (
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/hxcdashboard/domain"
 	hxcport "github.com/qianlan33333-png/AI-CRM-v3/internal/hxcdashboard/port"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 )
 
 var ErrNotFound = errors.New("hxc dashboard not found")
 var ErrActiveRefresh = errors.New("hxc dashboard refresh already active")
 
-type PostgreSQL struct{ pool *pgxpool.Pool }
+type PostgreSQL struct {
+	pool    *pgxpool.Pool
+	lineage identityport.CanonicalLineageReader
+}
 
 func NewPostgreSQL(pool *pgxpool.Pool) *PostgreSQL { return &PostgreSQL{pool: pool} }
+
+func (store *PostgreSQL) BindCanonicalLineage(reader identityport.CanonicalLineageReader) error {
+	if store == nil || reader == nil {
+		return hxcport.ErrSharedFactsVersionUnavailable
+	}
+	store.lineage = reader
+	return nil
+}
+
+// Read immutable HXC source IDs through the current OneID lineage. Resolve in
+// the same read snapshot; HXC never rewrites source facts or copies merge rules.
+func (store *PostgreSQL) factLineages(ctx context.Context, requested []int64) (map[customerdomain.CustomerID][]customerdomain.CustomerID, []int64, error) {
+	lineages := make(map[customerdomain.CustomerID][]customerdomain.CustomerID, len(requested))
+	seen := map[customerdomain.CustomerID]bool{}
+	ids := []int64{}
+	for _, id := range requested {
+		customer := customerdomain.CustomerID(id)
+		members := []customerdomain.CustomerID{customer}
+		if store.lineage != nil {
+			var err error
+			members, err = store.lineage.CanonicalLineage(ctx, customer)
+			if err != nil || len(members) == 0 {
+				return nil, nil, hxcport.ErrSharedFactsVersionUnavailable
+			}
+		}
+		lineages[customer] = members
+		for _, member := range members {
+			if !seen[member] {
+				seen[member] = true
+				ids = append(ids, int64(member))
+			}
+		}
+	}
+	return lineages, ids, nil
+}
 
 func (store *PostgreSQL) CreateRun(ctx context.Context, runKey string, requestDigest [32]byte, trigger, identityMode string, requestedBy int64) (domain.RefreshRun, bool, error) {
 	tx, err := platformpostgres.RequireTransaction(ctx)
@@ -203,6 +242,10 @@ func (store *PostgreSQL) SharedFactsAtVersion(ctx context.Context, version int64
 		return nil, fmt.Errorf("begin HXC shared facts snapshot: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	lineages, ids, err := store.factLineages(platformpostgres.BindTransaction(ctx, tx), ids)
+	if err != nil {
+		return nil, err
+	}
 	var available bool
 	var expectedRows, retainedRows int64
 	if err := tx.QueryRow(ctx, `SELECT v.shared_facts_available,v.total_count,(SELECT count(*) FROM hxc_dashboard_rows r WHERE r.projection_id=v.id) FROM hxc_dashboard_versions v WHERE v.id=$1`, version).Scan(&available, &expectedRows, &retainedRows); err != nil {
@@ -258,7 +301,24 @@ func (store *PostgreSQL) SharedFactsAtVersion(ctx context.Context, version int64
 	if err = tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit HXC shared facts snapshot: %w", err)
 	}
-	return out, nil
+	canonical := make(map[customerdomain.CustomerID]hxcport.SharedFacts, len(lineages))
+	for requested, members := range lineages {
+		found := false
+		for _, id := range members {
+			item, exists := out[id]
+			if !exists {
+				continue
+			}
+			if found {
+				canonical[requested] = hxcport.SharedFacts{CustomerID: members[0], Availability: hxcport.SharedFactsAmbiguous}
+				break
+			}
+			item.CustomerID = members[0]
+			canonical[requested] = item
+			found = true
+		}
+	}
+	return canonical, nil
 }
 
 func sharedFactsIDs(customerIDs []customerdomain.CustomerID) ([]int64, error) {

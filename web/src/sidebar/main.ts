@@ -2599,8 +2599,6 @@ export class SidebarController {
         !Number.isSafeInteger(product.price_minor) ||
         product.price_minor < 0 ||
         !/^[A-Z]{3}$/.test(product.currency) ||
-        !Number.isSafeInteger(product.stock_quantity) ||
-        product.stock_quantity < 0 ||
         !new RegExp(`^/p/${product.kind}/[1-9][0-9]{0,18}$`).test(
           product.public_path,
         )
@@ -2913,7 +2911,7 @@ export class SidebarController {
             this.doc,
             "div",
             "item-meta",
-            `${kind} · ${product.product_code} · ${product.currency} ${(product.price_minor / 100).toFixed(2)} · 库存 ${product.stock_quantity}`,
+            `${kind} · ${product.product_code} · ${product.currency} ${(product.price_minor / 100).toFixed(2)}`,
           ),
           createElement(
             this.doc,

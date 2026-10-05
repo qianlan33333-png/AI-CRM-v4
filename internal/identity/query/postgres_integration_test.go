@@ -271,6 +271,34 @@ func TestPostgreSQLOneIDQueries(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Evidence writers acquire update locks up front; a second share holder
+	// cannot create the later lock-upgrade cycle.
+	if err = unit.Within(ctx, func(txContext context.Context) error {
+		lineages, e := store.WriteLockedCanonicalLineages(txContext, []customerdomain.CustomerID{customerdomain.CustomerID(mergedID), customerdomain.CustomerID(canonicalID), customerdomain.CustomerID(otherID)})
+		if e != nil {
+			return e
+		}
+		roots := lineages[customerdomain.CustomerID(mergedID)]
+		if len(lineages) != 3 || len(roots) != 2 || len(lineages[customerdomain.CustomerID(canonicalID)]) != 2 || len(lineages[customerdomain.CustomerID(otherID)]) != 1 {
+			return errors.New("unexpected write-locked lineage")
+		}
+		concurrent, e := native.Begin(ctx)
+		if e != nil {
+			return e
+		}
+		defer concurrent.Rollback(ctx)
+		for _, id := range roots {
+			_, e = concurrent.Exec(ctx, `SELECT id FROM customers WHERE id=$1 FOR SHARE NOWAIT`, id)
+			if e == nil {
+				return errors.New("share lock bypassed write-locked lineage")
+			}
+			// NOWAIT aborts this transaction; one blocked member suffices here.
+			break
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// Once eligibility commits, the merge root lock is available again.
 	mergeTx, e := native.Begin(ctx)
 	if e != nil {

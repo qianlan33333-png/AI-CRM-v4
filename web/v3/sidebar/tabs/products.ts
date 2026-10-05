@@ -20,8 +20,7 @@ interface BackendProductOption {
 
 /**
  * 可分享商品：直连后端 GET /api/sidebar/v2/products。本地商品选项投影
- * 没有描述与库存：description 置空、stock_quantity 缺省（UI 显示
- * 「库存未同步」）。public_path 指向仍然在线的公开购买页。
+ * 没有描述；public_path 指向仍然在线的公开购买页。
  */
 export async function loadProducts(
   contextToken: string,

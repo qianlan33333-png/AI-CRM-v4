@@ -79,9 +79,15 @@ func (v *invitationVirtualProvider) UpdateNativeInvitationCode(_ context.Context
 	return w.InvitationCode{ConfigID: v.config, QRCode: v.qr}, nil
 }
 
-type invitationVirtualCatalog struct{ g.Catalog }
+type invitationVirtualCatalog struct {
+	g.Catalog
+	facts map[string]g.CatalogGroup
+}
 
-func (invitationVirtualCatalog) ReadCatalogGroup(_ context.Context, id string) (g.CatalogGroup, error) {
+func (v invitationVirtualCatalog) ReadCatalogGroup(_ context.Context, id string) (g.CatalogGroup, error) {
+	if v.facts != nil {
+		return v.facts[id], nil
+	}
 	now := time.Now().UTC().Add(-24 * time.Hour)
 	return g.CatalogGroup{ChatID: id, MemberCount: 200, ObservedAt: &now}, nil
 }
@@ -212,10 +218,34 @@ func TestInvitationVirtualAcceptance(t *testing.T) {
 	if next.CurrentChatID != "b" {
 		t.Fatalf("switch target=%q", next.CurrentChatID)
 	}
-	if err = repo.ApplyInvitationEvaluationWithEffects(ctx, plan, next, effects); err != nil {
+	disabled := &mediaApp.InvitationService{Store: repo, Catalog: invitationVirtualCatalog{facts: facts}, Effects: effects, Origin: "https://crm.example", WriteEnabled: false}
+	held, err := disabled.Public(ctx, plan.Token)
+	if err != nil {
 		t.Fatal(err)
 	}
-	beforeProvider, err := repo.ReadPublicInvitation(ctx, plan.Token)
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM invitation_effect_probe`).Scan(&count); err != nil || count != 1 || held.State != "preparing" || held.CurrentChatID != "" || held.ProviderState != "executed" {
+		t.Fatalf("disabled public rotation must wait without accepting a doomed write: effects=%d state=%s current=%s provider=%s error=%v", count, held.State, held.CurrentChatID, held.ProviderState, err)
+	}
+	disabledEdit := input
+	disabledEdit.Version = held.Version
+	disabledEdit.ChatIDs = []string{"b"}
+	if _, err = disabled.Save(ctx, disabledEdit, 1, "disabled-target-switch"); err == nil {
+		t.Fatal("disabled local edit accepted a new Provider target intent")
+	}
+	preserved, err := repo.ReadInvitationPlan(ctx, held.ID)
+	if err != nil || preserved.Version != held.Version || preserved.ProviderState != "executed" {
+		t.Fatalf("blocked target edit must roll back plan/intent: version=%d provider=%s error=%v", preserved.Version, preserved.ProviderState, err)
+	}
+	disabledEdit.ChatIDs = []string{"a", "b"}
+	disabledEdit.Name = "local edit while waiting"
+	if _, err = disabled.Save(ctx, disabledEdit, 1, "disabled-local-metadata"); err != nil {
+		t.Fatalf("disabled metadata edit must stay available: %v", err)
+	}
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM invitation_effect_probe`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("disabled edits must not add effects: %d %v", count, err)
+	}
+	disabled.WriteEnabled = true
+	beforeProvider, err := disabled.Public(ctx, plan.Token)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +256,7 @@ func TestInvitationVirtualAcceptance(t *testing.T) {
 		t.Fatalf("switch effects=%d err=%v", count, err)
 	}
 	history, err := repo.InvitationHistory(ctx, plan.ID)
-	if err != nil || len(history) != 2 || history[0].From != "a" || history[0].To != "b" {
+	if err != nil || len(history) != 3 || history[0].From != "" || history[0].To != "b" || history[1].From != "a" || history[1].To != "" {
 		t.Fatalf("switch history=%+v err=%v", history, err)
 	}
 	runEffect([]string{"b"})

@@ -215,7 +215,7 @@ func (service *LocalProductLifecycleService) CopyLocalProduct(ctx context.Contex
 			Description:           source.Description,
 			PriceMinor:            source.PriceMinor,
 			Currency:              source.Currency,
-			StockQuantity:         source.StockQuantity,
+			StockQuantity:         0,
 			Images:                slices.Clone(source.Images),
 			LegacyAdminProjection: projection,
 			Actor:                 normalized.Actor,
@@ -232,7 +232,7 @@ func (service *LocalProductLifecycleService) CopyLocalProduct(ctx context.Contex
 		result, createErr = projectLocalProduct(created)
 		if createErr != nil || result.Version != 1 || result.Lifecycle != productport.LocalProductDraft || result.Enabled || result.ID == sourceProjected.ID ||
 			result.ProductCode != copiedCode || result.Name != copiedName || result.Description != sourceProjected.Description || result.PriceMinor != sourceProjected.PriceMinor ||
-			result.Currency != sourceProjected.Currency || result.StockQuantity != sourceProjected.StockQuantity || result.CreatedBy != normalized.Actor || !reflect.DeepEqual(result.Images, sourceProjected.Images) {
+			result.Currency != sourceProjected.Currency || result.CreatedBy != normalized.Actor || !reflect.DeepEqual(result.Images, sourceProjected.Images) {
 			return ErrUnavailable
 		}
 		if eventErr := appendLocalProductLifecycleEvent(tx, service.events, "copy", result, sourceProjected.ID, normalized.Actor, reservation, now, productport.EventProductCreated); eventErr != nil {
@@ -465,7 +465,7 @@ func decodeLocalProductSnapshot(raw []byte) (productport.LocalProduct, error) {
 		return productport.LocalProduct{}, ErrUnavailable
 	}
 	canonical, err := json.Marshal(result)
-	if err != nil || !jsonEquivalent(canonical, raw) {
+	if err != nil || !jsonEquivalentIgnoringRetiredStock(canonical, raw) {
 		return productport.LocalProduct{}, ErrUnavailable
 	}
 	return result, nil
@@ -583,7 +583,7 @@ func projectLocalProduct(product productport.Product) (productport.LocalProduct,
 	}
 	result := productport.LocalProduct{
 		ID: product.ID, ProductCode: product.ProductCode, Name: product.Name, Description: product.Description,
-		PriceMinor: product.PriceMinor, Currency: product.Currency, StockQuantity: product.StockQuantity,
+		PriceMinor: product.PriceMinor, Currency: product.Currency,
 		Images: append([]string{}, product.Images...), CreatedBy: product.CreatedBy,
 		CreatedAt: product.CreatedAt, UpdatedAt: product.UpdatedAt, Lifecycle: lifecycle, Enabled: enabled, Version: product.Version,
 	}
@@ -678,7 +678,7 @@ func localProductProjectionForLifecycle(raw json.RawMessage, lifecycle productpo
 func validLocalProductSnapshot(product productport.LocalProduct) bool {
 	if product.ID < 1 || product.ProductCode == "" || strings.TrimSpace(product.ProductCode) != product.ProductCode || len(product.ProductCode) > 200 ||
 		product.Name == "" || strings.TrimSpace(product.Name) != product.Name || len(product.Name) > 200 || strings.TrimSpace(product.Description) != product.Description || len(product.Description) > 10000 ||
-		product.PriceMinor < 0 || product.StockQuantity < 0 || len(product.Currency) != 3 || product.Currency != strings.ToUpper(product.Currency) ||
+		product.PriceMinor < 0 || len(product.Currency) != 3 || product.Currency != strings.ToUpper(product.Currency) ||
 		product.Version < 1 || product.CreatedBy < 1 || product.CreatedAt.IsZero() || product.UpdatedAt.IsZero() || product.UpdatedAt.Before(product.CreatedAt) {
 		return false
 	}
@@ -702,7 +702,7 @@ func validLocalProductSnapshot(product productport.LocalProduct) bool {
 
 func sameLocalProductBody(left, right productport.LocalProduct) bool {
 	return left.ID == right.ID && left.ProductCode == right.ProductCode && left.Name == right.Name && left.Description == right.Description &&
-		left.PriceMinor == right.PriceMinor && left.Currency == right.Currency && left.StockQuantity == right.StockQuantity &&
+		left.PriceMinor == right.PriceMinor && left.Currency == right.Currency &&
 		left.CreatedBy == right.CreatedBy && left.CreatedAt.Equal(right.CreatedAt) && reflect.DeepEqual(left.Images, right.Images)
 }
 

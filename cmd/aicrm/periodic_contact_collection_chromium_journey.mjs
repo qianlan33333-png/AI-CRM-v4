@@ -38,6 +38,10 @@ async function wait(cdp,expression,message) {
 async function navigate(cdp,url,expression) {
   await cdp.call('Page.navigate',{url});await wait(cdp,expression,'page not ready');
 }
+async function assertProductForm(cdp) {
+  assert.equal(await value(cdp,"Boolean(document.getElementById('pfStock')||document.getElementById('spfStock')||[...document.querySelectorAll('label')].some(el=>el.textContent.trim()==='库存'))"),false,'retired inventory controls remain absent');
+  assert.equal(await value(cdp,"document.querySelector('[data-product-alipay-enabled]') instanceof HTMLInputElement"),true,'packaged Product sale form mounts Alipay policy control');
+}
 async function read(cdp,prefix,id) {
   const endpoint=prefix==='spf'?'/api/admin/service-period-products/':'/api/v1/products/';
   return value(cdp,`fetch(${JSON.stringify(endpoint+id)}).then(async r=>{if(!r.ok)throw new Error('read status '+r.status);const v=await r.json();return v.product||v})`);
@@ -131,6 +135,7 @@ try {
   for(const [prefix,id] of [['spf',period],['pf',standard]]) {
     const page=prefix==='spf'?'/admin/spProductForm.html':'/admin/productForm.html';
     await navigate(cdp,base+page+'?id='+id,`Boolean(document.getElementById(${JSON.stringify(prefix+'ContactCollectionLevel')}))`);
+    await assertProductForm(cdp);
     for(const level of ['none','mobile','shipping_address']) {
       const before=await read(cdp,prefix,id);
       await save(cdp,prefix,level);
@@ -153,7 +158,8 @@ try {
   }
   for(const level of ['none','mobile','shipping_address']) {
     await navigate(cdp,base+'/admin/spProductForm.html',"Boolean(document.getElementById('spfContactCollectionLevel'))");
-    await value(cdp,`(()=>{for(const [id,v] of Object.entries({spfName:'synthetic contact',spfCode:${JSON.stringify('new-contact-'+level)},spfPrice:'9.90',spfCurrency:'CNY',spfStock:'5',spfDurationDays:'30'})){const el=document.getElementById(id);if(!el)throw new Error('new field missing');el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));}return true})()`);
+    await assertProductForm(cdp);
+    await value(cdp,`(()=>{for(const [id,v] of Object.entries({spfName:'synthetic contact',spfCode:${JSON.stringify('new-contact-'+level)},spfPrice:'9.90',spfCurrency:'CNY',spfDurationDays:'30'})){const el=document.getElementById(id);if(!el)throw new Error('new field missing');el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));}return true})()`);
     await save(cdp,'spf',level);
     await wait(cdp,"/^[1-9][0-9]*$/.test(new URL(location.href).searchParams.get('id')||'')",'new period ID unavailable');
     const id=await value(cdp,"new URL(location.href).searchParams.get('id')");

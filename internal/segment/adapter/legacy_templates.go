@@ -55,8 +55,16 @@ func (s LegacyTemplateSource) Evaluate(ctx context.Context, definition segmentpo
 	if json.Unmarshal(definition.Expression, &ast) != nil || ast.SchemaVersion != 1 || reference.IsZero() {
 		return segmentport.Evaluation{}, ErrCustomerReadUnavailable
 	}
+	isSurvey := ast.Template == segmentdsl.QuestionnaireSubmissions || ast.Template == segmentdsl.QuestionnaireChoiceAnswers
+	if segmentport.SurveyOwnerSelectionRetired(string(ast.Template), ast.Parameters) {
+		return segmentport.Evaluation{}, ErrCustomerReadUnavailable
+	}
+	needsDirectory := !isSurvey
+	if ast.Template == segmentdsl.QuestionnaireSubmissions {
+		needsDirectory, _ = boolParam(ast.Parameters, "require_wecom_identity")
+	}
 	var publication *wecomport.DirectoryPublication
-	if s.Publication != nil {
+	if needsDirectory && s.Publication != nil {
 		p, readErr := s.Publication.DirectoryPublication(ctx, s.PrimaryOwnerCorpScope)
 		if readErr != nil || !p.BaselineInitialized || !p.Complete || reference.Sub(p.FullObservedAt) > 24*time.Hour {
 			return segmentport.Evaluation{}, ErrCustomerReadUnavailable
@@ -66,8 +74,10 @@ func (s LegacyTemplateSource) Evaluate(ctx context.Context, definition segmentpo
 	var ids []int64
 	var qualifiedPaidOrders map[customerdomain.CustomerID]segmentport.PaidOrderFact
 	var err error
-	if ast.Parameters, err = s.ownerReferences(ctx, ast.Parameters); err != nil {
-		return segmentport.Evaluation{}, err
+	if !isSurvey {
+		if ast.Parameters, err = s.ownerReferences(ctx, ast.Parameters); err != nil {
+			return segmentport.Evaluation{}, err
+		}
 	}
 	switch ast.Template {
 	case segmentdsl.HXCRegistration:
@@ -463,7 +473,7 @@ func (s LegacyTemplateSource) questionnaire(ctx context.Context, p map[string]js
 	}
 	matched := map[int64]map[string]bool{}
 	for _, fact := range facts {
-		if strconv.FormatInt(int64(fact.QuestionnaireID), 10) != questionnaire || !owner(p, fact.StaffID) {
+		if strconv.FormatInt(int64(fact.QuestionnaireID), 10) != questionnaire {
 			continue
 		}
 		for _, condition := range conditions {

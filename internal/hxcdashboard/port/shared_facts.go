@@ -54,7 +54,9 @@ type SharedFacts struct {
 }
 
 // SharedFactsReader reads one atomically published HXC generation for a
-// bounded canonical CustomerID set. It never resolves external identities.
+// bounded CustomerID set. Map keys retain the requested IDs; each value uses
+// the current canonical root. Historical source rows follow the OneID lineage
+// without resolving external identities or rewriting a published generation.
 type SharedFactsReader interface {
 	SharedFacts(context.Context, []customerdomain.CustomerID) (map[customerdomain.CustomerID]SharedFacts, error)
 }

@@ -20,6 +20,7 @@ type executionStoreStub struct {
 	ExecutionStore
 	pkg                               segmentdomain.Package
 	config                            segmentdomain.ConfigurationVersion
+	configurations                    map[int64]segmentdomain.ConfigurationVersion
 	binding                           segmentdomain.AutomationBinding
 	senders                           segmentdomain.SenderSet
 	snapshot                          segmentport.Snapshot
@@ -31,6 +32,12 @@ func (s executionStoreStub) LockPackage(context.Context, int64) (segmentdomain.P
 }
 func (s executionStoreStub) CurrentConfiguration(context.Context, int64) (segmentdomain.ConfigurationVersion, error) {
 	return s.config, s.configErr
+}
+func (s executionStoreStub) Configuration(_ context.Context, id int64) (segmentdomain.ConfigurationVersion, error) {
+	if configuration, found := s.configurations[id]; found {
+		return configuration, nil
+	}
+	return segmentdomain.ConfigurationVersion{}, segmentstore.ErrNotFound
 }
 func (s executionStoreStub) CurrentBinding(context.Context, int64) (segmentdomain.AutomationBinding, error) {
 	return s.binding, s.bindingErr
@@ -94,6 +101,59 @@ func TestPrecheckReportsMissingConfigurationAsReadinessReason(t *testing.T) {
 	if check.Ready || !reflect.DeepEqual(check.Reasons, want) {
 		t.Fatalf("check=%+v want reasons=%v", check, want)
 	}
+}
+
+func TestPrecheckRejectsRetiredSurveyDefinitionFrozenInPublishedSnapshot(t *testing.T) {
+	retired := segmentdomain.ConfigurationVersion{
+		ID: 2, PackageID: 1,
+		Definition: []byte(`{"schema_version":1,"template_key":"questionnaire_submissions","parameters":{"questionnaire_ids":["16"],"owner_scope":"specified","owner_staff_ids":["17"],"require_wecom_identity":false}}`),
+	}
+	current := segmentdomain.ConfigurationVersion{
+		ID: 3, PackageID: 1,
+		Definition: []byte(`{"schema_version":1,"template_key":"questionnaire_submissions","parameters":{"questionnaire_ids":["16"],"require_wecom_identity":false}}`),
+	}
+	store := executionStoreStub{
+		pkg:            segmentdomain.Package{ID: 1, Lifecycle: segmentdomain.Active},
+		config:         current,
+		configurations: map[int64]segmentdomain.ConfigurationVersion{retired.ID: retired},
+		bindingErr:     segmentstore.ErrNotFound,
+		sendersErr:     segmentstore.ErrNotFound,
+		snapshot:       segmentport.Snapshot{ID: 4, PackageID: 1, ConfigurationVersionID: segmentport.ConfigurationVersionID(retired.ID), State: segmentport.SnapshotPublished},
+	}
+	service, _ := NewExecutionService(directUOW{}, store, publishedAgentStub{}, staffReaderStub{}, false)
+	check, err := service.Precheck(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("precheck err=%v", err)
+	}
+	if check.Ready || !containsReason(check.Reasons, "definition_unsupported") {
+		t.Fatalf("precheck=%+v; want retired snapshot definition to block execution", check)
+	}
+}
+
+func TestSurveyOwnerSelectionRetiredAtReadsOnlyRequestedImmutableVersion(t *testing.T) {
+	retired := segmentdomain.ConfigurationVersion{ID: 2, PackageID: 1, Definition: []byte(`{"schema_version":1,"template_key":"questionnaire_submissions","parameters":{"questionnaire_ids":["16"],"owner_scope":"specified","owner_staff_ids":["17"],"require_wecom_identity":false}}`)}
+	compatible := segmentdomain.ConfigurationVersion{ID: 3, PackageID: 1, Definition: []byte(`{"schema_version":1,"template_key":"questionnaire_submissions","parameters":{"questionnaire_ids":["16"],"owner_scope":"all","owner_staff_ids":[],"require_wecom_identity":false}}`)}
+	service, err := NewExecutionService(directUOW{}, executionStoreStub{configurations: map[int64]segmentdomain.ConfigurationVersion{retired.ID: retired, compatible.ID: compatible}}, publishedAgentStub{}, staffReaderStub{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredAt, err := service.SurveyOwnerSelectionRetiredAtWithin(context.Background(), segmentport.ConfigurationVersionID(retired.ID))
+	if err != nil || !retiredAt {
+		t.Fatalf("retired config=%v err=%v; want true", retiredAt, err)
+	}
+	retiredAt, err = service.SurveyOwnerSelectionRetiredAtWithin(context.Background(), segmentport.ConfigurationVersionID(compatible.ID))
+	if err != nil || retiredAt {
+		t.Fatalf("legacy all/empty config=%v err=%v; want false", retiredAt, err)
+	}
+}
+
+func containsReason(reasons []string, target string) bool {
+	for _, reason := range reasons {
+		if reason == target {
+			return true
+		}
+	}
+	return false
 }
 func (s executionStoreStub) PublishedSnapshot(context.Context, segmentport.PackageID) (segmentport.Snapshot, bool, error) {
 	return s.snapshot, s.snapshot.ID > 0, nil

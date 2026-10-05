@@ -173,9 +173,9 @@ func TestLegacyTemplateSourcesEvaluateFrozenConditions(t *testing.T) {
 			{CustomerID: 3, OwnerUserID: "staff-a", Status: "deleted"},
 		},
 		survey: []surveyport.AudienceChoiceAnswer{
-			{CustomerID: 1, QuestionnaireID: 9, StaffID: "staff-a", QuestionID: 11, OptionIDs: []surveyport.ID{101}},
-			{CustomerID: 1, QuestionnaireID: 9, StaffID: "staff-a", QuestionID: 12, OptionIDs: []surveyport.ID{202}},
-			{CustomerID: 2, QuestionnaireID: 9, StaffID: "staff-b", QuestionID: 11, OptionIDs: []surveyport.ID{102}},
+			{CustomerID: 1, QuestionnaireID: 9, QuestionID: 11, OptionIDs: []surveyport.ID{101}},
+			{CustomerID: 1, QuestionnaireID: 9, QuestionID: 12, OptionIDs: []surveyport.ID{202}},
+			{CustomerID: 2, QuestionnaireID: 9, QuestionID: 11, OptionIDs: []surveyport.ID{102}},
 		},
 		orders: []orderport.PaidAudienceOrder{
 			{CustomerID: 1, ProductCode: "paid-course", OwnerReference: "staff-a", PaidAt: &paidInside},
@@ -195,7 +195,7 @@ func TestLegacyTemplateSourcesEvaluateFrozenConditions(t *testing.T) {
 	}{
 		{"contact-registration", `{"owner_scope":"specified","owner_staff_ids":["19"],"contact_statuses":["active"],"registration_status":"registered"}`, segmentdsl.WeComContactRegistration, []customerdomain.CustomerID{1}},
 		// Question conditions use AND across questions and OR inside each option list.
-		{"first-questionnaire-choice", `{"questionnaire_id":"9","conditions":[{"question_id":"11","option_ids":["101","102"]},{"question_id":"12","option_ids":["202"]}],"owner_scope":"specified","owner_staff_ids":["19"]}`, segmentdsl.QuestionnaireChoiceAnswers, []customerdomain.CustomerID{1}},
+		{"first-questionnaire-choice", `{"questionnaire_id":"9","conditions":[{"question_id":"11","option_ids":["101","102"]},{"question_id":"12","option_ids":["202"]}]}`, segmentdsl.QuestionnaireChoiceAnswers, []customerdomain.CustomerID{1}},
 		// A time window is [from,to); unknown PaidAt cannot enter it. Owner scope
 		// remains effective even when the active-contact switch is false.
 		{"paid-payer-window-owner", `{"product_codes":["paid-course"],"paid_at_from":"2026-09-05T09:00:00Z","paid_at_to":"2026-09-05T12:00:00Z","owner_scope":"specified","owner_staff_ids":["19"],"require_active_wecom_contact":false}`, segmentdsl.PaidOrder, []customerdomain.CustomerID{1}},

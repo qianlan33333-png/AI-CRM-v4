@@ -146,6 +146,7 @@ type publicSurveyPresentationChromiumFixture struct {
 type publicSurveyBrowserOptions struct {
 	reauthorization bool
 	display         surveyport.AnswerDisplayMode
+	extraQuestions  []surveyport.Question
 }
 
 func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicSurveyBrowserOptions) *publicSurveyPresentationChromiumFixture {
@@ -234,6 +235,9 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 			success.Questions = append(success.Questions, surveyport.Question{Type: surveyport.QuestionSingleChoice, Title: "选择当前状态", Required: true, SortOrder: i, Validation: surveyport.Validation{MaximumSelections: &maximum}, Options: []surveyport.Option{{Text: "已确认", TagCodes: []string{}, SortOrder: 0}, {Text: "待确认", TagCodes: []string{}, SortOrder: 1}}})
 		}
 		success.Questions = append(success.Questions, surveyport.Question{Type: surveyport.QuestionMobile, Title: "手机号", Required: true, SortOrder: 6, Options: []surveyport.Option{}}, surveyport.Question{Type: surveyport.QuestionTextarea, Title: "补充说明", Required: true, SortOrder: 7, Options: []surveyport.Option{}})
+	}
+	if len(options) > 0 {
+		success.Questions = append(success.Questions, options[0].extraQuestions...)
 	}
 	success, err = definitions.Create(ctx, surveyport.CreateCommand{Questionnaire: success, ActorID: actorID, IdempotencyKey: "public-survey-ui-create-0001"})
 	if err != nil {

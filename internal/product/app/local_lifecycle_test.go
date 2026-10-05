@@ -131,7 +131,7 @@ func TestLocalProductLifecycleCopyRetainsTypedBodyAndImagesButResetsDraft(t *tes
 	}
 	if copied.ID == source.ID || copied.Version != 1 || copied.Lifecycle != productport.LocalProductDraft || copied.Enabled ||
 		copied.ProductCode == source.ProductCode || copied.Name == source.Name || copied.Description != source.Description ||
-		copied.PriceMinor != source.PriceMinor || copied.Currency != source.Currency || copied.StockQuantity != source.StockQuantity ||
+		copied.PriceMinor != source.PriceMinor || copied.Currency != source.Currency || copied.StockQuantity != 0 ||
 		fmt.Sprint(copied.Images) != fmt.Sprint(source.Images) {
 		t.Fatalf("copy=%+v source=%+v", copied, source)
 	}
@@ -149,6 +149,73 @@ func TestLocalProductLifecycleCopyRetainsTypedBodyAndImagesButResetsDraft(t *tes
 	if got := store.products[source.ID]; got.Version != source.Version || localProductLifecycleForTest(got) != source.Lifecycle {
 		t.Fatalf("source changed=%+v", got)
 	}
+}
+
+func TestLocalProductCopyReplayIgnoresOnlyRetiredSnapshotStock(t *testing.T) {
+	service, store, events := newLocalProductLifecycleFixture()
+	command := productport.CopyLocalProductCommand{ID: 13, ExpectedVersion: 2, Actor: 41, IdempotencyKey: "old-stock-local-copy-01"}
+	_, digest, err := normalizeLocalProductCopy(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	result := productport.LocalProduct{
+		ID: 91, ProductCode: "copied-old-local-product", Name: "旧商品 (copy)", Description: "说明", PriceMinor: 9900,
+		Currency: "CNY", Images: []string{}, CreatedBy: command.Actor, CreatedAt: now, UpdatedAt: now,
+		Lifecycle: productport.LocalProductDraft, Enabled: false, Version: 1,
+	}
+	snapshot, err := retiredStockLocalSnapshot(t, result, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := localProductLifecycleReservation(command.Actor, command.IdempotencyKey, digest, now)
+	reservation.Operation = "copy"
+	store.receipts[localProductLifecycleReceiptKey(reservation.Operation, reservation.ActorScope, reservation.KeyDigest)] = Receipt{
+		ID: 91, Operation: reservation.Operation, ActorScope: reservation.ActorScope, KeyDigest: reservation.KeyDigest,
+		PayloadDigest: reservation.PayloadDigest, State: "completed", ResultSnapshot: snapshot,
+	}
+
+	replayed, err := service.CopyLocalProduct(context.Background(), command)
+	if err != nil || replayed.ID != result.ID || replayed.StockQuantity != 0 || store.createCalls != 0 || len(events.events) != 0 {
+		t.Fatalf("old local copy replay=%+v err=%v creates=%d events=%d", replayed, err, store.createCalls, len(events.events))
+	}
+	changed := command
+	changed.ExpectedVersion++
+	if _, err = service.CopyLocalProduct(context.Background(), changed); !errors.Is(err, ErrConflict) {
+		t.Fatalf("changed copy payload error=%v, want conflict", err)
+	}
+	var tampered map[string]json.RawMessage
+	if err = json.Unmarshal(snapshot, &tampered); err != nil {
+		t.Fatal(err)
+	}
+	tampered["unknown_snapshot_field"] = json.RawMessage(`true`)
+	tamperedSnapshot, _ := json.Marshal(tampered)
+	receiptKey := localProductLifecycleReceiptKey(reservation.Operation, reservation.ActorScope, reservation.KeyDigest)
+	receipt := store.receipts[receiptKey]
+	receipt.ResultSnapshot = tamperedSnapshot
+	store.receipts[receiptKey] = receipt
+	if _, err = service.CopyLocalProduct(context.Background(), command); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unknown local snapshot field error=%v, want unavailable", err)
+	}
+}
+
+func retiredStockLocalSnapshot(t *testing.T, product productport.LocalProduct, stock int32) (json.RawMessage, error) {
+	t.Helper()
+	raw, err := json.Marshal(product)
+	if err != nil {
+		return nil, err
+	}
+	var snapshot map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &snapshot); err != nil {
+		return nil, err
+	}
+	stockJSON, _ := json.Marshal(stock)
+	snapshot["stock_quantity"] = stockJSON
+	raw, err = json.Marshal(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 func TestLocalProductLifecycleDeleteIsDraftOnlyAndReferenceSafe(t *testing.T) {

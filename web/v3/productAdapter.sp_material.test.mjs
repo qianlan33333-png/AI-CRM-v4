@@ -1,3 +1,4 @@
+import { productSourceTestPage } from '../scripts/product-source-test-page.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 import { buildTestBrowserBundle } from '../scripts/test-browser-bundle.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const page = fs.readFileSync(path.join(root, 'web/dist/admin/spProductForm.html'), 'utf8');
+const page = productSourceTestPage('spProductForm.html');
 const host = await buildTestBrowserBundle(path.join(root, 'web/v3/productAdapter.ts'));
 const admin = await buildTestBrowserBundle(path.join(root, 'web/src/admin/main.ts'));
 const materialPicker = fs.readFileSync(path.join(root, 'web/donors/ai-assistant-production/static/material_picker.js'), 'utf8');
@@ -102,7 +103,7 @@ document.querySelector('[data-v3-picker-confirm]').click();
 await waitFor(() => document.querySelector('[data-v3-selection-session="material"]') === null, 'periodic V3 confirm did not return to the owner draft');
 await waitFor(() => [...document.querySelectorAll('#sp-media img')].some((image) => image.src.includes('/39/variants/thumb_320')), 'periodic frozen form did not receive original material');
 document.querySelector('a[href="#sp-sale"]').click();
-for (const [id, value] of [['spfName', '周期素材'], ['spfCode', 'sp-media'], ['spfPrice', '0.02'], ['spfStock', '1']]) document.getElementById(id).value = value;
+for (const [id, value] of [['spfName', '周期素材'], ['spfCode', 'sp-media'], ['spfPrice', '0.02']]) document.getElementById(id).value = value;
 const durationBeforeCreate = document.getElementById('spfDurationDays');
 durationBeforeCreate.value = '90'; durationBeforeCreate.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
 const policyBeforeCreate = document.querySelector('[data-distribution-policy]');
@@ -118,6 +119,7 @@ assert.equal(document.querySelector('[data-distribution-policy-enabled]').checke
 const save = [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === '保存当前维度'); save.click();
 await waitFor(() => calls.some((call) => call.path === '/api/admin/service-period-products' && call.method === 'POST'), 'periodic frozen save did not write');
 const body = JSON.parse(calls.find((call) => call.path === '/api/admin/service-period-products' && call.method === 'POST').body);
+assert.equal(Object.hasOwn(body, 'stock_quantity'), false, 'periodic Product create omits retired stock');
 assert.deepEqual(body.images, ['/api/admin/image-library/39/variants/original'], 'periodic save lost original selected URL');
 assert.equal(body.duration_days, 90, 'periodic product create must use the explicit service duration');
 assert.deepEqual(body.distribution_policy, { enabled: true, commission_rate_basis_points: 2345, wait_days: 9, version: 0 }, 'periodic product create must atomically carry the edited distribution policy');

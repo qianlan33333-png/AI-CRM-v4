@@ -20,13 +20,14 @@ var (
 type ID int64
 
 type Product struct {
-	ID                    ID                    `json:"id"`
-	ProductCode           string                `json:"product_code"`
-	Name                  string                `json:"name"`
-	Description           string                `json:"description"`
-	PriceMinor            int64                 `json:"price_minor"`
-	Currency              string                `json:"currency"`
-	StockQuantity         int32                 `json:"stock_quantity"`
+	ID          ID     `json:"id"`
+	ProductCode string `json:"product_code"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	PriceMinor  int64  `json:"price_minor"`
+	Currency    string `json:"currency"`
+	// StockQuantity is retained only to decode old idempotency snapshots.
+	StockQuantity         int32                 `json:"-"`
 	Images                []string              `json:"images"`
 	CreatedBy             int64                 `json:"created_by"`
 	CreatedAt             time.Time             `json:"created_at"`
@@ -71,11 +72,12 @@ func DefaultDistributionPolicy() DistributionPolicy {
 type CreateCommand struct {
 	ProductCode, Name, Description, Currency, IdempotencyKey string
 	PriceMinor                                               int64
-	StockQuantity                                            int32
-	Images                                                   []string
-	LegacyAdminProjection                                    json.RawMessage
-	Actor                                                    int64
-	DistributionPolicy                                       *DistributionPolicy
+	// Deprecated: accepted for source compatibility; Product commands ignore it.
+	StockQuantity         int32
+	Images                []string
+	LegacyAdminProjection json.RawMessage
+	Actor                 int64
+	DistributionPolicy    *DistributionPolicy
 }
 
 type UpdateCommand struct {
@@ -83,11 +85,12 @@ type UpdateCommand struct {
 	ExpectedVersion                             int64
 	Name, Description, Currency, IdempotencyKey string
 	PriceMinor                                  int64
-	StockQuantity                               int32
-	Images                                      []string
-	LegacyAdminProjection                       json.RawMessage
-	Actor                                       int64
-	DistributionPolicy                          *DistributionPolicy
+	// Deprecated: accepted for source compatibility; Product commands ignore it.
+	StockQuantity         int32
+	Images                []string
+	LegacyAdminProjection json.RawMessage
+	Actor                 int64
+	DistributionPolicy    *DistributionPolicy
 }
 
 type Page struct {

@@ -118,6 +118,8 @@ var (
 
 func definitionReferenceErrorCode(err error) string {
 	switch {
+	case errors.Is(err, segmentapp.ErrUnsupportedDefinition):
+		return "definition_not_supported"
 	case errors.Is(err, errOwnerUnknown):
 		return "owner_unknown"
 	case errors.Is(err, errOwnerUnavailable):
@@ -543,10 +545,14 @@ func (h *Handler) configuration(w http.ResponseWriter, r *http.Request, packageI
 // owner_staff_ids. Mixed or unknown input fails instead of widening a cohort.
 func (h *Handler) normalizeOwnerUserIDs(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
 	var definition struct {
-		Parameters map[string]json.RawMessage `json:"parameters"`
+		TemplateKey string                     `json:"template_key"`
+		Parameters  map[string]json.RawMessage `json:"parameters"`
 	}
 	if err := json.Unmarshal(raw, &definition); err != nil || definition.Parameters == nil {
 		return nil, errOwnerInvalid
+	}
+	if segmentport.SurveyOwnerSelectionRetired(definition.TemplateKey, definition.Parameters) {
+		return nil, segmentapp.ErrUnsupportedDefinition
 	}
 	legacy, exists := definition.Parameters["owner_userids"]
 	if !exists {
@@ -602,6 +608,13 @@ func (h *Handler) normalizeOwnerUserIDs(ctx context.Context, raw json.RawMessage
 	return marshalNormalizedOwnerDefinition(raw, definition.Parameters)
 }
 func (h *Handler) normalizeDefinitionReferences(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	var input struct {
+		TemplateKey string                     `json:"template_key"`
+		Parameters  map[string]json.RawMessage `json:"parameters"`
+	}
+	if json.Unmarshal(raw, &input) == nil && segmentport.SurveyOwnerSelectionRetired(input.TemplateKey, input.Parameters) {
+		return nil, segmentapp.ErrUnsupportedDefinition
+	}
 	resolved, err := h.normalizeProductReferences(ctx, raw)
 	if err != nil {
 		return nil, err

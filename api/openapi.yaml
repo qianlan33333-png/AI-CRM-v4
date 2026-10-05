@@ -6478,7 +6478,7 @@ components:
     Product:
       type: object
       additionalProperties: false
-      required: [id, product_code, name, description, price_minor, currency, stock_quantity, images, admin_projection, created_by, created_at, updated_at, version, lifecycle, enabled, paid_order_count, refund_order_count, sold_count]
+      required: [id, product_code, name, description, price_minor, currency, images, admin_projection, created_by, created_at, updated_at, version, lifecycle, enabled, paid_order_count, refund_order_count, sold_count]
       properties:
         id: {$ref: "#/components/schemas/PositiveID"}
         product_code: {type: string, minLength: 1, maxLength: 200}
@@ -6486,7 +6486,6 @@ components:
         description: {type: string, maxLength: 10000}
         price_minor: {type: integer, format: int64, minimum: 0}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
-        stock_quantity: {type: integer, format: int32, minimum: 0}
         images: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 2048}}
         admin_projection: {$ref: "#/components/schemas/ProductAdminProjection"}
         created_by: {$ref: "#/components/schemas/PositiveID"}
@@ -6521,27 +6520,25 @@ components:
     CreateProductRequest:
       type: object
       additionalProperties: false
-      required: [product_code, name, description, price_minor, currency, stock_quantity, images]
+      required: [product_code, name, description, price_minor, currency, images]
       properties:
         product_code: {type: string, minLength: 1, maxLength: 200}
         name: {type: string, minLength: 1, maxLength: 200}
         description: {type: string, maxLength: 10000}
         price_minor: {type: integer, format: int64, minimum: 0}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
-        stock_quantity: {type: integer, format: int32, minimum: 0}
         images: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 2048}}
         admin_projection: {$ref: "#/components/schemas/ProductAdminProjection"}
     UpdateProductRequest:
       type: object
       additionalProperties: false
-      required: [expected_version, name, description, price_minor, currency, stock_quantity, images, admin_projection]
+      required: [expected_version, name, description, price_minor, currency, images, admin_projection]
       properties:
         expected_version: {$ref: "#/components/schemas/PositiveID"}
         name: {type: string, minLength: 1, maxLength: 200}
         description: {type: string, maxLength: 10000}
         price_minor: {type: integer, format: int64, minimum: 0}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
-        stock_quantity: {type: integer, format: int32, minimum: 0}
         images: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 2048}}
         admin_projection: {$ref: "#/components/schemas/ProductAdminProjection"}
     VersionRequest:
@@ -6553,7 +6550,7 @@ components:
     LocalProduct:
       type: object
       additionalProperties: false
-      required: [id, product_code, name, description, price_minor, currency, stock_quantity, images, created_by, created_at, updated_at, lifecycle, enabled, version]
+      required: [id, product_code, name, description, price_minor, currency, images, created_by, created_at, updated_at, lifecycle, enabled, version]
       properties:
         id: {$ref: "#/components/schemas/PositiveID"}
         product_code: {type: string, minLength: 1, maxLength: 200}
@@ -6561,7 +6558,6 @@ components:
         description: {type: string, maxLength: 10000}
         price_minor: {type: integer, format: int64, minimum: 0}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
-        stock_quantity: {type: integer, format: int32, minimum: 0}
         images: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 2048}}
         created_by: {$ref: "#/components/schemas/PositiveID"}
         created_at: {type: string, format: date-time}
@@ -6584,7 +6580,7 @@ components:
     ServicePeriodProduct:
       type: object
       additionalProperties: false
-      required: [service_product_id, product_code, name, description, price_minor, currency, stock_quantity, images, admin_projection, lifecycle, enabled, archived, version, created_at, updated_at]
+      required: [service_product_id, product_code, name, description, price_minor, currency, images, admin_projection, lifecycle, enabled, archived, version, created_at, updated_at]
       properties:
         service_product_id: {$ref: "#/components/schemas/PositiveID"}
         product_code: {type: string, minLength: 1, maxLength: 200}
@@ -6592,7 +6588,6 @@ components:
         description: {type: string, maxLength: 10000}
         price_minor: {type: integer, format: int64, minimum: 0}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
-        stock_quantity: {type: integer, format: int32, minimum: 0}
         images: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 2048}}
         admin_projection: {$ref: "#/components/schemas/ProductAdminProjection"}
         lifecycle: {type: string, enum: [draft, enabled, disabled, archived]}
@@ -6622,27 +6617,25 @@ components:
     ServicePeriodProductCreateRequest:
       type: object
       additionalProperties: false
-      required: [product_code, name, description, price_minor, currency, stock_quantity, images]
+      required: [product_code, name, description, price_minor, currency, images]
       properties:
         product_code: {type: string, minLength: 1, maxLength: 200}
         name: {type: string, minLength: 1, maxLength: 200}
         description: {type: string, maxLength: 10000}
         price_minor: {type: integer, format: int64, minimum: 0}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
-        stock_quantity: {type: integer, format: int32, minimum: 0}
         images: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 2048}}
         admin_projection: {$ref: "#/components/schemas/ProductAdminProjection"}
     ServicePeriodProductUpdateRequest:
       type: object
       additionalProperties: false
-      required: [expected_version, name, description, price_minor, currency, stock_quantity, images]
+      required: [expected_version, name, description, price_minor, currency, images]
       properties:
         expected_version: {$ref: "#/components/schemas/PositiveID"}
         name: {type: string, minLength: 1, maxLength: 200}
         description: {type: string, maxLength: 10000}
         price_minor: {type: integer, format: int64, minimum: 0}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
-        stock_quantity: {type: integer, format: int32, minimum: 0}
         images: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 2048}}
         admin_projection: {$ref: "#/components/schemas/ProductAdminProjection"}
     ServicePeriodProductShare:
@@ -8017,7 +8010,6 @@ components:
         answers: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/SurveyPublicSubmissionAnswer"}}
         source_channel: {type: string, maxLength: 200}
         campaign_id: {type: string, maxLength: 200}
-        staff_id: {type: string, maxLength: 200}
     SurveyPublicSubmissionAnswer:
       type: object
       additionalProperties: false

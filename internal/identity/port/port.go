@@ -58,6 +58,19 @@ type LockedCanonicalLineageReader interface {
 	LockedCanonicalLineage(context.Context, customerdomain.CustomerID) ([]customerdomain.CustomerID, error)
 }
 
+// WriteLockedCanonicalLineageReader pins roots for commands which subsequently
+// attach identity evidence. Acquiring the write lock first avoids upgrading
+// shared root locks while another command waits on a business receipt.
+type WriteLockedCanonicalLineageReader interface {
+	WriteLockedCanonicalLineage(context.Context, customerdomain.CustomerID) ([]customerdomain.CustomerID, error)
+}
+
+// WriteLockedCanonicalLineagesReader locks a whole command's lineages in one
+// ID order, including shared aliases only once.
+type WriteLockedCanonicalLineagesReader interface {
+	WriteLockedCanonicalLineages(context.Context, []customerdomain.CustomerID) (map[customerdomain.CustomerID][]customerdomain.CustomerID, error)
+}
+
 // OutboundWeComIdentityReader is consumed only by the composition-owned
 // private-message target resolver. It may reveal a verified channel identity
 // to Outbound in memory, never to an HTTP response or structured log.

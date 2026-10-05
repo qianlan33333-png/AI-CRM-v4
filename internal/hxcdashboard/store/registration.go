@@ -2,10 +2,11 @@ package store
 
 import (
 	"context"
+	"time"
+
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	hxcport "github.com/qianlan33333-png/AI-CRM-v3/internal/hxcdashboard/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
-	"time"
 )
 
 // RegistrationFacts pins the publication within the caller's UoW. Absence is
@@ -26,6 +27,10 @@ func (s *PostgreSQL) RegistrationFacts(ctx context.Context, customers []customer
 	if at.IsZero() {
 		return nil, hxcport.ErrSharedFactsVersionUnavailable
 	}
+	lineages, ids, e := s.factLineages(ctx, ids)
+	if e != nil {
+		return nil, e
+	}
 	var version int64
 	var asOf time.Time
 	if e = tx.QueryRow(ctx, `SELECT id,projection_as_of FROM hxc_dashboard_versions WHERE projection_as_of <= $1 ORDER BY projection_as_of DESC,id DESC LIMIT 1`, at.UTC()).Scan(&version, &asOf); e != nil {
@@ -39,13 +44,28 @@ func (s *PostgreSQL) RegistrationFacts(ctx context.Context, customers []customer
 		return nil, e
 	}
 	defer rows.Close()
+	observed := make(map[customerdomain.CustomerID]hxcport.RegistrationFact)
 	for rows.Next() {
 		var id customerdomain.CustomerID
 		var f hxcport.RegistrationFact
 		if e = rows.Scan(&id, &f.State, &f.AsOf, &f.Version); e != nil {
 			return nil, e
 		}
-		out[id] = f
+		observed[id] = f
+	}
+	for requested, members := range lineages {
+		found := false
+		for _, member := range members {
+			fact, exists := observed[member]
+			if !exists || fact.State == "unknown" {
+				continue
+			}
+			if found && fact.State != out[requested].State {
+				out[requested] = hxcport.RegistrationFact{State: "unknown", AsOf: asOf, Version: version}
+				break
+			}
+			out[requested], found = fact, true
+		}
 	}
 	return out, rows.Err()
 }

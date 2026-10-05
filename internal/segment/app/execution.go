@@ -20,6 +20,7 @@ import (
 type ExecutionStore interface {
 	LockPackage(context.Context, int64) (segmentdomain.Package, error)
 	CurrentConfiguration(context.Context, int64) (segmentdomain.ConfigurationVersion, error)
+	Configuration(context.Context, int64) (segmentdomain.ConfigurationVersion, error)
 	CurrentBinding(context.Context, int64) (segmentdomain.AutomationBinding, error)
 	CreateBinding(context.Context, segmentdomain.AutomationBinding) (segmentdomain.AutomationBinding, error)
 	SetCurrentBinding(context.Context, int64, int64, int64, int64, time.Time) (segmentdomain.Package, error)
@@ -242,6 +243,8 @@ func (s *ExecutionService) Precheck(ctx context.Context, packageID int64) (Prech
 	var snapshot segmentport.Snapshot
 	var configFound, bindingFound, sendersFound bool
 	var snapshotFound bool
+	var retiredSnapshotSurveyDefinition bool
+	var snapshotConfigurationMissing bool
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		var e error
 		pkg, e = s.store.LockPackage(tx, packageID)
@@ -273,7 +276,22 @@ func (s *ExecutionService) Precheck(ctx context.Context, packageID int64) (Prech
 			sendersFound = true
 		}
 		snapshot, snapshotFound, e = s.store.PublishedSnapshot(tx, segmentport.PackageID(packageID))
-		return e
+		if e != nil || !snapshotFound || snapshot.ConfigurationVersionID < 1 {
+			return e
+		}
+		snapshotConfig := config
+		if !configFound || segmentport.ConfigurationVersionID(config.ID) != snapshot.ConfigurationVersionID {
+			snapshotConfig, e = s.store.Configuration(tx, int64(snapshot.ConfigurationVersionID))
+			if errors.Is(e, segmentstore.ErrNotFound) {
+				snapshotConfigurationMissing = true
+				return nil
+			}
+			if e != nil {
+				return e
+			}
+		}
+		retiredSnapshotSurveyDefinition = segmentport.SurveyDefinitionOwnerSelectionRetired(snapshotConfig.Definition)
+		return nil
 	})
 	if err != nil {
 		return Precheck{}, classify(err)
@@ -295,7 +313,7 @@ func (s *ExecutionService) Precheck(ctx context.Context, packageID int64) (Prech
 		result.Reasons = append(result.Reasons, "sender_set_missing")
 	}
 	if configFound {
-		if _, definitionErr := CanonicalDefinition(config.Definition); definitionErr != nil {
+		if _, definitionErr := CanonicalDefinition(config.Definition); definitionErr != nil || segmentport.SurveyDefinitionOwnerSelectionRetired(config.Definition) {
 			result.Reasons = append(result.Reasons, "definition_unsupported")
 		}
 		if cronErr := ValidateRefreshCronUTC(config.RefreshCronUTC); cronErr != nil {
@@ -304,6 +322,12 @@ func (s *ExecutionService) Precheck(ctx context.Context, packageID int64) (Prech
 	}
 	if snapshotFound {
 		result.SnapshotID = snapshot.ID
+		if snapshotConfigurationMissing {
+			result.Reasons = append(result.Reasons, "published_snapshot_configuration_mismatch")
+		}
+		if retiredSnapshotSurveyDefinition {
+			result.Reasons = append(result.Reasons, "definition_unsupported")
+		}
 	} else {
 		result.Reasons = append(result.Reasons, "published_snapshot_missing")
 	}
@@ -426,6 +450,38 @@ func (f *RuntimeFacade) CurrentSenderSet(ctx context.Context, id int64) (segment
 func (f *RuntimeFacade) Precheck(ctx context.Context, id int64) (Precheck, error) {
 	return f.Execution.Precheck(ctx, id)
 }
+
+// SurveyOwnerSelectionRetiredAtWithin reads one immutable configuration
+// version using the caller's transaction. It is used by event and approval
+// paths that already hold their own write transaction.
+func (s *ExecutionService) SurveyOwnerSelectionRetiredAtWithin(ctx context.Context, configurationID segmentport.ConfigurationVersionID) (bool, error) {
+	if s == nil || configurationID < 1 {
+		return false, ErrInvalid
+	}
+	configuration, err := s.store.Configuration(ctx, int64(configurationID))
+	if err != nil {
+		return false, err
+	}
+	return segmentport.SurveyDefinitionOwnerSelectionRetired(configuration.Definition), nil
+}
+
+// SurveyOwnerSelectionRetiredForPackageWithin locks and reads the package's
+// current configuration in the caller's transaction. This is a narrow Survey
+// retirement check, not a generic published-snapshot staleness check.
+func (s *ExecutionService) SurveyOwnerSelectionRetiredForPackageWithin(ctx context.Context, packageID segmentport.PackageID) (bool, error) {
+	if s == nil || packageID < 1 {
+		return false, ErrInvalid
+	}
+	if _, err := s.store.LockPackage(ctx, int64(packageID)); err != nil {
+		return false, err
+	}
+	configuration, err := s.store.CurrentConfiguration(ctx, int64(packageID))
+	if err != nil {
+		return false, err
+	}
+	return segmentport.SurveyDefinitionOwnerSelectionRetired(configuration.Definition), nil
+}
+
 func (f *RuntimeFacade) TransitionPackage(ctx context.Context, c VersionCommand, target segmentdomain.Lifecycle) (segmentdomain.Package, error) {
 	if target == segmentdomain.Active {
 		check, err := f.ActivationPrecheck(ctx, c.ID)
@@ -476,3 +532,4 @@ func (s *ExecutionService) AudienceExecutionConfiguration(ctx context.Context, p
 }
 
 var _ segmentport.ExecutionConfigurationReader = (*ExecutionService)(nil)
+var _ segmentport.RetiredSurveyConfigurationReader = (*ExecutionService)(nil)

@@ -14,6 +14,7 @@ import (
 
 	automationport "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/port"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	outboundport "github.com/qianlan33333-png/AI-CRM-v3/internal/outbound/port"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 )
@@ -67,7 +68,7 @@ type DirectPushStore interface {
 	PutDirectPushConfig(context.Context, DirectPushConfig, int64, int64, string, [32]byte, time.Time) (DirectPushConfig, error)
 	ExistingDirectPushBatch(context.Context, int64, [32]byte) ([32]byte, automationport.DirectPushBatchResult, bool, error)
 	CreateDirectPushBatch(context.Context, DirectPushConfig, [32]byte, [32]byte, int, time.Time) (int64, error)
-	CountRecentDirectPushes(context.Context, int64, customerdomain.CustomerID, time.Time) (int, error)
+	CountRecentDirectPushes(context.Context, int64, []customerdomain.CustomerID, time.Time) (int, error)
 	LockDirectPushRate(context.Context, int64, customerdomain.CustomerID) error
 	CreateDirectPushItem(context.Context, int64, DirectPushItemDraft) (int64, error)
 	BindDirectPushEffect(context.Context, int64, outboundport.MessageAcceptance, time.Time) error
@@ -176,6 +177,7 @@ func newDirectPushWebhookReference() (string, error) {
 
 type DirectPushRuntime struct {
 	uow         platformport.UnitOfWork
+	lineage     identityport.WriteLockedCanonicalLineagesReader
 	store       DirectPushStore
 	targets     automationport.DirectPushTargetResolver
 	eligibility automationport.DirectPushEligibilityReader
@@ -192,6 +194,16 @@ func NewDirectPushRuntime(uow platformport.UnitOfWork, store DirectPushStore, ta
 		return nil, ErrDirectPushInvalid
 	}
 	return &DirectPushRuntime{uow: uow, store: store, targets: targets, eligibility: eligibility, freezer: freezer, outbound: outbound, now: time.Now}, nil
+}
+
+// BindCanonicalLineages keeps new writes and the customer rate budget on the
+// current OneID root without rewriting historical push or receipt rows.
+func (s *DirectPushRuntime) BindCanonicalLineages(reader identityport.WriteLockedCanonicalLineagesReader) error {
+	if s == nil || reader == nil {
+		return ErrDirectPushInvalid
+	}
+	s.lineage = reader
+	return nil
 }
 
 func (s *DirectPushRuntime) BindObservation(deliveries automationport.DirectPushDeliveryReconciler, opens automationport.DirectPushOpenReader, scheduler DirectPushObservationScheduler) error {
@@ -331,6 +343,21 @@ func (s *DirectPushRuntime) AcceptDirectPush(ctx context.Context, command automa
 			result.Replayed = true
 			return nil
 		}
+		lineages := make(map[customerdomain.CustomerID][]customerdomain.CustomerID)
+		if s.lineage != nil {
+			ids := make([]customerdomain.CustomerID, 0, len(resolved))
+			for _, item := range resolved {
+				if item.code == "" {
+					ids = append(ids, item.target.CustomerID)
+				}
+			}
+			if len(ids) > 0 {
+				lineages, err = s.lineage.WriteLockedCanonicalLineages(tx, ids)
+				if err != nil {
+					return err
+				}
+			}
+		}
 		batchID, err := s.store.CreateDirectPushBatch(tx, locked, command.EventIDDigest, command.PayloadDigest, len(command.Items), command.AcceptedAt)
 		if err != nil {
 			return err
@@ -344,7 +371,16 @@ func (s *DirectPushRuntime) AcceptDirectPush(ctx context.Context, command automa
 				result.RejectedCount++
 				continue
 			}
-			eligibility, code, readErr := s.eligibility.DirectPushEligibility(tx, locked.PackageID, resolved[index].target.CustomerID, resolved[index].target.StaffID)
+			target := resolved[index].target
+			members := []customerdomain.CustomerID{target.CustomerID}
+			if s.lineage != nil {
+				members = lineages[target.CustomerID]
+				if len(members) == 0 {
+					return ErrDirectPushUnavailable
+				}
+				target.CustomerID = members[0]
+			}
+			eligibility, code, readErr := s.eligibility.DirectPushEligibility(tx, locked.PackageID, target.CustomerID, target.StaffID)
 			if readErr != nil {
 				return readErr
 			}
@@ -354,10 +390,10 @@ func (s *DirectPushRuntime) AcceptDirectPush(ctx context.Context, command automa
 				result.RejectedCount++
 				continue
 			}
-			if err = s.store.LockDirectPushRate(tx, locked.PackageID, resolved[index].target.CustomerID); err != nil {
+			if err = s.store.LockDirectPushRate(tx, locked.PackageID, target.CustomerID); err != nil {
 				return err
 			}
-			count, countErr := s.store.CountRecentDirectPushes(tx, locked.PackageID, resolved[index].target.CustomerID, command.AcceptedAt.Add(-24*time.Hour))
+			count, countErr := s.store.CountRecentDirectPushes(tx, locked.PackageID, members, command.AcceptedAt.Add(-24*time.Hour))
 			if countErr != nil {
 				return countErr
 			}
@@ -374,11 +410,11 @@ func (s *DirectPushRuntime) AcceptDirectPush(ctx context.Context, command automa
 				result.RejectedCount++
 				continue
 			}
-			itemID, createErr := s.store.CreateDirectPushItem(tx, batchID, DirectPushItemDraft{PackageID: locked.PackageID, SnapshotID: eligibility.SnapshotID, IdentityID: resolved[index].target.IdentityID, CustomerID: resolved[index].target.CustomerID, StaffID: resolved[index].target.StaffID, SenderSetVersion: eligibility.SenderSetVersion, MiniProgramID: item.MiniProgramID, ClientReference: item.ClientReference, ContentSnapshot: snapshot, ContentDigest: digest, CreatedAt: command.AcceptedAt})
+			itemID, createErr := s.store.CreateDirectPushItem(tx, batchID, DirectPushItemDraft{PackageID: locked.PackageID, SnapshotID: eligibility.SnapshotID, IdentityID: target.IdentityID, CustomerID: target.CustomerID, StaffID: target.StaffID, SenderSetVersion: eligibility.SenderSetVersion, MiniProgramID: item.MiniProgramID, ClientReference: item.ClientReference, ContentSnapshot: snapshot, ContentDigest: digest, CreatedAt: command.AcceptedAt})
 			if createErr != nil {
 				return createErr
 			}
-			acceptance, acceptErr := s.outbound.AcceptMessageWithin(tx, outboundport.MessageIntent{SourceKind: "audience_direct_push", SourceID: itemID, RunRecipientID: itemID, CustomerID: resolved[index].target.CustomerID, SenderStaffID: resolved[index].target.StaffID, ContentReference: formatDirectPushID("audience-direct-push", itemID), SourceDigest: sha256.Sum256([]byte(fmt.Sprintf("audience-direct-push:%d", itemID))), TargetDigest: sha256.Sum256([]byte(fmt.Sprintf("customer:%d:staff:%d", resolved[index].target.CustomerID, resolved[index].target.StaffID))), PayloadDigest: digest, ContentSnapshot: snapshot, ContentSnapshotDigest: digest, PolicyDigest: sha256.Sum256([]byte("audience-direct-push-policy:v1")), ReceiptKey: fmt.Sprintf("audience-direct-push-item-%d", itemID)})
+			acceptance, acceptErr := s.outbound.AcceptMessageWithin(tx, outboundport.MessageIntent{SourceKind: "audience_direct_push", SourceID: itemID, RunRecipientID: itemID, CustomerID: target.CustomerID, SenderStaffID: target.StaffID, ContentReference: formatDirectPushID("audience-direct-push", itemID), SourceDigest: sha256.Sum256([]byte(fmt.Sprintf("audience-direct-push:%d", itemID))), TargetDigest: sha256.Sum256([]byte(fmt.Sprintf("customer:%d:staff:%d", target.CustomerID, target.StaffID))), PayloadDigest: digest, ContentSnapshot: snapshot, ContentSnapshotDigest: digest, PolicyDigest: sha256.Sum256([]byte("audience-direct-push-policy:v1")), ReceiptKey: fmt.Sprintf("audience-direct-push-item-%d", itemID)})
 			if acceptErr != nil {
 				return acceptErr
 			}

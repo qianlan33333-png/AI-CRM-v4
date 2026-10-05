@@ -433,6 +433,28 @@ function mountNewServicePeriodDuration(): void {
   field.append(input); fields.append(field);
 }
 
+function withoutRetiredStockQuantity(url: URL, method: string, init?: RequestInit): RequestInit | undefined {
+  if (url.origin !== location.origin) return init;
+  const productWrite = method === 'POST' && (
+    url.pathname === '/api/v1/products' ||
+    url.pathname === '/api/admin/wechat-pay/products' ||
+    url.pathname === '/api/admin/service-period-products'
+  ) || method === 'PUT' && (
+    /^\/api\/v1\/products\/[1-9][0-9]*$/.test(url.pathname) ||
+    /^\/api\/admin\/wechat-pay\/products\/[1-9][0-9]*$/.test(url.pathname) ||
+    /^\/api\/admin\/service-period-products\/[1-9][0-9]*$/.test(url.pathname)
+  );
+  if (!productWrite || typeof init?.body !== 'string') return init;
+  try {
+    const body = object(JSON.parse(init.body));
+    delete body.stock_quantity;
+    return { ...init, body: JSON.stringify(body) };
+  } catch {
+    // Leave malformed bodies intact so the Product HTTP boundary reports them.
+    return init;
+  }
+}
+
 globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const request = input instanceof Request ? input : undefined;
   const url = new URL(request?.url || String(input), location.origin);
@@ -497,6 +519,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
       if (Object.prototype.hasOwnProperty.call(body, 'distribution_policy')) submittedDistributionPolicy = distributionPolicy(body.distribution_policy);
     } catch { /* the Product API validates malformed JSON */ }
   }
+  nextInit = withoutRetiredStockQuantity(url, method, nextInit);
   const response = await donorFetch(input, nextInit);
   if ((periodicMatch && (method === 'GET' || method === 'PUT')) || (periodicCollection && method === 'POST')) {
     if (response.ok) {
@@ -1547,6 +1570,13 @@ function observeProductDocument(callback: () => void): MutationObserver {
   return observer;
 }
 
+function retireProductStockControls(): void {
+  if (typeof document === 'undefined' || !document.documentElement) return;
+  for (const id of ['pfStock', 'spfStock']) {
+    document.getElementById(id)?.parentElement?.remove();
+  }
+}
+
 type ContactCollectionLevel = 'none' | 'mobile' | 'shipping_address';
 function contactCollectionLevelFrom(value: unknown): ContactCollectionLevel {
   return value === 'shipping_address' || value === 'mobile' ? value : 'none';
@@ -1603,6 +1633,8 @@ function mountContactCollectionPanel(): void {
 
 const productStandardObserver = observeProductDocument(mountProductTagPicker);
 mountProductTagPicker();
+const productStockRetirementObserver = observeProductDocument(retireProductStockControls);
+retireProductStockControls();
 const contactCollectionObserver = observeProductDocument(mountContactCollectionPanel);
 mountContactCollectionPanel();
 

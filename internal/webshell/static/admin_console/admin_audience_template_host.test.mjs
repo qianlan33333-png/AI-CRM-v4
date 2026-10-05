@@ -19,13 +19,13 @@ const ownerFields = [
 ];
 const templates = [
   { key: "wecom_contact_registration", label: "企微联系人与注册状态", template_version: 1, available: true, fields: [...ownerFields, { name: "contact_statuses", label: "联系人状态", type: "enum_list", required: true, enum: ["active", "deleted"], default: ["active"] }, { name: "registration_status", label: "注册状态", type: "enum", required: true, enum: ["any", "registered", "unregistered"], default: "any" }] },
-  { key: "questionnaire_choice_answers", label: "问卷选择题答案", template_version: 1, available: true, fields: [{ name: "questionnaire", label: "问卷", type: "reference", required: true }, { name: "conditions", label: "题目条件", type: "condition_list", required: true, min_items: 1 }, ...ownerFields] },
+  { key: "questionnaire_choice_answers", label: "问卷选择题答案", template_version: 1, available: true, fields: [{ name: "questionnaire", label: "问卷", type: "reference", required: true }, { name: "conditions", label: "题目条件", type: "condition_list", required: true, min_items: 1 }] },
   { key: "paid_order", label: "已支付订单", template_version: 1, available: true, fields: [{ name: "products", label: "商品", type: "reference_list", reference: "product", required: true }, { name: "paid_at_from", label: "支付时间起点", type: "datetime" }, { name: "paid_at_to", label: "支付时间终点（不含）", type: "datetime" }, ...ownerFields, { name: "require_active_wecom_contact", label: "要求有效企微联系人", type: "boolean", default: true }] },
   { key: "channel_entry", label: "渠道进入", template_version: 1, available: true, fields: [{ name: "channels", label: "渠道", type: "reference_list", reference: "channel", required: true }, { name: "entered_days_min", label: "最少天数", type: "integer", default: 0 }, { name: "entered_days_max", label: "最大天数", type: "integer" }, ...ownerFields, { name: "require_active_wecom_contact", label: "要求有效企微联系人", type: "boolean", default: true }] },
   { key: "radar_first_click_elapsed", label: "雷达首次点击距今", template_version: 1, available: true, fields: [{ name: "radars", label: "雷达", type: "reference_list", reference: "radar", required: true }, { name: "elapsed_min", label: "最小经过时间", type: "integer", default: 0 }, { name: "elapsed_max", label: "最大经过时间", type: "integer" }, { name: "elapsed_unit", label: "时间单位", type: "enum", enum: ["hour", "day"], default: "day" }, ...ownerFields] },
   { key: "member_usage_status", label: "会员与真实使用状态", template_version: 1, available: true, fields: [...ownerFields, { name: "service_period", label: "服务期", type: "enum", enum: ["any", "active", "expired"], default: "active" }, { name: "registration_status", label: "注册状态", type: "enum", enum: ["any", "registered", "unregistered"], default: "any" }, { name: "usage_status", label: "真实使用状态", type: "enum", enum: ["any", "used", "unused"], default: "any" }, { name: "membership_tiers", label: "会员层级", type: "string_list", default: [] }, { name: "membership_statuses", label: "会员状态", type: "string_list", default: [] }] },
 ];
-templates.push({ key: "questionnaire_submissions", label: "问卷提交", template_version: 1, available: true, fields: [{name: "questionnaires", label: "问卷", type: "reference_list", reference: "questionnaire", required: true}, ...ownerFields, {name: "require_wecom_identity", label: "要求已识别企微身份", type: "boolean", default: true}] });
+templates.push({ key: "questionnaire_submissions", label: "问卷提交", template_version: 1, available: true, fields: [{name: "questionnaires", label: "问卷", type: "reference_list", reference: "questionnaire", required: true}, {name: "require_wecom_identity", label: "要求已识别企微身份", type: "boolean", default: true}] });
 let config = { id: 4, package_id: 13, version: 1, refresh_cron_utc: "0 1 * * *", refresh_mode: "legacy_custom", definition: { schema_version: 1, template_key: "wecom_contact_registration", parameters: { owner_scope: "all", owner_staff_ids: [], contact_statuses: ["active"], registration_status: "any" } } };
 let packageVersion = 3;
 const writes = [];
@@ -94,7 +94,7 @@ const dom = new JSDOM(`<!doctype html><html><body>${template}</body></html>`, {
           parameters.paid_at_from = "2026-09-05T00:00:00.611265Z";
           parameters.paid_at_to = "2026-09-05T01:00:00.125Z";
         }
-        parameters.owner_staff_ids = parameters.owner_scope === "specified" ? ["9"] : [];
+        if (!["questionnaire_submissions", "questionnaire_choice_answers"].includes(body.definition.template_key)) parameters.owner_staff_ids = parameters.owner_scope === "specified" ? ["9"] : [];
         delete parameters.owner_userids;
         config = { ...config, version: config.version + 1, refresh_cron_utc: body.refresh_cron_utc, refresh_mode: body.refresh_mode, definition: { ...body.definition, parameters } };
         return json({ configuration: config });
@@ -320,13 +320,13 @@ await saveTemplate("questionnaire_choice_answers", () => {
   const second = conditionField.querySelectorAll(".template-condition-row")[1];
   second.querySelector("[data-condition-question]").value = "成交方式";
   second.querySelector("[data-condition-options]").value = "咨询";
-  setSpecifiedOwner();
+  if (fieldInput("owner_scope") || fieldInput("owner_userids")) throw new Error("retired questionnaire employee controls remain");
 }, (definition) => {
   const parameters = definition.parameters;
-  if (definition.template_key !== "questionnaire_choice_answers" || parameters.owner_userids.join(",") !== "bob" || parameters.questionnaire_id !== "客户调研" || parameters.conditions.length !== 2 || parameters.conditions[0].question_id !== "获客方式" || parameters.conditions[0].option_ids.join(",") !== "内容,投放" || parameters.conditions[1].question_id !== "成交方式" || parameters.conditions[1].option_ids.join(",") !== "咨询") throw new Error(`questionnaire parameters=${JSON.stringify(definition)}`);
+  if (definition.template_key !== "questionnaire_choice_answers" || "owner_scope" in parameters || "owner_userids" in parameters || "owner_staff_ids" in parameters || parameters.questionnaire_id !== "客户调研" || parameters.conditions.length !== 2 || parameters.conditions[0].question_id !== "获客方式" || parameters.conditions[0].option_ids.join(",") !== "内容,投放" || parameters.conditions[1].question_id !== "成交方式" || parameters.conditions[1].option_ids.join(",") !== "咨询") throw new Error(`questionnaire parameters=${JSON.stringify(definition)}`);
 }, () => {
   const rows = document.querySelectorAll('[data-field-name="conditions"] .template-condition-row');
-  if (fieldInput("questionnaire").value !== "客户调研" || rows.length !== 2 || rows[0].querySelector("[data-condition-options]").value !== "内容\n投放" || fieldInput("owner_userids").value !== "bob") throw new Error("questionnaire conditions or Access-backed owner did not reopen");
+  if (fieldInput("questionnaire").value !== "客户调研" || rows.length !== 2 || rows[0].querySelector("[data-condition-options]").value !== "内容\n投放" || fieldInput("owner_userids")) throw new Error("questionnaire conditions did not reopen without retired employee field");
 });
 if (writes.length !== 11 || previewWrites.length !== 8 || packageWrites.length !== 11) throw new Error(`form save/preview contract incomplete: ${JSON.stringify({ saves: writes.length, previews: previewWrites.length, packages: packageWrites.length })}`);
 document.querySelector("#policyCodeInput").value = "shanghai-quiet";
@@ -427,4 +427,43 @@ document.querySelector("#savePackageBtn").click();
 await wait(140);
 if (writes.at(-1)?.refresh_mode !== "every_1h") throw new Error("saving other fields replaced the stored hourly plan");
 dom.window.close();
+// A saved specified employee filter must never be rebuilt into all respondents
+// just because its retired controls are absent from the new schema.
+let retiredConfig = {id:9,version:1,refresh_mode:"manual",refresh_cron_utc:"",definition:{schema_version:1,template_key:"questionnaire_submissions",parameters:{questionnaire_ids:["16"],require_wecom_identity:false,owner_scope:"specified",owner_staff_ids:["9"]}}};
+const retiredWrites = [];
+let ownerReferenceCalls = 0;
+const retiredDOM = new JSDOM(`<!doctype html><html><body>${template}</body></html>`, {
+  url:"https://test.invalid/admin/automation-conversion/packages/13",runScripts:"outside-only",pretendToBeVisual:true,
+  beforeParse(window) {
+    window.Headers=globalThis.Headers; window.structuredClone=globalThis.structuredClone;
+    window.AdminDateTime={datetimeLocalValue:()=>"",shanghaiDateTimeLocalToRFC3339:()=>""};
+    window.AdminFmt={whenAdminDateTimeReady:(ready)=>ready(window.AdminDateTime)};
+    window.fetch=async(input,init={})=>{
+      const pathname=new URL(String(input),window.location.origin).pathname;
+      if(pathname.endsWith("/owner-references")){ownerReferenceCalls++;return json({error:"owner_unavailable"},503)}
+      if(pathname.endsWith("/templates"))return json({items:templates});
+      if(pathname.endsWith("/packages/13") && (!init.method || init.method === "GET"))return json({package:{id:13,name:"旧员工受众",version:1,lifecycle:"paused",membership_mode:"rule"}});
+      if(pathname.endsWith("/configuration") && (!init.method || init.method === "GET"))return json({configuration:retiredConfig});
+      if(init.method){const body=JSON.parse(init.body);retiredWrites.push({pathname,body});
+        if(pathname.endsWith("/configuration")){retiredConfig={...retiredConfig,definition:body.definition};return json({configuration:retiredConfig})}
+        return json({package:{id:13,name:"旧员工受众",version:2,lifecycle:"paused",membership_mode:"rule"}});
+      }
+      return json({items:[]});
+    };
+  }
+});
+retiredDOM.window.eval(frozenController);retiredDOM.window.eval(host);await wait(80);
+const retiredDoc=retiredDOM.window.document;
+if(!retiredDoc.querySelector("#retiredQuestionnaireOwnerNote")?.textContent.includes("已失效") || retiredDoc.querySelector('[data-field-name="owner_scope"]') || ownerReferenceCalls)throw new Error("retired source did not clearly invalidate without staff resolution");
+retiredDoc.querySelector("#savePackageBtn").click();await wait(20);
+if(retiredWrites.length || !retiredDoc.querySelector("#templateStatusLine").textContent.includes("请先选择重新配置"))throw new Error("old specified audience silently broadened on save");
+retiredDoc.querySelector("#manualRefreshBtn").disabled=false;
+retiredDoc.querySelector("#packageDefinitionInput").closest(".ai-field").hidden=false;await wait(10);
+if(!retiredDoc.querySelector("#packageDefinitionInput").closest(".ai-field").hidden)throw new Error("late frozen render restored raw retired employee editor");
+if(!retiredDoc.querySelector("#manualRefreshBtn").disabled)throw new Error("late frozen render reenabled retired refresh");
+retiredDoc.querySelector("#reconfigureQuestionnaireAudienceBtn").click();await wait(20);
+retiredDoc.querySelector("#savePackageBtn").click();await wait(80);
+const retiredSave=retiredWrites.find((write)=>write.pathname.endsWith("/configuration"));
+if(!retiredSave || Object.keys(retiredSave.body.definition.parameters).some((key)=>key.startsWith("owner_")) || !retiredDoc.querySelector("#retiredQuestionnaireOwnerNote").hidden || retiredDoc.querySelector("#manualRefreshBtn").disabled)throw new Error("explicit respondent reconfiguration failed");
+retiredDOM.window.close();
 console.log("admin-audience-template-host-browser: PASS");

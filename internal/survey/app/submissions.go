@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	channelport "github.com/qianlan33333-png/AI-CRM-v3/internal/channel/port"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
@@ -76,8 +77,22 @@ type customerHistoryWindowStore interface {
 	CustomerHistoryWindow(context.Context, surveyport.CustomerHistoryQuery) ([]surveyport.Submission, error)
 }
 
+type customerHistoryLineageStore interface {
+	CustomerHistoryForCustomers(context.Context, []customerdomain.CustomerID, int32, int32) ([]surveyport.Submission, int64, error)
+	CustomerHistoryWindowForCustomers(context.Context, surveyport.CustomerHistoryQuery, []customerdomain.CustomerID) ([]surveyport.Submission, error)
+}
+
 type externalSubmissionStore interface {
 	ExternalSubmissions(context.Context, surveyport.ExternalSubmissionQuery) (surveyport.ExternalSubmissionPage, error)
+}
+
+type submissionClaimLineageStore interface {
+	HasSubmissionClaimForCustomers(context.Context, surveyport.ID, []customerdomain.CustomerID) (bool, error)
+}
+
+type canonicalSubmissionLineage interface {
+	identityport.CanonicalLineageReader
+	identityport.WriteLockedCanonicalLineageReader
 }
 
 type SubmissionService struct {
@@ -87,6 +102,7 @@ type SubmissionService struct {
 	cipher              *secure.Cipher
 	timeline            customerport.TimelineWriter
 	collectedPhones     customerport.CollectedPhoneRecorder
+	lineage             canonicalSubmissionLineage
 	completion          surveyport.CompletionIntentAccepter
 	completionPolicy    surveyport.CompletionPolicyResolver
 	completionIdentity  surveyport.CompletionIdentitySnapshotter
@@ -94,6 +110,44 @@ type SubmissionService struct {
 	publicRedirect      surveyport.PublicCompletionTargetResolver
 	publicLeadQR        channelport.PublicLeadQRCodeReader
 	now                 func() time.Time
+}
+
+func (s *SubmissionService) BindCanonicalLineage(reader canonicalSubmissionLineage) error {
+	if s == nil || reader == nil {
+		return surveyport.ErrInvalid
+	}
+	s.lineage = reader
+	return nil
+}
+
+func (s *SubmissionService) submissionLineage(ctx context.Context, id customerdomain.CustomerID, locked bool) ([]customerdomain.CustomerID, error) {
+	if s.lineage == nil {
+		return []customerdomain.CustomerID{id}, nil
+	}
+	var ids []customerdomain.CustomerID
+	var err error
+	if locked {
+		ids, err = s.lineage.WriteLockedCanonicalLineage(ctx, id)
+	} else {
+		ids, err = s.lineage.CanonicalLineage(ctx, id)
+	}
+	if err != nil || len(ids) == 0 || ids[0] < 1 {
+		return nil, surveyport.ErrUnavailable
+	}
+	return ids, nil
+}
+
+func (s *SubmissionService) hasLineageClaim(ctx context.Context, questionnaireID surveyport.ID, ids []customerdomain.CustomerID) (bool, error) {
+	if store, ok := s.store.(submissionClaimLineageStore); ok {
+		return store.HasSubmissionClaimForCustomers(ctx, questionnaireID, ids)
+	}
+	for _, id := range ids {
+		claimed, err := s.store.HasSubmissionClaim(ctx, questionnaireID, id)
+		if err != nil || claimed {
+			return claimed, err
+		}
+	}
+	return false, nil
 }
 
 func (s *SubmissionService) BindCompletionEndpoints(manager surveyport.CompletionEndpointManager) error {
@@ -209,7 +263,11 @@ func (s *SubmissionService) PublicSubmissionStatus(ctx context.Context, slug str
 		if questionnaire.Mode != surveyport.ModeSurvey {
 			return surveyport.ErrNotFound
 		}
-		claimed, err := s.store.HasSubmissionClaim(tx, questionnaire.ID, *identity.CustomerID)
+		ids, err := s.submissionLineage(tx, *identity.CustomerID, false)
+		if err != nil {
+			return err
+		}
+		claimed, err := s.hasLineageClaim(tx, questionnaire.ID, ids)
 		if err != nil {
 			return err
 		}
@@ -237,7 +295,7 @@ func (s *SubmissionService) PublicSubmissionStatus(ctx context.Context, slug str
 }
 
 func (s *SubmissionService) Submit(ctx context.Context, command surveyport.SubmitCommand) (surveyport.SubmissionReceipt, error) {
-	if s == nil || s.uow == nil || s.store == nil || s.cipher == nil || s.collectedPhones == nil || !validSlug(command.Slug) || !validPublicKey(command.SubmissionKey) || command.Identity.State != surveyport.IdentityResolved || command.Identity.CustomerID == nil || !validIdentity(command.Identity) || len(command.SourceChannel) > 100 || len(command.CampaignID) > 200 || len(command.StaffID) > 200 {
+	if s == nil || s.uow == nil || s.store == nil || s.cipher == nil || s.collectedPhones == nil || !validSlug(command.Slug) || !validPublicKey(command.SubmissionKey) || command.Identity.State != surveyport.IdentityResolved || command.Identity.CustomerID == nil || !validIdentity(command.Identity) || utf8.RuneCountInString(command.SourceChannel) > 200 || utf8.RuneCountInString(command.CampaignID) > 200 {
 		return surveyport.SubmissionReceipt{}, surveyport.ErrInvalid
 	}
 	canonical, _ := json.Marshal(struct {
@@ -276,7 +334,15 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 			completionConfiguration, e = s.store.GetOperationConfiguration(tx, questionnaire.ID)
 			return e
 		}
-		claimed, e := s.store.HasSubmissionClaim(tx, questionnaire.ID, *command.Identity.CustomerID)
+		// Pin the same roots as OneID merge before eligibility and commit. Old
+		// claims retain their source ID; new writes use the current root and PK.
+		ids, e := s.submissionLineage(tx, *command.Identity.CustomerID, true)
+		if e != nil {
+			return e
+		}
+		root := ids[0]
+		command.Identity.CustomerID = &root
+		claimed, e := s.hasLineageClaim(tx, questionnaire.ID, ids)
 		if e != nil {
 			return e
 		}
@@ -571,6 +637,18 @@ func (s *SubmissionService) CustomerHistory(ctx context.Context, customer int64,
 	page := surveyport.SubmissionPage{Limit: limit, Offset: offset}
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		var e error
+		if s.lineage != nil {
+			ids, err := s.submissionLineage(tx, customerdomain.CustomerID(customer), false)
+			if err != nil {
+				return err
+			}
+			store, ok := s.store.(customerHistoryLineageStore)
+			if !ok {
+				return surveyport.ErrUnavailable
+			}
+			page.Items, page.Total, e = store.CustomerHistoryForCustomers(tx, ids, limit, offset)
+			return e
+		}
 		page.Items, page.Total, e = s.store.CustomerHistory(tx, customer, limit, offset)
 		return e
 	})
@@ -628,6 +706,18 @@ func (s *SubmissionService) CustomerHistoryWindow(ctx context.Context, query sur
 	window := surveyport.CustomerHistoryWindow{Items: []surveyport.Submission{}}
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		var e error
+		if s.lineage != nil {
+			ids, err := s.submissionLineage(tx, customerdomain.CustomerID(query.CustomerID), false)
+			if err != nil {
+				return err
+			}
+			lineageStore, ok := s.store.(customerHistoryLineageStore)
+			if !ok {
+				return surveyport.ErrUnavailable
+			}
+			window.Items, e = lineageStore.CustomerHistoryWindowForCustomers(tx, query, ids)
+			return e
+		}
 		window.Items, e = store.CustomerHistoryWindow(tx, query)
 		return e
 	})

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -22,14 +23,17 @@ func (r *Repository) DirectPushEligibility(ctx context.Context, packageID segmen
 	}
 	var out segmentport.DirectPushEligibility
 	var active, member, sender bool
+	var currentDefinition, publishedDefinition []byte
 	err = t.QueryRow(ctx, `SELECT COALESCE(p.published_snapshot_id,0),COALESCE(s.version,0),
-		p.lifecycle='active' AND snap.state='published',m.customer_id IS NOT NULL,sm.staff_id IS NOT NULL
+		p.lifecycle='active' AND snap.state='published',m.customer_id IS NOT NULL,sm.staff_id IS NOT NULL,c.definition,sc.definition
 		FROM segment_audience_packages p
 		LEFT JOIN segment_audience_sender_sets s ON s.id=p.current_sender_set_id AND s.package_id=p.id
 		LEFT JOIN segment_audience_sender_set_members sm ON sm.sender_set_id=s.id AND sm.staff_id=$3
 		LEFT JOIN segment_audience_snapshot_members m ON m.snapshot_id=p.published_snapshot_id AND m.customer_id=$2
 		LEFT JOIN segment_audience_snapshots snap ON snap.id=p.published_snapshot_id AND snap.package_id=p.id
-		WHERE p.id=$1`, packageID, customerID, staffID).Scan(&out.SnapshotID, &out.SenderSetVersion, &active, &member, &sender)
+		LEFT JOIN segment_audience_configuration_versions c ON c.id=p.current_configuration_version_id AND c.package_id=p.id
+		LEFT JOIN segment_audience_configuration_versions sc ON sc.id=snap.configuration_version_id AND sc.package_id=p.id
+		WHERE p.id=$1`, packageID, customerID, staffID).Scan(&out.SnapshotID, &out.SenderSetVersion, &active, &member, &sender, &currentDefinition, &publishedDefinition)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return segmentport.DirectPushEligibility{}, "package_not_found", nil
 	}
@@ -38,6 +42,9 @@ func (r *Repository) DirectPushEligibility(ctx context.Context, packageID segmen
 	}
 	if !active {
 		return segmentport.DirectPushEligibility{}, "package_not_active", nil
+	}
+	if segmentport.SurveyDefinitionOwnerSelectionRetired(json.RawMessage(currentDefinition)) || segmentport.SurveyDefinitionOwnerSelectionRetired(json.RawMessage(publishedDefinition)) {
+		return out, "definition_unsupported", nil
 	}
 	if !member {
 		return segmentport.DirectPushEligibility{}, "customer_not_in_package", nil

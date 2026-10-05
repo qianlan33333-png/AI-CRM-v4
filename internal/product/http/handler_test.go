@@ -1250,33 +1250,33 @@ func TestDistributionPolicyDTOUsesActualReadAndKeepsLegacyUpdateCompatible(t *te
 	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"distribution_policy":{"enabled":true,"commission_rate_basis_points":1234,"wait_days":8,"version":3}`) {
 		t.Fatalf("actual policy missing: %d %s", get.Code, get.Body.String())
 	}
-	create := httptest.NewRequest(http.MethodPost, "/api/admin/wechat-pay/products", strings.NewReader(`{"product_code":"distribution-http","name":"分销商品","description":"","price_minor":1,"currency":"CNY","stock_quantity":1,"images":[],"distribution_policy":{"enabled":true,"commission_rate_basis_points":1234,"wait_days":8,"version":0}}`))
+	create := httptest.NewRequest(http.MethodPost, "/api/admin/wechat-pay/products", strings.NewReader(`{"product_code":"distribution-http","name":"分销商品","description":"","price_minor":1,"currency":"CNY","stock_quantity":"unlimited","images":[],"distribution_policy":{"enabled":true,"commission_rate_basis_points":1234,"wait_days":8,"version":0}}`))
 	create.Header.Set("Idempotency-Key", "distribution-http-create-0001")
 	created := httptest.NewRecorder()
 	handler.ServeHTTP(created, create)
-	if created.Code != http.StatusCreated || catalog.createCall == nil || catalog.createCall.DistributionPolicy == nil || !catalog.createCall.DistributionPolicy.Enabled || catalog.createCall.DistributionPolicy.CommissionRateBasisPoints != 1234 {
+	if created.Code != http.StatusCreated || catalog.createCall == nil || catalog.createCall.StockQuantity != 0 || strings.Contains(created.Body.String(), `"stock_quantity"`) || catalog.createCall.DistributionPolicy == nil || !catalog.createCall.DistributionPolicy.Enabled || catalog.createCall.DistributionPolicy.CommissionRateBasisPoints != 1234 {
 		t.Fatalf("policy create=%+v status=%d body=%s", catalog.createCall, created.Code, created.Body.String())
 	}
-	legacy := httptest.NewRequest(http.MethodPut, "/api/admin/wechat-pay/products/7", strings.NewReader(`{"expected_version":2,"name":"商品七","description":"描述","price_minor":1200,"currency":"CNY","stock_quantity":4,"images":[]}`))
+	legacy := httptest.NewRequest(http.MethodPut, "/api/admin/wechat-pay/products/7", strings.NewReader(`{"expected_version":2,"name":"商品七","description":"描述","price_minor":1200,"currency":"CNY","stock_quantity":-4,"images":[]}`))
 	legacy.Header.Set("Idempotency-Key", "distribution-http-update-0001")
 	updated := httptest.NewRecorder()
 	handler.ServeHTTP(updated, legacy)
-	if updated.Code != http.StatusOK || catalog.updateCall == nil || catalog.updateCall.DistributionPolicy != nil {
+	if updated.Code != http.StatusOK || catalog.updateCall == nil || catalog.updateCall.StockQuantity != 0 || strings.Contains(updated.Body.String(), `"stock_quantity"`) || catalog.updateCall.DistributionPolicy != nil {
 		t.Fatalf("legacy update policy=%+v status=%d body=%s", catalog.updateCall, updated.Code, updated.Body.String())
 	}
 	period := handler.service.(*testServicePeriod)
-	periodCreate := httptest.NewRequest(http.MethodPost, "/api/admin/service-period-products", strings.NewReader(`{"product_code":"distribution-period","name":"周期分销商品","description":"","price_minor":1,"currency":"CNY","duration_days":7,"stock_quantity":1,"images":[],"distribution_policy":{"enabled":true,"commission_rate_basis_points":3000,"wait_days":0,"version":0}}`))
+	periodCreate := httptest.NewRequest(http.MethodPost, "/api/admin/service-period-products", strings.NewReader(`{"product_code":"distribution-period","name":"周期分销商品","description":"","price_minor":1,"currency":"CNY","duration_days":7,"stock_quantity":"legacy-value","images":[],"distribution_policy":{"enabled":true,"commission_rate_basis_points":3000,"wait_days":0,"version":0}}`))
 	periodCreate.Header.Set("Idempotency-Key", "distribution-period-create-0001")
 	periodResponse := httptest.NewRecorder()
 	handler.ServeHTTP(periodResponse, periodCreate)
-	if periodResponse.Code != http.StatusCreated || period.createCall == nil || period.createCall.DistributionPolicy == nil || period.createCall.DistributionPolicy.CommissionRateBasisPoints != 3000 {
+	if periodResponse.Code != http.StatusCreated || period.createCall == nil || period.createCall.StockQuantity != 0 || strings.Contains(periodResponse.Body.String(), `"stock_quantity"`) || period.createCall.DistributionPolicy == nil || period.createCall.DistributionPolicy.CommissionRateBasisPoints != 3000 {
 		t.Fatalf("period create=%+v status=%d body=%s", period.createCall, periodResponse.Code, periodResponse.Body.String())
 	}
-	periodUpdate := httptest.NewRequest(http.MethodPut, "/api/admin/service-period-products/7", strings.NewReader(`{"expected_version":2,"name":"周期分销商品更新","description":"","price_minor":1,"currency":"CNY","duration_days":7,"stock_quantity":1,"images":[],"admin_projection":{},"distribution_policy":{"enabled":true,"commission_rate_basis_points":1234,"wait_days":8,"version":1}}`))
+	periodUpdate := httptest.NewRequest(http.MethodPut, "/api/admin/service-period-products/7", strings.NewReader(`{"expected_version":2,"name":"周期分销商品更新","description":"","price_minor":1,"currency":"CNY","duration_days":7,"stock_quantity":-123,"images":[],"admin_projection":{},"distribution_policy":{"enabled":true,"commission_rate_basis_points":1234,"wait_days":8,"version":1}}`))
 	periodUpdate.Header.Set("Idempotency-Key", "distribution-period-update-0001")
 	periodUpdated := httptest.NewRecorder()
 	handler.ServeHTTP(periodUpdated, periodUpdate)
-	if periodUpdated.Code != http.StatusOK || period.updateCall == nil || period.updateCall.DistributionPolicy == nil || !period.updateCall.DistributionPolicy.Enabled || period.updateCall.DistributionPolicy.CommissionRateBasisPoints != 1234 || period.updateCall.DistributionPolicy.WaitDays != 8 || period.updateCall.DistributionPolicy.ExpectedVersion != 1 {
+	if periodUpdated.Code != http.StatusOK || period.updateCall == nil || period.updateCall.StockQuantity != 0 || strings.Contains(periodUpdated.Body.String(), `"stock_quantity"`) || period.updateCall.DistributionPolicy == nil || !period.updateCall.DistributionPolicy.Enabled || period.updateCall.DistributionPolicy.CommissionRateBasisPoints != 1234 || period.updateCall.DistributionPolicy.WaitDays != 8 || period.updateCall.DistributionPolicy.ExpectedVersion != 1 {
 		t.Fatalf("period update=%+v status=%d body=%s", period.updateCall, periodUpdated.Code, periodUpdated.Body.String())
 	}
 }

@@ -57,7 +57,7 @@ type rowScanner interface {
 	Scan(...any) error
 }
 
-const productColumns = `id,product_code,name,description,price_minor,currency,stock_quantity,images,created_by,created_at,updated_at,version,legacy_admin_projection`
+const productColumns = `id,product_code,name,description,price_minor,currency,images,created_by,created_at,updated_at,version,legacy_admin_projection`
 
 func scanProduct(row rowScanner) (productport.Product, error) {
 	var (
@@ -67,7 +67,7 @@ func scanProduct(row rowScanner) (productport.Product, error) {
 	)
 	err := row.Scan(
 		&product.ID, &product.ProductCode, &product.Name, &product.Description,
-		&product.PriceMinor, &product.Currency, &product.StockQuantity,
+		&product.PriceMinor, &product.Currency,
 		&imagesRaw, &product.CreatedBy, &product.CreatedAt, &product.UpdatedAt,
 		&product.Version, &projection,
 	)
@@ -389,9 +389,10 @@ func (r *Repository) Create(ctx context.Context, command productport.CreateComma
 	if err != nil {
 		return productport.Product{}, ErrInvalid
 	}
-	return scanProduct(tx.QueryRow(ctx, `INSERT INTO products (`+productColumns+`) VALUES (DEFAULT,$1,$2,$3,$4,$5,$6,$7,$8,$9,$9,1,$10) RETURNING `+productColumns,
+	return scanProduct(tx.QueryRow(ctx, `INSERT INTO products (product_code,name,description,price_minor,currency,stock_quantity,images,created_by,created_at,updated_at,version,legacy_admin_projection)
+		VALUES($1,$2,$3,$4,$5,0,$6,$7,$8,$8,1,$9) RETURNING `+productColumns,
 		command.ProductCode, command.Name, command.Description, command.PriceMinor, command.Currency,
-		command.StockQuantity, images, command.Actor, now.UTC(), command.LegacyAdminProjection))
+		images, command.Actor, now.UTC(), command.LegacyAdminProjection))
 }
 
 // ImportDefinition writes a migration-approved local product definition using
@@ -403,7 +404,7 @@ func (r *Repository) ImportDefinition(ctx context.Context, input productport.Def
 		return productport.Product{}, err
 	}
 	if input.Actor < 1 || input.ProductCode == "" || len(input.ProductCode) > 200 || input.Name == "" || len(input.Name) > 200 ||
-		len(input.Description) > 10000 || input.PriceMinor < 0 || input.StockQuantity < 0 || len(input.Currency) != 3 ||
+		len(input.Description) > 10000 || input.PriceMinor < 0 || len(input.Currency) != 3 ||
 		input.ServicePeriodDurationDays < 0 ||
 		len(input.Images) != 0 || input.CreatedAt.IsZero() || input.UpdatedAt.IsZero() || input.UpdatedAt.Before(input.CreatedAt) ||
 		!json.Valid(input.LegacyAdminProjection) {
@@ -439,8 +440,8 @@ func (r *Repository) ImportDefinition(ctx context.Context, input productport.Def
 		return productport.Product{}, ErrInvalid
 	}
 	product, err := scanProduct(tx.QueryRow(ctx, `INSERT INTO products (product_code,name,description,price_minor,currency,stock_quantity,images,created_by,created_at,updated_at,version,legacy_admin_projection)
-		VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,1,$11::jsonb) RETURNING `+productColumns,
-		input.ProductCode, input.Name, input.Description, input.PriceMinor, input.Currency, input.StockQuantity, images,
+		VALUES($1,$2,$3,$4,$5,0,$6::jsonb,$7,$8,$9,1,$10::jsonb) RETURNING `+productColumns,
+		input.ProductCode, input.Name, input.Description, input.PriceMinor, input.Currency, images,
 		input.Actor, input.CreatedAt.UTC(), input.UpdatedAt.UTC(), canonical))
 	if err != nil {
 		return productport.Product{}, err
@@ -478,9 +479,9 @@ func (r *Repository) Update(ctx context.Context, command productport.UpdateComma
 	if err != nil {
 		return productport.Product{}, ErrInvalid
 	}
-	return scanProduct(tx.QueryRow(ctx, `UPDATE products SET name=$2,description=$3,price_minor=$4,currency=$5,stock_quantity=$6,images=$7,legacy_admin_projection=$8,updated_at=$9,version=version+1 WHERE id=$1 AND version=$10 RETURNING `+productColumns,
+	return scanProduct(tx.QueryRow(ctx, `UPDATE products SET name=$2,description=$3,price_minor=$4,currency=$5,images=$6,legacy_admin_projection=$7,updated_at=$8,version=version+1 WHERE id=$1 AND version=$9 RETURNING `+productColumns,
 		int64(command.ID), command.Name, command.Description, command.PriceMinor, command.Currency,
-		command.StockQuantity, images, command.LegacyAdminProjection, now.UTC(), command.ExpectedVersion))
+		images, command.LegacyAdminProjection, now.UTC(), command.ExpectedVersion))
 }
 
 func (r *Repository) UpdateLocalProductLifecycle(ctx context.Context, update productapp.LocalProductLifecycleStoreUpdate, now time.Time) (productport.Product, error) {
@@ -619,9 +620,9 @@ func (r *Repository) UpdateServicePeriodProduct(ctx context.Context, update prod
 	if err != nil {
 		return productport.Product{}, ErrInvalid
 	}
-	return scanProduct(tx.QueryRow(ctx, `UPDATE products SET name=$2,description=$3,price_minor=$4,currency=$5,stock_quantity=$6,images=$7,legacy_admin_projection=$8,updated_at=$9,version=version+1 WHERE id=$1 AND version=$10 AND `+servicePeriodStatusSQL()+` RETURNING `+productColumns,
+	return scanProduct(tx.QueryRow(ctx, `UPDATE products SET name=$2,description=$3,price_minor=$4,currency=$5,images=$6,legacy_admin_projection=$7,updated_at=$8,version=version+1 WHERE id=$1 AND version=$9 AND `+servicePeriodStatusSQL()+` RETURNING `+productColumns,
 		int64(update.ID), update.Name, update.Description, update.PriceMinor, update.Currency,
-		update.StockQuantity, images, update.LegacyAdminProjection, now.UTC(), update.ExpectedVersion))
+		images, update.LegacyAdminProjection, now.UTC(), update.ExpectedVersion))
 }
 
 func (r *Repository) Reserve(ctx context.Context, reservation productapp.Reservation) (productapp.Receipt, bool, error) {

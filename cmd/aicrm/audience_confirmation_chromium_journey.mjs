@@ -75,7 +75,8 @@ async function waitFor(cdp, expression, message) {
     if (await evaluate(cdp, expression)) return;
     await delay(50);
   }
-  throw new Error(message);
+  const diagnostic = await evaluate(cdp, "({path:location.pathname,status:document.querySelector('#templateStatusLine')?.textContent,note:document.querySelector('#retiredQuestionnaireOwnerNote')?.textContent,noteHidden:document.querySelector('#retiredQuestionnaireOwnerNote')?.hidden,refreshDisabled:document.querySelector('#manualRefreshBtn')?.disabled,fields:[...document.querySelectorAll('#templateParameterForm [data-field-name]')].map(x=>x.dataset.fieldName)})");
+  throw new Error(message + ": " + JSON.stringify(diagnostic));
 }
 
 async function waitForBrowserExit(browser, timeoutMilliseconds) {
@@ -155,7 +156,29 @@ try {
   const closure = await evaluate(cdp, "(() => ({css:[...document.styleSheets].some(sheet=>String(sheet.href||'').includes('confirmationDialogStyles-')),script:[...document.scripts].some(script=>String(script.src||'').includes('confirmationDialogHost-')),route:location.pathname}))()");
   if (!closure.css || !closure.script || closure.route !== "/admin/automation-conversion") throw new Error("Audience shell did not load the real confirmation asset closure: " + JSON.stringify(closure));
 
-  if (process.env.AICRM_AUDIENCE_TEST_SCENARIO === "send-history") {
+  if (process.env.AICRM_AUDIENCE_TEST_SCENARIO === "survey-owner-retirement") {
+    await cdp.call("Page.navigate", { url: baseURL + "/admin/automation-conversion/packages/" + packageID });
+    await waitFor(cdp, "document.querySelector('#retiredQuestionnaireOwnerNote')?.textContent.includes('已失效') && Boolean(document.querySelector('[data-field-name=questionnaires]'))", "retired owner configuration did not show an actionable explanation");
+    if (!await evaluate(cdp, "!document.querySelector('[data-field-name=owner_scope]') && !document.querySelector('[data-field-name=owner_userids]') && document.querySelector('#manualRefreshBtn').disabled")) throw new Error("employee controls or refresh remain enabled for retired configuration: " + JSON.stringify(await evaluate(cdp,"({owner:!!document.querySelector('[data-field-name=owner_scope]'),user:!!document.querySelector('[data-field-name=owner_userids]'),disabled:document.querySelector('#manualRefreshBtn')?.disabled})")));
+    if (!await evaluate(cdp, "document.querySelector('#packageDefinitionInput').closest('.ai-field').hidden")) throw new Error("retired raw employee filter editor remained visible");
+    await evaluate(cdp, "document.querySelector('#retiredQuestionnaireOwnerNote').scrollIntoView({block:'center'})");
+    await capture("survey-retired-owner-before");
+    const countWrites = () => requests.filter((r) => ['PATCH','PUT'].includes(r.method) && r.path.includes('/packages/' + packageID)).length;
+    const before = countWrites();
+    await click('#savePackageBtn');
+    await waitFor(cdp, "document.querySelector('#templateStatusLine')?.textContent.includes('请先选择重新配置')", "unchanged old employee configuration was not blocked before save");
+    if (countWrites() !== before || requests.some((r) => r.path.includes('/owner-references'))) throw new Error("retired configuration was silently saved or required staff resolution");
+    await click('#reconfigureQuestionnaireAudienceBtn');
+    await waitFor(cdp, "document.querySelector('#retiredQuestionnaireOwnerNote')?.textContent.includes('已进入重新配置')", "explicit reconfiguration did not open");
+    await click('#savePackageBtn');
+    await waitFor(cdp, "document.querySelector('#templateStatusLine')?.textContent.includes('已保存') && document.querySelector('#retiredQuestionnaireOwnerNote')?.hidden && !document.querySelector('#manualRefreshBtn').disabled", "new respondent configuration was not saved or refresh was not restored");
+    if (countWrites() !== before + 2) throw new Error("explicit reconfiguration did not use one package update and one immutable configuration save");
+    const response = await evaluate(cdp, "fetch('/api/admin/ai-audience/packages/" + packageID + "/configuration',{credentials:'same-origin'}).then(r=>r.json()).then(x=>JSON.stringify(x.configuration.definition))");
+    if (response.includes('owner_') || !response.includes('questionnaire_submissions')) throw new Error("new respondent definition still carries employee dependency");
+    await resize(390); await capture("survey-retired-owner-after-390");
+    if (exceptions.length) throw new Error("Survey retirement had browser exceptions: " + JSON.stringify(exceptions));
+    console.log("survey_owner_retirement_chromium: PASS screenshots=" + screenshotDirectory);
+  } else if (process.env.AICRM_AUDIENCE_TEST_SCENARIO === "send-history") {
     await cdp.call("Page.navigate", { url: baseURL + "/admin/automation-conversion/packages/" + packageID });
     await waitFor(cdp, "Boolean(document.querySelector('[data-panel=\"records\"]'))", "detail shell did not mount");
     await click('[data-panel="records"]');

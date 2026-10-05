@@ -23,6 +23,7 @@
     if (status === 403) return "当前账号没有此操作权限。";
     if (status === 404) return "所需人群配置不存在或已不可读取。";
     if (status === 409) return "配置已变化，请重新读取后再保存。";
+    if (code === "definition_not_supported") return "原筛选条件已失效，请重新配置并保存后再试。";
     if (status === 400 || status === 422) return "表单填写有误，请检查后重试。";
     if (status >= 500) return "人群配置服务暂不可用，请稍后重试。";
     return "人群配置请求未完成，请刷新后重试。";
@@ -110,6 +111,16 @@
     return converted;
   };
 
+  const isQuestionnaire = (key) => key === "questionnaire_submissions" || key === "questionnaire_choice_answers";
+  const retiredQuestionnaireOwner = (definition) => {
+    if (!isQuestionnaire(definition?.template_key)) return false;
+    const p = definition.parameters || {};
+    const fields = ["owner_scope", "owner_staff_ids", "owner_userids"];
+    if (!fields.some((key) => Object.hasOwn(p, key))) return false;
+    return p.owner_scope !== "all" || !["owner_staff_ids", "owner_userids"].some((key) => Object.hasOwn(p, key)) ||
+      ["owner_staff_ids", "owner_userids"].some((key) => Object.hasOwn(p, key) && (!Array.isArray(p[key]) || p[key].length > 0));
+  };
+
   function canonicalDefinition(templateKey, value, preservedDateTimes = {}) {
     const parameters = { ...value };
     if (parameters.owner_scope === "all") parameters.owner_userids = [];
@@ -138,6 +149,7 @@
       delete parameters.radars;
     }
     delete parameters.owner_staff_ids;
+    if (isQuestionnaire(templateKey)) { delete parameters.owner_scope; delete parameters.owner_userids; }
     return { schema_version: 1, template_key: templateKey, parameters };
   }
 
@@ -170,8 +182,12 @@
     const previewBox = byID("templatePreviewBox");
     const form = window.TemplateParameterForm.create(root);
     const legacyDefinition = byID("packageDefinitionInput");
-    if (legacyDefinition?.closest(".ai-field")) legacyDefinition.closest(".ai-field").hidden = true;
-    const state = { package: null, configuration: null, templates: [], selectedTemplate: "", ready: false, restoring: false, initialDateTimes: {}, refreshInitial: null, refreshChanged: false, refreshDraft: null };
+    const legacyDefinitionField = legacyDefinition?.closest(".ai-field");
+    if (legacyDefinitionField) {
+      legacyDefinitionField.hidden = true;
+      new MutationObserver(() => { if (!legacyDefinitionField.hidden) legacyDefinitionField.hidden = true; }).observe(legacyDefinitionField, { attributes: true, attributeFilter: ["hidden"] });
+    }
+    const state = { package: null, configuration: null, templates: [], selectedTemplate: "", ready: false, restoring: false, initialDateTimes: {}, refreshInitial: null, refreshChanged: false, refreshDraft: null, retiredReconfigured: false };
     const setStatus = (message, kind = "") => { status.textContent = message; status.dataset.state = kind; };
     const templateFor = () => state.templates.find((item) => item.key === state.selectedTemplate);
 
@@ -292,9 +308,32 @@
       }
       const template = templateFor();
       const stored = state.configuration?.definition;
-      const source = stored?.template_key === template?.key ? await rehydrateOwnerUserIDs(stored.parameters) : {};
+      const retired = retiredQuestionnaireOwner(stored);
+      const matching = stored?.template_key === template?.key;
+      const source = matching ? (isQuestionnaire(template.key) ? stored.parameters : await rehydrateOwnerUserIDs(stored.parameters)) : {};
       const readOnly = ["active", "archived"].includes(state.package?.lifecycle);
       form.setSchema(localizedFields(template?.fields), editableParameters(template?.key, source), { readOnly });
+      let note = byID("retiredQuestionnaireOwnerNote");
+      if (!note) {
+        note = document.createElement("div"); note.id = "retiredQuestionnaireOwnerNote"; note.setAttribute("role", "alert");
+        root.before(note);
+      }
+      note.replaceChildren(); note.hidden = !retired;
+      if (retired) {
+        const text = document.createElement("p");
+        text.textContent = state.retiredReconfigured ? "已进入重新配置：将按填写人和当前问卷条件圈选。检查条件并保存后，刷新成员再执行。" : "原问卷指定员工筛选已失效，旧配置和原成员名单保留。请主动重新配置；不会自动扩大为全体。";
+        note.appendChild(text);
+        if (!state.retiredReconfigured) {
+          const reset = document.createElement("button"); reset.type = "button"; reset.id = "reconfigureQuestionnaireAudienceBtn"; reset.className = "ai-btn soft";
+          reset.textContent = readOnly ? "请先暂停此人群包，再重新配置" : "重新配置问卷受众"; reset.disabled = readOnly;
+          reset.addEventListener("click", () => { state.retiredReconfigured = true; render().catch((error) => setStatus(templateHostMessage(error, "表单暂不可更新。"), "error")); });
+          note.appendChild(reset);
+        }
+      }
+      const refreshButton = byID("manualRefreshBtn");
+      if (retired && refreshButton) { refreshButton.dataset.retiredOwnerDisabled = "true"; refreshButton.disabled = true; refreshButton.title = "原员工筛选已失效，请先重新配置并保存"; }
+      else if (refreshButton?.dataset.retiredOwnerDisabled) { delete refreshButton.dataset.retiredOwnerDisabled; refreshButton.disabled = readOnly; refreshButton.title = ""; }
+
       hydrateDateTimeFields(template, source);
       previewButton.disabled = readOnly || !template;
       saveButton.disabled = readOnly || !template;
@@ -309,12 +348,14 @@
       state.package = pkg.package;
       state.templates = templates.items || [];
       state.configuration = configuration.configuration;
+      state.retiredReconfigured = false;
       state.ready = true;
       renderRefreshMode();
       renderTemplateOptions();
       await render();
     }
     function currentDefinition() {
+      if (retiredQuestionnaireOwner(state.configuration?.definition) && !state.retiredReconfigured) throw templateHostError("原问卷员工筛选已失效，请先选择重新配置，检查条件后保存。");
       if (state.configuration?.definition?.template_key === "core_ai_product") throw templateHostError("此包由核心产品配置管理，不支持修改筛选模板。");
       const template = templateFor();
       if (!template) throw templateHostError("请选择模板。");
@@ -380,8 +421,20 @@
       previewBox.textContent = `${preview.member_count} 人 · 成员摘要 ${preview.member_digest} · 水位摘要 ${preview.watermark_digest}`;
       setStatus("当前表单预览完成，尚未保存配置。", "success");
     }
+    const refreshControl = byID("manualRefreshBtn");
+    if (refreshControl) {
+      // The frozen detail controller updates this button after its async read.
+      // Keep retirement visible while it still points at the old definition.
+      new MutationObserver(() => {
+        if (retiredQuestionnaireOwner(state.configuration?.definition) && !refreshControl.disabled) refreshControl.disabled = true;
+      }).observe(refreshControl, { attributes: true, attributeFilter: ["disabled"] });
+    }
     document.addEventListener("click", (event) => {
       const target = event.target;
+      if (target === refreshControl && retiredQuestionnaireOwner(state.configuration?.definition)) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        setStatus("原问卷员工筛选已失效，请先重新配置并保存。", "error"); return;
+      }
       if (target === previewButton) {
         event.preventDefault();
         event.stopImmediatePropagation();

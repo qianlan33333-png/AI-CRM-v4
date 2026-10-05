@@ -64,6 +64,23 @@ type DeliveryReader interface {
 	Get(context.Context, int64) (Delivery, error)
 }
 
+// ClaimGuard holds the Inbox row lock for the caller's transaction. A page
+// commit cannot race the existing Claim transition to a newer attempt.
+type ClaimGuard interface {
+	RequireCurrentClaim(context.Context, int64, string, int) error
+}
+
+func (service *Service) RequireCurrentClaim(ctx context.Context, id int64, provider string, attempt int) error {
+	if id < 1 || !validProvider(provider) || attempt < 1 {
+		return ErrInvalidClaim
+	}
+	guard, ok := service.store.(ClaimGuard)
+	if !ok {
+		return ErrInvalidClaim
+	}
+	return guard.RequireCurrentClaim(ctx, id, provider, attempt)
+}
+
 // RetryStore is intentionally separate from Store so existing provider and
 // in-memory stores remain ingest-only unless they explicitly support the
 // privileged operational retry transition.

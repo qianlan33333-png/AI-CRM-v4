@@ -10,11 +10,12 @@ import (
 // It is accepted only with a caller-bound PostgreSQL transaction. It has no
 // customer, order, payment, entitlement, provider, or external-effect field.
 type DefinitionImport struct {
-	ProductCode           string
-	Name                  string
-	Description           string
-	PriceMinor            int64
-	Currency              string
+	ProductCode string
+	Name        string
+	Description string
+	PriceMinor  int64
+	Currency    string
+	// Deprecated: retained for import-call compatibility; imports create stockless products.
 	StockQuantity         int32
 	Images                []string
 	LegacyAdminProjection json.RawMessage

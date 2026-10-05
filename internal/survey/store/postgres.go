@@ -574,13 +574,18 @@ func (r *Repository) CreateSubmission(ctx context.Context, input surveyapp.Persi
 		}
 		return surveyport.Submission{}, false, surveyport.ErrAlreadySubmitted
 	}
-	var definitionID int64
-	if err = t.QueryRow(ctx, `SELECT active_definition_version_id FROM survey_questionnaires WHERE id=$1 AND status='published' FOR SHARE`, input.Questionnaire.ID).Scan(&definitionID); err != nil {
+	var definitionID, definitionVersion int64
+	if err = t.QueryRow(ctx, `SELECT q.active_definition_version_id,v.version_number FROM survey_questionnaires q JOIN survey_definition_versions v ON v.id=q.active_definition_version_id WHERE q.id=$1 AND q.status='published' FOR SHARE OF q`, input.Questionnaire.ID).Scan(&definitionID, &definitionVersion); err != nil {
 		return surveyport.Submission{}, false, mapError(err)
+	}
+	// The definition may have been republished after validation. Preserve the
+	// existing row lock and reject before binding old answers to a new version.
+	if definitionVersion != input.Questionnaire.DefinitionVersion {
+		return surveyport.Submission{}, false, surveyport.ErrConflict
 	}
 	resultRaw, _ := json.Marshal(input.Result)
 	var submissionID int64
-	err = t.QueryRow(ctx, `INSERT INTO survey_submissions(questionnaire_id,definition_version_id,definition_version_number,customer_id,identity_state,identity_reason,evidence_digest,submission_key_digest,payload_digest,questionnaire_slug_snapshot,title_snapshot,mode_snapshot,total_score,result_snapshot,source_channel,campaign_id,staff_id,submitted_at,created_at) VALUES($1,$2,$3,$4,$5,'',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$17) RETURNING id`, input.Questionnaire.ID, definitionID, input.Questionnaire.DefinitionVersion, input.Command.Identity.CustomerID, input.Command.Identity.State, decodeEvidence(input.Command.Identity.EvidenceDigest), input.SubmissionKeyDigest[:], input.PayloadDigest[:], input.Questionnaire.Slug, input.Questionnaire.Title, input.Questionnaire.Mode, input.TotalScore, resultRaw, input.Command.SourceChannel, input.Command.CampaignID, input.Command.StaffID, input.Now).Scan(&submissionID)
+	err = t.QueryRow(ctx, `INSERT INTO survey_submissions(questionnaire_id,definition_version_id,definition_version_number,customer_id,identity_state,identity_reason,evidence_digest,submission_key_digest,payload_digest,questionnaire_slug_snapshot,title_snapshot,mode_snapshot,total_score,result_snapshot,source_channel,campaign_id,staff_id,submitted_at,created_at) VALUES($1,$2,$3,$4,$5,'',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'',$16,$16) RETURNING id`, input.Questionnaire.ID, definitionID, input.Questionnaire.DefinitionVersion, input.Command.Identity.CustomerID, input.Command.Identity.State, decodeEvidence(input.Command.Identity.EvidenceDigest), input.SubmissionKeyDigest[:], input.PayloadDigest[:], input.Questionnaire.Slug, input.Questionnaire.Title, input.Questionnaire.Mode, input.TotalScore, resultRaw, input.Command.SourceChannel, input.Command.CampaignID, input.Now).Scan(&submissionID)
 	if err != nil {
 		return surveyport.Submission{}, false, mapError(err)
 	}
@@ -617,12 +622,20 @@ func (r *Repository) CreateSubmission(ctx context.Context, input surveyapp.Persi
 }
 
 func (r *Repository) HasSubmissionClaim(ctx context.Context, questionnaireID surveyport.ID, customerID customerdomain.CustomerID) (bool, error) {
+	return r.HasSubmissionClaimForCustomers(ctx, questionnaireID, []customerdomain.CustomerID{customerID})
+}
+
+func (r *Repository) HasSubmissionClaimForCustomers(ctx context.Context, questionnaireID surveyport.ID, customerIDs []customerdomain.CustomerID) (bool, error) {
 	t, err := tx(ctx)
 	if err != nil {
 		return false, err
 	}
 	var claimed bool
-	err = t.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM survey_submission_claims WHERE questionnaire_id=$1 AND customer_id=$2 AND submission_id IS NOT NULL)`, questionnaireID, customerID).Scan(&claimed)
+	ids := make([]int64, len(customerIDs))
+	for i, id := range customerIDs {
+		ids[i] = int64(id)
+	}
+	err = t.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM survey_submission_claims WHERE questionnaire_id=$1 AND customer_id=ANY($2::bigint[]) AND submission_id IS NOT NULL)`, questionnaireID, ids).Scan(&claimed)
 	return claimed, mapError(err)
 }
 
@@ -721,9 +734,19 @@ func (r *Repository) ListSubmissions(ctx context.Context, id surveyport.ID, limi
 	return r.listSubmissionQuery(ctx, `questionnaire_id=$1 AND ($2='' OR identity_state=$2)`, []any{id, string(state)}, limit, offset)
 }
 func (r *Repository) CustomerHistory(ctx context.Context, customer int64, limit, offset int32) ([]surveyport.Submission, int64, error) {
-	return r.listSubmissionQuery(ctx, `customer_id=$1`, []any{customer}, limit, offset)
+	return r.CustomerHistoryForCustomers(ctx, []customerdomain.CustomerID{customerdomain.CustomerID(customer)}, limit, offset)
+}
+func (r *Repository) CustomerHistoryForCustomers(ctx context.Context, customers []customerdomain.CustomerID, limit, offset int32) ([]surveyport.Submission, int64, error) {
+	ids := make([]int64, len(customers))
+	for i, id := range customers {
+		ids[i] = int64(id)
+	}
+	return r.listSubmissionQuery(ctx, `customer_id=ANY($1::bigint[])`, []any{ids}, limit, offset)
 }
 func (r *Repository) CustomerHistoryWindow(ctx context.Context, query surveyport.CustomerHistoryQuery) ([]surveyport.Submission, error) {
+	return r.CustomerHistoryWindowForCustomers(ctx, query, []customerdomain.CustomerID{customerdomain.CustomerID(query.CustomerID)})
+}
+func (r *Repository) CustomerHistoryWindowForCustomers(ctx context.Context, query surveyport.CustomerHistoryQuery, customers []customerdomain.CustomerID) ([]surveyport.Submission, error) {
 	t, err := tx(ctx)
 	if err != nil {
 		return nil, err
@@ -732,10 +755,14 @@ func (r *Repository) CustomerHistoryWindow(ctx context.Context, query surveyport
 	if !query.AfterAt.IsZero() {
 		afterAt = query.AfterAt.UTC()
 	}
+	idsForQuery := make([]int64, len(customers))
+	for i, id := range customers {
+		idsForQuery[i] = int64(id)
+	}
 	rows, err := t.Query(ctx, `SELECT id FROM survey_submissions
-		WHERE customer_id=$1 AND submitted_at <= $2
+		WHERE customer_id=ANY($1::bigint[]) AND submitted_at <= $2
 		AND ($3::timestamptz IS NULL OR (submitted_at,id) < ($3,$4))
-		ORDER BY submitted_at DESC,id DESC LIMIT $5`, query.CustomerID, query.Watermark.UTC(), afterAt, query.AfterID, query.Limit)
+		ORDER BY submitted_at DESC,id DESC LIMIT $5`, idsForQuery, query.Watermark.UTC(), afterAt, query.AfterID, query.Limit)
 	if err != nil {
 		return nil, mapError(err)
 	}

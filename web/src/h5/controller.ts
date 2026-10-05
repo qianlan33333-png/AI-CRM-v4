@@ -13,32 +13,20 @@ import { ApiError } from '../api/transport';
 import { formatShanghaiDateTime } from '../../v3/adminDateTime';
 
 import type {
-  PublicSurveyDefinition,
-  PublicSurveyQuestion,
-  PublicSurveyResult,
-  PublicSurveySubmissionAnswer,
-} from "../api/generated/health.schemas";
+  SurveyPublicDefinition,
+  SurveyPublicQuestion,
+  SurveyPublicResult,
+  SurveyPublicSubmissionAnswer,
+} from '../../v3/generated/survey-public';
 
-type V3SurveyQuestion = Omit<PublicSurveyQuestion, 'type'> & {
-  type: PublicSurveyQuestion['type'] | 'textarea' | 'mobile';
-  minimum_length?: number;
-  maximum_length?: number;
-  placeholder_text?: string;
-  assessment_dimension_key?: string;
-};
-type V3SurveyDefinition = Omit<PublicSurveyDefinition, 'questions'> & {
+// Use the same current public contract as the HTTP transport. The legacy
+// health schema omitted Other and needed handwritten field extensions.
+type V3SurveyQuestion = SurveyPublicQuestion;
+type V3SurveyDefinition = SurveyPublicDefinition & {
   authorizationContext?: string;
-  mode: 'survey' | 'assessment';
-  assessment_config: Record<string, unknown>;
-  questions: V3SurveyQuestion[];
 };
-type V3SurveyResult = PublicSurveyResult & {
-  questionnaire_title?: string;
-  mode?: 'survey' | 'assessment';
-  total_score?: number;
-  assessment_result?: Record<string, unknown>;
-};
-type V3SurveySubmissionAnswer = PublicSurveySubmissionAnswer & { text_value?: string };
+type V3SurveyResult = SurveyPublicResult;
+type V3SurveySubmissionAnswer = SurveyPublicSubmissionAnswer;
 
 const validID = (value: number): boolean => Number.isSafeInteger(value) && value > 0;
 const validToken = (value: string): boolean => /^[A-Za-z0-9_-]{43}$/.test(value);
@@ -250,7 +238,8 @@ export class H5Controller extends PageBase {
     let changed = false;
     for (const input of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('#screen input[data-text-question-id], #screen textarea[data-text-question-id]')) {
       const question = questions.get(Number(input.dataset.textQuestionId));
-      if (!question || !this.supported(question) || !['mobile', 'textarea'].includes(question.type)) continue;
+      if (!question || !this.supported(question) ||
+          (!['mobile', 'textarea'].includes(question.type) && !this.selectedOther(question))) continue;
       if (input.value !== (this.textAnswers.get(question.id) || '')) {
         this.textAnswers.set(question.id, input.value);
         changed = true;
@@ -298,7 +287,8 @@ export class H5Controller extends PageBase {
       }
       for (const [id] of draft.textAnswers) {
         const question = questions.get(id);
-        if (!question || !['textarea', 'mobile'].includes(question.type) || textIDs.has(id)) {
+        if (!question || textIDs.has(id) || (!['textarea', 'mobile'].includes(question.type) &&
+            !this.selectedOther(question, new Map(draft.answers).get(id) || []))) {
           this.clearResumeDraft(); return null;
         }
         textIDs.add(id);
@@ -389,6 +379,10 @@ export class H5Controller extends PageBase {
     return !this.unsupportedTypes.has(question.id);
   }
 
+  private selectedOther(question: V3SurveyQuestion, selected = this.answers.get(question.id) || []) {
+    return question.options.find((option) => option.is_other && selected.includes(option.id));
+  }
+
   private unsupportedNotice(): string {
     return this.definition && this.unsupportedTypes.size
       ? '本问卷包含当前端暂不支持的题型，相关题目已禁用且不参与提交；其余题目可正常作答'
@@ -404,6 +398,8 @@ export class H5Controller extends PageBase {
     next.sort((a, b) => a - b);
     if (next.join(',') !== previous.join(',')) this.submissionKey = '';
     this.answers.set(question.id, next);
+    // The Owner rejects supplemental text when Other is no longer selected.
+    if (!this.selectedOther(question, next)) this.textAnswers.delete(question.id);
     this.saveDraft();
     if (!this.definitionStale) this.error = '';
     this.refresh();
@@ -436,8 +432,16 @@ export class H5Controller extends PageBase {
     }
     const count = (this.answers.get(question.id) || []).length;
     if (count === 0 && !question.required) return '';
-    return count < question.minimum_selections || count > question.maximum_selections
-      ? `「${question.title}」请选择 ${question.minimum_selections}–${question.maximum_selections} 项` : '';
+    if (count < question.minimum_selections || count > question.maximum_selections) {
+      return `「${question.title}」请选择 ${question.minimum_selections}–${question.maximum_selections} 项`;
+    }
+    const other = this.selectedOther(question);
+    if (other) {
+      const text = this.textAnswers.get(question.id) || '';
+      if (!text.trim()) return `「${question.title}」请填写其他说明`;
+      if ([...text].length > other.other_max_length) return `「${question.title}」其他说明最多 ${other.other_max_length} 字`;
+    }
+    return '';
   }
 
   private async submit(afterAuthorization = false): Promise<void> {
@@ -469,7 +473,8 @@ export class H5Controller extends PageBase {
         else this.authorizationRetryNotice();
       }
       else if (error instanceof ApiError && error.status === 409 &&
-               (error.details as { error?: unknown } | null)?.error === 'definition_version_conflict') {
+               ((error.details as { code?: unknown } | null)?.code === 'definition_version_conflict' ||
+                (error.details as { error?: unknown } | null)?.error === 'definition_version_conflict')) {
         this.definitionStale = true;
         this.error = '问卷内容已更新，当前答案尚未提交。请点击重试读取最新题目后重新填写。';
       }
@@ -550,9 +555,11 @@ export class H5Controller extends PageBase {
       questions: visible.map((question) => {
         const supported = this.supported(question);
         const isText = question.type === 'textarea' || question.type === 'mobile';
+        const other = this.selectedOther(question);
         return {
           id: question.id, title: question.title, required: question.required ? '（必答）' : '（选答）',
           supported, unsupported: !supported,
+          hasOther: !!other, otherPlaceholder: other?.other_placeholder || '请补充其他说明',
           isText, isMobile: question.type === 'mobile', isTextarea: question.type === 'textarea', isChoice: !isText, inputType: question.type === 'mobile' ? 'tel' : 'text', inputValue: this.textAnswers.get(question.id) || '', placeholder: question.type === 'mobile' ? '请输入11位中国大陆手机号' : question.placeholder_text || '请输入', input: (event: Event) => this.setText(question, event),
           hint: !supported ? '当前端不支持该题型，本题不参与作答与提交'
             : question.type === 'single_choice' ? '单选' : question.type === 'multi_choice' ? `多选，限选 ${question.maximum_selections} 项` : question.type === 'mobile' ? '11位中国大陆手机号' : '文本回答',

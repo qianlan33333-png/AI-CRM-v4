@@ -1,3 +1,4 @@
+import { productSourceTestPage } from '../scripts/product-source-test-page.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 import { buildTestBrowserBundle } from '../scripts/test-browser-bundle.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const page = fs.readFileSync(path.join(root, 'web/dist/admin/spProductForm.html'), 'utf8');
+const page = productSourceTestPage('spProductForm.html');
 const host = await buildTestBrowserBundle(path.join(root, 'web/v3/productAdapter.ts'));
 const wait = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitFor(check, label) { for (let i = 0; i < 80; i += 1) { if (check()) return; await wait(20); } throw new Error(label); }
@@ -54,7 +55,7 @@ await waitFor(() => document.getElementById('spfName'), 'frozen periodic form di
 
 await waitFor(() => document.querySelector('[data-product-alipay-enabled]'), 'period Alipay checkbox missing');
 assert.equal(document.querySelector('[data-product-alipay-enabled]').checked,true,'new period defaults both methods');
-for (const [id,value] of [['spfName','周期支付'],['spfCode','sp-media'],['spfPrice','0.02'],['spfStock','1'],['spfDurationDays','90']]) document.getElementById(id).value=value;
+for (const [id,value] of [['spfName','周期支付'],['spfCode','sp-media'],['spfPrice','0.02'],['spfDurationDays','90']]) document.getElementById(id).value=value;
 const control=()=>document.querySelector('[data-product-alipay-enabled]');
 control().checked=false;control().dispatchEvent(new dom.window.Event('change',{bubbles:true}));
 assert.match(document.getElementById('spfAlipayHint').textContent,/仅支持微信/);
@@ -62,6 +63,7 @@ const save=()=>document.querySelector('.admin-topbar [data-page-header-actions="
 save().click();
 await waitFor(()=>calls.some(c=>c.path==='/api/admin/service-period-products'&&c.method==='POST'),'period create missing');
 assert.equal(JSON.parse(calls.find(c=>c.path==='/api/admin/service-period-products'&&c.method==='POST').body).admin_projection.alipay_enabled,false);
+assert.equal(Object.hasOwn(JSON.parse(calls.find(c=>c.path==='/api/admin/service-period-products'&&c.method==='POST').body),'stock_quantity'),false,'new periodic Product create omits retired stock');
 await waitFor(()=>new URL(dom.window.location.href).searchParams.get('id')==='201','period create identity missing');
 await wait(100);
 assert.equal(control().checked,false,'create readback preserves disabled choice');

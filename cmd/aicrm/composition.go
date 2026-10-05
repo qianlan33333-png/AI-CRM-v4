@@ -816,6 +816,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = automationRuntime.SetReviewPlanIntake(aiService, automationService); err != nil {
 		return fail(err)
 	}
+	if err = aiService.BindManualAudienceRunApprovalValidator(automationRuntime.ValidateManualAudienceRunApproval); err != nil {
+		return fail(err)
+	}
 	if err = automationRuntime.SetOutboundContentFreezer(automationOutboundContentFreezer{capturer: mediaRepository, materials: mediaRepository}); err != nil {
 		return fail(err)
 	}
@@ -835,6 +838,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		outboundMessages,
 	)
 	if err != nil {
+		return fail(err)
+	}
+	if err = audienceDirectPush.BindCanonicalLineages(queries); err != nil {
 		return fail(err)
 	}
 	if err = audienceDirectPushReconcileWorker.Bind(audienceDirectPush); err != nil {
@@ -1013,6 +1019,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	surveyDefinitions := surveyapp.NewService(uow, surveyRepository)
 	segmentBindings.Handler.BindAudienceSurveyReferences(audienceSurveyReferenceAdapter{surveys: surveyDefinitions})
 	surveySubmissions := surveyapp.NewSubmissionService(uow, surveyRepository, surveyCipher)
+	if err = surveySubmissions.BindCanonicalLineage(queries); err != nil {
+		return fail(err)
+	}
 	surveySubmissions.BindSubmissionObserver(segment.CoreSubmissionEnqueuer{Client: effectClient})
 	surveyCompletionTargets, err := surveyCompletionTargets(cfg.Survey.CompletionTargetsJSON)
 	if err != nil {
@@ -1448,6 +1457,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	relationships := wecom.NewPostgreSQLFollowRelationshipStore()
 	customerTagCommands, err := customerapp.NewTagCommandService(uow, customerstore.TagCommandPostgreSQL{}, effectRepository, customerTagCommandGate{uow: uow, corpID: cfg.WeCom.CorpID, owners: customerProfileStore, staff: accessRepository, tags: tagRepository, identities: queries}, auditService, platformoutbox.NewPostgreSQL())
 	if err != nil {
+		return fail(err)
+	}
+	if err = customerTagCommands.BindCanonicalLineages(queries); err != nil {
 		return fail(err)
 	}
 	if err = channelEntrantActions.SetTagCommandSubmitter(customerTagCommands); err != nil {
@@ -2234,6 +2246,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	hxcModule := hxc.NewModuleRegistration()
 	hxcRepository := hxcstore.NewPostgreSQL(pool.Native())
+	if err = hxcRepository.BindCanonicalLineage(queries); err != nil {
+		return fail(err)
+	}
 	// Product receives only HXC's versioned shared-facts Port. It never opens
 	// an HXC store or reads dashboard tables while composing the member grid.
 	if err = productBindings.ProductHandler.SetServicePeriodMemberSharedFacts(hxcRepository); err != nil {

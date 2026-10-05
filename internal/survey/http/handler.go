@@ -460,13 +460,12 @@ func (h *Handler) publicQuestionnaire(w http.ResponseWriter, r *http.Request, ta
 			Answers       []surveyport.SubmissionAnswer `json:"answers"`
 			SourceChannel string                        `json:"source_channel,omitempty"`
 			CampaignID    string                        `json:"campaign_id,omitempty"`
-			StaffID       string                        `json:"staff_id,omitempty"`
 		}
 		if decode(r, &body) != nil {
 			writeError(w, 400, "invalid_public_input")
 			return
 		}
-		receipt, err := h.submissions.Submit(r.Context(), surveyport.SubmitCommand{Slug: slug, DefinitionVersion: body.Version, SubmissionKey: body.SubmissionKey, Answers: body.Answers, Identity: identity, SourceChannel: body.SourceChannel, CampaignID: body.CampaignID, StaffID: body.StaffID})
+		receipt, err := h.submissions.Submit(r.Context(), surveyport.SubmitCommand{Slug: slug, DefinitionVersion: body.Version, SubmissionKey: body.SubmissionKey, Answers: body.Answers, Identity: identity, SourceChannel: body.SourceChannel, CampaignID: body.CampaignID})
 		if err != nil {
 			var duplicate *surveyport.AlreadySubmittedError
 			if errors.As(err, &duplicate) {

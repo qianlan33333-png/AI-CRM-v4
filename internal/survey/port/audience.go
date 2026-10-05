@@ -11,7 +11,6 @@ type AudienceChoiceAnswer struct {
 	CustomerID      customerdomain.CustomerID
 	QuestionnaireID ID
 	SubmissionID    ID
-	StaffID         string
 	SubmittedAt     time.Time
 	QuestionID      ID
 	OptionIDs       []ID

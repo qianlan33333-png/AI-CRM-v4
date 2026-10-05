@@ -55,13 +55,14 @@ func IsServicePeriodProjection(raw json.RawMessage) bool {
 // Projection remains the existing products.legacy_admin_projection; no second
 // product model or table is introduced.
 type ServicePeriodStoreUpdate struct {
-	ID                    productport.ID
-	ExpectedVersion       int64
-	Name                  string
-	Description           string
-	PriceMinor            int64
-	Currency              string
-	DurationDays          int32
+	ID              productport.ID
+	ExpectedVersion int64
+	Name            string
+	Description     string
+	PriceMinor      int64
+	Currency        string
+	DurationDays    int32
+	// Deprecated: retained for store-call compatibility; persistence ignores it.
 	StockQuantity         int32
 	Images                []string
 	LegacyAdminProjection json.RawMessage
@@ -279,7 +280,9 @@ func (service *ServicePeriodService) CreateServicePeriodProduct(ctx context.Cont
 	}
 	var result productport.ServicePeriodProduct
 	err = service.uow.Within(ctx, func(tx context.Context) error {
-		receipt, replay, snapshot, reserveErr := service.reserveServicePeriod(tx, reservation)
+		receipt, replay, snapshot, reserveErr := service.reserveServicePeriod(tx, reservation, func(stock int32) [32]byte {
+			return legacyServicePeriodCreateDigest(normalized, stock)
+		})
 		if reserveErr != nil {
 			return reserveErr
 		}
@@ -298,7 +301,7 @@ func (service *ServicePeriodService) CreateServicePeriodProduct(ctx context.Cont
 			Description:           normalized.Description,
 			PriceMinor:            normalized.PriceMinor,
 			Currency:              normalized.Currency,
-			StockQuantity:         normalized.StockQuantity,
+			StockQuantity:         0,
 			Images:                append([]string{}, normalized.Images...),
 			LegacyAdminProjection: projection,
 			Actor:                 normalized.Actor,
@@ -347,7 +350,10 @@ func (service *ServicePeriodService) UpdateServicePeriodProduct(ctx context.Cont
 		id:              normalized.ID,
 		expectedVersion: normalized.ExpectedVersion,
 		digest:          digest,
-		policy:          policy,
+		legacyDigest: func(stock int32) [32]byte {
+			return legacyServicePeriodUpdateDigest(normalized, stock)
+		},
+		policy: policy,
 		mutate: func(current productport.Product, projected productport.ServicePeriodProduct) (ServicePeriodStoreUpdate, productport.ServicePeriodLifecycle, bool, error) {
 			if projected.Archived {
 				return ServicePeriodStoreUpdate{}, "", false, ErrConflict
@@ -374,7 +380,7 @@ func (service *ServicePeriodService) UpdateServicePeriodProduct(ctx context.Cont
 				PriceMinor:            normalized.PriceMinor,
 				Currency:              normalized.Currency,
 				DurationDays:          normalized.DurationDays,
-				StockQuantity:         normalized.StockQuantity,
+				StockQuantity:         0,
 				Images:                slices.Clone(images),
 				LegacyAdminProjection: projection,
 			}, projected.Lifecycle, true, nil
@@ -465,7 +471,7 @@ func (service *ServicePeriodService) CopyServicePeriodProduct(ctx context.Contex
 	}
 	var result productport.ServicePeriodProduct
 	err = service.uow.Within(ctx, func(tx context.Context) error {
-		receipt, replay, snapshot, reserveErr := service.reserveServicePeriod(tx, reservation)
+		receipt, replay, snapshot, reserveErr := service.reserveServicePeriod(tx, reservation, nil)
 		if reserveErr != nil {
 			return reserveErr
 		}
@@ -502,7 +508,7 @@ func (service *ServicePeriodService) CopyServicePeriodProduct(ctx context.Contex
 			Description:           source.Description,
 			PriceMinor:            source.PriceMinor,
 			Currency:              source.Currency,
-			StockQuantity:         source.StockQuantity,
+			StockQuantity:         0,
 			Images:                slices.Clone(source.Images),
 			LegacyAdminProjection: projection,
 			Actor:                 normalized.Actor,
@@ -541,6 +547,7 @@ type servicePeriodWrite struct {
 	id              productport.ID
 	expectedVersion int64
 	digest          [32]byte
+	legacyDigest    func(int32) [32]byte
 	policy          *productport.DistributionPolicy
 	mutate          func(productport.Product, productport.ServicePeriodProduct) (ServicePeriodStoreUpdate, productport.ServicePeriodLifecycle, bool, error)
 }
@@ -563,7 +570,7 @@ func (service *ServicePeriodService) updateServicePeriod(ctx context.Context, wr
 	}
 	var result productport.ServicePeriodProduct
 	err := service.uow.Within(ctx, func(tx context.Context) error {
-		receipt, replay, snapshot, reserveErr := service.reserveServicePeriod(tx, reservation)
+		receipt, replay, snapshot, reserveErr := service.reserveServicePeriod(tx, reservation, write.legacyDigest)
 		if reserveErr != nil {
 			return reserveErr
 		}
@@ -624,7 +631,7 @@ func (service *ServicePeriodService) updateServicePeriod(ctx context.Context, wr
 	return result, nil
 }
 
-func (service *ServicePeriodService) reserveServicePeriod(ctx context.Context, reservation Reservation) (Receipt, bool, productport.ServicePeriodProduct, error) {
+func (service *ServicePeriodService) reserveServicePeriod(ctx context.Context, reservation Reservation, legacyDigest func(int32) [32]byte) (Receipt, bool, productport.ServicePeriodProduct, error) {
 	receipt, owned, err := service.store.Reserve(ctx, reservation)
 	if err != nil {
 		return Receipt{}, false, productport.ServicePeriodProduct{}, err
@@ -632,10 +639,10 @@ func (service *ServicePeriodService) reserveServicePeriod(ctx context.Context, r
 	if !validReceipt(receipt, reservation) {
 		return Receipt{}, false, productport.ServicePeriodProduct{}, ErrUnavailable
 	}
-	if subtle.ConstantTimeCompare(receipt.PayloadDigest[:], reservation.PayloadDigest[:]) != 1 {
-		return Receipt{}, false, productport.ServicePeriodProduct{}, ErrConflict
-	}
 	if owned {
+		if subtle.ConstantTimeCompare(receipt.PayloadDigest[:], reservation.PayloadDigest[:]) != 1 {
+			return Receipt{}, false, productport.ServicePeriodProduct{}, ErrConflict
+		}
 		return receipt, false, productport.ServicePeriodProduct{}, nil
 	}
 	if receipt.State != "completed" {
@@ -646,8 +653,18 @@ func (service *ServicePeriodService) reserveServicePeriod(ctx context.Context, r
 		return Receipt{}, false, productport.ServicePeriodProduct{}, ErrUnavailable
 	}
 	canonical, err := json.Marshal(snapshot)
-	if err != nil || !jsonEquivalent(canonical, receipt.ResultSnapshot) {
+	if err != nil || !jsonEquivalentIgnoringRetiredStock(canonical, receipt.ResultSnapshot) {
 		return Receipt{}, false, productport.ServicePeriodProduct{}, ErrUnavailable
+	}
+	if subtle.ConstantTimeCompare(receipt.PayloadDigest[:], reservation.PayloadDigest[:]) != 1 {
+		stock, hasRetiredStock := retiredStockFromSnapshot(receipt.ResultSnapshot)
+		if legacyDigest == nil || !hasRetiredStock {
+			return Receipt{}, false, productport.ServicePeriodProduct{}, ErrConflict
+		}
+		expected := legacyDigest(stock)
+		if subtle.ConstantTimeCompare(receipt.PayloadDigest[:], expected[:]) != 1 {
+			return Receipt{}, false, productport.ServicePeriodProduct{}, ErrConflict
+		}
 	}
 	return receipt, true, snapshot, nil
 }
@@ -712,7 +729,6 @@ func projectServicePeriodProduct(product productport.Product, durationDays int32
 		PriceMinor:       product.PriceMinor,
 		Currency:         product.Currency,
 		DurationDays:     durationDays,
-		StockQuantity:    product.StockQuantity,
 		Images:           append([]string(nil), product.Images...),
 		AdminProjection:  append(json.RawMessage(nil), product.LegacyAdminProjection...),
 		Lifecycle:        lifecycle,
@@ -805,7 +821,7 @@ func servicePeriodProjectionForLifecycle(raw json.RawMessage, lifecycle productp
 func validServicePeriodSnapshot(product productport.ServicePeriodProduct) bool {
 	if product.ServiceProductID < 1 || product.ProductCode == "" || len(product.ProductCode) > 200 || strings.TrimSpace(product.ProductCode) != product.ProductCode ||
 		product.Name == "" || len(product.Name) > 200 || strings.TrimSpace(product.Name) != product.Name || len(product.Description) > 10000 ||
-		product.PriceMinor < 0 || product.StockQuantity < 0 || product.DurationDays < 1 || len(product.Currency) != 3 || product.Currency != strings.ToUpper(product.Currency) || len(product.Images) > 20 || !IsServicePeriodProjection(product.AdminProjection) ||
+		product.PriceMinor < 0 || product.DurationDays < 1 || len(product.Currency) != 3 || product.Currency != strings.ToUpper(product.Currency) || len(product.Images) > 20 || !IsServicePeriodProjection(product.AdminProjection) ||
 		product.Version < 1 || product.CreatedAt.IsZero() || product.UpdatedAt.IsZero() || product.UpdatedAt.Before(product.CreatedAt) {
 		return false
 	}
@@ -835,8 +851,9 @@ func normalizeServicePeriodCreate(command productport.CreateServicePeriodProduct
 	command.Name = strings.TrimSpace(command.Name)
 	command.Description = strings.TrimSpace(command.Description)
 	command.Currency = strings.ToUpper(strings.TrimSpace(command.Currency))
+	command.StockQuantity = 0
 	if command.Actor < 1 || command.ProductCode == "" || len(command.ProductCode) > 200 || command.Name == "" || len(command.Name) > 200 ||
-		len(command.Description) > 10000 || command.PriceMinor < 0 || command.StockQuantity < 0 || command.DurationDays < 1 || len(command.Currency) != 3 || len(command.Images) > 20 || !validIdempotencyKey(command.IdempotencyKey) {
+		len(command.Description) > 10000 || command.PriceMinor < 0 || command.DurationDays < 1 || len(command.Currency) != 3 || len(command.Images) > 20 || !validIdempotencyKey(command.IdempotencyKey) {
 		return productport.CreateServicePeriodProductCommand{}, [32]byte{}, ErrInvalidProduct
 	}
 	for index := range command.Images {
@@ -859,11 +876,10 @@ func normalizeServicePeriodCreate(command productport.CreateServicePeriodProduct
 		PriceMinor         int64                           `json:"price_minor"`
 		Currency           string                          `json:"currency"`
 		DurationDays       int32                           `json:"duration_days"`
-		StockQuantity      int32                           `json:"stock_quantity"`
 		Images             []string                        `json:"images"`
 		AdminProjection    json.RawMessage                 `json:"admin_projection"`
 		DistributionPolicy *productport.DistributionPolicy `json:"distribution_policy"`
-	}{command.ProductCode, command.Name, command.Description, command.PriceMinor, command.Currency, command.DurationDays, command.StockQuantity, command.Images, command.AdminProjection, command.DistributionPolicy})
+	}{command.ProductCode, command.Name, command.Description, command.PriceMinor, command.Currency, command.DurationDays, command.Images, command.AdminProjection, command.DistributionPolicy})
 	if err != nil {
 		return productport.CreateServicePeriodProductCommand{}, [32]byte{}, ErrInvalidProduct
 	}
@@ -876,8 +892,9 @@ func normalizeServicePeriodUpdate(command productport.UpdateServicePeriodProduct
 	command.Name = strings.TrimSpace(command.Name)
 	command.Description = strings.TrimSpace(command.Description)
 	command.Currency = strings.ToUpper(strings.TrimSpace(command.Currency))
+	command.StockQuantity = 0
 	if !validServicePeriodWriteIdentity(command.ID, command.ExpectedVersion, command.Actor, command.IdempotencyKey) ||
-		command.Name == "" || len(command.Name) > 200 || len(command.Description) > 10000 || command.PriceMinor < 0 || command.StockQuantity < 0 || command.DurationDays < 1 || len(command.Currency) != 3 || len(command.Images) > 20 {
+		command.Name == "" || len(command.Name) > 200 || len(command.Description) > 10000 || command.PriceMinor < 0 || command.DurationDays < 1 || len(command.Currency) != 3 || len(command.Images) > 20 {
 		return productport.UpdateServicePeriodProductCommand{}, [32]byte{}, ErrInvalidProduct
 	}
 	for index := range command.Images {
@@ -901,15 +918,47 @@ func normalizeServicePeriodUpdate(command productport.UpdateServicePeriodProduct
 		PriceMinor         int64                           `json:"price_minor"`
 		Currency           string                          `json:"currency"`
 		DurationDays       int32                           `json:"duration_days"`
-		StockQuantity      int32                           `json:"stock_quantity"`
 		Images             []string                        `json:"images"`
 		AdminProjection    json.RawMessage                 `json:"admin_projection"`
 		DistributionPolicy *productport.DistributionPolicy `json:"distribution_policy"`
-	}{command.ID, command.ExpectedVersion, command.Name, command.Description, command.PriceMinor, command.Currency, command.DurationDays, command.StockQuantity, command.Images, command.AdminProjection, command.DistributionPolicy})
+	}{command.ID, command.ExpectedVersion, command.Name, command.Description, command.PriceMinor, command.Currency, command.DurationDays, command.Images, command.AdminProjection, command.DistributionPolicy})
 	if err != nil {
 		return productport.UpdateServicePeriodProductCommand{}, [32]byte{}, ErrInvalidProduct
 	}
 	return command, sha256.Sum256(raw), nil
+}
+
+func legacyServicePeriodCreateDigest(command productport.CreateServicePeriodProductCommand, stock int32) [32]byte {
+	raw, _ := json.Marshal(struct {
+		ProductCode        string                          `json:"product_code"`
+		Name               string                          `json:"name"`
+		Description        string                          `json:"description"`
+		PriceMinor         int64                           `json:"price_minor"`
+		Currency           string                          `json:"currency"`
+		DurationDays       int32                           `json:"duration_days"`
+		StockQuantity      int32                           `json:"stock_quantity"`
+		Images             []string                        `json:"images"`
+		AdminProjection    json.RawMessage                 `json:"admin_projection"`
+		DistributionPolicy *productport.DistributionPolicy `json:"distribution_policy"`
+	}{command.ProductCode, command.Name, command.Description, command.PriceMinor, command.Currency, command.DurationDays, stock, command.Images, command.AdminProjection, command.DistributionPolicy})
+	return sha256.Sum256(raw)
+}
+
+func legacyServicePeriodUpdateDigest(command productport.UpdateServicePeriodProductCommand, stock int32) [32]byte {
+	raw, _ := json.Marshal(struct {
+		ID                 productport.ID                  `json:"service_product_id"`
+		ExpectedVersion    int64                           `json:"expected_version"`
+		Name               string                          `json:"name"`
+		Description        string                          `json:"description"`
+		PriceMinor         int64                           `json:"price_minor"`
+		Currency           string                          `json:"currency"`
+		DurationDays       int32                           `json:"duration_days"`
+		StockQuantity      int32                           `json:"stock_quantity"`
+		Images             []string                        `json:"images"`
+		AdminProjection    json.RawMessage                 `json:"admin_projection"`
+		DistributionPolicy *productport.DistributionPolicy `json:"distribution_policy"`
+	}{command.ID, command.ExpectedVersion, command.Name, command.Description, command.PriceMinor, command.Currency, command.DurationDays, stock, command.Images, command.AdminProjection, command.DistributionPolicy})
+	return sha256.Sum256(raw)
 }
 
 func normalizeServicePeriodEnabled(command productport.SetServicePeriodProductEnabledCommand) (productport.SetServicePeriodProductEnabledCommand, [32]byte, error) {
@@ -967,7 +1016,7 @@ func unchangedServicePeriodUpdate(current productport.Product, expectedVersion i
 		Description:           current.Description,
 		PriceMinor:            current.PriceMinor,
 		Currency:              current.Currency,
-		StockQuantity:         current.StockQuantity,
+		StockQuantity:         0,
 		Images:                append([]string(nil), current.Images...),
 		LegacyAdminProjection: projection,
 	}

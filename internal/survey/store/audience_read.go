@@ -19,8 +19,8 @@ func (r *Repository) FirstCompleteAudienceChoices(ctx context.Context, reference
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `WITH ranked AS (SELECT id,questionnaire_id,customer_id,staff_id,submitted_at,row_number() OVER (PARTITION BY questionnaire_id,customer_id ORDER BY submitted_at,id) AS n FROM survey_submissions WHERE identity_state='resolved' AND customer_id IS NOT NULL AND submitted_at <= $1)
-		SELECT s.customer_id,s.questionnaire_id,s.id,s.staff_id,s.submitted_at,a.definition_question_id,a.selected_options_snapshot
+	rows, err := tx.Query(ctx, `WITH ranked AS (SELECT id,questionnaire_id,customer_id,submitted_at,row_number() OVER (PARTITION BY questionnaire_id,customer_id ORDER BY submitted_at,id) AS n FROM survey_submissions WHERE identity_state='resolved' AND customer_id IS NOT NULL AND submitted_at <= $1)
+		SELECT s.customer_id,s.questionnaire_id,s.id,s.submitted_at,a.definition_question_id,a.selected_options_snapshot
 		FROM ranked s JOIN survey_submission_answers a ON a.submission_id=s.id
 		WHERE s.n=1 AND a.definition_question_id IS NOT NULL AND a.question_type IN ('single_choice','multi_choice') ORDER BY s.questionnaire_id,s.customer_id,a.id`, reference.UTC())
 	if err != nil {
@@ -33,7 +33,7 @@ func (r *Repository) FirstCompleteAudienceChoices(ctx context.Context, reference
 		var options []struct {
 			OptionID surveyport.ID `json:"option_id"`
 		}
-		if err = rows.Scan(&item.CustomerID, &item.QuestionnaireID, &item.SubmissionID, &item.StaffID, &item.SubmittedAt, &item.QuestionID, &options); err != nil {
+		if err = rows.Scan(&item.CustomerID, &item.QuestionnaireID, &item.SubmissionID, &item.SubmittedAt, &item.QuestionID, &options); err != nil {
 			return nil, err
 		}
 		raw, _ := json.Marshal(options)

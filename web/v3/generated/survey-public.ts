@@ -255,8 +255,6 @@ export interface SurveyPublicSubmissionRequest {
   source_channel?: string;
   /** @maxLength 200 */
   campaign_id?: string;
-  /** @maxLength 200 */
-  staff_id?: string;
 }
 
 export interface SurveyPublicSubmissionReceipt {

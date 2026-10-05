@@ -7,12 +7,12 @@ import (
 )
 
 type SubmitCommand struct {
-	Slug                               string
-	DefinitionVersion                  int64
-	SubmissionKey                      string
-	Answers                            []SubmissionAnswer
-	Identity                           SubmissionIdentity
-	SourceChannel, CampaignID, StaffID string
+	Slug                      string
+	DefinitionVersion         int64
+	SubmissionKey             string
+	Answers                   []SubmissionAnswer
+	Identity                  SubmissionIdentity
+	SourceChannel, CampaignID string
 }
 
 type SubmissionReceipt struct {

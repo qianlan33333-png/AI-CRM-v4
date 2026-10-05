@@ -1116,7 +1116,7 @@ func TestPostgreSQLAudienceChoicesReadFirstResolvedCompletion(t *testing.T) {
 		t.Fatalf("facts=%+v", facts)
 	}
 	fact := facts[0]
-	if int64(fact.CustomerID) != customerID || fact.QuestionnaireID != surveyport.ID(questionnaireID) || fact.SubmissionID != surveyport.ID(firstSubmissionID) || fact.StaffID != "owner-first" || !fact.SubmittedAt.Equal(now.Add(-48*time.Hour)) || fact.QuestionID != surveyport.ID(questionID) {
+	if int64(fact.CustomerID) != customerID || fact.QuestionnaireID != surveyport.ID(questionnaireID) || fact.SubmissionID != surveyport.ID(firstSubmissionID) || !fact.SubmittedAt.Equal(now.Add(-48*time.Hour)) || fact.QuestionID != surveyport.ID(questionID) {
 		t.Fatalf("fact=%+v", fact)
 	}
 	if len(fact.OptionIDs) != 2 || fact.OptionIDs[0] != surveyport.ID(firstOptionID) || fact.OptionIDs[1] != surveyport.ID(secondOptionID) {

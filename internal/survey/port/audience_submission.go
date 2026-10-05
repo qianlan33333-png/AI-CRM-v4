@@ -12,7 +12,6 @@ type AudienceSubmission struct {
 	CustomerID      customerdomain.CustomerID
 	QuestionnaireID ID
 	SubmissionID    ID
-	StaffID         string
 	SubmittedAt     time.Time
 }
 type AudienceSubmissionReader interface {

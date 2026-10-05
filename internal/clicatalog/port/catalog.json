@@ -40313,11 +40313,6 @@
           "maxLength": 200,
           "minLength": 1,
           "type": "string"
-        },
-        "stock_quantity": {
-          "format": "int32",
-          "minimum": 0,
-          "type": "integer"
         }
       },
       "required": [
@@ -40326,7 +40321,6 @@
         "description",
         "price_minor",
         "currency",
-        "stock_quantity",
         "images"
       ],
       "type": "object"
@@ -46349,11 +46343,6 @@
           "minLength": 1,
           "type": "string"
         },
-        "stock_quantity": {
-          "format": "int32",
-          "minimum": 0,
-          "type": "integer"
-        },
         "updated_at": {
           "format": "date-time",
           "type": "string"
@@ -46369,7 +46358,6 @@
         "description",
         "price_minor",
         "currency",
-        "stock_quantity",
         "images",
         "created_by",
         "created_at",
@@ -53147,11 +53135,6 @@
           "minimum": 0,
           "type": "integer"
         },
-        "stock_quantity": {
-          "format": "int32",
-          "minimum": 0,
-          "type": "integer"
-        },
         "updated_at": {
           "format": "date-time",
           "type": "string"
@@ -53167,7 +53150,6 @@
         "description",
         "price_minor",
         "currency",
-        "stock_quantity",
         "images",
         "admin_projection",
         "created_by",
@@ -55500,11 +55482,6 @@
         "service_product_id": {
           "$ref": "#/components/schemas/PositiveID"
         },
-        "stock_quantity": {
-          "format": "int32",
-          "minimum": 0,
-          "type": "integer"
-        },
         "updated_at": {
           "format": "date-time",
           "type": "string"
@@ -55520,7 +55497,6 @@
         "description",
         "price_minor",
         "currency",
-        "stock_quantity",
         "images",
         "admin_projection",
         "lifecycle",
@@ -55569,11 +55545,6 @@
           "maxLength": 200,
           "minLength": 1,
           "type": "string"
-        },
-        "stock_quantity": {
-          "format": "int32",
-          "minimum": 0,
-          "type": "integer"
         }
       },
       "required": [
@@ -55582,7 +55553,6 @@
         "description",
         "price_minor",
         "currency",
-        "stock_quantity",
         "images"
       ],
       "type": "object"
@@ -55703,11 +55673,6 @@
           "format": "int64",
           "minimum": 0,
           "type": "integer"
-        },
-        "stock_quantity": {
-          "format": "int32",
-          "minimum": 0,
-          "type": "integer"
         }
       },
       "required": [
@@ -55716,7 +55681,6 @@
         "description",
         "price_minor",
         "currency",
-        "stock_quantity",
         "images"
       ],
       "type": "object"
@@ -56955,10 +56919,6 @@
           "maxLength": 200,
           "type": "string"
         },
-        "staff_id": {
-          "maxLength": 200,
-          "type": "string"
-        },
         "submission_key": {
           "pattern": "^[A-Za-z0-9_-]{43}$",
           "type": "string"
@@ -57636,11 +57596,6 @@
           "format": "int64",
           "minimum": 0,
           "type": "integer"
-        },
-        "stock_quantity": {
-          "format": "int32",
-          "minimum": 0,
-          "type": "integer"
         }
       },
       "required": [
@@ -57649,7 +57604,6 @@
         "description",
         "price_minor",
         "currency",
-        "stock_quantity",
         "images",
         "admin_projection"
       ],

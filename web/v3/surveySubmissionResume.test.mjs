@@ -241,7 +241,7 @@ for(const display of ['all_in_one','one_by_one']){
   forgedResume.dom.window.close();
   const expiredDraft=JSON.parse(editDraft);expiredDraft.savedAt=Date.now()-25*60*60*1000;
   const expired=harness({display,draft:JSON.stringify(expiredDraft)});await expired.controller.init();assert.equal(expired.controller.textAnswers.size,0,'expired temporary draft is not restored');
-  const stale=harness({display,status:409,postBody:{error:'definition_version_conflict'}});await stale.controller.init();stale.fill();await stale.controller.submit();
+  const stale=harness({display,status:409,postBody:{ok:false,code:'definition_version_conflict',message:'definition_version_conflict'}});await stale.controller.init();stale.fill();await stale.controller.submit();
   assert.equal(stale.controller.renderVals().canRetry,true,'version changes expose current retry instead of trapping stale submission');
   assert.equal(stale.controller.textAnswers.get(3),'\n保留文字答案\n','old answers stay visible until respondent elects to reload');
   stale.controller.setText(stale.controller.definition.questions[2],{target:{value:'修改文字也必须先重读新题'}});

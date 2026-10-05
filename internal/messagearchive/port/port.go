@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	ErrWorkBudgetExceeded = errors.New("message archive delivery work budget exceeded")
-	ErrNotReady           = errors.New("message archive not ready")
+	ErrWorkBudgetExceeded    = errors.New("message archive delivery work budget exceeded")
+	ErrNotReady              = errors.New("message archive not ready")
+	ErrRunFinalizationFailed = errors.New("message archive run finalization failed")
 	// ErrStaffNotFound is returned only by the archive-owned local staff
 	// selector. It never triggers a Provider directory request.
 	ErrStaffNotFound = errors.New("message archive staff not found")
@@ -27,6 +28,20 @@ type InboxDelivery struct {
 	MaxAttempts    int
 	ReceivedAt     time.Time
 	Payload        []byte
+	// CheckCurrentAttempt is supplied only by the trusted Inbox processor.
+	// It uses the caller's UoW to lock and validate the existing claim; it does
+	// not claim, renew, retry, or introduce an Archive lease.
+	CheckCurrentAttempt func(context.Context) error
+}
+
+func (delivery InboxDelivery) RequireCurrentAttempt(ctx context.Context) error {
+	if delivery.CheckCurrentAttempt == nil {
+		if delivery.Attempt > 0 {
+			return ErrNotReady
+		}
+		return nil // direct owner fixtures without an Inbox claim
+	}
+	return delivery.CheckCurrentAttempt(ctx)
 }
 
 type InboxDeliveryHandler interface {

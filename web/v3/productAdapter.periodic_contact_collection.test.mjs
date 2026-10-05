@@ -1,3 +1,4 @@
+import { productSourceTestPage } from '../scripts/product-source-test-page.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 import { buildTestBrowserBundle } from '../scripts/test-browser-bundle.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const page = fs.readFileSync(path.join(root, 'web/dist/admin/spProductForm.html'), 'utf8');
+const page = productSourceTestPage('spProductForm.html');
 const host = await buildTestBrowserBundle(path.join(root, 'web/v3/productAdapter.ts'));
 const wait = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check, message) { for (let i = 0; i < 100; i++) { if (check()) return; await wait(20); } throw new Error(message); }
@@ -53,7 +54,7 @@ for (const creating of [false, true]) {
   assert.deepEqual([...d.getElementById('spfContactCollectionLevel').options].map(option => option.value), ['none', 'mobile', 'shipping_address']);
   const save = () => [...d.querySelectorAll('#sp-sale button')].find(button => button.textContent.trim() === '保存当前维度');
   if (creating) {
-    for (const [id, value] of [['spfName','周期信息收集'],['spfCode','period-contact'],['spfPrice','9.90'],['spfStock','1'],['spfDurationDays','30']]) d.getElementById(id).value = value;
+    for (const [id, value] of [['spfName','周期信息收集'],['spfCode','period-contact'],['spfPrice','9.90'],['spfDurationDays','30']]) d.getElementById(id).value = value;
   }
   for (const level of creating ? ['shipping_address'] : ['none', 'mobile', 'shipping_address']) {
     const before = writes.length;

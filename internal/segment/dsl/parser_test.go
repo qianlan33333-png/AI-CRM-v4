@@ -2,6 +2,7 @@ package dsl
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -31,4 +32,18 @@ func FuzzParseNeverAcceptsArbitraryInput(f *testing.F) {
 			t.Fatalf("accepted invalid schema: %+v", ast)
 		}
 	})
+}
+
+func TestQuestionnaireCompilerRejectsRetiredEmployeeSelection(t *testing.T) {
+	base := `{"schema_version":1,"template_key":"questionnaire_choice_answers","parameters":{"questionnaire_id":"9","conditions":[{"question_id":"11","option_ids":["101"]}]%s}}`
+	for _, owners := range []string{"", `,"owner_scope":"all","owner_staff_ids":[]`} {
+		if _, err := Parse(json.RawMessage(fmt.Sprintf(base, owners))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, owners := range []string{`,"owner_scope":"specified","owner_staff_ids":["19"]`, `,"owner_scope":"all","owner_staff_ids":["19"]`, `,"owner_scope":"specified","owner_userids":["bob"]`} {
+		if _, err := Parse(json.RawMessage(fmt.Sprintf(base, owners))); err == nil {
+			t.Fatalf("retired employee filter still compiles: %s", owners)
+		}
+	}
 }
