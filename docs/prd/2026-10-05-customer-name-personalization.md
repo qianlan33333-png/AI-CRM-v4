@@ -63,3 +63,5 @@ UI：Product Design index/get-context/image-to-code 与前端一致性已读取�
 五项影响：对外合同=固定文本逐客户替换昵称；机制=原事务内读取/冻结且重放不改；模块=Automation 手动确认及自动 enrollment、Customer 只读 Port、Composition、既有审核和 Outbound；页面=固定话术共享编辑器变量入口；验证=多客户、空名、兼容变量、非递归、数据库失败拒绝/回滚、自动触发正文快照与digest、重放昵称变化不影响冻结结果、编辑器插入/保存/读回及当前安装包旅程。生产技术读回与真实 Provider/送达分开记录；不手动重发历史消息。
 
 固定话术本机验收：具名单元检查、真实 PostgreSQL + River + 合成 Outbound Provider 旅程、编辑器 JS 保存/同键重试/读回及 Chromium 真实输入和保存刷新均通过。截图检查了 1280px 编辑器和 360px 编辑器，用户名入口沿用现有变量栏，窄屏无横向溢出；420/1440px 保存展示旅程亦通过。未修改共享组件样式。最终安装构件仍需工作台独立验收与生产读回。
+
+Linux 首次浏览器门禁在无 web/dist 的干净执行目录中失败，功能断言未启动。相关修复只在已配置私有 AICRM_TEST_PREP_DIR 时复用已有 candidate-bound Artifact 准备/缓存 helper，随后仍验证全部 Host/素材资源与浏览器保存读回；不改发布控制器、不跳过用例。已通过输入不变的 backend/frontend 结果可复用，重跑失败 Chromium 旅程。

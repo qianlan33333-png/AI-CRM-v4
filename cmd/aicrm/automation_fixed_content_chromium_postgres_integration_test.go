@@ -166,6 +166,11 @@ func runAutomationContentJourney(t *testing.T, lifecycle bool) {
 
 func prepareAutomationFixedContentArtifacts(t *testing.T, repository string) {
 	t.Helper()
+	// Focused Linux checks start in a clean checkout. Reuse the existing
+	// candidate-bound artifact cache before composing the browser fixture.
+	if os.Getenv("AICRM_TEST_PREP_DIR") != "" {
+		prepareProductExternalPushChromiumArtifacts(t, repository)
+	}
 	manifest, err := os.ReadFile(filepath.Join(repository, "web", "dist", "asset-manifest.json"))
 	if err != nil {
 		t.Fatalf("automation fixed-content Chromium requires built assets: %v", err)
