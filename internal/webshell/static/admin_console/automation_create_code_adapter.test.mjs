@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildTestBrowserBundle } from "../../../../web/scripts/test-browser-bundle.mjs";
+import { productSourceTestPage } from "../../../../web/scripts/product-source-test-page.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../../../..");
@@ -23,7 +24,7 @@ const agent = (patch = {}) => ({
 const json = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, headers: new Headers({ "Content-Type": "application/json" }), text: async () => JSON.stringify(body) });
 
 function page(query, createCode = "") {
-  let html = fs.readFileSync(path.join(root, "web", "dist", "admin", "agentEdit.html"), "utf8");
+  let html = productSourceTestPage("agentEdit.html");
   // Model a real parser: the v3 host script is deferred, so it runs only
   // after body parsing, then the unchanged donor module mounts its controller.
   html = html.replace("<head>", `<head><script defer data-v3-host-adapter></script>`);

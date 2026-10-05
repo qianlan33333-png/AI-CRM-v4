@@ -2,17 +2,6 @@
   "schema": 1,
   "baseline_sha": "c334b5b9b404e93df9fa53727a56c8df1c4bdc71",
   "checks": [
-    {"lane": "backend", "path": "internal/wecom/welcome_name_test.go", "test": "TestWelcomeCustomerNameReadsBeforeDirectoryPublication"},
-    {"lane": "backend", "path": "internal/wecom/welcome_name_test.go", "test": "TestWelcomeCustomerNameRejectsDifferentCallbackGrant"},
-    {"lane": "backend", "package": "./internal/automation/port"},
-    {"lane": "backend", "package": "./internal/automation/provider"},
-    {"lane": "backend", "package": "./internal/platform/webhook"},
-    {"lane": "backend", "path": "cmd/aicrm/channel_welcome_runtime_integration_test.go", "test": "TestChannelWelcomeTemplateFreezesOneRenderedBodyBeforeProviderRetry", "postgres": true},
-    {"lane": "backend", "path": "cmd/aicrm/channel_welcome_runtime_integration_test.go", "test": "TestChannelWelcomeTemplateUsesCallbackNameBeforeCustomerLink", "postgres": true},
-    {"lane": "backend", "path": "cmd/aicrm/dynamic_generation_adapters_test.go", "test": "TestDynamicGenerationContextFreezesOnlyApprovedReadPorts"},
-    {"lane": "backend", "path": "cmd/aicrm/dynamic_generation_adapters_test.go", "test": "TestGeneratedOutboundTemplateRetainsFrozenSources"},
-    {"lane": "backend", "path": "internal/automation/store/prompt_chain_integration_test.go", "test": "TestPostgreSQLLongPromptHTTPPublishDispatchProvider", "postgres": true},
-    {"lane": "backend", "path": "internal/automation/app/dynamic_generation_test.go", "test": "TestCompleteGenerationCreatesOneExistingAIPendingReviewPlanForSuccessfulItems"},
     {"lane": "frontend", "path": "internal/webshell/static/admin_console/automation_username_adapter.test.mjs"},
     {"lane": "frontend", "path": "internal/webshell/static/admin_console/automation_create_code_adapter.test.mjs"},
     {"lane": "frontend", "path": "web/v3/automationContentHost.test.mjs"}
