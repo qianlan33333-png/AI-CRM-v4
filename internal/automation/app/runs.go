@@ -157,17 +157,25 @@ func (s *RuntimeService) ConfirmRun(ctx context.Context, c RunConfirmCommand) (a
 	if published.ContentDigest != configuration.ContentDigest {
 		return automationdomain.RuntimeRun{}, ErrRuntimeConflict
 	}
-	blocks, err := reviewContentBlocks(published.Content)
-	if err != nil {
-		return automationdomain.RuntimeRun{}, err
-	}
-	for i := range recipients {
-		recipients[i].Content = append([]aiassistantport.ContentBlock(nil), blocks...)
-	}
 	var run automationdomain.RuntimeRun
 	err = s.runtimeMutation(ctx, "confirm_run", c.Actor, c.IdempotencyKey, payload, func(tx context.Context) (any, RuntimeFact, error) {
 		if e := s.validatePreviewRuntimeConfigWithin(tx, preview); e != nil {
 			return run, RuntimeFact{}, e
+		}
+		ids := make([]customerdomain.CustomerID, len(recipients))
+		for i := range recipients {
+			ids[i] = recipients[i].CustomerID
+		}
+		contents, e := s.fixedContentWithin(tx, published.Content, ids)
+		if e != nil {
+			return run, RuntimeFact{}, e
+		}
+		for i := range recipients {
+			blocks, blockErr := reviewContentBlocks(contents[i])
+			if blockErr != nil {
+				return run, RuntimeFact{}, blockErr
+			}
+			recipients[i].Content = blocks
 		}
 		plan, e := s.reviewPlans.CreatePlanWithin(tx, aiassistantport.CreatePlanCommand{Actor: aiassistantport.Actor{Kind: aiassistantport.ActorAdmin, ID: c.Actor}, IdempotencyKey: "automation-manual-review-" + c.IdempotencyKey, Name: "Audience broadcast " + strconv.FormatInt(c.PackageID, 10), SourceKind: "automation.manual_audience_run.v1", SourceDigest: effectport.Hash("automation.manual-audience-run", hex.EncodeToString(digest[:])), Recipients: recipients, OccurredAt: now})
 		if e != nil {

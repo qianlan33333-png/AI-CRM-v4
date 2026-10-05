@@ -816,6 +816,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = automationRuntime.SetReviewPlanIntake(aiService, automationService); err != nil {
 		return fail(err)
 	}
+	if err = automationRuntime.SetCustomerNames(customerStore); err != nil {
+		return fail(err)
+	}
 	if err = aiService.BindManualAudienceRunApprovalValidator(automationRuntime.ValidateManualAudienceRunApproval); err != nil {
 		return fail(err)
 	}

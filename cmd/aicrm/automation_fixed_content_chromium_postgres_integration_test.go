@@ -158,7 +158,7 @@ func runAutomationContentJourney(t *testing.T, lifecycle bool) {
 	if lifecycle {
 		expectedPublished = 2
 	}
-	if payload.Agent.DraftVersion != 2 || payload.Agent.PublishedVersion != expectedPublished || payload.Agent.DraftRolePrompt != "保留角色 Prompt" || payload.Agent.DraftTaskPrompt != "保留任务 Prompt" || payload.Agent.LegacyConfiguration["keep"] != "legacy" || payload.Agent.FixedContentPackage.ContentText != "浏览器确认的中文固定话术" || len(payload.Agent.FixedContentPackage.ImageIDs) != 1 || payload.Agent.FixedContentPackage.ImageIDs[0] != imageID {
+	if payload.Agent.DraftVersion != 2 || payload.Agent.PublishedVersion != expectedPublished || payload.Agent.DraftRolePrompt != "保留角色 Prompt" || payload.Agent.DraftTaskPrompt != "保留任务 Prompt" || payload.Agent.LegacyConfiguration["keep"] != "legacy" || payload.Agent.FixedContentPackage.ContentText != "浏览器确认的中文固定话术{{用户名}}" || len(payload.Agent.FixedContentPackage.ImageIDs) != 1 || payload.Agent.FixedContentPackage.ImageIDs[0] != imageID {
 		t.Fatalf("fixed-content persisted/readback boundary is wrong: %+v", payload.Agent)
 	}
 	t.Logf("automation fixed-content Chromium screenshots: %s", screenshots)

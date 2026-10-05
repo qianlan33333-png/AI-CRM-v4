@@ -230,7 +230,9 @@ try {
   await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
   await cdp.call("Input.insertText", { text: "浏览器确认的中文固定话术" });
   await waitFor(cdp, `document.querySelector(${JSON.stringify(textareaSelector)})?.value==='浏览器确认的中文固定话术'`, "real Chinese text input");
-  await waitFor(cdp, "document.querySelector('[data-v3-composer-status]')?.textContent==='确认后将保存固定话术草稿。'", "fixed-content ready-to-save wording");
+  await pointerClick(cdp, '[data-v3-composer-variable="{{用户名}}"]', 'insert database nickname into fixed script');
+  await waitFor(cdp, `document.querySelector(${JSON.stringify(textareaSelector)})?.value==='浏览器确认的中文固定话术{{用户名}}'`, 'literal nickname token insertion');
+  await waitFor(cdp, "document.querySelector('[data-v3-composer-status]')?.textContent.includes('确认后将保存固定话术草稿。')", "fixed-content ready-to-save wording");
 
   await pointerClick(cdp, '[data-v3-composer-add="image"]', "open real Media picker");
   await waitFor(cdp, "Boolean(document.querySelector('[data-v3-selection-session=material] [data-v3-material-key]'))", "scoped V3 Media picker directory");
@@ -249,7 +251,7 @@ try {
   if (!Array.isArray(writes) || writes.length !== 1) throw new Error(`fixed-content confirmation did not issue exactly one accepted PUT: ${JSON.stringify(writes)}`);
   const display = await evaluate(cdp, "document.querySelector('[data-v3-automation-fixed-content]')?.textContent || ''");
   const pageText = await evaluate(cdp, "document.body.textContent || ''");
-  if (!display.includes('浏览器确认的中文固定话术') || !display.includes('自动化浏览器封面') || pageText.includes('后端能力未就绪')) throw new Error(`saved fixed-content presentation is incomplete or exposed engineering copy: ${display}`);
+  if (!display.includes('浏览器确认的中文固定话术{{用户名}}') || !display.includes('自动化浏览器封面') || pageText.includes('后端能力未就绪')) throw new Error(`saved fixed-content presentation is incomplete or exposed engineering copy: ${display}`);
   await resize(cdp, 420, 860);
   await evaluate(cdp, "document.querySelector('[data-v3-automation-fixed-content]')?.scrollIntoView({ block: 'start', inline: 'nearest' }); Promise.race([new Promise((resolve) => requestAnimationFrame(resolve)), new Promise((resolve) => setTimeout(resolve, 250))])");
   await assertLayout(cdp, 420, "readonly");

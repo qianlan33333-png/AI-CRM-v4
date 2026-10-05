@@ -338,7 +338,8 @@ function trimText(value: string): string { return value.trim(); }
 function textIssue(value: string): string | undefined {
   if (value.trim() !== value) return '话术首尾不能包含空白字符，请调整后确认。';
   if (Array.from(value).length > 4000) return '话术不能超过 4000 个字符，请删减后确认。';
-  if (value.includes('{{') || value.includes('}}')) return '固定话术不支持变量占位符，请改为明确文本后确认。';
+  const remaining = value.replaceAll('{{用户名}}', '').replaceAll('{{客户名}}', '');
+  if (remaining.includes('{{') || remaining.includes('}}')) return '固定话术目前仅支持 {{用户名}} 和 {{客户名}} 变量，请调整后确认。';
   return undefined;
 }
 function packageHasContent(value: ContentPackage): boolean {
@@ -496,6 +497,11 @@ function mountContent(content: HTMLElement, agentID: number): MountedHost {
       value: detail.content, selectedRecords: records, materialOrder: 'canonical_by_kind', ordering: 'none',
       materialKinds, limits: materialLimits, totalLimit: 9,
       textRule: { count: (value) => Array.from(value).length, maximum: 4000, normalize: trimText, validate: textIssue },
+      variablePolicy: {
+        scan: (text) => text.includes('{{用户名}}') ? ['{{用户名}}'] : [],
+        variables: [{ token: '{{用户名}}', label: '用户名' }],
+      },
+      variableNotice: '确认后将保存固定话术草稿。用户名按每位接收用户的数据库昵称替换；暂无昵称时使用“朋友”。兼容 {{客户名}}。',
       validateContent: contentIssue, selectMaterials: chooseMaterials,
       onConfirm: save,
     });

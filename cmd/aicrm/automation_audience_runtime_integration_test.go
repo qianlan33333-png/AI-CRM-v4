@@ -41,6 +41,7 @@ import (
 	configport "github.com/qianlan33333-png/AI-CRM-v3/internal/config/port"
 	configstore "github.com/qianlan33333-png/AI-CRM-v3/internal/config/store"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
+	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
 	externaleffects "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
@@ -75,6 +76,16 @@ import (
 // projected history without a write. The adapter is deliberately local and
 // deterministic; no Provider credential or customer identity is fabricated.
 func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *testing.T) {
+	automationAudienceProviderJourney(t, false)
+}
+
+// Uses real Customer, Automation, Config and Outbound PostgreSQL stores in
+// the same UoW; the Provider is an isolated loopback recipient simulator.
+func TestFixedScriptCustomerNamePostgreSQL(t *testing.T) {
+	automationAudienceProviderJourney(t, true)
+}
+
+func automationAudienceProviderJourney(t *testing.T, personalize bool) {
 	ctx := context.Background()
 	native, cleanup := automationAudienceRuntimePool(t)
 	defer cleanup()
@@ -211,6 +222,13 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	}
 	assertFrozenUnavailable("changed mini-program title")
 	customerIDs := automationAudienceInsertProviderCustomers(t, ctx, native)
+	templateText := "runtime hello"
+	if personalize {
+		templateText = "{{用户名}} / {{客户名}} runtime hello"
+		if _, err = native.Exec(ctx, `INSERT INTO customer_directory_projection(customer_id,customer_status,display_name,oneid_label) VALUES($1,'active',$2,$3)`, customerIDs[0], " 昵称{{客户名}}甲 ", fmt.Sprint(customerIDs[0])); err != nil {
+			t.Fatal(err)
+		}
+	}
 	source := &automationAudienceSource{}
 	source.Set(customerIDs[:1])
 	evaluator, err := segmentapp.NewEvaluator(segmentcompiler.Compiler{}, source, segmentadapter.CanonicalCustomers{
@@ -230,7 +248,7 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	now := time.Date(2026, 9, 5, 20, 0, 0, 0, time.UTC)
 	packageID := automationAudiencePackage(t, ctx, uow, segmentRepo, now)
 	automationService := automationapp.NewAgentServiceWithMediaReferences(uow, automationRepo, mediaRepo, mediaRepo, mediaRepo, mediaRepo, automationRepo)
-	agent := automationAudiencePublishedAgent(t, ctx, automationService, staffID, materials)
+	agent := automationAudiencePublishedAgent(t, ctx, automationService, staffID, materials, templateText)
 	publishedAgent, found, err := automationService.PublishedAgent(ctx, agent.ID)
 	if err != nil || !found {
 		t.Fatalf("published agent=%+v found=%v err=%v", agent, found, err)
@@ -261,6 +279,10 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 		t.Fatal(err)
 	}
 	wecomServer := newAutomationAudienceWeComServer(t)
+	if personalize {
+		wecomServer.defaultText = "朋友 / 朋友 runtime hello"
+		wecomServer.expectedText = map[string]string{"runtime-external-1": "昵称{{客户名}}甲 / 昵称{{客户名}}甲 runtime hello"}
+	}
 	defer wecomServer.Close()
 	writer, err := wecomadapter.NewDirectory(wecomadapter.Config{
 		Enabled: true, CorpID: "runtime-corp", ContactSecret: "runtime-contact-secret",
@@ -331,6 +353,9 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 		t.Fatal(err)
 	}
 	if err = runtimeService.SetRuntimeConfig(runtimeConfig, runtimeConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err = runtimeService.SetCustomerNames(customerstore.NewPostgreSQL()); err != nil {
 		t.Fatal(err)
 	}
 	if err = runtimeService.SetMessageAccepter(messages); err != nil {
@@ -444,6 +469,15 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	if originalEnrollment != 1 || originalRun != 1 || originalIntents != 1 || originalV1Uses != 1 {
 		t.Fatalf("initial automatic facts enrollment/run/intents/v1uses=%d/%d/%d/%d", originalEnrollment, originalRun, originalIntents, originalV1Uses)
 	}
+	var originalNameSnapshot string
+	if personalize {
+		if err = native.QueryRow(ctx, `SELECT content_snapshot::text FROM outbound_message_intents WHERE customer_id=$1`, customerIDs[0]).Scan(&originalNameSnapshot); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = native.Exec(ctx, `UPDATE customer_directory_projection SET display_name='改名后甲' WHERE customer_id=$1`, customerIDs[0]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	v2Limit, marshalErr := json.Marshal(3)
 	if marshalErr != nil {
 		t.Fatal(marshalErr)
@@ -482,6 +516,15 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	}
 	if afterEnrollment != originalEnrollment || afterRun != originalRun || afterIntents != originalIntents || afterV1Uses != originalV1Uses || v2ReplayUses != 0 {
 		t.Fatalf("replay changed automatic facts enrollment/run/intents/v1uses/v2uses=%d/%d/%d/%d/%d", afterEnrollment, afterRun, afterIntents, afterV1Uses, v2ReplayUses)
+	}
+	if personalize {
+		var replayedSnapshot string
+		if err = native.QueryRow(ctx, `SELECT content_snapshot::text FROM outbound_message_intents WHERE customer_id=$1`, customerIDs[0]).Scan(&replayedSnapshot); err != nil {
+			t.Fatal(err)
+		}
+		if replayedSnapshot != originalNameSnapshot {
+			t.Fatal("renaming a customer rewrote an already accepted automatic message")
+		}
 	}
 	// The Config release may advance, but the same event ID cannot be reused
 	// with a different Segment snapshot. It is a source-fact conflict, not a
@@ -640,6 +683,30 @@ func TestAudienceRefreshToAutomationProviderAndReadOnlyHistoryPostgreSQL(t *test
 	plan, err := aiService.GetPlan(ctx, aiassistantport.PlanID(manual.AIPlanID))
 	if err != nil || plan.State != aiassistantport.PlanPendingReview || plan.TargetCount != 2 {
 		t.Fatalf("manual plan=%+v err=%v", plan, err)
+	}
+	if personalize {
+		recipients, readErr := aiService.ListRecipients(ctx, aiassistantport.RecipientPageQuery{PlanID: plan.ID, Limit: 0})
+		if readErr != nil || len(recipients.Items) != 2 {
+			t.Fatalf("personalized review recipients count=%d err=%v", len(recipients.Items), readErr)
+		}
+		for _, item := range recipients.Items {
+			recipient, content, readErr := aiService.GetRecipient(ctx, plan.ID, item.ID)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			want := "朋友 / 朋友 runtime hello"
+			if recipient.CustomerID == customerIDs[0] {
+				want = "改名后甲 / 改名后甲 runtime hello"
+			}
+			if len(content.Blocks) < 1 || content.Blocks[0].Text != want {
+				t.Fatal("manual review did not freeze each recipient's current database name")
+			}
+		}
+		// The later Provider read must consume the manual plan's frozen content.
+		wecomServer.expectedText["runtime-external-1"] = "改名后甲 / 改名后甲 runtime hello"
+		if _, err = native.Exec(ctx, `UPDATE customer_directory_projection SET display_name='再次改名' WHERE customer_id=$1`, customerIDs[0]); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// Keep a genuine legacy specified-owner definition in the database and
 	// link pending AI plans to it as if they had been frozen before retirement.
@@ -1296,16 +1363,18 @@ func (p *automationAudienceRecordingProvider) Error() string {
 
 type automationAudienceWeComServer struct {
 	*httptest.Server
-	t       *testing.T
-	mu      sync.Mutex
-	calls   int
-	uploads int
-	errs    []string
+	t            *testing.T
+	mu           sync.Mutex
+	calls        int
+	uploads      int
+	errs         []string
+	defaultText  string
+	expectedText map[string]string
 }
 
 func newAutomationAudienceWeComServer(t *testing.T) *automationAudienceWeComServer {
 	t.Helper()
-	s := &automationAudienceWeComServer{t: t}
+	s := &automationAudienceWeComServer{t: t, defaultText: "runtime hello"}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
 }
@@ -1356,7 +1425,11 @@ func (s *automationAudienceWeComServer) handle(w http.ResponseWriter, r *http.Re
 		}
 		validAttachments := len(body.Attachments) == 4 && body.Attachments[0].MessageType == "image" && body.Attachments[0].Image.MediaID != "" && body.Attachments[1].MessageType == "miniprogram" && body.Attachments[1].MiniProgram.Title == "Runtime card revised" && body.Attachments[1].MiniProgram.PicMediaID != "" && body.Attachments[1].MiniProgram.AppID == "wx-runtime" && body.Attachments[1].MiniProgram.Page == "pages/runtime" && body.Attachments[2].MessageType == "file" && body.Attachments[2].File.MediaID != "" && body.Attachments[3].MessageType == "link" && body.Attachments[3].Link.Title == "Join runtime group" && body.Attachments[3].Link.Desc == "Runtime group" && body.Attachments[3].Link.URL == "https://work.weixin.qq.com/gm/runtime"
 		validRecipient := len(body.External) == 1 && (body.External[0] == "runtime-external-1" || body.External[0] == "runtime-external-2" || body.External[0] == "runtime-paid-friend-1" || body.External[0] == "runtime-paid-friend-2")
-		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || body.ChatType != "single" || !validRecipient || body.Sender != "sender-a" || body.Text.Content != "runtime hello" || !validAttachments {
+		expectedText := s.defaultText
+		if len(body.External) == 1 && s.expectedText[body.External[0]] != "" {
+			expectedText = s.expectedText[body.External[0]]
+		}
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || body.ChatType != "single" || !validRecipient || body.Sender != "sender-a" || body.Text.Content != expectedText || !validAttachments {
 			s.record("invalid signed message body")
 			http.Error(w, "bad message body", http.StatusBadRequest)
 			return
@@ -1519,9 +1592,13 @@ func automationAudiencePNG(t *testing.T) []byte {
 	return out.Bytes()
 }
 
-func automationAudiencePublishedAgent(t *testing.T, ctx context.Context, service *automationapp.Service, actor int64, materials automationAudienceMaterials) automationport.Agent {
+func automationAudiencePublishedAgent(t *testing.T, ctx context.Context, service *automationapp.Service, actor int64, materials automationAudienceMaterials, texts ...string) automationport.Agent {
 	t.Helper()
-	agent, err := service.Create(ctx, automationport.CreateCommand{Agent: automationport.Agent{AgentName: "Runtime fixed script", AgentCode: "runtime-fixed-script", AutomationType: automationport.AutomationTypeFixedScript, Status: automationport.AgentStatusPaused, DraftRolePrompt: "runtime role", DraftTaskPrompt: "runtime task", FixedContentPackage: automationport.FixedContentPackage{ContentText: "runtime hello", ImageLibraryIDs: []int64{materials.imageID}, MiniprogramLibraryIDs: []int64{materials.miniID}, AttachmentLibraryIDs: []int64{materials.attachmentID}, GroupInviteLibraryIDs: []int64{materials.inviteID}}}, Actor: actor, IdempotencyKey: "audience-runtime-agent-create-0001"})
+	contentText := "runtime hello"
+	if len(texts) > 0 {
+		contentText = texts[0]
+	}
+	agent, err := service.Create(ctx, automationport.CreateCommand{Agent: automationport.Agent{AgentName: "Runtime fixed script", AgentCode: "runtime-fixed-script", AutomationType: automationport.AutomationTypeFixedScript, Status: automationport.AgentStatusPaused, DraftRolePrompt: "runtime role", DraftTaskPrompt: "runtime task", FixedContentPackage: automationport.FixedContentPackage{ContentText: contentText, ImageLibraryIDs: []int64{materials.imageID}, MiniprogramLibraryIDs: []int64{materials.miniID}, AttachmentLibraryIDs: []int64{materials.attachmentID}, GroupInviteLibraryIDs: []int64{materials.inviteID}}}, Actor: actor, IdempotencyKey: "audience-runtime-agent-create-0001"})
 	if err != nil {
 		t.Fatal(err)
 	}

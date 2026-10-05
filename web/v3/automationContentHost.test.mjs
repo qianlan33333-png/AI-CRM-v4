@@ -63,7 +63,7 @@ globalThis.fetch = async (input, init = {}) => {
     const payload = JSON.parse(String(init.body));
     const idempotencyKey = init.headers.get ? init.headers.get('Idempotency-Key') : (init.headers['Idempotency-Key'] || init.headers['idempotency-key']);
     assert.match(String(idempotencyKey), /^automation-fixed-content-/, 'fixed-content save uses one explicit existing-command idempotency key');
-    assert.equal(payload.content_package.content_text, '更新后的固定话术');
+    assert.equal(payload.content_package.content_text, '{{用户名}}更新后的固定话术');
     saveKeys.push(String(idempotencyKey));
     if (!acceptedSaveKeys.has(String(idempotencyKey))) {
       acceptedSaveKeys.add(String(idempotencyKey));
@@ -116,9 +116,17 @@ textarea.dispatchEvent(new dom.window.CompositionEvent('compositionend', { bubbl
 textarea.value = '{{customer_name}}';
 textarea.dispatchEvent(new Event('input', { bubbles: true }));
 assert.equal(composer.querySelector('[data-v3-composer-confirm]').disabled, true, 'fixed_script blocks unsupported variable delimiters before its command boundary');
-assert.match(composer.textContent, /不支持变量占位符/);
+assert.match(composer.textContent, /仅支持.*用户名.*客户名/);
+textarea.value = '{{客户名}}，更新后的固定话术';
+textarea.dispatchEvent(new Event('input', { bubbles: true }));
+assert.equal(composer.querySelector('[data-v3-composer-confirm]').disabled, false, 'the customer-name alias is accepted');
 textarea.value = '更新后的固定话术';
 textarea.dispatchEvent(new Event('input', { bubbles: true }));
+textarea.setSelectionRange(0, 0);
+composer.querySelector('[data-v3-composer-variable="{{用户名}}"]').click();
+assert.equal(textarea.value, '{{用户名}}更新后的固定话术', 'insert username uses the existing caret and retains the fixed script');
+assert.equal(composer.querySelector('[data-v3-composer-confirm]').disabled, false, 'the supported username field can be saved');
+assert.match(composer.textContent, /数据库昵称.*朋友/);
 composer.querySelector('[data-v3-composer-confirm]').click();
 await waitFor(() => putCount === 1, 'fixed-content PUT completes');
 assert.equal(putCount, 1, 'one confirmation issues one fixed-content PUT');
@@ -136,7 +144,7 @@ content.querySelector('[data-v3-automation-retry-read]').click();
 await flush();
 assert.equal(putCount, 1, 'retrying a failed GET never submits a second PUT');
 assert.match(content.textContent, /草稿版本 2 \/ 已发布版本 1/);
-assert.match(content.textContent, /更新后的固定话术/);
+assert.match(content.textContent, /\{\{用户名\}\}更新后的固定话术/, 'the accepted server readback retains the literal template');
 
 readbackHang = true;
 retryRead = false;

@@ -1,9 +1,44 @@
 {
   "schema": 1,
-  "baseline_sha": "d193cdf4895501e8159d0d435f7172b11afb50aa",
+  "baseline_sha": "bbb18675bce1c2935433bde0ea9a73f843ea24eb",
   "checks": [
-    {"lane": "backend", "path": "internal/webshell/handler_test.go", "test": "TestRenderAutomationUsesOnlyV3CreateCodeHostBinding"},
-    {"lane": "backend", "path": "internal/automation/store/prompt_chain_integration_test.go", "test": "TestPostgreSQLLongPromptHTTPPublishDispatchProvider"}
+    {
+      "lane": "backend",
+      "path": "internal/automation/app/fixed_personalization_test.go",
+      "test": "TestFixedScriptCustomerNamesBatchFallbackAndLiteralData"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/automation/app/fixed_personalization_test.go",
+      "test": "TestFixedScriptCustomerNamesFailClosedAndPreserveLegacy"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/automation/app/fixed_personalization_test.go",
+      "test": "TestFixedScriptCustomerNamesConfirmReplayUsesFrozenRun"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/automation/app/runs_config_drift_test.go",
+      "test": "TestConfirmRunRejectsRuntimeConfigDriftForFixedAndDynamicContent"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/automation_audience_runtime_integration_test.go",
+      "test": "TestFixedScriptCustomerNamePostgreSQL",
+      "postgres": true
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/automationContentHost.test.mjs"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/automation_fixed_content_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLAutomationFixedContentChromiumJourney"
+    }
   ],
-  "installed_checks": ["welcome", "automation-generation"]
+  "installed_checks": [
+    "automation-fixed-content"
+  ]
 }

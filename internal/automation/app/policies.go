@@ -17,6 +17,7 @@ import (
 	automationport "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/port"
 	configport "github.com/qianlan33333-png/AI-CRM-v3/internal/config/port"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
+	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	outboundport "github.com/qianlan33333-png/AI-CRM-v3/internal/outbound/port"
@@ -90,6 +91,7 @@ type RuntimeService struct {
 	reviewPlans       reviewPlanGateway
 	content           automationport.OutboundPublishedContentReader
 	contentFreezer    automationport.OutboundContentFreezer
+	customerNames     customerport.DirectoryDisplayNameReader
 	generationEffects effectport.TransactionalAccepter
 	generationContext automationport.GenerationContextReader
 	generationAgents  automationport.PublishedGenerationReader
@@ -1643,7 +1645,13 @@ func (s *RuntimeService) acceptEnrollmentMessage(ctx context.Context, event segm
 	if s.messages == nil || len(configuration.SenderStaffIDs) == 0 {
 		return ErrRuntimeNotReady
 	}
-	contentSnapshot, contentSnapshotDigest, err := s.contentFreezer.FreezeOutboundContent(ctx, published)
+	personalized, err := s.fixedContentWithin(ctx, published.Content, []customerdomain.CustomerID{event.CustomerID})
+	if err != nil {
+		return err
+	}
+	frozenContent := published
+	frozenContent.Content = personalized[0]
+	contentSnapshot, contentSnapshotDigest, err := s.contentFreezer.FreezeOutboundContent(ctx, frozenContent)
 	if err != nil || len(contentSnapshot) == 0 || contentSnapshotDigest == ([32]byte{}) {
 		return ErrRuntimeNotReady
 	}
@@ -1664,7 +1672,11 @@ func (s *RuntimeService) acceptEnrollmentMessage(ctx context.Context, event segm
 	recipient := createdRecipients[0]
 	sourceDigest := sha256.Sum256([]byte(fmt.Sprintf("automation-enrollment:%d:recipient:%d", enrollment.ID, recipient.ID)))
 	targetDigest := sha256.Sum256([]byte(fmt.Sprintf("customer:%d", recipient.CustomerID)))
-	acceptance, err := s.messages.AcceptMessageWithin(ctx, outboundport.MessageIntent{SourceKind: "automation_enrollment", SourceID: enrollment.ID, RunRecipientID: recipient.ID, CustomerID: customerdomain.CustomerID(recipient.CustomerID), SenderStaffID: recipient.SenderStaffID, AgentID: created.AgentID, AgentPublishedVersion: created.AgentPublishedVersion, ContentReference: fmt.Sprintf("automation-agent:%d:published:%d:enrollment:%d:recipient:%d", created.AgentID, created.AgentPublishedVersion, enrollment.ID, recipient.ID), SourceDigest: sourceDigest, TargetDigest: targetDigest, PayloadDigest: configuration.ContentDigest, ContentSnapshot: contentSnapshot, ContentSnapshotDigest: contentSnapshotDigest, PolicyDigest: version.Digest, ReceiptKey: fmt.Sprintf("automation-enrollment-%d-recipient-%d", enrollment.ID, recipient.ID), ScheduledAt: nextAllowedExecution(now, version.QuietHours)})
+	payloadDigest := configuration.ContentDigest
+	if hasCustomerNameVariable(published.Content.ContentText) {
+		payloadDigest = contentSnapshotDigest
+	}
+	acceptance, err := s.messages.AcceptMessageWithin(ctx, outboundport.MessageIntent{SourceKind: "automation_enrollment", SourceID: enrollment.ID, RunRecipientID: recipient.ID, CustomerID: customerdomain.CustomerID(recipient.CustomerID), SenderStaffID: recipient.SenderStaffID, AgentID: created.AgentID, AgentPublishedVersion: created.AgentPublishedVersion, ContentReference: fmt.Sprintf("automation-agent:%d:published:%d:enrollment:%d:recipient:%d", created.AgentID, created.AgentPublishedVersion, enrollment.ID, recipient.ID), SourceDigest: sourceDigest, TargetDigest: targetDigest, PayloadDigest: payloadDigest, ContentSnapshot: contentSnapshot, ContentSnapshotDigest: contentSnapshotDigest, PolicyDigest: version.Digest, ReceiptKey: fmt.Sprintf("automation-enrollment-%d-recipient-%d", enrollment.ID, recipient.ID), ScheduledAt: nextAllowedExecution(now, version.QuietHours)})
 	if err != nil {
 		return err
 	}
