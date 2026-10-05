@@ -375,7 +375,7 @@ grep -qx 'test -f "$release_dir/web/dist/sidebar/index.html"' "$installer" || { 
 grep -qx '  test -f "$release_dir/web/dist/admin/${new_shell_page}.html"' "$installer" || { echo "release must verify each new shell admin document" >&2; exit 1; }
 for new_shell_page in \
   agentEdit agents ai aiDetail apidocs attach audienceEdit automation campaigns \
-  channelForm channels config configDetail couponData couponForm coupons customerDetail \
+  channelForm channels config configDetail couponData couponForm coupons \
   customers cycles cyclesDetail funnel groupops groupopsDetail images index mpLib \
   orderDetail orders ownerMig productForm products questionnaireDetail questionnaireOps \
   questionnaires radar radarDetail radarForm spProductData spProductForm spProducts tags \

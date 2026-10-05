@@ -762,7 +762,7 @@
       const item = object(order) || {};
       const productNames = (Array.isArray(item.items) ? item.items : []).map(function (line) { return object(line) && displayValue(line.product_name, ""); }).filter(Boolean).join("、");
       let action = "—";
-      if (typeof item.merchant_order_no === "string" && item.merchant_order_no && ["wechat_pay", "wechat_shop"].includes(item.provider)) {
+      if (typeof item.merchant_order_no === "string" && item.merchant_order_no && ["wechat_pay", "wechat_shop", "alipay", "external_history"].includes(item.provider)) {
         action = document.createElement("a");
         action.className = "admin-button admin-button--ghost";
         action.textContent = "查看详情";

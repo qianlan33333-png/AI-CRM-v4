@@ -15,6 +15,34 @@ import (
 	"testing"
 )
 
+func TestRetiredCustomerDetailDoesNotServeOrRedirect(t *testing.T) {
+	for _, distRoot := range []string{"", newDistFixture(t)} {
+		if distRoot != "" {
+			if err := os.WriteFile(filepath.Join(distRoot, "admin", "customerDetail.html"), []byte("stale customer profile"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		handler, err := NewHandler(HandlerOptions{DistDir: distRoot})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
+			for _, url := range []string{"/admin/customerDetail.html", "/admin/customerDetail.html?id=13697", "/admin/customerDetail.html?id=invalid"} {
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, httptest.NewRequest(method, url, nil))
+				if response.Code != http.StatusGone || response.Header().Get("Location") != "" || strings.Contains(response.Body.String(), "stale customer profile") {
+					t.Fatalf("retired page %s %s: status=%d location=%q body=%q", method, url, response.Code, response.Header().Get("Location"), response.Body.String())
+				}
+			}
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/admin/customers/13697", nil))
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "data-customer-profile-root") {
+			t.Fatalf("canonical profile unavailable: status=%d", response.Code)
+		}
+	}
+}
+
 func TestAdminNavGroupsMirrorSourceMenu(t *testing.T) {
 	if len(ADMIN_NAV_GROUPS) != 7 {
 		t.Fatalf("group count=%d, want 7", len(ADMIN_NAV_GROUPS))
@@ -59,7 +87,7 @@ func TestAdminNavGroupsMirrorSourceMenu(t *testing.T) {
 	}
 	for key, aliases := range map[string][]string{
 		"overview":                {"/admin", "/admin/index.html"},
-		"customers":               {"/admin/customers", "/admin/customerDetail.html"},
+		"customers":               {"/admin/customers", "/admin/customers.html"},
 		"wechat_pay_products":     {"/admin/wechat-pay/products", "/admin/wechat-pay/productForm.html", "/admin/productForm.html"},
 		"group_ops":               {"/admin/automation-conversion/group-ops", "/admin/groupops.html", "/admin/groupopsDetail.html"},
 		"service_period_products": {"/admin/service-period-products", "/admin/spProductForm.html"},

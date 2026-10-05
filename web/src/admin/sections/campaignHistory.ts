@@ -19,7 +19,7 @@ const pageSize = 20;
 const button = 'padding:7px 12px;border:1px solid #D0D5DD;border-radius:6px;background:#fff;color:#344054;font-size:13px;cursor:pointer';
 const cell = 'padding:9px 11px;border-bottom:1px solid #EEF0F3;text-align:left;vertical-align:top;white-space:pre-wrap';
 const text = (value: string | number | null): string => value === null ? '未关联' : value === '' ? '（空）' : esc(value);
-const customer = (id: number | null): string => id === null ? '未关联客户（不猜测）' : `<a href="customerDetail.html?id=${id}" style="color:#245BDB">Customer360 #${id}</a>`;
+const customer = (id: number | null): string => id === null ? '未关联客户（不猜测）' : `<a href="/admin/customers/${id}" style="color:#245BDB">Customer360 #${id}</a>`;
 const row = (...cells: string[]): string => `<tr>${cells.map((value) => `<td style="${cell}">${value}</td>`).join('')}</tr>`;
 
 type HistoryParams = { segment?: number; plan?: number; recipient?: number };

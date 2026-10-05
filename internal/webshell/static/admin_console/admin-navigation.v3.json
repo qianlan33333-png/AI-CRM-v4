@@ -29,8 +29,7 @@
           "href": "/admin/customers",
           "active_prefixes": [
             "/admin/customers",
-            "/admin/customers.html",
-            "/admin/customerDetail.html"
+            "/admin/customers.html"
           ],
           "required_permission": ""
         },

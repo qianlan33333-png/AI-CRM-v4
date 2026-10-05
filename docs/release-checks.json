@@ -1,14 +1,51 @@
 {
   "schema": 1,
-  "baseline_sha": "fe7938b79f554b9e7d1cbf8e8b64829ff2bb81b9",
+  "baseline_sha": "26f8546e147afc6506023df8c5d03ee9939b8274",
   "checks": [
     {
       "lane": "backend",
-      "package": "./cmd/invoice-setup"
+      "package": "./internal/webshell",
+      "test": "TestRetiredCustomerDetailDoesNotServeOrRedirect"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/webshell",
+      "test": "TestAdminNavGroupsMirrorSourceMenu"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/webshell",
+      "test": "TestPathForEscapesDynamicSegmentsAndNextPath"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/webshell",
+      "test": "TestStandaloneHandlerRendersAdminLoginSidebarAndAssets"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/webshell",
+      "test": "TestDistAdminPagesReplacePlaceholderShell"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/webshell",
+      "test": "TestDistAdminPageNameMapping"
+    },
+    {
+      "lane": "preflight",
+      "path": "scripts/test-install-release-ordering.sh"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/scripts/customer-profile-entry-checks.mjs"
     }
   ],
-  "installed_checks": [],
   "build_commands": [
-    "./cmd/invoice-setup"
+    "./cmd/migrate-external-orders"
+  ],
+  "installed_checks": [
+    "external-order-history",
+    "order-presentation"
   ]
 }

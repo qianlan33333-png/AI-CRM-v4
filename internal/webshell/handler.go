@@ -143,6 +143,13 @@ func (handler *Handler) serveDistribution(writer http.ResponseWriter, request *h
 }
 
 func (handler *Handler) serveAdmin(writer http.ResponseWriter, request *http.Request) {
+	// This page was retired in favor of /admin/customers/{id}. Never serve
+	// a stale built document or redirect the retired URL to another profile.
+	if request.URL.Path == "/admin/customerDetail.html" {
+		writer.Header().Set("Cache-Control", "private, no-store")
+		http.Error(writer, "旧客户档案页面已下线，请从用户列表进入客户档案。", http.StatusGone)
+		return
+	}
 	if request.Method != http.MethodGet && request.Method != http.MethodHead {
 		methodNotAllowed(writer, http.MethodGet+", "+http.MethodHead)
 		return

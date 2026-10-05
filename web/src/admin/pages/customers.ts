@@ -182,7 +182,7 @@ class CustomersPage extends PageBase {
             : String(customer.owner_staff_id),
         mobileText: "当前契约未返回",
         view: () => {
-          location.href = `customerDetail.html?id=${encodeURIComponent(String(customer.id))}`;
+          location.href = `/admin/customers/${encodeURIComponent(String(customer.id))}`;
         },
       }),
     );

@@ -274,7 +274,7 @@ if (typeof customerHost !== 'string' || typeof frozenAdmin !== 'string' || typeo
 const customerHostReference = `../${customerHost}`;
 const frozenAdminReference = `<script type="module" src="../${frozenAdmin}"></script>`;
 const standardCustomerReferences = `<link rel="stylesheet" href="../${selectionDialogStyles}">\n<link rel="stylesheet" href="../assets/standard-components/wecom_tag_picker.css">\n<script type="module" src="../${stableStandardHost}"></script>`;
-for (const documentName of ['customers.html', 'customerDetail.html']) {
+for (const documentName of ['customers.html']) {
   const documentPath = path.join(dist, 'admin', documentName);
   let documentHTML = fs.readFileSync(documentPath, 'utf8');
   if (!documentHTML.includes(frozenAdminReference)) throw new Error(`${documentName} does not reference the declared frozen admin entry`);

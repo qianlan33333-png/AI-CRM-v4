@@ -299,7 +299,6 @@ for new_shell_page in \
   couponData \
   couponForm \
   coupons \
-  customerDetail \
   customers \
   cycles \
   cyclesDetail \

@@ -8,11 +8,11 @@ const navigation = {
   version: 1,
   groups: [
     { key: 'overview', label: '总览', items: [{ key: 'overview', label: '经营总览', href: '/admin', active_prefixes: ['/admin'], required_permission: '' }] },
-    { key: 'customers', label: '用户', items: [{ key: 'customers', label: '用户列表', href: '/admin/customers', active_prefixes: ['/admin/customers', '/admin/customerDetail.html'], required_permission: '' }] },
+    { key: 'customers', label: '用户', items: [{ key: 'customers', label: '用户列表', href: '/admin/customers', active_prefixes: ['/admin/customers'], required_permission: '' }] },
   ],
 };
 const dom = new JSDOM('<!doctype html><aside><nav class="side-nav"><div class="side-grp">旧导航</div><a class="nav-item on" href="customers.html"><svg><path d="M0 0"></path></svg><span>用户列表</span></a><a class="nav-item" href="login-access.html"><span>登录与权限</span></a></nav></aside>', {
-  url: 'https://crm.example/admin/customerDetail.html?id=42', runScripts: 'outside-only', pretendToBeVisual: true,
+  url: 'https://crm.example/admin/customers/42', runScripts: 'outside-only', pretendToBeVisual: true,
   beforeParse(window) {
     window.Response = Response;
     window.fetch = async (input) => {

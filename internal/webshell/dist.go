@@ -231,6 +231,9 @@ var distAdminAliases = map[string]string{
 // explicit vanity aliases are eligible; nested module paths stay with their
 // domain owners.
 func DistAdminPageName(requestPath string) (string, bool) {
+	if requestPath == "/admin/customerDetail.html" {
+		return "", false
+	}
 	if name, ok := distAdminAliases[requestPath]; ok {
 		return name, true
 	}

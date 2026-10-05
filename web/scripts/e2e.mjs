@@ -13,10 +13,13 @@ import { memberGridPresentationPlugin } from '../../scripts/member-grid-presenta
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const DIST = path.join(ROOT, 'dist');
-// build.mjs creates the frozen sidebar document first. Replace that entry here
-// so every existing e2e invocation executes the final staged V3 Host instead
-// of accidentally asserting the pre-Host sidebar artifact.
-execFileSync(process.execPath, [path.join(ROOT, '..', 'scripts', 'build-v3-host-adapters.mjs')], { stdio: 'inherit' });
+const customerProfileLinksOnly = process.argv.includes('--customer-profile-links');
+// npm run build supplies base documents; release checks may already have
+// staged Hosts. Consume those bytes without injecting the same Hosts twice.
+const stagedManifest = JSON.parse(fs.readFileSync(path.join(DIST, 'asset-manifest.json'), 'utf8'));
+if (!stagedManifest.entries.orderHost) {
+  execFileSync(process.execPath, [path.join(ROOT, '..', 'scripts', 'build-v3-host-adapters.mjs')], { stdio: 'inherit' });
+}
 const TEST_BUNDLES = {
   admin: await buildTestBrowserBundle(path.join(ROOT, 'src/admin/main.ts')),
   customerHost: await buildTestBrowserBundle(path.join(ROOT, 'v3/customerAdapter.ts')),
@@ -1526,6 +1529,7 @@ const input = (dom, el, v) => {
   el.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
 };
 
+if (!customerProfileLinksOnly) {
 console.log('admin/mpLib.html（停用历史素材分页）');
 {
   const dom = await loadPage('admin/mpLib.html', { miniProgramHttp: true });
@@ -1836,13 +1840,15 @@ for (const query of ['message_history=1&history_message_id=bad', 'message_histor
   dom.window.close();
 }
 
+}
+
 console.log('admin/customers.html（筛选、opaque cursor 翻页与详情导航）');
 {
   const dom = await loadPage('admin/customers.html', { customerListHttp: true });
   const d = dom.window.document;
   ok('客户首屏按服务端页大小渲染 50 行', d.querySelectorAll('tbody tr').length === 50);
   ok('客户列表使用真实总数 55', d.body.textContent.includes('共 55 位客户') && d.body.textContent.includes('第 1 – 50 条，共 55 条'));
-  ok('客户行详情链接使用 canonical numeric OneID', d.querySelector('a[href="customerDetail.html?id=1"]')?.__dcBound === true);
+  ok('客户行详情链接使用 canonical numeric OneID', d.querySelector('a[href="/admin/customers/1"]')?.__dcBound === true);
 
   input(dom, d.querySelector('#fCustomerKeyword'), '李思远');
   click(dom, [...d.querySelectorAll('button')].find((b) => b.textContent.trim() === '查询'));
@@ -1873,13 +1879,14 @@ console.log('admin/customers.html（筛选、opaque cursor 翻页与详情导航
   const next = [...d.querySelectorAll('button')].find((b) => b.textContent.trim() === '下一页');
   click(dom, next);
   await sleep(300);
-  ok('下一页使用服务端 opaque cursor 并显示第 2 页 5 行', d.querySelectorAll('tbody tr').length === 5 && d.body.textContent.includes('第 2 页') && d.querySelector('a[href="customerDetail.html?id=51"]')?.__dcBound === true);
+  ok('下一页使用服务端 opaque cursor 并显示第 2 页 5 行', d.querySelectorAll('tbody tr').length === 5 && d.body.textContent.includes('第 2 页') && d.querySelector('a[href="/admin/customers/51"]')?.__dcBound === true);
   click(dom, [...d.querySelectorAll('button')].find((b) => b.textContent.trim() === '上一页'));
   await sleep(300);
   ok('上一页沿 cursor 栈返回第 1 页', d.querySelectorAll('tbody tr').length === 50 && d.body.textContent.includes('第 1 页'));
   dom.window.close();
 }
 
+if (!customerProfileLinksOnly) {
 console.log('admin/orders.html（筛选后微信支付 CSV 导出）');
 {
   const dom = await loadPage('admin/orders.html');
@@ -1928,51 +1935,14 @@ console.log('admin/orderDetail.html（V1 历史只读退款）');
   dom.window.close();
 }
 
-console.log('admin/customerDetail.html（安全 Customer360）');
-{
-  const dom = await loadPage('admin/customerDetail.html', { id: 1 });
-  const d = dom.window.document;
-  ok('Customer360 渲染原壳用户档案', d.body.textContent.includes('李思远') && d.body.textContent.includes('用户档案') && d.body.textContent.includes('渠道 ID'));
-  ok('Customer360 渲染标签与时间线摘要', d.querySelectorAll('[data-customer-not-found]').length === 0 && d.querySelectorAll('tbody tr').length === 2 && d.body.textContent.includes('owner.assigned'));
-  ok('Customer360 聊天只展示零正文摘要', d.querySelectorAll('[data-customer-not-found]').length === 0 && d.body.textContent.includes('消息类型：text') && d.body.textContent.includes('消息类型：image') && d.body.textContent.includes('仅展示类型和时间，不展示正文'));
-  const rendered = d.querySelector('#stage')?.textContent || '';
-  ok('Customer360 不展示手机号与外部身份', !rendered.includes('手机号') && !rendered.includes('external_userid') && !rendered.includes('unionid') && !rendered.includes('这个周期服务能开发票吗？'));
-  ok('Customer360 渲染安全问卷 ID 投影', d.querySelector('[data-customer-survey]')?.textContent.includes('提交 7001') && d.body.textContent.includes('题目 5') && d.body.textContent.includes('选项 12'));
-  ok('Customer360 明确隐藏自由文本与评测', d.querySelector('[data-customer-answer-policy]')?.textContent.includes('不展示自由文本') && d.body.textContent.includes('当前 V2 契约不可用'));
-  dom.window.close();
 }
 
-console.log('admin/customerDetail.html（V3 Customer Host 安全投影）');
-{
-  const dom = await loadPage('admin/customerDetail.html', { id: 7, customerDetailHttp: true });
-  const d = dom.window.document;
-  await sleep(80);
-  const requests = dom.window.__customerDetailRequests;
-  ok('Customer Host 将冻结 V1 context/survey 读取映射到现有 Customer 投影',
-    requests.includes('/api/admin/customers/7/360') &&
-    requests.includes('/api/admin/customers/7/tags') &&
-    requests.includes('/api/admin/customers/7/chat-activity?limit=20') &&
-    requests.includes('/api/v1/customers/7/survey-answers'));
-  ok('Customer Host 保留安全 360 页面与选择题 ID，不混入自由文本或身份',
-    d.querySelector('#stage')?.textContent.includes('李思远') &&
-    d.querySelector('[data-customer-survey]')?.textContent.includes('提交 7001') &&
-    d.querySelector('#stage')?.textContent.includes('选项 12') &&
-    !d.querySelector('#stage')?.textContent.includes('option_text'));
-  dom.window.close();
-}
-
-console.log('admin/customerDetail.html?id=999（404 占位态）');
-{
-  const dom = await loadPage('admin/customerDetail.html', { id: 999 });
-  const d = dom.window.document;
-  const back = d.querySelector('[data-customer-not-found] button');
-  ok('用户不存在显示明确占位', d.querySelector('[data-customer-not-found]')?.textContent.includes('用户档案不存在'));
-  ok('用户不存在提供返回用户列表', back?.textContent.trim() === '返回用户列表' && back?.__dcBound === true && !d.querySelector('#fCustomerName'));
-  dom.window.close();
-}
+console.log('旧客户详情页面已下线');
+ok('发布构件不包含旧客户详情 HTML', !fs.existsSync(path.join(DIST, 'admin/customerDetail.html')));
 
 /* ================= 本轮新增：二级页 + 通用选择器 ================= */
 let audienceDetailPackageId = 1;
+if (!customerProfileLinksOnly) {
 console.log('admin/automation.html（新增分组弹窗 → 测试 Mock 创建）');
 {
   const dom = await loadPage('admin/automation.html');
@@ -2443,6 +2413,8 @@ console.log('admin/groupopsDetail.html（typed 素材节点）');
   dom.window.close();
 }
 
+}
+
 console.log('admin/spProducts/spProductData（V1 历史只读 GET）');
 {
   const dom = await loadPage('admin/spProducts.html', { q: 'history=1', serviceHistoryHttp: true });
@@ -2470,7 +2442,7 @@ console.log('admin/spProducts/spProductData（V1 历史只读 GET）');
   const dom = await loadPage('admin/spProductData.html', { q: 'id=91&history=17', serviceHistoryHttp: true });
   const d = dom.window.document;
   const test = dom.window.__serviceHistoryHttpTest;
-  ok('历史权益保留原状态、负续期、未关联客户，不造当前会员', d.querySelector('#history-entitlements')?.textContent.includes('V1 快照状态：expired') && d.querySelector('#history-entitlements')?.textContent.includes('续期计数：-2') && d.querySelector('#history-entitlements')?.textContent.includes('未关联客户') && !!d.querySelector('a[href="customerDetail.html?id=7"]'));
+  ok('历史权益保留原状态、负续期、未关联客户，不造当前会员', d.querySelector('#history-entitlements')?.textContent.includes('V1 快照状态：expired') && d.querySelector('#history-entitlements')?.textContent.includes('续期计数：-2') && d.querySelector('#history-entitlements')?.textContent.includes('未关联客户') && !!d.querySelector('a[href="/admin/customers/7"]'));
   ok('失败历史事件保留 NULL 和负调整，无执行按钮', d.querySelector('#history-events')?.textContent.includes('grant_failed_missing_unionid') && d.querySelector('#history-events')?.textContent.includes('调整天数：-7') && d.querySelector('#history-events')?.textContent.includes('未关联权益') && d.querySelector('#history-events')?.textContent.includes('未记录') && ![...d.querySelectorAll('#stage button')].some((button) => /执行|删除|编辑|授权|退款/.test(button.textContent)));
   click(dom, d.querySelector('#history-entitlements [data-history-next]'));
   click(dom, d.querySelector('#history-events [data-history-next]'));
@@ -2490,6 +2462,7 @@ for (const fixture of [{ serviceHistoryEmpty: true }, { serviceHistoryFailure: '
   dom.window.close();
 }
 
+if (!customerProfileLinksOnly) {
 console.log('admin/spProductData.html（V1 Member Grid 历史只读 GET）');
 {
   const dom = await loadPage('admin/spProductData.html', { q: 'member_grid_history=1&history_kind=view&product_id=91', memberGridHistoryHttp: {} });
@@ -3602,6 +3575,8 @@ for (const scenario of ['send_delayed', 'invoke_errmsg_fail', 'invoke_empty']) {
   dom.window.close();
 }
 
+}
+
 console.log('admin/campaigns.html?history=1（七个真实GET只读历史）');
 {
   const dom = await loadPage('admin/campaigns.html', { q: 'history=1', campaignHistoryHttp: {} });
@@ -3629,7 +3604,7 @@ console.log('admin/campaigns.html?history=1（七个真实GET只读历史）');
   const plan = await loadPage('admin/campaigns.html', { q: 'history=1&plan=31&recipient=41', campaignHistoryHttp: {} });
   const pd = plan.window.document, pt = plan.window.__campaignHistoryHttpTest;
   ok('历史群发计划、收件人、消息顺序使用三个独立GET', pt.calls.length === 3 && pt.calls[0].path.endsWith('/broadcast-plans/31') && pt.calls[1].path.endsWith('/broadcast-plans/31/recipients') && pt.calls[2].path.endsWith('/broadcast-recipients/41/messages'));
-  ok('历史正文转义并保留原civil时间，已验证客户链接可见', pd.querySelector('#campaign-history-messages').textContent.includes('<old>') && pd.querySelector('#campaign-history-messages').textContent.includes('old civil') && !pd.querySelector('old') && pd.querySelector('#campaign-history-recipients a[href="customerDetail.html?id=7"]'));
+  ok('历史正文转义并保留原civil时间，已验证客户链接可见', pd.querySelector('#campaign-history-messages').textContent.includes('<old>') && pd.querySelector('#campaign-history-messages').textContent.includes('old civil') && !pd.querySelector('old') && pd.querySelector('#campaign-history-recipients a[href="/admin/customers/7"]'));
   ok('历史页面没有审批、启动、发送写操作', [...pd.querySelectorAll('button')].every((button) => ['上一页', '下一页', '刷新本页'].includes(button.textContent.trim())));
   plan.window.close();
 
@@ -3649,6 +3624,7 @@ console.log('admin/campaigns.html?history=1（七个真实GET只读历史）');
   }
 }
 
+if (!customerProfileLinksOnly) {
 console.log('admin/campaigns.html（External Effects / Push Center 本地边界）');
 {
   const effects = await loadPage('admin/campaigns.html', { q: 'view=external-effects' });
@@ -3697,6 +3673,8 @@ console.log('admin/campaigns.html（运营计划全局本地审核列表）');
   plans.window.close();
 }
 
+}
+
 console.log('admin/campaigns.html（目标人员 Customer360 链接）');
 {
   const planID = 'ctp_' + 'a'.repeat(64);
@@ -3704,7 +3682,7 @@ console.log('admin/campaigns.html（目标人员 Customer360 链接）');
   await sleep(40);
   const doc = recipient.window.document;
   const text = doc.querySelector('#stage')?.textContent || '';
-  const customer360 = doc.querySelector('a[href="customerDetail.html?id=7"]');
+  const customer360 = doc.querySelector('a[href="/admin/customers/7"]');
   ok('已验证的 plan 目标只用 canonical OneID 链接既有 Customer360 档案',
     customer360?.textContent === '在 Customer360 查看档案' &&
     recipient.window.__recipientCalls.some((call) => call.url.endsWith('/recipients/7')));
@@ -3733,6 +3711,7 @@ console.log('admin/campaigns.html（目标人员 Customer360 链接）');
   recipient.window.close();
 }
 
+if (!customerProfileLinksOnly) {
 console.log('admin/campaigns.html（Campaign 成员状态本地投影）');
 {
   const members = await loadPage('admin/campaigns.html', { q: 'campaign=spring-campaign', campaignHttp: {} });
@@ -3894,5 +3873,8 @@ await import('./invalid-source-history-e2e.mjs');
 await import('./product-edit-e2e.mjs');
 execFileSync(process.execPath, [path.join(ROOT, 'v3', 'sidebarOneIDPresentation.test.mjs')], { stdio: 'inherit' });
 
+}
+
+if (customerProfileLinksOnly && pass === 0) throw new Error('customer profile links check matched no assertions');
 console.log(`\n${pass} 通过 / ${fail} 失败`);
 process.exit(fail ? 1 : 0);

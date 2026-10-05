@@ -7,7 +7,7 @@ import { esc } from './util';
 const button = 'padding:7px 12px;border:1px solid #D0D5DD;border-radius:6px;background:#fff;color:#344054;font-size:13px;cursor:pointer';
 const cell = 'padding:10px 12px;border-bottom:1px solid #EEF0F3;text-align:left;vertical-align:top;white-space:pre-wrap';
 const text = (value: string | number | null): string => value === null ? '未记录' : value === '' ? '（空）' : esc(String(value));
-const customer = (id: number | null): string => id === null ? '未关联客户' : `<a href="customerDetail.html?id=${id}">客户 #${id}</a>`;
+const customer = (id: number | null): string => id === null ? '未关联客户' : `<a href="/admin/customers/${id}">客户 #${id}</a>`;
 const order = (id: number | null): string => id === null ? '未关联订单' : `V2 订单 #${id}`;
 const row = (...cells: string[]): string => `<tr>${cells.map((value) => `<td style="${cell}">${value}</td>`).join('')}</tr>`;
 

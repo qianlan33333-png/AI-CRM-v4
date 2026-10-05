@@ -419,7 +419,7 @@ detailDom.window.fetch = async (input) => {
   return { ok: true, status: 200, json: async () => ({
     profile: { status: "ready", data: { customer_id: 42, customer_number: "1000042", display_name: "测试客户", oneid: "cus_42", status: "active", contact_type: 1, last_synced_at: "2026-09-05T00:00:00Z" } },
     identity_summary: { status: "ready", data: { identities: [], phones: [] } },
-    order_summary: { status: "ready", data: { total: 1, paid: 1, refunded: 0, failed: 0, recent: [{ id: 71, merchant_order_no: "MO-71", status: "paid", provider:"wechat_pay", items:[{product_name:"课程商品"}] }] } },
+    order_summary: { status: "ready", data: { total: 4, paid: 4, refunded: 0, failed: 0, recent: [{ id: 71, merchant_order_no: "MO-71", status: "paid", provider:"wechat_pay", items:[{product_name:"课程商品"}] }, { id: 72, merchant_order_no: "历史 &/订单", status: "paid", provider: "external_history" }, { id: 73, merchant_order_no: "ALI-73", status: "paid", provider: "alipay" }, { id: 74, merchant_order_no: "UNKNOWN-74", status: "paid", provider: "unknown_provider" }] } },
     questionnaire_summary: { status: "ready", data: { total: 2, recent: [{ id: 81, title: "首份问卷", assessment_label: "已完成", submitted_at: "2026-09-05T00:00:00Z" }, { id: 82, title: "后续问卷", score: 0, submitted_at: "2026-09-05T00:00:00Z" }] } },
     risk: { status: "ready", data: { level: "low", reasons: [] } },
     recent_touchpoints: { status: "ready", data: [{ id: 91, title: "首次触达", source_domain: "customer", occurred_at: "2026-09-05T00:00:00Z" }, { id: 92, title: "后续触达", source_domain: "order", occurred_at: "2026-09-05T00:00:00Z" }, { id: 93, title: "历史触点", source_domain: "legacy_import", occurred_at: "2026-09-05T00:00:00Z" }] },
@@ -428,8 +428,13 @@ detailDom.window.fetch = async (input) => {
 detailDom.window.eval(script);
 await new Promise((resolve) => setTimeout(resolve, 20));
 const detailText = detailDom.window.document.getElementById("customer-360-main")?.textContent || "";
-if (!detailText.includes("订单总数1") || !detailText.includes("退款相关0") || !detailText.includes("MO-71") || !detailText.includes("已支付") || detailText.includes("paid")) throw new Error(`customer record table did not retain known facts without a machine status: ${detailText}`);
+if (!detailText.includes("订单总数4") || !detailText.includes("退款相关0") || !detailText.includes("MO-71") || !detailText.includes("已支付") || detailText.includes("paid")) throw new Error(`customer record table did not retain known facts without a machine status: ${detailText}`);
 if (!detailDom.window.document.body.textContent.includes("1000042") || !detailText.includes("课程商品") || !detailDom.window.document.querySelector('a[href="/admin/orderDetail.html?id=MO-71&provider=wechat"]')) throw new Error("profile numbering/product/order link missing");
+for (const [reference, provider] of [["历史 &/订单", "external_history"], ["ALI-73", "alipay"]]) {
+  const link = [...detailDom.window.document.querySelectorAll('a[href^="/admin/orderDetail.html?"]')].find((node) => new URL(node.href).searchParams.get("id") === reference);
+  if (!link || new URL(link.href).searchParams.get("provider") !== provider) throw new Error("profile must preserve encoded order reference and exact provider: " + reference);
+}
+if ([...detailDom.window.document.querySelectorAll('a')].some((node) => node.href.includes("UNKNOWN-74"))) throw new Error("unsupported order provider must remain unlinked");
 const detailMetaText = detailDom.window.document.getElementById("customer-profile-meta")?.textContent || "";
 if (detailMetaText !== "") throw new Error(`customer contact type was not rendered as an Owner-defined business label: ${detailMetaText}`);
 if (!detailText.includes("待确认")) throw new Error(`missing order time was presented as a known value: ${detailText}`);

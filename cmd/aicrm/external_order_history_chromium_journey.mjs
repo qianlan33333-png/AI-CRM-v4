@@ -143,7 +143,18 @@ try {
     if(!page.body.includes(time)||!page.body.includes(amount)||!page.body.includes('导入时间')||!page.body.includes('外部历史订单')||!page.body.includes('138****0077'))throw new Error('detail history facts missing');
     if(ref==='external-browser-known' && !page.body.includes('原组合商品'))throw new Error('refund/bundle summary missing');
     if(page.controls.some(t=>/退款|重发|重试推送/.test(t)))throw new Error('historical executable action present');
-    if(!page.links.some(link=>link.includes('/admin/customerDetail.html')))throw new Error('customer link missing');
+    const profileURL = page.links.find(link => new URL(link).pathname.match(/^\/admin\/customers\/[1-9][0-9]*$/));
+    if (!profileURL || page.links.some(link => link.includes('customerDetail.html'))) throw new Error('canonical customer link missing');
+    const customerID = new URL(profileURL).pathname.split('/').pop();
+    const retired = await evaluate(cdp, `(async()=>{const r=await fetch('/admin/customerDetail.html?id=${customerID}',{redirect:'manual'});return {status:r.status,location:r.headers.get('Location')}})()`);
+    if (retired.status !== 410 || retired.location) throw new Error('retired profile served or redirected');
+    await cdp.call('Page.navigate', {url: profileURL});
+    await waitFor(cdp, "Boolean(document.querySelector('[data-customer-profile-root]')) && [...document.querySelectorAll('a[href]')].some(a=>new URL(a.href).searchParams.get('id') === " + JSON.stringify(ref) + ")", 'formal customer history link missing');
+    const orderURL = await evaluate(cdp, "[...document.querySelectorAll('a[href]')].find(a=>new URL(a.href).searchParams.get('id') === " + JSON.stringify(ref) + ").href");
+    if (new URL(orderURL).searchParams.get('provider') !== 'external_history') throw new Error('formal profile history provider changed');
+    await capture('canonical-customer-history');
+    await cdp.call('Page.navigate', {url: orderURL});
+    await waitFor(cdp, "Boolean(document.querySelector('a[href=\"/admin/customers/" + customerID + "\"]')) && document.body.textContent.includes(" + JSON.stringify(ref) + ")", 'order roundtrip changed Customer ID');
     await capture(ref);
   }
   const exported=await evaluate(cdp,`(async()=>{const cookie=document.cookie.split('; ').find(v=>v.startsWith('aicrm_admin_csrf='))||document.cookie.split('; ').find(v=>v.startsWith('csrf_token='));const token=cookie?decodeURIComponent(cookie.split('=').slice(1).join('=')):'';const r=await fetch('/api/admin/exports',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':token,'Idempotency-Key':'external-history-browser-export'},body:JSON.stringify({resource:'orders',format:'csv',filter:{provider:'external_history'}})});return {status:r.status,body:await r.text()}})()`);

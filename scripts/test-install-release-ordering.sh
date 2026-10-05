@@ -332,7 +332,6 @@ make_release() {
     couponData \
     couponForm \
     coupons \
-    customerDetail \
     customers \
     cycles \
     cyclesDetail \

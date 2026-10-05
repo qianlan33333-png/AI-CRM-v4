@@ -1443,7 +1443,7 @@ function applyOrderDetailPresentation(): void {
   const customerId = String(order.payer_id).replace(/^customer:/, '');
   if (order.provider === 'external_history' && /^[1-9][0-9]*$/.test(customerId)) {
     const customerLink = element('a', '查看客户资料') as HTMLAnchorElement;
-    customerLink.href = `/admin/customerDetail.html?id=${encodeURIComponent(customerId)}`;
+    customerLink.href = `/admin/customers/${encodeURIComponent(customerId)}`;
     card.lastElementChild?.appendChild(customerLink);
   }
   const collectionLevel = order.contact_collection_level === 'shipping_address' || order.contact_collection_level === 'mobile' ? order.contact_collection_level : 'none';

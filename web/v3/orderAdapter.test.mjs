@@ -1146,6 +1146,8 @@ for (const originalTime of [null, '2024-01-01T19:04:05Z']) {
     assert.equal(externalCalls.filter(u=>u.pathname==='/api/admin/refunds'||u.pathname.includes('deliveries')).length,0,'historical summary never requests transaction/refund/provider records');
     assert.equal(externalDom.window.document.querySelectorAll('button,input').length,0,'history has no executable refund or replay controls');
     assert.match(body,/CID-101/);
+    assert.equal(externalDom.window.document.querySelector('a[href="/admin/customers/101"]')?.textContent, "查看客户资料", "historical payer link preserves canonical Customer ID");
+    assert.equal(externalDom.window.document.querySelector('a[href*="customerDetail.html"]'), null);
   }finally{externalDom.window.close()}
 }
 console.log('external history original time, refund summary, customer and read-only journey: PASS');

@@ -191,7 +191,7 @@ func TestDistAdminPageNameMapping(t *testing.T) {
 			t.Fatalf("DistAdminPageName(%q) = %q, %t", path, name, ok)
 		}
 	}
-	for _, path := range []string{"/admin/customers/7", "/admin/nested/deep.html", "/admin/..%2fsecret.html", "/api/admin/orders", "/admin/customers"} {
+	for _, path := range []string{"/admin/customerDetail.html", "/admin/customers/7", "/admin/nested/deep.html", "/admin/..%2fsecret.html", "/api/admin/orders", "/admin/customers"} {
 		if name, ok := DistAdminPageName(path); ok {
 			t.Fatalf("DistAdminPageName(%q) unexpectedly resolved %q", path, name)
 		}

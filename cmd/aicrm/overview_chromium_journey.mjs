@@ -199,7 +199,7 @@ try {
   await waitFor(cdp, "Boolean(document.querySelector('.admin-nav a[href=\"/admin/wechat-pay/products\"].is-active'))", "server-rendered product shell did not retain the V3 navigation state");
   await cdp.call("Page.navigate", { url: `${baseURL}/admin/distribution` });
   await waitFor(cdp, "Boolean(document.querySelector('#distribution-admin-root')) && Boolean(document.querySelector('.admin-nav a[href=\"/admin/distribution\"].is-active'))", "server-rendered distribution shell did not retain the V3 navigation state");
-  await cdp.call("Page.navigate", { url: `${baseURL}/admin/customerDetail.html?id=1` });
+  await cdp.call("Page.navigate", { url: `${baseURL}/admin/customers.html` });
   await waitFor(cdp, "Boolean(document.querySelector('.side-nav[data-v3-navigation-host=\"ready\"]'))", "built customer document did not receive the shared V3 navigation Host");
   if (assetResponses.get("navigationHost") !== 200) throw new Error(`staged navigation Host HTTP status=${assetResponses.get("navigationHost") || 0}`);
   const customerNavigation = await evaluate(cdp, "JSON.stringify({groups:[...document.querySelectorAll('.side-nav .side-grp')].map((node)=>node.textContent),active:[...document.querySelectorAll('.side-nav .nav-item.on')].map((node)=>node.textContent?.trim()),access:document.body.textContent.includes('登录与权限')})");
