@@ -90,11 +90,11 @@ func normalizeCompletionsURL(raw string) string {
 }
 
 func generationUserPrompt(task string, values automationport.GenerationContext) string {
-	return strings.TrimSpace(task) + "\n\n【问卷】\n" + values.Questionnaire + "\n\n【最近20条聊天】\n" + values.RecentChats + "\n\n【用户标签】\n" + values.Tags + "\n\n【激活信息】\n" + values.Activation
+	return strings.TrimSpace(automationport.RenderCustomerNamePrompt(task, values.CustomerName)) + "\n\n【用户名】\n" + values.CustomerName + "\n\n【问卷】\n" + values.Questionnaire + "\n\n【最近20条聊天】\n" + values.RecentChats + "\n\n【用户标签】\n" + values.Tags + "\n\n【激活信息】\n" + values.Activation
 }
 
 func validGeneratedText(value string, dispatch automationport.GenerationDispatch) bool {
-	return automationport.ValidGeneratedText(value, dispatch.RolePrompt, dispatch.TaskPrompt)
+	return automationport.ValidGeneratedText(value, automationport.RenderCustomerNamePrompt(dispatch.RolePrompt, dispatch.Context.CustomerName), automationport.RenderCustomerNamePrompt(dispatch.TaskPrompt, dispatch.Context.CustomerName))
 }
 
 func generationFailure(code string, attempted bool) effectport.AdapterResult {
@@ -126,7 +126,7 @@ func (p *GenerationProvider) Execute(ctx context.Context, envelope effectport.En
 	if !found || dispatch.EffectID != attempt.EffectID || !dispatch.Context.Valid() || !dispatch.ModelPolicy.Valid() || dispatch.ModelPolicy != policy || !effectport.ValidDigest(dispatch.PayloadDigest) || dispatch.PayloadDigest != envelope.PayloadDigest {
 		return generationFailure("generation_dispatch_invalid", false), nil
 	}
-	body, err := json.Marshal(map[string]any{"model": policy.Model, "messages": []map[string]string{{"role": "system", "content": dispatch.RolePrompt}, {"role": "user", "content": generationUserPrompt(dispatch.TaskPrompt, dispatch.Context)}}, "temperature": 0.4})
+	body, err := json.Marshal(map[string]any{"model": policy.Model, "messages": []map[string]string{{"role": "system", "content": automationport.RenderCustomerNamePrompt(dispatch.RolePrompt, dispatch.Context.CustomerName)}, {"role": "user", "content": generationUserPrompt(dispatch.TaskPrompt, dispatch.Context)}}, "temperature": 0.4})
 	if err != nil {
 		return generationFailure("generation_request_invalid", false), nil
 	}

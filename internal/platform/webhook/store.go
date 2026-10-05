@@ -12,6 +12,16 @@ import (
 
 type PostgreSQLStore struct{}
 
+func (*PostgreSQLStore) Lookup(ctx context.Context, provider string, key idempotency.Key) (Delivery, error) {
+	tx, err := platformpostgres.RequireTransaction(ctx)
+	if err != nil {
+		return Delivery{}, err
+	}
+	return scanDelivery(tx.QueryRow(ctx, `SELECT id,provider,idempotency_key,payload_hash,payload,status,
+		attempt_count,max_attempts,next_attempt_at,lease_owner,lease_expires_at,last_error_code,received_at,processed_at,updated_at
+		FROM webhook_inbox WHERE provider=$1 AND idempotency_key=$2`, provider, key))
+}
+
 func NewPostgreSQLStore() *PostgreSQLStore {
 	return &PostgreSQLStore{}
 }

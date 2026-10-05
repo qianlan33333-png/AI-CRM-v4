@@ -46,7 +46,7 @@ func (dynamicGenerationTagsStub) CustomerTags(context.Context, customerdomain.Cu
 type dynamicGenerationProfilesStub struct{}
 
 func (dynamicGenerationProfilesStub) ReadSidebarProfile(context.Context, customerdomain.CustomerID) (customerport.SidebarProfile, error) {
-	return customerport.SidebarProfile{ActivationState: "activated", Status: "active", UpdatedAt: time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)}, nil
+	return customerport.SidebarProfile{DisplayName: "数据库昵称", ActivationState: "activated", Status: "active", UpdatedAt: time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)}, nil
 }
 func (dynamicGenerationProfilesStub) UpdateSidebarProfile(context.Context, customerport.SidebarProfileUpdate) (customerport.SidebarProfile, error) {
 	return customerport.SidebarProfile{}, nil
@@ -64,7 +64,7 @@ func TestDynamicGenerationContextFreezesOnlyApprovedReadPorts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if surveys.query.CustomerID != 42 || surveys.query.Limit != 20 || !surveys.query.Watermark.Equal(watermark) || messages.query.CustomerID != 42 || !messages.query.AuthoredByCustomerOnly || messages.query.Limit != 20 || !messages.query.Watermark.Equal(watermark) || messages.query.Watermark.Location() != time.UTC || !value.Valid() || !strings.Contains(value.Questionnaire, "入营问卷") || !strings.Contains(value.RecentChats, "想了解课程") || !strings.Contains(value.Tags, "阶段/活跃") || !strings.Contains(value.Activation, "activated") {
+	if surveys.query.CustomerID != 42 || surveys.query.Limit != 20 || !surveys.query.Watermark.Equal(watermark) || messages.query.CustomerID != 42 || !messages.query.AuthoredByCustomerOnly || messages.query.Limit != 20 || !messages.query.Watermark.Equal(watermark) || messages.query.Watermark.Location() != time.UTC || !value.Valid() || value.CustomerName != "数据库昵称" || !strings.Contains(value.Questionnaire, "入营问卷") || !strings.Contains(value.RecentChats, "想了解课程") || !strings.Contains(value.Tags, "阶段/活跃") || !strings.Contains(value.Activation, "activated") {
 		t.Fatalf("queries survey=%+v messages=%+v value=%+v", surveys.query, messages.query, value)
 	}
 }

@@ -25,7 +25,7 @@ func (s generationDispatchStub) GenerationDispatch(context.Context, string) (aut
 }
 
 func testDispatch() automationport.GenerationDispatch {
-	return automationport.GenerationDispatch{ItemID: 1, RunID: 2, EffectID: "eer_1", AgentCode: "agent", RolePrompt: "你是顾问", TaskPrompt: "写一句问候", Context: automationport.GenerationContext{Questionnaire: "已填写", RecentChats: "最近聊天", Tags: "新用户", Activation: "已激活"}, ModelPolicy: automationport.GenerationModelPolicy{Mode: "enabled", Endpoint: "https://model.example.test/chat/completions", Model: "unit-model", Temperature: 0.4}, PayloadDigest: effectport.Hash("payload"), AcceptedAt: time.Now().UTC()}
+	return automationport.GenerationDispatch{ItemID: 1, RunID: 2, EffectID: "eer_1", AgentCode: "agent", RolePrompt: "你是{{用户名}}的顾问", TaskPrompt: "向{{客户名}}写一句问候", Context: automationport.GenerationContext{CustomerName: "小明", Questionnaire: "已填写", RecentChats: "最近聊天", Tags: "新用户", Activation: "已激活"}, ModelPolicy: automationport.GenerationModelPolicy{Mode: "enabled", Endpoint: "https://model.example.test/chat/completions", Model: "unit-model", Temperature: 0.4}, PayloadDigest: effectport.Hash("payload"), AcceptedAt: time.Now().UTC()}
 }
 
 func testEnvelope() effectport.Envelope {
@@ -38,7 +38,7 @@ func TestGenerationProviderUsesNormalizedOpenAICompatibleRequest(t *testing.T) {
 			t.Fatalf("request path=%q method=%s auth=%q", r.URL.Path, r.Method, r.Header.Get("Authorization"))
 		}
 		body, _ := io.ReadAll(r.Body)
-		for _, value := range []string{`"model":"unit-model"`, `"temperature":0.4`, "你是顾问", "写一句问候", "已填写", "最近聊天", "新用户", "已激活"} {
+		for _, value := range []string{`"model":"unit-model"`, `"temperature":0.4`, "你是小明的顾问", "向小明写一句问候", "【用户名】", "小明", "已填写", "最近聊天", "新用户", "已激活"} {
 			if !strings.Contains(string(body), value) {
 				t.Fatalf("missing %q body=%s", value, body)
 			}

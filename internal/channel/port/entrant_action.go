@@ -85,6 +85,8 @@ type PublishedEntrantAction struct {
 	WelcomeMaterialSnapshot                                 json.RawMessage
 	LocalTagID                                              int64
 	FirstReceivedAt, SendDeadlineAt                         time.Time
+	CallbackID                                              string
+	WelcomeMessageFrozen                                    bool
 }
 
 type PublishedEntrantActionReader interface {
@@ -109,6 +111,9 @@ type WelcomeMessageFreezer interface {
 type WelcomeMessageFreezeRequest struct {
 	EffectRef string
 	Envelope  effectport.Envelope
+	// Internal, callback-bound presentation observation, never HTTP input.
+	CallbackID          string
+	ObservedDisplayName string
 }
 
 type EntrantActionCompletion struct {

@@ -340,7 +340,7 @@ func testPromptChain(t *testing.T, role, task string) {
 		t.Fatal(err)
 	}
 	result, err := provider.Execute(ctx, effectport.Envelope{Owner: effectport.OwnerAutomation, Kind: effectport.KindAIAgentGenerate, PayloadDigest: payloadDigest}, effectport.Attempt{EffectID: "eer_1", Number: 1, Generation: 1, Fence: 1})
-	if err != nil || result.Completion != effectport.StateExecuted || !result.CallAttempted || !result.RealExternalCallExecuted || observedSystem != role || observedUser != task+"\n\n【问卷】\n"+item.Context.Questionnaire+"\n\n【最近20条聊天】\n"+item.Context.RecentChats+"\n\n【用户标签】\n"+item.Context.Tags+"\n\n【激活信息】\n"+item.Context.Activation {
+	if err != nil || result.Completion != effectport.StateExecuted || !result.CallAttempted || !result.RealExternalCallExecuted || observedSystem != role || observedUser != task+"\n\n【用户名】\n"+item.Context.CustomerName+"\n\n【问卷】\n"+item.Context.Questionnaire+"\n\n【最近20条聊天】\n"+item.Context.RecentChats+"\n\n【用户标签】\n"+item.Context.Tags+"\n\n【激活信息】\n"+item.Context.Activation {
 		t.Fatalf("local generation completion=%s called=%v executed=%v system=%d/%d user_prefix=%v err=%v", result.Completion, result.CallAttempted, result.RealExternalCallExecuted, len(observedSystem), len(role), strings.HasPrefix(observedUser, task), err)
 	}
 	t.Logf("DB GenerationDispatch effect=%s item=%d state=queued role_bytes=%d role_sha256=%s task_bytes=%d task_sha256=%s", dispatch.EffectID, dispatch.ItemID, len([]byte(dispatch.RolePrompt)), promptChainHash([]byte(dispatch.RolePrompt)), len([]byte(dispatch.TaskPrompt)), promptChainHash([]byte(dispatch.TaskPrompt)))

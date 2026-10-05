@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { JSDOM } from 'jsdom';
+
+const adapter = fs.readFileSync(new URL('./automation_create_code_adapter.js', import.meta.url), 'utf8');
+const dom = new JSDOM('<select id="agentType"><option value="agent">Agent</option><option value="fixed_script">固定</option></select><textarea id="agentTaskPrompt">你好，继续</textarea><button data-agent-precheck class="btn">预检</button>', { url: 'https://test.invalid/admin/agentEdit.html?id=7', runScripts: 'outside-only' });
+const doc = dom.window.document;
+dom.window.eval(adapter);
+const input = doc.querySelector('textarea');
+let changed = 0;
+input.addEventListener('input', () => changed++);
+input.setSelectionRange(3, 5);
+doc.querySelector('[data-agent-customer-name] button').click();
+assert.equal(input.value, '你好，{{用户名}}');
+assert.equal(changed, 1);
+assert.equal(doc.activeElement, input);
+assert.equal(doc.querySelector('[data-agent-customer-name] button').className, 'btn');
+const type = doc.querySelector('select');
+type.value = 'fixed_script'; type.dispatchEvent(new dom.window.Event('change'));
+assert.equal(doc.querySelector('[data-agent-customer-name]').hidden, true);
+type.value = 'agent'; type.dispatchEvent(new dom.window.Event('change'));
+assert.equal(doc.querySelector('[data-agent-customer-name]').hidden, false);
+doc.body.append(doc.createElement('span'));
+await new Promise(resolve => setTimeout(resolve, 0));
+assert.equal(doc.querySelectorAll('[data-agent-customer-name]').length, 1);
+dom.window.close();
+console.log('automation-username-adapter: PASS (insertion, input event, focus, mode, dedup)');

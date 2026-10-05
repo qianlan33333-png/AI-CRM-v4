@@ -17,6 +17,8 @@ import (
 	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
 	externaleffects "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/outbound"
 	platformjobqueue "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/jobqueue"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
@@ -322,6 +324,62 @@ func TestChannelWelcomeTemplateFreezesOneRenderedBodyBeforeProviderRetry(t *test
 		t.Fatal("frozen template did not reach local Provider boundary")
 	}
 	fixture.waitEffect(t, input, effectport.StateExecuted)
+}
+
+type unresolvedWelcomeIdentity struct{}
+
+func (unresolvedWelcomeIdentity) Resolve(context.Context, identitydomain.Reference) (identityport.ResolveResult, error) {
+	return identityport.ResolveResult{Status: identityport.ResolveNotFound}, nil
+}
+
+type callbackWelcomeNameProvider struct {
+	t     *testing.T
+	name  string
+	calls int
+}
+
+func (s *callbackWelcomeNameProvider) ReadExternalContact(ctx context.Context, externalID string) (wecomport.ExternalContact, error) {
+	if _, err := platformpostgres.RequireTransaction(ctx); err == nil {
+		s.t.Fatal("Provider read inside transaction")
+	}
+	s.calls++
+	return wecomport.ExternalContact{ExternalUserID: externalID, Name: s.name}, nil
+}
+
+func TestChannelWelcomeTemplateUsesCallbackNameBeforeCustomerLink(t *testing.T) {
+	fixture := newChannelWelcomeRuntimeFixtureWithWelcomeMessage(t, "您好{{客户名}}")
+	defer fixture.close()
+	input, _ := fixture.acceptWelcome(t, "runtime-early-nickname-0001", fixture.now)
+	var effectRef, grantRef string
+	var source, target, payload, policy effectport.Digest
+	var customerID *int64
+	if err := fixture.native.QueryRow(fixture.ctx, `SELECT effect_ref,welcome_grant_ref,customer_id,source_ref_digest,effect_target_digest,effect_payload_digest,effect_policy_digest FROM channel_welcome_intents WHERE callback_id=$1`, input.CallbackKey).Scan(&effectRef, &grantRef, &customerID, &source, &target, &payload, &policy); err != nil || customerID != nil {
+		t.Fatalf("expected pre-customer welcome: %v", err)
+	}
+	name := &callbackWelcomeNameProvider{t: t, name: "回调昵称{{数据}}"}
+	reader := channelEntrantActionReaderAdapter{uow: fixture.unit, source: fixture.actions, names: wecom.WelcomeCustomerNameService{CorpID: input.CorpID, Inbox: fixture.dispatch.Inbox, Identity: unresolvedWelcomeIdentity{}, Names: customerstore.PostgreSQL{}, Provider: name, UOW: fixture.unit}}
+	envelope := effectport.Envelope{Owner: effectport.OwnerOutbound, Kind: effectport.KindChannelWelcome, SourceRefDigest: source, TargetRefDigest: target, PayloadDigest: payload, PolicyVersionHash: policy}
+	request := channelport.WelcomeMessageFreezeRequest{EffectRef: effectRef, Envelope: envelope}
+	message, err := reader.FreezePublishedWelcomeMessage(fixture.ctx, request)
+	if err != nil || message != "您好回调昵称{{数据}}" || name.calls != 1 {
+		t.Fatalf("early nickname: %q %v %+v", message, err, name)
+	}
+	name.name = "后续昵称"
+	replayed, err := reader.FreezePublishedWelcomeMessage(fixture.ctx, request)
+	if err != nil || replayed != message || name.calls != 1 {
+		t.Fatalf("replay reread or changed name: %q %v calls=%d", replayed, err, name.calls)
+	}
+	// Platform's lookup must read this same authenticated delivery even before
+	// the normal Inbox processor claims or creates the customer.
+	if err := fixture.unit.Within(fixture.ctx, func(tx context.Context) error {
+		d, err := fixture.dispatch.Inbox.Lookup(tx, "wecom.external_contact", input.CallbackKey)
+		if err == nil && (d.Status != webhook.StatusReceived || d.IdempotencyKey != input.CallbackKey) {
+			t.Fatal("lookup changed callback lifecycle")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 type channelWelcomeRuntimeFixture struct {

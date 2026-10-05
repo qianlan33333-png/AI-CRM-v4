@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	accessdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/access/domain"
+	channeldomain "github.com/qianlan33333-png/AI-CRM-v3/internal/channel/domain"
 	channelport "github.com/qianlan33333-png/AI-CRM-v3/internal/channel/port"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	groupopsport "github.com/qianlan33333-png/AI-CRM-v3/internal/groupops/port"
@@ -50,6 +52,7 @@ type entrantActionSource interface {
 type channelEntrantActionReaderAdapter struct {
 	uow    platformport.UnitOfWork
 	source entrantActionSource
+	names  wecomport.CallbackCustomerNameReader
 }
 
 func (adapter channelEntrantActionReaderAdapter) ReadPublishedEntrantAction(ctx context.Context, source string) (channelport.PublishedEntrantAction, error) {
@@ -63,6 +66,21 @@ func (adapter channelEntrantActionReaderAdapter) ReadPublishedEntrantAction(ctx 
 }
 
 func (adapter channelEntrantActionReaderAdapter) FreezePublishedWelcomeMessage(ctx context.Context, request channelport.WelcomeMessageFreezeRequest) (string, error) {
+	if adapter.names != nil {
+		action, err := adapter.ReadPublishedEntrantAction(ctx, string(request.Envelope.SourceRefDigest))
+		if err != nil || action.EffectRef != request.EffectRef {
+			return "", channelport.ErrWelcomeMessageUnavailable
+		}
+		if !action.WelcomeMessageFrozen && strings.Contains(action.WelcomeMessage, channeldomain.WelcomeCustomerNameVariable) {
+			readContext, cancel := context.WithDeadline(ctx, action.SendDeadlineAt)
+			name, err := adapter.names.CallbackCustomerName(readContext, action.CallbackID, action.WelcomeGrantRef)
+			cancel()
+			if err != nil {
+				return "", channelport.ErrWelcomeMessageCustomerNameUnavailable
+			}
+			request.CallbackID, request.ObservedDisplayName = action.CallbackID, name
+		}
+	}
 	var result string
 	err := adapter.uow.Within(ctx, func(tx context.Context) error {
 		var freezeErr error

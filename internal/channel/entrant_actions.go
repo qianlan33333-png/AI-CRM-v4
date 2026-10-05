@@ -437,10 +437,10 @@ func (*EntrantActionStore) ReadPublishedEntrantAction(ctx context.Context, sourc
 		return channelport.PublishedEntrantAction{}, err
 	}
 	var result channelport.PublishedEntrantAction
-	err = tx.QueryRow(ctx, `SELECT i.id,i.channel_id,i.config_version,COALESCE(i.customer_id,0),0,'welcome',i.effect_ref,i.welcome_grant_ref,0,i.welcome_material_snapshot,v.welcome_message,i.first_received_at,i.send_deadline_at
+	err = tx.QueryRow(ctx, `SELECT i.id,i.channel_id,i.config_version,COALESCE(i.customer_id,0),0,'welcome',i.effect_ref,i.welcome_grant_ref,0,i.welcome_material_snapshot,v.welcome_message,i.first_received_at,i.send_deadline_at,i.callback_id,EXISTS(SELECT 1 FROM channel_welcome_message_snapshots s WHERE s.welcome_intent_id=i.id)
 		FROM channel_welcome_intents i JOIN channel_config_versions v ON v.channel_id=i.channel_id AND v.config_version=i.config_version
 		WHERE i.source_ref_digest=$1 AND i.effect_ref IS NOT NULL`, source,
-	).Scan(&result.ActionID, &result.ChannelID, &result.ConfigVersion, &result.CustomerID, &result.StaffID, &result.Kind, &result.EffectRef, &result.WelcomeGrantRef, &result.LocalTagID, &result.WelcomeMaterialSnapshot, &result.WelcomeMessage, &result.FirstReceivedAt, &result.SendDeadlineAt)
+	).Scan(&result.ActionID, &result.ChannelID, &result.ConfigVersion, &result.CustomerID, &result.StaffID, &result.Kind, &result.EffectRef, &result.WelcomeGrantRef, &result.LocalTagID, &result.WelcomeMaterialSnapshot, &result.WelcomeMessage, &result.FirstReceivedAt, &result.SendDeadlineAt, &result.CallbackID, &result.WelcomeMessageFrozen)
 	if err == nil {
 		return result, nil
 	}
@@ -478,6 +478,7 @@ func (store *EntrantActionStore) FreezePublishedWelcomeMessage(ctx context.Conte
 	type welcomeIntent struct {
 		id          int64
 		customerID  customerdomain.CustomerID
+		callbackID  string
 		template    string
 		source      effectport.Digest
 		effectRef   string
@@ -487,13 +488,13 @@ func (store *EntrantActionStore) FreezePublishedWelcomeMessage(ctx context.Conte
 		fingerprint effectport.Digest
 	}
 	var intent welcomeIntent
-	err = tx.QueryRow(ctx, `SELECT i.id,COALESCE(i.customer_id,0),v.welcome_message,i.source_ref_digest,i.effect_ref,
+	err = tx.QueryRow(ctx, `SELECT i.id,COALESCE(i.customer_id,0),i.callback_id,v.welcome_message,i.source_ref_digest,i.effect_ref,
 		i.effect_target_digest,i.effect_payload_digest,i.effect_policy_digest,i.effect_envelope_fingerprint
 		FROM channel_welcome_intents i
 		JOIN channel_config_versions v ON v.channel_id=i.channel_id AND v.config_version=i.config_version
 		WHERE i.effect_ref=$1 AND i.source_ref_digest=$2
 		FOR UPDATE OF i`, request.EffectRef, request.Envelope.SourceRefDigest).Scan(
-		&intent.id, &intent.customerID, &intent.template, &intent.source, &intent.effectRef,
+		&intent.id, &intent.customerID, &intent.callbackID, &intent.template, &intent.source, &intent.effectRef,
 		&intent.target, &intent.payload, &intent.policy, &intent.fingerprint,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -550,6 +551,14 @@ func (store *EntrantActionStore) FreezePublishedWelcomeMessage(ctx context.Conte
 			return "", errors.Join(channelport.ErrWelcomeMessageCustomerNameUnavailable, readErr)
 		}
 		displayName = names[intent.customerID]
+	}
+	if request.ObservedDisplayName != "" {
+		if request.CallbackID != intent.callbackID {
+			return "", channelport.ErrWelcomeMessageUnavailable
+		}
+		if strings.TrimSpace(displayName) == "" {
+			displayName = request.ObservedDisplayName
+		}
 	}
 	rendered, renderErr := channeldomain.RenderWelcomeMessage(intent.template, displayName)
 	if renderErr != nil {

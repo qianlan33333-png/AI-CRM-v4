@@ -14,8 +14,7 @@ import (
 )
 
 // dynamicGenerationContextAdapter is a Composition-owned read aggregation. It
-// deliberately speaks only the four narrow, stable read ports that B06
-// permits. It neither resolves identities nor performs a Provider write.
+// deliberately speaks the narrow, stable read ports. It neither resolves identities nor performs a Provider write.
 type dynamicGenerationContextAdapter struct {
 	questionnaires surveyport.CustomerHistoryReader
 	messages       archiveport.CustomerMessageReader
@@ -50,6 +49,7 @@ func (a dynamicGenerationContextAdapter) FreezeGenerationContext(ctx context.Con
 		return automationport.GenerationContext{}, fmt.Errorf("read activation context: %w", err)
 	}
 	value := automationport.GenerationContext{
+		CustomerName:  strings.TrimSpace(profile.DisplayName),
 		Questionnaire: generationQuestionnaireContext(questionnaires.Items),
 		RecentChats:   generationChatContext(messages.Items),
 		Tags:          generationTagContext(tags.Items),

@@ -2059,7 +2059,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	if (cfg.WeCom.ChannelWelcomeProviderEnabled || cfg.WeCom.ChannelTagProviderEnabled) && cfg.WeCom.CallbackEnabled {
 		entrantProvider := outbound.NewChannelEntrantProvider(
-			channelEntrantActionReaderAdapter{uow: uow, source: channelEntrantActions}, channelEntrantActionReaderAdapter{uow: uow, source: channelEntrantActions}, uow, welcomeGrantStore,
+			channelEntrantActionReaderAdapter{uow: uow, source: channelEntrantActions}, channelEntrantActionReaderAdapter{uow: uow, source: channelEntrantActions, names: wecom.WelcomeCustomerNameService{CorpID: cfg.WeCom.CorpID, Inbox: inboxService, Identity: oneID, Names: customerStore, Provider: providerClient, UOW: uow}}, uow, welcomeGrantStore,
 			channelCurrentContactAdapter{uow: uow, corpID: cfg.WeCom.CorpID, staff: accessRepository, identities: queries},
 			channelProviderTagAdapter{uow: uow, tags: tagRepository}, providerClient,
 		)

@@ -13,9 +13,10 @@ import (
 )
 
 // GenerationContext is frozen before an AI generation effect is accepted. It
-// intentionally has only the four product-approved sources; adapters may use
+// intentionally has the product-approved sources, including the database customer name; adapters may use
 // their owning read ports, but Completion must never re-read any of them.
 type GenerationContext struct {
+	CustomerName  string `json:"customer_name,omitempty"`
 	Questionnaire string `json:"questionnaire"`
 	RecentChats   string `json:"recent_chats"`
 	Tags          string `json:"tags"`
@@ -37,7 +38,7 @@ type GeneratedPolicyDelivery struct {
 }
 
 func (c GenerationContext) Valid() bool {
-	for _, value := range []string{c.Questionnaire, c.RecentChats, c.Tags, c.Activation} {
+	for _, value := range []string{c.CustomerName, c.Questionnaire, c.RecentChats, c.Tags, c.Activation} {
 		if len(value) > 16000 {
 			return false
 		}
@@ -58,7 +59,7 @@ func ValidGeneratedText(value, rolePrompt, taskPrompt string) bool {
 	if text == "" || utf8.RuneCountInString(text) > 8000 || strings.Contains(text, "{{") || strings.Contains(text, "}}") {
 		return false
 	}
-	for _, marker := range []string{"【问卷】", "【最近20条聊天】", "【用户标签】", "【激活信息】"} {
+	for _, marker := range []string{"【用户名】", "【问卷】", "【最近20条聊天】", "【用户标签】", "【激活信息】"} {
 		if strings.Contains(text, marker) {
 			return false
 		}
@@ -182,4 +183,13 @@ type GenerationProgress struct {
 	Succeeded int64 `json:"succeeded"`
 	Failed    int64 `json:"failed"`
 	Unknown   int64 `json:"unknown"`
+}
+
+// RenderCustomerNamePrompt performs a single replacement; names are data,
+// never recursively interpreted as template syntax or prompt instructions.
+func RenderCustomerNamePrompt(prompt, name string) string {
+	if strings.TrimSpace(name) == "" {
+		name = "朋友"
+	}
+	return strings.NewReplacer("{{用户名}}", name, "{{客户名}}", name).Replace(prompt)
 }

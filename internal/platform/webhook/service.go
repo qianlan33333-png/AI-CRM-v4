@@ -64,6 +64,12 @@ type DeliveryReader interface {
 	Get(context.Context, int64) (Delivery, error)
 }
 
+// DeliveryKeyReader reloads an authenticated delivery without claiming it or
+// waiting for its asynchronous processing to finish.
+type DeliveryKeyReader interface {
+	Lookup(context.Context, string, idempotency.Key) (Delivery, error)
+}
+
 // ClaimGuard holds the Inbox row lock for the caller's transaction. A page
 // commit cannot race the existing Claim transition to a newer attempt.
 type ClaimGuard interface {
@@ -219,6 +225,20 @@ func (service *Service) Get(ctx context.Context, id int64) (Delivery, error) {
 		return Delivery{}, ErrInvalidDelivery
 	}
 	return reader.Get(ctx, id)
+}
+
+func (service *Service) Lookup(ctx context.Context, provider string, key idempotency.Key) (Delivery, error) {
+	if service == nil || !validProvider(provider) {
+		return Delivery{}, ErrInvalidDelivery
+	}
+	if _, err := idempotency.Parse(string(key)); err != nil {
+		return Delivery{}, ErrInvalidDelivery
+	}
+	reader, ok := service.store.(DeliveryKeyReader)
+	if !ok {
+		return Delivery{}, ErrInvalidDelivery
+	}
+	return reader.Lookup(ctx, provider, key)
 }
 
 func validProvider(value string) bool {
