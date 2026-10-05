@@ -10,6 +10,7 @@ import (
 
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/payment/domain"
 	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
+	platformjobqueue "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/jobqueue"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 )
 
@@ -58,7 +59,12 @@ func (enqueuer *RiverReconciliationEnqueuer) EnqueueWithin(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	_, err = enqueuer.client.InsertTx(ctx, tx, ReconciliationJobArgs{Provider: target.Provider, PaymentID: target.PaymentID, RefundID: target.RefundID}, &river.InsertOpts{Queue: ReconciliationQueue, MaxAttempts: reconciliationMaxAttempts(target)})
+	args := ReconciliationJobArgs{Provider: target.Provider, PaymentID: target.PaymentID, RefundID: target.RefundID}
+	found, err := platformjobqueue.HasNonDiscardedJobTx(ctx, tx, args, ReconciliationQueue)
+	if err != nil || found {
+		return err
+	}
+	_, err = enqueuer.client.InsertTx(ctx, tx, args, &river.InsertOpts{Queue: ReconciliationQueue, MaxAttempts: reconciliationMaxAttempts(target), UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true}})
 	return err
 }
 

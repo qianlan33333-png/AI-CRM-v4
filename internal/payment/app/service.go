@@ -1380,8 +1380,8 @@ func (s *Service) ApplyVerifiedCallback(ctx context.Context, callback paymentpro
 				if s.reconcileJobs == nil || s.alipayReconciler == nil {
 					return paymentport.ErrUnavailable
 				}
-				replay, err := s.store.ClaimCallback(tx, callbackProvider, callback.EventDigest, callback.BodyDigest, "payment", "query_required", payment.ID)
-				if err != nil || replay {
+				_, err := s.store.ClaimCallback(tx, callbackProvider, callback.EventDigest, callback.BodyDigest, "payment", "query_required", payment.ID)
+				if err != nil {
 					return err
 				}
 				return s.reconcileJobs.EnqueueWithin(tx, paymentport.ReconciliationTarget{Provider: domain.ProviderAlipay, PaymentID: payment.ID})

@@ -3,6 +3,7 @@ package jobqueue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/platform/diagnostics"
 	"time"
@@ -161,4 +162,21 @@ func (r *Runtime) Run(ctx context.Context) error {
 	case <-r.client.Stopped():
 		return errors.New("River stopped unexpectedly")
 	}
+}
+
+// HasNonDiscardedJobTx also recognizes jobs written before unique insertion
+// was enabled. Callers serialize the owning business target in this transaction;
+// River's unique insert protects concurrent new producers. A cancelled task is
+// deliberately retained rather than undoing an operator's cancellation.
+func HasNonDiscardedJobTx(ctx context.Context, tx pgx.Tx, args river.JobArgs, queue string) (bool, error) {
+	if tx == nil || args == nil || queue == "" {
+		return false, ErrUnavailable
+	}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return false, err
+	}
+	var found bool
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM river_job WHERE kind=$1 AND queue=$2 AND args=$3::jsonb AND state<>'discarded')`, args.Kind(), queue, string(raw)).Scan(&found)
+	return found, err
 }
