@@ -2,7 +2,8 @@
   "schema": 1,
   "baseline_sha": "d193cdf4895501e8159d0d435f7172b11afb50aa",
   "checks": [
-    {"lane": "backend", "path": "internal/webshell/handler_test.go", "test": "TestRenderAutomationUsesOnlyV3CreateCodeHostBinding"}
+    {"lane": "backend", "path": "internal/webshell/handler_test.go", "test": "TestRenderAutomationUsesOnlyV3CreateCodeHostBinding"},
+    {"lane": "backend", "path": "internal/automation/store/prompt_chain_integration_test.go", "test": "TestPostgreSQLLongPromptHTTPPublishDispatchProvider"}
   ],
   "installed_checks": ["welcome", "automation-generation"]
 }

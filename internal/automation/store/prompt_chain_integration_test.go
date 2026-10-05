@@ -25,6 +25,8 @@ import (
 	automationhttp "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/http"
 	automationport "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/port"
 	automationprovider "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/provider"
+	configapp "github.com/qianlan33333-png/AI-CRM-v3/internal/config/app"
+	configstore "github.com/qianlan33333-png/AI-CRM-v3/internal/config/store"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
@@ -285,6 +287,19 @@ func testPromptChain(t *testing.T, role, task string) {
 	if err = runtimeService.SetDynamicGenerationDependencies(effects, contexts, service, promptChainPolicy{policy}); err != nil {
 		t.Fatal(err)
 	}
+	// Use Config's actual closed usage contract and PostgreSQL recorder, as
+	// composition does. A synthetic recorder would miss rejected operations.
+	configRepository, err := configstore.NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeConfig, err := configapp.NewRuntimeReleaseService(uow, configRepository, configRepository, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = runtimeService.SetRuntimeConfig(runtimeConfig, runtimeConfig); err != nil {
+		t.Fatal(err)
+	}
 	preview, err := runtimeService.CreateBroadcastPreview(ctx, 17, 7)
 	if err != nil {
 		t.Fatalf("create long prompt preview: %v", err)
@@ -301,6 +316,10 @@ func testPromptChain(t *testing.T, role, task string) {
 	var runs, items, receipts int
 	if err := native.QueryRow(ctx, `SELECT (SELECT count(*) FROM automation_runs),(SELECT count(*) FROM automation_generation_items),(SELECT count(*) FROM automation_runtime_operation_receipts WHERE operation='confirm_run' AND state='completed')`).Scan(&runs, &items, &receipts); err != nil || runs != 1 || items != 1 || receipts != 1 {
 		t.Fatalf("confirmation replay counts runs/items/receipts=%d/%d/%d err=%v", runs, items, receipts, err)
+	}
+	var confirmUsages int
+	if err := native.QueryRow(ctx, `SELECT count(*) FROM config_runtime_usage WHERE operation='confirm' AND subject_kind='automation_run' AND subject_id=$1 AND source='environment_default' AND revision=0`, run.ID).Scan(&confirmUsages); err != nil || confirmUsages != 1 {
+		t.Fatalf("dynamic confirmation must atomically record one Config usage despite replay: count=%d err=%v", confirmUsages, err)
 	}
 	var item automationdomain.GenerationItem
 	if err = uow.Within(ctx, func(tx context.Context) error {

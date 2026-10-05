@@ -106,7 +106,7 @@ func (s *RuntimeService) confirmDynamicRun(ctx context.Context, c RunConfirmComm
 			if preview.RuntimeConfigRevision > 0 {
 				frozen.Source = configport.RuntimeSourcePublished
 			}
-			if usageErr := s.recordRuntimeConfigUsage(tx, frozen, "api", "confirm_dynamic", "automation_run", run.ID, now); usageErr != nil {
+			if usageErr := s.recordRuntimeConfigUsage(tx, frozen, "api", "confirm", "automation_run", run.ID, now); usageErr != nil {
 				return run, RuntimeFact{}, usageErr
 			}
 		}

@@ -46,3 +46,5 @@ flowchart TD
 |验证|回调早于客户/昵称、缺名、错误身份拒绝、目录名称优先、事务外 Provider read、冻结重放、模型请求名称、旧 JSON 兼容、按钮插入和保存|
 
 回退：兼容条件下上一完整包；新的可选 JSON 字段对旧包可读。局部检查不称全量回归；合成 Provider 不证明真实收件人。唯一发布工作台按原队列和同包路径处理，本开发任务不安装共享环境。
+
+安装验证发现相关既有缺陷：动态生成确认写 Config usage 时使用 `confirm_dynamic`，而 Config 的应用验证和 PostgreSQL CHECK 只接受 `preview/confirm/execution`，导致整个确认事务回滚并返回 503。改为现有 `confirm` 合同；领域事件名称、队列、发送约束保持现状。长提示词 PostgreSQL 旅程接入真实 Config UsageRecorder，验证一次提交记录一个 usage，重试仍只产生一个 run/item/确认收据；安装二进制仍须独立验证用户名冻结与模型请求。测试先复现原 503 再验证修复，不放宽 Config 合同或绕过事务。
