@@ -155,6 +155,7 @@ type OrderDistributionLine struct {
 	ProductName                                                 string
 	DistributorCustomerID                                       customerdomain.CustomerID
 	DistributorDisplayName                                      string
+	DistributorPublicNo                                         string
 	RateBasisPoints, WaitDays                                   int32
 	PolicyVersion                                               int64
 	InitialMinor, CurrentPayableMinor, PaidMinor                int64

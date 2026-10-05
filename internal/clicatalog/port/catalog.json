@@ -4383,13 +4383,19 @@
       "responses": {
         "200": {
           "content": {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
             "text/csv": {
               "schema": {
                 "type": "string"
               }
             }
           },
-          "description": "Receipt-backed CSV"
+          "description": "Receipt-backed full-data order spreadsheet with 27 fixed columns. Missing facts are blank."
         },
         "400": {
           "$ref": "#/components/responses/Error"
@@ -4446,13 +4452,19 @@
       "responses": {
         "200": {
           "content": {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
             "text/csv": {
               "schema": {
                 "type": "string"
               }
             }
           },
-          "description": "PII-safe local order CSV"
+          "description": "Receipt-backed full-data WeChat order spreadsheet with the same 27 columns."
         },
         "400": {
           "$ref": "#/components/responses/Error"
@@ -17294,7 +17306,8 @@
                 "wechat",
                 "wechat_pay",
                 "wechat_shop",
-                "alipay"
+                "alipay",
+                "external_history"
               ],
               "type": "string"
             }
@@ -22694,12 +22707,11 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/TransactionExportPreview"
               }
             }
           },
-          "description": "Bounded export preview"
+          "description": "Current filter across all pages. total is bounded detail rows; order_count and row_count distinguish orders from items. truncated indicates the existing export limit."
         },
         "400": {
           "$ref": "#/components/responses/Error"
@@ -53310,6 +53322,104 @@
       ],
       "type": "object"
     },
+    "PublicPaymentCheckoutRequest": {
+      "additionalProperties": false,
+      "description": "The server freezes price, contact requirements and attribution from the product and trusted session. Browser contact fields are encrypted Order snapshots and never identity claims. Optional provider defaults to the path provider; the path constrains its accepted channels.",
+      "properties": {
+        "beneficiary_selection": {
+          "enum": [
+            "payer_self"
+          ],
+          "type": "string"
+        },
+        "channel": {
+          "enum": [
+            "",
+            "mini_program",
+            "h5_official_account",
+            "alipay_wap",
+            "alipay_page"
+          ],
+          "type": "string"
+        },
+        "checkout_session_binding": {
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "type": "string"
+        },
+        "city_code": {
+          "type": "string"
+        },
+        "city_name": {
+          "type": "string"
+        },
+        "contact_collection_level": {
+          "description": "The current product policy remains authoritative.",
+          "enum": [
+            "",
+            "none",
+            "mobile",
+            "shipping_address"
+          ],
+          "type": "string"
+        },
+        "coupon_claim_id": {
+          "description": "Zero means no coupon claim.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "detail_address": {
+          "type": "string"
+        },
+        "district_code": {
+          "type": "string"
+        },
+        "district_name": {
+          "type": "string"
+        },
+        "mobile": {
+          "pattern": "^\\+861[3-9][0-9]{9}$",
+          "type": "string"
+        },
+        "product_id": {
+          "$ref": "#/components/schemas/PositiveID"
+        },
+        "product_kind": {
+          "enum": [
+            "standard",
+            "service_period"
+          ],
+          "type": "string"
+        },
+        "promotion_context": {
+          "description": "Opaque Distribution credential; commission and participants are validated and frozen server-side.",
+          "pattern": "^(dpc_[A-Za-z0-9_-]{43})?$",
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "wechat_pay",
+            "alipay"
+          ],
+          "type": "string"
+        },
+        "province_code": {
+          "type": "string"
+        },
+        "province_name": {
+          "type": "string"
+        },
+        "recipient_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "product_id",
+        "product_kind",
+        "beneficiary_selection",
+        "checkout_session_binding"
+      ],
+      "type": "object"
+    },
     "PublicProduct": {
       "additionalProperties": false,
       "properties": {
@@ -56901,6 +57011,45 @@
       ],
       "type": "string"
     },
+    "TransactionExportPreview": {
+      "properties": {
+        "format": {
+          "enum": [
+            "xlsx",
+            "csv"
+          ],
+          "type": "string"
+        },
+        "order_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resource": {
+          "const": "orders",
+          "type": "string"
+        },
+        "row_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "resource",
+        "format",
+        "total",
+        "order_count",
+        "row_count",
+        "truncated"
+      ],
+      "type": "object"
+    },
     "TransactionExportRequest": {
       "additionalProperties": false,
       "properties": {
@@ -56913,7 +57062,11 @@
           "type": "object"
         },
         "format": {
-          "const": "csv",
+          "default": "xlsx",
+          "enum": [
+            "xlsx",
+            "csv"
+          ],
           "type": "string"
         },
         "resource": {
@@ -56922,8 +57075,7 @@
         }
       },
       "required": [
-        "resource",
-        "format"
+        "resource"
       ],
       "type": "object"
     },
@@ -56935,6 +57087,7 @@
           "type": "string"
         },
         "created_at": {
+          "description": "Internal ordering time; external historical presentation uses source_paid_at exclusively.",
           "format": "date-time",
           "type": "string"
         },
@@ -57217,6 +57370,10 @@
         "id": {
           "$ref": "#/components/schemas/PositiveID"
         },
+        "imported_at": {
+          "format": "date-time",
+          "type": "string"
+        },
         "merchant_order_no": {
           "maxLength": 200,
           "type": "string"
@@ -57260,7 +57417,8 @@
           "enum": [
             "wechat",
             "wechat_shop",
-            "alipay"
+            "alipay",
+            "external_history"
           ],
           "type": "string"
         },
@@ -57278,6 +57436,24 @@
           "format": "int64",
           "minimum": 0,
           "type": "integer"
+        },
+        "refunded_minor": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_after_sales": {
+          "type": "string"
+        },
+        "source_paid_at": {
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_status": {
+          "type": "string"
         },
         "status": {
           "type": "string"

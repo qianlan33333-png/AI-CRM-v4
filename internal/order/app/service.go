@@ -131,6 +131,7 @@ type Service struct {
 	attribution                orderport.CheckoutAttributionCoordinator
 	productSaleAttribution     orderport.ProductSaleCheckoutCoordinator
 	historicalEvidenceVerifier historicalQualificationEvidenceVerifier
+	exportFacts                orderport.ExportFactsReader
 	now                        func() time.Time
 }
 
@@ -932,58 +933,6 @@ func (s *Service) GetByReferenceForCustomer(ctx context.Context, reference strin
 	return matches[0].Snapshot(), nil
 }
 
-func (s *Service) PreviewExport(ctx context.Context, query orderport.ListQuery) (orderport.ExportPreview, error) {
-	if !ready(s) || !validListQuery(query) {
-		return orderport.ExportPreview{}, orderport.ErrConflict
-	}
-	var rows []domain.Order
-	err := s.uow.Within(ctx, func(tx context.Context) error {
-		var exportErr error
-		rows, exportErr = s.store.Export(tx, filterFrom(query), 10001)
-		return exportErr
-	})
-	if err != nil {
-		return orderport.ExportPreview{}, classify(err)
-	}
-	return orderport.ExportPreview{Rows: min(len(rows), 10000), Truncated: len(rows) > 10000}, nil
-}
-
-func (s *Service) ExportCSV(ctx context.Context, query orderport.ListQuery, actor int64, idempotencyKey string) (orderport.ExportResult, error) {
-	if !ready(s) || actor < 1 || !validKey(idempotencyKey) || !validListQuery(query) {
-		return orderport.ExportResult{}, orderport.ErrConflict
-	}
-	filterPayload, _ := json.Marshal(filterFrom(query))
-	receipt := ExportReceipt{Actor: actor, KeyDigest: sha256.Sum256([]byte(idempotencyKey)), FilterDigest: sha256.Sum256(filterPayload), CreatedAt: s.now().UTC()}
-	var result orderport.ExportResult
-	err := s.uow.Within(ctx, func(tx context.Context) error {
-		rows, exportErr := s.store.Export(tx, filterFrom(query), 10001)
-		if exportErr != nil {
-			return exportErr
-		}
-		if len(rows) > 10000 {
-			return orderport.ErrConflict
-		}
-		content := encodeCSV(rows)
-		if len(content) > 5<<20 {
-			return orderport.ErrConflict
-		}
-		receipt.RowCount, receipt.ByteCount, receipt.ContentDigest = len(rows), len(content), sha256.Sum256(content)
-		stored, _, recordErr := s.store.RecordExport(tx, receipt)
-		if recordErr != nil {
-			return recordErr
-		}
-		if stored.FilterDigest != receipt.FilterDigest || stored.ContentDigest != receipt.ContentDigest || stored.RowCount != receipt.RowCount || stored.ByteCount != receipt.ByteCount {
-			return orderport.ErrConflict
-		}
-		result = orderport.ExportResult{ReceiptID: stored.ID, Rows: len(rows), Bytes: len(content), Content: content, ContentDigest: receipt.ContentDigest}
-		return nil
-	})
-	if err != nil {
-		return orderport.ExportResult{}, classify(err)
-	}
-	return result, nil
-}
-
 func validListQuery(query orderport.ListQuery) bool {
 	if query.CustomerID < 0 || query.Offset < 0 || query.Offset > 1000000 || (query.Cursor != "" && query.Offset != 0) || len(query.OrderRef) > 200 || len(query.Product) > 200 {
 		return false
@@ -1006,32 +955,6 @@ func validListQuery(query orderport.ListQuery) bool {
 
 func filterFrom(query orderport.ListQuery) ListFilter {
 	return ListFilter{Offset: query.Offset, Provider: query.Provider, Status: query.Status, OrderRef: strings.TrimSpace(query.OrderRef), CustomerID: query.CustomerID, Product: strings.TrimSpace(query.Product), CreatedFrom: query.CreatedFrom, CreatedTo: query.CreatedTo, NoCustomerMatch: query.NoCustomerMatch}
-}
-
-func encodeCSV(orders []domain.Order) []byte {
-	var builder strings.Builder
-	builder.WriteString("created_at,merchant_order_no,provider_transaction_no,provider,payer_customer_id,beneficiary_customer_id,product_code,product_name,amount_minor,currency,status,record_origin,refunded_minor,source_status,source_after_sales,imported_at\r\n")
-	for _, order := range orders {
-		snapshot := order.Snapshot()
-		productCode, productName := "", ""
-		if len(snapshot.Items) > 0 {
-			productCode, productName = snapshot.Items[0].ProductCode, snapshot.Items[0].ProductName
-		}
-		values := []string{orderOriginalTime(snapshot), snapshot.MerchantOrderNo, snapshot.ProviderTransactionNo, orderProviderLabel(snapshot.Provider), optionalID(snapshot.PayerCustomerID), optionalID(snapshot.BeneficiaryCustomerID), productCode, productName, strconv.FormatInt(snapshot.Amount.AmountMinor, 10), snapshot.Amount.Currency, orderStatusLabel(snapshot.Status), orderRecordOriginLabel(snapshot.RecordOrigin), strconv.FormatInt(snapshot.RefundedMinor, 10), "", "", ""}
-		if f := snapshot.ExternalHistory; f != nil {
-			values[len(values)-3] = f.SourceStatus
-			values[len(values)-2] = f.SourceAfterSales
-			values[len(values)-1] = presentationtime.FormatShanghaiDateTime(f.ImportedAt)
-		}
-		for index, value := range values {
-			if index > 0 {
-				builder.WriteByte(',')
-			}
-			builder.WriteString(csvCell(value))
-		}
-		builder.WriteString("\r\n")
-	}
-	return []byte(builder.String())
 }
 
 func orderProviderLabel(value domain.Provider) string {
@@ -1086,13 +1009,6 @@ func optionalID(value *int64) string {
 		return ""
 	}
 	return strconv.FormatInt(*value, 10)
-}
-
-func csvCell(value string) string {
-	if value != "" && strings.ContainsRune("=+-@", rune(value[0])) {
-		value = "'" + value
-	}
-	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func (s *Service) ApplySettlement(ctx context.Context, command orderport.SettlementCommand) (domain.Snapshot, error) {

@@ -9,6 +9,7 @@ import { buildTestBrowserBundle } from '../scripts/test-browser-bundle.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const bundle = await build({ stdin: { contents: "import './web/v3/orderAdapter'; import {AdminController} from './web/src/admin/controller'; import {api} from './web/src/shared/api/client'; window.OrderControllerFixture = AdminController; window.OrderAdapterApi = api;", resolveDir: root, loader: 'ts' }, bundle: true, format: 'iife', write: false, platform: 'browser', logLevel: 'silent' });
 const host = bundle.outputFiles[0].text;
+const feedback = (await build({stdin:{contents:'import {initFeedback} from "./web/src/shared/ui/feedback.ts"; initFeedback();',resolveDir:root},bundle:true,format:"iife",write:false,platform:"browser",logLevel:"silent"})).outputFiles[0].text;
 const pause = () => new Promise((resolve) => setTimeout(resolve, 15));
 const refundActorBinding = 'b'.repeat(64);
 const alternateRefundActorBinding = 'c'.repeat(64);
@@ -18,7 +19,7 @@ function recoveryNotFound(actorBinding = refundActorBinding) {
 }
 
 function browserRuntime(window) {
-  window.Request = Request; window.Response = Response; window.Headers = Headers;
+  window.Request = Request; window.Response = Response; window.Headers = Headers; window.URL.createObjectURL = () => 'blob:fixture'; window.URL.revokeObjectURL = () => {}; window.HTMLAnchorElement.prototype.click = function () { window.fixtureDownload = this.download; window.fixtureDownloadOwned = this.__dcBound === true; };
   Object.defineProperty(window, 'crypto', { value: webcrypto, configurable: true });
 }
 
@@ -68,7 +69,7 @@ try {
 
   document.getElementById('orderMobile').value = '138 0013 8000';
   document.querySelector('button').click(); await pause();
-  assert.match(document.body.textContent, /筛选暂不支持导出/, 'identity-filtered result sets must not silently export all orders');
+  assert.equal(document.getElementById('order-export-all').textContent, '导出订单 XLSX'); assert.ok(calls.some(url => url.pathname === '/api/admin/exports/preview' && url.search === ''), 'identity-filtered export uses the server resolver');
   document.getElementById('orderMobile').value = '138 0013 8000';
   const directListResponse = await dom.window.fetch('/api/admin/orders?limit=50&offset=0');
   assert.equal(calls.at(-1).searchParams.get('phone'), '13800138000', 'phone searches must stay server-side and preserve paging');
@@ -1151,12 +1152,36 @@ console.log('external history original time, refund summary, customer and read-o
 
 const externalListCalls=[];
 const externalListDom=new JSDOM(`<!doctype html><body><input id="orderTransactionId"><input id="orderProductCode"><input id="orderMobile"><button>导出微信支付 CSV</button><table><thead><tr><th>创建时间</th><th>微信 / 平台单号</th><th>付款人 / 客户身份</th><th>商品</th><th>金额</th><th>状态</th><th>支付来源</th><th>操作</th></tr></thead><tbody><tr><td>2026-10-04T04:00:00Z</td><td><div>external-list-1</div></td><td><div>客户甲</div><div>customer:101</div></td><td>零元历史</td><td>0.00</td><td>closed</td><td>外部历史订单</td><td><a>查看详情</a></td></tr></tbody></table></body>`,{
-  url:'https://test.invalid/admin/orders',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:new VirtualConsole(),beforeParse(window){browserRuntime(window);window.URL.createObjectURL=()=> 'blob:test-history';window.URL.revokeObjectURL=()=>{};window.fetch=async(input,init)=>{const url=new URL(typeof input==='string'?input:input.url,window.location.href);externalListCalls.push({url,init});if(url.pathname==='/api/admin/exports')return new Response('原时间未知',{status:200});return new Response(JSON.stringify({items:[{id:801,merchant_order_no:'external-list-1',provider:'external_history',provider_label:'外部历史订单',record_origin:'v1_history',source_paid_at:null,created_at:'2026-10-04T04:00:00Z',amount_yuan:'0.00',status:'closed',detail_url:'/admin/orderDetail.html?id=external-list-1&provider=external_history',payer_id:101,payer_customer_number:'CID-101',distribution_read_state:'available',distribution:[]}]}),{status:200,headers:{'Content-Type':'application/json'}})}}
+  url:'https://test.invalid/admin/orders',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:new VirtualConsole(),beforeParse(window){browserRuntime(window);window.URL.createObjectURL=()=> 'blob:test-history';window.URL.revokeObjectURL=()=>{};window.fetch=async(input,init)=>{const url=new URL(typeof input==='string'?input:input.url,window.location.href);externalListCalls.push({url,init});if(url.pathname==='/api/admin/exports/preview')return new Response(JSON.stringify({order_count:1,row_count:1,truncated:false}),{headers:{'Content-Type':'application/json'}});if(url.pathname==='/api/admin/exports')return new Response('fixture workbook',{status:200,headers:{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}});return new Response(JSON.stringify({items:[{id:801,merchant_order_no:'external-list-1',provider:'external_history',provider_label:'外部历史订单',record_origin:'v1_history',source_paid_at:null,created_at:'2026-10-04T04:00:00Z',amount_yuan:'0.00',status:'closed',detail_url:'/admin/orderDetail.html?id=external-list-1&provider=external_history',payer_id:101,payer_customer_number:'CID-101',distribution_read_state:'available',distribution:[]}]}),{status:200,headers:{'Content-Type':'application/json'}})}}
 });
 try{
  externalListDom.window.eval(host);const controller=new externalListDom.window.OrderControllerFixture({mode:'http'},'orders');controller.db=await externalListDom.window.OrderAdapterApi.loadDb({page:'orders'});controller.renderVals();externalListDom.window.document.querySelector('tbody tr').append(externalListDom.window.document.createElement('span'));await pause();
  assert.equal(externalListDom.window.document.querySelector('tbody tr td').textContent,'原时间未知');
  assert.equal(new URL(externalListDom.window.document.querySelector('tbody tr').dataset.orderDetailUrl).searchParams.get('provider'),'external_history');
- const button=externalListDom.window.document.getElementById('order-export-all');assert.ok(button);button.click();await pause();const exported=externalListCalls.find(c=>c.url.pathname==='/api/admin/exports');assert.ok(exported);assert.deepEqual(JSON.parse(exported.init.body),{resource:'orders',format:'csv',filter:{}});assert.ok(new Headers(exported.init.headers).get('Idempotency-Key'));
+ const button=externalListDom.window.document.getElementById('order-export-all');assert.ok(button);button.click();await pause();const exported=externalListCalls.find(c=>c.url.pathname==='/api/admin/exports');assert.ok(exported);assert.deepEqual(JSON.parse(exported.init.body),{resource:'orders',format:'xlsx',filter:{}});assert.ok(new Headers(exported.init.headers).get('Idempotency-Key'));
 }finally{externalListDom.window.close()}
-console.log('external history list original time, scoped detail and all-order CSV export journey: PASS');
+console.log('external history list original time, scoped detail and all-order XLSX export journey: PASS');
+
+for (const scenario of ['success', 'empty', 'overflow', 'identity-error', 'forbidden']) {
+ const requests=[];let finishDownload;
+ const fixture=new JSDOM(`<!doctype html><body><input id="orderTransactionId" value="saved-reference"><input id="orderProductCode" value="000123"><input id="orderMobile" value="138 0000 0088"><select id="orderStatus"><option selected value="paid">已支付</option></select><input id="orderCreatedFrom" value="2026-10-01"><input id="orderCreatedTo" value="2026-10-05"><button type="button">导出微信支付 CSV</button></body>`,{url:'https://test.invalid/admin/orders',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:new VirtualConsole(),beforeParse(window){browserRuntime(window);window.fetch=async(input,init)=>{
+  const url=new URL(typeof input==='string'?input:input.url,window.location.href);requests.push({url,init});
+  if(url.pathname==='/api/admin/exports/preview') {
+   if(scenario==='identity-error'||scenario==='forbidden')return new Response(JSON.stringify({error:'unavailable'}),{status:scenario==='forbidden'?403:503,headers:{'Content-Type':'application/json'}});
+   return new Response(JSON.stringify({order_count:scenario==='empty'?0:2,row_count:scenario==='empty'?0:3,truncated:scenario==='overflow'}),{headers:{'Content-Type':'application/json'}});
+  }
+  if(url.pathname==='/api/admin/exports')return new Promise(resolve=>{finishDownload=()=>resolve(new Response(new Uint8Array([80,75]),{headers:{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}}));});
+  return new Response(JSON.stringify({items:[],total:0}),{headers:{'Content-Type':'application/json'}});
+ };}});
+ try {
+  fixture.window.eval(feedback);fixture.window.eval(host);await pause();const button=fixture.window.document.getElementById('order-export-all');button.click();await pause();
+  const preview=requests.find(r=>r.url.pathname==='/api/admin/exports/preview');assert.ok(preview);const body=JSON.parse(preview.init.body);
+  assert.equal(body.format,'xlsx');assert.equal(body.filter.phone,'13800000088');assert.equal(body.filter.status,'paid');assert.equal(body.filter.product,'000123');assert.equal(body.filter.order_ref,'saved-reference');assert.equal(body.filter.created_from,'2026-10-01');assert.equal(body.filter.created_to,'2026-10-05');assert.equal(body.filter.offset,undefined);
+  if(scenario==='success'||scenario==='empty'){
+   assert.equal(button.disabled,true);assert.equal(fixture.window.document.getElementById('order-export-status').hidden,false);assert.match(fixture.window.document.getElementById('order-export-status').textContent,scenario==='empty'?/0 笔订单，0 条商品明细/:/2 笔订单，3 条商品明细/);assert.ok(finishDownload);finishDownload();await pause();assert.equal(fixture.window.fixtureDownload,'订单明细.xlsx');assert.equal(fixture.window.fixtureDownloadOwned,true);assert.doesNotMatch(fixture.window.document.getElementById('fb-toast')?.textContent||'',/后端能力未就绪/);assert.equal(button.disabled,false);assert.match(fixture.window.document.getElementById('order-export-status').textContent,/已下载/);
+  } else {
+   assert.equal(requests.filter(r=>r.url.pathname==='/api/admin/exports').length,0,'failed preview must not dispatch a download');assert.equal(button.disabled,false);assert.match(fixture.window.document.body.textContent,scenario==='overflow'?/超过数量上限/:scenario==='forbidden'?/当前账号无法导出/:/订单导出失败/);
+  }
+ } finally {fixture.window.close();}
+}
+console.log('unified export filters, counts, empty workbook, loading, errors and XLSX download: PASS');

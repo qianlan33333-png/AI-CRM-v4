@@ -1,60 +1,18 @@
 {
   "schema": 1,
-  "baseline_sha": "94d4b845f9d9ddcc30e7e05432032ba1677fac5a",
+  "baseline_sha": "641d75779c46dc32b7db05d057580dd2f7a4d849",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/product/app",
-      "postgres": true
+      "package": "./internal/order/app"
     },
     {
       "lane": "backend",
-      "package": "./internal/product/store",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/http",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/provider",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/http",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/order/app",
-      "postgres": true
+      "package": "./internal/order/http"
     },
     {
       "lane": "backend",
       "package": "./internal/order/store",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/http",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
       "postgres": true
     },
     {
@@ -64,35 +22,18 @@
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/payment_alipay_unknown_time_postgres_integration_test.go",
-      "test": "TestPostgreSQLAlipayUnknownPaymentTimeQueuesOriginalQuery",
+      "package": "./internal/payment/store",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/payment_alipay_second_precision_postgres_integration_test.go",
-      "test": "TestPostgreSQLAlipaySignedSecondPrecision",
-      "postgres": true
+      "package": "./internal/crmcli"
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/product_image_mutation_postgres_integration_test.go",
-      "test": "TestPostgreSQLProductImageEditorClearAndCopy",
+      "path": "cmd/aicrm/order_export_postgres_integration_test.go",
+      "test": "TestPostgreSQLUnifiedOrderExportHTTPAndCLI",
       "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/payment_alipay_callback_postgres_integration_test.go",
-      "test": "TestPostgreSQLAlipayConcurrentCallbacksSettleOnceAndRollback",
-      "postgres": true
-    },
-    {
-      "lane": "frontend",
-      "path": "scripts/validate-openapi.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/product_transport_deadline.test.mjs"
     },
     {
       "lane": "backend",
@@ -100,129 +41,16 @@
       "test": "TestOpenAPIDownloadIsAuthenticatedAndMatchesTheReleaseSource"
     },
     {
-      "lane": "backend",
-      "package": "./internal/referral/store",
-      "postgres": true
+      "lane": "frontend",
+      "path": "web/v3/orderAdapter.test.mjs"
     },
     {
-      "lane": "backend",
-      "package": "./internal/distribution/http",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/coupon/app",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/coupon/http",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/coupon/store",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/product_scoped_share_postgres_integration_test.go",
-      "test": "TestPostgreSQLProductScopedShareBoundsAndArchivedRevocation",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/distribution_self_read_phase2_postgres_integration_test.go",
-      "test": "TestPostgreSQLDistributionSelfReadHTTPIsolation",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/commerce_funds_http_integration_test.go",
-      "test": "TestPostgreSQLCommerceFundsHTTPJourney",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/referral_h5_oauth_postgres_integration_test.go",
-      "test": "TestPostgreSQLReferralH5OAuthReturnRoundTrip",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/referral/app/product_activity_context_postgres_integration_test.go",
-      "test": "TestPostgreSQLProductActivityContextHTTPIdempotencyAndExpiry",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/payment_refund_actor_scope_postgres_integration_test.go",
-      "test": "TestPostgreSQLRefundHTTPActorScopedKeysAndLegacyReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/coupon_public_claim_phase2_postgres_integration_test.go",
-      "test": "TestPostgreSQLCouponPublicClaimHTTPReplayAndHolder",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/commerce_authorization_equivalence_postgres_test.go",
-      "test": "TestPostgreSQLCommerceAuthorizationObjectRoleEquivalence",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/payment_query_discard_recovery_postgres_test.go",
-      "test": "TestPostgreSQLPaymentQueryDiscardRecoveryOnCallbackReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/payment_query_restart_postgres_test.go",
-      "test": "TestPostgreSQLPaymentQueryWorkerRestartCompetitionAndGrantRollback",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment",
-      "test": "TestReconciliationMaxAttempts",
-      "postgres": false
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment",
-      "test": "TestWeChatPayPaymentReconciliationRetryWindowCoversOneDay",
-      "postgres": false
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment",
-      "test": "TestCompletionSinkDurablyQueuesPrepayAndAcceptedShopOutcomes",
-      "postgres": false
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestPostgreSQLAttemptedLeaseRecoveryDoesNotRepeatProviderCall",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestPostgreSQLLeaseRecoveryFencesDelayedProviderCompletionAndReplay",
-      "postgres": true
-    },
-    {
-      "lane": "preflight",
-      "path": "scripts/ci/test_check_preparation.py"
+      "lane": "frontend",
+      "path": "scripts/validate-openapi.mjs"
     }
   ],
   "build_commands": [],
   "installed_checks": [
-    "periodic-contact",
     "commerce-readback"
   ]
 }

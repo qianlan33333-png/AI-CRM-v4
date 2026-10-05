@@ -978,3 +978,14 @@ func (r *Repository) ReadContactSnapshot(ctx context.Context, orderID int64) ([]
 	}
 	return ciphertext, version, true, nil
 }
+
+// BeginExportSnapshot is invoked before any reads. Keep all owner projections
+// and the audit receipt in a consistent, writable snapshot without Provider IO.
+func (r *Repository) BeginExportSnapshot(ctx context.Context) error {
+	tx, err := transaction(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`)
+	return err
+}

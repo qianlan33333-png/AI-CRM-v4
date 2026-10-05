@@ -85,6 +85,10 @@ func (a *appStub) List(_ context.Context, q orderport.ListQuery) (orderport.Page
 func (a *appStub) PreviewExport(context.Context, orderport.ListQuery) (orderport.ExportPreview, error) {
 	return orderport.ExportPreview{Rows: 1}, nil
 }
+func (a *appStub) Export(ctx context.Context, q orderport.ListQuery, format string, actor int64, key string) (orderport.ExportResult, error) {
+	a.query = q
+	return a.ExportCSV(ctx, q, actor, key)
+}
 func (a *appStub) ExportCSV(context.Context, orderport.ListQuery, int64, string) (orderport.ExportResult, error) {
 	a.exports++
 	return orderport.ExportResult{ReceiptID: 7, Rows: 1, Content: []byte("a,b\r\n"), ContentDigest: [32]byte{1}}, nil
@@ -243,7 +247,7 @@ func TestExportRequiresAdminCSRFAndRejectsUnresolvedIdentityFilters(t *testing.T
 			request.Header.Set("Idempotency-Key", "order-export-key-0001")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
-			if response.Code != http.StatusBadRequest || app.exports != 0 {
+			if response.Code != http.StatusServiceUnavailable || app.exports != 0 {
 				t.Fatalf("field=%s code=%d exports=%d body=%s", field, response.Code, app.exports, response.Body.String())
 			}
 		})
@@ -364,5 +368,70 @@ func TestExternalHistoryResponsePreservesNullableTimeAndReadOnlySource(t *testin
 	r := responseFrom(s, nil)
 	if r.ProviderLabel != "外部历史订单" || r.RecordOrigin != "v1_history" || r.SourcePaidAt != nil || r.ImportedAt == nil || r.RefundedMinor != 100 || r.RefundableAmountTotal != 0 {
 		t.Fatalf("response %+v", r)
+	}
+}
+
+func TestExportSharesIdentityResolutionAndXLSXDefault(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		status  orderport.CustomerFilterStatus
+		want    int
+		id      int64
+		noMatch bool
+	}{
+		{"found", orderport.CustomerFilterFound, 200, 11, false}, {"missing", orderport.CustomerFilterNotFound, 200, 0, true}, {"conflict", orderport.CustomerFilterConflict, 409, 0, false}, {"unavailable", orderport.CustomerFilterUnavailable, 503, 0, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app := &appStub{}
+			handler, _ := NewHandler(app, adminSecurity())
+			resolver := &customerFilterStub{result: orderport.CustomerFilterResolution{Status: test.status, CustomerID: customerdomain.CustomerID(test.id)}}
+			handler.SetCustomerFilterResolver(resolver)
+			request := httptest.NewRequest(http.MethodPost, "/api/admin/exports", strings.NewReader(`{"resource":"orders","filter":{"phone":"13800000000","product":"sku"}}`))
+			request.Header.Set("Idempotency-Key", "xlsx-default-export-0001")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("code=%d", response.Code)
+			}
+			if test.want == 200 {
+				if app.query.CustomerID != test.id || app.query.NoCustomerMatch != test.noMatch || app.query.Product != "sku" || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Content-Type") != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" {
+					t.Fatal("identity filter/default format/no-store mismatch")
+				}
+			} else if app.exports != 0 {
+				t.Fatal("failed resolution cannot fall back to global export")
+			}
+		})
+	}
+}
+
+func TestWechatExportCompatibilityStaysScopedAndSharesFormats(t *testing.T) {
+	for _, test := range []struct {
+		body        string
+		status      int
+		provider    domain.Provider
+		contentType string
+	}{
+		{`{"resource":"orders"}`, 200, domain.ProviderWeChatPay, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+		{`{"resource":"orders","format":"csv"}`, 200, domain.ProviderWeChatPay, "text/csv; charset=utf-8"},
+		{`{"resource":"orders","filter":{"provider":"alipay"}}`, 400, "", ""},
+		{`{"resource":"orders","format":"xls"}`, 400, "", ""},
+	} {
+		t.Run(test.body, func(t *testing.T) {
+			app := &appStub{}
+			handler, _ := NewHandler(app, adminSecurity())
+			r := httptest.NewRequest(http.MethodPost, "/api/admin/wechat-pay/order-exports", strings.NewReader(test.body))
+			r.Header.Set("Idempotency-Key", "wechat-export-compatibility-0001")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != test.status {
+				t.Fatalf("status=%d want=%d", w.Code, test.status)
+			}
+			if test.status == 200 && (app.query.Provider != test.provider || w.Header().Get("Content-Type") != test.contentType) {
+				t.Fatal("legacy endpoint lost provider/format scope")
+			}
+			if test.status != 200 && app.exports != 0 {
+				t.Fatal("invalid format/provider dispatched export")
+			}
+		})
 	}
 }

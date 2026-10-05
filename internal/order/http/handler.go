@@ -154,6 +154,10 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request, path string) {
 
 func (h *Handler) resolveCustomerFilter(w http.ResponseWriter, r *http.Request, query orderport.ListQuery) (orderport.ListQuery, bool) {
 	filter := orderport.CustomerFilter{Phone: r.URL.Query().Get("phone"), ExternalUserID: r.URL.Query().Get("external_userid")}
+	return h.resolveExportCustomerFilter(w, r, query, filter)
+}
+
+func (h *Handler) resolveExportCustomerFilter(w http.ResponseWriter, r *http.Request, query orderport.ListQuery, filter orderport.CustomerFilter) (orderport.ListQuery, bool) {
 	if filter.Phone == "" && filter.ExternalUserID == "" {
 		return query, true
 	}
@@ -311,9 +315,13 @@ func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.write(w, r); !ok {
 		return
 	}
-	query, ok := decodeExport(r)
+	query, format, filter, ok := decodeExport(r)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	query, resolved := h.resolveExportCustomerFilter(w, r, query, filter)
+	if !resolved {
 		return
 	}
 	preview, err := h.app.PreviewExport(r.Context(), query)
@@ -321,7 +329,7 @@ func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
 		resultError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"resource": "orders", "format": "csv", "total": preview.Rows, "truncated": preview.Truncated})
+	writeJSON(w, http.StatusOK, map[string]any{"resource": "orders", "format": format, "total": preview.Rows, "order_count": preview.Orders, "row_count": preview.ItemRows, "truncated": preview.Truncated})
 }
 
 func (h *Handler) export(w http.ResponseWriter, r *http.Request, path string) {
@@ -333,19 +341,35 @@ func (h *Handler) export(w http.ResponseWriter, r *http.Request, path string) {
 	if !ok {
 		return
 	}
-	query, ok := decodeExport(r)
+	query, format, filter, ok := decodeExport(r)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	result, err := h.app.ExportCSV(r.Context(), query, principal.InternalID, key)
+	query, resolved := h.resolveExportCustomerFilter(w, r, query, filter)
+	if !resolved {
+		return
+	}
+	if path == "/api/admin/wechat-pay/order-exports" {
+		if query.Provider != "" && query.Provider != domain.ProviderWeChatPay {
+			writeError(w, http.StatusBadRequest, "invalid_request")
+			return
+		}
+		query.Provider = domain.ProviderWeChatPay
+	}
+	result, err := h.app.Export(r.Context(), query, format, principal.InternalID, key)
 	if err != nil {
 		resultError(w, err)
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="orders.csv"`)
+	if format == "xlsx" {
+		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="orders.`+format+`"`)
 	w.Header().Set("X-AICRM-Export-Receipt", strconv.FormatInt(result.ReceiptID, 10))
 	w.Header().Set("Digest", "sha-256="+hex.EncodeToString(result.ContentDigest[:]))
 	w.WriteHeader(http.StatusOK)
@@ -353,12 +377,12 @@ func (h *Handler) export(w http.ResponseWriter, r *http.Request, path string) {
 	_ = path
 }
 
-func decodeExport(r *http.Request) (orderport.ListQuery, bool) {
+func decodeExport(r *http.Request) (orderport.ListQuery, string, orderport.CustomerFilter, bool) {
 	decoder := json.NewDecoder(io.LimitReader(r.Body, maxBody))
 	decoder.DisallowUnknownFields()
 	var body exportRequest
-	if decoder.Decode(&body) != nil || body.Resource != "orders" || body.Format != "csv" {
-		return orderport.ListQuery{}, false
+	if decoder.Decode(&body) != nil || body.Resource != "orders" || (body.Format != "csv" && body.Format != "xlsx" && body.Format != "") {
+		return orderport.ListQuery{}, "", orderport.CustomerFilter{}, false
 	}
 	filter := body.Filter
 	if filter == nil {
@@ -370,10 +394,10 @@ func decodeExport(r *http.Request) (orderport.ListQuery, bool) {
 			values.Set(key, fmt.Sprint(value))
 		}
 	}
-	// Export has no composition-owned Identity resolver.  Do not let a list-only
-	// identity predicate parse successfully and then disappear from an export.
-	if values.Get("identity") != "" || values.Get("mobile") != "" || values.Get("phone") != "" || values.Get("external_userid") != "" {
-		return orderport.ListQuery{}, false
+	// Raw opaque identity predicates are unsupported; phone/contact filters use
+	// the same composition resolver as the list and fail closed.
+	if values.Get("identity") != "" || values.Get("mobile") != "" {
+		return orderport.ListQuery{}, "", orderport.CustomerFilter{}, false
 	}
 	if values.Get("transaction_id") != "" {
 		values.Set("order_ref", values.Get("transaction_id"))
@@ -381,7 +405,14 @@ func decodeExport(r *http.Request) (orderport.ListQuery, bool) {
 	if values.Get("product_code") != "" {
 		values.Set("product", values.Get("product_code"))
 	}
-	return parseListQuery(values)
+	query, ok := parseListQuery(values)
+	if !ok {
+		return orderport.ListQuery{}, "", orderport.CustomerFilter{}, false
+	}
+	if body.Format == "" {
+		body.Format = "xlsx"
+	}
+	return query, body.Format, orderport.CustomerFilter{Phone: values.Get("phone"), ExternalUserID: values.Get("external_userid")}, true
 }
 
 func parseListQuery(values url.Values) (orderport.ListQuery, bool) {
@@ -732,6 +763,8 @@ func writeError(w http.ResponseWriter, status int, code string) {
 }
 func resultError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, orderport.ErrExportTooLarge):
+		writeError(w, http.StatusConflict, "export_too_large")
 	case errors.Is(err, orderport.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found")
 	case errors.Is(err, orderport.ErrConflict):

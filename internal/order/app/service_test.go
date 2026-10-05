@@ -589,14 +589,15 @@ func TestHistoricalImportRejectsEffectEligibleAndReplaysSource(t *testing.T) {
 
 func TestExportCSVIsReceiptBackedReplayAndEscapesFormulas(t *testing.T) {
 	store := newMemoryStore()
-	service := NewService(directUOW{}, store)
+	service := NewService(directUOW{}, &exportMemoryStore{memoryStore: store})
+	service.SetExportFactsReader(exportFactsStub{})
 	input := orderInput("export-1")
 	input.Items[0].ProductName = "=HYPERLINK(\"bad\")"
 	if _, err := service.Create(context.Background(), orderport.CreateCommand{Input: input, Actor: 7, IdempotencyKey: "order-create-export-0001"}); err != nil {
 		t.Fatal(err)
 	}
 	first, err := service.ExportCSV(context.Background(), orderport.ListQuery{}, 7, "order-export-key-0001")
-	if err != nil || first.ReceiptID < 1 || !strings.Contains(string(first.Content), `"'=HYPERLINK(""bad"")"`) || !regexp.MustCompile(`"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"`).Match(first.Content) || strings.Contains(string(first.Content), "T") || !strings.Contains(string(first.Content), "微信支付") || !strings.Contains(string(first.Content), "待支付") || !strings.Contains(string(first.Content), "系统订单") {
+	if err != nil || first.ReceiptID < 1 || !strings.Contains(string(first.Content), `"'=HYPERLINK(""bad"")"`) || !regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}`).Match(first.Content) || strings.Contains(string(first.Content), "T") || !strings.Contains(string(first.Content), "微信支付") || !strings.Contains(string(first.Content), "待支付") || !strings.Contains(string(first.Content), "系统订单") {
 		t.Fatalf("result=%+v content=%s err=%v", first, first.Content, err)
 	}
 	replay, err := service.ExportCSV(context.Background(), orderport.ListQuery{}, 7, "order-export-key-0001")
@@ -689,16 +690,22 @@ func (s *orderCollectedPhoneStub) CollectPhoneWithin(_ context.Context, c custom
 func TestExternalHistoryCSVPreservesUnknownOriginalTimeAndRefund(t *testing.T) {
 	id := int64(1)
 	at := time.Date(2026, 10, 4, 4, 0, 0, 0, time.UTC)
-	s := domain.Snapshot{Provider: domain.ProviderExternalHistory, SourceSystem: "external-order-csv", SourceKey: "source", MerchantOrderNo: "source", PayerCustomerID: &id, BeneficiaryCustomerID: &id, Amount: domain.Money{AmountMinor: 200, Currency: "CNY"}, RefundedMinor: 100, Status: domain.StatusPartiallyRefunded, Items: []domain.ItemSnapshot{{LineNo: 1, ProductCode: "combo/A", ProductName: "原组合", UnitAmountMinor: 200, Quantity: 1, LineAmountMinor: 200}}, RecordOrigin: domain.RecordOriginHistory, Version: 1, CreatedAt: at, UpdatedAt: at, ExternalHistory: &domain.ExternalHistoryFacts{ImportedAt: at, SourceStatus: "已完成", SourceAfterSales: "部分退款"}}
+	s := domain.Snapshot{ID: 1, Provider: domain.ProviderExternalHistory, SourceSystem: "external-order-csv", SourceKey: "source", MerchantOrderNo: "source", PayerCustomerID: &id, BeneficiaryCustomerID: &id, Amount: domain.Money{AmountMinor: 200, Currency: "CNY"}, RefundedMinor: 100, Status: domain.StatusPartiallyRefunded, Items: []domain.ItemSnapshot{{LineNo: 1, ProductCode: "combo/A", ProductName: "原组合", UnitAmountMinor: 200, Quantity: 1, LineAmountMinor: 200}}, RecordOrigin: domain.RecordOriginHistory, Version: 1, CreatedAt: at, UpdatedAt: at, ExternalHistory: &domain.ExternalHistoryFacts{ImportedAt: at, SourceStatus: "已完成", SourceAfterSales: "部分退款"}}
 	o, e := domain.Restore(s)
 	if e != nil {
 		t.Fatal(e)
 	}
-	rows, e := csv.NewReader(strings.NewReader(string(encodeCSV([]domain.Order{o})))).ReadAll()
+	service := NewService(directUOW{}, &exportMemoryStore{memoryStore: newMemoryStore()})
+	service.SetExportFactsReader(exportFactsStub{})
+	values, e := service.exportRowsWithin(context.Background(), []domain.Order{o})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(rows) != 2 || rows[1][0] != "原时间未知" || rows[1][3] != "外部历史订单" || rows[1][8] != "200" || rows[1][12] != "100" || rows[1][13] != "已完成" || rows[1][14] != "部分退款" || rows[1][15] != "2026-10-04 12:00:00" {
+	rows, e := csv.NewReader(strings.NewReader(strings.TrimPrefix(string(encodeExportCSV(values)), "\ufeff"))).ReadAll()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(rows) != 2 || rows[1][1] != "" || rows[1][6] != "" || rows[1][7] != "2.00" || rows[1][9] != "1.00" || rows[1][24] != "已完成" || rows[1][25] != "部分退款" || rows[1][26] != "2026-10-04 12:00:00" {
 		t.Fatalf("history export %v", rows)
 	}
 }

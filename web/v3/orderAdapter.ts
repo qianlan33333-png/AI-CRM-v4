@@ -479,18 +479,6 @@ async function primeOrderDetail(): Promise<void> {
   }
 }
 
-// The export endpoint cannot carry a trusted customer query. Prevent a visible
-// identity-filtered result from exporting all orders.
-document.addEventListener('click', (event) => {
-  const target = event.target;
-  if (!(target instanceof Element)) return;
-  const button = target.closest('button');
-  if (!button || button.textContent?.trim() !== '导出微信支付 CSV' || !inputValue('orderMobile')) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  showOrderMessage('当前手机号或外部联系人 ID 筛选暂不支持导出。请清空该筛选后再导出，避免导出全量订单。');
-}, true);
-
 document.addEventListener('click', (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
@@ -611,23 +599,48 @@ function externalOrderTime(order: DetailRecord): string {
  return order.source_paid_at ? formatShanghaiDateTime(order.source_paid_at) : '原时间未知';
 }
 function installAllOrderExport(): void {
- if (document.getElementById('order-export-all')) return;
- const reference = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim() === '导出微信支付 CSV');
- if (!reference?.parentElement) return;
- const button = element('button', '导出全部订单 CSV') as HTMLButtonElement;
- button.id='order-export-all'; button.type='button';button.style.cssText=reference.style.cssText;
- button.addEventListener('click', async () => {
-  if (inputValue('orderMobile')) {showOrderMessage('当前手机号或外部联系人 ID 筛选暂不支持导出。请清空该筛选后再导出。');return;}
-  const filters:Record<string,string>={};
-  for (const [field,id] of [['order_ref','orderTransactionId'],['product','orderProductCode'],['status','orderStatus'],['created_from','orderCreatedFrom'],['created_to','orderCreatedTo']]) {const value=inputValue(id);if(value)filters[field]=value;}
-  button.disabled=true;
-  try {
-   const response=await originalFetch('/api/admin/exports',apiRequestOptions({method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':`order-export-${crypto.randomUUID()}`},body:JSON.stringify({resource:'orders',format:'csv',filter:filters})}));
-   if(!response.ok)throw new Error('export failed');
-   const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download='订单历史.csv';link.click();URL.revokeObjectURL(url);
-  } catch {showOrderMessage('订单导出失败，请稍后重试。');} finally {button.disabled=false;}
- });
- reference.parentElement.appendChild(button);
+  if (document.getElementById('order-export-all')) return;
+  const reference = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim() === '导出微信支付 CSV');
+  if (!reference?.parentElement) return;
+  const button = element('button', '导出订单 XLSX') as HTMLButtonElement;
+  button.id = 'order-export-all'; button.type = 'button'; button.style.cssText = reference.style.cssText;
+  (button as HTMLButtonElement & { __dcBound?: boolean }).__dcBound = true; button.dataset.capabilityState = 'real';
+  const status = element('p'); status.id = 'order-export-status'; status.setAttribute('role', 'status');
+  status.style.cssText = 'margin:0;color:#69707A;font-size:12px;flex-basis:100%;width:100%'; status.hidden = true;
+  button.addEventListener('click', async () => {
+    const query = new URL('/api/admin/orders', location.origin); orderQuery(query);
+    for (const [field, id] of [['status', 'orderStatus'], ['created_from', 'orderCreatedFrom'], ['created_to', 'orderCreatedTo']]) {
+      const value = inputValue(id); if (value) query.searchParams.set(field, value);
+    }
+    const body = JSON.stringify({ resource: 'orders', format: 'xlsx', filter: Object.fromEntries(query.searchParams) });
+    const options = apiRequestOptions({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    const failure = async (response: Response): Promise<never> => {
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (payload.error === 'export_too_large') throw new Error('导出超过数量或文件大小上限，请缩小筛选范围。');
+      if (payload.error === 'identity_filter_conflict') throw new Error('买家身份筛选存在冲突，请核对筛选条件。');
+      if (response.status === 401 || response.status === 403) throw new Error('当前账号无法导出，请检查登录状态和权限。');
+      throw new Error('订单导出失败，请稍后重试。');
+    };
+    button.disabled = true; button.textContent = '正在导出…'; status.hidden = false; status.textContent = '正在读取当前筛选条件下的全部订单…';
+    try {
+      const preview = await originalFetch('/api/admin/exports/preview', options);
+      if (!preview.ok) await failure(preview);
+      const counts = await preview.json() as { order_count: number; row_count: number; truncated: boolean };
+      if (!Number.isSafeInteger(counts.order_count) || !Number.isSafeInteger(counts.row_count) || counts.order_count < 0 || counts.row_count < 0 || typeof counts.truncated !== 'boolean') throw new Error('无法确认订单数量，请稍后重试。');
+      if (counts.truncated) throw new Error('导出超过数量上限，请缩小筛选范围。');
+      status.textContent = `正在生成文件：${counts.order_count} 笔订单，${counts.row_count} 条商品明细…`;
+      const response = await originalFetch('/api/admin/exports', apiRequestOptions({ method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `order-export-${crypto.randomUUID()}` }, body }));
+      if (!response.ok) await failure(response);
+      if (!response.headers.get('Content-Type')?.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) throw new Error('导出文件格式异常，请稍后重试。');
+      const url = URL.createObjectURL(await response.blob()); const link = document.createElement('a');
+      link.href = url; link.download = '订单明细.xlsx'; (link as HTMLAnchorElement & { __dcBound?: boolean }).__dcBound = true; link.dataset.capabilityState = 'real'; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+      status.textContent = `已下载订单明细。文件包含完整联系方式；无地址或缺失字段留空。`;
+    } catch (error) {
+      status.textContent = ''; status.hidden = true; showOrderMessage(error instanceof Error ? error.message : '订单导出失败，请稍后重试。');
+    } finally { button.disabled = false; button.textContent = '导出订单 XLSX'; }
+  });
+  reference.replaceWith(button);
+  const actions = button.parentElement; const statusParent = actions?.parentElement instanceof HTMLDivElement ? actions.parentElement : actions; statusParent?.appendChild(status);
 }
 function applyOrderPresentation(): void {
  installAllOrderExport();

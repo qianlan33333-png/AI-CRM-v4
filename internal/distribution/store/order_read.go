@@ -60,7 +60,7 @@ func (r *Repository) ReadOrderDistribution(ctx context.Context, orderIDs []int64
 	// the default READ COMMITTED transaction: a settlement that commits between
 	// those reads must not produce a mixed commission/settlement DTO.
 	rows, err := tx.Query(ctx, `SELECT
-		a.order_id,a.id,a.order_item_line,a.product_name,d.customer_id,
+		a.order_id,a.id,a.order_item_line,a.product_name,d.customer_id,d.public_no,
 		a.commission_rate_basis_points,a.wait_days,a.policy_version,
 		COALESCE(c.id,0),COALESCE(c.initial_minor,0),COALESCE(c.current_payable_minor,0),COALESCE(c.paid_minor,0),
 		COALESCE(c.status,''),COALESCE(c.hold_reason,''),COALESCE(c.cancel_reason,''),COALESCE(c.exception_reason,''),
@@ -132,7 +132,7 @@ func (r *Repository) ReadOrderDistribution(ctx context.Context, orderIDs []int64
 	for rows.Next() {
 		var item distributionport.OrderDistributionLine
 		var adjustmentsRaw, settlementsRaw, exceptionsRaw []byte
-		if err := rows.Scan(&item.OrderID, &item.AttributionID, &item.ItemLine, &item.ProductName, &item.DistributorCustomerID,
+		if err := rows.Scan(&item.OrderID, &item.AttributionID, &item.ItemLine, &item.ProductName, &item.DistributorCustomerID, &item.DistributorPublicNo,
 			&item.RateBasisPoints, &item.WaitDays, &item.PolicyVersion,
 			&item.CommissionID, &item.InitialMinor, &item.CurrentPayableMinor, &item.PaidMinor,
 			&item.Status, &item.HoldReason, &item.CancelReason, &item.ExceptionReason,

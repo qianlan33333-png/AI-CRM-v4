@@ -250,8 +250,12 @@ type CustomerActivityReader interface {
 	CustomerActivities(context.Context, CustomerActivityQuery) (CustomerActivityPage, error)
 }
 
+var ErrExportTooLarge = errors.New("order export exceeds existing row or byte limit")
+
 type ExportPreview struct {
 	Rows      int  `json:"total"`
+	Orders    int  `json:"order_count"`
+	ItemRows  int  `json:"row_count"`
 	Truncated bool `json:"truncated"`
 }
 
@@ -266,6 +270,28 @@ type ExportResult struct {
 type Exporter interface {
 	PreviewExport(context.Context, ListQuery) (ExportPreview, error)
 	ExportCSV(context.Context, ListQuery, int64, string) (ExportResult, error)
+	Export(context.Context, ListQuery, string, int64, string) (ExportResult, error)
+}
+
+// ExportFactsReader is a privileged composition read bridge. The caller has
+// authorized export and supplies its existing transaction; implementations
+// must not open a second UoW, persist contact data, or resolve new customers.
+type ExportFactsReader interface {
+	ReadOrderExportFactsWithin(context.Context, []domain.Snapshot, []int64) (ExportFacts, error)
+}
+type ExportCustomer struct{ Number, Name, Phone string }
+type ExportDistributor struct {
+	ItemLine     int32
+	Number, Name string
+}
+type ExportPayment struct {
+	PaidAt        *time.Time
+	TransactionNo string
+}
+type ExportFacts struct {
+	Customers    map[int64]ExportCustomer
+	Payments     map[int64]ExportPayment
+	Distributors map[int64][]ExportDistributor
 }
 
 type SettlementWriter interface {

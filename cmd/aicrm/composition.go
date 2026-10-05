@@ -1332,6 +1332,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	segmentBindings.Handler.BindAudienceProductReferences(audienceProductReferenceAdapter{products: productCatalog, historical: orderRepository, uow: uow})
 	legacyAudienceSource.Orders = orderRepository
 	orderService := orderapp.NewService(uow, orderRepository)
+	if err = orderService.SetExportFactsReader(orderExportAdapter{roots: queries, numbers: queries, names: customerStore, phones: queries, distribution: distributionRepository, payments: paymentRepository}); err != nil {
+		return fail(err)
+	}
 	if err = orderService.SetCollectedPhoneRecorder(collectedPhones); err != nil {
 		return fail(err)
 	}
@@ -1339,7 +1342,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = orderService.SetCheckoutCouponCoordinator(couponCheckout); err != nil {
 		return fail(err)
 	}
-	if cfg.WeChatPay.H5OAuthEnabled {
+	if cfg.WeChatPay.H5OAuthEnabled || cfg.WeChatPay.OrderContactDataKey != "" {
 		contactCipher, cipherErr := ordersecure.NewContactCipher(cfg.WeChatPay.OrderContactDataKey)
 		if cipherErr != nil {
 			return fail(cipherErr)

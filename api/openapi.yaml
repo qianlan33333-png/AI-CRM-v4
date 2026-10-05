@@ -3963,7 +3963,7 @@ paths:
       tags: [Transactions]
       security: [{adminSession: [], csrfHeader: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/TransactionExportRequest"}}}}
-      responses: {"200": {description: Bounded export preview, content: {application/json: {schema: {type: object, additionalProperties: true}}}}, "400": {$ref: "#/components/responses/Error"}, "401": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}}
+      responses: {"200": {description: Current filter across all pages. total is bounded detail rows; order_count and row_count distinguish orders from items. truncated indicates the existing export limit., content: {application/json: {schema: {$ref: "#/components/schemas/TransactionExportPreview"}}}}, "400": {$ref: "#/components/responses/Error"}, "401": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}}
   /api/admin/exports:
     post:
       operationId: createLegacyOrderExport
@@ -3971,7 +3971,7 @@ paths:
       security: [{adminSession: [], csrfHeader: []}]
       parameters: [{$ref: "#/components/parameters/RequiredIdempotencyKey"}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/TransactionExportRequest"}}}}
-      responses: {"200": {description: Receipt-backed CSV, content: {text/csv: {schema: {type: string}}}}, "400": {$ref: "#/components/responses/Error"}, "401": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}}
+      responses: {"200": {description: Receipt-backed full-data order spreadsheet with 27 fixed columns. Missing facts are blank., content: {application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: {schema: {type: string, format: binary}}, text/csv: {schema: {type: string}}}}, "400": {$ref: "#/components/responses/Error"}, "401": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}}
   /api/admin/wechat-pay/order-exports:
     post:
       operationId: createLegacyWechatOrderExport
@@ -3979,7 +3979,7 @@ paths:
       security: [{adminSession: [], csrfHeader: []}]
       parameters: [{$ref: "#/components/parameters/RequiredIdempotencyKey"}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/TransactionExportRequest"}}}}
-      responses: {"200": {description: PII-safe local order CSV, content: {text/csv: {schema: {type: string}}}}, "400": {$ref: "#/components/responses/Error"}, "401": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}}
+      responses: {"200": {description: Receipt-backed full-data WeChat order spreadsheet with the same 27 columns., content: {application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: {schema: {type: string, format: binary}}, text/csv: {schema: {type: string}}}}, "400": {$ref: "#/components/responses/Error"}, "401": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}}
   /api/admin/wechat-pay/orders:
     get:
       operationId: listLegacyWechatTransactions
@@ -6312,13 +6312,23 @@ components:
         limit: {type: integer, minimum: 1, maximum: 100}
         has_more: {type: boolean}
         next_cursor: {type: string, maxLength: 512}
+    TransactionExportPreview:
+      type: object
+      required: [resource, format, total, order_count, row_count, truncated]
+      properties:
+        resource: {type: string, const: orders}
+        format: {type: string, enum: [xlsx, csv]}
+        total: {type: integer, minimum: 0}
+        order_count: {type: integer, minimum: 0}
+        row_count: {type: integer, minimum: 0}
+        truncated: {type: boolean}
     TransactionExportRequest:
       type: object
       additionalProperties: false
-      required: [resource, format]
+      required: [resource]
       properties:
         resource: {type: string, const: orders}
-        format: {type: string, const: csv}
+        format: {type: string, enum: [xlsx, csv], default: xlsx}
         filter: {type: object, additionalProperties: true}
         filters: {type: object, additionalProperties: true}
     OperationCycleStage:

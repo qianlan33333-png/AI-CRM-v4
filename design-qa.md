@@ -1,3 +1,19 @@
+# 订单导出精简统一表 Product Design QA · 2026-10-05
+
+final result: passed（本次订单筛选/导出入口视觉与交互范围；共享预发及生产安装待唯一工作台）
+
+源目标：当前 V4 基线 `641d757` 的真实订单 Host 与管理后台壳，本地只替换订单 Host 为该基线的构建字节；实现目标：本候选的实际构建页面。两者均为同一隔离 PostgreSQL 的管理员空订单态，亮色、1600×1000 CSS viewport、DPR 1。截图由 CUA 浏览器取得。初始工具截图2500×1563与后续1590×994不一致，因此重新采集并读回源与实现的实际viewport/DPR；最后两张均1590×994，在同一组合图比较，不以密度差异提出视觉问题。页面与源码范围保持订单筛选区、列表和侧栏。
+
+证据目录：`/Users/qianlan/.codex/visualizations/2026/10/05/01a109fe-cdea-72a1-acf9-c9b70f1ef6ba`。最终源 `order-export-source-final.jpg`（初始源 `order-export-source.jpg`），首轮 `order-export-implementation.jpg` / `order-export-comparison.jpg`，最后 `order-export-final.jpg` / `order-export-comparison-final.jpg` / `order-export-preview.jpg`。已在同一组合图查看源与实现。
+
+- 首轮 P1 已修：共享反馈将新增导出按钮识别为未接入动作，成功后出现错误 toast。按现有真实能力控件约定设置绑定标记，并覆盖反馈层回归；最终真实页面无该错误。
+- 第二轮 P2 已修：成功提示与按钮同行，挤压筛选框。提示放入筛选卡片独立整行，初始/错误时隐藏。最后组合截图确认输入、日期、按钮没有被成功文本挤压。
+- 最后无本次 P0/P1/P2 视觉差异；合并两个 CSV 按钮为一个 XLSX 是已授权差异。既有字体、输入、颜色、圆角与导航保持现有组件。未开展移动后台重设计。
+
+实际构建页面点击导出，看到成功提示；Chrome 下载 `/Users/qianlan/Downloads/订单明细 (1).xlsx`，独立 openpyxl 只读打开确认1行27列空结果表头。CUA 的 download 事件在此环境超时，采用实际下载文件读回确认。IAB 用于视觉，Chrome用于下载。最终 IAB 控制台 error 列表为空。隔离本地页面仅预置合成管理员会话便利截图，不等于生产鉴权验收；正式 RBAC/CSRF拒绝用 Handler 测试，真实 Access 登录和 CLI/HTTP 由 PostgreSQL 组合测试覆盖。加载/计数/超限/权限与身份失败由真实 Host JSDOM旅程覆盖。本次无真实 Provider、外推或发货效果。
+
+---
+
 # 周期商品购买信息收集 Product Design QA · 2026-10-02
 
 final result: passed（本次视觉范围；本地真实 Chromium 保存与付款三档通过；已安装合同由工作台核验，真实支付及真实外推未验证）

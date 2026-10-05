@@ -147,7 +147,7 @@ try {
     await capture(ref);
   }
   const exported=await evaluate(cdp,`(async()=>{const cookie=document.cookie.split('; ').find(v=>v.startsWith('aicrm_admin_csrf='))||document.cookie.split('; ').find(v=>v.startsWith('csrf_token='));const token=cookie?decodeURIComponent(cookie.split('=').slice(1).join('=')):'';const r=await fetch('/api/admin/exports',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':token,'Idempotency-Key':'external-history-browser-export'},body:JSON.stringify({resource:'orders',format:'csv',filter:{provider:'external_history'}})});return {status:r.status,body:await r.text()}})()`);
-  if(exported.status!==200||exported.body.includes('external-browser-unknown')||exported.body.includes('external-browser-refund')||!exported.body.includes('2024-01-02 03:04:05')||!exported.body.includes('原组合商品')||!exported.body.includes('12345'))throw new Error('CSV original facts missing: '+exported.status);
+  if(exported.status!==200||exported.body.includes('external-browser-unknown')||exported.body.includes('external-browser-refund')||!exported.body.includes('2024-01-02 03:04:05')||!exported.body.includes('原组合商品')||!exported.body.includes('123.45'))throw new Error('CSV original facts missing: '+exported.status);
   console.log('external_order_history_chromium: PASS screenshots='+screenshotDirectory);
 } catch (error) {
   failed = true;
