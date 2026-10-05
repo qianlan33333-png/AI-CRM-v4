@@ -79,3 +79,11 @@ WebKit旅程范围是实际15.4/26.0引擎的商品HTML/JS、真实tap、无inpu
 补齐两项明确核心路径：WebKit15.4/26实际操作/s/{code}/pay，恢复无input地址、tap购买、当地503后手动沿原key/原body重试，无自动循环；checkout POST仍拦截。真实composition领券从管理员登录/CSRF创建、发布、分享到可信payer cookie公共页、拒绝匿名/客户字段篡改、并发同键同claim/期限、额度拒绝、适用商品可用券读回，PG issued_count=1、claim=1、holder来自session、claim receipt=1。没有新增Coupon生产逻辑；201/envelope和receipt表期望错误归为夹具。
 
 具体剩余核心入口与外部条件分类见完整报告新增“逐项未验证清单”；海报、战队、奖励撤销、导出、grid等已有PG/HTTP合同测试，不把“未完成所有UI组合”写成这些能力完全未审。
+
+## 有终点的三项高风险补审（2026-10-05）
+
+新增真实失败：Alipay查单任务discarded后原签名回调重放无runnable任务；会员备注跨商品引用/版本冲突的Order稳定Port错误误报503。前者只恢复原Provider读取目标，保留旧任务/receipt/cancelled，River去重；后者只补404/409映射。真实有效Admin、Viewer即使有edit协作者也不得写、未授权客户、缺CSRF、existent/absent对象、跨商品/客户会员引用及CAS均有真实HTTP/PG证据。管理员在单企业内具全局管理权限，不虚构product.created_by为所有权限制。
+
+新补本地页面源码双WebKit恢复、真实River查询失败/权益grant事务回滚/两runtime重启竞争；两引擎checkout均0 POST（拦截配置），券2次同key HTTP请求只1claim正确holder，退款1POST只1refund/effect，刷新/回读无新意图。服务期active/renewed/expired/refunded回读及A→B客户切换/迟到A响应保护；普通paid/reload无扣款，全退款后需显式新购买。PG状态fixture不是本轮重新付退款业务；相关真正资金/权益业务由composition和退款消费者测试交叉证明。派发pageshow事件不等同物理BFCache。
+
+详情/缺陷前后证据与精确边界见完整报告的“高风险补审”增量。已验证的是列出的金额/归属/私有数据/一次效果/事务不变量；不声称穷尽所有角色动作与真实Provider/真机。实际Provider、物理设备、库存规则决策及Linux安装仍未验收。本轮不推送、合并、部署、真实资金或客户消息。

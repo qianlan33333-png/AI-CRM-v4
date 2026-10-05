@@ -66,6 +66,7 @@ type productExternalPushChromiumFixtureOptions struct {
 	// original disabled Payment/OAuth configuration.
 	enablePublicH5 bool
 	enableAlipay   bool
+	enableReferral bool
 	// deferEffectsWorker lets a journey freeze a pre-existing intent shape
 	// before the real effect worker observes the committed payment.
 	deferEffectsWorker bool
@@ -232,6 +233,9 @@ func newProductExternalPushChromiumFixtureWithOptions(t *testing.T, timeout time
 		paymentKey, paymentCertificate := distributionFixturePaymentCredentials(t)
 		runtime.Survey = platformconfig.Survey{DataKey: base64.RawStdEncoding.EncodeToString(dataKey), IdentityPhoneDataKey: base64.RawStdEncoding.EncodeToString(dataKey), OAuthEnabled: true, OAuthAppID: "wx-public-commerce-h5", OAuthSecret: "public-commerce-h5-fixture-secret", OAuthOpenPlatformID: "public-commerce-fixture-platform", OAuthScope: "snsapi_userinfo"}
 		runtime.WeChatPay = platformconfig.WeChatPay{Enabled: true, AppID: "wx-public-commerce-mini", AppSecret: "public-commerce-mini-fixture-secret", AppScope: "wechat-app:wx-public-commerce-mini", H5OAuthEnabled: true, H5AppID: "wx-public-commerce-h5", H5AppSecret: "public-commerce-h5-fixture-secret", H5AppScope: "wechat-app:wx-public-commerce-h5", OrderContactDataKey: base64.RawStdEncoding.EncodeToString(dataKey), MerchantID: "public-commerce-fixture-mch", MerchantSerial: "public-commerce-fixture-serial", PrivateKeyPath: paymentKey, PlatformCertPath: paymentCertificate, APIV3Key: "0123456789abcdef0123456789abcdef"}
+	}
+	if options.enableReferral {
+		runtime.Referral = platformconfig.Referral{TokenDataKey: base64.RawStdEncoding.EncodeToString(dataKey)}
 	}
 	alipayGateway := options.alipayGateway
 	if options.enableAlipay {

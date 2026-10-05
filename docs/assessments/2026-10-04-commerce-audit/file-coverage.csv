@@ -1,9 +1,12 @@
 path,manual_review_depth,executed_test_source,meaning
 api/openapi.yaml,key_sections,no,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/alipay_callback_http_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
+cmd/aicrm/commerce_authorization_equivalence_postgres_test.go,authored_regression,yes,"High-risk follow-up: only named business invariants, local PostgreSQL; Provider/physical device unverified"
 cmd/aicrm/commerce_checkout_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/commerce_mapping_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/commerce_phone_vault_payment_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
+cmd/aicrm/commerce_recovery_webkit.mjs,authored_regression,no,"High-risk follow-up: only named business invariants, local PostgreSQL; Provider/physical device unverified"
+cmd/aicrm/commerce_recovery_webkit_postgres_test.go,authored_regression,yes,"High-risk follow-up: only named business invariants, local PostgreSQL; Provider/physical device unverified"
 cmd/aicrm/composition.go,key_sections,no,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/coupon_public_claim_phase2_postgres_integration_test.go,authored_regression,yes,Actual composition/HTTP/PG; see final receipt; trusted admin seam injected only in refund scope case
 cmd/aicrm/distribution_chromium_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
@@ -23,6 +26,8 @@ cmd/aicrm/payment_alipay_checkout_readback_postgres_integration_test.go,inventor
 cmd/aicrm/payment_alipay_refund_timestamp_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/payment_alipay_second_precision_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/payment_alipay_unknown_time_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
+cmd/aicrm/payment_query_discard_recovery_postgres_test.go,authored_regression,yes,"High-risk follow-up: only named business invariants, local PostgreSQL; Provider/physical device unverified"
+cmd/aicrm/payment_query_restart_postgres_test.go,authored_regression,yes,"High-risk follow-up: only named business invariants, local PostgreSQL; Provider/physical device unverified"
 cmd/aicrm/payment_refund_actor_scope_postgres_integration_test.go,authored_regression,yes,Actual composition/HTTP/PG; see final receipt; trusted admin seam injected only in refund scope case
 cmd/aicrm/prod04_product_beneficiary_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 cmd/aicrm/product_alipay_policy_postgres_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
@@ -225,7 +230,7 @@ internal/payment/provider/wechatpay_test.go,inventory_only,yes,key_sections does
 internal/payment/provider/wechatshop.go,inventory_only,no,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 internal/payment/provider/wechatshop_callback.go,inventory_only,no,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 internal/payment/provider/wechatshop_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
-internal/payment/reconciliation_river.go,inventory_only,no,key_sections does not mean every line reviewed; tests passing does not verify external Providers
+internal/payment/reconciliation_river.go,key_sections,no,"High-risk follow-up: only named business invariants, local PostgreSQL; Provider/physical device unverified"
 internal/payment/reconciliation_river_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 internal/payment/session/checkout_readiness.go,inventory_only,no,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 internal/payment/session/checkout_readiness_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
@@ -247,6 +252,7 @@ internal/payment/store/postgres_integration_test.go,inventory_only,yes,key_secti
 internal/payment/store/purchase.go,inventory_only,no,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 internal/payment/store/restart_checkout.go,inventory_only,no,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 internal/payment/store/unassigned_history_integration_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers
+internal/platform/jobqueue/river.go,key_sections,no,"High-risk follow-up: only named business invariants, local PostgreSQL; Provider/physical device unverified"
 internal/product/README.md,key_sections,no,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 internal/product/app/catalog.go,key_sections,no,key_sections does not mean every line reviewed; tests passing does not verify external Providers
 internal/product/app/catalog_test.go,inventory_only,yes,key_sections does not mean every line reviewed; tests passing does not verify external Providers

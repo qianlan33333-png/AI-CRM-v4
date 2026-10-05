@@ -2166,9 +2166,9 @@ func resultError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, productapp.ErrInvalidProduct), errors.Is(err, productapp.ErrInvalidCursor):
 		writeError(w, http.StatusBadRequest, "invalid_request")
-	case errors.Is(err, productapp.ErrNotFound), errors.Is(err, productport.ErrProductReadNotFound):
+	case errors.Is(err, productapp.ErrNotFound), errors.Is(err, productport.ErrProductReadNotFound), errors.Is(err, orderport.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found")
-	case errors.Is(err, productapp.ErrConflict), errors.Is(err, productapp.ErrExternalPushNotConfigured), errors.Is(err, productport.ErrProductConflict):
+	case errors.Is(err, productapp.ErrConflict), errors.Is(err, productapp.ErrExternalPushNotConfigured), errors.Is(err, productport.ErrProductConflict), errors.Is(err, orderport.ErrConflict):
 		writeError(w, http.StatusConflict, "conflict")
 	default:
 		writeError(w, http.StatusServiceUnavailable, "unavailable")

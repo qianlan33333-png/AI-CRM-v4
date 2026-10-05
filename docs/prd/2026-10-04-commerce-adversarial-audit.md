@@ -44,3 +44,9 @@ WebKit真实PUT/GET及PG复现普通/周期商品空图片响应null违反既有
 同一真实HTTP合同回归进一步证明普通copy直接JSON返回LocalProduct投影为null；仅将该投影保持空数组，不改复制业务/收据/库存。
 
 交付补核真实HTTP/PG证明两个管理员对不同支付使用同key：compat自动编号和generic EER accept收据均因全局键缺actor而409。只补全既有actor-scoped退款合同的编号/accept键；老compat编号从原Payment+actor+key回执恢复，完整载荷仍由原app校验。既有同UoW外部效果接受不改调度/Provider/状态或旧记录，OneID不涉及新增解析。本地效果worker停用。
+
+## 高风险补审增量
+
+真实River证明Alipay缺付款时间的签名通知在查单任务discarded后重放仍只返回旧query_required收据，无法恢复查单。最小修复让该重放确保原目标任务，使用River现有去重；平台只读检查兼容旧无unique_key任务，保留cancelled/未耗尽任务和旧收据。OneID仍读取既有规范客户；通知收据与任务接受在同一PG UoW；只恢复Provider读取，不新建支付效果、身份或调度内核，不增加重试次数和自动循环。不涉及新增业务限制。补测实际River失败/权益回滚/重启竞争、核心授权分支及本地页面源码恢复；checkout拦截，不代表真实Provider或真机验收。
+
+对象关系补核真实HTTP/PG证明会员备注跨商品引用被Order正确拒绝，但Product未识别Order稳定Port的not_found/conflict错误，误报503，导致客户端把无效对象和版本冲突当作依赖中断。仅补HTTP错误映射404/409，不改变授权、Customer/Product关系约束、持久收据或页面；对应有效管理员写入、Viewer拒绝和旧版本CAS交叉回归。
