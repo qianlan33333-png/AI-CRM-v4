@@ -150,12 +150,6 @@
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/product_webkit_phase2_postgres_test.go",
-      "test": "TestPostgreSQLProductWebKitPhase2Journey",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
       "path": "internal/referral/app/product_activity_context_postgres_integration_test.go",
       "test": "TestPostgreSQLProductActivityContextHTTPIdempotencyAndExpiry",
       "postgres": true,
@@ -193,12 +187,6 @@
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/commerce_recovery_webkit_postgres_test.go",
-      "test": "TestPostgreSQLCommerceRecoveryWebKit",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
       "package": "./internal/payment",
       "test": "TestReconciliationMaxAttempts",
       "postgres": false
@@ -228,8 +216,9 @@
       "postgres": true
     }
   ],
-  "build_commands": [
-    "./cmd/aicrm"
-  ],
-  "installed_checks": []
+  "build_commands": [],
+  "installed_checks": [
+    "periodic-contact",
+    "commerce-readback"
+  ]
 }
