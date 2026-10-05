@@ -1,10 +1,8 @@
 {
   "schema": 1,
-  "baseline_sha": "c334b5b9b404e93df9fa53727a56c8df1c4bdc71",
+  "baseline_sha": "d193cdf4895501e8159d0d435f7172b11afb50aa",
   "checks": [
-    {"lane": "frontend", "path": "internal/webshell/static/admin_console/automation_username_adapter.test.mjs"},
-    {"lane": "frontend", "path": "internal/webshell/static/admin_console/automation_create_code_adapter.test.mjs"},
-    {"lane": "frontend", "path": "web/v3/automationContentHost.test.mjs"}
+    {"lane": "backend", "path": "internal/webshell/handler_test.go", "test": "TestRenderAutomationUsesOnlyV3CreateCodeHostBinding"}
   ],
   "installed_checks": ["welcome", "automation-generation"]
 }
