@@ -200,13 +200,31 @@
     {
       "lane": "backend",
       "package": "./internal/payment",
-      "test": "Test(ReconciliationMaxAttempts|WeChatPayPaymentReconciliationRetryWindowCoversOneDay|Completion)",
+      "test": "TestReconciliationMaxAttempts",
+      "postgres": false
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment",
+      "test": "TestWeChatPayPaymentReconciliationRetryWindowCoversOneDay",
+      "postgres": false
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment",
+      "test": "TestCompletionSinkDurablyQueuesPrepayAndAcceptedShopOutcomes",
       "postgres": false
     },
     {
       "lane": "backend",
       "package": "./internal/externaleffects",
-      "test": "TestPostgreSQL(AttemptedLeaseRecoveryDoesNotRepeatProviderCall|LeaseRecoveryFencesDelayedProviderCompletionAndReplay)",
+      "test": "TestPostgreSQLAttemptedLeaseRecoveryDoesNotRepeatProviderCall",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/externaleffects",
+      "test": "TestPostgreSQLLeaseRecoveryFencesDelayedProviderCompletionAndReplay",
       "postgres": true
     }
   ],
