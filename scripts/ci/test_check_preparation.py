@@ -15,6 +15,8 @@ import check_preparation as prep
 
 
 def slot_worker(directory, queue):
+    # This worker owns a fresh test namespace, not the enclosing release slot.
+    os.environ.pop("AICRM_HEAVY_SLOT_HELD", None)
     os.environ["AICRM_TEST_PREP_DIR"] = directory
     with prep.heavy_slot(["go", "build"]):
         queue.put(("enter", time.monotonic()))
@@ -444,7 +446,9 @@ class CheckPreparationTest(unittest.TestCase):
                         'print("enter",os.getpid(),time.monotonic(),flush=True)\n'
                         'time.sleep(0.1)\nprint("leave",os.getpid(),time.monotonic(),flush=True)\n')
         tool.chmod(0o700); argv=[sys.executable,prep.__file__,'go-tool',str(tool)]
-        children=[subprocess.Popen(argv,stdout=subprocess.PIPE,text=True) for _ in range(2)]
+        independent_env = dict(os.environ)
+        independent_env.pop("AICRM_HEAVY_SLOT_HELD", None)
+        children=[subprocess.Popen(argv,env=independent_env,stdout=subprocess.PIPE,text=True) for _ in range(2)]
         events=[]
         for child in children:
             output,_=child.communicate(timeout=5);self.assertEqual(child.returncode,0)
