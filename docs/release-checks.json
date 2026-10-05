@@ -214,6 +214,10 @@
       "package": "./internal/externaleffects",
       "test": "TestPostgreSQLLeaseRecoveryFencesDelayedProviderCompletionAndReplay",
       "postgres": true
+    },
+    {
+      "lane": "preflight",
+      "path": "scripts/ci/test_check_preparation.py"
     }
   ],
   "build_commands": [],

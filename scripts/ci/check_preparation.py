@@ -556,6 +556,11 @@ def materialize_uncached_artifact(root: Path, fingerprint: str) -> None:
             shutil.rmtree(cache)
             reused = False
         if not reused:
+            # Backend HTTP fixtures call artifact directly on a fresh checkout.
+            # Reuse the locked dependency preparation before compiling Hosts;
+            # a valid artifact hit above needs no npm installation.
+            npm_dependencies(root, ".")
+            npm_dependencies(root, "web/v3")
             temporary = Path(tempfile.mkdtemp(prefix="artifact-build-", dir=prep))
             run(["npm", "run", "build", "--silent"], root)
             run(["node", "scripts/build-v3-host-adapters.mjs"], root)

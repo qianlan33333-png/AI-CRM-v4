@@ -62,16 +62,19 @@ class CheckPreparationTest(unittest.TestCase):
                 target = Path(command[-1]); target.mkdir(parents=True)
                 (target / "asset-manifest.json").write_text('{"original":true}')
                 (target / "page.js").write_text("original")
-        with patch.object(prep, "artifact_input", side_effect=fingerprints), patch.object(prep, "run", side_effect=build) as run:
+        with patch.object(prep, "artifact_input", side_effect=fingerprints), patch.object(prep, "npm_dependencies") as npm, patch.object(prep, "run", side_effect=build) as run:
             prep.materialize_artifact(root)
+            self.assertEqual([call.args for call in npm.call_args_list], [(root, "."), (root, "web/v3")])
             (root / "web/dist/page.js").write_text("fixture changed")
             prep.materialize_artifact(root)
             self.assertEqual((root / "web/dist/page.js").read_text(), "original")
             self.assertEqual(run.call_count, 5)
+            self.assertEqual(npm.call_count, 2, "cached artifact must not prepare npm again")
             prep.materialize_artifact(root)
             self.assertEqual(run.call_count, 10)
+            self.assertEqual(npm.call_count, 4)
         (cache / ("artifact-" + "b" * 64) / "dist/page.js").write_text("corrupt")
-        with patch.object(prep, "artifact_input", return_value="b" * 64), patch.object(prep, "run", side_effect=build) as run:
+        with patch.object(prep, "artifact_input", return_value="b" * 64), patch.object(prep, "npm_dependencies"), patch.object(prep, "run", side_effect=build) as run:
             prep.materialize_artifact(root)
             self.assertEqual((root / "web/dist/page.js").read_text(), "original")
             self.assertEqual(run.call_count, 5)
@@ -146,6 +149,7 @@ class CheckPreparationTest(unittest.TestCase):
                 (target / "asset-manifest.json").write_text('{"source":"same"}')
                 (target / "release.js").write_text("verified release")
         with patch.object(prep, "artifact_input", return_value=fingerprint), \
+                patch.object(prep, "npm_dependencies"), \
                 patch.object(prep, "run", side_effect=build) as run:
             with patch.dict(os.environ, {"AICRM_TEST_PREP_DIR": str(attempts[0])}):
                 prep.materialize_artifact(roots[0])
