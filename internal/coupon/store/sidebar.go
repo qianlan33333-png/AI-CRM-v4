@@ -14,7 +14,11 @@ func (r *Repository) ListCustomerCoupons(ctx context.Context, customerID int64, 
 	if err != nil {
 		return couponport.CustomerCouponPage{}, err
 	}
-	rows, err := tx.Query(ctx, `SELECT claim.id,rule.id,rule.name,rule.discount_amount_total,rule.currency,claim.status,claim.claim_no_masked,claim.claimed_at,claim.valid_from,claim.valid_until,claim.redeemed_at FROM coupon_customer_claims claim JOIN coupon_rules rule ON rule.id=claim.coupon_id WHERE claim.customer_id=$1 ORDER BY claim.claimed_at DESC,claim.id DESC LIMIT $2`, customerID, limit)
+	ids, err := r.couponCustomerIDs(ctx, customerID, false)
+	if err != nil {
+		return couponport.CustomerCouponPage{}, err
+	}
+	rows, err := tx.Query(ctx, `SELECT claim.id,rule.id,rule.name,rule.discount_amount_total,rule.currency,claim.status,claim.claim_no_masked,claim.claimed_at,claim.valid_from,claim.valid_until,claim.redeemed_at FROM coupon_customer_claims claim JOIN coupon_rules rule ON rule.id=claim.coupon_id WHERE claim.customer_id=ANY($1::bigint[]) ORDER BY claim.claimed_at DESC,claim.id DESC LIMIT $2`, ids, limit)
 	if err != nil {
 		return couponport.CustomerCouponPage{}, err
 	}
@@ -30,7 +34,7 @@ func (r *Repository) ListCustomerCoupons(ctx context.Context, customerID int64, 
 	if err = rows.Err(); err != nil {
 		return page, err
 	}
-	err = tx.QueryRow(ctx, `SELECT count(*) FROM coupon_customer_claims WHERE customer_id=$1`, customerID).Scan(&page.Total)
+	err = tx.QueryRow(ctx, `SELECT count(*) FROM coupon_customer_claims WHERE customer_id=ANY($1::bigint[])`, ids).Scan(&page.Total)
 	return page, err
 }
 
@@ -105,12 +109,16 @@ func (r *Repository) ListSidebarClaimable(ctx context.Context, customerID int64,
 	if customerID < 1 || limit < 1 || limit > couponport.SidebarClaimableMaximumLimit || offset < 0 || offset > couponport.SidebarClaimableMaximumOffset {
 		return couponapp.SidebarClaimableRecordPage{}, couponapp.ErrInvalidCoupon
 	}
+	ids, err := r.couponCustomerIDs(ctx, customerID, false)
+	if err != nil {
+		return couponapp.SidebarClaimableRecordPage{}, err
+	}
 	page := couponapp.SidebarClaimableRecordPage{Items: []couponapp.SidebarClaimableRecord{}, Limit: limit, Offset: offset}
-	rows, err := tx.Query(ctx, `SELECT `+couponColumns+`,COALESCE(rule.public_slug,''),(SELECT count(*) FROM coupon_customer_claims claim WHERE claim.customer_id=$1 AND claim.coupon_id=rule.id)
+	rows, err := tx.Query(ctx, `SELECT `+couponColumns+`,COALESCE(rule.public_slug,''),(SELECT count(*) FROM coupon_customer_claims claim WHERE claim.customer_id=ANY($1::bigint[]) AND claim.coupon_id=rule.id)
 		FROM coupon_rules rule
 		WHERE rule.status<>'draft' AND rule.status<>'archived'
 		ORDER BY rule.updated_at DESC,rule.id DESC
-		LIMIT $2 OFFSET $3`, customerID, limit, offset)
+		LIMIT $2 OFFSET $3`, ids, limit, offset)
 	if err != nil {
 		return page, err
 	}
@@ -150,10 +158,14 @@ func (r *Repository) ReadSidebarClaimable(ctx context.Context, customerID int64,
 	if customerID < 1 || couponID < 1 {
 		return couponapp.SidebarClaimableRecord{}, couponapp.ErrInvalidCoupon
 	}
+	ids, err := r.couponCustomerIDs(ctx, customerID, false)
+	if err != nil {
+		return couponapp.SidebarClaimableRecord{}, err
+	}
 	var record couponapp.SidebarClaimableRecord
 	var mode string
-	err = tx.QueryRow(ctx, `SELECT `+couponColumns+`,COALESCE(rule.public_slug,''),(SELECT count(*) FROM coupon_customer_claims claim WHERE claim.customer_id=$1 AND claim.coupon_id=rule.id)
-		FROM coupon_rules rule WHERE rule.id=$2 AND rule.status<>'draft' AND rule.status<>'archived'`, customerID, couponID).Scan(
+	err = tx.QueryRow(ctx, `SELECT `+couponColumns+`,COALESCE(rule.public_slug,''),(SELECT count(*) FROM coupon_customer_claims claim WHERE claim.customer_id=ANY($1::bigint[]) AND claim.coupon_id=rule.id)
+		FROM coupon_rules rule WHERE rule.id=$2 AND rule.status<>'draft' AND rule.status<>'archived'`, ids, couponID).Scan(
 		&record.Coupon.ID, &record.Coupon.Name, &record.Coupon.DiscountAmountTotal, &record.Coupon.Currency, &record.Coupon.Status, &record.Coupon.TotalIssueLimit, &record.Coupon.PerUserIssueLimit, &record.Coupon.IssuedCount, &record.Coupon.ClaimStartsAt, &record.Coupon.ClaimEndsAt, &mode, &record.Coupon.UseStartsAt, &record.Coupon.UseEndsAt, &record.Coupon.RelativeValidityDays, &record.Coupon.Instructions, &record.Coupon.CreatedBy, &record.Coupon.UpdatedBy, &record.Coupon.Version, &record.Coupon.CreatedAt, &record.Coupon.UpdatedAt, &record.PublicSlug, &record.ClaimCount,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

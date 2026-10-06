@@ -53,7 +53,18 @@ func (s *Service) ensureCheckoutBuyerParticipationWithin(ctx context.Context, ch
 	if err != nil {
 		return err
 	}
-	if event.OccurredAt.After(campaign.EndsAt) {
+	if s.timeline == nil {
+		return referralport.ErrUnavailable
+	}
+	state, known, err := s.campaignStateAt(ctx, campaign.ID, event.OccurredAt)
+	if err != nil {
+		return err
+	}
+	if !known {
+		return referralport.ErrUnavailable
+	}
+	campaign.State = state
+	if !campaign.AcceptingAt(event.OccurredAt) {
 		return nil
 	}
 	buyer := *event.Order.BeneficiaryCustomerID

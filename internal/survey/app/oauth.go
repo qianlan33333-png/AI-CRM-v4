@@ -36,11 +36,19 @@ type OAuthService struct {
 	store    OAuthStore
 	provider OAuthProvider
 	identity surveyport.IdentityCoordinator
+	subjects identityport.VerifiedIdentitySubjectReader
 	now      func() time.Time
 }
 
 func NewOAuthService(uow platformport.UnitOfWork, store OAuthStore, provider OAuthProvider, identity surveyport.IdentityCoordinator) *OAuthService {
 	return &OAuthService{uow: uow, store: store, provider: provider, identity: identity, now: time.Now}
+}
+func (s *OAuthService) BindIdentitySubjects(reader identityport.VerifiedIdentitySubjectReader) error {
+	if s == nil || reader == nil {
+		return surveyport.ErrInvalid
+	}
+	s.subjects = reader
+	return nil
 }
 func (s *OAuthService) Enabled() bool { return s != nil && s.provider != nil && s.provider.Enabled() }
 func (s *OAuthService) Start(ctx context.Context, slug string) (string, error) {
@@ -53,7 +61,7 @@ func (s *OAuthService) Start(ctx context.Context, slug string) (string, error) {
 	}
 	digest := sha256.Sum256([]byte(token))
 	now := s.now().UTC()
-	state := OAuthState{Slug: slug, ExpiresAt: now.Add(10 * time.Minute)}
+	state := OAuthState{Slug: slug, ExpiresAt: now.Add(surveyport.OAuthStateLifetime)}
 	if err = s.uow.Within(ctx, func(tx context.Context) error {
 		questionnaire, readErr := s.store.GetPublishedBySlug(tx, slug)
 		if readErr != nil {
@@ -112,6 +120,7 @@ func (s *OAuthService) Complete(ctx context.Context, stateToken, code string) (s
 			id := resolved.CustomerID
 			identity.State = surveyport.IdentityResolved
 			identity.CustomerID = &id
+			identity.ProviderIdentityID = resolved.IdentityID
 		case identityport.ResolveConflict:
 			identity.State = surveyport.IdentityConflict
 		case identityport.ResolveNotFound:
@@ -122,6 +131,7 @@ func (s *OAuthService) Complete(ctx context.Context, stateToken, code string) (s
 			id := provisioned.CustomerID
 			identity.State = surveyport.IdentityResolved
 			identity.CustomerID = &id
+			identity.ProviderIdentityID = provisioned.IdentityID
 		}
 		return s.store.CreateIdentitySession(tx, sessionDigest, identity, now.Add(30*time.Minute), now)
 	})
@@ -139,7 +149,29 @@ func (s *OAuthService) ResolveSession(ctx context.Context, token string) (survey
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		var e error
 		identity, e = s.store.ReadIdentitySession(tx, digest, s.now().UTC())
-		return e
+		if e != nil {
+			return e
+		}
+		if identity.State != surveyport.IdentityResolved {
+			return nil
+		}
+		// A legacy customer snapshot cannot identify the original provider
+		// subject after detach/correction. Require OAuth again rather than guess.
+		if s.subjects == nil || identity.ProviderIdentityID < 1 {
+			identity = surveyport.SubmissionIdentity{State: surveyport.IdentityAnonymous}
+			return nil
+		}
+		subject, found, e := s.subjects.VerifiedIdentitySubject(tx, identity.ProviderIdentityID)
+		if e != nil {
+			return e
+		}
+		if !found {
+			identity = surveyport.SubmissionIdentity{State: surveyport.IdentityAnonymous}
+			return nil
+		}
+		id := subject.CustomerID
+		identity.CustomerID = &id
+		return nil
 	})
 	if err != nil {
 		return surveyport.SubmissionIdentity{State: surveyport.IdentityAnonymous}, nil

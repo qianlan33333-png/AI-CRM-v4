@@ -12,12 +12,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	distributiondomain "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/domain"
 	distributionport "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/port"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	platformaudit "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/audit"
 	platformidempotency "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/idempotency"
 	platformoutbox "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/outbox"
@@ -77,23 +79,24 @@ func (s *Service) IssueProductActivityContext(ctx context.Context, actor referra
 	if s == nil || !actor.Valid() || campaignID < 1 || !validKey(idempotencyKey) {
 		return referralport.ProductActivityContextCredential{}, referralport.ErrConflict
 	}
-	actorScope := customerScope(actor.CustomerID)
-	token, err := s.activityContextTokens.issue(actorScope, campaignID, idempotencyKey)
-	if err != nil {
-		return referralport.ProductActivityContextCredential{}, referralport.ErrUnavailable
-	}
-	digest := sha256.Sum256([]byte(token))
 	payload := productActivityContextPayload(campaignID)
 	var credential referralport.ProductActivityContextCredential
-	err = s.uow.Within(ctx, func(tx context.Context) error {
-		if err := s.store.LockOperationReceiptWithin(tx, "issue_product_activity_context", actorScope, idempotencyKey); err != nil {
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		lineage, err := s.actorLineageWithin(tx, actor, true)
+		if err != nil {
 			return err
 		}
-		if receipt, found, err := s.store.ReadOperationReceiptWithin(tx, "issue_product_activity_context", actorScope, idempotencyKey); err != nil || found {
-			if err != nil {
-				return err
-			}
-			if receipt.PayloadDigest != payload || receipt.ResultKind != "campaign" || receipt.ResultID != campaignID {
+		receipt, actorScope, found, err := s.actorReceiptWithin(tx, "issue_product_activity_context", lineage, idempotencyKey, payload)
+		if err != nil {
+			return err
+		}
+		token, err := s.activityContextTokens.issue(actorScope, campaignID, idempotencyKey)
+		if err != nil {
+			return referralport.ErrUnavailable
+		}
+		digest := sha256.Sum256([]byte(token))
+		if found {
+			if receipt.ResultKind != "campaign" || receipt.ResultID != campaignID {
 				return referralport.ErrConflict
 			}
 			stored, readErr := s.store.ReadProductActivityContextByDigestWithin(tx, digest)
@@ -177,7 +180,103 @@ type Service struct {
 	qualification         referralport.PurchaseQualificationReader
 	attributions          distributionport.FrozenOrderAttributionReader
 	timeline              platformaudit.TimelineReader
+	subjects              trustedReferralSubjects
 	now                   func() time.Time
+}
+
+type trustedReferralSubjects interface {
+	identityport.VerifiedIdentitySubjectReader
+	identityport.WriteLockedVerifiedIdentitySubjectReader
+}
+
+func (s *Service) BindIdentitySubjects(reader trustedReferralSubjects) error {
+	if s == nil || reader == nil {
+		return referralport.ErrUnavailable
+	}
+	s.subjects = reader
+	return nil
+}
+
+// The immutable verified handle, rather than a session's historical customer
+// ID, identifies the current subject. Identity owns merge and reversal rules.
+func (s *Service) actorLineageWithin(ctx context.Context, actor referralport.TrustedSessionActor, locked bool) ([]int64, error) {
+	if s.subjects == nil {
+		return []int64{actor.CustomerID}, nil
+	}
+	var subject identityport.VerifiedIdentitySubject
+	var found bool
+	var err error
+	if locked {
+		subject, found, err = s.subjects.WriteLockedVerifiedIdentitySubject(ctx, actor.IdentityID)
+	} else {
+		subject, found, err = s.subjects.VerifiedIdentitySubject(ctx, actor.IdentityID)
+	}
+	if err != nil {
+		return nil, referralport.ErrUnavailable
+	}
+	if !found || subject.CustomerID < 1 || len(subject.Lineage) == 0 || subject.Lineage[0] != subject.CustomerID {
+		return nil, referralport.ErrUnauthorized
+	}
+	lineage := make([]int64, len(subject.Lineage))
+	for index, id := range subject.Lineage {
+		if id < 1 || slices.Contains(lineage[:index], int64(id)) {
+			return nil, referralport.ErrUnavailable
+		}
+		lineage[index] = int64(id)
+	}
+	return lineage, nil
+}
+
+// Existing actor-scoped receipts remain at their original historical scope.
+// A holder may replay only receipts owned by its currently locked lineage.
+func (s *Service) actorReceiptWithin(ctx context.Context, operation string, lineage []int64, key string, payload [sha256.Size]byte) (referralstore.OperationReceipt, string, bool, error) {
+	ordered := slices.Clone(lineage)
+	slices.Sort(ordered)
+	for _, customerID := range ordered {
+		if err := s.store.LockOperationReceiptWithin(ctx, operation, customerScope(customerID), key); err != nil {
+			return referralstore.OperationReceipt{}, "", false, err
+		}
+	}
+	var result referralstore.OperationReceipt
+	scope := customerScope(lineage[0])
+	found := false
+	for _, customerID := range lineage {
+		candidateScope := customerScope(customerID)
+		receipt, exists, err := s.store.ReadOperationReceiptWithin(ctx, operation, candidateScope, key)
+		if err != nil {
+			return result, scope, false, err
+		}
+		if !exists {
+			continue
+		}
+		if receipt.PayloadDigest != payload || found && (receipt.ResultKind != result.ResultKind || receipt.ResultID != result.ResultID) {
+			return result, scope, false, referralport.ErrConflict
+		}
+		result, scope, found = receipt, candidateScope, true
+	}
+	return result, scope, found, nil
+}
+
+func (s *Service) ownParticipationWithin(ctx context.Context, campaignID int64, lineage []int64, locked bool) (referraldomain.Participation, error) {
+	var result referraldomain.Participation
+	for _, customerID := range lineage {
+		participation, err := s.store.ReadParticipationWithin(ctx, campaignID, customerID, locked)
+		if errors.Is(err, referralport.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return result, err
+		}
+		if result.ID > 0 && result.ID != participation.ID {
+			// Merging pre-existing participants does not erase or combine facts.
+			return result, referralport.ErrConflict
+		}
+		result = participation
+	}
+	if result.ID == 0 {
+		return result, referralport.ErrNotFound
+	}
+	return result, nil
 }
 
 func NewService(uow platformport.UnitOfWork, store serviceStore, origin, tokenDataKey string, closeJobs CampaignCloseEnqueuer, audit *platformaudit.Service, outbox platformoutbox.Appender) (*Service, error) {
@@ -329,18 +428,24 @@ func (s *Service) JoinCampaign(ctx context.Context, command referralport.JoinCam
 	if s == nil || s.uow == nil || s.store == nil || !command.Actor.Valid() || command.CampaignID < 1 || command.TeamID < 0 || !validKey(command.IdempotencyKey) || (command.InvitationToken != "" && !validInvitationToken(command.InvitationToken)) {
 		return referralport.MyCampaign{}, referralport.ErrConflict
 	}
-	actorScope := customerScope(command.Actor.CustomerID)
 	payload := joinPayload(command)
 	result := int64(0)
 	err := s.uow.Within(ctx, func(tx context.Context) error {
-		if err := s.store.LockOperationReceiptWithin(tx, "join", actorScope, command.IdempotencyKey); err != nil {
+		lineage, err := s.actorLineageWithin(tx, command.Actor, true)
+		if err != nil {
 			return err
 		}
-		if receipt, found, err := s.store.ReadOperationReceiptWithin(tx, "join", actorScope, command.IdempotencyKey); err != nil || found {
-			if err != nil {
-				return err
+		command.Actor.CustomerID = lineage[0]
+		receipt, actorScope, found, err := s.actorReceiptWithin(tx, "join", lineage, command.IdempotencyKey, payload)
+		if err != nil {
+			return err
+		}
+		if found {
+			participation, readErr := s.ownParticipationWithin(tx, command.CampaignID, lineage, true)
+			if readErr != nil {
+				return readErr
 			}
-			if receipt.PayloadDigest != payload || receipt.ResultKind != "participation" {
+			if receipt.ResultKind != "participation" || receipt.ResultID != participation.ID {
 				return referralport.ErrConflict
 			}
 			result = receipt.ResultID
@@ -361,25 +466,20 @@ func (s *Service) JoinCampaign(ctx context.Context, command referralport.JoinCam
 				return err
 			}
 		}
-		lockFirst, lockSecond := command.Actor.CustomerID, int64(0)
-		if invitationFound && invitation.InviterCustomerID != command.Actor.CustomerID {
-			lockSecond = invitation.InviterCustomerID
-			if lockSecond < lockFirst {
-				lockFirst, lockSecond = lockSecond, lockFirst
-			}
+		locks := slices.Clone(lineage)
+		if invitationFound && !slices.Contains(locks, invitation.InviterCustomerID) {
+			locks = append(locks, invitation.InviterCustomerID)
 		}
-		if err = s.store.LockParticipationWithin(tx, command.CampaignID, lockFirst); err != nil {
-			return err
-		}
-		if lockSecond > 0 {
-			if err = s.store.LockParticipationWithin(tx, command.CampaignID, lockSecond); err != nil {
+		slices.Sort(locks)
+		for _, customerID := range locks {
+			if err = s.store.LockParticipationWithin(tx, command.CampaignID, customerID); err != nil {
 				return err
 			}
 		}
-		if invitationFound && invitation.InviterCustomerID == command.Actor.CustomerID {
+		if invitationFound && slices.Contains(lineage, invitation.InviterCustomerID) {
 			return referralport.ErrInvitationInvalid
 		}
-		if existing, readErr := s.store.ReadParticipationWithin(tx, command.CampaignID, command.Actor.CustomerID, true); readErr == nil {
+		if existing, readErr := s.ownParticipationWithin(tx, command.CampaignID, lineage, true); readErr == nil {
 			now := s.now().UTC()
 			if err = s.store.AppendOperationReceiptWithin(tx, "join", actorScope, command.IdempotencyKey, payload, "participation", existing.ID, now); err != nil {
 				return err
@@ -481,26 +581,33 @@ func (s *Service) IssueInvitation(ctx context.Context, command referralport.Issu
 	if s == nil || s.uow == nil || s.store == nil || !command.Actor.Valid() || command.CampaignID < 1 || !validKey(command.IdempotencyKey) {
 		return referralport.InvitationLink{}, referralport.ErrConflict
 	}
-	actorScope := customerScope(command.Actor.CustomerID)
-	token, err := s.tokens.issue(actorScope, command.CampaignID, command.IdempotencyKey)
-	if err != nil {
-		return referralport.InvitationLink{}, referralport.ErrUnavailable
-	}
-	digest, payload := sha256.Sum256([]byte(token)), issuePayload(command.CampaignID)
+	payload := issuePayload(command.CampaignID)
+	var token string
 	var expiresAt time.Time
-	err = s.uow.Within(ctx, func(tx context.Context) error {
-		if err := s.store.LockOperationReceiptWithin(tx, "issue_invitation", actorScope, command.IdempotencyKey); err != nil {
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		lineage, err := s.actorLineageWithin(tx, command.Actor, true)
+		if err != nil {
 			return err
 		}
-		if receipt, found, readErr := s.store.ReadOperationReceiptWithin(tx, "issue_invitation", actorScope, command.IdempotencyKey); readErr != nil || found {
-			if readErr != nil {
-				return readErr
+		receipt, actorScope, found, err := s.actorReceiptWithin(tx, "issue_invitation", lineage, command.IdempotencyKey, payload)
+		if err != nil {
+			return err
+		}
+		token, err = s.tokens.issue(actorScope, command.CampaignID, command.IdempotencyKey)
+		if err != nil {
+			return referralport.ErrUnavailable
+		}
+		digest := sha256.Sum256([]byte(token))
+		if found {
+			participation, partErr := s.ownParticipationWithin(tx, command.CampaignID, lineage, true)
+			if partErr != nil {
+				return partErr
 			}
-			if receipt.PayloadDigest != payload || receipt.ResultKind != "invitation" {
+			if receipt.ResultKind != "invitation" {
 				return referralport.ErrConflict
 			}
 			invitation, invitationErr := s.store.ReadInvitationByDigestWithin(tx, digest, false)
-			if invitationErr != nil || invitation.ID != receipt.ResultID || invitation.CampaignID != command.CampaignID || invitation.InviterCustomerID != command.Actor.CustomerID {
+			if invitationErr != nil || invitation.ID != receipt.ResultID || invitation.CampaignID != command.CampaignID || invitation.InviterCustomerID != participation.CustomerID {
 				return referralport.ErrConflict
 			}
 			expiresAt = invitation.ExpiresAt
@@ -514,13 +621,14 @@ func (s *Service) IssueInvitation(ctx context.Context, command referralport.Issu
 		if !campaign.AcceptingAt(now) {
 			return referralport.ErrCampaignUnavailable
 		}
-		participation, partErr := s.store.ReadParticipationWithin(tx, campaign.ID, command.Actor.CustomerID, false)
+		participation, partErr := s.ownParticipationWithin(tx, campaign.ID, lineage, true)
+		if errors.Is(partErr, referralport.ErrNotFound) {
+			return referralport.ErrParticipationRequired
+		}
 		if partErr != nil {
-			if errors.Is(partErr, referralport.ErrNotFound) {
-				return referralport.ErrParticipationRequired
-			}
 			return partErr
 		}
+		command.Actor.CustomerID = participation.CustomerID
 		if participation.State != referraldomain.ParticipationActive {
 			return referralport.ErrParticipationRequired
 		}
@@ -556,14 +664,19 @@ func (s *Service) MyCampaign(ctx context.Context, actor referralport.TrustedSess
 	var captainTeam referraldomain.Team
 	var hasParticipation, hasRelationship, assignedCaptain bool
 	err := s.uow.Within(ctx, func(tx context.Context) error {
-		var err error
+		lineage, err := s.actorLineageWithin(tx, actor, false)
+		if err != nil {
+			return err
+		}
+		actor.CustomerID = lineage[0]
 		campaign, err = s.store.ReadCampaignWithin(tx, campaignID, false)
 		if err != nil {
 			return err
 		}
-		participation, err = s.store.ReadParticipationWithin(tx, campaignID, actor.CustomerID, false)
+		participation, err = s.ownParticipationWithin(tx, campaignID, lineage, false)
 		if err == nil {
 			hasParticipation = true
+			actor.CustomerID = participation.CustomerID
 		} else if !errors.Is(err, referralport.ErrNotFound) {
 			return err
 		}
@@ -648,7 +761,10 @@ func (s *Service) ListMyInvites(ctx context.Context, actor referralport.TrustedS
 	}
 	var values []referralport.InviteItem
 	err = s.uow.Within(ctx, func(tx context.Context) error {
-		var err error
+		lineage, err := s.actorLineageWithin(tx, actor, false)
+		if err != nil {
+			return err
+		}
 		// The actor has already been authenticated by the shared verified
 		// browser session. A missing participation means this customer has no
 		// invitation details yet; it is not a failed login. Read the campaign
@@ -658,12 +774,14 @@ func (s *Service) ListMyInvites(ctx context.Context, actor referralport.TrustedS
 		if readErr != nil {
 			return readErr
 		}
-		if _, err = s.store.ReadParticipationWithin(tx, campaignID, actor.CustomerID, false); err != nil {
+		participation, err := s.ownParticipationWithin(tx, campaignID, lineage, false)
+		if err != nil {
 			if errors.Is(err, referralport.ErrNotFound) {
 				return nil
 			}
 			return err
 		}
+		actor.CustomerID = participation.CustomerID
 		if campaign.Config().QualificationMode == referraldomain.QualificationProductPurchase {
 			values, err = s.store.ListPaidInviteItemsWithin(tx, campaignID, actor.CustomerID, offset, limit+1)
 		} else {

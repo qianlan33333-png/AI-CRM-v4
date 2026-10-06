@@ -18,15 +18,16 @@ import (
 )
 
 type Repository struct {
-	pool *pgxpool.Pool
-	uow  platformport.UnitOfWork
+	pool    *pgxpool.Pool
+	uow     platformport.UnitOfWork
+	lineage canonicalCouponLineage
 }
 
 func NewPostgreSQL(pool *pgxpool.Pool, uow platformport.UnitOfWork) (*Repository, error) {
 	if pool == nil || uow == nil {
 		return nil, errors.New("coupon store dependencies are required")
 	}
-	return &Repository{pool, uow}, nil
+	return &Repository{pool: pool, uow: uow}, nil
 }
 func (r *Repository) Within(ctx context.Context, fn func(context.Context) error) error {
 	return r.uow.Within(ctx, fn)

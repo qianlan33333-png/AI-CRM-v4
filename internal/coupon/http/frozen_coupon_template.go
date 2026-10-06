@@ -10,12 +10,15 @@ import (
 
 // frozenCouponPublicTemplateSHA256 identifies the read-only donor page copied
 // from frozen Commerce coupon template source
-// coupon_public.html. The Host only translates its server-template dialect;
-// DOM, CSS, copy and browser workflow continue to originate in that file.
+// coupon_public.html. The Host translates its server-template dialect and
+// adapts command recovery; the page DOM and CSS originate in that file.
 const frozenCouponPublicTemplateSHA256 = "2a6feccf9621138b62e3cd04d523f980a16ad7aa8901d8af834822f2361a5cf6"
 
 //go:embed donor/coupon_public.html
 var frozenCouponPublicTemplate string
+
+//go:embed coupon_public_recovery.js
+var couponPublicRecoveryScript string
 
 type frozenCouponPageState struct {
 	Coupon           couponPublicView
@@ -28,6 +31,7 @@ type frozenCouponPageState struct {
 	DisplayState     string
 	ValidityText     string
 	Message          string
+	SessionBinding   string
 }
 
 type couponPublicView struct {
@@ -80,6 +84,14 @@ func mustFrozenCouponPublicPage() *template.Template {
 		`{% if coupon.instructions %}`, `{{if .Coupon.Instructions}}`,
 		`{{ coupon.instructions }}`, `{{.Coupon.Instructions}}`,
 	).Replace(frozenCouponPublicTemplate)
+	// Keep the frozen page and presentation intact. Only the Host's command
+	// transport gains a durable, session-bound recovery checkpoint.
+	source = strings.Replace(source, `data-public-slug="{{.Coupon.PublicSlug}}"`, `data-public-slug="{{.Coupon.PublicSlug}}" data-session-binding="{{.SessionBinding}}" data-is-wechat="{{.IsWechat}}"`, 1)
+	start, end := strings.Index(source, "  <script>"), strings.Index(source, "  </script>")
+	if start < 0 || end <= start || strings.Count(source, "  <script>") != 1 || strings.Count(source, "  </script>") != 1 {
+		panic("frozen coupon public script seam mismatch")
+	}
+	source = source[:start] + "  <script>\n" + couponPublicRecoveryScript + "\n" + source[end:]
 	return template.Must(template.New("frozen-coupon-public").Funcs(template.FuncMap{
 		"cny":                 func(value int64) float64 { return float64(value) / 100 },
 		"terminalCouponState": func(value string) bool { return value == "ended" || value == "stopped" || value == "archived" },

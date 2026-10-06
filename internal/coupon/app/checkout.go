@@ -22,12 +22,14 @@ type CheckoutStore interface {
 }
 
 // CheckoutService owns Coupon's local claim lifecycle and its narrow
-// transaction-bound Order seam. It never resolves identities or opens an
-// independent transaction for an Order mutation.
+// transaction-bound Order seam. Trusted public handles use Identity's subject
+// Port; Coupon owns no matcher or customer provisioning. Order mutations do
+// not open an independent transaction.
 type CheckoutService struct {
-	uow   platformport.UnitOfWork
-	store CheckoutStore
-	now   func() time.Time
+	uow      platformport.UnitOfWork
+	store    CheckoutStore
+	subjects trustedCouponSubjects
+	now      func() time.Time
 }
 
 var _ couponport.ClaimApplication = (*CheckoutService)(nil)
@@ -44,26 +46,35 @@ func (s *CheckoutService) Claim(ctx context.Context, c couponport.ClaimCommand) 
 		return couponport.CustomerCoupon{}, ErrUnavailable
 	}
 	c.ClaimedAt = checkoutTime(c.ClaimedAt, s.now)
-	if c.CouponID < 1 || c.HolderCustomerID < 1 || !validScope(c.ActorScope) || !validKey(c.IdempotencyKey) || c.ClaimedAt.IsZero() {
+	if c.CouponID < 1 || c.HolderIdentityID < 0 || c.HolderIdentityID == 0 && c.HolderCustomerID < 1 || !validScope(c.ActorScope) || !validKey(c.IdempotencyKey) || c.ClaimedAt.IsZero() {
 		return couponport.CustomerCoupon{}, ErrInvalidCoupon
 	}
 	// ClaimedAt records this process's execution time. It is intentionally not
 	// part of the client operation's immutable business payload: an HTTP retry
 	// must replay the first claim snapshot even when it reaches another server
 	// after the coupon itself has expired.
-	payload, e := json.Marshal(struct {
-		CouponID couponport.ID
-		Holder   int64
-		Scope    string
-	}{c.CouponID, c.HolderCustomerID, c.ActorScope})
-	if e != nil {
-		return couponport.CustomerCoupon{}, ErrUnavailable
-	}
-	key, digest := sha256.Sum256([]byte(c.IdempotencyKey)), sha256.Sum256(payload)
+	key := sha256.Sum256([]byte(c.IdempotencyKey))
 	var result couponport.CustomerCoupon
-	e = s.uow.Within(ctx, func(tx context.Context) error {
+	e := s.uow.Within(ctx, func(tx context.Context) error {
+		if c.HolderIdentityID > 0 {
+			holder, err := currentCouponSubjectWithin(tx, s.subjects, c.HolderIdentityID, true)
+			if err != nil {
+				return err
+			}
+			c.HolderCustomerID = holder
+		}
+		// Preserve historical receipt encoding; the private handle is authority,
+		// not an additional business field in the immutable claim payload.
+		payload, err := json.Marshal(struct {
+			CouponID couponport.ID
+			Holder   int64
+			Scope    string
+		}{c.CouponID, c.HolderCustomerID, c.ActorScope})
+		if err != nil {
+			return ErrUnavailable
+		}
 		var x error
-		result, x = s.store.ClaimCoupon(tx, c, key, digest, c.ClaimedAt)
+		result, x = s.store.ClaimCoupon(tx, c, key, sha256.Sum256(payload), c.ClaimedAt)
 		return x
 	})
 	if e != nil {
@@ -176,7 +187,7 @@ func validReservationRef(v string) bool {
 	return true
 }
 func classifyCheckout(e error) error {
-	if errors.Is(e, ErrInvalidCoupon) || errors.Is(e, ErrConflict) || errors.Is(e, ErrNotFound) || errors.Is(e, ErrNoEligibleCoupon) {
+	if errors.Is(e, ErrInvalidCoupon) || errors.Is(e, ErrConflict) || errors.Is(e, ErrNotFound) || errors.Is(e, ErrNoEligibleCoupon) || errors.Is(e, ErrReauthorizationRequired) {
 		return e
 	}
 	return ErrUnavailable

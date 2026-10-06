@@ -27,6 +27,25 @@ type Resolver interface {
 	Resolve(context.Context, identitydomain.Reference) (ResolveResult, error)
 }
 
+// VerifiedIdentitySubject binds a trusted, immutable Identity-owned handle to
+// its current active customer. Lineage is root-first; no external value is
+// exposed. A retired/replaced identity never becomes another subject by guess.
+type VerifiedIdentitySubject struct {
+	CustomerID customerdomain.CustomerID
+	Lineage    []customerdomain.CustomerID
+}
+
+type VerifiedIdentitySubjectReader interface {
+	VerifiedIdentitySubject(context.Context, int64) (VerifiedIdentitySubject, bool, error)
+}
+
+// WriteLockedVerifiedIdentitySubjectReader resolves and pins the exact verified
+// identity's roots before rechecking its owner. Business commands must use it
+// in their own UoW; an earlier browser-session read cannot pin a later write.
+type WriteLockedVerifiedIdentitySubjectReader interface {
+	WriteLockedVerifiedIdentitySubject(context.Context, int64) (VerifiedIdentitySubject, bool, error)
+}
+
 // CanonicalLineageReader is the narrow, read-only OneID bridge for domains
 // that retain immutable customer IDs at ingestion. It returns the current
 // canonical root first, followed by historical roots which currently resolve

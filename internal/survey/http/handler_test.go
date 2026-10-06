@@ -180,7 +180,7 @@ type routeOAuth struct {
 
 func (o routeOAuth) Enabled() bool { return o.enabled }
 func (routeOAuth) Start(context.Context, string) (string, error) {
-	return "https://open.weixin.qq.com/authorize", nil
+	return "https://open.weixin.qq.com/authorize?state=" + strings.Repeat("a", 43), nil
 }
 func (o routeOAuth) Complete(context.Context, string, string) (string, string, error) {
 	if o.completeErr != nil {
@@ -392,11 +392,14 @@ func TestOAuthSubmissionResumeDenialReturnsToAnswerRoute(t *testing.T) {
 	for _, display := range []string{"all", "one"} {
 		target := "/h5/" + display + ".html?slug=growth"
 		handler := newRouteHandler(t, routeOAuth{enabled: true, redirect: target, completeErr: errors.New("denied")})
+		state, cookies := sol61StartBrowserProof(t, handler, "submit")
 		response := httptest.NewRecorder()
-		request := httptest.NewRequest(nethttp.MethodGet, "/api/h5/surveys/oauth/callback?state=opaque", nil)
-		request.AddCookie(&nethttp.Cookie{Name: "survey_oauth_return", Value: "growth.submit"})
+		request := httptest.NewRequest(nethttp.MethodGet, "/api/h5/surveys/oauth/callback?state="+state, nil)
+		for _, cookie := range cookies {
+			request.AddCookie(cookie)
+		}
 		handler.ServeHTTP(response, request)
-		if response.Code != 303 || response.Header().Get("Location") != target+"&resume=submit&oauth_error=1" || len(response.Result().Cookies()) != 0 {
+		if response.Code != 303 || response.Header().Get("Location") != target+"&resume=submit&oauth_error=1" || sol61HasIdentityCookie(response.Result().Cookies()) {
 			t.Fatalf("denial returned %d %q", response.Code, response.Header().Get("Location"))
 		}
 	}
@@ -413,11 +416,14 @@ func TestOAuthSubmissionResumeDenialReturnsToAnswerRoute(t *testing.T) {
 func TestOAuthSubmissionResumeCookieCannotReplaceConsumedState(t *testing.T) {
 	for _, target := range []string{"", "/h5/all.html?slug=other"} {
 		handler := newRouteHandler(t, routeOAuth{enabled: true, redirect: target, completeErr: errors.New("invalid state")})
-		request := httptest.NewRequest(nethttp.MethodGet, "/api/h5/surveys/oauth/callback?state=opaque", nil)
-		request.AddCookie(&nethttp.Cookie{Name: "survey_oauth_return", Value: "growth.submit"})
+		state, cookies := sol61StartBrowserProof(t, handler, "submit")
+		request := httptest.NewRequest(nethttp.MethodGet, "/api/h5/surveys/oauth/callback?state="+state, nil)
+		for _, cookie := range cookies {
+			request.AddCookie(cookie)
+		}
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
-		if strings.Contains(response.Header().Get("Location"), "resume=submit") || len(response.Result().Cookies()) != 0 {
+		if strings.Contains(response.Header().Get("Location"), "resume=submit") || sol61HasIdentityCookie(response.Result().Cookies()) {
 			t.Fatal("return cookie substituted another/missing state or created a session")
 		}
 	}
@@ -732,8 +738,11 @@ func TestPublicEntryUsesUnifiedOAuthGate(t *testing.T) {
 
 func TestOAuthFailureReturnsToNonAutomaticRetry(t *testing.T) {
 	handler := newRouteHandler(t, routeOAuth{enabled: true, completeErr: fmt.Errorf("provider failure")})
-	request := httptest.NewRequest(nethttp.MethodGet, "/api/h5/surveys/oauth/callback?state=opaque&code=bad", nil)
-	request.AddCookie(&nethttp.Cookie{Name: "survey_oauth_return", Value: "growth"})
+	state, cookies := sol61StartBrowserProof(t, handler)
+	request := httptest.NewRequest(nethttp.MethodGet, "/api/h5/surveys/oauth/callback?state="+state+"&code=bad", nil)
+	for _, cookie := range cookies {
+		request.AddCookie(cookie)
+	}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != 303 || response.Header().Get("Location") != "/h5/auth.html?oauth_error=1&slug=growth" {

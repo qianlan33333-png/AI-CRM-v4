@@ -724,10 +724,12 @@ func (r *Repository) CancelRun(ctx context.Context, id int64, now time.Time) (au
 	if _, e = t.Exec(ctx, `UPDATE automation_run_recipients SET state='cancelled',updated_at=$2 WHERE run_id=$1 AND state='accepted'`, id, now); e != nil {
 		return current, e
 	}
-	if current.PolicyID > 0 && current.State == automationport.RunPreparing {
-		if _, e = t.Exec(ctx, `UPDATE automation_generation_items SET state='cancelled',updated_at=$2,completed_at=$2 WHERE run_id=$1 AND state IN ('accepted','queued')`, id, now); e != nil {
-			return current, e
-		}
+	// Manual and policy runs may still have queued generation items even
+	// after another item's unknown result changed the aggregate run state.
+	// Retain completed/unknown item facts while preventing remaining items
+	// from reviving the cancelled run through a later completion.
+	if _, e = t.Exec(ctx, `UPDATE automation_generation_items SET state='cancelled',updated_at=$2,completed_at=$2 WHERE run_id=$1 AND state IN ('accepted','queued')`, id, now); e != nil {
+		return current, e
 	}
 	out, e := scanRun(t.QueryRow(ctx, `UPDATE automation_runs SET state='cancelled',updated_at=$2,completed_at=$2 WHERE id=$1 RETURNING `+runColumns, id, now))
 	return out, e

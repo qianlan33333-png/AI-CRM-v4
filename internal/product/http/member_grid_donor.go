@@ -512,6 +512,10 @@ func (h *Handler) publicMemberGridBootstrap(w http.ResponseWriter, r *http.Reque
 		delete(item, "config")
 		items = append(items, item)
 	}
+	if _, ok = h.publicMemberGridShare(r.Context(), r.Header.Get("X-AICRM-Grid-Share-Token")); !ok {
+		writeError(w, http.StatusGone, "share_gone")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service_product_id": share.ProductID, "product": map[string]any{"title": product.Name}, "schema": donorGridSchema(false), "views": items})
 }
 
@@ -569,6 +573,10 @@ func (h *Handler) publicMemberGridQuery(w http.ResponseWriter, r *http.Request) 
 		if !productMemberGridQueryError(w, err) {
 			resultError(w, err)
 		}
+		return
+	}
+	if _, ok = h.publicMemberGridShare(r.Context(), r.Header.Get("X-AICRM-Grid-Share-Token")); !ok {
+		writeError(w, http.StatusGone, "share_gone")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "limit": body.Limit, "next_cursor": next, "has_more": next != ""})

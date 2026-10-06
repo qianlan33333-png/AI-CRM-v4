@@ -18,9 +18,9 @@ import (
 )
 
 // PublicHandler is the thin Host adapter for the frozen public coupon journey.
-// It receives a holder only from Payment's opaque, trusted H5 session and
-// passes that canonical Customer ID into Coupon. It never resolves identity,
-// accepts a browser customer ID, or calculates a checkout price.
+// It receives an immutable holder handle from Payment's opaque, trusted H5
+// session. Coupon resolves that handle through Identity in its own UoW; this
+// adapter accepts no browser identity or price.
 type PublicHandler struct {
 	coupons  couponport.PublicCouponApplication
 	claims   couponport.ClaimApplication
@@ -80,9 +80,26 @@ func (h *PublicHandler) page(w http.ResponseWriter, r *http.Request) {
 	}
 	isWechat := isMicroMessenger(r.UserAgent())
 	claimCount := int64(0)
+	sessionBinding := ""
 	if actor, sessionOK := h.trustedActor(r.Context(), r); sessionOK {
-		claimState, stateErr := h.coupons.PublicClaimState(r.Context(), actor.PayerCustomerID, coupon.ID)
+		cookie, _ := r.Cookie(paymentport.TrustedSessionCookieName)
+		sessionBinding = paymentport.CheckoutSessionBinding(cookie.Value)
+		var claimState couponport.PublicCouponClaimState
+		var stateErr error
+		if current, supported := h.coupons.(couponport.PublicCouponIdentityApplication); supported {
+			claimState, stateErr = current.PublicClaimStateForIdentity(r.Context(), actor.PayerIdentityID, coupon.ID)
+		} else {
+			claimState, stateErr = h.coupons.PublicClaimState(r.Context(), actor.PayerCustomerID, coupon.ID)
+		}
 		if stateErr != nil {
+			if errors.Is(stateErr, couponapp.ErrReauthorizationRequired) {
+				if isWechat {
+					http.Redirect(w, r, oauthStartPath("/c/"+slug), http.StatusFound)
+				} else {
+					http.Error(w, "coupon authorization required", http.StatusUnauthorized)
+				}
+				return
+			}
 			http.Error(w, "coupon status unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -94,8 +111,9 @@ func (h *PublicHandler) page(w http.ResponseWriter, r *http.Request) {
 		Coupon:   couponPublicView{Name: coupon.Name, DiscountAmountTotal: coupon.DiscountAmountTotal, Instructions: coupon.Instructions, PublicSlug: coupon.PublicSlug},
 		Products: products, IsWechat: isWechat, Claimed: claimCount > 0, ShowProducts: claimCount > 0,
 		UserLimitReached: userLimitReached, DisplayState: displayState,
-		Claimable:    coupon.Status == "published" && isWechat && displayState == "active" && !userLimitReached,
-		ValidityText: publicCouponValidityText(coupon),
+		Claimable:      coupon.Status == "published" && isWechat && displayState == "active" && !userLimitReached,
+		ValidityText:   publicCouponValidityText(coupon),
+		SessionBinding: sessionBinding,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -146,7 +164,13 @@ func (h *PublicHandler) available(w http.ResponseWriter, r *http.Request) {
 		writeOAuthRequired(w, "")
 		return
 	}
-	items, err := h.coupons.ListAvailableClaims(r.Context(), actor.PayerCustomerID, query.Get("target_ref"), h.now().UTC())
+	var items []couponport.CustomerCoupon
+	var err error
+	if current, supported := h.coupons.(couponport.PublicCouponIdentityApplication); supported {
+		items, err = current.ListAvailableClaimsForIdentity(r.Context(), actor.PayerIdentityID, query.Get("target_ref"), h.now().UTC())
+	} else {
+		items, err = h.coupons.ListAvailableClaims(r.Context(), actor.PayerCustomerID, query.Get("target_ref"), h.now().UTC())
+	}
 	if err != nil {
 		publicResultError(w, err)
 		return
@@ -167,6 +191,14 @@ func (h *PublicHandler) claim(w http.ResponseWriter, r *http.Request, rawSlug st
 	if !ok {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
+	}
+	recoveryOnly := false
+	if values, present := r.Header[http.CanonicalHeaderKey("X-AICRM-Coupon-Recovery-Only")]; present {
+		if len(values) != 1 || values[0] != "true" {
+			writeError(w, http.StatusBadRequest, "invalid_request")
+			return
+		}
+		recoveryOnly = true
 	}
 	// The frozen donor posts an empty JSON object. It remains a body-free
 	// command: reject every field and never accept a browser customer, amount,
@@ -190,6 +222,16 @@ func (h *PublicHandler) claim(w http.ResponseWriter, r *http.Request, rawSlug st
 		writeOAuthRequired(w, "/c/"+slug)
 		return
 	}
+	// New H5 clients bind an unresolved intent to the same trusted session.
+	// The optional marker is not a holder assertion: legacy clients without it
+	// still receive their holder exclusively from the trusted session above.
+	if values, present := r.Header[http.CanonicalHeaderKey("X-AICRM-Coupon-Session-Binding")]; present {
+		cookie, cookieErr := r.Cookie(paymentport.TrustedSessionCookieName)
+		if cookieErr != nil || len(values) != 1 || values[0] == "" || (!recoveryOnly && !paymentport.MatchesCheckoutSessionBinding(cookie.Value, values[0])) {
+			writeError(w, http.StatusConflict, "coupon_session_binding_mismatch")
+			return
+		}
+	}
 	key, err := idempotencyKey(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request")
@@ -200,12 +242,15 @@ func (h *PublicHandler) claim(w http.ResponseWriter, r *http.Request, rawSlug st
 		publicResultError(w, err)
 		return
 	}
-	if coupon.Status != "published" {
-		writeError(w, http.StatusConflict, "conflict")
-		return
-	}
-	claimed, err := h.claims.Claim(r.Context(), couponport.ClaimCommand{CouponID: coupon.ID, HolderCustomerID: actor.PayerCustomerID, ActorScope: "coupon-public:" + slug, IdempotencyKey: key, ClaimedAt: h.now().UTC()})
+	// Coupon owns receipt-first replay and current claimability. A terminal
+	// rule must still permit confirmation of its already committed receipt;
+	// the same application rejects every fresh intent for that rule.
+	claimed, err := h.claims.Claim(r.Context(), couponport.ClaimCommand{CouponID: coupon.ID, HolderCustomerID: actor.PayerCustomerID, HolderIdentityID: actor.PayerIdentityID, ActorScope: "coupon-public:" + slug, IdempotencyKey: key, ClaimedAt: h.now().UTC(), RecoveryOnly: recoveryOnly})
 	if err != nil {
+		if errors.Is(err, couponapp.ErrReauthorizationRequired) {
+			writeOAuthRequired(w, "/c/"+slug)
+			return
+		}
 		publicResultError(w, err)
 		return
 	}
@@ -229,6 +274,9 @@ func (h *PublicHandler) trustedActor(ctx context.Context, r *http.Request) (paym
 		return lookupErr
 	})
 	if err != nil || actor.PayerCustomerID < 1 {
+		return paymentport.SessionActor{}, false
+	}
+	if _, supported := h.coupons.(couponport.PublicCouponIdentityApplication); supported && actor.PayerIdentityID < 1 {
 		return paymentport.SessionActor{}, false
 	}
 	return actor, true
@@ -299,6 +347,8 @@ func oauthStartPath(returnPath string) string {
 
 func publicResultError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, couponapp.ErrReauthorizationRequired):
+		writeOAuthRequired(w, "")
 	case errors.Is(err, couponapp.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found")
 	case errors.Is(err, couponapp.ErrInvalidCoupon), errors.Is(err, couponapp.ErrInvalidTarget):

@@ -104,6 +104,16 @@ func (s *refundStoreStub) AppendCommissionAdjustmentWithin(_ context.Context, va
 	return nil
 }
 
+func (s *refundStoreStub) FindExceptionByEvidenceWithin(_ context.Context, commissionID int64, kind, evidence string) (distributionstore.Exception, error) {
+	for index := len(s.exceptions) - 1; index >= 0; index-- {
+		value := s.exceptions[index]
+		if value.CommissionID == commissionID && value.Kind == kind && value.EvidenceReference == evidence {
+			return value, nil
+		}
+	}
+	return distributionstore.Exception{}, distributionport.ErrNotFound
+}
+
 func (s *refundStoreStub) InsertExceptionWithin(_ context.Context, value distributionstore.Exception) (distributionstore.Exception, error) {
 	value.ID = int64(len(s.exceptions) + 1)
 	s.exceptions = append(s.exceptions, value)
@@ -158,6 +168,21 @@ func refundServiceFixture(t *testing.T, store *refundStoreStub, evidence refundE
 	}
 	service.now = func() time.Time { return now }
 	return service, due, rechecks
+}
+
+func TestRefundExceptionReplayKeepsLaterAffirmativeRevocation(t *testing.T) {
+	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	value := refundContext(t, 17, 41, distributiondomain.CommissionPaid, 200, 77, now)
+	store := &refundStoreStub{contexts: map[int64]distributionstore.SettlementContext{41: value}}
+	service, _, _ := refundServiceFixture(t, store, refundEvidenceStub{}, nil, nil, now)
+	for _, reason := range []string{"qualification_evidence_unavailable_after_submission", "qualification_revoked_after_paid", "qualification_evidence_unavailable_after_submission", "qualification_revoked_after_paid"} {
+		if err := service.markQualificationExceptionWithin(context.Background(), store.contexts[41], "source-refund", "order:3:refund:immutable-source", reason, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(store.exceptions) != 2 || store.exceptions[0].Reason != "qualification_evidence_unavailable_after_submission" || store.exceptions[1].Reason != "qualification_revoked_after_paid" {
+		t.Fatalf("source observations lost proved revocation or duplicated a replay: %+v", store.exceptions)
+	}
 }
 
 func TestRefundRecheckUsesAuthoritativeCumulativeRefundAndPreservesPaidFact(t *testing.T) {

@@ -382,9 +382,11 @@ func (service *CommerceExternalPushService) appendEvent(ctx context.Context, eve
 	if err != nil {
 		return ErrUnavailable
 	}
+	// Receipts are actor- and operation-scoped; global event keys retain both.
+	digest := sha256.Sum256([]byte(fmt.Sprintf("admin:%d", actor) + "\x00" + eventType + "\x00" + hex.EncodeToString(keyDigest[:])))
 	_, err = service.events.Append(ctx, productport.Event{
 		Type: eventType, Payload: payload, OccurredAt: service.now().UTC(),
-		IdempotencyKey: eventType + ":" + hex.EncodeToString(keyDigest[:]),
+		IdempotencyKey: eventType + ":" + hex.EncodeToString(digest[:]),
 	})
 	return err
 }

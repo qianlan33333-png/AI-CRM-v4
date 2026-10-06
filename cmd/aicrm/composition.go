@@ -157,6 +157,9 @@ type composedApplication struct {
 	// the public callback and River worker path, rather than an operations-only
 	// store shortcut.
 	paymentReconciliation *paymentapp.Service
+	// The existing Order owner is retained privately for synthetic tests of
+	// the actual composed paid fanout without a Provider or callback verifier.
+	nativeOrders *orderapp.Service
 	// paymentSession remains private to the Composition Root. Same-package
 	// PostgreSQL browser journeys use it only to issue a provider-verified test
 	// session through the exact OneID-backed session service before exercising
@@ -1025,6 +1028,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = surveySubmissions.BindCanonicalLineage(queries); err != nil {
 		return fail(err)
 	}
+	if err = surveySubmissions.BindIdentitySubjects(queries); err != nil {
+		return fail(err)
+	}
 	surveySubmissions.BindSubmissionObserver(segment.CoreSubmissionEnqueuer{Client: effectClient})
 	surveyCompletionTargets, err := surveyCompletionTargets(cfg.Survey.CompletionTargetsJSON)
 	if err != nil {
@@ -1071,6 +1077,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	surveyOAuth := surveyapp.NewOAuthService(uow, surveyRepository, surveyOAuthProvider, oneID)
+	if err = surveyOAuth.BindIdentitySubjects(queries); err != nil {
+		return fail(err)
+	}
 	surveyModule := surveymodule.NewModuleRegistration().SetCompletionProviderEnabled(cfg.Survey.CompletionProviderEnabled).SetCompletionTargetCatalog(surveyCompletionProvider)
 	tagCatalog := tagapp.NewCatalogService(uow, tagRepository, tagRepository, tagRepository, tagRepository)
 	if err = tagCatalog.RequireProviderMutations(); err != nil {
@@ -1212,6 +1221,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
+	if err = couponRepository.BindCanonicalLineage(queries); err != nil {
+		return fail(err)
+	}
 	couponService := couponapp.NewService(uow, couponRepository, productTargets, couponRepository)
 	sidebarCouponCatalog, err := couponapp.NewSidebarClaimableCatalog(uow, couponRepository, productTargets)
 	if err != nil {
@@ -1221,8 +1233,14 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
+	if err = couponCheckout.BindIdentitySubjects(queries); err != nil {
+		return fail(err)
+	}
 	couponPublic, err := couponapp.NewPublicCouponService(uow, couponRepository)
 	if err != nil {
+		return fail(err)
+	}
+	if err = couponPublic.BindIdentitySubjects(queries); err != nil {
 		return fail(err)
 	}
 	couponClaimAdmin, err := composeCouponClaimAdmin(uow, couponRepository)
@@ -1384,7 +1402,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	legacyAudienceSource.PrimaryOwners = customerProfileStore
 	legacyAudienceSource.Publication = customerProfileStore
 	sidebarProfiles.Numbers = queries
-	openPlatformTimeline := customerTimelineAdapter{uow: uow, reader: customerStore}
+	openPlatformTimeline := customerTimelineAdapter{uow: uow, reader: customerStore, lineage: queries}
 	openPlatformScopes := configuredOpenPlatformScopes(cfg.WeCom.CorpID, []string{cfg.HXCDashboard.UnionIDScope, "wechat-open-platform:" + cfg.Survey.OAuthOpenPlatformID}, []string{cfg.Survey.OAuthAppID, cfg.WeChatPay.AppID, cfg.WeChatPay.H5AppID, cfg.WeChatShop.AppID})
 	// Questionnaire history has one frozen donor Open Platform scope. Do not
 	// infer it from the broader set of configured UnionID integrations.
@@ -1741,6 +1759,12 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if cfg.Referral.TokenDataKey != "" {
 		referralService, err = referralapp.NewService(uow, referralRepository, cfg.PublicOrigin, cfg.Referral.TokenDataKey, referralCampaignCloseEnqueuer, auditService, platformoutbox.NewPostgreSQL())
 		if err != nil {
+			return fail(err)
+		}
+		if err = referralService.SetSaleEvidenceReaders(distributionapp.NewFrozenAttributionReader(distributionRepository), platformaudit.NewPostgreSQLStore()); err != nil {
+			return fail(err)
+		}
+		if err = referralService.BindIdentitySubjects(queries); err != nil {
 			return fail(err)
 		}
 		referralPaidConsumer = referralService
@@ -2666,7 +2690,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if cfg.Ops.Enabled {
 		handler = platformdiagnostics.MiddlewareWithClientErrorFilter(handler, cfg.ReleaseSHA, opsRecord, observePublicSurveyClientError)
 	}
-	return &composedApplication{invitationService: invitationService, catalogService: catalogService, pool: pool, handler: handler, authentication: authentication, management: management, weComProcessor: weComProcessor, weComArchiveProcessor: weComArchiveProcessor, effectsRuntime: effectsRuntime, paymentDistribution: paymentService, paymentReconciliation: paymentService, paymentSession: paymentSession, channelEntrantActions: channelEntrantActions, customerSync: customerSync, hxcDashboard: hxcDashboard, hxcSource: hxcSource, adminOps: adminOpsProjection, release: releaseObservation, diagnostics: diagnostics}, nil
+	return &composedApplication{invitationService: invitationService, catalogService: catalogService, pool: pool, handler: handler, authentication: authentication, management: management, weComProcessor: weComProcessor, weComArchiveProcessor: weComArchiveProcessor, effectsRuntime: effectsRuntime, paymentDistribution: paymentService, paymentReconciliation: paymentService, nativeOrders: orderService, paymentSession: paymentSession, channelEntrantActions: channelEntrantActions, customerSync: customerSync, hxcDashboard: hxcDashboard, hxcSource: hxcSource, adminOps: adminOpsProjection, release: releaseObservation, diagnostics: diagnostics}, nil
 }
 
 func observePublicSurveyClientError(method, route string) bool {

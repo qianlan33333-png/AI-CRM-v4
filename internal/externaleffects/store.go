@@ -575,6 +575,12 @@ func (r *Repository) controlWithin(ctx context.Context, tx pgx.Tx, command Contr
 		if State(state) != StateUnknown {
 			return Projection{}, Receipt{}, ErrReconcileRequired
 		}
+		// A digest-only manual receipt cannot supply the frozen model output
+		// required by generation owners. Keep their original unknown attempt
+		// until an owner-specific recovery contract is available.
+		if Kind(kind) == KindAIAgentGenerate || Kind(kind) == KindAIRecommend {
+			return Projection{}, Receipt{}, ErrReconcileRequired
+		}
 		next = StateReconciled
 	default:
 		return Projection{}, Receipt{}, ErrInvalid
@@ -720,7 +726,7 @@ func (r *Repository) RunAttempt(ctx context.Context, id, generation, riverJobID 
 			}
 			return ErrTransition
 		}
-		if projectsStaleAttempt(Kind(kind)) && r.sink != nil {
+		if (Owner(owner) == OwnerPayment || projectsStaleAttempt(Kind(kind))) && r.sink != nil {
 			envelope := Envelope{Owner: Owner(owner), Kind: Kind(kind), SourceRefDigest: Digest(source), TargetRefDigest: Digest(target), PayloadDigest: Digest(payload), PolicyVersionHash: Digest(policy)}
 			completion := AdapterResult{Completion: StateUnknown, ReceiptDigest: recovery, CallAttempted: true}
 			// Sidebar JSSDK effects are browser-owned: an expired worker lease is
@@ -902,7 +908,7 @@ func (r *Repository) QueuedEnvelope(ctx context.Context, id, generation, riverJo
 
 func projectsStaleAttempt(kind Kind) bool {
 	switch kind {
-	case KindFeishuOpsNotification, KindInvitationCode, KindOutboundMedia, KindWeComTagCatalog, KindWeComTagCatalogMutation, KindGroupMessage, KindChannelAsset, KindOutboundMessage, KindAutomationMessage, KindSurveyCompletion, KindCustomerTagCommand, KindCustomerOwnerHandoff, KindCommerceProductPush, KindAIAgentGenerate, KindAIRecommend, port.KindSidebarJSSDKSend:
+	case KindFeishuOpsNotification, KindInvitationCode, KindOutboundMedia, KindWeComTagCatalog, KindWeComTagCatalogMutation, KindWeComContactDescription, KindGroupMessage, KindChannelAsset, KindChannelWelcome, KindChannelEntryTag, KindChannelLink, KindOutboundMessage, KindAutomationMessage, KindSurveyCompletion, KindCustomerTagCommand, KindCustomerOwnerHandoff, KindCommerceProductPush, KindAIAgentGenerate, KindAIRecommend, port.KindSidebarJSSDKSend:
 		return true
 	default:
 		return false

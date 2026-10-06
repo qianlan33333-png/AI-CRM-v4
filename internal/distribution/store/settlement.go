@@ -212,7 +212,7 @@ func (r *Repository) ReadSettlementContextWithin(ctx context.Context, commission
 	if commissionID < 1 {
 		return SettlementContext{}, ErrInvalid
 	}
-	return scanSettlementContext(tx.QueryRow(ctx, `SELECT `+settlementContextColumns+` FROM distribution_commissions c JOIN distribution_order_attributions a ON a.id=c.attribution_id JOIN distribution_product_policies p ON p.id=a.policy_id WHERE c.id=$1 FOR UPDATE`, commissionID))
+	return scanSettlementContext(tx.QueryRow(ctx, `SELECT `+settlementContextColumns+` FROM distribution_commissions c JOIN distribution_order_attributions a ON a.id=c.attribution_id JOIN distribution_product_policies p ON p.id=a.policy_id WHERE c.id=$1 FOR UPDATE OF c`, commissionID))
 }
 
 // ListSettlementContextsByOrderWithin finds only Distribution's own frozen
@@ -226,7 +226,7 @@ func (r *Repository) ListSettlementContextsByOrderWithin(ctx context.Context, or
 	if orderID < 1 {
 		return nil, ErrInvalid
 	}
-	rows, err := tx.Query(ctx, `SELECT `+settlementContextColumns+` FROM distribution_commissions c JOIN distribution_order_attributions a ON a.id=c.attribution_id JOIN distribution_product_policies p ON p.id=a.policy_id WHERE c.order_id=$1 ORDER BY c.id FOR UPDATE`, orderID)
+	rows, err := tx.Query(ctx, `SELECT `+settlementContextColumns+` FROM distribution_commissions c JOIN distribution_order_attributions a ON a.id=c.attribution_id JOIN distribution_product_policies p ON p.id=a.policy_id WHERE c.order_id=$1 ORDER BY c.id FOR UPDATE OF c`, orderID)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -257,7 +257,7 @@ func (r *Repository) ListSettlementContextsByQualificationCustomerProductWithin(
 	if customerID < 1 || productID < 1 || !productType.Valid() {
 		return nil, ErrInvalid
 	}
-	rows, err := tx.Query(ctx, `SELECT `+settlementContextColumns+` FROM distribution_commissions c JOIN distribution_order_attributions a ON a.id=c.attribution_id JOIN distribution_product_policies p ON p.id=a.policy_id JOIN distribution_distributors d ON d.id=c.distributor_id WHERE d.customer_id=$1 AND p.product_id=$2 AND p.product_type=$3 ORDER BY c.id FOR UPDATE`, customerID, productID, string(productType))
+	rows, err := tx.Query(ctx, `SELECT `+settlementContextColumns+` FROM distribution_commissions c JOIN distribution_order_attributions a ON a.id=c.attribution_id JOIN distribution_product_policies p ON p.id=a.policy_id JOIN distribution_distributors d ON d.id=c.distributor_id WHERE d.customer_id=$1 AND p.product_id=$2 AND p.product_type=$3 ORDER BY c.id FOR UPDATE OF c`, customerID, productID, string(productType))
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -307,7 +307,7 @@ func (r *Repository) ListRefundRecheckContextsWithin(ctx context.Context, buyerO
 		clauses = append(clauses, "(p.product_id=$"+strconv.Itoa(productPos)+" AND p.product_type=$"+strconv.Itoa(typePos)+")")
 		args = append(args, scope.ProductID, string(scope.ProductType))
 	}
-	query := `SELECT ` + settlementContextColumns + ` FROM distribution_commissions c JOIN distribution_order_attributions a ON a.id=c.attribution_id JOIN distribution_product_policies p ON p.id=a.policy_id WHERE ` + strings.Join(clauses, " OR ") + ` ORDER BY c.id FOR UPDATE`
+	query := `SELECT ` + settlementContextColumns + ` FROM distribution_commissions c JOIN distribution_order_attributions a ON a.id=c.attribution_id JOIN distribution_product_policies p ON p.id=a.policy_id WHERE ` + strings.Join(clauses, " OR ") + ` ORDER BY c.id FOR UPDATE OF c`
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, mapError(err)
@@ -342,7 +342,7 @@ func (r *Repository) ListSettlementContextsByQualificationEvidenceOrderWithin(ct
 		return nil, ErrInvalid
 	}
 	prefix := "order:" + strconv.FormatInt(orderID, 10) + ":item:%"
-	rows, err := tx.Query(ctx, `SELECT `+settlementContextColumns+` FROM distribution_commissions c JOIN distribution_order_attributions a ON a.id=c.attribution_id JOIN distribution_product_policies p ON p.id=a.policy_id WHERE a.qualification_evidence_reference LIKE $1 ORDER BY c.id FOR UPDATE`, prefix)
+	rows, err := tx.Query(ctx, `SELECT `+settlementContextColumns+` FROM distribution_commissions c JOIN distribution_order_attributions a ON a.id=c.attribution_id JOIN distribution_product_policies p ON p.id=a.policy_id WHERE a.qualification_evidence_reference LIKE $1 ORDER BY c.id FOR UPDATE OF c`, prefix)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -482,7 +482,7 @@ func (r *Repository) ListSettlementContextsByQualificationProductWithin(ctx cont
 	if productID < 1 || !productType.Valid() {
 		return nil, ErrInvalid
 	}
-	rows, err := tx.Query(ctx, `SELECT `+settlementContextColumns+` FROM distribution_commissions c JOIN distribution_order_attributions a ON a.id=c.attribution_id JOIN distribution_product_policies p ON p.id=a.policy_id WHERE p.product_id=$1 AND p.product_type=$2 ORDER BY c.id FOR UPDATE`, productID, string(productType))
+	rows, err := tx.Query(ctx, `SELECT `+settlementContextColumns+` FROM distribution_commissions c JOIN distribution_order_attributions a ON a.id=c.attribution_id JOIN distribution_product_policies p ON p.id=a.policy_id WHERE p.product_id=$1 AND p.product_type=$2 ORDER BY c.id FOR UPDATE OF c`, productID, string(productType))
 	if err != nil {
 		return nil, mapError(err)
 	}

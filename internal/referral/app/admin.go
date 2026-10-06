@@ -400,7 +400,9 @@ func (s *AdminService) RecordReward(ctx context.Context, command referralport.Re
 		if campaign.State == referraldomain.CampaignDraft {
 			return referralport.ErrConflict
 		}
-		participation, err := s.store.ReadParticipationWithin(tx, command.CampaignID, command.CustomerID, false)
+		// ReverseInvitation locks this same participation row before changing
+		// its active state. Keep the reward prerequisite stable until commit.
+		participation, err := s.store.ReadParticipationWithin(tx, command.CampaignID, command.CustomerID, true)
 		if err != nil || participation.State != referraldomain.ParticipationActive {
 			return referralport.ErrConflict
 		}
@@ -794,6 +796,11 @@ func (s *AdminService) adminCampaignView(ctx context.Context, campaign referrald
 }
 
 func appendPlatformEvent(ctx context.Context, audit *platformaudit.Service, outbox platformoutbox.Appender, eventType, resourceType string, resourceID int64, actorType string, actorID int64, commandKey string, payload any, at time.Time) error {
+	// Admin receipts are scoped to their actor, so independent administrators
+	// may reuse a command key. Match that scope for both durable event sinks.
+	if actorType == "admin" {
+		commandKey = adminScope(actorID) + ":" + commandKey
+	}
 	return (&Service{audit: audit, outbox: outbox}).appendEvent(ctx, eventType, resourceType, resourceID, actorType, actorID, commandKey, payload, at)
 }
 func validAdminCommand(actorID int64, key string) bool { return actorID > 0 && validKey(key) }

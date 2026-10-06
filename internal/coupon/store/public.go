@@ -47,8 +47,12 @@ func (r *Repository) PublicCouponClaimState(ctx context.Context, holderCustomerI
 	if holderCustomerID < 1 || couponID < 1 {
 		return couponport.PublicCouponClaimState{}, couponapp.ErrInvalidCoupon
 	}
+	ids, err := r.couponCustomerIDs(ctx, holderCustomerID, false)
+	if err != nil {
+		return couponport.PublicCouponClaimState{}, err
+	}
 	var result couponport.PublicCouponClaimState
-	if err = tx.QueryRow(ctx, `SELECT count(*) FROM coupon_customer_claims WHERE customer_id=$1 AND coupon_id=$2`, holderCustomerID, couponID).Scan(&result.ClaimCount); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM coupon_customer_claims WHERE customer_id=ANY($1::bigint[]) AND coupon_id=$2`, ids, couponID).Scan(&result.ClaimCount); err != nil {
 		return couponport.PublicCouponClaimState{}, err
 	}
 	return result, nil
@@ -62,16 +66,20 @@ func (r *Repository) ListAvailableCouponClaims(ctx context.Context, holderCustom
 	if err != nil {
 		return nil, err
 	}
+	ids, err := r.couponCustomerIDs(ctx, holderCustomerID, false)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(ctx, `SELECT claim.id,rule.id,rule.name,rule.discount_amount_total,rule.currency,claim.status,claim.claim_no_masked,claim.claimed_at,claim.valid_from,claim.valid_until,claim.redeemed_at
 		FROM coupon_customer_claims claim
 		JOIN coupon_rules rule ON rule.id=claim.coupon_id
 		JOIN coupon_rule_targets target ON target.coupon_id=rule.id
-		WHERE claim.customer_id=$1
+		WHERE claim.customer_id=ANY($1::bigint[])
 		  AND claim.status IN ('available','claimed')
 		  AND claim.valid_from<=$2 AND claim.valid_until>$2
 		  AND rule.status='published' AND rule.currency='CNY'
 		  AND target.target_ref=$3
-		ORDER BY rule.discount_amount_total DESC,claim.valid_until ASC,claim.claimed_at ASC,claim.id ASC`, holderCustomerID, at, targetRef)
+		ORDER BY rule.discount_amount_total DESC,claim.valid_until ASC,claim.claimed_at ASC,claim.id ASC`, ids, at, targetRef)
 	if err != nil {
 		return nil, err
 	}

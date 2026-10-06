@@ -1,0 +1,9 @@
+# Oct6 本地候选验证分工
+
+基线b74037c3c9dbd3a187338cb7ccc8c80435423c6e。本轮仅本地修复、隔离验证和commit，不提交发布队列、不安装共享预发/生产。docs/release-checks.json列出改动Owner和直接消费者；大包具名、小包整包，不执行全仓或历史84项阶段。支付退款对抗阻塞目标不在清单，原测试与真实app红另保留；不能由正向fanout或EER探针代替验收。
+
+本机Go检查使用PG16.13独立loopback55476、aicrm_test_sol61_*数据库与各fixture私有schema，p1/GOMAXPROCS2/count1，Go cache在/tmp。需要Node的Coupon HTTP嵌入JS/JSDOM和Product八项HTTP消费者须先按相同package/lock准备实际node_modules，使用Node24.18.0/npm11.12.1；缺依赖、空匹配、skip、timeout均不通过。迁移0223仅在隔离测试schema应用；生产迁移不在本轮授权。
+
+实际Coupon浏览器目标TestPostgreSQLCouponStalledBrowserRecoverySol61和TestPostgreSQLCouponRenewedSessionBrowserRecoverySol61分别在已有本机WebKit15.4、WebKit26.0和Chromium驱动运行，AICRM_REQUIRE_SOL61_FRONTEND=1并显式SOL61_BROWSER_ENGINE/PLAYWRIGHT_NODE/WEBKIT_DRIVER/浏览器fixtures（准确env随收据）。这是本机源码Host/实际组合HTTP/PG，不能放在缺构件的Linux构建前lane，也不能说是已安装预发包或真机验收。独立native away/back已发生；真实BFCache命中仍单独记录未知。Survey两具名WebKit恢复用例由Identity Owner在15.4/26.0×两显示模式亲跑，0skip，O1改动后的最终输入独立保护；不将旧阶段输入说成新版本执行。
+
+最终冻结后准备准确HEAD机械源码views和本机Host构件，运行适用定向Go/Node/OpenAPI/API build与必要浏览器；每份外部收据绑定HEAD/tree、具体命令、日志SHA、结果和源输入是否稳定。未变Owner目标允许按实际输入/直接依赖变化说明复用，不能用全tree相同掩盖composition新增接线。真实Provider、资金、客户消息、付费AI和安装环境不触发。既有正确业务语义及历史事实保留；没有新队列、matcher、退款恢复内核或发布检查通道。

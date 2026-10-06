@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
@@ -508,7 +509,19 @@ func (h *Handler) publicResult(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		if identity.CustomerID == nil || s.Identity.CustomerID == nil || *identity.CustomerID != *s.Identity.CustomerID {
+		if reader, supported := h.submissions.(interface {
+			QueryResultForIdentity(context.Context, string, surveyport.SubmissionIdentity) (surveyport.Submission, error)
+		}); supported {
+			s, err = reader.QueryResultForIdentity(r.Context(), body.ResultToken, identity)
+			if errors.Is(err, surveyport.ErrResultForbidden) {
+				writeError(w, http.StatusForbidden, "survey_result_forbidden")
+				return
+			}
+			if err != nil {
+				resultError(w, err)
+				return
+			}
+		} else if identity.CustomerID == nil || s.Identity.CustomerID == nil || *identity.CustomerID != *s.Identity.CustomerID {
 			writeError(w, http.StatusForbidden, "survey_result_forbidden")
 			return
 		}
@@ -534,11 +547,18 @@ func (h *Handler) oauthStart(w http.ResponseWriter, r *http.Request) {
 		resultError(w, err)
 		return
 	}
+	authorization, parseErr := url.Parse(location)
+	if parseErr != nil || authorization.Query().Get("state") == "" {
+		writeError(w, http.StatusServiceUnavailable, "survey_oauth_unavailable")
+		return
+	}
+	state := authorization.Query().Get("state")
+	http.SetCookie(w, &http.Cookie{Name: surveyOAuthProofCookieName(state), Value: state, Path: "/", MaxAge: int(surveyport.OAuthStateLifetime.Seconds()), HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	returnContext := r.URL.Query().Get("slug")
 	if r.URL.Query().Get("resume") == "submit" {
 		returnContext += ".submit"
 	}
-	http.SetCookie(w, &http.Cookie{Name: "survey_oauth_return", Value: returnContext, Path: "/api/h5/surveys/oauth/callback", MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: surveyOAuthReturnCookieName(state), Value: returnContext, Path: "/", MaxAge: int(surveyport.OAuthStateLifetime.Seconds()), HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, location, http.StatusSeeOther)
 }
@@ -552,8 +572,25 @@ func (h *Handler) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/h5/error.html?code=survey_oauth_unavailable", http.StatusSeeOther)
 		return
 	}
-	session, redirect, err := h.oauth.Complete(r.Context(), r.URL.Query().Get("state"), r.URL.Query().Get("code"))
-	prior, priorErr := r.Cookie("survey_oauth_return")
+	w.Header().Set("Cache-Control", "no-store")
+	state := r.URL.Query().Get("state")
+	proofName := surveyOAuthProofCookieName(state)
+	proof, proofErr := r.Cookie(proofName)
+	returnName := surveyOAuthReturnCookieName(state)
+	prior, priorErr := r.Cookie(returnName)
+	if state == "" || proofErr != nil || subtle.ConstantTimeCompare([]byte(proof.Value), []byte(state)) != 1 {
+		if priorErr == nil && validPublicSlug(strings.TrimSuffix(prior.Value, ".submit")) {
+			http.Redirect(w, r, "/h5/auth.html?oauth_error=1&slug="+url.QueryEscape(strings.TrimSuffix(prior.Value, ".submit")), http.StatusSeeOther)
+		} else {
+			http.Redirect(w, r, "/h5/error.html?code=survey_oauth_failed", http.StatusSeeOther)
+		}
+		return
+	}
+	// Consume only this flow's browser proof. The existing database state
+	// consumption remains the one-time gate; another tab keeps its own cookie.
+	http.SetCookie(w, &http.Cookie{Name: proofName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: returnName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	session, redirect, err := h.oauth.Complete(r.Context(), state, r.URL.Query().Get("code"))
 	resume := priorErr == nil && surveySubmissionResumeRedirect(redirect, prior.Value)
 	if err != nil {
 		if resume {
@@ -574,6 +611,16 @@ func (h *Handler) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		redirect += "&resume=submit"
 	}
 	http.Redirect(w, r, redirect, http.StatusSeeOther)
+}
+
+func surveyOAuthProofCookieName(state string) string {
+	digest := sha256.Sum256([]byte(state))
+	return fmt.Sprintf("__Host-aicrm_survey_oauth_%x", digest)
+}
+
+func surveyOAuthReturnCookieName(state string) string {
+	digest := sha256.Sum256([]byte(state))
+	return fmt.Sprintf("__Host-aicrm_survey_return_%x", digest)
 }
 
 func surveySubmissionResumeRedirect(target, returnContext string) bool {
@@ -1422,6 +1469,8 @@ func writeAlreadySubmitted(w http.ResponseWriter, action surveyport.CompletionAc
 }
 func resultError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, surveyport.ErrReauthorizationRequired):
+		writeError(w, http.StatusUnauthorized, "survey_oauth_required")
 	case errors.Is(err, surveyport.ErrInvalid):
 		writeError(w, 400, "invalid_request")
 	case errors.Is(err, surveyport.ErrNotFound):

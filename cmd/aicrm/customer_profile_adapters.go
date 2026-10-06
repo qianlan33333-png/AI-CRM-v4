@@ -10,6 +10,7 @@ import (
 	customerapp "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/app"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	identityquery "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/query"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 	surveyport "github.com/qianlan33333-png/AI-CRM-v3/internal/survey/port"
@@ -226,8 +227,9 @@ func (adapter customerSurveyAdapter) CustomerSurveys(ctx context.Context, id cus
 }
 
 type customerTimelineAdapter struct {
-	uow    platformport.UnitOfWork
-	reader interface {
+	uow     platformport.UnitOfWork
+	lineage identityport.LockedCanonicalLineageReader
+	reader  interface {
 		CustomerTimeline(context.Context, customerdomain.CustomerID, customerport.PageQuery) (customerport.TimelinePage, error)
 	}
 }
@@ -240,6 +242,20 @@ func (adapter customerTimelineAdapter) CustomerTimeline(ctx context.Context, id 
 	var page customerport.TimelinePage
 	err := adapter.uow.Within(ctx, func(tx context.Context) error {
 		var readErr error
+		if adapter.lineage != nil {
+			ids, err := adapter.lineage.LockedCanonicalLineage(tx, id)
+			if err != nil {
+				return err
+			}
+			reader, ok := adapter.reader.(interface {
+				CustomerTimelineForCustomers(context.Context, []customerdomain.CustomerID, customerport.PageQuery) (customerport.TimelinePage, error)
+			})
+			if !ok {
+				return customerport.ErrSectionUnavailable
+			}
+			page, readErr = reader.CustomerTimelineForCustomers(tx, ids, query)
+			return readErr
+		}
 		page, readErr = adapter.reader.CustomerTimeline(tx, id, query)
 		return readErr
 	})

@@ -1663,7 +1663,11 @@ func (r *Repository) CreateIdentitySession(ctx context.Context, digest [32]byte,
 	if err != nil {
 		return err
 	}
-	_, err = t.Exec(ctx, `INSERT INTO survey_identity_sessions(session_digest,customer_id,identity_state,evidence_digest,expires_at,created_at) VALUES($1,$2,$3,$4,$5,$6)`, digest[:], identity.CustomerID, identity.State, decodeEvidence(identity.EvidenceDigest), expires, now)
+	var providerIdentityID any
+	if identity.ProviderIdentityID > 0 {
+		providerIdentityID = identity.ProviderIdentityID
+	}
+	_, err = t.Exec(ctx, `INSERT INTO survey_identity_sessions(session_digest,customer_id,identity_state,evidence_digest,expires_at,created_at,provider_identity_id) VALUES($1,$2,$3,$4,$5,$6,$7)`, digest[:], identity.CustomerID, identity.State, decodeEvidence(identity.EvidenceDigest), expires, now, providerIdentityID)
 	return mapError(err)
 }
 func (r *Repository) ReadIdentitySession(ctx context.Context, digest [32]byte, now time.Time) (surveyport.SubmissionIdentity, error) {
@@ -1674,7 +1678,8 @@ func (r *Repository) ReadIdentitySession(ctx context.Context, digest [32]byte, n
 	var result surveyport.SubmissionIdentity
 	var customer *int64
 	var evidence []byte
-	err = t.QueryRow(ctx, `SELECT customer_id,identity_state,evidence_digest FROM survey_identity_sessions WHERE session_digest=$1 AND revoked_at IS NULL AND expires_at>$2`, digest[:], now).Scan(&customer, &result.State, &evidence)
+	var providerIdentityID *int64
+	err = t.QueryRow(ctx, `SELECT customer_id,identity_state,evidence_digest,provider_identity_id FROM survey_identity_sessions WHERE session_digest=$1 AND revoked_at IS NULL AND expires_at>$2`, digest[:], now).Scan(&customer, &result.State, &evidence, &providerIdentityID)
 	if err != nil {
 		return result, mapError(err)
 	}
@@ -1683,6 +1688,9 @@ func (r *Repository) ReadIdentitySession(ctx context.Context, digest [32]byte, n
 		result.CustomerID = &id
 	}
 	result.EvidenceDigest = hex.EncodeToString(evidence)
+	if providerIdentityID != nil {
+		result.ProviderIdentityID = *providerIdentityID
+	}
 	return result, nil
 }
 

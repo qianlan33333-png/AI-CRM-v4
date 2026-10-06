@@ -21,11 +21,14 @@ type PublicStore interface {
 }
 
 // PublicCouponService is a Coupon-owned public read/share application. The
-// host provides only a canonical holder Customer from Payment's opaque session.
+// host provides an immutable trusted handle from Payment's opaque session.
+// Identity's subject Port verifies its current owner in the Coupon read UoW;
+// internal numeric-holder reads keep their existing canonical fact contract.
 type PublicCouponService struct {
-	uow   platformport.UnitOfWork
-	store PublicStore
-	now   func() time.Time
+	uow      platformport.UnitOfWork
+	store    PublicStore
+	subjects trustedCouponSubjects
+	now      func() time.Time
 }
 
 func NewPublicCouponService(uow platformport.UnitOfWork, store PublicStore) (*PublicCouponService, error) {
@@ -76,6 +79,47 @@ func (s *PublicCouponService) ListAvailableClaims(ctx context.Context, holderCus
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		var err error
 		result, err = s.store.ListAvailableCouponClaims(tx, holderCustomerID, targetRef, at.UTC())
+		return err
+	})
+	if err != nil {
+		return nil, classifyCheckout(err)
+	}
+	if result == nil {
+		return []couponport.CustomerCoupon{}, nil
+	}
+	return result, nil
+}
+
+func (s *PublicCouponService) PublicClaimStateForIdentity(ctx context.Context, identityID int64, couponID couponport.ID) (couponport.PublicCouponClaimState, error) {
+	if s == nil || s.uow == nil || s.store == nil || identityID < 1 || couponID < 1 {
+		return couponport.PublicCouponClaimState{}, ErrInvalidCoupon
+	}
+	var result couponport.PublicCouponClaimState
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		holder, err := currentCouponSubjectWithin(tx, s.subjects, identityID, false)
+		if err != nil {
+			return err
+		}
+		result, err = s.store.PublicCouponClaimState(tx, holder, couponID)
+		return err
+	})
+	if err != nil {
+		return couponport.PublicCouponClaimState{}, classifyCheckout(err)
+	}
+	return result, nil
+}
+
+func (s *PublicCouponService) ListAvailableClaimsForIdentity(ctx context.Context, identityID int64, targetRef string, at time.Time) ([]couponport.CustomerCoupon, error) {
+	if s == nil || s.uow == nil || s.store == nil || identityID < 1 || !validTargetRef(targetRef) || at.IsZero() {
+		return nil, ErrInvalidCoupon
+	}
+	var result []couponport.CustomerCoupon
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		holder, err := currentCouponSubjectWithin(tx, s.subjects, identityID, false)
+		if err != nil {
+			return err
+		}
+		result, err = s.store.ListAvailableCouponClaims(tx, holder, targetRef, at.UTC())
 		return err
 	})
 	if err != nil {
@@ -154,3 +198,4 @@ func validTargetRef(value string) bool {
 }
 
 var _ couponport.PublicCouponApplication = (*PublicCouponService)(nil)
+var _ couponport.PublicCouponIdentityApplication = (*PublicCouponService)(nil)

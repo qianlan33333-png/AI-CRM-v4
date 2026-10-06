@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -340,7 +341,13 @@ func (s *MemberGridWorkspaceService) SetShare(ctx context.Context, c productport
 			}
 			return e
 		}
-		if e := s.lockWritableMemberGridProduct(tx, c.ProductID); e != nil {
+		// Revoking an existing bearer credential must remain possible after
+		// archive. New shares and rotations still require a writable product.
+		if !c.Enabled && c.ExpectedVersion > 0 {
+			if _, e = s.store.GetServicePeriodProductForUpdate(tx, c.ProductID); e != nil {
+				return e
+			}
+		} else if e = s.lockWritableMemberGridProduct(tx, c.ProductID); e != nil {
 			return e
 		}
 		previous, e := s.store.GetMemberGridShare(tx, c.ProductID)
@@ -386,7 +393,7 @@ func (s *MemberGridWorkspaceService) ResolveShare(ctx context.Context, token str
 // lockWritableMemberGridProduct deliberately keeps archived service-period
 // products readable through the historical grid APIs, while serializing every
 // new workspace mutation with the owner product row and refusing a terminal
-// archived lifecycle before a view, collaborator, or public share can change.
+// archived lifecycle. Revocation of an existing share only needs the row lock.
 func (s *MemberGridWorkspaceService) lockWritableMemberGridProduct(ctx context.Context, id productport.ID) error {
 	product, err := s.store.GetServicePeriodProductForUpdate(ctx, id)
 	if err != nil {
@@ -473,6 +480,10 @@ func (s *MemberGridWorkspaceService) event(ctx context.Context, kind, key string
 	if e != nil {
 		return e
 	}
-	_, e = s.events.Append(ctx, productport.Event{Type: "product.service_period_member_grid." + kind, Payload: payload, OccurredAt: s.now().UTC(), IdempotencyKey: key})
+	// Receipts are scoped by actor and operation; globally unique event keys
+	// must retain both scopes so independent commands can share a browser key.
+	digest := sha256.Sum256([]byte("admin:" + strconv.FormatInt(a.AdminUserID, 10) + "\x00" + kind + "\x00" + key))
+	eventType := "product.service_period_member_grid." + kind
+	_, e = s.events.Append(ctx, productport.Event{Type: eventType, Payload: payload, OccurredAt: s.now().UTC(), IdempotencyKey: eventType + ":" + hex.EncodeToString(digest[:])})
 	return e
 }

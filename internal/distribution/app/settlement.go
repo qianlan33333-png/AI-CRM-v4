@@ -96,9 +96,9 @@ func (s *SettlementService) RunCommissionDueCheck(ctx context.Context, commissio
 		return s.applyReconciliation(ctx, commissionID, instruction)
 	}
 
-	// Payment's first snapshot is read outside the write UoW. Accepting the
-	// split below repeats Payment's own authoritative reserve check inside its
-	// UoW, so this display/preflight value never authorizes a stale payment.
+	// Payment's first snapshot is read outside the write UoW. The
+	// final decision below re-reads and locks Payment facts in its UoW; this
+	// outside snapshot is only a preflight read.
 	state, err := s.payment.DistributionPaymentState(ctx, initial.Commission.OrderID)
 	if err != nil {
 		return river.JobSnooze(dueCheckRetryDelay)
@@ -144,6 +144,34 @@ func (s *SettlementService) prepareSettlement(ctx context.Context, commissionID 
 			retry = true
 			return nil
 		}
+		distributor, receiver, err := s.store.ReadDistributorWithin(tx, commission.DistributorID, false)
+		if err != nil {
+			return err
+		}
+		qualification, err := s.qualification.CheckWithin(tx, distributor.CustomerID, value.ProductID, value.ProductType)
+		if err != nil || qualification.State == distributiondomain.QualificationUnavailable || qualification.State == distributiondomain.QualificationSuspended || qualification.State == distributiondomain.QualificationConflict {
+			return s.holdWithin(tx, commission, "qualification_unavailable", now)
+		}
+		if qualification.State == distributiondomain.QualificationIneligible {
+			next, cancelErr := commission.CancelUnsettled(commission.Version, "qualification_revoked", now)
+			if cancelErr != nil {
+				return distributionport.ErrConflict
+			}
+			if err = s.store.AppendCommissionAdjustmentWithin(tx, distributionstore.CommissionAdjustment{CommissionID: commission.ID, Kind: "qualification_revoke", DeltaMinor: next.CurrentPayableMinor - commission.CurrentPayableMinor, ResultingPayableMinor: next.CurrentPayableMinor, Reason: "qualification_revoked", SourceRef: value.Attribution.QualificationEvidenceRef, OccurredAt: now}); err != nil {
+				return err
+			}
+			if _, err = s.store.UpdateCommissionWithin(tx, next, commission.Version); err != nil {
+				return err
+			}
+			return s.auditWithin(tx, "distribution.commission_cancelled.v1", "commission", commission.ID, "worker:distribution-due", map[string]any{"reason": "qualification_revoked"}, now)
+		}
+		// Qualification locks OneID and qualifying payments first. Re-read and
+		// lock the buyer funding facts in this same transaction before pricing
+		// or accepting an instruction; an outside snapshot cannot authorize it.
+		state, err = s.payment.DistributionPaymentStateWithin(tx, commission.OrderID)
+		if err != nil {
+			return s.holdWithin(tx, commission, "payment_or_refund_pending", now)
+		}
 		if warningErr := s.recordDeadlineWarningWithin(tx, commission, distributionstore.Settlement{}, state.DeadlineAt, state.OriginalPaymentRef, now); warningErr != nil {
 			return warningErr
 		}
@@ -168,27 +196,6 @@ func (s *SettlementService) prepareSettlement(ctx context.Context, commissionID 
 			if commission.Status == distributiondomain.CommissionCancelled {
 				return s.auditWithin(tx, "distribution.commission_cancelled.v1", "commission", commission.ID, "worker:distribution-due", map[string]any{"reason": "buyer_refund", "payment_reference": state.OriginalPaymentRef}, now)
 			}
-		}
-		distributor, receiver, err := s.store.ReadDistributorWithin(tx, commission.DistributorID, true)
-		if err != nil {
-			return err
-		}
-		qualification, err := s.qualification.CheckWithin(tx, distributor.CustomerID, value.ProductID, value.ProductType)
-		if err != nil || qualification.State == distributiondomain.QualificationUnavailable || qualification.State == distributiondomain.QualificationSuspended || qualification.State == distributiondomain.QualificationConflict {
-			return s.holdWithin(tx, commission, "qualification_unavailable", now)
-		}
-		if qualification.State == distributiondomain.QualificationIneligible {
-			next, cancelErr := commission.CancelUnsettled(commission.Version, "qualification_revoked", now)
-			if cancelErr != nil {
-				return distributionport.ErrConflict
-			}
-			if err = s.store.AppendCommissionAdjustmentWithin(tx, distributionstore.CommissionAdjustment{CommissionID: commission.ID, Kind: "qualification_revoke", DeltaMinor: next.CurrentPayableMinor - commission.CurrentPayableMinor, ResultingPayableMinor: next.CurrentPayableMinor, Reason: "qualification_revoked", SourceRef: value.Attribution.QualificationEvidenceRef, OccurredAt: now}); err != nil {
-				return err
-			}
-			if _, err = s.store.UpdateCommissionWithin(tx, next, commission.Version); err != nil {
-				return err
-			}
-			return s.auditWithin(tx, "distribution.commission_cancelled.v1", "commission", commission.ID, "worker:distribution-due", map[string]any{"reason": "qualification_revoked"}, now)
 		}
 		readiness, err := s.payment.ReceiverReadinessWithin(tx, distributor.CustomerID, receiver.AppID)
 		if err != nil || !readiness.Ready {

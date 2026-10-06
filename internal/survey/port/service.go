@@ -17,11 +17,13 @@ var (
 	// ErrAlreadySubmitted is distinct from an idempotency payload conflict. It
 	// means this resolved canonical customer has already consumed this
 	// questionnaire's post-cutover submission entitlement with another key.
-	ErrAlreadySubmitted  = errors.New("survey questionnaire already submitted")
-	ErrReferenced        = errors.New("survey questionnaire has retained history")
-	ErrUnavailable       = errors.New("survey service unavailable")
-	ErrIdentityConflict  = errors.New("survey identity conflict")
-	ErrEffectUnavailable = errors.New("survey external effect unavailable")
+	ErrAlreadySubmitted        = errors.New("survey questionnaire already submitted")
+	ErrReferenced              = errors.New("survey questionnaire has retained history")
+	ErrUnavailable             = errors.New("survey service unavailable")
+	ErrIdentityConflict        = errors.New("survey identity conflict")
+	ErrResultForbidden         = errors.New("survey result forbidden")
+	ErrReauthorizationRequired = errors.New("survey OAuth reauthorization required")
+	ErrEffectUnavailable       = errors.New("survey external effect unavailable")
 )
 
 type ID int64
@@ -30,6 +32,10 @@ type QuestionnaireMode string
 type QuestionnaireStatus string
 type AnswerDisplayMode string
 type IdentityState string
+
+// OAuthStateLifetime is shared by the persisted one-time state and its
+// initiating-browser proof and return context. They share the existing window.
+const OAuthStateLifetime = 10 * time.Minute
 
 const (
 	QuestionSingleChoice QuestionType = "single_choice"
@@ -163,6 +169,9 @@ type SubmissionIdentity struct {
 	State          IdentityState              `json:"state"`
 	CustomerID     *customerdomain.CustomerID `json:"customer_id,omitempty"`
 	EvidenceDigest string                     `json:"evidence_digest,omitempty"`
+	// ProviderIdentityID is accepted only from the private OAuth session store.
+	// Public DTOs never expose it or allow a client to supply it.
+	ProviderIdentityID int64 `json:"-"`
 }
 
 type SubmissionResult struct {

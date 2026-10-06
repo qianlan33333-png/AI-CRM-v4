@@ -35,8 +35,19 @@ func (PostgreSQL) AppendTimeline(ctx context.Context, event customerport.Timelin
 }
 
 func (PostgreSQL) CustomerTimeline(ctx context.Context, customerID customerdomain.CustomerID, query customerport.PageQuery) (customerport.TimelinePage, error) {
-	if customerID < 1 || query.Limit < 1 || query.Limit > 101 || query.Watermark.IsZero() || len(query.Filter) > 96 {
+	return (PostgreSQL{}).CustomerTimelineForCustomers(ctx, []customerdomain.CustomerID{customerID}, query)
+}
+
+func (PostgreSQL) CustomerTimelineForCustomers(ctx context.Context, customerIDs []customerdomain.CustomerID, query customerport.PageQuery) (customerport.TimelinePage, error) {
+	if len(customerIDs) == 0 || query.Limit < 1 || query.Limit > 101 || query.Watermark.IsZero() || len(query.Filter) > 96 {
 		return customerport.TimelinePage{}, customerapp.ErrInvalidQuery
+	}
+	ids := make([]int64, len(customerIDs))
+	for index, id := range customerIDs {
+		if id < 1 {
+			return customerport.TimelinePage{}, customerapp.ErrInvalidQuery
+		}
+		ids[index] = int64(id)
 	}
 	tx, err := platformpostgres.RequireTransaction(ctx)
 	if err != nil {
@@ -44,9 +55,9 @@ func (PostgreSQL) CustomerTimeline(ctx context.Context, customerID customerdomai
 	}
 	rows, err := tx.Query(ctx, `SELECT id,event_type,title,source_domain,occurred_at
 		FROM customer_timeline_projection
-		WHERE customer_id=$1 AND occurred_at <= $2 AND ($3::text='' OR event_type=$3)
+		WHERE customer_id=ANY($1::bigint[]) AND occurred_at <= $2 AND ($3::text='' OR event_type=$3)
 		AND ($4::timestamptz IS NULL OR (occurred_at,id) < ($4,$5))
-		ORDER BY occurred_at DESC,id DESC LIMIT $6`, customerID, query.Watermark.UTC(), query.Filter,
+		ORDER BY occurred_at DESC,id DESC LIMIT $6`, ids, query.Watermark.UTC(), query.Filter,
 		nullableTime(query.AfterAt), query.AfterID, query.Limit)
 	if err != nil {
 		return customerport.TimelinePage{}, err

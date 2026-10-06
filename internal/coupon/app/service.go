@@ -327,7 +327,7 @@ func (s *Service) appendRuleEvent(ctx context.Context, operation string, item co
 	if e != nil {
 		return e
 	}
-	d := sha256.Sum256([]byte("coupon." + operation + "\x00" + key))
+	d := sha256.Sum256([]byte("admin:" + strconv.FormatInt(actor, 10) + "\x00" + operation + "\x00" + key))
 	_, e = s.events.Append(ctx, couponport.Event{Type: eventType(operation), Payload: payload, OccurredAt: now, IdempotencyKey: "coupon." + operation + ":" + hex.EncodeToString(d[:])})
 	return e
 }

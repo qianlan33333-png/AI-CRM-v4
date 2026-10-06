@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -34,8 +35,15 @@ func (r *Repository) ClaimCoupon(ctx context.Context, c couponport.ClaimCommand,
 	if err = lockCheckoutOperation(ctx, tx, "claim", c.ActorScope, key); err != nil {
 		return couponport.CustomerCoupon{}, err
 	}
-	if prior, found, e := findClaimReceipt(ctx, tx, c.ActorScope, key, payload); e != nil || found {
+	ids, err := r.couponCustomerIDs(ctx, c.HolderCustomerID, true)
+	if err != nil {
+		return couponport.CustomerCoupon{}, err
+	}
+	if prior, found, e := findClaimReceipt(ctx, tx, c, ids, key, payload); e != nil || found {
 		return prior, e
+	}
+	if c.RecoveryOnly {
+		return couponport.CustomerCoupon{}, couponapp.ErrNoEligibleCoupon
 	}
 	rule, e := r.get(ctx, tx, c.CouponID, true)
 	if e != nil {
@@ -45,7 +53,7 @@ func (r *Repository) ClaimCoupon(ctx context.Context, c couponport.ClaimCommand,
 		return couponport.CustomerCoupon{}, couponapp.ErrNoEligibleCoupon
 	}
 	var held int64
-	if e = tx.QueryRow(ctx, `SELECT count(*) FROM coupon_customer_claims WHERE coupon_id=$1 AND customer_id=$2`, rule.ID, c.HolderCustomerID).Scan(&held); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT count(*) FROM coupon_customer_claims WHERE coupon_id=$1 AND customer_id=ANY($2::bigint[])`, rule.ID, ids).Scan(&held); e != nil {
 		return couponport.CustomerCoupon{}, e
 	}
 	if held >= rule.PerUserIssueLimit {
@@ -68,7 +76,7 @@ func (r *Repository) ClaimCoupon(ctx context.Context, c couponport.ClaimCommand,
 	// actors who happen to reuse a browser-generated key would collide.
 	scopeDigest := sha256.Sum256([]byte(c.ActorScope))
 	sourceKey := "claim:" + hex.EncodeToString(scopeDigest[:]) + ":" + hex.EncodeToString(key[:])
-	e = tx.QueryRow(ctx, `INSERT INTO coupon_customer_claims(source_system,source_key,customer_id,coupon_id,status,claim_no_masked,claimed_at,valid_from,valid_until,source_digest,created_at,updated_at) VALUES('native-coupon',$1,$2,$3,'available','',$4,$5,$6,$7,$4,$4) RETURNING id`, sourceKey, c.HolderCustomerID, rule.ID, at, from, until, payload[:]).Scan(&id)
+	e = tx.QueryRow(ctx, `INSERT INTO coupon_customer_claims(source_system,source_key,customer_id,coupon_id,status,claim_no_masked,claimed_at,valid_from,valid_until,source_digest,created_at,updated_at) VALUES('native-coupon',$1,$2,$3,'available','',$4,$5,$6,$7,$4,$4) RETURNING id`, sourceKey, ids[0], rule.ID, at, from, until, payload[:]).Scan(&id)
 	if e != nil {
 		return couponport.CustomerCoupon{}, e
 	}
@@ -94,7 +102,11 @@ func (r *Repository) ReserveCoupon(ctx context.Context, c couponport.ReserveComm
 	if e = lockCheckoutOperation(ctx, tx, "reserve", c.ActorScope, key); e != nil {
 		return couponport.ReservationSnapshot{}, e
 	}
-	if prior, found, e := findRedemptionReceipt(ctx, tx, "reserve", c.ActorScope, key, payload); e != nil || found {
+	ids, e := r.couponCustomerIDs(ctx, c.HolderCustomerID, true)
+	if e != nil {
+		return couponport.ReservationSnapshot{}, e
+	}
+	if prior, found, e := findReservationReceipt(ctx, tx, c, ids, key, payload); e != nil || found {
 		return prior, e
 	}
 	var existing int64
@@ -105,7 +117,7 @@ func (r *Repository) ReserveCoupon(ctx context.Context, c couponport.ReserveComm
 	if !errors.Is(e, pgx.ErrNoRows) {
 		return couponport.ReservationSnapshot{}, e
 	}
-	row, e := selectReservationClaim(ctx, tx, c, c.ProductType+":"+fmt.Sprint(c.ProductID))
+	row, e := selectReservationClaim(ctx, tx, c, ids, c.ProductType+":"+fmt.Sprint(c.ProductID))
 	if errors.Is(e, pgx.ErrNoRows) {
 		if c.ClaimID == 0 {
 			// Auto-selection is optional. A checkout without an eligible coupon is
@@ -245,17 +257,43 @@ func (r *Repository) ReleaseCoupon(ctx context.Context, c couponport.ReleaseComm
 	return row.snapshot, nil
 }
 
-func findClaimReceipt(ctx context.Context, tx pgx.Tx, scope string, key, payload [32]byte) (couponport.CustomerCoupon, bool, error) {
+func findClaimReceipt(ctx context.Context, tx pgx.Tx, c couponport.ClaimCommand, ids []int64, key, payload [32]byte) (couponport.CustomerCoupon, bool, error) {
 	var prior, raw []byte
 	var item couponport.CustomerCoupon
-	e := tx.QueryRow(ctx, `SELECT payload_digest,result_snapshot FROM coupon_claim_operation_receipts WHERE operation='claim' AND actor_scope=$1 AND key_digest=$2`, scope, key[:]).Scan(&prior, &raw)
+	var claimID, ownerID, couponID int64
+	e := tx.QueryRow(ctx, `SELECT receipt.payload_digest,receipt.result_snapshot,claim.id,claim.customer_id,claim.coupon_id FROM coupon_claim_operation_receipts receipt JOIN coupon_customer_claims claim ON claim.id=receipt.claim_id WHERE receipt.operation='claim' AND receipt.actor_scope=$1 AND receipt.key_digest=$2`, c.ActorScope, key[:]).Scan(&prior, &raw, &claimID, &ownerID, &couponID)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return item, false, nil
 	}
 	if e != nil {
 		return item, false, e
 	}
-	if len(prior) != 32 || string(prior) != string(payload[:]) || json.Unmarshal(raw, &item) != nil {
+	// Permission over the immutable owner precedes any replay, even with an
+	// identical browser key and raw payload digest.
+	if !slices.Contains(ids, ownerID) || couponID != int64(c.CouponID) || json.Unmarshal(raw, &item) != nil || item.ClaimID != claimID || item.CouponID != couponID {
+		return item, false, couponapp.ErrConflict
+	}
+	if (len(prior) != 32 || string(prior) != string(payload[:])) && !claimPayloadMatchesLineage(c, ids, prior) {
+		return item, false, couponapp.ErrConflict
+	}
+	return item, true, nil
+}
+
+func findReservationReceipt(ctx context.Context, tx pgx.Tx, c couponport.ReserveCommand, ids []int64, key, payload [32]byte) (couponport.ReservationSnapshot, bool, error) {
+	var prior, raw []byte
+	var item couponport.ReservationSnapshot
+	var ownerID, claimID, redemptionID int64
+	e := tx.QueryRow(ctx, `SELECT receipt.payload_digest,receipt.result_snapshot,claim.customer_id,claim.id,redemption.id FROM coupon_redemption_operation_receipts receipt JOIN coupon_order_redemptions redemption ON redemption.id=receipt.redemption_id JOIN coupon_customer_claims claim ON claim.id=redemption.claim_id WHERE receipt.operation='reserve' AND receipt.actor_scope=$1 AND receipt.key_digest=$2`, c.ActorScope, key[:]).Scan(&prior, &raw, &ownerID, &claimID, &redemptionID)
+	if errors.Is(e, pgx.ErrNoRows) {
+		return item, false, nil
+	}
+	if e != nil {
+		return item, false, e
+	}
+	if !slices.Contains(ids, ownerID) || json.Unmarshal(raw, &item) != nil || item.ClaimID != claimID || item.ReservationRef != redemptionRef(redemptionID) {
+		return item, false, couponapp.ErrConflict
+	}
+	if (len(prior) != 32 || string(prior) != string(payload[:])) && !reservePayloadMatchesLineage(c, ids, prior) {
 		return item, false, couponapp.ErrConflict
 	}
 	return item, true, nil
@@ -275,11 +313,11 @@ func findRedemptionReceipt(ctx context.Context, tx pgx.Tx, op, scope string, key
 	}
 	return item, true, nil
 }
-func selectReservationClaim(ctx context.Context, tx pgx.Tx, c couponport.ReserveCommand, target string) (checkoutClaim, error) {
+func selectReservationClaim(ctx context.Context, tx pgx.Tx, c couponport.ReserveCommand, ids []int64, target string) (checkoutClaim, error) {
 	var x checkoutClaim
 	var mode string
-	q := `SELECT claim.id,rule.id,rule.name,rule.discount_amount_total,rule.currency,claim.status,claim.claim_no_masked,claim.claimed_at,claim.valid_from,claim.valid_until,claim.redeemed_at,rule.id,rule.name,rule.discount_amount_total,rule.currency,rule.status,rule.total_issue_limit,rule.per_user_issue_limit,rule.issued_count,rule.claim_starts_at,rule.claim_ends_at,rule.validity_mode,rule.use_starts_at,rule.use_ends_at,rule.relative_validity_days,rule.instructions,rule.created_by,rule.updated_by,rule.version,rule.created_at,rule.updated_at FROM coupon_customer_claims claim JOIN coupon_rules rule ON rule.id=claim.coupon_id JOIN coupon_rule_targets target ON target.coupon_id=rule.id WHERE claim.customer_id=$1 AND ($2=0 OR claim.id=$2) AND claim.status IN ('available','claimed') AND claim.valid_from<=$3 AND claim.valid_until>$3 AND rule.currency=$4 AND target.target_ref=$5 AND rule.status='published' AND rule.discount_amount_total>0 AND rule.discount_amount_total<$6 ORDER BY rule.discount_amount_total DESC,claim.valid_until ASC,claim.claimed_at ASC,claim.id ASC FOR UPDATE OF claim SKIP LOCKED LIMIT 1`
-	e := tx.QueryRow(ctx, q, c.HolderCustomerID, c.ClaimID, c.ReservedAt, c.Currency, target, c.GrossAmountMinor).Scan(&x.item.ClaimID, &x.item.CouponID, &x.item.Name, &x.item.DiscountMinor, &x.item.Currency, &x.item.Status, &x.item.ClaimNoMasked, &x.item.ClaimedAt, &x.item.ValidFrom, &x.item.ValidUntil, &x.item.RedeemedAt, &x.rule.ID, &x.rule.Name, &x.rule.DiscountAmountTotal, &x.rule.Currency, &x.rule.Status, &x.rule.TotalIssueLimit, &x.rule.PerUserIssueLimit, &x.rule.IssuedCount, &x.rule.ClaimStartsAt, &x.rule.ClaimEndsAt, &mode, &x.rule.UseStartsAt, &x.rule.UseEndsAt, &x.rule.RelativeValidityDays, &x.rule.Instructions, &x.rule.CreatedBy, &x.rule.UpdatedBy, &x.rule.Version, &x.rule.CreatedAt, &x.rule.UpdatedAt)
+	q := `SELECT claim.id,rule.id,rule.name,rule.discount_amount_total,rule.currency,claim.status,claim.claim_no_masked,claim.claimed_at,claim.valid_from,claim.valid_until,claim.redeemed_at,rule.id,rule.name,rule.discount_amount_total,rule.currency,rule.status,rule.total_issue_limit,rule.per_user_issue_limit,rule.issued_count,rule.claim_starts_at,rule.claim_ends_at,rule.validity_mode,rule.use_starts_at,rule.use_ends_at,rule.relative_validity_days,rule.instructions,rule.created_by,rule.updated_by,rule.version,rule.created_at,rule.updated_at FROM coupon_customer_claims claim JOIN coupon_rules rule ON rule.id=claim.coupon_id JOIN coupon_rule_targets target ON target.coupon_id=rule.id WHERE claim.customer_id=ANY($1::bigint[]) AND ($2=0 OR claim.id=$2) AND claim.status IN ('available','claimed') AND claim.valid_from<=$3 AND claim.valid_until>$3 AND rule.currency=$4 AND target.target_ref=$5 AND rule.status='published' AND rule.discount_amount_total>0 AND rule.discount_amount_total<$6 ORDER BY rule.discount_amount_total DESC,claim.valid_until ASC,claim.claimed_at ASC,claim.id ASC FOR UPDATE OF claim SKIP LOCKED LIMIT 1`
+	e := tx.QueryRow(ctx, q, ids, c.ClaimID, c.ReservedAt, c.Currency, target, c.GrossAmountMinor).Scan(&x.item.ClaimID, &x.item.CouponID, &x.item.Name, &x.item.DiscountMinor, &x.item.Currency, &x.item.Status, &x.item.ClaimNoMasked, &x.item.ClaimedAt, &x.item.ValidFrom, &x.item.ValidUntil, &x.item.RedeemedAt, &x.rule.ID, &x.rule.Name, &x.rule.DiscountAmountTotal, &x.rule.Currency, &x.rule.Status, &x.rule.TotalIssueLimit, &x.rule.PerUserIssueLimit, &x.rule.IssuedCount, &x.rule.ClaimStartsAt, &x.rule.ClaimEndsAt, &mode, &x.rule.UseStartsAt, &x.rule.UseEndsAt, &x.rule.RelativeValidityDays, &x.rule.Instructions, &x.rule.CreatedBy, &x.rule.UpdatedBy, &x.rule.Version, &x.rule.CreatedAt, &x.rule.UpdatedAt)
 	x.rule.ValidityMode = couponport.ValidityMode(mode)
 	return x, e
 }

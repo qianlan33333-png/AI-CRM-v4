@@ -12,15 +12,24 @@ import (
 // semantics.
 var ErrClaimNotEligible = errors.New("coupon claim not eligible for checkout")
 
-// ClaimCommand contains a canonical Customer reference supplied by a trusted
-// host adapter. It deliberately accepts no channel identity and cannot create
-// or resolve a Customer.
+// ClaimCommand carries the Host's immutable trusted identity handle for a
+// public claim; Coupon asks Identity for its current owner within the UoW.
+// Internal callers may supply their existing canonical Customer fact. This
+// command accepts no raw channel identifier and never provisions a Customer.
 type ClaimCommand struct {
 	CouponID         ID
 	HolderCustomerID int64
+	// HolderIdentityID comes only from the Host's trusted session. Public
+	// commands revalidate its current owner within Coupon's write UoW.
+	// Zero retains the existing internal numeric-holder command contract.
+	HolderIdentityID int64 `json:"-"`
 	ActorScope       string
 	IdempotencyKey   string
 	ClaimedAt        time.Time
+	// RecoveryOnly is selected by the Host for an unresolved original intent.
+	// It may return this holder's retained receipt, but never issue a new claim.
+	// It is not part of the immutable business payload or a browser identity.
+	RecoveryOnly bool `json:"-"`
 }
 
 type ClaimApplication interface {

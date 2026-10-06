@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	couponapp "github.com/qianlan33333-png/AI-CRM-v3/internal/coupon/app"
 	couponport "github.com/qianlan33333-png/AI-CRM-v3/internal/coupon/port"
 	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	productport "github.com/qianlan33333-png/AI-CRM-v3/internal/product/port"
@@ -49,9 +50,15 @@ func (s *publicCouponStub) EnsurePublicShare(context.Context, couponport.ID, int
 	return couponport.PublicCouponShare{}, errors.New("unused")
 }
 
-type publicClaimStub struct{ command couponport.ClaimCommand }
+type publicClaimStub struct {
+	command couponport.ClaimCommand
+	status  string
+}
 
 func (s *publicClaimStub) Claim(_ context.Context, command couponport.ClaimCommand) (couponport.CustomerCoupon, error) {
+	if s.status != "published" {
+		return couponport.CustomerCoupon{}, couponapp.ErrNoEligibleCoupon
+	}
 	s.command = command
 	return couponport.CustomerCoupon{ClaimID: 32, CouponID: int64(command.CouponID), Name: "公开券", DiscountMinor: 100, Currency: "CNY", Status: "available"}, nil
 }
@@ -77,7 +84,7 @@ func (publicProductStub) ReadCheckoutProductWithin(_ context.Context, kind produ
 func newPublicCouponHandler(t *testing.T, status string) (*PublicHandler, *publicCouponStub, *publicClaimStub) {
 	t.Helper()
 	stub := &publicCouponStub{coupon: couponport.PublicCoupon{Coupon: couponport.Coupon{ID: 7, Name: "公开券", DiscountAmountTotal: 100, Currency: "CNY", Status: status, TotalIssueLimit: 10, IssuedCount: 2, ClaimStartsAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), ClaimEndsAt: time.Date(2026, 2, 2, 3, 4, 5, 0, time.UTC), Instructions: "仅限适用商品", TargetRefs: []string{"service_period:8"}}, PublicSlug: "cp-a1b2c3"}}
-	claims := &publicClaimStub{}
+	claims := &publicClaimStub{status: status}
 	h, err := NewPublicHandler(stub, claims, publicSessionStub{}, publicProductStub{}, publicTestUOW{})
 	if err != nil {
 		t.Fatal(err)

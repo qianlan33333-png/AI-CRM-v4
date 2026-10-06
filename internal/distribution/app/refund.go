@@ -25,6 +25,7 @@ type refundStore interface {
 	ReadLatestSettlementByCommissionWithin(context.Context, int64, bool) (distributionstore.Settlement, error)
 	UpdateCommissionWithin(context.Context, distributiondomain.Commission, int64) (distributiondomain.Commission, error)
 	AppendCommissionAdjustmentWithin(context.Context, distributionstore.CommissionAdjustment) error
+	FindExceptionByEvidenceWithin(context.Context, int64, string, string) (distributionstore.Exception, error)
 	InsertExceptionWithin(context.Context, distributionstore.Exception) (distributionstore.Exception, error)
 	AppendAuditWithin(context.Context, string, string, int64, string, any, time.Time) error
 	AppendOutboxWithin(context.Context, string, string, int64, any, time.Time) error
@@ -88,7 +89,7 @@ func (s *RefundService) RunRefundRecheck(ctx context.Context, args RefundRecheck
 }
 
 func (s *RefundService) applySuccessfulRefundRecheckWithin(ctx context.Context, args RefundRecheckJobArgs) error {
-	now := args.OccurredAt.UTC()
+	now := s.now().UTC()
 	source := refundSource(eventRef(args.OrderID, args.ReceiptKey))
 	targets, err := s.qualificationRefundTargetsWithin(ctx, args.OrderID)
 	if err != nil {
@@ -189,7 +190,7 @@ func (s *RefundService) qualificationRefundTargetsWithin(ctx context.Context, or
 }
 
 func (s *RefundService) matchesQualificationRefundTargetWithin(ctx context.Context, value distributionstore.SettlementContext, target qualificationRefundTarget) (bool, error) {
-	distributor, _, err := s.store.ReadDistributorWithin(ctx, value.Commission.DistributorID, true)
+	distributor, _, err := s.store.ReadDistributorWithin(ctx, value.Commission.DistributorID, false)
 	if err != nil {
 		return false, err
 	}
@@ -198,6 +199,7 @@ func (s *RefundService) matchesQualificationRefundTargetWithin(ctx context.Conte
 
 func (s *RefundService) applyBuyerRefundWithin(ctx context.Context, value distributionstore.SettlementContext, cumulative int64, receiptKey, source string, now time.Time) error {
 	commission := value.Commission
+	now = refundTransitionTime(now, commission)
 	if cumulative < commission.SuccessfulRefundMinor || cumulative > commission.OriginalItemPaidMinor {
 		return distributionport.ErrConflict
 	}
@@ -254,6 +256,7 @@ func (s *RefundService) applyBuyerRefundWithin(ctx context.Context, value distri
 
 func (s *RefundService) recordPostSubmissionBuyerRefundWithin(ctx context.Context, value distributionstore.SettlementContext, cumulative int64, receiptKey, source string, now time.Time) error {
 	commission := value.Commission
+	now = refundTransitionTime(now, commission)
 	next, err := commission.RecordRefundAfterSubmission(commission.Version, cumulative, "buyer_refund_after_paid", now)
 	if err != nil {
 		return distributionport.ErrConflict
@@ -295,7 +298,8 @@ func (s *RefundService) appendRefundAdjustmentWithin(ctx context.Context, before
 }
 
 func (s *RefundService) applyQualificationRefundWithin(ctx context.Context, value distributionstore.SettlementContext, receiptKey, source string, now time.Time) error {
-	distributor, _, err := s.store.ReadDistributorWithin(ctx, value.Commission.DistributorID, true)
+	now = refundTransitionTime(now, value.Commission)
+	distributor, _, err := s.store.ReadDistributorWithin(ctx, value.Commission.DistributorID, false)
 	if err != nil {
 		return err
 	}
@@ -360,6 +364,18 @@ func (s *RefundService) applyQualificationRefundWithin(ctx context.Context, valu
 
 func (s *RefundService) markQualificationExceptionWithin(ctx context.Context, value distributionstore.SettlementContext, receiptKey, source, reason string, now time.Time) error {
 	commission := value.Commission
+	now = refundTransitionTime(now, commission)
+	// The commission row is already locked. A retry of one immutable source
+	// must retain its existing exception, including a handled exception.
+	if existing, err := s.store.FindExceptionByEvidenceWithin(ctx, commission.ID, "qualification_revoked_after_paid", source); err == nil {
+		if existing.Reason == reason || existing.Reason == "qualification_revoked_after_paid" || reason != "qualification_revoked_after_paid" {
+			return nil
+		}
+		// A prior unavailable observation is not affirmative revocation. Keep
+		// that immutable observation and append the newly proved business fact.
+	} else if !errors.Is(err, distributionport.ErrNotFound) {
+		return err
+	}
 	next := commission
 	if commission.Status != distributiondomain.CommissionException {
 		var err error
@@ -501,7 +517,7 @@ func (s *RefundService) applyRefundExposureRecheckWithin(ctx context.Context, ar
 
 func (s *RefundService) applyBuyerRefundExposureWithin(ctx context.Context, value distributionstore.SettlementContext, event paymentport.RefundExposureEvent) error {
 	commission := value.Commission
-	now := event.OccurredAt.UTC()
+	now := refundTransitionTime(s.now().UTC(), commission)
 	switch event.State {
 	case paymentport.RefundExposureOpened:
 		if commission.Status == distributiondomain.CommissionPending {
@@ -554,9 +570,9 @@ func (s *RefundService) applyBuyerRefundExposureWithin(ctx context.Context, valu
 
 func (s *RefundService) applyQualificationRefundExposureWithin(ctx context.Context, value distributionstore.SettlementContext, event paymentport.RefundExposureEvent) error {
 	commission := value.Commission
-	now := event.OccurredAt.UTC()
+	now := refundTransitionTime(s.now().UTC(), commission)
 	if event.State == paymentport.RefundExposureOpened {
-		distributor, _, err := s.store.ReadDistributorWithin(ctx, commission.DistributorID, true)
+		distributor, _, err := s.store.ReadDistributorWithin(ctx, commission.DistributorID, false)
 		if err != nil {
 			return err
 		}
@@ -589,7 +605,7 @@ func (s *RefundService) applyQualificationRefundExposureWithin(ctx context.Conte
 	}
 	// A final failure can restore qualification, but only an authoritative
 	// recheck may resume it. Other holds remain untouched and get a due recheck.
-	distributor, _, err := s.store.ReadDistributorWithin(ctx, commission.DistributorID, true)
+	distributor, _, err := s.store.ReadDistributorWithin(ctx, commission.DistributorID, false)
 	if err != nil {
 		return err
 	}
@@ -613,3 +629,12 @@ func (s *RefundService) applyQualificationRefundExposureWithin(ctx context.Conte
 }
 
 var _ paymentport.RefundExposureConsumer = (*RefundService)(nil)
+
+// Jobs carry the original fact time; mutable commission transitions use the
+// processing clock and cannot move behind a state already committed.
+func refundTransitionTime(now time.Time, commission distributiondomain.Commission) time.Time {
+	if now.Before(commission.UpdatedAt) {
+		return commission.UpdatedAt
+	}
+	return now
+}

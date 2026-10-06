@@ -2,6 +2,7 @@ package externaleffects
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
@@ -47,20 +48,20 @@ func (w *Worker) BindRepository(repository *Repository) error {
 	return nil
 }
 func (w *Worker) Work(ctx context.Context, job *river.Job[EffectJobArgs]) error {
-	if w == nil || w.repository == nil || job == nil {
+	if w == nil || w.repository == nil || job == nil || job.JobRow == nil || job.ID < 1 || job.Args.EffectID < 1 || job.Args.Generation < 1 {
 		return ErrInvalid
 	}
 	if preflight, ok := w.adapter.(port.ProviderPreflighter); ok {
 		envelope, queued, err := w.repository.QueuedEnvelope(ctx, job.Args.EffectID, job.Args.Generation, job.ID)
 		if err != nil {
-			return err
+			return deferEffectRecovery(err)
 		}
 		// Non-queued replay must still reach RunAttempt: it owns active lease
 		// deferral and expired attempted -> unknown recovery, including projection.
 		if queued {
 			ready, retryAfter, err := preflight.Preflight(ctx, envelope, effectID(job.Args.EffectID))
 			if err != nil {
-				return err
+				return deferEffectRecovery(err)
 			}
 			if !ready {
 				if retryAfter < time.Second {
@@ -70,5 +71,17 @@ func (w *Worker) Work(ctx context.Context, job *river.Job[EffectJobArgs]) error 
 			}
 		}
 	}
-	return w.repository.RunAttempt(ctx, job.Args.EffectID, job.Args.Generation, job.ID, w.adapter)
+	return deferEffectRecovery(w.repository.RunAttempt(ctx, job.Args.EffectID, job.Args.Generation, job.ID, w.adapter))
+}
+
+// Provider outcomes already settle inside RunAttempt and return nil. Errors
+// here mean its durable claim/completion or prerequisite read did not finish.
+// Preserve the same River job even on its last retry: an attempted replay
+// waits for the original lease and recovers unknown without executing again.
+func deferEffectRecovery(err error) error {
+	var snooze *river.JobSnoozeError
+	if err == nil || errors.Is(err, ErrInvalid) || errors.As(err, &snooze) {
+		return err
+	}
+	return errors.Join(err, river.JobSnooze(time.Minute))
 }

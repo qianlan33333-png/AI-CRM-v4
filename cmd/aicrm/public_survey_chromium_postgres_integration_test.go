@@ -21,6 +21,7 @@ import (
 	channelport "github.com/qianlan33333-png/AI-CRM-v3/internal/channel/port"
 	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
 	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
+	identityquery "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/query"
 	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
@@ -186,6 +187,9 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 	}
 	definitions := surveyapp.NewService(uow, repository)
 	submissions := surveyapp.NewSubmissionService(uow, repository, cipher)
+	if err = submissions.BindIdentitySubjects(identityquery.NewPostgreSQL()); err != nil {
+		t.Fatal(err)
+	}
 	projection := customerstore.NewPostgreSQL()
 	oneID := identityapp.OneIDService{
 		Store:               identitystore.NewPostgresStore(),
@@ -221,6 +225,9 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 		t.Fatal(err)
 	}
 	oauth := surveyapp.NewOAuthService(uow, oauthStore, oauthProvider, oneID)
+	if err = oauth.BindIdentitySubjects(identityquery.NewPostgreSQL()); err != nil {
+		t.Fatal(err)
+	}
 	api, err := surveyhttp.NewHandler(definitions, submissions, surveyJourneySecurity{actorID: actorID}, oauth)
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +325,7 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 	if state == "" {
 		t.Fatal("Survey OAuth start omitted state")
 	}
-	callback := surveyJourneyServe(t, api, http.MethodGet, "/api/h5/surveys/oauth/callback?state="+url.QueryEscape(state)+"&code=public-survey-browser-code", nil, "", nil, "")
+	callback := surveyJourneyServe(t, api, http.MethodGet, "/api/h5/surveys/oauth/callback?state="+url.QueryEscape(state)+"&code=public-survey-browser-code", nil, "", start.Result().Cookies(), "")
 	answerPath := "/h5/all.html?slug=" + success.Slug
 	if success.AnswerDisplayMode == surveyport.DisplayOneByOne {
 		answerPath = "/h5/one.html?slug=" + success.Slug
@@ -326,7 +333,7 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 	if callback.Code != http.StatusSeeOther || callback.Header().Get("Location") != answerPath || transport.calls != 2 {
 		t.Fatalf("Survey OAuth callback status=%d redirect=%q calls=%d", callback.Code, callback.Header().Get("Location"), transport.calls)
 	}
-	cookies := callback.Result().Cookies()
+	cookies := surveyJourneyIdentityCookies(t, callback)
 	if len(cookies) != 1 || cookies[0].Name != "__Host-aicrm_survey_identity" || len(cookies[0].Value) != 43 {
 		t.Fatal("Survey OAuth callback did not issue one valid session cookie")
 	}
@@ -338,8 +345,8 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 	if secondState == "" {
 		t.Fatal("second Survey OAuth start omitted state")
 	}
-	secondCallback := surveyJourneyServe(t, api, http.MethodGet, "/api/h5/surveys/oauth/callback?state="+url.QueryEscape(secondState)+"&code=public-survey-browser-code", nil, "", nil, "")
-	secondCookies := secondCallback.Result().Cookies()
+	secondCallback := surveyJourneyServe(t, api, http.MethodGet, "/api/h5/surveys/oauth/callback?state="+url.QueryEscape(secondState)+"&code=public-survey-browser-code", nil, "", secondStart.Result().Cookies(), "")
+	secondCookies := surveyJourneyIdentityCookies(t, secondCallback)
 	if secondCallback.Code != http.StatusSeeOther || secondCallback.Header().Get("Location") != answerPath || len(secondCookies) != 1 || secondCookies[0].Name != "__Host-aicrm_survey_identity" || len(secondCookies[0].Value) != 43 || secondCookies[0].Value == cookies[0].Value {
 		t.Fatalf("second Survey OAuth callback does not establish an independent session: status=%d location=%q cookies=%d", secondCallback.Code, secondCallback.Header().Get("Location"), len(secondCookies))
 	}

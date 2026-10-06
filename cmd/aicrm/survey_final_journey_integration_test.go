@@ -24,6 +24,7 @@ import (
 	customerapp "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/app"
 	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
 	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
+	identityquery "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/query"
 	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	surveymodule "github.com/qianlan33333-png/AI-CRM-v3/internal/survey"
@@ -305,6 +306,9 @@ func TestSurveyOAuthSubmissionResultJourneyPostgreSQL(t *testing.T) {
 	oneID := identityapp.OneIDService{Store: identitystore.NewPostgresStore()}
 	definitions := surveyapp.NewService(uow, repository)
 	submissions := surveyapp.NewSubmissionService(uow, repository, cipher)
+	if err = submissions.BindIdentitySubjects(identityquery.NewPostgreSQL()); err != nil {
+		t.Fatal(err)
+	}
 	projection := customerstore.NewPostgreSQL()
 	collectedPhones, err := customerapp.NewCollectedPhoneService(oneID, projection)
 	if err != nil {
@@ -322,6 +326,9 @@ func TestSurveyOAuthSubmissionResultJourneyPostgreSQL(t *testing.T) {
 	}
 	oauthStore := &surveyJourneyOAuthStore{OAuthStore: repository}
 	oauth := surveyapp.NewOAuthService(uow, oauthStore, oauthProvider, oneID)
+	if err = oauth.BindIdentitySubjects(identityquery.NewPostgreSQL()); err != nil {
+		t.Fatal(err)
+	}
 	handler, err := surveyhttp.NewHandler(definitions, submissions, surveyJourneySecurity{actorID: actorID}, oauth)
 	if err != nil {
 		t.Fatal(err)
@@ -419,16 +426,16 @@ func TestSurveyOAuthSubmissionResultJourneyPostgreSQL(t *testing.T) {
 	if wrongState.Code != http.StatusSeeOther || wrongState.Header().Get("Location") != "/h5/error.html?code=survey_oauth_failed" || transport.calls != 0 {
 		t.Fatalf("wrong OAuth state status=%d location=%q calls=%d", wrongState.Code, wrongState.Header().Get("Location"), transport.calls)
 	}
-	callback := surveyJourneyServe(t, handler, http.MethodGet, "/api/h5/surveys/oauth/callback?state="+url.QueryEscape(state)+"&code=journey-code", nil, "", nil, "")
+	callback := surveyJourneyServe(t, handler, http.MethodGet, "/api/h5/surveys/oauth/callback?state="+url.QueryEscape(state)+"&code=journey-code", nil, "", start.Result().Cookies(), "")
 	if callback.Code != http.StatusSeeOther || callback.Header().Get("Location") != "/h5/all.html?slug=oauth-journey" || transport.calls != 2 {
 		t.Fatalf("OAuth callback status=%d calls=%d body=%s", callback.Code, transport.calls, callback.Body.String())
 	}
-	cookies := callback.Result().Cookies()
+	cookies := surveyJourneyIdentityCookies(t, callback)
 	if len(cookies) != 1 || cookies[0].Name != "__Host-aicrm_survey_identity" || !cookies[0].HttpOnly {
 		t.Fatalf("OAuth callback cookie=%+v", cookies)
 	}
-	replayedCallback := surveyJourneyServe(t, handler, http.MethodGet, "/api/h5/surveys/oauth/callback?state="+url.QueryEscape(state)+"&code=journey-code", nil, "", nil, "")
-	if replayedCallback.Code != http.StatusSeeOther || replayedCallback.Header().Get("Location") != "/h5/error.html?code=survey_oauth_failed" || transport.calls != 2 {
+	replayedCallback := surveyJourneyServe(t, handler, http.MethodGet, "/api/h5/surveys/oauth/callback?state="+url.QueryEscape(state)+"&code=journey-code", nil, "", start.Result().Cookies(), "")
+	if replayedCallback.Code != http.StatusSeeOther || replayedCallback.Header().Get("Location") != "/h5/auth.html?oauth_error=1&slug=oauth-journey" || transport.calls != 2 {
 		t.Fatalf("replayed OAuth callback status=%d location=%q calls=%d", replayedCallback.Code, replayedCallback.Header().Get("Location"), transport.calls)
 	}
 
@@ -606,11 +613,11 @@ func TestSurveyOAuthSubmissionResultJourneyPostgreSQL(t *testing.T) {
 		t.Fatalf("one-mode OAuth start status=%d body=%s", oneStart.Code, oneStart.Body.String())
 	}
 	oneState := surveyFinalJourneyLocation(t, oneStart).Query().Get("state")
-	oneCallback := surveyJourneyServe(t, handler, http.MethodGet, "/api/h5/surveys/oauth/callback?state="+url.QueryEscape(oneState)+"&code=journey-code-one", nil, "", nil, "")
+	oneCallback := surveyJourneyServe(t, handler, http.MethodGet, "/api/h5/surveys/oauth/callback?state="+url.QueryEscape(oneState)+"&code=journey-code-one", nil, "", oneStart.Result().Cookies(), "")
 	if oneCallback.Code != http.StatusSeeOther || oneCallback.Header().Get("Location") != "/h5/one.html?slug=oauth-journey-one" || transport.calls != 4 {
 		t.Fatalf("one-mode callback status=%d location=%q calls=%d", oneCallback.Code, oneCallback.Header().Get("Location"), transport.calls)
 	}
-	oneCookies := oneCallback.Result().Cookies()
+	oneCookies := surveyJourneyIdentityCookies(t, oneCallback)
 	if len(oneCookies) != 1 || oneCookies[0].Name != "__Host-aicrm_survey_identity" || !oneCookies[0].HttpOnly {
 		t.Fatalf("one-mode cookie=%+v", oneCookies)
 	}
@@ -882,6 +889,31 @@ func (t *surveyOAuthAllowlistTransport) RoundTrip(request *http.Request) (*http.
 	forwarded.Host = ""
 	forwarded.RequestURI = ""
 	return t.base.RoundTrip(forwarded)
+}
+
+func surveyJourneyIdentityCookies(t *testing.T, response *httptest.ResponseRecorder) []*http.Cookie {
+	t.Helper()
+	var identity []*http.Cookie
+	deletedProof, deletedReturn := 0, 0
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == "__Host-aicrm_survey_identity" && cookie.MaxAge > 0 && len(cookie.Value) == 43 && cookie.Secure && cookie.HttpOnly && cookie.Path == "/" && cookie.Domain == "" {
+			identity = append(identity, cookie)
+			continue
+		}
+		if strings.HasPrefix(cookie.Name, "__Host-aicrm_survey_oauth_") && cookie.MaxAge < 0 && cookie.Value == "" && cookie.Secure && cookie.HttpOnly && cookie.Path == "/" && cookie.Domain == "" {
+			deletedProof++
+			continue
+		}
+		if strings.HasPrefix(cookie.Name, "__Host-aicrm_survey_return_") && cookie.MaxAge < 0 && cookie.Value == "" && cookie.Secure && cookie.HttpOnly && cookie.Path == "/" && cookie.Domain == "" {
+			deletedReturn++
+			continue
+		}
+		t.Fatal("OAuth callback produced an unexpected cookie")
+	}
+	if len(identity) != 1 || deletedProof != 1 || deletedReturn != 1 {
+		t.Fatal("actual OAuth callback must issue one identity session and delete only its flow proof and return context")
+	}
+	return identity
 }
 
 func surveyJourneyServe(t *testing.T, handler http.Handler, method, path string, body []byte, key string, cookies []*http.Cookie, userAgent string) *httptest.ResponseRecorder {

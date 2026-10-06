@@ -95,6 +95,11 @@ type canonicalSubmissionLineage interface {
 	identityport.WriteLockedCanonicalLineageReader
 }
 
+type trustedSubmissionSubjects interface {
+	identityport.VerifiedIdentitySubjectReader
+	identityport.WriteLockedVerifiedIdentitySubjectReader
+}
+
 type SubmissionService struct {
 	observer            surveyport.SubmissionObserver
 	uow                 platformport.UnitOfWork
@@ -103,6 +108,7 @@ type SubmissionService struct {
 	timeline            customerport.TimelineWriter
 	collectedPhones     customerport.CollectedPhoneRecorder
 	lineage             canonicalSubmissionLineage
+	subjects            trustedSubmissionSubjects
 	completion          surveyport.CompletionIntentAccepter
 	completionPolicy    surveyport.CompletionPolicyResolver
 	completionIdentity  surveyport.CompletionIdentitySnapshotter
@@ -110,6 +116,48 @@ type SubmissionService struct {
 	publicRedirect      surveyport.PublicCompletionTargetResolver
 	publicLeadQR        channelport.PublicLeadQRCodeReader
 	now                 func() time.Time
+}
+
+func (s *SubmissionService) BindIdentitySubjects(reader trustedSubmissionSubjects) error {
+	if s == nil || reader == nil {
+		return surveyport.ErrInvalid
+	}
+	s.subjects = reader
+	return nil
+}
+
+func (s *SubmissionService) trustedSubmissionLineage(ctx context.Context, identity surveyport.SubmissionIdentity, locked bool) ([]customerdomain.CustomerID, error) {
+	if s.subjects == nil {
+		if identity.ProviderIdentityID > 0 {
+			return nil, surveyport.ErrUnavailable
+		}
+		return s.submissionLineage(ctx, *identity.CustomerID, locked)
+	}
+	if identity.ProviderIdentityID < 1 {
+		return nil, surveyport.ErrReauthorizationRequired
+	}
+	var subject identityport.VerifiedIdentitySubject
+	var found bool
+	var err error
+	if locked {
+		subject, found, err = s.subjects.WriteLockedVerifiedIdentitySubject(ctx, identity.ProviderIdentityID)
+	} else {
+		subject, found, err = s.subjects.VerifiedIdentitySubject(ctx, identity.ProviderIdentityID)
+	}
+	if err != nil {
+		return nil, surveyport.ErrUnavailable
+	}
+	if !found || subject.CustomerID < 1 || len(subject.Lineage) == 0 || subject.Lineage[0] != subject.CustomerID {
+		return nil, surveyport.ErrReauthorizationRequired
+	}
+	return subject.Lineage, nil
+}
+
+func classifySubjectError(err error) error {
+	if errors.Is(err, surveyport.ErrReauthorizationRequired) {
+		return surveyport.ErrReauthorizationRequired
+	}
+	return classify(err)
 }
 
 func (s *SubmissionService) BindCanonicalLineage(reader canonicalSubmissionLineage) error {
@@ -263,7 +311,7 @@ func (s *SubmissionService) PublicSubmissionStatus(ctx context.Context, slug str
 		if questionnaire.Mode != surveyport.ModeSurvey {
 			return surveyport.ErrNotFound
 		}
-		ids, err := s.submissionLineage(tx, *identity.CustomerID, false)
+		ids, err := s.trustedSubmissionLineage(tx, identity, false)
 		if err != nil {
 			return err
 		}
@@ -283,7 +331,7 @@ func (s *SubmissionService) PublicSubmissionStatus(ctx context.Context, slug str
 		return err
 	})
 	if err != nil {
-		return result, classify(err)
+		return result, classifySubjectError(err)
 	}
 	if result.Submitted {
 		// Channel and Composition-owned target reads must happen after the
@@ -325,6 +373,15 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 		if e != nil {
 			return e
 		}
+		// Validate the exact OAuth subject inside this write transaction, before
+		// both retained receipts and new writes. ResolveSession is an earlier
+		// read and cannot protect this command from intervening detach/retire.
+		ids, e := s.trustedSubmissionLineage(tx, command.Identity, true)
+		if e != nil {
+			return e
+		}
+		root := ids[0]
+		command.Identity.CustomerID = &root
 		var found bool
 		stored, found, e = s.store.FindSubmissionByKey(tx, questionnaire.ID, submissionKeyDigest, payloadDigest)
 		if e != nil {
@@ -336,12 +393,6 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 		}
 		// Pin the same roots as OneID merge before eligibility and commit. Old
 		// claims retain their source ID; new writes use the current root and PK.
-		ids, e := s.submissionLineage(tx, *command.Identity.CustomerID, true)
-		if e != nil {
-			return e
-		}
-		root := ids[0]
-		command.Identity.CustomerID = &root
 		claimed, e := s.hasLineageClaim(tx, questionnaire.ID, ids)
 		if e != nil {
 			return e
@@ -493,7 +544,7 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 		return e
 	})
 	if err != nil {
-		return surveyport.SubmissionReceipt{}, classify(err)
+		return surveyport.SubmissionReceipt{}, classifySubjectError(err)
 	}
 	completionAction = s.resolvePublicCompletionAction(ctx, completionConfiguration)
 	if alreadySubmitted {
@@ -603,6 +654,40 @@ func (s *SubmissionService) QueryResult(ctx context.Context, token string) (surv
 		return e
 	})
 	return result, classify(err)
+}
+
+// QueryResultForIdentity authorizes the retained snapshot against the exact
+// current provider subject in one UoW. A merge permits historical alias facts;
+// detach/retirement cannot borrow a different customer's result token.
+func (s *SubmissionService) QueryResultForIdentity(ctx context.Context, token string, identity surveyport.SubmissionIdentity) (surveyport.Submission, error) {
+	if s == nil || s.uow == nil || s.store == nil || !validPublicKey(token) || identity.State != surveyport.IdentityResolved || identity.CustomerID == nil || !validIdentity(identity) {
+		return surveyport.Submission{}, surveyport.ErrResultForbidden
+	}
+	digest := sha256.Sum256([]byte(token))
+	var result surveyport.Submission
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		ids, err := s.trustedSubmissionLineage(tx, identity, true)
+		if err != nil {
+			return err
+		}
+		result, err = s.store.GetSubmissionByTokenDigest(tx, digest)
+		if err != nil {
+			return err
+		}
+		if result.Identity.State != surveyport.IdentityResolved || result.Identity.CustomerID == nil {
+			return surveyport.ErrResultForbidden
+		}
+		for _, id := range ids {
+			if id == *result.Identity.CustomerID {
+				return nil
+			}
+		}
+		return surveyport.ErrResultForbidden
+	})
+	if errors.Is(err, surveyport.ErrResultForbidden) {
+		return surveyport.Submission{}, err
+	}
+	return result, classifySubjectError(err)
 }
 func (s *SubmissionService) ListSubmissions(ctx context.Context, id surveyport.ID, limit, offset int32, state surveyport.IdentityState) (surveyport.SubmissionPage, error) {
 	if limit == 0 {
