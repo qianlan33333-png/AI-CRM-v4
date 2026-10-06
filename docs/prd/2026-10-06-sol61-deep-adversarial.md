@@ -31,3 +31,13 @@ Referral已关闭活动停用/截止、奖励撤销竞争、actor键、disabled-
 已存在两项Payment app边界退款红未修：对应退款回调对抗子任务被平台终止，精确trigger未披露；HTTP/PG仅夹具构建失败，没有业务验收。保留外部原测试、日志和阻塞说明，不换路径重跑，不把它们混入已关闭候选。没有Payment app/Provider实现修改，独立EER owner adapter0探针及nominal合成paid fanout不代表退款回调通过。
 
 验证短清单在docs/release-checks.json；本轮平台环境和实际浏览器分配见2026-10-06-sol61-validation.md。具名执行证据、每条复现/根因/最小修复/红绿结果和未覆盖矩阵在本机独立sol61-evidence报告，最终准确commit/tree由外部最终收据绑定。库存、问卷指定员工受众保持退役；真实Provider/资金/客户效果/设备、River末次硬崩溃和清理、历史双参与业务处理、模型inflight取消等未声称覆盖。候选仅供本地评审，不自动推送或上线。
+
+## 9a之后限定闭环
+
+父任务进一步授权独立高风险补充，继续仅本地候选、不push/merge/deploy。9a提交、保护ref和通过收据保留；PAY对抗动作继续暂停，不由其他代理或目标重启。补充仅验证：Survey成功原key在真实merge/revert/handle退役后授权与持久事实、实际Chromium重新授权；Automation模型请求inflight时CancelRun提交后的迟到成功/unknown不能复活run或review；非支付River末次自有子进程中断与rescuer恢复状态。最后一项只用私有schema与无联网合成adapter，实际红则保留边界、停止runtime修改。Distribution不同promoter互惠资格/买家付款锁序仅只读源审，不执行付款/DB/修复；不修历史多参与数据。
+
+这些补充涉及现有OneID、Owner UoW和EER/River；只复用当前Port、组合根和Owner测试设施。没有新身份匹配、队列或恢复框架。未发现实际失败前不改实现，精确受影响具名检查随最终本地提交，9a未变运行输入收据按实际blob证明复用；支付未闭环或River实际红均禁止将本轮称全绿。
+
+限定收尾结果：Survey两条成功cached原command在身份退役后拒绝且receipt为空，fresh只验证ResolveSession anonymous；真实merge/revert保留历史A/B owner，B原receipt可恢复而当前A读取结果403。Chromium两显示模式重新授权通过，限本机源码Host/合成OAuth。Automation实际EER请求inflight后CancelRun提交，迟到executed/unknown均不复活run/review，既有全文/digest/unknown和原EER调用事实保留；intake为spy0，真实AI review store未测。两项只新增具名组合测试，无runtime修复。
+
+非支付River新增实际未修缺陷：私有job设max_attempts=1，自有子进程在实际EER claim提交后无联网adapter中self-exit86；只老化该job attempted_at与原lease以加速真实rescuer。rescuer discarded，EER/original attempt仍attempted且过期、Worker/adapter重启调用0、Owner投影0、generic Retry冲突。一次52字符私有schema导致NOTIFY channel超长为夹具失败，缩短私有前缀后才取得业务红，两日志保留。未修runtime，实验源外部保留不纳入必绿清单；30天cleanup、真实Provider和完整默认25次前置尝试未执行。Distribution互惠资格/买方Payment反序仅条件可达源推断，仍未动态证实/未修。

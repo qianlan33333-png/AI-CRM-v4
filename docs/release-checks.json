@@ -724,6 +724,18 @@
     {
       "lane": "frontend",
       "path": "web/v3/product_transport_deadline.test.mjs"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLSurveySuccessfulKeyAuthorizationClosure",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestSol61PostgreSQLInflightGenerationCancelRetainsFactsWithoutReviewPlan",
+      "postgres": true
     }
   ]
 }
