@@ -13,7 +13,10 @@ import (
 // ModuleRegistration is the effects module's stable composition contract.
 // The composition root supplies infrastructure and chooses roles; this module
 // only publishes HTTP bindings, typed worker registration, and readiness.
-type ModuleRegistration struct{ worker *Worker }
+type ModuleRegistration struct {
+	worker   *Worker
+	recovery *RecoveryWorker
+}
 
 type HTTPBindings struct {
 	Effects    http.Handler
@@ -21,7 +24,7 @@ type HTTPBindings struct {
 }
 
 func NewModuleRegistration() *ModuleRegistration {
-	return &ModuleRegistration{worker: NewWorker(nil, nil)}
+	return &ModuleRegistration{worker: NewWorker(nil, nil), recovery: NewRecoveryWorker(nil)}
 }
 
 // SetProviderAdapter is composition-only wiring. It is intentionally narrow:
@@ -35,19 +38,23 @@ func (module *ModuleRegistration) SetProviderAdapter(adapter ProviderAdapter) er
 }
 
 func (module *ModuleRegistration) RegisterWorkers(workers *river.Workers) error {
-	if module == nil || module.worker == nil || workers == nil {
+	if module == nil || module.worker == nil || module.recovery == nil || workers == nil {
 		return ErrInvalid
 	}
-	return river.AddWorkerSafely[EffectJobArgs](workers, module.worker)
+	if err := river.AddWorkerSafely[EffectJobArgs](workers, module.worker); err != nil {
+		return err
+	}
+	return river.AddWorkerSafely[RecoveryJobArgs](workers, module.recovery)
 }
 
 func (module *ModuleRegistration) Bind(repository *Repository, security RequestSecurity) (HTTPBindings, error) {
-	if module == nil || module.worker == nil || repository == nil || security == nil {
+	if module == nil || module.worker == nil || module.recovery == nil || repository == nil || security == nil {
 		return HTTPBindings{}, ErrInvalid
 	}
 	if err := module.worker.BindRepository(repository); err != nil {
 		return HTTPBindings{}, err
 	}
+	module.recovery.repository = repository
 	effects, err := NewHTTPHandler(repository, security)
 	if err != nil {
 		return HTTPBindings{}, err

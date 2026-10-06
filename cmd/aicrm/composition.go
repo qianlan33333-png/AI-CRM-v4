@@ -638,7 +638,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = materialPreparation.EnsureDailyRefresh(ctx); err != nil {
 		return fail(err)
 	}
-	periodicJobs := []*river.PeriodicJob{segment.AudienceSchedulePeriodicJob(), automation.DirectPushReconcilePeriodicJob()}
+	periodicJobs := []*river.PeriodicJob{segment.AudienceSchedulePeriodicJob(), automation.DirectPushReconcilePeriodicJob(), externaleffects.RecoveryPeriodicJob()}
 	if cfg.WeCom.CustomerSyncEnabled {
 		periodicJobs = append(periodicJobs, wecom.CustomerSyncDailyPeriodicJob())
 	}

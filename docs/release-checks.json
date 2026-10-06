@@ -447,6 +447,29 @@
     },
     {
       "lane": "backend",
+      "package": "./internal/externaleffects",
+      "test": "TestSol61PostgreSQLFinalRiverAttemptAbruptExitPreservesRecovery",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/externaleffects",
+      "test": "TestSol61PostgreSQLDiscardedAttemptRecoveryPreservesGuardedFacts",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/externaleffects",
+      "test": "TestSol61PostgreSQLConcurrentDiscardedAttemptRecoveryRetriesOnlyOriginalJob",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/externaleffects",
+      "test": "TestModuleRegistrationPublishesTypedWorkerAndRejectsUnboundHTTP"
+    },
+    {
+      "lane": "backend",
       "package": "./internal/automation/store",
       "test": "TestPostgreSQLDynamicGenerationUOWConcurrencyAndReplay",
       "postgres": true

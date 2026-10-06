@@ -30,9 +30,9 @@ Referral已关闭活动停用/截止、奖励撤销竞争、actor键、disabled-
 
 已存在两项Payment app边界退款红未修：对应退款回调对抗子任务被平台终止，精确trigger未披露；HTTP/PG仅夹具构建失败，没有业务验收。保留外部原测试、日志和阻塞说明，不换路径重跑，不把它们混入已关闭候选。没有Payment app/Provider实现修改，独立EER owner adapter0探针及nominal合成paid fanout不代表退款回调通过。
 
-验证短清单在docs/release-checks.json；本轮平台环境和实际浏览器分配见2026-10-06-sol61-validation.md。具名执行证据、每条复现/根因/最小修复/红绿结果和未覆盖矩阵在本机独立sol61-evidence报告，最终准确commit/tree由外部最终收据绑定。库存、问卷指定员工受众保持退役；真实Provider/资金/客户效果/设备、River末次硬崩溃和清理、历史双参与业务处理、模型inflight取消等未声称覆盖。候选仅供本地评审，不自动推送或上线。
+验证短清单在docs/release-checks.json；本轮平台环境和实际浏览器分配见2026-10-06-sol61-validation.md。具名执行证据、每条复现/根因/最小修复/红绿结果和未覆盖矩阵在本机独立sol61-evidence报告，最终准确commit/tree由外部最终收据绑定。库存、问卷指定员工受众保持退役；真实Provider/资金/客户效果/设备、River清理、历史双参与业务处理及真实AI review store未声称覆盖。原末次中断与模型inflight取消的后续有限证据见下文，不能外推真实效果。候选仅供本地评审，不自动推送或上线。
 
-## 9a之后限定闭环
+## 9a之后限定闭环（fbb历史范围与收据）
 
 父任务进一步授权独立高风险补充，继续仅本地候选、不push/merge/deploy。9a提交、保护ref和通过收据保留；PAY对抗动作继续暂停，不由其他代理或目标重启。补充仅验证：Survey成功原key在真实merge/revert/handle退役后授权与持久事实、实际Chromium重新授权；Automation模型请求inflight时CancelRun提交后的迟到成功/unknown不能复活run或review；非支付River末次自有子进程中断与rescuer恢复状态。最后一项只用私有schema与无联网合成adapter，实际红则保留边界、停止runtime修改。Distribution不同promoter互惠资格/买家付款锁序仅只读源审，不执行付款/DB/修复；不修历史多参与数据。
 
@@ -41,3 +41,13 @@ Referral已关闭活动停用/截止、奖励撤销竞争、actor键、disabled-
 限定收尾结果：Survey两条成功cached原command在身份退役后拒绝且receipt为空，fresh只验证ResolveSession anonymous；真实merge/revert保留历史A/B owner，B原receipt可恢复而当前A读取结果403。Chromium两显示模式重新授权通过，限本机源码Host/合成OAuth。Automation实际EER请求inflight后CancelRun提交，迟到executed/unknown均不复活run/review，既有全文/digest/unknown和原EER调用事实保留；intake为spy0，真实AI review store未测。两项只新增具名组合测试，无runtime修复。
 
 非支付River新增实际未修缺陷：私有job设max_attempts=1，自有子进程在实际EER claim提交后无联网adapter中self-exit86；只老化该job attempted_at与原lease以加速真实rescuer。rescuer discarded，EER/original attempt仍attempted且过期、Worker/adapter重启调用0、Owner投影0、generic Retry冲突。一次52字符私有schema导致NOTIFY channel超长为夹具失败，缩短私有前缀后才取得业务红，两日志保留。未修runtime，实验源外部保留不纳入必绿清单；30天cleanup、真实Provider和完整默认25次前置尝试未执行。Distribution互惠资格/买方Payment反序仅条件可达源推断，仍未动态证实/未修。
+
+## A7已证实非金融恢复缺陷的最小修复
+
+父任务进一步授权关闭A7，范围只限已复现非金融合成任务；没有安全阻断，PAY继续暂停，不动态验证分销，不push/merge/deploy。fbb提交及Library v3和两次River原日志/原test字节保留。OneID不涉及：只操作不含用户标识的effect/job绑定。Persistence复用现有River周期任务与同PG事务的原JobRetryTx，执行仍走原Worker/RunAttempt；不新增队列、lease/fence、幂等键或效果状态机。
+
+最小实现：周期维护仅扫描当前generation的过期attempted且非payment Owner，effect行锁内经platform验证原job kind/queue/args、discarded且最后为native rescuer记录，在同事务用JobRetryTx唤醒原job。原RunAttempt只将原过期attempt转unknown并同UoW投影Owner，不再次执行Provider。已有executed/unknown/cancelled、active lease、原job completed/cancelled/不匹配绑定均不复活；并发扫描至多一次重排。每分钟及RunOnStart复用既有River调度，避免startup扫描早于rescuer留下永久缺口。不涉及新增业务限制；payment排除来自父任务的明确暂停范围，金融恢复仍未验收。
+
+五项影响：HTTP/事件合同不变；业务机制只恢复非金融末次中断原任务，unknown仍禁止盲重试；直接关联EER/平台River模块注册及composition周期列表/Owner completion，相关Automation取消事实；无页面改动；在原实际红之上验证实际native rescuer/周期/PG红转绿、同job及事实保留、并发和负控，准确final commit只跑受影响具名合同/API build，未变浏览器不重跑。回退为撤回该局部源码候选，无生产/历史数据回写或新权限。
+
+实际先红后绿：原native rescuer末次中断红保留；新源码的真实子进程中断、rescuer与周期恢复已PASS，原job completed，EER/原attempt outcome_unknown，Worker重入1、adapter调用0、Owner投影1，generation/fence/attempt_count仍1。16个终态/误绑定/取消负控、同事务回滚及两个并发扫描单次原job重排均PASS0skip；准确冻结提交的受影响复验收据在外部A7_FIX_RESULT.json，不把这些预冻结绿冒充最终HEAD运行。热点job行等待、扫描整批effect锁、已清理原job、完整25次前置尝试与OS signal kill仍未覆盖或未消除。

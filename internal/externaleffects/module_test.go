@@ -16,6 +16,9 @@ func TestModuleRegistrationPublishesTypedWorkerAndRejectsUnboundHTTP(t *testing.
 	if err := registration.RegisterWorkers(workers); err != nil {
 		t.Fatal(err)
 	}
+	if err := river.AddWorkerSafely[RecoveryJobArgs](workers, NewRecoveryWorker(nil)); err == nil {
+		t.Fatal("module did not register its original-job recovery worker")
+	}
 	if _, err := registration.Bind(nil, nil); err != ErrInvalid {
 		t.Fatalf("unbound module error=%v", err)
 	}

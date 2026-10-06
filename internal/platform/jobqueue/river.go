@@ -180,3 +180,48 @@ func HasNonDiscardedJobTx(ctx context.Context, tx pgx.Tx, args river.JobArgs, qu
 	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM river_job WHERE kind=$1 AND queue=$2 AND args=$3::jsonb AND state<>'discarded')`, args.Kind(), queue, string(raw)).Scan(&found)
 	return found, err
 }
+
+// RetryRescuedDiscardedJobTx wakes the exact original job after native River
+// rescue exhausted its attempts. Lock before using JobRetryTx: that API also
+// retries completed/cancelled jobs, which must not be revived by maintenance.
+func RetryRescuedDiscardedJobTx(ctx context.Context, client *river.Client[pgx.Tx], tx pgx.Tx, id int64, args river.JobArgs, queue string) (bool, error) {
+	if client == nil || tx == nil || id < 1 || args == nil || queue == "" {
+		return false, ErrUnavailable
+	}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return false, err
+	}
+	var lockedID int64
+	err = tx.QueryRow(ctx, `SELECT id FROM river_job WHERE id=$1 AND kind=$2 AND queue=$3 AND args=$4::jsonb
+        AND state='discarded'
+        FOR UPDATE`, id, args.Kind(), queue, string(raw)).Scan(&lockedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	job, err := client.JobGetTx(ctx, tx, lockedID)
+	if err != nil {
+		return false, err
+	}
+	var metadata struct {
+		CancelAttemptedAt time.Time `json:"cancel_attempted_at"`
+	}
+	if json.Unmarshal(job.Metadata, &metadata) != nil || !metadata.CancelAttemptedAt.IsZero() || len(job.Errors) == 0 {
+		return false, nil
+	}
+	last := job.Errors[len(job.Errors)-1]
+	if last.Error != "Stuck job rescued by JobRescuer" || last.Attempt != job.Attempt {
+		return false, nil
+	}
+	job, err = client.JobRetryTx(ctx, tx, lockedID)
+	if err != nil {
+		return false, err
+	}
+	if job.ID != id || job.State != rivertype.JobStateAvailable {
+		return false, ErrUnavailable
+	}
+	return true, nil
+}
