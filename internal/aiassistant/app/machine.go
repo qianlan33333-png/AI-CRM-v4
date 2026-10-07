@@ -44,11 +44,7 @@ func (s *Service) CreateMachinePlan(ctx context.Context, command aiassistantport
 	}
 	var result aiassistantport.MachineCreatePlanResult
 	err := s.uow.Within(ctx, func(tx context.Context) error {
-		recipients, err := s.validateCanonicalRecipients(tx, command.Recipients)
-		if err != nil {
-			return err
-		}
-		return s.createMachineWithin(tx, command, recipients, &result)
+		return s.createMachineWithin(tx, command, &result)
 	})
 	return result, classify(err)
 }
@@ -65,18 +61,14 @@ func (s *Service) CreateMachinePlanWithin(ctx context.Context, command aiassista
 	if _, err := platformpostgres.RequireTransaction(ctx); err != nil {
 		return aiassistantport.MachineCreatePlanResult{}, ErrUnavailable
 	}
-	recipients, err := s.validateCanonicalRecipients(ctx, command.Recipients)
-	if err != nil {
-		return aiassistantport.MachineCreatePlanResult{}, classify(err)
-	}
 	var result aiassistantport.MachineCreatePlanResult
-	if err = s.createMachineWithin(ctx, command, recipients, &result); err != nil {
+	if err := s.createMachineWithin(ctx, command, &result); err != nil {
 		return aiassistantport.MachineCreatePlanResult{}, classify(err)
 	}
 	return result, nil
 }
 
-func (s *Service) createMachineWithin(ctx context.Context, command aiassistantport.MachineCreatePlanCommand, recipients []aiassistantport.RecipientCandidate, result *aiassistantport.MachineCreatePlanResult) error {
+func (s *Service) createMachineWithin(ctx context.Context, command aiassistantport.MachineCreatePlanCommand, result *aiassistantport.MachineCreatePlanResult) error {
 	store, ok := s.machineStore()
 	if !ok {
 		return ErrUnavailable
@@ -106,6 +98,12 @@ func (s *Service) createMachineWithin(ctx context.Context, command aiassistantpo
 		}
 		result.Plan, result.Replayed = machinePlanStatus(plan), true
 		return nil
+	}
+	// Replay returns the original accepted plan. Mutable eligibility is still
+	// checked for a new request and again at the existing approval boundary.
+	recipients, err := s.validateCanonicalRecipients(ctx, command.Recipients)
+	if err != nil {
+		return err
 	}
 	aggregate, err := aiassistantdomain.NewMachinePlan(command.Name, command.SourceKind, command.SourceDigest, len(recipients), command.Actor, command.OccurredAt)
 	if err != nil {

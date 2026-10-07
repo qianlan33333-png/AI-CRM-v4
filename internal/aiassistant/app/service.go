@@ -221,11 +221,7 @@ func (s *Service) CreatePlan(ctx context.Context, command aiassistantport.Create
 	}
 	var result aiassistantport.CreatePlanResult
 	err := s.uow.Within(ctx, func(tx context.Context) error {
-		recipients, err := s.validateCanonicalRecipients(tx, command.Recipients)
-		if err != nil {
-			return err
-		}
-		return s.createWithin(tx, command, recipients, &result)
+		return s.createWithin(tx, command, nil, &result)
 	})
 	return result, classify(err)
 }
@@ -241,12 +237,8 @@ func (s *Service) CreatePlanWithin(ctx context.Context, command aiassistantport.
 	if _, err := platformpostgres.RequireTransaction(ctx); err != nil {
 		return aiassistantport.CreatePlanResult{}, ErrUnavailable
 	}
-	recipients, err := s.validateCanonicalRecipients(ctx, command.Recipients)
-	if err != nil {
-		return aiassistantport.CreatePlanResult{}, classify(err)
-	}
 	var result aiassistantport.CreatePlanResult
-	if err = s.createWithin(ctx, command, recipients, &result); err != nil {
+	if err := s.createWithin(ctx, command, nil, &result); err != nil {
 		return aiassistantport.CreatePlanResult{}, classify(err)
 	}
 	return result, nil
@@ -433,6 +425,15 @@ func (s *Service) createWithin(ctx context.Context, command aiassistantport.Crea
 		result.Plan, err = s.store.GetPlan(ctx, planID, false)
 		result.Replayed = err == nil
 		return err
+	}
+	// A committed receipt can be read after customer, staff or material facts
+	// change. Only a new canonical request must revalidate those mutable facts.
+	// Other intake paths supply their already-resolved candidates here.
+	if recipients == nil {
+		recipients, err = s.validateCanonicalRecipients(ctx, command.Recipients)
+		if err != nil {
+			return err
+		}
 	}
 	aggregate, err := aiassistantdomain.NewPlan(command.Name, command.SourceKind, command.SourceDigest, len(recipients), command.Actor.ID, command.OccurredAt)
 	if err != nil {
