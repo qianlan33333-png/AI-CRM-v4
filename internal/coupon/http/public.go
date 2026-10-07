@@ -377,11 +377,11 @@ func publicCouponSlug(path, prefix string) (string, bool) {
 }
 
 func validCouponPublicSlug(value string) bool {
-	if len(value) < 6 || len(value) > 120 || value != strings.TrimSpace(value) || value[0] < 'a' || value[0] > 'z' {
+	if len(value) < 6 || len(value) > 120 || value != strings.TrimSpace(value) {
 		return false
 	}
 	for _, r := range value {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
 			continue
 		}
 		return false
