@@ -1,89 +1,181 @@
 {
   "schema": 1,
-  "baseline_sha": "55936a1cd3e5cec0a20ced02c89741f5867d9d87",
+  "baseline_sha": "da810b3a77f96d58340cfcbd074243997b85a5e3",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/payment/domain",
-      "test": "TestVerifiedRefundFactSeparatesOccurrenceFromMonotonicProcessingTime"
+      "path": "internal/crmcli/wait_deadline_test.go",
+      "package": "./internal/crmcli",
+      "test": "TestWaitTimeoutBoundsStatusRequestAndPolling"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/domain",
-      "test": "TestVerifiedRefundFactUsesMicrosecondPrecisionWhenProviderSuppliesFraction"
+      "path": "internal/survey/app/submission_lineage_replay_test.go",
+      "package": "./internal/survey/app",
+      "test": "TestSubmissionReplayAfterSplitCannotReturnOtherRootReceipt"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestMatchesVerifiedRefundPaymentRequiresExactOriginalTransaction"
+      "path": "internal/survey/store/submission_lineage_replay_integration_test.go",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLSubmissionReceiptOwnershipAfterMergeReverse",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestVerifiedRefundCallbackCompletesUnknownOnceAndReplays"
+      "path": "internal/coupon/app/unicode_rule_test.go",
+      "package": "./internal/coupon/app",
+      "test": "TestCouponRuleUnicodeLimitsMatchPersistedCharacterContract"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestVerifiedRefundCallbackRejectsWrongOriginalBindingBeforeReceipt"
+      "path": "internal/coupon/app/unicode_rule_test.go",
+      "package": "./internal/coupon/app",
+      "test": "TestCouponCopyOfExistingChineseNameRemainsReadable"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestVerifiedRefundCallbackAfterReconciliationRecordsReplayWithoutSettlingAgain"
+      "path": "internal/coupon/store/unicode_definition_integration_test.go",
+      "package": "./internal/coupon/store",
+      "test": "TestPostgreSQLCouponUnicodeDefinitionCreateCopyAndImport",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestAlipayAcceptanceVirtualRefundSettlementAndReplay"
+      "path": "internal/coupon/http/public_slug_legacy_routes_test.go",
+      "package": "./internal/coupon/http",
+      "test": "TestPublicCouponRoutesPreserveImportedLegacySlug"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestAlipayRefundReconciliationRequiresExactFactsAndSettlesOnce"
+      "path": "internal/messagearchive/app/normalize_test.go",
+      "package": "./internal/messagearchive/app",
+      "test": "TestNormalizeTextPreservesOriginalWhitespaceAndUnicode"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestWeChatPayClosedRefundReleasesReservationWithoutChangingOrder"
+      "path": "internal/automation/store/dimension_generation_lock_postgres_test.go",
+      "package": "./internal/automation/store",
+      "test": "TestDimensionPostgreSQLGenerationCompletionAndCancellationUseOneLockOrder",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestShopRefundReconciliationUsesRefundForeignKey"
+      "path": "internal/operationcycle/store/dimension_event_replay_postgres_test.go",
+      "package": "./internal/operationcycle/store",
+      "test": "TestDimensionPostgreSQLOperationCycleConcurrentCompletionReplays",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/provider",
-      "test": "TestDecodeWeChatPayRefundQueryRequiresOriginalTransactionFields"
+      "path": "internal/radar/store/statistics_timezone_integration_test.go",
+      "package": "./internal/radar/store",
+      "test": "TestPostgreSQLTodayStatisticsUsesShanghaiDayAcrossSessionTimezones",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/provider",
-      "test": "TestAlipayRefundOccurrenceRequiresProviderTime"
+      "path": "internal/wecom/adapter/group_directory_names_test.go",
+      "package": "./internal/wecom/adapter",
+      "test": "TestGroupDirectoryPreservesNamedAndUnnamedGroups"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/provider",
-      "test": "TestAlipayRefundQuerySDKRequestAndResponseFieldMapping"
+      "path": "internal/distribution/app/distributor_enabled_integration_test.go",
+      "package": "./internal/distribution/app",
+      "test": "TestPostgreSQLDistributorEnabledActorScopedOutboxAndReplay",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/provider",
-      "test": "TestAlipayAcceptanceSignedCallbackKindSpecificTimestamps"
+      "path": "internal/hxcdashboard/store/terminal_publish_integration_test.go",
+      "package": "./internal/hxcdashboard/store",
+      "test": "TestDashboardTerminalRefreshCannotPublishLateProjection",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/order/domain",
-      "test": "TestVerifiedRefundFactSeparatesOccurrenceAndMonotonicProcessingTime"
+      "path": "internal/aiassistant/store/dimension_create_replay_postgres_test.go",
+      "package": "./internal/aiassistant/store",
+      "test": "TestDimensionPostgreSQLCreatePlanReplaySurvivesEligibilityChanges",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/order/app",
-      "test": "TestSettlePaymentRefundUsesVerifiedOccurrenceAndMonotonicOrderTime"
+      "path": "internal/aiassistant/store/dimension_excel_delivery_postgres_test.go",
+      "package": "./internal/aiassistant/store",
+      "test": "TestDimensionPostgreSQLExcelConcurrentOldFailureCannotEraseDeliveryProof",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/aiassistant/store/dimension_machine_status_postgres_test.go",
+      "package": "./internal/aiassistant/store",
+      "test": "TestDimensionPostgreSQLMachineStatusCannotMixCompletionSnapshots",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/identity/store/overview_postgres_integration_test.go",
+      "package": "./internal/identity/store",
+      "test": "TestPostgreSQLOverviewNewCanonicalCustomerProvenance",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/identity/store/overview_postgres_integration_test.go",
+      "package": "./internal/identity/store",
+      "test": "TestPostgreSQLOverviewCreationSourceSurvivesMergeReverseAndChainedMerge",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/coupon/app/fixed_claim_availability_test.go",
+      "package": "./internal/coupon/app",
+      "test": "TestFixedCouponRuleAvailabilityEndsAtUseDeadline"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/coupon/app/fixed_claim_availability_test.go",
+      "package": "./internal/coupon/app",
+      "test": "TestCouponAvailabilityKeepsFutureFixedUseAndRelativeClaimsOpen"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/coupon/app/fixed_claim_availability_test.go",
+      "package": "./internal/coupon/app",
+      "test": "TestCouponClaimPreservesOwnerRefusalAtFixedUseDeadline"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyPublicHost.keyboard.test.mjs"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/coupon/http",
+      "test": "TestFrozenCouponPublicTemplateRetainsDonorDOMAndRejectsClaimFields"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/coupon/http",
+      "test": "TestFrozenCouponPublicPageRendersLimitAndTerminalStates"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/coupon/http",
+      "test": "TestPublicCouponStoppedStateDoesNotClaimOrStartOAuth"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyPublicHost.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveySubmissionResume.test.mjs"
     }
   ],
-  "installed_checks": [
-    "payment-defensive-readback"
+  "installed_checks": [],
+  "build_commands": [
+    "./cmd/aicrm"
   ]
 }
