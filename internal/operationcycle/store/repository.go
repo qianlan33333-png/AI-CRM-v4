@@ -571,22 +571,20 @@ func (repository *Repository) RecordActionEvent(ctx context.Context, command ope
 	if err != nil {
 		return nil, false, operationapp.ErrInvalid
 	}
+	// Serialize this action before reading its event receipt. An identical
+	// concurrent request may have committed while we waited for the lock.
+	action, err := queries.GetOperationCycleActionForUpdate(ctx, command.RequestID)
+	if err != nil {
+		return nil, false, storeError(err)
+	}
 	existingDigest, err := queries.GetOperationCycleActionEvent(ctx, operationcycledb.GetOperationCycleActionEventParams{RequestID: command.RequestID, EventID: command.EventID})
 	if err == nil {
 		if !bytes.Equal(existingDigest, payloadDigest[:]) {
 			return nil, false, operationapp.ErrConflict
 		}
-		action, getErr := queries.GetOperationCycleAction(ctx, command.RequestID)
-		if getErr != nil {
-			return nil, false, storeError(getErr)
-		}
 		return actionResult(action), true, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, false, storeError(err)
-	}
-	action, err := queries.GetOperationCycleActionForUpdate(ctx, command.RequestID)
-	if err != nil {
 		return nil, false, storeError(err)
 	}
 	if !validLease(action.LeaseTokenHash, action.LeaseExpiresAt, command.LeaseToken, now) {
