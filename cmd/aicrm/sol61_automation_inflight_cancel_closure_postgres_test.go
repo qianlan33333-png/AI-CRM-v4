@@ -373,7 +373,7 @@ func sol61ClosureAutomationPool(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if baseConfig.ConnConfig.Host != "127.0.0.1" || baseConfig.ConnConfig.Port != 55476 || baseConfig.ConnConfig.Database != "aicrm_test_sol61_async" || len(baseConfig.ConnConfig.Fallbacks) != 0 {
+	if baseConfig.ConnConfig.Host != "127.0.0.1" || (!strings.HasSuffix(baseConfig.ConnConfig.Database, "_acceptance_test") && baseConfig.ConnConfig.Database != "aicrm_test_sol61_async") || len(baseConfig.ConnConfig.Fallbacks) != 0 {
 		t.Fatal("Automation closure requires the authorized dedicated loopback test database with no fallback")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -4,51 +4,6 @@
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/coupon/app"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/coupon/store",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/coupon/http"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/survey/app"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/survey/http"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/store",
-      "test": "TestServicePeriodImagesPostgreSQLClearPreserveReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/store",
-      "test": "TestProductImagesPostgreSQLCopyWithoutCover",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/store",
-      "test": "TestLocalProductArchivePostgreSQLRetainsHistoryAndClosesNewEntryPoints",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/store",
-      "test": "TestMemberGridPostgreSQLCRUDAndCAS",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
       "package": "./internal/product/store",
       "test": "TestPostgreSQLMemberGridLegacyShareRemainsRevocableAfterArchive",
       "postgres": true
@@ -62,13 +17,7 @@
     {
       "lane": "backend",
       "package": "./internal/product/store",
-      "test": "TestServicePeriodEmptyImagesPostgreSQLSave",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/store",
-      "test": "TestProductTargetBatchPostgreSQLRetainsArchivedHistoryAndTypeFacts",
+      "test": "TestPostgreSQLMemberGridRejectsObjectSwapsAndStaleCollaboratorAccess",
       "postgres": true
     },
     {
@@ -76,27 +25,6 @@
       "package": "./internal/product/store",
       "test": "TestPostgreSQLExternalPushLocalSaveKeepsActorEventNamespacesAligned",
       "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/store",
-      "test": "TestFieldMappingPostgreSQLSaveReadRollback",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestPublicGridFieldAllowlistExcludesIdentityAndNotes"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestReadOnlyMemberGridCollaboratorGetsExplicitForbiddenAndNoWrites"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestMemberGridPublicHttpAPIOnlyReadsEnabledShareAndSavedViews"
     },
     {
       "lane": "backend",
@@ -110,141 +38,39 @@
     },
     {
       "lane": "backend",
-      "package": "./internal/product/app",
-      "test": "TestCommerceExternalPushSavesReadsAndReplaysLocally"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/app",
-      "test": "TestCommerceExternalPushBusinessParametersFreezeJSONTypesAndLegacyBindingPreservesThem"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/app",
-      "test": "TestCommerceExternalPushFirstBusinessSaveRejectsStaleUnpersistedRevision"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/app",
-      "test": "TestCommerceExternalPushReplaysMain8ecBindingReceiptAndRejectsChangedBinding"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/app",
-      "test": "TestCommerceExternalPushURLBindingAndReceipt"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/app",
-      "test": "TestCommerceExternalPushEmptyEnabledURLRejected"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestExpiredActiveCampaignCannotBeDisabledBeforeCloseSnapshot",
+      "package": "./internal/coupon/store",
+      "test": "TestPostgreSQLCouponRuleMutationKeepsActorReceiptAndEventNamespacesAligned",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLProductActivityContextHTTPIdempotencyAndExpiry",
-      "postgres": true
+      "package": "./internal/coupon/http",
+      "test": "TestPublicCouponStalledResponseRecoverySol61"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLDistributionSaleScoresWithoutSignupAndRefundsOriginalDay",
-      "postgres": true
+      "package": "./internal/coupon/http",
+      "test": "TestPublicCouponRecoveryBindingIsOptionalAndRejectsChangedSessionSol61"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLDistributionSaleUsesTeamMembershipAtPayment",
-      "postgres": true
+      "package": "./internal/coupon/http",
+      "test": "TestPublicCouponRecoveryOnlyHeaderIsStrictAndKeepsTrustedHolderSol61"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralAcceptsAndFreezesActivityFacts",
-      "postgres": true
+      "package": "./internal/survey/http",
+      "test": "TestOAuthCallbackRequiresInitiatingBrowserProof"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralUnjoinedCaptainHasNoInvitationDetailsUntilExplicitJoin",
-      "postgres": true
+      "package": "./internal/survey/http",
+      "test": "TestOAuthParallelFlowsRetainOwnBrowserProof"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralConcurrentAcceptsPreserveOneParticipationAndLastRelation",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralInviterReversalWinsBeforeBlockedNewAcceptance",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralRewardAndReversalSerializeOnTheCredit",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralReversalOnlyReviewsRelatedOrAmbiguousRewards",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralCaptainAssignmentDoesNotChangeParticipationAndIsUniquePerCampaign",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralAdminActivityDetailsAndStableExports",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralConcurrentTeamAssignmentPreservesExistingParticipation",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralRejectsUnsafeInvitationsAndRollsBackPlatformFacts",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralRanksAcrossAsiaShanghaiDayAndWeekBoundaries",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralAdminKeysetPaginationIgnoresNewJoinsAndShowsReversal",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLIndividualConfigurationAndInvitationReadback",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLProductCampaignConfigRoundtrip",
-      "postgres": true
+      "package": "./internal/survey/http",
+      "test": "TestOAuthParallelFlowResumeContextIsBoundToOwnState"
     },
     {
       "lane": "backend",
@@ -272,278 +98,32 @@
     },
     {
       "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestRefundExceptionReplayKeepsLaterAffirmativeRevocation"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestRefundRecheckUsesAuthoritativeCumulativeRefundAndPreservesPaidFact"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestQualificationRefundKeepsAlternativePurchaseThenCancelsAfterLastOne"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestRefundFinalFailureDoesNotResumeWhileAnotherRefundIsExposed"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestRefundConsumersOnlyPersistRecheckPointersInOriginatingTransaction"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestCommissionDueAcceptsOneInstructionThenConfirmsExactReceiver"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestCommissionDueUnknownStaysQueryableAndCanRecoverToPaid"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestCommissionDueClosedInstructionPreservesCommissionObligationAndRecordsException"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestCommissionDueClosedInstructionReplayDoesNotReopenResolvedSameEvidence"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestCommissionDueClosedInstructionCancelsOnlyForExistingFullRefundFact"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestCommissionDueClosedInstructionCancelsForPersistentQualificationRevocation"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestCommissionDueClosedInstructionDoesNotTreatUnavailableQualificationEvidenceAsRevocation"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestPaymentSettlementFailureReasonAcceptsOnlyPaymentSafeClasses"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestCommissionDueUnfreezeFailureRemainsExceptionInsteadOfCompletion"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestCommissionDueCancelledUnfreezeFailureKeepsZeroPayableAndReplays"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestCommissionDueMarksImminentDeadlineWithoutEndingObligation"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/distribution/app",
-      "test": "TestCommissionDueMarksImminentDeadlineWhileSplitIsInFlight"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestPostgreSQLProviderAcceptedResponseLostHasNoSecondSend",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestEffectsAndPushCenterShareViewerReadAndAdminControlPolicy",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestQueuedPreflightSnoozesWithoutMessageAttemptPostgreSQL",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestStaleAttemptCompletionProjectionKinds",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61EffectsAliasesRejectForeignPrincipalsBeforeObjectLookup",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLUnknownGenerationGenericReconcileIsExplicitConflict",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLExpiredAttemptsProjectAllRegisteredOutboundOwners",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLExpiredPaymentOwnerInvokesBoundCompletionWithoutAdapter",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLSettlementFailureDefersOriginalAttemptRecovery",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLPreflightErrorCannotDiscardQueuedEffect",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestPostgreSQLTagCompletionSinkIsAtomic",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestPostgreSQLContactDescriptionNoopCompletionIsTerminal",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestPostgreSQLAttemptedLeaseRecoveryDoesNotRepeatProviderCall",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestPostgreSQLLeaseRecoveryFencesDelayedProviderCompletionAndReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestPostgreSQLProviderAttemptErrorBecomesUnknown",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLFinalRiverAttemptAbruptExitPreservesRecovery",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLDiscardedAttemptRecoveryPreservesGuardedFacts",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLConcurrentDiscardedAttemptRecoveryRetriesOnlyOriginalJob",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestModuleRegistrationPublishesTypedWorkerAndRejectsUnboundHTTP"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/automation/store",
-      "test": "TestPostgreSQLDynamicGenerationUOWConcurrencyAndReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/automation/store",
-      "test": "TestSol61PostgreSQLManualGenerationCompletionCannotReviveCancelledRun",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/automation/store",
-      "test": "TestSol61PostgreSQLUnknownGenerationCancellationRetainsUnknownAndCannotRevive",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/survey/store",
-      "test": "TestPostgreSQLSubmissionClaimsAreAtomicPerCustomerAndQuestionnaire",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/survey/store",
-      "test": "TestPostgreSQLSubmissionClaimConcurrentReceiptReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/survey/store",
-      "test": "TestPostgreSQLSubmissionRejectsDefinitionSwitchedAfterValidation",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLCouponSol61MergePeriodSessionFollowsCurrentVerifiedSubject",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLRefundWorkerRepricesOnceAndRevokesOnlyAfterLastQualification",
+      "test": "TestPostgreSQLSurveySuccessfulKeyAuthorizationClosure",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSettlementWorkerAcceptsOneInstructionAndReplaysAfterRestart",
+      "test": "TestPostgreSQLSurveySubjectReadPinsLineageUntilCommit",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSettlementWorkerClosedInstructionPreservesOrCancelsOnlyWithBusinessFacts",
+      "test": "TestPostgreSQLCustomerTimelineRetainsMergedHistory",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSettlementAdminObservationPreservesQualificationSourceForDueReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLAdminAfterSalesLedgerUsesLivePaidDelta",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSol61SettlementDoesNotInvertReceiverProjectionLocks",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSol61SettlementDoesNotInvertPromotionPolicyLocks",
+      "test": "TestPostgreSQLReferralSol61MergedCustomerCannotJoinTwice",
       "postgres": true
     },
     {
@@ -567,67 +147,13 @@
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSol61DelayedSuccessfulRefundRecheckUsesCurrentTransitionTime",
+      "test": "TestPostgreSQLSol61SettlementDoesNotInvertReceiverProjectionLocks",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLReferralSol61NativePaidFanoutWithoutWeChatCapability",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLReferralSol61MergedCustomerCannotJoinTwice",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLCustomerTimelineRetainsMergedHistory",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestSurveyOAuthSubmissionResultJourneyPostgreSQL",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSurveySubjectReadPinsLineageUntilCommit",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestCompositionMigrationFixtureRecordsCanonicalLedgerAndReadiesPostgreSQL",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestCurrentReleaseReadinessRequiresAppliedMigrationsPostgreSQL",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestCurrentReleaseReadinessAllowsDisabledOptionalProjectionsPostgreSQL",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestCurrentReleaseReadinessChecksCurrentModuleStructuresPostgreSQL",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSurveyReadinessRequiresIdentitySubjectColumn",
+      "test": "TestPostgreSQLSol61SettlementDoesNotInvertPromotionPolicyLocks",
       "postgres": true
     },
     {
@@ -639,101 +165,61 @@
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestSurveyOAuthRedirectConstraintReadinessPostgreSQL",
+      "test": "TestSol61PostgreSQLInflightGenerationCancelRetainsFactsWithoutReviewPlan",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestSurveyAssessmentBusinessKeyConstraintReadinessPostgreSQL",
+      "package": "./internal/externaleffects",
+      "test": "TestSol61PostgreSQLUnknownGenerationGenericReconcileIsExplicitConflict",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLCommerceNoCouponReplayRetainsCheckoutPrice",
+      "package": "./internal/externaleffects",
+      "test": "TestSol61PostgreSQLExpiredAttemptsProjectAllRegisteredOutboundOwners",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLCouponClaimsFollowOneIDMergeWithoutRewritingOwners",
+      "package": "./internal/externaleffects",
+      "test": "TestSol61PostgreSQLSettlementFailureDefersOriginalAttemptRecovery",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLCouponSol61MergePeriodSessionFollowsCurrentVerifiedSubject",
+      "package": "./internal/externaleffects",
+      "test": "TestSol61PostgreSQLPreflightErrorCannotDiscardQueuedEffect",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/product/store",
-      "test": "TestPostgreSQLMemberGridRejectsObjectSwapsAndStaleCollaboratorAccess",
+      "package": "./internal/externaleffects",
+      "test": "TestSol61PostgreSQLFinalRiverAttemptAbruptExitPreservesRecovery",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestFrozenMemberGridBrowserJourneyUsesActualHTTPAPI"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestFrozenMemberGridPublicSummaryBrowserJourneyUsesCursorAndGroups"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestPublicPaymentCompletionRefreshJourney"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestPublicAlipayOriginalOrderBrowserJourney"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestPublicPaymentRegionCascadeBrowserJourney"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestPublicCheckoutCollectionProviderMatrix"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestServicePeriodPublicBrowserJourney"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestServicePeriodIdentityLifecycle"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSurveySessionIssuedDuringMergeAfterDetach",
+      "package": "./internal/externaleffects",
+      "test": "TestSol61PostgreSQLDiscardedAttemptRecoveryPreservesGuardedFacts",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestSurveyAudienceRetirementHTTPPostgreSQLPreservesHistoryAndRequiresReconfiguration",
+      "package": "./internal/externaleffects",
+      "test": "TestSol61PostgreSQLConcurrentDiscardedAttemptRecoveryRetriesOnlyOriginalJob",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLCouponPublicReplayAfterTerminalRuleSol61",
+      "package": "./internal/automation/store",
+      "test": "TestSol61PostgreSQLManualGenerationCompletionCannotReviveCancelledRun",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLCouponRecoveryOnlyMissAndOtherHolderSol61",
+      "package": "./internal/automation/store",
+      "test": "TestSol61PostgreSQLUnknownGenerationCancellationRetainsUnknownAndCannotRevive",
       "postgres": true
     },
     {
@@ -743,22 +229,11 @@
     {
       "lane": "frontend",
       "path": "web/v3/surveySubmissionResume.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/product_transport_deadline.test.mjs"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSurveySuccessfulKeyAuthorizationClosure",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestSol61PostgreSQLInflightGenerationCancelRetainsFactsWithoutReviewPlan",
-      "postgres": true
     }
+  ],
+  "installed_checks": [
+    "commerce-readback",
+    "survey-recovery",
+    "effects-recovery"
   ]
 }

@@ -301,7 +301,7 @@ func sol61RiverLoopbackConfig(t *testing.T) *pgxpool.Config {
 	if err != nil {
 		t.Fatal("invalid isolated local database configuration")
 	}
-	if config.ConnConfig.Host != "127.0.0.1" || config.ConnConfig.Port != 55476 || config.ConnConfig.Database != "aicrm_test_sol61_async" || len(config.ConnConfig.Fallbacks) != 0 {
+	if config.ConnConfig.Host != "127.0.0.1" || (!strings.HasSuffix(config.ConnConfig.Database, "_acceptance_test") && config.ConnConfig.Database != "aicrm_test_sol61_async") || len(config.ConnConfig.Fallbacks) != 0 {
 		t.Fatal("River interruption closure requires the authorized dedicated loopback test database with no fallback")
 	}
 	return config
