@@ -541,6 +541,12 @@ func (r *Repository) RecordExcelDelivery(ctx context.Context, recipient ai.Recip
 		return ErrInvalid
 	}
 	return r.uow.Within(ctx, func(tx context.Context) error {
+		// Browser and River observation refreshes may carry different receipts.
+		// Lock the aggregate before reading proof so a stale failure waiting
+		// behind a successful observation cannot erase the committed delivery.
+		if _, err := r.GetPlan(tx, recipient.PlanID, true); err != nil {
+			return err
+		}
 		items, err := r.ListEffectBindings(tx, recipient.PlanID)
 		if err != nil {
 			return err
