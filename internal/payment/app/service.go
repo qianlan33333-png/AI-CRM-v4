@@ -58,7 +58,7 @@ type Store interface {
 	ListRefundsForPayment(context.Context, domain.Provider, string, int32, int32) ([]paymentport.RefundProjection, int64, error)
 	ListEffectBindings(context.Context, domain.Provider, string) ([]paymentport.EffectProjection, error)
 	UpdatePaymentSettlement(context.Context, domain.Payment, string, string) (domain.Payment, error)
-	UpdateRefundSettlement(context.Context, domain.Refund, string, string) (domain.Refund, error)
+	UpdateRefundSettlement(context.Context, domain.Refund, string, string, time.Time) (domain.Refund, error)
 	GetPaymentByMerchant(context.Context, string, bool) (domain.Payment, error)
 	GetRefundByNumber(context.Context, string, bool) (domain.Refund, error)
 	ClaimCallback(context.Context, string, [32]byte, [32]byte, string, string, int64) (bool, error)
@@ -879,7 +879,9 @@ func (s *Service) ReconcileShopRefund(ctx context.Context, refundID int64) (doma
 	if err != nil {
 		return domain.Refund{}, paymentport.ErrUnavailable
 	}
-	if query.AfterSaleID != current.ProviderRefundReference || query.ProviderOrderID != material.ProviderOrderID || query.ProductID != material.ProductID || query.SKUID != material.SKUID || query.Count != material.RefundCount || query.AmountMinor != current.AmountMinor || query.Currency != "CNY" || !effectport.ValidDigest(query.EvidenceDigest) || !effectport.ValidDigest(query.ProviderRefundDigest) || query.OccurredAt.IsZero() {
+	providerOccurredAt := query.OccurredAt
+	query.OccurredAt = canonicalProviderOccurredAt(query.OccurredAt)
+	if query.AfterSaleID != current.ProviderRefundReference || query.ProviderOrderID != material.ProviderOrderID || query.ProductID != material.ProductID || query.SKUID != material.SKUID || query.Count != material.RefundCount || query.AmountMinor != current.AmountMinor || query.Currency != "CNY" || !effectport.ValidDigest(query.EvidenceDigest) || !effectport.ValidDigest(query.ProviderRefundDigest) || current.ValidateVerifiedOccurrence(providerOccurredAt) != nil {
 		return domain.Refund{}, paymentport.ErrConflict
 	}
 	outcome := "pending"
@@ -898,17 +900,24 @@ func (s *Service) ReconcileShopRefund(ctx context.Context, refundID int64) (doma
 		if locked.ProviderRefundReference != query.AfterSaleID || (locked.Status != domain.RefundEffectAccepted && locked.Status != domain.RefundOutcomeUnknown) {
 			return paymentport.ErrConflict
 		}
+		lockedMaterial, inner := s.store.GetShopRefundMaterial(tx, locked.ID)
+		if inner != nil {
+			return inner
+		}
+		if lockedMaterial.ProviderOrderID != query.ProviderOrderID || lockedMaterial.ProductID != query.ProductID || lockedMaterial.SKUID != query.SKUID || lockedMaterial.RefundCount != query.Count || locked.AmountMinor != query.AmountMinor || locked.ValidateVerifiedOccurrence(providerOccurredAt) != nil {
+			return paymentport.ErrConflict
+		}
 		_, inner = s.store.RecordReconciliation(tx, locked.ID, query.EvidenceDigest, outcome, s.now().UTC())
 		if inner != nil || outcome != "refunded" {
 			current = locked
 			return inner
 		}
-		locked, inner = locked.Complete(locked.Version, domain.RefundCompleted, query.OccurredAt)
+		locked, inner = locked.CompleteVerifiedFact(locked.Version, domain.RefundCompleted, providerOccurredAt, s.now().UTC())
 		if inner != nil {
 			return inner
 		}
 		receiptKey := "reconcile:" + string(query.EvidenceDigest)
-		current, inner = s.store.UpdateRefundSettlement(tx, locked, string(query.ProviderRefundDigest), receiptKey)
+		current, inner = s.store.UpdateRefundSettlement(tx, locked, string(query.ProviderRefundDigest), receiptKey, query.OccurredAt)
 		if inner != nil {
 			return inner
 		}
@@ -1142,7 +1151,7 @@ func (s *Service) ReconcileWeChatPayRefund(ctx context.Context, refundID int64) 
 			return paymentport.ErrConflict
 		}
 		payment, inner = s.store.GetPayment(tx, current.PaymentID, false)
-		if inner == nil && payment.Historical {
+		if inner == nil && (payment.Historical || payment.Provider != domain.ProviderWeChatPay) {
 			return paymentport.ErrConflict
 		}
 		return inner
@@ -1154,7 +1163,9 @@ func (s *Service) ReconcileWeChatPayRefund(ctx context.Context, refundID int64) 
 	if err != nil {
 		return domain.Refund{}, paymentport.ErrUnavailable
 	}
-	if query.RefundNo != current.RefundNo || query.AmountMinor != current.AmountMinor || query.TotalMinor != payment.AmountMinor || query.Currency != payment.Currency || !effectport.ValidDigest(query.EvidenceDigest) || query.OccurredAt.IsZero() {
+	providerOccurredAt := query.OccurredAt
+	query.OccurredAt = canonicalProviderOccurredAt(query.OccurredAt)
+	if query.RefundNo != current.RefundNo || query.AmountMinor != current.AmountMinor || query.TotalMinor != payment.AmountMinor || query.Currency != payment.Currency || !effectport.ValidDigest(query.EvidenceDigest) || !matchesVerifiedRefundPayment(payment, query.MerchantOrderNo, query.TransactionReference, string(effectport.Hash("wechatpay.transaction", query.TransactionReference))) || current.ValidateVerifiedOccurrence(providerOccurredAt) != nil {
 		return domain.Refund{}, paymentport.ErrConflict
 	}
 	outcome := "pending"
@@ -1172,6 +1183,14 @@ func (s *Service) ReconcileWeChatPayRefund(ctx context.Context, refundID int64) 
 		if inner != nil {
 			return inner
 		}
+		lockedPayment, inner := s.store.GetPayment(tx, locked.PaymentID, false)
+		if inner != nil {
+			return inner
+		}
+		if locked.Provider != domain.ProviderWeChatPay || lockedPayment.Provider != domain.ProviderWeChatPay || !matchesVerifiedRefundPayment(lockedPayment, query.MerchantOrderNo, query.TransactionReference, string(effectport.Hash("wechatpay.transaction", query.TransactionReference))) || locked.ValidateVerifiedOccurrence(providerOccurredAt) != nil {
+			return paymentport.ErrConflict
+		}
+		payment = lockedPayment
 		_, inner = s.store.RecordReconciliation(tx, locked.ID, query.EvidenceDigest, outcome, s.now().UTC())
 		if inner != nil || outcome == "pending" || locked.Status == domain.RefundCompleted || locked.Status == domain.RefundFinalFailed {
 			current = locked
@@ -1181,12 +1200,12 @@ func (s *Service) ReconcileWeChatPayRefund(ctx context.Context, refundID int64) 
 		if outcome == "final_failed" {
 			next = domain.RefundFinalFailed
 		}
-		locked, inner = locked.Complete(locked.Version, next, query.OccurredAt)
+		locked, inner = locked.CompleteVerifiedFact(locked.Version, next, providerOccurredAt, s.now().UTC())
 		if inner != nil {
 			return inner
 		}
 		receiptKey := "reconcile:" + string(query.EvidenceDigest)
-		current, inner = s.store.UpdateRefundSettlement(tx, locked, string(query.RefundDigest), receiptKey)
+		current, inner = s.store.UpdateRefundSettlement(tx, locked, string(query.RefundDigest), receiptKey, query.OccurredAt)
 		if inner != nil {
 			return inner
 		}
@@ -1294,12 +1313,14 @@ func (s *Service) ReconcileAlipayRefund(ctx context.Context, refundID int64) (do
 	if err != nil {
 		return domain.Refund{}, paymentport.ErrUnavailable
 	}
-	if query.MerchantOrderNo != payment.MerchantOrderNo || query.RefundNo != current.RefundNo || query.Currency != payment.Currency || !effectport.ValidDigest(query.EvidenceDigest) || query.OccurredAt.IsZero() {
+	providerOccurredAt := query.OccurredAt
+	query.OccurredAt = canonicalProviderOccurredAt(query.OccurredAt)
+	if query.MerchantOrderNo != payment.MerchantOrderNo || query.RefundNo != current.RefundNo || query.Currency != payment.Currency || !effectport.ValidDigest(query.EvidenceDigest) || !matchesVerifiedRefundPayment(payment, query.MerchantOrderNo, query.TradeNo, string(effectport.Hash("alipay.transaction", query.TradeNo))) || current.ValidateVerifiedOccurrence(providerOccurredAt) != nil {
 		return domain.Refund{}, paymentport.ErrConflict
 	}
 	outcome := "pending"
 	if query.Status == "REFUND_SUCCESS" {
-		if query.AmountMinor != current.AmountMinor || query.TotalMinor != payment.AmountMinor || !effectport.ValidDigest(query.RefundDigest) || query.TradeNo == "" || string(effectport.Hash("alipay.transaction", query.TradeNo)) != payment.ProviderTransactionDigest || query.RefundDigest != effectport.Hash("alipay.refund", current.RefundNo, query.TradeNo) {
+		if query.AmountMinor != current.AmountMinor || query.TotalMinor != payment.AmountMinor || !effectport.ValidDigest(query.RefundDigest) || query.RefundDigest != effectport.Hash("alipay.refund", current.RefundNo, query.TradeNo) {
 			return domain.Refund{}, paymentport.ErrConflict
 		}
 		outcome = "refunded"
@@ -1309,16 +1330,24 @@ func (s *Service) ReconcileAlipayRefund(ctx context.Context, refundID int64) (do
 		if inner != nil {
 			return inner
 		}
+		lockedPayment, inner := s.store.GetPayment(tx, locked.PaymentID, false)
+		if inner != nil {
+			return inner
+		}
+		if locked.Provider != domain.ProviderAlipay || lockedPayment.Provider != domain.ProviderAlipay || !matchesVerifiedRefundPayment(lockedPayment, query.MerchantOrderNo, query.TradeNo, string(effectport.Hash("alipay.transaction", query.TradeNo))) || locked.ValidateVerifiedOccurrence(providerOccurredAt) != nil {
+			return paymentport.ErrConflict
+		}
+		payment = lockedPayment
 		if _, inner = s.store.RecordReconciliation(tx, locked.ID, query.EvidenceDigest, outcome, s.now().UTC()); inner != nil || outcome == "pending" || locked.Status == domain.RefundCompleted || locked.Status == domain.RefundFinalFailed {
 			current = locked
 			return inner
 		}
-		locked, inner = locked.Complete(locked.Version, domain.RefundCompleted, query.OccurredAt)
+		locked, inner = locked.CompleteVerifiedFact(locked.Version, domain.RefundCompleted, providerOccurredAt, s.now().UTC())
 		if inner != nil {
 			return inner
 		}
 		receipt := "reconcile:" + string(query.EvidenceDigest)
-		current, inner = s.store.UpdateRefundSettlement(tx, locked, string(query.RefundDigest), receipt)
+		current, inner = s.store.UpdateRefundSettlement(tx, locked, string(query.RefundDigest), receipt, query.OccurredAt)
 		if inner != nil {
 			return inner
 		}
@@ -1345,7 +1374,8 @@ func (s *Service) ApplyVerifiedCallback(ctx context.Context, callback paymentpro
 		(callback.Kind == "payment" && (!validProviderTransactionReference(callback.ProviderTransactionReference) || callback.ProviderTransactionDigest != string(effectport.Hash(providerDigestNamespace, callback.ProviderTransactionReference)))) {
 		return paymentport.ErrInvalid
 	}
-	if callback.Kind == "payment" {
+	providerOccurredAt := callback.OccurredAt
+	if callback.Kind == "payment" || callback.Kind == "refund" {
 		callback.OccurredAt = canonicalProviderOccurredAt(callback.OccurredAt)
 	}
 	return classify(s.uow.Within(ctx, func(tx context.Context) error {
@@ -1417,7 +1447,7 @@ func (s *Service) ApplyVerifiedCallback(ctx context.Context, callback paymentpro
 			return paymentport.ErrConflict
 		}
 		payment, err := s.store.GetPayment(tx, refund.PaymentID, false)
-		if err != nil || payment.Provider != callback.Provider || !s.callbackAppIDMatches(payment, callback.AppID) {
+		if err != nil || payment.Provider != callback.Provider || payment.Currency != callback.Currency || !s.callbackAppIDMatches(payment, callback.AppID) || !matchesVerifiedRefundPayment(payment, callback.MerchantOrderNo, callback.ProviderTransactionReference, callback.ProviderTransactionDigest) || refund.ValidateVerifiedOccurrence(providerOccurredAt) != nil {
 			return paymentport.ErrConflict
 		}
 		if !effectport.ValidDigest(effectport.Digest(callback.ProviderRefundDigest)) {
@@ -1437,12 +1467,12 @@ func (s *Service) ApplyVerifiedCallback(ctx context.Context, callback paymentpro
 		if err != nil || replay {
 			return err
 		}
-		refund, err = refund.Complete(refund.Version, domain.RefundCompleted, callback.OccurredAt)
+		refund, err = refund.CompleteVerifiedFact(refund.Version, domain.RefundCompleted, providerOccurredAt, s.now().UTC())
 		if err != nil {
 			return err
 		}
 		receiptKey := "callback:" + hexDigest(callback.EventDigest)
-		if _, err = s.store.UpdateRefundSettlement(tx, refund, callback.ProviderRefundDigest, receiptKey); err != nil {
+		if _, err = s.store.UpdateRefundSettlement(tx, refund, callback.ProviderRefundDigest, receiptKey, callback.OccurredAt); err != nil {
 			return err
 		}
 		_, err = s.orders.SettlePaymentWithin(tx, orderport.PaymentSettlementCommand{OrderID: payment.OrderID, RefundedDelta: refund.AmountMinor, OccurredAt: callback.OccurredAt, ReceiptKey: receiptKey})

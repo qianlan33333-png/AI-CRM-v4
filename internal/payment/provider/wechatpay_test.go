@@ -276,7 +276,7 @@ func TestSignedExactPaymentAndRefundReconciliationQueries(t *testing.T) {
 	now := time.Date(2026, 9, 3, 5, 0, 0, 0, time.UTC)
 	responses := []string{
 		`{"appid":"app","mchid":"mch","payer":{"openid":"synthetic-openid"},"out_trade_no":"order-1","transaction_id":"tx-1","trade_state":"SUCCESS","success_time":"2026-09-03T04:59:00Z","amount":{"total":99,"currency":"CNY"}}`,
-		`{"refund_id":"provider-refund-1","out_refund_no":"refund-1","status":"SUCCESS","success_time":"2026-09-03T04:59:30Z","amount":{"refund":20,"total":99,"currency":"CNY"}}`,
+		`{"refund_id":"provider-refund-1","out_refund_no":"refund-1","transaction_id":"tx-1","out_trade_no":"order-1","status":"SUCCESS","success_time":"2026-09-03T04:59:30Z","amount":{"refund":20,"total":99,"currency":"CNY"}}`,
 		`{"appid":"app","mchid":"other-merchant","out_trade_no":"order-1","transaction_id":"tx-1","trade_state":"SUCCESS","success_time":"2026-09-03T04:59:00Z","amount":{"total":99,"currency":"CNY"}}`,
 	}
 	calls := 0
@@ -300,11 +300,23 @@ func TestSignedExactPaymentAndRefundReconciliationQueries(t *testing.T) {
 		t.Fatalf("payment=%+v err=%v", payment, err)
 	}
 	refund, err := provider.QueryRefund(context.Background(), "refund-1")
-	if err != nil || refund.Status != "SUCCESS" || refund.AmountMinor != 20 || refund.TotalMinor != 99 || !effectport.ValidDigest(refund.RefundDigest) || calls != 2 {
+	if err != nil || refund.Status != "SUCCESS" || refund.MerchantOrderNo != "order-1" || refund.TransactionReference != "tx-1" || refund.AmountMinor != 20 || refund.TotalMinor != 99 || !effectport.ValidDigest(refund.RefundDigest) || calls != 2 {
 		t.Fatalf("refund=%+v calls=%d err=%v", refund, calls, err)
 	}
 	if _, err = provider.QueryPayment(context.Background(), "order-1"); !errors.Is(err, ErrInvalidResponse) || calls != 3 {
 		t.Fatalf("different merchant response err=%v calls=%d", err, calls)
+	}
+}
+
+func TestDecodeWeChatPayRefundQueryRequiresOriginalTransactionFields(t *testing.T) {
+	observedAt := time.Date(2026, 10, 7, 8, 0, 0, 0, time.UTC)
+	body := []byte(`{"refund_id":"wx-refund-1","out_refund_no":"refund-1","transaction_id":"wx-transaction-1","out_trade_no":"merchant-order-1","status":"SUCCESS","success_time":"2026-10-07T07:59:00Z","amount":{"refund":20,"total":99,"currency":"CNY"}}`)
+	query, err := decodeWeChatPayRefundQuery("refund-1", body, observedAt)
+	if err != nil || query.MerchantOrderNo != "merchant-order-1" || query.TransactionReference != "wx-transaction-1" || query.RefundNo != "refund-1" || query.Status != "SUCCESS" {
+		t.Fatalf("query=%+v err=%v", query, err)
+	}
+	if _, err = decodeWeChatPayRefundQuery("refund-1", []byte(`{"refund_id":"wx-refund-1","out_refund_no":"refund-1","status":"SUCCESS","success_time":"2026-10-07T07:59:00Z","amount":{"refund":20,"total":99,"currency":"CNY"}}`), observedAt); !errors.Is(err, ErrInvalidResponse) {
+		t.Fatalf("response without original transaction binding err=%v", err)
 	}
 }
 

@@ -180,6 +180,52 @@ func (r Refund) Complete(expected int64, status RefundStatus, now time.Time) (Re
 	r.UpdatedAt = now.UTC()
 	return r, nil
 }
+
+// ValidateVerifiedOccurrence checks a Provider fact against the Refund's
+// creation time at the precision available in that fact. Timestamp values
+// with no fractional component are second-precision facts; facts with a
+// fractional component use PostgreSQL's persisted microsecond precision.
+func (r Refund) ValidateVerifiedOccurrence(occurredAt time.Time) error {
+	if occurredAt.IsZero() || r.CreatedAt.IsZero() {
+		return ErrTransition
+	}
+	precision := time.Microsecond
+	if occurredAt.Nanosecond() == 0 {
+		precision = time.Second
+	}
+	if occurredAt.UTC().Truncate(precision).Before(r.CreatedAt.UTC().Truncate(precision)) {
+		return ErrTransition
+	}
+	return nil
+}
+
+// CompleteVerifiedFact applies a terminal Provider fact without confusing
+// its immutable occurrence time with local state-processing time. UpdatedAt
+// follows a non-regressing processing clock, while occurredAt is validated
+// and retained by the caller for the settlement audit and Order fact.
+func (r Refund) CompleteVerifiedFact(expected int64, status RefundStatus, occurredAt, processedAt time.Time) (Refund, error) {
+	if expected != r.Version {
+		return Refund{}, ErrVersion
+	}
+	if processedAt.IsZero() || status != RefundCompleted && status != RefundFinalFailed {
+		return Refund{}, ErrTransition
+	}
+	if r.Status != RefundEffectAccepted && r.Status != RefundOutcomeUnknown {
+		return Refund{}, ErrTransition
+	}
+	if err := r.ValidateVerifiedOccurrence(occurredAt); err != nil {
+		return Refund{}, err
+	}
+	processedAt = processedAt.UTC()
+	if processedAt.Before(r.UpdatedAt) {
+		processedAt = r.UpdatedAt.UTC()
+	}
+	r.Status = status
+	r.Version++
+	r.UpdatedAt = processedAt
+	return r, nil
+}
+
 func validEffectID(value string) bool {
 	if !strings.HasPrefix(value, "eer_") || len(value) < 5 {
 		return false

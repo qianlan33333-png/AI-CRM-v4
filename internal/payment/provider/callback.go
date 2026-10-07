@@ -51,7 +51,7 @@ type CallbackResult struct {
 	MerchantOrderNo, RefundNo    string
 	AppID                        string
 	ProviderTransactionDigest    string
-	ProviderTransactionReference string // decrypted in memory; passed only to Order's same-UoW paid fact
+	ProviderTransactionReference string // verified original transaction reference, used by same-UoW binding and Order payment settlement
 	ProviderRefundDigest         string
 	AmountMinor                  int64
 	Currency                     string
@@ -147,10 +147,12 @@ func (verifier *CallbackVerifier) Verify(_ context.Context, body []byte, headers
 		result.ProviderTransactionReference = value.TransactionID
 		result.ProviderTransactionDigest = string(effectport.Hash("wechatpay.transaction", value.TransactionID))
 	case "REFUND.SUCCESS":
-		if value.RefundStatus != "SUCCESS" || value.OutRefundNo == "" || value.RefundID == "" || value.Amount.Refund < 1 {
+		if value.RefundStatus != "SUCCESS" || value.OutTradeNo == "" || value.TransactionID == "" || value.OutRefundNo == "" || value.RefundID == "" || value.Amount.Refund < 1 {
 			return CallbackResult{}, invalidCallback("refund_resource")
 		}
 		result.Kind, result.RefundNo, result.AmountMinor = "refund", value.OutRefundNo, value.Amount.Refund
+		result.ProviderTransactionReference = value.TransactionID
+		result.ProviderTransactionDigest = string(effectport.Hash("wechatpay.transaction", value.TransactionID))
 		result.ProviderRefundDigest = string(effectport.Hash("wechatpay.refund", value.RefundID))
 	default:
 		return CallbackResult{}, invalidCallback("event_type")

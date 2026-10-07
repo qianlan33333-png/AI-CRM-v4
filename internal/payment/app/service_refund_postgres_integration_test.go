@@ -184,7 +184,7 @@ func testPostgreSQLRefundSerializesNewKeysPerPayment(t *testing.T, provider, cha
 		if inner != nil {
 			return inner
 		}
-		_, inner = repository.UpdateRefundSettlement(tx, terminal, string(effectport.Hash("fixture-terminal-refund", accepted.refund.RefundNo)), "fixture-terminal-refund")
+		_, inner = repository.UpdateRefundSettlement(tx, terminal, string(effectport.Hash("fixture-terminal-refund", accepted.refund.RefundNo)), "fixture-terminal-refund", terminal.UpdatedAt)
 		return inner
 	}); err != nil {
 		t.Fatal(err)
@@ -212,7 +212,9 @@ func TestPostgreSQLRefundQueryBeforeCallbackKeepsOneSettlement(t *testing.T) {
 	if err = pool.QueryRow(ctx, `INSERT INTO orders(provider,source_system,source_key,merchant_order_no,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,record_origin,effect_eligible,created_at,updated_at) VALUES('wechat_pay','refund-callback-order','refund-callback-order-1','M-refund-query-first',11,11,1000,'CNY','paid','native',true,$1,$1) RETURNING id`, now).Scan(&orderID); err != nil {
 		t.Fatal(err)
 	}
-	if err = pool.QueryRow(ctx, `INSERT INTO payments(order_id,provider,payment_channel,merchant_order_no,payer_identity_id,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,version,created_at,updated_at) VALUES($1,'wechat_pay','mini_program','M-refund-query-first',4,11,11,1000,'CNY','paid',1,$2,$2) RETURNING id`, orderID, now).Scan(&paymentID); err != nil {
+	transactionReference := "tx-refund-query-first"
+	transactionDigest := effectport.Hash("wechatpay.transaction", transactionReference)
+	if err = pool.QueryRow(ctx, `INSERT INTO payments(order_id,provider,payment_channel,merchant_order_no,payer_identity_id,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,version,provider_transaction_reference,provider_transaction_digest,created_at,updated_at) VALUES($1,'wechat_pay','mini_program','M-refund-query-first',4,11,11,1000,'CNY','paid',1,$2,$3,$4,$4) RETURNING id`, orderID, transactionReference, transactionDigest, now).Scan(&paymentID); err != nil {
 		t.Fatal(err)
 	}
 	if err = pool.QueryRow(ctx, `INSERT INTO payment_refunds(payment_id,provider,refund_no,amount_minor,reason,status,version,created_at,updated_at) VALUES($1,'wechat_pay','R-refund-query-first',300,'fixture refund','effect_accepted',2,$2,$2) RETURNING id`, paymentID, now).Scan(&refundID); err != nil {
@@ -222,7 +224,7 @@ func TestPostgreSQLRefundQueryBeforeCallbackKeepsOneSettlement(t *testing.T) {
 	orders := &postgresOrderSettlementRecorder{}
 	service := NewService(uow, paymentstore.NewPostgreSQL(), orders, sessionStub{}, postgresRefundEffects{})
 	if err = service.SetWeChatPayReconciler(payReconcilerStub{refund: paymentport.WeChatPayRefundQuery{
-		RefundNo: "R-refund-query-first", Currency: "CNY", Status: "SUCCESS", AmountMinor: 300, TotalMinor: 1000,
+		MerchantOrderNo: "M-refund-query-first", TransactionReference: transactionReference, RefundNo: "R-refund-query-first", Currency: "CNY", Status: "SUCCESS", AmountMinor: 300, TotalMinor: 1000,
 		OccurredAt: now.Add(time.Minute), EvidenceDigest: effectport.Hash("wechatpay.refund.query", "R-refund-query-first"), RefundDigest: providerDigest,
 	}}); err != nil {
 		t.Fatal(err)
@@ -231,7 +233,7 @@ func TestPostgreSQLRefundQueryBeforeCallbackKeepsOneSettlement(t *testing.T) {
 		t.Fatalf("provider query settlement: %v", err)
 	}
 	callback := paymentprovider.CallbackResult{
-		Kind: "refund", RefundNo: "R-refund-query-first", AmountMinor: 300, Currency: "CNY", OccurredAt: now.Add(time.Minute),
+		Kind: "refund", MerchantOrderNo: "M-refund-query-first", RefundNo: "R-refund-query-first", ProviderTransactionReference: transactionReference, ProviderTransactionDigest: string(transactionDigest), AmountMinor: 300, Currency: "CNY", OccurredAt: now.Add(time.Minute),
 		ProviderRefundDigest: string(providerDigest), EventDigest: [32]byte{7}, BodyDigest: [32]byte{8},
 	}
 	if err = service.ApplyVerifiedCallback(ctx, callback); err != nil {
@@ -276,7 +278,7 @@ func TestPostgreSQLAlipayRefundQueryBeforeCallbackKeepsOneSettlement(t *testing.
 	if err = pool.QueryRow(ctx, `INSERT INTO payment_refunds(payment_id,provider,refund_no,amount_minor,reason,status,version,created_at,updated_at) VALUES($1,'alipay','R-refund-query-first',300,'fixture refund','effect_accepted',2,$2,$2) RETURNING id`, paymentID, now).Scan(&refundID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, `UPDATE payments SET provider_transaction_digest=$1 WHERE id=$2`, string(effectport.Hash("alipay.transaction", "ALI-QUERY-FIRST")), paymentID); err != nil {
+	if _, err = pool.Exec(ctx, `UPDATE payments SET provider_transaction_reference=$1,provider_transaction_digest=$2 WHERE id=$3`, "ALI-QUERY-FIRST", string(effectport.Hash("alipay.transaction", "ALI-QUERY-FIRST")), paymentID); err != nil {
 		t.Fatal(err)
 	}
 	providerDigest := effectport.Hash("alipay.refund", "R-refund-query-first", "ALI-QUERY-FIRST")
@@ -294,7 +296,9 @@ func TestPostgreSQLAlipayRefundQueryBeforeCallbackKeepsOneSettlement(t *testing.
 		}
 	}
 	callback := paymentprovider.CallbackResult{
-		Provider: domain.ProviderAlipay, Kind: "refund", RefundNo: "R-refund-query-first", AmountMinor: 300, Currency: "CNY", OccurredAt: now.Add(time.Minute),
+		Provider: domain.ProviderAlipay, Kind: "refund", MerchantOrderNo: "M-refund-query-first", RefundNo: "R-refund-query-first",
+		ProviderTransactionReference: "ALI-QUERY-FIRST", ProviderTransactionDigest: string(effectport.Hash("alipay.transaction", "ALI-QUERY-FIRST")),
+		AmountMinor: 300, Currency: "CNY", OccurredAt: now.Add(time.Minute),
 		ProviderRefundDigest: string(providerDigest), EventDigest: [32]byte{7}, BodyDigest: [32]byte{8},
 	}
 	if err = service.ApplyVerifiedCallback(ctx, callback); err != nil {

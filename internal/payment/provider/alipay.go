@@ -306,7 +306,7 @@ func (a *Alipay) QueryRefund(ctx context.Context, merchantOrderNo, refundNo stri
 	if !a.Enabled() || !validAlipayReference(merchantOrderNo) || !validAlipayReference(refundNo) {
 		return paymentport.AlipayRefundQuery{}, ErrInvalidMaterial
 	}
-	result, err := a.client.TradeFastPayRefundQuery(ctx, alipay.TradeFastPayRefundQuery{OutTradeNo: merchantOrderNo, OutRequestNo: refundNo})
+	result, err := a.client.TradeFastPayRefundQuery(ctx, alipayRefundQueryRequest(merchantOrderNo, refundNo))
 	if err != nil || result == nil || !result.IsSuccess() || (result.OutTradeNo != "" && result.OutTradeNo != merchantOrderNo) || (result.OutRequestNo != "" && result.OutRequestNo != refundNo) {
 		return paymentport.AlipayRefundQuery{}, ErrInvalidResponse
 	}
@@ -325,15 +325,28 @@ func (a *Alipay) QueryRefund(ctx context.Context, merchantOrderNo, refundNo stri
 	if err != nil || query.AmountMinor > query.TotalMinor {
 		return paymentport.AlipayRefundQuery{}, ErrInvalidResponse
 	}
-	if result.GMTRefundPay != "" {
-		occurred, parseErr := time.ParseInLocation("2006-01-02 15:04:05", result.GMTRefundPay, time.FixedZone("CST", 8*60*60))
-		if parseErr != nil {
-			return paymentport.AlipayRefundQuery{}, ErrInvalidResponse
-		}
-		query.OccurredAt = occurred.UTC()
+	occurred, parseErr := parseAlipayRefundPayTime(result.GMTRefundPay)
+	if parseErr != nil {
+		return paymentport.AlipayRefundQuery{}, ErrInvalidResponse
 	}
+	query.OccurredAt = occurred
 	query.RefundDigest = effectport.Hash("alipay.refund", refundNo, result.TradeNo)
 	return query, nil
+}
+
+func parseAlipayRefundPayTime(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, ErrInvalidResponse
+	}
+	occurred, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.FixedZone("CST", 8*60*60))
+	if err != nil {
+		return time.Time{}, ErrInvalidResponse
+	}
+	return occurred.UTC(), nil
+}
+
+func alipayRefundQueryRequest(merchantOrderNo, refundNo string) alipay.TradeFastPayRefundQuery {
+	return alipay.TradeFastPayRefundQuery{OutTradeNo: merchantOrderNo, OutRequestNo: refundNo}
 }
 
 func validAlipayReference(value string) bool {
@@ -381,20 +394,24 @@ func (a *Alipay) VerifyValues(ctx context.Context, values url.Values) (CallbackR
 	}
 	occurred := time.Now().UTC()
 	paymentTimeUnknown := kind == "payment"
-	timestampKeys := []string{"gmt_payment", "gmt_refund", "notify_time"}
 	if kind == "refund" {
-		// The payment event time can predate refund acceptance. Refund callbacks
-		// use their own event time, then the signed notification time fallback.
-		timestampKeys = []string{"gmt_refund", "notify_time"}
-	}
-	for _, key := range timestampKeys {
-		if raw := values.Get(key); raw != "" {
-			if parsed, parseErr := time.ParseInLocation("2006-01-02 15:04:05", raw, time.FixedZone("CST", 8*60*60)); parseErr == nil {
-				occurred = parsed.UTC()
-				if kind == "payment" && key == "gmt_payment" {
-					paymentTimeUnknown = false
+		// Prefer the signed refund time. The signed notification time is the
+		// only available Provider timestamp fallback; never substitute local
+		// processing time for a verified refund fact.
+		occurred, err = parseAlipayRefundCallbackTime(values)
+		if err != nil {
+			return CallbackResult{}, ErrInvalidCallback
+		}
+	} else {
+		for _, key := range []string{"gmt_payment", "gmt_refund", "notify_time"} {
+			if raw := values.Get(key); raw != "" {
+				if parsed, parseErr := time.ParseInLocation("2006-01-02 15:04:05", raw, time.FixedZone("CST", 8*60*60)); parseErr == nil {
+					occurred = parsed.UTC()
+					if key == "gmt_payment" {
+						paymentTimeUnknown = false
+					}
+					break
 				}
-				break
 			}
 		}
 	}
@@ -406,6 +423,24 @@ func (a *Alipay) VerifyValues(ctx context.Context, values url.Values) (CallbackR
 		ProviderRefundDigest: string(effectport.Hash("alipay.refund", notification.RefundRequestNo, notification.TradeNo)),
 		AmountMinor:          minor, Currency: "CNY", OccurredAt: occurred, AlipayPaymentTimeUnknown: paymentTimeUnknown, Provider: paymentdomain.ProviderAlipay,
 	}, nil
+}
+
+func parseAlipayRefundCallbackTime(values url.Values) (time.Time, error) {
+	if values == nil {
+		return time.Time{}, ErrInvalidCallback
+	}
+	for _, key := range []string{"gmt_refund", "notify_time"} {
+		raw := values.Get(key)
+		if raw == "" {
+			continue
+		}
+		occurred, err := time.ParseInLocation("2006-01-02 15:04:05", raw, time.FixedZone("CST", 8*60*60))
+		if err != nil {
+			return time.Time{}, ErrInvalidCallback
+		}
+		return occurred.UTC(), nil
+	}
+	return time.Time{}, ErrInvalidCallback
 }
 
 func amountToMinor(value string) (int64, error) {

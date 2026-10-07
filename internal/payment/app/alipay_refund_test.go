@@ -24,10 +24,10 @@ func (s *alipayRefundReconcilerStub) QueryRefund(_ context.Context, orderNo, ref
 }
 
 func TestAlipayRefundReconciliationRequiresExactFactsAndSettlesOnce(t *testing.T) {
-	for _, name := range []string{"success", "pending", "wrong_order", "wrong_refund", "wrong_trade", "wrong_amount", "wrong_total", "wrong_digest"} {
+	for _, name := range []string{"success", "pending", "wrong_order", "wrong_refund", "wrong_trade", "missing_trade", "wrong_amount", "wrong_total", "wrong_digest"} {
 		t.Run(name, func(t *testing.T) {
 			now := time.Date(2026, 9, 26, 4, 0, 0, 0, time.UTC)
-			store := &storeStub{payment: domain.Payment{ID: 7, OrderID: 3, Provider: domain.ProviderAlipay, MerchantOrderNo: "M-ALI-7", AmountMinor: 990, Currency: "CNY", Status: domain.StatusPaid, ProviderTransactionDigest: string(effectport.Hash("alipay.transaction", "ALI-TRADE-7"))}, refund: domain.Refund{ID: 9, PaymentID: 7, Provider: domain.ProviderAlipay, RefundNo: "RF-ALI-9", AmountMinor: 120, Status: domain.RefundOutcomeUnknown, Version: 4, CreatedAt: now, UpdatedAt: now}}
+			store := &storeStub{payment: domain.Payment{ID: 7, OrderID: 3, Provider: domain.ProviderAlipay, MerchantOrderNo: "M-ALI-7", ProviderTransactionReference: "ALI-TRADE-7", AmountMinor: 990, Currency: "CNY", Status: domain.StatusPaid, ProviderTransactionDigest: string(effectport.Hash("alipay.transaction", "ALI-TRADE-7"))}, refund: domain.Refund{ID: 9, PaymentID: 7, Provider: domain.ProviderAlipay, RefundNo: "RF-ALI-9", AmountMinor: 120, Status: domain.RefundOutcomeUnknown, Version: 4, CreatedAt: now, UpdatedAt: now}}
 			orders := &recordingOrderStub{}
 			adapter := &alipayRefundReconcilerStub{query: paymentport.AlipayRefundQuery{MerchantOrderNo: "M-ALI-7", TradeNo: "ALI-TRADE-7", RefundNo: "RF-ALI-9", Currency: "CNY", Status: "REFUND_SUCCESS", AmountMinor: 120, TotalMinor: 990, OccurredAt: now.Add(time.Minute), EvidenceDigest: effectport.Hash("query", name), RefundDigest: effectport.Hash("alipay.refund", "RF-ALI-9", "ALI-TRADE-7")}}
 			switch name {
@@ -42,6 +42,8 @@ func TestAlipayRefundReconciliationRequiresExactFactsAndSettlesOnce(t *testing.T
 				adapter.query.RefundNo = "other"
 			case "wrong_trade":
 				adapter.query.TradeNo = "other"
+			case "missing_trade":
+				adapter.query.TradeNo = ""
 			case "wrong_amount":
 				adapter.query.AmountMinor = 121
 			case "wrong_total":
@@ -76,6 +78,9 @@ func TestAlipayRefundReconciliationRequiresExactFactsAndSettlesOnce(t *testing.T
 				}
 				if store.refund.Status != domain.RefundOutcomeUnknown || orders.settlementCount != 0 || store.refundSettlementUpdates != 0 {
 					t.Fatal("unverified result changed business state")
+				}
+				if name != "pending" && store.refundReconciliationCalls != 0 {
+					t.Fatalf("unbound or inconsistent query wrote reconciliation receipt: calls=%d", store.refundReconciliationCalls)
 				}
 			}
 		})

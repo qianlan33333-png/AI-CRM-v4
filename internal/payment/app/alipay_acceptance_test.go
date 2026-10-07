@@ -168,7 +168,7 @@ func TestAlipayAcceptanceVirtualRefundSettlementAndReplay(t *testing.T) {
 	now := time.Date(2026, 9, 23, 4, 0, 0, 0, time.UTC)
 	store := &storeStub{
 		callbackReplay: true,
-		payment:        domain.Payment{ID: 7, OrderID: 3, Provider: domain.ProviderAlipay, Channel: domain.ChannelAlipayPage, MerchantOrderNo: "merchant-test-1", AmountMinor: 990, Currency: "CNY", Status: domain.StatusPaid, Version: 3, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+		payment:        domain.Payment{ID: 7, OrderID: 3, Provider: domain.ProviderAlipay, Channel: domain.ChannelAlipayPage, MerchantOrderNo: "merchant-test-1", ProviderTransactionReference: "trade-test-1", ProviderTransactionDigest: string(effectport.Hash("alipay.transaction", "trade-test-1")), AmountMinor: 990, Currency: "CNY", Status: domain.StatusPaid, Version: 3, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
 		refund:         domain.Refund{ID: 9, PaymentID: 7, Provider: domain.ProviderAlipay, RefundNo: "refund-test-1", AmountMinor: 120, Status: domain.RefundOutcomeUnknown, Version: 4, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
 	}
 	orders := &recordingOrderStub{}
@@ -177,7 +177,8 @@ func TestAlipayAcceptanceVirtualRefundSettlementAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	callback := paymentprovider.CallbackResult{
-		Provider: domain.ProviderAlipay, Kind: "refund", AppID: "test-alipay-app",
+		Provider: domain.ProviderAlipay, Kind: "refund", AppID: "test-alipay-app", MerchantOrderNo: "merchant-test-1",
+		ProviderTransactionReference: "trade-test-1", ProviderTransactionDigest: string(effectport.Hash("alipay.transaction", "trade-test-1")),
 		RefundNo: "refund-test-1", AmountMinor: 120, Currency: "CNY", OccurredAt: now.Add(time.Minute),
 		ProviderRefundDigest: string(effectport.Hash("alipay.refund", "refund-test-1", "trade-test-1")),
 		EventDigest:          [32]byte{3}, BodyDigest: [32]byte{4},

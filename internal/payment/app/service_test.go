@@ -184,27 +184,29 @@ func (e *effectStub) AcceptAndQueueWithin(ctx context.Context, c effectport.Acce
 }
 
 type storeStub struct {
-	payment                  domain.Payment
-	checkoutPayments         map[domain.Provider]domain.Payment
-	paymentIntentSnapshot    map[string]any
-	refund                   domain.Refund
-	shopMaterial             paymentport.ShopRefundMaterial
-	bound                    bool
-	reserved                 int64
-	nonTerminalRefund        bool
-	nonTerminalRefundChecks  int
-	refundReconciliationID   int64
-	paymentReconciliationID  int64
-	callbackOutcome          string
-	callbackClaims           int
-	callbackReplay           bool
-	paymentSettlementUpdates int
-	refundSettlementUpdates  int
-	handoffCalls             int
-	recoveryRefund           domain.Refund
-	recoveryFound            bool
-	recoveryActor            string
-	recoveryKey              [32]byte
+	payment                    domain.Payment
+	checkoutPayments           map[domain.Provider]domain.Payment
+	paymentIntentSnapshot      map[string]any
+	refund                     domain.Refund
+	shopMaterial               paymentport.ShopRefundMaterial
+	bound                      bool
+	reserved                   int64
+	nonTerminalRefund          bool
+	nonTerminalRefundChecks    int
+	refundReconciliationID     int64
+	refundReconciliationCalls  int
+	paymentReconciliationID    int64
+	callbackOutcome            string
+	callbackClaims             int
+	callbackReplay             bool
+	paymentSettlementUpdates   int
+	refundSettlementUpdates    int
+	refundSettlementOccurredAt time.Time
+	handoffCalls               int
+	recoveryRefund             domain.Refund
+	recoveryFound              bool
+	recoveryActor              string
+	recoveryKey                [32]byte
 }
 
 func (s *storeStub) CreatePayment(_ context.Context, p domain.Payment, _, _ [32]byte, _ string) (domain.Payment, bool, error) {
@@ -271,6 +273,7 @@ func (s *storeStub) GetShopRefundMaterial(context.Context, int64) (paymentport.S
 }
 func (s *storeStub) RecordReconciliation(_ context.Context, id int64, _ effectport.Digest, _ string, _ time.Time) (bool, error) {
 	s.refundReconciliationID = id
+	s.refundReconciliationCalls++
 	return true, nil
 }
 func (s *storeStub) RecordPaymentReconciliation(_ context.Context, id int64, _ effectport.Digest, _ string, _ time.Time) (bool, error) {
@@ -287,8 +290,9 @@ func (s *storeStub) UpdatePaymentSettlement(_ context.Context, p domain.Payment,
 	s.payment = p
 	return p, nil
 }
-func (s *storeStub) UpdateRefundSettlement(_ context.Context, r domain.Refund, providerDigest, _ string) (domain.Refund, error) {
+func (s *storeStub) UpdateRefundSettlement(_ context.Context, r domain.Refund, providerDigest, _ string, occurredAt time.Time) (domain.Refund, error) {
 	s.refundSettlementUpdates++
+	s.refundSettlementOccurredAt = occurredAt
 	r.ProviderRefundDigest = providerDigest
 	s.refund = r
 	return r, nil
@@ -446,55 +450,99 @@ func TestVerifiedCallbackReplaysCanonicalPostgreSQLConfirmationTime(t *testing.T
 
 func TestVerifiedRefundCallbackCompletesUnknownOnceAndReplays(t *testing.T) {
 	now := time.Date(2026, 9, 14, 8, 0, 0, 0, time.UTC)
+	transactionReference := "tx-original-refund-callback"
+	providerOccurredAt := now.Add(-5 * time.Minute)
 	store := &storeStub{
 		callbackReplay: true,
-		payment:        domain.Payment{ID: 7, OrderID: 3, Provider: domain.ProviderWeChatPay, Channel: domain.ChannelMiniProgram, MerchantOrderNo: "M-refund-callback", AmountMinor: 1000, Currency: "CNY", Status: domain.StatusPaid, Version: 2, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
-		refund:         domain.Refund{ID: 9, PaymentID: 7, Provider: domain.ProviderWeChatPay, RefundNo: "R-refund-callback", AmountMinor: 300, Status: domain.RefundOutcomeUnknown, Version: 4, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+		payment:        domain.Payment{ID: 7, OrderID: 3, Provider: domain.ProviderWeChatPay, Channel: domain.ChannelMiniProgram, MerchantOrderNo: "M-refund-callback", ProviderTransactionReference: transactionReference, ProviderTransactionDigest: string(effectport.Hash("wechatpay.transaction", transactionReference)), AmountMinor: 1000, Currency: "CNY", Status: domain.StatusPaid, Version: 2, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+		refund:         domain.Refund{ID: 9, PaymentID: 7, Provider: domain.ProviderWeChatPay, RefundNo: "R-refund-callback", AmountMinor: 300, Status: domain.RefundOutcomeUnknown, Version: 4, CreatedAt: now.Add(-10 * time.Minute), UpdatedAt: now},
 	}
-	service := NewService(uowStub{}, store, &checkoutOrderStub{}, sessionStub{}, &effectStub{})
+	orders := &recordingOrderStub{}
+	service := NewService(uowStub{}, store, orders, sessionStub{}, &effectStub{})
+	service.now = func() time.Time { return now.Add(-time.Minute) }
 	callback := paymentprovider.CallbackResult{
-		Kind:                 "refund",
-		RefundNo:             "R-refund-callback",
-		AmountMinor:          300,
-		Currency:             "CNY",
-		OccurredAt:           now.Add(time.Minute),
-		EventDigest:          [32]byte{1},
-		BodyDigest:           [32]byte{2},
+		Kind: "refund", MerchantOrderNo: store.payment.MerchantOrderNo, RefundNo: "R-refund-callback",
+		ProviderTransactionReference: transactionReference, ProviderTransactionDigest: store.payment.ProviderTransactionDigest,
+		AmountMinor: 300, Currency: "CNY", OccurredAt: providerOccurredAt,
+		EventDigest: [32]byte{1}, BodyDigest: [32]byte{2},
 		ProviderRefundDigest: string(effectport.Hash("wechatpay.refund", "R-refund-callback")),
 	}
 	if err := service.ApplyVerifiedCallback(context.Background(), callback); err != nil {
 		t.Fatal(err)
 	}
-	if store.refund.Status != domain.RefundCompleted || store.refundSettlementUpdates != 1 || store.callbackClaims != 1 {
-		t.Fatalf("first callback refund=%+v updates=%d claims=%d", store.refund, store.refundSettlementUpdates, store.callbackClaims)
+	if store.refund.Status != domain.RefundCompleted || store.refundSettlementUpdates != 1 || store.callbackClaims != 1 || !store.refund.UpdatedAt.Equal(now) || !store.refundSettlementOccurredAt.Equal(canonicalProviderOccurredAt(providerOccurredAt)) || orders.settlementCount != 1 || !orders.settlement.OccurredAt.Equal(canonicalProviderOccurredAt(providerOccurredAt)) {
+		t.Fatalf("first callback refund=%+v updates=%d claims=%d audit_at=%s order=%+v", store.refund, store.refundSettlementUpdates, store.callbackClaims, store.refundSettlementOccurredAt, orders.settlement)
 	}
 	if err := service.ApplyVerifiedCallback(context.Background(), callback); err != nil {
 		t.Fatal(err)
 	}
-	if store.refund.Status != domain.RefundCompleted || store.refundSettlementUpdates != 1 || store.callbackClaims != 2 {
-		t.Fatalf("duplicate callback reapplied settlement: refund=%+v updates=%d claims=%d", store.refund, store.refundSettlementUpdates, store.callbackClaims)
+	if store.refund.Status != domain.RefundCompleted || store.refundSettlementUpdates != 1 || store.callbackClaims != 2 || orders.settlementCount != 1 {
+		t.Fatalf("duplicate callback reapplied settlement: refund=%+v updates=%d claims=%d order_updates=%d", store.refund, store.refundSettlementUpdates, store.callbackClaims, orders.settlementCount)
+	}
+}
+
+func TestVerifiedRefundCallbackRejectsWrongOriginalBindingBeforeReceipt(t *testing.T) {
+	now := time.Date(2026, 9, 14, 8, 0, 0, 0, time.UTC)
+	transactionReference := "tx-original-refund-binding"
+	digest := string(effectport.Hash("wechatpay.transaction", transactionReference))
+	for _, tc := range []struct {
+		name      string
+		orderNo   string
+		reference string
+		digest    string
+	}{
+		{name: "merchant_order", orderNo: "M-other", reference: transactionReference, digest: digest},
+		{name: "transaction_reference", orderNo: "M-refund-binding", reference: "tx-other", digest: string(effectport.Hash("wechatpay.transaction", "tx-other"))},
+		{name: "transaction_digest", orderNo: "M-refund-binding", reference: transactionReference, digest: string(effectport.Hash("other.transaction", transactionReference))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &storeStub{
+				payment: domain.Payment{ID: 7, OrderID: 3, Provider: domain.ProviderWeChatPay, MerchantOrderNo: "M-refund-binding", ProviderTransactionReference: transactionReference, ProviderTransactionDigest: digest, AmountMinor: 1000, Currency: "CNY", Status: domain.StatusPaid, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+				refund:  domain.Refund{ID: 9, PaymentID: 7, Provider: domain.ProviderWeChatPay, RefundNo: "R-refund-binding", AmountMinor: 300, Status: domain.RefundOutcomeUnknown, Version: 4, CreatedAt: now.Add(-time.Minute), UpdatedAt: now},
+			}
+			orders := &recordingOrderStub{}
+			service := NewService(uowStub{}, store, orders, sessionStub{}, &effectStub{})
+			callback := paymentprovider.CallbackResult{
+				Kind: "refund", MerchantOrderNo: tc.orderNo, RefundNo: store.refund.RefundNo,
+				ProviderTransactionReference: tc.reference, ProviderTransactionDigest: tc.digest,
+				AmountMinor: 300, Currency: "CNY", OccurredAt: now.Add(time.Second),
+				EventDigest: [32]byte{1}, BodyDigest: [32]byte{2},
+				ProviderRefundDigest: string(effectport.Hash("wechatpay.refund", "refund-id")),
+				Provider:             domain.ProviderWeChatPay,
+			}
+			if err := service.ApplyVerifiedCallback(context.Background(), callback); !errors.Is(err, paymentport.ErrConflict) {
+				t.Fatalf("mismatched binding err=%v", err)
+			}
+			if store.callbackClaims != 0 || store.refundSettlementUpdates != 0 || store.refund.Status != domain.RefundOutcomeUnknown || store.refund.Version != 4 || orders.settlementCount != 0 {
+				t.Fatalf("mismatched fact wrote state: claims=%d refund_updates=%d refund=%+v order_updates=%d", store.callbackClaims, store.refundSettlementUpdates, store.refund, orders.settlementCount)
+			}
+		})
 	}
 }
 
 func TestVerifiedRefundCallbackAfterReconciliationRecordsReplayWithoutSettlingAgain(t *testing.T) {
 	now := time.Date(2026, 9, 25, 8, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
-		name     string
-		provider domain.Provider
-		digest   string
+		name                 string
+		provider             domain.Provider
+		digest               string
+		transactionReference string
+		transactionDigest    string
 	}{
-		{name: "wechat", provider: domain.ProviderWeChatPay, digest: string(effectport.Hash("wechatpay.refund", "provider-refund-9"))},
-		{name: "alipay", provider: domain.ProviderAlipay, digest: string(effectport.Hash("alipay.refund", "R-refund-reconciled", "trade-9"))},
+		{name: "wechat", provider: domain.ProviderWeChatPay, digest: string(effectport.Hash("wechatpay.refund", "provider-refund-9")), transactionReference: "wx-trade-9", transactionDigest: string(effectport.Hash("wechatpay.transaction", "wx-trade-9"))},
+		{name: "alipay", provider: domain.ProviderAlipay, digest: string(effectport.Hash("alipay.refund", "R-refund-reconciled", "trade-9")), transactionReference: "trade-9", transactionDigest: string(effectport.Hash("alipay.transaction", "trade-9"))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &storeStub{
-				payment: domain.Payment{ID: 7, OrderID: 3, Provider: tc.provider, Channel: domain.ChannelMiniProgram, MerchantOrderNo: "M-refund-reconciled", AmountMinor: 1000, Currency: "CNY", Status: domain.StatusPaid, Version: 2, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+				payment: domain.Payment{ID: 7, OrderID: 3, Provider: tc.provider, Channel: domain.ChannelMiniProgram, MerchantOrderNo: "M-refund-reconciled", ProviderTransactionReference: tc.transactionReference, ProviderTransactionDigest: tc.transactionDigest, AmountMinor: 1000, Currency: "CNY", Status: domain.StatusPaid, Version: 2, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
 				refund:  domain.Refund{ID: 9, PaymentID: 7, Provider: tc.provider, RefundNo: "R-refund-reconciled", AmountMinor: 300, Status: domain.RefundCompleted, ProviderRefundDigest: tc.digest, Version: 5, CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
 			}
 			orders := &recordingOrderStub{}
 			service := NewService(uowStub{}, store, orders, sessionStub{}, &effectStub{})
 			callback := paymentprovider.CallbackResult{
-				Provider: tc.provider, Kind: "refund", RefundNo: store.refund.RefundNo, AmountMinor: store.refund.AmountMinor, Currency: "CNY", OccurredAt: now,
+				Provider: tc.provider, Kind: "refund", MerchantOrderNo: store.payment.MerchantOrderNo, RefundNo: store.refund.RefundNo,
+				ProviderTransactionReference: tc.transactionReference, ProviderTransactionDigest: tc.transactionDigest,
+				AmountMinor: store.refund.AmountMinor, Currency: "CNY", OccurredAt: now,
 				ProviderRefundDigest: tc.digest, EventDigest: [32]byte{7}, BodyDigest: [32]byte{8},
 			}
 			if err := service.ApplyVerifiedCallback(context.Background(), callback); err != nil {
@@ -745,12 +793,12 @@ func TestWeChatPayTerminalFailureClosesPaymentAndOrderAtomically(t *testing.T) {
 func TestWeChatPayClosedRefundReleasesReservationWithoutChangingOrder(t *testing.T) {
 	updatedAt := time.Date(2026, 9, 3, 1, 0, 0, 0, time.UTC)
 	store := &storeStub{
-		payment: domain.Payment{ID: 7, OrderID: 3, Provider: domain.ProviderWeChatPay, MerchantOrderNo: "M-7", AmountMinor: 1000, Currency: "CNY", Status: domain.StatusPaid, Version: 2, CreatedAt: updatedAt.Add(-time.Hour), UpdatedAt: updatedAt},
+		payment: domain.Payment{ID: 7, OrderID: 3, Provider: domain.ProviderWeChatPay, MerchantOrderNo: "M-7", ProviderTransactionReference: "tx-closed-refund-M-7", ProviderTransactionDigest: string(effectport.Hash("wechatpay.transaction", "tx-closed-refund-M-7")), AmountMinor: 1000, Currency: "CNY", Status: domain.StatusPaid, Version: 2, CreatedAt: updatedAt.Add(-time.Hour), UpdatedAt: updatedAt},
 		refund:  domain.Refund{ID: 9, PaymentID: 7, Provider: domain.ProviderWeChatPay, RefundNo: "R-9", AmountMinor: 500, Status: domain.RefundEffectAccepted, EffectID: "eer_9", Version: 2, CreatedAt: updatedAt.Add(-time.Minute), UpdatedAt: updatedAt},
 	}
 	orders := &recordingOrderStub{orderStub: orderStub{snapshot: nativeOrder()}}
 	service := NewService(uowStub{}, store, orders, sessionStub{}, &effectStub{})
-	if err := service.SetWeChatPayReconciler(payReconcilerStub{refund: paymentport.WeChatPayRefundQuery{RefundNo: "R-9", Currency: "CNY", Status: "CLOSED", AmountMinor: 500, TotalMinor: 1000, OccurredAt: updatedAt.Add(time.Minute), EvidenceDigest: effectport.Hash("refund-query", "closed-R-9")}}); err != nil {
+	if err := service.SetWeChatPayReconciler(payReconcilerStub{refund: paymentport.WeChatPayRefundQuery{MerchantOrderNo: "M-7", TransactionReference: "tx-closed-refund-M-7", RefundNo: "R-9", Currency: "CNY", Status: "CLOSED", AmountMinor: 500, TotalMinor: 1000, OccurredAt: updatedAt.Add(time.Minute), EvidenceDigest: effectport.Hash("refund-query", "closed-R-9")}}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := service.ReconcileWeChatPayRefund(context.Background(), 9)

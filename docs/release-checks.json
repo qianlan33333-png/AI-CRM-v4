@@ -1,234 +1,79 @@
 {
   "schema": 1,
-  "baseline_sha": "b74037c3c9dbd3a187338cb7ccc8c80435423c6e",
+  "baseline_sha": "55936a1cd3e5cec0a20ced02c89741f5867d9d87",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/product/store",
-      "test": "TestPostgreSQLMemberGridLegacyShareRemainsRevocableAfterArchive",
-      "postgres": true
+      "package": "./internal/payment/domain",
+      "test": "TestVerifiedRefundFactSeparatesOccurrenceFromMonotonicProcessingTime"
     },
     {
       "lane": "backend",
-      "package": "./internal/product/store",
-      "test": "TestPostgreSQLMemberGridReceiptNamespaceMatchesAuditAndOutbox",
-      "postgres": true
+      "package": "./internal/payment/domain",
+      "test": "TestVerifiedRefundFactUsesMicrosecondPrecisionWhenProviderSuppliesFraction"
     },
     {
       "lane": "backend",
-      "package": "./internal/product/store",
-      "test": "TestPostgreSQLMemberGridRejectsObjectSwapsAndStaleCollaboratorAccess",
-      "postgres": true
+      "package": "./internal/payment/app",
+      "test": "TestMatchesVerifiedRefundPaymentRequiresExactOriginalTransaction"
     },
     {
       "lane": "backend",
-      "package": "./internal/product/store",
-      "test": "TestPostgreSQLExternalPushLocalSaveKeepsActorEventNamespacesAligned",
-      "postgres": true
+      "package": "./internal/payment/app",
+      "test": "TestVerifiedRefundCallbackCompletesUnknownOnceAndReplays"
     },
     {
       "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestMemberGridPublicQueryRechecksRevocationBeforeResponding"
+      "package": "./internal/payment/app",
+      "test": "TestVerifiedRefundCallbackRejectsWrongOriginalBindingBeforeReceipt"
     },
     {
       "lane": "backend",
-      "package": "./internal/product/http",
-      "test": "TestMemberGridPublicBootstrapRechecksRevocationBeforeResponding"
+      "package": "./internal/payment/app",
+      "test": "TestVerifiedRefundCallbackAfterReconciliationRecordsReplayWithoutSettlingAgain"
     },
     {
       "lane": "backend",
-      "package": "./internal/coupon/store",
-      "test": "TestPostgreSQLCouponRuleMutationKeepsActorReceiptAndEventNamespacesAligned",
-      "postgres": true
+      "package": "./internal/payment/app",
+      "test": "TestAlipayAcceptanceVirtualRefundSettlementAndReplay"
     },
     {
       "lane": "backend",
-      "package": "./internal/coupon/http",
-      "test": "TestPublicCouponRecoveryBindingIsOptionalAndRejectsChangedSessionSol61"
+      "package": "./internal/payment/app",
+      "test": "TestAlipayRefundReconciliationRequiresExactFactsAndSettlesOnce"
     },
     {
       "lane": "backend",
-      "package": "./internal/coupon/http",
-      "test": "TestPublicCouponRecoveryOnlyHeaderIsStrictAndKeepsTrustedHolderSol61"
+      "package": "./internal/payment/app",
+      "test": "TestWeChatPayClosedRefundReleasesReservationWithoutChangingOrder"
     },
     {
       "lane": "backend",
-      "package": "./internal/survey/http",
-      "test": "TestOAuthCallbackRequiresInitiatingBrowserProof"
+      "package": "./internal/payment/app",
+      "test": "TestShopRefundReconciliationUsesRefundForeignKey"
     },
     {
       "lane": "backend",
-      "package": "./internal/survey/http",
-      "test": "TestOAuthParallelFlowsRetainOwnBrowserProof"
+      "package": "./internal/payment/provider",
+      "test": "TestDecodeWeChatPayRefundQueryRequiresOriginalTransactionFields"
     },
     {
       "lane": "backend",
-      "package": "./internal/survey/http",
-      "test": "TestOAuthParallelFlowResumeContextIsBoundToOwnState"
+      "package": "./internal/payment/provider",
+      "test": "TestAlipayRefundOccurrenceRequiresProviderTime"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralSol61CheckoutParticipationUsesPaymentLifecycle",
-      "postgres": true
+      "package": "./internal/payment/provider",
+      "test": "TestAlipayRefundQuerySDKRequestAndResponseFieldMapping"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralSol61RewardActiveParticipationCannotGoStale",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralSol61AdminAuditMatchesActorScopedReceipt",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralSol61RewardAfterCommittedReversalRejects",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLCouponSol61MergePeriodSessionFollowsCurrentVerifiedSubject",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSurveySuccessfulKeyAuthorizationClosure",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSurveySubjectReadPinsLineageUntilCommit",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLCustomerTimelineRetainsMergedHistory",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLReferralSol61MergedCustomerCannotJoinTwice",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSol61SettlementPricesRefundCommittedAfterSnapshot",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSol61QualificationRefundRecheckDeduplicatesSameSource",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSol61DelayedRefundAfterPaidKeepsPaidHistory",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSol61SettlementDoesNotInvertReceiverProjectionLocks",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSol61SettlementDoesNotInvertPromotionPolicyLocks",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLReleaseReadinessRequiresSurveyIdentitySubjectMigration",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestSol61PostgreSQLInflightGenerationCancelRetainsFactsWithoutReviewPlan",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLUnknownGenerationGenericReconcileIsExplicitConflict",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLExpiredAttemptsProjectAllRegisteredOutboundOwners",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLSettlementFailureDefersOriginalAttemptRecovery",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLPreflightErrorCannotDiscardQueuedEffect",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLFinalRiverAttemptAbruptExitPreservesRecovery",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLDiscardedAttemptRecoveryPreservesGuardedFacts",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestSol61PostgreSQLConcurrentDiscardedAttemptRecoveryRetriesOnlyOriginalJob",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/automation/store",
-      "test": "TestSol61PostgreSQLManualGenerationCompletionCannotReviveCancelledRun",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/automation/store",
-      "test": "TestSol61PostgreSQLUnknownGenerationCancellationRetainsUnknownAndCannotRevive",
-      "postgres": true
-    },
-    {
-      "lane": "frontend",
-      "path": "scripts/validate-openapi.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveySubmissionResume.test.mjs"
+      "package": "./internal/payment/provider",
+      "test": "TestAlipayAcceptanceSignedCallbackKindSpecificTimestamps"
     }
   ],
   "installed_checks": [
-    "commerce-readback",
-    "survey-recovery",
-    "effects-recovery"
+    "payment-defensive-readback"
   ]
 }

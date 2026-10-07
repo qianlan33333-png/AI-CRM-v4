@@ -55,6 +55,49 @@ func TestRefundPartialFullAndUnknown(t *testing.T) {
 	}
 }
 
+func TestVerifiedRefundFactSeparatesOccurrenceFromMonotonicProcessingTime(t *testing.T) {
+	createdAt := time.Date(2026, 10, 7, 8, 0, 0, 500_000_000, time.UTC)
+	unknownAt := createdAt.Add(5 * time.Minute)
+	refund := Refund{Status: RefundOutcomeUnknown, Version: 4, CreatedAt: createdAt, UpdatedAt: unknownAt}
+	providerOccurredAt := createdAt.Truncate(time.Second) // Provider fact has second precision.
+
+	completed, err := refund.CompleteVerifiedFact(refund.Version, RefundCompleted, providerOccurredAt, unknownAt.Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != RefundCompleted || completed.Version != refund.Version+1 || !completed.UpdatedAt.Equal(unknownAt) {
+		t.Fatalf("completed refund=%+v", completed)
+	}
+	if _, err = refund.Complete(refund.Version, RefundCompleted, providerOccurredAt); !errors.Is(err, ErrTransition) {
+		t.Fatalf("legacy strict completion moved UpdatedAt backward: %v", err)
+	}
+
+	if _, err = refund.CompleteVerifiedFact(refund.Version, RefundCompleted, time.Time{}, unknownAt.Add(time.Minute)); !errors.Is(err, ErrTransition) {
+		t.Fatalf("missing Provider occurrence accepted: %v", err)
+	}
+	if _, err = refund.CompleteVerifiedFact(refund.Version, RefundCompleted, createdAt.Add(-time.Second), unknownAt.Add(time.Minute)); !errors.Is(err, ErrTransition) {
+		t.Fatalf("Provider fact before refund creation accepted: %v", err)
+	}
+	if _, err = refund.CompleteVerifiedFact(refund.Version, RefundCompleted, providerOccurredAt, time.Time{}); !errors.Is(err, ErrTransition) {
+		t.Fatalf("missing processing clock accepted: %v", err)
+	}
+}
+
+func TestVerifiedRefundFactUsesMicrosecondPrecisionWhenProviderSuppliesFraction(t *testing.T) {
+	createdAt := time.Date(2026, 10, 7, 8, 0, 0, 123_456_000, time.UTC)
+	refund := Refund{Status: RefundEffectAccepted, Version: 2, CreatedAt: createdAt, UpdatedAt: createdAt}
+	processingAt := createdAt.Add(time.Minute)
+	occurredAt := createdAt.Add(500 * time.Nanosecond)
+
+	completed, err := refund.CompleteVerifiedFact(refund.Version, RefundCompleted, occurredAt, processingAt)
+	if err != nil || !completed.UpdatedAt.Equal(processingAt) {
+		t.Fatalf("completed=%+v err=%v", completed, err)
+	}
+	if _, err = refund.CompleteVerifiedFact(refund.Version, RefundCompleted, createdAt.Add(-time.Microsecond), processingAt); !errors.Is(err, ErrTransition) {
+		t.Fatalf("earlier microsecond fact accepted: %v", err)
+	}
+}
+
 func TestVerifiedAlipaySecondPrecisionIsNarrow(t *testing.T) {
 	at := time.Date(2026, 9, 30, 1, 2, 3, 0, time.UTC)
 	p := Payment{Provider: ProviderAlipay, Status: StatusAwaitingPayment, Version: 2, CreatedAt: at.Add(time.Microsecond), UpdatedAt: at.Add(999999 * time.Microsecond)}

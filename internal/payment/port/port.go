@@ -356,10 +356,11 @@ func (WeChatPayPaymentQuery) String() string   { return "WeChatPayPaymentQuery{i
 func (WeChatPayPaymentQuery) GoString() string { return "WeChatPayPaymentQuery{identity:[REDACTED]}" }
 
 type WeChatPayRefundQuery struct {
-	RefundNo, Currency, Status   string
-	AmountMinor, TotalMinor      int64
-	OccurredAt                   time.Time
-	EvidenceDigest, RefundDigest effectport.Digest
+	MerchantOrderNo, TransactionReference string
+	RefundNo, Currency, Status            string
+	AmountMinor, TotalMinor               int64
+	OccurredAt                            time.Time
+	EvidenceDigest, RefundDigest          effectport.Digest
 }
 
 type WeChatPayReconciler interface {

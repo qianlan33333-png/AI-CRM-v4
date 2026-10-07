@@ -373,21 +373,27 @@ func (provider *WeChatPay) QueryRefund(ctx context.Context, refundNo string) (pa
 		}
 		return paymentport.WeChatPayRefundQuery{}, ErrInvalidResponse
 	}
+	return decodeWeChatPayRefundQuery(refundNo, response.Body, provider.now())
+}
+
+func decodeWeChatPayRefundQuery(refundNo string, body []byte, observedAt time.Time) (paymentport.WeChatPayRefundQuery, error) {
 	var decoded struct {
-		RefundID    string `json:"refund_id"`
-		RefundNo    string `json:"out_refund_no"`
-		Status      string `json:"status"`
-		SuccessTime string `json:"success_time"`
-		Amount      struct {
+		RefundID      string `json:"refund_id"`
+		RefundNo      string `json:"out_refund_no"`
+		TransactionID string `json:"transaction_id"`
+		OutTradeNo    string `json:"out_trade_no"`
+		Status        string `json:"status"`
+		SuccessTime   string `json:"success_time"`
+		Amount        struct {
 			Refund   int64  `json:"refund"`
 			Total    int64  `json:"total"`
 			Currency string `json:"currency"`
 		} `json:"amount"`
 	}
-	if json.Unmarshal(response.Body, &decoded) != nil || decoded.RefundNo != refundNo || decoded.Amount.Refund < 1 || decoded.Amount.Total < decoded.Amount.Refund || decoded.Amount.Currency != "CNY" || !validRefundQueryStatus(decoded.Status) {
+	if json.Unmarshal(body, &decoded) != nil || decoded.RefundNo != refundNo || decoded.TransactionID == "" || decoded.OutTradeNo == "" || decoded.Amount.Refund < 1 || decoded.Amount.Total < decoded.Amount.Refund || decoded.Amount.Currency != "CNY" || !validRefundQueryStatus(decoded.Status) {
 		return paymentport.WeChatPayRefundQuery{}, ErrInvalidResponse
 	}
-	occurred := provider.now().UTC()
+	occurred := observedAt.UTC()
 	refundDigest := effectport.Digest("")
 	if decoded.Status == "SUCCESS" {
 		var parseErr error
@@ -397,7 +403,7 @@ func (provider *WeChatPay) QueryRefund(ctx context.Context, refundNo string) (pa
 		}
 		refundDigest = effectport.Hash("wechatpay.refund", decoded.RefundID)
 	}
-	return paymentport.WeChatPayRefundQuery{RefundNo: refundNo, Currency: decoded.Amount.Currency, Status: decoded.Status, AmountMinor: decoded.Amount.Refund, TotalMinor: decoded.Amount.Total, OccurredAt: occurred.UTC(), EvidenceDigest: effectport.Hash("wechatpay.refund.query", refundNo, hashBytes(response.Body)), RefundDigest: refundDigest}, nil
+	return paymentport.WeChatPayRefundQuery{MerchantOrderNo: decoded.OutTradeNo, TransactionReference: decoded.TransactionID, RefundNo: refundNo, Currency: decoded.Amount.Currency, Status: decoded.Status, AmountMinor: decoded.Amount.Refund, TotalMinor: decoded.Amount.Total, OccurredAt: occurred.UTC(), EvidenceDigest: effectport.Hash("wechatpay.refund.query", refundNo, hashBytes(body)), RefundDigest: refundDigest}, nil
 }
 
 func validPayQueryStatus(value string) bool {

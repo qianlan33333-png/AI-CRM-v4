@@ -191,18 +191,15 @@ func TestAlipayAcceptanceSignedCallbackKindSpecificTimestamps(t *testing.T) {
 	notifyFallback.Set("notify_id", "notify-kind-specific-refund-fallback-1")
 	verify(notifyFallback, "refund", wantNotifyAt)
 
-	// If neither refund time is usable, preserve receive-time fallback and do
-	// not substitute the original payment timestamp.
+	// If neither signed Provider timestamp is available, do not manufacture a
+	// refund occurrence time from local processing time.
 	receiveFallback := copyValues(refundValues)
 	delete(receiveFallback, "gmt_refund")
 	delete(receiveFallback, "notify_time")
 	receiveFallback.Set("notify_id", "notify-kind-specific-refund-receive-time-1")
 	sign(receiveFallback)
-	started := time.Now().UTC()
-	got, err := provider.VerifyValues(context.Background(), receiveFallback)
-	finished := time.Now().UTC()
-	if err != nil || got.Kind != "refund" || got.OccurredAt.Before(started) || got.OccurredAt.After(finished) || got.OccurredAt.Equal(wantPaymentAt) {
-		t.Fatalf("refund receive-time fallback got kind=%q occurred_at=%s payment_at=%s err=%v", got.Kind, got.OccurredAt, wantPaymentAt, err)
+	if got, err := provider.VerifyValues(context.Background(), receiveFallback); err == nil || got.Kind != "" {
+		t.Fatalf("refund without a signed Provider timestamp accepted: %+v err=%v", got, err)
 	}
 }
 
@@ -230,7 +227,7 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 			if json.Unmarshal([]byte(r.Form.Get("biz_content")), &query) != nil || query["out_trade_no"] != "merchant-test-1" || query["out_request_no"] != "refund-test-1" {
 				t.Error("refund query omitted original order/refund keys")
 			}
-			field, body = "alipay_trade_fastpay_refund_query_response", `{"code":"10000","out_request_no":"refund-test-1","out_trade_no":"merchant-test-1","trade_no":"trade-test-1","total_amount":"9.90","refund_amount":"1.20","refund_status":"REFUND_SUCCESS"}`
+			field, body = "alipay_trade_fastpay_refund_query_response", `{"code":"10000","out_request_no":"refund-test-1","out_trade_no":"merchant-test-1","trade_no":"trade-test-1","total_amount":"9.90","refund_amount":"1.20","refund_status":"REFUND_SUCCESS","gmt_refund_pay":"2026-09-26 16:14:00"}`
 		default:
 			t.Errorf("unexpected method %q", r.Form.Get("method"))
 			w.WriteHeader(http.StatusBadRequest)
@@ -297,6 +294,10 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 			t.Fatal("mismatched or incomplete refund result accepted")
 		}
 	}
+	refundQueryBody = `{"code":"10000","out_trade_no":"merchant-test-1","out_request_no":"refund-test-1","trade_no":"trade-test-1","total_amount":"9.90","refund_amount":"1.20","refund_status":"REFUND_SUCCESS"}`
+	if _, err := provider.QueryRefund(context.Background(), "merchant-test-1", "refund-test-1"); err == nil {
+		t.Fatal("successful refund query without Provider refund time accepted")
+	}
 	refundQueryBody = `{"code":"10000"}`
 	pending, err := provider.QueryRefund(context.Background(), "merchant-test-1", "refund-test-1")
 	if err != nil || pending.Status != "" || pending.RefundDigest != "" {
@@ -326,5 +327,44 @@ func TestAlipayAcceptanceWebCheckoutAndSignedQueryRefund(t *testing.T) {
 	}
 	if _, err := provider.Refund(context.Background(), RefundRequest{MerchantOrderNo: "merchant-test-1", RefundRequestNo: "refund-test-1", RefundAmount: "1.20"}); err == nil {
 		t.Fatal("tampered refund response accepted")
+	}
+}
+
+func TestAlipayRefundOccurrenceRequiresProviderTime(t *testing.T) {
+	want := time.Date(2026, 9, 26, 8, 14, 0, 0, time.UTC)
+	got, err := parseAlipayRefundPayTime("2026-09-26 16:14:00")
+	if err != nil || !got.Equal(want) {
+		t.Fatalf("parsed occurrence=%s err=%v", got, err)
+	}
+	if _, err = parseAlipayRefundPayTime(""); err == nil {
+		t.Fatal("missing Provider refund time accepted")
+	}
+	if _, err = parseAlipayRefundPayTime("not-a-time"); err == nil {
+		t.Fatal("malformed Provider refund time accepted")
+	}
+	callbackAt, err := parseAlipayRefundCallbackTime(url.Values{"notify_time": {"2026-09-26 16:14:00"}})
+	if err != nil || !callbackAt.Equal(want) {
+		t.Fatalf("callback occurrence=%s err=%v", callbackAt, err)
+	}
+	if _, err = parseAlipayRefundCallbackTime(url.Values{}); err == nil {
+		t.Fatal("refund callback without Provider timestamp accepted")
+	}
+}
+
+func TestAlipayRefundQuerySDKRequestAndResponseFieldMapping(t *testing.T) {
+	requestBytes, err := json.Marshal(alipayRefundQueryRequest("merchant-1", "refund-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request map[string]json.RawMessage
+	if err = json.Unmarshal(requestBytes, &request); err != nil {
+		t.Fatal(err)
+	}
+	if string(request["out_trade_no"]) != `"merchant-1"` || string(request["out_request_no"]) != `"refund-1"` || len(request["query_options"]) != 0 {
+		t.Fatalf("refund query SDK request fields=%s", requestBytes)
+	}
+	var response alipaysdk.TradeFastPayRefundQueryRsp
+	if err = json.Unmarshal([]byte(`{"refund_status":"REFUND_SUCCESS","gmt_refund_pay":"2026-09-26 16:14:00"}`), &response); err != nil || response.GMTRefundPay != "2026-09-26 16:14:00" {
+		t.Fatalf("refund query SDK response=%+v err=%v", response, err)
 	}
 }

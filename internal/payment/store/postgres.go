@@ -1068,12 +1068,12 @@ func (r *Repository) RestorePaidConfirmation(ctx context.Context, p domain.Payme
 	}
 	return p, nil
 }
-func (r *Repository) UpdateRefundSettlement(ctx context.Context, v domain.Refund, providerDigest, receipt string) (domain.Refund, error) {
+func (r *Repository) UpdateRefundSettlement(ctx context.Context, v domain.Refund, providerDigest, receipt string, occurredAt time.Time) (domain.Refund, error) {
 	t, e := tx(ctx)
 	if e != nil {
 		return domain.Refund{}, e
 	}
-	if providerDigest != "" && !effectport.ValidDigest(effectport.Digest(providerDigest)) {
+	if occurredAt.IsZero() || providerDigest != "" && !effectport.ValidDigest(effectport.Digest(providerDigest)) {
 		return domain.Refund{}, paymentport.ErrConflict
 	}
 	result, e := t.Exec(ctx, `UPDATE payment_refunds SET status=$2,provider_refund_digest=NULLIF($3,''),version=$4,updated_at=$5 WHERE id=$1 AND version=$6`, v.ID, v.Status, providerDigest, v.Version, v.UpdatedAt, v.Version-1)
@@ -1086,7 +1086,7 @@ func (r *Repository) UpdateRefundSettlement(ctx context.Context, v domain.Refund
 	if e = recordSettlement(ctx, t, "callback", "refund", v.ID, receipt, providerDigest, v.UpdatedAt); e != nil {
 		return domain.Refund{}, e
 	}
-	if e = appendFacts(ctx, t, "payment.refund_settled", v.ID, "provider", v.UpdatedAt); e != nil {
+	if e = appendFacts(ctx, t, "payment.refund_settled", v.ID, "provider", occurredAt); e != nil {
 		return domain.Refund{}, e
 	}
 	return v, nil
