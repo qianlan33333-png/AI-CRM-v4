@@ -162,3 +162,47 @@ func TestVerifiedAlipayPaymentPreservesEventAndStateTimes(t *testing.T) {
 		t.Fatal("other provider accepted")
 	}
 }
+
+func TestVerifiedRefundFactSeparatesOccurrenceAndMonotonicProcessingTime(t *testing.T) {
+	order, err := NewOrder(nativeInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	paidAt := order.CreatedAt.Add(time.Minute)
+	paid, _, err := order.ApplySettlement(order.Version, StatusPaid, 0, paidAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Model a later persisted Order update after the Provider refund occurred.
+	snapshot := paid.Snapshot()
+	snapshot.Version++
+	snapshot.UpdatedAt = paid.UpdatedAt.Add(10 * time.Minute)
+	current, err := Restore(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	occurredAt := paidAt.Add(2 * time.Minute)
+	processedAt := current.UpdatedAt.Add(-time.Minute)
+	updated, event, err := current.ApplyVerifiedRefundFact(current.Version, StatusPartiallyRefunded, 500, occurredAt, processedAt)
+	if err != nil || updated.Status != StatusPartiallyRefunded || updated.RefundedMinor != 500 || updated.Version != current.Version+1 {
+		t.Fatalf("updated=%+v event=%+v err=%v", updated.Snapshot(), event, err)
+	}
+	if !updated.UpdatedAt.Equal(current.UpdatedAt) || !event.OccurredAt.Equal(occurredAt) {
+		t.Fatalf("updated_at=%s event_at=%s want monotonic=%s occurrence=%s", updated.UpdatedAt, event.OccurredAt, current.UpdatedAt, occurredAt)
+	}
+	if _, _, err = current.ApplySettlement(current.Version, StatusPartiallyRefunded, 500, occurredAt); !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("generic settlement accepted backward fact time: %v", err)
+	}
+	if _, _, err = current.ApplyVerifiedRefundFact(current.Version+1, StatusPartiallyRefunded, 500, occurredAt, processedAt); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale verified refund version err=%v", err)
+	}
+	if _, _, err = current.ApplyVerifiedRefundFact(current.Version, StatusPartiallyRefunded, 500, time.Time{}, processedAt); !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("missing occurrence time err=%v", err)
+	}
+	if _, _, err = current.ApplyVerifiedRefundFact(current.Version, StatusPartiallyRefunded, 500, occurredAt, time.Time{}); !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("missing processing time err=%v", err)
+	}
+	if _, _, err = current.ApplyVerifiedRefundFact(current.Version, StatusRefunded, 2999, occurredAt, processedAt); !errors.Is(err, ErrInvalidSettlement) {
+		t.Fatalf("invalid full refund amount err=%v", err)
+	}
+}

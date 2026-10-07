@@ -263,6 +263,33 @@ func (o Order) ApplyVerifiedAlipayPayment(expectedVersion int64, occurredAt time
 	return updated, event, nil
 }
 
+// ApplyVerifiedRefundFact applies a refund fact already validated by Payment.
+// The event keeps Provider occurrence time, while Order UpdatedAt follows the
+// local processing clock and never moves backward. The generic ApplySettlement
+// contract remains strict for non-verified bookkeeping callers.
+func (o Order) ApplyVerifiedRefundFact(expectedVersion int64, next Status, refundedMinor int64, occurredAt, processedAt time.Time) (Order, StatusEvent, error) {
+	if expectedVersion != o.Version {
+		return Order{}, StatusEvent{}, ErrVersionConflict
+	}
+	if o.RecordOrigin != RecordOriginNative || !o.EffectEligible || occurredAt.IsZero() || processedAt.IsZero() ||
+		(next != StatusPartiallyRefunded && next != StatusRefunded) || refundedMinor <= o.RefundedMinor || !validSettlement(next, refundedMinor, o.Amount.AmountMinor) {
+		return Order{}, StatusEvent{}, ErrInvalidSettlement
+	}
+	if !mayTransition(o.Status, next) {
+		return Order{}, StatusEvent{}, ErrInvalidTransition
+	}
+	updated := o
+	updated.Status = next
+	updated.RefundedMinor = refundedMinor
+	updated.Version++
+	updated.UpdatedAt = processedAt.UTC()
+	if updated.UpdatedAt.Before(o.UpdatedAt) {
+		updated.UpdatedAt = o.UpdatedAt
+	}
+	event := StatusEvent{From: o.Status, To: next, RefundedMinor: refundedMinor, Version: updated.Version, OccurredAt: occurredAt.UTC()}
+	return updated, event, nil
+}
+
 func (o Order) ApplySettlement(expectedVersion int64, next Status, refundedMinor int64, at time.Time) (Order, StatusEvent, error) {
 	if expectedVersion != o.Version {
 		return Order{}, StatusEvent{}, ErrVersionConflict

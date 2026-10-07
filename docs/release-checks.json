@@ -71,6 +71,16 @@
       "lane": "backend",
       "package": "./internal/payment/provider",
       "test": "TestAlipayAcceptanceSignedCallbackKindSpecificTimestamps"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/order/domain",
+      "test": "TestVerifiedRefundFactSeparatesOccurrenceAndMonotonicProcessingTime"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/order/app",
+      "test": "TestSettlePaymentRefundUsesVerifiedOccurrenceAndMonotonicOrderTime"
     }
   ],
   "installed_checks": [

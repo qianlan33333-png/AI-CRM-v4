@@ -31,6 +31,7 @@ type memoryStore struct {
 	contacts             map[int64][]byte
 	checkout             map[int64]orderport.CheckoutSnapshot
 	paid                 map[int64]orderport.PaidEvent
+	settlements          []domain.StatusEvent
 	findByReferenceCalls int
 }
 
@@ -126,6 +127,15 @@ type fulfillmentStub struct {
 	refunds []orderport.ServicePeriodRefundCommand
 }
 
+type refundSettlementStub struct {
+	events []orderport.RefundSettlementEvent
+}
+
+func (stub *refundSettlementStub) ConsumeRefundSettlementWithin(_ context.Context, event orderport.RefundSettlementEvent) error {
+	stub.events = append(stub.events, event)
+	return nil
+}
+
 func (stub *fulfillmentStub) GrantPaidServicePeriodWithin(_ context.Context, command orderport.ServicePeriodGrantCommand) (orderport.Entitlement, error) {
 	stub.grants = append(stub.grants, command)
 	return orderport.Entitlement{ID: 1}, nil
@@ -213,8 +223,9 @@ func (s *memoryStore) RecordExport(_ context.Context, receipt ExportReceipt) (Ex
 	return receipt, true, nil
 }
 
-func (s *memoryStore) UpdateSettlement(_ context.Context, order domain.Order, _ domain.StatusEvent, _ string) (domain.Order, error) {
+func (s *memoryStore) UpdateSettlement(_ context.Context, order domain.Order, event domain.StatusEvent, _ string) (domain.Order, error) {
 	s.orders[order.ID] = order.Snapshot()
+	s.settlements = append(s.settlements, event)
 	return order, nil
 }
 
@@ -454,6 +465,61 @@ func TestPaymentCheckoutFinalFailureReleasesCouponAndServicePeriodRefundsOnce(t 
 	}
 	if len(fulfillment.refunds) != 1 || fulfillment.refunds[0].SourceOrderID != paid.ID || fulfillment.refunds[0].RefundAmountMinor != 10000 {
 		t.Fatalf("refunds=%+v", fulfillment.refunds)
+	}
+}
+
+func TestSettlePaymentRefundUsesVerifiedOccurrenceAndMonotonicOrderTime(t *testing.T) {
+	store := newMemoryStore()
+	service := NewService(directUOW{}, store)
+	createdAt := time.Date(2026, 10, 7, 2, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return createdAt }
+	created, err := service.Create(context.Background(), orderport.CreateCommand{Input: orderInput("refund-time"), Actor: 7, IdempotencyKey: "refund-order-time-key-0001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.checkout[created.ID] = orderport.CheckoutSnapshot{OrderID: created.ID, ProductType: "service_period", ProductID: 6, ProductCode: "period-6", ProductName: "Period 6", ProductVersion: 1, ServicePeriodDurationDays: 31, GrossAmountMinor: created.Amount.AmountMinor, PayableAmountMinor: created.Amount.AmountMinor, Currency: created.Amount.Currency}
+	fulfillment := &fulfillmentStub{}
+	if err = service.SetServicePeriodEntitlementCoordinator(fulfillment); err != nil {
+		t.Fatal(err)
+	}
+	refundEvents := &refundSettlementStub{}
+	if err = service.SetRefundSettlementConsumer(refundEvents); err != nil {
+		t.Fatal(err)
+	}
+	paidAt := createdAt.Add(time.Minute)
+	if _, err = service.SettlePaymentWithin(context.Background(), orderport.PaymentSettlementCommand{OrderID: created.ID, ProviderTransactionNo: "tx-refund-time-1", OccurredAt: paidAt, ReceiptKey: "payment-refund-time-0001"}); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate an ordinary later Order update after the Provider refund occurred.
+	priorUpdateAt := paidAt.Add(10 * time.Minute)
+	persisted := store.orders[created.ID]
+	persisted.Version++
+	persisted.UpdatedAt = priorUpdateAt
+	if _, err = domain.Restore(persisted); err != nil {
+		t.Fatal(err)
+	}
+	store.orders[created.ID] = persisted
+	refundOccurredAt := paidAt.Add(3 * time.Minute)
+	processedAt := priorUpdateAt.Add(2 * time.Minute)
+	service.now = func() time.Time { return processedAt }
+	if _, err = service.SettlePaymentWithin(context.Background(), orderport.PaymentSettlementCommand{OrderID: created.ID, RefundedDelta: created.Amount.AmountMinor + 1, OccurredAt: refundOccurredAt, ReceiptKey: "refund-over-amount-key-0001"}); !errors.Is(err, orderport.ErrConflict) {
+		t.Fatalf("over-refund err=%v", err)
+	}
+	if len(store.settlements) != 1 || len(refundEvents.events) != 0 || len(fulfillment.refunds) != 0 {
+		t.Fatalf("rejected amount wrote settlements=%+v refund_events=%+v entitlements=%+v", store.settlements, refundEvents.events, fulfillment.refunds)
+	}
+	settled, err := service.SettlePaymentWithin(context.Background(), orderport.PaymentSettlementCommand{OrderID: created.ID, RefundedDelta: created.Amount.AmountMinor, OccurredAt: refundOccurredAt, ReceiptKey: "refund-order-time-key-0002"})
+	if err != nil || settled.Status != domain.StatusRefunded || settled.RefundedMinor != created.Amount.AmountMinor || settled.Version != persisted.Version+1 {
+		t.Fatalf("settled=%+v err=%v", settled, err)
+	}
+	if !settled.UpdatedAt.Equal(processedAt) || len(store.settlements) != 2 || !store.settlements[1].OccurredAt.Equal(refundOccurredAt) {
+		t.Fatalf("updated_at=%s status_events=%+v want processed=%s occurrence=%s", settled.UpdatedAt, store.settlements, processedAt, refundOccurredAt)
+	}
+	if len(refundEvents.events) != 1 || !refundEvents.events[0].OccurredAt.Equal(refundOccurredAt) || !refundEvents.events[0].Order.UpdatedAt.Equal(processedAt) {
+		t.Fatalf("refund events=%+v", refundEvents.events)
+	}
+	if len(fulfillment.refunds) != 1 || fulfillment.refunds[0].RefundAmountMinor != created.Amount.AmountMinor || !fulfillment.refunds[0].ProcessedAt.Equal(processedAt) {
+		t.Fatalf("service period refunds=%+v", fulfillment.refunds)
 	}
 }
 

@@ -14,7 +14,7 @@ flowchart TD
     D -->|否| F[校验 Provider OccurredAt 非零且不早于 Refund.CreatedAt]
     F --> G[同一 UoW 写 callback 或 reconciliation 收据]
     G --> H[Refund UpdatedAt = max(处理时钟, 既有 UpdatedAt)]
-    H --> I[settled audit/outbox 与 Order 保留 Provider OccurredAt]
+    H --> I[settled audit/outbox 与 Order 状态/退款事实保留 Provider OccurredAt；Order UpdatedAt=max(处理时钟, 既有时间)]
     I --> J[提交同一 PostgreSQL UoW]
 ```
 
@@ -28,8 +28,8 @@ flowchart TD
 - **Persistence / execution**：Payment 与 Order 共用本地 PostgreSQL UoW；退款状态、Payment settlement receipt/audit/outbox 与 Order 退款结算在同一 UoW。Provider 查询在事务外。沿用现有 `internal/platform/jobqueue` reconciliation job，不新增持久任务。
 - **External Effects**：不新增 Provider 写效果或效果状态机。只消费已验签回调及现有 WeChat Pay、Alipay、WeChat Shop 只读查询事实；退款发起继续走现有 payment/External Effects 端口。
 - **对外合同**：不增改 HTTP 路由或 Provider 操作。缺少/不匹配原交易绑定时沿用冲突失败，不落回调、对账或退款结算收据。
-- **业务机制**：Refund `UpdatedAt` 使用不倒退的本地处理时钟；原 `OccurredAt` 保留给 `payment.refund_settled` audit/outbox 与 Order 结算。退款事件的精确交易绑定在任何收据写入前检查。
-- **关联模块**：`internal/payment/domain`、`app`、`provider`、`store`；Order 仅通过既有 `orderport.SettlePaymentWithin` 同一 UoW 接收退款事实。直接消费者是三种退款 reconcile 路径与已验签 callback。证据来自当前 V4 调用点及 Payment/Order Ports。
+- **业务机制**：Refund `UpdatedAt` 与 Order `UpdatedAt` 使用各自不倒退的本地处理时钟；原 `OccurredAt` 保留给 `payment.refund_settled` audit/outbox、Order 状态事件和退款消费者事件。Order 通用 `ApplySettlement` 保持严格时间合同，只有 Payment 传入已验证正退款增量时走 `ApplyVerifiedRefundFact`；该方法仍检查版本、原生订单、退款增量/总额与合法状态迁移，并将 Order `UpdatedAt` 设为 `max(处理时钟, 既有时间)`。Service-period 的 `ProcessedAt` 使用同一退款处理时钟。
+- **关联模块**：`internal/payment/domain`、`app`、`provider`、`store`；Order 通过既有 `orderport.SettlePaymentWithin` 在同一 UoW 接收退款事实，Order 新增的窄领域方法只处理该已验证退款事实。直接消费者是三种退款 reconcile 路径与已验签 callback。证据来自当前 V4 调用点及 Payment/Order Ports。
 - **页面影响**：无；不改侧边栏、后台页面或客户展示页。
 - **验证证据**：仅运行具名 domain/app 纯单元合同；精确 SHA/tree 与命令收据单独交付。Provider 真实结果、HTTP/PG 环境对抗验证和业务资金验收不在本候选。
 
@@ -45,5 +45,6 @@ flowchart TD
 4. 原 Provider `OccurredAt` 保留给 Order 和 settled audit/outbox；处理时间仅用于 Refund `UpdatedAt` 和 operation receipt 创建时间。
 5. 完成后的匹配重放保持既有 once 语义，不重复推进 Refund 或 Order。
 6. 旧 `Refund.Complete` 继续拒绝倒退时间；只有 `CompleteVerifiedFact` 将已验证 Provider 发生时间与单调处理时间分开。
+7. Order 已在退款事实之后更新时，已验证退款仍保留 Provider 发生时间并推进合法版本/退款状态；Order `UpdatedAt` 与 service-period `ProcessedAt` 使用不倒退的处理时钟，原通用 `ApplySettlement` 继续拒绝倒退发生时间。
 
 不覆盖旧对抗任务或其脚本/测试；不读写历史财务数据、不做退款恢复、不进行 HTTP/PG 对抗验证、不调用外网 Provider、不做实际支付/退款或任何资金操作；不改 UI，不扩大到其他支付行为。

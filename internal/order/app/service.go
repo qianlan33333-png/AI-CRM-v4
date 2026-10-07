@@ -446,7 +446,11 @@ func (s *Service) SettlePaymentWithin(ctx context.Context, command orderport.Pay
 	}
 	var updated domain.Order
 	var event domain.StatusEvent
-	if current.Provider == domain.ProviderAlipay && next == domain.StatusPaid {
+	var processedAt time.Time
+	if command.RefundedDelta > 0 {
+		processedAt = s.now().UTC()
+		updated, event, err = current.ApplyVerifiedRefundFact(current.Version, next, refunded, command.OccurredAt.UTC(), processedAt)
+	} else if current.Provider == domain.ProviderAlipay && next == domain.StatusPaid {
 		updated, event, err = current.ApplyVerifiedAlipayPayment(current.Version, command.OccurredAt.UTC())
 	} else {
 		updated, event, err = current.ApplySettlement(current.Version, next, refunded, command.OccurredAt.UTC())
@@ -464,7 +468,7 @@ func (s *Service) SettlePaymentWithin(ctx context.Context, command orderport.Pay
 	if err != nil {
 		return domain.Snapshot{}, classify(err)
 	}
-	if err = s.applyCheckoutSettlement(ctx, updated.Snapshot(), command); err != nil {
+	if err = s.applyCheckoutSettlement(ctx, updated.Snapshot(), command, processedAt); err != nil {
 		return domain.Snapshot{}, err
 	}
 	if err = s.consumeFirstNativePaidEvent(ctx, current.Snapshot(), updated.Snapshot(), event.OccurredAt); err != nil {
@@ -567,7 +571,7 @@ func (s *Service) reserveCheckout(ctx context.Context, command orderport.Payment
 	return snapshot, nil
 }
 
-func (s *Service) applyCheckoutSettlement(ctx context.Context, order domain.Snapshot, command orderport.PaymentSettlementCommand) error {
+func (s *Service) applyCheckoutSettlement(ctx context.Context, order domain.Snapshot, command orderport.PaymentSettlementCommand, processedAt time.Time) error {
 	checkout, err := s.store.ReadCheckoutSnapshot(ctx, order.ID)
 	if errors.Is(err, orderport.ErrNotFound) {
 		// Existing orders predate the immutable checkout table. Their missing
@@ -589,7 +593,7 @@ func (s *Service) applyCheckoutSettlement(ctx context.Context, order domain.Snap
 	}
 	if command.RefundedDelta > 0 {
 		if checkout.ProductType == "service_period" && s.entitlements != nil {
-			_, err = s.entitlements.ApplyServicePeriodRefundWithin(ctx, orderport.ServicePeriodRefundCommand{SourceOrderID: order.ID, RefundAmountMinor: command.RefundedDelta, ProcessedAt: command.OccurredAt.UTC()})
+			_, err = s.entitlements.ApplyServicePeriodRefundWithin(ctx, orderport.ServicePeriodRefundCommand{SourceOrderID: order.ID, RefundAmountMinor: command.RefundedDelta, ProcessedAt: processedAt})
 		}
 		return err
 	}
