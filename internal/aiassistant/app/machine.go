@@ -189,7 +189,9 @@ func (s *Service) GetMachineOperationStatus(ctx context.Context, actor aiassista
 	}
 	var result aiassistantport.MachineOperationStatus
 	err := s.uow.Within(ctx, func(tx context.Context) error {
-		plan, err := s.store.GetPlan(tx, id, false)
+		// Owner completions lock the plan before updating recipient facts. Keep
+		// that aggregate stable until its execution summary has also been read.
+		plan, err := s.store.GetPlan(tx, id, true)
 		if err != nil {
 			return err
 		}
