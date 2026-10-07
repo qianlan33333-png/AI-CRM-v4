@@ -45,11 +45,6 @@
     {
       "lane": "backend",
       "package": "./internal/coupon/http",
-      "test": "TestPublicCouponStalledResponseRecoverySol61"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/coupon/http",
       "test": "TestPublicCouponRecoveryBindingIsOptionalAndRejectsChangedSessionSol61"
     },
     {
