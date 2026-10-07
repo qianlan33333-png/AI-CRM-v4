@@ -162,13 +162,26 @@ func (r *Repository) SettleGeneration(ctx context.Context, completion automation
 	if !ok || completion.Attempt.Number < 1 || completion.CompletedAt.IsZero() || !effectport.ValidDigest(completion.ReceiptDigest) || !strings.HasPrefix(completion.EffectID, "eer_") {
 		return automationdomain.GenerationItem{}, automationdomain.RuntimeRun{}, false, automationapp.ErrRuntimeInvalid
 	}
+	// Cancellation locks the run before its generation items. Locate the
+	// immutable owner first, then use that same lock order for completion.
+	var runID int64
+	err = t.QueryRow(ctx, `SELECT run_id FROM automation_generation_items WHERE effect_id=$1`, completion.EffectID).Scan(&runID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = automationapp.ErrRuntimeNotFound
+		}
+		return automationdomain.GenerationItem{}, automationdomain.RuntimeRun{}, false, fmt.Errorf("locate generation run: %w", err)
+	}
+	run, err := scanRun(t.QueryRow(ctx, `SELECT `+runColumns+` FROM automation_runs WHERE id=$1 FOR UPDATE`, runID))
+	if err != nil {
+		return automationdomain.GenerationItem{}, run, false, fmt.Errorf("lock generation run: %w", err)
+	}
 	item, err := scanGeneration(t.QueryRow(ctx, `SELECT `+generationColumns+` FROM automation_generation_items WHERE effect_id=$1 FOR UPDATE`, completion.EffectID))
 	if err != nil {
-		return item, automationdomain.RuntimeRun{}, false, fmt.Errorf("lock generation item: %w", err)
+		return item, run, false, fmt.Errorf("lock generation item: %w", err)
 	}
-	run, err := scanRun(t.QueryRow(ctx, `SELECT `+runColumns+` FROM automation_runs WHERE id=$1 FOR UPDATE`, item.RunID))
-	if err != nil {
-		return item, run, false, fmt.Errorf("lock generation run: %w", err)
+	if item.RunID != run.ID {
+		return item, run, false, automationapp.ErrRuntimeConflict
 	}
 	if item.State == "executed" || item.State == "retryable_failed" || item.State == "final_failed" || item.State == "outcome_unknown" || item.State == "cancelled" {
 		return item, run, false, nil
