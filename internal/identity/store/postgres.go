@@ -86,7 +86,12 @@ func (store *PostgresStore) ReadNewCanonicalCustomerOverview(ctx context.Context
 		return identityport.NewCanonicalCustomerOverview{}, errStore
 	}
 	result := identityport.NewCanonicalCustomerOverview{Evidence: "identity.runtime_verified_source.v1"}
-	err = tx.QueryRow(ctx, `WITH candidates AS (
+	err = tx.QueryRow(ctx, `WITH original_identity_owners AS (
+	-- Merge moves current ownership. The first ledger move retains the
+	-- original owner even after reversal or another merge of the survivor.
+	SELECT DISTINCT ON (identity_id) identity_id,from_customer_id
+	FROM customer_merge_identity_members ORDER BY identity_id,merge_id
+), candidates AS (
 	SELECT c.id,
 		EXISTS(
 			SELECT 1 FROM identity_history_import_receipts h
@@ -94,7 +99,8 @@ func (store *PostgresStore) ReadNewCanonicalCustomerOverview(ctx context.Context
 		) AS historical,
 		(
 			SELECT i.source FROM customer_identities i
-			WHERE i.customer_id=c.id AND i.assurance='verified'
+			LEFT JOIN original_identity_owners origin ON origin.identity_id=i.id
+			WHERE COALESCE(origin.from_customer_id,i.customer_id)=c.id AND i.assurance='verified'
 			ORDER BY i.id ASC LIMIT 1
 		) AS initial_source
 	FROM customers c

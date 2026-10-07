@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
+	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 )
@@ -84,4 +86,79 @@ func overviewIdentityDigest(value string) []byte {
 	digest := make([]byte, 32)
 	copy(digest, []byte(value))
 	return digest
+}
+
+func TestPostgreSQLOverviewCreationSourceSurvivesMergeReverseAndChainedMerge(t *testing.T) {
+	h := newPostgresHarness(t)
+	ctx := context.Background()
+	if _, err := h.pool.Native().Exec(ctx, string(mustOverviewHistoryMigration(t))); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 9, 14, 16, 0, 0, 0, time.UTC)
+	prior := start.Add(-24 * time.Hour)
+	fact := func(kind identitydomain.Kind, scope, value, source string) identitydomain.VerifiedFact {
+		t.Helper()
+		f, err := identitydomain.NewVerifiedFact(identitydomain.ProviderVerifiedIdentityInput{Kind: kind, Scope: scope, Value: value, Source: source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	runtimeFact := fact(identitydomain.KindOAOpenID, "wechat-app:overview-lineage", "runtime-synthetic", "wechat_miniprogram")
+	importFact := fact(identitydomain.KindFirstPartyMemberID, "first-party:overview-lineage", "import-synthetic", "directory_sync")
+	runtimeRoot, survivor := h.provision(t, runtimeFact), h.provision(t, importFact)
+	if _, err := h.pool.Native().Exec(ctx, `UPDATE customers SET created_at=CASE WHEN id=$1 THEN $3::timestamptz ELSE $4::timestamptz END WHERE id IN($1,$2)`, runtimeRoot.CustomerID, survivor.CustomerID, start.Add(time.Hour), prior.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	check := func(stage string, priorUnknown int64) {
+		t.Helper()
+		for _, expected := range []struct {
+			start          time.Time
+			known, unknown int64
+		}{{start, 1, 0}, {prior, 0, priorUnknown}} {
+			var result identityport.NewCanonicalCustomerOverview
+			h.within(t, func(tx context.Context) error {
+				var e error
+				result, e = h.service.Store.(*PostgresStore).ReadNewCanonicalCustomerOverview(tx, identityport.OverviewWindow{Start: expected.start, End: expected.start.Add(24 * time.Hour)})
+				return e
+			})
+			if result.KnownNewCanonicalCustomers != expected.known || result.UnknownSource != expected.unknown || result.HistoricalExcluded != 0 {
+				t.Errorf("%s window=%s provenance=%+v want known=%d unknown=%d", stage, expected.start, result, expected.known, expected.unknown)
+			}
+		}
+	}
+	merge := func(from identityport.ProvisionResult, target identitydomain.VerifiedFact, to identityport.ProvisionResult) identityapp.LinkResult {
+		t.Helper()
+		candidate := h.link(t, identityapp.LinkCommand{SourceCustomerID: from.CustomerID, Target: target, Evidence: testEvidence(identitydomain.EvidenceStrong)})
+		if candidate.Candidate == nil {
+			t.Fatal("expected explicit merge candidate")
+		}
+		return h.confirm(t, identityapp.ConfirmMergeCommand{CandidateID: candidate.Candidate.ID, SurvivorCustomerID: to.CustomerID, Operator: "synthetic-reviewer"})
+	}
+	check("before_merge", 1)
+	first := merge(runtimeRoot, importFact, survivor)
+	check("merged", 1)
+	h.within(t, func(tx context.Context) error { _, e := h.service.RevertConfirmedMerge(tx, first.Merge.ID); return e })
+	check("reversed", 1)
+	thirdFact := fact(identitydomain.KindExtension, "ext:overview-lineage", "third-synthetic", "directory_sync")
+	third := h.provision(t, thirdFact)
+	if _, err := h.pool.Native().Exec(ctx, `UPDATE customers SET created_at=$2 WHERE id=$1`, third.CustomerID, prior.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	merge(runtimeRoot, importFact, survivor)
+	merge(survivor, thirdFact, third)
+	check("remerged_and_chained", 2)
+}
+
+func mustOverviewHistoryMigration(t *testing.T) []byte {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate identity overview migration")
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations", "0026_identity_history_receipts.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
