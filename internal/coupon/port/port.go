@@ -52,6 +52,11 @@ func AvailabilityStatusAt(c Coupon, at time.Time) string {
 		return "scheduled"
 	case c.Status == "published" && !at.Before(c.ClaimEndsAt):
 		return "ended"
+	case c.Status == "published" && c.ValidityMode == ValidityFixedRange && c.UseEndsAt != nil && !at.Before(*c.UseEndsAt):
+		// A new fixed-range claim cannot have a nonempty usable window once
+		// its use deadline has passed, even if the configured claim window
+		// remains open. Future use starts still allow advance claiming.
+		return "ended"
 	case c.Status == "published":
 		return "active"
 	default:
