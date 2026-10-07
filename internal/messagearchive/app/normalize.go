@@ -73,7 +73,9 @@ func NormalizeArchiveRecord(corpScope string, record wecomport.PlainArchiveRecor
 	}
 	switch envelope.MsgType {
 	case "text":
-		message.ContentText = strings.TrimSpace(envelope.Text.Content)
+		// Archive text is a historical fact, not an editable input field.
+		// Preserve spacing, newlines, and Unicode exactly as the SDK supplied it.
+		message.ContentText = envelope.Text.Content
 		message.Normalized = mustJSON(map[string]any{"msgtype": "text", "content": message.ContentText})
 	case "image":
 		message.Normalized = mustJSON(map[string]any{"msgtype": "image", "preview": "private_media"})
