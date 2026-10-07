@@ -1046,6 +1046,11 @@ func (client *Client) GetGroupChat(ctx context.Context, chatID string) (result w
 	if err != nil {
 		return wecomport.GroupChat{}, err
 	}
+	// A missing/null member list is an incomplete Provider response. It must
+	// not become a ready zero-member directory fact; an explicit [] is valid.
+	if payload.GroupChat.Members == nil {
+		return wecomport.GroupChat{}, ErrResponse
+	}
 	var externalCount int32
 	knownTypes := true
 	for _, member := range payload.GroupChat.Members {

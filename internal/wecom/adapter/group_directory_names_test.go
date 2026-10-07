@@ -11,12 +11,14 @@ import (
 
 func TestGroupDirectoryPreservesNamedAndUnnamedGroups(t *testing.T) {
 	details := map[string]string{
-		"named":          `{"errcode":0,"group_chat":{"chat_id":"named","owner":"owner-1","name":"真实群名","member_list":[{"type":2}]}}`,
-		"unnamed":        `{"errcode":0,"group_chat":{"chat_id":"unnamed","owner":"owner-1","name":"","member_list":[{"type":1}]}}`,
-		"missing-name":   `{"errcode":0,"group_chat":{"chat_id":"missing-name","owner":"owner-1","member_list":[]}}`,
-		"missing-id":     `{"errcode":0,"group_chat":{"owner":"owner-1","name":""}}`,
-		"missing-owner":  `{"errcode":0,"group_chat":{"chat_id":"missing-owner","name":""}}`,
-		"provider-error": `{"errcode":48002,"errmsg":"permission denied"}`,
+		"named":           `{"errcode":0,"group_chat":{"chat_id":"named","owner":"owner-1","name":"真实群名","member_list":[{"type":2}]}}`,
+		"unnamed":         `{"errcode":0,"group_chat":{"chat_id":"unnamed","owner":"owner-1","name":"","member_list":[{"type":1}]}}`,
+		"missing-name":    `{"errcode":0,"group_chat":{"chat_id":"missing-name","owner":"owner-1","member_list":[]}}`,
+		"missing-members": `{"errcode":0,"group_chat":{"chat_id":"missing-members","owner":"owner-1","name":"partial"}}`,
+		"null-members":    `{"errcode":0,"group_chat":{"chat_id":"null-members","owner":"owner-1","name":"partial","member_list":null}}`,
+		"missing-id":      `{"errcode":0,"group_chat":{"owner":"owner-1","name":""}}`,
+		"missing-owner":   `{"errcode":0,"group_chat":{"chat_id":"missing-owner","name":""}}`,
+		"provider-error":  `{"errcode":48002,"errmsg":"permission denied"}`,
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -61,7 +63,7 @@ func TestGroupDirectoryPreservesNamedAndUnnamedGroups(t *testing.T) {
 			t.Fatalf("name=%q want=%q", group.Name, want)
 		}
 	}
-	for _, id := range []string{"missing-id", "missing-owner", "provider-error"} {
+	for _, id := range []string{"missing-id", "missing-owner", "provider-error", "missing-members", "null-members"} {
 		t.Run(id, func(t *testing.T) {
 			if _, err := client.GetGroupChat(context.Background(), id); !errors.Is(err, ErrResponse) {
 				t.Fatalf("invalid provider result must fail, got %v", err)
