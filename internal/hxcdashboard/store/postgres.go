@@ -135,8 +135,14 @@ func (store *PostgreSQL) MarkPublishing(ctx context.Context, id int64, count, re
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE hxc_dashboard_refresh_runs SET status='publishing',source_count=$2,processed_count=$2,identity_replay_verified_count=$3,updated_at=now(),version=version+1 WHERE id=$1 AND status='running'`, id, count, replayVerified)
-	return err
+	tag, err := tx.Exec(ctx, `UPDATE hxc_dashboard_refresh_runs SET status='publishing',source_count=$2,processed_count=$2,identity_replay_verified_count=$3,updated_at=now(),version=version+1 WHERE id=$1 AND status='running'`, id, count, replayVerified)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 func (store *PostgreSQL) Fail(ctx context.Context, id int64, code string) error {
 	tx, err := platformpostgres.RequireTransaction(ctx)
@@ -149,6 +155,17 @@ func (store *PostgreSQL) Fail(ctx context.Context, id int64, code string) error 
 
 func (store *PostgreSQL) Publish(ctx context.Context, runID int64, projection domain.Projection) (int64, error) {
 	tx, err := platformpostgres.RequireTransaction(ctx)
+	if err != nil {
+		return 0, err
+	}
+	// A late worker must not replace the current generation after its run has
+	// failed or already published. Pin the existing state before changing any
+	// projection; the terminal receipt and generation commit in this same UoW.
+	var lockedRunID int64
+	err = tx.QueryRow(ctx, `SELECT id FROM hxc_dashboard_refresh_runs WHERE id=$1 AND status='publishing' FOR UPDATE`, runID).Scan(&lockedRunID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNotFound
+	}
 	if err != nil {
 		return 0, err
 	}
