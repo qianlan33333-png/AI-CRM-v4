@@ -4,7 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 import { buildTestBrowserBundle } from "../scripts/test-browser-bundle.mjs";
+import { prepareSurveyTestPages } from "../scripts/prepare-survey-test-pages.mjs";
 
+prepareSurveyTestPages();
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",

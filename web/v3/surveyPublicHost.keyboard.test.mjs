@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import { buildTestBrowserBundle } from '../scripts/test-browser-bundle.mjs';
+import { prepareSurveyTestPages } from '../scripts/prepare-survey-test-pages.mjs';
 
+prepareSurveyTestPages();
 const host = await buildTestBrowserBundle(new URL('./surveyPublicHost.ts', import.meta.url).pathname);
 const runtime = (await build({ stdin: { contents: `import {H5Controller} from './web/src/h5/controller'; import {mount} from './web/src/shared/ui/runtime'; export function start(page) { const controller = new H5Controller(page); mount(document.getElementById('screen'), document.getElementById('tpl').innerHTML, controller); return controller; }`, resolveDir: process.cwd() }, bundle: true, format: 'iife', globalName: 'SurveyKeyboard', platform: 'browser', write: false })).outputFiles[0].text;
 const wait = () => new Promise(resolve => setTimeout(resolve, 0));
