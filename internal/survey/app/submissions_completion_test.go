@@ -84,7 +84,7 @@ func (s *completionStore) CreateSubmission(_ context.Context, in PersistSubmissi
 	}
 	s.created, s.claimed = true, true
 	s.storedKey, s.storedPayload = in.SubmissionKeyDigest, in.PayloadDigest
-	s.stored = surveyport.Submission{ID: 9, QuestionnaireID: in.Questionnaire.ID, QuestionnaireSlug: in.Questionnaire.Slug, DefinitionVersion: in.Questionnaire.DefinitionVersion, Answers: in.Answers}
+	s.stored = surveyport.Submission{ID: 9, QuestionnaireID: in.Questionnaire.ID, QuestionnaireSlug: in.Questionnaire.Slug, DefinitionVersion: in.Questionnaire.DefinitionVersion, Identity: in.Command.Identity, Answers: in.Answers}
 	return s.stored, true, nil
 }
 func (s *completionStore) GetOperationConfiguration(context.Context, surveyport.ID) (surveyport.OperationConfiguration, error) {

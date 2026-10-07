@@ -388,6 +388,9 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 			return e
 		}
 		if found {
+			if !submissionInLineage(stored, ids) {
+				return surveyport.ErrConflict
+			}
 			completionConfiguration, e = s.store.GetOperationConfiguration(tx, questionnaire.ID)
 			return e
 		}
@@ -404,6 +407,9 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 			stored, found, e = s.store.FindSubmissionByKey(tx, questionnaire.ID, submissionKeyDigest, payloadDigest)
 			if e != nil {
 				return e
+			}
+			if found && !submissionInLineage(stored, ids) {
+				return surveyport.ErrConflict
 			}
 			completionConfiguration, e = s.store.GetOperationConfiguration(tx, questionnaire.ID)
 			if e != nil {
@@ -448,6 +454,9 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 			return e
 		}
 		if !created {
+			if !submissionInLineage(stored, ids) {
+				return surveyport.ErrConflict
+			}
 			completionConfiguration, e = s.store.GetOperationConfiguration(tx, questionnaire.ID)
 			return e
 		}
@@ -674,13 +683,8 @@ func (s *SubmissionService) QueryResultForIdentity(ctx context.Context, token st
 		if err != nil {
 			return err
 		}
-		if result.Identity.State != surveyport.IdentityResolved || result.Identity.CustomerID == nil {
-			return surveyport.ErrResultForbidden
-		}
-		for _, id := range ids {
-			if id == *result.Identity.CustomerID {
-				return nil
-			}
+		if submissionInLineage(result, ids) {
+			return nil
 		}
 		return surveyport.ErrResultForbidden
 	})
@@ -689,6 +693,22 @@ func (s *SubmissionService) QueryResultForIdentity(ctx context.Context, token st
 	}
 	return result, classifySubjectError(err)
 }
+
+// A retained submission key is not an ownership credential. Preserve receipts
+// across merges only while their recorded customer remains in this subject's
+// current locked lineage; reversal must not return another root's success.
+func submissionInLineage(submission surveyport.Submission, ids []customerdomain.CustomerID) bool {
+	if submission.Identity.State != surveyport.IdentityResolved || submission.Identity.CustomerID == nil {
+		return false
+	}
+	for _, id := range ids {
+		if id == *submission.Identity.CustomerID {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *SubmissionService) ListSubmissions(ctx context.Context, id surveyport.ID, limit, offset int32, state surveyport.IdentityState) (surveyport.SubmissionPage, error) {
 	if limit == 0 {
 		limit = DefaultLimit
