@@ -174,8 +174,13 @@
       "path": "web/v3/surveySubmissionResume.test.mjs"
     }
   ],
-  "installed_checks": [],
+  "installed_checks": [
+    "module-related-readback",
+    "survey-keyboard-installed",
+    "cli-deadline-installed"
+  ],
   "build_commands": [
-    "./cmd/aicrm"
+    "./cmd/aicrm",
+    "./cmd/aicrm-cli"
   ]
 }
