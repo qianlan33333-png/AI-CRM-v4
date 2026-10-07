@@ -163,6 +163,8 @@ if (supportedPages.has(page) && page !== 'auth') {
       "label[data-option-id]",
     )) {
       option.dataset.v3SurveyOption = "";
+      option.setAttribute("role", "button");
+      option.tabIndex = 0;
     }
     for (const control of templateDescendants<HTMLElement>(
       content,
@@ -320,8 +322,12 @@ if (supportedPages.has(page) && page !== 'auth') {
       card.dataset.v3SurveyQuestion = "";
     for (const option of Array.from(
       screen.querySelectorAll<HTMLElement>("label[data-option-id]"),
-    ))
+    )) {
       option.dataset.v3SurveyOption = "";
+      option.setAttribute("role", "button");
+      option.tabIndex = isSubmitting ? -1 : 0;
+      option.setAttribute("aria-disabled", String(isSubmitting));
+    }
     for (const error of Array.from(
       screen.querySelectorAll<HTMLElement>("[data-h5-error]"),
     )) {
@@ -355,6 +361,24 @@ if (supportedPages.has(page) && page !== 'auth') {
   markTemplate();
   const screen = rendered();
   if (screen) {
+    screen.addEventListener("keydown", (event) => {
+      if ((event.key !== "Enter" && event.key !== " ") || event.repeat || event.isComposing ||
+          event.altKey || event.ctrlKey || event.metaKey) return;
+      const option = event.target instanceof HTMLElement
+        ? event.target.closest<HTMLElement>("label[data-option-id]") : null;
+      if (!option || !screen.contains(option) || option.getAttribute("aria-disabled") === "true" ||
+          screen.querySelector("[data-v3-survey-submitting]")) return;
+      event.preventDefault();
+      const questionID = option.closest("[data-question-id]")?.getAttribute("data-question-id");
+      const optionID = option.getAttribute("data-option-id");
+      // Reuse the Controller's click and answer rules. Its synchronous render
+      // replaces the old label; keep keyboard focus on the same live choice.
+      option.click();
+      const current = Array.from(screen.querySelectorAll<HTMLElement>("label[data-option-id]"))
+        .find((candidate) => candidate.getAttribute("data-option-id") === optionID &&
+          candidate.closest("[data-question-id]")?.getAttribute("data-question-id") === questionID);
+      current?.focus({ preventScroll: true });
+    });
     const observer = new MutationObserver(decorate);
     observer.observe(screen, {
       childList: true,

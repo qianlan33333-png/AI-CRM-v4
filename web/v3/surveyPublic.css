@@ -1,4 +1,8 @@
 @import './requiredAuth.css';
+body[data-v3-public-survey] #screen [data-v3-survey-option]:focus-visible {
+  outline: 2px solid var(--v3-survey-primary, #3370ff);
+  outline-offset: 2px;
+}
 /* Public Survey H5 only.  It deliberately does not target admin, sidebar, or
    the other H5 product/service pages that share the frozen donor build. */
 body[data-ui-surface="h5"][data-v3-public-survey] {
