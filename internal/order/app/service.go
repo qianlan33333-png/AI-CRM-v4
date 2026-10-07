@@ -458,6 +458,9 @@ func (s *Service) SettlePaymentWithin(ctx context.Context, command orderport.Pay
 	if err != nil {
 		return domain.Snapshot{}, orderport.ErrConflict
 	}
+	if command.RefundedDelta > 0 {
+		processedAt = updated.UpdatedAt
+	}
 	if !command.Failed && command.RefundedDelta == 0 {
 		updated, err = updated.WithVerifiedProviderTransaction(command.ProviderTransactionNo)
 		if err != nil {

@@ -500,8 +500,9 @@ func TestSettlePaymentRefundUsesVerifiedOccurrenceAndMonotonicOrderTime(t *testi
 	}
 	store.orders[created.ID] = persisted
 	refundOccurredAt := paidAt.Add(3 * time.Minute)
-	processedAt := priorUpdateAt.Add(2 * time.Minute)
-	service.now = func() time.Time { return processedAt }
+	processingClock := priorUpdateAt.Add(-2 * time.Minute)
+	processedAt := priorUpdateAt
+	service.now = func() time.Time { return processingClock }
 	if _, err = service.SettlePaymentWithin(context.Background(), orderport.PaymentSettlementCommand{OrderID: created.ID, RefundedDelta: created.Amount.AmountMinor + 1, OccurredAt: refundOccurredAt, ReceiptKey: "refund-over-amount-key-0001"}); !errors.Is(err, orderport.ErrConflict) {
 		t.Fatalf("over-refund err=%v", err)
 	}
