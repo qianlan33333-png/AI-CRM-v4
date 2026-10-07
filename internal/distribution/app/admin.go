@@ -88,7 +88,11 @@ func (s *AdminService) SetDistributorEnabled(ctx context.Context, command distri
 		if err = s.store.AppendAuditWithin(tx, eventType, "distributor", updated.ID, command.ActorScope, result, now); err != nil {
 			return err
 		}
-		return s.store.AppendOutboxWithin(tx, eventType, "distribution."+operation+":"+command.IdempotencyKey, updated.ID, result, now)
+		// Receipts belong to an actor as well as an operation. Preserve that
+		// scope in the event key so another administrator's browser key cannot
+		// silently discard this distributor's enabled-state event.
+		outboxDigest := sha256.Sum256([]byte(command.ActorScope + "\x00" + command.IdempotencyKey))
+		return s.store.AppendOutboxWithin(tx, eventType, fmt.Sprintf("distribution.%s:%x", operation, outboxDigest), updated.ID, result, now)
 	})
 }
 
