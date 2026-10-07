@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	couponapp "github.com/qianlan33333-png/AI-CRM-v3/internal/coupon/app"
 	couponport "github.com/qianlan33333-png/AI-CRM-v3/internal/coupon/port"
@@ -20,9 +21,9 @@ func (r *Repository) ImportDefinition(ctx context.Context, input couponport.Defi
 		return couponport.Coupon{}, err
 	}
 	v := input.Coupon
-	if input.Actor < 1 || v.ID != 0 || v.IssuedCount != 0 || strings.TrimSpace(v.Name) != v.Name || v.Name == "" || len(v.Name) > 45 ||
+	if input.Actor < 1 || v.ID != 0 || v.IssuedCount != 0 || strings.TrimSpace(v.Name) != v.Name || v.Name == "" || utf8.RuneCountInString(v.Name) > 45 ||
 		v.DiscountAmountTotal < 1 || v.Currency != "CNY" || v.TotalIssueLimit < 1 || v.PerUserIssueLimit < 1 || v.PerUserIssueLimit > v.TotalIssueLimit ||
-		v.ClaimStartsAt.IsZero() || v.ClaimEndsAt.IsZero() || !v.ClaimEndsAt.After(v.ClaimStartsAt) || len(v.Instructions) > 200 ||
+		v.ClaimStartsAt.IsZero() || v.ClaimEndsAt.IsZero() || !v.ClaimEndsAt.After(v.ClaimStartsAt) || utf8.RuneCountInString(v.Instructions) > 200 ||
 		input.CreatedAt.IsZero() || input.UpdatedAt.IsZero() || input.UpdatedAt.Before(input.CreatedAt) {
 		return couponport.Coupon{}, couponapp.ErrInvalidCoupon
 	}

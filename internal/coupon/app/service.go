@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	couponport "github.com/qianlan33333-png/AI-CRM-v3/internal/coupon/port"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
@@ -473,7 +474,7 @@ func normalize(input couponport.UpsertCommand) (couponport.UpsertCommand, []int6
 	}
 	c.Currency = "CNY"
 	c.Status = "draft"
-	if c.Name == "" || len(c.Name) > 45 || c.DiscountAmountTotal < 1 || c.TotalIssueLimit < 1 || c.PerUserIssueLimit < 1 || c.PerUserIssueLimit > c.TotalIssueLimit || !c.ClaimEndsAt.After(c.ClaimStartsAt) || len(c.Instructions) > 200 || len(c.TargetRefs) < 1 || len(c.TargetRefs) > 100 {
+	if c.Name == "" || utf8.RuneCountInString(c.Name) > 45 || c.DiscountAmountTotal < 1 || c.TotalIssueLimit < 1 || c.PerUserIssueLimit < 1 || c.PerUserIssueLimit > c.TotalIssueLimit || !c.ClaimEndsAt.After(c.ClaimStartsAt) || utf8.RuneCountInString(c.Instructions) > 200 || len(c.TargetRefs) < 1 || len(c.TargetRefs) > 100 {
 		return couponport.UpsertCommand{}, nil, ErrInvalidCoupon
 	}
 	if c.ValidityMode == couponport.ValidityFixedRange {
