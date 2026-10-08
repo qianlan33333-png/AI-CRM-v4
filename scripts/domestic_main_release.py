@@ -914,6 +914,18 @@ def _pin_candidate(repo: Path, head_sha: str) -> None:
           "update-ref", ref, head_sha, ZERO_SHA], umask=0o022)
 
 
+def _is_batch_environment_check_failure(state: dict[str, Any]) -> bool:
+    batch, front = state.get("batch"), _active_queue_item(state)
+    failure = (front or {}).get("failure") or {}
+    return (isinstance(batch, dict) and batch.get("status") == "open"
+            and state.get("status") == "blocked" and state.get("in_flight") is None
+            and front is not None and front.get("status") == "pending"
+            and front.get("base_sha") == batch.get("head_sha")
+            and failure.get("phase") == "checks" and failure.get("kind") == "environment"
+            and failure.get("candidate_verdict") == "not_evaluated"
+            and not failure.get("required_recovery"))
+
+
 def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base_sha: str,
                      lock_path: Path | None = None,
                      supersedes_candidate_id: str | None = None) -> dict[str, Any]:
@@ -939,10 +951,20 @@ def submit_candidate(repo: Path, state_path: Path, ref: str, head_sha: str, base
         if actual_main != state["main"]["sha"] or base_sha != expected_base:
             raise ReleaseError("candidate base is stale; update and recheck from the current cumulative staging head")
         retry_front = _active_queue_item(state)
+        environment_retry = (_is_batch_environment_check_failure(state)
+                             and retry_front.get("ref") == ref
+                             and retry_front.get("head_sha") == head_sha
+                             and retry_front.get("base_sha") == base_sha)
+        repaired_environment = (batch is not None and retry_front is not None
+                               and retry_front.get("status") == "stale_base"
+                               and retry_front.get("environment_tool_repaired_by") == batch["head_sha"]
+                               and retry_front.get("failure", {}).get("kind") == "environment"
+                               and retry_front.get("failure", {}).get("candidate_verdict") == "not_evaluated")
         retryable_block = (state["status"] == "blocked" and retry_front is not None
-                           and retry_front.get("status") == "failed"
+                           and (retry_front.get("status") == "failed" or repaired_environment)
                            and (retry_front.get("ref") == ref
                                 or retry_front.get("candidate_id") == supersedes_candidate_id))
+        retryable_block = retryable_block or environment_retry
         if retryable_block and retry_front.get("failure", {}).get("required_recovery"):
             retryable_block = (state.get("stage_reset_acknowledged_at_utc", "")
                                >= retry_front["failure"]["recorded_at_utc"])
@@ -4616,9 +4638,33 @@ def _batch_build_repair_classification(repo: Path, base: str, candidate: str) ->
     return result
 
 
+def _verify_batch_environment_repair_state(config: dict[str, Any], repo: Path,
+                                         state: dict[str, Any]) -> None:
+    if not _is_batch_environment_check_failure(state):
+        raise ReleaseError("environment tool repair requires an idle unevaluated checks failure")
+    batch, front = state["batch"], _active_queue_item(state)
+    last = batch["members"][-1]
+    if (_resolve_ref(repo, MAIN_REF) != batch["base_sha"]
+            or _tree(repo, batch["base_sha"]) != state["main"]["tree"]
+            or _resolve_ref(repo, front["ref"]) != front["head_sha"]
+            or _resolve_ref(repo, last["ref"]) != batch["head_sha"]
+            or _tree(repo, batch["head_sha"]) != batch["head_tree"]):
+        raise ReleaseError("environment tool repair source identity changed")
+    _first_parent_chain(repo, batch["head_sha"], front["head_sha"])
+    app, baseline = batch["installed_app"], state["installed_app"]
+    _verify_stage_app(app["sha"], app["manifest_sha256"])
+    _verify_prod_app(config, baseline["sha"], baseline["manifest_sha256"])
+    cursor = _verify_production_cursor(config)["cursor"]
+    if (cursor.get("main_sha") != batch["base_sha"]
+            or cursor.get("installed_app_sha") != baseline["sha"]
+            or cursor.get("installed_manifest_sha256") != baseline["manifest_sha256"]):
+        raise ReleaseError("production cursor changed before environment tool repair")
+
+
 def _checked_batch_controller_member(config: dict[str, Any], repo: Path,
                                      batch: dict[str, Any], candidate: str,
-                                     ref: str, label: str, *, build_repair: bool = False) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+                                     ref: str, label: str, *, build_repair: bool = False,
+                                     environment_repair: bool = False) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     candidate = _sha(candidate, "batch controller SHA")
     ref = _assert_ref_name(ref)
     if _resolve_ref(repo, ref) != candidate:
@@ -4632,8 +4678,8 @@ def _checked_batch_controller_member(config: dict[str, Any], repo: Path,
         raise ReleaseError("batch controller candidate must be source-only and change the controller")
     _verify_controller_files(config, repo, candidate, sorted(builder.FIXED_CONTROLLER_FILES))
     report = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate}-{label}-{time.time_ns()}"
-    if build_repair:
-        marker = batch.get("build_repair_maintenance") or {}
+    if build_repair or environment_repair:
+        marker = batch.get("build_repair_maintenance" if build_repair else "tool_repair_maintenance") or {}
         hashes = {path: hashlib.sha256(_source_blob(repo, candidate, path)).hexdigest()
                   for path in sorted(builder.FIXED_CONTROLLER_FILES)}
         if (marker.get("candidate_sha") != candidate or marker.get("base_sha") != batch["head_sha"]
@@ -4774,9 +4820,10 @@ def batch_tool_repair(config: dict[str, Any], failed_candidate: str,
         state = _load_state(state_path)
         _recover_orphaned_inflight(state_path, state)
         batch, front = state.get("batch"), _active_queue_item(state)
+        environment_repair = _is_batch_environment_check_failure(state)
         if (not isinstance(batch, dict) or batch.get("status") != "open"
                 or state.get("status") != "blocked" or state.get("in_flight") is not None
-                or front is None or front.get("status") != "failed"
+                or front is None or (front.get("status") != "failed" and not environment_repair)
                 or front.get("head_sha") != failed_candidate):
             raise ReleaseError("batch tool repair requires the exact unevaluated queue front")
         failure = front.get("failure") or {}
@@ -4789,6 +4836,10 @@ def batch_tool_repair(config: dict[str, Any], failed_candidate: str,
             _verify_batch_build_repair_state(config, repo, state)
             if any(q["head_sha"] == controller_sha for q in state["queue"]):
                 raise ReleaseError("build repair must append a new exact ref without replacing an original member")
+        if environment_repair:
+            if _resolve_ref(repo, front["ref"]) != failed_candidate:
+                raise ReleaseError("environment tool repair source identity changed")
+            _first_parent_chain(repo, batch["head_sha"], failed_candidate)
         if (_resolve_ref(repo, MAIN_REF) != batch["base_sha"]
                 or _tree(repo, batch["base_sha"]) != state["main"]["tree"]):
             raise ReleaseError("production source base changed before batch tool repair")
@@ -4807,7 +4858,8 @@ def batch_tool_repair(config: dict[str, Any], failed_candidate: str,
         member, check, bundle = (_checked_batch_controller_member(
             config, repo, batch, controller_sha, controller_ref, "batch-tool-repair", build_repair=True)
             if build_repair else _checked_batch_controller_member(
-            config, repo, batch, controller_sha, controller_ref, "batch-tool-repair"))
+            config, repo, batch, controller_sha, controller_ref, "batch-tool-repair",
+            environment_repair=environment_repair))
         _append_batch_controller_member(state, member, check, bundle, before=front)
         batch.setdefault("tool_repairs", []).append({
             "head_sha": member["head_sha"], "failed_candidate": failed_candidate,
@@ -4822,6 +4874,10 @@ def batch_tool_repair(config: dict[str, Any], failed_candidate: str,
             queued = next(q for q in state["queue"] if q["head_sha"] == member["head_sha"])
             queued["status"] = "prepared"
             batch.pop("build_repair_maintenance", None)
+        if environment_repair:
+            # The old candidate remains unevaluated; only its source base is stale.
+            front.update(status="stale_base", environment_tool_repaired_by=member["head_sha"])
+            batch.pop("tool_repair_maintenance", None)
         _update_state(state_path, state, status="ready" if build_repair else "blocked")
         return {"status": "batch_tool_repaired", "staged_head_sha": member["head_sha"],
                 "blocked_candidate_sha": failed_candidate, "member_count": len(batch["members"]),
@@ -4982,7 +5038,9 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
         verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
         state = _load_state(state_path)
         build_repair = _is_preinstall_batch_build_failure(state)
-        if state.get("status") == "outcome_unknown" or (state.get("staging_out_of_sync") is True and not build_repair):
+        environment_repair = _is_batch_environment_check_failure(state)
+        batch_repair = build_repair or environment_repair
+        if state.get("status") == "outcome_unknown" or (state.get("staging_out_of_sync") is True and not batch_repair):
             raise ReleaseError("controller maintenance check is blocked by an unresolved release state")
         if state.get("in_flight") is not None:
             raise ReleaseError("controller maintenance check cannot overlap an active attempt")
@@ -4990,17 +5048,21 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
             state["controller_maintenance"] = None
             _update_state(state_path, state)
         item = _active_queue_item(state)
-        if not build_repair and (item is None or item.get("status") not in {"pending", "failed"}
+        if not batch_repair and (item is None or item.get("status") not in {"pending", "failed"}
                 or item.get("head_sha") != candidate_sha):
             raise ReleaseError("maintenance check requires the exact head candidate at the serial queue front")
         main_sha = _resolve_ref(repo, MAIN_REF)
-        if not build_repair and (main_sha != state["main"]["sha"] or item.get("base_sha") != main_sha
+        if not batch_repair and (main_sha != state["main"]["sha"] or item.get("base_sha") != main_sha
                 or _resolve_ref(repo, item["ref"]) != candidate_sha):
             raise ReleaseError("maintenance candidate is stale; update and check it from current domestic main")
-        check_base = state["batch"]["head_sha"] if build_repair else main_sha
+        check_base = state["batch"]["head_sha"] if batch_repair else main_sha
         if build_repair:
             _verify_batch_build_repair_state(config, repo, state)
             state["batch"].pop("build_repair_maintenance", None)
+            _update_state(state_path, state)
+        if environment_repair:
+            _verify_batch_environment_repair_state(config, repo, state)
+            state["batch"].pop("tool_repair_maintenance", None)
             _update_state(state_path, state)
         _first_parent_chain(repo, check_base, candidate_sha)
         expected_controller = hashlib.sha256(_source_blob(repo, candidate_sha, "scripts/domestic_main_release.py")).hexdigest()
@@ -5078,6 +5140,8 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
             }
             if build_repair:
                 state["batch"]["build_repair_maintenance"] = marker
+            elif environment_repair:
+                state["batch"]["tool_repair_maintenance"] = marker
             else:
                 state["controller_maintenance"] = marker
             _update_state(state_path, state)

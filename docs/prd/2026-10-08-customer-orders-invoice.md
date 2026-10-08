@@ -84,3 +84,11 @@ flowchart TD
 实测证据：`9c9a046` 的 20 项 Linux 检查通过，但正式 builder 不含 `cmd/invoice-setup`，因此显式构建清单在安装前被拒绝。参考并复用仓库现有 `_release_commands`、`batch-tool-repair`、`maintenance-check`；不用临时 allowlist 或第二发布通道。仅严格新增标准 Go 程序登记时按应用与指定工具增量构建，其他脚本行为变化不套用该优化。恢复只接受原累计批次、成功收据仍绑定原成员、安装前构建失败且独立读回两台机器与生产游标均未变化的状态；安装未知继续停止对账。
 
 分类：不涉及 OneID、业务 PostgreSQL、Provider 调用或新任务队列；涉及现有发布控制器的持久收据及串行锁。无页面变化。五项影响：发布 CLI 增加已检查的安装前恢复分支；保留成员、尝试与收据；直接消费者为 builder 和原发布控制器；无 UI；验证登记选包、拒绝脚本行为变化、收据保留、失败阶段及安装未知拒绝。修复继承父 PRD 开发授权，生产启用仍等待用户最终确认。
+
+## 已安装累计批次的检查环境恢复（2026-10-08）
+
+流程：已安装并验收的原批次 → 下一队首检查因环境中断、尚未评估 → 环境修复 → 同 SHA/ref/base 重提保留 attempt/checkpoint；若控制器本身需要修复，则从累计源码 HEAD 做 source-only maintenance → 验证两台机器及生产游标 → 既有 batch-tool-repair 追加已检查控制器成员 → 原运行时候选标记基线落后、保留历史 → 基于新累计 HEAD 重提同一业务修复。
+
+实测：配置工具候选因系统盘容量中断、队首为 pending/environment/not_evaluated；容量恢复后 batch guard 只认 failed，挡住后续既有同 SHA environment_retry。复用当前同 SHA 重试、maintenance-check、batch-tool-repair、串行锁与保护收据；不手改状态、不新建发布通道。maintenance 仅允许明确 checks 环境中断且无 in_flight 的原 open 批次，核验原源码、预发、生产及游标；候选未知、真实检查失败、安装已开始或需恢复确认仍拒绝。固定字节与维护收据准确绑定后才追加 source-only 修复，不接受 logo 等运行时改动混入控制器成员。
+
+分类：不涉及 OneID、客户、业务 PostgreSQL 或 Provider 效果；只使用原发布状态、同一串行锁和收据。五项影响：恢复已存在但不可达的精确候选重试；维护入口覆盖该真实环境状态；直接消费者为 submit/maintenance/batch-tool-repair；无页面；验证重提、attempt/checkpoint保留、不同候选/未知安装拒绝、精确维护回执复用和原队首重提。无需业务应用构建；原业务测试和预发证据保留。该相关修复继承本任务开发授权，不改变生产安装/开票启用仍待最终确认的范围。
