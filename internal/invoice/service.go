@@ -116,7 +116,7 @@ func (s *Service) freeze(o orderdomain.Snapshot) (p.Snapshot, error) {
 	remainder := o.Amount.AmountMinor
 	for i, line := range o.Items {
 		tax, ok := c.Taxes[line.ProductCode]
-		if !ok || len(tax.Code) != 19 || tax.Rate < 0 || tax.Rate > 10000 || tax.GoodsName == "" {
+		if !ok || !tax.Valid() {
 			return v, p.ErrIneligible
 		}
 		amount := new(big.Int).Quo(new(big.Int).Mul(big.NewInt(o.Amount.AmountMinor), big.NewInt(line.LineAmountMinor)), big.NewInt(total)).Int64()
@@ -127,7 +127,12 @@ func (s *Service) freeze(o orderdomain.Snapshot) (p.Snapshot, error) {
 		if amount <= 0 {
 			return v, p.ErrIneligible
 		}
-		v.Lines = append(v.Lines, p.Line{TaxCode: tax.Code, GoodsName: tax.GoodsName, Quantity: int64(line.Quantity) * 100000000, TotalAmount: amount, TaxRate: tax.Rate})
+		var policy *int64
+		if tax.PreferentialPolicyCode != nil {
+			value := *tax.PreferentialPolicyCode
+			policy = &value
+		}
+		v.Lines = append(v.Lines, p.Line{TaxCode: tax.Code, GoodsName: tax.GoodsName, Quantity: int64(line.Quantity) * 100000000, TotalAmount: amount, TaxRate: tax.Rate, PreferentialPolicyCode: policy})
 	}
 	return v, nil
 }

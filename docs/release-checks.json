@@ -1,20 +1,54 @@
 {
   "schema": 1,
-  "baseline_sha": "5d247fef0eaf948390430f5c61ff2061949be820",
+  "baseline_sha": "6ccf276ef9b75dd91516bf37a13cbef4d6e1d557",
   "checks": [
-    {"lane": "backend", "path": "internal/order/app/customer_lineage_test.go", "test": "TestCustomerOrderLineageFailureNeverReadsUnscopedOrders"},
-    {"lane": "backend", "path": "internal/order/app/customer_lineage_test.go", "test": "TestCustomerActivitiesLineageKeepsPartyRolesAndRejectsUnrelatedRows"},
-    {"lane": "backend", "path": "internal/order/app/service_test.go", "test": "TestCustomerActivitiesUseCustomerScopedWatermarkedKeysetAndRelationship"},
-    {"lane": "backend", "path": "internal/order/store/postgres_integration_test.go", "test": "TestPostgreSQLCustomerActivitiesKeepPartyScopeAndKeyset", "postgres": true},
-    {"lane": "backend", "path": "internal/identity/query/postgres_integration_test.go", "test": "TestPostgreSQLOneIDQueries", "postgres": true},
-    {"lane": "backend", "path": "cmd/aicrm/customer_order_lineage_postgres_test.go", "test": "TestPostgreSQLCustomerOrdersRetainMergedHistoryAndRestoreAfterRevert", "postgres": true},
-    {"lane": "backend", "path": "cmd/aicrm/open_platform_v1_test.go", "test": "TestV1CustomerActivitiesMergeOwnerPagesAndBindCursor"},
-    {"lane": "backend", "path": "cmd/aicrm/open_platform_v1_test.go", "test": "TestV1CustomerActivitiesFailClosedAndUseOneHundredItemLookahead"},
-    {"lane": "backend", "path": "cmd/aicrm/open_platform_v1_test.go", "test": "TestV1CustomerScopeOwnerFailureIsUnavailableBeforeContextOrActivities"},
-    {"lane": "backend", "path": "internal/customer/http/handler_test.go", "test": "TestCustomer360ContainsOnlyApprovedLocalSections"},
-    {"lane": "backend", "path": "internal/customer/http/handler_test.go", "test": "TestCustomer360RiskDegradesWhenRequiredSectionsAreUnavailable"},
-    {"lane": "backend", "path": "internal/customer/http/handler_test.go", "test": "TestCustomerDetailReturnsOnlySafeIdentityAndPhoneSummaries"}
+    {
+      "lane": "backend",
+      "package": "./internal/invoice/provider"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/invoice-setup"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/platform/config/invoice_test.go",
+      "test": "TestInvoiceProviderDisabledByDefaultAndIncompleteFailsClosed"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/platform/config/invoice_test.go",
+      "test": "TestInvoiceExplicitTrustAndPrivateKeyFile"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_setup_test.go",
+      "test": "TestInvoiceCompositionUsesSeparateServicePublicKey"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_setup_test.go",
+      "test": "TestInvoiceFinanceMappingRequiresExplicitTaxFacts"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_postgres_test.go",
+      "test": "TestInvoicePostgreSQLAtomicReplayAndUnknownRecovery",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_callback_postgres_test.go",
+      "test": "TestInvoicePostgreSQLCallbackAcknowledgementAndReplay",
+      "postgres": true
+    }
   ],
   "installed_checks": [],
-  "build_commands": []
+  "build_commands": [
+    "./cmd/invoice-setup"
+  ]
 }

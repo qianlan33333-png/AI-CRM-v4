@@ -66,7 +66,7 @@ func (f *invoiceFixtureProvider) Title(context.Context, p.Application, string) (
 	return p.Launch{AppID: "wx-invoice-fixture", Path: "pages/title", UserName: "gh_fixture", ExpiresAt: time.Now().Add(30 * time.Minute)}, nil
 }
 func (f *invoiceFixtureProvider) ReadTitle(_ context.Context, a p.Application) (p.Buyer, error) {
-	return p.Buyer{Type: "INDIVIDUAL", Name: "隔离测试抬头", Amount: a.Snapshot.Amount}, nil
+	return p.Buyer{Type: "INDIVIDUAL", Name: "隔离测试抬头", Amount: a.Snapshot.Amount, Phone: "13800000000", Email: "invoice@fixture.test", Address: "fixture address", BankName: "fixture bank"}, nil
 }
 func (f *invoiceFixtureProvider) Query(_ context.Context, a p.Application) (p.Result, error) {
 	f.mu.Lock()
@@ -411,6 +411,9 @@ func TestInvoicePostgreSQLAtomicReplayAndUnknownRecovery(t *testing.T) {
 		t.Fatal(e)
 	}
 	a = f.read(r.ID)
+	if a.Buyer.Phone != "13800000000" || a.Buyer.Email != "invoice@fixture.test" || a.Buyer.Address != "fixture address" || a.Buyer.BankName != "fixture bank" {
+		t.Fatal("official buyer fields lost in durable snapshot")
+	}
 	f.provider.unknown = true
 	f.run(a.IssueEffect)
 	f.run(a.IssueEffect)

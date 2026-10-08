@@ -20,15 +20,65 @@
    | `AICRM_INVOICE_SERVICE_MERCHANT_ID` | 自有服务商商户号 |
    | `AICRM_INVOICE_MERCHANT_SERIAL` | 服务商 API 证书序列号 |
    | `AICRM_INVOICE_PRIVATE_KEY_PATH` | 服务商签名私钥文件 |
-   | `AICRM_INVOICE_PLATFORM_CERT_PATH` | 当前有效微信支付平台证书，轮换前更新 |
-   | `AICRM_INVOICE_API_V3_KEY` | 服务商 APIv3 密钥，32 字节 |
+   | `AICRM_INVOICE_AUTH_MODE` | `public_key` 或 `certificate`；缺省保留 certificate 兼容 |
+   | `AICRM_INVOICE_PUBLIC_KEY_ID` / `...PUBLIC_KEY_PATH` | public_key 模式的已核验微信支付公钥 ID 和 PEM；不可使用商户 API 证书或其序列号代替 |
+   | `AICRM_INVOICE_PLATFORM_CERT_PATH` | certificate 模式的有效平台证书；不可与公钥配置混用 |
+   | `AICRM_INVOICE_API_V3_KEY_PATH` | 推荐：服务商 APIv3 密钥文件，32 字节，可有单个末尾换行；属主为运行用户，权限 0600 |
+   | `AICRM_INVOICE_API_V3_KEY` | 兼容原环境变量；不得同时设置 KEY_PATH |
    | `AICRM_INVOICE_SELLER_NAME` / `...SELLER_TAX_ID` | 本企业开票主体 |
    | `AICRM_INVOICE_BILLING_PERSON_ID` | 已授权开票员 |
    | `AICRM_INVOICE_TAX_CONFIG_PATH` | 财务保存的映射文件绝对路径 |
 
    启用要求现有 External Effects、微信支付及 H5 OAuth 同时启用。配置缺失、文件无效或税率未明确填写时启动失败，不能宣称已开通。只记录配置存在与摘要，不读出凭据。
 5. 将微信抬头、出票、冲红、插卡和卡券作废通知配置到同一个官方 HTTPS 地址 `/api/callbacks/wechat-invoice`。通知经官方 SDK 验签解密并去重，仅触发原申请的认证查询；查询确认最终状态。
-6. 保存后独立读回服务商资格、税务授权、公众号/卡券配置和财务文件摘要。通过唯一发布工作台安装同一准确构件，真实验收分别记录微信授权、真实出票、卡包插入、全额/部分退款后的整票冲红及卡券作废。HTTP 204、队列受理和 Provider 接口受理均不等于出票或交付。
+6. 保存后独立读回服务商资格、税务授权、公众号/卡券配置和财务文件摘要。通过唯一发布工作台安装同一准确构件，真实验收分别记录微信授权、真实出票、卡包插入、全额/部分退款后的整票冲红及卡券作废。HTTP 200、队列受理和 Provider 接口受理均不等于出票或交付。
+
+## 配置检查与填写位置
+
+`cmd/invoice-setup` 复用现有官方 SDK，不依赖数据库或 APIv3 密钥；默认只读，不开票或退款。工具校验服务商 API 证书的商户号、有效期和私钥匹配，以及显式公钥/平台证书信任材料。参数文件 0600；每次使用一个新的回执路径，文件包含先持久化的操作意图和最终结果两条 JSONL。原始回执及开票人/销售方信息只保存在私密文件；stdout 仅输出汇总。
+
+配置文件格式（路径与商户参数由运维从实际证书/环境填写，logo 尚未确认可以留空做 read）：
+
+```json
+{
+  "service_merchant_id": "<服务商商户号>",
+  "sub_merchant_id": "<收款商户号>",
+  "merchant_certificate_path": "/private/apiclient_cert.pem",
+  "private_key_path": "/private/apiclient_key.pem",
+  "auth_mode": "public_key",
+  "public_key_id": "PUB_KEY_ID_<已核验公钥ID>",
+  "public_key_path": "/private/pub_key.pem",
+  "public_origin": "https://<官方域名>",
+  "card_appid": "<现有公众号AppID>",
+  "card_logo_url": "<公众号身份上传永久素材得到的mmbiz.qpic.cn图片URL>"
+}
+```
+
+```sh
+invoice-setup -config /private/invoice-setup.json -action read -receipt /private/read-1.jsonl
+invoice-setup -config /private/invoice-setup.json -action development -receipt /private/development-1.jsonl
+invoice-setup -config /private/invoice-setup.json -action card -allow-card-replace -receipt /private/card-1.jsonl
+```
+
+- `read`：读取权限、商户基本信息、税码目录、服务商及商户开发配置、最近六天授权记录。`complete` 仅代表这些读取全部成功；不代表应用启用。基础信息接口报地址校验错误时保持错误事实，可从匹配该商户的已验签邀请记录获取主体事实，再由财务确认；不得填造地址。空税码目录不自动猜税，需要填写本地财务映射。
+- `development`：必须先安装本候选回调处理器；GET 返回 200 仅表示可达，不接受业务通知。配置官方 HTTPS 回调，再分别 GET 服务商回调及商户开关。关闭专票和微信支付账单入口：首版仅 CRM 本人订单页申请，支付账单入口产生不同申请编号，不能以不存在的 CRM 申请确认已开票。公众号菜单仍可正常使用订单链接。
+- `card`：明确确认后才使用 `-allow-card-replace`，官方接口会覆盖原模板；logo 必须来自公众号永久素材。保存验签的 `card_appid/card_id` 创建回执。官方没有模板 GET，该回执不冒称独立卡包验收；启用后用真实出票/插卡/卡券读取验收。网络或验签结果未知时停止写入，不创建新回执盲目重试覆盖。
+
+给用户的准确链接位置：
+
+| 位置 | 填写内容 | 谁填写 |
+|---|---|---|
+| 公众号后台 → 自定义菜单 → 菜单内容「跳转网页」 | `https://<官方域名>/my/orders`，保存并发布菜单 | 用户 |
+| 公众号后台 → 设置与开发 → 公众号设置 → 功能设置 → 网页授权域名、JS 接口安全域名 | 官方域名主机名，不带 https 和路径；复用当前已生效 OAuth/JS 配置 | 用户核对已有配置 |
+| 微信支付合作伙伴平台 → 账户中心 → API 安全 → APIv3 密钥 | 服务商号的 32 字节密钥；本机写入私密 KEY_PATH 文件 | 用户 |
+| 私密 `invoice-setup.json` 的 `card_logo_url` | 公众号永久素材的 logo URL | 用户 |
+| 私密税务映射 `product_code → code/rate/goods_name` | 财务确认；只保留首版要支持的商品。可显式填写官方 `preferential_policy_code`（1–18），不推断政策 | 财务 |
+| 官方配置接口 `PATCH .../merchant/development-config` 的 `callback_url` | `https://<官方域名>/api/callbacks/wechat-invoice` | 运维用工具配置，用户不用寻找后台输入框 |
+| 官方卡券模板 `custom_cell.jump_url` | `https://<官方域名>/my/orders` | 运维用工具配置 |
+
+商品税率仅接受官方支持值（单位万分比），遗漏或 `null` 不等同于 0。官方抬头查询的可选地址、电话、银行、联系方式及留言保留；手机号和邮件用商户 API 私钥解密，出票前以副本用对应微信支付信任公钥重新加密，持久化快照及效果摘要不因加密随机性改变。
+
+生产准备：由唯一发布工作台将服务商私钥、公钥、APIv3 密钥及财务映射安装至 `/etc/aicrm/keys/invoice/`（目录 0700，文件 0600，属主运行用户 `aicrm`），将发票配置合入 `/etc/aicrm/aicrm.env`；只修改 `AICRM_INVOICE_*`，现有微信收款凭据保持原商户。最终输入与启用授权齐备后才设置 `AICRM_INVOICE_PROVIDER_ENABLED=true`，所有 API / worker 使用同一配置并独立读回。此任务只交付候选，不安装共享环境。
 
 ## 运行行为与恢复
 

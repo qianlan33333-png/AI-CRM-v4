@@ -24,11 +24,23 @@ func TestInvoiceBeijingDatesAndRejectedFilters(t *testing.T) {
 	}
 }
 func TestInvoiceFrozenTaxUsesPaidAmountAndNoGuesses(t *testing.T) {
+	policy := int64(8)
 	s := Service{Config: p.Config{MerchantID: "merchant", SellerTaxID: "taxpayer", BillingPersonID: "person", Taxes: map[string]p.Tax{"course": {Code: "3010101020203000000", Rate: 600, GoodsName: "课程服务"}}}}
 	order := o.Snapshot{Amount: o.Money{AmountMinor: 9900000000000, Currency: "CNY"}, Items: []o.ItemSnapshot{{ProductCode: "course", Quantity: 1, LineAmountMinor: 10000000000000}, {ProductCode: "course", Quantity: 1, LineAmountMinor: 10000000000000}}}
+	tax := s.Config.Taxes["course"]
+	tax.PreferentialPolicyCode = &policy
+	s.Config.Taxes["course"] = tax
 	snapshot, e := s.freeze(order)
 	if e != nil || snapshot.Lines[0].TotalAmount != 4950000000000 || snapshot.Lines[0].TotalAmount+snapshot.Lines[1].TotalAmount != order.Amount.AmountMinor {
 		t.Fatalf("discount allocation/overflow=%+v %v", snapshot, e)
+	}
+	policy = 9
+	if snapshot.Lines[0].PreferentialPolicyCode == nil || *snapshot.Lines[0].PreferentialPolicyCode != 8 {
+		t.Fatal("finance policy was not frozen")
+	}
+	tax.Rate = 800
+	if tax.Valid() {
+		t.Fatal("unsupported official rate accepted")
 	}
 	order.Items[0].ProductCode = "unknown"
 	if _, e = s.freeze(order); e == nil {
@@ -61,5 +73,23 @@ func TestInvoiceHTTPRejectsUnauthenticatedAndCrossSiteWrite(t *testing.T) {
 	}
 	if validApplicationID("../../admin") || validApplicationID("inv_"+strings.Repeat("g", 28)) {
 		t.Fatal("invalid application route accepted")
+	}
+}
+
+func TestInvoiceCallbackProbeCannotAcceptBusinessNotice(t *testing.T) {
+	// A disabled provider may be reached by the official config checker. It must
+	// never acknowledge unsigned POSTs as successfully accepted business notices.
+	h := Handler{Service: &Service{}}
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(method, "https://crm.test/api/callbacks/wechat-invoice", nil))
+		if w.Code != 200 || w.Body.Len() != 0 {
+			t.Fatal("probe failed")
+		}
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "https://crm.test/api/callbacks/wechat-invoice", strings.NewReader(`{}`)))
+	if w.Code < 400 {
+		t.Fatal("unsigned business notice acknowledged")
 	}
 }

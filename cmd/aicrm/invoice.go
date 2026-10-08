@@ -17,6 +17,7 @@ import (
 	config "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 	"github.com/riverqueue/river"
+	"github.com/wechatpay-apiv3/wechatpay-go/utils"
 	"net/http"
 	"os"
 	"strings"
@@ -30,18 +31,10 @@ type invoiceIdentity interface {
 func composeInvoice(uow platformport.UnitOfWork, sessions paymentport.SessionReader, identities invoiceIdentity, orders orderport.SelfReader, refunds paymentport.RefundExposureReader, effects effectport.TransactionalAccepter, jobs *river.Client[pgx.Tx], cfg config.Runtime) (*invoice.Service, *invoice.Handler, error) {
 	c := p.Config{Enabled: cfg.Invoice.Enabled, MerchantID: cfg.WeChatPay.MerchantID, AppID: cfg.WeChatPay.H5AppID, AppScope: cfg.WeChatPay.H5AppScope, SellerName: cfg.Invoice.SellerName, SellerTaxID: cfg.Invoice.SellerTaxID, BillingPersonID: cfg.Invoice.BillingPersonID}
 	if c.Enabled {
-		raw, e := os.ReadFile(cfg.Invoice.TaxConfigPath)
-		if e != nil || json.Unmarshal(raw, &c.Taxes) != nil || len(c.Taxes) == 0 {
-			return nil, nil, errors.New("invoice finance configuration unavailable")
-		}
-		var values map[string]map[string]json.RawMessage
-		if json.Unmarshal(raw, &values) != nil {
-			return nil, nil, p.ErrInvalid
-		}
-		for code, tax := range c.Taxes {
-			if code == "" || len(tax.Code) != 19 || strings.Trim(tax.Code, "0123456789") != "" || tax.Rate < 0 || tax.Rate > 10000 || tax.GoodsName == "" || values[code]["rate"] == nil {
-				return nil, nil, errors.New("invoice tax configuration incomplete")
-			}
+		var e error
+		c.Taxes, e = loadInvoiceTaxes(cfg.Invoice.TaxConfigPath)
+		if e != nil {
+			return nil, nil, e
 		}
 	}
 	stateReader, ok := effects.(effectport.WithinReader)
@@ -54,6 +47,24 @@ func composeInvoice(uow platformport.UnitOfWork, sessions paymentport.SessionRea
 	}
 	s := &invoice.Service{Finality: finality, EffectStates: stateReader, UoW: uow, Sessions: sessions, Lineage: identities, Identities: identities, Orders: orders, Refunds: refunds, Effects: effects, Jobs: invoice.QueryEnqueuer{Client: jobs}, Config: c}
 	return s, &invoice.Handler{Service: s, Origins: []string{cfg.PublicOrigin, h5PublicOrigin(cfg)}, Dist: "web/dist"}, nil
+}
+
+func loadInvoiceTaxes(path string) (map[string]p.Tax, error) {
+	raw, e := os.ReadFile(path)
+	var taxes map[string]p.Tax
+	if e != nil || len(raw) > 1<<20 || json.Unmarshal(raw, &taxes) != nil || len(taxes) == 0 {
+		return nil, errors.New("invoice finance configuration unavailable")
+	}
+	var values map[string]map[string]json.RawMessage
+	if json.Unmarshal(raw, &values) != nil {
+		return nil, p.ErrInvalid
+	}
+	for code, tax := range taxes {
+		if code == "" || !tax.Valid() || values[code]["rate"] == nil || string(values[code]["rate"]) == "null" {
+			return nil, errors.New("invoice tax configuration incomplete")
+		}
+	}
+	return taxes, nil
 }
 
 type invoicePaymentVerifier struct {
@@ -90,15 +101,23 @@ func enableInvoiceProvider(ctx context.Context, s *invoice.Service, payments pay
 	if !ok {
 		return p.ErrInvalid
 	}
-	raw, e = os.ReadFile(cfg.Invoice.PlatformCertPath)
-	if e != nil {
-		return errors.New("invoice platform certificate unavailable")
-	}
-	cert, e := paymentprovider.ParsePlatformX509Certificate(raw)
-	if e != nil {
+	trust := invoiceprovider.Trust{Mode: cfg.Invoice.AuthMode}
+	switch trust.Mode {
+	case "public_key":
+		trust.PublicKeyID = cfg.Invoice.PublicKeyID
+		trust.PublicKey, e = utils.LoadPublicKeyWithPath(cfg.Invoice.PublicKeyPath)
+	case "certificate":
+		raw, e = os.ReadFile(cfg.Invoice.PlatformCertPath)
+		if e == nil {
+			trust.Certificate, e = paymentprovider.ParsePlatformX509Certificate(raw)
+		}
+	default:
 		return p.ErrInvalid
 	}
-	provider, e := invoiceprovider.New(ctx, cfg.Invoice.ServiceMerchantID, cfg.Invoice.MerchantSerial, cfg.Invoice.APIV3Key, key, cert, &invoiceprovider.OfficialAccount{AppID: cfg.WeChatPay.H5AppID, Secret: cfg.WeChatPay.H5AppSecret}, s, invoicePaymentVerifier{provider: payments, merchant: cfg.WeChatPay.MerchantID})
+	if e != nil {
+		return errors.New("invoice trust material unavailable")
+	}
+	provider, e := invoiceprovider.NewWithTrust(ctx, cfg.Invoice.ServiceMerchantID, cfg.Invoice.MerchantSerial, cfg.Invoice.APIV3Key, key, trust, &invoiceprovider.OfficialAccount{AppID: cfg.WeChatPay.H5AppID, Secret: cfg.WeChatPay.H5AppSecret}, s, invoicePaymentVerifier{provider: payments, merchant: cfg.WeChatPay.MerchantID})
 	if e != nil {
 		return e
 	}

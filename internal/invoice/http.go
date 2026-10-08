@@ -41,6 +41,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "/api/callbacks/wechat-invoice" {
+		// Development-config reachability checks carry no business notification.
+		// A GET/HEAD never bypasses verification or mutates an invoice.
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		if r.Method != http.MethodPost {
 			h.fail(w, p.ErrInvalid)
 			return
@@ -59,7 +65,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, e)
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 	token := ""

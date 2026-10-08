@@ -357,6 +357,7 @@ type WeChatPay struct {
 type Invoice struct {
 	Enabled                                                                       bool
 	ServiceMerchantID, MerchantSerial, PrivateKeyPath, PlatformCertPath, APIV3Key string
+	AuthMode, PublicKeyID, PublicKeyPath, APIV3KeyPath                            string
 	SellerName, SellerTaxID, BillingPersonID, TaxConfigPath                       string
 }
 
@@ -495,6 +496,10 @@ func Load() (Runtime, error) {
 	cfg.Invoice.PrivateKeyPath = os.Getenv("AICRM_INVOICE_PRIVATE_KEY_PATH")
 	cfg.Invoice.PlatformCertPath = os.Getenv("AICRM_INVOICE_PLATFORM_CERT_PATH")
 	cfg.Invoice.APIV3Key = os.Getenv("AICRM_INVOICE_API_V3_KEY")
+	cfg.Invoice.APIV3KeyPath = os.Getenv("AICRM_INVOICE_API_V3_KEY_PATH")
+	cfg.Invoice.AuthMode = valueOrDefault("AICRM_INVOICE_AUTH_MODE", "certificate")
+	cfg.Invoice.PublicKeyID = os.Getenv("AICRM_INVOICE_PUBLIC_KEY_ID")
+	cfg.Invoice.PublicKeyPath = os.Getenv("AICRM_INVOICE_PUBLIC_KEY_PATH")
 	cfg.Invoice.SellerName = os.Getenv("AICRM_INVOICE_SELLER_NAME")
 	cfg.Invoice.SellerTaxID = os.Getenv("AICRM_INVOICE_SELLER_TAX_ID")
 	cfg.Invoice.BillingPersonID = os.Getenv("AICRM_INVOICE_BILLING_PERSON_ID")
@@ -845,8 +850,14 @@ func Load() (Runtime, error) {
 		}
 	}
 	if cfg.Invoice.Enabled {
-		values := []string{cfg.Invoice.ServiceMerchantID, cfg.Invoice.MerchantSerial, cfg.Invoice.PrivateKeyPath, cfg.Invoice.PlatformCertPath, cfg.Invoice.APIV3Key, cfg.Invoice.SellerName, cfg.Invoice.SellerTaxID, cfg.Invoice.BillingPersonID, cfg.Invoice.TaxConfigPath}
-		if !cfg.Effects.ProviderEnabled || !cfg.WeChatPay.Enabled || !cfg.WeChatPay.H5OAuthEnabled || nonEmptyCount(values) != len(values) || len(cfg.Invoice.APIV3Key) != 32 {
+		cfg.Invoice.APIV3Key, err = readInvoiceKey(cfg.Invoice.APIV3Key, cfg.Invoice.APIV3KeyPath)
+		if err != nil {
+			return Runtime{}, err
+		}
+		if err = ValidateInvoice(cfg.Invoice); err != nil {
+			return Runtime{}, err
+		}
+		if !cfg.Effects.ProviderEnabled || !cfg.WeChatPay.Enabled || !cfg.WeChatPay.H5OAuthEnabled {
 			return Runtime{}, errors.New("enabled invoice provider requires service-provider credentials, finance configuration and WeChat H5 authorization")
 		}
 	}

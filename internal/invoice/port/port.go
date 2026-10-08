@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var (
@@ -19,22 +21,39 @@ var (
 )
 
 type Tax struct {
-	Code      string `json:"code"`
-	Rate      int64  `json:"rate"`
-	GoodsName string `json:"goods_name"`
+	Code                   string `json:"code"`
+	Rate                   int64  `json:"rate"`
+	GoodsName              string `json:"goods_name"`
+	PreferentialPolicyCode *int64 `json:"preferential_policy_code,omitempty"`
 }
+
+// Tax facts are supplied by finance. Reject unsupported official rates rather
+// than dispatching an invalid request and leaving the customer awaiting a ticket.
+func (t Tax) Valid() bool {
+	if len(t.Code) != 19 || strings.Trim(t.Code, "0123456789") != "" || strings.TrimSpace(t.GoodsName) == "" || utf8.RuneCountInString(t.GoodsName) > 128 {
+		return false
+	}
+	switch t.Rate {
+	case 0, 100, 150, 300, 500, 600, 900, 1000, 1100, 1300, 1600, 1700:
+	default:
+		return false
+	}
+	return t.PreferentialPolicyCode == nil || *t.PreferentialPolicyCode >= 1 && *t.PreferentialPolicyCode <= 18
+}
+
 type Config struct {
 	Enabled                                                               bool
 	MerchantID, AppID, AppScope, SellerName, SellerTaxID, BillingPersonID string
 	Taxes                                                                 map[string]Tax
 }
 type Line struct {
-	TaxCode     string `json:"tax_code"`
-	GoodsName   string `json:"goods_name"`
-	Quantity    int64  `json:"quantity"`
-	TotalAmount int64  `json:"total_amount"`
-	TaxRate     int64  `json:"tax_rate"`
-	Discount    bool   `json:"discount"`
+	TaxCode                string `json:"tax_code"`
+	GoodsName              string `json:"goods_name"`
+	Quantity               int64  `json:"quantity"`
+	TotalAmount            int64  `json:"total_amount"`
+	TaxRate                int64  `json:"tax_rate"`
+	Discount               bool   `json:"discount"`
+	PreferentialPolicyCode *int64 `json:"preferential_policy_code,omitempty"`
 }
 type Snapshot struct {
 	MerchantID      string `json:"merchant_id"`
@@ -60,12 +79,19 @@ type Application struct {
 	UpdatedAt                                          time.Time
 }
 type Buyer struct {
-	Type       string `json:"type"`
-	Name       string `json:"name"`
-	TaxpayerID string `json:"taxpayer_id,omitempty"`
-	Amount     int64  `json:"amount,omitempty"`
-	OrderNo    string `json:"out_trade_no,omitempty"`
-	BillType   string `json:"fapiao_bill_type,omitempty"`
+	Type             string `json:"type"`
+	Name             string `json:"name"`
+	TaxpayerID       string `json:"taxpayer_id,omitempty"`
+	Address          string `json:"address,omitempty"`
+	Telephone        string `json:"telephone,omitempty"`
+	BankName         string `json:"bank_name,omitempty"`
+	BankAccount      string `json:"bank_account,omitempty"`
+	Phone            string `json:"phone,omitempty" encryption:"EM_APIV3"`
+	Email            string `json:"email,omitempty" encryption:"EM_APIV3"`
+	UserApplyMessage string `json:"user_apply_message,omitempty"`
+	Amount           int64  `json:"amount,omitempty"`
+	OrderNo          string `json:"out_trade_no,omitempty"`
+	BillType         string `json:"fapiao_bill_type,omitempty"`
 }
 
 func (b Buyer) Valid(s Snapshot) bool {

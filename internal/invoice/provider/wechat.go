@@ -13,11 +13,9 @@ import (
 	effects "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	p "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice/port"
 	"github.com/wechatpay-apiv3/wechatpay-go/core"
-	"github.com/wechatpay-apiv3/wechatpay-go/core/auth/verifiers"
-	"github.com/wechatpay-apiv3/wechatpay-go/core/cipher/decryptors"
-	"github.com/wechatpay-apiv3/wechatpay-go/core/cipher/encryptors"
+	"github.com/wechatpay-apiv3/wechatpay-go/core/auth"
+	"github.com/wechatpay-apiv3/wechatpay-go/core/auth/validators"
 	"github.com/wechatpay-apiv3/wechatpay-go/core/notify"
-	"github.com/wechatpay-apiv3/wechatpay-go/core/option"
 	"io"
 	"net/http"
 	"net/url"
@@ -30,6 +28,7 @@ type WeChat struct {
 	Client         *core.Client
 	FileClient     *http.Client
 	Notify         *notify.Handler
+	Verifier       auth.Verifier
 	MerchantID     string
 	PlatformSerial string
 	Material       p.MaterialReader
@@ -38,16 +37,18 @@ type WeChat struct {
 }
 
 func New(ctx context.Context, merchant, serial, apiKey string, key *rsa.PrivateKey, certificate *x509.Certificate, oa *OfficialAccount, material p.MaterialReader, payments p.PaymentVerifier) (*WeChat, error) {
-	if merchant == "" || serial == "" || len(apiKey) != 32 || key == nil || certificate == nil || oa == nil || material == nil || payments == nil || time.Now().Before(certificate.NotBefore) || time.Now().After(certificate.NotAfter) {
+	return NewWithTrust(ctx, merchant, serial, apiKey, key, Trust{Mode: "certificate", Certificate: certificate}, oa, material, payments)
+}
+
+func NewWithTrust(ctx context.Context, merchant, serial, apiKey string, key *rsa.PrivateKey, trust Trust, oa *OfficialAccount, material p.MaterialReader, payments p.PaymentVerifier) (*WeChat, error) {
+	if len(apiKey) != 32 || oa == nil || material == nil || payments == nil {
 		return nil, p.ErrInvalid
 	}
-	visitor := core.NewCertificateMapWithList([]*x509.Certificate{certificate})
-	verifier := verifiers.NewSHA256WithRSAVerifier(visitor)
-	c, e := core.NewClient(ctx, option.WithMerchantCredential(merchant, serial, key), option.WithVerifier(verifier), option.WithWechatPayCipher(encryptors.NewWechatPayEncryptor(visitor), decryptors.NewWechatPayDecryptor(key)))
+	c, verifier, encryptionID, e := NewTrustedClient(ctx, merchant, serial, key, trust)
 	if e != nil {
 		return nil, p.ErrInvalid
 	}
-	return &WeChat{Client: c, Notify: notify.NewNotifyHandler(apiKey, verifier), MerchantID: merchant, PlatformSerial: strings.ToUpper(certificate.SerialNumber.Text(16)), OA: oa, Material: material, Payments: payments}, nil
+	return &WeChat{Client: c, Notify: notify.NewNotifyHandler(apiKey, verifier), Verifier: verifier, MerchantID: merchant, PlatformSerial: encryptionID, OA: oa, Material: material, Payments: payments}, nil
 }
 
 const base = "https://api.mch.weixin.qq.com/v3/new-tax-control-fapiao"
@@ -58,13 +59,18 @@ func (w *WeChat) request(ctx context.Context, method, path string, q url.Values,
 	}
 	headers := http.Header{}
 	headers.Set("Wechatpay-Serial", w.PlatformSerial)
-	if method == http.MethodPost {
+	if body != nil {
 		headers.Set("Content-Type", "application/json")
 	}
 	result, e := w.Client.Request(ctx, method, base+path, headers, q, body, "application/json")
+	if result != nil && result.Response != nil {
+		defer result.Response.Body.Close()
+	}
 	if e != nil {
 		var api *core.APIError
-		if errors.As(e, &api) && api.StatusCode == 404 {
+		// The SDK validates successful responses only. Never interpret an unsigned
+		// API error as absence of an invoice (which could otherwise cancel recovery).
+		if errors.As(e, &api) && api.StatusCode == 404 && w.Verifier != nil && result != nil && result.Response != nil && validators.NewWechatPayResponseValidator(w.Verifier).Validate(ctx, result.Response) == nil {
 			return p.ErrPending
 		}
 		return p.ErrUnavailable
@@ -72,7 +78,6 @@ func (w *WeChat) request(ctx context.Context, method, path string, q url.Values,
 	if result == nil || result.Response == nil {
 		return p.ErrUnavailable
 	}
-	defer result.Response.Body.Close()
 	if out == nil {
 		return nil
 	}
@@ -97,7 +102,13 @@ func (w *WeChat) Title(ctx context.Context, a p.Application, openID string) (p.L
 func (w *WeChat) ReadTitle(ctx context.Context, a p.Application) (p.Buyer, error) {
 	var b p.Buyer
 	e := w.request(ctx, http.MethodGet, "/user-title", url.Values{"sub_mchid": {a.Snapshot.MerchantID}, "fapiao_apply_id": {a.ID}, "scene": {"WITHOUT_WECHATPAY"}}, nil, &b)
-	return b, e
+	if e != nil {
+		return p.Buyer{}, e
+	}
+	if e = w.Client.DecryptResponse(ctx, &b); e != nil {
+		return p.Buyer{}, p.ErrUnavailable
+	}
+	return b, nil
 }
 func (w *WeChat) Query(ctx context.Context, a p.Application) (p.Result, error) {
 	var list struct {
@@ -121,12 +132,25 @@ func (w *WeChat) Write(ctx context.Context, a p.Application, reverse bool) error
 	return w.writeVerified(ctx, a, reverse)
 }
 func (w *WeChat) writeVerified(ctx context.Context, a p.Application, reverse bool) error {
+	path, body, e := w.prepareWrite(ctx, a, reverse)
+	if e != nil {
+		return e
+	}
+	return w.request(ctx, http.MethodPost, path, nil, body, nil)
+}
+func (w *WeChat) prepareWrite(ctx context.Context, a p.Application, reverse bool) (string, any, error) {
 	if reverse {
 		body := map[string]any{"sub_mchid": a.Snapshot.MerchantID, "reverse_reason": "SALES_RETURN", "fapiao_information": []map[string]string{{"fapiao_id": a.InvoiceID, "fapiao_number": a.BlueNumber}}}
-		return w.request(ctx, http.MethodPost, "/fapiao-applications/"+url.PathEscape(a.ID)+"/reverse", nil, body, nil)
+		return "/fapiao-applications/" + url.PathEscape(a.ID) + "/reverse", body, nil
 	}
-	body := map[string]any{"sub_mchid": a.Snapshot.MerchantID, "fapiao_apply_id": a.ID, "buyer_information": a.Buyer, "fapiao_information": map[string]any{"fapiao_id": a.InvoiceID, "total_amount": a.Snapshot.Amount, "items": a.Snapshot.Lines, "billing_person_id": a.Snapshot.BillingPersonID, "fapiao_bill_type": "COMM_FAPIAO", "transaction_information": []map[string]any{{"pay_channel": "WECHAT_PAY", "transaction_id": a.Snapshot.TransactionID, "out_trade_no": a.Snapshot.OrderNo, "amount": a.Snapshot.Amount}}}}
-	return w.request(ctx, http.MethodPost, "/fapiao-applications/issue-general", nil, body, nil)
+	// Encrypt a value copy: the persisted buyer and stable effect hash remain plaintext.
+	buyer := a.Buyer
+	serial, e := w.Client.EncryptRequest(ctx, &buyer)
+	if e != nil || serial != w.PlatformSerial {
+		return "", nil, p.ErrInvalid
+	}
+	body := map[string]any{"sub_mchid": a.Snapshot.MerchantID, "fapiao_apply_id": a.ID, "buyer_information": buyer, "fapiao_information": map[string]any{"fapiao_id": a.InvoiceID, "total_amount": a.Snapshot.Amount, "items": a.Snapshot.Lines, "billing_person_id": a.Snapshot.BillingPersonID, "fapiao_bill_type": "COMM_FAPIAO", "transaction_information": []map[string]any{{"pay_channel": "WECHAT_PAY", "transaction_id": a.Snapshot.TransactionID, "out_trade_no": a.Snapshot.OrderNo, "amount": a.Snapshot.Amount}}}}
+	return "/fapiao-applications/issue-general", body, nil
 }
 func (w *WeChat) Execute(ctx context.Context, envelope effects.Envelope, attempt effects.Attempt) (effects.AdapterResult, error) {
 	if envelope.Owner != effects.OwnerInvoice || (envelope.Kind != effects.KindInvoiceIssue && envelope.Kind != effects.KindInvoiceReverse) {
@@ -149,7 +173,11 @@ func (w *WeChat) Execute(ctx context.Context, envelope effects.Envelope, attempt
 			return effects.AdapterResult{Completion: effects.StateFinalFailed, ReceiptDigest: effects.Hash("invoice.payment.unverified", attempt.EffectID), FailureCode: code}, nil
 		}
 	}
-	e = w.writeVerified(ctx, a, reverse)
+	path, body, e := w.prepareWrite(ctx, a, reverse)
+	if e != nil {
+		return effects.AdapterResult{Completion: effects.StateFinalFailed, ReceiptDigest: effects.Hash("invoice.prepare.failed", attempt.EffectID), FailureCode: "invoice_request_invalid"}, nil
+	}
+	e = w.request(ctx, http.MethodPost, path, nil, body, nil)
 	state := effects.StateExecuted
 	if e != nil {
 		state = effects.StateUnknown

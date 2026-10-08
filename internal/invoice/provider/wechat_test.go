@@ -16,8 +16,6 @@ import (
 	"github.com/emmansun/gmsm/sm3"
 	effects "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	p "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice/port"
-	"github.com/wechatpay-apiv3/wechatpay-go/core"
-	"github.com/wechatpay-apiv3/wechatpay-go/core/auth/verifiers"
 	"github.com/wechatpay-apiv3/wechatpay-go/core/option"
 	"io"
 	"math/big"
@@ -67,8 +65,7 @@ func invoiceProviderFixture(t *testing.T, respond func(*http.Request) string) (*
 	if e != nil {
 		t.Fatal(e)
 	}
-	visitor := core.NewCertificateMapWithList([]*x509.Certificate{cert})
-	client, e := core.NewClient(context.Background(), option.WithMerchantCredential("service-merchant", "merchant-serial", key), option.WithVerifier(verifiers.NewSHA256WithRSAVerifier(visitor)), option.WithHTTPClient(&http.Client{Transport: invoiceTransport(func(r *http.Request) (*http.Response, error) {
+	client, _, _, e := NewTrustedClient(context.Background(), "service-merchant", "merchant-serial", key, Trust{Mode: "certificate", Certificate: cert}, option.WithHTTPClient(&http.Client{Transport: invoiceTransport(func(r *http.Request) (*http.Response, error) {
 		body := respond(r)
 		ts := fmt.Sprint(time.Now().Unix())
 		nonce := "fixture-nonce"
@@ -235,7 +232,8 @@ func TestInvoiceEffectUnknownCannotRetryAndNoWriteBeforePaymentProof(t *testing.
 		t.Fatal("conflicting payment proof did not fail closed", result, e)
 	}
 	w, key, _ = invoiceProviderFixture(t, func(*http.Request) string { return `{}` })
-	w.Client, _ = core.NewClient(context.Background(), option.WithHTTPClient(&http.Client{Transport: invoiceTransport(func(*http.Request) (*http.Response, error) { return nil, errors.New("synthetic transport loss") })}), option.WithoutValidator(), option.WithMerchantCredential("service-merchant", "merchant-serial", key))
+	w.PlatformSerial = "PUB_KEY_ID_fixture"
+	w.Client, _, _, _ = NewTrustedClient(context.Background(), "service-merchant", "merchant-serial", key, Trust{Mode: "public_key", PublicKeyID: w.PlatformSerial, PublicKey: &key.PublicKey}, option.WithHTTPClient(&http.Client{Transport: invoiceTransport(func(*http.Request) (*http.Response, error) { return nil, errors.New("synthetic transport loss") })}))
 	result, e = w.Execute(context.Background(), effects.Envelope{Owner: effects.OwnerInvoice, Kind: effects.KindInvoiceIssue}, effects.Attempt{EffectID: "eer_2"})
 	if e != nil || !result.CallAttempted || result.Completion != effects.StateUnknown || result.SafeToRetryRejected {
 		t.Fatal("ambiguous issue not kept unknown", result, e)
