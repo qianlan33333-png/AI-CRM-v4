@@ -252,6 +252,30 @@ func (w *WeChat) File(ctx context.Context, a p.Application) ([]byte, error) {
 	return b, nil
 }
 func (w *WeChat) Verify(ctx context.Context, r *http.Request) (p.Notice, error) {
+	if w == nil {
+		return p.Notice{}, p.ErrDisabled
+	}
+	return (&NotificationVerifier{Notify: w.Notify, MerchantID: w.MerchantID}).Verify(ctx, r)
+}
+
+// NotificationVerifier has no client, signing credential or write adapter.
+type NotificationVerifier struct {
+	Notify     *notify.Handler
+	MerchantID string
+}
+
+func NewNotificationVerifier(merchant, apiKey string, trust Trust) (*NotificationVerifier, error) {
+	if merchant == "" || strings.TrimSpace(merchant) != merchant || len(apiKey) != 32 {
+		return nil, p.ErrInvalid
+	}
+	verifier, _, e := trustedVerifier(trust)
+	if e != nil {
+		return nil, e
+	}
+	return &NotificationVerifier{Notify: notify.NewNotifyHandler(apiKey, verifier), MerchantID: merchant}, nil
+}
+
+func (w *NotificationVerifier) Verify(ctx context.Context, r *http.Request) (p.Notice, error) {
 	var out p.Notice
 	if w == nil || w.Notify == nil {
 		return out, p.ErrDisabled
@@ -284,4 +308,5 @@ func (w *WeChat) SignPage(ctx context.Context, page string) (p.JSConfig, error) 
 }
 
 var _ p.Provider = (*WeChat)(nil)
+var _ p.NotificationVerifier = (*NotificationVerifier)(nil)
 var _ effects.ProviderAdapter = (*WeChat)(nil)

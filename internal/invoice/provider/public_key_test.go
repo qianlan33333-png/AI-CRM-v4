@@ -139,12 +139,35 @@ func TestInvoicePublicKeyNotificationsAndWrongTrust(t *testing.T) {
 		r.Header.Set("Wechatpay-Signature", invoiceSignature(t, signer, string(body), ts, "nonce"))
 		return r
 	}
-	if n, e := w.Verify(context.Background(), makeRequest(trust.PublicKeyID, platformKey)); e != nil || n.ApplicationID != a.ID {
-		t.Fatal("public-key notification not verified", e)
+	callback, e := NewNotificationVerifier("service-merchant", apiKey, trust)
+	if e != nil {
+		t.Fatal(e)
 	}
-	for _, r := range []*http.Request{makeRequest("PUB_KEY_ID_foreign", platformKey), makeRequest(trust.PublicKeyID, merchantKey)} {
-		if _, e = w.Verify(context.Background(), r); !errors.Is(e, p.ErrInvalid) {
-			t.Fatal("wrong key or key ID accepted", e)
+	if _, ok := any(callback).(effects.ProviderAdapter); ok {
+		t.Fatal("notification verifier grants external write capability")
+	}
+	for _, verifier := range []p.NotificationVerifier{w, callback} {
+		if n, e := verifier.Verify(context.Background(), makeRequest(trust.PublicKeyID, platformKey)); e != nil || n.ApplicationID != a.ID {
+			t.Fatal("public-key notification not verified", e)
+		}
+		for _, r := range []*http.Request{makeRequest("PUB_KEY_ID_foreign", platformKey), makeRequest(trust.PublicKeyID, merchantKey)} {
+			if _, e = verifier.Verify(context.Background(), r); !errors.Is(e, p.ErrInvalid) {
+				t.Fatal("wrong key or key ID accepted", e)
+			}
+		}
+		stale := makeRequest(trust.PublicKeyID, platformKey)
+		ts := fmt.Sprint(time.Now().Add(-10 * time.Minute).Unix())
+		stale.Header.Set("Wechatpay-Timestamp", ts)
+		stale.Header.Set("Wechatpay-Signature", invoiceSignature(t, platformKey, string(body), ts, "nonce"))
+		if _, e = verifier.Verify(context.Background(), stale); !errors.Is(e, p.ErrInvalid) {
+			t.Fatal("stale signed notification accepted", e)
+		}
+	}
+	wrongKey, _ := NewNotificationVerifier("service-merchant", strings.Repeat("x", 32), trust)
+	wrongScope, _ := NewNotificationVerifier("foreign-service", apiKey, trust)
+	for _, verifier := range []*NotificationVerifier{wrongKey, wrongScope} {
+		if _, e = verifier.Verify(context.Background(), makeRequest(trust.PublicKeyID, platformKey)); !errors.Is(e, p.ErrInvalid) {
+			t.Fatal("wrong decryption key or service scope accepted", e)
 		}
 	}
 	for _, wrong := range []Trust{{Mode: "public_key", PublicKeyID: "serial", PublicKey: &platformKey.PublicKey}, {Mode: "certificate", PublicKeyID: trust.PublicKeyID, PublicKey: &platformKey.PublicKey}, {Mode: "", PublicKeyID: trust.PublicKeyID, PublicKey: &platformKey.PublicKey}} {

@@ -86,21 +86,11 @@ func (v invoicePaymentVerifier) VerifyInvoicePayment(ctx context.Context, s p.Sn
 	return nil
 }
 func enableInvoiceProvider(ctx context.Context, s *invoice.Service, payments paymentport.WeChatPayReconciler, cfg config.Runtime) error {
-	if !cfg.Invoice.Enabled {
+	if !cfg.Invoice.Enabled && !cfg.Invoice.CallbackEnabled {
 		return nil
 	}
-	raw, e := os.ReadFile(cfg.Invoice.PrivateKeyPath)
-	if e != nil {
-		return errors.New("invoice signing key unavailable")
-	}
-	signer, e := paymentprovider.ParseMerchantPrivateKey(raw)
-	if e != nil {
-		return p.ErrInvalid
-	}
-	key, ok := signer.(*rsa.PrivateKey)
-	if !ok {
-		return p.ErrInvalid
-	}
+	var raw []byte
+	var e error
 	trust := invoiceprovider.Trust{Mode: cfg.Invoice.AuthMode}
 	switch trust.Mode {
 	case "public_key":
@@ -116,6 +106,26 @@ func enableInvoiceProvider(ctx context.Context, s *invoice.Service, payments pay
 	}
 	if e != nil {
 		return errors.New("invoice trust material unavailable")
+	}
+	callback, e := invoiceprovider.NewNotificationVerifier(cfg.Invoice.ServiceMerchantID, cfg.Invoice.APIV3Key, trust)
+	if e != nil {
+		return e
+	}
+	s.CallbackVerifier = callback
+	if !cfg.Invoice.Enabled {
+		return nil
+	}
+	raw, e = os.ReadFile(cfg.Invoice.PrivateKeyPath)
+	if e != nil {
+		return errors.New("invoice signing key unavailable")
+	}
+	signer, e := paymentprovider.ParseMerchantPrivateKey(raw)
+	if e != nil {
+		return p.ErrInvalid
+	}
+	key, ok := signer.(*rsa.PrivateKey)
+	if !ok {
+		return p.ErrInvalid
 	}
 	provider, e := invoiceprovider.NewWithTrust(ctx, cfg.Invoice.ServiceMerchantID, cfg.Invoice.MerchantSerial, cfg.Invoice.APIV3Key, key, trust, &invoiceprovider.OfficialAccount{AppID: cfg.WeChatPay.H5AppID, Secret: cfg.WeChatPay.H5AppSecret}, s, invoicePaymentVerifier{provider: payments, merchant: cfg.WeChatPay.MerchantID})
 	if e != nil {

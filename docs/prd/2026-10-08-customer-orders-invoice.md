@@ -2,6 +2,30 @@
 
 本文件复用用户 2026-10-08 已批准的父 PRD。固定官方入口 `/my/orders`，微信授权识别 OneID，CRM 提供本人付款或受益订单。本人付款的已确认微信支付订单支持腾讯数电普通发票，官方页面填写个人或单位抬头，一单一票；确认退款后自动整票冲红。
 
+## 官方回调初始化修复（2026-10-08）
+
+已安装程序在业务 Provider 关闭时未创建通知验签组件，POST 在读包前返回 503；官方开发配置返回已验签的 PARAM_ERROR，独立 GET 确认回调尚未保存。受控观察确认验证 POST 长度为 603 字节，不能作为空请求直接应答。
+
+进一步受控观察确认 pinned RSA 验签及 APIv3 AES-GCM 解密均成功，资源中服务商 mchid 匹配且申请号非空；精确事件与子商户是否为空尚未确认。不会猜测特殊探针事件或放行空子商户。本服务商的未知申请沿用原合同安全丢弃，其他子商户不对应本系统申请时也不生成业务状态；已知申请必须匹配冻结的收款商户。
+
+```mermaid
+flowchart TD
+ A[仅启用回调验证] --> B[现有 SDK 校验固定 RSA 信任及 APIv3 解密]
+ B -->|不可信或解密失败| C[拒绝通知]
+ B -->|可信通知| D{CRM 中是否有该申请}
+ D -->|无| E[无业务写入应答]
+ D -->|有且开票关闭| F[503 保留 Provider 重试，无回执或任务]
+ D -->|有且开票启用| G[原 UoW 去重回执并唤醒认证查询]
+```
+
+分类：本次不改变 OneID、订单归属和财务映射；通知验签为无状态计算，已知申请读取及原通知 UoW 属既有 Invoice Owner，开票写能力继续由原 External Effects 控制。仅验签组件不实现 ProviderAdapter，不能出票、冲红、插卡。复用 [微信配置开发选项](https://pay.wechatpay.cn/doc/v3/partner/4012474031)、[官方通知合同](https://pay.wechatpay.cn/doc/v3/partner/4015792570) 和 [官方 Go SDK](https://github.com/wechatpay-apiv3/wechatpay-go)，不新建通知队列或重试机制。
+
+最小独立开关 `AICRM_INVOICE_CALLBACK_ENABLED` 默认关闭；正式 Provider 开启时自动初始化同一验签器。仅回调开启只加载服务商范围、公钥/平台证书和 APIv3 解密密钥，不要求税务文件、公众号或签名私钥。新增开关依据：官方回调配置须先验证地址，不能因此提前授予正式开票写能力。通知的既有大小、签名、时间、解密和归属边界继续复用；不接受未经证实的空 POST 或猜测 TEST 事件。
+
+五项影响：回调在独立验签后可处理可信通知；默认及开票资格不变；直接消费者为 Runtime 配置、invoice composition/HTTP/notification 和官方 SDK adapter；不改 UI；验证相关 RSA/AES 拒绝、仅回调初始化、关闭时已知/未知申请的 PG 无效果断言及实际挂载读回。官方保存、真实出票和卡包交付分别记录，修复测试不代表开通成功。
+
+实际安装合同由 `scripts/run-installed-invoice-callback.sh` 运行 `TestInvoicePostgreSQLCallbackBootstrapInstalled`，参数绑定已安装 binary/root/head/hash。只启动隔离库上的该 binary API 角色，用临时合成 RSA/APIv3 密钥进行签名通知，断言伪签/SIGTEST/错误服务商/空子商户拒绝、可信未知申请无状态 200、已知他商户 409 和关闭时已知本人 503；独立读回申请不变且没有新增回执、查询任务或外部效果。该用例缺安装参数或显式隔离 PG 直接失败，无源码 Host 回退。财务、凭据、域名和真实 Provider 均不会被此 fixture 改动。
+
 ```mermaid
 flowchart TD
  A[官方订单 URL] --> B{可信会话有效}

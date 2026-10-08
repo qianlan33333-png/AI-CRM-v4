@@ -51,12 +51,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, p.ErrInvalid)
 			return
 		}
-		if h.Service.Provider == nil {
+		verifier := h.Service.CallbackVerifier
+		if verifier == nil {
+			verifier = h.Service.Provider
+		}
+		if verifier == nil {
 			h.fail(w, p.ErrDisabled)
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
-		n, e := h.Service.Provider.Verify(r.Context(), r)
+		n, e := verifier.Verify(r.Context(), r)
 		if e != nil {
 			h.fail(w, e)
 			return

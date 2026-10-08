@@ -62,6 +62,10 @@ invoice-setup -config /private/invoice-setup.json -action card -allow-card-repla
 
 - `read`：读取权限、商户基本信息、税码目录、服务商及商户开发配置、最近六天授权记录。`complete` 仅代表这些读取全部成功；不代表应用启用。基础信息接口报地址校验错误时保持错误事实，可从匹配该商户的已验签邀请记录获取主体事实，再由财务确认；不得填造地址。空税码目录不自动猜税，需要填写本地财务映射。
 - `development`：必须先安装本候选回调处理器；GET 返回 200 仅表示可达，不接受业务通知。配置官方 HTTPS 回调，再分别 GET 服务商回调及商户开关。关闭专票和微信支付账单入口：首版仅 CRM 本人订单页申请，支付账单入口产生不同申请编号，不能以不存在的 CRM 申请确认已开票。公众号菜单仍可正常使用订单链接。
+
+回调初始化顺序：先设置 `AICRM_INVOICE_CALLBACK_ENABLED=true`，保留 `AICRM_INVOICE_PROVIDER_ENABLED=false`，安装并独立读回。此时只加载 pinned 通知信任和私密 APIv3 密钥，不创建开票 ProviderAdapter；已知申请的业务通知返回 503、无回执或查询任务，未知申请只有严格验签解密后才应答。完成 `development` 保存并独立读回后，再按已有授权启用正式开票。两项都默认 false，正式开票启用会自动初始化回调，无需强制重复设置开关。切勿把非空无签名 POST 改成 200。
+
+预发安装验收：在唯一工作台的显式 loopback `aicrm_test_*_acceptance_test` PostgreSQL 环境执行 `bash scripts/run-installed-invoice-callback.sh --binary <已安装bin/aicrm> --root <已安装包目录> --sha <准确HEAD> --binary-sha256 <准确二进制摘要>`，检查 `TestInvoicePostgreSQLCallbackBootstrapInstalled` 非跳过通过及 `invoice-callback-bootstrap-installed PASS`。测试只启动已安装 API 程序和合成密钥，不重建源码应用；读取申请、回执、River 查询任务和 Invoice 外部效果数量确认无业务写入。
 - `card`：明确确认后才使用 `-allow-card-replace`，官方接口会覆盖原模板；logo 必须来自公众号永久素材。保存验签的 `card_appid/card_id` 创建回执。官方没有模板 GET，该回执不冒称独立卡包验收；启用后用真实出票/插卡/卡券读取验收。网络或验签结果未知时停止写入，不创建新回执盲目重试覆盖。
 
 给用户的准确链接位置：

@@ -355,7 +355,7 @@ type WeChatPay struct {
 
 // Invoice credentials belong to the separately enrolled service provider.
 type Invoice struct {
-	Enabled                                                                       bool
+	Enabled, CallbackEnabled                                                      bool
 	ServiceMerchantID, MerchantSerial, PrivateKeyPath, PlatformCertPath, APIV3Key string
 	AuthMode, PublicKeyID, PublicKeyPath, APIV3KeyPath                            string
 	SellerName, SellerTaxID, BillingPersonID, TaxConfigPath                       string
@@ -489,6 +489,9 @@ func Load() (Runtime, error) {
 		return Runtime{}, err
 	}
 	if cfg.Invoice.Enabled, err = strictBool("AICRM_INVOICE_PROVIDER_ENABLED", false); err != nil {
+		return Runtime{}, err
+	}
+	if cfg.Invoice.CallbackEnabled, err = strictBool("AICRM_INVOICE_CALLBACK_ENABLED", false); err != nil {
 		return Runtime{}, err
 	}
 	cfg.Invoice.ServiceMerchantID = os.Getenv("AICRM_INVOICE_SERVICE_MERCHANT_ID")
@@ -849,11 +852,16 @@ func Load() (Runtime, error) {
 			return Runtime{}, errors.New("invalid AICRM_ORDER_CONTACT_DATA_KEY")
 		}
 	}
-	if cfg.Invoice.Enabled {
+	if cfg.Invoice.Enabled || cfg.Invoice.CallbackEnabled {
 		cfg.Invoice.APIV3Key, err = readInvoiceKey(cfg.Invoice.APIV3Key, cfg.Invoice.APIV3KeyPath)
 		if err != nil {
 			return Runtime{}, err
 		}
+		if err = ValidateInvoiceCallback(cfg.Invoice); err != nil {
+			return Runtime{}, err
+		}
+	}
+	if cfg.Invoice.Enabled {
 		if err = ValidateInvoice(cfg.Invoice); err != nil {
 			return Runtime{}, err
 		}

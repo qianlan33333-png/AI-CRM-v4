@@ -30,25 +30,16 @@ func NewTrustedClient(ctx context.Context, merchant, serial string, key *rsa.Pri
 	if merchant == "" || serial == "" || key == nil || key.N == nil || key.N.BitLen() < 2048 {
 		return nil, nil, "", p.ErrInvalid
 	}
-	var verifier auth.Verifier
-	var encryptionID string
+	verifier, encryptionID, e := trustedVerifier(t)
+	if e != nil {
+		return nil, nil, "", e
+	}
 	var authOptions []core.ClientOption
 	switch t.Mode {
 	case "certificate":
-		cert := t.Certificate
-		if cert == nil || t.PublicKey != nil || t.PublicKeyID != "" || time.Now().Before(cert.NotBefore) || time.Now().After(cert.NotAfter) {
-			return nil, nil, "", p.ErrInvalid
-		}
-		visitor := core.NewCertificateMapWithList([]*x509.Certificate{cert})
-		verifier = verifiers.NewSHA256WithRSAVerifier(visitor)
-		encryptionID = strings.ToUpper(cert.SerialNumber.Text(16))
+		visitor := core.NewCertificateMapWithList([]*x509.Certificate{t.Certificate})
 		authOptions = []core.ClientOption{option.WithMerchantCredential(merchant, serial, key), option.WithVerifier(verifier), option.WithWechatPayCipher(encryptors.NewWechatPayEncryptor(visitor), decryptors.NewWechatPayDecryptor(key))}
 	case "public_key":
-		if t.Certificate != nil || t.PublicKey == nil || t.PublicKey.N == nil || t.PublicKey.N.BitLen() < 2048 || t.PublicKey.E < 3 || !strings.HasPrefix(t.PublicKeyID, "PUB_KEY_ID_") || len(t.PublicKeyID) <= len("PUB_KEY_ID_") || strings.TrimSpace(t.PublicKeyID) != t.PublicKeyID {
-			return nil, nil, "", p.ErrInvalid
-		}
-		verifier = verifiers.NewSHA256WithRSAPubkeyVerifier(t.PublicKeyID, *t.PublicKey)
-		encryptionID = t.PublicKeyID
 		authOptions = []core.ClientOption{option.WithWechatPayPublicKeyAuthCipher(merchant, serial, key, t.PublicKeyID, t.PublicKey)}
 	default:
 		return nil, nil, "", p.ErrInvalid
@@ -58,4 +49,22 @@ func NewTrustedClient(ctx context.Context, merchant, serial string, key *rsa.Pri
 		return nil, nil, "", p.ErrInvalid
 	}
 	return c, verifier, encryptionID, nil
+}
+
+func trustedVerifier(t Trust) (auth.Verifier, string, error) {
+	switch t.Mode {
+	case "certificate":
+		cert := t.Certificate
+		if cert == nil || t.PublicKey != nil || t.PublicKeyID != "" || time.Now().Before(cert.NotBefore) || time.Now().After(cert.NotAfter) {
+			return nil, "", p.ErrInvalid
+		}
+		return verifiers.NewSHA256WithRSAVerifier(core.NewCertificateMapWithList([]*x509.Certificate{cert})), strings.ToUpper(cert.SerialNumber.Text(16)), nil
+	case "public_key":
+		if t.Certificate != nil || t.PublicKey == nil || t.PublicKey.N == nil || t.PublicKey.N.BitLen() < 2048 || t.PublicKey.E < 3 || !strings.HasPrefix(t.PublicKeyID, "PUB_KEY_ID_") || len(t.PublicKeyID) <= len("PUB_KEY_ID_") || strings.TrimSpace(t.PublicKeyID) != t.PublicKeyID {
+			return nil, "", p.ErrInvalid
+		}
+		return verifiers.NewSHA256WithRSAPubkeyVerifier(t.PublicKeyID, *t.PublicKey), t.PublicKeyID, nil
+	default:
+		return nil, "", p.ErrInvalid
+	}
 }

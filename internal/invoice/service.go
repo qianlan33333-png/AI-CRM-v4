@@ -26,19 +26,20 @@ import (
 )
 
 type Service struct {
-	UoW          platform.UnitOfWork
-	Sessions     payment.SessionReader
-	Lineage      identity.LockedCanonicalLineageReader
-	Identities   identity.PaymentIdentityReader
-	Orders       order.SelfReader
-	Refunds      payment.RefundExposureReader
-	Effects      effects.TransactionalAccepter
-	Jobs         p.QueryJobEnqueuer
-	Provider     p.Provider
-	Config       p.Config
-	EffectStates effects.WithinReader
-	Finality     effects.InvoiceFinality
-	Store        Repository
+	UoW              platform.UnitOfWork
+	Sessions         payment.SessionReader
+	Lineage          identity.LockedCanonicalLineageReader
+	Identities       identity.PaymentIdentityReader
+	Orders           order.SelfReader
+	Refunds          payment.RefundExposureReader
+	Effects          effects.TransactionalAccepter
+	Jobs             p.QueryJobEnqueuer
+	Provider         p.Provider
+	CallbackVerifier p.NotificationVerifier
+	Config           p.Config
+	EffectStates     effects.WithinReader
+	Finality         effects.InvoiceFinality
+	Store            Repository
 }
 
 func (s *Service) actor(ctx context.Context, token string) (payment.SessionActor, []int64, error) {

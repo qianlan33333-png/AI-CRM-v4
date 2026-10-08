@@ -133,13 +133,19 @@ type JSConfig struct {
 	Nonce     string `json:"nonceStr"`
 	Signature string `json:"signature"`
 }
+
+// NotificationVerifier authenticates inbound messages without granting any
+// invoice, card or refund write capability.
+type NotificationVerifier interface {
+	Verify(context.Context, *http.Request) (Notice, error)
+}
 type Provider interface {
+	NotificationVerifier
 	Title(context.Context, Application, string) (Launch, error)
 	ReadTitle(context.Context, Application) (Buyer, error)
 	Query(context.Context, Application) (Result, error)
 	Write(context.Context, Application, bool) error
 	File(context.Context, Application) ([]byte, error)
-	Verify(context.Context, *http.Request) (Notice, error)
 	SignPage(context.Context, string) (JSConfig, error)
 }
 

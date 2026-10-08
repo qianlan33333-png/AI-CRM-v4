@@ -1,51 +1,116 @@
 {
   "schema": 1,
-  "baseline_sha": "26f8546e147afc6506023df8c5d03ee9939b8274",
+  "baseline_sha": "d9711153ce8f47f39ac53f9494be7caecdafb99e",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/webshell",
-      "test": "TestRetiredCustomerDetailDoesNotServeOrRedirect"
+      "package": "./internal/invoice/provider",
+      "test": "TestInvoicePublicKeyTitleEncryptionAndErrorTrust"
     },
     {
       "lane": "backend",
-      "package": "./internal/webshell",
-      "test": "TestAdminNavGroupsMirrorSourceMenu"
+      "package": "./internal/invoice/provider",
+      "test": "TestInvoicePublicKeyNotificationsAndWrongTrust"
     },
     {
       "lane": "backend",
-      "package": "./internal/webshell",
-      "test": "TestPathForEscapesDynamicSegmentsAndNextPath"
+      "package": "./internal/invoice/provider",
+      "test": "TestInvoiceOfficialSDKRequestsFreezeAndQueryBinding"
     },
     {
       "lane": "backend",
-      "package": "./internal/webshell",
-      "test": "TestStandaloneHandlerRendersAdminLoginSidebarAndAssets"
+      "package": "./internal/invoice/provider",
+      "test": "TestInvoiceOfficialCallbackSignatureDecryptAndReplayDigest"
     },
     {
       "lane": "backend",
-      "package": "./internal/webshell",
-      "test": "TestDistAdminPagesReplacePlaceholderShell"
+      "package": "./internal/invoice/provider",
+      "test": "TestInvoiceFileUnsignedDigestAndRedirectBoundary"
     },
     {
       "lane": "backend",
-      "package": "./internal/webshell",
-      "test": "TestDistAdminPageNameMapping"
+      "package": "./internal/invoice/provider",
+      "test": "TestInvoiceEffectUnknownCannotRetryAndNoWriteBeforePaymentProof"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice/provider",
+      "test": "TestInvoiceOfficialPageSignatureCachesTicketAndDoesNotForceRefresh"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice/provider",
+      "test": "TestInvoiceSetupSignedReadbackAndSingleConfigurationAttempt"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice",
+      "test": "TestInvoiceBeijingDatesAndRejectedFilters"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice",
+      "test": "TestInvoiceFrozenTaxUsesPaidAmountAndNoGuesses"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice",
+      "test": "TestInvoiceHTTPRejectsUnauthenticatedAndCrossSiteWrite"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice",
+      "test": "TestInvoiceCallbackProbeCannotAcceptBusinessNotice"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/platform/config",
+      "test": "TestInvoiceProviderDisabledByDefaultAndIncompleteFailsClosed"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/platform/config",
+      "test": "TestInvoiceCallbackBootstrapLoadsOnlyNotificationCredentials"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/platform/config",
+      "test": "TestInvoiceExplicitTrustAndPrivateKeyFile"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceCompositionUsesSeparateServicePublicKey"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceFinanceMappingRequiresExplicitTaxFacts"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLCallbackAcknowledgementAndReplay",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLCallbackBootstrapCannotQueueBusiness",
+      "postgres": true
     },
     {
       "lane": "preflight",
       "path": "scripts/test_customer_profile_install_contract.py"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/scripts/customer-profile-entry-checks.mjs"
     }
   ],
   "build_commands": [
+    "./cmd/invoice-setup",
     "./cmd/migrate-external-orders"
   ],
   "installed_checks": [
     "external-order-history",
-    "order-presentation"
+    "order-presentation",
+    "invoice-callback-bootstrap-installed"
   ]
 }

@@ -25,6 +25,12 @@ func (s *Service) Notification(ctx context.Context, n p.Notice) error {
 		if a.Snapshot.MerchantID != n.SubMerchantID {
 			return p.ErrConflict
 		}
+		// Bootstrap may acknowledge an authenticated unknown application, but
+		// business callbacks while disabled must remain retryable and cannot
+		// create a receipt or a reconciliation job.
+		if !s.Config.Enabled {
+			return p.ErrDisabled
+		}
 		t, e := pg.RequireTransaction(tx)
 		if e != nil {
 			return e

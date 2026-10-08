@@ -16,6 +16,15 @@ func ValidateInvoice(c Invoice) error {
 			return errors.New("invoice credentials and finance configuration incomplete")
 		}
 	}
+	return ValidateInvoiceCallback(c)
+}
+
+// Callback setup precedes business enablement. It needs only the service scope,
+// pinned notification trust and APIv3 decryption key, not finance or a signer.
+func ValidateInvoiceCallback(c Invoice) error {
+	if c.ServiceMerchantID == "" || strings.TrimSpace(c.ServiceMerchantID) != c.ServiceMerchantID {
+		return errors.New("invoice callback service merchant incomplete")
+	}
 	if len(c.APIV3Key) != 32 || strings.TrimSpace(c.APIV3Key) != c.APIV3Key {
 		return errors.New("invoice APIv3 key must contain exactly 32 bytes")
 	}

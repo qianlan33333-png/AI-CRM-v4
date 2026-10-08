@@ -63,3 +63,50 @@ func TestInvoicePostgreSQLCallbackAcknowledgementAndReplay(t *testing.T) {
 		t.Fatal("invalid notification persisted", e)
 	}
 }
+
+func TestInvoicePostgreSQLCallbackBootstrapCannotQueueBusiness(t *testing.T) {
+	f := newInvoiceFixture(t)
+	id := f.order(f.customer, f.customer, "paid", "fixture invoice", "wechat_pay", time.Now())
+	r := f.create(id, "callback-bootstrap-0001")
+	a := f.read(r.ID)
+	verifier := &invoiceCallbackProvider{notice: p.Notice{ID: "bootstrap-notice", ApplicationID: a.ID, SubMerchantID: a.Snapshot.MerchantID, BodyDigest: string(effects.Hash("fixture", "body"))}}
+	f.s.Config.Enabled = false
+	f.s.Provider = nil
+	f.s.CallbackVerifier = verifier
+	h := &invoice.Handler{Service: f.s}
+	post := func(valid bool) int {
+		req := httptest.NewRequest(http.MethodPost, "https://crm.fixture/api/callbacks/wechat-invoice", strings.NewReader(`{}`))
+		if valid {
+			req.Header.Set("X-Fixture-Verified", "true")
+		}
+		out := httptest.NewRecorder()
+		h.ServeHTTP(out, req)
+		return out.Code
+	}
+	counts := func() [3]int {
+		var counts [3]int
+		if e := f.pool.QueryRow(f.ctx, `SELECT (SELECT count(*) FROM invoice_callback_receipts), (SELECT count(*) FROM river_job WHERE kind='invoice.provider-query.v1'), (SELECT count(*) FROM external_effects WHERE owner='invoice')`).Scan(&counts[0], &counts[1], &counts[2]); e != nil {
+			t.Fatal(e)
+		}
+		return counts
+	}
+	before := counts()
+	verifier.notice.SubMerchantID = "foreign-sub"
+	if post(true) != 409 {
+		t.Fatal("known application belonging to another collecting merchant accepted")
+	}
+	verifier.notice.SubMerchantID = a.Snapshot.MerchantID
+	if post(true) != 503 {
+		t.Fatal("disabled known application accepted a business notification")
+	}
+	verifier.notice.ApplicationID = "inv_" + strings.Repeat("0", 28)
+	if post(false) < 400 || post(true) != 200 || post(true) != 200 {
+		t.Fatal("bootstrap must authenticate an unknown application before acknowledgement")
+	}
+	if after := counts(); after != before {
+		t.Fatal("bootstrap created receipts, jobs or effects", before, after)
+	}
+	if f.s.ProviderAdapter() != nil || f.read(a.ID).State != a.State {
+		t.Fatal("bootstrap enabled writes or changed an application")
+	}
+}

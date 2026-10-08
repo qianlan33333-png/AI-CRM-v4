@@ -10,13 +10,52 @@ import (
 func TestInvoiceProviderDisabledByDefaultAndIncompleteFailsClosed(t *testing.T) {
 	t.Setenv("AICRM_DATABASE_URL", "postgres://fixture:test@localhost/aicrm_test_invoice")
 	t.Setenv("AICRM_INVOICE_PROVIDER_ENABLED", "")
+	t.Setenv("AICRM_INVOICE_CALLBACK_ENABLED", "")
 	cfg, e := Load()
-	if e != nil || cfg.Invoice.Enabled {
+	if e != nil || cfg.Invoice.Enabled || cfg.Invoice.CallbackEnabled {
 		t.Fatal("invoice defaults", e)
 	}
 	t.Setenv("AICRM_INVOICE_PROVIDER_ENABLED", "true")
 	if _, e = Load(); e == nil {
 		t.Fatal("enabled without service-provider permissions/credentials")
+	}
+}
+
+func TestInvoiceCallbackBootstrapLoadsOnlyNotificationCredentials(t *testing.T) {
+	t.Setenv("AICRM_DATABASE_URL", "postgres://fixture:test@localhost/aicrm_test_invoice")
+	t.Setenv("AICRM_INVOICE_PROVIDER_ENABLED", "false")
+	t.Setenv("AICRM_INVOICE_CALLBACK_ENABLED", "false")
+	t.Setenv("AICRM_INVOICE_API_V3_KEY_PATH", "/missing")
+	if _, e := Load(); e != nil {
+		t.Fatal("disabled callback read credentials", e)
+	}
+	t.Setenv("AICRM_INVOICE_CALLBACK_ENABLED", "true")
+	if _, e := Load(); e == nil {
+		t.Fatal("incomplete callback trust accepted")
+	}
+	path := filepath.Join(t.TempDir(), "api-v3.key")
+	key := strings.Repeat("k", 32)
+	if e := os.WriteFile(path, []byte(key), 0600); e != nil {
+		t.Fatal(e)
+	}
+	t.Setenv("AICRM_INVOICE_API_V3_KEY", "")
+	t.Setenv("AICRM_INVOICE_API_V3_KEY_PATH", path)
+	t.Setenv("AICRM_INVOICE_SERVICE_MERCHANT_ID", "service")
+	t.Setenv("AICRM_INVOICE_AUTH_MODE", "public_key")
+	t.Setenv("AICRM_INVOICE_PUBLIC_KEY_ID", "PUB_KEY_ID_fixture")
+	t.Setenv("AICRM_INVOICE_PUBLIC_KEY_PATH", "/private/public.pem")
+	cfg, e := Load()
+	if e != nil || cfg.Invoice.Enabled || !cfg.Invoice.CallbackEnabled || cfg.Invoice.APIV3Key != key {
+		t.Fatal("notification-only config failed", e)
+	}
+	if cfg.Effects.ProviderEnabled || cfg.WeChatPay.Enabled || cfg.WeChatPay.H5OAuthEnabled {
+		t.Fatal("notification configuration enabled other providers")
+	}
+	if e := os.WriteFile(path, []byte("invalid-key"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := Load(); e == nil || strings.Contains(e.Error(), "invalid-key") {
+		t.Fatal("invalid decryption key accepted or exposed")
 	}
 }
 

@@ -67,6 +67,18 @@ func TestInvoiceCompositionUsesSeparateServicePublicKey(t *testing.T) {
 	if e := enableInvoiceProvider(context.Background(), s, invoiceSetupPayment{}, cfg); e != nil {
 		t.Fatal("disabled provider loaded credentials")
 	}
+	// The callback-only bootstrap neither reads the missing signing key nor
+	// requires payment, official-account or finance write capabilities.
+	cfg.Invoice.CallbackEnabled = true
+	cfg.Invoice.AuthMode = "public_key"
+	cfg.WeChatPay.H5AppID = ""
+	s = &invoice.Service{}
+	if e := enableInvoiceProvider(context.Background(), s, nil, cfg); e != nil {
+		t.Fatal("callback bootstrap failed", e)
+	}
+	if s.CallbackVerifier == nil || s.Provider != nil || s.ProviderAdapter() != nil || s.Config.Enabled {
+		t.Fatal("callback initialization enabled invoice business writes")
+	}
 }
 
 func TestInvoiceFinanceMappingRequiresExplicitTaxFacts(t *testing.T) {
