@@ -26,7 +26,7 @@ func TestInvoiceBeijingDatesAndRejectedFilters(t *testing.T) {
 func TestInvoiceFrozenTaxUsesPaidAmountAndNoGuesses(t *testing.T) {
 	policy := int64(8)
 	s := Service{Config: p.Config{MerchantID: "merchant", SellerTaxID: "taxpayer", BillingPersonID: "person", Taxes: map[string]p.Tax{"course": {Code: "3010101020203000000", Rate: 600, GoodsName: "课程服务"}}}}
-	order := o.Snapshot{Amount: o.Money{AmountMinor: 9900000000000, Currency: "CNY"}, Items: []o.ItemSnapshot{{ProductCode: "course", Quantity: 1, LineAmountMinor: 10000000000000}, {ProductCode: "course", Quantity: 1, LineAmountMinor: 10000000000000}}}
+	order := o.Snapshot{ProviderTransactionNo: "4200000444201910177461284488", Amount: o.Money{AmountMinor: 9900000000000, Currency: "CNY"}, Items: []o.ItemSnapshot{{ProductCode: "course", Quantity: 1, LineAmountMinor: 10000000000000}, {ProductCode: "course", Quantity: 1, LineAmountMinor: 10000000000000}}}
 	tax := s.Config.Taxes["course"]
 	tax.PreferentialPolicyCode = &policy
 	s.Config.Taxes["course"] = tax
@@ -71,7 +71,7 @@ func TestInvoiceHTTPRejectsUnauthenticatedAndCrossSiteWrite(t *testing.T) {
 			t.Fatalf("boundary status=%d want %d", w.Code, c.want)
 		}
 	}
-	if validApplicationID("../../admin") || validApplicationID("inv_"+strings.Repeat("g", 28)) {
+	if validApplicationID("../../admin") || validApplicationID(strings.Repeat("1", 33)) {
 		t.Fatal("invalid application route accepted")
 	}
 }

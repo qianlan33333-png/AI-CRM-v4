@@ -62,7 +62,7 @@ func (s *Service) acceptTitleWithin(ctx context.Context, a *p.Application, o ord
 	if e = s.queue(ctx, a, false, time.Time{}); e != nil {
 		return e
 	}
-	return s.Jobs.EnqueueWithin(ctx, a.ID, time.Now().Add(30*time.Second))
+	return s.Jobs.EnqueueWithin(ctx, a.ID, time.Time{})
 }
 
 type historyCursor struct {

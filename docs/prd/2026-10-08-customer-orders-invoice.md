@@ -153,3 +153,35 @@ OneID reads canonical customer：Payment Session + Identity Port，历史只查�
 最新用户收窄：仅单位，无抬头类型板块；新 POST 自填合同和旧官方抬头通知的首次受理均只接受 ORGANIZATION，拒绝个人。旧已受理合同/票据保留历史兼容，不改写已有开票事实。
 
 构建登记修复：API 内容在 V4 b2c62847c36fec8975beb66ef0277bdecbf3c0db 具备真实 Git blob，更新 source-index 与 source-lock 的该 V4 canonical、绑定及 embed view；其余历史登记不变。干净 disposable V4 candidate 检出运行现有 prepare，核对 embed 与 API 字节一致，不删校验或借旧仓。
+
+## 微信账单入口与统一申请编号 scope delta（2026-10-09）
+
+用户最新决定：两种入口只保留同一套开票业务逻辑，申请编号统一为微信支付交易单号；旧测试申请不做兼容。税收分类编码另行处理，不猜测或替换，不因入口接通宣称出票成功。
+
+```mermaid
+flowchart TD
+ A[CRM 订单页确认单位抬头] --> D[交易单号定位唯一申请]
+ B[微信账单点击开发票并提交官方抬头] --> C[原 SDK 验签解密回调]
+ C --> E[Payment Port 精确查原交易和付款人]
+ E --> D
+ D --> F[OneID 归属与 Order 锁：核验成功支付 / 退款 / 税务快照]
+ F --> G[同一申请、收据、审计和共享任务事务提交]
+ G --> H[官方抬头认证读取或已有确认抬头]
+ H --> I[同一 External Effects 接受及执行]
+ I --> J[原单查询：出票、PDF、卡包独立状态]
+ J --> K[确认退款后原单整票冲红]
+```
+
+参考与复用：用户提供的 [官方业务示范 2.4](https://pay.wechatpay.cn/doc/v3/partner/4016078358) 明确账单申请单号为原微信交易单号；[官方抬头通知](https://pay.wechatpay.cn/doc/v3/partner/4015792559) 为 FAPIAO.USER_APPLIED；账单抬头用 WITH_WECHATPAY 读取。复用现有官方 Go SDK 和 Invoice Provider；[GoPay](https://github.com/go-pay/gopay/blob/main/wechat/v3/fapiao.go) 仅参考，不引入第二客户端。开发配置沿用官方 show_fapiao_cell 开关，保存后分别读取服务商回调和子商户开关。
+
+分类：OneID 只读取可信原支付 identity handle、verified subject 和 canonical lineage；不通过回调建客、猜测身份或使用受益人授权。持久化为现有 Invoice 表和同一个 PostgreSQL UoW；新增 Payment 只读 Port 返回原交易的最小付款事实，不跨领域读表。抬头 / 支付 / 状态均为 Provider 读；开票及冲红仍由原 External Effects 写。没有新队列、状态机、抬头库或新前端表单。
+
+申请、票据编号分离：application.id = 冻结的交易单号；invoice_id 仍是每次受认可的出票尝试编号。重复订单页确认和账单回调在相同 Order 锁下返回 / 使用同一申请；已接受的抬头不覆盖，未知结果不新开。回调仅为可信本商户 FAPIAO.USER_APPLIED 创建申请；未知交易 / 非抬头通知不创建，错误商户、身份冲突和交易事实不一致拒绝。进行中的退款不发出，确认退款取消或按原流程冲红。抬头查询与手动确认竞争，锁内状态检查保证只接受一个效果。
+
+Product Design：已读 index / audit / critical overrides 并执行 user-context preflight。此次视觉目标为用户提供的微信账单原生入口 → 官方表单 → 已提交截图；官方页由微信控制，CRM 页面沿用已选蓝色体系，不重建或模拟官方页。只支持单位的执行规则保留；官方页可能仍展示个人选项，服务端拒绝个人抬头并保留待填状态。这是参考分析，真实微信原生页当前未实际操作，不冒称完成实时 UI 审计。
+
+限制必要性：复用既有权限 / 退款 / 一单一票；申请单号长度和半角字符来自官方 string(32) 合同，超范围不能作为 Provider 申请号；无新增业务限制。
+
+五项影响：对外创建及详情 / 记录 / PDF 的申请 ID 改为交易单号，订单页 POST 必须包含已确认单位抬头；微信账单入口新增原生回调受理。业务共用创建、原子接受、执行与退款闭环；直接消费者为 Payment Port/store、Invoice service/provider/HTTP/jobs、composition、配置工具及订单页现有 API。页面没有布局改动，现有申请编号展示自动显示交易单号。验证为相关单元、PG 回调与手动提交并发/回滚/归属/退款/合并、官方 SDK 请求合同、实际挂载读回；真实微信账单展示、真实抬头、出票、卡包和冲红另记。
+
+交付：精确国内候选交唯一发布工作台。先安装统一回调实现，再用 invoice-setup 显式设置 show_invoice_cell=true 并独立签名读回；不提前开入口。回退可关闭账单开关；已接受效果保留原申请及原查询。旧测试记录保留审计，不自动改号重发，不作为历史兼容目标。

@@ -20,6 +20,19 @@ var (
 	ErrUnavailable = errors.New("invoice provider unavailable")
 )
 
+// ValidApplyID follows the official fapiao_apply_id string(32) contract.
+func ValidApplyID(id string) bool {
+	if len(id) == 0 || len(id) > 32 {
+		return false
+	}
+	for _, c := range id {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("_-|*", c)) {
+			return false
+		}
+	}
+	return true
+}
+
 type Tax struct {
 	Code                   string `json:"code"`
 	Rate                   int64  `json:"rate"`

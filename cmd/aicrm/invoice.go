@@ -26,6 +26,7 @@ import (
 type invoiceIdentity interface {
 	identityport.LockedCanonicalLineageReader
 	identityport.PaymentIdentityReader
+	identityport.VerifiedIdentitySubjectReader
 }
 
 func composeInvoice(uow platformport.UnitOfWork, sessions paymentport.SessionReader, identities invoiceIdentity, orders orderport.SelfReader, refunds paymentport.RefundExposureReader, effects effectport.TransactionalAccepter, jobs *river.Client[pgx.Tx], cfg config.Runtime) (*invoice.Service, *invoice.Handler, error) {
@@ -45,7 +46,11 @@ func composeInvoice(uow platformport.UnitOfWork, sessions paymentport.SessionRea
 	if !ok {
 		return nil, nil, p.ErrInvalid
 	}
-	s := &invoice.Service{Finality: finality, EffectStates: stateReader, UoW: uow, Sessions: sessions, Lineage: identities, Identities: identities, Orders: orders, Refunds: refunds, Effects: effects, Jobs: invoice.QueryEnqueuer{Client: jobs}, Config: c}
+	invoicePayments, ok := refunds.(paymentport.InvoicePaymentReader)
+	if !ok {
+		return nil, nil, p.ErrInvalid
+	}
+	s := &invoice.Service{Finality: finality, EffectStates: stateReader, UoW: uow, Sessions: sessions, Lineage: identities, Identities: identities, Subjects: identities, Payments: invoicePayments, Orders: orders, Refunds: refunds, Effects: effects, Jobs: invoice.QueryEnqueuer{Client: jobs}, Config: c}
 	return s, &invoice.Handler{Service: s, Origins: []string{cfg.PublicOrigin, h5PublicOrigin(cfg)}, Dist: "web/dist"}, nil
 }
 

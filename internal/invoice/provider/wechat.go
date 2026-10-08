@@ -101,7 +101,7 @@ func (w *WeChat) Title(ctx context.Context, a p.Application, openID string) (p.L
 }
 func (w *WeChat) ReadTitle(ctx context.Context, a p.Application) (p.Buyer, error) {
 	var b p.Buyer
-	e := w.request(ctx, http.MethodGet, "/user-title", url.Values{"sub_mchid": {a.Snapshot.MerchantID}, "fapiao_apply_id": {a.ID}, "scene": {"WITHOUT_WECHATPAY"}}, nil, &b)
+	e := w.request(ctx, http.MethodGet, "/user-title", url.Values{"sub_mchid": {a.Snapshot.MerchantID}, "fapiao_apply_id": {a.ID}, "scene": {"WITH_WECHATPAY"}}, nil, &b)
 	if e != nil {
 		return p.Buyer{}, e
 	}

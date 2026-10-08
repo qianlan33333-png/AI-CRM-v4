@@ -73,8 +73,13 @@ func TestInvoiceSetupIndependentDevelopmentReadback(t *testing.T) {
 	}
 	merchant.Body = json.RawMessage(`{"show_fapiao_cell":true,"support_vat_fapiao":false}`)
 	if developmentMatches(c, service, merchant) {
-		t.Fatal("unsupported payment-bill entry accepted")
+		t.Fatal("unrequested payment-bill entry accepted")
 	}
+	c.ShowInvoiceCell = true
+	if !c.development().ShowInvoiceCell || !developmentMatches(c, service, merchant) {
+		t.Fatal("enabled native bill entry did not read back")
+	}
+	c.ShowInvoiceCell = false
 	merchant.Body = json.RawMessage(`{"show_fapiao_cell":false,"support_vat_fapiao":false}`)
 	missing := merchant
 	missing.Body = json.RawMessage(`{}`)

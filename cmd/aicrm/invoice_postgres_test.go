@@ -166,7 +166,7 @@ func newInvoiceFixture(t *testing.T) *invoiceFixture {
 		t.Fatal(e)
 	}
 	f.provider = &invoiceFixtureProvider{}
-	f.s = &invoice.Service{UoW: uow, Sessions: invoiceFixtureSessions{}, Lineage: identities, Identities: identities, Orders: o, Refunds: payments.NewPostgreSQL(), Effects: effect, EffectStates: effect, Finality: effect, Jobs: invoice.QueryEnqueuer{Client: client}, Provider: f.provider, Config: p.Config{Enabled: true, MerchantID: "merchant-fixture", AppID: "wx-fixture", AppScope: "wechat-app:wx-fixture", SellerTaxID: "seller-tax-fixture", SellerName: "测试商户", BillingPersonID: "finance-fixture", Taxes: map[string]p.Tax{"course": {Code: "3010101020203000000", Rate: 600, GoodsName: "*培训服务*课程"}}}}
+	f.s = &invoice.Service{UoW: uow, Sessions: invoiceFixtureSessions{}, Lineage: identities, Identities: identities, Subjects: identities, Payments: payments.NewPostgreSQL(), Orders: o, Refunds: payments.NewPostgreSQL(), Effects: effect, EffectStates: effect, Finality: effect, Jobs: invoice.QueryEnqueuer{Client: client}, Provider: f.provider, Config: p.Config{Enabled: true, MerchantID: "merchant-fixture", AppID: "wx-fixture", AppScope: "wechat-app:wx-fixture", SellerTaxID: "seller-tax-fixture", SellerName: "测试商户", BillingPersonID: "finance-fixture", Taxes: map[string]p.Tax{"course": {Code: "3010101020203000000", Rate: 600, GoodsName: "*培训服务*课程"}}}}
 	f.provider.s = f.s
 	effect.SetCompletionSink(f.s)
 	return f

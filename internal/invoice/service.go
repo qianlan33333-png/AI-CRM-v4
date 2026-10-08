@@ -30,6 +30,8 @@ type Service struct {
 	Sessions         payment.SessionReader
 	Lineage          identity.LockedCanonicalLineageReader
 	Identities       identity.PaymentIdentityReader
+	Subjects         identity.VerifiedIdentitySubjectReader
+	Payments         payment.InvoicePaymentReader
 	Orders           order.SelfReader
 	Refunds          payment.RefundExposureReader
 	Effects          effects.TransactionalAccepter
@@ -98,7 +100,7 @@ func (s *Service) reason(x order.SelfOrder, ids []int64, refund bool, a *p.Appli
 func (s *Service) freeze(o orderdomain.Snapshot) (p.Snapshot, error) {
 	c := s.Config
 	v := p.Snapshot{MerchantID: c.MerchantID, AppID: c.AppID, AppScope: c.AppScope, SellerName: c.SellerName, SellerTaxID: c.SellerTaxID, BillingPersonID: c.BillingPersonID, OrderNo: o.MerchantOrderNo, TransactionID: o.ProviderTransactionNo, Amount: o.Amount.AmountMinor}
-	if len(o.Items) == 0 || c.MerchantID == "" || c.SellerTaxID == "" || c.BillingPersonID == "" {
+	if len(o.Items) == 0 || !p.ValidApplyID(o.ProviderTransactionNo) || c.MerchantID == "" || c.SellerTaxID == "" || c.BillingPersonID == "" {
 		return v, p.ErrIneligible
 	}
 	total := int64(0)
@@ -307,25 +309,12 @@ func (s *Service) create(ctx context.Context, token string, orderID int64, key s
 		if !ok || !slices.Contains(ids, int64(trusted.CustomerID)) {
 			return p.ErrIneligible
 		}
-		snap, e := s.freeze(o.Order)
+		a, e = s.createApplicationWithin(tx, o, int64(trusted.CustomerID), actor.PayerIdentityID)
 		if e != nil {
 			return e
 		}
-		id, e := newID()
+		_, e = t.Exec(tx, `INSERT INTO invoice_operation_receipts(customer_id,key_digest,order_id,application_id)VALUES($1,$2,$3,$4)`, a.CustomerID, digest, orderID, a.ID)
 		if e != nil {
-			return e
-		}
-		a = p.Application{ID: id, InvoiceID: id, OrderID: orderID, CustomerID: int64(trusted.CustomerID), IdentityID: actor.PayerIdentityID, State: "awaiting_title", CardState: "pending", Snapshot: snap}
-		raw, _ := json.Marshal(snap)
-		_, e = t.Exec(tx, `INSERT INTO invoice_applications(id,order_id,customer_id,identity_id,invoice_id,state,snapshot)VALUES($1,$2,$3,$4,$1,'awaiting_title',$5)`, id, orderID, a.CustomerID, a.IdentityID, raw)
-		if e != nil {
-			return e
-		}
-		_, e = t.Exec(tx, `INSERT INTO invoice_operation_receipts(customer_id,key_digest,order_id,application_id)VALUES($1,$2,$3,$4)`, a.CustomerID, digest, orderID, id)
-		if e != nil {
-			return e
-		}
-		if e = s.Store.update(tx, a, "created", string(effects.Hash("invoice.snapshot", string(raw)))); e != nil {
 			return e
 		}
 		if title != nil {
@@ -343,7 +332,33 @@ func (s *Service) create(ctx context.Context, token string, orderID int64, key s
 	if title != nil {
 		return p.MarshalReceipt(a), nil
 	}
-	return s.launch(ctx, token, a.ID)
+	return p.MarshalReceipt(a), nil
+}
+
+// Both entry points hold the Order lock and use this same creator.
+func (s *Service) createApplicationWithin(ctx context.Context, o order.SelfOrder, customerID, identityID int64) (p.Application, error) {
+	snap, e := s.freeze(o.Order)
+	if e != nil {
+		return p.Application{}, e
+	}
+	invoiceID, e := newID()
+	if e != nil {
+		return p.Application{}, e
+	}
+	a := p.Application{ID: snap.TransactionID, InvoiceID: invoiceID, OrderID: o.Order.ID, CustomerID: customerID, IdentityID: identityID, State: "awaiting_title", CardState: "pending", Snapshot: snap}
+	t, e := pg.RequireTransaction(ctx)
+	if e != nil {
+		return a, e
+	}
+	raw, e := json.Marshal(snap)
+	if e != nil {
+		return a, e
+	}
+	_, e = t.Exec(ctx, `INSERT INTO invoice_applications(id,order_id,customer_id,identity_id,invoice_id,state,snapshot)VALUES($1,$2,$3,$4,$5,'awaiting_title',$6)`, a.ID, a.OrderID, a.CustomerID, a.IdentityID, a.InvoiceID, raw)
+	if e != nil {
+		return a, e
+	}
+	return a, s.Store.update(ctx, a, "created", string(effects.Hash("invoice.snapshot", string(raw))))
 }
 func (s *Service) Read(ctx context.Context, token, id string) (p.Application, error) {
 	var a p.Application
@@ -356,58 +371,6 @@ func (s *Service) Read(ctx context.Context, token, id string) (p.Application, er
 		return e
 	})
 	return a, e
-}
-func (s *Service) launch(ctx context.Context, token, id string) (p.Receipt, error) {
-	var a p.Application
-	var openID string
-	e := s.UoW.Within(ctx, func(tx context.Context) error {
-		_, ids, e := s.actor(tx, token)
-		if e != nil {
-			return e
-		}
-		a, e = s.Store.get(tx, id, ids, false)
-		if e != nil {
-			return e
-		}
-		if a.RefundConfirmed || a.State != "awaiting_title" {
-			return nil
-		}
-		o, e := s.Orders.GetSelfWithin(tx, a.OrderID, ids, false)
-		if e != nil {
-			return p.ErrNotFound
-		}
-		refunds, e := s.Refunds.RefundRelatedOrderIDsWithin(tx, []int64{a.OrderID})
-		if e != nil {
-			return e
-		}
-		if _, pending := refunds[a.OrderID]; pending || o.Order.RefundedMinor > 0 {
-			return p.ErrIneligible
-		}
-		v, ok, e := s.Identities.VerifiedPaymentIdentity(tx, a.IdentityID, identitydomain.KindOAOpenID, a.Snapshot.AppScope)
-		if e != nil {
-			return e
-		}
-		if !ok || !slices.Contains(ids, int64(v.CustomerID)) {
-			return p.ErrIneligible
-		}
-		openID = v.Value
-		return nil
-	})
-	if e != nil {
-		return p.Receipt{}, e
-	}
-	out := p.MarshalReceipt(a)
-	if openID != "" {
-		if !s.Config.Enabled || s.Provider == nil {
-			return out, p.ErrDisabled
-		}
-		link, e := s.Provider.Title(ctx, a, openID)
-		if e != nil {
-			return out, e
-		}
-		out.Launch = &link
-	}
-	return out, nil
 }
 func (s *Service) Resume(ctx context.Context, token, id string) (p.Receipt, error) {
 	a, e := s.Read(ctx, token, id)
@@ -430,7 +393,14 @@ func (s *Service) Resume(ctx context.Context, token, id string) (p.Receipt, erro
 			return p.MarshalReceipt(a), e
 		}
 	}
-	return s.launch(ctx, token, id)
+	if a.State == "awaiting_title" {
+		e = s.UoW.Within(ctx, func(tx context.Context) error { return s.Jobs.EnqueueWithin(tx, id, time.Time{}) })
+		if e != nil {
+			return p.Receipt{}, e
+		}
+	}
+	a, e = s.Read(ctx, token, id)
+	return p.MarshalReceipt(a), e
 }
 func (s *Service) retryFailed(ctx context.Context, id string) error {
 	return s.withOrder(ctx, id, func(tx context.Context, a *p.Application, o order.SelfOrder) error {
@@ -841,5 +811,5 @@ func (s *Service) CompleteEffect(ctx context.Context, effectID string, envelope 
 		}
 	}
 	// Success means accepted; verified query/notification owns final state.
-	return s.Jobs.EnqueueWithin(ctx, a.ID, time.Now().Add(10*time.Second))
+	return s.Jobs.EnqueueWithin(ctx, a.ID, time.Time{})
 }

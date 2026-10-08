@@ -31,6 +31,7 @@ type setupConfig struct {
 	PublicOrigin            string `json:"public_origin"`
 	CardAppID               string `json:"card_appid"`
 	CardLogoURL             string `json:"card_logo_url"`
+	ShowInvoiceCell         bool   `json:"show_invoice_cell"`
 }
 
 func (c setupConfig) valid() bool {
@@ -56,9 +57,7 @@ func (c setupConfig) valid() bool {
 	}
 }
 func (c setupConfig) development() provider.DevelopmentConfig {
-	// The CRM flow uses its own application IDs. The payment-bill entry must stay
-	// off until that independent entry has an ownership/transaction mapping.
-	return provider.DevelopmentConfig{CallbackURL: c.PublicOrigin + "/api/callbacks/wechat-invoice", SubMerchant: c.SubMerchantID, ShowInvoiceCell: false, SupportVAT: false}
+	return provider.DevelopmentConfig{CallbackURL: c.PublicOrigin + "/api/callbacks/wechat-invoice", SubMerchant: c.SubMerchantID, ShowInvoiceCell: c.ShowInvoiceCell, SupportVAT: false}
 }
 func (c setupConfig) card() (provider.CardTemplate, bool) {
 	var out provider.CardTemplate
@@ -134,7 +133,7 @@ func developmentMatches(c setupConfig, service, merchant provider.SetupReceipt) 
 		Show *bool `json:"show_fapiao_cell"`
 		VAT  *bool `json:"support_vat_fapiao"`
 	}
-	return confirmed(service) && confirmed(merchant) && json.Unmarshal(service.Body, &a) == nil && json.Unmarshal(merchant.Body, &b) == nil && a.CallbackURL == c.development().CallbackURL && b.Show != nil && b.VAT != nil && !*b.Show && !*b.VAT
+	return confirmed(service) && confirmed(merchant) && json.Unmarshal(service.Body, &a) == nil && json.Unmarshal(merchant.Body, &b) == nil && a.CallbackURL == c.development().CallbackURL && b.Show != nil && b.VAT != nil && *b.Show == c.ShowInvoiceCell && !*b.VAT
 }
 
 // probe sends no credentials, refuses redirects, and has no business side effects.

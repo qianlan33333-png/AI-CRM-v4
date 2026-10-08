@@ -61,6 +61,7 @@ func invoiceProviderFixture(t *testing.T, respond func(*http.Request) string) (*
 	}
 	cert, _ := x509.ParseCertificate(der)
 	a := p.Application{ID: "inv_" + strings.Repeat("a", 28), InvoiceID: "inv_" + strings.Repeat("b", 28), BlueNumber: "BLUE1", Snapshot: p.Snapshot{MerchantID: "sub", AppID: "wx-app", AppScope: "wechat-app:wx-app", OrderNo: "order-1", TransactionID: "transaction-1", Amount: 9900, SellerTaxID: "tax-1", BillingPersonID: "finance", Lines: []p.Line{{TaxCode: "3010101020203000000", GoodsName: "*培训服务*课程", TotalAmount: 9900, Quantity: 100000000, TaxRate: 600}}}, Buyer: p.Buyer{Type: "INDIVIDUAL", Name: "本人"}}
+	a.ID = a.Snapshot.TransactionID
 	w, e := New(context.Background(), "service-merchant", "merchant-serial", strings.Repeat("k", 32), key, cert, &OfficialAccount{AppID: "wx-app"}, material{a}, paymentProof{})
 	if e != nil {
 		t.Fatal(e)
@@ -90,7 +91,7 @@ func TestInvoiceOfficialSDKRequestsFreezeAndQueryBinding(t *testing.T) {
 			}
 			return `{"miniprogram_appid":"wx-official","miniprogram_path":"pages/title","miniprogram_user_name":"gh-official"}`
 		case strings.HasSuffix(r.URL.Path, "user-title"):
-			if r.URL.Query().Get("scene") != "WITHOUT_WECHATPAY" {
+			if r.URL.Query().Get("scene") != "WITH_WECHATPAY" {
 				t.Fatal("wrong title scene")
 			}
 			return `{"type":"INDIVIDUAL","name":"本人","amount":9900}`

@@ -5093,7 +5093,7 @@ paths:
     post:
       summary: Create or return the payer's one-order invoice application
       security: [{paymentSession: []}]
-      description: Requires same official Origin. Amount, merchant, tax and trusted OA identity are frozen by the server. The confirmed organization title, receipt, audit and effect acceptance commit atomically. Provider writes execute asynchronously. Legacy requests without buyer retain the official title flow.
+      description: Requires same official Origin. Amount, merchant, tax and trusted OA identity are frozen by the server. The confirmed organization title, receipt, audit and effect acceptance commit atomically. Provider writes execute asynchronously. The application ID is the original WeChat transaction ID, shared with the native payment-bill entry.
       requestBody:
         required: true
         content:
@@ -5101,11 +5101,11 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [order_id, idempotency_key]
+              required: [order_id, idempotency_key, buyer, expected_amount_minor]
               properties:
                 order_id: {type: integer, minimum: 1}
                 idempotency_key: {type: string, minLength: 16, maxLength: 120}
-                expected_amount_minor: {type: integer, minimum: 1, description: "Required with buyer; must match the frozen and current server amount."}
+                expected_amount_minor: {type: integer, minimum: 1, description: "Must match the frozen and current server amount."}
                 buyer:
                   type: object
                   additionalProperties: false
@@ -5322,7 +5322,7 @@ components:
       type: object
       required: [id, order_id, amount_minor, state, card_state, refund_confirmed]
       properties:
-        id: {type: string, pattern: '^inv_[a-f0-9]{28}$'}
+        id: {type: string, minLength: 1, maxLength: 32, pattern: '^[A-Za-z0-9_|*-]+$', description: Original WeChat payment transaction number.}
         order_id: {type: integer}
         amount_minor: {type: integer, description: Frozen actual paid amount in CNY fen.}
         state: {type: string, enum: [awaiting_title, queued, issuing, issued, failed, cancelled, reversing, reversed, reverse_failed]}

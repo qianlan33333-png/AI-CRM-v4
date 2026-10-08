@@ -147,19 +147,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		var a p.Receipt
 		var e error
-		if input.Buyer != nil {
-			if input.ExpectedAmount == nil {
-				h.fail(w, p.ErrInvalid)
-				return
-			}
-			a, e = h.Service.SubmitTitle(r.Context(), token, input.OrderID, input.Key, p.TitleSubmission{Buyer: *input.Buyer, ExpectedAmount: *input.ExpectedAmount})
-		} else {
-			if input.ExpectedAmount != nil {
-				h.fail(w, p.ErrInvalid)
-				return
-			}
-			a, e = h.Service.Create(r.Context(), token, input.OrderID, input.Key)
+		if input.Buyer == nil || input.ExpectedAmount == nil {
+			h.fail(w, p.ErrInvalid)
+			return
 		}
+		a, e = h.Service.SubmitTitle(r.Context(), token, input.OrderID, input.Key, p.TitleSubmission{Buyer: *input.Buyer, ExpectedAmount: *input.ExpectedAmount})
 		h.reply(w, a, e)
 		return
 	}
@@ -210,15 +202,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 var errCSRF = errors.New("invoice cross-site request rejected")
 
 func validApplicationID(id string) bool {
-	if len(id) != 32 || !strings.HasPrefix(id, "inv_") {
-		return false
-	}
-	for _, c := range id[4:] {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return false
-		}
-	}
-	return true
+	return p.ValidApplyID(id)
 }
 func (h *Handler) sameOrigin(r *http.Request) bool {
 	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
