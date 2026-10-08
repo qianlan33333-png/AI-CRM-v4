@@ -49,6 +49,10 @@
     {
       "lane": "frontend",
       "path": "web/v3/customerOrders.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "scripts/prepare-donor-source-views.mjs"
     }
   ],
   "installed_checks": [
