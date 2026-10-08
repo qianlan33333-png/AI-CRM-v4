@@ -63,7 +63,7 @@ func (c setupConfig) development() provider.DevelopmentConfig {
 func (c setupConfig) card() (provider.CardTemplate, bool) {
 	var out provider.CardTemplate
 	u, e := url.Parse(c.CardLogoURL)
-	if e != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() != "mmbiz.qpic.cn" || u.User != nil || u.Fragment != "" || c.CardAppID == "" {
+	if e != nil || (u.Scheme != "https" && u.Scheme != "http") || (u.Hostname() != "mmbiz.qpic.cn" && u.Hostname() != "mmecoa.qpic.cn") || u.User != nil || u.Fragment != "" || c.CardAppID == "" {
 		return out, false
 	}
 	out.SubMerchant = c.SubMerchantID

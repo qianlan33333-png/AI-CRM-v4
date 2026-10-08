@@ -46,6 +46,24 @@ func TestInvoiceSetupPrivateConfigAndExactLocations(t *testing.T) {
 		t.Fatal("trailing data accepted")
 	}
 }
+func TestInvoiceSetupCurrentPermanentMaterialLogo(t *testing.T) {
+	c := setupConfig{SubMerchantID: "456", CardAppID: "wx-fixture", PublicOrigin: "https://crm.test"}
+	// add_material now returns mmecoa.qpic.cn; retain legacy material URLs.
+	for _, logo := range []string{"https://mmecoa.qpic.cn/mmecoa_jpg/fixture/0", "http://mmbiz.qpic.cn/mmbiz/fixture/0"} {
+		c.CardLogoURL = logo
+		card, ok := c.card()
+		if !ok || card.Information.LogoURL != logo || card.AppID != c.CardAppID || card.SubMerchant != c.SubMerchantID || card.Information.CustomCell.JumpURL != "https://crm.test/my/orders" {
+			t.Fatal("official permanent logo or card binding lost")
+		}
+	}
+	for _, logo := range []string{"https://wx.qlogo.cn/mmhead/fixture/0", "https://mmecoa.qpic.cn.example.com/logo", "https://mmecoa.qpic.cn@evil.test/logo", "https://user:password@mmecoa.qpic.cn/logo", "https://mmecoa.qpic.cn/logo#fragment", "file:///logo.jpg"} {
+		c.CardLogoURL = logo
+		if _, ok := c.card(); ok {
+			t.Fatal("unsupported logo accepted")
+		}
+	}
+}
+
 func TestInvoiceSetupIndependentDevelopmentReadback(t *testing.T) {
 	c := setupConfig{PublicOrigin: "https://crm.test"}
 	service := provider.SetupReceipt{CapturedAt: time.Now(), SignatureVerified: true, Outcome: "confirmed", Body: json.RawMessage(`{"callback_url":"https://crm.test/api/callbacks/wechat-invoice"}`)}

@@ -1,12 +1,14 @@
 {
   "schema": 1,
-  "baseline_sha": "30ba312488f25023234603c8eda9ccb9190c8480",
+  "baseline_sha": "fe7938b79f554b9e7d1cbf8e8b64829ff2bb81b9",
   "checks": [
     {
-      "lane": "preflight",
-      "path": "scripts/test_invoice_environment_retry.py"
+      "lane": "backend",
+      "package": "./cmd/invoice-setup"
     }
   ],
   "installed_checks": [],
-  "build_commands": []
+  "build_commands": [
+    "./cmd/invoice-setup"
+  ]
 }
