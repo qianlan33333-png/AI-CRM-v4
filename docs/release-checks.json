@@ -34,7 +34,7 @@
     },
     {
       "lane": "preflight",
-      "path": "scripts/test-customer-profile-install-contract.py"
+      "path": "scripts/test_customer_profile_install_contract.py"
     },
     {
       "lane": "frontend",
