@@ -130,3 +130,14 @@ func TestH5OAuthStateIsBoundExpiresAndCannotReplay(t *testing.T) {
 		}
 	}
 }
+
+func TestOrdersOAuthFixedReturnPathRejectsIdentityAndRedirectParameters(t *testing.T) {
+	if !validReturnPath("/my/orders") {
+		t.Fatal("official order entry rejected")
+	}
+	for _, path := range []string{"https://evil.example/my/orders", "//evil.example/my/orders", "/my/orders/", "/my/orders?customer_id=7", "/my/orders?openid=untrusted", "/my/orders?next=/admin", "/my/orders#redirect", "/my%2Forders"} {
+		if validReturnPath(path) {
+			t.Fatal("noncanonical order return path accepted", path)
+		}
+	}
+}

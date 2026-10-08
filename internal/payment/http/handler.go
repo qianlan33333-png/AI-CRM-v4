@@ -327,6 +327,11 @@ func retryPeriodDetailOAuth(writer http.ResponseWriter, request *http.Request, r
 	if request.Method != http.MethodGet || !strings.Contains(strings.ToLower(request.UserAgent()), "micromessenger") || !paymenth5oauth.ValidReturnPath(returnPath) {
 		return false
 	}
+	if returnPath == "/my/orders" {
+		writer.Header().Set("Cache-Control", "no-store")
+		http.Redirect(writer, request, "/my/orders?oauth_error=unavailable", http.StatusSeeOther)
+		return true
+	}
 	parsed, err := url.Parse(returnPath)
 	if err != nil {
 		return false
@@ -366,6 +371,13 @@ func (handler *Handler) completeH5OAuth(writer http.ResponseWriter, request *htt
 	returnCookie, cookieErr := request.Cookie(h5OAuthReturnCookieName)
 	http.SetCookie(writer, &http.Cookie{Name: h5OAuthReturnCookieName, Path: "/api/h5/wechat-pay/oauth/callback", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	if err != nil {
+		if errors.Is(err, paymenth5oauth.ErrIdentityConflict) && cookieErr == nil {
+			if decoded, decodeErr := base64.RawURLEncoding.DecodeString(returnCookie.Value); decodeErr == nil && string(decoded) == "/my/orders" {
+				writer.Header().Set("Cache-Control", "no-store")
+				http.Redirect(writer, request, "/my/orders?oauth_error=conflict", http.StatusSeeOther)
+				return
+			}
+		}
 		if !errors.Is(err, paymenth5oauth.ErrIdentityConflict) {
 			recoveryPath, recoveryErr := handler.h5OAuth.RecoverReturnPath(request.Context(), query["state"])
 			if recoveryErr != nil && cookieErr == nil {
@@ -375,6 +387,9 @@ func (handler *Handler) completeH5OAuth(writer http.ResponseWriter, request *htt
 			}
 			if paymenth5oauth.ValidReturnPath(recoveryPath) {
 				writer.Header().Set("Cache-Control", "no-store")
+				if recoveryPath == "/my/orders" {
+					recoveryPath += "?oauth_error=denied"
+				}
 				http.Redirect(writer, request, recoveryPath, http.StatusSeeOther)
 				return
 			}

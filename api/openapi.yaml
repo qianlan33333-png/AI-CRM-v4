@@ -5045,6 +5045,137 @@ paths:
   /api/admin/ai-audience/core/pushes: {"post": {"operationId": "recordAdminCorePush", "tags": ["Segment"], "security": [{"adminSession": [], "csrfHeader": []}], "description": "Administrator-owned core audience operation.", "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"push": {"$ref": "#/components/schemas/CoreOperatingPushRequest"}}, "required": ["push"]}}}}, "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}], "responses": {"200": {"description": "Current persisted result; no automatic message sending.", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/CoreOperatingPush"}}, "required": ["data"]}}}}, "400": {"$ref": "#/components/responses/Error"}, "401": {"$ref": "#/components/responses/Error"}, "403": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}, "429": {"$ref": "#/components/responses/Error"}, "503": {"$ref": "#/components/responses/Error"}}}}
   /api/admin/ai-audience/packages/{package_id}/members/{customer_id}/operations: {"get": {"operationId": "getAdminCoreMemberOperations", "tags": ["Segment"], "security": [{"adminSession": []}], "description": "Administrator-owned core audience operation.", "parameters": [{"name": "package_id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}, {"$ref": "#/components/parameters/CustomerID"}, {"$ref": "#/components/parameters/Limit"}, {"name": "cursor", "in": "query", "schema": {"type": "string"}}], "responses": {"200": {"description": "Current persisted result; no automatic message sending.", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/CoreOperatingMemberDetail"}}, "required": ["data"]}}}}, "400": {"$ref": "#/components/responses/Error"}, "401": {"$ref": "#/components/responses/Error"}, "403": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}, "429": {"$ref": "#/components/responses/Error"}, "503": {"$ref": "#/components/responses/Error"}}}}
   /api/admin/ai-audience/packages/{package_id}/members/{customer_id}/history: {"get": {"operationId": "listAdminCoreMemberHistory", "tags": ["Segment"], "security": [{"adminSession": []}], "description": "Administrator-owned core audience operation.", "parameters": [{"name": "package_id", "in": "path", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}, {"$ref": "#/components/parameters/CustomerID"}, {"$ref": "#/components/parameters/Limit"}, {"name": "cursor", "in": "query", "schema": {"type": "string"}}], "responses": {"200": {"description": "Current persisted result; no automatic message sending.", "content": {"application/json": {"schema": {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/CoreOperatingHistoryPage"}}, "required": ["data"]}}}}, "400": {"$ref": "#/components/responses/Error"}, "401": {"$ref": "#/components/responses/Error"}, "403": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}, "429": {"$ref": "#/components/responses/Error"}, "503": {"$ref": "#/components/responses/Error"}}}}
+
+  /my/orders:
+    get:
+      summary: Official public customer order center
+      security: []
+      responses:
+        '200': {description: "Mobile HTML. Existing WeChat OAuth provides a trusted payment session."}
+        '503': {description: "Hashed public assets unavailable."}
+  /api/h5/me/orders:
+    get:
+      summary: List own payer or beneficiary orders using canonical OneID lineage
+      security: [{paymentSession: []}]
+      parameters:
+        - {name: state, in: query, schema: {type: string, enum: [all, paid, pending, closed]}}
+        - {name: from, in: query, schema: {type: string, format: date}, description: Beijing start date inclusive.}
+        - {name: until, in: query, schema: {type: string, format: date}, description: Beijing end date inclusive.}
+        - {name: keyword, in: query, schema: {type: string, maxLength: 200}, description: Literal product name contains.}
+        - {name: order_no, in: query, schema: {type: string, maxLength: 200}, description: Full exact order number.}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 400}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+        - {name: eligible, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: Scoped safe order facts; refund/payment and invoice/card states remain separate. Cursor advances scanned rows even when eligibility removes the entire page.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CustomerOrdersPage'}
+        '400': {description: "Invalid or repeated filters."}
+        '401': {description: "Expired or untrusted session; reauthorize."}
+  /api/h5/me/invoices:
+    post:
+      summary: Create or return the payer's one-order invoice application
+      security: [{paymentSession: []}]
+      description: Requires same official Origin. Amount, merchant, tax and trusted OA identity are frozen by the server. No invoice Provider write occurs in this request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [order_id, idempotency_key]
+              properties:
+                order_id: {type: integer, minimum: 1}
+                idempotency_key: {type: string, minLength: 16, maxLength: 120}
+      responses:
+        '200':
+          description: Existing or created application and official title mini-program launch parameters.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CustomerInvoiceReceipt'}
+        '401': {description: "Session required."}
+        '403': {description: "Cross-site request rejected."}
+        '404': {description: "Order not owned."}
+        '409': {description: "Ineligible order or idempotency conflict."}
+        '503': {description: "Provider not enabled or unavailable; order query remains available."}
+  /api/h5/me/invoices/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, pattern: '^inv_[a-f0-9]{28}$'}}
+    get:
+      summary: Read own safe invoice and card-delivery status
+      security: [{paymentSession: []}]
+      responses:
+        '200':
+          description: Buyer title and external identity never returned.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CustomerInvoiceReceipt'}
+        '401': {description: "Session required."}
+        '404': {description: "Unknown or another customer's application."}
+  /api/h5/me/invoices/{id}/resume:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, pattern: '^inv_[a-f0-9]{28}$'}}
+    post:
+      summary: Refresh original application or regenerate its expired official title entrance
+      security: [{paymentSession: []}]
+      description: Same Origin required. Unknown outcomes retain original invoice ID; a new invoice ID is permitted only after verified failure, within bounded retries.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '200':
+          description: Original application status or title entrance.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CustomerInvoiceReceipt'}
+        '401': {description: "Session required."}
+        '403': {description: "Cross-site request rejected."}
+        '404': {description: "Application not owned."}
+        '409': {description: "Refund or bounded retry prevents issuing."}
+        '503': {description: "Provider unavailable."}
+  /api/h5/me/invoices/{id}/file:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, pattern: '^inv_[a-f0-9]{28}$'}}
+    get:
+      summary: Download own issued invoice through authenticated server proxy
+      security: [{paymentSession: []}]
+      responses:
+        '200':
+          description: Official PDF with verified SM3 digest; no-store.
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        '401': {description: "Session required."}
+        '404': {description: "Application not owned."}
+        '409': {description: "Not issued or has been reversed."}
+        '503': {description: "Provider file unavailable."}
+  /api/h5/me/invoice-jssdk:
+    get:
+      summary: Sign the current official order URL for WeChat's mini-program open tag
+      security: [{paymentSession: []}]
+      parameters:
+        - {name: url, in: query, required: true, schema: {type: string, format: uri}, description: Exact configured origin and /my/orders only. No fragment or credentials.}
+      responses:
+        '200': {description: "OA appId/timestamp/nonceStr/signature only."}
+        '400': {description: "Untrusted URL."}
+        '401': {description: "Session required."}
+        '503': {description: "OA credentials or Provider unavailable."}
+  /api/callbacks/wechat-invoice:
+    post:
+      summary: Verify, decrypt and deduplicate WeChat invoice notifications
+      security: [{wechatPaySignature: []}]
+      description: The official SDK checks platform signature and AES-GCM resource; service/sub-merchant and application must match. Notifications wake a fresh query, never directly claim issuance or card delivery.
+      responses:
+        '204': {description: "Notification accepted; not an invoice-success receipt."}
+        '400': {description: "Invalid timestamp, signature or encrypted resource."}
+        '409': {description: "Conflicting replay or wrong merchant binding."}
+        '503': {description: "Disabled Provider or unavailable database."}
+
 components:
   securitySchemes:
     adminSession: {type: apiKey, in: cookie, name: aicrm_admin_session}
@@ -5144,6 +5275,50 @@ components:
       content: {application/json: {schema: {$ref: "#/components/schemas/OpenPlatformV1Failure"}}}
     MutationOK: {description: Mutation completed, content: {application/json: {schema: {type: object, required: [ok], properties: {ok: {const: true}}}}}}
   schemas:
+    CustomerInvoiceReceipt:
+      type: object
+      required: [id, order_id, amount_minor, state, card_state, refund_confirmed]
+      properties:
+        id: {type: string, pattern: '^inv_[a-f0-9]{28}$'}
+        order_id: {type: integer}
+        amount_minor: {type: integer, description: Frozen actual paid amount in CNY fen.}
+        state: {type: string, enum: [awaiting_title, queued, issuing, issued, failed, cancelled, reversing, reversed, reverse_failed]}
+        card_state: {type: string, enum: [pending, INSERT_ACCEPTED, INSERTED, DISCARD_ACCEPTED, DISCARDED]}
+        invoice_number: {type: string}
+        red_number: {type: string}
+        refund_confirmed: {type: boolean}
+        launch:
+          type: object
+          properties:
+            miniprogram_appid: {type: string}
+            miniprogram_path: {type: string}
+            miniprogram_user_name: {type: string}
+            expires_at: {type: string, format: date-time}
+    CustomerOrdersPage:
+      type: object
+      required: [items, next_cursor, invoice_enabled]
+      properties:
+        next_cursor: {type: string}
+        invoice_enabled: {type: boolean}
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: integer}
+              order_no: {type: string}
+              product_names: {type: array, items: {type: string}}
+              time: {type: [string, 'null'], format: date-time}
+              time_kind: {type: string, enum: [ordered, paid, unknown]}
+              amount_minor: {type: integer}
+              currency: {type: string}
+              provider: {type: string}
+              state: {type: string}
+              refunded_minor: {type: integer}
+              refund_pending: {type: boolean}
+              invoice_eligible: {type: boolean}
+              invoice_reason: {type: string}
+              invoice: {$ref: '#/components/schemas/CustomerInvoiceReceipt'}
     OpsIncidentEpisode: {"type":"object","additionalProperties":false,"required":["id","issue_id","check_id","code","detected_release","detection_origin","initial_status","latest_status","detected_at","last_observed_at","recovered_at","version","classification","escaped_defect","change_failure","caused_by_release_sequence","root_cause","remediation","fault_started_at","fault_start_basis","effort_minutes","attributed_at"],"properties":{"id":{"type":"integer","format":"int64"},"issue_id":{"type":"integer","format":"int64"},"check_id":{"type":"string"},"code":{"type":"string"},"detected_release":{"type":"string"},"detection_origin":{"type":"string"},"initial_status":{"type":"string"},"latest_status":{"type":"string"},"detected_at":{"type":"string","format":"date-time"},"last_observed_at":{"type":"string","format":"date-time"},"recovered_at":{"type":["string","null"],"format":"date-time"},"version":{"type":"integer","format":"int64"},"classification":{"type":"string","enum":["unclassified","confirmed_defect","expected_rejection","legacy_backlog","observation_gap","non_defect"]},"escaped_defect":{"type":"string","enum":["unclassified","yes","no"]},"change_failure":{"type":"string","enum":["unclassified","yes","no"]},"caused_by_release_sequence":{"type":["integer","null"],"format":"int64"},"root_cause":{"type":"string","enum":["unknown","code","configuration","dependency","data","infrastructure","expected_behavior","instrumentation"]},"remediation":{"type":"string","enum":["unknown","code_fix","configuration_fix","rollback","hotfix","data_reconciliation","dependency_recovery","no_action"]},"fault_started_at":{"type":["string","null"],"format":"date-time"},"fault_start_basis":{"type":"string","enum":["unknown","monitor_evidence","provider_receipt","operator_confirmed"]},"effort_minutes":{"type":["integer","null"],"format":"int64"},"attributed_at":{"type":["string","null"],"format":"date-time"}}}
     OpsIncidentAttribution: {"type":"object","additionalProperties":false,"required":["classification","escaped_defect","change_failure","caused_by_release_sequence","root_cause","remediation","fault_started_at","fault_start_basis","effort_minutes"],"properties":{"classification":{"type":"string","enum":["unclassified","confirmed_defect","expected_rejection","legacy_backlog","observation_gap","non_defect"]},"escaped_defect":{"type":"string","enum":["unclassified","yes","no"]},"change_failure":{"type":"string","enum":["unclassified","yes","no"]},"caused_by_release_sequence":{"type":["integer","null"],"format":"int64"},"root_cause":{"type":"string","enum":["unknown","code","configuration","dependency","data","infrastructure","expected_behavior","instrumentation"]},"remediation":{"type":"string","enum":["unknown","code_fix","configuration_fix","rollback","hotfix","data_reconciliation","dependency_recovery","no_action"]},"fault_started_at":{"type":["string","null"],"format":"date-time"},"fault_start_basis":{"type":"string","enum":["unknown","monitor_evidence","provider_receipt","operator_confirmed"]},"effort_minutes":{"type":["integer","null"],"format":"int64"}}}
     OpsIncidentAttributionCommand: {"type":"object","additionalProperties":false,"required":["expected_version","classification","escaped_defect","change_failure","caused_by_release_sequence","root_cause","remediation","fault_started_at","fault_start_basis","effort_minutes"],"properties":{"expected_version":{"type":"integer","format":"int64"},"classification":{"type":"string","enum":["unclassified","confirmed_defect","expected_rejection","legacy_backlog","observation_gap","non_defect"]},"escaped_defect":{"type":"string","enum":["unclassified","yes","no"]},"change_failure":{"type":"string","enum":["unclassified","yes","no"]},"caused_by_release_sequence":{"type":["integer","null"],"format":"int64"},"root_cause":{"type":"string","enum":["unknown","code","configuration","dependency","data","infrastructure","expected_behavior","instrumentation"]},"remediation":{"type":"string","enum":["unknown","code_fix","configuration_fix","rollback","hotfix","data_reconciliation","dependency_recovery","no_action"]},"fault_started_at":{"type":["string","null"],"format":"date-time"},"fault_start_basis":{"type":"string","enum":["unknown","monitor_evidence","provider_receipt","operator_confirmed"]},"effort_minutes":{"type":["integer","null"],"format":"int64"}}}

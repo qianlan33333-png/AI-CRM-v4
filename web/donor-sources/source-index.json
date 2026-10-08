@@ -779,13 +779,13 @@
       "mode": "100644"
     },
     {
-      "id": "v4-openapi-50590ff9d9ab1e42b478e4e2c3d9674ee5afaf20",
+      "id": "v4-openapi-0451a31d90e43bc6dc649c3ffa2cd0751a0e4d70",
       "library_id": "v4-api-10dafc87aa32e4ade0f20f9371088040c4a997cf",
       "canonical_path": "api/openapi.yaml",
       "source_path": "api/openapi.yaml",
-      "source_git_blob_sha": "50590ff9d9ab1e42b478e4e2c3d9674ee5afaf20",
-      "content_sha256": "8f105ff955d6e5766d1f57eb4a19ffb6c7389b23ea2e89258dc294c41afa996b",
-      "bytes": 780507,
+      "source_git_blob_sha": "0451a31d90e43bc6dc649c3ffa2cd0751a0e4d70",
+      "content_sha256": "2ded1262b733eefdf6fe27b139c8e90f5c7044d2812176b5fb00526f82fc9fad",
+      "bytes": 789272,
       "mode": "100644"
     }
   ],
@@ -793,11 +793,11 @@
     {
       "module": "v3_openapi_contract",
       "logical_path": "api/openapi.yaml",
-      "content_id": "v4-openapi-50590ff9d9ab1e42b478e4e2c3d9674ee5afaf20",
+      "content_id": "v4-openapi-0451a31d90e43bc6dc649c3ffa2cd0751a0e4d70",
       "source_repository": "https://github.com/qianlan33333-png/AI-CRM-v4.git",
       "source_commit": "10dafc87aa32e4ade0f20f9371088040c4a997cf",
       "source_path": "api/openapi.yaml",
-      "source_git_blob_sha": "50590ff9d9ab1e42b478e4e2c3d9674ee5afaf20",
+      "source_git_blob_sha": "0451a31d90e43bc6dc649c3ffa2cd0751a0e4d70",
       "mode": "100644",
       "usage": "active_canonical_contract_source",
       "freeze_gate": "scripts/validate-openapi.mjs",
@@ -807,11 +807,11 @@
     {
       "module": "config_http",
       "logical_path": "internal/config/http/openapi.yaml",
-      "content_id": "v4-openapi-50590ff9d9ab1e42b478e4e2c3d9674ee5afaf20",
+      "content_id": "v4-openapi-0451a31d90e43bc6dc649c3ffa2cd0751a0e4d70",
       "source_repository": "https://github.com/qianlan33333-png/AI-CRM-v4.git",
       "source_commit": "10dafc87aa32e4ade0f20f9371088040c4a997cf",
       "source_path": "api/openapi.yaml",
-      "source_git_blob_sha": "50590ff9d9ab1e42b478e4e2c3d9674ee5afaf20",
+      "source_git_blob_sha": "0451a31d90e43bc6dc649c3ffa2cd0751a0e4d70",
       "mode": "100644",
       "usage": "go_embed_compatibility_view",
       "freeze_gate": "internal/config/http/handler_test.go",
@@ -4046,7 +4046,7 @@
   "views": [
     {
       "target_path": "internal/config/http/openapi.yaml",
-      "content_id": "v4-openapi-50590ff9d9ab1e42b478e4e2c3d9674ee5afaf20",
+      "content_id": "v4-openapi-0451a31d90e43bc6dc649c3ffa2cd0751a0e4d70",
       "enabled": true
     },
     {

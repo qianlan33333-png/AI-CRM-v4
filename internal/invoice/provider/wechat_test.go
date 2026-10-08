@@ -1,0 +1,243 @@
+package provider
+
+import (
+	"context"
+	"crypto"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/emmansun/gmsm/sm3"
+	effects "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	p "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice/port"
+	"github.com/wechatpay-apiv3/wechatpay-go/core"
+	"github.com/wechatpay-apiv3/wechatpay-go/core/auth/verifiers"
+	"github.com/wechatpay-apiv3/wechatpay-go/core/option"
+	"io"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+type invoiceTransport func(*http.Request) (*http.Response, error)
+
+func (f invoiceTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type material struct{ a p.Application }
+
+func (m material) PrepareInvoiceEffect(context.Context, string, bool) (p.Application, error) {
+	return m.a, nil
+}
+
+type paymentProof struct{}
+
+func (paymentProof) VerifyInvoicePayment(context.Context, p.Snapshot) error { return nil }
+func invoiceSignature(t *testing.T, key *rsa.PrivateKey, body, ts, nonce string) string {
+	t.Helper()
+	hash := sha256.Sum256([]byte(ts + "\n" + nonce + "\n" + body + "\n"))
+	sig, e := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, hash[:])
+	if e != nil {
+		t.Fatal(e)
+	}
+	return base64.StdEncoding.EncodeToString(sig)
+}
+func invoiceProviderFixture(t *testing.T, respond func(*http.Request) string) (*WeChat, *rsa.PrivateKey, p.Application) {
+	t.Helper()
+	key, e := rsa.GenerateKey(rand.Reader, 2048)
+	if e != nil {
+		t.Fatal(e)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(12345), NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature}
+	der, e := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if e != nil {
+		t.Fatal(e)
+	}
+	cert, _ := x509.ParseCertificate(der)
+	a := p.Application{ID: "inv_" + strings.Repeat("a", 28), InvoiceID: "inv_" + strings.Repeat("b", 28), BlueNumber: "BLUE1", Snapshot: p.Snapshot{MerchantID: "sub", AppID: "wx-app", AppScope: "wechat-app:wx-app", OrderNo: "order-1", TransactionID: "transaction-1", Amount: 9900, SellerTaxID: "tax-1", BillingPersonID: "finance", Lines: []p.Line{{TaxCode: "3010101020203000000", GoodsName: "*培训服务*课程", TotalAmount: 9900, Quantity: 100000000, TaxRate: 600}}}, Buyer: p.Buyer{Type: "INDIVIDUAL", Name: "本人"}}
+	w, e := New(context.Background(), "service-merchant", "merchant-serial", strings.Repeat("k", 32), key, cert, &OfficialAccount{AppID: "wx-app"}, material{a}, paymentProof{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	visitor := core.NewCertificateMapWithList([]*x509.Certificate{cert})
+	client, e := core.NewClient(context.Background(), option.WithMerchantCredential("service-merchant", "merchant-serial", key), option.WithVerifier(verifiers.NewSHA256WithRSAVerifier(visitor)), option.WithHTTPClient(&http.Client{Transport: invoiceTransport(func(r *http.Request) (*http.Response, error) {
+		body := respond(r)
+		ts := fmt.Sprint(time.Now().Unix())
+		nonce := "fixture-nonce"
+		return &http.Response{StatusCode: 200, Header: http.Header{"Wechatpay-Timestamp": {ts}, "Wechatpay-Nonce": {nonce}, "Wechatpay-Serial": {w.PlatformSerial}, "Wechatpay-Signature": {invoiceSignature(t, key, body, ts, nonce)}, "Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}))
+	if e != nil {
+		t.Fatal(e)
+	}
+	w.Client = client
+	return w, key, a
+}
+func TestInvoiceOfficialSDKRequestsFreezeAndQueryBinding(t *testing.T) {
+	var issue map[string]json.RawMessage
+	w, _, a := invoiceProviderFixture(t, func(r *http.Request) string {
+		if !strings.Contains(r.Header.Get("Authorization"), "service-merchant") {
+			t.Fatal("unsigned official API")
+		}
+		switch {
+		case strings.HasSuffix(r.URL.Path, "title-url"):
+			if r.URL.Query().Get("openid") != "trusted-openid" || r.URL.Query().Get("fapiao_apply_id") == "" {
+				t.Fatal("title identity binding")
+			}
+			return `{"miniprogram_appid":"wx-official","miniprogram_path":"pages/title","miniprogram_user_name":"gh-official"}`
+		case strings.HasSuffix(r.URL.Path, "user-title"):
+			if r.URL.Query().Get("scene") != "WITHOUT_WECHATPAY" {
+				t.Fatal("wrong title scene")
+			}
+			return `{"type":"INDIVIDUAL","name":"本人","amount":9900}`
+		case strings.HasSuffix(r.URL.Path, "issue-general"):
+			if json.NewDecoder(r.Body).Decode(&issue) != nil {
+				t.Fatal("issue body")
+			}
+			return `{}`
+		case strings.HasSuffix(r.URL.Path, "reverse"):
+			var b struct {
+				Reason   string              `json:"reverse_reason"`
+				Invoices []map[string]string `json:"fapiao_information"`
+			}
+			json.NewDecoder(r.Body).Decode(&b)
+			if b.Reason != "SALES_RETURN" || len(b.Invoices) != 1 || b.Invoices[0]["fapiao_number"] != "BLUE1" {
+				t.Fatal("reversal shape")
+			}
+			return `{}`
+		default:
+			return `{"fapiao_information":[{"fapiao_id":"foreign","status":"ISSUED"}]}`
+		}
+	})
+	if _, e := w.Title(context.Background(), a, "trusted-openid"); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := w.ReadTitle(context.Background(), a); e != nil {
+		t.Fatal(e)
+	}
+	if e := w.Write(context.Background(), a, false); e != nil {
+		t.Fatal(e)
+	}
+	var detail struct {
+		ID           string           `json:"fapiao_id"`
+		Amount       int64            `json:"total_amount"`
+		Items        []p.Line         `json:"items"`
+		Transactions []map[string]any `json:"transaction_information"`
+	}
+	if json.Unmarshal(issue["fapiao_information"], &detail) != nil || detail.ID != a.InvoiceID || detail.Amount != 9900 || len(detail.Items) != 1 || len(detail.Transactions) != 1 {
+		t.Fatal("immutable issue contract")
+	}
+	if e := w.Write(context.Background(), a, true); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := w.Query(context.Background(), a); !errors.Is(e, p.ErrConflict) {
+		t.Fatal("foreign invoice accepted", e)
+	}
+}
+func TestInvoiceOfficialCallbackSignatureDecryptAndReplayDigest(t *testing.T) {
+	w, key, a := invoiceProviderFixture(t, func(*http.Request) string { return `{}` })
+	block, _ := aes.NewCipher([]byte(strings.Repeat("k", 32)))
+	gcm, _ := cipher.NewGCM(block)
+	makeRequest := func(extra, merchant string) *http.Request {
+		plain, _ := json.Marshal(map[string]string{"mchid": merchant, "sub_mchid": "sub", "fapiao_apply_id": a.ID, "extra": extra})
+		nonce := "123456789012"
+		ciphertext := base64.StdEncoding.EncodeToString(gcm.Seal(nil, []byte(nonce), plain, []byte("invoice")))
+		raw, _ := json.Marshal(map[string]any{"id": "notice-1", "event_type": "FAPIAO.ISSUED", "resource": map[string]string{"algorithm": "AEAD_AES_256_GCM", "ciphertext": ciphertext, "nonce": nonce, "associated_data": "invoice"}})
+		r := httptest.NewRequest("POST", "https://crm.fixture/api/callbacks/wechat-invoice", strings.NewReader(string(raw)))
+		ts := fmt.Sprint(time.Now().Unix())
+		r.Header.Set("Wechatpay-Timestamp", ts)
+		r.Header.Set("Wechatpay-Nonce", "notify-nonce")
+		r.Header.Set("Wechatpay-Serial", w.PlatformSerial)
+		r.Header.Set("Wechatpay-Signature", invoiceSignature(t, key, string(raw), ts, "notify-nonce"))
+		return r
+	}
+	first, e := w.Verify(context.Background(), makeRequest("one", "service-merchant"))
+	if e != nil || first.ApplicationID != a.ID {
+		t.Fatal("verified encrypted notice", e)
+	}
+	second, e := w.Verify(context.Background(), makeRequest("two", "service-merchant"))
+	if e != nil || second.BodyDigest == first.BodyDigest {
+		t.Fatal("body changes invisible to receipt", e)
+	}
+	bad := makeRequest("one", "service-merchant")
+	bad.Header.Set("Wechatpay-Signature", "invalid")
+	if _, e = w.Verify(context.Background(), bad); !errors.Is(e, p.ErrInvalid) {
+		t.Fatal("bad signature", e)
+	}
+	if _, e = w.Verify(context.Background(), makeRequest("one", "foreign")); !errors.Is(e, p.ErrInvalid) {
+		t.Fatal("wrong SP merchant", e)
+	}
+	bad = makeRequest("one", "service-merchant")
+	bad.Header.Set("Wechatpay-Timestamp", fmt.Sprint(time.Now().Add(-10*time.Minute).Unix()))
+	if _, e = w.Verify(context.Background(), bad); !errors.Is(e, p.ErrInvalid) {
+		t.Fatal("expired callback", e)
+	}
+}
+func TestInvoiceFileUnsignedDigestAndRedirectBoundary(t *testing.T) {
+	badURL := false
+	w, _, a := invoiceProviderFixture(t, func(r *http.Request) string {
+		if strings.HasSuffix(r.URL.Path, "fapiao-files") {
+			url := "https://pay.wechatpay.cn/invoicing/fapiao/fapiao-file?token=fixture"
+			if badURL {
+				url = "https://evil.test/file?token=fixture"
+			}
+			return fmt.Sprintf(`{"fapiao_download_info_list":[{"fapiao_id":"%s","download_url":"%s"}]}`, "inv_"+strings.Repeat("b", 28), url)
+		}
+		return fmt.Sprintf(`{"fapiao_information":[{"fapiao_id":"%s","status":"ISSUED","total_amount":9900,"seller_information":{"taxpayer_id":"tax-1"},"blue_fapiao":{"fapiao_number":"BLUE1"},"card_information":{"card_openid":"trusted-openid"}}]}`, "inv_"+strings.Repeat("b", 28))
+	})
+	pdf := []byte("%PDF-1.5 fixture")
+	validDigest := true
+	w.FileClient = &http.Client{Transport: invoiceTransport(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "" || r.URL.Query().Get("mchid") != "service-merchant" || r.URL.Query().Get("openid") != "trusted-openid" {
+			t.Fatal("download credential contract")
+		}
+		digest := fmt.Sprintf("%X", sm3.Sum(pdf))
+		if !validDigest {
+			digest = strings.Repeat("0", 64)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Sm3-Digest": {digest}}, Body: io.NopCloser(strings.NewReader(string(pdf)))}, nil
+	})}
+	if _, e := w.File(context.Background(), a); e != nil {
+		t.Fatal(e)
+	}
+	validDigest = false
+	if _, e := w.File(context.Background(), a); !errors.Is(e, p.ErrConflict) {
+		t.Fatal("corrupt document", e)
+	}
+	badURL = true
+	if _, e := w.File(context.Background(), a); !errors.Is(e, p.ErrConflict) {
+		t.Fatal("foreign download URL", e)
+	}
+}
+
+type invoiceRejectedPayment struct{ err error }
+
+func (v invoiceRejectedPayment) VerifyInvoicePayment(context.Context, p.Snapshot) error {
+	return v.err
+}
+func TestInvoiceEffectUnknownCannotRetryAndNoWriteBeforePaymentProof(t *testing.T) {
+	w, key, _ := invoiceProviderFixture(t, func(*http.Request) string { t.Fatal("unverified payment reached invoice write"); return `{}` })
+	w.Payments = invoiceRejectedPayment{err: p.ErrUnavailable}
+	result, e := w.Execute(context.Background(), effects.Envelope{Owner: effects.OwnerInvoice, Kind: effects.KindInvoiceIssue}, effects.Attempt{EffectID: "eer_1"})
+	if e != nil || result.CallAttempted || result.Completion != effects.StateFinalFailed || result.FailureCode != "invoice_payment_check_unavailable" {
+		t.Fatal("payment read misclassified as invoice write", result, e)
+	}
+	w.Payments = invoiceRejectedPayment{err: p.ErrConflict}
+	result, e = w.Execute(context.Background(), effects.Envelope{Owner: effects.OwnerInvoice, Kind: effects.KindInvoiceIssue}, effects.Attempt{EffectID: "eer_1"})
+	if e != nil || result.CallAttempted || result.FailureCode != "invoice_payment_unverified" {
+		t.Fatal("conflicting payment proof did not fail closed", result, e)
+	}
+	w, key, _ = invoiceProviderFixture(t, func(*http.Request) string { return `{}` })
+	w.Client, _ = core.NewClient(context.Background(), option.WithHTTPClient(&http.Client{Transport: invoiceTransport(func(*http.Request) (*http.Response, error) { return nil, errors.New("synthetic transport loss") })}), option.WithoutValidator(), option.WithMerchantCredential("service-merchant", "merchant-serial", key))
+	result, e = w.Execute(context.Background(), effects.Envelope{Owner: effects.OwnerInvoice, Kind: effects.KindInvoiceIssue}, effects.Attempt{EffectID: "eer_2"})
+	if e != nil || !result.CallAttempted || result.Completion != effects.StateUnknown || result.SafeToRetryRejected {
+		t.Fatal("ambiguous issue not kept unknown", result, e)
+	}
+}

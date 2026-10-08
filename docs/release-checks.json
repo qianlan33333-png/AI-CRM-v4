@@ -1,27 +1,97 @@
 {
   "schema": 1,
-  "baseline_sha": "da810b3a77f96d58340cfcbd074243997b85a5e3",
+  "baseline_sha": "4155b95e8d540d3e5c9f98c51b0a7707292d6c2c",
   "checks": [
     {
-      "lane": "frontend",
-      "path": "web/v3/surveyPublicHost.keyboard.test.mjs"
+      "lane": "backend",
+      "package": "./internal/invoice"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice/provider"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/store/self_test.go",
+      "test": "TestSelfOrdersRequireOwnersAndLiteralProductSearch"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/h5oauth/h5oauth_test.go",
+      "test": "TestH5OAuthStateIsBoundExpiresAndCannotReplay"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/h5oauth/h5oauth_test.go",
+      "test": "TestOrdersOAuthFixedReturnPathRejectsIdentityAndRedirectParameters"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/http/orders_oauth_test.go",
+      "test": "TestOrdersOAuthFailuresReturnWithoutAutomaticLoop"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/platform/config/invoice_test.go",
+      "test": "TestInvoiceProviderDisabledByDefaultAndIncompleteFailsClosed"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/externaleffects/runtime_test.go",
+      "test": "TestClosedDigestOnlyEnvelopeAndStates"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/externaleffects/runtime_test.go",
+      "test": "TestStaleAttemptCompletionProjectionKinds"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/externaleffects/runtime_test.go",
+      "test": "TestInvoiceKindsRequireTheirOwnerAndDigestOnlyPayload"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/externaleffects/runtime_test.go",
+      "test": "TestPaymentV1KindsUsePaymentOwnerWithoutRawPayload"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_postgres_test.go",
+      "test": "TestInvoicePostgreSQLOwnershipFiltersAndSession",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_postgres_test.go",
+      "test": "TestInvoicePostgreSQLAtomicReplayAndUnknownRecovery",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_postgres_test.go",
+      "test": "TestInvoicePostgreSQLRefundRacesAndBoundedRetries",
+      "postgres": true
     },
     {
       "lane": "frontend",
-      "path": "web/v3/surveyPublicHost.test.mjs"
+      "path": "web/v3/customerOrders.test.mjs"
     },
     {
       "lane": "frontend",
-      "path": "web/v3/surveySubmissionResume.test.mjs"
+      "path": "scripts/validate-openapi.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "scripts/check-openapi-route-parity.mjs"
     }
   ],
   "installed_checks": [
-    "module-related-readback",
-    "survey-keyboard-installed",
-    "cli-deadline-installed"
+    "customer-orders-authorized-filters",
+    "invoice-application-readback",
+    "invoice-refund-state-readback"
   ],
   "build_commands": [
-    "./cmd/aicrm",
-    "./cmd/aicrm-cli"
+    "./cmd/aicrm"
   ]
 }

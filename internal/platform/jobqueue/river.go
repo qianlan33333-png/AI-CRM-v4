@@ -225,3 +225,26 @@ func RetryRescuedDiscardedJobTx(ctx context.Context, client *river.Client[pgx.Tx
 	}
 	return true, nil
 }
+
+// WakePendingJobTx advances a scheduled/retryable task when new authenticated
+// evidence arrives. It keeps the same River job; running and cancelled tasks
+// are left alone. Callers supply its exact registered kind, queue and args.
+func WakePendingJobTx(ctx context.Context, client *river.Client[pgx.Tx], tx pgx.Tx, id int64, args river.JobArgs, queue string) error {
+	if client == nil || tx == nil || id < 1 || args == nil || queue == "" {
+		return ErrUnavailable
+	}
+	raw, e := json.Marshal(args)
+	if e != nil {
+		return e
+	}
+	var locked int64
+	e = tx.QueryRow(ctx, `SELECT id FROM river_job WHERE id=$1 AND kind=$2 AND queue=$3 AND args=$4::jsonb AND state IN ('scheduled','retryable') FOR UPDATE SKIP LOCKED`, id, args.Kind(), queue, string(raw)).Scan(&locked)
+	if errors.Is(e, pgx.ErrNoRows) {
+		return nil
+	}
+	if e != nil {
+		return e
+	}
+	_, e = client.JobRetryTx(ctx, tx, locked)
+	return e
+}

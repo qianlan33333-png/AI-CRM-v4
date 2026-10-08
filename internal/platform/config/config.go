@@ -56,6 +56,7 @@ type Runtime struct {
 	Referral                   Referral
 	CommercePush               CommercePush
 	WeChatPay                  WeChatPay
+	Invoice                    Invoice
 	Alipay                     Alipay
 	WeChatShop                 WeChatShop
 	WorkerOwner                string
@@ -352,6 +353,13 @@ type WeChatPay struct {
 	ProfitSharingPublicKeyID string
 }
 
+// Invoice credentials belong to the separately enrolled service provider.
+type Invoice struct {
+	Enabled                                                                       bool
+	ServiceMerchantID, MerchantSerial, PrivateKeyPath, PlatformCertPath, APIV3Key string
+	SellerName, SellerTaxID, BillingPersonID, TaxConfigPath                       string
+}
+
 type WeChatShop struct {
 	Enabled                               bool
 	AppID, AppSecret                      string
@@ -479,6 +487,18 @@ func Load() (Runtime, error) {
 	if cfg.TagCatalog.MutationEnabled, err = strictBool("AICRM_WECOM_TAG_CATALOG_MUTATION_PROVIDER_ENABLED", false); err != nil {
 		return Runtime{}, err
 	}
+	if cfg.Invoice.Enabled, err = strictBool("AICRM_INVOICE_PROVIDER_ENABLED", false); err != nil {
+		return Runtime{}, err
+	}
+	cfg.Invoice.ServiceMerchantID = os.Getenv("AICRM_INVOICE_SERVICE_MERCHANT_ID")
+	cfg.Invoice.MerchantSerial = os.Getenv("AICRM_INVOICE_MERCHANT_SERIAL")
+	cfg.Invoice.PrivateKeyPath = os.Getenv("AICRM_INVOICE_PRIVATE_KEY_PATH")
+	cfg.Invoice.PlatformCertPath = os.Getenv("AICRM_INVOICE_PLATFORM_CERT_PATH")
+	cfg.Invoice.APIV3Key = os.Getenv("AICRM_INVOICE_API_V3_KEY")
+	cfg.Invoice.SellerName = os.Getenv("AICRM_INVOICE_SELLER_NAME")
+	cfg.Invoice.SellerTaxID = os.Getenv("AICRM_INVOICE_SELLER_TAX_ID")
+	cfg.Invoice.BillingPersonID = os.Getenv("AICRM_INVOICE_BILLING_PERSON_ID")
+	cfg.Invoice.TaxConfigPath = os.Getenv("AICRM_INVOICE_TAX_CONFIG_PATH")
 	if cfg.WeChatPay.Enabled, err = strictBool("AICRM_WECHAT_PAY_PROVIDER_ENABLED", false); err != nil {
 		return Runtime{}, err
 	}
@@ -822,6 +842,12 @@ func Load() (Runtime, error) {
 		}
 		if decoded, decodeErr := base64.RawStdEncoding.DecodeString(cfg.WeChatPay.OrderContactDataKey); decodeErr != nil || len(decoded) != 32 {
 			return Runtime{}, errors.New("invalid AICRM_ORDER_CONTACT_DATA_KEY")
+		}
+	}
+	if cfg.Invoice.Enabled {
+		values := []string{cfg.Invoice.ServiceMerchantID, cfg.Invoice.MerchantSerial, cfg.Invoice.PrivateKeyPath, cfg.Invoice.PlatformCertPath, cfg.Invoice.APIV3Key, cfg.Invoice.SellerName, cfg.Invoice.SellerTaxID, cfg.Invoice.BillingPersonID, cfg.Invoice.TaxConfigPath}
+		if !cfg.Effects.ProviderEnabled || !cfg.WeChatPay.Enabled || !cfg.WeChatPay.H5OAuthEnabled || nonEmptyCount(values) != len(values) || len(cfg.Invoice.APIV3Key) != 32 {
+			return Runtime{}, errors.New("enabled invoice provider requires service-provider credentials, finance configuration and WeChat H5 authorization")
 		}
 	}
 	if cfg.WeChatPay.ProfitSharingEnabled {

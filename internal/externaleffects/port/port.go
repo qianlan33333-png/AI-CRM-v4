@@ -41,6 +41,9 @@ type Kind string
 const (
 	OwnerOutbound               Owner = "outbound"
 	OwnerPayment                Owner = "payment"
+	OwnerInvoice                Owner = "invoice"
+	KindInvoiceIssue            Kind  = "wechat_invoice_issue_v1"
+	KindInvoiceReverse          Kind  = "wechat_invoice_reverse_v1"
 	OwnerAutomation             Owner = "automation"
 	OwnerAdminOps               Owner = "adminops"
 	KindFeishuOpsNotification   Kind  = "feishu_ops_notification_v1"
@@ -105,6 +108,7 @@ type Envelope struct {
 func (value Envelope) Valid() bool {
 	kindValid := value.Owner == OwnerOutbound && (value.Kind == KindOutboundMessage || value.Kind == KindAutomationMessage || value.Kind == KindOutboundMedia || value.Kind == KindWeComTagCatalog || value.Kind == KindWeComTagCatalogMutation || value.Kind == KindWeComContactDescription || value.Kind == KindGroupMessage || value.Kind == KindChannelAsset || value.Kind == KindChannelWelcome || value.Kind == KindChannelEntryTag || value.Kind == KindCustomerTagCommand || value.Kind == KindCustomerOwnerHandoff || value.Kind == KindCommerceProductPush || value.Kind == KindInvitationCode || value.Kind == KindChannelLink || value.Kind == KindSidebarJSSDKSend || value.Kind == KindSurveyCompletion) ||
 		value.Owner == OwnerPayment && (value.Kind == KindWeChatPayPrepay || value.Kind == KindWeChatPayRefund || value.Kind == KindWeChatShopRefund || value.Kind == KindWeChatPayReceiverAdd || value.Kind == KindWeChatPayProfitSharing || value.Kind == KindWeChatPayProfitUnfreeze || value.Kind == KindAlipayWapPay || value.Kind == KindAlipayPagePay || value.Kind == KindAlipayRefund) ||
+		value.Owner == OwnerInvoice && (value.Kind == KindInvoiceIssue || value.Kind == KindInvoiceReverse) ||
 		value.Owner == OwnerAutomation && value.Kind == KindAIAgentGenerate ||
 		value.Owner == OwnerAdminOps && value.Kind == KindFeishuOpsNotification || value.Owner == OwnerSegment && value.Kind == KindAIRecommend
 	return kindValid && ValidDigest(value.SourceRefDigest) && ValidDigest(value.TargetRefDigest) && ValidDigest(value.PayloadDigest) && ValidDigest(value.PolicyVersionHash)
@@ -218,6 +222,18 @@ type TransactionalCanceller interface {
 // payload, Provider response, or control operation.
 type Reader interface {
 	Get(context.Context, string) (Projection, error)
+}
+
+// WithinReader observes the owning domain's effect inside its current UoW.
+type WithinReader interface {
+	GetWithin(context.Context, string) (Projection, error)
+}
+
+// InvoiceFinality accepts only Invoice's authenticated provider-query evidence
+// or confirmed refund. It cannot retry a write or settle another owner's effect.
+type InvoiceFinality interface {
+	ReconcileInvoiceWithin(context.Context, string, Digest) error
+	CancelInvoiceWithin(context.Context, string, Digest) error
 }
 
 // ReconciliationCandidate is the exact expired attempt fence an owning

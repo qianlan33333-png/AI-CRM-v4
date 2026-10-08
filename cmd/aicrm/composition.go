@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	invoicemodule "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice"
+	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	"net/http"
 	"net/url"
 	"os"
@@ -400,6 +402,10 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = river.AddWorkerSafely[hxcworker.Args](effectWorkers, hxcDashboardWorker); err != nil {
 		return fail(err)
 	}
+	invoiceQueryWorker := &invoicemodule.QueryWorker{}
+	if err = river.AddWorkerSafely[invoicemodule.QueryArgs](effectWorkers, invoiceQueryWorker); err != nil {
+		return fail(err)
+	}
 	paymentReconciliationWorker := payment.NewReconciliationWorker()
 	if err = river.AddWorkerSafely[payment.ReconciliationJobArgs](effectWorkers, paymentReconciliationWorker); err != nil {
 		return fail(err)
@@ -550,7 +556,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = bindOpsOwnerRetention(opsRetention, configRepository, archivestore.NewPostgreSQL()); err != nil {
 		return fail(err)
 	}
-	effectsQueues := []string{platformjobqueue.OpsInspectionQueue, platformjobqueue.OpsNotificationQueue, platformjobqueue.OpsRetentionQueue, platformjobqueue.OutboundQueue, platformjobqueue.OutboundWelcomeQueue, platformjobqueue.OutboundExcelQueue, platformjobqueue.OutboundMediaQueue, wecom.CustomerSyncQueue, wecom.StaffDirectoryRefreshQueue, payment.ReconciliationQueue, distributionapp.DistributionSettlementQueue, referralapp.ReferralCampaignQueue, hxcworker.Queue, segment.AudienceRefreshQueue, customer.OwnerHandoffQueue, groupops.CatalogQueue}
+	effectsQueues := []string{platformjobqueue.OpsInspectionQueue, platformjobqueue.OpsNotificationQueue, platformjobqueue.OpsRetentionQueue, platformjobqueue.OutboundQueue, platformjobqueue.OutboundWelcomeQueue, platformjobqueue.OutboundExcelQueue, platformjobqueue.OutboundMediaQueue, wecom.CustomerSyncQueue, wecom.StaffDirectoryRefreshQueue, payment.ReconciliationQueue, invoicemodule.QueryQueue, distributionapp.DistributionSettlementQueue, referralapp.ReferralCampaignQueue, hxcworker.Queue, segment.AudienceRefreshQueue, customer.OwnerHandoffQueue, groupops.CatalogQueue}
 	opsHostMaintenance := hostmaintenance.New()
 	if err = opsRetention.BindHostReader(opsHostMaintenance); err != nil {
 		return fail(err)
@@ -1570,11 +1576,16 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = paymentService.SetReconciliationEnqueuer(paymentReconciliationEnqueuer); err != nil {
 		return fail(err)
 	}
+	invoiceService, invoiceHandler, invoiceErr := composeInvoice(uow, paymentSession, queries, orderRepository, paymentRepository, effectRepository, effectClient, cfg)
+	if invoiceErr != nil {
+		return fail(invoiceErr)
+	}
+	invoiceQueryWorker.Service = invoiceService
 	paymentCompletionSink, err := payment.NewCompletionSink(paymentRepository, paymentReconciliationEnqueuer, orderService)
 	if err != nil {
 		return fail(err)
 	}
-	if err = effectRepository.SetCompletionSink(composedCompletionRouter{adminops: opsCompletion{observer: opsInspections}, outbound: outboundCompletionSink, payment: paymentCompletionSink, paymentDistribution: paymentService, automation: generationCompletionSink, segment: coreRecommendationCompletion}); err != nil {
+	if err = effectRepository.SetCompletionSink(composedCompletionRouter{invoice: invoiceService, adminops: opsCompletion{observer: opsInspections}, outbound: outboundCompletionSink, payment: paymentCompletionSink, paymentDistribution: paymentService, automation: generationCompletionSink, segment: coreRecommendationCompletion}); err != nil {
 		return fail(err)
 	}
 	if err = paymentReconciliationWorker.BindService(paymentService); err != nil {
@@ -1693,6 +1704,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	if err = paymentService.SetAlipayReconciler(alipayAdapter); err != nil {
+		return fail(err)
+	}
+	if err = enableInvoiceProvider(ctx, invoiceService, wechatPayAdapter, cfg); err != nil {
 		return fail(err)
 	}
 	paymentAdapter := paymentProviderRouter{wechatPay: wechatPayAdapter, wechatShop: wechatShopAdapter, alipay: alipayAdapter}
@@ -1841,6 +1855,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	var distributionAdmin http.Handler = distributionUnavailableHandler{}
 	var distributionCommissionConsumer orderport.PaidEventConsumer
 	var distributionRefundConsumer orderport.RefundSettlementConsumer
+	var distributionExposureConsumer paymentport.RefundExposureConsumer
 	if cfg.WeChatPay.Enabled && cfg.WeChatPay.AppID != "" && cfg.WeChatPay.AppScope != "" {
 		if trustedBrowserSessions == nil || trustedPaymentSessionBridge == nil {
 			return fail(errors.New("distribution trusted Payment session bridge is unavailable"))
@@ -1897,9 +1912,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		if distributionErr = orderService.SetRefundSettlementConsumer(refundService); distributionErr != nil {
 			return fail(distributionErr)
 		}
-		if distributionErr = paymentService.SetRefundExposureConsumer(refundService); distributionErr != nil {
-			return fail(distributionErr)
-		}
+		distributionExposureConsumer = refundService
 		if distributionErr = paymentService.SetProfitSharingReceiverStatusObserver(registration); distributionErr != nil {
 			return fail(distributionErr)
 		}
@@ -1931,10 +1944,11 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = orderService.SetPaidEventConsumer(orderPaidEventFanout{commerce: commercePushService, purchase: paidPurchaseActions, distribution: distributionCommissionConsumer, referral: referralPaidConsumer}); err != nil {
 		return fail(err)
 	}
-	if distributionRefundConsumer != nil || referralRefundConsumer != nil {
-		if err = orderService.SetRefundSettlementConsumer(orderRefundSettlementFanout{distribution: distributionRefundConsumer, referral: referralRefundConsumer}); err != nil {
-			return fail(err)
-		}
+	if err = orderService.SetRefundSettlementConsumer(orderRefundSettlementFanout{invoice: invoiceService, distribution: distributionRefundConsumer, referral: referralRefundConsumer}); err != nil {
+		return fail(err)
+	}
+	if err = paymentService.SetRefundExposureConsumer(invoiceRefundExposureFanout{invoice: invoiceService, distribution: distributionExposureConsumer}); err != nil {
+		return fail(err)
 	}
 	couponPublicHandler, err := couponhttp.NewPublicHandler(couponPublic, couponCheckout, paymentSession, productTargets, uow)
 	if err != nil {
@@ -2210,7 +2224,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	materialProviderMux := outbound.MaterialEffectMux{GenericProvider: materialProvider, LegacyProvider: sidebarMediaProvider}
 	providerRouter := outbound.NewProviderRouterWithGroupMessageAndChannels(tagCatalogProvider, groupOpsProvider, channelAssetProvider, channelEntrantProvider, channelLinkProvider).WithTagCatalogMutation(tagCatalogMutationProvider).WithContactDescription(contactDescriptionProvider).WithCustomerTag(customerTagProvider).WithPrivateMessage(privateProvider).WithAutomationMessage(messageProvider).WithSidebarJSSDK(sidebarExpiry).WithSidebarMedia(materialProviderMux).WithSurveyCompletion(surveyCompletionProvider).WithCommercePush(commercePushProvider).WithCustomerOwnerHandoff(ownerHandoffProvider).WithInvitationCode(&outbound.InvitationCodeProvider{Store: mediaRepository, Provider: providerClient, Enabled: invitationService.WriteEnabled})
-	if err = effectsModule.SetProviderAdapter(composedProviderRouter{adminops: opsProvider, outbound: providerRouter, payment: paymentAdapter, automation: generationProvider, segment: coreRecommendationProvider}); err != nil {
+	if err = effectsModule.SetProviderAdapter(composedProviderRouter{invoice: invoiceService.ProviderAdapter(), adminops: opsProvider, outbound: providerRouter, payment: paymentAdapter, automation: generationProvider, segment: coreRecommendationProvider}); err != nil {
 		return fail(err)
 	}
 	callbackReceipts := wecom.NewPostgreSQLCallbackReceiptStore()
@@ -2600,6 +2614,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
+	handler = mountInvoice(handler, invoiceHandler)
 	handler = mountOpsGovernance(handler, opsInspectionHTTP, opsRetentionHTTP, opsCPUProfileHTTP, opsGovernanceOutcomesHTTP)
 	handler = mountInvitations(handler, invitationHandler)
 	handler = openplatformhttp.Mount(handler, openPlatformHandler.Routes())

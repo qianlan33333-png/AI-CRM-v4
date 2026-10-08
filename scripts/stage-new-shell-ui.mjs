@@ -31,7 +31,7 @@ const entryKeys = [
   // closure. They must be present in the verified release manifest before
   // Composition can expose them under /product-public-assets/; they remain
   // assets only and do not add a second public document surface.
-  'publicCommerceHost', 'publicCommerceStyles',
+  'publicCommerceHost', 'publicCommerceStyles', 'customerOrdersHost', 'customerOrdersStyles',
   'navigationHost', 'overviewAdmin', 'overviewStyles', 'governanceAdmin', 'governanceStyles',
 ];
 const selected = new Set();

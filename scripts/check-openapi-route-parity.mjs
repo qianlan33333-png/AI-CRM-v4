@@ -9,6 +9,14 @@ const explicitServeMuxRoute = /\bmux\.Handle(?:Func)?\(\s*"(GET|POST|PUT|PATCH|D
 const serverSourceRoots = ['internal', 'cmd'];
 
 const routeContracts = [
+  ['get', '/my/orders', 'none', null, 'internal/invoice/http.go', 'if path == "/my/orders" {'],
+  ['get', '/api/h5/me/orders', 'paymentSession', null, 'internal/invoice/http.go', 'if path == "/api/h5/me/orders" && r.Method == http.MethodGet {'],
+  ['post', '/api/h5/me/invoices', 'paymentSession', null, 'internal/invoice/http.go', 'if path == "/api/h5/me/invoices" && r.Method == http.MethodPost {'],
+  ['get', '/api/h5/me/invoices/{id}', 'paymentSession', null, 'internal/invoice/http.go', 'if len(parts) == 1 && r.Method == http.MethodGet {'],
+  ['post', '/api/h5/me/invoices/{id}/resume', 'paymentSession', null, 'internal/invoice/http.go', 'if len(parts) == 2 && parts[1] == "resume" && r.Method == http.MethodPost {'],
+  ['get', '/api/h5/me/invoices/{id}/file', 'paymentSession', null, 'internal/invoice/http.go', 'if len(parts) == 2 && parts[1] == "file" && r.Method == http.MethodGet {'],
+  ['get', '/api/h5/me/invoice-jssdk', 'paymentSession', null, 'internal/invoice/http.go', 'if path == "/api/h5/me/invoice-jssdk" && r.Method == http.MethodGet {'],
+  ['post', '/api/callbacks/wechat-invoice', 'wechatPaySignature', null, 'internal/invoice/http.go', 'if path == "/api/callbacks/wechat-invoice" {'],
   ['get', '/api/admin/access/cli/login-challenge', 'none', null, 'internal/access/http/handler.go', 'mux.HandleFunc("GET /api/admin/access/cli/login-challenge", handler.cliLoginChallenge)'],
   ['get', '/api/admin/access/cli/session', 'adminSession', null, 'internal/access/http/handler.go', 'mux.HandleFunc("GET /api/admin/access/cli/session", handler.cliSession)'],
   ['get', '/api/admin/cli/capabilities', 'adminSession', null, 'cmd/aicrm/cli_catalog.go', 'mux.HandleFunc("GET /api/admin/cli/capabilities", serve)'],

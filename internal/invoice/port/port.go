@@ -1,0 +1,174 @@
+// Package port is the stable invoice Provider and refund boundary.
+package port
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+)
+
+var (
+	ErrDisabled    = errors.New("invoice not enabled")
+	ErrInvalid     = errors.New("invalid invoice request")
+	ErrNotFound    = errors.New("invoice not found")
+	ErrIneligible  = errors.New("order not invoice eligible")
+	ErrConflict    = errors.New("invoice conflict")
+	ErrPending     = errors.New("invoice provider result pending")
+	ErrUnavailable = errors.New("invoice provider unavailable")
+)
+
+type Tax struct {
+	Code      string `json:"code"`
+	Rate      int64  `json:"rate"`
+	GoodsName string `json:"goods_name"`
+}
+type Config struct {
+	Enabled                                                               bool
+	MerchantID, AppID, AppScope, SellerName, SellerTaxID, BillingPersonID string
+	Taxes                                                                 map[string]Tax
+}
+type Line struct {
+	TaxCode     string `json:"tax_code"`
+	GoodsName   string `json:"goods_name"`
+	Quantity    int64  `json:"quantity"`
+	TotalAmount int64  `json:"total_amount"`
+	TaxRate     int64  `json:"tax_rate"`
+	Discount    bool   `json:"discount"`
+}
+type Snapshot struct {
+	MerchantID      string `json:"merchant_id"`
+	AppID           string `json:"appid"`
+	AppScope        string `json:"app_scope"`
+	SellerName      string `json:"seller_name"`
+	SellerTaxID     string `json:"seller_tax_id"`
+	BillingPersonID string `json:"billing_person_id"`
+	OrderNo         string `json:"order_no"`
+	TransactionID   string `json:"transaction_id"`
+	Amount          int64  `json:"amount_minor"`
+	Lines           []Line `json:"lines"`
+}
+type Application struct {
+	ID                                                 string
+	OrderID, CustomerID, IdentityID                    int64
+	InvoiceID, State, CardState, BlueNumber, RedNumber string
+	Snapshot                                           Snapshot
+	Buyer                                              Buyer
+	RefundConfirmed                                    bool
+	IssueEffect, ReverseEffect                         string
+	ReverseAttempt, IssueAttempt, DispatchAttempt      int
+	UpdatedAt                                          time.Time
+}
+type Buyer struct {
+	Type       string `json:"type"`
+	Name       string `json:"name"`
+	TaxpayerID string `json:"taxpayer_id,omitempty"`
+	Amount     int64  `json:"amount,omitempty"`
+	OrderNo    string `json:"out_trade_no,omitempty"`
+	BillType   string `json:"fapiao_bill_type,omitempty"`
+}
+
+func (b Buyer) Valid(s Snapshot) bool {
+	return (b.Type == "INDIVIDUAL" || b.Type == "ORGANIZATION" && b.TaxpayerID != "") && b.Name != "" && len(b.Name) <= 300 && len(b.TaxpayerID) <= 64 && (b.Amount == 0 || b.Amount == s.Amount) && (b.OrderNo == "" || b.OrderNo == s.OrderNo) && (b.BillType == "" || b.BillType == "COMM_FAPIAO")
+}
+
+type Launch struct {
+	AppID     string    `json:"miniprogram_appid"`
+	Path      string    `json:"miniprogram_path"`
+	UserName  string    `json:"miniprogram_user_name"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+type Result struct {
+	InvoiceID   string `json:"fapiao_id"`
+	Status      string `json:"status"`
+	TotalAmount int64  `json:"total_amount"`
+	Seller      struct {
+		Name       string `json:"name"`
+		TaxpayerID string `json:"taxpayer_id"`
+	} `json:"seller_information"`
+	Blue struct {
+		Number string `json:"fapiao_number"`
+	} `json:"blue_fapiao"`
+	Red struct {
+		Number string `json:"fapiao_number"`
+	} `json:"red_fapiao"`
+	Card struct {
+		Status string `json:"card_status"`
+		OpenID string `json:"card_openid"`
+	} `json:"card_information"`
+}
+type Notice struct {
+	ID, EventType, ApplicationID, MerchantID, SubMerchantID string
+	BodyDigest                                              string
+}
+type JSConfig struct {
+	AppID     string `json:"appId"`
+	Timestamp int64  `json:"timestamp"`
+	Nonce     string `json:"nonceStr"`
+	Signature string `json:"signature"`
+}
+type Provider interface {
+	Title(context.Context, Application, string) (Launch, error)
+	ReadTitle(context.Context, Application) (Buyer, error)
+	Query(context.Context, Application) (Result, error)
+	Write(context.Context, Application, bool) error
+	File(context.Context, Application) ([]byte, error)
+	Verify(context.Context, *http.Request) (Notice, error)
+	SignPage(context.Context, string) (JSConfig, error)
+}
+
+// PaymentVerifier uses the already-authenticated Payment adapter. It validates
+// the collecting merchant, exact transaction and amount before issuing.
+type PaymentVerifier interface {
+	VerifyInvoicePayment(context.Context, Snapshot) error
+}
+type MaterialReader interface {
+	PrepareInvoiceEffect(context.Context, string, bool) (Application, error)
+}
+type QueryJobEnqueuer interface {
+	EnqueueWithin(context.Context, string, time.Time) error
+}
+type Receipt struct {
+	ID              string  `json:"id"`
+	OrderID         int64   `json:"order_id"`
+	Amount          int64   `json:"amount_minor"`
+	State           string  `json:"state"`
+	CardState       string  `json:"card_state"`
+	BlueNumber      string  `json:"invoice_number,omitempty"`
+	RedNumber       string  `json:"red_number,omitempty"`
+	RefundConfirmed bool    `json:"refund_confirmed"`
+	Launch          *Launch `json:"launch,omitempty"`
+	FailureCode     string  `json:"failure_code,omitempty"`
+}
+type OrdersQuery struct {
+	State, Keyword, OrderNo, Cursor string
+	From, Until                     *time.Time
+	Limit                           int32
+	EligibleOnly                    bool
+}
+type OrderView struct {
+	ID              int64      `json:"id"`
+	OrderNo         string     `json:"order_no"`
+	ProductNames    []string   `json:"product_names"`
+	Time            *time.Time `json:"time"`
+	TimeKind        string     `json:"time_kind"`
+	Amount          int64      `json:"amount_minor"`
+	Currency        string     `json:"currency"`
+	Provider        string     `json:"provider"`
+	State           string     `json:"state"`
+	RefundedMinor   int64      `json:"refunded_minor"`
+	RefundPending   bool       `json:"refund_pending"`
+	InvoiceEligible bool       `json:"invoice_eligible"`
+	InvoiceReason   string     `json:"invoice_reason"`
+	Invoice         *Receipt   `json:"invoice,omitempty"`
+}
+type OrdersPage struct {
+	Items          []OrderView `json:"items"`
+	NextCursor     string      `json:"next_cursor"`
+	InvoiceEnabled bool        `json:"invoice_enabled"`
+}
+
+// MarshalReceipt contains only a safe client projection, never a buyer title.
+func MarshalReceipt(a Application) Receipt {
+	return Receipt{ID: a.ID, OrderID: a.OrderID, Amount: a.Snapshot.Amount, State: a.State, CardState: a.CardState, BlueNumber: a.BlueNumber, RedNumber: a.RedNumber, RefundConfirmed: a.RefundConfirmed}
+}

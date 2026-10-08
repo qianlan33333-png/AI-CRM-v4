@@ -14,10 +14,16 @@ func (router composedProviderRouter) Preflight(ctx context.Context, envelope eff
 			return p.Preflight(ctx, envelope, effectID)
 		}
 	}
+	if envelope.Owner == effectport.OwnerInvoice {
+		if p, ok := router.invoice.(effectport.ProviderPreflighter); ok {
+			return p.Preflight(ctx, envelope, effectID)
+		}
+	}
 	return true, 0, nil
 }
 
 type composedProviderRouter struct {
+	invoice    effectport.ProviderAdapter
 	outbound   effectport.ProviderAdapter
 	payment    effectport.ProviderAdapter
 	automation effectport.ProviderAdapter
@@ -54,6 +60,12 @@ func (router paymentProviderRouter) Execute(ctx context.Context, envelope effect
 }
 
 func (router composedProviderRouter) Execute(ctx context.Context, envelope effectport.Envelope, attempt effectport.Attempt) (effectport.AdapterResult, error) {
+	if envelope.Owner == effectport.OwnerInvoice {
+		if router.invoice == nil {
+			return effectport.AdapterResult{}, errors.New("invoice provider unavailable")
+		}
+		return router.invoice.Execute(ctx, envelope, attempt)
+	}
 	if envelope.Owner == effectport.OwnerAdminOps {
 		if router.adminops == nil {
 			return effectport.AdapterResult{}, errors.New("ops provider unavailable")
@@ -85,6 +97,7 @@ func (router composedProviderRouter) Execute(ctx context.Context, envelope effec
 }
 
 type composedCompletionRouter struct {
+	invoice             effectport.CompletionSink
 	outbound            effectport.CompletionSink
 	payment             effectport.CompletionSink
 	paymentDistribution effectport.CompletionSink
@@ -94,6 +107,12 @@ type composedCompletionRouter struct {
 }
 
 func (router composedCompletionRouter) CompleteEffect(ctx context.Context, effectRef string, envelope effectport.Envelope, attempt effectport.Attempt, result effectport.AdapterResult) error {
+	if envelope.Owner == effectport.OwnerInvoice {
+		if router.invoice == nil {
+			return errors.New("invoice completion unavailable")
+		}
+		return router.invoice.CompleteEffect(ctx, effectRef, envelope, attempt, result)
+	}
 	if envelope.Owner == effectport.OwnerAdminOps {
 		if router.adminops == nil {
 			return errors.New("ops completion unavailable")

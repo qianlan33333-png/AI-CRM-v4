@@ -9,11 +9,17 @@ import (
 // orderRefundSettlementFanout keeps Order as the single transaction owner
 // while each domain consumes the same confirmed refund fact in its own tables.
 type orderRefundSettlementFanout struct {
+	invoice      orderport.RefundSettlementConsumer
 	distribution orderport.RefundSettlementConsumer
 	referral     orderport.RefundSettlementConsumer
 }
 
 func (f orderRefundSettlementFanout) ConsumeRefundSettlementWithin(ctx context.Context, event orderport.RefundSettlementEvent) error {
+	if f.invoice != nil {
+		if err := f.invoice.ConsumeRefundSettlementWithin(ctx, event); err != nil {
+			return err
+		}
+	}
 	if f.distribution != nil {
 		if err := f.distribution.ConsumeRefundSettlementWithin(ctx, event); err != nil {
 			return err

@@ -189,6 +189,9 @@ func safe(value string, maximum int) bool {
 }
 
 func validReturnPath(value string) bool {
+	if value == "/my/orders" {
+		return true
+	}
 	if value == "/distribution" {
 		return true
 	}
