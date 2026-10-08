@@ -91,6 +91,14 @@ async function waitFor(cdp, expression, message) {
   throw new Error(message + " page=" + JSON.stringify(await evaluate(cdp,"({route:location.pathname,core:document.querySelector('#coreOperationsRoot')?.textContent,scripts:[...document.scripts].map(s=>s.src)})")));
 }
 
+function customerProfileURL(links, baseURL) {
+  for (const href of links) {
+    if (typeof href !== 'string' || !href.trim()) continue;
+    const url = new URL(href, baseURL);
+    if (/^\/admin\/customers\/[1-9][0-9]*$/.test(url.pathname)) return url.href;
+  }
+}
+
 async function waitForBrowserExit(browser, timeoutMilliseconds) {
   if (!browser || browser.exitCode !== null || browser.signalCode !== null) return true;
   return new Promise((resolve) => {
@@ -156,11 +164,11 @@ try {
     journeyPhase = "history-detail";
     await cdp.call('Page.navigate',{url:baseURL+'/admin/orderDetail.html?id='+ref+'&provider=external_history'});
     await waitFor(cdp,"document.body.textContent.includes('原支付时间') && document.body.textContent.includes("+JSON.stringify(ref)+")",'history detail missing');
-    const page=await evaluate(cdp,"({body:document.body.textContent,controls:[...document.querySelectorAll('button')].map(b=>b.textContent),links:[...document.querySelectorAll('a')].map(a=>a.href)})");
+    const page=await evaluate(cdp,"({body:document.body.textContent,controls:[...document.querySelectorAll('button')].map(b=>b.textContent),links:[...document.querySelectorAll('a[href]')].map(a=>a.getAttribute('href')).filter(href=>typeof href==='string' && href.trim())})");
     if(!page.body.includes(time)||!page.body.includes(amount)||!page.body.includes('导入时间')||!page.body.includes('外部历史订单')||!page.body.includes('138****0077'))throw new Error('detail history facts missing');
     if(ref==='external-browser-known' && !page.body.includes('原组合商品'))throw new Error('refund/bundle summary missing');
     if(page.controls.some(t=>/退款|重发|重试推送/.test(t)))throw new Error('historical executable action present');
-    const profileURL = page.links.find(link => new URL(link).pathname.match(/^\/admin\/customers\/[1-9][0-9]*$/));
+    const profileURL = customerProfileURL(page.links, baseURL);
     if (!profileURL || page.links.some(link => link.includes('customerDetail.html'))) throw new Error('canonical customer link missing');
     const customerID = new URL(profileURL).pathname.split('/').pop();
     journeyPhase = "retired-profile-fetch";

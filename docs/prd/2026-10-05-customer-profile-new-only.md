@@ -43,3 +43,5 @@ Product Design：index/user-context preflight、get-context、audit/image-to-cod
 发现入口接续：带连字符的测试文件名在受控 Python3.14 unittest discover 下产生 Ran0/NO TESTS RAN（exit5），原直接执行4项不算 Linux 发现通过。重命名为可导入的下划线文件名，并按发布器准确命令 `python3 -m unittest discover -s scripts -p test_customer_profile_install_contract.py` 执行验证。合同内容和应用源码均未改变，继续复用原页面/后端证据。
 
 预发旅程等待修复（纯测试）：86f 原安装包诊断在 history-detail 阶段报 TypeError（document.body 尚不存在）。基于已安装 f373a8ac6baf1aace5b5f1882dd182268ee9a19a 仅修复旅程 waitFor：先确认 body 存在再评估原表达式，不吞其他异常、不改业务断言，并保留固定阶段及具体异常描述诊断。小 Node 合同覆盖 body-null→body-ready、body 已存在但业务条件仍假、其他真实异常继续失败。清单只执行该合同，原47页面/六后端与发票检查不重复。对外合同、UI/API、身份/OneID、数据库、持久任务与 Provider 均无变；测试/doc-only，不重建重装应用。工作台在已安装 f373 包上绑定新 harness SHA 完成原认证旅程；通过后原包生产晋级，测试候选按源码-only接续，不越过 stage_validation_pending。
+
+预发链接采集接续（仍为纯测试）：86i 实际 Node Invalid URL 的 input 为空串，来自订单页无 href 占位 a。旅程只采集 `a[href]` 的非空字符串 href 属性，查找 canonical 档案时以 baseURL 解析相对链接；无 href/空值不再交给 URL，真实格式错误仍抛出，不新增业务链接政策。必须存在正式 /admin/customers/{id}、不存在旧链接、旧入口410、Provider正确和同ID往返断言全部保留。小合同另覆盖真实采集表达式排除占位并保留相对正式链接，以及空值/非字符串不影响查找、缺正式链接不假通过、真实坏 URL 不被吞。4ad 未发布，仅诊断候选；沿同独立ref更新，累计base仍f373，实际原安装包验收与源码-only接续按原工作台处理。
