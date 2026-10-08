@@ -4555,22 +4555,97 @@ def batch_seal(config: dict[str, Any], *, expected_head: str | None = None) -> d
         return result
 
 
+def _is_preinstall_batch_build_failure(state: dict[str, Any]) -> bool:
+    batch, front = state.get("batch"), _active_queue_item(state)
+    failure = (front or {}).get("failure") or {}
+    return bool(isinstance(batch, dict) and batch.get("status") == "open"
+        and batch.get("mode") == "source-accumulated"
+        and state.get("status") == "blocked" and state.get("in_flight") is None
+        and front and front.get("status") == "failed"
+        and front.get("head_sha") == batch.get("head_sha")
+        and failure.get("phase") == "build"
+        and failure.get("kind") == "candidate_check"
+        and failure.get("candidate_verdict") == "failed"
+        and not failure.get("required_recovery")
+        and not batch.get("final_stage_head")
+        and batch.get("installed_app") == state.get("installed_app"))
+
+
+def _verify_batch_build_repair_state(config: dict[str, Any], repo: Path,
+                                    state: dict[str, Any]) -> None:
+    if not _is_preinstall_batch_build_failure(state):
+        raise ReleaseError("build repair requires an exact source-accumulated failure before installation")
+    batch = state["batch"]
+    front = _active_queue_item(state)
+    if any(q is not front and q.get("status") in {"pending", "failed", "stale_base", "outcome_unknown",
+            "stage_validation_pending", "source_approval_pending"} for q in state["queue"]):
+        raise ReleaseError("resolve other queued candidates before repairing the final batch build")
+    if _resolve_ref(repo, MAIN_REF) != batch["base_sha"] or state["main"]["tree"] != _tree(repo, batch["base_sha"]):
+        raise ReleaseError("production source changed before build repair")
+    _prepared_batch_checks(repo, state)  # Check hashes and immutable original refs.
+    previous = batch["base_sha"]
+    for member in batch["members"]:
+        if (member.get("base_sha") != previous or member.get("deferred_install") is not True
+                or member.get("installed_app") != state["installed_app"]
+                or member.get("head_tree") != _tree(repo, member["head_sha"])):
+            raise ReleaseError("build repair member identity or installation state changed")
+        _first_parent_chain(repo, previous, member["head_sha"])
+        previous = member["head_sha"]
+    if previous != batch["head_sha"] or batch["head_tree"] != _tree(repo, previous):
+        raise ReleaseError("build repair cumulative source changed")
+    app = state["installed_app"]
+    _verify_stage_app(app["sha"], app["manifest_sha256"])
+    _verify_prod_app(config, app["sha"], app["manifest_sha256"])
+    cursor = _verify_production_cursor(config)["cursor"]
+    if (cursor.get("main_sha") != batch["base_sha"]
+            or cursor.get("installed_app_sha") != app["sha"]
+            or cursor.get("installed_manifest_sha256") != app["manifest_sha256"]):
+        raise ReleaseError("production cursor changed before build repair")
+
+
+def _batch_build_repair_classification(repo: Path, base: str, candidate: str) -> dict[str, Any]:
+    result = _classify_candidate(repo, base, candidate)
+    paths = result["changed_paths"]
+    allowed = lambda path: (path in builder.FIXED_CONTROLLER_FILES or path == builder.BUILDER_SCRIPT
+        or path.startswith("docs/") or (path.startswith("scripts/test_") and path.endswith(".py")))
+    if (any(not allowed(path) for path in paths) or result.get("full_build")
+            or result.get("package_overlays")
+            or "scripts/domestic_main_release.py" not in result.get("controller_files", [])
+            or not builder._added_release_registrations(repo, base, candidate)):
+        raise ReleaseError("build repair accepts only additive program registration and checked controller changes")
+    return result
+
+
 def _checked_batch_controller_member(config: dict[str, Any], repo: Path,
                                      batch: dict[str, Any], candidate: str,
-                                     ref: str, label: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+                                     ref: str, label: str, *, build_repair: bool = False) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     candidate = _sha(candidate, "batch controller SHA")
     ref = _assert_ref_name(ref)
     if _resolve_ref(repo, ref) != candidate:
         raise ReleaseError("batch controller ref differs from its exact SHA")
     _first_parent_chain(repo, batch["head_sha"], candidate)
     worktree = _active_worktree(config, repo, candidate)
-    classification = _classify_candidate(worktree, batch["head_sha"], candidate)
-    if (classification["runtime_changed"]
+    classification = (_batch_build_repair_classification(worktree, batch["head_sha"], candidate)
+                      if build_repair else _classify_candidate(worktree, batch["head_sha"], candidate))
+    if not build_repair and (classification["runtime_changed"]
             or "scripts/domestic_main_release.py" not in classification["controller_files"]):
         raise ReleaseError("batch controller candidate must be source-only and change the controller")
     _verify_controller_files(config, repo, candidate, sorted(builder.FIXED_CONTROLLER_FILES))
     report = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate}-{label}-{time.time_ns()}"
-    check = _check_report(config, repo, worktree, report, batch["head_sha"], candidate)
+    if build_repair:
+        marker = batch.get("build_repair_maintenance") or {}
+        hashes = {path: hashlib.sha256(_source_blob(repo, candidate, path)).hexdigest()
+                  for path in sorted(builder.FIXED_CONTROLLER_FILES)}
+        if (marker.get("candidate_sha") != candidate or marker.get("base_sha") != batch["head_sha"]
+                or marker.get("candidate_tree") != _tree(repo, candidate)
+                or marker.get("fixed_file_sha256") != hashes
+                or marker.get("controller_files") != sorted(classification["controller_files"])):
+            raise ControllerMaintenanceRequired("run maintenance-check for this exact build repair before installing fixed bytes")
+        check = _maintenance_check_checkpoint(config, marker, return_receipt=True)
+        if check is None:
+            raise ControllerMaintenanceRequired("build repair lost its checked maintenance receipt")
+    else:
+        check = _check_report(config, repo, worktree, report, batch["head_sha"], candidate)
     _pin_candidate(repo, candidate)
     _, bundle = _create_full_bundle(repo, Path(config["work_root"]), candidate,
                                      _tree(repo, candidate))
@@ -4581,6 +4656,8 @@ def _checked_batch_controller_member(config: dict[str, Any], repo: Path,
         "installed_app": batch["installed_app"], "check_receipt": check,
         "bundle_meta": bundle,
     }, None)
+    if build_repair:
+        member.update(runtime_changed=True, deferred_install=True)
     return member, check, bundle
 
 
@@ -4703,10 +4780,15 @@ def batch_tool_repair(config: dict[str, Any], failed_candidate: str,
                 or front.get("head_sha") != failed_candidate):
             raise ReleaseError("batch tool repair requires the exact unevaluated queue front")
         failure = front.get("failure") or {}
-        if (failure.get("phase") != "checks"
+        build_repair = _is_preinstall_batch_build_failure(state)
+        if not build_repair and (failure.get("phase") != "checks"
                 or failure.get("candidate_verdict") != "not_evaluated"
                 or failure.get("kind") not in {"unknown", "environment"}):
             raise ReleaseError("batch tool repair cannot bypass a candidate failure")
+        if build_repair:
+            _verify_batch_build_repair_state(config, repo, state)
+            if any(q["head_sha"] == controller_sha for q in state["queue"]):
+                raise ReleaseError("build repair must append a new exact ref without replacing an original member")
         if (_resolve_ref(repo, MAIN_REF) != batch["base_sha"]
                 or _tree(repo, batch["base_sha"]) != state["main"]["tree"]):
             raise ReleaseError("production source base changed before batch tool repair")
@@ -4722,15 +4804,25 @@ def batch_tool_repair(config: dict[str, Any], failed_candidate: str,
                 or cursor.get("installed_app_sha") != baseline["sha"]
                 or cursor.get("installed_manifest_sha256") != baseline["manifest_sha256"]):
             raise ReleaseError("production cursor changed before batch tool repair")
-        member, check, bundle = _checked_batch_controller_member(
-            config, repo, batch, controller_sha, controller_ref, "batch-tool-repair")
+        member, check, bundle = (_checked_batch_controller_member(
+            config, repo, batch, controller_sha, controller_ref, "batch-tool-repair", build_repair=True)
+            if build_repair else _checked_batch_controller_member(
+            config, repo, batch, controller_sha, controller_ref, "batch-tool-repair"))
         _append_batch_controller_member(state, member, check, bundle, before=front)
         batch.setdefault("tool_repairs", []).append({
             "head_sha": member["head_sha"], "failed_candidate": failed_candidate,
             "check_receipt_sha256": member["check_receipt_sha256"],
             "recorded_at_utc": _utc_now(),
+            "phase": "preinstall-build" if build_repair else "unevaluated-checks",
         })
-        _update_state(state_path, state, status="blocked")
+        if build_repair:
+            # Preserve original member/ref/check/attempt history. Only resolve its
+            # pre-install build failure and append the already checked source delta.
+            front.update(status="prepared", build_repaired_by=member["head_sha"])
+            queued = next(q for q in state["queue"] if q["head_sha"] == member["head_sha"])
+            queued["status"] = "prepared"
+            batch.pop("build_repair_maintenance", None)
+        _update_state(state_path, state, status="ready" if build_repair else "blocked")
         return {"status": "batch_tool_repaired", "staged_head_sha": member["head_sha"],
                 "blocked_candidate_sha": failed_candidate, "member_count": len(batch["members"]),
                 "production_written": False}
@@ -4889,34 +4981,43 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
     with _locked(Path(config["lock"]), nonblocking=True):
         verify_bare_repository(repo, controller_path=config["controller_path"], push_group=config["push_group"])
         state = _load_state(state_path)
-        if state.get("status") == "outcome_unknown" or state.get("staging_out_of_sync") is True:
+        build_repair = _is_preinstall_batch_build_failure(state)
+        if state.get("status") == "outcome_unknown" or (state.get("staging_out_of_sync") is True and not build_repair):
             raise ReleaseError("controller maintenance check is blocked by an unresolved release state")
+        if state.get("in_flight") is not None:
+            raise ReleaseError("controller maintenance check cannot overlap an active attempt")
         if state.get("controller_maintenance") is not None:
             state["controller_maintenance"] = None
             _update_state(state_path, state)
         item = _active_queue_item(state)
-        if (item is None or item.get("status") not in {"pending", "failed"}
+        if not build_repair and (item is None or item.get("status") not in {"pending", "failed"}
                 or item.get("head_sha") != candidate_sha):
             raise ReleaseError("maintenance check requires the exact head candidate at the serial queue front")
         main_sha = _resolve_ref(repo, MAIN_REF)
-        if (main_sha != state["main"]["sha"] or item.get("base_sha") != main_sha
+        if not build_repair and (main_sha != state["main"]["sha"] or item.get("base_sha") != main_sha
                 or _resolve_ref(repo, item["ref"]) != candidate_sha):
             raise ReleaseError("maintenance candidate is stale; update and check it from current domestic main")
-        _first_parent_chain(repo, main_sha, candidate_sha)
+        check_base = state["batch"]["head_sha"] if build_repair else main_sha
+        if build_repair:
+            _verify_batch_build_repair_state(config, repo, state)
+            state["batch"].pop("build_repair_maintenance", None)
+            _update_state(state_path, state)
+        _first_parent_chain(repo, check_base, candidate_sha)
         expected_controller = hashlib.sha256(_source_blob(repo, candidate_sha, "scripts/domestic_main_release.py")).hexdigest()
         running_controller = Path(__file__).resolve(strict=True)
         if _file_sha256(running_controller) != expected_controller:
             raise ControllerMaintenanceRequired("maintenance-check must run from the exact candidate controller bytes")
         _pin_candidate(repo, candidate_sha)
         worktree = _active_worktree(config, repo, candidate_sha)
-        classification = _classify_candidate(worktree, main_sha, candidate_sha)
-        if classification.get("runtime_changed") is not False:
+        classification = (_batch_build_repair_classification(worktree, check_base, candidate_sha)
+                          if build_repair else _classify_candidate(worktree, check_base, candidate_sha))
+        if not build_repair and classification.get("runtime_changed") is not False:
             raise ReleaseError("controller maintenance path accepts source-only candidates only")
         controller_files = classification.get("controller_files", [])
         if not controller_files:
             raise ReleaseError("candidate does not contain a registered fixed-controller change")
         report_dir = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate_sha}-maintenance-{time.time_ns()}"
-        check_receipt = _check_report(config, repo, worktree, report_dir, main_sha, candidate_sha, candidate_policy=True)
+        check_receipt = _check_report(config, repo, worktree, report_dir, check_base, candidate_sha, candidate_policy=True)
         python_controller_files = [path for path in controller_files if path.endswith(".py")]
         compile_code = (
             "from pathlib import Path; import sys; root=Path(sys.argv[1]); "
@@ -4966,24 +5067,30 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
         if status == "maintenance_checks_passed":
             fixed_hashes = {path: hashlib.sha256(_source_blob(repo, candidate_sha, path)).hexdigest()
                             for path in sorted(builder.FIXED_CONTROLLER_FILES)}
-            state["controller_maintenance"] = {
+            marker = {
                 "candidate_sha": candidate_sha,
                 "candidate_tree": _tree(repo, candidate_sha),
-                "base_sha": main_sha,
+                "base_sha": check_base,
                 "controller_files": sorted(controller_files),
                 "fixed_file_sha256": fixed_hashes,
                 "check_receipt_sha256": hashlib.sha256(canonical).hexdigest(),
                 "checked_at_utc": _utc_now(),
             }
+            if build_repair:
+                state["batch"]["build_repair_maintenance"] = marker
+            else:
+                state["controller_maintenance"] = marker
             _update_state(state_path, state)
         return {"status": status, "candidate_sha": candidate_sha,
-                "candidate_tree": _tree(repo, candidate_sha), "base_sha": main_sha,
+                "candidate_tree": _tree(repo, candidate_sha), "base_sha": check_base,
                 "controller_files": sorted(controller_files),
                 "check_receipt_sha256": hashlib.sha256(canonical).hexdigest(),
                 "toolchain": check_receipt["toolchain"],
                 "stage_host_contract": stage_host_contract,
                 "next_action": ("install the exact staging helper bytes with rollback, rerun maintenance-check, then install all remaining exact fixed-controller bytes before resubmitting this SHA"
                                 if stage_helper_install_required else
+                                "install the exact fixed-controller bytes with rollback, then batch-tool-repair using the original failed member and the new repair ref"
+                                if build_repair else
                                 "review this result, install any remaining exact fixed-controller bytes with rollback, then resubmit this SHA")}
 
 

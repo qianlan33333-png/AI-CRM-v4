@@ -76,3 +76,5 @@ sudo /usr/local/libexec/aicrm/domestic_main_release.py promote-authorized --conf
 用户“部署到生产机”即已说明范围授权，相关修复继承授权，无关新范围另列。原开发者处理代码或基线失败并保留队首顺序。源码与应用 SHA 因源码-only 改动合法不同，不视为失败。无状态变化用控制器 `status` 轻量读取。
 
 旧已安装累计批次仍按原收据收尾，新批次采用源码累计。`batch-reopen`、`batch-tool-repair` 继续只用于原状态的具体修复，不作为普通发布新增环节。
+
+若源码累计批次在安装前构建失败，原成员检查已通过且预发/生产包和生产游标都未变化，可用同一 `maintenance-check --sha <新修复 SHA>` 检查从原累计 HEAD 继续的登记/控制器修复。不要先 submit 或 supersedes 原失败成员：保留其 ref、成员与检查收据。此分支仅接受新增标准 Go 程序登记及固定控制器、相关测试/文档，不接受业务代码或其他脚本行为变更。检查结果存原批次 `build_repair_maintenance`；按原锁安装已检查的准确固定工具字节（保留回退），再执行 `batch-tool-repair --failed-candidate <原 HEAD> --sha <修复 SHA> --ref <新 ref>`，它原子保留原收据并追加检查过的成员，最后 `batch-stage` 使用原检查和修复检查重试最终包。未知安装、已发生安装或成员/收据变化均不走此恢复分支。

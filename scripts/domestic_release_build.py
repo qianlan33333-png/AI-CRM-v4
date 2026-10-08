@@ -121,6 +121,7 @@ class Classification:
     full_build_reason: str | None = None
     controller_files: list[str] = field(default_factory=list)
     package_overlays: list[str] = field(default_factory=list)
+    registered_go_commands: list[str] = field(default_factory=list)
 
     @property
     def build_mode(self) -> str:
@@ -130,7 +131,7 @@ class Classification:
             return "full"
         if self.frontend_build_paths:
             return "frontend_incremental"
-        if self.graph_paths:
+        if self.graph_paths or self.registered_go_commands:
             return "go_incremental"
         return "manifest_only"
 
@@ -603,10 +604,52 @@ class TemporaryWorktree:
                     shutil.rmtree(self.parent, ignore_errors=True)
 
 
+def _added_release_registrations(repo: Path, base_sha: str, target_sha: str) -> list[str]:
+    """Recognize only additive standard Go lines; preserve every other byte."""
+    line_pattern = re.compile(
+        r'\s*go build -trimpath -ldflags "-s -w" -o release/bin/([A-Za-z0-9_-]+) (\./cmd/[A-Za-z0-9_-]+)\s*')
+    try:
+        old = _git_file(repo, base_sha, BUILDER_SCRIPT).splitlines(keepends=True)
+        new = _git_file(repo, target_sha, BUILDER_SCRIPT).splitlines(keepends=True)
+    except BuildError:
+        return []
+    if len(new) <= len(old):
+        return []
+    commands = [m.groups() for line in new if (m := line_pattern.fullmatch(line))]
+    if len({c[0] for c in commands}) != len(commands) or len({c[1] for c in commands}) != len(commands):
+        return []
+    old_index, added, in_builder = 0, [], False
+    for line in new:
+        if line.strip() == "build_release_binaries() {":
+            in_builder = True
+        if old_index < len(old) and line == old[old_index]:
+            old_index += 1
+        else:
+            match = line_pattern.fullmatch(line)
+            if not match or not in_builder:
+                return []
+            added.append(match.group(2))
+        if line.strip() == "}":
+            in_builder = False
+    return added if old_index == len(old) else []
+
+
+def _classify_source(repo: Path, base_sha: str, target_sha: str, changed: list[str]) -> Classification:
+    result = classify_paths(changed)
+    if BUILDER_SCRIPT in changed:
+        remaining = classify_paths([path for path in changed if path != BUILDER_SCRIPT])
+        additions = _added_release_registrations(repo, base_sha, target_sha)
+        if additions and not remaining.full_build:
+            result.full_build = False
+            result.full_build_reason = None
+            result.registered_go_commands = additions
+    return result
+
+
 def _make_plan(repo: Path, base_sha: str, target_sha: str, target_root: Path | None = None) -> dict[str, Any]:
     changed = _changed_paths(repo, base_sha, target_sha)
     tree = _tree_sha(repo, target_sha)
-    classification = classify_paths(changed)
+    classification = _classify_source(repo, base_sha, target_sha, changed)
     _maintenance_application_guard(repo, target_sha, classification)
     if not classification.runtime_changed:
         return classification.as_json(base_sha, target_sha, tree, [])
@@ -622,11 +665,12 @@ def _make_plan(repo: Path, base_sha: str, target_sha: str, target_root: Path | N
     if classification.full_build:
         return classification.as_json(base_sha, target_sha, tree, [item.package for item in commands])
 
-    if classification.graph_paths:
+    if classification.graph_paths or classification.registered_go_commands:
         # Normal releases compile the application once. Explicit changed tools
         # and the AI's requested tools join that command; no base/head reverse
         # dependency graph or speculative rebuild of all maintenance binaries.
         selected = {item.package for item in commands if item.package == "./cmd/aicrm"}
+        selected.update(classification.registered_go_commands)
         for item in commands:
             directory = item.package.removeprefix("./") + "/"
             if any(path.startswith(directory) for path in classification.graph_paths):
@@ -697,7 +741,7 @@ def classify(repo_path: str | Path, base_value: str, target_value: str) -> dict[
     repo = Path(repo_path).resolve()
     base_sha = _resolve_commit(repo, base_value)
     target_sha = _resolve_commit(repo, target_value)
-    result = classify_paths(_changed_paths(repo, base_sha, target_sha))
+    result = _classify_source(repo, base_sha, target_sha, _changed_paths(repo, base_sha, target_sha))
     _maintenance_application_guard(repo, target_sha, result)
 
     return {

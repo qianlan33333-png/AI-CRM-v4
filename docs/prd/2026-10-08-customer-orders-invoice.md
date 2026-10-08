@@ -76,3 +76,11 @@ flowchart TD
 参考与复用：[官方 Go SDK 公钥验签及加解密](https://github.com/wechatpay-apiv3/wechatpay-go)、[公钥获取](https://pay.wechatpay.cn/doc/v3/partner/4013038589)、[官方抬头字段](https://pay.wechatpay.cn/doc/v3/partner/4015784260)、[通用行业开票字段](https://pay.wechatpay.cn/doc/v3/partner/4015792574)、[配置与卡券业务示例](https://pay.wechatpay.cn/doc/v3/partner/4016078358)、[通知验签及应答](https://pay.wechatpay.cn/doc/v3/partner/4015792570)。开票人名称为选填，不新增必填配置。回调成功返回 200；无签名 POST、签名探测和商户错配均拒绝，GET 仅用于可达性检查，无业务效果。
 
 五项影响：外部 HTTP 业务合同保持，增加只读回调可达性；买方快照保留官方可选字段且不进入客户端展示；直接消费者是配置、Composition Root、Invoice Provider 与运维工具；无前端或数据库结构变化；验证公钥/证书模式、错误信任材料、联系方式往返加密、回调拒绝及官方配置读回。真实出票、卡包和冲红仍需最终启用后独立验收。
+
+## 配置工具发布登记修复（2026-10-08）
+
+流程：原成员检查通过 → 最终构建发现工具未登记（安装前失败）→ 保留原 ref、成员与检查收据 → 仅检查登记及控制器修复 → 同一队列和锁追加修复成员 → 重试最终构建与预发。
+
+实测证据：`9c9a046` 的 20 项 Linux 检查通过，但正式 builder 不含 `cmd/invoice-setup`，因此显式构建清单在安装前被拒绝。参考并复用仓库现有 `_release_commands`、`batch-tool-repair`、`maintenance-check`；不用临时 allowlist 或第二发布通道。仅严格新增标准 Go 程序登记时按应用与指定工具增量构建，其他脚本行为变化不套用该优化。恢复只接受原累计批次、成功收据仍绑定原成员、安装前构建失败且独立读回两台机器与生产游标均未变化的状态；安装未知继续停止对账。
+
+分类：不涉及 OneID、业务 PostgreSQL、Provider 调用或新任务队列；涉及现有发布控制器的持久收据及串行锁。无页面变化。五项影响：发布 CLI 增加已检查的安装前恢复分支；保留成员、尝试与收据；直接消费者为 builder 和原发布控制器；无 UI；验证登记选包、拒绝脚本行为变化、收据保留、失败阶段及安装未知拒绝。修复继承父 PRD 开发授权，生产启用仍等待用户最终确认。

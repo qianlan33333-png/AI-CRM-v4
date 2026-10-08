@@ -123,6 +123,7 @@ build_release_binaries() {
   # release wrapper before the platform migrator runs.
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-access-role-convergence ./cmd/migrate-access-role-convergence
   go build -trimpath -ldflags "-s -w" -o release/bin/check-enterprise-directory ./cmd/check-enterprise-directory
+  go build -trimpath -ldflags "-s -w" -o release/bin/invoice-setup ./cmd/invoice-setup
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-river ./cmd/migrate-river
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-phone-identities ./cmd/migrate-phone-identities
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-identity-phone-vault ./cmd/migrate-identity-phone-vault

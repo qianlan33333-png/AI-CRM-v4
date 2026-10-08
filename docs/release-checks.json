@@ -1,50 +1,10 @@
 {
   "schema": 1,
-  "baseline_sha": "6ccf276ef9b75dd91516bf37a13cbef4d6e1d557",
+  "baseline_sha": "9c9a0463e1af3e06078b145d04ec06852bb0fb41",
   "checks": [
     {
-      "lane": "backend",
-      "package": "./internal/invoice/provider"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/invoice"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/invoice-setup"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/platform/config/invoice_test.go",
-      "test": "TestInvoiceProviderDisabledByDefaultAndIncompleteFailsClosed"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/platform/config/invoice_test.go",
-      "test": "TestInvoiceExplicitTrustAndPrivateKeyFile"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/invoice_setup_test.go",
-      "test": "TestInvoiceCompositionUsesSeparateServicePublicKey"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/invoice_setup_test.go",
-      "test": "TestInvoiceFinanceMappingRequiresExplicitTaxFacts"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/invoice_postgres_test.go",
-      "test": "TestInvoicePostgreSQLAtomicReplayAndUnknownRecovery",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/invoice_callback_postgres_test.go",
-      "test": "TestInvoicePostgreSQLCallbackAcknowledgementAndReplay",
-      "postgres": true
+      "lane": "preflight",
+      "path": "scripts/test_invoice_release_registration.py"
     }
   ],
   "installed_checks": [],
