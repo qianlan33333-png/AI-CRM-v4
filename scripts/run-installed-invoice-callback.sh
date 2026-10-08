@@ -15,4 +15,4 @@ if u.hostname not in ('localhost', '127.0.0.1', '::1') or not name.startswith('a
     sys.exit('requires explicit loopback isolated aicrm_test_*_acceptance_test PostgreSQL')
 PY
 exec bash scripts/run-go-with-donor-views.sh go test -json -p 1 -count=1 -timeout=5m \
-  -run '^TestInvoicePostgreSQLCallbackBootstrapInstalled$' ./cmd/aicrm
+  -run '^TestInvoicePostgreSQL(CallbackBootstrapInstalled|BillEntryInstalled)$' ./cmd/aicrm

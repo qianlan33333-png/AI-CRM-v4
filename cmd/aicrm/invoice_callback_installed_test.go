@@ -35,6 +35,10 @@ import (
 // Only database setup/readback runs in this test process. Every callback uses
 // the exact installed binary, synthetic RSA/APIv3 keys and an isolated DB.
 func TestInvoicePostgreSQLCallbackBootstrapInstalled(t *testing.T) {
+	invoiceCallbackInstalled(t, false)
+}
+func TestInvoicePostgreSQLBillEntryInstalled(t *testing.T) { invoiceCallbackInstalled(t, true) }
+func invoiceCallbackInstalled(t *testing.T, bill bool) {
 	installed := testconfig.InstalledProduct()
 	if installed.Binary == "" || os.Getenv("AICRM_DATABASE_URL") == "" {
 		t.Fatal("installed callback contract requires exact package inputs and isolated PostgreSQL")
@@ -81,8 +85,14 @@ func TestInvoicePostgreSQLCallbackBootstrapInstalled(t *testing.T) {
 		t.Fatal("callback fixture does not satisfy installed schema readiness", e)
 	}
 	id := f.order(f.customer, f.customer, "paid", "fixture invoice", "wechat_pay", time.Now())
-	r := f.create(id, "callback-installed-0001")
-	a := f.read(r.ID)
+	var a invoiceport.Application
+	if bill {
+		a.ID = f.billPayment(id)
+		a.Snapshot = invoiceport.Snapshot{MerchantID: f.s.Config.MerchantID, AppID: f.s.Config.AppID, AppScope: f.s.Config.AppScope}
+	} else {
+		r := f.create(id, "callback-installed-0001")
+		a = f.read(r.ID)
+	}
 	platformKey, e := rsa.GenerateKey(rand.Reader, 2048)
 	if e != nil {
 		t.Fatal(e)
@@ -121,13 +131,33 @@ func TestInvoicePostgreSQLCallbackBootstrapInstalled(t *testing.T) {
 		"AICRM_WECHAT_PAY_H5_APP_ID=" + a.Snapshot.AppID, "AICRM_WECHAT_PAY_H5_APP_SCOPE=" + a.Snapshot.AppScope,
 		"AICRM_EFFECTS_PROVIDER_ENABLED=false", "AICRM_WECHAT_PAY_PROVIDER_ENABLED=false", "AICRM_ALIPAY_PROVIDER_ENABLED=false", "AICRM_OUTBOUND_PROVIDER_ENABLED=false",
 	}
+	if bill {
+		private, err := x509.MarshalPKCS8PrivateKey(platformKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		privatePath, taxPath := filepath.Join(dir, "signing.pem"), filepath.Join(dir, "taxes.json")
+		if err = os.WriteFile(privatePath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: private}), 0600); err != nil {
+			t.Fatal(err)
+		}
+		taxes, _ := json.Marshal(f.s.Config.Taxes)
+		if err = os.WriteFile(taxPath, taxes, 0600); err != nil {
+			t.Fatal(err)
+		}
+		for i, v := range environment {
+			if v == "AICRM_INVOICE_PROVIDER_ENABLED=false" {
+				environment[i] = "AICRM_INVOICE_PROVIDER_ENABLED=true"
+			}
+		}
+		environment = append(environment, "AICRM_INVOICE_MERCHANT_SERIAL=fixture-serial", "AICRM_INVOICE_PRIVATE_KEY_PATH="+privatePath, "AICRM_INVOICE_SELLER_NAME="+f.s.Config.SellerName, "AICRM_INVOICE_SELLER_TAX_ID="+f.s.Config.SellerTaxID, "AICRM_INVOICE_BILLING_PERSON_ID="+f.s.Config.BillingPersonID, "AICRM_INVOICE_TAX_CONFIG_PATH="+taxPath)
+	}
 	process := startPeriodicContactInstalledProcess(t, installed.Binary, installed.Root, environment)
 	waitInstalledSurveyReady(t, process, endpoint, installed.SHA)
 	transport := &http.Transport{Proxy: nil}
 	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
 	t.Cleanup(transport.CloseIdleConnections)
 	// Read the authenticated history through installed bytes, including a
-	// legacy awaiting-title app while the write Provider remains disabled.
+	// an awaiting-title application in the callback-only bootstrap case.
 	historyRequest, e := http.NewRequest(http.MethodGet, endpoint+"/api/h5/me/invoices?limit=1", nil)
 	if e != nil {
 		t.Fatal(e)
@@ -140,10 +170,16 @@ func TestInvoicePostgreSQLCallbackBootstrapInstalled(t *testing.T) {
 	var history invoiceport.HistoryPage
 	decodeError := json.NewDecoder(historyResponse.Body).Decode(&history)
 	historyResponse.Body.Close()
-	if historyResponse.StatusCode != 200 || decodeError != nil || len(history.Items) != 1 || history.Items[0].ID != a.ID || history.Items[0].State != "awaiting_title" || len(history.Items[0].ProductNames) != 1 {
-		t.Fatalf("installed invoice history status=%d decode=%v", historyResponse.StatusCode, decodeError)
+	if historyResponse.StatusCode != 200 || decodeError != nil {
+		t.Fatal("installed history unavailable", historyResponse.StatusCode, decodeError)
 	}
-	t.Log("installed invoice history: owner-scoped legacy awaiting-title application read through installed binary")
+	if bill {
+		if len(history.Items) != 0 {
+			t.Fatal("premature bill application")
+		}
+	} else if len(history.Items) != 1 || history.Items[0].ID != a.ID || history.Items[0].State != "awaiting_title" {
+		t.Fatal("installed owner history")
+	}
 	counts := func() [3]int {
 		var counts [3]int
 		if e := f.pool.QueryRow(f.ctx, `SELECT (SELECT count(*) FROM invoice_callback_receipts), (SELECT count(*) FROM river_job WHERE kind='invoice.provider-query.v1'), (SELECT count(*) FROM external_effects WHERE owner='invoice')`).Scan(&counts[0], &counts[1], &counts[2]); e != nil {
@@ -196,14 +232,50 @@ func TestInvoicePostgreSQLCallbackBootstrapInstalled(t *testing.T) {
 	if post(unknown, a.Snapshot.MerchantID, "foreign-service", "valid") < 400 || post(unknown, "", "service-fixture", "valid") < 400 {
 		t.Fatal("wrong service or missing sub merchant acknowledged")
 	}
-	if post(unknown, a.Snapshot.MerchantID, "service-fixture", "valid") != 200 || post(unknown, "other-service-child", "service-fixture", "valid") != 200 {
-		t.Fatal("authenticated unknown application was not safely ignored")
+	wantUnknown := 200
+	if bill {
+		wantUnknown = 503
+	}
+	if post(unknown, a.Snapshot.MerchantID, "service-fixture", "valid") != wantUnknown || post(unknown, "other-service-child", "service-fixture", "valid") != 200 {
+		t.Fatal("unknown application boundary")
+	}
+	if bill {
+		if post(a.ID, "foreign-sub", "service-fixture", "valid") != 200 {
+			t.Fatal("unknown other merchant mutated local transaction")
+		}
+		if post(a.ID, a.Snapshot.MerchantID, "service-fixture", "valid") != 200 || post(a.ID, a.Snapshot.MerchantID, "service-fixture", "valid") != 200 {
+			t.Fatal("native callback acceptance/replay")
+		}
+		after := counts()
+		if after != [3]int{before[0] + 1, before[1] + 1, before[2]} {
+			t.Fatal("native callback duplicated receipt/job or issued prematurely", before, after)
+		}
+		if got := f.read(a.ID); got.ID != a.ID || got.OrderID != id || got.State != "awaiting_title" {
+			t.Fatal("wrong native application")
+		}
+		request, _ := http.NewRequest(http.MethodGet, endpoint+"/api/h5/me/invoices/"+a.ID, nil)
+		request.AddCookie(&http.Cookie{Name: paymentport.TrustedSessionCookieName, Value: f.token})
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var receipt invoiceport.Receipt
+		err = json.NewDecoder(response.Body).Decode(&receipt)
+		response.Body.Close()
+		if response.StatusCode != 200 || err != nil || receipt.ID != a.ID {
+			t.Fatal("installed transaction detail route", response.StatusCode, err)
+		}
+		if post(a.ID, "foreign-sub", "service-fixture", "valid") != 409 {
+			t.Fatal("known wrong merchant accepted")
+		}
+		t.Logf("invoice-bill-entry-installed PASS source_sha=%s binary_sha256=%s native_callback=verified transaction_id=shared zero_provider_writes=true", installed.SHA, installed.BinarySHA256)
+		return
 	}
 	if post(a.ID, "foreign-sub", "service-fixture", "valid") != 409 || post(a.ID, a.Snapshot.MerchantID, "service-fixture", "valid") != 503 {
 		t.Fatal("known application scope or disabled business boundary changed")
 	}
 	if counts() != before || f.read(a.ID).State != a.State {
-		t.Fatal("callback-only process created a receipt, task or effect, or changed application")
+		t.Fatal("callback-only process created business writes")
 	}
 	t.Logf("invoice-callback-bootstrap-installed PASS source_sha=%s binary_sha256=%s callback_enabled=true invoice_provider=false zero_business_writes=true", installed.SHA, installed.BinarySHA256)
 }

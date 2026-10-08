@@ -50,7 +50,8 @@
   "public_key_path": "/private/pub_key.pem",
   "public_origin": "https://<官方域名>",
   "card_appid": "<现有公众号AppID>",
-  "card_logo_url": "<公众号身份上传永久素材得到的mmbiz.qpic.cn图片URL>"
+  "card_logo_url": "<公众号身份上传永久素材得到的mmbiz.qpic.cn图片URL>",
+  "show_invoice_cell": true
 }
 ```
 
@@ -61,7 +62,7 @@ invoice-setup -config /private/invoice-setup.json -action card -allow-card-repla
 ```
 
 - `read`：读取权限、商户基本信息、税码目录、服务商及商户开发配置、最近六天授权记录。`complete` 仅代表这些读取全部成功；不代表应用启用。基础信息接口报地址校验错误时保持错误事实，可从匹配该商户的已验签邀请记录获取主体事实，再由财务确认；不得填造地址。空税码目录不自动猜税，需要填写本地财务映射。
-- `development`：必须先安装本候选回调处理器；GET 返回 200 仅表示可达，不接受业务通知。配置官方 HTTPS 回调，再分别 GET 服务商回调及商户开关。关闭专票和微信支付账单入口：首版仅 CRM 本人订单页申请，支付账单入口产生不同申请编号，不能以不存在的 CRM 申请确认已开票。公众号菜单仍可正常使用订单链接。
+- `development`：必须先安装本候选回调处理器；GET 返回 200 仅表示可达，不接受业务通知。配置官方 HTTPS 回调，再分别 GET 服务商回调及商户开关。专票保持关闭。统一交易单号实现安装后，`show_invoice_cell=true` 开启微信账单入口；两入口共用交易单号、原订单归属、申请及开票 / 冲红任务。开关保存后独立读回 true 才算配置完成，真实微信账单可见性另记。公众号菜单仍用原订单链接。
 
 回调初始化顺序：先设置 `AICRM_INVOICE_CALLBACK_ENABLED=true`，保留 `AICRM_INVOICE_PROVIDER_ENABLED=false`，安装并独立读回。此时只加载 pinned 通知信任和私密 APIv3 密钥，不创建开票 ProviderAdapter；已知申请的业务通知返回 503、无回执或查询任务，未知申请只有严格验签解密后才应答。完成 `development` 保存并独立读回后，再按已有授权启用正式开票。两项都默认 false，正式开票启用会自动初始化回调，无需强制重复设置开关。切勿把非空无签名 POST 改成 200。
 
@@ -105,3 +106,11 @@ DATABASE_URL='postgresql://<本机用户>@localhost:5432/aicrm_test_invoice?sslm
 ```
 
 该预览使用真实挂载页、真实 OneID/订单/退款/EER PostgreSQL 适配器与合成 Provider；自动注入测试会话仅存在于测试文件且限定 loopback。它不是生产路由、真实授权或出票证明。
+
+### 2026-10-09 统一交易单号流程
+
+原生账单回调 FAPIAO.USER_APPLIED 只通过 Payment Port 找本商户已确认的原交易、付款人及可信 Identity handle；未确认交易返回可重试，不建客。CRM 表单最终确认和原生回调使用同一申请 ID（交易单号），同一 Order 锁与创建函数；官方抬头读取固定 WITH_WECHATPAY。CRM POST 缺单位抬头或确认金额直接拒绝，不再生成官方跳转链接。个人抬头不接受开票效果。
+
+回调及提交会唤醒原查询任务；发出票据意图后也立即唤醒，避免已有退避时间遮挡终态。旧唯一测试申请不做兼容或自动重开，税码问题保持待办。启用账单展示不代表出票或卡包成功。
+
+安装收据 `invoice-callback-bootstrap-installed` 同时运行 CallbackBootstrapInstalled 和 BillEntryInstalled，后者通过准确安装 binary、隔离 PG 与合成 RSA/AES 回调创建交易单号申请，验证重复通知仅一份回执 / 任务及本人详情读取；API 角色不执行 Provider 写。

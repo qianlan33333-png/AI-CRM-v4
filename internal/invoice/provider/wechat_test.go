@@ -91,7 +91,7 @@ func TestInvoiceOfficialSDKRequestsFreezeAndQueryBinding(t *testing.T) {
 			}
 			return `{"miniprogram_appid":"wx-official","miniprogram_path":"pages/title","miniprogram_user_name":"gh-official"}`
 		case strings.HasSuffix(r.URL.Path, "user-title"):
-			if r.URL.Query().Get("scene") != "WITH_WECHATPAY" {
+			if r.URL.Query().Get("scene") != "WITH_WECHATPAY" || r.URL.Query().Get("fapiao_apply_id") != "transaction-1" {
 				t.Fatal("wrong title scene")
 			}
 			return `{"type":"INDIVIDUAL","name":"本人","amount":9900}`
@@ -102,15 +102,19 @@ func TestInvoiceOfficialSDKRequestsFreezeAndQueryBinding(t *testing.T) {
 			return `{}`
 		case strings.HasSuffix(r.URL.Path, "reverse"):
 			var b struct {
+				ApplyID  string              `json:"fapiao_apply_id"`
 				Reason   string              `json:"reverse_reason"`
 				Invoices []map[string]string `json:"fapiao_information"`
 			}
 			json.NewDecoder(r.Body).Decode(&b)
-			if b.Reason != "SALES_RETURN" || len(b.Invoices) != 1 || b.Invoices[0]["fapiao_number"] != "BLUE1" {
+			if b.ApplyID != "transaction-1" || b.Reason != "SALES_RETURN" || len(b.Invoices) != 1 || b.Invoices[0]["fapiao_number"] != "BLUE1" {
 				t.Fatal("reversal shape")
 			}
 			return `{}`
 		default:
+			if r.URL.Query().Get("fapiao_apply_id") != "transaction-1" {
+				t.Fatal("query did not retain original transaction")
+			}
 			return `{"fapiao_information":[{"fapiao_id":"foreign","status":"ISSUED"}]}`
 		}
 	})
@@ -122,6 +126,10 @@ func TestInvoiceOfficialSDKRequestsFreezeAndQueryBinding(t *testing.T) {
 	}
 	if e := w.Write(context.Background(), a, false); e != nil {
 		t.Fatal(e)
+	}
+	var applyID string
+	if json.Unmarshal(issue["fapiao_apply_id"], &applyID) != nil || applyID != a.Snapshot.TransactionID {
+		t.Fatal("issue did not retain original transaction")
 	}
 	var detail struct {
 		ID           string           `json:"fapiao_id"`
@@ -181,6 +189,9 @@ func TestInvoiceOfficialCallbackSignatureDecryptAndReplayDigest(t *testing.T) {
 func TestInvoiceFileUnsignedDigestAndRedirectBoundary(t *testing.T) {
 	badURL := false
 	w, _, a := invoiceProviderFixture(t, func(r *http.Request) string {
+		if r.URL.Query().Get("fapiao_apply_id") != "transaction-1" {
+			t.Fatal("file lookup did not retain original transaction")
+		}
 		if strings.HasSuffix(r.URL.Path, "fapiao-files") {
 			url := "https://pay.wechatpay.cn/invoicing/fapiao/fapiao-file?token=fixture"
 			if badURL {

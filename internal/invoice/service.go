@@ -300,8 +300,8 @@ func (s *Service) create(ctx context.Context, token string, orderID int64, key s
 		if s.reason(o, ids, refund, nil) != "" {
 			return p.ErrIneligible
 		}
-		// The official launch OpenID must be the current verified OA identity in
-		// the configured App scope. Never take it from a browser or query string.
+		// Freeze the current verified OA identity in the configured App scope.
+		// Never take identity handles from a browser or query string.
 		trusted, ok, e := s.Identities.VerifiedPaymentIdentity(tx, actor.PayerIdentityID, identitydomain.KindOAOpenID, s.Config.AppScope)
 		if e != nil {
 			return e
@@ -328,9 +328,6 @@ func (s *Service) create(ctx context.Context, token string, orderID int64, key s
 			e = p.ErrConflict
 		}
 		return p.Receipt{}, e
-	}
-	if title != nil {
-		return p.MarshalReceipt(a), nil
 	}
 	return p.MarshalReceipt(a), nil
 }

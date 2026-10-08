@@ -157,46 +157,46 @@ func TestInvoicePostgreSQLSelfTitleAtomicAndReplay(t *testing.T) {
 	}
 }
 
-type blockedLegacyTitle struct {
+type blockedOfficialTitle struct {
 	*invoiceFixtureProvider
 	entered, release chan struct{}
 }
 
-func (b *blockedLegacyTitle) ReadTitle(ctx context.Context, a p.Application) (p.Buyer, error) {
+func (b *blockedOfficialTitle) ReadTitle(ctx context.Context, a p.Application) (p.Buyer, error) {
 	close(b.entered)
 	<-b.release
 	return b.invoiceFixtureProvider.ReadTitle(ctx, a)
 }
 
-func TestInvoicePostgreSQLLegacyTitleRaceAndHistory(t *testing.T) {
+func TestInvoicePostgreSQLOfficialTitleRaceAndHistory(t *testing.T) {
 	f := newInvoiceFixture(t)
 	orderID := f.order(f.customer, f.customer, "paid", "旧申请课程", "wechat_pay", time.Now())
-	legacy, e := f.s.Create(f.ctx, f.token, orderID, "legacy-title-key-001")
+	official, e := f.s.Create(f.ctx, f.token, orderID, "official-title-key-001")
 	if e != nil {
 		t.Fatal(e)
 	}
 	f.provider.titleType = "INDIVIDUAL"
-	if e = f.s.Reconcile(f.ctx, legacy.ID); !errors.Is(e, p.ErrInvalid) {
-		t.Fatal("legacy personal title accepted", e)
+	if e = f.s.Reconcile(f.ctx, official.ID); !errors.Is(e, p.ErrInvalid) {
+		t.Fatal("official personal title accepted", e)
 	}
-	if pending := f.read(legacy.ID); pending.State != "awaiting_title" || pending.IssueEffect != "" {
+	if pending := f.read(official.ID); pending.State != "awaiting_title" || pending.IssueEffect != "" {
 		t.Fatal("personal title accepted an effect")
 	}
 	f.provider.titleType = ""
 
-	block := &blockedLegacyTitle{f.provider, make(chan struct{}), make(chan struct{})}
+	block := &blockedOfficialTitle{f.provider, make(chan struct{}), make(chan struct{})}
 	f.s.Provider = block
 	done := make(chan error, 1)
-	go func() { done <- f.s.Reconcile(f.ctx, legacy.ID) }()
+	go func() { done <- f.s.Reconcile(f.ctx, official.ID) }()
 	select {
 	case <-block.entered:
 	case <-time.After(5 * time.Second):
-		t.Fatal("legacy read did not start")
+		t.Fatal("official read did not start")
 	}
-	a, e := f.s.SubmitTitle(f.ctx, f.token, orderID, "manual-old-app-00001", titleFixture())
+	a, e := f.s.SubmitTitle(f.ctx, f.token, orderID, "manual-same-app-00001", titleFixture())
 	close(block.release)
-	if e != nil || a.ID != legacy.ID || a.State != "queued" {
-		t.Fatal("legacy ID not reused", e)
+	if e != nil || a.ID != official.ID || a.State != "queued" {
+		t.Fatal("official ID not reused", e)
 	}
 	if e = <-done; e != nil {
 		t.Fatal(e)

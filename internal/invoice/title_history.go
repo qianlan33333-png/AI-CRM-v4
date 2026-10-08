@@ -26,12 +26,15 @@ func (s *Service) SubmitTitle(ctx context.Context, token string, orderID int64, 
 	return s.create(ctx, token, orderID, key, &title)
 }
 
-// Caller holds the same Order lock used by refund and legacy title processing.
+// Caller holds the same Order lock used by refund and official title processing.
 // The application lock/state check prevents an in-flight official title read
 // from overwriting a confirmed title or accepting a second effect.
 func (s *Service) acceptTitleWithin(ctx context.Context, a *p.Application, o order.SelfOrder, ids []int64, title p.TitleSubmission) error {
 	if !slices.Contains(ids, a.CustomerID) {
 		return p.ErrNotFound
+	}
+	if a.ID != a.Snapshot.TransactionID {
+		return p.ErrConflict
 	}
 	if title.ExpectedAmount != a.Snapshot.Amount {
 		return p.ErrConflict

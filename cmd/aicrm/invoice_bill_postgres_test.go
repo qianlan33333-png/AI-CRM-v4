@@ -284,7 +284,7 @@ func TestInvoicePostgreSQLBillAndManualConcurrentFirstTitle(t *testing.T) {
 		t.Fatal("parallel duplicate", c)
 	}
 	// Authenticated provider title read finishes after manual confirmation.
-	read := &blockedLegacyTitle{invoiceFixtureProvider: f.provider, entered: make(chan struct{}), release: make(chan struct{})}
+	read := &blockedOfficialTitle{invoiceFixtureProvider: f.provider, entered: make(chan struct{}), release: make(chan struct{})}
 	fresh := f.order(f.customer, f.customer, "paid", "抬头读取竞争", "wechat_pay", time.Now())
 	freshRef := f.billPayment(fresh)
 	if e := f.s.Notification(f.ctx, billNotice(freshRef)); e != nil {

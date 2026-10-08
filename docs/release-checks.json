@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "a0e44ab3184985eaadb500edcd48a70bd04adbae",
+  "baseline_sha": "2f366bd2318135a620126b7c9d2ad07eaac3e838",
   "checks": [
     {
       "lane": "backend",
@@ -12,6 +12,28 @@
     },
     {
       "lane": "backend",
+      "package": "./cmd/invoice-setup"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLBillEntryUnifiedAndAtomic",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLBillEntryAuthorityAndRecovery",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLBillAndManualConcurrentFirstTitle",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
       "package": "./cmd/aicrm",
       "test": "TestInvoicePostgreSQLSelfTitleAtomicAndReplay",
       "postgres": true
@@ -19,7 +41,7 @@
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLLegacyTitleRaceAndHistory",
+      "test": "TestInvoicePostgreSQLOfficialTitleRaceAndHistory",
       "postgres": true
     },
     {
@@ -47,15 +69,38 @@
       "postgres": true
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/customerOrders.test.mjs"
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLCallbackBootstrapCannotQueueBusiness",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceCompositionUsesSeparateServicePublicKey"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceFinanceMappingRequiresExplicitTaxFacts"
     },
     {
       "lane": "frontend",
       "path": "scripts/prepare-donor-source-views.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "scripts/validate-openapi.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/customerOrders.test.mjs"
     }
   ],
   "installed_checks": [
     "invoice-callback-bootstrap-installed"
+  ],
+  "build_commands": [
+    "./cmd/invoice-setup"
   ]
 }

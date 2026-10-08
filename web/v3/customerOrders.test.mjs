@@ -23,7 +23,7 @@ function fixture({
   expired = false,
   expireWrites = false,
   uncertain = false,
-  legacy = false,
+  awaitingTitle = false,
 } = {}) {
   const dom = new JSDOM('<main id="customer-orders-root"></main>', {
     url: "https://crm.test/my/orders",
@@ -55,10 +55,10 @@ function fixture({
       let rows = [
         {
           ...row(1, "共创营 <img src=x onerror=alert(1)>"),
-          ...(legacy
+          ...(awaitingTitle
             ? {
                 invoice: {
-                  id: "inv_" + "b".repeat(28),
+                  id: "42000000000000000000000000000001",
                   order_id: 1,
                   amount_minor: 1000,
                   state: "awaiting_title",
@@ -94,7 +94,7 @@ function fixture({
     if (path === "/api/h5/me/invoices" && options?.method === "POST") {
       const body = JSON.parse(options.body);
       const invoice = {
-        id: "inv_" + (legacy ? "b" : "a").repeat(28),
+        id: `4200000000000000000000000000000${body.order_id}`,
         order_id: body.order_id,
         amount_minor: body.order_id * 1000,
         state: "queued",
@@ -121,13 +121,13 @@ function fixture({
         json: async () => ({ items: applications, next_cursor: "" }),
       };
     }
-    if (path.startsWith("/api/h5/me/invoices/inv_")) {
+    if (path.startsWith("/api/h5/me/invoices/420")) {
       return {
         ok: true,
         status: 200,
         json: async () =>
           applications[0] || {
-            id: "inv_" + "b".repeat(28),
+            id: "42000000000000000000000000000001",
             order_id: 1,
             amount_minor: 1000,
             state: "awaiting_title",
@@ -306,7 +306,7 @@ console.log(
 );
 
 {
-  const f = fixture({ legacy: true });
+  const f = fixture({ awaitingTitle: true });
   await flush();
   f.click("待填抬头");
   await flush();
@@ -317,7 +317,7 @@ console.log(
   f.click("提交");
   f.click("确认提交", f.w.document.querySelector("dialog"));
   await flush();
-  assert.equal(f.applications[0].id, "inv_" + "b".repeat(28));
+  assert.equal(f.applications[0].id, "42000000000000000000000000000001");
   assert.equal(
     f.calls.some((c) => c.path.includes("jssdk") || c.path.includes("resume")),
     false,
@@ -351,5 +351,5 @@ console.log(
   f.dom.window.close();
 }
 console.log(
-  "self-title flows passed: confirmation before write, company-only, legacy resume, exact ambiguous replay, invoice history, PDF preview, read-only refresh",
+  "self-title flows passed: confirmation before write, company-only, awaitingTitle resume, exact ambiguous replay, invoice history, PDF preview, read-only refresh",
 );
