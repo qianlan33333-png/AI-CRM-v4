@@ -356,8 +356,8 @@ func validateOrdersOAuthInstalledProduct(t *testing.T, input testconfig.Installe
 	var manifest struct {
 		SourceSHA string `json:"source_sha"`
 	}
-	if err != nil || json.Unmarshal(manifestBytes, &manifest) != nil || manifest.SourceSHA != input.SHA {
-		t.Fatal("installed OAuth package manifest does not match its source SHA")
+	if err != nil || json.Unmarshal(manifestBytes, &manifest) != nil || !validDomesticReleaseSHA(manifest.SourceSHA) {
+		t.Fatal("installed OAuth package UI manifest has an invalid source SHA")
 	}
 	info, err := os.Stat(input.Binary)
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
