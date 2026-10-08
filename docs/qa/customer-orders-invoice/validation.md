@@ -40,3 +40,17 @@
 真实微信 OAuth、JS SDK 官方开放标签和抬头小程序跳转、真实出票、发票 PDF 下载、卡包插入、全额/部分退款后的整票冲红及卡券作废均未验收；合成受理/排队/回执不计为真实成功。
 
 用户授权范围：实现本份已批准 PRD、必要修复、独立候选和国内源码交付、按 AGENTS 路由消息到唯一发布工作台。本开发任务没有用户“部署到生产机”的新授权，不自行安装或启用真实 Provider。
+
+## 2026-10-08 OAuth 回跳修复追加
+
+本候选从准确国内基线 `560ff9d891b2e733569b2f38336a78af5c2e5b72` 独立分支建立；复用父 PRD，不改变发票行为。具名源码清单仅包含 OAuth 固定回跳、旧路径与拒绝合同、0225 迁移、readiness 及安装包旅程。
+
+| 命令/范围 | 本机结果 |
+|---|---|
+| `go test ./internal/payment/h5oauth ./internal/payment/http -run 'TestOrdersOAuth|TestH5OAuthStateIsBoundExpiresAndCannotReplay' -count=1` | 通过。固定 `/my/orders` 成功回跳、授权失败不自动循环、固定身份/redirect 参数拒绝、已有 state 合同。 |
+| `go test ./internal/payment/store -run '^TestPostgreSQLOAuthReturnMigrationAddsOrdersAndPreservesStatePersistenceBoundary$' -count=1 -v` | Go 测试包编译通过；用例因未设置 `DATABASE_URL` 跳过，属于未验证。测试断言 SQLSTATE 23514、既有已消费 state 在迁移后完整保留及旧合法路径继续接受。 |
+| `go test ./cmd/aicrm -run '^TestPostgreSQLOrdersH5OAuthStartAndCompleteRoundTrip$|^TestPostgreSQLReleaseReadinessRequiresOrdersOAuthReturnMigration$' -count=1 -v` | Go 测试包编译通过；两个 PG 用例因未设置 `AICRM_DATABASE_URL` 跳过，属于未验证。完整旅程包含真实状态持久化/消费/重放、合成 Provider、OneID 与可信会话同客户、本人订单 HTTP 读取。 |
+| `go build -o /tmp/aicrm-orders-oauth-check ./cmd/aicrm` | 本候选本机应用构建；应用未安装。 |
+| `node scripts/prepare-donor-source-views.mjs`; `git diff --check`; `python3 -m json.tool docs/release-checks.json` | 派生 OpenAPI 视图仅在独立 worktree 物化；diff 与清单 JSON 检查通过，忽略视图未纳入提交。 |
+
+唯一发布工作台在准确最终安装二进制与隔离 PostgreSQL 上执行 `TestPostgreSQLOrdersH5OAuthStartAndCompleteRoundTrip` 的 installed mode；通过收据应含 `orders-oauth-installed-roundtrip: PASS source_sha=<inputs.SHA> binary_sha256=<inputs.BinarySHA256> actual_installed=true synthetic_provider=true unexpected_provider_calls=0`。本修复继承生产发布授权，由唯一发布工作台按准确候选执行；本开发任务未自行安装共享预发或生产。真实微信用户授权与真实 Provider 登录仍未验收。

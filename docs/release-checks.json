@@ -1,24 +1,16 @@
 {
   "schema": 1,
-  "baseline_sha": "4155b95e8d540d3e5c9f98c51b0a7707292d6c2c",
+  "baseline_sha": "560ff9d891b2e733569b2f38336a78af5c2e5b72",
   "checks": [
-    {
-      "lane": "backend",
-      "package": "./internal/invoice"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/invoice/provider"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/order/store/self_test.go",
-      "test": "TestSelfOrdersRequireOwnersAndLiteralProductSearch"
-    },
     {
       "lane": "backend",
       "path": "internal/payment/h5oauth/h5oauth_test.go",
       "test": "TestH5OAuthStateIsBoundExpiresAndCannotReplay"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/h5oauth/h5oauth_test.go",
+      "test": "TestOrdersOAuthFixedReturnPathRejectsIdentityAndRedirectParameters"
     },
     {
       "lane": "backend",
@@ -32,64 +24,30 @@
     },
     {
       "lane": "backend",
-      "path": "internal/platform/config/invoice_test.go",
-      "test": "TestInvoiceProviderDisabledByDefaultAndIncompleteFailsClosed"
+      "path": "internal/payment/http/orders_oauth_test.go",
+      "test": "TestOrdersOAuthSuccessfulCallbackReturnsToFixedOrdersPath"
     },
     {
       "lane": "backend",
-      "path": "internal/externaleffects/runtime_test.go",
-      "test": "TestClosedDigestOnlyEnvelopeAndStates"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/externaleffects/runtime_test.go",
-      "test": "TestStaleAttemptCompletionProjectionKinds"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/externaleffects/runtime_test.go",
-      "test": "TestInvoiceKindsRequireTheirOwnerAndDigestOnlyPayload"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/externaleffects/runtime_test.go",
-      "test": "TestPaymentV1KindsUsePaymentOwnerWithoutRawPayload"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/invoice_postgres_test.go",
-      "test": "TestInvoicePostgreSQLOwnershipFiltersAndSession",
+      "path": "internal/payment/store/postgres_integration_test.go",
+      "test": "TestPostgreSQLOAuthReturnMigrationAddsOrdersAndPreservesStatePersistenceBoundary",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/invoice_postgres_test.go",
-      "test": "TestInvoicePostgreSQLAtomicReplayAndUnknownRecovery",
+      "path": "cmd/aicrm/orders_h5_oauth_postgres_integration_test.go",
+      "test": "TestPostgreSQLOrdersH5OAuthStartAndCompleteRoundTrip",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/invoice_postgres_test.go",
-      "test": "TestInvoicePostgreSQLRefundRacesAndBoundedRetries",
+      "path": "cmd/aicrm/sol61_survey_readiness_postgres_test.go",
+      "test": "TestPostgreSQLReleaseReadinessRequiresOrdersOAuthReturnMigration",
       "postgres": true
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/customerOrders.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "scripts/validate-openapi.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "scripts/check-openapi-route-parity.mjs"
     }
   ],
   "installed_checks": [
-    "customer-orders-authorized-filters",
-    "invoice-application-readback",
-    "invoice-refund-state-readback"
+    "orders-oauth-installed-roundtrip"
   ],
   "build_commands": [
     "./cmd/aicrm"

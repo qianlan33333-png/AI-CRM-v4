@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
@@ -706,10 +707,17 @@ func TestPostgreSQLDistributionOAuthReturnMigrationKeepsApplicationContextClosed
 	}
 }
 
-func TestPostgreSQLReferralOAuthReturnMigrationClosesStatePersistenceBoundary(t *testing.T) {
+func TestPostgreSQLOAuthReturnMigrationAddsOrdersAndPreservesStatePersistenceBoundary(t *testing.T) {
 	pool, cleanup := paymentIntegrationPool(t)
 	defer cleanup()
 	ctx := context.Background()
+	assertCheckViolation := func(label string, err error) {
+		t.Helper()
+		var postgresErr *pgconn.PgError
+		if !errors.As(err, &postgresErr) || postgresErr.Code != "23514" {
+			t.Fatalf("%s did not fail at the return-path CHECK constraint: %v", label, err)
+		}
+	}
 	_, file, _, _ := runtime.Caller(0)
 	migrationRoot := filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations")
 	for _, name := range []string{"0142_payment_h5_product_return_path.sql", "0162_payment_h5_distribution_return_path.sql"} {
@@ -733,9 +741,41 @@ func TestPostgreSQLReferralOAuthReturnMigrationClosesStatePersistenceBoundary(t 
 	if _, err = pool.Exec(ctx, string(body)); err != nil {
 		t.Fatal(err)
 	}
+	priorPath := "/pay/course-7"
+	priorDigest := sha256.Sum256([]byte("orders-migration-preserve-existing-state"))
+	priorCreatedAt := time.Now().UTC().Truncate(time.Microsecond)
+	priorExpiresAt := priorCreatedAt.Add(10 * time.Minute)
+	priorConsumedAt := priorCreatedAt.Add(time.Minute)
+	if _, err = pool.Exec(ctx, `INSERT INTO payment_h5_oauth_states(state_digest,return_path,expires_at,created_at,consumed_at) VALUES($1,$2,$3,$4,$5)`, priorDigest[:], priorPath, priorExpiresAt, priorCreatedAt, priorConsumedAt); err != nil {
+		t.Fatalf("store existing valid OAuth state before 0225: %v", err)
+	}
+	ordersDigest := sha256.Sum256([]byte("orders-return-before-0225"))
+	_, err = pool.Exec(ctx, `INSERT INTO payment_h5_oauth_states(state_digest,return_path,expires_at,created_at) VALUES($1,$2,now()+interval '10 minutes',now())`, ordersDigest[:], "/my/orders")
+	assertCheckViolation("/my/orders before 0225", err)
+	for index, path := range []string{"/my/orders?customer_id=7", "/my/orders?next=https://evil.example/"} {
+		digest := sha256.Sum256([]byte(fmt.Sprintf("orders-invalid-before-0225-%d", index)))
+		_, err = pool.Exec(ctx, `INSERT INTO payment_h5_oauth_states(state_digest,return_path,expires_at,created_at) VALUES($1,$2,now()+interval '10 minutes',now())`, digest[:], path)
+		assertCheckViolation("unsafe /my/orders path before 0225", err)
+	}
+	body, err = os.ReadFile(filepath.Join(migrationRoot, "0225_payment_h5_orders_return_path.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, string(body)); err != nil {
+		t.Fatal(err)
+	}
+	var priorStatePreserved bool
+	if err = pool.QueryRow(ctx, `SELECT return_path=$2 AND expires_at=$3 AND created_at=$4 AND consumed_at=$5 FROM payment_h5_oauth_states WHERE state_digest=$1`, priorDigest[:], priorPath, priorExpiresAt, priorCreatedAt, priorConsumedAt).Scan(&priorStatePreserved); err != nil || !priorStatePreserved {
+		t.Fatalf("0225 did not preserve the existing valid OAuth state: preserved=%t err=%v", priorStatePreserved, err)
+	}
 	token := "rfi_" + strings.Repeat("A", 43)
+	promotion := "dpc_" + strings.Repeat("A", 43)
 	for index, path := range []string{
+		"/my/orders",
+		"/p/course-7?promotion_context=" + promotion,
 		"/pay/course-7",
+		"/s/term-31/pay?promotion_context=" + promotion,
+		"/c/coupon-2026",
 		"/distribution?product_id=7&product_type=standard_product",
 		"/referral",
 		"/referral?campaign=7",
@@ -760,8 +800,19 @@ func TestPostgreSQLReferralOAuthReturnMigrationClosesStatePersistenceBoundary(t 
 		"/referral?campaign=7%26invite=" + token,
 	} {
 		digest := sha256.Sum256([]byte(fmt.Sprintf("referral-invalid-%d", index)))
-		if _, err = pool.Exec(ctx, `INSERT INTO payment_h5_oauth_states(state_digest,return_path,expires_at,created_at) VALUES($1,$2,now()+interval '10 minutes',now())`, digest[:], path); err == nil {
-			t.Fatalf("unsafe Referral return path accepted: %q", path)
-		}
+		_, err = pool.Exec(ctx, `INSERT INTO payment_h5_oauth_states(state_digest,return_path,expires_at,created_at) VALUES($1,$2,now()+interval '10 minutes',now())`, digest[:], path)
+		assertCheckViolation(fmt.Sprintf("unsafe Referral return path %q", path), err)
+	}
+	for index, path := range []string{
+		"/my/orders/",
+		"/my/orders?customer_id=7",
+		"/my/orders?openid=untrusted",
+		"/my/orders?next=https://evil.example/",
+		"//evil.example/my/orders",
+		"/my%2forders",
+	} {
+		digest := sha256.Sum256([]byte(fmt.Sprintf("orders-invalid-%d", index)))
+		_, err = pool.Exec(ctx, `INSERT INTO payment_h5_oauth_states(state_digest,return_path,expires_at,created_at) VALUES($1,$2,now()+interval '10 minutes',now())`, digest[:], path)
+		assertCheckViolation(fmt.Sprintf("unsafe orders OAuth return path %q", path), err)
 	}
 }

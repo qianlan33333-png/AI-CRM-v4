@@ -119,3 +119,47 @@ func TestPostgreSQLReleaseReadinessRequiresSurveyIdentitySubjectMigration(t *tes
 		})
 	}
 }
+
+func TestPostgreSQLReleaseReadinessRequiresOrdersOAuthReturnMigration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	pool, cleanup := readinessIntegrationPool(t, ctx)
+	defer cleanup()
+	createReadinessMigrationLedger(t, ctx, pool)
+	if _, err := pool.Exec(ctx, `CREATE TABLE order_service_entitlements (alliance text)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `CREATE TABLE order_checkout_snapshots (post_purchase_action jsonb)`); err != nil {
+		t.Fatal(err)
+	}
+	createMinimumCustomerReadinessTables(t, ctx, pool)
+
+	config := platformconfig.Runtime{}
+	config.WeChatPay.H5OAuthEnabled = true
+	required := requiredCurrentReleaseMigrations(config)
+	if !containsMigration(required, "0225") {
+		t.Fatal("H5 OAuth readiness omitted Payment orders return-path migration 0225")
+	}
+	for _, version := range required {
+		insertReadinessMigration(t, ctx, pool, version)
+	}
+	handler := currentReleaseReadinessHandler(t, pool, config)
+	assertReadinessStatus(t, handler, http.StatusOK)
+
+	if _, err := pool.Exec(ctx, `DELETE FROM platform_schema_migrations WHERE version='0225'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkCurrentReleaseSchema(ctx, pool, config); err == nil || !strings.Contains(err.Error(), "0225") {
+		t.Fatalf("missing orders OAuth return-path migration readiness error=%v", err)
+	}
+	assertReadinessStatus(t, handler, http.StatusServiceUnavailable)
+	insertReadinessMigration(t, ctx, pool, "0225")
+	if err := checkCurrentReleaseSchema(ctx, pool, config); err != nil {
+		t.Fatalf("restored orders OAuth return-path migration readiness error=%v", err)
+	}
+	assertReadinessStatus(t, handler, http.StatusOK)
+
+	if containsMigration(requiredCurrentReleaseMigrations(platformconfig.Runtime{}), "0225") {
+		t.Fatal("disabled H5 OAuth unnecessarily requires the orders return-path migration")
+	}
+}

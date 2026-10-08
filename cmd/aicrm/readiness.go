@@ -39,6 +39,9 @@ func requiredCurrentReleaseMigrations(cfg platformconfig.Runtime) []string {
 	if cfg.HXCDashboard.Enabled {
 		required = append(required, "0138")
 	}
+	if cfg.WeChatPay.H5OAuthEnabled {
+		required = append(required, "0225")
+	}
 	sort.Strings(required)
 	return required
 }
