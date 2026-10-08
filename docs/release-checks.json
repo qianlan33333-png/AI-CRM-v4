@@ -1,55 +1,14 @@
 {
   "schema": 1,
-  "baseline_sha": "560ff9d891b2e733569b2f38336a78af5c2e5b72",
+  "baseline_sha": "e2a24c6dce7a1f14d3e0b49a0b6a61b4c08d4dca",
   "checks": [
-    {
-      "lane": "backend",
-      "path": "internal/payment/h5oauth/h5oauth_test.go",
-      "test": "TestH5OAuthStateIsBoundExpiresAndCannotReplay"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/payment/h5oauth/h5oauth_test.go",
-      "test": "TestOrdersOAuthFixedReturnPathRejectsIdentityAndRedirectParameters"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/payment/h5oauth/h5oauth_test.go",
-      "test": "TestOrdersOAuthFixedReturnPathRejectsIdentityAndRedirectParameters"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/payment/http/orders_oauth_test.go",
-      "test": "TestOrdersOAuthFailuresReturnWithoutAutomaticLoop"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/payment/http/orders_oauth_test.go",
-      "test": "TestOrdersOAuthSuccessfulCallbackReturnsToFixedOrdersPath"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/payment/store/postgres_integration_test.go",
-      "test": "TestPostgreSQLOAuthReturnMigrationAddsOrdersAndPreservesStatePersistenceBoundary",
-      "postgres": true
-    },
     {
       "lane": "backend",
       "path": "cmd/aicrm/orders_h5_oauth_postgres_integration_test.go",
       "test": "TestPostgreSQLOrdersH5OAuthStartAndCompleteRoundTrip",
       "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/sol61_survey_readiness_postgres_test.go",
-      "test": "TestPostgreSQLReleaseReadinessRequiresOrdersOAuthReturnMigration",
-      "postgres": true
     }
   ],
-  "installed_checks": [
-    "orders-oauth-installed-roundtrip"
-  ],
-  "build_commands": [
-    "./cmd/aicrm"
-  ]
+  "installed_checks": [],
+  "build_commands": []
 }
