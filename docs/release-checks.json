@@ -34,7 +34,7 @@
     },
     {
       "lane": "preflight",
-      "path": "scripts/test-install-release-ordering.sh"
+      "path": "scripts/test-customer-profile-install-contract.py"
     },
     {
       "lane": "frontend",

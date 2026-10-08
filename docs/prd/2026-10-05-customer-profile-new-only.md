@@ -37,3 +37,5 @@ Product Design：index/user-context preflight、get-context、audit/image-to-cod
 本次重提只有检查清单的累计基线冲突；采用当前候选相关清单，已上线发票工具清单不重复带入。业务/前端源代码自动合并后按准确diff复核，保留最新 Order Host 与 admin_base 的其他改动。复用原 Product Design 证据 `/Users/qianlan/Downloads/新CRM/release-control/customer-profile-new-only/design/`，没有新增布局或视觉方案。
 
 重提交验证选择：复用e2e既有客户列表、周期历史、Campaign历史/目标人员的具名页面块（--customer-profile-links），不运行无关导出/H5/侧边栏。最新main的订单导出按钮已更换，旧全页面断言不再匹配；完整V3类型检查在未修改的automationContentHost/sidebar出现基线错误。两项如实交接，不在此缺陷中扩大修复；本候选受影响的TS单独校验。
+
+安装检查接续：工作台 Linux 的全历史 `test-install-release-ordering.sh` 失败，最终日志为硬编码 `/tmp` 的完整包夹具创建时 gzip/tar 报 `No space left on device`，不记通过。本次安装器准确 diff 仅删除 `customerDetail` 页面必需项；相关 preflight 改用 `test-customer-profile-install-contract.py`，读取并执行真实安装器的 admin 文档检查循环，验证旧页不要求、新客户列表和订单详情仍必需、缺任一时拒绝，另检安装器 shell 语法。新合同使用遵守 TMPDIR 的临时空文档，不生成完整 tar 包。原全历史脚本保留给明确维护，不改安装器运行行为。最终同包预发安装与认证旅程继续由工作台执行；已通过且输入不变的页面47项与六项后端证据复用。此接续仅修改检查及其说明，不涉及 OneID、持久化或外部效果，没有新增业务限制。
