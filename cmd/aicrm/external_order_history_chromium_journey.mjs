@@ -64,15 +64,28 @@ async function debuggingAddress(profile) {
   throw new Error("Chromium remote debugging did not become ready");
 }
 
+let journeyPhase = "browser-launch";
 async function evaluate(cdp, expression) {
   const result = await cdp.call("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
-  if (result.exceptionDetails) throw new Error("page evaluation failed: " + String(result.exceptionDetails.text || "unknown"));
+  if (result.exceptionDetails) {
+    const details = result.exceptionDetails;
+    const description = details.exception?.description || details.exception?.className || details.text || "unknown";
+    let page = {};
+    try {
+      const context = await cdp.call("Runtime.evaluate", {
+        expression: "({route:location.pathname,readyState:document.readyState,profileRoot:Boolean(document.querySelector('[data-customer-profile-root]')),linkCount:document.querySelectorAll('a[href]').length})",
+        returnByValue: true,
+      });
+      page = context.result?.value || {};
+    } catch (_) {}
+    throw new Error("page evaluation failed phase=" + journeyPhase + " description=" + String(description) + " page=" + JSON.stringify(page));
+  }
   return result.result?.value;
 }
 
 async function waitFor(cdp, expression, message) {
   for (let attempt = 0; attempt < 180; attempt += 1) {
-    if (await evaluate(cdp, expression)) return;
+    if (await evaluate(cdp, "Boolean(document.body) && (" + expression + ")")) return;
     await delay(50);
   }
   throw new Error(message + " page=" + JSON.stringify(await evaluate(cdp,"({route:location.pathname,core:document.querySelector('#coreOperationsRoot')?.textContent,scripts:[...document.scripts].map(s=>s.src)})")));
@@ -129,14 +142,18 @@ try {
   await cdp.call("Network.enable");
 
   const capture=async name=>{const image=await cdp.call('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await fs.writeFile(path.join(screenshotDirectory,name+'.png'),Buffer.from(image.data,'base64'),{mode:0o600})};
+  journeyPhase = "login-load";
   await cdp.call('Page.navigate',{url:baseURL+'/login?next=%2Fadmin%2Forders.html'});
   await waitFor(cdp,'Boolean(document.querySelector(\'input[name="login_csrf_token"]\'))','login missing');
+  journeyPhase = "login-submit";
   await evaluate(cdp,`document.querySelector('input[name="username"]').value=${JSON.stringify(username)};document.querySelector('input[name="password"]').value=${JSON.stringify(password)};document.querySelector('form[action="/login"]').requestSubmit();true`);
+  journeyPhase = "history-list";
   await waitFor(cdp,"location.pathname.includes('orders') && document.body.textContent.includes('external-browser-known')",'history list missing');
   const list=await evaluate(cdp,"document.body.textContent");
   if(list.includes('external-browser-unknown')||list.includes('external-browser-refund')||!list.includes('外部历史订单')||!list.includes('2024-01-02 03:04:05'))throw new Error('list original time/source missing');
   await capture('external-history-list');
   for(const [ref,time,amount] of [['external-browser-known','2024-01-02 03:04:05','¥123.45']]){
+    journeyPhase = "history-detail";
     await cdp.call('Page.navigate',{url:baseURL+'/admin/orderDetail.html?id='+ref+'&provider=external_history'});
     await waitFor(cdp,"document.body.textContent.includes('原支付时间') && document.body.textContent.includes("+JSON.stringify(ref)+")",'history detail missing');
     const page=await evaluate(cdp,"({body:document.body.textContent,controls:[...document.querySelectorAll('button')].map(b=>b.textContent),links:[...document.querySelectorAll('a')].map(a=>a.href)})");
@@ -146,22 +163,28 @@ try {
     const profileURL = page.links.find(link => new URL(link).pathname.match(/^\/admin\/customers\/[1-9][0-9]*$/));
     if (!profileURL || page.links.some(link => link.includes('customerDetail.html'))) throw new Error('canonical customer link missing');
     const customerID = new URL(profileURL).pathname.split('/').pop();
+    journeyPhase = "retired-profile-fetch";
     const retired = await evaluate(cdp, `(async()=>{const r=await fetch('/admin/customerDetail.html?id=${customerID}',{redirect:'manual'});return {status:r.status,location:r.headers.get('Location')}})()`);
     if (retired.status !== 410 || retired.location) throw new Error('retired profile served or redirected');
+    journeyPhase = "formal-profile-history-wait";
     await cdp.call('Page.navigate', {url: profileURL});
     await waitFor(cdp, "Boolean(document.querySelector('[data-customer-profile-root]')) && [...document.querySelectorAll('a[href]')].some(a=>new URL(a.href).searchParams.get('id') === " + JSON.stringify(ref) + ")", 'formal customer history link missing');
+    journeyPhase = "formal-profile-order-link-read";
     const orderURL = await evaluate(cdp, "[...document.querySelectorAll('a[href]')].find(a=>new URL(a.href).searchParams.get('id') === " + JSON.stringify(ref) + ").href");
     if (new URL(orderURL).searchParams.get('provider') !== 'external_history') throw new Error('formal profile history provider changed');
     await capture('canonical-customer-history');
+    journeyPhase = "order-profile-roundtrip";
     await cdp.call('Page.navigate', {url: orderURL});
     await waitFor(cdp, "Boolean(document.querySelector('a[href=\"/admin/customers/" + customerID + "\"]')) && document.body.textContent.includes(" + JSON.stringify(ref) + ")", 'order roundtrip changed Customer ID');
     await capture(ref);
   }
+  journeyPhase = "history-export";
   const exported=await evaluate(cdp,`(async()=>{const cookie=document.cookie.split('; ').find(v=>v.startsWith('aicrm_admin_csrf='))||document.cookie.split('; ').find(v=>v.startsWith('csrf_token='));const token=cookie?decodeURIComponent(cookie.split('=').slice(1).join('=')):'';const r=await fetch('/api/admin/exports',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':token,'Idempotency-Key':'external-history-browser-export'},body:JSON.stringify({resource:'orders',format:'csv',filter:{provider:'external_history'}})});return {status:r.status,body:await r.text()}})()`);
   if(exported.status!==200||exported.body.includes('external-browser-unknown')||exported.body.includes('external-browser-refund')||!exported.body.includes('2024-01-02 03:04:05')||!exported.body.includes('原组合商品')||!exported.body.includes('123.45'))throw new Error('CSV original facts missing: '+exported.status);
   console.log('external_order_history_chromium: PASS screenshots='+screenshotDirectory);
 } catch (error) {
   failed = true;
+  console.error("external_order_history_chromium: FAIL phase=" + journeyPhase);
   throw error;
 } finally {
   if (cdp) cdp.close();
