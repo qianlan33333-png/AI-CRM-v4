@@ -58,6 +58,7 @@ type invoiceFixtureProvider struct {
 	status, card string
 	unknown      bool
 	stoppedCode  string
+	titleType    string
 	calls        int
 	mu           sync.Mutex
 }
@@ -66,7 +67,11 @@ func (f *invoiceFixtureProvider) Title(context.Context, p.Application, string) (
 	return p.Launch{AppID: "wx-invoice-fixture", Path: "pages/title", UserName: "gh_fixture", ExpiresAt: time.Now().Add(30 * time.Minute)}, nil
 }
 func (f *invoiceFixtureProvider) ReadTitle(_ context.Context, a p.Application) (p.Buyer, error) {
-	return p.Buyer{Type: "INDIVIDUAL", Name: "隔离测试抬头", Amount: a.Snapshot.Amount, Phone: "13800000000", Email: "invoice@fixture.test", Address: "fixture address", BankName: "fixture bank"}, nil
+	kind := f.titleType
+	if kind == "" {
+		kind = "ORGANIZATION"
+	}
+	return p.Buyer{Type: kind, TaxpayerID: "FIXTURE-TAX", Name: "隔离测试抬头", Amount: a.Snapshot.Amount, Phone: "13800000000", Email: "invoice@fixture.test", Address: "fixture address", BankName: "fixture bank"}, nil
 }
 func (f *invoiceFixtureProvider) Query(_ context.Context, a p.Application) (p.Result, error) {
 	f.mu.Lock()

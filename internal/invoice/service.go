@@ -558,6 +558,11 @@ func (s *Service) Reconcile(ctx context.Context, id string) error {
 			if e != nil {
 				return e
 			}
+			// New first acceptance is organization-only, including legacy
+			// official title notifications. Already accepted history is frozen.
+			if buyer.Type != "ORGANIZATION" {
+				return p.ErrInvalid
+			}
 		}
 		if !buyer.Valid(a.Snapshot) {
 			return p.ErrConflict

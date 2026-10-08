@@ -175,6 +175,15 @@ func TestInvoicePostgreSQLLegacyTitleRaceAndHistory(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	f.provider.titleType = "INDIVIDUAL"
+	if e = f.s.Reconcile(f.ctx, legacy.ID); !errors.Is(e, p.ErrInvalid) {
+		t.Fatal("legacy personal title accepted", e)
+	}
+	if pending := f.read(legacy.ID); pending.State != "awaiting_title" || pending.IssueEffect != "" {
+		t.Fatal("personal title accepted an effect")
+	}
+	f.provider.titleType = ""
+
 	block := &blockedLegacyTitle{f.provider, make(chan struct{}), make(chan struct{})}
 	f.s.Provider = block
 	done := make(chan error, 1)

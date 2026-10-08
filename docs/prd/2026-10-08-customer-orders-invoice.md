@@ -150,4 +150,4 @@ OneID reads canonical customer：Payment Session + Identity Port，历史只查�
 
 五项影响：扩展确认提交/历史/PDF接口；新增同事务自填确认、旧单恢复及重放保护；关联 Invoice、Order/Sessions/Identity 稳定 Port、External Effects/共享任务，复用已存在边界；页面新增自填/确认/结果/记录；相关 Invoice 单测、PG 拒绝/并发/回滚/旧通知竞争/退款、移动挂载和 Product Design QA 随源码交付。真实授权、出票、卡包与冲红分开记录。失败兼容回退上一构件，已受理记录保留不重复发出。
 
-最新用户收窄：仅单位，无抬头类型板块；新 POST 自填合同只接受 ORGANIZATION，拒绝个人。旧已存在合同/票据保留历史兼容，不改写已有开票事实。
+最新用户收窄：仅单位，无抬头类型板块；新 POST 自填合同和旧官方抬头通知的首次受理均只接受 ORGANIZATION，拒绝个人。旧已受理合同/票据保留历史兼容，不改写已有开票事实。
