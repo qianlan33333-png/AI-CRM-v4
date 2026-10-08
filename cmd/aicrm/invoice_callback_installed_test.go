@@ -26,6 +26,8 @@ import (
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
+	invoiceport "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice/port"
+	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 )
@@ -116,6 +118,7 @@ func TestInvoicePostgreSQLCallbackBootstrapInstalled(t *testing.T) {
 		"AICRM_INVOICE_SERVICE_MERCHANT_ID=service-fixture", "AICRM_INVOICE_AUTH_MODE=public_key",
 		"AICRM_INVOICE_PUBLIC_KEY_ID=PUB_KEY_ID_fixture", "AICRM_INVOICE_PUBLIC_KEY_PATH=" + publicPath, "AICRM_INVOICE_API_V3_KEY_PATH=" + keyPath,
 		"AICRM_WECHAT_PAY_MERCHANT_ID=" + a.Snapshot.MerchantID,
+		"AICRM_WECHAT_PAY_H5_APP_ID=" + a.Snapshot.AppID, "AICRM_WECHAT_PAY_H5_APP_SCOPE=" + a.Snapshot.AppScope,
 		"AICRM_EFFECTS_PROVIDER_ENABLED=false", "AICRM_WECHAT_PAY_PROVIDER_ENABLED=false", "AICRM_ALIPAY_PROVIDER_ENABLED=false", "AICRM_OUTBOUND_PROVIDER_ENABLED=false",
 	}
 	process := startPeriodicContactInstalledProcess(t, installed.Binary, installed.Root, environment)
@@ -123,6 +126,24 @@ func TestInvoicePostgreSQLCallbackBootstrapInstalled(t *testing.T) {
 	transport := &http.Transport{Proxy: nil}
 	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
 	t.Cleanup(transport.CloseIdleConnections)
+	// Read the authenticated history through installed bytes, including a
+	// legacy awaiting-title app while the write Provider remains disabled.
+	historyRequest, e := http.NewRequest(http.MethodGet, endpoint+"/api/h5/me/invoices?limit=1", nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	historyRequest.AddCookie(&http.Cookie{Name: paymentport.TrustedSessionCookieName, Value: f.token})
+	historyResponse, e := client.Do(historyRequest)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var history invoiceport.HistoryPage
+	decodeError := json.NewDecoder(historyResponse.Body).Decode(&history)
+	historyResponse.Body.Close()
+	if historyResponse.StatusCode != 200 || decodeError != nil || len(history.Items) != 1 || history.Items[0].ID != a.ID || history.Items[0].State != "awaiting_title" || len(history.Items[0].ProductNames) != 1 {
+		t.Fatalf("installed invoice history status=%d decode=%v", historyResponse.StatusCode, decodeError)
+	}
+	t.Log("installed invoice history: owner-scoped legacy awaiting-title application read through installed binary")
 	counts := func() [3]int {
 		var counts [3]int
 		if e := f.pool.QueryRow(f.ctx, `SELECT (SELECT count(*) FROM invoice_callback_receipts), (SELECT count(*) FROM river_job WHERE kind='invoice.provider-query.v1'), (SELECT count(*) FROM external_effects WHERE owner='invoice')`).Scan(&counts[0], &counts[1], &counts[2]); e != nil {

@@ -202,5 +202,36 @@ type OrdersPage struct {
 
 // MarshalReceipt contains only a safe client projection, never a buyer title.
 func MarshalReceipt(a Application) Receipt {
+	// A locally stopped dispatch retains its confirmed title and recovers via
+	// query jobs. It does not need the customer to fill the title again.
+	if a.State == "awaiting_title" && a.IssueEffect != "" && a.Buyer.Valid(a.Snapshot) {
+		a.State = "queued"
+	}
 	return Receipt{ID: a.ID, OrderID: a.OrderID, Amount: a.Snapshot.Amount, State: a.State, CardState: a.CardState, BlueNumber: a.BlueNumber, RedNumber: a.RedNumber, RefundConfirmed: a.RefundConfirmed}
+}
+
+// TitleSubmission is the minimal self-collected title. Amount is a confirmation
+// precondition, never an authority for invoice calculation.
+type TitleInput struct {
+	Type       string `json:"type"`
+	Name       string `json:"name"`
+	TaxpayerID string `json:"taxpayer_id,omitempty"`
+}
+type TitleSubmission struct {
+	Buyer          TitleInput
+	ExpectedAmount int64
+}
+type HistoryQuery struct {
+	Cursor string
+	Limit  int
+}
+type HistoryItem struct {
+	Receipt
+	OrderNo      string    `json:"order_no"`
+	ProductNames []string  `json:"product_names"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+type HistoryPage struct {
+	Items      []HistoryItem `json:"items"`
+	NextCursor string        `json:"next_cursor"`
 }

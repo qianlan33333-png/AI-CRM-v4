@@ -416,6 +416,12 @@ body:has(#customer-orders-root) {
   width: 100%;
 }
 @media (max-width: 360px) {
+  .orders-tabs {
+    margin-left: -12px;
+    margin-right: -12px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
   #customer-orders-root {
     padding-left: 12px;
     padding-right: 12px;
@@ -433,4 +439,117 @@ body:has(#customer-orders-root) {
     padding-left: 16px;
     padding-right: 16px;
   }
+}
+
+.orders-title-form {
+  margin: 18px 0;
+}
+.orders-title-card {
+  background: #fff;
+  padding: 4px 20px;
+  border-radius: 16px;
+}
+.orders-title-field {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 0;
+  border-bottom: 1px solid #f0f1f3;
+  font-size: 15px;
+}
+.orders-title-field input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1px solid #d8dce3;
+  background: #fff;
+  color: #1f2329;
+  font: inherit;
+  font-size: 16px;
+  border-radius: 0;
+}
+.orders-title-field input:focus {
+  outline: 0;
+  border-bottom: 2px solid #3370ff;
+}
+.orders-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 24px;
+  padding: 20px 0;
+  border-bottom: 1px solid #f0f1f3;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.orders-title-row > span {
+  color: #646a73;
+  flex-shrink: 0;
+}
+.orders-title-row > strong {
+  font-weight: 500;
+  text-align: right;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.orders-title-card .orders-title-row:last-child {
+  border-bottom: 0;
+}
+.orders-title-submit {
+  width: 100%;
+  margin-top: 28px;
+  min-height: 52px;
+}
+.orders-title-confirm .orders-title-row {
+  font-size: 16px;
+  border: 0;
+  padding: 15px 0;
+}
+.orders-title-confirm .orders-title-row strong {
+  max-width: 70%;
+}
+.orders-title-confirm .orders-primary {
+  font: inherit;
+}
+.orders-result {
+  text-align: center;
+  padding: 60px 12px 24px;
+}
+.orders-result-title {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.6;
+  margin: 0 0 20px;
+}
+.orders-result .orders-primary {
+  width: 100%;
+  margin-top: 48px;
+}
+.orders-result .orders-secondary {
+  width: 100%;
+  margin-top: 16px;
+}
+.orders-card a.orders-pill {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+@media (max-width: 390px) {
+  .orders-header {
+    flex-wrap: wrap;
+    padding-bottom: 8px;
+  }
+  .orders-header-actions {
+    margin-left: auto;
+  }
+}
+
+.orders-title-money strong {
+  font-size: 24px;
+  font-weight: 600;
+  color: #1f2329;
 }

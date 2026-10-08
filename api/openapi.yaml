@@ -5075,10 +5075,25 @@ paths:
         '400': {description: "Invalid or repeated filters."}
         '401': {description: "Expired or untrusted session; reauthorize."}
   /api/h5/me/invoices:
+    get:
+      summary: List own invoice applications and safe order presentation
+      security: [{paymentSession: []}]
+      description: Canonical OneID ownership; descending application time and ID cursor. No title or external identity returned.
+      parameters:
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200':
+          description: Own application history, including unfinished applications.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CustomerInvoiceHistoryPage'}
+        '400': {description: "Invalid, unknown or repeated filters."}
+        '401': {description: "Session required."}
     post:
       summary: Create or return the payer's one-order invoice application
       security: [{paymentSession: []}]
-      description: Requires same official Origin. Amount, merchant, tax and trusted OA identity are frozen by the server. No invoice Provider write occurs in this request.
+      description: Requires same official Origin. Amount, merchant, tax and trusted OA identity are frozen by the server. The confirmed organization title, receipt, audit and effect acceptance commit atomically. Provider writes execute asynchronously. Legacy requests without buyer retain the official title flow.
       requestBody:
         required: true
         content:
@@ -5090,12 +5105,22 @@ paths:
               properties:
                 order_id: {type: integer, minimum: 1}
                 idempotency_key: {type: string, minLength: 16, maxLength: 120}
+                expected_amount_minor: {type: integer, minimum: 1, description: "Required with buyer; must match the frozen and current server amount."}
+                buyer:
+                  type: object
+                  additionalProperties: false
+                  required: [type, name, taxpayer_id]
+                  properties:
+                    type: {type: string, enum: [ORGANIZATION]}
+                    name: {type: string, minLength: 1, description: "Trimmed organization name; at most 256 UTF-8 bytes."}
+                    taxpayer_id: {type: string, minLength: 1, description: "Trimmed tax ID; at most 32 UTF-8 bytes."}
       responses:
         '200':
-          description: Existing or created application and official title mini-program launch parameters.
+          description: Existing or accepted safe application status; self-collected title does not return an official launch entrance.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/CustomerInvoiceReceipt'}
+        '400': {description: "Invalid title or missing confirmation amount."}
         '401': {description: "Session required."}
         '403': {description: "Cross-site request rejected."}
         '404': {description: "Order not owned."}
@@ -5142,8 +5167,10 @@ paths:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, pattern: '^inv_[a-f0-9]{28}$'}}
     get:
-      summary: Download own issued invoice through authenticated server proxy
+      summary: Preview or download own issued invoice through authenticated server proxy
       security: [{paymentSession: []}]
+      parameters:
+        - {name: disposition, in: query, schema: {type: string, enum: [inline, attachment], default: attachment}}
       responses:
         '200':
           description: Official PDF with verified SM3 digest; no-store.
@@ -5275,6 +5302,22 @@ components:
       content: {application/json: {schema: {$ref: "#/components/schemas/OpenPlatformV1Failure"}}}
     MutationOK: {description: Mutation completed, content: {application/json: {schema: {type: object, required: [ok], properties: {ok: {const: true}}}}}}
   schemas:
+    CustomerInvoiceHistoryPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        next_cursor: {type: string}
+        items:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/CustomerInvoiceReceipt'}
+              - type: object
+                required: [order_no, product_names, created_at]
+                properties:
+                  order_no: {type: string}
+                  product_names: {type: array, items: {type: string}}
+                  created_at: {type: string, format: date-time}
     CustomerInvoiceReceipt:
       type: object
       required: [id, order_id, amount_minor, state, card_state, refund_confirmed]

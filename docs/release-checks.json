@@ -1,16 +1,57 @@
 {
   "schema": 1,
-  "baseline_sha": "f373a8ac6baf1aace5b5f1882dd182268ee9a19a",
+  "baseline_sha": "a0e44ab3184985eaadb500edcd48a70bd04adbae",
   "checks": [
     {
       "lane": "backend",
+      "package": "./internal/invoice"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice/provider"
+    },
+    {
+      "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoiceCompositionUsesSeparateServicePublicKey"
+      "test": "TestInvoicePostgreSQLSelfTitleAtomicAndReplay",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLLegacyTitleRaceAndHistory",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLAtomicReplayAndUnknownRecovery",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLRefundRacesAndBoundedRetries",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLOwnershipFiltersAndSession",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLCallbackAcknowledgementAndReplay",
+      "postgres": true
     },
     {
       "lane": "frontend",
-      "path": "cmd/aicrm/external_order_history_chromium_journey.test.mjs"
+      "path": "web/v3/customerOrders.test.mjs"
     }
   ],
-  "installed_checks": ["external-order-history", "invoice-callback-bootstrap-installed"]
+  "installed_checks": [
+    "invoice-callback-bootstrap-installed"
+  ]
 }

@@ -114,16 +114,52 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.reply(w, config, e)
 		return
 	}
+	if path == "/api/h5/me/invoices" && r.Method == http.MethodGet {
+		q := p.HistoryQuery{Cursor: r.URL.Query().Get("cursor"), Limit: 20}
+		for key, values := range r.URL.Query() {
+			if (key != "cursor" && key != "limit") || len(values) != 1 {
+				h.fail(w, p.ErrInvalid)
+				return
+			}
+		}
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			var e error
+			q.Limit, e = strconv.Atoi(raw)
+			if e != nil || q.Limit < 1 || q.Limit > 50 {
+				h.fail(w, p.ErrInvalid)
+				return
+			}
+		}
+		page, e := h.Service.History(r.Context(), token, q)
+		h.reply(w, page, e)
+		return
+	}
 	if path == "/api/h5/me/invoices" && r.Method == http.MethodPost {
 		var input struct {
-			OrderID int64  `json:"order_id"`
-			Key     string `json:"idempotency_key"`
+			OrderID        int64         `json:"order_id"`
+			Key            string        `json:"idempotency_key"`
+			Buyer          *p.TitleInput `json:"buyer,omitempty"`
+			ExpectedAmount *int64        `json:"expected_amount_minor,omitempty"`
 		}
 		if decode(w, r, &input) != nil {
 			h.fail(w, p.ErrInvalid)
 			return
 		}
-		a, e := h.Service.Create(r.Context(), token, input.OrderID, input.Key)
+		var a p.Receipt
+		var e error
+		if input.Buyer != nil {
+			if input.ExpectedAmount == nil {
+				h.fail(w, p.ErrInvalid)
+				return
+			}
+			a, e = h.Service.SubmitTitle(r.Context(), token, input.OrderID, input.Key, p.TitleSubmission{Buyer: *input.Buyer, ExpectedAmount: *input.ExpectedAmount})
+		} else {
+			if input.ExpectedAmount != nil {
+				h.fail(w, p.ErrInvalid)
+				return
+			}
+			a, e = h.Service.Create(r.Context(), token, input.OrderID, input.Key)
+		}
 		h.reply(w, a, e)
 		return
 	}
@@ -148,13 +184,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 2 && parts[1] == "file" && r.Method == http.MethodGet {
+		disposition := r.URL.Query().Get("disposition")
+		if disposition != "" && disposition != "inline" && disposition != "attachment" {
+			h.fail(w, p.ErrInvalid)
+			return
+		}
 		b, e := h.Service.File(r.Context(), token, parts[0])
 		if e != nil {
 			h.fail(w, e)
 			return
 		}
 		w.Header().Set("Content-Type", "application/pdf")
-		w.Header().Set("Content-Disposition", `attachment; filename="invoice.pdf"`)
+		if disposition == "inline" {
+			w.Header().Set("Content-Disposition", `inline; filename="invoice.pdf"`)
+		} else {
+			w.Header().Set("Content-Disposition", `attachment; filename="invoice.pdf"`)
+		}
 		w.Write(b)
 		return
 	}

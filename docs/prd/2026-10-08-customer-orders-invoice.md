@@ -126,3 +126,28 @@ flowchart TD
 参考：[微信官方卡券模板](https://pay.wechatpay.cn/doc/v3/partner/4015792562) 要求使用插卡服务号上传永久素材返回的 URL；复用现有配置工具和官方 SDK，只补充此次已验证的官方图片域名，继续接受旧 `mmbiz.qpic.cn`，不接受头像 URL 或伪造域名。
 
 分类：不涉及 OneID、客户或业务 PostgreSQL；现有运维工具 Provider 写入及私密请求/回执协议保持，无新队列或重试。无新增限制。五项影响：配置工具接受当前官方素材 URL；卡券请求内容与已有未知结果处理不变；仅直接影响 `cmd/invoice-setup`；无 UI；整包测试覆盖当前及旧域名、卡券主体/跳转保持，以及头像、伪装域名和带凭据 URL 拒绝。官方卡券创建受理、素材读回和真实卡包交付分别记录，税码按用户要求暂缓，生产开票不启用。
+
+## 自填抬头与开票记录 scope delta（2026-10-08）
+
+已批准流程：单选订单 → 自填单位名称/税号 → 确认弹窗 → 原子接受 → 提交结果 → 开票记录/继续开票 → 已出票查看 PDF。Product Design image-to-code 以本任务图2/3/4为选定参考，保留 V4 公共页蓝色、字体、卡片，去除邮箱、出行信息、多格式和独立抬头库；只交付微信卡包。
+
+官方 [issue-general](https://pay.wechatpay.cn/doc/v3/partner/4015792574) 明确允许自行收集抬头；复用官方 SDK 和现有 Invoice Provider，GitHub [GoPay](https://github.com/go-pay/gopay/blob/main/wechat/v3/fapiao.go) 仅作请求参考，不引入第二客户端。
+
+```mermaid
+flowchart LR
+ A[单选订单] --> B[抬头/金额/PDF/卡包]
+ B --> C[确认弹窗]
+ C --> D[核验付款归属退款与金额]
+ D --> E[同一UoW:申请/抬头/收据/审计/效果接受]
+ E --> F[提交结果]
+ F --> G[本人开票记录]
+ G --> H[实际出票后查看PDF]
+```
+
+OneID reads canonical customer：Payment Session + Identity Port，历史只查本人申请，订单只经 Order Port；Persistence local transaction + shared durable query job；Provider reads 文件/状态，Provider writes 开票/冲红仍经 External Effects。无新身份、队列或状态机，无数据库迁移。旧申请沿用原编号/快照；与旧官方抬头读取并发时锁定订单及申请，状态检查阻止覆盖和重复效果。未知结果只读原单，刷新不隐式重试。
+
+合同：POST /api/h5/me/invoices 增加 buyer(type,name,taxpayer_id) 与 expected_amount_minor；不带 buyer 的旧请求保持兼容。金额是确认前置条件，不是计费来源。GET 同集合为游标本人历史，返回安全收据、订单名/号及真实申请时间。既有 file 新增 disposition=inline 预览 PDF，保留鉴权/官方校验。抬头限长只按官方 name(256)/taxpayer_id(32) 字节边界，金额必须与冻结及当前订单一致，拒绝跨站与越权；不猜测税号真实性。
+
+五项影响：扩展确认提交/历史/PDF接口；新增同事务自填确认、旧单恢复及重放保护；关联 Invoice、Order/Sessions/Identity 稳定 Port、External Effects/共享任务，复用已存在边界；页面新增自填/确认/结果/记录；相关 Invoice 单测、PG 拒绝/并发/回滚/旧通知竞争/退款、移动挂载和 Product Design QA 随源码交付。真实授权、出票、卡包与冲红分开记录。失败兼容回退上一构件，已受理记录保留不重复发出。
+
+最新用户收窄：仅单位，无抬头类型板块；新 POST 自填合同只接受 ORGANIZATION，拒绝个人。旧已存在合同/票据保留历史兼容，不改写已有开票事实。

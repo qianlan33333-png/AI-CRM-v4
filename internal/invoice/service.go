@@ -230,6 +230,9 @@ func newID() (string, error) {
 	return "inv_" + hex.EncodeToString(b), e
 }
 func (s *Service) Create(ctx context.Context, token string, orderID int64, key string) (p.Receipt, error) {
+	return s.create(ctx, token, orderID, key, nil)
+}
+func (s *Service) create(ctx context.Context, token string, orderID int64, key string, title *p.TitleSubmission) (p.Receipt, error) {
 	var a p.Application
 	if orderID < 1 || len(key) < 16 || len(key) > 120 {
 		return p.Receipt{}, p.ErrInvalid
@@ -259,7 +262,10 @@ func (s *Service) Create(ctx context.Context, token string, orderID int64, key s
 				return p.ErrConflict
 			}
 			a, e = s.Store.get(tx, priorID, ids, true)
-			return e
+			if e != nil || title == nil {
+				return e
+			}
+			return s.acceptTitleWithin(tx, &a, o, ids, *title)
 		}
 		if !errors.Is(e, pgx.ErrNoRows) {
 			return e
@@ -268,6 +274,15 @@ func (s *Service) Create(ctx context.Context, token string, orderID int64, key s
 		if e == nil {
 			if !slices.Contains(ids, a.CustomerID) {
 				return p.ErrNotFound
+			}
+			a, e = s.Store.get(tx, a.ID, ids, true)
+			if e != nil {
+				return e
+			}
+			if title != nil {
+				if e = s.acceptTitleWithin(tx, &a, o, ids, *title); e != nil {
+					return e
+				}
 			}
 			_, e = t.Exec(tx, `INSERT INTO invoice_operation_receipts(customer_id,key_digest,order_id,application_id)VALUES($1,$2,$3,$4)`, a.CustomerID, digest, orderID, a.ID)
 			return e
@@ -313,6 +328,9 @@ func (s *Service) Create(ctx context.Context, token string, orderID int64, key s
 		if e = s.Store.update(tx, a, "created", string(effects.Hash("invoice.snapshot", string(raw)))); e != nil {
 			return e
 		}
+		if title != nil {
+			return s.acceptTitleWithin(tx, &a, o, ids, *title)
+		}
 		return s.Jobs.EnqueueWithin(tx, a.ID, time.Now().Add(30*time.Second))
 	})
 	if e != nil {
@@ -321,6 +339,9 @@ func (s *Service) Create(ctx context.Context, token string, orderID int64, key s
 			e = p.ErrConflict
 		}
 		return p.Receipt{}, e
+	}
+	if title != nil {
+		return p.MarshalReceipt(a), nil
 	}
 	return s.launch(ctx, token, a.ID)
 }
@@ -531,9 +552,12 @@ func (s *Service) Reconcile(ctx context.Context, id string) error {
 		return nil
 	}
 	if a.State == "awaiting_title" {
-		buyer, e := s.Provider.ReadTitle(ctx, a)
-		if e != nil {
-			return e
+		buyer := a.Buyer
+		if a.IssueEffect == "" || !buyer.Valid(a.Snapshot) {
+			buyer, e = s.Provider.ReadTitle(ctx, a)
+			if e != nil {
+				return e
+			}
 		}
 		if !buyer.Valid(a.Snapshot) {
 			return p.ErrConflict
@@ -561,7 +585,9 @@ func (s *Service) Reconcile(ctx context.Context, id string) error {
 			if s.reason(o, ids, false, nil) != "" {
 				return p.ErrIneligible
 			}
-			a.Buyer = buyer
+			if a.IssueEffect == "" {
+				a.Buyer = buyer
+			}
 			return s.queue(tx, a, false, time.Time{})
 		})
 	}

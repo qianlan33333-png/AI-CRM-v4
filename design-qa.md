@@ -1,37 +1,29 @@
-# Product Design 验收：用户订单中心与微信发票
+# Product Design QA — invoice title and history
 
-final result: passed
+Result: PASS for the approved UI scope on the mounted candidate page. Real WeChat authorization, provider issuance, card insertion and red-letter completion remain separate acceptance items.
 
-日期：2026-10-08。父 PRD：`docs/prd/2026-10-08-customer-orders-invoice.md`。使用 Product Design 的 image-to-code 和 design-qa；所选参考为用户四张滴滴截图，设计保留列表卡片、顶部筛选与开票入口、选择订单及底部金额操作栏。按已批准要求改为 V4 蓝色、单选、商品及订单号搜索，移除出行分类与行程操作。
+## Reference and reproduction scope
 
-## 实际挂载与对比
+Selected user references: `codex-clipboard-30c49d7e-f61a-4f33-b308-9426f4c5599e.jpg` (form), `codex-clipboard-b7241261-6a8b-494f-8299-2af8b6531df8.jpg` (confirmation), `codex-clipboard-36976faa-93cd-4cb7-ac95-4350e01c86dd.jpg` (result), all in `/var/folders/dq/56xlfzsx05zc7vqhbl7lgv6c0000gn/T/`. Original references 1140×2616; displayed downscaled 892×2048. Native-app chrome and travel information are reference context, not implemented content.
 
-验收 URL：`http://127.0.0.1:8797/my/orders`，真实公共路由与哈希资源、真实 PostgreSQL/OneID/可信会话/订单/EER、合成 Provider 和合成订单。浏览器为 Codex IAB，DOM 实测宽度 390、320、1024 CSS px；390/320 高度为 844，1024 布局中内容最大宽度 680。均无横向溢出。
+Approved changes: V4 blue theme and native font stack; latest instruction removes title-type selection entirely and supports organizations only; PDF and WeChat card pack fixed; no email, personal title, travel information, ad or 24-hour promise. Pending acceptance has no misleading issued-success checkmark. Existing V4 order cards and dialog focus controller reused.
 
-IAB 的 viewport 请求 312×675 实测为 390×844，请求 256×675 实测宽度为 320，请求 819×675 实测宽度为 1024。截图原始画布为 488×1054；`viewport-*.png` 只裁去 IAB 截图中超出实测页面视口的空白，未缩放内容。参考原图按 390 CSS px 归一化，与实际挂载截图并排目视检查；参考图中的订单和地址未复制进仓库。
+Mounted `web/v3/customerOrders.ts` and its CSS at `http://127.0.0.1:7188/my/orders`, bundled from this worktree with esbuild. The private local server uses synthetic orders and receipts and has no Provider connection. This is source UI evidence, not an installed-production claim.
 
-确认白色圆角卡片、灰色背景、状态分栏、商品信息层级、蓝色选中标记、禁用灰色主按钮、遮罩与底部筛选面板、固定金额栏及窄屏换行。日期采用起止日期输入，替代参考年月滚轮以符合 PRD 的时间区间。筛选项按要求保留日期、商品名和订单号，不增加业务类型分类。
+## Rendered checks
 
-## 浏览器操作证据
+Evidence directory: `/Users/qianlan/Documents/Codex/2026-10-08/invoice-title-history-checks/`.
 
-- 全部订单显示已付款、待付款、已关闭及不支持本期开票的历史/支付宝事实；历史时间未记录明确标注。
-- 开始 2026-10-08、结束 2026-10-07 时阻止提交并显示校验。起止同为 2026-10-08、商品“共创”、完整订单号 FIXTURE-000001 组合后仅返回对应一笔；清除可恢复列表。
-- 可开票页只显示两笔符合资格的微信订单。初始 ¥0.00 且按钮禁用；依次选择两笔后仅一个 radio 勾选，金额 ¥99.00，已选 1 笔。
-- 申请后展示“待填抬头”、申请编号、服务端金额、独立卡包状态；返回订单页能从数据库读回未完成申请。桌面微信外环境显示“请在微信中打开此页面填写抬头”。
-- 320 px 下关闭订单说明准确，筛选无结果显示“没有找到订单”和重置入口；申请编号自动换行。1024 px 居中限制内容宽度。
-- 相关 DOM Journey 另外验证初次及提交中会话过期恢复、Provider 关闭、商品字符串安全展示和仅发送订单 ID/幂等键。
+- `form-mobile.png`, `confirm-mobile.png`, `result-mobile.png`, `history-mobile.png`: 390×844 CSS viewport and output pixels (1× screenshot density). Form and result viewed in the same comparison input with their selected reference images. Confirmation compared against the selected reference, then reread after the organization-only change. History compared with existing order-card hierarchy.
+- `orders-320.png`, `history-320.png`: 320×740 viewport. Orders, form and history each report document width equal to viewport width after the tab-margin fix.
+- Layout: 16px mobile gutter, rounded white cards, simple stacked name/tax-ID inputs, clear amount at 24px, 44px or greater buttons, confirmation bottom sheet. Font family remains V4 system/PingFang/Microsoft YaHei; no substituted image assets.
+- Copy: organization name and tax ID first; PDF, server amount and card delivery visible; confirmation includes no title-type row. Result says application submitted/issuing. History separately shows issuing, issued and card delivery.
+- Browser operations: fill synthetic company/tax ID, submit opens confirmation; return to edit retains fields and restores submit focus; final confirm shows pending result; view invoices opens owner history; issued entry has authenticated inline-PDF URL; return loads orders. Error/warn console empty.
+- Automated mounted journeys cover combined filters, single selection, confirm-before-write, server amount, organization-only controls, legacy awaiting-title recovery, session expiry, duplicate/ambiguous replay and history refresh/PDF state.
 
-## 缺陷修正及复验
+## Findings and fixes
 
-| 严重度 | 发现 | 修正与复验 |
-|---|---|---|
-| P1 | 写入后会话过期的授权页可能被 finally 重绘覆盖 | 授权状态守卫；提交中 401 Journey 通过 |
-| P2 | 关闭订单曾提示付款后可开票 | 服务端 closed 原因与页面说明；closed-320.png 复验 |
-| P2 | 未选订单的按钮蓝色透明度降低，不够明确 | 灰色禁用主按钮；invoice-unselected-final.png 复验 |
-| P2 | 冲红后的文件入口不符合官方下载合同 | 仅已出票未冲红显示下载；Provider 文件合同测试通过 |
+P2: amount initially had metadata-sized text; increased emphasis in form and confirmation and inspected updated render.
+P2: existing ≤360px order tabs retained -16px margins despite 12px root gutters, causing 4px overflow on each side; matched margins/padding to 12px and independently read width 320/320.
 
-无剩余 P0/P1/P2 页面问题。此 passed 是已实现页面的视觉与本地交互结果；微信真机授权、JS SDK 官方开放标签、抬头小程序跳转、真实出票、卡包插入/作废及真实冲红尚未验证，需商户权限与税务配置开通后独立验收。
-
-证据位于 `docs/qa/customer-orders-invoice/`：orders-final、filter-final、filtered-final、invoice-unselected-final、invoice-selected-final、detail-final、detail-320、closed-320、empty-320、orders-desktop，以及归一化 viewport 图片。浏览器临时视口已重置，预览页保留。
-
-最终构建重新加载确认 `customerOrdersHost-GYN54TT4.js`，浏览器 error 日志为空；再次采集 orders-final.png（第二笔申请已从数据库读回）并重置临时视口。CNY 示例布局与参考对比结论相同，其他币种金额保留币种代码，DOM Journey 已验证。
+No unresolved P0/P1/P2 UI findings in the tested scope. Physical-phone keyboard, real WeChat OAuth and Provider delivery need device/provider acceptance; browser input/focus tests do not claim a physical keyboard test.

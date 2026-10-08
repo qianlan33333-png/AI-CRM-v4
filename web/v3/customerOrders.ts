@@ -1,3 +1,4 @@
+import { installSelectionDialog } from "./shared/ui/selectionDialog";
 type Invoice = {
   id: string;
   order_id: number;
@@ -31,16 +32,13 @@ type Order = {
   invoice?: Invoice;
 };
 type Page = { items: Order[]; next_cursor: string; invoice_enabled: boolean };
-type WX = {
-  config: (v: unknown) => void;
-  ready: (cb: () => void) => void;
-  error: (cb: () => void) => void;
+type HistoryItem = Invoice & {
+  order_no: string;
+  product_names: string[];
+  created_at: string;
 };
-declare global {
-  interface Window {
-    wx?: WX;
-  }
-}
+type HistoryPage = { items: HistoryItem[]; next_cursor: string };
+type TitleDraft = { type: "ORGANIZATION"; name: string; taxpayer_id: string };
 const states: Record<string, string> = {
   pending_payment: "待付款",
   paid: "已付款",
@@ -111,7 +109,8 @@ const channels: Record<string, string> = {
 };
 export function mountCustomerOrders(root: HTMLElement): () => void {
   let authorized = true;
-  let mode: "orders" | "invoices" | "detail" = "orders";
+  let mode: "orders" | "invoices" | "detail" | "form" | "result" | "history" =
+    "orders";
   let active = "all";
   let data: Order[] = [];
   let selected: number | null = null;
@@ -121,6 +120,16 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
   let generation = 0;
   let disposed = false;
   let detail: Invoice | null = null;
+  let formOrder: Pick<Order, "id" | "amount_minor"> | null = null;
+  let draft: TitleDraft = { type: "ORGANIZATION", name: "", taxpayer_id: "" };
+  let history: HistoryItem[] = [];
+  let historyCursor = "";
+  let submittedBody: {
+    order_id: number;
+    idempotency_key: string;
+    buyer: TitleDraft;
+    expected_amount_minor: number;
+  } | null = null;
   let filters = { from: "", until: "", keyword: "", order_no: "" };
   let status = "";
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -198,6 +207,8 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
         return "自动开票暂未开通，订单仍可正常查看。";
       case "conflict":
         return "身份或开票信息需要核对，请联系商家。";
+      case "invalid_request":
+        return "请检查抬头名称和单位税号后重新提交。";
       case "ineligible":
         return "订单状态已变化，请刷新后重新选择。";
       case "not_found":
@@ -217,7 +228,9 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
         button(
           "返回",
           () => {
+            if (busy) return;
             clearTimeout(refreshTimer);
+            generation++;
             mode = "orders";
             detail = null;
             selected = null;
@@ -234,11 +247,17 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
           ? "订单"
           : mode === "invoices"
             ? "开发票"
-            : "发票详情",
+            : mode === "form"
+              ? "填写信息"
+              : mode === "result"
+                ? "提交结果"
+                : mode === "history"
+                  ? "开票记录"
+                  : "发票详情",
       ),
     );
     const actions = element("div", "", "orders-header-actions");
-    if (mode !== "detail")
+    if (mode === "orders" || mode === "invoices")
       actions.append(button("筛选", filterSheet, "orders-header-button"));
     if (mode === "orders")
       actions.append(
@@ -253,7 +272,22 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
           "orders-header-button orders-blue",
         ),
       );
+    if (mode === "orders" || mode === "invoices") {
+      actions.append(
+        button(
+          "开票记录",
+          () => {
+            if (!busy) {
+              mode = "history";
+              void loadHistory();
+            }
+          },
+          "orders-header-button orders-blue",
+        ),
+      );
+    }
     h.append(actions);
+    for (const action of h.querySelectorAll("button")) action.disabled = busy;
     return h;
   }
   function feedback(text: string): HTMLElement {
@@ -283,6 +317,18 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
         tabs.append(t);
       }
       root.append(tabs);
+    }
+    if (mode === "form") {
+      renderForm();
+      return;
+    }
+    if (mode === "history") {
+      renderHistory();
+      return;
+    }
+    if (mode === "result") {
+      renderResult();
+      return;
     }
     if (mode === "detail") {
       renderDetail();
@@ -583,45 +629,399 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
     document.body.append(d);
     d.showModal();
   }
-  async function create(o: Order): Promise<void> {
+  function create(o: Pick<Order, "id" | "amount_minor">): void {
     if (busy) return;
+    clearTimeout(refreshTimer);
+    generation++;
+    formOrder = o;
+    draft = { type: "ORGANIZATION", name: "", taxpayer_id: "" };
+    submittedBody = null;
+    mode = "form";
+    status = "";
+    render();
+  }
+  function factRow(label: string, value: string): HTMLElement {
+    const row = element(
+      "div",
+      "",
+      "orders-title-row" + (label === "开票金额" ? " orders-title-money" : ""),
+    );
+    row.append(element("span", label), element("strong", value));
+    return row;
+  }
+  function renderForm(): void {
+    if (!formOrder) return;
+    const form = element("form", "", "orders-title-form");
+    const card = element("section", "", "orders-title-card");
+    function field(
+      name: "name" | "taxpayer_id",
+      label: string,
+      placeholder: string,
+    ): void {
+      const row = element("label", "", "orders-title-field");
+      row.append(element("span", label));
+      const input = element("input");
+      input.name = name;
+      input.required = true;
+      input.value = draft[name];
+      input.placeholder = placeholder;
+      input.autocomplete = "off";
+      input.disabled = busy || submittedBody !== null;
+      input.addEventListener("input", () => {
+        draft[name] = input.value;
+      });
+      row.append(input);
+      card.append(row);
+    }
+    field("name", "单位名称", "请输入完整单位名称");
+    field("taxpayer_id", "单位税号", "请输入纳税人识别号");
+    card.append(
+      factRow("发票格式", "PDF"),
+      factRow("开票金额", amount(formOrder.amount_minor)),
+      factRow("交付方式", "微信卡包"),
+    );
+    form.append(card);
+    if (status) form.append(feedback(status));
+    if (submittedBody)
+      form.append(
+        feedback("正在核对上次提交；再次提交会使用同一申请，不会重新开票。"),
+      );
+    const action = element(
+      "button",
+      busy ? "正在提交…" : submittedBody ? "核对并继续提交" : "提交",
+      "orders-primary orders-title-submit",
+    );
+    action.type = "submit";
+    action.disabled = busy;
+    form.append(action);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (busy) return;
+      if (submittedBody) {
+        void submitTitle();
+        return;
+      }
+      draft.name = draft.name.trim();
+      draft.taxpayer_id = draft.taxpayer_id.trim();
+      if (!draft.name || !draft.taxpayer_id) {
+        status = "请填写完整抬头信息。";
+        render();
+        return;
+      }
+      if (
+        new TextEncoder().encode(draft.name).length > 256 ||
+        new TextEncoder().encode(draft.taxpayer_id).length > 32
+      ) {
+        status = "抬头名称或税号超过支持长度，请核对后修改。";
+        render();
+        return;
+      }
+      confirmTitle();
+    });
+    root.append(form);
+  }
+  function confirmTitle(): void {
+    if (!formOrder) return;
+    const dialog = element(
+      "dialog",
+      "",
+      "orders-filter-dialog orders-title-confirm",
+    );
+    const title = element("div", "", "orders-filter-title");
+    const heading = element("h2", "发票信息确认");
+    heading.id = "invoice-confirm-title";
+    dialog.setAttribute("aria-labelledby", heading.id);
+    title.append(
+      heading,
+      button("返回修改", () => dialog.close()),
+    );
+    dialog.append(title, factRow("单位名称", draft.name));
+    dialog.append(factRow("单位税号", draft.taxpayer_id));
+    dialog.append(
+      factRow("发票类型", "数电普通发票"),
+      factRow("发票格式", "PDF"),
+      factRow("开票金额", amount(formOrder.amount_minor)),
+      factRow("交付方式", "微信卡包"),
+      element("p", "请核对抬头与税号，确认后将申请开票。", "orders-note"),
+      button(
+        "确认提交",
+        () => {
+          dialog.close();
+          void submitTitle();
+        },
+        "orders-primary orders-title-submit",
+      ),
+    );
+    const controls = installSelectionDialog({
+      dialog,
+      initialFocus: title.querySelector("button")!,
+      close: () => dialog.close(),
+      submit: () => {},
+    });
+    dialog.addEventListener("close", () => {
+      controls.dispose();
+      dialog.remove();
+    });
+    document.body.append(dialog);
+    dialog.showModal();
+  }
+  function submissionKey(id: number): string {
+    const slot = `invoice-submit-key:${id}`;
+    try {
+      const prior = sessionStorage.getItem(slot);
+      if (prior) return prior;
+    } catch {
+      /* Private browsing can disable storage. */
+    }
+    const key = crypto.randomUUID
+      ? crypto.randomUUID()
+      : `invoice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    try {
+      sessionStorage.setItem(slot, key);
+    } catch {
+      /* The Order lock also prevents duplicate applications. */
+    }
+    return key;
+  }
+  async function submitTitle(): Promise<void> {
+    if (!formOrder || busy) return;
+    const version = ++generation;
+    submittedBody ??= {
+      order_id: formOrder.id,
+      idempotency_key: submissionKey(formOrder.id),
+      buyer: { ...draft },
+      expected_amount_minor: formOrder.amount_minor,
+    };
     busy = true;
     status = "";
     render();
     try {
-      const key = crypto.randomUUID
-        ? crypto.randomUUID()
-        : `invoice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const a = await api<Invoice>("/api/h5/me/invoices", {
-        order_id: o.id,
-        idempotency_key: key,
-      });
-      if (disposed) return;
+      const a = await api<Invoice>("/api/h5/me/invoices", submittedBody);
+      if (disposed || generation !== version) return;
       detail = a;
-      mode = "detail";
+      submittedBody = null;
+      mode = "result";
     } catch (e) {
-      if (e instanceof Error && e.message === "session_required") return;
+      if (
+        disposed ||
+        generation !== version ||
+        (e instanceof Error && e.message === "session_required")
+      )
+        return;
+      // Definitive refusals allow editing. Network/503 ambiguity retains the
+      // exact confirmed payload and key; its replay can only return the same app.
+      if (
+        e instanceof Error &&
+        [
+          "invalid_request",
+          "ineligible",
+          "conflict",
+          "not_found",
+          "cross_site_rejected",
+          "not_enabled",
+        ].includes(e.message)
+      )
+        submittedBody = null;
       status = errorMessage(e);
     } finally {
-      busy = false;
-      if (!disposed) render();
+      if (!disposed && generation === version) {
+        busy = false;
+        render();
+      }
     }
   }
-  async function openInvoice(id: string): Promise<void> {
+  async function loadHistory(append = false): Promise<void> {
     clearTimeout(refreshTimer);
+    const version = ++generation;
+    busy = true;
+    status = "";
+    if (!append) {
+      history = [];
+      historyCursor = "";
+    }
+    render();
+    const query = new URLSearchParams({ limit: "20" });
+    if (append && historyCursor) query.set("cursor", historyCursor);
+    try {
+      const page = await api<HistoryPage>("/api/h5/me/invoices?" + query);
+      if (disposed || generation !== version) return;
+      if (!Array.isArray(page.items) || typeof page.next_cursor !== "string")
+        throw Error("invalid_response");
+      history = append ? [...history, ...page.items] : page.items;
+      historyCursor = page.next_cursor;
+    } catch (e) {
+      if (
+        disposed ||
+        version !== generation ||
+        (e instanceof Error && e.message === "session_required")
+      )
+        return;
+      status = errorMessage(e);
+    } finally {
+      if (!disposed && generation === version) {
+        busy = false;
+        render();
+      }
+    }
+  }
+  function invoiceFile(a: Invoice, cls = "orders-pill"): HTMLAnchorElement {
+    const link = element("a", "查看发票", cls);
+    link.href = `/api/h5/me/invoices/${encodeURIComponent(a.id)}/file?disposition=inline`;
+    return link;
+  }
+  function renderHistory(): void {
+    if (status) root.append(feedback(status));
+    const list = element("section", "", "orders-list");
+    list.setAttribute("aria-label", "开票记录");
+    for (const a of history) {
+      const card = element("article", "", "orders-card");
+      const heading = element("div", "", "orders-card-heading");
+      heading.append(
+        element("h2", a.product_names.join("、") || "商品名称未记录"),
+        element("span", invoiceStates[a.state] || "状态待确认", "orders-state"),
+      );
+      const facts = element("div", "", "orders-facts");
+      facts.append(
+        element("p", `订单号：${a.order_no}`),
+        element(
+          "p",
+          `申请时间：${new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", dateStyle: "medium", timeStyle: "short" }).format(new Date(a.created_at))}`,
+        ),
+        element("p", cardStates[a.card_state] || "卡包状态确认中"),
+      );
+      const bottom = element("div", "", "orders-card-bottom");
+      bottom.append(element("strong", amount(a.amount_minor), "orders-amount"));
+      if (a.state === "issued") bottom.append(invoiceFile(a));
+      else
+        bottom.append(
+          button(
+            a.state === "awaiting_title" ? "继续填写" : "查看进度",
+            () => void openInvoice(a.id),
+            "orders-pill",
+          ),
+        );
+      card.append(heading, facts, bottom);
+      list.append(card);
+    }
+    root.append(list);
+    if (!busy && !status && !history.length)
+      root.append(element("p", "暂无开票记录", "orders-empty"));
+    const refresh = button(
+      busy ? "正在读取…" : "刷新记录",
+      () => void loadHistory(),
+      "orders-load-more",
+    );
+    refresh.disabled = busy;
+    root.append(refresh);
+    if (historyCursor) {
+      const more = button(
+        "加载更多",
+        () => void loadHistory(true),
+        "orders-load-more",
+      );
+      more.disabled = busy;
+      root.append(more);
+    }
+    if (!busy && !historyCursor && history.length)
+      root.append(element("p", "已展示全部开票记录", "orders-end"));
+  }
+  function scheduleRefresh(a: Invoice): void {
+    clearTimeout(refreshTimer);
+    if (
+      ["queued", "issuing", "reversing"].includes(a.state) ||
+      (a.state === "issued" && a.card_state !== "INSERTED")
+    ) {
+      refreshTimer = setTimeout(() => {
+        if (
+          !disposed &&
+          ["detail", "result"].includes(mode) &&
+          detail?.id === a.id
+        )
+          void openInvoice(a.id, mode === "result");
+      }, 10000);
+    }
+  }
+  function renderResult(): void {
+    if (!detail) return;
+    const a = detail;
+    const screen = element("section", "", "orders-result");
+    screen.append(
+      element(
+        "p",
+        a.state === "issued"
+          ? "已开票"
+          : ["queued", "issuing"].includes(a.state)
+            ? "申请已提交，正在开票"
+            : invoiceStates[a.state] || "正在确认结果",
+        "orders-result-title",
+      ),
+      element("strong", amount(a.amount_minor), "orders-detail-amount"),
+      element("p", cardStates[a.card_state] || "卡包状态确认中", "orders-note"),
+    );
+    if (["queued", "issuing"].includes(a.state))
+      screen.append(
+        element(
+          "p",
+          "开具完成后将交付微信卡包，可在开票记录中查看进度和发票。",
+          "orders-note",
+        ),
+      );
+    if (status) screen.append(feedback(status));
+    screen.append(
+      button(
+        "查看发票",
+        () => {
+          mode = "history";
+          void loadHistory();
+        },
+        "orders-primary",
+      ),
+      button(
+        "继续开票",
+        () => {
+          clearTimeout(refreshTimer);
+          mode = "invoices";
+          active = "paid";
+          detail = null;
+          void load();
+        },
+        "orders-secondary",
+      ),
+    );
+    root.append(screen);
+    scheduleRefresh(a);
+  }
+  async function openInvoice(id: string, resultMode = false): Promise<void> {
+    if (busy) return;
+    clearTimeout(refreshTimer);
+    const version = ++generation;
     busy = true;
     status = "";
     try {
-      detail = await api<Invoice>(
+      const a = await api<Invoice>(
         "/api/h5/me/invoices/" + encodeURIComponent(id),
       );
-      mode = "detail";
+      if (disposed || version !== generation) return;
+      detail = a;
+      if (detail.state === "awaiting_title") {
+        busy = false;
+        create({ id: detail.order_id, amount_minor: detail.amount_minor });
+        return;
+      }
+      mode = resultMode ? "result" : "detail";
     } catch (e) {
-      if (e instanceof Error && e.message === "session_required") return;
+      if (
+        disposed ||
+        version !== generation ||
+        (e instanceof Error && e.message === "session_required")
+      )
+        return;
       status = errorMessage(e);
     } finally {
-      busy = false;
-      if (!disposed) render();
+      if (!disposed && version === generation) {
+        busy = false;
+        render();
+      }
     }
   }
   function renderDetail(): void {
@@ -648,46 +1048,31 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
       );
     root.append(card);
     if (status) root.append(feedback(status));
-    if (a.state === "awaiting_title") {
+    if (a.state === "awaiting_title")
+      root.append(
+        button(
+          "填写发票抬头",
+          () => create({ id: a.order_id, amount_minor: a.amount_minor }),
+          "orders-primary",
+        ),
+      );
+    if (a.state === "issued") root.append(invoiceFile(a, "orders-primary"));
+    if (a.state === "failed")
       root.append(
         element(
           "p",
-          "请在微信官方页面填写个人或单位抬头。提交后自动开票，结果会显示在这里。",
+          "开票未完成，可重新核对原申请。无法恢复时请联系商家。",
           "orders-note",
         ),
       );
-      if (a.launch) void showLaunch(a);
-      else
-        root.append(
-          button(
-            busy ? "正在获取…" : "填写发票抬头",
-            () => void resume(),
-            "orders-primary",
-          ),
-        );
-    }
-    if (a.state === "issued") {
-      const file = element(
-        "a",
-        a.state === "issued" ? "下载发票" : "下载票据",
-        "orders-primary",
-      );
-      file.href = "/api/h5/me/invoices/" + encodeURIComponent(a.id) + "/file";
-      root.append(file);
-    }
     root.append(
       button(
         busy ? "确认中…" : a.state === "failed" ? "重试开票" : "刷新状态",
-        () => void resume(),
+        () => (a.state === "failed" ? void resume() : void openInvoice(a.id)),
         "orders-secondary",
       ),
     );
-    if (["queued", "issuing", "reversing"].includes(a.state)) {
-      refreshTimer = setTimeout(() => {
-        if (!disposed && mode === "detail" && detail?.id === a.id)
-          void openInvoice(a.id);
-      }, 10000);
-    }
+    scheduleRefresh(a);
   }
   async function resume(): Promise<void> {
     if (!detail || busy) return;
@@ -704,91 +1089,6 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
     } finally {
       busy = false;
       if (!disposed) render();
-    }
-  }
-  let sdkReady: Promise<void> | undefined;
-  async function prepareSDK(): Promise<void> {
-    if (sdkReady) return sdkReady;
-    sdkReady = (async () => {
-      if (!window.wx)
-        await new Promise<void>((resolve, reject) => {
-          const script = element("script");
-          script.src = "https://res.wx.qq.com/open/js/jweixin-1.6.0.js";
-          script.onload = () => resolve();
-          script.onerror = () => reject(Error("sdk_unavailable"));
-          document.head.append(script);
-        });
-      const config = await api<Record<string, unknown>>(
-        "/api/h5/me/invoice-jssdk?url=" +
-          encodeURIComponent(location.href.split("#")[0]),
-      );
-      await new Promise<void>((resolve, reject) => {
-        if (!window.wx) {
-          reject(Error("sdk_unavailable"));
-          return;
-        }
-        const timer = setTimeout(() => reject(Error("sdk_unavailable")), 10000);
-        window.wx.ready(() => {
-          clearTimeout(timer);
-          resolve();
-        });
-        window.wx.error(() => {
-          clearTimeout(timer);
-          reject(Error("sdk_unavailable"));
-        });
-        window.wx.config({
-          ...config,
-          jsApiList: [],
-          openTagList: ["wx-open-launch-weapp"],
-        });
-      });
-    })();
-    try {
-      await sdkReady;
-    } catch (e) {
-      sdkReady = undefined;
-      throw e;
-    }
-  }
-  async function showLaunch(a: Invoice): Promise<void> {
-    if (!a.launch) return;
-    const area = element("div", "", "orders-launch");
-    area.append(
-      feedback(
-        inWechat ? "正在准备微信官方入口…" : "请在微信中打开此页面填写抬头。",
-      ),
-    );
-    root.append(area);
-    if (!inWechat) return;
-    try {
-      await prepareSDK();
-      if (
-        disposed ||
-        mode !== "detail" ||
-        detail?.id !== a.id ||
-        !area.isConnected
-      )
-        return;
-      area.replaceChildren();
-      const launcher = document.createElement("wx-open-launch-weapp");
-      launcher.setAttribute("username", a.launch.miniprogram_user_name);
-      launcher.setAttribute("path", a.launch.miniprogram_path);
-      const script = document.createElement("script");
-      script.type = "text/wxtag-template";
-      script.innerHTML =
-        '<button style="width:100%;padding:16px;background:#3370ff;color:white;border:0;border-radius:12px;font-size:16px">填写发票抬头</button>';
-      launcher.append(script);
-      launcher.addEventListener("error", () => {
-        area.replaceChildren(feedback("官方入口暂不可用，请刷新后重试。"));
-      });
-      area.append(launcher);
-    } catch {
-      if (area.isConnected) {
-        area.replaceChildren(
-          feedback("微信官方入口暂不可用，请稍后重试。"),
-          button("重试获取入口", () => void resume(), "orders-secondary"),
-        );
-      }
     }
   }
   void load();

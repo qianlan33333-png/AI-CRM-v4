@@ -22,6 +22,8 @@ function fixture({
   enabled = true,
   expired = false,
   expireWrites = false,
+  uncertain = false,
+  legacy = false,
 } = {}) {
   const dom = new JSDOM('<main id="customer-orders-root"></main>', {
     url: "https://crm.test/my/orders",
@@ -30,6 +32,9 @@ function fixture({
   });
   const { window: w } = dom;
   const calls = [];
+  const applications = [];
+  w.TextEncoder = TextEncoder;
+  let uncertainOnce = uncertain;
   w.HTMLDialogElement.prototype.showModal = function () {
     this.open = true;
   };
@@ -48,7 +53,20 @@ function fixture({
     if (path.startsWith("/api/h5/me/orders")) {
       const url = new URL(path, w.location.origin);
       let rows = [
-        row(1, "共创营 <img src=x onerror=alert(1)>"),
+        {
+          ...row(1, "共创营 <img src=x onerror=alert(1)>"),
+          ...(legacy
+            ? {
+                invoice: {
+                  id: "inv_" + "b".repeat(28),
+                  order_id: 1,
+                  amount_minor: 1000,
+                  state: "awaiting_title",
+                  card_state: "pending",
+                },
+              }
+            : {}),
+        },
         row(2, "成长课"),
         { ...row(3, "历史课", false), currency: "USD" },
       ];
@@ -73,24 +91,49 @@ function fixture({
         }),
       };
     }
-    if (path === "/api/h5/me/invoices") {
+    if (path === "/api/h5/me/invoices" && options?.method === "POST") {
       const body = JSON.parse(options.body);
+      const invoice = {
+        id: "inv_" + (legacy ? "b" : "a").repeat(28),
+        order_id: body.order_id,
+        amount_minor: body.order_id * 1000,
+        state: "queued",
+        card_state: "pending",
+        refund_confirmed: false,
+      };
+      if (!applications.length)
+        applications.push({
+          ...invoice,
+          order_no: `ORDER-${body.order_id}`,
+          product_names: ["开票课程"],
+          created_at: "2026-10-08T00:00:00Z",
+        });
+      if (uncertainOnce) {
+        uncertainOnce = false;
+        throw Error("network response lost");
+      }
+      return { ok: true, status: 200, json: async () => applications[0] };
+    }
+    if (path.startsWith("/api/h5/me/invoices?")) {
       return {
         ok: true,
         status: 200,
-        json: async () => ({
-          id: "inv_" + "a".repeat(28),
-          order_id: body.order_id,
-          amount_minor: body.order_id * 1000,
-          state: "awaiting_title",
-          card_state: "pending",
-          refund_confirmed: false,
-          launch: {
-            miniprogram_appid: "official",
-            miniprogram_path: "pages/title",
-            miniprogram_user_name: "gh_official",
+        json: async () => ({ items: applications, next_cursor: "" }),
+      };
+    }
+    if (path.startsWith("/api/h5/me/invoices/inv_")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () =>
+          applications[0] || {
+            id: "inv_" + "b".repeat(28),
+            order_id: 1,
+            amount_minor: 1000,
+            state: "awaiting_title",
+            card_state: "pending",
+            refund_confirmed: false,
           },
-        }),
       };
     }
     throw Error(`unexpected fetch ${path}`);
@@ -101,6 +144,7 @@ function fixture({
     w,
     calls,
     root: w.document.querySelector("main"),
+    applications,
     click: (text, parent = w.document) => {
       const b = [...parent.querySelectorAll("button")].find(
         (b) => b.textContent === text,
@@ -110,6 +154,17 @@ function fixture({
     },
   };
 }
+function fillTitle(f, name = "测试单位", tax = "TEST-TAX") {
+  for (const [field, value] of [
+    ["name", name],
+    ["taxpayer_id", tax],
+  ]) {
+    const input = f.root.querySelector(`[name="${field}"]`);
+    input.value = value;
+    input.dispatchEvent(new f.w.Event("input"));
+  }
+}
+
 {
   const f = fixture();
   await flush();
@@ -159,13 +214,51 @@ function fixture({
   assert.match(f.root.querySelector("footer").textContent, /¥20.00/);
   f.click("去开票");
   await flush();
+  assert.match(f.root.textContent, /填写信息/);
+  assert.equal(
+    f.calls.some((c) => c.path === "/api/h5/me/invoices"),
+    false,
+    "no draft/effect before confirmation",
+  );
+  fillTitle(f);
+  f.click("提交");
+  const confirm = f.w.document.querySelector("dialog");
+  assert.match(confirm.textContent, /发票信息确认/);
+  assert.match(confirm.textContent, /¥20.00/);
+  assert.match(confirm.textContent, /微信卡包/);
+  assert.equal(
+    f.calls.some((c) => c.options?.method === "POST"),
+    false,
+  );
+  f.click("返回修改", confirm);
+  assert.equal(f.root.querySelector('[name="name"]').value, "测试单位");
+  f.click("提交");
+  f.click("确认提交", f.w.document.querySelector("dialog"));
+  await flush();
   const posted = f.calls.find((c) => c.path === "/api/h5/me/invoices");
   const body = JSON.parse(posted.options.body);
   assert.equal(body.order_id, 2);
-  assert.equal(Object.hasOwn(body, "amount_minor"), false);
+  assert.equal(body.expected_amount_minor, 2000);
+  assert.deepEqual(body.buyer, {
+    type: "ORGANIZATION",
+    name: "测试单位",
+    taxpayer_id: "TEST-TAX",
+  });
   assert.equal(Object.hasOwn(body, "customer_id"), false);
-  assert.match(f.root.textContent, /待填抬头/);
-  assert.match(f.root.textContent, /请在微信中打开此页面填写抬头/);
+  assert.match(f.root.textContent, /申请已提交，正在开票/);
+  assert.doesNotMatch(f.root.textContent, /24小时|邮箱|XML|OFD|出行人/);
+  f.click("查看发票");
+  await flush();
+  assert.match(f.root.textContent, /开票记录/);
+  assert.match(f.root.textContent, /开票中/);
+  assert.equal(f.root.querySelector('a[href*="/file"]'), null);
+  f.applications[0].state = "issued";
+  f.applications[0].card_state = "INSERTED";
+  f.click("刷新记录");
+  await flush();
+  assert.match(f.root.textContent, /已开票/);
+  assert.match(f.root.textContent, /已送达微信卡包/);
+  assert.match(f.root.querySelector("a").href, /file\?disposition=inline$/);
   f.dom.window.close();
 }
 {
@@ -197,6 +290,9 @@ function fixture({
   r.checked = true;
   r.dispatchEvent(new f.w.Event("change"));
   f.click("去开票");
+  fillTitle(f);
+  f.click("提交");
+  f.click("确认提交", f.w.document.querySelector("dialog"));
   await flush();
   assert.match(
     f.root.textContent,
@@ -207,4 +303,53 @@ function fixture({
 }
 console.log(
   "customerOrders journeys passed: combined filters, single selection, server amount, safe text, expired session, disabled provider",
+);
+
+{
+  const f = fixture({ legacy: true });
+  await flush();
+  f.click("待填抬头");
+  await flush();
+  assert.match(f.root.textContent, /填写信息/);
+  assert.equal(f.root.querySelector('[name="title_type"]'), null);
+  assert.doesNotMatch(f.root.textContent, /个人|抬头类型/);
+  fillTitle(f);
+  f.click("提交");
+  f.click("确认提交", f.w.document.querySelector("dialog"));
+  await flush();
+  assert.equal(f.applications[0].id, "inv_" + "b".repeat(28));
+  assert.equal(
+    f.calls.some((c) => c.path.includes("jssdk") || c.path.includes("resume")),
+    false,
+    "self form needs no official launch",
+  );
+  f.click("继续开票");
+  await flush();
+  assert.match(f.root.textContent, /请选择一笔订单/);
+  f.dom.window.close();
+}
+{
+  const f = fixture({ uncertain: true });
+  await flush();
+  f.click("开发票", f.root.querySelector("article"));
+  fillTitle(f);
+  f.click("提交");
+  f.click("确认提交", f.w.document.querySelector("dialog"));
+  await flush();
+  assert.match(f.root.textContent, /核对并继续提交/);
+  assert.equal(f.root.querySelector('[name="name"]').disabled, true);
+  f.click("核对并继续提交");
+  await flush();
+  const posts = f.calls.filter((c) => c.options?.method === "POST");
+  assert.equal(posts.length, 2);
+  assert.equal(
+    posts[0].options.body,
+    posts[1].options.body,
+    "ambiguous response replays exact confirmed intent",
+  );
+  assert.match(f.root.textContent, /申请已提交/);
+  f.dom.window.close();
+}
+console.log(
+  "self-title flows passed: confirmation before write, company-only, legacy resume, exact ambiguous replay, invoice history, PDF preview, read-only refresh",
 );
