@@ -102,17 +102,16 @@ func TestInvoiceOfficialSDKRequestsFreezeAndQueryBinding(t *testing.T) {
 			return `{}`
 		case strings.HasSuffix(r.URL.Path, "reverse"):
 			var b struct {
-				ApplyID  string              `json:"fapiao_apply_id"`
 				Reason   string              `json:"reverse_reason"`
 				Invoices []map[string]string `json:"fapiao_information"`
 			}
 			json.NewDecoder(r.Body).Decode(&b)
-			if b.ApplyID != "transaction-1" || b.Reason != "SALES_RETURN" || len(b.Invoices) != 1 || b.Invoices[0]["fapiao_number"] != "BLUE1" {
+			if !strings.HasSuffix(r.URL.Path, "/fapiao-applications/transaction-1/reverse") || b.Reason != "SALES_RETURN" || len(b.Invoices) != 1 || b.Invoices[0]["fapiao_number"] != "BLUE1" {
 				t.Fatal("reversal shape")
 			}
 			return `{}`
 		default:
-			if r.URL.Query().Get("fapiao_apply_id") != "transaction-1" {
+			if !strings.HasSuffix(r.URL.Path, "/fapiao-applications/transaction-1") {
 				t.Fatal("query did not retain original transaction")
 			}
 			return `{"fapiao_information":[{"fapiao_id":"foreign","status":"ISSUED"}]}`
@@ -189,7 +188,7 @@ func TestInvoiceOfficialCallbackSignatureDecryptAndReplayDigest(t *testing.T) {
 func TestInvoiceFileUnsignedDigestAndRedirectBoundary(t *testing.T) {
 	badURL := false
 	w, _, a := invoiceProviderFixture(t, func(r *http.Request) string {
-		if r.URL.Query().Get("fapiao_apply_id") != "transaction-1" {
+		if !strings.Contains(r.URL.Path, "/fapiao-applications/transaction-1") {
 			t.Fatal("file lookup did not retain original transaction")
 		}
 		if strings.HasSuffix(r.URL.Path, "fapiao-files") {
