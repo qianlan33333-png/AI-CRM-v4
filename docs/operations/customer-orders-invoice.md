@@ -114,3 +114,11 @@ DATABASE_URL='postgresql://<本机用户>@localhost:5432/aicrm_test_invoice?sslm
 回调及提交会唤醒原查询任务；发出票据意图后也立即唤醒，避免已有退避时间遮挡终态。旧唯一测试申请不做兼容或自动重开，税码问题保持待办。启用账单展示不代表出票或卡包成功。
 
 安装收据 `invoice-callback-bootstrap-installed` 同时运行 CallbackBootstrapInstalled 和 BillEntryInstalled，后者通过准确安装 binary、隔离 PG 与合成 RSA/AES 回调创建交易单号申请，验证重复通知仅一份回执 / 任务及本人详情读取；API 角色不执行 Provider 写。
+
+安装测试的账单夹具必须满足正式 Config.Load 对 Invoice / Effects / WeChatPay / H5 OAuth 的开启与合成凭据合同，不关闭或绕过校验。夹具仍只启动 API 角色，无 effects/query worker，远程 HTTP 由失效 loopback proxy 阻断；支付平台证书、签名及 OAuth secret 全为隔离生成。已通过 bootstrap 的输入不变；工作台在原安装参数与严格 isolated PG 保护下，直接用具名 Go 命令在同一已安装包只重跑 BillEntryInstalled，原 runner 保持两例。此修复只改 Go 测试/说明/清单，应用二进制不重建。
+
+合成启动检查 `TestInvoiceInstalledFixtureConfigContract` 使用与安装测试相同的环境构造器，直接执行正式 Config.Load，覆盖 bootstrap / bill 正常装载及把未生效变量当开关时的拒绝。Effects 开关的正式入口是 `AICRM_OUTBOUND_PROVIDER_ENABLED`；仅 bill 设 true，WeCom 仍关闭、只运行 API。
+
+`TestInvoicePostgreSQLInstalledFixtureStartup` 在隔离 PG 中以同一环境执行正式 Config.Load → compose → bootstrap → readiness → 本人已挂载开票记录读取，先检查完整启动链。合成 H5 AppID 与 Survey/OA AppID 一致，开放平台 scope 有明确合成值；不启用 Survey OAuth Provider，不放松正式检查。该结果仍是源码初始化证据，准确安装包 BillEntryInstalled 需工作台另行执行。目录准备抽为测试 helper，bootstrap 环境值及业务断言保持不变。
+
+同一源码完整启动用例进一步复用安装回调断言，验证合成签名的未知本商户交易、其他商户、原生申请创建/通知重放及本人详情。未知本商户交易沿用 HTTP Handler 已有 `ErrPending → 409 pending` 合同（非成功，Provider 可重试），安装夹具的 503 预期纠正为 409；不修改应用应答映射或通知业务逻辑。

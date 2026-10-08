@@ -1,106 +1,20 @@
 {
   "schema": 1,
-  "baseline_sha": "2f366bd2318135a620126b7c9d2ad07eaac3e838",
+  "baseline_sha": "4c39050574a4f0aeaa72b89419e06eb96b04f553",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/invoice"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/invoice/provider"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/invoice-setup"
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceInstalledFixtureConfigContract"
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLBillEntryUnifiedAndAtomic",
+      "test": "TestInvoicePostgreSQLInstalledFixtureStartup",
       "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLBillEntryAuthorityAndRecovery",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLBillAndManualConcurrentFirstTitle",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLSelfTitleAtomicAndReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLOfficialTitleRaceAndHistory",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLAtomicReplayAndUnknownRecovery",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLRefundRacesAndBoundedRetries",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLOwnershipFiltersAndSession",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLCallbackAcknowledgementAndReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLCallbackBootstrapCannotQueueBusiness",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoiceCompositionUsesSeparateServicePublicKey"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoiceFinanceMappingRequiresExplicitTaxFacts"
-    },
-    {
-      "lane": "frontend",
-      "path": "scripts/prepare-donor-source-views.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "scripts/validate-openapi.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/customerOrders.test.mjs"
     }
   ],
   "installed_checks": [
     "invoice-callback-bootstrap-installed"
-  ],
-  "build_commands": [
-    "./cmd/invoice-setup"
   ]
 }
