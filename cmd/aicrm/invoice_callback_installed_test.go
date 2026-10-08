@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
@@ -22,6 +23,10 @@ import (
 	"testing"
 	"time"
 
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
+	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
+	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
+	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 )
 
@@ -34,6 +39,45 @@ func TestInvoicePostgreSQLCallbackBootstrapInstalled(t *testing.T) {
 	}
 	validateOrdersOAuthInstalledProduct(t, installed)
 	f := newInvoiceFixture(t)
+	missingDirectory := func() int {
+		var count int
+		if e := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM customers customer
+			LEFT JOIN customer_directory_projection directory ON directory.customer_id=customer.id
+			WHERE customer.status='active' AND directory.customer_id IS NULL`).Scan(&count); e != nil {
+			t.Fatal("count callback fixture minimum directory gaps", e)
+		}
+		return count
+	}
+	if count := missingDirectory(); count != 2 {
+		t.Fatalf("callback fixture minimum directory precondition: missing=%d want=2", count)
+	}
+	// The source-owner invoice fixture intentionally seeds only core customers.
+	// A real API also requires each active customer's minimum directory record.
+	// Prepare those presentation-only records through the Customer owner before
+	// launching installed bytes; keep the installed readiness gate intact.
+	var directory customerport.ProjectionWriter = customerstore.NewPostgreSQL()
+	if e := f.s.UoW.Within(f.ctx, func(tx context.Context) error {
+		now := time.Now().UTC()
+		for _, id := range []int64{f.customer, f.other} {
+			if e := directory.UpsertDirectoryProjection(tx, customerport.DirectoryProjection{
+				CustomerID: customerdomain.CustomerID(id), CustomerStatus: customerdomain.StatusActive,
+				DisplayName: "隔离回调测试用户", OneIDLabel: fmt.Sprintf("CID-%d", id), ActivationState: "active",
+				Source: "invoice.callback.installed.fixture", SourceVersion: 1, LastSyncedAt: now, UpdatedAt: now,
+			}); e != nil {
+				return e
+			}
+		}
+		return nil
+	}); e != nil {
+		t.Fatal("prepare callback fixture minimum customer directory", e)
+	}
+	if count := missingDirectory(); count != 0 {
+		t.Fatalf("callback fixture minimum directory incomplete: missing=%d want=0", count)
+	}
+	t.Log("callback fixture minimum directory: missing_before=2 missing_after=0")
+	if e := checkCurrentReleaseSchema(f.ctx, f.pool, platformconfig.Runtime{}); e != nil {
+		t.Fatal("callback fixture does not satisfy installed schema readiness", e)
+	}
 	id := f.order(f.customer, f.customer, "paid", "fixture invoice", "wechat_pay", time.Now())
 	r := f.create(id, "callback-installed-0001")
 	a := f.read(r.ID)

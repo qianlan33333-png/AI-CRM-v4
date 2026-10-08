@@ -26,6 +26,8 @@ flowchart TD
 
 实际安装合同由 `scripts/run-installed-invoice-callback.sh` 运行 `TestInvoicePostgreSQLCallbackBootstrapInstalled`，参数绑定已安装 binary/root/head/hash。只启动隔离库上的该 binary API 角色，用临时合成 RSA/APIv3 密钥进行签名通知，断言伪签/SIGTEST/错误服务商/空子商户拒绝、可信未知申请无状态 200、已知他商户 409 和关闭时已知本人 503；独立读回申请不变且没有新增回执、查询任务或外部效果。该用例缺安装参数或显式隔离 PG 直接失败，无源码 Host 回退。财务、凭据、域名和真实 Provider 均不会被此 fixture 改动。
 
+安装 fixture 就绪修复：原 Invoice 领域 fixture 只插入两位核心客户，真实 API 的既有 readiness 要求 active Customer 有最小 directory projection，因此安装用例在 503 处停止，尚未执行回调断言。仅安装 fixture 通过现有 Customer ProjectionWriter 和 UoW 补两位隔离客户的展示投影，并先核验原 schema readiness；保留实际安装程序的 ready 检查。分类为测试中读取已有 CustomerID、Customer Owner 的隔离持久化，无身份解析/新建/合并，无 Provider 效果、应用/UI/运行配置改动。相关验证只重跑该实际安装用例，已有发票单元/PG 和构件不重建。
+
 ```mermaid
 flowchart TD
  A[官方订单 URL] --> B{可信会话有效}

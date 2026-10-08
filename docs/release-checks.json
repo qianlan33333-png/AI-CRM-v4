@@ -1,10 +1,16 @@
 {
   "schema": 1,
-  "baseline_sha": "f373a8ac6baf1aace5b5f1882dd182268ee9a19a",
+  "baseline_sha": "0f678882ab3f88ed944f1b2b0fe24cd09d928a5e",
   "checks": [
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceCompositionUsesSeparateServicePublicKey"
+    },
     {
       "lane": "frontend",
       "path": "cmd/aicrm/external_order_history_chromium_journey.test.mjs"
     }
-  ]
+  ],
+  "installed_checks": ["external-order-history", "invoice-callback-bootstrap-installed"]
 }
