@@ -169,6 +169,15 @@ func (s *memoryStore) List(_ context.Context, before *Cursor, limit int32, filte
 		if filter.CustomerID > 0 && (snapshot.PayerCustomerID == nil || *snapshot.PayerCustomerID != filter.CustomerID) && (snapshot.BeneficiaryCustomerID == nil || *snapshot.BeneficiaryCustomerID != filter.CustomerID) {
 			continue
 		}
+		if filter.CustomerIDs != nil {
+			matched := false
+			for _, customerID := range filter.CustomerIDs {
+				matched = matched || snapshot.PayerCustomerID != nil && *snapshot.PayerCustomerID == customerID || snapshot.BeneficiaryCustomerID != nil && *snapshot.BeneficiaryCustomerID == customerID
+			}
+			if !matched {
+				continue
+			}
+		}
 		if filter.CreatedThrough != nil && snapshot.CreatedAt.After(*filter.CreatedThrough) {
 			continue
 		}

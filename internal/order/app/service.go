@@ -60,11 +60,14 @@ type Cursor struct {
 }
 
 type ListFilter struct {
-	Offset          int32
-	Provider        domain.Provider
-	Status          domain.Status
-	OrderRef        string
-	CustomerID      int64
+	Offset     int32
+	Provider   domain.Provider
+	Status     domain.Status
+	OrderRef   string
+	CustomerID int64
+	// CustomerIDs is an app-owned OneID lineage filter, never populated from
+	// public query parameters. A non-nil empty slice matches no orders.
+	CustomerIDs     []int64
 	Product         string
 	CreatedFrom     *time.Time
 	CreatedTo       *time.Time
@@ -132,6 +135,7 @@ type Service struct {
 	productSaleAttribution     orderport.ProductSaleCheckoutCoordinator
 	historicalEvidenceVerifier historicalQualificationEvidenceVerifier
 	exportFacts                orderport.ExportFactsReader
+	customerLineage            identityport.LockedCanonicalLineageReader
 	now                        func() time.Time
 }
 
@@ -203,6 +207,40 @@ func (s *Service) SetProductSaleCheckoutCoordinator(coordinator orderport.Produc
 
 func NewService(uow platformport.UnitOfWork, store Store) *Service {
 	return &Service{uow: uow, store: store, now: time.Now}
+}
+
+// SetLockedCanonicalLineageReader binds OneID's transaction-scoped read Port.
+// Production injects it at the composition root; isolated services retain
+// their existing single-customer read contract when it is not configured.
+func (s *Service) SetLockedCanonicalLineageReader(reader identityport.LockedCanonicalLineageReader) error {
+	if s == nil || reader == nil {
+		return orderport.ErrConflict
+	}
+	s.customerLineage = reader
+	return nil
+}
+
+func (s *Service) customerLineageWithin(ctx context.Context, customerID int64) ([]int64, error) {
+	if s.customerLineage == nil {
+		return []int64{customerID}, nil
+	}
+	lineage, err := s.customerLineage.LockedCanonicalLineage(ctx, customerdomain.CustomerID(customerID))
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(lineage))
+	found := false
+	for _, id := range lineage {
+		if id < 1 {
+			return nil, orderport.ErrUnavailable
+		}
+		ids = append(ids, int64(id))
+		found = found || int64(id) == customerID
+	}
+	if !found {
+		return nil, orderport.ErrUnavailable
+	}
+	return ids, nil
 }
 
 func (s *Service) SetContactCipher(cipher interface {
@@ -750,11 +788,16 @@ func (s *Service) CustomerActivities(ctx context.Context, query orderport.Custom
 		beforeAt, beforeID = query.Watermark.UTC(), math.MaxInt64
 	}
 	rows := []domain.Order{}
+	var customerIDs []int64
 	through := query.Watermark.UTC()
 	err := s.uow.Within(ctx, func(tx context.Context) error {
-		var listErr error
-		rows, listErr = s.store.List(tx, &Cursor{CreatedAt: beforeAt.UTC(), ID: beforeID}, query.Limit, ListFilter{CustomerID: query.CustomerID, CreatedThrough: &through})
-		return listErr
+		var err error
+		customerIDs, err = s.customerLineageWithin(tx, query.CustomerID)
+		if err != nil {
+			return err
+		}
+		rows, err = s.store.List(tx, &Cursor{CreatedAt: beforeAt.UTC(), ID: beforeID}, query.Limit, ListFilter{CustomerIDs: customerIDs, CreatedThrough: &through})
+		return err
 	})
 	if err != nil {
 		return orderport.CustomerActivityPage{}, classify(err)
@@ -762,7 +805,7 @@ func (s *Service) CustomerActivities(ctx context.Context, query orderport.Custom
 	page := orderport.CustomerActivityPage{Items: make([]orderport.CustomerActivity, 0, len(rows))}
 	for _, row := range rows {
 		snapshot := row.Snapshot()
-		relationship := customerOrderRelationship(snapshot, query.CustomerID)
+		relationship := customerOrderRelationship(snapshot, customerIDs)
 		if relationship == "" { // Store predicates must remain defense in depth.
 			return orderport.CustomerActivityPage{}, orderport.ErrUnavailable
 		}
@@ -777,9 +820,12 @@ func (s *Service) CustomerActivities(ctx context.Context, query orderport.Custom
 	return page, nil
 }
 
-func customerOrderRelationship(snapshot domain.Snapshot, customerID int64) string {
-	payer := snapshot.PayerCustomerID != nil && *snapshot.PayerCustomerID == customerID
-	beneficiary := snapshot.BeneficiaryCustomerID != nil && *snapshot.BeneficiaryCustomerID == customerID
+func customerOrderRelationship(snapshot domain.Snapshot, customerIDs []int64) string {
+	payer, beneficiary := false, false
+	for _, id := range customerIDs {
+		payer = payer || (snapshot.PayerCustomerID != nil && *snapshot.PayerCustomerID == id)
+		beneficiary = beneficiary || (snapshot.BeneficiaryCustomerID != nil && *snapshot.BeneficiaryCustomerID == id)
+	}
 	switch {
 	case payer && beneficiary:
 		return "payer_and_beneficiary"
@@ -800,21 +846,29 @@ func (s *Service) CustomerOrderSummary(ctx context.Context, customerID int64, re
 	}
 	var out orderport.CustomerOrderSummary
 	err := s.uow.Within(ctx, func(tx context.Context) error {
-		base := ListFilter{CustomerID: customerID}
-		var err error
+		customerIDs, err := s.customerLineageWithin(tx, customerID)
+		if err != nil {
+			return err
+		}
+		base := ListFilter{CustomerIDs: customerIDs}
+		countStatus := func(status domain.Status) (int64, error) {
+			filter := base
+			filter.Status = status
+			return s.store.Count(tx, filter)
+		}
 		if out.Total, err = s.store.Count(tx, base); err != nil {
 			return err
 		}
-		if out.Paid, err = s.store.Count(tx, ListFilter{CustomerID: customerID, Status: domain.StatusPaid}); err != nil {
+		if out.Paid, err = countStatus(domain.StatusPaid); err != nil {
 			return err
 		}
-		if out.Failed, err = s.store.Count(tx, ListFilter{CustomerID: customerID, Status: domain.StatusPaymentFailed}); err != nil {
+		if out.Failed, err = countStatus(domain.StatusPaymentFailed); err != nil {
 			return err
 		}
-		if out.Refunded, err = s.store.Count(tx, ListFilter{CustomerID: customerID, Status: domain.StatusRefunded}); err != nil {
+		if out.Refunded, err = countStatus(domain.StatusRefunded); err != nil {
 			return err
 		}
-		partial, err := s.store.Count(tx, ListFilter{CustomerID: customerID, Status: domain.StatusPartiallyRefunded})
+		partial, err := countStatus(domain.StatusPartiallyRefunded)
 		if err != nil {
 			return err
 		}

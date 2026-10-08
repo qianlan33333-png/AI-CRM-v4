@@ -1,13 +1,19 @@
 {
   "schema": 1,
-  "baseline_sha": "e2a24c6dce7a1f14d3e0b49a0b6a61b4c08d4dca",
+  "baseline_sha": "5d247fef0eaf948390430f5c61ff2061949be820",
   "checks": [
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/orders_h5_oauth_postgres_integration_test.go",
-      "test": "TestPostgreSQLOrdersH5OAuthStartAndCompleteRoundTrip",
-      "postgres": true
-    }
+    {"lane": "backend", "path": "internal/order/app/customer_lineage_test.go", "test": "TestCustomerOrderLineageFailureNeverReadsUnscopedOrders"},
+    {"lane": "backend", "path": "internal/order/app/customer_lineage_test.go", "test": "TestCustomerActivitiesLineageKeepsPartyRolesAndRejectsUnrelatedRows"},
+    {"lane": "backend", "path": "internal/order/app/service_test.go", "test": "TestCustomerActivitiesUseCustomerScopedWatermarkedKeysetAndRelationship"},
+    {"lane": "backend", "path": "internal/order/store/postgres_integration_test.go", "test": "TestPostgreSQLCustomerActivitiesKeepPartyScopeAndKeyset", "postgres": true},
+    {"lane": "backend", "path": "internal/identity/query/postgres_integration_test.go", "test": "TestPostgreSQLOneIDQueries", "postgres": true},
+    {"lane": "backend", "path": "cmd/aicrm/customer_order_lineage_postgres_test.go", "test": "TestPostgreSQLCustomerOrdersRetainMergedHistoryAndRestoreAfterRevert", "postgres": true},
+    {"lane": "backend", "path": "cmd/aicrm/open_platform_v1_test.go", "test": "TestV1CustomerActivitiesMergeOwnerPagesAndBindCursor"},
+    {"lane": "backend", "path": "cmd/aicrm/open_platform_v1_test.go", "test": "TestV1CustomerActivitiesFailClosedAndUseOneHundredItemLookahead"},
+    {"lane": "backend", "path": "cmd/aicrm/open_platform_v1_test.go", "test": "TestV1CustomerScopeOwnerFailureIsUnavailableBeforeContextOrActivities"},
+    {"lane": "backend", "path": "internal/customer/http/handler_test.go", "test": "TestCustomer360ContainsOnlyApprovedLocalSections"},
+    {"lane": "backend", "path": "internal/customer/http/handler_test.go", "test": "TestCustomer360RiskDegradesWhenRequiredSectionsAreUnavailable"},
+    {"lane": "backend", "path": "internal/customer/http/handler_test.go", "test": "TestCustomerDetailReturnsOnlySafeIdentityAndPhoneSummaries"}
   ],
   "installed_checks": [],
   "build_commands": []

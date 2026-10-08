@@ -1368,6 +1368,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	segmentBindings.Handler.BindAudienceProductReferences(audienceProductReferenceAdapter{products: productCatalog, historical: orderRepository, uow: uow})
 	legacyAudienceSource.Orders = orderRepository
 	orderService := orderapp.NewService(uow, orderRepository)
+	if err = orderService.SetLockedCanonicalLineageReader(queries); err != nil {
+		return fail(err)
+	}
 	if err = orderService.SetExportFactsReader(orderExportAdapter{roots: queries, numbers: queries, names: customerStore, phones: queries, distribution: distributionRepository, payments: paymentRepository}); err != nil {
 		return fail(err)
 	}

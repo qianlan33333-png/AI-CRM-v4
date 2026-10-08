@@ -342,7 +342,11 @@ func orderFilterSQL(filter orderapp.ListFilter) (string, []any) {
 		placeholder := "$" + strconv.Itoa(len(args))
 		conditions = append(conditions, `(merchant_order_no=`+placeholder+` OR provider_transaction_no=`+placeholder+` OR source_key=`+placeholder+`)`)
 	}
-	if filter.CustomerID > 0 {
+	if filter.CustomerIDs != nil {
+		args = append(args, filter.CustomerIDs)
+		placeholder := "$" + strconv.Itoa(len(args))
+		conditions = append(conditions, `(payer_customer_id=ANY(`+placeholder+`::bigint[]) OR beneficiary_customer_id=ANY(`+placeholder+`::bigint[]))`)
+	} else if filter.CustomerID > 0 {
 		args = append(args, filter.CustomerID)
 		placeholder := "$" + strconv.Itoa(len(args))
 		conditions = append(conditions, `(payer_customer_id=`+placeholder+` OR beneficiary_customer_id=`+placeholder+`)`)
