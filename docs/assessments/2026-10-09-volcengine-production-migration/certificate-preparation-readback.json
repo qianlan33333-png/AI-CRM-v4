@@ -1,0 +1,16 @@
+{
+  "observed_at_utc": "2026-10-09T02:36:03.954403+00:00",
+  "domain": "www.youcangogogo.com",
+  "caddy_tls_mode": "explicit_files",
+  "certificate_path": "/etc/caddy/tls-www-20260911/fullchain.pem",
+  "private_key_path": "/etc/caddy/tls-www-20260911/privkey.pem",
+  "both_files_exist": true,
+  "both_file_modes": "0640",
+  "expires_at_beijing": "2026-10-17T19:30:12+08:00",
+  "certbot_renewal_configs_found": 0,
+  "certificate_related_systemd_timers_found": 0,
+  "automatic_renewal_verified": false,
+  "cron_or_custom_issuer_fully_audited": false,
+  "source_configuration_or_service_changed": false,
+  "completion_boundary": "Existing valid certificate materials found; issuance and renewal preparation remains pending. No private key or certificate account credential included."
+}
