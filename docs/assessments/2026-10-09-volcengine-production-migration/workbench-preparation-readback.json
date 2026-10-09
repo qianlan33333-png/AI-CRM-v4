@@ -113,7 +113,238 @@
     "export_seconds": 4.75,
     "publisher_activation": false
   },
-  "restoration_and_authenticated_journeys_verified": false,
+  "restoration_and_authenticated_journeys_verified": true,
   "formal_cutover_performed": false,
-  "source_snapshot_is_continuously_synchronized": false
+  "source_snapshot_is_continuously_synchronized": false,
+  "snapshot_restore": {
+    "status": "restored_and_table_counts_matched",
+    "tables": 484,
+    "dump_sha256": "2494e3e9f5a957ffc0b2e79cf93032440ecc378f9bada910a2e5a8ec4c283710",
+    "restore_seconds": 94.7,
+    "target_database": "aicrm_migration_rehearsal_20261009",
+    "comparison_before_app_start": true,
+    "all_table_counts_matched_in_original_attempt": true,
+    "table_count_evidence": "original restore script passed all count assertions before constraints_md5 failed",
+    "constraint_count": 4047,
+    "constraint_exact_matches": 4024,
+    "constraint_text_differences": 23,
+    "constraint_differences_readonly_postgres_plans_equal": true,
+    "constraint_proof_sha256": "70d436fbaf447ac0dc69c8e428d2d1c22755fc48c6ee2a42c87063ac494972cd",
+    "database_reinstalled": false,
+    "sequence_states_matched": 325,
+    "schema_semantics_matched": true,
+    "columns_and_indexes_fingerprints_matched": true,
+    "locale_readback": {
+      "collate": "en_US.utf8",
+      "ctype": "en_US.utf8",
+      "collation_version": "2.28"
+    },
+    "verification_repair_seconds": 30.627,
+    "sslmode": "verify-full",
+    "application_started": false
+  },
+  "restoration_verified": true,
+  "authenticated_journeys_verified": true,
+  "collation_environment_difference": {
+    "source_version": "2.39",
+    "target_version": "2.28",
+    "target_indexes_built_and_fingerprints_matched": true,
+    "all_existing_snapshot_table_counts_matched": true,
+    "text_sort_order_equivalence_verified": false
+  },
+  "target_certificate_preparation": {
+    "status": "renewed_certificate_prepared_inactive",
+    "fullchain_sha256": "d90361d1f8e1e19b76b18634ed2e632ee73affe7b347802877d76accd69964cf",
+    "private_key_matches": true,
+    "trusted_www_sslserver_chain": true,
+    "expiry": "notAfter=Jan  7 02:28:58 2027 GMT",
+    "directory": "/opt/aicrm-migration-prepared-20261009/certificates/www-20261009",
+    "production_caddy_or_dns_changed": false
+  },
+  "services_preparation": {
+    "status": "services_prepared_not_started",
+    "api_unit": "aicrm-migration-rehearsal-api.service",
+    "excel_unit": "aicrm-migration-rehearsal-excel.service",
+    "api_port": 18081,
+    "excel_port": 18082,
+    "enabled": false,
+    "worker_or_timer_created": false,
+    "providers_disabled_env": 31,
+    "Config": {
+      "after_checksum": "7a60233bd4bc0b7f3b82f4ca65383e5f92c5566228fba392457b2c5df0a9044a",
+      "after_revision": 3,
+      "automation_mode": "disabled",
+      "before_revision": 2,
+      "disabled_boolean_switches": 17,
+      "identity_bindings_preserved": true,
+      "provider_called": false,
+      "status": "isolated_config_disabled"
+    },
+    "excel_dependencies_verified": true,
+    "excel_external_source_disabled": true,
+    "root": "/opt/aicrm-migration-prepared-20261009"
+  },
+  "localhost_https_preparation": {
+    "status": "localhost_https_prepared_not_started",
+    "caddy_version": "2.6.2",
+    "default_caddy_service": "masked_inactive",
+    "listen": "127.0.0.1:18443",
+    "production_dns_or_source_caddy_changed": false,
+    "certificate": "www-20261009",
+    "enabled": false
+  },
+  "isolated_runtime_readback": {
+    "status": "isolated_runtime_and_authenticated_reads_verified",
+    "release_sha": "4c39050574a4f0aeaa72b89419e06eb96b04f553",
+    "tls_certificate_trust_and_www_hostname": true,
+    "private_https_port": 18443,
+    "network": {
+      "rds_allowed": true,
+      "public_egress_denied": true,
+      "same_public_endpoint_reachable_outside_policy_before_and_after": true,
+      "reused_original_passed_probe": true
+    },
+    "anonymous_admin_orders": 401,
+    "authentication": {
+      "login_http_status": 200,
+      "normal_existing_password_login": true,
+      "password_reset_or_session_forgery": false,
+      "session_http_status": 200,
+      "roles": [
+        "admin"
+      ]
+    },
+    "authenticated_business_reads": [
+      {
+        "path": "/api/admin/customers?limit=1",
+        "status": 200,
+        "json_keys": [
+          "items",
+          "next_cursor",
+          "total",
+          "total_is_estimate",
+          "watermark"
+        ],
+        "response_nonempty": true
+      },
+      {
+        "path": "/api/admin/wechat-pay/products?limit=1",
+        "status": 200,
+        "json_keys": [
+          "items",
+          "next_cursor"
+        ],
+        "response_nonempty": true
+      },
+      {
+        "path": "/api/admin/service-period-products?limit=1",
+        "status": 200,
+        "json_keys": [
+          "items",
+          "limit",
+          "offset",
+          "ok",
+          "total"
+        ],
+        "response_nonempty": true
+      },
+      {
+        "path": "/api/admin/orders?limit=1",
+        "status": 200,
+        "json_keys": [
+          "has_more",
+          "items",
+          "limit",
+          "next_cursor",
+          "offset",
+          "orders",
+          "total"
+        ],
+        "response_nonempty": true
+      }
+    ],
+    "Config": {
+      "applications": [
+        {
+          "revision": 3,
+          "source": "published",
+          "role": "api",
+          "release_sha": "4c39050574a4f0aeaa72b89419e06eb96b04f553",
+          "snapshot_checksum": "f52ac4f2b439514cec6960f93f651e4d02bedcde65e4a66f7024c129159abaac",
+          "applied_at": "2026-10-09T03:53:28.147257Z"
+        }
+      ],
+      "automation_mode": "disabled",
+      "checksum": "7a60233bd4bc0b7f3b82f4ca65383e5f92c5566228fba392457b2c5df0a9044a",
+      "disabled_boolean_switches": 17,
+      "revision": 3,
+      "status": "independent_isolated_config_read"
+    },
+    "validation_service_retained": true,
+    "production_dns_or_workers_changed": false,
+    "pii_or_secrets_output": false
+  },
+  "rehearsal_stopped": {
+    "status": "rehearsal_verified_and_stopped",
+    "units": [
+      "aicrm-migration-rehearsal-api.service",
+      "aicrm-migration-rehearsal-excel.service",
+      "aicrm-migration-rehearsal-https.service"
+    ],
+    "worker_or_timer_activated": false,
+    "existing_validation_retained": true,
+    "target_existing_env_unchanged": true,
+    "production_cutover": false
+  },
+  "sdk_dependencies": {
+    "created_at_utc": "2026-10-09T03:59:41.550808+00:00",
+    "status": "sdk_dependencies_read_only_checked",
+    "sdk_library_count": 1,
+    "libraries": [
+      {
+        "library": "configuration/message-archive/libWeWorkFinanceSdk_C.so",
+        "bytes": 8907368,
+        "ldd_status": 0,
+        "missing_dependencies": [],
+        "aicrm_user_readable": true
+      }
+    ],
+    "all_discovered_dependencies_resolved": true,
+    "sdk_initialized": false,
+    "archive_provider_called": false,
+    "configuration_changed": false
+  },
+  "authenticated_journey_boundary": "Existing normal human admin login and four API JSON reads returned 200; anonymized response-envelope evidence retained. No real external Provider effects or all-module regression.",
+  "services_enabled_for_production": false,
+  "excel_synthetic_tests": {
+    "status": "installed_excel_synthetic_tests_passed",
+    "tests_run": 13,
+    "expected_tests": 13,
+    "skipped": 0,
+    "exit_code": 0,
+    "duration_seconds": 1.747,
+    "component_file_sha256": "050ee28cecfc1eafae792d355a195bd92259d564bdf79d034ea013412fb3d190",
+    "test_file_sha256": "3a4c60dfc35d7aa6c00106ef5d560f9b7d64ec396072caac31ff4670f2c706d9",
+    "test_source_commit": "4c39050574a4f0aeaa72b89419e06eb96b04f553",
+    "uses_exact_prepared_component_and_target_venv": true,
+    "fixture_data_and_temporary_sqlite_only": true,
+    "real_provider_or_mysql_called": false,
+    "existing_sqlite_or_crm_database_modified": false,
+    "production_or_rehearsal_units_started_or_stopped": false,
+    "scope": "Synthetic workbook/import, SQLite restart/idempotency/report, localhost HTTP authentication/refusal. Not real delivery/open evidence."
+  },
+  "source_current_health": {
+    "read_only": true,
+    "tls_trust_verified": true,
+    "www_hostname_verified": true,
+    "certificate_not_after": "Oct 17 11:30:12 2026 GMT",
+    "certificate_leaf_der_sha256": "40936ae4dd30b949f2cf333c6a7ebc2a913a4b50a80c5e015a020e4ddbb5b082",
+    "ready_http_status": 200,
+    "readiness": {
+      "release_sha": "b482603a1eb0a93a0c17a33470b9558953cc1b29",
+      "status": "ready"
+    },
+    "observed_at_utc": "2026-10-09T04:06:39.445133+00:00"
+  },
+  "source_latest_app_at_readback": "b482603a1eb0a93a0c17a33470b9558953cc1b29"
 }

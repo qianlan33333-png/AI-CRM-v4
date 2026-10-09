@@ -1,0 +1,13 @@
+{
+  "read_only": true,
+  "tls_trust_verified": true,
+  "www_hostname_verified": true,
+  "certificate_not_after": "Oct 17 11:30:12 2026 GMT",
+  "certificate_leaf_der_sha256": "40936ae4dd30b949f2cf333c6a7ebc2a913a4b50a80c5e015a020e4ddbb5b082",
+  "ready_http_status": 200,
+  "readiness": {
+    "release_sha": "b482603a1eb0a93a0c17a33470b9558953cc1b29",
+    "status": "ready"
+  },
+  "observed_at_utc": "2026-10-09T04:06:39.445133+00:00"
+}

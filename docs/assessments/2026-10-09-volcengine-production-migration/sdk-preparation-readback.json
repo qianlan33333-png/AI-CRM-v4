@@ -1,0 +1,18 @@
+{
+  "created_at_utc": "2026-10-09T03:59:41.550808+00:00",
+  "status": "sdk_dependencies_read_only_checked",
+  "sdk_library_count": 1,
+  "libraries": [
+    {
+      "library": "configuration/message-archive/libWeWorkFinanceSdk_C.so",
+      "bytes": 8907368,
+      "ldd_status": 0,
+      "missing_dependencies": [],
+      "aicrm_user_readable": true
+    }
+  ],
+  "all_discovered_dependencies_resolved": true,
+  "sdk_initialized": false,
+  "archive_provider_called": false,
+  "configuration_changed": false
+}

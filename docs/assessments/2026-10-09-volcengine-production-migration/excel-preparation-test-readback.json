@@ -1,0 +1,17 @@
+{
+  "status": "installed_excel_synthetic_tests_passed",
+  "tests_run": 13,
+  "expected_tests": 13,
+  "skipped": 0,
+  "exit_code": 0,
+  "duration_seconds": 1.747,
+  "component_file_sha256": "050ee28cecfc1eafae792d355a195bd92259d564bdf79d034ea013412fb3d190",
+  "test_file_sha256": "3a4c60dfc35d7aa6c00106ef5d560f9b7d64ec396072caac31ff4670f2c706d9",
+  "test_source_commit": "4c39050574a4f0aeaa72b89419e06eb96b04f553",
+  "uses_exact_prepared_component_and_target_venv": true,
+  "fixture_data_and_temporary_sqlite_only": true,
+  "real_provider_or_mysql_called": false,
+  "existing_sqlite_or_crm_database_modified": false,
+  "production_or_rehearsal_units_started_or_stopped": false,
+  "scope": "Synthetic workbook/import, SQLite restart/idempotency/report, localhost HTTP authentication/refusal. Not real delivery/open evidence."
+}
