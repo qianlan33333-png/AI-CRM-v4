@@ -1,0 +1,127 @@
+{
+  "observed_at_utc": "2026-10-09T02:07:52.485265+00:00",
+  "application_directory": "/opt/aicrm/releases/4c39050574a4f0aeaa72b89419e06eb96b04f553",
+  "application_files": [
+    "migrations",
+    "bin",
+    "components",
+    "release.env",
+    "deploy",
+    "web",
+    "release-files.sha256"
+  ],
+  "release_identity": {
+    "AICRM_RELEASE_SHA": "4c39050574a4f0aeaa72b89419e06eb96b04f553"
+  },
+  "binary_sha256": "504fbf2585a45ceadb6b210ed804c4f3483dd4eb9e62d9aa72a4313ec5505483",
+  "boolean_configuration": {
+    "AICRM_WECOM_ENABLED": "true",
+    "AICRM_WECOM_CALLBACK_ENABLED": "true",
+    "AICRM_WECOM_CUSTOMER_SYNC_ENABLED": "true",
+    "AICRM_WECOM_TAG_CATALOG_PROVIDER_ENABLED": "true",
+    "AICRM_OUTBOUND_PROVIDER_ENABLED": "true",
+    "AICRM_CHANNEL_PROVIDER_READ_ENABLED": "true",
+    "AICRM_CHANNEL_QR_PROVIDER_ENABLED": "true",
+    "AICRM_CHANNEL_MEDIA_PREP_PROVIDER_ENABLED": "true",
+    "AICRM_CHANNEL_WELCOME_PROVIDER_ENABLED": "true",
+    "AICRM_CHANNEL_TAG_PROVIDER_ENABLED": "true",
+    "AICRM_GROUP_OPS_PROVIDER_ENABLED": "true",
+    "AICRM_SURVEY_OAUTH_ENABLED": "true",
+    "AICRM_WECHAT_PAY_PROVIDER_ENABLED": "true",
+    "AICRM_CUSTOMER_TAG_PROVIDER_ENABLED": "true",
+    "AICRM_COMMERCE_PUSH_PROVIDER_ENABLED": "true",
+    "AICRM_AI_ASSISTANT_DISPATCH_ENABLED": "true",
+    "AICRM_WECOM_MESSAGE_ARCHIVE_ENABLED": "true",
+    "AICRM_SURVEY_COMPLETION_PROVIDER_ENABLED": "true",
+    "AICRM_HXC_IDENTITY_WRITE_ENABLED": "true",
+    "AICRM_GROUP_OPS_PROVIDER_READ_ENABLED": "true",
+    "AICRM_WECOM_TAG_CATALOG_MUTATION_PROVIDER_ENABLED": "true",
+    "AICRM_WECHAT_PAY_PROFIT_SHARING_ENABLED": "true",
+    "AICRM_WECOM_CONTACT_DESCRIPTION_PROVIDER_ENABLED": "true",
+    "AICRM_HXC_SYNC_ENABLED": "true",
+    "AICRM_WECHAT_PAY_H5_OAUTH_ENABLED": "true",
+    "AICRM_OPS_ENABLED": "true",
+    "AICRM_OPS_NOTIFICATION_ENABLED": "true",
+    "AICRM_OPS_RETENTION_ENABLED": "true",
+    "AICRM_ALIPAY_PROVIDER_ENABLED": "true",
+    "AICRM_INVOICE_PROVIDER_ENABLED": "true",
+    "AICRM_INVOICE_CALLBACK_ENABLED": "true"
+  },
+  "referenced_files": {
+    "AICRM_WECHAT_PAY_PRIVATE_KEY_PATH": "/etc/aicrm/keys/wechatpay_merchant.pem",
+    "AICRM_WECHAT_PAY_PLATFORM_CERT_PATH": "/etc/aicrm/keys/wechatpay_platform.pem",
+    "AICRM_WECOM_MESSAGE_ARCHIVE_RUNNER_PATH": "/opt/aicrm/current/bin/wecom-archive-sdk-runner",
+    "AICRM_WECOM_MESSAGE_ARCHIVE_LIBRARY_PATH": "/etc/aicrm/message-archive/libWeWorkFinanceSdk_C.so",
+    "AICRM_OPS_WEBHOOK_FILE": "/etc/aicrm/ops-feishu-webhook",
+    "AICRM_ALIPAY_PRIVATE_KEY_PATH": "/etc/aicrm/secrets/alipay/app-private-key.pem",
+    "AICRM_INVOICE_PRIVATE_KEY_PATH": "/etc/aicrm/keys/invoice/apiclient_key.pem",
+    "AICRM_INVOICE_PUBLIC_KEY_PATH": "/etc/aicrm/keys/invoice/pub_key.pem",
+    "AICRM_INVOICE_API_V3_KEY_PATH": "/etc/aicrm/keys/invoice/api-v3.key",
+    "AICRM_INVOICE_TAX_CONFIG_PATH": "/etc/aicrm/keys/invoice/taxes.json"
+  },
+  "configured_endpoint_hosts": {
+    "EXCEL_BATCH_URL": "127.0.0.1",
+    "AICRM_ALIPAY_NOTIFY_URL": "www.youcangogogo.com",
+    "AICRM_ALIPAY_RETURN_URL": "www.youcangogogo.com"
+  },
+  "database_endpoint": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "database": "aicrm"
+  },
+  "healthz": {
+    "http_status": 200,
+    "body": "{\"release_sha\":\"4c39050574a4f0aeaa72b89419e06eb96b04f553\",\"status\":\"alive\"}\n"
+  },
+  "database_readback": {
+    "version": "16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+    "database": "aicrm",
+    "size_bytes": 4797209623,
+    "wal_level": "replica",
+    "non_system_tables": 484,
+    "exact_business_counts": {
+      "customers": 23792,
+      "orders": 5611,
+      "payments": 1229,
+      "external_effects": 62081,
+      "river_job": 172277
+    },
+    "table_estimates": [
+      {
+        "schemaname": "public",
+        "relname": "customers",
+        "n_live_tup": 23792
+      },
+      {
+        "schemaname": "public",
+        "relname": "external_effects",
+        "n_live_tup": 62081
+      },
+      {
+        "schemaname": "public",
+        "relname": "orders",
+        "n_live_tup": 5611
+      },
+      {
+        "schemaname": "public",
+        "relname": "payments",
+        "n_live_tup": 1229
+      },
+      {
+        "schemaname": "public",
+        "relname": "products",
+        "n_live_tup": 54
+      },
+      {
+        "schemaname": "public",
+        "relname": "river_job",
+        "n_live_tup": 172277
+      }
+    ],
+    "logical_subscriptions": 0,
+    "publications": 0,
+    "replication_slots": 0,
+    "tables_without_primary_key": 0,
+    "large_objects": 0
+  }
+}

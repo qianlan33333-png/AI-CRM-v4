@@ -1,0 +1,110 @@
+{
+  "observed_at_utc": "2026-10-09T02:07:52.057598+00:00",
+  "application_directory": "/opt/aicrm/releases/641d75779c46dc32b7db05d057580dd2f7a4d849",
+  "application_files": [
+    "release.env",
+    "bin",
+    "migrations",
+    "web",
+    "components",
+    "release-files.sha256",
+    "deploy"
+  ],
+  "release_identity": {
+    "AICRM_RELEASE_SHA": "641d75779c46dc32b7db05d057580dd2f7a4d849"
+  },
+  "binary_sha256": "30b5983ed1384568513216d10c59dbbfa798ef8e22686f656f517611d100374b",
+  "boolean_configuration": {
+    "AICRM_AI_ASSISTANT_DISPATCH_ENABLED": "false",
+    "AICRM_AI_ASSISTANT_INTAKE_ENABLED": "false",
+    "AICRM_AI_GENERATION_ENABLED": "false",
+    "AICRM_ALIPAY_PROVIDER_ENABLED": "false",
+    "AICRM_CHANNEL_MEDIA_PREP_PROVIDER_ENABLED": "false",
+    "AICRM_CHANNEL_PROVIDER_READ_ENABLED": "false",
+    "AICRM_CHANNEL_QR_PROVIDER_ENABLED": "false",
+    "AICRM_CHANNEL_TAG_PROVIDER_ENABLED": "false",
+    "AICRM_CHANNEL_WELCOME_PROVIDER_ENABLED": "false",
+    "AICRM_COMMERCE_PUSH_PROVIDER_ENABLED": "false",
+    "AICRM_CUSTOMER_TAG_PROVIDER_ENABLED": "false",
+    "AICRM_GROUP_OPS_PROVIDER_ENABLED": "false",
+    "AICRM_GROUP_OPS_PROVIDER_READ_ENABLED": "false",
+    "AICRM_HXC_IDENTITY_WRITE_ENABLED": "false",
+    "AICRM_HXC_SYNC_ENABLED": "false",
+    "AICRM_OUTBOUND_PROVIDER_ENABLED": "false",
+    "AICRM_SURVEY_COMPLETION_PROVIDER_ENABLED": "false",
+    "AICRM_SURVEY_OAUTH_ENABLED": "false",
+    "AICRM_WECHAT_PAY_H5_OAUTH_ENABLED": "false",
+    "AICRM_WECHAT_PAY_PROFIT_SHARING_ENABLED": "false",
+    "AICRM_WECHAT_PAY_PROVIDER_ENABLED": "false",
+    "AICRM_WECHAT_SHOP_PROVIDER_ENABLED": "false",
+    "AICRM_WECOM_CALLBACK_ENABLED": "false",
+    "AICRM_WECOM_CONTACT_DESCRIPTION_PROVIDER_ENABLED": "false",
+    "AICRM_WECOM_CUSTOMER_SYNC_ENABLED": "false",
+    "AICRM_WECOM_ENABLED": "false",
+    "AICRM_WECOM_MESSAGE_ARCHIVE_ENABLED": "false",
+    "AICRM_WECOM_TAG_CATALOG_MUTATION_PROVIDER_ENABLED": "false",
+    "AICRM_WECOM_TAG_CATALOG_PROVIDER_ENABLED": "false"
+  },
+  "referenced_files": {},
+  "configured_endpoint_hosts": {},
+  "database_endpoint": {
+    "host": "postgres54b430626a32.rds-pg.ivolces.com",
+    "port": 5432,
+    "database": "CRM"
+  },
+  "healthz": {
+    "http_status": 200,
+    "body": "{\"release_sha\":\"641d75779c46dc32b7db05d057580dd2f7a4d849\",\"status\":\"alive\"}\n"
+  },
+  "database_readback": {
+    "version": "16.8",
+    "database": "CRM",
+    "size_bytes": 3259235351,
+    "wal_level": "replica",
+    "non_system_tables": 480,
+    "exact_business_counts": {
+      "customers": 23783,
+      "orders": 5606,
+      "payments": 1224,
+      "external_effects": 56787,
+      "river_job": 134397
+    },
+    "table_estimates": [
+      {
+        "schemaname": "public",
+        "relname": "customers",
+        "n_live_tup": 23783
+      },
+      {
+        "schemaname": "public",
+        "relname": "external_effects",
+        "n_live_tup": 56787
+      },
+      {
+        "schemaname": "public",
+        "relname": "orders",
+        "n_live_tup": 5606
+      },
+      {
+        "schemaname": "public",
+        "relname": "payments",
+        "n_live_tup": 1224
+      },
+      {
+        "schemaname": "public",
+        "relname": "products",
+        "n_live_tup": 54
+      },
+      {
+        "schemaname": "public",
+        "relname": "river_job",
+        "n_live_tup": 134397
+      }
+    ],
+    "logical_subscriptions": 0,
+    "publications": 0,
+    "replication_slots": 1,
+    "tables_without_primary_key": 0,
+    "large_objects": 0
+  }
+}
