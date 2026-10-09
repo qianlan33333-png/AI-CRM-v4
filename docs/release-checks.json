@@ -2,24 +2,34 @@
   "schema": 1,
   "baseline_sha": "099337d494d243179fb2b907f03a5d921227acbd",
   "checks": [
-    {"lane":"backend","package":"./internal/invoice"},
-    {"lane":"backend","package":"./internal/invoice/provider"},
-    {"lane":"backend","package":"./internal/payment/h5oauth"},
-    {"lane":"backend","package":"./internal/payment/app","test":"TestGetCheckoutAllowsRenewedSamePayerToReadTerminalWithoutHandoff"},
-    {"lane":"backend","package":"./internal/payment/app","test":"TestGetCheckoutExposesUnknownPrepayOnlyToAuthorizedPayer"},
-    {"lane":"backend","package":"./internal/payment/app","test":"TestCheckoutRecoveryUsesFrozenPaymentAmount"},
-    {"lane":"backend","package":"./internal/payment/app","test":"TestGetCheckoutReadsAlipayOriginalOrderThroughTrustedH5Session"},
-    {"lane":"backend","package":"./internal/payment/app","test":"TestAlipayCheckoutReadbackDoesNotBroadenPayerBeneficiaryOrSessionScope"},
-    {"lane":"backend","package":"./internal/product/http","test":"TestPublicOriginalCheckoutBrowserJourney"},
-    {"lane":"backend","package":"./internal/product/http","test":"TestPublicOriginalCheckoutQueryCannotBecomeAttribution"},
-    {"lane":"backend","package":"./internal/product/http","test":"TestPublicPaymentCompletionRefreshJourney"},
-    {"lane":"backend","package":"./cmd/aicrm","test":"TestInvoiceCardAndPaymentRoutesRequireTrustedSession"},
-    {"lane":"backend","package":"./cmd/aicrm","test":"TestInvoicePostgreSQLNativeCardOwnershipAndRefundRace","postgres":true},
-    {"lane":"backend","package":"./cmd/aicrm","test":"TestInvoicePostgreSQLOriginalPaymentReadOnlyAndPayerScope","postgres":true},
-    {"lane":"backend","package":"./cmd/aicrm","test":"TestInvoicePostgreSQLOriginalCheckoutOAuthReturnRetention","postgres":true},
-    {"lane":"backend","package":"./internal/product/http","test":"TestPublicAlipayOriginalOrderBrowserJourney"},
-    {"lane":"frontend","path":"web/v3/customerOrders.test.mjs"}
+    {
+      "lane": "backend",
+      "package": "./internal/product/http",
+      "test": "TestPublicOriginalCheckoutBrowserJourney"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/product/http",
+      "test": "TestPublicPaymentCompletionRefreshJourney"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/product/http",
+      "test": "TestPublicAlipayOriginalOrderBrowserJourney"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLInstalledFixtureStartup",
+      "postgres": true
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/customerOrders.test.mjs"
+    }
   ],
-  "installed_checks": ["invoice-callback"],
+  "installed_checks": [
+    "invoice-callback"
+  ],
   "build_commands": []
 }

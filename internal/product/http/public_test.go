@@ -310,6 +310,7 @@ func TestPublicProductDetailIsImmersiveAndPrioritizesOnlyTheFirstImage(t *testin
 }
 
 func TestPublicPaymentCompletionRefreshJourney(t *testing.T) {
+	preparePublicBrowserDependencies(t)
 	_, source, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime caller unavailable")
@@ -334,6 +335,7 @@ func TestPublicPaymentCompletionRefreshJourney(t *testing.T) {
 }
 
 func TestPublicAlipayOriginalOrderBrowserJourney(t *testing.T) {
+	preparePublicBrowserDependencies(t)
 	var html bytes.Buffer
 	view := publicProductPageView{Payment: true, WeChatPayEnabled: true, AlipayEnabled: true, Product: publicProduct{ID: 7, Name: "测试商品", PriceMinor: 990, ProductKind: "standard", CouponTargetRef: "standard_product:7", ContactCollectionLevel: "none", RegionOptionsJSON: template.JS("[]")}}
 	if err := publicProductPage.Execute(&html, view); err != nil {

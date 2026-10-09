@@ -11,6 +11,7 @@ import (
 )
 
 func TestPublicOriginalCheckoutBrowserJourney(t *testing.T) {
+	preparePublicBrowserDependencies(t)
 	for _, kind := range []string{"standard", "service_period"} {
 		t.Run(kind, func(t *testing.T) {
 			var html bytes.Buffer

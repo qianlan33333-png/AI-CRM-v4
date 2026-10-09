@@ -95,6 +95,8 @@ func invoiceCallbackInstalled(t *testing.T, bill bool) {
 	t.Cleanup(transport.CloseIdleConnections)
 	exerciseInvoiceCallbackHTTP(t, f, bill, id, a, platformKey, apiKey, endpoint, client)
 	if bill {
+		exerciseInvoiceCardPaymentHTTP(t, f, a.ID, endpoint, client)
+		t.Logf("invoice-card-payment-installed PASS source_sha=%s binary_sha256=%s actual_installed=true synthetic_database=true", installed.SHA, installed.BinarySHA256)
 		t.Logf("invoice-bill-entry-installed PASS source_sha=%s binary_sha256=%s native_callback=verified transaction_id=shared zero_provider_writes=true", installed.SHA, installed.BinarySHA256)
 	} else {
 		t.Logf("invoice-callback-bootstrap-installed PASS source_sha=%s binary_sha256=%s callback_enabled=true invoice_provider=false zero_business_writes=true", installed.SHA, installed.BinarySHA256)
@@ -459,5 +461,6 @@ func TestInvoicePostgreSQLInstalledFixtureStartup(t *testing.T) {
 	transport := &http.Transport{Proxy: nil}
 	defer transport.CloseIdleConnections()
 	exerciseInvoiceCallbackHTTP(t, f, true, id, a, key, apiKey, server.URL, &http.Client{Transport: transport, Timeout: 5 * time.Second})
+	exerciseInvoiceCardPaymentHTTP(t, f, a.ID, server.URL, &http.Client{Transport: transport, Timeout: 5 * time.Second})
 	t.Log("invoice fixture full source startup/callback PASS: Config.Load, composition, bootstrap, readiness, authenticated history, signed native acceptance/replay and detail; no workers or Provider writes")
 }

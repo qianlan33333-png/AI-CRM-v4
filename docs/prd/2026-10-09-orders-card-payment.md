@@ -37,3 +37,9 @@ Product Design 以用户本轮图二的蓝色卡片和现有订单页为选定�
 验证本人/他人/合并归属、卡包接收人/AppID 不匹配、未插卡/冲红、JS-SDK 失败；原支付恢复的过期/未知/已支付、防重复下单、原金额、普通及服务周期、微信及支付宝；在实际挂载页面检查 320/390 移动端布局和按钮交互。真实手机卡包跳转和真实付款另记结果。
 
 生产只读证据：2026-10-09 当前 ¥99 官方查询已出票、INSERTED，card_id/card_code 存在且 AppID 匹配；外部浏览器 session_required 符合 Cookie 隔离。候选推送国内准确 ref 后交唯一发布工作台，安装与真实 Provider 结果分别记录。回退本次应用构件；新增 OAuth 白名单保留，旧构件不使用新入口，不删除已有授权记录。生产迁移前由工作台按既有流程备份。
+
+### Linux 检查准备修复
+
+原候选 `21319d1d493b48ecbf3745061f729e106069998c` 的 Linux attempt 1 实际通过 30 项顶层检查，0 skip；三项 Go→Node 页面旅程因 backend checkout 未准备 jsdom 而未进入断言，frontend 尚未执行。本次仅在这三项测试前复用现有 `check_preparation.py npm` 的锁文件绑定缓存，并补充原安装包 callback fixture 的新 GET 鉴权、本人原订单冻结事实、未出票/确认退款卡包拒绝、no-store 与零新增订单/效果断言。不改应用实现、Provider URL、发布控制器或业务数据。
+
+`docs/release-checks.json` 仅保留失败三项、新 fixture 源组合验证和未执行 frontend；原 30 项准确 Linux 通过收据分别绑定 head/tree、backend run SHA256 `cca9fc7a1996e20b66f843d0cdaa1d480f31254fce2c09f1db5ce26cf40612cd` 与 Go JSON SHA256 `35e50d4e003ef242ab1d73440e6918279ff853995bac62f29af34e5bf8551705`，由同一工作台随 supersedes 候选复用。实际安装包继续通过既有 invoice-callback 入口验证，无二次构建路径；手机卡包打开和真实扣款仍另记验收。
