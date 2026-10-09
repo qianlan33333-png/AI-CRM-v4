@@ -529,7 +529,8 @@ func (s *Service) JoinCampaign(ctx context.Context, command referralport.JoinCam
 				teamID, inviterTeamID = inviter.TeamID, inviter.TeamID
 			}
 			invitationID, inviterCustomerID = invitation.ID, invitation.InviterCustomerID
-		} else if config.TeamMode == referraldomain.TeamModeTeam && teamID > 0 {
+		}
+		if config.TeamMode == referraldomain.TeamModeTeam && teamID > 0 {
 			team, teamErr := s.store.ReadTeamWithin(tx, teamID, false)
 			if teamErr != nil || team.CampaignID != campaign.ID {
 				return referralport.ErrConflict

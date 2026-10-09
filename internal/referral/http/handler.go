@@ -297,6 +297,9 @@ func (h *Handler) issuePromotionLink(w http.ResponseWriter, r *http.Request, cam
 		method(w, http.MethodPost)
 		return
 	}
+	if !h.authorizeMutation(w, r) {
+		return
+	}
 	if h.promotion == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable")
 		return
@@ -347,6 +350,9 @@ func (h *Handler) issuePromotionLink(w http.ResponseWriter, r *http.Request, cam
 func (h *Handler) productContext(w http.ResponseWriter, r *http.Request, campaignID int64) {
 	if r.Method != http.MethodPost || r.URL.RawQuery != "" || r.ContentLength > 0 {
 		method(w, http.MethodPost)
+		return
+	}
+	if !h.authorizeMutation(w, r) {
 		return
 	}
 	actor, ok := h.sessionActor(w, r)
@@ -503,6 +509,12 @@ func (h *Handler) leaderboard(w http.ResponseWriter, r *http.Request, campaignID
 		if err != nil {
 			resultError(w, err)
 			return
+		}
+		if mine.Participation != nil {
+			// MyCampaign resolves the immutable verified handle through OneID.
+			// A merge preserves the original participation and score owner even
+			// when the browser session now names the surviving customer.
+			query.ViewerCustomerID = mine.Participation.CustomerID
 		}
 		if mine.Team != nil {
 			query.ViewerTeamID = mine.Team.ID

@@ -481,6 +481,13 @@ func (r *Repository) InsertCampaignCloseSnapshotWithin(ctx context.Context, camp
 	if campaignID < 1 || at.IsZero() {
 		return 0, ErrInvalid
 	}
+	campaign, err := r.ReadCampaignWithin(ctx, campaignID, false)
+	if err != nil {
+		return 0, err
+	}
+	if campaign.Config().LeaderboardMetric != referraldomain.LeaderboardInvites {
+		return r.insertSalesCampaignCloseSnapshotWithin(ctx, campaign, at)
+	}
 	var id int64
 	err = tx.QueryRow(ctx, `WITH active_credits AS (
         SELECT c.id,c.inviter_customer_id,c.team_id,c.occurred_at
@@ -503,6 +510,56 @@ func (r *Repository) InsertCampaignCloseSnapshotWithin(ctx context.Context, camp
       ON CONFLICT(campaign_id,snapshot_kind) DO NOTHING RETURNING id`, campaignID, at.UTC()).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = tx.QueryRow(ctx, `SELECT id FROM referral_campaign_snapshots WHERE campaign_id=$1 AND snapshot_kind='close'`, campaignID).Scan(&id)
+	}
+	if err != nil {
+		return 0, mapError(err)
+	}
+	return id, nil
+}
+
+// Sales campaigns freeze the same net sales and tie-breaking dimensions as
+// their live leaderboard. A close snapshot must not consult invitation scores
+// for an activity whose configured metric is amount or paid order count.
+func (r *Repository) insertSalesCampaignCloseSnapshotWithin(ctx context.Context, campaign referraldomain.Campaign, at time.Time) (int64, error) {
+	tx, err := transaction(ctx)
+	if err != nil {
+		return 0, err
+	}
+	score, ordering := "sales_amount_minor", "sales_amount_minor DESC,sales_order_count DESC"
+	if campaign.Config().LeaderboardMetric == referraldomain.LeaderboardSalesOrders {
+		score, ordering = "sales_order_count", "sales_order_count DESC,sales_amount_minor DESC"
+	}
+	var id int64
+	err = tx.QueryRow(ctx, `WITH sale_nets AS (
+        SELECT c.promoter_customer_id,c.team_id,c.occurred_at AS paid_at,
+               (c.amount_delta_minor+COALESCE(SUM(r.amount_delta_minor),0))::bigint AS net_minor,
+               (c.order_count_delta+COALESCE(SUM(r.order_count_delta),0))::bigint AS net_orders
+        FROM referral_product_sale_events c
+        LEFT JOIN referral_product_sale_events r ON r.reverses_sale_event_id=c.id AND r.kind='reversal' AND r.occurred_at <= $2
+        WHERE c.campaign_id=$1 AND c.kind='credit' AND c.occurred_at >= $3 AND c.occurred_at < $4 AND c.occurred_at <= $2
+        GROUP BY c.id,c.promoter_customer_id,c.team_id,c.occurred_at,c.amount_delta_minor,c.order_count_delta
+    ), active_sales AS (
+        SELECT * FROM sale_nets WHERE net_minor>0 AND net_orders>0
+    ), personal AS (
+        SELECT promoter_customer_id AS customer_id,sum(net_minor)::bigint AS sales_amount_minor,
+               count(*)::bigint AS sales_order_count,max(paid_at) AS first_reached_at
+        FROM active_sales GROUP BY promoter_customer_id
+    ), teams AS (
+        SELECT team_id,sum(net_minor)::bigint AS sales_amount_minor,
+               count(*)::bigint AS sales_order_count,max(paid_at) AS first_reached_at
+        FROM active_sales WHERE team_id IS NOT NULL AND $5 GROUP BY team_id
+    ), payload AS (
+        SELECT jsonb_build_object(
+          'leaderboard_metric',$6::text,
+          'personal',COALESCE((SELECT jsonb_agg(jsonb_build_object('customer_id',customer_id,'team_id',0,'score',`+score+`,'sales_amount_minor',sales_amount_minor,'sales_order_count',sales_order_count,'first_reached_at',first_reached_at) ORDER BY `+ordering+`,first_reached_at,customer_id) FROM personal),'[]'::jsonb),
+          'team',COALESCE((SELECT jsonb_agg(jsonb_build_object('team_id',team_id,'score',`+score+`,'sales_amount_minor',sales_amount_minor,'sales_order_count',sales_order_count,'first_reached_at',first_reached_at) ORDER BY `+ordering+`,first_reached_at,team_id) FROM teams),'[]'::jsonb)
+        ) AS rankings,
+        COALESCE((SELECT max(id) FROM referral_product_sale_events WHERE campaign_id=$1 AND occurred_at <= $2),0)::bigint AS watermark
+    ) INSERT INTO referral_campaign_snapshots(campaign_id,snapshot_kind,captured_at,score_watermark,rankings)
+      SELECT $1,'close',$2,watermark,rankings FROM payload
+      ON CONFLICT(campaign_id,snapshot_kind) DO NOTHING RETURNING id`, campaign.ID, at.UTC(), campaign.StartsAt.UTC(), campaign.EndsAt.UTC(), campaign.Config().TeamMode == referraldomain.TeamModeTeam, string(campaign.Config().LeaderboardMetric)).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = tx.QueryRow(ctx, `SELECT id FROM referral_campaign_snapshots WHERE campaign_id=$1 AND snapshot_kind='close'`, campaign.ID).Scan(&id)
 	}
 	if err != nil {
 		return 0, mapError(err)
