@@ -54,9 +54,9 @@ func (a *cardFixtureAdapter) Execute(ctx context.Context, e ep.Envelope, attempt
 	return ep.AdapterResult{Completion: ep.StateExecuted, CallAttempted: true, RealExternalCallExecuted: true, ReceiptDigest: ep.Hash("fixture", "card"), Artifact: ep.ResultArtifact{Kind: "invoice_card_template_v1", Payload: raw, Digest: ep.Hash("external-effect.artifact.v1", "invoice_card_template_v1", string(raw))}}, nil
 }
 func TestInvoiceCardPostgreSQLAtomicConcurrentAndUnknown(t *testing.T) {
-	for _, mode := range []string{"executed", "unknown", "rejected"} {
+	for _, mode := range []string{"executed", "unknown", "signed_5xx", "ambiguous_rejection", "lease_expired", "rejected"} {
 		t.Run(mode, func(t *testing.T) {
-			unknown := mode == "unknown"
+			unknown := mode == "unknown" || mode == "signed_5xx" || mode == "ambiguous_rejection" || mode == "lease_expired"
 			rejected := mode == "rejected"
 			f := newInvoiceFixture(t)
 			reader := &cardConfigReader{checksum: "applied"}
@@ -120,13 +120,27 @@ func TestInvoiceCardPostgreSQLAtomicConcurrentAndUnknown(t *testing.T) {
 				t.Fatal(e)
 			}
 			adapter := &cardFixtureAdapter{f: f, unknown: unknown, rejected: rejected}
-			if e := f.effects.RunAttempt(f.ctx, id, generation, job, adapter); e != nil {
-				t.Fatal(e)
+			if mode == "lease_expired" {
+				// Simulate a process disappearing after the shared kernel recorded
+				// attempted. Expiry must project unknown without another write.
+				if _, e := f.pool.Exec(f.ctx, `UPDATE external_effects SET state='attempted',attempt_count=1,lease_fence=1,lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1;`, id); e != nil {
+					t.Fatal(e)
+				}
+				if _, e := f.pool.Exec(f.ctx, `INSERT INTO external_effect_attempts(effect_id,number,generation,fence,state) VALUES($1,1,$2,1,'attempted')`, id, generation); e != nil {
+					t.Fatal(e)
+				}
 			}
 			if e := f.effects.RunAttempt(f.ctx, id, generation, job, adapter); e != nil {
 				t.Fatal(e)
 			}
-			if adapter.calls != 1 {
+			if e := f.effects.RunAttempt(f.ctx, id, generation, job, adapter); e != nil {
+				t.Fatal(e)
+			}
+			wantCalls := 1
+			if mode == "lease_expired" {
+				wantCalls = 0
+			}
+			if adapter.calls != wantCalls {
 				t.Fatal("ambiguous card write repeated")
 			}
 			out, e := f.s.ReadCardSetup(f.ctx)
@@ -138,6 +152,15 @@ func TestInvoiceCardPostgreSQLAtomicConcurrentAndUnknown(t *testing.T) {
 			}
 			if unknown && out.State != "outcome_unknown" {
 				t.Fatal("unknown lost")
+			}
+			if unknown {
+				if _, err := f.s.AcceptCardSetup(f.ctx, 7); !errors.Is(err, p.ErrPending) {
+					t.Fatal("same payload resubmitted after unknown", err)
+				}
+				counts()
+				if materials != 1 || effects != 1 || jobs != 1 {
+					t.Fatal("unknown resubmission minted a new effect")
+				}
 			}
 			if rejected {
 				if out.State != "final_failed" || out.CardID != "" {
@@ -157,6 +180,12 @@ func TestInvoiceCardPostgreSQLAtomicConcurrentAndUnknown(t *testing.T) {
 			_, e = f.s.AcceptCardSetup(f.ctx, 7)
 			if unknown && !errors.Is(e, p.ErrPending) {
 				t.Fatal("overwrote unknown effect")
+			}
+			if unknown {
+				counts()
+				if materials != 1 || effects != 1 || jobs != 1 {
+					t.Fatal("changed payload minted an effect after unknown")
+				}
 			}
 			if !unknown && e != nil {
 				t.Fatal(e)

@@ -75,7 +75,10 @@ func (s *Service) AcceptCardSetup(ctx context.Context, actor int64) (out p.CardS
 			if err = tx.QueryRow(ctx, `SELECT payload_digest FROM invoice_card_setup_intents WHERE effect_id=$1`, current.EffectID).Scan(&priorDigest); err != nil {
 				return err
 			}
-			// A signed final rejection made no template change. An explicit admin
+			if current.State == string(effects.StateUnknown) {
+				return p.ErrPending
+			}
+			// A verified input/authentication refusal made no template change. An explicit admin
 			// resubmission may try again after fixing credentials/authorization.
 			// Accepted, executed and unknown writes always retain their receipt.
 			if priorDigest == string(digest) && current.State != "final_failed" {

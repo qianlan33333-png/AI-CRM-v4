@@ -45,7 +45,7 @@ type Tax struct {
 // Tax facts are supplied by finance. Reject unsupported official rates rather
 // than dispatching an invalid request and leaving the customer awaiting a ticket.
 func (t Tax) Valid() bool {
-	if len(t.Code) != 19 || strings.Trim(t.Code, "0123456789") != "" || strings.TrimSpace(t.GoodsName) == "" || utf8.RuneCountInString(t.GoodsName) > 128 {
+	if len(t.Code) != 19 || strings.Trim(t.Code, "0123456789") != "" || !ValidGoodsName(t.GoodsName) {
 		return false
 	}
 	switch t.Rate {
@@ -54,6 +54,12 @@ func (t Tax) Valid() bool {
 		return false
 	}
 	return t.PreferentialPolicyCode == nil || *t.PreferentialPolicyCode >= 1 && *t.PreferentialPolicyCode <= 18
+}
+
+// ValidGoodsName is the shared invoice item-name contract used before publishing
+// runtime configuration and when freezing invoice tax facts.
+func ValidGoodsName(name string) bool {
+	return utf8.ValidString(name) && strings.TrimSpace(name) != "" && utf8.RuneCountInString(name) <= 128
 }
 
 type Config struct {

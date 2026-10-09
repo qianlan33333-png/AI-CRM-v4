@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	ca "github.com/qianlan33333-png/AI-CRM-v3/internal/config/app"
 	cp "github.com/qianlan33333-png/AI-CRM-v3/internal/config/port"
 	cs "github.com/qianlan33333-png/AI-CRM-v3/internal/config/store"
@@ -52,6 +53,11 @@ func TestInvoiceSettingsPostgreSQLPublishAndCompositionReadback(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	for i, name := range []string{strings.Repeat("a", 129), strings.Repeat("服", 129)} {
+		if _, err := releases.CreateRuntimeReleaseDraft(ctx, cp.RuntimeReleaseDraftCommand{Actor: "7", IdempotencyKey: fmt.Sprintf("invoice-invalid-name-%d", i), Settings: []cp.RuntimeSetting{runtimeApplySetting(t, cp.InvoiceDefaultGoodsName, name)}}); err == nil {
+			t.Fatal("unstartable invoice configuration accepted as draft")
+		}
+	}
 	draft, e := releases.CreateRuntimeReleaseDraft(ctx, cp.RuntimeReleaseDraftCommand{Actor: "7", IdempotencyKey: "invoice-settings-save-1", Settings: []cp.RuntimeSetting{runtimeApplySetting(t, cp.InvoiceKeyFileID, id), runtimeApplySetting(t, cp.InvoiceDefaultGoodsName, "已发布服务费")}})
 	if e != nil {
 		t.Fatal(e)
@@ -88,5 +94,31 @@ func TestInvoiceSettingsPostgreSQLPublishAndCompositionReadback(t *testing.T) {
 	facts, e := releases.ListRuntimeApplications(ctx, 10)
 	if e != nil || len(facts) != 1 || facts[0].SnapshotChecksum != snapshot.Checksum {
 		t.Fatal("actual application fact missing")
+	}
+	for i, name := range []string{strings.Repeat("a", 128), strings.Repeat("服", 128)} {
+		key := fmt.Sprintf("invoice-name-boundary-%d", i)
+		draft, err := releases.CreateRuntimeReleaseDraft(ctx, cp.RuntimeReleaseDraftCommand{Actor: "7", IdempotencyKey: key + "-save", ExpectedBaseRevision: snapshot.Revision, Settings: []cp.RuntimeSetting{runtimeApplySetting(t, cp.InvoiceDefaultGoodsName, name)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		validated, err := releases.ValidateRuntimeRelease(ctx, cp.RuntimeReleaseMutationCommand{ReleaseID: draft.ID, Actor: "7", IdempotencyKey: key + "-validate"})
+		if err != nil || validated.State != cp.RuntimeReleaseValidated {
+			t.Fatal("valid boundary failed validation", err, validated.ValidationErrors)
+		}
+		if _, err = releases.PublishRuntimeRelease(ctx, cp.RuntimeReleasePublishCommand{ReleaseID: draft.ID, ExpectedChecksum: validated.Checksum, ExpectedBaseRevision: snapshot.Revision, Actor: "7", IdempotencyKey: key + "-publish"}); err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err = releases.EffectiveSnapshot(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		applied, err = applyRuntimeConfig(runtime, snapshot)
+		if err != nil {
+			t.Fatal("published boundary cannot apply", err)
+		}
+		consumer, _, err = composeInvoice(f.s.UoW, f.s.Sessions, f.s.Lineage.(invoiceIdentity), f.s.Orders, f.s.Refunds, f.effects, f.s.Jobs.(invoice.QueryEnqueuer).Client, applied)
+		if err != nil || consumer.Config.Taxes["*"].GoodsName != name || consumer.Config.Taxes["course"].Rate != 600 {
+			t.Fatal("publish/apply/compose item-name contract mismatch", err)
+		}
 	}
 }

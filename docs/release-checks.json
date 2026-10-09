@@ -24,6 +24,11 @@
     },
     {
       "lane": "backend",
+      "package": "./internal/externaleffects",
+      "test": "TestStaleAttemptCompletionProjectionKinds"
+    },
+    {
+      "lane": "backend",
       "package": "./cmd/aicrm",
       "test": "TestInvoiceRuntimeConfigurationPrivateKeyAndDefaults"
     },

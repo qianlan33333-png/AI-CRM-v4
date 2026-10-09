@@ -31,7 +31,7 @@ func (w *WeChat) configureCardEffect(ctx context.Context, envelope effects.Envel
 	card.Information.CustomCell.JumpURL = material.JumpURL
 	receipt := (SetupClient{Client: w.Client, Verifier: w.Verifier}).ConfigureCard(ctx, card)
 	result := effects.AdapterResult{Completion: effects.StateUnknown, CallAttempted: true, ReceiptDigest: effects.Hash("invoice.card.response", attempt.EffectID, receipt.Outcome, string(receipt.Body)), FailureCode: "card_result_unknown"}
-	if receipt.SignatureVerified && receipt.Outcome == "rejected" {
+	if cardConfigurationNotExecuted(receipt) {
 		result.Completion = effects.StateFinalFailed
 		result.FailureCode = "card_configuration_rejected"
 		return result, nil
@@ -52,4 +52,30 @@ func (w *WeChat) configureCardEffect(ctx context.Context, envelope effects.Envel
 	// No official template GET exists. Unknown results remain blocked and never
 	// automatically repeat this overwrite call.
 	return result, nil
+}
+
+// Only documented input/authentication refusals establish that the overwrite
+// was not executed. INVALID_REQUEST also covers template-creation failures;
+// 5xx, throttling, unknown codes and malformed responses do not prove finality.
+// Contract: https://pay.wechatpay.cn/doc/v3/partner/4015792562
+func cardConfigurationNotExecuted(receipt SetupReceipt) bool {
+	if !receipt.SignatureVerified || receipt.Outcome != "rejected" {
+		return false
+	}
+	var response struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal(receipt.Body, &response) != nil {
+		return false
+	}
+	switch receipt.HTTPStatus {
+	case 400:
+		return response.Code == "PARAM_ERROR" || response.Code == "APPID_MCHID_NOT_MATCH"
+	case 401:
+		return response.Code == "SIGN_ERROR"
+	case 403:
+		return response.Code == "NO_AUTH"
+	default:
+		return false
+	}
 }

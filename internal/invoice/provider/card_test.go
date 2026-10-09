@@ -26,7 +26,7 @@ func (m cardMaterial) PrepareCardEffect(context.Context, string) (p.CardConfig, 
 func TestInvoiceCardEffectSignedOutcomeAndNoBlindRetry(t *testing.T) {
 	_, key, _ := invoiceProviderFixture(t, func(*http.Request) string { return `{}` })
 	trust := Trust{Mode: "public_key", PublicKeyID: "PUB_KEY_ID_fixture", PublicKey: &key.PublicKey}
-	for _, mode := range []string{"issued", "rejected", "unsigned", "lost", "wrong_app"} {
+	for _, mode := range []string{"issued", "rejected", "auth_rejected", "signed_5xx", "signed_5xx_parameter", "ambiguous_rejection", "unknown_code", "missing_code", "unsigned", "lost", "wrong_app"} {
 		t.Run(mode, func(t *testing.T) {
 			calls := 0
 			client, verifier, _, err := NewTrustedClient(context.Background(), "service", "serial", key, trust, option.WithHTTPClient(&http.Client{Transport: invoiceTransport(func(r *http.Request) (*http.Response, error) {
@@ -43,6 +43,20 @@ func TestInvoiceCardEffectSignedOutcomeAndNoBlindRetry(t *testing.T) {
 				if mode == "rejected" {
 					status = 400
 					body = `{"code":"PARAM_ERROR","message":"private failure"}`
+				}
+				switch mode {
+				case "auth_rejected":
+					status, body = 403, `{"code":"NO_AUTH"}`
+				case "signed_5xx":
+					status, body = 500, `{"code":"SYSTEM_ERROR"}`
+				case "signed_5xx_parameter":
+					status, body = 503, `{"code":"PARAM_ERROR"}`
+				case "ambiguous_rejection":
+					status, body = 400, `{"code":"INVALID_REQUEST","message":"template creation failed"}`
+				case "unknown_code":
+					status, body = 400, `{"code":"UNRECOGNIZED"}`
+				case "missing_code":
+					status, body = 400, `{}`
 				}
 				if mode == "wrong_app" {
 					body = `{"card_id":"card-fixture","card_appid":"other"}`
@@ -69,7 +83,7 @@ func TestInvoiceCardEffectSignedOutcomeAndNoBlindRetry(t *testing.T) {
 			if mode == "issued" {
 				want = effects.StateExecuted
 			}
-			if mode == "rejected" {
+			if mode == "rejected" || mode == "auth_rejected" {
 				want = effects.StateFinalFailed
 			}
 			if result.Completion != want || calls != 1 || result.RealExternalCallExecuted != (mode == "issued") {

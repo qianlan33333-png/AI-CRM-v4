@@ -8,8 +8,10 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	configport "github.com/qianlan33333-png/AI-CRM-v3/internal/config/port"
+	invoiceport "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice/port"
 )
 
 // RuntimeField is the public, non-secret schema used by the Config host.  A
@@ -231,7 +233,7 @@ func runtimeDefinitions() map[configport.RuntimeSettingKey]runtimeDefinition {
 		configport.InvoiceBillingPersonID:                  {input: "text", validate: text},
 		configport.InvoiceDefaultTaxCode:                   {input: "text", validate: text},
 		configport.InvoiceDefaultTaxRate:                   {input: "tax-rate", validate: runtimeInteger(0, 1700)},
-		configport.InvoiceDefaultGoodsName:                 {input: "text", validate: text},
+		configport.InvoiceDefaultGoodsName:                 {input: "text", validate: runtimeInvoiceGoodsName},
 		configport.InvoiceServiceMerchantID:                {input: "scope-bound", validate: text},
 		configport.InvoiceMerchantSerial:                   {input: "text", validate: text},
 		configport.InvoiceKeyFileID:                        {input: "private-key-file", validate: runtimeInvoiceKeyReference},
@@ -382,6 +384,15 @@ func runtimeChoice(values ...string) func(json.RawMessage) (json.RawMessage, boo
 func runtimeText(value json.RawMessage) (json.RawMessage, bool) {
 	var decoded string
 	if !decodeRuntimeOne(value, &decoded) || strings.TrimSpace(decoded) != decoded || len(decoded) > 256 {
+		return nil, false
+	}
+	canonical, _ := json.Marshal(decoded)
+	return canonical, true
+}
+
+func runtimeInvoiceGoodsName(value json.RawMessage) (json.RawMessage, bool) {
+	var decoded string
+	if !utf8.Valid(value) || !decodeRuntimeOne(value, &decoded) || strings.TrimSpace(decoded) != decoded || decoded != "" && !invoiceport.ValidGoodsName(decoded) {
 		return nil, false
 	}
 	canonical, _ := json.Marshal(decoded)

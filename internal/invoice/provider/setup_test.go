@@ -60,6 +60,11 @@ func TestInvoiceSetupSignedReadbackAndSingleConfigurationAttempt(t *testing.T) {
 	if r := setup.Status(context.Background(), "sub"); !r.SignatureVerified || r.Outcome != "rejected" {
 		t.Fatal("signed API error not captured")
 	}
+	status = 500
+	if r := setup.ConfigureDevelopment(context.Background(), patch); !r.SignatureVerified || r.Outcome != "outcome_unknown" {
+		t.Fatal("signed server failure falsely established write finality")
+	}
+	status = 400
 	validSignature = false
 	if r := setup.Status(context.Background(), "sub"); r.SignatureVerified || len(r.Body) != 0 {
 		t.Fatal("unsigned error facts leaked into receipt")

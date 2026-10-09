@@ -72,7 +72,7 @@ func TestInvoiceRuntimeActivationRequiresFinanceAndCredentials(t *testing.T) {
 	for _, tc := range []struct {
 		key   cp.RuntimeSettingKey
 		value any
-	}{{cp.InvoiceDefaultTaxCode, "bad"}, {cp.InvoiceDefaultTaxRate, 123}, {cp.InvoiceSellerName, ""}, {cp.InvoiceLogoURL, "https://evil.test/logo"}, {cp.InvoiceKeyFileID, strings.Repeat("f", 32)}} {
+	}{{cp.InvoiceDefaultTaxCode, "bad"}, {cp.InvoiceDefaultTaxRate, 123}, {cp.InvoiceSellerName, ""}, {cp.InvoiceDefaultGoodsName, strings.Repeat("a", 129)}, {cp.InvoiceLogoURL, "https://evil.test/logo"}, {cp.InvoiceKeyFileID, strings.Repeat("f", 32)}} {
 		bad := append([]cp.RuntimeSetting(nil), settings...)
 		for i := range bad {
 			if bad[i].Key == tc.key {

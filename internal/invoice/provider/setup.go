@@ -83,7 +83,7 @@ func (s SetupClient) call(ctx context.Context, method, path string, q url.Values
 	receipt.Body = raw
 	if receipt.HTTPStatus >= 200 && receipt.HTTPStatus < 300 {
 		receipt.Outcome = "confirmed"
-	} else {
+	} else if method == http.MethodGet || receipt.HTTPStatus >= 400 && receipt.HTTPStatus < 500 {
 		receipt.Outcome = "rejected"
 	}
 	return receipt

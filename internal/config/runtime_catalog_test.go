@@ -1,6 +1,30 @@
 package config
 
-import "testing"
+import (
+	"encoding/json"
+	configport "github.com/qianlan33333-png/AI-CRM-v3/internal/config/port"
+	"strings"
+	"testing"
+)
+
+func TestInvoiceGoodsNameUsesInvoiceUnicodeContract(t *testing.T) {
+	for _, name := range []string{strings.Repeat("a", 128), strings.Repeat("服", 128), ""} {
+		raw, _ := json.Marshal(name)
+		canonical, err := ValidateRuntimeSetting(configport.InvoiceDefaultGoodsName, raw)
+		if err != nil || string(canonical) != string(raw) {
+			t.Fatal("valid invoice item name rejected", err)
+		}
+	}
+	for _, name := range []string{strings.Repeat("a", 129), strings.Repeat("服", 129), " 服务费 "} {
+		raw, _ := json.Marshal(name)
+		if _, err := ValidateRuntimeSetting(configport.InvoiceDefaultGoodsName, raw); err == nil {
+			t.Fatal("invalid invoice item name accepted")
+		}
+	}
+	if _, err := ValidateRuntimeSetting(configport.InvoiceDefaultGoodsName, json.RawMessage{'"', 0xff, '"'}); err == nil {
+		t.Fatal("invalid UTF-8 silently replaced")
+	}
+}
 
 func TestRuntimeCatalogRetainsTwelveLegacyCategoriesAndReferencePresence(t *testing.T) {
 	catalog := RuntimeCatalog(map[string]bool{
