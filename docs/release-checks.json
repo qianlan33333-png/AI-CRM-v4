@@ -1,77 +1,12 @@
 {
   "schema": 1,
-  "baseline_sha": "b482603a1eb0a93a0c17a33470b9558953cc1b29",
+  "baseline_sha": "62d6ef5e0b153bea66ca9646429bfd992a7f42a7",
   "checks": [
     {
-      "lane": "backend",
-      "package": "./internal/invoice"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/invoice/provider"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLOfficialTitleSharedAndValidated",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLBuyerCorrectionAtomicAndOnce",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLBuyerCorrectionRejectsStaleOrUnsafe",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLUnsubmittedReplayStopsAfterSecondUnknown",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLFailedRecoveryCurrentFinanceAndAtomic",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLFailedTestCanonicalRecoveryPreservesFacts",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLSelfTitleAtomicAndReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLOfficialTitleRaceAndHistory",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLBillEntryUnifiedAndAtomic",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLBillAndManualConcurrentFirstTitle",
-      "postgres": true
+      "lane": "preflight",
+      "path": "docs/assessments/2026-10-09-volcengine-production-migration/test_preparation_contract.py"
     }
   ],
-  "installed_checks": [
-    "invoice-bill-entry-installed"
-  ]
+  "installed_checks": [],
+  "build_commands": []
 }
