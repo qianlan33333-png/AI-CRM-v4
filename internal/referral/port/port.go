@@ -17,6 +17,7 @@ var (
 	ErrNotFound             = errors.New("referral record not found")
 	ErrCampaignConfigLocked = errors.New("referral campaign configuration locked")
 	ErrInvalidRequest       = errors.New("invalid referral request")
+	ErrPosterDimensions     = errors.New("poster does not match the reference dimensions")
 	ErrConflict             = errors.New("referral command conflict")
 	ErrUnavailable          = errors.New("referral unavailable")
 	ErrUnauthorized         = errors.New("referral unauthorized")
@@ -100,6 +101,8 @@ type CampaignPoster struct {
 	ShareText     string
 	ImageURL      string
 	SourceImageID int64
+	Width, Height int
+	QRLayout      PosterQRLayout
 }
 
 type CampaignPosterImage struct {
@@ -111,7 +114,8 @@ type CampaignPosterSource struct {
 	ImageID     int64  `json:"image_id"`
 	Description string `json:"description"`
 	// Empty copy retains the digest shape of existing publication receipts.
-	ShareText string `json:"share_text,omitempty"`
+	ShareText string          `json:"share_text,omitempty"`
+	QRLayout  *PosterQRLayout `json:"qr_layout,omitempty"`
 }
 
 type SetCampaignPostersCommand struct {

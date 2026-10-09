@@ -1,28 +1,34 @@
-# Invoice settings design QA
+# 裂变海报参考模板及运行时布局 QA
 
-## Result
+final result: passed
 
-Passed for this configuration extension. Product Design used the existing rendered V4 configuration page as its source. Actual mounted Go composition, PostgreSQL Config handler, Access session and CSRF were exercised in an isolated local environment. No real Provider write or production credential change was performed by the browser journey.
+## 对比输入与状态
 
-## Source and matched comparison
+- Source visual truth：`/Users/qianlan/Downloads/新CRM/release-control/referral-poster-fixed-template/2026-10-09/reference.png`，用户原图1250×2426px。
+- Implementation：同目录`screenshots/composed-375.png`、`composed-430.png`，真实Go应用、PostgreSQL、管理员素材上传/发布、可信参与会话生成的PNG，均1250×2426px。
+- Full-view comparison：同目录`comparison-full.png`，2500×2426px，左右同尺寸原图与浏览器生成结果，没有拉伸或裁切。
+- Focused comparison：同目录`comparison-qr.png`，860×480px，将原图及结果相同 `(780,1900,430,480)` 区域并排。
+- Mobile evidence：同目录`screenshots/poster-375.png`、`poster-430.png`，375/430×850 CSS px，density1；并排输入`comparison-mobile.png`。海报以原宽高比缩放到现有45vh预览；二维码坐标按原图像素计算。
+- State：已参加用户的「邀请好友」弹窗、第一张海报、两行含表情话术。实际坐标API修改后无需重载页面，重新打开弹窗验证最新布局。
 
-Evidence directory: `/Users/qianlan/Documents/Codex/2026-10-09/invoice-admin-settings/`.
+## 发现与保真表面
 
-- Source: baseline `2217897214dbf859dace6fe1a236e6e352abc1b1`, rendered `/admin/configDetail.html?cat=wechat_pay`, untouched form, APIv3/private key references absent in the isolated fixture.
-- Desktop: 1440 × 1000 viewport, DPR 1. Source screenshot `source-desktop.png` (1440 × 1184); final `implementation-desktop-v2.png` (1440 × 2395). Combined `comparison-desktop-v2.png`; common-shell focus `comparison-desktop-focused-v2.png`.
-- Mobile: 446 × 959 viewport, DPR 1. Source screenshot `source-mobile.png` (446 × 1542); final `implementation-mobile-v2.png` (446 × 3087). Combined `comparison-mobile-v2.png`; common-shell focus `comparison-mobile-focused-v2.png`; new settings focus `configuration-mobile-focused-v2.png`.
-- Full combined and focused comparisons were visually inspected. The page grows vertically for the requested fields; it retains the same shell, card grouping, typography, blue controls, spacing and borders. No image assets are added or changed.
+没有需修复的P0/P1/P2视觉偏差。初次视觉比对通过，没有据此修改视觉后遗漏重新截图。
 
-## Corrections and recheck
+- 字体和排版：参考海报logo、标题、讲师介绍、课程安排与价格文字均保留原图像素，无字体替换、HTML复刻、重新换行或压缩。弹窗及话术沿用现有页面字体与层级。
+- 间距及布局：1250×2426原画布完整保留，默认白框330×330，左上角830/1952，右90/底144。两档手机无横向溢出、未裁切海报，复制及下载入口可见。
+- 色彩：海报纹理、背景、图片及正文颜色未重绘；原图二维码区域以外逐像素比较差异数为0。弹窗保持当前CRM橙色主操作及浅背景。
+- 图片质量：使用用户提供的源PNG，Canvas按原图分辨率合成后导出PNG，未生成替代素材或拉伸。二维码使用整数像素黑模块、至少四模块白边；白框完整遮盖原码。白框直角及新的无logo专属二维码是动态替换的预期差异。
+- 文案：原海报文案保留，后台规格提示更新；用户话术原文、空格、表情和换行保持一致，未添加坐标编辑控件。
 
-Initial mobile rendering put explanatory text beside the card heading and squeezed its title (P2). V2 moves explanations below the full-width heading and wraps them. It also removes a promise about refund processing when invoices are disabled that the runtime does not guarantee. Rechecked full and focused desktop/mobile comparisons: no unresolved P0–P2 visual issue.
+## 行为证据
 
-Fonts remain `PingFang SC`, `HarmonyOS Sans SC`, `Hiragino Sans GB`, `Microsoft YaHei`, then system sans-serif. Final mobile measurement: viewport/scroll width 446/446, DPR 1. Inputs fit their table cells; buttons wrap within the card. Enterprise-only invoice copy and default-tax fallback/override copy match the approved business behavior.
+- Chromium旅程通过375/430px真实管理员发布、用户邀请、剪贴板写入/读取、点选及触摸切换、保存配置后读回，浏览器异常检查通过。
+- 同一运行实例及页面通过PUT修改slot1到810/1932/370，同键重放不增加版本；GET确认；关弹窗再打开立即采用新布局，slot2/3及话术未变化。
+- 默认与修改后两档PNG共四张，由独立Apple Vision解码，各仅一个码，均等于可信当前用户邀请链接；原码不残留。
+- 默认及修改后逐像素比对，配置白框外差异均为0。证据：`screenshots/pixels-375.json`、`pixels-430.json`、`qr-decoding.log`。
+- UI合同覆盖二维码区域过小/越界时明确失败、无旧PNG或可用下载、话术仍可复制；原有迟到图片、加载失败、0/1/3张、复制回退/失败及后台绑定测试通过。
 
-## Actual interactions
+## 剩余验收
 
-Changed the fixture seller name to `隔离验收销售方已保存`, selected 1%, confirmed the card template, refreshed status, saved a draft, ran cross-module validation, published, navigated independently back to the configuration page and read back the values. Unsaved form edits disable card submission even after status refresh. Published values are distinct from the still-running API's startup configuration; card submission remains disabled until exact applied configuration readback. Empty key upload shows a local validation message; no secret is entered or transmitted. Captured `ui-published-isolated.png`, `ui-published-readback-isolated.png` and `ui-published-readback-mobile.png`. Console warnings/errors: none in final operation tab.
-
-## Limits
-
-Real key upload permissions on the installed host, authenticated production readback, and live Tencent card-template writes require separate installed/provider evidence. This local design pass does not assert those outcomes. Actual previous invoice/card delivery is recorded separately in the parent task evidence.
+微信iOS/Android真机长按保存、系统复制粘贴仍待单独验收；macOS合成浏览器及独立图像解码不冒称真机或生产结果。正式Linux构建/安装及相关安装后旅程由唯一路由发布工作台执行。本报告未安装共享环境或修改生产活动。

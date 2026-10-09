@@ -181,6 +181,8 @@ func (h *Handler) ServeAdminHTTP(w http.ResponseWriter, r *http.Request) {
 		h.updateCampaign(w, r, parts[1], actor)
 	case len(parts) == 3 && parts[0] == "campaigns" && parts[2] == "posters" && r.Method == http.MethodPut:
 		h.setCampaignPosters(w, r, parts[1], actor)
+	case len(parts) == 3 && parts[0] == "campaigns" && parts[2] == "poster-layouts" && r.Method == http.MethodPut:
+		h.setCampaignPosterLayouts(w, r, parts[1], actor)
 	case len(parts) == 3 && parts[0] == "campaigns" && parts[2] == "state" && r.Method == http.MethodPost:
 		h.setCampaignState(w, r, parts[1], actor)
 	case len(parts) == 3 && parts[0] == "campaigns" && parts[2] == "teams" && r.Method == http.MethodPost:
@@ -1792,6 +1794,8 @@ func resultError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "campaign_config_locked")
 	case errors.Is(err, referralport.ErrInvalidRequest):
 		writeError(w, http.StatusBadRequest, "invalid_request")
+	case errors.Is(err, referralport.ErrPosterDimensions):
+		writeError(w, http.StatusBadRequest, "poster_dimensions_invalid")
 	case errors.Is(err, referralport.ErrConflict):
 		writeError(w, http.StatusConflict, "conflict")
 	default:

@@ -30,7 +30,7 @@ func TestPostgreSQLCampaignPosterShareTextBindingAndAtomicPublication(t *testing
 	defer h.cleanup()
 	ctx := context.Background()
 	var buffer bytes.Buffer
-	if err := png.Encode(&buffer, image.NewRGBA(image.Rect(0, 0, 600, 800))); err != nil {
+	if err := png.Encode(&buffer, image.NewRGBA(image.Rect(0, 0, 1250, 2426))); err != nil {
 		t.Fatal(err)
 	}
 	media := &posterImageStub{content: buffer.Bytes(), enabled: true}
@@ -103,7 +103,7 @@ func TestPostgreSQLCampaignPosterShareTextMigrationPreservesLegacySnapshot(t *te
 	defer h.cleanup()
 	ctx := context.Background()
 	var buffer bytes.Buffer
-	if err := png.Encode(&buffer, image.NewRGBA(image.Rect(0, 0, 600, 800))); err != nil {
+	if err := png.Encode(&buffer, image.NewRGBA(image.Rect(0, 0, 1250, 2426))); err != nil {
 		t.Fatal(err)
 	}
 	audit, err := platformaudit.NewService(platformaudit.NewPostgreSQLStore())
@@ -174,7 +174,7 @@ func TestPostgreSQLCampaignPostersPublishSnapshotAndIdempotentRetry(t *testing.T
 	h := newReferralPostgreSQLHarness(t)
 	defer h.cleanup()
 	ctx := context.Background()
-	canvas := image.NewRGBA(image.Rect(0, 0, 600, 800))
+	canvas := image.NewRGBA(image.Rect(0, 0, 1250, 2426))
 	canvas.Set(5, 5, color.RGBA{R: 255, A: 255})
 	var buffer bytes.Buffer
 	if err := png.Encode(&buffer, canvas); err != nil {

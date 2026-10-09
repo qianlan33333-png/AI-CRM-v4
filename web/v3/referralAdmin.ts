@@ -2,6 +2,7 @@
 // with safe read-model projections and never exposes customer IDs in the UI.
 import { downloadQr } from "../src/admin/sections/qr";
 import { openShareQrDialog } from "./shared/ui/shareQrDialog";
+import { parsePosterQRLayout, referencePosterTemplate, type PosterQRLayout } from "./shared/posterLayout";
 
 export {};
 
@@ -24,7 +25,7 @@ type Campaign = {
   productID: number;
   productType: string;
   leaderboardMetric: "invites" | "sales_amount" | "sales_orders";
-  posters: Array<{ slot: number; imageID: number; description: string; shareText: string; imageURL: string }>;
+  posters: Array<{ slot: number; imageID: number; description: string; shareText: string; imageURL: string; qrLayout?: PosterQRLayout }>;
 };
 type Tab =
   | "campaigns"
@@ -166,6 +167,7 @@ function errorText(status: number, raw: unknown): string {
     captain_already_assigned: "该客户已是本活动其他战队的队长。",
     idempotency_conflict: "本次提交内容已变化，请重新打开表单后重试。",
     invalid_request: "提交内容无效，未执行操作。",
+    poster_dimensions_invalid: `默认海报请使用 ${referencePosterTemplate.width}×${referencePosterTemplate.height}px 图片；其他版式需通过管理员接口设置二维码位置。`,
     campaign_config_locked:
       "活动规则已锁定，可修改名称、封面、介绍与奖励说明；参与规则和时间不可变更。",
     not_found: "记录不存在或已不可见。",
@@ -240,7 +242,7 @@ function parseCampaign(raw: unknown): Campaign {
           : "invites",
     posters: Array.isArray(row.posters) ? row.posters.map((item) => {
       const poster = obj(item);
-      return { slot: int(poster.slot), imageID: int(poster.image_id), description: str(poster.description), shareText: str(poster.share_text), imageURL: str(poster.image_url) };
+      return { slot: int(poster.slot), imageID: int(poster.image_id), description: str(poster.description), shareText: str(poster.share_text), imageURL: str(poster.image_url), qrLayout: parsePosterQRLayout(poster.qr_layout) };
     }).filter((item) => item.slot >= 1 && item.slot <= 3 && item.imageID > 0) : [],
   };
 }
@@ -1230,7 +1232,7 @@ function openCampaignForm(existing?: Campaign): void {
     area("活动介绍", "活动介绍", existing?.introduction || ""),
     area("奖励说明", "奖励说明", existing?.reward || ""),
   );
-  const posterSection = section("邀请海报", "最多 3 张。每张可填写配套话术；用户切换海报时话术一起切换。图片右下角请预留专属二维码位置。");
+  const posterSection = section("邀请海报", `最多 3 张，默认制图规格 ${referencePosterTemplate.width}×${referencePosterTemplate.height}px。右下角二维码预留 ${referencePosterTemplate.qr_layout.size}×${referencePosterTemplate.qr_layout.size}px，距右 ${referencePosterTemplate.width-referencePosterTemplate.qr_layout.x-referencePosterTemplate.qr_layout.size}px、距底 ${referencePosterTemplate.height-referencePosterTemplate.qr_layout.y-referencePosterTemplate.qr_layout.size}px。每张可填写配套话术；切换海报时话术一起切换。`);
   posterSection.classList.add("referral-admin-poster-section");
   if (existing) {
     const posterList = node("div");
@@ -1274,19 +1276,20 @@ function openCampaignForm(existing?: Campaign): void {
       posterRows.push({ slot: posterRows.length+1, imageID: image.id, description: image.name.slice(0,80), shareText: "", imageURL: `/api/admin/image-library/${image.id}/variants/thumb_320` });
       drawPosters();
     });
-    let pendingReadback: Array<{ image_id: number; description: string; share_text: string }> | undefined;
+    let pendingReadback: Array<{ image_id: number; description: string; share_text: string; qr_layout?: PosterQRLayout }> | undefined;
     const savePosters = action("发布海报配置", async () => {
       const controls = Array.from(posterSection.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>("input,textarea,button"));
       controls.forEach((control) => { control.disabled = true; });
       try {
         if (!pendingReadback) {
-          const payload = posterRows.map((row) => ({ image_id: row.imageID, description: row.description.trim(), share_text: row.shareText.trim() ? row.shareText : "" }));
+          const payload = posterRows.map((row) => ({ image_id: row.imageID, description: row.description.trim(), share_text: row.shareText.trim() ? row.shareText : "", ...(row.qrLayout ? { qr_layout: row.qrLayout } : {}) }));
           await api(`/campaigns/${existing.id}/posters`, { method: "PUT", body: JSON.stringify({ expected_version: existing.version, posters: payload }) }, `posters:${existing.id}`);
           pendingReadback = payload;
         }
         const saved = parseCampaign(await api(`/campaigns/${existing.id}`));
         if (saved.id !== existing.id || saved.version < 1) throw new Error("配置已发布，但尚未确认保存结果，请重试读取。");
-        const matches = JSON.stringify(saved.posters.map((row) => ({ image_id: row.imageID, description: row.description, share_text: row.shareText }))) === JSON.stringify(pendingReadback);
+        const expected = pendingReadback;
+        const matches = saved.posters.length === expected.length && saved.posters.every((row,i) => row.imageID === expected[i].image_id && row.description === expected[i].description && row.shareText === expected[i].share_text && (!expected[i].qr_layout || JSON.stringify(row.qrLayout) === JSON.stringify(expected[i].qr_layout)));
         existing.version = saved.version;
         existing.posters = saved.posters;
         posterRows.splice(0, posterRows.length, ...saved.posters.map((row) => ({ ...row })));

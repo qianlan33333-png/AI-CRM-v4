@@ -1,8 +1,9 @@
 // Public referral campaign host.  It only consumes safe display projections
 // emitted by Referral HTTP; browser query parameters are never customer proof.
 export {};
-import qrcode from "qrcode-generator";
 import { copyPlainText as copy } from "./shared/ui/plainTextClipboard";
+import { composeReferralPoster } from "./shared/posterComposition";
+import { parsePosterQRLayout, type PosterQRLayout } from "./shared/posterLayout";
 
 type Row = Record<string, unknown>;
 type Campaign = {
@@ -23,7 +24,7 @@ type Campaign = {
   teams: Team[];
   activityURL: string;
   productURL: string;
-  posters: Array<{ slot: number; description: string; shareText: string; imageURL: string }>;
+  posters: Array<{ slot: number; description: string; shareText: string; imageURL: string; width: number; height: number; qrLayout?: PosterQRLayout }>;
 };
 type Team = { id: number; name: string; logoURL: string; captainName: string };
 type Me = {
@@ -242,7 +243,7 @@ function parseCampaign(raw: unknown): Campaign {
     productURL: str(row.product_url),
     posters: Array.isArray(row.posters) ? row.posters.map((item) => {
       const poster = obj(item);
-      return { slot: num(poster.slot), description: str(poster.description), shareText: str(poster.share_text), imageURL: str(poster.image_url) };
+      return { slot: num(poster.slot), description: str(poster.description), shareText: str(poster.share_text), imageURL: str(poster.image_url), width: num(poster.image_width), height: num(poster.image_height), qrLayout: parsePosterQRLayout(poster.qr_layout) };
     }).filter((item) => item.slot >= 1 && item.slot <= 3 && item.imageURL.startsWith("/api/v1/referral/campaigns/")) : [],
   };
 }
@@ -941,6 +942,8 @@ async function beginParticipation(): Promise<void> {
 }
 async function openInvite(): Promise<void> {
   if (!campaign || !me?.participant) return;
+  if (document.querySelector('dialog[data-testid="referral-invite-dialog"][open]')) return;
+  const currentCampaign = campaign;
   try {
     let url = "";
     if (campaign.qualificationMode === "product_purchase") {
@@ -972,6 +975,11 @@ async function openInvite(): Promise<void> {
       !/^\/referral\/invite\/rfi_[A-Za-z0-9_-]{43}$/.test(parsed.pathname)
     ))
       throw new Error("服务端返回的邀请入口无效。");
+    // Layouts are live content configuration. Reopening uses current metadata
+    // without rebuilding the application or reloading the whole public page.
+    const latest = parseCampaign(await api(`/campaigns/${currentCampaign.id}`));
+    if (campaign !== currentCampaign || latest.id !== currentCampaign.id) return;
+    currentCampaign.posters = latest.posters;
     invite = { qrPayload: parsed.toString() };
     renderInviteDialog();
   } catch (error) {
@@ -980,37 +988,6 @@ async function openInvite(): Promise<void> {
       true,
     );
   }
-}
-async function composePoster(imageURL: string, payload: string): Promise<HTMLCanvasElement> {
-  const source = new Image();
-  source.decoding = "async";
-  source.src = imageURL;
-  await source.decode();
-  const canvas = document.createElement("canvas");
-  canvas.width = source.naturalWidth;
-  canvas.height = source.naturalHeight;
-  const ctx = canvas.getContext("2d");
-  if (!ctx || canvas.width < 600 || canvas.height < 800) throw new Error("海报图片不可用。");
-  ctx.drawImage(source, 0, 0);
-  // All poster artwork reserves the lower-right square for this QR. It is
-  // composed at preview/download time from the current trusted invite URL.
-  const qr = qrcode(0, "M");
-  qr.addData(payload, "Byte");
-  qr.make();
-  const size = Math.round(Math.min(canvas.width * 0.25, canvas.height * 0.19));
-  const x = canvas.width - size - Math.round(canvas.width * 0.06);
-  const y = canvas.height - size - Math.round(canvas.height * 0.06);
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(x, y, size, size);
-  const quiet = Math.max(4, Math.floor(size * 0.06));
-  const cell = (size - quiet * 2) / qr.getModuleCount();
-  ctx.fillStyle = "#1b1b1b";
-  for (let row = 0; row < qr.getModuleCount(); row++) {
-    for (let col = 0; col < qr.getModuleCount(); col++) {
-      if (qr.isDark(row, col)) ctx.fillRect(x + quiet + col * cell, y + quiet + row * cell, Math.ceil(cell), Math.ceil(cell));
-    }
-  }
-  return canvas;
 }
 async function renderInviteDialog(): Promise<void> {
   if (!invite || !campaign) return;
@@ -1105,7 +1082,7 @@ async function renderInviteDialog(): Promise<void> {
     position.textContent = `${index + 1} / ${posters.length}`;
     selectors.querySelectorAll("button").forEach((node, buttonIndex) => node.setAttribute("aria-pressed", String(buttonIndex === index)));
     try {
-      const canvas = await composePoster(poster.imageURL, qrPayload);
+      const canvas = await composeReferralPoster(poster.imageURL, qrPayload, poster.qrLayout, poster.width, poster.height);
       if (current !== selection || !dialog.open) return;
       const png = canvas.toDataURL("image/png");
       const image = document.createElement("img");
@@ -1117,8 +1094,8 @@ async function renderInviteDialog(): Promise<void> {
       selectedPNG = png;
       download.disabled = false;
       saveHint.hidden = false;
-    } catch {
-      if (current === selection && dialog.open) preview.replaceChildren(element("p", "海报加载失败，请稍后重试。"));
+    } catch (error) {
+      if (current === selection && dialog.open) preview.replaceChildren(element("p", error instanceof Error ? error.message : "海报加载失败，请稍后重试。"));
     }
   };
   posters.forEach((_poster, index) => {

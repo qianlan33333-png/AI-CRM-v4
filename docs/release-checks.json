@@ -1,48 +1,96 @@
 {
   "schema": 1,
-  "baseline_sha": "b9234588b657e3795bb5c618858d742a3243b6c1",
+  "baseline_sha": "6b28130afa0f2b8e784b3e7372faf3451d33cfda",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/config",
-      "path": "internal/config/runtime_catalog.go"
+      "package": "./internal/referral/http",
+      "path": "internal/referral/http/posters.go"
     },
     {
       "lane": "backend",
-      "package": "./internal/config/app",
-      "path": "internal/config/app/runtime_releases.go"
+      "package": "./internal/referral/port",
+      "path": "internal/referral/port/poster_layout.go"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/store",
+      "path": "internal/referral/store/posters.go"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLPosterLayoutsAtomicRuntimeUpdate",
+      "postgres": true,
+      "path": "internal/referral/app/poster_layouts_integration_test.go",
+      "fresh": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLPosterLayoutMigrationAndCustomDimensions",
+      "postgres": true,
+      "path": "internal/referral/app/poster_layouts_integration_test.go",
+      "fresh": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLCampaignPosterShareTextBindingAndAtomicPublication",
+      "postgres": true,
+      "path": "internal/referral/app/posters_integration_test.go",
+      "fresh": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLCampaignPosterShareTextMigrationPreservesLegacySnapshot",
+      "postgres": true,
+      "path": "internal/referral/app/posters_integration_test.go",
+      "fresh": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLCampaignPostersPublishSnapshotAndIdempotentRetry",
+      "postgres": true,
+      "path": "internal/referral/app/posters_integration_test.go",
+      "fresh": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoiceInstalledFixtureConfigContract"
+      "test": "TestMountReferralSeparatesPublicAndAdminPrefixes",
+      "path": "cmd/aicrm/referral_routes_test.go"
     },
     {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLInstalledFixtureStartup",
-      "postgres": true
+      "lane": "frontend",
+      "path": "web/v3/referralPosterShareText.test.mjs"
     },
     {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoiceRuntimeActivationRequiresFinanceAndCredentials"
+      "lane": "frontend",
+      "path": "web/v3/referralCenter.test.mjs"
     },
     {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoiceSettingsPostgreSQLProductTaxWithoutDefault",
-      "postgres": true
+      "lane": "frontend",
+      "path": "web/v3/referralAdmin.test.mjs"
     },
     {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoiceSettingsPostgreSQLPublishAndCompositionReadback",
-      "postgres": true
+      "lane": "frontend",
+      "path": "web/v3/referralSettings.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralCenter.captainJourney.test.mjs"
+    },
+    {
+      "lane": "browser",
+      "test": "TestPostgreSQLReferralChromiumJourney",
+      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go"
     }
   ],
   "installed_checks": [
-    "invoice-callback"
+    "referral"
   ],
   "build_commands": []
 }

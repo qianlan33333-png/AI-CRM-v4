@@ -99,7 +99,7 @@ try {
   // isolated database. All three slots intentionally use one fixture image.
   const form = new FormData();
   form.append('name', '邀请海报测试图片');
-  form.append('image', new Blob([Buffer.from(process.env.AICRM_REFERRAL_POSTER_PNG, 'base64')], { type: 'image/png' }), 'poster.png');
+  form.append('image', new Blob([await fs.readFile(process.env.AICRM_REFERRAL_POSTER_PATH)], { type: 'image/png' }), 'poster.png');
   const upload = await fetch(base+'/api/admin/image-library/upload', { method: 'POST', headers: { Cookie: staffCookies.join('; '), Origin: base, 'X-CSRF-Token': adminCSRF, 'Idempotency-Key': 'referral-poster-browser-upload' }, body: form });
   const uploaded = await upload.json();
   assert.ok(upload.ok && uploaded.item?.id, `poster upload: ${JSON.stringify(uploaded)}`);
@@ -109,6 +109,8 @@ try {
     await api(`/api/admin/referral/campaigns/${c.id}/posters`, { expected_version: current.version, posters: shareTexts.map((share_text,i)=>({ image_id: uploaded.item.id, description: `海报${i+1}`, share_text })) }, undefined, 'PUT');
     const readback = await api(`/api/admin/referral/campaigns/${c.id}`);
     assert.deepEqual(readback.posters.map(p=>p.share_text), shareTexts, 'published text readback');
+    assert.deepEqual(readback.posters.map(p=>p.qr_layout),Array(3).fill({x:830,y:1952,size:330}),'fixed reference layout');
+    assert.ok(readback.posters.every(p=>p.image_width===1250&&p.image_height===2426));
   }
   await call('Browser.grantPermissions', { origin: base, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
   for(let index=0;index<2;index++){
@@ -137,7 +139,7 @@ try {
     await evaluate("document.querySelector('[data-testid=referral-invite]').click()");
     await wait("document.querySelector('[data-testid=referral-invite-dialog]')");
     assert.equal(await evaluate("document.querySelector('[data-testid=referral-invite-url]')===null"),true,'poster panel has no editable link action');
-    await wait("document.querySelector('[data-testid=referral-poster-image]')?.naturalWidth===600");
+    await wait("document.querySelector('[data-testid=referral-poster-image]')?.naturalWidth===1250");
     assert.equal(await evaluate("document.querySelector('[data-testid=referral-poster-share-text]').textContent"),shareTexts[0]);
     const composedPNG = await evaluate("document.querySelector('[data-testid=referral-poster-image]').src");
     assert.match(composedPNG,/^data:image\/png;base64,/);
@@ -148,6 +150,13 @@ try {
     assert.equal(personalPreview.inviter_display_name,actors[2].name,'personal artwork must use the current session actor');
     await fs.writeFile(path.join(screenshots,`composed-${index?430:375}.png`),Buffer.from(composedPNG.split(',')[1],'base64'));
     await fs.writeFile(path.join(screenshots,`composed-${index?430:375}.json`),JSON.stringify({expected_url:invitationURL}));
+    const compareArtwork = async layout => {
+      const differences = await evaluate(`(async()=>{const current=document.querySelector('[data-testid=referral-poster-image]');const source=new Image();source.src=${JSON.stringify(base+`/api/v1/referral/campaigns/${campaigns[index].c.id}/posters/1`)};await source.decode();const canvas=document.createElement('canvas');canvas.width=1250;canvas.height=2426;const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(source,0,0);const before=ctx.getImageData(0,0,1250,2426).data;ctx.clearRect(0,0,1250,2426);ctx.drawImage(current,0,0);const after=ctx.getImageData(0,0,1250,2426).data;const box=${JSON.stringify(layout)};let differentOutside=0,changedInside=0;for(let y=0;y<2426;y++)for(let x=0;x<1250;x++){const i=(y*1250+x)*4;const changed=before[i]!==after[i]||before[i+1]!==after[i+1]||before[i+2]!==after[i+2]||before[i+3]!==after[i+3];if(changed){if(x>=box.x&&x<box.x+box.size&&y>=box.y&&y<box.y+box.size)changedInside++;else differentOutside++;}}return{differentOutside,changedInside};})()`);
+      assert.equal(differences.differentOutside,0,'original artwork stays pixel exact outside configured QR');
+      assert.ok(differences.changedInside>0,'QR replaces source pixels');
+      return differences;
+    };
+    const fixedPixels=await compareArtwork({x:830,y:1952,size:330});
     const posterImage=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,`poster-${index?430:375}.png`),Buffer.from(posterImage.data,'base64'));
     const clickPoint = await evaluate("(()=>{const button=document.querySelector('[data-testid=referral-copy-share-text]');button.scrollIntoView({block:'center'});const r=button.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()");
     await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...clickPoint});
@@ -165,6 +174,32 @@ try {
     await wait("document.querySelector('.referral-poster-share').hidden");
     assert.equal(await evaluate("document.querySelector('[data-testid=referral-poster-next]').disabled"),true,'third poster does not wrap');
 
+    await evaluate("document.querySelector('[data-testid=referral-invite-dialog]').close()");
+    await wait("!document.querySelector('[data-testid=referral-invite-dialog]')");
+    // Runtime metadata update, same server and same loaded page. No rebuild/reload.
+    const currentConfig=await api(`/api/admin/referral/campaigns/${campaigns[index].c.id}`);
+    const adjusted={x:810,y:1932,size:370};
+    const updateKey=crypto.randomUUID();
+    const updateBody={expected_version:currentConfig.version,posters:[{slot:1,...adjusted}]};
+    const updated=await api(`/api/admin/referral/campaigns/${campaigns[index].c.id}/poster-layouts`,updateBody,undefined,'PUT',updateKey);
+    const replay=await api(`/api/admin/referral/campaigns/${campaigns[index].c.id}/poster-layouts`,updateBody,undefined,'PUT',updateKey);
+    assert.equal(replay.version,updated.version,'retry does not increment version');
+    assert.deepEqual(updated.posters.map(p=>p.share_text),shareTexts,'layout API preserves paired copy');
+    const reread=await api(`/api/admin/referral/campaigns/${campaigns[index].c.id}`);
+    assert.equal(reread.version,updated.version);
+    assert.deepEqual(reread.posters[0].qr_layout,adjusted);
+    assert.deepEqual(reread.posters[1].qr_layout,{x:830,y:1952,size:330},'partial update preserves other posters');
+    await evaluate("document.querySelector('[data-testid=referral-invite]').click()");
+    await wait("document.querySelector('[data-testid=referral-poster-image]')?.naturalWidth===1250");
+    assert.equal(await evaluate("document.querySelector('[data-testid=referral-poster-share-text]').textContent"),shareTexts[0]);
+    const adjustedPixels=await compareArtwork(adjusted);
+    const adjustedPNG=await evaluate("document.querySelector('[data-testid=referral-poster-image]').src");
+    assert.notEqual(adjustedPNG,composedPNG,'reopen uses changed runtime coordinates');
+    const freshInviteResponse=networkResponses.findLast(response=>response.url===`${base}/api/v1/referral/campaigns/${campaigns[index].c.id}/invite`);
+    const freshURL=JSON.parse((await call('Network.getResponseBody',{requestId:freshInviteResponse.id})).body).url;
+    await fs.writeFile(path.join(screenshots,`adjusted-${index?430:375}.png`),Buffer.from(adjustedPNG.split(',')[1],'base64'));
+    await fs.writeFile(path.join(screenshots,`adjusted-${index?430:375}.json`),JSON.stringify({expected_url:freshURL,qr_layout:adjusted}));
+    await fs.writeFile(path.join(screenshots,`pixels-${index?430:375}.json`),JSON.stringify({fixed:fixedPixels,adjusted:adjustedPixels}));
     await evaluate("document.querySelector('[data-testid=referral-invite-dialog]').close()");
     assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'),true,'mobile does not horizontally overflow');
     const image=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,`mobile-${index?430:375}.png`),Buffer.from(image.data,'base64'));

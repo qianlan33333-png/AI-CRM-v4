@@ -18,6 +18,7 @@ func TestMountReferralSeparatesPublicAndAdminPrefixes(t *testing.T) {
 		"/referral/activity/7/dpc_ABCDEFGHIJKLMNOPQRSTUV":                       http.StatusNoContent,
 		"/api/v1/referral/campaigns/7/posters/1":                                http.StatusNoContent,
 		"/api/admin/referral/campaigns/7/posters":                               http.StatusAccepted,
+		"/api/admin/referral/campaigns/7/poster-layouts":                        http.StatusAccepted,
 		"/api/v1/referral/campaigns":                                            http.StatusNoContent,
 		"/api/admin/referral/campaigns":                                         http.StatusAccepted,
 		"/referral":                                                             http.StatusTeapot,

@@ -12,7 +12,13 @@ import (
 )
 
 type posterHTTPStub struct {
-	calls []referralport.SetCampaignPostersCommand
+	calls       []referralport.SetCampaignPostersCommand
+	layoutCalls []referralport.SetCampaignPosterLayoutsCommand
+}
+
+func (s *posterHTTPStub) SetCampaignPosterLayouts(_ context.Context, c referralport.SetCampaignPosterLayoutsCommand) (referralport.CampaignPosterLayoutConfiguration, error) {
+	s.layoutCalls = append(s.layoutCalls, c)
+	return referralport.CampaignPosterLayoutConfiguration{CampaignID: c.CampaignID, Version: c.ExpectedVersion + 1, Posters: []referralport.CampaignPoster{{Slot: 1, Width: 1250, Height: 2426, QRLayout: c.Posters[0].PosterQRLayout}}}, nil
 }
 
 func (s *posterHTTPStub) ListCampaignPosters(context.Context, int64, bool) ([]referralport.CampaignPoster, error) {

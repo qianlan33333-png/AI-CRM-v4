@@ -26,6 +26,7 @@ type posterStore interface {
 	ListCampaignPostersWithin(context.Context, int64) ([]referralstore.PublishedPoster, error)
 	ReadCampaignPosterWithin(context.Context, int64, int) (referralport.CampaignPosterImage, error)
 	ReplaceCampaignPostersWithin(context.Context, int64, []referralstore.PublishedPoster, time.Time) error
+	UpdateCampaignPosterLayoutWithin(context.Context, int64, referralstore.PublishedPoster) error
 	LockOperationReceiptWithin(context.Context, string, string, string) error
 	ReadOperationReceiptWithin(context.Context, string, string, string) (referralstore.OperationReceipt, bool, error)
 	AppendOperationReceiptWithin(context.Context, string, string, string, [sha256.Size]byte, string, int64, time.Time) error
@@ -51,7 +52,7 @@ func (s *PosterService) ListCampaignPosters(ctx context.Context, campaignID int6
 	if s == nil || campaignID < 1 {
 		return nil, referralport.ErrInvalidRequest
 	}
-	var stored []referralstore.PublishedPoster
+	var result []referralport.CampaignPoster
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		campaign, err := s.store.ReadCampaignWithin(tx, campaignID, false)
 		if err != nil {
@@ -60,15 +61,42 @@ func (s *PosterService) ListCampaignPosters(ctx context.Context, campaignID int6
 		if !admin && campaign.State == referraldomain.CampaignDraft {
 			return referralport.ErrNotFound
 		}
-		stored, err = s.store.ListCampaignPostersWithin(tx, campaignID)
+		stored, err := s.store.ListCampaignPostersWithin(tx, campaignID)
+		if err != nil {
+			return err
+		}
+		result, err = s.projectPostersWithin(tx, campaignID, stored)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
+	return result, nil
+}
+
+func (s *PosterService) projectPostersWithin(ctx context.Context, campaignID int64, stored []referralstore.PublishedPoster) ([]referralport.CampaignPoster, error) {
 	result := make([]referralport.CampaignPoster, 0, len(stored))
-	for _, p := range stored {
-		result = append(result, referralport.CampaignPoster{Slot: p.Slot, Description: p.Description, ShareText: p.ShareText, SourceImageID: p.SourceImageID, ImageURL: "/api/v1/referral/campaigns/" + strconv.FormatInt(campaignID, 10) + "/posters/" + strconv.Itoa(p.Slot)})
+	for i := range stored {
+		p := &stored[i]
+		if p.Width < 1 || p.Height < 1 {
+			frozen, err := s.store.ReadCampaignPosterWithin(ctx, campaignID, p.Slot)
+			if err != nil {
+				return nil, err
+			}
+			config, _, err := image.DecodeConfig(bytes.NewReader(frozen.Content))
+			if err != nil {
+				return nil, referralport.ErrUnavailable
+			}
+			p.Width, p.Height = config.Width, config.Height
+		}
+		layout := referralport.DefaultPosterQRLayout(p.Width, p.Height)
+		if p.QRLayout != nil {
+			layout = *p.QRLayout
+		}
+		if !layout.Fits(p.Width, p.Height) {
+			return nil, referralport.ErrUnavailable
+		}
+		result = append(result, referralport.CampaignPoster{Slot: p.Slot, Description: p.Description, ShareText: p.ShareText, SourceImageID: p.SourceImageID, Width: p.Width, Height: p.Height, QRLayout: layout, ImageURL: "/api/v1/referral/campaigns/" + strconv.FormatInt(campaignID, 10) + "/posters/" + strconv.Itoa(p.Slot)})
 	}
 	return result, nil
 }
@@ -150,11 +178,18 @@ func (s *PosterService) SetCampaignPosters(ctx context.Context, c referralport.S
 		if mediaType != imageValue.MediaType || (mediaType != "image/png" && mediaType != "image/jpeg") {
 			return nil, referralport.ErrInvalidRequest
 		}
+		template := referralport.ReferencePosterTemplate()
+		if p.QRLayout == nil && (config.Width != template.Width || config.Height != template.Height) {
+			return nil, referralport.ErrPosterDimensions
+		}
+		if p.QRLayout != nil && !p.QRLayout.Fits(config.Width, config.Height) {
+			return nil, referralport.ErrInvalidRequest
+		}
 		shareText := p.ShareText
 		if strings.TrimSpace(shareText) == "" {
 			shareText = ""
 		}
-		prepared = append(prepared, referralstore.PublishedPoster{Slot: i + 1, SourceImageID: p.ImageID, Description: p.Description, ShareText: shareText, MediaType: mediaType, Content: imageValue.Content})
+		prepared = append(prepared, referralstore.PublishedPoster{Slot: i + 1, SourceImageID: p.ImageID, Description: p.Description, ShareText: shareText, MediaType: mediaType, Content: imageValue.Content, Width: config.Width, Height: config.Height, QRLayout: p.QRLayout})
 	}
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		if err := s.store.LockOperationReceiptWithin(tx, "campaign_posters", actor, c.IdempotencyKey); err != nil {

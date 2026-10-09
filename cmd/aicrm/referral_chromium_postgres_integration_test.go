@@ -98,14 +98,26 @@ func TestPostgreSQLReferralChromiumJourney(t *testing.T) {
 	server.Config.Handler = application.handler
 	server.StartTLS()
 	fixture, _ := json.Marshal(actors)
-	poster := image.NewRGBA(image.Rect(0, 0, 600, 800))
+	poster := image.NewRGBA(image.Rect(0, 0, 1250, 2426))
 	draw.Draw(poster, poster.Bounds(), image.NewUniform(color.RGBA{R: 255, G: 243, B: 236, A: 255}), image.Point{}, draw.Src)
 	var posterPNG bytes.Buffer
 	if err = png.Encode(&posterPNG, poster); err != nil {
 		t.Fatal(err)
 	}
+	if sourcePath := os.Getenv("AICRM_REFERRAL_POSTER_SOURCE"); sourcePath != "" {
+		actual, readErr := os.ReadFile(sourcePath)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		posterPNG.Reset()
+		posterPNG.Write(actual)
+	}
+	posterPath := filepath.Join(t.TempDir(), "poster.png")
+	if err = os.WriteFile(posterPath, posterPNG.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
 	command := exec.CommandContext(ctx, "node", filepath.Join(repository, "cmd/aicrm/referral_chromium_journey.mjs"))
-	command.Env = append(os.Environ(), "AICRM_REFERRAL_BROWSER_URL="+server.URL, "AICRM_REFERRAL_BROWSER_ACTORS="+string(fixture), "AICRM_REFERRAL_POSTER_PNG="+base64.StdEncoding.EncodeToString(posterPNG.Bytes()))
+	command.Env = append(os.Environ(), "AICRM_REFERRAL_BROWSER_URL="+server.URL, "AICRM_REFERRAL_BROWSER_ACTORS="+string(fixture), "AICRM_REFERRAL_POSTER_PATH="+posterPath)
 	output, runErr := command.CombinedOutput()
 	if runErr != nil || !strings.Contains(string(output), "referral_chromium: PASS") {
 		t.Fatalf("referral journey err=%v output=%s", runErr, output)

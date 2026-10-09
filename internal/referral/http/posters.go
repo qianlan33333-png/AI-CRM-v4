@@ -14,18 +14,65 @@ type CampaignPosters interface {
 	ListCampaignPosters(context.Context, int64, bool) ([]referralport.CampaignPoster, error)
 	ReadCampaignPoster(context.Context, int64, int) (referralport.CampaignPosterImage, error)
 	SetCampaignPosters(context.Context, referralport.SetCampaignPostersCommand) ([]referralport.CampaignPoster, error)
+	SetCampaignPosterLayouts(context.Context, referralport.SetCampaignPosterLayoutsCommand) (referralport.CampaignPosterLayoutConfiguration, error)
 }
 
 func publicPosters(posters []referralport.CampaignPoster, admin bool) []any {
 	result := make([]any, 0, len(posters))
 	for _, poster := range posters {
-		item := map[string]any{"slot": poster.Slot, "description": poster.Description, "share_text": poster.ShareText, "image_url": poster.ImageURL}
+		item := map[string]any{"slot": poster.Slot, "description": poster.Description, "share_text": poster.ShareText, "image_url": poster.ImageURL, "image_width": poster.Width, "image_height": poster.Height, "qr_layout": poster.QRLayout}
 		if admin {
 			item["image_id"] = poster.SourceImageID
 		}
 		result = append(result, item)
 	}
 	return result
+}
+
+func (h *Handler) setCampaignPosterLayouts(w http.ResponseWriter, r *http.Request, raw string, actor int64) {
+	if h.posters == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable")
+		return
+	}
+	campaignID, ok := id(raw)
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	var input struct {
+		ExpectedVersion int64 `json:"expected_version"`
+		Posters         []struct {
+			Slot int  `json:"slot"`
+			X    *int `json:"x"`
+			Y    *int `json:"y"`
+			Size *int `json:"size"`
+		} `json:"posters"`
+	}
+	if !decode(w, r, &input) {
+		return
+	}
+	if input.ExpectedVersion < 1 || len(input.Posters) < 1 || len(input.Posters) > 3 {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	updates := make([]referralport.PosterLayoutUpdate, 0, len(input.Posters))
+	for _, p := range input.Posters {
+		if p.X == nil || p.Y == nil || p.Size == nil {
+			writeError(w, http.StatusBadRequest, "invalid_request")
+			return
+		}
+		updates = append(updates, referralport.PosterLayoutUpdate{Slot: p.Slot, PosterQRLayout: referralport.PosterQRLayout{X: *p.X, Y: *p.Y, Size: *p.Size}})
+	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.posters.SetCampaignPosterLayouts(r.Context(), referralport.SetCampaignPosterLayoutsCommand{CampaignID: campaignID, ExpectedVersion: input.ExpectedVersion, ActorAdminID: actor, IdempotencyKey: key, Posters: updates})
+	if err != nil {
+		resultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"campaign_id": result.CampaignID, "version": result.Version, "posters": publicPosters(result.Posters, true)})
 }
 
 func (h *Handler) publicPoster(w http.ResponseWriter, r *http.Request, campaignID int64, rawSlot string) {
