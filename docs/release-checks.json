@@ -99,6 +99,10 @@
       "lane": "backend",
       "package": "./internal/config/http",
       "test": "TestOpenAPIDownloadIsAuthenticatedAndMatchesTheReleaseSource"
+    },
+    {
+      "lane": "frontend",
+      "path": "scripts/donor-source-views.test.mjs"
     }
   ],
   "installed_checks": [
