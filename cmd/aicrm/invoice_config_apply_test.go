@@ -69,6 +69,33 @@ func TestInvoiceRuntimeActivationRequiresFinanceAndCredentials(t *testing.T) {
 	if e = app.ValidateEffectiveRuntimeSettings(settings, guards); e != nil {
 		t.Fatal(e)
 	}
+	withoutDefault := append([]cp.RuntimeSetting(nil), settings...)
+	for i, value := range withoutDefault {
+		switch value.Key {
+		case cp.InvoiceDefaultTaxCode, cp.InvoiceDefaultGoodsName:
+			withoutDefault[i] = runtimeApplySetting(t, value.Key, "")
+		case cp.InvoiceDefaultTaxRate:
+			withoutDefault[i] = runtimeApplySetting(t, value.Key, 0)
+		}
+	}
+	if e = app.ValidateEffectiveRuntimeSettings(withoutDefault, guards); e == nil {
+		t.Fatal("enabled without any finance mapping")
+	}
+	guards.InvoiceTaxMappingReady = true
+	if e = app.ValidateEffectiveRuntimeSettings(withoutDefault, guards); e != nil {
+		t.Fatal("valid product taxes require an unnecessary default", e)
+	}
+	for _, partial := range []cp.RuntimeSetting{runtimeApplySetting(t, cp.InvoiceDefaultTaxCode, "3040203000000000000"), runtimeApplySetting(t, cp.InvoiceDefaultGoodsName, "服务费"), runtimeApplySetting(t, cp.InvoiceDefaultTaxRate, 100)} {
+		bad := append([]cp.RuntimeSetting(nil), withoutDefault...)
+		for i := range bad {
+			if bad[i].Key == partial.Key {
+				bad[i] = partial
+			}
+		}
+		if e = app.ValidateEffectiveRuntimeSettings(bad, guards); e == nil {
+			t.Fatal("partial default accepted despite product mapping", partial.Key)
+		}
+	}
 	for _, tc := range []struct {
 		key   cp.RuntimeSettingKey
 		value any

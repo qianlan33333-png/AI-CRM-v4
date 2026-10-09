@@ -8,6 +8,7 @@ import (
 	cp "github.com/qianlan33333-png/AI-CRM-v3/internal/config/port"
 	cs "github.com/qianlan33333-png/AI-CRM-v3/internal/config/store"
 	invoice "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice"
+	ip "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice/port"
 	cfg "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	"os"
 	"path/filepath"
@@ -15,6 +16,79 @@ import (
 	"testing"
 	"time"
 )
+
+func TestInvoiceSettingsPostgreSQLProductTaxWithoutDefault(t *testing.T) {
+	f := newInvoiceFixture(t)
+	runtime := cfg.NormalizeRuntimePolicyDefaults(cfg.Runtime{})
+	runtime.Invoice = cfg.Invoice{Enabled: true, ServiceMerchantID: "service", MerchantSerial: "serial", SellerName: "销售方", SellerTaxID: "SELLER-TAX", BillingPersonID: "开票人", PrivateKeyPath: "fixture-private", PublicKeyPath: "fixture-public", APIV3Key: strings.Repeat("A", 32)}
+	runtime.WeChatPay.Enabled, runtime.WeChatPay.H5OAuthEnabled = true, true
+	runtime.WeChatPay.AppID, runtime.WeChatPay.H5AppID = "wx-fixture", "wx-fixture"
+	runtime.WeChatPay.H5AppScope = "wechat-app:wx-fixture"
+	runtime.WeChatPay.MerchantID, runtime.WeChatPay.MerchantSerial = f.s.Config.MerchantID, "serial"
+	runtime.WeChatPay.AppSecret, runtime.WeChatPay.H5AppSecret = "fixture-app", "fixture-h5"
+	runtime.WeChatPay.PrivateKeyPath, runtime.WeChatPay.PlatformCertPath = "fixture-private", "fixture-cert"
+	runtime.WeChatPay.APIV3Key, runtime.WeChatPay.OrderContactDataKey = strings.Repeat("A", 32), "fixture-contact"
+	runtime.Invoice.TaxConfigPath = filepath.Join(t.TempDir(), "product-tax.json")
+	finance, _ := json.Marshal(f.s.Config.Taxes)
+	if err := os.WriteFile(runtime.Invoice.TaxConfigPath, finance, 0600); err != nil {
+		t.Fatal(err)
+	}
+	defaults, err := runtimeConfigDefaults(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guards := runtimeConfigActivationGuards(runtime)
+	if !guards.InvoiceTaxMappingReady || validateAppliedRuntimeConfig(runtime) != nil {
+		t.Fatal("valid existing product taxes cannot activate")
+	}
+	repo, err := cs.NewPostgreSQL(f.pool, f.s.UoW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releases, err := ca.NewRuntimeReleaseService(f.s.UoW, repo, repo, 1, ca.WithRuntimeDefaults(defaults), ca.WithRuntimeActivationGuards(guards))
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := releases.CreateRuntimeReleaseDraft(f.ctx, cp.RuntimeReleaseDraftCommand{Actor: "7", IdempotencyKey: "product-tax-only-save", Settings: []cp.RuntimeSetting{runtimeApplySetting(t, cp.InvoiceSellerName, "已核对销售方")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	validated, err := releases.ValidateRuntimeRelease(f.ctx, cp.RuntimeReleaseMutationCommand{ReleaseID: draft.ID, Actor: "7", IdempotencyKey: "product-tax-only-validate"})
+	if err != nil || validated.State != cp.RuntimeReleaseValidated {
+		t.Fatal("product-only configuration cannot publish", err, validated.ValidationErrors)
+	}
+	if _, err = releases.PublishRuntimeRelease(f.ctx, cp.RuntimeReleasePublishCommand{ReleaseID: draft.ID, Actor: "7", IdempotencyKey: "product-tax-only-publish", ExpectedChecksum: validated.Checksum}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := releases.EffectiveSnapshot(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, err := applyRuntimeConfig(runtime, snapshot)
+	if err != nil || applied.Invoice.DefaultTaxCode != "" || applied.Invoice.DefaultGoodsName != "" {
+		t.Fatal("published product-only configuration invented a default", err)
+	}
+	consumer, _, err := composeInvoice(f.s.UoW, f.s.Sessions, f.s.Lineage.(invoiceIdentity), f.s.Orders, f.s.Refunds, f.effects, f.s.Jobs.(invoice.QueryEnqueuer).Client, applied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer.Provider = f.s.Provider
+	known := f.orderWithProduct(f.customer, f.customer, "paid", "有专属税目", "course", "wechat_pay", time.Now())
+	missing := f.orderWithProduct(f.customer, f.customer, "paid", "尚未配置税目", "future", "wechat_pay", time.Now())
+	page, err := consumer.List(f.ctx, f.token, ip.OrdersQuery{Limit: 20})
+	if err != nil || len(page.Items) != 2 {
+		t.Fatal("published product taxes unavailable to order consumer", err)
+	}
+	for _, item := range page.Items {
+		if item.ID == known && !item.InvoiceEligible || item.ID == missing && (item.InvoiceEligible || item.InvoiceReason != "tax_not_configured") {
+			t.Fatal("product-only tax eligibility changed", item.ID, item.InvoiceReason)
+		}
+	}
+	unchanged, err := os.ReadFile(runtime.Invoice.TaxConfigPath)
+	if err != nil || string(unchanged) != string(finance) {
+		t.Fatal("publication changed existing finance material")
+	}
+}
 
 func TestInvoiceSettingsPostgreSQLPublishAndCompositionReadback(t *testing.T) {
 	f := newInvoiceFixture(t)

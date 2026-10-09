@@ -351,6 +351,13 @@ func runtimeConfigProtectedReferencePresence(cfg platformconfig.Runtime) map[str
 // credential contract. They contain no secret material and cannot grant an
 // authorization by themselves.
 func runtimeConfigActivationGuards(cfg platformconfig.Runtime) configapp.RuntimeActivationGuards {
+	// Existing per-product finance material remains authoritative even when no
+	// shared fallback has been configured. Expose only readiness, never its path.
+	taxMappingReady := false
+	if cfg.Invoice.TaxConfigPath != "" {
+		taxes, err := loadInvoiceTaxes(cfg.Invoice.TaxConfigPath)
+		taxMappingReady = err == nil && len(taxes) > 0
+	}
 	return configapp.RuntimeActivationGuards{
 		WeComEnabled:              cfg.WeCom.Secret != "" && cfg.WeCom.ContextSigningKey != "",
 		MessageArchiveEnabled:     cfg.WeCom.MessageArchiveSecret != "" && cfg.WeCom.MessageArchiveRunnerPath != "" && cfg.WeCom.MessageArchiveLibraryPath != "" && len(cfg.WeCom.MessageArchivePrivateKeyPaths) > 0,
@@ -360,6 +367,7 @@ func runtimeConfigActivationGuards(cfg platformconfig.Runtime) configapp.Runtime
 		AIAgentGenerationEnabled:  cfg.Effects.ProviderEnabled && cfg.AIGeneration.Ready(),
 		InvoiceSigningReady:       cfg.Invoice.PrivateKeyPath != "" && (cfg.Invoice.PublicKeyPath != "" || cfg.Invoice.PlatformCertPath != ""),
 		InvoiceKeyConfigured:      len(cfg.Invoice.APIV3Key) == 32,
+		InvoiceTaxMappingReady:    taxMappingReady,
 		InvoiceKeyReferenceExists: func(id string) bool {
 			_, e := (configapp.InvoiceKeyFiles{Directory: invoiceMaterialDirectory(cfg)}).Read(id)
 			return e == nil

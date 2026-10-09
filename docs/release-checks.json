@@ -1,36 +1,27 @@
 {
   "schema": 1,
-  "baseline_sha": "a604aff173c90f085228611212fe30c40ae2cc4c",
+  "baseline_sha": "b9234588b657e3795bb5c618858d742a3243b6c1",
   "checks": [
     {
       "lane": "backend",
       "package": "./internal/config",
-      "path": "internal/config/registry.go"
+      "path": "internal/config/runtime_catalog.go"
     },
     {
       "lane": "backend",
       "package": "./internal/config/app",
-      "path": "internal/config/app/manager.go"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/invoice",
-      "path": "internal/invoice/service.go"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/invoice/provider",
-      "path": "internal/invoice/provider/wechat.go"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestStaleAttemptCompletionProjectionKinds"
+      "path": "internal/config/app/runtime_releases.go"
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoiceRuntimeConfigurationPrivateKeyAndDefaults"
+      "test": "TestInvoiceInstalledFixtureConfigContract"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLInstalledFixtureStartup",
+      "postgres": true
     },
     {
       "lane": "backend",
@@ -40,27 +31,7 @@
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestRuntimeConfigDefaultsNormalizesOmittedCompositionPolicy"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestApplyRuntimeConfigAllowsValidatedAutomationAndAIDispatchSwitches"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestApplyRuntimeConfigRejectsBoundPaymentAppIDSwitch"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestApplyRuntimeConfigAllowsInitialBindingAndMerchantCertificateRotation"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoiceCardPostgreSQLAtomicConcurrentAndUnknown",
+      "test": "TestInvoiceSettingsPostgreSQLProductTaxWithoutDefault",
       "postgres": true
     },
     {
@@ -68,46 +39,6 @@
       "package": "./cmd/aicrm",
       "test": "TestInvoiceSettingsPostgreSQLPublishAndCompositionReadback",
       "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLDefaultTaxSupportsFutureProductBothEntries",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/config/http",
-      "test": "TestInvoiceKeyHTTPWriteOnlyAndAuthorization"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/config/http",
-      "test": "TestInvoiceCardHTTPAuthorizationAndPendingConfiguration"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/config/http",
-      "test": "TestRuntimeReleaseMutationRequiresAdminAndNeverElevatesViewer"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/config/http",
-      "test": "TestRuntimeReleaseHTTPJourneyKeepsDraftPublishAndUsageSeparate"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/config/http",
-      "test": "TestRuntimeCatalogHTTPReturnsTwelveCategoriesAndApplicationFactsSeparately"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/config/http",
-      "test": "TestOpenAPIDownloadIsAuthenticatedAndMatchesTheReleaseSource"
-    },
-    {
-      "lane": "frontend",
-      "path": "scripts/donor-source-views.test.mjs"
     }
   ],
   "installed_checks": [

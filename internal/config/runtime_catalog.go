@@ -328,19 +328,23 @@ func ValidateRuntimeDependencies(settings []configport.RuntimeSetting) []configp
 	require(boolAt(configport.SurveyOAuthEnabled), configport.SurveyOAuthEnabled, oauthReady, "需填写 AppID、开放平台 AppID 和 OAuth Scope")
 	require(boolAt(configport.InvoiceEnabled), configport.InvoiceEnabled,
 		boolAt(configport.WeChatPayProviderEnabled) && boolAt(configport.WeChatPayH5OAuthEnabled), "需启用微信支付与公众号授权")
-	for _, key := range []configport.RuntimeSettingKey{configport.InvoiceServiceMerchantID, configport.InvoiceMerchantSerial, configport.InvoiceSellerName, configport.InvoiceSellerTaxID, configport.InvoiceBillingPersonID, configport.InvoiceDefaultGoodsName} {
+	for _, key := range []configport.RuntimeSettingKey{configport.InvoiceServiceMerchantID, configport.InvoiceMerchantSerial, configport.InvoiceSellerName, configport.InvoiceSellerTaxID, configport.InvoiceBillingPersonID} {
 		require(boolAt(configport.InvoiceEnabled), key, textAt(key) != "", "开票配置不能为空")
 	}
 	taxCode := textAt(configport.InvoiceDefaultTaxCode)
-	require(boolAt(configport.InvoiceEnabled), configport.InvoiceDefaultTaxCode, len(taxCode) == 19 && strings.Trim(taxCode, "0123456789") == "", "财务需填写完整 19 位税收分类编码")
 	var rate int64
 	rateValid := json.Unmarshal(values[configport.InvoiceDefaultTaxRate], &rate) == nil
+	// The shared tax is a fallback, not a replacement for valid product taxes.
+	// An absent fallback is allowed; a partially supplied fallback is not.
+	defaultRequested := boolAt(configport.InvoiceEnabled) && (taxCode != "" || textAt(configport.InvoiceDefaultGoodsName) != "" || rate != 0)
+	require(defaultRequested, configport.InvoiceDefaultGoodsName, textAt(configport.InvoiceDefaultGoodsName) != "", "默认开票项目名不能为空")
+	require(defaultRequested, configport.InvoiceDefaultTaxCode, len(taxCode) == 19 && strings.Trim(taxCode, "0123456789") == "", "财务需填写完整 19 位税收分类编码")
 	switch rate {
 	case 0, 100, 150, 300, 500, 600, 900, 1000, 1100, 1300, 1600, 1700:
 	default:
 		rateValid = false
 	}
-	require(boolAt(configport.InvoiceEnabled), configport.InvoiceDefaultTaxRate, rateValid, "税率不受官方接口支持")
+	require(defaultRequested, configport.InvoiceDefaultTaxRate, rateValid, "税率不受官方接口支持")
 
 	return issues
 }

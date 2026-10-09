@@ -56,7 +56,7 @@ type RuntimeReleaseService struct {
 }
 
 type RuntimeActivationGuards struct {
-	InvoiceSigningReady, InvoiceKeyConfigured                                                     bool
+	InvoiceSigningReady, InvoiceKeyConfigured, InvoiceTaxMappingReady                             bool
 	InvoiceKeyReferenceExists                                                                     func(string) bool
 	WeComEnabled, MessageArchiveEnabled, AutomationProviderEnabled, AIDispatchEnabled             bool
 	AIAssistantIntakeEnabled, AIAgentGenerationEnabled, WeChatPayEnabled, WeChatPayH5OAuthEnabled bool
@@ -712,6 +712,7 @@ func runtimeReleaseValidationIssues(defaults, scopeBaseline []configport.Runtime
 	}
 	guard(keyReference != "", configport.InvoiceKeyFileID, keyReady, "上传的服务商密钥文件不可用，请重新上传")
 	guard(boolAt(configport.InvoiceEnabled), configport.InvoiceEnabled, guards.InvoiceSigningReady && keyReady, "需已有服务商签名证书、微信验签材料及 APIv3 密钥")
+	guard(boolAt(configport.InvoiceEnabled), configport.InvoiceDefaultTaxCode, stringAt(configport.InvoiceDefaultTaxCode) != "" || guards.InvoiceTaxMappingReady, "需完整默认税目或已有有效商品税目配置")
 
 	guard(boolAt(configport.WeChatPayProviderEnabled), configport.WeChatPayProviderEnabled, guards.WeChatPayEnabled, "需已有支付受保护凭据")
 	guard(boolAt(configport.WeChatPayH5OAuthEnabled), configport.WeChatPayH5OAuthEnabled, guards.WeChatPayH5OAuthEnabled, "需已有 H5 OAuth 受保护凭据")

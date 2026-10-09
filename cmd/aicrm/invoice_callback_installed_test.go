@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	configport "github.com/qianlan33333-png/AI-CRM-v3/internal/config/port"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
@@ -377,6 +378,20 @@ func TestInvoiceInstalledFixtureConfigContract(t *testing.T) {
 			}
 			if cfg.Role != platformconfig.RoleAPI || cfg.WeCom.Enabled || !cfg.Invoice.CallbackEnabled || cfg.Invoice.Enabled != bill || cfg.Effects.ProviderEnabled != bill || cfg.WeChatPay.Enabled != bill || cfg.WeChatPay.H5OAuthEnabled != bill {
 				t.Fatal("fixture startup capability boundary")
+			}
+			defaults, err := runtimeConfigDefaults(cfg)
+			if err != nil {
+				t.Fatal("fixture runtime defaults", err)
+			}
+			if err = validateAppliedRuntimeConfig(cfg); err != nil {
+				t.Fatal("fixture rejected by composed runtime activation", err)
+			}
+			if bill {
+				for _, setting := range defaults {
+					if setting.Key == configport.InvoiceDefaultTaxCode && string(setting.Value) != `""` {
+						t.Fatal("product-only fixture invented a fallback")
+					}
+				}
 			}
 			if bill {
 				t.Setenv("AICRM_OUTBOUND_PROVIDER_ENABLED", "false")
