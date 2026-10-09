@@ -27,6 +27,25 @@ func (s *Service) RecoverFailed(ctx context.Context, id, expectedInvoiceID strin
 	// Only the explicit one-shot operator (no expected failed ticket) may replay
 	// an unaccepted unknown request. Native jobs and ordinary GET never do this.
 	if canonicalize && expectedInvoiceID == "" && prior.State == "issuing" {
+		var rejection effects.Digest
+		var matched bool
+		err = s.UoW.Within(ctx, func(tx context.Context) error {
+			used, e := s.Store.buyerCorrectionUsed(tx, prior)
+			if e != nil {
+				return e
+			}
+			if used {
+				return p.ErrIneligible
+			}
+			rejection, matched, e = s.Store.buyerMismatch(tx, prior)
+			return e
+		})
+		if err != nil {
+			return p.MarshalReceipt(prior), err
+		}
+		if matched {
+			return s.correctRejectedBuyer(ctx, prior, rejection)
+		}
 		return s.recoverUnsubmitted(ctx, prior)
 	}
 	if prior.State != "failed" || expectedInvoiceID != "" && prior.InvoiceID != expectedInvoiceID {
@@ -73,8 +92,8 @@ func (s *Service) RecoverFailed(ctx context.Context, id, expectedInvoiceID strin
 	if buyer.Type != "ORGANIZATION" || !buyer.Valid(prior.Snapshot) {
 		return p.Receipt{}, p.ErrInvalid
 	}
-	// Preserve only the agreed unit title; never forward travel/email fields.
-	buyer = p.Buyer{Type: buyer.Type, Name: buyer.Name, TaxpayerID: buyer.TaxpayerID, Amount: buyer.Amount, OrderNo: buyer.OrderNo, BillType: buyer.BillType}
+	// Retain the complete official title. WeChat validates optional fields too;
+	// removing a native address/bank/email makes the same unit title inconsistent.
 	var receipt p.Receipt
 	err = s.withOrder(ctx, id, func(tx context.Context, a *p.Application, o order.SelfOrder) error {
 		if a.State != "failed" || a.InvoiceID != prior.InvoiceID {

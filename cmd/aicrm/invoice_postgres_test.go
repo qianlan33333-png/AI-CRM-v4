@@ -61,6 +61,9 @@ type invoiceFixtureProvider struct {
 	titleType        string
 	unsubmittedError error
 	artifact         ep.ResultArtifact
+	officialBuyer    *p.Buyer
+	optionalPresent  bool
+	optionalError    error
 	calls            int
 	mu               sync.Mutex
 }
@@ -69,11 +72,27 @@ func (f *invoiceFixtureProvider) Title(context.Context, p.Application, string) (
 	return p.Launch{AppID: "wx-invoice-fixture", Path: "pages/title", UserName: "gh_fixture", ExpiresAt: time.Now().Add(30 * time.Minute)}, nil
 }
 func (f *invoiceFixtureProvider) ReadTitle(_ context.Context, a p.Application) (p.Buyer, error) {
+	if f.officialBuyer != nil {
+		return *f.officialBuyer, nil
+	}
 	kind := f.titleType
 	if kind == "" {
 		kind = "ORGANIZATION"
 	}
 	return p.Buyer{Type: kind, TaxpayerID: "FIXTURE-TAX", Name: "隔离测试抬头", Amount: a.Snapshot.Amount, OrderNo: a.Snapshot.OrderNo, Phone: "13800000000", Email: "invoice@fixture.test", Address: "fixture address", BankName: "fixture bank"}, nil
+}
+func (f *invoiceFixtureProvider) ReadOptionalTitle(ctx context.Context, a p.Application) (p.Buyer, bool, error) {
+	if _, e := pg.RequireTransaction(ctx); e == nil {
+		return p.Buyer{}, false, errors.New("provider read inside transaction")
+	}
+	if f.optionalError != nil {
+		return p.Buyer{}, false, f.optionalError
+	}
+	if !f.optionalPresent {
+		return p.Buyer{}, false, nil
+	}
+	b, e := f.ReadTitle(ctx, a)
+	return b, e == nil, e
 }
 func (f *invoiceFixtureProvider) Query(_ context.Context, a p.Application) (p.Result, error) {
 	f.mu.Lock()

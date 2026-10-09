@@ -23,13 +23,17 @@ func (s *Service) SubmitTitle(ctx context.Context, token string, orderID int64, 
 	if title.Buyer.Type != "ORGANIZATION" || !utf8.ValidString(title.Buyer.Name) || !utf8.ValidString(title.Buyer.TaxpayerID) || len(title.Buyer.Name) > 256 || len(title.Buyer.TaxpayerID) > 32 || title.ExpectedAmount <= 0 || !(p.Buyer{Type: title.Buyer.Type, Name: title.Buyer.Name, TaxpayerID: title.Buyer.TaxpayerID}).Valid(p.Snapshot{}) {
 		return p.Receipt{}, p.ErrInvalid
 	}
-	return s.create(ctx, token, orderID, key, &title)
+	official, e := s.resolveOfficialTitle(ctx, token, orderID, key, title)
+	if e != nil {
+		return p.Receipt{}, e
+	}
+	return s.create(ctx, token, orderID, key, &title, official)
 }
 
 // Caller holds the same Order lock used by refund and official title processing.
 // The application lock/state check prevents an in-flight official title read
 // from overwriting a confirmed title or accepting a second effect.
-func (s *Service) acceptTitleWithin(ctx context.Context, a *p.Application, o order.SelfOrder, ids []int64, title p.TitleSubmission) error {
+func (s *Service) acceptTitleWithin(ctx context.Context, a *p.Application, o order.SelfOrder, ids []int64, title p.TitleSubmission, official *officialTitle) error {
 	if !slices.Contains(ids, a.CustomerID) {
 		return p.ErrNotFound
 	}
@@ -58,6 +62,12 @@ func (s *Service) acceptTitleWithin(ctx context.Context, a *p.Application, o ord
 		return p.ErrConflict
 	}
 	a.Buyer = p.Buyer{Type: title.Buyer.Type, Name: title.Buyer.Name, TaxpayerID: title.Buyer.TaxpayerID, Amount: snap.Amount, OrderNo: snap.OrderNo, BillType: "COMM_FAPIAO"}
+	if official != nil {
+		if !sameTitleSource(official.Source, snap) || !sameUnit(official.Buyer, a.Buyer) || !official.Buyer.Valid(snap) {
+			return p.ErrConflict
+		}
+		a.Buyer = official.Buyer
+	}
 	raw, _ := json.Marshal(a.Buyer)
 	if e = s.Store.update(ctx, *a, "title_confirmed", string(effects.Hash("invoice.title", string(raw)))); e != nil {
 		return e

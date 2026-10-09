@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "a2802d3ca9cda02f057f7d1da92692275ee70371",
+  "baseline_sha": "b482603a1eb0a93a0c17a33470b9558953cc1b29",
   "checks": [
     {
       "lane": "backend",
@@ -13,19 +13,19 @@
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLUnsubmittedReplayKeepsInvoiceAndIsAtomic",
+      "test": "TestInvoicePostgreSQLOfficialTitleSharedAndValidated",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLUnsubmittedReplayRejectsRefundAndExisting",
+      "test": "TestInvoicePostgreSQLBuyerCorrectionAtomicAndOnce",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLOfficialResponseSharesCompletionTransaction",
+      "test": "TestInvoicePostgreSQLBuyerCorrectionRejectsStaleOrUnsafe",
       "postgres": true
     },
     {
@@ -43,19 +43,31 @@
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLFailedRecoveryRejectsUnsafeProof",
+      "test": "TestInvoicePostgreSQLFailedTestCanonicalRecoveryPreservesFacts",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLAtomicReplayAndUnknownRecovery",
+      "test": "TestInvoicePostgreSQLSelfTitleAtomicAndReplay",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLRefundRacesAndBoundedRetries",
+      "test": "TestInvoicePostgreSQLOfficialTitleRaceAndHistory",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLBillEntryUnifiedAndAtomic",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLBillAndManualConcurrentFirstTitle",
       "postgres": true
     }
   ],

@@ -19,6 +19,7 @@ var (
 	ErrPending      = errors.New("invoice provider result pending")
 	ErrUnavailable  = errors.New("invoice provider unavailable")
 	ErrNotSubmitted = errors.New("invoice application not submitted")
+	ErrTitleAbsent  = errors.New("invoice official title absent")
 )
 
 // ValidApplyID follows the official fapiao_apply_id string(32) contract.
@@ -175,6 +176,11 @@ type Provider interface {
 	Write(context.Context, Application, bool) error
 	File(context.Context, Application) ([]byte, error)
 	SignPage(context.Context, string) (JSConfig, error)
+}
+
+// Only authenticated affirmative absence permits a self-collected title.
+type OptionalTitleReader interface {
+	ReadOptionalTitle(context.Context, Application) (Buyer, bool, error)
 }
 
 // PaymentVerifier uses the already-authenticated Payment adapter. It validates

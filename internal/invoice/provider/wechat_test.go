@@ -334,3 +334,51 @@ func TestInvoiceSignedRejectionBecomesPrivateOwnerReceipt(t *testing.T) {
 		}
 	}
 }
+
+func TestInvoiceOptionalTitleRequiresExactSignedAbsence(t *testing.T) {
+	for _, kind := range []string{"signed-absence", "unsigned", "wrong-code", "unavailable", "present"} {
+		t.Run(kind, func(t *testing.T) {
+			w, key, a := invoiceProviderFixture(t, func(*http.Request) string { return `{}` })
+			trust := Trust{Mode: "public_key", PublicKey: &key.PublicKey, PublicKeyID: "PUB_KEY_ID_1234567890"}
+			client, verifier, id, e := NewTrustedClient(context.Background(), w.MerchantID, "merchant-serial", key, trust, option.WithHTTPClient(&http.Client{Transport: invoiceTransport(func(r *http.Request) (*http.Response, error) {
+				if r.Method != "GET" || r.URL.Query().Get("scene") != "WITH_WECHATPAY" {
+					t.Fatal("unexpected title request")
+				}
+				raw := `{"code":"RESOURCE_NOT_EXISTS","message":"official title absent"}`
+				status := 404
+				if kind == "wrong-code" {
+					raw = `{"code":"OTHER_NOT_FOUND","message":"other absence"}`
+				}
+				if kind == "unavailable" {
+					status = 503
+				}
+				if kind == "present" {
+					raw = `{"type":"ORGANIZATION","name":"official unit","taxpayer_id":"synthetic-tax","address":"official address","bank_account":"account","amount":9900,"out_trade_no":"order-1"}`
+					status = 200
+				}
+				ts, nonce := fmt.Sprint(time.Now().Unix()), "fixture-nonce"
+				sig := invoiceSignature(t, key, raw, ts, nonce)
+				if kind == "unsigned" {
+					sig = "invalid"
+				}
+				return &http.Response{StatusCode: status, Header: http.Header{"Wechatpay-Timestamp": {ts}, "Wechatpay-Nonce": {nonce}, "Wechatpay-Serial": {trust.PublicKeyID}, "Wechatpay-Signature": {sig}}, Body: io.NopCloser(strings.NewReader(raw))}, nil
+			})}))
+			if e != nil {
+				t.Fatal(e)
+			}
+			w.Client, w.Verifier, w.PlatformSerial = client, verifier, id
+			b, present, e := w.ReadOptionalTitle(context.Background(), a)
+			if kind == "signed-absence" {
+				if e != nil || present {
+					t.Fatal("signed absence not recognized", e)
+				}
+			} else if kind == "present" {
+				if e != nil || !present || b.Address != "official address" || b.BankAccount != "account" {
+					t.Fatal("official extras lost", e)
+				}
+			} else if e == nil {
+				t.Fatal("unknown title incorrectly fell back")
+			}
+		})
+	}
+}

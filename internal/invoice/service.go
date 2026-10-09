@@ -232,9 +232,9 @@ func newID() (string, error) {
 	return "inv_" + hex.EncodeToString(b), e
 }
 func (s *Service) Create(ctx context.Context, token string, orderID int64, key string) (p.Receipt, error) {
-	return s.create(ctx, token, orderID, key, nil)
+	return s.create(ctx, token, orderID, key, nil, nil)
 }
-func (s *Service) create(ctx context.Context, token string, orderID int64, key string, title *p.TitleSubmission) (p.Receipt, error) {
+func (s *Service) create(ctx context.Context, token string, orderID int64, key string, title *p.TitleSubmission, official *officialTitle) (p.Receipt, error) {
 	var a p.Application
 	if orderID < 1 || len(key) < 16 || len(key) > 120 {
 		return p.Receipt{}, p.ErrInvalid
@@ -267,7 +267,7 @@ func (s *Service) create(ctx context.Context, token string, orderID int64, key s
 			if e != nil || title == nil {
 				return e
 			}
-			return s.acceptTitleWithin(tx, &a, o, ids, *title)
+			return s.acceptTitleWithin(tx, &a, o, ids, *title, official)
 		}
 		if !errors.Is(e, pgx.ErrNoRows) {
 			return e
@@ -282,7 +282,7 @@ func (s *Service) create(ctx context.Context, token string, orderID int64, key s
 				return e
 			}
 			if title != nil {
-				if e = s.acceptTitleWithin(tx, &a, o, ids, *title); e != nil {
+				if e = s.acceptTitleWithin(tx, &a, o, ids, *title, official); e != nil {
 					return e
 				}
 			}
@@ -318,7 +318,7 @@ func (s *Service) create(ctx context.Context, token string, orderID int64, key s
 			return e
 		}
 		if title != nil {
-			return s.acceptTitleWithin(tx, &a, o, ids, *title)
+			return s.acceptTitleWithin(tx, &a, o, ids, *title, official)
 		}
 		return s.Jobs.EnqueueWithin(tx, a.ID, time.Now().Add(30*time.Second))
 	})
@@ -416,6 +416,9 @@ func (s *Service) File(ctx context.Context, token, id string) ([]byte, error) {
 }
 
 func (s *Service) queue(ctx context.Context, a *p.Application, reverse bool, at time.Time) error {
+	return s.queueRevision(ctx, a, reverse, at, "")
+}
+func (s *Service) queueRevision(ctx context.Context, a *p.Application, reverse bool, at time.Time, revision string) error {
 	kind := effects.KindInvoiceIssue
 	operation := "issue"
 	if reverse {
@@ -429,6 +432,10 @@ func (s *Service) queue(ctx context.Context, a *p.Application, reverse bool, at 
 	}{a.Snapshot, a.Buyer, a.InvoiceID})
 	receipt := effects.Hash("invoice.effect", a.ID, operation, a.InvoiceID, fmt.Sprint(a.ReverseAttempt), fmt.Sprint(a.DispatchAttempt))
 	envelope := effects.Envelope{Owner: effects.OwnerInvoice, Kind: kind, SourceRefDigest: effects.Hash("invoice.intent", a.ID, a.InvoiceID, operation, fmt.Sprint(a.ReverseAttempt), fmt.Sprint(a.DispatchAttempt)), TargetRefDigest: effects.Hash("invoice.merchant", a.Snapshot.MerchantID), PayloadDigest: effects.Hash("invoice.payload", string(raw)), PolicyVersionHash: effects.Hash("invoice.policy", "one-order-one-invoice.v1")}
+	if revision != "" {
+		receipt = effects.Hash("invoice.corrected.effect", string(receipt), revision)
+		envelope.SourceRefDigest = effects.Hash("invoice.corrected.intent", string(envelope.SourceRefDigest), revision)
+	}
 	projection, _, e := s.Effects.AcceptAndQueueWithin(ctx, effects.AcceptCommand{ReceiptKey: receipt, Envelope: envelope, ScheduledAt: at})
 	if e != nil {
 		return e

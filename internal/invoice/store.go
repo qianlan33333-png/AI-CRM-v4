@@ -12,6 +12,61 @@ import (
 
 type Repository struct{}
 
+func (Repository) buyerCorrectionUsed(ctx context.Context, a invoiceport.Application) (bool, error) {
+	tx, e := platformpostgres.RequireTransaction(ctx)
+	if e != nil {
+		return false, e
+	}
+	var used bool
+	e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM invoice_audit_events WHERE application_id=$1 AND event_type='buyer_corrected' AND material->>'invoice_id'=$2)`, a.ID, a.InvoiceID).Scan(&used)
+	return used, e
+}
+
+func (Repository) buyerMismatch(ctx context.Context, a invoiceport.Application) (effects.Digest, bool, error) {
+	tx, e := platformpostgres.RequireTransaction(ctx)
+	if e != nil {
+		return "", false, e
+	}
+	var raw []byte
+	var digest string
+	e = tx.QueryRow(ctx, `SELECT material,evidence_digest FROM invoice_audit_events WHERE application_id=$1 AND event_type='official_response' AND id>(SELECT max(id) FROM invoice_audit_events WHERE application_id=$1 AND event_type='dispatch_prepared' AND evidence_digest=$2) ORDER BY id DESC LIMIT 1`, a.ID, string(effects.Hash("invoice.dispatch", a.IssueEffect))).Scan(&raw, &digest)
+	if errors.Is(e, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if e != nil {
+		return "", false, e
+	}
+	var response invoiceport.OfficialResponse
+	if json.Unmarshal(raw, &response) != nil {
+		return "", false, invoiceport.ErrUnavailable
+	}
+	canonical, _ := json.Marshal(response)
+	if effects.Hash("external-effect.artifact.v1", invoiceport.OfficialResponseArtifact, string(canonical)) != effects.Digest(digest) {
+		return "", false, invoiceport.ErrUnavailable
+	}
+	matched := response.HTTPStatus == 403 && response.Code == "RULE_LIMIT" && response.Message == buyerMismatchMessage
+	return effects.Digest(digest), matched, nil
+}
+
+func (r Repository) correctBuyer(ctx context.Context, a *invoiceport.Application, buyer invoiceport.Buyer, evidence, rejection effects.Digest) error {
+	material, _ := json.Marshal(struct {
+		InvoiceID     string         `json:"invoice_id"`
+		EffectID      string         `json:"effect_id"`
+		Rejection     effects.Digest `json:"rejection_digest"`
+		Before, After invoiceport.Buyer
+	}{a.InvoiceID, a.IssueEffect, rejection, a.Buyer, buyer})
+	a.Buyer = buyer
+	if e := r.update(ctx, *a, "buyer_corrected", string(evidence)); e != nil {
+		return e
+	}
+	tx, e := platformpostgres.RequireTransaction(ctx)
+	if e != nil {
+		return e
+	}
+	_, e = tx.Exec(ctx, `UPDATE invoice_audit_events SET material=$3 WHERE application_id=$1 AND event_type='buyer_corrected' AND evidence_digest=$2`, a.ID, string(evidence), material)
+	return e
+}
+
 func (Repository) officialResponse(ctx context.Context, id string, artifact effects.ResultArtifact) error {
 	if artifact.Kind != invoiceport.OfficialResponseArtifact || !artifact.Valid() {
 		return invoiceport.ErrInvalid

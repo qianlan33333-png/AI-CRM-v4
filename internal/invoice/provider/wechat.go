@@ -75,6 +75,9 @@ func (w *WeChat) request(ctx context.Context, method, path string, q url.Values,
 				return p.OfficialResponse{HTTPStatus: api.StatusCode, Code: api.Code, Message: api.Message}
 			}
 			if api.StatusCode == 404 {
+				if method == http.MethodGet && path == "/user-title" && api.Code == "RESOURCE_NOT_EXISTS" {
+					return p.ErrTitleAbsent
+				}
 				return p.ErrPending
 			}
 			// RULE_LIMIT alone is not absence. This exact signed response is the
@@ -119,6 +122,16 @@ func (w *WeChat) ReadTitle(ctx context.Context, a p.Application) (p.Buyer, error
 		return p.Buyer{}, p.ErrUnavailable
 	}
 	return b, nil
+}
+func (w *WeChat) ReadOptionalTitle(ctx context.Context, a p.Application) (p.Buyer, bool, error) {
+	b, e := w.ReadTitle(ctx, a)
+	if errors.Is(e, p.ErrTitleAbsent) {
+		return p.Buyer{}, false, nil
+	}
+	if e != nil {
+		return p.Buyer{}, false, p.ErrUnavailable
+	}
+	return b, true, nil
 }
 func (w *WeChat) Query(ctx context.Context, a p.Application) (p.Result, error) {
 	var list struct {

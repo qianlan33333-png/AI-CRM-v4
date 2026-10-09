@@ -136,3 +136,9 @@ DATABASE_URL='postgresql://<本机用户>@localhost:5432/aicrm_test_invoice?sslm
 一次性 invoice-recover 角色还可处理 canonical 申请的 issuing 状态：仅在全申请签名查询明确未受理、原 EER outcome_unknown 租约已过期且归属/付款/金额/主体/退款核验通过时，通过既有 Finality Port 对账并接受相同 apply_id、相同 fapiao_id、原冻结材料的受限重放。普通页面读取、原生通知和查询任务均不触发此路径。网络未确认或官方已有票据时停止。
 
 已验签的 POST 错误在 invoice_audit_events 中以 official_response / material 保存 HTTP 状态、code 与 message，随 EER 完成事务一起提交；仅授权运维读取，不能输出到日志或公共页面。发布后由唯一工作台选择原交易号执行一次恢复，先读取这份业务回执再判断参数或外部配置阻塞；不因 API 受理宣称出票。
+
+### 已明确购买方不一致的材料修正
+
+invoice-recover 对选定 issuing 原单先检查私密 official_response 是否确属当前 issue_effect 的 dispatch_prepared 之后，摘要须与规范化回执一致。仅已验签的 HTTP403/RULE_LIMIT/购买方不一致可进入修正；根申请仍未受理、原 Unknown 过期、单位核心及付款/主体/财务不变后，补回官方完整附加字段，同 UoW 保留前后 Buyer、关闭旧 finality、接受材料摘要幂等的修正意图和任务。原 apply/fapiaoID及原样重放预算均不改。buyer_corrected 按当前票号封住第二次修正，不能以后来再有字段差异重复执行。
+
+自填首单在 Provider 读取事务外检查官方抬头。已存在且单位核心一致时保持完整官方 Buyer；单位不同要求用户核对，未知不采用缺字段副本。公开页面仍不显示银行/联系方式，不新增邮件发送能力。
