@@ -16,6 +16,13 @@ import (
 // expectedInvoiceID binds a native title job to one failed attempt. Network reads
 // precede the UoW; a fresh locked comparison prevents stale proofs minting a ticket.
 func (s *Service) RecoverFailed(ctx context.Context, id, expectedInvoiceID string, canonicalize bool) (p.Receipt, error) {
+	return s.recoverFailed(ctx, id, expectedInvoiceID, canonicalize, "")
+}
+
+// User-initiated recovery carries its session into the acceptance transaction.
+// Native jobs and the explicitly selected operator retain the trusted internal
+// entry point above and do not impersonate a customer session.
+func (s *Service) recoverFailed(ctx context.Context, id, expectedInvoiceID string, canonicalize bool, token string) (p.Receipt, error) {
 	if !s.Config.Enabled || s.Provider == nil {
 		return p.Receipt{}, p.ErrDisabled
 	}
@@ -99,6 +106,15 @@ func (s *Service) RecoverFailed(ctx context.Context, id, expectedInvoiceID strin
 	// removing a native address/bank/email makes the same unit title inconsistent.
 	var receipt p.Receipt
 	err = s.withOrder(ctx, id, func(tx context.Context, a *p.Application, o order.SelfOrder) error {
+		if token != "" {
+			_, ids, e := s.actor(tx, token)
+			if e != nil {
+				return e
+			}
+			if !slices.Contains(ids, a.CustomerID) {
+				return p.ErrNotFound
+			}
+		}
 		if a.State != "failed" || a.InvoiceID != prior.InvoiceID {
 			receipt = p.MarshalReceipt(*a)
 			return nil

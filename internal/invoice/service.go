@@ -329,7 +329,10 @@ func (s *Service) create(ctx context.Context, token string, orderID int64, key s
 		if !ok || !slices.Contains(ids, int64(trusted.CustomerID)) {
 			return p.ErrIneligible
 		}
-		a, e = s.createApplicationWithin(tx, o, int64(trusted.CustomerID), actor.PayerIdentityID)
+		// Keep the Order's original payer root. Canonical resolution authorizes
+		// the current request but must not move invoice ownership to a merge
+		// winner, or a later split would expose the payer's invoice to that root.
+		a, e = s.createApplicationWithin(tx, o, int64(*o.Order.PayerCustomerID), actor.PayerIdentityID)
 		if e != nil {
 			return e
 		}
@@ -410,10 +413,23 @@ func (s *Service) Resume(ctx context.Context, token, id string) (p.Receipt, erro
 		return p.Receipt{}, e
 	}
 	if a.State == "failed" {
-		return s.RecoverFailed(ctx, id, a.InvoiceID, false)
+		return s.recoverFailed(ctx, id, a.InvoiceID, false, token)
 	}
 	if a.State == "awaiting_title" {
-		e = s.UoW.Within(ctx, func(tx context.Context) error { return s.Jobs.EnqueueWithin(tx, id, time.Time{}) })
+		e = s.UoW.Within(ctx, func(tx context.Context) error {
+			_, ids, e := s.actor(tx, token)
+			if e != nil {
+				return e
+			}
+			current, e := s.Store.get(tx, id, ids, true)
+			if e != nil {
+				return e
+			}
+			if current.State != "awaiting_title" {
+				return nil
+			}
+			return s.Jobs.EnqueueWithin(tx, id, time.Time{})
+		})
 		if e != nil {
 			return p.Receipt{}, e
 		}
@@ -426,13 +442,27 @@ func (s *Service) File(ctx context.Context, token, id string) ([]byte, error) {
 	if e != nil {
 		return nil, e
 	}
-	if a.State != "issued" {
+	if a.State != "issued" || a.RefundConfirmed {
 		return nil, p.ErrIneligible
 	}
 	if s.Provider == nil {
 		return nil, p.ErrDisabled
 	}
-	return s.Provider.File(ctx, a)
+	// As with native cards, the Provider read cannot hold an authorization
+	// transaction. Recheck the current session, lineage and ticket before
+	// releasing private bytes after that potentially slow network operation.
+	body, e := s.Provider.File(ctx, a)
+	if e != nil {
+		return nil, e
+	}
+	current, e := s.Read(ctx, token, id)
+	if e != nil {
+		return nil, e
+	}
+	if current.State != "issued" || current.RefundConfirmed || current.InvoiceID != a.InvoiceID || current.BlueNumber != a.BlueNumber {
+		return nil, p.ErrIneligible
+	}
+	return body, nil
 }
 
 func (s *Service) queue(ctx context.Context, a *p.Application, reverse bool, at time.Time) error {
@@ -522,7 +552,7 @@ func (s *Service) Reconcile(ctx context.Context, id string) error {
 			}
 			// New first acceptance is organization-only, including legacy
 			// official title notifications. Already accepted history is frozen.
-			if buyer.Type != "ORGANIZATION" {
+			if !officialBuyerValid(buyer, a.Snapshot) {
 				return p.ErrInvalid
 			}
 		}

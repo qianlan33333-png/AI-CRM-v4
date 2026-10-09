@@ -6,6 +6,7 @@ import (
 	effects "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	p "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice/port"
 	order "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -13,7 +14,7 @@ import (
 const buyerMismatchMessage = "商户提交的购买方信息与用户填写的发票抬头不一致，请检查参数中的购买方信息与【获取用户填写的抬头】接口返回的发票抬头信息是否一致"
 
 func officialBuyerValid(b p.Buyer, s p.Snapshot) bool {
-	if b.Type != "ORGANIZATION" || !b.Valid(s) || b.BillType != "" && b.BillType != "COMM_FAPIAO" {
+	if b.Type != "ORGANIZATION" || strings.TrimSpace(b.Name) == "" || strings.TrimSpace(b.TaxpayerID) == "" || !b.Valid(s) || b.BillType != "" && b.BillType != "COMM_FAPIAO" {
 		return false
 	}
 	for _, field := range []struct {
