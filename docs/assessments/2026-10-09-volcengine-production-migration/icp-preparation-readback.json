@@ -10,5 +10,10 @@
   "volcengine_access_filing_verified": false,
   "filing_application_submitted": false,
   "original_access_cancelled": false,
-  "boundary": "User-provided filing and existing website footer are consistent. They do not prove current regulatory validity or Volcengine access filing completion."
+  "boundary": "User-provided filing and existing website footer are consistent. They do not prove current regulatory validity or Volcengine access filing completion.",
+  "access_filing_path": "Volcengine additional access filing with unchanged original subject, conditional on valid existing filing",
+  "original_access_can_coexist": true,
+  "account_subject_and_eligible_resource_verified": false,
+  "primary_reference": "https://www.volcengine.com/docs/6428/68740?lang=zh",
+  "materials_checklist_prepared": true
 }
