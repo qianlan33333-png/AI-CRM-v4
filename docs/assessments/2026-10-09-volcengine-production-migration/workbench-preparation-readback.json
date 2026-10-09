@@ -1,0 +1,119 @@
+{
+  "observed_at_utc": "2026-10-09T03:22:22.881861+00:00",
+  "preparation_owner_thread": "01a0f85a-9de6-7701-a12a-9c774080389b",
+  "scope": "preparation_only",
+  "rds_capacity": {
+    "status": "verified",
+    "instance_id": "postgres-54b430626a32",
+    "region": "cn-beijing",
+    "storage_gb": 100,
+    "used_gb": 10.28,
+    "remaining_gb": 89.72,
+    "space_analysis_used_gib": 9.58,
+    "source": "live browser instance details and space analysis",
+    "instance_details_url": "https://console.volcengine.com/db/region:db+cn-beijing/rds-pg/detail/postgres-54b430626a32?instanceName=postgres-54b430626a32",
+    "database_version": 16,
+    "nodes": 2,
+    "cpu_per_node": 2,
+    "memory_gb_per_node": 4,
+    "allow_isolated_rehearsal_capacity": true,
+    "cloud_configuration_mutated": false
+  },
+  "materials": {
+    "status": "prepared_materials_verified",
+    "archive_bytes": 523845577,
+    "archive_sha256": "610fd426e8c21b22cafd868c874e2a8cc6073d39e221de713dca0a0535eb3c43",
+    "binary_sha256": "504fbf2585a45ceadb6b210ed804c4f3483dd4eb9e62d9aa72a4313ec5505483",
+    "prepared_root": "/opt/aicrm-migration-prepared-20261009",
+    "certificate_and_private_key_present": true,
+    "services_started": false,
+    "validation_unchanged": true,
+    "skipped_external_excel_symlinks": 1,
+    "excel_venv_requires_recreation": true,
+    "upload_extract_verify_seconds": 96.436
+  },
+  "isolated_database": {
+    "status": "isolated_database_created",
+    "database": "aicrm_migration_rehearsal_20261009",
+    "role": "aicrm_rehearsal",
+    "role_superuser": false,
+    "role_can_create_database": false,
+    "sslmode": "verify-full",
+    "tls_verified": true,
+    "source_locale": "en_US.UTF-8",
+    "target_locale": "en_US.utf8",
+    "locale_difference": "same en_US UTF-8 locale alias",
+    "empty_tables": 0,
+    "existing_databases_preserved": [
+      {
+        "datname": "CRM",
+        "owner": "qianlan",
+        "encoding": 6,
+        "datcollate": "en_US.utf8",
+        "datctype": "en_US.utf8"
+      },
+      {
+        "datname": "CRM_copy_c",
+        "owner": "pg_rds_superuser",
+        "encoding": 6,
+        "datcollate": "C",
+        "datctype": "C"
+      },
+      {
+        "datname": "postgres",
+        "owner": "postgres",
+        "encoding": 6,
+        "datcollate": "en_US.UTF-8",
+        "datctype": "en_US.UTF-8"
+      },
+      {
+        "datname": "prompt",
+        "owner": "pg_rds_superuser",
+        "encoding": 6,
+        "datcollate": "C",
+        "datctype": "C"
+      }
+    ],
+    "ca_sha256": "f591eb9638f76842b63a5643e71d2cb9e9646d970c946a83bb24f7b82f369431",
+    "production_database_created": false
+  },
+  "snapshot_export": {
+    "exported_at_utc": "2026-10-09T02:46:41.158370+00:00",
+    "snapshot": "00000027-000070DD-1",
+    "schema": {
+      "locale": {
+        "collate": "en_US.UTF-8",
+        "ctype": "en_US.UTF-8",
+        "collation_version": "2.39"
+      },
+      "columns_md5": "c78ce9d5c82e861d7f0216eeb9b90acb",
+      "constraints_md5": "8b67b42e2c904411a0130e0311044874",
+      "indexes_md5": "86dd4cfe9a2d78984fd64578c1d4a830"
+    },
+    "dump_bytes": 861739263,
+    "dump_sha256": "2494e3e9f5a957ffc0b2e79cf93032440ecc378f9bada910a2e5a8ec4c283710",
+    "export_transfer_seconds": 1469.862,
+    "source_read_only": true,
+    "source_runtime": "4c39050574a4f0aeaa72b89419e06eb96b04f553"
+  },
+  "snapshot_upload": {
+    "status": "uploaded_uninstalled_snapshot",
+    "dump_bytes": 861739263,
+    "dump_sha256": "2494e3e9f5a957ffc0b2e79cf93032440ecc378f9bada910a2e5a8ec4c283710",
+    "stream_upload_seconds": 1195.865,
+    "database_or_service_changed": false
+  },
+  "sqlite": {
+    "sqlite_integrity": "ok",
+    "sqlite_consistent_online_backup": true,
+    "source_sqlite_bytes": 53248,
+    "source_business_write": false,
+    "archive_bytes": 205436,
+    "archive_sha256": "5ea3fe221dfefb82d35c89eb4d50000eee1a1dd65b75f34037f6a47560b9ffaf",
+    "export_seconds": 4.75,
+    "publisher_activation": false
+  },
+  "restoration_and_authenticated_journeys_verified": false,
+  "formal_cutover_performed": false,
+  "source_snapshot_is_continuously_synchronized": false
+}

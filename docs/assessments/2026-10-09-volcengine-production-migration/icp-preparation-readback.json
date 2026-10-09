@@ -1,0 +1,14 @@
+{
+  "observed_at_utc": "2026-10-09T02:53:55.897801+00:00",
+  "domain": "youcangogogo.com",
+  "user_reported_filing_number": "京ICP备2021011098号-1",
+  "user_reported_subject": "北京可能无限大科技有限公司",
+  "source_website_footer_filing_number_matches": true,
+  "source_website_contains_reported_subject": true,
+  "regulator_live_state_verified": false,
+  "regulator_lookup_browser_status": "net::ERR_BLOCKED_BY_CLIENT",
+  "volcengine_access_filing_verified": false,
+  "filing_application_submitted": false,
+  "original_access_cancelled": false,
+  "boundary": "User-provided filing and existing website footer are consistent. They do not prove current regulatory validity or Volcengine access filing completion."
+}
