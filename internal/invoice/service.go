@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	configport "github.com/qianlan33333-png/AI-CRM-v3/internal/config/port"
 	customer "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	effects "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
@@ -26,24 +27,27 @@ import (
 )
 
 type Service struct {
-	UoW              platform.UnitOfWork
-	Sessions         payment.SessionReader
-	Lineage          identity.LockedCanonicalLineageReader
-	Identities       identity.PaymentIdentityReader
-	Subjects         identity.VerifiedIdentitySubjectReader
-	Payments         payment.InvoicePaymentReader
-	SelfPayments     payment.SelfCheckoutReader
-	Checkouts        order.CheckoutSnapshotReader
-	Orders           order.SelfReader
-	Refunds          payment.RefundExposureReader
-	Effects          effects.TransactionalAccepter
-	Jobs             p.QueryJobEnqueuer
-	Provider         p.Provider
-	CallbackVerifier p.NotificationVerifier
-	Config           p.Config
-	EffectStates     effects.WithinReader
-	Finality         effects.InvoiceFinality
-	Store            Repository
+	CardConfig                   p.CardConfig
+	Configuration                configport.EffectiveReader
+	AppliedConfigurationChecksum string
+	UoW                          platform.UnitOfWork
+	Sessions                     payment.SessionReader
+	Lineage                      identity.LockedCanonicalLineageReader
+	Identities                   identity.PaymentIdentityReader
+	Subjects                     identity.VerifiedIdentitySubjectReader
+	Payments                     payment.InvoicePaymentReader
+	SelfPayments                 payment.SelfCheckoutReader
+	Checkouts                    order.CheckoutSnapshotReader
+	Orders                       order.SelfReader
+	Refunds                      payment.RefundExposureReader
+	Effects                      effects.TransactionalAccepter
+	Jobs                         p.QueryJobEnqueuer
+	Provider                     p.Provider
+	CallbackVerifier             p.NotificationVerifier
+	Config                       p.Config
+	EffectStates                 effects.WithinReader
+	Finality                     effects.InvoiceFinality
+	Store                        Repository
 }
 
 func (s *Service) actor(ctx context.Context, token string) (payment.SessionActor, []int64, error) {
@@ -766,6 +770,9 @@ func (s *Service) PrepareInvoiceEffect(ctx context.Context, effectID string, rev
 	return out, e
 }
 func (s *Service) CompleteEffect(ctx context.Context, effectID string, envelope effects.Envelope, attempt effects.Attempt, result effects.AdapterResult) error {
+	if envelope.Kind == effects.KindInvoiceCardConfigure {
+		return s.completeCardSetup(ctx, effectID, result)
+	}
 	t, e := pg.RequireTransaction(ctx)
 	if e != nil {
 		return e

@@ -22,6 +22,7 @@ import (
 	configcatalog "github.com/qianlan33333-png/AI-CRM-v3/internal/config"
 	configapp "github.com/qianlan33333-png/AI-CRM-v3/internal/config/app"
 	configport "github.com/qianlan33333-png/AI-CRM-v3/internal/config/port"
+	invoiceport "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice/port"
 )
 
 type RequestSecurity interface {
@@ -30,6 +31,8 @@ type RequestSecurity interface {
 }
 
 type Handler struct {
+	invoiceCard  invoiceport.CardSetupAdmin
+	invoiceKeys  configport.InvoiceKeyStager
 	models       configport.AIModelSettings
 	settings     settingsService
 	wizard       wizardService
@@ -84,6 +87,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.appSettings(w, r)
 	case "setup-wizard":
 		h.setupWizard(w, r)
+	case "invoice-card":
+		h.invoiceCardSetup(w, r)
+	case "invoice-key":
+		h.invoiceKey(w, r)
 	case "ai-model":
 		h.aiModel(w, r)
 	case "categories":

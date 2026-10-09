@@ -33,7 +33,17 @@ func composeInvoice(uow platformport.UnitOfWork, sessions paymentport.SessionRea
 	c := p.Config{Enabled: cfg.Invoice.Enabled, MerchantID: cfg.WeChatPay.MerchantID, AppID: cfg.WeChatPay.H5AppID, AppScope: cfg.WeChatPay.H5AppScope, SellerName: cfg.Invoice.SellerName, SellerTaxID: cfg.Invoice.SellerTaxID, BillingPersonID: cfg.Invoice.BillingPersonID}
 	if c.Enabled {
 		var e error
-		c.Taxes, e = loadInvoiceTaxes(cfg.Invoice.TaxConfigPath)
+		c.Taxes = map[string]p.Tax{}
+		if cfg.Invoice.TaxConfigPath != "" {
+			c.Taxes, e = loadInvoiceTaxes(cfg.Invoice.TaxConfigPath)
+		}
+		if cfg.Invoice.DefaultTaxCode != "" {
+			tax := p.Tax{Code: cfg.Invoice.DefaultTaxCode, Rate: cfg.Invoice.DefaultTaxRate, GoodsName: cfg.Invoice.DefaultGoodsName}
+			if !tax.Valid() {
+				return nil, nil, p.ErrInvalid
+			}
+			c.Taxes["*"] = tax
+		}
 		if e != nil {
 			return nil, nil, e
 		}
@@ -50,7 +60,7 @@ func composeInvoice(uow platformport.UnitOfWork, sessions paymentport.SessionRea
 	if !ok {
 		return nil, nil, p.ErrInvalid
 	}
-	s := &invoice.Service{Finality: finality, EffectStates: stateReader, UoW: uow, Sessions: sessions, Lineage: identities, Identities: identities, Subjects: identities, Payments: invoicePayments, Orders: orders, Refunds: refunds, Effects: effects, Jobs: invoice.QueryEnqueuer{Client: jobs}, Config: c}
+	s := &invoice.Service{CardConfig: p.CardConfig{MerchantID: cfg.WeChatPay.MerchantID, AppID: cfg.WeChatPay.H5AppID, LogoURL: cfg.Invoice.LogoURL, Confirmed: cfg.Invoice.CardConfirmed, JumpURL: cfg.PublicOrigin + "/my/orders", PayeeName: cfg.Invoice.SellerName}, Finality: finality, EffectStates: stateReader, UoW: uow, Sessions: sessions, Lineage: identities, Identities: identities, Subjects: identities, Payments: invoicePayments, Orders: orders, Refunds: refunds, Effects: effects, Jobs: invoice.QueryEnqueuer{Client: jobs}, Config: c}
 	return s, &invoice.Handler{Service: s, Origins: []string{cfg.PublicOrigin, h5PublicOrigin(cfg)}, Dist: "web/dist"}, nil
 }
 

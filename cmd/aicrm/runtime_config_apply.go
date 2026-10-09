@@ -17,6 +17,18 @@ import (
 // inputs and Config shows only their fixed safe reference.
 func runtimeConfigDefaults(cfg platformconfig.Runtime) ([]configport.RuntimeSetting, error) {
 	cfg = platformconfig.NormalizeRuntimePolicyDefaults(cfg)
+	if cfg.Invoice.TaxConfigPath != "" && cfg.Invoice.DefaultTaxCode == "" {
+		taxes, e := loadInvoiceTaxes(cfg.Invoice.TaxConfigPath)
+		if e != nil && cfg.Invoice.Enabled {
+			return nil, e
+		}
+		if tax, ok := taxes["*"]; ok {
+			cfg.Invoice.DefaultTaxCode = tax.Code
+			cfg.Invoice.DefaultTaxRate = tax.Rate
+			cfg.Invoice.DefaultGoodsName = tax.GoodsName
+		}
+	}
+
 	values := []struct {
 		key   configport.RuntimeSettingKey
 		value any
@@ -30,6 +42,18 @@ func runtimeConfigDefaults(cfg platformconfig.Runtime) ([]configport.RuntimeSett
 		{configport.GroupOpsDirectoryReadEnabled, cfg.GroupOps.ProviderReadEnabled}, {configport.GroupOpsDispatchEnabled, cfg.GroupOps.ProviderEnabled},
 		{configport.EffectsProviderEnabled, cfg.Effects.ProviderEnabled}, {configport.SurveyCompletionProviderEnabled, cfg.Survey.CompletionProviderEnabled}, {configport.CommercePushProviderEnabled, cfg.CommercePush.ProviderEnabled}, {configport.WorkerLimit, cfg.WorkerLimit},
 		{configport.WeChatPayProviderEnabled, cfg.WeChatPay.Enabled}, {configport.WeChatPayAppID, cfg.WeChatPay.AppID}, {configport.WeChatPayAppScope, cfg.WeChatPay.AppScope}, {configport.WeChatPayH5OAuthEnabled, cfg.WeChatPay.H5OAuthEnabled}, {configport.WeChatPayH5AppID, cfg.WeChatPay.H5AppID}, {configport.WeChatPayH5AppScope, cfg.WeChatPay.H5AppScope}, {configport.WeChatPayMerchantID, cfg.WeChatPay.MerchantID}, {configport.WeChatPayMerchantSerial, cfg.WeChatPay.MerchantSerial},
+		{configport.InvoiceEnabled, cfg.Invoice.Enabled},
+		{configport.InvoiceServiceMerchantID, cfg.Invoice.ServiceMerchantID},
+		{configport.InvoiceMerchantSerial, cfg.Invoice.MerchantSerial},
+		{configport.InvoiceSellerName, cfg.Invoice.SellerName},
+		{configport.InvoiceSellerTaxID, cfg.Invoice.SellerTaxID},
+		{configport.InvoiceBillingPersonID, cfg.Invoice.BillingPersonID},
+		{configport.InvoiceDefaultTaxCode, cfg.Invoice.DefaultTaxCode},
+		{configport.InvoiceDefaultTaxRate, cfg.Invoice.DefaultTaxRate},
+		{configport.InvoiceDefaultGoodsName, cfg.Invoice.DefaultGoodsName},
+		{configport.InvoiceKeyFileID, cfg.Invoice.KeyFileID},
+		{configport.InvoiceLogoURL, cfg.Invoice.LogoURL},
+		{configport.InvoiceCardConfirmed, cfg.Invoice.CardConfirmed},
 		{configport.WeChatShopProviderEnabled, cfg.WeChatShop.Enabled}, {configport.WeChatShopAppID, cfg.WeChatShop.AppID},
 		{configport.AlipayProviderEnabled, cfg.Alipay.Enabled}, {configport.AlipayAppID, cfg.Alipay.AppID}, {configport.AlipayProduction, cfg.Alipay.Production},
 		{configport.SurveyOAuthEnabled, cfg.Survey.OAuthEnabled}, {configport.SurveyOAuthAppID, cfg.Survey.OAuthAppID}, {configport.SurveyOAuthOpenPlatformID, cfg.Survey.OAuthOpenPlatformID}, {configport.SurveyOAuthScope, cfg.Survey.OAuthScope},
@@ -67,7 +91,7 @@ func applyRuntimeConfig(cfg platformconfig.Runtime, snapshot configport.Effectiv
 			if !bytes.Equal(setting.Value, baselineValue) {
 				return cfg, fmt.Errorf("runtime config %s is deployment-controlled", setting.Key)
 			}
-		case configport.RuntimeWeComCorpID, configport.SurveyOAuthAppID, configport.SurveyOAuthOpenPlatformID, configport.WeChatPayAppID, configport.WeChatPayH5AppID, configport.WeChatPayMerchantID, configport.WeChatShopAppID, configport.AlipayAppID:
+		case configport.RuntimeWeComCorpID, configport.SurveyOAuthAppID, configport.SurveyOAuthOpenPlatformID, configport.WeChatPayAppID, configport.WeChatPayH5AppID, configport.WeChatPayMerchantID, configport.WeChatShopAppID, configport.AlipayAppID, configport.InvoiceServiceMerchantID:
 			var bound string
 			if err := json.Unmarshal(baselineValue, &bound); err != nil {
 				return cfg, fmt.Errorf("runtime config %s has invalid deployment baseline: %w", setting.Key, err)
@@ -227,6 +251,53 @@ func applyRuntimeConfig(cfg platformconfig.Runtime, snapshot configport.Effectiv
 	if err := stringValue(configport.SurveyOAuthScope, &cfg.Survey.OAuthScope); err != nil {
 		return cfg, err
 	}
+	if err := boolValue(configport.InvoiceEnabled, &cfg.Invoice.Enabled); err != nil {
+		return cfg, err
+	}
+	if err := stringValue(configport.InvoiceServiceMerchantID, &cfg.Invoice.ServiceMerchantID); err != nil {
+		return cfg, err
+	}
+	if err := stringValue(configport.InvoiceMerchantSerial, &cfg.Invoice.MerchantSerial); err != nil {
+		return cfg, err
+	}
+	if err := stringValue(configport.InvoiceSellerName, &cfg.Invoice.SellerName); err != nil {
+		return cfg, err
+	}
+	if err := stringValue(configport.InvoiceSellerTaxID, &cfg.Invoice.SellerTaxID); err != nil {
+		return cfg, err
+	}
+	if err := stringValue(configport.InvoiceBillingPersonID, &cfg.Invoice.BillingPersonID); err != nil {
+		return cfg, err
+	}
+	if err := stringValue(configport.InvoiceDefaultTaxCode, &cfg.Invoice.DefaultTaxCode); err != nil {
+		return cfg, err
+	}
+	if err := stringValue(configport.InvoiceDefaultGoodsName, &cfg.Invoice.DefaultGoodsName); err != nil {
+		return cfg, err
+	}
+	if err := stringValue(configport.InvoiceKeyFileID, &cfg.Invoice.KeyFileID); err != nil {
+		return cfg, err
+	}
+	if err := stringValue(configport.InvoiceLogoURL, &cfg.Invoice.LogoURL); err != nil {
+		return cfg, err
+	}
+	if err := boolValue(configport.InvoiceCardConfirmed, &cfg.Invoice.CardConfirmed); err != nil {
+		return cfg, err
+	}
+	if raw, ok := values[configport.InvoiceDefaultTaxRate]; ok {
+		if e := json.Unmarshal(raw, &cfg.Invoice.DefaultTaxRate); e != nil {
+			return cfg, e
+		}
+	}
+	if cfg.Invoice.KeyFileID != "" {
+		material := configapp.InvoiceKeyFiles{Directory: invoiceMaterialDirectory(cfg)}
+		key, e := material.Read(cfg.Invoice.KeyFileID)
+		if e != nil {
+			return cfg, fmt.Errorf("invoice private key reference unavailable")
+		}
+		cfg.Invoice.APIV3Key = key
+	}
+
 	return cfg, nil
 }
 
@@ -257,6 +328,9 @@ func runtimeConfigProtectedReferencePresence(cfg platformconfig.Runtime) map[str
 		"environment://AICRM_AUDIENCE_PUSH_WEBHOOK_SECRET":       cfg.AutomationOperations.AudiencePushWebhookSecret != "",
 		"environment://AICRM_AUTOMATION_OPS_PROVIDER_PERMISSION": cfg.AutomationOperations.ProviderPermission != "",
 		"environment://AICRM_AI_GENERATION_API_KEY":              cfg.AIGeneration.APIKey != "",
+		"environment://AICRM_INVOICE_PRIVATE_KEY_PATH":           cfg.Invoice.PrivateKeyPath != "",
+		"environment://AICRM_INVOICE_TRUST":                      cfg.Invoice.PublicKeyPath != "" || cfg.Invoice.PlatformCertPath != "",
+		"environment://AICRM_INVOICE_API_V3_KEY":                 len(cfg.Invoice.APIV3Key) == 32,
 		"environment://AICRM_WECHAT_PAY_API_V3_KEY":              cfg.WeChatPay.APIV3Key != "",
 		"environment://AICRM_WECHAT_PAY_PRIVATE_KEY_PATH":        cfg.WeChatPay.PrivateKeyPath != "",
 		"environment://AICRM_WECHAT_PAY_PLATFORM_CERT_PATH":      cfg.WeChatPay.PlatformCertPath != "",
@@ -284,10 +358,23 @@ func runtimeConfigActivationGuards(cfg platformconfig.Runtime) configapp.Runtime
 		AIDispatchEnabled:         cfg.AIAssistant.ProviderPermission == "private-message-authorized" && cfg.WeCom.ContactSecret != "",
 		AIAssistantIntakeEnabled:  cfg.AIAssistant.IntegrationKey != "" && cfg.AIAssistant.IntegrationSecret != "" && cfg.AIAssistant.IntegrationActorID > 0,
 		AIAgentGenerationEnabled:  cfg.Effects.ProviderEnabled && cfg.AIGeneration.Ready(),
-		WeChatPayEnabled:          cfg.WeChatPay.AppSecret != "" && cfg.WeChatPay.PrivateKeyPath != "" && cfg.WeChatPay.PlatformCertPath != "" && cfg.WeChatPay.APIV3Key != "",
-		WeChatPayH5OAuthEnabled:   cfg.WeChatPay.H5AppSecret != "" && cfg.WeChatPay.OrderContactDataKey != "",
-		WeChatShopEnabled:         cfg.WeChatShop.AppSecret != "" && cfg.WeChatShop.CallbackToken != "" && cfg.WeChatShop.CallbackEncodingAESKey != "",
-		AlipayEnabled:             cfg.Alipay.PrivateKeyPath != "" && (cfg.Alipay.AlipayPublicKey != "" || (cfg.Alipay.AppCertPath != "" && cfg.Alipay.AlipayCertPath != "" && cfg.Alipay.AlipayRootPath != "")),
-		SurveyOAuthEnabled:        cfg.Survey.OAuthSecret != "",
+		InvoiceSigningReady:       cfg.Invoice.PrivateKeyPath != "" && (cfg.Invoice.PublicKeyPath != "" || cfg.Invoice.PlatformCertPath != ""),
+		InvoiceKeyConfigured:      len(cfg.Invoice.APIV3Key) == 32,
+		InvoiceKeyReferenceExists: func(id string) bool {
+			_, e := (configapp.InvoiceKeyFiles{Directory: invoiceMaterialDirectory(cfg)}).Read(id)
+			return e == nil
+		},
+		WeChatPayEnabled:        cfg.WeChatPay.AppSecret != "" && cfg.WeChatPay.PrivateKeyPath != "" && cfg.WeChatPay.PlatformCertPath != "" && cfg.WeChatPay.APIV3Key != "",
+		WeChatPayH5OAuthEnabled: cfg.WeChatPay.H5AppSecret != "" && cfg.WeChatPay.OrderContactDataKey != "",
+		WeChatShopEnabled:       cfg.WeChatShop.AppSecret != "" && cfg.WeChatShop.CallbackToken != "" && cfg.WeChatShop.CallbackEncodingAESKey != "",
+		AlipayEnabled:           cfg.Alipay.PrivateKeyPath != "" && (cfg.Alipay.AlipayPublicKey != "" || (cfg.Alipay.AppCertPath != "" && cfg.Alipay.AlipayCertPath != "" && cfg.Alipay.AlipayRootPath != "")),
+		SurveyOAuthEnabled:      cfg.Survey.OAuthSecret != "",
 	}
+}
+
+func invoiceMaterialDirectory(cfg platformconfig.Runtime) string {
+	if cfg.Invoice.MaterialDir != "" {
+		return cfg.Invoice.MaterialDir
+	}
+	return "/var/lib/aicrm/invoice-materials"
 }

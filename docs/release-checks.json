@@ -1,49 +1,108 @@
 {
   "schema": 1,
-  "baseline_sha": "2217897214dbf859dace6fe1a236e6e352abc1b1",
+  "baseline_sha": "a604aff173c90f085228611212fe30c40ae2cc4c",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/referral/http"
+      "package": "./internal/config",
+      "path": "internal/config/registry.go"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLCampaignPostersPublishSnapshotAndIdempotentRetry",
+      "package": "./internal/config/app",
+      "path": "internal/config/app/manager.go"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice",
+      "path": "internal/invoice/service.go"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice/provider",
+      "path": "internal/invoice/provider/wechat.go"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceRuntimeConfigurationPrivateKeyAndDefaults"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceRuntimeActivationRequiresFinanceAndCredentials"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestRuntimeConfigDefaultsNormalizesOmittedCompositionPolicy"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestApplyRuntimeConfigAllowsValidatedAutomationAndAIDispatchSwitches"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestApplyRuntimeConfigRejectsBoundPaymentAppIDSwitch"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestApplyRuntimeConfigAllowsInitialBindingAndMerchantCertificateRotation"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceCardPostgreSQLAtomicConcurrentAndUnknown",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLCampaignPosterShareTextBindingAndAtomicPublication",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceSettingsPostgreSQLPublishAndCompositionReadback",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLCampaignPosterShareTextMigrationPreservesLegacySnapshot",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLDefaultTaxSupportsFutureProductBothEntries",
       "postgres": true
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/referralCenter.test.mjs"
+      "lane": "backend",
+      "package": "./internal/config/http",
+      "test": "TestInvoiceKeyHTTPWriteOnlyAndAuthorization"
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/referralAdmin.test.mjs"
+      "lane": "backend",
+      "package": "./internal/config/http",
+      "test": "TestInvoiceCardHTTPAuthorizationAndPendingConfiguration"
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/referralPosterShareText.test.mjs"
+      "lane": "backend",
+      "package": "./internal/config/http",
+      "test": "TestRuntimeReleaseMutationRequiresAdminAndNeverElevatesViewer"
     },
     {
-      "lane": "browser",
-      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLReferralChromiumJourney"
+      "lane": "backend",
+      "package": "./internal/config/http",
+      "test": "TestRuntimeReleaseHTTPJourneyKeepsDraftPublishAndUsageSeparate"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/config/http",
+      "test": "TestRuntimeCatalogHTTPReturnsTwelveCategoriesAndApplicationFactsSeparately"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/config/http",
+      "test": "TestOpenAPIDownloadIsAuthenticatedAndMatchesTheReleaseSource"
     }
   ],
   "installed_checks": [
-    "referral"
+    "invoice-callback"
   ],
   "build_commands": []
 }

@@ -1288,7 +1288,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	configBindings, err := configModule.Bind(settingsService, setupWizard, configManager, adminOpsProjection, requestSecurity, runtimeReleaseService)
-	configBindings = configBindings.WithAIModels(aiModelSettings)
+	configBindings = configBindings.WithAIModels(aiModelSettings).WithInvoiceKeys(configapp.InvoiceKeyFiles{Directory: invoiceMaterialDirectory(cfg)})
 	if err != nil {
 		return fail(err)
 	}
@@ -1584,6 +1584,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if invoiceErr != nil {
 		return fail(invoiceErr)
 	}
+	invoiceService.Configuration = runtimeReleaseService
+	invoiceService.AppliedConfigurationChecksum = runtimeSnapshot.Checksum
+	configBindings = configBindings.WithInvoiceCard(invoiceService)
 	invoiceQueryWorker.Service = invoiceService
 	invoiceService.SelfPayments = paymentRepository
 	invoiceService.Checkouts = orderService

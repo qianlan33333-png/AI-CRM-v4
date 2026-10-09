@@ -9,7 +9,8 @@
   root.classList.add("cc-page");
   const switchStyle = document.createElement("style");
   switchStyle.textContent = ".cc-switch{width:40px;height:22px;flex:0 0 40px;margin-right:12px}.cc-slider:before{width:16px;height:16px;left:3px;top:3px;transform:translateX(0)}.cc-switch input:checked + .cc-slider:before{transform:translateX(18px)}.cc-switch input:focus-visible + .cc-slider{outline:2px solid var(--cc-blue);outline-offset:2px}.cc-switch input:disabled + .cc-slider{opacity:.55;cursor:not-allowed}@media(max-width:560px){.cc-switch{margin-right:10px;vertical-align:top}}";
-  document.head.append(switchStyle);
+  switchStyle.textContent += ".cc-invoice-card-actions{padding:16px 20px}.cc-invoice-card-actions .cc-btn{margin-right:8px}.cc-field-table small{display:block;margin-top:8px;white-space:normal;overflow-wrap:anywhere}.cc-field-table .cc-input{max-width:100%;box-sizing:border-box}.cc-field-table th{overflow-wrap:anywhere}.cc-invoice-help{font-size:13px;font-weight:400;margin:0;padding:12px 16px;line-height:1.6}@media(max-width:560px){.cc-field-table{table-layout:fixed;width:100%;min-width:0}.cc-field-table th{width:30%}.cc-field-table td{width:70%;min-width:0}.cc-field-table .cc-input{width:100%;min-width:0}.cc-field-table .cc-btn{margin-top:8px}.cc-invoice-card-actions .cc-btn{margin-top:8px}}";
+ document.head.append(switchStyle);
 
   const operationalCategories = new Set(["wecom_base", "admin_access", "wechat_pay", "alipay", "wechat_shop", "wechat_oauth"]);
   const operationalField = (field) => !["deployment", "unsupported", "protected"].includes(field.input) && !/timeout|ttl|page_limit|page_budget|poll|worker|limit_per|retry|token_expir/i.test(field.key);
@@ -42,7 +43,16 @@
     let payload = null;
     try { payload = await response.json(); } catch (_) {}
     if (!response.ok) {
-      throw new Error(payload?.error === "runtime_release_conflict" ? "发布版本已变化，请重新读取后再保存。" : `配置操作失败（${response.status}）`);
+      const explanations = {
+ runtime_release_conflict: "发布版本已变化，请重新读取后再保存。",
+ invalid_invoice_key: "请输入 32 位服务商 APIv3 密钥。",
+ invoice_key_upload_unavailable: "密钥私密文件暂时无法写入，请联系管理员。",
+ invoice_card_config_incomplete: "请先填写永久素材 Logo URL、确认模板，再保存并发布配置。",
+ invoice_card_not_enabled: "自动开票尚未生效，请先保存并发布配置。",
+ invoice_card_pending: "已有卡券配置正在处理或结果待核实，请勿重复更换模板。",
+ invoice_card_config_not_applied: "新配置尚未由服务读取，请生效后重新读取页面。",
+ };
+ throw new Error(explanations[payload?.error] || `配置操作失败（${response.status}）`);
     }
     return payload;
   };
@@ -218,7 +228,28 @@
     const cell = document.createElement("td");
     if (field.input === "secret-reference") {
       cell.append(element("span", "", field.configured === true ? "••••••••" : "未填写"));
-    } else if (["protected", "deployment", "unsupported"].includes(field.input)) {
+    } else if (field.input === "private-key-file") {
+      const reference = document.createElement("input");
+      reference.type = "hidden"; reference.value = typeof value === "string" ? value : ""; reference.dataset.runtimeSetting = field.key;
+      const key = document.createElement("input");
+      key.type = "password"; key.className = "cc-input"; key.autocomplete = "new-password"; key.maxLength = 32;
+      key.placeholder = "留空保留现有密钥"; key.setAttribute("aria-label", field.label);
+      const upload = button("上传密钥");
+      const state = element("small", "admin-muted", value ? "已选择私密文件；密钥不会回显" : "更换密钥时填写并上传，留空保留当前配置");
+      upload.addEventListener("click", async () => {
+        if (!key.value) { state.textContent = "请输入 32 位 APIv3 密钥。"; return; }
+        upload.disabled = true;
+        try {
+          const saved = await request("/api/admin/config/invoice-key", { method: "POST", headers: writeHeaders(), body: JSON.stringify({ key: key.value }) });
+          reference.value = saved.key_file_id; reference.dispatchEvent(new Event("input", { bubbles: true })); key.value = "";
+          state.textContent = "已写入私密文件，请保存草稿并发布后生效。";
+          status("密钥已暂存，当前服务仍使用原密钥。");
+        } catch (error) { state.textContent = error.message; }
+        finally { upload.disabled = false; }
+      });
+      key.addEventListener("input", () => { state.textContent = "密钥尚未上传。"; });
+      cell.append(key, upload, state, reference);
+     } else if (["protected", "deployment", "unsupported"].includes(field.input)) {
       cell.append(element("span", "admin-muted", field.unsupported || "由对应管理页面维护。"));
     } else {
       let input;
@@ -226,7 +257,13 @@
         const control = makeSwitch({ enabled: value === true });
         input = control.input;
         cell.append(control.label);
-      } else if (field.input === "number") {
+      } else if (field.input === "tax-rate") {
+        input = document.createElement("select"); input.className = "cc-input";
+        for (const rate of [0, 100, 150, 300, 500, 600, 900, 1000, 1100, 1300, 1600, 1700]) {
+          const option = document.createElement("option"); option.value = String(rate); option.textContent = `${rate / 100}%`; option.selected = rate === value; input.append(option);
+        }
+        cell.append(input);
+       } else if (field.input === "number") {
         input = document.createElement("input"); input.type = "number"; input.className = "cc-input"; input.value = Number.isFinite(value) ? String(value) : ""; input.required = true;
         cell.append(input);
       } else if (String(field.input || "").startsWith("select:")) {
@@ -240,12 +277,16 @@
         cell.append(input);
       }
       input.dataset.runtimeSetting = field.key;
+      input.setAttribute("aria-label",field.label);
+      if (field.key === "wechat_invoice.default_tax_code") { input.maxLength=19; input.pattern="[0-9]{19}"; input.placeholder="财务确认的完整税收分类编码"; }
+      if (field.key === "wechat_invoice.logo_url") { input.maxLength=1024; input.placeholder="https://mmbiz.qpic.cn/mmbiz…"; }
+      if (field.key === "wechat_invoice.enabled")cell.append(element("small","admin-muted","仅支持单位抬头、微信支付、一单一票。关闭后不再接受新的开票申请，历史发票记录仍可查看。"));
       if (field.input === "scope-bound" && typeof value === "string" && value !== "") {
         input.readOnly = true;
         input.classList.add("is-readonly");
         input.setAttribute("aria-readonly", "true");
       }
-      if (field.input === "scope-bound") cell.append(element("small", "admin-muted", field.unsupported));
+      if (field.input === "scope-bound" && field.unsupported) cell.append(element("small", "admin-muted", field.unsupported));
 
     }
     row.append(cell);
@@ -272,7 +313,7 @@
         const control = makeSwitch(toggle);
         control.input.addEventListener("change", () => {
           const field = form?.querySelector(`[data-runtime-setting="${toggle.key}"]`);
-          if (field) field.checked = control.input.checked;
+          if (field) { field.checked = control.input.checked; field.dispatchEvent(new Event("input", { bubbles: true })); }
           status("已修改，请保存草稿并在发布记录完成校验和发布。");
         });
         stateArea.append(control.label);
@@ -301,22 +342,61 @@
       for (const [group, fields] of blocks) {
         const block = element("section", "cc-card cc-block"); block.dataset.configDetailBlock = "";
         const head = element("div", "cc-card-h"); head.append(element("h2", "", group)); block.append(head);
+        if (group === "所有商品默认税目") block.append(element("p","admin-muted cc-invoice-help","未设置专属税目的现有和新商品统一使用此配置；已付款、无退款等开票条件仍须满足。"));
+        if (group === "开票服务商") block.append(element("p","admin-muted cc-invoice-help","填写服务商号的 APIv3 密钥。现有签名证书与微信验签材料继续使用。"));
+        if (group === "微信卡券") block.append(element("p","admin-muted cc-invoice-help","Logo 须使用公众号永久素材的图片 URL。提交后将替换本商户卡券模板。"));
         const wrap = element("div", "cc-table-wrap"); const table = element("table", "cc-table cc-field-table"); const body = document.createElement("tbody");
         for (const field of fields) body.append(inputFor(field, values.get(field.key)));
         table.append(body); wrap.append(table); block.append(wrap); form.append(block);
+        if (group === "微信卡券") {
+          const footer = element("div", "cc-invoice-card-actions");
+          const result = element("p", "admin-muted", "正在读取微信卡券配置状态。"); result.setAttribute("role", "status");
+          const apply = button("提交微信卡券配置"); const refresh = button("刷新卡券状态");
+          footer.append(result, apply, refresh); block.append(footer);
+          const labels = {
+            not_submitted: "尚未通过本页面提交卡券配置", accepted: "配置已受理", queued: "配置处理中", attempted: "正在提交微信",
+            executed: "微信已确认卡券模板", final_failed: "微信拒绝了卡券配置，请核对 Logo 素材及公众号绑定",
+            outcome_unknown: "微信结果待核实，请联系管理员；请勿再次提交"
+          };
+          let dirty = false;
+          const read = async () => {
+            try {
+              const receipt = await request("/api/admin/config/invoice-card");
+              result.textContent = (labels[receipt.state] || "配置状态待核实") + (receipt.card_id ? `（${receipt.card_id}）` : "");
+              apply.disabled = dirty || receipt.configuration_applied !== true || !values.get("wechat_invoice.enabled") ||
+                !values.get("wechat_invoice.card_confirmed") || !values.get("wechat_invoice.logo_url") ||
+                ["accepted", "queued", "attempted", "outcome_unknown"].includes(receipt.state);
+              if (dirty) result.textContent += "。表单已修改，请先保存、发布并生效。";
+              if (receipt.configuration_applied !== true) result.textContent += "。保存后请发布配置，待服务读取后再提交模板。";
+            } catch (error) { result.textContent = error.message; apply.disabled = true; }
+          };
+          apply.disabled = true;
+          refresh.addEventListener("click", () => { void read(); });
+          apply.addEventListener("click", async () => {
+            apply.disabled = true;
+            try { await request("/api/admin/config/invoice-card", { method: "POST", headers: writeHeaders(), body: "{}" }); await read(); }
+            catch (error) { result.textContent = error.message; }
+          });
+          form.addEventListener("input", () => {
+            dirty = true; apply.disabled = true; result.textContent = "表单已修改，请保存草稿、发布并生效后提交卡券模板。";
+          }, { once: true });
+          void read();
+        }
+
       }
       const actions = element("div", "cc-bottom-actions");
       const cancel = document.createElement("a"); cancel.className = "cc-btn"; cancel.href = "/admin/config"; cancel.textContent = "取消";
       const save = button("保存草稿", "primary"); save.type = "submit"; actions.append(cancel, save); form.append(actions); root.append(form);
       form.addEventListener("submit", async (event) => {
         event.preventDefault(); if (!form.reportValidity()) return;
+ const unuploaded=form.querySelector('input[type="password"]');if(unuploaded?.value){status("请先上传填写的 APIv3 密钥，再保存草稿。","error");return; }
         const changes = new Map();
         for (const input of form.querySelectorAll("[data-runtime-setting]")) {
           const field = (category.fields || []).find((item) => item.key === input.dataset.runtimeSetting);
           if (!field) continue;
           let value = input.value;
           if (field.input === "boolean") value = input.checked;
-          if (field.input === "number") value = Number(input.value);
+          if (field.input === "number" || field.input==="tax-rate") value = Number(input.value);
           changes.set(field.key, value);
         }
         save.disabled = true;

@@ -358,6 +358,9 @@ type WeChatPay struct {
 
 // Invoice credentials belong to the separately enrolled service provider.
 type Invoice struct {
+	MaterialDir, KeyFileID, DefaultTaxCode, DefaultGoodsName, LogoURL             string
+	DefaultTaxRate                                                                int64
+	CardConfirmed                                                                 bool
 	Enabled, CallbackEnabled                                                      bool
 	ServiceMerchantID, MerchantSerial, PrivateKeyPath, PlatformCertPath, APIV3Key string
 	AuthMode, PublicKeyID, PublicKeyPath, APIV3KeyPath                            string
@@ -510,6 +513,8 @@ func Load() (Runtime, error) {
 	cfg.Invoice.SellerTaxID = os.Getenv("AICRM_INVOICE_SELLER_TAX_ID")
 	cfg.Invoice.BillingPersonID = os.Getenv("AICRM_INVOICE_BILLING_PERSON_ID")
 	cfg.Invoice.TaxConfigPath = os.Getenv("AICRM_INVOICE_TAX_CONFIG_PATH")
+	cfg.Invoice.MaterialDir = valueOrDefault("AICRM_INVOICE_MATERIAL_DIR", "/var/lib/aicrm/invoice-materials")
+	cfg.Invoice.LogoURL = os.Getenv("AICRM_INVOICE_LOGO_URL")
 	if cfg.WeChatPay.Enabled, err = strictBool("AICRM_WECHAT_PAY_PROVIDER_ENABLED", false); err != nil {
 		return Runtime{}, err
 	}

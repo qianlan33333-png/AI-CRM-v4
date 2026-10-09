@@ -11,6 +11,7 @@ import (
 	configapp "github.com/qianlan33333-png/AI-CRM-v3/internal/config/app"
 	confighttp "github.com/qianlan33333-png/AI-CRM-v3/internal/config/http"
 	configport "github.com/qianlan33333-png/AI-CRM-v3/internal/config/port"
+	invoiceport "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice/port"
 )
 
 type Registration struct{}
@@ -42,6 +43,20 @@ func (m *Registration) Readiness(ctx context.Context, pool *pgxpool.Pool) error 
 func (b HTTPBindings) WithAIModels(service configport.AIModelSettings) HTTPBindings {
 	if h, ok := b.Config.(*confighttp.Handler); ok {
 		h.WithAIModels(service)
+	}
+	return b
+}
+
+func (b HTTPBindings) WithInvoiceKeys(stager configport.InvoiceKeyStager) HTTPBindings {
+	if h, ok := b.Config.(*confighttp.Handler); ok {
+		h.WithInvoiceKeys(stager)
+	}
+	return b
+}
+
+func (b HTTPBindings) WithInvoiceCard(service invoiceport.CardSetupAdmin) HTTPBindings {
+	if h, ok := b.Config.(*confighttp.Handler); ok {
+		h.WithInvoiceCard(service)
 	}
 	return b
 }

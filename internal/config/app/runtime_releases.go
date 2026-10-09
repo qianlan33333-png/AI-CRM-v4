@@ -56,6 +56,8 @@ type RuntimeReleaseService struct {
 }
 
 type RuntimeActivationGuards struct {
+	InvoiceSigningReady, InvoiceKeyConfigured                                                     bool
+	InvoiceKeyReferenceExists                                                                     func(string) bool
 	WeComEnabled, MessageArchiveEnabled, AutomationProviderEnabled, AIDispatchEnabled             bool
 	AIAssistantIntakeEnabled, AIAgentGenerationEnabled, WeChatPayEnabled, WeChatPayH5OAuthEnabled bool
 	WeChatShopEnabled, AlipayEnabled, SurveyOAuthEnabled                                          bool
@@ -703,6 +705,14 @@ func runtimeReleaseValidationIssues(defaults, scopeBaseline []configport.Runtime
 	guard(boolAt(configport.AIAssistantDispatchEnabled), configport.AIAssistantDispatchEnabled, guards.AIDispatchEnabled, "需已有私信发送授权和受保护通讯录凭据")
 	guard(boolAt(configport.AIAssistantIntakeEnabled), configport.AIAssistantIntakeEnabled, guards.AIAssistantIntakeEnabled, "需已有 AI 接入受保护凭据")
 	guard(boolAt(configport.AIAgentGenerationEnabled), configport.AIAgentGenerationEnabled, guards.AIAgentGenerationEnabled, "需已有 AI 生成 Provider endpoint、model 和受保护凭据")
+	keyReference := stringAt(configport.InvoiceKeyFileID)
+	keyReady := guards.InvoiceKeyConfigured
+	if keyReference != "" {
+		keyReady = guards.InvoiceKeyReferenceExists != nil && guards.InvoiceKeyReferenceExists(keyReference)
+	}
+	guard(keyReference != "", configport.InvoiceKeyFileID, keyReady, "上传的服务商密钥文件不可用，请重新上传")
+	guard(boolAt(configport.InvoiceEnabled), configport.InvoiceEnabled, guards.InvoiceSigningReady && keyReady, "需已有服务商签名证书、微信验签材料及 APIv3 密钥")
+
 	guard(boolAt(configport.WeChatPayProviderEnabled), configport.WeChatPayProviderEnabled, guards.WeChatPayEnabled, "需已有支付受保护凭据")
 	guard(boolAt(configport.WeChatPayH5OAuthEnabled), configport.WeChatPayH5OAuthEnabled, guards.WeChatPayH5OAuthEnabled, "需已有 H5 OAuth 受保护凭据")
 	guard(boolAt(configport.WeChatShopProviderEnabled), configport.WeChatShopProviderEnabled, guards.WeChatShopEnabled, "需已有微信小店 AppSecret、回调 Token 和专属 EncodingAESKey")

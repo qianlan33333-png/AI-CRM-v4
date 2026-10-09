@@ -14,9 +14,9 @@ import (
 	"github.com/wechatpay-apiv3/wechatpay-go/core/auth/validators"
 )
 
-// SetupClient is an operator-only configuration client. It has no invoice,
-// payment, refund, identity or database operations. Runtime business effects
-// continue to use the existing External Effects adapter.
+// SetupClient supplies signed configuration calls for operator setup and the
+// queued card-template adapter. It owns no business state or retries; runtime
+// writes are accepted and executed through External Effects.
 type SetupClient struct {
 	Client   *core.Client
 	Verifier auth.Verifier
@@ -40,6 +40,7 @@ type CardTemplate struct {
 	SubMerchant string `json:"sub_mchid"`
 	AppID       string `json:"card_appid"`
 	Information struct {
+		PayeeName  string `json:"payee_name,omitempty"`
 		LogoURL    string `json:"logo_url"`
 		CustomCell struct {
 			Words       string `json:"words"`

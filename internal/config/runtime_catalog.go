@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -108,6 +109,21 @@ func RuntimeCatalog(statuses ...map[string]bool) []RuntimeCategory {
 			protected(configport.WeChatPayH5AppScope, "H5 App Scope（受控）", "公众号授权", "restart", "H5 scope 绑定身份边界，只能由受控部署变更。"),
 			scopeBound(configport.WeChatPayMerchantID, "商户号（支付接入绑定）", "商户", "restart", "已绑定商户号只能通过支付接入迁移流程变更；商户证书序列号可按证书轮换更新。"),
 			field(configport.WeChatPayMerchantSerial, "商户证书序列号", "商户", "text", "restart"),
+			field(configport.InvoiceEnabled, "开通自动开票", "自动开票", "boolean", "restart"),
+			field(configport.InvoiceSellerName, "销售方名称", "销售方信息", "text", "restart"),
+			field(configport.InvoiceSellerTaxID, "销售方税号", "销售方信息", "text", "restart"),
+			field(configport.InvoiceBillingPersonID, "开票人", "销售方信息", "text", "restart"),
+			field(configport.InvoiceDefaultTaxCode, "税收分类编码（19 位）", "所有商品默认税目", "text", "restart"),
+			field(configport.InvoiceDefaultTaxRate, "税率（%）", "所有商品默认税目", "tax-rate", "restart"),
+			field(configport.InvoiceDefaultGoodsName, "开票项目名", "所有商品默认税目", "text", "restart"),
+			field(configport.InvoiceServiceMerchantID, "服务商商户号", "开票服务商", "scope-bound", "restart"),
+			field(configport.InvoiceMerchantSerial, "服务商证书序列号", "开票服务商", "text", "restart"),
+			field(configport.InvoiceKeyFileID, "服务商 APIv3 密钥", "开票服务商", "private-key-file", "restart"),
+			field(configport.InvoiceLogoURL, "公众号永久素材 Logo URL", "微信卡券", "text", "restart"),
+			field(configport.InvoiceCardConfirmed, "确认使用此卡券模板", "微信卡券", "boolean", "restart"),
+			secret("INVOICE_PRIVATE_KEY", "服务商签名私钥（沿用现有证书）", "开票服务商", "environment://AICRM_INVOICE_PRIVATE_KEY_PATH"),
+			secret("INVOICE_TRUST", "微信支付验签公钥或平台证书", "开票服务商", "environment://AICRM_INVOICE_TRUST"),
+			secret("INVOICE_API_V3", "当前生效的服务商 APIv3 密钥", "开票服务商", "environment://AICRM_INVOICE_API_V3_KEY"),
 			secret("WECHAT_PAY_API_V3_KEY", "API v3 Key", "密钥", "environment://AICRM_WECHAT_PAY_API_V3_KEY"),
 			secret("WECHAT_PAY_PRIVATE_KEY_PATH", "商户私钥", "密钥", "environment://AICRM_WECHAT_PAY_PRIVATE_KEY_PATH"),
 			secret("WECHAT_PAY_PLATFORM_CERT_PATH", "平台证书", "密钥", "environment://AICRM_WECHAT_PAY_PLATFORM_CERT_PATH"),
@@ -209,6 +225,18 @@ func runtimeDefinitions() map[configport.RuntimeSettingKey]runtimeDefinition {
 		configport.WeChatPayH5AppScope:                     {input: "text", validate: text},
 		configport.WeChatPayMerchantID:                     {input: "text", validate: text},
 		configport.WeChatPayMerchantSerial:                 {input: "text", validate: text},
+		configport.InvoiceEnabled:                          {input: "boolean", validate: boolValue},
+		configport.InvoiceSellerName:                       {input: "text", validate: text},
+		configport.InvoiceSellerTaxID:                      {input: "text", validate: text},
+		configport.InvoiceBillingPersonID:                  {input: "text", validate: text},
+		configport.InvoiceDefaultTaxCode:                   {input: "text", validate: text},
+		configport.InvoiceDefaultTaxRate:                   {input: "tax-rate", validate: runtimeInteger(0, 1700)},
+		configport.InvoiceDefaultGoodsName:                 {input: "text", validate: text},
+		configport.InvoiceServiceMerchantID:                {input: "scope-bound", validate: text},
+		configport.InvoiceMerchantSerial:                   {input: "text", validate: text},
+		configport.InvoiceKeyFileID:                        {input: "private-key-file", validate: runtimeInvoiceKeyReference},
+		configport.InvoiceLogoURL:                          {input: "text", validate: runtimeInvoiceLogo},
+		configport.InvoiceCardConfirmed:                    {input: "boolean", validate: boolValue},
 		configport.WeChatShopProviderEnabled:               {input: "boolean", validate: boolValue},
 		configport.WeChatShopAppID:                         {input: "text", validate: text},
 		configport.AlipayProviderEnabled:                   {input: "boolean", validate: boolValue},
@@ -296,6 +324,22 @@ func ValidateRuntimeDependencies(settings []configport.RuntimeSetting) []configp
 	require(boolAt(configport.WeChatShopProviderEnabled), configport.WeChatShopProviderEnabled, textAt(configport.WeChatShopAppID) != "", "需填写 AppID")
 	oauthReady := textAt(configport.SurveyOAuthAppID) != "" && textAt(configport.SurveyOAuthOpenPlatformID) != "" && textAt(configport.SurveyOAuthScope) != ""
 	require(boolAt(configport.SurveyOAuthEnabled), configport.SurveyOAuthEnabled, oauthReady, "需填写 AppID、开放平台 AppID 和 OAuth Scope")
+	require(boolAt(configport.InvoiceEnabled), configport.InvoiceEnabled,
+		boolAt(configport.WeChatPayProviderEnabled) && boolAt(configport.WeChatPayH5OAuthEnabled), "需启用微信支付与公众号授权")
+	for _, key := range []configport.RuntimeSettingKey{configport.InvoiceServiceMerchantID, configport.InvoiceMerchantSerial, configport.InvoiceSellerName, configport.InvoiceSellerTaxID, configport.InvoiceBillingPersonID, configport.InvoiceDefaultGoodsName} {
+		require(boolAt(configport.InvoiceEnabled), key, textAt(key) != "", "开票配置不能为空")
+	}
+	taxCode := textAt(configport.InvoiceDefaultTaxCode)
+	require(boolAt(configport.InvoiceEnabled), configport.InvoiceDefaultTaxCode, len(taxCode) == 19 && strings.Trim(taxCode, "0123456789") == "", "财务需填写完整 19 位税收分类编码")
+	var rate int64
+	rateValid := json.Unmarshal(values[configport.InvoiceDefaultTaxRate], &rate) == nil
+	switch rate {
+	case 0, 100, 150, 300, 500, 600, 900, 1000, 1100, 1300, 1600, 1700:
+	default:
+		rateValid = false
+	}
+	require(boolAt(configport.InvoiceEnabled), configport.InvoiceDefaultTaxRate, rateValid, "税率不受官方接口支持")
+
 	return issues
 }
 
@@ -450,9 +494,33 @@ func ScopeBoundRuntimeSetting(key configport.RuntimeSettingKey) bool {
 	case configport.RuntimeWeComCorpID, configport.SurveyOAuthAppID,
 		configport.SurveyOAuthOpenPlatformID, configport.WeChatPayAppID,
 		configport.WeChatPayH5AppID, configport.WeChatPayMerchantID,
-		configport.WeChatShopAppID:
+		configport.WeChatShopAppID, configport.InvoiceServiceMerchantID:
 		return true
 	default:
 		return false
 	}
+}
+
+func runtimeInvoiceKeyReference(value json.RawMessage) (json.RawMessage, bool) {
+	var v string
+	if !decodeRuntimeOne(value, &v) || (v != "" && (len(v) != 32 || strings.Trim(v, "0123456789abcdef") != "")) {
+		return nil, false
+	}
+	out, _ := json.Marshal(v)
+	return out, true
+}
+func runtimeInvoiceLogo(value json.RawMessage) (json.RawMessage, bool) {
+	var v string
+	if !decodeRuntimeOne(value, &v) {
+		return nil, false
+	}
+	v = strings.TrimSpace(v)
+	if v != "" {
+		u, e := url.Parse(v)
+		if e != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host != "mmbiz.qpic.cn" || u.User != nil || u.Fragment != "" || !strings.HasPrefix(u.Path, "/mmbiz") || len(v) > 1024 {
+			return nil, false
+		}
+	}
+	out, _ := json.Marshal(v)
+	return out, true
 }

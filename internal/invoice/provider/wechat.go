@@ -191,6 +191,9 @@ func (w *WeChat) prepareWrite(ctx context.Context, a p.Application, reverse bool
 	return "/fapiao-applications/issue-general", body, nil
 }
 func (w *WeChat) Execute(ctx context.Context, envelope effects.Envelope, attempt effects.Attempt) (effects.AdapterResult, error) {
+	if envelope.Owner == effects.OwnerInvoice && envelope.Kind == effects.KindInvoiceCardConfigure {
+		return w.configureCardEffect(ctx, envelope, attempt)
+	}
 	if envelope.Owner != effects.OwnerInvoice || (envelope.Kind != effects.KindInvoiceIssue && envelope.Kind != effects.KindInvoiceReverse) {
 		return effects.AdapterResult{}, p.ErrInvalid
 	}

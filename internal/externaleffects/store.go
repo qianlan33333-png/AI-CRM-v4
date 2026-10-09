@@ -908,7 +908,7 @@ func (r *Repository) QueuedEnvelope(ctx context.Context, id, generation, riverJo
 
 func projectsStaleAttempt(kind Kind) bool {
 	switch kind {
-	case KindFeishuOpsNotification, KindInvitationCode, KindOutboundMedia, KindWeComTagCatalog, KindWeComTagCatalogMutation, KindWeComContactDescription, KindGroupMessage, KindChannelAsset, KindChannelWelcome, KindChannelEntryTag, KindChannelLink, KindOutboundMessage, KindAutomationMessage, KindSurveyCompletion, KindCustomerTagCommand, KindCustomerOwnerHandoff, KindCommerceProductPush, KindAIAgentGenerate, KindAIRecommend, port.KindSidebarJSSDKSend, port.KindInvoiceIssue, port.KindInvoiceReverse:
+	case KindFeishuOpsNotification, KindInvitationCode, KindOutboundMedia, KindWeComTagCatalog, KindWeComTagCatalogMutation, KindWeComContactDescription, KindGroupMessage, KindChannelAsset, KindChannelWelcome, KindChannelEntryTag, KindChannelLink, KindOutboundMessage, KindAutomationMessage, KindSurveyCompletion, KindCustomerTagCommand, KindCustomerOwnerHandoff, KindCommerceProductPush, KindAIAgentGenerate, KindAIRecommend, port.KindSidebarJSSDKSend, port.KindInvoiceIssue, port.KindInvoiceReverse, port.KindInvoiceCardConfigure:
 		return true
 	default:
 		return false
