@@ -12,6 +12,7 @@ type PublishedPoster struct {
 	Slot                   int
 	SourceImageID          int64
 	Description, MediaType string
+	ShareText              string
 	Content                []byte
 }
 
@@ -23,7 +24,7 @@ func (r *Repository) ListCampaignPostersWithin(ctx context.Context, campaignID i
 	if campaignID < 1 {
 		return nil, ErrInvalid
 	}
-	rows, err := tx.Query(ctx, `SELECT slot,source_image_id,description,media_type FROM referral_campaign_posters WHERE campaign_id=$1 ORDER BY slot`, campaignID)
+	rows, err := tx.Query(ctx, `SELECT slot,source_image_id,description,media_type,share_text FROM referral_campaign_posters WHERE campaign_id=$1 ORDER BY slot`, campaignID)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -31,7 +32,7 @@ func (r *Repository) ListCampaignPostersWithin(ctx context.Context, campaignID i
 	result := make([]PublishedPoster, 0, 3)
 	for rows.Next() {
 		var poster PublishedPoster
-		if err := rows.Scan(&poster.Slot, &poster.SourceImageID, &poster.Description, &poster.MediaType); err != nil {
+		if err := rows.Scan(&poster.Slot, &poster.SourceImageID, &poster.Description, &poster.MediaType, &poster.ShareText); err != nil {
 			return nil, mapError(err)
 		}
 		result = append(result, poster)
@@ -74,7 +75,7 @@ func (r *Repository) ReplaceCampaignPostersWithin(ctx context.Context, campaignI
 			return ErrInvalid
 		}
 		digest := sha256.Sum256(poster.Content)
-		_, err = tx.Exec(ctx, `INSERT INTO referral_campaign_posters(campaign_id,slot,source_image_id,description,media_type,image_bytes,image_sha256,published_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, campaignID, poster.Slot, poster.SourceImageID, poster.Description, poster.MediaType, poster.Content, digest[:], at.UTC())
+		_, err = tx.Exec(ctx, `INSERT INTO referral_campaign_posters(campaign_id,slot,source_image_id,description,media_type,image_bytes,image_sha256,published_at,share_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, campaignID, poster.Slot, poster.SourceImageID, poster.Description, poster.MediaType, poster.Content, digest[:], at.UTC(), poster.ShareText)
 		if err != nil {
 			return mapError(err)
 		}

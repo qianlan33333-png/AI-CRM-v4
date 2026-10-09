@@ -68,7 +68,7 @@ func (s *PosterService) ListCampaignPosters(ctx context.Context, campaignID int6
 	}
 	result := make([]referralport.CampaignPoster, 0, len(stored))
 	for _, p := range stored {
-		result = append(result, referralport.CampaignPoster{Slot: p.Slot, Description: p.Description, SourceImageID: p.SourceImageID, ImageURL: "/api/v1/referral/campaigns/" + strconv.FormatInt(campaignID, 10) + "/posters/" + strconv.Itoa(p.Slot)})
+		result = append(result, referralport.CampaignPoster{Slot: p.Slot, Description: p.Description, ShareText: p.ShareText, SourceImageID: p.SourceImageID, ImageURL: "/api/v1/referral/campaigns/" + strconv.FormatInt(campaignID, 10) + "/posters/" + strconv.Itoa(p.Slot)})
 	}
 	return result, nil
 }
@@ -150,7 +150,11 @@ func (s *PosterService) SetCampaignPosters(ctx context.Context, c referralport.S
 		if mediaType != imageValue.MediaType || (mediaType != "image/png" && mediaType != "image/jpeg") {
 			return nil, referralport.ErrInvalidRequest
 		}
-		prepared = append(prepared, referralstore.PublishedPoster{Slot: i + 1, SourceImageID: p.ImageID, Description: p.Description, MediaType: mediaType, Content: imageValue.Content})
+		shareText := p.ShareText
+		if strings.TrimSpace(shareText) == "" {
+			shareText = ""
+		}
+		prepared = append(prepared, referralstore.PublishedPoster{Slot: i + 1, SourceImageID: p.ImageID, Description: p.Description, ShareText: shareText, MediaType: mediaType, Content: imageValue.Content})
 	}
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		if err := s.store.LockOperationReceiptWithin(tx, "campaign_posters", actor, c.IdempotencyKey); err != nil {

@@ -6,6 +6,7 @@
 
 | 场景 | 入口 | 调用／装配 | 边界 |
 | --- | --- | --- | --- |
+| 纯文本剪贴板 | `web/v3/shared/ui/plainTextClipboard.ts` | Referral 公共页活动链接及配套话术调用 `copyPlainText` | 仅用户点击触发浏览器本地复制；Clipboard API 拒绝/缺失时尝试 modal 内 textarea 兼容回退，返回真实布尔结果，不读服务器或剪贴板历史。 |
 | 管理端单壳 | `internal/webshell/templates/admin_base.html` | `internal/webshell/renderer.go` 的 `RenderDistribution` | 仅一个 `.admin-sidebar` 和 `.admin-topbar`；分销领域只提供经 manifest 验证的正文 assets。 |
 | 企微客户侧边栏 | `web/v3/sidebar/main.ts`、`web/v3/sidebar/presentation.css` | `RenderSidebar` → sidebar manifest assets → `sidebar_workbench_v3_overlay.js` | 仅复用签名 context 与 `SidebarBridge`；不挂员工、群、标签 picker 或自动化话术目录。403／context 失效清空客户缓存和操作入口；素材标签来自 Media Owner。 |
 | 问卷管理与编辑器 | `web/v3/surveyAdapter.ts`、`web/src/admin/sections/questionnaireEditor.ts` | `internal/survey/ui.go` 解析 manifest，`RenderSurvey` 在冻结 admin bundle 前装配列表 bridge；编辑器由 `questionnaireEditor` 入口挂载 | 一级列表复用冻结 table、检索和操作；bridge 仅映射问卷名称。编辑页保留标题用于答题/预览，状态以服务端 readback 为准。 |

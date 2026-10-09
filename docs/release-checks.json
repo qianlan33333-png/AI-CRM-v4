@@ -1,65 +1,49 @@
 {
   "schema": 1,
-  "baseline_sha": "5ff2052369afda809fd9740637425dc4294eca00",
+  "baseline_sha": "2217897214dbf859dace6fe1a236e6e352abc1b1",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/invoice"
+      "package": "./internal/referral/http"
     },
     {
       "lane": "backend",
-      "package": "./internal/invoice/provider"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLMissingNativeRecoveryAtomicConcurrent",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLCampaignPostersPublishSnapshotAndIdempotentRetry",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLMissingNativeRecoveryAuthority",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLCampaignPosterShareTextBindingAndAtomicPublication",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLBillEntryUnifiedAndAtomic",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLCampaignPosterShareTextMigrationPreservesLegacySnapshot",
       "postgres": true
     },
     {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLBillEntryAuthorityAndRecovery",
-      "postgres": true
+      "lane": "frontend",
+      "path": "web/v3/referralCenter.test.mjs"
     },
     {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLFailedRecoveryCurrentFinanceAndAtomic",
-      "postgres": true
+      "lane": "frontend",
+      "path": "web/v3/referralAdmin.test.mjs"
     },
     {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLUnsubmittedReplayKeepsInvoiceAndIsAtomic",
-      "postgres": true
+      "lane": "frontend",
+      "path": "web/v3/referralPosterShareText.test.mjs"
     },
     {
-      "lane": "backend",
-      "package": "./internal/platform/config",
-      "test": "TestLoadInvoiceRecoveryRequiresExplicitApplication"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLDefaultTaxSupportsFutureProductBothEntries",
-      "postgres": true
+      "lane": "browser",
+      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLReferralChromiumJourney"
     }
   ],
   "installed_checks": [
-    "invoice-callback"
+    "referral"
   ],
   "build_commands": []
 }

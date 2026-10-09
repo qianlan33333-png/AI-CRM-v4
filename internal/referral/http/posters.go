@@ -19,7 +19,7 @@ type CampaignPosters interface {
 func publicPosters(posters []referralport.CampaignPoster, admin bool) []any {
 	result := make([]any, 0, len(posters))
 	for _, poster := range posters {
-		item := map[string]any{"slot": poster.Slot, "description": poster.Description, "image_url": poster.ImageURL}
+		item := map[string]any{"slot": poster.Slot, "description": poster.Description, "share_text": poster.ShareText, "image_url": poster.ImageURL}
 		if admin {
 			item["image_id"] = poster.SourceImageID
 		}

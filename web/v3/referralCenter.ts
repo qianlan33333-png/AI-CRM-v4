@@ -2,6 +2,7 @@
 // emitted by Referral HTTP; browser query parameters are never customer proof.
 export {};
 import qrcode from "qrcode-generator";
+import { copyPlainText as copy } from "./shared/ui/plainTextClipboard";
 
 type Row = Record<string, unknown>;
 type Campaign = {
@@ -22,7 +23,7 @@ type Campaign = {
   teams: Team[];
   activityURL: string;
   productURL: string;
-  posters: Array<{ slot: number; description: string; imageURL: string }>;
+  posters: Array<{ slot: number; description: string; shareText: string; imageURL: string }>;
 };
 type Team = { id: number; name: string; logoURL: string; captainName: string };
 type Me = {
@@ -241,7 +242,7 @@ function parseCampaign(raw: unknown): Campaign {
     productURL: str(row.product_url),
     posters: Array.isArray(row.posters) ? row.posters.map((item) => {
       const poster = obj(item);
-      return { slot: num(poster.slot), description: str(poster.description), imageURL: str(poster.image_url) };
+      return { slot: num(poster.slot), description: str(poster.description), shareText: str(poster.share_text), imageURL: str(poster.image_url) };
     }).filter((item) => item.slot >= 1 && item.slot <= 3 && item.imageURL.startsWith("/api/v1/referral/campaigns/")) : [],
   };
 }
@@ -980,14 +981,6 @@ async function openInvite(): Promise<void> {
     );
   }
 }
-async function copy(value: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
 async function composePoster(imageURL: string, payload: string): Promise<HTMLCanvasElement> {
   const source = new Image();
   source.decoding = "async";
@@ -1021,6 +1014,8 @@ async function composePoster(imageURL: string, payload: string): Promise<HTMLCan
 }
 async function renderInviteDialog(): Promise<void> {
   if (!invite || !campaign) return;
+  if (document.querySelector('dialog[data-testid="referral-invite-dialog"][open]')) return;
+  const qrPayload = invite.qrPayload;
   const dialog = document.createElement("dialog");
   dialog.className = "referral-dialog referral-poster-dialog";
   dialog.dataset.testid = "referral-invite-dialog";
@@ -1030,55 +1025,134 @@ async function renderInviteDialog(): Promise<void> {
   selectors.className = "referral-poster-selectors";
   const preview = element("div");
   preview.className = "referral-poster-preview";
+  preview.dataset.testid = "referral-poster-preview";
+  const navigation = element("div");
+  navigation.className = "referral-poster-navigation";
+  const previous = button("上一张", () => void show(activeIndex - 1), "referral-quiet");
+  const next = button("下一张", () => void show(activeIndex + 1), "referral-quiet");
+  previous.dataset.testid = "referral-poster-previous";
+  next.dataset.testid = "referral-poster-next";
+  const position = element("span");
+  position.setAttribute("aria-live", "polite");
+  navigation.append(previous, position, next);
   const description = element("p");
-  const download = button("下载海报", () => {}, "referral-primary");
+  const saveHint = element("p", "长按海报可保存图片");
+  saveHint.className = "referral-poster-save-hint";
+  saveHint.hidden = true;
+  const share = element("div");
+  share.className = "referral-poster-share";
+  const shareText = element("p");
+  shareText.className = "referral-poster-share-text";
+  shareText.dataset.testid = "referral-poster-share-text";
+  const feedback = element("p");
+  feedback.className = "referral-poster-copy-feedback";
+  feedback.setAttribute("role", "status");
+  feedback.dataset.testid = "referral-poster-copy-feedback";
+  const manualCopy = button("选中话术", () => {
+    const range = document.createRange();
+    range.selectNodeContents(shareText);
+    const selected = window.getSelection();
+    selected?.removeAllRanges();
+    selected?.addRange(range);
+  }, "referral-quiet");
+  manualCopy.hidden = true;
+  const copyButton = button("复制话术", async () => {
+    const current = selection;
+    const value = posters[activeIndex]?.shareText || "";
+    if (!value.trim()) return;
+    copyButton.disabled = true;
+    const copied = await copy(value);
+    if (current !== selection || !dialog.open) return;
+    feedback.textContent = copied ? "话术已复制" : "复制失败，请选中话术或长按文本手动复制。";
+    feedback.dataset.error = String(!copied);
+    manualCopy.hidden = copied;
+    copyButton.disabled = false;
+  }, "referral-primary");
+  copyButton.dataset.testid = "referral-copy-share-text";
+  share.append(shareText, copyButton, feedback, manualCopy);
+  const download = button("下载海报", () => {}, "referral-quiet");
   download.dataset.testid = "referral-download-poster";
   download.disabled = true;
   const posters = campaign.posters.slice(0, 3);
-  let selectedCanvas: HTMLCanvasElement | undefined;
+  selectors.hidden = posters.length < 2;
+  navigation.hidden = posters.length < 2;
+  let selectedPNG = "";
+  let activeIndex = 0;
   let selection = 0;
   const show = async (index: number) => {
+    if (index < 0 || index >= posters.length) {
+      if (!posters.length) {
+        preview.replaceChildren(element("p", "管理员尚未发布邀请海报。"));
+        share.hidden = true;
+      }
+      return;
+    }
     const poster = posters[index];
-    selection++;
-    const current = selection;
-    selectedCanvas = undefined;
+    activeIndex = index;
+    const current = ++selection;
+    selectedPNG = "";
     download.disabled = true;
+    saveHint.hidden = true;
     preview.replaceChildren(element("p", "正在生成专属海报…"));
-    description.textContent = poster?.description || "扫码购买活动商品";
+    description.textContent = poster.description || "扫码购买活动商品";
+    shareText.textContent = poster.shareText;
+    share.hidden = !poster.shareText.trim();
+    feedback.textContent = "";
+    manualCopy.hidden = true;
+    copyButton.disabled = false;
+    previous.disabled = index === 0;
+    next.disabled = index === posters.length - 1;
+    position.textContent = `${index + 1} / ${posters.length}`;
     selectors.querySelectorAll("button").forEach((node, buttonIndex) => node.setAttribute("aria-pressed", String(buttonIndex === index)));
-    if (!poster) { preview.replaceChildren(element("p", "管理员尚未发布邀请海报。")); return; }
     try {
-      const canvas = await composePoster(poster.imageURL, invite!.qrPayload);
+      const canvas = await composePoster(poster.imageURL, qrPayload);
       if (current !== selection || !dialog.open) return;
-      canvas.setAttribute("role", "img");
-      canvas.setAttribute("aria-label", `海报${index + 1}，包含我的专属邀请二维码`);
-      preview.replaceChildren(canvas);
-      selectedCanvas = canvas;
+      const png = canvas.toDataURL("image/png");
+      const image = document.createElement("img");
+      image.src = png;
+      image.alt = `海报${index + 1}，包含我的专属邀请二维码`;
+      image.draggable = false;
+      image.dataset.testid = "referral-poster-image";
+      preview.replaceChildren(image);
+      selectedPNG = png;
       download.disabled = false;
+      saveHint.hidden = false;
     } catch {
-      if (current === selection) preview.replaceChildren(element("p", "海报加载失败，请稍后重试。"));
+      if (current === selection && dialog.open) preview.replaceChildren(element("p", "海报加载失败，请稍后重试。"));
     }
   };
-  posters.forEach((poster,index) => {
+  posters.forEach((_poster, index) => {
     const choice = button(`海报${["一", "二", "三"][index]}`, () => void show(index), "referral-poster-choice");
     choice.setAttribute("aria-pressed", String(index === 0));
     selectors.append(choice);
   });
+  let gesture: { x: number; y: number } | undefined;
+  preview.addEventListener("touchstart", (event) => {
+    const touch = event.touches.length === 1 ? event.touches[0] : undefined;
+    gesture = touch ? { x: touch.clientX, y: touch.clientY } : undefined;
+  }, { passive: true });
+  preview.addEventListener("touchcancel", () => { gesture = undefined; });
+  preview.addEventListener("touchend", (event) => {
+    const start = gesture;
+    gesture = undefined;
+    const touch = event.changedTouches[0];
+    if (!start || !touch || posters.length < 2) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    // Ignore tap/long-press movement and vertical scrolling. Never cancel the
+    // native image context menu or the dialog's vertical scroll gesture.
+    if (Math.abs(dx) >= 40 && Math.abs(dx) > Math.abs(dy)) void show(activeIndex + (dx < 0 ? 1 : -1));
+  }, { passive: true });
   download.onclick = () => {
-    if (!selectedCanvas || !campaign) return;
-    selectedCanvas.toBlob((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${campaign!.name.slice(0, 48)}-海报${["一", "二", "三"][Math.max(0, Array.from(selectors.children).findIndex((item) => item.getAttribute("aria-pressed") === "true"))]}.png`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }, "image/png");
+    if (!selectedPNG || !campaign) return;
+    const link = document.createElement("a");
+    link.href = selectedPNG;
+    link.download = `${campaign.name.slice(0, 48)}-海报${["一", "二", "三"][activeIndex]}.png`;
+    link.click();
   };
-  card.append(selectors, preview, description, download, button("关闭", () => dialog.close(), "referral-quiet"));
+  card.append(selectors, preview, navigation, description, saveHint, share, download, button("关闭", () => dialog.close(), "referral-quiet"));
   dialog.append(card);
-  dialog.addEventListener("close", () => dialog.remove());
+  dialog.addEventListener("close", () => { selection++; selectedPNG = ""; dialog.remove(); });
   document.body.append(dialog);
   dialog.showModal();
   void show(0);

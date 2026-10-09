@@ -24,7 +24,7 @@ type Campaign = {
   productID: number;
   productType: string;
   leaderboardMetric: "invites" | "sales_amount" | "sales_orders";
-  posters: Array<{ slot: number; imageID: number; description: string; imageURL: string }>;
+  posters: Array<{ slot: number; imageID: number; description: string; shareText: string; imageURL: string }>;
 };
 type Tab =
   | "campaigns"
@@ -240,7 +240,7 @@ function parseCampaign(raw: unknown): Campaign {
           : "invites",
     posters: Array.isArray(row.posters) ? row.posters.map((item) => {
       const poster = obj(item);
-      return { slot: int(poster.slot), imageID: int(poster.image_id), description: str(poster.description), imageURL: str(poster.image_url) };
+      return { slot: int(poster.slot), imageID: int(poster.image_id), description: str(poster.description), shareText: str(poster.share_text), imageURL: str(poster.image_url) };
     }).filter((item) => item.slot >= 1 && item.slot <= 3 && item.imageID > 0) : [],
   };
 }
@@ -1230,7 +1230,8 @@ function openCampaignForm(existing?: Campaign): void {
     area("活动介绍", "活动介绍", existing?.introduction || ""),
     area("奖励说明", "奖励说明", existing?.reward || ""),
   );
-  const posterSection = section("邀请海报", "最多 3 张。请在每张图片右下角预留二维码位置；前台下载时会叠加当前邀请人的专属二维码。");
+  const posterSection = section("邀请海报", "最多 3 张。每张可填写配套话术；用户切换海报时话术一起切换。图片右下角请预留专属二维码位置。");
+  posterSection.classList.add("referral-admin-poster-section");
   if (existing) {
     const posterList = node("div");
     posterList.className = "referral-admin-poster-list";
@@ -1251,6 +1252,16 @@ function openCampaignForm(existing?: Campaign): void {
         description.setAttribute("aria-label", `海报${index + 1}说明`);
         description.addEventListener("input", () => { poster.description = description.value; });
         meta.append(description);
+        const shareLabel = node("label");
+        shareLabel.append(node("span", "配套话术（选填）"));
+        const shareText = document.createElement("textarea");
+        shareText.rows = 4;
+        shareText.value = poster.shareText;
+        shareText.placeholder = "填写用户可直接复制的推广话术，支持换行和表情";
+        shareText.setAttribute("aria-label", `海报${index + 1}配套话术`);
+        shareText.addEventListener("input", () => { poster.shareText = shareText.value; });
+        shareLabel.append(shareText);
+        meta.append(shareLabel);
         row.append(preview,meta,action("移除", () => { posterRows.splice(index,1); drawPosters(); }));
         posterList.append(row);
       }
@@ -1260,21 +1271,39 @@ function openCampaignForm(existing?: Campaign): void {
       if (posterRows.length >= 3) { feedback.textContent = "最多配置 3 张海报。"; return; }
       const image = await choosePosterImage();
       if (!image) return;
-      posterRows.push({ slot: posterRows.length+1, imageID: image.id, description: image.name.slice(0,80), imageURL: `/api/admin/image-library/${image.id}/variants/thumb_320` });
+      posterRows.push({ slot: posterRows.length+1, imageID: image.id, description: image.name.slice(0,80), shareText: "", imageURL: `/api/admin/image-library/${image.id}/variants/thumb_320` });
       drawPosters();
     });
+    let pendingReadback: Array<{ image_id: number; description: string; share_text: string }> | undefined;
     const savePosters = action("发布海报配置", async () => {
-      savePosters.disabled = true;
+      const controls = Array.from(posterSection.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>("input,textarea,button"));
+      controls.forEach((control) => { control.disabled = true; });
       try {
-        await api(`/campaigns/${existing.id}/posters`, { method: "PUT", body: JSON.stringify({ expected_version: existing.version, posters: posterRows.map((row) => ({ image_id: row.imageID, description: row.description.trim() })) }) }, `posters:${existing.id}`);
+        if (!pendingReadback) {
+          const payload = posterRows.map((row) => ({ image_id: row.imageID, description: row.description.trim(), share_text: row.shareText.trim() ? row.shareText : "" }));
+          await api(`/campaigns/${existing.id}/posters`, { method: "PUT", body: JSON.stringify({ expected_version: existing.version, posters: payload }) }, `posters:${existing.id}`);
+          pendingReadback = payload;
+        }
+        const saved = parseCampaign(await api(`/campaigns/${existing.id}`));
+        if (saved.id !== existing.id || saved.version < 1) throw new Error("配置已发布，但尚未确认保存结果，请重试读取。");
+        const matches = JSON.stringify(saved.posters.map((row) => ({ image_id: row.imageID, description: row.description, share_text: row.shareText }))) === JSON.stringify(pendingReadback);
+        existing.version = saved.version;
+        existing.posters = saved.posters;
+        posterRows.splice(0, posterRows.length, ...saved.posters.map((row) => ({ ...row })));
+        drawPosters();
+        pendingReadback = undefined;
         keys.delete(`posters:${existing.id}`);
-        existing.version++;
-        feedback.textContent = "海报已发布，前台可选择并下载专属海报。";
-        feedback.dataset.error = "false";
+        feedback.textContent = matches ? "海报及配套话术已发布并读取确认。" : "海报配置已被更新，已读取最新内容，请核对后再发布。";
+        feedback.dataset.error = String(!matches);
       } catch (error) {
-        feedback.textContent = error instanceof Error ? error.message : "海报发布失败。";
+        feedback.textContent = pendingReadback ? "配置已发布，但读取确认失败。点击重试读取，不会重复发布。" : error instanceof Error ? error.message : "海报发布失败。";
         feedback.dataset.error = "true";
-      } finally { savePosters.disabled = false; }
+      } finally {
+        controls.forEach((control) => { control.disabled = false; });
+        // A failed readback must be resolved before another content mutation.
+        posterSection.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>("input,textarea,button").forEach((control) => { control.disabled = !!pendingReadback && control !== savePosters; });
+        savePosters.textContent = pendingReadback ? "重试读取海报配置" : "发布海报配置";
+      }
     }, "referral-admin-primary");
     posterSection.append(posterList,addPoster,savePosters);
   } else {

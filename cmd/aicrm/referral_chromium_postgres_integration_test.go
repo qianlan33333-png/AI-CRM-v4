@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -93,8 +98,14 @@ func TestPostgreSQLReferralChromiumJourney(t *testing.T) {
 	server.Config.Handler = application.handler
 	server.StartTLS()
 	fixture, _ := json.Marshal(actors)
+	poster := image.NewRGBA(image.Rect(0, 0, 600, 800))
+	draw.Draw(poster, poster.Bounds(), image.NewUniform(color.RGBA{R: 255, G: 243, B: 236, A: 255}), image.Point{}, draw.Src)
+	var posterPNG bytes.Buffer
+	if err = png.Encode(&posterPNG, poster); err != nil {
+		t.Fatal(err)
+	}
 	command := exec.CommandContext(ctx, "node", filepath.Join(repository, "cmd/aicrm/referral_chromium_journey.mjs"))
-	command.Env = append(os.Environ(), "AICRM_REFERRAL_BROWSER_URL="+server.URL, "AICRM_REFERRAL_BROWSER_ACTORS="+string(fixture))
+	command.Env = append(os.Environ(), "AICRM_REFERRAL_BROWSER_URL="+server.URL, "AICRM_REFERRAL_BROWSER_ACTORS="+string(fixture), "AICRM_REFERRAL_POSTER_PNG="+base64.StdEncoding.EncodeToString(posterPNG.Bytes()))
 	output, runErr := command.CombinedOutput()
 	if runErr != nil || !strings.Contains(string(output), "referral_chromium: PASS") {
 		t.Fatalf("referral journey err=%v output=%s", runErr, output)

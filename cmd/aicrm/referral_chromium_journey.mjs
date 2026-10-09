@@ -26,8 +26,8 @@ try {
   const tab = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();
   socket = new WebSocket(tab.webSocketDebuggerUrl);
   await new Promise((r,j)=>{socket.addEventListener('open',r,{once:true});socket.addEventListener('error',j,{once:true});});
-  const exceptions=[], networkRequests=[];
-  socket.addEventListener('message',e=>{const m=JSON.parse(String(e.data));if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(new Error(m.error.message)):p?.resolve(m.result);}else if(m.method==='Network.requestWillBeSent')networkRequests.push(m.params.request.url);else if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails.text);});
+  const exceptions=[], networkRequests=[], networkResponses=[];
+  socket.addEventListener('message',e=>{const m=JSON.parse(String(e.data));if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(new Error(m.error.message)):p?.resolve(m.result);}else if(m.method==='Network.requestWillBeSent')networkRequests.push(m.params.request.url);else if(m.method==='Network.responseReceived')networkResponses.push({id:m.params.requestId,url:m.params.response.url});else if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails.text);});
   const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
   const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result?.value;};
   const wait=async expression=>{for(let i=0;i<180;i++){if(await evaluate(expression))return;await sleep(75);}throw new Error('UI condition not reached: '+expression+'; page='+await evaluate('location.pathname+location.search+" "+document.body.innerText'));};
@@ -95,6 +95,22 @@ try {
     const joinedImage=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,'captain-joined-375.png'),Buffer.from(joinedImage.data,'base64'));
     await evaluate("document.querySelector('[data-testid=referral-invite-dialog]').close()");
   }
+  // Publish artwork through the real Media and Referral owners in the
+  // isolated database. All three slots intentionally use one fixture image.
+  const form = new FormData();
+  form.append('name', '邀请海报测试图片');
+  form.append('image', new Blob([Buffer.from(process.env.AICRM_REFERRAL_POSTER_PNG, 'base64')], { type: 'image/png' }), 'poster.png');
+  const upload = await fetch(base+'/api/admin/image-library/upload', { method: 'POST', headers: { Cookie: staffCookies.join('; '), Origin: base, 'X-CSRF-Token': adminCSRF, 'Idempotency-Key': 'referral-poster-browser-upload' }, body: form });
+  const uploaded = await upload.json();
+  assert.ok(upload.ok && uploaded.item?.id, `poster upload: ${JSON.stringify(uploaded)}`);
+  const shareTexts = ['  一起参加 🎉\n第二行保持空格  ', '<b>第二张纯文本</b>\n🙂', ''];
+  for(const {c} of campaigns) {
+    const current = await api(`/api/admin/referral/campaigns/${c.id}`);
+    await api(`/api/admin/referral/campaigns/${c.id}/posters`, { expected_version: current.version, posters: shareTexts.map((share_text,i)=>({ image_id: uploaded.item.id, description: `海报${i+1}`, share_text })) }, undefined, 'PUT');
+    const readback = await api(`/api/admin/referral/campaigns/${c.id}`);
+    assert.deepEqual(readback.posters.map(p=>p.share_text), shareTexts, 'published text readback');
+  }
+  await call('Browser.grantPermissions', { origin: base, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
   for(let index=0;index<2;index++){
     await cookie('aicrm_distribution_session',actors[2].session);await cookie('aicrm_distribution_csrf','referral-fixture-csrf');
     await call('Emulation.setDeviceMetricsOverride',{width:index?430:375,height:850,deviceScaleFactor:1,mobile:true});
@@ -106,6 +122,9 @@ try {
     await wait("document.querySelector('[data-testid=referral-confirm-join]')");
     await evaluate("document.querySelector('#referral-rule-check').click(); document.querySelector('[data-testid=referral-confirm-join]').click()");
     await wait("!document.querySelector('[data-testid=referral-accept-dialog]')");
+    await wait("document.querySelector('[data-testid=referral-invite-dialog][open]')");
+    await evaluate("document.querySelector('[data-testid=referral-invite-dialog]').close()");
+    await wait("!document.querySelector('[data-testid=referral-invite-dialog]')");
     await evaluate("document.querySelector('[data-testid=referral-activity-info]').click()");
     await wait("document.querySelector('[data-testid=referral-invite]')?.textContent==='邀请好友'");
     const pageImage=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,`campaign-${index?430:375}.png`),Buffer.from(pageImage.data,'base64'));
@@ -118,6 +137,34 @@ try {
     await evaluate("document.querySelector('[data-testid=referral-invite]').click()");
     await wait("document.querySelector('[data-testid=referral-invite-dialog]')");
     assert.equal(await evaluate("document.querySelector('[data-testid=referral-invite-url]')===null"),true,'poster panel has no editable link action');
+    await wait("document.querySelector('[data-testid=referral-poster-image]')?.naturalWidth===600");
+    assert.equal(await evaluate("document.querySelector('[data-testid=referral-poster-share-text]').textContent"),shareTexts[0]);
+    const composedPNG = await evaluate("document.querySelector('[data-testid=referral-poster-image]').src");
+    assert.match(composedPNG,/^data:image\/png;base64,/);
+    const inviteResponse = networkResponses.findLast(response=>response.url===`${base}/api/v1/referral/campaigns/${campaigns[index].c.id}/invite`);
+    assert.ok(inviteResponse, 'personal invitation comes from authenticated HTTP');
+    const invitationURL = JSON.parse((await call('Network.getResponseBody', {requestId:inviteResponse.id})).body).url;
+    const personalPreview = await api(`/api/v1/referral/invitations/${new URL(invitationURL).pathname.split('/').at(-1)}`,undefined,actors[2]);
+    assert.equal(personalPreview.inviter_display_name,actors[2].name,'personal artwork must use the current session actor');
+    await fs.writeFile(path.join(screenshots,`composed-${index?430:375}.png`),Buffer.from(composedPNG.split(',')[1],'base64'));
+    await fs.writeFile(path.join(screenshots,`composed-${index?430:375}.json`),JSON.stringify({expected_url:invitationURL}));
+    const posterImage=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,`poster-${index?430:375}.png`),Buffer.from(posterImage.data,'base64'));
+    const clickPoint = await evaluate("(()=>{const button=document.querySelector('[data-testid=referral-copy-share-text]');button.scrollIntoView({block:'center'});const r=button.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()");
+    await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...clickPoint});
+    await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...clickPoint});
+    await wait("document.querySelector('[data-testid=referral-poster-copy-feedback]').textContent==='话术已复制'");
+    assert.equal(await evaluate("navigator.clipboard.readText()"), shareTexts[0], 'clipboard retains exact newlines/emoji/spaces');
+    await evaluate("document.querySelector('[data-testid=referral-poster-next]').click()");
+    await wait("document.querySelector('[data-testid=referral-poster-image]')?.alt.startsWith('海报2')");
+    assert.equal(await evaluate("document.querySelector('[data-testid=referral-poster-share-text]').textContent"),shareTexts[1]);
+    assert.equal(await evaluate("document.querySelector('.referral-poster-share-text b')===null"),true,'copy is plain text');
+    const swipePoint = await evaluate("(()=>{const preview=document.querySelector('[data-testid=referral-poster-preview]');preview.scrollIntoView({block:'center'});const r=preview.getBoundingClientRect();return{x:r.x+r.width*0.8,y:Math.max(r.y+20,Math.min(innerHeight-20,r.y+r.height/2))}})()");
+    await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[swipePoint]});
+    await call('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:swipePoint.x-120,y:swipePoint.y+2}]});
+    await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    await wait("document.querySelector('.referral-poster-share').hidden");
+    assert.equal(await evaluate("document.querySelector('[data-testid=referral-poster-next]').disabled"),true,'third poster does not wrap');
+
     await evaluate("document.querySelector('[data-testid=referral-invite-dialog]').close()");
     assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'),true,'mobile does not horizontally overflow');
     const image=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,`mobile-${index?430:375}.png`),Buffer.from(image.data,'base64'));
@@ -187,6 +234,16 @@ try {
   assert.equal(corrected.items.reduce((sum,x)=>sum+x.score,0),0,'reversal corrects real leaderboard');
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='人工发奖').click()");
   await wait("document.querySelector('.referral-admin-table')?.textContent.includes('待核查')");
+  await call('Page.navigate',{url:`${base}/admin/referral/settings?campaign=${first.c.id}`});
+  await wait("document.querySelector('[aria-label=\"海报1配套话术\"]')");
+  assert.equal(await evaluate("document.querySelector('[aria-label=\"海报1配套话术\"]').value"),shareTexts[0]);
+  await evaluate("(()=>{const field=document.querySelector('[aria-label=\"海报1配套话术\"]');field.value='保存后读回 🚀\\n第二行';field.dispatchEvent(new Event('input',{bubbles:true}));[...document.querySelectorAll('button')].find(b=>b.textContent==='发布海报配置').click()})()");
+  await wait("document.querySelector('[data-testid=referral-admin-form-message]').textContent.includes('已发布并读取确认')");
+  const savedPosters = await api(`/api/admin/referral/campaigns/${first.c.id}`);
+  assert.equal(savedPosters.posters[0].share_text,'保存后读回 🚀\n第二行');
+  assert.ok(await evaluate("[...document.querySelectorAll('.referral-admin-poster-section button')].find(b=>b.textContent==='选择图片素材').getBoundingClientRect().height<80"), 'material picker action must not stretch alongside all poster rows');
+  await evaluate("document.querySelector('.referral-admin-poster-list').scrollIntoView()");
+  const settingsImage=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,'poster-settings-1440.png'),Buffer.from(settingsImage.data,'base64'));
   assert.deepEqual(exceptions,[],'no uncaught browser errors');
   console.log('referral_chromium: PASS');
 } finally {

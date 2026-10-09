@@ -97,6 +97,7 @@ type CampaignView struct {
 type CampaignPoster struct {
 	Slot          int
 	Description   string
+	ShareText     string
 	ImageURL      string
 	SourceImageID int64
 }
@@ -109,6 +110,8 @@ type CampaignPosterImage struct {
 type CampaignPosterSource struct {
 	ImageID     int64  `json:"image_id"`
 	Description string `json:"description"`
+	// Empty copy retains the digest shape of existing publication receipts.
+	ShareText string `json:"share_text,omitempty"`
 }
 
 type SetCampaignPostersCommand struct {

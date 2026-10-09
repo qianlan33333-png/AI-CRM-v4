@@ -72,7 +72,7 @@ for(const active of [false,true]) {
   w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new w.Event('close'));};
   w.fetch=async(input,init={})=>{const u=new URL(String(input),'https://crm.example');
    if(u.pathname==='/api/admin/image-library')return json({items:[{id:11,name:'第一张',enabled:true,thumb_320_url:'/api/admin/image-library/11/variants/thumb_320'}],has_more:false});
-   if(u.pathname.endsWith('/campaigns/2/posters')&&init.method==='PUT'){writes.push(JSON.parse(init.body));return json({posters:[]});}
+   if(u.pathname.endsWith('/campaigns/2/posters')&&init.method==='PUT'){const body=JSON.parse(init.body);writes.push(body);campaign.version++;campaign.posters=body.posters.map((p,i)=>({slot:i+1,...p,image_url:'/poster/'+(i+1)}));return json({posters:campaign.posters});}
    if(u.pathname.endsWith('/product-options'))return json({items:[{id:51,code:'122331',name:'测试',product_type:'standard'}],total:1});
    if(u.pathname.endsWith('/campaigns'))return json({items:[campaign]});
    if(u.pathname.endsWith('/campaigns/2'))return json(campaign);
@@ -96,7 +96,8 @@ for(const active of [false,true]) {
  [...doc.querySelectorAll('button')].find(x=>x.textContent==='发布海报配置').click();
  await wait(()=>writes.length===1);
  assert.equal(writes[0].expected_version,2);
- assert.deepEqual(writes[0].posters,[{image_id:11,description:'第一张'},{image_id:11,description:'第一张'},{image_id:11,description:'第一张'}]);
+ assert.deepEqual(writes[0].posters,[{image_id:11,description:'第一张',share_text:''},{image_id:11,description:'第一张',share_text:''},{image_id:11,description:'第一张',share_text:''}]);
+ await wait(()=>/已发布并读取确认/.test(doc.querySelector('[data-testid="referral-admin-form-message"]').textContent));
  dom.window.close();
 }
 console.log('referral settings route, product selection, active copy save and readback passed');
