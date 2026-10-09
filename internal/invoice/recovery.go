@@ -179,7 +179,7 @@ func (s *Service) recoverUnsubmitted(ctx context.Context, prior p.Application) (
 			receipt = p.MarshalReceipt(*a)
 			return nil
 		}
-		if a.BlueNumber != "" || a.RefundConfirmed || a.DispatchAttempt >= 2 || a.Buyer.Type != "ORGANIZATION" || !a.Buyer.Valid(a.Snapshot) {
+		if a.BlueNumber != "" || a.RefundConfirmed || a.DispatchAttempt >= 1 || a.Buyer.Type != "ORGANIZATION" || !a.Buyer.Valid(a.Snapshot) {
 			return p.ErrIneligible
 		}
 		ids, e := s.customerIDs(tx, a.CustomerID)

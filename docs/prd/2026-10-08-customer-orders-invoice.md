@@ -226,6 +226,6 @@ flowchart LR
  F --> G[查询出票 PDF 与卡包真实结果]
 ```
 
-分类沿用父 PRD：涉及 OneID/订单事实读取、Invoice 持久化和 EER Provider 写入；沿用现有 Unit of Work、Finality Port 与 River，不新建队列、状态机、表或前端。签名错误响应通过 EER Artifact 交回 Invoice Owner，在完成效果的同一事务写入审计 material，回滚时两者都不落库；原始消息不进入结构化日志。普通 GET、原生通知及查询任务不自动重放未知请求。一次性角色仅在原未知租约过期、全申请明确未受理、无退款/蓝票且身份金额主体不变时，以相同申请号和票号显式恢复，受已有 dispatch 次数限制。
+分类沿用父 PRD：涉及 OneID/订单事实读取、Invoice 持久化和 EER Provider 写入；沿用现有 Unit of Work、Finality Port 与 River，不新建队列、状态机、表或前端。签名错误响应通过 EER Artifact 交回 Invoice Owner，在完成效果的同一事务写入审计 material，回滚时两者都不落库；原始消息不进入结构化日志。普通 GET、原生通知及查询任务不自动重放未知请求。一次性角色仅在原未知租约过期、全申请明确未受理、无退款/蓝票且身份金额主体不变时，以相同申请号和票号显式恢复，仅初始 dispatch=0 时允许一次，若这次 POST 仍未知则 dispatch=1 阻止再次恢复。
 
 参考继续采用官方 [通用行业开票接口](https://pay.wechatpay.cn/doc/v3/partner/4015792574) 和 [业务示范](https://pay.wechatpay.cn/doc/v3/partner/4016078358)；沿用官方 SDK 验签及现有原单查询，不添加第二支付客户端。验证覆盖签名/无签名回执、消息日志脱敏、并发单次接受、活跃租约拒绝、全申请未知/已存在拒绝、订单金额及销售主体变化、退款、个人抬头、次数上限、回执/EER/任务事务回滚。实际 API 拒绝原因、出票和交付由生产独立读回确定。

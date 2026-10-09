@@ -94,7 +94,7 @@ func TestInvoicePostgreSQLUnsubmittedReplayRejectsRefundAndExisting(t *testing.T
 					t.Fatal(e)
 				}
 			case "exhausted":
-				if _, e := f.pool.Exec(f.ctx, `UPDATE invoice_applications SET dispatch_attempt=2 WHERE id=$1`, a.ID); e != nil {
+				if _, e := f.pool.Exec(f.ctx, `UPDATE invoice_applications SET dispatch_attempt=1 WHERE id=$1`, a.ID); e != nil {
 					t.Fatal(e)
 				}
 			case "amount":
@@ -112,6 +112,45 @@ func TestInvoicePostgreSQLUnsubmittedReplayRejectsRefundAndExisting(t *testing.T
 				t.Fatal("rejected original replay mutated facts")
 			}
 		})
+	}
+}
+
+func TestInvoicePostgreSQLUnsubmittedReplayStopsAfterSecondUnknown(t *testing.T) {
+	f, prior := unknownInvoiceFixture(t)
+	if _, e := f.pool.Exec(f.ctx, `UPDATE external_effects SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, strings.TrimPrefix(prior.IssueEffect, "eer_")); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := f.s.RecoverFailed(f.ctx, prior.ID, "", true); e != nil {
+		t.Fatal(e)
+	}
+	a := f.read(prior.ID)
+	f.run(a.IssueEffect) // The sole original replay is again outcome_unknown.
+	if _, e := f.pool.Exec(f.ctx, `UPDATE external_effects SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, strings.TrimPrefix(a.IssueEffect, "eer_")); e != nil {
+		t.Fatal(e)
+	}
+	a = f.read(a.ID)
+	before := invoiceBillCounts(t, f)
+	jobCounts := func() [2]int {
+		var counts [2]int
+		if e := f.pool.QueryRow(f.ctx, `SELECT (SELECT count(*) FROM river_job),(SELECT count(*) FROM external_effect_jobs)`).Scan(&counts[0], &counts[1]); e != nil {
+			t.Fatal(e)
+		}
+		return counts
+	}
+	beforeJobs := jobCounts()
+	beforeJSON, _ := json.Marshal(a)
+	if _, e := f.s.RecoverFailed(f.ctx, a.ID, "", true); !errors.Is(e, p.ErrIneligible) {
+		t.Fatal("second original replay was not rejected", e)
+	}
+	afterJSON, _ := json.Marshal(f.read(a.ID))
+	if string(afterJSON) != string(beforeJSON) || invoiceBillCounts(t, f) != before || jobCounts() != beforeJobs {
+		t.Fatal("rejected replay changed invoice, snapshot, effect, job or audit")
+	}
+	f.provider.mu.Lock()
+	calls := f.provider.calls
+	f.provider.mu.Unlock()
+	if calls != 2 {
+		t.Fatal("provider calls exceed original plus single recovery", calls)
 	}
 }
 

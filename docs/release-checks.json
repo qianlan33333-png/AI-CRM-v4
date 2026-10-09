@@ -31,6 +31,12 @@
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLUnsubmittedReplayStopsAfterSecondUnknown",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
       "test": "TestInvoicePostgreSQLFailedRecoveryCurrentFinanceAndAtomic",
       "postgres": true
     },
