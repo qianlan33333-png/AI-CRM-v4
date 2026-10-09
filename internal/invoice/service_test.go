@@ -76,6 +76,30 @@ func TestInvoiceHTTPRejectsUnauthenticatedAndCrossSiteWrite(t *testing.T) {
 	}
 }
 
+func TestInvoiceConfiguredDefaultTaxAndExplicitOverride(t *testing.T) {
+	policy := int64(8)
+	defaultTax := p.Tax{Code: "3040203000000000000", Rate: 100, GoodsName: "服务费", PreferentialPolicyCode: &policy}
+	s := Service{Config: p.Config{MerchantID: "merchant", SellerTaxID: "taxpayer", BillingPersonID: "person", Taxes: map[string]p.Tax{"*": defaultTax, "specific": {Code: "3010101020203000000", Rate: 600, GoodsName: "课程服务"}}}}
+	order := o.Snapshot{ProviderTransactionNo: "4200000444201910177461284488", Amount: o.Money{AmountMinor: 9900, Currency: "CNY"}, Items: []o.ItemSnapshot{{ProductCode: "new-product", Quantity: 1, LineAmountMinor: 9900}, {ProductCode: "specific", Quantity: 1, LineAmountMinor: 9900}}}
+	snapshot, e := s.freeze(order)
+	if e != nil || len(snapshot.Lines) != 2 || snapshot.Lines[0].TaxCode != defaultTax.Code || snapshot.Lines[0].TaxRate != 100 || snapshot.Lines[0].GoodsName != "服务费" || snapshot.Lines[1].TaxRate != 600 || snapshot.Lines[0].TotalAmount+snapshot.Lines[1].TotalAmount != 9900 {
+		t.Fatal("default or product override not frozen", e, snapshot)
+	}
+	policy = 9
+	if *snapshot.Lines[0].PreferentialPolicyCode != 8 {
+		t.Fatal("default policy mutated after freezing")
+	}
+	s.Config.Taxes["specific"] = p.Tax{}
+	if _, e = s.freeze(order); e == nil {
+		t.Fatal("invalid explicit tax silently fell back to default")
+	}
+	delete(s.Config.Taxes, "specific")
+	s.Config.Taxes["*"] = p.Tax{}
+	if _, e = s.freeze(order); e == nil {
+		t.Fatal("invalid default accepted")
+	}
+}
+
 func TestInvoiceCallbackProbeCannotAcceptBusinessNotice(t *testing.T) {
 	// A disabled provider may be reached by the official config checker. It must
 	// never acknowledge unsigned POSTs as successfully accepted business notices.

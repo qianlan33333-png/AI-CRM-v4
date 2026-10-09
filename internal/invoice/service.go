@@ -121,6 +121,11 @@ func (s *Service) freeze(o orderdomain.Snapshot) (p.Snapshot, error) {
 	remainder := o.Amount.AmountMinor
 	for i, line := range o.Items {
 		tax, ok := c.Taxes[line.ProductCode]
+		if !ok {
+			// Finance explicitly configures this shared default. A product-specific
+			// entry always wins; names never determine classification or rate.
+			tax, ok = c.Taxes["*"]
+		}
 		if !ok || !tax.Valid() {
 			return v, p.ErrIneligible
 		}

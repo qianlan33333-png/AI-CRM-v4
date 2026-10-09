@@ -199,6 +199,10 @@ func newInvoiceFixture(t *testing.T) *invoiceFixture {
 }
 func (f *invoiceFixture) order(payer, beneficiary int64, status, name, provider string, at time.Time) int64 {
 	f.t.Helper()
+	return f.orderWithProduct(payer, beneficiary, status, name, "course", provider, at)
+}
+func (f *invoiceFixture) orderWithProduct(payer, beneficiary int64, status, name, productCode, provider string, at time.Time) int64 {
+	f.t.Helper()
 	f.count++
 	no := fmt.Sprintf("FIXTURE-%06d", f.count)
 	native := provider != "external_history"
@@ -216,7 +220,7 @@ func (f *invoiceFixture) order(payer, beneficiary int64, status, name, provider 
 	if e != nil {
 		f.t.Fatal(e)
 	}
-	if _, e = f.pool.Exec(f.ctx, `INSERT INTO order_items(order_id,line_no,product_code,product_name,unit_amount_minor,quantity,line_amount_minor)VALUES($1,1,'course',$2,9900,1,9900)`, id, name); e != nil {
+	if _, e = f.pool.Exec(f.ctx, `INSERT INTO order_items(order_id,line_no,product_code,product_name,unit_amount_minor,quantity,line_amount_minor)VALUES($1,1,$2,$3,9900,1,9900)`, id, productCode, name); e != nil {
 		f.t.Fatal(e)
 	}
 	if !native {

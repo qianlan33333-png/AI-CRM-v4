@@ -50,6 +50,12 @@
       "lane": "backend",
       "package": "./internal/platform/config",
       "test": "TestLoadInvoiceRecoveryRequiresExplicitApplication"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLDefaultTaxSupportsFutureProductBothEntries",
+      "postgres": true
     }
   ],
   "installed_checks": [
