@@ -1,0 +1,37 @@
+{
+  "observed_at_utc": "2026-10-09T02:27:17.835169+00:00",
+  "source_egress_ipv4": "124.220.53.183",
+  "target_egress_ipv4": "115.190.113.5",
+  "egress_probe": "checkip.amazonaws.com via curl -4 --noproxy * on each host",
+  "ipify_probe": "connection failed; not counted as validation",
+  "authenticated_provider_calls_performed": false,
+  "platform_allowlists_saved": false,
+  "hosts": [
+    {
+      "host": "qyapi.weixin.qq.com",
+      "tcp": true,
+      "tls_verified": true,
+      "tls_version": "TLSv1.3"
+    },
+    {
+      "host": "api.weixin.qq.com",
+      "tcp": true,
+      "tls_verified": true,
+      "tls_version": "TLSv1.2"
+    },
+    {
+      "host": "api.mch.weixin.qq.com",
+      "tcp": true,
+      "tls_verified": true,
+      "tls_version": "TLSv1.2"
+    },
+    {
+      "host": "openapi.alipay.com",
+      "tcp": true,
+      "tls_verified": true,
+      "tls_version": "TLSv1.2"
+    }
+  ],
+  "scope": "TCP and verified TLS only; no credentials or authenticated Provider calls",
+  "browser_admin_access": "blocked by site-safety policy for work.weixin.qq.com, mp.weixin.qq.com and pay.weixin.qq.com; no workaround attempted"
+}
