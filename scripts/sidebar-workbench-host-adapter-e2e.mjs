@@ -32,6 +32,11 @@ assert.equal(overlay.includes("window.fetch ="), false, "overlay must not monkey
 assert.equal(overlay.includes("getCurExternalContact"), false, "overlay must not own WeCom identity lookup");
 assert.equal(overlay.includes("sendChatMessage"), false, "overlay must not invoke WeCom directly");
 assert.equal(bridge.includes("sidebarApi"), false, "Host must not revive the retired V3 sidebar renderer");
+for (const contract of ["SidebarAIOperations.mount", 'readURL: "/api/sidebar/v2/ai-operations"', "bridge.checkAIOperationsContext(identity)", "disposeAIOperations();", '["profile", "AI运营"]']) {
+  assert.ok(overlay.includes(contract), `production overlay lacks AI operations contract: ${contract}`);
+}
+assert.match(bridge, /async checkAIOperationsContext\(expectedIdentity: string\)/);
+assert.equal(overlay.includes('if (state.profileView === "timeline") await loadTimeline'), false, "AI profile must not fetch historical timeline");
 for (const contract of ["getCurExternalContact", "sendChatMessage", "X-Sidebar-Context-Token", "outcome_unknown"]) {
   assert.equal(bridge.includes(contract), true, `Host lacks required trusted boundary: ${contract}`);
 }

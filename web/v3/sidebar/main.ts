@@ -189,6 +189,26 @@ export class SidebarBridge {
   contextToken(): string { return this.token; }
   contextIdentity(): string { return this.contextIdentityStamp; }
 
+  // AI reads, generation and copying actively check the current contact.
+  // Only an opaque equality result crosses into the presentation layer.
+  async checkAIOperationsContext(expectedIdentity: string): Promise<boolean> {
+    if (!expectedIdentity || expectedIdentity !== this.contextIdentityStamp || !this.token) return false;
+    const generation = this.contextGeneration;
+    try {
+      const externalUserID = await this.resolveWeComExternalUserID(generation);
+      this.assertGeneration(generation);
+      if (expectedIdentity !== this.contextIdentityStamp || !externalUserID || externalUserID !== this.externalUserID) {
+        this.invalidateContext();
+        void this.start().catch(() => {});
+        return false;
+      }
+      return true;
+    } catch (_error) {
+      if (generation === this.contextGeneration) this.invalidateContext();
+      return false;
+    }
+  }
+
   async start(): Promise<void> {
     this.bindContextEvents();
     // A retained token is not proof that this WebView is still attached to
@@ -697,6 +717,14 @@ export class SidebarBridge {
         section_unavailable: "当前信息暂时不可用，请稍后重试。",
         resource_not_available: "当前资源不可用，请返回后重试。",
         capability_not_ready: "图片发送暂不可用，请稍后重试。",
+        warehouse_unavailable: "数仓暂时不可用，请稍后刷新。",
+        confirmation_required: "请先核对客户末句并确认。",
+        snapshot_expired: "当前数据已过期，请刷新并重新核对。",
+        snapshot_changed: "摘要或对话已有变化，请刷新并重新核对。",
+        context_incomplete: "当前摘要或客户文本不足，暂时无法生成。",
+        generation_unavailable: "生成能力尚未接通，请联系管理员。",
+        generation_outcome_unknown: "生成结果尚未确认，请刷新后核对处理记录。",
+        generation_invalid_result: "生成结果无效，请刷新后重试。",
         material_upload_failed: "图片上传到企微失败，请联系管理员检查素材或应用权限。",
         material_upload_outcome_unknown: "图片上传结果尚未确认，请稍后核对；当前未发送消息。",
       };

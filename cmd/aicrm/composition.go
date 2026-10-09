@@ -2346,7 +2346,8 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	sidebarHandler, err := sidebar.NewHandler(sidebar.Config{
-		Contexts: sidebarContextAdapter{tokens: sidebarContextTokens}, Profiles: sidebarProfiles,
+		AICurrentViewer: sidebarPrincipalResolver{authentication: authentication, users: accessRepository, uow: uow, corpID: cfg.WeCom.CorpID},
+		Contexts:        sidebarContextAdapter{tokens: sidebarContextTokens}, Profiles: sidebarProfiles,
 		Viewer: sidebarViewerBootstrapper{
 			principals: sidebarPrincipalResolver{authentication: authentication, users: accessRepository, uow: uow, corpID: cfg.WeCom.CorpID},
 			identity:   existingWeComIdentityResolver{service: oneID, uow: uow, corpID: cfg.WeCom.CorpID},

@@ -218,7 +218,7 @@ try {
   cdp.on("Runtime.exceptionThrown", (params) => { const detail = params.exceptionDetails || {}; const kind = String(detail.exception?.className || detail.text || "runtime_exception").replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 96); if (exceptions.length < 8) exceptions.push(kind); });
   cdp.on("Network.requestWillBeSent", (params) => {
     requestURLs.push(String(params.request?.url || ""));
-    requestRecords.push({ url: String(params.request?.url || ""), postData: String(params.request?.postData || "") });
+    requestRecords.push({ url: String(params.request?.url || ""), method: String(params.request?.method || ""), postData: String(params.request?.postData || "") });
   });
   cdp.on("Network.responseReceived", (params) => {
     try {
@@ -284,9 +284,10 @@ try {
     throw new Error(`sidebar standard overlay did not complete official JSSDK handshake: ${diagnostic}`);
   }
   await waitFor(cdp, '/^用户编号 [1-9][0-9]{6}$/.test(document.querySelector("#customer-oneid")?.textContent || "")', "sidebar public number was dropped by the legacy renderer");
+  await waitFor(cdp, 'document.body.textContent.includes("数仓尚未接通")', "initial AI read did not finish its contact revalidation");
   const successCalls = await bridgeCalls();
   const successAgentAPIs = JSON.parse(await evaluate(cdp, "JSON.stringify(globalThis.__sidebarAgentAPIs || [])"));
-  if (successCalls.join("|") !== "preVerifyJSAPI|agentConfig|getCurExternalContact" || JSON.stringify(successAgentAPIs) !== JSON.stringify(["getCurExternalContact", "sendChatMessage"]) || bootstrapCountSince(successStart) !== 1) throw new Error(`official JSSDK success order/API mismatch: ${JSON.stringify({ calls: successCalls, agentAPIs: successAgentAPIs })}`);
+  if (successCalls.join("|") !== "preVerifyJSAPI|agentConfig|getCurExternalContact|getCurExternalContact|getCurExternalContact" || JSON.stringify(successAgentAPIs) !== JSON.stringify(["getCurExternalContact", "sendChatMessage"]) || bootstrapCountSince(successStart) !== 1) throw new Error(`official JSSDK success order/API mismatch: ${JSON.stringify({ calls: successCalls, agentAPIs: successAgentAPIs })}`);
   for (const width of [320, 360, 375, 420, 430, 768]) {
     await cdp.call("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
     const geometry = JSON.parse(await evaluate(cdp, 'JSON.stringify((()=>{const t=[...document.querySelectorAll("#tabs [data-tab]")],r=t.map(n=>n.getBoundingClientRect());return {v:innerWidth,c:document.documentElement.clientWidth,s:document.documentElement.scrollWidth,n:t.length,rows:new Set(r.map(x=>Math.round(x.top))).size,cols:new Set(r.slice(0,3).map(x=>Math.round(x.left))).size,in:r.every(x=>x.left>=0&&x.right<=innerWidth+.5)}})())'));
@@ -297,29 +298,38 @@ try {
   await cdp.call("Emulation.setDeviceMetricsOverride", { width:375, height:900, deviceScaleFactor:1, mobile:false });
   await captureScreenshot(cdp, "profile-375");
   await cdp.call("Emulation.setDeviceMetricsOverride", { width:430, height:900, deviceScaleFactor:1, mobile:false });
+  // The AI profile entry replaces the old editor/timeline navigation. The
+  // underlying profile and timeline APIs remain scoped and data-preserving.
+  await waitFor(cdp, 'document.body.textContent.includes("数仓尚未接通")', "AI unconfigured state");
+  const aiStart=requestRecords.length;
+  await evaluate(cdp, '[...document.querySelectorAll("#content button")].find(b=>b.textContent==="辅助成交").click();true');
+  if(await evaluate(cdp, 'Boolean(document.querySelector("[data-profile-field], [data-profile-view=timeline]"))')) throw new Error("retired profile navigation survived");
+  await evaluate(cdp, '[...document.querySelectorAll("#content button")].find(b=>b.textContent==="刷新").click();true');
+  await waitFor(cdp, 'document.body.textContent.includes("数仓尚未接通")', "AI refresh unconfigured state");
+  if(requestRecords.slice(aiStart).some(r=>r.method!=="GET")) throw new Error("AI refresh caused a write");
   const profileStart=requestRecords.length;
-  await evaluate(cdp, '(()=>{const f=document.querySelector("[data-profile-field=source]");f.value="Chromium活动报名";f.dispatchEvent(new Event("input",{bubbles:true}));return true})()');
-  for(let n=0;n<140&&requestRecords.slice(profileStart).filter(r=>new URL(r.url).pathname==="/api/sidebar/v2/profile").length<1;n++) await delay(50);
+  await evaluate(cdp, 'window.__AICRMSidebarBridge.request("/api/sidebar/v2/profile",{method:"PUT",body:JSON.stringify({source:"Chromium活动报名"})}).then(()=>true)');
   let writes=requestRecords.slice(profileStart).filter(r=>new URL(r.url).pathname==="/api/sidebar/v2/profile"), body=JSON.parse(writes[0]?.postData||"{}");
-  if(writes.length!==1||body.expected_profile_version!==0||body.source!=="Chromium活动报名") throw new Error("profile CAS 0 "+JSON.stringify(writes));
-  await evaluate(cdp, '(()=>{const f=document.querySelector("[data-profile-field=industry]");f.value="教育";f.dispatchEvent(new Event("input",{bubbles:true}));return true})()');
-  for(let n=0;n<140&&requestRecords.slice(profileStart).filter(r=>new URL(r.url).pathname==="/api/sidebar/v2/profile").length<2;n++) await delay(50);
+  if(writes.length!==1||body.expected_profile_version!==0||body.source!=="Chromium活动报名") throw new Error("retained profile CAS 0 "+JSON.stringify(writes));
+  await evaluate(cdp, 'window.__AICRMSidebarBridge.request("/api/sidebar/v2/profile",{method:"PUT",body:JSON.stringify({source:"Chromium活动报名",industry:"教育"})}).then(()=>true)');
   writes=requestRecords.slice(profileStart).filter(r=>new URL(r.url).pathname==="/api/sidebar/v2/profile");body=JSON.parse(writes[1]?.postData||"{}");
-  if(writes.length!==2||body.expected_profile_version!==1||body.industry!=="教育") throw new Error("profile CAS 1 "+JSON.stringify(writes));
+  if(writes.length!==2||body.expected_profile_version!==1||body.industry!=="教育") throw new Error("retained profile CAS 1 "+JSON.stringify(writes));
   const timelineStart=requestRecords.length;
-  await evaluate(cdp, 'document.querySelector("[data-profile-view=timeline]").click();true');
-  await waitFor(cdp, 'document.querySelectorAll(".timeline-event").length===20', "business timeline first page");
-  while(await evaluate(cdp, 'Boolean(document.querySelector("[data-load-more-timeline]"))')) {
-    const before=await evaluate(cdp, 'document.querySelectorAll(".timeline-event").length');
-    await evaluate(cdp, 'document.querySelector("[data-load-more-timeline]").click();true');
-    await waitFor(cdp, 'document.querySelectorAll(".timeline-event").length>'+before, "business timeline cursor append");
-  }
-  const timeline=JSON.parse(await evaluate(cdp, 'JSON.stringify([...document.querySelectorAll(".timeline-event h3")].map(x=>x.textContent))'));
+  const timeline=JSON.parse(await evaluate(cdp, `(async()=>{
+    const titles=[];let cursor="";
+    for(let n=0;n<6;n++){
+      const page=await window.__AICRMSidebarBridge.request("/api/sidebar/v2/timeline?limit=20"+(cursor?"&cursor="+encodeURIComponent(cursor):""));
+      titles.push(...page.items.map(item=>item.title));
+      if(!page.has_more)break;
+      cursor=page.next_cursor;
+    }
+    return JSON.stringify(titles);
+  })()`));
   for(const title of ["提交问卷：Sidebar bootstrap count", "创建订单（已退款）：浏览器外推商品", "历史渠道进入：Chromium渠道活动", "打开雷达内容：Chromium雷达介绍"]) {
-    if(!timeline.includes(title)) throw new Error("missing business timeline title "+title);
+    if(!timeline.includes(title)) throw new Error("missing retained business timeline title "+title);
   }
   const timelineReads=requestRecords.slice(timelineStart).filter(r=>new URL(r.url).pathname==="/api/sidebar/v2/timeline");
-  if(timeline.length!==105||timeline.some(t=>t.includes("资料已同步"))||timelineReads.length!==6||timelineReads.slice(1).some(r=>!new URL(r.url).searchParams.get("cursor"))) throw new Error("business timeline pagination or sync noise "+JSON.stringify({count:timeline.length,reads:timelineReads.length}));
+  if(timeline.length!==105||timeline.some(t=>t.includes("资料已同步"))||timelineReads.length!==6||timelineReads.slice(1).some(r=>!new URL(r.url).searchParams.get("cursor"))) throw new Error("retained timeline pagination or sync noise "+JSON.stringify({count:timeline.length,reads:timelineReads.length}));
   const surveyStart=requestRecords.length;
   await evaluate(cdp, 'document.querySelector("#tabs [data-tab=questionnaires]").click();true');
   await waitFor(cdp, 'document.querySelectorAll("[data-questionnaire-card]").length===20', "survey page 1");

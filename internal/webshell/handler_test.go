@@ -266,7 +266,7 @@ func TestStandaloneHandlerRendersAdminLoginSidebarAndAssets(t *testing.T) {
 			path:   SidebarPagePath,
 			status: http.StatusOK,
 			contains: []string{
-				"核心画像",
+				"AI运营",
 				"问卷",
 				"商品",
 				"订单",
@@ -279,9 +279,18 @@ func TestStandaloneHandlerRendersAdminLoginSidebarAndAssets(t *testing.T) {
 				"data-profile-url=\"/api/sidebar/v2/profile\"",
 				"data-questionnaires-url=\"/api/sidebar/v2/questionnaires\"",
 				"data-send-intents-url=\"/api/sidebar/v2/send-intents\"",
+				"/static/sidebar_workbench/sidebar_ai_operations.js?v=ai-operations1",
 				"https://res.wx.qq.com/wwopen/js/jsapi/jweixin-1.0.0.js",
 			},
-			notContain: []string{"/api/v3/sidebar/", "聊天", "标签", "跟进", "运营", "自动化", "XMLHttpRequest", "sendBeacon"},
+			notContain: []string{"/api/v3/sidebar/", "聊天", "标签", "跟进", "自动化", "XMLHttpRequest", "sendBeacon"},
+		},
+		{
+			name:       "sidebar ai operations javascript",
+			method:     http.MethodGet,
+			path:       "/static/sidebar_workbench/sidebar_ai_operations.js",
+			status:     http.StatusOK,
+			contains:   []string{"基础信息", "辅助成交", "数仓同步时间", "已归档的客户末句", "snapshot_token", "confirmed", "createSession"},
+			notContain: []string{"sendChatMessage", "sendBeacon", "XMLHttpRequest"},
 		},
 		{
 			name:   "sidebar shell javascript",

@@ -966,3 +966,12 @@ button[disabled] {
     width: 44px;
   }
 }
+
+/* AI operations inherits the workbench's blue/white card system. */
+.ai-toolbar { display:flex; justify-content:flex-end; margin:8px 0; }
+.ai-copy { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.65; margin:8px 0; }
+.ai-notice { background:var(--soft); color:var(--muted); border-radius:8px; padding:10px; font-size:13px; line-height:1.6; }
+.ai-confirm { display:flex; align-items:flex-start; gap:8px; margin:14px 0; font-size:14px; line-height:1.6; }
+.ai-confirm input { margin-top:5px; accent-color:var(--blue); }
+.ai-result { margin-top:12px; }
+.ai-result .btn { margin-top:8px; }

@@ -783,6 +783,44 @@ for (const fragment of [
   if (js.includes(fragment)) js = js.replace(fragment, "");
 }
 
+// AI operations is a V3-owned consumer of the same trusted Host. Keep the
+// immutable donor source and historical timeline endpoint intact; replace
+// only the profile entry and its reachable secondary navigation.
+once('["profile", "核心画像"]', "AI navigation label");
+js = js.replace('["profile", "核心画像"]', '["profile", "AI运营"]');
+replaceRange("  function renderProfile() {", "  function renderProfileTimeline() {", `  let aiOperationsView = null;
+  function disposeAIOperations() {
+    const previous = aiOperationsView;
+    aiOperationsView = null;
+    if (previous) previous.dispose();
+  }
+  function renderProfile() {
+    disposeAIOperations();
+    const bridge = window.__AICRMSidebarBridge;
+    const identity = bridge && bridge.contextIdentity();
+    if (!identity || !isWorkbenchReady() || root.dataset.v3SidebarContext === "invalid") return;
+    aiOperationsView = window.SidebarAIOperations.mount({
+      container: content,
+      readURL: "/api/sidebar/v2/ai-operations",
+      generateURL: "/api/sidebar/v2/ai-operations/suggestions",
+      request: (url, options) => bridge.request(url, options),
+      checkContext: () => bridge.checkAIOperationsContext(identity),
+      friendly: error => error.message || "暂时无法读取或生成，请刷新后重试。",
+      copy: text => navigator.clipboard.writeText(text),
+      toast: (message, error) => showToast(message, error ? "error" : ""),
+    });
+  }
+
+`, "AI profile renderer");
+const oldProfileLoad = '      if (state.profileView === "timeline") await loadTimeline({ reset: true, force: true });\n';
+once(oldProfileLoad, "AI profile read ownership");
+js = js.replace(oldProfileLoad, "");
+once("  function clearV3SensitiveSidebarState() {\n", "AI context disposal");
+js = js.replace("  function clearV3SensitiveSidebarState() {\n", "  function clearV3SensitiveSidebarState() {\n    disposeAIOperations();\n");
+once('    if (tab !== "profile" && !isWorkbenchReady()) return;\n', "AI panel disposal");
+js = js.replace('    if (tab !== "profile" && !isWorkbenchReady()) return;\n', '    if (tab !== "profile" && !isWorkbenchReady()) return;\n    disposeAIOperations();\n');
+js = fs.readFileSync(path.join(root, "internal/webshell/static/sidebar_workbench/sidebar_ai_operations.js"), "utf8") + "\n" + js;
+
 for (const forbidden of ["other_staff_messages", "其他客服聊天", "chat_activity", "other-staff-messages", "/api/sidebar/v2/other-staff-messages"]) {
   if (js.includes(forbidden)) throw new Error(`removed chat capability survived overlay: ${forbidden}`);
 }

@@ -83,11 +83,19 @@ type Config struct {
 	// fresh first page rather than accepting an old cursor under a new process.
 	CursorSigningKey []byte
 	Now              func() time.Time
+	// AI operations reads the context center's already materialized warehouse.
+	// Nil ports deliberately expose an unconfigured state, never CRM fallbacks.
+	AIWarehouse     AIWarehouseReader
+	AISuggestions   AISuggestionGenerator
+	AICurrentViewer AIViewerVerifier
 }
 
 type Handler struct{ config Config }
 
 func NewHandler(config Config) (*Handler, error) {
+	if config.AIWarehouse != nil && config.AICurrentViewer == nil {
+		return nil, errors.New("AI warehouse requires the current sidebar viewer verifier")
+	}
 	if config.Contexts == nil || config.Profiles == nil || config.Surveys == nil || config.Timeline == nil || config.Products == nil || config.ProductByID == nil || config.Orders == nil || config.Entitlements == nil || config.Coupons == nil || config.Materials == nil || config.MaterialSend == nil || config.Radar == nil || config.Sends == nil || len(config.CursorSigningKey) < 32 {
 		return nil, errors.New("sidebar dependencies are required")
 	}
@@ -107,6 +115,8 @@ func (h *Handler) Routes() http.Handler {
 	}
 	mux.HandleFunc("GET /api/sidebar/v2/workbench", h.workbench)
 	mux.HandleFunc("GET /api/sidebar/v2/profile", h.profile)
+	mux.HandleFunc("GET /api/sidebar/v2/ai-operations", h.aiOperations)
+	mux.HandleFunc("POST /api/sidebar/v2/ai-operations/suggestions", h.aiSuggestion)
 	mux.HandleFunc("PUT /api/sidebar/v2/profile", h.updateProfile)
 	mux.HandleFunc("POST /api/sidebar/v2/phone-binding", h.bindPhone)
 	mux.HandleFunc("GET /api/sidebar/v2/questionnaires", h.questionnaires)
