@@ -21,6 +21,9 @@ func (s *Service) RecoverFailed(ctx context.Context, id, expectedInvoiceID strin
 	}
 	var prior p.Application
 	err := s.UoW.Within(ctx, func(tx context.Context) error { var e error; prior, e = s.Store.get(tx, id, nil, false); return e })
+	if errors.Is(err, p.ErrNotFound) && canonicalize && expectedInvoiceID == "" {
+		return s.recoverMissingNative(ctx, id)
+	}
 	if err != nil {
 		return p.Receipt{}, err
 	}

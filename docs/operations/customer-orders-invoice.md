@@ -142,3 +142,8 @@ DATABASE_URL='postgresql://<本机用户>@localhost:5432/aicrm_test_invoice?sslm
 invoice-recover 对选定 issuing 原单先检查私密 official_response 是否确属当前 issue_effect 的 dispatch_prepared 之后，摘要须与规范化回执一致。仅已验签的 HTTP403/RULE_LIMIT/购买方不一致可进入修正；根申请仍未受理、原 Unknown 过期、单位核心及付款/主体/财务不变后，补回官方完整附加字段，同 UoW 保留前后 Buyer、关闭旧 finality、接受材料摘要幂等的修正意图和任务。原 apply/fapiaoID及原样重放预算均不改。buyer_corrected 按当前票号封住第二次修正，不能以后来再有字段差异重复执行。
 
 自填首单在 Provider 读取事务外检查官方抬头。已存在且单位核心一致时保持完整官方 Buyer；单位不同要求用户核对，未知不采用缺字段副本。公开页面仍不显示银行/联系方式，不新增邮件发送能力。
+
+
+### 官方抬头存在但本地申请缺失
+
+操作员显式选择原交易号的 invoice-recover 也可补取遗漏的原生抬头申请。只有官方已验签/解密的单位抬头与全申请明确未提交证明均通过，且原 Payment/OneID/Order、实付金额、商户订单号、主体、税务及退款核验通过，才能在原 UoW 创建或复用该交易号申请，保存 native_title_recovered 审计并接受已有效果及共享查询任务。不得补造官方通知收据，不直接调用开票。延迟通知或并发恢复返回同一申请，不覆盖已接受抬头。公开读取和普通页面重试不会创建缺失申请。结果不明/已有票据停止；接口接受仍须另行查询出票和卡包结果。
