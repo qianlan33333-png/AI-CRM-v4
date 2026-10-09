@@ -319,22 +319,37 @@ func (h *Handler) issueCredential(w http.ResponseWriter, r *http.Request, rawID 
 	}
 	// Product type is never accepted from the browser. Resolve the stored
 	// candidate through a server-owned list/check at issuance time.
-	page, err := h.promotion.ListPromotionProducts(r.Context(), actor, "", 100)
-	if err != nil {
-		resultError(w, err)
-		return
-	}
-	for _, item := range page.Items {
-		if item.ProductID != id {
-			continue
-		}
-		link, issueErr := h.promotion.IssuePromotionLink(r.Context(), distributionport.IssuePromotionCommand{Actor: actor, ProductID: item.ProductID, ProductType: item.ProductType, IdempotencyKey: r.Header.Get("Idempotency-Key")})
-		if issueErr != nil {
-			resultError(w, issueErr)
+	cursor := ""
+	var offset int64
+	for {
+		page, err := h.promotion.ListPromotionProducts(r.Context(), actor, cursor, 100)
+		if err != nil {
+			resultError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, map[string]any{"url": link.URL, "expires_at": link.ExpiresAt.UTC()})
-		return
+		for _, item := range page.Items {
+			if item.ProductID != id {
+				continue
+			}
+			link, issueErr := h.promotion.IssuePromotionLink(r.Context(), distributionport.IssuePromotionCommand{Actor: actor, ProductID: item.ProductID, ProductType: item.ProductType, IdempotencyKey: r.Header.Get("Idempotency-Key")})
+			if issueErr != nil {
+				resultError(w, issueErr)
+				return
+			}
+			writeJSON(w, http.StatusCreated, map[string]any{"url": link.URL, "expires_at": link.ExpiresAt.UTC()})
+			return
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		// Follow the same filtered Product pagination as the public list. An
+		// empty eligibility page can still have a later saleable candidate.
+		next, cursorErr := strconv.ParseInt(page.NextCursor, 10, 32)
+		if cursorErr != nil || next <= offset || page.NextCursor != strconv.FormatInt(next, 10) || r.Context().Err() != nil {
+			writeError(w, http.StatusServiceUnavailable, "unavailable")
+			return
+		}
+		cursor, offset = page.NextCursor, next
 	}
 	writeError(w, http.StatusNotFound, "not_found")
 }

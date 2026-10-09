@@ -14,6 +14,7 @@ import (
 	distributionport "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/port"
 	distributionstore "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/store"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	paymentdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/domain"
 	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
@@ -41,7 +42,20 @@ type RegistrationService struct {
 	uow        platformport.UnitOfWork
 	store      registrationStore
 	settlement paymentport.DistributionSettlementPort
+	subjects   distributionIdentitySubjects
 	now        func() time.Time
+}
+
+func (s *RegistrationService) BindIdentitySubjects(reader identityport.VerifiedIdentitySubjectReader) error {
+	if s == nil {
+		return distributionport.ErrUnavailable
+	}
+	value, err := distributionSubjects(reader)
+	if err != nil {
+		return err
+	}
+	s.subjects = value
+	return nil
 }
 
 func NewRegistrationService(uow platformport.UnitOfWork, store registrationStore, settlement paymentport.DistributionSettlementPort) (*RegistrationService, error) {
@@ -81,6 +95,12 @@ func (s *RegistrationService) Profile(ctx context.Context, actor distributionpor
 	var readiness distributionport.ReceiverReadiness
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		var err error
+		if s.subjects != nil {
+			actor, err = distributionActorWithin(tx, s.subjects, s.store, actor, false)
+			if err != nil {
+				return err
+			}
+		}
 		agreement, err = s.store.ActiveAgreementWithin(tx)
 		if err != nil {
 			return err
@@ -145,6 +165,14 @@ func (s *RegistrationService) Register(ctx context.Context, command distribution
 	payloadDigest := registrationPayloadDigest(command.AgreementVersion)
 	var profile distributionport.DistributorProfile
 	err := s.uow.Within(ctx, func(tx context.Context) error {
+		if s.subjects != nil {
+			var err error
+			command.Actor, err = distributionActorWithin(tx, s.subjects, s.store, command.Actor, true)
+			if err != nil {
+				return err
+			}
+			actorScope = registrationActorScope(command.Actor)
+		}
 		if err := s.store.LockOperationReceiptWithin(tx, "register", actorScope, command.IdempotencyKey); err != nil {
 			return err
 		}
@@ -309,6 +337,13 @@ func (s *RegistrationService) PrepareReceiver(ctx context.Context, actor distrib
 	}
 	var result distributionport.ReceiverPreparationResult
 	err = s.uow.Within(ctx, func(tx context.Context) error {
+		if s.subjects != nil {
+			var err error
+			actor, err = distributionActorWithin(tx, s.subjects, s.store, actor, true)
+			if err != nil {
+				return err
+			}
+		}
 		// Establish that this trusted customer is already a distributor without
 		// taking Distribution's row lock. The payment receiver write below may
 		// later project back into this row from the EER worker, and both paths

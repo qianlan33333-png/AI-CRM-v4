@@ -3,7 +3,7 @@
 // private helpers into the administrator entry's global scope.
 export {};
 
-import { distributionCommissionStatusLabel } from './distributionPresentation';
+import { distributionCommissionStatusLabel, distributionReasonLabel } from './distributionPresentation';
 
 type Row = Record<string, unknown>;
 type Distributor = { publicNo: string; enabled: boolean; agreementVersion: string; registeredAt: string };
@@ -657,7 +657,8 @@ function earningsView(): HTMLElement {
     list.append(el('p', '所选状态的佣金记录暂未确认，请稍后重试。'));
   } else {
     for (const row of commissions) {
-      const item = el('article'); item.className = 'distribution-card'; item.append(el('h3', row.product), el('p', `订单 ${row.order} · ${distributionCommissionStatusLabel(row.status)}`), el('p', `初始 ${money(row.initial, row.currency)} · 当前应付 ${money(row.payable, row.currency)} · 已分账 ${money(row.paid, row.currency)}`), el('small', `支付确认时间 ${time(row.paidConfirmedAt)} · 预计可结算时间 ${time(row.dueAt)} · 分账成功确认时间 ${row.settlementConfirmedAt ? time(row.settlementConfirmedAt) : '未记录'}`), el('small', row.holdReason || row.cancelReason || row.exceptionReason || '暂无补充说明')); list.append(item);
+      const reason = row.holdReason || row.cancelReason || row.exceptionReason;
+      const item = el('article'); item.className = 'distribution-card'; item.append(el('h3', row.product), el('p', `订单 ${row.order} · ${distributionCommissionStatusLabel(row.status)}`), el('p', `初始 ${money(row.initial, row.currency)} · 当前应付 ${money(row.payable, row.currency)} · 已分账 ${money(row.paid, row.currency)}`), el('small', `支付确认时间 ${time(row.paidConfirmedAt)} · 预计可结算时间 ${time(row.dueAt)} · 分账成功确认时间 ${row.settlementConfirmedAt ? time(row.settlementConfirmedAt) : '未记录'}`), el('small', reason ? distributionReasonLabel(reason) : '暂无补充说明')); list.append(item);
     }
     if (!list.childElementCount) list.append(el('p', '暂无该状态的佣金记录。'));
   }

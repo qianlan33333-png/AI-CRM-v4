@@ -1825,6 +1825,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		if err != nil {
 			return fail(err)
 		}
+		if err = trustedBrowserSessions.BindIdentitySubjects(queries); err != nil {
+			return fail(err)
+		}
 		trustedPaymentSessionBridge, err = distributionapp.NewPaymentSessionBridge(uow, paymentSession, trustedBrowserSessions, cfg.WeChatPay.AppID, cfg.WeChatPay.AppScope, cfg.WeChatPay.H5AppID, cfg.WeChatPay.H5AppScope)
 		if err != nil {
 			return fail(err)
@@ -1882,8 +1885,14 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		if distributionErr != nil {
 			return fail(distributionErr)
 		}
+		if distributionErr = registration.BindIdentitySubjects(queries); distributionErr != nil {
+			return fail(distributionErr)
+		}
 		promotion, distributionErr := distributionapp.NewPromotionService(uow, distributionRepository, qualificationService, productCatalog, productTargets, queries, cfg.PublicOrigin, cfg.Survey.DataKey)
 		if distributionErr != nil {
+			return fail(distributionErr)
+		}
+		if distributionErr = promotion.BindIdentitySubjects(queries); distributionErr != nil {
 			return fail(distributionErr)
 		}
 		promotion.SetSettlementEnabled(cfg.WeChatPay.ProfitSharingEnabled)
@@ -1927,6 +1936,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		}
 		readModelService, distributionErr := distributionapp.NewReadModelService(uow, distributionRepository)
 		if distributionErr != nil {
+			return fail(distributionErr)
+		}
+		if distributionErr = readModelService.BindIdentitySubjects(queries); distributionErr != nil {
 			return fail(distributionErr)
 		}
 		if distributionErr = readModelService.SetDirectoryDisplayNameReader(orderCustomerDisplayNameAdapter{uow: uow, reader: customerStore}); distributionErr != nil {

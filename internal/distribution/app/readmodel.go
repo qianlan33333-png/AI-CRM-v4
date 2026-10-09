@@ -8,6 +8,7 @@ import (
 	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	distributiondomain "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/domain"
 	distributionport "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/port"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 )
 
@@ -27,6 +28,33 @@ type ReadModelService struct {
 	uow       platformport.UnitOfWork
 	store     readModelStore
 	directory customerport.DirectoryDisplayNameReader
+	subjects  distributionIdentitySubjects
+}
+
+func (s *ReadModelService) BindIdentitySubjects(reader identityport.VerifiedIdentitySubjectReader) error {
+	if s == nil {
+		return distributionport.ErrUnavailable
+	}
+	if _, ok := s.store.(distributorSubjectStore); !ok {
+		return distributionport.ErrUnavailable
+	}
+	value, err := distributionSubjects(reader)
+	if err != nil {
+		return err
+	}
+	s.subjects = value
+	return nil
+}
+
+func (s *ReadModelService) actorWithin(ctx context.Context, actor distributionport.TrustedSessionActor) (distributionport.TrustedSessionActor, error) {
+	if s.subjects == nil {
+		return actor, nil
+	}
+	store, ok := s.store.(distributorSubjectStore)
+	if !ok {
+		return distributionport.TrustedSessionActor{}, distributionport.ErrUnavailable
+	}
+	return distributionActorWithin(ctx, s.subjects, store, actor, false)
 }
 
 func NewReadModelService(uow platformport.UnitOfWork, store readModelStore) (*ReadModelService, error) {
@@ -51,7 +79,14 @@ func (s *ReadModelService) Earnings(c context.Context, a distributionport.Truste
 	if s == nil || !a.Valid() {
 		return v, distributionport.ErrUnauthorized
 	}
-	e = s.uow.Within(c, func(t context.Context) error { v, e = s.store.EarningsByCustomer(t, a.CustomerID); return e })
+	e = s.uow.Within(c, func(t context.Context) error {
+		a, e = s.actorWithin(t, a)
+		if e != nil {
+			return e
+		}
+		v, e = s.store.EarningsByCustomer(t, a.CustomerID)
+		return e
+	})
 	return
 }
 func (s *ReadModelService) ListCommissions(c context.Context, a distributionport.TrustedSessionActor, st distributiondomain.CommissionStatus, cur string, l int32) (v distributionport.CommissionPage, e error) {
@@ -59,6 +94,10 @@ func (s *ReadModelService) ListCommissions(c context.Context, a distributionport
 		return v, distributionport.ErrUnauthorized
 	}
 	e = s.uow.Within(c, func(t context.Context) error {
+		a, e = s.actorWithin(t, a)
+		if e != nil {
+			return e
+		}
 		v, e = s.store.ListCommissionsByCustomer(t, a.CustomerID, st, cur, l)
 		return e
 	})

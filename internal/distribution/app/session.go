@@ -9,6 +9,7 @@ import (
 
 	distributionport "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/port"
 	distributionstore "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/store"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 )
 
@@ -24,7 +25,16 @@ type BrowserSessionService struct {
 		InsertBrowserSessionWithin(context.Context, distributionstore.BrowserSession) error
 		ReadBrowserSessionWithin(context.Context, [32]byte, time.Time) (distributionstore.BrowserSession, error)
 	}
-	now func() time.Time
+	now      func() time.Time
+	subjects identityport.VerifiedIdentitySubjectReader
+}
+
+func (s *BrowserSessionService) BindIdentitySubjects(reader identityport.VerifiedIdentitySubjectReader) error {
+	if s == nil || reader == nil {
+		return distributionport.ErrUnavailable
+	}
+	s.subjects = reader
+	return nil
 }
 
 func NewBrowserSessionService(uow platformport.UnitOfWork, store interface {
@@ -53,6 +63,13 @@ func (s *BrowserSessionService) Issue(ctx context.Context, actor distributionpor
 	}
 	expiresAt := now.Add(BrowserSessionTTL)
 	err := s.uow.Within(ctx, func(tx context.Context) error {
+		if s.subjects != nil {
+			lineage, err := distributionActorLineageWithin(tx, s.subjects, actor, false)
+			if err != nil {
+				return err
+			}
+			actor.CustomerID = lineage[0]
+		}
 		return s.store.InsertBrowserSessionWithin(tx, distributionstore.BrowserSession{TokenDigest: digest, CustomerID: actor.CustomerID, IdentityID: actor.IdentityID, Channel: actor.Channel, AppID: actor.AppID, AppScope: actor.AppScope, ExpiresAt: expiresAt, CreatedAt: now})
 	})
 	if err != nil {
@@ -68,15 +85,27 @@ func (s *BrowserSessionService) Resolve(ctx context.Context, token string) (dist
 	digest := sha256.Sum256([]byte(token))
 	now := s.now().UTC()
 	var session distributionstore.BrowserSession
+	var currentCustomerID int64
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		var err error
 		session, err = s.store.ReadBrowserSessionWithin(tx, digest, now)
-		return err
+		if err != nil {
+			return err
+		}
+		currentCustomerID = session.CustomerID
+		if s.subjects != nil {
+			lineage, err := distributionActorLineageWithin(tx, s.subjects, distributionport.TrustedSessionActor{CustomerID: session.CustomerID, IdentityID: session.IdentityID, Channel: session.Channel, AppID: session.AppID, AppScope: session.AppScope, OccurredAt: session.CreatedAt}, false)
+			if err != nil {
+				return err
+			}
+			currentCustomerID = lineage[0]
+		}
+		return nil
 	})
 	if err != nil {
 		return distributionport.TrustedSessionActor{}, err
 	}
-	actor := distributionport.TrustedSessionActor{CustomerID: session.CustomerID, IdentityID: session.IdentityID, Channel: session.Channel, AppID: session.AppID, AppScope: session.AppScope, OccurredAt: session.CreatedAt}
+	actor := distributionport.TrustedSessionActor{CustomerID: currentCustomerID, IdentityID: session.IdentityID, Channel: session.Channel, AppID: session.AppID, AppScope: session.AppScope, OccurredAt: session.CreatedAt}
 	if !actor.Valid() {
 		return distributionport.TrustedSessionActor{}, distributionport.ErrUnauthorized
 	}

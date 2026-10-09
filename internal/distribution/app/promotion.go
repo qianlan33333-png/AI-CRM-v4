@@ -56,10 +56,23 @@ type PromotionService struct {
 	products          productport.ProductOptionReader
 	saleableProduct   productport.SidebarProductShareReader
 	lineage           identityport.LockedCanonicalLineageReader
+	subjects          distributionIdentitySubjects
 	promotionOrigin   string
 	tokens            promotionTokenIssuer
 	settlementEnabled bool
 	now               func() time.Time
+}
+
+func (s *PromotionService) BindIdentitySubjects(reader identityport.VerifiedIdentitySubjectReader) error {
+	if s == nil {
+		return distributionport.ErrUnavailable
+	}
+	value, err := distributionSubjects(reader)
+	if err != nil {
+		return err
+	}
+	s.subjects = value
+	return nil
 }
 
 // SetSettlementEnabled controls whether a valid checkout becomes a financial
@@ -99,6 +112,12 @@ func (s *PromotionService) ListPromotionProducts(ctx context.Context, actor dist
 	var receiver distributionport.ReceiverReadiness
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		var err error
+		if s.subjects != nil {
+			actor, err = distributionActorWithin(tx, s.subjects, s.store, actor, false)
+			if err != nil {
+				return err
+			}
+		}
 		distributor, receiver, err = s.store.ReadDistributorByCustomerWithin(tx, actor.CustomerID, false)
 		return err
 	})
@@ -163,6 +182,15 @@ func (s *PromotionService) ListPromotionProducts(ctx context.Context, actor dist
 			var qualification distributiondomain.Qualification
 			readErr := s.uow.Within(ctx, func(tx context.Context) error {
 				var err error
+				if s.subjects != nil {
+					currentActor, subjectErr := distributionActorWithin(tx, s.subjects, s.store, actor, false)
+					if subjectErr != nil {
+						return subjectErr
+					}
+					if currentActor.CustomerID != distributor.CustomerID {
+						return distributionport.ErrUnauthorized
+					}
+				}
 				policy, err = s.store.ReadProductPolicyWithin(tx, int64(option.ID), kind)
 				if errors.Is(err, distributionport.ErrNotFound) {
 					return nil
@@ -325,16 +353,25 @@ func (s *PromotionService) IssuePromotionLink(ctx context.Context, command distr
 	if !command.Actor.Valid() || command.ProductID < 1 || !command.ProductType.Valid() || !validPromotionIdempotencyKey(command.IdempotencyKey) {
 		return distributionport.PromotionLink{}, distributionport.ErrConflict
 	}
-	actorScope := promotionActorScope(command.Actor)
 	payloadDigest := promotionCredentialPayloadDigest(command.ProductID, command.ProductType)
-	token, err := s.tokens.issue(actorScope, command.ProductID, command.ProductType, command.IdempotencyKey)
-	if err != nil {
-		return distributionport.PromotionLink{}, distributionport.ErrUnavailable
-	}
-	digest := sha256.Sum256([]byte(token))
 	now := s.now().UTC()
+	var token string
 	var expiresAt time.Time
-	err = s.uow.Within(ctx, func(tx context.Context) error {
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		if s.subjects != nil {
+			var err error
+			command.Actor, err = distributionActorWithin(tx, s.subjects, s.store, command.Actor, true)
+			if err != nil {
+				return err
+			}
+		}
+		actorScope := promotionActorScope(command.Actor)
+		var err error
+		token, err = s.tokens.issue(actorScope, command.ProductID, command.ProductType, command.IdempotencyKey)
+		if err != nil {
+			return distributionport.ErrUnavailable
+		}
+		digest := sha256.Sum256([]byte(token))
 		if err := s.store.LockOperationReceiptWithin(tx, "credential", actorScope, command.IdempotencyKey); err != nil {
 			return err
 		}
