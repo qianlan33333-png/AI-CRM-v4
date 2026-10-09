@@ -16,6 +16,7 @@ const script = source.slice(start + '</main><script>'.length, end)
   .replaceAll('{{.Product.PromotionContext}}', '')
   .replaceAll('{{.Product.RegionOptionsJSON}}', '[]')
   .replaceAll('{{.AlipayEnabled}}', 'false')
+  .replaceAll('{{.ResumeOrderID}}', '0')
   .replaceAll('{{.Product.CouponTargetRef}}', 'standard_product:7');
 
 assert.equal(source.includes('id="grossAmount"'), false);

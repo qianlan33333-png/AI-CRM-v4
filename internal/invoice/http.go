@@ -114,6 +114,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.reply(w, config, e)
 		return
 	}
+	if strings.HasPrefix(path, "/api/h5/me/orders/") && r.Method == http.MethodGet {
+		parts := strings.Split(strings.TrimPrefix(path, "/api/h5/me/orders/"), "/")
+		if len(parts) != 2 || parts[1] != "payment" || r.URL.RawQuery != "" {
+			http.NotFound(w, r)
+			return
+		}
+		id, e := strconv.ParseInt(parts[0], 10, 64)
+		if e != nil || id < 1 {
+			h.fail(w, p.ErrInvalid)
+			return
+		}
+		entry, e := h.Service.ContinuePayment(r.Context(), token, id)
+		h.reply(w, entry, e)
+		return
+	}
 	if path == "/api/h5/me/invoices" && r.Method == http.MethodGet {
 		q := p.HistoryQuery{Cursor: r.URL.Query().Get("cursor"), Limit: 20}
 		for key, values := range r.URL.Query() {
@@ -163,6 +178,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 1 && r.Method == http.MethodGet {
 		a, e := h.Service.Read(r.Context(), token, parts[0])
 		h.reply(w, p.MarshalReceipt(a), e)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "card" && r.Method == http.MethodGet {
+		if r.URL.RawQuery != "" {
+			h.fail(w, p.ErrInvalid)
+			return
+		}
+		entry, e := h.Service.Card(r.Context(), token, parts[0])
+		h.reply(w, entry, e)
 		return
 	}
 	if len(parts) == 2 && parts[1] == "resume" && r.Method == http.MethodPost {

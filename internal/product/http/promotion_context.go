@@ -4,11 +4,24 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const promotionContextQueryKey = "promotion_context"
+
+// Resume is an order reference, never an identity or payment credential.
+// It is accepted only by payment pages and cannot combine with new-sale attribution.
+func publicPaymentContext(r *http.Request, payment bool) (string, int64, bool) {
+	if payment && strings.HasPrefix(r.URL.RawQuery, "resume_order=") {
+		raw := strings.TrimPrefix(r.URL.RawQuery, "resume_order=")
+		id, e := strconv.ParseInt(raw, 10, 64)
+		return "", id, e == nil && id > 0 && strconv.FormatInt(id, 10) == raw
+	}
+	value, ok := publicPromotionContext(r)
+	return value, 0, ok
+}
 
 // publicPromotionContext accepts only the opaque Distribution credential that
 // /d places into the exact public product URL. Product cannot inspect its

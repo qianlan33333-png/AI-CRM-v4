@@ -24,6 +24,10 @@ function fixture({
   expireWrites = false,
   uncertain = false,
   awaitingTitle = false,
+  wechat = false,
+  pendingOrder = false,
+  cardPending = false,
+  cardFail = false,
 } = {}) {
   const dom = new JSDOM('<main id="customer-orders-root"></main>', {
     url: "https://crm.test/my/orders",
@@ -34,6 +38,11 @@ function fixture({
   const calls = [];
   const applications = [];
   w.TextEncoder = TextEncoder;
+  if (wechat) {
+    Object.defineProperty(w.navigator, "userAgent", { value: "MicroMessenger" });
+    let ready;
+    w.wx = { ready(fn) { ready = fn; }, error() {}, config(config) { calls.push({ config }); ready(); }, openCard(value) { calls.push({ cardList:value.cardList }); cardFail ? value.fail() : value.success(); } };
+  }
   let uncertainOnce = uncertain;
   w.HTMLDialogElement.prototype.showModal = function () {
     this.open = true;
@@ -50,6 +59,8 @@ function fixture({
         status: 401,
         json: async () => ({ code: "session_required" }),
       };
+    if (path.startsWith("/api/h5/me/invoice-jssdk")) return { ok:true, status:200, json:async()=>({appId:"wx-test", timestamp:1,nonceStr:"test",signature:"test"}) };
+    if (path.endsWith("/card")) return cardPending ? {ok:false,status:409,json:async()=>({code:"pending"})} : {ok:true,status:200,json:async()=>({cardId:"card-test",code:"card-code-test"})};
     if (path.startsWith("/api/h5/me/orders")) {
       const url = new URL(path, w.location.origin);
       let rows = [
@@ -67,7 +78,7 @@ function fixture({
               }
             : {}),
         },
-        row(2, "成长课"),
+        { ...row(2, "成长课"), ...(pendingOrder ? {state:"pending_payment", invoice_eligible:false, payment_path:"/pay/course-7?resume_order=2"}: {}) },
         { ...row(3, "历史课", false), currency: "USD" },
       ];
       if (url.searchParams.get("eligible") === "true")
@@ -258,7 +269,9 @@ function fillTitle(f, name = "测试单位", tax = "TEST-TAX") {
   await flush();
   assert.match(f.root.textContent, /已开票/);
   assert.match(f.root.textContent, /已送达微信卡包/);
-  assert.match(f.root.querySelector("a").href, /file\?disposition=inline$/);
+  assert.equal(f.root.querySelector('a[href*="/file"]'), null);
+  f.click("查看发票"); await flush();
+  assert.match(f.root.textContent, /请在微信中打开此页面/);
   f.dom.window.close();
 }
 {
@@ -380,5 +393,18 @@ console.log(
   f.dom.window.close();
 }
 console.log(
-  "self-title flows passed: confirmation before write, company-only, awaitingTitle resume, exact ambiguous replay, invoice history, PDF preview, read-only refresh",
+  "self-title flows passed: confirmation before write, company-only, awaitingTitle resume, exact ambiguous replay, invoice history, native card viewing, read-only refresh",
 );
+
+for (const opts of [{wechat:true},{wechat:true,cardPending:true},{wechat:true,cardFail:true}]) {
+ const f=fixture(opts); await flush();
+ f.applications.push({id:"42000000000000000000000000000001",order_id:1,amount_minor:1000,state:"issued",card_state:"INSERTED",order_no:"ORDER-1",product_names:["已开票课程"],created_at:"2026-10-08T00:00:00Z"});
+ f.click("开票记录"); await flush(); f.click("查看发票"); await flush(); await flush();
+ if(opts.cardPending) {assert.match(f.root.textContent,/正在送达微信卡包/);assert.equal(f.calls.some(c=>c.cardList),false);}
+ else {assert.deepEqual(JSON.parse(JSON.stringify(f.calls.find(c=>c.cardList).cardList)),[{cardId:"card-test",code:"card-code-test"}]);assert.deepEqual(Array.from(f.calls.find(c=>c.config).config.jsApiList),["openCard"]);if(opts.cardFail)assert.match(f.root.textContent,/微信卡包未能打开/);}
+ assert.equal(f.calls.some(c=>c.path?.includes("/file")),false); f.dom.window.close();
+}
+{
+ const f=fixture({pendingOrder:true});await flush();const link=f.root.querySelector('a');assert.equal(link.textContent,"继续支付");assert.equal(link.href,"https://crm.test/pay/course-7?resume_order=2");assert.equal(f.calls.some(c=>c.options?.method==="POST"),false);f.dom.window.close();
+}
+console.log("native invoice card and original payment entry journeys passed");

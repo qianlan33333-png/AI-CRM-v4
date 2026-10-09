@@ -1,12 +1,25 @@
 {
   "schema": 1,
-  "baseline_sha": "62d6ef5e0b153bea66ca9646429bfd992a7f42a7",
+  "baseline_sha": "099337d494d243179fb2b907f03a5d921227acbd",
   "checks": [
-    {
-      "lane": "preflight",
-      "path": "docs/assessments/2026-10-09-volcengine-production-migration/test_preparation_contract.py"
-    }
+    {"lane":"backend","package":"./internal/invoice"},
+    {"lane":"backend","package":"./internal/invoice/provider"},
+    {"lane":"backend","package":"./internal/payment/h5oauth"},
+    {"lane":"backend","package":"./internal/payment/app","test":"TestGetCheckoutAllowsRenewedSamePayerToReadTerminalWithoutHandoff"},
+    {"lane":"backend","package":"./internal/payment/app","test":"TestGetCheckoutExposesUnknownPrepayOnlyToAuthorizedPayer"},
+    {"lane":"backend","package":"./internal/payment/app","test":"TestCheckoutRecoveryUsesFrozenPaymentAmount"},
+    {"lane":"backend","package":"./internal/payment/app","test":"TestGetCheckoutReadsAlipayOriginalOrderThroughTrustedH5Session"},
+    {"lane":"backend","package":"./internal/payment/app","test":"TestAlipayCheckoutReadbackDoesNotBroadenPayerBeneficiaryOrSessionScope"},
+    {"lane":"backend","package":"./internal/product/http","test":"TestPublicOriginalCheckoutBrowserJourney"},
+    {"lane":"backend","package":"./internal/product/http","test":"TestPublicOriginalCheckoutQueryCannotBecomeAttribution"},
+    {"lane":"backend","package":"./internal/product/http","test":"TestPublicPaymentCompletionRefreshJourney"},
+    {"lane":"backend","package":"./cmd/aicrm","test":"TestInvoiceCardAndPaymentRoutesRequireTrustedSession"},
+    {"lane":"backend","package":"./cmd/aicrm","test":"TestInvoicePostgreSQLNativeCardOwnershipAndRefundRace","postgres":true},
+    {"lane":"backend","package":"./cmd/aicrm","test":"TestInvoicePostgreSQLOriginalPaymentReadOnlyAndPayerScope","postgres":true},
+    {"lane":"backend","package":"./cmd/aicrm","test":"TestInvoicePostgreSQLOriginalCheckoutOAuthReturnRetention","postgres":true},
+    {"lane":"backend","package":"./internal/product/http","test":"TestPublicAlipayOriginalOrderBrowserJourney"},
+    {"lane":"frontend","path":"web/v3/customerOrders.test.mjs"}
   ],
-  "installed_checks": [],
+  "installed_checks": ["invoice-callback"],
   "build_commands": []
 }

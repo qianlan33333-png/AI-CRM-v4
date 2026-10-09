@@ -236,6 +236,9 @@ body:has(#customer-orders-root) {
   background: #3370ff;
   color: #fff;
 }
+.orders-card-open {
+  width: 100%;
+}
 .orders-secondary {
   background: #fff;
   color: #245bdb;

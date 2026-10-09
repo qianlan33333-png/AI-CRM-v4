@@ -189,6 +189,11 @@ func safe(value string, maximum int) bool {
 }
 
 func validReturnPath(value string) bool {
+	if parts := strings.Split(value, "?resume_order="); len(parts) == 2 {
+		id, e := strconv.ParseInt(parts[1], 10, 64)
+		paymentPath := strings.HasPrefix(parts[0], "/pay/") || strings.HasPrefix(parts[0], "/s/") && strings.HasSuffix(parts[0], "/pay")
+		return paymentPath && e == nil && id > 0 && strconv.FormatInt(id, 10) == parts[1] && validReturnPath(parts[0])
+	}
 	if value == "/my/orders" {
 		return true
 	}

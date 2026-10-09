@@ -1585,6 +1585,8 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(invoiceErr)
 	}
 	invoiceQueryWorker.Service = invoiceService
+	invoiceService.SelfPayments = paymentRepository
+	invoiceService.Checkouts = orderService
 	paymentCompletionSink, err := payment.NewCompletionSink(paymentRepository, paymentReconciliationEnqueuer, orderService)
 	if err != nil {
 		return fail(err)

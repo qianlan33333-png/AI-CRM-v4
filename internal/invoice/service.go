@@ -32,6 +32,8 @@ type Service struct {
 	Identities       identity.PaymentIdentityReader
 	Subjects         identity.VerifiedIdentitySubjectReader
 	Payments         payment.InvoicePaymentReader
+	SelfPayments     payment.SelfCheckoutReader
+	Checkouts        order.CheckoutSnapshotReader
 	Orders           order.SelfReader
 	Refunds          payment.RefundExposureReader
 	Effects          effects.TransactionalAccepter
@@ -161,7 +163,7 @@ func (s *Service) List(ctx context.Context, token string, q p.OrdersQuery) (p.Or
 		}
 	}
 	e := s.UoW.Within(ctx, func(tx context.Context) error {
-		_, ids, e := s.actor(tx, token)
+		actor, ids, e := s.actor(tx, token)
 		if e != nil {
 			return e
 		}
@@ -213,6 +215,15 @@ func (s *Service) List(ctx context.Context, token string, q p.OrdersQuery) (p.Or
 			_, refund := refunds[o.ID]
 			v.InvoiceReason = s.reason(r, ids, refund, existing)
 			v.InvoiceEligible = v.InvoiceReason == ""
+			if !q.EligibleOnly && o.Status == orderdomain.StatusPendingPayment && s.SelfPayments != nil && s.Checkouts != nil {
+				continuation, ce := s.continuationWithin(tx, actor, ids, r)
+				if ce == nil {
+					v.PaymentPath = continuation.Path
+				}
+				if ce != nil && !errors.Is(ce, p.ErrIneligible) && !errors.Is(ce, p.ErrNotFound) {
+					return ce
+				}
+			}
 			if !q.EligibleOnly || v.InvoiceEligible {
 				out.Items = append(out.Items, v)
 			}

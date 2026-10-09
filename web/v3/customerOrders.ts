@@ -30,6 +30,7 @@ type Order = {
   invoice_eligible: boolean;
   invoice_reason: string;
   invoice?: Invoice;
+  payment_path?: string;
 };
 type Page = { items: Order[]; next_cursor: string; invoice_enabled: boolean };
 type HistoryItem = Invoice & {
@@ -454,7 +455,11 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
       } else if (o.refund_pending)
         card.append(element("span", "退款处理中", "orders-refund"));
       if (mode === "orders") {
-        if (o.invoice) {
+        if (o.state === "pending_payment" && o.payment_path && /^\/(?:pay\/[^/?#]+|s\/[^/?#]+\/pay)\?resume_order=[1-9][0-9]*$/.test(o.payment_path)) {
+          const link = element("a", "继续支付", "orders-pill");
+          link.href = o.payment_path;
+          bottom.append(link);
+        } else if (o.invoice) {
           bottom.append(
             button(
               invoiceStates[o.invoice.state] || "查看发票",
@@ -874,10 +879,69 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
       }
     }
   }
-  function invoiceFile(a: Invoice, cls = "orders-pill"): HTMLAnchorElement {
-    const link = element("a", "查看发票", cls);
-    link.href = `/api/h5/me/invoices/${encodeURIComponent(a.id)}/file?disposition=inline`;
-    return link;
+  function invoiceFile(a: Invoice, cls = "orders-pill"): HTMLButtonElement {
+    const action = button("查看发票", () => void openInvoiceCard(a), cls);
+    action.disabled = busy;
+    return action;
+  }
+  type WechatSDK = {
+    config(value: object): void;
+    ready(fn: () => void): void;
+    error(fn: () => void): void;
+    openCard(value: { cardList: { cardId: string; code: string }[]; success(): void; fail(): void; cancel(): void }): void;
+  };
+  let cardSDK: Promise<WechatSDK> | null = null;
+  const signedPageURL = location.href.split("#")[0];
+  async function prepareCardSDK(): Promise<WechatSDK> {
+    if (cardSDK) return cardSDK;
+    cardSDK = (async () => {
+      const host = window as typeof window & { wx?: WechatSDK };
+      if (!host.wx) await new Promise<void>((resolve, reject) => {
+        const script = document.createElement("script");
+        const timer = setTimeout(() => { script.remove(); reject(new Error("微信查看发票能力加载超时，请重试")); }, 10000);
+        script.src = "https://res.wx.qq.com/open/js/jweixin-1.6.0.js";
+        script.onload = () => { clearTimeout(timer); resolve(); };
+        script.onerror = () => { clearTimeout(timer); script.remove(); reject(new Error("微信查看发票能力加载失败，请重试")); };
+        document.head.append(script);
+      });
+      const sdk = host.wx;
+      if (!sdk) throw new Error("请在微信中打开后查看发票");
+      const config = await api<object>("/api/h5/me/invoice-jssdk?url=" + encodeURIComponent(signedPageURL));
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("微信授权校验超时，请重新打开页面")), 10000);
+        sdk.ready(() => { clearTimeout(timer); resolve(); });
+        sdk.error(() => { clearTimeout(timer); reject(new Error("微信查看发票授权校验失败，请重新打开页面")); });
+        sdk.config({ ...config, jsApiList: ["openCard"] });
+      });
+      return sdk;
+    })();
+    try { return await cardSDK; } catch (error) { cardSDK = null; throw error; }
+  }
+  async function openInvoiceCard(a: Invoice): Promise<void> {
+    if (busy) return;
+    if (!inWechat) { status = "请在微信中打开此页面，查看微信卡包发票"; render(); return; }
+    const version = generation;
+    busy = true;
+    status = "正在打开微信卡包发票…";
+    render();
+    try {
+      const entry = await api<{ cardId: string; code: string }>(`/api/h5/me/invoices/${encodeURIComponent(a.id)}/card`);
+      const sdk = await prepareCardSDK();
+      if (disposed || generation !== version) return;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("微信卡包未能打开，请重试")), 10000);
+        const done = (error?: Error) => { clearTimeout(timer); error ? reject(error) : resolve(); };
+        sdk.openCard({ cardList: [entry], success: () => done(), cancel: () => done(), fail: () => done(new Error("微信卡包未能打开，请在微信卡包中查看或重试")) });
+      });
+      status = "";
+    } catch (error) {
+      if (!disposed && generation === version) {
+        const message = error instanceof Error ? error.message : "unavailable";
+        status = ({ pending: "发票正在送达微信卡包，请稍后重试", conflict: "微信卡包票据信息暂不匹配，请联系商家", ineligible: "当前发票状态不可查看，请刷新状态", unavailable: "发票暂不可查看，请稍后重试", not_found: "发票不存在或当前微信账号无法查看" } as Record<string, string>)[message] || message;
+      }
+    } finally {
+      if (!disposed && generation === version) { busy = false; render(); }
+    }
   }
   function renderHistory(): void {
     if (status) root.append(feedback(status));
@@ -1066,7 +1130,7 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
           "orders-primary",
         ),
       );
-    if (a.state === "issued") root.append(invoiceFile(a, "orders-primary"));
+    if (a.state === "issued") root.append(invoiceFile(a, "orders-primary orders-card-open"));
     if (a.state === "failed")
       root.append(
         element(

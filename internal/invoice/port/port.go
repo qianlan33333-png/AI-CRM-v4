@@ -136,7 +136,17 @@ type Result struct {
 	Card struct {
 		Status string `json:"card_status"`
 		OpenID string `json:"card_openid"`
+		AppID  string `json:"card_appid"`
+		ID     string `json:"card_id"`
+		Code   string `json:"card_code"`
 	} `json:"card_information"`
+}
+
+// CardEntry is returned only after ownership and official recipient validation.
+// Do not put the card code or the recipient identity into URLs or logs.
+type CardEntry struct {
+	ID   string `json:"cardId"`
+	Code string `json:"code"`
 }
 
 // OfficialResponse is an authenticated business receipt, owned by Invoice.
@@ -238,6 +248,7 @@ type OrderView struct {
 	InvoiceEligible bool       `json:"invoice_eligible"`
 	InvoiceReason   string     `json:"invoice_reason"`
 	Invoice         *Receipt   `json:"invoice,omitempty"`
+	PaymentPath     string     `json:"payment_path,omitempty"`
 }
 type OrdersPage struct {
 	Items          []OrderView `json:"items"`

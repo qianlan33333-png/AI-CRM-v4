@@ -157,7 +157,7 @@ func (f invoiceRefundExposureFanout) ConsumeRefundExposureWithin(ctx context.Con
 }
 func mountInvoice(next http.Handler, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/my/orders" || strings.HasPrefix(r.URL.Path, "/my/orders-assets/") || r.URL.Path == "/api/h5/me/orders" || r.URL.Path == "/api/h5/me/invoice-jssdk" || r.URL.Path == "/api/h5/me/invoices" || strings.HasPrefix(r.URL.Path, "/api/h5/me/invoices/") || r.URL.Path == "/api/callbacks/wechat-invoice" {
+		if r.URL.Path == "/my/orders" || strings.HasPrefix(r.URL.Path, "/my/orders-assets/") || r.URL.Path == "/api/h5/me/orders" || strings.HasPrefix(r.URL.Path, "/api/h5/me/orders/") || r.URL.Path == "/api/h5/me/invoice-jssdk" || r.URL.Path == "/api/h5/me/invoices" || strings.HasPrefix(r.URL.Path, "/api/h5/me/invoices/") || r.URL.Path == "/api/callbacks/wechat-invoice" {
 			h.ServeHTTP(w, r)
 			return
 		}

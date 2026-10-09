@@ -5128,7 +5128,7 @@ paths:
         '503': {description: "Provider not enabled or unavailable; order query remains available."}
   /api/h5/me/invoices/{id}:
     parameters:
-      - {name: id, in: path, required: true, schema: {type: string, pattern: '^inv_[a-f0-9]{28}$'}}
+      - {name: id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,32}$'}}
     get:
       summary: Read own safe invoice and card-delivery status
       security: [{paymentSession: []}]
@@ -5142,7 +5142,7 @@ paths:
         '404': {description: "Unknown or another customer's application."}
   /api/h5/me/invoices/{id}/resume:
     parameters:
-      - {name: id, in: path, required: true, schema: {type: string, pattern: '^inv_[a-f0-9]{28}$'}}
+      - {name: id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,32}$'}}
     post:
       summary: Refresh original application or regenerate its expired official title entrance
       security: [{paymentSession: []}]
@@ -5163,9 +5163,61 @@ paths:
         '404': {description: "Application not owned."}
         '409': {description: "Refund or bounded retry prevents issuing."}
         '503': {description: "Provider unavailable."}
+  /api/h5/me/invoices/{id}/card:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,32}$'}}
+    get:
+      summary: Open own delivered invoice in the current WeChat recipient card wallet
+      security: [{paymentSession: []}]
+      responses:
+        '200':
+          description: Authenticated official card metadata, no-store. Never place code in a URL.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [cardId, code]
+                properties:
+                  cardId: {type: string, minLength: 1, maxLength: 32}
+                  code: {type: string, minLength: 1, maxLength: 32}
+        '401': {description: 'Session required.'}
+        '404': {description: 'Application not owned.'}
+        '409': {description: 'Not issued, card pending, reversed or official recipient mismatch.'}
+        '503': {description: 'Official query unavailable.'}
+  /api/h5/me/orders/{id}/payment:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    get:
+      summary: Recover original checkout facts for the trusted payer without creating any order or payment
+      security: [{paymentSession: []}]
+      responses:
+        '200':
+          description: Original frozen payment and product references. No handoff or identity in the URL.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [order_id, merchant_order_no, provider, channel, amount_minor, currency, product_id, product_kind, product_name, payment_path]
+                properties:
+                  order_id: {type: integer, format: int64}
+                  merchant_order_no: {type: string}
+                  provider: {type: string, enum: [wechat_pay, alipay]}
+                  channel: {type: string, enum: [h5_official_account, alipay_wap, alipay_page]}
+                  amount_minor: {type: integer, format: int64, minimum: 1}
+                  currency: {type: string, const: CNY}
+                  product_id: {type: integer, format: int64}
+                  product_kind: {type: string, enum: [standard, service_period]}
+                  product_name: {type: string}
+                  payment_path: {type: string}
+        '401': {description: 'Session required.'}
+        '404': {description: 'Order not owned.'}
+        '409': {description: 'Not original payer, imported, refunded, closed or inconsistent frozen facts.'}
+        '503': {description: 'Read unavailable.'}
   /api/h5/me/invoices/{id}/file:
     parameters:
-      - {name: id, in: path, required: true, schema: {type: string, pattern: '^inv_[a-f0-9]{28}$'}}
+      - {name: id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,32}$'}}
     get:
       summary: Preview or download own issued invoice through authenticated server proxy
       security: [{paymentSession: []}]
@@ -5183,7 +5235,7 @@ paths:
         '503': {description: "Provider file unavailable."}
   /api/h5/me/invoice-jssdk:
     get:
-      summary: Sign the current official order URL for WeChat's mini-program open tag
+      summary: Sign the current official order URL for the WeChat JS-SDK card viewer
       security: [{paymentSession: []}]
       parameters:
         - {name: url, in: query, required: true, schema: {type: string, format: uri}, description: Exact configured origin and /my/orders only. No fragment or credentials.}
@@ -5362,6 +5414,7 @@ components:
               invoice_eligible: {type: boolean}
               invoice_reason: {type: string}
               invoice: {$ref: '#/components/schemas/CustomerInvoiceReceipt'}
+              payment_path: {type: string, description: 'Original payment page with order reference; not a credential.'}
     OpsIncidentEpisode: {"type":"object","additionalProperties":false,"required":["id","issue_id","check_id","code","detected_release","detection_origin","initial_status","latest_status","detected_at","last_observed_at","recovered_at","version","classification","escaped_defect","change_failure","caused_by_release_sequence","root_cause","remediation","fault_started_at","fault_start_basis","effort_minutes","attributed_at"],"properties":{"id":{"type":"integer","format":"int64"},"issue_id":{"type":"integer","format":"int64"},"check_id":{"type":"string"},"code":{"type":"string"},"detected_release":{"type":"string"},"detection_origin":{"type":"string"},"initial_status":{"type":"string"},"latest_status":{"type":"string"},"detected_at":{"type":"string","format":"date-time"},"last_observed_at":{"type":"string","format":"date-time"},"recovered_at":{"type":["string","null"],"format":"date-time"},"version":{"type":"integer","format":"int64"},"classification":{"type":"string","enum":["unclassified","confirmed_defect","expected_rejection","legacy_backlog","observation_gap","non_defect"]},"escaped_defect":{"type":"string","enum":["unclassified","yes","no"]},"change_failure":{"type":"string","enum":["unclassified","yes","no"]},"caused_by_release_sequence":{"type":["integer","null"],"format":"int64"},"root_cause":{"type":"string","enum":["unknown","code","configuration","dependency","data","infrastructure","expected_behavior","instrumentation"]},"remediation":{"type":"string","enum":["unknown","code_fix","configuration_fix","rollback","hotfix","data_reconciliation","dependency_recovery","no_action"]},"fault_started_at":{"type":["string","null"],"format":"date-time"},"fault_start_basis":{"type":"string","enum":["unknown","monitor_evidence","provider_receipt","operator_confirmed"]},"effort_minutes":{"type":["integer","null"],"format":"int64"},"attributed_at":{"type":["string","null"],"format":"date-time"}}}
     OpsIncidentAttribution: {"type":"object","additionalProperties":false,"required":["classification","escaped_defect","change_failure","caused_by_release_sequence","root_cause","remediation","fault_started_at","fault_start_basis","effort_minutes"],"properties":{"classification":{"type":"string","enum":["unclassified","confirmed_defect","expected_rejection","legacy_backlog","observation_gap","non_defect"]},"escaped_defect":{"type":"string","enum":["unclassified","yes","no"]},"change_failure":{"type":"string","enum":["unclassified","yes","no"]},"caused_by_release_sequence":{"type":["integer","null"],"format":"int64"},"root_cause":{"type":"string","enum":["unknown","code","configuration","dependency","data","infrastructure","expected_behavior","instrumentation"]},"remediation":{"type":"string","enum":["unknown","code_fix","configuration_fix","rollback","hotfix","data_reconciliation","dependency_recovery","no_action"]},"fault_started_at":{"type":["string","null"],"format":"date-time"},"fault_start_basis":{"type":"string","enum":["unknown","monitor_evidence","provider_receipt","operator_confirmed"]},"effort_minutes":{"type":["integer","null"],"format":"int64"}}}
     OpsIncidentAttributionCommand: {"type":"object","additionalProperties":false,"required":["expected_version","classification","escaped_defect","change_failure","caused_by_release_sequence","root_cause","remediation","fault_started_at","fault_start_basis","effort_minutes"],"properties":{"expected_version":{"type":"integer","format":"int64"},"classification":{"type":"string","enum":["unclassified","confirmed_defect","expected_rejection","legacy_backlog","observation_gap","non_defect"]},"escaped_defect":{"type":"string","enum":["unclassified","yes","no"]},"change_failure":{"type":"string","enum":["unclassified","yes","no"]},"caused_by_release_sequence":{"type":["integer","null"],"format":"int64"},"root_cause":{"type":"string","enum":["unknown","code","configuration","dependency","data","infrastructure","expected_behavior","instrumentation"]},"remediation":{"type":"string","enum":["unknown","code_fix","configuration_fix","rollback","hotfix","data_reconciliation","dependency_recovery","no_action"]},"fault_started_at":{"type":["string","null"],"format":"date-time"},"fault_start_basis":{"type":"string","enum":["unknown","monitor_evidence","provider_receipt","operator_confirmed"]},"effort_minutes":{"type":["integer","null"],"format":"int64"}}}
