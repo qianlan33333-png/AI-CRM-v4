@@ -1,75 +1,263 @@
 {
   "schema": 1,
-  "baseline_sha": "6b28130afa0f2b8e784b3e7372faf3451d33cfda",
+  "baseline_sha": "710788ad563a3874f6bf06b17297758fa5ad3f77",
   "checks": [
     {
       "lane": "backend",
+      "path": "cmd/aicrm/distribution_review_20261009_identity_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLDistributionReview20261009RegistrationFollowsUniqueMergedHistory",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/distribution_review_20261009_identity_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLDistributionReview20261009SplitSessionCannotReadOtherOwner",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/distribution_review_20261009_identity_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLDistributionReview20261009RetiredHandleRejectsSessionAndCommands",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/distribution_review_20261009_regression_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLDistributionReview20261009PromotionRetainsOriginalReceiptScope",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/distribution_review_20261009_regression_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLDistributionReview20261009PromotionReadRechecksSubjectBetweenTransactions",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/distribution_review_20261009_regression_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLDistributionReview20261009SplitCannotReplayAnotherOwnersCredential",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/distribution_review_20261009_regression_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLDistributionReview20261009AmbiguousMergedHistoryRejectsAllOwnerEntries",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/distribution_review_20261009_regression_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLDistributionReview20261009SplitEarningsCannotReadOtherOwner",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/distribution_review_20261009_regression_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLDistributionReview20261009BoundRegistrationConcurrentAndRestartReplay",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/distribution_review_20261009_regression_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLDistributionReview20261009RegistrationFailureAndCancellationRollBackAllFacts",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_review_20261009_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceReview20261009PDFRejectsLineageSplitDuringRead",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_review_20261009_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceReview20261009PDFRevalidatesAfterRead",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_review_20261009_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceReview20261009NativeTitleUsesFullValidation",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_review_20261009_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceReview20261009ResumeAuthorizesRecoveryAcceptance",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_review_20261009_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceReview20261009ManualTitlePreservesPayerAcrossSplit",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_review_20261009_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceReview20261009ResumeAuthorizesTitleWakeAcceptance",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_review_20261009_boundary_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceReview20261009TitleAtomicConcurrentAndBound",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_review_20261009_boundary_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceReview20261009NativeTitleAcceptsExactFieldBoundaries",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_review_20261009_boundary_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceReview20261009TrustedHTTPAndBuyerAuthority",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/invoice_review_20261009_boundary_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoiceReview20261009HistoricalUnknownPayerRemainsIneligible",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/referral_review_20261009_oneid_test.go",
+      "package": "./cmd/aicrm",
+      "test": "TestReview20261009ReferralHTTPLeaderboardTracksRealOneIDMergeAndSplit",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/review_20261009_postgres_test.go",
+      "package": "./internal/referral/app",
+      "test": "TestReview20261009ReferralInvitationCannotAssignForeignCampaignTeam",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/review_20261009_postgres_test.go",
+      "package": "./internal/referral/app",
+      "test": "TestReview20261009ReferralCanceledJoinRollsBackAndOriginalKeyRecovers",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/review_20261009_postgres_test.go",
+      "package": "./internal/referral/app",
+      "test": "TestReview20261009ReferralSalesCloseSnapshotMatchesConfiguredRanking",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/review_20261009_postgres_test.go",
+      "package": "./internal/referral/app",
+      "test": "TestReview20261009ReferralInviteCloseSnapshotPreservesReversalAndTies",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/http/review_20261009_test.go",
       "package": "./internal/referral/http",
-      "path": "internal/referral/http/posters.go"
+      "test": "TestReview20261009ReferralProductMutationsRequireExistingCSRFBoundary",
+      "race": true
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/port",
-      "path": "internal/referral/port/poster_layout.go"
+      "path": "internal/referral/http/review_20261009_test.go",
+      "package": "./internal/referral/http",
+      "test": "TestReview20261009ReferralLeaderboardUsesResolvedParticipationOwner",
+      "race": true
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/store",
-      "path": "internal/referral/store/posters.go"
+      "path": "internal/distribution/http/review_20261009_test.go",
+      "package": "./internal/distribution/http",
+      "test": "TestDistributionReview20261009CredentialUsesEligibleLaterPage",
+      "race": true
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLPosterLayoutsAtomicRuntimeUpdate",
-      "postgres": true,
-      "path": "internal/referral/app/poster_layouts_integration_test.go",
-      "fresh": true
+      "path": "internal/distribution/http/review_20261009_test.go",
+      "package": "./internal/distribution/http",
+      "test": "TestDistributionReview20261009CredentialKeepsFilterAndRejectsCursorCycles",
+      "race": true
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLPosterLayoutMigrationAndCustomDimensions",
-      "postgres": true,
-      "path": "internal/referral/app/poster_layouts_integration_test.go",
-      "fresh": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLCampaignPosterShareTextBindingAndAtomicPublication",
-      "postgres": true,
-      "path": "internal/referral/app/posters_integration_test.go",
-      "fresh": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLCampaignPosterShareTextMigrationPreservesLegacySnapshot",
-      "postgres": true,
-      "path": "internal/referral/app/posters_integration_test.go",
-      "fresh": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLCampaignPostersPublishSnapshotAndIdempotentRetry",
-      "postgres": true,
-      "path": "internal/referral/app/posters_integration_test.go",
-      "fresh": true
+      "path": "internal/distribution/http/review_20261009_test.go",
+      "package": "./internal/distribution/http",
+      "test": "TestDistributionReview20261009CredentialRejectsUnauthenticatedAndCrossSiteRequests",
+      "race": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestMountReferralSeparatesPublicAndAdminPrefixes",
-      "path": "cmd/aicrm/referral_routes_test.go"
+      "test": "TestPostgreSQLReferralCompositionDoesNotRequireDistributionPaymentCapability",
+      "postgres": true
     },
     {
       "lane": "frontend",
-      "path": "web/v3/referralPosterShareText.test.mjs"
+      "path": "web/v3/customerOrders.test.mjs"
     },
     {
       "lane": "frontend",
       "path": "web/v3/referralCenter.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralCenter.captainJourney.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralPosterShareText.test.mjs"
     },
     {
       "lane": "frontend",
@@ -81,16 +269,46 @@
     },
     {
       "lane": "frontend",
-      "path": "web/v3/referralCenter.captainJourney.test.mjs"
+      "path": "web/v3/distributionCenter.test.mjs"
     },
     {
-      "lane": "browser",
-      "test": "TestPostgreSQLReferralChromiumJourney",
-      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go"
+      "lane": "frontend",
+      "path": "web/v3/distributionCenter.lifecycle.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/distributionCenter.reasons.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/distributionAdmin.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/productAdapter.distribution_dimensions.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/automationContentHost.test.mjs"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/poster_layouts_integration_test.go",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLPosterLayoutsAtomicRuntimeUpdate",
+      "postgres": true,
+      "fresh": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestMountReferralSeparatesPublicAndAdminPrefixes"
     }
   ],
   "installed_checks": [
-    "referral"
+    "referral",
+    "invoice-review-installed",
+    "distribution-review-installed"
   ],
   "build_commands": []
 }
