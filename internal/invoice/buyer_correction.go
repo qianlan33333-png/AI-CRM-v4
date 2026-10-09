@@ -41,7 +41,7 @@ func (s *Service) correctRejectedBuyer(ctx context.Context, prior p.Application,
 	if err != nil {
 		return p.MarshalReceipt(prior), err
 	}
-	if !officialBuyerValid(buyer, prior.Snapshot) || !sameUnit(buyer, prior.Buyer) || buyer.Amount != prior.Snapshot.Amount || buyer.OrderNo != prior.Snapshot.OrderNo {
+	if !officialBuyerValid(buyer, prior.Snapshot) || buyer.Type != prior.Buyer.Type || buyer.Name != prior.Buyer.Name || buyer.TaxpayerID != prior.Buyer.TaxpayerID || buyer.Amount != prior.Snapshot.Amount || buyer.OrderNo != prior.Snapshot.OrderNo {
 		return p.MarshalReceipt(prior), p.ErrConflict
 	}
 	oldJSON, _ := json.Marshal(prior.Buyer)

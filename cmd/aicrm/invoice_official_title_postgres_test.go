@@ -167,7 +167,7 @@ func TestInvoicePostgreSQLBuyerCorrectionAtomicAndOnce(t *testing.T) {
 }
 
 func TestInvoicePostgreSQLBuyerCorrectionRejectsStaleOrUnsafe(t *testing.T) {
-	for _, kind := range []string{"stale-response", "unknown-root", "other-unit", "amount", "refund", "invalid-extra"} {
+	for _, kind := range []string{"stale-response", "unknown-root", "other-unit", "core-whitespace", "amount", "refund", "invalid-extra"} {
 		t.Run(kind, func(t *testing.T) {
 			f, a := mismatchInvoiceFixture(t)
 			expireInvoiceEffect(f, a.IssueEffect)
@@ -180,6 +180,8 @@ func TestInvoicePostgreSQLBuyerCorrectionRejectsStaleOrUnsafe(t *testing.T) {
 				f.provider.unsubmittedError = p.ErrPending
 			case "other-unit":
 				f.provider.officialBuyer.Name = "不同单位"
+			case "core-whitespace":
+				f.provider.officialBuyer.Name = " " + a.Buyer.Name
 			case "amount":
 				f.provider.officialBuyer.Amount = 9800
 			case "refund":

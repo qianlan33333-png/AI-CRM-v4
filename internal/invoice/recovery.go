@@ -89,7 +89,7 @@ func (s *Service) RecoverFailed(ctx context.Context, id, expectedInvoiceID strin
 			return p.Receipt{}, p.ErrConflict
 		}
 	}
-	if buyer.Type != "ORGANIZATION" || !buyer.Valid(prior.Snapshot) {
+	if !officialBuyerValid(buyer, prior.Snapshot) {
 		return p.Receipt{}, p.ErrInvalid
 	}
 	// Retain the complete official title. WeChat validates optional fields too;
