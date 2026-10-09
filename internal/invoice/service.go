@@ -756,6 +756,11 @@ func (s *Service) CompleteEffect(ctx context.Context, effectID string, envelope 
 	if e != nil {
 		return e
 	}
+	if result.Artifact.Kind != "" {
+		if e = s.Store.officialResponse(ctx, a.ID, result.Artifact); e != nil {
+			return e
+		}
+	}
 	if !result.CallAttempted && result.Completion == effects.StateFinalFailed {
 		changed := false
 		if envelope.Kind == effects.KindInvoiceIssue && a.IssueEffect == effectID && (a.State == "queued" || a.State == "issuing") {

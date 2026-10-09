@@ -292,3 +292,45 @@ func TestInvoiceUnsubmittedRequiresExactSignedOfficialProof(t *testing.T) {
 		})
 	}
 }
+
+func TestInvoiceSignedRejectionBecomesPrivateOwnerReceipt(t *testing.T) {
+	for _, signed := range []bool{true, false} {
+		w, key, a := invoiceProviderFixture(t, func(*http.Request) string { return `{}` })
+		trust := Trust{Mode: "public_key", PublicKey: &key.PublicKey, PublicKeyID: "PUB_KEY_ID_1234567890"}
+		const privateMessage = "private invoice title mismatch"
+		client, verifier, id, e := NewTrustedClient(context.Background(), w.MerchantID, "merchant-serial", key, trust, option.WithHTTPClient(&http.Client{Transport: invoiceTransport(func(r *http.Request) (*http.Response, error) {
+			if r.Method != "POST" {
+				t.Fatal("unexpected read")
+			}
+			raw := `{"code":"RULE_LIMIT","message":"` + privateMessage + `"}`
+			ts, nonce := fmt.Sprint(time.Now().Unix()), "fixture-nonce"
+			sig := invoiceSignature(t, key, raw, ts, nonce)
+			if !signed {
+				sig = "invalid"
+			}
+			return &http.Response{StatusCode: 403, Header: http.Header{"Wechatpay-Timestamp": {ts}, "Wechatpay-Nonce": {nonce}, "Wechatpay-Serial": {trust.PublicKeyID}, "Wechatpay-Signature": {sig}}, Body: io.NopCloser(strings.NewReader(raw))}, nil
+		})}))
+		if e != nil {
+			t.Fatal(e)
+		}
+		w.Client, w.Verifier, w.PlatformSerial = client, verifier, id
+		result, e := w.Execute(context.Background(), effects.Envelope{Owner: effects.OwnerInvoice, Kind: effects.KindInvoiceIssue}, effects.Attempt{EffectID: "eer_1"})
+		if e != nil || result.Completion != effects.StateUnknown || !result.CallAttempted || result.RealExternalCallExecuted || result.SafeToRetryRejected {
+			t.Fatal("rejection changed unknown safety boundary", e)
+		}
+		if signed {
+			var response p.OfficialResponse
+			if !result.Artifact.Valid() || result.Artifact.Kind != p.OfficialResponseArtifact || json.Unmarshal(result.Artifact.Payload, &response) != nil || response.HTTPStatus != 403 || response.Code != "RULE_LIMIT" || response.Message != privateMessage {
+				t.Fatal("signed owner receipt missing")
+			}
+			if strings.Contains(response.Error(), privateMessage) {
+				t.Fatal("private response leaked to error logs")
+			}
+		} else if result.Artifact.Kind != "" {
+			t.Fatal("unverified response stored as official receipt")
+		}
+		if a.InvoiceID == "" {
+			t.Fatal("fixture lost invoice binding")
+		}
+	}
+}

@@ -60,6 +60,7 @@ type invoiceFixtureProvider struct {
 	stoppedCode      string
 	titleType        string
 	unsubmittedError error
+	artifact         ep.ResultArtifact
 	calls            int
 	mu               sync.Mutex
 }
@@ -128,7 +129,7 @@ func (f *invoiceFixtureProvider) Execute(ctx context.Context, en ep.Envelope, at
 	if e != nil {
 		state = ep.StateUnknown
 	}
-	return ep.AdapterResult{Completion: state, CallAttempted: true, RealExternalCallExecuted: e == nil, ReceiptDigest: ep.Hash("fixture.result", attempt.EffectID)}, nil
+	return ep.AdapterResult{Completion: state, Artifact: f.artifact, CallAttempted: true, RealExternalCallExecuted: e == nil, ReceiptDigest: ep.Hash("fixture.result", attempt.EffectID)}, nil
 }
 func newInvoiceFixture(t *testing.T) *invoiceFixture {
 	t.Helper()

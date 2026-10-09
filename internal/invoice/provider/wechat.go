@@ -71,6 +71,9 @@ func (w *WeChat) request(ctx context.Context, method, path string, q url.Values,
 		// The SDK validates successful responses only. Never interpret an unsigned
 		// API error as absence of an invoice (which could otherwise cancel recovery).
 		if errors.As(e, &api) && w.Verifier != nil && result != nil && result.Response != nil && validators.NewWechatPayResponseValidator(w.Verifier).Validate(ctx, result.Response) == nil {
+			if method == http.MethodPost && len(api.Code) <= 64 && len(api.Message) <= 4096 {
+				return p.OfficialResponse{HTTPStatus: api.StatusCode, Code: api.Code, Message: api.Message}
+			}
 			if api.StatusCode == 404 {
 				return p.ErrPending
 			}
@@ -201,10 +204,16 @@ func (w *WeChat) Execute(ctx context.Context, envelope effects.Envelope, attempt
 	}
 	e = w.request(ctx, http.MethodPost, path, nil, body, nil)
 	state := effects.StateExecuted
+	var artifact effects.ResultArtifact
 	if e != nil {
 		state = effects.StateUnknown
+		var response p.OfficialResponse
+		if errors.As(e, &response) {
+			payload, _ := json.Marshal(response)
+			artifact = effects.ResultArtifact{Kind: p.OfficialResponseArtifact, Payload: payload, Digest: effects.Hash("external-effect.artifact.v1", p.OfficialResponseArtifact, string(payload))}
+		}
 	}
-	return effects.AdapterResult{Completion: state, ReceiptDigest: effects.Hash("invoice.dispatch", attempt.EffectID, string(state)), CallAttempted: true, RealExternalCallExecuted: e == nil, FailureCode: func() string {
+	return effects.AdapterResult{Completion: state, Artifact: artifact, ReceiptDigest: effects.Hash("invoice.dispatch", attempt.EffectID, string(state), string(artifact.Digest)), CallAttempted: true, RealExternalCallExecuted: e == nil, FailureCode: func() string {
 		if e != nil {
 			return "invoice_query_required"
 		}

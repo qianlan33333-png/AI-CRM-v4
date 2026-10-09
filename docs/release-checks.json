@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "21b06f7b47ae88d7bf800b7761db7398edd921da",
+  "baseline_sha": "a2802d3ca9cda02f057f7d1da92692275ee70371",
   "checks": [
     {
       "lane": "backend",
@@ -12,8 +12,21 @@
     },
     {
       "lane": "backend",
-      "package": "./internal/platform/config",
-      "test": "TestLoadInvoiceRecoveryRequiresExplicitApplication"
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLUnsubmittedReplayKeepsInvoiceAndIsAtomic",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLUnsubmittedReplayRejectsRefundAndExisting",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLOfficialResponseSharesCompletionTransaction",
+      "postgres": true
     },
     {
       "lane": "backend",
@@ -30,18 +43,6 @@
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLFailedTestCanonicalRecoveryPreservesFacts",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLNativeRecoveryNoticeReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
       "test": "TestInvoicePostgreSQLAtomicReplayAndUnknownRecovery",
       "postgres": true
     },
@@ -50,34 +51,6 @@
       "package": "./cmd/aicrm",
       "test": "TestInvoicePostgreSQLRefundRacesAndBoundedRetries",
       "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLSelfTitleAtomicAndReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLBillEntryUnifiedAndAtomic",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLBillEntryAuthorityAndRecovery",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLBillAndManualConcurrentFirstTitle",
-      "postgres": true
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/customerOrders.test.mjs"
     }
   ],
   "installed_checks": [

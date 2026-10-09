@@ -137,6 +137,20 @@ type Result struct {
 		OpenID string `json:"card_openid"`
 	} `json:"card_information"`
 }
+
+// OfficialResponse is an authenticated business receipt, owned by Invoice.
+// Its message can contain invoice data and must never enter application logs.
+type OfficialResponse struct {
+	HTTPStatus int    `json:"http_status"`
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+}
+
+func (r OfficialResponse) Error() string { return ErrUnavailable.Error() }
+func (r OfficialResponse) Unwrap() error { return ErrUnavailable }
+
+const OfficialResponseArtifact = "invoice.official-response.v1"
+
 type Notice struct {
 	ID, EventType, ApplicationID, MerchantID, SubMerchantID string
 	BodyDigest                                              string

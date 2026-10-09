@@ -130,3 +130,9 @@ DATABASE_URL='postgresql://<本机用户>@localhost:5432/aicrm_test_invoice?sslm
 针对用户本次明确授权的旧测试汇合，唯一发布工作台在迁移前备份，安装候选后仅运行已安装 `aicrm` 的一次性 `invoice-recover` 角色，并用私密环境指定 `AICRM_INVOICE_RECOVER_ID`。该角色无 HTTP、无独立 Worker、无直接开票调用；仅通过 Invoice Service 核验原失败、目标交易申请尚未提交、官方单位抬头及 Payment/OneID 原付款事实，原子把此失败记录归一为交易单号并接受原 EER。旧 lookup 不做别名兼容，收据/回调/审计 FK 级联保留。
 
 恢复输出的 queued 仅表示意图接受，必须另读原 EER 尝试、微信签名查询、票号/PDF、卡包状态；未知结果只读对账，不重复运行或换申请号。
+
+### 已尝试但官方明确未受理
+
+一次性 invoice-recover 角色还可处理 canonical 申请的 issuing 状态：仅在全申请签名查询明确未受理、原 EER outcome_unknown 租约已过期且归属/付款/金额/主体/退款核验通过时，通过既有 Finality Port 对账并接受相同 apply_id、相同 fapiao_id、原冻结材料的受限重放。普通页面读取、原生通知和查询任务均不触发此路径。网络未确认或官方已有票据时停止。
+
+已验签的 POST 错误在 invoice_audit_events 中以 official_response / material 保存 HTTP 状态、code 与 message，随 EER 完成事务一起提交；仅授权运维读取，不能输出到日志或公共页面。发布后由唯一工作台选择原交易号执行一次恢复，先读取这份业务回执再判断参数或外部配置阻塞；不因 API 受理宣称出票。

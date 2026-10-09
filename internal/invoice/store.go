@@ -12,6 +12,22 @@ import (
 
 type Repository struct{}
 
+func (Repository) officialResponse(ctx context.Context, id string, artifact effects.ResultArtifact) error {
+	if artifact.Kind != invoiceport.OfficialResponseArtifact || !artifact.Valid() {
+		return invoiceport.ErrInvalid
+	}
+	var response invoiceport.OfficialResponse
+	if json.Unmarshal(artifact.Payload, &response) != nil || response.HTTPStatus < 400 || response.HTTPStatus > 599 || response.Code == "" || len(response.Code) > 64 || len(response.Message) > 4096 {
+		return invoiceport.ErrInvalid
+	}
+	tx, e := platformpostgres.RequireTransaction(ctx)
+	if e != nil {
+		return e
+	}
+	_, e = tx.Exec(ctx, `INSERT INTO invoice_audit_events(application_id,event_type,evidence_digest,material) VALUES($1,'official_response',$2,$3)`, id, string(artifact.Digest), artifact.Payload)
+	return e
+}
+
 const columns = `id,order_id,customer_id,identity_id,invoice_id,state,card_state,snapshot,buyer,refund_confirmed,issue_effect,reverse_effect,blue_number,red_number,reverse_attempt,issue_attempt,dispatch_attempt,updated_at`
 
 func scan(row interface{ Scan(...any) error }) (invoiceport.Application, error) {

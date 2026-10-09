@@ -24,6 +24,11 @@ func (s *Service) RecoverFailed(ctx context.Context, id, expectedInvoiceID strin
 	if err != nil {
 		return p.Receipt{}, err
 	}
+	// Only the explicit one-shot operator (no expected failed ticket) may replay
+	// an unaccepted unknown request. Native jobs and ordinary GET never do this.
+	if canonicalize && expectedInvoiceID == "" && prior.State == "issuing" {
+		return s.recoverUnsubmitted(ctx, prior)
+	}
 	if prior.State != "failed" || expectedInvoiceID != "" && prior.InvoiceID != expectedInvoiceID {
 		return p.MarshalReceipt(prior), nil
 	}
@@ -145,6 +150,86 @@ func (s *Service) RecoverFailed(ctx context.Context, id, expectedInvoiceID strin
 		a.Buyer = buyer
 		a.IssueAttempt++
 		a.CardState = "pending"
+		if e = s.queue(tx, a, false, time.Time{}); e != nil {
+			return e
+		}
+		if e = s.Jobs.EnqueueWithin(tx, a.ID, time.Time{}); e != nil {
+			return e
+		}
+		receipt = p.MarshalReceipt(*a)
+		return nil
+	})
+	return receipt, err
+}
+
+// recoverUnsubmitted preserves both application and invoice identifiers and
+// the frozen payload. The full official application must affirm no acceptance,
+// and the existing finality port must close the expired unknown attempt first.
+func (s *Service) recoverUnsubmitted(ctx context.Context, prior p.Application) (p.Receipt, error) {
+	check, ok := s.Provider.(p.UnsubmittedVerifier)
+	if !ok || s.Finality == nil || s.EffectStates == nil || prior.ID != prior.Snapshot.TransactionID {
+		return p.MarshalReceipt(prior), p.ErrUnavailable
+	}
+	if err := check.VerifyUnsubmitted(ctx, prior); err != nil {
+		return p.MarshalReceipt(prior), err
+	}
+	var receipt p.Receipt
+	err := s.withOrder(ctx, prior.ID, func(tx context.Context, a *p.Application, o order.SelfOrder) error {
+		if a.State != "issuing" || a.InvoiceID != prior.InvoiceID || a.IssueEffect != prior.IssueEffect || a.DispatchAttempt != prior.DispatchAttempt {
+			receipt = p.MarshalReceipt(*a)
+			return nil
+		}
+		if a.BlueNumber != "" || a.RefundConfirmed || a.DispatchAttempt >= 2 || a.Buyer.Type != "ORGANIZATION" || !a.Buyer.Valid(a.Snapshot) {
+			return p.ErrIneligible
+		}
+		ids, e := s.customerIDs(tx, a.CustomerID)
+		if e != nil {
+			return e
+		}
+		refunds, e := s.Refunds.RefundRelatedOrderIDsWithin(tx, []int64{a.OrderID})
+		if e != nil {
+			return e
+		}
+		_, refund := refunds[a.OrderID]
+		if s.reason(o, ids, refund, nil) != "" {
+			return p.ErrIneligible
+		}
+		fresh, e := s.freeze(o.Order)
+		if e != nil {
+			return e
+		}
+		// A replay retains its original finance payload, but changing payment,
+		// order, app scope or seller facts invalidates the original confirmation.
+		fresh.Lines = a.Snapshot.Lines
+		fresh.BillingPersonID = a.Snapshot.BillingPersonID
+		frozenJSON, _ := json.Marshal(a.Snapshot)
+		freshJSON, _ := json.Marshal(fresh)
+		if string(frozenJSON) != string(freshJSON) {
+			return p.ErrConflict
+		}
+		effect, e := s.EffectStates.GetWithin(tx, a.IssueEffect)
+		if e != nil {
+			return e
+		}
+		if effect.State != effects.StateUnknown {
+			return p.ErrPending
+		}
+		evidence := effects.Hash("invoice.verified.not-submitted", a.ID, a.InvoiceID, a.IssueEffect)
+		if e = s.Finality.ReconcileInvoiceWithin(tx, a.IssueEffect, evidence); e != nil {
+			return e
+		}
+		effect, e = s.EffectStates.GetWithin(tx, a.IssueEffect)
+		if e != nil {
+			return e
+		}
+		if effect.State != effects.StateReconciled {
+			return p.ErrPending
+		}
+		a.DispatchAttempt++
+		a.CardState = "pending"
+		if e = s.Store.update(tx, *a, "unsubmitted_recovery", string(evidence)); e != nil {
+			return e
+		}
 		if e = s.queue(tx, a, false, time.Time{}); e != nil {
 			return e
 		}
