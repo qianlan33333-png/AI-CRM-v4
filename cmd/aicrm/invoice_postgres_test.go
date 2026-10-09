@@ -54,13 +54,14 @@ func (invoiceFixtureSessions) LookupWithin(ctx context.Context, token string, no
 }
 
 type invoiceFixtureProvider struct {
-	s            *invoice.Service
-	status, card string
-	unknown      bool
-	stoppedCode  string
-	titleType    string
-	calls        int
-	mu           sync.Mutex
+	s                *invoice.Service
+	status, card     string
+	unknown          bool
+	stoppedCode      string
+	titleType        string
+	unsubmittedError error
+	calls            int
+	mu               sync.Mutex
 }
 
 func (f *invoiceFixtureProvider) Title(context.Context, p.Application, string) (p.Launch, error) {
@@ -71,7 +72,7 @@ func (f *invoiceFixtureProvider) ReadTitle(_ context.Context, a p.Application) (
 	if kind == "" {
 		kind = "ORGANIZATION"
 	}
-	return p.Buyer{Type: kind, TaxpayerID: "FIXTURE-TAX", Name: "隔离测试抬头", Amount: a.Snapshot.Amount, Phone: "13800000000", Email: "invoice@fixture.test", Address: "fixture address", BankName: "fixture bank"}, nil
+	return p.Buyer{Type: kind, TaxpayerID: "FIXTURE-TAX", Name: "隔离测试抬头", Amount: a.Snapshot.Amount, OrderNo: a.Snapshot.OrderNo, Phone: "13800000000", Email: "invoice@fixture.test", Address: "fixture address", BankName: "fixture bank"}, nil
 }
 func (f *invoiceFixtureProvider) Query(_ context.Context, a p.Application) (p.Result, error) {
 	f.mu.Lock()
@@ -81,12 +82,17 @@ func (f *invoiceFixtureProvider) Query(_ context.Context, a p.Application) (p.Re
 	}
 	r := p.Result{InvoiceID: a.InvoiceID, Status: f.status, TotalAmount: a.Snapshot.Amount}
 	r.Seller.TaxpayerID = a.Snapshot.SellerTaxID
-	r.Blue.Number = "BLUE-fixture"
+	if r.Status == "ISSUED" || r.Status == "REVERSED" || r.Status == "REVERSE_FAILED" {
+		r.Blue.Number = "BLUE-fixture"
+	}
 	r.Card.Status = f.card
 	if r.Status == "REVERSED" {
 		r.Red.Number = "RED-fixture"
 	}
 	return r, nil
+}
+func (f *invoiceFixtureProvider) VerifyUnsubmitted(context.Context, p.Application) error {
+	return f.unsubmittedError
 }
 func (f *invoiceFixtureProvider) Write(context.Context, p.Application, bool) error {
 	f.mu.Lock()
@@ -696,6 +702,23 @@ func TestInvoicePreview(t *testing.T) {
 	for _, x := range []struct{ s, n, p string }{{"paid", "AI 共创营 · 第三期", "wechat_pay"}, {"paid", "一人公司成长课", "wechat_pay"}, {"pending_payment", "AI 自动化工作坊", "wechat_pay"}, {"closed", "内容创作训练营", "wechat_pay"}, {"paid", "历史导入课程", "external_history"}, {"paid", "2026 共创营", "alipay"}} {
 		f.order(f.customer, f.customer, x.s, x.n, x.p, at)
 		at = at.Add(-24 * time.Hour)
+	}
+	if os.Getenv("AICRM_INVOICE_PREVIEW_FAILED") == "1" {
+		var firstID int64
+		if e := f.pool.QueryRow(f.ctx, `SELECT min(id) FROM orders WHERE provider='wechat_pay' AND status='paid'`).Scan(&firstID); e != nil {
+			t.Fatal(e)
+		}
+		r, e := f.s.SubmitTitle(f.ctx, f.token, firstID, "preview-failed-title-key", titleFixture())
+		if e != nil {
+			t.Fatal(e)
+		}
+		a := f.read(r.ID)
+		f.run(a.IssueEffect)
+		f.provider.status = "ISSUE_FAILED"
+		f.provider.card = "INSERT_ACCEPTED"
+		if e = f.s.Reconcile(f.ctx, a.ID); e != nil {
+			t.Fatal(e)
+		}
 	}
 	root, _ := filepath.Abs("../../web/dist")
 	handler := &invoice.Handler{Service: f.s, Dist: root, Origins: []string{"http://" + listen}}

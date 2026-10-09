@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/aes"
@@ -248,5 +249,46 @@ func TestInvoiceEffectUnknownCannotRetryAndNoWriteBeforePaymentProof(t *testing.
 	result, e = w.Execute(context.Background(), effects.Envelope{Owner: effects.OwnerInvoice, Kind: effects.KindInvoiceIssue}, effects.Attempt{EffectID: "eer_2"})
 	if e != nil || !result.CallAttempted || result.Completion != effects.StateUnknown || result.SafeToRetryRejected {
 		t.Fatal("ambiguous issue not kept unknown", result, e)
+	}
+}
+
+func TestInvoiceUnsubmittedRequiresExactSignedOfficialProof(t *testing.T) {
+	const message = "商户尚未同意开票，无法对当前发票申请单进行当前操作，请先调用【开具电子发票】接口进行开票"
+	for _, kind := range []string{"signed", "unsigned", "other-limit", "issued"} {
+		t.Run(kind, func(t *testing.T) {
+			w, key, a := invoiceProviderFixture(t, func(*http.Request) string { return `{}` })
+			trust := Trust{Mode: "public_key", PublicKey: &key.PublicKey, PublicKeyID: "PUB_KEY_ID_1234567890"}
+			client, verifier, id, e := NewTrustedClient(context.Background(), w.MerchantID, "merchant-serial", key, trust, option.WithHTTPClient(&http.Client{Transport: invoiceTransport(func(r *http.Request) (*http.Response, error) {
+				if r.Method != "GET" || r.URL.Query().Get("fapiao_id") != "" || r.URL.Query().Get("sub_mchid") != a.Snapshot.MerchantID {
+					t.Fatal("filtered or write request")
+				}
+				raw, _ := json.Marshal(map[string]string{"code": "RULE_LIMIT", "message": message})
+				status := 403
+				if kind == "other-limit" {
+					raw = []byte(`{"code":"RULE_LIMIT","message":"other limit"}`)
+				}
+				if kind == "issued" {
+					raw = []byte(`{"fapiao_information":[{"status":"ISSUED"}]}`)
+					status = 200
+				}
+				ts := fmt.Sprint(time.Now().Unix())
+				nonce := "fixture-nonce"
+				sig := invoiceSignature(t, key, string(raw), ts, nonce)
+				if kind == "unsigned" {
+					sig = "invalid"
+				}
+				return &http.Response{StatusCode: status, Header: http.Header{"Wechatpay-Timestamp": {ts}, "Wechatpay-Nonce": {nonce}, "Wechatpay-Serial": {trust.PublicKeyID}, "Wechatpay-Signature": {sig}}, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+			})}))
+			if e != nil {
+				t.Fatal(e)
+			}
+			w.Client = client
+			w.Verifier = verifier
+			w.PlatformSerial = id
+			e = w.VerifyUnsubmitted(context.Background(), a)
+			if (kind == "signed") != (e == nil) {
+				t.Fatal("absence proof boundary", kind, e)
+			}
+		})
 	}
 }

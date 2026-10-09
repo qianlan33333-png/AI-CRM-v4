@@ -33,6 +33,18 @@ func run() error {
 		return err
 	}
 	defer application.Close()
+	if cfg.Role == platformconfig.RoleInvoiceRecover {
+		if application.invoiceRecovery == nil {
+			return errors.New("invoice recovery is not composed")
+		}
+		receipt, recoverErr := application.invoiceRecovery.RecoverFailed(ctx, cfg.InvoiceRecoverID, "", true)
+		if recoverErr != nil {
+			return recoverErr
+		}
+		// This is accepted intent only. Provider issuance/card/PDF require independent readback.
+		slog.Info("invoice recovery complete", "state", receipt.State, "release_sha", cfg.ReleaseSHA)
+		return nil
+	}
 	if cfg.Role == platformconfig.RolePaymentReconcile {
 		if application.paymentReconciliation == nil {
 			return errors.New("payment reconciliation is not composed")

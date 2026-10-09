@@ -788,3 +788,19 @@ func TestGroupOpsDirectoryReadDoesNotEnableDispatch(t *testing.T) {
 		t.Fatal("accepted invalid read gate")
 	}
 }
+
+func TestLoadInvoiceRecoveryRequiresExplicitApplication(t *testing.T) {
+	t.Setenv("AICRM_DATABASE_URL", "postgres://aicrm:test@localhost/aicrm")
+	t.Setenv("AICRM_ROLE", string(RoleInvoiceRecover))
+	for _, id := range []string{"", " ", "inv_bad ", "/wrong", "SELECT x", strings.Repeat("a", 33)} {
+		t.Setenv("AICRM_INVOICE_RECOVER_ID", id)
+		if _, e := Load(); e == nil {
+			t.Fatal("invalid recovery selector accepted")
+		}
+	}
+	t.Setenv("AICRM_INVOICE_RECOVER_ID", "4500000490202610044108114483")
+	cfg, e := Load()
+	if e != nil || cfg.InvoiceRecoverID != "4500000490202610044108114483" {
+		t.Fatal("invoice recovery role", e)
+	}
+}

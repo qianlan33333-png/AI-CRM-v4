@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jackc/pgx/v5"
+	effects "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	invoiceport "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 )
@@ -71,5 +72,38 @@ func (Repository) update(ctx context.Context, a invoiceport.Application, event, 
 		return invoiceport.ErrNotFound
 	}
 	_, e = tx.Exec(ctx, `INSERT INTO invoice_audit_events(application_id,event_type,evidence_digest)VALUES($1,$2,$3)`, a.ID, event, evidence)
+	return e
+}
+
+// recover is called with the application and its Order locked. Cascade keeps all
+// existing owner receipts/audit attached; the material preserves original facts.
+func (Repository) recover(ctx context.Context, a *invoiceport.Application, targetID string, fresh invoiceport.Snapshot, proof invoiceport.Result) error {
+	tx, e := platformpostgres.RequireTransaction(ctx)
+	if e != nil {
+		return e
+	}
+	material, e := json.Marshal(struct {
+		PreviousID        string               `json:"previous_application_id"`
+		PreviousInvoiceID string               `json:"previous_invoice_id"`
+		Before            invoiceport.Snapshot `json:"before"`
+		After             invoiceport.Snapshot `json:"after"`
+	}{a.ID, a.InvoiceID, a.Snapshot, fresh})
+	if e != nil {
+		return e
+	}
+	raw, e := json.Marshal(fresh)
+	if e != nil {
+		return e
+	}
+	tag, e := tx.Exec(ctx, `UPDATE invoice_applications SET id=$2,snapshot=$3,updated_at=now() WHERE id=$1 AND state='failed' AND invoice_id=$4 AND blue_number=''`, a.ID, targetID, raw, a.InvoiceID)
+	if e != nil {
+		return e
+	}
+	if tag.RowsAffected() != 1 {
+		return invoiceport.ErrConflict
+	}
+	a.ID = targetID
+	a.Snapshot = fresh
+	_, e = tx.Exec(ctx, `INSERT INTO invoice_audit_events(application_id,event_type,evidence_digest,material)VALUES($1,'failed_recovery',$2,$3)`, a.ID, string(effects.Hash("invoice.recovery", string(material), proof.InvoiceID, proof.Status)), material)
 	return e
 }

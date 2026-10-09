@@ -385,10 +385,12 @@ func (s *Service) Resume(ctx context.Context, token, id string) (p.Receipt, erro
 			return p.MarshalReceipt(a), e
 		}
 	}
+	a, e = s.Read(ctx, token, id)
+	if e != nil {
+		return p.Receipt{}, e
+	}
 	if a.State == "failed" {
-		if e = s.retryFailed(ctx, id); e != nil {
-			return p.MarshalReceipt(a), e
-		}
+		return s.RecoverFailed(ctx, id, a.InvoiceID, false)
 	}
 	if a.State == "awaiting_title" {
 		e = s.UoW.Within(ctx, func(tx context.Context) error { return s.Jobs.EnqueueWithin(tx, id, time.Time{}) })
@@ -398,40 +400,6 @@ func (s *Service) Resume(ctx context.Context, token, id string) (p.Receipt, erro
 	}
 	a, e = s.Read(ctx, token, id)
 	return p.MarshalReceipt(a), e
-}
-func (s *Service) retryFailed(ctx context.Context, id string) error {
-	return s.withOrder(ctx, id, func(tx context.Context, a *p.Application, o order.SelfOrder) error {
-		if a.State != "failed" {
-			return nil
-		}
-		if a.RefundConfirmed || o.Order.RefundedMinor > 0 || a.IssueAttempt >= 4 {
-			return p.ErrIneligible
-		}
-		refunds, e := s.Refunds.RefundRelatedOrderIDsWithin(tx, []int64{a.OrderID})
-		if e != nil {
-			return e
-		}
-		if _, ok := refunds[a.OrderID]; ok {
-			return p.ErrIneligible
-		}
-		if a.IssueEffect != "" && s.EffectStates != nil {
-			effect, e := s.EffectStates.GetWithin(tx, a.IssueEffect)
-			if e != nil {
-				return e
-			}
-			if effect.State == effects.StateUnknown || effect.State == effects.StateAttempted || effect.State == effects.StateQueued {
-				return p.ErrPending
-			}
-		}
-		invoiceID, e := newID()
-		if e != nil {
-			return e
-		}
-		a.InvoiceID = invoiceID
-		a.IssueAttempt++
-		a.CardState = "pending"
-		return s.queue(tx, a, false, time.Time{})
-	})
 }
 func (s *Service) File(ctx context.Context, token, id string) ([]byte, error) {
 	a, e := s.Read(ctx, token, id)
@@ -639,7 +607,10 @@ func (s *Service) Reconcile(ctx context.Context, id string) error {
 		default:
 			return p.ErrConflict
 		}
-		if cardRank(result.Card.Status) >= cardRank(a.CardState) {
+		// A card operation accepted alongside a rejected invoice is not delivery.
+		if a.BlueNumber == "" {
+			a.CardState = "pending"
+		} else if cardRank(result.Card.Status) >= cardRank(a.CardState) {
 			a.CardState = result.Card.Status
 		}
 		a.RefundConfirmed = a.RefundConfirmed || o.Order.RefundedMinor > 0

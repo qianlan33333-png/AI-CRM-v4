@@ -122,3 +122,11 @@ DATABASE_URL='postgresql://<本机用户>@localhost:5432/aicrm_test_invoice?sslm
 `TestInvoicePostgreSQLInstalledFixtureStartup` 在隔离 PG 中以同一环境执行正式 Config.Load → compose → bootstrap → readiness → 本人已挂载开票记录读取，先检查完整启动链。合成 H5 AppID 与 Survey/OA AppID 一致，开放平台 scope 有明确合成值；不启用 Survey OAuth Provider，不放松正式检查。该结果仍是源码初始化证据，准确安装包 BillEntryInstalled 需工作台另行执行。目录准备抽为测试 helper，bootstrap 环境值及业务断言保持不变。
 
 同一源码完整启动用例进一步复用安装回调断言，验证合成签名的未知本商户交易、其他商户、原生申请创建/通知重放及本人详情。未知本商户交易沿用 HTTP Handler 已有 `ErrPending → 409 pending` 合同（非成功，Provider 可重试），安装夹具的 503 预期纠正为 409；不修改应用应答映射或通知业务逻辑。
+
+### 明确失败后的恢复
+
+本人“重试开票”与新的可信账单抬头通知都须先查询原申请/原票号，只有 `ISSUE_FAILED` 且无蓝票才读取最新财务配置。普通刷新只读。申请/订单加锁后，原票号变化、效果仍 queued/attempted/outcome_unknown、退款或财务主体/金额变化均禁止重开。原税务快照和票号保存在 `invoice_audit_events.material`，新票号、快照、审计、EER 与查询任务同 UoW。账单通知恢复任务绑定失败票号，重复通知或旧任务不再生成另一张票。
+
+针对用户本次明确授权的旧测试汇合，唯一发布工作台在迁移前备份，安装候选后仅运行已安装 `aicrm` 的一次性 `invoice-recover` 角色，并用私密环境指定 `AICRM_INVOICE_RECOVER_ID`。该角色无 HTTP、无独立 Worker、无直接开票调用；仅通过 Invoice Service 核验原失败、目标交易申请尚未提交、官方单位抬头及 Payment/OneID 原付款事实，原子把此失败记录归一为交易单号并接受原 EER。旧 lookup 不做别名兼容，收据/回调/审计 FK 级联保留。
+
+恢复输出的 queued 仅表示意图接受，必须另读原 EER 尝试、微信签名查询、票号/PDF、卡包状态；未知结果只读对账，不重复运行或换申请号。

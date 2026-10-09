@@ -25,6 +25,8 @@ const (
 	// for an explicitly selected existing WeChat Pay payment.  It has no HTTP
 	// listener and cannot create a payment or call a Provider write API.
 	RolePaymentReconcile Role = "payment-reconcile"
+	// One-shot, explicitly selected failed invoice recovery; no daemon or direct Provider write.
+	RoleInvoiceRecover Role = "invoice-recover"
 
 	// These defaults are the deployment policy used when a Runtime is assembled
 	// without an environment loader, for example by an isolated composition
@@ -62,6 +64,7 @@ type Runtime struct {
 	WorkerOwner                string
 	WorkerLimit                int
 	PaymentReconcileID         int64
+	InvoiceRecoverID           string
 	CustomerSyncTrigger        string
 	HXCDashboard               HXCDashboard
 	OperationCycleServiceToken string
@@ -664,9 +667,16 @@ func Load() (Runtime, error) {
 		return Runtime{}, errors.New("invalid AICRM_RELEASE_SHA")
 	}
 	switch cfg.Role {
-	case RoleAPI, RoleWorker, RoleEffectsWorker, RolePaymentReconcile:
+	case RoleAPI, RoleWorker, RoleEffectsWorker, RolePaymentReconcile, RoleInvoiceRecover:
 	default:
 		return Runtime{}, errors.New("invalid AICRM_ROLE")
+	}
+	if cfg.Role == RoleInvoiceRecover {
+		raw := os.Getenv("AICRM_INVOICE_RECOVER_ID")
+		if raw == "" || len(raw) > 32 || strings.TrimSpace(raw) != raw || strings.Trim(raw, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-|*") != "" {
+			return Runtime{}, errors.New("invalid AICRM_INVOICE_RECOVER_ID")
+		}
+		cfg.InvoiceRecoverID = raw
 	}
 	if cfg.Role == RolePaymentReconcile {
 		raw, ok := os.LookupEnv("AICRM_PAYMENT_RECONCILE_ID")

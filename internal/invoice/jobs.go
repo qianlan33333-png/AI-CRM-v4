@@ -15,7 +15,8 @@ import (
 const QueryQueue = "invoice-reconciliation"
 
 type QueryArgs struct {
-	ApplicationID string `json:"application_id"`
+	ApplicationID   string `json:"application_id"`
+	FailedInvoiceID string `json:"failed_invoice_id,omitempty"`
 }
 
 func (QueryArgs) Kind() string { return "invoice.provider-query.v1" }
@@ -23,11 +24,16 @@ func (QueryArgs) Kind() string { return "invoice.provider-query.v1" }
 type QueryEnqueuer struct{ Client *river.Client[pgx.Tx] }
 
 func (q QueryEnqueuer) EnqueueWithin(ctx context.Context, id string, at time.Time) error {
+	return q.enqueue(ctx, QueryArgs{ApplicationID: id}, at)
+}
+func (q QueryEnqueuer) EnqueueRecoveryWithin(ctx context.Context, id, failedInvoiceID string) error {
+	return q.enqueue(ctx, QueryArgs{ApplicationID: id, FailedInvoiceID: failedInvoiceID}, time.Time{})
+}
+func (q QueryEnqueuer) enqueue(ctx context.Context, args QueryArgs, at time.Time) error {
 	tx, e := pg.RequireTransaction(ctx)
 	if e != nil {
 		return e
 	}
-	args := QueryArgs{ApplicationID: id}
 	result, e := jobqueue.InsertTxWithOptions(ctx, q.Client, tx, args, river.InsertOpts{Queue: QueryQueue, MaxAttempts: 20, ScheduledAt: at, UniqueOpts: river.UniqueOpts{ByArgs: true, ByQueue: true, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRetryable, rivertype.JobStateRunning, rivertype.JobStateScheduled}}})
 	if e == nil && at.IsZero() && result.UniqueSkippedAsDuplicate {
 		return jobqueue.WakePendingJobTx(ctx, q.Client, tx, result.Job.ID, args, QueryQueue)
@@ -45,7 +51,12 @@ func (w *QueryWorker) Work(ctx context.Context, j *river.Job[QueryArgs]) error {
 	if w.Service == nil || j == nil {
 		return p.ErrUnavailable
 	}
-	e := w.Service.Reconcile(ctx, j.Args.ApplicationID)
+	var e error
+	if j.Args.FailedInvoiceID != "" {
+		e = w.Service.RecoverNativeTitle(ctx, j.Args.ApplicationID, j.Args.FailedInvoiceID)
+	} else {
+		e = w.Service.Reconcile(ctx, j.Args.ApplicationID)
+	}
 	if errors.Is(e, p.ErrPending) {
 		return p.ErrPending
 	}

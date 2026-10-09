@@ -1,20 +1,86 @@
 {
   "schema": 1,
-  "baseline_sha": "4c39050574a4f0aeaa72b89419e06eb96b04f553",
+  "baseline_sha": "21b06f7b47ae88d7bf800b7761db7398edd921da",
   "checks": [
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestInvoiceInstalledFixtureConfigContract"
+      "package": "./internal/invoice"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice/provider"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/platform/config",
+      "test": "TestLoadInvoiceRecoveryRequiresExplicitApplication"
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInvoicePostgreSQLInstalledFixtureStartup",
+      "test": "TestInvoicePostgreSQLFailedRecoveryCurrentFinanceAndAtomic",
       "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLFailedRecoveryRejectsUnsafeProof",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLFailedTestCanonicalRecoveryPreservesFacts",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLNativeRecoveryNoticeReplay",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLAtomicReplayAndUnknownRecovery",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLRefundRacesAndBoundedRetries",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLSelfTitleAtomicAndReplay",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLBillEntryUnifiedAndAtomic",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLBillEntryAuthorityAndRecovery",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestInvoicePostgreSQLBillAndManualConcurrentFirstTitle",
+      "postgres": true
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/customerOrders.test.mjs"
     }
   ],
   "installed_checks": [
-    "invoice-callback-bootstrap-installed"
+    "invoice-bill-entry-installed"
   ]
 }

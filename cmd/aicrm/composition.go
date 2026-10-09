@@ -159,6 +159,7 @@ type composedApplication struct {
 	// the public callback and River worker path, rather than an operations-only
 	// store shortcut.
 	paymentReconciliation *paymentapp.Service
+	invoiceRecovery       *invoicemodule.Service
 	// The existing Order owner is retained privately for synthetic tests of
 	// the actual composed paid fanout without a Provider or callback verifier.
 	nativeOrders *orderapp.Service
@@ -2697,7 +2698,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	// It still performs the full Composition below and its service persists the
 	// normal Payment/Order/audit/outbox facts; it simply must not claim a daemon
 	// was started or widen the catalog/migration for an emergency operation.
-	if cfg.Role != platformconfig.RolePaymentReconcile {
+	if cfg.Role != platformconfig.RolePaymentReconcile && cfg.Role != platformconfig.RoleInvoiceRecover {
 		// Record only after every configuration-dependent Adapter and route has
 		// been constructed successfully. A failed startup therefore leaves no
 		// application fact that could be mistaken for a running process.
@@ -2708,7 +2709,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if cfg.Ops.Enabled {
 		handler = platformdiagnostics.MiddlewareWithClientErrorFilter(handler, cfg.ReleaseSHA, opsRecord, observePublicSurveyClientError)
 	}
-	return &composedApplication{invitationService: invitationService, catalogService: catalogService, pool: pool, handler: handler, authentication: authentication, management: management, weComProcessor: weComProcessor, weComArchiveProcessor: weComArchiveProcessor, effectsRuntime: effectsRuntime, paymentDistribution: paymentService, paymentReconciliation: paymentService, nativeOrders: orderService, paymentSession: paymentSession, channelEntrantActions: channelEntrantActions, customerSync: customerSync, hxcDashboard: hxcDashboard, hxcSource: hxcSource, adminOps: adminOpsProjection, release: releaseObservation, diagnostics: diagnostics}, nil
+	return &composedApplication{invitationService: invitationService, catalogService: catalogService, pool: pool, handler: handler, authentication: authentication, management: management, weComProcessor: weComProcessor, weComArchiveProcessor: weComArchiveProcessor, effectsRuntime: effectsRuntime, paymentDistribution: paymentService, paymentReconciliation: paymentService, invoiceRecovery: invoiceService, nativeOrders: orderService, paymentSession: paymentSession, channelEntrantActions: channelEntrantActions, customerSync: customerSync, hxcDashboard: hxcDashboard, hxcSource: hxcSource, adminOps: adminOpsProjection, release: releaseObservation, diagnostics: diagnostics}, nil
 }
 
 func observePublicSurveyClientError(method, route string) bool {

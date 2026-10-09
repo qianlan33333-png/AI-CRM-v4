@@ -262,6 +262,35 @@ function fillTitle(f, name = "测试单位", tax = "TEST-TAX") {
   f.dom.window.close();
 }
 {
+  const f = fixture();
+  await flush();
+  f.applications.push({
+    id: "42000000000000000000000000000001",
+    order_id: 1,
+    amount_minor: 9900,
+    state: "failed",
+    card_state: "INSERT_ACCEPTED",
+    order_no: "ORDER-1",
+    product_names: ["测试课程"],
+    created_at: "2026-10-09T00:00:00Z",
+  });
+  f.click("开票记录");
+  await flush();
+  assert.match(f.root.textContent, /未出票，暂未交付卡包/);
+  assert.doesNotMatch(f.root.textContent, /卡包交付中/);
+  f.click("查看进度");
+  await flush();
+  assert.match(f.root.textContent, /开票失败/);
+  assert.match(f.root.textContent, /未出票，暂未交付卡包/);
+  assert.ok(
+    [...f.root.querySelectorAll("button")].some(
+      (b) => b.textContent === "重试开票",
+    ),
+  );
+  f.dom.window.close();
+}
+
+{
   const f = fixture({ expired: true });
   await flush();
   assert.match(f.root.textContent, /请在微信中打开/);

@@ -70,8 +70,15 @@ func (w *WeChat) request(ctx context.Context, method, path string, q url.Values,
 		var api *core.APIError
 		// The SDK validates successful responses only. Never interpret an unsigned
 		// API error as absence of an invoice (which could otherwise cancel recovery).
-		if errors.As(e, &api) && api.StatusCode == 404 && w.Verifier != nil && result != nil && result.Response != nil && validators.NewWechatPayResponseValidator(w.Verifier).Validate(ctx, result.Response) == nil {
-			return p.ErrPending
+		if errors.As(e, &api) && w.Verifier != nil && result != nil && result.Response != nil && validators.NewWechatPayResponseValidator(w.Verifier).Validate(ctx, result.Response) == nil {
+			if api.StatusCode == 404 {
+				return p.ErrPending
+			}
+			// RULE_LIMIT alone is not absence. This exact signed response is the
+			// official affirmative no-issuance evidence for a native application.
+			if method == http.MethodGet && strings.HasPrefix(path, "/fapiao-applications/") && !strings.Contains(strings.TrimPrefix(path, "/fapiao-applications/"), "/") && api.StatusCode == 403 && api.Code == "RULE_LIMIT" && api.Message == "商户尚未同意开票，无法对当前发票申请单进行当前操作，请先调用【开具电子发票】接口进行开票" {
+				return p.ErrNotSubmitted
+			}
 		}
 		return p.ErrUnavailable
 	}
@@ -123,6 +130,21 @@ func (w *WeChat) Query(ctx context.Context, a p.Application) (p.Result, error) {
 	}
 	return list.Information[0], nil
 }
+
+// VerifyUnsubmitted checks the entire canonical application, without a invoice
+// filter that could hide a different already accepted or issued invoice.
+func (w *WeChat) VerifyUnsubmitted(ctx context.Context, a p.Application) error {
+	var out any
+	err := w.request(ctx, http.MethodGet, "/fapiao-applications/"+url.PathEscape(a.ID), url.Values{"sub_mchid": {a.Snapshot.MerchantID}}, nil, &out)
+	if errors.Is(err, p.ErrNotSubmitted) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return p.ErrConflict
+}
+
 func (w *WeChat) Write(ctx context.Context, a p.Application, reverse bool) error {
 	if !reverse {
 		if e := w.Payments.VerifyInvoicePayment(ctx, a.Snapshot); e != nil {

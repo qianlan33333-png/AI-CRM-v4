@@ -52,8 +52,10 @@ func (s *Service) Notification(ctx context.Context, n p.Notice) error {
 		}
 		id := effects.Hash("invoice.notify.id", n.ID)
 		var prior string
+		freshNotice := true
 		e = t.QueryRow(tx, `INSERT INTO invoice_callback_receipts(event_digest,body_digest,application_id)VALUES($1,$2,$3)ON CONFLICT DO NOTHING RETURNING body_digest`, id, n.BodyDigest, a.ID).Scan(&prior)
 		if errors.Is(e, pgx.ErrNoRows) {
+			freshNotice = false
 			e = t.QueryRow(tx, `SELECT body_digest FROM invoice_callback_receipts WHERE event_digest=$1`, id).Scan(&prior)
 			if e != nil {
 				return e
@@ -66,6 +68,13 @@ func (s *Service) Notification(ctx context.Context, n p.Notice) error {
 		}
 		// Callbacks wake a fresh authenticated query. Their order cannot downgrade
 		// a reversed invoice or confuse card acceptance with card delivery.
+		if freshNotice && n.EventType == "FAPIAO.USER_APPLIED" && a.State == "failed" {
+			jobs, ok := s.Jobs.(p.RecoveryJobEnqueuer)
+			if !ok {
+				return p.ErrUnavailable
+			}
+			return jobs.EnqueueRecoveryWithin(tx, a.ID, a.InvoiceID)
+		}
 		return s.Jobs.EnqueueWithin(tx, a.ID, time.Time{})
 	})
 }

@@ -66,6 +66,16 @@ const cardStates: Record<string, string> = {
   DISCARD_ACCEPTED: "卡券作废中",
   DISCARDED: "卡券已作废",
 };
+function cardLabel(a: Invoice): string {
+  if (a.state === "failed" || a.state === "cancelled")
+    return "未出票，暂未交付卡包";
+  if (
+    !a.invoice_number &&
+    !["issued", "reversing", "reversed", "reverse_failed"].includes(a.state)
+  )
+    return "出票后交付微信卡包";
+  return cardStates[a.card_state] || "卡包状态确认中";
+}
 const reasons: Record<string, string> = {
   closed: "已关闭订单不可开票",
   not_enabled: "自动开票暂未开通",
@@ -887,7 +897,7 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
           "p",
           `申请时间：${new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", dateStyle: "medium", timeStyle: "short" }).format(new Date(a.created_at))}`,
         ),
-        element("p", cardStates[a.card_state] || "卡包状态确认中"),
+        element("p", cardLabel(a)),
       );
       const bottom = element("div", "", "orders-card-bottom");
       bottom.append(element("strong", amount(a.amount_minor), "orders-amount"));
@@ -956,7 +966,7 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
         "orders-result-title",
       ),
       element("strong", amount(a.amount_minor), "orders-detail-amount"),
-      element("p", cardStates[a.card_state] || "卡包状态确认中", "orders-note"),
+      element("p", cardLabel(a), "orders-note"),
     );
     if (["queued", "issuing"].includes(a.state))
       screen.append(
@@ -1033,7 +1043,7 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
       element("h2", invoiceStates[a.state] || "状态待确认"),
       element("strong", amount(a.amount_minor), "orders-detail-amount"),
       element("p", `申请编号：${a.id}`, "orders-note"),
-      element("p", cardStates[a.card_state] || "卡包状态确认中"),
+      element("p", cardLabel(a)),
     );
     if (a.invoice_number)
       card.append(element("p", `发票号码：${a.invoice_number}`));

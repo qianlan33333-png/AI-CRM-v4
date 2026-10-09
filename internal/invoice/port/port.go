@@ -11,13 +11,14 @@ import (
 )
 
 var (
-	ErrDisabled    = errors.New("invoice not enabled")
-	ErrInvalid     = errors.New("invalid invoice request")
-	ErrNotFound    = errors.New("invoice not found")
-	ErrIneligible  = errors.New("order not invoice eligible")
-	ErrConflict    = errors.New("invoice conflict")
-	ErrPending     = errors.New("invoice provider result pending")
-	ErrUnavailable = errors.New("invoice provider unavailable")
+	ErrDisabled     = errors.New("invoice not enabled")
+	ErrInvalid      = errors.New("invalid invoice request")
+	ErrNotFound     = errors.New("invoice not found")
+	ErrIneligible   = errors.New("order not invoice eligible")
+	ErrConflict     = errors.New("invoice conflict")
+	ErrPending      = errors.New("invoice provider result pending")
+	ErrUnavailable  = errors.New("invoice provider unavailable")
+	ErrNotSubmitted = errors.New("invoice application not submitted")
 )
 
 // ValidApplyID follows the official fapiao_apply_id string(32) contract.
@@ -172,6 +173,17 @@ type MaterialReader interface {
 }
 type QueryJobEnqueuer interface {
 	EnqueueWithin(context.Context, string, time.Time) error
+}
+
+// Explicit native title acceptance binds recovery to the failed invoice number.
+type RecoveryJobEnqueuer interface {
+	EnqueueRecoveryWithin(context.Context, string, string) error
+}
+
+// UnsubmittedVerifier is used only by the explicitly selected one-shot repair.
+// It must authenticate affirmative Provider evidence, never infer absence from a timeout.
+type UnsubmittedVerifier interface {
+	VerifyUnsubmitted(context.Context, Application) error
 }
 type Receipt struct {
 	ID              string  `json:"id"`
