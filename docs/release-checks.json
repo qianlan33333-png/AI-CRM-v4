@@ -12,6 +12,8 @@
     },
     {
       "lane": "backend",
+      "path": "internal/referral/app/invitation_token_test.go",
+      "test": "TestInvitationTokenIsOpaqueAndStrictlyValidated",
       "package": "./internal/referral/app"
     },
     {
