@@ -1,12 +1,94 @@
 {
   "schema": 1,
-  "baseline_sha": "f6538bd5e324d1960ab77b4f9a0285a774e40500",
+  "baseline_sha": "4f25bc1e27d3a85995cf164c35a35d8a8333a0c5",
   "checks": [
     {
       "lane": "preflight",
-      "path": "scripts/test_release_cache_lifecycle_contracts.py"
+      "path": "integrations/context-center/sidebar/tests/test_sidebar_reader.py"
+    },
+    {
+      "lane": "preflight",
+      "path": "integrations/context-center/sidebar/tests/test_snapshot_binding.py"
+    },
+    {
+      "lane": "preflight",
+      "path": "integrations/context-center/sidebar/tests/test_manual_generation.py"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/sidebar",
+      "race": true,
+      "fresh": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/platform/config/sidebar_warehouse_test.go",
+      "test": "TestSidebarWarehouseDefaultAndProtectedConfiguration"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/config/http"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/sidebar_ai_viewer_test.go",
+      "test": "TestSidebarAIViewerUsesCurrentCookieAndActiveWeComEmployee"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/sidebar_warehouse_adapter_test.go",
+      "test": "TestSidebarWarehouseCompositionUsesProtectedReaderOnlyWhenEnabled"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/sidebar_warehouse_adapter_test.go",
+      "test": "TestSidebarGenerationCompositionUsesProtectedManualAgentOnlyWhenEnabled"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/sidebar_bootstrap_survey_postgres_integration_test.go",
+      "test": "TestPostgreSQLSidebarBootstrapUsesBoundedSurveyReadAndActualTotal",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/adapters_test.go",
+      "test": "TestSecurityHeadersAllowBlobImagesOnlyOnMediaAndSidebarPages"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/webshell/handler_test.go",
+      "test": "TestStandaloneHandlerRendersAdminLoginSidebarAndAssets"
+    },
+    {
+      "lane": "frontend",
+      "path": "scripts/validate-openapi.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "internal/webshell/sidebar_ai_operations.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "internal/webshell/sidebar_ai_standard_host.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "scripts/sidebar-workbench-host-adapter-e2e.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/scripts/e2e.mjs"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/sidebar_thumbnail_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLSidebarThumbnailChromiumJourney"
     }
   ],
-  "installed_checks": [],
+  "installed_checks": [
+    "sidebar-ai-operations"
+  ],
   "build_commands": []
 }

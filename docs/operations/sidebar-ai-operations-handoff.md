@@ -1,6 +1,6 @@
 # AI运营侧栏：准确候选与启用交接
 
-原开发任务 `01a12136-1d2f-7186-9b90-62a976bc40bd`；父任务 Dot `01a1189c-2bc0-76da-97db-8b03e2cb2039`。本候选已对齐只读核验的国内 main `82edf652065beecf77409723c0a25a7581d0764d`，分支 `codex/sidebar-ai-operations`，仓库 `/Users/qianlan/Documents/Codex/2026-10-09/task-2/crm-sidebar-ai-operations`。最终 head/tree/ref、检查与投递结果以仓外 `candidate-receipt.json` 为准；不使用旧 HEAD 的绿灯证明最终候选。
+原开发任务 `01a12136-1d2f-7186-9b90-62a976bc40bd`；父任务 Dot `01a1189c-2bc0-76da-97db-8b03e2cb2039`。本候选已重基到只读核验的国内 main `4f25bc1e27d3a85995cf164c35a35d8a8333a0c5`（原基线 `82edf652065beecf77409723c0a25a7581d0764d`），分支 `codex/sidebar-ai-operations`，仓库 `/Users/qianlan/Documents/Codex/2026-10-09/task-2/crm-sidebar-ai-operations`。最终 head/tree/ref、检查与投递结果以仓外 `candidate-receipt.json` 为准；不使用旧 HEAD 的绿灯证明最终候选。
 
 代码候选已包含标准侧栏、受保护数仓 Reader、手动 native Generator、隔离的数仓安装材料。真实腾讯固定导出器更新、55 活动安装、配置装配和真实 Provider 验收尚未执行；业务链路尚未接通。没有切流、生产数据库连接、旧 Agent 停服或新定时任务。
 
@@ -72,3 +72,9 @@ OneID：读取现有 scoped customer，经已有数仓 CID/alias/fold lineage �
 本地最终 fast、全仓测试编译、受影响 Go/JS/Host 检查由仓外最终收据绑定。55 Linux 收据证明合成投影、原子 claim、并发/重启/超时、实际 native v2 资源合同和 stub Provider，不能证明生产字段、真实模型或配置已接通。真实腾讯→55、活动安装和实际 Provider 输出必须单列验收。
 
 国内候选推送后重新读取 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json`，实际投递指定《CRM v4 发布工作台 · 新流程》，包含准确 base/head/tree/ref、五项影响、收据和以上启用边界。只交付本功能，沿原队列/锁/attempt；不自行安装共享 CRM 预发/生产。消息失败要记明，不把文件准备等同于投递成功。
+
+## 2026-10-10 执行通道恢复
+
+原 session 95383 在恢复通道中不存在；原后端无完成收据，进程已结束，不复用为最终通过。端口59538确认是本任务独立合成 PostgreSQL16.13；无测试连接后已正常停止，数据库文件保留。本轮最终准确源码验证收据保存于 `/Users/qianlan/Documents/Codex/2026-10-10/task/sidebar-ai-operations-resume-20261010`。旧55/Agent授权 socket 已失效，本轮不新认证、不读取或重传凭据；生产导出器、重启恢复任务和账号配置仍按以上具体计划由既有发布者/人安全核验。
+
+仅推送本侧栏候选的国内ref并实际投递唯一路由工作台；新 main 已含的其他发布结果只是基线，不把另一个三模块审查纳入本次授权。工作台依当前源码的极简发布机制执行 `docs/release-checks.json` 与 Linux标准Host及最终安装包相关冒烟。旧Dot计划消息拒绝记录保留，不重试该动作；本轮用户已明确授权国内源码交付与指定工作台投递。

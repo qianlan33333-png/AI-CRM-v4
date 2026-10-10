@@ -12,7 +12,7 @@ flowchart LR
  F --> G[人工复制与发送]
 ```
 
-基线为只读验证的国内 main `82edf652065beecf77409723c0a25a7581d0764d`，独立分支 `codex/sidebar-ai-operations`。本机权威项目 `/Users/qianlan/Downloads/新CRM/main`。旧 Agent 是用户授权的独立话术项目，不是旧 CRM 源码/运行时依赖。迁移线程仍为前置准备；腾讯现网 `124.220.53.183`、火山演练 `115.190.113.5`、数仓目标 `115.190.115.55`、旧 Agent 源 `122.152.209.11` 分别核对。
+当前候选已重基到只读验证的国内 main `4f25bc1e27d3a85995cf164c35a35d8a8333a0c5`（原基线 `82edf652065beecf77409723c0a25a7581d0764d`），独立分支 `codex/sidebar-ai-operations`。本机权威项目 `/Users/qianlan/Downloads/新CRM/main`。旧 Agent 是用户授权的独立话术项目，不是旧 CRM 源码/运行时依赖。迁移线程仍为前置准备；腾讯现网 `124.220.53.183`、火山演练 `115.190.113.5`、数仓目标 `115.190.115.55`、旧 Agent 源 `122.152.209.11` 分别核对。
 
 参考产品为 [Microsoft 销售邮件辅助](https://learn.microsoft.com/en-us/microsoft-sales-copilot/use-copilot-kickstart-email-messages)。本范围复用原 scoped context、HttpOnly 员工认证、标准 Host/overlay、数仓 CID/alias 与 published projection、55 native prompt runtime，不新建客户匹配器、CRM 队列、CLI/批量模型恢复或发送能力。Product Design 已在本父 brief 编码前应用，当前沿已授权设计补接口装配。
 
@@ -45,3 +45,5 @@ OneID 涉及读取 canonical customer 和可信员工，复用既有 context/数
 Reader/Generator 分别默认关闭。接口装配不要求 CRM 整体迁云：腾讯服务端可访问55现有 HTTPS；实际网络/授权和生产来源仍需验收。RDS 保持私网，浏览器不访问数仓/数据库/模型凭据。
 
 执行前的腾讯更新、55重启（会恢复既有工作）、既有凭据安全装配和回滚计划见 [交接](../operations/sidebar-ai-operations-handoff.md)。无数据库逆向迁移。CRM 由唯一路由指定工作台沿现有队列/锁安装与回退；本任务仅交付准确国内候选及隔离材料，不自行部署共享预发/生产、不切 DNS 或停旧 Agent。最终准确源码和实际检查以仓外 `candidate-receipt.json` 为准。
+
+本次恢复沿用原业务和设计，不涉及新增限制。发布清单见 `docs/release-checks.json`：侧栏整包竞态与权限/快照/HTTP合同、当前员工与可选装配、标准 Host/overlay 和 OpenAPI；Linux 执行标准 Host Chromium，最终安装包以 `sidebar-ai-operations` 收据覆盖同源接口鉴权、关闭配置反馈和两分区入口。55 活动 API/真实模型启用仍独立待验。原断连后端日志不完整，本轮按用户要求补最终源码的完整本地后端检查；不把 macOS 的 Linux 专用 skip 算作门禁通过。
