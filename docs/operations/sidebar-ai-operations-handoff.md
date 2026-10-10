@@ -78,3 +78,5 @@ OneID：读取现有 scoped customer，经已有数仓 CID/alias/fold lineage �
 原 session 95383 在恢复通道中不存在；原后端无完成收据，进程已结束，不复用为最终通过。端口59538确认是本任务独立合成 PostgreSQL16.13；无测试连接后已正常停止，数据库文件保留。本轮最终准确源码验证收据保存于 `/Users/qianlan/Documents/Codex/2026-10-10/task/sidebar-ai-operations-resume-20261010`。旧55/Agent授权 socket 已失效，本轮不新认证、不读取或重传凭据；生产导出器、重启恢复任务和账号配置仍按以上具体计划由既有发布者/人安全核验。
 
 仅推送本侧栏候选的国内ref并实际投递唯一路由工作台；新 main 已含的其他发布结果只是基线，不把另一个三模块审查纳入本次授权。工作台依当前源码的极简发布机制执行 `docs/release-checks.json` 与 Linux标准Host及最终安装包相关冒烟。旧Dot计划消息拒绝记录保留，不重试该动作；本轮用户已明确授权国内源码交付与指定工作台投递。
+
+用户在本次恢复中另授权修复阻断检查的最小测试配置问题：`automation_fixed_content_chromium_postgres_integration_test.go` 原171行直接读环境，触发 `scripts/check-architecture.py` 117–119行。现复用既有 `internal/platform/config/tests.PreparationDirectory()`，保留原有条件、断言及规则；只增加测试配置包和三个直接 Chromium 消费者的验证，不变更自动化业务或另一三模块审查范围。该修复不涉及 OneID、持久化或外部效果，也不涉及新增限制。`2c7ab28` 完整后端实际完成但有23失败事件、53skip，失败记录保留；修复后的准确候选只按各自实际收据报告，不以先前SHA的通过事件冒称当前整仓通过。

@@ -20,6 +20,7 @@ import (
 
 	accesshttp "github.com/qianlan33333-png/AI-CRM-v3/internal/access/http"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 )
 
 // OneID is not involved: this journey edits one authenticated Automation Agent
@@ -168,7 +169,7 @@ func prepareAutomationFixedContentArtifacts(t *testing.T, repository string) {
 	t.Helper()
 	// Focused Linux checks start in a clean checkout. Reuse the existing
 	// candidate-bound artifact cache before composing the browser fixture.
-	if os.Getenv("AICRM_TEST_PREP_DIR") != "" {
+	if testconfig.PreparationDirectory() != "" {
 		prepareProductExternalPushChromiumArtifacts(t, repository)
 	}
 	manifest, err := os.ReadFile(filepath.Join(repository, "web", "dist", "asset-manifest.json"))

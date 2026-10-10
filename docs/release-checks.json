@@ -85,6 +85,25 @@
       "lane": "browser",
       "path": "cmd/aicrm/sidebar_thumbnail_chromium_postgres_integration_test.go",
       "test": "TestPostgreSQLSidebarThumbnailChromiumJourney"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/platform/config/tests"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/automation_fixed_content_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLAutomationFixedContentChromiumJourney"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/automation_fixed_content_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLAutomationLifecycleChromiumJourney"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/automation_fixed_content_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLAutomationLongPromptChromiumJourney"
     }
   ],
   "installed_checks": [
