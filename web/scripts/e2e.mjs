@@ -1318,7 +1318,7 @@ async function loadPage(rel, { id, q, automationHistoryHttp = false, campaignHis
         blob: async () => new window.Blob([JSON.stringify(data)], { type: 'application/json' }),
         clone() { return this; },
       });
-      window.__sidebarTest = { contactSwitched: false, remarkBody: null, idempotencyKey: null, phoneBody: null, phoneKey: null, phoneKeys: [], phoneAttempts: 0, profileBodies: [], profileKeys: [], materialQueries: [], sendIntentBodies: [], sendIntentKeys: [], sendIntentTokens: [], sendOutcomeBodies: [], sendOutcomeTokens: [], wxMessages: [], wxInvokes: [], wxStages: [], requests: [], bootstrapBodies: [], releaseStaleContact: null, releaseSend: null, oauthTargets: [], jssdkStorageReads: 0 };
+      window.__sidebarTest = { contactSwitched: false, remarkBody: null, idempotencyKey: null, phoneBody: null, phoneKey: null, phoneKeys: [], phoneAttempts: 0, profileBodies: [], profileKeys: [], aiReadTokens: [], aiGenerationBodies: [], materialQueries: [], sendIntentBodies: [], sendIntentKeys: [], sendIntentTokens: [], sendOutcomeBodies: [], sendOutcomeTokens: [], wxMessages: [], wxInvokes: [], wxStages: [], requests: [], bootstrapBodies: [], releaseStaleContact: null, releaseSend: null, oauthTargets: [], jssdkStorageReads: 0 };
       window.addEventListener('aicrm-sidebar-oauth-required', (event) => window.__sidebarTest.oauthTargets.push(event.detail?.target || ''));
       if (scenario === 'agent_retry_storage_failure') {
         const values = new Map();
@@ -1361,6 +1361,18 @@ async function loadPage(rel, { id, q, automationHistoryHttp = false, campaignHis
           const bootstrapInput = window.__sidebarTest.bootstrapBodies.at(-1);
           const scopedCustomerID = bootstrapInput?.external_userid === 'ext-8' ? 8 : 7;
           return json({ state: 'ready', context_token: 'sidebar-context-token-' + scopedCustomerID + '-' + 'x'.repeat(50), customer_id: scopedCustomerID, workbench: { profile: { ...profile, customer_id: scopedCustomerID, oneid: 'CID-' + scopedCustomerID }, questionnaire_count: scenario === 'empty' ? 0 : 2, order_count: scenario === 'success' ? 1 : 0, periodic_order_count: scenario === 'success' ? 1 : 0, material_count: scenario === 'success' ? 2 : 0, safety }, safety });
+        }
+        if (url.includes('/api/sidebar/v2/ai-operations')) {
+          const scopedCustomerID = window.__sidebarTest.bootstrapBodies.at(-1)?.external_userid === 'ext-8' ? 8 : 7;
+          const snapshotToken = 'synthetic-sidebar-ai-' + scopedCustomerID;
+          if (url.includes('/suggestions')) {
+            window.__sidebarTest.aiGenerationBodies.push(JSON.parse(init.body || '{}'));
+            return json({ snapshot_token: snapshotToken, suggestion: '合成销售参考' + scopedCustomerID, auto_sent: false });
+          }
+          window.__sidebarTest.aiReadTokens.push(new Headers(init.headers).get('X-Sidebar-Context-Token'));
+          if (scenario === 'ai_unconfigured') return json({ state: 'unconfigured', generation_ready: false });
+          if (scenario === 'error') return json({ code: 'warehouse_unavailable' }, 503);
+          return json({ state: 'ready', snapshot_token: snapshotToken, expires_at: new Date(Date.now() + 300_000).toISOString(), generation_ready: scenario !== 'empty', data: { summary: scenario === 'empty' ? '' : '合成清洗摘要' + scopedCustomerID, summary_updated_at: '2026-08-26T01:00:00Z', synced_at: '2026-08-26T02:00:00Z', last_customer_message: scenario === 'empty' ? null : { type: 'text', text: '合成客户末句' + scopedCustomerID, occurred_at: '2026-08-26T01:30:00Z' } } });
         }
         if (url.includes('/phone-binding')) {
           window.__sidebarTest.phoneBody = JSON.parse(init.body || '{}');
@@ -3383,9 +3395,11 @@ for (const [scenario, expectedSignatureReads] of [['sdk_cache', 0], ['sdk_cache_
   await sleep(100);
   ok('窗口重新可见时重验联系人；旧 context token 不可用于新客户',
     state.bootstrapBodies.map((body) => body.external_userid).join('|') === 'ext-7|ext-8' &&
-    state.wxInvokes.filter((method) => method === 'getCurExternalContact').length === 3 &&
+    state.wxInvokes.filter((method) => method === 'getCurExternalContact').length === 7 &&
     dom.window.__AICRMSidebarBridge.contextToken().startsWith('sidebar-context-token-') &&
-    d.querySelector('#customer-oneid')?.textContent === 'OneID CID-8');
+    d.querySelector('#customer-oneid')?.textContent === 'OneID CID-8' &&
+    d.body.textContent.includes('合成清洗摘要8') && !d.body.textContent.includes('合成清洗摘要7') &&
+    state.aiReadTokens.at(-1)?.startsWith('sidebar-context-token-8-'));
   dom.window.close();
 }
 {
@@ -3406,15 +3420,19 @@ for (const [scenario, expectedSignatureReads] of [['sdk_cache', 0], ['sdk_cache_
   const dom = await loadPage('sidebar/index.html', { q: 'sidebar_case=success' });
   const d = dom.window.document;
   const state = dom.window.__sidebarTest;
-  input(dom, d.querySelector('[data-profile-field="source"]'), '活动报名');
-  await waitFor(() => state.profileBodies.length === 1);
+  // The approved AI tabs replace the profile editor. The retained public Host
+  // request adapter still owns CAS and filtering for its existing consumers.
+  await dom.window.__AICRMSidebarBridge.request('/api/sidebar/v2/profile', {
+    method: 'PUT', body: JSON.stringify({ source: '活动报名', external_userid: 'untrusted-external-id' }),
+  });
   click(dom, d.querySelector('#change-mobile-button'));
   input(dom, d.querySelector('#mobile-input'), '13800138000');
   click(dom, d.querySelector('#confirm-mobile-button'));
   await sleep(70);
   ok('画像保存带当前 profile CAS，手机号仅声明且 Host 丢弃 donor 外部标识字段',
     state.profileBodies.length === 1 && state.profileBodies[0].expected_profile_version === 0 &&
-    state.profileBodies[0].source === '活动报名' && state.profileKeys[0]?.startsWith('sidebar-profile-') &&
+    state.profileBodies[0].source === '活动报名' && !('external_userid' in state.profileBodies[0]) &&
+    state.profileKeys[0]?.startsWith('sidebar-profile-') &&
     state.phoneBody?.phone === '13800138000' && !('external_userid' in state.phoneBody) &&
     state.phoneKey?.startsWith('sidebar-phone-') && d.body.textContent.includes('手机号已声明') &&
     !d.body.textContent.includes('手机号已验证'));
@@ -3423,14 +3441,15 @@ for (const [scenario, expectedSignatureReads] of [['sdk_cache', 0], ['sdk_cache_
 {
   const dom = await loadPage('sidebar/index.html', { q: 'sidebar_case=profile_conflict' });
   const d = dom.window.document;
-  input(dom, d.querySelector('[data-profile-field="industry"]'), '教育');
-  // Request capture precedes the asynchronous error response and Host render.
-  // Assert the completed conflict state rather than racing response handling.
-  await waitFor(() => dom.window.__sidebarTest.profileBodies.length === 1 && d.querySelector('#toast')?.textContent.includes('客户资料已更新'));
+  const error = await dom.window.__AICRMSidebarBridge.request('/api/sidebar/v2/profile', {
+    method: 'PUT', body: JSON.stringify({ industry: '教育' }),
+  }).then(() => null, (failure) => failure);
+  const retained = await dom.window.__AICRMSidebarBridge.request('/api/sidebar/v2/workbench');
   ok('画像陈旧 CAS 冲突不会伪造已保存，也不会覆盖本地版本',
     dom.window.__sidebarTest.profileBodies.length === 1 &&
     dom.window.__sidebarTest.profileBodies[0].expected_profile_version === 0 &&
-    d.querySelector('#toast')?.textContent.includes('客户资料已更新') && !d.querySelector('#toast')?.textContent.includes('已保存'));
+    error?.status === 409 && error.message.includes('客户资料已更新') && retained.profile.industry === '' &&
+    !d.querySelector('#toast')?.textContent.includes('已保存'));
   dom.window.close();
 }
 {
@@ -3441,19 +3460,45 @@ for (const [scenario, expectedSignatureReads] of [['sdk_cache', 0], ['sdk_cache_
   await sleep(50);
   click(dom, d.querySelector('[data-load-more-questionnaires]'));
   await sleep(50);
+  const questionnaireRows = d.body.textContent.includes('满意度回访') && d.body.textContent.includes('第二页问卷');
   click(dom, d.querySelector('#tabs [data-tab="profile"]'));
-  await sleep(20);
-  click(dom, d.querySelector('[data-profile-view="timeline"]'));
-  await sleep(50);
-  click(dom, d.querySelector('[data-load-more-timeline]'));
-  await sleep(50);
+  await waitFor(() => d.body.textContent.includes('合成清洗摘要7'));
   const questionnaireReads = state.requests.filter((url) => url.includes('/questionnaires'));
   const timelineReads = state.requests.filter((url) => url.includes('/timeline'));
-  ok('问卷和时间线使用 Customer 的 opaque cursor，逐页追加且不伪造 offset 或总数',
-    d.body.textContent.includes('提交问卷') && d.body.textContent.includes('创建订单') &&
+  ok('问卷继续使用 Customer 的 opaque cursor；AI运营入口不再加载旧时间线',
+    questionnaireRows &&
     questionnaireReads.length === 2 && questionnaireReads[1].includes('cursor=survey-page-2') &&
-    timelineReads.length === 2 && timelineReads[1].includes('cursor=timeline-page-2') &&
-    !questionnaireReads.concat(timelineReads).some((url) => url.includes('offset=')));
+    timelineReads.length === 0 && !d.querySelector('[data-profile-view="timeline"]') &&
+    !d.querySelector('[data-profile-field]') && !questionnaireReads.some((url) => url.includes('offset=')));
+  const byLabel = (label) => [...d.querySelectorAll('button')].find((button) => button.textContent.trim() === label);
+  ok('AI运营基础信息读取清洗摘要和同步水位，读取不调用模型',
+    d.querySelector('#tabs [data-tab="profile"]').textContent === 'AI运营' &&
+    byLabel('基础信息') && byLabel('辅助成交') && d.body.textContent.includes('数仓同步时间：') &&
+    state.aiGenerationBodies.length === 0);
+  byLabel('辅助成交').click();
+  ok('辅助成交显示客户末句，确认前禁用生成',
+    d.body.textContent.includes('合成客户末句7') && d.body.textContent.includes('消息时间：') && byLabel('生成话术').disabled);
+  const confirmation = d.querySelector('.ai-confirm input');
+  confirmation.checked = true; confirmation.dispatchEvent(new dom.window.Event('change'));
+  byLabel('生成话术').click();
+  await waitFor(() => d.body.textContent.includes('合成销售参考7'));
+  ok('人工确认后只调用一次生成，并保持复制后人工发送',
+    state.aiGenerationBodies.length === 1 &&
+    JSON.stringify(state.aiGenerationBodies[0]) === JSON.stringify({ snapshot_token: 'synthetic-sidebar-ai-7', confirmed: true }) &&
+    byLabel('复制话术') && state.wxMessages.length === 0 && !state.wxInvokes.includes('sendChatMessage'));
+  byLabel('刷新').click();
+  await waitFor(() => d.body.textContent.includes('合成客户末句7') && !d.body.textContent.includes('合成销售参考7'));
+  ok('刷新清空话术及人工确认，保持无自动生成或发送',
+    byLabel('生成话术').disabled && !d.querySelector('.ai-confirm input').checked &&
+    state.aiGenerationBodies.length === 1 && state.wxMessages.length === 0);
+  dom.window.close();
+}
+{
+  const dom = await loadPage('sidebar/index.html', { q: 'sidebar_case=ai_unconfigured' });
+  const d = dom.window.document;
+  ok('数仓未配置时真实提示未接通且无模型调用',
+    d.body.textContent.includes('数仓尚未接通') && !d.querySelector('.ai-confirm') &&
+    dom.window.__sidebarTest.aiGenerationBodies.length === 0);
   dom.window.close();
 }
 {
