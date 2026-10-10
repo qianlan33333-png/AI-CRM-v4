@@ -8,8 +8,9 @@ import (
 	"strings"
 )
 
-// SidebarWarehouse uses an existing protected operator account; it does not
-// provision a user, grant a role, or enable any model/Provider write.
+// SidebarWarehouse uses an existing protected operator account without
+// provisioning a user or granting a role. Read and manual generation are
+// separately enabled; neither path sends a WeCom message.
 type SidebarWarehouse struct {
 	Enabled           bool
 	GenerationEnabled bool

@@ -1,30 +1,47 @@
 # 侧边栏 AI运营：基础信息与辅助成交
 
-用户已批准本范围，优先于 CRM 整体迁云。入口沿用蓝白卡片工作台，将核心画像改为 AI运营，二级为基础信息/辅助成交；旧 timeline API 与数据保留。基础信息展示上下文中心清洗摘要。辅助成交显示数仓已归档客户末句、发生时间与同步时间，销售核对当前企微会话后手动生成、复制、发送。刷新只读数仓现有投影；不拉取上游存档、不调模型。当前腾讯→数仓同步并非快速更新，不承诺30秒或迁云后无延迟。
+用户已批准并优先实施本范围。标准蓝白卡片工作台沿既有入口将核心画像改为 AI运营，二级为基础信息/辅助成交。销售先阅读上下文中心摘要、最近归档的客户末句、发生时间与同步水位，再核对企微当前会话，手动确认、生成、复制及发送。刷新只读取现有数仓投影；不拉上游存档、不调用模型。不承诺快速同步或整体迁云后无延迟。
 
-## 已核实来源与范围
+```mermaid
+flowchart LR
+ A[当前可信客户与员工] --> B[55已发布投影与范围来源]
+ B --> C[摘要 末句 真实同步水位]
+ C --> D[销售核对当前会话并确认]
+ D --> E[签名快照与源前后核对]
+ E --> F[55 native单次生成及持久防重]
+ F --> G[人工复制与发送]
+```
 
-- 国内实际 main 6b28130afa0f2b8e784b3e7372faf3451d33cfda；独立 codex/sidebar-ai-operations。
-- 迁移对话 01a11e64-e0ad-7d93-a114-c5121379276b 可访问8轮，用户/助手消息已核对；工具执行正文未读取，凭据行排除。最后结论为 PREPARATION ONLY。迁移准备目录 /Users/qianlan/Downloads/新CRM/migration/volcengine-production-20261009，清单及 workbench/18-PREPARATION_RESULT.json 是准备证据，不能视为切流批准。
-- 腾讯现网124.220.53.183；火山CRM测试/迁移准备115.190.113.5；清洗/数仓115.190.115.55；旧生成来源122.152.209.11。后两项角色来自用户当前说明，SSH无密码认证被拒，未核验当前代码。
-- 工作台路由 /Users/qianlan/Downloads/新CRM/release-control/workstation.json → 01a0f85a-9de6-7701-a12a-9c774080389b。已读工作台最近10轮、AGENTS.md及 domestic-main-release.md；工作台历史尚有更早页，不声称全部历史读完。
-- 10月7日数仓扫描记录存在 user-context、user-source-records、sync-runs、copy/generate 路径，但只有 source_inventory_only 证据，缺请求/响应、身份归属和当前部署身份。不能把这些路径直接假定为新的CRM生产契约。
-- 参考：[Microsoft官方销售邮件辅助](https://learn.microsoft.com/en-us/microsoft-sales-copilot/use-copilot-kickstart-email-messages)，CRM证据驱动的候选需人工核对/编辑后发送。
+基线为只读验证的国内 main `82edf652065beecf77409723c0a25a7581d0764d`，独立分支 `codex/sidebar-ai-operations`。本机权威项目 `/Users/qianlan/Downloads/新CRM/main`。旧 Agent 是用户授权的独立话术项目，不是旧 CRM 源码/运行时依赖。迁移线程仍为前置准备；腾讯现网 `124.220.53.183`、火山演练 `115.190.113.5`、数仓目标 `115.190.115.55`、旧 Agent 源 `122.152.209.11` 分别核对。
 
-## 合同与边界
+参考产品为 [Microsoft 销售邮件辅助](https://learn.microsoft.com/en-us/microsoft-sales-copilot/use-copilot-kickstart-email-messages)。本范围复用原 scoped context、HttpOnly 员工认证、标准 Host/overlay、数仓 CID/alias 与 published projection、55 native prompt runtime，不新建客户匹配器、CRM 队列、CLI/批量模型恢复或发送能力。Product Design 已在本父 brief 编码前应用，当前沿已授权设计补接口装配。
 
-浏览器仅调用同源 GET /api/sidebar/v2/ai-operations 与 POST /api/sidebar/v2/ai-operations/suggestions。后端从既有 scoped context token 得到企业、员工及 canonical customer.id，同时重验当前HttpOnly员工会话并要求主体一致，禁止浏览器指定客户/员工/正文。数仓消费 Port 返回同一客户/员工范围的清洗摘要、双向私聊（最多40条）、最后客户消息、同步水位及源版本。响应必须与可信主体一致。未知同步时间显示未知，read_at 不能冒充同步时间；非文本末句明确不可理解。
+## 合同、身份与生成
 
-生成使用签名快照（客户、企业、员工、内容摘要、有效期），显式确认、刷新后失效。生成前/后重新读取数仓并比较同一快照，新增/迟到消息或摘要变化返回冲突。调用远端生成器最多45秒；远端必须按冻结快照幂等，不能由CRM新建队列或重试调度器。超时标记结果未确认；不自动重发。返回只供复制，不调用企微发送。员工或客户变化、刷新、离开页面、过期均清除确认和旧话术。
+浏览器只访问同源 GET `/api/sidebar/v2/ai-operations` 和 POST `/api/sidebar/v2/ai-operations/suggestions`；后端从可信 context 获取企业、员工、canonical `customers.id`，禁止浏览器提交身份或原始正文。GET 完成后再次核验当前员工；POST 模型调用前后均核验身份和源。
 
-数仓读取结束后必须重新验证当前员工身份，再返回摘要或进入模型；读取期间身份撤销/变更立即拒绝。请求取消或读取期限已过时，即使Adapter返回成功，也不接受其结果。两项拒绝行为由TestAIOperationsViewerChangeDuringWarehouseRead与TestAIOperationsCancelledWarehouseReadIsRejected覆盖，不新增权限或业务限制。
+Reader 固定读取55受保护 HTTPS `/api/local/v3/sidebar-ai-operations`，按 `crm-sidebar-ai-operations.v1` 和 `crm-private-message-scope.v1` 返回单一客户/企业/当前员工的摘要、水位、最多40条双向私聊及末条客户消息。依赖腾讯既有固定导出器补齐企业、唯一员工、双人私聊及发送方来源字段；缺失或歧义失败，非文本末句不伪造转写。前端读响应不含双向私聊正文。
 
-OneID涉及：复用既有客户context解析，数仓返回身份不匹配拒绝，不自建外部ID映射。持久化：本候选无新表/迁移/持久任务；模型调用是远端读取/生成候选，不是企微写入。远端幂等属于已有Agent迁移合同。无新增业务限制，仅落实用户要求的核对与隔离。
+生成固定调用 `/api/local/v3/sidebar-manual-generation`，传递5分钟签名快照绑定的全部冻结输入和稳定幂等 key。摘要或任何双向消息发生变化即返回冲突；不足则禁用生成。CRM 单次45秒上限，页面55秒兜底，超时为 outcome_unknown，不自动换 key 重试。
 
-火山数据库仅私网。腾讯CRM通过55受保护服务接口或既有已授权网络路径读取，不公网直连私网数据库；火山测试CRM私网验收与腾讯生产分开。生产数据绑定必须在实际数仓合同核验后于Composition Root装配；缺绑定时界面明确未接通，不展示虚构摘要/话术、不回退到客户单方20句。隔离测试可装配合成Reader/Generator。真实读写链路未验收不称完成。
+55 复用旧 Agent 已核验纯函数和本机现有 native v2 `sales_assist` 资源合同；摘要标为历史参考，近期消息保留角色/时间/来源。只进行一次 Ark/Kimi API 请求，不使用 CLI 重试、fallback、批量恢复或企微发送。排他 claim 在调用前 fsync；并发/重启/超时后同 key 不再次调用，完成收据可复用。真实模型及凭据尚未验证。
 
-## 五项影响与验收
+## 必要边界分类
 
-对外：新增侧边栏同源接口与冲突/未接通/未知结果状态。业务机制：只读数仓+人工生成，绑定可信OneID/员工，无资金/企微效果。关联：sidebar、webshell、Composition Root；不更改自动化原生成上下文、消息存档、订单或发票。页面：AI运营两个二级入口及复制；其他模块保持既有行为。验证：Go鉴权/签名/范围/水位/超时合同，JS异步竞态和确认清除，真实浏览器合成旅程；真实数仓/模型/企微接受与远程迁移仍单列未验证。
+OneID 涉及读取 canonical customer 和可信员工，复用既有 context/数仓 lineage，不建客、不自动合并。CRM 无新增表、持久任务或数据库迁移。远端 native owner 的最小 claim 是手动单次生成收据；不属于 CRM 内部作业或企微发送。资金和企微写不涉及。
 
-回退：工作台沿原锁/队列用上一完整应用构件回退，旧timeline数据保留；不需要数据库逆向迁移。发布由用户指定既有工作台处理，开发线程不安装预发/生产、不切DNS、不迁CRM。候选交接包含base/head/tree/ref、短测试清单与未验证项。
+新增/复用边界依据：客户/员工来源不足会串读其他私聊，故拒绝缺字段/歧义；冻结快照变化会使用过期会话，故绑定源版本和全文；模型结果不明会重复扣费/输出，故调用前持久 claim 且不自动重试；沿既定40条/文本字节预算计算4MiB JSON传输上限，正常边界与超限均有合同测试。既有 API admin/operator 授权保持，不扩大 agent 角色。
+
+## 五项影响及验收
+
+|项|实际影响|
+|---|---|
+|对外合同|CRM 两个侧栏接口；55 两个版本化适配接口及生产 facts 来源字段；缺范围/过期/未装配/未知结果可辨识|
+|业务机制|只读投影、人工确认、单次生成、持久防重；不自动发送/追新/迁数据或建立调度|
+|关联模块|sidebar、webshell标准Host/overlay、platform config、Composition Root；独立 Context Center 集成材料及既有固定 exporter|
+|页面|AI运营两入口、真实水位、末句核对、复制；共享Host相关消费者按最新主线检查|
+|证据|本地 fast/全仓编译/相关完整包与JS/Host；55 Linux合成范围/防重/native合同；真实腾讯范围、认证链路、活动安装和Provider另验|
+
+Reader/Generator 分别默认关闭。接口装配不要求 CRM 整体迁云：腾讯服务端可访问55现有 HTTPS；实际网络/授权和生产来源仍需验收。RDS 保持私网，浏览器不访问数仓/数据库/模型凭据。
+
+执行前的腾讯更新、55重启（会恢复既有工作）、既有凭据安全装配和回滚计划见 [交接](../operations/sidebar-ai-operations-handoff.md)。无数据库逆向迁移。CRM 由唯一路由指定工作台沿现有队列/锁安装与回退；本任务仅交付准确国内候选及隔离材料，不自行部署共享预发/生产、不切 DNS 或停旧 Agent。最终准确源码和实际检查以仓外 `candidate-receipt.json` 为准。

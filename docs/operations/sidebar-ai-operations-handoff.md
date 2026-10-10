@@ -1,78 +1,70 @@
-# AI运营侧栏候选交接与 Agent 迁移准备
+# AI运营侧栏：准确候选与启用交接
 
-原开发任务 01a12136-1d2f-7186-9b90-62a976bc40bd；父任务 01a1189c-2bc0-76da-97db-8b03e2cb2039。
-本候选是本地可验证消费端；真实数仓和Agent适配未完成，不可作为业务接通收据。没有生产部署、DNS修改、数据库连接或凭据持久配置。
+原开发任务 `01a12136-1d2f-7186-9b90-62a976bc40bd`；父任务 Dot `01a1189c-2bc0-76da-97db-8b03e2cb2039`。本候选已对齐只读核验的国内 main `82edf652065beecf77409723c0a25a7581d0764d`，分支 `codex/sidebar-ai-operations`，仓库 `/Users/qianlan/Documents/Codex/2026-10-09/task-2/crm-sidebar-ai-operations`。最终 head/tree/ref、检查与投递结果以仓外 `candidate-receipt.json` 为准；不使用旧 HEAD 的绿灯证明最终候选。
 
-## 四种服务器角色
+代码候选已包含标准侧栏、受保护数仓 Reader、手动 native Generator、隔离的数仓安装材料。真实腾讯固定导出器更新、55 活动安装、配置装配和真实 Provider 验收尚未执行；业务链路尚未接通。没有切流、生产数据库连接、旧 Agent 停服或新定时任务。
 
-|角色|地址|证据与当前状态|
+## 已核实角色和源码
+
+|角色|准确位置|实际证据|
 |---|---|---|
-|腾讯 CRM 现网|124.220.53.183|迁移对话及10月9日准备清单；正式流量/任务仍在源，未切流|
-|火山 CRM 标准版测试/迁移准备|115.190.113.5|迁移对话、独立RDS恢复/认证旅程收据；演练已停止，正式消费者未开；副本并非持续同步|
-|火山清洗/数仓，未来生成目标|115.190.115.55|用户当前明确root密码登录；现有SSH身份及一次交互登录失败，未读远端源码，后续仅本机安全交接|
-|旧话术Agent迁移源|122.152.209.11|用户明确密钥登录，实际账号未确认；尝试root的免密探测失败，不能推断正确账号也会失败；未取得部署/代码清单，不应作为未来运行依赖|
+|当前腾讯 CRM|`124.220.53.183`；本机权威项目 `/Users/qianlan/Downloads/新CRM/main`|迁移线程范围为前置准备；本候选使用国内 v4 源码，不读取其他审查 worktree|
+|火山 CRM 演练|`115.190.113.5`|准备副本及独立演练，未切流，也不是持续更新的生产镜像|
+|数仓/上下文中心|`115.190.115.55:/opt/daru-v3-warehouse-candidate`|已复用用户本机授权会话只读验证；部署目录无 `.git`；活动 unit `daru-v3-warehouse-candidate.service`，用户 `daru-ops`，Python API 仅监听 `127.0.0.1:8797`，既有 Nginx HTTPS `https://agent.lhbl.com.cn`|
+|旧话术 Agent|`122.152.209.11:/opt/daru-ops-console`，实际登录账号 `ubuntu`|已只读核验源码；部署目录无 `.git`；包 `daru-ops-console v0.4.4`；活动 unit `daru-ops-console.service`，用户 `daru-ops`|
 
-现网域名及DNS可以留在腾讯；CRM正式切流的接入备案/白名单等是另一任务。侧栏消费现有数仓无需等待整体迁云。火山RDS没有公网，仅私网，用户确认两台火山机器均可直连；这是最新口述，尚无本任务连接实测。腾讯现网不得公网直连该库：侧栏应由腾讯CRM服务端调用55受保护HTTPS服务，或复用已有且授权的网络路径。当前服务端跨云URL/TLS/鉴权/来源控制未核实，不新增数据库公网、隧道或防火墙权限。火山测试CRM↔数仓私网是独立验收环境，不等于腾讯生产路径可用。
+两台目标的实际会话均已验证，不再标为认证缺失。只读、隔离 staging 使用原有会话；没有读取、复制私钥、环境变量值或认证文件。旧服务器其他业务与黄小璨分身不属于整体迁移范围。
 
-当前数仓同步不是快速更新；上线前读回真实 synced_at，禁止把接口 read_at、文件修改时间或归档计划30秒当作最后成功同步。
+## 实际数据合同及依赖
 
-## 对话读取范围及冲突处理
+浏览器只访问 CRM 同源 GET `/api/sidebar/v2/ai-operations`、POST `/api/sidebar/v2/ai-operations/suggestions`。当前 HttpOnly 员工会话及既有 scoped context 提供 canonical `customers.id`、企业、员工；生成前后及读取结束重新核验主体。浏览器不能指定这些身份或原始正文。
 
-- 《规划腾讯云到火山引擎平滑迁移》精确ID：01a11e64-e0ad-7d93-a114-c5121379276b；本机 read_thread 成功返回8轮，nextCursor=null。已核对全部可访问用户/助手消息，includeOutputs=false，未读取命令执行输出；凭据内容不纳入资料。不能声称已读完整工具日志。本次恢复后重读8轮：最早turn 01a11e64-e8e7-7b40-9547-c8944897bdd2，最新turn 01a11f03-ab2e-7e00-95d9-6b6ffc11d09b，共取回12条userMessage、75条agentMessage；范围包含用户将目标改为“只做前置准备”的消息01a11e75-8cc1-7871-a0db-27e8e834b236及最新正式未迁移结论。nextCursor=null/hasMore=false是消息分页完整，不表示命令、工具日志或压缩前细节完整。
-- 最新明确用户范围为“只做所有前置准备”；最新助手结论为文档源码099337d已入国内、生产应用当时62d6ef5、正式迁移未执行。该应用版本是时点证据，已被工作台后续6b28130上线记录更新。未切流原因由迁移线程明确：用户主动收缩为前置准备；平台白名单保存读回/真实Provider验证、原备案有效状态与火山接入、现网新证书安装读回/续签仍未完成。
-- 《CRM v4 发布工作台 · 新流程》ID：01a0f85a-9de6-7701-a12a-9c774080389b；已读最近10轮（01a11e73…至01a12029…），更早页尚未读取。其最新结论：6b28130已上线，710788a固定海报候选通过预发但待另行生产授权。不要把预发710788a当已上线main。
-- 唯一入口从 /Users/qianlan/Downloads/新CRM/release-control/workstation.json 每次重新读取，不在新发布脚本固化ID；本任务读到上述工作台ID。父任务读取同线程有placement兼容错误，本任务本机工具成功读取，没有绕过拒绝路径。
-- 迁移准备目录：/Users/qianlan/Downloads/新CRM/migration/volcengine-production-20261009；只读了迁移前置准备清单，未打开private/operator-source或凭据文件。独立RDS恢复核对484表/325序列，认证读取及Excel13项合成测试通过；应用/Excel/HTTPS三个演练unit已停止且未启自启动，17项Provider开关关闭，没有新worker/timer，旧站继续变化。火山测试/演练副本不是持续同步的最终生产库，也不是实际全业务回归收据。
-- 10月7日扫描说明曾描述同机生成路径；当前用户明确区分55清洗与旧209.11生成。本任务未独立核验服务器，优先按最新用户说明安排，保留扫描为历史线索，不认定其当前有效。
+CRM Composition Root 已装配可选 HTTPS Reader 和 Generator，分别默认关闭。目标固定路径为 GET `/api/local/v3/sidebar-ai-operations`（`crm-sidebar-ai-operations.v1`）和 POST `/api/local/v3/sidebar-manual-generation`（`crm-sidebar-manual-generation.v1`）。既有 API 顶层认证及 admin/operator 判断不变；没有扩大 agent_read/agent_operator 的路径权限。双向正文仅在服务端传递；公开读响应只有清洗摘要、末句、真实水位和签名快照。
 
-## 精确消费合同
+真实生产消息导出目前缺少 `corp_scope`、`staff_provider_user_ids`、`participant_count`、`sender_actor_type`。候选增加这些来源字段和 `crm-private-message-scope.v1`，保留原列和原行。Reader 必须验证企业、唯一当前员工、双人私聊、发送方角色，再取最多40条双向文本并保留最后客户消息；群聊、其他销售、未解析或歧义范围不可冒用。
 
-CRM新增同源GET /api/sidebar/v2/ai-operations 与POST /api/sidebar/v2/ai-operations/suggestions。
-后端侧栏Config提供AIWarehouseReader与AISuggestionGenerator可选Port；生产Composition Root尚未装配，GET诚实返回unconfigured，生成禁用。隔离测试装配合成端口。新增HTML/JS真实由webshell静态资源输出，不修改旧timeline路由或表。
+55 的 `ops/export-crm-production-read-facts.py` 在 bridge 模式只调用远端固定命令 `crm-production-read-facts.v1`，实际 SQL 在 CRM 端执行。**仅改 55 文件不会更新腾讯固定导出器。** 腾讯固定入口实际文件/安装账号尚未核验，不能凭 bridge 标签推断它一定已指向 `124.220.53.183`。`DARU_CRM_READ_SSH_HOST` 等只核对名称，未读取值。
 
-生产实际入口优先为构建后的web/dist/sidebar/index.html。共享AI模块已接入标准overlay生成器，Host提供仅返回bool的当前联系人校验；冻结dd8源字节未改。内置模板也使用同一模块，但最早的备用页面截图不作为生产入口验收。标准构建与标准Host合成旅程已通过，真实Adapter仍未装配。
+最新成功发布的数据是 `/releases/data/20261009T011758Z-archive-refresh`：CRM `source_as_of=2026-10-09T09:15:27.087634+08:00`，归档生成 `2026-10-09T01:16:21.065Z`。最近 refresh 失败于 `hxc-sync.py`，未发布/清洗；旧脚本未保存有效失败阶段，历史根因未知。候选仅为今后失败增加脱敏原因码，不把该修复冒称为已查明历史原因。既有管道支持仅 `--refresh-crm`，可以保留旧 HXC 水位；本任务没有运行它。
 
-AIWarehouseReader必须从55既有标准路径返回：canonical CustomerID、CorpID、当前EmployeeID、SourceVersion、Summary、SummaryUpdatedAt、SyncedAt、同一私聊双向Messages（最多40，角色customer/sales）、LastCustomerMessage。customer.id来自CRM既有scoped context；不得用昵称/手机号猜测数仓身份，不得混入其他销售/客户消息。缺失或歧义必须明确失败；摘要/文本不足禁用生成。非文本末句仅标注类型，不伪造转写。
+腾讯 CRM 可通过 55 现有受保护 HTTPS 消费投影，架构上无需等待整体迁云。实际腾讯→55 认证请求、TLS/权限、更新后的生产范围字段仍需核验；不开放私网 RDS、不新增隧道/防火墙权限。接口读取时间不是同步水位。
 
-读取响应显示摘要、末句与真实同步时间，双向私聊正文仅留后端。签名快照5分钟有效，与企业/员工/客户/源版本/摘要/全部消息绑定。POST只接受snapshot_token与confirmed，拒绝浏览器自带身份/正文，生成前后重新读取源并比较。Generator接收冻结双向输入及稳定IdempotencyKey，须复用旧Agent的幂等收据或现有内部任务设施，不新增CRM队列；同一key的超时/重试必须复用任务/结果，不能重复模型调用。CRM不自动重试，45秒超时返回generation_outcome_unknown，页面55秒兜底。
+## 真实 Agent 迁入材料
 
-历史接口线索（尚无当前请求/响应合同）：/api/local/agent/user-context、/api/local/v3/user-source-records、/api/local/sync-runs、/api/local/copy/generate。来源为上下文中心/artifacts/生产环境能力扫描-20261007/接口能力清单.csv，均source_inventory_only。不得据此直接开放公网、抄写鉴权或编造响应字段。真实适配应先读取其现有代码和脱敏schema，再把标准路径转换为上述Port。浏览器不能直接访问55、数据库或模型密钥。
+已从旧 Agent 校验22个纯提示词/解析/质量函数及常量的来源 SHA，记录在 `integrations/context-center/sidebar/native-migration-manifest.json`。没有复制旧环境、CLI 授权、客户语料、SQLite、批量 worker 或恢复队列。55 已有较新的 `prompt_runtime.py`、`copy_engine_v2.py`、`prompt_asset_versions.py`；候选沿它的 `sales_assist` 资源合同映射已核验快照和 provenance，历史清洗摘要保持历史参考属性。
 
-## 最短实施顺序
+模型路径只使用原有 Ark/Kimi API 协议单次调用，不调用 CLI、自动重试、兜底模型或企微发送。实际提供方及凭据是否装配尚未读取/验证。手动请求先在既有私有 COPY_CACHE_DIR 排他、落盘 claim，超时/中断保持 `outcome_unknown`；同 key 不再调用，完成后复用结果；不复用旧批量任务的自动恢复逻辑。
 
-1. 本机安全SSH交接后只读55当前标准接口/字段/身份映射/同步水位/鉴权边界，补实际Adapter和Composition Root装配。先在隔离合成合同中验证，再从指定测试客户只读核对。侧栏通过既有工作台发布，先展示当前数仓基础信息/末句，生成若未就绪继续明确禁用。
-2. 只读209.11现有Agent代码、依赖锁、模型调用、提示词/策略/语料路径、定时任务、接口/幂等/任务存储，记录文件SHA和版本。只记录环境变量名字、权限与文件路径，禁止读取/复制.env、私钥、密码或真实聊天正文进入交接材料。当前这些清单均未取得，不编造新Agent替代。
-3. 在55独立候选目录迁入已核验代码/非敏感依赖，切换读取为55标准数仓路径。明确语料迁移范围及凭据安全供给后执行对应传输；不开周期任务、不停旧服务、不改流量。合成双向对话验证输出、重复请求、超时恢复和不同客户隔离；再由既有发布/运维入口完成经授权的真实验证。
-4. 工作台使用原队列/锁/attempt累计最终源码，只构建/预发一次，按本候选短清单做相关验收，同包晋级并独立读回。CRM迁云、DNS、白名单、正式数据切换保持原迁移任务范围，不混入本批。
+55 最终隔离候选：`/opt/daru-v3-warehouse-candidate/candidates/sidebar-ai-manual-20261010-47ff24367bfe`。bundle SHA256 `47ff24367bfeaf0a7c9d92baa6335c20f39c8b07d6c030e7cf9b6ace16ee107d`，构建及 Linux 合成检查见 `integrations/context-center/sidebar/candidate-stage-receipt.json`。该目录不是活动安装，也不是真实生成收据。
 
-## Agent非敏感部署材料状态
+## 执行前的三项具体计划
 
-|材料|状态/取证要求|
-|---|---|
-|源代码、提交/文件SHA、依赖锁|blocked_auth；从209.11限定目录获取，不能猜版本|
-|提示词、策略、产品/用户语料|blocked_auth；确认真实路径/版本/权限，敏感正文不进入报告|
-|标准数仓读取合同|blocked_auth；从55获取脱敏字段/身份/时间水位合同|
-|模型提供方/环境变量名|blocked_auth；仅名称与所需权限，值由操作者安全供给|
-|服务启动命令/运行账号/定时任务|blocked_auth；核对既有实际机制，未取得前不生成可执行安装unit|
-|配置模板|只列目标55、禁用周期/外发、标准Reader适配与幂等要求；无伪造URL/密钥|
-|切换/回滚|先保留源服务；目标候选隔离验证；切换仅绑定经过核验的55接口与构件。失败回退CRM上一完整构件及目标原配置；不删除源/数据，不盲目重试未知模型任务|
+### 1. 腾讯固定只读导出器
 
-真正剩余阻塞：可用的本机授权SSH身份/登录途径；55当前合同；209.11实际源码和依赖。用户已明确两块优先级、目标机和工作台，无需重复业务审批。后续问题由父任务统一沟通。
+先由既有发布/运维入口核实固定命令确实绑定腾讯主机、root-owned 文件及实际安装路径；该路径尚不明确，不猜测，不读 authorized_keys、私钥或环境值。比较准确源码与候选 SQL 后，只更新现有固定导出器的 SQL/版本校验，不改入口授权、数据库表、任务或 timer。每次固定命令启动 Python，预计无需 CRM 应用重启；若实际入口的打包方式不同，应由工作台补充影响。
 
-本机验证收据：internal/sidebar全包；cmd/aicrm当前Cookie/在职企微员工用例；webshell侧栏页面/资源用例；10项状态机合同和3项标准Host/overlay合同；标准overlay合同；源码视图机械展开后前端build及V3 Host构建通过。当前Node24.21.0/npm11.19.0与锁定工具链24.18.0/11.12.1不同，这只证明本机候选构建，不冒充工作台发布构建。隔离PostgreSQL16.13 Chromium安装旅程现已通过（17.515秒，无跳过），13项前端相关回归通过。此前没有建立本任务隔离数据库或给该旅程设置loopback AICRM_DATABASE_URL，未核实已有服务，不能归因于已确认的软件缺失或单纯离线。恢复连接后创建独立临时库，修正测试的联系人核对次数断言及HTTP method收据字段，再验证通过；临时实例已停止。工作台生产安装与真实Reader/Generator仍需另行验收。完整webshell测试早期有缺失构建资源/依赖失败，未声称全包通过。design-qa最终blocked，原因及截图分类见根文件。
+更新只读事务增加4项来源字段与版本标记，读取后 ROLLBACK；不写业务表。随后如获准仅执行一次既有 CRM-only refresh，保留 HXC 水位并由原发布机制激活投影。它会重读生产快照及更新数仓发布数据，不能算本次已完成。回退保留旧固定导出器源码和上一已发布数仓版本，沿原机制恢复；不删除生成 claim，不把旧数据标成新同步。
 
-最小安全登录步骤：操作者在自己的终端用已有授权SSH身份连接密钥机，并只提供实际Host别名/账号；密码机由操作者在本机安全流程完成登录/授权现有身份，勿在对话贴凭据。本任务不下载或使用私钥附件，不再传输或重试密码，不接受新Host Key，不创建持久凭据。已有身份可用后先只读探测服务/仓库，再读取限定代码与脱敏合同。
+### 2. 55 安装候选
 
-## 工作台交接边界
+安装前再比对活动3文件 SHA：exporter `972b5abe…`、local API `11884412…`、archive refresh `db292b5a…`；任一变化需重基和验证。候选替换这3个 `ops` 文件，并增加 `sidebar_ai_reader.py`、`refresh_diagnostics.py`、`sidebar_native_copy.py`、`sidebar_manual_generation.py`，复用已核验55 native runtime。不建服务、timer、队列或数据库迁移。
 
-先本地精确提交与隔离证据；当前真实适配缺失，标记integration_not_ready，不请求安装一个仅显示未接通的生产替换页。若父任务后续授权推送/交接，准确国内ref推送后重新读路由，再实际投递base/head/tree/ref、五项影响、测试收据、未验证项及用户当前工作台授权；不旁路安装、不新建发布通道。本轮未推送、未消息投递工作台。
+新路由加载需要重启既有 `daru-v3-warehouse-candidate.service`。已核实其 `main` 会调用 `resume_agent_ops_workers_after_restart`、`resume_copy_batch_workers_after_restart`，可能恢复原有待处理工作；本任务没有读任务数据，也不能宣称重启只影响新接口。工作台/操作者应先核对现有任务和停机影响，再决定实际重启窗口。新手动生成器不参加这些恢复函数。
 
-## 10月10日恢复核查与拒绝分支修复
+回滚沿现有 owner 的文件/发布机制恢复原3文件和原运行配置，再重启同一 unit；保留所有手动 claim/结果收据。不得删除未知请求以获得“重试成功”。没有 PostgreSQL/SQLite schema 变更，无需数据库逆向迁移。
 
-恢复时本地候选为599559652b12869a4af4cce8bcc0c8e6c28a2ea1，工作树干净。本地主线21b06f7是6b28130的祖先，不能把本地main当国内最新游标；工作台正在独立处理三模块/海报发布，本任务不读取或修改其worktree、队列或锁。最终候选与测试绑定见仓外candidate-receipt.json。
+### 3. 既有账号与 API 配置安全装配
 
-两项缺陷已复现并修复：数仓读取期间员工被撤销/更换时，GET不再返回摘要，POST在进入模型前拒绝；适配器在请求取消后仍返回成功时，Reader拒绝该结果。新增2个具名用例覆盖8个子用例，修复后internal/sidebar全包46项（含子用例）及当前员工鉴权1项通过，0失败/跳过。仅改变sidebar后端拒绝分支；成功响应、UI、OneID解析、持久化、队列、企微发送及资金归属未变。此前前端/安装旅程是对应输入未变部分的复用证据，不冒充真实Adapter或本次生产安装。
+CRM 侧需现有保护 API 的 operator 账号、HTTPS origin 和分别启用 Reader/Generator 的开关；55 侧需 DARU 手动生成开关、既有 Ark/Kimi API 配置及现有私有 COPY_CACHE_DIR。完整变量名称在集成 README，无值。SSH 登录身份不能当成 API 账号；CLI 授权不能当成 API 凭据。
 
-本轮安全访问取证：agent可读取但没有加载身份，SSH配置无55/209.11的Host别名；现有两个SSH进程仅指向腾讯124.220.53.183，没有目标既有控制socket。本轮未对任一远端发起认证。用户已确认dot就是父对话并授权询问，桌面消息工具返回thread not found；由本任务最终回传交付父对话。两台目标已各有3条known_hosts记录，未读取任何私钥、密码或token。
+不创建账号/角色/新密钥，不扩大 agent 路径 allowlist，不改防火墙或 RDS。配置值由人通过原生终端或现有安全配置入口接管，工具/聊天不搬运、不读回。即使账号已存在，把 operator 凭据持久提供给新的 CRM 服务也可能扩大访问面；须明确其权限和是否有既有授权，涉及新持久权限/安全设置时取得本次批准。不能把已授权 SSH 会话等同于已批准该装配。
 
-安全接管可由当前执行器复用，已用本地合成OpenSSH mux完成check和命令通道验证；socket缺失时退出255，备用网络连接为/usr/bin/false，所有执行器认证方式均禁用。该证据不代表远端已认证。用户本人在原生终端建立30分钟ControlPersist会话，55用已知root，209.11用原成功登录账号和本机现有授权密钥；不猜root、不创建新密钥、不关闭主机校验、不改认证或防火墙。短期socket目录为/tmp/aicrm-ssh-handoff.dzu5dnmr，属本机uid501、0700；用户命令与复用脚本记录在/Users/qianlan/Documents/Codex/2026-10-09/task-2/ssh-handoff-plan.json和ssh-control-client.py。实际目标socket尚未建立，真实Reader/Generator、Agent源码/依赖迁移和腾讯生产链路仍未就绪。未推送、安装、切流或删除旧Agent。
+## 候选影响与验证边界
+
+OneID：读取现有 scoped customer，经已有数仓 CID/alias/fold lineage 转换；不猜昵称/电话，不建新主键或隐式客户。CRM 持久化：无新表/迁移/后台任务。远端手动生成的最小持久 claim 由 Context Center native owner 持有，只用于一次调用防重；没有任务重试框架。企微业务写、订单/裂变/分销/开票、资金归属不改。
+
+页面为实际标准 Host + overlay 的 AI运营“基础信息/辅助成交”。冻结 dd8 源字节未改；备用模板复用同一模块。共享 Host 变化要按主线映射验证真实消费者，不能用备用页截图替代。
+
+本地最终 fast、全仓测试编译、受影响 Go/JS/Host 检查由仓外最终收据绑定。55 Linux 收据证明合成投影、原子 claim、并发/重启/超时、实际 native v2 资源合同和 stub Provider，不能证明生产字段、真实模型或配置已接通。真实腾讯→55、活动安装和实际 Provider 输出必须单列验收。
+
+国内候选推送后重新读取 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json`，实际投递指定《CRM v4 发布工作台 · 新流程》，包含准确 base/head/tree/ref、五项影响、收据和以上启用边界。只交付本功能，沿原队列/锁/attempt；不自行安装共享 CRM 预发/生产。消息失败要记明，不把文件准备等同于投递成功。
