@@ -4,8 +4,7 @@
   "checks": [
     {
       "lane": "preflight",
-      "path": "scripts/test_domestic_release_lifecycle.py",
-      "test": "CheckLifecycleTest.test_completed_release_cleanup_removes_only_verified_build_copies"
+      "path": "scripts/test_release_build_copy_root_contract.py"
     }
   ],
   "installed_checks": [],
