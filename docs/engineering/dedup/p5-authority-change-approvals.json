@@ -2193,6 +2193,28 @@
       ],
       "reason": "User-authorized commerce audit: correct demonstrated checkout DTO/schema mismatch; synchronize only the active OpenAPI contract, preserving all frozen donors. Local candidate only; no deployment approval.",
       "review_reference": "docs/prd/2026-10-04-commerce-adversarial-audit.md; delegated source thread 01a0f20a-12d2-7078-934f-baf57f0e101d; checkout-contract-before/after evidence"
+    },
+    {
+      "base_commit": "4f25bc1e27d3a85995cf164c35a35d8a8333a0c5",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "c2ffdb3f12d4077ef3a86e8dd63b7a5f97e59c6a910853c53896f50cf60b3f22",
+          "head_sha256": "b1f0b81b220dc321e09d4be0633c18938a2ac7a86d1ca98abe7421a2de2012fe"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "97c3e72bb6e54b765bfa707accb88b850c16e4ba82b550996957c1608bd8e6d1",
+          "head_sha256": "7bdcd91d70e3b47fa9bf9aff3174a763f24810daf3d46ff35a92f98e63f37cfd"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "aa3f0094b095c7fcf6d9c563525106e6a6712df2ed43ebb7efe8f1ff4015119f",
+          "head_sha256": "ee6ee8b2aa0e5352aa1759fdba57cb44a195fac8bce893ab766e3ce471dc58e4"
+        }
+      ],
+      "reason": "Review the already-authorized sidebar AI public summary/manual generation routes against the current domestic V4 baseline; preserve frozen sources and all existing active API contracts. Exact contract binding only; no runtime, credential or production activation authorization.",
+      "review_reference": "docs/prd/2026-10-09-sidebar-ai-operations.md; internal/sidebar/handler.go and ai_operations.go route/schema review; restored execution for original task 01a12136-1d2f-7186-9b90-62a976bc40bd; exact V4 API source commit 2aafe8ce328802ae7e2c040cafa5e44c8957b3f5"
     }
   ]
 }
