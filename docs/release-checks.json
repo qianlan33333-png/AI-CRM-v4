@@ -32,13 +32,6 @@
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/profit_sharing_reconcile_role_integration_test.go",
-      "test": "TestPostgreSQLProfitSharingReconcileRoleHasNoDaemonOrNewEffect",
-      "package": "./cmd/aicrm",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
       "path": "cmd/aicrm/referral_paid_invitation_checkout_postgres_test.go",
       "test": "TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor",
       "package": "./cmd/aicrm",

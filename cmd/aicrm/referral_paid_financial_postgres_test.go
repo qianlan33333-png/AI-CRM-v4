@@ -16,6 +16,7 @@ import (
 	identityquery "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/query"
 	orderdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
+	orderstore "github.com/qianlan33333-png/AI-CRM-v3/internal/order/store"
 	platformaudit "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/audit"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	platformoutbox "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/outbox"
@@ -143,15 +144,42 @@ func paidReferralFinancialJourney(t *testing.T, channel string) {
 	if err = f.pool.QueryRow(ctx, `SELECT r.external_effect_id,r.state,d.agreement_version,d.receiver_ready FROM payment_profit_sharing_receivers r JOIN distribution_distributors d ON d.customer_id=r.customer_id WHERE r.customer_id=$1`, f.buyer).Scan(&receiverEffect, &receiverState, &provenance, &prepared); err != nil || receiverEffect < 1 || receiverState != "accepted" || prepared || provenance != "paid_campaign_referral_v1" {
 		t.Fatal("automatic receiver preparation not atomically accepted", err)
 	}
+	orderRepository, err := orderstore.NewPostgreSQL(f.pool, f.uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayDue := &refundWorkerDue{}
+	commissionConsumer, err := distributionapp.NewCommissionService(f.distributions, replayDue, qualification)
+	if err != nil {
+		t.Fatal(err)
+	}
 	settle := func(order orderdomain.Snapshot, key string) {
 		t.Helper()
+		if e := f.uow.Within(ctx, func(tx context.Context) error {
+			_, e := f.orders.SettlePaymentWithin(tx, orderport.PaymentSettlementCommand{OrderID: order.ID, ProviderTransactionNo: "synthetic-" + key, OccurredAt: order.CreatedAt.Add(time.Millisecond), ReceiptKey: "paid-financial-" + key})
+			return e
+		}); e != nil {
+			t.Fatal(e)
+		}
+		// Replay the same authoritative first-paid fact, as callback handling
+		// does after its own receipt gate. SettlePayment itself is a transition
+		// command and correctly rejects a second paid transition.
 		for replay := 0; replay < 2; replay++ {
 			if e := f.uow.Within(ctx, func(tx context.Context) error {
-				_, e := f.orders.SettlePaymentWithin(tx, orderport.PaymentSettlementCommand{OrderID: order.ID, ProviderTransactionNo: "synthetic-" + key, OccurredAt: order.CreatedAt.Add(time.Millisecond), ReceiptKey: "paid-financial-" + key})
-				return e
+				fact, e := orderRepository.ReadPaidSaleBackfillFactWithin(tx, order.ID)
+				if e != nil {
+					return e
+				}
+				if e = commissionConsumer.ConsumePaidEventWithin(tx, fact.Paid); e != nil {
+					return e
+				}
+				return service.ConsumePaidEventWithin(tx, fact.Paid)
 			}); e != nil {
 				t.Fatal(e)
 			}
+		}
+		if len(replayDue.ids) != 0 {
+			t.Fatal("paid event replay enqueued another commission due job")
 		}
 		f.assertCommission(t, order.ID, 1)
 	}

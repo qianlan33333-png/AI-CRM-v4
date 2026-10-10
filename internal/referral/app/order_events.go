@@ -42,7 +42,12 @@ func (s *Service) ConsumePaidEventWithin(ctx context.Context, event orderport.Pa
 			if checkout.BuyerCustomerID != *event.Order.PayerCustomerID || checkout.BeneficiaryCustomerID != *event.Order.BeneficiaryCustomerID {
 				return referralport.ErrConflict
 			}
-			if err = s.validateFinancialInvitationCheckoutWithin(ctx, checkout, event.Order.ProfitSharingRequired); err != nil {
+			// Order's paid event carries the persisted Order aggregate projection,
+			// which does not include its separate immutable checkout snapshot. For
+			// this Referral-owned invitation, its frozen financial facts determine
+			// whether a Distribution attribution must exist and are checked below.
+			hasFinancialSnapshot := checkout.PolicyVersion != 0 || checkout.CommissionRateBasisPoints != 0 || checkout.WaitDays != 0
+			if err = s.validateFinancialInvitationCheckoutWithin(ctx, checkout, hasFinancialSnapshot); err != nil {
 				return err
 			}
 			var amount int64
