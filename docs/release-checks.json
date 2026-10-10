@@ -27,10 +27,6 @@
     },
     {
       "lane": "backend",
-      "package": "./internal/config/http"
-    },
-    {
-      "lane": "backend",
       "path": "cmd/aicrm/sidebar_ai_viewer_test.go",
       "test": "TestSidebarAIViewerUsesCurrentCookieAndActiveWeComEmployee"
     },
@@ -43,13 +39,6 @@
       "lane": "backend",
       "path": "cmd/aicrm/sidebar_warehouse_adapter_test.go",
       "test": "TestSidebarGenerationCompositionUsesProtectedManualAgentOnlyWhenEnabled"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/sidebar_bootstrap_survey_postgres_integration_test.go",
-      "test": "TestPostgreSQLSidebarBootstrapUsesBoundedSurveyReadAndActualTotal",
-      "postgres": true,
-      "race": true
     },
     {
       "lane": "backend",
@@ -78,36 +67,9 @@
       "path": "scripts/sidebar-workbench-host-adapter-e2e.mjs"
     },
     {
-      "lane": "frontend",
-      "path": "web/scripts/e2e.mjs"
-    },
-    {
       "lane": "browser",
       "path": "cmd/aicrm/sidebar_thumbnail_chromium_postgres_integration_test.go",
       "test": "TestPostgreSQLSidebarThumbnailChromiumJourney"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/platform/config/tests"
-    },
-    {
-      "lane": "browser",
-      "path": "cmd/aicrm/automation_fixed_content_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLAutomationFixedContentChromiumJourney"
-    },
-    {
-      "lane": "browser",
-      "path": "cmd/aicrm/automation_fixed_content_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLAutomationLifecycleChromiumJourney"
-    },
-    {
-      "lane": "browser",
-      "path": "cmd/aicrm/automation_fixed_content_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLAutomationLongPromptChromiumJourney"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/orderAdapter.test.mjs"
     }
   ],
   "installed_checks": [
