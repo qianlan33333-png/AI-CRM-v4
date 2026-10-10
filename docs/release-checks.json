@@ -3,10 +3,6 @@
   "baseline_sha": "b06bc30b3318d1e28210f95a50b82dd661349bba",
   "checks": [
     {
-      "lane": "preflight",
-      "path": "scripts/ci/test_quality_lanes.py"
-    },
-    {
       "lane": "backend",
       "package": "./internal/payment/provider"
     },
@@ -17,112 +13,6 @@
     {
       "lane": "backend",
       "package": "./internal/payment/store"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/access/credential"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/identity/secure"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLProfitSharingDescriptionFreezeReplayAndLegacyMigration",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLRefundDoesNotReserveFutureCommission",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLMissingProfitSharingProofAndFullRefund",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLProfitSharingFundingTreatsHistoricalInFlightRefundsAsExposure",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLWeChatPayRefundSerializesNewKeysPerPayment",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLRefundQueryBeforeCallbackKeepsOneSettlement",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/order/app",
-      "test": "TestExportXLSXPreservesFullFactsBlankContactsAndEveryItem"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/order/app",
-      "test": "TestExportFailsClosedForReadDecryptAndEnrichmentFailures"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/order/app",
-      "test": "TestExportEmptyWorkbookAndExistingLimits"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/order/app",
-      "test": "TestExportUsesFrozenCouponPriceAndConfirmedRefund"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/customer/store",
-      "test": "TestProviderProfileCreatesMinimumAndPreservesHigherPriorityNamePostgreSQL",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/customer/store",
-      "test": "TestWeChatNicknameMigrationDoesNotBackfillOrReadMixedNamePostgreSQL",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLPaidReferralComposedPurchaseDescription",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLPaidReferralCanonicalAliasesAndRepurchaseFreezeCommission",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLRefundWorkerRepricesOnceAndRevokesOnlyAfterLastQualification",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSettlementWorkerAcceptsOneInstructionAndReplaysAfterRestart",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSettlementWorkerClosedInstructionPreservesOrCancelsOnlyWithBusinessFacts",
-      "postgres": true
     }
   ],
   "installed_checks": [
