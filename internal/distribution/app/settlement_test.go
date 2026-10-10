@@ -482,7 +482,7 @@ func settlementFixture(t *testing.T, now time.Time) (*settlementStoreStub, *sett
 	commission.ID = 41
 	store := &settlementStoreStub{context: distributionstore.SettlementContext{Commission: commission, Attribution: attribution, ProductID: 77, ProductType: distributiondomain.ProductTypeStandard}, distributor: distributiondomain.Distributor{ID: 8, CustomerID: 9, PublicNo: "D123456", AgreementVersion: "v1", Enabled: true, RegisteredAt: now.Add(-time.Hour), Version: 1}, receiver: distributionport.ReceiverReadiness{Ready: true, AppID: "app-1", Reference: "receiver_1", CheckedAt: now}}
 	payment := &settlementPaymentStub{state: paymentport.DistributionPaymentState{OriginalPaymentRef: "payref_17", ConfirmedPaid: true, ConfirmedPaidAt: now.Add(-time.Hour), SplitCapable: true, DeadlineAt: now.Add(48 * time.Hour), OriginalMinor: 1000, AvailableMinor: 1000}, instruction: paymentport.ProfitSharingInstruction{Reference: "psinst_1", SettlementRef: "dstl_commission_41", OriginalPaymentRef: "payref_17", AmountMinor: 100, Currency: "CNY", EffectRef: "eer_1", DeadlineAt: now.Add(48 * time.Hour), UpdatedAt: now}, unfreeze: paymentport.ProfitSharingUnfreeze{Reference: "psunfreeze_1", State: "succeeded", OutcomeKnown: true, UpdatedAt: now}}
-	qualification, err := NewQualificationService(lineageStub{roots: []customerdomain.CustomerID{9}}, qualificationOrderStub{evidence: []orderport.QualificationPurchaseEvidence{{OrderID: 3, OrderItemLine: 1, ProductID: 77, PayerCustomerID: 9, BeneficiaryCustomerID: 9, ItemPaidMinor: 1000, PaymentConfirmedAt: now.Add(-time.Hour), RecordOrigin: "native"}}}, payment)
+	qualification, err := NewQualificationService(lineageStub{roots: []customerdomain.CustomerID{9}}, settlementOrderEvidenceStub{qualificationOrderStub: qualificationOrderStub{evidence: []orderport.QualificationPurchaseEvidence{{OrderID: 3, OrderItemLine: 1, ProductID: 77, PayerCustomerID: 9, BeneficiaryCustomerID: 9, ItemPaidMinor: 1000, PaymentConfirmedAt: now.Add(-time.Hour), RecordOrigin: "native"}}}}, payment)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,3 +497,47 @@ func settlementFixture(t *testing.T, now time.Time) (*settlementStoreStub, *sett
 
 var _ paymentport.DistributionSettlementPort = (*settlementPaymentStub)(nil)
 var _ settlementStore = (*settlementStoreStub)(nil)
+
+type settlementOrderEvidenceStub struct {
+	qualificationOrderStub
+	payer, beneficiary int64
+	missing            bool
+}
+
+func (s settlementOrderEvidenceStub) ListQualificationRefundEvidenceByOrderWithin(_ context.Context, id int64) ([]orderport.QualificationRefundEvidence, error) {
+	if s.missing {
+		return nil, nil
+	}
+	payer, beneficiary := s.payer, s.beneficiary
+	if payer == 0 {
+		payer = 10
+	}
+	if beneficiary == 0 {
+		beneficiary = 10
+	}
+	return []orderport.QualificationRefundEvidence{{OrderID: id, OrderItemLine: 1, ProductID: 77, ProductType: "standard_product", PayerCustomerID: payer, BeneficiaryCustomerID: beneficiary, ItemPaidMinor: 1000, PaymentConfirmedAt: time.Unix(1, 0).UTC(), RecordOrigin: "native"}}, nil
+}
+func TestCommissionDueBlocksCurrentMergedSelfAndMissingBuyerEvidence(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		payer, beneficiary int64
+		missing            bool
+		reason             string
+	}{
+		{"payer_merged", 9, 10, false, "self_purchase_current_identity"},
+		{"beneficiary_merged", 10, 9, false, "self_purchase_current_identity"},
+		{"missing", 10, 10, true, "buyer_identity_unavailable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			now := time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)
+			store, payment, service := settlementFixture(t, now)
+			original := service.qualification.orders.(settlementOrderEvidenceStub)
+			original.payer, original.beneficiary, original.missing = test.payer, test.beneficiary, test.missing
+			service.qualification.orders = original
+			_ = service.RunCommissionDueCheck(context.Background(), 41)
+			if payment.accepted.SettlementRef != "" || store.settlement.ID != 0 || store.context.Commission.Status != distributiondomain.CommissionHeld || store.context.Commission.HoldReason != test.reason {
+				t.Fatalf("unexpected financial acceptance or hold: %+v %+v", payment.accepted, store.context.Commission)
+			}
+		})
+	}
+}

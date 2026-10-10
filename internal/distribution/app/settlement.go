@@ -171,6 +171,13 @@ func (s *SettlementService) prepareSettlement(ctx context.Context, commissionID 
 			}
 			return s.auditWithin(tx, "distribution.commission_cancelled.v1", "commission", commission.ID, "worker:distribution-due", map[string]any{"reason": "qualification_revoked"}, now)
 		}
+		distinct, distinctErr := s.qualification.BuyerDistinctWithin(tx, distributor.CustomerID, commission.OrderID, commission.OrderItemLine, value.ProductID, value.ProductType)
+		if distinctErr != nil {
+			return s.holdWithin(tx, commission, "buyer_identity_unavailable", now)
+		}
+		if !distinct {
+			return s.holdWithin(tx, commission, "self_purchase_current_identity", now)
+		}
 		// Qualification locks OneID and qualifying payments first. Re-read and
 		// lock the buyer funding facts in this same transaction before pricing
 		// or accepting an instruction; an outside snapshot cannot authorize it.
