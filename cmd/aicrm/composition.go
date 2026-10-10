@@ -1817,6 +1817,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		if err = referralAdminService.BindCampaignCloseUnitOfWork(referralCloseUoW); err != nil {
 			return fail(err)
 		}
+		if err = referralService.BindIdentityReportingUnitOfWork(referralCloseUoW); err != nil {
+			return fail(err)
+		}
 		referralPosters, err = referralapp.NewPosterService(uow, referralRepository, referralPosterMediaReader{media: mediaService}, auditService, platformoutbox.NewPostgreSQL())
 		if err != nil {
 			return fail(err)

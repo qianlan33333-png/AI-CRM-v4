@@ -76,6 +76,13 @@
       "package": "./cmd/aicrm",
       "test": "TestPostgreSQLReferralCompositionDoesNotRequireDistributionPaymentCapability",
       "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLMyInvitesCanonicalBatchesShareIdentitySnapshot",
+      "postgres": true,
+      "race": true
     }
   ],
   "installed_checks": [

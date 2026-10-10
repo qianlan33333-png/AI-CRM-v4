@@ -90,3 +90,9 @@ OneID：涉及 canonical customer、可信渠道身份、合并前后主体和�
 新增独立期望模型覆盖 605 笔合成订单、跨 OneID 输入批次、两队、别名买家/邀请人、部分全额退款、当前自购、三个指标及旧 `sales`、日周总及旧 `all`、翻页和缺根拒绝。真实 OneID merge/撤销、可信会话与不可变历史断言仍由 Composition 旅程证明，不用 fixture map 冒充真实身份合并。
 
 四个 fuzz target 各运行 30 秒、2 workers；这些是有限覆盖引导测试，不能证明穷尽全部输入。无 Provider 真实资金写入；生产既有选中订单在部署前后读取并比较。真实新单微信备注、用户端实际海报长按保存及微信扫码仍属于现场业务观察，不由合成浏览器代替。
+
+## 发布复核补充：我的邀请明细快照
+
+唯一工作台复核指出 `ListMyInvites` 的身份批次与邀请事实仍使用默认 Read Committed。新增真实双连接 PG 复现：605 条同一买家历史别名的冻结事实，Identity Port 第一批读取后，另一连接提交合并为邀请人的根；原实现只保留第一批 499 条（339320 分），而同一读取快照应为全部 605 条（411400 分），下一独立快照才全部排除为自购。测试 Adapter 明确模拟 Identity Port 的 PG 版本标记，不冒充真实 OneID；真实可信会话与 `FOR SHARE` 仍由 Composition genuine merge/OAuth 旅程验证。
+
+`MyCampaign` 的身份/参与状态和 `ListMyInvites` 复用已新增的可写 Repeatable Read UoW：允许可信身份校验的 `FOR SHARE`，在一份读取快照中解析所有批次和邀请事实。只读榜单仍用原 read-only RR，封榜仍同事务写快照与收据，不增加队列或身份主键。原四个未发布候选按原队首顺序重提修复后的累计成员；授权继承，生产保持原版本直到相关验证完成。

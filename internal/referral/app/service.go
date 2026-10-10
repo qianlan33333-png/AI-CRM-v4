@@ -182,6 +182,7 @@ type Service struct {
 	timeline              platformaudit.TimelineReader
 	subjects              trustedReferralSubjects
 	reportingUow          platformport.UnitOfWork
+	identityReportingUow  platformport.UnitOfWork
 	now                   func() time.Time
 }
 
@@ -218,6 +219,23 @@ func (s *Service) BindReportingUnitOfWork(uow platformport.UnitOfWork) error {
 func (s *Service) reportingUnitOfWork() platformport.UnitOfWork {
 	if s.reportingUow != nil {
 		return s.reportingUow
+	}
+	return s.uow
+}
+
+// VerifiedIdentitySubject needs FOR SHARE. Its reporting snapshot therefore
+// uses a writable Repeatable Read transaction, although this path only reads.
+func (s *Service) BindIdentityReportingUnitOfWork(uow platformport.UnitOfWork) error {
+	if s == nil || uow == nil || s.identityReportingUow != nil {
+		return referralport.ErrUnavailable
+	}
+	s.identityReportingUow = uow
+	return nil
+}
+
+func (s *Service) identityReportingUnitOfWork() platformport.UnitOfWork {
+	if s.identityReportingUow != nil {
+		return s.identityReportingUow
 	}
 	return s.uow
 }
@@ -693,7 +711,7 @@ func (s *Service) MyCampaign(ctx context.Context, actor referralport.TrustedSess
 	var relationship referraldomain.Relationship
 	var captainTeam referraldomain.Team
 	var hasParticipation, hasRelationship, assignedCaptain bool
-	err := s.uow.Within(ctx, func(tx context.Context) error {
+	err := s.identityReportingUnitOfWork().Within(ctx, func(tx context.Context) error {
 		lineage, err := s.actorLineageWithin(tx, actor, false)
 		if err != nil {
 			return err
@@ -790,7 +808,7 @@ func (s *Service) ListMyInvites(ctx context.Context, actor referralport.TrustedS
 		return referralport.InvitePage{}, err
 	}
 	var values []referralport.InviteItem
-	err = s.uow.Within(ctx, func(tx context.Context) error {
+	err = s.identityReportingUnitOfWork().Within(ctx, func(tx context.Context) error {
 		lineage, err := s.actorLineageWithin(tx, actor, false)
 		if err != nil {
 			return err
