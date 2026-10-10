@@ -14,6 +14,8 @@ flowchart LR
 
 清单从23项缩为15项：保留3个Context Center Python合同、Sidebar小包race、默认关闭配置、当前员工认证、Reader/Generator装配、侧栏模板与CSP、OpenAPI、两个侧栏UI合同、Host adapter以及一个真实Sidebar Chromium。去掉未改动的HTTP配置包、问卷Bootstrap、订单和全站DOM、三个Automation Chromium及独立测试配置helper包；其编译由已保留的直接消费者完成。允许这些无关旅程漏测风险，不称完整回归。
 
-`TestPostgreSQLSidebarAIOperationsInstalled` 使用安装二进制，Source仅种入隔离fixture及读取最终数据库事实。验收本人当前员工会话得到 `unconfigured`，没有摘要/快照/生成可用；匿名、无当前Cookie、跨员工、撤销员工、查询注入、原始对话注入、未确认及伪造快照均拒绝；零effects/发送intent、仅API进程。所需安装输入缺失不能计入发布通过。
+`TestPostgreSQLSidebarAIOperationsInstalled` 使用安装二进制，Source仅种入隔离fixture及读取最终数据库事实。验收本人当前员工会话得到 `unconfigured`，没有摘要/快照/生成可用；匿名、无当前Cookie、跨员工、撤销员工会话、查询注入、原始对话注入、未确认及伪造快照均拒绝；零effects/发送intent、仅API进程。所需安装输入缺失不能计入发布通过。
 
 实际共享预发和生产另读标准Host/overlay字节、ready版本、开关关闭和匿名401；该证据不证明55接通或模型生成成功。远端exporter、55部署与认证/真实模型保持原handoff的未完成边界，不重启远端Agent服务。
+
+安装包验证夹具修复：初次尝试撤销唯一治理管理员的 active 状态被现有数据库保护拒绝。改为通过 Access 会话版本撤销已发行会话，保留原401断言，不关闭或删除治理Owner；业务运行时不变，原失败日志保留。仅重跑这个安装包用例，源码补丁发布只需当前员工认证用例及编译，不重新构建安装。

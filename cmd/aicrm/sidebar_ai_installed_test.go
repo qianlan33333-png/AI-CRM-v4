@@ -156,7 +156,9 @@ func TestPostgreSQLSidebarAIOperationsInstalled(t *testing.T) {
 	if code, _ := call("GET", "/api/sidebar/v2/ai-operations", "", otherToken, true); code != 401 {
 		t.Fatalf("cross employee status=%d", code)
 	}
-	if _, err = application.pool.Native().Exec(ctx, `UPDATE admin_users SET is_active=false WHERE id=1`); err != nil {
+	// Revoke the session without disabling the governance owner. The current
+	// employee still exists, but an earlier issued session must cease to work.
+	if _, err = application.pool.Native().Exec(ctx, `UPDATE admin_users SET session_version=session_version+1 WHERE id=1`); err != nil {
 		t.Fatal(err)
 	}
 	if code, _ := call("GET", "/api/sidebar/v2/ai-operations", "", token, true); code != 401 {
