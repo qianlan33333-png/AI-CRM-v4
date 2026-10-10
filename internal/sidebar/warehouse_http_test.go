@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -19,9 +20,9 @@ func warehouseFixture() map[string]any {
 }
 
 func TestWarehouseReaderBindsServerScopeAndKeepsDialoguePrivate(t *testing.T) {
-	requests := 0
+	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
+		requests.Add(1)
 		u, p, ok := r.BasicAuth()
 		if !ok || u != "fixture-operator" || p != "fixture-only" || r.Method != "GET" || r.URL.Path != warehouseSidebarPath ||
 			r.URL.Query().Get("customer_id") != "42" || r.URL.Query().Get("corp_id") != "corp" || r.URL.Query().Get("employee_id") != "staff" || len(r.URL.Query()) != 3 {
@@ -36,7 +37,7 @@ func TestWarehouseReaderBindsServerScopeAndKeepsDialoguePrivate(t *testing.T) {
 	}
 	h := aiHandler(t, reader, nil)
 	w := aiCall(h, "GET", "/api/sidebar/v2/ai-operations", "", true)
-	if w.Code != 200 || requests != 1 || !strings.Contains(w.Body.String(), "两个晚上") || strings.Contains(w.Body.String(), "您每周可投入多久") || strings.Contains(w.Body.String(), `"messages"`) || strings.Contains(w.Body.String(), "fixture-only") {
+	if w.Code != 200 || requests.Load() != 1 || !strings.Contains(w.Body.String(), "两个晚上") || strings.Contains(w.Body.String(), "您每周可投入多久") || strings.Contains(w.Body.String(), `"messages"`) || strings.Contains(w.Body.String(), "fixture-only") {
 		t.Fatalf("dialogue or credential exposed / invalid response: %d", w.Code)
 	}
 }
@@ -102,12 +103,12 @@ func TestWarehouseReaderRejectsUnscopedAndUnpublishedResponses(t *testing.T) {
 }
 
 func TestWarehouseReaderNeverFollowsRedirectOrRetries(t *testing.T) {
-	redirected := 0
-	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { redirected++ }))
+	var redirected atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { redirected.Add(1) }))
 	defer target.Close()
-	requests := 0
+	var requests atomic.Int64
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
+		requests.Add(1)
 		http.Redirect(w, r, target.URL, http.StatusFound)
 	}))
 	defer source.Close()
@@ -115,12 +116,12 @@ func TestWarehouseReaderNeverFollowsRedirectOrRetries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = reader.ReadAIOperations(context.Background(), Principal{"corp", "staff"}, 42); err == nil || requests != 1 || redirected != 0 {
+	if _, err = reader.ReadAIOperations(context.Background(), Principal{"corp", "staff"}, 42); err == nil || requests.Load() != 1 || redirected.Load() != 0 {
 		t.Fatal("reader followed redirect or retried")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err = reader.ReadAIOperations(ctx, Principal{"corp", "staff"}, 42); err == nil || requests != 1 {
+	if _, err = reader.ReadAIOperations(ctx, Principal{"corp", "staff"}, 42); err == nil || requests.Load() != 1 {
 		t.Fatal("cancelled read reached service")
 	}
 }

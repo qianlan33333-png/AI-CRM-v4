@@ -3,9 +3,12 @@ package sidebar
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -15,7 +18,8 @@ func generationFixture() map[string]any {
 }
 
 func TestWarehouseGenerationSendsFrozenBilateralSnapshotWithStableKey(t *testing.T) {
-	reads, posts := 0, 0
+	var reads, posts atomic.Int64
+	var keyMu sync.Mutex
 	var firstKey string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, password, ok := r.BasicAuth()
@@ -23,14 +27,14 @@ func TestWarehouseGenerationSendsFrozenBilateralSnapshotWithStableKey(t *testing
 			t.Error("protected server credential missing")
 		}
 		if r.Method == http.MethodGet && r.URL.Path == warehouseSidebarPath {
-			reads++
+			reads.Add(1)
 			_ = json.NewEncoder(w).Encode(warehouseFixture())
 			return
 		}
 		if r.Method != http.MethodPost || r.URL.Path != warehouseGenerationPath || r.URL.RawQuery != "" || r.Header.Get("Content-Type") != "application/json" {
 			t.Error("invalid private generation request")
 		}
-		posts++
+		posts.Add(1)
 		var body struct {
 			Contract       string `json:"contract"`
 			IdempotencyKey string `json:"idempotency_key"`
@@ -51,11 +55,13 @@ func TestWarehouseGenerationSendsFrozenBilateralSnapshotWithStableKey(t *testing
 				t.Error("private dialogue changed in transit")
 			}
 		}
+		keyMu.Lock()
 		if firstKey == "" {
 			firstKey = body.IdempotencyKey
 		} else if firstKey != body.IdempotencyKey {
 			t.Error("token refresh changed idempotency key for the same content and employee")
 		}
+		keyMu.Unlock()
 		_ = json.NewEncoder(w).Encode(generationFixture())
 	}))
 	defer server.Close()
@@ -76,17 +82,17 @@ func TestWarehouseGenerationSendsFrozenBilateralSnapshotWithStableKey(t *testing
 			t.Fatalf("invalid draft or private input exposed: status=%d", result.Code)
 		}
 	}
-	if posts != 2 || reads != 6 {
-		t.Fatalf("unexpected HTTP actions: reads=%d posts=%d", reads, posts)
+	if posts.Load() != 2 || reads.Load() != 6 {
+		t.Fatalf("unexpected HTTP actions: reads=%d posts=%d", reads.Load(), posts.Load())
 	}
 }
 
 func TestWarehouseGenerationRejectsUnsafeRepliesWithoutRetry(t *testing.T) {
 	for _, field := range []string{"contract", "version", "send", "missing-send-flag", "empty", "too-large", "http-error", "non-json", "oversized-body"} {
 		t.Run(field, func(t *testing.T) {
-			calls := 0
+			var calls atomic.Int64
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls++
+				calls.Add(1)
 				if field == "http-error" {
 					w.WriteHeader(504)
 					_, _ = w.Write([]byte("private upstream error"))
@@ -120,7 +126,7 @@ func TestWarehouseGenerationRejectsUnsafeRepliesWithoutRetry(t *testing.T) {
 			defer server.Close()
 			g, _ := NewHTTPWarehouseGenerator(server.URL, "fixture-operator", "fixture-only", server.Client())
 			_, err := g.GenerateSidebarSuggestion(context.Background(), AISuggestionInput{Principal: Principal{"corp", "staff"}, Snapshot: aiFixture(), IdempotencyKey: "synthetic-key"})
-			if err == nil || strings.Contains(err.Error(), "private upstream") || calls != 1 {
+			if err == nil || strings.Contains(err.Error(), "private upstream") || calls.Load() != 1 {
 				t.Fatal("unsafe reply accepted, disclosed, or retried")
 			}
 		})
@@ -128,40 +134,41 @@ func TestWarehouseGenerationRejectsUnsafeRepliesWithoutRetry(t *testing.T) {
 }
 
 func TestWarehouseGenerationCancellationRedirectAndScopeNeverRepeatPost(t *testing.T) {
-	targetCalls, calls := 0, 0
-	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { targetCalls++ }))
+	var targetCalls, calls atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { targetCalls.Add(1) }))
 	defer target.Close()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
+		calls.Add(1)
 		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
 	}))
 	defer server.Close()
 	g, _ := NewHTTPWarehouseGenerator(server.URL, "fixture-operator", "fixture-only", server.Client())
 	in := AISuggestionInput{Principal: Principal{"corp", "staff"}, Snapshot: aiFixture(), IdempotencyKey: "synthetic-key"}
-	if _, err := g.GenerateSidebarSuggestion(context.Background(), in); err == nil || calls != 1 || targetCalls != 0 {
+	if _, err := g.GenerateSidebarSuggestion(context.Background(), in); err == nil || calls.Load() != 1 || targetCalls.Load() != 0 {
 		t.Fatal("redirect forwarded private content or retried")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := g.GenerateSidebarSuggestion(ctx, in); err == nil || calls != 1 {
+	if _, err := g.GenerateSidebarSuggestion(ctx, in); err == nil || calls.Load() != 1 {
 		t.Fatal("cancelled generation reached server")
 	}
 	in.Principal.EmployeeID = "other"
-	if _, err := g.GenerateSidebarSuggestion(context.Background(), in); err == nil || calls != 1 {
+	if _, err := g.GenerateSidebarSuggestion(context.Background(), in); err == nil || calls.Load() != 1 {
 		t.Fatal("invalid viewer scope reached server")
 	}
-	accepted := 0
+	var accepted atomic.Int64
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		accepted++
-		time.Sleep(30 * time.Millisecond)
-		_ = json.NewEncoder(w).Encode(generationFixture())
+		accepted.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		// Keep the request accepted until the real client deadline expires.
+		<-r.Context().Done()
 	}))
 	defer slow.Close()
 	client := slow.Client()
-	client.Timeout = 5 * time.Millisecond
+	client.Timeout = 2 * time.Second
 	g, _ = NewHTTPWarehouseGenerator(slow.URL, "fixture-operator", "fixture-only", client)
 	in.Principal.EmployeeID = "staff"
-	if _, err := g.GenerateSidebarSuggestion(context.Background(), in); err == nil || accepted != 1 {
+	if _, err := g.GenerateSidebarSuggestion(context.Background(), in); err == nil || accepted.Load() != 1 {
 		t.Fatal("accepted timed-out generation was retried")
 	}
 }

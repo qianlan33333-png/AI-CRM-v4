@@ -2968,6 +2968,34 @@ paths:
         "200": {description: Minimal OneID workbench, content: {application/json: {schema: {type: object, required: [customer_id, status], properties: {customer_id: {$ref: "#/components/schemas/PositiveID"}, status: {type: string, enum: [active, merged, closed]}}}}}}
         "401": {$ref: "#/components/responses/Error"}
         "403": {$ref: "#/components/responses/Error"}
+  /api/sidebar/v2/ai-operations:
+    get:
+      operationId: getSidebarAIOperations
+      tags: [Sidebar]
+      description: Reads the published context-center projection for the authenticated employee and canonical customer. It never refreshes upstream data or calls a model. Private bilateral dialogue remains server-side.
+      security: [{sidebarSession: [], sidebarContextToken: []}, {sidebarSession: [], contextToken: []}]
+      responses:
+        "200": {description: "Published summary and last customer message, or an explicit unconfigured state", content: {application/json: {schema: {$ref: "#/components/schemas/SidebarAIOperationsReadResponse"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /api/sidebar/v2/ai-operations/suggestions:
+    post:
+      operationId: generateSidebarManualSuggestion
+      tags: [Sidebar]
+      description: Generates one manually confirmed draft from the signed five-minute snapshot. Customer, employee and private dialogue cannot be supplied by the caller. A changed source conflicts; outcome_unknown must not be blindly retried. No message is automatically sent.
+      security: [{sidebarSession: [], sidebarContextToken: []}, {sidebarSession: [], contextToken: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/SidebarManualSuggestionRequest"}}}}
+      responses:
+        "200": {description: Draft for manual copying and sending, content: {application/json: {schema: {$ref: "#/components/schemas/SidebarManualSuggestionResponse"}}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "403": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "502": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+        "504": {$ref: "#/components/responses/Error"}
   /api/sidebar/v2/profile:
     get: {operationId: getSidebarProfile, security: [{contextToken: []}], responses: {"200": {description: Customer-owned safe profile projection}}}
     put:
@@ -5264,6 +5292,7 @@ components:
     csrfHeader: {type: apiKey, in: header, name: X-CSRF-Token}
     machineBearer: {type: http, scheme: bearer, bearerFormat: opaque}
     contextToken: {type: http, scheme: bearer}
+    sidebarContextToken: {type: apiKey, in: header, name: X-Sidebar-Context-Token}
     groupOpsWebhook: {type: apiKey, in: header, name: X-AICRM-Signature}
     paymentSession: {type: apiKey, in: cookie, name: aicrm_payment_session}
     wechatPaySignature: {type: apiKey, in: header, name: Wechatpay-Signature}
@@ -9876,6 +9905,65 @@ components:
       additionalProperties: false
       required: [local_only, provider_execution_eligible, real_external_call_executed]
       properties: {local_only: {const: true}, provider_execution_eligible: {const: false}, real_external_call_executed: {const: false}}
+    SidebarAILastCustomerMessage:
+      type: object
+      additionalProperties: false
+      required: [id, role, type, text, occurred_at]
+      properties:
+        id: {type: string}
+        role: {type: string, const: customer}
+        type: {type: string, description: Non-text message types are displayed without invented transcription.}
+        text: {type: string, description: At most 16000 UTF-8 bytes; may be empty for non-text messages.}
+        occurred_at: {type: string, format: date-time}
+    SidebarAIOperationsPublicSnapshot:
+      type: object
+      additionalProperties: false
+      required: [customer_id, source_version, summary, summary_updated_at, synced_at, last_customer_message]
+      properties:
+        customer_id: {$ref: "#/components/schemas/PositiveID"}
+        source_version: {type: string}
+        summary: {type: string, description: "Historical cleaned summary, at most 32000 UTF-8 bytes."}
+        summary_updated_at: {type: [string, "null"], format: date-time}
+        synced_at: {type: [string, "null"], format: date-time, description: Actual successful source watermark; request time is not sync time.}
+        last_customer_message: {oneOf: [{$ref: "#/components/schemas/SidebarAILastCustomerMessage"}, {type: "null"}]}
+    SidebarAIOperationsReadResponse:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [state, source, data, read_at, snapshot_token, expires_at, generation_ready]
+          properties:
+            state: {type: string, const: ready}
+            source: {type: string, const: context_center_warehouse}
+            data: {$ref: "#/components/schemas/SidebarAIOperationsPublicSnapshot"}
+            read_at: {type: string, format: date-time}
+            snapshot_token: {type: string, description: "Opaque signed snapshot bound to customer, employee and all private input; do not log."}
+            expires_at: {type: string, format: date-time}
+            generation_ready: {type: boolean}
+        - type: object
+          additionalProperties: false
+          required: [state, source, generation_ready, read_at, synced_at]
+          properties:
+            state: {type: string, const: unconfigured}
+            source: {type: string, const: context_center_warehouse}
+            generation_ready: {type: boolean, const: false}
+            read_at: {type: string, format: date-time}
+            synced_at: {type: "null"}
+    SidebarManualSuggestionRequest:
+      type: object
+      additionalProperties: false
+      required: [snapshot_token, confirmed]
+      properties:
+        snapshot_token: {type: string, minLength: 1}
+        confirmed: {type: boolean, const: true}
+    SidebarManualSuggestionResponse:
+      type: object
+      additionalProperties: false
+      required: [state, snapshot_token, suggestion, auto_sent]
+      properties:
+        state: {type: string, const: ready}
+        snapshot_token: {type: string}
+        suggestion: {type: string, description: "Human-reviewed draft, at most 32000 UTF-8 bytes."}
+        auto_sent: {type: boolean, const: false}
     SidebarWorkbenchProfile:
       type: object
       additionalProperties: false

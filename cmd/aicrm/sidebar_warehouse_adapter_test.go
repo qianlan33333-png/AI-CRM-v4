@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
@@ -11,9 +12,9 @@ import (
 )
 
 func TestSidebarWarehouseCompositionUsesProtectedReaderOnlyWhenEnabled(t *testing.T) {
-	calls := 0
+	var calls atomic.Int64
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
+		calls.Add(1)
 		if r.URL.Path != "/api/local/v3/sidebar-ai-operations" || r.URL.Query().Get("employee_id") != "employee" {
 			t.Error("composition did not bind scoped reader")
 		}
@@ -22,7 +23,7 @@ func TestSidebarWarehouseCompositionUsesProtectedReaderOnlyWhenEnabled(t *testin
 	}))
 	defer server.Close()
 	cfg := platformconfig.SidebarWarehouse{Origin: server.URL, Username: "fixture-operator", Password: "fixture-only", HTTPClient: server.Client()}
-	if reader, err := composeSidebarWarehouse(cfg); err != nil || reader != nil || calls != 0 {
+	if reader, err := composeSidebarWarehouse(cfg); err != nil || reader != nil || calls.Load() != 0 {
 		t.Fatal("disabled config activated a reader")
 	}
 	cfg.Enabled = true
@@ -31,15 +32,15 @@ func TestSidebarWarehouseCompositionUsesProtectedReaderOnlyWhenEnabled(t *testin
 		t.Fatal(err)
 	}
 	snapshot, err := reader.ReadAIOperations(context.Background(), sidebar.Principal{CorpID: "corp", EmployeeID: "employee"}, 42)
-	if err != nil || snapshot.CustomerID != 42 || calls != 1 {
+	if err != nil || snapshot.CustomerID != 42 || calls.Load() != 1 {
 		t.Fatalf("protected reader not wired: %v", err)
 	}
 }
 
 func TestSidebarGenerationCompositionUsesProtectedManualAgentOnlyWhenEnabled(t *testing.T) {
-	calls := 0
+	var calls atomic.Int64
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
+		calls.Add(1)
 		user, password, ok := r.BasicAuth()
 		if r.Method != "POST" || r.URL.Path != "/api/local/v3/sidebar-manual-generation" || !ok || user != "fixture-operator" || password != "fixture-only" {
 			t.Error("composition did not use protected manual Agent")
@@ -48,7 +49,7 @@ func TestSidebarGenerationCompositionUsesProtectedManualAgentOnlyWhenEnabled(t *
 	}))
 	defer server.Close()
 	cfg := platformconfig.SidebarWarehouse{Enabled: true, Origin: server.URL, Username: "fixture-operator", Password: "fixture-only", HTTPClient: server.Client()}
-	if generator, err := composeSidebarSuggestions(cfg); err != nil || generator != nil || calls != 0 {
+	if generator, err := composeSidebarSuggestions(cfg); err != nil || generator != nil || calls.Load() != 0 {
 		t.Fatal("default enabled Reader also enabled the model")
 	}
 	cfg.GenerationEnabled = true
@@ -58,7 +59,7 @@ func TestSidebarGenerationCompositionUsesProtectedManualAgentOnlyWhenEnabled(t *
 	}
 	result, err := generator.GenerateSidebarSuggestion(context.Background(), sidebar.AISuggestionInput{Principal: sidebar.Principal{CorpID: "corp", EmployeeID: "employee"},
 		Snapshot: sidebar.AIWarehouseSnapshot{CustomerID: 42, CorpID: "corp", EmployeeID: "employee", SourceVersion: "published-fixture"}, IdempotencyKey: "synthetic-key"})
-	if err != nil || result != "合成参考回复" || calls != 1 {
+	if err != nil || result != "合成参考回复" || calls.Load() != 1 {
 		t.Fatal("manual generation composition did not call once")
 	}
 }
