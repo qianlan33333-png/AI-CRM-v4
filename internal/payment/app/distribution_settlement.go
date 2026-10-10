@@ -32,6 +32,7 @@ type DistributionSettlementStore interface {
 	RecoverProfitSharingReceiverEffectWithin(context.Context, domain.ProfitSharingReceiver, string, effectport.PaymentV1Intent, string, string, [32]byte, [32]byte) (domain.ProfitSharingReceiver, bool, error)
 	PaymentForDistributionOrder(context.Context, int64, bool) (domain.Payment, error)
 	ProfitSharingFunding(context.Context, int64) (domain.ProfitSharingFunding, error)
+	OtherProfitSharingObligationsMinor(context.Context, int64, int64) (int64, error)
 	FindProfitSharingBySettlement(context.Context, string, bool) (domain.ProfitSharingInstruction, bool, error)
 	GetProfitSharingInstruction(context.Context, string, bool) (domain.ProfitSharingInstruction, error)
 	GetProfitSharingInstructionByEffect(context.Context, string, bool) (domain.ProfitSharingInstruction, error)
@@ -421,15 +422,27 @@ func (s *Service) LoadProfitSharingEffectMaterial(ctx context.Context, kind effe
 			if instruction.State == domain.ProfitSharingCancelled {
 				return paymentport.ErrConflict
 			}
+			// Serialize the balance check with new split acceptance and refund
+			// requests, both of which take the same Payment row lock. The
+			// instruction amount is immutable; other paid splits and outstanding
+			// reserves are read from Payment-owned facts in this UoW.
+			payment, err := s.store.GetPayment(tx, instruction.PaymentID, true)
+			if err != nil {
+				return err
+			}
 			funding, err := store.ProfitSharingFunding(tx, instruction.PaymentID)
 			if err != nil {
 				return err
 			}
-			payment, err := s.store.GetPayment(tx, instruction.PaymentID, false)
+			otherObligations, err := store.OtherProfitSharingObligationsMinor(tx, instruction.PaymentID, instruction.ID)
 			if err != nil {
 				return err
 			}
-			if funding.RefundExposure() || funding.SuccessfulRefundMinor >= payment.AmountMinor {
+			if funding.RefundExposure() || funding.SuccessfulRefundMinor < 0 || funding.SuccessfulRefundMinor > payment.AmountMinor || otherObligations < 0 {
+				return paymentport.ErrConflict
+			}
+			available := payment.AmountMinor - funding.SuccessfulRefundMinor
+			if otherObligations > available || instruction.AmountMinor > available-otherObligations {
 				return paymentport.ErrConflict
 			}
 			material, err = s.profitSharingInstructionMaterial(tx, store, instruction, intent.PayloadDigest)

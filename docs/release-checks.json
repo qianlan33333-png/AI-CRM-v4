@@ -1,102 +1,16 @@
 {
   "schema": 1,
-  "baseline_sha": "a018e6858eaf75ecfcf37435c9953eb8065d1770",
+  "baseline_sha": "fde403ef0e5d621fd7c32af40b1f7d679d283990",
   "checks": [
     {
       "lane": "backend",
       "package": "./internal/payment/app",
       "test": "TestPostgreSQLRefundDoesNotReserveFutureCommission",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLMissingProfitSharingProofAndFullRefund",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLWeChatPayRefundSerializesNewKeysPerPayment",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLRefundQueryBeforeCallbackKeepsOneSettlement",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLProfitSharingCompletionUpdatesOnlyMatchingEffect",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestRefundReservesOutstandingAmountsAndRejectsOverRefund"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestWeChatPayRefundRejectsNewKeyWhileEarlierRefundIsNonTerminal"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestWeChatPayRefundAllowsNewKeyAfterEarlierRefundIsTerminal"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestRefundReplayReturnsExistingBeforeReservedAmountCheck"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestPostgreSQLRefundCancellationAndSplitDispatchHaveOneWinner",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestPostgreSQLCancelQueuedEffectPersistsRefundInitiatorAdmin",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/externaleffects",
-      "test": "TestPostgreSQLCancelQueuedPaymentSplitPersistsSystemDueActor",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSettlementWorkerClosedInstructionPreservesOrCancelsOnlyWithBusinessFacts",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLSettlementWorkerAcceptsOneInstructionAndReplaysAfterRestart",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLRefundWorkerRepricesOnceAndRevokesOnlyAfterLastQualification",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLPaymentRefundRoleKeepsHTTPAuthAndNoDaemon",
-      "postgres": true
+      "package": "./internal/payment/store"
     }
   ],
   "installed_checks": [

@@ -11,8 +11,11 @@ import (
 	"testing"
 	"time"
 
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	externaleffects "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	paymentstore "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/store"
 	platformjobqueue "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/jobqueue"
@@ -40,7 +43,7 @@ func (p *forbiddenRefundSplitQuery) QueryProfitSharingUnfreeze(context.Context, 
 }
 
 func TestPostgreSQLRefundDoesNotReserveFutureCommission(t *testing.T) {
-	for _, scenario := range []string{"queued-full", "queued-partial", "unknown", "dispatch-won", "queued-prior-attempt", "rollback", "concurrent-refunds", "root-refund"} {
+	for _, scenario := range []string{"queued-full", "queued-partial", "unknown", "dispatch-won", "dispatch-partial-insufficient", "dispatch-partial-sufficient", "dispatch-partial-paid-other", "dispatch-partial-reserved-other", "queued-prior-attempt", "rollback", "concurrent-refunds", "root-refund"} {
 		t.Run(scenario, func(t *testing.T) {
 			pool, cleanup := paymentAppIntegrationPool(t)
 			defer cleanup()
@@ -78,7 +81,8 @@ func TestPostgreSQLRefundDoesNotReserveFutureCommission(t *testing.T) {
 			if err = pool.QueryRow(ctx, `INSERT INTO payments(order_id,provider,payment_channel,merchant_order_no,payer_identity_id,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,profit_sharing_marked,provider_transaction_reference,provider_transaction_digest,version,created_at,updated_at) VALUES($1,'wechat_pay','mini_program','M-refund-first',4,11,11,680,'CNY','paid',true,'trusted-transaction',$2,1,$3,$3) RETURNING id`, orderID, effectport.Hash("wechatpay.transaction", "trusted-transaction"), now).Scan(&paymentID); err != nil {
 				t.Fatal(err)
 			}
-			if err = pool.QueryRow(ctx, `INSERT INTO payment_profit_sharing_receivers(customer_id,identity_id,app_id,app_scope,channel,account_digest,state,version,created_at,updated_at) VALUES(19,29,'wx-test','wechat-app:wx-test','mini_program',$1,'ready',1,$2,$2) RETURNING id`, effectport.Hash("receiver"), now).Scan(&receiverID); err != nil {
+			receiverAccountDigest := effectport.Hash("payment.profit-sharing.receiver.account.v1", "wx-test", "wechat-app:wx-test", "trusted-openid")
+			if err = pool.QueryRow(ctx, `INSERT INTO payment_profit_sharing_receivers(customer_id,identity_id,app_id,app_scope,channel,account_digest,state,version,created_at,updated_at) VALUES(19,29,'wx-test','wechat-app:wx-test','mini_program',$1,'ready',1,$2,$2) RETURNING id`, receiverAccountDigest, now).Scan(&receiverID); err != nil {
 				t.Fatal(err)
 			}
 			effectState, splitState, attempts := "queued", "accepted", 0
@@ -88,18 +92,58 @@ func TestPostgreSQLRefundDoesNotReserveFutureCommission(t *testing.T) {
 			if scenario == "dispatch-won" {
 				effectState, attempts = "attempted", 1
 			}
+			if scenario == "dispatch-partial-insufficient" || scenario == "dispatch-partial-sufficient" || scenario == "dispatch-partial-paid-other" || scenario == "dispatch-partial-reserved-other" {
+				// EER has claimed the original attempt, but its Provider material
+				// has not yet been loaded. The later loader must use the actual
+				// refund/split facts before allowing CreateOrder.
+				effectState, attempts = "attempted", 1
+			}
 			if scenario == "queued-prior-attempt" {
 				attempts = 1
 			}
 			digest := effectport.Hash("refund-first-split")
-			if err = pool.QueryRow(ctx, `INSERT INTO external_effects(owner,kind,source_ref_digest,target_ref_digest,payload_digest,policy_version_hash,envelope_fingerprint,state,attempt_count,generation,created_at,updated_at) VALUES('payment',$1,$2,$2,$2,$2,$2,$3,$4,1,$5,$5) RETURNING id`, effectport.KindWeChatPayProfitSharing, digest, effectState, attempts, now).Scan(&effectID); err != nil {
+			if err = pool.QueryRow(ctx, `INSERT INTO external_effects(owner,kind,source_ref_digest,target_ref_digest,payload_digest,policy_version_hash,envelope_fingerprint,state,attempt_count,generation,lease_fence,lease_expires_at,created_at,updated_at) VALUES('payment',$1,$2,$2,$2,$2,$2,$3,$4,1,CASE WHEN $4>0 THEN 1 ELSE 0 END,CASE WHEN $4>0 THEN clock_timestamp()+interval '5 minutes' ELSE NULL END,$5,$5) RETURNING id`, effectport.KindWeChatPayProfitSharing, digest, effectState, attempts, now).Scan(&effectID); err != nil {
 				t.Fatal(err)
+			}
+			if attempts > 0 {
+				attemptState, callAttempted, realExternalCall, completedAt := "retryable_failed", false, false, now
+				if effectState == "attempted" {
+					attemptState = "attempted"
+				}
+				if effectState == "outcome_unknown" {
+					attemptState, callAttempted, realExternalCall = "outcome_unknown", true, true
+				}
+				if _, err = pool.Exec(ctx, `INSERT INTO external_effect_attempts(effect_id,number,generation,fence,state,call_attempted,real_external_call_executed,completed_at) VALUES($1,1,1,1,$2,$3,$4,CASE WHEN $2='attempted' THEN NULL::timestamptz ELSE $5::timestamptz END)`, effectID, attemptState, callAttempted, realExternalCall, completedAt); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err = pool.QueryRow(ctx, `INSERT INTO payment_profit_sharing_instructions(settlement_ref,payment_id,receiver_id,provider_order_no,idempotency_key_digest,source_ref_digest,payload_digest,policy_version_hash,amount_minor,currency,state,external_effect_id,deadline_at,version,created_at,updated_at) VALUES('dstl_refund_first',$1,$2,'v3ps_ABCDEFGHIJKLMNOPQRST',$3,$3,$3,$3,204,'CNY',$4,$5,$6,1,$7,$7) RETURNING id`, paymentID, receiverID, digest, splitState, effectID, now.Add(24*time.Hour), now).Scan(&instructionID); err != nil {
 				t.Fatal(err)
 			}
 			if _, err = pool.Exec(ctx, `INSERT INTO payment_profit_sharing_reserves(instruction_id,payment_id,amount_minor,state,created_at) VALUES($1,$2,204,'reserved',$3)`, instructionID, paymentID, now); err != nil {
 				t.Fatal(err)
+			}
+			if scenario == "dispatch-partial-paid-other" {
+				var otherID int64
+				if err = pool.QueryRow(ctx, `INSERT INTO payment_profit_sharing_instructions(settlement_ref,payment_id,receiver_id,provider_order_no,idempotency_key_digest,source_ref_digest,payload_digest,policy_version_hash,amount_minor,currency,state,receiver_confirmed_success,outcome_known,deadline_at,version,created_at,updated_at) VALUES('dstl_paid_other',$1,$2,'v3ps_BCDEFGHIJKLMNOPQRSTU',$3,$3,$3,$3,100,'CNY','paid',true,true,$4,1,$5,$5) RETURNING id`, paymentID, receiverID, effectport.Hash("paid-other"), now.Add(24*time.Hour), now).Scan(&otherID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = pool.Exec(ctx, `INSERT INTO payment_profit_sharing_reserves(instruction_id,payment_id,amount_minor,state,released_reason,created_at,released_at) VALUES($1,$2,100,'released','receiver_success',$3,$3)`, otherID, paymentID, now); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "dispatch-partial-reserved-other" {
+				var otherReceiverID, otherID int64
+				accountDigest := effectport.Hash("receiver-other")
+				if err = pool.QueryRow(ctx, `INSERT INTO payment_profit_sharing_receivers(customer_id,identity_id,app_id,app_scope,channel,account_digest,state,version,created_at,updated_at) VALUES(20,30,'wx-test','wechat-app:wx-test','mini_program',$1,'ready',1,$2,$2) RETURNING id`, accountDigest, now).Scan(&otherReceiverID); err != nil {
+					t.Fatal(err)
+				}
+				if err = pool.QueryRow(ctx, `INSERT INTO payment_profit_sharing_instructions(settlement_ref,payment_id,receiver_id,provider_order_no,idempotency_key_digest,source_ref_digest,payload_digest,policy_version_hash,amount_minor,currency,state,deadline_at,version,created_at,updated_at) VALUES('dstl_reserved_other',$1,$2,'v3ps_CDEFGHIJKLMNOPQRSTUV',$3,$3,$3,$3,100,'CNY','accepted',$4,1,$5,$5) RETURNING id`, paymentID, otherReceiverID, effectport.Hash("reserved-other"), now.Add(24*time.Hour), now).Scan(&otherID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = pool.Exec(ctx, `INSERT INTO payment_profit_sharing_reserves(instruction_id,payment_id,amount_minor,state,created_at) VALUES($1,$2,100,'reserved',$3)`, otherID, paymentID, now); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if _, err = pool.Exec(ctx, `INSERT INTO payment_profit_sharing_provider_intents(instruction_id,effect_kind,source_ref_digest,target_ref_digest,payload_digest,policy_version_hash,request_snapshot,created_at) VALUES($1,$2,$3,$3,$3,$3,'{}',$4)`, instructionID, effectport.KindWeChatPayProfitSharing, digest, now); err != nil {
 				t.Fatal(err)
@@ -109,12 +153,25 @@ func TestPostgreSQLRefundDoesNotReserveFutureCommission(t *testing.T) {
 			if err = service.SetProfitSharingReconciler(provider); err != nil {
 				t.Fatal(err)
 			}
-			if err = service.SetProfitSharingIdentityReader(receiverRecoveryIdentityStub{}); err != nil {
+			if err = service.SetPaymentChannelAppIDs("wx-test", ""); err != nil {
+				t.Fatal(err)
+			}
+			if err = service.SetProfitSharingEnabled(true); err != nil {
+				t.Fatal(err)
+			}
+			service.SetCanonicalLineageReader(lineageStub{customerdomain.CustomerID(19)})
+			if err = service.SetProfitSharingIdentityReader(receiverRecoveryIdentityStub{value: identityport.VerifiedCommerceIdentity{IdentityID: 29, CustomerID: customerdomain.CustomerID(19), Kind: identitydomain.KindMPOpenID, Scope: "wechat-app:wx-test", Value: "trusted-openid"}}); err != nil {
 				t.Fatal(err)
 			}
 			command := paymentport.RefundCommand{PaymentID: paymentID, AmountMinor: 680, RefundNo: "RF-refund-first", Reason: "customer refund", ActorScope: "admin:17", IdempotencyKey: "refund-first-full-key-0001"}
 			if scenario == "queued-partial" {
 				command.AmountMinor = 200
+			}
+			if scenario == "dispatch-partial-insufficient" {
+				command.AmountMinor = 500
+			}
+			if scenario == "dispatch-partial-sufficient" || scenario == "dispatch-partial-paid-other" || scenario == "dispatch-partial-reserved-other" {
+				command.AmountMinor = 400
 			}
 			if scenario == "root-refund" {
 				command.ActorScope = "ops:root-refund:authorized-test"
@@ -208,10 +265,24 @@ func TestPostgreSQLRefundDoesNotReserveFutureCommission(t *testing.T) {
 				if _, err = pool.Exec(ctx, `UPDATE payment_refunds SET status='completed',version=version+1,updated_at=clock_timestamp() WHERE payment_id=$1`, paymentID); err != nil {
 					t.Fatal(err)
 				}
-				if scenario != "queued-partial" {
-					if _, inner = service.LoadProfitSharingEffectMaterial(ctx, effectport.KindWeChatPayProfitSharing, digest); !errors.Is(inner, paymentport.ErrConflict) {
-						t.Fatalf("full refund must stop future split: %v", inner)
+				material, loadErr := service.LoadProfitSharingEffectMaterial(ctx, effectport.KindWeChatPayProfitSharing, digest)
+				if scenario == "dispatch-partial-sufficient" {
+					if loadErr != nil || material.AmountMinor != 204 || material.ProviderOrderNo != "v3ps_ABCDEFGHIJKLMNOPQRST" {
+						t.Fatalf("partial refund with sufficient balance should retain the frozen split material: material=%+v err=%v", material, loadErr)
 					}
+				} else if !errors.Is(loadErr, paymentport.ErrConflict) {
+					t.Fatalf("refund facts or insufficient remaining funds must stop this split material: %v", loadErr)
+				}
+				after, inner := effects.Get(ctx, fmt.Sprintf("eer_%d", effectID))
+				if inner != nil || after.State != wantEffect || int(after.AttemptCount) != attempts {
+					t.Fatalf("material inspection changed the original effect: effect=%+v err=%v", after, inner)
+				}
+				var finalState, finalReserve string
+				if err = pool.QueryRow(ctx, `SELECT i.state,r.state FROM payment_profit_sharing_instructions i JOIN payment_profit_sharing_reserves r ON r.instruction_id=i.id WHERE i.id=$1`, instructionID).Scan(&finalState, &finalReserve); err != nil {
+					t.Fatal(err)
+				}
+				if finalState != wantState || finalReserve != wantReserve {
+					t.Fatalf("material inspection changed the frozen split facts: state=%s reserve=%s", finalState, finalReserve)
 				}
 			}
 		})

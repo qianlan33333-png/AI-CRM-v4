@@ -268,6 +268,27 @@ func (r *Repository) ProfitSharingFunding(ctx context.Context, paymentID int64) 
 	return value, mapError(err)
 }
 
+// OtherProfitSharingObligationsMinor returns already-paid splits and still-held
+// reserves for a payment, excluding the instruction whose fresh Provider
+// material is being loaded. Paid instructions no longer hold a reserve, so
+// both facts must be considered to keep post-refund split material within the
+// original payment amount.
+func (r *Repository) OtherProfitSharingObligationsMinor(ctx context.Context, paymentID, instructionID int64) (int64, error) {
+	t, err := tx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if paymentID < 1 || instructionID < 1 {
+		return 0, paymentport.ErrInvalid
+	}
+	var amount int64
+	err = t.QueryRow(ctx, `SELECT (
+ COALESCE((SELECT sum(i.amount_minor) FROM payment_profit_sharing_instructions i WHERE i.payment_id=$1 AND i.id<>$2 AND i.state='paid'),0)
+ + COALESCE((SELECT sum(r.amount_minor) FROM payment_profit_sharing_reserves r WHERE r.payment_id=$1 AND r.instruction_id<>$2 AND r.state='reserved'),0)
+)::bigint`, paymentID, instructionID).Scan(&amount)
+	return amount, mapError(err)
+}
+
 func (r *Repository) ReservedProfitSharingMinor(ctx context.Context, paymentID int64) (int64, error) {
 	t, err := tx(ctx)
 	if err != nil {
