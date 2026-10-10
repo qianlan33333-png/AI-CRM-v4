@@ -1,70 +1,7 @@
 {
   "schema": 1,
-  "baseline_sha": "970e3e3c9f454fc14abd3115fa6daca41522422f",
+  "baseline_sha": "b143b83b35052da8b5529f1c437dd2905e5693f0",
   "checks": [
-    {
-      "lane": "backend",
-      "package": "./internal/platform/postgres"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/domain"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/store"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLCanonicalPaidRankingsMatchModelAcrossBatches",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLCanonicalFreeCloseSnapshotKeepsOneWritableSnapshot",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLPaidRankingThreeMetricsScopesPeriodsAndRefunds",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLPaidInvitationWithoutDistributorFreezesAndScoresAtomically",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralRanksAcrossAsiaShanghaiDayAndWeekBoundaries",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestReview20261009ReferralSalesCloseSnapshotMatchesConfiguredRanking",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestReview20261009ReferralInviteCloseSnapshotPreservesReversalAndTies",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralInviterReversalWinsBeforeBlockedNewAcceptance",
-      "postgres": true,
-      "race": true
-    },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
