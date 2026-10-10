@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 )
 
@@ -66,11 +67,16 @@ func run() error {
 		}
 		instruction, queryErr := application.paymentReconciliation.ReconcileProfitSharing(ctx, fmt.Sprintf("psinst_%d", cfg.ProfitSharingReconcileID))
 		if queryErr != nil {
+			code := paymentport.ProfitSharingQueryCode(queryErr)
+			if code == "" {
+				code = "UNKNOWN"
+			}
+			slog.Error("profit sharing original query failed", "query_phase", "original_instruction_query", "instruction_id", cfg.ProfitSharingReconcileID, "provider_code", code, "release_sha", cfg.ReleaseSHA)
 			// Provider errors can carry raw response headers, account identifiers,
 			// and request data. Never pass them into the process-level error log.
 			return errors.New("profit sharing query unavailable; no provider write attempted")
 		}
-		slog.Info("profit sharing reconciliation complete", "instruction_id", cfg.ProfitSharingReconcileID, "state", instruction.State, "outcome_known", instruction.OutcomeKnown, "receiver_confirmed_success", instruction.ReceiverConfirmedSuccess, "release_sha", cfg.ReleaseSHA)
+		slog.Info("profit sharing reconciliation complete", "query_phase", "original_instruction_query", "instruction_id", cfg.ProfitSharingReconcileID, "state", instruction.State, "outcome_known", instruction.OutcomeKnown, "receiver_confirmed_success", instruction.ReceiverConfirmedSuccess, "release_sha", cfg.ReleaseSHA)
 		return nil
 	}
 	if cfg.Role == platformconfig.RoleWorker {

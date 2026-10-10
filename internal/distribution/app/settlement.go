@@ -137,7 +137,13 @@ func (s *SettlementService) prepareSettlement(ctx context.Context, commissionID 
 		if commission.Status != distributiondomain.CommissionPending && commission.Status != distributiondomain.CommissionHeld {
 			return nil
 		}
-		if now.Before(commission.DueAt) {
+		// Also honor the Provider's one-minute payment settlement delay for
+		// pending records created before the frozen DueAt rule was corrected.
+		effectiveDue := commission.DueAt
+		if earliest := commission.PaidConfirmedAt.Add(time.Minute); effectiveDue.Before(earliest) {
+			effectiveDue = earliest
+		}
+		if now.Before(effectiveDue) {
 			if warningErr := s.recordDeadlineWarningWithin(tx, commission, distributionstore.Settlement{}, state.DeadlineAt, state.OriginalPaymentRef, now); warningErr != nil {
 				return warningErr
 			}

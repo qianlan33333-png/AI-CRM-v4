@@ -53,7 +53,7 @@ func TestRefundCannotRewriteSettlingOrPaidCommission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settling, err := commission.BeginSettlement(commission.Version, now)
+	settling, err := commission.BeginSettlement(commission.Version, now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}

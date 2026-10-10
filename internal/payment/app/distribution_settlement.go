@@ -826,7 +826,10 @@ func (s *Service) ReconcileProfitSharing(ctx context.Context, reference string) 
 		return instructionProjection(current), nil
 	}
 	query, err := s.profitSharingReconciler.QueryProfitSharing(ctx, reference)
-	if err != nil || !effectport.ValidDigest(query.EvidenceDigest) || query.OccurredAt.IsZero() {
+	if err != nil {
+		return paymentport.ProfitSharingInstruction{}, profitSharingReconciliationError(err)
+	}
+	if !effectport.ValidDigest(query.EvidenceDigest) || query.OccurredAt.IsZero() {
 		return paymentport.ProfitSharingInstruction{}, paymentport.ErrUnavailable
 	}
 	err = s.uow.Within(ctx, func(tx context.Context) error {
@@ -870,6 +873,13 @@ func (s *Service) ReconcileProfitSharing(ctx context.Context, reference string) 
 		return paymentport.ProfitSharingInstruction{}, classify(err)
 	}
 	return instructionProjection(current), nil
+}
+
+func profitSharingReconciliationError(err error) error {
+	if code := paymentport.ProfitSharingQueryCode(err); code != "" {
+		return paymentport.NewProfitSharingQueryError(code)
+	}
+	return paymentport.ErrUnavailable
 }
 
 func (s *Service) ReconcileProfitSharingUnfreeze(ctx context.Context, reference string) (paymentport.ProfitSharingUnfreeze, error) {

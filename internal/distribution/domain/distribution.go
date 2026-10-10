@@ -232,6 +232,9 @@ func NewCommission(attribution Attribution, paidMinor int64, paidAt time.Time) (
 		status = CommissionZero
 	}
 	due := paidAt.UTC().Add(time.Duration(attribution.WaitDays) * 24 * time.Hour)
+	if earliest := paidAt.UTC().Add(time.Minute); due.Before(earliest) {
+		due = earliest
+	}
 	return Commission{AttributionID: attribution.ID, OrderID: attribution.OrderID, OrderItemLine: attribution.OrderItemLine, DistributorID: attribution.DistributorID, OriginalItemPaidMinor: paidMinor, SuccessfulRefundMinor: 0, InitialMinor: initial, CurrentPayableMinor: initial, CommissionRateBasisPoints: attribution.CommissionRateBasisPoints, PaidConfirmedAt: paidAt.UTC(), DueAt: due, Status: status, Version: 1, CreatedAt: paidAt.UTC(), UpdatedAt: paidAt.UTC()}, nil
 }
 

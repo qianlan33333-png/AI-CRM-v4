@@ -19,3 +19,5 @@ OneID：不解析/新增身份，原指令服务校核已有接收方。持久�
 五项影响：新增运维 role/env 合同；业务状态仍由原 Payment 查询服务判断；直接关联 Config/Composition/Payment；无 UI；验证显式正整数参数及隔离 PG composition，不启动 HTTP/worker、不登记 daemon。最小新增限制为必须指定已有指令 ID，依据是禁止不定范围资金查询/恢复；Provider 原单验证沿已有边界。
 
 接受结果只输出原指令 ID、状态、是否已知及接收方成功标志、准确版本。查询失败不得输出 SDK 原始 error（可能含 Header/账号）；保留状态并报告失败。下游 Distribution 原 due job负责账本同步。与主候选同包安装；无需迁移数据库，兼容回退到上一完整包。真实 Provider 结果与测试证据分别记录。
+
+同批修复：按 [微信商户 FAQ](https://pay.wechatpay.cn/doc/v3/merchant/4014547102) 将新佣金 due 冻结为原等待期与 paid+1分钟的较晚者；旧 pending 记录也在原 due worker 中检查该最早时点，不改写旧 due 字段。当前 Query 的白名单 code 单独投影，不存 SDK error、不推断首次提交失败原因；RESOURCE_NOT_EXISTS 仍是查询失败，不能释放 reserve、取消佣金或自动提交新单。

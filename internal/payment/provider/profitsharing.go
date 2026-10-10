@@ -105,6 +105,24 @@ func classifyOfficialProfitSharingError(err error) error {
 	return ErrInvalidResponse
 }
 
+func classifyOfficialProfitSharingQueryError(err error) error {
+	var api *core.APIError
+	if errors.As(err, &api) {
+		// Match both the documented HTTP status and its code. Do not retain
+		// APIError itself: its Error() includes body, headers and account data.
+		valid := (api.StatusCode == 400 && (api.Code == "PARAM_ERROR" || api.Code == "INVALID_REQUEST")) ||
+			(api.StatusCode == 401 && api.Code == "SIGN_ERROR") ||
+			(api.StatusCode == 403 && api.Code == "NO_AUTH") ||
+			(api.StatusCode == 404 && api.Code == "RESOURCE_NOT_EXISTS") ||
+			(api.StatusCode == 429 && api.Code == "FREQUENCY_LIMITED") ||
+			(api.StatusCode == 500 && api.Code == "SYSTEM_ERROR")
+		if valid {
+			return paymentport.NewProfitSharingQueryError(api.Code)
+		}
+	}
+	return paymentport.NewProfitSharingQueryError("UNKNOWN")
+}
+
 // NewOfficialProfitSharingSDK builds the official WeChat Pay Go SDK client.
 // It is intentionally separate from NewWeChatPay: unless Composition injects
 // this client and a Payment-only material loader, split effects fail closed and
@@ -163,7 +181,10 @@ func (sdk *OfficialProfitSharingSDK) QueryOrder(ctx context.Context, value Profi
 		return ProfitSharingQuery{}, ErrInvalidMaterial
 	}
 	response, _, err := sdk.orders.QueryOrder(ctx, profitsharing.QueryOrderRequest{OutOrderNo: &value.ProviderOrderNo, TransactionId: &value.TransactionReference})
-	if err != nil || response == nil || response.OutOrderNo == nil || *response.OutOrderNo != value.ProviderOrderNo || response.TransactionId == nil || *response.TransactionId != value.TransactionReference || response.State == nil {
+	if err != nil {
+		return ProfitSharingQuery{}, classifyOfficialProfitSharingQueryError(err)
+	}
+	if response == nil || response.OutOrderNo == nil || *response.OutOrderNo != value.ProviderOrderNo || response.TransactionId == nil || *response.TransactionId != value.TransactionReference || response.State == nil {
 		return ProfitSharingQuery{}, ErrInvalidResponse
 	}
 	query := ProfitSharingQuery{State: string(*response.State), OccurredAt: time.Now().UTC()}

@@ -24,15 +24,16 @@ func (settlementUOWStub) Within(ctx context.Context, fn func(context.Context) er
 }
 
 type settlementPaymentStub struct {
-	capability  paymentport.SettlementCapability
-	state       paymentport.DistributionPaymentState
-	instruction paymentport.ProfitSharingInstruction
-	accepted    paymentport.ProfitSharingRequest
-	reconciled  paymentport.ProfitSharingInstruction
-	unfreeze    paymentport.ProfitSharingUnfreeze
-	unfreezes   int
-	unfreezeReq []paymentport.ProfitSharingUnfreezeRequest
-	readiness   paymentport.ReceiverReadiness
+	capability         paymentport.SettlementCapability
+	state              paymentport.DistributionPaymentState
+	qualificationState *paymentport.DistributionPaymentState
+	instruction        paymentport.ProfitSharingInstruction
+	accepted           paymentport.ProfitSharingRequest
+	reconciled         paymentport.ProfitSharingInstruction
+	unfreeze           paymentport.ProfitSharingUnfreeze
+	unfreezes          int
+	unfreezeReq        []paymentport.ProfitSharingUnfreezeRequest
+	readiness          paymentport.ReceiverReadiness
 }
 
 func (s *settlementPaymentStub) SettlementCapability(context.Context) (paymentport.SettlementCapability, error) {
@@ -54,7 +55,10 @@ func (s *settlementPaymentStub) ReceiverReadiness(context.Context, int64, string
 func (s *settlementPaymentStub) ReceiverReadinessWithin(ctx context.Context, customerID int64, appID string) (paymentport.ReceiverReadiness, error) {
 	return s.ReceiverReadiness(ctx, customerID, appID)
 }
-func (s *settlementPaymentStub) DistributionPaymentState(context.Context, int64) (paymentport.DistributionPaymentState, error) {
+func (s *settlementPaymentStub) DistributionPaymentState(_ context.Context, orderID int64) (paymentport.DistributionPaymentState, error) {
+	if orderID == 3 && s.qualificationState != nil {
+		return *s.qualificationState, nil
+	}
 	return s.state, nil
 }
 func (s *settlementPaymentStub) DistributionPaymentStateWithin(ctx context.Context, orderID int64) (paymentport.DistributionPaymentState, error) {
@@ -176,6 +180,34 @@ func (s *settlementStoreStub) AppendAuditWithin(_ context.Context, event string,
 }
 func (*settlementStoreStub) AppendOutboxWithin(context.Context, string, string, int64, any, time.Time) error {
 	return nil
+}
+
+func TestCommissionDueWaitsProviderMinuteForLegacyPendingRecord(t *testing.T) {
+	now := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	store, payment, service := settlementFixture(t, now)
+	qualificationState := payment.state
+	payment.qualificationState = &qualificationState
+	store.context.Commission.PaidConfirmedAt = now.Add(-2 * time.Second)
+	store.context.Commission.DueAt = store.context.Commission.PaidConfirmedAt
+	payment.state.ConfirmedPaidAt = store.context.Commission.PaidConfirmedAt
+	if err := service.RunCommissionDueCheck(context.Background(), 41); err == nil {
+		t.Fatal("newly paid legacy commission must wait")
+	} else {
+		var snooze *river.JobSnoozeError
+		if !errors.As(err, &snooze) {
+			t.Fatalf("wait error=%v", err)
+		}
+	}
+	if payment.accepted.SettlementRef != "" || store.settlement.ID != 0 || store.context.Commission.Status != distributiondomain.CommissionPending {
+		t.Fatal("waiting commission prematurely accepted a split")
+	}
+	service.now = func() time.Time { return now.Add(58 * time.Second) }
+	if err := service.RunCommissionDueCheck(context.Background(), 41); err == nil {
+		t.Fatal("accepted split still needs reconciliation")
+	}
+	if payment.accepted.SettlementRef == "" {
+		t.Fatal("split not accepted at one-minute boundary")
+	}
 }
 
 func TestCommissionDueAcceptsOneInstructionThenConfirmsExactReceiver(t *testing.T) {
