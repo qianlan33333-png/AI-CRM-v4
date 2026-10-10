@@ -84,6 +84,10 @@ func preparePaidReferralInstalledDirectory(t *testing.T, f *promotionCheckoutFix
 // existing fixed staging helper supplies its protected, exact-binary inputs.
 // It uses the Journey's isolated synthetic database; all Providers stay off.
 func verifyInstalledPaidReferral(t *testing.T, f *promotionCheckoutFixture, actor referralport.TrustedSessionActor, campaignID int64) {
+	verifyInstalledPaidReferralWithOptions(t, f, actor, campaignID, false, 1)
+}
+
+func verifyInstalledPaidReferralWithOptions(t *testing.T, f *promotionCheckoutFixture, actor referralport.TrustedSessionActor, campaignID int64, financial bool, expectedInvitations int64) {
 	t.Helper()
 	if *domesticReleaseSmokeInputFile == "" {
 		return
@@ -130,6 +134,9 @@ func verifyInstalledPaidReferral(t *testing.T, f *promotionCheckoutFixture, acto
 	address := listener.Addr().String()
 	listener.Close()
 	environment := paidReferralInstalledEnvironment(f.pool.Config().ConnConfig.ConnString(), inputs.InstalledSHA, address)
+	if financial {
+		environment = paidReferralFinancialInstalledEnvironment(t, f.pool.Config().ConnConfig.ConnString(), inputs.InstalledSHA, address)
+	}
 	process := startDomesticSmokeProcess(t, binary, releaseRoot, environment)
 	// Stop before this Journey's deferred database cleanup removes its clone.
 	defer func() {
@@ -181,7 +188,7 @@ func verifyInstalledPaidReferral(t *testing.T, f *promotionCheckoutFixture, acto
 	}
 	err = json.NewDecoder(response.Body).Decode(&mine)
 	response.Body.Close()
-	if response.StatusCode != 200 || err != nil || mine.Invitations != 1 || mine.Rank != 1 || !mine.Available {
+	if response.StatusCode != 200 || err != nil || mine.Invitations != expectedInvitations || mine.Rank != 1 || !mine.Available {
 		t.Fatal("installed paid participant readback failed")
 	}
 	shanghai, err := time.LoadLocation("Asia/Shanghai")
@@ -202,7 +209,7 @@ func verifyInstalledPaidReferral(t *testing.T, f *promotionCheckoutFixture, acto
 		}
 		err = json.NewDecoder(response.Body).Decode(&board)
 		response.Body.Close()
-		if response.StatusCode != 200 || err != nil || len(board.Items) != 1 || board.Items[0].Score != 1 {
+		if response.StatusCode != 200 || err != nil || len(board.Items) != 1 || board.Items[0].Score != expectedInvitations {
 			t.Fatalf("installed paid people leaderboard failed period=%s status=%d", period, response.StatusCode)
 		}
 	}
@@ -215,6 +222,14 @@ func verifyInstalledPaidReferral(t *testing.T, f *promotionCheckoutFixture, acto
 	parsed, parseErr := url.Parse(link.URL)
 	if response.StatusCode != http.StatusOK || err != nil || parseErr != nil || parsed.Host != "crm.example.test" || !regexp.MustCompile(`^/referral/invite/rfi_[A-Za-z0-9_-]{43}$`).MatchString(parsed.Path) {
 		t.Fatal("installed invitation still requires financial registration")
+	}
+	if financial {
+		digest := sha256.Sum256([]byte(strings.TrimPrefix(parsed.Path, "/referral/invite/")))
+		var identityID int64
+		var appID, appScope, channel string
+		if e := f.pool.QueryRow(context.Background(), `SELECT issuer_identity_id,issuer_app_id,issuer_app_scope,issuer_channel FROM referral_invitations WHERE token_digest=$1`, digest[:]).Scan(&identityID, &appID, &appScope, &channel); e != nil || identityID != actor.IdentityID || appID != actor.AppID || appScope != actor.AppScope || channel != actor.Channel {
+			t.Fatal("installed financial invitation lost verified issuer snapshot")
+		}
 	}
 	response = request(http.MethodGet, parsed.Path)
 	cookies := response.Cookies()
