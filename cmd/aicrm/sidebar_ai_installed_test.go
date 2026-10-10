@@ -156,7 +156,7 @@ func TestPostgreSQLSidebarAIOperationsInstalled(t *testing.T) {
 	if code, _ := call("GET", "/api/sidebar/v2/ai-operations", "", otherToken, true); code != 401 {
 		t.Fatalf("cross employee status=%d", code)
 	}
-	if _, err = application.pool.Native().Exec(ctx, `UPDATE admin_users SET active=false WHERE id=1`); err != nil {
+	if _, err = application.pool.Native().Exec(ctx, `UPDATE admin_users SET is_active=false WHERE id=1`); err != nil {
 		t.Fatal(err)
 	}
 	if code, _ := call("GET", "/api/sidebar/v2/ai-operations", "", token, true); code != 401 {
