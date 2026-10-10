@@ -152,8 +152,8 @@ def dedup_base_ready() -> bool:
 def missing_prerequisites(lane: str) -> list[str]:
     required = {"bash", "go", "make", "node", "python3"}
     missing = []
-    if not exact_version(["go", "version"], "go1.26.6"):
-        missing.append("Go 1.26.6")
+    if not exact_version(["go", "version"], "go1.26.9"):
+        missing.append("Go 1.26.9")
     if not exact_version(["node", "--version"], "v" + NODE_VERSION):
         missing.append("Node " + NODE_VERSION)
     if lane != "preflight" and not exact_version(["npm", "--version"], NPM_VERSION):
@@ -199,8 +199,8 @@ def ai_selected_prerequisites(lane: str, checks: list[dict]) -> list[str]:
     elif lane == "backend":
         if not command_available("bash"):
             missing.append("bash")
-        if not exact_version(["go", "version"], "go1.26.6"):
-            missing.append("Go 1.26.6")
+        if not exact_version(["go", "version"], "go1.26.9"):
+            missing.append("Go 1.26.9")
         if any(_check_requires_postgres(check) for check in checks):
             if not postgres_16_ready():
                 missing.append("PostgreSQL 16 reachable through AICRM_DATABASE_URL")
@@ -212,8 +212,8 @@ def ai_selected_prerequisites(lane: str, checks: list[dict]) -> list[str]:
     elif lane == "browser":
         if not command_available("bash"):
             missing.append("bash")
-        if not exact_version(["go", "version"], "go1.26.6"):
-            missing.append("Go 1.26.6")
+        if not exact_version(["go", "version"], "go1.26.9"):
+            missing.append("Go 1.26.9")
         if not exact_version(["node", "--version"], "v" + NODE_VERSION):
             missing.append("Node " + NODE_VERSION)
         if not command_available("python3"):

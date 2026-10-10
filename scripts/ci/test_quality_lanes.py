@@ -505,8 +505,8 @@ class QualityLaneTests(unittest.TestCase):
     def test_version_match_is_exact_token_not_substring(self):
         with patch.object(quality_lanes, "command_available", return_value=True), patch("subprocess.run") as run:
             run.return_value.returncode = 0
-            run.return_value.stdout = "go version go1.26.60 linux/amd64\n"
-            self.assertFalse(quality_lanes.exact_version(["go", "version"], "go1.26.6"))
+            run.return_value.stdout = "go version go1.26.90 linux/amd64\n"
+            self.assertFalse(quality_lanes.exact_version(["go", "version"], "go1.26.9"))
 
     def test_dispatch_dedup_baseline_falls_back_to_checked_out_head_parent(self):
         head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=quality_lanes.ROOT, text=True).strip()
