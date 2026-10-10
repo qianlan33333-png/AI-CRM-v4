@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"os"
@@ -27,6 +28,12 @@ import (
 // Real Composition Root, OneID, qualifying Payment facts and Order paid fanout.
 // Only API runs; accepted effects are never dispatched to a real Provider.
 func TestPostgreSQLPaidReferralFinancialAttributionAtomicAndInstalled(t *testing.T) {
+	for _, channel := range []string{"mini_program", "h5_official_account"} {
+		t.Run(channel, func(t *testing.T) { paidReferralFinancialJourney(t, channel) })
+	}
+}
+
+func paidReferralFinancialJourney(t *testing.T, channel string) {
 	f := newPromotionCheckoutFixture(t)
 	defer f.close()
 	ctx := context.Background()
@@ -80,6 +87,13 @@ func TestPostgreSQLPaidReferralFinancialAttributionAtomicAndInstalled(t *testing
 		t.Fatal(err)
 	}
 	actor := referralport.TrustedSessionActor{CustomerID: f.buyer, IdentityID: identityID, AppID: "wx-promotion-checkout", AppScope: "wechat-app:promotion-checkout", Channel: "mini_program", OccurredAt: time.Now()}
+	if channel == "h5_official_account" {
+		if err = f.pool.QueryRow(ctx, `INSERT INTO customer_identities(customer_id,kind,scope_key,normalized_value,assurance,source,normalizer_version,verified_at) VALUES($1,'oa_openid','wechat-app:wx-paid-referral-h5','paid-financial-oa-owner','verified','synthetic-test',1,$2) RETURNING id`, f.buyer, time.Now()).Scan(&actor.IdentityID); err != nil {
+			t.Fatal(err)
+		}
+		actor.AppID, actor.AppScope, actor.Channel = "wx-paid-referral-h5", "wechat-app:wx-paid-referral-h5", channel
+	}
+
 	campaign, err := admin.CreateCampaign(ctx, referralport.CreateCampaignCommand{ActorAdminID: 1, Name: "financial referral", StartsAt: time.Now().Add(-time.Hour), EndsAt: time.Now().Add(time.Hour), TeamMode: referraldomain.TeamModeIndividual, QualificationMode: referraldomain.QualificationProductPurchase, ProductID: f.productID, ProductType: "standard_product", LeaderboardMetric: referraldomain.LeaderboardInvites, IdempotencyKey: "paid-financial-campaign"})
 	if err != nil {
 		t.Fatal(err)
@@ -163,6 +177,53 @@ func TestPostgreSQLPaidReferralFinancialAttributionAtomicAndInstalled(t *testing
 	board, err := service.Leaderboard(ctx, referralport.LeaderboardQuery{CampaignID: campaign.ID, Kind: referralport.LeaderboardPersonal, Period: referralport.LeaderboardTotal, ViewerCustomerID: f.buyer, Limit: 20})
 	if err != nil || len(board.Items) != 1 || board.Items[0].Score != 2 {
 		t.Fatal("financial attribution lost referral statistics", err)
+	}
+
+	// A stale unrelated Distribution cookie must never replace an invalid RFI.
+	stale := promotionCheckoutToken(t, f.issue(t, f.promoter, "paid-financial-unrelated-cookie"))
+	var ordinary orderdomain.Snapshot
+	if err = f.uow.Within(ctx, func(tx context.Context) error {
+		var e error
+		ordinary, e = f.orders.CreatePaymentOrderWithin(tx, orderport.PaymentOrderCommand{Provider: orderdomain.ProviderWeChatPay, MerchantOrderNo: "M-paid-financial-invalid", PayerCustomerID: f.promoter.CustomerID, BeneficiaryCustomerID: f.promoter.CustomerID, ProductID: f.productID, ProductCode: "promotion-checkout-product", ProductName: "分销归因商品", ProductVersion: 1, ProductType: "standard_product", UnitAmountMinor: 1000, Currency: "CNY", ReferralActivityContext: "rfi_" + strings.Repeat("A", 43), PromotionContext: stale, ActorScope: "checkout:paid-financial-invalid", IdempotencyKey: "paid-financial-invalid"})
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.assertOrderAttribution(t, ordinary.ID, 0, false)
+	// Existing invitations with no authenticated issuer stay statistics-only.
+	legacy, err := service.IssueInvitation(ctx, referralport.IssueInvitationCommand{Actor: actor, CampaignID: campaign.ID, IdempotencyKey: "paid-financial-legacy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyToken := strings.TrimPrefix(legacy.URL, "https://crm.example.test/referral/invite/")
+	legacyDigest := sha256.Sum256([]byte(legacyToken))
+	if _, err = f.pool.Exec(ctx, `UPDATE referral_invitations SET issuer_identity_id=0,issuer_app_id='',issuer_app_scope='',issuer_channel='' WHERE token_digest=$1`, legacyDigest[:]); err != nil {
+		t.Fatal(err)
+	}
+	originalToken := token
+	token = legacyToken
+	if err = f.uow.Within(ctx, func(tx context.Context) error {
+		var e error
+		ordinary, e = createWithin(tx, f.promoter.CustomerID, "paid-financial-legacy-order")
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.assertOrderAttribution(t, ordinary.ID, 0, false)
+	token = originalToken
+	if _, err = f.pool.Exec(ctx, `UPDATE distribution_product_policies SET enabled=false WHERE product_id=$1`, f.productID); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.uow.Within(ctx, func(tx context.Context) error {
+		var e error
+		ordinary, e = createWithin(tx, f.promoter.CustomerID, "paid-financial-disabled-order")
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.assertOrderAttribution(t, ordinary.ID, 0, false)
+	if _, err = f.pool.Exec(ctx, `UPDATE distribution_product_policies SET enabled=true WHERE product_id=$1`, f.productID); err != nil {
+		t.Fatal(err)
 	}
 	preparePaidReferralInstalledDirectory(t, f, []int64{f.buyer, f.promoter.CustomerID, f.otherPromoter.CustomerID})
 	verifyInstalledPaidReferralWithOptions(t, f, actor, campaign.ID, true, 2)
