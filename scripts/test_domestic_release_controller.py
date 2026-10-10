@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 from contextlib import ExitStack, contextmanager, nullcontext, redirect_stdout
+import copy
 import hashlib
 import importlib.util
 import io
@@ -1248,6 +1249,90 @@ class DomesticMainReleaseTests(unittest.TestCase):
             self.assertEqual(state["status"], "ready")
             self.assertEqual(state["queue"][0]["failure"], failure)
             self.assertEqual(state["queue"][0]["attempt"], 1)
+
+    def test_finalizer_cleanup_cannot_reclassify_confirmed_success(self) -> None:
+        def state_fixture(root: Path):
+            repo, base, candidate, _other = make_repository(root)
+            app = {"sha": base, "tree": release._tree(repo, base), "manifest_sha256": "a" * 64}
+            item = {"candidate_id": "candidate-1", "ref": "refs/heads/codex/one",
+                    "head_sha": candidate, "base_sha": base, "status": "checking", "attempt": 1}
+            state = release._new_state(base, app["tree"], app)
+            state.update(status="outcome_unknown", queue=[item],
+                         in_flight={"candidate_id": "candidate-1", "head_sha": candidate,
+                                    "phase": "main-cas-and-cursor", "commit_started": True})
+            return repo, base, candidate, app, item, state
+
+        def run_finalizer(root: Path, build_cleanup, *, fail_terminal_write=False):
+            repo, base, candidate, app, item, state = state_fixture(root)
+            cursor = {"cursor": {"main_sha": candidate, "source_bundle_sha256": "b" * 64}}
+            state_writes = []
+
+            def update(_path, current, **changes):
+                if fail_terminal_write:
+                    raise OSError("state write unavailable")
+                current.update(changes)
+                state_writes.append(copy.deepcopy(current))
+
+            cleanup_effect = ((lambda *_args: build_cleanup()) if callable(build_cleanup)
+                              else (lambda *_args: build_cleanup))
+
+            with mock.patch.object(release, "_record_production_cursor", return_value=cursor), \
+                 mock.patch.object(release, "_verify_production_cursor", return_value=cursor), \
+                 mock.patch.object(release, "_advance_main_cas"), \
+                 mock.patch.object(release, "_pending_archive_count", return_value=0), \
+                 mock.patch.object(release, "_update_state", side_effect=update), \
+                 mock.patch.object(release, "_reclaim_completed_build_copies", side_effect=cleanup_effect), \
+                 mock.patch.object(release, "_production_ssh", return_value="remote-cleanup-completed") as remote_cleanup:
+                if fail_terminal_write:
+                    with self.assertRaises(OSError):
+                        release._finalize_success(
+                            {"repo": str(repo), "prod_helper": "/helper"}, root / "state.json", state,
+                            item, {"bundle_sha256": "b" * 64}, base,
+                            {"sha": candidate, "manifest_sha256": "c" * 64},
+                            {"status": "passed"}, None, None, 1.0)
+                    return state, state_writes, remote_cleanup
+                result = release._finalize_success(
+                    {"repo": str(repo), "prod_helper": "/helper"}, root / "state.json", state,
+                    item, {"bundle_sha256": "b" * 64}, base,
+                    {"sha": candidate, "manifest_sha256": "c" * 64},
+                    {"status": "passed"}, None, None, 1.0)
+                return result, state, state_writes, remote_cleanup
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            warning = {"status": "cleanup_warning", "removed": [], "retained": [],
+                       "proof": str(root / "build-copies.json")}
+            result, state, writes, remote = run_finalizer(root, warning)
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["cleanup"]["status"], "completed")
+            self.assertEqual(state["queue"][0]["status"], "completed")
+            self.assertEqual(state["last_release"]["build_copy_cleanup"]["status"], "cleanup_warning")
+            self.assertEqual(state["last_release"]["package_cleanup"], "remote-cleanup-completed")
+            self.assertEqual(remote.call_count, 1)
+            self.assertEqual(len(writes), 3)
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            def unknown_proof():
+                raise OSError("cleanup proof unavailable")
+            result, state, writes, remote = run_finalizer(root, unknown_proof)
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["cleanup"]["status"], "readback_required")
+            self.assertEqual(state["queue"][0]["status"], "completed")
+            self.assertEqual(state["last_release"]["build_copy_cleanup"], {"status": "pending"})
+            self.assertEqual(state["last_release"]["package_cleanup"], {"status": "pending"})
+            self.assertEqual(len(writes), 1)
+            remote.assert_not_called()
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            state, writes, remote = run_finalizer(root, {"status": "completed", "removed": [],
+                                                         "retained": []}, fail_terminal_write=True)
+            self.assertEqual(state["status"], "outcome_unknown")
+            self.assertTrue(state["in_flight"]["commit_started"])
+            self.assertEqual(state["queue"][0]["status"], "checking")
+            self.assertEqual(writes, [])
+            remote.assert_not_called()
 
     def test_release_candidate_does_not_poll_behind_an_earlier_candidate(self) -> None:
         head, base = "a" * 40, "b" * 40

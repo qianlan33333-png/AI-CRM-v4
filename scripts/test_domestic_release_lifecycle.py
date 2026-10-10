@@ -635,6 +635,14 @@ class CheckLifecycleTest(unittest.TestCase):
             self.assertEqual(len(result['retained']), 1)
             # An unresolved transaction blocks even a previously verified copy.
             shutil.copytree(releases / names[0], duplicate_paths[names[0]])
+            with patch.object(release, '_load_state', return_value=state), \
+                 patch.object(release, '_assert_build_account_idle'), \
+                 patch.object(release.shutil, 'rmtree', side_effect=OSError('disk temporarily unavailable')), \
+                 release._locked(Path(config['lock'])):
+                warning = release._reclaim_completed_build_copies(config)
+            self.assertEqual(warning['status'], 'cleanup_warning')
+            self.assertTrue(duplicate_paths[names[0]].exists())
+            self.assertEqual(json.loads(Path(warning['proof']).read_text())['status'], 'cleanup_warning')
             state['in_flight'] = {'phase':'promotion'}
             with patch.object(release, '_load_state', return_value=state), release._locked(Path(config['lock'])):
                 blocked = release._reclaim_completed_build_copies(config)

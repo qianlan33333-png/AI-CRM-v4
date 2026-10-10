@@ -1,36 +1,12 @@
 {
   "schema": 1,
-  "baseline_sha": "710788ad563a3874f6bf06b17297758fa5ad3f77",
+  "baseline_sha": "f6538bd5e324d1960ab77b4f9a0285a774e40500",
   "checks": [
     {
-      "lane": "frontend",
-      "path": "web/v3/referralCenter.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/referralCenter.captainJourney.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/referralPosterShareText.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/referralAdmin.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/referralSettings.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/productAdapter.distribution_dimensions.test.mjs"
+      "lane": "preflight",
+      "path": "scripts/test_release_cache_lifecycle_contracts.py"
     }
   ],
-  "installed_checks": [
-    "referral",
-    "invoice-review-installed",
-    "distribution-review-installed"
-  ],
+  "installed_checks": [],
   "build_commands": []
 }

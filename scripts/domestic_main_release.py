@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from contextlib import contextmanager
+import copy
 from datetime import datetime, timezone
 import fcntl
 import grp
@@ -2494,6 +2495,7 @@ def _reclaim_completed_build_copies(config: dict) -> dict:
         return {"status": "installed_receipt_or_build_root_unavailable", "removed": []}
     planned = []
     retained = []
+    inventory_unknown = False
     for installed_path in sorted(releases.iterdir()):
         sha = installed_path.name
         if (not SHA.fullmatch(sha) or sha in pending or installed_path.is_symlink()
@@ -2507,10 +2509,12 @@ def _reclaim_completed_build_copies(config: dict) -> dict:
         if (receipt_path.is_symlink() or not receipt_path.is_file()
                 or duplicate.is_symlink() or metadata.is_symlink() or not metadata.is_file()):
             retained.append({"sha": sha, "reason": "missing or unsafe installed proof"})
+            inventory_unknown = True
             continue
         ancestors = [duplicate.parent, builds, builds.parent, releases.parent]
         if any(value.is_symlink() for value in ancestors):
             retained.append({"sha": sha, "reason": "linked build path"})
+            inventory_unknown = True
             continue
         try:
             installed = json.loads(receipt_path.read_text())
@@ -2521,16 +2525,32 @@ def _reclaim_completed_build_copies(config: dict) -> dict:
                     or not isinstance(installed.get("source_tree"), str)
                     or not SHA.fullmatch(installed["source_tree"])):
                 retained.append({"sha": sha, "reason": "installed receipt does not bind inventory"})
+                inventory_unknown = True
                 continue
-            duplicate_manifest = builder.verify_release_inventory(duplicate)
-            if duplicate_manifest != installed_manifest:
-                retained.append({"sha": sha, "reason": "build copy differs from installed inventory"})
-                continue
-            planned.append({"sha": sha, "path": str(duplicate),
-                            "manifest_sha256": installed_manifest,
-                            "allocated_bytes": _allocated_bytes(duplicate)})
         except (OSError, ValueError, ReleaseError, builder.BuildError) as exc:
             retained.append({"sha": sha, "reason": type(exc).__name__})
+            inventory_unknown = True
+            continue
+        try:
+            duplicate_manifest = builder.verify_release_inventory(duplicate)
+        except builder.BuildError:
+            # A malformed or changed duplicate is known to be unfit for
+            # deletion. Keep it for diagnosis while independently verified
+            # copies may still be reclaimed under the same lock.
+            retained.append({"sha": sha, "reason": "build copy inventory mismatch"})
+            continue
+        except (OSError, ValueError, ReleaseError) as exc:
+            retained.append({"sha": sha, "reason": type(exc).__name__})
+            inventory_unknown = True
+            continue
+        if duplicate_manifest != installed_manifest:
+            retained.append({"sha": sha, "reason": "build copy differs from installed inventory"})
+            continue
+        planned.append({"sha": sha, "path": str(duplicate),
+                        "manifest_sha256": installed_manifest,
+                        "allocated_bytes": _allocated_bytes(duplicate)})
+    if inventory_unknown:
+        return {"status": "inventory_unverified", "removed": [], "retained": retained}
     if not planned:
         return {"status": "nothing_to_reclaim", "removed": [], "retained": retained}
     try:
@@ -2540,21 +2560,29 @@ def _reclaim_completed_build_copies(config: dict) -> dict:
     proof = _lifecycle_directory(config) / ("build-copies-" + str(time.time_ns()) + ".json")
     record = {"status": "in_progress", "planned": planned, "removed": [], "retained": retained}
     atomic_json(proof, record)
-    try:
-        for item in planned:
-            target = Path(item["path"])
-            if target.is_symlink() or not target.is_dir():
-                retained.append({"sha": item["sha"], "reason": "build copy changed after verification"})
-                continue
-            shutil.rmtree(target)
-            record["removed"].append(item)
+    for item in planned:
+        target = Path(item["path"])
+        if target.is_symlink() or not target.is_dir():
+            retained.append({"sha": item["sha"], "reason": "build copy changed after verification"})
+            record["status"] = "identity_changed_after_verification"
+            record["retained"] = retained
             atomic_json(proof, record)
-    except OSError:
-        record["status"] = "cleanup_warning"
+            return {"status": record["status"], "removed": record["removed"],
+                    "retained": retained, "proof": str(proof)}
+        try:
+            shutil.rmtree(target)
+        except OSError:
+            record["status"] = "cleanup_warning"
+            record["retained"] = retained
+            # A proof-write failure is not a deletion warning: callers must
+            # stop further cleanup and leave the terminal receipt pending.
+            atomic_json(proof, record)
+            return {"status": "cleanup_warning", "removed": record["removed"],
+                    "retained": retained, "proof": str(proof)}
+        record["removed"].append(item)
         atomic_json(proof, record)
-        return {"status": "cleanup_warning", "removed": record["removed"],
-                "retained": retained, "proof": str(proof)}
     record["status"] = "completed"
+    record["retained"] = retained
     atomic_json(proof, record)
     return {"status": "completed", "removed": record["removed"], "retained": retained,
             "reclaimed_bytes": sum(item["allocated_bytes"] for item in record["removed"]),
@@ -3631,6 +3659,7 @@ def _finalize_success(config: dict[str, Any], state_path: Path, state: dict[str,
                       bundle_meta: dict[str, Any], previous_main_sha: str, installed_app: dict[str, str],
                       check_receipt: dict[str, Any], stage_receipt: dict[str, Any] | None,
                       production_receipt: dict[str, Any] | None, started: float) -> dict[str, Any]:
+    original_state = copy.deepcopy(state)
     repo = Path(config["repo"])
     candidate_sha = item["head_sha"]
     candidate_tree = _tree(repo, candidate_sha)
@@ -3687,23 +3716,64 @@ def _finalize_success(config: dict[str, Any], state_path: Path, state: dict[str,
                              "github_sync_observed_by": "manual_cli" if ack else "unknown",
                              "github_pending_first_parent_count": pending if pending is not None else "unknown",
                              "status": "ready", "completed_at_utc": item["completed_at_utc"],
-                             "duration_seconds": item["duration_seconds"]}
+                             "duration_seconds": item["duration_seconds"],
+                             "build_copy_cleanup": {"status": "pending"},
+                             "package_cleanup": {"status": "pending"}}
     if batch_heads is not None:
         state["last_release"]["batch_member_heads"] = batch_heads
-    _update_state(state_path, state, status="ready")
-    state["last_release"]["build_copy_cleanup"] = _reclaim_completed_build_copies(config)
-    _update_state(state_path, state, status="ready")
-    cleanup = None
+    cleanup_result = {"status": "pending"}
     try:
-        cleanup = _production_ssh(config, "sudo", "-n", config["prod_helper"],
-                                  "--reclaim-obsolete-releases", timeout=120)
-    except (ReleaseError, OSError, subprocess.SubprocessError):
-        cleanup = {"status": "maintenance-pending"}
-    state["last_release"]["package_cleanup"] = cleanup
-    _update_state(state_path, state, status="ready")
+        _update_state(state_path, state, status="ready")
+    except BaseException:
+        # Preserve the original commit-started ledger in memory so the caller
+        # records outcome_unknown, never a candidate failure, after production
+        # succeeded but the terminal receipt could not be persisted.
+        state.clear()
+        state.update(original_state)
+        raise
+    cleanup_result = _finish_success_cleanup(config, state_path, state)
     return {"status": "completed", "main_sha": candidate_sha, "main_tree": candidate_tree,
             "installed_app_sha": installed_app["sha"], "source_bundle_sha256": bundle_meta["bundle_sha256"],
-            "duration_seconds": item["duration_seconds"], "cursor": cursor}
+            "duration_seconds": item["duration_seconds"], "cursor": cursor, "cleanup": cleanup_result}
+
+
+def _finish_success_cleanup(config: dict[str, Any], state_path: Path, state: dict[str, Any]) -> dict[str, Any]:
+    """Run cleanup after the durable success record; cleanup cannot undo success."""
+    last = state.get("last_release")
+    pending = {"status": "pending"}
+    if not isinstance(last, dict):
+        return {"status": "pending", "reason": "terminal receipt is unavailable"}
+    try:
+        build_cleanup = _reclaim_completed_build_copies(config)
+    except Exception as exc:
+        # The initial terminal write already persisted pending markers. Do not
+        # attempt more cleanup writes when proof or ownership is uncertain.
+        return {"status": "readback_required", "error_type": type(exc).__name__}
+    if not isinstance(build_cleanup, dict):
+        return {"status": "readback_required", "reason": "build cleanup returned no structured result"}
+    safe_status = build_cleanup.get("status") in {"completed", "nothing_to_reclaim", "cleanup_warning"}
+    if (not safe_status or build_cleanup.get("retained")
+            or (build_cleanup.get("status") == "cleanup_warning" and not build_cleanup.get("proof"))):
+        return {"status": "readback_required", "build_copy_cleanup": build_cleanup}
+    last["build_copy_cleanup"] = build_cleanup
+    try:
+        _update_state(state_path, state, status="ready")
+    except Exception as exc:
+        last["build_copy_cleanup"] = pending
+        return {"status": "readback_required", "error_type": type(exc).__name__}
+    try:
+        package_cleanup = _production_ssh(config, "sudo", "-n", config["prod_helper"],
+                                          "--reclaim-obsolete-releases", timeout=120)
+    except Exception as exc:
+        package_cleanup = {"status": "maintenance-pending", "error_type": type(exc).__name__}
+    last["package_cleanup"] = package_cleanup
+    try:
+        _update_state(state_path, state, status="ready")
+    except Exception as exc:
+        last["package_cleanup"] = pending
+        return {"status": "readback_required", "error_type": type(exc).__name__}
+    return {"status": "completed", "build_copy_cleanup": build_cleanup,
+            "package_cleanup": package_cleanup}
 
 
 def _mark_unknown(state_path: Path, state: dict[str, Any], phase: str, error: BaseException) -> None:
@@ -5405,6 +5475,7 @@ def reconcile(config: dict[str, Any]) -> dict[str, Any]:
             _advance_main_cas(repo, old_main, sha)
         elif current_main != sha:
             raise ReleaseError("domestic main has moved to a different SHA; remain stopped")
+        original_state = copy.deepcopy(state)
         state["main"] = {"sha": sha, "tree": tree}
         state["installed_app"] = installed_app
         state["staging_out_of_sync"] = False
@@ -5431,14 +5502,21 @@ def reconcile(config: dict[str, Any]) -> dict[str, Any]:
                                  "last_manual_confirmed_github_sha": (state.get("archive_ack") or {}).get("sha", "unknown"),
                                  "github_sync_observed_by": "manual_cli" if state.get("archive_ack") else "unknown",
                                  "github_pending_first_parent_count": _pending_archive_count(repo, (state.get("archive_ack") or {}).get("sha"), sha) if state.get("archive_ack") else "unknown",
-                                 "status": "ready", "reconciled_at_utc": _utc_now()}
+                                 "status": "ready", "reconciled_at_utc": _utc_now(),
+                                 "build_copy_cleanup": {"status": "pending"},
+                                 "package_cleanup": {"status": "pending"}}
         if isinstance(batch, dict):
             state["last_release"]["batch_member_heads"] = inflight["batch_member_heads"]
-        _update_state(state_path, state, status="ready")
-        state["last_release"]["build_copy_cleanup"] = _reclaim_completed_build_copies(config)
-        _update_state(state_path, state, status="ready")
+        try:
+            _update_state(state_path, state, status="ready")
+        except BaseException:
+            state.clear()
+            state.update(original_state)
+            raise
+        cleanup_result = _finish_success_cleanup(config, state_path, state)
         return {"status": "reconciled", "main_sha": sha, "main_tree": tree,
-                "installed_app_sha": installed_app["sha"], "cursor": cursor}
+                "installed_app_sha": installed_app["sha"], "cursor": cursor,
+                "cleanup": cleanup_result}
 
 
 def _assert_release_timers_stopped() -> None:
