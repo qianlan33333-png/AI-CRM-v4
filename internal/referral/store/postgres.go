@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
@@ -21,8 +22,17 @@ import (
 var ErrInvalid = errors.New("invalid referral persistence request")
 
 type Repository struct {
-	pool *pgxpool.Pool
-	uow  platformport.UnitOfWork
+	pool  *pgxpool.Pool
+	uow   platformport.UnitOfWork
+	roots identityport.CanonicalCustomerRootsReader
+}
+
+func (r *Repository) BindCanonicalCustomerRoots(reader identityport.CanonicalCustomerRootsReader) error {
+	if r == nil || reader == nil || r.roots != nil {
+		return referralport.ErrUnavailable
+	}
+	r.roots = reader
+	return nil
 }
 
 func NewPostgreSQL(pool *pgxpool.Pool, uow platformport.UnitOfWork) (*Repository, error) {

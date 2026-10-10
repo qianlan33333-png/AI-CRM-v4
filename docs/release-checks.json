@@ -1,83 +1,85 @@
 {
   "schema": 1,
-  "baseline_sha": "974158a16903d5d1ed199359f471c4191a833924",
+  "baseline_sha": "970e3e3c9f454fc14abd3115fa6daca41522422f",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/payment/port",
-      "test": "TestProfitSharingPurchaseDescriptionPreservesBuyerAndProduct"
+      "package": "./internal/platform/postgres"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/provider",
-      "test": "TestOfficialProfitSharingPurchaseDescriptionReachesRequest"
+      "package": "./internal/referral/domain"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/provider",
-      "test": "TestProfitSharingEffectsUseInjectedSDKAndFailClosedWithoutIt"
+      "package": "./internal/referral/store"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/provider",
-      "test": "TestProfitSharingReconciliationUsesOriginalInstructionMaterial"
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLCanonicalPaidRankingsMatchModelAcrossBatches",
+      "postgres": true,
+      "race": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/store",
-      "test": "TestProfitSharingProviderIntentRequiresExactlyOneOwner"
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLCanonicalFreeCloseSnapshotKeepsOneWritableSnapshot",
+      "postgres": true,
+      "race": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLProfitSharingDescriptionFreezeReplayAndLegacyMigration",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLPaidRankingThreeMetricsScopesPeriodsAndRefunds",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestProfitSharingReplayRejectsAnyFrozenCommandMutation"
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLPaidInvitationWithoutDistributorFreezesAndScoresAtomically",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLRefundDoesNotReserveFutureCommission",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLReferralRanksAcrossAsiaShanghaiDayAndWeekBoundaries",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "test": "TestReview20261009ReferralSalesCloseSnapshotMatchesConfiguredRanking",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "test": "TestReview20261009ReferralInviteCloseSnapshotPreservesReversalAndTies",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLReferralInviterReversalWinsBeforeBlockedNewAcceptance",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLReferralSol61MergedCustomerCannotJoinTwice",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestProfitSharingDescriptionUsesOriginalBuyerAndFrozenProduct"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLPaidReferralComposedPurchaseDescription",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLPaidReferralCanonicalAliasesAndRepurchaseFreezeCommission",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/customer/store",
-      "test": "TestProviderProfileCreatesMinimumAndPreservesHigherPriorityNamePostgreSQL",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/customer/store",
-      "test": "TestWeChatNicknameMigrationDoesNotBackfillOrReadMixedNamePostgreSQL",
+      "test": "TestPostgreSQLReferralCompositionDoesNotRequireDistributionPaymentCapability",
       "postgres": true
     }
   ],
   "installed_checks": [
-    "paid-referral-financial-canonical",
-    "profit-sharing-purchase-description",
-    "refund-before-split"
+    "canonical-referral-reporting"
   ],
   "build_commands": []
 }

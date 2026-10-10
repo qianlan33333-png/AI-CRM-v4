@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -277,6 +279,74 @@ func TestPostgreSQLReferralSol61MergedCustomerCannotJoinTwice(t *testing.T) {
 		}
 		if after := facts(); after != before {
 			t.Fatalf("ambiguity appended/deleted facts: before=%v after=%v", before, after)
+		}
+	})
+	t.Run("free_rank_counter_and_detail_share_canonical_promoter", func(t *testing.T) {
+		var extra identityport.ProvisionResult
+		if e := uow.Within(ctx, func(tx context.Context) error {
+			var e error
+			extra, e = oneID.ProvisionCustomerFromVerifiedIdentity(tx, evidenceMergeFact(t, identitydomain.KindMPOpenID, scope, "sol61-referral-extra"))
+			return e
+		}); e != nil {
+			t.Fatal(e)
+		}
+		ownToken := oldInvitation.URL[strings.LastIndex(oldInvitation.URL, "/")+1:]
+		if _, e := service.JoinCampaign(ctx, referralport.JoinCampaignCommand{Actor: actor(extra), CampaignID: campaign.ID, InvitationToken: ownToken, IdempotencyKey: "canonical-free-extra-join"}); e != nil {
+			t.Fatal(e)
+		}
+		for _, sessionActor := range []distributionport.TrustedSessionActor{oldActor, mergedActor} {
+			mine, e := service.MyCampaign(ctx, sessionActor, campaign.ID)
+			if e != nil || mine.DirectInvitationCount != 1 || mine.PersonalTotalScore != 1 || mine.PersonalRank < 1 {
+				t.Fatalf("canonical free own summary=%+v err=%v", mine, e)
+			}
+			items, e := service.ListMyInvites(ctx, sessionActor, campaign.ID, "", 10)
+			if e != nil || len(items.Items) != 1 || items.Items[0].Participation.InviterCustomerID != int64(survivor.CustomerID) {
+				t.Fatalf("canonical free detail=%+v err=%v", items, e)
+			}
+		}
+		board, e := service.Leaderboard(ctx, referralport.LeaderboardQuery{CampaignID: campaign.ID, Kind: referralport.LeaderboardPersonal, Period: referralport.LeaderboardTotal, ViewerCustomerID: first.Participation.CustomerID, Limit: 20})
+		if e != nil || board.MyEntry == nil || board.MyEntry.CustomerID != int64(survivor.CustomerID) || board.MyEntry.Score != 1 {
+			t.Fatalf("canonical free rank=%+v err=%v", board, e)
+		}
+	})
+	t.Run("paid_rankings_use_current_subjects_without_rewriting_facts", func(t *testing.T) {
+		for _, metric := range []referraldomain.LeaderboardMetric{referraldomain.LeaderboardInvites, referraldomain.LeaderboardSalesAmount, referraldomain.LeaderboardSalesOrders} {
+			paid, e := admin.CreateCampaign(ctx, referralport.CreateCampaignCommand{ActorAdminID: 9001, Name: "merged paid ranking " + string(metric), StartsAt: at.Add(-time.Hour), EndsAt: at.Add(time.Hour), TeamMode: referraldomain.TeamModeIndividual, QualificationMode: referraldomain.QualificationProductPurchase, ProductID: 51, ProductType: referraldomain.ProductTypeStandard, LeaderboardMetric: metric, IdempotencyKey: "merged-ranking-" + string(metric)})
+			if e != nil {
+				t.Fatal(e)
+			}
+			oldID, rootID, otherID := first.Participation.CustomerID, int64(survivor.CustomerID), int64(inviter.CustomerID)
+			for i, pair := range [][2]int64{{otherID, oldID}, {otherID, rootID}, {oldID, otherID}, {rootID, otherID}, {oldID, rootID}} {
+				digest := sha256.Sum256([]byte("merged-paid-ranking-" + string(metric) + "-" + strconv.Itoa(i)))
+				if e = uow.Within(ctx, func(tx context.Context) error {
+					_, e := repository.InsertProductSaleEventWithin(tx, referraldomain.ProductSaleEvent{CampaignID: paid.ID, OrderID: paid.ID*100 + int64(i) + 1, OrderVersion: 2, ProductID: 51, ProductType: "standard_product", ProductCode: "p-51", ProductName: "original", ProductVersion: 1, PromoterCustomerID: pair[0], PromotionCredentialRef: "frozen-synthetic", PolicyVersion: 1, BuyerCustomerID: pair[1], BeneficiaryCustomerID: pair[1], Kind: referraldomain.ProductSaleCredit, AmountDeltaMinor: 680, OrderCountDelta: 1, Currency: "CNY", SourcePaidEventID: paid.ID*100 + int64(i) + 1, SourceDigest: digest, OccurredAt: at})
+					return e
+				}); e != nil {
+					t.Fatal(e)
+				}
+			}
+			for _, period := range []referralport.LeaderboardPeriod{referralport.LeaderboardDay, referralport.LeaderboardWeek, referralport.LeaderboardTotal} {
+				board, e := service.Leaderboard(ctx, referralport.LeaderboardQuery{CampaignID: paid.ID, Kind: referralport.LeaderboardPersonal, Period: period, Anchor: at, ViewerCustomerID: oldID, Limit: 20})
+				want := int64(1)
+				if metric == referraldomain.LeaderboardSalesAmount {
+					want = 1360
+				}
+				if metric == referraldomain.LeaderboardSalesOrders {
+					want = 2
+				}
+				if e != nil || len(board.Items) != 2 || board.MyEntry == nil || board.MyEntry.CustomerID != rootID {
+					t.Fatalf("metric=%s period=%s canonical board=%+v err=%v", metric, period, board, e)
+				}
+				for _, item := range board.Items {
+					if item.Score != want || item.SalesAmountMinor != 1360 || item.SalesOrderCount != 2 {
+						t.Fatalf("metric=%s canonical entry=%+v want=%d", metric, item, want)
+					}
+				}
+			}
+			var count int
+			if e = native.QueryRow(ctx, "SELECT count(*) FROM referral_product_sale_events WHERE campaign_id=$1", paid.ID).Scan(&count); e != nil || count != 5 {
+				t.Fatalf("immutable history count=%d err=%v", count, e)
+			}
 		}
 	})
 	t.Run("merge_period_session_follows_actual_reversal", func(t *testing.T) {

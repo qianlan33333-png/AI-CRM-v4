@@ -181,6 +181,7 @@ type Service struct {
 	attributions          distributionport.FrozenOrderAttributionReader
 	timeline              platformaudit.TimelineReader
 	subjects              trustedReferralSubjects
+	reportingUow          platformport.UnitOfWork
 	now                   func() time.Time
 }
 
@@ -194,7 +195,31 @@ func (s *Service) BindIdentitySubjects(reader trustedReferralSubjects) error {
 		return referralport.ErrUnavailable
 	}
 	s.subjects = reader
+	if roots, ok := reader.(identityport.CanonicalCustomerRootsReader); ok {
+		if binder, ok := s.store.(interface {
+			BindCanonicalCustomerRoots(identityport.CanonicalCustomerRootsReader) error
+		}); ok {
+			if err := binder.BindCanonicalCustomerRoots(roots); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+func (s *Service) BindReportingUnitOfWork(uow platformport.UnitOfWork) error {
+	if s == nil || uow == nil || s.reportingUow != nil {
+		return referralport.ErrUnavailable
+	}
+	s.reportingUow = uow
+	return nil
+}
+
+func (s *Service) reportingUnitOfWork() platformport.UnitOfWork {
+	if s.reportingUow != nil {
+		return s.reportingUow
+	}
+	return s.uow
 }
 
 // The immutable verified handle, rather than a session's historical customer
@@ -722,7 +747,7 @@ func (s *Service) MyCampaign(ctx context.Context, actor referralport.TrustedSess
 		}
 		result.InvitationAvailable = participation.State == referraldomain.ParticipationActive && campaign.AcceptingAt(s.now().UTC())
 		var countErr error
-		err = s.uow.Within(ctx, func(tx context.Context) error {
+		err = s.reportingUnitOfWork().Within(ctx, func(tx context.Context) error {
 			if campaign.Config().QualificationMode == referraldomain.QualificationProductPurchase {
 				result.DirectInvitationCount, countErr = s.store.CountPaidInviteesWithin(tx, campaignID, actor.CustomerID)
 			} else {
@@ -815,7 +840,7 @@ func (s *Service) Leaderboard(ctx context.Context, query referralport.Leaderboar
 		return referralport.LeaderboardPage{}, err
 	}
 	var campaign referraldomain.Campaign
-	err = s.uow.Within(ctx, func(tx context.Context) error {
+	err = s.reportingUnitOfWork().Within(ctx, func(tx context.Context) error {
 		var err error
 		campaign, err = s.store.ReadCampaignWithin(tx, query.CampaignID, false)
 		return err
@@ -832,7 +857,7 @@ func (s *Service) Leaderboard(ctx context.Context, query referralport.Leaderboar
 	}
 	var items []referralport.LeaderboardEntry
 	var mine *referralport.LeaderboardEntry
-	err = s.uow.Within(ctx, func(tx context.Context) error {
+	err = s.reportingUnitOfWork().Within(ctx, func(tx context.Context) error {
 		var err error
 		if campaign.Config().LeaderboardMetric != referraldomain.LeaderboardInvites || campaign.Config().QualificationMode == referraldomain.QualificationProductPurchase {
 			items, mine, err = s.store.ListSalesLeaderboardRowsWithin(tx, query.CampaignID, query.Kind, campaign.Config().LeaderboardMetric, query.TeamID, start, end, offset, query.Limit+1, query.ViewerCustomerID, query.ViewerTeamID)

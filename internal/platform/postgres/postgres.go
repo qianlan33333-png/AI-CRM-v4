@@ -163,6 +163,15 @@ func NewReadOnlyRepeatableReadUnitOfWork(pool *Pool) (*UnitOfWork, error) {
 	return &UnitOfWork{pool: pool, options: pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}}, nil
 }
 
+// NewRepeatableReadUnitOfWork freezes a reporting snapshot and its receipt
+// atomically. Other command paths continue using their default transaction.
+func NewRepeatableReadUnitOfWork(pool *Pool) (*UnitOfWork, error) {
+	if pool == nil || pool.pool == nil {
+		return nil, ErrInvalidConfig
+	}
+	return &UnitOfWork{pool: pool, options: pgx.TxOptions{IsoLevel: pgx.RepeatableRead}}, nil
+}
+
 func (unit *UnitOfWork) Within(ctx context.Context, callback func(context.Context) error) (err error) {
 	if callback == nil {
 		return errors.New("unit of work callback is required")

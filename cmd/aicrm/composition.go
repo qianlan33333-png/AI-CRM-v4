@@ -1793,6 +1793,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		if err = referralService.BindIdentitySubjects(queries); err != nil {
 			return fail(err)
 		}
+		if err = referralService.BindReportingUnitOfWork(overviewReadUoW); err != nil {
+			return fail(err)
+		}
 		referralPaidConsumer = referralService
 		referralRefundConsumer = referralService
 		// Product activity checkout facts are owned by Referral and must be
@@ -1805,6 +1808,13 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		}
 		referralAdminService, err = referralapp.NewAdminService(uow, referralRepository, referralCanonicalCustomerVerifier{resolver: canonicalCustomerAdapter{reader: queries}, identities: queries}, referralCampaignCloseEnqueuer, auditService, platformoutbox.NewPostgreSQL())
 		if err != nil {
+			return fail(err)
+		}
+		referralCloseUoW, err := platformpostgres.NewRepeatableReadUnitOfWork(pool)
+		if err != nil {
+			return fail(err)
+		}
+		if err = referralAdminService.BindCampaignCloseUnitOfWork(referralCloseUoW); err != nil {
 			return fail(err)
 		}
 		referralPosters, err = referralapp.NewPosterService(uow, referralRepository, referralPosterMediaReader{media: mediaService}, auditService, platformoutbox.NewPostgreSQL())

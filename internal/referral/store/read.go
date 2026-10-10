@@ -110,7 +110,11 @@ func (r *Repository) CountDirectInvitationsWithin(ctx context.Context, campaignI
 		return 0, ErrInvalid
 	}
 	var count int64
-	err = tx.QueryRow(ctx, `SELECT count(*) FROM referral_participations WHERE campaign_id=$1 AND inviter_customer_id=$2 AND state='active'`, campaignID, inviterCustomerID).Scan(&count)
+	query, args, err := r.canonicalReportingWithin(ctx, campaignID, `SELECT count(DISTINCT customer_id) FROM referral_participations WHERE campaign_id=$1 AND inviter_customer_id=$2 AND customer_id<>$2 AND state='active'`, []any{campaignID, inviterCustomerID}, 1)
+	if err != nil {
+		return 0, err
+	}
+	err = tx.QueryRow(ctx, query, args...).Scan(&count)
 	if err != nil {
 		return 0, mapError(err)
 	}
@@ -130,12 +134,16 @@ func (r *Repository) CountPaidInviteesWithin(ctx context.Context, campaignID, pr
 		return 0, ErrInvalid
 	}
 	var count int64
-	err = tx.QueryRow(ctx, `WITH paid_buyers AS (
+	query, args, err := r.canonicalReportingWithin(ctx, campaignID, `WITH paid_buyers AS (
 		SELECT buyer_customer_id, SUM(amount_delta_minor) AS net_minor
 		FROM referral_product_sale_events
 		WHERE campaign_id=$1 AND promoter_customer_id=$2 AND buyer_customer_id<>$2
 		GROUP BY buyer_customer_id
-	) SELECT count(*) FROM paid_buyers WHERE net_minor>0`, campaignID, promoterCustomerID).Scan(&count)
+	) SELECT count(*) FROM paid_buyers WHERE net_minor>0`, []any{campaignID, promoterCustomerID}, 1)
+	if err != nil {
+		return 0, err
+	}
+	err = tx.QueryRow(ctx, query, args...).Scan(&count)
 	if err != nil {
 		return 0, mapError(err)
 	}
@@ -153,11 +161,15 @@ func (r *Repository) ListPaidInviteItemsWithin(ctx context.Context, campaignID, 
 	if campaignID < 1 || promoterCustomerID < 1 || offset < 0 || limit < 1 || limit > 101 {
 		return nil, ErrInvalid
 	}
-	rows, err := tx.Query(ctx, `SELECT buyer_customer_id,MIN(occurred_at) AS first_paid_at,SUM(amount_delta_minor)::bigint AS net_minor
+	query, args, err := r.canonicalReportingWithin(ctx, campaignID, `SELECT buyer_customer_id,MIN(occurred_at) FILTER (WHERE kind='credit') AS first_paid_at,SUM(amount_delta_minor)::bigint AS net_minor
 		FROM referral_product_sale_events
 		WHERE campaign_id=$1 AND promoter_customer_id=$2 AND buyer_customer_id<>$2
 		GROUP BY buyer_customer_id
-		ORDER BY first_paid_at DESC,buyer_customer_id DESC OFFSET $3 LIMIT $4`, campaignID, promoterCustomerID, offset, limit)
+		ORDER BY first_paid_at DESC,buyer_customer_id DESC OFFSET $3 LIMIT $4`, []any{campaignID, promoterCustomerID, offset, limit}, 1)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -299,10 +311,18 @@ func (r *Repository) ListInviteItemsWithin(ctx context.Context, campaignID, invi
 	if campaignID < 1 || inviterCustomerID < 1 || offset < 0 || limit < 1 || limit > 101 {
 		return nil, ErrInvalid
 	}
-	rows, err := tx.Query(ctx, `SELECT `+participationColumns+`,COALESCE((SELECT sum(delta) FROM referral_score_events e WHERE e.participation_id=p.id),0)
+	query := `SELECT ` + participationColumns + `,COALESCE((SELECT sum(delta) FROM referral_score_events e WHERE e.participation_id=p.id),0)
         FROM referral_participations p
-        WHERE p.campaign_id=$1 AND p.inviter_customer_id=$2
-        ORDER BY p.joined_at DESC,p.id DESC OFFSET $3 LIMIT $4`, campaignID, inviterCustomerID, offset, limit)
+        WHERE p.campaign_id=$1 AND p.inviter_customer_id=$2 AND p.customer_id<>$2
+        ORDER BY p.joined_at DESC,p.id DESC OFFSET $3 LIMIT $4`
+	if r.roots != nil {
+		query = strings.Replace(query, "FROM referral_participations p", `FROM (SELECT DISTINCT ON (customer_id) * FROM referral_participations WHERE campaign_id=$1 AND inviter_customer_id=$2 ORDER BY customer_id,(state='active') DESC,joined_at DESC,id DESC) p`, 1)
+	}
+	query, args, err := r.canonicalReportingWithin(ctx, campaignID, query, []any{campaignID, inviterCustomerID, offset, limit}, 1)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -489,6 +509,10 @@ func (r *Repository) LeaderboardRowsWithin(ctx context.Context, campaignID int64
 		args = []any{campaignID, start.UTC(), end.UTC(), offset, limit}
 		ownArgs = []any{campaignID, start.UTC(), end.UTC(), viewerTeamID}
 	}
+	query, ownQuery, args, ownArgs, viewerCustomerID, err = r.canonicalRankingQueriesWithin(ctx, campaignID, kind, query, ownQuery, args, ownArgs, viewerCustomerID, true)
+	if err != nil {
+		return nil, nil, err
+	}
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, nil, mapError(err)
@@ -590,6 +614,10 @@ func (r *Repository) ListSalesLeaderboardRowsWithin(ctx context.Context, campaig
 		ownQuery = strings.Replace(query, `SELECT rank,score,customer_id,team_id,team_name,sales_amount_minor,sales_order_count,first_reached_at FROM ranked ORDER BY rank OFFSET $4 LIMIT $5`, `SELECT rank,score,customer_id,team_id,team_name,sales_amount_minor,sales_order_count,first_reached_at FROM ranked WHERE team_id=$4`, 1)
 		args = []any{campaignID, start.UTC(), end.UTC(), offset, limit}
 		ownArgs = []any{campaignID, start.UTC(), end.UTC(), viewerTeamID}
+	}
+	query, ownQuery, args, ownArgs, viewerCustomerID, err = r.canonicalRankingQueriesWithin(ctx, campaignID, kind, query, ownQuery, args, ownArgs, viewerCustomerID, false)
+	if err != nil {
+		return nil, nil, err
 	}
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {

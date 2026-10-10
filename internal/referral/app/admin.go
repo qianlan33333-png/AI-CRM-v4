@@ -57,12 +57,21 @@ type adminStore interface {
 
 type AdminService struct {
 	uow       platformport.UnitOfWork
+	closeUow  platformport.UnitOfWork
 	store     adminStore
 	verifier  referralport.CanonicalCustomerVerifier
 	closeJobs CampaignCloseEnqueuer
 	audit     *platformaudit.Service
 	outbox    platformoutbox.Appender
 	now       func() time.Time
+}
+
+func (s *AdminService) BindCampaignCloseUnitOfWork(uow platformport.UnitOfWork) error {
+	if s == nil || uow == nil || s.closeUow != nil {
+		return referralport.ErrUnavailable
+	}
+	s.closeUow = uow
+	return nil
 }
 
 func NewAdminService(uow platformport.UnitOfWork, store adminStore, verifier referralport.CanonicalCustomerVerifier, closeJobs CampaignCloseEnqueuer, audit *platformaudit.Service, outbox platformoutbox.Appender) (*AdminService, error) {
@@ -443,7 +452,11 @@ func (s *AdminService) RunCampaignClose(ctx context.Context, campaignID int64) e
 	if s == nil || campaignID < 1 {
 		return referralport.ErrConflict
 	}
-	return s.uow.Within(ctx, func(tx context.Context) error {
+	uow := s.uow
+	if s.closeUow != nil {
+		uow = s.closeUow
+	}
+	return uow.Within(ctx, func(tx context.Context) error {
 		campaign, err := s.store.ReadCampaignWithin(tx, campaignID, true)
 		if err != nil {
 			return err

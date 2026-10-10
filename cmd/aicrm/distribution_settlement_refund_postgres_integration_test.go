@@ -279,6 +279,7 @@ func refundWorkerPool(t *testing.T) (*pgxpool.Pool, func()) {
 		"0127_payment_historical_refund_states.sql", "0131_payment_historical_unassigned.sql", "0134_payment_history_source_delta.sql",
 		"0140_payment_h5_unionid_verified.sql", "0143_payment_checkout_abandonments.sql", "0144_payment_checkout_restart_permissions.sql",
 		"0156_distribution_profit_sharing_payment.sql", "0157_distribution_core.sql", "0158_order_distribution_qualification_evidence.sql", "0161_payment_paid_confirmation_time.sql", "0165_payment_profit_sharing_receiver_failure_class.sql", "0166_payment_profit_sharing_instruction_failure_class.sql", "0167_distribution_settlement_not_paid_exception.sql",
+		"0233_payment_profit_sharing_description.sql",
 	} {
 		body, readErr := os.ReadFile(filepath.Join(root, "migrations", name))
 		if readErr != nil {

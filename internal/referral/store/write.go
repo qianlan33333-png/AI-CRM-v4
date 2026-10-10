@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -489,7 +490,7 @@ func (r *Repository) InsertCampaignCloseSnapshotWithin(ctx context.Context, camp
 		return r.insertSalesCampaignCloseSnapshotWithin(ctx, campaign, at)
 	}
 	var id int64
-	err = tx.QueryRow(ctx, `WITH active_credits AS (
+	query := `WITH active_credits AS (
         SELECT c.id,c.inviter_customer_id,c.team_id,c.occurred_at
         FROM referral_score_events c
         WHERE c.campaign_id=$1 AND c.kind='credit' AND c.occurred_at <= $2
@@ -507,7 +508,19 @@ func (r *Repository) InsertCampaignCloseSnapshotWithin(ctx context.Context, camp
         COALESCE((SELECT max(id) FROM referral_score_events WHERE campaign_id=$1),0)::bigint AS watermark
     ) INSERT INTO referral_campaign_snapshots(campaign_id,snapshot_kind,captured_at,score_watermark,rankings)
       SELECT $1,'close',$2,watermark,rankings FROM payload
-      ON CONFLICT(campaign_id,snapshot_kind) DO NOTHING RETURNING id`, campaignID, at.UTC()).Scan(&id)
+      ON CONFLICT(campaign_id,snapshot_kind) DO NOTHING RETURNING id`
+	if r.roots != nil {
+		query = strings.ReplaceAll(query, "c.team_id,c.occurred_at", "c.team_id,c.occurred_at,c.buyer_customer_id")
+		query = strings.ReplaceAll(query, "count(*)", "count(DISTINCT buyer_customer_id)")
+		query = strings.ReplaceAll(query, "AS customer_id,team_id,count", "AS customer_id,0::bigint AS team_id,count")
+		query = strings.ReplaceAll(query, "GROUP BY inviter_customer_id,team_id", "GROUP BY inviter_customer_id")
+		query = strings.Replace(query, "max(id) FROM referral_score_events", "max(id) FROM original_score_events", 1)
+	}
+	query, args, err := r.canonicalReportingWithin(ctx, campaignID, query, []any{campaignID, at.UTC()}, -1)
+	if err != nil {
+		return 0, err
+	}
+	err = tx.QueryRow(ctx, query, args...).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = tx.QueryRow(ctx, `SELECT id FROM referral_campaign_snapshots WHERE campaign_id=$1 AND snapshot_kind='close'`, campaignID).Scan(&id)
 	}
@@ -533,7 +546,7 @@ func (r *Repository) insertSalesCampaignCloseSnapshotWithin(ctx context.Context,
 		score, ordering = "paid_invite_count", "paid_invite_count DESC,sales_amount_minor DESC"
 	}
 	var id int64
-	err = tx.QueryRow(ctx, `WITH sale_nets AS (
+	query := `WITH sale_nets AS (
         SELECT c.promoter_customer_id,c.team_id,c.buyer_customer_id,c.occurred_at AS paid_at,
                (c.amount_delta_minor+COALESCE(SUM(r.amount_delta_minor),0))::bigint AS net_minor,
                (c.order_count_delta+COALESCE(SUM(r.order_count_delta),0))::bigint AS net_orders
@@ -554,13 +567,21 @@ func (r *Repository) insertSalesCampaignCloseSnapshotWithin(ctx context.Context,
     ), payload AS (
         SELECT jsonb_build_object(
           'leaderboard_metric',$6::text,
-          'personal',COALESCE((SELECT jsonb_agg(jsonb_build_object('customer_id',customer_id,'team_id',0,'score',`+score+`,'sales_amount_minor',sales_amount_minor,'sales_order_count',sales_order_count,'first_reached_at',first_reached_at) ORDER BY `+ordering+`,first_reached_at,customer_id) FROM personal),'[]'::jsonb),
-          'team',COALESCE((SELECT jsonb_agg(jsonb_build_object('team_id',team_id,'score',`+score+`,'sales_amount_minor',sales_amount_minor,'sales_order_count',sales_order_count,'first_reached_at',first_reached_at) ORDER BY `+ordering+`,first_reached_at,team_id) FROM teams),'[]'::jsonb)
+          'personal',COALESCE((SELECT jsonb_agg(jsonb_build_object('customer_id',customer_id,'team_id',0,'score',` + score + `,'sales_amount_minor',sales_amount_minor,'sales_order_count',sales_order_count,'first_reached_at',first_reached_at) ORDER BY ` + ordering + `,first_reached_at,customer_id) FROM personal),'[]'::jsonb),
+          'team',COALESCE((SELECT jsonb_agg(jsonb_build_object('team_id',team_id,'score',` + score + `,'sales_amount_minor',sales_amount_minor,'sales_order_count',sales_order_count,'first_reached_at',first_reached_at) ORDER BY ` + ordering + `,first_reached_at,team_id) FROM teams),'[]'::jsonb)
         ) AS rankings,
         COALESCE((SELECT max(id) FROM referral_product_sale_events WHERE campaign_id=$1 AND occurred_at <= $2),0)::bigint AS watermark
     ) INSERT INTO referral_campaign_snapshots(campaign_id,snapshot_kind,captured_at,score_watermark,rankings)
       SELECT $1,'close',$2,watermark,rankings FROM payload
-      ON CONFLICT(campaign_id,snapshot_kind) DO NOTHING RETURNING id`, campaign.ID, at.UTC(), campaign.StartsAt.UTC(), campaign.EndsAt.UTC(), campaign.Config().TeamMode == referraldomain.TeamModeTeam, string(campaign.Config().LeaderboardMetric)).Scan(&id)
+      ON CONFLICT(campaign_id,snapshot_kind) DO NOTHING RETURNING id`
+	if r.roots != nil {
+		query = strings.Replace(query, "max(id) FROM referral_product_sale_events", "max(id) FROM original_sale_events", 1)
+	}
+	query, args, err := r.canonicalReportingWithin(ctx, campaign.ID, query, []any{campaign.ID, at.UTC(), campaign.StartsAt.UTC(), campaign.EndsAt.UTC(), campaign.Config().TeamMode == referraldomain.TeamModeTeam, string(campaign.Config().LeaderboardMetric)}, -1)
+	if err != nil {
+		return 0, err
+	}
+	err = tx.QueryRow(ctx, query, args...).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = tx.QueryRow(ctx, `SELECT id FROM referral_campaign_snapshots WHERE campaign_id=$1 AND snapshot_kind='close'`, campaign.ID).Scan(&id)
 	}
