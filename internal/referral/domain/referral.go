@@ -306,11 +306,23 @@ type Invitation struct {
 	State                             InvitationState
 	CreatedAt, ExpiresAt              time.Time
 	RevokedAt                         *time.Time
+	// Issuer is a snapshot of the verified session that actually issued this
+	// invitation. Empty legacy snapshots never become financial authority.
+	IssuerIdentityID            int64
+	IssuerAppID, IssuerAppScope string
+	IssuerChannel               string
 }
 
 func (i Invitation) Valid() bool {
 	return i.ID > 0 && i.CampaignID > 0 && i.InviterCustomerID > 0 && i.State.Valid() && !i.CreatedAt.IsZero() &&
-		i.ExpiresAt.After(i.CreatedAt) && ((i.State == InvitationRevoked) == (i.RevokedAt != nil))
+		i.ExpiresAt.After(i.CreatedAt) && ((i.State == InvitationRevoked) == (i.RevokedAt != nil)) && i.ValidIssuerSnapshot()
+}
+
+func (i Invitation) ValidIssuerSnapshot() bool {
+	if i.IssuerIdentityID == 0 {
+		return i.IssuerAppID == "" && i.IssuerAppScope == "" && i.IssuerChannel == ""
+	}
+	return i.IssuerIdentityID > 0 && i.IssuerAppID == strings.TrimSpace(i.IssuerAppID) && len(i.IssuerAppID) >= 1 && len(i.IssuerAppID) <= 160 && i.IssuerAppScope == strings.TrimSpace(i.IssuerAppScope) && len(i.IssuerAppScope) >= 1 && len(i.IssuerAppScope) <= 240 && (i.IssuerChannel == "mini_program" || i.IssuerChannel == "h5_official_account")
 }
 
 type Relationship struct {

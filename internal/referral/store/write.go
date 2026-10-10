@@ -232,10 +232,10 @@ func (r *Repository) InsertInvitationWithin(ctx context.Context, value referrald
 	if err != nil {
 		return referraldomain.Invitation{}, err
 	}
-	if value.ID != 0 || value.CampaignID < 1 || value.InviterCustomerID < 1 || value.State != referraldomain.InvitationActive || value.CreatedAt.IsZero() || !value.ExpiresAt.After(value.CreatedAt) || value.RevokedAt != nil {
+	if value.ID != 0 || value.CampaignID < 1 || value.InviterCustomerID < 1 || value.State != referraldomain.InvitationActive || value.CreatedAt.IsZero() || !value.ExpiresAt.After(value.CreatedAt) || value.RevokedAt != nil || !value.ValidIssuerSnapshot() {
 		return referraldomain.Invitation{}, ErrInvalid
 	}
-	return scanInvitation(tx.QueryRow(ctx, `INSERT INTO referral_invitations(campaign_id,inviter_customer_id,token_digest,state,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING `+invitationColumns, value.CampaignID, value.InviterCustomerID, value.TokenDigest[:], string(value.State), value.CreatedAt.UTC(), value.ExpiresAt.UTC()))
+	return scanInvitation(tx.QueryRow(ctx, `INSERT INTO referral_invitations(campaign_id,inviter_customer_id,token_digest,state,created_at,expires_at,issuer_identity_id,issuer_app_id,issuer_app_scope,issuer_channel) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+invitationColumns, value.CampaignID, value.InviterCustomerID, value.TokenDigest[:], string(value.State), value.CreatedAt.UTC(), value.ExpiresAt.UTC(), value.IssuerIdentityID, value.IssuerAppID, value.IssuerAppScope, value.IssuerChannel))
 }
 
 func (r *Repository) ReadInvitationByDigestWithin(ctx context.Context, digest [sha256.Size]byte, lock bool) (referraldomain.Invitation, error) {

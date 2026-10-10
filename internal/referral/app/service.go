@@ -640,7 +640,11 @@ func (s *Service) IssueInvitation(ctx context.Context, command referralport.Issu
 		if !expiresAt.After(now) {
 			return referralport.ErrCampaignUnavailable
 		}
-		invitation, insertErr := s.store.InsertInvitationWithin(tx, referraldomain.Invitation{CampaignID: campaign.ID, InviterCustomerID: command.Actor.CustomerID, TokenDigest: digest, State: referraldomain.InvitationActive, CreatedAt: now, ExpiresAt: expiresAt})
+		fact := referraldomain.Invitation{CampaignID: campaign.ID, InviterCustomerID: command.Actor.CustomerID, TokenDigest: digest, State: referraldomain.InvitationActive, CreatedAt: now, ExpiresAt: expiresAt}
+		if campaign.Config().QualificationMode == referraldomain.QualificationProductPurchase && s.subjects != nil {
+			fact.IssuerIdentityID, fact.IssuerAppID, fact.IssuerAppScope, fact.IssuerChannel = command.Actor.IdentityID, command.Actor.AppID, command.Actor.AppScope, command.Actor.Channel
+		}
+		invitation, insertErr := s.store.InsertInvitationWithin(tx, fact)
 		if insertErr != nil {
 			return insertErr
 		}

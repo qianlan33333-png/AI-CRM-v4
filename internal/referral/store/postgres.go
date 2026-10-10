@@ -48,7 +48,7 @@ type rowScanner interface{ Scan(...any) error }
 const campaignColumns = `id,name,cover_url,description,reward_rules,state,starts_at,ends_at,version,created_by,created_at,updated_at,team_mode,qualification_mode,product_id,product_type,leaderboard_metric`
 const teamColumns = `id,campaign_id,name,logo_url,captain_customer_id,version,created_at,updated_at`
 const participationColumns = `id,campaign_id,customer_id,COALESCE(team_id,0),COALESCE(invitation_id,0),COALESCE(inviter_customer_id,0),COALESCE(inviter_team_id,0),state,joined_at`
-const invitationColumns = `id,campaign_id,inviter_customer_id,token_digest,state,created_at,expires_at,revoked_at`
+const invitationColumns = `id,campaign_id,inviter_customer_id,token_digest,state,created_at,expires_at,revoked_at,issuer_identity_id,issuer_app_id,issuer_app_scope,issuer_channel`
 const relationshipColumns = `id,customer_id,referrer_customer_id,source_campaign_id,invitation_id,version,effective_at`
 const scoreEventColumns = `id,campaign_id,participation_id,inviter_customer_id,COALESCE(team_id,0),delta,kind,COALESCE(reverses_score_event_id,0),reason,occurred_at`
 const rewardColumns = `id,campaign_id,customer_id,COALESCE(score_event_id,0),period,reward,evidence_reference,state,recorded_by,recorded_at`
@@ -107,7 +107,7 @@ func scanInvitation(row rowScanner) (referraldomain.Invitation, error) {
 	var value referraldomain.Invitation
 	var raw []byte
 	var state string
-	err := row.Scan(&value.ID, &value.CampaignID, &value.InviterCustomerID, &raw, &state, &value.CreatedAt, &value.ExpiresAt, &value.RevokedAt)
+	err := row.Scan(&value.ID, &value.CampaignID, &value.InviterCustomerID, &raw, &state, &value.CreatedAt, &value.ExpiresAt, &value.RevokedAt, &value.IssuerIdentityID, &value.IssuerAppID, &value.IssuerAppScope, &value.IssuerChannel)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return referraldomain.Invitation{}, referralport.ErrNotFound
 	}

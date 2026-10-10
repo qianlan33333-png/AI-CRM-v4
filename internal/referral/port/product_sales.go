@@ -111,6 +111,20 @@ type ProductSaleContextReader interface {
 	ReadProductSaleContextWithin(context.Context, [sha256.Size]byte, int64, string, time.Time) (ProductSaleContext, error)
 }
 
+// PaidInvitationCheckout returns only actual invitation and verified issuer
+// facts. Distribution owns purchase qualification, financial policy and
+// settlement; this port never supplies an external account identifier.
+type PaidInvitationCheckout struct {
+	CampaignID, InvitationID, ProductID int64
+	ProductType                         string
+	Inviter                             TrustedSessionActor
+	ExpiresAt                           time.Time
+}
+
+type PaidInvitationCheckoutReader interface {
+	ReadPaidInvitationCheckoutWithin(context.Context, [sha256.Size]byte, int64, string, time.Time) (PaidInvitationCheckout, error)
+}
+
 // ProductSaleCheckoutAttribution is called beside Distribution's existing
 // checkout coordinator. It freezes the activity context and promoter snapshot
 // in Referral-owned storage; payment confirmation later consumes the durable

@@ -1033,7 +1033,7 @@ func referralPostgreSQLPoolWithContextReceipts(t *testing.T, contextReceipts boo
 		t.Fatal("locate referral migrations")
 	}
 	root := filepath.Join(filepath.Dir(file), "..", "..", "..")
-	for _, name := range []string{"0001_platform.sql", "0185_referral_core.sql", "0198_referral_activity_config.sql", "0199_referral_individual_invitation.sql", "0210_referral_campaign_posters.sql", "0222_referral_product_activity_context_receipt.sql", "0229_referral_poster_share_text.sql", "0231_referral_poster_layout.sql"} {
+	for _, name := range []string{"0001_platform.sql", "0185_referral_core.sql", "0198_referral_activity_config.sql", "0199_referral_individual_invitation.sql", "0210_referral_campaign_posters.sql", "0222_referral_product_activity_context_receipt.sql", "0229_referral_poster_share_text.sql", "0231_referral_poster_layout.sql", "0232_referral_invitation_verified_issuer.sql"} {
 		if name == "0222_referral_product_activity_context_receipt.sql" && !contextReceipts {
 			continue
 		}
