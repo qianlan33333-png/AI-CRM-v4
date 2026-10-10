@@ -1162,8 +1162,6 @@ def _check_env(config: dict[str, Any], safe_repository: Path | None = None, *,
         environment["AICRM_VERIFIED_COMMERCE_POLICY"] = verified_profile
     if config.get("_check_preparation_dir"):
         environment["AICRM_TEST_PREP_DIR"] = str(config["_check_preparation_dir"])
-    if config.get("_check_preparation_cache"):
-        environment["AICRM_TEST_PREP_CACHE"] = str(config["_check_preparation_cache"])
     if config.get("_check_tmpdir"):
         environment["TMPDIR"] = str(config["_check_tmpdir"])
     if (base_sha is None) != (head_sha is None):
@@ -1642,29 +1640,6 @@ def _environment_lane_failure(receipt: dict[str, Any], events: list[dict[str, An
     return classified == failed
 
 
-def _sanitized_test_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    # Preserve test evidence without copying fixture logs or credentials into
-    # the durable controller ledger. No-test package markers are significant.
-    result = []
-    for event in events:
-        if event.get("Action") in {"pass", "skip", "fail"}:
-            result.append({key: event[key] for key in ("Action", "Package", "Test", "Elapsed") if key in event})
-        elif event.get("Action") == "output" and "[no test files]" in event.get("Output", ""):
-            result.append({"Action": "output", "Package": event.get("Package"), "Output": "[no test files]"})
-    return result
-
-
-def _passed_go_packages(events: list[dict[str, Any]], required: list[str]) -> list[str]:
-    terminal = {event.get("Package"): event.get("Action") for event in events
-                if not event.get("Test") and event.get("Action") in {"pass", "skip", "fail"}}
-    no_tests = {event.get("Package") for event in events
-                if event.get("Action") == "output" and "[no test files]" in event.get("Output", "")}
-    failed = {event.get("Package") for event in events if event.get("Action") == "fail"}
-    return sorted(package for package in required if package not in failed and
-                  (terminal.get(package) == "pass" or
-                   (terminal.get(package) == "skip" and package in no_tests)))
-
-
 def _candidate_lane_failure(receipt: dict, events: list[dict]) -> bool:
     if any(re.search(r"test timed out|signal: (?:killed|terminated)|panic:.*timeout", event.get("Output", ""))
            for event in events):
@@ -1682,98 +1657,12 @@ def _candidate_lane_failure(receipt: dict, events: list[dict]) -> bool:
     return False
 
 
-def _merge_backend_continuation(lane_dir: Path, snapshot: dict, receipt: dict,
-                                required: list[str]) -> None:
-    if receipt.get("required_go_packages") != required or snapshot.get("required_go_packages") != required:
-        raise CheckIncompleteError("continued backend package inventory changed")
-    passed = _passed_go_packages(snapshot["events"], required)
-    if receipt.get("reused_go_packages") != passed:
-        raise CheckIncompleteError("continued backend package reuse evidence differs")
-    prior = [event for event in snapshot["events"] if event.get("Package") in passed]
-    events = _sanitized_test_events(_lane_test_events(lane_dir, receipt))
-    if any(event.get("Package") in passed for event in events):
-        raise CheckIncompleteError("continued backend reran a package recorded as reused")
-    receipt.update(go_json_log="continued-tests.jsonl", reused_from=snapshot["result"]["log_path"])
-    (lane_dir / "continued-tests.jsonl").write_text("".join(json.dumps(event) + "\n" for event in [*prior, *events]))
-    (lane_dir / "run.json").write_text(json.dumps(receipt))
-
-
 def _check_database_identity(config: dict) -> dict:
     from urllib.parse import urlsplit, unquote
     database = urlsplit(config["check_database_url"])
     return {"host":database.hostname,"port":database.port or 5432,
             "role":unquote(database.username or ""),"name":unquote(database.path),
             "options_sha256":hashlib.sha256(database.query.encode()).hexdigest()}
-
-
-def _check_resume_identity(config: dict[str, Any], plan: dict[str, Any], toolchain: dict,
-                           enforced: dict, lanes: list[str], checks: list, packages: list,
-                           profile: str) -> dict[str, Any]:
-    return {"baseline_sha": plan["baseline_sha"], "head_sha": plan["head_sha"],
-            "head_tree": plan["head_tree"], "policy_fingerprint": plan["policy_fingerprint"],
-            "controller_sha256": _file_sha256(Path(__file__)),
-            "lanes": lanes, "checks": checks, "packages": packages, "profile": profile,
-            "required_go_packages": config.get("_required_go_packages", []),
-            "selection_mode": enforced["selection_mode"],
-            "host": list(os.uname()), "build_user": legacy.BUILD_USER,
-            "database":_check_database_identity(config),
-            "tools": {name: value if name != "chromium" else {"version": value["version"]}
-                      for name, value in toolchain.items()}}
-
-
-def _load_check_checkpoint(path: Path, diagnostic_root: Path, identity: dict) -> dict:
-    # Only the controller's protected capsule can certify an earlier attempt.
-    # Build-owned run.json files alone cannot authorize reuse on a later run.
-    if path.parent != diagnostic_root or not path.name.endswith("-checkpoint.json"):
-        raise ReleaseError("check continuation checkpoint is outside protected diagnostics")
-    _safe_directory(diagnostic_root)
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    try:
-        info = os.fstat(descriptor)
-        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
-                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
-            raise ReleaseError("check continuation checkpoint is not protected")
-        with os.fdopen(descriptor, "r", closefd=False) as stream:
-            value = json.load(stream)
-    finally:
-        os.close(descriptor)
-    if (value.get("schema") != 1 or value.get("identity") != identity or
-            not (value.get("failure_kind") == "environment" or
-                 (value.get("result") == "passed" and value.get("failure_kind") is None))):
-        return {}  # Different code, policy, scope, or runtime gets a fresh run.
-    for snapshot in value.get("lanes", {}).values():
-        result = snapshot["result"]
-        log = Path(result["log_path"])
-        if log.parent != diagnostic_root or log.is_symlink():
-            raise ReleaseError("continued check diagnostic is outside protected diagnostics")
-        info = log.lstat()
-        if (info.st_uid != os.geteuid() or not stat.S_ISREG(info.st_mode)
-                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600
-                or _file_sha256(log) != result["log_sha256"]):
-            raise ReleaseError("continued check diagnostic hash or ownership changed")
-    return value
-
-
-def _restore_check_snapshot(lane_dir: Path, snapshot: dict) -> None:
-    receipt = dict(snapshot["receipt"])
-    receipt.update(reused_from=snapshot["result"]["log_path"], go_json_log="continued-tests.jsonl")
-    (lane_dir / "continued-tests.jsonl").write_text("".join(json.dumps(event) + "\n" for event in snapshot["events"]))
-    if snapshot.get("required_browser_tests"):
-        (lane_dir / "summary.json").write_text(json.dumps({"required_browser_tests": snapshot["required_browser_tests"]}))
-    (lane_dir / "run.json").write_text(json.dumps(receipt))
-    (lane_dir / "progress.json").write_text(json.dumps({"lane": receipt["lane"], "status": "reused",
-                                                       "reused_from": receipt["reused_from"]}))
-
-
-def _merge_browser_continuation(lane_dir: Path, snapshot: dict, receipt: dict) -> None:
-    prior = [event for event in snapshot["events"] if event.get("Test")
-             and event.get("Action") == "pass"]
-    events = _sanitized_test_events(_lane_test_events(lane_dir, receipt))
-    receipt.update(go_json_log="continued-tests.jsonl", reused_from=snapshot["result"]["log_path"],
-                   reused_browser_tests=sorted({event["Test"] for event in prior if "/" not in event["Test"]}))
-    (lane_dir / "continued-tests.jsonl").write_text("".join(json.dumps(event) + "\n" for event in [*prior, *events]))
-    (lane_dir / "summary.json").write_text(json.dumps({"required_browser_tests": snapshot["required_browser_tests"]}))
-    (lane_dir / "run.json").write_text(json.dumps(receipt))
 
 
 def _run_check_process(args: list[str], *, cwd: Path, output, timeout: int) -> subprocess.CompletedProcess:
@@ -1843,9 +1732,6 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
                      lanes: list[str], checks: list[dict[str, Any]], packages: list[str],
                      profile: str, diagnostic_root: Path) -> list[dict[str, Any]]:
     tree = _tree(repo, head_sha)  # Protected authority; never trust private clone Git metadata.
-    prior = config.get("_check_checkpoint", {}).get("lanes", {})
-    snapshots = config.setdefault("_check_snapshots", {})
-    guard = threading.Lock()
     backend_running = threading.Event()
     if "backend" not in lanes:
         backend_running.set()
@@ -1853,20 +1739,12 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
     def execute_lane(lane: str) -> dict[str, Any]:
         # t.Chdir and generated artifacts may mutate a checkout. Never share it
         # between concurrently executing lanes, even when source SHA is equal.
-        snapshot = prior.get(lane, {})
         lane_dir = report_dir / lane
         _build_command(config, ["/usr/bin/mkdir", "-m", "0700", str(lane_dir)], cwd=execution_worktree,
                        timeout=30, safe_repository=execution_worktree)
         lane_checks = [check for check in checks if check.get("lane") == lane]
         lane_packages = (config.get("_required_go_packages") or
                          (packages if enforced.get("selection_mode") == "targeted" else [])) if lane == "backend" else []
-        if snapshot.get("status") == "passed":
-            _restore_check_snapshot(lane_dir, snapshot)
-            _verify_lane_evidence(lane_dir, lane, head_sha, tree, lane_checks, lane_packages)
-            with guard:
-                snapshots[lane] = snapshot
-            return dict(snapshot["result"], reused=True, duration_seconds=0,
-                        reused_duration_seconds=snapshot["result"].get("duration_seconds"))
         checkout = (execution_worktree if lane == "preflight" else
                     _private_check_checkout(config, repo, execution_worktree.parent / ("candidate-" + lane), head_sha))
         # Package discovery and each lane use separate clean checkouts. Embed
@@ -1889,9 +1767,9 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
         dependency_preparation = "not-applicable"
         if lane in {"frontend", "browser"} or (lane == "backend" and not backend_stages_dependencies and profile != "ai-selected"):
             needs_dependencies = not (lane == "browser" and preparation_helper
-                # Continued backend commands may reuse stage evidence while
-                # its old disposable artifact has already been reclaimed.
-                and "backend" in lanes and not prior.get("backend")
+                # A same-attempt backend artifact receipt can avoid repeating
+                # dependency inspection while every lane still runs afresh.
+                and "backend" in lanes
                 and any(path.is_file() and not path.is_symlink() for path in
                         (report_dir / ".preparation").glob("artifact-*/receipt.json"))
                 and _lane_check_profile(enforced, profile) == "public-commerce-v1"
@@ -1910,26 +1788,10 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
             args.extend(["--profile", "public-commerce-v1"])
         elif lane == "preflight":
             args.extend(["--profile", profile if profile in {"tooling", "documentation"} else "full"])
-        continued_names = []
-        if lane == "browser" and snapshot.get("required_browser_tests"):
-            passed = {event["Test"] for event in snapshot["events"] if event.get("Action") == "pass" and event.get("Test")}
-            continued_names = [name for name in snapshot["required_browser_tests"] if name not in passed]
-            if continued_names:
-                # dev_preflight still discovers and validates every requested
-                # name against this exact candidate before it executes them.
-                lane_checks = [{"lane": "browser", "path": "cmd/aicrm/continuation_test.go", "test": name}
-                               for name in continued_names]
         if enforced.get("selection_mode") == "targeted" and lane == "backend" and packages:
             args.extend(["--focus-packages-json", json.dumps(sorted(set(packages)), separators=(",", ":"))])
-        elif (enforced.get("selection_mode") == "targeted" or continued_names) and (lane != "preflight" or profile == "ai-selected") and lane_checks:
+        elif enforced.get("selection_mode") == "targeted" and (lane != "preflight" or profile == "ai-selected") and lane_checks:
             args.extend(["--focus-checks-json", json.dumps(lane_checks, separators=(",", ":"))])
-        if snapshot and (policy / "scripts/ci/check_preparation.py").is_file():
-            args.extend(["--resume-commands-json", json.dumps(snapshot.get("passed_commands", []), separators=(",", ":"))])
-            if lane == "backend" and snapshot.get("required_go_packages"):
-                if snapshot["required_go_packages"] != lane_packages:
-                    raise CheckIncompleteError("continued Go packages differ from trusted discovery")
-                args.extend(["--resume-go-packages-json", json.dumps(
-                    _passed_go_packages(snapshot["events"], lane_packages), separators=(",", ":"))])
         command = ["/usr/bin/python3", "-c", _trusted_runner_code(), str(policy), str(checkout), *args]
         log = diagnostic_root / f"{head_sha}-{report_dir.name}-{lane}.log"
         if log.exists() or log.is_symlink():
@@ -1956,7 +1818,7 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
         if lane == "browser" and config.get("_browser_dependency_evidence"):
             result["dependency_inspection"] = config["_browser_dependency_evidence"]
         # Failed attempts need the same immutable-source validation as passed
-        # ones before any partial result is eligible for future continuation.
+        # ones before the attempt can be classified.
         _verify_check_checkout_tree(repo, head_sha, checkout)
         try:
             receipt = json.loads((lane_dir / "run.json").read_text())
@@ -1969,43 +1831,12 @@ def _run_check_lanes(config: dict[str, Any], repo: Path, policy: Path,
         if completed.returncode != 0 and not environment:
             error_type = CheckCandidateError if identity_valid and _candidate_lane_failure(receipt, events) else CheckIncompleteError
             raise error_type(f"trusted impact lane failed: {lane} (exit={completed.returncode})")
-        if lane == "backend" and snapshot.get("required_go_packages") and (receipt.get("required_go_packages") or completed.returncode == 0):
-            _merge_backend_continuation(lane_dir, snapshot, receipt, lane_packages)
-            events = _lane_test_events(lane_dir, receipt)
-        elif lane == "backend" and environment and snapshot.get("required_go_packages"):
-            passed_packages = _passed_go_packages(snapshot["events"], lane_packages)
-            events = [*[event for event in snapshot["events"] if event.get("Package") in passed_packages], *events]
-        if continued_names and completed.returncode == 0:
-            _verify_lane_evidence(lane_dir, lane, head_sha, tree, lane_checks, [])
-            _merge_browser_continuation(lane_dir, snapshot, receipt)
-            events = _lane_test_events(lane_dir, receipt)
-        required_names = []
-        if lane == "browser":
-            try:
-                required_names = json.loads((lane_dir / "summary.json").read_text()).get("required_browser_tests", [])
-            except (OSError, ValueError):
-                pass
-            # Keep earlier passed journeys even when another environment
-            # issue stops the continuation before all remaining names pass.
-            if snapshot.get("required_browser_tests") and completed.returncode:
-                events = [*[event for event in snapshot["events"] if event.get("Test") and event.get("Action") == "pass"], *events]
-                required_names = snapshot["required_browser_tests"]
-        with guard:
-            snapshots[lane] = {"status": "environment" if environment else "passed", "result": result,
-                "receipt": receipt, "events": _sanitized_test_events(events),
-                "required_browser_tests": required_names,
-                "required_go_packages": lane_packages,
-                "passed_commands": receipt.get("passed_commands", [])}
         if environment:
             raise CheckEnvironmentError("required check environment is unavailable: " + lane)
         receipt = _verify_lane_evidence(lane_dir, lane, head_sha, tree, lane_checks,
                                        lane_packages)
         result.update(command_results=receipt.get("command_results", []),
                       preparation=receipt.get("preparation", {}), slow_tests=receipt.get("slow_tests", []))
-        if snapshot:
-            result.update(reused_browser_tests=receipt.get("reused_browser_tests", []),
-                          reused_go_packages=receipt.get("reused_go_packages", []),
-                          resumed_from=snapshot["result"]["log_path"])
         return result
 
     failure_stop = threading.Event()
@@ -2158,6 +1989,66 @@ def _lifecycle_directory(config: dict) -> Path:
     return path
 
 
+def _clear_preparation_snapshot_cache(config: dict) -> dict[str, Any]:
+    """Discard reusable preparation snapshots, retaining all check evidence."""
+    _require_cleanup_lock(config)
+    _assert_build_account_idle()
+    root = Path(legacy.BUILD_ROOT) / "cache" / "preparation"
+    if not root.exists() and not root.is_symlink():
+        return {"status": "already_empty", "removed": [], "reclaimed_bytes": 0}
+    if root.is_symlink():
+        raise CheckEnvironmentError("preparation cache root is a symlink; retained for inspection")
+    try:
+        _verify_preparation_cache_root(root)
+    except (OSError, ReleaseError) as exc:
+        raise CheckEnvironmentError("preparation cache root is unsafe; retained for inspection") from exc
+    entries = sorted(root.iterdir())
+    for entry in entries:
+        if entry.is_symlink():
+            raise CheckEnvironmentError("preparation cache contains a symlink; retained for inspection")
+        if entry.name in {"artifact.lock", "npm.lock"}:
+            if not entry.is_file():
+                raise CheckEnvironmentError("preparation cache lock entry is not a regular file")
+            continue
+        if not re.fullmatch(r"(?:artifact|npm)-[0-9a-f]{64}", entry.name) or not entry.is_dir():
+            raise CheckEnvironmentError("preparation cache has an unknown entry; retained for inspection")
+    removed = []
+    reclaimed = 0
+    for entry in entries:
+        if entry.name in {"artifact.lock", "npm.lock"}:
+            reclaimed += entry.lstat().st_blocks * 512
+            entry.unlink()
+            removed.append(entry.name)
+            continue
+        reclaimed += entry.lstat().st_blocks * 512 + _allocated_bytes(entry)
+        shutil.rmtree(entry)
+        removed.append(entry.name)
+    if not any(root.iterdir()):
+        root.rmdir()
+    return {"status": "cleared" if removed else "already_empty",
+            "removed": removed, "reclaimed_bytes": reclaimed}
+
+
+def _clear_check_continuation_checkpoints(config: dict, diagnostic_root: Path) -> dict[str, Any]:
+    """Remove only obsolete resume capsules; keep receipts, logs, and summaries."""
+    _require_cleanup_lock(config)
+    _assert_build_account_idle()
+    if not diagnostic_root.exists() and not diagnostic_root.is_symlink():
+        return {"status": "already_empty", "removed": []}
+    _safe_directory(diagnostic_root)
+    paths = sorted(diagnostic_root.glob("*-checkpoint.json"))
+    for path in paths:
+        info = path.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+            raise CheckEnvironmentError("check continuation capsule is unsafe; retained for inspection")
+    removed = []
+    for path in paths:
+        path.unlink()
+        removed.append(path.name)
+    return {"status": "cleared" if removed else "already_empty", "removed": removed}
+
+
 def _process_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -2230,10 +2121,7 @@ def _cleanup_attempt_record(config: dict, path: Path, record: dict) -> dict:
             raise ReleaseError("generated lifecycle object is a symlink")
         if value.exists():
             shutil.rmtree(value)
-    preparation_cache = _trim_preparation_cache(config,
-        config.get("check_capacity", {}).get("cache_limits_bytes", {}).get("preparation"))
-    if preparation_cache is not None:
-        record["preparation_cache"] = preparation_cache
+    record["preparation_cache_cleanup"] = _clear_preparation_snapshot_cache(config)
     record.update(status="reclaimed", finished_at_utc=_utc_now(), reclaimed_allocated_bytes=reclaim,
                   free_after_bytes=shutil.disk_usage(Path(config["work_root"])).free,
                   released_free_bytes=shutil.disk_usage(Path(config["work_root"])).free - before)
@@ -2511,70 +2399,11 @@ def _merge_legacy_check_caches(config: dict) -> dict:
     return record
 
 
-def _check_preparation_cache(config: dict) -> Path | None:
-    limit = config.get("check_capacity", {}).get("cache_limits_bytes", {}).get("preparation")
-    if limit is None:
-        return None
-    if type(limit) is not int or limit <= 0:
-        raise CheckEnvironmentError("preparation cache capacity must be positive and measured")
-    _require_cleanup_lock(config)
-    root = Path(legacy.BUILD_ROOT) / "cache/preparation"
-    if root.is_symlink():
-        raise CheckEnvironmentError("preparation cache root is a symlink")
-    _build_command(config, ["/usr/bin/mkdir", "-m", "0700", "-p", str(root)],
-                   cwd=Path("/"), timeout=30)
-    info = root.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != pwd.getpwnam(legacy.BUILD_USER).pw_uid:
-        raise CheckEnvironmentError("preparation cache must belong to the actual build account")
-    if stat.S_IMODE(info.st_mode) != 0o700:
-        _build_command(config, ["/usr/bin/chmod", "0700", str(root)], cwd=Path("/"), timeout=30)
-    _verify_preparation_cache_root(root)
-    return root
-
-
 def _verify_preparation_cache_root(root: Path) -> None:
     info = root.lstat()
     if (not stat.S_ISDIR(info.st_mode) or info.st_uid != pwd.getpwnam(legacy.BUILD_USER).pw_uid
             or stat.S_IMODE(info.st_mode) != 0o700):
         raise CheckEnvironmentError("preparation cache must be private to the actual build account")
-
-
-def _trim_preparation_cache(config: dict, limit: int | None) -> dict | None:
-    _require_cleanup_lock(config)
-    root = Path(legacy.BUILD_ROOT) / "cache/preparation"
-    if not root.exists() and not root.is_symlink():
-        return None
-    _assert_build_account_idle()  # Preserve snapshots while any task uses them.
-    _verify_preparation_cache_root(root)
-    units = []
-    for value in root.iterdir():
-        if value.name in {"artifact.lock", "npm.lock"} and value.is_file() and not value.is_symlink():
-            continue
-        if not value.is_symlink() and value.is_dir() and re.fullmatch(r"(?:artifact|npm)-[0-9a-f]{64}", value.name):
-            units.append(value)
-        else:
-            raise CheckEnvironmentError("unrecognized preparation cache entry; retained for diagnosis")
-    if limit is not None and (type(limit) is not int or limit <= 0):
-        raise CheckEnvironmentError("preparation cache capacity must be positive and measured")
-    before = _allocated_bytes(root)
-    if limit is None or before <= limit:
-        # No cache writer is active under the existing controller lock. With
-        # no eviction, the measured inventory is also the final inventory.
-        return {"before_bytes": before, "reclaimed_bytes": 0, "after_bytes": before,
-                "limit_bytes": limit, "removed": [], "reused": limit is not None}
-    reclaimed = 0
-    removed = []
-    for unit in sorted(units, key=lambda item: item.stat().st_mtime_ns):
-        if limit is None or before - reclaimed <= limit:
-            break
-        reclaimed += unit.lstat().st_blocks * 512 + _allocated_bytes(unit)
-        removed.append(unit.name)
-        shutil.rmtree(unit)  # Whole snapshots only; writable task copies are elsewhere.
-    after = _allocated_bytes(root)
-    if limit is not None and after > limit:
-        raise CheckEnvironmentError("preparation cache metadata exceeds measured budget")
-    return {"before_bytes": before, "reclaimed_bytes": reclaimed, "after_bytes": after,
-            "limit_bytes": limit, "removed": removed, "reused": limit is not None}
 
 
 def _trim_check_caches(config: dict) -> dict:
@@ -2644,82 +2473,92 @@ def _trim_check_caches(config: dict) -> dict:
                             "limit_bytes":limit, "reused":True, "protected_by":"all authoritative source refs go.sum"}
         if limit is not None and after > limit:
             raise CheckEnvironmentError("referenced module cache exceeds measured budget; keep source dependencies and review capacity")
-    preparation = _trim_preparation_cache(config, limits.get("preparation"))
-    if preparation is not None:
-        result["preparation"] = preparation
     return result
 
 
-def _reclaim_unreferenced_packages(config: dict) -> dict:
+def _reclaim_completed_build_copies(config: dict) -> dict:
+    """Remove only installed, byte-identical local build copies after completion."""
     _require_cleanup_lock(config)
     state = _load_state(Path(config["state"]))
-    batch = state.get("batch")
-    if ((state.get("staging_out_of_sync") and
-         (not isinstance(batch, dict) or batch.get("status") != "open"))
-            or (state.get("in_flight") and state["in_flight"].get("phase") != "checks")):
-        return {"status":"protected_unresolved_install", "removed":[]}
+    if state.get("in_flight") is not None or state.get("status") == "outcome_unknown":
+        return {"status": "protected_unresolved_attempt", "removed": []}
+    pending = {item.get("head_sha") for item in state.get("queue", [])
+               if item.get("status") != "completed"}
     releases = Path(config.get("stage_releases", "/opt/aicrm/releases"))
-    current = (batch["installed_app"] if isinstance(batch, dict)
-               else state["installed_app"])["sha"]
-    if (releases.parent / "current").resolve() != (releases / current).resolve():
-        return {"status":"current_identity_unavailable", "removed":[]}
-    receipt_path = releases.parent / "domestic-receipts" / (current + ".json")
-    if receipt_path.is_symlink() or not receipt_path.is_file():
-        return {"status":"rollback_identity_unavailable", "removed":[]}
-    current_receipt = json.loads(receipt_path.read_text())
-    if current_receipt.get("source_sha") != current:
-        return {"status":"current_receipt_identity_unavailable", "removed":[]}
-    if isinstance(batch, dict) and (current_receipt != batch.get("stage_receipt")
-                                    or current_receipt.get("manifest_sha256") != batch["installed_app"]["manifest_sha256"]):
-        return {"status":"cumulative_stage_receipt_changed", "removed":[]}
-    previous = current_receipt.get("previous_sha")
-    if not isinstance(previous, str) or not SHA.fullmatch(previous):
-        return {"status":"rollback_identity_unavailable", "removed":[]}
-    refs = set(_git(Path(config["repo"]), "for-each-ref", "--format=%(objectname)").splitlines())
-    pending = {item["head_sha"] for item in state.get("queue", []) if item.get("status") != "completed"}
-    protected = refs | pending | {current, previous, state["main"]["sha"],
-                                  state["installed_app"]["sha"]}
-    removed = []
-    proof = _lifecycle_directory(config) / ("packages-" + str(time.time_ns()) + ".json")
-    snapshots = {"protected":sorted(protected), "removed":removed}
     if releases.is_symlink() or not releases.is_dir():
-        return {"status":"package_root_unavailable", "removed":[]}
-    for path in sorted(releases.iterdir()):
-        if not SHA.fullmatch(path.name) or path.is_symlink() or not path.is_dir():
+        return {"status": "installed_release_root_unavailable", "removed": []}
+    receipts = releases.parent / "domestic-receipts"
+    builds = releases.parent / "domestic" / "builds"
+    if (receipts.is_symlink() or not receipts.is_dir() or builds.is_symlink()
+            or (builds.exists() and not builds.is_dir())):
+        return {"status": "installed_receipt_or_build_root_unavailable", "removed": []}
+    planned = []
+    retained = []
+    for installed_path in sorted(releases.iterdir()):
+        sha = installed_path.name
+        if (not SHA.fullmatch(sha) or sha in pending or installed_path.is_symlink()
+                or not installed_path.is_dir()):
             continue
-        if path.name in pending:
+        receipt_path = receipts / (sha + ".json")
+        duplicate = builds / sha / "release"
+        metadata = duplicate.parent / "domestic-release.json"
+        if not duplicate.exists() and not duplicate.is_symlink():
             continue
-        duplicate = releases.parent / "domestic/builds" / path.name / "release"
-        if path.name in protected and not duplicate.is_dir():
-            # This package is retained and has no duplicate eligible for
-            # reclamation. Its installation verification is separate from
-            # cleanup; do not reread every retained package byte per attempt.
+        if (receipt_path.is_symlink() or not receipt_path.is_file()
+                or duplicate.is_symlink() or metadata.is_symlink() or not metadata.is_file()):
+            retained.append({"sha": sha, "reason": "missing or unsafe installed proof"})
             continue
-        installed_receipt = releases.parent / "domestic-receipts" / (path.name + ".json")
-        # A read-back installation receipt proves this package is no longer
-        # being built/accepted. Never infer completion merely from directory age.
-        if not installed_receipt.is_file() or installed_receipt.is_symlink():
+        ancestors = [duplicate.parent, builds, builds.parent, releases.parent]
+        if any(value.is_symlink() for value in ancestors):
+            retained.append({"sha": sha, "reason": "linked build path"})
             continue
-        installed = json.loads(installed_receipt.read_text())
-        if installed.get("source_sha") != path.name:
-            continue
-        manifest = builder.verify_release_inventory(path, allow_release_env=True)
-        ancestors = [duplicate, duplicate.parent, duplicate.parent.parent, duplicate.parent.parent.parent]
-        if (duplicate.is_dir() and not any(value.is_symlink() for value in ancestors)
-                and builder.verify_release_inventory(duplicate) == manifest):
-            record = {"path":str(duplicate), "manifest_sha256":manifest,
-                      "allocated_bytes":_allocated_bytes(duplicate), "reason":"verified duplicate of retained package"}
-            removed.append(record)
-            atomic_json(proof, snapshots)
-            shutil.rmtree(duplicate)
-        if path.name not in protected:
-            record = {"path":str(path), "manifest_sha256":manifest,
-                      "allocated_bytes":_allocated_bytes(path), "reason":"installed history released from all references"}
-            removed.append(record)
-            atomic_json(proof, snapshots)
-            shutil.rmtree(path)
-    return {"status":"completed", "protected":sorted(protected), "removed":removed,
-            "reclaimed_bytes":sum(item["allocated_bytes"] for item in removed)}
+        try:
+            installed = json.loads(receipt_path.read_text())
+            installed_manifest = builder.verify_release_inventory(installed_path, allow_release_env=True)
+            if (installed.get("source_sha") != sha
+                    or installed.get("manifest_sha256") != installed_manifest
+                    or installed.get("technical_status") != "installed_healthy"
+                    or not isinstance(installed.get("source_tree"), str)
+                    or not SHA.fullmatch(installed["source_tree"])):
+                retained.append({"sha": sha, "reason": "installed receipt does not bind inventory"})
+                continue
+            duplicate_manifest = builder.verify_release_inventory(duplicate)
+            if duplicate_manifest != installed_manifest:
+                retained.append({"sha": sha, "reason": "build copy differs from installed inventory"})
+                continue
+            planned.append({"sha": sha, "path": str(duplicate),
+                            "manifest_sha256": installed_manifest,
+                            "allocated_bytes": _allocated_bytes(duplicate)})
+        except (OSError, ValueError, ReleaseError, builder.BuildError) as exc:
+            retained.append({"sha": sha, "reason": type(exc).__name__})
+    if not planned:
+        return {"status": "nothing_to_reclaim", "removed": [], "retained": retained}
+    try:
+        _assert_build_account_idle()
+    except CheckEnvironmentError:
+        return {"status": "retained_live_build_process", "removed": [], "retained": retained}
+    proof = _lifecycle_directory(config) / ("build-copies-" + str(time.time_ns()) + ".json")
+    record = {"status": "in_progress", "planned": planned, "removed": [], "retained": retained}
+    atomic_json(proof, record)
+    try:
+        for item in planned:
+            target = Path(item["path"])
+            if target.is_symlink() or not target.is_dir():
+                retained.append({"sha": item["sha"], "reason": "build copy changed after verification"})
+                continue
+            shutil.rmtree(target)
+            record["removed"].append(item)
+            atomic_json(proof, record)
+    except OSError:
+        record["status"] = "cleanup_warning"
+        atomic_json(proof, record)
+        return {"status": "cleanup_warning", "removed": record["removed"],
+                "retained": retained, "proof": str(proof)}
+    record["status"] = "completed"
+    atomic_json(proof, record)
+    return {"status": "completed", "removed": record["removed"], "retained": retained,
+            "reclaimed_bytes": sum(item["allocated_bytes"] for item in record["removed"]),
+            "proof": str(proof)}
 
 
 def _archive_closed_check_evidence(config: dict) -> list[dict]:
@@ -3102,8 +2941,11 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
     if report_dir.exists() or report_dir.is_symlink():
         raise ReleaseError("candidate check evidence path already exists; inspect before retry")
     recovered = _recover_check_attempts(config)
+    diagnostic_root = diagnostic_root or (Path(config["work_root"]) / "diagnostics")
+    preparation_cleanup = _clear_preparation_snapshot_cache(config)
+    continuation_cleanup = _clear_check_continuation_checkpoints(config, diagnostic_root)
     source_recovery = _reclaim_policy_worktrees(config, repo, base_sha)
-    package_recovery = _reclaim_unreferenced_packages(config)
+    package_recovery = _reclaim_completed_build_copies(config)
     archived_evidence = _archive_closed_check_evidence(config)
     cache_migration = _merge_legacy_check_caches(config)
     cache_usage = _trim_check_caches(config)
@@ -3122,11 +2964,8 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
     enforced, lanes, checks, packages, profile = _enforced_lanes(plan, changed_policy)
     config = dict(config, _check_process_guard=True)
 
-    diagnostic_root = diagnostic_root or (Path(config["work_root"]) / "diagnostics")
     _safe_directory(diagnostic_root, create=True)
     _safe_directory(Path(config["work_root"]))
-    previous_path = config.get("_check_resume_checkpoint")
-    prior = {}
     with _check_attempt_directory(config, report_dir, policy, head_sha) as temporary:
         check_root = Path(temporary)
         os.chmod(check_root, 0o711)
@@ -3141,11 +2980,8 @@ def _check_report(config: dict[str, Any], repo: Path, worktree: Path, report_dir
             config, repo, execution_parent / "candidate", head_sha)
         prep = report_dir / ".preparation"
         _build_command(config, ["/usr/bin/mkdir", "-m", "0700", str(prep)], cwd=execution_worktree, timeout=30)
-        check_config = dict(config, _check_snapshots={}, _check_tmpdir=str(attempt_tmp))
+        check_config = dict(config, _check_tmpdir=str(attempt_tmp))
         check_config["_check_preparation_dir"] = str(prep)
-        preparation_cache = _check_preparation_cache(check_config)
-        if preparation_cache is not None:
-            check_config["_check_preparation_cache"] = str(preparation_cache)
         toolchain["execution"] = _check_execution_preflight(check_config, policy, execution_worktree, report_dir, "browser" in lanes)
         if profile != "ai-selected" and (policy / "scripts/ci/check_preparation.py").is_file():
             probe_code = """import sys,json
@@ -3173,11 +3009,6 @@ print(json.dumps({lane: items for lane, items in missing.items() if items}))
         if "backend" in lanes and (enforced["selection_mode"] == "full" or profile == "affected-packages"):
             check_config["_required_go_packages"] = _discover_check_packages(
                 check_config,policy,execution_worktree,plan,enforced)
-        continuation_identity = _check_resume_identity(
-            check_config,plan,toolchain,enforced,lanes,checks,packages,profile)
-        if previous_path:
-            prior = _load_check_checkpoint(Path(previous_path),diagnostic_root,continuation_identity)
-        check_config["_check_checkpoint"] = prior
         database_needed = (bool(set(lanes) & {"backend", "browser"}) if profile != "ai-selected" else
                            "browser" in lanes or any(c.get("postgres") or "PostgreSQL" in c.get("test", "") or
                            "postgres" in c.get("path", "").lower() or "integration" in c.get("path", "").lower()
@@ -3193,20 +3024,13 @@ print(json.dumps({lane: items for lane, items in missing.items() if items}))
             if (_worktree_git(worktree, "rev-parse", "HEAD") != head_sha
                     or _worktree_git(worktree, "status", "--porcelain=v1", "--untracked-files=all")):
                 raise ReleaseError("candidate source changed during failed isolated checks") from error
-            checkpoint = diagnostic_root / f"{head_sha}-{report_dir.name}-checkpoint.json"
-            atomic_json(checkpoint, {"schema": 1, "failure_kind": "environment",
-                "identity": continuation_identity, "recorded_at_utc": _utc_now(),
-                "lanes": check_config["_check_snapshots"], "continued_from": previous_path if prior else None})
-            error.checkpoint = str(checkpoint)
             raise
         if _verify_check_checkout_tree(repo, head_sha, execution_worktree) == 0:
             raise ReleaseError("isolated check candidate checkout has no tracked source files")
     if _worktree_git(worktree, "rev-parse", "HEAD") != head_sha or _worktree_git(worktree, "status", "--porcelain=v1", "--untracked-files=all"):
         raise ReleaseError("candidate source changed or became dirty during isolated checks")
-    completed_checkpoint = diagnostic_root / f"{head_sha}-{report_dir.name}-checkpoint.json"
-    atomic_json(completed_checkpoint, {"schema":1,"result":"passed","failure_kind":None,
-        "identity":continuation_identity,"recorded_at_utc":_utc_now(),
-        "lanes":check_config["_check_snapshots"],"continued_from":previous_path if prior else None})
+    artifact_lifecycle = json.loads(
+        (_lifecycle_directory(config) / (report_dir.name + "-attempt.json")).read_text())
     receipt = {
         "schema_version": 1, "status": "passed", "baseline_sha": base_sha,
         "baseline_tree": plan["baseline_tree"], "head_sha": head_sha, "head_tree": plan["head_tree"],
@@ -3219,14 +3043,15 @@ print(json.dumps({lane: items for lane, items in missing.items() if items}))
         "changed_paths": plan.get("changed_paths"), "toolchain": toolchain, "lane_results": lane_results,
         "business_assessment": plan.get("business_assessment"),
         "capacity":capacity, "storage":storage, "cache_usage":cache_usage, "recovered_attempts":recovered,
+        "preparation_cache_cleanup":{"before":preparation_cleanup,
+                                      "after":artifact_lifecycle.get("preparation_cache_cleanup")},
+        "continuation_checkpoint_cleanup":continuation_cleanup,
         "cache_migration":cache_migration,
         "source_recovery":source_recovery,
         "package_recovery":package_recovery,
         "archived_evidence":archived_evidence,
-        "artifact_lifecycle":json.loads((_lifecycle_directory(config) / (report_dir.name + "-attempt.json")).read_text()),
+        "artifact_lifecycle":artifact_lifecycle,
         "execution_receipt_sha256": None, "verified_at_utc": _utc_now(),
-        "continued_from": previous_path if prior else None,
-        "check_checkpoint":str(completed_checkpoint),
     }
     canonical = json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     receipt["execution_receipt_sha256"] = hashlib.sha256(canonical).hexdigest()
@@ -3755,10 +3580,10 @@ def _update_state(path: Path, state: dict[str, Any], **changes: Any) -> None:
 
 def _maintenance_check_checkpoint(config: dict[str, Any], marker: dict[str, Any], *,
                                   return_receipt: bool = False) -> str | dict[str, Any] | None:
-    """Resolve the completed capsule through the existing receipt digest.
+    """Resolve the completed check receipt through its existing digest.
 
     Keep the maintenance marker compatible with installed older controllers;
-    only protected exact-receipt evidence can supply a continuation pointer.
+    never resume any partial process result from a prior check attempt.
     """
     directory = Path(config["work_root"]) / "diagnostics"
     if not directory.exists() and not directory.is_symlink():
@@ -3786,13 +3611,7 @@ def _maintenance_check_checkpoint(config: dict[str, Any], marker: dict[str, Any]
             raise ReleaseError("maintenance check receipt identity differs from marker")
         if return_receipt:
             return receipt
-        checkpoint = receipt.get("check_checkpoint")
-        if checkpoint is None:
-            return None
-        if (not isinstance(checkpoint, str) or Path(checkpoint).parent != directory
-                or not Path(checkpoint).name.endswith("-checkpoint.json")):
-            raise ReleaseError("maintenance check checkpoint is outside protected diagnostics")
-        return checkpoint
+        return None
     return None
 
 
@@ -3872,6 +3691,8 @@ def _finalize_success(config: dict[str, Any], state_path: Path, state: dict[str,
     if batch_heads is not None:
         state["last_release"]["batch_member_heads"] = batch_heads
     _update_state(state_path, state, status="ready")
+    state["last_release"]["build_copy_cleanup"] = _reclaim_completed_build_copies(config)
+    _update_state(state_path, state, status="ready")
     cleanup = None
     try:
         cleanup = _production_ssh(config, "sudo", "-n", config["prod_helper"],
@@ -3906,8 +3727,6 @@ def _mark_failed(state_path: Path, state: dict[str, Any], item: dict[str, Any], 
         item["failure"]["required_action"] = "diagnose incomplete or unknown execution; no automatic continuation or passing verdict"
     if environment:
         item["failure"]["required_action"] = "repair the check environment, then resubmit the same exact candidate; keep queue order"
-        if getattr(error, "checkpoint", None):
-            item["failure"]["check_checkpoint"] = error.checkpoint
     if isinstance(error, ControllerMaintenanceRequired):
         item["failure"]["required_action"] = "run maintenance-check for this exact SHA; review and install the checked fixed controller bytes with rollback; resubmit the same candidate"
     if (state.get("in_flight") or {}).get("stage_install_started") is True:
@@ -4098,10 +3917,6 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
         controller_receipt = _verify_controller_files(config, source_worktree, item["head_sha"], controller_files)
         check_config = dict(config, _check_progress_callback=lambda progress: _update_state(
             state_path, state, in_flight={**state["in_flight"], "check_progress": progress}))
-        if maintenance_marker and maintenance_marker.get("candidate_sha") == item["head_sha"]:
-            check_config["_check_resume_checkpoint"] = _maintenance_check_checkpoint(config, maintenance_marker)
-        if item.get("failure", {}).get("kind") == "environment" and item["failure"].get("check_checkpoint"):
-            check_config["_check_resume_checkpoint"] = item["failure"].get("check_checkpoint")
         if final_batch:
             check_receipt = _prepared_batch_checks(repo, state)
         elif maintenance_marker and maintenance_marker.get("candidate_sha") == item["head_sha"]:
@@ -5619,6 +5434,8 @@ def reconcile(config: dict[str, Any]) -> dict[str, Any]:
                                  "status": "ready", "reconciled_at_utc": _utc_now()}
         if isinstance(batch, dict):
             state["last_release"]["batch_member_heads"] = inflight["batch_member_heads"]
+        _update_state(state_path, state, status="ready")
+        state["last_release"]["build_copy_cleanup"] = _reclaim_completed_build_copies(config)
         _update_state(state_path, state, status="ready")
         return {"status": "reconciled", "main_sha": sha, "main_tree": tree,
                 "installed_app_sha": installed_app["sha"], "cursor": cursor}

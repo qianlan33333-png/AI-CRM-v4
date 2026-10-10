@@ -919,7 +919,7 @@ class DomesticMainReleaseTests(unittest.TestCase):
             marker = loaded["controller_maintenance"]
             self.assertEqual(set(marker), {"candidate_sha","candidate_tree","base_sha","controller_files",
                 "fixed_file_sha256","check_receipt_sha256","checked_at_utc"})
-            self.assertEqual(release._maintenance_check_checkpoint(config,marker),str(checkpoint))
+            self.assertIsNone(release._maintenance_check_checkpoint(config,marker))
             # Install the fixture bytes, verify them through the real marker
             # binding, then use the real submission reader on the same head.
             installed = root / "installed"; installed.mkdir()
@@ -1095,10 +1095,13 @@ class DomesticMainReleaseTests(unittest.TestCase):
             }
             state_path = root / "state.json"
             state["in_flight"] = {}
+            error = RuntimeError("failed")
+            error.checkpoint = "/protected/partial-checkpoint.json"
             with mock.patch.object(release, "atomic_json") as save:
-                release._mark_failed(state_path, state, item, RuntimeError("failed"), "checks")
+                release._mark_failed(state_path, state, item, error, "checks")
             self.assertIsNone(state["controller_maintenance"])
             self.assertEqual(item["status"], "failed")
+            self.assertNotIn("check_checkpoint", item["failure"])
             self.assertEqual(state["status"], "blocked")
             save.assert_called_once()
 
@@ -1230,7 +1233,7 @@ class DomesticMainReleaseTests(unittest.TestCase):
                                              other, base, root / "lock")
             self.assertEqual(json.dumps(state, sort_keys=True), before)
 
-    def test_environment_retry_reactivates_queue_and_keeps_checkpoint(self) -> None:
+    def test_environment_retry_reactivates_queue_and_preserves_failure_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             repo, base, candidate, _other = make_repository(root)

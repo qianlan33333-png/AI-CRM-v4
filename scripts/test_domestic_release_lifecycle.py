@@ -375,12 +375,10 @@ class CheckLifecycleTest(unittest.TestCase):
     def test_cache_no_eviction_measures_once_and_does_not_read_source_refs(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw); _, build, _, config = self.fixture(root)
-            roots = {name: build / 'cache' / name for name in ('go-build', 'go-mod', 'npm', 'preparation')}
+            roots = {name: build / 'cache' / name for name in ('go-build', 'go-mod', 'npm')}
             for name, directory in roots.items():
                 directory.mkdir(parents=True, mode=0o700)
-                destination = directory / ('artifact-' + 'a' * 64) if name == 'preparation' else directory / 'kept'
-                if name == 'preparation':
-                    destination.mkdir(); destination = destination / 'payload'
+                destination = directory / 'kept'
                 destination.write_bytes(b'x' * 8192)
             measured = {name: release._allocated_bytes(directory) for name, directory in roots.items()}
             original_scan = release._allocated_bytes
@@ -393,29 +391,22 @@ class CheckLifecycleTest(unittest.TestCase):
                      release._locked(Path(config['lock'])):
                     config['check_capacity'] = {'cache_limits_bytes': limits}
                     result = release._trim_check_caches(config)
-                    self.assertEqual(scans.call_count, 4)
+                    self.assertEqual(scans.call_count, 3)
                     self.assertEqual({call.args[0] for call in scans.call_args_list}, set(roots.values()))
                     for name, usage in result.items():
                         self.assertEqual(usage['before_bytes'], measured[name])
                         self.assertEqual(usage['after_bytes'], measured[name])
                         self.assertEqual(usage['reclaimed_bytes'], 0)
-            unknown = roots['preparation'] / 'unknown'; unknown.mkdir()
-            with patch.object(release.legacy, 'BUILD_ROOT', build), \
-                 patch.object(release.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())), \
-                 patch.object(release, '_assert_build_account_idle'), release._locked(Path(config['lock'])):
-                for limit in (None, measured['preparation'] * 10):
-                    with self.assertRaisesRegex(release.CheckEnvironmentError, 'unrecognized'):
-                        release._trim_preparation_cache(config, limit)
 
     def test_cache_no_eviction_still_rejects_invalid_limits(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw); _, build, _, config = self.fixture(root)
-            for name in ('go-build', 'go-mod', 'npm', 'preparation'):
+            for name in ('go-build', 'go-mod', 'npm'):
                 (build / 'cache' / name).mkdir(parents=True, mode=0o700)
             with patch.object(release.legacy, 'BUILD_ROOT', build), \
                  patch.object(release.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())), \
                  patch.object(release, '_assert_build_account_idle'), release._locked(Path(config['lock'])):
-                for name in ('go-build', 'go-mod', 'npm', 'preparation'):
+                for name in ('go-build', 'go-mod', 'npm'):
                     for bad in (0, -1, True, '8192'):
                         config['check_capacity'] = {'cache_limits_bytes': {name: bad}}
                         with self.subTest(name=name, bad=bad), self.assertRaises(release.CheckEnvironmentError):
@@ -449,82 +440,87 @@ class CheckLifecycleTest(unittest.TestCase):
             self.assertEqual(usage['after_bytes'], release._allocated_bytes(modules))
             self.assertLessEqual(usage['after_bytes'], usage['limit_bytes'])
 
-    def test_preparation_cache_requires_opt_in_and_uses_actual_private_build_account(self):
+    def test_preparation_and_checkpoint_cleanup_preserve_durable_evidence_and_normal_caches(self):
         with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw); _, build, _, config = self.fixture(root)
-            account = pwd.getpwuid(os.getuid())
-            def mkdir(cfg, command, **kwargs):
-                if command[0] == '/usr/bin/chmod':
-                    os.chmod(command[-1], 0o700)
-                else:
-                    Path(command[-1]).mkdir(mode=0o700, parents=True, exist_ok=True)
-                return subprocess.CompletedProcess(command, 0, '', '')
-            with patch.object(release.legacy, 'BUILD_ROOT', build), \
-                 patch.object(release.pwd, 'getpwnam', return_value=account), \
-                 patch.object(release, '_build_command', side_effect=mkdir) as execute:
-                self.assertIsNone(release._check_preparation_cache(config))
-                execute.assert_not_called()
-                config['check_capacity'] = {'cache_limits_bytes': {'preparation': 1024 * 1024}}
-                with self.assertRaisesRegex(release.ReleaseError, 'serial'):
-                    release._check_preparation_cache(config)
-                with release._locked(Path(config['lock'])):
-                    cache = release._check_preparation_cache(config)
-                    self.assertEqual(cache, build / 'cache/preparation')
-                    cfg = dict(config, _check_preparation_cache=str(cache),
-                               build_path='/opt/aicrm/toolchain/npm/bin:/usr/bin')
-                    self.assertEqual(release._check_env(cfg)['AICRM_TEST_PREP_CACHE'], str(cache))
-                    os.chmod(cache, 0o755)
-                    self.assertEqual(release._check_preparation_cache(config), cache)
-                    self.assertEqual(cache.stat().st_mode & 0o777, 0o700)
-                    for bad in (0, True, -1):
-                        config['check_capacity']['cache_limits_bytes']['preparation'] = bad
-                        with self.assertRaisesRegex(release.CheckEnvironmentError, 'positive'):
-                            release._check_preparation_cache(config)
-
-    def test_preparation_cache_reclaims_whole_old_snapshots_and_preserves_writable_copy(self):
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw); _, build, _, config = self.fixture(root)
+            root = Path(raw); work, build, _, config = self.fixture(root)
             cache = build / 'cache/preparation'; cache.mkdir(parents=True, mode=0o700)
-            old = cache / ('npm-' + 'a' * 64); (old / 'modules').mkdir(parents=True)
-            (old / 'modules/library.js').write_bytes(b'a' * 65536)
-            copy = root / 'active-copy.js'; copy.write_text('private copy')
-            (old / 'modules/link').symlink_to(copy)
-            new = cache / ('artifact-' + 'b' * 64); new.mkdir(); (new / 'page.js').write_bytes(b'b' * 8192)
-            (new / 'receipt.json').write_text('{"input":"verified"}')
-            os.utime(old, (1, 1))
-            config['check_capacity'] = {'cache_limits_bytes': {'preparation': 24576}}
+            for name in ('artifact-' + 'a' * 64, 'npm-' + 'b' * 64):
+                entry = cache / name; entry.mkdir(); (entry / 'receipt.json').write_text('{}')
+            for name in ('artifact.lock', 'npm.lock'):
+                (cache / name).write_text('lock')
+            diagnostics = work / 'diagnostics'; diagnostics.mkdir(mode=0o700)
+            checkpoint = diagnostics / ('c' * 40 + '-attempt-checkpoint.json')
+            checkpoint.write_text('{}'); os.chmod(checkpoint, 0o600)
+            receipt = diagnostics / ('c' * 40 + '-attempt-receipt.json')
+            receipt.write_text('{}'); os.chmod(receipt, 0o600)
+            log = diagnostics / ('c' * 40 + '-attempt-backend.log')
+            log.write_text('durable lane output'); os.chmod(log, 0o600)
+            ordinary_caches = {}
+            for name in ('go-build', 'go-mod', 'npm'):
+                directory = build / 'cache' / name; directory.mkdir(parents=True)
+                ordinary_caches[name] = directory / 'content'; ordinary_caches[name].write_text(name)
+            protected = [work / 'source-bundles' / 'candidate.bundle',
+                         work / 'release-config.json',
+                         build / 'domestic-main-checks' / ('c' * 40 + '-attempt') / 'backend' / 'run.json',
+                         root / 'releases' / ('d' * 40) / 'release' / 'aicrm']
+            for path in protected:
+                path.parent.mkdir(parents=True, exist_ok=True); path.write_text('preserve')
+            env = {'check_database_url':'postgres://test@localhost/aicrm_test_fixture',
+                   'build_path':'/opt/aicrm/toolchain/npm/bin:/usr/bin:/bin'}
+            cfg = dict(env, _check_preparation_dir='/tmp/prep',
+                       _check_preparation_cache=str(cache))
             with patch.object(release.legacy, 'BUILD_ROOT', build), \
                  patch.object(release.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())), \
-                 patch.object(release, '_assert_build_account_idle'), release._locked(Path(config['lock'])):
-                result = release._trim_check_caches(config)['preparation']
-            self.assertEqual(result['removed'], [old.name])
-            self.assertLessEqual(result['after_bytes'], 24576)
-            self.assertFalse(old.exists()); self.assertTrue((new / 'receipt.json').is_file())
-            self.assertEqual(copy.read_text(), 'private copy')
+                 patch.object(release, '_assert_build_account_idle'), \
+                 release._locked(Path(config['lock'])):
+                checked_env = release._check_env(cfg)
+                self.assertNotIn('AICRM_TEST_PREP_CACHE', checked_env)
+                self.assertEqual(checked_env['GOCACHE'], str(build / 'cache/go-build'))
+                with self.assertRaisesRegex(release.ReleaseError, 'serial'):
+                    release._clear_preparation_snapshot_cache({**config, 'lock':str(root/'other.lock')})
+                cleared = release._clear_preparation_snapshot_cache(config)
+                checkpoints = release._clear_check_continuation_checkpoints(config, diagnostics)
+            self.assertEqual(cleared['status'], 'cleared')
+            self.assertCountEqual(cleared['removed'], ['artifact-' + 'a' * 64,
+                                                       'npm-' + 'b' * 64,
+                                                       'artifact.lock', 'npm.lock'])
+            self.assertEqual(checkpoints['removed'], [checkpoint.name])
+            self.assertFalse(cache.exists()); self.assertFalse(checkpoint.exists())
+            self.assertTrue(receipt.is_file()); self.assertTrue(log.is_file())
+            self.assertTrue(all(path.is_file() for path in protected))
+            self.assertTrue(all(path.is_file() for path in ordinary_caches.values()))
 
-    def test_preparation_cache_retains_all_entries_if_running_unknown_or_linked(self):
+    def test_preparation_cleanup_stops_without_deleting_when_build_process_is_unknown(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw); _, build, _, config = self.fixture(root)
             cache = build / 'cache/preparation'; cache.mkdir(parents=True, mode=0o700)
-            known = cache / ('artifact-' + 'a' * 64); known.mkdir(); (known / 'page.js').write_bytes(b'a' * 8192)
-            protected = root / 'source.txt'; protected.write_text('protected')
+            snapshot = cache / ('artifact-' + 'a' * 64); snapshot.mkdir()
+            (snapshot / 'receipt.json').write_text('{}')
             with patch.object(release.legacy, 'BUILD_ROOT', build), \
-                 patch.object(release.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())):
-                with self.assertRaisesRegex(release.ReleaseError, 'serial'):
-                    release._trim_preparation_cache(config, 1)
-                with release._locked(Path(config['lock'])), \
-                     patch.object(release, '_assert_build_account_idle', side_effect=release.CheckEnvironmentError('running task')):
-                    with self.assertRaisesRegex(release.CheckEnvironmentError, 'running'):
-                        release._trim_preparation_cache(config, 1)
-                with release._locked(Path(config['lock'])), patch.object(release, '_assert_build_account_idle'):
-                    unknown = cache / 'unaccounted'; unknown.mkdir()
-                    with self.assertRaisesRegex(release.CheckEnvironmentError, 'unrecognized'):
-                        release._trim_preparation_cache(config, 1)
-                    self.assertTrue(known.exists()); unknown.rmdir()
-                    linked = cache / 'artifact.lock'; linked.symlink_to(protected)
-                    with self.assertRaisesRegex(release.CheckEnvironmentError, 'unrecognized'):
-                        release._trim_preparation_cache(config, 1)
-                    self.assertTrue(known.exists()); self.assertEqual(protected.read_text(), 'protected')
+                 patch.object(release.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())), \
+                 patch.object(release, '_assert_build_account_idle',
+                              side_effect=release.CheckEnvironmentError('unknown live process')), \
+                 release._locked(Path(config['lock'])):
+                with self.assertRaisesRegex(release.CheckEnvironmentError, 'unknown live process'):
+                    release._clear_preparation_snapshot_cache(config)
+            self.assertTrue((snapshot / 'receipt.json').is_file())
+
+    def test_preparation_cleanup_validates_inventory_before_removing_any_entry(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw); _, build, _, config = self.fixture(root)
+            cache = build / 'cache/preparation'; cache.mkdir(parents=True, mode=0o700)
+            known = cache / ('artifact-' + 'a' * 64); known.mkdir()
+            (known / 'receipt.json').write_text('{}')
+            unknown = cache / 'unknown'; unknown.mkdir()
+            marker = unknown / 'keep'; marker.write_text('inspect')
+            with patch.object(release.legacy, 'BUILD_ROOT', build), \
+                 patch.object(release.pwd, 'getpwnam', return_value=pwd.getpwuid(os.getuid())), \
+                 patch.object(release, '_assert_build_account_idle'), \
+                 release._locked(Path(config['lock'])):
+                with self.assertRaisesRegex(release.CheckEnvironmentError, 'unknown entry'):
+                    release._clear_preparation_snapshot_cache(config)
+            self.assertTrue((known / 'receipt.json').is_file())
+            self.assertEqual(marker.read_text(), 'inspect')
 
     def test_missing_or_wrong_disk_blocks_before_root_disk_fallback(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -595,51 +591,55 @@ class CheckLifecycleTest(unittest.TestCase):
                 mapping=json.loads((directory/(report.name+'-archive.json')).read_text())
                 self.assertEqual(mapping['members'][0]['original_path'],str(report/'first-failure.log'))
 
-    def test_current_rollback_pending_and_authority_references_survive_package_gc(self):
+    def test_completed_release_cleanup_removes_only_verified_build_copies(self):
         with tempfile.TemporaryDirectory() as raw:
-            root=Path(raw); work,build,policy,config=self.fixture(root)
-            releases=root/'releases'; releases.mkdir()
-            receipts=root/'domestic-receipts'; receipts.mkdir()
-            names=['a'*40,'b'*40,'c'*40,'d'*40]
+            root = Path(raw); work, build, _, config = self.fixture(root)
+            releases = root / 'releases'; releases.mkdir()
+            receipts = root / 'domestic-receipts'; receipts.mkdir()
+            builds = root / 'domestic/builds'
+            names = ['a' * 40, 'b' * 40, 'c' * 40, 'd' * 40]
+            duplicate_paths = {}
             for name in names:
-                path=releases/name; path.mkdir(); (path/'binary').write_text(name)
-                release.builder.write_release_inventory(path)
-                (receipts/(name+'.json')).write_text(json.dumps({'source_sha':name,'previous_sha':names[1]}))
-            (root/'current').symlink_to(releases/names[0],target_is_directory=True)
-            duplicate=root/'domestic/builds'/names[0]/'release'
-            duplicate.parent.mkdir(parents=True); shutil.copytree(releases/names[0],duplicate)
-            (duplicate.parent/'domestic-release.json').write_text('retained metadata')
-            config.update(state=str(root/'state.json'),repo=str(root/'authority.git'),stage_releases=str(releases))
-            state={'installed_app':{'sha':names[0]},'main':{'sha':names[0]},'queue':[{'head_sha':names[2],'status':'pending'}]}
-            with patch.object(release,'_load_state',return_value=state), \
-                 patch.object(release,'_git',return_value=names[0]), \
-                 patch.object(release.builder,'verify_release_inventory',wraps=release.builder.verify_release_inventory) as verify, \
+                installed = releases / name; installed.mkdir()
+                (installed / 'binary').write_text(name)
+                manifest = release.builder.write_release_inventory(installed)
+                (receipts / (name + '.json')).write_text(json.dumps(
+                    {'source_sha':name, 'source_tree':'e'*40, 'manifest_sha256':manifest,
+                     'technical_status':'installed_healthy'}))
+                duplicate = builds / name / 'release'; duplicate.parent.mkdir(parents=True)
+                shutil.copytree(installed, duplicate)
+                (duplicate.parent / 'domestic-release.json').write_text('retained build metadata')
+                duplicate_paths[name] = duplicate
+            # A mismatched build copy remains available for diagnosis.
+            (duplicate_paths[names[3]] / 'binary').write_text('changed')
+            state = {'status':'ready', 'in_flight':None,
+                     'queue':[{'head_sha':names[2], 'status':'pending'}]}
+            config.update(state=str(root/'state.json'), stage_releases=str(releases))
+            with patch.object(release, '_load_state', return_value=state), \
+                 patch.object(release, '_assert_build_account_idle'), \
                  release._locked(Path(config['lock'])):
-                result=release._reclaim_unreferenced_packages(config)
-                self.assertEqual(verify.call_count,3)  # current + duplicate + unreferenced history
-            self.assertFalse(duplicate.exists())
-            self.assertTrue((duplicate.parent/'domestic-release.json').exists())
-            for name in names[:3]: self.assertTrue((releases/name).exists())
-            self.assertFalse((releases/names[3]).exists())
-            self.assertEqual(len(result['removed']),2)
-            # A build ancestor link cannot redirect duplicate GC outside its root.
-            protected=root/'protected-task'; (protected/'release').mkdir(parents=True)
-            shutil.copytree(releases/names[0],protected/'release',dirs_exist_ok=True)
-            (duplicate.parent/'domestic-release.json').unlink()
-            duplicate.parent.rmdir()
-            duplicate.parent.symlink_to(protected,target_is_directory=True)
-            with patch.object(release,'_load_state',return_value=state), \
-                 patch.object(release,'_git',return_value=names[0]), release._locked(Path(config['lock'])):
-                release._reclaim_unreferenced_packages(config)
-            self.assertTrue((protected/'release/binary').exists())
-            duplicate.parent.unlink()
-            with patch.object(release,'_load_state',return_value=state), \
-                 patch.object(release,'_git',return_value=names[0]), \
-                 patch.object(release.builder,'verify_release_inventory',side_effect=AssertionError('nothing eligible for cleanup')), \
-                 release._locked(Path(config['lock'])):
-                result=release._reclaim_unreferenced_packages(config)
-                self.assertEqual(result['removed'],[])
-                for name in names[:3]: self.assertTrue((releases/name).exists())
+                result = release._reclaim_completed_build_copies(config)
+            self.assertEqual(result['status'], 'completed')
+            self.assertCountEqual([Path(item['path']) for item in result['removed']],
+                                  [duplicate_paths[names[0]], duplicate_paths[names[1]]])
+            self.assertTrue(all((releases / name / 'binary').is_file() for name in names))
+            self.assertTrue(all((duplicate_paths[name].parent / 'domestic-release.json').is_file()
+                                for name in names))
+            self.assertFalse(duplicate_paths[names[0]].exists())
+            self.assertFalse(duplicate_paths[names[1]].exists())
+            self.assertTrue(duplicate_paths[names[2]].exists())
+            self.assertTrue(duplicate_paths[names[3]].exists())
+            proof = json.loads(Path(result['proof']).read_text())
+            self.assertEqual(proof['status'], 'completed')
+            self.assertEqual(len(proof['removed']), 2)
+            self.assertEqual(len(result['retained']), 1)
+            # An unresolved transaction blocks even a previously verified copy.
+            shutil.copytree(releases / names[0], duplicate_paths[names[0]])
+            state['in_flight'] = {'phase':'promotion'}
+            with patch.object(release, '_load_state', return_value=state), release._locked(Path(config['lock'])):
+                blocked = release._reclaim_completed_build_copies(config)
+            self.assertEqual(blocked['status'], 'protected_unresolved_attempt')
+            self.assertTrue(duplicate_paths[names[0]].exists())
 
     def test_timeout_terminates_only_the_attempt_process_group_before_cleanup(self):
         process=unittest.mock.Mock(pid=424242)
