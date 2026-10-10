@@ -246,16 +246,33 @@ func paidReferralFinancialJourney(t *testing.T, channel string, mergedAliases, p
 		if err = f.pool.QueryRow(ctx, `INSERT INTO payments(order_id,provider,payment_channel,merchant_order_no,payer_identity_id,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,profit_sharing_marked,provider_transaction_reference,provider_transaction_digest,paid_confirmed_at,version,created_at,updated_at) VALUES($1,'wechat_pay',$2,$3,$4,$5,$5,1000,'CNY','paid',true,'synthetic-description-transaction',$6,$7,1,$7,$7) RETURNING id`, first.ID, channel, first.MerchantOrderNo, f.promoter.IdentityID, f.promoter.CustomerID, effectport.Hash("wechatpay.transaction", "synthetic-description-transaction"), time.Now()).Scan(&paymentID); err != nil {
 			t.Fatal(err)
 		}
-		writeName := func(name string) {
+		directory := customerstore.NewPostgreSQL()
+		writeDirectoryName := func(name, source string) {
 			t.Helper()
 			if err := f.uow.Within(ctx, func(tx context.Context) error {
 				now := time.Now().UTC()
-				return customerstore.NewPostgreSQL().UpsertDirectoryProjection(tx, customerport.DirectoryProjection{CustomerID: customerdomain.CustomerID(f.promoter.CustomerID), CustomerStatus: customerdomain.StatusActive, DisplayName: name, ActivationState: "active", Source: "referral.description.fixture", SourceVersion: 1, LastSyncedAt: now, UpdatedAt: now})
+				return directory.UpsertDirectoryProjection(tx, customerport.DirectoryProjection{CustomerID: customerdomain.CustomerID(f.promoter.CustomerID), CustomerStatus: customerdomain.StatusActive, DisplayName: name, ActivationState: "active", Source: source, SourceVersion: 1, LastSyncedAt: now, UpdatedAt: now})
 			}); err != nil {
 				t.Fatal(err)
 			}
 		}
-		writeName("购买人微信昵称")
+		// H5 starts with an existing manually maintained WeCom display name;
+		// Mini Program starts with a legacy row whose source tag looks like OAuth.
+		// Neither generic display value is itself accepted as a WeChat nickname.
+		initialDisplaySource := "wecom_directory_sync"
+		if channel == "mini_program" {
+			initialDisplaySource = "wechat.payment.h5_oauth.userinfo"
+		}
+		writeDirectoryName("既有混合展示名", initialDisplaySource)
+		expectedNickname := ""
+		if channel == "h5_official_account" {
+			if err = f.uow.Within(ctx, func(tx context.Context) error {
+				return directory.ObserveProviderProfile(tx, customerdomain.CustomerID(f.promoter.CustomerID), customerport.ProviderProfileObservation{DisplayName: "购买人微信昵称", Source: "wechat.payment.h5_oauth.userinfo", ObservedAt: time.Now().UTC()})
+			}); err != nil {
+				t.Fatal(err)
+			}
+			expectedNickname = "购买人微信昵称"
+		}
 		request := paymentport.ProfitSharingRequest{SettlementRef: "dstl_composed_description", OriginalPaymentRef: paymentport.PaymentReference(paymentID), RecipientCustomerID: f.buyer, AmountMinor: wantCommission, Currency: "CNY", IdempotencyKey: "composed-description-idempotency-0001", SourceDigest: effectport.Hash("composed-description-source"), PayloadDigest: effectport.Hash("composed-description-payload"), PolicyDigest: effectport.Hash("composed-description-policy")}
 		var instruction paymentport.ProfitSharingInstruction
 		if err = f.uow.Within(ctx, func(tx context.Context) error {
@@ -265,7 +282,23 @@ func paidReferralFinancialJourney(t *testing.T, channel string, mergedAliases, p
 		}); err != nil {
 			t.Fatal(err)
 		}
-		writeName("后来修改的昵称")
+		// Exercise the real Customer sidebar writer, followed by a generic
+		// WeCom directory observation. Neither may replace the verified name.
+		var profile customerport.SidebarProfile
+		if err = f.uow.Within(ctx, func(tx context.Context) error {
+			var readErr error
+			profile, readErr = directory.ReadSidebarProfile(tx, customerdomain.CustomerID(f.promoter.CustomerID))
+			return readErr
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err = f.uow.Within(ctx, func(tx context.Context) error {
+			_, updateErr := directory.UpdateSidebarProfile(tx, customerport.SidebarProfileUpdate{CustomerID: customerdomain.CustomerID(f.promoter.CustomerID), DisplayName: "管理员手工备注", ExpectedVersion: profile.Version}, [32]byte{}, [32]byte{}, time.Now().UTC())
+			return updateErr
+		}); err != nil {
+			t.Fatal(err)
+		}
+		writeDirectoryName("企微同步名称", "wecom_directory_sync")
 		if err = f.uow.Within(ctx, func(tx context.Context) error {
 			replay, err := application.paymentReconciliation.AcceptProfitSharingWithin(tx, request)
 			if err == nil && replay.Reference != instruction.Reference {
@@ -275,8 +308,20 @@ func paidReferralFinancialJourney(t *testing.T, channel string, mergedAliases, p
 		}); err != nil {
 			t.Fatal(err)
 		}
+		var persistedNickname string
+		if err = f.uow.Within(ctx, func(tx context.Context) error {
+			var readErr error
+			persistedNickname, readErr = directory.ReadWeChatNickname(tx, customerdomain.CustomerID(f.promoter.CustomerID))
+			return readErr
+		}); err != nil || persistedNickname != expectedNickname {
+			t.Fatalf("Customer nickname changed across sidebar or WeCom write: got=%q want=%q err=%v", persistedNickname, expectedNickname, err)
+		}
 		material, err := application.paymentReconciliation.LoadProfitSharingEffectMaterial(ctx, effectport.KindWeChatPayProfitSharing, request.SourceDigest)
-		if err != nil || material.Reason != "购买人微信昵称购买分销归因商品分账" || material.AmountMinor != wantCommission || material.PayloadDigest == request.PayloadDigest {
+		wantDescriptionName := expectedNickname
+		if wantDescriptionName == "" {
+			wantDescriptionName = "微信用户"
+		}
+		if err != nil || material.Reason != wantDescriptionName+"购买分销归因商品分账" || material.AmountMinor != wantCommission || material.PayloadDigest == request.PayloadDigest {
 			t.Fatal("composed description lost original buyer/product/fingerprint", err)
 		}
 	}

@@ -20,33 +20,53 @@ func (s *purchaseDescriptionOrders) ReadCheckoutSnapshotWithin(_ context.Context
 	return s.value, s.err
 }
 
-type purchaseDescriptionNames struct {
-	got []customerdomain.CustomerID
-	err error
+type purchaseDescriptionNicknames struct {
+	got   customerdomain.CustomerID
+	value string
+	err   error
 }
 
-func (s *purchaseDescriptionNames) DisplayNames(_ context.Context, ids []customerdomain.CustomerID) (map[customerdomain.CustomerID]string, error) {
-	s.got = ids
-	return map[customerdomain.CustomerID]string{11: "购买人", 19: "推荐人"}, s.err
+func (s *purchaseDescriptionNicknames) ReadWeChatNickname(_ context.Context, id customerdomain.CustomerID) (string, error) {
+	s.got = id
+	return s.value, s.err
 }
+
+type purchaseDescriptionLineage struct {
+	requested customerdomain.CustomerID
+	values    []customerdomain.CustomerID
+	err       error
+}
+
+func (s *purchaseDescriptionLineage) LockedCanonicalLineage(_ context.Context, id customerdomain.CustomerID) ([]customerdomain.CustomerID, error) {
+	s.requested = id
+	return s.values, s.err
+}
+
 func TestProfitSharingDescriptionUsesOriginalBuyerAndFrozenProduct(t *testing.T) {
 	orders := &purchaseDescriptionOrders{value: orderport.CheckoutSnapshot{OrderID: 7, ProductName: "原下单商品"}}
-	names := &purchaseDescriptionNames{}
-	a := paymentProfitSharingDescriptionAdapter{orders: orders, names: names}
+	nicknames := &purchaseDescriptionNicknames{value: "购买人"}
+	lineage := &purchaseDescriptionLineage{values: []customerdomain.CustomerID{19, 11}}
+	a := paymentProfitSharingDescriptionAdapter{orders: orders, lineage: lineage, nicknames: nicknames}
 	got, err := a.ReadProfitSharingDescriptionWithin(context.Background(), 7, 11)
-	if err != nil || got != "购买人购买原下单商品分账" || orders.got != 7 || len(names.got) != 1 || names.got[0] != 11 {
-		t.Fatal("description did not use original Payment buyer and Order snapshot")
+	if err != nil || got != "购买人购买原下单商品分账" || orders.got != 7 || lineage.requested != 11 || nicknames.got != 19 {
+		t.Fatal("description did not use Payment buyer's current OneID root and frozen Order snapshot")
 	}
 	orders.value.OrderID = 8
 	if _, err = a.ReadProfitSharingDescriptionWithin(context.Background(), 7, 11); err == nil {
 		t.Fatal("wrong Order accepted")
 	}
 	orders.value.OrderID = 7
-	names.err = errors.New("directory unavailable")
+	lineage.err = errors.New("identity unavailable")
 	if _, err = a.ReadProfitSharingDescriptionWithin(context.Background(), 7, 11); err == nil {
-		t.Fatal("unavailable presentation reader silently accepted")
+		t.Fatal("unavailable identity reader silently accepted")
 	}
-	names.err = nil
+	lineage.err = nil
+	nicknames.err = errors.New("customer reader unavailable")
+	if _, err = a.ReadProfitSharingDescriptionWithin(context.Background(), 7, 11); err == nil {
+		t.Fatal("unavailable Customer reader silently accepted")
+	}
+	nicknames.err = nil
+	nicknames.value = ""
 	got, err = a.ReadProfitSharingDescriptionWithin(context.Background(), 7, 12)
 	if err != nil || got != "微信用户购买原下单商品分账" {
 		t.Fatal("missing nickname did not use neutral fallback")

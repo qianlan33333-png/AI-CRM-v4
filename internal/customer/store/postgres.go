@@ -27,6 +27,7 @@ var _ customerport.ProviderProfileWriter = PostgreSQL{}
 var _ customerport.AudienceReader = PostgreSQL{}
 var _ customerport.AudienceRegistrationReader = PostgreSQL{}
 var _ customerport.DirectoryDisplayNameReader = PostgreSQL{}
+var _ customerport.WeChatNicknameReader = PostgreSQL{}
 var _ customerport.DirectoryPublicProfileReader = PostgreSQL{}
 var _ customerport.DirectoryContactDisplayReader = PostgreSQL{}
 var _ customerport.RadarVisitorDirectoryReader = PostgreSQL{}
@@ -156,6 +157,22 @@ func (PostgreSQL) DisplayNames(ctx context.Context, customerIDs []customerdomain
 		}
 	}
 	return result, rows.Err()
+}
+
+func (PostgreSQL) ReadWeChatNickname(ctx context.Context, customerID customerdomain.CustomerID) (string, error) {
+	if customerID < 1 {
+		return "", customerapp.ErrInvalidQuery
+	}
+	tx, err := platformpostgres.RequireTransaction(ctx)
+	if err != nil {
+		return "", err
+	}
+	var nickname string
+	err = tx.QueryRow(ctx, `SELECT wechat_nickname FROM customer_directory_projection WHERE customer_id=$1`, customerID).Scan(&nickname)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return nickname, err
 }
 
 func (PostgreSQL) PublicProfiles(ctx context.Context, customerIDs []customerdomain.CustomerID) (map[customerdomain.CustomerID]customerport.DirectoryPublicProfile, error) {
@@ -455,6 +472,11 @@ func (PostgreSQL) ObserveProviderProfile(ctx context.Context, customerID custome
 	if customerID < 1 || observation.Source == "" || len(observation.Source) > 128 || strings.ContainsAny(observation.Source, " \t\r\n\x00") || observation.ObservedAt.IsZero() {
 		return customerapp.ErrInvalidQuery
 	}
+	wechatNickname := ""
+	trustedWeChatUserInfo := observation.Source == "wechat.payment.h5_oauth.userinfo"
+	if trustedWeChatUserInfo {
+		wechatNickname = observation.DisplayName
+	}
 	if observation.DisplayName == "" {
 		observation.DisplayName = "微信用户"
 	}
@@ -462,19 +484,20 @@ func (PostgreSQL) ObserveProviderProfile(ctx context.Context, customerID custome
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO customer_directory_projection(customer_id,customer_status,display_name,avatar_url,oneid_label,activation_status,source,source_version,last_synced_at,updated_at)
-		VALUES($1,'active',$2,$3,$4,'active',$5,1,$6,$6)
+	_, err = tx.Exec(ctx, `INSERT INTO customer_directory_projection(customer_id,customer_status,display_name,avatar_url,wechat_nickname,oneid_label,activation_status,source,source_version,last_synced_at,updated_at)
+		VALUES($1,'active',$2,$3,$4,$5,'active',$6,1,$7,$7)
 		ON CONFLICT(customer_id) DO UPDATE SET
 			customer_status='active',
 			display_name=CASE WHEN customer_directory_projection.display_name='' OR customer_directory_projection.source IN ('identity_provision','identity_provision_backfill','wechat.payment.h5_oauth.userinfo') THEN EXCLUDED.display_name ELSE customer_directory_projection.display_name END,
 			avatar_url=CASE WHEN EXCLUDED.avatar_url<>'' AND (customer_directory_projection.avatar_url='' OR customer_directory_projection.source IN ('identity_provision','identity_provision_backfill','wechat.payment.h5_oauth.userinfo')) THEN EXCLUDED.avatar_url ELSE customer_directory_projection.avatar_url END,
+			wechat_nickname=CASE WHEN $8 THEN EXCLUDED.wechat_nickname ELSE customer_directory_projection.wechat_nickname END,
 			oneid_label=EXCLUDED.oneid_label,
 			activation_status='active',
 			source=CASE WHEN customer_directory_projection.display_name='' OR customer_directory_projection.source IN ('identity_provision','identity_provision_backfill','wechat.payment.h5_oauth.userinfo') THEN EXCLUDED.source ELSE customer_directory_projection.source END,
 			source_version=customer_directory_projection.source_version+1,
 			last_synced_at=EXCLUDED.last_synced_at,
 			updated_at=EXCLUDED.updated_at`,
-		customerID, observation.DisplayName, observation.AvatarURL, customerdomain.CanonicalOneIDLabel(customerID), observation.Source, observation.ObservedAt.UTC())
+		customerID, observation.DisplayName, observation.AvatarURL, wechatNickname, customerdomain.CanonicalOneIDLabel(customerID), observation.Source, observation.ObservedAt.UTC(), trustedWeChatUserInfo)
 	return err
 }
 

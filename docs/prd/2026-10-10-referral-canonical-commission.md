@@ -6,7 +6,7 @@
 
 根因：OneID 的 `LockedCanonicalLineage` 返回 `[canonical root, merged aliases...]`，不是多个候选主体。推荐人 root 12935 下有已合并 alias 23503，`recordPaidInvitationAttributionWithin` 的 `len(roots) != 1` 错误排除了合法客户。不得改客户合并事实、要求重新注册分销员或修改订单页面标签掩盖缺失。
 
-另一个授权行为：将新分账备注从固定英文改为 `购买人微信昵称 + 购买 + 商品名 + 分账`。例如 `崔晓玲购买裂变商品分账`；支付重试保持首次冻结的备注。
+另一个授权行为：将新分账备注从固定英文改为 `购买人微信昵称 + 购买 + 商品名 + 分账`。例如 `崔晓玲购买裂变商品分账`；支付重试保持首次冻结的备注。Customer 的通用 `display_name` 是混合展示投影，不能保证是微信昵称；只有可信 WeChat H5 OAuth userinfo 取得的昵称可用于备注。缺少这项单独保存的资料时使用“微信用户”。不新增采集步骤或页面。
 
 ## 业务判断流程
 
@@ -36,11 +36,11 @@ flowchart TD
 
 ## 复用与数据边界
 
-OneID：读取现有 `identity/port` 的锁定 canonical lineage 和已验证签发身份。不自建身份匹配、合并、第二个客户 ID；合法别名不会导致资格丢失，自购必须检查整个 lineage。身份 Port 失败、空 lineage 或 root 不符仍按既有安全规则处理。
+OneID：读取现有 `identity/port` 的锁定 canonical lineage 和已验证签发身份。不自建身份匹配、合并、第二个客户 ID；合法别名不会导致资格丢失，自购必须检查整个 lineage。分账备注仅用 lineage 首位的当前 canonical root 读取 Customer 昵称，不改 Payment 原始付款人/接收方/金额/幂等事实。身份 Port 失败、空 lineage 或 root 不符仍按既有安全规则处理。
 
 持久化：订单归因、政策、收款准备及付款后佣金继续由现有领域 Owner 在同一 PostgreSQL UoW 完成。资格检查使用 Order / Payment 的已有 Port，已全退购买不能证明资格，但同一客户另一笔有效购买能够证明资格。
 
-外部效果：继续使用 Payment 的原分账指令及 EER，不新建 Provider writer、队列、重试或对账内核。备注从可信客户展示投影和 Order 已冻结商品名取得，在首次分账受理时由 Payment 冻结；昵称不能改变金额、接收人或身份。原指令重复受理先重放原指令，再读实时展示资料，避免改变原资金请求。备注不进入结构化日志和 EER envelope，只在 Payment 的业务材料中保存；新增字段保持旧指令原英文备注兼容。迁移 0233 为 Payment 指令增加不可修改的 `description_snapshot`，既有行默认为空并继续使用原英文和原摘要。新 Provider payload 摘要由原 Distribution 请求摘要和冻结备注共同生成；请求重放仍比较原请求摘要，因此改昵称不创建第二条资金指令。
+外部效果：继续使用 Payment 的原分账指令及 EER，不新建 Provider writer、队列、重试或对账内核。备注从 Payment 已冻结付款人 CustomerID、Customer 自有的 `wechat_nickname` 资料和 Order 已冻结商品名取得，在首次分账受理时由 Payment 冻结；不读取混合来源的 `display_name`。只有可信 H5 OAuth userinfo ProviderProfile 写口写入 `wechat_nickname`，管理员侧栏编辑及企微目录同步不改该字段。新增列默认空且不从旧 `display_name` 回填；小程序、旧行和未取得微信资料的账户使用“微信用户”。昵称不能改变金额、接收人或身份。原指令重复受理使用已冻结描述，不重读实时资料。备注不进入结构化日志和 EER envelope，只在 Payment 的业务材料中保存；新增字段保持旧指令原英文备注兼容。迁移 0233 为 Payment 指令增加不可修改的 `description_snapshot`，既有行默认为空并继续使用原英文和原摘要。迁移 0234 为 Customer 增加独立可信微信昵称列，不改变现有展示投影或历史值。新 Provider payload 摘要由原 Distribution 请求摘要和冻结备注共同生成；请求重放仍比较原请求摘要，因此改昵称不创建第二条资金指令。
 
 限制必要性：删除“lineage 必须只有一个成员”的无依据限制。只保留 canonical root 正确、已验证身份和非自购判断。微信接口声明长度 80；实现保守地同时满足 80 UTF-8 字节边界，超长按 UTF-8 边界显式缩略展示内容并保留 `购买`、`分账` 和双方文本，不以超长备注阻断正常佣金。缺昵称使用 `微信用户`，不替换成手机号或 OpenID。
 
@@ -48,7 +48,7 @@ OneID：读取现有 `identity/port` 的锁定 canonical lineage 和已验证签
 
 候选 A：修复 canonical lineage 判断。真实 PostgreSQL + Composition Root 重现合法已合并别名时，好友订单仍冻结 30% 佣金及分账标记；同根别名自购不产生佣金；先退款后重新购买仍可分销；拒绝已失效资格和未知身份。保留原邀请、旧分销链接、回滚及幂等合同。验证付款回调重放仅一条佣金 / 一条排行榜 credit。无 UI 或数据库迁移。
 
-候选 B：冻结中文分账备注。验证昵称来自买家、商品来自原订单；SDK 实际请求使用中文备注；首次受理后的改昵称/改商品展示不改变重试备注；中文、emoji、超长与缺昵称兼容；原已创建指令保持原英文。涉及 Payment 自有材料持久化时使用前向兼容迁移，生产迁移前由唯一工作台备份。
+候选 B：冻结中文分账备注。验证昵称只能来自 Customer 独立保存的可信 WeChat OAuth userinfo 值，而不是可编辑混合展示名；Payment 旧付款人别名经现有 OneID 锁定到当前 root 后读名，但资金命令仍保留原冻结 ID；商品来自原订单；SDK 实际请求使用中文备注；首次受理后的侧栏改名/企微目录更新/商品展示变化不改变重试备注；中文、emoji、超长与缺昵称兼容；小程序和旧行回退“微信用户”；原已创建指令保持原英文。Customer PG 验证迁移不回填旧混合值，受信 OAuth 独立写入、侧栏和 WeCom 写不覆盖；真实 Payment+Customer+OneID PostgreSQL 旅程验证买家名称与重放备注。Payment 指令材料迁移 0233 与 Customer 新字段迁移 0234 均为前向兼容；0234 不回填历史展示名。生产迁移前由唯一工作台备份。
 
 五项影响：接口保持兼容；机制为 canonical 主体判断与 Provider 文本材料；直接消费者为 Distribution / Order / Referral / Payment / Customer 展示 Port；现有后台及微信账单输出变化，无页面编码；相关具名用例及最终同包预发旅程、生产独立读回分别记录。局部合成测试不代表真实新订单或微信分账已成功。
 

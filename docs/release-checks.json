@@ -60,6 +60,18 @@
       "package": "./cmd/aicrm",
       "test": "TestPostgreSQLPaidReferralCanonicalAliasesAndRepurchaseFreezeCommission",
       "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/customer/store",
+      "test": "TestProviderProfileCreatesMinimumAndPreservesHigherPriorityNamePostgreSQL",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/customer/store",
+      "test": "TestWeChatNicknameMigrationDoesNotBackfillOrReadMixedNamePostgreSQL",
+      "postgres": true
     }
   ],
   "installed_checks": [

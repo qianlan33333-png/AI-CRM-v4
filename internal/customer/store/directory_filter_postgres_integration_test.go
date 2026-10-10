@@ -4,6 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -161,6 +164,7 @@ func TestProviderProfileCreatesMinimumAndPreservesHigherPriorityNamePostgreSQL(t
 	ctx := context.Background()
 	native, cleanup := directoryFilterPool(t, ctx, url)
 	defer cleanup()
+	applyCustomerVerifiedWeChatNicknameMigration(t, ctx, native)
 	pool, err := platformpostgres.Wrap(native, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +191,15 @@ func TestProviderProfileCreatesMinimumAndPreservesHigherPriorityNamePostgreSQL(t
 	if name != "微信昵称" || avatar != "https://thirdwx.qlogo.cn/avatar" || oneID != "CID-7" || source != "wechat.payment.h5_oauth.userinfo" {
 		t.Fatalf("name=%q avatar=%q oneID=%q source=%q", name, avatar, oneID, source)
 	}
-	if _, err = native.Exec(ctx, `UPDATE customer_directory_projection SET display_name='企微姓名',source='wecom_directory_sync' WHERE customer_id=7`); err != nil {
+	var nickname string
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		var readErr error
+		nickname, readErr = repository.ReadWeChatNickname(tx, 7)
+		return readErr
+	}); err != nil || nickname != "微信昵称" {
+		t.Fatalf("trusted WeChat nickname=%q err=%v", nickname, err)
+	}
+	if _, err = native.Exec(ctx, `UPDATE customer_directory_projection SET display_name='后台手工备注' WHERE customer_id=7`); err != nil {
 		t.Fatal(err)
 	}
 	if err = uow.Within(ctx, func(tx context.Context) error {
@@ -195,11 +207,111 @@ func TestProviderProfileCreatesMinimumAndPreservesHigherPriorityNamePostgreSQL(t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err = native.QueryRow(ctx, `SELECT display_name,source FROM customer_directory_projection WHERE customer_id=7`).Scan(&name, &source); err != nil {
+	if err = native.QueryRow(ctx, `SELECT display_name,source,wechat_nickname FROM customer_directory_projection WHERE customer_id=7`).Scan(&name, &source, &nickname); err != nil {
 		t.Fatal(err)
 	}
-	if name != "企微姓名" || source != "wecom_directory_sync" {
-		t.Fatalf("higher-priority name=%q source=%q", name, source)
+	if name != "更新微信昵称" || source != "wechat.payment.h5_oauth.userinfo" || nickname != "更新微信昵称" {
+		t.Fatalf("directory name=%q source=%q trusted nickname=%q", name, source, nickname)
+	}
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		return repository.ObserveProviderProfile(tx, 7, customerport.ProviderProfileObservation{DisplayName: "企微同步姓名", Source: "wecom_directory_sync", ObservedAt: observedAt.Add(2 * time.Minute)})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		var readErr error
+		nickname, readErr = repository.ReadWeChatNickname(tx, 7)
+		return readErr
+	}); err != nil || nickname != "更新微信昵称" {
+		t.Fatalf("WeCom observation replaced trusted nickname=%q err=%v", nickname, err)
+	}
+}
+
+func TestWeChatNicknameMigrationDoesNotBackfillOrReadMixedNamePostgreSQL(t *testing.T) {
+	url, err := platformconfig.DatabaseURL()
+	if err != nil {
+		t.Skip("AICRM_DATABASE_URL is not configured")
+	}
+	ctx := context.Background()
+	native, cleanup := directoryFilterPool(t, ctx, url)
+	defer cleanup()
+	if _, err = native.Exec(ctx, `INSERT INTO customer_directory_projection(customer_id,customer_status,display_name,source,source_version,updated_at) VALUES(7,'active','旧混合目录名','wechat.payment.h5_oauth.userinfo',1,clock_timestamp())`); err != nil {
+		t.Fatal(err)
+	}
+	applyCustomerVerifiedWeChatNicknameMigration(t, ctx, native)
+	pool, err := platformpostgres.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	uow, err := platformpostgres.NewUnitOfWork(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := PostgreSQL{}
+	var nickname string
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		var readErr error
+		nickname, readErr = repository.ReadWeChatNickname(tx, 7)
+		return readErr
+	}); err != nil || nickname != "" {
+		t.Fatalf("legacy mixed display name was treated as a trusted nickname: %q %v", nickname, err)
+	}
+	if _, err = native.Exec(ctx, `UPDATE customer_directory_projection SET display_name='旧目录中的人工改名' WHERE customer_id=7`); err != nil {
+		t.Fatal(err)
+	}
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		return repository.ObserveProviderProfile(tx, 7, customerport.ProviderProfileObservation{DisplayName: "新的微信昵称", Source: "wechat.payment.h5_oauth.userinfo", ObservedAt: time.Now().UTC()})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		var readErr error
+		nickname, readErr = repository.ReadWeChatNickname(tx, 7)
+		return readErr
+	}); err != nil || nickname != "新的微信昵称" {
+		t.Fatalf("trusted OAuth nickname not isolated from mixed name: %q %v", nickname, err)
+	}
+	profile, err := func() (customerport.SidebarProfile, error) {
+		var got customerport.SidebarProfile
+		err := uow.Within(ctx, func(tx context.Context) error {
+			var readErr error
+			got, readErr = repository.ReadSidebarProfile(tx, 7)
+			return readErr
+		})
+		return got, err
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		_, updateErr := repository.UpdateSidebarProfile(tx, customerport.SidebarProfileUpdate{CustomerID: 7, DisplayName: "管理员内备注", ExpectedVersion: profile.Version}, [32]byte{}, [32]byte{}, time.Now().UTC())
+		return updateErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = uow.Within(ctx, func(tx context.Context) error {
+		var readErr error
+		nickname, readErr = repository.ReadWeChatNickname(tx, 7)
+		return readErr
+	}); err != nil || nickname != "新的微信昵称" {
+		t.Fatalf("sidebar display edit replaced trusted nickname: %q %v", nickname, err)
+	}
+}
+
+func applyCustomerVerifiedWeChatNicknameMigration(t *testing.T, ctx context.Context, native *pgxpool.Pool) {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate Customer store test source")
+	}
+	path := filepath.Join(filepath.Dir(file), "../../../migrations/0234_customer_verified_wechat_nickname.sql")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = native.Exec(ctx, string(raw)); err != nil {
+		t.Fatalf("apply Customer WeChat nickname migration: %v", err)
 	}
 }
 
@@ -232,11 +344,17 @@ func directoryFilterPool(t *testing.T, ctx context.Context, url string) (*pgxpoo
 			CREATE TABLE customer_directory_projection (
 				customer_id BIGINT PRIMARY KEY, customer_status TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '',
 				avatar_url TEXT NOT NULL DEFAULT '', oneid_label TEXT NOT NULL DEFAULT '', phone_masked TEXT NOT NULL DEFAULT '',
+				gender SMALLINT NOT NULL DEFAULT 0, contact_type SMALLINT NOT NULL DEFAULT 0, corp_name TEXT NOT NULL DEFAULT '',
 				phone_assurance TEXT NULL, activation_status TEXT NOT NULL DEFAULT 'active', last_synced_at TIMESTAMPTZ NULL,
 				source TEXT NOT NULL DEFAULT 'wecom_directory_sync', source_version BIGINT NOT NULL DEFAULT 1,
 				updated_at TIMESTAMPTZ NOT NULL
 			);
 		CREATE TABLE customer_local_owners (customer_id BIGINT PRIMARY KEY, staff_id BIGINT NOT NULL);
+		CREATE TABLE customer_sidebar_profiles (
+			customer_id BIGINT PRIMARY KEY, profile_source TEXT NOT NULL DEFAULT '', industry TEXT NOT NULL DEFAULT '',
+			industry_description TEXT NOT NULL DEFAULT '', needs_blockers_followup TEXT NOT NULL DEFAULT '',
+			version BIGINT NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+		);
 	`); err != nil {
 		native.Close()
 		_, _ = admin.Exec(context.Background(), "DROP SCHEMA "+identifier+" CASCADE")

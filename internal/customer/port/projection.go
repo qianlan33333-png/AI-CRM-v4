@@ -34,6 +34,13 @@ type DirectoryDisplayNameReader interface {
 	DisplayNames(context.Context, []customerdomain.CustomerID) (map[customerdomain.CustomerID]string, error)
 }
 
+// WeChatNicknameReader exposes only the nickname returned by a trusted WeChat
+// OAuth userinfo read. It never falls back to the mixed-source directory name
+// and does not resolve or provision customer identities.
+type WeChatNicknameReader interface {
+	ReadWeChatNickname(context.Context, customerdomain.CustomerID) (string, error)
+}
+
 // DirectoryPublicProfile is the smallest public-facing identity presentation
 // projection. It is used only after a domain already holds a canonical
 // Customer ID; it cannot search, resolve, provision, or reveal contact data.
