@@ -71,27 +71,28 @@ type paidConfirmationRestorer interface {
 }
 
 type Service struct {
-	lineage                 identityport.CanonicalLineageReader
-	receiverIDs             identityport.PaymentIdentityReader
-	uow                     platformport.UnitOfWork
-	store                   Store
-	orders                  orderport.PaymentCoordinator
-	sessions                paymentport.SessionLifecycle
-	effects                 effectport.TransactionalAccepter
-	effectReader            effectport.Reader
-	shopReconciler          paymentport.ShopRefundReconciler
-	payReconciler           paymentport.WeChatPayReconciler
-	alipayReconciler        paymentport.AlipayReconciler
-	profitSharingReconciler paymentport.ProfitSharingReconciler
-	receiverStatusObserver  paymentport.ProfitSharingReceiverStatusObserver
-	reconcileJobs           paymentport.ReconciliationEnqueuer
-	products                productport.CheckoutProductReader
-	refundExposureConsumer  paymentport.RefundExposureConsumer
-	miniAppID               string
-	h5AppID                 string
-	alipayAppID             string
-	profitSharingEnabled    bool
-	now                     func() time.Time
+	lineage                  identityport.CanonicalLineageReader
+	receiverIDs              identityport.PaymentIdentityReader
+	uow                      platformport.UnitOfWork
+	store                    Store
+	orders                   orderport.PaymentCoordinator
+	sessions                 paymentport.SessionLifecycle
+	effects                  effectport.TransactionalAccepter
+	effectReader             effectport.Reader
+	shopReconciler           paymentport.ShopRefundReconciler
+	payReconciler            paymentport.WeChatPayReconciler
+	alipayReconciler         paymentport.AlipayReconciler
+	profitSharingReconciler  paymentport.ProfitSharingReconciler
+	profitSharingDescription paymentport.ProfitSharingDescriptionReader
+	receiverStatusObserver   paymentport.ProfitSharingReceiverStatusObserver
+	reconcileJobs            paymentport.ReconciliationEnqueuer
+	products                 productport.CheckoutProductReader
+	refundExposureConsumer   paymentport.RefundExposureConsumer
+	miniAppID                string
+	h5AppID                  string
+	alipayAppID              string
+	profitSharingEnabled     bool
+	now                      func() time.Time
 }
 
 func (s *Service) SetAlipayAppID(appID string) error {

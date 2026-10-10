@@ -1574,6 +1574,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = paymentService.SetProfitSharingEnabled(cfg.WeChatPay.ProfitSharingEnabled); err != nil {
 		return fail(err)
 	}
+	if err = paymentService.SetProfitSharingDescriptionReader(paymentProfitSharingDescriptionAdapter{orders: orderService, names: customerStore}); err != nil {
+		return fail(err)
+	}
 	if err = paymentService.SetCheckoutProductReader(productTargets); err != nil {
 		return fail(err)
 	}

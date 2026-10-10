@@ -481,7 +481,7 @@ func (s *Service) LoadProfitSharingReferenceMaterial(ctx context.Context, refere
 			if err != nil {
 				return err
 			}
-			material, err = s.profitSharingInstructionMaterial(tx, store, instruction, effectport.Digest(instruction.PayloadDigest))
+			material, err = s.profitSharingInstructionMaterial(tx, store, instruction, profitSharingProviderPayloadDigest(instruction))
 			kind = effectport.KindWeChatPayProfitSharing
 			return err
 		}
@@ -500,6 +500,9 @@ func (s *Service) LoadProfitSharingReferenceMaterial(ctx context.Context, refere
 }
 
 func (s *Service) profitSharingInstructionMaterial(ctx context.Context, store DistributionSettlementStore, instruction domain.ProfitSharingInstruction, digest effectport.Digest) (paymentport.ProfitSharingProviderMaterial, error) {
+	if digest != profitSharingProviderPayloadDigest(instruction) || instruction.DescriptionSnapshot != "" && !paymentport.ValidProfitSharingDescription(instruction.DescriptionSnapshot) {
+		return paymentport.ProfitSharingProviderMaterial{}, paymentport.ErrConflict
+	}
 	receiver, err := store.GetProfitSharingReceiver(ctx, instruction.ReceiverID, false)
 	if err != nil {
 		return paymentport.ProfitSharingProviderMaterial{}, err
@@ -512,7 +515,10 @@ func (s *Service) profitSharingInstructionMaterial(ctx context.Context, store Di
 	if err != nil {
 		return paymentport.ProfitSharingProviderMaterial{}, err
 	}
-	base.TransactionReference, base.ProviderOrderNo, base.AmountMinor, base.Reason = payment.ProviderTransactionReference, instruction.ProviderOrderNo, instruction.AmountMinor, "distribution commission"
+	base.TransactionReference, base.ProviderOrderNo, base.AmountMinor, base.Reason = payment.ProviderTransactionReference, instruction.ProviderOrderNo, instruction.AmountMinor, instruction.DescriptionSnapshot
+	if base.Reason == "" {
+		base.Reason = paymentport.LegacyProfitSharingDescription
+	}
 	if base.AppID != s.profitSharingAppID(payment) {
 		return paymentport.ProfitSharingProviderMaterial{}, paymentport.ErrConflict
 	}
@@ -631,6 +637,21 @@ func (s *Service) distributionPaymentStateFactsWithin(ctx context.Context, store
 	return payment, funding, nil
 }
 
+func (s *Service) SetProfitSharingDescriptionReader(reader paymentport.ProfitSharingDescriptionReader) error {
+	if s == nil || reader == nil || s.profitSharingDescription != nil {
+		return paymentport.ErrInvalid
+	}
+	s.profitSharingDescription = reader
+	return nil
+}
+
+func profitSharingProviderPayloadDigest(instruction domain.ProfitSharingInstruction) effectport.Digest {
+	if instruction.DescriptionSnapshot == "" {
+		return effectport.Digest(instruction.PayloadDigest)
+	}
+	return effectport.Hash("payment.profit-sharing.description.v1", instruction.PayloadDigest, instruction.DescriptionSnapshot)
+}
+
 func (s *Service) AcceptProfitSharingWithin(ctx context.Context, request paymentport.ProfitSharingRequest) (paymentport.ProfitSharingInstruction, error) {
 	if !request.Valid() || s == nil || s.effects == nil {
 		return paymentport.ProfitSharingInstruction{}, paymentport.ErrInvalid
@@ -681,8 +702,19 @@ func (s *Service) AcceptProfitSharingWithin(ctx context.Context, request payment
 	if !found || receiver.State != domain.ProfitSharingReceiverReady {
 		return paymentport.ProfitSharingInstruction{}, paymentport.ErrUnavailable
 	}
+	var description string
+	if s.profitSharingDescription != nil {
+		description, err = s.profitSharingDescription.ReadProfitSharingDescriptionWithin(ctx, payment.OrderID, payment.PayerCustomerID)
+		if err != nil {
+			return paymentport.ProfitSharingInstruction{}, err
+		}
+		if !paymentport.ValidProfitSharingDescription(description) {
+			return paymentport.ProfitSharingInstruction{}, paymentport.ErrInvalid
+		}
+	}
 	instruction := domain.ProfitSharingInstruction{
 		PaymentID: payment.ID, ReceiverID: receiver.ID, SettlementRef: request.SettlementRef,
+		DescriptionSnapshot:  description,
 		ProviderOrderNo:      profitSharingProviderOrderNo("v3ps_", request.IdempotencyKey),
 		IdempotencyKeyDigest: string(effectport.Hash("payment.profit-sharing.idempotency.v1", request.IdempotencyKey)),
 		SourceRefDigest:      string(request.SourceDigest), PayloadDigest: string(request.PayloadDigest), PolicyVersionHash: string(request.PolicyDigest),
@@ -693,7 +725,7 @@ func (s *Service) AcceptProfitSharingWithin(ctx context.Context, request payment
 	if err != nil {
 		return paymentport.ProfitSharingInstruction{}, err
 	}
-	intent := effectport.PaymentV1Intent{Kind: effectport.KindWeChatPayProfitSharing, ReceiptKey: effectport.Hash("payment.profit-sharing.accept.v1", request.IdempotencyKey), SourceRefDigest: request.SourceDigest, TargetRefDigest: effectport.Hash("payment.profit-sharing.instruction.target.v1", strconv.FormatInt(instruction.ID, 10)), PayloadDigest: request.PayloadDigest, PolicyVersionHash: request.PolicyDigest}
+	intent := effectport.PaymentV1Intent{Kind: effectport.KindWeChatPayProfitSharing, ReceiptKey: effectport.Hash("payment.profit-sharing.accept.v1", request.IdempotencyKey), SourceRefDigest: request.SourceDigest, TargetRefDigest: effectport.Hash("payment.profit-sharing.instruction.target.v1", strconv.FormatInt(instruction.ID, 10)), PayloadDigest: profitSharingProviderPayloadDigest(instruction), PolicyVersionHash: request.PolicyDigest}
 	accept, ok := intent.AcceptCommand()
 	if !ok {
 		return paymentport.ProfitSharingInstruction{}, paymentport.ErrInvalid

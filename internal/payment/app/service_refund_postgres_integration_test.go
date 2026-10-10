@@ -529,6 +529,10 @@ func TestPostgreSQLProfitSharingFundingTreatsHistoricalInFlightRefundsAsExposure
 }
 
 func paymentAppIntegrationPool(t *testing.T) (*pgxpool.Pool, func()) {
+	return paymentAppIntegrationPoolWithDescription(t, true)
+}
+
+func paymentAppIntegrationPoolWithDescription(t *testing.T, withDescription bool) (*pgxpool.Pool, func()) {
 	t.Helper()
 	url, err := platformconfig.DatabaseURL()
 	if err != nil {
@@ -573,6 +577,15 @@ func paymentAppIntegrationPool(t *testing.T) (*pgxpool.Pool, func()) {
 			pool.Close()
 			admin.Close(ctx)
 			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if withDescription {
+		raw, readErr := os.ReadFile(filepath.Join(root, "migrations", "0233_payment_profit_sharing_description.sql"))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if _, err = pool.Exec(ctx, string(raw)); err != nil {
+			t.Fatalf("apply description migration: %v", err)
 		}
 	}
 	return pool, func() {

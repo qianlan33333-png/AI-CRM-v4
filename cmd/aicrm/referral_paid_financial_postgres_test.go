@@ -12,6 +12,8 @@ import (
 	"time"
 
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
+	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
+	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
 	distributionapp "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/app"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
@@ -22,6 +24,7 @@ import (
 	orderdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	orderstore "github.com/qianlan33333-png/AI-CRM-v3/internal/order/store"
+	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	platformaudit "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/audit"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	platformoutbox "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/outbox"
@@ -35,7 +38,7 @@ import (
 // Only API runs; accepted effects are never dispatched to a real Provider.
 func TestPostgreSQLPaidReferralFinancialAttributionAtomicAndInstalled(t *testing.T) {
 	for _, channel := range []string{"mini_program", "h5_official_account"} {
-		t.Run(channel, func(t *testing.T) { paidReferralFinancialJourney(t, channel, false) })
+		t.Run(channel, func(t *testing.T) { paidReferralFinancialJourney(t, channel, false, false) })
 	}
 }
 
@@ -44,11 +47,17 @@ func TestPostgreSQLPaidReferralFinancialAttributionAtomicAndInstalled(t *testing
 // repurchase. Alias self-purchases must still be excluded.
 func TestPostgreSQLPaidReferralCanonicalAliasesAndRepurchaseFreezeCommission(t *testing.T) {
 	for _, channel := range []string{"mini_program", "h5_official_account"} {
-		t.Run(channel, func(t *testing.T) { paidReferralFinancialJourney(t, channel, true) })
+		t.Run(channel, func(t *testing.T) { paidReferralFinancialJourney(t, channel, true, false) })
 	}
 }
 
-func paidReferralFinancialJourney(t *testing.T, channel string, mergedAliases bool) {
+func TestPostgreSQLPaidReferralComposedPurchaseDescription(t *testing.T) {
+	for _, channel := range []string{"mini_program", "h5_official_account"} {
+		t.Run(channel, func(t *testing.T) { paidReferralFinancialJourney(t, channel, true, true) })
+	}
+}
+
+func paidReferralFinancialJourney(t *testing.T, channel string, mergedAliases, purchaseDescription bool) {
 	f := newPromotionCheckoutFixture(t)
 	defer f.close()
 	ctx := context.Background()
@@ -229,6 +238,47 @@ func paidReferralFinancialJourney(t *testing.T, channel string, mergedAliases bo
 		return application.paymentDistribution.CompleteEffect(tx, "eer_"+strconv.FormatInt(receiverEffect, 10), effectport.Envelope{Owner: effectport.OwnerPayment, Kind: effectport.KindWeChatPayReceiverAdd}, effectport.Attempt{EffectID: "eer_" + strconv.FormatInt(receiverEffect, 10), Number: 1, Generation: 1, Fence: 1}, effectport.AdapterResult{Completion: effectport.StateExecuted, ReceiptDigest: effectport.Hash("paid-financial-synthetic-receiver-ready")})
 	}); err != nil {
 		t.Fatal(err)
+	}
+	if purchaseDescription {
+		// Payment facts are synthetic; actual composed Customer/Order ports,
+		// Payment acceptance and EER transaction run without a Provider worker.
+		var paymentID int64
+		if err = f.pool.QueryRow(ctx, `INSERT INTO payments(order_id,provider,payment_channel,merchant_order_no,payer_identity_id,payer_customer_id,beneficiary_customer_id,amount_minor,currency,status,profit_sharing_marked,provider_transaction_reference,provider_transaction_digest,paid_confirmed_at,version,created_at,updated_at) VALUES($1,'wechat_pay',$2,$3,$4,$5,$5,1000,'CNY','paid',true,'synthetic-description-transaction',$6,$7,1,$7,$7) RETURNING id`, first.ID, channel, first.MerchantOrderNo, f.promoter.IdentityID, f.promoter.CustomerID, effectport.Hash("wechatpay.transaction", "synthetic-description-transaction"), time.Now()).Scan(&paymentID); err != nil {
+			t.Fatal(err)
+		}
+		writeName := func(name string) {
+			t.Helper()
+			if err := f.uow.Within(ctx, func(tx context.Context) error {
+				now := time.Now().UTC()
+				return customerstore.NewPostgreSQL().UpsertDirectoryProjection(tx, customerport.DirectoryProjection{CustomerID: customerdomain.CustomerID(f.promoter.CustomerID), CustomerStatus: customerdomain.StatusActive, DisplayName: name, ActivationState: "active", Source: "referral.description.fixture", SourceVersion: 1, LastSyncedAt: now, UpdatedAt: now})
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		writeName("购买人微信昵称")
+		request := paymentport.ProfitSharingRequest{SettlementRef: "dstl_composed_description", OriginalPaymentRef: paymentport.PaymentReference(paymentID), RecipientCustomerID: f.buyer, AmountMinor: wantCommission, Currency: "CNY", IdempotencyKey: "composed-description-idempotency-0001", SourceDigest: effectport.Hash("composed-description-source"), PayloadDigest: effectport.Hash("composed-description-payload"), PolicyDigest: effectport.Hash("composed-description-policy")}
+		var instruction paymentport.ProfitSharingInstruction
+		if err = f.uow.Within(ctx, func(tx context.Context) error {
+			var err error
+			instruction, err = application.paymentReconciliation.AcceptProfitSharingWithin(tx, request)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		writeName("后来修改的昵称")
+		if err = f.uow.Within(ctx, func(tx context.Context) error {
+			replay, err := application.paymentReconciliation.AcceptProfitSharingWithin(tx, request)
+			if err == nil && replay.Reference != instruction.Reference {
+				return errors.New("description replay duplicated instruction")
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		material, err := application.paymentReconciliation.LoadProfitSharingEffectMaterial(ctx, effectport.KindWeChatPayProfitSharing, request.SourceDigest)
+		if err != nil || material.Reason != "购买人微信昵称购买分销归因商品分账" || material.AmountMinor != wantCommission || material.PayloadDigest == request.PayloadDigest {
+			t.Fatal("composed description lost original buyer/product/fingerprint", err)
+		}
 	}
 	second := create(f.otherPromoter.CustomerID, "paid-financial-second")
 	settle(second, "second")

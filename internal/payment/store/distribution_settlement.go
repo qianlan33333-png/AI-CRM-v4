@@ -355,12 +355,12 @@ func (r *Repository) getProfitSharingInstructionByID(ctx context.Context, id int
 	if err != nil {
 		return domain.ProfitSharingInstruction{}, err
 	}
-	query := `SELECT id,payment_id,receiver_id,settlement_ref,provider_order_no,idempotency_key_digest,source_ref_digest,payload_digest,policy_version_hash,amount_minor,currency,state,failure_class,COALESCE('eer_'||external_effect_id::text,''),deadline_at,receiver_confirmed_success,outcome_known,version,created_at,updated_at FROM payment_profit_sharing_instructions WHERE id=$1`
+	query := `SELECT id,payment_id,receiver_id,settlement_ref,provider_order_no,idempotency_key_digest,source_ref_digest,payload_digest,policy_version_hash,description_snapshot,amount_minor,currency,state,failure_class,COALESCE('eer_'||external_effect_id::text,''),deadline_at,receiver_confirmed_success,outcome_known,version,created_at,updated_at FROM payment_profit_sharing_instructions WHERE id=$1`
 	if lock {
 		query += ` FOR UPDATE`
 	}
 	var value domain.ProfitSharingInstruction
-	err = t.QueryRow(ctx, query, id).Scan(&value.ID, &value.PaymentID, &value.ReceiverID, &value.SettlementRef, &value.ProviderOrderNo, &value.IdempotencyKeyDigest, &value.SourceRefDigest, &value.PayloadDigest, &value.PolicyVersionHash, &value.AmountMinor, &value.Currency, &value.State, &value.FailureClass, &value.EffectID, &value.DeadlineAt, &value.ReceiverConfirmedSuccess, &value.OutcomeKnown, &value.Version, &value.CreatedAt, &value.UpdatedAt)
+	err = t.QueryRow(ctx, query, id).Scan(&value.ID, &value.PaymentID, &value.ReceiverID, &value.SettlementRef, &value.ProviderOrderNo, &value.IdempotencyKeyDigest, &value.SourceRefDigest, &value.PayloadDigest, &value.PolicyVersionHash, &value.DescriptionSnapshot, &value.AmountMinor, &value.Currency, &value.State, &value.FailureClass, &value.EffectID, &value.DeadlineAt, &value.ReceiverConfirmedSuccess, &value.OutcomeKnown, &value.Version, &value.CreatedAt, &value.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ProfitSharingInstruction{}, paymentport.ErrNotFound
 	}
@@ -372,7 +372,7 @@ func (r *Repository) CreateProfitSharingInstruction(ctx context.Context, value d
 	if err != nil {
 		return domain.ProfitSharingInstruction{}, false, err
 	}
-	err = t.QueryRow(ctx, `INSERT INTO payment_profit_sharing_instructions(settlement_ref,payment_id,receiver_id,provider_order_no,idempotency_key_digest,source_ref_digest,payload_digest,policy_version_hash,amount_minor,currency,state,deadline_at,version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`, value.SettlementRef, value.PaymentID, value.ReceiverID, value.ProviderOrderNo, value.IdempotencyKeyDigest, value.SourceRefDigest, value.PayloadDigest, value.PolicyVersionHash, value.AmountMinor, value.Currency, value.State, value.DeadlineAt, value.Version, value.CreatedAt, value.UpdatedAt).Scan(&value.ID)
+	err = t.QueryRow(ctx, `INSERT INTO payment_profit_sharing_instructions(settlement_ref,payment_id,receiver_id,provider_order_no,idempotency_key_digest,source_ref_digest,payload_digest,policy_version_hash,amount_minor,currency,state,deadline_at,version,created_at,updated_at,description_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`, value.SettlementRef, value.PaymentID, value.ReceiverID, value.ProviderOrderNo, value.IdempotencyKeyDigest, value.SourceRefDigest, value.PayloadDigest, value.PolicyVersionHash, value.AmountMinor, value.Currency, value.State, value.DeadlineAt, value.Version, value.CreatedAt, value.UpdatedAt, value.DescriptionSnapshot).Scan(&value.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ProfitSharingInstruction{}, false, paymentport.ErrConflict
 	}

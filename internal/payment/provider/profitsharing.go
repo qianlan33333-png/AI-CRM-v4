@@ -172,7 +172,13 @@ func (sdk *OfficialProfitSharingSDK) CreateOrder(ctx context.Context, value Prof
 		return ErrInvalidMaterial
 	}
 	personal := "PERSONAL_OPENID"
-	description := "distribution commission"
+	description := value.Reason
+	if description == "" {
+		description = paymentport.LegacyProfitSharingDescription
+	}
+	if !paymentport.ValidProfitSharingDescription(description) {
+		return ErrInvalidMaterial
+	}
 	freezeRemaining := false
 	response, _, err := sdk.orders.CreateOrder(ctx, profitsharing.CreateOrderRequest{Appid: &value.AppID, OutOrderNo: &value.ProviderOrderNo, TransactionId: &value.TransactionReference, UnfreezeUnsplit: &freezeRemaining, Receivers: []profitsharing.CreateOrderReceiver{{Account: &value.ReceiverAccount, Amount: &value.AmountMinor, Description: &description, Type: &personal}}})
 	if err != nil || response == nil || response.OutOrderNo == nil || *response.OutOrderNo != value.ProviderOrderNo || response.TransactionId == nil || *response.TransactionId != value.TransactionReference {

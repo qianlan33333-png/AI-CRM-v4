@@ -104,6 +104,8 @@ func (s ProfitSharingState) Reserving() bool {
 type ProfitSharingInstruction struct {
 	ID, PaymentID, ReceiverID      int64
 	SettlementRef, ProviderOrderNo string
+	// Empty keeps the original English material of legacy instructions.
+	DescriptionSnapshot string
 	// These digests are immutable command fingerprints.  A settlement replay
 	// must match all of them; returning an old instruction for a mutated
 	// recipient or frozen Distribution fact would otherwise hide a money
