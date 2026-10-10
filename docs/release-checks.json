@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "baseline_sha": "df25216a978065bc593781ef6c979eb4cbd00794",
+  "baseline_sha": "1c40277289f37c189fd205d353171e271d1ebc93",
   "checks": [
     {
-      "lane": "backend",
-      "path": "cmd/aicrm/sidebar_ai_viewer_test.go",
-      "test": "TestSidebarAIViewerUsesCurrentCookieAndActiveWeComEmployee"
+      "lane": "preflight",
+      "path": "scripts/test_domestic_release_lifecycle.py",
+      "test": "CheckLifecycleTest.test_completed_release_cleanup_removes_only_verified_build_copies"
     }
   ],
   "installed_checks": [],

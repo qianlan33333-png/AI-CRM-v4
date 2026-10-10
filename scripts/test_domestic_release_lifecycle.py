@@ -596,7 +596,11 @@ class CheckLifecycleTest(unittest.TestCase):
             root = Path(raw); work, build, _, config = self.fixture(root)
             releases = root / 'releases'; releases.mkdir()
             receipts = root / 'domestic-receipts'; receipts.mkdir()
-            builds = root / 'domestic/builds'
+            # The actual source accumulator writes below control/work. Keep
+            # the old inferred location populated so using it is detectable.
+            builds = work / 'builds'
+            inferred = root / 'domestic/builds'; inferred.mkdir(parents=True)
+            (inferred / 'unowned').write_text('outside configured build root')
             names = ['a' * 40, 'b' * 40, 'c' * 40, 'd' * 40]
             duplicate_paths = {}
             for name in names:
@@ -633,6 +637,8 @@ class CheckLifecycleTest(unittest.TestCase):
             self.assertEqual(proof['status'], 'completed')
             self.assertEqual(len(proof['removed']), 2)
             self.assertEqual(len(result['retained']), 1)
+            self.assertTrue((inferred / 'unowned').is_file())
+            self.assertTrue(all(Path(item['path']).is_relative_to(builds) for item in result['removed']))
             # An unresolved transaction blocks even a previously verified copy.
             shutil.copytree(releases / names[0], duplicate_paths[names[0]])
             with patch.object(release, '_load_state', return_value=state), \

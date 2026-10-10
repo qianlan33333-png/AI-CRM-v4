@@ -2489,7 +2489,7 @@ def _reclaim_completed_build_copies(config: dict) -> dict:
     if releases.is_symlink() or not releases.is_dir():
         return {"status": "installed_release_root_unavailable", "removed": []}
     receipts = releases.parent / "domestic-receipts"
-    builds = releases.parent / "domestic" / "builds"
+    builds = Path(config["work_root"]) / "builds"
     if (receipts.is_symlink() or not receipts.is_dir() or builds.is_symlink()
             or (builds.exists() and not builds.is_dir())):
         return {"status": "installed_receipt_or_build_root_unavailable", "removed": []}
