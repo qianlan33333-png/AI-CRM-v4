@@ -231,6 +231,26 @@ func TestLoadPaymentReconcileRoleRequiresAnExplicitPositivePaymentID(t *testing.
 	}
 }
 
+func TestLoadProfitSharingReconcileRoleRequiresExplicitInstructionID(t *testing.T) {
+	t.Setenv("AICRM_DATABASE_URL", "postgres://aicrm:test@localhost/aicrm")
+	t.Setenv("AICRM_ROLE", string(RoleProfitSharingReconcile))
+	t.Setenv("AICRM_PROFIT_SHARING_RECONCILE_ID", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("profit sharing query accepted without selected instruction")
+	}
+	for _, invalid := range []string{"0", "-1", " 6", "6 ", "psinst_6", "9223372036854775808"} {
+		t.Setenv("AICRM_PROFIT_SHARING_RECONCILE_ID", invalid)
+		if _, err := Load(); err == nil {
+			t.Fatalf("profit sharing query accepted invalid instruction %q", invalid)
+		}
+	}
+	t.Setenv("AICRM_PROFIT_SHARING_RECONCILE_ID", "6")
+	cfg, err := Load()
+	if err != nil || cfg.Role != RoleProfitSharingReconcile || cfg.ProfitSharingReconcileID != 6 {
+		t.Fatalf("profit sharing role selection failed: %v", err)
+	}
+}
+
 func TestChannelProviderCapabilitiesAreIndependentAndFailClosed(t *testing.T) {
 	t.Setenv("AICRM_DATABASE_URL", "postgres://aicrm:test@localhost/aicrm")
 	t.Setenv("AICRM_CHANNEL_PROVIDER_READ_ENABLED", "true")

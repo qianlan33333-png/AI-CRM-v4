@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -57,6 +58,19 @@ func run() error {
 		// provider transaction, customer or secret enters the log. The service
 		// itself has performed the signed Provider read and its same-UoW fanout.
 		slog.Info("payment reconciliation complete", "payment_id", payment.ID, "status", payment.Status, "provider_query_performed", true, "release_sha", cfg.ReleaseSHA)
+		return nil
+	}
+	if cfg.Role == platformconfig.RoleProfitSharingReconcile {
+		if application.paymentReconciliation == nil {
+			return errors.New("profit sharing reconciliation is not composed")
+		}
+		instruction, queryErr := application.paymentReconciliation.ReconcileProfitSharing(ctx, fmt.Sprintf("psinst_%d", cfg.ProfitSharingReconcileID))
+		if queryErr != nil {
+			// Provider errors can carry raw response headers, account identifiers,
+			// and request data. Never pass them into the process-level error log.
+			return errors.New("profit sharing query unavailable; no provider write attempted")
+		}
+		slog.Info("profit sharing reconciliation complete", "instruction_id", cfg.ProfitSharingReconcileID, "state", instruction.State, "outcome_known", instruction.OutcomeKnown, "receiver_confirmed_success", instruction.ReceiverConfirmedSuccess, "release_sha", cfg.ReleaseSHA)
 		return nil
 	}
 	if cfg.Role == platformconfig.RoleWorker {

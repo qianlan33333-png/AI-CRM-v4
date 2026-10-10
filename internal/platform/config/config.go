@@ -25,6 +25,8 @@ const (
 	// for an explicitly selected existing WeChat Pay payment.  It has no HTTP
 	// listener and cannot create a payment or call a Provider write API.
 	RolePaymentReconcile Role = "payment-reconcile"
+	// Queries exactly one existing profit-sharing instruction; no Provider write or daemon.
+	RoleProfitSharingReconcile Role = "profit-sharing-reconcile"
 	// One-shot, explicitly selected failed invoice recovery; no daemon or direct Provider write.
 	RoleInvoiceRecover Role = "invoice-recover"
 
@@ -64,6 +66,7 @@ type Runtime struct {
 	WorkerOwner                string
 	WorkerLimit                int
 	PaymentReconcileID         int64
+	ProfitSharingReconcileID   int64
 	InvoiceRecoverID           string
 	CustomerSyncTrigger        string
 	HXCDashboard               HXCDashboard
@@ -678,7 +681,7 @@ func Load() (Runtime, error) {
 		return Runtime{}, errors.New("invalid AICRM_RELEASE_SHA")
 	}
 	switch cfg.Role {
-	case RoleAPI, RoleWorker, RoleEffectsWorker, RolePaymentReconcile, RoleInvoiceRecover:
+	case RoleAPI, RoleWorker, RoleEffectsWorker, RolePaymentReconcile, RoleProfitSharingReconcile, RoleInvoiceRecover:
 	default:
 		return Runtime{}, errors.New("invalid AICRM_ROLE")
 	}
@@ -697,6 +700,16 @@ func Load() (Runtime, error) {
 		cfg.PaymentReconcileID, err = strconv.ParseInt(raw, 10, 64)
 		if err != nil || cfg.PaymentReconcileID < 1 {
 			return Runtime{}, errors.New("invalid AICRM_PAYMENT_RECONCILE_ID")
+		}
+	}
+	if cfg.Role == RoleProfitSharingReconcile {
+		raw := os.Getenv("AICRM_PROFIT_SHARING_RECONCILE_ID")
+		if raw == "" || strings.TrimSpace(raw) != raw {
+			return Runtime{}, errors.New("invalid AICRM_PROFIT_SHARING_RECONCILE_ID")
+		}
+		cfg.ProfitSharingReconcileID, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || cfg.ProfitSharingReconcileID < 1 {
+			return Runtime{}, errors.New("invalid AICRM_PROFIT_SHARING_RECONCILE_ID")
 		}
 	}
 	if strings.TrimSpace(cfg.DatabaseURL) != cfg.DatabaseURL || cfg.DatabaseURL == "" {
