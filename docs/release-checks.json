@@ -1,91 +1,106 @@
 {
   "schema": 1,
-  "baseline_sha": "7514476ba2857157874194916380e6c10a43b88c",
+  "baseline_sha": "a018e6858eaf75ecfcf37435c9953eb8065d1770",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/platform/config",
-      "test": "TestLoadPaymentRefundRequiresExplicitBoundCommand"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPaymentRefundRoleRequiresRootAndExactNativeTarget"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLPaymentRefundRoleKeepsHTTPAuthAndNoDaemon",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/provider"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/store",
-      "test": "TestProfitSharingProviderIntentRequiresExactlyOneOwner"
+      "package": "./internal/payment/app",
+      "test": "TestPostgreSQLRefundDoesNotReserveFutureCommission",
+      "postgres": true,
+      "race": true
     },
     {
       "lane": "backend",
       "package": "./internal/payment/app",
-      "path": "internal/payment/app/profit_sharing_absence_postgres_test.go",
       "test": "TestPostgreSQLMissingProfitSharingProofAndFullRefund",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./internal/payment/app",
-      "path": "internal/payment/app/service_refund_postgres_integration_test.go",
-      "test": "TestPostgreSQLProfitSharingUnknownQueryKeepsReceiverMismatchReserveForReconciliation",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/payment/app",
-      "path": "internal/payment/app/service_refund_postgres_integration_test.go",
       "test": "TestPostgreSQLWeChatPayRefundSerializesNewKeysPerPayment",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./internal/payment/app",
-      "path": "internal/payment/app/service_refund_postgres_integration_test.go",
       "test": "TestPostgreSQLRefundQueryBeforeCallbackKeepsOneSettlement",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./internal/payment/app",
-      "path": "internal/payment/app/service_refund_postgres_integration_test.go",
       "test": "TestPostgreSQLProfitSharingCompletionUpdatesOnlyMatchingEffect",
       "postgres": true
     },
     {
       "lane": "backend",
+      "package": "./internal/payment/app",
+      "test": "TestRefundReservesOutstandingAmountsAndRejectsOverRefund"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment/app",
+      "test": "TestWeChatPayRefundRejectsNewKeyWhileEarlierRefundIsNonTerminal"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment/app",
+      "test": "TestWeChatPayRefundAllowsNewKeyAfterEarlierRefundIsTerminal"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment/app",
+      "test": "TestRefundReplayReturnsExistingBeforeReservedAmountCheck"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/externaleffects",
+      "test": "TestPostgreSQLRefundCancellationAndSplitDispatchHaveOneWinner",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/externaleffects",
+      "test": "TestPostgreSQLCancelQueuedEffectPersistsRefundInitiatorAdmin",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/externaleffects",
+      "test": "TestPostgreSQLCancelQueuedPaymentSplitPersistsSystemDueActor",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
       "package": "./cmd/aicrm",
-      "path": "cmd/aicrm/distribution_settlement_refund_postgres_integration_test.go",
       "test": "TestPostgreSQLSettlementWorkerClosedInstructionPreservesOrCancelsOnlyWithBusinessFacts",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "path": "cmd/aicrm/distribution_settlement_refund_postgres_integration_test.go",
       "test": "TestPostgreSQLSettlementWorkerAcceptsOneInstructionAndReplaysAfterRestart",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "path": "cmd/aicrm/distribution_settlement_refund_postgres_integration_test.go",
       "test": "TestPostgreSQLRefundWorkerRepricesOnceAndRevokesOnlyAfterLastQualification",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLPaymentRefundRoleKeepsHTTPAuthAndNoDaemon",
       "postgres": true
     }
   ],
   "installed_checks": [
-    "profit-sharing-missing-refund"
+    "refund-before-split"
   ],
   "build_commands": []
 }

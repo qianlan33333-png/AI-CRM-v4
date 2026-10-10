@@ -494,9 +494,6 @@ func (s *Service) RequestRefund(ctx context.Context, c paymentport.RefundCommand
 	if result.ID > 0 {
 		return result, nil
 	}
-	if err := s.reconcileRefundProfitSharing(ctx, c); err != nil {
-		return domain.Refund{}, err
-	}
 	if c.ProviderOrderID != "" {
 		if s.shopReconciler == nil || !validShopRefundCommand(c) {
 			return domain.Refund{}, paymentport.ErrInvalid
@@ -557,18 +554,17 @@ func (s *Service) RequestRefund(ctx context.Context, c paymentport.RefundCommand
 		if err != nil {
 			return err
 		}
-		profitSharingReserved, err := s.store.ReservedProfitSharingMinor(tx, payment.ID)
-		if err != nil {
-			return err
-		}
-		// The payment row is the shared coordinator lock. Once a split reserve
-		// exists, an ensuing refund may not consume those retained funds. This
-		// is deliberately checked before creating any refund effect.
-		if reserved < 0 || profitSharingReserved < 0 || c.AmountMinor > payment.AmountMinor-reserved-profitSharingReserved {
+		// Future commission does not reduce the customer's refund budget.
+		// WeChat owns the frozen/available funds and rejects any later split
+		// after a full refund. The payment lock still serializes refund keys.
+		if reserved < 0 || c.AmountMinor > payment.AmountMinor-reserved {
 			return paymentport.ErrConflict
 		}
 		refund, err := domain.NewRefund(payment, c.RefundNo, c.AmountMinor, c.Reason, now)
 		if err != nil {
+			return err
+		}
+		if err = s.cancelRefundQueuedProfitSharingWithin(tx, payment, c); err != nil {
 			return err
 		}
 		refund, _, err = s.store.CreateRefund(tx, refund, keyDigest, payloadDigest, c.ActorScope)

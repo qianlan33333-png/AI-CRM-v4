@@ -418,6 +418,20 @@ func (s *Service) LoadProfitSharingEffectMaterial(ctx context.Context, kind effe
 			if err != nil {
 				return err
 			}
+			if instruction.State == domain.ProfitSharingCancelled {
+				return paymentport.ErrConflict
+			}
+			funding, err := store.ProfitSharingFunding(tx, instruction.PaymentID)
+			if err != nil {
+				return err
+			}
+			payment, err := s.store.GetPayment(tx, instruction.PaymentID, false)
+			if err != nil {
+				return err
+			}
+			if funding.RefundExposure() || funding.SuccessfulRefundMinor >= payment.AmountMinor {
+				return paymentport.ErrConflict
+			}
 			material, err = s.profitSharingInstructionMaterial(tx, store, instruction, intent.PayloadDigest)
 			return err
 		}

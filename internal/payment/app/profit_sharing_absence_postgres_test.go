@@ -80,8 +80,8 @@ func TestPostgreSQLMissingProfitSharingProofAndFullRefund(t *testing.T) {
 			}
 			ref := fmt.Sprintf("psinst_%d", instructionID)
 			command := paymentport.RefundCommand{PaymentID: paymentID, AmountMinor: 680, RefundNo: "RF-absence-test", Reason: "full refund", ActorScope: "admin:17", IdempotencyKey: "absence-full-refund-0001"}
-			if _, err = service.RequestRefund(ctx, command); !errors.Is(err, paymentport.ErrConflict) {
-				t.Fatalf("premature refund=%v", err)
+			if _, err = service.ReconcileProfitSharing(ctx, ref); err != nil {
+				t.Fatalf("initial independent accounting observation=%v", err)
 			}
 			if scenario == "too-soon-after-write" {
 				reader.UpdatedAt = now

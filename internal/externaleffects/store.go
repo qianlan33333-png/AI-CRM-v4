@@ -63,6 +63,9 @@ func (r *Repository) CancelQueuedEffectWithin(ctx context.Context, command port.
 		return port.Projection{}, err
 	}
 	commandDigest := port.Hash("cancel", command.EffectID, string(command.ReceiptKey), command.ReasonCode, strconv.FormatInt(command.Actor.AdminUserID, 10), command.Actor.SystemRef)
+	if command.OnlyIfUnattempted {
+		commandDigest = port.Hash(string(commandDigest), "only_if_unattempted")
+	}
 	var prior string
 	priorErr := tx.QueryRow(ctx, `SELECT command_digest FROM external_effect_operation_receipts WHERE operation='cancel' AND effect_id=$1 AND receipt_key_digest=$2`, id, command.ReceiptKey).Scan(&prior)
 	if priorErr == nil {
@@ -74,14 +77,20 @@ func (r *Repository) CancelQueuedEffectWithin(ctx context.Context, command port.
 	if !errors.Is(priorErr, pgx.ErrNoRows) {
 		return port.Projection{}, priorErr
 	}
-	if port.State(state) != port.StateQueued {
-		return port.Projection{}, ErrTransition
-	}
 	// The named system principal is reserved for the Payment due worker's
 	// unsubmitted split cancellation. It cannot be used to control another
 	// owner or kind merely because it satisfies the receipt schema.
 	if command.Actor.System() && (port.Owner(owner) != port.OwnerPayment || port.Kind(kind) != port.KindWeChatPayProfitSharing) {
 		return port.Projection{}, ErrInvalid
+	}
+	if command.OnlyIfUnattempted && (port.Owner(owner) != port.OwnerPayment || port.Kind(kind) != port.KindWeChatPayProfitSharing) {
+		return port.Projection{}, ErrInvalid
+	}
+	if command.OnlyIfUnattempted && (port.State(state) != port.StateQueued || attempts != 0) {
+		return projection(id, port.Owner(owner), port.Kind(kind), port.State(state), attempts, generation, updated), nil
+	}
+	if port.State(state) != port.StateQueued {
+		return port.Projection{}, ErrTransition
 	}
 	if err = tx.QueryRow(ctx, `UPDATE external_effects SET state='cancelled',updated_at=clock_timestamp() WHERE id=$1 AND state='queued' RETURNING updated_at`, id).Scan(&updated); err != nil {
 		return port.Projection{}, err

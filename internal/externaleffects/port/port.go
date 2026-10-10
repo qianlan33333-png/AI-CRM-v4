@@ -194,6 +194,10 @@ type CancelCommand struct {
 	ReceiptKey Digest
 	ReasonCode string
 	Actor      ControlActor
+	// OnlyIfUnattempted makes Payment split cancellation conditional under the effect lock.
+	// A non-queued or previously attempted effect is returned unchanged, so a
+	// refund can proceed without inventing a terminal split outcome.
+	OnlyIfUnattempted bool
 }
 
 // ControlActor identifies the authenticated principal that made an immutable
