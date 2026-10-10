@@ -70,6 +70,10 @@ CI_ONLY_FILES = {
 MAINTENANCE_ONLY_PREFIXES = ("cmd/migrate-wecom-directory-retire/",
                              "cmd/recover-access-password/", "internal/access/maintenance/")
 
+# Prepared Context Center material is installed only by its owning operator.
+# It is absent from the CRM command, embed, and application package consumers.
+OPERATOR_ONLY_PREFIXES = ("integrations/context-center/sidebar/",)
+
 OPERATOR_ONLY_FILES = {
     "scripts/manual_github_sync.py",
 }
@@ -289,7 +293,7 @@ def classify_paths(paths: Iterable[str]) -> Classification:
             controller_files.append(normalized)
             continue
 
-        if normalized in OPERATOR_ONLY_FILES or normalized.startswith(MAINTENANCE_ONLY_PREFIXES):
+        if normalized in OPERATOR_ONLY_FILES or normalized.startswith((*MAINTENANCE_ONLY_PREFIXES, *OPERATOR_ONLY_PREFIXES)):
             continue
 
         if normalized in DEPLOY_SAMPLE_CONFIGS:

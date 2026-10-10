@@ -17,6 +17,10 @@
     {
       "lane": "preflight",
       "path": "integrations/context-center/sidebar/tests/test_snapshot_binding.py"
+    },
+    {
+      "lane": "preflight",
+      "path": "scripts/test_sidebar_warehouse_source_contract.py"
     }
   ],
   "installed_checks": [],

@@ -100,6 +100,25 @@ class DomesticReleaseBuildTests(unittest.TestCase):
         self.assertTrue(unknown.runtime_changed)
         self.assertTrue(unknown.full_build)
 
+    def test_sidebar_warehouse_material_is_source_only_and_app_consumers_remain_runtime(self) -> None:
+        material = [
+            "integrations/context-center/sidebar/build_candidate.py",
+            "integrations/context-center/sidebar/candidate-stage-receipt.json",
+            "integrations/context-center/sidebar/ops/sidebar_ai_reader.py",
+        ]
+        result = builder.classify_paths(material)
+        self.assertFalse(result.runtime_changed)
+        self.assertEqual(result.build_mode, "none")
+        self.assertFalse(result.full_build)
+        changed_app = builder.classify_paths(material + ["cmd/aicrm/main.go"])
+        self.assertTrue(changed_app.runtime_changed)
+        self.assertEqual(changed_app.graph_paths, ["cmd/aicrm/main.go"])
+        changed_component = builder.classify_paths(material + ["components/excel-batches/batches.py"])
+        self.assertTrue(changed_component.runtime_changed)
+        self.assertEqual(changed_component.package_overlays, ["components/excel-batches"])
+        unknown = builder.classify_paths(["integrations/other/runtime.py"])
+        self.assertTrue(unknown.runtime_changed)
+
     def test_manual_github_sync_is_operator_only_not_an_application_build(self) -> None:
         result = builder.classify_paths(["scripts/manual_github_sync.py"])
         self.assertFalse(result.runtime_changed)

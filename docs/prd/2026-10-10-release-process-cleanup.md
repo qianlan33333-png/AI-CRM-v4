@@ -36,3 +36,9 @@ flowchart LR
 准确短清单见 `docs/release-checks.json`：7项直接Python合同，经现有unittest发现/结果收据验证；加工具语法、help、配置与原锁排他检查。没有全仓回归、DB迁移、真实Provider调用或页面回归。
 
 实际路径修复：源码累计构件位于配置的 `work_root/builds`（当前 `domestic/control/work/builds`），自动回收使用该真实生产者路径；旧实现从 releases 同级推断路径，漏掉已完成重复副本。继承本PRD分类与流程，无OneID、UI、Provider、数据库或应用变更。相关具名合同在真实路径布局中验证完整安装/回退包和metadata保留、pending/changed/unknown保护以及删除失败warning；只运行这一项维护合同，不重复应用构建。
+
+## 已授权源码材料的收录修正
+
+2026-10-10 warehouse 候选仅修改 `integrations/context-center/sidebar` 的隔离构建材料、合同和收据，当前 `cmd/internal/web/components/deploy/scripts` 无应用构建消费者引用这个目录。复用本父 PRD 的极简构建与当前源码-only分类；按既有 operator-only 模式明确登记该单一目录，不泛化到所有 integrations。CRM API/组件实际变动仍按其直接消费者正常构建，其他未知目录分类保持原合同。新增一条具名合同验证这三个边界，与候选原四项Python合同一起执行。
+
+OneID不涉及：只修正源码材料分类；Persistence复用原发布队列与源码游标；不调用Provider、不改变55服务或新账号权限。无UI。集成准备可收录不意味着活动接通，权限/安全配置/55安装重启/导出器及数据发布/真实模型仍按原候选批准边界停止。
