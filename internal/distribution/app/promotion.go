@@ -639,11 +639,13 @@ func (s *PromotionService) recordPaidInvitationAttributionWithin(ctx context.Con
 	if invitation.CampaignID < 1 || invitation.InvitationID < 1 || invitation.ProductID != command.ProductID || invitation.ProductType != command.ProductType || !invitation.ExpiresAt.After(command.OccurredAt.UTC()) || !inviter.Valid() {
 		return orderport.CheckoutAttributionResult{}, distributionport.ErrUnavailable
 	}
-	// A current merge can change the inviter's canonical root after the
-	// invitation was issued. Do not guess which historical participation or
-	// receiver should own money; merged identities remain activity-only.
+	// Identity returns one canonical root followed by that root's already
+	// merged aliases. Multiple lineage members are not competing owners; the
+	// verified invitation reader has already resolved its issuer to this root.
+	// Keep the root check, and use the whole lineage for self-purchase and
+	// qualification checks below rather than silently dropping commissions.
 	roots, err := s.lineage.LockedCanonicalLineage(ctx, customerdomain.CustomerID(inviter.CustomerID))
-	if err != nil || len(roots) != 1 || int64(roots[0]) != inviter.CustomerID {
+	if err != nil || len(roots) == 0 || int64(roots[0]) != inviter.CustomerID {
 		return orderport.CheckoutAttributionResult{}, nil
 	}
 	if s.isSelfPurchaseWithin(ctx, inviter.CustomerID, command.PayerCustomerID, command.BeneficiaryCustomerID) {

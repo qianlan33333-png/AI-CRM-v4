@@ -1,20 +1,38 @@
 {
   "schema": 1,
-  "baseline_sha": "fde403ef0e5d621fd7c32af40b1f7d679d283990",
+  "baseline_sha": "b69ab060ee207a9d84aada9fccd881e24a8d4cd3",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/payment/app",
-      "test": "TestPostgreSQLRefundDoesNotReserveFutureCommission",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLPaidReferralCanonicalAliasesAndRepurchaseFreezeCommission",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/store"
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLPaidReferralFinancialAttributionAtomicAndInstalled",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLPaidInvitationFinancialIssuerPreservesLegacyAndRejectsRetiredOwner",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/distribution/app",
+      "test": "TestQualificationDoesNotLetPendingRefundHideAlternativeValidPurchase"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/distribution/app",
+      "test": "TestQualificationFailsClosedWhenEveryCandidateHasUnknownPaymentEvidence"
     }
   ],
   "installed_checks": [
-    "refund-before-split"
+    "paid-referral-financial-canonical"
   ],
   "build_commands": []
 }

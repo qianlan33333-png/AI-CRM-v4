@@ -11,9 +11,14 @@ import (
 	"testing"
 	"time"
 
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	distributionapp "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/app"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
+	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	identityquery "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/query"
+	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
 	orderdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	orderstore "github.com/qianlan33333-png/AI-CRM-v3/internal/order/store"
@@ -30,11 +35,20 @@ import (
 // Only API runs; accepted effects are never dispatched to a real Provider.
 func TestPostgreSQLPaidReferralFinancialAttributionAtomicAndInstalled(t *testing.T) {
 	for _, channel := range []string{"mini_program", "h5_official_account"} {
-		t.Run(channel, func(t *testing.T) { paidReferralFinancialJourney(t, channel) })
+		t.Run(channel, func(t *testing.T) { paidReferralFinancialJourney(t, channel, false) })
 	}
 }
 
-func paidReferralFinancialJourney(t *testing.T, channel string) {
+// Production regression: a canonical customer with merged aliases remains one
+// financial subject. A previous fully refunded purchase cannot hide a valid
+// repurchase. Alias self-purchases must still be excluded.
+func TestPostgreSQLPaidReferralCanonicalAliasesAndRepurchaseFreezeCommission(t *testing.T) {
+	for _, channel := range []string{"mini_program", "h5_official_account"} {
+		t.Run(channel, func(t *testing.T) { paidReferralFinancialJourney(t, channel, true) })
+	}
+}
+
+func paidReferralFinancialJourney(t *testing.T, channel string, mergedAliases bool) {
 	f := newPromotionCheckoutFixture(t)
 	defer f.close()
 	ctx := context.Background()
@@ -84,6 +98,19 @@ func paidReferralFinancialJourney(t *testing.T, channel string) {
 		t.Fatal(err)
 	}
 	f.seedQualificationPurchase(t, f.buyer, identityID, f.productID, "paid-financial-owner")
+	wantCommission := int64(100)
+	if mergedAliases {
+		// These are isolated, synthetic authoritative refund facts, not a
+		// Provider call or an assertion about a real refund's execution.
+		if _, err = f.pool.Exec(ctx, `INSERT INTO payment_refunds(payment_id,provider,refund_no,amount_minor,reason,status,version,created_at,updated_at) SELECT id,'wechat_pay','canonical-alias-old-refund',1000,'synthetic completed refund','completed',1,$1,$1 FROM payments WHERE merchant_order_no='M-promotion-qualification-paid-financial-owner'`, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		f.seedQualificationPurchase(t, f.buyer, identityID, f.productID, "paid-financial-repurchase")
+		if _, err = f.pool.Exec(ctx, `UPDATE distribution_product_policies SET commission_rate_basis_points=3000 WHERE product_id=$1`, f.productID); err != nil {
+			t.Fatal(err)
+		}
+		wantCommission = 300
+	}
 	if _, err = f.pool.Exec(ctx, `UPDATE distribution_product_policies SET wait_days=0 WHERE product_id=$1`, f.productID); err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +120,10 @@ func paidReferralFinancialJourney(t *testing.T, channel string) {
 			t.Fatal(err)
 		}
 		actor.AppID, actor.AppScope, actor.Channel = "wx-paid-referral-h5", "wechat-app:wx-paid-referral-h5", channel
+	}
+	var aliases []int64
+	if mergedAliases {
+		aliases = append(aliases, mergePaidReferralFinancialAlias(t, f, "before-invitation"))
 	}
 
 	campaign, err := admin.CreateCampaign(ctx, referralport.CreateCampaignCommand{ActorAdminID: 1, Name: "financial referral", StartsAt: time.Now().Add(-time.Hour), EndsAt: time.Now().Add(time.Hour), TeamMode: referraldomain.TeamModeIndividual, QualificationMode: referraldomain.QualificationProductPurchase, ProductID: f.productID, ProductType: "standard_product", LeaderboardMetric: referraldomain.LeaderboardInvites, IdempotencyKey: "paid-financial-campaign"})
@@ -111,6 +142,9 @@ func paidReferralFinancialJourney(t *testing.T, channel string) {
 		t.Fatal(err)
 	}
 	token := strings.TrimPrefix(link.URL, "https://crm.example.test/referral/invite/")
+	if mergedAliases {
+		aliases = append(aliases, mergePaidReferralFinancialAlias(t, f, "after-invitation"))
+	}
 	createWithin := func(tx context.Context, buyer int64, key string) (orderdomain.Snapshot, error) {
 		return f.orders.CreatePaymentOrderWithin(tx, orderport.PaymentOrderCommand{Provider: orderdomain.ProviderWeChatPay, MerchantOrderNo: "M-" + key, PayerCustomerID: buyer, BeneficiaryCustomerID: buyer, ProductID: f.productID, ProductCode: "promotion-checkout-product", ProductName: "分销归因商品", ProductVersion: 1, ProductType: "standard_product", UnitAmountMinor: 1000, Currency: "CNY", ReferralActivityContext: token, ActorScope: "checkout:" + key, IdempotencyKey: key})
 	}
@@ -187,7 +221,7 @@ func paidReferralFinancialJourney(t *testing.T, channel string) {
 	var commissions, instructions int
 	var paidMinor, payableMinor int64
 	var dueAt, paidAt time.Time
-	if err = f.pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM distribution_commissions WHERE order_id=$1),(SELECT count(*) FROM payment_profit_sharing_instructions),paid_minor,current_payable_minor,due_at,paid_confirmed_at FROM distribution_commissions WHERE order_id=$1`, first.ID).Scan(&commissions, &instructions, &paidMinor, &payableMinor, &dueAt, &paidAt); err != nil || commissions != 1 || instructions != 0 || paidMinor != 0 || payableMinor != 100 || dueAt.Before(paidAt.Add(time.Minute)) {
+	if err = f.pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM distribution_commissions WHERE order_id=$1),(SELECT count(*) FROM payment_profit_sharing_instructions),paid_minor,current_payable_minor,due_at,paid_confirmed_at FROM distribution_commissions WHERE order_id=$1`, first.ID).Scan(&commissions, &instructions, &paidMinor, &payableMinor, &dueAt, &paidAt); err != nil || commissions != 1 || instructions != 0 || paidMinor != 0 || payableMinor != wantCommission || dueAt.Before(paidAt.Add(time.Minute)) {
 		t.Fatal("pending receiver or callback replay created invalid money facts", err)
 	}
 	// Synthetic completion exercises the real Payment-to-Distribution observer.
@@ -205,6 +239,34 @@ func paidReferralFinancialJourney(t *testing.T, channel string) {
 	board, err := service.Leaderboard(ctx, referralport.LeaderboardQuery{CampaignID: campaign.ID, Kind: referralport.LeaderboardPersonal, Period: referralport.LeaderboardTotal, ViewerCustomerID: f.buyer, Limit: 20})
 	if err != nil || len(board.Items) != 1 || board.Items[0].Score != 2 {
 		t.Fatal("financial attribution lost referral statistics", err)
+	}
+	for index, alias := range aliases {
+		var self orderdomain.Snapshot
+		if err = f.uow.Within(ctx, func(tx context.Context) error {
+			var e error
+			self, e = createWithin(tx, alias, "paid-financial-self-alias-"+strconv.Itoa(index))
+			return e
+		}); err != nil {
+			t.Fatal(err)
+		}
+		f.assertOrderAttribution(t, self.ID, 0, false)
+		if err = f.uow.Within(ctx, func(tx context.Context) error {
+			_, e := f.orders.SettlePaymentWithin(tx, orderport.PaymentSettlementCommand{OrderID: self.ID, ProviderTransactionNo: "synthetic-self-alias-" + strconv.Itoa(index), OccurredAt: self.CreatedAt.Add(time.Millisecond), ReceiptKey: "paid-financial-self-alias-paid-" + strconv.Itoa(index)})
+			return e
+		}); err != nil {
+			t.Fatal(err)
+		}
+		f.assertCommission(t, self.ID, 0)
+	}
+	if mergedAliases {
+		board, err = service.Leaderboard(ctx, referralport.LeaderboardQuery{CampaignID: campaign.ID, Kind: referralport.LeaderboardPersonal, Period: referralport.LeaderboardTotal, ViewerCustomerID: f.buyer, Limit: 20})
+		if err != nil || len(board.Items) != 1 || board.Items[0].CustomerID != f.buyer || board.Items[0].Score != 2 {
+			t.Fatal("alias self-purchase inflated valid paid invite people", err)
+		}
+		var agrees bool
+		if err = f.pool.QueryRow(ctx, `SELECT d.customer_id=r.promoter_customer_id AND r.promoter_customer_id=$2 AND a.commission_rate_basis_points=r.commission_rate_basis_points AND a.policy_version=r.policy_version AND s.profit_sharing_required FROM distribution_order_attributions a JOIN distribution_distributors d ON d.id=a.distributor_id JOIN referral_product_sale_checkouts r ON r.order_id=a.order_id JOIN order_checkout_snapshots s ON s.order_id=a.order_id WHERE a.order_id=$1`, first.ID, f.buyer).Scan(&agrees); err != nil || !agrees {
+			t.Fatal("Order, Referral and Distribution did not freeze the same canonical financial subject", err)
+		}
 	}
 
 	// A stale unrelated Distribution cookie must never replace an invalid RFI.
@@ -255,6 +317,33 @@ func paidReferralFinancialJourney(t *testing.T, channel string) {
 	}
 	preparePaidReferralInstalledDirectory(t, f, []int64{f.buyer, f.promoter.CustomerID, f.otherPromoter.CustomerID})
 	verifyInstalledPaidReferralWithOptions(t, f, actor, campaign.ID, true, 2)
+}
+
+func mergePaidReferralFinancialAlias(t *testing.T, f *promotionCheckoutFixture, suffix string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	service := identityapp.OneIDService{Store: identitystore.NewPostgresStore()}
+	fact := evidenceMergeFact(t, identitydomain.KindMPOpenID, "wechat-app:canonical-paid-referral-"+suffix, "canonical-paid-referral-alias-"+suffix)
+	var alias identityport.ProvisionResult
+	if err := f.uow.Within(ctx, func(tx context.Context) error {
+		var err error
+		alias, err = service.ProvisionCustomerFromVerifiedIdentity(tx, fact)
+		if err != nil {
+			return err
+		}
+		candidate, err := service.LinkVerifiedIdentity(tx, identityapp.LinkCommand{SourceCustomerID: customerdomain.CustomerID(f.buyer), Target: fact, Evidence: identitydomain.LinkEvidence{Type: "test", Strength: identitydomain.EvidenceStrong, Source: "canonical.referral.synthetic", EventID: suffix, Digest: suffix, PolicyVersion: "test-v1"}})
+		if err != nil {
+			return err
+		}
+		if candidate.Candidate == nil {
+			return errors.New("missing canonical referral merge candidate")
+		}
+		_, err = service.ConfirmMerge(tx, identityapp.ConfirmMergeCommand{CandidateID: candidate.Candidate.ID, SurvivorCustomerID: customerdomain.CustomerID(f.buyer), Operator: "canonical-referral-test"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return int64(alias.CustomerID)
 }
 
 func referralappNewFinancialService(f *promotionCheckoutFixture, repository *referralstore.Repository, audit *platformaudit.Service, queries identityquery.PostgreSQL, qualification *distributionapp.QualificationService) (*referralapp.Service, error) {
