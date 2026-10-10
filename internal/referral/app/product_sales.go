@@ -9,6 +9,7 @@ import (
 	"time"
 
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
+	distributionport "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/port"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
@@ -104,11 +105,35 @@ func (s *Service) RecordProductSaleCheckoutAttributionWithin(ctx context.Context
 	}
 	snapshot := referralport.ProductSaleCheckoutSnapshot{OrderID: command.OrderID, OrderVersion: command.OrderVersion, CampaignID: activity.CampaignID, ProductID: command.ProductID, ProductType: command.ProductType, ProductCode: command.ProductCode, ProductName: command.ProductName, ProductVersion: command.ProductVersion, PromotionCustomerID: command.PromotionCustomerID, PromotionCredentialRef: command.PromotionCredentialRef, PolicyVersion: command.PolicyVersion, CommissionRateBasisPoints: command.CommissionRateBasisPoints, WaitDays: command.WaitDays, BuyerCustomerID: command.BuyerCustomerID, BeneficiaryCustomerID: command.BeneficiaryCustomerID, ActivityContextDigest: activityDigest, PromotionContextDigest: promotionDigest, CreatedAt: command.OccurredAt.UTC()}
 	if activity.InviterCustomerID > 0 {
-		// A campaign invitation owns its activity attribution, independent of
-		// Distribution's financial policy and receiver readiness.
+		// The campaign invitation remains the activity source. If Distribution
+		// accepted a financial attribution in this same UoW, freeze the same
+		// canonical promoter and policy as Order/Distribution; otherwise retain
+		// the established statistics-only invitation behavior.
 		snapshot.PromotionCustomerID = activity.InviterCustomerID
 		snapshot.PromotionCredentialRef = "referral.invitation:" + itoa(activity.InvitationID)
 		snapshot.PolicyVersion, snapshot.CommissionRateBasisPoints, snapshot.WaitDays = 0, 0, 0
+		if command.PromotionCustomerID > 0 || command.PromotionCredentialRef != "" || command.PolicyVersion > 0 || command.CommissionRateBasisPoints > 0 || command.WaitDays > 0 {
+			paid, paidErr := s.ReadPaidInvitationCheckoutWithin(ctx, activityDigest, command.ProductID, command.ProductType, command.OccurredAt.UTC())
+			if paidErr != nil {
+				if errors.Is(paidErr, referralport.ErrNotFound) {
+					return referralport.ErrConflict
+				}
+				return paidErr
+			}
+			if paid.CampaignID != activity.CampaignID || paid.InvitationID != activity.InvitationID || paid.ProductID != command.ProductID || paid.ProductType != command.ProductType || paid.Inviter.CustomerID != command.PromotionCustomerID {
+				return referralport.ErrConflict
+			}
+			if err = s.validateFinancialInvitationCheckoutWithin(ctx, referralport.ProductSaleCheckoutSnapshot{
+				OrderID: command.OrderID, ProductID: command.ProductID, ProductType: command.ProductType,
+				PromotionCustomerID: command.PromotionCustomerID, PromotionCredentialRef: command.PromotionCredentialRef,
+				PolicyVersion: command.PolicyVersion, CommissionRateBasisPoints: command.CommissionRateBasisPoints, WaitDays: command.WaitDays,
+			}, true); err != nil {
+				return err
+			}
+			snapshot.PromotionCustomerID = command.PromotionCustomerID
+			snapshot.PromotionCredentialRef = "referral.invitation:" + itoa(activity.InvitationID)
+			snapshot.PolicyVersion, snapshot.CommissionRateBasisPoints, snapshot.WaitDays = command.PolicyVersion, command.CommissionRateBasisPoints, command.WaitDays
+		}
 	}
 	if err = store.InsertProductSaleCheckoutWithin(ctx, snapshot); err != nil {
 		return err
@@ -157,7 +182,15 @@ func (s *Service) consumeProductSalePaidWithin(ctx context.Context, event referr
 		if !checkoutOrderVersionCompatible(checkout.OrderVersion, event.OrderVersion) || checkout.CampaignID != event.CampaignID || checkout.ProductID != event.ProductID || checkout.ProductType != event.ProductType || checkout.BuyerCustomerID != event.BuyerCustomerID || checkout.BeneficiaryCustomerID != event.BeneficiaryCustomerID || checkout.PromotionCustomerID != event.PromotionCustomerID || checkout.ActivityContextDigest != event.ActivityContextDigest || checkout.PromotionContextDigest != event.PromotionContextDigest {
 			return referralport.ErrConflict
 		}
+		if strings.HasPrefix(checkout.PromotionCredentialRef, "referral.invitation:") {
+			hasFinancialSnapshot := checkout.PolicyVersion != 0 || checkout.CommissionRateBasisPoints != 0 || checkout.WaitDays != 0
+			if err = s.validateFinancialInvitationCheckoutWithin(ctx, checkout, hasFinancialSnapshot); err != nil {
+				return err
+			}
+		}
 		buyerLineage := []int64{checkout.BeneficiaryCustomerID}
+		payerLineage := []int64{checkout.BuyerCustomerID}
+		promoterLineage := []int64{checkout.PromotionCustomerID}
 		selfInvitation := false
 		if strings.HasPrefix(checkout.PromotionCredentialRef, "referral.invitation:") {
 			lineages, lineageErr := s.paidInvitationLineagesWithin(ctx, checkout)
@@ -165,6 +198,8 @@ func (s *Service) consumeProductSalePaidWithin(ctx context.Context, event referr
 				return lineageErr
 			}
 			buyerLineage = lineages[checkout.BeneficiaryCustomerID]
+			payerLineage = lineages[checkout.BuyerCustomerID]
+			promoterLineage = lineages[checkout.PromotionCustomerID]
 			promoterRoot := lineages[checkout.PromotionCustomerID][0]
 			selfInvitation = promoterRoot == lineages[checkout.BuyerCustomerID][0] || promoterRoot == buyerLineage[0]
 		}
@@ -188,8 +223,10 @@ func (s *Service) consumeProductSalePaidWithin(ctx context.Context, event referr
 				return nil
 			}
 		}
-		locks := slices.Clone(buyerLineage)
+		locks := append(slices.Clone(buyerLineage), payerLineage...)
+		locks = append(locks, promoterLineage...)
 		slices.Sort(locks)
+		locks = slices.Compact(locks)
 		for _, customerID := range locks {
 			if err = s.store.LockParticipationWithin(ctx, checkout.CampaignID, customerID); err != nil {
 				return err
@@ -217,7 +254,7 @@ func (s *Service) consumeProductSalePaidWithin(ctx context.Context, event referr
 			return nil
 		}
 		if strings.HasPrefix(checkout.PromotionCredentialRef, "referral.invitation:") {
-			participation, err = s.store.ReadParticipationWithin(ctx, checkout.CampaignID, checkout.PromotionCustomerID, false)
+			participation, err = s.ownParticipationWithin(ctx, checkout.CampaignID, promoterLineage, false)
 			if errors.Is(err, referralport.ErrNotFound) {
 				return nil
 			}
@@ -243,12 +280,40 @@ func (s *Service) consumeProductSalePaidWithin(ctx context.Context, event referr
 	}
 }
 
+func (s *Service) validateFinancialInvitationCheckoutWithin(ctx context.Context, checkout referralport.ProductSaleCheckoutSnapshot, required bool) error {
+	hasFinancialSnapshot := checkout.PolicyVersion != 0 || checkout.CommissionRateBasisPoints != 0 || checkout.WaitDays != 0
+	if !required && !hasFinancialSnapshot {
+		return nil
+	}
+	if !required || checkout.PromotionCustomerID < 1 || checkout.OrderID < 1 || checkout.ProductID < 1 || (checkout.ProductType != "standard_product" && checkout.ProductType != "service_period") || checkout.PolicyVersion < 1 || checkout.CommissionRateBasisPoints < 1 || checkout.WaitDays < 0 {
+		return referralport.ErrConflict
+	}
+	if checkout.PromotionCredentialRef != "" && !strings.HasPrefix(checkout.PromotionCredentialRef, "distribution.credential:") && !strings.HasPrefix(checkout.PromotionCredentialRef, "referral.invitation:") {
+		return referralport.ErrConflict
+	}
+	if s.attributions == nil {
+		return referralport.ErrUnavailable
+	}
+	attribution, err := s.attributions.ReadFrozenOrderAttributionWithin(ctx, checkout.OrderID, 1)
+	if errors.Is(err, distributionport.ErrNotFound) {
+		return referralport.ErrConflict
+	}
+	if err != nil {
+		return referralport.ErrUnavailable
+	}
+	credentialRef := "distribution.credential:" + itoa(attribution.CredentialID)
+	if attribution.OrderID != checkout.OrderID || attribution.OrderItemLine != 1 || attribution.ProductID != checkout.ProductID || string(attribution.ProductType) != checkout.ProductType || attribution.PromoterCustomerID != checkout.PromotionCustomerID || attribution.PolicyVersion != checkout.PolicyVersion || attribution.CommissionRateBasisPoints != checkout.CommissionRateBasisPoints || attribution.WaitDays != checkout.WaitDays || attribution.CredentialID < 1 || (strings.HasPrefix(checkout.PromotionCredentialRef, "distribution.credential:") && checkout.PromotionCredentialRef != credentialRef) {
+		return referralport.ErrConflict
+	}
+	return nil
+}
+
 func (s *Service) verifyExistingProductCredit(ctx context.Context, store productSalesStore, expected referraldomain.ProductSaleEvent) error {
 	actual, err := store.ReadProductSaleCreditWithin(ctx, expected.OrderID, expected.ProductID, true)
 	if err != nil {
 		return err
 	}
-	if actual.CampaignID != expected.CampaignID || actual.SourcePaidEventID != expected.SourcePaidEventID || actual.AmountDeltaMinor != expected.AmountDeltaMinor || actual.PromoterCustomerID != expected.PromoterCustomerID || actual.ParticipationID != expected.ParticipationID || actual.BuyerCustomerID != expected.BuyerCustomerID || actual.BeneficiaryCustomerID != expected.BeneficiaryCustomerID || actual.SourceDigest != expected.SourceDigest {
+	if actual.CampaignID != expected.CampaignID || actual.OrderVersion != expected.OrderVersion || actual.ProductID != expected.ProductID || actual.ProductType != expected.ProductType || actual.ProductCode != expected.ProductCode || actual.ProductName != expected.ProductName || actual.ProductVersion != expected.ProductVersion || actual.SourcePaidEventID != expected.SourcePaidEventID || actual.AmountDeltaMinor != expected.AmountDeltaMinor || actual.OrderCountDelta != expected.OrderCountDelta || actual.PromoterCustomerID != expected.PromoterCustomerID || actual.PromotionCredentialRef != expected.PromotionCredentialRef || actual.PolicyVersion != expected.PolicyVersion || actual.CommissionRateBasisPoints != expected.CommissionRateBasisPoints || actual.WaitDays != expected.WaitDays || actual.ParticipationID != expected.ParticipationID || actual.TeamID != expected.TeamID || actual.BuyerCustomerID != expected.BuyerCustomerID || actual.BeneficiaryCustomerID != expected.BeneficiaryCustomerID || actual.Currency != expected.Currency || actual.SourceDigest != expected.SourceDigest {
 		return referralport.ErrConflict
 	}
 	return nil

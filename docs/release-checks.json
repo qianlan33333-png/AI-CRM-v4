@@ -1,18 +1,57 @@
 {
   "schema": 1,
-  "baseline_sha": "aed5b78f6c4fc2d0bf5b6f913250b0fd40798849",
+  "baseline_sha": "df84f5d262717780ff132bbbcfc89d594704b070",
   "checks": [
     {
-      "lane": "frontend",
-      "path": "web/v3/referralPosterShareText.test.mjs"
+      "lane": "backend",
+      "package": "./internal/distribution/app"
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/referralCenter.test.mjs"
+      "lane": "backend",
+      "package": "./internal/distribution/store"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/paid_invitation_postgres_test.go",
+      "test": "TestPostgreSQLPaidInvitationWithoutDistributorFreezesAndScoresAtomically",
+      "package": "./internal/referral/app",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/financial_invitation_postgres_test.go",
+      "test": "TestPostgreSQLPaidInvitationFinancialIssuerPreservesLegacyAndRejectsRetiredOwner",
+      "package": "./internal/referral/app",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/profit_sharing_reconcile_role_integration_test.go",
+      "test": "TestPostgreSQLProfitSharingReconcileRoleHasNoDaemonOrNewEffect",
+      "package": "./cmd/aicrm",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/referral_paid_invitation_checkout_postgres_test.go",
+      "test": "TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor",
+      "package": "./cmd/aicrm",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/referral_paid_financial_postgres_test.go",
+      "test": "TestPostgreSQLPaidReferralFinancialAttributionAtomicAndInstalled",
+      "package": "./cmd/aicrm",
+      "postgres": true
     }
   ],
   "installed_checks": [
-    "referral-poster-compact"
+    "referral-paid-sharing-rankings"
   ],
   "build_commands": []
 }

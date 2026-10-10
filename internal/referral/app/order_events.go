@@ -38,12 +38,12 @@ func (s *Service) ConsumePaidEventWithin(ctx context.Context, event orderport.Pa
 		if !checkoutOrderVersionCompatible(checkout.OrderVersion, event.OrderVersion) || checkout.ProductID != event.CheckoutProductID || checkout.ProductType != event.CheckoutProductType || checkout.ActivityContextDigest != event.ReferralActivityContextDigest || checkout.PromotionContextDigest != event.PromotionContextDigest {
 			return referralport.ErrConflict
 		}
-		if err = s.ensureCheckoutBuyerParticipationWithin(ctx, checkout, event); err != nil {
-			return err
-		}
 		if strings.HasPrefix(checkout.PromotionCredentialRef, "referral.invitation:") {
 			if checkout.BuyerCustomerID != *event.Order.PayerCustomerID || checkout.BeneficiaryCustomerID != *event.Order.BeneficiaryCustomerID {
 				return referralport.ErrConflict
+			}
+			if err = s.validateFinancialInvitationCheckoutWithin(ctx, checkout, event.Order.ProfitSharingRequired); err != nil {
+				return err
 			}
 			var amount int64
 			for _, item := range event.Order.Items {
@@ -61,6 +61,9 @@ func (s *Service) ConsumePaidEventWithin(ctx context.Context, event orderport.Pa
 				PaidAmountMinor: amount, Currency: event.Order.Amount.Currency, ActivityContextDigest: checkout.ActivityContextDigest,
 				PromotionContextDigest: checkout.PromotionContextDigest, SourceDigest: event.SourceDigest, OccurredAt: event.OccurredAt,
 			})
+		}
+		if err = s.ensureCheckoutBuyerParticipationWithin(ctx, checkout, event); err != nil {
+			return err
 		}
 	} else if !errors.Is(err, referralport.ErrNotFound) {
 		return err

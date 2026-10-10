@@ -47,6 +47,29 @@ func (r *Repository) InsertPromotionCredentialWithin(ctx context.Context, creden
 	return scanPromotionCredential(tx.QueryRow(ctx, `INSERT INTO distribution_promotion_credentials(distributor_id,product_id,product_type,token_digest,status,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING `+credentialColumns, credential.DistributorID, credential.ProductID, string(credential.ProductType), credential.TokenDigest[:], string(credential.Status), credential.CreatedAt.UTC(), credential.ExpiresAt.UTC()))
 }
 
+// GetOrInsertPromotionCredentialWithin persists an invitation-backed digest
+// at most once. The conflict-safe insert lets concurrent orders reuse the
+// winner inside their existing Unit of Work without poisoning either
+// transaction with a unique-constraint error.
+func (r *Repository) GetOrInsertPromotionCredentialWithin(ctx context.Context, credential distributiondomain.PromotionCredential) (distributiondomain.PromotionCredential, bool, error) {
+	tx, err := transaction(ctx)
+	if err != nil {
+		return distributiondomain.PromotionCredential{}, false, err
+	}
+	if !credential.ValidForInsert() {
+		return distributiondomain.PromotionCredential{}, false, ErrInvalid
+	}
+	saved, err := scanPromotionCredential(tx.QueryRow(ctx, `INSERT INTO distribution_promotion_credentials(distributor_id,product_id,product_type,token_digest,status,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(token_digest) DO NOTHING RETURNING `+credentialColumns, credential.DistributorID, credential.ProductID, string(credential.ProductType), credential.TokenDigest[:], string(credential.Status), credential.CreatedAt.UTC(), credential.ExpiresAt.UTC()))
+	if err == nil {
+		return saved, true, nil
+	}
+	if !errors.Is(err, distributionport.ErrNotFound) {
+		return distributiondomain.PromotionCredential{}, false, err
+	}
+	existing, err := r.ReadPromotionCredentialByDigestWithin(ctx, credential.TokenDigest, true)
+	return existing, false, err
+}
+
 func (r *Repository) ReadPromotionCredentialByDigestWithin(ctx context.Context, digest [32]byte, lock bool) (distributiondomain.PromotionCredential, error) {
 	tx, err := transaction(ctx)
 	if err != nil {

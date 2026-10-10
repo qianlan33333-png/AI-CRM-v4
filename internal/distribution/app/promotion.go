@@ -13,14 +13,19 @@ import (
 	distributiondomain "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/domain"
 	distributionport "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/port"
 	distributionstore "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/store"
+	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
+	paymentdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/domain"
+	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	productport "github.com/qianlan33333-png/AI-CRM-v3/internal/product/port"
+	referralport "github.com/qianlan33333-png/AI-CRM-v3/internal/referral/port"
 )
 
 const promotionCredentialTTL = 30 * 24 * time.Hour
+const paidCampaignReferralProvenance = "paid_campaign_referral_v1"
 
 // promotionProductScanMaximum bounds one public request while still allowing
 // the server-side eligibility gate to advance past a Product-owned source page
@@ -46,6 +51,15 @@ type promotionStore interface {
 	AppendOutboxWithin(context.Context, string, string, int64, any, time.Time) error
 }
 
+// paidReferralPromotionStore is used only by the paid campaign invitation
+// checkout path. It remains a narrow Distribution-owned persistence seam.
+type paidReferralPromotionStore interface {
+	ReadDistributorByCustomerWithin(context.Context, int64, bool) (distributiondomain.Distributor, distributionport.ReceiverReadiness, error)
+	InsertDistributorWithin(context.Context, int64, string, string, time.Time) (distributiondomain.Distributor, distributionport.ReceiverReadiness, error)
+	UpdateReceiverReadinessWithin(context.Context, int64, int64, distributionport.ReceiverReadiness, time.Time) (distributiondomain.Distributor, distributionport.ReceiverReadiness, error)
+	GetOrInsertPromotionCredentialWithin(context.Context, distributiondomain.PromotionCredential) (distributiondomain.PromotionCredential, bool, error)
+}
+
 // PromotionService owns opaque credential issuance and Order's checkout-time
 // attribution callback. The browser never chooses commission, policy, seller,
 // payment recipient, or qualification evidence.
@@ -57,10 +71,28 @@ type PromotionService struct {
 	saleableProduct   productport.SidebarProductShareReader
 	lineage           identityport.LockedCanonicalLineageReader
 	subjects          distributionIdentitySubjects
+	paidInvitations   referralport.PaidInvitationCheckoutReader
+	settlement        paymentport.DistributionSettlementPort
 	promotionOrigin   string
 	tokens            promotionTokenIssuer
 	settlementEnabled bool
 	now               func() time.Time
+}
+
+func (s *PromotionService) BindPaidInvitationCheckoutReader(reader referralport.PaidInvitationCheckoutReader) error {
+	if s == nil || reader == nil {
+		return distributionport.ErrUnavailable
+	}
+	s.paidInvitations = reader
+	return nil
+}
+
+func (s *PromotionService) BindProfitSharingSettlement(settlement paymentport.DistributionSettlementPort) error {
+	if s == nil || settlement == nil {
+		return distributionport.ErrUnavailable
+	}
+	s.settlement = settlement
+	return nil
 }
 
 func (s *PromotionService) BindIdentitySubjects(reader identityport.VerifiedIdentitySubjectReader) error {
@@ -502,11 +534,20 @@ func (s *PromotionService) ResolvePromotionTarget(ctx context.Context, token str
 // ordinary purchase. A real persistence failure remains an error so an order
 // cannot commit while pretending that a partial attribution was saved.
 func (s *PromotionService) RecordCheckoutAttributionWithin(ctx context.Context, command orderport.CheckoutAttributionCommand) (orderport.CheckoutAttributionResult, error) {
-	if s == nil || !s.settlementEnabled || s.store == nil || s.qualification == nil || s.lineage == nil || command.OrderID < 1 || command.OrderItemLine != 1 || command.ProductID < 1 || command.PayerCustomerID < 1 || command.BeneficiaryCustomerID < 1 || command.ItemPaidMinor < 1 || command.OccurredAt.IsZero() || !validPromotionToken(command.PromotionContext) {
+	if s == nil || !s.settlementEnabled || s.store == nil || s.qualification == nil || s.lineage == nil || command.OrderID < 1 || command.OrderItemLine != 1 || command.ProductID < 1 || command.PayerCustomerID < 1 || command.BeneficiaryCustomerID < 1 || command.ItemPaidMinor < 1 || command.OccurredAt.IsZero() {
 		return orderport.CheckoutAttributionResult{}, nil
 	}
 	if _, err := platformpostgres.RequireTransaction(ctx); err != nil {
 		return orderport.CheckoutAttributionResult{}, distributionport.ErrUnavailable
+	}
+	// An RFI link is its own immutable campaign source. Never let a stale or
+	// invalid RFI cookie fall through to an unrelated dpc_ cookie on the same
+	// checkout, which could otherwise silently change the promoter.
+	if strings.HasPrefix(command.ReferralActivityContext, "rfi_") {
+		return s.recordPaidInvitationAttributionWithin(ctx, command)
+	}
+	if !validPromotionToken(command.PromotionContext) {
+		return orderport.CheckoutAttributionResult{}, nil
 	}
 	productType := distributiondomain.ProductType(command.ProductType)
 	if !productType.Valid() {
@@ -559,8 +600,11 @@ func (s *PromotionService) RecordCheckoutAttributionWithin(ctx context.Context, 
 	}
 	attribution := distributiondomain.Attribution{OrderID: command.OrderID, OrderItemLine: command.OrderItemLine, ProductCode: command.ProductCode, ProductName: command.ProductName, DistributorID: distributor.ID, PromotionCredentialID: credential.ID, QualificationEvidenceRef: qualification.EvidenceRef, QualificationState: qualification.State, PolicyVersion: policy.Version, CommissionRateBasisPoints: policy.CommissionRateBasisPoints, WaitDays: policy.WaitDays, AttributedAt: command.OccurredAt.UTC()}
 	saved, created, err := s.store.InsertAttributionWithin(ctx, attribution, policyID)
-	if err != nil || !created {
+	if err != nil {
 		return orderport.CheckoutAttributionResult{}, err
+	}
+	if !created {
+		return orderport.CheckoutAttributionResult{}, distributionport.ErrConflict
 	}
 	payload := map[string]any{"attribution_id": saved.ID, "order_id": command.OrderID, "policy_version": policy.Version}
 	if err = s.store.AppendAuditWithin(ctx, "distribution.attribution_created.v1", "attribution", saved.ID, "order:"+decimal(command.OrderID), payload, command.OccurredAt); err != nil {
@@ -574,6 +618,200 @@ func (s *PromotionService) RecordCheckoutAttributionWithin(ctx context.Context, 
 		return orderport.CheckoutAttributionResult{}, err
 	}
 	return orderport.CheckoutAttributionResult{Attributed: true, ProfitSharingRequired: commission > 0, PromoterCustomerID: distributor.CustomerID, PromotionCredentialRef: "distribution.credential:" + decimal(credential.ID), PolicyVersion: policy.Version, CommissionRateBasisPoints: policy.CommissionRateBasisPoints, WaitDays: policy.WaitDays}, nil
+}
+
+func (s *PromotionService) recordPaidInvitationAttributionWithin(ctx context.Context, command orderport.CheckoutAttributionCommand) (orderport.CheckoutAttributionResult, error) {
+	if !validReferralInvitationToken(command.ReferralActivityContext) {
+		return orderport.CheckoutAttributionResult{}, nil
+	}
+	if s.paidInvitations == nil || s.settlement == nil || s.subjects == nil {
+		return orderport.CheckoutAttributionResult{}, distributionport.ErrUnavailable
+	}
+	digest := sha256.Sum256([]byte(command.ReferralActivityContext))
+	invitation, err := s.paidInvitations.ReadPaidInvitationCheckoutWithin(ctx, digest, command.ProductID, command.ProductType, command.OccurredAt.UTC())
+	if errors.Is(err, referralport.ErrNotFound) {
+		return orderport.CheckoutAttributionResult{}, nil
+	}
+	if err != nil {
+		return orderport.CheckoutAttributionResult{}, err
+	}
+	inviter := invitation.Inviter
+	if invitation.CampaignID < 1 || invitation.InvitationID < 1 || invitation.ProductID != command.ProductID || invitation.ProductType != command.ProductType || !invitation.ExpiresAt.After(command.OccurredAt.UTC()) || !inviter.Valid() {
+		return orderport.CheckoutAttributionResult{}, distributionport.ErrUnavailable
+	}
+	// A current merge can change the inviter's canonical root after the
+	// invitation was issued. Do not guess which historical participation or
+	// receiver should own money; merged identities remain activity-only.
+	roots, err := s.lineage.LockedCanonicalLineage(ctx, customerdomain.CustomerID(inviter.CustomerID))
+	if err != nil || len(roots) != 1 || int64(roots[0]) != inviter.CustomerID {
+		return orderport.CheckoutAttributionResult{}, nil
+	}
+	if s.isSelfPurchaseWithin(ctx, inviter.CustomerID, command.PayerCustomerID, command.BeneficiaryCustomerID) {
+		return orderport.CheckoutAttributionResult{}, nil
+	}
+	productType := distributiondomain.ProductType(command.ProductType)
+	if !productType.Valid() {
+		return orderport.CheckoutAttributionResult{}, nil
+	}
+	policy, err := s.store.ReadProductPolicyForUpdateWithin(ctx, command.ProductID, productType)
+	if errors.Is(err, distributionport.ErrNotFound) || err == nil && (!policy.Enabled || policy.CommissionRateBasisPoints == 0) {
+		return orderport.CheckoutAttributionResult{}, nil
+	}
+	if err != nil {
+		return orderport.CheckoutAttributionResult{}, err
+	}
+	qualification, err := s.qualification.CheckWithin(ctx, inviter.CustomerID, command.ProductID, productType)
+	if err != nil {
+		return orderport.CheckoutAttributionResult{}, err
+	}
+	if !qualification.AllowsPromotion() {
+		return orderport.CheckoutAttributionResult{}, nil
+	}
+	commission, err := distributiondomain.CalculateCommission(command.ItemPaidMinor, policy.CommissionRateBasisPoints)
+	if err != nil {
+		return orderport.CheckoutAttributionResult{}, err
+	}
+	if commission < 1 {
+		return orderport.CheckoutAttributionResult{}, nil
+	}
+	store, ok := s.store.(paidReferralPromotionStore)
+	if !ok {
+		return orderport.CheckoutAttributionResult{}, distributionport.ErrUnavailable
+	}
+	distributor, readiness, err := store.ReadDistributorByCustomerWithin(ctx, inviter.CustomerID, false)
+	if errors.Is(err, distributionport.ErrNotFound) {
+		distributor, readiness, err = s.ensurePaidReferralDistributorWithin(ctx, store, invitation, inviter.CustomerID, command.OccurredAt.UTC())
+	}
+	if err != nil {
+		return orderport.CheckoutAttributionResult{}, err
+	}
+	if !distributor.Enabled || distributor.CustomerID != inviter.CustomerID {
+		return orderport.CheckoutAttributionResult{}, nil
+	}
+	credential, created, err := store.GetOrInsertPromotionCredentialWithin(ctx, distributiondomain.PromotionCredential{
+		DistributorID: distributor.ID, ProductID: command.ProductID, ProductType: productType,
+		TokenDigest: digest, Status: distributiondomain.CredentialActive, CreatedAt: command.OccurredAt.UTC(), ExpiresAt: invitation.ExpiresAt.UTC(),
+	})
+	if err != nil {
+		return orderport.CheckoutAttributionResult{}, err
+	}
+	if credential.DistributorID != distributor.ID || credential.ProductID != command.ProductID || credential.ProductType != productType || credential.TokenDigest != digest || credential.Status != distributiondomain.CredentialActive || !credential.ExpiresAt.Equal(invitation.ExpiresAt.UTC()) || !credential.ExpiresAt.After(command.OccurredAt.UTC()) {
+		return orderport.CheckoutAttributionResult{}, distributionport.ErrConflict
+	}
+	if created {
+		payload := map[string]any{"source_kind": "referral_invitation", "campaign_id": invitation.CampaignID, "invitation_id": invitation.InvitationID, "distributor_id": distributor.ID, "credential_id": credential.ID, "enrollment_provenance": paidCampaignReferralProvenance}
+		if err = s.store.AppendAuditWithin(ctx, "distribution.referral_invitation_credential_created.v1", "credential", credential.ID, "referral:campaign:"+decimal(invitation.CampaignID), payload, command.OccurredAt.UTC()); err != nil {
+			return orderport.CheckoutAttributionResult{}, err
+		}
+		if err = s.store.AppendOutboxWithin(ctx, "distribution.referral_invitation_credential_created.v1", paidReferralCredentialOutboxKey(invitation, command.ProductID), credential.ID, payload, command.OccurredAt.UTC()); err != nil {
+			return orderport.CheckoutAttributionResult{}, err
+		}
+	}
+	policyID, err := s.store.ProductPolicyIDWithin(ctx, command.ProductID, productType)
+	if err != nil {
+		return orderport.CheckoutAttributionResult{}, err
+	}
+	attribution := distributiondomain.Attribution{OrderID: command.OrderID, OrderItemLine: command.OrderItemLine, ProductCode: command.ProductCode, ProductName: command.ProductName, DistributorID: distributor.ID, PromotionCredentialID: credential.ID, QualificationEvidenceRef: qualification.EvidenceRef, QualificationState: qualification.State, PolicyVersion: policy.Version, CommissionRateBasisPoints: policy.CommissionRateBasisPoints, WaitDays: policy.WaitDays, AttributedAt: command.OccurredAt.UTC()}
+	saved, created, err := s.store.InsertAttributionWithin(ctx, attribution, policyID)
+	if err != nil {
+		return orderport.CheckoutAttributionResult{}, err
+	}
+	if !created {
+		return orderport.CheckoutAttributionResult{}, distributionport.ErrConflict
+	}
+	payload := map[string]any{"attribution_id": saved.ID, "order_id": command.OrderID, "policy_version": policy.Version, "source_kind": "referral_invitation", "campaign_id": invitation.CampaignID, "invitation_id": invitation.InvitationID}
+	if err = s.store.AppendAuditWithin(ctx, "distribution.attribution_created.v1", "attribution", saved.ID, "order:"+decimal(command.OrderID), payload, command.OccurredAt.UTC()); err != nil {
+		return orderport.CheckoutAttributionResult{}, err
+	}
+	if err = s.store.AppendOutboxWithin(ctx, "distribution.attribution_created.v1", "distribution.attribution:order:"+decimal(command.OrderID)+":item:"+decimal(int64(command.OrderItemLine)), saved.ID, payload, command.OccurredAt.UTC()); err != nil {
+		return orderport.CheckoutAttributionResult{}, err
+	}
+
+	channel := paymentdomain.ChannelMiniProgram
+	if inviter.Channel == "h5_official_account" {
+		channel = paymentdomain.ChannelH5Official
+	}
+	key := "distribution.receiver:" + decimal(distributor.ID) + ":" + inviter.AppID
+	prepared, err := s.settlement.PrepareProfitSharingReceiverWithin(ctx, paymentport.ReceiverPreparation{
+		CustomerID: inviter.CustomerID, IdentityID: inviter.IdentityID, AppID: inviter.AppID, AppScope: inviter.AppScope,
+		Channel: channel, IdempotencyKey: key,
+		SourceDigest:  effectport.Hash("distribution.receiver.v1", decimal(distributor.ID), inviter.AppID),
+		PayloadDigest: effectport.Hash("distribution.receiver.payload.v1", decimal(distributor.ID), inviter.AppID, inviter.Channel),
+	})
+	if err != nil {
+		return orderport.CheckoutAttributionResult{}, err
+	}
+	if prepared.CustomerID != inviter.CustomerID || prepared.AppID != inviter.AppID || prepared.Reference == "" {
+		return orderport.CheckoutAttributionResult{}, distributionport.ErrUnavailable
+	}
+	// Keep lock ordering consistent with RegistrationService: Payment first,
+	// then refresh/lock the Distribution row and persist its safe projection.
+	distributor, readiness, err = store.ReadDistributorByCustomerWithin(ctx, inviter.CustomerID, true)
+	if err != nil {
+		return orderport.CheckoutAttributionResult{}, err
+	}
+	next := distributionport.ReceiverReadiness{Reference: prepared.Reference, AppID: inviter.AppID, Ready: prepared.Ready, CheckedAt: command.OccurredAt.UTC()}
+	if !next.Ready {
+		next.Reason = safeReceiverReason(prepared)
+	}
+	if readiness.Reference != next.Reference || readiness.AppID != next.AppID || readiness.Ready != next.Ready || readiness.Reason != next.Reason {
+		updated, persisted, updateErr := store.UpdateReceiverReadinessWithin(ctx, distributor.ID, distributor.Version, next, next.CheckedAt)
+		if updateErr != nil {
+			return orderport.CheckoutAttributionResult{}, updateErr
+		}
+		distributor, readiness = updated, persisted
+	}
+	return orderport.CheckoutAttributionResult{Attributed: true, ProfitSharingRequired: true, PromoterCustomerID: distributor.CustomerID, PromotionCredentialRef: "distribution.credential:" + decimal(credential.ID), PolicyVersion: policy.Version, CommissionRateBasisPoints: policy.CommissionRateBasisPoints, WaitDays: policy.WaitDays}, nil
+}
+
+func (s *PromotionService) ensurePaidReferralDistributorWithin(ctx context.Context, store paidReferralPromotionStore, invitation referralport.PaidInvitationCheckout, customerID int64, at time.Time) (distributiondomain.Distributor, distributionport.ReceiverReadiness, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		publicNo, err := newPublicNumber()
+		if err != nil {
+			return distributiondomain.Distributor{}, distributionport.ReceiverReadiness{}, distributionport.ErrUnavailable
+		}
+		distributor, readiness, err := store.InsertDistributorWithin(ctx, customerID, publicNo, paidCampaignReferralProvenance, at)
+		if err == nil {
+			payload := map[string]any{"source_kind": "referral_invitation", "campaign_id": invitation.CampaignID, "invitation_id": invitation.InvitationID, "distributor_id": distributor.ID, "enrollment_provenance": paidCampaignReferralProvenance}
+			if err = s.store.AppendAuditWithin(ctx, "distribution.paid_campaign_enrollment_created.v1", "distributor", distributor.ID, "referral:campaign:"+decimal(invitation.CampaignID), payload, at); err != nil {
+				return distributiondomain.Distributor{}, distributionport.ReceiverReadiness{}, err
+			}
+			if err = s.store.AppendOutboxWithin(ctx, "distribution.paid_campaign_enrollment_created.v1", paidReferralEnrollmentOutboxKey(invitation, customerID), distributor.ID, payload, at); err != nil {
+				return distributiondomain.Distributor{}, distributionport.ReceiverReadiness{}, err
+			}
+			return distributor, readiness, nil
+		}
+		if !errors.Is(err, distributionport.ErrConflict) {
+			return distributiondomain.Distributor{}, distributionport.ReceiverReadiness{}, err
+		}
+		// The insert store returns an expected conflict without aborting the
+		// caller's transaction. Re-read the customer owner before considering a
+		// generated public-number collision.
+		distributor, readiness, err = store.ReadDistributorByCustomerWithin(ctx, customerID, false)
+		if err == nil {
+			return distributor, readiness, nil
+		}
+		if !errors.Is(err, distributionport.ErrNotFound) {
+			return distributiondomain.Distributor{}, distributionport.ReceiverReadiness{}, err
+		}
+	}
+	return distributiondomain.Distributor{}, distributionport.ReceiverReadiness{}, distributionport.ErrUnavailable
+}
+
+func validReferralInvitationToken(value string) bool {
+	if len(value) != 47 || !strings.HasPrefix(value, "rfi_") {
+		return false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(value[4:])
+	return err == nil && len(decoded) == sha256.Size
+}
+
+func paidReferralEnrollmentOutboxKey(invitation referralport.PaidInvitationCheckout, customerID int64) string {
+	return "distribution.paid-campaign-enrollment:" + decimal(invitation.CampaignID) + ":" + decimal(customerID)
+}
+
+func paidReferralCredentialOutboxKey(invitation referralport.PaidInvitationCheckout, productID int64) string {
+	return "distribution.paid-referral-credential:" + decimal(invitation.CampaignID) + ":" + decimal(invitation.InvitationID) + ":" + decimal(productID)
 }
 
 func (s *PromotionService) isSelfPurchaseWithin(ctx context.Context, distributorCustomerID, payerCustomerID, beneficiaryCustomerID int64) bool {

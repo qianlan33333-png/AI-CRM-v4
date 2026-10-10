@@ -1895,6 +1895,14 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		if distributionErr = promotion.BindIdentitySubjects(queries); distributionErr != nil {
 			return fail(distributionErr)
 		}
+		if referralService != nil {
+			if distributionErr = promotion.BindPaidInvitationCheckoutReader(referralService); distributionErr != nil {
+				return fail(distributionErr)
+			}
+		}
+		if distributionErr = promotion.BindProfitSharingSettlement(paymentService); distributionErr != nil {
+			return fail(distributionErr)
+		}
 		promotion.SetSettlementEnabled(cfg.WeChatPay.ProfitSharingEnabled)
 		if referralHandler != nil {
 			if distributionErr = referralHandler.SetPromotionApplication(promotion); distributionErr != nil {
