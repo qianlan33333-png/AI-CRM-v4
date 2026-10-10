@@ -109,7 +109,7 @@ func TestReview20261009ReferralCanceledJoinRollsBackAndOriginalKeyRecovers(t *te
 }
 
 func TestReview20261009ReferralSalesCloseSnapshotMatchesConfiguredRanking(t *testing.T) {
-	for _, metric := range []referraldomain.LeaderboardMetric{referraldomain.LeaderboardSalesAmount, referraldomain.LeaderboardSalesOrders} {
+	for _, metric := range []referraldomain.LeaderboardMetric{referraldomain.LeaderboardInvites, referraldomain.LeaderboardSalesAmount, referraldomain.LeaderboardSalesOrders} {
 		t.Run(string(metric), func(t *testing.T) {
 			h := newReferralPostgreSQLHarness(t)
 			defer h.cleanup()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"strings"
 	"time"
 
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
@@ -58,6 +59,13 @@ func (s *Service) RecordProductSaleCheckoutAttributionWithin(ctx context.Context
 		return nil
 	}
 	snapshot := referralport.ProductSaleCheckoutSnapshot{OrderID: command.OrderID, OrderVersion: command.OrderVersion, CampaignID: activity.CampaignID, ProductID: command.ProductID, ProductType: command.ProductType, ProductCode: command.ProductCode, ProductName: command.ProductName, ProductVersion: command.ProductVersion, PromotionCustomerID: command.PromotionCustomerID, PromotionCredentialRef: command.PromotionCredentialRef, PolicyVersion: command.PolicyVersion, CommissionRateBasisPoints: command.CommissionRateBasisPoints, WaitDays: command.WaitDays, BuyerCustomerID: command.BuyerCustomerID, BeneficiaryCustomerID: command.BeneficiaryCustomerID, ActivityContextDigest: activityDigest, PromotionContextDigest: promotionDigest, CreatedAt: command.OccurredAt.UTC()}
+	if activity.InviterCustomerID > 0 {
+		// A campaign invitation owns its activity attribution, independent of
+		// Distribution's financial policy and receiver readiness.
+		snapshot.PromotionCustomerID = activity.InviterCustomerID
+		snapshot.PromotionCredentialRef = "referral.invitation:" + itoa(activity.InvitationID)
+		snapshot.PolicyVersion, snapshot.CommissionRateBasisPoints, snapshot.WaitDays = 0, 0, 0
+	}
 	if err = store.InsertProductSaleCheckoutWithin(ctx, snapshot); err != nil {
 		return err
 	}
@@ -112,6 +120,19 @@ func (s *Service) consumeProductSalePaidWithin(ctx context.Context, event referr
 		if checkout.CreatedAt.After(event.OccurredAt.UTC()) || event.OccurredAt.After(campaign.EndsAt) {
 			return nil
 		}
+		if strings.HasPrefix(checkout.PromotionCredentialRef, "referral.invitation:") {
+			state, known, stateErr := s.campaignStateAt(ctx, campaign.ID, event.OccurredAt)
+			if stateErr != nil {
+				return stateErr
+			}
+			if !known {
+				return referralport.ErrUnavailable
+			}
+			campaign.State = state
+			if !campaign.AcceptingAt(event.OccurredAt) {
+				return nil
+			}
+		}
 		if err = s.store.LockParticipationWithin(ctx, checkout.CampaignID, checkout.BeneficiaryCustomerID); err != nil {
 			return err
 		}
@@ -135,6 +156,22 @@ func (s *Service) consumeProductSalePaidWithin(ctx context.Context, event referr
 		// be mistaken for a payable distribution.
 		if checkout.PromotionCustomerID == 0 {
 			return nil
+		}
+		if strings.HasPrefix(checkout.PromotionCredentialRef, "referral.invitation:") {
+			participation, err = s.store.ReadParticipationWithin(ctx, checkout.CampaignID, checkout.PromotionCustomerID, false)
+			if errors.Is(err, referralport.ErrNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			active, stateErr := s.participationActiveAt(ctx, participation, event.OccurredAt)
+			if stateErr != nil {
+				return stateErr
+			}
+			if !active {
+				return nil
+			}
 		}
 		credit := referraldomain.ProductSaleEvent{CampaignID: checkout.CampaignID, OrderID: event.OrderID, OrderVersion: event.OrderVersion, ProductID: event.ProductID, ProductType: event.ProductType, ProductCode: checkout.ProductCode, ProductName: checkout.ProductName, ProductVersion: checkout.ProductVersion, ParticipationID: participation.ID, TeamID: participation.TeamID, PromoterCustomerID: checkout.PromotionCustomerID, PromotionCredentialRef: checkout.PromotionCredentialRef, PolicyVersion: checkout.PolicyVersion, CommissionRateBasisPoints: checkout.CommissionRateBasisPoints, WaitDays: checkout.WaitDays, BuyerCustomerID: event.BuyerCustomerID, BeneficiaryCustomerID: event.BeneficiaryCustomerID, Kind: referraldomain.ProductSaleCredit, AmountDeltaMinor: event.PaidAmountMinor, OrderCountDelta: 1, SourcePaidEventID: event.PaidEventID, Currency: event.Currency, SourceDigest: event.SourceDigest, OccurredAt: event.OccurredAt.UTC()}
 		if _, err = store.InsertProductSaleEventWithin(ctx, credit); err != nil {

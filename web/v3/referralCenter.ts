@@ -945,35 +945,21 @@ async function openInvite(): Promise<void> {
   if (document.querySelector('dialog[data-testid="referral-invite-dialog"][open]')) return;
   const currentCampaign = campaign;
   try {
-    let url = "";
-    if (campaign.qualificationMode === "product_purchase") {
-      const raw = obj(
-        await api(
-          `/campaigns/${campaign.id}/promotion-link`,
-          { method: "POST" },
-          `promotion-link:${campaign.id}`,
-        ),
-      );
-      url = str(raw.url);
-      const parsed = new URL(url, location.origin);
-      if (parsed.origin !== location.origin || !new RegExp(`^/referral/activity/${campaign.id}/dpc_[A-Za-z0-9_-]{16,}$`).test(parsed.pathname) || !/^[a-f0-9]{64}$/.test(parsed.searchParams.get("sig") || "") || parsed.searchParams.size !== 1 || parsed.hash)
-        throw new Error("活动绑定商品入口暂不可用。");
-    } else {
-      const raw = obj(
-        await api(
-          `/campaigns/${campaign.id}/invite`,
-          { method: "POST" },
-          `invite:${campaign.id}`,
-        ),
-      );
-      url = str(raw.url);
-    }
+    const raw = obj(
+      await api(
+        `/campaigns/${campaign.id}/invite`,
+        { method: "POST" },
+        `invite:${campaign.id}`,
+      ),
+    );
+    const url = str(raw.url);
     if (!url) throw new Error("邀请入口暂不可用。");
     const parsed = new URL(url, location.origin);
-    if (campaign.qualificationMode !== "product_purchase" && (
+    if (
       parsed.origin !== location.origin ||
-      !/^\/referral\/invite\/rfi_[A-Za-z0-9_-]{43}$/.test(parsed.pathname)
-    ))
+      !/^\/referral\/invite\/rfi_[A-Za-z0-9_-]{43}$/.test(parsed.pathname) ||
+      parsed.search || parsed.hash
+    )
       throw new Error("服务端返回的邀请入口无效。");
     // Layouts are live content configuration. Reopening uses current metadata
     // without rebuilding the application or reloading the whole public page.

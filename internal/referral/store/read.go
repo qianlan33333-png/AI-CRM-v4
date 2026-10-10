@@ -534,24 +534,27 @@ func (r *Repository) ListSalesLeaderboardRowsWithin(ctx context.Context, campaig
 	if err != nil {
 		return nil, nil, err
 	}
-	if campaignID < 1 || !kind.Valid() || !start.Before(end) || offset < 0 || limit < 1 || limit > 101 || (kind == referralport.LeaderboardInTeam && teamID < 1) || (metric != referraldomain.LeaderboardSalesAmount && metric != referraldomain.LeaderboardSalesOrders) {
+	if campaignID < 1 || !kind.Valid() || !start.Before(end) || offset < 0 || limit < 1 || limit > 101 || (kind == referralport.LeaderboardInTeam && teamID < 1) || (metric != referraldomain.LeaderboardInvites && metric != referraldomain.LeaderboardSalesAmount && metric != referraldomain.LeaderboardSalesOrders) {
 		return nil, nil, ErrInvalid
 	}
 	scoreExpr, orderExpr := "sum(net_minor)", "sum(net_minor) DESC,count(*) DESC"
 	if metric == referraldomain.LeaderboardSalesOrders {
 		scoreExpr, orderExpr = "count(*)", "count(*) DESC,sum(net_minor) DESC"
 	}
+	if metric == referraldomain.LeaderboardInvites {
+		scoreExpr, orderExpr = "count(DISTINCT buyer_customer_id)", "count(DISTINCT buyer_customer_id) DESC,sum(net_minor) DESC"
+	}
 	base := `WITH sale_nets AS (
-	        SELECT c.promoter_customer_id,c.team_id,c.occurred_at AS paid_at,
+	        SELECT c.promoter_customer_id,c.team_id,c.buyer_customer_id,c.occurred_at AS paid_at,
 	               (c.amount_delta_minor+COALESCE(SUM(r.amount_delta_minor),0))::bigint AS net_minor,
 	               (c.order_count_delta+COALESCE(SUM(r.order_count_delta),0))::bigint AS net_orders
 	        FROM referral_product_sale_events c
 	        LEFT JOIN referral_product_sale_events r ON r.reverses_sale_event_id=c.id AND r.kind='reversal'
 	        WHERE c.campaign_id=$1 AND c.kind='credit' AND c.occurred_at >= $2 AND c.occurred_at < $3
-	        GROUP BY c.id,c.promoter_customer_id,c.team_id,c.occurred_at,c.amount_delta_minor,c.order_count_delta
+	        GROUP BY c.id,c.promoter_customer_id,c.team_id,c.buyer_customer_id,c.occurred_at,c.amount_delta_minor,c.order_count_delta
 	    ), active_sales AS (
 	        SELECT f.promoter_customer_id,COALESCE(f.team_id,0) AS team_id,COALESCE(t.name,'') AS team_name,
-	               f.net_minor,f.paid_at
+	               f.net_minor,f.buyer_customer_id,f.paid_at
 	        FROM sale_nets f LEFT JOIN referral_teams t ON t.id=f.team_id
 	        WHERE f.net_minor>0 AND f.net_orders>0`
 	var query, ownQuery string

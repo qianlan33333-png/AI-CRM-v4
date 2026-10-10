@@ -81,9 +81,11 @@ type ProductSaleRefundConsumer interface {
 // context. It is intentionally separate from CurrentRelationshipReader.
 type ProductSaleContext struct {
 	CampaignID, ProductID int64
-	ProductType           string
-	SalesMetric           SalesMetric
-	ExpiresAt             time.Time
+	// Referral invitation facts are nonfinancial and frozen at checkout.
+	InviterCustomerID, InvitationID int64
+	ProductType                     string
+	SalesMetric                     SalesMetric
+	ExpiresAt                       time.Time
 }
 
 type ProductActivityContext struct {

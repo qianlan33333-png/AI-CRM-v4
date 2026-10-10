@@ -1,28 +1,137 @@
 {
   "schema": 1,
-  "baseline_sha": "43beb48370de0e5ae5c40931aa9fb29b417a38df",
+  "baseline_sha": "73b8669dbf7357102d0fc4569811acbce9a829c9",
   "checks": [
     {
-      "lane": "preflight",
-      "path": "integrations/context-center/sidebar/tests/test_candidate_authorization.py"
+      "lane": "backend",
+      "package": "./internal/referral/domain"
     },
     {
-      "lane": "preflight",
-      "path": "integrations/context-center/sidebar/tests/test_manual_generation.py"
+      "lane": "backend",
+      "package": "./internal/referral/store"
     },
     {
-      "lane": "preflight",
-      "path": "integrations/context-center/sidebar/tests/test_sidebar_reader.py"
+      "lane": "backend",
+      "package": "./internal/referral/http"
     },
     {
-      "lane": "preflight",
-      "path": "integrations/context-center/sidebar/tests/test_snapshot_binding.py"
+      "lane": "backend",
+      "path": "internal/referral/app/paid_invitation_postgres_test.go",
+      "test": "TestPostgreSQLPaidInvitationWithoutDistributorFreezesAndScoresAtomically",
+      "postgres": true
     },
     {
-      "lane": "preflight",
-      "path": "scripts/test_sidebar_warehouse_source_contract.py"
+      "lane": "backend",
+      "path": "internal/referral/app/paid_rankings_postgres_test.go",
+      "test": "TestPostgreSQLPaidRankingThreeMetricsScopesPeriodsAndRefunds",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/review_20261009_postgres_test.go",
+      "test": "TestReview20261009ReferralSalesCloseSnapshotMatchesConfiguredRanking",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/sale_attribution_integration_test.go",
+      "test": "TestPostgreSQLDistributionSaleScoresWithoutSignupAndRefundsOriginalDay",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/sale_attribution_integration_test.go",
+      "test": "TestPostgreSQLDistributionSaleUsesTeamMembershipAtPayment",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/product_activity_context_postgres_integration_test.go",
+      "test": "TestPostgreSQLProductActivityContextHTTPIdempotencyAndExpiry",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/sol61_adversarial_postgres_test.go",
+      "test": "TestPostgreSQLReferralSol61CheckoutParticipationUsesPaymentLifecycle",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/service_postgres_integration_test.go",
+      "test": "TestPostgreSQLReferralAcceptsAndFreezesActivityFacts",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/referral/app/service_postgres_integration_test.go",
+      "test": "TestPostgreSQLReferralRanksAcrossAsiaShanghaiDayAndWeekBoundaries",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/referral_paid_invitation_checkout_postgres_test.go",
+      "test": "TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/referral_sol61_nominal_composition_postgres_test.go",
+      "test": "TestPostgreSQLReferralSol61NativePaidFanoutWithoutWeChatCapability",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/distribution_promotion_checkout_integration_test.go",
+      "test": "TestPostgreSQLDistributionPromotionCheckoutCreatesCommissionFromARealOrder",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/referral_review_20261009_oneid_test.go",
+      "test": "TestReview20261009ReferralHTTPLeaderboardTracksRealOneIDMergeAndSplit",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/http/referral_activity_context_test.go",
+      "test": "TestReferralActivityContextCookieRequiresOpaqueTokenShape"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/http/referral_activity_context_test.go",
+      "test": "TestCheckoutForwardsOpaqueReferralInvitationOnlyFromCookie"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/http/handler_test.go",
+      "test": "TestCheckoutAcceptsOnlyOpaqueCookieIdentity"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/http/handler_test.go",
+      "test": "TestCheckoutAcceptsOnlyWellFormedExplicitPromotionContext"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/http/handler_test.go",
+      "test": "TestCheckoutRejectsSessionBindingBeforeCallingApplication"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralCenter.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralPosterShareText.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralCenter.captainJourney.test.mjs"
     }
   ],
-  "installed_checks": [],
+  "installed_checks": [
+    "referral-paid-sharing-rankings"
+  ],
   "build_commands": []
 }

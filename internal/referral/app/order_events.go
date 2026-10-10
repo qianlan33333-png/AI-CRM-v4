@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	distributionport "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/port"
@@ -29,8 +30,8 @@ func (s *Service) ConsumePaidEventWithin(ctx context.Context, event orderport.Pa
 	if event.Order.PayerCustomerID == nil || event.Order.BeneficiaryCustomerID == nil || *event.Order.PayerCustomerID < 1 || *event.Order.BeneficiaryCustomerID < 1 {
 		return referralport.ErrConflict
 	}
-	// An explicit activity entry can still admit its buyer. Sales attribution is
-	// independent and is resolved only from Distribution's frozen order fact.
+	// Activity invitations use Referral's frozen checkout fact. Existing
+	// financial promotion links retain Distribution's frozen order attribution.
 	checkout, err := store.ReadProductSaleCheckoutWithin(ctx, event.OrderID, true)
 	if err == nil {
 		if !checkoutOrderVersionCompatible(checkout.OrderVersion, event.OrderVersion) || checkout.ProductID != event.CheckoutProductID || checkout.ProductType != event.CheckoutProductType || checkout.ActivityContextDigest != event.ReferralActivityContextDigest || checkout.PromotionContextDigest != event.PromotionContextDigest {
@@ -38,6 +39,27 @@ func (s *Service) ConsumePaidEventWithin(ctx context.Context, event orderport.Pa
 		}
 		if err = s.ensureCheckoutBuyerParticipationWithin(ctx, checkout, event); err != nil {
 			return err
+		}
+		if strings.HasPrefix(checkout.PromotionCredentialRef, "referral.invitation:") {
+			if checkout.BuyerCustomerID != *event.Order.PayerCustomerID || checkout.BeneficiaryCustomerID != *event.Order.BeneficiaryCustomerID {
+				return referralport.ErrConflict
+			}
+			var amount int64
+			for _, item := range event.Order.Items {
+				if item.LineNo == 1 && item.ProductID != nil && *item.ProductID == checkout.ProductID && item.ProductVersion != nil && *item.ProductVersion == checkout.ProductVersion && item.ProductCode == checkout.ProductCode && item.ProductName == checkout.ProductName {
+					amount = item.LineAmountMinor
+				}
+			}
+			if amount < 1 || amount > event.Order.Amount.AmountMinor {
+				return referralport.ErrConflict
+			}
+			return s.consumeProductSalePaidWithin(ctx, referralport.ProductSalePaidEvent{
+				PaidEventID: event.ID, OrderID: event.OrderID, OrderVersion: event.OrderVersion,
+				ProductID: checkout.ProductID, ProductType: checkout.ProductType, CampaignID: checkout.CampaignID,
+				PromotionCustomerID: checkout.PromotionCustomerID, BuyerCustomerID: checkout.BuyerCustomerID, BeneficiaryCustomerID: checkout.BeneficiaryCustomerID,
+				PaidAmountMinor: amount, Currency: event.Order.Amount.Currency, ActivityContextDigest: checkout.ActivityContextDigest,
+				PromotionContextDigest: checkout.PromotionContextDigest, SourceDigest: event.SourceDigest, OccurredAt: event.OccurredAt,
+			})
 		}
 	} else if !errors.Is(err, referralport.ErrNotFound) {
 		return err

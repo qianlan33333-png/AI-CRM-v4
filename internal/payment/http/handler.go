@@ -983,7 +983,7 @@ func validPromotionContext(value string) bool {
 }
 
 func validReferralActivityContext(value string) bool {
-	if len(value) != 47 || !strings.HasPrefix(value, "rpa_") {
+	if len(value) != 47 || (!strings.HasPrefix(value, "rpa_") && !strings.HasPrefix(value, "rfi_")) {
 		return false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(value[4:])

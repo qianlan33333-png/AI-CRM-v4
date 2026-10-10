@@ -28,7 +28,7 @@ async function publicFixture({ count = 3, deferredImage = false, failedImage = f
       if (path.endsWith('/campaigns/8')) return json({ ...campaign, posters: posters.slice(0, count).map(p=>({...p,...(layout?{qr_layout:layout}:{})})) });
       if (path.endsWith('/me')) return json({ participation: { joined_at: '2026-01-01T00:00:00Z' }, invitation_available: true });
       if (path.endsWith('/leaderboard')) return json({ items: [] });
-      if (path.endsWith('/promotion-link')) return json({ url: 'https://crm.example/referral/activity/8/dpc_ABCDEFGHIJKLMNOPQRSTUVWX?sig=' + 'a'.repeat(64) });
+      if (path.endsWith('/invite')) return json({ url: 'https://crm.example/referral/invite/rfi_' + 'A'.repeat(43) });
       return json({ items: [] });
     };
   } });

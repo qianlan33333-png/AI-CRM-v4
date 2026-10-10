@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	productport "github.com/qianlan33333-png/AI-CRM-v3/internal/product/port"
+	referraldomain "github.com/qianlan33333-png/AI-CRM-v3/internal/referral/domain"
 	referralport "github.com/qianlan33333-png/AI-CRM-v3/internal/referral/port"
 )
 
@@ -67,5 +69,42 @@ func TestSignedActivityHandoffPreservesCampaignContext(t *testing.T) {
 	h.activityHandoff(badSignature, httptest.NewRequest(http.MethodGet, badSignatureURL.RequestURI(), nil), strings.TrimPrefix(badSignatureURL.Path, "/referral/activity/"))
 	if badSignature.Code != http.StatusNotFound || issuer.calls != 1 {
 		t.Fatalf("tampered signature accepted: status=%d calls=%d", badSignature.Code, issuer.calls)
+	}
+}
+
+type paidInvitationPreviewStub struct {
+	*publicStub
+	campaign referraldomain.Campaign
+	err      error
+}
+
+func (s paidInvitationPreviewStub) PreviewInvitation(context.Context, string) (referralport.InvitationPreview, error) {
+	return referralport.InvitationPreview{Campaign: referralport.CampaignSummary{Campaign: s.campaign}, ExpiresAt: time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)}, s.err
+}
+
+func TestPaidInvitationHandoffSetsOpaqueActivityCookieAndKeepsLegacyFreeRoute(t *testing.T) {
+	token := "rfi_" + strings.Repeat("A", 43)
+	for _, kind := range []struct{ productType, prefix string }{{"standard_product", "/p/"}, {"service_period", "/s/"}} {
+		t.Run(kind.productType, func(t *testing.T) {
+			h := &Handler{public: paidInvitationPreviewStub{publicStub: &publicStub{}, campaign: referraldomain.Campaign{ID: 7, QualificationMode: referraldomain.QualificationProductPurchase, ProductID: 42, ProductType: kind.productType}}, productTargets: productTargetStub{item: productport.ProductOption{Code: "paid-product"}}, cookieSecure: true}
+			response := httptest.NewRecorder()
+			h.invitationHandoff(response, httptest.NewRequest(http.MethodGet, "/referral/invite/"+token, nil), token)
+			cookies := response.Result().Cookies()
+			if response.Code != http.StatusSeeOther || response.Header().Get("Location") != kind.prefix+"paid-product" || len(cookies) != 1 || cookies[0].Value != token || !cookies[0].Secure || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteLaxMode || response.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("handoff=%d location=%q cookies=%+v", response.Code, response.Header().Get("Location"), cookies)
+			}
+			h.public = paidInvitationPreviewStub{publicStub: &publicStub{}, err: referralport.ErrInvitationInvalid}
+			rejected := httptest.NewRecorder()
+			h.invitationHandoff(rejected, httptest.NewRequest(http.MethodGet, "/referral/invite/"+token, nil), token)
+			if rejected.Code == http.StatusSeeOther || len(rejected.Result().Cookies()) != 0 {
+				t.Fatal("invalid invitation created activity authority")
+			}
+		})
+	}
+	h := &Handler{public: &publicStub{}}
+	response := httptest.NewRecorder()
+	h.invitationHandoff(response, httptest.NewRequest(http.MethodGet, "/referral/invite/"+token, nil), token)
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/referral?campaign=7&invite="+token || len(response.Result().Cookies()) != 0 {
+		t.Fatalf("free handoff=%d %s", response.Code, response.Header().Get("Location"))
 	}
 }

@@ -88,7 +88,7 @@ const paidDom = new JSDOM('<!doctype html><main id="referral-root"></main>', { u
     if (url.pathname === '/api/v1/referral/campaigns/8') return json(paidCampaign);
     if (url.pathname === '/api/v1/referral/campaigns/8/me') return json({ participation: { joined_at: '2026-09-18T00:00:00Z' }, team: { id: 9, name: '向阳队' }, direct_invitation_count: 0, personal_total_score: 0, personal_rank: 0, invitation_available: true });
     if (url.pathname === '/api/v1/referral/campaigns/8/leaderboard') return json({ kind: 'team', period: 'total', items: [], my_entry: null });
-    if (url.pathname === '/api/v1/referral/campaigns/8/promotion-link') return json({ url: 'https://crm.example/referral/activity/8/dpc_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd?sig=' + 'a'.repeat(64) }, 201);
+    if (url.pathname === '/api/v1/referral/campaigns/8/invite') return json({ url: 'https://crm.example/referral/invite/rfi_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefg' }, 201);
     return json({ error: 'not_found' }, 404);
   };
 } });
@@ -104,7 +104,7 @@ paidDom.window.document.querySelector('[data-testid="referral-invite"]').click()
 await waitFor(() => paidDom.window.document.querySelector('[data-testid="referral-invite-dialog"]'), 'paid activity product link dialog did not render');
 assert.match(paidDom.window.document.querySelector('[data-testid="referral-invite-dialog"]').textContent, /海报一/, 'published poster is selectable');
 assert.equal(paidDom.window.document.querySelector('[data-testid="referral-invite-url"]'), null, 'public panel must not expose editable copy actions');
-assert.equal(listCalls.some((call) => call.path === '/api/v1/referral/campaigns/8/invite'), false, 'paid activity must not use the free-signup invitation endpoint');
-assert.equal(listCalls.some((call) => call.path === '/api/v1/referral/campaigns/8/promotion-link' && call.method === 'POST'), true, 'paid activity needs a signed campaign promotion handoff');
+assert.equal(listCalls.some((call) => call.path === '/api/v1/referral/campaigns/8/invite' && call.method === 'POST'), true, 'paid participant uses the activity invitation endpoint without distributor registration');
+assert.equal(listCalls.some((call) => call.path === '/api/v1/referral/campaigns/8/promotion-link'), false, 'poster generation must not require financial receiver readiness');
 paidDom.window.close();
 console.log('referralCenter behavior passed');

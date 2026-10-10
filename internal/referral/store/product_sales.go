@@ -72,7 +72,24 @@ func (r *Repository) ReadProductSaleContextWithin(ctx context.Context, digest [s
 FROM referral_product_activity_contexts
 WHERE context_digest=$1 AND product_id=$2 AND product_type=$3 AND state='active' AND expires_at>$4`, digest[:], productID, productType, at.UTC()).Scan(&value.CampaignID, &value.ProductID, &value.ProductType, &value.ExpiresAt, &metric)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return referralport.ProductSaleContext{}, referralport.ErrNotFound
+		// Reuse Referral-owned invitations for paid activity sharing. This
+		// never creates or reads a financial Distribution credential.
+		err = tx.QueryRow(ctx, `SELECT c.id,c.product_id,c.product_type,i.expires_at,c.leaderboard_metric,i.inviter_customer_id,i.id
+          FROM referral_invitations i JOIN referral_campaigns c ON c.id=i.campaign_id
+          JOIN referral_participations p ON p.campaign_id=c.id AND p.customer_id=i.inviter_customer_id
+          WHERE i.token_digest=$1 AND i.state='active' AND i.expires_at>$4 AND p.state='active'
+            AND c.qualification_mode='product_purchase' AND c.state='active' AND c.starts_at<=$4 AND c.ends_at>$4
+            AND c.product_id=$2 AND c.product_type=$3`, digest[:], productID, productType, at.UTC()).Scan(&value.CampaignID, &value.ProductID, &value.ProductType, &value.ExpiresAt, &metric, &value.InviterCustomerID, &value.InvitationID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return referralport.ProductSaleContext{}, referralport.ErrNotFound
+		}
+		// Invitations are compatible with all three activity metrics; this
+		// context's legacy SalesMetric field only stores amount/order shape.
+		if metric != "sales_orders" {
+			metric = "amount"
+		} else {
+			metric = "orders"
+		}
 	}
 	if err != nil {
 		return referralport.ProductSaleContext{}, mapError(err)

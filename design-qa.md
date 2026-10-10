@@ -1,34 +1,26 @@
-# 裂变海报参考模板及运行时布局 QA
+# Paid referral sharing QA
+
+Source visual truth: `/var/folders/dq/56xlfzsx05zc7vqhbl7lgv6c0000gn/T/codex-clipboard-3eed7d5a-4c5b-4547-b32d-a749103d7657.jpg`, current `web/v3/referral.css`, published campaign 5 poster and QR layout. Implementation captures: `/Users/qianlan/Documents/Codex/2026-10-10/referral-paid-fix/mobile-ranking.jpg` and `mobile-poster.jpg`.
+
+Viewport: 360 × 715 CSS pixels. Source original 1080 × 2400 (3x Android capture including roughly 255px status/browser header); compare its application region at width 360 and about 715px height. Implementation screenshot 360 × 715 (1x). Browser chrome is excluded. Source attachment display was resized to 922 × 2048, which is not a separate design change.
+
+State: active paid campaign, participant with one valid paid invite; participant has no distributor/receiver prerequisite. Local browser uses the exact changed referralCenter bundle and unchanged stylesheet, current published poster 1250 × 2426 with QR region x830/y1952/size330, and synthetic authenticated display/API responses. This visual test is separate from PostgreSQL actual composed Order checkout/fanout tests and installed-artifact acceptance.
+
+Full-view comparison: retains title, paired personal statistics, rounded leaderboard card, individual/period controls, fixed remaining-time/invite footer and warm gradient. Expected content changes are score 1/rank 1, populated ranking and removal of failed-invite message. Existing desktop browser font/color rendering versus Android and the current stylesheet's warmer hue are retained; this fix does not redesign tokens.
+
+Focused comparison: statistics and leaderboard text/controls remain readable at 360px; populated row and my-rank affordance fit; poster has original full artwork and composed invitation QR in its configured rectangle. The modal footer (copy, download, close) fits in the viewport. No horizontal overflow (clientWidth=scrollWidth=360).
+
+Required fidelity surfaces:
+- Fonts/typography: current system Chinese font stack, heading/score weights and wrapping preserved. Browser/platform rasterization differs as expected.
+- Spacing/layout rhythm: unchanged cards, radii, margins and footer. Poster fills the existing contain region without cropping; open dialog count stays 1 after reopening.
+- Colors/tokens: unchanged stylesheet; original warm campaign theme retained. No newly introduced palette or contrast finding.
+- Image/asset quality: actual campaign poster reused, original 1250x2426 artwork remains sharp and QR is composed into the saved layout. Existing fallback avatar shown only because the local synthetic user has no photo.
+- Copy/content: public Chinese activity wording retained; explicit score/rank state and successful copy feedback appear. No registration/receiver step is shown.
+
+Interaction evidence: invite opens composed PNG; close restores leaderboard; re-open produces one modal and current poster; copy produces “话术已复制”. Console warn/error list empty. Poster switching, stale image, exact copy, download and fallback paths pass the focused frontend contract tests.
+
+Findings: no actionable P0/P1/P2 findings. Comparison history: one rendered review, no visual code changes required. Residual gap: no real mobile WeChat authorization, scan or payment Provider invoked by this local QA.
+
+Implementation checklist: complete backend and frontend selected checks; submit exact domestic ref to release workbench; verify installed journey and production readback separately.
 
 final result: passed
-
-## 对比输入与状态
-
-- Source visual truth：`/Users/qianlan/Downloads/新CRM/release-control/referral-poster-fixed-template/2026-10-09/reference.png`，用户原图1250×2426px。
-- Implementation：同目录`screenshots/composed-375.png`、`composed-430.png`，真实Go应用、PostgreSQL、管理员素材上传/发布、可信参与会话生成的PNG，均1250×2426px。
-- Full-view comparison：同目录`comparison-full.png`，2500×2426px，左右同尺寸原图与浏览器生成结果，没有拉伸或裁切。
-- Focused comparison：同目录`comparison-qr.png`，860×480px，将原图及结果相同 `(780,1900,430,480)` 区域并排。
-- Mobile evidence：同目录`screenshots/poster-375.png`、`poster-430.png`，375/430×850 CSS px，density1；并排输入`comparison-mobile.png`。海报以原宽高比缩放到现有45vh预览；二维码坐标按原图像素计算。
-- State：已参加用户的「邀请好友」弹窗、第一张海报、两行含表情话术。实际坐标API修改后无需重载页面，重新打开弹窗验证最新布局。
-
-## 发现与保真表面
-
-没有需修复的P0/P1/P2视觉偏差。初次视觉比对通过，没有据此修改视觉后遗漏重新截图。
-
-- 字体和排版：参考海报logo、标题、讲师介绍、课程安排与价格文字均保留原图像素，无字体替换、HTML复刻、重新换行或压缩。弹窗及话术沿用现有页面字体与层级。
-- 间距及布局：1250×2426原画布完整保留，默认白框330×330，左上角830/1952，右90/底144。两档手机无横向溢出、未裁切海报，复制及下载入口可见。
-- 色彩：海报纹理、背景、图片及正文颜色未重绘；原图二维码区域以外逐像素比较差异数为0。弹窗保持当前CRM橙色主操作及浅背景。
-- 图片质量：使用用户提供的源PNG，Canvas按原图分辨率合成后导出PNG，未生成替代素材或拉伸。二维码使用整数像素黑模块、至少四模块白边；白框完整遮盖原码。白框直角及新的无logo专属二维码是动态替换的预期差异。
-- 文案：原海报文案保留，后台规格提示更新；用户话术原文、空格、表情和换行保持一致，未添加坐标编辑控件。
-
-## 行为证据
-
-- Chromium旅程通过375/430px真实管理员发布、用户邀请、剪贴板写入/读取、点选及触摸切换、保存配置后读回，浏览器异常检查通过。
-- 同一运行实例及页面通过PUT修改slot1到810/1932/370，同键重放不增加版本；GET确认；关弹窗再打开立即采用新布局，slot2/3及话术未变化。
-- 默认与修改后两档PNG共四张，由独立Apple Vision解码，各仅一个码，均等于可信当前用户邀请链接；原码不残留。
-- 默认及修改后逐像素比对，配置白框外差异均为0。证据：`screenshots/pixels-375.json`、`pixels-430.json`、`qr-decoding.log`。
-- UI合同覆盖二维码区域过小/越界时明确失败、无旧PNG或可用下载、话术仍可复制；原有迟到图片、加载失败、0/1/3张、复制回退/失败及后台绑定测试通过。
-
-## 剩余验收
-
-微信iOS/Android真机长按保存、系统复制粘贴仍待单独验收；macOS合成浏览器及独立图像解码不冒称真机或生产结果。正式Linux构建/安装及相关安装后旅程由唯一路由发布工作台执行。本报告未安装共享环境或修改生产活动。

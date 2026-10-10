@@ -382,6 +382,20 @@ func (h *Handler) invitationHandoff(w http.ResponseWriter, r *http.Request, toke
 		resultError(w, err)
 		return
 	}
+	if preview.Campaign.Campaign.Config().QualificationMode == referraldomain.QualificationProductPurchase {
+		campaign := preview.Campaign.Campaign
+		links := map[string]any{}
+		h.addPublicCampaignLinks(r.Context(), links, campaign)
+		target, _ := links["product_url"].(string)
+		if target == "" {
+			resultError(w, referralport.ErrUnavailable)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "aicrm_referral_activity_context", Value: token, Path: "/", HttpOnly: true, Secure: h.cookieSecure, SameSite: http.SameSiteLaxMode, Expires: preview.ExpiresAt.UTC()})
+		w.Header().Set("Cache-Control", "no-store")
+		http.Redirect(w, r, target, http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/referral?campaign="+strconv.FormatInt(preview.Campaign.Campaign.ID, 10)+"&invite="+token, http.StatusSeeOther)
 }
 

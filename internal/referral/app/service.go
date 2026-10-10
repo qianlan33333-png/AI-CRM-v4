@@ -830,7 +830,7 @@ func (s *Service) Leaderboard(ctx context.Context, query referralport.Leaderboar
 	var mine *referralport.LeaderboardEntry
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		var err error
-		if campaign.Config().LeaderboardMetric != referraldomain.LeaderboardInvites {
+		if campaign.Config().LeaderboardMetric != referraldomain.LeaderboardInvites || campaign.Config().QualificationMode == referraldomain.QualificationProductPurchase {
 			items, mine, err = s.store.ListSalesLeaderboardRowsWithin(tx, query.CampaignID, query.Kind, campaign.Config().LeaderboardMetric, query.TeamID, start, end, offset, query.Limit+1, query.ViewerCustomerID, query.ViewerTeamID)
 		} else {
 			items, mine, err = s.store.LeaderboardRowsWithin(tx, query.CampaignID, query.Kind, query.TeamID, start, end, offset, query.Limit+1, query.ViewerCustomerID, query.ViewerTeamID)
