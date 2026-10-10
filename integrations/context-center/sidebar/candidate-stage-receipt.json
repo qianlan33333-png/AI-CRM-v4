@@ -1,0 +1,57 @@
+{
+  "stage": "/opt/daru-v3-warehouse-candidate/candidates/sidebar-ai-manual-20261010-47ff24367bfe",
+  "bundle_sha256": "47ff24367bfeaf0a7c9d92baa6335c20f39c8b07d6c030e7cf9b6ace16ee107d",
+  "active_source_changed": false,
+  "model_called": false,
+  "customer_data_read": false,
+  "configuration_changed": false,
+  "service_changed": false,
+  "resumed_exact_unactivated_candidate": true,
+  "build": {
+    "base": {
+      "export-crm-production-read-facts.py": "972b5abe5014cfceb04316443c2507576cf670eb0ef027cca351ef7c53e9ac89",
+      "local-api.py": "11884412cae51a2fc67b29566310fe00c16b666f6535c1a835c7594f94c49c53",
+      "warehouse-archive-refresh.py": "db292b5a59617e554523ecee5d8cf071636438c00c32cafb22e46682f11ff998"
+    },
+    "candidate": {
+      "export-crm-production-read-facts.py": "3344a4910f2ba6ee1f9a2fa9caa1d59fc6734fcbca63080223cbb10d088bab77",
+      "local-api.py": "9567a469325a5cf4f71652c88f1c1ddf6ce92d1d2d25cf6f2b6cedcd79d69a0a",
+      "warehouse-archive-refresh.py": "cd42737159b3a2f454b0d2f30e8e0f055f855e9a47c9ef472b306fcecfee6449",
+      "sidebar_ai_reader.py": "cf5d406c6839034713a1e2da14ee6485851c7af36c8d874544623d0cbb6f9546",
+      "refresh_diagnostics.py": "4f97df05eb0f5ca65c34d8d64a25fda7b801ac864cb586037a27bc3aeabe3177",
+      "sidebar_native_copy.py": "f888f32f33efafd8133496080a1bb1e3374efc77c6b7119c9c176a03c71071b9",
+      "sidebar_manual_generation.py": "f5d34e647c590fc221b81eafd53dc0c5efde5010cea9043e6a340c70015d0d2b"
+    },
+    "active_source_changed": false
+  },
+  "auth_and_lifecycle_unchanged": true,
+  "synthetic_tests": [
+    {
+      "label": "native_receipt",
+      "exit": 0,
+      "test_count": 8,
+      "log": "/opt/daru-v3-warehouse-candidate/candidates/sidebar-ai-manual-20261010-47ff24367bfe/source/native_receipt-tests.log",
+      "reused_exact_source_evidence": true,
+      "log_sha256": "1312e2c0ed571d252a0eaead5ed0dd32c8ac6d163c15f7417205a9fd71b533f5"
+    },
+    {
+      "label": "refresh_diagnostics",
+      "exit": 0,
+      "test_count": 3,
+      "log": "/opt/daru-v3-warehouse-candidate/candidates/sidebar-ai-manual-20261010-47ff24367bfe/source/refresh_diagnostics-tests.log",
+      "reused_exact_source_evidence": true,
+      "log_sha256": "f1f4c08945eb173adb1301755e7b0a0e7092c7950ff213858268ff17ab4d20d8"
+    }
+  ],
+  "synthetic_export_contract_cases": 3,
+  "actual_target_runtime_synthetic_compatibility": true,
+  "dependencies": {
+    "ops/prompt_runtime.py": "894e2957b52d232ce424945063e08c75b136cbaefc93d90c0f54b17eeb2115df",
+    "ops/copy_engine_v2.py": "6d7f6e13315d6a0000484a6fce98538f46a79e13c36c8d9d388cfe16700212c4",
+    "ops/prompt_asset_versions.py": "64b12067e40a08ec62495826f62b95676f5713aa248ff1b4f1227ddb9ec8369c",
+    "ops/warehouse-source-facts.py": "725542a33699326636ff80f773df8f678fdad01471d4efda94481ed73f48cdd3",
+    "ops/user_reference.py": "082e5bd6943d00bbb634a5f43b339596746bb19f9159e373fbc330fdf0384bb5"
+  },
+  "python": "Python 3.12.3",
+  "ok": true
+}

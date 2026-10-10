@@ -2345,7 +2345,17 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
+	sidebarWarehouse, err := composeSidebarWarehouse(cfg.SidebarWarehouse)
+	if err != nil {
+		return fail(err)
+	}
+	sidebarSuggestions, err := composeSidebarSuggestions(cfg.SidebarWarehouse)
+	if err != nil {
+		return fail(err)
+	}
 	sidebarHandler, err := sidebar.NewHandler(sidebar.Config{
+		AIWarehouse:     sidebarWarehouse,
+		AISuggestions:   sidebarSuggestions,
 		AICurrentViewer: sidebarPrincipalResolver{authentication: authentication, users: accessRepository, uow: uow, corpID: cfg.WeCom.CorpID},
 		Contexts:        sidebarContextAdapter{tokens: sidebarContextTokens}, Profiles: sidebarProfiles,
 		Viewer: sidebarViewerBootstrapper{

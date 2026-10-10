@@ -1,0 +1,41 @@
+{
+  "ok": true,
+  "source_path": "/opt/daru-ops-console/ops/local-api.py",
+  "source_sha256": "531b85c8539252ea51adf1147d2d8259c1db93da401ad992f36d80e852aae245",
+  "primitives": {
+    "COPY_SCENE_TEMPLATES": "8efae317a6e01a71c01537c2afa1955a30e08dcd531c4fbd8baaf5f20c6fcfcf",
+    "SEVERE_COPY_QUALITY_ISSUES": "6679817282cd669251051ec7961f8344667fcd36f0ab21e241aaaeadf071658c",
+    "copy_value": "91701f29a9d2a58e7ce51bf2ff940e21a41360cacbf9efb804b616583ec33daf",
+    "compact_text_list": "47169cf99ae26a3833035318abe1c003fb3f2763952313cc3af53ed9cfe4a0d3",
+    "clean_display_name": "63bc90868d5b5237e97418694351500c6c8f7cb5099cdbb7a2fa37deb561766b",
+    "template_strategy_meta": "9206b577bc2ce346ff7fb8dc08cb10f90d291268fc57e4e94d5b4929e8255683",
+    "copy_render_values": "72d400f013c5995e6649b3bc8ef51f60f1bebdca51f57771cf9308ae574899c9",
+    "product_facts": "89de7fa837fae719d0f7de7a6ac779260ca38cfb472e2a098b9566bce3f93a33",
+    "product_fact_for": "cb74d97725a3568ab3ff483cf7ca440f7d7874fbe22ae055f6765dbc9857ddd7",
+    "compact_product_fact": "6a14c1e59e64e2d5f0499d086929f6bae69857490f214a3a30438bbaccdc11b9",
+    "product_fact_hint": "faaa1869424255c799d9a89e17f6bbd4d2f058a76ccc6e7a24145051f5e94921",
+    "fill_copy_placeholders": "e82dcafb5c760f0aa696b97c4dfab1995370ff86cbc3ca178c279f472e25806d",
+    "has_copy_placeholders": "892d460e9a364879f863c5c5e53d5fcc53df97097c49f985dbb8e670083b0386",
+    "copy_quality_issues": "aaf4da22a2a712a5b38b99a613aad8e6375d3917b61717f851efbfe1bbfaef3e",
+    "service_safe_topic": "e452437f2a19c39038d586349b77eef5a28972baefcd7ef5df16c686b648290f",
+    "compact_hxc_service_context": "1eb51eebbdc86ef49554b0ba364edefce002071d1673dd772fe83ff1f558aed7",
+    "copy_generation_prompt": "6ba516aae2b648164ff9a1eb2cf49c920735d4be8ca704b022b56c889b7b38a1",
+    "parse_copy_response": "c49f41da11efa8cd75e7db8170d907efbcf175d41eb55ac9d59dddf7d02f3cfe",
+    "strategy_meta_from_parsed": "778f5f50f33798cb20b1f3e6e21bcb656674e83fe545c5a7ca07fdd88c952587",
+    "deterministic_copy_repairs": "124679788344914bf8d3702609f16dfa2790b5ba2157411445f7c8c7be14ebd3",
+    "candidates_from_parsed": "be9c2d2530da7870e3e360a3e5044ac175cab177d978b12ceba3b96cdfd8bd74",
+    "enforce_sales_bundle_shape": "438992abf43d4a3f26f8e96a7a1d6b95588905e8c9144b25f27cfc13bddc3d58"
+  },
+  "exclusions": [
+    "environment files",
+    "provider credentials",
+    "customer data",
+    "service startup",
+    "timers",
+    "old database",
+    "user feedback writes",
+    "provider retries"
+  ],
+  "module_sha256": "f888f32f33efafd8133496080a1bb1e3374efc77c6b7119c9c176a03c71071b9",
+  "primitive_count": 22
+}

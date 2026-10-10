@@ -70,6 +70,7 @@ type Runtime struct {
 	OperationCycleServiceToken string
 	AIAssistant                AIAssistant
 	AIGeneration               AIGeneration
+	SidebarWarehouse           SidebarWarehouse
 	OpenPlatform               OpenPlatform
 	Ops                        Ops
 }
@@ -398,6 +399,10 @@ func Load() (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
+	sidebarWarehouse, err := loadSidebarWarehouse()
+	if err != nil {
+		return Runtime{}, err
+	}
 	cfg := Runtime{
 		ListenAddress:              valueOrDefault("AICRM_LISTEN_ADDR", "127.0.0.1:8080"),
 		ReleaseSHA:                 valueOrDefault("AICRM_RELEASE_SHA", "development"),
@@ -411,6 +416,7 @@ func Load() (Runtime, error) {
 		OperationCycleServiceToken: os.Getenv("AICRM_OPERATION_CYCLE_SERVICE_TOKEN"),
 		AIAssistant:                AIAssistant{ExcelBatchURL: os.Getenv("EXCEL_BATCH_URL"), ExcelBatchToken: os.Getenv("EXCEL_BATCH_TOKEN"), UIEnabled: true, IntegrationKey: os.Getenv("AICRM_AI_ASSISTANT_INTEGRATION_KEY"), IntegrationSecret: os.Getenv("AICRM_AI_ASSISTANT_INTEGRATION_SECRET"), ProviderPermission: os.Getenv("AICRM_AI_ASSISTANT_PROVIDER_PERMISSION")},
 		AIGeneration:               AIGeneration{BaseURL: os.Getenv("AICRM_AI_GENERATION_BASE_URL"), APIKey: os.Getenv("AICRM_AI_GENERATION_API_KEY"), Model: os.Getenv("AICRM_AI_GENERATION_MODEL"), Timeout: 30 * time.Second},
+		SidebarWarehouse:           sidebarWarehouse,
 		OpenPlatform:               OpenPlatform{JWTSigningKey: os.Getenv("AICRM_OPEN_PLATFORM_JWT_SIGNING_KEY"), TrustedProxyCIDRs: splitCommaSeparated("AICRM_OPEN_PLATFORM_TRUSTED_PROXY_CIDRS")},
 		Bootstrap: Bootstrap{
 			Username: os.Getenv("AICRM_BOOTSTRAP_USERNAME"), Password: os.Getenv("AICRM_BOOTSTRAP_PASSWORD"),
