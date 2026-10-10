@@ -22,7 +22,7 @@ func TestInvitationTokenIsOpaqueAndStrictlyValidated(t *testing.T) {
 	if !strings.HasPrefix(first, "rfi_") || len(first) != 47 || !validInvitationToken(first) {
 		t.Fatalf("invalid opaque token %q", first)
 	}
-	if validInvitationToken(first+"x") || validInvitationToken("rfi_"+strings.Repeat("/", 43)) {
+	if validInvitationToken(first+"x") || validInvitationToken("rfi_"+strings.Repeat("/", 43)) || validInvitationToken("rfi_"+strings.Repeat("A", 42)+"\n") {
 		t.Fatal("malformed token passed closed validation")
 	}
 }

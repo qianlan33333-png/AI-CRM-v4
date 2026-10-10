@@ -1,29 +1,36 @@
 {
   "schema": 1,
-  "baseline_sha": "b143b83b35052da8b5529f1c437dd2905e5693f0",
+  "baseline_sha": "b284ddda7df2a350a48b3638fcdda355b9c14308",
   "checks": [
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLReferralSol61MergedCustomerCannotJoinTwice",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLReferralCompositionDoesNotRequireDistributionPaymentCapability",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
       "package": "./internal/referral/app",
-      "test": "TestPostgreSQLMyInvitesCanonicalBatchesShareIdentitySnapshot",
-      "postgres": true,
-      "race": true
+      "test": "TestInvitationTokenIsOpaqueAndStrictlyValidated"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/distribution/app",
+      "test": "TestPromotionTokenIssuerBindsCommandAndRejectsInvalidDataKey"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/http"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/distribution/http"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/distribution/domain"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment/port"
     }
   ],
   "installed_checks": [
-    "canonical-referral-reporting"
+    "referral-credential-rejection"
   ],
   "build_commands": []
 }

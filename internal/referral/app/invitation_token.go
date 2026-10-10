@@ -41,6 +41,7 @@ func validInvitationToken(value string) bool {
 	if len(value) != len(invitationTokenPrefix)+43 || !strings.HasPrefix(value, invitationTokenPrefix) {
 		return false
 	}
-	_, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(value, invitationTokenPrefix))
-	return err == nil
+	body := strings.TrimPrefix(value, invitationTokenPrefix)
+	decoded, err := base64.RawURLEncoding.DecodeString(body)
+	return err == nil && len(decoded) == sha256.Size
 }

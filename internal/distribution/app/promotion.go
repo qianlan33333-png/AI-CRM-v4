@@ -856,8 +856,9 @@ func validPromotionToken(value string) bool {
 	if len(value) != 47 || !strings.HasPrefix(value, "dpc_") {
 		return false
 	}
-	_, err := base64.RawURLEncoding.DecodeString(value[4:])
-	return err == nil
+	body := value[4:]
+	decoded, err := base64.RawURLEncoding.DecodeString(body)
+	return err == nil && len(decoded) == sha256.Size
 }
 
 var _ orderport.CheckoutAttributionCoordinator = (*PromotionService)(nil)

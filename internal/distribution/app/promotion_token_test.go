@@ -16,8 +16,11 @@ func TestPromotionTokenIssuerBindsCommandAndRejectsInvalidDataKey(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(first, "dpc_") || len(first) != 47 {
+	if !strings.HasPrefix(first, "dpc_") || len(first) != 47 || !validPromotionToken(first) {
 		t.Fatalf("token=%q", first)
+	}
+	if validPromotionToken("dpc_" + strings.Repeat("A", 42) + "\n") {
+		t.Fatal("short decoded bearer passed validation")
 	}
 	replay, err := issuer.issue("customer:17", 8, distributiondomain.ProductTypeStandard, "credential-idempotency-key-0001")
 	if err != nil || replay != first {
