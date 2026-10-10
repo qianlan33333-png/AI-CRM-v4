@@ -66,3 +66,13 @@ AIWarehouseReader必须从55既有标准路径返回：canonical CustomerID、Co
 ## 工作台交接边界
 
 先本地精确提交与隔离证据；当前真实适配缺失，标记integration_not_ready，不请求安装一个仅显示未接通的生产替换页。若父任务后续授权推送/交接，准确国内ref推送后重新读路由，再实际投递base/head/tree/ref、五项影响、测试收据、未验证项及用户当前工作台授权；不旁路安装、不新建发布通道。本轮未推送、未消息投递工作台。
+
+## 10月10日恢复核查与拒绝分支修复
+
+恢复时本地候选为599559652b12869a4af4cce8bcc0c8e6c28a2ea1，工作树干净。本地主线21b06f7是6b28130的祖先，不能把本地main当国内最新游标；工作台正在独立处理三模块/海报发布，本任务不读取或修改其worktree、队列或锁。最终候选与测试绑定见仓外candidate-receipt.json。
+
+两项缺陷已复现并修复：数仓读取期间员工被撤销/更换时，GET不再返回摘要，POST在进入模型前拒绝；适配器在请求取消后仍返回成功时，Reader拒绝该结果。新增2个具名用例覆盖8个子用例，修复后internal/sidebar全包46项（含子用例）及当前员工鉴权1项通过，0失败/跳过。仅改变sidebar后端拒绝分支；成功响应、UI、OneID解析、持久化、队列、企微发送及资金归属未变。此前前端/安装旅程是对应输入未变部分的复用证据，不冒充真实Adapter或本次生产安装。
+
+本轮安全访问取证：agent可读取但没有加载身份，SSH配置无55/209.11的Host别名；现有两个SSH进程仅指向腾讯124.220.53.183，没有目标既有控制socket。本轮未对任一远端发起认证。用户已确认dot就是父对话并授权询问，桌面消息工具返回thread not found；由本任务最终回传交付父对话。两台目标已各有3条known_hosts记录，未读取任何私钥、密码或token。
+
+安全接管可由当前执行器复用，已用本地合成OpenSSH mux完成check和命令通道验证；socket缺失时退出255，备用网络连接为/usr/bin/false，所有执行器认证方式均禁用。该证据不代表远端已认证。用户本人在原生终端建立30分钟ControlPersist会话，55用已知root，209.11用原成功登录账号和本机现有授权密钥；不猜root、不创建新密钥、不关闭主机校验、不改认证或防火墙。短期socket目录为/tmp/aicrm-ssh-handoff.dzu5dnmr，属本机uid501、0700；用户命令与复用脚本记录在/Users/qianlan/Documents/Codex/2026-10-09/task-2/ssh-handoff-plan.json和ssh-control-client.py。实际目标socket尚未建立，真实Reader/Generator、Agent源码/依赖迁移和腾讯生产链路仍未就绪。未推送、安装、切流或删除旧Agent。

@@ -96,6 +96,9 @@ func (h *Handler) readAI(ctx context.Context, principal Principal, customerID cu
 	if err != nil {
 		return AIWarehouseSnapshot{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return AIWarehouseSnapshot{}, err
+	}
 	if s.CustomerID != customerID || s.CorpID != principal.CorpID || s.EmployeeID != principal.EmployeeID || strings.TrimSpace(s.SourceVersion) == "" || len(s.Messages) > 40 || len(s.Summary) > 32000 {
 		return AIWarehouseSnapshot{}, errors.New("warehouse scope or contract mismatch")
 	}
@@ -191,6 +194,9 @@ func (h *Handler) aiOperations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "warehouse_unavailable")
 		return
 	}
+	if _, _, ok := h.authorizeAI(w, r); !ok {
+		return
+	}
 	expiry := h.now().Add(aiSnapshotTTL)
 	claim := aiSnapshotClaim{Version: 1, CustomerID: id, Binding: aiBinding(p), Digest: aiDigest(s), ExpiresAt: expiry.Unix()}
 	h.writeJSON(w, 200, map[string]any{"state": "ready", "source": "context_center_warehouse", "data": s, "read_at": h.now(), "snapshot_token": h.signAISnapshot(claim), "expires_at": expiry, "generation_ready": h.config.AISuggestions != nil && strings.TrimSpace(s.Summary) != "" && s.LastCustomerMessage != nil && s.LastCustomerMessage.Type == "text" && strings.TrimSpace(s.LastCustomerMessage.Text) != ""})
@@ -232,6 +238,9 @@ func (h *Handler) aiSuggestion(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(s.Summary) == "" || s.LastCustomerMessage == nil || s.LastCustomerMessage.Type != "text" || strings.TrimSpace(s.LastCustomerMessage.Text) == "" {
 		writeError(w, 409, "context_incomplete")
+		return
+	}
+	if _, _, ok := h.authorizeAI(w, r); !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), aiGenerateTimeout)

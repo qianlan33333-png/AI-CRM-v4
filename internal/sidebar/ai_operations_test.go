@@ -285,3 +285,82 @@ func TestAICurrentViewerRevocationAndEmployeeChange(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
+
+func TestAIOperationsViewerChangeDuringWarehouseRead(t *testing.T) {
+	for _, method := range []string{"GET", "POST"} {
+		for _, change := range []string{"revoked", "employee", "corp"} {
+			t.Run(method+"/"+change, func(t *testing.T) {
+				s := aiFixture()
+				changed, modelCalls := false, 0
+				h := aiHandler(t, aiReaderFunc(func(context.Context, Principal, customerdomain.CustomerID) (AIWarehouseSnapshot, error) {
+					return s, nil
+				}), aiGeneratorFunc(func(context.Context, AISuggestionInput) (string, error) {
+					modelCalls++
+					return "private suggestion", nil
+				}))
+				token := aiToken(t, h)
+				h.config.AICurrentViewer = aiViewerFunc(func(context.Context, *http.Request) (Principal, error) {
+					if !changed {
+						return Principal{"corp", "staff"}, nil
+					}
+					switch change {
+					case "employee":
+						return Principal{"corp", "other"}, nil
+					case "corp":
+						return Principal{"other", "staff"}, nil
+					default:
+						return Principal{}, errors.New("revoked")
+					}
+				})
+				h.config.AIWarehouse = aiReaderFunc(func(context.Context, Principal, customerdomain.CustomerID) (AIWarehouseSnapshot, error) {
+					changed = true
+					return s, nil
+				})
+				path, body := "/api/sidebar/v2/ai-operations", ""
+				if method == "POST" {
+					path += "/suggestions"
+					body = aiBody(token)
+				}
+				w := aiCall(h, method, path, body, true)
+				if w.Code != http.StatusUnauthorized || modelCalls != 0 || strings.Contains(w.Body.String(), s.Summary) || strings.Contains(w.Body.String(), "private suggestion") {
+					t.Fatalf("viewer change accepted: status=%d model_calls=%d", w.Code, modelCalls)
+				}
+			})
+		}
+	}
+}
+
+func TestAIOperationsCancelledWarehouseReadIsRejected(t *testing.T) {
+	for _, method := range []string{"GET", "POST"} {
+		t.Run(method, func(t *testing.T) {
+			s := aiFixture()
+			modelCalls := 0
+			h := aiHandler(t, aiReaderFunc(func(context.Context, Principal, customerdomain.CustomerID) (AIWarehouseSnapshot, error) {
+				return s, nil
+			}), aiGeneratorFunc(func(context.Context, AISuggestionInput) (string, error) {
+				modelCalls++
+				return "private suggestion", nil
+			}))
+			token := aiToken(t, h)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			h.config.AIWarehouse = aiReaderFunc(func(context.Context, Principal, customerdomain.CustomerID) (AIWarehouseSnapshot, error) {
+				cancel()
+				return s, nil // An adapter may return success after its caller cancels.
+			})
+			path, body := "/api/sidebar/v2/ai-operations", ""
+			if method == "POST" {
+				path += "/suggestions"
+				body = aiBody(token)
+			}
+			r := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx)
+			r.Header.Set("Authorization", "Bearer scoped")
+			r.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			h.Routes().ServeHTTP(w, r)
+			if w.Code != http.StatusServiceUnavailable || modelCalls != 0 || strings.Contains(w.Body.String(), s.Summary) || strings.Contains(w.Body.String(), "private suggestion") {
+				t.Fatalf("cancelled read accepted: status=%d model_calls=%d", w.Code, modelCalls)
+			}
+		})
+	}
+}
