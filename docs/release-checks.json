@@ -17,6 +17,11 @@
       "path": "cmd/aicrm/referral_paid_invitation_checkout_postgres_test.go",
       "test": "TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor",
       "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/referral_paid_invitation_installed_test.go",
+      "test": "TestPaidReferralInstalledEnvironmentMeetsRuntimeConfig"
     }
   ],
   "installed_checks": [

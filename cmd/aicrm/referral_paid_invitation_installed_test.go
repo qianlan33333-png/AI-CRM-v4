@@ -20,8 +20,34 @@ import (
 
 	distributionapp "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/app"
 	identityquery "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/query"
+	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	referralport "github.com/qianlan33333-png/AI-CRM-v3/internal/referral/port"
 )
+
+func paidReferralInstalledEnvironment(databaseURL, releaseSHA, address string) []string {
+	dataKey := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	return []string{"AICRM_DATABASE_URL=" + databaseURL, "AICRM_ROLE=api", "AICRM_RELEASE_SHA=" + releaseSHA, "AICRM_LISTEN_ADDR=" + address, "AICRM_PUBLIC_ORIGIN=https://crm.example.test", "AICRM_H5_PUBLIC_ORIGIN=https://crm.example.test", "AICRM_REFERRAL_TOKEN_DATA_KEY=" + dataKey, "AICRM_SURVEY_DATA_KEY=" + dataKey, "AICRM_IDENTITY_PHONE_DATA_KEY=" + dataKey, "AICRM_GROUP_OPS_WEBHOOK_SECRET=synthetic-referral-installed-secret-test", "AICRM_WECHAT_PAY_APP_ID=wx-promotion-checkout", "AICRM_WECHAT_PAY_APP_SCOPE=wechat-app:promotion-checkout", "AICRM_WECHAT_PAY_PROVIDER_ENABLED=false", "AICRM_ALIPAY_PROVIDER_ENABLED=false", "AICRM_OUTBOUND_PROVIDER_ENABLED=false"}
+}
+
+func TestPaidReferralInstalledEnvironmentMeetsRuntimeConfig(t *testing.T) {
+	for _, value := range os.Environ() {
+		key, _, _ := strings.Cut(value, "=")
+		if strings.HasPrefix(key, "AICRM_") {
+			t.Setenv(key, "")
+		}
+	}
+	for _, value := range paidReferralInstalledEnvironment("postgresql://aicrm_test@127.0.0.1:5432/aicrm_test_referral_input", strings.Repeat("a", 40), "127.0.0.1:18081") {
+		key, value, _ := strings.Cut(value, "=")
+		t.Setenv(key, value)
+	}
+	cfg, err := platformconfig.Load()
+	if err != nil {
+		t.Fatalf("installed referral synthetic runtime input rejected: %v", err)
+	}
+	if cfg.Role != platformconfig.RoleAPI || cfg.WeChatPay.Enabled || cfg.Alipay.Enabled || cfg.Effects.ProviderEnabled {
+		t.Fatal("installed referral input must run API with Providers disabled")
+	}
+}
 
 // Optional installed readback joins the real-order Journey only when the
 // existing fixed staging helper supplies its protected, exact-binary inputs.
@@ -72,8 +98,7 @@ func verifyInstalledPaidReferral(t *testing.T, f *promotionCheckoutFixture, acto
 	}
 	address := listener.Addr().String()
 	listener.Close()
-	dataKey := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	environment := []string{"AICRM_DATABASE_URL=" + f.pool.Config().ConnConfig.ConnString(), "AICRM_ROLE=api", "AICRM_RELEASE_SHA=" + inputs.InstalledSHA, "AICRM_LISTEN_ADDR=" + address, "AICRM_PUBLIC_ORIGIN=https://crm.example.test", "AICRM_H5_PUBLIC_ORIGIN=https://crm.example.test", "AICRM_REFERRAL_TOKEN_DATA_KEY=" + dataKey, "AICRM_SURVEY_DATA_KEY=" + dataKey, "AICRM_IDENTITY_PHONE_DATA_KEY=" + dataKey, "AICRM_GROUP_OPS_WEBHOOK_SECRET=synthetic-referral-installed", "AICRM_WECHAT_PAY_APP_ID=wx-promotion-checkout", "AICRM_WECHAT_PAY_APP_SCOPE=wechat-app:promotion-checkout", "AICRM_WECHAT_PAY_PROVIDER_ENABLED=false", "AICRM_ALIPAY_PROVIDER_ENABLED=false", "AICRM_OUTBOUND_PROVIDER_ENABLED=false"}
+	environment := paidReferralInstalledEnvironment(f.pool.Config().ConnConfig.ConnString(), inputs.InstalledSHA, address)
 	process := startDomesticSmokeProcess(t, binary, releaseRoot, environment)
 	// Stop before this Journey's deferred database cleanup removes its clone.
 	defer func() {
