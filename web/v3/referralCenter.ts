@@ -384,7 +384,7 @@ function renderLogin(): void {
     element("h1", campaign?.name || "微信登录后参加活动"),
     element(
       "p",
-      "活动不要求购买商品，也不需要完成微信收款准备。请先使用可信微信身份登录。",
+      "请先使用微信登录，查看活动规则并参加活动。参加后即可邀请好友，无需额外注册分销员或完成收款准备。",
     ),
   );
   const link = element("a", "使用微信登录");
