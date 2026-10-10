@@ -1,17 +1,7 @@
 {
   "schema": 1,
-  "baseline_sha": "cee7a84c298fce7b78ff97e6efea36b3c607051d",
+  "baseline_sha": "35bafd8b9963b3f06c8f1223ac66c8c18111261a",
   "checks": [
-    {
-      "lane": "backend",
-      "package": "./internal/referral/http"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/referral/app/paid_rankings_postgres_test.go",
-      "test": "TestPostgreSQLPaidRankingThreeMetricsScopesPeriodsAndRefunds",
-      "postgres": true
-    },
     {
       "lane": "backend",
       "path": "cmd/aicrm/referral_paid_invitation_checkout_postgres_test.go",

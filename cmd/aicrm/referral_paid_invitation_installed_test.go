@@ -18,6 +18,9 @@ import (
 	"testing"
 	"time"
 
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
+	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
+	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
 	distributionapp "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/app"
 	identityquery "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/query"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
@@ -47,6 +50,34 @@ func TestPaidReferralInstalledEnvironmentMeetsRuntimeConfig(t *testing.T) {
 	if cfg.Role != platformconfig.RoleAPI || cfg.WeChatPay.Enabled || cfg.Alipay.Enabled || cfg.Effects.ProviderEnabled {
 		t.Fatal("installed referral input must run API with Providers disabled")
 	}
+}
+
+// The shared order fixture seeds core customers directly. Prepare the minimum
+// presentation directory through its owner, as the invoice installed fixture
+// does, before launching an actual API. Keep production readiness unchanged.
+func preparePaidReferralInstalledDirectory(t *testing.T, f *promotionCheckoutFixture, customerIDs []int64) {
+	t.Helper()
+	ctx := context.Background()
+	var directory customerport.ProjectionWriter = customerstore.NewPostgreSQL()
+	if err := f.uow.Within(ctx, func(tx context.Context) error {
+		now := time.Now().UTC()
+		for _, id := range customerIDs {
+			if err := directory.UpsertDirectoryProjection(tx, customerport.DirectoryProjection{
+				CustomerID: customerdomain.CustomerID(id), CustomerStatus: customerdomain.StatusActive,
+				DisplayName: "隔离活动测试用户", OneIDLabel: "CID-" + strconv.FormatInt(id, 10), ActivationState: "active",
+				Source: "referral.paid.installed.fixture", SourceVersion: 1, LastSyncedAt: now, UpdatedAt: now,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal("prepare paid referral fixture minimum directory", err)
+	}
+	if err := checkCurrentReleaseSchema(ctx, f.pool, platformconfig.Runtime{}); err != nil {
+		t.Fatal("paid referral fixture fails installed schema readiness", err)
+	}
+	t.Log("paid referral fixture minimum directory and schema readiness: passed")
 }
 
 // Optional installed readback joins the real-order Journey only when the

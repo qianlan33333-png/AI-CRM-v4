@@ -129,6 +129,7 @@ func TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor(t *testing.
 	}
 	// An invitation remains a self-invitation after real OneID merge, whether
 	// the merge happens before checkout or between checkout and payment.
+	knownCustomers := []int64{f.buyer, f.promoter.CustomerID, f.otherPromoter.CustomerID}
 	oneID := identityapp.OneIDService{Store: identitystore.NewPostgresStore()}
 	for _, when := range []string{"before-checkout", "after-checkout"} {
 		targetFact := evidenceMergeFact(t, identitydomain.KindMPOpenID, "wechat-app:paid-invitation-alias-"+when, "paid-invitation-self-alias-"+when)
@@ -140,6 +141,7 @@ func TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor(t *testing.
 		}); err != nil {
 			t.Fatal(err)
 		}
+		knownCustomers = append(knownCustomers, int64(alias.CustomerID))
 		merge := func() int64 {
 			t.Helper()
 			var mergeID int64
@@ -183,5 +185,6 @@ func TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor(t *testing.
 		}
 	}
 
+	preparePaidReferralInstalledDirectory(t, f, knownCustomers)
 	verifyInstalledPaidReferral(t, f, actor, c.ID)
 }
