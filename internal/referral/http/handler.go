@@ -1526,7 +1526,7 @@ func leaderboardQuery(r *http.Request, campaignID int64) (referralport.Leaderboa
 	switch period {
 	case referralport.LeaderboardAll:
 		return query, values.Get("date") == ""
-	case referralport.LeaderboardDay:
+	case referralport.LeaderboardDay, referralport.LeaderboardWeek:
 		anchor, err := time.ParseInLocation("2006-01-02", values.Get("date"), shanghai)
 		if err != nil {
 			return referralport.LeaderboardQuery{}, false

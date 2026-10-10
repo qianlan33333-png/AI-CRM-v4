@@ -128,16 +128,27 @@ func verifyInstalledPaidReferral(t *testing.T, f *promotionCheckoutFixture, acto
 	if response.StatusCode != 200 || err != nil || mine.Invitations != 1 || mine.Rank != 1 || !mine.Available {
 		t.Fatal("installed paid participant readback failed")
 	}
-	response = request(http.MethodGet, path+"/leaderboard?kind=personal&period=total")
-	var board struct {
-		Items []struct {
-			Score int64 `json:"score"`
-		} `json:"items"`
+	shanghai, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
 	}
-	err = json.NewDecoder(response.Body).Decode(&board)
-	response.Body.Close()
-	if response.StatusCode != 200 || err != nil || len(board.Items) != 1 || board.Items[0].Score != 1 {
-		t.Fatal("installed paid people leaderboard failed")
+	date := time.Now().In(shanghai).Format("2006-01-02")
+	for _, period := range []string{"total", "all", "day", "week"} {
+		query := "?kind=personal&period=" + period
+		if period == "day" || period == "week" {
+			query += "&date=" + date
+		}
+		response = request(http.MethodGet, path+"/leaderboard"+query)
+		var board struct {
+			Items []struct {
+				Score int64 `json:"score"`
+			} `json:"items"`
+		}
+		err = json.NewDecoder(response.Body).Decode(&board)
+		response.Body.Close()
+		if response.StatusCode != 200 || err != nil || len(board.Items) != 1 || board.Items[0].Score != 1 {
+			t.Fatalf("installed paid people leaderboard failed period=%s status=%d", period, response.StatusCode)
+		}
 	}
 	response = request(http.MethodPost, path+"/invite")
 	var link struct {
