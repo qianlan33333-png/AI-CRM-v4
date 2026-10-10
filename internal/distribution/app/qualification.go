@@ -185,51 +185,26 @@ func unavailableQualification(now time.Time, reason string) distributiondomain.Q
 	return distributiondomain.Qualification{State: distributiondomain.QualificationUnavailable, Reason: reason, CheckedAt: now}
 }
 
-// BuyerDistinctWithin rechecks the frozen paid parties against the current
-// locked promoter lineage before the first financial instruction is accepted.
-// An already submitted instruction is reconciled by its original reference.
-func (s *QualificationService) BuyerDistinctWithin(ctx context.Context, customerID, orderID int64, line int32, productID int64, productType distributiondomain.ProductType) (bool, error) {
-	if s == nil || s.lineage == nil || customerID < 1 || orderID < 1 || line < 1 {
+// BuyerDistinctWithin checks both Payment-owned frozen parties against the
+// locked current promoter lineage before the first financial instruction.
+func (s *QualificationService) BuyerDistinctWithin(ctx context.Context, customerID, payerID, beneficiaryID int64) (bool, error) {
+	if s == nil || s.lineage == nil || customerID < 1 || payerID < 1 || beneficiaryID < 1 {
 		return false, distributionport.ErrQualification
 	}
 	if _, err := platformpostgres.RequireTransaction(ctx); err != nil {
-		return false, distributionport.ErrQualification
-	}
-	reader, ok := s.orders.(orderport.QualificationRefundEvidenceByOrderReader)
-	if !ok {
 		return false, distributionport.ErrQualification
 	}
 	roots, err := s.lineage.LockedCanonicalLineage(ctx, customerdomain.CustomerID(customerID))
 	if err != nil || len(roots) == 0 || len(roots) > 100 {
 		return false, distributionport.ErrQualification
 	}
-	seen := make(map[int64]struct{}, len(roots))
 	for _, root := range roots {
 		if root < 1 {
 			return false, distributionport.ErrQualification
 		}
-		seen[int64(root)] = struct{}{}
-	}
-	rows, err := reader.ListQualificationRefundEvidenceByOrderWithin(ctx, orderID)
-	if err != nil {
-		return false, distributionport.ErrQualification
-	}
-	found := false
-	distinct := false
-	for _, row := range rows {
-		if row.OrderItemLine != line {
-			continue
+		if int64(root) == payerID || int64(root) == beneficiaryID {
+			return false, nil
 		}
-		if found || !row.Valid() || row.OrderID != orderID || row.ProductID != productID || row.ProductType != string(productType) {
-			return false, distributionport.ErrQualification
-		}
-		found = true
-		_, payerSelf := seen[row.PayerCustomerID]
-		_, beneficiarySelf := seen[row.BeneficiaryCustomerID]
-		distinct = !payerSelf && !beneficiarySelf
 	}
-	if !found {
-		return false, distributionport.ErrQualification
-	}
-	return distinct, nil
+	return true, nil
 }
