@@ -8,7 +8,7 @@ from pathlib import Path
 
 BASE_SHA256 = {
     "export-crm-production-read-facts.py": "972b5abe5014cfceb04316443c2507576cf670eb0ef027cca351ef7c53e9ac89",
-    "local-api.py": "11884412cae51a2fc67b29566310fe00c16b666f6535c1a835c7594f94c49c53",
+    "local-api.py": "159821ea35a1bff271d2dece742563ca2c70d7429fd51d99932604e5079a9820",
     "warehouse-archive-refresh.py": "db292b5a59617e554523ecee5d8cf071636438c00c32cafb22e46682f11ff998",
 }
 
@@ -32,6 +32,58 @@ def patched_sql(sql):
 def _replace_node(text, node, replacement):
     lines = text.splitlines(keepends=True)
     return "".join(lines[:node.lineno - 1]) + replacement.rstrip() + "\n" + "".join(lines[node.end_lineno:])
+
+
+def _insert_before(text, node, block):
+    lines = text.splitlines(keepends=True)
+    prefix = " " * node.col_offset
+    return "".join(lines[:node.lineno - 1]) + "".join(prefix + line + "\n" for line in block.splitlines()) + "".join(lines[node.lineno - 1:])
+
+
+def patch_sidebar_account(text):
+    """Prepare optional least-privilege credentials; never create or load a secret."""
+    tree = ast.parse(text)
+    enabled = next(node for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "AUTH_ENABLED" for target in node.targets))
+    expression = ast.unparse(enabled.value)
+    if not expression.startswith("bool(") or not expression.endswith(")"):
+        raise ValueError("auth_configuration_base_mismatch")
+    replacement = """SIDEBAR_AUTH_USER = os.environ.get('DARU_SIDEBAR_AUTH_USER', 'crm-sidebar')
+SIDEBAR_AUTH_PASSWORD = os.environ.get('DARU_SIDEBAR_AUTH_PASSWORD', '')
+AUTH_ENABLED = """ + expression[:-1] + " or SIDEBAR_AUTH_PASSWORD)\n\n" + """def validate_sidebar_auth_configuration():
+  if not SIDEBAR_AUTH_PASSWORD:
+    return
+  if not SIDEBAR_AUTH_USER or SIDEBAR_AUTH_USER != SIDEBAR_AUTH_USER.strip() or ':' in SIDEBAR_AUTH_USER or SIDEBAR_AUTH_USER in {AUTH_USER, ADMIN_AUTH_USER}:
+    raise RuntimeError('sidebar_auth_configuration_invalid')
+"""
+    text = _replace_node(text, enabled, replacement)
+    tree = ast.parse(text)
+    auth = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_auth_identity")
+    admin = next(node for node in ast.walk(auth) if isinstance(node, ast.If) and isinstance(node.test, ast.BoolOp) and any(isinstance(value, ast.Name) and value.id == "ADMIN_AUTH_PASSWORD" for value in node.test.values))
+    text = _insert_before(text, admin, """if SIDEBAR_AUTH_PASSWORD and hmac.compare_digest(user.encode('utf-8'), SIDEBAR_AUTH_USER.encode('utf-8')):
+  if SIDEBAR_AUTH_USER in {AUTH_USER, ADMIN_AUTH_USER}:
+    return None
+  if hmac.compare_digest(password.encode('utf-8'), SIDEBAR_AUTH_PASSWORD.encode('utf-8')):
+    return {'user': user, 'role': 'sidebar_api'}
+  return None""")
+    tree = ast.parse(text)
+    scope = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_agent_scope_forbidden")
+    role_filter = next(node for node in scope.body if isinstance(node, ast.If))
+    text = _insert_before(text, role_filter, """if role == 'sidebar_api':
+  if (method, path) in {('GET', '/api/local/v3/sidebar-ai-operations'), ('POST', '/api/local/v3/sidebar-manual-generation')}:
+    return False
+  self._send(403, {'ok': False, 'error': 'sidebar_scope_forbidden', 'automatic_send_allowed': False})
+  return True""")
+    tree = ast.parse(text)
+    editor = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_strategy_editor_forbidden")
+    text = _insert_before(text, editor, """def _sidebar_api_forbidden(self):
+  if (self._auth_identity() or {}).get('role') in {'admin', 'operator', 'sidebar_api'}:
+    return False
+  self._send(403, {'ok': False, 'error': 'sidebar_operator_required', 'automatic_send_allowed': False})
+  return True
+""")
+    tree = ast.parse(text)
+    main = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main")
+    return _insert_before(text, main.body[0], "validate_sidebar_auth_configuration()")
 
 
 def patch_export(text):
@@ -63,7 +115,7 @@ def patch_http(text):
         raise ValueError("http_route_base_mismatch")
     indent = " " * targets[0].col_offset
     branch = """if parsed.path == '/api/local/v3/sidebar-ai-operations':
-  if self._strategy_editor_forbidden():
+  if self._sidebar_api_forbidden():
     return
   from sidebar_ai_reader import read_from_published, ReadUnavailable
   try:
@@ -86,7 +138,7 @@ def patch_http(text):
         raise ValueError("generation_route_base_mismatch")
     indent = " " * targets[0].col_offset
     branch = """if parsed.path == '/api/local/v3/sidebar-manual-generation':
-  if self._strategy_editor_forbidden():
+  if self._sidebar_api_forbidden():
     return
   from sidebar_manual_generation import generation_from_published
   from sidebar_ai_reader import ReadUnavailable
@@ -105,7 +157,8 @@ def patch_http(text):
   return
 """
     lines = text.splitlines(keepends=True)
-    return "".join(lines[:targets[0].lineno - 1]) + "".join(indent + line + "\n" for line in branch.splitlines()) + "".join(lines[targets[0].lineno - 1:])
+    text = "".join(lines[:targets[0].lineno - 1]) + "".join(indent + line + "\n" for line in branch.splitlines()) + "".join(lines[targets[0].lineno - 1:])
+    return patch_sidebar_account(text)
 
 
 def patch_refresh(text):

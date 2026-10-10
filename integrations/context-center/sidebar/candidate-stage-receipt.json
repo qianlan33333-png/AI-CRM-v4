@@ -1,57 +1,129 @@
 {
-  "stage": "/opt/daru-v3-warehouse-candidate/candidates/sidebar-ai-manual-20261010-47ff24367bfe",
-  "bundle_sha256": "47ff24367bfeaf0a7c9d92baa6335c20f39c8b07d6c030e7cf9b6ace16ee107d",
+  "base": {
+    "export-crm-production-read-facts.py": "972b5abe5014cfceb04316443c2507576cf670eb0ef027cca351ef7c53e9ac89",
+    "local-api.py": "159821ea35a1bff271d2dece742563ca2c70d7429fd51d99932604e5079a9820",
+    "warehouse-archive-refresh.py": "db292b5a59617e554523ecee5d8cf071636438c00c32cafb22e46682f11ff998"
+  },
+  "candidate": {
+    "export-crm-production-read-facts.py": "3344a4910f2ba6ee1f9a2fa9caa1d59fc6734fcbca63080223cbb10d088bab77",
+    "local-api.py": "71fc75d46bacf6dc0c65c0de14ecd9f233bc161d659e154b6363ca2315972eaf",
+    "warehouse-archive-refresh.py": "cd42737159b3a2f454b0d2f30e8e0f055f855e9a47c9ef472b306fcecfee6449",
+    "sidebar_ai_reader.py": "cf5d406c6839034713a1e2da14ee6485851c7af36c8d874544623d0cbb6f9546",
+    "refresh_diagnostics.py": "4f97df05eb0f5ca65c34d8d64a25fda7b801ac864cb586037a27bc3aeabe3177",
+    "sidebar_native_copy.py": "f888f32f33efafd8133496080a1bb1e3374efc77c6b7119c9c176a03c71071b9",
+    "sidebar_manual_generation.py": "f5d34e647c590fc221b81eafd53dc0c5efde5010cea9043e6a340c70015d0d2b"
+  },
   "active_source_changed": false,
-  "model_called": false,
-  "customer_data_read": false,
-  "configuration_changed": false,
-  "service_changed": false,
-  "resumed_exact_unactivated_candidate": true,
-  "build": {
-    "base": {
-      "export-crm-production-read-facts.py": "972b5abe5014cfceb04316443c2507576cf670eb0ef027cca351ef7c53e9ac89",
-      "local-api.py": "11884412cae51a2fc67b29566310fe00c16b666f6535c1a835c7594f94c49c53",
-      "warehouse-archive-refresh.py": "db292b5a59617e554523ecee5d8cf071636438c00c32cafb22e46682f11ff998"
-    },
-    "candidate": {
-      "export-crm-production-read-facts.py": "3344a4910f2ba6ee1f9a2fa9caa1d59fc6734fcbca63080223cbb10d088bab77",
-      "local-api.py": "9567a469325a5cf4f71652c88f1c1ddf6ce92d1d2d25cf6f2b6cedcd79d69a0a",
-      "warehouse-archive-refresh.py": "cd42737159b3a2f454b0d2f30e8e0f055f855e9a47c9ef472b306fcecfee6449",
-      "sidebar_ai_reader.py": "cf5d406c6839034713a1e2da14ee6485851c7af36c8d874544623d0cbb6f9546",
-      "refresh_diagnostics.py": "4f97df05eb0f5ca65c34d8d64a25fda7b801ac864cb586037a27bc3aeabe3177",
-      "sidebar_native_copy.py": "f888f32f33efafd8133496080a1bb1e3374efc77c6b7119c9c176a03c71071b9",
-      "sidebar_manual_generation.py": "f5d34e647c590fc221b81eafd53dc0c5efde5010cea9043e6a340c70015d0d2b"
-    },
-    "active_source_changed": false
+  "schema": 2,
+  "status": "passed",
+  "candidate_path": "/opt/daru-v3-warehouse-candidate/candidates/sidebar-ai-rebased-20261010-470f99eb9b07",
+  "bundle_sha256": "470f99eb9b07ee877aef2dc3c8c25fdadfeaa4a85e547fd5686c204b68379e6e",
+  "source_files": {
+    "native-migration-manifest.json": "f5ee5ef30ebee4ffe9be569a39573986f53f293c527ad3658e35858b4fd3d8d2",
+    "candidate-export.sql": "5a83f6f4e5521e32aba03019c357bbffd1f328e945513742523f430c4c13a88f",
+    "README.md": "5c8d4ad42e510212ccbeeceeb46bc4f2939eeca00e58e3bd632c7e5c2929d704",
+    "build_candidate.py": "5d7442ac370f03b7fadd270caf99b9ec6659834d34c56f3d6ae555f3bcb3d348",
+    "source-export.sql": "57ace2db7e518e596fc0c25cefd7731a464ee961b736d43627fe49f57107d470",
+    "tests/test_manual_generation.py": "a0660d0947f408c7f7b5dde31e9324d4567a2edac9d500b9f3dacb9b043b97a7",
+    "tests/test_candidate_preservation.py": "bd73a5de095c18862c7ee6cdfb26dc0e00ee02c99cc50d35c25dbd979cf66c57",
+    "tests/test_native_current_runtime_compat.py": "b5fb339588428fc114518c51797cbfbfaf96bbaa8e335b603aadfc74cc39588d",
+    "tests/verify_private_message_sql.py": "558d1a6e1a2879237070aef1eb11d565cdf17690b4fa405bba4889ac1c1c5f8f",
+    "tests/test_candidate_authorization.py": "d467f75bb1b7f5e679e76864918e242f4e28b407fab8b7527f6354ac5047a64d",
+    "tests/test_snapshot_binding.py": "837826c7a193eb2fe3a132107870a0f0ad5f8f3c4b62bc0dd99638d15dd94391",
+    "tests/test_sidebar_reader.py": "ae195a337530968e34fbde63e120e04452bd1953384d3bb08c681ffe41ed9fbf",
+    "ops/refresh_diagnostics.py": "4f97df05eb0f5ca65c34d8d64a25fda7b801ac864cb586037a27bc3aeabe3177",
+    "ops/sidebar_native_copy.py": "f888f32f33efafd8133496080a1bb1e3374efc77c6b7119c9c176a03c71071b9",
+    "ops/sidebar_ai_reader.py": "cf5d406c6839034713a1e2da14ee6485851c7af36c8d874544623d0cbb6f9546",
+    "ops/sidebar_manual_generation.py": "f5d34e647c590fc221b81eafd53dc0c5efde5010cea9043e6a340c70015d0d2b"
   },
-  "auth_and_lifecycle_unchanged": true,
-  "synthetic_tests": [
-    {
-      "label": "native_receipt",
-      "exit": 0,
-      "test_count": 8,
-      "log": "/opt/daru-v3-warehouse-candidate/candidates/sidebar-ai-manual-20261010-47ff24367bfe/source/native_receipt-tests.log",
-      "reused_exact_source_evidence": true,
-      "log_sha256": "1312e2c0ed571d252a0eaead5ed0dd32c8ac6d163c15f7417205a9fd71b533f5"
-    },
-    {
-      "label": "refresh_diagnostics",
-      "exit": 0,
-      "test_count": 3,
-      "log": "/opt/daru-v3-warehouse-candidate/candidates/sidebar-ai-manual-20261010-47ff24367bfe/source/refresh_diagnostics-tests.log",
-      "reused_exact_source_evidence": true,
-      "log_sha256": "f1f4c08945eb173adb1301755e7b0a0e7092c7950ff213858268ff17ab4d20d8"
-    }
-  ],
-  "synthetic_export_contract_cases": 3,
-  "actual_target_runtime_synthetic_compatibility": true,
-  "dependencies": {
-    "ops/prompt_runtime.py": "894e2957b52d232ce424945063e08c75b136cbaefc93d90c0f54b17eeb2115df",
-    "ops/copy_engine_v2.py": "6d7f6e13315d6a0000484a6fce98538f46a79e13c36c8d9d388cfe16700212c4",
-    "ops/prompt_asset_versions.py": "64b12067e40a08ec62495826f62b95676f5713aa248ff1b4f1227ddb9ec8369c",
-    "ops/warehouse-source-facts.py": "725542a33699326636ff80f773df8f678fdad01471d4efda94481ed73f48cdd3",
-    "ops/user_reference.py": "082e5bd6943d00bbb634a5f43b339596746bb19f9159e373fbc330fdf0384bb5"
+  "current_native_dependencies": {
+    "prompt_runtime.py": "894e2957b52d232ce424945063e08c75b136cbaefc93d90c0f54b17eeb2115df",
+    "copy_engine_v2.py": "7e447cc1b75a13df0cf4fb3255869017811a364b8068e6d5731977c26bd45c5b",
+    "hxc_writing_inputs.py": "5d5d21bb7416cd6641eb5a4197540a9b7730f2ad5d4da6aa8956f1629c5fc78e",
+    "prompt_asset_versions.py": "64b12067e40a08ec62495826f62b95676f5713aa248ff1b4f1227ddb9ec8369c"
   },
-  "python": "Python 3.12.3",
-  "ok": true
+  "active_before": {
+    "local-api.py": "159821ea35a1bff271d2dece742563ca2c70d7429fd51d99932604e5079a9820",
+    "export-crm-production-read-facts.py": "972b5abe5014cfceb04316443c2507576cf670eb0ef027cca351ef7c53e9ac89",
+    "warehouse-archive-refresh.py": "db292b5a59617e554523ecee5d8cf071636438c00c32cafb22e46682f11ff998"
+  },
+  "active_after": {
+    "local-api.py": "159821ea35a1bff271d2dece742563ca2c70d7429fd51d99932604e5079a9820",
+    "export-crm-production-read-facts.py": "972b5abe5014cfceb04316443c2507576cf670eb0ef027cca351ef7c53e9ac89",
+    "warehouse-archive-refresh.py": "db292b5a59617e554523ecee5d8cf071636438c00c32cafb22e46682f11ff998"
+  },
+  "service_before": {
+    "MainPID": "491789",
+    "User": "daru-ops",
+    "ActiveState": "active",
+    "SubState": "running"
+  },
+  "service_after": {
+    "MainPID": "491789",
+    "User": "daru-ops",
+    "ActiveState": "active",
+    "SubState": "running"
+  },
+  "service_restarted": false,
+  "test_command": "isolated /usr/bin/python3 run_synthetic.py source/tests; unittest test_candidate_authorization.py; 11 expected; no skips",
+  "test_return_code": 0,
+  "test_seconds": 0.419,
+  "test_count": 31,
+  "fresh_test_count": 11,
+  "reused_passed_test_count": 20,
+  "reused_passed_tests": {
+    "candidate_path": "/opt/daru-v3-warehouse-candidate/candidates/sidebar-ai-rebased-20261010-35d0c2c5e575",
+    "log_sha256": "5cd99af07afe19230c4abbd710cfe40003ca831ff495655476ee1a82aa56336d",
+    "passed_tests": [
+      "test_all_existing_api_routes_roles_and_startup_tasks_are_preserved (test_candidate_preservation.CurrentSourcePreservationTest.test_all_existing_api_routes_roles_and_startup_tasks_are_preserved)",
+      "test_changed_snapshot_scope_or_input_is_rejected_before_model (test_manual_generation.ManualGenerationTest.test_changed_snapshot_scope_or_input_is_rejected_before_model)",
+      "test_completed_receipt_survives_restart_without_prompt_storage (test_manual_generation.ManualGenerationTest.test_completed_receipt_survives_restart_without_prompt_storage)",
+      "test_concurrent_duplicate_issues_one_call (test_manual_generation.ManualGenerationTest.test_concurrent_duplicate_issues_one_call)",
+      "test_interruption_timeout_or_bad_result_never_retries (test_manual_generation.ManualGenerationTest.test_interruption_timeout_or_bad_result_never_retries)",
+      "test_native_primitive_provenance_and_complete_bilateral_prompt (test_manual_generation.ManualGenerationTest.test_native_primitive_provenance_and_complete_bilateral_prompt)",
+      "test_provider_is_one_bounded_call_with_generic_failure (test_manual_generation.ManualGenerationTest.test_provider_is_one_bounded_call_with_generic_failure)",
+      "test_same_key_other_binding_and_equivalent_timezone (test_manual_generation.ManualGenerationTest.test_same_key_other_binding_and_equivalent_timezone)",
+      "test_snapshot_change_after_provider_keeps_receipt_unknown (test_manual_generation.ManualGenerationTest.test_snapshot_change_after_provider_keeps_receipt_unknown)",
+      "test_current_eight_modules_frozen_dialogue_and_restart_receipt (test_native_current_runtime_compat.CurrentNativeRuntimeCompatibilityTest.test_current_eight_modules_frozen_dialogue_and_restart_receipt)",
+      "test_current_product_catalog_filters_unapproved_and_frontend_facts (test_native_current_runtime_compat.CurrentNativeRuntimeCompatibilityTest.test_current_product_catalog_filters_unapproved_and_frontend_facts)",
+      "test_current_router_missing_main_skill_stops_before_provider (test_native_current_runtime_compat.CurrentNativeRuntimeCompatibilityTest.test_current_router_missing_main_skill_stops_before_provider)",
+      "test_private_scope_and_bridge_failures_have_fixed_codes (test_sidebar_reader.DiagnosticsTests.test_private_scope_and_bridge_failures_have_fixed_codes)",
+      "test_records_safe_failure_category_and_never_retains_stderr (test_sidebar_reader.DiagnosticsTests.test_records_safe_failure_category_and_never_retains_stderr)",
+      "test_timeout_and_unknown_failure_do_not_claim_a_root_cause (test_sidebar_reader.DiagnosticsTests.test_timeout_and_unknown_failure_do_not_claim_a_root_cause)",
+      "test_bilateral_scope_skips_other_customer_employee_corp_and_group (test_sidebar_reader.ReaderTests.test_bilateral_scope_skips_other_customer_employee_corp_and_group)",
+      "test_keeps_last_customer_after_many_sales_replies_and_matches_go_tie_break (test_sidebar_reader.ReaderTests.test_keeps_last_customer_after_many_sales_replies_and_matches_go_tie_break)",
+      "test_nontext_is_not_transcribed_and_every_frozen_input_changes_version (test_sidebar_reader.ReaderTests.test_nontext_is_not_transcribed_and_every_frozen_input_changes_version)",
+      "test_rejects_missing_scope_ambiguous_private_identity_and_mixed_release (test_sidebar_reader.ReaderTests.test_rejects_missing_scope_ambiguous_private_identity_and_mixed_release)",
+      "test_current_release_is_pinned_and_pointer_switch_is_rejected (test_snapshot_binding.PublishedBindingTests.test_current_release_is_pinned_and_pointer_switch_is_rejected)"
+    ],
+    "unchanged_source_file_digests": {
+      "native-migration-manifest.json": "f5ee5ef30ebee4ffe9be569a39573986f53f293c527ad3658e35858b4fd3d8d2",
+      "candidate-export.sql": "5a83f6f4e5521e32aba03019c357bbffd1f328e945513742523f430c4c13a88f",
+      "README.md": "5c8d4ad42e510212ccbeeceeb46bc4f2939eeca00e58e3bd632c7e5c2929d704",
+      "build_candidate.py": "5d7442ac370f03b7fadd270caf99b9ec6659834d34c56f3d6ae555f3bcb3d348",
+      "source-export.sql": "57ace2db7e518e596fc0c25cefd7731a464ee961b736d43627fe49f57107d470",
+      "tests/test_manual_generation.py": "a0660d0947f408c7f7b5dde31e9324d4567a2edac9d500b9f3dacb9b043b97a7",
+      "tests/test_candidate_preservation.py": "bd73a5de095c18862c7ee6cdfb26dc0e00ee02c99cc50d35c25dbd979cf66c57",
+      "tests/test_native_current_runtime_compat.py": "b5fb339588428fc114518c51797cbfbfaf96bbaa8e335b603aadfc74cc39588d",
+      "tests/verify_private_message_sql.py": "558d1a6e1a2879237070aef1eb11d565cdf17690b4fa405bba4889ac1c1c5f8f",
+      "tests/test_snapshot_binding.py": "837826c7a193eb2fe3a132107870a0f0ad5f8f3c4b62bc0dd99638d15dd94391",
+      "tests/test_sidebar_reader.py": "ae195a337530968e34fbde63e120e04452bd1953384d3bb08c681ffe41ed9fbf",
+      "ops/refresh_diagnostics.py": "4f97df05eb0f5ca65c34d8d64a25fda7b801ac864cb586037a27bc3aeabe3177",
+      "ops/sidebar_native_copy.py": "f888f32f33efafd8133496080a1bb1e3374efc77c6b7119c9c176a03c71071b9",
+      "ops/sidebar_ai_reader.py": "cf5d406c6839034713a1e2da14ee6485851c7af36c8d874544623d0cbb6f9546",
+      "ops/sidebar_manual_generation.py": "f5d34e647c590fc221b81eafd53dc0c5efde5010cea9043e6a340c70015d0d2b"
+    },
+    "original_failed_scope": "authorization class fixture did not support current frozenset literal; no auth assertions ran",
+    "original_overall_status": "failed",
+    "reused_overall_pass": false
+  },
+  "test_log_sha256": "d217b0cbbf91adead8649259752b4cfaba71cedb474a0c748ebf716cd62fe34e",
+  "python_version": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+  "network_connections_blocked": true,
+  "credentials_read": false,
+  "published_customer_data_read": false,
+  "active_configuration_changed": false,
+  "provider_calls": 0,
+  "scope": "isolated candidate preparation; account/configuration/service/data/model remain unactivated",
+  "historical_candidate_receipt": "candidate-stage-receipt-historical-20261010.json"
 }

@@ -1,10 +1,22 @@
 {
   "schema": 1,
-  "baseline_sha": "1c40277289f37c189fd205d353171e271d1ebc93",
+  "baseline_sha": "43beb48370de0e5ae5c40931aa9fb29b417a38df",
   "checks": [
     {
       "lane": "preflight",
-      "path": "scripts/test_release_build_copy_root_contract.py"
+      "path": "integrations/context-center/sidebar/tests/test_candidate_authorization.py"
+    },
+    {
+      "lane": "preflight",
+      "path": "integrations/context-center/sidebar/tests/test_manual_generation.py"
+    },
+    {
+      "lane": "preflight",
+      "path": "integrations/context-center/sidebar/tests/test_sidebar_reader.py"
+    },
+    {
+      "lane": "preflight",
+      "path": "integrations/context-center/sidebar/tests/test_snapshot_binding.py"
     }
   ],
   "installed_checks": [],
