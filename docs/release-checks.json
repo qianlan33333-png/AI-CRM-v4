@@ -1,78 +1,12 @@
 {
   "schema": 1,
-  "baseline_sha": "43936f3770725ac32dbc4700bb184c98936302e5",
+  "baseline_sha": "37fc9f807bb04c23b7e29881bf63d5599bda8b52",
   "checks": [
     {
-      "lane": "frontend",
-      "path": "web/v3/referralAdmin.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/referralCenter.anonymous.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/referralCenter.captainJourney.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/referralCenter.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/referralPosterShareText.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/referralSettings.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/distributionAdmin.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/distributionCenter.lifecycle.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/distributionCenter.reasons.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/distributionCenter.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/productAdapter.distribution_dimensions.test.mjs"
-    },
-    {
-      "lane": "browser",
-      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLReferralChromiumJourney"
-    },
-    {
-      "lane": "browser",
-      "path": "cmd/aicrm/distribution_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLDistributionChromiumJourney"
-    },
-    {
-      "lane": "browser",
-      "path": "cmd/aicrm/distribution_product_policy_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLDistributionProductPolicyChromiumJourney"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLReferralH5OAuthReturnRoundTrip",
-      "postgres": true
+      "lane": "preflight",
+      "path": "scripts/test_release_go_patch_transition.py"
     }
   ],
-  "installed_checks": [
-    "referral-anonymous-copy",
-    "referral-journey",
-    "distribution-journey",
-    "distribution-product-policy"
-  ],
+  "installed_checks": [],
   "build_commands": []
 }

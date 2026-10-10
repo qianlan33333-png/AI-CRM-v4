@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 import fcntl
 import grp
 import hashlib
+import inspect
 import json
 import os
 import pwd
@@ -1238,12 +1239,35 @@ def _build_command(config: dict[str, Any], command: list[str], *, cwd: Path,
                 umask=umask, terminate_group=True)
 
 
+def _candidate_go_patch_version(policy: Path, candidate: Path) -> str | None:
+    """Bind a same-series patch upgrade to the exact candidate declaration."""
+    if not (policy / "go.mod").is_file() or not (candidate / "go.mod").is_file():
+        return None  # Non-Go tooling fixtures retain the original prerequisite.
+    versions = []
+    for root in (policy, candidate):
+        values = re.findall(r"^go (1\.[0-9]+\.[0-9]+)$", (root / "go.mod").read_text(), re.M)
+        if len(values) != 1:
+            raise ValueError("Go module version declaration is invalid")
+        versions.append(tuple(map(int, values[0].split("."))))
+    base, selected = versions
+    if selected[:2] != base[:2] or selected < base:
+        raise ValueError("Go patch transition cannot change series or downgrade")
+    if selected == base:
+        return None
+    version = ".".join(map(str, selected))
+    declared = re.findall(r"^golang (\S+)$", (candidate / ".tool-versions").read_text(), re.M)
+    if declared != [version]:
+        raise ValueError("candidate Go module and toolchain declarations differ")
+    return "go" + version
+
+
 def _trusted_runner_code() -> str:
     # Import both the lane runner and dev_preflight from the exact base
     # worktree. Override only their repository root so they execute checks on
     # candidate files while the check-selection and orchestration code stay
     # fixed to current domestic main.
-    return """import sys
+    return "import re\nfrom pathlib import Path\n" + inspect.getsource(_candidate_go_patch_version) + """
+import sys
 from pathlib import Path
 policy = Path(sys.argv.pop(1))
 candidate = Path(sys.argv.pop(1))
@@ -1251,6 +1275,14 @@ sys.path.insert(0, str(policy / 'scripts/ci'))
 sys.path.insert(0, str(policy / 'scripts'))
 import quality_lanes
 quality_lanes.ROOT = candidate
+selected_go_patch = _candidate_go_patch_version(policy, candidate)
+if selected_go_patch is not None:
+    original_exact_version = quality_lanes.exact_version
+    def exact_candidate_version(command, expected):
+        if command == ['go', 'version'] and expected.startswith('go'):
+            expected = selected_go_patch
+        return original_exact_version(command, expected)
+    quality_lanes.exact_version = exact_candidate_version
 original_commands = quality_lanes.commands
 original_focused = quality_lanes.focused_commands
 original_run_recorded = quality_lanes.run_recorded

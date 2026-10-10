@@ -2754,6 +2754,7 @@ def main():
                            stdout=subprocess.DEVNULL)
             quality_source = Path(__file__).resolve().parent / "ci/quality_lanes.py"
             shutil.copy2(quality_source.with_name("check_preparation.py"), policy / "scripts/ci/check_preparation.py")
+            shutil.copy2(quality_source.with_name("ai_check_plan.py"), policy / "scripts/ci/ai_check_plan.py")
             (policy / "scripts/ci/quality_lanes.py").write_text('''import os
 from pathlib import Path
 exec(compile(Path(os.environ["AICRM_QUALITY_LANES_SOURCE"]).read_bytes(),
