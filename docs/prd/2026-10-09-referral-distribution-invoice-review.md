@@ -65,3 +65,5 @@ OneID涉及，复用Identity subject reader在业务UoW内解析/加锁；保留
 ### 2026-10-10 Linux 定点修复与验证复用
 
 Linux 72c2de6 首条命令执行 23 个具名用例、51 个通过事件，无 skip；唯一失败为凭证首次纳秒时间与 PostgreSQL 微秒重放时间不同。保留原到期时间一致断言，统一首次生成精度。重跑该失败及直接推广链接拒绝/重放消费者；其余 18 个输入和行为未变的具名 Linux 通过结果复用，原日志摘要 `4ce178883f493ff3829a9aa64a85477e9d418d295a69b60dfafa39447fa0188b`，原收据保存在发布工作台 2026-10-10/three-module-release/12-first-attempt-tests.json 与 13-reused-linux-evidence.json。未执行的领域与前端清单继续执行。新增安装包本人订单/发票、跨客户拒绝、个人抬头拒绝和身份退役检查只在最终二进制隔离环境执行。
+
+Linux 8014507 的后端 5 条命令全部通过（41 个测试通过事件），前端先通过 6 个脚本。商品维度脚本随后因读取未生成的 `web/dist/admin/productForm.html` 失败，使用已有 `productSourceTestPage` 读取本候选源码模板，断言不变，Mac 具名脚本通过。此修复不改变应用；复用后端和此前 6 个前端准确通过收据，仅运行该失败脚本和此前未执行的 5 个裂变前端脚本。收据：工作台 26-passed-backend.json、29-reused-check-evidence.json。

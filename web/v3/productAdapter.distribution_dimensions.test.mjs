@@ -1,12 +1,12 @@
+import { productSourceTestPage } from '../scripts/product-source-test-page.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JSDOM, VirtualConsole } from 'jsdom';
 import { buildTestBrowserBundle } from '../scripts/test-browser-bundle.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const page = fs.readFileSync(path.join(root, 'web/dist/admin/productForm.html'), 'utf8');
+const page = productSourceTestPage('productForm.html');
 const host = await buildTestBrowserBundle(path.join(root, 'web/v3/productAdapter.ts'));
 const wait = (milliseconds = 0) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 async function waitFor(check, message) {
