@@ -23,7 +23,7 @@ flowchart TD
 
 OneID：复用可信微信会话和 Identity Port，邀请归属由服务端签发/冻结，不增加客户主键、隐式建客或自动合并。Persistence：复用 Referral 邀请、checkout、销售事件，均参与已有 PostgreSQL UoW；无新表/迁移/队列。External Effects：不新增 Provider 写；普通邀请不制造佣金，原 Distribution 入口与财务校验保留。不涉及新增限制。
 
-公开合同：海报改用 /invite；付费邀请凭据作为已存在的活动 cookie 被 Payment 传递给 Order/Referral，仅拥有者解引用，不接受前端客户/活动归属声明。旧 /promotion-link、签名活动推广与 rpa_ context 保留。有效邀请拒绝过期、撤销、错商品、自购成绩；付款回放不得重复记分。无有效 inviter 时保留普通购买语义。
+公开合同：海报改用 /invite；付费邀请凭据作为已存在的活动 cookie 被 Payment 传递给 Order/Referral，仅拥有者解引用，不接受前端客户/活动归属声明。旧 /promotion-link、签名活动推广与 rpa_ context 保留。有效邀请拒绝过期、撤销、错商品、自购成绩；付款前通过 Identity Port 锁定买家、受益人、邀请人当前根，签发后或下单后身份合并为同一人仍按自购拒绝计分，并沿用已有参赛记录；付款回放不得重复记分。无有效 inviter 时保留普通购买语义。
 
 三种成绩：人数为窗口内有效付费买家 distinct（重复订单一人）；金额为剩余净金额；订单为仍有有效净额的订单。部分退款保留人数/订单、减少金额；全退款撤销相应订单，买家其他有效订单仍保留人数。免费活动保留邀请积分。日/周/总 period 别名、sales 别名及现有范围兼容；实时榜和结束快照使用相同口径。
 

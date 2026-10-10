@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	referraldomain "github.com/qianlan33333-png/AI-CRM-v3/internal/referral/domain"
@@ -21,6 +24,47 @@ type productSalesStore interface {
 	ReadProductSaleReversalByReceiptWithin(context.Context, int64, string) (referraldomain.ProductSaleEvent, error)
 	SumProductSaleReversalsWithin(context.Context, int64, bool) (int64, int64, error)
 	InsertProductSaleEventWithin(context.Context, referraldomain.ProductSaleEvent) (referraldomain.ProductSaleEvent, error)
+}
+
+// Pin current roots through OneID while preserving immutable checkout IDs.
+// An invitation issued before an identity merge must not credit a self-sale
+// or create a second participation for the same current subject.
+func (s *Service) paidInvitationLineagesWithin(ctx context.Context, checkout referralport.ProductSaleCheckoutSnapshot) (map[int64][]int64, error) {
+	ids := []int64{checkout.BuyerCustomerID, checkout.BeneficiaryCustomerID, checkout.PromotionCustomerID}
+	result := make(map[int64][]int64, len(ids))
+	if s.subjects == nil {
+		for _, id := range ids {
+			result[id] = []int64{id}
+		}
+		return result, nil
+	}
+	reader, ok := s.subjects.(identityport.WriteLockedCanonicalLineagesReader)
+	if !ok {
+		return nil, referralport.ErrUnavailable
+	}
+	requested := make([]customerdomain.CustomerID, len(ids))
+	for i, id := range ids {
+		requested[i] = customerdomain.CustomerID(id)
+	}
+	values, err := reader.WriteLockedCanonicalLineages(ctx, requested)
+	if err != nil {
+		return nil, referralport.ErrUnavailable
+	}
+	for _, id := range ids {
+		lineage := values[customerdomain.CustomerID(id)]
+		if len(lineage) == 0 || !slices.Contains(lineage, customerdomain.CustomerID(id)) {
+			return nil, referralport.ErrUnavailable
+		}
+		converted := make([]int64, len(lineage))
+		for i, member := range lineage {
+			if member < 1 || slices.Contains(converted[:i], int64(member)) {
+				return nil, referralport.ErrUnavailable
+			}
+			converted[i] = int64(member)
+		}
+		result[id] = converted
+	}
+	return result, nil
 }
 
 var _ referralport.ProductSaleCheckoutCoordinator = (*Service)(nil)
@@ -113,6 +157,17 @@ func (s *Service) consumeProductSalePaidWithin(ctx context.Context, event referr
 		if !checkoutOrderVersionCompatible(checkout.OrderVersion, event.OrderVersion) || checkout.CampaignID != event.CampaignID || checkout.ProductID != event.ProductID || checkout.ProductType != event.ProductType || checkout.BuyerCustomerID != event.BuyerCustomerID || checkout.BeneficiaryCustomerID != event.BeneficiaryCustomerID || checkout.PromotionCustomerID != event.PromotionCustomerID || checkout.ActivityContextDigest != event.ActivityContextDigest || checkout.PromotionContextDigest != event.PromotionContextDigest {
 			return referralport.ErrConflict
 		}
+		buyerLineage := []int64{checkout.BeneficiaryCustomerID}
+		selfInvitation := false
+		if strings.HasPrefix(checkout.PromotionCredentialRef, "referral.invitation:") {
+			lineages, lineageErr := s.paidInvitationLineagesWithin(ctx, checkout)
+			if lineageErr != nil {
+				return lineageErr
+			}
+			buyerLineage = lineages[checkout.BeneficiaryCustomerID]
+			promoterRoot := lineages[checkout.PromotionCustomerID][0]
+			selfInvitation = promoterRoot == lineages[checkout.BuyerCustomerID][0] || promoterRoot == buyerLineage[0]
+		}
 		campaign, err := s.store.ReadCampaignWithin(ctx, checkout.CampaignID, true)
 		if err != nil {
 			return err
@@ -133,12 +188,16 @@ func (s *Service) consumeProductSalePaidWithin(ctx context.Context, event referr
 				return nil
 			}
 		}
-		if err = s.store.LockParticipationWithin(ctx, checkout.CampaignID, checkout.BeneficiaryCustomerID); err != nil {
-			return err
+		locks := slices.Clone(buyerLineage)
+		slices.Sort(locks)
+		for _, customerID := range locks {
+			if err = s.store.LockParticipationWithin(ctx, checkout.CampaignID, customerID); err != nil {
+				return err
+			}
 		}
-		participation, err := s.store.ReadParticipationWithin(ctx, checkout.CampaignID, checkout.BeneficiaryCustomerID, true)
+		participation, err := s.ownParticipationWithin(ctx, checkout.CampaignID, buyerLineage, true)
 		if errors.Is(err, referralport.ErrNotFound) {
-			participation, err = s.store.InsertParticipationWithin(ctx, referraldomain.Participation{CampaignID: checkout.CampaignID, CustomerID: checkout.BeneficiaryCustomerID, TeamID: 0, State: referraldomain.ParticipationActive, JoinedAt: event.OccurredAt.UTC()})
+			participation, err = s.store.InsertParticipationWithin(ctx, referraldomain.Participation{CampaignID: checkout.CampaignID, CustomerID: buyerLineage[0], TeamID: 0, State: referraldomain.ParticipationActive, JoinedAt: event.OccurredAt.UTC()})
 		}
 		if err != nil {
 			return err
@@ -146,7 +205,7 @@ func (s *Service) consumeProductSalePaidWithin(ctx context.Context, event referr
 		// A self-purchase never credits a promoter. The buyer still becomes an
 		// activity participant, which keeps organic and self-purchase membership
 		// behavior explicit and auditable.
-		if checkout.PromotionCustomerID > 0 && (checkout.PromotionCustomerID == checkout.BuyerCustomerID || checkout.PromotionCustomerID == checkout.BeneficiaryCustomerID) {
+		if selfInvitation || checkout.PromotionCustomerID > 0 && (checkout.PromotionCustomerID == checkout.BuyerCustomerID || checkout.PromotionCustomerID == checkout.BeneficiaryCustomerID) {
 			return nil
 		}
 		// A bound product purchase without a frozen promoter is still a valid

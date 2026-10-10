@@ -3,12 +3,18 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	distributionapp "github.com/qianlan33333-png/AI-CRM-v3/internal/distribution/app"
+	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
+	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
+	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	identityquery "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/query"
+	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
 	orderdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	platformaudit "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/audit"
@@ -121,5 +127,61 @@ func TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor(t *testing.
 	if err = f.pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM referral_participations WHERE campaign_id=$1 AND customer_id=$2 AND state='active'),(SELECT count(*) FROM referral_product_sale_events WHERE campaign_id=$1 AND order_id=$3 AND kind='credit')`, c.ID, f.promoter.CustomerID, referred.ID).Scan(&buyerParticipants, &sales); err != nil || buyerParticipants != 1 || sales != 1 {
 		t.Fatalf("atomic referred facts participants=%d sales=%d err=%v", buyerParticipants, sales, err)
 	}
+	// An invitation remains a self-invitation after real OneID merge, whether
+	// the merge happens before checkout or between checkout and payment.
+	oneID := identityapp.OneIDService{Store: identitystore.NewPostgresStore()}
+	for _, when := range []string{"before-checkout", "after-checkout"} {
+		targetFact := evidenceMergeFact(t, identitydomain.KindMPOpenID, "wechat-app:paid-invitation-alias-"+when, "paid-invitation-self-alias-"+when)
+		var alias identityport.ProvisionResult
+		if err = f.uow.Within(ctx, func(tx context.Context) error {
+			var e error
+			alias, e = oneID.ProvisionCustomerFromVerifiedIdentity(tx, targetFact)
+			return e
+		}); err != nil {
+			t.Fatal(err)
+		}
+		merge := func() int64 {
+			t.Helper()
+			var mergeID int64
+			if e := f.uow.Within(ctx, func(tx context.Context) error {
+				candidate, e := oneID.LinkVerifiedIdentity(tx, identityapp.LinkCommand{SourceCustomerID: customerdomain.CustomerID(f.buyer), Target: targetFact, Evidence: identitydomain.LinkEvidence{Type: "test", Strength: identitydomain.EvidenceStrong, Source: "paid.referral.synthetic", EventID: "paid-referral-" + when, Digest: "paid-referral-" + when, PolicyVersion: "test-v1"}})
+				if e != nil {
+					return e
+				}
+				if candidate.Candidate == nil {
+					return fmt.Errorf("missing self-alias merge candidate when=%s status=%s", when, candidate.Status)
+				}
+				merged, e := oneID.ConfirmMerge(tx, identityapp.ConfirmMergeCommand{CandidateID: candidate.Candidate.ID, SurvivorCustomerID: alias.CustomerID, Operator: "paid-referral-test"})
+				if e != nil {
+					return e
+				}
+				if merged.Merge == nil {
+					return fmt.Errorf("missing self-alias merge when=%s status=%s", when, merged.Status)
+				}
+				mergeID = merged.Merge.ID
+				return nil
+			}); e != nil {
+				t.Fatal(e)
+			}
+			return mergeID
+		}
+		var mergeID int64
+		if when == "before-checkout" {
+			mergeID = merge()
+		}
+		self := create(int64(alias.CustomerID), token, "self-"+when+"-checkout")
+		if when == "after-checkout" {
+			mergeID = merge()
+		}
+		settle(self, "self-"+when+"-paid")
+		var participants, credits int
+		if err = f.pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM referral_participations WHERE campaign_id=$1),(SELECT count(*) FROM referral_product_sale_events WHERE campaign_id=$1 AND kind='credit')`, c.ID).Scan(&participants, &credits); err != nil || participants != 2 || credits != 1 {
+			t.Fatalf("merged self purchase changed facts when=%s participants=%d credits=%d err=%v", when, participants, credits, err)
+		}
+		if err = f.uow.Within(ctx, func(tx context.Context) error { _, e := oneID.RevertConfirmedMerge(tx, mergeID); return e }); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	verifyInstalledPaidReferral(t, f, actor, c.ID)
 }

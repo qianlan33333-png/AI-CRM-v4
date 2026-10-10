@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -89,14 +90,25 @@ func (s *Service) ensureCheckoutBuyerParticipationWithin(ctx context.Context, ch
 	if !campaign.AcceptingAt(event.OccurredAt) {
 		return nil
 	}
-	buyer := *event.Order.BeneficiaryCustomerID
-	if err = s.store.LockParticipationWithin(ctx, checkout.CampaignID, buyer); err != nil {
-		return err
+	lineage := []int64{*event.Order.BeneficiaryCustomerID}
+	if strings.HasPrefix(checkout.PromotionCredentialRef, "referral.invitation:") {
+		lineages, lineageErr := s.paidInvitationLineagesWithin(ctx, checkout)
+		if lineageErr != nil {
+			return lineageErr
+		}
+		lineage = lineages[checkout.BeneficiaryCustomerID]
 	}
-	_, err = s.store.ReadParticipationWithin(ctx, checkout.CampaignID, buyer, true)
+	locks := slices.Clone(lineage)
+	slices.Sort(locks)
+	for _, customerID := range locks {
+		if err = s.store.LockParticipationWithin(ctx, checkout.CampaignID, customerID); err != nil {
+			return err
+		}
+	}
+	_, err = s.ownParticipationWithin(ctx, checkout.CampaignID, lineage, true)
 	if errors.Is(err, referralport.ErrNotFound) {
 		_, err = s.store.InsertParticipationWithin(ctx, referraldomain.Participation{
-			CampaignID: checkout.CampaignID, CustomerID: buyer,
+			CampaignID: checkout.CampaignID, CustomerID: lineage[0],
 			State: referraldomain.ParticipationActive, JoinedAt: event.OccurredAt.UTC(),
 		})
 	}
