@@ -104,6 +104,10 @@
       "lane": "browser",
       "path": "cmd/aicrm/automation_fixed_content_chromium_postgres_integration_test.go",
       "test": "TestPostgreSQLAutomationLongPromptChromiumJourney"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/orderAdapter.test.mjs"
     }
   ],
   "installed_checks": [

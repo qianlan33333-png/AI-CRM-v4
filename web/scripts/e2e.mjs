@@ -3,6 +3,7 @@
  * 加载 dist/ 生成页，执行真实 bundle，断言渲染结果与关键交互。
  */
 import { execFileSync } from 'node:child_process';
+import { isDeepStrictEqual } from 'node:util';
 import { JSDOM } from 'jsdom';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -1064,9 +1065,22 @@ async function loadPage(rel, { id, q, automationHistoryHttp = false, campaignHis
         return;
       }
       if (rel === 'admin/orders.html') {
-        window.URL.createObjectURL = () => 'blob:wechat-order-export';
+        window.URL.createObjectURL = () => 'blob:order-xlsx-export';
         window.URL.revokeObjectURL = () => {};
         window.HTMLAnchorElement.prototype.click = function () { window.__orderDownload = { href: this.href, download: this.download }; };
+        window.__orderExportRequests = [];
+        window.__orderExportPreviewFailure = true;
+        window.fetch = async (input, init = {}) => {
+          const url = new URL(String(input), window.location.origin);
+          window.__orderExportRequests.push({ origin: url.origin, path: url.pathname, method: init.method || 'GET', body: JSON.parse(init.body || '{}'), headers: new Headers(init.headers), credentials: init.credentials });
+          if (url.pathname === '/api/admin/exports/preview') {
+            return new Response(JSON.stringify(window.__orderExportPreviewFailure ? { error: 'identity_filter_conflict' } : { order_count: 3, row_count: 4, truncated: false }), { status: window.__orderExportPreviewFailure ? 422 : 200, headers: { 'Content-Type': 'application/json' } });
+          }
+          if (url.pathname === '/api/admin/exports') {
+            return new Response(new Uint8Array([80, 75]), { headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' } });
+          }
+          throw new Error('Unexpected HTTP request in mock order fixture');
+        };
       }
       if (rel === 'admin/config.html') {
         const digest = 'a'.repeat(64);
@@ -1899,7 +1913,7 @@ console.log('admin/customers.html（筛选、opaque cursor 翻页与详情导航
 }
 
 if (!customerProfileLinksOnly) {
-console.log('admin/orders.html（筛选后微信支付 CSV 导出）');
+console.log('admin/orders.html（筛选后完整订单 XLSX 导出）');
 {
   const dom = await loadPage('admin/orders.html');
   const d = dom.window.document;
@@ -1920,13 +1934,21 @@ console.log('admin/orders.html（筛选后微信支付 CSV 导出）');
   input(dom, d.querySelector('#orderCreatedFrom'), '2026-08-01');
   input(dom, d.querySelector('#orderCreatedTo'), '2026-08-31');
   d.querySelector('#orderStatus').value = 'paid';
-  click(dom, [...d.querySelectorAll('button')].find((button) => button.textContent.includes('导出微信支付 CSV')));
+  const exportButton = d.querySelector('#order-export-all');
+  ok('订单导出使用当前 XLSX Host 按钮', exportButton?.textContent === '导出订单 XLSX');
+  click(dom, exportButton);
   await sleep(350);
-  ok('身份筛选时阻止无筛选导出并说明原因', !dom.window.__orderDownload && d.querySelector('#order-v3-query-error')?.textContent.includes('暂不支持导出'));
-  input(dom, d.querySelector('#orderMobile'), '');
-  click(dom, [...d.querySelectorAll('button')].find((button) => button.textContent.includes('导出微信支付 CSV')));
+  const requests = dom.window.__orderExportRequests;
+  const expectedBody = { resource: 'orders', format: 'xlsx', filter: { order_ref: 'wx-42', phone: '13800000000', product: 'sku-1', status: 'paid', created_from: '2026-08-01', created_to: '2026-08-31' } };
+  const matchesExport = (request) => request.origin === dom.window.location.origin && request.method === 'POST' && request.credentials === 'include' && isDeepStrictEqual(JSON.parse(JSON.stringify(request.body)), expectedBody);
+  ok('预览传递全部实际筛选，不退回无筛选导出', requests.length === 1 && requests[0].path === '/api/admin/exports/preview' && matchesExport(requests[0]));
+  ok('身份冲突预览失败时阻止下载并说明原因', !dom.window.__orderDownload && !requests.some((request) => request.path === '/api/admin/exports') && d.querySelector('#order-v3-query-error')?.textContent.includes('买家身份筛选存在冲突'));
+  dom.window.__orderExportPreviewFailure = false;
+  click(dom, exportButton);
   await sleep(350);
-  ok('微信支付交易导出生成 CSV 下载', dom.window.__orderDownload?.href === 'blob:wechat-order-export' && dom.window.__orderDownload?.download === 'wechat-pay-orders.csv');
+  const download = requests.find((request) => request.path === '/api/admin/exports');
+  ok('预览成功后同一筛选带幂等键请求完整订单', requests.length === 3 && requests[1].path === '/api/admin/exports/preview' && matchesExport(requests[1]) && download && matchesExport(download) && download.headers.get('Idempotency-Key')?.startsWith('order-export-'));
+  ok('完整订单导出生成当前 XLSX 文件', dom.window.__orderDownload?.href === 'blob:order-xlsx-export' && dom.window.__orderDownload?.download === '订单明细.xlsx' && d.querySelector('#order-export-status')?.textContent.includes('已下载订单明细'));
   dom.window.close();
 }
 

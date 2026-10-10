@@ -80,3 +80,5 @@ OneID：读取现有 scoped customer，经已有数仓 CID/alias/fold lineage �
 仅推送本侧栏候选的国内ref并实际投递唯一路由工作台；新 main 已含的其他发布结果只是基线，不把另一个三模块审查纳入本次授权。工作台依当前源码的极简发布机制执行 `docs/release-checks.json` 与 Linux标准Host及最终安装包相关冒烟。旧Dot计划消息拒绝记录保留，不重试该动作；本轮用户已明确授权国内源码交付与指定工作台投递。
 
 用户在本次恢复中另授权修复阻断检查的最小测试配置问题：`automation_fixed_content_chromium_postgres_integration_test.go` 原171行直接读环境，触发 `scripts/check-architecture.py` 117–119行。现复用既有 `internal/platform/config/tests.PreparationDirectory()`，保留原有条件、断言及规则；只增加测试配置包和三个直接 Chromium 消费者的验证，不变更自动化业务或另一三模块审查范围。该修复不涉及 OneID、持久化或外部效果，也不涉及新增限制。`2c7ab28` 完整后端实际完成但有23失败事件、53skip，失败记录保留；修复后的准确候选只按各自实际收据报告，不以先前SHA的通过事件冒称当前整仓通过。
+
+重基后完整前端脚本的原订单段仍查找已被国内 main 替换的 CSV 按钮。只将该合成 fixture 对齐现有统一 XLSX 导出合同：保留筛选、失败禁止下载和实际文件断言，并增加预览/下载同一完整筛选、同源会话和幂等键断言；业务适配器、后端和页面均不改。新增既有订单适配器测试以验证 fixture 所依据的当前合同。其作用是修复完整消费者验证，不属于另一个三模块审查发布。此测试变动不涉及实际 OneID、持久化或外部效果。最终准确 SHA 重新执行全部选中检查，保留旧失败收据。
