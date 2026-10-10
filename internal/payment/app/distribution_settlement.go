@@ -362,6 +362,9 @@ func (s *Service) CompleteEffect(ctx context.Context, effectRef string, envelope
 			instruction.State = domain.ProfitSharingOutcomeUnknown
 		case effectport.StateFinalFailed:
 			instruction.State, instruction.OutcomeKnown = domain.ProfitSharingException, true
+			if err = store.ReleaseProfitSharingReserve(ctx, instruction.ID, "effect_final_failed", now); err != nil {
+				return err
+			}
 		}
 		instruction.Version++
 		instruction.UpdatedAt = now
@@ -827,10 +830,19 @@ func (s *Service) ReconcileProfitSharing(ctx context.Context, reference string) 
 	}
 	query, err := s.profitSharingReconciler.QueryProfitSharing(ctx, reference)
 	if err != nil {
+		if resetErr := s.resetProfitSharingAbsence(ctx, current.ID); resetErr != nil {
+			return paymentport.ProfitSharingInstruction{}, classify(resetErr)
+		}
 		return paymentport.ProfitSharingInstruction{}, profitSharingReconciliationError(err)
 	}
 	if !effectport.ValidDigest(query.EvidenceDigest) || query.OccurredAt.IsZero() {
+		if resetErr := s.resetProfitSharingAbsence(ctx, current.ID); resetErr != nil {
+			return paymentport.ProfitSharingInstruction{}, classify(resetErr)
+		}
 		return paymentport.ProfitSharingInstruction{}, paymentport.ErrUnavailable
+	}
+	if query.OrderNotFound {
+		return s.reconcileAbsentProfitSharing(ctx, current, query)
 	}
 	err = s.uow.Within(ctx, func(tx context.Context) error {
 		locked, inner := store.GetProfitSharingInstruction(tx, reference, true)

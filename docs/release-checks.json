@@ -1,52 +1,91 @@
 {
   "schema": 1,
-  "baseline_sha": "df84f5d262717780ff132bbbcfc89d594704b070",
+  "baseline_sha": "7514476ba2857157874194916380e6c10a43b88c",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/distribution/app"
+      "package": "./internal/platform/config",
+      "test": "TestLoadPaymentRefundRequiresExplicitBoundCommand"
     },
     {
       "lane": "backend",
-      "package": "./internal/distribution/store"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/referral/app/invitation_token_test.go",
-      "test": "TestInvitationTokenIsOpaqueAndStrictlyValidated",
-      "package": "./internal/referral/app"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/referral/app/paid_invitation_postgres_test.go",
-      "test": "TestPostgreSQLPaidInvitationWithoutDistributorFreezesAndScoresAtomically",
-      "package": "./internal/referral/app",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/referral/app/financial_invitation_postgres_test.go",
-      "test": "TestPostgreSQLPaidInvitationFinancialIssuerPreservesLegacyAndRejectsRetiredOwner",
-      "package": "./internal/referral/app",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/referral_paid_invitation_checkout_postgres_test.go",
-      "test": "TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor",
       "package": "./cmd/aicrm",
+      "test": "TestPaymentRefundRoleRequiresRootAndExactNativeTarget"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLPaymentRefundRoleKeepsHTTPAuthAndNoDaemon",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/referral_paid_financial_postgres_test.go",
-      "test": "TestPostgreSQLPaidReferralFinancialAttributionAtomicAndInstalled",
+      "package": "./internal/payment/provider"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment/store",
+      "test": "TestProfitSharingProviderIntentRequiresExactlyOneOwner"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment/app",
+      "path": "internal/payment/app/profit_sharing_absence_postgres_test.go",
+      "test": "TestPostgreSQLMissingProfitSharingProofAndFullRefund",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment/app",
+      "path": "internal/payment/app/service_refund_postgres_integration_test.go",
+      "test": "TestPostgreSQLProfitSharingUnknownQueryKeepsReceiverMismatchReserveForReconciliation",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment/app",
+      "path": "internal/payment/app/service_refund_postgres_integration_test.go",
+      "test": "TestPostgreSQLWeChatPayRefundSerializesNewKeysPerPayment",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment/app",
+      "path": "internal/payment/app/service_refund_postgres_integration_test.go",
+      "test": "TestPostgreSQLRefundQueryBeforeCallbackKeepsOneSettlement",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment/app",
+      "path": "internal/payment/app/service_refund_postgres_integration_test.go",
+      "test": "TestPostgreSQLProfitSharingCompletionUpdatesOnlyMatchingEffect",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
       "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/distribution_settlement_refund_postgres_integration_test.go",
+      "test": "TestPostgreSQLSettlementWorkerClosedInstructionPreservesOrCancelsOnlyWithBusinessFacts",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/distribution_settlement_refund_postgres_integration_test.go",
+      "test": "TestPostgreSQLSettlementWorkerAcceptsOneInstructionAndReplaysAfterRestart",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/distribution_settlement_refund_postgres_integration_test.go",
+      "test": "TestPostgreSQLRefundWorkerRepricesOnceAndRevokesOnlyAfterLastQualification",
       "postgres": true
     }
   ],
   "installed_checks": [
-    "referral-paid-sharing-rankings"
+    "profit-sharing-missing-refund"
   ],
   "build_commands": []
 }

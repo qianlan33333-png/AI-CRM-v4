@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/wechatpay-apiv3/wechatpay-go/core"
+	"github.com/wechatpay-apiv3/wechatpay-go/core/auth"
+	"github.com/wechatpay-apiv3/wechatpay-go/core/auth/validators"
 	"github.com/wechatpay-apiv3/wechatpay-go/core/auth/verifiers"
 	"github.com/wechatpay-apiv3/wechatpay-go/core/cipher/decryptors"
 	"github.com/wechatpay-apiv3/wechatpay-go/core/cipher/encryptors"
@@ -103,8 +105,9 @@ func newOfficialProfitSharingSDKWithAuthentication(ctx context.Context, merchant
 	}
 
 	var (
-		client *core.Client
-		err    error
+		client         *core.Client
+		err            error
+		errorValidator auth.Validator
 	)
 	switch authentication.Mode {
 	case ProfitSharingAuthenticationCertificate:
@@ -113,12 +116,14 @@ func newOfficialProfitSharingSDKWithAuthentication(ctx context.Context, merchant
 		// response verification and field encryption. This is equivalent to the
 		// SDK's deprecated certificate-list helper without any downloader.
 		visitor := core.NewCertificateMapWithList([]*x509.Certificate{authentication.PlatformCertificate})
+		errorValidator = validators.NewWechatPayResponseValidator(verifiers.NewSHA256WithRSAVerifier(visitor))
 		client, err = core.NewClient(ctx,
 			option.WithMerchantCredential(merchantID, serial, signer),
 			option.WithVerifier(verifiers.NewSHA256WithRSAVerifier(visitor)),
 			option.WithWechatPayCipher(encryptors.NewWechatPayEncryptor(visitor), decryptors.NewWechatPayDecryptor(signer)),
 		)
 	case ProfitSharingAuthenticationPublicKey:
+		errorValidator = validators.NewWechatPayResponseValidator(verifiers.NewSHA256WithRSAPubkeyVerifier(authentication.PlatformPublicKeyID, *authentication.PlatformPublicKey))
 		client, err = core.NewClient(ctx, option.WithWechatPayPublicKeyAuthCipher(merchantID, serial, signer, authentication.PlatformPublicKeyID, authentication.PlatformPublicKey))
 	default:
 		return nil, ErrInvalidConfig
@@ -126,7 +131,7 @@ func newOfficialProfitSharingSDKWithAuthentication(ctx context.Context, merchant
 	if err != nil || client == nil {
 		return nil, ErrInvalidConfig
 	}
-	return &OfficialProfitSharingSDK{receivers: profitsharing.ReceiversApiService{Client: client}, orders: profitsharing.OrdersApiService{Client: client}}, nil
+	return &OfficialProfitSharingSDK{receivers: profitsharing.ReceiversApiService{Client: client}, orders: profitsharing.OrdersApiService{Client: client}, errorValidator: errorValidator}, nil
 }
 
 // newOfficialProfitSharingSDKWithAutoCertificate retains the earlier explicit

@@ -213,6 +213,9 @@ type ProfitSharingUnfreeze struct {
 type ProfitSharingProviderResult struct {
 	State                                              string
 	ReceiverConfirmedSuccess, ReceiverConfirmedFailure bool
+	// OrderNotFound is a signed exact-original-order absence observation,
+	// never a terminal result by itself.
+	OrderNotFound bool
 	// FailureClass is set only for an exact receiver/amount/type CLOSED detail
 	// whose official fail_reason maps to Payment's finite safe vocabulary.
 	FailureClass string

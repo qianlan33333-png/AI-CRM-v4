@@ -494,6 +494,9 @@ func (s *Service) RequestRefund(ctx context.Context, c paymentport.RefundCommand
 	if result.ID > 0 {
 		return result, nil
 	}
+	if err := s.reconcileRefundProfitSharing(ctx, c); err != nil {
+		return domain.Refund{}, err
+	}
 	if c.ProviderOrderID != "" {
 		if s.shopReconciler == nil || !validShopRefundCommand(c) {
 			return domain.Refund{}, paymentport.ErrInvalid

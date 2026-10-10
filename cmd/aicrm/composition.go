@@ -2734,7 +2734,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	// It still performs the full Composition below and its service persists the
 	// normal Payment/Order/audit/outbox facts; it simply must not claim a daemon
 	// was started or widen the catalog/migration for an emergency operation.
-	if cfg.Role != platformconfig.RolePaymentReconcile && cfg.Role != platformconfig.RoleProfitSharingReconcile && cfg.Role != platformconfig.RoleInvoiceRecover {
+	if cfg.Role != platformconfig.RolePaymentReconcile && cfg.Role != platformconfig.RoleProfitSharingReconcile && cfg.Role != platformconfig.RolePaymentRefund && cfg.Role != platformconfig.RoleInvoiceRecover {
 		// Record only after every configuration-dependent Adapter and route has
 		// been constructed successfully. A failed startup therefore leaves no
 		// application fact that could be mistaken for a running process.

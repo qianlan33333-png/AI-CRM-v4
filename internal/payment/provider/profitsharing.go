@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/wechatpay-apiv3/wechatpay-go/core"
+	"github.com/wechatpay-apiv3/wechatpay-go/core/auth"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/profitsharing"
 
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
@@ -60,6 +61,9 @@ type ProfitSharingSDK interface {
 type ProfitSharingQuery struct {
 	State                                              string
 	ReceiverConfirmedSuccess, ReceiverConfirmedFailure bool
+	// OrderNotFound requires a separately verified signed HTTP 404. The SDK
+	// does not validate error responses in its ordinary request path.
+	OrderNotFound bool
 	// FailureClass is a bounded projection of an exact PERSONAL_OPENID CLOSED
 	// detail. Raw Provider response text and identifiers never leave this SDK
 	// adapter.
@@ -69,8 +73,9 @@ type ProfitSharingQuery struct {
 }
 
 type OfficialProfitSharingSDK struct {
-	receivers profitsharing.ReceiversApiService
-	orders    profitsharing.OrdersApiService
+	receivers      profitsharing.ReceiversApiService
+	orders         profitsharing.OrdersApiService
+	errorValidator auth.Validator
 }
 
 // ProfitSharingProviderRejection intentionally preserves only a bounded,
@@ -180,8 +185,12 @@ func (sdk *OfficialProfitSharingSDK) QueryOrder(ctx context.Context, value Profi
 	if sdk == nil || !value.validForQuery() {
 		return ProfitSharingQuery{}, ErrInvalidMaterial
 	}
-	response, _, err := sdk.orders.QueryOrder(ctx, profitsharing.QueryOrderRequest{OutOrderNo: &value.ProviderOrderNo, TransactionId: &value.TransactionReference})
+	response, result, err := sdk.orders.QueryOrder(ctx, profitsharing.QueryOrderRequest{OutOrderNo: &value.ProviderOrderNo, TransactionId: &value.TransactionReference})
 	if err != nil {
+		var api *core.APIError
+		if errors.As(err, &api) && api.StatusCode == http.StatusNotFound && api.Code == "RESOURCE_NOT_EXISTS" && result != nil && result.Response != nil && result.Response.StatusCode == http.StatusNotFound && sdk.errorValidator != nil && sdk.errorValidator.Validate(ctx, result.Response) == nil {
+			return ProfitSharingQuery{State: "NOT_FOUND", OrderNotFound: true, OccurredAt: time.Now().UTC()}, nil
+		}
 		return ProfitSharingQuery{}, classifyOfficialProfitSharingQueryError(err)
 	}
 	if response == nil || response.OutOrderNo == nil || *response.OutOrderNo != value.ProviderOrderNo || response.TransactionId == nil || *response.TransactionId != value.TransactionReference || response.State == nil {

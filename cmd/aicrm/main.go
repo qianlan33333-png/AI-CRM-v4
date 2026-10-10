@@ -27,6 +27,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if cfg.Role == platformconfig.RolePaymentRefund && os.Geteuid() != 0 {
+		return errors.New("payment refund role requires authenticated OS root")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -35,6 +38,14 @@ func run() error {
 		return err
 	}
 	defer application.Close()
+	if cfg.Role == platformconfig.RolePaymentRefund {
+		result, refundErr := executePaymentRefund(ctx, application.paymentReconciliation, cfg, os.Geteuid())
+		if refundErr != nil {
+			return refundErr
+		}
+		slog.Info("authorized payment refund receipt", "payment_id", cfg.PaymentRefundID, "order_id", cfg.PaymentRefundOrderID, "refund_id", result.Refund.ID, "amount_minor", result.Refund.AmountMinor, "state", result.Refund.Status, "provider_refund_confirmed", result.ProviderConfirmed, "release_sha", cfg.ReleaseSHA)
+		return nil
+	}
 	if cfg.Role == platformconfig.RoleInvoiceRecover {
 		if application.invoiceRecovery == nil {
 			return errors.New("invoice recovery is not composed")

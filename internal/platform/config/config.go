@@ -27,6 +27,8 @@ const (
 	RolePaymentReconcile Role = "payment-reconcile"
 	// Queries exactly one existing profit-sharing instruction; no Provider write or daemon.
 	RoleProfitSharingReconcile Role = "profit-sharing-reconcile"
+	// Explicit single-payment refund under authenticated OS root authority.
+	RolePaymentRefund Role = "payment-refund"
 	// One-shot, explicitly selected failed invoice recovery; no daemon or direct Provider write.
 	RoleInvoiceRecover Role = "invoice-recover"
 
@@ -67,6 +69,11 @@ type Runtime struct {
 	WorkerLimit                int
 	PaymentReconcileID         int64
 	ProfitSharingReconcileID   int64
+	PaymentRefundID            int64
+	PaymentRefundOrderID       int64
+	PaymentRefundAmountMinor   int64
+	PaymentRefundKey           string
+	PaymentRefundAuthorization string
 	InvoiceRecoverID           string
 	CustomerSyncTrigger        string
 	HXCDashboard               HXCDashboard
@@ -681,9 +688,39 @@ func Load() (Runtime, error) {
 		return Runtime{}, errors.New("invalid AICRM_RELEASE_SHA")
 	}
 	switch cfg.Role {
-	case RoleAPI, RoleWorker, RoleEffectsWorker, RolePaymentReconcile, RoleProfitSharingReconcile, RoleInvoiceRecover:
+	case RoleAPI, RoleWorker, RoleEffectsWorker, RolePaymentReconcile, RoleProfitSharingReconcile, RolePaymentRefund, RoleInvoiceRecover:
 	default:
 		return Runtime{}, errors.New("invalid AICRM_ROLE")
+	}
+	if cfg.Role == RolePaymentRefund {
+		for _, item := range []struct {
+			name   string
+			target *int64
+		}{
+			{"AICRM_PAYMENT_REFUND_ID", &cfg.PaymentRefundID},
+			{"AICRM_PAYMENT_REFUND_ORDER_ID", &cfg.PaymentRefundOrderID},
+			{"AICRM_PAYMENT_REFUND_AMOUNT_MINOR", &cfg.PaymentRefundAmountMinor},
+		} {
+			raw := os.Getenv(item.name)
+			value, parseErr := strconv.ParseInt(raw, 10, 64)
+			if parseErr != nil || value < 1 || strings.TrimSpace(raw) != raw {
+				return Runtime{}, errors.New("invalid " + item.name)
+			}
+			*item.target = value
+		}
+		cfg.PaymentRefundKey = os.Getenv("AICRM_PAYMENT_REFUND_KEY")
+		cfg.PaymentRefundAuthorization = os.Getenv("AICRM_PAYMENT_REFUND_AUTHORIZATION")
+		for _, item := range []struct {
+			name, value string
+			min, max    int
+		}{
+			{"AICRM_PAYMENT_REFUND_KEY", cfg.PaymentRefundKey, 16, 200},
+			{"AICRM_PAYMENT_REFUND_AUTHORIZATION", cfg.PaymentRefundAuthorization, 1, 160},
+		} {
+			if len(item.value) < item.min || len(item.value) > item.max || strings.TrimSpace(item.value) != item.value || strings.IndexFunc(item.value, func(r rune) bool { return r < 0x21 || r > 0x7e }) >= 0 {
+				return Runtime{}, errors.New("invalid " + item.name)
+			}
+		}
 	}
 	if cfg.Role == RoleInvoiceRecover {
 		raw := os.Getenv("AICRM_INVOICE_RECOVER_ID")

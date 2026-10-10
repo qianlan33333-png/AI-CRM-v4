@@ -57,7 +57,7 @@ func (provider *WeChatPay) QueryProfitSharing(ctx context.Context, reference str
 		return paymentport.ProfitSharingProviderResult{}, err
 	}
 	known := query.ReceiverConfirmedSuccess || query.ReceiverConfirmedFailure
-	return paymentport.ProfitSharingProviderResult{State: query.State, ReceiverConfirmedSuccess: query.ReceiverConfirmedSuccess, ReceiverConfirmedFailure: query.ReceiverConfirmedFailure, FailureClass: query.FailureClass, OutcomeKnown: known, OccurredAt: query.OccurredAt.UTC(), EvidenceDigest: effectport.Hash("wechatpay.profit-sharing.query", reference, query.State, query.FailureClass, strconv.FormatBool(query.ReceiverConfirmedSuccess), strconv.FormatBool(query.ReceiverConfirmedFailure), strconv.FormatBool(known), query.OccurredAt.UTC().Format(time.RFC3339Nano))}, nil
+	return paymentport.ProfitSharingProviderResult{State: query.State, ReceiverConfirmedSuccess: query.ReceiverConfirmedSuccess, ReceiverConfirmedFailure: query.ReceiverConfirmedFailure, OrderNotFound: query.OrderNotFound, FailureClass: query.FailureClass, OutcomeKnown: known, OccurredAt: query.OccurredAt.UTC(), EvidenceDigest: effectport.Hash("wechatpay.profit-sharing.query", reference, query.State, query.FailureClass, strconv.FormatBool(query.ReceiverConfirmedSuccess), strconv.FormatBool(query.ReceiverConfirmedFailure), strconv.FormatBool(query.OrderNotFound), strconv.FormatBool(known), query.OccurredAt.UTC().Format(time.RFC3339Nano))}, nil
 }
 
 func (provider *WeChatPay) QueryProfitSharingUnfreeze(ctx context.Context, reference string) (paymentport.ProfitSharingProviderResult, error) {
