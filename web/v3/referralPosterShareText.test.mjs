@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
 import { buildTestBrowserBundle } from '../scripts/test-browser-bundle.mjs';
-const publicBundle = await buildTestBrowserBundle(fileURLToPath(new URL('./referralCenter.ts', import.meta.url)));
-const adminBundle = await buildTestBrowserBundle(fileURLToPath(new URL('./referralAdmin.ts', import.meta.url)));
+// Installed mode rebundles only the verified installed JS/chunks for jsdom.
+const installedBundle = process.env.AICRM_REFERRAL_INSTALLED_BUNDLE;
+const publicBundle = await buildTestBrowserBundle(installedBundle || fileURLToPath(new URL('./referralCenter.ts', import.meta.url)));
+const adminBundle = installedBundle ? '' : await buildTestBrowserBundle(fileURLToPath(new URL('./referralAdmin.ts', import.meta.url)));
 const picker = fs.readFileSync(new URL('../../internal/webshell/static/admin_console/admin_search_select.js', import.meta.url), 'utf8');
 const json = body => new Response(JSON.stringify(body), { status: 200 });
 const wait = async (fn) => { for (let i = 0; i < 150; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); } throw new Error('poster UI did not settle'); };
@@ -58,26 +60,37 @@ async function publicFixture({ count = 3, deferredImage = false, failedImage = f
   f.release(); await new Promise(r => setTimeout(r, 0));
   assert.ok(Buffer.from(doc.querySelector('[data-testid="referral-poster-image"]').src.split(',')[1], 'base64').toString().endsWith('/2'), 'late first image must not replace second');
   copy.click(); await wait(() => f.copied() === texts[1]);
-  doc.querySelector('[data-testid="referral-download-poster"]').click();
-  assert.equal(f.downloaded().name, '话术活动-海报二.png');
-  assert.equal(f.downloaded().href, doc.querySelector('[data-testid="referral-poster-image"]').src);
+  assert.equal(doc.querySelector('[data-testid="referral-download-poster"]'), null);
+  const dialog = doc.querySelector('dialog[open]');
+  assert.equal(dialog.querySelector('h2'), null);
+  assert.equal(dialog.getAttribute('aria-label'), '邀请海报');
+  assert.equal(dialog.textContent.includes('说明2'), false, 'filename/description is not shown');
+  assert.equal(doc.querySelector('.referral-poster-save-hint').hidden, false);
+  assert.deepEqual([...doc.querySelector('.referral-poster-actions').children].map(b => b.textContent), ['复制话术', '关闭']);
   const preview = doc.querySelector('[data-testid="referral-poster-preview"]');
   const touch = (type, props) => { const event = new dom.window.Event(type, { bubbles: true, cancelable: true }); Object.assign(event, props); preview.dispatchEvent(event); assert.equal(event.defaultPrevented, false, 'native long-press/scroll must remain available'); };
   touch('touchstart', { touches: [{ clientX: 220, clientY: 100 }] });
   touch('touchend', { changedTouches: [{ clientX: 100, clientY: 105 }] });
   assert.equal(doc.querySelector('.referral-poster-share').hidden, true, 'blank third copy hidden');
+  assert.equal(copy.hidden, true);
+  assert.equal(doc.querySelector('[data-testid="referral-close-poster"]').hidden, false);
   assert.equal(doc.querySelector('[data-testid="referral-poster-next"]').disabled, true);
   touch('touchstart', { touches: [{ clientX: 220, clientY: 100 }] });
   touch('touchend', { changedTouches: [{ clientX: 100, clientY: 105 }] });
   assert.equal(doc.querySelector('.referral-poster-share').hidden, true, 'last poster does not loop');
   doc.querySelector('[data-testid="referral-poster-previous"]').click();
   assert.equal(doc.querySelector('[data-testid="referral-poster-share-text"]').textContent, texts[1]);
+  doc.querySelector('[data-testid="referral-close-poster"]').click();
+  assert.equal(doc.querySelector('dialog'), null, 'close removes modal');
+  doc.querySelector('[data-testid="referral-invite"]').click();
+  await wait(() => doc.querySelector('[data-testid="referral-poster-image"]'));
+  assert.equal(doc.querySelector('[data-testid="referral-copy-share-text"]').hidden, false);
   await new Promise(r => setTimeout(r, 10)); dom.window.close();
 }
 for (const [layout, message] of [[{x:0,y:0,size:1},'二维码区域过小'],[{x:590,y:790,size:300},'二维码位置不可用']]) {
   const f = await publicFixture({ count:1, layout, expectCompositionError:true });
   await wait(()=>f.doc.querySelector('[data-testid="referral-poster-preview"]').textContent.includes(message));
-  assert.equal(f.doc.querySelector('[data-testid="referral-download-poster"]').disabled,true);
+  assert.equal(f.doc.querySelector('[data-testid="referral-download-poster"]'),null);
   assert.equal(f.doc.querySelector('[data-testid="referral-poster-image"]'),null,'invalid layout cannot show a stale PNG');
   f.doc.querySelector('[data-testid="referral-copy-share-text"]').click(); await wait(()=>f.copied()===texts[0]);
   f.dom.window.close();
@@ -101,7 +114,7 @@ for (const clipboard of ['fallback', 'denied', 'missing']) {
 {
   const f = await publicFixture({ count: 1, failedImage: true });
   await wait(() => f.doc.querySelector('[data-testid="referral-poster-preview"]').textContent.includes('海报加载失败'));
-  assert.equal(f.doc.querySelector('[data-testid="referral-download-poster"]').disabled, true);
+  assert.equal(f.doc.querySelector('[data-testid="referral-download-poster"]'), null);
   assert.equal(f.doc.querySelector('[data-testid="referral-poster-image"]'), null);
   f.doc.querySelector('[data-testid="referral-copy-share-text"]').click();
   await wait(() => f.copied() === texts[0]);
@@ -110,10 +123,10 @@ for (const clipboard of ['fallback', 'denied', 'missing']) {
 {
   const f = await publicFixture({ count: 0 });
   assert.equal(f.doc.querySelector('.referral-poster-share').hidden, true);
-  assert.equal(f.doc.querySelector('[data-testid="referral-download-poster"]').disabled, true);
+  assert.equal(f.doc.querySelector('[data-testid="referral-download-poster"]'), null);
   await new Promise(r => setTimeout(r, 10)); f.dom.window.close();
 }
-{
+if (!installedBundle) {
   const saved = { ...campaign, posters: posters.map((p,i) => ({ ...p, qr_layout: { x: 10+i, y: 20, size: 200 } })) };
   const writes = []; let reads = 0, failReadback = true;
   const dom = new JSDOM('<section id="referral-admin-root"></section>', { url: 'https://crm.example/admin/referral/settings?campaign=8', runScripts: 'outside-only', beforeParse(w) {
@@ -152,4 +165,4 @@ for (const clipboard of ['fallback', 'denied', 'missing']) {
   assert.ok(reads >= 3, 'publication must read backend configuration');
   await new Promise(r => setTimeout(r, 10)); dom.window.close();
 }
-console.log('poster share text: binding, stale image, swipe, exact copy, fallback, empty/single/three and admin save/readback passed');
+console.log('poster share text: binding, stale image, swipe, exact copy, fallback, empty/single/three, close/reopen passed; ' + (installedBundle ? 'installed public assets verified' : 'source assets and admin save/readback verified'));

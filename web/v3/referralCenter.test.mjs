@@ -55,7 +55,7 @@ assert.ok(join.key.length >= 16, 'acceptance needs an idempotency key');
 await waitFor(() => dom.window.document.querySelector('[data-testid="referral-invite"]')?.textContent === '邀请好友', 'successful participation must enable the invitation entry');
 dom.window.document.querySelector('[data-testid="referral-invite"]').click();
 await waitFor(() => dom.window.document.querySelector('[data-testid="referral-invite-dialog"]'), `invite dialog did not render: ${dom.window.document.body.textContent} calls=${JSON.stringify(calls)}`);
-assert.equal(dom.window.document.querySelector('[data-testid="referral-download-poster"]').disabled, true, 'campaign without published posters must not download a placeholder');
+assert.equal(dom.window.document.querySelector('[data-testid="referral-download-poster"]'), null, 'download action is removed');
 assert.equal(dom.window.document.querySelector('[data-testid="referral-invite-url"]'), null, 'invitation panel has only poster and close actions');
 dom.window.close();
 

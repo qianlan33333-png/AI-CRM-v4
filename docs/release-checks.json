@@ -1,21 +1,18 @@
 {
   "schema": 1,
-  "baseline_sha": "35bafd8b9963b3f06c8f1223ac66c8c18111261a",
+  "baseline_sha": "aed5b78f6c4fc2d0bf5b6f913250b0fd40798849",
   "checks": [
     {
-      "lane": "backend",
-      "path": "cmd/aicrm/referral_paid_invitation_checkout_postgres_test.go",
-      "test": "TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor",
-      "postgres": true
+      "lane": "frontend",
+      "path": "web/v3/referralPosterShareText.test.mjs"
     },
     {
-      "lane": "backend",
-      "path": "cmd/aicrm/referral_paid_invitation_installed_test.go",
-      "test": "TestPaidReferralInstalledEnvironmentMeetsRuntimeConfig"
+      "lane": "frontend",
+      "path": "web/v3/referralCenter.test.mjs"
     }
   ],
   "installed_checks": [
-    "referral-paid-sharing-rankings"
+    "referral-poster-compact"
   ],
   "build_commands": []
 }

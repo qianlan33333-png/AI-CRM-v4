@@ -983,7 +983,7 @@ async function renderInviteDialog(): Promise<void> {
   dialog.className = "referral-dialog referral-poster-dialog";
   dialog.dataset.testid = "referral-invite-dialog";
   const card = element("section");
-  card.append(element("h2", "邀请好友"));
+  dialog.setAttribute("aria-label", "邀请海报");
   const selectors = element("div");
   selectors.className = "referral-poster-selectors";
   const preview = element("div");
@@ -998,7 +998,6 @@ async function renderInviteDialog(): Promise<void> {
   const position = element("span");
   position.setAttribute("aria-live", "polite");
   navigation.append(previous, position, next);
-  const description = element("p");
   const saveHint = element("p", "长按海报可保存图片");
   saveHint.className = "referral-poster-save-hint";
   saveHint.hidden = true;
@@ -1032,14 +1031,15 @@ async function renderInviteDialog(): Promise<void> {
     copyButton.disabled = false;
   }, "referral-primary");
   copyButton.dataset.testid = "referral-copy-share-text";
-  share.append(shareText, copyButton, feedback, manualCopy);
-  const download = button("下载海报", () => {}, "referral-quiet");
-  download.dataset.testid = "referral-download-poster";
-  download.disabled = true;
+  share.append(shareText, feedback, manualCopy);
+  const actions = element("div");
+  actions.className = "referral-poster-actions";
+  const closeButton = button("关闭", () => dialog.close(), "referral-quiet");
+  closeButton.dataset.testid = "referral-close-poster";
+  actions.append(copyButton, closeButton);
   const posters = campaign.posters.slice(0, 3);
   selectors.hidden = posters.length < 2;
   navigation.hidden = posters.length < 2;
-  let selectedPNG = "";
   let activeIndex = 0;
   let selection = 0;
   const show = async (index: number) => {
@@ -1047,19 +1047,18 @@ async function renderInviteDialog(): Promise<void> {
       if (!posters.length) {
         preview.replaceChildren(element("p", "管理员尚未发布邀请海报。"));
         share.hidden = true;
+        copyButton.hidden = true;
       }
       return;
     }
     const poster = posters[index];
     activeIndex = index;
     const current = ++selection;
-    selectedPNG = "";
-    download.disabled = true;
     saveHint.hidden = true;
     preview.replaceChildren(element("p", "正在生成专属海报…"));
-    description.textContent = poster.description || "扫码购买活动商品";
     shareText.textContent = poster.shareText;
     share.hidden = !poster.shareText.trim();
+    copyButton.hidden = share.hidden;
     feedback.textContent = "";
     manualCopy.hidden = true;
     copyButton.disabled = false;
@@ -1077,8 +1076,6 @@ async function renderInviteDialog(): Promise<void> {
       image.draggable = false;
       image.dataset.testid = "referral-poster-image";
       preview.replaceChildren(image);
-      selectedPNG = png;
-      download.disabled = false;
       saveHint.hidden = false;
     } catch (error) {
       if (current === selection && dialog.open) preview.replaceChildren(element("p", error instanceof Error ? error.message : "海报加载失败，请稍后重试。"));
@@ -1106,16 +1103,9 @@ async function renderInviteDialog(): Promise<void> {
     // native image context menu or the dialog's vertical scroll gesture.
     if (Math.abs(dx) >= 40 && Math.abs(dx) > Math.abs(dy)) void show(activeIndex + (dx < 0 ? 1 : -1));
   }, { passive: true });
-  download.onclick = () => {
-    if (!selectedPNG || !campaign) return;
-    const link = document.createElement("a");
-    link.href = selectedPNG;
-    link.download = `${campaign.name.slice(0, 48)}-海报${["一", "二", "三"][activeIndex]}.png`;
-    link.click();
-  };
-  card.append(selectors, preview, navigation, description, saveHint, share, download, button("关闭", () => dialog.close(), "referral-quiet"));
+  card.append(selectors, preview, navigation, saveHint, share, actions);
   dialog.append(card);
-  dialog.addEventListener("close", () => { selection++; selectedPNG = ""; dialog.remove(); });
+  dialog.addEventListener("close", () => { selection++; dialog.remove(); });
   document.body.append(dialog);
   dialog.showModal();
   void show(0);

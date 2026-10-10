@@ -1214,8 +1214,8 @@ body:has(#referral-root) {
 .referral-poster-selectors { display: flex; gap: 8px; }
 .referral-poster-choice { flex: 1; min-height: 38px; border: 1px solid #f2c7b6; border-radius: 9px; background: #fff7f2; color: #9e4a32; cursor: pointer; }
 .referral-poster-choice[aria-pressed="true"] { border-color: #f25a2e; background: #f25a2e; color: #fff; }
-.referral-poster-preview { display: grid; min-height: 220px; max-height: 45vh; place-items: center; overflow: auto; border-radius: 12px; background: #fff3ec; touch-action: pan-y pinch-zoom; }
-.referral-poster-preview img { display: block; width: auto; height: auto; max-width: 100%; max-height: 45vh; }
+.referral-poster-preview { display: grid; min-height: 220px; max-height: 60vh; place-items: center; overflow: auto; border-radius: 12px; background: #fff3ec; touch-action: pan-y pinch-zoom; }
+.referral-poster-preview img { display: block; width: auto; height: auto; max-width: 100%; max-height: 60vh; }
 .referral-poster-dialog [hidden] { display: none !important; }
 .referral-poster-dialog { max-height: calc(100dvh - 24px); overflow-y: auto; }
 .referral-poster-navigation { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -1237,7 +1237,7 @@ body:has(#referral-root) {
 .referral-admin-poster-list textarea { display: block; width: 100%; min-height: 96px; padding: 8px; border: 1px solid #d0d5dd; border-radius: 6px; font: inherit; resize: vertical; }
 .referral-admin-poster-picker { width: min(620px,calc(100vw - 24px)); border: 0; border-radius: 14px; padding: 0; }
 .referral-admin-poster-picker > section { display: grid; gap: 12px; padding: 20px; }
-.referral-admin-poster-materials { display: grid; gap: 6px; max-height: 45vh; overflow: auto; }
+.referral-admin-poster-materials { display: grid; gap: 6px; max-height: 60vh; overflow: auto; }
 .referral-admin-poster-materials button { display: flex; align-items: center; gap: 10px; text-align: left; }
 .referral-admin-poster-materials img { width: 48px; height: 58px; object-fit: cover; }
 @media (max-width: 390px) {
@@ -1245,3 +1245,6 @@ body:has(#referral-root) {
   .referral-bottom-bar .referral-invite-fab { min-width: 148px; padding-inline: 12px; }
   #referral-root.referral-mobile-detail .referral-leaderboard__row { gap: 7px; }
 }
+
+.referral-poster-actions { display: flex; gap: 10px; }
+.referral-poster-actions > button { flex: 1 1 0; min-width: 0; min-height: 46px; }
