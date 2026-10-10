@@ -3485,12 +3485,12 @@ for (const [scenario, expectedSignatureReads] of [['sdk_cache', 0], ['sdk_cache_
   ok('人工确认后只调用一次生成，并保持复制后人工发送',
     state.aiGenerationBodies.length === 1 &&
     JSON.stringify(state.aiGenerationBodies[0]) === JSON.stringify({ snapshot_token: 'synthetic-sidebar-ai-7', confirmed: true }) &&
-    byLabel('复制话术') && state.wxMessages.length === 0 && !state.wxInvokes.includes('sendChatMessage'));
+    byLabel('复制话术') && state.sendIntentBodies.length === 0 && !state.wxInvokes.includes('sendChatMessage'));
   byLabel('刷新').click();
   await waitFor(() => d.body.textContent.includes('合成客户末句7') && !d.body.textContent.includes('合成销售参考7'));
   ok('刷新清空话术及人工确认，保持无自动生成或发送',
     byLabel('生成话术').disabled && !d.querySelector('.ai-confirm input').checked &&
-    state.aiGenerationBodies.length === 1 && state.wxMessages.length === 0);
+    state.aiGenerationBodies.length === 1 && state.sendIntentBodies.length === 0 && !state.wxInvokes.includes('sendChatMessage'));
   dom.window.close();
 }
 {
