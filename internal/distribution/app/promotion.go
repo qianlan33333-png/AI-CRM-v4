@@ -354,7 +354,10 @@ func (s *PromotionService) IssuePromotionLink(ctx context.Context, command distr
 		return distributionport.PromotionLink{}, distributionport.ErrConflict
 	}
 	payloadDigest := promotionCredentialPayloadDigest(command.ProductID, command.ProductType)
-	now := s.now().UTC()
+	// PostgreSQL timestamps have microsecond precision. Normalize the service
+	// clock before persistence and response so an exact receipt replay returns
+	// the same expiry instant as the first call.
+	now := s.now().UTC().Truncate(time.Microsecond)
 	var token string
 	var expiresAt time.Time
 	err := s.uow.Within(ctx, func(tx context.Context) error {
