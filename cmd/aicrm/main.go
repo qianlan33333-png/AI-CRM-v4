@@ -30,8 +30,23 @@ func run() error {
 	if cfg.Role == platformconfig.RolePaymentRefund && os.Geteuid() != 0 {
 		return errors.New("payment refund role requires authenticated OS root")
 	}
+	if cfg.Role == platformconfig.RoleRuntimeConfigMaintenance && os.Geteuid() != 0 {
+		return errors.New("runtime configuration maintenance requires authenticated OS root")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if cfg.Role == platformconfig.RoleRuntimeConfigMaintenance {
+		receipt, maintenanceErr := runRuntimeConfigMaintenance(ctx, cfg, os.Geteuid())
+		if maintenanceErr != nil {
+			return maintenanceErr
+		}
+		slog.Info("runtime Config maintenance complete", "release_id", receipt.ReleaseID,
+			"revision", receipt.Revision, "state", receipt.State, "checksum", receipt.Checksum,
+			"app_id_sha256", receipt.AppIDSHA256,
+			"previous_provider_enabled", receipt.PreviousProviderEnabled,
+			"provider_enabled", receipt.ProviderEnabled, "release_sha", cfg.ReleaseSHA)
+		return nil
+	}
 
 	application, err := compose(ctx, cfg)
 	if err != nil {

@@ -1,12 +1,62 @@
 {
   "schema": 1,
-  "baseline_sha": "17761e5765e8cec2a257639fe8e417be5532c4ab",
+  "baseline_sha": "811f46eff0adb124ecfadbfa8c6b11db7e8f880f",
   "checks": [
     {
-      "lane": "preflight",
-      "path": "scripts/test_domestic_release_controller.py"
+      "lane": "backend",
+      "path": "cmd/aicrm/runtime_config_maintenance_test.go",
+      "test": "TestParseRuntimeConfigMaintenanceRequestRejectsNullUnknownDuplicateAndTrailingFields"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/runtime_config_maintenance_test.go",
+      "test": "TestExecuteRuntimeConfigMaintenancePublishesOnlyTwoShopKeysAndReplaysIdempotently"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/runtime_config_maintenance_test.go",
+      "test": "TestExecuteRuntimeConfigMaintenanceRefusesStaleWrongIdentityAndMissingCredentials"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/runtime_config_maintenance_test.go",
+      "test": "TestExecuteRuntimeConfigMaintenanceRequiresRootRoleAndNonRebinding"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/runtime_config_maintenance_test.go",
+      "test": "TestRuntimeConfigMaintenanceErrorsDoNotExposeAppID"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/runtime_config_maintenance_postgres_test.go",
+      "test": "TestPostgreSQLRuntimeConfigMaintenancePreservesSettingsAndOwnerReceipts",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/platform/config/config_test.go",
+      "test": "TestLoadRuntimeConfigMaintenanceRequiresRequestPathOnlyForThatRole"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/runtime_config_apply_test.go",
+      "test": "TestApplyRuntimeConfigAllowsInitialBindingAndMerchantCertificateRotation"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/runtime_config_apply_test.go",
+      "test": "TestApplyRuntimeConfigRejectsBoundPaymentAppIDSwitch"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/config/store/runtime_releases_integration_test.go",
+      "test": "TestPostgreSQLRuntimeReleasePublishCASAndFailureRollback",
+      "postgres": true
     }
   ],
-  "installed_checks": [],
+  "installed_checks": [
+    "wechat-shop-runtime-config"
+  ],
   "build_commands": []
 }

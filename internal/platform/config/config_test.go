@@ -27,6 +27,29 @@ func TestLoadDefaultsAndRejectsInvalidRole(t *testing.T) {
 	}
 }
 
+func TestLoadRuntimeConfigMaintenanceRequiresRequestPathOnlyForThatRole(t *testing.T) {
+	t.Setenv("AICRM_DATABASE_URL", "postgres://aicrm:test@localhost/aicrm")
+	t.Setenv("AICRM_WECHAT_SHOP_PROVIDER_ENABLED", "false")
+	t.Setenv("AICRM_RUNTIME_CONFIG_REQUEST_FILE", "")
+	t.Setenv("AICRM_ROLE", string(RoleRuntimeConfigMaintenance))
+	if _, err := Load(); err == nil {
+		t.Fatal("maintenance role accepted a missing protected request path")
+	}
+	t.Setenv("AICRM_RUNTIME_CONFIG_REQUEST_FILE", "relative-request.json")
+	if _, err := Load(); err == nil {
+		t.Fatal("maintenance role accepted a relative request path")
+	}
+	t.Setenv("AICRM_RUNTIME_CONFIG_REQUEST_FILE", "/run/aicrm/runtime-config-request.json")
+	cfg, err := Load()
+	if err != nil || cfg.Role != RoleRuntimeConfigMaintenance || cfg.RuntimeConfigRequestFile != "/run/aicrm/runtime-config-request.json" {
+		t.Fatalf("maintenance role config=%+v err=%v", cfg, err)
+	}
+	t.Setenv("AICRM_ROLE", string(RoleAPI))
+	if _, err = Load(); err == nil {
+		t.Fatal("normal API role accepted the maintenance-only request path")
+	}
+}
+
 func TestNormalizeRuntimePolicyDefaultsOnlyFillsOmittedValues(t *testing.T) {
 	defaults := NormalizeRuntimePolicyDefaults(Runtime{})
 	if defaults.WorkerLimit != DefaultWorkerLimit ||

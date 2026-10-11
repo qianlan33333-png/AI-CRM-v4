@@ -199,6 +199,9 @@ func weComProviderConfig(cfg platformconfig.Runtime) wecomadapter.Config {
 // HTTPS client inside test Composition only. Production Composition passes nil
 // and therefore retains the outbound provider's locked default transport.
 func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Context, cfg platformconfig.Runtime, providerFactory func(wecomadapter.Config) (*wecomadapter.Client, error), surveyCompletionHTTPClient *http.Client, surveyCompletionNetwork outbound.SurveyCompletionNetwork) (*composedApplication, error) {
+	if cfg.Role == platformconfig.RoleRuntimeConfigMaintenance {
+		return nil, errors.New("runtime configuration maintenance must run before application composition")
+	}
 	if providerFactory == nil {
 		return nil, errors.New("WeCom client factory is required")
 	}
@@ -241,15 +244,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		cfg.AIGeneration.APIKey = storedModel.APIKey
 		cfg.AIGeneration.Model = storedModel.Model
 	}
-	runtimeDefaults, err := runtimeConfigDefaults(cfg)
-	if err != nil {
-		return fail(err)
-	}
-	runtimeDefaultLimit := cfg.AutomationOperations.MaxRecipientsPerRun
-	if runtimeDefaultLimit < 1 {
-		runtimeDefaultLimit = 1
-	}
-	runtimeReleaseService, err := configapp.NewRuntimeReleaseService(uow, configRepository, configRepository, runtimeDefaultLimit, configapp.WithRuntimeDefaults(runtimeDefaults), configapp.WithProtectedReferencePresence(runtimeConfigProtectedReferencePresence(cfg)), configapp.WithRuntimeActivationGuards(runtimeConfigActivationGuards(cfg)))
+	runtimeReleaseService, err := newRuntimeConfigReleaseService(cfg, uow, configRepository)
 	if err != nil {
 		return fail(err)
 	}

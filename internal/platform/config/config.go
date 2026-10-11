@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,9 @@ const (
 	// One-shot, explicitly selected failed invoice recovery; no daemon or direct Provider write.
 	RoleInvoiceRecover Role = "invoice-recover"
 	RoleShopBackfill   Role = "wechat-shop-backfill"
+	// RoleRuntimeConfigMaintenance is a root-authenticated one-shot Config-owner
+	// command. It publishes only the explicitly supplied WeChat Shop settings.
+	RoleRuntimeConfigMaintenance Role = "runtime-config-maintenance"
 
 	// These defaults are the deployment policy used when a Runtime is assembled
 	// without an environment loader, for example by an isolated composition
@@ -76,6 +80,7 @@ type Runtime struct {
 	PaymentRefundKey                    string
 	PaymentRefundAuthorization          string
 	InvoiceRecoverID                    string
+	RuntimeConfigRequestFile            string
 	ShopBackfillFrom, ShopBackfillUntil time.Time
 	CustomerSyncTrigger                 string
 	HXCDashboard                        HXCDashboard
@@ -690,7 +695,7 @@ func Load() (Runtime, error) {
 		return Runtime{}, errors.New("invalid AICRM_RELEASE_SHA")
 	}
 	switch cfg.Role {
-	case RoleAPI, RoleWorker, RoleEffectsWorker, RolePaymentReconcile, RoleProfitSharingReconcile, RolePaymentRefund, RoleInvoiceRecover, RoleShopBackfill:
+	case RoleAPI, RoleWorker, RoleEffectsWorker, RolePaymentReconcile, RoleProfitSharingReconcile, RolePaymentRefund, RoleInvoiceRecover, RoleShopBackfill, RoleRuntimeConfigMaintenance:
 	default:
 		return Runtime{}, errors.New("invalid AICRM_ROLE")
 	}
@@ -733,6 +738,15 @@ func Load() (Runtime, error) {
 		if err != nil || !cfg.ShopBackfillUntil.After(cfg.ShopBackfillFrom) {
 			return Runtime{}, errors.New("invalid AICRM_SHOP_BACKFILL_UNTIL")
 		}
+	}
+	if cfg.Role == RoleRuntimeConfigMaintenance {
+		requestPath := os.Getenv("AICRM_RUNTIME_CONFIG_REQUEST_FILE")
+		if requestPath == "" || strings.TrimSpace(requestPath) != requestPath || !filepath.IsAbs(requestPath) {
+			return Runtime{}, errors.New("invalid AICRM_RUNTIME_CONFIG_REQUEST_FILE")
+		}
+		cfg.RuntimeConfigRequestFile = filepath.Clean(requestPath)
+	} else if os.Getenv("AICRM_RUNTIME_CONFIG_REQUEST_FILE") != "" {
+		return Runtime{}, errors.New("AICRM_RUNTIME_CONFIG_REQUEST_FILE is only valid for the runtime-config-maintenance role")
 	}
 	if cfg.Role == RoleInvoiceRecover {
 		raw := os.Getenv("AICRM_INVOICE_RECOVER_ID")
