@@ -1,104 +1,12 @@
 {
   "schema": 1,
-  "baseline_sha": "0fe8bbcc3ee27d5dbb6aae0a4e4cc24e40a1dcca",
+  "baseline_sha": "17761e5765e8cec2a257639fe8e417be5532c4ab",
   "checks": [
     {
-      "lane": "backend",
-      "package": "./internal/wechatshop",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/payment/provider/wechatshop_products_test.go",
-      "test": "TestWeChatShopProductsReadOnlineAndExactSKU"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/payment/provider/wechatshop_orders_test.go",
-      "test": "TestWeChatShopOrderContractUpdateWindowAndRefund"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/payment/provider/wechatshop_orders_test.go",
-      "test": "TestWeChatShopPaidCallbackSignatureScopeAndExactID"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/payment/provider/wechatshop_orders_test.go",
-      "test": "TestWeChatShopDeferredOrNonPaymentNeverActivates"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/order/domain"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/wechat_shop_orders_integration_test.go",
-      "test": "TestPostgreSQLShopOrdersReplayRefundMissingContactAndRecovery",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/commerce_mapping_integration_test.go",
-      "test": "TestPostgreSQLCommerceLegacyPaidIgnoresHistoricalMappingAndExpiry",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/product/app/target_reader_lifecycle_test.go",
-      "test": "TestShopProductCannotCheckoutOrEnableDistribution"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/product/app/paid_purchase_action_postgres_integration_test.go",
-      "test": "TestPaidPurchaseActionPostgreSQLTransactionBoundaries",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/product/http/wechat_shop_test.go",
-      "test": "TestShopRefreshRequiresProductEditAndCSRF"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/platform/config/config_test.go",
-      "test": "TestShopBackfillRoleRequiresExplicitOrderedWindow"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/outbound/commerce_push_protocol_test.go",
-      "test": "TestCommercePaidPayloadUsesFrozenLegacyFieldNamesForEveryProduct"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/outbound/commerce_push_protocol_test.go",
-      "test": "TestCommercePaidPayloadDoesNotSplitProtocolByProductKind"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/outbound/commerce_push_protocol_test.go",
-      "test": "TestCommercePushSignatureUsesLegacyDotAndExactBody"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/wechatShopProducts.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/orderAdapter.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/productAdapter.field_mapping.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/productAdapter.distribution_dimensions.test.mjs"
+      "lane": "preflight",
+      "path": "scripts/test_domestic_release_controller.py"
     }
   ],
-  "installed_checks": [
-    "wechat-shop-product-refresh",
-    "wechat-shop-order-callback"
-  ],
+  "installed_checks": [],
   "build_commands": []
 }

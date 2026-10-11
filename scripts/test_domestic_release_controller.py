@@ -53,6 +53,60 @@ def make_repository(root: Path) -> tuple[Path, str, str, str]:
     return bare, base, candidate, other
 
 
+def make_promoting_batch_rollback_fixture(root: Path) -> tuple[dict, dict, dict, dict, Path, dict]:
+    repo, base, candidate, _other = make_repository(root)
+    base_tree, candidate_tree = release._tree(repo, base), release._tree(repo, candidate)
+    baseline = {"sha": base, "tree": base_tree, "manifest_sha256": "a" * 64}
+    staged_app = {"sha": candidate, "tree": candidate_tree, "manifest_sha256": "b" * 64}
+    member = {"candidate_id": candidate, "ref": "refs/heads/codex/one", "base_sha": base,
+              "head_sha": candidate, "head_tree": candidate_tree, "runtime_changed": True,
+              "check_receipt_sha256": "c" * 64, "stage_receipt_sha256": "d" * 64,
+              "stage_journey_sha256": "e" * 64, "source_bundle_sha256": "f" * 64,
+              "stage_check_names": ["route"]}
+    batch = {"status": "promoting", "base_sha": base, "base_tree": base_tree,
+             "head_sha": candidate, "head_tree": candidate_tree, "members": [member],
+             "installed_app": staged_app, "approval_digest": "1" * 64,
+             "stage_receipt": {"receipt_sha256": "2" * 64}}
+    state = release._new_state(base, base_tree, baseline)
+    state.update(status="outcome_unknown", staging_out_of_sync=True, batch=batch)
+    state["queue"] = [{"candidate_id": candidate, "ref": member["ref"], "base_sha": base,
+                       "head_sha": candidate, "status": "staged",
+                       "check_receipt": {"receipt_sha256": "3" * 64},
+                       "stage_receipt": {"receipt_sha256": "4" * 64}}]
+    state["in_flight"] = {"candidate_id": candidate, "head_sha": candidate,
+                          "head_tree": candidate_tree, "base_sha": base,
+                          "phase": "batch-production-install", "production_install_started": True,
+                          "commit_started": False, "production_receipt": None,
+                          "batch_member_heads": [candidate], "previous_installed_app": baseline,
+                          "installed_app": staged_app}
+    receipt = {"schema_version": 1, "source_sha": base, "source_tree": base_tree,
+               "manifest_sha256": "a" * 64, "previous_sha": "0" * 40,
+               "database_backup": None, "technical_status": "installed_healthy",
+               "installed_at_utc": release._utc_now()}
+    receipt_sha = hashlib.sha256((json.dumps(receipt, sort_keys=True) + "\n").encode()).hexdigest()
+    cursor = {"status": "ready", "schema_version": 1, "main_sha": base, "main_tree": base_tree,
+              "installed_app_sha": base, "installed_app_tree": base_tree,
+              "installed_manifest_sha256": "a" * 64,
+              "install_receipt_sha256": receipt_sha, "source_bundle_sha256": "6" * 64,
+              "updated_at_utc": release._utc_now()}
+    proof = {"schema_version": 1, "status": "known_rollback_verified",
+             "verified_at_utc": release._utc_now(), "candidate_sha": candidate,
+             "candidate_tree": candidate_tree,
+             "prior_app": {"sha": base, "tree": base_tree, "manifest_sha256": "a" * 64,
+                           "install_receipt_sha256": receipt_sha, "binary_sha256": "7" * 64},
+             "cursor": cursor, "candidate_install_receipt_absent": True,
+             "candidate_orphan_payload_verified": True, "shared_production_lock_acquired": True,
+             "services": {"aicrm.service": "active_exact_prior_binary",
+                          "aicrm-effects-worker.service": "active_exact_prior_binary"},
+             "migration_backup_archive_verified": True, "migration_backup_bytes": 911062379,
+             "read_only": True, "secret_value_output": False}
+    proof["verified_at_utc"] = release._utc_now()
+    config = {"repo": str(repo), "state": str(root / "state.json"),
+              "lock": str(root / "controller.lock"), "work_root": str(root)}
+    release._validate_state(state)
+    return state, proof, cursor, receipt, Path(config["state"]), config
+
+
 def stdin_with_bytes(payload: bytes) -> mock.Mock:
     stream = mock.Mock()
     stream.buffer = io.BytesIO(payload)
@@ -3186,6 +3240,169 @@ if os.environ.get("AICRM_TEST_MALFORMED_PREFIX") == "1":
 
 
 class CumulativeBatchTests(unittest.TestCase):
+    def test_known_rollback_ack_seals_same_batch_after_fresh_prior_app_and_cursor_readback(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state, proof, cursor, receipt, state_path, config = make_promoting_batch_rollback_fixture(root)
+            candidate_sha = state["in_flight"]["head_sha"]
+            original_batch = copy.deepcopy(state["batch"])
+            original_in_flight = copy.deepcopy(state["in_flight"])
+            original_queue = copy.deepcopy(state["queue"])
+            release.atomic_json(state_path, state)
+            real_load = release._load_state
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                 mock.patch.object(release, "_safe_directory"), \
+                 mock.patch.object(release, "_load_state", side_effect=lambda path: real_load(path, owner_uid=os.getuid())), \
+                 mock.patch.object(release, "_read_known_production_rollback_proof",
+                                   return_value=(proof, "8" * 64)) as read_proof, \
+                 mock.patch.object(release, "_verify_prod_app", return_value={"receipt": receipt}) as app_readback, \
+                 mock.patch.object(release, "_verify_production_cursor", return_value={"cursor": cursor}) as cursor_readback, \
+                 mock.patch.object(release.legacy, "prod_readback", return_value={
+                     "receipt_target_sha": candidate_sha,
+                     "receipt_exists": False, "receipt": None}) as candidate_readback:
+                result = release.acknowledge_known_production_rollback(
+                    config, root / "proof.json", "user:restore-and-continue-2026-10-11")
+                self.assertEqual(result["status"], "known_rollback_acknowledged")
+                self.assertFalse(result["production_written"])
+                app_readback.assert_called_once_with(config, state["main"]["sha"], state["installed_app"]["manifest_sha256"])
+                cursor_readback.assert_called_once_with(config)
+                with self.assertRaisesRegex(release.ReleaseError, "no promoting batch"):
+                    release.acknowledge_known_production_rollback(
+                        config, root / "proof.json", "user:restore-and-continue-2026-10-11")
+
+            observed = json.loads(state_path.read_text())
+            self.assertEqual(observed["status"], "blocked")
+            self.assertIsNone(observed["in_flight"])
+            self.assertEqual(observed["batch"]["status"], "sealed")
+            self.assertEqual(observed["batch"]["approval_digest"], original_batch["approval_digest"])
+            self.assertEqual(observed["batch"]["members"], original_batch["members"])
+            self.assertEqual(observed["batch"]["stage_receipt"], original_batch["stage_receipt"])
+            self.assertEqual(observed["queue"], original_queue)
+            self.assertEqual(observed["main"], state["main"])
+            self.assertEqual(observed["installed_app"], state["installed_app"])
+            self.assertEqual(len(observed["production_rollback_ack_history"]), 1)
+            history = observed["production_rollback_ack_history"][0]
+            self.assertEqual(history["authorization_reference"], "user:restore-and-continue-2026-10-11")
+            self.assertEqual(history["in_flight_snapshot"], original_in_flight)
+            self.assertEqual(history["batch_snapshot"], original_batch)
+            self.assertIsNone(release._active_queue_item(observed))
+            read_proof.assert_called_once()
+            candidate_readback.assert_called_once_with(config, candidate_sha)
+
+    def test_known_rollback_ack_rejects_stale_proof_without_mutating_unknown_attempt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state, proof, cursor, receipt, state_path, config = make_promoting_batch_rollback_fixture(root)
+            proof["verified_at_utc"] = "2020-01-01T00:00:00Z"
+            release.atomic_json(state_path, state)
+            original = state_path.read_bytes()
+            real_load = release._load_state
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                 mock.patch.object(release, "_load_state", side_effect=lambda path: real_load(path, owner_uid=os.getuid())), \
+                 mock.patch.object(release, "_read_known_production_rollback_proof",
+                                   return_value=(proof, "8" * 64)), \
+                 mock.patch.object(release, "_verify_prod_app") as app_readback, \
+                 mock.patch.object(release, "_update_state") as update:
+                with self.assertRaisesRegex(release.ReleaseError, "120-second validity"):
+                    release.acknowledge_known_production_rollback(
+                        config, root / "proof.json", "user:restore-and-continue-2026-10-11")
+            self.assertEqual(state_path.read_bytes(), original)
+            app_readback.assert_not_called()
+            update.assert_not_called()
+
+    def test_known_rollback_ack_rejects_fresh_cursor_drift_and_replay(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state, proof, cursor, receipt, state_path, config = make_promoting_batch_rollback_fixture(root)
+            release.atomic_json(state_path, state)
+            real_load = release._load_state
+            drifted_cursor = {**cursor, "source_bundle_sha256": "9" * 64}
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                 mock.patch.object(release, "_load_state", side_effect=lambda path: real_load(path, owner_uid=os.getuid())), \
+                 mock.patch.object(release, "_read_known_production_rollback_proof",
+                                   return_value=(proof, "8" * 64)), \
+                 mock.patch.object(release, "_verify_prod_app", return_value={"receipt": receipt}), \
+                 mock.patch.object(release, "_verify_production_cursor", return_value={"cursor": drifted_cursor}), \
+                 mock.patch.object(release, "_update_state") as update:
+                with self.assertRaisesRegex(release.ReleaseError, "fresh production cursor differs"):
+                    release.acknowledge_known_production_rollback(
+                        config, root / "proof.json", "user:restore-and-continue-2026-10-11")
+            self.assertEqual(json.loads(state_path.read_text())["status"], "outcome_unknown")
+            update.assert_not_called()
+
+    def test_known_rollback_ack_refuses_a_new_candidate_install_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state, proof, cursor, receipt, state_path, config = make_promoting_batch_rollback_fixture(root)
+            candidate_sha = state["in_flight"]["head_sha"]
+            release.atomic_json(state_path, state)
+            original = state_path.read_bytes()
+            real_load = release._load_state
+            with mock.patch.object(release.os, "geteuid", return_value=0), \
+                 mock.patch.object(release, "_check_config", return_value=config), \
+                 mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                 mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                 mock.patch.object(release, "_load_state", side_effect=lambda path: real_load(path, owner_uid=os.getuid())), \
+                 mock.patch.object(release, "_read_known_production_rollback_proof",
+                                   return_value=(proof, "8" * 64)), \
+                 mock.patch.object(release, "_verify_prod_app", return_value={"receipt": receipt}), \
+                 mock.patch.object(release, "_verify_production_cursor", return_value={"cursor": cursor}), \
+                 mock.patch.object(release.legacy, "prod_readback", return_value={
+                     "receipt_target_sha": candidate_sha,
+                     "receipt_exists": True, "receipt": {"technical_status": "installed_healthy"}}), \
+                 mock.patch.object(release, "_update_state") as update:
+                with self.assertRaisesRegex(release.ReleaseError, "found a candidate install receipt"):
+                    release.acknowledge_known_production_rollback(
+                        config, root / "proof.json", "user:restore-and-continue-2026-10-11")
+            self.assertEqual(state_path.read_bytes(), original)
+            update.assert_not_called()
+
+    def test_known_rollback_ack_refuses_wrong_phase_or_any_candidate_success_receipt(self) -> None:
+        for mutation, error in (
+            (lambda state: state["in_flight"].update(phase="batch-main-cas-and-cursor"), "outside the known installer"),
+            (lambda state: state["in_flight"].update(production_receipt={"technical_status": "installed_healthy"}),
+             "outside the known installer"),
+            (lambda state: state["queue"][0].update(production_receipt={"technical_status": "installed_healthy"}),
+             "queue receipt changed"),
+        ):
+            with self.subTest(error=error), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                state, proof, cursor, receipt, state_path, config = make_promoting_batch_rollback_fixture(root)
+                mutation(state)
+                release.atomic_json(state_path, state)
+                original = state_path.read_bytes()
+                real_load = release._load_state
+                with mock.patch.object(release.os, "geteuid", return_value=0), \
+                     mock.patch.object(release, "_check_config", return_value=config), \
+                     mock.patch.object(release, "_locked", return_value=nullcontext()), \
+                     mock.patch.object(release, "_assert_legacy_release_path_stopped"), \
+                     mock.patch.object(release, "_load_state", side_effect=lambda path: real_load(path, owner_uid=os.getuid())), \
+                     mock.patch.object(release, "_read_known_production_rollback_proof") as read_proof, \
+                     mock.patch.object(release, "_update_state") as update:
+                    with self.assertRaisesRegex(release.ReleaseError, error):
+                        release.acknowledge_known_production_rollback(
+                            config, root / "proof.json", "user:restore-and-continue-2026-10-11")
+                self.assertEqual(state_path.read_bytes(), original)
+                read_proof.assert_not_called()
+                update.assert_not_called()
+
+    def test_known_rollback_ack_requires_os_root_before_controller_or_proof_access(self) -> None:
+        with mock.patch.object(release.os, "geteuid", return_value=1000), \
+             mock.patch.object(release, "_check_config") as check_config:
+            with self.assertRaisesRegex(release.ReleaseError, "must run as root"):
+                release.acknowledge_known_production_rollback(
+                    {}, Path("/tmp/proof.json"), "user:restore-and-continue-2026-10-11")
+        check_config.assert_not_called()
+
     def test_tool_repair_keeps_unevaluated_business_candidate_at_queue_front(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

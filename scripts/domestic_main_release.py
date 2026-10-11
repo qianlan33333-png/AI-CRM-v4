@@ -764,6 +764,60 @@ def _validate_state(state: Any) -> None:
             raise ReleaseError("manual GitHub archive acknowledgement is invalid")
         _sha(ack.get("sha"), "last manually confirmed GitHub SHA")
         _utc_string(ack.get("confirmed_at_utc"), "archive acknowledgement timestamp")
+    rollback_acks = state.get("production_rollback_ack_history", [])
+    if not isinstance(rollback_acks, list):
+        raise ReleaseError("production rollback acknowledgement history is invalid")
+    for record in rollback_acks:
+        required = {"status", "candidate_sha", "candidate_tree", "previous_main_sha",
+                    "prior_installed_app", "cursor_sha256", "proof_sha256",
+                    "proof_verified_at_utc", "acknowledged_at_utc", "migration_backup_bytes",
+                    "authorization_reference", "in_flight_snapshot", "batch_snapshot"}
+        if not isinstance(record, dict) or set(record) != required:
+            raise ReleaseError("production rollback acknowledgement record is incomplete")
+        if record.get("status") != "known_rollback_acknowledged":
+            raise ReleaseError("production rollback acknowledgement status is invalid")
+        _sha(record.get("candidate_sha"), "rollback candidate SHA")
+        _sha(record.get("candidate_tree"), "rollback candidate tree")
+        _sha(record.get("previous_main_sha"), "rollback previous main SHA")
+        app_identity = record.get("prior_installed_app")
+        if not isinstance(app_identity, dict) or set(app_identity) != {"sha", "tree", "manifest_sha256"}:
+            raise ReleaseError("rollback prior installed application identity is invalid")
+        _sha(app_identity.get("sha"), "rollback prior app SHA")
+        _sha(app_identity.get("tree"), "rollback prior app tree")
+        _digest(app_identity.get("manifest_sha256"), "rollback prior app manifest")
+        _digest(record.get("cursor_sha256"), "rollback cursor digest")
+        _digest(record.get("proof_sha256"), "rollback proof digest")
+        _utc_string(record.get("proof_verified_at_utc"), "rollback proof timestamp")
+        _utc_string(record.get("acknowledged_at_utc"), "rollback acknowledgement timestamp")
+        if type(record.get("migration_backup_bytes")) is not int or record["migration_backup_bytes"] < 1:
+            raise ReleaseError("rollback migration backup size is invalid")
+        authorization_reference = record.get("authorization_reference")
+        if (not isinstance(authorization_reference, str) or len(authorization_reference) < 8
+                or len(authorization_reference) > 200
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{7,199}", authorization_reference) is None):
+            raise ReleaseError("rollback recovery authorization reference is invalid")
+        inflight_snapshot = record.get("in_flight_snapshot")
+        batch_snapshot = record.get("batch_snapshot")
+        if (not isinstance(inflight_snapshot, dict) or not isinstance(batch_snapshot, dict)
+                or batch_snapshot.get("status") != "promoting"
+                or inflight_snapshot.get("head_sha") != record["candidate_sha"]
+                or inflight_snapshot.get("head_tree") != record["candidate_tree"]
+                or inflight_snapshot.get("base_sha") != record["previous_main_sha"]
+                or inflight_snapshot.get("phase") != "batch-production-install"
+                or inflight_snapshot.get("production_install_started") is not True
+                or inflight_snapshot.get("commit_started") is not False
+                or inflight_snapshot.get("production_receipt") is not None
+                or batch_snapshot.get("head_sha") != record["candidate_sha"]
+                or batch_snapshot.get("head_tree") != record["candidate_tree"]
+                or batch_snapshot.get("base_sha") != record["previous_main_sha"]):
+            raise ReleaseError("rollback acknowledgement attempt snapshots do not match their identity")
+        members = batch_snapshot.get("members")
+        if (not isinstance(members, list) or not members
+                or inflight_snapshot.get("batch_member_heads") != [member.get("head_sha") for member in members]):
+            raise ReleaseError("rollback acknowledgement batch snapshot lost its exact member order")
+        if (inflight_snapshot.get("previous_installed_app") != app_identity
+                or inflight_snapshot.get("installed_app") != batch_snapshot.get("installed_app")):
+            raise ReleaseError("rollback acknowledgement in-flight snapshot lost its application identities")
     ids: set[str] = set()
     for item in queue:
         if not isinstance(item, dict):
@@ -842,6 +896,7 @@ def _new_state(main_sha: str, main_tree: str, installed_app: dict[str, str]) -> 
         "staging_out_of_sync": False,
         "last_release": None,
         "archive_ack": None,
+        "production_rollback_ack_history": [],
         "updated_at_utc": _utc_now(),
     }
 
@@ -5551,6 +5606,224 @@ def reconcile(config: dict[str, Any]) -> dict[str, Any]:
                 "cleanup": cleanup_result}
 
 
+def _read_known_production_rollback_proof(path: Path) -> tuple[dict[str, Any], str]:
+    """Read a short-lived, root-owned proof produced by the existing installer."""
+    if not path.is_absolute() or path.is_symlink():
+        raise ReleaseError("known rollback proof path must be an absolute protected file")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+    except OSError as exc:
+        raise ReleaseError("known rollback proof is unavailable") from exc
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size < 2 or info.st_size > 65536):
+            raise ReleaseError("known rollback proof must be a root-owned private regular file")
+        chunks = []
+        remaining = 65537
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 8192))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        if len(raw) > 65536:
+            raise ReleaseError("known rollback proof is too large")
+    finally:
+        os.close(descriptor)
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ReleaseError("known rollback proof repeats a JSON field")
+            result[key] = value
+        return result
+
+    try:
+        proof = json.loads(raw, object_pairs_hook=unique_object)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReleaseError("known rollback proof is unreadable") from exc
+    return proof, hashlib.sha256(raw).hexdigest()
+
+
+def _validate_known_production_rollback_proof(proof: Any, *, candidate_sha: str,
+                                               candidate_tree: str,
+                                               previous_app: dict[str, str],
+                                               previous_main: dict[str, str]) -> dict[str, Any]:
+    top_level = {"schema_version", "status", "verified_at_utc", "candidate_sha", "candidate_tree",
+                 "prior_app", "cursor", "candidate_install_receipt_absent",
+                 "candidate_orphan_payload_verified", "shared_production_lock_acquired", "services",
+                 "migration_backup_archive_verified", "migration_backup_bytes", "read_only",
+                 "secret_value_output"}
+    if not isinstance(proof, dict) or set(proof) != top_level or proof.get("schema_version") != 1:
+        raise ReleaseError("known rollback proof schema is not exact")
+    if (proof.get("status") != "known_rollback_verified"
+            or proof.get("candidate_sha") != candidate_sha
+            or proof.get("candidate_tree") != candidate_tree):
+        raise ReleaseError("known rollback proof does not identify this in-flight candidate")
+    verified_at = _utc_string(proof.get("verified_at_utc"), "known rollback proof timestamp")
+    verified_time = datetime.fromisoformat(verified_at.replace("Z", "+00:00"))
+    age = (datetime.now(timezone.utc) - verified_time).total_seconds()
+    if age < -5 or age > 120:
+        raise ReleaseError("known rollback proof is outside its 120-second validity window")
+    prior = proof.get("prior_app")
+    if (not isinstance(prior, dict)
+            or set(prior) != {"sha", "tree", "manifest_sha256", "install_receipt_sha256", "binary_sha256"}):
+        raise ReleaseError("known rollback proof has no exact prior application identity")
+    prior_identity = {"sha": _sha(prior.get("sha"), "proof prior app SHA"),
+                      "tree": _sha(prior.get("tree"), "proof prior app tree"),
+                      "manifest_sha256": _digest(prior.get("manifest_sha256"), "proof prior app manifest")}
+    _digest(prior.get("install_receipt_sha256"), "proof prior install receipt digest")
+    _digest(prior.get("binary_sha256"), "proof prior binary digest")
+    if prior_identity != previous_app:
+        raise ReleaseError("known rollback proof prior application differs from the release ledger")
+    cursor = proof.get("cursor")
+    cursor_fields = {"install_receipt_sha256", "installed_app_sha", "installed_app_tree",
+                     "installed_manifest_sha256", "main_sha", "main_tree", "schema_version",
+                     "source_bundle_sha256", "status", "updated_at_utc"}
+    if not isinstance(cursor, dict) or set(cursor) != cursor_fields:
+        raise ReleaseError("known rollback proof production cursor is incomplete")
+    if (cursor.get("status") != "ready" or cursor.get("schema_version") != 1
+            or cursor.get("main_sha") != previous_main["sha"]
+            or cursor.get("main_tree") != previous_main["tree"]
+            or cursor.get("installed_app_sha") != prior_identity["sha"]
+            or cursor.get("installed_app_tree") != prior_identity["tree"]
+            or cursor.get("installed_manifest_sha256") != prior_identity["manifest_sha256"]
+            or cursor.get("install_receipt_sha256") != prior.get("install_receipt_sha256")):
+        raise ReleaseError("known rollback proof cursor differs from the prior release ledger")
+    _digest(cursor.get("source_bundle_sha256"), "proof cursor source bundle digest")
+    _utc_string(cursor.get("updated_at_utc"), "proof cursor timestamp")
+    if any(proof.get(flag) is not True for flag in (
+            "candidate_install_receipt_absent", "candidate_orphan_payload_verified",
+            "shared_production_lock_acquired", "migration_backup_archive_verified", "read_only")):
+        raise ReleaseError("known rollback proof lacks a required rollback observation")
+    if proof.get("secret_value_output") is not False:
+        raise ReleaseError("known rollback proof is not marked secret-safe")
+    backup_bytes = proof.get("migration_backup_bytes")
+    if type(backup_bytes) is not int or backup_bytes < 1:
+        raise ReleaseError("known rollback proof has no verified migration backup size")
+    services = proof.get("services")
+    if (not isinstance(services, dict)
+            or services != {"aicrm.service": "active_exact_prior_binary",
+                            "aicrm-effects-worker.service": "active_exact_prior_binary"}):
+        raise ReleaseError("known rollback proof does not verify both prior service binaries")
+    return {"prior_app": prior_identity, "cursor": cursor, "verified_at_utc": verified_at,
+            "migration_backup_bytes": backup_bytes}
+
+
+def _verify_known_rollback_candidate_receipt_absent(config: dict[str, Any], candidate_sha: str) -> None:
+    """Recheck the failed candidate receipt after the locked production cursor read."""
+    readback = legacy.prod_readback(config, candidate_sha)
+    if (not isinstance(readback, dict) or readback.get("receipt_target_sha") != candidate_sha
+            or readback.get("receipt_exists") is not False or readback.get("receipt") is not None):
+        raise ReleaseError("fresh production readback found a candidate install receipt")
+
+
+def acknowledge_known_production_rollback(config: dict[str, Any], proof_path: Path,
+                                          authorization_reference: str) -> dict[str, Any]:
+    """Close a proven rolled-back batch attempt without claiming candidate success."""
+    if os.geteuid() != 0:
+        raise ReleaseError("known production rollback acknowledgement must run as root")
+    if (not isinstance(authorization_reference, str) or len(authorization_reference) < 8
+            or len(authorization_reference) > 200
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{7,199}", authorization_reference) is None):
+        raise ReleaseError("known rollback acknowledgement requires a human authorization reference")
+    config = _check_config(config)
+    state_path, repo = Path(config["state"]), Path(config["repo"])
+    with _locked(Path(config["lock"]), nonblocking=True):
+        _assert_legacy_release_path_stopped()
+        state = _load_state(state_path)
+        batch, inflight = state.get("batch"), state.get("in_flight")
+        if (state.get("status") != "outcome_unknown" or not isinstance(batch, dict)
+                or batch.get("status") != "promoting" or not isinstance(inflight, dict)):
+            raise ReleaseError("no promoting batch has a durable unknown production outcome")
+        if (inflight.get("phase") != "batch-production-install"
+                or inflight.get("production_install_started") is not True
+                or inflight.get("commit_started") is not False
+                or inflight.get("production_receipt") is not None):
+            raise ReleaseError("in-flight batch attempt is outside the known installer rollback phase")
+        members = batch.get("members")
+        if not isinstance(members, list) or not members:
+            raise ReleaseError("promoting batch has no durable members")
+        member_heads = [member.get("head_sha") for member in members if isinstance(member, dict)]
+        candidate_sha = _sha(inflight.get("head_sha"), "in-flight batch candidate SHA")
+        candidate_tree = _sha(inflight.get("head_tree"), "in-flight batch candidate tree")
+        prior_main = state.get("main")
+        previous_app = state.get("installed_app")
+        if (not isinstance(prior_main, dict) or not isinstance(previous_app, dict)
+                or batch.get("head_sha") != candidate_sha or batch.get("head_tree") != candidate_tree
+                or batch.get("base_sha") != prior_main.get("sha")
+                or inflight.get("base_sha") != prior_main.get("sha")
+                or inflight.get("batch_member_heads") != member_heads
+                or inflight.get("previous_installed_app") != previous_app
+                or inflight.get("installed_app") != batch.get("installed_app")):
+            raise ReleaseError("in-flight attempt does not match the exact promoting batch and prior release")
+        if _resolve_ref(repo, MAIN_REF) != prior_main["sha"] or _tree(repo, prior_main["sha"]) != prior_main["tree"]:
+            raise ReleaseError("domestic main changed during the unknown production attempt")
+        if state.get("last_release") and state["last_release"].get("main_sha") == candidate_sha:
+            raise ReleaseError("candidate already has a terminal production release receipt")
+        batch_members = set(member_heads)
+        queued_batch_heads = []
+        for queued in state["queue"]:
+            if queued.get("head_sha") in batch_members:
+                queued_batch_heads.append(queued["head_sha"])
+                expected_member = next(member for member in members if member.get("head_sha") == queued["head_sha"])
+                if (queued.get("status") != "staged" or queued.get("candidate_id") != expected_member.get("candidate_id")
+                        or queued.get("ref") != expected_member.get("ref")
+                        or queued.get("base_sha") != expected_member.get("base_sha")
+                        or queued.get("production_receipt") is not None):
+                    raise ReleaseError("batch queue receipt changed or contains a production success receipt")
+            elif queued.get("status") in {"pending", "stale_base", "failed", "outcome_unknown",
+                                           "stage_validation_pending", "source_approval_pending"}:
+                raise ReleaseError("another candidate is active beside the promoting batch")
+        if sorted(queued_batch_heads) != sorted(member_heads):
+            raise ReleaseError("promoting batch queue members do not match the durable batch")
+        proof, proof_sha256 = _read_known_production_rollback_proof(proof_path)
+        validated = _validate_known_production_rollback_proof(
+            proof, candidate_sha=candidate_sha, candidate_tree=candidate_tree,
+            previous_app=previous_app, previous_main=prior_main)
+        fresh_production = _verify_prod_app(config, previous_app["sha"], previous_app["manifest_sha256"])
+        fresh_receipt = fresh_production.get("receipt") if isinstance(fresh_production, dict) else None
+        if not isinstance(fresh_receipt, dict):
+            raise ReleaseError("fresh production application readback has no install receipt")
+        fresh_receipt_sha256 = hashlib.sha256((json.dumps(fresh_receipt, sort_keys=True) + "\n").encode()).hexdigest()
+        if fresh_receipt_sha256 != proof["prior_app"]["install_receipt_sha256"]:
+            raise ReleaseError("fresh prior production install receipt differs from the known rollback proof")
+        fresh_cursor_payload = _verify_production_cursor(config)
+        fresh_cursor = fresh_cursor_payload["cursor"]
+        if fresh_cursor != validated["cursor"]:
+            raise ReleaseError("fresh production cursor differs from the short-lived known rollback proof")
+        _verify_known_rollback_candidate_receipt_absent(config, candidate_sha)
+        if (fresh_cursor.get("main_sha") != prior_main["sha"]
+                or fresh_cursor.get("installed_app_sha") != previous_app["sha"]
+                or fresh_cursor.get("installed_manifest_sha256") != previous_app["manifest_sha256"]):
+            raise ReleaseError("fresh production cursor no longer names the prior installed release")
+        record = {"status": "known_rollback_acknowledged", "candidate_sha": candidate_sha,
+                  "candidate_tree": candidate_tree, "previous_main_sha": prior_main["sha"],
+                  "prior_installed_app": {key: previous_app[key]
+                                          for key in ("sha", "tree", "manifest_sha256")},
+                  "cursor_sha256": hashlib.sha256(json.dumps(
+                      fresh_cursor, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":")).encode()).hexdigest(),
+                  "proof_sha256": proof_sha256, "proof_verified_at_utc": validated["verified_at_utc"],
+                  "acknowledged_at_utc": _utc_now(),
+                  "migration_backup_bytes": validated["migration_backup_bytes"],
+                  "authorization_reference": authorization_reference,
+                  "in_flight_snapshot": copy.deepcopy(inflight),
+                  "batch_snapshot": copy.deepcopy(batch)}
+        state.setdefault("production_rollback_ack_history", []).append(record)
+        batch["status"] = "sealed"
+        state["in_flight"] = None
+        state["status"] = "blocked"
+        _update_state(state_path, state, status="blocked")
+        return {"status": record["status"], "candidate_sha": candidate_sha,
+                "candidate_tree": candidate_tree, "production_written": False,
+                "prior_main_sha": prior_main["sha"], "proof_sha256": proof_sha256,
+                "acknowledged_at_utc": record["acknowledged_at_utc"]}
+
+
 def _assert_release_timers_stopped() -> None:
     for unit in (OLD_RELEASE_TIMER, NEW_RELEASE_TIMER):
         enabled = _run(["/usr/bin/systemctl", "is-enabled", unit], check=False)
@@ -6339,6 +6612,7 @@ def restricted_ssh() -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check", "batch-open", "batch-stage", "batch-seal", "batch-reopen", "batch-tool-repair",
+                                            "ack-production-rollback",
                                             "poll", "status", "promote", "promote-authorized", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
     parser.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG))
     parser.add_argument("--repo", type=Path)
@@ -6355,6 +6629,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--calibrate-check-capacity", action="store_true",
                         help="maintenance-only measurement before setting same-host disk/cache budgets")
     parser.add_argument("--tree")
+    parser.add_argument("--proof", type=Path, help="fresh root-owned known-production-rollback proof")
     parser.add_argument("--installed-app-sha")
     parser.add_argument("--candidate-sha", help="exact PR #46 head for the one-time baseline helper overlay")
     parser.add_argument("--seed-bundle", type=Path, help="verified full seed bundle for the one-time baseline helper overlay")
@@ -6371,6 +6646,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--candidate-sha is valid only with resume-baseline, activate or verify")
     if args.action != "resume-baseline" and args.seed_bundle is not None:
         parser.error("--seed-bundle is valid only with resume-baseline")
+    if args.action != "ack-production-rollback" and args.proof is not None:
+        parser.error("--proof is valid only with ack-production-rollback")
     if args.action == "resume-baseline" and ((args.candidate_sha is None) != (args.seed_bundle is None)):
         parser.error("resume-baseline overlay requires both --candidate-sha and --seed-bundle")
     try:
@@ -6470,6 +6747,13 @@ def main(argv: list[str] | None = None) -> int:
             result = promote(config, args.approval_digest)
         elif args.action == "reconcile":
             result = reconcile(config)
+        elif args.action == "ack-production-rollback":
+            if args.proof is None:
+                parser.error("ack-production-rollback requires --proof <protected proof file>")
+            if not args.authorization_reference:
+                parser.error("ack-production-rollback requires --authorization-reference from the user's recovery instruction")
+            result = acknowledge_known_production_rollback(config, args.proof,
+                                                           args.authorization_reference)
         else:
             raise AssertionError(args.action)
     except (OSError, ValueError, ReleaseError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
