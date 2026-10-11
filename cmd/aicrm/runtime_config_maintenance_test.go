@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	configport "github.com/qianlan33333-png/AI-CRM-v3/internal/config/port"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
@@ -138,6 +139,7 @@ func TestExecuteRuntimeConfigMaintenancePublishesOnlyTwoShopKeysAndReplaysIdempo
 func TestExecuteRuntimeConfigMaintenanceRefusesStaleWrongIdentityAndMissingCredentials(t *testing.T) {
 	baseSettings := []configport.RuntimeSetting{
 		runtimeMaintenanceSetting(t, configport.AutomationOperationsMaxRecipientsPerRun, 4),
+		runtimeMaintenanceSetting(t, configport.AIAgentGenerationEnabled, false),
 		runtimeMaintenanceSetting(t, configport.WeChatShopAppID, ""),
 		runtimeMaintenanceSetting(t, configport.WeChatShopProviderEnabled, false),
 	}
@@ -200,9 +202,79 @@ func TestExecuteRuntimeConfigMaintenanceRequiresRootRoleAndNonRebinding(t *testi
 	}
 }
 
+func TestRuntimeConfigMaintenanceHydratesStoredAIModelAndRefusesMissingKey(t *testing.T) {
+	cfg := runtimeConfigMaintenanceTestConfig()
+	cfg.AIGeneration.Enabled = true
+	cfg.Effects.ProviderEnabled = true
+	modelOwner := &runtimeConfigMaintenanceAIModelSettings{
+		configured: true,
+		model:      configport.AIModelRuntime{BaseURL: "https://api.deepseek.com/v1", Model: "synthetic-model", APIKey: "synthetic-protected-key"},
+	}
+	hydrated, err := hydrateStoredAIModelRuntimeConfig(context.Background(), cfg, modelOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hydrated.AIGeneration.BaseURL != modelOwner.model.BaseURL || hydrated.AIGeneration.Model != modelOwner.model.Model || hydrated.AIGeneration.APIKey != modelOwner.model.APIKey {
+		t.Fatal("stored AI model runtime settings were not hydrated from Config Owner")
+	}
+	if !hydrated.AIGeneration.Enabled || !runtimeConfigActivationGuards(hydrated).AIAgentGenerationEnabled {
+		t.Fatal("hydration disabled an existing AI capability or failed its protected activation guard")
+	}
+	if modelOwner.readRuntimeCalls != 1 || modelOwner.saveCalls != 0 {
+		t.Fatalf("maintenance hydration made unexpected Config Owner calls: read=%d save=%d", modelOwner.readRuntimeCalls, modelOwner.saveCalls)
+	}
+
+	active := []configport.RuntimeSetting{
+		runtimeMaintenanceSetting(t, configport.WeChatShopAppID, ""),
+		runtimeMaintenanceSetting(t, configport.WeChatShopProviderEnabled, false),
+		runtimeMaintenanceSetting(t, configport.AIAgentGenerationEnabled, true),
+	}
+	fake := newRuntimeConfigMaintenanceFake(active)
+	withoutStoredKey := &runtimeConfigMaintenanceAIModelSettings{}
+	unhydrated, err := hydrateStoredAIModelRuntimeConfig(context.Background(), cfg, withoutStoredKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtimeConfigActivationGuards(unhydrated).AIAgentGenerationEnabled {
+		t.Fatal("AI generation guard accepted a missing stored key")
+	}
+	request := runtimeConfigMaintenanceRequest{OperationID: "shop-missing-ai-key-01", ExpectedBaseRevision: 0, AppID: "wx-shop-test", ProviderEnabled: false}
+	if _, err = executeRuntimeConfigMaintenance(context.Background(), fake, unhydrated, request, 0); err == nil {
+		t.Fatal("maintenance proceeded with an active AI capability but no readable stored model key")
+	}
+	if fake.createCalls != 0 || fake.validateCalls != 0 || fake.publishCalls != 0 {
+		t.Fatal("missing stored model key refusal created a Config draft or receipt")
+	}
+}
+
+type runtimeConfigMaintenanceAIModelSettings struct {
+	configured       bool
+	model            configport.AIModelRuntime
+	err              error
+	readRuntimeCalls int
+	saveCalls        int
+}
+
+func (*runtimeConfigMaintenanceAIModelSettings) ReadAIModel(context.Context) (configport.AIModelSelection, error) {
+	return configport.AIModelSelection{}, nil
+}
+
+func (f *runtimeConfigMaintenanceAIModelSettings) SaveAIModel(context.Context, configport.AIModelCommand) (configport.AIModelSelection, error) {
+	f.saveCalls++
+	return configport.AIModelSelection{}, nil
+}
+
+func (f *runtimeConfigMaintenanceAIModelSettings) ReadAIModelRuntime(context.Context) (configport.AIModelRuntime, bool, error) {
+	f.readRuntimeCalls++
+	return f.model, f.configured, f.err
+}
+
+var _ configport.AIModelSettings = (*runtimeConfigMaintenanceAIModelSettings)(nil)
+
 func runtimeConfigMaintenanceTestConfig() platformconfig.Runtime {
 	return platformconfig.Runtime{
-		Role: platformconfig.RoleRuntimeConfigMaintenance,
+		Role:         platformconfig.RoleRuntimeConfigMaintenance,
+		AIGeneration: platformconfig.AIGeneration{Timeout: 30 * time.Second},
 		AutomationOperations: platformconfig.AutomationOperations{
 			ProviderMode: platformconfig.AutomationProviderDisabled, MaxRecipientsPerRun: 1,
 		},

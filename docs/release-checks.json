@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "baseline_sha": "811f46eff0adb124ecfadbfa8c6b11db7e8f880f",
+  "baseline_sha": "f731176fbc2ba2d3815b0fbe5ed8704495e3cd1f",
   "checks": [
     {
       "lane": "backend",
       "path": "cmd/aicrm/runtime_config_maintenance_test.go",
-      "test": "TestParseRuntimeConfigMaintenanceRequestRejectsNullUnknownDuplicateAndTrailingFields"
+      "test": "TestRuntimeConfigMaintenanceHydratesStoredAIModelAndRefusesMissingKey"
     },
     {
       "lane": "backend",
@@ -35,11 +35,6 @@
     },
     {
       "lane": "backend",
-      "path": "internal/platform/config/config_test.go",
-      "test": "TestLoadRuntimeConfigMaintenanceRequiresRequestPathOnlyForThatRole"
-    },
-    {
-      "lane": "backend",
       "path": "cmd/aicrm/runtime_config_apply_test.go",
       "test": "TestApplyRuntimeConfigAllowsInitialBindingAndMerchantCertificateRotation"
     },
@@ -47,12 +42,6 @@
       "lane": "backend",
       "path": "cmd/aicrm/runtime_config_apply_test.go",
       "test": "TestApplyRuntimeConfigRejectsBoundPaymentAppIDSwitch"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/config/store/runtime_releases_integration_test.go",
-      "test": "TestPostgreSQLRuntimeReleasePublishCASAndFailureRollback",
-      "postgres": true
     }
   ],
   "installed_checks": [

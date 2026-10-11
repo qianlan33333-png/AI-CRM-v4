@@ -65,6 +65,27 @@ func newRuntimeConfigReleaseService(cfg platformconfig.Runtime, uow platformport
 	)
 }
 
+// hydrateStoredAIModelRuntimeConfig uses the same Config Owner read as normal
+// composition. The decrypted key stays in process memory and is used only to
+// evaluate existing activation guards; this function never calls the model
+// Provider or logs the returned credential.
+func hydrateStoredAIModelRuntimeConfig(ctx context.Context, cfg platformconfig.Runtime,
+	settings configport.AIModelSettings) (platformconfig.Runtime, error) {
+	if settings == nil {
+		return cfg, errors.New("AI model Config Owner is unavailable")
+	}
+	stored, configured, err := settings.ReadAIModelRuntime(ctx)
+	if err != nil {
+		return cfg, err
+	}
+	if configured {
+		cfg.AIGeneration.BaseURL = stored.BaseURL
+		cfg.AIGeneration.APIKey = stored.APIKey
+		cfg.AIGeneration.Model = stored.Model
+	}
+	return cfg, nil
+}
+
 func parseRuntimeConfigMaintenanceRequest(data []byte) (runtimeConfigMaintenanceRequest, error) {
 	var request runtimeConfigMaintenanceRequest
 	if len(data) == 0 || len(data) > 8192 {
@@ -200,6 +221,13 @@ func executeRuntimeConfigMaintenance(ctx context.Context, service configport.Run
 	if err != nil {
 		return runtimeConfigMaintenanceReceipt{}, errors.New("active WeChat Shop Provider switch is invalid")
 	}
+	currentAIGenerationEnabled, err := runtimeSettingBool(page.Effective.Settings, configport.AIAgentGenerationEnabled)
+	if err != nil {
+		return runtimeConfigMaintenanceReceipt{}, errors.New("active AI generation switch is invalid")
+	}
+	if currentAIGenerationEnabled && !guards.AIAgentGenerationEnabled {
+		return runtimeConfigMaintenanceReceipt{}, errors.New("active AI generation requires its stored model endpoint, model, protected key, and enabled outbound provider")
+	}
 	if request.ProviderEnabled && (currentAppID != request.AppID || cfg.WeChatShop.AppID != request.AppID || !guards.WeChatShopEnabled) {
 		return runtimeConfigMaintenanceReceipt{}, errors.New("Provider activation requires the published identity, matching protected AppID, and credential presence")
 	}
@@ -332,6 +360,14 @@ func runRuntimeConfigMaintenance(ctx context.Context, cfg platformconfig.Runtime
 	repository, err := configstore.NewPostgreSQL(pool.Native(), uow)
 	if err != nil {
 		return runtimeConfigMaintenanceReceipt{}, errors.New("Config owner repository is unavailable")
+	}
+	aiModelSettings, err := configapp.NewAIModelService(uow, repository, []byte(cfg.Survey.DataKey))
+	if err != nil {
+		return runtimeConfigMaintenanceReceipt{}, errors.New("AI model Config Owner is unavailable")
+	}
+	cfg, err = hydrateStoredAIModelRuntimeConfig(ctx, cfg, aiModelSettings)
+	if err != nil {
+		return runtimeConfigMaintenanceReceipt{}, errors.New("stored AI model runtime configuration is unavailable")
 	}
 	service, err := newRuntimeConfigReleaseService(cfg, uow, repository)
 	if err != nil {

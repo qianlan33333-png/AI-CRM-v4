@@ -235,14 +235,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
-	storedModel, modelConfigured, err := aiModelSettings.ReadAIModelRuntime(ctx)
+	cfg, err = hydrateStoredAIModelRuntimeConfig(ctx, cfg, aiModelSettings)
 	if err != nil {
 		return fail(err)
-	}
-	if modelConfigured {
-		cfg.AIGeneration.BaseURL = storedModel.BaseURL
-		cfg.AIGeneration.APIKey = storedModel.APIKey
-		cfg.AIGeneration.Model = storedModel.Model
 	}
 	runtimeReleaseService, err := newRuntimeConfigReleaseService(cfg, uow, configRepository)
 	if err != nil {

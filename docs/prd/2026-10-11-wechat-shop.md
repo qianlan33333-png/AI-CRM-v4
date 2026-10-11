@@ -53,6 +53,8 @@ flowchart TD
 
 复用与参考：入口通过 `internal/config/app.RuntimeReleaseService` 与其 PostgreSQL repository / Unit of Work 完成 draft、validate、publish 和收据，不直写配置表、不构造 HTTP 管理员会话，也不初始化 API、Provider、Worker、River job 或 runtime-application 观测。常规 Composition 仍由 `applyRuntimeConfig` 保留“非空绑定拒绝切换”保护。外部配置系统的校验后发布模式可参考 [AWS AppConfig validators](https://docs.aws.amazon.com/appconfig/latest/userguide/appconfig-creating-configuration-and-profile-validators.html)；本补充只借鉴先校验再发布这一顺序，配置事务、身份保护和审计继续归属 V4 Config Owner。
 
+运维补充：维护角色和常规 Composition 使用同一 Config Owner `ReadAIModelRuntime` 读取既有加密模型设置，在进程内评估当前 AI 生成 guard；不发起模型 Provider 请求，也不输出密钥。若 active Config 已启用 AI 生成但受保护密钥或模型配置不可读，必须在创建 Shop 草稿前拒绝，保留原 AI 开关与 Owner 状态不变。
+
 分类：OneID 不涉及，因为只处理集成 AppID、不关联客户或外部用户；Persistence 为 Config Owner PostgreSQL 本地事务；External Effects 不涉及，maintenance role 不执行 Provider 请求。非 UI 运维入口，不新增页面、API、队列、timer 或发布状态机。
 
 验收：严格拒绝缺字段、`null`、重复/未知字段、尾随 JSON、错误角色、非 root、过期 revision、同 operation ID 不同 payload、缺失凭据引用及 AppID 重绑；同 key 重放返回同一 release 且不复制审计/outbox；两阶段变更仅改变请求的两个设置并保留原非 Shop 值。OS-root 实际候选二进制在隔离 loopback PostgreSQL 上验证；断言没有管理员 session、runtime application 记录或 Provider 调用。Config Owner publish 事务沿用现有 Outbox append 失败回滚合同测试。
