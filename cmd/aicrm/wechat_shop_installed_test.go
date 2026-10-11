@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	accesshttp "github.com/qianlan33333-png/AI-CRM-v3/internal/access/http"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 	postgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
@@ -61,7 +62,7 @@ func TestPostgreSQLShopInstalledAPI(t *testing.T) {
 	key := []byte("abcdefghijklmnopqrstuvwxyz123456")
 	process := startPeriodicContactInstalledProcess(t, input.Binary, input.Root, []string{
 		"AICRM_DATABASE_URL=" + f.application.pool.Native().Config().ConnConfig.ConnString(), "AICRM_ROLE=api", "AICRM_LISTEN_ADDR=" + address, "AICRM_RELEASE_SHA=" + input.SHA,
-		"AICRM_PUBLIC_ORIGIN=" + f.server.URL, "AICRM_GROUP_OPS_WEBHOOK_SECRET=installed-shop-fixture-secret",
+		"AICRM_PUBLIC_ORIGIN=" + f.server.URL, "AICRM_GROUP_OPS_WEBHOOK_SECRET=installed-shop-fixture-secret-at-least-32-bytes",
 		"AICRM_SURVEY_DATA_KEY=" + base64.RawStdEncoding.EncodeToString(f.dataKey), "AICRM_IDENTITY_PHONE_DATA_KEY=" + base64.RawStdEncoding.EncodeToString(f.dataKey),
 		"AICRM_COMMERCE_PUSH_PAYLOAD_DATA_KEY=" + base64.RawStdEncoding.EncodeToString(f.dataKey),
 		"AICRM_WECHAT_SHOP_PROVIDER_ENABLED=true", "AICRM_WECHAT_SHOP_APP_ID=installed-shop", "AICRM_WECHAT_SHOP_APP_SECRET=installed-fixture-secret",
@@ -82,8 +83,8 @@ func TestPostgreSQLShopInstalledAPI(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", f.server.URL)
 		if auth {
-			r.AddCookie(&http.Cookie{Name: "aicrm_admin_session", Value: session})
-			r.AddCookie(&http.Cookie{Name: "aicrm_csrf", Value: csrf})
+			r.AddCookie(&http.Cookie{Name: accesshttp.SessionCookieName, Value: session})
+			r.AddCookie(&http.Cookie{Name: accesshttp.CSRFCookieName, Value: csrf})
 			r.Header.Set("X-CSRF-Token", csrf)
 		}
 		response, e := f.server.Client().Do(r)
@@ -113,8 +114,8 @@ func TestPostgreSQLShopInstalledAPI(t *testing.T) {
 	if code, detail := call("GET", "/api/admin/orders/90071992547409931234?provider=wechat_shop", "", true); code != 200 || detail["record_origin"] != "external" || detail["refunded_minor"] != float64(85) {
 		t.Fatal("external refund fact unreadable")
 	}
-	if code, product := call("GET", "/api/admin/products/"+strconv.FormatInt(int64(id), 10), "", true); code != 200 || product["source_kind"] != "wechat_shop" {
-		t.Fatal("Shop source not exposed")
+	if code, product := call("GET", "/api/v1/products/"+strconv.FormatInt(int64(id), 10), "", true); code != 200 || product["source_kind"] != "wechat_shop" {
+		t.Fatalf("Shop source not exposed: status=%d source=%v", code, product["source_kind"])
 	}
 	query, body := installedShopCallback(key, now)
 	if code, _ := call("POST", "/api/public/wechat-shop/callback?"+query, body, false); code != 200 {
@@ -123,7 +124,9 @@ func TestPostgreSQLShopInstalledAPI(t *testing.T) {
 	if code, _ := call("POST", "/api/public/wechat-shop/callback?"+query, body, false); code != 200 {
 		t.Fatal("callback replay failed")
 	}
-	if code, _ := call("POST", "/api/public/wechat-shop/callback?"+query+"0", body, false); code != 400 {
+	wrong, _ := url.ParseQuery(query)
+	wrong.Set("msg_signature", wrong.Get("msg_signature")+"0")
+	if code, _ := call("POST", "/api/public/wechat-shop/callback?"+wrong.Encode(), body, false); code != 400 {
 		t.Fatal("wrong signature accepted")
 	}
 	var receipts, jobs int
