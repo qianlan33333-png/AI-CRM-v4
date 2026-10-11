@@ -55,6 +55,8 @@ flowchart TD
 
 运维补充：维护角色和常规 Composition 使用同一 Config Owner `ReadAIModelRuntime` 读取既有加密模型设置，在进程内评估当前 AI 生成 guard；不发起模型 Provider 请求，也不输出密钥。若 active Config 已启用 AI 生成但受保护密钥或模型配置不可读，必须在创建 Shop 草稿前拒绝，保留原 AI 开关与 Owner 状态不变。
 
+Provider 故障安全补充：Shop HTTP transport、请求构造和响应体读取错误以固定安全错误返回，不传播可能包含 access token URL 或原始错误内容的 transport/body error。退款请求一旦进入 HTTPDoer，仍标记为已尝试并保持 `outcome_unknown`，不改变原幂等/对账路径。
+
 分类：OneID 不涉及，因为只处理集成 AppID、不关联客户或外部用户；Persistence 为 Config Owner PostgreSQL 本地事务；External Effects 不涉及，maintenance role 不执行 Provider 请求。非 UI 运维入口，不新增页面、API、队列、timer 或发布状态机。
 
 验收：严格拒绝缺字段、`null`、重复/未知字段、尾随 JSON、错误角色、非 root、过期 revision、同 operation ID 不同 payload、缺失凭据引用及 AppID 重绑；同 key 重放返回同一 release 且不复制审计/outbox；两阶段变更仅改变请求的两个设置并保留原非 Shop 值。OS-root 实际候选二进制在隔离 loopback PostgreSQL 上验证；断言没有管理员 session、runtime application 记录或 Provider 调用。Config Owner publish 事务沿用现有 Outbox append 失败回滚合同测试。

@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"sort"
@@ -66,6 +67,70 @@ func TestWeChatShopRefundUsesOfficialCreateAndExactQuery(t *testing.T) {
 		t.Fatalf("query=%+v calls=%d err=%v", query, calls, err)
 	}
 }
+
+func TestWeChatShopTransportFailuresRedactSecretsAndKeepRefundUnknown(t *testing.T) {
+	const (
+		accessToken = "synthetic-shop-access-token-secret"
+		appSecret   = "synthetic-shop-app-secret"
+		bodySecret  = "synthetic-body-secret"
+		phone       = "13800138000"
+	)
+	payloadDigest := effectport.Hash("shop-transport-redaction-payload")
+	material := Material{Intent: paymentport.ProviderIntent{
+		Kind: effectport.KindWeChatShopRefund, MerchantOrderNo: "merchant-transport-test",
+		RefundNo: "refund-transport-test", ProviderOrderID: "shop-order-transport-test",
+		ProductID: "shop-product-transport-test", SKUID: "shop-sku-transport-test",
+		RefundCount: 1, ReasonCode: "10000014", AmountMinor: 100, TotalMinor: 100,
+		Currency: "CNY", PayloadDigest: payloadDigest,
+	}}
+
+	for _, failure := range []string{"round-trip", "response-body-read"} {
+		t.Run(failure, func(t *testing.T) {
+			client := &http.Client{Transport: shopRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
+				if request.URL.Path != shopRefundPath || request.URL.Query().Get("access_token") != accessToken {
+					t.Fatal("refund request did not carry the synthetic token in its query")
+				}
+				if failure == "round-trip" {
+					return nil, errors.New("synthetic transport detail: " + bodySecret + " phone=" + phone)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: shopFailingBody{err: errors.New(bodySecret + " phone=" + phone)}}, nil
+			})}
+			provider, err := NewWeChatShop(ShopConfig{
+				Enabled: true, AppID: "synthetic-shop-app", AppSecret: appSecret,
+				APIBaseURL: "https://api.weixin.qq.com",
+			}, loaderStub{material}, client)
+			if err != nil {
+				t.Fatal("create test provider")
+			}
+			provider.token = accessToken
+			provider.expiry = time.Now().Add(time.Hour)
+
+			result, callErr := provider.Execute(context.Background(), testEnvelope(effectport.KindWeChatShopRefund, payloadDigest), effectport.Attempt{Number: 1, Generation: 1, Fence: 1})
+			if !errors.Is(callErr, ErrShopRequestFailed) {
+				t.Fatal("provider request failure did not return its safe sentinel")
+			}
+			for _, sensitive := range []string{accessToken, appSecret, bodySecret, phone} {
+				if strings.Contains(callErr.Error(), sensitive) {
+					t.Fatal("provider request error exposed synthetic credential or PII")
+				}
+			}
+			if result.Completion != effectport.StateUnknown || !result.CallAttempted || !result.RealExternalCallExecuted || !effectport.ValidDigest(result.ReceiptDigest) {
+				t.Fatalf("refund attempt classification changed: state=%s attempted=%t executed=%t receipt_valid=%t", result.Completion, result.CallAttempted, result.RealExternalCallExecuted, effectport.ValidDigest(result.ReceiptDigest))
+			}
+		})
+	}
+}
+
+type shopRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (roundTripper shopRoundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTripper(request)
+}
+
+type shopFailingBody struct{ err error }
+
+func (body shopFailingBody) Read([]byte) (int, error) { return 0, body.err }
+func (shopFailingBody) Close() error                  { return nil }
 
 func TestWeChatShopCallbackSeparatesURLAndEncryptedPOST(t *testing.T) {
 	key := []byte("0123456789abcdef0123456789abcdef")

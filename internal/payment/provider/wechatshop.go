@@ -27,6 +27,7 @@ const (
 )
 
 var ErrInvalidShopResponse = errors.New("invalid wechat shop response")
+var ErrShopRequestFailed = errors.New("wechat shop request failed")
 
 type ShopConfig struct {
 	Enabled          bool
@@ -236,25 +237,25 @@ func (provider *ShopProvider) stableToken(ctx context.Context, force bool) (stri
 func (provider *ShopProvider) post(ctx context.Context, path string, query url.Values, payload any) ([]byte, int64, bool, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, ErrShopRequestFailed
 	}
 	endpoint := *provider.base
 	endpoint.Path = path
 	endpoint.RawQuery = query.Encode()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(raw))
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, ErrShopRequestFailed
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Content-Type", "application/json")
 	response, err := provider.client.Do(request)
 	if err != nil {
-		return nil, 0, true, err
+		return nil, 0, true, ErrShopRequestFailed
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
-		return nil, 0, true, err
+		return nil, 0, true, ErrShopRequestFailed
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, 0, true, ErrInvalidShopResponse

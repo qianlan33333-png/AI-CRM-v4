@@ -1,51 +1,18 @@
 {
   "schema": 1,
-  "baseline_sha": "f731176fbc2ba2d3815b0fbe5ed8704495e3cd1f",
+  "baseline_sha": "485baa59a6dc1b2c4abf3d3d6a5c484fe4e0c9f5",
   "checks": [
     {
       "lane": "backend",
-      "path": "cmd/aicrm/runtime_config_maintenance_test.go",
-      "test": "TestRuntimeConfigMaintenanceHydratesStoredAIModelAndRefusesMissingKey"
+      "path": "internal/payment/provider/wechatshop_test.go",
+      "test": "TestWeChatShopTransportFailuresRedactSecretsAndKeepRefundUnknown"
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/runtime_config_maintenance_test.go",
-      "test": "TestExecuteRuntimeConfigMaintenancePublishesOnlyTwoShopKeysAndReplaysIdempotently"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/runtime_config_maintenance_test.go",
-      "test": "TestExecuteRuntimeConfigMaintenanceRefusesStaleWrongIdentityAndMissingCredentials"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/runtime_config_maintenance_test.go",
-      "test": "TestExecuteRuntimeConfigMaintenanceRequiresRootRoleAndNonRebinding"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/runtime_config_maintenance_test.go",
-      "test": "TestRuntimeConfigMaintenanceErrorsDoNotExposeAppID"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/runtime_config_maintenance_postgres_test.go",
-      "test": "TestPostgreSQLRuntimeConfigMaintenancePreservesSettingsAndOwnerReceipts",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/runtime_config_apply_test.go",
-      "test": "TestApplyRuntimeConfigAllowsInitialBindingAndMerchantCertificateRotation"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/runtime_config_apply_test.go",
-      "test": "TestApplyRuntimeConfigRejectsBoundPaymentAppIDSwitch"
+      "path": "internal/payment/provider/wechatshop_test.go",
+      "test": "TestWeChatShopRefundUsesOfficialCreateAndExactQuery"
     }
   ],
-  "installed_checks": [
-    "wechat-shop-runtime-config"
-  ],
+  "installed_checks": [],
   "build_commands": []
 }
