@@ -1,6 +1,5 @@
 import { apiRequestOptions } from '../src/api/transport';
 import { mountPageHeaderActions } from './shared/ui/pageHeaderActions';
-import { formatShanghaiDateTime } from './adminDateTime';
 
 type Status = { id: number; state: string; added: number; existing: number; failed: number; last_success_at?: string };
 const busyStates = new Set(['queued', 'running', 'retrying']);
@@ -20,12 +19,13 @@ export function installShopRefresh(): void {
   const status = document.createElement('p');
   status.dataset.shopRefreshStatus = '';
   status.setAttribute('role', 'status');
+  status.hidden = true;
   status.style.cssText = 'margin:12px 22px;color:var(--text-secondary,#646A73);font-size:13px;line-height:1.6';
   stage.prepend(status);
   let active = false;
   let current = 0;
   let timer: number | undefined;
-  const showError = (error: unknown) => { active = false; mountShopAction( [{ id: 'shop-refresh', label: '重试刷新微信小店商品', variant: 'secondary', onClick: async () => { render(await requestStatus(true)); }, onError: showError }]); status.textContent = error instanceof Error ? error.message : '微信小店刷新暂时不可用，请重试'; };
+  const showError = (error: unknown) => { active = false; status.hidden = false; mountShopAction( [{ id: 'shop-refresh', label: '重试刷新微信小店商品', variant: 'secondary', onClick: async () => { render(await requestStatus(true)); }, onError: showError }]); status.textContent = error instanceof Error ? error.message : '微信小店刷新暂时不可用，请重试'; };
   const requestStatus = async (submit = false): Promise<Status> => {
     const response = await fetch(`/api/admin/products/wechat-shop/${submit ? 'refresh' : 'refresh-status'}`, apiRequestOptions({ method: submit ? 'POST' : 'GET', credentials: 'same-origin' }));
     if (!response.ok) throw new Error(response.status === 403 ? '需要商品编辑权限' : '微信小店刷新暂时不可用，请检查接入配置或重试');
@@ -37,8 +37,8 @@ export function installShopRefresh(): void {
     if (!status.isConnected) return;
     const wasActive = active;
     active = busyStates.has(result.state);
-    const last = result.last_success_at ? formatShanghaiDateTime(result.last_success_at) : '尚未成功刷新';
-    status.textContent = `${active ? result.state === 'retrying' ? '刷新遇到失败，正在重试' : '微信小店商品刷新中' : '微信小店'} · 上次成功：${last} · 新增 ${result.added}，已存在 ${result.existing}，失败 ${result.failed}`;
+    status.hidden = !active;
+    status.textContent = active ? result.state === 'retrying' ? '微信小店商品刷新遇到失败，系统将自动重试；也可点击重试刷新。' : '微信小店商品刷新中' : '';
     mountShopAction( [{ id: 'shop-refresh', label: result.state === 'retrying' ? '重试刷新微信小店商品' : active ? '微信小店刷新中…' : '刷新微信小店商品', variant: 'secondary', disabled: active && result.state !== 'retrying', onError: showError, onClick: async () => { render(await requestStatus(true)); } }]);
     if (timer !== undefined) window.clearTimeout(timer);
     if (active) timer = window.setTimeout(() => { void requestStatus().then(render).catch(showError); }, 2000);

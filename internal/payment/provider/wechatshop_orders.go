@@ -16,13 +16,16 @@ func (p *ShopProvider) ListShopOrders(ctx context.Context, from, until time.Time
 	var response struct {
 		IDs     []exactShopReference `json:"order_id_list"`
 		Next    string               `json:"next_key"`
-		HasMore bool                 `json:"has_more"`
+		HasMore *bool                `json:"has_more"`
 	}
 	e := p.shopRead(ctx, "/channels/ec/order/list/get", map[string]any{"update_time_range": map[string]int64{"start_time": from.Unix(), "end_time": until.Unix()}, "page_size": 100, "next_key": next}, &response)
 	if e != nil {
 		return shopport.OrderPage{}, e
 	}
-	page := shopport.OrderPage{Next: response.Next, HasMore: response.HasMore}
+	if response.IDs == nil || response.HasMore == nil {
+		return shopport.OrderPage{}, ErrInvalidShopResponse
+	}
+	page := shopport.OrderPage{Next: response.Next, HasMore: *response.HasMore}
 	for _, id := range response.IDs {
 		page.IDs = append(page.IDs, id.value)
 	}
@@ -35,6 +38,7 @@ func (p *ShopProvider) ReadShopOrder(ctx context.Context, id string) (orderport.
 	var response struct {
 		Order struct {
 			ID        exactShopReference `json:"order_id"`
+			Status    exactShopInteger   `json:"status"`
 			Create    exactShopInteger   `json:"create_time"`
 			Update    exactShopInteger   `json:"update_time"`
 			OpenID    string             `json:"openid"`
@@ -80,7 +84,22 @@ func (p *ShopProvider) ReadShopOrder(ctx context.Context, id string) (orderport.
 		return orderport.ShopOrder{}, ErrInvalidShopResponse
 	}
 	result := orderport.ShopOrder{AppID: p.config.AppID, ID: id}
-	if !o.Detail.Pay.Time.set || o.Detail.Pay.Time.value == 0 || o.Detail.Pay.Method.value == 3 || o.Detail.Pay.Method.value == 4 || (o.Detail.Pay.Method.value == 2 && o.Detail.Pay.Transaction == "") {
+	if !o.Detail.Pay.Time.set {
+		if o.Status.set && (o.Status.value == 10 || o.Status.value == 250) {
+			return result, nil // Unpaid or cancelled without a payment fact.
+		}
+		return result, ErrInvalidShopResponse
+	}
+	if o.Detail.Pay.Time.value == 0 {
+		if o.Status.set && paidShopStatus(o.Status.value) {
+			return result, ErrInvalidShopResponse
+		}
+		return result, nil
+	}
+	if !o.Detail.Pay.Method.set {
+		return result, ErrInvalidShopResponse
+	}
+	if o.Detail.Pay.Method.value == 3 || o.Detail.Pay.Method.value == 4 || (o.Detail.Pay.Method.value == 2 && o.Detail.Pay.Transaction == "") {
 		return result, nil
 	}
 	if o.Detail.Pay.Time.value < 0 || !o.Create.set || o.Create.value < 1 || !o.Detail.Price.Amount.set || o.Detail.Price.Amount.value < 0 {
@@ -113,7 +132,10 @@ func (p *ShopProvider) ReadShopOrder(ctx context.Context, id string) (orderport.
 	}
 	seen := map[string]bool{}
 	for _, after := range o.AfterSales.List {
-		if !after.ID.set || seen[after.ID.value] {
+		if !after.ID.set {
+			return result, ErrInvalidShopResponse
+		}
+		if seen[after.ID.value] {
 			continue
 		}
 		seen[after.ID.value] = true

@@ -300,7 +300,14 @@ func (reference *exactShopReference) UnmarshalJSON(raw []byte) error {
 		if json.Unmarshal(raw, &value) != nil {
 			return ErrInvalidShopResponse
 		}
-	} else if len(raw) > 0 && !bytes.ContainsAny(raw, ".eE") {
+	} else if len(raw) > 0 {
+		// Numeric IDs may exceed int64, but JSON null/objects/negative numbers
+		// are never identifiers. Preserve decimal digits without a float cast.
+		for _, digit := range raw {
+			if digit < '0' || digit > '9' {
+				return ErrInvalidShopResponse
+			}
+		}
 		value = string(raw)
 	} else {
 		return ErrInvalidShopResponse
@@ -322,7 +329,52 @@ func decodeShopObject(raw []byte, destination any) bool {
 		return false
 	}
 	var extra any
-	return decoder.Decode(&extra) == io.EOF
+	if decoder.Decode(&extra) != io.EOF {
+		return false
+	}
+	fields := json.NewDecoder(bytes.NewReader(trimmed))
+	fields.UseNumber()
+	return uniqueShopJSONFields(fields)
+}
+
+// Duplicate fields make cursor/payment facts ambiguous even when JSON itself
+// is syntactically valid. Token keys are decoded, so escaped aliases also clash.
+func uniqueShopJSONFields(decoder *json.Decoder) bool {
+	token, err := decoder.Token()
+	if err != nil {
+		return false
+	}
+	delimiter, nested := token.(json.Delim)
+	if !nested {
+		return true
+	}
+	switch delimiter {
+	case '{':
+		seen := map[string]bool{}
+		for decoder.More() {
+			key, err := decoder.Token()
+			name, ok := key.(string)
+			if err != nil || !ok || seen[name] {
+				return false
+			}
+			seen[name] = true
+			if !uniqueShopJSONFields(decoder) {
+				return false
+			}
+		}
+		end, err := decoder.Token()
+		return err == nil && end == json.Delim('}')
+	case '[':
+		for decoder.More() {
+			if !uniqueShopJSONFields(decoder) {
+				return false
+			}
+		}
+		end, err := decoder.Token()
+		return err == nil && end == json.Delim(']')
+	default:
+		return false
+	}
 }
 
 func validShopIntent(intent paymentport.ProviderIntent) bool {

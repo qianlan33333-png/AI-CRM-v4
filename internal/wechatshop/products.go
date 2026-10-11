@@ -56,14 +56,19 @@ func (s *Service) SubmitProductRefresh(ctx context.Context) (shopport.RefreshSta
 			return err
 		}
 		var id int64
-		err = tx.QueryRow(ctx, `SELECT id FROM wechat_shop_product_refreshes WHERE app_id=$1 AND state<>'succeeded'`, s.AppID).Scan(&id)
+		var state string
+		err = tx.QueryRow(ctx, `SELECT id,state FROM wechat_shop_product_refreshes WHERE app_id=$1 AND state<>'succeeded'`, s.AppID).Scan(&id, &state)
 		if err == pgx.ErrNoRows {
 			err = tx.QueryRow(ctx, `INSERT INTO wechat_shop_product_refreshes(app_id,state) VALUES($1,'queued') RETURNING id`, s.AppID).Scan(&id)
 		}
 		if err != nil {
 			return err
 		}
-		_, err = jobqueue.InsertTxWithOptions(ctx, s.Client, tx, ProductArgs{RunID: id}, river.InsertOpts{Queue: jobqueue.OutboundQueue, MaxAttempts: 12, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled}}})
+		args := ProductArgs{RunID: id}
+		job, err := jobqueue.InsertTxWithOptions(ctx, s.Client, tx, args, river.InsertOpts{Queue: jobqueue.OutboundQueue, MaxAttempts: 12, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled}}})
+		if err == nil && state == "retrying" {
+			return jobqueue.WakePendingJobTx(ctx, s.Client, tx, job.Job.ID, args, jobqueue.OutboundQueue)
+		}
 		return err
 	})
 	if err != nil {

@@ -1,18 +1,68 @@
 {
   "schema": 1,
-  "baseline_sha": "485baa59a6dc1b2c4abf3d3d6a5c484fe4e0c9f5",
+  "baseline_sha": "e73c73ce0fd906c6c52ec0006efcb88302ec55f0",
   "checks": [
     {
       "lane": "backend",
-      "path": "internal/payment/provider/wechatshop_test.go",
-      "test": "TestWeChatShopTransportFailuresRedactSecretsAndKeepRefundUnknown"
+      "package": "./internal/payment/provider",
+      "race": true
     },
     {
       "lane": "backend",
-      "path": "internal/payment/provider/wechatshop_test.go",
-      "test": "TestWeChatShopRefundUsesOfficialCreateAndExactQuery"
+      "package": "./internal/wechatshop",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/wechat_shop_orders_integration_test.go",
+      "test": "TestPostgreSQLShopOrdersReplayRefundMissingContactAndRecovery",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/wechat_shop_adversarial_postgres_test.go",
+      "test": "TestPostgreSQLShopStateMoneyIdentityAndImmutableSnapshot",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/http/wechat_shop_test.go",
+      "test": "TestShopRefreshRequiresProductEditAndCSRF"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/app/target_reader_lifecycle_test.go",
+      "test": "TestShopProductCannotCheckoutOrEnableDistribution"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/domain/wechat_shop_test.go",
+      "test": "TestShopExternalSourceMoneyDoesNotRelaxNativeMath"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/adapters_test.go",
+      "test": "TestApplicationRouterMountsWeChatShopCallbackAndReconciliation"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/wechatShopProducts.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/orderAdapter.test.mjs"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/wechat_shop_chromium_postgres_test.go",
+      "test": "TestPostgreSQLShopRefreshRecoveryAndOrderChromiumJourney"
     }
   ],
-  "installed_checks": [],
+  "installed_checks": [
+    "wechat-shop"
+  ],
   "build_commands": []
 }

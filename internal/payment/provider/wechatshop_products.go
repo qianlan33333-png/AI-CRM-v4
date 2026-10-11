@@ -19,7 +19,7 @@ func (p *ShopProvider) shopRead(ctx context.Context, path string, request, respo
 	var envelope struct {
 		ErrCode exactShopInteger `json:"errcode"`
 	}
-	if !decodeShopObject(raw, &envelope) || envelope.ErrCode.value != 0 || !decodeShopObject(raw, response) {
+	if !decodeShopObject(raw, &envelope) || !envelope.ErrCode.set || envelope.ErrCode.value != 0 || !decodeShopObject(raw, response) {
 		return ErrInvalidShopResponse
 	}
 	return nil
@@ -32,6 +32,9 @@ func (p *ShopProvider) ListShopProducts(ctx context.Context, next string) (shopp
 	err := p.shopRead(ctx, "/channels/ec/product/list/get", map[string]any{"status": 5, "page_size": 30, "next_key": next}, &response)
 	if err != nil {
 		return shopport.ProductPage{}, err
+	}
+	if response.Products == nil {
+		return shopport.ProductPage{}, ErrInvalidShopResponse
 	}
 	page := shopport.ProductPage{Next: response.Next}
 	for _, id := range response.Products {

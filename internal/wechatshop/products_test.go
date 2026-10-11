@@ -204,3 +204,43 @@ func TestShopDailyScheduleBeijing(t *testing.T) {
 		t.Fatal("boundary repeated")
 	}
 }
+
+func TestPostgreSQLShopManualRetryWakesSameJob(t *testing.T) {
+	s, _ := fixture(t)
+	ctx := context.Background()
+	first, e := s.SubmitProductRefresh(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var job int64
+	if e = s.Pool.QueryRow(ctx, `UPDATE river_job SET state='retryable',attempt=3,attempted_at=clock_timestamp(),scheduled_at=clock_timestamp()+interval '1 hour' WHERE kind='wechat_shop.product_refresh' RETURNING id`).Scan(&job); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.Pool.Exec(ctx, `UPDATE wechat_shop_product_refreshes SET state='retrying',failed_count=1 WHERE id=$1`, first.ID); e != nil {
+		t.Fatal(e)
+	}
+	second, e := s.SubmitProductRefresh(ctx)
+	if e != nil || second.ID != first.ID {
+		t.Fatal("retry replaced logical run", e)
+	}
+	var id int64
+	var count, attempt int
+	var state string
+	var scheduled time.Time
+	if e = s.Pool.QueryRow(ctx, `SELECT id,state,attempt,scheduled_at,(SELECT count(*) FROM river_job WHERE kind='wechat_shop.product_refresh') FROM river_job WHERE id=$1`, job).Scan(&id, &state, &attempt, &scheduled, &count); e != nil {
+		t.Fatal(e)
+	}
+	if id != job || count != 1 || attempt != 3 || scheduled.After(time.Now().Add(5*time.Second)) || state != "available" {
+		t.Fatalf("manual retry did not wake original task: id=%d count=%d attempt=%d state=%s future=%t", id, count, attempt, state, scheduled.After(time.Now().Add(5*time.Second)))
+	}
+	// A running task must retain its state and attempt on another click.
+	if _, e = s.Pool.Exec(ctx, `UPDATE river_job SET state='running',attempted_at=clock_timestamp() WHERE id=$1`, job); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.SubmitProductRefresh(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if e = s.Pool.QueryRow(ctx, `SELECT state,attempt FROM river_job WHERE id=$1`, job).Scan(&state, &attempt); e != nil || state != "running" || attempt != 3 {
+		t.Fatal("running task changed", e)
+	}
+}
