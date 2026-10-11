@@ -141,6 +141,7 @@ import (
 )
 
 type composedApplication struct {
+	shopSync              *wechatshop.Service
 	invitationService     *mediaapp.InvitationService
 	catalogService        *groupopsapp.CatalogService
 	pool                  *platformpostgres.Pool
@@ -365,6 +366,14 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	effectsModule := externaleffects.NewModuleRegistration()
 	effectWorkers := river.NewWorkers()
 	shopProductWorker := &wechatshop.ProductWorker{}
+	shopOrderWorker := &wechatshop.OrderWorker{}
+	shopDailyWorker := &wechatshop.DailyOrderWorker{}
+	if err = river.AddWorkerSafely[wechatshop.OrderArgs](effectWorkers, shopOrderWorker); err != nil {
+		return fail(err)
+	}
+	if err = river.AddWorkerSafely[wechatshop.DailyOrderArgs](effectWorkers, shopDailyWorker); err != nil {
+		return fail(err)
+	}
 	if err = river.AddWorkerSafely[wechatshop.ProductArgs](effectWorkers, shopProductWorker); err != nil {
 		return fail(err)
 	}
@@ -652,7 +661,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	periodicJobs := []*river.PeriodicJob{segment.AudienceSchedulePeriodicJob(), automation.DirectPushReconcilePeriodicJob(), externaleffects.RecoveryPeriodicJob()}
 	if cfg.WeChatShop.Enabled {
-		periodicJobs = append(periodicJobs, wechatshop.ProductPeriodicJob())
+		periodicJobs = append(periodicJobs, wechatshop.ProductPeriodicJob(), wechatshop.OrderPeriodicJob())
 	}
 	if cfg.WeCom.CustomerSyncEnabled {
 		periodicJobs = append(periodicJobs, wecom.CustomerSyncDailyPeriodicJob())
@@ -1720,8 +1729,19 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = paymentService.SetShopReconciler(wechatShopAdapter); err != nil {
 		return fail(err)
 	}
+	if cfg.WeChatShop.Enabled && commercePushCipher == nil {
+		return fail(errors.New("WeChat Shop requires the existing Commerce payload encryption key"))
+	}
 	shopSync := &wechatshop.Service{Pool: pool.Native(), UOW: uow, Client: effectClient, AppID: cfg.WeChatShop.AppID, Enabled: cfg.WeChatShop.Enabled, Products: productapp.ShopCatalog{Store: productRepository, Events: productEvents}, Reader: wechatShopAdapter}
 	shopProductWorker.Service = shopSync
+	shopOrders := orderapp.ShopOrders{Store: orderRepository, Products: shopSync.Products, Consumer: commercePushService, Cipher: commercePushCipher, Identity: oneID, Subjects: queries}
+	shopSync.Orders = shopOrders
+	shopSync.Pending = shopOrders
+	shopSync.OrderReader = wechatShopAdapter
+	shopSync.Wake = shopSync
+	shopOrderWorker.Service = shopSync
+	shopDailyWorker.Service = shopSync
+	productExternalPush.SetShopWakeup(shopSync)
 	productBindings.ProductHandler.SetShopRefresh(shopSync)
 	if err = paymentService.SetWeChatPayReconciler(wechatPayAdapter); err != nil {
 		return fail(err)
@@ -2020,6 +2040,10 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 			return fail(verifierErr)
 		}
 		if err = paymentHandler.SetShopCallbackVerifier(shopVerifier); err != nil {
+			return fail(err)
+		}
+		shopSync.Verifier = shopVerifier
+		if err = shopSync.EnsureOrderProgress(ctx); err != nil {
 			return fail(err)
 		}
 	}
@@ -2451,6 +2475,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	adminAPIs.Handle("/api/public/alipay/", paymentHandler)
 	adminAPIs.Handle("/pay/alipay/return", paymentHandler)
 	adminAPIs.Handle("/api/public/wechat-shop/", paymentHandler)
+	adminAPIs.Handle("/api/public/wechat-shop/callback", shopSync)
 	adminAPIs.Handle("/api/public/service-period-member-grid/bootstrap", productBindings.Products)
 	adminAPIs.Handle("/api/public/service-period-member-grid/query", productBindings.Products)
 	adminAPIs.Handle("/api/public/service-period-member-grid/scoped-query", productBindings.Products)
@@ -2762,7 +2787,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	// It still performs the full Composition below and its service persists the
 	// normal Payment/Order/audit/outbox facts; it simply must not claim a daemon
 	// was started or widen the catalog/migration for an emergency operation.
-	if cfg.Role != platformconfig.RolePaymentReconcile && cfg.Role != platformconfig.RoleProfitSharingReconcile && cfg.Role != platformconfig.RolePaymentRefund && cfg.Role != platformconfig.RoleInvoiceRecover {
+	if cfg.Role != platformconfig.RolePaymentReconcile && cfg.Role != platformconfig.RoleProfitSharingReconcile && cfg.Role != platformconfig.RolePaymentRefund && cfg.Role != platformconfig.RoleInvoiceRecover && cfg.Role != platformconfig.RoleShopBackfill {
 		// Record only after every configuration-dependent Adapter and route has
 		// been constructed successfully. A failed startup therefore leaves no
 		// application fact that could be mistaken for a running process.
@@ -2773,7 +2798,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if cfg.Ops.Enabled {
 		handler = platformdiagnostics.MiddlewareWithClientErrorFilter(handler, cfg.ReleaseSHA, opsRecord, observePublicSurveyClientError)
 	}
-	return &composedApplication{invitationService: invitationService, catalogService: catalogService, pool: pool, handler: handler, authentication: authentication, management: management, weComProcessor: weComProcessor, weComArchiveProcessor: weComArchiveProcessor, effectsRuntime: effectsRuntime, paymentDistribution: paymentService, paymentReconciliation: paymentService, invoiceRecovery: invoiceService, nativeOrders: orderService, paymentSession: paymentSession, channelEntrantActions: channelEntrantActions, customerSync: customerSync, hxcDashboard: hxcDashboard, hxcSource: hxcSource, adminOps: adminOpsProjection, release: releaseObservation, diagnostics: diagnostics}, nil
+	return &composedApplication{shopSync: shopSync, invitationService: invitationService, catalogService: catalogService, pool: pool, handler: handler, authentication: authentication, management: management, weComProcessor: weComProcessor, weComArchiveProcessor: weComArchiveProcessor, effectsRuntime: effectsRuntime, paymentDistribution: paymentService, paymentReconciliation: paymentService, invoiceRecovery: invoiceService, nativeOrders: orderService, paymentSession: paymentSession, channelEntrantActions: channelEntrantActions, customerSync: customerSync, hxcDashboard: hxcDashboard, hxcSource: hxcSource, adminOps: adminOpsProjection, release: releaseObservation, diagnostics: diagnostics}, nil
 }
 
 func observePublicSurveyClientError(method, route string) bool {

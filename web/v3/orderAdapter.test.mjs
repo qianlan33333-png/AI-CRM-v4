@@ -1187,3 +1187,28 @@ for (const scenario of ['success', 'empty', 'overflow', 'identity-error', 'forbi
  } finally {fixture.window.close();}
 }
 console.log('unified export filters, counts, empty workbook, loading, errors and XLSX download: PASS');
+
+const shopExternalDom=new JSDOM(`<!doctype html><body data-page="orderDetail"><div><div><h2>订单详情</h2></div><div></div></div><div><div><h2>事件时间线</h2></div><div></div></div><div><div><h2>退款</h2></div><div></div></div></body>`,{
+ url:'https://test.invalid/admin/orderDetail.html?id=shop-external&provider=wechat_shop',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:new VirtualConsole(),beforeParse(window){browserRuntime(window);window.fetch=async(input)=>{const u=new URL(typeof input==='string'?input:input.url,window.location.href);return new Response(JSON.stringify(u.pathname.includes('shop-external')?{record_origin:'external',provider:'wechat_shop',merchant_order_no:'shop-external',product_name:'小店课程',amount_yuan:'1.90',refunded_minor:190,created_at:'2026-10-11T00:00:00Z',status:'refunded',distribution:[],distribution_read_state:'available'}:{items:[]}),{headers:{'Content-Type':'application/json'}})}}
+});
+try{shopExternalDom.window.eval(host);await shopExternalDom.window.fetch('/api/admin/orders/shop-external?provider=wechat_shop');await new Promise(resolve=>setTimeout(resolve,65));const body=shopExternalDom.window.document.body.textContent;assert.match(body,/微信小店外部订单/);assert.match(body,/微信小店已退款金额.*¥1.90/);assert.match(body,/权益需人工处理/);assert.doesNotMatch(body,/分销信息/,'Shop orders expose no distribution capability');assert.equal(shopExternalDom.window.document.querySelector('input'),null,'external refund cannot be initiated in CRM')}finally{shopExternalDom.window.close()}
+console.log('WeChat Shop external paid/refund display and manual rights handling: PASS');
+
+const shopRaw={id:901,record_origin:'external',provider:'wechat_shop',provider_label:'微信小店',merchant_order_no:'shop-contract',product_name:'小店课程',amount_yuan:'1.90',refunded_minor:190,currency:'CNY',created_at:'2026-10-11T00:00:00Z',status:'refunded',distribution:[],distribution_read_state:'available'};
+const shopContractDom=new JSDOM('<!doctype html><body data-page="orders"></body>',{
+ url:'https://test.invalid/admin/orders',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:new VirtualConsole(),beforeParse(window){browserRuntime(window);window.fetch=async(input)=>{const u=new URL(typeof input==='string'?input:input.url,window.location.href);const payload=u.pathname==='/api/admin/orders'?{items:[shopRaw]}:u.pathname==='/api/admin/orders/shop-contract'?shopRaw:{items:[]};return new Response(JSON.stringify(payload),{headers:{'Content-Type':'application/json'}})}}
+});
+try{
+ shopContractDom.window.eval(host);
+ const raw=await (await shopContractDom.window.fetch('/api/admin/orders')).json();
+ assert.equal(raw.items[0].record_origin,'external','raw API readers preserve canonical external facts');
+ const list=await shopContractDom.window.OrderAdapterApi.loadDb({page:'orders'});
+ assert.equal(list.rows.orders.length,1,'frozen list DTO accepts the Shop record');
+ assert.equal(list.rows.orders[0].pay,'微信小店');
+ assert.equal(list.rows.orders[0].recordOrigin,'v1_history','only the private frozen DTO receives the read-only enum');
+ const detail=await shopContractDom.window.OrderAdapterApi.loadDb({page:'orderDetail',id:'shop-contract'});
+ assert.equal(detail.rows.orders.length,1,'frozen detail DTO accepts the Shop record');
+ const direct=await (await shopContractDom.window.fetch('/api/admin/orders/shop-contract')).json();
+ assert.equal(direct.record_origin,'external','DTO projection does not rewrite later raw detail reads');
+}finally{shopContractDom.window.close()}
+console.log('WeChat Shop exact list/detail DTO compatibility with canonical external API facts: PASS');

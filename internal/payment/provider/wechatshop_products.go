@@ -5,6 +5,7 @@ import (
 	productport "github.com/qianlan33333-png/AI-CRM-v3/internal/product/port"
 	shopport "github.com/qianlan33333-png/AI-CRM-v3/internal/wechatshop/port"
 	"strings"
+	"unicode/utf8"
 )
 
 func (p *ShopProvider) shopRead(ctx context.Context, path string, request, response any) error {
@@ -48,7 +49,7 @@ func (p *ShopProvider) ReadShopProduct(ctx context.Context, id string) (shopport
 				ID    exactShopReference `json:"sku_id"`
 				Price exactShopInteger   `json:"sale_price"`
 				Attrs []struct {
-					Value string `json:"value"`
+					Value string `json:"attr_value"`
 				} `json:"sku_attrs"`
 			} `json:"skus"`
 		} `json:"product"`
@@ -75,6 +76,14 @@ func (p *ShopProvider) ReadShopProduct(ctx context.Context, id string) (shopport
 		for _, a := range s.Attrs {
 			if a.Value != "" {
 				name += " / " + a.Value
+			}
+		}
+		// Product's existing name contract is 200 UTF-8 bytes. Source SKU IDs
+		// remain exact even when a long title plus attributes exceeds it.
+		if len(name) > 200 {
+			name = name[:200]
+			for !utf8.ValidString(name) {
+				name = name[:len(name)-1]
 			}
 		}
 		result.SKUs = append(result.SKUs, productport.ShopSKU{AppID: p.config.AppID, ProductID: id, SKUID: s.ID.value, Name: name, PriceMinor: s.Price.value})

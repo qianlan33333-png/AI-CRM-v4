@@ -31,6 +31,7 @@ const (
 	RolePaymentRefund Role = "payment-refund"
 	// One-shot, explicitly selected failed invoice recovery; no daemon or direct Provider write.
 	RoleInvoiceRecover Role = "invoice-recover"
+	RoleShopBackfill   Role = "wechat-shop-backfill"
 
 	// These defaults are the deployment policy used when a Runtime is assembled
 	// without an environment loader, for example by an isolated composition
@@ -46,43 +47,44 @@ const (
 )
 
 type Runtime struct {
-	ListenAddress              string
-	ReleaseSHA                 string
-	Role                       Role
-	DatabaseURL                string
-	PublicOrigin               string
-	H5PublicOrigin             string
-	Bootstrap                  Bootstrap
-	WeCom                      WeCom
-	GroupOps                   GroupOps
-	AutomationOperations       AutomationOperations
-	Effects                    Effects
-	TagCatalog                 TagCatalogProvider
-	Survey                     Survey
-	Referral                   Referral
-	CommercePush               CommercePush
-	WeChatPay                  WeChatPay
-	Invoice                    Invoice
-	Alipay                     Alipay
-	WeChatShop                 WeChatShop
-	WorkerOwner                string
-	WorkerLimit                int
-	PaymentReconcileID         int64
-	ProfitSharingReconcileID   int64
-	PaymentRefundID            int64
-	PaymentRefundOrderID       int64
-	PaymentRefundAmountMinor   int64
-	PaymentRefundKey           string
-	PaymentRefundAuthorization string
-	InvoiceRecoverID           string
-	CustomerSyncTrigger        string
-	HXCDashboard               HXCDashboard
-	OperationCycleServiceToken string
-	AIAssistant                AIAssistant
-	AIGeneration               AIGeneration
-	SidebarWarehouse           SidebarWarehouse
-	OpenPlatform               OpenPlatform
-	Ops                        Ops
+	ListenAddress                       string
+	ReleaseSHA                          string
+	Role                                Role
+	DatabaseURL                         string
+	PublicOrigin                        string
+	H5PublicOrigin                      string
+	Bootstrap                           Bootstrap
+	WeCom                               WeCom
+	GroupOps                            GroupOps
+	AutomationOperations                AutomationOperations
+	Effects                             Effects
+	TagCatalog                          TagCatalogProvider
+	Survey                              Survey
+	Referral                            Referral
+	CommercePush                        CommercePush
+	WeChatPay                           WeChatPay
+	Invoice                             Invoice
+	Alipay                              Alipay
+	WeChatShop                          WeChatShop
+	WorkerOwner                         string
+	WorkerLimit                         int
+	PaymentReconcileID                  int64
+	ProfitSharingReconcileID            int64
+	PaymentRefundID                     int64
+	PaymentRefundOrderID                int64
+	PaymentRefundAmountMinor            int64
+	PaymentRefundKey                    string
+	PaymentRefundAuthorization          string
+	InvoiceRecoverID                    string
+	ShopBackfillFrom, ShopBackfillUntil time.Time
+	CustomerSyncTrigger                 string
+	HXCDashboard                        HXCDashboard
+	OperationCycleServiceToken          string
+	AIAssistant                         AIAssistant
+	AIGeneration                        AIGeneration
+	SidebarWarehouse                    SidebarWarehouse
+	OpenPlatform                        OpenPlatform
+	Ops                                 Ops
 }
 
 type Bootstrap struct {
@@ -688,7 +690,7 @@ func Load() (Runtime, error) {
 		return Runtime{}, errors.New("invalid AICRM_RELEASE_SHA")
 	}
 	switch cfg.Role {
-	case RoleAPI, RoleWorker, RoleEffectsWorker, RolePaymentReconcile, RoleProfitSharingReconcile, RolePaymentRefund, RoleInvoiceRecover:
+	case RoleAPI, RoleWorker, RoleEffectsWorker, RolePaymentReconcile, RoleProfitSharingReconcile, RolePaymentRefund, RoleInvoiceRecover, RoleShopBackfill:
 	default:
 		return Runtime{}, errors.New("invalid AICRM_ROLE")
 	}
@@ -720,6 +722,16 @@ func Load() (Runtime, error) {
 			if len(item.value) < item.min || len(item.value) > item.max || strings.TrimSpace(item.value) != item.value || strings.IndexFunc(item.value, func(r rune) bool { return r < 0x21 || r > 0x7e }) >= 0 {
 				return Runtime{}, errors.New("invalid " + item.name)
 			}
+		}
+	}
+	if cfg.Role == RoleShopBackfill {
+		cfg.ShopBackfillFrom, err = time.Parse(time.RFC3339, os.Getenv("AICRM_SHOP_BACKFILL_FROM"))
+		if err != nil {
+			return Runtime{}, errors.New("invalid AICRM_SHOP_BACKFILL_FROM")
+		}
+		cfg.ShopBackfillUntil, err = time.Parse(time.RFC3339, os.Getenv("AICRM_SHOP_BACKFILL_UNTIL"))
+		if err != nil || !cfg.ShopBackfillUntil.After(cfg.ShopBackfillFrom) {
+			return Runtime{}, errors.New("invalid AICRM_SHOP_BACKFILL_UNTIL")
 		}
 	}
 	if cfg.Role == RoleInvoiceRecover {

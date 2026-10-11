@@ -49,3 +49,31 @@ func TestTargetReaderProjectsPersistedLifecycleForShareAndCheckout(t *testing.T)
 		})
 	}
 }
+
+func TestShopProductCannotCheckoutOrEnableDistribution(t *testing.T) {
+	ctx := context.Background()
+	product := validTestProduct(1)
+	product.SourceKind = productport.SourceWeChatShop
+	product.Images = []string{"https://example.test/existing-shop-media.jpg"}
+	store := &productTestStore{products: []productport.Product{product}}
+	svc := NewService(&productTestUoW{}, store, &productTestEvents{})
+	reader := &TargetReader{ordinary: svc, period: &ServicePeriodService{}}
+	if _, e := reader.ReadCheckoutProductWithin(ctx, productport.ProductOptionStandard, 1); e == nil {
+		t.Fatal("shop product locally sold")
+	}
+	// The same ordinary edit service owns the distribution policy guard.
+	command := productport.UpdateCommand{ID: 1, ExpectedVersion: product.Version, Name: product.Name, Currency: product.Currency, PriceMinor: product.PriceMinor, Actor: 1, IdempotencyKey: "shop-policy-0000001", DistributionPolicy: &productport.DistributionPolicy{Enabled: true, CommissionRateBasisPoints: 1000, WaitDays: 7}}
+
+	if _, e := svc.Update(ctx, command); e == nil {
+		t.Fatal("shop distribution enabled")
+	}
+	command.DistributionPolicy = nil
+	command.IdempotencyKey = "shop-basic-00000001"
+	command.Name = "更改基础名称"
+	command.Images = []string{"https://example.test/not-shop-media.jpg"}
+	command.LegacyAdminProjection = json.RawMessage(`{"schema_version":1,"status":"enabled","enabled":true,"buy_button_text":"不应保存的售卖设置"}`)
+	updated, e := svc.Update(ctx, command)
+	if e != nil || updated.Name != command.Name || len(updated.Images) != 1 || updated.Images[0] != product.Images[0] || !jsonEquivalent(updated.LegacyAdminProjection, product.LegacyAdminProjection) {
+		t.Fatalf("Shop basic edit changed a non-basic capability: err=%v name=%q images=%v before=%s after=%s", e, updated.Name, updated.Images, product.LegacyAdminProjection, updated.LegacyAdminProjection)
+	}
+}

@@ -1056,6 +1056,8 @@ func orderStatusLabel(value domain.Status) string {
 
 func orderRecordOriginLabel(value domain.RecordOrigin) string {
 	switch value {
+	case domain.RecordOriginExternal:
+		return "外部订单"
 	case domain.RecordOriginNative:
 		return "系统订单"
 	case domain.RecordOriginHistory:

@@ -38,6 +38,16 @@ func run() error {
 		return err
 	}
 	defer application.Close()
+	if cfg.Role == platformconfig.RoleShopBackfill {
+		if application.shopSync == nil {
+			return errors.New("shop backfill is not composed")
+		}
+		if err := application.shopSync.ReadWindow(ctx, cfg.ShopBackfillFrom, cfg.ShopBackfillUntil); err != nil {
+			return errors.New("shop backfill incomplete; replay the same window")
+		}
+		slog.Info("wechat shop backfill complete", "from", cfg.ShopBackfillFrom, "until", cfg.ShopBackfillUntil, "release_sha", cfg.ReleaseSHA)
+		return nil
+	}
 	if cfg.Role == platformconfig.RolePaymentRefund {
 		result, refundErr := executePaymentRefund(ctx, application.paymentReconciliation, cfg, os.Geteuid())
 		if refundErr != nil {

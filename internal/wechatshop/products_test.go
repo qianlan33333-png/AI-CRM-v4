@@ -82,6 +82,8 @@ func fixture(t *testing.T) (*Service, *productstore.Repository) {
 	events, _ := productstore.NewTransactionalEventAppender(auditService, outbox.NewPostgreSQL())
 	workers := river.NewWorkers()
 	_ = river.AddWorkerSafely[ProductArgs](workers, &ProductWorker{})
+	_ = river.AddWorkerSafely[OrderArgs](workers, &OrderWorker{})
+	_ = river.AddWorkerSafely[DailyOrderArgs](workers, &DailyOrderWorker{})
 	client, e := jobqueue.NewInsertClient(pool, workers)
 	if e != nil {
 		t.Fatal(e)

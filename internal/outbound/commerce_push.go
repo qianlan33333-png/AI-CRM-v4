@@ -259,10 +259,44 @@ func (s *CommercePushService) ConsumePaidEventWithin(ctx context.Context, event 
 	return nil
 }
 
+// Shop recovery is independent of the native paid fanout. Missing identity
+// fields are allowed; absent Product/configuration keeps only this fact pending.
+func (s *CommercePushService) ConsumeShopPaidEventWithin(ctx context.Context, event orderport.PaidEvent) (bool, error) {
+	if s == nil || !event.ValidShopFact() {
+		return false, ErrCommercePushInvalid
+	}
+	if _, e := platformpostgres.RequireTransaction(ctx); e != nil {
+		return false, e
+	}
+	complete := true
+	for _, item := range event.Order.Items {
+		if item.ProductID == nil {
+			complete = false
+			continue
+		}
+		if e := s.consumeOrderItemWithin(ctx, event, item); e != nil {
+			return false, e
+		}
+		slot := commerceProductSlot(*item.ProductID) + ":line:" + strconv.FormatInt(int64(item.LineNo), 10)
+		record, found, e := commerceIntentExists(ctx, commerceOrderSourceReference(event, item.LineNo), slot, event.SourceDigest, *item.ProductID)
+		if e != nil {
+			return false, e
+		}
+		if !found || validCommercePlannedState(record.state) {
+			complete = false
+		}
+	}
+	return complete, nil
+}
+
 func (s *CommercePushService) consumeOrderItemWithin(ctx context.Context, event orderport.PaidEvent, item orderdomain.ItemSnapshot) error {
 	sourceReference := commerceOrderSourceReference(event, item.LineNo)
 	targetSlot := commerceProductSlot(*item.ProductID)
-	if _, found, err := commerceIntentExists(ctx, sourceReference, targetSlot, event.SourceDigest, *item.ProductID); err != nil || found {
+	shop := event.ValidShopFact()
+	if shop {
+		targetSlot += ":line:" + strconv.FormatInt(int64(item.LineNo), 10)
+	}
+	if existing, found, err := commerceIntentExists(ctx, sourceReference, targetSlot, event.SourceDigest, *item.ProductID); err != nil || (found && (!shop || !validCommercePlannedState(existing.state))) {
 		return err
 	}
 	configuration, err := s.products.ReadExternalPushConfigurationForOrder(ctx, productport.ID(*item.ProductID))
@@ -273,7 +307,7 @@ func (s *CommercePushService) consumeOrderItemWithin(ctx context.Context, event 
 	// that lock: a concurrent first consumer may have committed the immutable
 	// dispatch while this consumer waited, and a later configuration revision
 	// must never create a competing EER envelope for the same paid event.
-	if _, found, err := commerceIntentExists(ctx, sourceReference, targetSlot, event.SourceDigest, *item.ProductID); err != nil || found {
+	if existing, found, err := commerceIntentExists(ctx, sourceReference, targetSlot, event.SourceDigest, *item.ProductID); err != nil || (found && (!shop || !validCommercePlannedState(existing.state))) {
 		return err
 	}
 	if !configuration.Enabled || !s.targets.CommercePushProviderEnabled() {
@@ -301,7 +335,7 @@ func (s *CommercePushService) consumeOrderItemWithin(ctx context.Context, event 
 		}
 		return s.planCommercePushWithin(ctx, commercePlannedIntent{sourceKind: "order_paid", sourceReference: sourceReference, orderEventID: event.ID, productID: *item.ProductID, productKind: configuration.ProductKind, targetReference: configuration.ConfigurationReference, targetSlot: targetSlot, revision: configuration.Revision, sourceDigest: event.SourceDigest, state: state})
 	}
-	_, err = s.acceptCommercePushWithin(ctx, commerceAcceptedIntent{sourceKind: "order_paid", sourceReference: sourceReference, orderEventID: event.ID, productID: *item.ProductID, productKind: configuration.ProductKind, targetReference: configuration.ConfigurationReference, targetSlot: targetSlot, revision: configuration.Revision, sourceDigest: event.SourceDigest, target: target, body: body, payloadMode: "legacy"})
+	_, err = s.acceptCommercePushWithin(ctx, commerceAcceptedIntent{resumePlanned: shop, sourceKind: "order_paid", sourceReference: sourceReference, orderEventID: event.ID, productID: *item.ProductID, productKind: configuration.ProductKind, targetReference: configuration.ConfigurationReference, targetSlot: targetSlot, revision: configuration.Revision, sourceDigest: event.SourceDigest, target: target, body: body, payloadMode: "legacy"})
 	return err
 }
 
@@ -490,6 +524,7 @@ func validCommercePlannedState(v string) bool {
 }
 
 type commerceAcceptedIntent struct {
+	resumePlanned                                            bool // only authenticated external paid recovery may promote an unsent row
 	payloadMode                                              string
 	sourceKind, sourceReference, targetReference, targetSlot string
 	orderEventID                                             int64
@@ -511,11 +546,14 @@ func (s *CommercePushService) acceptCommercePushWithin(ctx context.Context, in c
 	if s == nil || in.productID < 1 || in.revision < 1 || in.sourceDigest == ([32]byte{}) || !validCommercePushKind(in.productKind) || !in.target.valid() || len(in.body) == 0 || len(in.body) > 64<<10 || !json.Valid(in.body) {
 		return commerceIntentRecord{}, ErrCommercePushInvalid
 	}
-	if existing, found, err := commerceIntentExists(ctx, in.sourceReference, in.targetSlot, in.sourceDigest, in.productID); err != nil || found {
+	if existing, found, err := commerceIntentExists(ctx, in.sourceReference, in.targetSlot, in.sourceDigest, in.productID); err != nil || (found && (!in.resumePlanned || !validCommercePlannedState(existing.state))) {
 		return existing, err
 	}
 	payloadDigest := sha256.Sum256(in.body)
 	targetDigest := sha256.Sum256([]byte("commerce-push.target.v1\x00" + in.target.Reference + "\x00" + in.target.Slot))
+	if in.resumePlanned {
+		targetDigest = sha256.Sum256([]byte("commerce-push.target.v1\x00" + in.target.Reference + "\x00" + in.target.Slot + "\x00" + in.targetSlot))
+	}
 	policyDigest := in.target.policyDigest()
 	ciphertext, keyVersion, err := s.cipher.EncryptCommercePayload(in.body, commercePayloadAAD(in.sourceReference, in.targetSlot))
 	if err != nil || keyVersion != 1 || len(ciphertext) < 29 {
@@ -543,8 +581,12 @@ func (s *CommercePushService) acceptCommercePushWithin(ctx context.Context, in c
 	}
 	keyDigest := sha256.Sum256([]byte("commerce-push.intent.v1\x00" + in.sourceReference + "\x00" + in.targetSlot))
 	intentDigest := commerceIntentDigest(in.sourceKind, in.sourceReference, in.productID, in.targetSlot, in.revision, in.sourceDigest, targetDigest, payloadDigest, policyDigest)
+	conflictAction := "DO NOTHING"
+	if in.resumePlanned {
+		conflictAction = `DO UPDATE SET target_reference=EXCLUDED.target_reference,product_configuration_revision=EXCLUDED.product_configuration_revision,target_digest=EXCLUDED.target_digest,payload_digest=EXCLUDED.payload_digest,policy_digest=EXCLUDED.policy_digest,intent_digest=EXCLUDED.intent_digest,envelope_fingerprint=EXCLUDED.envelope_fingerprint,payload_ciphertext=EXCLUDED.payload_ciphertext,payload_key_version=EXCLUDED.payload_key_version,effect_id=EXCLUDED.effect_id,queue_receipt_id=EXCLUDED.queue_receipt_id,state='queued',updated_at=EXCLUDED.updated_at,payload_mode=EXCLUDED.payload_mode WHERE outbound_commerce_push_intents.effect_id IS NULL AND outbound_commerce_push_intents.state LIKE 'planned_%' AND outbound_commerce_push_intents.source_digest=EXCLUDED.source_digest AND outbound_commerce_push_intents.product_id=EXCLUDED.product_id`
+	}
 	var out commerceIntentRecord
-	err = tx.QueryRow(ctx, `INSERT INTO outbound_commerce_push_intents(source_kind,source_reference,order_paid_event_id,product_id,product_kind,target_reference,target_slot,product_configuration_revision,source_digest,target_digest,payload_digest,policy_digest,receipt_key_digest,intent_digest,envelope_fingerprint,payload_ciphertext,payload_key_version,effect_id,queue_receipt_id,state,created_at,updated_at,payload_mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'queued',$20,$20,$21) ON CONFLICT(source_reference,target_slot) DO NOTHING RETURNING id,effect_id,state,created_at`, in.sourceKind, in.sourceReference, eventID, in.productID, string(in.productKind), in.targetReference, in.targetSlot, in.revision, in.sourceDigest[:], targetDigest[:], payloadDigest[:], policyDigest[:], keyDigest[:], intentDigest[:], string(envelope.Fingerprint()), ciphertext, keyVersion, projection.ID, receipt.QueueReceiptID, now, in.payloadMode).Scan(&out.id, &out.effectID, &out.state, &out.createdAt)
+	err = tx.QueryRow(ctx, `INSERT INTO outbound_commerce_push_intents(source_kind,source_reference,order_paid_event_id,product_id,product_kind,target_reference,target_slot,product_configuration_revision,source_digest,target_digest,payload_digest,policy_digest,receipt_key_digest,intent_digest,envelope_fingerprint,payload_ciphertext,payload_key_version,effect_id,queue_receipt_id,state,created_at,updated_at,payload_mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'queued',$20,$20,$21) ON CONFLICT(source_reference,target_slot) `+conflictAction+` RETURNING id,effect_id,state,created_at`, in.sourceKind, in.sourceReference, eventID, in.productID, string(in.productKind), in.targetReference, in.targetSlot, in.revision, in.sourceDigest[:], targetDigest[:], payloadDigest[:], policyDigest[:], keyDigest[:], intentDigest[:], string(envelope.Fingerprint()), ciphertext, keyVersion, projection.ID, receipt.QueueReceiptID, now, in.payloadMode).Scan(&out.id, &out.effectID, &out.state, &out.createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		stored, found, readErr := commerceIntentExists(ctx, in.sourceReference, in.targetSlot, in.sourceDigest, in.productID)
 		if readErr != nil || !found {
@@ -654,6 +696,12 @@ func (s *CommercePushService) paidPayload(ctx context.Context, event orderport.P
 	body.Transaction.TradeState = "SUCCESS"
 	body.Transaction.SuccessTime = commerceUTC(event.OccurredAt)
 	raw, marshalErr := json.Marshal(body)
+	if event.ValidShopFact() && marshalErr == nil {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		fields["account"], _ = json.Marshal(event.ShopAccount)
+		raw, marshalErr = json.Marshal(fields)
+	}
 	return raw, false, marshalErr
 }
 
@@ -661,6 +709,9 @@ func (s *CommercePushService) paidPayload(ctx context.Context, event orderport.P
 // without treating it as a verified customer identity. The immutable Order
 // snapshot is decrypted through its owning Port only for the encrypted intent.
 func (s *CommercePushService) paidPhones(ctx context.Context, event orderport.PaidEvent, target CommercePushTarget) (buyer, beneficiary string, missing bool, err error) {
+	if event.ValidShopFact() {
+		return event.ShopPhone, event.ShopPhone, false, nil
+	}
 	if s.checkoutMobile != nil {
 		mobile, found, readErr := s.checkoutMobile.ReadCheckoutMobileWithin(ctx, event.OrderID)
 		if readErr != nil {

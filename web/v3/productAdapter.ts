@@ -3185,9 +3185,11 @@ function presentProductLists(): void {
     for (const [index, row] of Array.from(document.querySelectorAll<HTMLTableRowElement>('tbody tr')).entries()) {
       const product = loadedProducts[index];
       if (!product || openedProductPayloads.get(product.resourceId)?.source_kind !== 'wechat_shop') continue;
+      const codeCell = row.cells[0];
+      if (codeCell) { const code = product.code; const display = code.length > 24 ? `${code.slice(0, 19)}…${code.slice(-4)}` : code; if (codeCell.textContent !== display) codeCell.textContent = display; codeCell.title = code; }
       const cell = row.cells[1];
       if (cell && !cell.querySelector('[data-shop-source]')) { const tag = document.createElement('small'); tag.dataset.shopSource = ''; tag.textContent = ' · 微信小店'; cell.appendChild(tag); }
-      for (const action of row.querySelectorAll<HTMLButtonElement>('button')) if (action.textContent?.trim() === '分享') action.remove();
+      for (const action of row.querySelectorAll<HTMLButtonElement>('button')) if (['分享','复制'].includes(action.textContent?.trim() || '')) action.remove();
     }
   }
   mountProductListActionMenus(page);

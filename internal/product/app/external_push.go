@@ -46,6 +46,7 @@ type ProductExternalPushEffectAccepter = productport.ExternalPushTestAccepter
 type ProductExternalPushEffectCommand = productport.ExternalPushTestIntent
 
 type CommerceExternalPushService struct {
+	shopWake  productport.ShopProductWakeup
 	endpoints outboundport.CommercePushEndpointManager
 	uow       platformport.UnitOfWork
 	store     CommerceExternalPushStore
@@ -53,6 +54,10 @@ type CommerceExternalPushService struct {
 	statuses  productport.ExternalPushTestStatusReader
 	events    productport.EventAppender
 	now       func() time.Time
+}
+
+func (service *CommerceExternalPushService) SetShopWakeup(wake productport.ShopProductWakeup) {
+	service.shopWake = wake
 }
 
 var _ productport.CommerceExternalPushApplication = (*CommerceExternalPushService)(nil)
@@ -226,6 +231,11 @@ func (service *CommerceExternalPushService) SaveExternalPushConfiguration(
 		}
 		snapshotResult := result
 		snapshotResult.URL = ""
+		if service.shopWake != nil {
+			if e := service.shopWake.WakeShopProductWithin(tx, command.ProductID); e != nil {
+				return e
+			}
+		}
 		return service.completeCommerceExternalPush(tx, receipt.ID, snapshotResult, now)
 	})
 	if err != nil {

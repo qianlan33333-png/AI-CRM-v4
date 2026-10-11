@@ -104,10 +104,23 @@ function activateOrderListForRenderedRows(rows: unknown[]): void {
   activateOrderList(records as DetailRecord[]);
 }
 
+const pendingDetailLoads: Array<{claimed: boolean}> = [];
 function installOrderListCorrelation(): void {
   const donorLoadDb = api.loadDb.bind(api);
   api.loadDb = async (context) => {
-    if (context?.page !== 'orders' || api.mode !== 'http') return donorLoadDb(context);
+    if (api.mode !== 'http') return donorLoadDb(context);
+    if (context?.page === 'orderDetail') {
+      // The frozen detail loader first reads the order list, then its exact
+      // detail. Both private DTO inputs need the read-only enum projection.
+      const capture = {claimed:false}; pendingDetailLoads.push(capture);
+      const listCapture:OrderLoadCapture={claimed:false}; pendingOrderLoads.push(listCapture);
+      try { return await donorLoadDb(context); }
+      finally {
+        const i=pendingDetailLoads.indexOf(capture); if(i>=0) pendingDetailLoads.splice(i,1);
+        const j=pendingOrderLoads.indexOf(listCapture); if(j>=0) pendingOrderLoads.splice(j,1);
+      }
+    }
+    if (context?.page !== 'orders') return donorLoadDb(context);
     const capture: OrderLoadCapture = { claimed: false };
     pendingOrderLoads.push(capture);
     let result: ReturnType<typeof donorLoadDb>;
@@ -511,6 +524,8 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     ? pendingOrderLoads.find((capture) => !capture.claimed)
     : undefined;
   if (orderLoadCapture) orderLoadCapture.claimed = true;
+  const detailLoadCapture = /^\/api\/admin\/orders\/[^/]+$/.test(url.pathname) ? pendingDetailLoads.find(c=>!c.claimed) : undefined;
+  if(detailLoadCapture) detailLoadCapture.claimed=true;
 
   if (isOrderDetailPage() && /^\/api\/admin\/orders\/[^/]+(?:\/items)?$/.test(url.pathname)) {
     const provider = detailProvider();
@@ -573,6 +588,10 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
       else return unavailableDeliveries();
     }
   }
+  if (detailLoadCapture && response.ok) {
+    const value = asRecord(await response.clone().json());
+    if (value?.record_origin === 'external') return frozenShopOrderResponse(response, {...value,record_origin:'v1_history'});
+  }
   if (url.pathname !== '/api/admin/orders' || !response.ok) return response;
   try {
     const payload = await response.clone().json() as { items?: unknown[] };
@@ -589,11 +608,18 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
       orderLoadCapture.records = records;
     }
     schedulePresentation();
+    if (orderLoadCapture && records.some(r=>r.record_origin==='external')) return frozenShopOrderResponse(response,{...payload,items:records.map(r=>r.record_origin==='external'?{...r,record_origin:'v1_history'}:r)});
     return response;
   } catch {
     return response;
   }
 };
+// Only a frozen in-memory renderer load receives its supported read-only enum.
+// Canonical HTTP JSON and captured current Order facts remain external.
+function frozenShopOrderResponse(response:Response,value:unknown):Response {
+  const headers=new Headers(response.headers);headers.delete('content-length');
+  return new Response(JSON.stringify(value),{status:response.status,headers});
+}
 
 function externalOrderTime(order: DetailRecord): string {
  return order.source_paid_at ? formatShanghaiDateTime(order.source_paid_at) : '原时间未知';
@@ -805,7 +831,7 @@ function appendRefundReadbackControl(parent: HTMLElement, scope: RefundScope, in
 
 function replaceRefundPanel(order: DetailRecord): void {
   const native = order.record_origin === 'native';
-  const oldPanel = panelForHeading((heading) => heading === '申请退款' || heading === '退款确认' || heading === '退款' || heading.includes('历史只读') || heading === '历史订单，仅供查询');
+  const oldPanel = panelForHeading((heading) => heading === '申请退款' || heading === '退款确认' || heading === '退款' || heading.includes('历史只读') || heading === '历史订单，仅供查询' || heading === '微信小店退款');
   if (!oldPanel) return;
   oldPanel.dataset.orderRefundPanel = '';
   const refunds = detailContext.refunds || [];
@@ -818,19 +844,19 @@ function replaceRefundPanel(order: DetailRecord): void {
   oldPanel.replaceChildren();
   const header = element('div');
   header.style.cssText = 'padding:12px 16px;border-bottom:1px solid #EFF0F1';
-  const title = element('h2', native ? '退款' : '历史订单，仅供查询');
+  const title = element('h2', native ? '退款' : order.record_origin === 'external' ? '微信小店退款' : '历史订单，仅供查询');
   title.style.cssText = 'margin:0;font-size:14px;font-weight:600';
   const description = element('p', native
     ? `提交前请核对商品、可退金额和已核验的${order.provider === "alipay" ? "支付宝交易单号" : "微信支付交易单号"}。退款结果以后续退款记录为准。`
-    : '该订单保留历史事实，仅供查询，不支持退款确认。');
+    : order.record_origin === 'external' ? '退款金额与状态由微信小店同步，权益需人工处理。' : '该订单保留历史事实，仅供查询，不支持退款确认。');
   description.style.cssText = 'margin:2px 0 0;font-size:12px;color:#8F959E';
   header.append(title, description);
   oldPanel.appendChild(header);
   const body = element('div');
   body.style.cssText = 'padding:16px;display:grid;gap:10px';
-  if (order.provider === 'external_history') {
-    body.appendChild(element('p', `历史已退款金额：${moneyFromMinor(order.refunded_minor)}`));
-    body.appendChild(element('p', text(order.source_after_sales, '源报表未标注售后状态')));
+  if (order.provider === 'external_history' || order.record_origin === 'external') {
+    body.appendChild(element('p', `${order.record_origin === 'external' ? '微信小店已退款金额' : '历史已退款金额'}：${moneyFromMinor(order.refunded_minor)}`));
+    if (order.record_origin !== 'external') body.appendChild(element('p', text(order.source_after_sales, '源报表未标注售后状态')));
   } else if (detailContext.refundsUnavailable) {
     const warning = element('p', '退款记录暂不可读取，为避免混入其他订单记录，本页未展示退款列表，也不能确认新的退款申请。');
     warning.style.cssText = 'margin:0;color:#8F5A16;font-size:13px';
@@ -1351,7 +1377,7 @@ function applyOrderDetailStatusBadge(order: DetailRecord): void {
   if (!(statusBadge instanceof HTMLElement)) return;
   const label = order.record_origin === 'native'
     ? commerceStatusLabel('order', order.status_label || order.status)
-    : `历史记录：${commerceStatusLabel('order', order.status_label || order.status)}`;
+    : `${order.record_origin === 'external' ? '微信小店' : '历史记录'}：${commerceStatusLabel('order', order.status_label || order.status)}`;
   if (statusBadge.textContent !== label) statusBadge.textContent = label;
 }
 
@@ -1421,7 +1447,7 @@ function applyOrderDetailPresentation(): void {
   const header = element('div');
   header.style.cssText = 'padding:12px 16px;border-bottom:1px solid #EFF0F1';
   const heading = element('h2', '订单详情'); heading.style.cssText = 'margin:0;font-size:14px;font-weight:600';
-  const note = element('p', order.record_origin === 'native' ? '以下信息来自服务端订单事实。' : '历史订单，仅供查询。');
+  const note = element('p', order.record_origin === 'native' ? '以下信息来自服务端订单事实。' : order.record_origin === 'external' ? '微信小店外部订单，支付与退款由微信小店同步。' : '历史订单，仅供查询。');
   note.style.cssText = 'margin:2px 0 0;font-size:12px;color:#8F959E';
   header.append(heading, note);
   card.appendChild(header);
@@ -1429,7 +1455,7 @@ function applyOrderDetailPresentation(): void {
     ['商户订单号', text(order.merchant_order_no)],
     [order.provider === 'external_history' ? '原支付时间' : '创建时间', order.provider === 'external_history' ? externalOrderTime(order) : formatShanghaiDateTime(order.created_at)],
     ...(order.provider === 'external_history' ? [['导入时间', formatShanghaiDateTime(order.imported_at)], ['源订单状态', text(order.source_status)]] as Array<[string,string]> : []),
-    ['订单状态', order.record_origin === 'native' ? commerceStatusLabel('order', order.status_label || order.status) : `历史记录：${commerceStatusLabel('order', order.status_label || order.status)}`],
+    ['订单状态', order.record_origin === 'native' ? commerceStatusLabel('order', order.status_label || order.status) : `${order.record_origin === 'external' ? '微信小店' : '历史记录'}：${commerceStatusLabel('order', order.status_label || order.status)}`],
   ]);
   appendDetailSection(card, '支付信息', [
     ['支付来源', commerceProviderLabel(order.provider)],
@@ -1459,9 +1485,9 @@ function applyOrderDetailPresentation(): void {
   appendDetailSection(card, '商品与金额', [
     ['商品名称', names.join('、') || text(order.product_name, '未提供')],
     ['付款金额', money(order.amount_yuan)],
-    [order.provider === 'external_history' ? '历史已退款金额' : '当前可退金额', moneyFromMinor(order.provider === 'external_history' ? order.refunded_minor : order.refundable_amount_total)],
+    [order.record_origin === 'external' ? '微信小店已退款金额' : order.provider === 'external_history' ? '历史已退款金额' : '当前可退金额', moneyFromMinor(order.provider === 'external_history' || order.record_origin === 'external' ? order.refunded_minor : order.refundable_amount_total)],
   ]);
-  appendDistributionDetailSections(card, order);
+  if (order.record_origin !== 'external') appendDistributionDetailSections(card, order);
   replaceExternalEffectsPanel();
   replaceRefundPanel(order);
 }

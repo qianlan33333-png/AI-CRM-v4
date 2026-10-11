@@ -949,6 +949,8 @@ ORDER BY o.id LIMIT 2`, provider, reference)
 	match := matches[0]
 	out := orderport.CommercePushDeliveryReference{OrderID: match.id}
 	switch match.recordOrigin {
+	case domain.RecordOriginExternal:
+		out.PaidEventID, out.HistoricalMappingState = match.paidEventID, "current"
 	case domain.RecordOriginNative:
 		if !match.effectEligible {
 			return orderport.CommercePushDeliveryReference{}, orderport.ErrConflict

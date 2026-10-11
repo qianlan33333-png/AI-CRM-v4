@@ -13,6 +13,7 @@ import (
 // only canonical IDs and the already-frozen Order snapshot; an Outbound
 // consumer must not infer a customer, mutate Order, or inspect Order tables.
 type PaidEvent struct {
+	ShopPhone, ShopAccount        string // transient decrypted Order facts, never logged
 	ID                            int64
 	OrderID                       int64
 	OrderVersion                  int64
@@ -26,6 +27,10 @@ type PaidEvent struct {
 	OccurredAt                    time.Time
 	SourceDigest                  [32]byte
 	Order                         domain.Snapshot
+}
+
+func (event PaidEvent) ValidShopFact() bool {
+	return event.ID > 0 && event.OrderID > 0 && event.OrderVersion > 0 && event.DomainEventOutboxID > 0 && !event.OccurredAt.IsZero() && event.SourceDigest != ([32]byte{}) && event.Order.ID == event.OrderID && event.Order.RecordOrigin == domain.RecordOriginExternal && event.Order.Provider == domain.ProviderWeChatShop && !event.Order.EffectEligible && event.Order.Status == domain.StatusPaid
 }
 
 func (event PaidEvent) Valid() bool {

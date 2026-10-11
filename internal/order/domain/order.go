@@ -40,8 +40,9 @@ const (
 type RecordOrigin string
 
 const (
-	RecordOriginNative  RecordOrigin = "native"
-	RecordOriginHistory RecordOrigin = "history"
+	RecordOriginNative   RecordOrigin = "native"
+	RecordOriginHistory  RecordOrigin = "history"
+	RecordOriginExternal RecordOrigin = "external"
 )
 
 type Money struct {
@@ -324,6 +325,7 @@ func cloneExternalHistory(f *ExternalHistoryFacts) *ExternalHistoryFacts {
 	return &copy
 }
 func validate(o Order) error {
+	external := o.RecordOrigin == RecordOriginExternal && o.Provider == ProviderWeChatShop && !o.EffectEligible
 	if o.Provider == ProviderExternalHistory {
 		if o.RecordOrigin != RecordOriginHistory || o.EffectEligible || o.ExternalHistory == nil || o.ExternalHistory.ImportedAt.IsZero() || o.ExternalHistory.SourceStatus == "" || o.ProviderTransactionNo != "" || !validID(o.PayerCustomerID) || !validID(o.BeneficiaryCustomerID) {
 			return ErrInvalidOrder
@@ -333,8 +335,8 @@ func validate(o Order) error {
 	}
 
 	if !validProvider(o.Provider) || !validText(o.SourceSystem, 100) || !validText(o.SourceKey, 200) || !validText(o.MerchantOrderNo, 200) || len(o.ProviderTransactionNo) > 200 || o.ProviderTransactionNo != strings.TrimSpace(o.ProviderTransactionNo) ||
-		o.Amount.AmountMinor < 1 || !validCurrency(o.Amount.Currency) || o.Version < 1 || o.CreatedAt.IsZero() || o.UpdatedAt.Before(o.CreatedAt) ||
-		(o.RecordOrigin != RecordOriginNative && o.RecordOrigin != RecordOriginHistory) || o.EffectEligible != (o.RecordOrigin == RecordOriginNative) ||
+		(o.Amount.AmountMinor < 1 && !(external && o.Amount.AmountMinor == 0)) || !validCurrency(o.Amount.Currency) || o.Version < 1 || o.CreatedAt.IsZero() || o.UpdatedAt.Before(o.CreatedAt) ||
+		(o.RecordOrigin != RecordOriginNative && o.RecordOrigin != RecordOriginHistory && !external) || o.EffectEligible != (o.RecordOrigin == RecordOriginNative) ||
 		!validSettlement(o.Status, o.RefundedMinor, o.Amount.AmountMinor) {
 		return ErrInvalidOrder
 	}
@@ -351,8 +353,8 @@ func validate(o Order) error {
 	seen := make(map[int32]struct{}, len(o.items))
 	for _, item := range o.items {
 		if item.LineNo < 1 || item.ProductID != nil && *item.ProductID < 1 || item.ProductVersion != nil && *item.ProductVersion < 1 || !validText(item.ProductCode, 200) || !validText(item.ProductName, 500) ||
-			item.UnitAmountMinor < 1 || item.Quantity < 1 || item.UnitAmountMinor > math.MaxInt64/int64(item.Quantity) ||
-			item.LineAmountMinor != item.UnitAmountMinor*int64(item.Quantity) || total > math.MaxInt64-item.LineAmountMinor {
+			item.Quantity < 1 || item.UnitAmountMinor < 0 || item.LineAmountMinor < 0 ||
+			(!external && (item.UnitAmountMinor < 1 || item.LineAmountMinor < 1 || item.UnitAmountMinor > math.MaxInt64/int64(item.Quantity) || item.LineAmountMinor != item.UnitAmountMinor*int64(item.Quantity))) || total > math.MaxInt64-item.LineAmountMinor {
 			return ErrInvalidOrder
 		}
 		if _, duplicate := seen[item.LineNo]; duplicate {
@@ -361,7 +363,7 @@ func validate(o Order) error {
 		seen[item.LineNo] = struct{}{}
 		total += item.LineAmountMinor
 	}
-	if total != o.Amount.AmountMinor {
+	if !external && total != o.Amount.AmountMinor {
 		return ErrInvalidOrder
 	}
 	return nil

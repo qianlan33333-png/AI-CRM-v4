@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	jobqueue "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/jobqueue"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 	postgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
@@ -21,15 +22,19 @@ import (
 var ErrUnavailable = errors.New("wechat shop synchronization unavailable")
 
 type Service struct {
-	Pool     *pgxpool.Pool
-	UOW      platformport.UnitOfWork
-	Client   *river.Client[pgx.Tx]
-	AppID    string
-	Enabled  bool
-	Products productport.ShopCatalog
-	Reader   shopport.ProductReader
-	Wake     productport.ShopProductWakeup
-	Now      func() time.Time
+	Orders      orderport.ShopOrderImporter
+	Pending     orderport.ShopPendingReader
+	OrderReader shopport.OrderReader
+	Verifier    shopport.CallbackVerifier
+	Pool        *pgxpool.Pool
+	UOW         platformport.UnitOfWork
+	Client      *river.Client[pgx.Tx]
+	AppID       string
+	Enabled     bool
+	Products    productport.ShopCatalog
+	Reader      shopport.ProductReader
+	Wake        productport.ShopProductWakeup
+	Now         func() time.Time
 }
 
 func (s *Service) now() time.Time {
@@ -166,6 +171,7 @@ type ProductWorker struct {
 	Service *Service
 }
 
+func (*ProductWorker) Timeout(*river.Job[ProductArgs]) time.Duration { return time.Hour }
 func (w *ProductWorker) Work(ctx context.Context, j *river.Job[ProductArgs]) error {
 	if w.Service == nil {
 		return ErrUnavailable

@@ -57,7 +57,7 @@ func imageMutationServices(t *testing.T) (context.Context, *pgxpool.Pool, *produ
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, name := range []string{"0001_platform.sql", "0010_product.sql"} {
+	for _, name := range []string{"0001_platform.sql", "0010_product.sql", "0235_wechat_shop_products.sql"} {
 		sql, err := os.ReadFile(memberGridMigration(t, name))
 		if err != nil {
 			t.Fatal(err)

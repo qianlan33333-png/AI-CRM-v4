@@ -423,8 +423,13 @@ func (s *Service) Update(ctx context.Context, command productport.UpdateCommand)
 		if !validProduct(current) {
 			return ErrUnavailable
 		}
-		if current.SourceKind == productport.SourceWeChatShop && policy != nil && policy.Enabled {
-			return ErrInvalidProduct
+		if current.SourceKind == productport.SourceWeChatShop {
+			if policy != nil && policy.Enabled {
+				return ErrInvalidProduct
+			}
+			// Shop products expose only their basic fields and the separate push Port.
+			command.Images = slices.Clone(current.Images)
+			command.LegacyAdminProjection = append(json.RawMessage(nil), current.LegacyAdminProjection...)
 		}
 		currentLifecycle, projectionErr := projectLocalProduct(current)
 		if projectionErr != nil {
@@ -441,7 +446,7 @@ func (s *Service) Update(ctx context.Context, command productport.UpdateCommand)
 		}
 		if len(command.LegacyAdminProjection) == 0 {
 			command.LegacyAdminProjection = append(json.RawMessage(nil), current.LegacyAdminProjection...)
-		} else if !alipaySupplied {
+		} else if !alipaySupplied && current.SourceKind != productport.SourceWeChatShop {
 			command.LegacyAdminProjection = preserveAlipayPolicy(command.LegacyAdminProjection, current.LegacyAdminProjection)
 		}
 		nextLifecycle, projectionErr := projectLocalProduct(productport.Product{

@@ -109,7 +109,7 @@ func TestPaidPurchaseActionPostgreSQLTransactionBoundaries(t *testing.T) {
 	}
 	defer native.Close()
 	for _, statement := range []string{
-		`CREATE TABLE products(id BIGINT PRIMARY KEY,product_code TEXT NOT NULL,name TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',price_minor BIGINT NOT NULL,currency TEXT NOT NULL,stock_quantity INTEGER NOT NULL,images JSONB NOT NULL DEFAULT '[]'::jsonb,created_by BIGINT NOT NULL,created_at TIMESTAMPTZ NOT NULL,updated_at TIMESTAMPTZ NOT NULL,version BIGINT NOT NULL,legacy_admin_projection JSONB NOT NULL)`,
+		`CREATE TABLE products(id BIGINT PRIMARY KEY,product_code TEXT NOT NULL,name TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',price_minor BIGINT NOT NULL,currency TEXT NOT NULL,stock_quantity INTEGER NOT NULL,images JSONB NOT NULL DEFAULT '[]'::jsonb,created_by BIGINT NOT NULL,created_at TIMESTAMPTZ NOT NULL,updated_at TIMESTAMPTZ NOT NULL,version BIGINT NOT NULL,legacy_admin_projection JSONB NOT NULL,source_kind TEXT NOT NULL DEFAULT '')`,
 		`CREATE TABLE orders(id BIGINT PRIMARY KEY)`,
 		`CREATE TABLE order_paid_events(id BIGINT PRIMARY KEY,order_id BIGINT NOT NULL REFERENCES orders(id))`,
 		`CREATE TABLE customer_tag_commands(id BIGINT PRIMARY KEY)`,

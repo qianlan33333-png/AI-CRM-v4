@@ -824,3 +824,23 @@ func TestLoadInvoiceRecoveryRequiresExplicitApplication(t *testing.T) {
 		t.Fatal("invoice recovery role", e)
 	}
 }
+
+func TestShopBackfillRoleRequiresExplicitOrderedWindow(t *testing.T) {
+	t.Setenv("AICRM_DATABASE_URL", "postgres://fixture:fixture@localhost/aicrm")
+	t.Setenv("AICRM_ROLE", string(RoleShopBackfill))
+	t.Setenv("AICRM_SHOP_BACKFILL_FROM", "")
+	t.Setenv("AICRM_SHOP_BACKFILL_UNTIL", "")
+	if _, e := Load(); e == nil {
+		t.Fatal("backfill accepted without window")
+	}
+	t.Setenv("AICRM_SHOP_BACKFILL_FROM", "2026-10-10T03:00:00+08:00")
+	t.Setenv("AICRM_SHOP_BACKFILL_UNTIL", "2026-10-09T03:00:00+08:00")
+	if _, e := Load(); e == nil {
+		t.Fatal("reverse window accepted")
+	}
+	t.Setenv("AICRM_SHOP_BACKFILL_UNTIL", "2026-10-11T03:00:00+08:00")
+	cfg, e := Load()
+	if e != nil || cfg.Role != RoleShopBackfill || cfg.ShopBackfillUntil.Sub(cfg.ShopBackfillFrom) != 24*time.Hour {
+		t.Fatal("explicit window rejected", e)
+	}
+}
