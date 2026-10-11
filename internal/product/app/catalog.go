@@ -423,6 +423,9 @@ func (s *Service) Update(ctx context.Context, command productport.UpdateCommand)
 		if !validProduct(current) {
 			return ErrUnavailable
 		}
+		if current.SourceKind == productport.SourceWeChatShop && policy != nil && policy.Enabled {
+			return ErrInvalidProduct
+		}
 		currentLifecycle, projectionErr := projectLocalProduct(current)
 		if projectionErr != nil {
 			return projectionErr

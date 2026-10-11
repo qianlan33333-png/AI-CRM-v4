@@ -7,6 +7,7 @@ import (
 	"errors"
 	invoicemodule "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice"
 	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
+	"github.com/qianlan33333-png/AI-CRM-v3/internal/wechatshop"
 	"net/http"
 	"net/url"
 	"os"
@@ -363,6 +364,10 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	effectsModule := externaleffects.NewModuleRegistration()
 	effectWorkers := river.NewWorkers()
+	shopProductWorker := &wechatshop.ProductWorker{}
+	if err = river.AddWorkerSafely[wechatshop.ProductArgs](effectWorkers, shopProductWorker); err != nil {
+		return fail(err)
+	}
 	opsInspectionWorker := adminops.NewInspectionWorker()
 	opsReportWorker := adminops.NewReportWorker()
 	opsRetentionWorker := adminops.NewRetentionWorker()
@@ -646,6 +651,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	periodicJobs := []*river.PeriodicJob{segment.AudienceSchedulePeriodicJob(), automation.DirectPushReconcilePeriodicJob(), externaleffects.RecoveryPeriodicJob()}
+	if cfg.WeChatShop.Enabled {
+		periodicJobs = append(periodicJobs, wechatshop.ProductPeriodicJob())
+	}
 	if cfg.WeCom.CustomerSyncEnabled {
 		periodicJobs = append(periodicJobs, wecom.CustomerSyncDailyPeriodicJob())
 	}
@@ -1712,6 +1720,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = paymentService.SetShopReconciler(wechatShopAdapter); err != nil {
 		return fail(err)
 	}
+	shopSync := &wechatshop.Service{Pool: pool.Native(), UOW: uow, Client: effectClient, AppID: cfg.WeChatShop.AppID, Enabled: cfg.WeChatShop.Enabled, Products: productapp.ShopCatalog{Store: productRepository, Events: productEvents}, Reader: wechatShopAdapter}
+	shopProductWorker.Service = shopSync
+	productBindings.ProductHandler.SetShopRefresh(shopSync)
 	if err = paymentService.SetWeChatPayReconciler(wechatPayAdapter); err != nil {
 		return fail(err)
 	}
@@ -2445,6 +2456,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	adminAPIs.Handle("/api/public/service-period-member-grid/scoped-query", productBindings.Products)
 	adminAPIs.Handle("/api/public/hxc-dashboard/query", hxcHandler.Routes())
 	adminAPIs.Handle("/api/v1/products", productBindings.Products)
+	adminAPIs.Handle("/api/admin/products/wechat-shop/", productBindings.Products)
 	adminAPIs.Handle("/api/v1/products/", productBindings.Products)
 	adminAPIs.Handle("/api/admin/wechat-pay/products", productBindings.Products)
 	adminAPIs.Handle("/api/admin/wechat-pay/products/", productBindings.Products)
@@ -3166,6 +3178,7 @@ func routeApplicationWithProductsCouponsGroupOpsAutomationAndCycles(health, acce
 	// handler. Product owns only local definitions/lifecycle/configuration;
 	// member-grid and provider paths remain absent/fail-closed.
 	mux.Handle("/api/v1/products", productHandler)
+	mux.Handle("/api/admin/products/wechat-shop/", productHandler)
 	mux.Handle("/api/v1/products/", productHandler)
 	mux.Handle("/api/admin/wechat-pay/products", productHandler)
 	mux.Handle("/api/admin/wechat-pay/products/", productHandler)

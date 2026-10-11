@@ -28,6 +28,7 @@ import (
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	productapp "github.com/qianlan33333-png/AI-CRM-v3/internal/product/app"
 	productport "github.com/qianlan33333-png/AI-CRM-v3/internal/product/port"
+	shopport "github.com/qianlan33333-png/AI-CRM-v3/internal/wechatshop/port"
 )
 
 const (
@@ -53,6 +54,7 @@ type CatalogApplication interface {
 }
 
 type Handler struct {
+	shop      shopport.ProductRefresh
 	catalog   CatalogApplication
 	lifecycle productport.LocalProductLifecycleApplication
 	service   productport.ServicePeriodApplication
@@ -142,6 +144,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	switch {
+	case strings.HasPrefix(path, "/api/admin/products/wechat-shop/"):
+		h.shopRefresh(w, r)
 	case path == "/api/public/service-period-member-grid/scoped-query":
 		h.publicScopedQuery(w, r)
 	case path == "/api/public/service-period-member-grid/bootstrap":
@@ -1906,6 +1910,7 @@ func normalizeExternalConfigurationCustomParams(value map[string]any) (map[strin
 }
 
 type productResponse struct {
+	SourceKind         string                            `json:"source_kind,omitempty"`
 	ID                 productport.ID                    `json:"id"`
 	ProductCode        string                            `json:"product_code"`
 	Name               string                            `json:"name"`
@@ -1979,6 +1984,7 @@ func (h *Handler) productResponse(ctx context.Context, value productport.Product
 	if err != nil {
 		return productResponse{}, err
 	}
+	response.SourceKind = value.SourceKind
 	response.DistributionPolicy, err = h.distributionPolicy(ctx, value.ID, distributiondomain.ProductTypeStandard)
 	return response, err
 }

@@ -255,7 +255,7 @@ func (h *PublicHandler) enabledProductValue(r *http.Request, code string) (produ
 		}
 	}
 	local, err := productapp.ProjectLocalProduct(value)
-	if err != nil || local.Lifecycle != productport.LocalProductEnabled || !local.Enabled {
+	if err != nil || value.SourceKind == productport.SourceWeChatShop || local.Lifecycle != productport.LocalProductEnabled || !local.Enabled {
 		return productport.Product{}, false
 	}
 	return value, true

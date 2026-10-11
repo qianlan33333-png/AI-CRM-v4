@@ -19,6 +19,7 @@ import { installMaterialPickerAdapter, type MaterialPickerLoadRequest, type Mate
 import { openShareQrDialog } from './shared/ui/shareQrDialog';
 import { renderMaterialThumbnail } from './shared/ui/materialThumbnailPresentation';
 import { openChannelPicker, type ChannelPickerPage, type ChannelPickerRecord } from './shared/ui/channelPickerAdapter';
+import { installShopRefresh, presentShopEditor } from './wechatShopProducts';
 
 type RecordValue = Record<string, unknown>;
 type ProductProjection = Product & { resourceId: number };
@@ -312,6 +313,7 @@ function mountDistributionPolicyControls(): void {
   // its authoritative snapshot hook instead of mutating the DOM with an error,
   // which would trigger the observer again and fabricate a draft policy.
   if (route && !snapshot) return;
+  if (snapshot?.source_kind === 'wechat_shop') return;
   const anchor = document.getElementById(prefix === 'pf' ? 'product-sale' : 'sp-sale');
   if (!anchor) return;
   let policy: DistributionPolicy;
@@ -3178,6 +3180,16 @@ function presentProductLists(): void {
   }
   relabelServiceProductDeleteAction();
   moveProductListCreateAction(page);
+  if (page === 'products') {
+    installShopRefresh();
+    for (const [index, row] of Array.from(document.querySelectorAll<HTMLTableRowElement>('tbody tr')).entries()) {
+      const product = loadedProducts[index];
+      if (!product || openedProductPayloads.get(product.resourceId)?.source_kind !== 'wechat_shop') continue;
+      const cell = row.cells[1];
+      if (cell && !cell.querySelector('[data-shop-source]')) { const tag = document.createElement('small'); tag.dataset.shopSource = ''; tag.textContent = ' · 微信小店'; cell.appendChild(tag); }
+      for (const action of row.querySelectorAll<HTMLButtonElement>('button')) if (action.textContent?.trim() === '分享') action.remove();
+    }
+  }
   mountProductListActionMenus(page);
 }
 
@@ -3188,6 +3200,10 @@ function scheduleProductListPresentation(): void {
 }
 
 const productListPresentationObserver = observeProductDocument(scheduleProductListPresentation);
+const shopEditorObserver = observeProductDocument(() => {
+  const route = productEditorRoute();
+  presentShopEditor(route?.prefix === 'pf' && openedProductPayloads.get(route.id)?.source_kind === 'wechat_shop');
+});
 const disposeProductListPresentation = (): void => {
   for (const menu of productListActionMenus.values()) menu.dispose();
   productListActionMenus.clear();

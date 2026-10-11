@@ -1,24 +1,24 @@
 {
   "schema": 1,
-  "baseline_sha": "b06bc30b3318d1e28210f95a50b82dd661349bba",
+  "baseline_sha": "0fe8bbcc3ee27d5dbb6aae0a4e4cc24e40a1dcca",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/payment/provider"
+      "package": "./internal/wechatshop", "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/http"
+      "path": "internal/payment/provider/wechatshop_products_test.go", "test": "TestWeChatShopProductsReadOnlineAndExactSKU"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/store"
+      "path": "internal/product/http/wechat_shop_test.go", "test": "TestShopRefreshRequiresProductEditAndCSRF"
+    },
+    { "lane": "frontend", "path": "web/v3/wechatShopProducts.test.mjs"
     }
   ],
   "installed_checks": [
-    "paid-referral-financial-canonical",
-    "profit-sharing-purchase-description",
-    "refund-before-split"
+    "wechat-shop-product-refresh"
   ],
   "build_commands": []
 }

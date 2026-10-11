@@ -57,7 +57,7 @@ type rowScanner interface {
 	Scan(...any) error
 }
 
-const productColumns = `id,product_code,name,description,price_minor,currency,images,created_by,created_at,updated_at,version,legacy_admin_projection`
+const productColumns = `id,product_code,name,description,price_minor,currency,images,created_by,created_at,updated_at,version,legacy_admin_projection,source_kind`
 
 func scanProduct(row rowScanner) (productport.Product, error) {
 	var (
@@ -69,7 +69,7 @@ func scanProduct(row rowScanner) (productport.Product, error) {
 		&product.ID, &product.ProductCode, &product.Name, &product.Description,
 		&product.PriceMinor, &product.Currency,
 		&imagesRaw, &product.CreatedBy, &product.CreatedAt, &product.UpdatedAt,
-		&product.Version, &projection,
+		&product.Version, &projection, &product.SourceKind,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return productport.Product{}, productport.ErrProductReadNotFound

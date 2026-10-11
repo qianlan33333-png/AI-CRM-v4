@@ -141,7 +141,7 @@ func (reader *TargetReader) ReadCheckoutProductWithin(ctx context.Context, kind 
 			return productport.CheckoutProduct{}, classify(err)
 		}
 		projected, projectionErr := projectLocalProduct(item)
-		if !validOrdinaryProduct(item) || projectionErr != nil || !projected.Enabled || projected.Lifecycle != productport.LocalProductEnabled {
+		if item.SourceKind == productport.SourceWeChatShop || !validOrdinaryProduct(item) || projectionErr != nil || !projected.Enabled || projected.Lifecycle != productport.LocalProductEnabled {
 			return productport.CheckoutProduct{}, ErrNotFound
 		}
 		var projection struct {

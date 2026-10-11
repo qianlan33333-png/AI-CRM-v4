@@ -20,6 +20,7 @@ var (
 type ID int64
 
 type Product struct {
+	SourceKind  string `json:"source_kind,omitempty"`
 	ID          ID     `json:"id"`
 	ProductCode string `json:"product_code"`
 	Name        string `json:"name"`
