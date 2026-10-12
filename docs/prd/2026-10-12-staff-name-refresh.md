@@ -57,3 +57,5 @@ OneID：仅当前企业受信员工 UserID 与 Access 员工主键，不涉及�
 五项影响：HTTP 新增完整刷新响应计数，旧入口兼容；Access 增加未授权投影和显示，不授予登录；直接消费者为目录 Port、StaffProjector、Access 列表/开通、原周期 staff reader；页面显示完整已投影名单、未开通状态及授权入口；验证选真实 PG/合成 HTTP Provider、重复/并发、部分失败/审计回滚、同企业/跨企业、权限和唯一超级管理员保留、实际按钮/提示/开通读回。没有新增迁移；应用回退保留未授权投影即可，不删历史员工。
 
 真实新增员工是否可见已独立核实；修复安装后的真实刷新、入库与未开通状态由工作台独立读回，不用合成 Provider 代替生产结果。
+
+最终阶段选择：正式候选从工作台已接受问卷累计源码 `6fcd3f18b554ca0acdfdc6cf35338230902dc39c` 继续，保留其源码阶段修复与安装的五条问卷旅程。本机相关 PostgreSQL/Chromium 员工旅程已完成；source 清单仅登记 Access/HTTP/存储/轻量 DOM/API 与只读 Provider 边界，取消重复 source Host 浏览器运行及其 dist 前置。员工完整名单/未开通/权限弹窗统一由 `TestPostgreSQLStaffDirectoryInstalledChromiumJourney` 在最终安装包验证，具名入口 `scripts/run-installed-staff-directory.sh`；安装组保留 survey-recovery 和 staff-directory-refresh 两项，不继承上一批全模块冒烟。

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "fee5cb1947465c2d1ab81f14702542ec2067ca92",
+  "baseline_sha": "6fcd3f18b554ca0acdfdc6cf35338230902dc39c",
   "checks": [
     {
       "lane": "backend",
@@ -51,17 +51,13 @@
       "path": "scripts/validate-openapi.mjs"
     },
     {
-      "lane": "browser",
-      "path": "cmd/aicrm/access_governance_ui_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLAccessGovernanceUIChromiumJourney"
-    },
-    {
       "lane": "backend",
       "path": "cmd/aicrm/staff_directory_installed_fixture_test.go",
       "test": "TestInstalledDirectoryProviderReadBoundary"
     }
   ],
   "installed_checks": [
+    "survey-recovery",
     "staff-directory-refresh"
   ],
   "build_commands": []
