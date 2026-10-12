@@ -741,7 +741,21 @@ func (r *Repository) loadSubmission(ctx context.Context, t pgx.Tx, id surveyport
 		_ = encrypted
 		s.Answers = append(s.Answers, a)
 	}
-	return s, mapError(rows.Err())
+	if err = rows.Err(); err != nil {
+		return s, mapError(err)
+	}
+	rows.Close()
+	for i := range s.Answers {
+		if s.Answers[i].QuestionType == surveyport.QuestionAttachment {
+			a, e := r.ReadSubmissionAttachment(ctx, s.QuestionnaireID, s.ID, s.Answers[i].ID)
+			if e == nil {
+				s.Answers[i].Attachment = &a
+			} else if !errors.Is(e, surveyport.ErrNotFound) {
+				return s, e
+			}
+		}
+	}
+	return s, nil
 }
 
 func (r *Repository) ListSubmissions(ctx context.Context, id surveyport.ID, limit, offset int32, state surveyport.IdentityState) ([]surveyport.Submission, int64, error) {

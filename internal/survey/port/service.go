@@ -43,6 +43,7 @@ const (
 	QuestionTextarea       QuestionType = "textarea"
 	QuestionMobile         QuestionType = "mobile"
 	QuestionRedemptionCode QuestionType = "redemption_code"
+	QuestionAttachment     QuestionType = "attachment"
 
 	ModeSurvey     QuestionnaireMode = "survey"
 	ModeAssessment QuestionnaireMode = "assessment"
@@ -164,6 +165,7 @@ type SubmissionAnswer struct {
 	QuestionID ID     `json:"question_id"`
 	OptionIDs  []ID   `json:"option_ids"`
 	TextValue  string `json:"text_value,omitempty"`
+	Attachment bool   `json:"attachment,omitempty"`
 }
 
 type SubmissionIdentity struct {

@@ -1,21 +1,130 @@
 {
   "schema": 1,
-  "baseline_sha": "0b2d5967975f40ae51b92a39dc198a14cdbb3af9",
+  "baseline_sha": "c07e2f6775b019cfb2fd1dc3bea697b89743ea82",
   "checks": [
     {
       "lane": "backend",
-      "path": "internal/access/store/staff_name_refresh_postgres_integration_test.go",
-      "test": "TestPostgreSQLStaffNameRefreshAuditUpgradeAndAtomicity",
+      "package": "./internal/survey/domain"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/app"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/http"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/survey/store/redemption_integration_test.go",
+      "test": "TestPostgreSQLRedemptionConcurrentConsumeReplayAndImport",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/survey/store/redemption_integration_test.go",
+      "test": "TestPostgreSQLRedemptionRollbackAndQuestionnaireIsolation",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/survey/store/submission_claim_replay_integration_test.go",
+      "test": "TestPostgreSQLSubmissionClaimConcurrentReceiptReplay",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/survey/store/submission_version_race_postgres_test.go",
+      "test": "TestPostgreSQLSubmissionRejectsDefinitionSwitchedAfterValidation",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/access/app/governance_test.go",
-      "test": "TestRefreshStaffNamesPreservesPermissionsAndProviderFailure"
+      "path": "internal/outbound/survey_redemption_test.go",
+      "test": "TestSurveyCompletionRedemptionNeverExportsRawCode"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyOperationsHost.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyRedemptionLibrary.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyRedemptionH5.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveySubmissionResume.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyPublicHost.test.mjs"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/survey/store/attachment_integration_test.go",
+      "test": "TestPostgreSQLAttachmentAtomicReplayAndScope",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/survey/store/attachment_integration_test.go",
+      "test": "TestPostgreSQLAttachmentRollbackAndConcurrentCode",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/survey/store/attachment_integration_test.go",
+      "test": "TestPostgreSQLAttachmentRejectsInvalidFilesAndFields",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/survey_redemption_test.go",
+      "test": "TestSurveyCompletionAttachmentUsesSafeMarker"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/survey_attachment_chromium_postgres_test.go",
+      "test": "TestPostgreSQLSurveyAttachmentChromiumJourney"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyAttachmentH5.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyAdapter.test.mjs"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/survey/store/attachment_integration_test.go",
+      "test": "TestPostgreSQLAttachmentWithoutCodeAndOptionalJSON",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/media/domain"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/survey/store/attachment_integration_test.go",
+      "test": "TestPostgreSQLAttachmentCompletionFailureRollsBackAudit",
+      "postgres": true,
+      "race": true
     }
   ],
   "installed_checks": [
-    "staff-name-refresh"
-  ],
-  "build_commands": []
+    "survey-recovery"
+  ]
 }

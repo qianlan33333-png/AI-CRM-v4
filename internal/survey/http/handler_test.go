@@ -468,6 +468,7 @@ func TestSubmittedPublicRoutesExposeOnlyCompletionAction(t *testing.T) {
 
 	submit := httptest.NewRequest(nethttp.MethodPost, "/api/public/questionnaires/growth/submissions", strings.NewReader(`{"version":1,"submission_key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","answers":[]}`))
 	submit.AddCookie(cookie)
+	submit.Header.Set("Content-Type", "application/json")
 	submitResponse := httptest.NewRecorder()
 	handler.ServeHTTP(submitResponse, submit)
 	if submitResponse.Code != nethttp.StatusConflict || !strings.Contains(submitResponse.Body.String(), `"type":"lead_qr"`) || !strings.Contains(submitResponse.Body.String(), `"lead_qr":{"url":"https://cdn.example.test/lead.png"}`) || strings.Contains(submitResponse.Body.String(), "42") {
@@ -508,6 +509,7 @@ func TestPublicSubmissionSuccessEmitsCompletionActionAndLegacyResultTokenAtTopLe
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(nethttp.MethodPost, "/api/public/questionnaires/growth/submissions", strings.NewReader(`{"version":1,"submission_key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","answers":[]}`))
+	request.Header.Set("Content-Type", "application/json")
 	request.AddCookie(&nethttp.Cookie{Name: "__Host-aicrm_survey_identity", Value: strings.Repeat("a", 43)})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

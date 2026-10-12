@@ -123,7 +123,7 @@ func ValidateQuestion(value surveyport.Question, mode surveyport.QuestionnaireMo
 		if len(value.Options) != 0 || value.Validation.MinimumSelections != nil || value.Validation.MaximumSelections != nil || value.Validation.MinimumLength != nil || value.Validation.MaximumLength != nil {
 			return ErrInvalidQuestion
 		}
-	case surveyport.QuestionRedemptionCode:
+	case surveyport.QuestionRedemptionCode, surveyport.QuestionAttachment:
 		if mode != surveyport.ModeSurvey || len(value.Options) != 0 || value.SidebarProfileField != "" ||
 			value.Validation != (surveyport.Validation{}) || value.Type == surveyport.QuestionRedemptionCode && !value.Required {
 			return ErrInvalidQuestion
@@ -206,6 +206,9 @@ func ValidateAnswers(questions []surveyport.Question, answers []surveyport.Submi
 }
 
 func validateAnswer(question surveyport.Question, answer surveyport.SubmissionAnswer) error {
+	if question.Type != surveyport.QuestionAttachment && answer.Attachment {
+		return ErrInvalidAnswer
+	}
 	switch question.Type {
 	case surveyport.QuestionSingleChoice, surveyport.QuestionMultiChoice:
 		minimum, maximum := 1, len(question.Options)
@@ -278,6 +281,10 @@ func validateAnswer(question surveyport.Question, answer surveyport.SubmissionAn
 		}
 	case surveyport.QuestionRedemptionCode:
 		if len(answer.OptionIDs) != 0 || strings.TrimSpace(answer.TextValue) == "" || !utf8.ValidString(answer.TextValue) || utf8.RuneCountInString(answer.TextValue) > MaximumTextLength {
+			return ErrInvalidAnswer
+		}
+	case surveyport.QuestionAttachment:
+		if len(answer.OptionIDs) != 0 || answer.TextValue != "" || question.Required && !answer.Attachment {
 			return ErrInvalidAnswer
 		}
 	default:

@@ -23,6 +23,7 @@ import (
 	identityapp "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/app"
 	identityquery "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/query"
 	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
+	mediastore "github.com/qianlan33333-png/AI-CRM-v3/internal/media/store"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
@@ -129,6 +130,7 @@ type publicSurveyPresentationChromiumFixture struct {
 	ctx            context.Context
 	native         *pgxpool.Pool
 	cipher         *surveysecure.Cipher
+	adminCookies   []*http.Cookie
 	submissions    *surveyapp.SubmissionService
 	server         *httptest.Server
 	browserURL     string
@@ -187,6 +189,13 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 	}
 	definitions := surveyapp.NewService(uow, repository)
 	submissions := surveyapp.NewSubmissionService(uow, repository, cipher)
+	privateImages, err := mediastore.NewPostgreSQL(native, uow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = submissions.BindPrivateImages(privateImages); err != nil {
+		t.Fatal(err)
+	}
 	if err = submissions.BindIdentitySubjects(identityquery.NewPostgreSQL()); err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +253,9 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 		success.Questions = append(success.Questions, surveyport.Question{Type: surveyport.QuestionMobile, Title: "手机号", Required: true, SortOrder: 6, Options: []surveyport.Option{}}, surveyport.Question{Type: surveyport.QuestionTextarea, Title: "补充说明", Required: true, SortOrder: 7, Options: []surveyport.Option{}})
 	}
 	if len(options) > 0 {
+		if options[0].display != "" {
+			success.AnswerDisplayMode = options[0].display
+		}
 		success.Questions = append(success.Questions, options[0].extraQuestions...)
 	}
 	success, err = definitions.Create(ctx, surveyport.CreateCommand{Questionnaire: success, ActorID: actorID, IdempotencyKey: "public-survey-ui-create-0001"})
@@ -405,6 +417,25 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 		_, _ = w.Write([]byte(`{"code":"survey_temporarily_unavailable"}`))
 	}))
 	mux.Handle("/api/public/questionnaires/", api)
+	mux.HandleFunc("/admin/questionnaires/", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/external-push-logs") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[],"logs":[],"total":0}`))
+	})
+	mux.Handle("/api/admin/questionnaires", api)
+	mux.Handle("/api/admin/questionnaires/", api)
+	mux.HandleFunc("/api/admin/channels", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[]}`))
+	})
+	mux.HandleFunc("/api/admin/tags", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[]}`))
+	})
+	mux.Handle("/", http.FileServer(http.Dir(filepath.Join(root, "web", "dist"))))
 	server.Config.Handler = mux
 	server.StartTLS()
 	t.Cleanup(server.Close)

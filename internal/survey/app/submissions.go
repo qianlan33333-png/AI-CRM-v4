@@ -15,6 +15,7 @@ import (
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
+	mediaport "github.com/qianlan33333-png/AI-CRM-v3/internal/media/port"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 	surveydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/survey/domain"
 	surveyport "github.com/qianlan33333-png/AI-CRM-v3/internal/survey/port"
@@ -101,6 +102,7 @@ type trustedSubmissionSubjects interface {
 }
 
 type SubmissionService struct {
+	images              mediaport.PrivateImageStorage
 	observer            surveyport.SubmissionObserver
 	uow                 platformport.UnitOfWork
 	store               SubmissionStore
@@ -346,12 +348,17 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 	if s == nil || s.uow == nil || s.store == nil || s.cipher == nil || s.collectedPhones == nil || !validSlug(command.Slug) || !validPublicKey(command.SubmissionKey) || command.Identity.State != surveyport.IdentityResolved || command.Identity.CustomerID == nil || !validIdentity(command.Identity) || utf8.RuneCountInString(command.SourceChannel) > 200 || utf8.RuneCountInString(command.CampaignID) > 200 {
 		return surveyport.SubmissionReceipt{}, surveyport.ErrInvalid
 	}
+	prepared, err := s.prepareAttachments(ctx, command.Attachments)
+	if err != nil {
+		return surveyport.SubmissionReceipt{}, err
+	}
 	canonical, _ := json.Marshal(struct {
 		Version       int64                         `json:"version"`
 		Answers       []surveyport.SubmissionAnswer `json:"answers"`
 		IdentityState surveyport.IdentityState      `json:"identity_state"`
 		Evidence      string                        `json:"evidence_digest,omitempty"`
-	}{command.DefinitionVersion, command.Answers, command.Identity.State, command.Identity.EvidenceDigest})
+		Attachments   []preparedAttachment          `json:"attachments,omitempty"`
+	}{command.DefinitionVersion, command.Answers, command.Identity.State, command.Identity.EvidenceDigest, prepared})
 	payloadDigest := sha256.Sum256(canonical)
 	submissionKeyDigest := sha256.Sum256([]byte(command.SubmissionKey))
 	token, err := s.cipher.Token(command.Slug, command.SubmissionKey)
@@ -443,6 +450,9 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 				return surveyport.CodeRequired(question.ID)
 			}
 		}
+		if e = validateAttachments(questionnaire, command.Answers, prepared); e != nil {
+			return e
+		}
 		if e = surveydomain.ValidateAnswers(questionnaire.Questions, command.Answers); e != nil {
 			return surveyport.ErrInvalid
 		}
@@ -473,6 +483,15 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 			}
 			completionConfiguration, e = s.store.GetOperationConfiguration(tx, questionnaire.ID)
 			return e
+		}
+		if e = s.persistAttachments(tx, stored, prepared); e != nil {
+			return e
+		}
+		if len(prepared) > 0 {
+			stored, e = s.store.GetSubmission(tx, stored.ID)
+			if e != nil {
+				return e
+			}
 		}
 		if s.observer != nil && command.Identity.CustomerID != nil {
 			if e = s.observer.SubmissionCreatedWithin(tx, int64(stored.ID), int64(*command.Identity.CustomerID)); e != nil {
@@ -660,6 +679,9 @@ func snapshotAnswers(q surveyport.Questionnaire, values []surveyport.SubmissionA
 		} else if question.Type == surveyport.QuestionRedemptionCode {
 			snapshot.TextValue = "兑换码已验证"
 			snapshot.TextValueMasked = "兑换码已验证"
+		} else if question.Type == surveyport.QuestionAttachment && answer.Attachment {
+			snapshot.TextValue = "已上传图片"
+			snapshot.TextValueMasked = "已上传图片"
 		} else if answer.TextValue != "" {
 			snapshot.TextValueMasked = "[protected]"
 		}

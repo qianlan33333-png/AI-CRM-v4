@@ -5,6 +5,7 @@
 // the exact body and idempotency key rather than asking the server to delete
 // whatever version happens to be current later.
 
+import { showSurveyAnswers } from './surveyAnswerDialog';
 import { apiRequestOptions, request, unwrapGenerated } from '../src/api/transport';
 import { api } from '../src/shared/api/client';
 import { emptyAdminDb, questionnairePageDto } from '../src/api/admin';
@@ -15,7 +16,7 @@ import { renderTableReadState } from './shared/ui/tableReadState';
 // The immutable donor template is a source fixture only. V3 retires its
 // assessment entry before paint and never exposes its obsolete callback.
 function removeAssessmentEntry(): void {
-  if (document.body?.dataset.page !== 'questionnaires') return;
+  if (typeof document === 'undefined' || document.body?.dataset.page !== 'questionnaires') return;
   for (const button of document.querySelectorAll('button')) {
     if (button.textContent?.trim() === '创建测评问卷模板') button.remove();
   }
@@ -313,7 +314,8 @@ void (async () => {
       if (!renderedRows) return values;
       const filters = currentSurveyFilters(this);
       renderSurveyReadState(this, renderedRows, filters.query, filters.status);
-      const questionnaires = surveyAuthorizationRevoked ? [] : renderedRows.map((row) => {
+      const questionnaires = surveyAuthorizationRevoked ? [] : renderedRows.map((original) => {
+        const row = {...original, answersGo: () => {const qid=Number(original.resourceId || original.id);if(Number.isSafeInteger(qid)&&qid>0)void showSurveyAnswers(qid).catch(error=>toast(error instanceof Error?error.message:'答卷读取失败',true));}};
         const id = idOf(row);
         const expectedVersion = versionOf(row);
         const displayName = typeof row.internalName === 'string' && row.internalName.trim() ? row.internalName : row.name;

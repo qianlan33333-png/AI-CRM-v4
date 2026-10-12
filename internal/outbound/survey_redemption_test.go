@@ -16,3 +16,13 @@ func TestSurveyCompletionRedemptionNeverExportsRawCode(t *testing.T) {
 		t.Fatalf("unsafe qualification projection: %s", body)
 	}
 }
+
+func TestSurveyCompletionAttachmentUsesSafeMarker(t *testing.T) {
+	body, err := marshalSurveyCompletion(surveyport.CompletionPayload{Answers: []surveyport.CompletionAnswer{{QuestionTitle: "图片", QuestionType: surveyport.QuestionAttachment, TextValue: "/api/admin/private-image"}}}, "test-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "private-image") || !strings.Contains(string(body), "已上传图片") {
+		t.Fatal("unsafe attachment projection")
+	}
+}

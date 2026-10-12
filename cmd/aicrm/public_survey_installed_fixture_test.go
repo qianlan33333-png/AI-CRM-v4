@@ -87,6 +87,8 @@ func useInstalledPublicSurveyFixture(t *testing.T, fixture *publicSurveyPresenta
 	waitInstalledSurveyReady(t, process, endpoint, head)
 	target, _ := url.Parse(endpoint)
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	director := proxy.Director
+	proxy.Director = func(r *http.Request) { director(r); r.Header.Set("X-Forwarded-Proto", "https") }
 	proxy.Transport = &http.Transport{Proxy: nil} // only loopback, never a real Provider
 	fixture.server.Config.Handler = proxy
 	expectedOAuthReads := int32(0)
@@ -275,6 +277,7 @@ func installedSurveyCopyJourney(t *testing.T, fixture *publicSurveyPresentationC
 		t.Fatalf("installed admin login status=%d", response.StatusCode)
 	}
 	cookies := response.Cookies()
+	fixture.adminCookies = cookies
 	csrf := ""
 	for _, cookie := range cookies {
 		if cookie.Name == "aicrm_admin_csrf" {

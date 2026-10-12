@@ -1,5 +1,6 @@
 import {
   getPublicSurvey,
+  getSubmitPublicSurveyUrl,
   queryPublicSurveyResult,
   submitPublicSurvey,
   type CompletionAction as GeneratedCompletionAction,
@@ -8,7 +9,7 @@ import {
   type SurveyPublicSubmissionRequest,
   type SurveyPublicSubmissionResponse,
 } from './generated/survey-public';
-import { apiRequestOptions, unwrapGenerated } from '../src/api/transport';
+import { apiRequestOptions, unwrapGenerated, request as fetchRequest } from '../src/api/transport';
 
 export type CompletionAction = GeneratedCompletionAction;
 export type PublicSurveyDefinition = SurveyPublicDefinition;
@@ -48,9 +49,9 @@ export function completionActionFromCarrier(value: unknown): CompletionAction {
 
 // Keep stalled public reads finite, including response-body decoding. This is
 // a wait budget only; it neither retries requests nor changes Owner authority.
-export async function surveyRead<T>(read: (signal: AbortSignal | undefined) => Promise<T>, timeoutMessage = '读取超时，请检查网络后重试'): Promise<T> {
+export async function surveyRead<T>(read: (signal: AbortSignal | undefined) => Promise<T>, timeoutMessage = '读取超时，请检查网络后重试', budget = 15_000): Promise<T> {
   const request = typeof AbortController === 'function' ? new AbortController() : undefined;
-  const expiresAt = Date.now() + 15_000;
+  const expiresAt = Date.now() + budget;
   let expired = false;
   let expire!: () => void;
   // Some embedded transports do not reject when aborted. The deadline must
@@ -65,7 +66,7 @@ export async function surveyRead<T>(read: (signal: AbortSignal | undefined) => P
     };
   });
   const checkDeadline = (): void => { if (Date.now() >= expiresAt) expire(); };
-  const timer = window.setTimeout(expire, 15_000);
+  const timer = window.setTimeout(expire, budget);
   // iOS may suspend timers in the background or keep the page in BFCache.
   // Recheck elapsed time when it returns, without replaying the request.
   window.addEventListener('pageshow', checkDeadline);
@@ -84,8 +85,14 @@ export async function readPublicSurvey(slug: string): Promise<PublicSurveyDefini
   return { ...definition, authorizationContext: response.headers.get('X-Aicrm-Survey-Authorization-Context') || '' };
 }
 
-export async function submitSurvey(slug: string, request: PublicSurveySubmissionRequest, signal?: AbortSignal): Promise<{ completionAction: CompletionAction }> {
-  const result = unwrapGenerated(await submitPublicSurvey(slug, request, apiRequestOptions({ signal }))) as Partial<SurveyPublicSubmissionResponse>;
+export async function submitSurvey(slug: string, request: PublicSurveySubmissionRequest, signal?: AbortSignal, images = new Map<number, File>()): Promise<{ completionAction: CompletionAction }> {
+  let result: Partial<SurveyPublicSubmissionResponse>;
+  if (images.size) {
+    const form = new FormData(); form.append('submission', JSON.stringify(request));
+    for (const [id,file] of images) form.append(`attachment:${id}`,file,file.name);
+    const response = await fetchRequest(getSubmitPublicSurveyUrl(slug), {method:'POST',body:form,signal});
+    result = await response.json();
+  } else result = unwrapGenerated(await submitPublicSurvey(slug, request, apiRequestOptions({ signal, headers: {'Content-Type':'application/json'} }))) as Partial<SurveyPublicSubmissionResponse>;
   const receipt = result?.receipt;
   if (!receipt || !Number.isSafeInteger(receipt.submission_id) || receipt.submission_id <= 0 ||
       !Number.isSafeInteger(receipt.questionnaire_id) || receipt.questionnaire_id <= 0 ||

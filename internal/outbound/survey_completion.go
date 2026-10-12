@@ -361,6 +361,8 @@ func marshalSurveyCompletion(payload surveyport.CompletionPayload, userID string
 			}
 		case surveyport.QuestionRedemptionCode:
 			value = "兑换码已验证"
+		case surveyport.QuestionAttachment:
+			value = "已上传图片"
 		default:
 			return nil, errors.New("unsupported survey answer type")
 		}

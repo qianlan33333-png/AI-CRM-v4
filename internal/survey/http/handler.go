@@ -311,6 +311,14 @@ func (h *Handler) adminTail(w http.ResponseWriter, r *http.Request, tail string)
 		h.redemptionCodes(w, r, surveyport.ID(id), parts[2:])
 		return
 	}
+	if len(parts) == 6 && parts[1] == "submissions" && parts[3] == "answers" && parts[5] == "attachment" {
+		sid, e := parseID(parts[2])
+		aid, a := parseID(parts[4])
+		if e == nil && a == nil {
+			h.submissionAttachment(w, r, surveyport.ID(id), surveyport.ID(sid), surveyport.ID(aid))
+			return
+		}
+	}
 	switch action {
 	case "duplicate":
 		h.duplicate(w, r, id)
@@ -459,18 +467,13 @@ func (h *Handler) publicQuestionnaire(w http.ResponseWriter, r *http.Request, ta
 		if !ok {
 			return
 		}
-		var body struct {
-			Version       int64                         `json:"version"`
-			SubmissionKey string                        `json:"submission_key"`
-			Answers       []surveyport.SubmissionAnswer `json:"answers"`
-			SourceChannel string                        `json:"source_channel,omitempty"`
-			CampaignID    string                        `json:"campaign_id,omitempty"`
-		}
-		if decode(r, &body) != nil {
-			writeError(w, 400, "invalid_public_input")
+		body, uploads, cleanup, err := decodeSubmission(w, r)
+		defer cleanup()
+		if err != nil {
+			resultError(w, err)
 			return
 		}
-		receipt, err := h.submissions.Submit(r.Context(), surveyport.SubmitCommand{Slug: slug, DefinitionVersion: body.Version, SubmissionKey: body.SubmissionKey, Answers: body.Answers, Identity: identity, SourceChannel: body.SourceChannel, CampaignID: body.CampaignID})
+		receipt, err := h.submissions.Submit(r.Context(), surveyport.SubmitCommand{Slug: slug, DefinitionVersion: body.Version, SubmissionKey: body.SubmissionKey, Answers: body.Answers, Identity: identity, SourceChannel: body.SourceChannel, CampaignID: body.CampaignID, Attachments: uploads})
 		if err != nil {
 			var duplicate *surveyport.AlreadySubmittedError
 			if errors.As(err, &duplicate) {
@@ -851,7 +854,7 @@ func (h *Handler) export(w http.ResponseWriter, r *http.Request, id int64) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=questionnaire-%d.csv", id))
 	w.Header().Set("Cache-Control", "no-store")
 	writer := csv.NewWriter(w)
-	_ = writer.Write([]string{"submission_id", "submitted_at", "identity_state", "customer_id", "total_score"})
+	_ = writer.Write([]string{"submission_id", "submitted_at", "identity_state", "customer_id", "total_score", "attachments"})
 	for offset := int32(0); ; {
 		page, err := h.submissions.ListSubmissions(r.Context(), surveyport.ID(id), 100, offset, "")
 		if err != nil {
@@ -862,7 +865,19 @@ func (h *Handler) export(w http.ResponseWriter, r *http.Request, id int64) {
 			if s.Identity.CustomerID != nil {
 				customer = fmt.Sprint(*s.Identity.CustomerID)
 			}
-			_ = writer.Write([]string{fmt.Sprint(s.ID), presentationtime.FormatShanghaiDateTime(s.SubmittedAt), surveyIdentityStateLabel(s.Identity.State), customer, fmt.Sprint(s.TotalScore)})
+			attachments := []map[string]string{}
+			for _, a := range s.Answers {
+				if a.Attachment != nil {
+					scheme := "http"
+					if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+						scheme = "https"
+					}
+					view := (&url.URL{Scheme: scheme, Host: r.Host, Path: a.Attachment.ViewURL}).String()
+					attachments = append(attachments, map[string]string{"question_title": a.QuestionTitle, "file_name": a.Attachment.FileName, "view_url": view})
+				}
+			}
+			attachmentJSON, _ := json.Marshal(attachments)
+			_ = writer.Write([]string{fmt.Sprint(s.ID), presentationtime.FormatShanghaiDateTime(s.SubmittedAt), surveyIdentityStateLabel(s.Identity.State), customer, fmt.Sprint(s.TotalScore), string(attachmentJSON)})
 		}
 		writer.Flush()
 		if writer.Error() != nil || len(page.Items) == 0 || int64(offset)+int64(len(page.Items)) >= page.Total {

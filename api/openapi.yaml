@@ -3761,6 +3761,25 @@ paths:
   /api/admin/questionnaires:
     get: {operationId: listSurveyQuestionnaires, security: [{adminSession: []}], responses: {"200": {description: Survey definitions}}}
     post: {operationId: createSurveyQuestionnaire, security: [{adminSession: [], csrfHeader: []}], parameters: [{$ref: "#/components/parameters/RequiredIdempotencyKey"}], requestBody: {required: true, content: {application/json: {schema: {type: object}}}}, responses: {"200": {description: Survey definition created}}}
+  /api/admin/questionnaires/{questionnaire_id}/submissions/{submission_id}/answers/{answer_id}/attachment:
+    parameters:
+      - {name: questionnaire_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveID"}}
+      - {name: submission_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveID"}}
+      - {name: answer_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveID"}}
+    get:
+      operationId: readSurveyAnswerAttachment
+      tags: [Survey]
+      security: [{adminSession: []}]
+      responses:
+        "200":
+          description: Private image requiring the same admin authorization as its answer; never a public or provider URL.
+          content:
+            image/png: {schema: {type: string, format: binary}}
+            image/jpeg: {schema: {type: string, format: binary}}
+            image/gif: {schema: {type: string, format: binary}}
+        "401": {description: Authentication required}
+        "403": {description: Answer access forbidden}
+        "404": {description: Image or scoped answer not found}
   /api/admin/questionnaires/{questionnaire_id}/redemption-codes:
     parameters: [{name: questionnaire_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveID"}}]
     get:
@@ -3918,7 +3937,20 @@ paths:
       operationId: submitPublicSurvey
       tags: [SurveyPublic]
       description: Requires a resolved Customer from a valid HttpOnly Survey OAuth session. Mobile answers accept only 11-digit mainland numbers and remain declared evidence. The same submission key and payload replays its receipt; a different key after a successful claim returns already_submitted.
-      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/SurveyPublicSubmissionRequest"}}}}
+      requestBody:
+        required: true
+        description: Images use attachment:<question_id> parts. One file per attachment question; valid JPEG/PNG/GIF smaller than 2097152 bytes. Same-origin only. Multipart uses 120 seconds; JSON retains 15 seconds.
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SurveyPublicSubmissionRequest"}
+          multipart/form-data:
+            schema:
+              type: object
+              required: [submission]
+              properties:
+                submission: {type: string, description: JSON encoded SurveyPublicSubmissionRequest}
+              additionalProperties: {type: string, format: binary}
+
       responses:
         "201": {description: Idempotent local submission receipt and safe completion action, content: {application/json: {schema: {$ref: "#/components/schemas/SurveyPublicSubmissionResponse"}}}}
         "400": {description: invalid_public_input, content: {application/json: {schema: {$ref: "#/components/schemas/SurveyPublicError"}}}}
@@ -8361,7 +8393,7 @@ components:
       required: [id, type, title, required, sort_order, minimum_selections, maximum_selections, placeholder_text, assessment_dimension_key, options]
       properties:
         id: {$ref: "#/components/schemas/PositiveID"}
-        type: {type: string, enum: [single_choice, multi_choice, textarea, mobile, redemption_code]}
+        type: {type: string, enum: [single_choice, multi_choice, textarea, mobile, redemption_code, attachment]}
         title: {type: string, minLength: 1, maxLength: 500}
         required: {type: boolean}
         sort_order: {type: integer, minimum: 0, maximum: 99}
@@ -8403,7 +8435,7 @@ components:
       type: object
       additionalProperties: false
       required: [question_id, option_ids]
-      properties: {question_id: {$ref: "#/components/schemas/PositiveID"}, option_ids: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/PositiveID"}}, text_value: {type: string, maxLength: 10000}}
+      properties: {question_id: {$ref: "#/components/schemas/PositiveID"}, option_ids: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/PositiveID"}}, text_value: {type: string, maxLength: 10000}, attachment: {type: boolean, description: True when the multipart request includes the image for this question}}
     SurveyPublicSubmissionReceipt:
       type: object
       additionalProperties: false

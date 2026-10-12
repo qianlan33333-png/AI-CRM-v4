@@ -1,3 +1,4 @@
+import { showSurveyAnswers } from './surveyAnswerDialog';
 import { request } from '../src/api/transport';
 
 type CodeRow = { code: string; used_submission_id?: number; used_at?: string };
@@ -24,8 +25,8 @@ export function mountRedemptionLibrary(root: HTMLElement, qid: number): void {
     pending = active; upload.disabled = active; input.disabled = active;
     previous.disabled = active || offset === 0; next.disabled = active || offset + 100 >= total;
   };
-  async function load(): Promise<void> {
-    if (pending) return;
+  async function load(): Promise<boolean> {
+    if (pending) return false;
     busy(true); message.textContent = '正在读取兑换码库…';
     try {
       const response = await request(`${path}?limit=100&offset=${offset}`);
@@ -39,12 +40,14 @@ export function mountRedemptionLibrary(root: HTMLElement, qid: number): void {
         for (const value of [item.code, item.used_submission_id ? '已使用' : '未使用', item.used_at ? new Date(item.used_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '—', item.used_submission_id ? String(item.used_submission_id) : '—']) {
           const cell = document.createElement('td'); cell.textContent = value; row.append(cell);
         }
+        if (item.used_submission_id) {const cell=row.lastElementChild!;const link=document.createElement('button');link.textContent=String(item.used_submission_id);link.style.cssText='border:0;background:none;color:#3370ff;font:inherit;padding:6px 0;cursor:pointer';link.onclick=()=>void showSurveyAnswers(qid,item.used_submission_id);cell.replaceChildren(link);}
         rows.append(row);
       }
       message.textContent = page.items.length ? '' : '兑换码库为空，请下载模板后导入。';
+      return true;
     } catch (error) {
       rows.replaceChildren(); panel.querySelector<HTMLElement>('[data-code-counts]')!.textContent = '';
-      message.textContent = failure(error);
+      message.textContent = failure(error);return false;
     } finally { busy(false); }
   }
   input.onchange = () => { importedFile = input.files?.[0]; importKey = crypto.randomUUID(); message.textContent = ''; };
@@ -57,7 +60,7 @@ export function mountRedemptionLibrary(root: HTMLElement, qid: number): void {
       const response = await request(`${path}/imports`, { method: 'POST', headers: { 'Idempotency-Key': importKey }, body: form });
       const result = await response.json() as { imported: number; duplicates: number; empty_rows: number };
       if (![result.imported, result.duplicates, result.empty_rows].every(Number.isSafeInteger)) throw new Error('导入结果尚未确认，请用同一文件重试');
-      offset = 0; busy(false); await load();
+      offset = 0; busy(false); if (!await load()) {message.textContent = `导入已接受，但重新读取失败：${message.textContent}，请点击刷新确认。`; return;}
       message.textContent = `新增 ${result.imported} 个，跳过重复 ${result.duplicates} 个、空行 ${result.empty_rows} 行。`;
     } catch (error) { message.textContent = failure(error); }
     finally { busy(false); }

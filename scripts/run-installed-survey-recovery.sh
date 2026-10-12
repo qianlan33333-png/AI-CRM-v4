@@ -29,4 +29,5 @@ export AICRM_REQUIRE_CHROMIUM_JOURNEY=1
 exec python3 scripts/dev_preflight.py browser \
   --journey TestPostgreSQLPublicSurveyReauthorizationChromiumJourney \
   --journey TestPostgreSQLPublicSurveyLostResponseChromiumJourney \
-  --journey TestPostgreSQLPublicSurveyNativeInputRecoveryChromiumJourney
+  --journey TestPostgreSQLPublicSurveyNativeInputRecoveryChromiumJourney \
+  --journey TestPostgreSQLSurveyAttachmentChromiumJourney

@@ -223,3 +223,5 @@ body[data-ui-surface="h5"][data-v3-public-survey] #screen[data-v3-survey-submitt
 .survey-field-dialog h2 { margin: 0 0 12px; font-size: 18px; }
 .survey-field-dialog p { font-size: 15px; line-height: 1.6; }
 .survey-field-dialog button { width: 100%; height: 44px; margin-top: 12px; border: 0; border-radius: 10px; background: var(--accent, #3370ff); color: #fff; font-size: 15px; }
+
+.survey-attachment-picker:focus-within { outline: 2px solid #3370ff; outline-offset: 2px; }

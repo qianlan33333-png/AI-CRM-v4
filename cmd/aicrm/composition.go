@@ -1039,6 +1039,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	surveyDefinitions := surveyapp.NewService(uow, surveyRepository)
 	segmentBindings.Handler.BindAudienceSurveyReferences(audienceSurveyReferenceAdapter{surveys: surveyDefinitions})
 	surveySubmissions := surveyapp.NewSubmissionService(uow, surveyRepository, surveyCipher)
+	if err := surveySubmissions.BindPrivateImages(mediaRepository); err != nil {
+		return fail(err)
+	}
 	if err = surveySubmissions.BindCanonicalLineage(queries); err != nil {
 		return fail(err)
 	}

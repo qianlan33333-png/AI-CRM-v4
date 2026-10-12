@@ -2,8 +2,33 @@ package port
 
 import (
 	"context"
+	"io"
 	"time"
 )
+
+const MaximumAttachmentBytes = 2 << 20
+
+type AttachmentUpload struct {
+	QuestionID          ID
+	FileName, MediaType string
+	Content             []byte
+	// Open is a request-scoped multipart file, never a persisted upload ticket.
+	Open func() (io.ReadCloser, error)
+}
+type SubmissionAttachment struct {
+	FileName   string `json:"file_name"`
+	MediaType  string `json:"media_type"`
+	SizeBytes  int64  `json:"size_bytes"`
+	ViewURL    string `json:"view_url,omitempty"`
+	PrivateRef string `json:"-"`
+}
+type AttachmentContent struct {
+	FileName, MediaType string
+	Content             []byte
+}
+type SubmissionAttachmentReader interface {
+	ReadSubmissionAttachment(context.Context, ID, ID, ID) (AttachmentContent, error)
+}
 
 // FieldError carries safe feedback, never rejected code or file contents.
 type FieldError struct {

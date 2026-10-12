@@ -11,6 +11,7 @@ type SubmitCommand struct {
 	DefinitionVersion         int64
 	SubmissionKey             string
 	Answers                   []SubmissionAnswer
+	Attachments               []AttachmentUpload
 	Identity                  SubmissionIdentity
 	SourceChannel, CampaignID string
 }
@@ -86,6 +87,7 @@ type AnswerSnapshot struct {
 	SelectedOptions         []SelectedOptionSnapshot `json:"selected_options"`
 	TextValue               string                   `json:"text_value,omitempty"`
 	TextValueMasked         string                   `json:"text_value_masked,omitempty"`
+	Attachment              *SubmissionAttachment    `json:"attachment,omitempty"`
 	Score                   float64                  `json:"score"`
 	LegacyDefinitionMissing bool                     `json:"legacy_definition_missing"`
 	PhoneBindingStatus      string                   `json:"phone_binding_status,omitempty"`

@@ -46,5 +46,12 @@ const save = calls.find(call => call.path.endsWith('/operations/external-push') 
 assert.equal(save?.body.webhook_url, 'https://hooks.example/survey');
 assert.deepEqual(save?.body.custom_params, { source: 'survey' });
 assert.equal(save?.body.configuration_version, 3);
+const originalRoot=document.querySelector('.qo-page');
+const inputBefore=document.querySelector('[data-push-url]') || document.querySelector('#qo-push-url');
+inputBefore.value='https://hooks.example/unsaved-input';
+document.getElementById('stage').textContent='旧后台壳的延迟结果';
+await delay();
+assert.strictEqual(document.querySelector('.qo-page'),originalRoot,'late shell rendering must retain the Owner node');
+assert.equal(document.querySelector('#qo-push-url').value,'https://hooks.example/unsaved-input','late shell rendering must retain unsaved input');
 dom.window.close();
 console.log('Survey operations legacy-parity Host: PASS');

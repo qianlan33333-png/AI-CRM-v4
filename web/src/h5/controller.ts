@@ -31,12 +31,13 @@ type V3SurveySubmissionAnswer = SurveyPublicSubmissionAnswer;
 
 const validID = (value: number): boolean => Number.isSafeInteger(value) && value > 0;
 const validToken = (value: string): boolean => /^[A-Za-z0-9_-]{43}$/.test(value);
-const SUPPORTED_TYPES = ['single_choice', 'multi_choice', 'textarea', 'mobile', 'redemption_code'];
+const SUPPORTED_TYPES = ['single_choice', 'multi_choice', 'textarea', 'mobile', 'redemption_code', 'attachment'];
 
 type SubmissionResumeDraft = {
   schema: 1;
   savedAt?: number;
   pendingSubmit?: boolean;
+  hadImages?: boolean;
   definition: V3SurveyDefinition;
   answers: [number, number[]][];
   textAnswers: [number, string][];
@@ -49,6 +50,7 @@ export class H5Controller extends PageBase {
   private result: V3SurveyResult | null = null;
   private answers = new Map<number, number[]>();
   private textAnswers = new Map<number, string>();
+  private images = new Map<number, { file: File; url: string }>();
   private unsupportedTypes = new Set<number>();
   private questionIndex = 0;
   private loading = false;
@@ -137,6 +139,8 @@ export class H5Controller extends PageBase {
           this.definition = definition;
           this.answers.clear();
           this.textAnswers.clear();
+          for (const image of this.images.values()) URL.revokeObjectURL(image.url);
+          this.images.clear();
           this.submissionKey = '';
           this.questionIndex = 0;
           document.title = definition.title;
@@ -149,7 +153,7 @@ export class H5Controller extends PageBase {
               this.error = '问卷内容已更新，旧答案尚未提交。请核对当前题目后重新填写并提交。';
             } else {
               this.restoreResumeDraft(draft);
-              resumeSubmit = returningFromAuthorization && !query.has('oauth_error') && draft.pendingSubmit !== false;
+              resumeSubmit = returningFromAuthorization && !query.has('oauth_error') && draft.pendingSubmit !== false && !draft.hadImages;
             }
           }
           const expectedPage = definition.answer_display_mode === 'one_by_one' ? 'one' : 'all';
@@ -300,7 +304,7 @@ export class H5Controller extends PageBase {
 
   private snapshotDraft(pendingSubmit = false): SubmissionResumeDraft | null {
     if (!this.definition || !/^[a-f0-9]{64}$/.test(this.definition.authorizationContext || '')) return null;
-    return { schema: 1, savedAt: Date.now(), pendingSubmit, definition: this.definition,
+    return { schema: 1, savedAt: Date.now(), pendingSubmit: this.images.size ? false : pendingSubmit, hadImages: this.images.size > 0, definition: this.definition,
       answers: [...this.answers], textAnswers: [...this.textAnswers],
       submissionKey: this.submissionKey, questionIndex: this.questionIndex };
   }
@@ -315,7 +319,8 @@ export class H5Controller extends PageBase {
   private restoreResumeDraft(draft: SubmissionResumeDraft): void {
     this.answers = new Map(draft.answers);
     this.textAnswers = new Map(draft.textAnswers);
-    this.submissionKey = draft.submissionKey;
+    this.submissionKey = draft.hadImages ? '' : draft.submissionKey;
+    if (draft.hadImages) this.error = '已恢复文字答案，请重新选择图片后提交。';
     this.questionIndex = Math.min(draft.questionIndex, (this.definition?.questions.length || 1) - 1);
   }
 
@@ -367,7 +372,7 @@ export class H5Controller extends PageBase {
 		  (question.required && question.minimum_selections === 0) || (question.type === 'single_choice' && question.maximum_selections !== 1))) {
         throw new Error('问卷题目超出当前单选/多选契约');
       }
-	  if (['textarea', 'mobile', 'redemption_code'].includes(question.type) && question.options.length) throw new Error('输入题不应包含选项');
+	  if (['textarea', 'mobile', 'redemption_code', 'attachment'].includes(question.type) && question.options.length) throw new Error('输入题不应包含选项');
       const options = new Set<number>();
       for (const option of question.options) {
         if (!validID(option.id) || options.has(option.id) || typeof option.option_text !== 'string' || !option.option_text) throw new Error('问卷选项响应不完整');
@@ -422,6 +427,7 @@ export class H5Controller extends PageBase {
 
   private questionError(question: V3SurveyQuestion): string {
     if (!this.supported(question)) return '';
+    if (question.type === 'attachment') return question.required && !this.images.has(question.id) ? `「${question.title}」请上传图片` : '';
     if (question.type === 'textarea' || question.type === 'mobile' || question.type === 'redemption_code') {
       const value = this.textAnswers.get(question.id) || '';
       if (!value && !question.required) return '';
@@ -446,20 +452,41 @@ export class H5Controller extends PageBase {
     return '';
   }
 
+  private setImage(question: V3SurveyQuestion, event: Event): void {
+    if (this.submitting || this.submitted) return;
+    this.captureVisibleText();
+    const file = (event.target as HTMLInputElement).files?.[0];
+    const selectedToast = document.getElementById('fb-toast');
+    if (selectedToast?.textContent?.startsWith('已选择：')) selectedToast.hidden = true;
+    if (!file) return;
+    let error = '';
+    if (file.size >= 2097152) error = '图片必须小于 2MB';
+    else if (!['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) error = '请上传 JPG、PNG 或 GIF 图片';
+    if (error) { showSurveyFieldDialog(error, question.id); (event.target as HTMLInputElement).value=''; return; }
+    const old = this.images.get(question.id); if (old) URL.revokeObjectURL(old.url);
+    this.images.set(question.id, { file, url: URL.createObjectURL(file) });
+    this.submissionKey = ''; this.error = ''; this.saveDraft(); this.refresh(true);
+  }
+  private removeImage(question: V3SurveyQuestion): void {
+    if (this.submitting || this.submitted) return;
+    this.captureVisibleText();
+    const old=this.images.get(question.id); if (old) URL.revokeObjectURL(old.url);
+    this.images.delete(question.id);this.submissionKey='';this.saveDraft();this.refresh(true);
+  }
   private async submit(afterAuthorization = false): Promise<void> {
     if (!this.definition || this.submitting || this.submitted) return;
     if (this.definitionStale) { this.refresh(true); return; }
     this.captureVisibleText();
     const invalid = this.definition.questions.find(question => this.questionError(question));
     this.error = invalid ? this.questionError(invalid) : '';
-    if (this.error) { if (invalid) this.questionIndex = this.definition.questions.indexOf(invalid); this.refresh(true); if (invalid?.type === 'redemption_code') showSurveyFieldDialog(this.error, invalid.id); return; }
+    if (this.error) { if (invalid) this.questionIndex = this.definition.questions.indexOf(invalid); this.refresh(true); if (['redemption_code','attachment'].includes(invalid?.type || '')) showSurveyFieldDialog(this.error, invalid.id); return; }
     let fieldFeedback: { message: string; id?: number } | undefined;
     const answers: V3SurveySubmissionAnswer[] = this.definition.questions
-      .filter((question) => this.supported(question) && ((this.answers.get(question.id) || []).length > 0 || (this.textAnswers.get(question.id) || '') !== ''))
-      .map((question) => ({ question_id: question.id, option_ids: [...(this.answers.get(question.id) || [])], text_value: this.textAnswers.get(question.id) || undefined }));
+      .filter((question) => this.supported(question) && ((this.answers.get(question.id) || []).length > 0 || (this.textAnswers.get(question.id) || '') !== '' || this.images.has(question.id)))
+      .map((question) => ({ question_id: question.id, option_ids: [...(this.answers.get(question.id) || [])], text_value: this.textAnswers.get(question.id) || undefined, ...(this.images.has(question.id) ? {attachment:true} : {}) }));
     this.submitting = true;
     this.refresh();
-    // Match the Host's 15-second HTTP write budget. A lost response remains
+    // Match the route's 120-second image / 15-second JSON wait budget. A lost response remains
     // outcome-unknown: release the UI lock, retain the original key, and let
     // the user retry rather than starting a second logical submission.
     try {
@@ -467,7 +494,7 @@ export class H5Controller extends PageBase {
       // network outcomes retry the same request; editing answers clears the key.
       this.submissionKey ||= this.newSubmissionKey();
       this.saveDraft();
-      const receipt = await surveyRead((signal) => submitSurvey(this.definition!.slug, { version: this.definition!.version, submission_key: this.submissionKey, answers }, signal), '提交结果暂未确认，答案已保留；未修改答案时可安全重试。');
+      const receipt = await surveyRead((signal) => submitSurvey(this.definition!.slug, { version: this.definition!.version, submission_key: this.submissionKey, answers }, signal, new Map([...this.images].map(([id,value])=>[id,value.file]))), '提交结果暂未确认，答案与图片已保留；未修改内容时可安全重试。', this.images.size ? 120_000 : 15_000);
       this.complete(receipt.completionAction);
     } catch (error) {
       if (isAlreadySubmitted(error)) this.complete(completionActionFromCarrier(error.details));
@@ -477,7 +504,7 @@ export class H5Controller extends PageBase {
         else this.authorizationRetryNotice();
       }
       else if (error instanceof ApiError && error.details && typeof error.details === 'object' &&
-               (String((error.details as { code?: string }).code).startsWith('redemption_code_') || (error.details as { code?: string }).code === 'submission_payload_conflict')) {
+               (String((error.details as { code?: string }).code).startsWith('redemption_code_') || String((error.details as { code?: string }).code).startsWith('attachment_') || (error.details as { code?: string }).code === 'submission_payload_conflict')) {
         const field = error.details as { message?: string; question_id?: number };
         this.error = field.message || '提交未完成，请检查后重试';
         fieldFeedback = { message: this.error, id: field.question_id };
@@ -573,10 +600,10 @@ export class H5Controller extends PageBase {
           id: question.id, title: question.title, required: question.required ? '（必答）' : '（选答）',
           supported, unsupported: !supported,
           hasOther: !!other, otherPlaceholder: other?.other_placeholder || '请补充其他说明',
-          isText, isRedemption: question.type === 'redemption_code', isMobile: question.type === 'mobile', isTextarea: question.type === 'textarea', isChoice: !isText, inputType: question.type === 'mobile' ? 'tel' : 'text', inputValue: this.textAnswers.get(question.id) || '', placeholder: question.type === 'mobile' ? '请输入11位中国大陆手机号' : question.placeholder_text || '请输入', input: (event: Event) => this.setText(question, event),
+          isText, isRedemption: question.type === 'redemption_code', isMobile: question.type === 'mobile', isTextarea: question.type === 'textarea', isChoice: !isText && question.type !== 'attachment', isAttachment: question.type === 'attachment', hasImage:this.images.has(question.id), imageAction:this.images.has(question.id) ? '替换图片' : '选择图片', imageURL:this.images.get(question.id)?.url || '', fileName:this.images.get(question.id)?.file.name || '', selectImage:(event:Event)=>this.setImage(question,event), removeImage:()=>this.removeImage(question), inputType: question.type === 'mobile' ? 'tel' : 'text', inputValue: this.textAnswers.get(question.id) || '', placeholder: question.type === 'mobile' ? '请输入11位中国大陆手机号' : question.placeholder_text || '请输入', input: (event: Event) => this.setText(question, event),
           hint: !supported ? '当前端不支持该题型，本题不参与作答与提交'
-            : question.type === 'single_choice' ? '单选' : question.type === 'multi_choice' ? `多选，限选 ${question.maximum_selections} 项` : question.type === 'mobile' ? '11位中国大陆手机号' : question.type === 'redemption_code' ? '兑换码仅在提交时验证，只能使用一次' : '文本回答',
-          options: supported && !isText ? question.options.map((option) => {
+            : question.type === 'single_choice' ? '单选' : question.type === 'multi_choice' ? `多选，限选 ${question.maximum_selections} 项` : question.type === 'mobile' ? '11位中国大陆手机号' : question.type === 'redemption_code' ? '兑换码仅在提交时验证，只能使用一次' : question.type === 'attachment' ? '一张 JPG、PNG 或 GIF 图片，小于 2MB；刷新或重新登录后需重新选择' : '文本回答',
+          options: supported && !isText && question.type !== 'attachment' ? question.options.map((option) => {
             const selected = (this.answers.get(question.id) || []).includes(option.id);
             return { id: option.id, text: option.option_text, selected, mark: selected ? '✓' : '○',
               style: { background: selected ? '#EFF4FF' : '#fff', borderColor: selected ? '#3370ff' : '#DEE0E3' },

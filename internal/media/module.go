@@ -68,7 +68,7 @@ func (m *ModuleRegistration) Readiness(ctx context.Context, pool *pgxpool.Pool) 
 		return errors.New("media module dependencies are required")
 	}
 	var ready bool
-	err := pool.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM unnest(ARRAY['media_blobs','media_images','media_attachments','media_miniprograms','media_group_invites','media_operation_receipts','media_audit_events','media_outbox','media_attachment_uploads','media_attachment_upload_parts','media_content_packages','media_content_package_versions','media_content_package_version_refs','media_content_delivery_receipts','media_content_delivery_bindings','media_group_ops_preparation_receipts','media_group_ops_preparation_items','media_legacy_material_mappings','media_material_source_snapshots']) AS required(name) WHERE to_regclass(current_schema() || '.' || required.name) IS NULL)`).Scan(&ready)
+	err := pool.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM unnest(ARRAY['media_blobs','media_private_images','media_images','media_attachments','media_miniprograms','media_group_invites','media_operation_receipts','media_audit_events','media_outbox','media_attachment_uploads','media_attachment_upload_parts','media_content_packages','media_content_package_versions','media_content_package_version_refs','media_content_delivery_receipts','media_content_delivery_bindings','media_group_ops_preparation_receipts','media_group_ops_preparation_items','media_legacy_material_mappings','media_material_source_snapshots']) AS required(name) WHERE to_regclass(current_schema() || '.' || required.name) IS NULL)`).Scan(&ready)
 	if err != nil {
 		return err
 	}
