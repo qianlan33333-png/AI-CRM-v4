@@ -43,6 +43,16 @@ product-source-test-page与test-browser-bundle辅助模块也已核对；不改�
 
 1152正式run.json核实的Linux backend 7条命令、22个terminal pass且无skip/fail；88 attempt2正式backend/run.json亦为success/exit0且7条命令全部exit0，清单输入与业务/SQL/UI/测试载荷保持相同。88正式frontend顺序为imageLibraryFilterHost exit0、material_order因缺built productForm.html exit1，sp_material与radar upload尚未执行。有效后端与素材库收据保留；阶段修复不记为原失败用例通过。素材库、周期素材、雷达继续留在源码frontend，material_order与materialSaveAdapter待实际安装阶段，未执行项均不记为通过。
 
+## 雷达失败的定点修复与收据复用
+
+工作台正式822 attempt1：backend 7/7 exit0；imageLibraryFilterHost与sp_material均实际exit0；radar上传合同在固定等待20ms后断言第三个PDF请求失败（actual calls=2、expected=3）。这些原来源/载荷未变的后端和两条前端通过收据，绑定822准确树与原受保护run.json/E/206诊断保留，不能称作在本修复head重新执行。
+
+本机Node24.18.0/JSDOM30.0.1核对PDF File.arrayBuffer存在；uploadRadarPdfDto先await文件读取与SHA256再fetch。对原合同施加合法80ms异步读取，20ms处calls仍为2且没有提前拒绝，随后指定PDF初始化请求正常成为第3次。runtime图片1MiB guard只作用uploadRadarImage，PDF10MiB原合同没有改动。
+
+只修radar测试fixture：用有界2秒等待`POST /api/admin/attachment-library/uploads`，并同时观察pdfPromise，提前拒绝或无请求完成立即失败；保留严格calls===3、PDF>1MiB可进入原multipart路径和模拟网络拒绝断言。保留80ms合法慢读使固定sleep错误可稳定暴露。失败Promise注入复验确认报出具体文件读取错误而非等到超时。没有补虚假的File能力、改runtime/断言或加入skip。
+
+本修复准确树源码清单只选择失败的radar Node合同，installed_checks仍product-image-delivery；其余后端与两项源码前端明确复用822正式通过收据。API/index/lock、SQL、UI/runtime和其他测试字节不变；两个built Host Node合同及Go安装旅程继续由原最终安装包验收，尚未验证，不再重复构建Host或整阶段。
+
 ## 直接断言
 
 - multipart/JSON新素材及Excel原始封面超过1MiB返回413，拒绝后素材、blob、素材收据不增加，Excel plan version不变；单文件恰好1MiB允许并同键重放。
