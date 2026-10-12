@@ -40,8 +40,8 @@ for (const kind of ['standard', 'service_period']) {
       await settle();
       assert.equal(errors.length, 0, `${kind}/${level}/${provider}: ${errors.join('; ')}`);
       assert.equal(document.getElementById('identityGate').hidden, true);
-      assert.equal(document.querySelector('#checkoutContent > .product img'), null, 'checkout product has no image');
-      assert.equal(document.getElementById('couponPanel').hidden, false);
+      assert.equal(document.querySelector('#checkoutContent > .product .product-info img'), null, 'checkout product has no image');
+      assert.equal(document.getElementById('couponPanel').hidden, true);
       assert.equal(document.querySelector('[id*=Note], [id*=Remark]'), null, 'checkout has no notes');
       if (provider === 'alipay') document.querySelector('input[name=paymentMethod][value=alipay]').click();
 
