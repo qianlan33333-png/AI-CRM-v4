@@ -1,0 +1,70 @@
+import {resolveChromiumBinary} from '../../internal/webshell/chromium_binary.mjs';
+import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {spawn} from 'node:child_process';
+const base=process.env.AICRM_PUBLIC_SURVEY_BROWSER_URL,session=process.env.AICRM_PUBLIC_SURVEY_BROWSER_SESSION,picture=process.env.AICRM_SURVEY_BROWSER_IMAGE,book=process.env.AICRM_SURVEY_BROWSER_XLSX,screens=process.env.AICRM_PUBLIC_SURVEY_SCREENSHOT_DIR;
+const one=process.env.AICRM_PUBLIC_SURVEY_BROWSER_DISPLAY==='one_by_one',mode=one?'one':'all';
+if(!base?.startsWith('https://')||!path.isAbsolute(picture)||!path.isAbsolute(book)||!path.isAbsolute(screens))throw new Error('invalid isolated attachment fixture');
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
+class CDP{constructor(socket){this.errors=[];this.responses=[];this.socket=socket;this.id=0;this.pending=new Map();socket.addEventListener('message',e=>{const m=JSON.parse(String(e.data)),p=this.pending.get(m.id);if(m.method==='Network.responseReceived')this.responses.push({url:m.params.response.url,status:m.params.response.status,type:m.params.response.mimeType});if(m.method==='Runtime.exceptionThrown')this.errors.push(m.params.exceptionDetails?.text || 'uncaught exception');if(!p)return;this.pending.delete(m.id);m.error?p.reject(new Error(JSON.stringify(m.error))):p.resolve(m.result||{});});}call(method,params={}){return new Promise((resolve,reject)=>{const id=++this.id;this.pending.set(id,{resolve,reject});this.socket.send(JSON.stringify({id,method,params}));});}}
+const evalJS=async(c,e)=>{const r=await c.call('Runtime.evaluate',{expression:e,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw new Error(JSON.stringify(r.exceptionDetails));return r.result?.value;};
+const wait=async(c,e,label)=>{for(let i=0;i<160;i++){if(await evalJS(c,e))return;await delay(50);}throw new Error(label+': '+JSON.stringify(c.responses.slice(-20))+': '+await evalJS(c,'document.body.innerText.slice(-1500)'));};
+const profile=await fs.mkdtemp(path.join(os.tmpdir(),'survey-create-'));let browser;
+try{
+ browser=spawn(resolveChromiumBinary(),['--headless=new','--no-sandbox','--remote-debugging-port=0','--user-data-dir='+profile,'--ignore-certificate-errors','--no-first-run','--no-proxy-server','--host-resolver-rules=MAP example.com 127.0.0.1','--user-agent=Mozilla/5.0 MicroMessenger/8.0','about:blank'],{stdio:'ignore'});
+ let address;for(let i=0;i<160;i++){try{const port=(await fs.readFile(path.join(profile,'DevToolsActivePort'),'utf8')).split('\n')[0];if(/^\d+$/.test(port)){address='http://127.0.0.1:'+port;break;}}catch{}await delay(50);}if(!address)throw new Error('Chromium DevTools unavailable');
+ const target=await(await fetch(address+'/json/new?about:blank',{method:'PUT'})).json();const socket=new WebSocket(target.webSocketDebuggerUrl);await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true});});const c=new CDP(socket);await c.call('Page.enable');await c.call('Runtime.enable');await c.call('Network.enable');await c.call('DOM.enable');
+ for(const cookie of JSON.parse(process.env.AICRM_SURVEY_BROWSER_ADMIN_COOKIES||'null')||[])await c.call('Network.setCookie',{name:cookie.Name,value:cookie.Value,url:base,path:cookie.Path||'/',secure:true,httpOnly:cookie.HttpOnly,sameSite:'Lax'});
+ await c.call('Network.setCookie',{name:'__Host-aicrm_survey_identity',value:session,url:base,path:'/',secure:true,httpOnly:true,sameSite:'Lax'});
+ const navigate=async(route)=>{await c.call('Page.navigate',{url:base+route});};
+ const click=selector=>evalJS(c,`document.querySelector(${JSON.stringify(selector)}).click();true`);
+ const fill=(selector,value)=>evalJS(c,`(()=>{const n=document.querySelector(${JSON.stringify(selector)});n.value=${JSON.stringify(value)};n.dispatchEvent(new Event('input',{bubbles:true}));return true})()`);
+ const setFile=async(selector,file)=>{const root=(await c.call('DOM.getDocument')).root.nodeId;const n=await c.call('DOM.querySelector',{nodeId:root,selector});if(!n.nodeId)throw new Error('missing file input '+selector);await c.call('DOM.setFileInputFiles',{nodeId:n.nodeId,files:[file]});};
+ const capture=async(name)=>{await evalJS(c,'document.fonts.ready');const shot=await c.call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screens,mode+'-'+name+'.png'),Buffer.from(shot.data,'base64'),{mode:0o600});};
+ await c.call('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+
+ await navigate('/admin/questionnaireDetail.html');
+ await wait(c,"document.querySelector('#field-name') && document.querySelector('#add-shipping')",'blank editor did not mount');
+ await fill('#field-name','测试新能力');await fill('#field-title','123新能力');await fill('#field-description','123');
+ await evalJS(c,`(()=>{const n=document.querySelector('#field-answer-display-mode');n.value=${JSON.stringify(one?'one_by_one':'all_in_one')};n.dispatchEvent(new Event('change',{bubbles:true}));return true})()`);
+ await click('#add-shipping');await fill('#question-title','收货人');
+ await click('#add-redemption');await fill('#question-title','兑换码');
+ await click('#add-attachment');await fill('#question-title','图片');
+ await evalJS(c,"(()=>{const n=document.querySelector('#question-required');n.checked=true;n.dispatchEvent(new Event('change',{bubbles:true}));return true})()");
+ await click('#preview-head');await fill('#field-slug','bad slug');await click('#save-btn');
+ await wait(c,"document.body.innerText.includes('invalid_request')",'invalid explicit slug must fail');
+ if(!await evalJS(c,"!new URLSearchParams(location.search).has('id') && document.querySelector('#field-name').value==='测试新能力' && document.querySelector('#preview-questions').children.length===3 && document.querySelector('#field-slug').value==='bad slug'"))throw new Error('rejected save cleared draft or assigned id');
+ await capture('editor-rejected-draft');
+ await fill('#field-slug','');await click('#save-btn');
+ await wait(c,"Number(new URLSearchParams(location.search).get('id'))>0 && document.body.innerText.includes('问卷已创建')",'empty slug creation failed');
+ const savedID=Number(await evalJS(c,"new URLSearchParams(location.search).get('id')"));
+ const read=await evalJS(c,`fetch('/api/admin/questionnaires/${savedID}').then(r=>r.json())`);
+ const saved=read.questionnaire;
+ if(!/^q-[a-f0-9]{32}$/.test(saved.slug)||saved.questions.map(q=>q.type).join(',')!=='shipping_address,redemption_code,attachment'||saved.name!=='测试新能力'||saved.title!=='123新能力')throw new Error('created definition readback mismatch '+JSON.stringify(read));
+ await capture('editor-created');await c.call('Page.reload');
+ await wait(c,"document.querySelector('#field-name')?.value==='测试新能力' && document.querySelector('#preview-questions')?.children.length===3",'reopen lost saved definition');
+ if(Number(await evalJS(c,"new URLSearchParams(location.search).get('id')"))!==savedID || await evalJS(c,"document.querySelector('#field-slug').value")!==saved.slug)throw new Error('reopen changed ID or slug');
+ await capture('editor-reopened');
+ const publish=await evalJS(c,`(async()=>{const csrf=document.cookie.split(';').map(v=>v.trim()).find(v=>v.startsWith('aicrm_csrf='))?.slice(11);const r=await fetch('/api/admin/questionnaires/${savedID}/public-publish',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID(),...(csrf?{'X-CSRF-Token':decodeURIComponent(csrf)}:{})},body:JSON.stringify({expected_questionnaire_version:${saved.version}})});return {status:r.status,body:await r.json()}})()`);
+ if(publish.status!==200)throw new Error('created questionnaire publish failed '+JSON.stringify(publish));
+ await navigate('/admin/questionnaireOps.html?id='+savedID);await wait(c,"document.querySelector('[data-tab=\"codes\"]') && document.querySelector('[data-title]')?.textContent==='123新能力'",'created operations did not mount');
+ await click('[data-tab="codes"]');await wait(c,"document.querySelector('[data-code-counts]')?.textContent.includes('共 0 个')",'fresh code library missing');
+ await setFile('[data-code-file]',book);await click('[data-code-import]');await wait(c,"document.querySelector('[data-code-counts]')?.textContent.includes('共 1 个')",'created questionnaire import failed');
+ await capture('created-codes');
+ await c.call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+ await navigate('/q/'+saved.slug);await wait(c,"document.querySelector('[data-contact-field=recipient_name]')",'created public shipping did not mount');
+ await fill('[data-contact-field=recipient_name]','隔离验收收件人');await fill('[data-contact-field=mobile_e164]','13800009991');
+ for(const field of ['province_code','city_code','district_code'])await evalJS(c,`(()=>{const n=document.querySelector('[data-contact-field=${field}]');if(n.options.length<2)throw new Error('missing region catalog ${field}');n.selectedIndex=1;n.dispatchEvent(new Event('change',{bubbles:true}));return true})()`);
+ await fill('[data-contact-field=detail_address]','隔离验收地址 1 号');
+ if(one){await click('[data-h5-next]');await wait(c,"document.querySelector('[data-text-question-id]')",'created code step missing');}
+ await fill('[data-text-question-id]','00123');
+ if(one){await click('[data-h5-next]');await wait(c,"document.querySelector('[data-file-question-id]')",'created image step missing');}
+ await setFile('[data-file-question-id]',picture);await wait(c,"document.querySelector('#screen img[src^=\"blob:\"]')",'created local preview missing');await capture('created-h5-ready');
+ await click('[data-h5-submit]');await wait(c,"location.pathname==='/h5/done.html'",'created mixed questionnaire submit failed');await capture('created-h5-done');
+ const answers=await evalJS(c,`fetch('/api/admin/questionnaires/${savedID}/submissions').then(r=>r.json())`);
+ const a=answers.items?.[0]?.answers;
+ if(answers.items?.length!==1 || a?.length!==3 || a?.map(v=>v.question_type).join(',')!=='shipping_address,redemption_code,attachment' || JSON.stringify(answers).includes('00123'))throw new Error('created mixed answer readback mismatch '+JSON.stringify(answers));
+ const attachment=a.find(v=>v.attachment);
+ const image=await evalJS(c,`fetch(${JSON.stringify(attachment.attachment.view_url)}).then(async r=>({status:r.status,bytes:(await r.arrayBuffer()).byteLength}))`);
+ if(image.status!==200||image.bytes===0)throw new Error('created private image could not be read');
+ if(c.errors.length)throw new Error('browser uncaught exceptions: '+c.errors.join(';'));
+ console.log(JSON.stringify({questionnaire_id:savedID,slug:saved.slug}));console.log('survey_editor_create_chromium: PASS');socket.close();
+}finally{if(browser&&browser.exitCode===null){browser.kill('SIGTERM');await Promise.race([new Promise(r=>browser.once('exit',r)),delay(3000)]);if(browser.exitCode===null)browser.kill('SIGKILL');}await fs.rm(profile,{recursive:true,force:true,maxRetries:3,retryDelay:100});}

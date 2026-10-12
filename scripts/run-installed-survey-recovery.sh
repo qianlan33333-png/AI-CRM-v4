@@ -30,4 +30,5 @@ exec python3 scripts/dev_preflight.py browser \
   --journey TestPostgreSQLPublicSurveyReauthorizationChromiumJourney \
   --journey TestPostgreSQLPublicSurveyLostResponseChromiumJourney \
   --journey TestPostgreSQLPublicSurveyNativeInputRecoveryChromiumJourney \
-  --journey TestPostgreSQLSurveyAttachmentChromiumJourney
+  --journey TestPostgreSQLSurveyAttachmentChromiumJourney \
+  --journey TestPostgreSQLSurveyEditorCreateChromiumJourney

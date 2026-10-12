@@ -88,6 +88,41 @@ func TestQuestionnaireLifecycleCreatesDuplicatesAndPublishesIdempotently(t *test
 	}
 }
 
+func TestQuestionnaireCreateAssignsMissingSlugWithoutRelaxingExplicitSlugs(t *testing.T) {
+	store := &lifecycleStore{}
+	service := NewService(oauthUOW{}, store)
+	definition := surveyport.Questionnaire{Name: "问卷", Title: "问卷", Mode: surveyport.ModeSurvey, AnswerDisplayMode: surveyport.DisplayAllInOne, Questions: []surveyport.Question{{Type: surveyport.QuestionTextarea, Title: "需求", Required: true}}}
+	command := surveyport.CreateCommand{Questionnaire: definition, ActorID: 3, IdempotencyKey: "new-editor-slug-create-001"}
+	created, err := service.Create(context.Background(), command)
+	if err != nil || !validSlug(created.Slug) || len(created.Slug) != 34 || !strings.HasPrefix(created.Slug, "q-") {
+		t.Fatalf("generated slug=%q error=%v", created.Slug, err)
+	}
+	replay, err := service.Create(context.Background(), command)
+	if err != nil || replay.ID != created.ID || replay.Slug != created.Slug || len(store.created) != 1 {
+		t.Fatalf("replay=%+v error=%v creates=%d", replay, err, len(store.created))
+	}
+	command.Questionnaire.Slug = "operator-chosen-slug"
+	command.IdempotencyKey = "new-editor-slug-create-002"
+	explicit, err := service.Create(context.Background(), command)
+	if err != nil || explicit.Slug != command.Questionnaire.Slug {
+		t.Fatalf("explicit slug changed: %q error=%v", explicit.Slug, err)
+	}
+	for _, slug := range []string{" ", "bad slug", "BadSlug"} {
+		command.Questionnaire.Slug = slug
+		command.IdempotencyKey = "new-editor-slug-invalid-001"
+		if _, err := service.Create(context.Background(), command); !errors.Is(err, surveyport.ErrInvalid) {
+			t.Fatalf("invalid explicit slug %q accepted: %v", slug, err)
+		}
+	}
+	created.Slug = ""
+	if _, err := service.Update(context.Background(), surveyport.UpdateCommand{Questionnaire: created, ActorID: 3, ExpectedVersion: 1, IdempotencyKey: "new-editor-empty-slug-update"}); !errors.Is(err, surveyport.ErrInvalid) {
+		t.Fatalf("update must not clear public identifier: %v", err)
+	}
+	if len(store.created) != 2 || len(store.receipts) != 2 {
+		t.Fatal("rejected definitions reserved a receipt or created a record")
+	}
+}
+
 func TestQuestionnaireRecursiveCopiesKeepIndependentSlugsAndReplay(t *testing.T) {
 	originalSlug := strings.Repeat("copy-chain-", 11) + "origin"
 	store := &lifecycleStore{source: surveyport.Questionnaire{ID: 7, Name: "原问卷", Title: "原问卷", Slug: originalSlug, Status: surveyport.StatusPublished, Mode: surveyport.ModeSurvey, AnswerDisplayMode: surveyport.DisplayAllInOne, Questions: []surveyport.Question{{Type: surveyport.QuestionTextarea, Title: "需求", Required: true}}}}

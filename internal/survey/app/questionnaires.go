@@ -95,7 +95,14 @@ func (s *Service) Create(ctx context.Context, command surveyport.CreateCommand) 
 	if value.Status == "" {
 		value.Status = surveyport.StatusDraft
 	}
-	if command.ActorID < 1 || !validKey(command.IdempotencyKey) || value.Status != surveyport.StatusDraft && value.Status != surveyport.StatusDisabled || value.Mode != surveyport.ModeSurvey || surveydomain.ValidateQuestionnaire(value) != nil {
+	// A new editor draft has no public identifier yet. Validate the rest of
+	// its definition without persisting this temporary validation value;
+	// generate the actual identifier only after owning the original receipt.
+	validation := value
+	if validation.Slug == "" {
+		validation.Slug = "q-unassigned"
+	}
+	if command.ActorID < 1 || !validKey(command.IdempotencyKey) || value.Status != surveyport.StatusDraft && value.Status != surveyport.StatusDisabled || value.Mode != surveyport.ModeSurvey || surveydomain.ValidateQuestionnaire(validation) != nil {
 		return surveyport.Questionnaire{}, surveyport.ErrInvalid
 	}
 	payload, digest, err := digestPayload(value)
@@ -103,6 +110,13 @@ func (s *Service) Create(ctx context.Context, command surveyport.CreateCommand) 
 		return surveyport.Questionnaire{}, surveyport.ErrInvalid
 	}
 	return s.mutate(ctx, "definition_create", 0, command.ActorID, command.IdempotencyKey, digest, payload, func(tx context.Context, now time.Time) (surveyport.Questionnaire, error) {
+		if value.Slug == "" {
+			var publicID [16]byte
+			if _, err := rand.Read(publicID[:]); err != nil {
+				return surveyport.Questionnaire{}, err
+			}
+			value.Slug = "q-" + hex.EncodeToString(publicID[:])
+		}
 		return s.store.Create(tx, value, command.ActorID, now)
 	})
 }

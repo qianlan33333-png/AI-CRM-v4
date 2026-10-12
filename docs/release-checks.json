@@ -1,15 +1,25 @@
 {
   "schema": 1,
-  "baseline_sha": "3d6ab2808e1cae715434354a0f6b96f44f1778ea",
+  "baseline_sha": "fee5cb1947465c2d1ab81f14702542ec2067ca92",
   "checks": [
     {
-      "lane": "preflight",
-      "path": "scripts/test_domestic_source_only_seal.py"
+      "lane": "backend",
+      "package": "./internal/survey/app"
     },
     {
-      "lane": "preflight",
-      "path": "scripts/test_domestic_release_minimal.py"
+      "lane": "backend",
+      "package": "./internal/survey/http"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/survey_editor_create_postgres_test.go",
+      "test": "TestPostgreSQLSurveyEditorCreatesUnassignedSlugDefinitions",
+      "postgres": true
+    },
+    {
+      "lane": "frontend",
+      "path": "web/scripts/questionnaire-editor-publish-lifecycle.mjs"
     }
   ],
-  "installed_checks": []
+  "installed_checks": ["survey-recovery"]
 }
