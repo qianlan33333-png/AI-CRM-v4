@@ -145,10 +145,6 @@
     },
     {
       "lane": "frontend",
-      "path": "web/v3/productAdapter.contact_collection.test.mjs"
-    },
-    {
-      "lane": "frontend",
       "path": "web/v3/productAdapter.save_recovery.test.mjs"
     },
     {
@@ -166,11 +162,6 @@
     {
       "lane": "frontend",
       "path": "web/v3/wechatShopProducts.test.mjs"
-    },
-    {
-      "lane": "browser",
-      "path": "cmd/aicrm/product_variants_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLProductVariantsChromiumJourney"
     },
     {
       "lane": "backend",
@@ -228,10 +219,6 @@
     },
     {
       "lane": "frontend",
-      "path": "web/v3/contactPrefill.test.mjs"
-    },
-    {
-      "lane": "frontend",
       "path": "web/v3/surveySubmissionResume.test.mjs"
     },
     {
@@ -243,10 +230,6 @@
       "path": "web/v3/surveyRedemptionH5.test.mjs"
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/sidebarOneIDPresentation.test.mjs"
-    },
-    {
       "lane": "backend",
       "path": "cmd/aicrm/product_variants_checkout_postgres_integration_test.go",
       "test": "TestPostgreSQLZeroVariantCheckoutFreezesSelection",
@@ -254,7 +237,9 @@
     }
   ],
   "installed_checks": [
-    "product-variants"
+    "product-variants",
+    "customer-contact-reuse",
+    "checkout-contact-dist"
   ],
   "build_commands": [
     "./cmd/migrate-customer-contacts"

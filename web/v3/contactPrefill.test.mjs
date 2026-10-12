@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
 import { build } from "esbuild";
 import { JSDOM } from "jsdom";
 const bundle = (
@@ -83,7 +84,7 @@ for (const page of ["all", "one"])
     w.ContactTest.mount(
       w.document.querySelector("#screen"),
       new JSDOM(
-        fs.readFileSync(`web/dist/h5/${page}.html`, "utf8"),
+        fs.readFileSync(path.join(process.env.AICRM_INSTALLED_PRODUCT_ROOT || process.cwd(), `web/dist/h5/${page}.html`), "utf8"),
       ).window.document.querySelector("#tpl").innerHTML,
       c,
     );

@@ -7,15 +7,23 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 )
 
 func TestPostgreSQLProductVariantsChromiumJourney(t *testing.T) {
 	if !platformconfig.ChromiumJourneyRequired() {
 		t.Skip("set AICRM_REQUIRE_CHROMIUM_JOURNEY=1")
 	}
-	fixture := newProductExternalPushChromiumFixture(t)
+	var fixture *productExternalPushChromiumFixture
+	if testconfig.InstalledProduct().Binary != "" {
+		fixture = newProductExternalPushChromiumFixtureWithOptions(t, 90*time.Second, productExternalPushChromiumFixtureOptions{enableAlipay: true, deferEffectsWorker: true})
+		useInstalledPeriodicContactFixture(t, fixture)
+	} else {
+		fixture = newProductExternalPushChromiumFixture(t)
+	}
 	cmd := exec.CommandContext(fixture.ctx, "node", filepath.Join(filepath.Dir(fixture.script), "product_variants_chromium_journey.mjs"))
 	cmd.Env = append(os.Environ(), "AICRM_VARIANT_BROWSER_URL="+fixture.server.URL, "AICRM_VARIANT_BROWSER_PRODUCT_ID="+strconv.FormatInt(fixture.productID, 10))
 	out, err := cmd.CombinedOutput()

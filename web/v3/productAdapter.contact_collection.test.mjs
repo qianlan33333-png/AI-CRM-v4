@@ -6,7 +6,7 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 import { buildTestBrowserBundle } from '../scripts/test-browser-bundle.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const page = fs.readFileSync(path.join(root, 'web/dist/admin/productForm.html'), 'utf8');
+const page = fs.readFileSync(path.join(process.env.AICRM_INSTALLED_PRODUCT_ROOT || root, 'web/dist/admin/productForm.html'), 'utf8');
 const host = await buildTestBrowserBundle(path.join(root, 'web/v3/productAdapter.ts'));
 const wait = (milliseconds = 0) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 async function waitFor(check, message) {

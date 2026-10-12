@@ -6,7 +6,7 @@ import { JSDOM } from "jsdom";
 import { buildTestBrowserBundle } from "../scripts/test-browser-bundle.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const dist = path.join(repository, "web", "dist");
+const dist = path.join(process.env.AICRM_INSTALLED_PRODUCT_ROOT || repository, "web", "dist");
 const sidebarDocumentPath = path.join(dist, "sidebar", "index.html");
 
 if (!fs.existsSync(sidebarDocumentPath)) {

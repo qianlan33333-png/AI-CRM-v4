@@ -16,6 +16,7 @@ import (
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	ordersecure "github.com/qianlan33333-png/AI-CRM-v3/internal/order/secure"
 	orderstore "github.com/qianlan33333-png/AI-CRM-v3/internal/order/store"
+	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	surveyapp "github.com/qianlan33333-png/AI-CRM-v3/internal/survey/app"
 	surveyport "github.com/qianlan33333-png/AI-CRM-v3/internal/survey/port"
@@ -381,4 +382,9 @@ func TestPostgreSQLCustomerContactReuse(t *testing.T) {
 			}
 		}
 	})
+	// Source contracts always run. Only the final-package lane launches an API.
+	if testconfig.InstalledProduct().Binary != "" {
+		t.Run("installed_http", customerContactReuseInstalledHTTP)
+	}
+
 }
