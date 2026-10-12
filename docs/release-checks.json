@@ -3,10 +3,9 @@
   "baseline_sha": "83b5e8cb0e858b4f20f9237b10b19e8c9018314e",
   "checks": [
     {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLReferralChromiumJourney",
-      "postgres": true
+      "lane": "browser",
+      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLReferralChromiumJourney"
     },
     {
       "lane": "frontend",

@@ -54,3 +54,5 @@ OneID：不涉及，本次不改变客户身份和归属。Persistence：本机�
 [Chromium 官方协议](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/json/browser_protocol.json) 明确区分建议文件名与实际落盘名；`allowAndName` 按下载 GUID 命名。因此改为：观察本次导出按钮实际触发的唯一 CSV anchor/blob URL → 匹配 `downloadWillBegin` 的 URL/建议名及 GUID → 只接受同一 GUID 的 completed → 检查临时目录内该 GUID 的真实普通文件 → 保留原 BOM、表头、指定邀请人行与 participation 筛选断言。不以其他下载或其他 CSV 兜底，不改 CRM 运行时。
 
 相关短清单仅包含新下载绑定合同与原失败的具名 PostgreSQL/Chromium 旅程。验证其他 GUID、错误 URL、取消、重复开始、缺失落盘文件与链接文件均不能算通过；保留已有 72 小时清理规则及全部业务断言，沿用既有清理任务，不重装应用或扩大预发检查范围。
+
+该具名旅程登记为 `browser` lane，由运行器设置 Chromium 必需标志；Node 绑定合同登记为 `frontend`。缺少 `AICRM_REQUIRE_CHROMIUM_JOURNEY=1` 而 skip 不算通过。`installed_checks=[]`，工作台仅在既有安装包上独立重跑失败旅程并保留其他通过收据。
