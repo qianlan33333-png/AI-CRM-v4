@@ -126,6 +126,12 @@
       "postgres": true
     },
     {
+      "lane": "backend",
+      "package": "./internal/externaleffects",
+      "test": "TestPostgreSQLOpsRecentFailuresExcludeRetainedHistory",
+      "postgres": true
+    },
+    {
       "lane": "frontend",
       "path": "web/v3/governanceAdmin.test.mjs"
     }

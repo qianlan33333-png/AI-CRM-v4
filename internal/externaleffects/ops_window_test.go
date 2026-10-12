@@ -2,9 +2,36 @@ package externaleffects
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
+
+func TestPostgreSQLOpsRecentFailuresExcludeRetainedHistory(t *testing.T) {
+	pool, cleanup := effectIntegrationPool(t)
+	defer cleanup()
+	ctx := context.Background()
+	at := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	for i, item := range []struct {
+		state string
+		age   time.Duration
+	}{
+		{"retryable_failed", 2 * time.Hour},
+		{"retryable_failed", 10 * time.Minute},
+		{"final_failed", 2 * time.Hour},
+		{"final_failed", 10 * time.Minute},
+		{"outcome_unknown", 48 * time.Hour},
+	} {
+		d := digestForTest(fmt.Sprintf("recent-failure-%d", i))
+		if _, err := pool.Exec(ctx, `INSERT INTO external_effects(owner,kind,source_ref_digest,target_ref_digest,payload_digest,policy_version_hash,envelope_fingerprint,state,attempt_count,updated_at) VALUES('outbound','outbound_message',$1,$1,$1,$1,$1,$2,1,$3)`, d, item.state, at.Add(-item.age)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	counts, err := (&Repository{pool: pool}).ReadOpsDiagnosticCounts(ctx, at)
+	if err != nil || counts["retryable"] != 2 || counts["final_failed"] != 2 || counts["retryable_last_hour"] != 1 || counts["final_failed_last_hour"] != 1 || counts["unknown"] != 1 {
+		t.Fatalf("current failures, history, and unresolved outcome must remain distinct: %v %v", counts, err)
+	}
+}
 
 func TestPostgreSQLOpsReportWindowSeparatesStartedAndCompletedHours(t *testing.T) {
 	pool, cleanup := effectIntegrationPool(t)
