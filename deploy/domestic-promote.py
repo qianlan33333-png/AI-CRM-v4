@@ -13,6 +13,7 @@ import fcntl
 import grp
 import hashlib
 import ipaddress
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -2318,11 +2319,24 @@ def read_domestic_main() -> dict:
         }
 
 
-def reclaim_obsolete_releases() -> dict:
-    """One install lock, exact current receipt, current/previous/live references.
+def _release_retention_helpers(current: str):
+    """Use the exact installed, cursor-verified release's cleanup owner."""
+    modules = []
+    for name, filename in (("domestic_cleanup_owner", "cleanup-releases.py"),
+                           ("domestic_schema_reader", "post-release-retention.py")):
+        spec = importlib.util.spec_from_file_location(name, RELEASES / current / "deploy" / filename)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        modules.append(module)
+    return tuple(modules)
 
-    Reclaim disposable package directories only. Never age-delete database,
-    backup, source, upload or audit paths. Unknown/symlink packages stay protected.
+
+def reclaim_obsolete_releases() -> dict:
+    """Reuse verified retention under the original production install lock.
+
+    Current, previous and live references remain protected. Two real successful,
+    schema-compatible rollback packages are selected by the existing cleanup
+    owner; an unavailable proof never permits the old current/previous-only GC.
     """
     require_host_role("production")
     with _production_release_lock():
@@ -2336,44 +2350,27 @@ def reclaim_obsolete_releases() -> dict:
         previous = receipt.get("previous_sha")
         if isinstance(previous, str) and SHA.fullmatch(previous):
             protected.add(previous)
-        for process in Path("/proc").glob("[0-9]*"):
-            for name in ("exe", "cwd"):
-                try:
-                    target = (process / name).resolve(strict=True)
-                    relative = target.relative_to(RELEASES.resolve())
-                    if relative.parts and SHA.fullmatch(relative.parts[0]):
-                        protected.add(relative.parts[0])
-                except (OSError, ValueError):
-                    pass
-        removed, skipped = [], []
-        for package in sorted(RELEASES.iterdir()):
-            if package.name in protected:
-                continue
-            if (not SHA.fullmatch(package.name) or package.is_symlink()
-                    or not package.is_dir() or package.resolve().parent != RELEASES.resolve()):
-                skipped.append(package.name)
-                continue
-            # Only expected installer payload roots may be retired automatically.
-            allowed = {"bin", "web", "migrations", "deploy", "components",
-                       "release.env", "release-files.sha256", "domestic-release.json"}
-            if any(child.name not in allowed for child in package.iterdir()):
-                skipped.append(package.name)
-                continue
-            unsafe = False
-            for directory, dirs, files in os.walk(package, followlinks=False):
-                for name in dirs + files:
-                    child = Path(directory) / name
-                    info = child.lstat()
-                    if (info.st_uid != 0 or info.st_dev != package.stat().st_dev
-                            or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))):
-                        unsafe = True
-            if unsafe:
-                skipped.append(package.name)
-                continue
-            shutil.rmtree(package)
-            removed.append(package.name)
-        return {"status": "completed", "protected": sorted(protected),
-                "removed": removed, "skipped_unknown": skipped}
+        cleanup, schema_reader = _release_retention_helpers(current)
+        with tempfile.TemporaryDirectory(prefix=".domestic-retention-", dir=ROOT) as temporary:
+            schema = Path(temporary) / "schema.json"
+            schema.write_text(json.dumps(schema_reader.snapshot(current, schema_reader.database_environment(ENV))))
+            try:
+                plan = cleanup.inventory(ROOT, schema, sorted(protected))
+            except cleanup.Refuse:
+                # The normal success observer materializes immutable rsync
+                # aliases before publishing facts. Keep all packages until
+                # that exact existing path can verify them; never loosen it.
+                return {"status": "maintenance-pending", "reason": "release_retention_evidence_unavailable",
+                        "removed": [], "protected": sorted(protected)}
+            if plan["blockers"]:
+                return {"status": "maintenance-pending", "reason": "two_verified_schema_compatible_rollbacks_missing",
+                        "removed": [], "protected": sorted(protected),
+                        "rollback_releases": plan["rollback_releases"]}
+            result = cleanup.apply_plan(ROOT, schema, plan, sorted(protected))
+        return {"status": "completed", "protected": sorted(set(protected) | set(result["rollback_releases"])),
+                "removed": [entry["name"] for entry in result["deleted"]],
+                "rollback_releases": result["rollback_releases"], "deleted_bytes": result["deleted_bytes"],
+                "policy": "existing_verified_release_retention"}
 
 
 def main() -> None:

@@ -1,24 +1,15 @@
 {
   "schema": 1,
-  "baseline_sha": "e94e983910af253c9cd0226e9736bc6d7c23dc3a",
+  "baseline_sha": "8023435693fca28e4d8ef03a18031747dcc2294c",
   "checks": [
     {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestHumanReportLongTaskNeedsProgressEvidence"
+      "lane": "preflight",
+      "path": "deploy/test_domestic_promote_gc.py"
     },
     {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestHumanReportActualFaultAndHistorySeparation"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestHumanReportHistoricalFailuresDoNotMakeRed"
+      "lane": "preflight",
+      "path": "deploy/test_cleanup_releases.py"
     }
   ],
-  "installed_checks": [
-    "governance-notifications"
-  ]
+  "installed_checks": []
 }
