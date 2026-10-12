@@ -26,8 +26,8 @@ try {
   const tab = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();
   socket = new WebSocket(tab.webSocketDebuggerUrl);
   await new Promise((r,j)=>{socket.addEventListener('open',r,{once:true});socket.addEventListener('error',j,{once:true});});
-  const exceptions=[], networkRequests=[], networkResponses=[];
-  socket.addEventListener('message',e=>{const m=JSON.parse(String(e.data));if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(new Error(m.error.message)):p?.resolve(m.result);}else if(m.method==='Network.requestWillBeSent')networkRequests.push(m.params.request.url);else if(m.method==='Network.responseReceived')networkResponses.push({id:m.params.requestId,url:m.params.response.url});else if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails.text);});
+  const exceptions=[], networkRequests=[], networkMethods=[], networkResponses=[];
+  socket.addEventListener('message',e=>{const m=JSON.parse(String(e.data));if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(new Error(m.error.message)):p?.resolve(m.result);}else if(m.method==='Network.requestWillBeSent'){networkRequests.push(m.params.request.url);networkMethods.push({url:m.params.request.url,method:m.params.request.method});}else if(m.method==='Network.responseReceived')networkResponses.push({id:m.params.requestId,url:m.params.response.url});else if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails.text);});
   const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
   const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result?.value;};
   const wait=async expression=>{for(let i=0;i<180;i++){if(await evaluate(expression))return;await sleep(75);}throw new Error('UI condition not reached: '+expression+'; page='+await evaluate('location.pathname+location.search+" "+document.body.innerText'));};
@@ -111,7 +111,17 @@ try {
     assert.deepEqual(readback.posters.map(p=>p.share_text), shareTexts, 'published text readback');
     assert.deepEqual(readback.posters.map(p=>p.qr_layout),Array(3).fill({x:830,y:1952,size:330}),'fixed reference layout');
     assert.ok(readback.posters.every(p=>p.image_width===1250&&p.image_height===2426));
+    const imageURL=readback.posters[0].image_url;
+    assert.match(imageURL,/\?v=[a-f0-9]{64}$/);
+    const background=await fetch(base+imageURL);assert.equal(background.status,200);assert.equal(background.headers.get('content-type'),'image/jpeg');
+    assert.ok((await background.arrayBuffer()).byteLength<(await fs.stat(process.env.AICRM_REFERRAL_POSTER_PATH)).size,'JPEG background reduces bytes');
+    const conditional=await fetch(base+imageURL,{headers:{'If-None-Match':background.headers.get('etag')}});assert.equal(conditional.status,304);assert.equal((await conditional.arrayBuffer()).byteLength,0);
+    assert.equal((await fetch(base+imageURL.replace(/v=[a-f0-9]{64}/,'v='+'0'.repeat(64)))).status,409);
+    assert.equal((await fetch(base+imageURL.split('?')[0])).status,200,'legacy entry remains readable');
   }
+  const draft=await api('/api/admin/referral/campaigns',{name:'私有草稿海报',starts_at:new Date(Date.now()+3600000).toISOString(),ends_at:new Date(Date.now()+86400000).toISOString()});
+  const draftPosters=await api(`/api/admin/referral/campaigns/${draft.id}/posters`,{expected_version:draft.version,posters:[{image_id:uploaded.item.id}]},undefined,'PUT');
+  assert.equal((await fetch(base+draftPosters.posters[0].image_url,{headers:{'If-None-Match':'*'}})).status,404,'draft never returns bytes or 304');
   await call('Browser.grantPermissions', { origin: base, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
   for(let index=0;index<2;index++){
     await cookie('aicrm_distribution_session',actors[2].session);await cookie('aicrm_distribution_csrf','referral-fixture-csrf');
@@ -136,23 +146,27 @@ try {
       await wait("document.querySelector('[data-testid=referral-leaderboard]')?.textContent.includes('1')");
       assert.equal(await evaluate("document.querySelector('[data-referral-message]')?.dataset.error === 'true'"),false,'period switch should not fail');
     }
-    await evaluate("document.querySelector('[data-testid=referral-invite]').click()");
+    const beforeInvites=networkMethods.filter(r=>r.method==='POST'&&r.url===`${base}/api/v1/referral/campaigns/${campaigns[index].c.id}/invite`).length;
+    await evaluate("(()=>{const b=document.querySelector('[data-testid=referral-invite]');b.click();b.click();b.click();})()");
     await wait("document.querySelector('[data-testid=referral-invite-dialog]')");
     assert.equal(await evaluate("document.querySelector('[data-testid=referral-invite-url]')===null"),true,'poster panel has no editable link action');
     await wait("document.querySelector('[data-testid=referral-poster-image]')?.naturalWidth===1250");
     assert.equal(await evaluate("document.querySelector('[data-testid=referral-poster-share-text]').textContent"),shareTexts[0]);
     const composedPNG = await evaluate("document.querySelector('[data-testid=referral-poster-image]').src");
-    assert.match(composedPNG,/^data:image\/png;base64,/);
+    assert.match(composedPNG,/^data:image\/jpeg;base64,/);
+    assert.equal(networkMethods.filter(r=>r.method==='POST'&&r.url===`${base}/api/v1/referral/campaigns/${campaigns[index].c.id}/invite`).length-beforeInvites,1,'pending triple click issues one invite');
     const inviteResponse = networkResponses.findLast(response=>response.url===`${base}/api/v1/referral/campaigns/${campaigns[index].c.id}/invite`);
     assert.ok(inviteResponse, 'personal invitation comes from authenticated HTTP');
     const invitationURL = JSON.parse((await call('Network.getResponseBody', {requestId:inviteResponse.id})).body).url;
     const personalPreview = await api(`/api/v1/referral/invitations/${new URL(invitationURL).pathname.split('/').at(-1)}`,undefined,actors[2]);
     assert.equal(personalPreview.inviter_display_name,actors[2].name,'personal artwork must use the current session actor');
-    await fs.writeFile(path.join(screenshots,`composed-${index?430:375}.png`),Buffer.from(composedPNG.split(',')[1],'base64'));
+    await fs.writeFile(path.join(screenshots,`composed-${index?430:375}.jpg`),Buffer.from(composedPNG.split(',')[1],'base64'));
     await fs.writeFile(path.join(screenshots,`composed-${index?430:375}.json`),JSON.stringify({expected_url:invitationURL}));
     const compareArtwork = async layout => {
-      const differences = await evaluate(`(async()=>{const current=document.querySelector('[data-testid=referral-poster-image]');const source=new Image();source.src=${JSON.stringify(base+`/api/v1/referral/campaigns/${campaigns[index].c.id}/posters/1`)};await source.decode();const canvas=document.createElement('canvas');canvas.width=1250;canvas.height=2426;const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(source,0,0);const before=ctx.getImageData(0,0,1250,2426).data;ctx.clearRect(0,0,1250,2426);ctx.drawImage(current,0,0);const after=ctx.getImageData(0,0,1250,2426).data;const box=${JSON.stringify(layout)};let differentOutside=0,changedInside=0;for(let y=0;y<2426;y++)for(let x=0;x<1250;x++){const i=(y*1250+x)*4;const changed=before[i]!==after[i]||before[i+1]!==after[i+1]||before[i+2]!==after[i+2]||before[i+3]!==after[i+3];if(changed){if(x>=box.x&&x<box.x+box.size&&y>=box.y&&y<box.y+box.size)changedInside++;else differentOutside++;}}return{differentOutside,changedInside};})()`);
-      assert.equal(differences.differentOutside,0,'original artwork stays pixel exact outside configured QR');
+      const differences = await evaluate(`(async()=>{const current=document.querySelector('[data-testid=referral-poster-image]');const source=new Image();source.src=${JSON.stringify(base+`/api/v1/referral/campaigns/${campaigns[index].c.id}/posters/1`)};await source.decode();const canvas=document.createElement('canvas');canvas.width=1250;canvas.height=2426;const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(source,0,0);const before=ctx.getImageData(0,0,1250,2426).data;ctx.clearRect(0,0,1250,2426);ctx.drawImage(current,0,0);const after=ctx.getImageData(0,0,1250,2426).data;const box=${JSON.stringify(layout)};let squares=0,samples=0,changedInside=0;for(let y=0;y<2426;y++)for(let x=0;x<1250;x++){const i=(y*1250+x)*4;if(x>=box.x&&x<box.x+box.size&&y>=box.y&&y<box.y+box.size){if(before[i]!==after[i]||before[i+1]!==after[i+1]||before[i+2]!==after[i+2])changedInside++;continue;}if(x>=box.x-8&&x<box.x+box.size+8&&y>=box.y-8&&y<box.y+box.size+8)continue;for(let c=0;c<3;c++){const d=before[i+c]-after[i+c];squares+=d*d;samples++;}}return{rmse:Math.sqrt(squares/samples),changedInside};})()`);
+      // JPEG is lossy. Exclude its 8px QR boundary blocks, then require low
+      // background error rather than the old PNG-only byte/pixel equality.
+      assert.ok(differences.rmse<=8,`JPEG artwork error ${differences.rmse}`);
       assert.ok(differences.changedInside>0,'QR replaces source pixels');
       return differences;
     };
@@ -197,7 +211,7 @@ try {
     assert.notEqual(adjustedPNG,composedPNG,'reopen uses changed runtime coordinates');
     const freshInviteResponse=networkResponses.findLast(response=>response.url===`${base}/api/v1/referral/campaigns/${campaigns[index].c.id}/invite`);
     const freshURL=JSON.parse((await call('Network.getResponseBody',{requestId:freshInviteResponse.id})).body).url;
-    await fs.writeFile(path.join(screenshots,`adjusted-${index?430:375}.png`),Buffer.from(adjustedPNG.split(',')[1],'base64'));
+    await fs.writeFile(path.join(screenshots,`adjusted-${index?430:375}.jpg`),Buffer.from(adjustedPNG.split(',')[1],'base64'));
     await fs.writeFile(path.join(screenshots,`adjusted-${index?430:375}.json`),JSON.stringify({expected_url:freshURL,qr_layout:adjusted}));
     await fs.writeFile(path.join(screenshots,`pixels-${index?430:375}.json`),JSON.stringify({fixed:fixedPixels,adjusted:adjustedPixels}));
     await evaluate("document.querySelector('[data-testid=referral-invite-dialog]').close()");

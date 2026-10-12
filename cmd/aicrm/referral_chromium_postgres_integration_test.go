@@ -8,11 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
-	"image/color"
-	"image/draw"
 	"image/png"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,7 +29,7 @@ import (
 // payment is composed only to provide the existing trusted browser session.
 // No distributor, qualification purchase, or receiver is created by this fixture.
 func TestPostgreSQLReferralChromiumJourney(t *testing.T) {
-	if !platformconfig.ChromiumJourneyRequired() {
+	if !platformconfig.ChromiumJourneyRequired() && *domesticReleaseSmokeInputFile == "" {
 		t.Skip("set AICRM_REQUIRE_CHROMIUM_JOURNEY=1")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
@@ -39,7 +40,9 @@ func TestPostgreSQLReferralChromiumJourney(t *testing.T) {
 	}
 	repository := filepath.Clean(filepath.Join(filepath.Dir(source), "..", ".."))
 	t.Chdir(repository)
-	prepareProductExternalPushChromiumArtifacts(t, repository)
+	if *domesticReleaseSmokeInputFile == "" {
+		prepareProductExternalPushChromiumArtifacts(t, repository)
+	}
 	databaseURL, cleanup := adminAccessCompositionDatabase(t, ctx)
 	defer cleanup()
 	key, cert := distributionFixturePaymentCredentials(t)
@@ -96,12 +99,52 @@ func TestPostgreSQLReferralChromiumJourney(t *testing.T) {
 		actors = append(actors, actor)
 	}
 	server.Config.Handler = application.handler
+	if *domesticReleaseSmokeInputFile != "" {
+		inputs, binary, releaseRoot := referralInstalledArtifact(t)
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		address := listener.Addr().String()
+		listener.Close()
+		origin := cfg.PublicOrigin
+		environment := referralPosterInstalledEnvironment(databaseURL, inputs.InstalledSHA, address, origin)
+		process := startDomesticSmokeProcess(t, binary, releaseRoot, environment)
+		defer func() {
+			if !process.finished {
+				_ = process.command.Process.Signal(os.Interrupt)
+				select {
+				case err := <-process.done:
+					process.finished = true
+					if err != nil {
+						t.Errorf("installed poster API did not stop: %T", err)
+					}
+				case <-time.After(8 * time.Second):
+					_ = process.command.Process.Kill()
+					<-process.done
+					process.finished = true
+					t.Error("installed poster API stop timeout")
+				}
+			}
+		}()
+		target, _ := url.Parse("http://" + address)
+		waitDomesticReleaseReady(t, process, target.String(), inputs.InstalledSHA)
+		server.Config.Handler = httputil.NewSingleHostReverseProxy(target)
+		t.Logf("referral_poster_installed: exact binary selected source_sha=%s installed_sha=%s", inputs.SourceSHA, inputs.InstalledSHA)
+	}
 	server.StartTLS()
 	fixture, _ := json.Marshal(actors)
-	poster := image.NewRGBA(image.Rect(0, 0, 1250, 2426))
-	draw.Draw(poster, poster.Bounds(), image.NewUniform(color.RGBA{R: 255, G: 243, B: 236, A: 255}), image.Point{}, draw.Src)
+	// An opaque grayscale PNG without deflate compression remains <5MiB and
+	// makes JPEG reduction deterministic. The approved real artwork can override it.
+	poster := image.NewGray(image.Rect(0, 0, 1250, 2426))
+	for y := 0; y < 2426; y++ {
+		for x := 0; x < 1250; x++ {
+			poster.Pix[y*poster.Stride+x] = uint8(32 + (x/12+y/24)%200)
+		}
+	}
 	var posterPNG bytes.Buffer
-	if err = png.Encode(&posterPNG, poster); err != nil {
+	encoder := png.Encoder{CompressionLevel: png.NoCompression}
+	if err = encoder.Encode(&posterPNG, poster); err != nil {
 		t.Fatal(err)
 	}
 	if sourcePath := os.Getenv("AICRM_REFERRAL_POSTER_SOURCE"); sourcePath != "" {
@@ -138,5 +181,37 @@ func TestPostgreSQLReferralChromiumJourney(t *testing.T) {
 	}
 	if effects != 0 {
 		t.Fatal("invitation journey unexpectedly created payment effects")
+	}
+}
+
+func referralPosterInstalledEnvironment(databaseURL, sha, address, origin string) []string {
+	environment := paidReferralInstalledEnvironment(databaseURL, sha, address)
+	for i, value := range environment {
+		key, _, _ := strings.Cut(value, "=")
+		switch key {
+		case "AICRM_PUBLIC_ORIGIN", "AICRM_H5_PUBLIC_ORIGIN":
+			environment[i] = key + "=" + origin
+		case "AICRM_WECHAT_PAY_APP_ID":
+			environment[i] = key + "=wx-referral-fixture"
+		case "AICRM_WECHAT_PAY_APP_SCOPE":
+			environment[i] = key + "=wechat-app:referral-fixture"
+		}
+	}
+	return environment
+}
+func TestReferralPosterInstalledEnvironment(t *testing.T) {
+	for _, value := range os.Environ() {
+		key, _, _ := strings.Cut(value, "=")
+		if strings.HasPrefix(key, "AICRM_") {
+			t.Setenv(key, "")
+		}
+	}
+	for _, value := range referralPosterInstalledEnvironment("postgresql://aicrm_test@127.0.0.1:5432/aicrm_test_poster", strings.Repeat("a", 40), "127.0.0.1:18081", "https://127.0.0.1:18443") {
+		key, value, _ := strings.Cut(value, "=")
+		t.Setenv(key, value)
+	}
+	cfg, err := platformconfig.Load()
+	if err != nil || cfg.PublicOrigin != "https://127.0.0.1:18443" || cfg.WeChatPay.AppScope != "wechat-app:referral-fixture" || cfg.WeChatPay.Enabled || cfg.Alipay.Enabled || cfg.Effects.ProviderEnabled {
+		t.Fatalf("installed poster environment rejected or enables Providers: %v", err)
 	}
 }

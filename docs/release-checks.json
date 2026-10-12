@@ -70,6 +70,27 @@
     {
       "lane": "frontend",
       "path": "web/v3/referralCenter.captainJourney.test.mjs"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
+      "test": "TestReferralPosterInstalledEnvironment"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/referral_paid_invitation_installed_test.go",
+      "test": "TestPaidReferralInstalledEnvironmentMeetsRuntimeConfig"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLReferralChromiumJourney"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/referral_paid_invitation_checkout_postgres_test.go",
+      "test": "TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor",
+      "postgres": true
     }
   ],
   "installed_checks": [

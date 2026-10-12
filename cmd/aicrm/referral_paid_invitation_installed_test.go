@@ -92,30 +92,7 @@ func verifyInstalledPaidReferralWithOptions(t *testing.T, f *promotionCheckoutFi
 	if *domesticReleaseSmokeInputFile == "" {
 		return
 	}
-	inputs, err := readDomesticReleaseSmokeInputs(*domesticReleaseSmokeInputFile)
-	if err != nil {
-		t.Fatal("invalid installed referral smoke input")
-	}
-	if inputs.StageRole != "staging" || !validDomesticReleaseSHA(inputs.InstalledSHA) || !validDomesticReleaseSHA(inputs.SourceSHA) {
-		t.Fatal("installed referral Journey requires staging identities")
-	}
-	binary := filepath.Clean(inputs.InstalledBinary)
-	releaseRoot := filepath.Dir(filepath.Dir(binary))
-	if binary != filepath.Join("/opt/aicrm/releases", inputs.InstalledSHA, "bin/aicrm") {
-		t.Fatal("installed referral binary is outside exact release")
-	}
-	info, err := os.Lstat(binary)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
-		t.Fatal("installed referral binary unavailable")
-	}
-	raw, err := os.ReadFile(binary)
-	if err != nil {
-		t.Fatal("cannot hash installed referral binary")
-	}
-	digest := sha256.Sum256(raw)
-	if hex.EncodeToString(digest[:]) != inputs.InstalledBinarySHA256 {
-		t.Fatal("installed referral binary digest differs")
-	}
+	inputs, binary, releaseRoot := referralInstalledArtifact(t)
 	sessions, err := distributionapp.NewBrowserSessionService(f.uow, f.distributions)
 	if err != nil {
 		t.Fatal(err)
@@ -269,4 +246,34 @@ func verifyInstalledPaidReferralWithOptions(t *testing.T, f *promotionCheckoutFi
 		t.Fatal("installed activity asset still calls financial promotion")
 	}
 	t.Logf("referral_paid_sharing_rankings_installed: PASS source_sha=%s installed_sha=%s", inputs.SourceSHA, inputs.InstalledSHA)
+}
+
+// Reuse the fixed staging input and exact binary checks for both referral journeys.
+func referralInstalledArtifact(t *testing.T) (domesticReleaseSmokeInputs, string, string) {
+	t.Helper()
+	inputs, err := readDomesticReleaseSmokeInputs(*domesticReleaseSmokeInputFile)
+	if err != nil {
+		t.Fatal("invalid installed referral smoke input")
+	}
+	if inputs.StageRole != "staging" || !validDomesticReleaseSHA(inputs.InstalledSHA) || !validDomesticReleaseSHA(inputs.SourceSHA) {
+		t.Fatal("installed referral Journey requires staging identities")
+	}
+	binary := filepath.Clean(inputs.InstalledBinary)
+	releaseRoot := filepath.Dir(filepath.Dir(binary))
+	if binary != filepath.Join("/opt/aicrm/releases", inputs.InstalledSHA, "bin/aicrm") {
+		t.Fatal("installed referral binary is outside exact release")
+	}
+	info, err := os.Lstat(binary)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
+		t.Fatal("installed referral binary unavailable")
+	}
+	raw, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatal("cannot hash installed referral binary")
+	}
+	digest := sha256.Sum256(raw)
+	if hex.EncodeToString(digest[:]) != inputs.InstalledBinarySHA256 {
+		t.Fatal("installed referral binary digest differs")
+	}
+	return inputs, binary, releaseRoot
 }
