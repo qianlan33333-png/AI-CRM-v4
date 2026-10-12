@@ -24,6 +24,7 @@ async function fixture({delayInvite=false,delayDecode=false,delayExport=false,ur
    if(path.endsWith('/campaigns/8'))return json({id:8,name:'测试',state:'active',effective_state:'active',team_mode:'individual',qualification_mode:'free_signup',starts_at:'2026-01-01T00:00:00Z',ends_at:'2099-01-01T00:00:00Z',posters:[1,2].map(slot=>({slot,image_url:`/api/v1/referral/campaigns/8/posters/${slot}?v=${revision}`,image_width:1250,image_height:2426,qr_layout:layout,share_text:copy+slot}))});
    if(path.endsWith('/me'))return json({participation:{joined_at:'2026-01-01T00:00:00Z'},invitation_available:true});
    if(path.endsWith('/invite')){if(delayInvite)await pending.promise;return json({url:url||'https://crm.example/referral/invite/rfi_'+user.repeat(43)})}
+   if(path.includes('/posters/') && failStatus===0)throw new TypeError('Failed to fetch');
    if(path.includes('/posters/'))return new Response(new Blob([path],{type:transparent?'image/png':'image/jpeg'}),{status:failStatus});
    return json({items:[]});
   };
@@ -69,7 +70,7 @@ async function fixture({delayInvite=false,delayDecode=false,delayExport=false,ur
 {
  const f=await fixture({delayExport:true});f.click('referral-invite');await wait(()=>f.exports.length===1);f.click('referral-close-poster');f.encode.release();await new Promise(r=>setTimeout(r,20));assert.equal(f.doc.querySelector('dialog'),null);assert.equal(f.canvases[0].width,0);f.dom.window.close();
 }
-for(const [status,text]of [[503,'繁忙'],[409,'刚刚更新'],[404,'加载失败']]){
+for(const [status,text]of [[503,'繁忙'],[409,'刚刚更新'],[404,'加载失败'],[0,'加载失败']]){
  const f=await fixture({status});f.click('referral-invite');await wait(()=>f.doc.querySelector('[data-testid="referral-poster-preview"]')?.textContent.includes(text));
  await new Promise(r=>setTimeout(r,30));assert.equal(f.calls.filter(c=>c.path.includes('/posters/')).length,1,'no automatic retry');assert.equal(f.image(),null);
  f.setStatus(200);f.doc.querySelector('.referral-poster-choice').click();await wait(f.image);assert.equal(f.exports.length,1,'failure must not be cached');f.click('referral-close-poster');f.dom.window.close();

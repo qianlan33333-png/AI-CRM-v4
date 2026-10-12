@@ -21,13 +21,17 @@ function readPosterBlob(blob: Blob, signal?: AbortSignal): Promise<string> {
 }
 
 export async function composeReferralPoster(imageURL: string, payload: string, layout?: PosterQRLayout, expectedWidth = 0, expectedHeight = 0, signal?: AbortSignal): Promise<HTMLCanvasElement> {
-  const response = await fetch(imageURL, { credentials: "same-origin", signal });
+  let response: Response;
+  try { response = await fetch(imageURL, { credentials: "same-origin", signal }); }
+  catch { checkCancelled(signal); throw new Error("海报加载失败，请稍后重试。"); }
   if (!response.ok) {
     if (response.status === 503) throw new Error("海报生成繁忙，请稍后重新打开。");
     if (response.status === 409) throw new Error("海报图片刚刚更新，请重新打开海报。");
     throw new Error("海报加载失败，请稍后重试。");
   }
-  const blob = await response.blob();
+  let blob: Blob;
+  try { blob = await response.blob(); }
+  catch { checkCancelled(signal); throw new Error("海报加载失败，请稍后重试。"); }
   const source = new Image();
   source.decoding = "async";
   source.src = await readPosterBlob(blob, signal);
