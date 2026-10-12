@@ -1,73 +1,21 @@
 {
   "schema": 1,
-  "baseline_sha": "8245526b89d04111acb2b03f66416b9c10d4064e",
+  "baseline_sha": "0b2d5967975f40ae51b92a39dc198a14cdbb3af9",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/survey/domain"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/survey/app"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/survey/http"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/survey/store/redemption_integration_test.go",
-      "test": "TestPostgreSQLRedemptionConcurrentConsumeReplayAndImport",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/survey/store/redemption_integration_test.go",
-      "test": "TestPostgreSQLRedemptionRollbackAndQuestionnaireIsolation",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/survey/store/submission_claim_replay_integration_test.go",
-      "test": "TestPostgreSQLSubmissionClaimConcurrentReceiptReplay",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/survey/store/submission_version_race_postgres_test.go",
-      "test": "TestPostgreSQLSubmissionRejectsDefinitionSwitchedAfterValidation",
+      "path": "internal/access/store/staff_name_refresh_postgres_integration_test.go",
+      "test": "TestPostgreSQLStaffNameRefreshAuditUpgradeAndAtomicity",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/outbound/survey_redemption_test.go",
-      "test": "TestSurveyCompletionRedemptionNeverExportsRawCode"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveyOperationsHost.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveyRedemptionLibrary.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveyRedemptionH5.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveySubmissionResume.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveyPublicHost.test.mjs"
+      "path": "internal/access/app/governance_test.go",
+      "test": "TestRefreshStaffNamesPreservesPermissionsAndProviderFailure"
     }
   ],
   "installed_checks": [
-    "survey-recovery"
-  ]
+    "staff-name-refresh"
+  ],
+  "build_commands": []
 }
