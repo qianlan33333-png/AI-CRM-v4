@@ -1,14 +1,10 @@
 {
   "schema": 1,
-  "baseline_sha": "8023435693fca28e4d8ef03a18031747dcc2294c",
+  "baseline_sha": "cfff2374bb2d5fef20bd3ca43e1044fb0b9e6802",
   "checks": [
     {
       "lane": "preflight",
       "path": "deploy/test_domestic_promote_gc.py"
-    },
-    {
-      "lane": "preflight",
-      "path": "deploy/test_cleanup_releases.py"
     }
   ],
   "installed_checks": []

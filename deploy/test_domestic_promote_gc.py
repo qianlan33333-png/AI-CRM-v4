@@ -2,6 +2,8 @@
 import importlib.util
 import json
 import os
+import shutil
+import sys
 import unittest
 from contextlib import nullcontext
 from pathlib import Path
@@ -19,6 +21,7 @@ def load(name, filename):
 m = load('package_gc', 'domestic-promote.py')
 contracts = load('gc_evidence_contracts', 'test_cleanup_releases.py')
 cleanup = contracts.cleanup
+actual_helpers = m._release_retention_helpers
 
 
 class PackageGC(unittest.TestCase):
@@ -96,7 +99,20 @@ class PackageGC(unittest.TestCase):
             result = m.reclaim_obsolete_releases()
         self.assertEqual(result['status'], 'completed')
         self.assertEqual(result['removed'], [])
+        self.assertIn(self.names[0], result['protected'])
         self.assertTrue((self.root / 'releases' / self.names[0]).is_dir())
+
+    def test_actual_helper_loading_never_writes_into_sealed_application(self):
+        deploy = self.root / 'releases' / self.current / 'deploy'
+        deploy.mkdir()
+        for filename in ('cleanup-releases.py', 'post-release-retention.py'):
+            shutil.copy2(Path(__file__).with_name(filename), deploy / filename)
+        with patch.object(sys, 'dont_write_bytecode', False):
+            owners = actual_helpers(self.current)
+            self.assertEqual(len(owners), 2)
+            self.assertFalse(sys.dont_write_bytecode)
+        self.assertEqual(list(deploy.rglob('*.pyc')), [])
+        self.assertFalse((deploy / '__pycache__').exists())
 
     def test_shared_current_file_defers_to_normal_success_observer(self):
         binary = self.root / 'releases' / self.current / 'bin/aicrm'

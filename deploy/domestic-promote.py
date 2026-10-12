@@ -25,6 +25,7 @@ import socket
 import stat
 import subprocess
 import sys
+import sys
 import tarfile
 import tempfile
 import time
@@ -2322,12 +2323,17 @@ def read_domestic_main() -> dict:
 def _release_retention_helpers(current: str):
     """Use the exact installed, cursor-verified release's cleanup owner."""
     modules = []
-    for name, filename in (("domestic_cleanup_owner", "cleanup-releases.py"),
-                           ("domestic_schema_reader", "post-release-retention.py")):
-        spec = importlib.util.spec_from_file_location(name, RELEASES / current / "deploy" / filename)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        modules.append(module)
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        for name, filename in (("domestic_cleanup_owner", "cleanup-releases.py"),
+                               ("domestic_schema_reader", "post-release-retention.py")):
+            spec = importlib.util.spec_from_file_location(name, RELEASES / current / "deploy" / filename)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            modules.append(module)
+    finally:
+        sys.dont_write_bytecode = previous
     return tuple(modules)
 
 
@@ -2367,7 +2373,9 @@ def reclaim_obsolete_releases() -> dict:
                         "removed": [], "protected": sorted(protected),
                         "rollback_releases": plan["rollback_releases"]}
             result = cleanup.apply_plan(ROOT, schema, plan, sorted(protected))
-        return {"status": "completed", "protected": sorted(set(protected) | set(result["rollback_releases"])),
+        protected.update(entry["name"] for entry in plan["entries"]
+                         if entry["action"] == "protect" and entry["reason"] == "referenced_or_rollback")
+        return {"status": "completed", "protected": sorted(protected),
                 "removed": [entry["name"] for entry in result["deleted"]],
                 "rollback_releases": result["rollback_releases"], "deleted_bytes": result["deleted_bytes"],
                 "policy": "existing_verified_release_retention"}

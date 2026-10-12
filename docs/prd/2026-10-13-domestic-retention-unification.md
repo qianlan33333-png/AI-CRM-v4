@@ -36,3 +36,7 @@ flowchart LR
 运维恢复：保留原 BCC 成功收据；从已核验归档复制到 root 私有临时目录，逐文件核验 manifest/binary/package/schema 摘要，原 production install lock 内原子落位，只刷新既有桥接。验收必须读到 rollback_count=2、两个实际目录存在、真实成功收据未变、生产 current/PID/摘要未变。
 
 固定 helper 修改按原 maintenance-check 与准确字节安装流程推进，仅更新源码/工具。恢复前后不重新安装应用；失败或状态不明只读核对。工具可还原保留的旧 helper 字节；恢复包仅在未被引用时可移出，任何历史收据均保留。
+
+## 实机相关修复
+
+首次 source-only 清理拒绝时，独立只读定位到 Python 动态导入在已封包 deploy 目录生成两个 pyc；包原文件及 manifest 不变。修复导入前禁止字节码写入，并以真实模块加载断言目录没有新文件；保留当前进程和原构件字节。仅删除与本次导入对应且摘要已独立核对的两个缓存文件。后续候选只重跑受影响的 GC 八项合同，原清理 Owner 二十项 Linux 结果未变继续复用。
