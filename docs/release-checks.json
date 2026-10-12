@@ -1,64 +1,57 @@
 {
   "schema": 1,
-  "baseline_sha": "6fcd3f18b554ca0acdfdc6cf35338230902dc39c",
+  "baseline_sha": "5485044bd41ea8fc34ea3881f7b938b6c6199636",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/access/app"
+      "package": "./internal/wecom/adapter",
+      "test": "TestArchiveJSONControlCharactersPreserveDecodedText"
     },
     {
       "lane": "backend",
-      "package": "./internal/access/http"
+      "package": "./internal/wecom/adapter",
+      "test": "TestArchiveJSONRejectsOtherDamage"
     },
     {
       "lane": "backend",
-      "path": "internal/access/store/staff_directory_refresh_postgres_integration_test.go",
-      "test": "TestPostgreSQLStaffDirectoryRefreshDiscoveryVisibilityAndSafety",
-      "postgres": true,
-      "race": true
+      "package": "./internal/wecom/adapter",
+      "test": "TestArchiveDecryptEscapesControlsAndRetainsOriginalBytes"
     },
     {
       "lane": "backend",
-      "path": "internal/access/store/staff_name_refresh_postgres_integration_test.go",
-      "test": "TestPostgreSQLStaffNameRefreshAuditUpgradeAndAtomicity",
+      "package": "./internal/messagearchive/app"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/messagearchive/store",
+      "test": "TestPostgreSQLArchiveRepairEvidenceCursorAtomicAndReplay",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/access/store/governance_behavior_postgres_integration_test.go",
-      "test": "TestPostgreSQLUnprovisionedStaffProjectionCannotUseAnyGovernanceMutation",
+      "package": "./cmd/aicrm",
+      "test": "TestMessageArchivePostgreSQLInboxJourney",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/wecom/adapter/enterprise_directory_test.go",
-      "test": "TestEnterpriseDirectoryUsesApplicationVisibleDepartmentReads"
-    },
-    {
-      "lane": "frontend",
-      "path": "internal/webshell/static/admin_console/admin_access_directory_refresh.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "internal/webshell/static/admin_console/admin_access_committed_search.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "internal/webshell/static/admin_console/admin_access_password_reset.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "scripts/validate-openapi.mjs"
+      "package": "./cmd/aicrm",
+      "test": "TestMessageArchivePostgreSQLBatchRollbackAndConcurrentCursor",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/staff_directory_installed_fixture_test.go",
-      "test": "TestInstalledDirectoryProviderReadBoundary"
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLOpsInspectionOwnerDiagnostics",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/adminops",
+      "test": "TestInspectionObservationNeverMakesMissingOrInvalidEvidenceGreen"
     }
   ],
   "installed_checks": [
-    "survey-recovery",
-    "staff-directory-refresh"
-  ],
-  "build_commands": []
+    "archive-ingestion"
+  ]
 }

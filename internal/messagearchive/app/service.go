@@ -241,6 +241,10 @@ func (service Service) normalizePage(encrypted []wecomport.EncryptedArchiveRecor
 			return nil, []IngestIssue{{Seq: plain[index].Seq, MsgID: plain[index].MsgID, Stage: "normalize", Reason: "message_invalid", Payload: payload, Digest: digest}}, nil, 0, ErrProviderPage
 		}
 		attachTrustedParticipants(&message, plain[index].ExternalIdentities, trusted)
+		if len(plain[index].OriginalPayload) > 0 {
+			payload, digest := domain.NewIssuePayload(plain[index].OriginalPayload)
+			issues = append(issues, IngestIssue{Seq: plain[index].Seq, MsgID: plain[index].MsgID, Stage: "sdk_payload", Reason: "json_control_character_escaped", Payload: payload, Digest: digest})
+		}
 		messages = append(messages, message)
 	}
 	if next == 0 {

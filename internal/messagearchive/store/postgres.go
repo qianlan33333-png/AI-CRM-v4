@@ -127,7 +127,14 @@ func (PostgreSQL) CommitBatch(ctx context.Context, batch app.Batch) (app.BatchRe
 		return app.BatchResult{}, err
 	}
 	if batch.RunID > 0 {
-		if _, err = tx.Exec(ctx, `UPDATE message_archive_sync_runs SET end_seq=$2,pages=pages+1,fetched_count=fetched_count+$3,inserted_count=inserted_count+$4,duplicate_count=duplicate_count+$5,unresolved_count=unresolved_count+$6,issue_count=issue_count+$7 WHERE id=$1 AND status='running'`, batch.RunID, int64(batch.EndSeq), len(batch.Messages)+len(batch.Issues), result.Inserted, result.Duplicates, result.Unresolved, result.Issues); err != nil {
+		sequences := map[uint64]struct{}{}
+		for _, message := range batch.Messages {
+			sequences[message.Seq] = struct{}{}
+		}
+		for _, issue := range batch.Issues {
+			sequences[issue.Seq] = struct{}{}
+		}
+		if _, err = tx.Exec(ctx, `UPDATE message_archive_sync_runs SET end_seq=$2,pages=pages+1,fetched_count=fetched_count+$3,inserted_count=inserted_count+$4,duplicate_count=duplicate_count+$5,unresolved_count=unresolved_count+$6,issue_count=issue_count+$7 WHERE id=$1 AND status='running'`, batch.RunID, int64(batch.EndSeq), len(sequences), result.Inserted, result.Duplicates, result.Unresolved, result.Issues); err != nil {
 			return app.BatchResult{}, err
 		}
 	}

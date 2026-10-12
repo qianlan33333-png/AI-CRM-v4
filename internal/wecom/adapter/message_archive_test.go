@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -10,6 +11,40 @@ import (
 	wecomport "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/port"
 	"testing"
 )
+
+func TestArchiveDecryptEscapesControlsAndRetainsOriginalBytes(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped, err := rsa.EncryptPKCS1v15(rand.Reader, &key.PublicKey, []byte("fixture-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte("{\"msgid\":\"fixture\",\"from\":\"wm_fixture\",\"tolist\":[],\"msgtype\":\"text\",\"msgtime\":1,\"text\":{\"content\":\"a\nb\"}}")
+	reader := &MessageArchiveReader{config: MessageArchiveConfig{Enabled: true, CorpID: "wx-fixture"}, keys: map[uint32]*rsa.PrivateKey{1: key}, invoke: func(context.Context, archivesdk.Request) (archivesdk.Response, error) {
+		return archivesdk.Response{Items: [][]byte{raw}}, nil
+	}}
+	plain, err := reader.DecryptArchiveData(context.Background(), []wecomport.EncryptedArchiveRecord{{Seq: 17, MsgID: "fixture", PublicKeyVersion: 1, EncryptedKey: base64.StdEncoding.EncodeToString(wrapped), EncryptedMessage: "fixture"}})
+	if err != nil || len(plain) != 1 {
+		t.Fatal(err)
+	}
+	if !json.Valid(plain[0].Payload) || !bytes.Equal(plain[0].OriginalPayload, raw) || len(plain[0].ExternalIdentities) != 1 {
+		t.Fatal("normalized evidence or verified boundary lost")
+	}
+	var decoded struct {
+		Text struct {
+			Content string `json:"content"`
+		} `json:"text"`
+	}
+	if err = json.Unmarshal(plain[0].Payload, &decoded); err != nil || decoded.Text.Content != "a\nb" {
+		t.Fatal("decoded contents changed")
+	}
+	raw[0] = 'x'
+	if plain[0].OriginalPayload[0] != '{' {
+		t.Fatal("private evidence buffer aliased")
+	}
+}
 
 func TestArchiveDecryptStartsOneBoundedRunnerForABatch(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 1024)

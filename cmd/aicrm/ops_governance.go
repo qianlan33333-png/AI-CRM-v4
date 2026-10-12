@@ -19,6 +19,7 @@ import (
 	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
 	mediastore "github.com/qianlan33333-png/AI-CRM-v3/internal/media/store"
 	archiveport "github.com/qianlan33333-png/AI-CRM-v3/internal/messagearchive/port"
+	archivestore "github.com/qianlan33333-png/AI-CRM-v3/internal/messagearchive/store"
 	operationport "github.com/qianlan33333-png/AI-CRM-v3/internal/operationcycle/port"
 	operationstore "github.com/qianlan33333-png/AI-CRM-v3/internal/operationcycle/store"
 	orderstore "github.com/qianlan33333-png/AI-CRM-v3/internal/order/store"
@@ -71,6 +72,9 @@ func opsCollector(id string, read opsCounts, warning, critical []string) opsport
 			o.Status = "unknown"
 			o.Code = "runtime_roles_not_fully_observed"
 		}
+		if id == "archive.ingestion" && metrics["observed_sources"] == 0 {
+			o.Status, o.Code = "unknown", "archive_source_unobserved"
+		}
 		if id == "jobqueue.workers" && (metrics["fresh_queue_observations"] == 0 || metrics["missing_queue_observations"] > 0 || metrics["stale_queue_observations"] > 0) {
 			o.Status = "unknown"
 			o.Code = "worker_activity_unconfirmed"
@@ -92,6 +96,7 @@ func opsInspectionCollectors(pool *pgxpool.Pool, effects *externaleffects.Reposi
 		{"wecom.sync", wecom.NewOpsDiagnosticReader(pool), []string{"sync_failed", "sync_overdue", "staff_refresh_failed"}, nil},
 		{"segment.refresh", segmentstore.NewOpsDiagnosticReader(pool), []string{"refresh_failed", "refresh_overdue"}, nil},
 		{"automation.runs", automationstore.NewOpsDiagnosticReader(pool), []string{"runs_unknown", "runs_partial_failed", "runs_overdue"}, nil},
+		{"archive.ingestion", archivestore.NewOpsDiagnosticReader(pool), nil, []string{"ingestion_blocked"}},
 		{"media.storage", mediastore.NewOpsDiagnosticReader(pool), []string{"expired_upload_parts"}, nil},
 		{"operationcycle.actions", operationstore.NewOpsDiagnosticReader(pool), []string{"actions_failed", "actions_overdue"}, nil},
 		{"survey.submissions", surveystore.NewOpsDiagnosticReader(pool), []string{"identity_conflicts"}, []string{"missing_claim_submission", "claim_owner_mismatch", "definition_mismatch"}},

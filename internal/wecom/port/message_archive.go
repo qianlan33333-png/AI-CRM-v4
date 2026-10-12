@@ -36,9 +36,12 @@ type EncryptedArchiveRecord struct {
 // and decrypted a record. Payload stays in the private archive boundary and
 // is never suitable for request logging.
 type PlainArchiveRecord struct {
-	Seq                uint64                           `json:"seq"`
-	MsgID              string                           `json:"msgid"`
-	Payload            json.RawMessage                  `json:"payload"`
+	Seq     uint64          `json:"seq"`
+	MsgID   string          `json:"msgid"`
+	Payload json.RawMessage `json:"payload"`
+	// Retained only when a trusted SDK payload required lossless JSON escaping.
+	// These private bytes are persisted by the archive Owner with its cursor.
+	OriginalPayload    []byte                           `json:"-"`
 	ExternalIdentities []TrustedArchiveExternalIdentity `json:"-"`
 }
 

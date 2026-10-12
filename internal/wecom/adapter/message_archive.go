@@ -141,14 +141,19 @@ func (r *MessageArchiveReader) DecryptArchiveData(ctx context.Context, encrypted
 	}
 	out := make([]wecomport.PlainArchiveRecord, 0, len(encrypted))
 	for index, payload := range response.Items {
-		if !json.Valid(payload) {
+		normalized, repaired, normalizeErr := normalizeArchiveJSON(payload)
+		if normalizeErr != nil {
 			return nil, ErrArchiveUnavailable
 		}
-		identities, identityErr := r.trustedExternalIdentities(payload)
+		identities, identityErr := r.trustedExternalIdentities(normalized)
 		if identityErr != nil {
 			return nil, identityErr
 		}
-		out = append(out, wecomport.PlainArchiveRecord{Seq: encrypted[index].Seq, MsgID: encrypted[index].MsgID, Payload: append(json.RawMessage(nil), payload...), ExternalIdentities: identities})
+		record := wecomport.PlainArchiveRecord{Seq: encrypted[index].Seq, MsgID: encrypted[index].MsgID, Payload: normalized, ExternalIdentities: identities}
+		if repaired {
+			record.OriginalPayload = append([]byte(nil), payload...)
+		}
+		out = append(out, record)
 	}
 	return out, nil
 }
