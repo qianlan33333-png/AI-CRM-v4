@@ -8,7 +8,12 @@ import { buildTestBrowserBundle } from './test-browser-bundle.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bundle = await buildTestBrowserBundle(path.join(root, 'src/admin/sections/questionnaireEditor.ts'));
-const template = fs.readFileSync(path.join(root, 'dist/admin/questionnaireDetail.html'), 'utf8')
+// Installed checks use the verified package's document. Source checks can
+// still run locally after an explicit build; this harness never builds Host.
+const distRoot = process.env.AICRM_INSTALLED_SURVEY_ROOT
+  ? path.join(process.env.AICRM_INSTALLED_SURVEY_ROOT, 'web/dist')
+  : path.join(root, 'dist');
+const template = fs.readFileSync(path.join(distRoot, 'admin/questionnaireDetail.html'), 'utf8')
   .replace(/<script[^>]*src="[^"]+"[^>]*><\/script>/g, '');
 const waitFor = async (check, label) => {
   for (let attempt = 0; attempt < 60; attempt += 1) {

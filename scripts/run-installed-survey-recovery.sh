@@ -25,6 +25,10 @@ try:
 except Exception:
     sys.exit('requires a clean exact-SHA V4 source, matching binary/Host package and explicit local isolated acceptance_test PostgreSQL database')
 PY
+# Keep the existing editor lifecycle assertions against the exact package's
+# document after final build/install. Source preparation does not build Host.
+node -e 'if (process.version !== "v24.18.0") { console.error("installed Survey editor lifecycle requires Node 24.18.0"); process.exit(2); }'
+node web/scripts/questionnaire-editor-publish-lifecycle.mjs
 export AICRM_REQUIRE_CHROMIUM_JOURNEY=1
 exec python3 scripts/dev_preflight.py browser \
   --journey TestPostgreSQLPublicSurveyReauthorizationChromiumJourney \

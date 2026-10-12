@@ -35,3 +35,13 @@ Product Design：用户当前截图是视觉目标，沿用编辑器工具卡、
 - 原编辑器保存/发布合同与原 H5 Host 构建合同通过。
 - 清单只包括 Survey app/http、具名 PostgreSQL 创建及编辑器生命周期。安装包沿用 survey-recovery，增加创建旅程到原安装包脚本，与已有身份恢复/丢失响应/输入恢复/附件旅程一起验证；不引入源码阶段无 dist 的浏览器门禁。Linux 准确候选与正式安装包证据由唯一发布工作台形成，本机证据不冒称安装包或真实 Provider 验收。
 - 页面、对外 DTO、身份/映射策略、数据库迁移和 Provider 写入无新增；仅定义创建服务自动分配缺省标识，复用原随机标识与 UoW。
+
+## 原失败队首的检查阶段修复
+
+AEC attempt1 的标准 Linux 后端三条命令已通过，原前端 `questionnaire-editor-publish-lifecycle.mjs` 在读取未构建的 `web/dist/admin/questionnaireDetail.html` 时 ENOENT，准备阶段 artifact_builds=0，业务断言未执行。源码检查不新增完整 Host 构建；把这条原合同移入既有 `survey-recovery` 安装包脚本，并从已绑定 SHA/摘要的 `AICRM_INSTALLED_SURVEY_ROOT/web/dist` 读取页面。原合同断言不改，保留正式 Node24.18.0 执行及全部五条真实浏览器旅程。
+
+本次仅改变清单、阶段运行脚本、测试页面路径及本文登记。不涉及 OneID、业务持久化、内部任务、Provider 或 UI 产品代码；复用既有固定 Node 与准确安装包边界，无新业务限制。业务修复及后端测试的 Git blob 与 AEC 逐个比较一致，可复用输入未变的 Linux 后端收据，不把原候选整体失败计为通过。新候选从 AEC 线性继续、父 base 仍 fee5，以新 ref supersedes AEC，原 ref 不移动；应用安装和生产认证验收仍由唯一工作台完成。
+
+原 Linux 后端 run.json SHA256 `6175230036d7e5e92c47e1567dcebad97de29685fea9e6ceb5e0d4736ba46ce0`；Go JSONL SHA256 `155c35f8128bd552da4b7db398f1da9de08fe7b68c26ed215afe6bd25dd39719`，terminal PASS115/FAIL0/SKIP0。原前端失败日志 SHA256 `86fd308de6e269072b11a73a36af57e4c2b6bd7ad401af9c3d23ff6a92347cb9`；run.json SHA256 `88aeb66af86240caaa053225da085b371382bb0eeb8ac4830eaa4a0b518eb986`，原收据保留。
+
+本机阶段修复验证：临时移走源码 web/dist，仅从指定包目录提供原 questionnaireDetail.html，原 lifecycle 的发布版本、读回及停用不再发布等断言全部通过；Host 构建数0。bash -n 与 node --check 通过。本机 Node24.21.0 的这次文件路径合同验证不计固定 Node24.18.0 正式安装包验收，后者已登记在原脚本中，由工作台最终包执行。
