@@ -1,32 +1,13 @@
 {
   "schema": 1,
-  "baseline_sha": "11738b99f7d70a6dc154f56e396b1da3e97c2141",
+  "baseline_sha": "83f85a5e8c87e1294b43973266366c406c27660a",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/customer/port"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/product/app",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/survey/app"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/product/http/public_test.go",
-      "test": "TestPublicProductEnabledOnlyAndSafeDTO"
-    },
-    {
-      "lane": "frontend",
-      "path": "internal/webshell/test_referral_csv_download.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "internal/webshell/test_referral_browser_cdp.test.mjs"
+      "path": "cmd/aicrm/public_commerce_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLPublicCommerceChromiumJourney",
+      "postgres": true,
+      "browser": true
     }
   ],
   "installed_checks": []

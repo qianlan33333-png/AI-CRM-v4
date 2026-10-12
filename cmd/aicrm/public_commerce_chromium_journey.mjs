@@ -215,7 +215,7 @@ try {
       assert.equal(state.identityVisible, false, `${pagePath} trusted session must reveal checkout`);
       assert.equal(state.checkoutVisible, true, `${pagePath} visible checkout content`);
       assert.equal(state.checkoutName, name, `${pagePath} checkout product name`);
-      assert.equal(state.checkoutPrice, price, `${pagePath} checkout price`);
+      assert.equal(state.checkoutPrice, `¥${price}`, `${pagePath} checkout CNY price`);
       assert.equal(state.payable, `¥${price}`, `${pagePath} Owner payable amount`);
       assert.equal(state.footer, `¥${price}`, `${pagePath} Owner payment recovery footer amount`);
       assert.equal(state.buyDisabled, false, `${pagePath} ready purchase action`);
