@@ -41,12 +41,14 @@ type ProductOptionQuery struct {
 // CNY minor units: non-CNY rows are not eligible for this cross-domain
 // projection and are omitted by the Product-owned implementation.
 type ProductOption struct {
-	ID          ID                `json:"id"`
-	Code        string            `json:"code"`
-	ProductType ProductOptionType `json:"product_type"`
-	Name        string            `json:"name"`
-	PriceMinor  int64             `json:"price_minor"`
-	Currency    string            `json:"currency"`
+	VariantsEnabled bool              `json:"variants_enabled,omitempty"`
+	MaxPriceMinor   int64             `json:"max_price_minor,omitempty"`
+	ID              ID                `json:"id"`
+	Code            string            `json:"code"`
+	ProductType     ProductOptionType `json:"product_type"`
+	Name            string            `json:"name"`
+	PriceMinor      int64             `json:"price_minor"`
+	Currency        string            `json:"currency"`
 	// CoverURL is Product's public first image for a message card. A consumer
 	// that needs a card must reject an empty value rather than inventing a
 	// generic cover.
@@ -137,13 +139,15 @@ type PublicDetailMedia struct {
 }
 
 type CheckoutProduct struct {
-	ID          ID
-	ProductType ProductOptionType
-	Code        string
-	Name        string
-	PriceMinor  int64
-	Currency    string
-	Version     int64
+	VariantsEnabled bool
+	Variants        []Variant
+	ID              ID
+	ProductType     ProductOptionType
+	Code            string
+	Name            string
+	PriceMinor      int64
+	Currency        string
+	Version         int64
 	// AlipayDisabled defaults to false for historical products. Product owns this policy.
 	AlipayDisabled bool
 	RequireMobile  bool

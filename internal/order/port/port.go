@@ -336,6 +336,7 @@ type PaymentConfirmationEvidenceVerifier interface {
 }
 
 type PaymentOrderCommand struct {
+	Variant                         *VariantSnapshot `json:",omitempty"`
 	Provider                        domain.Provider
 	MerchantOrderNo                 string
 	PayerCustomerID                 int64

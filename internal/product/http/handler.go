@@ -228,7 +228,7 @@ func (h *Handler) ordinaryRoot(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_request")
 			return
 		}
-		product, err := h.catalog.Create(r.Context(), productport.CreateCommand{
+		product, err := h.catalog.Create(r.Context(), productport.CreateCommand{VariantsEnabled: body.VariantsEnabled, Variants: body.Variants,
 			ProductCode: body.ProductCode, Name: body.Name, Description: body.Description,
 			PriceMinor: body.PriceMinor, Currency: body.Currency,
 			Images: body.Images, LegacyAdminProjection: projection, Actor: principal.InternalID,
@@ -334,7 +334,7 @@ func (h *Handler) ordinaryTail(w http.ResponseWriter, r *http.Request, tail stri
 			writeError(w, http.StatusBadRequest, "invalid_request")
 			return
 		}
-		product, updateErr := h.catalog.Update(r.Context(), productport.UpdateCommand{
+		product, updateErr := h.catalog.Update(r.Context(), productport.UpdateCommand{VariantsEnabled: body.VariantsEnabled, Variants: body.Variants,
 			ID: productport.ID(id), ExpectedVersion: body.ExpectedVersion, Name: body.Name,
 			Description: body.Description, PriceMinor: body.PriceMinor, Currency: body.Currency,
 			Images: body.Images, LegacyAdminProjection: body.AdminProjection,
@@ -1657,6 +1657,8 @@ func (value *distributionPolicyRequest) command() *productport.DistributionPolic
 }
 
 type createRequest struct {
+	VariantsEnabled    *bool                      `json:"variants_enabled"`
+	Variants           *[]productport.Variant     `json:"variants"`
 	ProductCode        string                     `json:"product_code"`
 	Name               string                     `json:"name"`
 	Description        string                     `json:"description"`
@@ -1669,6 +1671,8 @@ type createRequest struct {
 }
 
 type updateRequest struct {
+	VariantsEnabled    *bool                      `json:"variants_enabled"`
+	Variants           *[]productport.Variant     `json:"variants"`
 	ExpectedVersion    int64                      `json:"expected_version"`
 	Name               string                     `json:"name"`
 	Description        string                     `json:"description"`
@@ -1910,6 +1914,8 @@ func normalizeExternalConfigurationCustomParams(value map[string]any) (map[strin
 }
 
 type productResponse struct {
+	VariantsEnabled    bool                              `json:"variants_enabled"`
+	Variants           []productport.Variant             `json:"variants"`
 	SourceKind         string                            `json:"source_kind,omitempty"`
 	ID                 productport.ID                    `json:"id"`
 	ProductCode        string                            `json:"product_code"`
@@ -1936,7 +1942,7 @@ func productResponseFrom(value productport.Product) (productResponse, error) {
 	if err != nil || value.PaidOrderCount < 0 || value.RefundOrderCount < 0 || value.SoldCount < 0 || value.SoldCount != maxInt64(0, value.PaidOrderCount-value.RefundOrderCount) {
 		return productResponse{}, productapp.ErrUnavailable
 	}
-	return productResponse{ID: value.ID, ProductCode: value.ProductCode, Name: value.Name, Description: value.Description, PriceMinor: value.PriceMinor, Currency: value.Currency, Images: append([]string{}, value.Images...), AdminProjection: append(json.RawMessage(nil), value.LegacyAdminProjection...), CreatedBy: value.CreatedBy, CreatedAt: value.CreatedAt.UTC(), UpdatedAt: value.UpdatedAt.UTC(), Version: value.Version, Lifecycle: local.Lifecycle, Enabled: local.Enabled, PaidOrderCount: value.PaidOrderCount, RefundOrderCount: value.RefundOrderCount, SoldCount: value.SoldCount}, nil
+	return productResponse{VariantsEnabled: value.VariantsEnabled, Variants: value.Variants, ID: value.ID, ProductCode: value.ProductCode, Name: value.Name, Description: value.Description, PriceMinor: value.PriceMinor, Currency: value.Currency, Images: append([]string{}, value.Images...), AdminProjection: append(json.RawMessage(nil), value.LegacyAdminProjection...), CreatedBy: value.CreatedBy, CreatedAt: value.CreatedAt.UTC(), UpdatedAt: value.UpdatedAt.UTC(), Version: value.Version, Lifecycle: local.Lifecycle, Enabled: local.Enabled, PaidOrderCount: value.PaidOrderCount, RefundOrderCount: value.RefundOrderCount, SoldCount: value.SoldCount}, nil
 }
 
 type servicePeriodResponse struct {

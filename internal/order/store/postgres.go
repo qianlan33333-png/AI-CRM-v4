@@ -163,7 +163,7 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`
 		}
 	}
 	for _, item := range snapshot.Items {
-		if _, err = tx.Exec(ctx, `INSERT INTO order_items(order_id,line_no,product_id,product_version,product_code,product_name,unit_amount_minor,quantity,line_amount_minor) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, snapshot.ID, item.LineNo, item.ProductID, item.ProductVersion, item.ProductCode, item.ProductName, item.UnitAmountMinor, item.Quantity, item.LineAmountMinor); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO order_items(order_id,line_no,product_id,product_version,product_code,product_name,unit_amount_minor,quantity,line_amount_minor,variant_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, snapshot.ID, item.LineNo, item.ProductID, item.ProductVersion, item.ProductCode, item.ProductName, item.UnitAmountMinor, item.Quantity, item.LineAmountMinor, item.Variant); err != nil {
 			return domain.Order{}, mapError(err)
 		}
 	}
@@ -872,7 +872,7 @@ func (r *Repository) appendFacts(ctx context.Context, tx pgx.Tx, snapshot domain
 }
 
 func loadItems(ctx context.Context, tx pgx.Tx, orderID int64) ([]domain.ItemSnapshot, error) {
-	rows, err := tx.Query(ctx, `SELECT line_no,product_id,product_version,product_code,product_name,unit_amount_minor,quantity,line_amount_minor FROM order_items WHERE order_id=$1 ORDER BY line_no`, orderID)
+	rows, err := tx.Query(ctx, `SELECT line_no,product_id,product_version,product_code,product_name,unit_amount_minor,quantity,line_amount_minor,variant_snapshot FROM order_items WHERE order_id=$1 ORDER BY line_no`, orderID)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -880,7 +880,7 @@ func loadItems(ctx context.Context, tx pgx.Tx, orderID int64) ([]domain.ItemSnap
 	items := make([]domain.ItemSnapshot, 0)
 	for rows.Next() {
 		var item domain.ItemSnapshot
-		if err = rows.Scan(&item.LineNo, &item.ProductID, &item.ProductVersion, &item.ProductCode, &item.ProductName, &item.UnitAmountMinor, &item.Quantity, &item.LineAmountMinor); err != nil {
+		if err = rows.Scan(&item.LineNo, &item.ProductID, &item.ProductVersion, &item.ProductCode, &item.ProductName, &item.UnitAmountMinor, &item.Quantity, &item.LineAmountMinor, &item.Variant); err != nil {
 			return nil, mapError(err)
 		}
 		items = append(items, item)

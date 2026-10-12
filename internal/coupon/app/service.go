@@ -529,7 +529,11 @@ func (s *Service) validateProducts(ctx context.Context, c couponport.Coupon) err
 			kind = productport.ProductOptionServicePeriod
 		}
 		p, e := s.products.ReadProductTarget(ctx, kind, productport.ID(id))
-		if e != nil || p.ID != productport.ID(id) || p.ProductType != kind || p.Currency != "CNY" || p.PriceMinor <= c.DiscountAmountTotal {
+		price := p.PriceMinor
+		if p.VariantsEnabled {
+			price = p.MaxPriceMinor
+		}
+		if e != nil || p.ID != productport.ID(id) || p.ProductType != kind || p.Currency != "CNY" || price <= c.DiscountAmountTotal {
 			return ErrInvalidTarget
 		}
 	}

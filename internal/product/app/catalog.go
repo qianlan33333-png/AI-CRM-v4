@@ -314,7 +314,7 @@ func (s *Service) Create(ctx context.Context, command productport.CreateCommand)
 			if subtle.ConstantTimeCompare(receipt.PayloadDigest[:], digest[:]) != 1 {
 				stock, hasRetiredStock := retiredStockFromSnapshot(receipt.ResultSnapshot)
 				legacyDigest := legacyProductCreateDigest(command, stock)
-				if !hasRetiredStock || subtle.ConstantTimeCompare(receipt.PayloadDigest[:], legacyDigest[:]) != 1 {
+				if command.Variants != nil || command.VariantsEnabled != nil || !hasRetiredStock || subtle.ConstantTimeCompare(receipt.PayloadDigest[:], legacyDigest[:]) != 1 {
 					return ErrConflict
 				}
 			}
@@ -407,7 +407,7 @@ func (s *Service) Update(ctx context.Context, command productport.UpdateCommand)
 			if subtle.ConstantTimeCompare(receipt.PayloadDigest[:], digest[:]) != 1 {
 				stock, hasRetiredStock := retiredStockFromSnapshot(receipt.ResultSnapshot)
 				legacyDigest := legacyProductUpdateDigest(command, stock)
-				if !hasRetiredStock || subtle.ConstantTimeCompare(receipt.PayloadDigest[:], legacyDigest[:]) != 1 {
+				if command.Variants != nil || command.VariantsEnabled != nil || !hasRetiredStock || subtle.ConstantTimeCompare(receipt.PayloadDigest[:], legacyDigest[:]) != 1 {
 					return ErrConflict
 				}
 			}
@@ -428,6 +428,9 @@ func (s *Service) Update(ctx context.Context, command productport.UpdateCommand)
 				return ErrInvalidProduct
 			}
 			// Shop products expose only their basic fields and the separate push Port.
+			if command.Variants != nil || command.VariantsEnabled != nil {
+				return ErrInvalidProduct
+			}
 			command.Images = slices.Clone(current.Images)
 			command.LegacyAdminProjection = append(json.RawMessage(nil), current.LegacyAdminProjection...)
 		}
@@ -510,6 +513,9 @@ func (s *Service) Update(ctx context.Context, command productport.UpdateCommand)
 func ready(s *Service) bool { return s != nil && s.uow != nil && s.store != nil && s.events != nil }
 
 func normalizeUpdate(c productport.UpdateCommand) (productport.UpdateCommand, [32]byte, error) {
+	if err := normalizeVariants(c.Variants); err != nil {
+		return c, [32]byte{}, err
+	}
 	c.Images = slices.Clone(c.Images)
 	c.Name = strings.TrimSpace(c.Name)
 	c.Description = strings.TrimSpace(c.Description)
@@ -540,7 +546,9 @@ func normalizeUpdate(c productport.UpdateCommand) (productport.UpdateCommand, [3
 		Images                      []string
 		LegacyAdminProjection       json.RawMessage
 		DistributionPolicy          *productport.DistributionPolicy
-	}{int64(c.ID), c.ExpectedVersion, c.Name, c.Description, c.Currency, c.PriceMinor, c.Images, c.LegacyAdminProjection, c.DistributionPolicy})
+		VariantsEnabled             *bool                  `json:",omitempty"`
+		Variants                    *[]productport.Variant `json:",omitempty"`
+	}{int64(c.ID), c.ExpectedVersion, c.Name, c.Description, c.Currency, c.PriceMinor, c.Images, c.LegacyAdminProjection, c.DistributionPolicy, c.VariantsEnabled, c.Variants})
 	if err != nil {
 		return productport.UpdateCommand{}, [32]byte{}, ErrInvalidProduct
 	}
@@ -552,6 +560,9 @@ func validIdempotencyKey(key string) bool {
 }
 
 func normalize(c productport.CreateCommand) (productport.CreateCommand, [32]byte, error) {
+	if err := normalizeVariants(c.Variants); err != nil {
+		return c, [32]byte{}, err
+	}
 	c.Images = slices.Clone(c.Images)
 	c.Name = strings.TrimSpace(c.Name)
 	c.ProductCode = strings.TrimSpace(c.ProductCode)
@@ -576,7 +587,9 @@ func normalize(c productport.CreateCommand) (productport.CreateCommand, [32]byte
 		Images                      []string
 		LegacyAdminProjection       json.RawMessage
 		DistributionPolicy          *productport.DistributionPolicy
-	}{c.ProductCode, c.Name, c.Description, c.Currency, c.PriceMinor, c.Images, c.LegacyAdminProjection, c.DistributionPolicy})
+		VariantsEnabled             *bool                  `json:",omitempty"`
+		Variants                    *[]productport.Variant `json:",omitempty"`
+	}{c.ProductCode, c.Name, c.Description, c.Currency, c.PriceMinor, c.Images, c.LegacyAdminProjection, c.DistributionPolicy, c.VariantsEnabled, c.Variants})
 	if err != nil {
 		return productport.CreateCommand{}, [32]byte{}, ErrInvalidProduct
 	}

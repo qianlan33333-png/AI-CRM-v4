@@ -198,7 +198,7 @@ func (s *Service) exportRowsWithin(ctx context.Context, orders []domain.Order) (
 					names = append(names, d.Name)
 				}
 			}
-			rows = append(rows, []string{o.MerchantOrderNo, createdAt, buyer.Number, buyer.Name, transactionNo, method, paidAt, decimalMinor(o.Amount.AmountMinor), o.Amount.Currency, decimalMinor(o.RefundedMinor), address.RecipientName, phone, address.ProvinceName, address.CityName, address.DistrictName, address.DetailAddress, item.ProductCode, item.ProductName, strconv.Itoa(int(item.Quantity)), decimalMinor(item.UnitAmountMinor), statusLabel, orderRecordOriginLabel(o.RecordOrigin), strings.Join(numbers, ";"), strings.Join(names, ";"), sourceStatus, sourceAfterSales, importedAt})
+			rows = append(rows, []string{o.MerchantOrderNo, createdAt, buyer.Number, buyer.Name, transactionNo, method, paidAt, decimalMinor(o.Amount.AmountMinor), o.Amount.Currency, decimalMinor(o.RefundedMinor), address.RecipientName, phone, address.ProvinceName, address.CityName, address.DistrictName, address.DetailAddress, item.ProductCode, item.DisplayName(), strconv.Itoa(int(item.Quantity)), decimalMinor(item.UnitAmountMinor), statusLabel, orderRecordOriginLabel(o.RecordOrigin), strings.Join(numbers, ";"), strings.Join(names, ";"), sourceStatus, sourceAfterSales, importedAt})
 		}
 	}
 	return rows, nil

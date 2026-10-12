@@ -73,7 +73,7 @@ func TestExportXLSXPreservesFullFactsBlankContactsAndEveryItem(t *testing.T) {
 	first.Items[0].Quantity = 2
 	first.Items[0].LineAmountMinor = 2000
 	first.Amount.AmountMinor = 2050
-	first.Items = append(first.Items, domain.ItemSnapshot{LineNo: 2, ProductCode: "0002", ProductName: "第二商品", Quantity: 1, UnitAmountMinor: 50, LineAmountMinor: 50})
+	first.Items = append(first.Items, domain.ItemSnapshot{LineNo: 2, ProductCode: "0002", ProductName: "第二商品", ProductID: func() *int64 { v := int64(88); return &v }(), Variant: &domain.VariantSnapshot{ID: 9, Version: 1, Name: "三人成行版"}, Quantity: 1, UnitAmountMinor: 50, LineAmountMinor: 50})
 	o, err := service.Create(context.Background(), orderport.CreateCommand{Input: first, Actor: 7, IdempotencyKey: "order-create-full-export-0001"})
 	if err != nil {
 		t.Fatal(err)
@@ -124,6 +124,9 @@ func TestExportXLSXPreservesFullFactsBlankContactsAndEveryItem(t *testing.T) {
 	if rows[3][22] != "0000333" || rows[3][23] != "测试分销员" || rows[2][22] != "" {
 		t.Fatal("distribution borrowed another item")
 	}
+	if rows[3][17] != "第二商品 · 三人成行版" || rows[3][16] != "0002" || rows[3][18] != "1" {
+		t.Fatal("variant export must append the name without changing parent code or quantity")
+	}
 	formula, _ := f.GetCellFormula("订单信息", "R3")
 	kind, _ := f.GetCellType("订单信息", "R3")
 	if formula != "" || kind != excelize.CellTypeSharedString || rows[2][17] != first.Items[0].ProductName {
@@ -141,7 +144,7 @@ func TestExportXLSXPreservesFullFactsBlankContactsAndEveryItem(t *testing.T) {
 		t.Fatal(err)
 	}
 	csvRows, err := csv.NewReader(strings.NewReader(strings.TrimPrefix(string(csvExport.Content), "\ufeff"))).ReadAll()
-	if err != nil || len(csvRows) != 4 || len(csvRows[0]) != 27 || csvRows[2][17] != "'"+first.Items[0].ProductName || csvRows[2][11] != "13800000000" || csvRows[2][7] != "20.50" {
+	if err != nil || len(csvRows) != 4 || len(csvRows[0]) != 27 || csvRows[3][17] != "第二商品 · 三人成行版" || csvRows[2][17] != "'"+first.Items[0].ProductName || csvRows[2][11] != "13800000000" || csvRows[2][7] != "20.50" {
 		t.Fatal("CSV must share full facts and protect formula text")
 	}
 

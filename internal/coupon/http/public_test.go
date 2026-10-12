@@ -74,6 +74,31 @@ func (publicSessionStub) LookupWithin(_ context.Context, token string, _ time.Ti
 
 type publicProductStub struct{}
 
+type publicVariantProductStub struct{ variants []productport.Variant }
+
+func (s publicVariantProductStub) ReadCheckoutProductWithin(_ context.Context, kind productport.ProductOptionType, id productport.ID) (productport.CheckoutProduct, error) {
+	return productport.CheckoutProduct{ID: id, ProductType: kind, Code: "variant-course", Name: "规格课程", PriceMinor: 1, Currency: "CNY", Version: 1, VariantsEnabled: true, Variants: s.variants}, nil
+}
+
+func TestPublicCouponVariantPriceUsesAvailableSelection(t *testing.T) {
+	h, coupon, _ := newPublicCouponHandler(t, "published")
+	coupon.coupon.TargetRefs = []string{"standard_product:9"}
+	h.products = publicVariantProductStub{variants: []productport.Variant{{PriceMinor: 0}, {PriceMinor: 9900}, {PriceMinor: 99900}}}
+	products, err := h.checkoutProducts(context.Background(), coupon.coupon.TargetRefs)
+	if err != nil || len(products) != 1 || products[0].PriceMinor != 9900 || !products[0].PriceFrom {
+		t.Fatalf("variant target=%+v err=%v", products, err)
+	}
+	page := httptest.NewRecorder()
+	h.ServeHTTP(page, trustedCouponRequest(http.MethodGet, "/c/cp-a1b2c3"))
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "99.00 起") {
+		t.Fatal("variant price label missing", page.Code)
+	}
+	h.products = publicVariantProductStub{}
+	if _, err = h.checkoutProducts(context.Background(), coupon.coupon.TargetRefs); err == nil {
+		t.Fatal("empty variants must not fall back to parent price")
+	}
+}
+
 func (publicProductStub) ReadCheckoutProductWithin(_ context.Context, kind productport.ProductOptionType, id productport.ID) (productport.CheckoutProduct, error) {
 	if kind != productport.ProductOptionServicePeriod || id != 8 {
 		return productport.CheckoutProduct{}, errors.New("wrong product")

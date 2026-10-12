@@ -59,14 +59,15 @@ func NewMoney(amountMinor int64, currency string) (Money, error) {
 }
 
 type ItemSnapshot struct {
-	LineNo          int32  `json:"line_no"`
-	ProductID       *int64 `json:"product_id,omitempty"`
-	ProductVersion  *int64 `json:"product_version,omitempty"`
-	ProductCode     string `json:"product_code"`
-	ProductName     string `json:"product_name"`
-	UnitAmountMinor int64  `json:"unit_amount_minor"`
-	Quantity        int32  `json:"quantity"`
-	LineAmountMinor int64  `json:"line_amount_minor"`
+	Variant         *VariantSnapshot `json:"variant,omitempty"`
+	LineNo          int32            `json:"line_no"`
+	ProductID       *int64           `json:"product_id,omitempty"`
+	ProductVersion  *int64           `json:"product_version,omitempty"`
+	ProductCode     string           `json:"product_code"`
+	ProductName     string           `json:"product_name"`
+	UnitAmountMinor int64            `json:"unit_amount_minor"`
+	Quantity        int32            `json:"quantity"`
+	LineAmountMinor int64            `json:"line_amount_minor"`
 }
 
 type NewOrderInput struct {
@@ -360,7 +361,7 @@ func validate(o Order) error {
 	var total int64
 	seen := make(map[int32]struct{}, len(o.items))
 	for _, item := range o.items {
-		if item.LineNo < 1 || item.ProductID != nil && *item.ProductID < 1 || item.ProductVersion != nil && *item.ProductVersion < 1 || !validText(item.ProductCode, 200) || !validText(item.ProductName, 500) ||
+		if !item.Variant.Valid() || item.Variant != nil && item.ProductID == nil || item.LineNo < 1 || item.ProductID != nil && *item.ProductID < 1 || item.ProductVersion != nil && *item.ProductVersion < 1 || !validText(item.ProductCode, 200) || !validText(item.ProductName, 500) ||
 			item.Quantity < 1 || item.UnitAmountMinor < 0 || item.LineAmountMinor < 0 ||
 			(!external && ((!noPayment && (item.UnitAmountMinor < 1 || item.LineAmountMinor < 1)) || item.UnitAmountMinor > math.MaxInt64/int64(item.Quantity) || item.LineAmountMinor != item.UnitAmountMinor*int64(item.Quantity))) || total > math.MaxInt64-item.LineAmountMinor {
 			return ErrInvalidOrder
@@ -441,6 +442,8 @@ func cloneItems(items []ItemSnapshot) []ItemSnapshot {
 	copy(result, items)
 	for index := range result {
 		result[index].ProductID = cloneID(result[index].ProductID)
+		result[index].ProductVersion = cloneID(result[index].ProductVersion)
+		result[index].Variant = result[index].Variant.Clone()
 	}
 	return result
 }

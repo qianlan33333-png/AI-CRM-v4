@@ -1554,7 +1554,7 @@ func orderIntegrationPool(t *testing.T) (*pgxpool.Pool, func()) {
 	if !ok {
 		t.Fatal("locate integration test")
 	}
-	for _, name := range []string{"0002_identity.sql", "0005_external_effects.sql", "0010_product.sql", "0020_order.sql", "0024_order_product_version.sql", "0049_order_history_attribution.sql", "0055_order_service_entitlements.sql", "0070_service_period_entitlement_fulfillment.sql", "0076_order_checkout_snapshots.sql", "0088_order_service_entitlement_alliance.sql", "0095_product_external_push.sql", "0158_order_distribution_qualification_evidence.sql", "0172_order_checkout_post_purchase_action.sql", "0197_order_referral_activity_context.sql", "0206_order_native_alipay_checkout.sql", "0221_external_order_history.sql"} {
+	for _, name := range []string{"0002_identity.sql", "0005_external_effects.sql", "0010_product.sql", "0020_order.sql", "0024_order_product_version.sql", "0049_order_history_attribution.sql", "0055_order_service_entitlements.sql", "0070_service_period_entitlement_fulfillment.sql", "0076_order_checkout_snapshots.sql", "0088_order_service_entitlement_alliance.sql", "0095_product_external_push.sql", "0158_order_distribution_qualification_evidence.sql", "0172_order_checkout_post_purchase_action.sql", "0197_order_referral_activity_context.sql", "0206_order_native_alipay_checkout.sql", "0221_external_order_history.sql", "0242_order_variant_snapshot.sql"} {
 		migration, readErr := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations", name))
 		if readErr != nil {
 			t.Fatal(readErr)

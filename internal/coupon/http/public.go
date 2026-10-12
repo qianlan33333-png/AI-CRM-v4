@@ -285,6 +285,7 @@ func (h *PublicHandler) trustedActor(ctx context.Context, r *http.Request) (paym
 type publicCouponProduct struct {
 	Name, URL    string
 	PriceMinor   int64
+	PriceFrom    bool
 	DurationDays int32
 	Available    bool
 	KindLabel    string
@@ -299,6 +300,14 @@ func (h *PublicHandler) checkoutProducts(ctx context.Context, refs []string) ([]
 				return errors.New("invalid coupon target")
 			}
 			product, err := h.products.ReadCheckoutProductWithin(txctx, kind, productport.ID(id))
+			if product.VariantsEnabled {
+				product.PriceMinor = 0
+				for _, v := range product.Variants {
+					if v.PriceMinor > 0 && (product.PriceMinor == 0 || v.PriceMinor < product.PriceMinor) {
+						product.PriceMinor = v.PriceMinor
+					}
+				}
+			}
 			if err != nil || product.ID != productport.ID(id) || product.ProductType != kind || product.Code == "" || product.Name == "" || product.PriceMinor < 1 || product.Currency != "CNY" || product.Version < 1 || (kind == productport.ProductOptionServicePeriod && product.ServicePeriodDurationDays < 1) {
 				return errors.New("unavailable coupon target")
 			}
@@ -310,7 +319,7 @@ func (h *PublicHandler) checkoutProducts(ctx context.Context, refs []string) ([]
 			if kind == productport.ProductOptionServicePeriod {
 				kindLabel = "周期商品"
 			}
-			products = append(products, publicCouponProduct{Name: product.Name, URL: path, PriceMinor: product.PriceMinor, DurationDays: product.ServicePeriodDurationDays, Available: true, KindLabel: kindLabel})
+			products = append(products, publicCouponProduct{Name: product.Name, URL: path, PriceMinor: product.PriceMinor, PriceFrom: product.VariantsEnabled, DurationDays: product.ServicePeriodDurationDays, Available: true, KindLabel: kindLabel})
 		}
 		return nil
 	})

@@ -1,17 +1,185 @@
 {
   "schema": 1,
-  "baseline_sha": "d65f512849154b21416d8c8cea7964d4b6ddcc81",
+  "baseline_sha": "8245526b89d04111acb2b03f66416b9c10d4064e",
   "checks": [
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLReferralChromiumJourney",
+      "package": "./internal/product/port"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/order/domain"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/order/http"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/invoice"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/app/catalog_test.go",
+      "test": "TestCreateReplaysLegacyStockSnapshotWithoutWideningPayloadCompatibility"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/app/catalog_test.go",
+      "test": "TestUpdateReplaysLegacyStockSnapshotWithoutWideningPayloadCompatibility"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/app/catalog_test.go",
+      "test": "TestUpdateUsesProductVersionCASAndOperationScopedReceipt"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/app/local_lifecycle_test.go",
+      "test": "TestLocalProductLifecycleCopyRetainsTypedBodyAndImagesButResetsDraft"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/store/variants_integration_test.go",
+      "test": "TestProductVariantsPostgreSQLAtomicCompatibilityAndVersion",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/store/service_period_save_integration_test.go",
+      "test": "TestServicePeriodEmptyImagesPostgreSQLSave",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/store/variant_integration_test.go",
+      "test": "TestPostgreSQLOrderVariantSnapshotSurvivesReadsAndReplay",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/app/variants_test.go",
+      "test": "TestVariantCheckoutPriceSelectionAndReplay"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/app/service_test.go",
+      "test": "TestCreateAcceptsPaymentEffectInSameUOWAndReplays"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/app/service_test.go",
+      "test": "TestCreateFailsClosedWhenAtomicEffectAcceptanceFails"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/app/service_test.go",
+      "test": "TestVerifiedCallbackReplaysCanonicalPostgreSQLConfirmationTime"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/app/service_test.go",
+      "test": "TestCreatePaymentOrderWithinFreezesProductVersionAndReplays"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/app/service_test.go",
+      "test": "TestPaymentCheckoutNoCouponReplayKeepsOriginalFrozenPrice"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/app/service_test.go",
+      "test": "TestPaymentCheckoutFreezesCouponPriceAndSettlesWithinOrderTransaction"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/app/service_test.go",
+      "test": "TestPaymentCheckoutFinalFailureReleasesCouponAndServicePeriodRefundsOnce"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/app/export_test.go",
+      "test": "TestExportXLSXPreservesFullFactsBlankContactsAndEveryItem"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/app/export_test.go",
+      "test": "TestExportUsesFrozenCouponPriceAndConfirmedRefund"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/coupon/app/variants_test.go",
+      "test": "TestVariantCouponAcceptsAnyEligiblePrice"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/http/variants_test.go",
+      "test": "TestPublicVariantSelectionCouponAndRecovery"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/http/public_resume_test.go",
+      "test": "TestPublicOriginalCheckoutBrowserJourney"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/http/public_test.go",
+      "test": "TestPublicPaymentCompletionRefreshJourney"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/http/public_test.go",
+      "test": "TestPublicAlipayOriginalOrderBrowserJourney"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/product_variants_checkout_postgres_integration_test.go",
+      "test": "TestPostgreSQLVariantCheckoutTransactionsAndFrozenRecovery",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/wechatshop/products_test.go",
+      "test": "TestPostgreSQLShopProductRefreshReplayAndNewSKU",
       "postgres": true
     },
     {
       "lane": "frontend",
-      "path": "internal/webshell/referral_test_downloads.test.mjs"
+      "path": "web/v3/productAdapter.contact_collection.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/productAdapter.save_recovery.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/productAdapter.distribution_dimensions.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/couponAdapter.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/orderAdapter.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/wechatShopProducts.test.mjs"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/product_variants_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLProductVariantsChromiumJourney"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/coupon/http/public_test.go",
+      "test": "TestPublicCouponVariantPriceUsesAvailableSelection"
     }
   ],
-  "installed_checks": []
+  "installed_checks": [
+    "product-variants"
+  ],
+  "build_commands": []
 }

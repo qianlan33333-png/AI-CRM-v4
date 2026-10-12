@@ -211,7 +211,7 @@ func newMemberGridAdversarialFixture(t *testing.T) memberGridAdversarialFixture 
 		t.Fatal(err)
 	}
 	t.Cleanup(native.Close)
-	for _, name := range []string{"0001_platform.sql", "0003_access.sql", "0010_product.sql", "0235_wechat_shop_products.sql", "0079_service_period_member_grid.sql"} {
+	for _, name := range []string{"0001_platform.sql", "0003_access.sql", "0010_product.sql", "0235_wechat_shop_products.sql", "0241_product_variants.sql", "0079_service_period_member_grid.sql"} {
 		migration, err := os.ReadFile(memberGridMigration(t, name))
 		if err != nil {
 			t.Fatal(err)

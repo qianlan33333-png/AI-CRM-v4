@@ -236,7 +236,7 @@ func checkoutOrderResult(o orderdomain.Snapshot) paymentport.CheckoutResult {
 func (s *Service) createCheckout(ctx context.Context, c paymentport.CreateCommand, allowFree, providerEnabled bool) (paymentport.CheckoutResult, error) {
 	fromExistingOrder := c.OrderID > 0 && c.ProductID == 0 && c.ProductType == ""
 	fromProduct := c.OrderID == 0 && c.ProductID > 0 && (c.ProductType == string(productport.ProductOptionStandard) || c.ProductType == string(productport.ProductOptionServicePeriod))
-	if !s.ready() || (!fromExistingOrder && !fromProduct) || fromProduct && s.products == nil || c.CouponClaimID < 0 || fromExistingOrder && c.CouponClaimID != 0 || len(c.SessionToken) < 20 || len(c.SessionToken) > 100 || !validScope(c.ActorScope) || !validKey(c.IdempotencyKey) || len(c.PromotionContext) > 512 || strings.TrimSpace(c.PromotionContext) != c.PromotionContext || !validOpaqueActivityContext(c.ReferralActivityContext) || (c.Provider != "" && c.Provider != string(domain.ProviderWeChatPay) && c.Provider != string(domain.ProviderAlipay)) || (c.Provider == string(domain.ProviderAlipay) && c.Channel != domain.ChannelAlipayWap && c.Channel != domain.ChannelAlipayPage) {
+	if c.VariantID < 0 || c.VariantVersion < 0 || fromExistingOrder && (c.VariantID != 0 || c.VariantVersion != 0) || !s.ready() || (!fromExistingOrder && !fromProduct) || fromProduct && s.products == nil || c.CouponClaimID < 0 || fromExistingOrder && c.CouponClaimID != 0 || len(c.SessionToken) < 20 || len(c.SessionToken) > 100 || !validScope(c.ActorScope) || !validKey(c.IdempotencyKey) || len(c.PromotionContext) > 512 || strings.TrimSpace(c.PromotionContext) != c.PromotionContext || !validOpaqueActivityContext(c.ReferralActivityContext) || (c.Provider != "" && c.Provider != string(domain.ProviderWeChatPay) && c.Provider != string(domain.ProviderAlipay)) || (c.Provider == string(domain.ProviderAlipay) && c.Channel != domain.ChannelAlipayWap && c.Channel != domain.ChannelAlipayPage) {
 		return paymentport.CheckoutResult{}, paymentport.ErrInvalid
 	}
 	// A response-lost browser recovery checkpoint is valid for precisely the
@@ -357,6 +357,22 @@ func (s *Service) createCheckout(ctx context.Context, c paymentport.CreateComman
 			}
 		} else {
 			product, productErr := s.products.ReadCheckoutProductWithin(tx, productport.ProductOptionType(c.ProductType), productport.ID(c.ProductID))
+			if productErr != nil {
+				return productErr
+			}
+			selected, selectionErr := product.SelectedVariant(c.VariantID, c.VariantVersion)
+			if selectionErr != nil {
+				return selectionErr
+			}
+			var variant *orderport.VariantSnapshot
+			if selected != nil {
+				product.PriceMinor = selected.PriceMinor
+				variant = &orderport.VariantSnapshot{ID: selected.ID, Version: selected.Version, Name: selected.Name, Description: selected.Description, Attributes: []orderport.VariantAttribute{}}
+				for _, a := range selected.Attributes {
+					variant.Attributes = append(variant.Attributes, orderport.VariantAttribute{Key: a.Key, Value: a.Value})
+				}
+			}
+
 			if productErr != nil || int64(product.ID) != c.ProductID || product.ProductType != productport.ProductOptionType(c.ProductType) || (product.PriceMinor < 0 || product.PriceMinor == 0 && (!allowFree || product.ProductType != productport.ProductOptionStandard || c.CouponClaimID != 0)) || product.Currency != "CNY" || product.Version < 1 || product.ProductType == productport.ProductOptionServicePeriod && product.ServicePeriodDurationDays < 1 {
 				if productErr != nil {
 					return productErr
@@ -407,6 +423,7 @@ func (s *Service) createCheckout(ctx context.Context, c paymentport.CreateComman
 				}
 			}
 			command := orderport.PaymentOrderCommand{
+				Variant:  variant,
 				Provider: provider, MerchantOrderNo: merchantOrderNo,
 				PayerCustomerID: actor.PayerCustomerID, BeneficiaryCustomerID: actor.BeneficiaryCustomerID,
 				ProductID: int64(product.ID), CouponClaimID: c.CouponClaimID, ProductCode: product.Code, ProductName: product.Name,
@@ -751,6 +768,12 @@ func (s *Service) GetCheckout(ctx context.Context, provider domain.Provider, mer
 			return paymentport.ErrConflict
 		}
 		out = paymentport.Handoff{PaymentID: payment.ID, OrderID: payment.OrderID, MerchantOrder: payment.MerchantOrderNo, Provider: payment.Provider, Channel: payment.Channel, Status: payment.Status, AmountMinor: payment.AmountMinor, Currency: payment.Currency}
+		if reader, ok := s.orders.(orderport.CheckoutVariantReader); ok {
+			out.Variant, err = reader.ReadCheckoutVariantWithin(tx, payment.OrderID)
+			if err != nil {
+				return err
+			}
+		}
 		// A terminal outcome is an immutable Payment fact. It remains readable to
 		// the original trusted payer after the short-lived JSAPI handoff expires;
 		// handoff material is neither needed nor safe to revive at this point.
@@ -1694,7 +1717,7 @@ func classify(err error) error {
 		return nil
 	case errors.Is(err, paymentport.ErrPriceChanged), errors.Is(err, orderport.ErrPriceChanged):
 		return paymentport.ErrPriceChanged
-	case errors.Is(err, paymentport.ErrProviderDisabled), errors.Is(err, paymentport.ErrProductPaymentMethodDisabled), errors.Is(err, paymentport.ErrAlreadyPurchased), errors.Is(err, paymentport.ErrPurchasePending):
+	case errors.Is(err, productport.ErrVariantSelection), errors.Is(err, paymentport.ErrProviderDisabled), errors.Is(err, paymentport.ErrProductPaymentMethodDisabled), errors.Is(err, paymentport.ErrAlreadyPurchased), errors.Is(err, paymentport.ErrPurchasePending):
 		return err
 	case errors.Is(err, paymentport.ErrNotFound), errors.Is(err, orderport.ErrNotFound):
 		return paymentport.ErrNotFound

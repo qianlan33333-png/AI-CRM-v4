@@ -56,7 +56,7 @@ func TestServicePeriodEmptyImagesPostgreSQLSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"0003_access.sql", "0010_product.sql"} {
+	for _, name := range []string{"0003_access.sql", "0010_product.sql", "0235_wechat_shop_products.sql", "0241_product_variants.sql"} {
 		sql, readErr := os.ReadFile(memberGridMigration(t, name))
 		if readErr != nil {
 			t.Fatal(readErr)

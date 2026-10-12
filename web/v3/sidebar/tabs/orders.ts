@@ -21,7 +21,7 @@ interface BackendOrderSnapshot {
   amount: { amount_minor: number; currency: string };
   status: string;
   provider: string;
-  items?: Array<{ product_code: string; product_name: string }>;
+  items?: Array<{ product_code: string; product_name: string; variant?: { name: string } }>;
 }
 
 function mapOrder(snapshot: BackendOrderSnapshot): SidebarOrderItem {
@@ -31,7 +31,7 @@ function mapOrder(snapshot: BackendOrderSnapshot): SidebarOrderItem {
     created_at: snapshot.provider === "external_history" ? (snapshot.external_history?.source_paid_at || "原时间未知") : snapshot.created_at,
     merchant_order_no: snapshot.merchant_order_no ?? "",
     product_code: line?.product_code ?? "",
-    product_name: line?.product_name ?? "",
+    product_name: line ? line.product_name + (line.variant ? " · " + line.variant.name : "") : "",
     amount_yuan: (amountMinor / 100).toFixed(2),
     currency: snapshot.amount?.currency ?? "",
     status: snapshot.status ?? "",

@@ -42,7 +42,8 @@ func (reader *TargetReader) ReadProductTarget(ctx context.Context, kind productp
 		if err != nil || local.Lifecycle == productport.LocalProductArchived {
 			return productport.ProductOption{}, ErrNotFound
 		}
-		return productport.ProductOption{ID: item.ID, Code: item.ProductCode, ProductType: productport.ProductOptionStandard, Name: item.Name, PriceMinor: item.PriceMinor, Currency: item.Currency, CoverURL: publicProductCardCover(item)}, nil
+		low, high := item.SalePriceRange()
+		return productport.ProductOption{VariantsEnabled: item.VariantsEnabled, MaxPriceMinor: high, ID: item.ID, Code: item.ProductCode, ProductType: productport.ProductOptionStandard, Name: item.Name, PriceMinor: low, Currency: item.Currency, CoverURL: publicProductCardCover(item)}, nil
 	case productport.ProductOptionServicePeriod:
 		item, err := reader.period.GetServicePeriodProduct(ctx, id)
 		if err != nil {
@@ -167,7 +168,7 @@ func (reader *TargetReader) ReadCheckoutProductWithin(ctx context.Context, kind 
 		if policyErr != nil {
 			return productport.CheckoutProduct{}, policyErr
 		}
-		return productport.CheckoutProduct{ID: item.ID, ProductType: kind, AlipayDisabled: disabled, Code: item.ProductCode, Name: item.Name, PriceMinor: item.PriceMinor, Currency: item.Currency, Version: item.Version, RequireMobile: level != "none", ContactCollectionLevel: level, Images: append([]string(nil), item.Images...), PostPurchaseAction: action}, nil
+		return productport.CheckoutProduct{VariantsEnabled: item.VariantsEnabled, Variants: item.Variants, ID: item.ID, ProductType: kind, AlipayDisabled: disabled, Code: item.ProductCode, Name: item.Name, PriceMinor: item.PriceMinor, Currency: item.Currency, Version: item.Version, RequireMobile: level != "none", ContactCollectionLevel: level, Images: append([]string(nil), item.Images...), PostPurchaseAction: action}, nil
 	case productport.ProductOptionServicePeriod:
 		item, err := reader.period.store.GetServicePeriodProductForUpdate(ctx, id)
 		if err != nil {

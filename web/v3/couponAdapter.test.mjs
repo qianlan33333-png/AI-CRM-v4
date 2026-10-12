@@ -31,6 +31,7 @@ assert.equal(crypto.createHash('sha256').update(donorRuntime).digest('hex'), 'a3
 // granting another test file direct donor access.
 if (process.env.AICRM_COUPON_TIMEZONE_PROBE === '1') {
   const calls = [];
+  const variantProbe = process.env.AICRM_COUPON_VARIANT_PROBE === '1';
   const dom = new JSDOM('<!doctype html><body data-page="couponForm"><main id="stage"><textarea id="coupon-target-refs"></textarea></main></body>', {
     url: 'https://test.invalid/admin/couponForm.html', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: new VirtualConsole(),
     resources: { interceptors: [requestInterceptor(async (request) => request.url.endsWith('/coupon_form_runtime.js') ? new Response(donorRuntime, { headers: { 'Content-Type': 'application/javascript' } }) : undefined)] },
@@ -41,7 +42,7 @@ if (process.env.AICRM_COUPON_TIMEZONE_PROBE === '1') {
         const method = String(init.method || (typeof input === 'string' ? 'GET' : input.method)).toUpperCase();
         if (url.pathname === '/assets/standard-components/coupon_form.html') return new Response(donorForm);
         if (url.pathname === '/assets/standard-components/coupon_styles.html') return new Response(donorStyle);
-        if (url.pathname.endsWith('/product-options')) return Response.json({ total: 1, items: [{ target_ref: 'standard_product:9', name: '测试商品', price_minor: 2, currency: 'CNY' }] });
+        if (url.pathname.endsWith('/product-options')) return Response.json({ total: 1, items: [{ target_ref: 'standard_product:9', name: '测试商品', price_minor: variantProbe ? 9900 : 2, variants_enabled: variantProbe, max_price_minor: variantProbe ? 99900 : 2, currency: 'CNY' }] });
         if (url.pathname === '/api/admin/coupons' && method === 'POST') {
           calls.push(JSON.parse(String(init.body)));
           return Response.json({ coupon: { id: 9 } }, { status: 201 });
@@ -67,7 +68,7 @@ if (process.env.AICRM_COUPON_TIMEZONE_PROBE === '1') {
     document.querySelector('[data-product-option="standard_product:9"]').click();
     document.querySelector('#confirmProductSelection').click();
     document.querySelector('#couponName').value = '时区验收券';
-    document.querySelector('#couponAmount').value = '0.01';
+    document.querySelector('#couponAmount').value = variantProbe ? '100' : '0.01';
     document.querySelector('#couponIssueLimit').value = '1';
     document.querySelector('#couponPerUserLimit').value = '1';
     document.querySelector('#couponClaimStart').value = '2026-09-08T10:00';
@@ -78,6 +79,11 @@ if (process.env.AICRM_COUPON_TIMEZONE_PROBE === '1') {
     for (let attempt = 0; attempt < 100 && calls.length !== 1; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(calls.length, 1, 'Coupon Host did not submit through its scoped write boundary');
     const body = calls[0];
+    if (variantProbe) {
+      assert.equal(body.discount_amount_total, 10000);
+      for (let attempt = 0; attempt < 100 && !document.querySelector('#selectedProductList').textContent.includes('¥99.00～¥999.00'); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.match(document.querySelector('#selectedProductList').textContent, /¥99.00～¥999.00/);
+    }
     process.stdout.write(JSON.stringify({
       claim_starts_at: body.claim_starts_at,
       claim_ends_at: body.claim_ends_at,
@@ -102,6 +108,8 @@ for (const timezone of ['UTC', 'America/Los_Angeles']) {
     use_ends_at: '2026-09-08T05:00:00.000Z',
   }, `TZ=${timezone} must submit the same Shanghai instants through the Coupon Host`);
 }
+const variantResult = spawnSync(process.execPath, [filePath], { env: { ...process.env, AICRM_COUPON_TIMEZONE_PROBE: '1', AICRM_COUPON_VARIANT_PROBE: '1' }, encoding: 'utf8' });
+assert.equal(variantResult.status, 0, `variant price eligibility: ${variantResult.stderr || variantResult.stdout}`);
 const pause = () => new Promise((resolve) => setTimeout(resolve, 15));
 async function waitFor(check, message) { for (let attempt = 0; attempt < 100; attempt += 1) { const value = check(); if (value) return value; await pause(); } throw new Error(message); }
 const calls = []; let createAttempts = 0; let unknownCreateAttempts = 0;

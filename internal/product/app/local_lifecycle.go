@@ -209,7 +209,13 @@ func (service *LocalProductLifecycleService) CopyLocalProduct(ctx context.Contex
 		}
 		copiedCode := copiedLocalProductCode(source.ProductCode, actorScope, normalized.IdempotencyKey)
 		copiedName := copiedLocalProductName(source.Name)
+		variants := append([]productport.Variant{}, source.Variants...)
+		for i := range variants {
+			variants[i].ID = 0
+			variants[i].Version = 0
+		}
 		created, createErr := service.store.Create(tx, productport.CreateCommand{
+			VariantsEnabled: &source.VariantsEnabled, Variants: &variants,
 			ProductCode:           copiedCode,
 			Name:                  copiedName,
 			Description:           source.Description,

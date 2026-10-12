@@ -302,7 +302,7 @@ func (s *Service) createCheckoutOrderWithin(ctx context.Context, command orderpo
 			command.ContactCollectionLevel = "none"
 		}
 	}
-	if !ready(s) || (!noPayment && command.Provider != domain.ProviderWeChatPay && command.Provider != domain.ProviderAlipay) || command.PayerCustomerID < 1 || command.BeneficiaryCustomerID < 1 || command.ProductID < 1 || command.ProductVersion < 1 || (!noPayment && command.UnitAmountMinor < 1) || command.Currency != "CNY" || command.CouponClaimID < 0 || !validPaymentProductType(command.ProductType, command.ServicePeriodDurationDays) || !validPostPurchaseAction(command.PostPurchaseAction) || !validPromotionContext(command.PromotionContext) || !validReferralActivityContext(command.ReferralActivityContext) || !validKey(command.IdempotencyKey) || !validKey(command.ActorScope) || !validContactCollection(command.ContactCollectionLevel, command.MobileE164, command.ShippingAddress) {
+	if command.Variant != nil && command.ProductType != "standard_product" || !command.Variant.Valid() || !ready(s) || (!noPayment && command.Provider != domain.ProviderWeChatPay && command.Provider != domain.ProviderAlipay) || command.PayerCustomerID < 1 || command.BeneficiaryCustomerID < 1 || command.ProductID < 1 || command.ProductVersion < 1 || (!noPayment && command.UnitAmountMinor < 1) || command.Currency != "CNY" || command.CouponClaimID < 0 || !validPaymentProductType(command.ProductType, command.ServicePeriodDurationDays) || !validPostPurchaseAction(command.PostPurchaseAction) || !validPromotionContext(command.PromotionContext) || !validReferralActivityContext(command.ReferralActivityContext) || !validKey(command.IdempotencyKey) || !validKey(command.ActorScope) || !validContactCollection(command.ContactCollectionLevel, command.MobileE164, command.ShippingAddress) {
 		return domain.Snapshot{}, orderport.ErrConflict
 	}
 	productID := command.ProductID
@@ -367,7 +367,7 @@ func (s *Service) createCheckoutOrderWithin(ctx context.Context, command orderpo
 		MerchantOrderNo: command.MerchantOrderNo, PayerCustomerID: &command.PayerCustomerID,
 		BeneficiaryCustomerID: &command.BeneficiaryCustomerID,
 		Amount:                domain.Money{AmountMinor: checkout.PayableAmountMinor, Currency: command.Currency},
-		Items:                 []domain.ItemSnapshot{{LineNo: 1, ProductID: &productID, ProductVersion: &productVersion, ProductCode: command.ProductCode, ProductName: command.ProductName, UnitAmountMinor: checkout.PayableAmountMinor, Quantity: 1, LineAmountMinor: checkout.PayableAmountMinor}},
+		Items:                 []domain.ItemSnapshot{{Variant: command.Variant.Clone(), LineNo: 1, ProductID: &productID, ProductVersion: &productVersion, ProductCode: command.ProductCode, ProductName: command.ProductName, UnitAmountMinor: checkout.PayableAmountMinor, Quantity: 1, LineAmountMinor: checkout.PayableAmountMinor}},
 		RecordOrigin:          domain.RecordOriginNative, EffectEligible: true, CreatedAt: createdAt,
 	}
 	order, err := domain.NewOrder(input)
@@ -858,7 +858,7 @@ func (s *Service) CustomerActivities(ctx context.Context, query orderport.Custom
 		}
 		names := make([]string, 0, len(snapshot.Items))
 		for _, item := range snapshot.Items {
-			names = append(names, item.ProductName)
+			names = append(names, item.DisplayName())
 		}
 		page.Items = append(page.Items, orderport.CustomerActivity{OrderID: snapshot.ID, Relationship: relationship, ProductNames: names,
 			Provider: snapshot.Provider, Status: snapshot.Status, Amount: snapshot.Amount, RefundedMinor: snapshot.RefundedMinor,

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/payment/domain"
 )
 
@@ -77,6 +78,8 @@ func MatchesCheckoutSessionBinding(token, binding string) bool {
 }
 
 type CreateCommand struct {
+	VariantID          int64 `json:",omitempty"`
+	VariantVersion     int64 `json:",omitempty"`
 	OrderID, ProductID int64
 	CouponClaimID      int64
 	ProductType        string
@@ -196,6 +199,7 @@ type CheckoutAbandoner interface {
 }
 
 type Handoff struct {
+	Variant *orderport.VariantSnapshot `json:"variant,omitempty"`
 	// AmountMinor and Currency are frozen Payment facts, not current catalog/coupon prices.
 	AmountMinor            int64
 	Currency               string

@@ -15,16 +15,17 @@ import (
 )
 
 type paymentContinuation struct {
-	OrderID       int64       `json:"order_id"`
-	MerchantOrder string      `json:"merchant_order_no"`
-	Provider      pd.Provider `json:"provider"`
-	Channel       pd.Channel  `json:"channel"`
-	Amount        int64       `json:"amount_minor"`
-	Currency      string      `json:"currency"`
-	ProductID     int64       `json:"product_id"`
-	ProductKind   string      `json:"product_kind"`
-	ProductName   string      `json:"product_name"`
-	Path          string      `json:"payment_path"`
+	Variant       *op.VariantSnapshot `json:"variant,omitempty"`
+	OrderID       int64               `json:"order_id"`
+	MerchantOrder string              `json:"merchant_order_no"`
+	Provider      pd.Provider         `json:"provider"`
+	Channel       pd.Channel          `json:"channel"`
+	Amount        int64               `json:"amount_minor"`
+	Currency      string              `json:"currency"`
+	ProductID     int64               `json:"product_id"`
+	ProductKind   string              `json:"product_kind"`
+	ProductName   string              `json:"product_name"`
+	Path          string              `json:"payment_path"`
 }
 
 func (s *Service) ContinuePayment(ctx context.Context, token string, orderID int64) (paymentContinuation, error) {
@@ -88,7 +89,7 @@ func (s *Service) continuationWithin(ctx context.Context, actor pp.SessionActor,
 	} else {
 		return paymentContinuation{}, p.ErrIneligible
 	}
-	return paymentContinuation{OrderID: o.ID, MerchantOrder: v.MerchantOrderNo, Provider: v.Provider, Channel: v.Channel, Amount: v.AmountMinor, Currency: v.Currency, ProductID: f.ProductID, ProductName: f.ProductName, ProductKind: kind, Path: path + "?resume_order=" + strconv.FormatInt(o.ID, 10)}, nil
+	return paymentContinuation{Variant: o.Items[0].Variant.Clone(), OrderID: o.ID, MerchantOrder: v.MerchantOrderNo, Provider: v.Provider, Channel: v.Channel, Amount: v.AmountMinor, Currency: v.Currency, ProductID: f.ProductID, ProductName: f.ProductName, ProductKind: kind, Path: path + "?resume_order=" + strconv.FormatInt(o.ID, 10)}, nil
 }
 
 func continuablePayment(v pd.Payment, o od.Snapshot, actor pp.SessionActor, ids []int64) bool {

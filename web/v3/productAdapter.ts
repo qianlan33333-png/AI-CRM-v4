@@ -1,3 +1,4 @@
+import { mountProductVariants, readProductVariants, syncProductVariants, lockProductVariants, type VariantConfiguration } from './productVariants';
 import { createFieldMappingEditor, type FieldMapping, type MappingField, type MappingPreview } from './fieldMappingEditor';
 // This is the only v3-owned browser seam for the byte-frozen Product UI.
 // It validates the authoritative lifecycle/sales projection, supplies Chinese
@@ -108,6 +109,7 @@ type ProductArchiveIntent = { key: string; body: string };
 const productArchiveIntents = new Map<string, ProductArchiveIntent>();
 
 type ProductSaveContext = {
+  variants?: VariantConfiguration;
   alipayEnabled?: boolean;
   contactCollectionLevel?: ContactCollectionLevel;
   productID?: number;
@@ -522,6 +524,9 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
       if (Object.prototype.hasOwnProperty.call(body, 'distribution_policy')) submittedDistributionPolicy = distributionPolicy(body.distribution_policy);
     } catch { /* the Product API validates malformed JSON */ }
   }
+  if (context?.variants && (method === 'POST' && url.pathname === '/api/v1/products' || method === 'PUT' && url.pathname === `/api/v1/products/${context.productID}`) && typeof nextInit?.body === 'string') {
+    nextInit = { ...nextInit, body: JSON.stringify({ ...JSON.parse(nextInit.body), ...context.variants }) };
+  }
   nextInit = withoutRetiredStockQuantity(url, method, nextInit);
   const response = await donorFetch(input, nextInit);
   if ((periodicMatch && (method === 'GET' || method === 'PUT')) || (periodicCollection && method === 'POST')) {
@@ -550,6 +555,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     const id = Number(url.pathname.split('/').pop());
     if (Number(saved.id) === id && Number.isSafeInteger(Number(saved.version))) {
       openedProductPayloads.set(id, saved);
+      if (context?.variants) syncProductVariants(saved);
       if (submittedDistributionPolicy) syncDistributionPolicyControls(saved.distribution_policy, submittedDistributionPolicy);
       if (context?.productID === id) { context.createdProductID = id; context.createdProduct = saved; }
     }
@@ -563,6 +569,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
         context.createdProductID = id;
         context.createdProduct = created;
         openedProductPayloads.set(id, created);
+        if (context?.variants) syncProductVariants(created);
         if (submittedDistributionPolicy) syncDistributionPolicyControls(created.distribution_policy, submittedDistributionPolicy);
       }
     } catch {
@@ -583,6 +590,11 @@ api.saveProduct = (input) => {
       return Promise.reject(new Error(`商品编码「${code}」已存在，请更换商品编码。`));
     }
   }
+  let variantConfig: VariantConfiguration | undefined;
+  try {
+    if (productPrefix() === 'pf' && distributionPolicyDimensionSelected() && openedProductPayloads.get(input.id || 0)?.source_kind !== 'wechat_shop') variantConfig = readProductVariants();
+  } catch (error) { return Promise.reject(error); }
+  if (variantConfig) input = { ...input, variantConfiguration: variantConfig } as typeof input;
   const alipayEnabled = currentAlipayEnabled();
   const level = currentContactCollectionLevel();
   // Include the level before fingerprinting so a changed selection is a new intent.
@@ -604,6 +616,7 @@ api.saveProduct = (input) => {
     ? { ...input, adminProjection: { ...input.adminProjection, status: creating ? 'active' : input.adminProjection.status, enabled: creating ? true : input.adminProjection.enabled, requireMobile: level !== 'none', contact_collection_level: level } as typeof input.adminProjection & { contact_collection_level: ContactCollectionLevel } }
     : input;
   const context: ProductSaveContext = {
+    variants: variantConfig,
     alipayEnabled,
     contactCollectionLevel: level,
     productID,
@@ -614,6 +627,7 @@ api.saveProduct = (input) => {
   };
   productSaveInFlight = (async () => {
     productSaveContext = context;
+    lockProductVariants(true);
     try {
       // External push is now its own legacy-parity command.  The frozen
       // product controller still carries its retired reference field, so do
@@ -665,6 +679,7 @@ api.saveProduct = (input) => {
       }
       throw error;
     } finally {
+      lockProductVariants(false);
       productSaveContext = undefined;
     }
   })();
@@ -2291,6 +2306,14 @@ const purchaseActionObserver = observeProductDocument(mountPurchaseActionControl
 mountPurchaseActionControls();
 const legacyParityPushObserver = observeProductDocument(mountLegacyParityPushPanel);
 mountLegacyParityPushPanel();
+function mountVariantControls(): void {
+  if (productPrefix() !== 'pf') return;
+  const route = productEditorRoute();
+  const snapshot = route ? openedProductPayloads.get(route.id) : undefined;
+  mountProductVariants(snapshot, !route || !!snapshot);
+}
+const variantsObserver = observeProductDocument(mountVariantControls);
+mountVariantControls();
 const alipayPolicyObserver = observeProductDocument(mountAlipayPolicyControls);
 mountAlipayPolicyControls();
 const distributionPolicyObserver = observeProductDocument(mountDistributionPolicyControls);

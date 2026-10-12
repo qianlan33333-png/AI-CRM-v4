@@ -198,7 +198,7 @@ func (s *Service) List(ctx context.Context, token string, q p.OrdersQuery) (p.Or
 			o := r.Order
 			v := p.OrderView{ID: o.ID, OrderNo: o.MerchantOrderNo, ProductNames: []string{}, Amount: o.Amount.AmountMinor, Currency: o.Amount.Currency, Provider: string(o.Provider), State: string(o.Status), RefundedMinor: o.RefundedMinor, TimeKind: "ordered", Time: &o.CreatedAt}
 			for _, it := range o.Items {
-				v.ProductNames = append(v.ProductNames, it.ProductName)
+				v.ProductNames = append(v.ProductNames, it.DisplayName())
 			}
 			if o.Provider == orderdomain.ProviderExternalHistory {
 				v.Time = nil

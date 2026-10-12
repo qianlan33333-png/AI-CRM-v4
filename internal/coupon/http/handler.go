@@ -495,7 +495,7 @@ func (h *Handler) productOptions(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 503, "unavailable")
 			return
 		}
-		out = append(out, map[string]any{"id": item.ID, "target_ref": prefix + ":" + strconv.FormatInt(int64(item.ID), 10), "name": item.Name, "title": item.Name, "product_type": prefix, "price_minor": item.PriceMinor, "price_cents": item.PriceMinor, "currency": "CNY"})
+		out = append(out, map[string]any{"id": item.ID, "target_ref": prefix + ":" + strconv.FormatInt(int64(item.ID), 10), "name": item.Name, "title": item.Name, "product_type": prefix, "price_minor": item.PriceMinor, "price_cents": item.PriceMinor, "variants_enabled": item.VariantsEnabled, "max_price_minor": item.MaxPriceMinor, "currency": "CNY"})
 	}
 	if page.Total < 0 || page.Limit != int32(limit) || page.Offset != int32(offset) {
 		writeError(w, 503, "unavailable")

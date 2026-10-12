@@ -76,7 +76,7 @@ func mustFrozenCouponPublicPage() *template.Template {
 		`{% for product in products %}`, `{{range .Products}}`,
 		`{{ product.title or product.name }}`, `{{.Name}}`,
 		`{{ "周期商品" if product.product_type == "service_period" else "普通商品" }}`, `{{.KindLabel}}`,
-		`{{ "%.2f"|format((product.amount_total or product.price_cents or 0) / 100) }}`, `{{printf "%.2f" (cny .PriceMinor)}}`,
+		`{{ "%.2f"|format((product.amount_total or product.price_cents or 0) / 100) }}`, `{{printf "%.2f" (cny .PriceMinor)}}{{if .PriceFrom}} 起{{end}}`,
 		`{% if not product.available %}`, `{{if not .Available}}`,
 		`{{ product.purchase_url if product.available else '#' }}`, `{{if .Available}}{{.URL}}{{else}}#{{end}}`,
 		`{{ "立即使用" if product.available else "暂不可售" }}`, `{{if .Available}}立即使用{{else}}暂不可售{{end}}`,

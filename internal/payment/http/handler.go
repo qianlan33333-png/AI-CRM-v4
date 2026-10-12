@@ -943,6 +943,8 @@ func (handler *Handler) checkout(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	var body struct {
+		VariantID              int64                            `json:"variant_id,omitempty"`
+		VariantVersion         int64                            `json:"variant_version,omitempty"`
 		ProductID              int64                            `json:"product_id,omitempty"`
 		CouponClaimID          int64                            `json:"coupon_claim_id,omitempty"`
 		ExpectedAmountMinor    *int64                           `json:"expected_amount_minor,omitempty"`
@@ -990,7 +992,7 @@ func (handler *Handler) checkout(writer http.ResponseWriter, request *http.Reque
 	if activityCookie, cookieErr := request.Cookie(paymentport.ReferralActivityCookieName); cookieErr == nil && validReferralActivityContext(activityCookie.Value) {
 		activityContext = activityCookie.Value
 	}
-	command := paymentport.CreateCommand{ProductID: body.ProductID, CouponClaimID: body.CouponClaimID, ExpectedAmountMinor: body.ExpectedAmountMinor, ProductType: body.ProductType, Provider: provider, Channel: body.Channel, MobileE164: body.MobileE164, ContactCollectionLevel: body.ContactCollectionLevel, ShippingAddress: paymentport.ShippingAddress{RecipientName: body.RecipientName, ProvinceCode: body.ProvinceCode, ProvinceName: body.ProvinceName, CityCode: body.CityCode, CityName: body.CityName, DistrictCode: body.DistrictCode, DistrictName: body.DistrictName, DetailAddress: body.DetailAddress}, BeneficiarySelection: body.BeneficiarySelection, SessionToken: cookie.Value, CheckoutSessionBinding: body.CheckoutSessionBinding, PromotionContext: body.PromotionContext, ReferralActivityContext: activityContext, ActorScope: "public-checkout", IdempotencyKey: idempotency}
+	command := paymentport.CreateCommand{VariantID: body.VariantID, VariantVersion: body.VariantVersion, ProductID: body.ProductID, CouponClaimID: body.CouponClaimID, ExpectedAmountMinor: body.ExpectedAmountMinor, ProductType: body.ProductType, Provider: provider, Channel: body.Channel, MobileE164: body.MobileE164, ContactCollectionLevel: body.ContactCollectionLevel, ShippingAddress: paymentport.ShippingAddress{RecipientName: body.RecipientName, ProvinceCode: body.ProvinceCode, ProvinceName: body.ProvinceName, CityCode: body.CityCode, CityName: body.CityName, DistrictCode: body.DistrictCode, DistrictName: body.DistrictName, DetailAddress: body.DetailAddress}, BeneficiarySelection: body.BeneficiarySelection, SessionToken: cookie.Value, CheckoutSessionBinding: body.CheckoutSessionBinding, PromotionContext: body.PromotionContext, ReferralActivityContext: activityContext, ActorScope: "public-checkout", IdempotencyKey: idempotency}
 	if localCheckout {
 		result, createErr := creator.CreateCheckout(request.Context(), command, handler.providerEnabled(routeProvider))
 		if createErr != nil {
@@ -1010,7 +1012,20 @@ func (handler *Handler) checkout(writer http.ResponseWriter, request *http.Reque
 		resultError(writer, err)
 		return
 	}
-	writeJSON(writer, http.StatusAccepted, map[string]any{"order_id": payment.OrderID, "merchant_order_no": payment.MerchantOrderNo, "payment_id": payment.ID, "status": payment.Status, "effect_id": payment.EffectID})
+	result := map[string]any{"order_id": payment.OrderID, "merchant_order_no": payment.MerchantOrderNo, "payment_id": payment.ID, "status": payment.Status, "effect_id": payment.EffectID}
+	if body.VariantID > 0 {
+		handoff, readErr := handler.app.GetCheckout(request.Context(), routeProvider, payment.MerchantOrderNo, cookie.Value)
+		if readErr != nil {
+			resultError(writer, readErr)
+			return
+		}
+		if handoff.Variant == nil {
+			writeError(writer, http.StatusServiceUnavailable, "unavailable")
+			return
+		}
+		result["variant"] = handoff.Variant
+	}
+	writeJSON(writer, http.StatusAccepted, result)
 }
 
 func validPromotionContext(value string) bool {
@@ -1053,6 +1068,9 @@ func (handler *Handler) checkoutStatus(writer http.ResponseWriter, request *http
 		return
 	}
 	result := map[string]any{"payment_id": handoff.PaymentID, "merchant_order_no": handoff.MerchantOrder, "provider": handoff.Provider, "channel": handoff.Channel, "status": handoff.Status, "ready": len(handoff.Payload) > 0, "amount_minor": handoff.AmountMinor, "currency": handoff.Currency}
+	if handoff.Variant != nil {
+		result["variant"] = handoff.Variant
+	}
 	if handoff.CheckoutRestartAllowed {
 		result["checkout_restart_allowed"] = true
 	}
@@ -1581,6 +1599,10 @@ func decodeJSON(writer http.ResponseWriter, request *http.Request, destination a
 }
 
 func resultError(writer http.ResponseWriter, err error) {
+	if errors.Is(err, productport.ErrVariantSelection) {
+		writeError(writer, http.StatusConflict, "variant_selection_changed")
+		return
+	}
 	switch {
 	case errors.Is(err, paymentport.ErrProviderDisabled):
 		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")

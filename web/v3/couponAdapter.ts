@@ -79,11 +79,14 @@ function createdID(payload: unknown): number {
   const id = Number(coupon.id ?? coupon.resource_id);
   return Number.isSafeInteger(id) && id > 0 ? id : 0;
 }
+const variantCouponPrices = new Map<string, string>();
 function normalizedCouponProduct(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const item = value as Json; const ref = String(item.target_ref || '');
   if (!ref) return value;
-  return { ...item, title: typeof item.title === 'string' ? item.title : String(item.name || '未命名商品'), product_type: ref.startsWith('service_period:') ? 'service_period' : ref.startsWith('standard_product:') ? 'standard_product' : 'unknown', price_cents: Number(item.price_cents ?? item.price_minor ?? 0), status: typeof item.status === 'string' && item.status ? item.status : '状态未提供' };
+  if (item.variants_enabled === true) variantCouponPrices.set(ref, `¥${(Number(item.price_minor) / 100).toFixed(2)}～¥${(Number(item.max_price_minor) / 100).toFixed(2)}`);
+  else variantCouponPrices.delete(ref);
+  return { ...item, title: typeof item.title === 'string' ? item.title : String(item.name || '未命名商品'), product_type: ref.startsWith('service_period:') ? 'service_period' : ref.startsWith('standard_product:') ? 'standard_product' : 'unknown', price_cents: Number(item.variants_enabled === true ? item.max_price_minor : item.price_cents ?? item.price_minor ?? 0), status: typeof item.status === 'string' && item.status ? item.status : '状态未提供' };
 }
 async function normalizeProductOptions(response: Response): Promise<Response> {
   if (!response.ok) return response;
@@ -474,10 +477,15 @@ async function executeDonorScript(): Promise<void> {
 }
 
 function hideTechnicalTargetReferences(): void {
+  document.querySelectorAll<HTMLInputElement>('[data-product-option]').forEach(input => {
+    const label = variantCouponPrices.get(input.dataset.productOption || "");
+    const amount = input.closest("label")?.lastElementChild;
+    if (label && amount && amount.textContent !== label) amount.textContent = label;
+  });
   document.querySelectorAll<HTMLElement>('#selectedProductList .coupon-selected-copy small').forEach((node) => {
     const before = node.textContent || '';
     const targetRef = before.match(/(?:standard_product|service_period):[1-9][0-9]*/)?.[0] || '';
-    const after = couponTargetsWithUnverifiedPrice.has(targetRef)
+    const after = variantCouponPrices.has(targetRef) ? before.replace(/\s*·\s*(?:standard_product|service_period):[1-9][0-9]*\s*·\s*¥[^\s]+\s*$/, ' · ' + variantCouponPrices.get(targetRef)) : couponTargetsWithUnverifiedPrice.has(targetRef)
       ? before.replace(/\s*·\s*(?:standard_product|service_period):[1-9][0-9]*\s*·\s*¥[^\s]+\s*$/, ' · 价格待核验')
       : before.replace(/\s*·\s*(?:standard_product|service_period):[1-9][0-9]*\s*·\s*/, ' · ');
     if (after !== before) node.textContent = after;
@@ -761,7 +769,7 @@ async function mountCouponEditor(): Promise<void> {
     ]);
     await installStyles(); installAdminAPI(); stage.innerHTML = contentFromDonor(raw, initial, id); removeCouponTimeZoneLabels(); await executeDonorScript(); captureCouponDateSnapshots(initial); hideTechnicalTargetReferences();
     const selected = document.getElementById('selectedProductList');
-    if (selected) new MutationObserver(hideTechnicalTargetReferences).observe(selected, { childList: true, subtree: true });
+    if (selected) new MutationObserver(hideTechnicalTargetReferences).observe(stage, { childList: true, subtree: true });
   } catch (error) {
     mounted = false; mountFailed = true; const message = error instanceof Error ? error.message : '标准优惠券表单加载失败'; const notice = document.createElement('div'); notice.setAttribute('role', 'alert'); notice.textContent = `${message}；未提交任何保存。`;
     const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = '重试加载'; retry.addEventListener('click', () => { mountFailed = false; notice.remove(); void mountCouponEditor(); }); (retry as HTMLButtonElement & { __dcBound?: boolean }).__dcBound = true; notice.append(' ', retry); stage.prepend(notice);

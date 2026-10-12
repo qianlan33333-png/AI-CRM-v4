@@ -57,19 +57,20 @@ type rowScanner interface {
 	Scan(...any) error
 }
 
-const productColumns = `id,product_code,name,description,price_minor,currency,images,created_by,created_at,updated_at,version,legacy_admin_projection,source_kind`
+const productColumns = `id,product_code,name,description,price_minor,currency,images,created_by,created_at,updated_at,version,legacy_admin_projection,source_kind,variants_enabled,COALESCE((SELECT jsonb_agg(jsonb_build_object('id',v.id,'name',v.name,'description',v.description,'attributes',v.attributes,'price_minor',v.price_minor,'version',v.version) ORDER BY v.position,v.id) FROM product_variants v WHERE v.product_id=products.id AND v.removed_at IS NULL),'[]'::jsonb)`
 
 func scanProduct(row rowScanner) (productport.Product, error) {
 	var (
-		product    productport.Product
-		imagesRaw  []byte
-		projection []byte
+		product     productport.Product
+		imagesRaw   []byte
+		projection  []byte
+		variantsRaw []byte
 	)
 	err := row.Scan(
 		&product.ID, &product.ProductCode, &product.Name, &product.Description,
 		&product.PriceMinor, &product.Currency,
 		&imagesRaw, &product.CreatedBy, &product.CreatedAt, &product.UpdatedAt,
-		&product.Version, &projection, &product.SourceKind,
+		&product.Version, &projection, &product.SourceKind, &product.VariantsEnabled, &variantsRaw,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return productport.Product{}, productport.ErrProductReadNotFound
@@ -77,7 +78,7 @@ func scanProduct(row rowScanner) (productport.Product, error) {
 	if err != nil {
 		return productport.Product{}, mapDatabaseError(err)
 	}
-	if json.Unmarshal(imagesRaw, &product.Images) != nil || !json.Valid(projection) {
+	if json.Unmarshal(variantsRaw, &product.Variants) != nil || json.Unmarshal(imagesRaw, &product.Images) != nil || !json.Valid(projection) {
 		return productport.Product{}, productport.ErrProductReadUnavailable
 	}
 	product.LegacyAdminProjection = append(json.RawMessage(nil), projection...)
@@ -247,7 +248,7 @@ func (r *Repository) ListProductOptions(ctx context.Context, query productport.P
 	limitPlaceholder := len(args) + 1
 	offsetPlaceholder := len(args) + 2
 	args = append(args, query.Limit, query.Offset)
-	rows, err := tx.Query(ctx, `SELECT id,product_code,name,price_minor,currency,CASE WHEN `+servicePeriodStatusSQL()+` THEN 'service_period' ELSE 'standard' END FROM products WHERE `+whereSQL+` ORDER BY id LIMIT $`+itoa(limitPlaceholder)+` OFFSET $`+itoa(offsetPlaceholder), args...)
+	rows, err := tx.Query(ctx, `SELECT id,product_code,name,CASE WHEN variants_enabled THEN COALESCE((SELECT min(price_minor) FROM product_variants v WHERE v.product_id=products.id AND v.removed_at IS NULL),0) ELSE price_minor END,currency,variants_enabled,CASE WHEN variants_enabled THEN COALESCE((SELECT max(price_minor) FROM product_variants v WHERE v.product_id=products.id AND v.removed_at IS NULL),0) ELSE price_minor END,CASE WHEN `+servicePeriodStatusSQL()+` THEN 'service_period' ELSE 'standard' END FROM products WHERE `+whereSQL+` ORDER BY id LIMIT $`+itoa(limitPlaceholder)+` OFFSET $`+itoa(offsetPlaceholder), args...)
 	if err != nil {
 		return productport.ProductOptionPage{}, mapDatabaseError(err)
 	}
@@ -255,7 +256,7 @@ func (r *Repository) ListProductOptions(ctx context.Context, query productport.P
 	items := make([]productport.ProductOption, 0)
 	for rows.Next() {
 		var item productport.ProductOption
-		if err := rows.Scan(&item.ID, &item.Code, &item.Name, &item.PriceMinor, &item.Currency, &item.ProductType); err != nil {
+		if err := rows.Scan(&item.ID, &item.Code, &item.Name, &item.PriceMinor, &item.Currency, &item.VariantsEnabled, &item.MaxPriceMinor, &item.ProductType); err != nil {
 			return productport.ProductOptionPage{}, mapDatabaseError(err)
 		}
 		items = append(items, item)
@@ -372,7 +373,10 @@ func (r *Repository) get(ctx context.Context, id productport.ID, forUpdate bool,
 		query += ` AND ` + statusSQL
 	}
 	if forUpdate {
-		query += ` FOR UPDATE`
+		var locked int64
+		if err := tx.QueryRow(ctx, `SELECT id FROM products WHERE id=$1 FOR UPDATE`, id).Scan(&locked); err != nil {
+			return productport.Product{}, mapDatabaseError(err)
+		}
 	}
 	return scanProduct(tx.QueryRow(ctx, query, int64(id)))
 }
@@ -389,10 +393,23 @@ func (r *Repository) Create(ctx context.Context, command productport.CreateComma
 	if err != nil {
 		return productport.Product{}, ErrInvalid
 	}
-	return scanProduct(tx.QueryRow(ctx, `INSERT INTO products (product_code,name,description,price_minor,currency,stock_quantity,images,created_by,created_at,updated_at,version,legacy_admin_projection)
-		VALUES($1,$2,$3,$4,$5,0,$6,$7,$8,$8,1,$9) RETURNING `+productColumns,
+	enabled := command.VariantsEnabled != nil && *command.VariantsEnabled
+	for _, v := range variantsInput(command.Variants) {
+		if v.ID != 0 {
+			return productport.Product{}, ErrInvalid
+		}
+	}
+	product, err := scanProduct(tx.QueryRow(ctx, `INSERT INTO products (product_code,name,description,price_minor,currency,stock_quantity,images,created_by,created_at,updated_at,version,legacy_admin_projection,variants_enabled)
+ VALUES($1,$2,$3,$4,$5,0,$6,$7,$8,$8,1,$9,$10) RETURNING `+productColumns,
 		command.ProductCode, command.Name, command.Description, command.PriceMinor, command.Currency,
-		images, command.Actor, now.UTC(), command.LegacyAdminProjection))
+		images, command.Actor, now.UTC(), command.LegacyAdminProjection, enabled))
+	if err != nil {
+		return productport.Product{}, err
+	}
+	if err = r.saveVariants(ctx, product.ID, command.Variants, now); err != nil {
+		return productport.Product{}, err
+	}
+	return r.Get(ctx, product.ID)
 }
 
 // ImportDefinition writes a migration-approved local product definition using
@@ -479,9 +496,16 @@ func (r *Repository) Update(ctx context.Context, command productport.UpdateComma
 	if err != nil {
 		return productport.Product{}, ErrInvalid
 	}
-	return scanProduct(tx.QueryRow(ctx, `UPDATE products SET name=$2,description=$3,price_minor=$4,currency=$5,images=$6,legacy_admin_projection=$7,updated_at=$8,version=version+1 WHERE id=$1 AND version=$9 RETURNING `+productColumns,
+	product, err := scanProduct(tx.QueryRow(ctx, `UPDATE products SET name=$2,description=$3,price_minor=$4,currency=$5,images=$6,legacy_admin_projection=$7,updated_at=$8,version=version+1,variants_enabled=COALESCE($10,variants_enabled) WHERE id=$1 AND version=$9 RETURNING `+productColumns,
 		int64(command.ID), command.Name, command.Description, command.PriceMinor, command.Currency,
-		images, command.LegacyAdminProjection, now.UTC(), command.ExpectedVersion))
+		images, command.LegacyAdminProjection, now.UTC(), command.ExpectedVersion, command.VariantsEnabled))
+	if err != nil {
+		return productport.Product{}, err
+	}
+	if err = r.saveVariants(ctx, product.ID, command.Variants, now); err != nil {
+		return productport.Product{}, err
+	}
+	return r.Get(ctx, product.ID)
 }
 
 func (r *Repository) UpdateLocalProductLifecycle(ctx context.Context, update productapp.LocalProductLifecycleStoreUpdate, now time.Time) (productport.Product, error) {

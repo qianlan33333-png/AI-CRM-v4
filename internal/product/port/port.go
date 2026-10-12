@@ -20,13 +20,15 @@ var (
 type ID int64
 
 type Product struct {
-	SourceKind  string `json:"source_kind,omitempty"`
-	ID          ID     `json:"id"`
-	ProductCode string `json:"product_code"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	PriceMinor  int64  `json:"price_minor"`
-	Currency    string `json:"currency"`
+	VariantsEnabled bool      `json:"variants_enabled,omitempty"`
+	Variants        []Variant `json:"variants,omitempty"`
+	SourceKind      string    `json:"source_kind,omitempty"`
+	ID              ID        `json:"id"`
+	ProductCode     string    `json:"product_code"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description"`
+	PriceMinor      int64     `json:"price_minor"`
+	Currency        string    `json:"currency"`
 	// StockQuantity is retained only to decode old idempotency snapshots.
 	StockQuantity         int32                 `json:"-"`
 	Images                []string              `json:"images"`
@@ -71,6 +73,8 @@ func DefaultDistributionPolicy() DistributionPolicy {
 }
 
 type CreateCommand struct {
+	VariantsEnabled                                          *bool      `json:",omitempty"`
+	Variants                                                 *[]Variant `json:",omitempty"`
 	ProductCode, Name, Description, Currency, IdempotencyKey string
 	PriceMinor                                               int64
 	// Deprecated: accepted for source compatibility; Product commands ignore it.
@@ -82,6 +86,8 @@ type CreateCommand struct {
 }
 
 type UpdateCommand struct {
+	VariantsEnabled                             *bool      `json:",omitempty"`
+	Variants                                    *[]Variant `json:",omitempty"`
 	ID                                          ID
 	ExpectedVersion                             int64
 	Name, Description, Currency, IdempotencyKey string
