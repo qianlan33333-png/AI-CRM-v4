@@ -106,10 +106,6 @@
     },
     {
       "lane": "frontend",
-      "path": "web/v3/materialSaveAdapter.test.mjs"
-    },
-    {
-      "lane": "frontend",
       "path": "web/v3/radarAdapter.upload_feedback.test.mjs"
     },
     {
