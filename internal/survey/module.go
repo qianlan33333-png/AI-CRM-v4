@@ -56,6 +56,13 @@ func (m *ModuleRegistration) Readiness(ctx context.Context, pool *pgxpool.Pool) 
 		return errors.New("survey schema is not ready")
 	}
 	var identitySubjectColumnReady bool
+	var redemptionReady bool
+	if err = pool.QueryRow(ctx, `SELECT to_regclass(current_schema() || '.survey_redemption_codes') IS NOT NULL`).Scan(&redemptionReady); err != nil {
+		return err
+	}
+	if !redemptionReady {
+		return errors.New("survey redemption schema is not ready")
+	}
 	err = pool.QueryRow(ctx, `SELECT EXISTS(
 		SELECT 1 FROM information_schema.columns
 		WHERE table_schema=current_schema()

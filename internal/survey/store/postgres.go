@@ -531,7 +531,7 @@ func (r *Repository) FindSubmissionByKey(ctx context.Context, questionnaireID su
 		return surveyport.Submission{}, false, mapError(err)
 	}
 	if string(existingPayload) != string(payloadDigest[:]) {
-		return surveyport.Submission{}, false, surveyport.ErrConflict
+		return surveyport.Submission{}, false, &surveyport.FieldError{Code: "submission_payload_conflict", Message: "提交内容已变化，请重新提交"}
 	}
 	stored, err := r.GetSubmission(ctx, surveyport.ID(id))
 	return stored, true, err
@@ -597,6 +597,20 @@ func (r *Repository) CreateSubmission(ctx context.Context, input surveyapp.Persi
 	}
 	if _, err = t.Exec(ctx, `INSERT INTO survey_result_tokens(submission_id,token_digest,created_at) VALUES($1,$2,$3)`, submissionID, input.TokenDigest[:], input.Now); err != nil {
 		return surveyport.Submission{}, false, mapError(err)
+	}
+	for _, question := range input.Questionnaire.Questions {
+		if question.Type != surveyport.QuestionRedemptionCode {
+			continue
+		}
+		code := ""
+		for _, answer := range input.Command.Answers {
+			if answer.QuestionID == question.ID {
+				code = answer.TextValue
+			}
+		}
+		if err = r.ConsumeRedemptionCode(ctx, input.Questionnaire.ID, question.ID, code, surveyport.ID(submissionID)); err != nil {
+			return surveyport.Submission{}, false, err
+		}
 	}
 	for _, answer := range input.Answers {
 		var encrypted []byte

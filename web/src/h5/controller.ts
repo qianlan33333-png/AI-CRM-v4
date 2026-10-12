@@ -1,3 +1,4 @@
+import { showSurveyFieldDialog } from '../../v3/shared/ui/surveyFieldDialog';
 import { PageBase, type Vals } from '../shared/ui/runtime';
 import {
   completionAction,
@@ -30,7 +31,7 @@ type V3SurveySubmissionAnswer = SurveyPublicSubmissionAnswer;
 
 const validID = (value: number): boolean => Number.isSafeInteger(value) && value > 0;
 const validToken = (value: string): boolean => /^[A-Za-z0-9_-]{43}$/.test(value);
-const SUPPORTED_TYPES = ['single_choice', 'multi_choice', 'textarea', 'mobile'];
+const SUPPORTED_TYPES = ['single_choice', 'multi_choice', 'textarea', 'mobile', 'redemption_code'];
 
 type SubmissionResumeDraft = {
   schema: 1;
@@ -239,7 +240,7 @@ export class H5Controller extends PageBase {
     for (const input of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('#screen input[data-text-question-id], #screen textarea[data-text-question-id]')) {
       const question = questions.get(Number(input.dataset.textQuestionId));
       if (!question || !this.supported(question) ||
-          (!['mobile', 'textarea'].includes(question.type) && !this.selectedOther(question))) continue;
+          (!['mobile', 'textarea', 'redemption_code'].includes(question.type) && !this.selectedOther(question))) continue;
       if (input.value !== (this.textAnswers.get(question.id) || '')) {
         this.textAnswers.set(question.id, input.value);
         changed = true;
@@ -287,7 +288,7 @@ export class H5Controller extends PageBase {
       }
       for (const [id] of draft.textAnswers) {
         const question = questions.get(id);
-        if (!question || textIDs.has(id) || (!['textarea', 'mobile'].includes(question.type) &&
+        if (!question || textIDs.has(id) || (!['textarea', 'mobile', 'redemption_code'].includes(question.type) &&
             !this.selectedOther(question, new Map(draft.answers).get(id) || []))) {
           this.clearResumeDraft(); return null;
         }
@@ -366,7 +367,7 @@ export class H5Controller extends PageBase {
 		  (question.required && question.minimum_selections === 0) || (question.type === 'single_choice' && question.maximum_selections !== 1))) {
         throw new Error('问卷题目超出当前单选/多选契约');
       }
-	  if (['textarea', 'mobile'].includes(question.type) && question.options.length) throw new Error('输入题不应包含选项');
+	  if (['textarea', 'mobile', 'redemption_code'].includes(question.type) && question.options.length) throw new Error('输入题不应包含选项');
       const options = new Set<number>();
       for (const option of question.options) {
         if (!validID(option.id) || options.has(option.id) || typeof option.option_text !== 'string' || !option.option_text) throw new Error('问卷选项响应不完整');
@@ -421,9 +422,10 @@ export class H5Controller extends PageBase {
 
   private questionError(question: V3SurveyQuestion): string {
     if (!this.supported(question)) return '';
-    if (question.type === 'textarea' || question.type === 'mobile') {
+    if (question.type === 'textarea' || question.type === 'mobile' || question.type === 'redemption_code') {
       const value = this.textAnswers.get(question.id) || '';
       if (!value && !question.required) return '';
+      if (question.type === 'redemption_code' && !value.trim()) return '请输入兑换码';
       if (!value || question.required && !value.trim()) return `「${question.title}」请填写`;
       if (question.type === 'mobile' && !/^1[3-9][0-9]{9}$/.test(value)) return `「${question.title}」请输入11位中国大陆手机号`;
       const length = [...value].length;
@@ -448,8 +450,10 @@ export class H5Controller extends PageBase {
     if (!this.definition || this.submitting || this.submitted) return;
     if (this.definitionStale) { this.refresh(true); return; }
     this.captureVisibleText();
-    this.error = this.definition.questions.map((question) => this.questionError(question)).find(Boolean) || '';
-    if (this.error) { this.refresh(true); return; }
+    const invalid = this.definition.questions.find(question => this.questionError(question));
+    this.error = invalid ? this.questionError(invalid) : '';
+    if (this.error) { if (invalid) this.questionIndex = this.definition.questions.indexOf(invalid); this.refresh(true); if (invalid?.type === 'redemption_code') showSurveyFieldDialog(this.error, invalid.id); return; }
+    let fieldFeedback: { message: string; id?: number } | undefined;
     const answers: V3SurveySubmissionAnswer[] = this.definition.questions
       .filter((question) => this.supported(question) && ((this.answers.get(question.id) || []).length > 0 || (this.textAnswers.get(question.id) || '') !== ''))
       .map((question) => ({ question_id: question.id, option_ids: [...(this.answers.get(question.id) || [])], text_value: this.textAnswers.get(question.id) || undefined }));
@@ -472,6 +476,14 @@ export class H5Controller extends PageBase {
         if (!afterAuthorization) this.resumeAuthorization();
         else this.authorizationRetryNotice();
       }
+      else if (error instanceof ApiError && error.details && typeof error.details === 'object' &&
+               (String((error.details as { code?: string }).code).startsWith('redemption_code_') || (error.details as { code?: string }).code === 'submission_payload_conflict')) {
+        const field = error.details as { message?: string; question_id?: number };
+        this.error = field.message || '提交未完成，请检查后重试';
+        fieldFeedback = { message: this.error, id: field.question_id };
+        const index = this.definition.questions.findIndex(question => question.id === field.question_id);
+        if (index >= 0) this.questionIndex = index;
+      }
       else if (error instanceof ApiError && error.status === 409 &&
                ((error.details as { code?: unknown } | null)?.code === 'definition_version_conflict' ||
                 (error.details as { error?: unknown } | null)?.error === 'definition_version_conflict')) {
@@ -482,6 +494,7 @@ export class H5Controller extends PageBase {
     } finally {
       this.submitting = false;
       this.refresh(true);
+      if (fieldFeedback) showSurveyFieldDialog(fieldFeedback.message, fieldFeedback.id);
     }
   }
 
@@ -554,15 +567,15 @@ export class H5Controller extends PageBase {
         : '后端能力未就绪：当前页面没有可用的报名、支付、续费、二维码或完成状态契约；未执行任何外部操作。',
       questions: visible.map((question) => {
         const supported = this.supported(question);
-        const isText = question.type === 'textarea' || question.type === 'mobile';
+        const isText = question.type === 'textarea' || question.type === 'mobile' || question.type === 'redemption_code';
         const other = this.selectedOther(question);
         return {
           id: question.id, title: question.title, required: question.required ? '（必答）' : '（选答）',
           supported, unsupported: !supported,
           hasOther: !!other, otherPlaceholder: other?.other_placeholder || '请补充其他说明',
-          isText, isMobile: question.type === 'mobile', isTextarea: question.type === 'textarea', isChoice: !isText, inputType: question.type === 'mobile' ? 'tel' : 'text', inputValue: this.textAnswers.get(question.id) || '', placeholder: question.type === 'mobile' ? '请输入11位中国大陆手机号' : question.placeholder_text || '请输入', input: (event: Event) => this.setText(question, event),
+          isText, isRedemption: question.type === 'redemption_code', isMobile: question.type === 'mobile', isTextarea: question.type === 'textarea', isChoice: !isText, inputType: question.type === 'mobile' ? 'tel' : 'text', inputValue: this.textAnswers.get(question.id) || '', placeholder: question.type === 'mobile' ? '请输入11位中国大陆手机号' : question.placeholder_text || '请输入', input: (event: Event) => this.setText(question, event),
           hint: !supported ? '当前端不支持该题型，本题不参与作答与提交'
-            : question.type === 'single_choice' ? '单选' : question.type === 'multi_choice' ? `多选，限选 ${question.maximum_selections} 项` : question.type === 'mobile' ? '11位中国大陆手机号' : '文本回答',
+            : question.type === 'single_choice' ? '单选' : question.type === 'multi_choice' ? `多选，限选 ${question.maximum_selections} 项` : question.type === 'mobile' ? '11位中国大陆手机号' : question.type === 'redemption_code' ? '兑换码仅在提交时验证，只能使用一次' : '文本回答',
           options: supported && !isText ? question.options.map((option) => {
             const selected = (this.answers.get(question.id) || []).includes(option.id);
             return { id: option.id, text: option.option_text, selected, mark: selected ? '✓' : '○',

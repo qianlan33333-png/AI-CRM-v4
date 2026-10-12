@@ -112,6 +112,7 @@ function formatQuestionType(type) {
   if (type === 'multi_choice') return '多选题';
   if (type === 'textarea') return '文本题';
   if (type === 'mobile') return '手机号题';
+  if (type === 'redemption_code') return '兑换码';
   return type || '题目';
 }
 
@@ -334,15 +335,15 @@ function createQuestion(type = 'single_choice', question = {}, index = 0) {
     id: question.id ?? null,
     local_key: question.local_key || nextLocalKey('question'),
     type: normalizedType,
-    title: question.title || '',
+    title: question.title || (normalizedType === 'redemption_code' ? '兑换码' : ''),
     placeholder_text: question.placeholder_text || '',
 
     sidebar_profile_field: normalizeSidebarProfileField(question.sidebar_profile_field),
     assessment_template_id: question.assessment_template_id || '',
     assessment_template_name: question.assessment_template_name || '',
-    required: Boolean(question.required),
+    required: normalizedType === 'redemption_code' || Boolean(question.required),
     sort_order: question.sort_order ?? (index + 1),
-    options: ['textarea', 'mobile'].includes(normalizedType)
+    options: ['textarea', 'mobile', 'redemption_code'].includes(normalizedType)
       ? []
       : (question.options || []).map((option, optionIndex) => createOption(option, optionIndex)).length
         ? (question.options || []).map((option, optionIndex) => createOption(option, optionIndex))
@@ -483,10 +484,10 @@ function serializePayload(options = {}) {
         // V1 编辑器内部用 1-based 展示顺序；V2 Survey 写契约要求严格 0-based 连续序号。
         sort_order: index,
       };
-      if (['textarea', 'mobile'].includes(question.type)) {
+      if (['textarea', 'mobile', 'redemption_code'].includes(question.type)) {
         payload.placeholder_text = question.placeholder_text || '';
       }
-      if (!['textarea', 'mobile'].includes(question.type)) {
+      if (!['textarea', 'mobile', 'redemption_code'].includes(question.type)) {
         payload.options = question.options.map((option, optionIndex) => ({
           option_text: option.option_text,
           score: Number(option.score || 0),
@@ -838,6 +839,8 @@ function renderPreview() {
       {
         const optionPreview = question.type === 'textarea'
           ? `<div class="option-pill">${escapeHtml(question.placeholder_text || '多行文本输入')}</div>`
+          : question.type === 'redemption_code'
+            ? '<div class="option-pill">请输入兑换码，提交时验证</div>'
           : question.type === 'mobile'
             ? `<div class="option-pill">${escapeHtml(question.placeholder_text || '请输入手机号')}</div>`
             : (question.options || []).map((option) => `
@@ -963,7 +966,7 @@ function renderQuestionnaireInspector() {
 function renderQuestionInspector(question) {
   inspectorTitleEl.textContent = formatQuestionType(question.type);
   inspectorSubtitleEl.textContent = '编辑题目内容、选项与分值。';
-  const optionsHtml = ['textarea', 'mobile'].includes(question.type)
+  const optionsHtml = ['textarea', 'mobile', 'redemption_code'].includes(question.type)
     ? ''
     : (question.options || []).map((option, index) => {
         const otherMaxLength = normalizeOtherMaxLength(option.other_max_length);
@@ -1024,14 +1027,14 @@ function renderQuestionInspector(question) {
       </div>
       <label class="field">题型
         <select id="question-type">
-          ${'<option value="single_choice">单选题</option><option value="multi_choice">多选题</option><option value="textarea">文本题</option><option value="mobile">手机号题</option>'}
+          ${'<option value="single_choice">单选题</option><option value="multi_choice">多选题</option><option value="textarea">文本题</option><option value="mobile">手机号题</option><option value="redemption_code">兑换码</option>'}
         </select>
       </label>
       <label class="field">${'题目标题'}
         ${`<input id="question-title" type="text" value="${escapeHtml(question.title)}">`}
       </label>
 
-      <label class="field${['textarea', 'mobile'].includes(question.type) ? '' : ' hidden'}" id="question-placeholder-field">提示文字
+      <label class="field${['textarea', 'mobile', 'redemption_code'].includes(question.type) ? '' : ' hidden'}" id="question-placeholder-field">提示文字
         <input
           id="question-placeholder-text"
           type="text"
@@ -1054,7 +1057,7 @@ function renderQuestionInspector(question) {
       </label>
       <p>用户填什么就同步什么；多个题目映射同一字段时，后填写覆盖前填写。</p>
     </section>
-    <section class="config-group${['textarea', 'mobile'].includes(question.type) ? ' hidden' : ''}" id="question-options-group">
+    <section class="config-group${['textarea', 'mobile', 'redemption_code'].includes(question.type) ? ' hidden' : ''}" id="question-options-group">
       <div class="config-head">
         <div><h3>选项</h3></div>
         <button id="add-option-btn" type="button" class="btn secondary">添加选项</button>
@@ -1063,6 +1066,8 @@ function renderQuestionInspector(question) {
     </section>
   `;
   inspectorBodyEl.querySelector('#question-type').value = question.type;
+  inspectorBodyEl.querySelector('#question-required').disabled = question.type === 'redemption_code';
+  inspectorBodyEl.querySelector('#question-sidebar-profile-field').closest('.config-group').classList.toggle('hidden', question.type === 'redemption_code');
 
   inspectorBodyEl.querySelector('#question-title').addEventListener('input', (event) => {
     question.title = event.target.value;
@@ -1084,8 +1089,10 @@ function renderQuestionInspector(question) {
     renderPreview();
   });
   inspectorBodyEl.querySelector('#question-type').addEventListener('change', (event) => {
+    if (event.target.value === 'redemption_code' && state.questionnaire.questions.some(item => item !== question && item.type === 'redemption_code')) { showToast('每份问卷最多一个兑换码字段', true); event.target.value = question.type; return; }
     question.type = event.target.value;
-    if (['textarea', 'mobile'].includes(question.type)) {
+    if (question.type === 'redemption_code') { question.required = true; question.sidebar_profile_field = ''; }
+    if (['textarea', 'mobile', 'redemption_code'].includes(question.type)) {
       question.options = [];
     } else if (!question.options.length) {
       question.options = [createOption({}, 0)];
@@ -1134,7 +1141,7 @@ function renderQuestionInspector(question) {
   inspectorBodyEl.querySelectorAll('.remove-option-btn').forEach((button) => {
     button.addEventListener('click', () => {
       question.options = question.options.filter((item) => item.local_key !== button.dataset.optionKey);
-      if (!question.options.length && !['textarea', 'mobile'].includes(question.type)) {
+      if (!question.options.length && !['textarea', 'mobile', 'redemption_code'].includes(question.type)) {
         question.options = [createOption({}, 0)];
       }
       renderWorkspace();
@@ -1336,6 +1343,7 @@ function renderWorkspace() {
 }
 
 function addQuestion(type) {
+  if (type === 'redemption_code' && state.questionnaire.questions.some(item => item.type === type)) { showToast('每份问卷最多一个兑换码字段', true); return; }
   const questionSeed = {};
   const question = createQuestion(type, questionSeed, state.questionnaire.questions.length);
   state.questionnaire.questions.push(question);
@@ -1355,7 +1363,7 @@ function addRule() {
 
 function validateOtherOptionsBeforeSave() {
   (state.questionnaire?.questions || []).forEach((question, questionIndex) => {
-    if (['textarea', 'mobile'].includes(question.type)) return;
+    if (['textarea', 'mobile', 'redemption_code'].includes(question.type)) return;
     const title = question.title || `题目 ${questionIndex + 1}`;
     const otherOptions = (question.options || []).filter((option) => Boolean(option.is_other));
     if (otherOptions.length > 1) {
@@ -1503,3 +1511,5 @@ Promise.all(bootTasks).then(async () => {
   showToast(error.message || '页面初始化失败，请刷新后重试', true);
   renderWorkspace();
 });
+
+document.getElementById('add-redemption')?.addEventListener('click', () => addQuestion('redemption_code'));

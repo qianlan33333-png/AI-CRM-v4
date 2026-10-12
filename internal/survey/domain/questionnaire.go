@@ -41,7 +41,14 @@ func ValidateQuestionnaire(value surveyport.Questionnaire) error {
 		return ErrInvalidQuestionnaire
 	}
 	seenQuestionIDs := map[surveyport.ID]struct{}{}
+	redemptionCount := 0
 	for index, question := range value.Questions {
+		if question.Type == surveyport.QuestionRedemptionCode {
+			redemptionCount++
+			if redemptionCount > 1 {
+				return ErrInvalidQuestionnaire
+			}
+		}
 		if question.SortOrder != index || ValidateQuestion(question, value.Mode) != nil {
 			return ErrInvalidQuestionnaire
 		}
@@ -114,6 +121,11 @@ func ValidateQuestion(value surveyport.Question, mode surveyport.QuestionnaireMo
 		}
 	case surveyport.QuestionMobile:
 		if len(value.Options) != 0 || value.Validation.MinimumSelections != nil || value.Validation.MaximumSelections != nil || value.Validation.MinimumLength != nil || value.Validation.MaximumLength != nil {
+			return ErrInvalidQuestion
+		}
+	case surveyport.QuestionRedemptionCode:
+		if mode != surveyport.ModeSurvey || len(value.Options) != 0 || value.SidebarProfileField != "" ||
+			value.Validation != (surveyport.Validation{}) || value.Type == surveyport.QuestionRedemptionCode && !value.Required {
 			return ErrInvalidQuestion
 		}
 	default:
@@ -262,6 +274,10 @@ func validateAnswer(question surveyport.Question, answer surveyport.SubmissionAn
 			return nil
 		}
 		if !mobilePattern.MatchString(answer.TextValue) {
+			return ErrInvalidAnswer
+		}
+	case surveyport.QuestionRedemptionCode:
+		if len(answer.OptionIDs) != 0 || strings.TrimSpace(answer.TextValue) == "" || !utf8.ValidString(answer.TextValue) || utf8.RuneCountInString(answer.TextValue) > MaximumTextLength {
 			return ErrInvalidAnswer
 		}
 	default:

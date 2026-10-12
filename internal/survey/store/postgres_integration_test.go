@@ -1238,7 +1238,7 @@ func surveyIntegrationPool(t *testing.T) (*pgxpool.Pool, func()) {
 	if !ok {
 		t.Fatal("locate integration test")
 	}
-	for _, migrationName := range []string{"0002_identity.sql", "0003_access.sql", "0018_survey.sql", "0038_survey_oauth_phone_vault.sql", "0067_survey_completion_snapshots.sql", "0073_survey_completion_test_push_snapshots.sql", "0074_survey_external_operation_execution_facts.sql", "0090_survey_oauth_state_redirect.sql", "0091_survey_assessment_business_keys.sql", "0099_survey_historical_external_projection.sql", "0168_survey_questionnaire_archive.sql", "0169_survey_questionnaire_archive_receipts.sql", "0176_survey_single_submission_claims.sql", "0177_survey_operation_legacy_parity.sql", "0223_survey_identity_session_subject.sql"} {
+	for _, migrationName := range []string{"0002_identity.sql", "0003_access.sql", "0018_survey.sql", "0038_survey_oauth_phone_vault.sql", "0067_survey_completion_snapshots.sql", "0073_survey_completion_test_push_snapshots.sql", "0074_survey_external_operation_execution_facts.sql", "0090_survey_oauth_state_redirect.sql", "0091_survey_assessment_business_keys.sql", "0099_survey_historical_external_projection.sql", "0168_survey_questionnaire_archive.sql", "0169_survey_questionnaire_archive_receipts.sql", "0176_survey_single_submission_claims.sql", "0177_survey_operation_legacy_parity.sql", "0223_survey_identity_session_subject.sql", "0237_survey_redemption_codes.sql"} {
 		migration, readErr := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations", migrationName))
 		if readErr != nil {
 			t.Fatal(readErr)

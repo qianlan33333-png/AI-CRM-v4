@@ -83,3 +83,8 @@
   .qo-nav button + button { margin-top: 0; }
   .qo-panel-actions--split { align-items: stretch; flex-direction: column; }
 }
+.qo-code-table { overflow-x: auto; margin-top: 16px; }
+.qo-code-table table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.qo-code-table th, .qo-code-table td { padding: 12px 16px; border-bottom: 1px solid var(--qo-border, #e5e7eb); text-align: left; }
+.qo-code-table th { color: #646a73; background: #f8fafc; font-weight: 500; }
+.qo-page [data-save-current][hidden] { display: none; }

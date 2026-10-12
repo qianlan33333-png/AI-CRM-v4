@@ -429,6 +429,20 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 		if questionnaire.DefinitionVersion != command.DefinitionVersion {
 			return surveyport.ErrConflict
 		}
+		for _, question := range questionnaire.Questions {
+			if question.Type != surveyport.QuestionRedemptionCode {
+				continue
+			}
+			code := ""
+			for _, answer := range command.Answers {
+				if answer.QuestionID == question.ID {
+					code = answer.TextValue
+				}
+			}
+			if strings.TrimSpace(code) == "" {
+				return surveyport.CodeRequired(question.ID)
+			}
+		}
 		if e = surveydomain.ValidateAnswers(questionnaire.Questions, command.Answers); e != nil {
 			return surveyport.ErrInvalid
 		}
@@ -643,6 +657,9 @@ func snapshotAnswers(q surveyport.Questionnaire, values []surveyport.SubmissionA
 		}
 		if question.Type == surveyport.QuestionMobile {
 			snapshot.TextValueMasked = maskMobile(answer.TextValue)
+		} else if question.Type == surveyport.QuestionRedemptionCode {
+			snapshot.TextValue = "兑换码已验证"
+			snapshot.TextValueMasked = "兑换码已验证"
 		} else if answer.TextValue != "" {
 			snapshot.TextValueMasked = "[protected]"
 		}

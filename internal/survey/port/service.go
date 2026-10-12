@@ -38,10 +38,11 @@ type IdentityState string
 const OAuthStateLifetime = 10 * time.Minute
 
 const (
-	QuestionSingleChoice QuestionType = "single_choice"
-	QuestionMultiChoice  QuestionType = "multi_choice"
-	QuestionTextarea     QuestionType = "textarea"
-	QuestionMobile       QuestionType = "mobile"
+	QuestionSingleChoice   QuestionType = "single_choice"
+	QuestionMultiChoice    QuestionType = "multi_choice"
+	QuestionTextarea       QuestionType = "textarea"
+	QuestionMobile         QuestionType = "mobile"
+	QuestionRedemptionCode QuestionType = "redemption_code"
 
 	ModeSurvey     QuestionnaireMode = "survey"
 	ModeAssessment QuestionnaireMode = "assessment"

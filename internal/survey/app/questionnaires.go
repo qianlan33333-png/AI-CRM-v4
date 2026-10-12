@@ -292,6 +292,10 @@ func classify(err error) error {
 	if err == nil {
 		return nil
 	}
+	var field *surveyport.FieldError
+	if errors.As(err, &field) {
+		return field
+	}
 	for _, known := range []error{surveyport.ErrInvalid, surveyport.ErrNotFound, surveyport.ErrConflict, surveyport.ErrReferenced, surveyport.ErrUnavailable} {
 		if errors.Is(err, known) {
 			return known

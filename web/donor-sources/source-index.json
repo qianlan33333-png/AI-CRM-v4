@@ -11,9 +11,9 @@
       "authority_kind": "frozen_donor"
     },
     {
-      "id": "v4-api-013edc2f9b15cc56fe34b494fdb9871538d88c12",
+      "id": "v4-api-5d2d5b5c78dd2df9f3ae82df957975b027d60434",
       "source_repository": "https://github.com/qianlan33333-png/AI-CRM-v4.git",
-      "source_commit": "013edc2f9b15cc56fe34b494fdb9871538d88c12",
+      "source_commit": "5d2d5b5c78dd2df9f3ae82df957975b027d60434",
       "root": "api",
       "immutable": true,
       "authority_kind": "active_v3_contract"
@@ -779,13 +779,13 @@
       "mode": "100644"
     },
     {
-      "id": "v4-openapi-ba45ed6996bec8ecc93b40e93cbae0c82f217851",
-      "library_id": "v4-api-013edc2f9b15cc56fe34b494fdb9871538d88c12",
+      "id": "v4-openapi-ce9ee810faf5c8ece418adc78312b37c947fd9af",
+      "library_id": "v4-api-5d2d5b5c78dd2df9f3ae82df957975b027d60434",
       "canonical_path": "api/openapi.yaml",
       "source_path": "api/openapi.yaml",
-      "source_git_blob_sha": "ba45ed6996bec8ecc93b40e93cbae0c82f217851",
-      "content_sha256": "bb2032aa150810b8ada9d14d084145191efe10edfbfed5b288d8fe67ce3511b3",
-      "bytes": 805220,
+      "source_git_blob_sha": "ce9ee810faf5c8ece418adc78312b37c947fd9af",
+      "content_sha256": "a052f17d12f6b9fcf44ffa43c18db897c503480b58a8e6aaf3658da597050454",
+      "bytes": 808005,
       "mode": "100644"
     }
   ],
@@ -793,11 +793,11 @@
     {
       "module": "v3_openapi_contract",
       "logical_path": "api/openapi.yaml",
-      "content_id": "v4-openapi-ba45ed6996bec8ecc93b40e93cbae0c82f217851",
+      "content_id": "v4-openapi-ce9ee810faf5c8ece418adc78312b37c947fd9af",
       "source_repository": "https://github.com/qianlan33333-png/AI-CRM-v4.git",
-      "source_commit": "013edc2f9b15cc56fe34b494fdb9871538d88c12",
+      "source_commit": "5d2d5b5c78dd2df9f3ae82df957975b027d60434",
       "source_path": "api/openapi.yaml",
-      "source_git_blob_sha": "ba45ed6996bec8ecc93b40e93cbae0c82f217851",
+      "source_git_blob_sha": "ce9ee810faf5c8ece418adc78312b37c947fd9af",
       "mode": "100644",
       "usage": "active_canonical_contract_source",
       "freeze_gate": "scripts/validate-openapi.mjs",
@@ -807,11 +807,11 @@
     {
       "module": "config_http",
       "logical_path": "internal/config/http/openapi.yaml",
-      "content_id": "v4-openapi-ba45ed6996bec8ecc93b40e93cbae0c82f217851",
+      "content_id": "v4-openapi-ce9ee810faf5c8ece418adc78312b37c947fd9af",
       "source_repository": "https://github.com/qianlan33333-png/AI-CRM-v4.git",
-      "source_commit": "013edc2f9b15cc56fe34b494fdb9871538d88c12",
+      "source_commit": "5d2d5b5c78dd2df9f3ae82df957975b027d60434",
       "source_path": "api/openapi.yaml",
-      "source_git_blob_sha": "ba45ed6996bec8ecc93b40e93cbae0c82f217851",
+      "source_git_blob_sha": "ce9ee810faf5c8ece418adc78312b37c947fd9af",
       "mode": "100644",
       "usage": "go_embed_compatibility_view",
       "freeze_gate": "internal/config/http/handler_test.go",
@@ -4046,7 +4046,7 @@
   "views": [
     {
       "target_path": "internal/config/http/openapi.yaml",
-      "content_id": "v4-openapi-ba45ed6996bec8ecc93b40e93cbae0c82f217851",
+      "content_id": "v4-openapi-ce9ee810faf5c8ece418adc78312b37c947fd9af",
       "enabled": true
     },
     {

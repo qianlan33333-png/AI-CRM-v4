@@ -359,6 +359,8 @@ func marshalSurveyCompletion(payload surveyport.CompletionPayload, userID string
 			if item.QuestionType == surveyport.QuestionMobile && item.TextValue != "" {
 				out.PhoneNumber = item.TextValue
 			}
+		case surveyport.QuestionRedemptionCode:
+			value = "兑换码已验证"
 		default:
 			return nil, errors.New("unsupported survey answer type")
 		}

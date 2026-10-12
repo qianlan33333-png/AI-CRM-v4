@@ -307,6 +307,10 @@ func (h *Handler) adminTail(w http.ResponseWriter, r *http.Request, tail string)
 		}
 	}
 	action := strings.Join(parts[1:], "/")
+	if parts[1] == "redemption-codes" {
+		h.redemptionCodes(w, r, surveyport.ID(id), parts[2:])
+		return
+	}
 	switch action {
 	case "duplicate":
 		h.duplicate(w, r, id)
@@ -1468,6 +1472,19 @@ func writeAlreadySubmitted(w http.ResponseWriter, action surveyport.CompletionAc
 	writeJSON(w, http.StatusConflict, map[string]any{"ok": false, "code": "already_submitted", "message": "already_submitted", "completion_action": action})
 }
 func resultError(w http.ResponseWriter, err error) {
+	var field *surveyport.FieldError
+	if errors.As(err, &field) {
+		status := http.StatusBadRequest
+		if field.Code == "redemption_code_used" || field.Code == "submission_payload_conflict" {
+			status = http.StatusConflict
+		}
+		body := map[string]any{"ok": false, "code": field.Code, "message": field.Message}
+		if field.QuestionID > 0 {
+			body["question_id"] = field.QuestionID
+		}
+		writeJSON(w, status, body)
+		return
+	}
 	switch {
 	case errors.Is(err, surveyport.ErrReauthorizationRequired):
 		writeError(w, http.StatusUnauthorized, "survey_oauth_required")

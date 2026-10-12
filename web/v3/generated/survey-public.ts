@@ -77,6 +77,7 @@ export interface SurveyPublicError {
   ok: false;
   code: string;
   message: string;
+  question_id?: PositiveID;
 }
 
 export interface SurveyPublicAlreadySubmittedError {
@@ -138,6 +139,7 @@ export const SurveyPublicQuestionType = {
   multi_choice: "multi_choice",
   textarea: "textarea",
   mobile: "mobile",
+  redemption_code: "redemption_code",
 } as const;
 
 export interface SurveyPublicOption {
@@ -234,6 +236,22 @@ export interface SurveyPublicDefinition {
    * @maxItems 100
    */
   questions: SurveyPublicQuestion[];
+}
+
+export type SurveyPublicFieldErrorCode =
+  (typeof SurveyPublicFieldErrorCode)[keyof typeof SurveyPublicFieldErrorCode];
+
+export const SurveyPublicFieldErrorCode = {
+  redemption_code_required: "redemption_code_required",
+  redemption_code_invalid: "redemption_code_invalid",
+  redemption_code_used: "redemption_code_used",
+  submission_payload_conflict: "submission_payload_conflict",
+} as const;
+
+export interface SurveyPublicFieldError {
+  code: SurveyPublicFieldErrorCode;
+  message: string;
+  question_id?: PositiveID;
 }
 
 export interface SurveyPublicSubmissionAnswer {
