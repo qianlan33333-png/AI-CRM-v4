@@ -3,11 +3,10 @@
   "baseline_sha": "83f85a5e8c87e1294b43973266366c406c27660a",
   "checks": [
     {
-      "lane": "backend",
+      "lane": "browser",
       "path": "cmd/aicrm/public_commerce_chromium_postgres_integration_test.go",
       "test": "TestPostgreSQLPublicCommerceChromiumJourney",
-      "postgres": true,
-      "browser": true
+      "postgres": true
     }
   ],
   "installed_checks": []
