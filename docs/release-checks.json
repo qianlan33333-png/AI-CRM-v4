@@ -54,6 +54,11 @@
       "lane": "browser",
       "path": "cmd/aicrm/access_governance_ui_chromium_postgres_integration_test.go",
       "test": "TestPostgreSQLAccessGovernanceUIChromiumJourney"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/staff_directory_installed_fixture_test.go",
+      "test": "TestInstalledDirectoryProviderReadBoundary"
     }
   ],
   "installed_checks": [

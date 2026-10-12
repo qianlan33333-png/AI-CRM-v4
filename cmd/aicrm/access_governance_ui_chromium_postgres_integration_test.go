@@ -18,6 +18,7 @@ import (
 	accessapp "github.com/qianlan33333-png/AI-CRM-v3/internal/access/app"
 	accessdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/access/domain"
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 )
 
 // OneID decision: not involved. This is Access-owned employee governance; it
@@ -25,6 +26,17 @@ import (
 // Persistence decision: real PostgreSQL Access transactions. Provider reads
 // use the composed WeCom adapter; no Provider write or external effect occurs.
 func TestPostgreSQLAccessGovernanceUIChromiumJourney(t *testing.T) {
+	runAccessGovernanceUIChromiumJourney(t, false)
+}
+
+func TestPostgreSQLStaffDirectoryInstalledChromiumJourney(t *testing.T) {
+	if runtime.GOOS != "linux" || testconfig.InstalledProduct().Binary == "" {
+		t.Skip("requires Linux and explicit installed binary/Host inputs")
+	}
+	runAccessGovernanceUIChromiumJourney(t, true)
+}
+
+func runAccessGovernanceUIChromiumJourney(t *testing.T, installed bool) {
 	if !platformconfig.ChromiumJourneyRequired() {
 		t.Skip("set AICRM_REQUIRE_CHROMIUM_JOURNEY=1")
 	}
@@ -36,17 +48,17 @@ func TestPostgreSQLAccessGovernanceUIChromiumJourney(t *testing.T) {
 	t.Chdir(repository)
 	prepareProductExternalPushChromiumArtifacts(t, repository)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
+	t.Cleanup(cancel)
 	databaseURL, cleanup := adminAccessCompositionDatabase(t, ctx)
-	defer cleanup()
+	t.Cleanup(cleanup)
 	provider := httptest.NewServer(accessGovernanceDirectoryFixture())
-	defer provider.Close()
+	t.Cleanup(provider.Close)
 	dataKey := make([]byte, 32)
 	if _, err := rand.Read(dataKey); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewUnstartedServer(http.NotFoundHandler())
-	defer server.Close()
+	t.Cleanup(server.Close)
 	application, err := compose(ctx, platformconfig.Runtime{
 		Role: platformconfig.RoleAPI, DatabaseURL: databaseURL, PublicOrigin: "https://" + server.Listener.Addr().String(), ReleaseSHA: "access-governance-ui", WorkerOwner: "access-governance-ui", WorkerLimit: 1,
 		WeCom:     platformconfig.WeCom{Enabled: true, CorpID: "access-ui-corp", AgentID: "access-ui-agent", Secret: "access-ui-secret", ContactSecret: "access-ui-contact", APIBase: provider.URL, HTTPClient: provider.Client(), ContextSigningKey: strings.Repeat("x", 32)},
@@ -57,7 +69,7 @@ func TestPostgreSQLAccessGovernanceUIChromiumJourney(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer application.Close()
+	t.Cleanup(application.Close)
 	if err = application.bootstrap(ctx, platformconfig.Bootstrap{Enabled: true, Username: "access-ui-super", Password: "access-ui-super-password", DisplayName: "超级管理员甲"}); err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +106,9 @@ func TestPostgreSQLAccessGovernanceUIChromiumJourney(t *testing.T) {
 		t.Fatal("governed browser seed must keep generated local credentials")
 	}
 	server.Config.Handler = application.handler
+	if installed {
+		useInstalledStaffDirectoryFixture(t, server, databaseURL, dataKey)
+	}
 	server.StartTLS()
 	screenshots := t.TempDir()
 	if configured := platformconfig.AccessGovernanceScreenshotDirectory(); configured != "" {

@@ -1,23 +1,15 @@
-# Product Design QA — 规格、联系资料与结算
+# 员工完整名单刷新 Product Design QA
+
+Source visual truth: 用户提供的生产员工列表截图 `/var/folders/dq/56xlfzsx05zc7vqhbl7lgv6c0000gn/T/codex-clipboard-b41b85a2-8c4a-447b-bdf5-0a65964a9dac.png` 与本仓当前已挂载 admin_access。该截图为 2314×1080 内容截取；不以它与本机视口做像素级相等判断。
+
+Same-viewport reference: `/Users/qianlan/Downloads/新CRM/release-control/staff-directory-refresh-20261012/screenshots/access-governance-1440.png`。Implementation: 同目录 `access-governance-directory-refreshed.png`。两张均为 Chromium 1440×900、CSS 1440×900、1x，无缩放；已在同一比较输入打开。前者是同一 V4 页面初始三名已授权夹具，后者是刷新后五名夹具；新增行、提示和“未开通”是本次明确行为变化，并非设计漂移。
+
+字体/层级、字号、行高：沿用 admin_base/admin_access，标题、员工姓名与账号层级一致。间距/布局：同一表格与六列结构，新增行正常撑开，提示出现后的垂直位移符合现有状态组件。色彩：复用原权限蓝色及不可登录状态色，无新 token。图像/图标：复用原导航与品牌资产，无新增/替换资产。文案：完整刷新反馈包含发现、新增、姓名更新数量；新员工明确未开通，操作为“开通权限”，不是“管理”或“可登录”。1440 图中的新行和状态已清楚可读，无需另裁局部图；390/420 的行布局和无横向溢出由真实浏览器旅程验证。
+
+交互：真实 Access + WeCom Adapter + 隔离 PostgreSQL 的 Chromium 旅程验证刷新、重复刷新、两个新员工未开通、现有角色选择与确认开通弹窗、同员工记录开通读回，随后覆盖原管理/转移/无权限旅程。新 DOM 合同覆盖 Provider/列表失败不显示成功、缺完整刷新收据不冒称成功、403清除敏感列表。未进行全套 WCAG 合规测试。
+
+Comparison history: 首轮视觉对照，无 P0/P1/P2 差异，没有为视觉问题改动 CSS。构建输入和测试夹具准备修正属于验证准备，不计为设计迭代。安装二进制/Linux与真实生产新增员工读回由工作台独立验收；本报告不把源旅程当安装验收。
+
+Findings: 无需要本次修复的 P0/P1/P2。P3：未开通状态沿用现有不可登录状态颜色，可在未来统一状态色设计时评估；本次不改公共样式。
 
 final result: passed
-
-范围：用户选定的 3 个完整移动结算版本（none/mobile/shipping_address），保留问卷双展示及侧边栏现有组件。既有 Product Design image-to-code 路由；未新建页面体系。
-
-## 对照证据
-
-源图：本任务 exec-9623dbda（不采集）、exec-843957f1（手机号）、exec-040dd9d7（收货）。源图均 852×1846，统一归一为 393×852 CSS viewport。实现为 Go 实际模板导出的本地页面，合成课程/规格/优惠及联系资料 fixture，非真实认证/支付回执。
-
-最终截图与同画布左右对照保存在 `docs/design/customer-contact-reuse/`；左为源图、右为实现。商品名“课程”、三人成行版 ¥999、优惠 ¥100、实付 ¥899、收货空表单、微信支付选中，状态一致。
-
-第一轮 P2：区域占位过长导致窄列拥挤；收货块/支付块垂直间距偏大；支付宝图标反色；手机号单行缺少分隔；底栏按钮垂直位置偏低。已修订并重新截图比较。最终无 P0/P1/P2。P3：原生单选/地区选择箭头与不同平台字体存在细微差异；使用 Bootstrap Icons MIT 品牌轮廓，非原图栅格或表情替代。
-
-## 已操作
-
-- CUA In-app Browser：三个 393×852 空表单版本、折叠/展开规格详情、支付方式切换、常用电话和完整地址预填，均可编辑。
-- 320px 窄屏 document clientWidth/scrollWidth 均 320，无横向溢出。
-- 运行时控制台未见 error/warn。
-- 问卷 all/one 结构化地址和晚到预填保护、侧边栏 staff 脱敏/admin CSRF 审计查看，通过实际 TS/DOM 旅程；前轮 CUA 已检查双模式表单。
-- PostgreSQL + Chromium 管理商品规格保存/读取和付款页实际服务端旅程通过。
-
-预发、真实微信/支付宝、实际客户权限及履约依然由发布工作台独立验证。本报告只确认本地范围的视觉与交互，不代表发布或真实支付成功。

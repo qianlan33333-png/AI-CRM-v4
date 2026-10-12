@@ -151,13 +151,23 @@ func waitInstalledSurveyReady(t *testing.T, process *domesticSmokeProcess, endpo
 // its unmodified api.weixin.qq.com URL. Only this isolated process trusts the
 // short-lived synthetic CA. CONNECT has a strict host allowlist and tunnels
 // solely to a local TLS fixture, so no real token or external network is used.
-func installedSurveyProviderBoundary(t *testing.T) (string, string, *atomic.Int32, *atomic.Int32) {
+func installedSurveyProviderBoundary(t *testing.T, overrides ...installedProviderReadOverride) (string, string, *atomic.Int32, *atomic.Int32) {
 	t.Helper()
+	host := "api.weixin.qq.com"
+	if len(overrides) > 1 {
+		t.Fatal("one isolated Provider boundary is required")
+	}
+	if len(overrides) == 1 {
+		if overrides[0].host != "qyapi.weixin.qq.com" || overrides[0].handler == nil {
+			t.Fatal("invalid isolated directory Provider")
+		}
+		host = overrides[0].host
+	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	certificate := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Survey isolated fixture"}, DNSNames: []string{"api.weixin.qq.com"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	certificate := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Isolated Provider fixture"}, DNSNames: []string{host}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
@@ -178,9 +188,19 @@ func installedSurveyProviderBoundary(t *testing.T) (string, string, *atomic.Int3
 	calls, unexpected := &atomic.Int32{}, &atomic.Int32{}
 	provider := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.Method != http.MethodGet || r.Host != "api.weixin.qq.com" {
+		if r.Method != http.MethodGet || r.Host != host {
 			unexpected.Add(1)
 			http.Error(w, "forbidden fixture request", 403)
+			return
+		}
+		if len(overrides) == 1 {
+			if !overrides[0].paths[r.URL.Path] {
+				unexpected.Add(1)
+				http.Error(w, "forbidden directory fixture path", 403)
+				return
+			}
+			calls.Add(1)
+			overrides[0].handler.ServeHTTP(w, r)
 			return
 		}
 		switch r.URL.Path {
@@ -209,7 +229,7 @@ func installedSurveyProviderBoundary(t *testing.T) (string, string, *atomic.Int3
 	provider.StartTLS()
 	t.Cleanup(provider.Close)
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "CONNECT" || r.Host != "api.weixin.qq.com:443" {
+		if r.Method != "CONNECT" || r.Host != host+":443" {
 			unexpected.Add(1)
 			http.Error(w, "forbidden fixture destination", 403)
 			return
