@@ -80,6 +80,30 @@ func TestHumanReportHistoricalFailuresDoNotMakeRed(t *testing.T) {
 	}
 }
 
+func TestHumanReportLongTaskNeedsProgressEvidence(t *testing.T) {
+	now := time.Now().UTC()
+	o := opsport.InspectionOverview{Fresh: true, ObservedAt: now, Checks: []opsport.CheckResult{
+		{CheckDefinition: opsport.CheckDefinition{ID: "jobqueue.backlog"}, CheckObservation: opsport.CheckObservation{Status: "warning", Metrics: map[string]int64{"running_over_10m": 1}}},
+	}}
+	raw, err := reportMessage(now, o, &effectport.OpsWindowCounts{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	color, title, body := inspectHumanCard(t, raw)
+	if color != "orange" || !strings.Contains(title, "需要核实") || !strings.Contains(body, "实际问题 0 项") || !strings.Contains(body, "需核对执行进度") {
+		t.Fatal("elapsed runtime alone cannot prove an operational failure")
+	}
+	o.Checks[0].Metrics["due_over_10m"] = 2
+	raw, err = reportMessage(now, o, &effectport.OpsWindowCounts{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	color, _, body = inspectHumanCard(t, raw)
+	if color != "red" || !strings.Contains(body, "2 条到期未执行") {
+		t.Fatal("real due backlog must remain actionable")
+	}
+}
+
 func TestHumanReportUnknownCannotTurnGreen(t *testing.T) {
 	now := time.Now().UTC()
 	for _, status := range []string{"unknown", "uncovered", "stale"} {

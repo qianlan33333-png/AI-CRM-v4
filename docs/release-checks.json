@@ -1,26 +1,24 @@
 {
   "schema": 1,
-  "baseline_sha": "bcc0ed7a2b8ab3e51c1f8492a86640e0ddbfed6c",
+  "baseline_sha": "e94e983910af253c9cd0226e9736bc6d7c23dc3a",
   "checks": [
     {
-      "lane": "frontend",
-      "path": "web/v3/surveyAttachmentH5.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveyRedemptionH5.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveySubmissionResume.test.mjs"
+      "lane": "backend",
+      "package": "./internal/adminops",
+      "test": "TestHumanReportLongTaskNeedsProgressEvidence"
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/adapters_test.go",
-      "test": "TestSecurityHeadersAllowBlobImagesOnlyOnMediaAndSidebarPages"
+      "package": "./internal/adminops",
+      "test": "TestHumanReportActualFaultAndHistorySeparation"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/adminops",
+      "test": "TestHumanReportHistoricalFailuresDoNotMakeRed"
     }
   ],
   "installed_checks": [
-    "survey-recovery"
+    "governance-notifications"
   ]
 }

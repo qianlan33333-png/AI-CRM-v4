@@ -53,8 +53,11 @@ func humanCheck(r opsport.CheckResult) humanFinding {
 			f.verify = fmt.Sprintf("%d 个客户群详情不可读：请核对企微权限范围与群状态；系统不反复重试永久拒绝。", n)
 		}
 	case "jobqueue.backlog":
-		if n := m["due_over_10m"] + m["running_over_10m"]; n > 0 {
-			f.urgent = fmt.Sprintf("后台任务有 %d 条超时积压：会延迟业务执行，请检查 Worker。", n)
+		if n := m["due_over_10m"]; n > 0 {
+			f.urgent = fmt.Sprintf("后台任务有 %d 条到期未执行的积压：会延迟业务执行，请检查 Worker。", n)
+		}
+		if n := m["running_over_10m"]; n > 0 {
+			f.verify = fmt.Sprintf("后台有 %d 条任务运行超过 10 分钟：需核对执行进度，运行时长本身不能证明失败。", n)
 		}
 		if n := m["discarded_retained"]; n > 0 {
 			f.history = fmt.Sprintf("后台保留 %d 条历史终止任务，不代表当前积压。", n)
