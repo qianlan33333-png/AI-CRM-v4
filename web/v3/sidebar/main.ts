@@ -2,6 +2,7 @@
 // V3 production controller's identity, JSSDK, generation, OAuth, and durable
 // send-receipt controls; the overlay can only call this narrow boundary.
 
+import { mountSidebarContacts } from "./contactProfile";
 import { orderStatusLabel } from "./tabs/local-contract";
 import { formatShanghaiDateTime } from "../adminDateTime";
 
@@ -800,6 +801,8 @@ export class SidebarBridge {
       throw failure("侧边栏 workbench OneID 与可信客户主键不一致。");
     }
     this.profile = profile;
+    const generation = this.contextGeneration;
+    mountSidebarContacts(profile, this.customerID, () => this.assertGeneration(generation));
     this.oneID = oneID;
     this.profileVersion = Number(profile.profile_version || 0);
   }
@@ -838,6 +841,8 @@ export class SidebarBridge {
     }
     const profile = updated.customer || updated.profile || {};
     this.profile = profile;
+    const generation = this.contextGeneration;
+    mountSidebarContacts(profile, this.customerID, () => this.assertGeneration(generation));
     this.profileVersion = Number(profile.profile_version || this.profileVersion);
     return { profile: { source: profile.profile_source || "", industry: profile.industry || "", industry_description: profile.industry_description || "", needs_blockers_followup: profile.needs_blockers_followup || "" } };
   }
@@ -961,6 +966,7 @@ function start(): void {
   if (!root) return;
   root.dataset.v3SidebarPresentation = "ready";
   const clearSensitiveContent = () => {
+    document.getElementById("sidebar-contact-profile")?.remove();
     const content = root.querySelector<HTMLElement>("#content");
     if (!content) return;
     root.dataset.v3SidebarContext = "invalid";

@@ -102,13 +102,17 @@ type trustedSubmissionSubjects interface {
 }
 
 type SubmissionService struct {
-	images              mediaport.PrivateImageStorage
-	observer            surveyport.SubmissionObserver
-	uow                 platformport.UnitOfWork
-	store               SubmissionStore
-	cipher              *secure.Cipher
-	timeline            customerport.TimelineWriter
-	collectedPhones     customerport.CollectedPhoneRecorder
+	images          mediaport.PrivateImageStorage
+	observer        surveyport.SubmissionObserver
+	uow             platformport.UnitOfWork
+	store           SubmissionStore
+	cipher          *secure.Cipher
+	timeline        customerport.TimelineWriter
+	collectedPhones customerport.CollectedPhoneRecorder
+	contacts        interface {
+		customerport.ContactWriter
+		customerport.ContactReader
+	}
 	lineage             canonicalSubmissionLineage
 	subjects            trustedSubmissionSubjects
 	completion          surveyport.CompletionIntentAccepter
@@ -484,6 +488,9 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 			completionConfiguration, e = s.store.GetOperationConfiguration(tx, questionnaire.ID)
 			return e
 		}
+		if e = s.updateContactProfile(tx, questionnaire, command, stored); e != nil {
+			return e
+		}
 		if e = s.persistAttachments(tx, stored, prepared); e != nil {
 			return e
 		}
@@ -674,7 +681,14 @@ func snapshotAnswers(q surveyport.Questionnaire, values []surveyport.SubmissionA
 			snapshot.Score += o.Score
 			total += o.Score
 		}
-		if question.Type == surveyport.QuestionMobile {
+		if question.Type == surveyport.QuestionShippingAddress && answer.ShippingAddress != nil {
+			raw, err := json.Marshal(answer.ShippingAddress)
+			if err != nil {
+				return nil, 0, err
+			}
+			snapshot.TextValue = string(raw)
+			snapshot.TextValueMasked = "[收货信息已保护]"
+		} else if question.Type == surveyport.QuestionMobile {
 			snapshot.TextValueMasked = maskMobile(answer.TextValue)
 		} else if question.Type == surveyport.QuestionRedemptionCode {
 			snapshot.TextValue = "兑换码已验证"

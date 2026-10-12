@@ -1030,6 +1030,11 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
+	contactProfiles, err := customerapp.NewContactService(customerStore, surveyCipher, queries)
+	if err != nil {
+		return fail(err)
+	}
+	sidebarProfiles.Contacts = contactProfiles
 	surveyRepository, err := surveystore.NewPostgreSQL(pool.Native(), uow, surveyCipher)
 	if err != nil {
 		return fail(err)
@@ -1039,6 +1044,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	surveyDefinitions := surveyapp.NewService(uow, surveyRepository)
 	segmentBindings.Handler.BindAudienceSurveyReferences(audienceSurveyReferenceAdapter{surveys: surveyDefinitions})
 	surveySubmissions := surveyapp.NewSubmissionService(uow, surveyRepository, surveyCipher)
+	surveySubmissions.BindContactProfiles(contactProfiles)
 	if err := surveySubmissions.BindPrivateImages(mediaRepository); err != nil {
 		return fail(err)
 	}
@@ -1385,6 +1391,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = orderService.SetExportFactsReader(orderExportAdapter{roots: queries, numbers: queries, names: customerStore, phones: queries, distribution: distributionRepository, payments: paymentRepository}); err != nil {
 		return fail(err)
 	}
+	orderService.SetContactProfiles(contactProfiles)
 	if err = orderService.SetCollectedPhoneRecorder(collectedPhones); err != nil {
 		return fail(err)
 	}
@@ -1543,7 +1550,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(ownerCompletionErr)
 	}
 	outboundCompletionSink.WithCustomerOwnerHandoff(ownerHandoffCompletion)
-	customerHandler, err := customerhttp.NewHandler(customerhttp.Config{UnitOfWork: uow, Auth: requestSecurity, CSRF: requestSecurity,
+	customerHandler, err := customerhttp.NewHandler(customerhttp.Config{Contacts: contactProfiles, UnitOfWork: uow, Auth: requestSecurity, CSRF: requestSecurity,
 		Directory: customerapp.Directory{Numbers: queries, Store: customerStore, SigningKey: cursorSigningKey, OwnerCustomers: customerDirectoryOwnerFilter{users: accessRepository, follows: relationships, corpScope: "wecom-corp:" + cfg.WeCom.CorpID}, Tags: customerDirectoryTagFilter{bindings: tagRepository, members: customerProfileStore}}, Store: customerStore, Identities: queries, Audit: auditService,
 		Canonical:   canonicalCustomerAdapter{reader: queries},
 		Owners:      customerOwnerAdapter{uow: uow, observations: customerProfileStore, users: accessRepository, owners: ownerHandoffStore},
@@ -1577,6 +1584,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	paymentService := paymentapp.NewService(uow, paymentRepository, orderService, paymentSession, effectRepository, effectRepository)
+	paymentService.SetContactProfiles(contactProfiles, queries)
 	publicProductHandler.SetCompletedCheckoutReader(paymentService)
 	paymentService.SetCanonicalLineageReader(queries)
 	if err = paymentService.SetProfitSharingIdentityReader(queries); err != nil {

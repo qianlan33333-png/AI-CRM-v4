@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	"time"
 
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
@@ -38,12 +39,13 @@ type IdentityState string
 const OAuthStateLifetime = 10 * time.Minute
 
 const (
-	QuestionSingleChoice   QuestionType = "single_choice"
-	QuestionMultiChoice    QuestionType = "multi_choice"
-	QuestionTextarea       QuestionType = "textarea"
-	QuestionMobile         QuestionType = "mobile"
-	QuestionRedemptionCode QuestionType = "redemption_code"
-	QuestionAttachment     QuestionType = "attachment"
+	QuestionSingleChoice    QuestionType = "single_choice"
+	QuestionMultiChoice     QuestionType = "multi_choice"
+	QuestionTextarea        QuestionType = "textarea"
+	QuestionMobile          QuestionType = "mobile"
+	QuestionShippingAddress QuestionType = "shipping_address"
+	QuestionRedemptionCode  QuestionType = "redemption_code"
+	QuestionAttachment      QuestionType = "attachment"
 
 	ModeSurvey     QuestionnaireMode = "survey"
 	ModeAssessment QuestionnaireMode = "assessment"
@@ -162,10 +164,11 @@ type DefinitionApplication interface {
 }
 
 type SubmissionAnswer struct {
-	QuestionID ID     `json:"question_id"`
-	OptionIDs  []ID   `json:"option_ids"`
-	TextValue  string `json:"text_value,omitempty"`
-	Attachment bool   `json:"attachment,omitempty"`
+	ShippingAddress *customerport.ShippingContact `json:"shipping_address,omitempty"`
+	QuestionID      ID                            `json:"question_id"`
+	OptionIDs       []ID                          `json:"option_ids"`
+	TextValue       string                        `json:"text_value,omitempty"`
+	Attachment      bool                          `json:"attachment,omitempty"`
 }
 
 type SubmissionIdentity struct {

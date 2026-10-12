@@ -328,3 +328,7 @@ body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presenta
 body[data-ui-surface="sidebar"] #sidebar-workbench-root[data-v3-sidebar-presentation] .material--image .tags {
   margin-top: 4px;
 }
+
+.contact-profile { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--v3-ui-line); overflow-wrap: anywhere; }
+.contact-profile .meta { margin: 3px 0; line-height: 1.5; }
+.contact-reveal { padding: 4px 0; border: 0; background: transparent; color: var(--v3-ui-primary, #3165ff); font: inherit; font-size: 12px; cursor: pointer; }

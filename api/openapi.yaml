@@ -1345,6 +1345,16 @@ paths:
         "200": {description: Ephemeral clear-text phone. Mainland China numbers omit +86., headers: {Cache-Control: {schema: {type: string, const: no-store}}}, content: {application/json: {schema: {type: object, additionalProperties: false, required: [phone], properties: {phone: {type: string, writeOnly: true, example: "13812345678"}}}}}}
         "403": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
+  /api/admin/customers/{customer_id}/contact-reveal:
+    post:
+      operationId: revealCustomerContact
+      description: Admin and SuperAdmin only. No-store contact reveal with atomic audit, separate from identity phone.
+      security: [{adminSession: [], csrfHeader: []}]
+      parameters: [{$ref: "#/components/parameters/CustomerID"}]
+      responses:
+        "200": {description: Latest business contact, headers: {Cache-Control: {schema: {type: string, const: no-store}}}, content: {application/json: {schema: {$ref: "#/components/schemas/CustomerContactPrefill"}}}}
+        "403": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
   /api/admin/customers/{customer_id}/owners:
     get:
       operationId: getCustomerOwners
@@ -4258,7 +4268,25 @@ paths:
       operationId: getWechatPayCheckoutSession
       tags: [Transactions]
       security: [{paymentSession: []}]
-      responses: {"200": {description: Current trusted-payment-session marker for a browser recovery checkpoint, content: {application/json: {schema: {type: object, additionalProperties: false, required: [checkout_session_binding, can_create_checkout], properties: {can_create_checkout: {type: boolean, description: Whether this trusted session can create a new checkout. Consumed sessions remain valid for reading their existing checkout.}, checkout_session_binding: {type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: Opaque marker only; it is neither a session token nor an identity claim.}}}}}}, "401": {$ref: "#/components/responses/Error"}, "503": {$ref: "#/components/responses/Unavailable"}}
+      parameters:
+        - {name: product_id, in: query, schema: {$ref: "#/components/schemas/PositiveID"}}
+        - {name: product_kind, in: query, schema: {type: string, enum: [standard, service_period]}}
+      responses:
+        "200":
+          description: Trusted payment-session marker and optional contact prefill filtered by collection configuration. Never cached.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [checkout_session_binding, can_create_checkout]
+                properties:
+                  checkout_session_binding: {type: string, pattern: "^[A-Za-z0-9_-]{43}$"}
+                  can_create_checkout: {type: boolean}
+                  contact_prefill: {$ref: "#/components/schemas/CustomerContactPrefill"}
+                  contact_prefill_unavailable: {type: boolean}
+        "401": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Unavailable"}
   /api/v1/wechat-pay/purchase-status:
     get:
       operationId: getWechatPayPurchaseStatus
@@ -8364,6 +8392,8 @@ components:
         authorized: {type: boolean, const: true}
         identity_state: {type: string, enum: [resolved]}
         display: {type: string, enum: [all, one]}
+        contact_prefill: {type: object, additionalProperties: {$ref: "#/components/schemas/SurveyPublicSubmissionAnswer"}}
+        contact_prefill_unavailable: {type: boolean}
         submitted: {type: boolean}
         completion_action: {$ref: "#/components/schemas/CompletionAction"}
     SurveyPublicDefinition:
@@ -8380,6 +8410,34 @@ components:
         mode: {type: string, enum: [survey, assessment]}
         assessment_config: {type: object, additionalProperties: true}
         questions: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/SurveyPublicQuestion"}}
+        region_options: {type: array, items: {$ref: "#/components/schemas/SurveyPublicRegion"}}
+    CustomerContactPrefill:
+      type: object
+      additionalProperties: false
+      properties:
+        mobile_e164: {type: string}
+        shipping_address: {$ref: "#/components/schemas/SurveyPublicShippingContact"}
+    SurveyPublicShippingContact:
+      type: object
+      additionalProperties: false
+      required: [mobile_e164, recipient_name, province_code, province_name, city_code, city_name, district_code, district_name, detail_address]
+      properties:
+        mobile_e164: {type: string}
+        recipient_name: {type: string}
+        province_code: {type: string}
+        province_name: {type: string}
+        city_code: {type: string}
+        city_name: {type: string}
+        district_code: {type: string}
+        district_name: {type: string}
+        detail_address: {type: string}
+    SurveyPublicRegion:
+      type: object
+      required: [c, n]
+      properties:
+        c: {type: [string, integer]}
+        n: {type: string}
+        ch: {type: array, items: {$ref: "#/components/schemas/SurveyPublicRegion"}}
     SurveyPublicFieldError:
       type: object
       additionalProperties: false
@@ -8394,7 +8452,8 @@ components:
       required: [id, type, title, required, sort_order, minimum_selections, maximum_selections, placeholder_text, assessment_dimension_key, options]
       properties:
         id: {$ref: "#/components/schemas/PositiveID"}
-        type: {type: string, enum: [single_choice, multi_choice, textarea, mobile, redemption_code, attachment]}
+        type: {type: string, enum: [single_choice, multi_choice, textarea, mobile, redemption_code, attachment, shipping_address]}
+        contact_field: {type: string, enum: [contact_phone, shipping_contact]}
         title: {type: string, minLength: 1, maxLength: 500}
         required: {type: boolean}
         sort_order: {type: integer, minimum: 0, maximum: 99}
@@ -8436,7 +8495,7 @@ components:
       type: object
       additionalProperties: false
       required: [question_id, option_ids]
-      properties: {question_id: {$ref: "#/components/schemas/PositiveID"}, option_ids: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/PositiveID"}}, text_value: {type: string, maxLength: 10000}, attachment: {type: boolean, description: True when the multipart request includes the image for this question}}
+      properties: {shipping_address: {$ref: "#/components/schemas/SurveyPublicShippingContact"}, question_id: {$ref: "#/components/schemas/PositiveID"}, option_ids: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/PositiveID"}}, text_value: {type: string, maxLength: 10000}, attachment: {type: boolean, description: True when the multipart request includes the image for this question}}
     SurveyPublicSubmissionReceipt:
       type: object
       additionalProperties: false
@@ -10095,6 +10154,8 @@ components:
         name: {type: string}
         display_name: {type: string}
         avatar_url: {type: string}
+        contact_phone_masked: {type: string}
+        contact_shipping_summary: {type: string}
         phone_masked: {type: string}
         phone_assurance: {type: string}
         status: {type: string}

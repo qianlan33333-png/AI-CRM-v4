@@ -36,6 +36,7 @@ type Auditor interface {
 }
 
 type Config struct {
+	Contacts                 customerport.ContactReader
 	UnitOfWork               platformport.UnitOfWork
 	Auth                     Authenticator
 	CSRF                     CSRFAuthorizer
@@ -63,6 +64,7 @@ type Config struct {
 }
 
 type Handler struct {
+	contacts                 customerport.ContactReader
 	uow                      platformport.UnitOfWork
 	auth                     Authenticator
 	csrf                     CSRFAuthorizer
@@ -97,7 +99,7 @@ func NewHandler(config Config) (*Handler, error) {
 	if config.OwnerHandoff != nil && (config.OwnerHandoffStaff == nil || strings.TrimSpace(config.OwnerHandoffCorpScope) == "") {
 		return nil, errors.New("owner handoff context dependencies are required")
 	}
-	return &Handler{uow: config.UnitOfWork, auth: config.Auth, csrf: config.CSRF, directory: config.Directory,
+	return &Handler{contacts: config.Contacts, uow: config.UnitOfWork, auth: config.Auth, csrf: config.CSRF, directory: config.Directory,
 		store: config.Store, identities: config.Identities, audit: config.Audit, canonical: config.Canonical,
 		owners: config.Owners, tags: config.Tags, tagCommands: config.TagCommands, tagHistory: config.TagHistory, surveys: config.Surveys, timeline: config.Timeline, chat: config.Chat, orders: config.Orders,
 		profileSigningKey: append([]byte(nil), config.ProfileSigningKey...), ownerHandoff: config.OwnerHandoff, ownerHandoffReader: config.OwnerHandoffReader, ownerHandoffTransfers: config.OwnerHandoffTransfers, ownerHandoffStaff: config.OwnerHandoffStaff, ownerHandoffCorpScope: config.OwnerHandoffCorpScope, ownerHandoffIdentity: config.OwnerHandoffIdentity, ownerHandoffPresentation: config.OwnerHandoffPresentation}, nil
@@ -109,6 +111,7 @@ func (handler *Handler) Routes() nethttp.Handler {
 	mux.HandleFunc("GET /api/admin/customers/{customer_id}", handler.detail)
 	mux.HandleFunc("GET /api/admin/customers/{customer_id}/360", handler.customer360)
 	mux.HandleFunc("POST /api/admin/customers/{customer_id}/phone-reveal", handler.revealPhone)
+	mux.HandleFunc("POST /api/admin/customers/{customer_id}/contact-reveal", handler.revealContact)
 	mux.HandleFunc("GET /api/admin/customers/{customer_id}/owners", handler.ownerSection)
 	mux.HandleFunc("GET /api/admin/customers/{customer_id}/tags", handler.tagSection)
 	mux.HandleFunc("GET /api/admin/customers/{customer_id}/survey-answers", handler.surveySection)

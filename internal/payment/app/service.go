@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -71,6 +72,8 @@ type paidConfirmationRestorer interface {
 }
 
 type Service struct {
+	contacts                 customerport.ContactReader
+	contactSubjects          identityport.VerifiedIdentitySubjectReader
 	lineage                  identityport.CanonicalLineageReader
 	receiverIDs              identityport.PaymentIdentityReader
 	uow                      platformport.UnitOfWork

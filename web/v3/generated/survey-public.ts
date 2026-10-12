@@ -105,10 +105,39 @@ export const SurveyPublicSessionDisplay = {
   one: "one",
 } as const;
 
+export interface SurveyPublicShippingContact {
+  mobile_e164: string;
+  recipient_name: string;
+  province_code: string;
+  province_name: string;
+  city_code: string;
+  city_name: string;
+  district_code: string;
+  district_name: string;
+  detail_address: string;
+}
+
+export interface SurveyPublicSubmissionAnswer {
+  shipping_address?: SurveyPublicShippingContact;
+  question_id: PositiveID;
+  /** @maxItems 100 */
+  option_ids: PositiveID[];
+  /** @maxLength 10000 */
+  text_value?: string;
+  /** True when the multipart request includes the image for this question */
+  attachment?: boolean;
+}
+
+export type SurveyPublicSessionContactPrefill = {
+  [key: string]: SurveyPublicSubmissionAnswer;
+};
+
 export interface SurveyPublicSession {
   authorized: true;
   identity_state: SurveyPublicSessionIdentityState;
   display: SurveyPublicSessionDisplay;
+  contact_prefill?: SurveyPublicSessionContactPrefill;
+  contact_prefill_unavailable?: boolean;
   submitted: boolean;
   completion_action: CompletionAction;
 }
@@ -141,6 +170,15 @@ export const SurveyPublicQuestionType = {
   mobile: "mobile",
   redemption_code: "redemption_code",
   attachment: "attachment",
+  shipping_address: "shipping_address",
+} as const;
+
+export type SurveyPublicQuestionContactField =
+  (typeof SurveyPublicQuestionContactField)[keyof typeof SurveyPublicQuestionContactField];
+
+export const SurveyPublicQuestionContactField = {
+  contact_phone: "contact_phone",
+  shipping_contact: "shipping_contact",
 } as const;
 
 export interface SurveyPublicOption {
@@ -177,6 +215,7 @@ export interface SurveyPublicOption {
 export interface SurveyPublicQuestion {
   id: PositiveID;
   type: SurveyPublicQuestionType;
+  contact_field?: SurveyPublicQuestionContactField;
   /**
    * @minLength 1
    * @maxLength 500
@@ -216,6 +255,14 @@ export interface SurveyPublicQuestion {
   options: SurveyPublicOption[];
 }
 
+export type SurveyPublicRegionC = string | number;
+
+export interface SurveyPublicRegion {
+  c: SurveyPublicRegionC;
+  n: string;
+  ch?: SurveyPublicRegion[];
+}
+
 export interface SurveyPublicDefinition {
   id: PositiveID;
   /** @pattern ^[a-z0-9][a-z0-9-]{0,127}$ */
@@ -237,6 +284,7 @@ export interface SurveyPublicDefinition {
    * @maxItems 100
    */
   questions: SurveyPublicQuestion[];
+  region_options?: SurveyPublicRegion[];
 }
 
 export type SurveyPublicFieldErrorCode =
@@ -253,16 +301,6 @@ export interface SurveyPublicFieldError {
   code: SurveyPublicFieldErrorCode;
   message: string;
   question_id?: PositiveID;
-}
-
-export interface SurveyPublicSubmissionAnswer {
-  question_id: PositiveID;
-  /** @maxItems 100 */
-  option_ids: PositiveID[];
-  /** @maxLength 10000 */
-  text_value?: string;
-  /** True when the multipart request includes the image for this question */
-  attachment?: boolean;
 }
 
 export interface SurveyPublicSubmissionRequest {

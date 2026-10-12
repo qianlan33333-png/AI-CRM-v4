@@ -18,7 +18,7 @@ window.fetch = async (url, options = {}) => {
   const call = {url: String(url), method, body: options.body, headers: options.headers || {}};
   calls.push(call);
   const answer = (body, status = 200) => ({ok: status >= 200 && status < 300, status, async json() {return body;}});
-  if (url === '/api/v1/wechat-pay/checkout-session') return answer({checkout_session_binding: 'a'.repeat(43), can_create_checkout: true});
+  if (new URL(String(url), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session') return answer({checkout_session_binding: 'a'.repeat(43), can_create_checkout: true});
   if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return answer({purchase_state: 'available', can_purchase: true});
   if (String(url).startsWith('/api/h5/coupons/available')) return answer({items: []});
   if (url === '/api/v1/alipay/checkouts' && method === 'POST') {
@@ -108,7 +108,7 @@ after.sessionStorage.setItem('aicrm.checkout.tab.v2:7:standard', saved);
 const reloadCalls = [];
 after.fetch = async (url, options = {}) => {
   reloadCalls.push({url: String(url), method: options.method || 'GET'});
-  const body = url === '/api/v1/wechat-pay/checkout-session'
+  const body = new URL(String(url), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session'
     ? {checkout_session_binding: 'a'.repeat(43), can_create_checkout: false}
     : String(url).startsWith('/api/v1/wechat-pay/purchase-status')
       ? {purchase_state: 'available', can_purchase: true}
@@ -129,7 +129,7 @@ const desktopCalls = [];
 desktop.window.crypto.randomUUID = () => 'checkout-alipay-page-7';
 desktop.window.fetch = async (url, options = {}) => {
   desktopCalls.push({url: String(url), options});
-  const body = url === '/api/v1/wechat-pay/checkout-session'
+  const body = new URL(String(url), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session'
     ? {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true}
     : String(url).startsWith('/api/v1/wechat-pay/purchase-status')
       ? {purchase_state: 'available', can_purchase: true}
@@ -158,7 +158,7 @@ rejectedWindow.crypto.randomUUID = () => 'checkout-alipay-rejected-7';
 let rejectedPosts = 0;
 rejectedWindow.fetch = async (url, options = {}) => {
   const method = options.method || 'GET';
-  if (url === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
+  if (new URL(String(url), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
   if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return {ok: true, status: 200, async json() {return {purchase_state: 'available', can_purchase: true};}};
   if (String(url).startsWith('/api/h5/coupons/available')) return {ok: true, status: 200, async json() {return {items: []};}};
   if (url === '/api/v1/alipay/checkouts' && method === 'POST') {
@@ -191,7 +191,7 @@ ambiguousWindow.sessionStorage.setItem('aicrm.checkout.tab.v2:7:standard', JSON.
 let ambiguousPosts = 0;
 ambiguousWindow.fetch = async (url, options = {}) => {
   const method = options.method || 'GET';
-  if (url === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
+  if (new URL(String(url), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
   if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return {ok: true, status: 200, async json() {return {purchase_state: 'available', can_purchase: true};}};
   if (url === '/api/v1/alipay/checkouts' && method === 'POST') {
     ambiguousPosts++;
@@ -217,7 +217,7 @@ unauthorizedWindow.crypto.randomUUID = () => 'checkout-alipay-first-401-7';
 let unauthorizedPosts = 0;
 unauthorizedWindow.fetch = async (url, options = {}) => {
   const method = options.method || 'GET';
-  if (url === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
+  if (new URL(String(url), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
   if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return {ok: true, status: 200, async json() {return {purchase_state: 'available', can_purchase: true};}};
   if (String(url).startsWith('/api/h5/coupons/available')) return {ok: true, status: 200, async json() {return {items: []};}};
   if (url === '/api/v1/alipay/checkouts' && method === 'POST') {
@@ -242,7 +242,7 @@ reauthorizedWindow.crypto.randomUUID = () => 'checkout-alipay-new-binding-7';
 let reauthorizedPost;
 reauthorizedWindow.fetch = async (url, options = {}) => {
   const method = options.method || 'GET';
-  if (url === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'b'.repeat(43), can_create_checkout: true};}};
+  if (new URL(String(url), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'b'.repeat(43), can_create_checkout: true};}};
   if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return {ok: true, status: 200, async json() {return {purchase_state: 'available', can_purchase: true};}};
   if (String(url).startsWith('/api/h5/coupons/available')) return {ok: true, status: 200, async json() {return {items: []};}};
   if (url === '/api/v1/alipay/checkouts' && method === 'POST') {
@@ -266,7 +266,7 @@ Object.defineProperty(originRejectedWindow.navigator, 'userAgent', {value: 'Mozi
 originRejectedWindow.crypto.randomUUID = () => 'checkout-alipay-origin-rejected-7';
 originRejectedWindow.fetch = async (url, options = {}) => {
   const method = options.method || 'GET';
-  if (url === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
+  if (new URL(String(url), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
   if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return {ok: true, status: 200, async json() {return {purchase_state: 'available', can_purchase: true};}};
   if (String(url).startsWith('/api/h5/coupons/available')) return {ok: true, status: 200, async json() {return {items: []};}};
   if (url === '/api/v1/alipay/checkouts' && method === 'POST') return {ok: false, status: 403, async json() {return {error: 'cross_site_request'};}};
@@ -289,7 +289,7 @@ ambiguousNewBindingWindow.sessionStorage.setItem('aicrm.checkout.tab.v2:7:standa
 let blockedNewBindingPosts = 0;
 ambiguousNewBindingWindow.fetch = async (url, options = {}) => {
   const method = options.method || 'GET';
-  if (url === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'b'.repeat(43), can_create_checkout: true};}};
+  if (new URL(String(url), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'b'.repeat(43), can_create_checkout: true};}};
   if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return {ok: true, status: 200, async json() {return {purchase_state: 'available', can_purchase: true};}};
   if (url === '/api/v1/alipay/checkouts' && method === 'POST') blockedNewBindingPosts++;
   throw new Error('unexpected ambiguous-new-binding request: ' + method + ' ' + url);
@@ -312,7 +312,7 @@ ambiguousOriginRetryWindow.sessionStorage.setItem('aicrm.checkout.tab.v2:7:stand
 let ambiguousOriginPosts = 0;
 ambiguousOriginRetryWindow.fetch = async (url, options = {}) => {
   const method = options.method || 'GET';
-  if (url === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
+  if (new URL(String(url), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session') return {ok: true, status: 200, async json() {return {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true};}};
   if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return {ok: true, status: 200, async json() {return {purchase_state: 'available', can_purchase: true};}};
   if (url === '/api/v1/alipay/checkouts' && method === 'POST') {
     ambiguousOriginPosts++;
@@ -335,7 +335,7 @@ Object.defineProperty(encryptedPage.window.navigator,'userAgent',{value:'MicroMe
 encryptedPage.window.sessionStorage.setItem('aicrm.checkout.tab.v2:7:standard',JSON.stringify({key:'encrypted-original',merchant_order_no:'M-alipay-7',create_attempted:true,session_binding:'a'.repeat(43),payload:ambiguousPayload}));
 let encryptedReads=0;
 encryptedPage.window.fetch=async(url,options={})=>{assert.notEqual(options.method,'POST','encrypted handoff never creates a second order');let body;
- if(url==='/api/v1/wechat-pay/checkout-session')body={checkout_session_binding:'a'.repeat(43),can_create_checkout:true};
+ if(new URL(String(url), 'https://example.test').pathname==='/api/v1/wechat-pay/checkout-session')body={checkout_session_binding:'a'.repeat(43),can_create_checkout:true};
  else if(String(url).startsWith('/api/v1/wechat-pay/purchase-status'))body={purchase_state:'available',can_purchase:true};
  else if(url==='/api/v1/alipay/checkouts/M-alipay-7'){encryptedReads++;body={status:'awaiting_payment',ready:true,provider:'alipay',handoff:{redirectUrl:encryptedLink.href}}}
  else assert.fail('unexpected encrypted read '+url);

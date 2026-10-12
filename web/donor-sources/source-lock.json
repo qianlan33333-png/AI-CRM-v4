@@ -908,9 +908,9 @@
       "source_commit": "d2f702bd5393e78071cc73c67c11985d5d5e044b",
       "canonical_path": "api/openapi.yaml",
       "source_path": "api/openapi.yaml",
-      "source_git_blob_sha": "ba716e52fe50096fcfada27b4459838766b3f74a",
-      "content_sha256": "3d32329c8491801a212d9bda3185931de84a337cd35ffd0ab6027db80c90faa6",
-      "bytes": 810062,
+      "source_git_blob_sha": "50baf5ebf00addd45e1f3718dd60658c9a6b3009",
+      "content_sha256": "847ab5c67e35d682987477fe7f28063fc93155bfc33c0d8bbed064e79fc3d912",
+      "bytes": 812645,
       "mode": "100644"
     }
   ]

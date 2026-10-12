@@ -4,6 +4,7 @@ package domain
 import (
 	"encoding/json"
 	"errors"
+	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	"math"
 	"net/url"
 	"regexp"
@@ -42,7 +43,14 @@ func ValidateQuestionnaire(value surveyport.Questionnaire) error {
 	}
 	seenQuestionIDs := map[surveyport.ID]struct{}{}
 	redemptionCount := 0
+	contactCount := 0
 	for index, question := range value.Questions {
+		if question.SidebarProfileField == "contact_phone" || question.SidebarProfileField == "shipping_contact" {
+			contactCount++
+			if contactCount > 1 {
+				return ErrInvalidQuestionnaire
+			}
+		}
 		if question.Type == surveyport.QuestionRedemptionCode {
 			redemptionCount++
 			if redemptionCount > 1 {
@@ -79,6 +87,9 @@ func ValidateQuestionnaire(value surveyport.Questionnaire) error {
 
 func ValidateQuestion(value surveyport.Question, mode surveyport.QuestionnaireMode) error {
 	if !validText(value.Title, 1000) || value.SortOrder < 0 || !validOptionalText(value.Placeholder, 500) || !validOptionalOpaque(value.SidebarProfileField) {
+		return ErrInvalidQuestion
+	}
+	if value.SidebarProfileField == "contact_phone" && value.Type != surveyport.QuestionMobile || value.SidebarProfileField == "shipping_contact" && value.Type != surveyport.QuestionShippingAddress {
 		return ErrInvalidQuestion
 	}
 	switch value.Type {
@@ -119,7 +130,7 @@ func ValidateQuestion(value surveyport.Question, mode surveyport.QuestionnaireMo
 		if len(value.Options) != 0 || value.Validation.MinimumSelections != nil || value.Validation.MaximumSelections != nil || !validLengthRange(value.Validation.MinimumLength, value.Validation.MaximumLength, MaximumTextLength) {
 			return ErrInvalidQuestion
 		}
-	case surveyport.QuestionMobile:
+	case surveyport.QuestionMobile, surveyport.QuestionShippingAddress:
 		if len(value.Options) != 0 || value.Validation.MinimumSelections != nil || value.Validation.MaximumSelections != nil || value.Validation.MinimumLength != nil || value.Validation.MaximumLength != nil {
 			return ErrInvalidQuestion
 		}
@@ -206,6 +217,9 @@ func ValidateAnswers(questions []surveyport.Question, answers []surveyport.Submi
 }
 
 func validateAnswer(question surveyport.Question, answer surveyport.SubmissionAnswer) error {
+	if question.Type != surveyport.QuestionShippingAddress && answer.ShippingAddress != nil {
+		return ErrInvalidAnswer
+	}
 	if question.Type != surveyport.QuestionAttachment && answer.Attachment {
 		return ErrInvalidAnswer
 	}
@@ -277,6 +291,19 @@ func validateAnswer(question surveyport.Question, answer surveyport.SubmissionAn
 			return nil
 		}
 		if !mobilePattern.MatchString(answer.TextValue) {
+			return ErrInvalidAnswer
+		}
+	case surveyport.QuestionShippingAddress:
+		if len(answer.OptionIDs) != 0 || answer.TextValue != "" {
+			return ErrInvalidAnswer
+		}
+		if answer.ShippingAddress == nil {
+			if question.Required {
+				return ErrInvalidAnswer
+			}
+			return nil
+		}
+		if !customerport.ValidShippingContact(*answer.ShippingAddress) {
 			return ErrInvalidAnswer
 		}
 	case surveyport.QuestionRedemptionCode:

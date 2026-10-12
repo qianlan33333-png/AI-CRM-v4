@@ -22,7 +22,7 @@ for (const kind of ['standard', 'service_period']) {
           window.fetch = async (url, options = {}) => {
             const route = String(url), method = options.method || 'GET';
             calls.push({route, method, body: options.body});
-            const body = route === '/api/v1/wechat-pay/checkout-session'
+            const body = new URL(String(route), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session'
               ? {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true}
               : route.startsWith('/api/v1/wechat-pay/purchase-status')
                 ? {purchase_state: 'available', can_purchase: true}
@@ -56,7 +56,7 @@ for (const kind of ['standard', 'service_period']) {
       }
       if (level === 'shipping_address') {
         assert.equal(document.getElementById('provinceError').textContent, '请选择省');
-        assert.equal(document.querySelector('.shipping-purpose').textContent, '收实物商品使用');
+        assert.equal(document.querySelector('.shipping-purpose'), null, 'shipping form omits redundant purpose copy');
         const province = document.getElementById('province'), city = document.getElementById('city'), district = document.getElementById('district');
         province.value = '11'; province.dispatchEvent(new Event('change'));
         city.value = '1101'; city.dispatchEvent(new Event('change'));

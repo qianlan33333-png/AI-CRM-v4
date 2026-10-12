@@ -1,36 +1,19 @@
-# 问卷兑换码与图片附件 Product Design QA
+# Customer contact reuse — Product Design QA
 
-沿用已授权父 PRD 及当前 CRM 的运营配置、问卷编辑器、H5 题卡。没有新增统计看板、附件管理中心、预上传或临时引用页面。
+Source visual truth: `/Users/qianlan/.codex/generated_images/01a12e77-4c1c-7891-9d87-ada185685b8a/exec-040dd9d7-9ce8-4a8e-a937-10eb4795830a.png`.
 
-## 视觉证据
+Evidence root: `/Users/qianlan/.codex/visualizations/2026/10/12/01a12e77-4c1c-7891-9d87-ada185685b8a/customer-contact-reuse/`.
 
-截图目录：`/Users/qianlan/.codex/visualizations/2026/10/12/01a12dad-c7da-72a0-9173-293fab637ed2`。
+Compared `comparison-full.png` and `comparison-contact.png`, each placing source and implementation in the same image. Source 852×1846 normalized to 393×852 CSS; checkout screenshots 393×852. In-app browser viewport 393×852, devicePixelRatio 1. Survey screenshots captured during viewport transition are 614×1331; used for functional inspection only, not precise full-screen comparison.
 
-- 运营配置源视觉：`all-operations-source.png`，同页已有“提交后动作”区块；实现：`all-operations-codes.png`。1440×900 CSS/pixels，deviceScaleFactor 1。`qa-operations.png` 在同一图像中组合两张捕获；`qa-operations-focused.png` 对齐内容区比较字体、标题间距、分隔线、表格和按钮。
-- H5 源视觉：`one-h5-source.png` 的既有逐题卡片；实现：`one-h5-image.png`；390×844 CSS/pixels，deviceScaleFactor 1。源题目与附件题内容、进度不同，属于已授权新题型，比较卡片、控件、字体、颜色和页底导航，不声称内容逐像素相同。`qa-h5.png` 是组合比较输入；全页 `all-h5-image.png` 另核对整页滚动，逐题 `one-h5-rejected.png` 核对拒绝弹窗和定位。
-- 编辑器：`all-editor-attachment.png`；1440×900，附件工具卡与同屏既有工具卡、题卡及配置区比较。`one-admin-answer.png` 核对受保护缩略图和查看入口。
-- 截图均来自实际 Chromium 加真实 PostgreSQL 的隔离业务旅程。PNG 合成只用于并排分析，没有改动产品图片。桌面组合图查看时可能缩至 2048 宽，细节判断使用原尺寸的内容区域。
+Scope: the approved contact group and its reuse in questionnaires. The baseline product/coupon/payment blocks outside that group are unchanged by the contact feature and are not claimed to match the full reference. Final cumulative checkout must also integrate the previously approved product-variants/UI candidate.
 
-## 比较历史与修正
+Iteration 1: `checkout-shipping.png` had overly round corners and a light heading versus the approved contact block (P2). Fixed the contact group to 8px corners and 600-weight heading. Iteration 2: `checkout-shipping-final.png` and the combined focused comparison show the corrected block.
 
-1. 首次比较发现 P2：原生 file 控件在重渲染后显示“未选择文件”，但页内 File 和预览仍存在；工具图像回执记录了该状态。改为“选择图片／替换图片”选择控件，保留预览、文件名、移除按钮及键盘焦点边框。同时隐藏重复的文件已选择成功 toast，避免遮住移动端提交按钮。
-2. 首次编辑器捕获发现 P2：新增附件入口采用普通按钮，破坏同列工具卡节奏；附件显示无实际用途的“提示文字”。改为既有 tool-card 结构并隐藏该设置。
-3. 修正后再次捕获、比较：题卡边框和圆角、字号层级、页面间距、蓝色操作色与既有页面一致，选择状态明确；新题型及文字为批准的必要内容。最新捕获覆盖旧路径，首次图像回执保留在本任务工具记录中。没有剩余 P0/P1/P2。
+Required surfaces checked: system Chinese typography and 15px field hierarchy; four 52px rows with aligned 72px labels; neutral white/gray fields and restrained borders; no new imagery or decorative assets; same 收件人/手机号/所在地区/详细地址 wording. Filled content intentionally replaces the source placeholders. Surrounding existing native questionnaire controls and shared UI styles remain in use.
 
-## 五项表面检查
+Browser verification: checkout phone/address prefilled; address can be modified. Questionnaire all-in-one and one-by-one render the four fields; name can be modified. No console errors/warnings observed on these local fixture routes. JavaScript journey tests separately cover late input/clear, manual fallback, region cascade, current submission values and scoped sidebar reveal. This is local fixture evidence, not authenticated staging or real Provider acceptance.
 
-- 字体：沿用系统中文字体、现有标题/正文/说明层级；文件名允许换行，未出现截断或横向溢出。
-- 间距：运营配置单壳与导航保持原布局；H5 复用题卡和 44px 触控入口，逐题保留固定页底导航。
-- 颜色：白色卡片、灰色背景/边框、蓝色操作与红色必填提示沿用现有 tokens。
-- 图片：展示实际提交文件，使用 object-fit:contain；未引入装饰图片、素材替代或自制图标。
-- 文案：三种兑换码拒绝话术固定；附件注明格式、严格小于 2MB 和刷新后重新选择，新增类型不提供画像或分值配置。
-
-## 交互与限制
-
-真实浏览器验证：运营上传 Excel 与重新读取库；编辑器新增附件/兑换码数量约束；全页和逐题选图、替换/移除、刷新重选、最终验码失败保留图片、成功提交、后台私有缩略图及导出。浏览器旅程同时检查未捕获 Runtime 异常。图片格式与大小由服务端真实解码校验补充。
-
-隔离环境未配置企微标签 Provider，编辑器的既有标签不可用提示属于测试环境事实；未把它当作真实 Provider 验收。最终 Linux 安装包、真实微信客户端与实际网关预算仍由唯一工作台验证，本报告不代替安装或上线收据。
-
-Implementation checklist：视觉修正已应用；两种模式的真实旅程纳入候选；最终准确 head/tree 的测试收据随交付保存。
+No remaining P0/P1/P2 in the contact group. Full cumulative checkout and installed sidebar remain release-workbench checks after integration.
 
 final result: passed

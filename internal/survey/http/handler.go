@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	addressport "github.com/qianlan33333-png/AI-CRM-v3/internal/address/port"
 	"io"
 	"net/http"
 	"net/url"
@@ -738,7 +739,22 @@ func (h *Handler) oauthSession(w http.ResponseWriter, r *http.Request) {
 		display = "one"
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"authorized": true, "identity_state": identity.State, "display": display, "submitted": status.Submitted, "completion_action": status.CompletionAction})
+	response := map[string]any{"authorized": true, "identity_state": identity.State, "display": display, "submitted": status.Submitted, "completion_action": status.CompletionAction}
+	if reader, available := h.submissions.(interface {
+		ContactPrefill(context.Context, surveyport.Questionnaire, surveyport.SubmissionIdentity) (map[surveyport.ID]surveyport.SubmissionAnswer, error)
+	}); available {
+		prefill, e := reader.ContactPrefill(r.Context(), questionnaire, identity)
+		if errors.Is(e, surveyport.ErrReauthorizationRequired) || errors.Is(e, surveyport.ErrConflict) {
+			resultError(w, e)
+			return
+		}
+		if e == nil {
+			response["contact_prefill"] = prefill
+		} else {
+			response["contact_prefill_unavailable"] = true
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func completionLocation(slug string, action surveyport.CompletionAction) string {
@@ -1365,6 +1381,9 @@ func publicDefinition(q surveyport.Questionnaire) map[string]any {
 			maximum = *question.Validation.MaximumSelections
 		}
 		item := map[string]any{"id": question.ID, "type": question.Type, "title": question.Title, "required": question.Required, "sort_order": question.SortOrder, "minimum_selections": minimum, "maximum_selections": maximum, "placeholder_text": question.Placeholder, "assessment_dimension_key": question.AssessmentDimensionKey, "options": question.Options}
+		if question.SidebarProfileField == "contact_phone" || question.SidebarProfileField == "shipping_contact" {
+			item["contact_field"] = question.SidebarProfileField
+		}
 		if question.Validation.MinimumLength != nil {
 			item["minimum_length"] = *question.Validation.MinimumLength
 		}
@@ -1373,7 +1392,14 @@ func publicDefinition(q surveyport.Questionnaire) map[string]any {
 		}
 		questions = append(questions, item)
 	}
-	return map[string]any{"id": q.ID, "slug": q.Slug, "title": q.Title, "description": q.Description, "answer_display_mode": q.AnswerDisplayMode, "version": q.DefinitionVersion, "mode": q.Mode, "assessment_config": json.RawMessage(q.AssessmentConfig), "questions": questions}
+	result := map[string]any{"id": q.ID, "slug": q.Slug, "title": q.Title, "description": q.Description, "answer_display_mode": q.AnswerDisplayMode, "version": q.DefinitionVersion, "mode": q.Mode, "assessment_config": json.RawMessage(q.AssessmentConfig), "questions": questions}
+	for _, question := range q.Questions {
+		if question.Type == surveyport.QuestionShippingAddress {
+			result["region_options"] = json.RawMessage(addressport.OptionsJSON())
+			break
+		}
+	}
+	return result
 }
 
 func (h *Handler) read(w http.ResponseWriter, r *http.Request) bool {

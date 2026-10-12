@@ -39,6 +39,7 @@ type SidebarProfileStore interface {
 }
 
 type SidebarProfileApplication struct {
+	Contacts   customerport.ContactReader
 	Numbers    identityport.CustomerPublicNumbers
 	uow        platformport.UnitOfWork
 	store      SidebarProfileStore
@@ -70,6 +71,23 @@ func (service *SidebarProfileApplication) ReadSidebarProfile(ctx context.Context
 		profile, err = service.store.ReadSidebarProfile(txctx, customerID)
 		if err != nil {
 			return err
+		}
+		if service.Contacts != nil {
+			contact, e := service.Contacts.ReadContactWithin(txctx, customerID, true)
+			if e != nil {
+				return e
+			}
+			if phone, valid := customerport.NormalizeContactPhone(contact.MobileE164); valid {
+				profile.ContactPhoneMasked = phone[3:6] + "****" + phone[10:]
+			}
+			if a := contact.Shipping; a != nil {
+				name := []rune(a.RecipientName)
+				masked := "*"
+				if len(name) > 0 {
+					masked = string(name[0]) + "*"
+				}
+				profile.ContactShippingSummary = masked + " · " + a.ProvinceName + a.CityName + a.DistrictName + " · 详细地址已保护"
+			}
 		}
 		if service.Numbers != nil {
 			numbers, e := service.Numbers.CustomerPublicNumbers(txctx, []customerdomain.CustomerID{customerID})

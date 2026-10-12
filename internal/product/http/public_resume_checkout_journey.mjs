@@ -14,7 +14,7 @@ for(const scenario of ['ready','alipay','paid','expired','unknown','wrong-produc
  w.fetch=async(url,options={})=>{
   calls.push({url:String(url),method:options.method||'GET'});
   const response=(value,status=200)=>({ok:status>=200&&status<300,status,json:async()=>value});
-  if(url==='/api/v1/wechat-pay/checkout-session')return scenario==='unauthorized'?response({code:'payment_session_required'},401):response({checkout_session_binding:'a'.repeat(43),can_create_checkout:false});
+  if(new URL(String(url), 'https://example.test').pathname==='/api/v1/wechat-pay/checkout-session')return scenario==='unauthorized'?response({code:'payment_session_required'},401):response({checkout_session_binding:'a'.repeat(43),can_create_checkout:false});
   if(url==='/api/h5/me/orders/7/payment')return response({order_id:7,merchant_order_no:'original-7',product_id:scenario==='wrong-product'?8:7,product_kind:kind,product_name:'冻结商品名称',provider:scenario==='alipay'?'alipay':'wechat_pay',channel:scenario==='alipay'?'alipay_wap':'h5_official_account',amount_minor:8800,currency:'CNY'});
   assert.equal(url,scenario==='alipay'?'/api/v1/alipay/checkouts/original-7':'/api/v1/wechat-pay/checkouts/original-7');
   if(scenario==='alipay')return response({status:'awaiting_payment',ready:true,amount_minor:8800,currency:'CNY',handoff:{redirectUrl:'https://openapi.alipay.com/gateway.do?method=alipay.trade.wap.pay&app_id=synthetic&sign=synthetic&biz_content='+encodeURIComponent(JSON.stringify({out_trade_no:'original-7'}))}});

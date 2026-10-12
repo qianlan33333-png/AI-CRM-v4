@@ -10,26 +10,28 @@ import (
 // SidebarProfile is the Customer-owned safe projection. It deliberately
 // contains neither raw external identifiers nor a clear-text phone.
 type SidebarProfile struct {
-	CustomerNumber        string                    `json:"customer_number,omitempty"`
-	CustomerID            customerdomain.CustomerID `json:"customer_id"`
-	DisplayName           string                    `json:"display_name"`
-	AvatarURL             string                    `json:"avatar_url,omitempty"`
-	PhoneMasked           string                    `json:"phone_masked,omitempty"`
-	PhoneAssurance        string                    `json:"phone_assurance,omitempty"`
-	Status                string                    `json:"status"`
-	ActivationState       string                    `json:"activation_status"`
-	Gender                int16                     `json:"gender,omitempty"`
-	ContactType           int16                     `json:"contact_type,omitempty"`
-	CorpName              string                    `json:"corp_name,omitempty"`
-	Source                string                    `json:"source,omitempty"`
-	ProfileSource         string                    `json:"profile_source,omitempty"`
-	ProfileVersion        int64                     `json:"profile_version"`
-	Industry              string                    `json:"industry,omitempty"`
-	IndustryDescription   string                    `json:"industry_description,omitempty"`
-	NeedsBlockersFollowup string                    `json:"needs_blockers_followup,omitempty"`
-	Version               int64                     `json:"version"`
-	LastSyncedAt          *time.Time                `json:"last_synced_at,omitempty"`
-	UpdatedAt             time.Time                 `json:"updated_at"`
+	ContactPhoneMasked     string                    `json:"contact_phone_masked,omitempty"`
+	ContactShippingSummary string                    `json:"contact_shipping_summary,omitempty"`
+	CustomerNumber         string                    `json:"customer_number,omitempty"`
+	CustomerID             customerdomain.CustomerID `json:"customer_id"`
+	DisplayName            string                    `json:"display_name"`
+	AvatarURL              string                    `json:"avatar_url,omitempty"`
+	PhoneMasked            string                    `json:"phone_masked,omitempty"`
+	PhoneAssurance         string                    `json:"phone_assurance,omitempty"`
+	Status                 string                    `json:"status"`
+	ActivationState        string                    `json:"activation_status"`
+	Gender                 int16                     `json:"gender,omitempty"`
+	ContactType            int16                     `json:"contact_type,omitempty"`
+	CorpName               string                    `json:"corp_name,omitempty"`
+	Source                 string                    `json:"source,omitempty"`
+	ProfileSource          string                    `json:"profile_source,omitempty"`
+	ProfileVersion         int64                     `json:"profile_version"`
+	Industry               string                    `json:"industry,omitempty"`
+	IndustryDescription    string                    `json:"industry_description,omitempty"`
+	NeedsBlockersFollowup  string                    `json:"needs_blockers_followup,omitempty"`
+	Version                int64                     `json:"version"`
+	LastSyncedAt           *time.Time                `json:"last_synced_at,omitempty"`
+	UpdatedAt              time.Time                 `json:"updated_at"`
 }
 
 type SidebarProfileUpdate struct {

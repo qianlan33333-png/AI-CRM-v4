@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	customerport "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/port"
 	"io"
 	"log/slog"
 	"net/http"
@@ -281,7 +282,29 @@ func (handler *Handler) checkoutSession(writer http.ResponseWriter, request *htt
 		}
 	}
 	writer.Header().Set("Cache-Control", "no-store")
-	writeJSON(writer, http.StatusOK, map[string]any{"checkout_session_binding": binding, "can_create_checkout": canCreate})
+	response := map[string]any{"checkout_session_binding": binding, "can_create_checkout": canCreate}
+	if rawID := request.URL.Query().Get("product_id"); rawID != "" && canCreate {
+		id, parseErr := strconv.ParseInt(rawID, 10, 64)
+		if parseErr != nil || id < 1 {
+			writeError(writer, http.StatusBadRequest, "invalid_product")
+			return
+		}
+		if reader, ok := handler.app.(interface {
+			CheckoutContactPrefill(context.Context, string, string, int64) (customerport.ContactProfile, error)
+		}); ok {
+			profile, readErr := reader.CheckoutContactPrefill(request.Context(), cookie.Value, request.URL.Query().Get("product_kind"), id)
+			if errors.Is(readErr, paymentport.ErrSessionRequired) || errors.Is(readErr, paymentport.ErrSessionMismatch) {
+				resultError(writer, readErr)
+				return
+			}
+			if readErr == nil {
+				response["contact_prefill"] = profile
+			} else {
+				response["contact_prefill_unavailable"] = true
+			}
+		}
+	}
+	writeJSON(writer, http.StatusOK, response)
 }
 
 func (handler *Handler) startH5OAuth(writer http.ResponseWriter, request *http.Request) {

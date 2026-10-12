@@ -127,6 +127,7 @@ type Service struct {
 		KeyVersion() int16
 	}
 	collectedPhones            customerport.CollectedPhoneRecorder
+	contacts                   customerport.ContactWriter
 	coupons                    couponport.OrderCouponCoordinator
 	entitlements               orderport.ServicePeriodEntitlementCoordinator
 	paidEvents                 orderport.PaidEventConsumer
@@ -434,6 +435,16 @@ func (s *Service) createCheckoutOrderWithin(ctx context.Context, command orderpo
 		}
 	}
 	if command.MobileE164 != "" {
+		if s.contacts != nil {
+			update := customerport.ContactUpdate{CustomerID: customerdomain.CustomerID(command.PayerCustomerID), MobileE164: command.MobileE164, Source: fmt.Sprintf("order:%d", checkout.OrderID)}
+			if command.ContactCollectionLevel == "shipping_address" {
+				a := command.ShippingAddress
+				update.Shipping = &customerport.ShippingContact{MobileE164: command.MobileE164, RecipientName: a.RecipientName, ProvinceCode: a.ProvinceCode, ProvinceName: a.ProvinceName, CityCode: a.CityCode, CityName: a.CityName, DistrictCode: a.DistrictCode, DistrictName: a.DistrictName, DetailAddress: a.DetailAddress}
+			}
+			if err = s.contacts.UpdateContactWithin(ctx, update); err != nil {
+				return domain.Snapshot{}, err
+			}
+		}
 		if _, err = s.collectedPhones.CollectPhoneWithin(ctx, customerport.CollectedPhoneCommand{
 			DeclaredPhoneCommand: identityport.DeclaredPhoneCommand{CustomerID: customerdomain.CustomerID(command.PayerCustomerID), Phone: command.MobileE164, Source: "order", SourceEventID: fmt.Sprintf("order:%d:contact", checkout.OrderID), IdempotencyKey: fmt.Sprintf("order-phone:%d", checkout.OrderID)},
 			CollectedAt:          input.CreatedAt,

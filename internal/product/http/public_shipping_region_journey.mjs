@@ -17,7 +17,7 @@ const page = new JSDOM(html, {
     window.fetch = async (url, options = {}) => {
       const path = String(url);
       calls.push({path, options});
-      const body = path === '/api/v1/wechat-pay/checkout-session'
+      const body = new URL(String(path), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session'
         ? {checkout_session_binding: 'a'.repeat(43), can_create_checkout: true}
         : path.startsWith('/api/v1/wechat-pay/purchase-status')
           ? {purchase_state: 'available', can_purchase: true}

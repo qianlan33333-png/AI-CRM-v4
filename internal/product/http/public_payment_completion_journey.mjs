@@ -58,7 +58,7 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   setGlobal('WeixinJSBridge', {invoke(...args) {if(bridgeInvoke) return bridgeInvoke(...args);throw new Error('paid reload must not invoke payment'); }});
   setGlobal('fetch', async (url, options = {}) => {
     calls.push({url: String(url), method: options.method ?? 'GET'});
-    if (String(url) === '/api/v1/wechat-pay/checkout-session') return sessionAuthorized===503?response({code:'unavailable'},503):(typeof sessionAuthorized === 'function' ? sessionAuthorized() : sessionAuthorized) ? response({checkout_session_binding: 'a'.repeat(43),can_create_checkout:sessionAuthorized!=='consumed'}) : response({code: 'payment_session_required'}, 401);
+    if (new URL(String(String(url)), 'https://example.test').pathname === '/api/v1/wechat-pay/checkout-session') return sessionAuthorized===503?response({code:'unavailable'},503):(typeof sessionAuthorized === 'function' ? sessionAuthorized() : sessionAuthorized) ? response({checkout_session_binding: 'a'.repeat(43),can_create_checkout:sessionAuthorized!=='consumed'}) : response({code: 'payment_session_required'}, 401);
     if (String(url).startsWith('/api/v1/wechat-pay/purchase-status')) return response(purchase);
     if (String(url).startsWith('/api/h5/coupons/available')) return response({items: []});
     assert.equal(String(url), '/api/v1/wechat-pay/checkouts/M-paid-7');
@@ -81,7 +81,7 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   assert.equal(run.elements.get('identityTitle').textContent, '登录才能完成支付');
   assert.match(run.elements.get('identityMessage').textContent, /不会自动扣款/);
   assert.equal(run.calls.length, 1);
-  assert.equal(run.calls[0].url, '/api/v1/wechat-pay/checkout-session');
+  assert.equal(new URL(run.calls[0].url,'https://example.test').pathname, '/api/v1/wechat-pay/checkout-session');
   assert.equal(run.calls.some(call => call.method === 'POST'), false);
   assert.equal(run.calls.filter(call => call.redirect).length, 0);
 }
@@ -247,7 +247,7 @@ function boot(store, completion, redirectFailure = false, sessionAuthorized = tr
   run.elements.get('mobile').value = '13800138000';
   let submissions = 0;
   globalThis.fetch = async (url, options = {}) => {
-    if (url.endsWith('/checkout-session')) return response({checkout_session_binding: 'a'.repeat(43),can_create_checkout:true});
+    if (new URL(url,'https://example.test').pathname.endsWith('/checkout-session')) return response({checkout_session_binding: 'a'.repeat(43),can_create_checkout:true});
     if (options.method === 'POST') {
       const payload = JSON.parse(options.body);
       assert.equal(payload.mobile, '+8613800138000');

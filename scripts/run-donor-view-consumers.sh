@@ -128,6 +128,7 @@ build_release_binaries() {
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-phone-identities ./cmd/migrate-phone-identities
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-identity-phone-vault ./cmd/migrate-identity-phone-vault
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-collected-phones ./cmd/migrate-collected-phones
+  go build -trimpath -ldflags "-s -w" -o release/bin/migrate-customer-contacts ./cmd/migrate-customer-contacts
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-external-orders ./cmd/migrate-external-orders
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-survey-v2 ./cmd/migrate-survey-v2
   go build -trimpath -ldflags "-s -w" -o release/bin/migrate-commerce-history ./cmd/migrate-commerce-history
