@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	ErrNotFound    = errors.New("order not found")
-	ErrConflict    = errors.New("order conflict")
-	ErrUnavailable = errors.New("order unavailable")
+	ErrNotFound     = errors.New("order not found")
+	ErrConflict     = errors.New("order conflict")
+	ErrUnavailable  = errors.New("order unavailable")
+	ErrPriceChanged = errors.New("order checkout price changed")
 )
 
 type CreateCommand struct {
@@ -362,6 +363,7 @@ type PaymentOrderCommand struct {
 	// Referral can later resolve the exact activity without reading Order data.
 	ReferralActivityContext    string
 	ActorScope, IdempotencyKey string
+	ExpectedAmountMinor        *int64 `json:",omitempty"`
 }
 
 // ShippingAddress is an immutable buyer-supplied contact fact. Region codes

@@ -359,11 +359,14 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 				ProductVersion: product.Version, ProductType: orderCheckoutProductType(product.ProductType), ServicePeriodDurationDays: product.ServicePeriodDurationDays, UnitAmountMinor: product.PriceMinor, Currency: product.Currency,
 				PostPurchaseAction: product.PostPurchaseAction,
 				MobileE164:         c.MobileE164, ContactCollectionLevel: c.ContactCollectionLevel, ShippingAddress: orderport.ShippingAddress{RecipientName: c.ShippingAddress.RecipientName, ProvinceCode: c.ShippingAddress.ProvinceCode, ProvinceName: c.ShippingAddress.ProvinceName, CityCode: c.ShippingAddress.CityCode, CityName: c.ShippingAddress.CityName, DistrictCode: c.ShippingAddress.DistrictCode, DistrictName: c.ShippingAddress.DistrictName, DetailAddress: c.ShippingAddress.DetailAddress}, PromotionContext: c.PromotionContext, ReferralActivityContext: c.ReferralActivityContext,
-				ActorScope: "payment-session:" + hex.EncodeToString(sessionDigest[:]), IdempotencyKey: c.IdempotencyKey,
+				ActorScope: "payment-session:" + hex.EncodeToString(sessionDigest[:]), IdempotencyKey: c.IdempotencyKey, ExpectedAmountMinor: c.ExpectedAmountMinor,
 			})
 		}
 		if err != nil {
 			return err
+		}
+		if c.ExpectedAmountMinor != nil && *c.ExpectedAmountMinor != order.Amount.AmountMinor {
+			return paymentport.ErrPriceChanged
 		}
 		if order.PayerCustomerID == nil || order.BeneficiaryCustomerID == nil || int64(*order.PayerCustomerID) != actor.PayerCustomerID || int64(*order.BeneficiaryCustomerID) != actor.BeneficiaryCustomerID {
 			return paymentport.ErrConflict
@@ -1604,6 +1607,8 @@ func classify(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, paymentport.ErrPriceChanged), errors.Is(err, orderport.ErrPriceChanged):
+		return paymentport.ErrPriceChanged
 	case errors.Is(err, paymentport.ErrProductPaymentMethodDisabled), errors.Is(err, paymentport.ErrAlreadyPurchased), errors.Is(err, paymentport.ErrPurchasePending):
 		return err
 	case errors.Is(err, paymentport.ErrNotFound), errors.Is(err, orderport.ErrNotFound):

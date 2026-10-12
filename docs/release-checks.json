@@ -1,125 +1,43 @@
 {
   "schema": 1,
-  "baseline_sha": "c07e2f6775b019cfb2fd1dc3bea697b89743ea82",
+  "baseline_sha": "1dbb43b4f716b4ed8b6e5337b3059c5371c01107",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/survey/domain"
+      "package": "./internal/order/app"
     },
     {
       "lane": "backend",
-      "package": "./internal/survey/app"
+      "package": "./internal/payment/app"
     },
     {
       "lane": "backend",
-      "package": "./internal/survey/http"
+      "package": "./internal/payment/http"
     },
     {
       "lane": "backend",
-      "path": "internal/survey/store/redemption_integration_test.go",
-      "test": "TestPostgreSQLRedemptionConcurrentConsumeReplayAndImport",
-      "postgres": true,
-      "race": true
+      "package": "./internal/coupon/app"
     },
     {
       "lane": "backend",
-      "path": "internal/survey/store/redemption_integration_test.go",
-      "test": "TestPostgreSQLRedemptionRollbackAndQuestionnaireIsolation",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/survey/store/submission_claim_replay_integration_test.go",
-      "test": "TestPostgreSQLSubmissionClaimConcurrentReceiptReplay",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/survey/store/submission_version_race_postgres_test.go",
-      "test": "TestPostgreSQLSubmissionRejectsDefinitionSwitchedAfterValidation",
+      "path": "internal/coupon/store/checkout_floor_postgres_test.go",
+      "test": "TestPostgreSQLCouponFloorPreservesFaceAndConsumesActualDiscount",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/outbound/survey_redemption_test.go",
-      "test": "TestSurveyCompletionRedemptionNeverExportsRawCode"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveyOperationsHost.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveyRedemptionLibrary.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveyRedemptionH5.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveySubmissionResume.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveyPublicHost.test.mjs"
+      "path": "cmd/aicrm/checkout_price_floor_postgres_test.go",
+      "test": "TestPostgreSQLCheckoutExpectedAmountRollsBackOrderCouponAndPayment",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/survey/store/attachment_integration_test.go",
-      "test": "TestPostgreSQLAttachmentAtomicReplayAndScope",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/survey/store/attachment_integration_test.go",
-      "test": "TestPostgreSQLAttachmentRollbackAndConcurrentCode",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/survey/store/attachment_integration_test.go",
-      "test": "TestPostgreSQLAttachmentRejectsInvalidFilesAndFields",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "path": "internal/outbound/survey_redemption_test.go",
-      "test": "TestSurveyCompletionAttachmentUsesSafeMarker"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveyAttachmentH5.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/surveyAdapter.test.mjs"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/survey/store/attachment_integration_test.go",
-      "test": "TestPostgreSQLAttachmentWithoutCodeAndOptionalJSON",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/media/domain"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/survey/store/attachment_integration_test.go",
-      "test": "TestPostgreSQLAttachmentCompletionFailureRollsBackAudit",
-      "postgres": true,
-      "race": true
+      "path": "internal/product/http/public_test.go",
+      "test": "TestPublicPaymentCompletionRefreshJourney"
     }
   ],
   "installed_checks": [
-    "survey-recovery"
-  ]
+    "coupon-minimum-amount"
+  ],
+  "build_commands": []
 }

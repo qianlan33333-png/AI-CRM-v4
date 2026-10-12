@@ -919,6 +919,7 @@ func (handler *Handler) checkout(writer http.ResponseWriter, request *http.Reque
 	var body struct {
 		ProductID              int64                            `json:"product_id,omitempty"`
 		CouponClaimID          int64                            `json:"coupon_claim_id,omitempty"`
+		ExpectedAmountMinor    *int64                           `json:"expected_amount_minor,omitempty"`
 		ProductType            string                           `json:"product_kind,omitempty"`
 		Provider               string                           `json:"provider,omitempty"`
 		Channel                domain.Channel                   `json:"channel,omitempty"`
@@ -963,7 +964,7 @@ func (handler *Handler) checkout(writer http.ResponseWriter, request *http.Reque
 	if activityCookie, cookieErr := request.Cookie(paymentport.ReferralActivityCookieName); cookieErr == nil && validReferralActivityContext(activityCookie.Value) {
 		activityContext = activityCookie.Value
 	}
-	payment, err := handler.app.Create(request.Context(), paymentport.CreateCommand{ProductID: body.ProductID, CouponClaimID: body.CouponClaimID, ProductType: body.ProductType, Provider: provider, Channel: body.Channel, MobileE164: body.MobileE164, ContactCollectionLevel: body.ContactCollectionLevel, ShippingAddress: paymentport.ShippingAddress{RecipientName: body.RecipientName, ProvinceCode: body.ProvinceCode, ProvinceName: body.ProvinceName, CityCode: body.CityCode, CityName: body.CityName, DistrictCode: body.DistrictCode, DistrictName: body.DistrictName, DetailAddress: body.DetailAddress}, BeneficiarySelection: body.BeneficiarySelection, SessionToken: cookie.Value, CheckoutSessionBinding: body.CheckoutSessionBinding, PromotionContext: body.PromotionContext, ReferralActivityContext: activityContext, ActorScope: "public-checkout", IdempotencyKey: idempotency})
+	payment, err := handler.app.Create(request.Context(), paymentport.CreateCommand{ProductID: body.ProductID, CouponClaimID: body.CouponClaimID, ExpectedAmountMinor: body.ExpectedAmountMinor, ProductType: body.ProductType, Provider: provider, Channel: body.Channel, MobileE164: body.MobileE164, ContactCollectionLevel: body.ContactCollectionLevel, ShippingAddress: paymentport.ShippingAddress{RecipientName: body.RecipientName, ProvinceCode: body.ProvinceCode, ProvinceName: body.ProvinceName, CityCode: body.CityCode, CityName: body.CityName, DistrictCode: body.DistrictCode, DistrictName: body.DistrictName, DetailAddress: body.DetailAddress}, BeneficiarySelection: body.BeneficiarySelection, SessionToken: cookie.Value, CheckoutSessionBinding: body.CheckoutSessionBinding, PromotionContext: body.PromotionContext, ReferralActivityContext: activityContext, ActorScope: "public-checkout", IdempotencyKey: idempotency})
 	if err != nil {
 		resultError(writer, err)
 		return
@@ -1530,6 +1531,8 @@ func decodeJSON(writer http.ResponseWriter, request *http.Request, destination a
 
 func resultError(writer http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, paymentport.ErrPriceChanged):
+		writeError(writer, http.StatusConflict, "price_changed")
 	case errors.Is(err, paymentport.ErrProductPaymentMethodDisabled):
 		writeError(writer, http.StatusConflict, "product_payment_method_disabled")
 	case errors.Is(err, paymentport.ErrAlreadyPurchased):

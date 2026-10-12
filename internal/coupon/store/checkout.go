@@ -130,9 +130,10 @@ func (r *Repository) ReserveCoupon(ctx context.Context, c couponport.ReserveComm
 	if e != nil {
 		return couponport.ReservationSnapshot{}, e
 	}
-	if row.item.DiscountMinor <= 0 || row.item.DiscountMinor >= c.GrossAmountMinor || row.item.Currency != c.Currency {
+	if row.item.DiscountMinor <= 0 || c.GrossAmountMinor <= 1 || row.item.Currency != c.Currency {
 		return couponport.ReservationSnapshot{}, couponapp.ErrConflict
 	}
+	discount := min(row.item.DiscountMinor, c.GrossAmountMinor-1)
 	tag, e := tx.Exec(ctx, `UPDATE coupon_customer_claims SET status='reserved',reserved_at=$2,updated_at=$2 WHERE id=$1 AND status IN ('available','claimed')`, row.item.ClaimID, at)
 	if e != nil {
 		return couponport.ReservationSnapshot{}, e
@@ -140,13 +141,13 @@ func (r *Repository) ReserveCoupon(ctx context.Context, c couponport.ReserveComm
 	if tag.RowsAffected() != 1 {
 		return couponport.ReservationSnapshot{}, couponapp.ErrConflict
 	}
-	payable := c.GrossAmountMinor - row.item.DiscountMinor
+	payable := c.GrossAmountMinor - discount
 	var id int64
-	e = tx.QueryRow(ctx, `INSERT INTO coupon_order_redemptions(claim_id,order_reference,product_id,product_type,product_code,rule_version,gross_amount_minor,discount_amount_minor,payable_amount_minor,currency,status,reserved_at,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'reserved',$11,$11,$11) RETURNING id`, row.item.ClaimID, c.OrderReference, c.ProductID, c.ProductType, c.ProductCode, row.rule.Version, c.GrossAmountMinor, row.item.DiscountMinor, payable, c.Currency, at).Scan(&id)
+	e = tx.QueryRow(ctx, `INSERT INTO coupon_order_redemptions(claim_id,order_reference,product_id,product_type,product_code,rule_version,gross_amount_minor,discount_amount_minor,payable_amount_minor,currency,status,reserved_at,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'reserved',$11,$11,$11) RETURNING id`, row.item.ClaimID, c.OrderReference, c.ProductID, c.ProductType, c.ProductCode, row.rule.Version, c.GrossAmountMinor, discount, payable, c.Currency, at).Scan(&id)
 	if e != nil {
 		return couponport.ReservationSnapshot{}, e
 	}
-	s := couponport.ReservationSnapshot{CouponApplied: true, ReservationRef: redemptionRef(id), ClaimID: row.item.ClaimID, CouponID: couponport.ID(row.item.CouponID), ProductID: c.ProductID, ProductType: c.ProductType, ProductCode: c.ProductCode, RuleVersion: row.rule.Version, GrossAmountMinor: c.GrossAmountMinor, DiscountAmountMinor: row.item.DiscountMinor, PayableAmountMinor: payable, Currency: c.Currency}
+	s := couponport.ReservationSnapshot{CouponApplied: true, ReservationRef: redemptionRef(id), ClaimID: row.item.ClaimID, CouponID: couponport.ID(row.item.CouponID), ProductID: c.ProductID, ProductType: c.ProductType, ProductCode: c.ProductCode, RuleVersion: row.rule.Version, GrossAmountMinor: c.GrossAmountMinor, DiscountAmountMinor: discount, PayableAmountMinor: payable, Currency: c.Currency}
 	if e = recordRedemptionReceipt(ctx, tx, "reserve", c.ActorScope, key, payload, id, s, at); e != nil {
 		return couponport.ReservationSnapshot{}, e
 	}
@@ -316,7 +317,7 @@ func findRedemptionReceipt(ctx context.Context, tx pgx.Tx, op, scope string, key
 func selectReservationClaim(ctx context.Context, tx pgx.Tx, c couponport.ReserveCommand, ids []int64, target string) (checkoutClaim, error) {
 	var x checkoutClaim
 	var mode string
-	q := `SELECT claim.id,rule.id,rule.name,rule.discount_amount_total,rule.currency,claim.status,claim.claim_no_masked,claim.claimed_at,claim.valid_from,claim.valid_until,claim.redeemed_at,rule.id,rule.name,rule.discount_amount_total,rule.currency,rule.status,rule.total_issue_limit,rule.per_user_issue_limit,rule.issued_count,rule.claim_starts_at,rule.claim_ends_at,rule.validity_mode,rule.use_starts_at,rule.use_ends_at,rule.relative_validity_days,rule.instructions,rule.created_by,rule.updated_by,rule.version,rule.created_at,rule.updated_at FROM coupon_customer_claims claim JOIN coupon_rules rule ON rule.id=claim.coupon_id JOIN coupon_rule_targets target ON target.coupon_id=rule.id WHERE claim.customer_id=ANY($1::bigint[]) AND ($2=0 OR claim.id=$2) AND claim.status IN ('available','claimed') AND claim.valid_from<=$3 AND claim.valid_until>$3 AND rule.currency=$4 AND target.target_ref=$5 AND rule.status='published' AND rule.discount_amount_total>0 AND rule.discount_amount_total<$6 ORDER BY rule.discount_amount_total DESC,claim.valid_until ASC,claim.claimed_at ASC,claim.id ASC FOR UPDATE OF claim SKIP LOCKED LIMIT 1`
+	q := `SELECT claim.id,rule.id,rule.name,rule.discount_amount_total,rule.currency,claim.status,claim.claim_no_masked,claim.claimed_at,claim.valid_from,claim.valid_until,claim.redeemed_at,rule.id,rule.name,rule.discount_amount_total,rule.currency,rule.status,rule.total_issue_limit,rule.per_user_issue_limit,rule.issued_count,rule.claim_starts_at,rule.claim_ends_at,rule.validity_mode,rule.use_starts_at,rule.use_ends_at,rule.relative_validity_days,rule.instructions,rule.created_by,rule.updated_by,rule.version,rule.created_at,rule.updated_at FROM coupon_customer_claims claim JOIN coupon_rules rule ON rule.id=claim.coupon_id JOIN coupon_rule_targets target ON target.coupon_id=rule.id WHERE claim.customer_id=ANY($1::bigint[]) AND ($2=0 OR claim.id=$2) AND claim.status IN ('available','claimed') AND claim.valid_from<=$3 AND claim.valid_until>$3 AND rule.currency=$4 AND target.target_ref=$5 AND rule.status='published' AND rule.discount_amount_total>0 AND $6>1 ORDER BY rule.discount_amount_total DESC,claim.valid_until ASC,claim.claimed_at ASC,claim.id ASC FOR UPDATE OF claim SKIP LOCKED LIMIT 1`
 	e := tx.QueryRow(ctx, q, ids, c.ClaimID, c.ReservedAt, c.Currency, target, c.GrossAmountMinor).Scan(&x.item.ClaimID, &x.item.CouponID, &x.item.Name, &x.item.DiscountMinor, &x.item.Currency, &x.item.Status, &x.item.ClaimNoMasked, &x.item.ClaimedAt, &x.item.ValidFrom, &x.item.ValidUntil, &x.item.RedeemedAt, &x.rule.ID, &x.rule.Name, &x.rule.DiscountAmountTotal, &x.rule.Currency, &x.rule.Status, &x.rule.TotalIssueLimit, &x.rule.PerUserIssueLimit, &x.rule.IssuedCount, &x.rule.ClaimStartsAt, &x.rule.ClaimEndsAt, &mode, &x.rule.UseStartsAt, &x.rule.UseEndsAt, &x.rule.RelativeValidityDays, &x.rule.Instructions, &x.rule.CreatedBy, &x.rule.UpdatedBy, &x.rule.Version, &x.rule.CreatedAt, &x.rule.UpdatedAt)
 	x.rule.ValidityMode = couponport.ValidityMode(mode)
 	return x, e

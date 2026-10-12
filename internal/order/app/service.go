@@ -342,6 +342,9 @@ func (s *Service) CreatePaymentOrderWithin(ctx context.Context, command orderpor
 	if err != nil {
 		return domain.Snapshot{}, classify(err)
 	}
+	if command.ExpectedAmountMinor != nil && *command.ExpectedAmountMinor != checkout.PayableAmountMinor {
+		return domain.Snapshot{}, orderport.ErrPriceChanged
+	}
 	input := domain.NewOrderInput{
 		Provider: command.Provider, SourceSystem: "v3-checkout", SourceKey: command.MerchantOrderNo,
 		MerchantOrderNo: command.MerchantOrderNo, PayerCustomerID: &command.PayerCustomerID,
@@ -1200,6 +1203,8 @@ func classify(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, orderport.ErrPriceChanged):
+		return orderport.ErrPriceChanged
 	case errors.Is(err, orderport.ErrNotFound):
 		return orderport.ErrNotFound
 	case errors.Is(err, orderport.ErrConflict), errors.Is(err, couponport.ErrClaimNotEligible), errors.Is(err, domain.ErrInvalidOrder), errors.Is(err, domain.ErrInvalidSettlement), errors.Is(err, domain.ErrInvalidTransition), errors.Is(err, domain.ErrVersionConflict):

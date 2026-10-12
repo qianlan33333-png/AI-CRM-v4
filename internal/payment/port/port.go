@@ -32,6 +32,7 @@ var ErrSettlementCapabilityDisabled = errors.New("payment settlement capability 
 var ErrNothingToUnfreeze = errors.New("payment has no profit sharing balance to unfreeze")
 var ErrSessionRequired = errors.New("trusted payment session required")
 var ErrSessionMismatch = errors.New("payment checkout session mismatch")
+var ErrPriceChanged = errors.New("checkout price changed")
 
 // PaymentReconciliationPreview is an administrator-only, read-only result for
 // the narrow native-payment confirmation repair.  It intentionally reveals no
@@ -100,6 +101,8 @@ type CreateCommand struct {
 	ShippingAddress            ShippingAddress
 	BeneficiarySelection       BeneficiarySelection
 	ActorScope, IdempotencyKey string
+	// Omitted fields must retain the legacy CreateCommand digest bytes.
+	ExpectedAmountMinor *int64 `json:",omitempty"`
 }
 
 type ShippingAddress struct {
