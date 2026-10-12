@@ -717,8 +717,8 @@ def _validate_controller_maintenance_marker(state: dict[str, Any]) -> None:
             raise ReleaseError("controller maintenance marker file inventory is invalid")
         _digest(digest, "maintenance fixed file digest")
     main = state.get("main")
-    if not isinstance(main, dict) or marker["base_sha"] != main.get("sha"):
-        raise ReleaseError("controller maintenance marker base differs from domestic main")
+    if not isinstance(main, dict) or marker["base_sha"] != _batch_tip(state):
+        raise ReleaseError("controller maintenance marker base differs from cumulative source")
     active = _active_queue_item(state)
     if (active is None or active.get("status") not in {"pending", "failed"}
             or active.get("head_sha") != marker["candidate_sha"]
@@ -4449,8 +4449,21 @@ def batch_open(config: dict[str, Any], *, controller_sha: str | None = None,
 
 def _batch_final_evidence(config: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any] | None:
     app = batch["installed_app"]
+    staged_sha, staged_tree = batch["head_sha"], batch["head_tree"]
+    if batch.get("final_stage_head") is not None:
+        staged_sha = batch["final_stage_head"]
+        if staged_sha != app["sha"]:
+            raise ReleaseError("final staging source differs from the installed application")
+        staged_tree = app["tree"]
+        repo = Path(config["repo"])
+        if _tree(repo, staged_sha) != staged_tree:
+            raise ReleaseError("final staging application tree changed")
+        if staged_sha != batch["head_sha"]:
+            _first_parent_chain(repo, staged_sha, batch["head_sha"])
+            if _classify_candidate(repo, staged_sha, batch["head_sha"])["runtime_changed"]:
+                raise ReleaseError("run batch-stage for runtime changes after the installed application")
     evidence = _read_stage_evidence(config, {
-        "head_sha": batch["head_sha"], "head_tree": batch["head_tree"],
+        "head_sha": staged_sha, "head_tree": staged_tree,
         "release_manifest_sha256": app["manifest_sha256"],
         "stage_receipt": batch["stage_receipt"],
     })
@@ -4503,7 +4516,7 @@ def batch_seal(config: dict[str, Any], *, expected_head: str | None = None) -> d
         tip = _batch_tip(state)
         if expected_head is not None and tip != _sha(expected_head, "authorized batch head"):
             raise ReleaseError("batch scope changed after production authorization")
-        if batch.get("mode") == "source-accumulated" and batch.get("final_stage_head") != tip:
+        if batch.get("mode") == "source-accumulated" and not batch.get("final_stage_head"):
             raise ReleaseError("run batch-stage once for the final accumulated source before sealing")
         last = batch["members"][-1]
         if _resolve_ref(repo, last["ref"]) != tip or _tree(repo, tip) != batch["head_tree"]:
@@ -5012,7 +5025,8 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
         build_repair = _is_preinstall_batch_build_failure(state)
         environment_repair = _is_batch_environment_check_failure(state)
         batch_repair = build_repair or environment_repair
-        if state.get("status") == "outcome_unknown" or (state.get("staging_out_of_sync") is True and not batch_repair):
+        open_batch = isinstance(state.get("batch"), dict) and state["batch"].get("status") == "open"
+        if state.get("status") == "outcome_unknown" or (state.get("staging_out_of_sync") is True and not (batch_repair or open_batch)):
             raise ReleaseError("controller maintenance check is blocked by an unresolved release state")
         if state.get("in_flight") is not None:
             raise ReleaseError("controller maintenance check cannot overlap an active attempt")
@@ -5024,10 +5038,11 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
                 or item.get("head_sha") != candidate_sha):
             raise ReleaseError("maintenance check requires the exact head candidate at the serial queue front")
         main_sha = _resolve_ref(repo, MAIN_REF)
-        if not batch_repair and (main_sha != state["main"]["sha"] or item.get("base_sha") != main_sha
+        source_base = _batch_tip(state)
+        if not batch_repair and (main_sha != state["main"]["sha"] or item.get("base_sha") != source_base
                 or _resolve_ref(repo, item["ref"]) != candidate_sha):
             raise ReleaseError("maintenance candidate is stale; update and check it from current domestic main")
-        check_base = state["batch"]["head_sha"] if batch_repair else main_sha
+        check_base = state["batch"]["head_sha"] if batch_repair else source_base
         if build_repair:
             _verify_batch_build_repair_state(config, repo, state)
             state["batch"].pop("build_repair_maintenance", None)
@@ -5139,7 +5154,7 @@ def _verify_controller_maintenance_candidate(config: dict[str, Any], repo: Path,
         raise ControllerMaintenanceRequired("controller maintenance marker is missing or candidate is not ready")
     candidate_sha, base_sha = marker["candidate_sha"], marker["base_sha"]
     main_sha = _resolve_ref(repo, MAIN_REF)
-    if (main_sha != state["main"]["sha"] or base_sha != main_sha
+    if (main_sha != state["main"]["sha"] or base_sha != _batch_tip(state)
             or item.get("head_sha") != candidate_sha or item.get("base_sha") != base_sha
             or _resolve_ref(repo, item["ref"]) != candidate_sha
             or _tree(repo, candidate_sha) != marker["candidate_tree"]):

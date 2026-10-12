@@ -1,11 +1,14 @@
 {
   "schema": 1,
-  "baseline_sha": "83f85a5e8c87e1294b43973266366c406c27660a",
+  "baseline_sha": "3d6ab2808e1cae715434354a0f6b96f44f1778ea",
   "checks": [
     {
-      "lane": "browser",
-      "path": "cmd/aicrm/public_commerce_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLPublicCommerceChromiumJourney"
+      "lane": "preflight",
+      "path": "scripts/test_domestic_source_only_seal.py"
+    },
+    {
+      "lane": "preflight",
+      "path": "scripts/test_domestic_release_minimal.py"
     }
   ],
   "installed_checks": []
