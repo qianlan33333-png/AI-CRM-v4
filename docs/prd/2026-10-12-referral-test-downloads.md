@@ -46,3 +46,11 @@ OneID：不涉及，本次不改变客户身份和归属。Persistence：本机�
 ## 已授权基线接续
 
 原候选 a42ce66 / 1657de0 保留审计。工作台回传准确累计 base `d65f512849154b21416d8c8cea7964d4b6ddcc81` 后，仅接续上述测试输出修改。保留该 base 的海报 JPEG 1250×2426、QR、双视口、1MiB 素材及实际导出断言，以及商品图片、问卷、零元行为。冲突只合并网络方法记录与下载完成记录；原断言逐行比对保留。既有本机清理任务和六文件删除结果不重复执行，源码-only 候选不构建或安装应用，不新增发布定时器。
+
+## 已授权失败修复：绑定当前 CSV 的下载 GUID
+
+安装包 `83b5e8cb0e858b4f20f9237b10b19e8c9018314e` 的唯一失败为 CSV 路径 ENOENT；测试把任意下载的 completed 与推测的人类文件名混用。复用原授权，从该准确累计 base 只修下载测试。
+
+[Chromium 官方协议](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/json/browser_protocol.json) 明确区分建议文件名与实际落盘名；`allowAndName` 按下载 GUID 命名。因此改为：观察本次导出按钮实际触发的唯一 CSV anchor/blob URL → 匹配 `downloadWillBegin` 的 URL/建议名及 GUID → 只接受同一 GUID 的 completed → 检查临时目录内该 GUID 的真实普通文件 → 保留原 BOM、表头、指定邀请人行与 participation 筛选断言。不以其他下载或其他 CSV 兜底，不改 CRM 运行时。
+
+相关短清单仅包含新下载绑定合同与原失败的具名 PostgreSQL/Chromium 旅程。验证其他 GUID、错误 URL、取消、重复开始、缺失落盘文件与链接文件均不能算通过；保留已有 72 小时清理规则及全部业务断言，沿用既有清理任务，不重装应用或扩大预发检查范围。

@@ -1,5 +1,6 @@
 import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
-import { createDownloadDirectory, configureTestDownloads } from "../../internal/webshell/test_referral_downloads.mjs";
+import { createDownloadDirectory } from "../../internal/webshell/test_referral_downloads.mjs";
+import { createCSVDownloadTracker } from "../../internal/webshell/test_referral_csv_download.mjs";
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -14,6 +15,7 @@ assert.ok(actors.length >= 3);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'referral-browser-'));
 const downloads = await createDownloadDirectory();
+const csvDownloads = createCSVDownloadTracker(downloads);
 const screenshots = process.env.AICRM_REFERRAL_SCREENSHOTS || path.join(profile, 'screenshots');
 await fs.mkdir(screenshots, { recursive: true });
 let chrome, socket;
@@ -28,8 +30,8 @@ try {
   const tab = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();
   socket = new WebSocket(tab.webSocketDebuggerUrl);
   await new Promise((r,j)=>{socket.addEventListener('open',r,{once:true});socket.addEventListener('error',j,{once:true});});
-  const exceptions=[], networkRequests=[], networkMethods=[], networkResponses=[], completedDownloads=new Set();
-  socket.addEventListener('message',e=>{const m=JSON.parse(String(e.data));if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(new Error(m.error.message)):p?.resolve(m.result);}else if(m.method==='Network.requestWillBeSent'){networkRequests.push(m.params.request.url);networkMethods.push({url:m.params.request.url,method:m.params.request.method});}else if(m.method==='Network.responseReceived')networkResponses.push({id:m.params.requestId,url:m.params.response.url});else if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails.text);else if(m.method==='Browser.downloadProgress'&&m.params.state==='completed')completedDownloads.add(m.params.guid);});
+  const exceptions=[], networkRequests=[], networkMethods=[], networkResponses=[];
+  socket.addEventListener('message',e=>{const m=JSON.parse(String(e.data));csvDownloads.observe(m);if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(new Error(m.error.message)):p?.resolve(m.result);}else if(m.method==='Network.requestWillBeSent'){networkRequests.push(m.params.request.url);networkMethods.push({url:m.params.request.url,method:m.params.request.method});}else if(m.method==='Network.responseReceived')networkResponses.push({id:m.params.requestId,url:m.params.response.url});else if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails.text);});
   const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
   const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result?.value;};
   const wait=async expression=>{for(let i=0;i<180;i++){if(await evaluate(expression))return;await sleep(75);}throw new Error('UI condition not reached: '+expression+'; page='+await evaluate('location.pathname+location.search+" "+document.body.innerText'));};
@@ -37,7 +39,7 @@ try {
   await call('Page.enable');await call('Runtime.enable');await call('Network.enable');
   // A temporary profile does not isolate Chrome's download destination.
   // Fail before navigation if downloads cannot be confined to this test run.
-  await configureTestDownloads(call, downloads);
+  await csvDownloads.configure(call);
   const loginPage=await fetch(base+'/login');const html=await loginPage.text();const loginCSRF=/name="login_csrf_token" value="([^"]+)"/.exec(html)?.[1];assert.ok(loginCSRF);
   const login=await fetch(base+'/login',{method:'POST',redirect:'manual',headers:{'Content-Type':'application/x-www-form-urlencoded',Cookie:loginPage.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ')},body:new URLSearchParams({username:'referral-admin',password:'referral-admin-password',login_csrf_token:loginCSRF})});assert.equal(login.status,303);
   const staffCookies=login.headers.getSetCookie().map(c=>c.split(';')[0]);
@@ -265,20 +267,27 @@ try {
   await evaluate("(()=>{const row=[...document.querySelectorAll('.referral-admin-table tbody tr')].find(row=>row.querySelector('td')?.textContent==='队长阿青');const button=row&&[...row.querySelectorAll('button')].find(b=>b.textContent==='查看邀请对象');if(!button)throw new Error('captain drilldown action missing');button.click();})()");
   await wait("document.body.textContent.includes('队长阿青带来的直接邀请') && document.body.textContent.includes('超长昵称的活动参与者')");
   const drilldownImage=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,'admin-member-drilldown-1440.png'),Buffer.from(drilldownImage.data,'base64'));
+  const expectedCSVName=`裂变活动-${first.c.name}-invitations.csv`;
+  // Observe the anchor created by this exact export click. Keep the UI action
+  // intact; the test only records its blob URL and logical download name.
+  await evaluate(`(()=>{const original=HTMLAnchorElement.prototype.click;window.__referralCSVAnchors=[];window.__restoreReferralCSVAnchor=()=>{HTMLAnchorElement.prototype.click=original;};HTMLAnchorElement.prototype.click=function(...args){if(this.download===${JSON.stringify(expectedCSVName)})window.__referralCSVAnchors.push({url:this.href,suggestedFilename:this.download});return Reflect.apply(original,this,args);};})()`);
+  const exportRequestStart=networkRequests.length;
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='导出当前筛选').click()");
-  for(let i=0;i<80&&!networkRequests.some(url=>url.includes('/export?')&&url.includes('participation_id='));i++)await sleep(50);
-  const drilldownExport=networkRequests.find(url=>url.includes('/export?')&&url.includes('participation_id='));
+  for(let i=0;i<80&&!networkRequests.slice(exportRequestStart).some(url=>url.includes('/export?')&&url.includes('participation_id='));i++)await sleep(50);
+  const drilldownExport=networkRequests.slice(exportRequestStart).find(url=>url.includes('/export?')&&url.includes('participation_id='));
   assert.ok(drilldownExport,'drilldown export did not request a participation-scoped CSV');
   assert.equal(drilldownExport.includes('team_id='),false,'drilldown export must not retain a stale team filter');
-  const exportedCSV=path.join(downloads,`裂变活动-${first.c.name}-invitations.csv`);
-  for(let i=0;i<100;i++) {
-    if(completedDownloads.size>0) { try {await fs.access(exportedCSV);break;}catch{} }
-    await sleep(50);
-  }
-  assert.ok(completedDownloads.size>0,'CSV download did not complete');
+  await wait("window.__referralCSVAnchors?.length>0");
+  const anchorDownloads=await evaluate("window.__restoreReferralCSVAnchor();window.__referralCSVAnchors");
+  assert.equal(anchorDownloads.length,1,'this scoped export must create exactly one CSV anchor');
+  assert.equal(anchorDownloads[0].suggestedFilename,expectedCSVName,'CSV anchor must belong to the selected invitation campaign');
+  const currentDownload=await csvDownloads.waitFor(anchorDownloads[0]);
+  assert.equal(currentDownload.state,'completed','this CSV GUID must finish downloading');
+  const exportedCSV=currentDownload.path;
   const csv=await fs.readFile(exportedCSV,'utf8');
   assert.ok(csv.startsWith('\ufeff邀请人,邀请人战队,参加人,参加人战队,'),'downloaded CSV must retain the invitation headers');
   assert.ok(csv.includes('队长阿青,追光战队,超长昵称的活动参与者用于手机页面换行验证,'),'downloaded CSV must contain the scoped fixture invitation');
+  await fs.writeFile(path.join(downloads,'invitation-download.json'),JSON.stringify({...currentDownload,exportRequest:drilldownExport,csvValidated:true}));
   console.log('referral_download: '+exportedCSV);
   // Use staff controls against real HTTP/SQL: history lookup, reversal, reward review.
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='归属历史').click()");
