@@ -25,7 +25,7 @@ Product Design使用现有页面和组件，未生成新组件。免费页隐藏
 | 真实浏览器→完整Composition→隔离PG领取及改价/下架后的恢复 | 通过；界面领取成功/无需支付，最后PG记录仍各1份 |
 | 客户订单、后台订单详情与TypeScript检查 | 通过 |
 
-测试使用本机独立PG16.13集群和临时数据库；新增零元夹具的Effects Worker关闭。未接触运行环境数据库。相关包及具名检查登记于`docs/release-checks.json`。普通包检查为Order domain/app/http、Payment app/http、Outbound、Coupon app；大包cmd/aicrm、Order store、Invoice及Public H5采用具名用例。前端使用`node web/v3/customerOrders.test.mjs`、`node web/v3/orderAdapter.test.mjs`、`npm run typecheck --silent`。
+测试使用本机独立PG16.13集群和临时数据库；新增零元夹具的Effects Worker关闭。未接触运行环境数据库。相关包及具名检查登记于`docs/release-checks.json`。小包Order domain和Coupon app保留整包检查；Order app/http、Payment app/http、Outbound、cmd/aicrm、Order store、Invoice及Public H5采用改动函数与直接消费者的具名用例。前端使用`node web/v3/customerOrders.test.mjs`、`node web/v3/orderAdapter.test.mjs`、`npm run typecheck --silent`。
 
 一次并行依赖准备导致临时npm目录缺失；已串行重跑受影响的支付宝恢复和前端检查并通过。Go业务断言的失败与依赖准备失败分别处理。当前本机Node24.21/npm11.19，正式国内构建仍由工作台使用其固定工具链。
 
@@ -55,3 +55,18 @@ bash scripts/run-go-with-donor-views.sh go test -json -p 1 -count=1 -timeout=5m 
 数据库必须是明确的 loopback `aicrm_test_*` 隔离库，运行过程自行克隆独立接受库；不使用运行环境数据库。安装进程为API角色，关闭Effects执行能力，并用失败代理阻止真实外网访问；券1分只创建付款意图，不发起真实付款。成功输出必须包含 `installed_zero_amount: PASS` 和实际源码/二进制摘要。缺输入时 `AICRM_REQUIRE_ZERO_INSTALLED=1` 直接失败，不能算skip通过。
 
 本机只完成安装验收夹具的源码模式诊断与编译；它明确输出 `source composition only, installed acceptance remains unverified`，不作为实际安装包收据。真实安装包结果由工作台最终安装后执行并保存在原stage-evidence。
+
+## B 候选检查清单收缩
+
+按工作台退回的检查范围修正，在已推送的 B `49082d1b7d01b318e70e54ec5dcc00bf1ae75d73` 后仅追加检查清单及本文。业务实现、迁移、前端及测试文件字节不变；B 的累计 base 仍为 A `6ba5e2898c53db20a6ae76413ced66df1e10635d`，旧 B 保留为审计 ref。原有本机通过结果继续有效，本轮没有重跑已通过阶段或先前批次成员。
+
+| 收缩后的检查 | 直接行为及保留理由 |
+|---|---|
+| Order app 五个具名用例 | 正价快照及收据重放、无券冻结金额、券核销与结算、周期券失败释放及退款、冻结券金额导出；覆盖共享的订单创建和导出函数 |
+| Payment app 六个具名用例 | 原正价订单与支付原子创建、旧会话严格重放、同一付款人续期读取、未知预支付的客户归属、普通商品已购锁与周期续购；覆盖 Checkout 与已购读取的原有正价分支 |
+| Payment HTTP 五个具名用例 | 可信 Cookie、请求会话绑定、冻结金额读回、已授权购买后动作与 URL Link；覆盖原路由仍使用的直接应用调用方 |
+| Order HTTP 两个具名用例 | Provider 隔离读回及订单授权后读取分销快照；零元列表、详情及导出由完整 PG 旅程断言覆盖 |
+| Outbound 三个具名用例 | 零元载荷无虚构付款事实，原正价载荷逐字兼容及字段映射；覆盖本次改动的 paidPayload 及直接字段消费者 |
+| 保留的 PG、领域及消费者用例 | 同键/异键并发、每个事务步骤失败回滚、改价下架恢复、付款人鉴权、券后1分、付费人群/资格/分销/补录排除、零额导出及退款/开票拒绝继续检查 |
+
+具名 Test 均逐一核对当前源码存在。A 已覆盖且 B 未改动的优惠券计算、期待金额旧 nil 摘要兼容等纯单元结果沿用 A 的准确源码收据；B 中共享结账函数发生变化的正价分支仍登记上述具名回归。实际安装包入口及两个原收据名保持不变，仍须由工作台在最终同包 Host 上执行，不以本机源码模式代替。

@@ -8,23 +8,108 @@
     },
     {
       "lane": "backend",
-      "package": "./internal/order/app"
+      "path": "internal/order/app/service_test.go",
+      "test": "TestCreatePaymentOrderWithinFreezesProductVersionAndReplays"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/app"
+      "path": "internal/order/app/service_test.go",
+      "test": "TestPaymentCheckoutNoCouponReplayKeepsOriginalFrozenPrice"
     },
     {
       "lane": "backend",
-      "package": "./internal/payment/http"
+      "path": "internal/order/app/service_test.go",
+      "test": "TestPaymentCheckoutFreezesCouponPriceAndSettlesWithinOrderTransaction"
     },
     {
       "lane": "backend",
-      "package": "./internal/order/http"
+      "path": "internal/order/app/service_test.go",
+      "test": "TestPaymentCheckoutFinalFailureReleasesCouponAndServicePeriodRefundsOnce"
     },
     {
       "lane": "backend",
-      "package": "./internal/outbound"
+      "path": "internal/order/app/export_test.go",
+      "test": "TestExportUsesFrozenCouponPriceAndConfirmedRefund"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/app/service_test.go",
+      "test": "TestCheckoutFromProductCreatesOrderAndPaymentInSameUOW"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/app/service_test.go",
+      "test": "TestExistingOrderRejectsLegacySessionNewPaymentButAllowsExactReplay"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/app/service_test.go",
+      "test": "TestGetCheckoutAllowsRenewedSamePayerToReadTerminalWithoutHandoff"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/app/service_test.go",
+      "test": "TestGetCheckoutExposesUnknownPrepayOnlyToAuthorizedPayer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/app/service_test.go",
+      "test": "TestStandardPurchaseGateBlocksOwnedButAllowsPending"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/app/service_test.go",
+      "test": "TestServicePeriodPurchaseRemainsRenewableDespiteStandardOwned"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/http/handler_test.go",
+      "test": "TestCheckoutAcceptsOnlyOpaqueCookieIdentity"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/http/handler_test.go",
+      "test": "TestCheckoutRejectsSessionBindingBeforeCallingApplication"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/http/checkout_amount_test.go",
+      "test": "TestCheckoutStatusAlwaysReturnsFrozenPaymentAmount"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/http/handler_test.go",
+      "test": "TestCheckoutStatusExposesFrozenPurchaseActionOnlyAfterAuthorizedPaidCheckout"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/http/handler_test.go",
+      "test": "TestCheckoutURLLinkResolvesOnlyThroughTheAuthorizedPaidOrder"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/http/handler_test.go",
+      "test": "TestProviderScopedOrderDetailKeepsSameMerchantNumbersSeparate"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/http/handler_test.go",
+      "test": "TestOrderResponsesBatchDistributionSnapshotsAfterOrderAuthorization"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/commerce_push_zero_test.go",
+      "test": "TestCommerceFreePayloadKeepsShapeWithoutFabricatingPayment"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/commerce_push_protocol_test.go",
+      "test": "TestCommercePaidPayloadUsesFrozenLegacyFieldNamesForEveryProduct"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/commerce_push_mapping_test.go",
+      "test": "TestCommerceMappedPaidPayloadSourcesAndMissing"
     },
     {
       "lane": "backend",
