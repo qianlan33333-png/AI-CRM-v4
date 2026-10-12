@@ -132,6 +132,13 @@ func TestPaidPurchaseActionPostgreSQLTransactionBoundaries(t *testing.T) {
 	if _, err = native.Exec(ctx, string(targetSnapshotSQL)); err != nil {
 		t.Fatalf("apply 0173: %v", err)
 	}
+	variantSQL, err := os.ReadFile(filepath.Join(filepath.Dir(paidPurchaseActionMigration(t)), "0241_product_variants.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = native.Exec(ctx, string(variantSQL)); err != nil {
+		t.Fatalf("apply 0241: %v", err)
+	}
 	if _, err = native.Exec(ctx, `INSERT INTO customer_tag_commands(id) VALUES(1)`); err != nil {
 		t.Fatal(err)
 	}
