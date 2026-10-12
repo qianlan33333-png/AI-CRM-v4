@@ -6,6 +6,7 @@ import path from 'node:path';
 export function createCSVDownloadTracker(directory) {
   const starts = [];
   const progress = new Map();
+  let progressEvents = 0;
   return {
     async configure(call) {
       await call('Browser.setDownloadBehavior', {
@@ -14,7 +15,27 @@ export function createCSVDownloadTracker(directory) {
     },
     observe(message) {
       if (message.method === 'Browser.downloadWillBegin') starts.push({ ...message.params });
-      if (message.method === 'Browser.downloadProgress') progress.set(message.params.guid, { ...message.params });
+      if (message.method === 'Browser.downloadProgress') {
+        progressEvents++;
+        progress.set(message.params.guid, { ...message.params });
+      }
+    },
+    diagnostics({ url, suggestedFilename } = {}) {
+      const matching = starts.filter(item => item.url === url && item.suggestedFilename === suggestedFilename);
+      return {
+        begin_events: starts.length, progress_events: progressEvents,
+        matching_begin_events: matching.length,
+        expected_url_kind: typeof url === 'string' && url.startsWith('blob:') ? 'blob' : 'not_observed',
+        // Matching booleans reveal the difference between no events and
+        // unrelated events without saving raw URLs, names, headers or cookies.
+        observed_begins: starts.map(item => ({ url_matches_expected: item.url === url,
+          filename_matches_expected: item.suggestedFilename === suggestedFilename,
+          guid_is_safe: typeof item.guid === 'string' && /^[A-Za-z0-9-]+$/.test(item.guid) })),
+        matching_guid_states: matching.map(item => {
+          const state = progress.get(item.guid)?.state;
+          return { state: ['inProgress', 'completed', 'canceled'].includes(state) ? state : 'not_observed' };
+        }),
+      };
     },
     async waitFor({ url, suggestedFilename }, timeoutMs = 5000) {
       if (typeof url !== 'string' || !url.startsWith('blob:') ||

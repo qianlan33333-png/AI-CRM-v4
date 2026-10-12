@@ -10,6 +10,10 @@
     {
       "lane": "frontend",
       "path": "internal/webshell/test_referral_csv_download.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "internal/webshell/test_referral_browser_cdp.test.mjs"
     }
   ],
   "installed_checks": []

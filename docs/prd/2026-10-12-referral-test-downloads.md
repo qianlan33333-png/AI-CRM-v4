@@ -56,3 +56,9 @@ OneID：不涉及，本次不改变客户身份和归属。Persistence：本机�
 相关短清单仅包含新下载绑定合同与原失败的具名 PostgreSQL/Chromium 旅程。验证其他 GUID、错误 URL、取消、重复开始、缺失落盘文件与链接文件均不能算通过；保留已有 72 小时清理规则及全部业务断言，沿用既有清理任务，不重装应用或扩大预发检查范围。
 
 该具名旅程登记为 `browser` lane，由运行器设置 Chromium 必需标志；Node 绑定合同登记为 `frontend`。缺少 `AICRM_REQUIRE_CHROMIUM_JOURNEY=1` 而 skip 不算通过。`installed_checks=[]`，工作台仅在既有安装包上独立重跑失败旅程并保留其他通过收据。
+
+## 已授权 Linux 事件路由修复
+
+348 安装态复验仅能证明没有匹配的 downloadWillBegin；因当时未保存事件计数，不能推出完全没有 Browser 事件。[Playwright 的 Chromium 实现](https://raw.githubusercontent.com/microsoft/playwright/main/packages/playwright-core/src/server/chromium/crBrowser.ts) 在 connection.rootSession 订阅 Browser 下载事件并配置下载行为。本次复用这一标准路由：从 Chrome `/json/version` 获取 browser-target WebSocket，独立连接、配置与订阅下载事件；page-target 只继续原 Runtime/Network/DOM 处理。
+
+失败时保存仅含测试浏览器版本、连接种类、开始/进度事件数量、URL/文件名匹配布尔值与匹配 GUID 状态的诊断。不输出原始 URL、建议名、headers、cookies 或环境变量。保持严格 blob/GUID/真实隔离文件与 CSV/参与范围断言、原 5 秒等待和 72 小时清理策略。只新增浏览器连接合同和事件诊断合同，独立重跑原失败旅程，不修改应用或其他验收阶段。

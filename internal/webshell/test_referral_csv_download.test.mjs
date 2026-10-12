@@ -82,3 +82,26 @@ test('does not read links, unsafe GUID paths or incomplete-size files', async t 
   await fs.writeFile(path.join(incomplete.directory, 'current-guid'), 'partial');
   await assert.rejects(incomplete.tracker.waitFor(expected, 20), /file size differs/);
 });
+
+test('diagnostics distinguish no events from observed events that did not match without exposing raw fields', async t => {
+  const { tracker, begin, finish } = await fixture(t);
+  const empty = tracker.diagnostics(expected);
+  assert.equal(empty.begin_events, 0); assert.equal(empty.progress_events, 0); assert.equal(empty.matching_begin_events, 0);
+  begin('other-guid', { url: 'blob:https://127.0.0.1:8080/unrelated?synthetic-secret', suggestedFilename: 'synthetic-private-name.csv' });
+  finish('other-guid');
+  const unmatched = tracker.diagnostics(expected);
+  assert.equal(unmatched.begin_events, 1); assert.equal(unmatched.progress_events, 1); assert.equal(unmatched.matching_begin_events, 0);
+  assert.deepEqual(unmatched.observed_begins, [{ url_matches_expected: false, filename_matches_expected: false, guid_is_safe: true }]);
+  assert.ok(!JSON.stringify(unmatched).includes('synthetic-secret'));
+  assert.ok(!JSON.stringify(unmatched).includes('synthetic-private-name'));
+});
+
+test('diagnostics report matching start and the state of only that target GUID', async t => {
+  const { tracker, begin, finish } = await fixture(t);
+  begin('current-guid'); finish('other-guid');
+  assert.deepEqual(tracker.diagnostics(expected).matching_guid_states, [{ state: 'not_observed' }]);
+  finish('current-guid');
+  const matched = tracker.diagnostics(expected);
+  assert.equal(matched.matching_begin_events, 1);
+  assert.deepEqual(matched.matching_guid_states, [{ state: 'completed' }]);
+});
