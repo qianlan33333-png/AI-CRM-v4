@@ -162,13 +162,36 @@ func TestPostgreSQLCatalogDailyManualRerunAndFreshness(t *testing.T) {
 	if err != nil || got.Name != "补拉群名" || got.ObservedAt == nil {
 		t.Fatal("detail repair", got, err)
 	}
+	provider.repaired, provider.permanent = false, true
+	provider.pages = 0
+	repairs = nil
+	if _, err = service.RequestCatalogSync(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.ProcessCatalog(ctx, jobs[len(jobs)-1]); err != nil {
+		t.Fatal(err)
+	}
+	if len(repairs) != 0 || provider.pages != 2 {
+		t.Fatal("permanent permission denial was retried or stopped discovery")
+	}
+	counts, err := NewOpsDiagnosticReader(native).ReadOpsDiagnosticCounts(ctx, time.Now())
+	if err != nil || counts["groups_unreadable"] == 0 {
+		t.Fatal("unreadable group disappeared from diagnostics")
+	}
 
 }
 
 type catalogPages struct {
-	pages    int
-	repaired bool
+	pages     int
+	repaired  bool
+	permanent bool
 }
+
+type catalogPermissionFailure struct{}
+
+func (catalogPermissionFailure) Error() string                   { return "fixture permission denial" }
+func (catalogPermissionFailure) DirectoryFailureCode() string    { return "provider_permission_denied" }
+func (catalogPermissionFailure) DirectoryFailureRetryable() bool { return false }
 
 func (p *catalogPages) ListAllGroupChats(_ context.Context, cursor string, _ int) (w.GroupChatPage, error) {
 	p.pages++
@@ -179,6 +202,9 @@ func (p *catalogPages) ListAllGroupChats(_ context.Context, cursor string, _ int
 }
 func (p *catalogPages) GetGroupChat(_ context.Context, id string) (w.GroupChat, error) {
 	if id == "retry-name" && !p.repaired {
+		if p.permanent {
+			return w.GroupChat{}, catalogPermissionFailure{}
+		}
 		return w.GroupChat{}, errors.New("temporary detail error")
 	}
 	name := "新群名"

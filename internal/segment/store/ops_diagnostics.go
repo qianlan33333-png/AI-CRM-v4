@@ -30,6 +30,11 @@ func (r *OpsDiagnosticReader) ReadOpsDiagnosticCounts(ctx context.Context, at ti
 		return nil, e
 	}
 	out := map[string]int64{}
+	var current int64
+	if e = tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT DISTINCT ON(package_id) state,error_code FROM segment_audience_refresh_runs ORDER BY package_id,id DESC) latest WHERE state='failed' AND error_code IS DISTINCT FROM 'reference_superseded' AND $1::timestamptz IS NOT NULL`, at.UTC()).Scan(&current); e != nil {
+		return nil, e
+	}
+	out["refresh_current_failed"] = current
 	for _, q := range []struct{ key, sql string }{{"refresh_failed", `SELECT count(*) FROM segment_audience_refresh_runs WHERE state='failed' AND $1::timestamptz IS NOT NULL`}, {"refresh_overdue", `SELECT count(*) FROM segment_audience_refresh_runs WHERE state IN ('accepted','queued','evaluating','staging') AND updated_at<$1::timestamptz-interval '1 hour'`}} {
 		var n int64
 		if e = tx.QueryRow(ctx, q.sql, at.UTC()).Scan(&n); e != nil {

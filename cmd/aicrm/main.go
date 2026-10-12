@@ -33,6 +33,9 @@ func run() error {
 	if cfg.Role == platformconfig.RoleRuntimeConfigMaintenance && os.Geteuid() != 0 {
 		return errors.New("runtime configuration maintenance requires authenticated OS root")
 	}
+	if cfg.Role == platformconfig.RoleArchiveRecover && os.Geteuid() != 0 {
+		return errors.New("archive recovery requires authenticated OS root")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if cfg.Role == platformconfig.RoleRuntimeConfigMaintenance {
@@ -53,6 +56,14 @@ func run() error {
 		return err
 	}
 	defer application.Close()
+	if cfg.Role == platformconfig.RoleArchiveRecover {
+		receipt, recoverErr := recoverArchiveNotification(ctx, application.weComArchiveProcessor, cfg.ArchiveRecoverID, cfg.ArchiveRecoverAttempt, os.Geteuid())
+		if recoverErr != nil {
+			return recoverErr
+		}
+		slog.Info("archive recovery accepted", "delivery_id", receipt.ID, "expected_attempt", cfg.ArchiveRecoverAttempt, "state", receipt.Status, "release_sha", cfg.ReleaseSHA)
+		return nil
+	}
 	if cfg.Role == platformconfig.RoleShopBackfill {
 		if application.shopSync == nil {
 			return errors.New("shop backfill is not composed")

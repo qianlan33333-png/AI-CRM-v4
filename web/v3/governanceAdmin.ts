@@ -79,6 +79,16 @@ function storageEvidence(value: unknown): string {
   return `<p>${esc(value.status || value.state || 'unknown')} · ${esc(value.reason || value.code || '')} · ${esc(date(value.observed_at || value.finished_at))}</p>${'deleted_count' in value ? table(['删除发布包', '逻辑字节', '可用回滚版本'], [[n(value.deleted_count), n(value.deleted_bytes), n(value.rollback_count)]]) : ''}${samples.length ? table(['存储范围', '采样状态', '清理前可用字节', '清理后可用字节', '可用空间净变化'], samples.map((v) => [esc(v.resource), esc(v.state), n(v.available_bytes_before), n(v.available_bytes_after), n(v.available_bytes_net_change)])) : ''}`;
 }
 function metrics(c: Check): string { return Object.entries(c.metrics || {}).map(([name, value]) => `${esc(name)}：${esc(value)}`).join('<br>') || '—'; }
+function reportText(value: unknown): string {
+  if (!record(value)) return '内容已到期或不可读取';
+  if (record(value.content)) return String(value.content.text ?? '');
+  if (value.msg_type !== 'interactive' || !record(value.card)) return '内容已到期或不可读取';
+  const card = value.card;
+  const header = record(card.header) && record(card.header.title) ? String(card.header.title.content ?? '') : '';
+  const body = record(card.body) && Array.isArray(card.body.elements) ? card.body.elements : [];
+  const paragraphs = body.filter(record).filter((item) => item.tag === 'markdown' && typeof item.content === 'string').map((item) => String(item.content));
+  return [header, ...paragraphs].filter(Boolean).join('\n\n') || '内容已到期或不可读取';
+}
 function layout(content: string): void {
   if (!root) return;
   renderHeader();
@@ -207,7 +217,7 @@ async function refresh(): Promise<void> {
     const items = data.items.filter(record);
     if (selected === 'reports') {
       layout(`<p>每小时一个报告窗口。飞书已接受不等于群内已确认可见。</p>${table(['类型 / 报告窗口', '发送状态', '关联效果', '详情'], items.map((v, n) => [`${esc(({ hourly: '小时报告', critical: '严重告警', recovery: '恢复通知' } as Record<string, string>)[String(v.notification_kind)] || '巡查报告')}<br>${esc(date(v.hour_key))}`, badge(String(v.effect_state)), esc(v.effect_id || '—'), `<button class="admin-button" data-report="${n}">查看报告</button>`]))}`);
-      root?.querySelectorAll<HTMLButtonElement>('[data-report]').forEach((button) => button.addEventListener('click', () => { const v = items[Number(button.dataset.report)]; const body = document.createElement('pre'); body.className = 'governance-report'; body.textContent = record(v.content) && record(v.content.content) ? String(v.content.content.text ?? '') : '内容已到期或不可读取'; openDetailDrawer('巡查报告', body); }));
+      root?.querySelectorAll<HTMLButtonElement>('[data-report]').forEach((button) => button.addEventListener('click', () => { const v = items[Number(button.dataset.report)]; const body = document.createElement('pre'); body.className = 'governance-report'; body.textContent = reportText(v.content); if(record(v.content) && record(v.content.card) && record(v.content.card.header)) body.dataset.reportTone=String(v.content.card.header.template ?? ''); openDetailDrawer('巡查报告', body); }));
     } else if (selected === 'diagnostics') {
       layout(`<form class="governance-query"><label>页面排查编号 <input name="correlation" value="${esc(diagnosticQuery)}" maxlength="128" autocomplete="off" placeholder="粘贴报错时的排查编号"></label><button class="admin-button" type="submit">定位问题</button><button class="admin-button" type="button" data-clear-query>查看全部</button></form>${table(['错误类别 / 路由', '关联摘要', '版本', '关联任务 / 效果', '次数 / 首次 / 最近'], items.map((v) => [`${esc(v.code || v.error_code)}<br>${esc(v.route_template || '—')}`, esc(v.correlation_digest), esc(v.release_sha), `${esc(v.job_ref || '—')} / ${esc(v.effect_ref || '—')}`, `${esc(v.occurrences ?? 1)}<br>${esc(date(v.first_seen || v.occurred_at))}<br>${esc(date(v.last_seen || v.occurred_at))}`]))}`);
       root?.querySelector<HTMLFormElement>('form')?.addEventListener('submit', (event) => { event.preventDefault(); const value = root.querySelector<HTMLInputElement>('[name="correlation"]')?.value.trim() || ''; if (value && !/^[a-f0-9]{32}$/.test(value)) { showError(new Error('排查编号应为 32 位字母和数字。')); return; } diagnosticQuery = value; void refresh(); });

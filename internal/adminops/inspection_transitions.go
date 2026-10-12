@@ -2,7 +2,6 @@ package adminops
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -63,31 +62,30 @@ func recordInspectionIssue(ctx context.Context, tx pgx.Tx, r opsport.CheckResult
 }
 
 func transitionMessage(kind string, runID int64, at time.Time, changes []inspectionTransition, detailURL string) ([]byte, error) {
-	title := "CRM 严重异常合并通知"
+	title, color := "CRM 运行巡查 · 需要立即处理", "red"
 	if kind == "recovery" {
-		title = "CRM 严重异常恢复通知"
+		title, color = "CRM 运行巡查 · 已确认恢复", "green"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n巡查 #%d · %s\n变化检查项：%d\n", title, runID, at.Format(time.RFC3339), len(changes))
+	fmt.Fprintf(&b, "**本次 %d 项%s**\n", len(changes), map[bool]string{true: "检查恢复", false: "严重异常需要处理"}[kind == "recovery"])
+	known := map[string]string{}
+	for _, definition := range InspectionCatalog() {
+		known[definition.ID] = definition.Title
+	}
 	for i, c := range changes {
 		if i >= 30 {
 			b.WriteString("其余变化见治理看板。\n")
 			break
 		}
-		fmt.Fprintf(&b, "问题 #%d · %s · %s\n", c.ID, c.CheckID, c.Code)
+		name := known[c.CheckID]
+		if name == "" {
+			name = c.CheckID
+		}
+		fmt.Fprintf(&b, "- %s：%s（问题 #%d；%s）\n", name, map[bool]string{true: "新的成功采集已确认恢复", false: "请检查当前业务影响并处理"}[kind == "recovery"], c.ID, c.CheckID)
 	}
 	if kind == "recovery" {
 		b.WriteString("上述检查已由新的成功采集确认恢复；其他检查状态请查详情。\n")
 	}
-	if detailURL != "" {
-		b.WriteString("详情：" + detailURL + "\n")
-	}
-	content, e := json.Marshal(map[string]any{"msg_type": "text", "content": map[string]string{"text": b.String()}})
-	if e != nil {
-		return nil, e
-	}
-	if len(content) > 24000 {
-		return nil, ErrInspectionInvalid
-	}
-	return content, nil
+	fmt.Fprintf(&b, "\n巡查 #%d · %s（北京时间）", runID, at.In(time.FixedZone("CST", 8*3600)).Format("01/02 15:04"))
+	return humanCard(title, color, b.String(), detailURL)
 }

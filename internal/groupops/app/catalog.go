@@ -152,6 +152,10 @@ func (s *CatalogService) ProcessCatalog(ctx context.Context, id int64) error {
 					return err
 				}
 				if s.RetryDetail != nil {
+					var failure w.DirectoryFailure
+					if errors.As(err, &failure) && !failure.DirectoryFailureRetryable() {
+						continue // saved failure requires permission/data repair, not retries
+					}
 					if retryErr := s.RetryDetail(ctx, item.ChatID); retryErr != nil {
 						return retryErr
 					}

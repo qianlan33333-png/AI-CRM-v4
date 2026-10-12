@@ -2,7 +2,6 @@ package payment
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -21,7 +20,15 @@ const (
 	weChatPayPaymentReconciliationMaxAttempts = 16
 )
 
-var errReconciliationPending = errors.New("payment reconciliation is pending")
+type reconciliationPending struct{}
+
+func (reconciliationPending) Error() string { return "payment reconciliation is pending" }
+
+// A successful Provider read of an unpaid/processing order is expected
+// waiting. Keep River's retry budget unchanged without reporting an outage.
+func (reconciliationPending) ExpectedJobRetry() bool { return true }
+
+var errReconciliationPending error = reconciliationPending{}
 
 type ReconciliationJobArgs struct {
 	Provider  domain.Provider `json:"provider"`

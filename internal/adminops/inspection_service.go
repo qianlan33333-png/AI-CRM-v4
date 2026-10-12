@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -590,63 +589,3 @@ func (s *InspectionService) String() string {
 
 // reportMessage freezes the exact bytes sent to Feishu. It carries all check
 // statuses and bounded issue detail; business payloads are never serialized.
-func reportMessage(hour time.Time, o opsport.InspectionOverview, window *effectport.OpsWindowCounts, detailURL string) ([]byte, error) {
-	var b strings.Builder
-	zone := time.FixedZone("CST", 8*3600)
-	fmt.Fprintf(&b, "CRM 每小时巡查 · 窗口 [%s, %s)\n当前观察新鲜：%t\n", hour.In(zone).Format("2006-01-02 15:04"), hour.Add(time.Hour).In(zone).Format("2006-01-02 15:04"), o.Fresh)
-	if window == nil {
-		b.WriteString("报告窗口外部效果流量：[unknown] 原窗口数据未取得，不以其他窗口替代\n")
-	} else {
-		fmt.Fprintf(&b, "报告窗口外部效果流量：开始尝试=%d，执行完成=%d（分别按开始、完成时间统计；非群内可见凭证）\n", window.Started, window.Executed)
-	}
-	fmt.Fprintf(&b, "当前状态采集读回：%s；以下为采集时积压或保留状态总数，不代表本小时新增故障；滚动指标另标窗口。\n", o.ObservedAt.Format(time.RFC3339))
-	for _, r := range o.Checks {
-		fmt.Fprintf(&b, "[%s] %s · %s", r.Status, r.Title, r.Code)
-		keys := make([]string, 0, len(r.Metrics))
-		for k := range r.Metrics {
-			// The separately queried report window is authoritative; the latest
-			// scan's preceding hour may differ after a delayed report attempt.
-			if r.ID == "effects.outcomes" && (k == "previous_hour_attempts" || k == "previous_hour_executed") {
-				continue
-			}
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			fmt.Fprintf(&b, " %s%s=%d", k, reportMetricWindow(k), r.Metrics[k])
-		}
-		b.WriteByte('\n')
-	}
-	fmt.Fprintf(&b, "未关闭问题：%d（列表上限200）\n", len(o.Issues))
-	for i, v := range o.Issues {
-		if i >= 20 {
-			b.WriteString("其余问题见治理看板。\n")
-			break
-		}
-		fmt.Fprintf(&b, "#%d [%s/%s] %s %s，累计%d次\n", v.ID, v.Severity, v.Status, v.CheckID, v.Code, v.Occurrences)
-	}
-	if detailURL != "" {
-		b.WriteString("详情：" + detailURL + "\n")
-	}
-	content, e := json.Marshal(map[string]any{"msg_type": "text", "content": map[string]string{"text": b.String()}})
-	if e != nil {
-		return nil, e
-	}
-	if len(content) > 24000 {
-		return nil, ErrInspectionInvalid
-	}
-	return content, nil
-}
-
-func reportMetricWindow(key string) string {
-	switch {
-	case strings.HasSuffix(key, "_last_hour"):
-		return "（采集前60分钟）"
-	case strings.HasSuffix(key, "_last_24h"):
-		return "（采集前24小时）"
-	case key == "failed" || key == "retryable" || key == "final_failed" || key == "discarded_retained" || strings.HasSuffix(key, "_failed"):
-		return "（保留状态总数）"
-	default:
-		return ""
-	}
-}

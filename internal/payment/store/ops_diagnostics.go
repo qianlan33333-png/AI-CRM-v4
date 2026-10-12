@@ -30,6 +30,11 @@ func (r *OpsDiagnosticReader) ReadOpsDiagnosticCounts(ctx context.Context, at ti
 		return nil, e
 	}
 	out := map[string]int64{}
+	var recentPrepay int64
+	if e = tx.QueryRow(ctx, `SELECT count(*) FROM payments WHERE status='awaiting_prepay' AND updated_at<$1::timestamptz-interval '1 hour' AND updated_at>=$1::timestamptz-interval '24 hours'`, at.UTC()).Scan(&recentPrepay); e != nil {
+		return nil, e
+	}
+	out["prepay_recent_overdue"] = recentPrepay
 	for _, q := range []struct{ key, sql string }{{"refund_unknown", `SELECT count(*) FROM payment_refunds WHERE status='outcome_unknown' AND $1::timestamptz IS NOT NULL`}, {"refund_failed", `SELECT count(*) FROM payment_refunds WHERE status='final_failed' AND $1::timestamptz IS NOT NULL`}, {"refund_overdue", `SELECT count(*) FROM payment_refunds WHERE status IN ('requested','effect_accepted') AND updated_at<$1::timestamptz-interval '1 hour'`}, {"prepay_overdue", `SELECT count(*) FROM payments WHERE status='awaiting_prepay' AND updated_at<$1::timestamptz-interval '1 hour'`}} {
 		var n int64
 		if e = tx.QueryRow(ctx, q.sql, at.UTC()).Scan(&n); e != nil {

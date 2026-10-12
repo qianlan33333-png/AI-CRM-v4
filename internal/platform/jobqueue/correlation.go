@@ -94,6 +94,11 @@ func (m *CorrelationMiddleware) Work(ctx context.Context, job *rivertype.JobRow,
 			panic("durable_job_panic")
 		}
 		if err != nil && !errors.As(err, &snooze) {
+			// Only a top-level typed expected retry is exempt. Joined/wrapped
+			// failures may contain another real error and must stay observable.
+			if expected, ok := err.(ExpectedRetry); ok && expected.ExpectedJobRetry() {
+				return
+			}
 			m.record(workctx, correlation, job.Attempt, "durable_job_failed")
 		}
 	}()

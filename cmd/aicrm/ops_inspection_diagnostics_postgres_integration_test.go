@@ -5,6 +5,7 @@ import (
 	automationstore "github.com/qianlan33333-png/AI-CRM-v3/internal/automation/store"
 	configstore "github.com/qianlan33333-png/AI-CRM-v3/internal/config/store"
 	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
+	groupstore "github.com/qianlan33333-png/AI-CRM-v3/internal/groupops/store"
 	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
 	mediastore "github.com/qianlan33333-png/AI-CRM-v3/internal/media/store"
 	archivestore "github.com/qianlan33333-png/AI-CRM-v3/internal/messagearchive/store"
@@ -44,6 +45,7 @@ func TestPostgreSQLOpsInspectionOwnerDiagnostics(t *testing.T) {
 		"segment": segmentstore.NewOpsDiagnosticReader(p), "automation": automationstore.NewOpsDiagnosticReader(p),
 		"media": mediastore.NewOpsDiagnosticReader(p), "operationcycle": operationstore.NewOpsDiagnosticReader(p),
 		"messagearchive": archivestore.NewOpsDiagnosticReader(p),
+		"groupops":       groupstore.NewOpsDiagnosticReader(p),
 	}
 	for owner, r := range readers {
 		t.Run(owner+"_empty_schema", func(t *testing.T) {

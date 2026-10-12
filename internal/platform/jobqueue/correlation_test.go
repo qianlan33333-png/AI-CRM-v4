@@ -72,3 +72,21 @@ func TestCorrelationPanicDoesNotDiscloseOriginalValue(t *testing.T) {
 	}()
 	_ = m.Work(context.Background(), &rivertype.JobRow{ID: 1}, func(context.Context) error { panic("private token") })
 }
+
+type expectedRetryFixture struct{}
+
+func (expectedRetryFixture) Error() string          { return "expected waiting" }
+func (expectedRetryFixture) ExpectedJobRetry() bool { return true }
+func TestCorrelationExpectedRetryKeepsRealFailuresVisible(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want int
+	}{{expectedRetryFixture{}, 0}, {errors.New("real failure"), 1}, {errors.Join(expectedRetryFixture{}, errors.New("real failure")), 1}} {
+		calls := 0
+		m := &CorrelationMiddleware{Record: func(context.Context, diagnostics.Observation) error { calls++; return nil }}
+		got := m.Work(context.Background(), &rivertype.JobRow{ID: 1}, func(context.Context) error { return tc.err })
+		if got != tc.err || calls != tc.want {
+			t.Fatal("diagnostics changed retry outcome or hid actual failure")
+		}
+	}
+}

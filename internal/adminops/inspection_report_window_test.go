@@ -3,7 +3,6 @@ package adminops
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -61,23 +60,15 @@ func TestPostgreSQLDelayedHourlyReportKeepsWindowAndCurrentBacklog(t *testing.T)
 			if err != nil || len(reports) != 1 {
 				t.Fatalf("reports=%+v %v", reports, err)
 			}
-			var message struct {
-				Content struct {
-					Text string `json:"text"`
-				} `json:"content"`
-			}
-			if err = json.Unmarshal(reports[0].Content, &message); err != nil {
-				t.Fatal(err)
-			}
-			text := message.Content.Text
-			if strings.Contains(text, "previous_hour_") || strings.Contains(text, "sensitive upstream") || !strings.Contains(text, "retryable（保留状态总数）=7") {
+			_, _, text := inspectHumanCard(t, reports[0].Content)
+			if strings.Contains(text, "previous_hour_") || strings.Contains(text, "sensitive upstream") || !strings.Contains(text, "累计保留 7 条失败/重试记录") {
 				t.Fatalf("mixed window or unsafe message: %s", text)
 			}
 			if unavailable {
-				if !strings.Contains(text, "[unknown] 原窗口数据未取得") || strings.Contains(text, "开始尝试=0") {
+				if !strings.Contains(text, "本报告窗口的外部执行统计未取得") || strings.Contains(text, "开始 0 次") {
 					t.Fatalf("unavailable became zero: %s", text)
 				}
-			} else if !strings.Contains(text, "开始尝试=3，执行完成=2") {
+			} else if !strings.Contains(text, "开始 3 次，执行完成 2 次") {
 				t.Fatalf("wrong fixed window: %s", text)
 			}
 			// A retry after the clock and underlying counts change must reuse

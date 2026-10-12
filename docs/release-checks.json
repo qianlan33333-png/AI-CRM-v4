@@ -1,42 +1,110 @@
 {
   "schema": 1,
-  "baseline_sha": "5485044bd41ea8fc34ea3881f7b938b6c6199636",
+  "baseline_sha": "2e3bd8892556c6d57afdb8237220ef3373768284",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/wecom/adapter",
-      "test": "TestArchiveJSONControlCharactersPreserveDecodedText"
+      "package": "./internal/adminops",
+      "test": "TestHumanReportActualFaultAndHistorySeparation"
     },
     {
       "lane": "backend",
-      "package": "./internal/wecom/adapter",
-      "test": "TestArchiveJSONRejectsOtherDamage"
+      "package": "./internal/adminops",
+      "test": "TestHumanReportHistoricalFailuresDoNotMakeRed"
     },
     {
       "lane": "backend",
-      "package": "./internal/wecom/adapter",
-      "test": "TestArchiveDecryptEscapesControlsAndRetainsOriginalBytes"
+      "package": "./internal/adminops",
+      "test": "TestHumanReportUnknownCannotTurnGreen"
     },
     {
       "lane": "backend",
-      "package": "./internal/messagearchive/app"
+      "package": "./internal/adminops",
+      "test": "TestHumanTransitionCardRecoveryAndCritical"
     },
     {
       "lane": "backend",
-      "package": "./internal/messagearchive/store",
-      "test": "TestPostgreSQLArchiveRepairEvidenceCursorAtomicAndReplay",
+      "package": "./internal/adminops",
+      "test": "TestPostgreSQLDelayedHourlyReportKeepsWindowAndCurrentBacklog",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestMessageArchivePostgreSQLInboxJourney",
+      "package": "./internal/adminops",
+      "test": "TestPostgreSQLInspectionHourlyReportWaitsForCompletionBoundary",
       "postgres": true
     },
     {
       "lane": "backend",
+      "package": "./internal/adminops",
+      "test": "TestPostgreSQLInspectionReportAtomicAcceptanceImmutableReplayAndObserver",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/adminops",
+      "test": "TestPostgreSQLInspectionCriticalAndRecoveryAreMergedAndDeduplicated",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/adminops/provider"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/automation/store",
+      "test": "TestPostgreSQLAutomationAcceptedWaitIsNotSystemOverdue",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/groupops/app"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/groupops/store",
+      "test": "TestPostgreSQLCatalogDailyManualRerunAndFreshness",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/platform/jobqueue",
+      "test": "TestCorrelationSurvivesInsertionAndWorkerReleaseChange"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/platform/jobqueue",
+      "test": "TestCorrelationRejectsUntrustedMetadataAndSnoozeIsNotFailure"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/platform/jobqueue",
+      "test": "TestCorrelationExpectedRetryKeepsRealFailuresVisible"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment",
+      "test": "TestReconciliationMaxAttempts"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/payment",
+      "test": "TestWeChatPayPaymentReconciliationRetryWindowCoversOneDay"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/platform/config",
+      "test": "TestLoadArchiveRecoveryRequiresExplicitDeliveryAndAttempt"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/platform/config",
+      "test": "TestLoadDefaultsAndRejectsInvalidRole"
+    },
+    {
+      "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestMessageArchivePostgreSQLBatchRollbackAndConcurrentCursor",
+      "test": "TestPostgreSQLArchiveRecoveryFencedAuditedAndNoOtherProvider",
       "postgres": true
     },
     {
@@ -47,11 +115,24 @@
     },
     {
       "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestInspectionObservationNeverMakesMissingOrInvalidEvidenceGreen"
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLOpsRuntimePreservesUnknownAndReportAtomicity",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLOpsPlatformFactsUseDueTimeAndExpectedWorkers",
+      "postgres": true
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/governanceAdmin.test.mjs"
     }
   ],
   "installed_checks": [
-    "archive-ingestion"
+    "archive-ingestion",
+    "governance-notifications",
+    "archive-recovery-fence"
   ]
 }

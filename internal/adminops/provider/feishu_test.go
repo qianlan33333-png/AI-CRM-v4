@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	opsport "github.com/qianlan33333-png/AI-CRM-v3/internal/adminops/port"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
@@ -13,6 +14,37 @@ import (
 	"testing"
 	"time"
 )
+
+func TestFeishuInteractiveCardUsesFrozenPayloadAndExistingReceipt(t *testing.T) {
+	p, e := notificationFixture(t)
+	payload := p.reader.(fixtureReader).payload
+	payload.Content = []byte(`{"msg_type":"interactive","card":{"schema":"2.0","header":{"template":"red","title":{"tag":"plain_text","content":"CRM 运行巡查 · 需要处理"}},"body":{"elements":[{"tag":"markdown","content":"会话存档处理失败，请恢复同步。"}]}}}`)
+	payload.PayloadDigest = effectport.Hash("ops-report-payload-v1", string(payload.Content))
+	e.PayloadDigest = payload.PayloadDigest
+	p.reader = fixtureReader{payload}
+	called := 0
+	p.client = &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		called++
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		if err = json.Unmarshal(raw, &body); err != nil || body["msg_type"] != "interactive" || body["card"] == nil {
+			t.Fatal("native card changed before Provider")
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"code":0}`)), Header: make(http.Header)}, nil
+	})}
+	got, err := p.Execute(context.Background(), e, effectport.Attempt{EffectID: "eer_1", Number: 1})
+	if err != nil || got.Completion != effectport.StateExecuted || called != 1 {
+		t.Fatal("card acceptance receipt missing")
+	}
+	e.PayloadDigest = effectport.Hash("changed")
+	got, err = p.Execute(context.Background(), e, effectport.Attempt{EffectID: "eer_1", Number: 2})
+	if err != nil || got.CallAttempted || called != 1 {
+		t.Fatal("changed card escaped immutable receipt")
+	}
+}
 
 type fixtureReader struct{ payload opsport.OpsReportPayload }
 

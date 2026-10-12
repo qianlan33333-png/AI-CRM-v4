@@ -17,4 +17,7 @@
 #governance-admin-root [data-status=warning],#governance-admin-root [data-status=unknown]{color:#b54708;background:#fffaeb}
 #governance-admin-root [data-status=critical],#governance-admin-root [data-status=final_failed]{color:#b42318;background:#fef3f2}
 .governance-report{white-space:pre-wrap;overflow-wrap:anywhere;padding:20px;font:14px/1.8 system-ui}
+.governance-report[data-report-tone=red]{border-left:4px solid #b42318;background:#fef3f2}
+.governance-report[data-report-tone=orange]{border-left:4px solid #b54708;background:#fffaeb}
+.governance-report[data-report-tone=green]{border-left:4px solid #067647;background:#ecfdf3}
 @media(max-width:900px){#governance-admin-root .governance-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}

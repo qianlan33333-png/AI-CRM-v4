@@ -46,6 +46,11 @@ func (r *Repository) ReadOpsDiagnosticCounts(ctx context.Context, at time.Time) 
 	counts["queued_overdue"] = due
 	counts["previous_hour_attempts"] = attemptedHour
 	counts["previous_hour_executed"] = executedHour
+	var recentRetry, recentFailed int64
+	if err = tx.QueryRow(ctx, `SELECT count(*) FILTER(WHERE state='retryable_failed'),count(*) FILTER(WHERE state='final_failed') FROM external_effects WHERE updated_at >= $1::timestamptz-interval '1 hour'`, at.UTC()).Scan(&recentRetry, &recentFailed); err != nil {
+		return nil, err
+	}
+	counts["retryable_last_hour"], counts["final_failed_last_hour"] = recentRetry, recentFailed
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}

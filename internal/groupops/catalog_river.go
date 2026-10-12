@@ -8,6 +8,7 @@ import (
 	queue "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/jobqueue"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 	postgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
+	wecomport "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/port"
 	"github.com/riverqueue/river"
 	"time"
 )
@@ -95,5 +96,9 @@ type CatalogDetailWorker struct {
 
 func (w *CatalogDetailWorker) Work(ctx context.Context, j *river.Job[CatalogDetailArgs]) error {
 	_, err := w.Service.RefreshCatalogGroup(ctx, j.Args.ChatID)
+	var failure wecomport.DirectoryFailure
+	if errors.As(err, &failure) && !failure.DirectoryFailureRetryable() {
+		return river.JobCancel(err)
+	}
 	return err
 }

@@ -159,7 +159,7 @@ func TestPostgreSQLInspectionHourlyReportWaitsForCompletionBoundary(t *testing.T
 		t.Fatal(result.err)
 	}
 	text := string(result.report.Content)
-	if !strings.Contains(text, "fixture_recovered") || strings.Contains(text, "fixture_conflict") {
+	if strings.Contains(text, `"template":"red"`) || !strings.Contains(text, "实际问题 0 项") {
 		t.Fatalf("frozen report mixed scan states: %s", text)
 	}
 	var recorded int

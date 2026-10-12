@@ -71,6 +71,16 @@ for (const lateStatus of [200, 409, 403]) {
   h.dom.window.close();
 }
 
+{
+  const h=setup(); h.pending.shift().respond(overview()); await flush();
+  h.tab('reports'); h.pending.shift().respond({items:[{hour_key:at,effect_state:'executed',content:{msg_type:'interactive',card:{schema:'2.0',header:{template:'red',title:{tag:'plain_text',content:'CRM 运行巡查 · 需要处理'}},body:{elements:[{tag:'markdown',content:'会话存档停更，请处理。<script>must remain text</script>'}]}}}}]}); await flush();
+  h.root.querySelector('[data-report="0"]').click(); const dialog=h.dom.window.document.querySelector('dialog');
+  assert.match(dialog.textContent,/需要处理/); assert.match(dialog.textContent,/会话存档停更/);
+  assert.equal(dialog.querySelector('[data-report-tone="red"]')?.dataset.reportTone,'red');
+  assert.equal(dialog.querySelector('script'),null,'card Markdown is rendered as safe text, not HTML');
+  h.dom.window.close();
+}
+
 for (const lateStatus of [202, 500]) {
   const h = setup(); h.pending.shift().respond(overview()); await flush();
   [...h.dom.window.document.querySelectorAll('[data-page-header-actions="governance"] button')].find((button) => button.textContent === '立即巡查').click();

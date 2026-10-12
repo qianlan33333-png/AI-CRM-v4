@@ -16,6 +16,7 @@ import (
 	customerstore "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/store"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	groupstore "github.com/qianlan33333-png/AI-CRM-v3/internal/groupops/store"
 	identitystore "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/store"
 	mediastore "github.com/qianlan33333-png/AI-CRM-v3/internal/media/store"
 	archiveport "github.com/qianlan33333-png/AI-CRM-v3/internal/messagearchive/port"
@@ -91,16 +92,17 @@ func opsInspectionCollectors(pool *pgxpool.Pool, effects *externaleffects.Reposi
 		{"identity.conflicts", identitystore.NewOpsDiagnosticReader(pool), []string{"open_conflicts", "open_merge_candidates", "source_conflicts"}, nil},
 		{"customer.projection", customerstore.NewOpsDiagnosticReader(pool), []string{"projection_conflicts", "projection_stale"}, nil},
 		{"config.drift", configstore.NewOpsDiagnosticReader(pool), []string{"revision_mismatch", "release_mismatch"}, nil},
-		{"payment.recovery", paymentstore.NewOpsDiagnosticReader(pool), []string{"refund_failed", "refund_overdue", "prepay_overdue"}, []string{"refund_unknown"}},
-		{"outbound.delivery", outbound.NewOpsDiagnosticReader(pool), []string{"message_failed", "message_overdue", "material_unknown"}, []string{"message_unknown"}},
-		{"wecom.sync", wecom.NewOpsDiagnosticReader(pool), []string{"sync_failed", "sync_overdue", "staff_refresh_failed"}, nil},
-		{"segment.refresh", segmentstore.NewOpsDiagnosticReader(pool), []string{"refresh_failed", "refresh_overdue"}, nil},
+		{"payment.recovery", paymentstore.NewOpsDiagnosticReader(pool), []string{"refund_failed", "refund_overdue", "prepay_recent_overdue"}, []string{"refund_unknown"}},
+		{"outbound.delivery", outbound.NewOpsDiagnosticReader(pool), []string{"message_failed", "message_overdue", "material_current_unknown"}, []string{"message_unknown"}},
+		{"wecom.sync", wecom.NewOpsDiagnosticReader(pool), []string{"sync_current_failed", "sync_overdue", "staff_current_failed"}, nil},
+		{"segment.refresh", segmentstore.NewOpsDiagnosticReader(pool), []string{"refresh_current_failed", "refresh_overdue"}, nil},
 		{"automation.runs", automationstore.NewOpsDiagnosticReader(pool), []string{"runs_unknown", "runs_partial_failed", "runs_overdue"}, nil},
 		{"archive.ingestion", archivestore.NewOpsDiagnosticReader(pool), nil, []string{"ingestion_blocked"}},
+		{"groupops.catalog", groupstore.NewOpsDiagnosticReader(pool), []string{"groups_unreadable", "scans_overdue"}, nil},
 		{"media.storage", mediastore.NewOpsDiagnosticReader(pool), []string{"expired_upload_parts"}, nil},
 		{"operationcycle.actions", operationstore.NewOpsDiagnosticReader(pool), []string{"actions_failed", "actions_overdue"}, nil},
 		{"survey.submissions", surveystore.NewOpsDiagnosticReader(pool), []string{"identity_conflicts"}, []string{"missing_claim_submission", "claim_owner_mismatch", "definition_mismatch"}},
-		{"effects.outcomes", effects, []string{"unknown", "retryable", "final_failed", "queued_overdue"}, []string{"lease_expired"}},
+		{"effects.outcomes", effects, []string{"unknown", "retryable_last_hour", "final_failed_last_hour", "queued_overdue"}, []string{"lease_expired"}},
 	}
 	out := make([]opsport.InspectionCollector, 0, len(specs)+6)
 	for _, s := range specs {
@@ -110,13 +112,13 @@ func opsInspectionCollectors(pool *pgxpool.Pool, effects *externaleffects.Reposi
 		opsPaymentOrderConsistencyCollector(snapshot, paymentstore.NewOpsConsistencyReader(), orderstore.NewOpsConsistencyReader()),
 		opsCollector("jobqueue.backlog", func(c context.Context, t time.Time) (map[string]int64, error) {
 			return jobqueue.DiagnosticCounts(c, pool, t)
-		}, []string{"due_over_10m", "running_over_10m", "discarded_retained"}, nil),
+		}, []string{"due_over_10m", "running_over_10m"}, nil),
 		opsCollector("jobqueue.workers", func(c context.Context, t time.Time) (map[string]int64, error) {
 			return jobqueue.WorkerDiagnosticCounts(c, pool, t, expectedQueues...)
 		}, []string{"paused_queues"}, nil),
 		opsCollector("platform.callbacks", func(c context.Context, t time.Time) (map[string]int64, error) {
 			return webhook.DiagnosticCounts(c, pool, t)
-		}, []string{"failed", "due_over_10m", "expired_processing_leases"}, nil),
+		}, []string{"failed_last_hour", "due_over_10m", "expired_processing_leases"}, nil),
 		opsCollector("platform.outbox", func(c context.Context, t time.Time) (map[string]int64, error) {
 			return outbox.DiagnosticCounts(c, pool, t, []string{operationport.EvOperationCycleFact})
 		}, []string{"expected_consumer_overdue"}, nil),

@@ -30,6 +30,11 @@ func (r *OpsDiagnosticReader) ReadOpsDiagnosticCounts(ctx context.Context, at ti
 		return nil, e
 	}
 	out := map[string]int64{}
+	var currentMaterial int64
+	if e = tx.QueryRow(ctx, `SELECT count(*) FROM outbound_material_preparations WHERE state='outcome_unknown' AND is_current AND $1::timestamptz IS NOT NULL`, at.UTC()).Scan(&currentMaterial); e != nil {
+		return nil, e
+	}
+	out["material_current_unknown"] = currentMaterial
 	for _, q := range []struct{ key, sql string }{{"message_unknown", `SELECT count(*) FROM outbound_private_message_intents WHERE state='outcome_unknown' AND $1::timestamptz IS NOT NULL`}, {"message_failed", `SELECT count(*) FROM outbound_private_message_intents WHERE state='final_failed' AND $1::timestamptz IS NOT NULL`}, {"message_overdue", `SELECT count(*) FROM outbound_private_message_intents WHERE state='attempted' AND updated_at<$1::timestamptz-interval '1 hour'`}, {"material_unknown", `SELECT count(*) FROM outbound_material_preparations WHERE state='outcome_unknown' AND $1::timestamptz IS NOT NULL`}} {
 		var n int64
 		if e = tx.QueryRow(ctx, q.sql, at.UTC()).Scan(&n); e != nil {

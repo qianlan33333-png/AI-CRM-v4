@@ -32,6 +32,8 @@ const (
 	RolePaymentRefund Role = "payment-refund"
 	// One-shot, explicitly selected failed invoice recovery; no daemon or direct Provider write.
 	RoleInvoiceRecover Role = "invoice-recover"
+	// Reopens one existing authenticated archive notification after a repair.
+	RoleArchiveRecover Role = "archive-recover"
 	RoleShopBackfill   Role = "wechat-shop-backfill"
 	// RoleRuntimeConfigMaintenance is a root-authenticated one-shot Config-owner
 	// command. It publishes only the explicitly supplied WeChat Shop settings.
@@ -80,6 +82,8 @@ type Runtime struct {
 	PaymentRefundKey                    string
 	PaymentRefundAuthorization          string
 	InvoiceRecoverID                    string
+	ArchiveRecoverID                    int64
+	ArchiveRecoverAttempt               int
 	RuntimeConfigRequestFile            string
 	ShopBackfillFrom, ShopBackfillUntil time.Time
 	CustomerSyncTrigger                 string
@@ -695,7 +699,7 @@ func Load() (Runtime, error) {
 		return Runtime{}, errors.New("invalid AICRM_RELEASE_SHA")
 	}
 	switch cfg.Role {
-	case RoleAPI, RoleWorker, RoleEffectsWorker, RolePaymentReconcile, RoleProfitSharingReconcile, RolePaymentRefund, RoleInvoiceRecover, RoleShopBackfill, RoleRuntimeConfigMaintenance:
+	case RoleAPI, RoleWorker, RoleEffectsWorker, RolePaymentReconcile, RoleProfitSharingReconcile, RolePaymentRefund, RoleInvoiceRecover, RoleArchiveRecover, RoleShopBackfill, RoleRuntimeConfigMaintenance:
 	default:
 		return Runtime{}, errors.New("invalid AICRM_ROLE")
 	}
@@ -754,6 +758,16 @@ func Load() (Runtime, error) {
 			return Runtime{}, errors.New("invalid AICRM_INVOICE_RECOVER_ID")
 		}
 		cfg.InvoiceRecoverID = raw
+	}
+	if cfg.Role == RoleArchiveRecover {
+		cfg.ArchiveRecoverID, err = strconv.ParseInt(os.Getenv("AICRM_ARCHIVE_RECOVER_ID"), 10, 64)
+		if err != nil || cfg.ArchiveRecoverID < 1 {
+			return Runtime{}, errors.New("invalid AICRM_ARCHIVE_RECOVER_ID")
+		}
+		cfg.ArchiveRecoverAttempt, err = strconv.Atoi(os.Getenv("AICRM_ARCHIVE_RECOVER_ATTEMPT"))
+		if err != nil || cfg.ArchiveRecoverAttempt < 1 {
+			return Runtime{}, errors.New("invalid AICRM_ARCHIVE_RECOVER_ATTEMPT")
+		}
 	}
 	if cfg.Role == RolePaymentReconcile {
 		raw, ok := os.LookupEnv("AICRM_PAYMENT_RECONCILE_ID")

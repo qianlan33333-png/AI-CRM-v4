@@ -27,6 +27,24 @@ func TestLoadDefaultsAndRejectsInvalidRole(t *testing.T) {
 	}
 }
 
+func TestLoadArchiveRecoveryRequiresExplicitDeliveryAndAttempt(t *testing.T) {
+	t.Setenv("AICRM_DATABASE_URL", "postgres://aicrm:test@localhost/aicrm")
+	t.Setenv("AICRM_ROLE", string(RoleArchiveRecover))
+	for _, pair := range [][2]string{{"", ""}, {"17", ""}, {"0", "1"}, {"17", "0"}, {"17", "invalid"}} {
+		t.Setenv("AICRM_ARCHIVE_RECOVER_ID", pair[0])
+		t.Setenv("AICRM_ARCHIVE_RECOVER_ATTEMPT", pair[1])
+		if _, err := Load(); err == nil {
+			t.Fatal("unfenced archive recovery accepted")
+		}
+	}
+	t.Setenv("AICRM_ARCHIVE_RECOVER_ID", "17")
+	t.Setenv("AICRM_ARCHIVE_RECOVER_ATTEMPT", "8")
+	cfg, err := Load()
+	if err != nil || cfg.ArchiveRecoverID != 17 || cfg.ArchiveRecoverAttempt != 8 {
+		t.Fatal("explicit recovery unavailable", err)
+	}
+}
+
 func TestLoadRuntimeConfigMaintenanceRequiresRequestPathOnlyForThatRole(t *testing.T) {
 	t.Setenv("AICRM_DATABASE_URL", "postgres://aicrm:test@localhost/aicrm")
 	t.Setenv("AICRM_WECHAT_SHOP_PROVIDER_ENABLED", "false")

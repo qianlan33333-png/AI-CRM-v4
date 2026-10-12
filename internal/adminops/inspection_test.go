@@ -240,7 +240,7 @@ func TestPostgreSQLInspectionReportAtomicAcceptanceImmutableReplayAndObserver(t 
 		t.Fatalf("duplicate effect %d %v", accepts, e)
 	}
 	var message map[string]any
-	if e = json.Unmarshal(r.Content, &message); e != nil || message["msg_type"] != "text" || len(r.Content) > 24000 {
+	if e = json.Unmarshal(r.Content, &message); e != nil || message["msg_type"] != "interactive" || len(r.Content) > 24000 {
 		t.Fatalf("invalid provider payload %s", r.Content)
 	}
 	loaded, e := s.LoadOpsReportPayload(ctx, a.envelope)
