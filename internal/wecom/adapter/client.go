@@ -2535,6 +2535,13 @@ func (client *Client) EnterpriseDirectoryReady() bool {
 	return client != nil && client.Ready() && !invalid(client.config.Secret)
 }
 
+func (client *Client) EnterpriseDirectoryCorpID() string {
+	if client == nil {
+		return ""
+	}
+	return client.config.CorpID
+}
+
 // ListEnterpriseEmployees reads the application-visible corporate directory
 // through the read-only department/simplelist + user/simplelist APIs. The
 // newer user/list_id endpoint is not universally granted to the existing

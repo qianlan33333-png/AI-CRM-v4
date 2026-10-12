@@ -52,7 +52,7 @@ dom.window.fetch = (url, options = {}) => {
   const target = new URL(String(url), dom.window.location.href);
   calls.push(target.pathname + target.search);
   if(target.pathname === '/api/admin/access/super-admin-transfer') return Promise.resolve(reply({error:'permission_denied'},403));
-  if(target.pathname === '/api/admin/access/users/refresh-names') return Promise.resolve(reply(usersMode === 'forbidden'?{error:'permission_denied'}:{refreshed:true}, usersMode === 'forbidden'?403:200));
+  if(target.pathname === '/api/admin/access/users/refresh') return Promise.resolve(reply(usersMode === 'forbidden'?{error:'permission_denied'}:{ok:true,directory_refreshed:true,discovered:3,created:0,names_updated:0}, usersMode === 'forbidden'?403:200));
   if (target.pathname === '/api/admin/access/users') {
     if (usersMode === 'late') return new Promise((resolve) => { resolveLateUsers = () => resolve(reply(usersPayload())); });
     if (usersMode === 'forbidden') return Promise.resolve(reply({ error: 'permission_denied' }, 403));
@@ -94,7 +94,7 @@ try {
   assert.equal(userSearch.value, '管理员', 'refresh does not overwrite a newer user-search draft');
 
   assert.equal(document.querySelector('#admin-access-provision'),null,'grant-access entry is retired');
-  assert.ok(calls.includes('/api/admin/access/users/refresh-names'),'refresh must reread provider names');
+  assert.ok(calls.includes('/api/admin/access/users/refresh'),'refresh must reread the complete provider directory');
   usersMode = 'late'; document.querySelector('#admin-access-refresh').click(); await delay(10);
   assert.equal(typeof resolveLateUsers, 'function', 'the test holds an older authorized user read in flight');
   document.querySelector('#admin-access-transfer').click();

@@ -28,13 +28,10 @@ const (
 
 var ErrEnterpriseDirectoryUnavailable = errors.New("enterprise employee directory unavailable")
 
-type EnterpriseEmployees interface {
-	EnterpriseDirectoryReady() bool
-	ListEnterpriseEmployees(context.Context) ([]wecomport.EnterpriseEmployee, error)
-	ReadEnterpriseEmployee(context.Context, string) (wecomport.EnterpriseEmployee, error)
-}
+type EnterpriseEmployees = wecomport.EnterpriseEmployeeDirectory
 
 type GovernanceActions struct {
+	ProvisionAccess    bool `json:"provision_access"`
 	SetLoginEnabled    bool `json:"set_login_enabled"`
 	ChangeRole         bool `json:"change_role"`
 	BindWeComUserID    bool `json:"bind_wecom_userid"`
@@ -55,6 +52,7 @@ type GovernanceActor struct {
 
 type GovernanceUser struct {
 	UserSummary
+	AuthorizedAccount bool `json:"authorized_account"`
 	// AdminUserID is explicit for the governance command routes. ID remains
 	// present through UserSummary for the frozen-list compatibility readers.
 	AdminUserID int64 `json:"admin_user_id"`
@@ -140,13 +138,21 @@ func (service *Management) SetGovernanceSigningKey(key []byte) error {
 // WeCom client is ready. Calling a governed employee operation without it
 // fails closed instead of trusting a browser-supplied employee identifier.
 func (service *Management) SetEnterpriseEmployeeDirectory(directory EnterpriseEmployees, cursorKey []byte, corpScope string) error {
-	if service == nil || directory == nil || len(cursorKey) < 32 || strings.TrimSpace(corpScope) == "" {
+	if service == nil || directory == nil || len(cursorKey) < 32 || strings.TrimSpace(corpScope) == "" || directory.EnterpriseDirectoryCorpID() != corpScope {
 		return ErrEnterpriseDirectoryUnavailable
 	}
 	// Domain-separated signing material prevents a cursor from being accepted
 	// by another protocol that happens to use the same runtime key.
 	derived := sha256.Sum256(append(append([]byte("access-enterprise-directory-v1\x00"), cursorKey...), []byte(corpScope)...))
 	service.enterpriseDirectory, service.enterpriseCursorKey, service.enterpriseCorpScope = directory, derived[:], corpScope
+	return nil
+}
+
+func (service *Management) SetEnterpriseStaffProjector(projector accessport.EnterpriseStaffProjector) error {
+	if service == nil || projector == nil {
+		return ErrEnterpriseDirectoryUnavailable
+	}
+	service.enterpriseProjector = projector
 	return nil
 }
 
@@ -165,14 +171,11 @@ func (service *Management) ListGovernance(ctx context.Context, actor domain.Prin
 		result.Capabilities = capabilitiesFor(role)
 		result.Users = make([]GovernanceUser, 0, len(users))
 		for _, user := range users {
-			if user.AccessGrantedAt == nil {
-				continue
-			}
 			userRole, err := domain.SingleRole(user.Roles)
 			if err != nil {
 				return domain.ErrConflict
 			}
-			result.Users = append(result.Users, GovernanceUser{UserSummary: summarizeUser(user), AdminUserID: user.ID, IsActive: user.Active, LastLoginAt: user.LastLoginAt, AccessGrantedAt: user.AccessGrantedAt, Role: userRole, LoginEnabled: user.LoginEnabled, Actions: actionsFor(role, current.ID, user, userRole)})
+			result.Users = append(result.Users, GovernanceUser{UserSummary: summarizeUser(user), AuthorizedAccount: user.AccessGrantedAt != nil, AdminUserID: user.ID, IsActive: user.Active, LastLoginAt: user.LastLoginAt, AccessGrantedAt: user.AccessGrantedAt, Role: userRole, LoginEnabled: user.LoginEnabled, Actions: actionsFor(role, current.ID, user, userRole)})
 		}
 		return nil
 	})
@@ -186,7 +189,7 @@ func (service *Management) ListEnterpriseEmployees(ctx context.Context, actor do
 	if err := service.authorizeGovernanceRead(ctx, actor); err != nil {
 		return EnterpriseEmployeeListing{}, err
 	}
-	if service.enterpriseDirectory == nil || !service.enterpriseDirectory.EnterpriseDirectoryReady() {
+	if !service.enterpriseDirectoryReady() {
 		return EnterpriseEmployeeListing{}, ErrEnterpriseDirectoryUnavailable
 	}
 	query = strings.TrimSpace(query)
@@ -254,6 +257,9 @@ func (service *Management) ListEnterpriseEmployees(ctx context.Context, actor do
 }
 
 func (service *Management) completeEnterpriseDirectory(ctx context.Context) ([]wecomport.EnterpriseEmployee, error) {
+	if service.enterpriseDirectory == nil || service.enterpriseDirectory.EnterpriseDirectoryCorpID() != service.enterpriseCorpScope {
+		return nil, ErrEnterpriseDirectoryUnavailable
+	}
 	readCtx, cancel := context.WithTimeout(ctx, enterpriseSearchDeadline)
 	defer cancel()
 	employees, err := service.enterpriseDirectory.ListEnterpriseEmployees(readCtx)
@@ -276,6 +282,10 @@ func (service *Management) completeEnterpriseDirectory(ctx context.Context) ([]w
 	// make a subsequent page drift merely by returning another order.
 	sort.Slice(employees, func(i, j int) bool { return employees[i].UserID < employees[j].UserID })
 	return employees, nil
+}
+
+func (service *Management) enterpriseDirectoryReady() bool {
+	return service.enterpriseDirectory != nil && service.enterpriseDirectory.EnterpriseDirectoryReady() && service.enterpriseDirectory.EnterpriseDirectoryCorpID() == service.enterpriseCorpScope
 }
 
 func (service *Management) enterpriseItems(ctx context.Context, employees []wecomport.EnterpriseEmployee) ([]EnterpriseEmployeeItem, error) {
@@ -609,7 +619,7 @@ func (service *Management) verifiedEnterpriseEmployee(ctx context.Context, raw s
 	if err != nil || userID != raw {
 		return wecomport.EnterpriseEmployee{}, domain.ErrInvalidInput
 	}
-	if service.enterpriseDirectory == nil || !service.enterpriseDirectory.EnterpriseDirectoryReady() {
+	if !service.enterpriseDirectoryReady() {
 		return wecomport.EnterpriseEmployee{}, ErrEnterpriseDirectoryUnavailable
 	}
 	employee, err := service.enterpriseDirectory.ReadEnterpriseEmployee(ctx, userID)
@@ -638,6 +648,9 @@ func canAnyGovernanceMutation(actor, target domain.Role) bool {
 	return canManageTarget(actor, target) || (actor == domain.RoleSuperAdmin && target == domain.RoleSuperAdmin)
 }
 func actionsFor(actorRole domain.Role, actorID int64, target domain.User, targetRole domain.Role) GovernanceActions {
+	if target.AccessGrantedAt == nil {
+		return GovernanceActions{ProvisionAccess: target.Active && target.WeComUserID != "" && canProvision(actorRole, domain.RoleViewer)}
+	}
 	if target.ID == actorID || targetRole == domain.RoleSuperAdmin {
 		return GovernanceActions{TransferSuperAdmin: actorRole == domain.RoleSuperAdmin && target.ID != actorID && target.Active && target.LoginEnabled && target.AccessGrantedAt != nil && targetRole == domain.RoleAdmin}
 	}
@@ -713,31 +726,59 @@ func (service *Management) enterpriseQueryDigest(query string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// RefreshStaffNames reads the provider before opening the update transaction.
-// It updates existing bindings only and cannot grant login or create staff.
+// RefreshStaffNames remains the legacy spelling of the complete directory
+// refresh. Discovery creates staff projections, never a backend login grant.
 func (service *Management) RefreshStaffNames(ctx context.Context, actor domain.Principal) error {
+	_, err := service.RefreshStaffDirectory(ctx, actor)
+	return err
+}
+
+type StaffDirectoryRefreshResult struct {
+	Discovered   int64 `json:"discovered"`
+	Created      int64 `json:"created"`
+	NamesUpdated int64 `json:"names_updated"`
+}
+
+func (service *Management) RefreshStaffDirectory(ctx context.Context, actor domain.Principal) (StaffDirectoryRefreshResult, error) {
 	if err := service.authorizeGovernanceRead(ctx, actor); err != nil {
-		return err
+		return StaffDirectoryRefreshResult{}, err
 	}
-	if service.enterpriseDirectory == nil || !service.enterpriseDirectory.EnterpriseDirectoryReady() {
-		return ErrEnterpriseDirectoryUnavailable
+	if !service.enterpriseDirectoryReady() || service.enterpriseProjector == nil {
+		return StaffDirectoryRefreshResult{}, ErrEnterpriseDirectoryUnavailable
 	}
 	writer, ok := service.repository.(accessport.StaffNameWriter)
 	if !ok {
-		return ErrEnterpriseDirectoryUnavailable
+		return StaffDirectoryRefreshResult{}, ErrEnterpriseDirectoryUnavailable
 	}
 	employees, err := service.completeEnterpriseDirectory(ctx)
 	if err != nil {
-		return err
+		return StaffDirectoryRefreshResult{}, err
 	}
 	names := make(map[string]string, len(employees))
+	projections := make([]accessport.WeComStaffProjection, 0, len(employees))
 	for _, employee := range employees {
 		names[employee.UserID] = strings.TrimSpace(employee.DisplayName)
+		projections = append(projections, accessport.WeComStaffProjection{WeComUserID: employee.UserID, DisplayName: strings.TrimSpace(employee.DisplayName)})
 	}
-	return service.uow.Within(ctx, func(tx context.Context) error {
+	runKey, _, err := credential.IssueOpaque("directory_")
+	if err != nil {
+		return StaffDirectoryRefreshResult{}, err
+	}
+	var result StaffDirectoryRefreshResult
+	err = service.uow.Within(ctx, func(tx context.Context) error {
+		if locker, ok := service.repository.(accessport.StaffProjectionLocker); ok {
+			if err := locker.LockStaffDirectoryWithin(tx); err != nil {
+				return err
+			}
+		}
 		if _, _, err := service.currentGovernanceActor(tx, actor); err != nil {
 			return err
 		}
+		projected, err := service.enterpriseProjector.ProjectEnterpriseStaffWithin(tx, runKey, projections, service.now().UTC())
+		if err != nil {
+			return err
+		}
+		result.Discovered, result.Created = projected.Discovered, projected.Created
 		users, err := service.repository.ListUsers(tx)
 		if err != nil {
 			return err
@@ -753,7 +794,12 @@ func (service *Management) RefreshStaffNames(ctx context.Context, actor domain.P
 			if err := service.audit(tx, actor.InternalID, user.ID, "refresh_staff_name", nil); err != nil {
 				return err
 			}
+			result.NamesUpdated++
 		}
 		return nil
 	})
+	if err != nil {
+		return StaffDirectoryRefreshResult{}, err
+	}
+	return result, nil
 }

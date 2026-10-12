@@ -97,6 +97,7 @@ func (handler *Handler) Routes() nethttp.Handler {
 	mux.HandleFunc("GET /api/admin/access/users", handler.listUsers)
 	mux.HandleFunc("GET /api/admin/access/enterprise-employees", handler.listEnterpriseEmployees)
 	mux.HandleFunc("POST /api/admin/access/users/refresh-names", handler.refreshStaffNames)
+	mux.HandleFunc("POST /api/admin/access/users/refresh", handler.refreshStaffNames)
 	mux.HandleFunc("POST /api/admin/access/super-admin-transfer", handler.transferSuperAdmin)
 	mux.HandleFunc("PUT /api/admin/access/users/{id}/login-access", handler.setLoginEnabled)
 	mux.HandleFunc("PUT /api/admin/access/users/{id}/role", handler.setRole)
@@ -764,11 +765,16 @@ func (handler *Handler) refreshStaffNames(response nethttp.ResponseWriter, reque
 		return
 	}
 	service, ok := handler.management.(interface {
-		RefreshStaffNames(context.Context, domain.Principal) error
+		RefreshStaffDirectory(context.Context, domain.Principal) (app.StaffDirectoryRefreshResult, error)
 	})
 	if !ok {
 		handler.writeMutationResult(response, request, app.ErrEnterpriseDirectoryUnavailable)
 		return
 	}
-	handler.writeMutationResult(response, request, service.RefreshStaffNames(request.Context(), actor))
+	result, err := service.RefreshStaffDirectory(request.Context(), actor)
+	if err != nil {
+		handler.writeError(response, request, err)
+		return
+	}
+	writeJSON(response, nethttp.StatusOK, map[string]any{"ok": true, "directory_refreshed": true, "discovered": result.Discovered, "created": result.Created, "names_updated": result.NamesUpdated})
 }

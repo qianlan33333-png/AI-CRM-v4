@@ -19,6 +19,7 @@ import (
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/access/domain"
 	accesshttp "github.com/qianlan33333-png/AI-CRM-v3/internal/access/http"
 	accessstore "github.com/qianlan33333-png/AI-CRM-v3/internal/access/store"
+	platformaudit "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/audit"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	wecomport "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/port"
 )
@@ -365,7 +366,7 @@ type governanceBehaviorFixture struct {
 func newGovernanceBehaviorFixture(t *testing.T) *governanceBehaviorFixture {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	native, cleanupSchema := governanceSchema(t, ctx, "0003_access.sql", "0027_admin_access_login_compat.sql", "0151_access_role_governance.sql", "0152_access_login_grants.sql")
+	native, cleanupSchema := governanceSchema(t, ctx, "0001_platform.sql", "0003_access.sql", "0027_admin_access_login_compat.sql", "0151_access_role_governance.sql", "0152_access_login_grants.sql")
 	pool, err := platformpostgres.Wrap(native, time.Second)
 	if err != nil {
 		cleanupSchema()
@@ -383,6 +384,17 @@ func newGovernanceBehaviorFixture(t *testing.T) *governanceBehaviorFixture {
 	if err != nil {
 		cleanupSchema()
 		cancel()
+		t.Fatal(err)
+	}
+	audit, err := platformaudit.NewService(platformaudit.NewPostgreSQLStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projector, err := accessapp.NewWeComStaffProjector(repository, credential.PasswordHasher{}, audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = management.SetEnterpriseStaffProjector(projector); err != nil {
 		t.Fatal(err)
 	}
 	if err = management.SetGovernanceSigningKey([]byte("0123456789abcdef0123456789abcdef")); err != nil {
@@ -521,7 +533,15 @@ func (fixture *governanceBehaviorFixture) httpRequest(t *testing.T, method, path
 }
 
 type governanceTestDirectory struct {
+	corpID    string
 	employees map[string]wecomport.EnterpriseEmployee
+}
+
+func (directory *governanceTestDirectory) EnterpriseDirectoryCorpID() string {
+	if directory.corpID == "" {
+		return "fixture-corp"
+	}
+	return directory.corpID
 }
 
 func newGovernanceTestDirectory() *governanceTestDirectory {

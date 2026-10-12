@@ -25,3 +25,15 @@ type WeComStaffProjectionResult struct {
 type WeComStaffProjector interface {
 	ProjectWeComStaffWithin(context.Context, string, []WeComStaffProjection, time.Time) (WeComStaffProjectionResult, error)
 }
+
+// EnterpriseStaffProjector reuses the same Access projection kernel while
+// retaining the complete enterprise directory as the audit source.
+type EnterpriseStaffProjector interface {
+	ProjectEnterpriseStaffWithin(context.Context, string, []WeComStaffProjection, time.Time) (WeComStaffProjectionResult, error)
+}
+
+// StaffProjectionLocker serializes directory discovery from manual and durable
+// refreshes. The lock lives in the caller's existing PostgreSQL transaction.
+type StaffProjectionLocker interface {
+	LockStaffDirectoryWithin(context.Context) error
+}

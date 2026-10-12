@@ -147,11 +147,13 @@
       if (user.role === "super_admin") { const note = document.createElement("small"); note.textContent = "唯一超级管理员"; name.appendChild(note); }
       nameCell.dataset.label = "员工"; nameCell.appendChild(name); row.appendChild(nameCell);
       row.appendChild(makeCell(String(user.wecom_userid || "未绑定"), "admin-access-table__muted", "企微账号"));
-      const roleCell = document.createElement("td"); roleCell.dataset.label = "权限"; const role = document.createElement("span"); role.className = "admin-access-role"; role.textContent = roleLabels[user.role] || "未设置"; roleCell.appendChild(role); row.appendChild(roleCell);
-      const statusCell = document.createElement("td"); statusCell.dataset.label = "登录状态"; const status = document.createElement("span"); status.className = "admin-access-status" + (user.login_enabled ? "" : " is-inactive"); status.textContent = user.login_enabled ? "可登录" : "已停用"; statusCell.appendChild(status); row.appendChild(statusCell);
+      const ungranted = user.authorized_account === false;
+      const roleCell = document.createElement("td"); roleCell.dataset.label = "权限"; const role = document.createElement("span"); role.className = "admin-access-role"; role.textContent = ungranted ? "未开通" : (roleLabels[user.role] || "未设置"); roleCell.appendChild(role); row.appendChild(roleCell);
+      const statusCell = document.createElement("td"); statusCell.dataset.label = "登录状态"; const status = document.createElement("span"); status.className = "admin-access-status" + (user.login_enabled ? "" : " is-inactive"); status.textContent = ungranted ? "未开通" : (user.login_enabled ? "可登录" : "已停用"); statusCell.appendChild(status); row.appendChild(statusCell);
       row.appendChild(makeCell(formatLogin(user.last_login_at), "admin-access-table__muted", "最近登录"));
       const actionsCell = document.createElement("td"); actionsCell.dataset.label = "操作"; const actions = document.createElement("div"); actions.className = "admin-access-actions";
-      if (hasAction(user)) actions.appendChild(actionButton("管理", "manage", user)); else actions.textContent = "—";
+      if (ungranted && user.actions?.provision_access === true) actions.appendChild(actionButton("开通权限", "provision-user", user));
+      else if (hasAction(user)) actions.appendChild(actionButton("管理", "manage", user)); else actions.textContent = "—";
       actionsCell.appendChild(actions); row.appendChild(actionsCell); elements.usersBody.appendChild(row);
     });
     renderSuper();
@@ -275,10 +277,14 @@
       setAlert(errorMessage(error, "企业员工目录暂时不可用。"), "error"); setProvisionStep(1);
     }
   }
-  function openProvision() {
+  function openProvision(user) {
     if (!canProvision()) return;
     clearEmployeeDirectory(); employeeDirectoryError = false; setAlert("", ""); elements.employeeSearch.value = ""; root.querySelectorAll('input[name="provision-role"]').forEach((input) => { input.checked = false; const option = input.closest("[data-role-option]"); option.hidden = input.value === "admin" ? capabilities.provision_admin !== true : capabilities.provision_viewer !== true; });
-    elements.provisionDialog.hidden = false; setProvisionStep(1); void loadEmployees(true); elements.employeeSearch.focus();
+    elements.provisionDialog.hidden = false;
+    if (user?.authorized_account === false && user.actions?.provision_access === true) {
+      selectedEmployee = { display_name: user.display_name, wecom_userid: user.wecom_userid, authorized_account: false };
+      setProvisionStep(2);
+    } else { setProvisionStep(1); void loadEmployees(true); elements.employeeSearch.focus(); }
   }
   function closeProvision() { elements.provisionDialog.hidden = true; clearEmployeeDirectory(); }
   function openTransfer() {
@@ -290,11 +296,17 @@
   }
   function closeTransfer() { elements.transferDialog.hidden = true; elements.transferTarget.replaceChildren(); }
 
-  elements.refresh.addEventListener("click", () => { setAlert("", ""); elements.refresh.disabled = true; void mutate(api.users + "/refresh-names", "POST", {}, "员工昵称已刷新。").finally(() => { elements.refresh.disabled = accessRevoked; }); });
+  elements.refresh.addEventListener("click", () => {
+    setAlert("", ""); elements.refresh.disabled = true;
+    void requestJSON(api.users + "/refresh", { method: "POST", body: "{}", headers: { "Idempotency-Key": requestKey() } }).then(async (payload) => {
+      if (payload.directory_refreshed !== true) throw new Error("directory refresh receipt missing");
+      if (await loadUsers()) setAlert(`员工名单已刷新：读取 ${payload.discovered} 名，新增 ${payload.created} 名，更新姓名 ${payload.names_updated} 名。新员工需单独开通后台权限。`, "success");
+    }).catch((error) => { if (error.status === 401 || error.status === 403) clearSensitiveView(); setAlert(errorMessage(error, "员工名单刷新失败，保留原有员工与权限。"), "error"); }).finally(() => { elements.refresh.disabled = accessRevoked; });
+  });
   elements.search.addEventListener("input", () => { usersCommittedQuery = String(elements.search.value || "").trim(); renderUsers(); });
   elements.provision?.addEventListener("click", openProvision); elements.provisionClose.addEventListener("click", closeProvision); elements.transfer.addEventListener("click", openTransfer); elements.transferClose.addEventListener("click", closeTransfer);
   elements.drawerClose.addEventListener("click", closeDrawer); elements.drawerBackdrop.addEventListener("click", closeDrawer);
-  elements.usersBody.addEventListener("click", (event) => { const button = event.target.closest("button[data-access-action]"); if (!button || button.dataset.accessAction !== "manage") return; openDrawer(users.find((user) => String(user.admin_user_id) === String(button.dataset.userId))); });
+  elements.usersBody.addEventListener("click", (event) => { const button = event.target.closest("button[data-access-action]"); if (!button) return; const user = users.find((user) => String(user.admin_user_id) === String(button.dataset.userId)); if (button.dataset.accessAction === "provision-user") openProvision(user); else if (button.dataset.accessAction === "manage") openDrawer(user); });
   elements.drawerActions.addEventListener("click", (event) => { const button = event.target.closest("button[data-access-action]"); const user = selectedUser(); if (!button || !user || button.dataset.accessAction !== "toggle-login") return; button.disabled = true; void mutate(api.loginAccess(user.admin_user_id), "PUT", { login_enabled: !user.login_enabled }, user.login_enabled ? "员工登录已停用。" : "员工登录已启用。").then((ok) => { if (ok) openDrawer(selectedUser()); }).finally(() => { button.disabled = false; }); });
   elements.roleForm.addEventListener("submit", (event) => { event.preventDefault(); const user = selectedUser(); const role = elements.roleForm.querySelector('input[name="role"]:checked'); if (!user || !role || user.actions.change_role !== true) return; const submit = event.currentTarget.querySelector('button[type="submit"]'); submit.disabled = true; void mutate(api.role(user.admin_user_id), "PUT", { role: role.value }, "员工权限已更新。").then((ok) => { if (ok) openDrawer(selectedUser()); }).finally(() => { submit.disabled = false; }); });
   elements.bindingForm.addEventListener("submit", (event) => { event.preventDefault(); const user = selectedUser(); const value = String(elements.wecomInput.value || "").trim(); if (!user || !value || user.actions.bind_wecom_userid !== true) { setAlert("请输入企微账号。", "error"); return; } if (typeof window.confirm === "function" && !window.confirm(`确定将企微账号绑定为“${value}”吗？`)) return; const submit = event.currentTarget.querySelector('button[type="submit"]'); submit.disabled = true; void mutate(api.wecom(user.admin_user_id), "PUT", { wecom_userid: value }, "企微账号已更新。").then((ok) => { if (ok) openDrawer(selectedUser()); }).finally(() => { submit.disabled = false; }); });

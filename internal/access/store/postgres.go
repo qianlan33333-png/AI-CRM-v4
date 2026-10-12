@@ -250,6 +250,15 @@ func (*PostgreSQL) CreateStaffProjection(ctx context.Context, user domain.User) 
 	return user, nil
 }
 
+func (*PostgreSQL) LockStaffDirectoryWithin(ctx context.Context) error {
+	database, err := tx(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = database.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('aicrm-access-staff-directory'))`)
+	return err
+}
+
 func (store *PostgreSQL) BootstrapUser(ctx context.Context, user domain.User) (domain.User, bool, error) {
 	database, err := tx(ctx)
 	if err != nil {

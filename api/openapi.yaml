@@ -466,7 +466,8 @@ paths:
           description: 幂等摘要或记录版本冲突
         '503':
           description: 数据源不可用，不能据此认定正常
-  /api/admin/access/users/refresh-names: {"post":{"operationId":"refreshAccessStaffNames","description":"Read current WeCom names and update existing Access accounts with transactional audit. Does not grant permissions or create users.","security":[{"adminSession":[],"csrfHeader":[]}],"responses":{"200":{"$ref":"#/components/responses/MutationOK"},"400":{"$ref":"#/components/responses/Error"},"401":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"409":{"$ref":"#/components/responses/Error"},"503":{"$ref":"#/components/responses/Error"}}}}
+  /api/admin/access/users/refresh-names: {"post":{"operationId":"refreshAccessStaffNames","description":"Compatibility spelling of complete enterprise staff refresh. Creates ungranted staff projections, refreshes names and audits atomically; never grants backend access.","security":[{"adminSession":[],"csrfHeader":[]}],"responses":{"200":{"description":"Complete directory refresh committed","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AccessStaffDirectoryRefreshResponse"}}}},"400":{"$ref":"#/components/responses/Error"},"401":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"409":{"$ref":"#/components/responses/Error"},"503":{"$ref":"#/components/responses/Error"}}}}
+  /api/admin/access/users/refresh: {"post":{"operationId":"refreshAccessStaffDirectory","description":"Read the complete visible directory from the configured enterprise, project missing staff without login grants, and refresh names in one audited Access transaction. Missing employees never delete or disable existing records.","security":[{"adminSession":[],"csrfHeader":[]}],"responses":{"200":{"description":"Complete directory refresh committed","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AccessStaffDirectoryRefreshResponse"}}}},"400":{"$ref":"#/components/responses/Error"},"401":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"409":{"$ref":"#/components/responses/Error"},"503":{"$ref":"#/components/responses/Error"}}}}
   /api/admin/config/ai-model: {"get":{"operationId":"getConfiguredAIModel","security":[{"adminSession":[]}],"responses":{"200":{"description":"Success","content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["provider","model","configured","version"],"properties":{"provider":{"type":"string"},"model":{"type":"string"},"configured":{"type":"boolean"},"version":{"type":"integer","minimum":0}}}}}},"401":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"503":{"$ref":"#/components/responses/Error"}}},"put":{"operationId":"saveConfiguredAIModel","security":[{"adminSession":[],"csrfHeader":[]}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["provider","model","expected_version"],"properties":{"provider":{"type":"string","enum":["deepseek","qwen","glm","kimi"]},"model":{"type":"string","minLength":1,"maxLength":200},"api_key":{"type":"string","maxLength":8192,"writeOnly":true,"description":"Blank retains the saved key only for the same provider."},"expected_version":{"type":"integer","minimum":0}}}}}},"responses":{"200":{"description":"Success","content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["provider","model","configured","version"],"properties":{"provider":{"type":"string"},"model":{"type":"string"},"configured":{"type":"boolean"},"version":{"type":"integer","minimum":0}}}}}},"400":{"$ref":"#/components/responses/Error"},"401":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"409":{"$ref":"#/components/responses/Error"},"503":{"$ref":"#/components/responses/Error"}}}}
   /api/admin/attachment-library/groups: {"get":{"operationId":"listAttachmentGroups","security":[{"adminSession":[]}],"responses":{"200":{"description":"Success","content":{"application/json":{"schema":{"type":"object","required":["items"],"properties":{"items":{"type":"array","items":{"type":"object","required":["name","count"],"properties":{"name":{"type":"string","maxLength":100},"count":{"type":"integer","minimum":0}}}}}}}}},"401":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"503":{"$ref":"#/components/responses/Error"}}}}
   /api/admin/attachment-library/{id}/group: {"put":{"operationId":"setAttachmentGroup","security":[{"adminSession":[],"csrfHeader":[]}],"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"integer","minimum":1}},{"name":"Idempotency-Key","in":"header","required":true,"schema":{"type":"string","minLength":1}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["category","expected_version"],"properties":{"category":{"type":"string","maxLength":100,"description":"Empty means ungrouped."},"expected_version":{"type":"integer","minimum":1}}}}}},"responses":{"200":{"description":"Success","content":{"application/json":{"schema":{"type":"object","required":["id","category","version"],"properties":{"id":{"type":"integer","minimum":1},"category":{"type":"string"},"version":{"type":"integer","minimum":1}}}}}},"400":{"$ref":"#/components/responses/Error"},"401":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"409":{"$ref":"#/components/responses/Error"},"503":{"$ref":"#/components/responses/Error"}}}}
@@ -8540,8 +8541,9 @@ components:
     AccessGovernanceActions:
       type: object
       additionalProperties: false
-      required: [set_login_enabled, change_role, bind_wecom_userid, reset_password, transfer_super_admin]
+      required: [provision_access, set_login_enabled, change_role, bind_wecom_userid, reset_password, transfer_super_admin]
       properties:
+        provision_access: {type: boolean, description: Explicit first grant through the existing verified employee provision command.}
         set_login_enabled: {type: boolean}
         change_role: {type: boolean}
         bind_wecom_userid: {type: boolean}
@@ -8563,17 +8565,18 @@ components:
     AccessGovernanceUser:
       type: object
       additionalProperties: false
-      required: [id, admin_user_id, username, display_name, wecom_userid, active, is_active, login_enabled, access_granted_at, role, roles, actions, last_login_at, created_at, updated_at]
+      required: [id, admin_user_id, authorized_account, username, display_name, wecom_userid, active, is_active, login_enabled, access_granted_at, role, roles, actions, last_login_at, created_at, updated_at]
       properties:
         id: {$ref: "#/components/schemas/PositiveID"}
         admin_user_id: {$ref: "#/components/schemas/PositiveID"}
+        authorized_account: {type: boolean, description: False for discovered staff who have never been granted backend access.}
         username: {type: string, minLength: 1, maxLength: 120}
         display_name: {type: string, minLength: 1, maxLength: 120}
         wecom_userid: {type: string, maxLength: 128}
         active: {type: boolean}
         is_active: {type: boolean, description: Canonical governance employee-active field. `active` remains for frozen list readers.}
         login_enabled: {type: boolean}
-        access_granted_at: {type: string, format: date-time}
+        access_granted_at: {type: [string, "null"], format: date-time}
         role: {$ref: "#/components/schemas/AccessGovernanceRole"}
         roles: {$ref: "#/components/schemas/Roles"}
         actions: {$ref: "#/components/schemas/AccessGovernanceActions"}
@@ -8589,6 +8592,16 @@ components:
         actor: {$ref: "#/components/schemas/AccessGovernanceActor"}
         capabilities: {$ref: "#/components/schemas/AccessGovernanceCapabilities"}
         users: {type: array, items: {$ref: "#/components/schemas/AccessGovernanceUser"}}
+    AccessStaffDirectoryRefreshResponse:
+      type: object
+      additionalProperties: false
+      required: [ok, directory_refreshed, discovered, created, names_updated]
+      properties:
+        ok: {const: true}
+        directory_refreshed: {const: true}
+        discovered: {type: integer, format: int64, minimum: 0}
+        created: {type: integer, format: int64, minimum: 0}
+        names_updated: {type: integer, format: int64, minimum: 0}
     AccessEnterpriseEmployeeItem:
       type: object
       additionalProperties: false

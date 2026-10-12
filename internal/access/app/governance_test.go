@@ -11,12 +11,20 @@ import (
 )
 
 type governanceDirectoryStub struct {
+	corpID    string
 	employees []wecomport.EnterpriseEmployee
 	exact     map[string]wecomport.EnterpriseEmployee
 	listErr   error
 	readErr   error
 	listCalls int
 	readCalls int
+}
+
+func (directory *governanceDirectoryStub) EnterpriseDirectoryCorpID() string {
+	if directory.corpID == "" {
+		return "fixture-corp"
+	}
+	return directory.corpID
 }
 
 func (directory *governanceDirectoryStub) EnterpriseDirectoryReady() bool { return true }
@@ -59,6 +67,13 @@ func governanceFixture(t *testing.T) (*Management, *memoryRepository, *governanc
 	// before applying its signed offset cursor.
 	directory := &governanceDirectoryStub{employees: []wecomport.EnterpriseEmployee{{UserID: "Bob", DisplayName: "Bob"}, {UserID: "Alice", DisplayName: "Alice"}}, exact: map[string]wecomport.EnterpriseEmployee{}}
 	if err = service.SetEnterpriseEmployeeDirectory(directory, key, "fixture-corp"); err != nil {
+		t.Fatal(err)
+	}
+	projector, err := NewWeComStaffProjector(repository, testPasswords{}, &staffAuditRecorder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.SetEnterpriseStaffProjector(projector); err != nil {
 		t.Fatal(err)
 	}
 	return service, repository, directory, domain.Principal{Kind: domain.KindAdmin, InternalID: 1, Roles: []domain.Role{domain.RoleSuperAdmin}, SessionVersion: 3}
@@ -140,7 +155,7 @@ func TestRefreshStaffNamesPreservesPermissionsAndProviderFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	updated := repo.users[2]
-	if updated.DisplayName != "员工昵称" || updated.LoginEnabled != user.LoginEnabled || updated.SessionVersion != user.SessionVersion || len(repo.users) != 3 || updated.Roles[0] != user.Roles[0] {
+	if updated.DisplayName != "员工昵称" || updated.LoginEnabled != user.LoginEnabled || updated.SessionVersion != user.SessionVersion || len(repo.users) != 4 || updated.Roles[0] != user.Roles[0] {
 		t.Fatalf("refresh changed access: %+v", updated)
 	}
 	directory.listErr = errors.New("provider unavailable")
@@ -149,5 +164,16 @@ func TestRefreshStaffNamesPreservesPermissionsAndProviderFailure(t *testing.T) {
 	}
 	if repo.users[2].DisplayName != "员工昵称" {
 		t.Fatal("provider failure erased trusted nickname")
+	}
+}
+
+func TestStaffDirectoryRefreshRejectsChangedEnterpriseScope(t *testing.T) {
+	service, repo, directory, actor := governanceFixture(t)
+	directory.corpID = "other-enterprise"
+	if _, err := service.RefreshStaffDirectory(context.Background(), actor); !errors.Is(err, ErrEnterpriseDirectoryUnavailable) {
+		t.Fatalf("cross-enterprise refresh error=%v", err)
+	}
+	if directory.listCalls != 0 || len(repo.users) != 3 {
+		t.Fatal("cross-enterprise refresh read or projected employee facts")
 	}
 }

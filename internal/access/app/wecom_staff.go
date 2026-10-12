@@ -51,6 +51,14 @@ func NewWeComStaffProjector(repository accessport.Repository, passwords Password
 }
 
 func (service *WeComStaffProjector) ProjectWeComStaffWithin(ctx context.Context, runKey string, input []accessport.WeComStaffProjection, now time.Time) (accessport.WeComStaffProjectionResult, error) {
+	return service.projectStaffWithin(ctx, runKey, input, now, "wecom_follow_user_list")
+}
+
+func (service *WeComStaffProjector) ProjectEnterpriseStaffWithin(ctx context.Context, runKey string, input []accessport.WeComStaffProjection, now time.Time) (accessport.WeComStaffProjectionResult, error) {
+	return service.projectStaffWithin(ctx, runKey, input, now, "wecom_enterprise_directory")
+}
+
+func (service *WeComStaffProjector) projectStaffWithin(ctx context.Context, runKey string, input []accessport.WeComStaffProjection, now time.Time, source string) (accessport.WeComStaffProjectionResult, error) {
 	if service == nil || service.repository == nil || service.audit == nil || !validStaffRunKey(runKey) || len(input) > 10000 {
 		return accessport.WeComStaffProjectionResult{}, ErrWeComStaffProjectionUnavailable
 	}
@@ -75,9 +83,14 @@ func (service *WeComStaffProjector) ProjectWeComStaffWithin(ctx context.Context,
 		canonical = append(canonical, accessport.WeComStaffProjection{WeComUserID: providerID, DisplayName: displayName})
 	}
 	sort.Slice(canonical, func(i, j int) bool { return canonical[i].WeComUserID < canonical[j].WeComUserID })
+	if locker, ok := service.repository.(accessport.StaffProjectionLocker); ok {
+		if err := locker.LockStaffDirectoryWithin(ctx); err != nil {
+			return accessport.WeComStaffProjectionResult{}, err
+		}
+	}
 	result := accessport.WeComStaffProjectionResult{Discovered: int64(len(canonical))}
 	for _, item := range canonical {
-		user, err := service.repository.UserByWeComUserID(ctx, item.WeComUserID, true)
+		user, err := service.repository.UserByWeComUserID(ctx, item.WeComUserID, false)
 		if err == nil {
 			result.Existing++
 			if !user.Active {
@@ -101,7 +114,7 @@ func (service *WeComStaffProjector) ProjectWeComStaffWithin(ctx context.Context,
 		if err != nil {
 			return accessport.WeComStaffProjectionResult{}, err
 		}
-		payload, _ := json.Marshal(map[string]any{"source": "wecom_follow_user_list", "roles": []domain.Role{domain.RoleViewer}})
+		payload, _ := json.Marshal(map[string]any{"source": source, "roles": []domain.Role{domain.RoleViewer}})
 		key, keyErr := idempotency.Parse("wecom-staff-project:" + runKey + ":" + hex.EncodeToString(digest[:12]))
 		if keyErr != nil {
 			return accessport.WeComStaffProjectionResult{}, keyErr

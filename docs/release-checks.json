@@ -4,18 +4,60 @@
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/survey/app"
+      "package": "./internal/access/app"
     },
     {
       "lane": "backend",
-      "package": "./internal/survey/http"
+      "package": "./internal/access/http"
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/survey_editor_create_postgres_test.go",
-      "test": "TestPostgreSQLSurveyEditorCreatesUnassignedSlugDefinitions",
+      "path": "internal/access/store/staff_directory_refresh_postgres_integration_test.go",
+      "test": "TestPostgreSQLStaffDirectoryRefreshDiscoveryVisibilityAndSafety",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/access/store/staff_name_refresh_postgres_integration_test.go",
+      "test": "TestPostgreSQLStaffNameRefreshAuditUpgradeAndAtomicity",
       "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/access/store/governance_behavior_postgres_integration_test.go",
+      "test": "TestPostgreSQLUnprovisionedStaffProjectionCannotUseAnyGovernanceMutation",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/wecom/adapter/enterprise_directory_test.go",
+      "test": "TestEnterpriseDirectoryUsesApplicationVisibleDepartmentReads"
+    },
+    {
+      "lane": "frontend",
+      "path": "internal/webshell/static/admin_console/admin_access_directory_refresh.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "internal/webshell/static/admin_console/admin_access_committed_search.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "internal/webshell/static/admin_console/admin_access_password_reset.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "scripts/validate-openapi.mjs"
+    },
+    {
+      "lane": "browser",
+      "path": "cmd/aicrm/access_governance_ui_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLAccessGovernanceUIChromiumJourney"
     }
   ],
-  "installed_checks": ["survey-recovery"]
+  "installed_checks": [
+    "staff-directory-refresh"
+  ],
+  "build_commands": []
 }

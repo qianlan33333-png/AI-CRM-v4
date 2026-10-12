@@ -24,6 +24,8 @@ type EnterpriseEmployee struct {
 // external-contact follow-user directory: that list is only a customer-owner
 // subset and cannot establish who may be granted CRM access.
 type EnterpriseEmployeeDirectory interface {
+	// EnterpriseDirectoryCorpID binds trusted employee facts to one enterprise.
+	EnterpriseDirectoryCorpID() string
 	EnterpriseDirectoryReady() bool
 	// ListEnterpriseEmployees returns the complete application-visible
 	// enterprise directory. Implementations must bound their Provider work and

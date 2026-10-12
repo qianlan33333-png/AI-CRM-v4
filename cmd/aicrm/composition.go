@@ -294,6 +294,9 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
+	if err = management.SetEnterpriseStaffProjector(staffProjector); err != nil {
+		return fail(err)
+	}
 
 	if cfg.Survey.IdentityPhoneDataKey == "" {
 		return fail(errors.New("identity phone data encryption key is not configured"))

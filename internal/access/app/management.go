@@ -21,6 +21,7 @@ type Management struct {
 	passwords           Passwords
 	now                 func() time.Time
 	enterpriseDirectory EnterpriseEmployees
+	enterpriseProjector accessport.EnterpriseStaffProjector
 	enterpriseCursorKey []byte
 	enterpriseCorpScope string
 	governanceKey       []byte

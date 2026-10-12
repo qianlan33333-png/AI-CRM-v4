@@ -83,10 +83,16 @@ func TestPostgreSQLStaffNameRefreshAuditUpgradeAndAtomicity(t *testing.T) {
 	}
 	refresh(request(), http.StatusOK)
 	after := staffRefreshUsers(t, f)
-	if len(after) != len(before) || staffRefreshAuditCount(t, f) != beforeAudit+2 {
-		t.Fatal("refresh created an account or omitted per-employee audit")
+	if len(after) != len(before)+4 || staffRefreshAuditCount(t, f) != beforeAudit+2 {
+		t.Fatal("refresh omitted discovered staff or per-employee audit")
 	}
 	for index, user := range after {
+		if index >= len(before) {
+			if user.AccessGrantedAt != nil || user.LoginEnabled || len(user.Roles) != 1 || user.Roles[0] != domain.RoleViewer {
+				t.Fatal("discovery granted new staff backend access")
+			}
+			continue
+		}
 		switch user.WeComUserID {
 		case "bound-admin":
 			if user.DisplayName != "管理员姓名" {
