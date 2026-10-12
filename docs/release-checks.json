@@ -5,8 +5,7 @@
     {
       "lane": "browser",
       "path": "cmd/aicrm/public_commerce_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLPublicCommerceChromiumJourney",
-      "postgres": true
+      "test": "TestPostgreSQLPublicCommerceChromiumJourney"
     }
   ],
   "installed_checks": []
