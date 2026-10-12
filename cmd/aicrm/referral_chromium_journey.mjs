@@ -99,7 +99,9 @@ try {
   // isolated database. All three slots intentionally use one fixture image.
   const form = new FormData();
   form.append('name', '邀请海报测试图片');
-  form.append('image', new Blob([await fs.readFile(process.env.AICRM_REFERRAL_POSTER_PATH)], { type: 'image/png' }), 'poster.png');
+  const uploadBytes=await fs.readFile(process.env.AICRM_REFERRAL_POSTER_PATH);
+  assert.ok(uploadBytes.byteLength>0&&uploadBytes.byteLength<=1048576,'actual manual-upload PNG must fit 1MiB policy');
+  form.append('image', new Blob([uploadBytes], { type: 'image/png' }), 'poster.png');
   const upload = await fetch(base+'/api/admin/image-library/upload', { method: 'POST', headers: { Cookie: staffCookies.join('; '), Origin: base, 'X-CSRF-Token': adminCSRF, 'Idempotency-Key': 'referral-poster-browser-upload' }, body: form });
   const uploaded = await upload.json();
   assert.ok(upload.ok && uploaded.item?.id, `poster upload: ${JSON.stringify(uploaded)}`);
@@ -114,7 +116,7 @@ try {
     const imageURL=readback.posters[0].image_url;
     assert.match(imageURL,/\?v=[a-f0-9]{64}$/);
     const background=await fetch(base+imageURL);assert.equal(background.status,200);assert.equal(background.headers.get('content-type'),'image/jpeg');
-    assert.ok((await background.arrayBuffer()).byteLength<(await fs.stat(process.env.AICRM_REFERRAL_POSTER_PATH)).size,'JPEG background reduces bytes');
+    assert.ok((await background.arrayBuffer()).byteLength<uploadBytes.byteLength,'JPEG background reduces bytes');
     const conditional=await fetch(base+imageURL,{headers:{'If-None-Match':background.headers.get('etag')}});assert.equal(conditional.status,304);assert.equal((await conditional.arrayBuffer()).byteLength,0);
     assert.equal((await fetch(base+imageURL.replace(/v=[a-f0-9]{64}/,'v='+'0'.repeat(64)))).status,409);
     assert.equal((await fetch(base+imageURL.split('?')[0])).status,200,'legacy entry remains readable');

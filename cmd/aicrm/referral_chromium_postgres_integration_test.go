@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/jpeg"
 	"image/png"
 	"net"
 	"net/http"
@@ -134,29 +135,22 @@ func TestPostgreSQLReferralChromiumJourney(t *testing.T) {
 	}
 	server.StartTLS()
 	fixture, _ := json.Marshal(actors)
-	// An opaque grayscale PNG without deflate compression remains <5MiB and
-	// makes JPEG reduction deterministic. The approved real artwork can override it.
-	poster := image.NewGray(image.Rect(0, 0, 1250, 2426))
-	for y := 0; y < 2426; y++ {
-		for x := 0; x < 1250; x++ {
-			poster.Pix[y*poster.Stride+x] = uint8(32 + (x/12+y/24)%200)
-		}
-	}
-	var posterPNG bytes.Buffer
-	encoder := png.Encoder{CompressionLevel: png.NoCompression}
-	if err = encoder.Encode(&posterPNG, poster); err != nil {
-		t.Fatal(err)
-	}
+	posterBytes := referralBrowserPosterFixture(t)
 	if sourcePath := os.Getenv("AICRM_REFERRAL_POSTER_SOURCE"); sourcePath != "" {
 		actual, readErr := os.ReadFile(sourcePath)
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
-		posterPNG.Reset()
-		posterPNG.Write(actual)
+		posterBytes = actual
+	}
+	if len(posterBytes) > 1048576 {
+		t.Fatal("poster browser upload fixture exceeds 1MiB; do not bypass manual-upload policy")
+	}
+	if _, format, err := image.DecodeConfig(bytes.NewReader(posterBytes)); err != nil || format != "png" {
+		t.Fatal("poster browser upload fixture must be a valid PNG")
 	}
 	posterPath := filepath.Join(t.TempDir(), "poster.png")
-	if err = os.WriteFile(posterPath, posterPNG.Bytes(), 0600); err != nil {
+	if err = os.WriteFile(posterPath, posterBytes, 0600); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.CommandContext(ctx, "node", filepath.Join(repository, "cmd/aicrm/referral_chromium_journey.mjs"))
@@ -214,4 +208,54 @@ func TestReferralPosterInstalledEnvironment(t *testing.T) {
 	if err != nil || cfg.PublicOrigin != "https://127.0.0.1:18443" || cfg.WeChatPay.AppScope != "wechat-app:referral-fixture" || cfg.WeChatPay.Enabled || cfg.Alipay.Enabled || cfg.Effects.ProviderEnabled {
 		t.Fatalf("installed poster environment rejected or enables Providers: %v", err)
 	}
+}
+
+// Deterministic, correlated gray texture keeps PNG below the manual upload
+// policy while retaining enough detail to exercise JPEG95 reduction.
+func referralBrowserPosterFixture(t *testing.T) []byte {
+	t.Helper()
+	poster := image.NewGray(image.Rect(0, 0, 1250, 2426))
+	for y := 0; y < 2426; y++ {
+		for x := 0; x < 1250; x++ {
+			poster.Pix[y*poster.Stride+x] = uint8(96 + (x/32+y/48)%64)
+		}
+	}
+	const side = 640
+	noise := make([]byte, side*side)
+	var state uint32 = 42
+	for i := range noise {
+		state = 1664525*state + 1013904223
+		noise[i] = uint8(state >> 24)
+	}
+	for y := 1; y < side-1; y++ {
+		for x := 1; x < side-1; x++ {
+			sum := 0
+			for dy := -1; dy <= 1; dy++ {
+				for dx := -1; dx <= 1; dx++ {
+					sum += int(noise[(y+dy)*side+x+dx])
+				}
+			}
+			poster.Pix[(y+120)*poster.Stride+x+80] = uint8(sum / 9)
+		}
+	}
+	var pngBytes bytes.Buffer
+	if err := png.Encode(&pngBytes, poster); err != nil {
+		t.Fatal(err)
+	}
+	return pngBytes.Bytes()
+}
+func TestReferralPosterFixtureFitsManualUploadAndJPEG95(t *testing.T) {
+	raw := referralBrowserPosterFixture(t)
+	if len(raw) == 0 || len(raw) > 1048576 {
+		t.Fatalf("fixture PNG bytes=%d", len(raw))
+	}
+	decoded, format, err := image.Decode(bytes.NewReader(raw))
+	if err != nil || format != "png" || decoded.Bounds().Dx() != 1250 || decoded.Bounds().Dy() != 2426 {
+		t.Fatalf("invalid PNG fixture: %v", err)
+	}
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, decoded, &jpeg.Options{Quality: 95}); err != nil || encoded.Len() >= len(raw) {
+		t.Fatalf("JPEG95 fixture must reduce PNG: PNG=%d JPEG=%d err=%v", len(raw), encoded.Len(), err)
+	}
+	t.Logf("manual upload fixture PNG=%d bytes JPEG95=%d bytes", len(raw), encoded.Len())
 }
