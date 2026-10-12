@@ -3761,6 +3761,28 @@ paths:
   /api/admin/questionnaires:
     get: {operationId: listSurveyQuestionnaires, security: [{adminSession: []}], responses: {"200": {description: Survey definitions}}}
     post: {operationId: createSurveyQuestionnaire, security: [{adminSession: [], csrfHeader: []}], parameters: [{$ref: "#/components/parameters/RequiredIdempotencyKey"}], requestBody: {required: true, content: {application/json: {schema: {type: object}}}}, responses: {"200": {description: Survey definition created}}}
+  /api/admin/questionnaires/{questionnaire_id}/redemption-codes:
+    parameters: [{name: questionnaire_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveID"}}]
+    get:
+      operationId: listSurveyRedemptionCodes
+      security: [{adminSession: []}]
+      parameters: [{name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}, {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 1000000, default: 0}}]
+      responses: {"200": {description: Operator-only questionnaire code library and aggregate counts}, "401": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}}
+  /api/admin/questionnaires/{questionnaire_id}/redemption-codes/template:
+    parameters: [{name: questionnaire_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveID"}}]
+    get:
+      operationId: downloadSurveyRedemptionTemplate
+      security: [{adminSession: []}]
+      responses: {"200": {description: XLSX template with text-formatted redemption column, content: {application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: {schema: {type: string, format: binary}}}}, "403": {$ref: "#/components/responses/Error"}}
+  /api/admin/questionnaires/{questionnaire_id}/redemption-codes/imports:
+    parameters: [{name: questionnaire_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveID"}}]
+    post:
+      operationId: importSurveyRedemptionCodes
+      description: Appends codes from the first XLSX sheet. Duplicate codes never reset a redemption. Any uncertain cell rejects the entire import.
+      security: [{adminSession: [], csrfHeader: []}]
+      parameters: [{$ref: "#/components/parameters/RequiredIdempotencyKey"}]
+      requestBody: {required: true, content: {multipart/form-data: {schema: {type: object, additionalProperties: false, required: [file], properties: {file: {type: string, format: binary}}}}}}
+      responses: {"200": {description: Import receipt, content: {application/json: {schema: {type: object, required: [imported, duplicates, empty_rows], properties: {imported: {type: integer}, duplicates: {type: integer}, empty_rows: {type: integer}}}}}}, "400": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}}
   /api/admin/questionnaires/preflight:
     get: {operationId: getSurveyPreflight, security: [{adminSession: []}], responses: {"200": {description: Real capability status}}}
   /api/admin/questionnaires/{questionnaire_id}:
@@ -8293,7 +8315,7 @@ components:
       type: object
       additionalProperties: false
       required: [ok, code, message]
-      properties: {ok: {type: boolean, const: false}, code: {type: string}, message: {type: string}}
+      properties: {ok: {type: boolean, const: false}, code: {type: string}, message: {type: string}, question_id: {$ref: "#/components/schemas/PositiveID"}}
     SurveyPublicAlreadySubmittedError:
       type: object
       additionalProperties: false
@@ -8325,13 +8347,21 @@ components:
         mode: {type: string, enum: [survey, assessment]}
         assessment_config: {type: object, additionalProperties: true}
         questions: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/SurveyPublicQuestion"}}
+    SurveyPublicFieldError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code: {type: string, enum: [redemption_code_required, redemption_code_invalid, redemption_code_used, submission_payload_conflict]}
+        message: {type: string}
+        question_id: {$ref: "#/components/schemas/PositiveID"}
     SurveyPublicQuestion:
       type: object
       additionalProperties: false
       required: [id, type, title, required, sort_order, minimum_selections, maximum_selections, placeholder_text, assessment_dimension_key, options]
       properties:
         id: {$ref: "#/components/schemas/PositiveID"}
-        type: {type: string, enum: [single_choice, multi_choice, textarea, mobile]}
+        type: {type: string, enum: [single_choice, multi_choice, textarea, mobile, redemption_code]}
         title: {type: string, minLength: 1, maxLength: 500}
         required: {type: boolean}
         sort_order: {type: integer, minimum: 0, maximum: 99}
