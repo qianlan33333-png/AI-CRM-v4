@@ -1,11 +1,24 @@
 {
   "schema": 1,
-  "baseline_sha": "83b5e8cb0e858b4f20f9237b10b19e8c9018314e",
+  "baseline_sha": "2e80350e22f156edd20e19cadf5b355b722768b2",
   "checks": [
     {
-      "lane": "browser",
-      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLReferralChromiumJourney"
+      "lane": "backend",
+      "package": "./internal/customer/port"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/product/app",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/app"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/http/public_test.go",
+      "test": "TestPublicProductEnabledOnlyAndSafeDTO"
     },
     {
       "lane": "frontend",
