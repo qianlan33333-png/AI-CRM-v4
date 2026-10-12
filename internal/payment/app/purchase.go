@@ -2,11 +2,14 @@ package app
 
 import (
 	"context"
+	"errors"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
+	orderdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	productport "github.com/qianlan33333-png/AI-CRM-v3/internal/product/port"
+	"strconv"
 )
 
 func (s *Service) standardPurchaseWithin(ctx context.Context, customerID, productID int64, code string, currentOrderID int64, lock bool) (paymentport.PurchaseState, error) {
@@ -60,6 +63,14 @@ func (s *Service) standardPurchaseWithin(ctx context.Context, customerID, produc
 		result.PaidOrderID = state.PaidOrderID
 		result.MerchantOrderNo = state.MerchantOrderNo
 		result.CanPurchase = false
+		if reader, ok := s.orders.(orderport.NoPaymentCheckout); ok {
+			local, readErr := reader.ReadNoPaymentCheckoutWithin(ctx, state.MerchantOrderNo)
+			if readErr == nil {
+				result.NoPayment = local.Amount.AmountMinor == 0
+			} else if !errors.Is(readErr, orderport.ErrNotFound) {
+				return paymentport.PurchaseState{}, readErr
+			}
+		}
 	}
 	return result, nil
 }
@@ -72,6 +83,16 @@ func (s *Service) PurchaseStatus(ctx context.Context, token, kind string, id int
 		actor, err := s.sessions.LookupWithin(tx, token, s.now().UTC())
 		if err != nil {
 			return err
+		}
+		if kind == "standard" {
+			original, readErr := s.noPaymentProductWithin(tx, actor, id, "")
+			if readErr == nil {
+				result = paymentport.PurchaseState{NoPayment: true, PaidOrderID: original.OrderID, MerchantOrderNo: original.MerchantOrderNo, State: "owned", CanPurchase: false}
+				return nil
+			}
+			if !errors.Is(readErr, paymentport.ErrNotFound) {
+				return readErr
+			}
 		}
 		product, err := s.products.ReadCheckoutProductWithin(tx, productport.ProductOptionType(kind), productport.ID(id))
 		if err != nil {
@@ -113,4 +134,59 @@ func (s *Service) CanCreateCheckout(ctx context.Context, token string) (bool, er
 		return e
 	})
 	return ready, classify(err)
+}
+
+func (s *Service) noPaymentProductWithin(ctx context.Context, actor paymentport.SessionActor, productID int64, code string) (paymentport.CompletedProductCheckout, error) {
+	reader, ok := s.orders.(orderport.NoPaymentProductReader)
+	if !ok {
+		return paymentport.CompletedProductCheckout{}, paymentport.ErrNotFound
+	}
+	customer := actor.BeneficiaryCustomerID
+	if customer < 1 {
+		customer = actor.PayerCustomerID
+	}
+	roots := []customerdomain.CustomerID{customerdomain.CustomerID(customer)}
+	var err error
+	if s.lineage != nil {
+		roots, err = s.lineage.CanonicalLineage(ctx, customerdomain.CustomerID(customer))
+		if err != nil {
+			return paymentport.CompletedProductCheckout{}, err
+		}
+	}
+	ids := make([]int64, 0, len(roots))
+	for _, id := range roots {
+		ids = append(ids, int64(id))
+	}
+	order, err := reader.ReadNoPaymentProductWithin(ctx, ids, productID, code)
+	if errors.Is(err, orderport.ErrNotFound) {
+		return paymentport.CompletedProductCheckout{}, paymentport.ErrNotFound
+	}
+	if err != nil {
+		return paymentport.CompletedProductCheckout{}, err
+	}
+	if order.Provider != orderdomain.ProviderNoPayment || order.Status != orderdomain.StatusPaid || len(order.Items) != 1 || order.Items[0].ProductID == nil {
+		return paymentport.CompletedProductCheckout{}, paymentport.ErrConflict
+	}
+	item := order.Items[0]
+	return paymentport.CompletedProductCheckout{OrderID: order.ID, ProductID: *item.ProductID, MerchantOrderNo: order.MerchantOrderNo, ProductCode: item.ProductCode, ProductName: item.ProductName}, nil
+}
+func (s *Service) CompletedProductCheckout(ctx context.Context, token, code string) (paymentport.CompletedProductCheckout, error) {
+	if s == nil || s.uow == nil || s.sessions == nil || len(token) < 20 || len(token) > 100 || !validScope(code) {
+		return paymentport.CompletedProductCheckout{}, paymentport.ErrInvalid
+	}
+	var result paymentport.CompletedProductCheckout
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		actor, err := s.sessions.LookupWithin(tx, token, s.now().UTC())
+		if err != nil {
+			return err
+		}
+		result, err = s.noPaymentProductWithin(tx, actor, 0, code)
+		if errors.Is(err, paymentport.ErrNotFound) {
+			if id, parseErr := strconv.ParseInt(code, 10, 64); parseErr == nil && id > 0 && strconv.FormatInt(id, 10) == code {
+				result, err = s.noPaymentProductWithin(tx, actor, id, "")
+			}
+		}
+		return err
+	})
+	return result, classify(err)
 }

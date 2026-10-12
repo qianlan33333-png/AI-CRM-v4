@@ -113,6 +113,7 @@ function orderTime(o: Order): string {
   return `${o.time_kind === "paid" ? "原始付款时间" : "下单时间"}：${new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(d)}`;
 }
 const channels: Record<string, string> = {
+  no_payment: "无需支付",
   wechat_pay: "微信支付",
   wechat_shop: "微信小店",
   alipay: "支付宝",
@@ -408,7 +409,7 @@ export function mountCustomerOrders(root: HTMLElement): () => void {
       const titleRow = element("div", "", "orders-card-heading");
       titleRow.append(
         element("h2", o.product_names.join("、") || "商品名称未记录"),
-        element("span", states[o.state] || "状态待确认", "orders-state"),
+        element("span", o.provider === "no_payment" && o.state === "paid" ? "领取成功" : states[o.state] || "状态待确认", "orders-state"),
       );
       card.append(titleRow);
       if (mode === "invoices") {

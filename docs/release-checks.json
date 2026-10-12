@@ -1,7 +1,11 @@
 {
   "schema": 1,
-  "baseline_sha": "1dbb43b4f716b4ed8b6e5337b3059c5371c01107",
+  "baseline_sha": "6ba5e2898c53db20a6ae76413ced66df1e10635d",
   "checks": [
+    {
+      "lane": "backend",
+      "package": "./internal/order/domain"
+    },
     {
       "lane": "backend",
       "package": "./internal/order/app"
@@ -16,13 +20,32 @@
     },
     {
       "lane": "backend",
+      "package": "./internal/order/http"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/outbound"
+    },
+    {
+      "lane": "backend",
       "package": "./internal/coupon/app"
     },
     {
       "lane": "backend",
-      "path": "internal/coupon/store/checkout_floor_postgres_test.go",
-      "test": "TestPostgreSQLCouponFloorPreservesFaceAndConsumesActualDiscount",
+      "path": "cmd/aicrm/zero_amount_checkout_postgres_test.go",
+      "test": "TestPostgreSQLZeroCheckoutAtomicReplayOwnershipAndPaidExclusion",
       "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/zero_amount_checkout_postgres_test.go",
+      "test": "TestPostgreSQLZeroCheckoutExternalIntentJoinsTransaction",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/order_no_payment_fanout_test.go",
+      "test": "TestNoPaymentCompletionReusesFulfillmentAndSkipsFinancialConsumers"
     },
     {
       "lane": "backend",
@@ -32,12 +55,76 @@
     },
     {
       "lane": "backend",
+      "path": "cmd/aicrm/payment_actions_public_checkout_postgres_integration_test.go",
+      "test": "TestPostgreSQLPaymentActionsPublicCheckoutCompletionParity",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/store/postgres_integration_test.go",
+      "test": "TestPostgreSQLPaidAudienceOrdersUsePayerAndPaymentEvidence",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/store/distribution_integration_test.go",
+      "test": "TestPostgreSQLHistoricalQualificationEvidenceRejectsDriftAndPreservesExactReplay",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/store/distribution_integration_test.go",
+      "test": "TestPostgreSQLQualificationRefundEvidenceUnionUsesOnlyFrozenNativeAndVerifiedHistory",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/store/sale_backfill_integration_test.go",
+      "test": "TestPostgreSQLPaidSaleBackfillReconstructsPaidAndConfirmedRefunds",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/invoice/service_test.go",
+      "test": "TestInvoiceFreeOrderCannotBecomePaidInvoice"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/invoice/card_payment_test.go",
+      "test": "TestInvoiceOriginalCheckoutScopesAndFrozenFacts"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/invoice/service_test.go",
+      "test": "TestInvoiceFrozenTaxUsesPaidAmountAndNoGuesses"
+    },
+    {
+      "lane": "backend",
       "path": "internal/product/http/public_test.go",
       "test": "TestPublicPaymentCompletionRefreshJourney"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/http/public_test.go",
+      "test": "TestPublicAlipayOriginalOrderBrowserJourney"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/http/zero_amount_journey_test.go",
+      "test": "TestPublicZeroAmountCheckoutRecoveryJourney"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/customerOrders.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/orderAdapter.test.mjs"
     }
   ],
   "installed_checks": [
-    "coupon-minimum-amount"
+    "coupon-minimum-amount",
+    "zero-amount-checkout"
   ],
   "build_commands": []
 }

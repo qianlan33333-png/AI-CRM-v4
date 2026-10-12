@@ -35,7 +35,8 @@ func (event PaidEvent) ValidShopFact() bool {
 
 func (event PaidEvent) Valid() bool {
 	return event.ValidOrderFact() && event.DomainEventOutboxID > 0 &&
-		((event.CheckoutProductID == 0 && event.CheckoutGrossAmountMinor == 0) ||
+		((event.Order.Provider == domain.ProviderNoPayment && event.Order.Amount.AmountMinor == 0 && event.CheckoutProductID > 0 && event.CheckoutProductType == "standard_product" && event.CheckoutGrossAmountMinor == 0 && event.CheckoutPayableAmountMinor == 0) ||
+			(event.CheckoutProductID == 0 && event.CheckoutGrossAmountMinor == 0) ||
 			(event.CheckoutProductID > 0 && event.CheckoutGrossAmountMinor > 0 &&
 				(event.CheckoutProductType == "" || event.CheckoutProductType == "standard_product" || event.CheckoutProductType == "service_period") &&
 				(event.CheckoutPayableAmountMinor == 0 || event.CheckoutPayableAmountMinor > 0)))

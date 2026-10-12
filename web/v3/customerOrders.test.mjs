@@ -26,6 +26,7 @@ function fixture({
   awaitingTitle = false,
   wechat = false,
   pendingOrder = false,
+  freeOrder = false,
   cardPending = false,
   cardFail = false,
 } = {}) {
@@ -78,7 +79,7 @@ function fixture({
               }
             : {}),
         },
-        { ...row(2, "成长课"), ...(pendingOrder ? {state:"pending_payment", invoice_eligible:false, payment_path:"/pay/course-7?resume_order=2"}: {}) },
+        { ...row(2, "成长课"), ...(freeOrder ? {provider:"no_payment",amount_minor:0,state:"paid",invoice_eligible:false}: {}), ...(pendingOrder ? {state:"pending_payment", invoice_eligible:false, payment_path:"/pay/course-7?resume_order=2"}: {}) },
         { ...row(3, "历史课", false), currency: "USD" },
       ];
       if (url.searchParams.get("eligible") === "true")
@@ -408,3 +409,11 @@ for (const opts of [{wechat:true},{wechat:true,cardPending:true},{wechat:true,ca
  const f=fixture({pendingOrder:true});await flush();const link=f.root.querySelector('a');assert.equal(link.textContent,"继续支付");assert.equal(link.href,"https://crm.test/pay/course-7?resume_order=2");assert.equal(f.calls.some(c=>c.options?.method==="POST"),false);f.dom.window.close();
 }
 console.log("native invoice card and original payment entry journeys passed");
+
+{
+ const f=fixture({freeOrder:true});await flush();
+ const free=f.root.querySelectorAll('article')[1];
+ assert.match(free.textContent,/领取成功/);assert.match(free.textContent,/无需支付/);assert.match(free.textContent,/¥0\.00/);
+ assert.equal(free.querySelector('a'),null);assert.equal(Array.from(free.querySelectorAll('button')).some(b=>b.textContent==='开发票'),false);
+ assert.equal(f.calls.some(c=>c.options?.method==='POST'),false);f.dom.window.close();
+}

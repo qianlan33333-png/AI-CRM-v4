@@ -13,6 +13,8 @@ import (
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/payment/domain"
 )
 
+var ErrProviderDisabled = errors.New("payment provider disabled")
+
 var ErrProductPaymentMethodDisabled = errors.New("product payment method disabled")
 var ErrInvalid = errors.New("invalid payment command")
 var ErrConflict = errors.New("payment conflict")
@@ -425,4 +427,29 @@ func (v RefundExposureEvent) Valid() bool {
 // no provider calls and must not mutate Payment/Order data.
 type RefundExposureConsumer interface {
 	ConsumeRefundExposureWithin(context.Context, RefundExposureEvent) error
+}
+
+// CheckoutResult separates a completed order from an optional collection.
+type CheckoutResult struct {
+	OrderID         int64
+	MerchantOrderNo string
+	Status          string
+	AmountMinor     int64
+	Currency        string
+	Payment         *domain.Payment
+}
+type CheckoutCreator interface {
+	CreateCheckout(context.Context, CreateCommand, bool) (CheckoutResult, error)
+}
+type NoPaymentCheckoutReader interface {
+	GetNoPaymentCheckout(context.Context, string, string) (Handoff, error)
+}
+
+// CompletedProductCheckout is the immutable public-safe recovery projection.
+type CompletedProductCheckout struct {
+	OrderID, ProductID                        int64
+	MerchantOrderNo, ProductCode, ProductName string
+}
+type CompletedProductCheckoutReader interface {
+	CompletedProductCheckout(context.Context, string, string) (CompletedProductCheckout, error)
 }

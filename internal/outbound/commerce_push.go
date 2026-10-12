@@ -649,6 +649,10 @@ func (s *CommercePushService) paidPayload(ctx context.Context, event orderport.P
 		Status:     "paid", // Order.Amount is the checkout's frozen payable (after coupon) amount, verified on settlement.
 		PaidAmount: event.Order.Amount.AmountMinor, PaidAt: commerceUTC(event.OccurredAt), PayChannel: "wechat",
 	}
+	if event.Order.Provider == orderdomain.ProviderNoPayment {
+		order.PayChannel = ""
+		order.PaidAt = ""
+	}
 	productPrice := item.UnitAmountMinor
 	// Old payloads used the catalog price while paid_amount used payer_total.
 	// Order's immutable checkout snapshot is the equivalent frozen catalog fact;
@@ -695,6 +699,12 @@ func (s *CommercePushService) paidPayload(ctx context.Context, event orderport.P
 	body.Transaction.TransactionID = event.Order.ProviderTransactionNo
 	body.Transaction.TradeState = "SUCCESS"
 	body.Transaction.SuccessTime = commerceUTC(event.OccurredAt)
+	if event.Order.Provider == orderdomain.ProviderNoPayment {
+		body.QuestionnaireTitle = "订单完成开通黄小璨会员"
+		body.Transaction.TransactionID = ""
+		body.Transaction.TradeState = ""
+		body.Transaction.SuccessTime = ""
+	}
 	raw, marshalErr := json.Marshal(body)
 	if event.ValidShopFact() && marshalErr == nil {
 		var fields map[string]json.RawMessage

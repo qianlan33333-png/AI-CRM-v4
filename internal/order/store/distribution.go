@@ -34,7 +34,7 @@ FROM (
   SELECT o.id AS order_id,i.line_no AS order_item_line,o.payer_customer_id,o.beneficiary_customer_id,
          i.line_amount_minor AS item_paid_minor,pe.occurred_at AS payment_confirmed_at,'native'::text AS record_origin
   FROM order_checkout_snapshots c
-  JOIN orders o ON o.id=c.order_id AND o.record_origin='native'
+  JOIN orders o ON o.id=c.order_id AND o.record_origin='native' AND o.provider<>'no_payment'
   JOIN order_items i ON i.order_id=o.id AND i.product_id=c.product_id
   JOIN order_paid_events pe ON pe.order_id=o.id
   WHERE c.product_id=$1 AND c.product_type=$2
@@ -171,7 +171,7 @@ FROM (
 	JOIN order_checkout_snapshots c ON c.order_id=o.id
 	JOIN order_items i ON i.order_id=o.id AND i.product_id=c.product_id
 	JOIN order_paid_events pe ON pe.order_id=o.id
-	WHERE o.id=$1 AND o.record_origin='native'
+	WHERE o.id=$1 AND o.record_origin='native' AND o.provider<>'no_payment'
 	  AND o.payer_customer_id IS NOT NULL AND o.beneficiary_customer_id IS NOT NULL
 	UNION ALL
 	SELECT h.order_id,h.order_item_line,h.product_id,h.product_type,

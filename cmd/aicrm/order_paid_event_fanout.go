@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	orderdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 )
 
@@ -27,6 +28,9 @@ func (f orderPaidEventFanout) ConsumePaidEventWithin(ctx context.Context, event 
 	}
 	if err := f.purchase.ConsumePaidEventWithin(ctx, event); err != nil {
 		return err
+	}
+	if event.Order.Provider == orderdomain.ProviderNoPayment {
+		return nil
 	}
 	if f.distribution != nil {
 		if err := f.distribution.ConsumePaidEventWithin(ctx, event); err != nil {

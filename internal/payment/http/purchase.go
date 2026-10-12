@@ -36,6 +36,9 @@ func (h *Handler) purchaseStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	result := map[string]any{"purchase_state": state.State, "can_purchase": state.CanPurchase}
 	if state.State == "owned" {
+		if state.NoPayment {
+			result["payment_required"] = false
+		}
 		result["completion_action"] = h.paidPurchaseAction(r.Context(), domain.ProviderWeChatPay, state.PaidOrderID, state.MerchantOrderNo)
 	}
 	writeJSON(w, 200, result)

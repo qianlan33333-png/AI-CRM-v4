@@ -211,17 +211,40 @@ func NewService(uow platformport.UnitOfWork, store Store, orders orderport.Payme
 }
 
 func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (domain.Payment, error) {
+	result, err := s.createCheckout(ctx, c, false, true)
+	if err != nil {
+		return domain.Payment{}, err
+	}
+	if result.Payment == nil {
+		return domain.Payment{}, paymentport.ErrConflict
+	}
+	return *result.Payment, nil
+}
+func (s *Service) CreateCheckout(ctx context.Context, c paymentport.CreateCommand, providerEnabled bool) (paymentport.CheckoutResult, error) {
+	return s.createCheckout(ctx, c, true, providerEnabled)
+}
+func checkoutPaymentResult(p domain.Payment) paymentport.CheckoutResult {
+	return paymentport.CheckoutResult{OrderID: p.OrderID, MerchantOrderNo: p.MerchantOrderNo, Status: string(p.Status), AmountMinor: p.AmountMinor, Currency: p.Currency, Payment: &p}
+}
+func checkoutOrderResult(o orderdomain.Snapshot) paymentport.CheckoutResult {
+	return paymentport.CheckoutResult{OrderID: o.ID, MerchantOrderNo: o.MerchantOrderNo, Status: string(o.Status), AmountMinor: o.Amount.AmountMinor, Currency: o.Amount.Currency}
+}
+
+func (s *Service) createCheckout(ctx context.Context, c paymentport.CreateCommand, allowFree, providerEnabled bool) (paymentport.CheckoutResult, error) {
 	fromExistingOrder := c.OrderID > 0 && c.ProductID == 0 && c.ProductType == ""
 	fromProduct := c.OrderID == 0 && c.ProductID > 0 && (c.ProductType == string(productport.ProductOptionStandard) || c.ProductType == string(productport.ProductOptionServicePeriod))
 	if !s.ready() || (!fromExistingOrder && !fromProduct) || fromProduct && s.products == nil || c.CouponClaimID < 0 || fromExistingOrder && c.CouponClaimID != 0 || len(c.SessionToken) < 20 || len(c.SessionToken) > 100 || !validScope(c.ActorScope) || !validKey(c.IdempotencyKey) || len(c.PromotionContext) > 512 || strings.TrimSpace(c.PromotionContext) != c.PromotionContext || !validOpaqueActivityContext(c.ReferralActivityContext) || (c.Provider != "" && c.Provider != string(domain.ProviderWeChatPay) && c.Provider != string(domain.ProviderAlipay)) || (c.Provider == string(domain.ProviderAlipay) && c.Channel != domain.ChannelAlipayWap && c.Channel != domain.ChannelAlipayPage) {
-		return domain.Payment{}, paymentport.ErrInvalid
+		return paymentport.CheckoutResult{}, paymentport.ErrInvalid
 	}
 	// A response-lost browser recovery checkpoint is valid for precisely the
 	// trusted session that created it. Check before opening the mutation UoW so
 	// a renewed OAuth session cannot turn the old idempotency key into a second
 	// merchant order.
 	if !paymentport.MatchesCheckoutSessionBinding(c.SessionToken, c.CheckoutSessionBinding) {
-		return domain.Payment{}, paymentport.ErrSessionMismatch
+		return paymentport.CheckoutResult{}, paymentport.ErrSessionMismatch
+	}
+	if c.ExpectedAmountMinor != nil && *c.ExpectedAmountMinor < 0 {
+		return paymentport.CheckoutResult{}, paymentport.ErrInvalid
 	}
 	now := s.now().UTC()
 	sessionDigest := sha256.Sum256([]byte(c.SessionToken))
@@ -232,7 +255,7 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 	payload, _ := json.Marshal(c)
 	keyDigest := sha256.Sum256([]byte(c.IdempotencyKey))
 	payloadDigest := sha256.Sum256(payload)
-	var result domain.Payment
+	var result paymentport.CheckoutResult
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		actor, err := s.sessions.LookupWithin(tx, c.SessionToken, now)
 		if err != nil {
@@ -284,8 +307,27 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 			if (fromExistingOrder && replay.OrderID != c.OrderID) || (fromProduct && replay.MerchantOrderNo != merchantOrderNo && replay.MerchantOrderNo != legacyMerchantOrderNo) || replay.PayerIdentityID != actor.PayerIdentityID || replay.PayerCustomerID != actor.PayerCustomerID || replay.BeneficiaryCustomerID != actor.BeneficiaryCustomerID || replay.Channel != channel {
 				return paymentport.ErrConflict
 			}
-			result = replay
+			result = checkoutPaymentResult(replay)
 			return nil
+		}
+		noPaymentOrders, hasNoPayment := s.orders.(orderport.NoPaymentCheckout)
+		receiptScope := "payment-session:" + hex.EncodeToString(sessionDigest[:])
+		replayFree := func() (bool, error) {
+			if !allowFree || !hasNoPayment || !fromProduct {
+				return false, nil
+			}
+			original, found, replayErr := noPaymentOrders.ReplayNoPaymentCheckoutWithin(tx, receiptScope, c.IdempotencyKey, payloadDigest)
+			if replayErr != nil || !found {
+				return found, replayErr
+			}
+			if original.MerchantOrderNo != merchantOrderNo || original.PayerCustomerID == nil || original.BeneficiaryCustomerID == nil || int64(*original.PayerCustomerID) != actor.PayerCustomerID || int64(*original.BeneficiaryCustomerID) != actor.BeneficiaryCustomerID {
+				return true, paymentport.ErrConflict
+			}
+			result = checkoutOrderResult(original)
+			return true, nil
+		}
+		if found, replayErr := replayFree(); found || replayErr != nil {
+			return replayErr
 		}
 		if !selectedBeneficiary(actor) {
 			// Pre-migration sessions retain their recipient value only to authorize
@@ -312,13 +354,19 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 			}
 		} else {
 			product, productErr := s.products.ReadCheckoutProductWithin(tx, productport.ProductOptionType(c.ProductType), productport.ID(c.ProductID))
-			if productErr != nil || int64(product.ID) != c.ProductID || product.ProductType != productport.ProductOptionType(c.ProductType) || product.PriceMinor < 1 || product.Currency != "CNY" || product.Version < 1 || product.ProductType == productport.ProductOptionServicePeriod && product.ServicePeriodDurationDays < 1 {
+			if productErr != nil || int64(product.ID) != c.ProductID || product.ProductType != productport.ProductOptionType(c.ProductType) || (product.PriceMinor < 0 || product.PriceMinor == 0 && (!allowFree || product.ProductType != productport.ProductOptionStandard || c.CouponClaimID != 0)) || product.Currency != "CNY" || product.Version < 1 || product.ProductType == productport.ProductOptionServicePeriod && product.ServicePeriodDurationDays < 1 {
 				if productErr != nil {
 					return productErr
 				}
 				return paymentport.ErrConflict
 			}
-			if c.Provider == string(domain.ProviderAlipay) && product.AlipayDisabled {
+			if product.PriceMinor > 0 && c.ExpectedAmountMinor != nil && *c.ExpectedAmountMinor == 0 {
+				return paymentport.ErrPriceChanged
+			}
+			if product.PriceMinor > 0 && !providerEnabled {
+				return paymentport.ErrProviderDisabled
+			}
+			if product.PriceMinor > 0 && c.Provider == string(domain.ProviderAlipay) && product.AlipayDisabled {
 				return paymentport.ErrProductPaymentMethodDisabled
 			}
 			level := product.ContactCollectionLevel
@@ -349,10 +397,13 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 					return checkErr
 				}
 				if !state.CanPurchase {
+					if found, replayErr := replayFree(); found || replayErr != nil {
+						return replayErr
+					}
 					return purchaseBlocked(state)
 				}
 			}
-			order, err = s.orders.CreatePaymentOrderWithin(tx, orderport.PaymentOrderCommand{
+			command := orderport.PaymentOrderCommand{
 				Provider: provider, MerchantOrderNo: merchantOrderNo,
 				PayerCustomerID: actor.PayerCustomerID, BeneficiaryCustomerID: actor.BeneficiaryCustomerID,
 				ProductID: int64(product.ID), CouponClaimID: c.CouponClaimID, ProductCode: product.Code, ProductName: product.Name,
@@ -360,7 +411,16 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 				PostPurchaseAction: product.PostPurchaseAction,
 				MobileE164:         c.MobileE164, ContactCollectionLevel: c.ContactCollectionLevel, ShippingAddress: orderport.ShippingAddress{RecipientName: c.ShippingAddress.RecipientName, ProvinceCode: c.ShippingAddress.ProvinceCode, ProvinceName: c.ShippingAddress.ProvinceName, CityCode: c.ShippingAddress.CityCode, CityName: c.ShippingAddress.CityName, DistrictCode: c.ShippingAddress.DistrictCode, DistrictName: c.ShippingAddress.DistrictName, DetailAddress: c.ShippingAddress.DetailAddress}, PromotionContext: c.PromotionContext, ReferralActivityContext: c.ReferralActivityContext,
 				ActorScope: "payment-session:" + hex.EncodeToString(sessionDigest[:]), IdempotencyKey: c.IdempotencyKey, ExpectedAmountMinor: c.ExpectedAmountMinor,
-			})
+			}
+			if product.PriceMinor == 0 {
+				if !hasNoPayment {
+					return paymentport.ErrUnavailable
+				}
+				command.Provider = orderdomain.ProviderNoPayment
+				order, err = noPaymentOrders.CreateNoPaymentCheckoutWithin(tx, command, payloadDigest)
+			} else {
+				order, err = s.orders.CreatePaymentOrderWithin(tx, command)
+			}
 		}
 		if err != nil {
 			return err
@@ -370,6 +430,20 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 		}
 		if order.PayerCustomerID == nil || order.BeneficiaryCustomerID == nil || int64(*order.PayerCustomerID) != actor.PayerCustomerID || int64(*order.BeneficiaryCustomerID) != actor.BeneficiaryCustomerID {
 			return paymentport.ErrConflict
+		}
+		if order.Provider == orderdomain.ProviderNoPayment {
+			consumed, consumeErr := s.sessions.ConsumeWithin(tx, c.SessionToken, now)
+			if consumeErr != nil {
+				return consumeErr
+			}
+			if consumed != actor {
+				return paymentport.ErrConflict
+			}
+			result = checkoutOrderResult(order)
+			return nil
+		}
+		if !providerEnabled {
+			return paymentport.ErrProviderDisabled
 		}
 		// Distribution is the only coordinator that may decide whether this
 		// checkout needs a profit-sharing reservation. Its result was frozen by
@@ -435,11 +509,11 @@ func (s *Service) Create(ctx context.Context, c paymentport.CreateCommand) (doma
 		} else if payment.EffectID != projection.ID {
 			return paymentport.ErrConflict
 		}
-		result = payment
+		result = checkoutPaymentResult(payment)
 		return nil
 	})
 	if err != nil {
-		return domain.Payment{}, classify(err)
+		return paymentport.CheckoutResult{}, classify(err)
 	}
 	return result, nil
 }
@@ -639,6 +713,14 @@ func (s *Service) GetCheckout(ctx context.Context, provider domain.Provider, mer
 		actor, err := s.sessions.LookupWithin(tx, sessionToken, now)
 		if err != nil {
 			return err
+		}
+		local, localErr := s.noPaymentCheckoutWithin(tx, merchantOrderNo, actor)
+		if localErr == nil {
+			out = local
+			return nil
+		}
+		if !errors.Is(localErr, paymentport.ErrNotFound) {
+			return localErr
 		}
 		payment, err := s.store.GetPaymentByMerchantProvider(tx, provider, merchantOrderNo, false)
 		if err != nil {
@@ -1609,7 +1691,7 @@ func classify(err error) error {
 		return nil
 	case errors.Is(err, paymentport.ErrPriceChanged), errors.Is(err, orderport.ErrPriceChanged):
 		return paymentport.ErrPriceChanged
-	case errors.Is(err, paymentport.ErrProductPaymentMethodDisabled), errors.Is(err, paymentport.ErrAlreadyPurchased), errors.Is(err, paymentport.ErrPurchasePending):
+	case errors.Is(err, paymentport.ErrProviderDisabled), errors.Is(err, paymentport.ErrProductPaymentMethodDisabled), errors.Is(err, paymentport.ErrAlreadyPurchased), errors.Is(err, paymentport.ErrPurchasePending):
 		return err
 	case errors.Is(err, paymentport.ErrNotFound), errors.Is(err, orderport.ErrNotFound):
 		return paymentport.ErrNotFound
@@ -1622,4 +1704,54 @@ func classify(err error) error {
 	default:
 		return paymentport.ErrUnavailable
 	}
+}
+
+func (s *Service) GetNoPaymentCheckout(ctx context.Context, reference, token string) (paymentport.Handoff, error) {
+	if s == nil || s.uow == nil || s.sessions == nil || !validScope(reference) || len(token) < 20 || len(token) > 100 {
+		return paymentport.Handoff{}, paymentport.ErrInvalid
+	}
+	var out paymentport.Handoff
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		actor, err := s.sessions.LookupWithin(tx, token, s.now().UTC())
+		if err != nil {
+			return err
+		}
+		out, err = s.noPaymentCheckoutWithin(tx, reference, actor)
+		return err
+	})
+	return out, classify(err)
+}
+func (s *Service) noPaymentCheckoutWithin(ctx context.Context, reference string, actor paymentport.SessionActor) (paymentport.Handoff, error) {
+	reader, ok := s.orders.(orderport.NoPaymentCheckout)
+	if !ok {
+		return paymentport.Handoff{}, paymentport.ErrNotFound
+	}
+	order, err := reader.ReadNoPaymentCheckoutWithin(ctx, reference)
+	if errors.Is(err, orderport.ErrNotFound) {
+		return paymentport.Handoff{}, paymentport.ErrNotFound
+	}
+	if err != nil {
+		return paymentport.Handoff{}, err
+	}
+	selfRead := order.PayerCustomerID != nil && order.BeneficiaryCustomerID != nil && *order.PayerCustomerID == *order.BeneficiaryCustomerID && (actor.BeneficiarySelection == paymentport.BeneficiarySelectionPayerSelf || actor.BeneficiarySelection == paymentport.BeneficiarySelectionUnresolved)
+	if order.Status != orderdomain.StatusPaid || order.PayerCustomerID == nil || order.BeneficiaryCustomerID == nil || (!selectedBeneficiary(actor) && !selfRead) {
+		return paymentport.Handoff{}, paymentport.ErrConflict
+	}
+	roots := []customerdomain.CustomerID{customerdomain.CustomerID(actor.PayerCustomerID)}
+	if s.lineage != nil {
+		roots, err = s.lineage.CanonicalLineage(ctx, customerdomain.CustomerID(actor.PayerCustomerID))
+		if err != nil {
+			return paymentport.Handoff{}, err
+		}
+	}
+	authorized := false
+	for _, root := range roots {
+		if int64(root) == int64(*order.PayerCustomerID) && (int64(*order.BeneficiaryCustomerID) == actor.BeneficiaryCustomerID || selfRead) {
+			authorized = true
+		}
+	}
+	if !authorized {
+		return paymentport.Handoff{}, paymentport.ErrConflict
+	}
+	return paymentport.Handoff{OrderID: order.ID, MerchantOrder: order.MerchantOrderNo, Provider: domain.Provider(order.Provider), Status: domain.StatusPaid, AmountMinor: 0, Currency: order.Amount.Currency}, nil
 }

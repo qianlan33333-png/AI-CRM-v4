@@ -4,6 +4,7 @@ import (
 	"errors"
 	p "github.com/qianlan33333-png/AI-CRM-v3/internal/invoice/port"
 	o "github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
+	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -115,5 +116,21 @@ func TestInvoiceCallbackProbeCannotAcceptBusinessNotice(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "https://crm.test/api/callbacks/wechat-invoice", strings.NewReader(`{}`)))
 	if w.Code < 400 {
 		t.Fatal("unsigned business notice acknowledged")
+	}
+}
+
+func TestInvoiceFreeOrderCannotBecomePaidInvoice(t *testing.T) {
+	// Eligibility is pure: this sentinel must never receive a Provider call.
+	service := Service{Config: p.Config{Enabled: true}, Provider: struct{ p.Provider }{}}
+	customer := int64(11)
+	at := time.Now()
+	order := orderport.SelfOrder{Order: o.Snapshot{Provider: o.ProviderNoPayment, RecordOrigin: o.RecordOriginNative, EffectEligible: true, Status: o.StatusPaid, PayerCustomerID: &customer, Amount: o.Money{Currency: "CNY"}}, ConfirmedPaidAt: &at}
+	if reason := service.reason(order, []int64{customer}, false, nil); reason != "unsupported_channel" {
+		t.Fatalf("free invoice eligibility=%s", reason)
+	}
+	order.Order.Provider = o.ProviderWeChatPay
+	order.Order.ProviderTransactionNo = "forged"
+	if reason := service.reason(order, []int64{customer}, false, nil); reason != "not_paid" {
+		t.Fatalf("zero amount invoice eligibility=%s", reason)
 	}
 }

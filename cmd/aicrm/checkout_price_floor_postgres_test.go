@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	paymentapp "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/app"
 	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 )
 
@@ -16,6 +17,7 @@ func expectedCheckoutRequest(f *productExternalPushChromiumFixture, token, key s
 	body, _ := json.Marshal(map[string]any{"product_id": productID, "product_kind": kind, "beneficiary_selection": "payer_self", "coupon_claim_id": claimID, "expected_amount_minor": expected, "checkout_session_binding": paymentport.CheckoutSessionBinding(token)})
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/wechat-pay/checkouts", bytes.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Origin", f.server.URL)
 	r.Header.Set("Idempotency-Key", key)
 	r.AddCookie(&http.Cookie{Name: paymentport.TrustedSessionCookieName, Value: token})
 	w := httptest.NewRecorder()
@@ -67,5 +69,18 @@ func TestPostgreSQLCheckoutExpectedAmountRollsBackOrderCouponAndPayment(t *testi
 	replay := expectedCheckoutRequest(f, session.token, "expected-price-correct-0001", 1, f.productID, "standard", claim)
 	if replay.Code != 202 || !bytes.Equal(correct.Body.Bytes(), replay.Body.Bytes()) {
 		t.Fatalf("replay status=%d", replay.Code)
+	}
+
+	var created struct {
+		Merchant string `json:"merchant_order_no"`
+	}
+	if e = json.Unmarshal(correct.Body.Bytes(), &created); e != nil {
+		t.Fatal(e)
+	}
+	settlePublicCheckoutForCompletionAction(t, f, f.application.paymentDistribution.(*paymentapp.Service), created.Merchant, 1, "coupon-floor-one-cent")
+	var face, actual, settled int64
+	e = f.application.pool.Native().QueryRow(f.ctx, `SELECT rule.discount_amount_total,r.discount_amount_minor,r.payable_amount_minor,c.status FROM coupon_customer_claims c JOIN coupon_rules rule ON rule.id=c.coupon_id JOIN coupon_order_redemptions r ON r.claim_id=c.id WHERE c.id=$1`, claim).Scan(&face, &actual, &settled, &status)
+	if e != nil || face != 20000 || actual != 9899 || settled != 1 || status != "redeemed" {
+		t.Fatalf("coupon finality face=%d actual=%d payable=%d status=%s err=%v", face, actual, settled, status, e)
 	}
 }

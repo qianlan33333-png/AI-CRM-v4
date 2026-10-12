@@ -1212,3 +1212,17 @@ try{
  assert.equal(direct.record_origin,'external','DTO projection does not rewrite later raw detail reads');
 }finally{shopContractDom.window.close()}
 console.log('WeChat Shop exact list/detail DTO compatibility with canonical external API facts: PASS');
+
+{
+ const calls=[];
+ const freeDom=new JSDOM('<!doctype html><body data-page="orderDetail"><div><div><h2>订单详情</h2></div><div></div></div><div><div><h2>事件时间线</h2></div><div></div></div><div><div><h2>退款</h2></div><div></div></div></body>',{
+ url:'https://test.invalid/admin/orderDetail.html?id=local-free&provider=no_payment',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:new VirtualConsole(),beforeParse(window){browserRuntime(window);window.fetch=async input=>{const url=new URL(typeof input==='string'?input:input.url,window.location.href);calls.push(url);return new Response(JSON.stringify(url.pathname.startsWith('/api/admin/order-deliveries/')?{items:[],effects:[]}:{record_origin:'native',provider:'no_payment',provider_label:'无需支付',merchant_order_no:'local-free',product_name:'免费课程',amount_yuan:'0.00',refunded_minor:0,created_at:'2026-10-12T00:00:00Z',status:'paid',status_label:'领取成功',distribution:[],distribution_read_state:'available'}),{headers:{'Content-Type':'application/json'}})}}});
+ try{
+  freeDom.window.eval(host);await pause();await freeDom.window.fetch('/api/admin/orders/local-free?provider=no_payment');await freeDom.window.fetch('/api/admin/refunds');await freeDom.window.fetch('/api/admin/wechat-pay/orders/local-free/external-push-deliveries');await pause();
+  const text=freeDom.window.document.body.textContent;assert.match(text,/无需支付/);assert.match(text,/领取成功/);assert.match(text,/¥0\.00/);assert.doesNotMatch(text,/微信支付交易单号|分销信息|当前可退金额/);
+  assert.equal(calls.some(u=>u.pathname==='/api/admin/refunds'),false);
+  assert.equal(freeDom.window.document.querySelectorAll('input').length,0,'free detail cannot submit a refund');
+  assert.ok(calls.some(u=>u.pathname==='/api/admin/order-deliveries/local-free'&&u.searchParams.get('provider')==='no_payment'));
+ }finally{freeDom.window.close()}
+}
+console.log('Free order detail preserves zero amount, local completion and scoped fulfillment without refund controls: PASS');

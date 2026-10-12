@@ -23,7 +23,7 @@ func (r *Repository) ListPaidSaleOrderIDsWithin(ctx context.Context, afterID int
 		return nil, ErrInvalid
 	}
 	rows, err := tx.Query(ctx, `SELECT o.id FROM orders o
-WHERE o.id>$1 AND o.record_origin='native' AND o.effect_eligible
+WHERE o.id>$1 AND o.record_origin='native' AND o.effect_eligible AND o.provider<>'no_payment'
 AND (EXISTS(SELECT 1 FROM order_paid_events pe WHERE pe.order_id=o.id)
  OR EXISTS(SELECT 1 FROM order_status_history h WHERE h.order_id=o.id AND h.to_status='paid'))
 ORDER BY o.id LIMIT $2`, afterID, limit)
@@ -55,7 +55,7 @@ func (r *Repository) ReadPaidSaleBackfillFactWithin(ctx context.Context, orderID
 		return orderport.PaidSaleBackfillFact{}, err
 	}
 	current := order.Snapshot()
-	if current.RecordOrigin != domain.RecordOriginNative || !current.EffectEligible {
+	if current.RecordOrigin != domain.RecordOriginNative || !current.EffectEligible || current.Provider == domain.ProviderNoPayment {
 		return orderport.PaidSaleBackfillFact{}, orderport.ErrConflict
 	}
 	var event orderport.PaidEvent

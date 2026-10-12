@@ -76,7 +76,8 @@ func nullableCheckoutID(value int64) any {
 }
 
 func validCheckoutSnapshot(snapshot orderport.CheckoutSnapshot) bool {
-	if snapshot.OrderID < 1 || snapshot.ProductID < 1 || snapshot.ProductCode == "" || len(snapshot.ProductCode) > 200 || snapshot.ProductName == "" || len(snapshot.ProductName) > 500 || snapshot.ProductVersion < 1 || snapshot.GrossAmountMinor < 1 || snapshot.PayableAmountMinor < 1 || snapshot.DiscountAmountMinor < 0 || snapshot.PayableAmountMinor != snapshot.GrossAmountMinor-snapshot.DiscountAmountMinor || snapshot.Currency != "CNY" || len(snapshot.PostPurchaseAction) > 0 && !json.Valid(snapshot.PostPurchaseAction) || len(snapshot.PostPurchaseAction) > 8<<10 || snapshot.ReservedAt.IsZero() {
+	free := snapshot.GrossAmountMinor == 0 && snapshot.PayableAmountMinor == 0 && snapshot.ProductType == "standard_product" && !snapshot.CouponApplied && !snapshot.ProfitSharingRequired
+	if snapshot.OrderID < 1 || snapshot.ProductID < 1 || snapshot.ProductCode == "" || len(snapshot.ProductCode) > 200 || snapshot.ProductName == "" || len(snapshot.ProductName) > 500 || snapshot.ProductVersion < 1 || (!free && (snapshot.GrossAmountMinor < 1 || snapshot.PayableAmountMinor < 1)) || snapshot.DiscountAmountMinor < 0 || snapshot.PayableAmountMinor != snapshot.GrossAmountMinor-snapshot.DiscountAmountMinor || snapshot.Currency != "CNY" || len(snapshot.PostPurchaseAction) > 0 && !json.Valid(snapshot.PostPurchaseAction) || len(snapshot.PostPurchaseAction) > 8<<10 || snapshot.ReservedAt.IsZero() {
 		return false
 	}
 	if (snapshot.ProductType == "standard_product" && snapshot.ServicePeriodDurationDays != 0) || (snapshot.ProductType == "service_period" && snapshot.ServicePeriodDurationDays < 1) || (snapshot.ProductType != "standard_product" && snapshot.ProductType != "service_period") {

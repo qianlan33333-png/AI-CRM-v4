@@ -235,7 +235,7 @@ function detailProvider(): string | undefined | null {
   const values = new URL(location.href).searchParams.getAll('provider');
   if (values.length === 0) return undefined;
   const value = values[0]?.trim() || '';
-  return values.length === 1 && ['wechat', 'wechat_pay', 'wechat_shop', 'alipay', 'external_history'].includes(value) ? value : null;
+  return values.length === 1 && ['wechat', 'wechat_pay', 'wechat_shop', 'alipay', 'external_history', 'no_payment'].includes(value) ? value : null;
 }
 
 function currentDetailAPIURL(reference: string): URL | undefined {
@@ -484,7 +484,7 @@ async function primeOrderDetail(): Promise<void> {
     // unavailable; withholding the whole order would invite a merchant-only
     // fallback to a different provider's row.
     detailContext.order = order;
-    if (!refundScope(order)) detailContext.refundsUnavailable = order.provider !== 'external_history';
+    if (!refundScope(order)) detailContext.refundsUnavailable = !['external_history','no_payment'].includes(order.provider);
   } catch {
     detailContext.refundsUnavailable = true;
   } finally {
@@ -556,7 +556,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
 
   if (isOrderDetailPage() && url.pathname === '/api/admin/refunds') {
     const scope = refundScope(detailContext.order);
-    if (!scope && detailContext.order?.provider === 'external_history') {
+    if (!scope && ['external_history','no_payment'].includes(detailContext.order?.provider || '')) {
       detailContext.refunds=[];detailContext.refundsUnavailable=false;schedulePresentation();return emptyScopedRefundPage();
     }
     if (!scope) {
@@ -833,6 +833,7 @@ function replaceRefundPanel(order: DetailRecord): void {
   const native = order.record_origin === 'native';
   const oldPanel = panelForHeading((heading) => heading === '申请退款' || heading === '退款确认' || heading === '退款' || heading.includes('历史只读') || heading === '历史订单，仅供查询' || heading === '微信小店退款');
   if (!oldPanel) return;
+  if (order.provider === 'no_payment') { oldPanel.hidden = true; oldPanel.replaceChildren(); return; }
   oldPanel.dataset.orderRefundPanel = '';
   const refunds = detailContext.refunds || [];
   const scope = refundScope(order);
@@ -1459,7 +1460,7 @@ function applyOrderDetailPresentation(): void {
   ]);
   appendDetailSection(card, '支付信息', [
     ['支付来源', commerceProviderLabel(order.provider)],
-    ...(order.provider === 'external_history' ? [] : [[order.provider === 'alipay' ? '支付宝交易单号' : '微信支付交易单号', text(order.transaction_id)]] as Array<[string,string]>),
+    ...(['external_history','no_payment'].includes(order.provider) ? [] : [[order.provider === 'alipay' ? '支付宝交易单号' : '微信支付交易单号', text(order.transaction_id)]] as Array<[string,string]>),
   ]);
   appendDetailSection(card, '买家信息', [
     ['买家', text(order.payer_name, '未提供')],
@@ -1484,10 +1485,10 @@ function applyOrderDetailPresentation(): void {
   const names = items.map(asRecord).filter((item): item is DetailRecord => Boolean(item)).map((item) => text(item.name, '')).filter(Boolean);
   appendDetailSection(card, '商品与金额', [
     ['商品名称', names.join('、') || text(order.product_name, '未提供')],
-    ['付款金额', money(order.amount_yuan)],
-    [order.record_origin === 'external' ? '微信小店已退款金额' : order.provider === 'external_history' ? '历史已退款金额' : '当前可退金额', moneyFromMinor(order.provider === 'external_history' || order.record_origin === 'external' ? order.refunded_minor : order.refundable_amount_total)],
+    [order.provider === 'no_payment' ? '订单金额' : '付款金额', money(order.amount_yuan)],
+    ...(order.provider === 'no_payment' ? [] : [[order.record_origin === 'external' ? '微信小店已退款金额' : order.provider === 'external_history' ? '历史已退款金额' : '当前可退金额', moneyFromMinor(order.provider === 'external_history' || order.record_origin === 'external' ? order.refunded_minor : order.refundable_amount_total)]] as Array<[string,string]>),
   ]);
-  if (order.record_origin !== 'external') appendDistributionDetailSections(card, order);
+  if (order.record_origin !== 'external' && order.provider !== 'no_payment') appendDistributionDetailSections(card, order);
   replaceExternalEffectsPanel();
   replaceRefundPanel(order);
 }

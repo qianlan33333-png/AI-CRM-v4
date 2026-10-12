@@ -264,6 +264,7 @@ SELECT DISTINCT o.id,oi.product_id,oi.product_code,
 FROM orders o
 JOIN order_items oi ON oi.order_id=o.id
 WHERE (oi.product_id=ANY($1::bigint[]) OR (oi.product_id IS NULL AND oi.product_code=ANY($2::text[])))
+  AND o.provider<>'no_payment'
   AND EXISTS (
     SELECT 1 FROM order_status_history h
     WHERE h.order_id=o.id AND h.to_status IN ('paid','partially_refunded','refunded')
@@ -994,4 +995,26 @@ func (r *Repository) BeginExportSnapshot(ctx context.Context) error {
 	}
 	_, err = tx.Exec(ctx, `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`)
 	return err
+}
+
+func (r *Repository) ReadCreateReceipt(ctx context.Context, scope string, key [32]byte) (orderapp.Receipt, bool, error) {
+	tx, err := transaction(ctx)
+	if err != nil {
+		return orderapp.Receipt{}, false, err
+	}
+	var out orderapp.Receipt
+	var digest []byte
+	err = tx.QueryRow(ctx, `SELECT id,state,payload_digest,result_snapshot FROM order_operation_receipts WHERE operation='create' AND actor_scope=$1 AND key_digest=$2 FOR UPDATE`, scope, key[:]).Scan(&out.ID, &out.State, &digest, &out.ResultSnapshot)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, false, nil
+	}
+	if err != nil {
+		return out, false, mapError(err)
+	}
+	if len(digest) != 32 {
+		return out, true, orderport.ErrUnavailable
+	}
+	copy(out.PayloadDigest[:], digest)
+	out.Operation, out.ActorScope, out.KeyDigest = "create", scope, key
+	return out, true, nil
 }

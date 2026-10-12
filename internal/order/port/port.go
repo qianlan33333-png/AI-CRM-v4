@@ -507,3 +507,17 @@ type ExternalHistoryRepository interface {
 	LookupExternalHistoryWithin(context.Context, string, string, [32]byte) (domain.Snapshot, bool, error)
 	ImportHistoricalWithin(context.Context, HistoricalImportCommand) (domain.Snapshot, bool, error)
 }
+
+// NoPaymentCheckout reuses Order's create receipt and the caller's active UoW.
+// The request digest is the original authenticated checkout command, before catalog reads.
+type NoPaymentCheckout interface {
+	CreateNoPaymentCheckoutWithin(context.Context, PaymentOrderCommand, [32]byte) (domain.Snapshot, error)
+	ReplayNoPaymentCheckoutWithin(context.Context, string, string, [32]byte) (domain.Snapshot, bool, error)
+	ReadNoPaymentCheckoutWithin(context.Context, string) (domain.Snapshot, error)
+}
+
+// NoPaymentProductReader reads only an already-completed local order belonging
+// to the supplied canonical lineage. It does not read the current catalog.
+type NoPaymentProductReader interface {
+	ReadNoPaymentProductWithin(context.Context, []int64, int64, string) (domain.Snapshot, error)
+}

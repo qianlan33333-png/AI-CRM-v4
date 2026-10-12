@@ -279,6 +279,19 @@ func (s *Service) ReadCheckoutSnapshotWithin(ctx context.Context, orderID int64)
 }
 
 func (s *Service) CreatePaymentOrderWithin(ctx context.Context, command orderport.PaymentOrderCommand) (domain.Snapshot, error) {
+	return s.createCheckoutOrderWithin(ctx, command, nil)
+}
+
+func (s *Service) CreateNoPaymentCheckoutWithin(ctx context.Context, command orderport.PaymentOrderCommand, digest [32]byte) (domain.Snapshot, error) {
+	if command.Provider != domain.ProviderNoPayment || digest == ([32]byte{}) {
+		return domain.Snapshot{}, orderport.ErrConflict
+	}
+	return s.createCheckoutOrderWithin(ctx, command, &digest)
+}
+
+func (s *Service) createCheckoutOrderWithin(ctx context.Context, command orderport.PaymentOrderCommand, requestDigest *[32]byte) (domain.Snapshot, error) {
+	noPayment := requestDigest != nil && command.Provider == domain.ProviderNoPayment && command.UnitAmountMinor == 0 && command.ProductType == "standard_product" && command.CouponClaimID == 0
+
 	// Empty means the legacy no-contact contract for callers created before
 	// contact collection levels were introduced.
 	if command.ContactCollectionLevel == "" {
@@ -288,7 +301,7 @@ func (s *Service) CreatePaymentOrderWithin(ctx context.Context, command orderpor
 			command.ContactCollectionLevel = "none"
 		}
 	}
-	if !ready(s) || (command.Provider != domain.ProviderWeChatPay && command.Provider != domain.ProviderAlipay) || command.PayerCustomerID < 1 || command.BeneficiaryCustomerID < 1 || command.ProductID < 1 || command.ProductVersion < 1 || command.UnitAmountMinor < 1 || command.Currency != "CNY" || command.CouponClaimID < 0 || !validPaymentProductType(command.ProductType, command.ServicePeriodDurationDays) || !validPostPurchaseAction(command.PostPurchaseAction) || !validPromotionContext(command.PromotionContext) || !validReferralActivityContext(command.ReferralActivityContext) || !validKey(command.IdempotencyKey) || !validKey(command.ActorScope) || !validContactCollection(command.ContactCollectionLevel, command.MobileE164, command.ShippingAddress) {
+	if !ready(s) || (!noPayment && command.Provider != domain.ProviderWeChatPay && command.Provider != domain.ProviderAlipay) || command.PayerCustomerID < 1 || command.BeneficiaryCustomerID < 1 || command.ProductID < 1 || command.ProductVersion < 1 || (!noPayment && command.UnitAmountMinor < 1) || command.Currency != "CNY" || command.CouponClaimID < 0 || !validPaymentProductType(command.ProductType, command.ServicePeriodDurationDays) || !validPostPurchaseAction(command.PostPurchaseAction) || !validPromotionContext(command.PromotionContext) || !validReferralActivityContext(command.ReferralActivityContext) || !validKey(command.IdempotencyKey) || !validKey(command.ActorScope) || !validContactCollection(command.ContactCollectionLevel, command.MobileE164, command.ShippingAddress) {
 		return domain.Snapshot{}, orderport.ErrConflict
 	}
 	productID := command.ProductID
@@ -321,6 +334,9 @@ func (s *Service) CreatePaymentOrderWithin(ctx context.Context, command orderpor
 		return domain.Snapshot{}, orderport.ErrUnavailable
 	}
 	reservation := Reservation{Operation: "create", ActorScope: command.ActorScope, KeyDigest: sha256.Sum256([]byte(command.IdempotencyKey)), PayloadDigest: sha256.Sum256(payload), CreatedAt: createdAt}
+	if requestDigest != nil {
+		reservation.PayloadDigest = *requestDigest
+	}
 	receipt, owned, err := s.store.Reserve(ctx, reservation)
 	if err != nil || !validReceipt(receipt, reservation) || subtle.ConstantTimeCompare(receipt.PayloadDigest[:], reservation.PayloadDigest[:]) != 1 {
 		if err != nil {
@@ -363,7 +379,7 @@ func (s *Service) CreatePaymentOrderWithin(ctx context.Context, command orderpor
 	}
 	checkout.OrderID = persisted.Snapshot().ID
 	var attribution orderport.CheckoutAttributionResult
-	if (command.PromotionContext != "" || command.ReferralActivityContext != "") && s.attribution != nil {
+	if !noPayment && (command.PromotionContext != "" || command.ReferralActivityContext != "") && s.attribution != nil {
 		var attributionErr error
 		attribution, attributionErr = s.attribution.RecordCheckoutAttributionWithin(ctx, orderport.CheckoutAttributionCommand{
 			OrderID: persisted.Snapshot().ID, OrderItemLine: 1, ProductID: command.ProductID,
@@ -379,7 +395,7 @@ func (s *Service) CreatePaymentOrderWithin(ctx context.Context, command orderpor
 			checkout.ProfitSharingRequired = true
 		}
 	}
-	if command.ReferralActivityContext != "" && s.productSaleAttribution != nil {
+	if !noPayment && command.ReferralActivityContext != "" && s.productSaleAttribution != nil {
 		if err = s.productSaleAttribution.RecordProductSaleCheckoutAttributionWithin(ctx, orderport.ProductSaleCheckoutContextCommand{
 			OrderID: persisted.Snapshot().ID, OrderVersion: persisted.Snapshot().Version, ProductID: command.ProductID,
 			ProductType: command.ProductType, ProductCode: command.ProductCode, ProductName: command.ProductName, ProductVersion: command.ProductVersion,
@@ -425,6 +441,20 @@ func (s *Service) CreatePaymentOrderWithin(ctx context.Context, command orderpor
 			return domain.Snapshot{}, classify(err)
 		}
 	}
+	if noPayment {
+		previous := persisted.Snapshot()
+		updated, event, settleErr := persisted.ApplySettlement(persisted.Version, domain.StatusPaid, 0, input.CreatedAt)
+		if settleErr != nil {
+			return domain.Snapshot{}, orderport.ErrConflict
+		}
+		persisted, err = s.store.UpdateSettlement(ctx, updated, event, command.ActorScope)
+		if err != nil {
+			return domain.Snapshot{}, classify(err)
+		}
+		if err = s.consumeFirstNativePaidEvent(ctx, previous, persisted.Snapshot(), event.OccurredAt); err != nil {
+			return domain.Snapshot{}, err
+		}
+	}
 	result := persisted.Snapshot()
 	result.ProfitSharingRequired = checkout.ProfitSharingRequired
 	snapshot, err := json.Marshal(result)
@@ -461,6 +491,9 @@ func (s *Service) SettlePaymentWithin(ctx context.Context, command orderport.Pay
 		return domain.Snapshot{}, orderport.ErrConflict
 	}
 	current, err := s.store.Get(ctx, command.OrderID, true)
+	if err == nil && current.Provider == domain.ProviderNoPayment {
+		return domain.Snapshot{}, orderport.ErrConflict
+	}
 	if err != nil {
 		return domain.Snapshot{}, classify(err)
 	}
@@ -591,7 +624,7 @@ func (s *Service) reserveCheckout(ctx context.Context, command orderport.Payment
 	if command.PromotionContext != "" {
 		snapshot.PromotionContextDigest = sha256.Sum256([]byte(command.PromotionContext))
 	}
-	if s.coupons == nil {
+	if s.coupons == nil || command.Provider == domain.ProviderNoPayment {
 		return snapshot, nil
 	}
 	reserved, err := s.coupons.ReserveWithin(ctx, couponport.ReserveCommand{HolderCustomerID: command.PayerCustomerID, ClaimID: command.CouponClaimID, ProductID: command.ProductID, ProductCode: command.ProductCode, ProductType: command.ProductType, GrossAmountMinor: command.UnitAmountMinor, Currency: command.Currency, OrderReference: command.MerchantOrderNo, ActorScope: command.ActorScope, IdempotencyKey: command.IdempotencyKey, ReservedAt: at})
@@ -657,7 +690,7 @@ func (s *Service) applyCheckoutSettlement(ctx context.Context, order domain.Snap
 }
 
 func (s *Service) Create(ctx context.Context, command orderport.CreateCommand) (domain.Snapshot, error) {
-	if !ready(s) || command.Actor < 1 || !validKey(command.IdempotencyKey) || command.Input.RecordOrigin == domain.RecordOriginHistory {
+	if !ready(s) || command.Actor < 1 || !validKey(command.IdempotencyKey) || command.Input.RecordOrigin == domain.RecordOriginHistory || command.Input.Provider == domain.ProviderNoPayment {
 		return domain.Snapshot{}, orderport.ErrConflict
 	}
 	now := s.now().UTC()
@@ -969,7 +1002,7 @@ func (s *Service) GetByReferenceForProvider(ctx context.Context, provider domain
 }
 
 func validProvider(provider domain.Provider) bool {
-	return provider == domain.ProviderWeChatPay || provider == domain.ProviderWeChatShop || provider == domain.ProviderAlipay || provider == domain.ProviderExternalHistory
+	return provider == domain.ProviderNoPayment || provider == domain.ProviderWeChatPay || provider == domain.ProviderWeChatShop || provider == domain.ProviderAlipay || provider == domain.ProviderExternalHistory
 }
 
 func (s *Service) GetByReferenceForCustomer(ctx context.Context, reference string, customerID int64) (domain.Snapshot, error) {
@@ -1001,7 +1034,7 @@ func validListQuery(query orderport.ListQuery) bool {
 	if query.CustomerID < 0 || query.Offset < 0 || query.Offset > 1000000 || (query.Cursor != "" && query.Offset != 0) || len(query.OrderRef) > 200 || len(query.Product) > 200 {
 		return false
 	}
-	if query.Provider != "" && query.Provider != domain.ProviderWeChatPay && query.Provider != domain.ProviderWeChatShop && query.Provider != domain.ProviderAlipay && query.Provider != domain.ProviderExternalHistory {
+	if query.Provider != "" && query.Provider != domain.ProviderNoPayment && query.Provider != domain.ProviderWeChatPay && query.Provider != domain.ProviderWeChatShop && query.Provider != domain.ProviderAlipay && query.Provider != domain.ProviderExternalHistory {
 		return false
 	}
 	if query.Status != "" {
@@ -1023,6 +1056,8 @@ func filterFrom(query orderport.ListQuery) ListFilter {
 
 func orderProviderLabel(value domain.Provider) string {
 	switch value {
+	case domain.ProviderNoPayment:
+		return "无需支付"
 	case domain.ProviderWeChatPay:
 		return "微信支付"
 	case domain.ProviderWeChatShop:
@@ -1253,4 +1288,52 @@ func orderOriginalTime(s domain.Snapshot) string {
 		return presentationtime.FormatShanghaiDateTime(*f.SourcePaidAt)
 	}
 	return presentationtime.FormatShanghaiDateTime(s.CreatedAt)
+}
+
+func (s *Service) ReplayNoPaymentCheckoutWithin(ctx context.Context, scope, key string, digest [32]byte) (domain.Snapshot, bool, error) {
+	reader, ok := s.store.(interface {
+		ReadCreateReceipt(context.Context, string, [32]byte) (Receipt, bool, error)
+	})
+	if !ok {
+		return domain.Snapshot{}, false, orderport.ErrUnavailable
+	}
+	receipt, found, err := reader.ReadCreateReceipt(ctx, scope, sha256.Sum256([]byte(key)))
+	if err != nil || !found {
+		return domain.Snapshot{}, found, err
+	}
+	if subtle.ConstantTimeCompare(receipt.PayloadDigest[:], digest[:]) != 1 {
+		return domain.Snapshot{}, true, orderport.ErrConflict
+	}
+	var out domain.Snapshot
+	if receipt.State != "completed" || json.Unmarshal(receipt.ResultSnapshot, &out) != nil {
+		return out, true, orderport.ErrUnavailable
+	}
+	if out.Provider != domain.ProviderNoPayment || out.Status != domain.StatusPaid {
+		return out, true, orderport.ErrConflict
+	}
+	if _, err := domain.Restore(out); err != nil {
+		return out, true, orderport.ErrConflict
+	}
+	return out, true, nil
+}
+
+func (s *Service) ReadNoPaymentCheckoutWithin(ctx context.Context, reference string) (domain.Snapshot, error) {
+	orders, err := s.store.FindByReference(ctx, reference)
+	if err != nil {
+		return domain.Snapshot{}, classify(err)
+	}
+	for _, order := range orders {
+		if order.Provider == domain.ProviderNoPayment && order.MerchantOrderNo == reference {
+			return order.Snapshot(), nil
+		}
+	}
+	return domain.Snapshot{}, orderport.ErrNotFound
+}
+
+func (s *Service) ReadNoPaymentProductWithin(ctx context.Context, ids []int64, productID int64, code string) (domain.Snapshot, error) {
+	reader, ok := s.store.(orderport.NoPaymentProductReader)
+	if !ok {
+		return domain.Snapshot{}, orderport.ErrNotFound
+	}
+	return reader.ReadNoPaymentProductWithin(ctx, ids, productID, code)
 }

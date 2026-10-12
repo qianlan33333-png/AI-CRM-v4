@@ -254,7 +254,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 // recovery checkpoint. It deliberately verifies the HttpOnly cookie through
 // Payment before returning anything, and contains no OneID/customer facts.
 func (handler *Handler) checkoutSession(writer http.ResponseWriter, request *http.Request) {
-	if !handler.writesEnabled {
+	if _, localCheckout := handler.app.(paymentport.CheckoutCreator); !handler.writesEnabled && !localCheckout {
 		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")
 		return
 	}
@@ -790,6 +790,8 @@ func (handler *Handler) orderEffects(writer http.ResponseWriter, request *http.R
 			provider = orderdomain.ProviderWeChatPay
 		case "wechat_shop":
 			provider = orderdomain.ProviderWeChatShop
+		case "no_payment":
+			provider = orderdomain.ProviderNoPayment
 		case "alipay":
 			provider = orderdomain.ProviderAlipay
 		default:
@@ -903,7 +905,8 @@ func checkoutStatusPath(provider domain.Provider) string {
 }
 
 func (handler *Handler) checkout(writer http.ResponseWriter, request *http.Request, routeProvider domain.Provider) {
-	if !handler.providerEnabled(routeProvider) {
+	creator, localCheckout := handler.app.(paymentport.CheckoutCreator)
+	if !handler.providerEnabled(routeProvider) && !localCheckout {
 		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")
 		return
 	}
@@ -964,7 +967,22 @@ func (handler *Handler) checkout(writer http.ResponseWriter, request *http.Reque
 	if activityCookie, cookieErr := request.Cookie(paymentport.ReferralActivityCookieName); cookieErr == nil && validReferralActivityContext(activityCookie.Value) {
 		activityContext = activityCookie.Value
 	}
-	payment, err := handler.app.Create(request.Context(), paymentport.CreateCommand{ProductID: body.ProductID, CouponClaimID: body.CouponClaimID, ExpectedAmountMinor: body.ExpectedAmountMinor, ProductType: body.ProductType, Provider: provider, Channel: body.Channel, MobileE164: body.MobileE164, ContactCollectionLevel: body.ContactCollectionLevel, ShippingAddress: paymentport.ShippingAddress{RecipientName: body.RecipientName, ProvinceCode: body.ProvinceCode, ProvinceName: body.ProvinceName, CityCode: body.CityCode, CityName: body.CityName, DistrictCode: body.DistrictCode, DistrictName: body.DistrictName, DetailAddress: body.DetailAddress}, BeneficiarySelection: body.BeneficiarySelection, SessionToken: cookie.Value, CheckoutSessionBinding: body.CheckoutSessionBinding, PromotionContext: body.PromotionContext, ReferralActivityContext: activityContext, ActorScope: "public-checkout", IdempotencyKey: idempotency})
+	command := paymentport.CreateCommand{ProductID: body.ProductID, CouponClaimID: body.CouponClaimID, ExpectedAmountMinor: body.ExpectedAmountMinor, ProductType: body.ProductType, Provider: provider, Channel: body.Channel, MobileE164: body.MobileE164, ContactCollectionLevel: body.ContactCollectionLevel, ShippingAddress: paymentport.ShippingAddress{RecipientName: body.RecipientName, ProvinceCode: body.ProvinceCode, ProvinceName: body.ProvinceName, CityCode: body.CityCode, CityName: body.CityName, DistrictCode: body.DistrictCode, DistrictName: body.DistrictName, DetailAddress: body.DetailAddress}, BeneficiarySelection: body.BeneficiarySelection, SessionToken: cookie.Value, CheckoutSessionBinding: body.CheckoutSessionBinding, PromotionContext: body.PromotionContext, ReferralActivityContext: activityContext, ActorScope: "public-checkout", IdempotencyKey: idempotency}
+	if localCheckout {
+		result, createErr := creator.CreateCheckout(request.Context(), command, handler.providerEnabled(routeProvider))
+		if createErr != nil {
+			resultError(writer, createErr)
+			return
+		}
+		if result.Payment == nil {
+			writeJSON(writer, http.StatusOK, map[string]any{"order_id": result.OrderID, "merchant_order_no": result.MerchantOrderNo, "status": result.Status, "provider": "no_payment", "amount_minor": result.AmountMinor, "currency": result.Currency, "payment_required": false, "completion_action": handler.paidPurchaseAction(request.Context(), routeProvider, result.OrderID, result.MerchantOrderNo)})
+			return
+		}
+		payment := result.Payment
+		writeJSON(writer, http.StatusAccepted, map[string]any{"order_id": payment.OrderID, "merchant_order_no": payment.MerchantOrderNo, "payment_id": payment.ID, "status": payment.Status, "effect_id": payment.EffectID, "payment_required": true})
+		return
+	}
+	payment, err := handler.app.Create(request.Context(), command)
 	if err != nil {
 		resultError(writer, err)
 		return
@@ -992,7 +1010,8 @@ func validReferralActivityContext(value string) bool {
 }
 
 func (handler *Handler) checkoutStatus(writer http.ResponseWriter, request *http.Request, provider domain.Provider, merchantOrderNo string) {
-	if !handler.providerEnabled(provider) {
+	_, localCheckout := handler.app.(paymentport.NoPaymentCheckoutReader)
+	if !handler.providerEnabled(provider) && !localCheckout {
 		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")
 		return
 	}
@@ -1005,7 +1024,7 @@ func (handler *Handler) checkoutStatus(writer http.ResponseWriter, request *http
 		writeError(writer, http.StatusUnauthorized, "payment_session_required")
 		return
 	}
-	handoff, err := handler.app.GetCheckout(request.Context(), provider, merchantOrderNo, cookie.Value)
+	handoff, err := handler.authorizedCheckout(request.Context(), provider, merchantOrderNo, cookie.Value)
 	if err != nil {
 		resultError(writer, err)
 		return
@@ -1020,6 +1039,11 @@ func (handler *Handler) checkoutStatus(writer http.ResponseWriter, request *http
 	if handoff.PrepayState != "" {
 		result["prepay_state"] = handoff.PrepayState
 	}
+	result["payment_required"] = handoff.PaymentID > 0
+	if handoff.PaymentID == 0 {
+		delete(result, "payment_id")
+		delete(result, "channel")
+	}
 	status := http.StatusAccepted
 	if len(handoff.Payload) > 0 {
 		var providerPayload map[string]any
@@ -1032,6 +1056,9 @@ func (handler *Handler) checkoutStatus(writer http.ResponseWriter, request *http
 		status = http.StatusOK
 	}
 	if handoff.Status == domain.StatusPaid {
+		if handoff.PaymentID == 0 {
+			status = http.StatusOK
+		}
 		// Keep the already-authorized, short-lived payer session through the
 		// terminal paid state. A refresh can therefore re-read the same frozen
 		// completion action, while GetCheckout still binds it to this exact
@@ -1083,7 +1110,8 @@ func (handler *Handler) paidPurchaseAction(ctx context.Context, provider domain.
 }
 
 func (handler *Handler) resolveCompletionTarget(writer http.ResponseWriter, request *http.Request, provider domain.Provider, merchantOrderNo string) {
-	if !handler.providerEnabled(provider) {
+	_, localCheckout := handler.app.(paymentport.NoPaymentCheckoutReader)
+	if !handler.providerEnabled(provider) && !localCheckout {
 		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")
 		return
 	}
@@ -1096,7 +1124,7 @@ func (handler *Handler) resolveCompletionTarget(writer http.ResponseWriter, requ
 		writeError(writer, http.StatusUnauthorized, "payment_session_required")
 		return
 	}
-	handoff, err := handler.app.GetCheckout(request.Context(), provider, merchantOrderNo, cookie.Value)
+	handoff, err := handler.authorizedCheckout(request.Context(), provider, merchantOrderNo, cookie.Value)
 	if err != nil {
 		resultError(writer, err)
 		return
@@ -1531,6 +1559,8 @@ func decodeJSON(writer http.ResponseWriter, request *http.Request, destination a
 
 func resultError(writer http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, paymentport.ErrProviderDisabled):
+		writeError(writer, http.StatusServiceUnavailable, "payment_provider_disabled")
 	case errors.Is(err, paymentport.ErrPriceChanged):
 		writeError(writer, http.StatusConflict, "price_changed")
 	case errors.Is(err, paymentport.ErrProductPaymentMethodDisabled):
@@ -1630,4 +1660,19 @@ func (handler *Handler) historyPayment(w http.ResponseWriter, r *http.Request) {
 		return v
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": p.ID, "order_id": p.OrderID, "merchant_order_no": p.MerchantOrderNo, "provider": p.Provider, "status": p.Status, "amount_minor": p.AmountMinor, "currency": p.Currency, "record_origin": "history", "source_status": p.SourceStatus, "history_reason": p.HistoryReason, "payer_customer_id": nullable(p.PayerCustomerID), "beneficiary_customer_id": nullable(p.BeneficiaryCustomerID), "effect_eligible": false, "updated_at": p.UpdatedAt})
+}
+
+// Disabled money providers can still read a local completed order; this path
+// never reaches Payment querying or an external adapter.
+func (handler *Handler) authorizedCheckout(ctx context.Context, provider domain.Provider, reference, token string) (paymentport.Handoff, error) {
+	if handler.providerEnabled(provider) {
+		return handler.app.GetCheckout(ctx, provider, reference, token)
+	}
+	if reader, ok := handler.app.(paymentport.NoPaymentCheckoutReader); ok {
+		local, err := reader.GetNoPaymentCheckout(ctx, reference, token)
+		if !errors.Is(err, paymentport.ErrNotFound) {
+			return local, err
+		}
+	}
+	return paymentport.Handoff{}, paymentport.ErrProviderDisabled
 }

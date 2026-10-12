@@ -46,6 +46,7 @@ export function commerceStatusLabel(kind: CommerceStatusKind, raw: unknown): str
 
 export function commerceProviderLabel(raw: unknown): string {
   switch (typeof raw === 'string' ? raw.trim() : '') {
+    case 'no_payment': return '无需支付';
     case 'wechat':
     case 'wechat_pay': return '微信支付';
     case 'wechat_shop': return '微信小店';

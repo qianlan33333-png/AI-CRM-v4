@@ -128,6 +128,10 @@ func periodicContactFixture(t *testing.T) (*productExternalPushChromiumFixture, 
 }
 
 func useInstalledPeriodicContactFixture(t *testing.T, f *productExternalPushChromiumFixture) string {
+	return useInstalledPeriodicContactFixtureWithEnvironment(t, f, nil)
+}
+
+func useInstalledPeriodicContactFixtureWithEnvironment(t *testing.T, f *productExternalPushChromiumFixture, extra []string) string {
 	t.Helper()
 	input := testconfig.InstalledProduct()
 	if input.Binary == "" {
@@ -180,6 +184,7 @@ func useInstalledPeriodicContactFixture(t *testing.T, f *productExternalPushChro
 		"AICRM_ALIPAY_PROVIDER_ENABLED=true", "AICRM_ALIPAY_PRODUCTION=false", "AICRM_ALIPAY_APP_ID=virtual-alipay-test-app", "AICRM_ALIPAY_PRIVATE_KEY_PATH=" + alipayKey, "AICRM_ALIPAY_PUBLIC_KEY=" + alipayPublic, "AICRM_ALIPAY_GATEWAY=https://127.0.0.1:1/gateway.do", "AICRM_ALIPAY_NOTIFY_URL=" + f.server.URL + "/api/public/alipay/callback", "AICRM_ALIPAY_RETURN_URL=" + f.server.URL + "/pay/result",
 		"AICRM_OUTBOUND_PROVIDER_ENABLED=true", "AICRM_COMMERCE_PUSH_PROVIDER_ENABLED=true", "AICRM_COMMERCE_PUSH_TARGETS_JSON=" + string(targets), "AICRM_COMMERCE_PUSH_PAYLOAD_DATA_KEY=" + dataKey,
 	}
+	environment = append(environment, extra...)
 	process := startPeriodicContactInstalledProcess(t, input.Binary, input.Root, environment)
 	waitInstalledSurveyReady(t, process, "http://"+address, input.SHA)
 	target, _ := url.Parse("http://" + address)

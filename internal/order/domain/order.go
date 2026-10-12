@@ -19,6 +19,7 @@ var (
 type Provider string
 
 const (
+	ProviderNoPayment       Provider = "no_payment"
 	ProviderWeChatPay       Provider = "wechat_pay"
 	ProviderWeChatShop      Provider = "wechat_shop"
 	ProviderAlipay          Provider = "alipay"
@@ -295,6 +296,9 @@ func (o Order) ApplySettlement(expectedVersion int64, next Status, refundedMinor
 	if expectedVersion != o.Version {
 		return Order{}, StatusEvent{}, ErrVersionConflict
 	}
+	if o.Provider == ProviderNoPayment && (refundedMinor != 0 || next == StatusRefunded || next == StatusPartiallyRefunded || next == StatusPaymentFailed) {
+		return Order{}, StatusEvent{}, ErrInvalidSettlement
+	}
 	if at.IsZero() || at.Before(o.UpdatedAt) || !validSettlement(next, refundedMinor, o.Amount.AmountMinor) {
 		return Order{}, StatusEvent{}, ErrInvalidSettlement
 	}
@@ -325,6 +329,10 @@ func cloneExternalHistory(f *ExternalHistoryFacts) *ExternalHistoryFacts {
 	return &copy
 }
 func validate(o Order) error {
+	noPayment := o.Provider == ProviderNoPayment
+	if noPayment && (o.RecordOrigin != RecordOriginNative || !o.EffectEligible || o.Amount.AmountMinor != 0 || o.Amount.Currency != "CNY" || o.ProviderTransactionNo != "" || o.RefundedMinor != 0 || o.Status == StatusRefunded || o.Status == StatusPartiallyRefunded || o.Status == StatusPaymentFailed) {
+		return ErrInvalidOrder
+	}
 	external := o.RecordOrigin == RecordOriginExternal && o.Provider == ProviderWeChatShop && !o.EffectEligible
 	if o.Provider == ProviderExternalHistory {
 		if o.RecordOrigin != RecordOriginHistory || o.EffectEligible || o.ExternalHistory == nil || o.ExternalHistory.ImportedAt.IsZero() || o.ExternalHistory.SourceStatus == "" || o.ProviderTransactionNo != "" || !validID(o.PayerCustomerID) || !validID(o.BeneficiaryCustomerID) {
@@ -335,7 +343,7 @@ func validate(o Order) error {
 	}
 
 	if !validProvider(o.Provider) || !validText(o.SourceSystem, 100) || !validText(o.SourceKey, 200) || !validText(o.MerchantOrderNo, 200) || len(o.ProviderTransactionNo) > 200 || o.ProviderTransactionNo != strings.TrimSpace(o.ProviderTransactionNo) ||
-		(o.Amount.AmountMinor < 1 && !(external && o.Amount.AmountMinor == 0)) || !validCurrency(o.Amount.Currency) || o.Version < 1 || o.CreatedAt.IsZero() || o.UpdatedAt.Before(o.CreatedAt) ||
+		(o.Amount.AmountMinor < 1 && !((external || noPayment) && o.Amount.AmountMinor == 0)) || !validCurrency(o.Amount.Currency) || o.Version < 1 || o.CreatedAt.IsZero() || o.UpdatedAt.Before(o.CreatedAt) ||
 		(o.RecordOrigin != RecordOriginNative && o.RecordOrigin != RecordOriginHistory && !external) || o.EffectEligible != (o.RecordOrigin == RecordOriginNative) ||
 		!validSettlement(o.Status, o.RefundedMinor, o.Amount.AmountMinor) {
 		return ErrInvalidOrder
@@ -354,7 +362,7 @@ func validate(o Order) error {
 	for _, item := range o.items {
 		if item.LineNo < 1 || item.ProductID != nil && *item.ProductID < 1 || item.ProductVersion != nil && *item.ProductVersion < 1 || !validText(item.ProductCode, 200) || !validText(item.ProductName, 500) ||
 			item.Quantity < 1 || item.UnitAmountMinor < 0 || item.LineAmountMinor < 0 ||
-			(!external && (item.UnitAmountMinor < 1 || item.LineAmountMinor < 1 || item.UnitAmountMinor > math.MaxInt64/int64(item.Quantity) || item.LineAmountMinor != item.UnitAmountMinor*int64(item.Quantity))) || total > math.MaxInt64-item.LineAmountMinor {
+			(!external && ((!noPayment && (item.UnitAmountMinor < 1 || item.LineAmountMinor < 1)) || item.UnitAmountMinor > math.MaxInt64/int64(item.Quantity) || item.LineAmountMinor != item.UnitAmountMinor*int64(item.Quantity))) || total > math.MaxInt64-item.LineAmountMinor {
 			return ErrInvalidOrder
 		}
 		if _, duplicate := seen[item.LineNo]; duplicate {
@@ -399,7 +407,7 @@ func mayTransition(from, to Status) bool {
 }
 
 func validProvider(provider Provider) bool {
-	return provider == ProviderWeChatPay || provider == ProviderWeChatShop || provider == ProviderAlipay || provider == ProviderExternalHistory
+	return provider == ProviderNoPayment || provider == ProviderWeChatPay || provider == ProviderWeChatShop || provider == ProviderAlipay || provider == ProviderExternalHistory
 }
 
 func validCurrency(value string) bool {

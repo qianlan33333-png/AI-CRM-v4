@@ -132,6 +132,9 @@ func (r *Repository) selfFacts(ctx context.Context, x domain.Snapshot) (orderpor
 		return orderport.SelfOrder{}, e
 	}
 	out := orderport.SelfOrder{Order: x}
+	if x.Provider == domain.ProviderNoPayment {
+		return out, nil
+	}
 	e = tx.QueryRow(ctx, `SELECT (SELECT occurred_at FROM order_paid_events WHERE order_id=$1)`, x.ID).Scan(&out.ConfirmedPaidAt)
 	return out, e
 }

@@ -1577,6 +1577,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	paymentService := paymentapp.NewService(uow, paymentRepository, orderService, paymentSession, effectRepository, effectRepository)
+	publicProductHandler.SetCompletedCheckoutReader(paymentService)
 	paymentService.SetCanonicalLineageReader(queries)
 	if err = paymentService.SetProfitSharingIdentityReader(queries); err != nil {
 		return fail(err)

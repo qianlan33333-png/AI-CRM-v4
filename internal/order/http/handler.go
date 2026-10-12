@@ -271,6 +271,8 @@ func detailProvider(values url.Values) (domain.Provider, bool, bool) {
 		return domain.ProviderWeChatShop, true, true
 	case "alipay":
 		return domain.ProviderAlipay, true, true
+	case "no_payment":
+		return domain.ProviderNoPayment, true, true
 	case "external_history":
 		return domain.ProviderExternalHistory, true, true
 	default:
@@ -452,6 +454,8 @@ func parseListQuery(values url.Values) (orderport.ListQuery, bool) {
 			query.Provider = domain.ProviderWeChatShop
 		case "alipay":
 			query.Provider = domain.ProviderAlipay
+		case "no_payment":
+			query.Provider = domain.ProviderNoPayment
 		case "external_history":
 			query.Provider = domain.ProviderExternalHistory
 		default:
@@ -639,6 +643,8 @@ func responseFrom(order domain.Snapshot, customers map[customerdomain.CustomerID
 	provider, label := string(order.Provider), string(order.Provider)
 	if order.Provider == domain.ProviderWeChatPay {
 		provider, label = "wechat", "微信支付"
+	} else if order.Provider == domain.ProviderNoPayment {
+		label = "无需支付"
 	} else if order.Provider == domain.ProviderWeChatShop {
 		label = "微信小店"
 	} else if order.Provider == domain.ProviderAlipay {
@@ -670,6 +676,9 @@ func responseFrom(order domain.Snapshot, customers map[customerdomain.CustomerID
 		}
 	}
 	response := orderResponse{RefundedMinor: order.RefundedMinor, PayerCustomerNumber: payerNumber, ID: order.ID, RecordOrigin: origin, CreatedAt: order.CreatedAt, MerchantOrderNo: order.MerchantOrderNo, OutTradeNo: order.MerchantOrderNo, OrderNo: order.SourceKey, PlatformTransactionNo: order.ProviderTransactionNo, TransactionID: order.ProviderTransactionNo, PayerName: payerName, PayerID: payer, PayerPhoneMasked: payerPhoneMasked, ProductCode: productCode, ProductName: productName, AmountYuan: fmt.Sprintf("%d.%02d", order.Amount.AmountMinor/100, order.Amount.AmountMinor%100), Currency: order.Amount.Currency, Status: order.Status, StatusLabel: string(order.Status), Provider: provider, ProviderLabel: label, DetailURL: "/admin/orderDetail.html?" + url.Values{"id": {order.MerchantOrderNo}, "provider": {provider}}.Encode()}
+	if order.Provider == domain.ProviderNoPayment && order.Status == domain.StatusPaid {
+		response.StatusLabel = "领取成功"
+	}
 	if f := order.ExternalHistory; f != nil {
 		response.SourcePaidAt = f.SourcePaidAt
 		response.ImportedAt = &f.ImportedAt

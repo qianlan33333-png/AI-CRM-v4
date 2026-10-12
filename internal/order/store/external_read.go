@@ -59,16 +59,18 @@ func (r *Repository) ListExternalRead(ctx context.Context, q orderport.ExternalR
 		add("o.created_at<=", q.CreatedTo.UTC())
 	}
 	if q.PaidFrom != nil {
+		where=append(where,"o.provider<>'no_payment'")
 		add("pe.occurred_at>=", q.PaidFrom.UTC())
 	}
 	if q.PaidTo != nil {
+		where=append(where,"o.provider<>'no_payment'")
 		add("pe.occurred_at<=", q.PaidTo.UTC())
 	}
 	if q.IsPaid != nil {
 		if *q.IsPaid {
-			where = append(where, "EXISTS (SELECT 1 FROM order_status_history h WHERE h.order_id=o.id AND h.to_status IN ('paid','partially_refunded','refunded'))")
+			where = append(where, "o.provider<>'no_payment' AND EXISTS (SELECT 1 FROM order_status_history h WHERE h.order_id=o.id AND h.to_status IN ('paid','partially_refunded','refunded'))")
 		} else {
-			where = append(where, "NOT EXISTS (SELECT 1 FROM order_status_history h WHERE h.order_id=o.id AND h.to_status IN ('paid','partially_refunded','refunded'))")
+			where = append(where, "(o.provider='no_payment' OR NOT EXISTS (SELECT 1 FROM order_status_history h WHERE h.order_id=o.id AND h.to_status IN ('paid','partially_refunded','refunded')))")
 		}
 	}
 	if q.IsRefunded != nil {
@@ -98,8 +100,8 @@ func (r *Repository) ListExternalRead(ctx context.Context, q orderport.ExternalR
 		where = append(where, "(o.created_at,o.id)<($"+itoa(n-1)+",$"+itoa(n)+")")
 	}
 	args = append(args, q.Limit)
-	rows, err := tx.Query(ctx, `SELECT o.id,o.provider,o.source_system,o.source_key,o.merchant_order_no,o.provider_transaction_no,o.payer_customer_id,o.beneficiary_customer_id,o.amount_minor,o.currency,o.status,o.created_at,pe.occurred_at,
-	 (o.status IN ('paid','partially_refunded','refunded') OR EXISTS (SELECT 1 FROM order_status_history h WHERE h.order_id=o.id AND h.to_status IN ('paid','partially_refunded','refunded'))),
+	rows, err := tx.Query(ctx, `SELECT o.id,o.provider,o.source_system,o.source_key,o.merchant_order_no,o.provider_transaction_no,o.payer_customer_id,o.beneficiary_customer_id,o.amount_minor,o.currency,o.status,o.created_at,CASE WHEN o.provider='no_payment' THEN NULL ELSE pe.occurred_at END,
+	 (o.provider<>'no_payment' AND (o.status IN ('paid','partially_refunded','refunded') OR EXISTS (SELECT 1 FROM order_status_history h WHERE h.order_id=o.id AND h.to_status IN ('paid','partially_refunded','refunded')))),
  COALESCE((SELECT array_agg(oi.product_code ORDER BY oi.line_no) FROM order_items oi WHERE oi.order_id=o.id),ARRAY[]::text[]),
  COALESCE((SELECT jsonb_agg(jsonb_build_object('line_no',oi.line_no,'product_code',oi.product_code,'product_name',oi.product_name,'unit_amount_minor',oi.unit_amount_minor,'quantity',oi.quantity,'line_amount_minor',oi.line_amount_minor) ORDER BY oi.line_no) FROM order_items oi WHERE oi.order_id=o.id),'[]'::jsonb)
  FROM orders o LEFT JOIN order_paid_events pe ON pe.order_id=o.id WHERE `+strings.Join(where, " AND ")+` ORDER BY o.created_at DESC,o.id DESC LIMIT $`+itoa(len(args)), args...)
@@ -139,7 +141,7 @@ func (r *Repository) GetExternalRead(ctx context.Context, id int64, customerIDs 
 		args = append(args, customerIDs)
 		where += " AND (o.payer_customer_id=ANY($2) OR o.beneficiary_customer_id=ANY($2))"
 	}
-	row := tx.QueryRow(ctx, `SELECT o.id,o.provider,o.source_system,o.source_key,o.merchant_order_no,o.provider_transaction_no,o.payer_customer_id,o.beneficiary_customer_id,o.amount_minor,o.currency,o.status,o.created_at,pe.occurred_at,(o.status IN ('paid','partially_refunded','refunded') OR EXISTS (SELECT 1 FROM order_status_history h WHERE h.order_id=o.id AND h.to_status IN ('paid','partially_refunded','refunded'))),COALESCE((SELECT array_agg(oi.product_code ORDER BY oi.line_no) FROM order_items oi WHERE oi.order_id=o.id),ARRAY[]::text[]),COALESCE((SELECT jsonb_agg(jsonb_build_object('line_no',oi.line_no,'product_code',oi.product_code,'product_name',oi.product_name,'unit_amount_minor',oi.unit_amount_minor,'quantity',oi.quantity,'line_amount_minor',oi.line_amount_minor) ORDER BY oi.line_no) FROM order_items oi WHERE oi.order_id=o.id),'[]'::jsonb) FROM orders o LEFT JOIN order_paid_events pe ON pe.order_id=o.id WHERE `+where, args...)
+	row := tx.QueryRow(ctx, `SELECT o.id,o.provider,o.source_system,o.source_key,o.merchant_order_no,o.provider_transaction_no,o.payer_customer_id,o.beneficiary_customer_id,o.amount_minor,o.currency,o.status,o.created_at,CASE WHEN o.provider='no_payment' THEN NULL ELSE pe.occurred_at END,(o.provider<>'no_payment' AND (o.status IN ('paid','partially_refunded','refunded') OR EXISTS (SELECT 1 FROM order_status_history h WHERE h.order_id=o.id AND h.to_status IN ('paid','partially_refunded','refunded')))),COALESCE((SELECT array_agg(oi.product_code ORDER BY oi.line_no) FROM order_items oi WHERE oi.order_id=o.id),ARRAY[]::text[]),COALESCE((SELECT jsonb_agg(jsonb_build_object('line_no',oi.line_no,'product_code',oi.product_code,'product_name',oi.product_name,'unit_amount_minor',oi.unit_amount_minor,'quantity',oi.quantity,'line_amount_minor',oi.line_amount_minor) ORDER BY oi.line_no) FROM order_items oi WHERE oi.order_id=o.id),'[]'::jsonb) FROM orders o LEFT JOIN order_paid_events pe ON pe.order_id=o.id WHERE `+where, args...)
 	var x orderport.ExternalOrder
 	var paid *time.Time
 	var itemsRaw []byte
