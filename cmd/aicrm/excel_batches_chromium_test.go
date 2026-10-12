@@ -10,6 +10,7 @@ import (
 	accessdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/access/domain"
 	accesshttp "github.com/qianlan33333-png/AI-CRM-v3/internal/access/http"
 	effect "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
+	mediaport "github.com/qianlan33333-png/AI-CRM-v3/internal/media/port"
 	config "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
 	"io"
 	"net/http"
@@ -262,6 +263,13 @@ func runExcelCompositionJourney(t *testing.T, browser bool) {
 		}
 		if invalidCover := write(http.MethodPost, fmt.Sprintf("/api/admin/operation-batches/%d/cover?expected_version=%d", imported.Batch.ID, imported.Batch.Version), "http-cover-invalid", []byte("not an image")); invalidCover.Code != http.StatusBadRequest {
 			t.Fatalf("invalid cover: %d %s", invalidCover.Code, invalidCover.Body.String())
+		}
+		for _, size := range []int{mediaport.ManualImageUploadMaxBytes + 1, (2 << 20) + 1} {
+			large := append(append([]byte{}, cover...), make([]byte, size-len(cover))...)
+			result := write(http.MethodPost, fmt.Sprintf("/api/admin/operation-batches/%d/cover?expected_version=%d", imported.Batch.ID, imported.Batch.Version), fmt.Sprintf("http-cover-oversize-%d", size), large)
+			if result.Code != http.StatusRequestEntityTooLarge || !strings.Contains(result.Body.String(), "1MB") {
+				t.Fatalf("oversize cover: size=%d status=%d body=%s", size, result.Code, result.Body.String())
+			}
 		}
 		coverResponse := write(http.MethodPost, fmt.Sprintf("/api/admin/operation-batches/%d/cover?expected_version=%d", imported.Batch.ID, imported.Batch.Version), "http-cover-upload", cover)
 		if coverResponse.Code != http.StatusOK {

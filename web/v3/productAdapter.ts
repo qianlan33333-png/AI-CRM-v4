@@ -18,6 +18,7 @@ import { formatShanghaiDateTime } from './adminDateTime';
 import { installMaterialPickerAdapter, type MaterialPickerLoadRequest, type MaterialPickerRecord } from './shared/ui/materialPickerAdapter';
 import { openShareQrDialog } from './shared/ui/shareQrDialog';
 import { renderMaterialThumbnail } from './shared/ui/materialThumbnailPresentation';
+import { imageUploadSizeError, imageUploadSizeMessage } from './shared/ui/imageUploadPolicy';
 import { openChannelPicker, type ChannelPickerPage, type ChannelPickerRecord } from './shared/ui/channelPickerAdapter';
 import { installShopRefresh, presentShopEditor } from './wechatShopProducts';
 
@@ -2704,6 +2705,9 @@ function moveProductMaterialDraft(controller: ProductController, kind: 'product'
 function renderProductMaterialDraft(controller: ProductController, kind: 'product' | 'service'): void {
   const root = productMediaRoot(kind);
   if (!root) return;
+  for (const label of root.querySelectorAll('strong')) {
+    if (label.textContent?.trim() === '上传长图切片（最大 2MB）') label.textContent = '上传图片（单张不超过 1MB）';
+  }
   const urls = [...controller.currentCommerceImageUrls(kind)];
   const host = productMediaListHost(root);
   const draftKey = productPickerDraftKey(urls);
@@ -2897,9 +2901,12 @@ function productUploadOwnsCurrentEditor(flight: ProductUploadFlight, context: Pr
 
 productController.uploadCommerceImage = function (kind, event) {
   const input = event.target instanceof HTMLInputElement ? event.target : null;
-  const files = input ? Array.from(input.files || []) : [];
-  if (!input || !files.length) return;
+  const selected = input ? Array.from(input.files || []) : [];
+  if (!input || !selected.length) return;
+  const rejected = selected.map(imageUploadSizeError).filter((message): message is string => Boolean(message));
+  const files = selected.filter((file) => !imageUploadSizeError(file));
   input.value = '';
+  if (!files.length) { showMessage(rejected.join('；')); return; }
   const context = productMaterialEditorContext(this, kind);
   const expectedDimension = kind === 'product' ? 'product-media' : 'sp-media';
   if (!context || context.dimension !== expectedDimension) {
@@ -2941,8 +2948,10 @@ productController.uploadCommerceImage = function (kind, event) {
       // therefore cannot hide, clear, or re-upload an already-successful item.
       showMessage(`已加入当前商品页面素材：${material.title}`, true);
     }
+    if (rejected.length) showMessage(rejected.join('；'));
   })().catch((error) => {
-    showMessage(error instanceof Error ? error.message : '图片上传失败；已成功的页面素材仍保留。');
+    const message = (error as { status?: number })?.status === 413 ? imageUploadSizeMessage : error instanceof Error ? error.message : '图片上传失败；已成功的页面素材仍保留。';
+    showMessage([message, ...rejected].join('；'));
   }).finally(() => productUploadFlights.delete(flight));
   flight = { controller: this, kind, context, pending };
   productUploadFlights.add(flight);

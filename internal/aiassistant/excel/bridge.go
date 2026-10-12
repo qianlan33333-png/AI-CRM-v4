@@ -807,11 +807,15 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				raw, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
 				if readErr != nil {
 					err = app.ErrInvalid
+					var tooLarge *http.MaxBytesError
+					if errors.As(readErr, &tooLarge) {
+						err = mediaport.ErrImageUploadTooLarge
+					}
 					break
 				}
 				imageInfo, imageFormat, imageErr := image.DecodeConfig(bytes.NewReader(raw))
 				if imageErr != nil || (imageFormat != "png" && imageFormat != "jpeg") || imageInfo.Width < 1 || imageInfo.Height < 1 || int64(imageInfo.Width)*int64(imageInfo.Height) > 40000000 {
-					err = &InputError{Message: "请上传有效的 PNG 或 JPEG 封面（不超过 2 MB）"}
+					err = &InputError{Message: "请上传有效的 PNG 或 JPEG 封面（不超过 1MB）"}
 					break
 				}
 				fileName, declaredType := "excel-cover.png", "image/png"
@@ -944,6 +948,10 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var inputError *InputError
+		if errors.Is(err, mediaport.ErrImageUploadTooLarge) {
+			respond(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "invalid_input", "message": "单张图片不能超过 1MB，请压缩文件后重新选择"})
+			return
+		}
 		if errors.As(err, &inputError) {
 			respond(w, 400, map[string]any{"error": "invalid_input", "message": inputError.Message})
 			return

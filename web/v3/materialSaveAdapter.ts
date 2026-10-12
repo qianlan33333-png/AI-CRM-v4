@@ -6,6 +6,7 @@ import { installGroupSelects, withGroupSelection } from './materialGroupManageme
 export {};
 import { materialGroupRequest } from './materialGrouping';
 import { clearActionBusy, setActionBusy } from './actionFeedback';
+import { imageUploadSizeError } from './shared/ui/imageUploadPolicy';
 
 type SaveState = {
   button: HTMLButtonElement;
@@ -45,9 +46,11 @@ function installFileFeedback(): void {
     input.after(status);
     const describe = (cancelled = false) => {
       const file = input.files?.[0];
-      status.textContent = file
+      const sizeError = image && file ? imageUploadSizeError(file) : undefined;
+      status.style.color = sizeError ? '#D83931' : '#646A73';
+      status.textContent = sizeError || (file
         ? `已选择 ${file.name}（${Math.max(1, Math.ceil(file.size / 1024))} KB），点击上传后保存。`
-        : `${cancelled ? '已取消选择。' : ''}${image ? '请选择 PNG、JPEG 或 GIF 图片' : '请选择 PDF 附件'}，最大 10 MB。`;
+        : `${cancelled ? '已取消选择。' : ''}${image ? '请选择 PNG、JPEG 或 GIF 图片，单张不超过 1MB。' : '请选择 PDF 附件，最大 10 MB。'}`);
     };
     input.addEventListener('change', () => describe());
     input.addEventListener('cancel', () => describe(true));

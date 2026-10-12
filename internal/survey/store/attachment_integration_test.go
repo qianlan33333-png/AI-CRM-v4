@@ -126,6 +126,67 @@ func TestPostgreSQLAttachmentAtomicReplayAndScope(t *testing.T) {
 	}
 }
 
+func TestPostgreSQLAttachmentSizeRemainsSeparateFromManualImageLimit(t *testing.T) {
+	f := newAttachmentFixture(t)
+	ctx := context.Background()
+	// A fully valid RGB PNG close to 2 MiB, without trailing byte padding.
+	img := image.NewNRGBA(image.Rect(0, 0, 800, 870))
+	for y := 0; y < 870; y++ {
+		for x := 0; x < 800; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: 31, G: 67, B: 137, A: 255})
+		}
+	}
+	var encoded bytes.Buffer
+	encoder := png.Encoder{CompressionLevel: png.NoCompression}
+	if err := encoder.Encode(&encoded, img); err != nil {
+		t.Fatal(err)
+	}
+	if encoded.Len() <= 19*surveyport.MaximumAttachmentBytes/20 || encoded.Len() >= surveyport.MaximumAttachmentBytes || encoded.Len() <= mediaport.ManualImageUploadMaxBytes {
+		t.Fatalf("fixture must be a valid near-2-MiB image: %d", encoded.Len())
+	}
+	command := f.imageCommand(t, f.customer(t), "S", "IMG", 100)
+	command.Attachments[0].Content = encoded.Bytes()
+	first, err := f.submissions.Submit(ctx, command)
+	if err != nil {
+		t.Fatalf("private Survey image below 2 MiB was rejected: %v", err)
+	}
+	replay, err := f.submissions.Submit(ctx, command)
+	if err != nil || replay.SubmissionID != first.SubmissionID {
+		t.Fatalf("private submission replay=%v", err)
+	}
+	assertImageCounts(t, f, 1, 2, 1)
+	stored, err := f.submissions.GetSubmission(ctx, first.SubmissionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, answer := range stored.Answers {
+		if answer.QuestionID != nil && *answer.QuestionID == command.Attachments[0].QuestionID {
+			found = true
+			content, err := f.submissions.ReadSubmissionAttachment(ctx, f.q.ID, stored.ID, answer.ID)
+			if err != nil || !bytes.Equal(content.Content, encoded.Bytes()) {
+				t.Fatalf("private original lost: %v", err)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("near-2-MiB answer missing from saved submission")
+	}
+	media, err := mediastore.NewPostgreSQL(f.pool, f.unit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = media.CreateImage(ctx, f.actor, "manual-near-2-MiB-image", mediastore.ImageInput{FileName: "near-2-MiB.png", Name: "manual image", MIME: "image/png", Content: encoded.Bytes(), Width: 800, Height: 870})
+	if !errors.Is(err, mediaport.ErrImageUploadTooLarge) {
+		t.Fatalf("same image entered the manual library: %v", err)
+	}
+	var publicImages int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM media_images`).Scan(&publicImages); err != nil || publicImages != 0 {
+		t.Fatalf("private image leaked into manual/public library: count=%d err=%v", publicImages, err)
+	}
+	assertImageCounts(t, f, 1, 2, 1)
+}
+
 type failingImageObserver struct{}
 
 func (failingImageObserver) SubmissionCreatedWithin(context.Context, int64, int64) error {

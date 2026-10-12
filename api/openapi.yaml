@@ -800,10 +800,11 @@ paths:
     post:
       operationId: createMediaImage
       tags: [Media]
+      description: New manual images must be at most 1048576 bytes. Completed identical receipts still replay.
       security: [{adminSession: [], csrfHeader: []}]
       parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/MediaImageCreateRequest"}}, multipart/form-data: {schema: {$ref: "#/components/schemas/MediaImageMultipartRequest"}}}}
-      responses: {"200": {description: Local image created, content: {application/json: {schema: {$ref: "#/components/schemas/MediaImageEnvelope"}}}}, "400": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}}
+      responses: {"200": {description: Local image created, content: {application/json: {schema: {$ref: "#/components/schemas/MediaImageEnvelope"}}}}, "400": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}, "413": {$ref: "#/components/responses/Error"}}
   /api/admin/image-library/{id}:
     get:
       operationId: getMediaImage
@@ -829,7 +830,7 @@ paths:
       operationId: getMediaImageVariant
       tags: [Media]
       security: [{adminSession: []}]
-      parameters: [{$ref: "#/components/parameters/ID"}, {name: variant, in: path, required: true, schema: {type: string, enum: [thumb_160, thumb_320, mobile_1080, large_1440, original]}}]
+      parameters: [{$ref: "#/components/parameters/ID"}, {name: variant, in: path, required: true, schema: {type: string, enum: [thumb_160, thumb_320, mobile_1080, large_1440, original, web_1080]}}]
       responses: {"200": {description: Authenticated image variant bytes, headers: {ETag: {required: true, schema: {type: string, pattern: '^"[0-9a-f]{64}"$'}}}, content: {image/png: {schema: {type: string, format: binary}}, image/jpeg: {schema: {type: string, format: binary}}, image/gif: {schema: {type: string, format: binary}}}}, "304": {description: ETag matched, headers: {ETag: {required: true, schema: {type: string}}}}, "401": {$ref: "#/components/responses/Error"}, "404": {$ref: "#/components/responses/Error"}, "422": {$ref: "#/components/responses/Error"}}
   /api/admin/image-library/facets:
     get:
@@ -841,11 +842,11 @@ paths:
     post:
       operationId: uploadLegacyMediaImage
       tags: [Media]
-      description: Frozen Media multipart compatibility alias. Missing Idempotency-Key receives an audited server compatibility key.
+      description: New manual images must be at most 1048576 bytes. Completed identical receipts still replay. Missing Idempotency-Key receives an audited server compatibility key.
       security: [{adminSession: [], csrfHeader: []}]
       parameters: [{$ref: "#/components/parameters/IdempotencyKey"}]
       requestBody: {required: true, content: {multipart/form-data: {schema: {$ref: "#/components/schemas/MediaImageMultipartRequest"}}}}
-      responses: {"200": {description: Local image created, content: {application/json: {schema: {$ref: "#/components/schemas/MediaImageUploadEnvelope"}}}}, "400": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}}
+      responses: {"200": {description: Local image created, content: {application/json: {schema: {$ref: "#/components/schemas/MediaImageUploadEnvelope"}}}}, "400": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}, "413": {$ref: "#/components/responses/Error"}}
   /api/admin/attachment-library:
     get:
       operationId: listMediaAttachments
@@ -5422,7 +5423,7 @@ components:
     ImageTagGroup: {name: tag_group, in: query, schema: {type: string, maxLength: 4096, description: Repeatable comma-separated tag group filter.}}
     OnlyUnlabeled: {name: only_unlabeled, in: query, schema: {type: boolean, default: false}}
     IncludeData: {name: include_data, in: query, schema: {type: boolean, default: false}}
-    MediaImageDetailVariant: {name: variant, in: query, schema: {type: string, enum: [thumb_160, thumb_320, mobile_1080, large_1440, original]}}
+    MediaImageDetailVariant: {name: variant, in: query, schema: {type: string, enum: [thumb_160, thumb_320, mobile_1080, large_1440, original, web_1080]}}
     CustomerID: {name: customer_id, in: path, required: true, schema: {$ref: "#/components/schemas/PositiveID"}}
     SafeNext: {name: next, in: query, schema: {type: string, pattern: "^/"}}
     Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
@@ -8020,7 +8021,7 @@ components:
     MediaImage:
       type: object
       required: [id, resource_id, file_name, name, mime_type, file_size, width, height, enabled, created_at, updated_at]
-      properties: {id: {$ref: "#/components/schemas/PositiveID"}, resource_id: {$ref: "#/components/schemas/PositiveID"}, file_name: {type: string}, name: {type: string}, description: {type: string}, tags: {type: array, items: {type: string}}, category: {type: string}, mime_type: {type: string}, content_type: {type: string}, file_size: {type: integer}, width: {type: integer}, height: {type: integer}, enabled: {type: boolean}, source: {const: upload}, source_url: {type: string}, thumb_media_id: {type: string}, thumb_media_id_expires_at: {type: string}, ai_metadata: {type: object}, thumb_160_url: {type: string}, thumb_320_url: {type: string}, thumb_url: {type: string}, preview_url: {type: string}, mobile_1080_url: {type: string}, large_1440_url: {type: string}, original_url: {type: string}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}, data_url: {type: string}, variant: {type: string, enum: [thumb_160, thumb_320, mobile_1080, large_1440, original]}, variant_url: {type: string}}
+      properties: {id: {$ref: "#/components/schemas/PositiveID"}, resource_id: {$ref: "#/components/schemas/PositiveID"}, file_name: {type: string}, name: {type: string}, description: {type: string}, tags: {type: array, items: {type: string}}, category: {type: string}, mime_type: {type: string}, content_type: {type: string}, file_size: {type: integer}, width: {type: integer}, height: {type: integer}, enabled: {type: boolean}, source: {const: upload}, source_url: {type: string}, thumb_media_id: {type: string}, thumb_media_id_expires_at: {type: string}, ai_metadata: {type: object}, thumb_160_url: {type: string}, thumb_320_url: {type: string}, thumb_url: {type: string}, preview_url: {type: string}, mobile_1080_url: {type: string}, large_1440_url: {type: string}, original_url: {type: string}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}, data_url: {type: string}, variant: {type: string, enum: [thumb_160, thumb_320, mobile_1080, large_1440, original, web_1080]}, variant_url: {type: string}}
     MediaImageEnvelope: {type: object, required: [ok, item, image, item_id, local_only, provider_call_executed, real_external_call_executed], properties: {ok: {const: true}, item: {$ref: "#/components/schemas/MediaImage"}, image: {$ref: "#/components/schemas/MediaImage"}, item_id: {$ref: "#/components/schemas/PositiveID"}, local_only: {const: true}, provider_call_executed: {const: false}, real_external_call_executed: {const: false}}}
     MediaImageUploadItem: {type: object, required: [id, file_name, name, description, tags, category, mime_type, file_size, width, height, created_at, updated_at], properties: {id: {$ref: "#/components/schemas/PositiveID"}, file_name: {type: string}, name: {type: string}, description: {type: string}, tags: {type: string}, category: {type: string}, mime_type: {type: string, enum: [image/png, image/jpeg, image/gif]}, file_size: {type: integer, minimum: 1, maximum: 10485760}, width: {type: integer, minimum: 1, maximum: 10000}, height: {type: integer, minimum: 1, maximum: 10000}, created_at: {type: string, format: date-time}, updated_at: {type: string, format: date-time}}}
     MediaImageUploadEnvelope: {type: object, required: [ok, item, item_id, source_status, route_owner, fallback_used, real_external_call_executed, storage_adapter_mode, adapter_mode], properties: {ok: {const: true}, item: {$ref: "#/components/schemas/MediaImageUploadItem"}, item_id: {$ref: "#/components/schemas/PositiveID"}, source_status: {const: local_upload}, route_owner: {const: ai_crm_next}, fallback_used: {const: false}, real_external_call_executed: {const: false}, storage_adapter_mode: {const: postgresql}, adapter_mode: {const: postgresql}}}

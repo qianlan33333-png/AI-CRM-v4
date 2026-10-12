@@ -29,6 +29,10 @@ func TestPublicProductImageURLsUseSavedImageLibraryBindings(t *testing.T) {
 	if cover := publicProductCardCover(product); cover != "/api/h5/product-images/course-9/88/variants/large_1440" {
 		t.Fatalf("cover=%q", cover)
 	}
+	detail, err := PublicProductDetailImageURLs(product)
+	if err != nil || len(detail) != 3 || detail[0] != "/api/h5/product-images/course-9/88/variants/web_1080" || detail[1] != urls[1] {
+		t.Fatalf("detail optimisation leaked: %v %v", detail, err)
+	}
 	ids, err := PublicProductImageIDs(product)
 	if err != nil || len(ids) != 1 || ids[0] != 88 {
 		t.Fatalf("ids=%v err=%v", ids, err)

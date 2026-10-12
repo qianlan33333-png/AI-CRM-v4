@@ -38,6 +38,16 @@ func PublicProductImageIDs(product productport.Product) ([]int64, error) {
 // that an anonymous browser can load. The order is the persisted Product
 // image order, so the selected primary image remains the card cover.
 func PublicProductImageURLs(product productport.Product) ([]string, error) {
+	return publicProductImageURLs(product, "large_1440")
+}
+
+// PublicProductDetailImageURLs opts only the ordinary customer detail into the
+// best-effort web variant. Card/sidebar consumers keep their existing cover.
+func PublicProductDetailImageURLs(product productport.Product) ([]string, error) {
+	return publicProductImageURLs(product, "web_1080")
+}
+
+func publicProductImageURLs(product productport.Product, variant string) ([]string, error) {
 	ids, err := PublicProductImageIDs(product)
 	if err != nil {
 		return nil, err
@@ -50,7 +60,7 @@ func PublicProductImageURLs(product productport.Product) ([]string, error) {
 	for _, raw := range product.Images {
 		if id, ok := productImageLibraryID(raw); ok {
 			if _, present := allowed[id]; present {
-				urls = append(urls, publicProductImageURL(product.ProductCode, id))
+				urls = append(urls, "/api/h5/product-images/"+url.PathEscape(product.ProductCode)+"/"+strconv.FormatInt(id, 10)+"/variants/"+variant)
 			}
 			continue
 		}
@@ -68,10 +78,6 @@ func publicProductCardCover(product productport.Product) string {
 		return ""
 	}
 	return images[0]
-}
-
-func publicProductImageURL(code string, imageID int64) string {
-	return "/api/h5/product-images/" + url.PathEscape(code) + "/" + strconv.FormatInt(imageID, 10) + "/variants/large_1440"
 }
 
 func productImageLibraryID(raw string) (int64, bool) {

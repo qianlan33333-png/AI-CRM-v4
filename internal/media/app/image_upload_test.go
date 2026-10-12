@@ -41,6 +41,23 @@ func (u memoryUOW) Within(ctx context.Context, fn func(context.Context) error) e
 	return nil
 }
 func receiptKey(actor string, digest [32]byte) string { return actor + ":" + string(digest[:]) }
+
+func TestUploadManualSizeBoundaryAndRollback(t *testing.T) {
+	for _, size := range []int{mediaport.ManualImageUploadMaxBytes - 1, mediaport.ManualImageUploadMaxBytes, mediaport.ManualImageUploadMaxBytes + 1} {
+		command := validCommand(t)
+		command.Content = append(command.Content, make([]byte, size-len(command.Content))...)
+		state := &memoryState{receipts: map[string]Receipt{}}
+		service := NewImageUploadService(memoryUOW{state}, memoryStore{state}, memoryEvents{state})
+		_, err := service.Upload(context.Background(), command)
+		if size > mediaport.ManualImageUploadMaxBytes {
+			if !errors.Is(err, mediaport.ErrImageUploadTooLarge) || len(state.images) != 0 || len(state.events) != 0 || len(state.receipts) != 0 {
+				t.Fatalf("oversize persisted: %v", err)
+			}
+		} else if err != nil {
+			t.Fatalf("allowed boundary failed: %v", err)
+		}
+	}
+}
 func (s memoryStore) Reserve(_ context.Context, input Reservation) (Receipt, bool, error) {
 	key := receiptKey(input.ActorScope, input.KeyDigest)
 	if old, ok := s.state.receipts[key]; ok {

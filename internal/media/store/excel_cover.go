@@ -62,6 +62,9 @@ func (r *Repository) CreateOrReuseExcelCover(ctx context.Context, command mediap
 			cover = mediaport.ExcelCover{ImageID: stored.ImageID, ContentDigest: decoded}
 			return nil
 		}
+		if len(command.Content) > mediaport.ManualImageUploadMaxBytes {
+			return mediaport.ErrImageUploadTooLarge
+		}
 		if _, reserveErr = tx.Exec(txctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "excel-cover:"+digest); reserveErr != nil {
 			return reserveErr
 		}

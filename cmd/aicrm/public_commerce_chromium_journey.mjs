@@ -186,6 +186,10 @@ try {
       assert.match(period.card, /30 天/);
       assert.equal(period.cta, '立即续费');
       await waitFor(cdp, "(() => { const image=document.querySelector('.detail-media .slice-img'); return image && image.complete && image.naturalWidth > 0; })()", `${pagePath} uploaded image must load through Product public route`);
+      const poster = await evaluate(cdp, "(()=>{const image=document.querySelector('.detail-media .slice-img');return {width:image.naturalWidth,height:image.naturalHeight,url:image.src}})()");
+      assert.equal(poster.width, 640, 'periodic detail preserves original width');
+      assert.equal(poster.height, 2200, 'periodic detail preserves original height');
+      assert.match(poster.url, /\/variants\/original$/, 'periodic detail keeps its original media route');
     } else if (detail) {
       assert.equal(state.identityVisible, false, `${pagePath} trusted session must reveal product detail`);
       assert.equal(state.detailVisible, true, `${pagePath} visible product detail`);
@@ -195,6 +199,10 @@ try {
       assert.notEqual(state.detailAction, "", `${pagePath} product purchase action`);
       if (media) {
         assert.equal(state.detailImageLoaded, true, `${pagePath} Product-owned detail media`);
+        const poster = await evaluate(cdp, "(()=>{const image=document.querySelector('#detailContent .detail-image');return {width:image.naturalWidth,height:image.naturalHeight,url:image.src}})()");
+        assert.equal(poster.width, 640, 'ordinary detail leaves a narrow poster unchanged');
+        assert.equal(poster.height, 2200, 'ordinary detail does not cap the tall poster at 1440');
+        assert.match(poster.url, /\/variants\/web_1080$/, 'ordinary detail opts into the width-based media route');
         assert.equal(state.detailScrollable, true, `${pagePath} Product-owned long media creates a real detail scroll`);
         await evaluate(cdp, "window.scrollTo(0, document.documentElement.scrollHeight);");
         await settleLayout();

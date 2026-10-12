@@ -365,12 +365,18 @@ try {
   // intact, then persist the order only through the explicit owner save.
   const productUploadPath = path.join(profile, 'chromium-product-upload.png');
   await fs.writeFile(productUploadPath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGL6z8DwnwEZAAIAAP//HxcCAa7PZcoAAAAASUVORK5CYII=', 'base64'));
+  const oversizeUploadPath = path.join(profile, 'chromium-oversize.png');
+  const oversizeImage = Buffer.alloc(1_048_577);
+  (await fs.readFile(productUploadPath)).copy(oversizeImage);
+  await fs.writeFile(oversizeUploadPath, oversizeImage);
   const productUploadPrepared = await evaluate(cdp, "(()=>{const description=document.querySelector('#pfDescription');if(!(description instanceof HTMLTextAreaElement))return false;description.value='Chromium material draft remains active';return true})()");
   if (!productUploadPrepared) throw new Error('product material upload input was unavailable');
   await evaluate(cdp, "(()=>{const input=document.querySelector('#pfImageUpload');if(!(input instanceof HTMLInputElement))return false;window.__productUploadChangeSeen=0;input.addEventListener('change',()=>{window.__productUploadChangeSeen=(window.__productUploadChangeSeen||0)+1},{capture:true});return true})()");
   const productDOM = await cdp.call('DOM.getDocument', { depth: 2 });
   const productUploadNode = await cdp.call('DOM.querySelector', { nodeId: productDOM.root.nodeId, selector: '#pfImageUpload' });
   if (!productUploadNode.nodeId) throw new Error('product material upload source input was unavailable');
+  await cdp.call('DOM.setFileInputFiles', { files: [oversizeUploadPath], nodeId: productUploadNode.nodeId });
+  await waitFor(cdp, "(()=>{const root=document.querySelector('#product-media');const toast=document.querySelector('#product-v3-toast')?.textContent||'';const rows=document.querySelectorAll('[data-v3-product-material-list] [data-v3-product-material-key]');return rows.length===1&&toast.includes('chromium-oversize.png')&&toast.includes('1MB')&&root?.textContent.includes('上传图片（单张不超过 1MB）')})()", 'ordinary oversize upload changed its draft or did not explain the new limit');
   await cdp.call('DOM.setFileInputFiles', { files: [productUploadPath], nodeId: productUploadNode.nodeId });
   // DOM.setFileInputFiles dispatches the browser's native change event. The
   // product host clears the input while its async upload is in flight, so do not
@@ -460,6 +466,8 @@ try {
   const serviceDOM = await cdp.call('DOM.getDocument', { depth: 2 });
   const serviceUploadNode = await cdp.call('DOM.querySelector', { nodeId: serviceDOM.root.nodeId, selector: '#spfImageUpload' });
   if (!serviceUploadNode.nodeId) throw new Error('service-period material upload source input was unavailable');
+  await cdp.call('DOM.setFileInputFiles', { files: [oversizeUploadPath], nodeId: serviceUploadNode.nodeId });
+  await waitFor(cdp, "(()=>{const root=document.querySelector('#sp-media');const toast=document.querySelector('#product-v3-toast')?.textContent||'';const rows=document.querySelectorAll('[data-v3-product-material-list] [data-v3-product-material-key]');return rows.length===0&&toast.includes('chromium-oversize.png')&&toast.includes('1MB')&&root?.textContent.includes('上传图片（单张不超过 1MB）')})()", 'periodic oversize upload changed its draft or did not explain the new limit');
   await cdp.call('DOM.setFileInputFiles', { files: [serviceUploadPath], nodeId: serviceUploadNode.nodeId });
   await waitFor(cdp, "(()=>{const rows=[...document.querySelectorAll('[data-v3-product-material-list] [data-v3-product-material-key]')];const tab=document.querySelector('a[href=\"#sp-media\"]');return rows.length===1&&tab?.getAttribute('aria-current')==='step'&&document.querySelector('#spfDescription')?.value==='Chromium service material draft remains active'})()", 'service-period upload reset the current media dimension or did not append its typed receipt');
   await captureProductMaterialScreens(cdp, 'service-material-draft');

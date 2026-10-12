@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
 import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 
@@ -15,6 +16,7 @@ const dom = new JSDOM('<!doctype html><body data-page="radarForm"><div id="media
   url: 'https://test.invalid/admin/radarForm.html', runScripts: 'dangerously', pretendToBeVisual: true,
   beforeParse(window) {
     window.Request = Request; window.Response = Response; window.Headers = Headers;
+    Object.defineProperty(window, 'crypto', { value: webcrypto });
     window.AICRMStandardComponents = { ready: () => new Promise(() => {}) };
     window.fetch = async () => { calls += 1; if (failFirst) return new Promise((_, reject) => { rejectUpload = reject; }); return new Promise(resolve => { release = () => resolve(new Response(JSON.stringify({ item: { id: 7, name: 'x.png', mime_type: 'image/png', file_size: 1 } }), { status: 200 })); }); };
   },
@@ -26,7 +28,7 @@ const file = new dom.window.File(['x'], 'x.png', { type: 'image/png' });
 Object.defineProperty(input, 'files', { configurable: true, value: [file] });
 let listenerCalls = 0;
 let lastPromise;
-input.addEventListener('change', () => { listenerCalls += 1; lastPromise = dom.window.TestApi.uploadRadarImage(file); });
+input.addEventListener('change', () => { listenerCalls += 1; lastPromise = dom.window.TestApi.uploadRadarImage(input.files[0]); });
 input.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
 await new Promise(resolve => setTimeout(resolve, 20));
 assert.equal(calls, 1, 'radar upload must issue one request while Promise is pending');
@@ -45,5 +47,20 @@ await new Promise(resolve => setTimeout(resolve, 20));
 release();
 await lastPromise;
 assert.equal(calls, 2);
+const oversized = new dom.window.File([new Uint8Array(1_048_577)], 'large.png', { type: 'image/png' });
+Object.defineProperty(input, 'files', { configurable: true, value: [oversized] });
+input.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+await assert.rejects(lastPromise, /large\.png.*1MB/);
+assert.equal(calls, 2, 'oversize radar image must not be sent');
+assert.equal(input.disabled, false);
+assert.equal(button.disabled, false);
+assert.equal(input.files[0], oversized, 'size feedback must retain the selected file');
+const pdf = new dom.window.File([new Uint8Array(1_048_577)], 'large.pdf', { type: 'application/pdf' });
+failFirst = true;
+const pdfPromise = dom.window.TestApi.uploadRadarPdf(pdf);
+await new Promise(resolve => setTimeout(resolve, 20));
+assert.equal(calls, 3, 'PDF upload must retain its existing size policy');
+rejectUpload(new Error('pdf-request-reached'));
+await assert.rejects(pdfPromise, /pdf-request-reached/);
 dom.window.close();
 console.log('radar adapter upload feedback: PASS');

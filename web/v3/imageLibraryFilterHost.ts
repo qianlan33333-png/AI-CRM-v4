@@ -3,6 +3,7 @@ import { GroupManagement, bindMaterialGroup } from './materialGroupManagement';
 // contract directly and leaves all mutations on the existing typed DTO and
 // MaterialSaveHost path; no donor controller or generated template is mounted.
 import { imagePageDto, saveImageItemDto } from "../src/api/admin";
+import { imageUploadSizeError, imageUploadSizeMessage } from './shared/ui/imageUploadPolicy';
 import { deleteLegacyImage, getLegacyImage, getLegacyImageList } from "../src/api/generated/p4-media-compat/p4-media-compat";
 import { ApiError, apiRequestOptions, unwrapGenerated } from "../src/api/transport";
 import type { ImageItem } from "../src/shared/api/types";
@@ -63,6 +64,7 @@ function errorCode(error: ApiError): string {
 function errorText(error: unknown, context: ErrorContext): string {
   const action = context === "read" ? "读取图片素材" : context === "save" ? "保存图片素材" : "删除图片素材";
   if (error instanceof ApiError) {
+    if (context === "save" && error.status === 413) return imageUploadSizeMessage;
     const code = errorCode(error);
     if (error.status === 401 || code === "UNAUTHORIZED") return "登录状态已失效，请重新登录后继续操作。";
     if (error.status === 403 || code === "FORBIDDEN") return "当前账号无权操作图片素材。";
@@ -694,6 +696,8 @@ class ImageLibraryHost {
     if (dialogID === undefined) return;
     const file = form.querySelector<HTMLInputElement>("#fImgUpFile")?.files?.[0];
     if (!file) return this.setDialogError("请选择真实图片文件后再上传", dialogID);
+    const sizeError = imageUploadSizeError(file);
+    if (sizeError) return this.setDialogError(sizeError, dialogID);
     const name = this.formValue(form, "fImgUpName") || file.name;
     try {
       await saveImageItemDto(null, {

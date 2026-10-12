@@ -444,6 +444,8 @@ func resultError(w http.ResponseWriter, err error) {
 	switch {
 	case err == nil:
 		return
+	case errors.Is(err, mediaport.ErrImageUploadTooLarge):
+		writeError(w, http.StatusRequestEntityTooLarge, "image_too_large")
 	case errors.Is(err, mediaapp.ErrHTTPNotFound):
 		writeError(w, 404, "not_found")
 	case errors.Is(err, mediaapp.ErrHTTPConflict):
@@ -469,9 +471,15 @@ func writeError(w http.ResponseWriter, status int, code string) {
 	if compat == "" {
 		compat = "DEPENDENCY_UNAVAILABLE"
 	}
+	if code == "image_too_large" {
+		compat = "MALFORMED_REQUEST"
+	}
 	var raw [12]byte
 	_, _ = rand.Read(raw[:])
 	payload := map[string]any{"ok": false, "code": compat, "message": strings.ReplaceAll(strings.ToLower(compat), "_", " "), "request_id": "media_" + hex.EncodeToString(raw[:])}
+	if code == "image_too_large" {
+		payload["message"] = "单张图片不能超过 1MB，请压缩文件后重新选择"
+	}
 	if code == "has_references" {
 		payload["error"] = "material has local references"
 		payload["references"] = map[string]any{"automation_agents": []int{}, "channels": []int{}, "radar_links": []int{}}

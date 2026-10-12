@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"image"
@@ -12,6 +13,8 @@ import (
 	"image/png"
 	"math"
 	"strings"
+
+	xdraw "golang.org/x/image/draw"
 
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/media/domain"
 	mediaport "github.com/qianlan33333-png/AI-CRM-v3/internal/media/port"
@@ -53,6 +56,7 @@ var imageVariantSpecs = map[string]imageVariantSpec{
 	"mobile_1080": {limit: 1080},
 	"large_1440":  {limit: 1440},
 	"original":    {},
+	"web_1080":    {limit: 1080},
 }
 
 func (service *Service) GetImageVariant(ctx context.Context, imageID int64, key string) (ImageVariant, error) {
@@ -135,7 +139,14 @@ func imageVariantFor(key string, inspection domain.Inspection, content []byte) (
 		return ImageVariant{}, ErrImageVariantUnavailable
 	}
 	output := content
-	if key != "original" && maxImageDimension(inspection.Width, inspection.Height) > spec.limit {
+	if key == "web_1080" {
+		if inspection.Width > spec.limit && safeWebImageMetadata(inspection.MediaType, content) {
+			candidate, err := resizeWebImage(content, inspection, spec.limit)
+			if err == nil && len(candidate) > 0 && len(candidate) < len(content) {
+				output = candidate
+			}
+		}
+	} else if key != "original" && maxImageDimension(inspection.Width, inspection.Height) > spec.limit {
 		if inspection.MediaType == "image/gif" {
 			return ImageVariant{}, ErrImageVariantUnavailable
 		}
@@ -153,6 +164,82 @@ func imageVariantFor(key string, inspection domain.Inspection, content []byte) (
 		Content: append([]byte(nil), output...), MediaType: inspection.MediaType,
 		ETag: `"` + hex.EncodeToString(digest[:]) + `"`,
 	}, nil
+}
+
+// Metadata with direction or non-default colour semantics, and animations,
+// keep their exact original bytes rather than silently losing those facts.
+func safeWebImageMetadata(mediaType string, data []byte) bool {
+	switch mediaType {
+	case "image/jpeg":
+		for p := 2; p+4 <= len(data); {
+			if data[p] != 0xff {
+				return false
+			}
+			for p < len(data) && data[p] == 0xff {
+				p++
+			}
+			if p >= len(data) {
+				return false
+			}
+			marker := data[p]
+			p++
+			if marker == 0xda || marker == 0xd9 {
+				return true
+			}
+			if marker == 0xe1 || marker == 0xe2 || marker == 0xee {
+				return false
+			}
+			if marker == 0x01 || (marker >= 0xd0 && marker <= 0xd8) {
+				continue
+			}
+			if p+2 > len(data) {
+				return false
+			}
+			length := int(binary.BigEndian.Uint16(data[p : p+2]))
+			if length < 2 || length > len(data)-p {
+				return false
+			}
+			p += length
+		}
+	case "image/png":
+		if len(data) > 24 && data[24] == 16 {
+			return false
+		}
+		for p := 8; p+12 <= len(data); {
+			length := uint64(binary.BigEndian.Uint32(data[p : p+4]))
+			if length+12 > uint64(len(data)-p) {
+				return false
+			}
+			switch string(data[p+4 : p+8]) {
+			case "eXIf", "iCCP", "gAMA", "cHRM", "acTL":
+				return false
+			case "IEND":
+				return true
+			}
+			p += int(length) + 12
+		}
+	}
+	return false
+}
+
+func resizeWebImage(content []byte, inspection domain.Inspection, width int32) ([]byte, error) {
+	source, _, err := image.Decode(bytes.NewReader(content))
+	if err != nil {
+		return nil, err
+	}
+	height := int64(inspection.Height) * int64(width) / int64(inspection.Width)
+	if height < 1 {
+		height = 1
+	}
+	destination := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
+	xdraw.BiLinear.Scale(destination, destination.Bounds(), source, source.Bounds(), xdraw.Src, nil)
+	var output bytes.Buffer
+	if inspection.MediaType == "image/png" {
+		err = png.Encode(&output, destination)
+	} else {
+		err = jpeg.Encode(&output, destination, &jpeg.Options{Quality: 90})
+	}
+	return output.Bytes(), err
 }
 
 func maxImageDimension(width, height int32) int32 {

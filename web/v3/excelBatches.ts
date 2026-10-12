@@ -1,4 +1,5 @@
 import { runAction } from "./actionFeedback";
+import { requireManualImageSize } from './shared/ui/imageUploadPolicy';
 import {
   openContentComposer,
   openReadonlyContentPresentation,
@@ -1079,12 +1080,13 @@ class Workspace {
         action("选择已有启用图片", () => this.coverPickerDialog(batch)),
       );
       actions.append(
-        field("上传统一封面（PNG 或 JPEG）", cover),
+        field("上传统一封面（PNG 或 JPEG，单张不超过 1MB）", cover),
         this.batchAction(
           action("上传统一封面", async () => {
             await this.withBatchWrite(async () => {
               const file = cover.files?.[0];
               if (!file) throw new Error("请选择 PNG 或 JPEG 封面");
+              requireManualImageSize(file);
               await api(
                 `${base}/${id}/cover?expected_version=${batch.version}`,
                 "POST",

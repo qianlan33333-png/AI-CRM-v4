@@ -239,7 +239,7 @@ func (h *PublicHandler) enabledProduct(r *http.Request, code string) (publicProd
 			level = "none"
 		}
 	}
-	images, imageErr := productapp.PublicProductImageURLs(value)
+	images, imageErr := productapp.PublicProductDetailImageURLs(value)
 	if imageErr != nil {
 		return publicProduct{}, false
 	}
@@ -284,7 +284,7 @@ func (h *PublicHandler) detailMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	const prefix = "/api/h5/product-images/"
 	parts := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), prefix), "/")
-	if len(parts) != 4 || parts[2] != "variants" || (parts[3] != "original" && parts[3] != "large_1440") {
+	if len(parts) != 4 || parts[2] != "variants" || (parts[3] != "original" && parts[3] != "large_1440" && parts[3] != "web_1080") {
 		http.NotFound(w, r)
 		return
 	}

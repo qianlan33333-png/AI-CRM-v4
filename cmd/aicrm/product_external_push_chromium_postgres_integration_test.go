@@ -98,7 +98,15 @@ func TestPostgreSQLProductExternalPushChromiumJourney(t *testing.T) {
 		t.Skip("set AICRM_REQUIRE_CHROMIUM_JOURNEY=1 to run the required Chromium journey")
 	}
 
-	fixture := newProductExternalPushChromiumFixture(t)
+	var fixture *productExternalPushChromiumFixture
+	// The same browser assertions can serve the existing final-package receipt.
+	// Fixture seeding/readback remains local; browser requests use installed bytes.
+	if testconfig.InstalledProduct().Binary != "" {
+		fixture = newProductExternalPushChromiumFixtureWithOptions(t, 220*time.Second, productExternalPushChromiumFixtureOptions{enableAlipay: true})
+		useInstalledPeriodicContactFixture(t, fixture)
+	} else {
+		fixture = newProductExternalPushChromiumFixture(t)
+	}
 	outerSession, outerCSRF := adminAccessLogin(t, fixture.application.handler, "product-browser-owner", "product-browser-owner-password")
 	// Seed the old Product configuration through its owner HTTP contract. The
 	// high-precision nested JSON is deliberately present before the browser

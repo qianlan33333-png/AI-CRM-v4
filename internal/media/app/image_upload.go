@@ -101,6 +101,9 @@ func (s *ImageUploadService) Upload(ctx context.Context, command mediaport.Uploa
 			}
 			return nil
 		}
+		if len(command.Content) > mediaport.ManualImageUploadMaxBytes {
+			return mediaport.ErrImageUploadTooLarge
+		}
 		result, reserveErr = s.store.Create(tx, CreateInput{Command: command, MediaType: inspection.MediaType, Width: inspection.Width, Height: inspection.Height, Checksum: checksum, Now: now})
 		if reserveErr != nil || !validImage(result) || result.Enabled != expectedUploadEnabled(command) {
 			return ErrUnavailable
@@ -127,6 +130,9 @@ func (s *ImageUploadService) Upload(ctx context.Context, command mediaport.Uploa
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, mediaport.ErrImageUploadTooLarge) {
+			return mediaport.Image{}, err
+		}
 		if errors.Is(err, ErrConflict) {
 			return mediaport.Image{}, ErrConflict
 		}

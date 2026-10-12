@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/media/domain"
+	mediaport "github.com/qianlan33333-png/AI-CRM-v3/internal/media/port"
 	outboundport "github.com/qianlan33333-png/AI-CRM-v3/internal/outbound/port"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
@@ -221,6 +222,9 @@ func (r *Repository) CreateImage(ctx context.Context, actor int64, key string, i
 		}
 		if !owned {
 			return json.Unmarshal(replay, &out)
+		}
+		if len(input.Content) > mediaport.ManualImageUploadMaxBytes {
+			return mediaport.ErrImageUploadTooLarge
 		}
 		tx, _ := platformpostgres.RequireTransaction(txctx)
 		blob := bytesDigest(input.Content)

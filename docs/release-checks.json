@@ -1,100 +1,126 @@
 {
   "schema": 1,
-  "baseline_sha": "a3dbebe8c1ee729cdbcb6e31ae82c1c5cd7e532f",
+  "baseline_sha": "7e299faf7ea3ed788d058b5b50cc7596ce90a81c",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/referral/http",
-      "race": true
+      "package": "./internal/media/app",
+      "test": "TestWebImageVariantWidthOnly"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/port"
+      "package": "./internal/media/app",
+      "test": "TestWebImageVariantInflationAndUnsupportedPreserveOriginal"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/store"
+      "package": "./internal/media/app",
+      "test": "TestWebImageVariantPreservesHighBitDepthPNG"
     },
     {
       "lane": "backend",
-      "path": "internal/referral/app/poster_image_version_integration_test.go",
-      "test": "TestPostgreSQLPosterImageVersionAndFrozenSnapshot",
+      "package": "./internal/media/app",
+      "test": "TestUploadManualSizeBoundaryAndRollback"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/media/app",
+      "test": "TestUploadActorScopedReplayConflictAndRollback"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/media/app",
+      "test": "TestUploadEnabledDigestAndLegacyReceiptReplay"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/media/store",
+      "test": "TestPostgreSQLManualImageLimitKeepsCompletedReceipts",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/referral/app/poster_layouts_integration_test.go",
-      "test": "TestPostgreSQLPosterLayoutsAtomicRuntimeUpdate",
+      "package": "./internal/media/store",
+      "test": "TestPostgreSQLExcelCoverReuseDoesNotReviveDisabledOrLoseFrozenBytes",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/referral/app/poster_layouts_integration_test.go",
-      "test": "TestPostgreSQLPosterLayoutMigrationAndCustomDimensions",
+      "package": "./internal/media/http",
+      "test": "TestMediaHTTPManualImageLimitAndOriginalBytes",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/referral/app/posters_integration_test.go",
-      "test": "TestPostgreSQLCampaignPosterShareTextBindingAndAtomicPublication",
+      "package": "./internal/media/http",
+      "test": "TestMediaHTTPCompatibilitySecurityAndFrozenWriteContract",
       "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/referral/app/posters_integration_test.go",
-      "test": "TestPostgreSQLCampaignPosterShareTextMigrationPreservesLegacySnapshot",
-      "postgres": true
+      "package": "./internal/product/app",
+      "test": "TestPublicProductImageURLsUseSavedImageLibraryBindings"
     },
     {
       "lane": "backend",
-      "path": "internal/referral/app/posters_integration_test.go",
-      "test": "TestPostgreSQLCampaignPostersPublishSnapshotAndIdempotentRetry",
+      "package": "./internal/product/http",
+      "test": "TestPublicProductEnabledOnlyAndSafeDTO"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/product/http",
+      "test": "TestPublicProductDetailIsImmersiveAndPrioritizesOnlyTheFirstImage"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/product/http",
+      "test": "TestPublicProductMediaUsesOnlyEnabledProductImageBindings"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/product/http",
+      "test": "TestPublicServicePeriodDetailPreservesOriginalPostersAndLoadingOrder"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/product/http",
+      "test": "TestPublicServicePeriodMediaIsRestrictedToProductSlices"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLExcelHTTPCompositionJourney",
       "postgres": true
     },
     {
       "lane": "frontend",
-      "path": "web/v3/referralPosterPerformance.test.mjs"
+      "path": "web/v3/productAdapter.material_order.test.mjs"
     },
     {
       "lane": "frontend",
-      "path": "web/v3/referralPosterPublic.test.mjs"
+      "path": "web/v3/productAdapter.sp_material.test.mjs"
     },
     {
       "lane": "frontend",
-      "path": "web/v3/referralCenter.test.mjs"
+      "path": "web/v3/imageLibraryFilterHost.test.mjs"
     },
     {
       "lane": "frontend",
-      "path": "web/v3/referralCenter.anonymous.test.mjs"
+      "path": "web/v3/materialSaveAdapter.test.mjs"
     },
     {
       "lane": "frontend",
-      "path": "web/v3/referralCenter.captainJourney.test.mjs"
+      "path": "web/v3/radarAdapter.upload_feedback.test.mjs"
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
-      "test": "TestReferralPosterInstalledEnvironment"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/referral_paid_invitation_installed_test.go",
-      "test": "TestPaidReferralInstalledEnvironmentMeetsRuntimeConfig"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/referral_paid_invitation_checkout_postgres_test.go",
-      "test": "TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLAttachmentSizeRemainsSeparateFromManualImageLimit",
       "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
-      "test": "TestReferralPosterFixtureFitsManualUploadAndJPEG95"
     }
   ],
   "installed_checks": [
-    "referral-poster"
+    "product-image-delivery"
   ],
   "build_commands": []
 }

@@ -495,7 +495,7 @@ func TestPublicProductMediaUsesOnlyEnabledProductImageBindings(t *testing.T) {
 	}
 	api := httptest.NewRecorder()
 	handler.ServeHTTP(api, httptest.NewRequest(http.MethodGet, "/api/public/products/course-9", nil))
-	if api.Code != http.StatusOK || !strings.Contains(api.Body.String(), "/api/h5/product-images/course-9/88/variants/large_1440") || strings.Contains(api.Body.String(), "/api/admin/image-library/") {
+	if api.Code != http.StatusOK || !strings.Contains(api.Body.String(), "/api/h5/product-images/course-9/88/variants/web_1080") || strings.Contains(api.Body.String(), "/api/admin/image-library/") {
 		t.Fatalf("public product status=%d body=%s", api.Code, api.Body.String())
 	}
 	page := httptest.NewRecorder()
@@ -504,6 +504,11 @@ func TestPublicProductMediaUsesOnlyEnabledProductImageBindings(t *testing.T) {
 		t.Fatalf("public page status=%d body=%s", page.Code, page.Body.String())
 	}
 	allowed := httptest.NewRecorder()
+	handler.ServeHTTP(allowed, httptest.NewRequest(http.MethodGet, "/api/h5/product-images/course-9/88/variants/web_1080", nil))
+	if allowed.Code != http.StatusOK || allowed.Body.String() != "image-88" {
+		t.Fatalf("optimised media status=%d", allowed.Code)
+	}
+	allowed = httptest.NewRecorder()
 	handler.ServeHTTP(allowed, httptest.NewRequest(http.MethodGet, "/api/h5/product-images/course-9/88/variants/large_1440", nil))
 	if allowed.Code != http.StatusOK || allowed.Body.String() != "image-88" || allowed.Header().Get("Content-Type") != "image/png" {
 		t.Fatalf("bounded media status=%d body=%q headers=%v", allowed.Code, allowed.Body.String(), allowed.Header())
@@ -514,6 +519,7 @@ func TestPublicProductMediaUsesOnlyEnabledProductImageBindings(t *testing.T) {
 		t.Fatalf("allowed status=%d body=%q headers=%v", allowed.Code, allowed.Body.String(), allowed.Header())
 	}
 	for _, path := range []string{
+		"/api/h5/product-images/course-9/89/variants/web_1080",
 		"/api/h5/product-images/course-9/89/variants/original",
 		"/api/h5/product-images/course-9/88/variants/thumb_320",
 		"/api/h5/product-images/course-9/88/variants/original?download=1",
@@ -843,7 +849,7 @@ func (servicePeriodMediaStub) LocalImageExists(_ context.Context, id int64) (boo
 	return id == 88, nil
 }
 func (servicePeriodMediaStub) GetImageVariant(_ context.Context, id int64, key string) (mediaport.ImageVariant, error) {
-	if id != 88 || (key != "original" && key != "large_1440") {
+	if id != 88 || (key != "original" && key != "large_1440" && key != "web_1080") {
 		return mediaport.ImageVariant{}, errors.New("not found")
 	}
 	return mediaport.ImageVariant{Content: []byte("image-88"), MediaType: "image/png", ETag: `"image-88"`}, nil

@@ -6,6 +6,7 @@ import type { RadarLink as ApiRadarLink } from '../src/api/generated/health.sche
 import type { AdminDb, AttachItem, ImageItem, RadarMedia } from '../src/shared/api/types';
 import { rememberActionInputs, runAction } from './actionFeedback';
 import { apiRequestOptions, request as authenticatedRequest, unwrapGenerated } from '../src/api/transport';
+import { requireManualImageSize } from './shared/ui/imageUploadPolicy';
 import { formatShanghaiDateTime, shanghaiDateTimeLocalToRFC3339 } from './adminDateTime';
 import { installMaterialPickerAdapter, type MaterialPickerLoadRequest, type MaterialPickerRecord } from './shared/ui/materialPickerAdapter';
 import { mountPageHeaderActions } from './shared/ui/pageHeaderActions';
@@ -15,7 +16,10 @@ const takeRadarUploadInput = rememberActionInputs((input) =>
 );
 for (const method of ['uploadRadarImage', 'uploadRadarPdf'] as const) {
   const original = api[method].bind(api);
-  api[method] = (file) => runAction(takeRadarUploadInput(), () => original(file), '上传中…').then((media) => {
+  api[method] = (file) => runAction(takeRadarUploadInput(), () => {
+    if (method === 'uploadRadarImage') requireManualImageSize(file);
+    return original(file);
+  }, '上传中…').then((media) => {
     rememberRadarOriginalUpload(method === 'uploadRadarImage' ? 'image' : 'attachment', media);
     return media;
   });
