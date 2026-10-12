@@ -108,6 +108,7 @@ type CampaignPoster struct {
 type CampaignPosterImage struct {
 	Content   []byte
 	MediaType string
+	Digest    [32]byte
 }
 
 type CampaignPosterSource struct {

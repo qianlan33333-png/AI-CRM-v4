@@ -6,7 +6,8 @@ import { buildTestBrowserBundle } from '../scripts/test-browser-bundle.mjs';
 // Installed mode rebundles only the verified installed JS/chunks for jsdom.
 const installedBundle = process.env.AICRM_REFERRAL_INSTALLED_BUNDLE;
 const publicBundle = await buildTestBrowserBundle(installedBundle || fileURLToPath(new URL('./referralCenter.ts', import.meta.url)));
-const adminBundle = installedBundle ? '' : await buildTestBrowserBundle(fileURLToPath(new URL('./referralAdmin.ts', import.meta.url)));
+const publicOnly = Boolean(installedBundle || process.env.AICRM_REFERRAL_PUBLIC_ONLY);
+const adminBundle = publicOnly ? '' : await buildTestBrowserBundle(fileURLToPath(new URL('./referralAdmin.ts', import.meta.url)));
 const picker = fs.readFileSync(new URL('../../internal/webshell/static/admin_console/admin_search_select.js', import.meta.url), 'utf8');
 const json = body => new Response(JSON.stringify(body), { status: 200 });
 const wait = async (fn) => { for (let i = 0; i < 150; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); } throw new Error('poster UI did not settle'); };
@@ -17,12 +18,17 @@ async function publicFixture({ count = 3, deferredImage = false, failedImage = f
   let copied, downloaded, resolveImage;
   const pending = deferredImage ? new Promise(r => { resolveImage = r; }) : Promise.resolve();
   const dom = new JSDOM('<main id="referral-root"></main>', { url: 'https://crm.example/referral?campaign=8', runScripts: 'outside-only', pretendToBeVisual: true, beforeParse(w) {
-    w.Response = Response; w.Headers = Headers;
+    w.Response = Response; w.Headers = Headers; w.Blob = Blob;
+    w.FileReader = class {
+      readAsDataURL(blob) { blob.arrayBuffer().then(bytes => { this.result = 'data:' + blob.type + ';base64,' + Buffer.from(bytes).toString('base64'); this.onload?.(); }); }
+      abort() {}
+    };
     w.HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
     w.HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); this.dispatchEvent(new w.Event('close')); };
-    w.Image = function () { const img = w.document.createElement('img'); Object.defineProperties(img, { naturalWidth: { value: 600 }, naturalHeight: { value: 800 } }); img.decode = () => failedImage ? Promise.reject(new Error('image unavailable')) : img.src.endsWith('/1') ? pending : Promise.resolve(); return img; };
-    w.HTMLCanvasElement.prototype.getContext = function () { return { drawImage: img => { this.__source = img.src; }, fillRect() {}, set fillStyle(v) {} }; };
-    w.HTMLCanvasElement.prototype.toDataURL = function () { return 'data:image/png;base64,' + Buffer.from(this.__source).toString('base64'); };
+    w.Image = function () { const img = w.document.createElement('img'); Object.defineProperties(img, { naturalWidth: { value: 600 }, naturalHeight: { value: 800 } }); img.decode = () => failedImage ? Promise.reject(new Error('image unavailable')) : Buffer.from(img.src.split(',')[1] || '', 'base64').toString().endsWith('/1') ? pending : Promise.resolve(); return img; };
+    w.HTMLCanvasElement.prototype.getContext = function () { return { drawImage: img => { this.__source = Buffer.from(img.src.split(',')[1], 'base64').toString(); }, fillRect() {}, set fillStyle(v) {} }; };
+    w.HTMLCanvasElement.prototype.toDataURL = function () { throw new Error('synchronous export forbidden'); };
+    w.HTMLCanvasElement.prototype.toBlob = function (callback, type) { queueMicrotask(() => callback(new Blob([this.__source], { type }))); };
     w.HTMLAnchorElement.prototype.click = function () { downloaded = { href: this.href, name: this.download }; };
     Object.defineProperty(w.navigator, 'clipboard', { value: clipboard === 'missing' ? undefined : { writeText: async value => { if (clipboard !== 'success') throw new Error('denied'); copied = value; } } });
     w.document.execCommand = () => { if (clipboard !== 'fallback') return false; const field = w.document.activeElement; assert.ok(field.closest('dialog[open]'), 'fallback must stay inside modal'); copied = field.value; return true; };
@@ -30,6 +36,7 @@ async function publicFixture({ count = 3, deferredImage = false, failedImage = f
       if (path.endsWith('/campaigns/8')) return json({ ...campaign, posters: posters.slice(0, count).map(p=>({...p,...(layout?{qr_layout:layout}:{})})) });
       if (path.endsWith('/me')) return json({ participation: { joined_at: '2026-01-01T00:00:00Z' }, invitation_available: true });
       if (path.endsWith('/leaderboard')) return json({ items: [] });
+      if (/\/posters\/[123]$/.test(path)) return new Response(new Blob([path], { type: 'image/jpeg' }));
       if (path.endsWith('/invite')) return json({ url: 'https://crm.example/referral/invite/rfi_' + 'A'.repeat(43) });
       return json({ items: [] });
     };
@@ -126,7 +133,7 @@ for (const clipboard of ['fallback', 'denied', 'missing']) {
   assert.equal(f.doc.querySelector('[data-testid="referral-download-poster"]'), null);
   await new Promise(r => setTimeout(r, 10)); f.dom.window.close();
 }
-if (!installedBundle) {
+if (!publicOnly) {
   const saved = { ...campaign, posters: posters.map((p,i) => ({ ...p, qr_layout: { x: 10+i, y: 20, size: 200 } })) };
   const writes = []; let reads = 0, failReadback = true;
   const dom = new JSDOM('<section id="referral-admin-root"></section>', { url: 'https://crm.example/admin/referral/settings?campaign=8', runScripts: 'outside-only', beforeParse(w) {
@@ -165,4 +172,4 @@ if (!installedBundle) {
   assert.ok(reads >= 3, 'publication must read backend configuration');
   await new Promise(r => setTimeout(r, 10)); dom.window.close();
 }
-console.log('poster share text: binding, stale image, swipe, exact copy, fallback, empty/single/three, close/reopen passed; ' + (installedBundle ? 'installed public assets verified' : 'source assets and admin save/readback verified'));
+console.log('poster share text: binding, stale image, swipe, exact copy, fallback, empty/single/three, close/reopen passed; ' + (installedBundle ? 'installed public assets verified' : publicOnly ? 'source public assets verified; admin unchanged and excluded' : 'source assets and admin save/readback verified'));

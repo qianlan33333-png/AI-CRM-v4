@@ -17,6 +17,7 @@ type PublishedPoster struct {
 	Content                []byte
 	Width, Height          int
 	QRLayout               *referralport.PosterQRLayout
+	Digest                 [sha256.Size]byte
 }
 
 func (r *Repository) ListCampaignPostersWithin(ctx context.Context, campaignID int64) ([]PublishedPoster, error) {
@@ -27,7 +28,7 @@ func (r *Repository) ListCampaignPostersWithin(ctx context.Context, campaignID i
 	if campaignID < 1 {
 		return nil, ErrInvalid
 	}
-	rows, err := tx.Query(ctx, `SELECT slot,source_image_id,description,media_type,share_text,image_width,image_height,qr_layout FROM referral_campaign_posters WHERE campaign_id=$1 ORDER BY slot`, campaignID)
+	rows, err := tx.Query(ctx, `SELECT slot,source_image_id,description,media_type,share_text,image_width,image_height,qr_layout,image_sha256 FROM referral_campaign_posters WHERE campaign_id=$1 ORDER BY slot`, campaignID)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -36,9 +37,14 @@ func (r *Repository) ListCampaignPostersWithin(ctx context.Context, campaignID i
 	for rows.Next() {
 		var poster PublishedPoster
 		var layout []byte
-		if err := rows.Scan(&poster.Slot, &poster.SourceImageID, &poster.Description, &poster.MediaType, &poster.ShareText, &poster.Width, &poster.Height, &layout); err != nil {
+		var digest []byte
+		if err := rows.Scan(&poster.Slot, &poster.SourceImageID, &poster.Description, &poster.MediaType, &poster.ShareText, &poster.Width, &poster.Height, &layout, &digest); err != nil {
 			return nil, mapError(err)
 		}
+		if len(digest) != sha256.Size {
+			return nil, referralport.ErrUnavailable
+		}
+		copy(poster.Digest[:], digest)
 		if len(layout) > 0 {
 			if err := json.Unmarshal(layout, &poster.QRLayout); err != nil {
 				return nil, ErrInvalid
@@ -50,6 +56,33 @@ func (r *Repository) ListCampaignPostersWithin(ctx context.Context, campaignID i
 		return nil, mapError(err)
 	}
 	return result, nil
+}
+
+func (r *Repository) ReadCampaignPosterMetadataWithin(ctx context.Context, campaignID int64, slot int) (referralport.CampaignPosterMetadata, error) {
+	tx, err := transaction(ctx)
+	if err != nil {
+		return referralport.CampaignPosterMetadata{}, err
+	}
+	var result referralport.CampaignPosterMetadata
+	var digest []byte
+	if err = tx.QueryRow(ctx, `SELECT image_sha256 FROM referral_campaign_posters WHERE campaign_id=$1 AND slot=$2`, campaignID, slot).Scan(&digest); err != nil {
+		return result, mapError(err)
+	}
+	if len(digest) != sha256.Size {
+		return result, referralport.ErrUnavailable
+	}
+	copy(result.Digest[:], digest)
+	return result, nil
+}
+
+func (r *Repository) ReadCampaignPosterSnapshotWithin(ctx context.Context, campaignID int64, slot int, digest [sha256.Size]byte) (referralport.CampaignPosterImage, error) {
+	tx, err := transaction(ctx)
+	if err != nil {
+		return referralport.CampaignPosterImage{}, err
+	}
+	result := referralport.CampaignPosterImage{Digest: digest}
+	err = tx.QueryRow(ctx, `SELECT image_bytes,media_type FROM referral_campaign_posters WHERE campaign_id=$1 AND slot=$2 AND image_sha256=$3`, campaignID, slot, digest[:]).Scan(&result.Content, &result.MediaType)
+	return result, mapError(err)
 }
 
 func (r *Repository) ReadCampaignPosterWithin(ctx context.Context, campaignID int64, slot int) (referralport.CampaignPosterImage, error) {

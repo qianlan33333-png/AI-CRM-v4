@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	accessdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/access/domain"
@@ -82,6 +83,8 @@ type Handler struct {
 	promotion                                     PromotionIssuer
 	admin                                         referralport.AdminApplication
 	posters                                       CampaignPosters
+	posterImages                                  *posterImageCache
+	posterImagesOnce                              sync.Once
 	sessions                                      SessionResolver
 	bridge                                        PaymentSessionBridge
 	names                                         customerport.DirectoryDisplayNameReader

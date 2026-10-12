@@ -25,6 +25,8 @@ type posterStore interface {
 	UpdateCampaignWithin(context.Context, referraldomain.Campaign, int64) (referraldomain.Campaign, error)
 	ListCampaignPostersWithin(context.Context, int64) ([]referralstore.PublishedPoster, error)
 	ReadCampaignPosterWithin(context.Context, int64, int) (referralport.CampaignPosterImage, error)
+	ReadCampaignPosterMetadataWithin(context.Context, int64, int) (referralport.CampaignPosterMetadata, error)
+	ReadCampaignPosterSnapshotWithin(context.Context, int64, int, [sha256.Size]byte) (referralport.CampaignPosterImage, error)
 	ReplaceCampaignPostersWithin(context.Context, int64, []referralstore.PublishedPoster, time.Time) error
 	UpdateCampaignPosterLayoutWithin(context.Context, int64, referralstore.PublishedPoster) error
 	LockOperationReceiptWithin(context.Context, string, string, string) error
@@ -96,9 +98,53 @@ func (s *PosterService) projectPostersWithin(ctx context.Context, campaignID int
 		if !layout.Fits(p.Width, p.Height) {
 			return nil, referralport.ErrUnavailable
 		}
-		result = append(result, referralport.CampaignPoster{Slot: p.Slot, Description: p.Description, ShareText: p.ShareText, SourceImageID: p.SourceImageID, Width: p.Width, Height: p.Height, QRLayout: layout, ImageURL: "/api/v1/referral/campaigns/" + strconv.FormatInt(campaignID, 10) + "/posters/" + strconv.Itoa(p.Slot)})
+		result = append(result, referralport.CampaignPoster{Slot: p.Slot, Description: p.Description, ShareText: p.ShareText, SourceImageID: p.SourceImageID, Width: p.Width, Height: p.Height, QRLayout: layout, ImageURL: "/api/v1/referral/campaigns/" + strconv.FormatInt(campaignID, 10) + "/posters/" + strconv.Itoa(p.Slot) + "?v=" + referralport.PosterImageRevision(p.Digest)})
 	}
 	return result, nil
+}
+
+func (s *PosterService) ReadCampaignPosterMetadata(ctx context.Context, campaignID int64, slot int) (referralport.CampaignPosterMetadata, error) {
+	var result referralport.CampaignPosterMetadata
+	if s == nil || campaignID < 1 || slot < 1 || slot > 3 {
+		return result, referralport.ErrNotFound
+	}
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		campaign, err := s.store.ReadCampaignWithin(tx, campaignID, false)
+		if err != nil {
+			return err
+		}
+		if campaign.State == referraldomain.CampaignDraft {
+			return referralport.ErrNotFound
+		}
+		result, err = s.store.ReadCampaignPosterMetadataWithin(tx, campaignID, slot)
+		return err
+	})
+	return result, err
+}
+
+func (s *PosterService) ReadCampaignPosterSnapshot(ctx context.Context, campaignID int64, slot int, digest [sha256.Size]byte) (referralport.CampaignPosterImage, error) {
+	var result referralport.CampaignPosterImage
+	if s == nil || campaignID < 1 || slot < 1 || slot > 3 {
+		return result, referralport.ErrNotFound
+	}
+	err := s.uow.Within(ctx, func(tx context.Context) error {
+		campaign, err := s.store.ReadCampaignWithin(tx, campaignID, false)
+		if err != nil {
+			return err
+		}
+		if campaign.State == referraldomain.CampaignDraft {
+			return referralport.ErrNotFound
+		}
+		result, err = s.store.ReadCampaignPosterSnapshotWithin(tx, campaignID, slot, digest)
+		if err == referralport.ErrNotFound {
+			return referralport.ErrConflict
+		}
+		return err
+	})
+	if err == nil && sha256.Sum256(result.Content) != digest {
+		return referralport.CampaignPosterImage{}, referralport.ErrUnavailable
+	}
+	return result, err
 }
 
 func (s *PosterService) ReadCampaignPoster(ctx context.Context, campaignID int64, slot int) (referralport.CampaignPosterImage, error) {

@@ -2,7 +2,7 @@
 // emitted by Referral HTTP; browser query parameters are never customer proof.
 export {};
 import { copyPlainText as copy } from "./shared/ui/plainTextClipboard";
-import { composeReferralPoster } from "./shared/posterComposition";
+import { composeReferralPoster, exportReferralPoster } from "./shared/posterComposition";
 import { parsePosterQRLayout, type PosterQRLayout } from "./shared/posterLayout";
 
 type Row = Record<string, unknown>;
@@ -940,18 +940,26 @@ async function beginParticipation(): Promise<void> {
   document.body.append(dialog);
   dialog.showModal();
 }
+let invitePending: Campaign | undefined;
 async function openInvite(): Promise<void> {
   if (!campaign || !me?.participant) return;
+  if (invitePending === campaign) return;
   if (document.querySelector('dialog[data-testid="referral-invite-dialog"][open]')) return;
   const currentCampaign = campaign;
+  invitePending = currentCampaign;
   try {
-    const raw = obj(
-      await api(
-        `/campaigns/${campaign.id}/invite`,
+    const results = await Promise.allSettled([
+      api(
+        `/campaigns/${currentCampaign.id}/invite`,
         { method: "POST" },
-        `invite:${campaign.id}`,
+        `invite:${currentCampaign.id}`,
       ),
-    );
+      api(`/campaigns/${currentCampaign.id}`),
+    ]);
+    if (campaign !== currentCampaign) return;
+    if (results[0].status === "rejected") throw results[0].reason;
+    if (results[1].status === "rejected") throw results[1].reason;
+    const raw = obj(results[0].value);
     const url = str(raw.url);
     if (!url) throw new Error("邀请入口暂不可用。");
     const parsed = new URL(url, location.origin);
@@ -963,16 +971,19 @@ async function openInvite(): Promise<void> {
       throw new Error("服务端返回的邀请入口无效。");
     // Layouts are live content configuration. Reopening uses current metadata
     // without rebuilding the application or reloading the whole public page.
-    const latest = parseCampaign(await api(`/campaigns/${currentCampaign.id}`));
+    const latest = parseCampaign(results[1].value);
     if (campaign !== currentCampaign || latest.id !== currentCampaign.id) return;
     currentCampaign.posters = latest.posters;
     invite = { qrPayload: parsed.toString() };
     renderInviteDialog();
   } catch (error) {
+    if (campaign !== currentCampaign) return;
     setMessage(
       error instanceof Error ? error.message : "邀请入口读取失败。",
       true,
     );
+  } finally {
+    if (invitePending === currentCampaign) invitePending = undefined;
   }
 }
 async function renderInviteDialog(): Promise<void> {
@@ -1042,6 +1053,9 @@ async function renderInviteDialog(): Promise<void> {
   navigation.hidden = posters.length < 2;
   let activeIndex = 0;
   let selection = 0;
+  let processing: AbortController | undefined;
+  let pendingIndex: number | undefined;
+  const composed = new Map<string, string>();
   const show = async (index: number) => {
     if (index < 0 || index >= posters.length) {
       if (!posters.length) {
@@ -1051,6 +1065,11 @@ async function renderInviteDialog(): Promise<void> {
       }
       return;
     }
+    if (index === pendingIndex) return;
+    processing?.abort();
+    const controller = new AbortController();
+    processing = controller;
+    pendingIndex = index;
     const poster = posters[index];
     activeIndex = index;
     const current = ++selection;
@@ -1067,11 +1086,17 @@ async function renderInviteDialog(): Promise<void> {
     position.textContent = `${index + 1} / ${posters.length}`;
     selectors.querySelectorAll("button").forEach((node, buttonIndex) => node.setAttribute("aria-pressed", String(buttonIndex === index)));
     try {
-      const canvas = await composeReferralPoster(poster.imageURL, qrPayload, poster.qrLayout, poster.width, poster.height);
+      const key = JSON.stringify([poster.imageURL, poster.width, poster.height, poster.qrLayout, qrPayload]);
+      let encoded = composed.get(key);
+      if (!encoded) {
+        const canvas = await composeReferralPoster(poster.imageURL, qrPayload, poster.qrLayout, poster.width, poster.height, controller.signal);
+        encoded = await exportReferralPoster(canvas, controller.signal);
+        if (current !== selection || !dialog.open) return;
+        composed.set(key, encoded);
+      }
       if (current !== selection || !dialog.open) return;
-      const png = canvas.toDataURL("image/png");
       const image = document.createElement("img");
-      image.src = png;
+      image.src = encoded;
       image.alt = `海报${index + 1}，包含我的专属邀请二维码`;
       image.draggable = false;
       image.dataset.testid = "referral-poster-image";
@@ -1079,6 +1104,8 @@ async function renderInviteDialog(): Promise<void> {
       saveHint.hidden = false;
     } catch (error) {
       if (current === selection && dialog.open) preview.replaceChildren(element("p", error instanceof Error ? error.message : "海报加载失败，请稍后重试。"));
+    } finally {
+      if (current === selection) pendingIndex = undefined;
     }
   };
   posters.forEach((_poster, index) => {
@@ -1105,7 +1132,13 @@ async function renderInviteDialog(): Promise<void> {
   }, { passive: true });
   card.append(selectors, preview, navigation, saveHint, share, actions);
   dialog.append(card);
-  dialog.addEventListener("close", () => { selection++; dialog.remove(); });
+  dialog.addEventListener("close", () => {
+    selection++;
+    processing?.abort();
+    composed.clear();
+    preview.replaceChildren();
+    dialog.remove();
+  });
   document.body.append(dialog);
   dialog.showModal();
   void show(0);

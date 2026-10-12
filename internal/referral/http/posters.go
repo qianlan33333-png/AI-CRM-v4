@@ -2,10 +2,11 @@ package http
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	referralport "github.com/qianlan33333-png/AI-CRM-v3/internal/referral/port"
 )
@@ -13,6 +14,8 @@ import (
 type CampaignPosters interface {
 	ListCampaignPosters(context.Context, int64, bool) ([]referralport.CampaignPoster, error)
 	ReadCampaignPoster(context.Context, int64, int) (referralport.CampaignPosterImage, error)
+	ReadCampaignPosterMetadata(context.Context, int64, int) (referralport.CampaignPosterMetadata, error)
+	ReadCampaignPosterSnapshot(context.Context, int64, int, [32]byte) (referralport.CampaignPosterImage, error)
 	SetCampaignPosters(context.Context, referralport.SetCampaignPostersCommand) ([]referralport.CampaignPoster, error)
 	SetCampaignPosterLayouts(context.Context, referralport.SetCampaignPosterLayoutsCommand) (referralport.CampaignPosterLayoutConfiguration, error)
 }
@@ -76,7 +79,8 @@ func (h *Handler) setCampaignPosterLayouts(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *Handler) publicPoster(w http.ResponseWriter, r *http.Request, campaignID int64, rawSlot string) {
-	if r.Method != http.MethodGet || r.URL.RawQuery != "" {
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method != http.MethodGet {
 		method(w, http.MethodGet)
 		return
 	}
@@ -85,21 +89,74 @@ func (h *Handler) publicPoster(w http.ResponseWriter, r *http.Request, campaignI
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	poster, err := h.posters.ReadCampaignPoster(r.Context(), campaignID, slot)
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	version := query.Get("v")
+	if err != nil || len(query) > 1 || (len(query) == 1 && (len(query["v"]) != 1 || !validPosterRevision(version))) {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	metadata, err := h.posters.ReadCampaignPosterMetadata(r.Context(), campaignID, slot)
 	if err != nil {
 		resultError(w, err)
 		return
 	}
-	digest := sha256.Sum256(poster.Content)
-	w.Header().Set("Content-Type", poster.MediaType)
+	revision := referralport.PosterImageRevision(metadata.Digest)
+	if version != "" && version != revision {
+		w.Header().Set("Cache-Control", "no-store")
+		writeError(w, http.StatusConflict, "poster_updated")
+		return
+	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "public, max-age=60")
-	w.Header().Set("ETag", "\""+hex.EncodeToString(digest[:])+"\"")
-	if r.Header.Get("If-None-Match") == w.Header().Get("ETag") {
+	// Fallback may return the original encoding of the same pixels.
+	w.Header().Set("ETag", "W/\""+revision+"\"")
+	if posterETagMatches(r.Header.Get("If-None-Match"), w.Header().Get("ETag")) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
+	h.posterImagesOnce.Do(func() { h.posterImages = newPosterImageCache() })
+	poster, err := h.posterImages.read(r.Context(), posterImageKey{campaign: campaignID, slot: slot, revision: revision}, func(ctx context.Context) (referralport.CampaignPosterImage, error) {
+		return h.posters.ReadCampaignPosterSnapshot(ctx, campaignID, slot, metadata.Digest)
+	})
+	if err != nil {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Del("ETag")
+		switch {
+		case errors.Is(err, errPosterImageBusy):
+			w.Header().Set("Retry-After", "1")
+			writeError(w, http.StatusServiceUnavailable, "poster_busy")
+		case errors.Is(err, referralport.ErrConflict):
+			writeError(w, http.StatusConflict, "poster_updated")
+		default:
+			resultError(w, err)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", poster.MediaType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(poster.Content)))
 	_, _ = w.Write(poster.Content)
+}
+
+func validPosterRevision(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, ch := range value {
+		if !(ch >= '0' && ch <= '9') && !(ch >= 'a' && ch <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func posterETagMatches(header, etag string) bool {
+	for _, value := range strings.Split(header, ",") {
+		value = strings.TrimSpace(value)
+		if value == "*" || strings.TrimPrefix(value, "W/") == strings.TrimPrefix(etag, "W/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) setCampaignPosters(w http.ResponseWriter, r *http.Request, raw string, actor int64) {

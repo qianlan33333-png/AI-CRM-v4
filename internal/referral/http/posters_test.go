@@ -27,6 +27,12 @@ func (s *posterHTTPStub) ListCampaignPosters(context.Context, int64, bool) ([]re
 func (s *posterHTTPStub) ReadCampaignPoster(context.Context, int64, int) (referralport.CampaignPosterImage, error) {
 	return referralport.CampaignPosterImage{}, nil
 }
+func (s *posterHTTPStub) ReadCampaignPosterMetadata(context.Context, int64, int) (referralport.CampaignPosterMetadata, error) {
+	return referralport.CampaignPosterMetadata{}, nil
+}
+func (s *posterHTTPStub) ReadCampaignPosterSnapshot(context.Context, int64, int, [32]byte) (referralport.CampaignPosterImage, error) {
+	return referralport.CampaignPosterImage{}, nil
+}
 func (s *posterHTTPStub) SetCampaignPosters(_ context.Context, c referralport.SetCampaignPostersCommand) ([]referralport.CampaignPoster, error) {
 	s.calls = append(s.calls, c)
 	return []referralport.CampaignPoster{{Slot: 1, SourceImageID: c.Posters[0].ImageID, Description: c.Posters[0].Description, ShareText: c.Posters[0].ShareText, ImageURL: "/poster/1"}}, nil
