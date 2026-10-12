@@ -1,4 +1,5 @@
 import { resolveChromiumBinary } from "../../internal/webshell/chromium_binary.mjs";
+import { createDownloadDirectory, configureTestDownloads } from "../../internal/webshell/test_referral_downloads.mjs";
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -12,6 +13,7 @@ assert.match(base || '', /^https:\/\/127\.0\.0\.1:/);
 assert.ok(actors.length >= 3);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'referral-browser-'));
+const downloads = await createDownloadDirectory();
 const screenshots = process.env.AICRM_REFERRAL_SCREENSHOTS || path.join(profile, 'screenshots');
 await fs.mkdir(screenshots, { recursive: true });
 let chrome, socket;
@@ -26,13 +28,16 @@ try {
   const tab = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT'})).json();
   socket = new WebSocket(tab.webSocketDebuggerUrl);
   await new Promise((r,j)=>{socket.addEventListener('open',r,{once:true});socket.addEventListener('error',j,{once:true});});
-  const exceptions=[], networkRequests=[], networkMethods=[], networkResponses=[];
-  socket.addEventListener('message',e=>{const m=JSON.parse(String(e.data));if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(new Error(m.error.message)):p?.resolve(m.result);}else if(m.method==='Network.requestWillBeSent'){networkRequests.push(m.params.request.url);networkMethods.push({url:m.params.request.url,method:m.params.request.method});}else if(m.method==='Network.responseReceived')networkResponses.push({id:m.params.requestId,url:m.params.response.url});else if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails.text);});
+  const exceptions=[], networkRequests=[], networkMethods=[], networkResponses=[], completedDownloads=new Set();
+  socket.addEventListener('message',e=>{const m=JSON.parse(String(e.data));if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p?.reject(new Error(m.error.message)):p?.resolve(m.result);}else if(m.method==='Network.requestWillBeSent'){networkRequests.push(m.params.request.url);networkMethods.push({url:m.params.request.url,method:m.params.request.method});}else if(m.method==='Network.responseReceived')networkResponses.push({id:m.params.requestId,url:m.params.response.url});else if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails.text);else if(m.method==='Browser.downloadProgress'&&m.params.state==='completed')completedDownloads.add(m.params.guid);});
   const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
   const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result?.value;};
   const wait=async expression=>{for(let i=0;i<180;i++){if(await evaluate(expression))return;await sleep(75);}throw new Error('UI condition not reached: '+expression+'; page='+await evaluate('location.pathname+location.search+" "+document.body.innerText'));};
   const cookie=async(name,value)=>call('Network.setCookie',{name,value,url:base,secure:true,sameSite:'Lax'});
   await call('Page.enable');await call('Runtime.enable');await call('Network.enable');
+  // A temporary profile does not isolate Chrome's download destination.
+  // Fail before navigation if downloads cannot be confined to this test run.
+  await configureTestDownloads(call, downloads);
   const loginPage=await fetch(base+'/login');const html=await loginPage.text();const loginCSRF=/name="login_csrf_token" value="([^"]+)"/.exec(html)?.[1];assert.ok(loginCSRF);
   const login=await fetch(base+'/login',{method:'POST',redirect:'manual',headers:{'Content-Type':'application/x-www-form-urlencoded',Cookie:loginPage.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ')},body:new URLSearchParams({username:'referral-admin',password:'referral-admin-password',login_csrf_token:loginCSRF})});assert.equal(login.status,303);
   const staffCookies=login.headers.getSetCookie().map(c=>c.split(';')[0]);
@@ -265,6 +270,16 @@ try {
   const drilldownExport=networkRequests.find(url=>url.includes('/export?')&&url.includes('participation_id='));
   assert.ok(drilldownExport,'drilldown export did not request a participation-scoped CSV');
   assert.equal(drilldownExport.includes('team_id='),false,'drilldown export must not retain a stale team filter');
+  const exportedCSV=path.join(downloads,`裂变活动-${first.c.name}-invitations.csv`);
+  for(let i=0;i<100;i++) {
+    if(completedDownloads.size>0) { try {await fs.access(exportedCSV);break;}catch{} }
+    await sleep(50);
+  }
+  assert.ok(completedDownloads.size>0,'CSV download did not complete');
+  const csv=await fs.readFile(exportedCSV,'utf8');
+  assert.ok(csv.startsWith('\ufeff邀请人,邀请人战队,参加人,参加人战队,'),'downloaded CSV must retain the invitation headers');
+  assert.ok(csv.includes('队长阿青,追光战队,超长昵称的活动参与者用于手机页面换行验证,'),'downloaded CSV must contain the scoped fixture invitation');
+  console.log('referral_download: '+exportedCSV);
   // Use staff controls against real HTTP/SQL: history lookup, reversal, reward review.
   await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='归属历史').click()");
   await wait("document.querySelector('.referral-admin-picker input')");

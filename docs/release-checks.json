@@ -1,14 +1,17 @@
 {
   "schema": 1,
-  "baseline_sha": "7e299faf7ea3ed788d058b5b50cc7596ce90a81c",
+  "baseline_sha": "d65f512849154b21416d8c8cea7964d4b6ddcc81",
   "checks": [
     {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLReferralChromiumJourney",
+      "postgres": true
+    },
+    {
       "lane": "frontend",
-      "path": "web/v3/radarAdapter.upload_feedback.test.mjs"
+      "path": "internal/webshell/referral_test_downloads.test.mjs"
     }
   ],
-  "installed_checks": [
-    "product-image-delivery"
-  ],
-  "build_commands": []
+  "installed_checks": []
 }
