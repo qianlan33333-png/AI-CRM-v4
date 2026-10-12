@@ -1,5 +1,7 @@
 import { mergeShippingPrefill, mountShippingContact, emptyShippingContact, shippingContactError, type ShippingContact, type ShippingContactForm } from '../../v3/shared/ui/shippingContact';
 import { showSurveyFieldDialog } from '../../v3/shared/ui/surveyFieldDialog';
+import { localImageThumbnail } from '../../v3/shared/ui/localImageThumbnail';
+import { imagePickerIcons } from '../../v3/shared/ui/imagePickerIcons';
 import { PageBase, type Vals } from '../shared/ui/runtime';
 import {
   completionAction,
@@ -54,6 +56,7 @@ export class H5Controller extends PageBase {
   private shippingForms = new Map<number, ShippingContactForm>();
   private shippingTouched = new Map<number, Set<string>>();
   private images = new Map<number, { file: File; url: string }>();
+  private previewRequests = new Map<number, symbol>();
   private unsupportedTypes = new Set<number>();
   private questionIndex = 0;
   private loading = false;
@@ -142,8 +145,8 @@ export class H5Controller extends PageBase {
           this.definition = definition;
           this.answers.clear();
           this.textAnswers.clear();
-          for (const image of this.images.values()) URL.revokeObjectURL(image.url);
           this.images.clear();
+          this.previewRequests.clear();
           this.submissionKey = '';
           this.questionIndex = 0;
           document.title = definition.title;
@@ -491,7 +494,7 @@ export class H5Controller extends PageBase {
     return '';
   }
 
-  private setImage(question: V3SurveyQuestion, event: Event): void {
+  private async setImage(question: V3SurveyQuestion, event: Event): Promise<void> {
     if (this.submitting || this.submitted) return;
     this.captureVisibleText();
     const file = (event.target as HTMLInputElement).files?.[0];
@@ -502,18 +505,38 @@ export class H5Controller extends PageBase {
     if (file.size >= 2097152) error = '图片必须小于 2MB';
     else if (!['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) error = '请上传 JPG、PNG 或 GIF 图片';
     if (error) { showSurveyFieldDialog(error, question.id); (event.target as HTMLInputElement).value=''; return; }
-    const old = this.images.get(question.id); if (old) URL.revokeObjectURL(old.url);
-    this.images.set(question.id, { file, url: URL.createObjectURL(file) });
-    this.submissionKey = ''; this.error = ''; this.saveDraft(); this.refresh(true);
+    const request = Symbol();
+    const definition = this.definition;
+    this.previewRequests.set(question.id, request);
+    this.refresh();
+    try {
+      const url = await localImageThumbnail(file);
+      if (this.definition !== definition || this.previewRequests.get(question.id) !== request || this.submitted) return;
+      this.images.set(question.id, { file, url });
+      this.submissionKey = ''; this.error = ''; this.saveDraft();
+    } catch {
+      if (this.definition === definition && this.previewRequests.get(question.id) === request) {
+        showSurveyFieldDialog('图片无法预览，请重新选择有效的 JPG、PNG 或 GIF 图片', question.id);
+      }
+    } finally {
+      if (this.previewRequests.get(question.id) === request) {
+        this.previewRequests.delete(question.id);
+        this.refresh();
+      }
+    }
   }
   private removeImage(question: V3SurveyQuestion): void {
     if (this.submitting || this.submitted) return;
     this.captureVisibleText();
-    const old=this.images.get(question.id); if (old) URL.revokeObjectURL(old.url);
+    this.previewRequests.delete(question.id);
     this.images.delete(question.id);this.submissionKey='';this.saveDraft();this.refresh(true);
   }
   private async submit(afterAuthorization = false): Promise<void> {
     if (!this.definition || this.submitting || this.submitted) return;
+    if (this.previewRequests.size) {
+      showSurveyFieldDialog('正在生成图片预览，请稍候', this.previewRequests.keys().next().value!);
+      return;
+    }
     if (this.definitionStale) { this.refresh(true); return; }
     this.captureVisibleText();
     const invalid = this.definition.questions.find(question => this.questionError(question));
@@ -639,9 +662,9 @@ export class H5Controller extends PageBase {
           id: question.id, title: question.title, required: question.required ? '（必答）' : '（选答）',
           supported, unsupported: !supported,
           hasOther: !!other, otherPlaceholder: other?.other_placeholder || '请补充其他说明',
-          isText, isRedemption: question.type === 'redemption_code', isMobile: question.type === 'mobile', isTextarea: question.type === 'textarea', isShipping:question.type==='shipping_address', isChoice: !isText && question.type !== 'attachment' && question.type!=='shipping_address', isAttachment: question.type === 'attachment', hasImage:this.images.has(question.id), imageAction:this.images.has(question.id) ? '替换图片' : '选择图片', imageURL:this.images.get(question.id)?.url || '', fileName:this.images.get(question.id)?.file.name || '', selectImage:(event:Event)=>this.setImage(question,event), removeImage:()=>this.removeImage(question), inputType: question.type === 'mobile' ? 'tel' : 'text', inputValue: this.textAnswers.get(question.id) || '', placeholder: question.type === 'mobile' ? '请输入11位中国大陆手机号' : question.placeholder_text || '请输入', input: (event: Event) => this.setText(question, event),
+          isText, isRedemption: question.type === 'redemption_code', isMobile: question.type === 'mobile', isTextarea: question.type === 'textarea', isShipping:question.type==='shipping_address', isChoice: !isText && question.type !== 'attachment' && question.type!=='shipping_address', isAttachment: question.type === 'attachment', hasImage:this.images.has(question.id), noImage:!this.images.has(question.id), imageLoading:this.previewRequests.has(question.id), imageLabel:this.images.has(question.id) ? '重新选择图片' : '选择图片', imageURL:this.images.get(question.id)?.url || '', iconPlus:imagePickerIcons.plus, iconClose:imagePickerIcons.close, iconSelected:imagePickerIcons.selected, selectImage:(event:Event)=>this.setImage(question,event), removeImage:()=>this.removeImage(question), inputType: question.type === 'mobile' ? 'tel' : 'text', inputValue: this.textAnswers.get(question.id) || '', placeholder: question.type === 'mobile' ? '请输入11位中国大陆手机号' : question.placeholder_text || '请输入', input: (event: Event) => this.setText(question, event),
           hint: !supported ? '当前端不支持该题型，本题不参与作答与提交'
-            : question.type === 'single_choice' ? '单选' : question.type === 'multi_choice' ? `多选，限选 ${question.maximum_selections} 项` : question.type === 'mobile' ? '11位中国大陆手机号' : question.type === 'redemption_code' ? '兑换码仅在提交时验证，只能使用一次' : question.type === 'shipping_address' ? '' : question.type === 'attachment' ? '一张 JPG、PNG 或 GIF 图片，小于 2MB；刷新或重新登录后需重新选择' : '文本回答',
+            : question.type === 'single_choice' ? '单选' : question.type === 'multi_choice' ? `多选，限选 ${question.maximum_selections} 项` : question.type === 'mobile' ? '11位中国大陆手机号' : question.type === 'redemption_code' ? '兑换码仅在提交时验证，只能使用一次' : question.type === 'shipping_address' ? '' : question.type === 'attachment' ? '一张 JPG、PNG 或 GIF 图片，小于 2MB' : '文本回答',
           options: supported && !isText && question.type !== 'attachment' ? question.options.map((option) => {
             const selected = (this.answers.get(question.id) || []).includes(option.id);
             return { id: option.id, text: option.option_text, selected, mark: selected ? '✓' : '○',

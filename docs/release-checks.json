@@ -1,15 +1,26 @@
 {
   "schema": 1,
-  "baseline_sha": "19e22311ac091830f038b84d450328cb4ca1edce",
+  "baseline_sha": "bcc0ed7a2b8ab3e51c1f8492a86640e0ddbfed6c",
   "checks": [
     {
+      "lane": "frontend",
+      "path": "web/v3/surveyAttachmentH5.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyRedemptionH5.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveySubmissionResume.test.mjs"
+    },
+    {
       "lane": "backend",
-      "package": "./internal/segment/store",
-      "test": "TestPostgreSQLOpsArchivedRefreshFailureIsHistory",
-      "postgres": true
+      "path": "cmd/aicrm/adapters_test.go",
+      "test": "TestSecurityHeadersAllowBlobImagesOnlyOnMediaAndSidebarPages"
     }
   ],
   "installed_checks": [
-    "governance-notifications"
+    "survey-recovery"
   ]
 }

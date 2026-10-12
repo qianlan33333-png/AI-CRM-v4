@@ -57,7 +57,7 @@ try{
  if(one){await click('[data-h5-next]');await wait(c,"document.querySelector('[data-text-question-id]')",'created code step missing');}
  await fill('[data-text-question-id]','00123');
  if(one){await click('[data-h5-next]');await wait(c,"document.querySelector('[data-file-question-id]')",'created image step missing');}
- await setFile('[data-file-question-id]',picture);await wait(c,"document.querySelector('#screen img[src^=\"blob:\"]')",'created local preview missing');await capture('created-h5-ready');
+ await setFile('[data-file-question-id]',picture);await wait(c,"document.querySelector('[data-image-preview]')?.naturalWidth===96",'created local preview missing');await capture('created-h5-ready');
  await click('[data-h5-submit]');await wait(c,"location.pathname==='/h5/done.html'",'created mixed questionnaire submit failed');await capture('created-h5-done');
  const answers=await evalJS(c,`fetch('/api/admin/questionnaires/${savedID}/submissions').then(r=>r.json())`);
  const a=answers.items?.[0]?.answers;

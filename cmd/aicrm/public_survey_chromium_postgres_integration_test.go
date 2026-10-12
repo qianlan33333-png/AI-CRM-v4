@@ -436,7 +436,7 @@ func newPublicSurveyPresentationChromiumFixture(t *testing.T, options ...publicS
 		_, _ = w.Write([]byte(`{"items":[]}`))
 	})
 	mux.Handle("/", http.FileServer(http.Dir(filepath.Join(root, "web", "dist"))))
-	server.Config.Handler = mux
+	server.Config.Handler = securityHeaders(mux)
 	server.StartTLS()
 	t.Cleanup(server.Close)
 

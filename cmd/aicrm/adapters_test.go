@@ -440,6 +440,8 @@ func TestSecurityHeadersAllowBlobImagesOnlyOnMediaAndSidebarPages(t *testing.T) 
 		"/admin/campaigns.html?view=external-effects": false,
 		"/admin/orders":                               false,
 		"/api/admin/image-library":                    false,
+		"/h5/all.html":                                false,
+		"/h5/one.html":                                false,
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))

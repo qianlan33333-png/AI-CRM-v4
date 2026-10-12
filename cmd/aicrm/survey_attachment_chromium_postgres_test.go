@@ -67,6 +67,15 @@ func TestPostgreSQLSurveyAttachmentChromiumJourney(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			for _, answer := range stored.Answers {
+				if answer.Attachment == nil {
+					continue
+				}
+				content, err := fixture.submissions.ReadSubmissionAttachment(fixture.ctx, fixture.success.ID, id, answer.ID)
+				if err != nil || !bytes.Equal(content.Content, picture.Bytes()) || content.MediaType != "image/png" {
+					t.Fatalf("local thumbnail changed the submitted original image: error=%v type=%s", err, content.MediaType)
+				}
+			}
 			raw, _ := json.Marshal(stored)
 			if bytes.Contains(raw, []byte("00123")) || bytes.Contains(raw, []byte("private_ref")) {
 				t.Fatal("answer projection leaked redemption or private ref")

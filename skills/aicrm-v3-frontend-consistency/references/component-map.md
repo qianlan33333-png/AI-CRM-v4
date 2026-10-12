@@ -209,3 +209,7 @@ Host／assets 缩写：`WB`=`webshell.RenderAdmin` + `admin_base`；`CH`=`Render
 
 ### 裂变活动完整设置页（2026-09-19 修复）
 `/admin/referral/settings` 经 `RenderReferral` 继续使用 admin_base；`referralAdmin.ts` 复用 `AICRMSearchSelect` 搜索普通/周期商品，目录由 Referral 管理权限下的 ProductOptionReader 提供。共享选择器增加可选 emptyLabel/initialLabel/initialQuery/onChange，既有核心产品调用默认行为保持。真实 PostgreSQL 配置读回与个人邀请测试、JSDOM 设置页及同壳装配测试独立于生产验收；视觉 QA 的未完成项见 design-qa.md。
+
+## 问卷图片本地选择（2026-10-13）
+
+H5全页与逐题统一复用 `web/v3/shared/ui/localImageThumbnail.ts` 和 `imagePickerIcons.ts`，原Controller/模板配合 `surveyPublic.css`：112px方框、96像素本地中心裁切、点击替换、右上圆叉删除及已选择状态；无预上传、无新权限或领域写入。缩略图只作为本地DOM数据，原File进入原提交合同。私有图片服务与答卷权限仍由Survey/Media Owner承担。
