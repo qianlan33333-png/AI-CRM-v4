@@ -93,11 +93,6 @@
       "test": "TestSurveyCompletionAttachmentUsesSafeMarker"
     },
     {
-      "lane": "browser",
-      "path": "cmd/aicrm/survey_attachment_chromium_postgres_test.go",
-      "test": "TestPostgreSQLSurveyAttachmentChromiumJourney"
-    },
-    {
       "lane": "frontend",
       "path": "web/v3/surveyAttachmentH5.test.mjs"
     },

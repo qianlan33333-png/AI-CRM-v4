@@ -34,3 +34,11 @@ Product Design QA：项目根 `design-qa.md`；已修复原生文件选择状态
 迁移 `0239_survey_private_image_answers.sql` 前向兼容；保留已有题型、答卷与核销，不提供逆向迁移。正式生产迁移前备份由工作台执行。
 
 本任务仅授权开发及候选交付。按当前批次人类指令，各候选审核后进入预发并保留；全部完成后，生产等待用户对完整批次明确授权，不沿用此前直接晋级范围。
+
+## 安装包旅程的执行阶段调整
+
+工作台只读定位：774a04b 原队首 attempt 1 的 Linux backend 178 terminal pass，frontend 7 个命令均 exit 0；附件 browser 两种模式在 0.00s 的准备入口失败，检查工作目录缺少 web/dist/asset-manifest.json，真实业务断言未执行。原失败报告保留在 /opt/aicrm/domestic/build-worker/domestic-main-checks/774a04b81d691998c52fdf145caf2c352a20c5fe-attempt-1/browser/browser-execution.log，不称本次浏览器检查通过。
+
+从安装前 browser lane 移出 TestPostgreSQLSurveyAttachmentChromiumJourney；installed_checks 继续为 survey-recovery，原 run-installed-survey-recovery.sh 仍显式执行该旅程。由工作台在最终精确 SHA 的实际 Linux 二进制与 Host 安装包上运行真实 Chromium/PostgreSQL 的 all_in_one、one_by_one 业务断言，不省略验收，也不为同一旅程在安装前额外构建一次源 Host。
+
+本次仅移动清单阶段并登记原因，运行时、API、迁移、UI、测试代码、backend/frontend 清单输入均不变；Linux 已通过的对应载荷证据可复用。新候选 supersedes 774a04b，保留旧失败记录，在原失败队首替换，不新建队列、审批或发布路径。预发授权已有，生产授权仍为否。
