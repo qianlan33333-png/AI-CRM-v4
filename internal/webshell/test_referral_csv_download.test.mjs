@@ -38,12 +38,26 @@ test('another completed GUID and any existing CSV cannot satisfy the current CSV
   finish('current-guid'); assert.equal((await tracker.waitFor(expected)).guid, 'current-guid');
 });
 
-test('a same-name download for a different blob or a different name for the same blob is ignored', async t => {
+test('a same-name download for a different blob is ignored', async t => {
   const { directory, tracker, begin, finish } = await fixture(t);
   begin('wrong-url', { url: 'blob:https://127.0.0.1:8080/unrelated-export' }); finish('wrong-url');
-  begin('wrong-name', { suggestedFilename: 'other.csv' }); finish('wrong-name');
-  await fs.writeFile(path.join(directory, 'wrong-url'), 'wrong'); await fs.writeFile(path.join(directory, 'wrong-name'), 'wrong');
+  await fs.writeFile(path.join(directory, 'wrong-url'), 'wrong');
   await assert.rejects(tracker.waitFor(expected, 20), /no matching downloadWillBegin/);
+});
+
+test('browser suggested filename differences for the same blob are valid platform metadata', async t => {
+  const { directory, tracker, begin, finish } = await fixture(t);
+  begin('platform-guid', { suggestedFilename: 'platform-assigned-name' });
+  await fs.writeFile(path.join(directory, 'platform-guid'), 'CSV');
+  finish('platform-guid', { totalBytes: 3 });
+  const result = await tracker.waitFor(expected);
+  assert.equal(result.guid, 'platform-guid'); assert.equal(result.path, path.join(directory, 'platform-guid'));
+  const diagnostic = tracker.diagnostics(expected);
+  assert.equal(diagnostic.matching_begin_events, 1);
+  assert.deepEqual(diagnostic.matching_guid_states, [{ state: 'completed' }]);
+  assert.equal(diagnostic.observed_begins[0].url_matches_expected, true);
+  assert.equal(diagnostic.observed_begins[0].filename_matches_expected, false);
+  assert.ok(!JSON.stringify(diagnostic).includes('platform-assigned-name'));
 });
 
 test('completed current GUID without its exact file cannot fall back to another CSV', async t => {
@@ -64,7 +78,7 @@ test('waits for the exact completed GUID file to become readable', async t => {
 test('canceled or duplicate downloads of the target blob fail explicitly', async t => {
   const canceled = await fixture(t); canceled.begin('current-guid'); canceled.finish('current-guid', { state: 'canceled' });
   await assert.rejects(canceled.tracker.waitFor(expected), /canceled/);
-  const duplicate = await fixture(t); duplicate.begin('first-guid'); duplicate.begin('second-guid');
+  const duplicate = await fixture(t); duplicate.begin('first-guid'); duplicate.begin('second-guid', { suggestedFilename: 'different-platform-name' });
   await assert.rejects(duplicate.tracker.waitFor(expected), /more than one download/);
 });
 

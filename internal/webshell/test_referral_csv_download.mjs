@@ -21,7 +21,7 @@ export function createCSVDownloadTracker(directory) {
       }
     },
     diagnostics({ url, suggestedFilename } = {}) {
-      const matching = starts.filter(item => item.url === url && item.suggestedFilename === suggestedFilename);
+      const matching = starts.filter(item => item.url === url);
       return {
         begin_events: starts.length, progress_events: progressEvents,
         matching_begin_events: matching.length,
@@ -38,14 +38,15 @@ export function createCSVDownloadTracker(directory) {
       };
     },
     async waitFor({ url, suggestedFilename }, timeoutMs = 5000) {
-      if (typeof url !== 'string' || !url.startsWith('blob:') ||
-          typeof suggestedFilename !== 'string' || !suggestedFilename.endsWith('.csv')) {
-        throw new Error('Expected the current CSV anchor blob URL and filename');
+      if (typeof url !== 'string' || !url.startsWith('blob:')) {
+        throw new Error('Expected the current CSV anchor blob URL');
       }
       const deadline = Date.now() + timeoutMs;
       let lastState = 'no matching downloadWillBegin';
       do {
-        const matching = starts.filter(item => item.url === url && item.suggestedFilename === suggestedFilename);
+        // The runner already checks the UI anchor's logical filename. Chrome's
+        // suggested filename is platform metadata and must not gate ownership.
+        const matching = starts.filter(item => item.url === url);
         if (matching.length > 1) throw new Error('Current CSV blob started more than one download');
         const started = matching[0];
         if (started) {

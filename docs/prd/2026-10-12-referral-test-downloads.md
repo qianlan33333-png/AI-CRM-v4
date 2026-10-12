@@ -51,7 +51,7 @@ OneID：不涉及，本次不改变客户身份和归属。Persistence：本机�
 
 安装包 `83b5e8cb0e858b4f20f9237b10b19e8c9018314e` 的唯一失败为 CSV 路径 ENOENT；测试把任意下载的 completed 与推测的人类文件名混用。复用原授权，从该准确累计 base 只修下载测试。
 
-[Chromium 官方协议](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/json/browser_protocol.json) 明确区分建议文件名与实际落盘名；`allowAndName` 按下载 GUID 命名。因此改为：观察本次导出按钮实际触发的唯一 CSV anchor/blob URL → 匹配 `downloadWillBegin` 的 URL/建议名及 GUID → 只接受同一 GUID 的 completed → 检查临时目录内该 GUID 的真实普通文件 → 保留原 BOM、表头、指定邀请人行与 participation 筛选断言。不以其他下载或其他 CSV 兜底，不改 CRM 运行时。
+[Chromium 官方协议](https://raw.githubusercontent.com/ChromeDevTools/devtools-protocol/master/json/browser_protocol.json) 明确区分建议文件名与实际落盘名；`allowAndName` 按下载 GUID 命名。最终合同为：观察本次导出按钮实际触发的唯一 CSV anchor/blob URL（UI 逻辑名由 runner 单独验证）→ 按唯一 URL 匹配 `downloadWillBegin` 并冻结 GUID → 只接受同一 GUID 的 completed → 检查临时目录内该 GUID 的真实普通文件 → 保留原 BOM、表头、指定邀请人行与 participation 筛选断言。CDP 建议名只作脱敏诊断，不作为第二个名称门禁；不以其他下载或其他 CSV 兜底，不改 CRM 运行时。
 
 相关短清单仅包含新下载绑定合同与原失败的具名 PostgreSQL/Chromium 旅程。验证其他 GUID、错误 URL、取消、重复开始、缺失落盘文件与链接文件均不能算通过；保留已有 72 小时清理规则及全部业务断言，沿用既有清理任务，不重装应用或扩大预发检查范围。
 
@@ -62,3 +62,9 @@ OneID：不涉及，本次不改变客户身份和归属。Persistence：本机�
 348 安装态复验仅能证明没有匹配的 downloadWillBegin；因当时未保存事件计数，不能推出完全没有 Browser 事件。[Playwright 的 Chromium 实现](https://raw.githubusercontent.com/microsoft/playwright/main/packages/playwright-core/src/server/chromium/crBrowser.ts) 在 connection.rootSession 订阅 Browser 下载事件并配置下载行为。本次复用这一标准路由：从 Chrome `/json/version` 获取 browser-target WebSocket，独立连接、配置与订阅下载事件；page-target 只继续原 Runtime/Network/DOM 处理。
 
 失败时保存仅含测试浏览器版本、连接种类、开始/进度事件数量、URL/文件名匹配布尔值与匹配 GUID 状态的诊断。不输出原始 URL、建议名、headers、cookies 或环境变量。保持严格 blob/GUID/真实隔离文件与 CSV/参与范围断言、原 5 秒等待和 72 小时清理策略。只新增浏览器连接合同和事件诊断合同，独立重跑原失败旅程，不修改应用或其他验收阶段。
+
+## 351 已确认的平台建议名差异
+
+实际 Linux Chrome 154 的 browser root 连接已 open，收到 begin=1/progress=6；唯一开始事件 URL 与当前 blob 一致、GUID 安全，但 CDP 建议名与 UI 属性不同。按核心 skill 的限制必要性判断，唯一 UI anchor/逻辑名断言、唯一 blob、同 GUID 完成、真实隔离文件及 BOM/指定邀请行/participation 作用域已足以保证正确性；再要求 CDP 建议名相等是多余门禁，取消。
+
+认领仅按当前唯一 blob URL；同 URL 的重复开始（即使建议名不同）仍失败。建议名差异只留脱敏匹配布尔值，不输出两个原始名字。UI 错误逻辑名仍由未改动的 runner 断言拒绝。保留错误 URL、其他 GUID、取消、重复、缺文件、链接及字节不足拒绝、原 5 秒及 72 小时规则；只修改该 tracker 和关联合同，应用与 runner 均不变。
