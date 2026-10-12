@@ -16,10 +16,11 @@ export AICRM_REQUIRE_CHROMIUM_JOURNEY=1
 # AICRM_DATABASE_URL沿用原隔离验收库配置，不使用生产库。
 # 原工作台harness将准确安装包web/dist复制到私有源码checkout。
 # 校验built shell来自同一安装包，不构建源码Host或生成替代模板。
-for image_contract_shell in mpLib.html images.html attach.html; do
+for image_contract_shell in productForm.html mpLib.html images.html attach.html; do
   test -s "$AICRM_INSTALLED_PRODUCT_ROOT/web/dist/admin/$image_contract_shell"
   cmp "$AICRM_INSTALLED_PRODUCT_ROOT/web/dist/admin/$image_contract_shell" "web/dist/admin/$image_contract_shell"
 done
+node web/v3/productAdapter.material_order.test.mjs
 node web/v3/materialSaveAdapter.test.mjs
 bash scripts/run-go-with-donor-views.sh go test -json -p 1 -count=1 -timeout=8m \
   -run '^TestPostgreSQLProductImageDeliveryInstalledJourney$' ./cmd/aicrm
@@ -27,9 +28,20 @@ bash scripts/run-go-with-donor-views.sh go test -json -p 1 -count=1 -timeout=8m 
 
 具名用例校验安装二进制摘要、Host source SHA与readyz，所有断言HTTP和后台Chromium访问实际安装进程；只在隔离DB准备历史素材/收据和种子数据。复用原Product旅程，具名最终日志 `installed_product_image_delivery: PASS` 及Go包/Test终态均必须pass，任何skip、环境缺失或无匹配不得登记通过。按现有受保护收据写入 `product-image-delivery`，绑定原attempt、head/tree、stage receipt、manifest与日志摘要。
 
-`materialSaveAdapter.test.mjs`读取built shell（包括mpLib.html）。该Node合同从安装前frontend清单移至本installed检查，源码测试和全部原断言逐字保留；必须先验证准确安装包的真实mpLib.html与checkout副本一致，再实际执行Node合同，终态exit0后继续Go旅程。此Node合同依然是JSDOM交互合同；Go旅程负责实际安装进程的HTTP/Chromium断言，两者结果分别记录，不将Node模拟称作安装API成功。
+`productAdapter.material_order.test.mjs`第9行读取built productForm.html，`materialSaveAdapter.test.mjs`读取built mpLib.html、images.html、attach.html。两项Node合同从安装前frontend清单移至本installed检查，源码测试和全部原断言逐字保留；先逐字核对准确安装包与checkout的四份真实HTML，再实际执行两个Node合同，均exit0后继续Go旅程。Node仍是JSDOM交互合同，Go旅程负责实际安装进程的HTTP/Chromium断言，两者结果分别记录，不将Node模拟称作安装API成功。
 
-1152正式run.json核实的Linux backend 7条命令、22个terminal pass且无skip/fail，frontend的imageLibraryFilterHost第一条exit0；这些有效收据保留，backend清单输入与全部业务/SQL/UI/测试载荷保持相同。imageLibraryFilterHost继续留在源码frontend，其余源码frontend合同按准确清单在Linux执行；materialSaveAdapter待最终安装阶段，不记作已通过。不新增runner或重复Host构建。此前将失败错误归到imageLibraryFilterHost的口头报告已由正式结果纠正，不据此撤掉有效检查。
+本次一次性核对88清单剩余四项及直接辅助模块，执行位置如下：
+
+| Node合同 | 实际页面依赖 | 执行阶段 |
+| --- | --- | --- |
+| productAdapter.material_order | 第9行直接读取web/dist/admin/productForm.html | 最终安装product-image-delivery |
+| productAdapter.sp_material | product-source-test-page.mjs读取source-index及当前V4 canonical template；material_picker使用已登记派生源码 | 保留源码frontend |
+| imageLibraryFilterHost | 内存JSDOM页面及esbuild(write:false)源码bundle，无dist读取 | 保留源码frontend |
+| radarAdapter.upload_feedback | 内存JSDOM页面及esbuild(write:false)源码bundle，无dist读取 | 保留源码frontend |
+
+product-source-test-page与test-browser-bundle辅助模块也已核对；不改源码模板辅助模块、不伪造新HTML、不提前重复构建Host。两项移至安装阶段的原Node文件及其全部断言必须在原harness复制准确安装dist后真实执行。
+
+1152正式run.json核实的Linux backend 7条命令、22个terminal pass且无skip/fail；88 attempt2正式backend/run.json亦为success/exit0且7条命令全部exit0，清单输入与业务/SQL/UI/测试载荷保持相同。88正式frontend顺序为imageLibraryFilterHost exit0、material_order因缺built productForm.html exit1，sp_material与radar upload尚未执行。有效后端与素材库收据保留；阶段修复不记为原失败用例通过。素材库、周期素材、雷达继续留在源码frontend，material_order与materialSaveAdapter待实际安装阶段，未执行项均不记为通过。
 
 ## 直接断言
 

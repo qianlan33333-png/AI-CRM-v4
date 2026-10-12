@@ -94,10 +94,6 @@
     },
     {
       "lane": "frontend",
-      "path": "web/v3/productAdapter.material_order.test.mjs"
-    },
-    {
-      "lane": "frontend",
       "path": "web/v3/productAdapter.sp_material.test.mjs"
     },
     {
