@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	productport "github.com/qianlan33333-png/AI-CRM-v3/internal/product/port"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -32,7 +34,12 @@ func TestPublicContactPrefillThreeModes(t *testing.T) {
 			if e = os.MkdirAll(dir, 0700); e != nil {
 				t.Fatal(e)
 			}
-			if e = os.WriteFile(filepath.Join(dir, level+".html"), w.Body.Bytes(), 0600); e != nil {
+			visual := bytes.Buffer{}
+			visualProduct := publicProduct{ID: 7, Name: "课程", PriceMinor: 99900, ProductKind: "standard", Currency: "CNY", ContactCollectionLevel: level, RequireMobile: level != "none", CouponTargetRef: "standard_product:7", RegionOptionsJSON: template.JS(`[{"c":"11","n":"北京市","ch":[{"c":"1101","n":"北京市","ch":[{"c":"110101","n":"东城区"}]}]}]`), VariantsEnabled: true, Variants: []productport.Variant{{ID: 21, Version: 1, Name: "单人版", PriceMinor: 9900}, {ID: 22, Version: 1, Name: "三人成行版", PriceMinor: 99900, Description: "一份订单独立定价", Attributes: []productport.VariantAttribute{{Key: "版本", Value: "B"}}}}}
+			if e = publicProductPage.Execute(&visual, publicProductPageView{Payment: true, Product: visualProduct, WeChatPayEnabled: true, AlipayEnabled: true}); e != nil {
+				t.Fatal(e)
+			}
+			if e = os.WriteFile(filepath.Join(dir, level+".html"), visual.Bytes(), 0600); e != nil {
 				t.Fatal(e)
 			}
 		}

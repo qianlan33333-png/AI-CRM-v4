@@ -113,3 +113,51 @@ func TestPostgreSQLVariantCheckoutTransactionsAndFrozenRecovery(t *testing.T) {
 		t.Fatal("duplicate effects", payments, paid, err)
 	}
 }
+
+func TestPostgreSQLZeroVariantCheckoutFreezesSelection(t *testing.T) {
+	f := newProductExternalPushChromiumFixtureWithOptions(t, 90*time.Second, productExternalPushChromiumFixtureOptions{enablePublicH5: true, deferEffectsWorker: true})
+	pool := f.application.pool.Native()
+	if _, err := pool.Exec(f.ctx, `UPDATE products SET variants_enabled=true WHERE id=$1`, f.productID); err != nil {
+		t.Fatal(err)
+	}
+	var id int64
+	if err := pool.QueryRow(f.ctx, `INSERT INTO product_variants(product_id,name,price_minor,position) VALUES($1,'免费体验版',0,0) RETURNING id`, f.productID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	session := issuePublicCommerceTrustedH5Session(t, f)
+	body := fmt.Sprintf(`{"product_id":%d,"product_kind":"standard","variant_id":%d,"variant_version":1,"beneficiary_selection":"payer_self","coupon_claim_id":0,"expected_amount_minor":0,"checkout_session_binding":%q}`, f.productID, id, paymentport.CheckoutSessionBinding(session.token))
+	post := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/wechat-pay/checkouts", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "zero-variant-frozen-checkout-0001")
+		req.AddCookie(&http.Cookie{Name: paymentport.TrustedSessionCookieName, Value: session.token})
+		out := httptest.NewRecorder()
+		f.application.handler.ServeHTTP(out, req)
+		return out
+	}
+	out := post()
+	var fact struct {
+		Merchant string `json:"merchant_order_no"`
+		OrderID  int64  `json:"order_id"`
+	}
+	if out.Code != 200 || json.Unmarshal(out.Body.Bytes(), &fact) != nil || fact.OrderID < 1 || !strings.Contains(out.Body.String(), `"payment_required":false`) || !strings.Contains(out.Body.String(), "免费体验版") {
+		t.Fatalf("free variant response: %d %s", out.Code, out.Body)
+	}
+	if _, err := pool.Exec(f.ctx, `UPDATE product_variants SET name='改名',price_minor=99900,version=version+1,removed_at=now() WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if replay := post(); replay.Code != 200 || !strings.Contains(replay.Body.String(), "免费体验版") {
+		t.Fatalf("free variant replay: %d %s", replay.Code, replay.Body)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/wechat-pay/checkouts/"+fact.Merchant, nil)
+	req.AddCookie(&http.Cookie{Name: paymentport.TrustedSessionCookieName, Value: session.token})
+	read := httptest.NewRecorder()
+	f.application.handler.ServeHTTP(read, req)
+	if read.Code != 200 || !strings.Contains(read.Body.String(), `"amount_minor":0`) || !strings.Contains(read.Body.String(), "免费体验版") {
+		t.Fatalf("free variant snapshot: %d %s", read.Code, read.Body)
+	}
+	var payments int
+	if err := pool.QueryRow(f.ctx, `SELECT count(*) FROM payments WHERE order_id=$1`, fact.OrderID).Scan(&payments); err != nil || payments != 0 {
+		t.Fatal("free variant created payment", payments, err)
+	}
+}

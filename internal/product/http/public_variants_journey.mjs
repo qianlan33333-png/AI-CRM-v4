@@ -16,9 +16,9 @@ async function page(mode,storage,status){
 }
 const {dom,posts}=await page('multi');const d=dom.window.document;const choice=d.getElementById('variantChoice');
 assert.equal(choice.value,'');d.getElementById('buy').click();await settle();assert.equal(posts.length,0);
-choice.value='21';choice.dispatchEvent(new dom.window.Event('change'));await settle();assert.equal(d.getElementById('coupon').options.length,1);assert.equal(d.getElementById('payableAmount').textContent,'¥99.00');
+choice.value='21';choice.dispatchEvent(new dom.window.Event('change'));await settle();assert.equal(d.getElementById('coupon').options.length,2);assert.equal(d.getElementById('payableAmount').textContent,'¥0.01');
 choice.value='22';choice.dispatchEvent(new dom.window.Event('change'));await settle();assert.equal(d.getElementById('coupon').options.length,2);assert.equal(d.getElementById('payableAmount').textContent,'¥899.00');assert.match(d.getElementById('variantDescription').textContent,/独立定价/);
-d.getElementById('buy').click();await settle();assert.equal(posts[0].body.variant_id,22);assert.equal(posts[0].body.variant_version,3);assert.equal(choice.disabled,true);
+d.getElementById('buy').click();assert.equal(choice.disabled,true,'lock selection before awaiting session read');await settle();assert.equal(posts[0].body.variant_id,22);assert.equal(posts[0].body.variant_version,3);assert.equal(choice.disabled,true);
 choice.value='21';choice.dispatchEvent(new dom.window.Event('change'));d.getElementById('buy').click();await settle();assert.deepEqual(posts[1],posts[0],'unknown response must reuse exact payload and key');
 const saved={};for(let i=0;i<dom.window.sessionStorage.length;i++){const k=dom.window.sessionStorage.key(i);saved[k]=dom.window.sessionStorage.getItem(k)}dom.window.close();
 const recovered=await page('off',saved);recovered.dom.window.document.getElementById('buy').click();await settle();assert.deepEqual(recovered.posts[0],posts[0],'disabled catalog must not rewrite pending request');recovered.dom.window.close();

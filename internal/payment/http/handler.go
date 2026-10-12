@@ -999,12 +999,33 @@ func (handler *Handler) checkout(writer http.ResponseWriter, request *http.Reque
 			resultError(writer, createErr)
 			return
 		}
+		var variant *orderport.VariantSnapshot
+		if body.VariantID > 0 {
+			handoff, readErr := handler.app.GetCheckout(request.Context(), routeProvider, result.MerchantOrderNo, cookie.Value)
+			if readErr != nil {
+				resultError(writer, readErr)
+				return
+			}
+			if handoff.Variant == nil {
+				writeError(writer, http.StatusServiceUnavailable, "unavailable")
+				return
+			}
+			variant = handoff.Variant
+		}
 		if result.Payment == nil {
-			writeJSON(writer, http.StatusOK, map[string]any{"order_id": result.OrderID, "merchant_order_no": result.MerchantOrderNo, "status": result.Status, "provider": "no_payment", "amount_minor": result.AmountMinor, "currency": result.Currency, "payment_required": false, "completion_action": handler.paidPurchaseAction(request.Context(), routeProvider, result.OrderID, result.MerchantOrderNo)})
+			response := map[string]any{"order_id": result.OrderID, "merchant_order_no": result.MerchantOrderNo, "status": result.Status, "provider": "no_payment", "amount_minor": result.AmountMinor, "currency": result.Currency, "payment_required": false, "completion_action": handler.paidPurchaseAction(request.Context(), routeProvider, result.OrderID, result.MerchantOrderNo)}
+			if variant != nil {
+				response["variant"] = variant
+			}
+			writeJSON(writer, http.StatusOK, response)
 			return
 		}
 		payment := result.Payment
-		writeJSON(writer, http.StatusAccepted, map[string]any{"order_id": payment.OrderID, "merchant_order_no": payment.MerchantOrderNo, "payment_id": payment.ID, "status": payment.Status, "effect_id": payment.EffectID, "payment_required": true})
+		response := map[string]any{"order_id": payment.OrderID, "merchant_order_no": payment.MerchantOrderNo, "payment_id": payment.ID, "status": payment.Status, "effect_id": payment.EffectID, "payment_required": true}
+		if variant != nil {
+			response["variant"] = variant
+		}
+		writeJSON(writer, http.StatusAccepted, response)
 		return
 	}
 	payment, err := handler.app.Create(request.Context(), command)

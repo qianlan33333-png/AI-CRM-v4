@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "8245526b89d04111acb2b03f66416b9c10d4064e",
+  "baseline_sha": "a8cf8a0bcf68d52c1bb8a15d2df46a030ed5e702",
   "checks": [
     {
       "lane": "backend",
@@ -176,10 +176,87 @@
       "lane": "backend",
       "path": "internal/coupon/http/public_test.go",
       "test": "TestPublicCouponVariantPriceUsesAvailableSelection"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/customer/app"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/customer/http"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/domain"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/migrate-customer-contacts"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/customer_contact_reuse_postgres_test.go",
+      "test": "TestPostgreSQLCustomerContactReuse",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/checkout_price_floor_postgres_test.go",
+      "test": "TestPostgreSQLCheckoutExpectedAmountRollsBackOrderCouponAndPayment",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/zero_amount_checkout_postgres_test.go",
+      "test": "TestPostgreSQLZeroCheckoutAtomicReplayOwnershipAndPaidExclusion",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/app/contact_profile_test.go",
+      "test": "TestContactPrefillUsesLiveIdentityAndConfiguredCollection"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/http/contact_prefill_test.go",
+      "test": "TestPublicContactPrefillThreeModes"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/product/http/zero_amount_journey_test.go",
+      "test": "TestPublicZeroAmountCheckoutRecoveryJourney"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/contactPrefill.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveySubmissionResume.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyAttachmentH5.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/surveyRedemptionH5.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/sidebarOneIDPresentation.test.mjs"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/product_variants_checkout_postgres_integration_test.go",
+      "test": "TestPostgreSQLZeroVariantCheckoutFreezesSelection",
+      "postgres": true
     }
   ],
   "installed_checks": [
     "product-variants"
   ],
-  "build_commands": []
+  "build_commands": [
+    "./cmd/migrate-customer-contacts"
+  ]
 }

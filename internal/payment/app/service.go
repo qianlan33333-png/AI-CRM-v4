@@ -737,6 +737,12 @@ func (s *Service) GetCheckout(ctx context.Context, provider domain.Provider, mer
 		local, localErr := s.noPaymentCheckoutWithin(tx, merchantOrderNo, actor)
 		if localErr == nil {
 			out = local
+			if reader, ok := s.orders.(orderport.CheckoutVariantReader); ok {
+				out.Variant, err = reader.ReadCheckoutVariantWithin(tx, local.OrderID)
+				if err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 		if !errors.Is(localErr, paymentport.ErrNotFound) {

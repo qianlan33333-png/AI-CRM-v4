@@ -464,6 +464,7 @@ export const MediaImageDetailVariantParameter = {
   mobile_1080: "mobile_1080",
   large_1440: "large_1440",
   original: "original",
+  web_1080: "web_1080",
 } as const;
 
 export type SafeNextParameter = string;
