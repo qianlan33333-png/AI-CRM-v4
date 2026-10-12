@@ -82,11 +82,6 @@
       "test": "TestPaidReferralInstalledEnvironmentMeetsRuntimeConfig"
     },
     {
-      "lane": "browser",
-      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLReferralChromiumJourney"
-    },
-    {
       "lane": "backend",
       "path": "cmd/aicrm/referral_paid_invitation_checkout_postgres_test.go",
       "test": "TestPostgreSQLReferralPaidInvitationRealOrderWithoutDistributor",

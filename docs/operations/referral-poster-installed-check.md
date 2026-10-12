@@ -1,6 +1,6 @@
 # Referral B 版同包验收入口
 
-`referral-poster` 是原 stage-evidence 中的一项业务检查名称，不新增发布器、服务或验收通道。
+`referral-poster` 是原 stage-evidence 中的一项业务检查名称，不新增发布器、服务或验收通道。此同一浏览器旅程仅登记在installed_checks，安装前清单不含browser lane；最终Linux/PG/375与430视口/实际导出独立解码必须执行，不以源码Host重复构建替代。
 
 复用 `cmd/aicrm/referral_chromium_postgres_integration_test.go:TestPostgreSQLReferralChromiumJourney` 和 `cmd/aicrm/referral_chromium_journey.mjs`。未给安装输入时为源码旅程；给现有固定 helper 的 `-domestic-release-smoke-input` 时，复用 `referralInstalledArtifact` 的 protected-input、staging角色、准确路径/二进制SHA校验，启动该安装二进制的隔离实例，经原loopback TLS入口访问真实安装的API和静态资源。此模式不重打前端包，不将源码Host当成已安装Host，所有Provider disabled；源码composition只准备合成身份/管理员/数据库事实。
 
