@@ -577,6 +577,9 @@ func TestAutomationAIAssistantAndGroupOpsShareRiverRuntime(t *testing.T) {
 	if err = runtimeService.SetReviewPlanIntake(aiService, automationService); err != nil {
 		t.Fatal(err)
 	}
+	if err = aiService.BindManualAudienceRunApprovalValidator(runtimeService.ValidateManualAudienceRunApproval); err != nil {
+		t.Fatal(err)
+	}
 	if err = runtimeService.SetOutboundContentFreezer(automationOutboundContentFreezer{capturer: mediaRepo}); err != nil {
 		t.Fatal(err)
 	}

@@ -1,112 +1,85 @@
 {
   "schema": 1,
-  "baseline_sha": "37330df426e4c5eec23c0c4e45de175002dd2af7",
+  "baseline_sha": "1fce5ecede73cdbb6423d3a2c8d48c90fd5c5b87",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/aiassistant/port",
-      "test": "TestMachineActorRequiresCanonicalAuthenticatedReference"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/aiassistant/port",
-      "test": "TestMachineCreatePlanCommandRejectsUntrustedSubject"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/aiassistant/store",
-      "test": "TestDimensionPostgreSQLMachineStatusCannotMixCompletionSnapshots",
+      "package": "./cmd/migrate-commerce-history",
+      "test": "TestPostgreSQLCommerceHistoryCommandApplyReplayReconcile",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/aiassistant/store",
-      "test": "TestPostgreSQLMachinePlanActorScopesReceiptsFactsAndStatus",
+      "package": "./cmd/migrate-commerce-history",
+      "test": "TestPostgreSQLHistoricalDeltaAtomicPaymentAndReplay",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/aiassistant/store",
-      "test": "TestPostgreSQLMachinePlanSameClientRaceReplaysOneReceipt",
+      "package": "./cmd/migrate-v2-config-definitions",
+      "test": "TestCommercePreflightReusesMappingsAndReportsDrift",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestCLIMachineCanIChecksTrustedResourceAndNeverExecutes"
+      "package": "./cmd/migrate-v2-config-definitions",
+      "test": "TestCommerceSafeApplyPreservesFactsAndReplays",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestMessageArchivePostgreSQLExternalChatMachineProjectionJourney",
+      "package": "./cmd/migrate-v2-config-definitions",
+      "test": "TestCommerceAuditedCouponDeltaPreservesProductOperatorConfig",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestOpenPlatformMachineManagementPostgreSQLJourney",
+      "test": "TestPostgreSQLDistributionProductPolicyCompositionUoW",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/migrate-v2-config-definitions",
+      "test": "TestCommerceExplicitReviewedCouponCASAndReplay",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/migrate-v2-config-definitions",
+      "test": "TestRunnerPostgresIntegrationApplyVerifyAndReplay",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestOpenPlatformOperationSnapshotPostgreSQLConcurrentCompletionAndScope",
+      "test": "TestPostgreSQLPaymentConfirmationReconciliationRestoresOnlyVerifiedOrderFacts",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestOpenPlatformV1AIReviewPlanPostgreSQLJourney",
+      "test": "TestPostgreSQLPaymentConfirmationReconciliationPreviewDoesNotWrite",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestAUTH02WorkbenchAIReplayRevalidatesAccessInOwnerUnitOfWorkPostgreSQL",
+      "test": "TestPostgreSQLPaymentConfirmationReconciliationRejectsExistingTransactionFactMismatch",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestV1MachineWriteOperationsRequireTheAccessMutationFence"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestV4MachineContactWindowPostgreSQL",
+      "test": "TestOpenPlatformV1ReadPortsPostgreSQLJourney",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestV1OperationAuditMustBeComposedForMachinePrincipal"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestV1AICreateAndStatusUseMachineActorAndAtomicAudit"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestV1WorkbenchPackageFreezesOnlyResolvedIDsAndRejectsPartial"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestOpenPlatformOperationSnapshotPostgreSQLConcurrentCompletionAndScope",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/aiassistant/store",
-      "test": "TestDimensionPostgreSQLMachineStatusCannotMixCompletionSnapshots",
-      "postgres": true,
-      "race": true
+      "test": "TestAutomationAIAssistantAndGroupOpsShareRiverRuntime",
+      "postgres": true
     }
   ],
-  "installed_checks": [
-    "operation-status-snapshot"
-  ]
+  "installed_checks": []
 }

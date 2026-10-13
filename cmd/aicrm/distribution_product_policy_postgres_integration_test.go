@@ -195,7 +195,7 @@ func distributionProductPolicyPool(t *testing.T) (*pgxpool.Pool, func()) {
 		t.Fatal("locate migrations")
 	}
 	root := filepath.Join(filepath.Dir(file), "..", "..")
-	for _, name := range []string{"0003_access.sql", "0010_product.sql", "0157_distribution_core.sql"} {
+	for _, name := range []string{"0003_access.sql", "0010_product.sql", "0157_distribution_core.sql", "0235_wechat_shop_products.sql", "0241_product_variants.sql"} {
 		body, readErr := os.ReadFile(filepath.Join(root, "migrations", name))
 		if readErr != nil {
 			native.Close()

@@ -369,7 +369,7 @@ func openPlatformV1ReadMigrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return os.ErrNotExist
 	}
 	root := filepath.Join(filepath.Dir(source), "..", "..")
-	for _, name := range []string{"0002_identity.sql", "0003_access.sql", "0004_wecom.sql", "0009_customer_activation.sql", "0018_survey.sql", "0038_survey_oauth_phone_vault.sql", "0020_order.sql", "0022_customer_profile_sections.sql", "0024_order_product_version.sql", "0050_radar_core.sql", "0051_radar_sessions_events.sql", "0071_message_archive_core.sql", "0086_wecom_profile_primary_owner.sql", "0096_open_platform.sql", "0098_message_archive_historical_projection.sql", "0103_sidebar_customer_profile_annotations.sql", "0153_wecom_customer_detail_projection.sql"} {
+	for _, name := range []string{"0002_identity.sql", "0003_access.sql", "0004_wecom.sql", "0009_customer_activation.sql", "0018_survey.sql", "0038_survey_oauth_phone_vault.sql", "0020_order.sql", "0022_customer_profile_sections.sql", "0024_order_product_version.sql", "0050_radar_core.sql", "0051_radar_sessions_events.sql", "0071_message_archive_core.sql", "0086_wecom_profile_primary_owner.sql", "0096_open_platform.sql", "0098_message_archive_historical_projection.sql", "0103_sidebar_customer_profile_annotations.sql", "0153_wecom_customer_detail_projection.sql", "0242_order_variant_snapshot.sql", "0244_survey_submission_subject.sql"} {
 		sql, err := os.ReadFile(filepath.Join(root, "migrations", name))
 		if err != nil {
 			return err
