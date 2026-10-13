@@ -66,7 +66,7 @@ func (s *Service) Export(ctx context.Context, q orderport.ListQuery, format stri
 	payload, _ := json.Marshal(struct {
 		Schema, Format string
 		Filter         ListFilter
-	}{"order-export-27-v1", format, exportFilter(q)})
+	}{"order-export-36-sharing-v2", format, exportFilter(q)})
 	receipt := ExportReceipt{Actor: actor, KeyDigest: sha256.Sum256([]byte(key)), FilterDigest: sha256.Sum256(payload), CreatedAt: s.now().UTC()}
 	var result orderport.ExportResult
 	err := s.uow.Within(ctx, func(tx context.Context) error {
@@ -190,7 +190,8 @@ func (s *Service) exportRowsWithin(ctx context.Context, orders []domain.Order) (
 		address := contact.ShippingAddress
 		items := append([]domain.ItemSnapshot(nil), o.Items...)
 		sort.Slice(items, func(i, j int) bool { return items[i].LineNo < items[j].LineNo })
-		for _, item := range items {
+		financial := exportFinancialColumns(o, payment, facts.Commissions[o.ID])
+		for itemIndex, item := range items {
 			var numbers, names []string
 			for _, d := range facts.Distributors[o.ID] {
 				if d.ItemLine == item.LineNo {
@@ -198,13 +199,25 @@ func (s *Service) exportRowsWithin(ctx context.Context, orders []domain.Order) (
 					names = append(names, d.Name)
 				}
 			}
-			rows = append(rows, []string{o.MerchantOrderNo, createdAt, buyer.Number, buyer.Name, transactionNo, method, paidAt, decimalMinor(o.Amount.AmountMinor), o.Amount.Currency, decimalMinor(o.RefundedMinor), address.RecipientName, phone, address.ProvinceName, address.CityName, address.DistrictName, address.DetailAddress, item.ProductCode, item.DisplayName(), strconv.Itoa(int(item.Quantity)), decimalMinor(item.UnitAmountMinor), statusLabel, orderRecordOriginLabel(o.RecordOrigin), strings.Join(numbers, ";"), strings.Join(names, ";"), sourceStatus, sourceAfterSales, importedAt})
+			row := []string{o.MerchantOrderNo, createdAt, buyer.Number, buyer.Name, transactionNo, method, paidAt, decimalMinor(o.Amount.AmountMinor), o.Amount.Currency, decimalMinor(o.RefundedMinor), address.RecipientName, phone, address.ProvinceName, address.CityName, address.DistrictName, address.DetailAddress, item.ProductCode, item.DisplayName(), strconv.Itoa(int(item.Quantity)), decimalMinor(item.UnitAmountMinor), statusLabel, orderRecordOriginLabel(o.RecordOrigin), strings.Join(numbers, ";"), strings.Join(names, ";"), sourceStatus, sourceAfterSales, importedAt}
+			if itemIndex == 0 {
+				row = append(row, financial...)
+			} else {
+				row = append(row, make([]string, len(financial))...)
+			}
+			rows = append(rows, row)
 		}
 	}
 	return rows, nil
 }
 func decimalMinor(n int64) string {
-	return strconv.FormatInt(n/100, 10) + "." + string('0'+byte(n%100/10)) + string('0'+byte(n%10))
+	sign := ""
+	value := uint64(n)
+	if n < 0 {
+		sign = "-"
+		value = uint64(-(n + 1)) + 1
+	}
+	return sign + strconv.FormatUint(value/100, 10) + "." + string('0'+byte(value%100/10)) + string('0'+byte(value%10))
 }
 func encodeExportCSV(rows [][]string) []byte {
 	var b bytes.Buffer
@@ -216,7 +229,9 @@ func encodeExportCSV(rows [][]string) []byte {
 		values := append([]string(nil), row...)
 		for i, v := range values {
 			trimmed := strings.TrimLeft(v, " \t\r\n")
-			if strings.ContainsAny(trimmed[:min(1, len(trimmed))], "=+-@") || strings.HasPrefix(v, "\t") || strings.HasPrefix(v, "\r") {
+			// A trusted signed amount remains numeric. All user-controlled text
+			// still receives the existing spreadsheet formula protection.
+			if !exportNumericColumn(i) && (strings.ContainsAny(trimmed[:min(1, len(trimmed))], "=+-@") || strings.HasPrefix(v, "\t") || strings.HasPrefix(v, "\r")) {
 				values[i] = "'" + v
 			}
 		}
@@ -247,7 +262,7 @@ func encodeXLSX(rows [][]string) ([]byte, error) {
 				}
 			}
 			cell, _ := excelize.CoordinatesToCellName(c+1, r+1)
-			if r > 0 && (c == 7 || c == 9 || c == 18 || c == 19) {
+			if r > 0 && exportNumericColumn(c) && v != "" {
 				if err := f.SetCellDefault(sheet, cell, v); err != nil {
 					return nil, err
 				}
@@ -261,7 +276,7 @@ func encodeXLSX(rows [][]string) ([]byte, error) {
 		return nil, err
 	}
 	if len(rows) > 0 {
-		for _, col := range []string{"H", "J", "T"} {
+		for _, col := range []string{"H", "J", "T", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI"} {
 			if err = f.SetCellStyle(sheet, col+"2", col+strconv.Itoa(len(rows)+1), money); err != nil {
 				return nil, err
 			}
@@ -271,10 +286,11 @@ func encodeXLSX(rows [][]string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = f.SetCellStyle(sheet, "A1", "AA1", header); err != nil {
+	lastColumn, _ := excelize.ColumnNumberToName(len(exportHeaders))
+	if err = f.SetCellStyle(sheet, "A1", lastColumn+"1", header); err != nil {
 		return nil, err
 	}
-	if err = f.SetColWidth(sheet, "A", "AA", 20); err != nil {
+	if err = f.SetColWidth(sheet, "A", lastColumn, 20); err != nil {
 		return nil, err
 	}
 	if err = f.SetColWidth(sheet, "P", "P", 45); err != nil {
@@ -283,7 +299,10 @@ func encodeXLSX(rows [][]string) ([]byte, error) {
 	if err = f.SetPanes(sheet, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2", ActivePane: "bottomLeft"}); err != nil {
 		return nil, err
 	}
-	if err = f.SetSheetDimension(sheet, "A1:AA"+strconv.Itoa(len(rows)+1)); err != nil {
+	if err = f.SetSheetDimension(sheet, "A1:"+lastColumn+strconv.Itoa(len(rows)+1)); err != nil {
+		return nil, err
+	}
+	if err = addExportMoneyNotes(f, header); err != nil {
 		return nil, err
 	}
 	buffer, err := f.WriteToBuffer()

@@ -1,95 +1,76 @@
 {
   "schema": 1,
-  "baseline_sha": "501ef2b32865e5028ad734e08d4dd7df54f028f4",
+  "baseline_sha": "aa2585c63939c9eff88099750c94326051f69703",
   "checks": [
     {
       "lane": "backend",
-      "path": "cmd/migrate-platform/main_test.go",
-      "test": "TestApplyMigrationsFreshAndUpgradePostgreSQL",
-      "postgres": true
+      "path": "internal/order/app/export_financial_test.go",
+      "test": "TestExportFinancialReconciliationStates"
     },
     {
       "lane": "backend",
-      "path": "internal/wechatshop/orders_test.go",
-      "test": "TestPostgreSQLShopDailyWindowFailureAndOutageRecovery",
-      "postgres": true
+      "path": "internal/order/app/export_financial_test.go",
+      "test": "TestExportFinancialColumnsCountEachOrderOnceAndKeepSignedNumbers"
     },
     {
       "lane": "backend",
-      "path": "internal/payment/provider/wechatshop_buyer_test.go",
-      "test": "TestWeChatShopBuyerMetadataContract"
+      "path": "internal/order/app/export_test.go",
+      "test": "TestExportXLSXPreservesFullFactsBlankContactsAndEveryItem"
     },
     {
       "lane": "backend",
-      "path": "internal/payment/provider/wechatshop_orders_test.go",
-      "test": "TestWeChatShopOrderContractUpdateWindowAndRefund"
+      "path": "internal/order/app/export_test.go",
+      "test": "TestExportFailsClosedForReadDecryptAndEnrichmentFailures"
     },
     {
       "lane": "backend",
-      "path": "internal/payment/provider/wechatshop_orders_test.go",
-      "test": "TestWeChatShopPaidCallbackSignatureScopeAndExactID"
+      "path": "internal/order/app/export_test.go",
+      "test": "TestExportEmptyWorkbookAndExistingLimits"
     },
     {
       "lane": "backend",
-      "path": "internal/payment/provider/wechatshop_orders_test.go",
-      "test": "TestWeChatShopDeferredOrNonPaymentNeverActivates"
+      "path": "internal/order/app/export_test.go",
+      "test": "TestExportCSVByteLimitRejectsWithoutReceipt"
     },
     {
       "lane": "backend",
-      "path": "internal/order/http/wechat_shop_buyer_test.go",
-      "test": "TestShopBuyerDisplayBeforeAndAfterCustomerLink"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/order/http/handler_test.go",
-      "test": "TestListUsesCanonicalCustomerDisplayName"
+      "path": "internal/order/app/export_test.go",
+      "test": "TestExportUsesFrozenCouponPriceAndConfirmedRefund"
     },
     {
       "lane": "backend",
       "path": "internal/order/app/service_test.go",
-      "test": "TestGetByReferenceForCustomerUsesCustomerBoundStoreQuery"
+      "test": "TestExportCSVIsReceiptBackedReplayAndEscapesFormulas"
     },
     {
       "lane": "backend",
-      "path": "internal/identity/app/oauth_test.go",
-      "test": "TestOAuthSubjectPreservesRootsAndRejectsCrossRoot"
+      "path": "internal/order/http/handler_test.go",
+      "test": "TestExportRequiresAdminCSRFAndRejectsUnresolvedIdentityFilters"
     },
     {
       "lane": "backend",
-      "path": "internal/identity/app/oneid_test.go",
-      "test": "TestResolveDoesNotProvisionCustomer"
+      "path": "internal/order/http/handler_test.go",
+      "test": "TestExportReturnsReceiptBackedCSV"
     },
     {
       "lane": "backend",
-      "path": "internal/identity/app/oneid_test.go",
-      "test": "TestProvisionRequiresOpaqueVerifiedFact"
+      "path": "internal/order/http/handler_test.go",
+      "test": "TestExportSharesIdentityResolutionAndXLSXDefault"
     },
     {
       "lane": "backend",
-      "path": "internal/identity/app/oneid_test.go",
-      "test": "TestProvisionObservesOnlyNewCanonicalCustomer"
+      "path": "internal/order/http/handler_test.go",
+      "test": "TestWechatExportCompatibilityStaysScopedAndSharesFormats"
     },
     {
       "lane": "backend",
-      "path": "internal/identity/app/oneid_test.go",
-      "test": "TestProvisionFailsWhenMinimumCustomerProjectionFails"
+      "path": "cmd/aicrm/order_export_adapter_test.go",
+      "test": "TestOrderExportCommissionUsesCurrentPayableAndRecordedRecovery"
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/wechat_shop_buyer_integration_test.go",
-      "test": "TestPostgreSQLShopBuyerOneIDOrdersAndLateContact",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/wechat_shop_orders_integration_test.go",
-      "test": "TestPostgreSQLShopOrdersReplayRefundMissingContactAndRecovery",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/wechat_shop_adversarial_postgres_test.go",
-      "test": "TestPostgreSQLShopStateMoneyIdentityAndImmutableSnapshot",
+      "path": "cmd/aicrm/order_export_postgres_integration_test.go",
+      "test": "TestPostgreSQLUnifiedOrderExportHTTPAndCLI",
       "postgres": true
     },
     {
@@ -98,6 +79,6 @@
     }
   ],
   "installed_checks": [
-    "wechat-shop"
+    "order-export-sharing"
   ]
 }

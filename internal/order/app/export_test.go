@@ -107,11 +107,11 @@ func TestExportXLSXPreservesFullFactsBlankContactsAndEveryItem(t *testing.T) {
 	}
 	defer f.Close()
 	rows, err := f.GetRows("订单信息")
-	if err != nil || len(rows) != 4 || len(rows[0]) != 27 {
+	if err != nil || len(rows) != 4 || len(rows[0]) != 36 {
 		t.Fatal("xlsx schema/row count mismatch")
 	}
 	for i := 1; i < len(rows); i++ {
-		for len(rows[i]) < 27 {
+		for len(rows[i]) < 36 {
 			rows[i] = append(rows[i], "")
 		}
 	}
@@ -144,7 +144,7 @@ func TestExportXLSXPreservesFullFactsBlankContactsAndEveryItem(t *testing.T) {
 		t.Fatal(err)
 	}
 	csvRows, err := csv.NewReader(strings.NewReader(strings.TrimPrefix(string(csvExport.Content), "\ufeff"))).ReadAll()
-	if err != nil || len(csvRows) != 4 || len(csvRows[0]) != 27 || csvRows[3][17] != "第二商品 · 三人成行版" || csvRows[2][17] != "'"+first.Items[0].ProductName || csvRows[2][11] != "13800000000" || csvRows[2][7] != "20.50" {
+	if err != nil || len(csvRows) != 4 || len(csvRows[0]) != 36 || csvRows[3][17] != "第二商品 · 三人成行版" || csvRows[2][17] != "'"+first.Items[0].ProductName || csvRows[2][11] != "13800000000" || csvRows[2][7] != "20.50" {
 		t.Fatal("CSV must share full facts and protect formula text")
 	}
 
@@ -188,11 +188,11 @@ func TestExportEmptyWorkbookAndExistingLimits(t *testing.T) {
 	}
 	defer f.Close()
 	dimension, _ := f.GetSheetDimension("订单信息")
-	if dimension != "A1:AA1" {
+	if dimension != "A1:AJ1" {
 		t.Fatal("empty export must publish every header to spreadsheet readers")
 	}
 	rows, _ := f.GetRows("订单信息")
-	if len(rows) != 1 || len(rows[0]) != 27 || result.Rows != 0 {
+	if len(rows) != 1 || len(rows[0]) != 36 || result.Rows != 0 {
 		t.Fatal("empty export still needs exact headers")
 	}
 	input := orderInput("large-export")

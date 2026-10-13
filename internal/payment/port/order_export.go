@@ -11,6 +11,8 @@ type OrderExportPaymentReader interface {
 	ReadOrderExportPaymentsWithin(context.Context, []int64) (map[int64]OrderExportPayment, error)
 }
 type OrderExportPayment struct {
-	PaidAt        *time.Time
-	TransactionNo string
+	PaidAt                                              *time.Time
+	TransactionNo                                       string
+	AmountMinor, SharedMinor                            int64
+	SharingProcessing, SharingUnknown, SharingException bool
 }

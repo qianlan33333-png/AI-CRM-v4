@@ -25,7 +25,7 @@ type orderExportAdapter struct {
 }
 
 func (a orderExportAdapter) ReadOrderExportFactsWithin(ctx context.Context, orders []orderdomain.Snapshot, fallbackIDs []int64) (orderport.ExportFacts, error) {
-	out := orderport.ExportFacts{Customers: map[int64]orderport.ExportCustomer{}, Payments: map[int64]orderport.ExportPayment{}, Distributors: map[int64][]orderport.ExportDistributor{}}
+	out := orderport.ExportFacts{Customers: map[int64]orderport.ExportCustomer{}, Payments: map[int64]orderport.ExportPayment{}, Distributors: map[int64][]orderport.ExportDistributor{}, Commissions: map[int64]orderport.ExportCommission{}}
 	customerSet := map[customerdomain.CustomerID]bool{}
 	var orderIDs []int64
 	distribution := map[int64][]distributionport.OrderDistributionLine{}
@@ -42,7 +42,7 @@ func (a orderExportAdapter) ReadOrderExportFactsWithin(ctx context.Context, orde
 			return out, err
 		}
 		for id, v := range p {
-			out.Payments[id] = orderport.ExportPayment{PaidAt: v.PaidAt, TransactionNo: v.TransactionNo}
+			out.Payments[id] = orderport.ExportPayment{PaidAt: v.PaidAt, TransactionNo: v.TransactionNo, AmountMinor: v.AmountMinor, SharedMinor: v.SharedMinor, SharingProcessing: v.SharingProcessing, SharingUnknown: v.SharingUnknown, SharingException: v.SharingException}
 		}
 		d, err := a.distribution.ReadOrderDistribution(ctx, batch)
 		if err != nil {
@@ -53,6 +53,7 @@ func (a orderExportAdapter) ReadOrderExportFactsWithin(ctx context.Context, orde
 			for _, line := range lines {
 				customerSet[line.DistributorCustomerID] = true
 			}
+			out.Commissions[id] = exportCommissionFacts(lines)
 		}
 	}
 	var ids []customerdomain.CustomerID
@@ -130,4 +131,34 @@ func (a orderExportAdapter) ReadOrderExportFactsWithin(ctx context.Context, orde
 		}
 	}
 	return out, nil
+}
+
+func exportCommissionFacts(lines []distributionport.OrderDistributionLine) orderport.ExportCommission {
+	var out orderport.ExportCommission
+	for _, line := range lines {
+		if !line.HasCommission {
+			continue
+		}
+		out.PayableMinor += line.CurrentPayableMinor
+		if line.Status != "cancelled" && line.Status != "zero_commission" && line.Status != "paid" {
+			out.PendingMinor += max(line.CurrentPayableMinor-line.PaidMinor, 0)
+		}
+		for _, adjustment := range line.Adjustments {
+			if adjustment.Kind == "manual_recovery" {
+				out.RecoveredMinor += adjustment.DeltaMinor
+			}
+		}
+		if line.Status == "exception" {
+			out.Exception = true
+		}
+		for _, exception := range line.Exceptions {
+			if exception.Status == "open" || exception.Status == "querying" {
+				// Scheduling warnings are not unsettled money.
+				if exception.Kind != "settlement_deadline_imminent" {
+					out.Exception = true
+				}
+			}
+		}
+	}
+	return out
 }

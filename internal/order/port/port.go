@@ -286,13 +286,23 @@ type ExportDistributor struct {
 	Number, Name string
 }
 type ExportPayment struct {
-	PaidAt        *time.Time
-	TransactionNo string
+	PaidAt                                              *time.Time
+	TransactionNo                                       string
+	AmountMinor, SharedMinor                            int64
+	SharingProcessing, SharingUnknown, SharingException bool
+}
+
+// ExportCommission is an order-level local projection, separate from names
+// on individual item lines. Recovery is recorded money, never a liability.
+type ExportCommission struct {
+	PayableMinor, PendingMinor, RecoveredMinor int64
+	Exception                                  bool
 }
 type ExportFacts struct {
 	Customers    map[int64]ExportCustomer
 	Payments     map[int64]ExportPayment
 	Distributors map[int64][]ExportDistributor
+	Commissions  map[int64]ExportCommission
 }
 
 type SettlementWriter interface {

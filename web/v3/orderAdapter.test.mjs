@@ -69,7 +69,7 @@ try {
 
   document.getElementById('orderMobile').value = '138 0013 8000';
   document.querySelector('button').click(); await pause();
-  assert.equal(document.getElementById('order-export-all').textContent, '导出订单 XLSX'); assert.ok(calls.some(url => url.pathname === '/api/admin/exports/preview' && url.search === ''), 'identity-filtered export uses the server resolver');
+  assert.equal(document.getElementById('order-export-all').textContent, '导出订单 XLSX'); assert.equal(document.getElementById('order-export-all').getAttribute('aria-describedby'), 'order-export-money-note'); assert.match(document.getElementById('order-export-money-note').textContent, /未扣手续费.*每单只计一次.*净额留空/); assert.ok(calls.some(url => url.pathname === '/api/admin/exports/preview' && url.search === ''), 'identity-filtered export uses the server resolver');
   document.getElementById('orderMobile').value = '138 0013 8000';
   const directListResponse = await dom.window.fetch('/api/admin/orders?limit=50&offset=0');
   assert.equal(calls.at(-1).searchParams.get('phone'), '13800138000', 'phone searches must stay server-side and preserve paging');

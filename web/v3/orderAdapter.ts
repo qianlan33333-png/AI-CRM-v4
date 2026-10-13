@@ -633,6 +633,9 @@ function installAllOrderExport(): void {
   (button as HTMLButtonElement & { __dcBound?: boolean }).__dcBound = true; button.dataset.capabilityState = 'real';
   const status = element('p'); status.id = 'order-export-status'; status.setAttribute('role', 'status');
   status.style.cssText = 'margin:0;color:#69707A;font-size:12px;flex-basis:100%;width:100%'; status.hidden = true;
+  const moneyNote = element('p', '导出含应收、实付、分账及商家净额（未扣手续费）；新增金额每单只计一次，结果待确认时净额留空。');
+  moneyNote.id = 'order-export-money-note'; moneyNote.style.cssText = status.style.cssText;
+  button.setAttribute('aria-describedby', moneyNote.id);
   button.addEventListener('click', async () => {
     const query = new URL('/api/admin/orders', location.origin); orderQuery(query);
     for (const [field, id] of [['status', 'orderStatus'], ['created_from', 'orderCreatedFrom'], ['created_to', 'orderCreatedTo']]) {
@@ -666,7 +669,7 @@ function installAllOrderExport(): void {
     } finally { button.disabled = false; button.textContent = '导出订单 XLSX'; }
   });
   reference.replaceWith(button);
-  const actions = button.parentElement; const statusParent = actions?.parentElement instanceof HTMLDivElement ? actions.parentElement : actions; statusParent?.appendChild(status);
+  const actions = button.parentElement; const statusParent = actions?.parentElement instanceof HTMLDivElement ? actions.parentElement : actions; statusParent?.appendChild(moneyNote); statusParent?.appendChild(status);
 }
 function applyOrderPresentation(): void {
  installAllOrderExport();
