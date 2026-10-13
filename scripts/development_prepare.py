@@ -13,6 +13,7 @@ INDEX = "web/donor-sources/source-index.json"
 LOCK = "web/donor-sources/source-lock.json"
 APPROVALS = "docs/engineering/dedup/p5-authority-change-approvals.json"
 V4 = "https://github.com/qianlan33333-png/AI-CRM-v4.git"
+WORKSTATION_ROUTE = Path("/Users/qianlan/Downloads/新CRM/release-control/workstation.json")
 
 
 def git(root: Path, *args: str) -> bytes:
@@ -200,8 +201,7 @@ def handoff(root: Path, base: str, ref: str, task: str, authorization: str,
     impacts = json.loads(impact.read_text())
     if set(impacts) != {"contract", "mechanism", "consumers", "pages", "evidence"}:
         raise ValueError("handoff_requires_five_impacts")
-    route = Path("/Users/qianlan/Downloads/新CRM/release-control/workstation.json")
-    thread = json.loads(route.read_text())["thread_id"]
+    thread = json.loads(WORKSTATION_ROUTE.read_text())["thread_id"]
     return {"schema_version": 1, "origin_task_id": task, "workstation_thread_id": thread,
             "base": base, "head": head, "tree": git(root, "rev-parse", "HEAD^{tree}").decode().strip(),
             "ref": ref, "impact": impacts, "test_receipts": values,

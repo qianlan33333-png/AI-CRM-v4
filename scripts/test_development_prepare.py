@@ -69,13 +69,14 @@ class Preparation(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root = self.clone(d); head = p.git(root, "rev-parse", "HEAD").decode().strip()
             receipt = Path(d) / "receipt.json"; impact = Path(d) / "impact.json"
+            route = Path(d) / "workstation.json"; route.write_text('{"thread_id":"fixture-workstation"}')
             impact.write_text(json.dumps(dict.fromkeys(["contract", "mechanism", "consumers", "pages", "evidence"], "fixture")))
             raw_git = p.git
             def fake_git(root, *args):
                 if args[0] == "ls-remote":
                     return (head + "\trefs/heads/codex/fixture\n").encode()
                 return raw_git(root, *args)
-            with patch.object(p, "git", side_effect=fake_git):
+            with patch.object(p, "git", side_effect=fake_git), patch.object(p, "WORKSTATION_ROUTE", route):
                 for row in ({"head": "a" * 40, "result": "passed"},
                             {"head": head, "result": "failed"},
                             {"head": head, "result": "passed", "source": {"unchanged_during_execution": False}}):

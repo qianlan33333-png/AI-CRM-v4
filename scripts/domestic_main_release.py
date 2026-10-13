@@ -5488,7 +5488,12 @@ def maintenance_check(config: dict[str, Any], candidate_sha: str) -> dict[str, A
         if not controller_files:
             raise ReleaseError("candidate does not contain a registered fixed-controller change")
         report_dir = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{candidate_sha}-maintenance-{time.time_ns()}"
-        check_receipt = _check_report(config, repo, worktree, report_dir, check_base, candidate_sha, candidate_policy=True)
+        try:
+            check_receipt = _check_report(config, repo, worktree, report_dir, check_base, candidate_sha, candidate_policy=True)
+        except (CheckCandidateError, CheckEnvironmentError, CheckIncompleteError) as error:
+            if not batch_repair:
+                _mark_failed(state_path, state, item, error, "maintenance-check")
+            raise
         python_controller_files = [path for path in controller_files if path.endswith(".py")]
         compile_code = (
             "from pathlib import Path; import sys; root=Path(sys.argv[1]); "
