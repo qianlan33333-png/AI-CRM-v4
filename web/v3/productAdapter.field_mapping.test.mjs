@@ -44,10 +44,25 @@ for (const periodic of [false, true]) {
   await waitFor(() => d.querySelector('[data-product-purchase-action]') && d.querySelector('[data-product-parity-push]')).catch((error) => { console.log(JSON.stringify(calls), d.querySelector('#stage')?.textContent, d.querySelector('#stage')?.innerHTML?.slice(0, 1200)); throw error; });
   await waitFor(() => !d.getElementById(periodic ? 'spfStock' : 'pfStock'));
   const prefix = periodic ? 'spf' : 'pf';
+  assert.equal(d.getElementById(prefix + 'BuyButtonText').closest('#product-sale,#sp-action')?.id, periodic ? 'sp-action' : 'product-sale', 'buy-button field must be tested in its actual source-owned dimension');
   for (const suffix of ['Name', 'Price', 'BuyButtonText', 'Code', 'Currency', 'Description']) {
     const input = d.getElementById(prefix + suffix);
-    if (!input) continue; // Periodic source contracts omit ordinary-only fields.
-    assert.equal(input.labels.length, 1, `${input.id} must retain its visible accessible label`);
+    assert.ok(input, `${prefix + suffix} source-owned field must exist`);
+    const dimension = input.closest('#product-sale,#sp-sale,#sp-action');
+    const tab = d.querySelector(`a[href="#${dimension?.id}"]`);
+    assert.ok(tab, `${input.id} must have real dimension navigation`);
+    tab.click();
+    assert.equal(dimension.hidden, false, `${input.id} dimension must activate`);
+    assert.equal(input.labels.length, 1, `${input.id} must retain its associated label`);
+    if (periodic && suffix === 'BuyButtonText') {
+      const wrapper = dimension.lastElementChild;
+      assert.equal(wrapper.hidden, true, 'periodic retired fields stay hidden');
+      assert.equal(wrapper.previousElementSibling.matches('[data-product-purchase-action]'), true, 'only the exact retained serializer sibling is exempt from visible-field focus');
+      assert.equal(input.closest('[hidden]'), wrapper, 'periodic buy-button text remains in the intentional hidden serializer');
+      assert.equal(input.value, projection.buy_button_text, 'hidden serializer retains the persisted projection');
+      continue;
+    }
+    assert.equal(input.closest('[hidden]'), null, `${input.id} must not be hidden after real navigation`);
     let activations = 0;
     input.addEventListener('click', () => { activations++; }, { once: true });
     input.labels[0].click();
@@ -75,17 +90,20 @@ for (const periodic of [false, true]) {
   const subjectWrite = (call) => call.method === 'PUT' && !call.path.endsWith('/external-push') && !call.path.endsWith('/external-push/test');
   await waitFor(() => calls.some(subjectWrite)).catch((error) => { console.log(JSON.stringify(calls), d.querySelector('#fb-toast, #product-v3-toast')?.textContent); throw error; });
   const redirectWrite = calls.find(subjectWrite).body.admin_projection;
+  assert.equal(redirectWrite.buy_button_text, projection.buy_button_text, 'action save preserves the retained buy-button text');
   assert.equal(Object.hasOwn(calls.find(subjectWrite).body, 'stock_quantity'), false, 'legacy Product response fields never flow into updates');
   assert.equal(redirectWrite.purchase_action_mode, 'redirect');
   assert.deepEqual(redirectWrite.completion_target.url_link, { enabled: true, url: '', source_url: 'https://link.example.test/source', response_url_key: 'destination' });
   targetType.value = 'h5'; targetType.dispatchEvent(new dom.window.Event('change', { bubbles: true })); d.querySelector('[data-product-purchase-h5-url]').value = '/paid/complete'; d.querySelector('[data-product-purchase-save]').click();
   await waitFor(() => calls.filter(subjectWrite).length >= 2);
   const h5Write = calls.filter(subjectWrite).at(-1).body.admin_projection;
+  assert.equal(h5Write.buy_button_text, projection.buy_button_text, 'mode changes preserve the retained buy-button text');
   assert.equal(Object.hasOwn(calls.filter(subjectWrite).at(-1).body, 'stock_quantity'), false, 'subsequent Product updates stay stockless');
   assert.equal(h5Write.completion_target.h5_url, '/paid/complete');
   actionEnabled.checked = false; actionEnabled.dispatchEvent(new dom.window.Event('change', { bubbles: true })); d.querySelector('[data-product-purchase-save]').click();
   await waitFor(() => calls.filter(subjectWrite).length >= 3);
   const disabledAction = calls.filter(subjectWrite).at(-1).body.admin_projection;
+  assert.equal(disabledAction.buy_button_text, projection.buy_button_text, 'disabling actions preserves the retained buy-button text');
   assert.equal(disabledAction.purchase_action_enabled, false); assert.equal(disabledAction.completion_target, null);
   const enabled = d.querySelector('[data-product-parity-push-enabled]'); enabled.checked = true; enabled.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
   d.querySelector('[data-product-parity-push-url]').value = 'https://hooks.example.test/new'; d.querySelector('[data-product-parity-push-save]').click();

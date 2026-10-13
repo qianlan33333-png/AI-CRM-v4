@@ -67,17 +67,44 @@ async function evaluate(cdp, expression) {
 
 async function assertProductFormSemantics(cdp, prefix) {
   await waitFor(cdp, `['Name','Price','Description'].every(suffix => document.getElementById(${JSON.stringify(prefix)} + suffix)?.labels?.length === 1)`, 'product fields have no visible accessible labels');
-  const fields = await evaluate(cdp, `(() => {
-    const prefix = ${JSON.stringify(prefix)};
-    const sale = document.querySelector(prefix === 'pf' ? 'a[href="#product-sale"]' : 'a[href="#sp-sale"]');
-    sale?.click();
-    return ['Name','Price','BuyButtonText','Code','Currency','Description'].filter(suffix => document.getElementById(prefix + suffix)).every(suffix => {
-      const input = document.getElementById(prefix + suffix);
-      if (input.labels.length !== 1 || !input.labels[0].textContent.trim()) return false;
-      input.labels[0].click(); return document.activeElement === input;
-    });
-  })()`);
-  if (!fields) throw new Error('product visible labels do not focus their exact fields');
+  const fields = [];
+  for (const suffix of ['Name','Price','BuyButtonText','Code','Currency','Description']) {
+    const id = prefix + suffix;
+    const dimension = await evaluate(cdp, `(() => {
+      const input = document.getElementById(${JSON.stringify(id)});
+      const panel = input?.closest('#product-sale,#product-action,#sp-sale,#sp-action');
+      const tab = panel && document.querySelector('a[href="#' + panel.id + '"]');
+      if (!input || !panel || !tab) return null;
+      tab.click(); return panel.id;
+    })()`);
+    if (!dimension) throw new Error('product field or real dimension navigation missing: ' + id);
+    await waitFor(cdp, `document.querySelector('a[href="#${dimension}"]')?.getAttribute('aria-current') === 'step' && document.getElementById(${JSON.stringify(dimension)})?.hidden === false`, 'product dimension did not activate: ' + dimension);
+    if (prefix === 'spf' && suffix === 'BuyButtonText') {
+      // purchaseActionControls intentionally retains the frozen serializer
+      // fields in the hidden sibling after the visible V4 action panel.
+      // Assert this exact compatibility contract, never skip arbitrary fields.
+      const retained = await evaluate(cdp, `(() => {
+        const input = document.getElementById('spfBuyButtonText');
+        const panel = document.getElementById('sp-action');
+        const wrapper = panel?.lastElementChild;
+        const owned = wrapper?.hidden === true && wrapper.contains(input) && wrapper.previousElementSibling?.matches('[data-product-purchase-action]');
+        input?.focus();
+        return {owned, hidden: input?.getClientRects().length === 0, unfocusable: document.activeElement !== input, labeled: input?.labels.length === 1, value: input?.value};
+      })()`);
+      if (!retained.owned || !retained.hidden || !retained.unfocusable || !retained.labeled || typeof retained.value !== 'string') throw new Error('periodic retained serializer contract failed: ' + JSON.stringify(retained));
+      fields.push({id, retained: true, ...retained});
+      continue;
+    }
+    await waitFor(cdp, `(() => { const input = document.getElementById(${JSON.stringify(id)}); return input?.getClientRects().length > 0 && getComputedStyle(input).visibility !== 'hidden'; })()`, 'visible product control unavailable: ' + id);
+    const field = await evaluate(cdp, `(() => {
+      const input = document.getElementById(${JSON.stringify(id)});
+      const labeled = input.labels.length === 1 && Boolean(input.labels[0].textContent.trim());
+      if (labeled) input.labels[0].click();
+      return {id: input.id, labeled, focused: document.activeElement === input};
+    })()`);
+    if (!field.labeled || !field.focused) throw new Error('visible product label focus failed: ' + JSON.stringify(field));
+    fields.push(field);
+  }
   const original = await evaluate(cdp, `(() => { const input = document.getElementById(${JSON.stringify(prefix + 'Name')}); input.labels[0].click(); input.select(); return input.value; })()`);
   await cdp.call('Input.insertText', { text: '标签键盘验收' });
   if (!await evaluate(cdp, `document.getElementById(${JSON.stringify(prefix + 'Name')}).value === '标签键盘验收'`)) throw new Error('label keyboard input failed');
@@ -85,6 +112,7 @@ async function assertProductFormSemantics(cdp, prefix) {
   await waitFor(cdp, "document.querySelectorAll('.admin-nav-icon').length === 24 && [...document.querySelectorAll('.admin-nav-icon')].every(image => image.complete && image.naturalWidth > 0)", 'installed menu contains unloaded icons');
   const resources = await evaluate(cdp, "Promise.all([...document.querySelectorAll('.admin-nav-icon')].map(async image => { const response = await fetch(image.src,{credentials:'same-origin'}); return response.ok && response.headers.get('Content-Type')?.startsWith('image/svg+xml'); })).then(results => results.every(Boolean))");
   if (!resources) throw new Error('installed navigation icon resource is not an SVG');
+  return fields.find(field => field.retained)?.value;
 }
 
 async function waitFor(cdp, expression, message) {
@@ -214,13 +242,15 @@ try {
   await cdp.call('Page.navigate', { url: baseURL + servicePath });
   await waitFor(cdp, "location.pathname === '/admin/wechat-pay/spProductForm.html'", 'navigation did not reach service-period product page');
   await waitFor(cdp, actionReadyExpression(), 'service-period legacy parity panels did not mount');
-  await assertProductFormSemantics(cdp, 'spf');
+  const retainedBuyButtonText = await assertProductFormSemantics(cdp, 'spf');
   await configureURLLinkAction(cdp, servicePath, `/api/admin/service-period-products/${serviceProductID}`);
+  if (!await evaluate(cdp, `fetch(${JSON.stringify('/api/admin/service-period-products/' + serviceProductID)}, {credentials:'same-origin'}).then(response => response.ok ? response.json() : null).then(body => (body?.product || body)?.admin_projection?.buy_button_text === ${JSON.stringify(retainedBuyButtonText)})`)) throw new Error('periodic hidden serializer value changed after action save');
   await configurePush(cdp, `/api/admin/service-period-products/${serviceProductID}/external-push`, 'service');
   await cdp.call('Page.navigate', { url: baseURL + servicePath });
   await waitFor(cdp, actionReadyExpression(), 'service-period push panel did not remount after reload');
   await assertPushReadback(cdp, 'service');
-  console.log('health_product_accessibility: PASS ordinary/service labels, native focus/keyboard and 24 installed navigation SVGs');
+  if (!await evaluate(cdp, `document.getElementById('spfBuyButtonText')?.value === ${JSON.stringify(retainedBuyButtonText)}`)) throw new Error('periodic hidden serializer value did not survive save and reload');
+  console.log('health_product_accessibility: PASS 11 visible ordinary/service labels, native focus/keyboard, periodic hidden serializer preservation and 24 installed navigation SVGs');
   console.log(`product_payment_actions_legacy_parity: PASS screenshots=${screenshotDirectory}`);
 } finally {
   if (cdp) cdp.close();
