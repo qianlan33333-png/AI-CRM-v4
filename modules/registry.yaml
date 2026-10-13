@@ -1,83 +1,1292 @@
 version: 1
-states: [planned, contracted, implemented, shadow, cutover, retired-source]
+states:
+  - planned
+  - contracted
+  - implemented
+  - shadow
+  - cutover
+  - retired-source
 modules:
   - name: platform
     status: implemented
     owner: crm-platform
     dependencies: []
+    source: internal/platform
+    entrypoints:
+      - internal/platform/audit/service.go
+    owned_tables:
+      - audit_events
+      - idempotency_receipts
+      - outbox_events
+      - platform_schema_migrations
+      - river_client
+      - river_client_queue
+      - river_job
+      - river_leader
+      - river_migration
+      - river_queue
+      - webhook_inbox
+    validation_contracts:
+      - internal/platform/audit/service_test.go
+      - internal/platform/config/config_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: platform
   - name: customer
     status: implemented
     owner: crm-core
-    dependencies: [platform]
+    dependencies:
+      - access
+      - address
+      - externaleffects
+      - identity
+      - order
+      - platform
+      - wecom
+    source: internal/customer
+    entrypoints:
+      - internal/customer/http/handler.go
+    owned_tables:
+      - customer_contact_profiles
+      - customer_directory_projection
+      - customer_local_owners
+      - customer_owner_handoff_batches
+      - customer_owner_handoff_effect_lines
+      - customer_owner_handoff_effects
+      - customer_owner_handoff_history_imports
+      - customer_owner_handoff_history_runs
+      - customer_owner_handoff_lines
+      - customer_owner_handoff_preview_rows
+      - customer_owner_handoff_previews
+      - customer_sidebar_profile_receipts
+      - customer_sidebar_profiles
+      - customer_tag_command_lines
+      - customer_tag_commands
+      - customer_tag_history_import_batches
+      - customer_tag_history_receipts
+      - customer_timeline_projection
+    validation_contracts:
+      - internal/customer/app/collected_phone_test.go
+      - internal/customer/app/directory_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: customer
   - name: identity
     status: implemented
     owner: crm-core
-    dependencies: [platform, customer]
+    dependencies:
+      - access
+      - customer
+      - platform
+    source: internal/identity
+    entrypoints:
+      - internal/identity/http/handler.go
+    owned_tables:
+      - customer_identities
+      - customer_identity_conflicts
+      - customer_merge_candidates
+      - customer_merge_identity_members
+      - customer_merges
+      - customers
+      - identity_declared_phone_receipts
+      - identity_history_import_receipts
+      - identity_link_evidence
+      - identity_link_intents
+      - identity_phone_canonical_recoveries
+      - identity_phone_import_receipts
+      - identity_phone_import_runs
+      - identity_phone_secrets
+      - identity_phone_vault_migration_runs
+      - identity_source_conflict_actions
+      - identity_source_conflicts
+      - identity_source_observations
+      - identity_source_resolution_receipts
+      - identity_source_subjects
+    validation_contracts:
+      - internal/identity/app/oauth_test.go
+      - internal/identity/app/oneid_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: identity
   - name: access
     status: implemented
     owner: crm-core
-    dependencies: [platform]
+    dependencies:
+      - platform
+      - wecom
+    source: internal/access
+    entrypoints:
+      - internal/access/http/handler.go
+    owned_tables:
+      - access_machine_audit
+      - access_machine_client_grants
+      - access_machine_clients
+      - access_machine_historical_audit_batch_receipts
+      - access_machine_historical_audit_facts
+      - access_machine_import_batch_receipts
+      - access_machine_import_batches
+      - access_machine_import_receipts
+      - access_super_admin_control
+      - admin_access_audit
+      - admin_access_governance_receipts
+      - admin_access_login_compat_receipts
+      - admin_login_audit
+      - admin_login_rate_limits
+      - admin_sessions
+      - admin_user_roles
+      - admin_users
+    validation_contracts:
+      - internal/access/app/aiassistant_test.go
+      - internal/access/app/authentication_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: access
   - name: wecom
     status: implemented
     owner: crm-connectors
-    dependencies: [platform, access, identity]
+    dependencies:
+      - access
+      - channel
+      - customer
+      - externaleffects
+      - identity
+      - messagearchive
+      - outbound
+      - platform
+    source: internal/wecom
+    entrypoints:
+      - internal/wecom/handler.go
+    owned_tables:
+      - wecom_callback_receipts
+      - wecom_contact_description_source_observations
+      - wecom_customer_follow_staging
+      - wecom_customer_owner_observations
+      - wecom_customer_profile_staging
+      - wecom_customer_sync_items
+      - wecom_customer_sync_runs
+      - wecom_customer_tag_history
+      - wecom_customer_tag_observations
+      - wecom_customer_tag_refresh_watermarks
+      - wecom_directory_publications
+      - wecom_external_contact_event_cursors
+      - wecom_external_contact_profiles
+      - wecom_follow_relationships
+      - wecom_group_membership_facts
+      - wecom_group_membership_observations
+      - wecom_group_provider_facts
+      - wecom_group_provider_observations
+      - wecom_oauth_states
+      - wecom_provider_cache_metadata
+      - wecom_staff_directory_refresh_runs
+      - wecom_welcome_grants
+    validation_contracts:
+      - internal/wecom/adapter/archive_json_test.go
+      - internal/wecom/adapter/client_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: wecom
   - name: order
     status: implemented
     owner: crm-commerce
-    dependencies: [platform, customer, identity]
+    dependencies:
+      - access
+      - address
+      - coupon
+      - customer
+      - distribution
+      - externaleffects
+      - identity
+      - payment
+      - platform
+      - product
+    source: internal/order
+    entrypoints:
+      - internal/order/http/handler.go
+      - internal/order/app/service.go
+    owned_tables:
+      - order_audit_events
+      - order_checkout_snapshots
+      - order_contact_snapshots
+      - order_distribution_qualification_evidence
+      - order_entitlement_audit_events
+      - order_entitlement_fulfillment_receipts
+      - order_entitlement_historical_sources
+      - order_entitlement_operation_receipts
+      - order_entitlement_outbox
+      - order_export_receipts
+      - order_external_history_facts
+      - order_history_attribution_receipts
+      - order_history_attribution_runs
+      - order_history_source_deltas
+      - order_import_quarantine
+      - order_import_receipts
+      - order_import_runs
+      - order_items
+      - order_operation_receipts
+      - order_outbox
+      - order_paid_events
+      - order_service_entitlements
+      - order_shipping_address_snapshots
+      - order_status_history
+      - order_wechat_shop_facts
+      - order_wechat_shop_lines
+      - orders
+    validation_contracts:
+      - internal/order/app/attribution_test.go
+      - internal/order/app/checkout_mobile_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: order
   - name: payment
     status: implemented
     owner: crm-commerce
-    dependencies: [platform, order, identity]
+    dependencies:
+      - access
+      - address
+      - channel
+      - customer
+      - externaleffects
+      - identity
+      - order
+      - outbound
+      - platform
+      - product
+      - wechatshop
+    source: internal/payment
+    entrypoints:
+      - internal/payment/http/handler.go
+      - internal/payment/app/service.go
+    owned_tables:
+      - payment_audit_events
+      - payment_callback_receipts
+      - payment_checkout_abandonments
+      - payment_checkout_restart_permissions
+      - payment_h5_oauth_states
+      - payment_handoffs
+      - payment_history_source_deltas
+      - payment_operation_receipts
+      - payment_outbox
+      - payment_profit_sharing_audit_events
+      - payment_profit_sharing_instructions
+      - payment_profit_sharing_provider_intents
+      - payment_profit_sharing_receivers
+      - payment_profit_sharing_reserves
+      - payment_profit_sharing_unfreezes
+      - payment_provider_intents
+      - payment_reconciliations
+      - payment_refunds
+      - payment_sessions
+      - payment_shop_materials
+      - payments
+    validation_contracts:
+      - internal/payment/app/abandon_checkout_test.go
+      - internal/payment/app/alipay_acceptance_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: payment
   - name: webshell
     status: implemented
     owner: crm-product
-    dependencies: [access, customer, identity, wecom]
+    dependencies: []
+    source: internal/webshell
+    entrypoints:
+      - internal/webshell/handler.go
+    owned_tables: []
+    validation_contracts:
+      - internal/webshell/audience_activation_host_test.go
+      - internal/webshell/audience_send_history_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: webshell
   - name: crm-core-modules
     status: planned
     owner: crm-core
-    dependencies: [customer, identity, access, wecom]
+    dependencies:
+      - customer
+      - identity
+      - access
+      - wecom
+    kind: aggregate
   - name: content-commerce-modules
     status: planned
     owner: crm-product
-    dependencies: [crm-core-modules, order, payment]
+    dependencies:
+      - crm-core-modules
+      - order
+      - payment
+    kind: aggregate
   - name: operations-modules
     status: planned
     owner: crm-operations
-    dependencies: [crm-core-modules, content-commerce-modules]
+    dependencies:
+      - crm-core-modules
+      - content-commerce-modules
+    kind: aggregate
   - name: operationcycle
     status: implemented
     owner: crm-operations
-    dependencies: [platform, access]
+    dependencies:
+      - access
+      - platform
+    source: internal/operationcycle
+    entrypoints:
+      - internal/operationcycle/module.go
+      - internal/operationcycle/http/handler.go
+    owned_tables:
+      - operation_cycle_action_execution_snapshots
+      - operation_cycle_action_request_events
+      - operation_cycle_action_requests
+      - operation_cycle_admin_receipts
+      - operation_cycle_report_receipts
+      - operation_cycle_run_ordinals
+      - operation_cycle_run_versions
+      - operation_cycle_runners
+      - operation_cycle_runs
+      - operation_cycle_strategies
+      - operation_cycle_strategy_proposals
+      - operation_cycle_strategy_versions
+    validation_contracts:
+      - internal/operationcycle/app/service_test.go
+      - internal/operationcycle/domain/cycle_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: operationcycle
   - name: automation
     status: implemented
     owner: crm-operations
-    dependencies: [platform, access]
+    dependencies:
+      - access
+      - aiassistant
+      - config
+      - customer
+      - externaleffects
+      - identity
+      - media
+      - outbound
+      - platform
+      - segment
+    source: internal/automation
+    entrypoints:
+      - internal/automation/module.go
+      - internal/automation/http/handler.go
+    owned_tables:
+      - automation_agents
+      - automation_audience_push_audit_events
+      - automation_audience_push_batches
+      - automation_audience_push_config_audit_events
+      - automation_audience_push_config_receipts
+      - automation_audience_push_configs
+      - automation_audience_push_items
+      - automation_audience_push_outbox
+      - automation_audit_events
+      - automation_enrollments
+      - automation_generation_audit_events
+      - automation_generation_items
+      - automation_operation_receipts
+      - automation_operations_legacy_history
+      - automation_operations_migration_batches
+      - automation_operations_migration_quarantine
+      - automation_operations_migration_source_map
+      - automation_outbox
+      - automation_policies
+      - automation_policy_versions
+      - automation_run_previews
+      - automation_run_recipients
+      - automation_run_reconciliations
+      - automation_runs
+      - automation_runtime_audit_events
+      - automation_runtime_operation_receipts
+      - automation_runtime_outbox
+    validation_contracts:
+      - internal/automation/app/agents_attachment_test.go
+      - internal/automation/app/agents_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: automation
   - name: externaleffects
     status: implemented
     owner: crm-platform
-    dependencies: [platform]
+    dependencies:
+      - access
+      - platform
+    source: internal/externaleffects
+    entrypoints:
+      - internal/externaleffects/module.go
+    owned_tables:
+      - external_effect_attempts
+      - external_effect_generations
+      - external_effect_jobs
+      - external_effect_operation_receipts
+      - external_effects
+    validation_contracts:
+      - internal/externaleffects/accepted_response_lost_integration_test.go
+      - internal/externaleffects/final_failure_proof_integration_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: externaleffects
   - name: outbound
     status: implemented
     owner: crm-connectors
-    dependencies: [platform, externaleffects]
+    dependencies:
+      - access
+      - aiassistant
+      - automation
+      - channel
+      - customer
+      - externaleffects
+      - groupops
+      - identity
+      - media
+      - order
+      - platform
+      - product
+      - survey
+      - tag
+      - wecom
+    source: internal/outbound
+    entrypoints:
+      - internal/outbound/channel_asset.go
+    owned_tables:
+      - outbound_commerce_push_audit_events
+      - outbound_commerce_push_endpoints
+      - outbound_commerce_push_history_batch_rows
+      - outbound_commerce_push_history_batches
+      - outbound_commerce_push_history_rows
+      - outbound_commerce_push_intents
+      - outbound_commerce_push_outbox
+      - outbound_material_events
+      - outbound_material_outbox
+      - outbound_material_preparations
+      - outbound_material_refresh_items
+      - outbound_material_refresh_rounds
+      - outbound_message_audit_events
+      - outbound_message_intents
+      - outbound_message_outbox
+      - outbound_message_receipts
+      - outbound_private_message_intents
+      - outbound_private_message_receipts
+      - outbound_sidebar_image_events
+      - outbound_sidebar_image_outbox
+      - outbound_sidebar_image_preparations
+      - outbound_sidebar_send_audit_events
+      - outbound_sidebar_send_grants
+      - outbound_sidebar_send_intents
+      - outbound_sidebar_send_outbox
+      - outbound_survey_completion_endpoints
+      - outbound_wecom_contact_description_intents
+      - outbound_wecom_contact_description_run_items
+    validation_contracts:
+      - internal/outbound/channel_asset_test.go
+      - internal/outbound/channel_entrant_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: outbound
   - name: segment
     status: implemented
     owner: crm-operations
-    dependencies: [platform, customer, identity, access, automation, outbound]
+    dependencies:
+      - access
+      - automation
+      - channel
+      - customer
+      - externaleffects
+      - hxcdashboard
+      - identity
+      - order
+      - platform
+      - product
+      - radar
+      - survey
+      - wecom
+    source: internal/segment
+    entrypoints:
+      - internal/segment/module.go
+      - internal/segment/http/handler.go
+    owned_tables:
+      - segment_audience_audit_events
+      - segment_audience_automation_binding_versions
+      - segment_audience_configuration_versions
+      - segment_audience_groups
+      - segment_audience_history_batches
+      - segment_audience_history_groups
+      - segment_audience_history_members
+      - segment_audience_history_packages
+      - segment_audience_history_rows
+      - segment_audience_history_snapshots
+      - segment_audience_member_events
+      - segment_audience_member_exit_events
+      - segment_audience_operation_receipts
+      - segment_audience_outbox
+      - segment_audience_packages
+      - segment_audience_refresh_batches
+      - segment_audience_refresh_runs
+      - segment_audience_schedule_states
+      - segment_audience_sender_set_members
+      - segment_audience_sender_sets
+      - segment_audience_snapshot_members
+      - segment_audience_snapshots
+      - segment_audience_webhook_receipts
+      - segment_core_assignments
+      - segment_core_products
+      - segment_core_prompt_state
+      - segment_core_prompt_versions
+      - segment_core_purchases
+      - segment_core_pushes
+      - segment_core_recommendations
+    validation_contracts:
+      - internal/segment/adapter/activation_test.go
+      - internal/segment/adapter/customer_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: segment
   - name: radar
     status: implemented
     owner: crm-operations
-    dependencies: [platform, access, customer, identity, media, wecom]
+    dependencies:
+      - access
+      - customer
+      - identity
+      - platform
+    source: internal/radar
+    entrypoints:
+      - internal/radar/module/module.go
+      - internal/radar/http/handler.go
+    owned_tables:
+      - radar_audit_events
+      - radar_events
+      - radar_legacy_events
+      - radar_link_versions
+      - radar_links
+      - radar_migration_batches
+      - radar_migration_quarantine
+      - radar_migration_source_map
+      - radar_oauth_states
+      - radar_operation_receipts
+      - radar_outbox
+      - radar_view_sessions
+    validation_contracts:
+      - internal/radar/app/commands_test.go
+      - internal/radar/http/handler_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: radar
   - name: aiassistant
-    status: contracted
+    status: implemented
     owner: crm-operations
-    dependencies: [platform, customer, identity, access]
+    dependencies:
+      - access
+      - customer
+      - externaleffects
+      - identity
+      - media
+      - operationcycle
+      - outbound
+      - platform
+    source: internal/aiassistant
+    entrypoints:
+      - internal/aiassistant/module.go
+      - internal/aiassistant/http/handler.go
+    owned_tables:
+      - ai_assistant_audit_events
+      - ai_assistant_content_versions
+      - ai_assistant_effect_bindings
+      - ai_assistant_excel_batch_version_covers
+      - ai_assistant_excel_batch_versions
+      - ai_assistant_excel_imports
+      - ai_assistant_integration_nonces
+      - ai_assistant_operation_receipts
+      - ai_assistant_outbox
+      - ai_assistant_plan_recipients
+      - ai_assistant_plans
+      - ai_assistant_review_decisions
+      - ai_assistant_workbench_packages
+    validation_contracts:
+      - internal/aiassistant/domain/content_test.go
+      - internal/aiassistant/domain/plan_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: aiassistant
   - name: intelligence-platform-tail
     status: planned
     owner: crm-platform
-    dependencies: [operations-modules]
+    dependencies:
+      - operations-modules
+    kind: aggregate
   - name: hxc-dashboard
-    status: cutover
+    status: implemented
     owner: crm-operations
-    dependencies: [platform, access, identity]
+    dependencies:
+      - access
+      - customer
+      - identity
+      - platform
+    source: internal/hxcdashboard
+    entrypoints:
+      - internal/hxcdashboard/module.go
+      - internal/hxcdashboard/http/handler.go
+    owned_tables:
+      - hxc_dashboard_refresh_runs
+      - hxc_dashboard_rows
+      - hxc_dashboard_share_key
+      - hxc_dashboard_shares
+      - hxc_dashboard_versions
+      - hxc_dashboard_view_receipts
+      - hxc_dashboard_views
+      - hxc_registration_coverage
+    validation_contracts:
+      - internal/hxcdashboard/app/service_test.go
+      - internal/hxcdashboard/domain/domain_test.go
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: hxcdashboard
+  - name: address
+    owner: crm-commerce
+    source: internal/address
+    entrypoints:
+      - internal/address/port/address.go
+    dependencies: []
+    owned_tables: []
+    validation_contracts: []
+    status: contracted
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: address
+  - name: adminops
+    owner: crm-operations
+    source: internal/adminops
+    entrypoints:
+      - internal/adminops/app/service.go
+    dependencies:
+      - access
+      - config
+      - externaleffects
+      - media
+      - platform
+    owned_tables:
+      - adminops_cpu_profile_receipts
+      - adminops_diagnostic_events
+      - adminops_diagnostic_snapshots
+      - adminops_governance_releases
+      - adminops_incident_attributions
+      - adminops_incident_episodes
+      - adminops_inspection_commands
+      - adminops_inspection_issue_actions
+      - adminops_inspection_issues
+      - adminops_inspection_reports
+      - adminops_inspection_results
+      - adminops_inspection_runs
+      - adminops_release_projections
+      - adminops_retention_runs
+    validation_contracts:
+      - internal/adminops/app/credential_identifier_test.go
+      - internal/adminops/app/execution_runtime_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: adminops
+  - name: channel
+    owner: crm-connectors
+    source: internal/channel
+    entrypoints:
+      - internal/channel/module.go
+    dependencies:
+      - access
+      - customer
+      - externaleffects
+      - platform
+      - wecom
+    owned_tables:
+      - channel_acquisition_assets
+      - channel_acquisition_entrant_receipts
+      - channel_acquisition_entrant_reconciliation_receipts
+      - channel_acquisition_link_receipts
+      - channel_acquisition_link_reconciliations
+      - channel_acquisition_state_bindings
+      - channel_asset_reconciliation_receipts
+      - channel_assignees
+      - channel_config_versions
+      - channel_entrant_actions
+      - channel_entrant_assignments
+      - channel_history_assignees
+      - channel_history_contact_reconciliations
+      - channel_history_contacts
+      - channel_history_effects
+      - channel_history_import_runs
+      - channel_history_source_maps
+      - channel_legacy_acquisition_assets
+      - channel_legacy_material_maps
+      - channel_legacy_tag_maps
+      - channel_operation_receipts
+      - channel_semantic_repair_conflicts
+      - channel_semantic_repair_runs
+      - channel_semantic_repaired_configs
+      - channel_welcome_intents
+      - channel_welcome_message_snapshots
+      - channels
+    validation_contracts:
+      - internal/channel/acquisition_http_test.go
+      - internal/channel/acquisition_links_http_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: channel
+  - name: clicatalog
+    owner: crm-platform
+    source: internal/clicatalog
+    entrypoints:
+      - internal/clicatalog/port/catalog.go
+    dependencies: []
+    owned_tables: []
+    validation_contracts: []
+    status: contracted
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: clicatalog
+  - name: config
+    owner: crm-platform
+    source: internal/config
+    entrypoints:
+      - internal/config/module/module.go
+      - internal/config/http/handler.go
+    dependencies:
+      - access
+      - invoice
+      - platform
+    owned_tables:
+      - config_ai_model
+      - config_ai_model_audits
+      - config_audits
+      - config_command_receipts
+      - config_outbox
+      - config_runtime_active_release
+      - config_runtime_applications
+      - config_runtime_release_audits
+      - config_runtime_release_command_receipts
+      - config_runtime_release_history_batches
+      - config_runtime_release_history_rows
+      - config_runtime_release_values
+      - config_runtime_releases
+      - config_runtime_usage
+      - config_settings
+    validation_contracts:
+      - internal/config/app/ai_model_test.go
+      - internal/config/app/invoice_keys_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: config
+  - name: configmigration
+    owner: crm-platform
+    source: internal/configmigration
+    entrypoints:
+      - internal/configmigration/source/crypto.go
+    dependencies:
+      - automation
+      - coupon
+      - groupops
+      - platform
+      - product
+    owned_tables:
+      - config_definition_commerce_reviews
+      - config_definition_commerce_revisions
+      - config_definition_import_batches
+      - config_definition_import_quarantines
+      - config_definition_import_source_maps
+    validation_contracts:
+      - internal/configmigration/source/commerce_test.go
+      - internal/configmigration/source/history_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: configmigration
+  - name: coupon
+    owner: crm-commerce
+    source: internal/coupon
+    entrypoints:
+      - internal/coupon/module.go
+      - internal/coupon/http/handler.go
+    dependencies:
+      - access
+      - customer
+      - identity
+      - payment
+      - platform
+      - product
+    owned_tables:
+      - coupon_audit_events
+      - coupon_claim_audit_events
+      - coupon_claim_operation_receipts
+      - coupon_claim_outbox
+      - coupon_customer_claims
+      - coupon_operation_receipts
+      - coupon_order_redemptions
+      - coupon_outbox
+      - coupon_redemption_operation_receipts
+      - coupon_rule_targets
+      - coupon_rules
+    validation_contracts:
+      - internal/coupon/app/board_test.go
+      - internal/coupon/app/fixed_claim_availability_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: coupon
+  - name: crmcli
+    owner: crm-platform
+    source: internal/crmcli
+    entrypoints:
+      - internal/crmcli/client.go
+    dependencies:
+      - clicatalog
+      - platform
+    owned_tables: []
+    validation_contracts:
+      - internal/crmcli/client_test.go
+      - internal/crmcli/journey_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: crmcli
+  - name: distribution
+    owner: crm-commerce
+    source: internal/distribution
+    entrypoints:
+      - internal/distribution/http/handler.go
+    dependencies:
+      - access
+      - customer
+      - externaleffects
+      - identity
+      - order
+      - payment
+      - platform
+      - product
+      - referral
+    owned_tables:
+      - distribution_agreements
+      - distribution_audit_events
+      - distribution_browser_sessions
+      - distribution_commission_adjustments
+      - distribution_commissions
+      - distribution_distributors
+      - distribution_exceptions
+      - distribution_operation_receipts
+      - distribution_order_attributions
+      - distribution_outbox
+      - distribution_policy_versions
+      - distribution_product_policies
+      - distribution_promotion_credentials
+      - distribution_settlements
+    validation_contracts:
+      - internal/distribution/app/admin_test.go
+      - internal/distribution/app/distributor_enabled_integration_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: distribution
+  - name: groupops
+    owner: crm-operations
+    source: internal/groupops
+    entrypoints:
+      - internal/groupops/module.go
+      - internal/groupops/http/handler.go
+    dependencies:
+      - access
+      - externaleffects
+      - media
+      - platform
+      - wecom
+    owned_tables:
+      - group_ops_audit_events
+      - group_ops_catalog_control
+      - group_ops_catalog_observations
+      - group_ops_catalog_runs
+      - group_ops_directory_groups
+      - group_ops_directory_refresh_receipts
+      - group_ops_execution_intents
+      - group_ops_executions
+      - group_ops_group_message_tasks
+      - group_ops_operation_member_directory
+      - group_ops_operation_receipts
+      - group_ops_outbox
+      - group_ops_plan_group_assets
+      - group_ops_plan_members
+      - group_ops_plan_nodes
+      - group_ops_plan_webhook_descriptors
+      - group_ops_plans
+      - group_ops_protocol_replays
+      - group_ops_runs
+      - group_ops_v1_history_directory
+      - group_ops_v1_history_groups
+      - group_ops_v1_history_import_batches
+      - group_ops_v1_history_import_rows
+      - group_ops_v1_history_nodes
+      - group_ops_v1_history_plans
+    validation_contracts:
+      - internal/groupops/app/history_test.go
+      - internal/groupops/app/operation_member_search_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: groupops
+  - name: invoice
+    owner: crm-commerce
+    source: internal/invoice
+    entrypoints:
+      - internal/invoice/service.go
+    dependencies:
+      - config
+      - customer
+      - externaleffects
+      - identity
+      - order
+      - payment
+      - platform
+    owned_tables:
+      - invoice_applications
+      - invoice_audit_events
+      - invoice_callback_receipts
+      - invoice_card_setup_intents
+      - invoice_operation_receipts
+    validation_contracts:
+      - internal/invoice/card_payment_test.go
+      - internal/invoice/provider/card_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: invoice
+  - name: media
+    owner: crm-product
+    source: internal/media
+    entrypoints:
+      - internal/media/module.go
+      - internal/media/http/handler.go
+    dependencies:
+      - access
+      - externaleffects
+      - groupops
+      - outbound
+      - platform
+      - wecom
+    owned_tables:
+      - media_attachment_upload_parts
+      - media_attachment_uploads
+      - media_attachments
+      - media_audit_events
+      - media_blobs
+      - media_content_delivery_bindings
+      - media_content_delivery_receipts
+      - media_content_package_version_refs
+      - media_content_package_versions
+      - media_content_packages
+      - media_group_invites
+      - media_group_ops_preparation_items
+      - media_group_ops_preparation_receipts
+      - media_images
+      - media_invitation_changes
+      - media_invitation_codes
+      - media_invitation_join_ways
+      - media_invitation_plans
+      - media_legacy_material_mappings
+      - media_material_groups
+      - media_material_source_snapshots
+      - media_miniprograms
+      - media_operation_receipts
+      - media_outbox
+      - media_private_images
+      - media_references
+    validation_contracts:
+      - internal/media/app/attachment_library_test.go
+      - internal/media/app/content_delivery_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: media
+  - name: messagearchive
+    owner: crm-connectors
+    source: internal/messagearchive
+    entrypoints:
+      - internal/messagearchive/http/handler.go
+      - internal/messagearchive/app/service.go
+    dependencies:
+      - access
+      - customer
+      - identity
+      - platform
+      - wecom
+    owned_tables:
+      - message_archive_ingest_issues
+      - message_archive_legacy_projections
+      - message_archive_media
+      - message_archive_messages
+      - message_archive_migration_receipts
+      - message_archive_migration_runs
+      - message_archive_participants
+      - message_archive_resolution_attempts
+      - message_archive_sync_runs
+      - message_archive_sync_state
+    validation_contracts:
+      - internal/messagearchive/app/control_character_evidence_test.go
+      - internal/messagearchive/app/normalize_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: messagearchive
+  - name: openplatform
+    owner: crm-platform
+    source: internal/openplatform
+    entrypoints:
+      - internal/openplatform/http/handler.go
+    dependencies:
+      - access
+      - clicatalog
+      - platform
+    owned_tables:
+      - openplatform_customer_window_items
+      - openplatform_customer_windows
+    validation_contracts:
+      - internal/openplatform/http/cli_test.go
+      - internal/openplatform/http/core_supervision_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: openplatform
+  - name: overview
+    owner: crm-operations
+    source: internal/overview
+    entrypoints:
+      - internal/overview/http/handler.go
+      - internal/overview/app/service.go
+    dependencies:
+      - access
+      - customer
+      - distribution
+      - payment
+    owned_tables: []
+    validation_contracts:
+      - internal/overview/app/service_test.go
+      - internal/overview/http/handler_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: overview
+  - name: product
+    owner: crm-commerce
+    source: internal/product
+    entrypoints:
+      - internal/product/module.go
+      - internal/product/http/handler.go
+    dependencies:
+      - access
+      - address
+      - channel
+      - customer
+      - distribution
+      - hxcdashboard
+      - media
+      - order
+      - outbound
+      - payment
+      - platform
+      - wechatshop
+    owned_tables:
+      - product_dashboard_share_key
+      - product_dashboard_shares
+      - product_external_push_configurations
+      - product_external_push_tests
+      - product_imported_service_period_definitions
+      - product_operation_receipts
+      - product_paid_purchase_actions
+      - product_service_period_member_collaborators
+      - product_service_period_member_shares
+      - product_service_period_member_views
+      - product_variants
+      - product_wechat_shop_skus
+      - products
+    validation_contracts:
+      - internal/product/app/catalog_test.go
+      - internal/product/app/completion_url_link_resolver_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: product
+  - name: referral
+    owner: crm-commerce
+    source: internal/referral
+    entrypoints:
+      - internal/referral/http/handler.go
+      - internal/referral/app/service.go
+    dependencies:
+      - access
+      - customer
+      - distribution
+      - identity
+      - order
+      - platform
+      - product
+    owned_tables:
+      - referral_campaign_posters
+      - referral_campaign_snapshots
+      - referral_campaigns
+      - referral_current_relationships
+      - referral_invitations
+      - referral_operation_receipts
+      - referral_participation_locks
+      - referral_participations
+      - referral_product_activity_contexts
+      - referral_product_sale_checkouts
+      - referral_product_sale_events
+      - referral_relationship_history
+      - referral_relationship_locks
+      - referral_reward_records
+      - referral_reward_reviews
+      - referral_sales_facts
+      - referral_score_events
+      - referral_teams
+    validation_contracts:
+      - internal/referral/app/campaign_river_test.go
+      - internal/referral/app/canonical_rankings_postgres_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: referral
+  - name: release
+    owner: crm-platform
+    source: internal/release
+    entrypoints:
+      - internal/release/app/service.go
+    dependencies:
+      - platform
+    owned_tables: []
+    validation_contracts:
+      - internal/release/app/observation_test.go
+      - internal/release/app/service_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: release
+  - name: sidebar
+    owner: crm-product
+    source: internal/sidebar
+    entrypoints:
+      - internal/sidebar/handler.go
+    dependencies:
+      - coupon
+      - customer
+      - media
+      - order
+      - outbound
+      - product
+      - radar
+    owned_tables:
+      - sidebar_history_migration_batches
+      - sidebar_history_migration_quarantine
+      - sidebar_history_migration_source_map
+    validation_contracts:
+      - internal/sidebar/ai_operations_test.go
+      - internal/sidebar/handler_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: sidebar
+  - name: survey
+    owner: crm-operations
+    source: internal/survey
+    entrypoints:
+      - internal/survey/module.go
+      - internal/survey/http/handler.go
+    dependencies:
+      - access
+      - address
+      - channel
+      - customer
+      - identity
+      - media
+      - platform
+    owned_tables:
+      - survey_audit_events
+      - survey_completion_push_snapshots
+      - survey_completion_test_push_snapshots
+      - survey_definition_options
+      - survey_definition_questions
+      - survey_definition_versions
+      - survey_external_operation_receipts
+      - survey_identity_sessions
+      - survey_legacy_external_projections
+      - survey_migration_batches
+      - survey_migration_quarantine
+      - survey_migration_source_map
+      - survey_oauth_states
+      - survey_operation_configurations
+      - survey_operation_receipts
+      - survey_outbox
+      - survey_phone_binding_receipts
+      - survey_questionnaires
+      - survey_redemption_codes
+      - survey_result_tokens
+      - survey_score_rules
+      - survey_submission_answers
+      - survey_submission_attachments
+      - survey_submission_claims
+      - survey_submissions
+    validation_contracts:
+      - internal/survey/app/attachments_test.go
+      - internal/survey/app/completion_target_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: survey
+  - name: tag
+    owner: crm-operations
+    source: internal/tag
+    entrypoints:
+      - internal/tag/module.go
+      - internal/tag/http/handler.go
+    dependencies:
+      - access
+      - externaleffects
+      - platform
+    owned_tables:
+      - tag_audit_events
+      - tag_catalog_mutation_receipts
+      - tag_catalog_tags
+      - tag_groups
+      - tag_operation_receipts
+      - tag_outbox
+      - tag_provider_group_bindings
+      - tag_provider_observations
+      - tag_provider_tag_bindings
+      - tag_references
+      - tag_sync_receipts
+    validation_contracts:
+      - internal/tag/app/catalog_test.go
+      - internal/tag/app/gate_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: tag
+  - name: wechatshop
+    owner: crm-commerce
+    source: internal/wechatshop
+    entrypoints:
+      - internal/wechatshop/orders.go
+    dependencies:
+      - order
+      - platform
+      - product
+    owned_tables:
+      - wechat_shop_callback_receipts
+      - wechat_shop_order_progress
+      - wechat_shop_product_refresh_items
+      - wechat_shop_product_refreshes
+    validation_contracts:
+      - internal/wechatshop/orders_adversarial_test.go
+      - internal/wechatshop/orders_test.go
+    status: implemented
+    kind: module
+    data_registry: docs/governance/retention-registry.json#tables
+    data_owner: wechatshop
+registration_scope: >-
+  Current V4 source ownership and discovery only. Implemented means runtime entry code exists, not Provider acceptance or production
+  installation. validation_contracts lists representative source contracts, not execution receipts. owned_tables is the explicit
+  retention-registry ownership list; an empty list is not a claim of no other state.

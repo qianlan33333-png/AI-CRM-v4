@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import SwaggerParser from '@apidevtools/swagger-parser';
 import { assertOpenAPIRouteParity } from './check-openapi-route-parity.mjs';
+import { assertOperationIds } from './check-operation-ids.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -116,13 +117,14 @@ try {
   // Keep the repository's normal OpenAPI structural validation.  The
   // dereferenced copy below is only for compiling the local DTO examples.
   const specification = await SwaggerParser.validate('api/openapi.yaml');
+  const operations = assertOperationIds(specification);
   assertOpenAPIRouteParity(specification);
   const dereferenced = await SwaggerParser.dereference('api/openapi.yaml');
   assertGroupOpsPlanListItemExamples(dereferenced);
   assertSurveyCompletionContracts(specification);
   assertGovernanceUnknownContracts(specification);
   assertPublicCheckoutContracts(dereferenced);
-  console.log(`validated OpenAPI ${specification.openapi}: ${Object.keys(specification.paths).length} paths`);
+  console.log(`validated OpenAPI ${specification.openapi}: ${Object.keys(specification.paths).length} paths, ${operations} unique operationIds`);
 } catch (error) {
   console.error(`OpenAPI validation failed: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);

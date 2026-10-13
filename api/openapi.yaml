@@ -5208,6 +5208,7 @@ paths:
 
   /my/orders:
     get:
+      operationId: getCustomerOrderCenterPage
       summary: Official public customer order center
       security: []
       responses:
@@ -5215,6 +5216,7 @@ paths:
         '503': {description: "Hashed public assets unavailable."}
   /api/h5/me/orders:
     get:
+      operationId: listCustomerOrders
       summary: List own payer or beneficiary orders using canonical OneID lineage
       security: [{paymentSession: []}]
       parameters:
@@ -5236,6 +5238,7 @@ paths:
         '401': {description: "Expired or untrusted session; reauthorize."}
   /api/h5/me/invoices:
     get:
+      operationId: listCustomerInvoices
       summary: List own invoice applications and safe order presentation
       security: [{paymentSession: []}]
       description: Canonical OneID ownership; descending application time and ID cursor. No title or external identity returned.
@@ -5251,6 +5254,7 @@ paths:
         '400': {description: "Invalid, unknown or repeated filters."}
         '401': {description: "Session required."}
     post:
+      operationId: applyCustomerInvoice
       summary: Create or return the payer's one-order invoice application
       security: [{paymentSession: []}]
       description: Requires same official Origin. Amount, merchant, tax and trusted OA identity are frozen by the server. The confirmed organization title, receipt, audit and effect acceptance commit atomically. Provider writes execute asynchronously. The application ID is the original WeChat transaction ID, shared with the native payment-bill entry.
@@ -5290,6 +5294,7 @@ paths:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,32}$'}}
     get:
+      operationId: getCustomerInvoice
       summary: Read own safe invoice and card-delivery status
       security: [{paymentSession: []}]
       responses:
@@ -5304,6 +5309,7 @@ paths:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,32}$'}}
     post:
+      operationId: resumeCustomerInvoice
       summary: Refresh original application or regenerate its expired official title entrance
       security: [{paymentSession: []}]
       description: Same Origin required. Unknown outcomes retain original invoice ID; a new invoice ID is permitted only after verified failure, within bounded retries.
@@ -5327,6 +5333,7 @@ paths:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,32}$'}}
     get:
+      operationId: openCustomerInvoiceCard
       summary: Open own delivered invoice in the current WeChat recipient card wallet
       security: [{paymentSession: []}]
       responses:
@@ -5349,6 +5356,7 @@ paths:
     parameters:
       - {name: id, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
     get:
+      operationId: getCustomerOrderPayment
       summary: Recover original checkout facts for the trusted payer without creating any order or payment
       security: [{paymentSession: []}]
       responses:
@@ -5379,6 +5387,7 @@ paths:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,32}$'}}
     get:
+      operationId: getCustomerInvoiceFile
       summary: Preview or download own issued invoice through authenticated server proxy
       security: [{paymentSession: []}]
       parameters:
@@ -5395,6 +5404,7 @@ paths:
         '503': {description: "Provider file unavailable."}
   /api/h5/me/invoice-jssdk:
     get:
+      operationId: getCustomerInvoiceJSSDK
       summary: Sign the current official order URL for the WeChat JS-SDK card viewer
       security: [{paymentSession: []}]
       parameters:
@@ -5406,6 +5416,7 @@ paths:
         '503': {description: "OA credentials or Provider unavailable."}
   /api/callbacks/wechat-invoice:
     post:
+      operationId: receiveWeChatInvoiceCallback
       summary: Verify, decrypt and deduplicate WeChat invoice notifications
       security: [{wechatPaySignature: []}]
       description: The official SDK checks platform signature and AES-GCM resource; service/sub-merchant and application must match. Notifications wake a fresh query, never directly claim issuance or card delivery.
