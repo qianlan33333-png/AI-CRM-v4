@@ -1,29 +1,22 @@
 {
   "schema": 1,
-  "baseline_sha": "e1341d2a4c950c8f316503df8014a5108176ea61",
+  "baseline_sha": "7716814f51fec833bf86fc11ff19319dda047935",
   "checks": [
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInstalledSurveyPackageProvenanceAllowsOnlyUnchangedHost",
-      "postgres": false
+      "test": "TestHealthOperationStatusCompositionPostgreSQL",
+      "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestInstalledSurveyWebTreeVerifiesActualGitObjects",
-      "postgres": false
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/platform/config/tests",
-      "test": "TestInstalledProductLayerSelectionRequiresPackageOrExplicitRequest"
+      "test": "TestHealthOperationStatusCompositionPostgreSQL",
+      "postgres": true,
+      "race": true
     }
   ],
   "installed_checks": [
-    "invoice-callback-bootstrap-installed",
-    "invoice-bill-entry-installed",
-    "invoice-review-installed",
-    "invoice-settings-installed"
+    "operation-status-snapshot"
   ]
 }

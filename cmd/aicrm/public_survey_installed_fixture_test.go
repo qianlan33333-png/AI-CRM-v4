@@ -68,6 +68,7 @@ func useInstalledPublicSurveyFixture(t *testing.T, fixture *publicSurveyPresenta
 		"AICRM_SURVEY_DATA_KEY=" + dataKey, "AICRM_IDENTITY_PHONE_DATA_KEY=" + dataKey,
 		"AICRM_SURVEY_OAUTH_ENABLED=true", "AICRM_SURVEY_OAUTH_APP_ID=public-survey-browser-app",
 		"AICRM_SURVEY_OAUTH_SECRET=public-survey-browser-secret", "AICRM_SURVEY_OAUTH_OPEN_PLATFORM_ID=public-survey-browser-platform", "AICRM_SURVEY_OAUTH_SCOPE=snsapi_userinfo",
+		"AICRM_OPEN_PLATFORM_JWT_SIGNING_KEY=01234567890123456789012345678901", "AICRM_OPEN_PLATFORM_TRUSTED_PROXY_CIDRS=127.0.0.1/32", "AICRM_WECOM_CORP_ID=installed-health-corp",
 		"AICRM_OUTBOUND_PROVIDER_ENABLED=false", "AICRM_SURVEY_COMPLETION_PROVIDER_ENABLED=false",
 		"HTTPS_PROXY=" + providerProxy, "NO_PROXY=127.0.0.1,localhost,::1", "SSL_CERT_FILE=" + trust,
 	})
