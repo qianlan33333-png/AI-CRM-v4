@@ -1,29 +1,23 @@
 {
   "schema": 1,
-  "baseline_sha": "9b9d5ba2c5305a0da4301ace404bb10438091ce5",
+  "baseline_sha": "43ffc30bebc78053c7cd5dda35e59f8fb5837843",
   "checks": [
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestSurveyOAuthSubmissionResultJourneyPostgreSQL",
+      "test": "TestPostgreSQLAdminOverviewCanonicalPayersScaleWithinSectionBudget",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestSurveyOAuthJourneyDefinitionFixtureIsAcceptedByApplication",
-      "postgres": false
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestSurveyOAuthRedirectConstraintReadinessPostgreSQL",
+      "test": "TestPostgreSQLAdminOverviewCanonicalPayersFollowCurrentMerge",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestSurveyAssessmentBusinessKeyConstraintReadinessPostgreSQL",
+      "test": "TestPostgreSQLAdminOverviewCanonicalPayersKeepOneSnapshotAcrossConcurrentMerge",
       "postgres": true
     }
   ],

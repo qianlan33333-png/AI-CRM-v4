@@ -202,6 +202,27 @@ func TestPostgreSQLAdminOverviewCanonicalPayersScaleWithinSectionBudget(t *testi
 	fixture := newAdminOverviewFixture(t)
 	const payerCount = 10001
 	seedAdminOverviewPayerScale(t, fixture.ctx, fixture.application, time.Now().UTC().Truncate(time.Microsecond), payerCount)
+	// Bulk fixtures need representative planner statistics before measuring
+	// the existing section deadline; production obtains these via autovacuum.
+	if _, err := fixture.application.pool.Native().Exec(fixture.ctx, `ANALYZE customers; ANALYZE payments; ANALYZE orders`); err != nil {
+		t.Fatal(err)
+	}
+	readUOW, err := platformpostgres.NewReadOnlyRepeatableReadUnitOfWork(fixture.application.pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paidReader, err := paymentapp.NewOverviewReader(readUOW, paymentstore.NewPostgreSQL(), identityquery.NewPostgreSQL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sectionCtx, cancel := context.WithTimeout(fixture.ctx, overviewapp.DefaultSectionReadTimeout)
+	defer cancel()
+	sectionStarted := time.Now()
+	paid, err := paidReader.ReadPaidOverview(sectionCtx, paymentport.OverviewWindow{Start: time.Now().UTC().Add(-24 * time.Hour), End: time.Now().UTC().Add(time.Second)})
+	sectionElapsed := time.Since(sectionStarted)
+	if err != nil || paid.OrderCount != payerCount+1 || paid.DistinctCanonicalPayers != payerCount+1 || sectionElapsed > overviewapp.DefaultSectionReadTimeout {
+		t.Fatalf("paid section count=%d canonical=%d elapsed=%s budget=%s err=%v", paid.OrderCount, paid.DistinctCanonicalPayers, sectionElapsed, overviewapp.DefaultSectionReadTimeout, err)
+	}
 	started := time.Now()
 	response := overviewAuthenticatedGET(t, fixture.application.handler, fixture.session, "/api/admin/overview?period=7d")
 	elapsed := time.Since(started)
@@ -218,10 +239,9 @@ func TestPostgreSQLAdminOverviewCanonicalPayersScaleWithinSectionBudget(t *testi
 	if response.Code != http.StatusOK || body.Paid.Status != "ready" || body.Paid.OrderCount != payerCount+1 || body.Paid.DistinctCanonicalPayers == nil || *body.Paid.DistinctCanonicalPayers != payerCount+1 {
 		t.Fatalf("scaled canonical payer overview status=%d body=%s", response.Code, response.Body.String())
 	}
-	if elapsed > overviewapp.DefaultSectionReadTimeout {
-		t.Fatalf("%d canonical payers took %s, exceeding overview section budget %s", payerCount, elapsed, overviewapp.DefaultSectionReadTimeout)
-	}
-	t.Logf("%d canonical payers read exactly in %s within %s section budget", payerCount, elapsed, overviewapp.DefaultSectionReadTimeout)
+	// HTTP waits for all independent sections, some deliberately unavailable
+	// in this fixture. Their deadlines are not the Paid section's duration.
+	t.Logf("%d canonical payers paid section=%s budget=%s aggregate HTTP=%s", payerCount, sectionElapsed, overviewapp.DefaultSectionReadTimeout, elapsed)
 }
 
 type adminOverviewFixture struct {
