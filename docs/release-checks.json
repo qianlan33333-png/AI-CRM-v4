@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "a122976c06b7a9ef0a2c8266645dcd5eb6f6a4c8",
+  "baseline_sha": "c5e92ee90012873504994a73e3252363acdeea5a",
   "checks": [
     {
       "lane": "backend",
@@ -18,6 +18,25 @@
       "test": "TestHealthOperationStatusCompositionPostgreSQL",
       "postgres": true,
       "race": true
+    },
+    {
+      "lane": "preflight",
+      "path": "scripts/test_architecture.py"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/access/maintenance",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/recover-access-password"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/platform/config",
+      "test": "TestMaintenanceOperatorReadsOnlyHostEnvironment"
     }
   ],
   "installed_checks": [

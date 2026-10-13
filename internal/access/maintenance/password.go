@@ -23,11 +23,10 @@ type Authority struct {
 
 // HostAuthority cannot be populated from a request or CLI flag. Linux root
 // controls the deployed application and database independently of CRM roles.
-func HostAuthority() (Authority, error) {
+func HostAuthority(operator string) (Authority, error) {
 	if runtime.GOOS != "linux" || os.Geteuid() != 0 {
 		return Authority{}, domain.ErrPermissionDenied
 	}
-	operator := os.Getenv("SUDO_USER")
 	if operator == "" {
 		operator = "root"
 	}

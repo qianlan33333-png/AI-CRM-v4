@@ -78,7 +78,7 @@ func run() error {
 	if flag.NArg() != 0 || (*mode != "inspect" && *mode != "apply") || *id < 1 || *username == "" {
 		return errors.New("invalid recovery flags")
 	}
-	authority, err := maintenance.HostAuthority()
+	authority, err := maintenance.HostAuthority(platformconfig.MaintenanceOperator())
 	if err != nil {
 		return err
 	}
