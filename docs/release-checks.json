@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "c5e92ee90012873504994a73e3252363acdeea5a",
+  "baseline_sha": "103d3166f36b93b683d07b577a064842c37bd457",
   "checks": [
     {
       "lane": "backend",
@@ -37,6 +37,45 @@
       "lane": "backend",
       "package": "./internal/platform/config",
       "test": "TestMaintenanceOperatorReadsOnlyHostEnvironment"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/scripts/dependency-security-contract.mjs"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/media/app",
+      "test": "TestWebImageVariantPreservesHighBitDepthPNG"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/media/app",
+      "test": "TestWebImageVariantWidthOnly"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/media/app",
+      "test": "TestWebImageVariantInflationAndUnsupportedPreserveOriginal"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/http",
+      "test": "TestPosterImageCompressionPreservesOriginalAndDimensions"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/excel",
+      "test": "TestMissingTitleOrCoverNeverLoadsMedia"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/excel",
+      "test": "TestMediaBackedExcelCoverReadsFrozenMediaBytes"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/excel",
+      "test": "TestReceiptFullPaginationAndExactTarget"
     }
   ],
   "installed_checks": [
