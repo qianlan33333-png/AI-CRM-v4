@@ -426,14 +426,37 @@ class Preflight:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=["fast", "compile", "browser", "full", "affected"])
+    parser.add_argument("phase", choices=["fast", "compile", "browser", "full", "affected", "prepare", "handoff"])
     parser.add_argument("--group", choices=["all", "shell", "business"], default="all")
     parser.add_argument("--journey", action="append", default=[], help="run only the named Chromium journey; repeat for several")
     parser.add_argument("--report-dir", type=Path)
     parser.add_argument("--base", help="baseline commit for the affected shadow plan")
     parser.add_argument("--head", default="HEAD", help="candidate commit for the affected shadow plan")
     parser.add_argument("--dry-run", action="store_true", help="print the affected plan without local checks")
+    parser.add_argument("--verify", action="store_true", help="verify preparation on clean committed source")
+    parser.add_argument("--authorization-reference", help="existing human authorization for this scope")
+    parser.add_argument("--ref")
+    parser.add_argument("--task-id")
+    parser.add_argument("--receipt", type=Path, action="append", default=[])
+    parser.add_argument("--impact", type=Path)
+    parser.add_argument("--unverified", action="append", default=[])
     args = parser.parse_args()
+    if args.phase in {"prepare", "handoff"}:
+        import development_prepare
+        try:
+            if args.phase == "prepare":
+                result = development_prepare.prepare(ROOT, base=args.base,
+                    authorization=args.authorization_reference, verify=args.verify)
+            else:
+                if not all((args.base, args.ref, args.task_id, args.authorization_reference, args.impact, args.receipt)):
+                    parser.error("handoff requires base/ref/task-id/authorization-reference/impact/receipt")
+                result = development_prepare.handoff(ROOT, args.base, args.ref, args.task_id,
+                    args.authorization_reference, args.receipt, args.impact, args.unverified)
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
+        except (ValueError, OSError, KeyError) as error:
+            print(json.dumps({"status": "failed", "error": str(error)}), file=sys.stderr)
+            return 1
     if args.phase == "affected" and not args.base:
         parser.error("affected requires --base SHA")
     if args.phase != "affected" and (args.base or args.head != "HEAD" or args.dry_run):

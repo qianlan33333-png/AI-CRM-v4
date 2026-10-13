@@ -19,7 +19,7 @@ TEST_NAME = re.compile(r"Test[A-Za-z0-9_]+\Z")
 CHROMIUM_TEST = re.compile(r"Test[A-Za-z0-9_]*ChromiumJourney\Z")
 SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 CHECK_FIELDS = {"lane", "path", "package", "test", "postgres", "race", "fresh",
-                "concurrency", "requires_postgres"}
+                "concurrency", "requires_postgres", "reason"}
 
 
 class CheckPlanError(ValueError):
@@ -112,6 +112,8 @@ def validate_check(root: Path, head_sha: str, raw: object) -> dict:
     extra = set(raw) - CHECK_FIELDS
     if extra:
         raise CheckPlanError("unsupported check fields: " + ", ".join(sorted(extra)))
+    if "reason" in raw and (not isinstance(raw["reason"], str) or not raw["reason"].strip()):
+        raise CheckPlanError("check reason must explain the direct consumer")
     lane = raw.get("lane")
     if lane not in LANES:
         raise CheckPlanError("check lane must be one of: " + ", ".join(LANES))
@@ -150,6 +152,8 @@ def validate_check(root: Path, head_sha: str, raw: object) -> dict:
             if test not in defined:
                 raise CheckPlanError("named backend test is not defined in " + path + ": " + test)
         check = {"lane": lane, "path": path, "package": package}
+        if "reason" in raw:
+            check["reason"] = raw["reason"]
         if test is not None:
             check["test"] = test
         if concurrency:
@@ -188,6 +192,8 @@ def validate_check(root: Path, head_sha: str, raw: object) -> dict:
         if test is not None:
             raise CheckPlanError("archive-sdk checks use a path and do not accept a Go test name")
     check = {"lane": lane, "path": path}
+    if "reason" in raw:
+        check["reason"] = raw["reason"]
     if lane == "browser":
         check["test"] = test
     return check

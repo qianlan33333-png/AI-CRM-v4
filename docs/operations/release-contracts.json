@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "contracts": {
+    "survey-successful-key-recovery": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/priority_health_installed_test.go",
+      "tests": [
+        "TestPriorityHealthInstalledContracts"
+      ],
+      "postgres": true,
+      "browser": false,
+      "installed": true
+    },
+    "sender-idempotency-replay": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/priority_health_installed_test.go",
+      "tests": [
+        "TestPriorityHealthInstalledContracts"
+      ],
+      "postgres": true,
+      "browser": false,
+      "installed": true
+    },
+    "retention-business-protection": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/priority_health_installed_test.go",
+      "tests": [
+        "TestPriorityHealthInstalledContracts"
+      ],
+      "postgres": true,
+      "browser": false,
+      "installed": true
+    },
+    "operation-status-snapshot": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/health_operation_status_installed_test.go",
+      "tests": [
+        "TestHealthOperationStatusInstalled"
+      ],
+      "postgres": true,
+      "browser": false,
+      "installed": true
+    },
+    "invoice-callback-bootstrap-installed": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/invoice_callback_installed_test.go",
+      "tests": [
+        "TestInvoicePostgreSQLCallbackBootstrapInstalled"
+      ],
+      "postgres": true,
+      "browser": false,
+      "installed": true
+    },
+    "invoice-bill-entry-installed": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/invoice_callback_installed_test.go",
+      "tests": [
+        "TestInvoicePostgreSQLBillEntryInstalled"
+      ],
+      "postgres": true,
+      "browser": false,
+      "installed": true
+    },
+    "invoice-review-installed": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/invoice_distribution_authorization_installed_test.go",
+      "tests": [
+        "TestInvoiceDistributionInstalledAuthorizationBoundaries"
+      ],
+      "postgres": true,
+      "browser": false,
+      "installed": true
+    },
+    "invoice-settings-installed": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/invoice_settings_installed_test.go",
+      "tests": [
+        "TestInvoicePostgreSQLSettingsInstalled"
+      ],
+      "postgres": true,
+      "browser": false,
+      "installed": true
+    },
+    "health-product-ui": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/product_payment_actions_legacy_parity_chromium_postgres_integration_test.go",
+      "tests": [
+        "TestPostgreSQLProductPaymentActionsLegacyParityChromiumJourney"
+      ],
+      "postgres": true,
+      "browser": true,
+      "installed": true
+    },
+    "wechat-shop": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/wechat_shop_installed_test.go",
+      "tests": [
+        "TestPostgreSQLShopInstalledAPI"
+      ],
+      "postgres": true,
+      "browser": false,
+      "installed": true
+    },
+    "order-export-sharing": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/order_export_installed_test.go",
+      "tests": [
+        "TestPostgreSQLOrderExportSharingInstalled"
+      ],
+      "postgres": true,
+      "browser": false,
+      "installed": true
+    },
+    "referral-poster": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
+      "tests": [
+        "TestPostgreSQLReferralChromiumJourney"
+      ],
+      "postgres": true,
+      "browser": true,
+      "installed": true
+    },
+    "aiassistant-execution-receipts": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/aiassistant_receipts_postgres_test.go",
+      "tests": [
+        "TestPostgreSQLAIExecutionReceiptsInstalled"
+      ],
+      "postgres": true,
+      "browser": false,
+      "installed": true
+    },
+    "release-runtime-config": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/runtime_config_check_installed_test.go",
+      "tests": [
+        "TestInstalledRuntimeConfigCheck"
+      ],
+      "postgres": false,
+      "browser": false,
+      "installed": true
+    }
+  }
+}

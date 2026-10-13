@@ -95,6 +95,10 @@ class CheckCandidateError(ReleaseError):
     """An executed candidate test or validation explicitly failed."""
 
 
+class SourcePreparationError(CheckIncompleteError):
+    """Mechanical source preparation failed before business assertions."""
+
+
 def _run(args: list[str], *, cwd: Path | None = None, input_text: str | None = None,
          input_path: Path | None = None, timeout: int = 600, check: bool = True,
          umask: int = -1, terminate_group: bool = False) -> subprocess.CompletedProcess[str]:
@@ -1226,6 +1230,8 @@ def _check_env(config: dict[str, Any], safe_repository: Path | None = None, *,
     if base_sha is not None:
         environment.update(AICRM_DEDUP_BASE_SHA=_sha(base_sha, "check base SHA"),
                            AICRM_DEDUP_HEAD_SHA=_sha(head_sha, "check head SHA"))
+    if config.get("_installed_contract_env"):
+        environment.update(config["_installed_contract_env"])
     return environment
 
 
@@ -2875,7 +2881,7 @@ def _prepare_exact_source_views(config: dict, policy: Path, checkout: Path) -> N
                                   "--root",str(checkout)],cwd=checkout,timeout=180,
                                   check=False,safe_repository=checkout)
         if prepared.returncode:
-            raise CheckIncompleteError("exact-source embed preparation did not complete")
+            raise SourcePreparationError("exact-source embed preparation did not complete")
         if ((checkout / "internal/config/http/openapi.go").is_file()
                 and not (checkout / "internal/config/http/openapi.yaml").is_file()):
             raise CheckIncompleteError("exact-source OpenAPI embed view was not materialized")
@@ -3866,6 +3872,7 @@ def _finish_success_cleanup(config: dict[str, Any], state_path: Path, state: dic
 def _mark_unknown(state_path: Path, state: dict[str, Any], phase: str, error: BaseException) -> None:
     inflight = state.get("in_flight") or {}
     inflight.update({"phase": phase, "error_type": type(error).__name__, "updated_at_utc": _utc_now()})
+    inflight["failure_category"] = "transport_or_install_unknown"
     state["in_flight"] = inflight
     state["status"] = "outcome_unknown"
     state["updated_at_utc"] = _utc_now()
@@ -3880,6 +3887,8 @@ def _mark_failed(state_path: Path, state: dict[str, Any], item: dict[str, Any], 
     item["failure"] = {"phase": phase, "error_type": type(error).__name__, "recorded_at_utc": _utc_now(),
                        "kind": "environment" if environment else "unknown" if incomplete else "candidate_check",
                        "candidate_verdict": "not_evaluated" if environment or incomplete else "failed"}
+    item["failure"]["category"] = ("source_preparation" if isinstance(error, SourcePreparationError)
+        else "environment" if environment else "runner_or_unknown" if incomplete else "business")
     if incomplete:
         item["failure"]["required_action"] = "diagnose incomplete or unknown execution; no automatic continuation or passing verdict"
     if environment:
@@ -3918,6 +3927,364 @@ def _installed_check_names(values: list[Any]) -> set[str]:
     return names
 
 
+STAGE_REGISTRY = "docs/operations/release-contracts.json"
+
+
+def _require_runtime_config_contract(metadata: dict, batch: dict | None) -> None:
+    if (batch or {}).get("stage_policy_version") == 2 and metadata.get("runtime_config_check_supported") is not True:
+        raise ReleaseError("new batch package lacks the pre-switch runtime configuration contract")
+
+
+def _stage_contracts(repo: Path, source: str, names: set[str]) -> dict[str, dict]:
+    try:
+        registry = json.loads(_source_blob(repo, source, STAGE_REGISTRY))
+        rows = registry["contracts"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ReleaseError("installed contract registry is missing or invalid") from exc
+    if registry.get("schema_version") != 1 or not isinstance(rows, dict) or not names:
+        raise ReleaseError("installed contract selection is empty or unregistered")
+    result = {}
+    for name in sorted(names):
+        row = rows.get(name)
+        if (not isinstance(row, dict) or row.get("installed") is not True
+                or row.get("package") != "./cmd/aicrm"
+                or not isinstance(row.get("tests"), list) or not row["tests"]
+                or not all(re.fullmatch(r"Test[A-Za-z0-9_]+", str(t)) for t in row["tests"])
+                or not re.fullmatch(r"cmd/aicrm/[A-Za-z0-9_]+_test.go", str(row.get("path")))):
+            raise ReleaseError("installed contract is not registered: " + name)
+        code = _source_blob(repo, source, row["path"]).decode()
+        defined = set(re.findall(r"(?m)^func\s+(Test\w+)\s*\(", code))
+        if not set(row["tests"]) <= defined:
+            raise ReleaseError("installed contract source does not define its named tests: " + name)
+        result[name] = row
+    return result
+
+
+def _verify_go_contract_log(raw: str, expected: set[str]) -> None:
+    """Require real named terminals and a package terminal, never PASS substrings."""
+    if not expected:
+        raise ReleaseError("empty installed test selection")
+    terminal, package_pass, problems = {}, False, []
+    for line in raw.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        name, action = event.get("Test"), event.get("Action")
+        if action not in {"pass", "fail", "skip"}:
+            continue
+        if not name:
+            if action == "pass":
+                package_pass = True
+            else:
+                problems.append("package:" + action)
+        elif name.split("/")[0] in expected:
+            if name in terminal:
+                problems.append("duplicate terminal:" + name)
+            terminal[name] = action
+            if action != "pass":
+                problems.append(name + ":" + action)
+    if not package_pass or any(terminal.get(name) != "pass" for name in expected) or problems:
+        raise ReleaseError("installed named test execution failed, skipped or incomplete")
+
+
+def _stage_partial(config, sha, fixture, name, row, installation_digest, binary_digest):
+    directory = _stage_evidence_path(config, sha).parent
+    path = directory / f"{sha}-partial-{name}.json"
+    if not path.exists() and not path.is_symlink():
+        return None
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+            or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+        raise ReleaseError("partial stage receipt is unsafe")
+    value = json.loads(path.read_text())
+    if (value.get("source_sha") != sha or value.get("installation_digest") != installation_digest
+            or value.get("binary_digest") != binary_digest):
+        raise ReleaseError("partial result belongs to another installed attempt")
+    check = value.get("check", {})
+    prior = _sha(check.get("test_source_sha"), "prior stage test source")
+    repo = Path(config["repo"])
+    if _tree(repo, prior) != check.get("test_source_tree"):
+        raise ReleaseError("partial test source tree changed")
+    if prior != fixture and (_source_blob(repo, prior, row["path"]) != _source_blob(repo, fixture, row["path"])
+                             or check.get("test_names") != row["tests"]):
+        return None  # Rerun the directly changed fixture; keep its original log.
+    log = Path(check.get("log", ""))
+    if log.parent != directory or not log.name.startswith(sha + "-") or log.is_symlink():
+        raise ReleaseError("partial log is outside the protected installed evidence")
+    info = log.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1
+            or stat.S_IMODE(info.st_mode) != 0o600 or _file_sha256(log) != check.get("log_sha256")):
+        raise ReleaseError("partial log is unsafe or changed")
+    if check.get("name") != name or check.get("status") != "passed" or check.get("test_names") != row["tests"]:
+        raise ReleaseError("partial named result differs from its contract")
+    _verify_go_contract_log(log.read_text(), set(row["tests"]))
+    return check
+
+
+def stage_check(config: dict[str, Any], *, test_source_sha: str | None = None) -> dict[str, Any]:
+    """Execute registered contracts against the existing package, under its lock."""
+    if os.geteuid() != 0:
+        raise ReleaseError("stage-check requires the routed root controller")
+    config = _check_config(config)
+    repo, state_path = Path(config["repo"]), Path(config["state"])
+    with _locked(Path(config["lock"]), nonblocking=True):
+        _assert_legacy_release_path_stopped()
+        state = _load_state(state_path)
+        flight = state.get("in_flight")
+        if (state.get("status") != "blocked" or not isinstance(flight, dict)
+                or flight.get("phase") != "stage-validation-pending"
+                or flight.get("stage_install_completed") is not True):
+            raise ReleaseError("no exact installed attempt awaits stage-check")
+        sha, tree = flight["head_sha"], flight["head_tree"]
+        app, installation = flight["installed_app"], flight["stage_receipt"]
+        existing = _read_stage_evidence(config, flight)
+        if existing:
+            return {"status": "passed", "already_verified": True, "source_sha": sha,
+                    "checks": [r["name"] for r in existing["checks"]]}
+        _verify_stage_app(app["sha"], app["manifest_sha256"])
+        fixture = _sha(test_source_sha or sha, "installed test source")
+        if fixture != sha:
+            _first_parent_chain(repo, sha, fixture)
+            if _classify_candidate(repo, sha, fixture)["runtime_changed"]:
+                raise ReleaseError("fixture repair changes installed application; rebuild required")
+        names = _installed_check_names(flight["check_receipt"].get("installed_checks", []))
+        contracts = _stage_contracts(repo, fixture, names)
+        tests = {t for row in contracts.values() for t in row["tests"]}
+        package = Path(config["stage_releases"]) / app["sha"]
+        binary, dist = package / "bin/aicrm", package / "web/dist"
+        if binary.is_symlink() or not binary.is_file() or not os.access(binary, os.X_OK):
+            raise ReleaseError("installed binary is missing or unsafe")
+        binary_digest = _file_sha256(binary)
+        host = json.loads((dist / "asset-manifest.json").read_text())
+        host_source = _sha(host.get("source_sha"), "installed Host source")
+        if _git(repo, "rev-parse", host_source + ":web") != _git(repo, "rev-parse", sha + ":web"):
+            raise ReleaseError("installed Host tree differs from application source")
+        report = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{fixture}-installed-{time.time_ns()}"
+        _build_command(config, ["/usr/bin/mkdir", "-m", "0700", "-p", str(report)], cwd=Path("/"), timeout=30)
+        config = dict(config, _check_process_guard=True)
+        _recover_check_attempts(config)
+        policy = _active_worktree(config, repo, fixture)
+        evidence_path = _stage_evidence_path(config, sha)
+        _safe_directory(evidence_path.parent, create=True)
+        installation_digest = hashlib.sha256(json.dumps(installation, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        results, executed = {}, []
+        for name, row in contracts.items():
+            previous = _stage_partial(config, sha, fixture, name, row, installation_digest, binary_digest)
+            if previous:
+                results[name] = previous
+        with _check_attempt_directory(config, report, policy, fixture) as temporary:
+            build = pwd.getpwnam(legacy.BUILD_USER)
+            os.chmod(temporary, 0o711)
+            execution = Path(temporary) / "execution"; execution.mkdir(mode=0o700)
+            os.chown(execution, build.pw_uid, build.pw_gid)
+            scratch = Path(config["_check_tmpdir"])
+            os.chown(scratch, build.pw_uid, build.pw_gid); os.chmod(scratch, 0o700)
+            checkout = _private_check_checkout(config, repo, execution / "source", fixture)
+            prep = report / ".preparation"
+            _build_command(config, ["/usr/bin/mkdir", "-m", "0700", str(prep)], cwd=checkout, timeout=30)
+            config["_check_preparation_dir"] = str(prep)
+            if any(row.get("postgres") for row in contracts.values()):
+                config["_check_attempt_database"] = _create_check_attempt_database(config, checkout, prep)
+            _prepare_exact_source_views(config, policy, checkout)
+            _prepare_check_dependencies(config, checkout, ["backend"], report / "dependency-preparation.log")
+            smoke = execution / "installed-smoke-input.json"
+            smoke.write_text(json.dumps({"stage_role": "staging", "source_sha": fixture,
+                "installed_sha": sha, "installed_binary": str(binary),
+                "installed_binary_sha256": binary_digest,
+                "database_url": _check_env(config, checkout)["AICRM_DATABASE_URL"]}))
+            os.chown(smoke, build.pw_uid, build.pw_gid); os.chmod(smoke, 0o600)
+            installed_env = {"AICRM_REQUIRE_INSTALLED_PRODUCT_CONTRACTS": "1"}
+            if any(row.get("browser") for row in contracts.values()):
+                installed_env["AICRM_REQUIRE_CHROMIUM_JOURNEY"] = "1"
+            for prefix in ("AICRM_INSTALLED_PRODUCT_", "AICRM_INSTALLED_SURVEY_"):
+                installed_env.update({prefix + "BINARY": str(binary), prefix + "ROOT": str(package),
+                    prefix + "SHA": sha, prefix + "BINARY_SHA256": binary_digest,
+                    prefix + "HOST_SOURCE_SHA": host_source, prefix + "SOURCE_REPOSITORY": str(checkout),
+                    prefix + "HOST_MANIFEST_SHA256": _file_sha256(dist / "asset-manifest.json")})
+            config["_installed_contract_env"] = installed_env
+            same_tests = {}
+            for name, row in contracts.items():
+                if name in results:
+                    continue
+                group = tuple(row["tests"])
+                if group in same_tests:
+                    check = {**same_tests[group], "name": name}
+                else:
+                    command = ["go", "test", "-json", "-p", "1", "-count=1", "-timeout=15m",
+                        "-run", "^(?:" + "|".join(row["tests"]) + ")$", "./cmd/aicrm",
+                        "-args", "-domestic-release-smoke-input=" + str(smoke)]
+                    proc, raw = None, b""
+                    try:
+                        proc = _build_command(config, command, cwd=checkout, timeout=1000,
+                                              check=False, safe_repository=checkout)
+                        raw = ((proc.stdout or "") + (proc.stderr or "")).encode()
+                    except subprocess.TimeoutExpired as error:
+                        raw = (str(error.stdout or "") + str(error.stderr or "")).encode()
+                        raise CheckIncompleteError("installed contract timed out; no passing verdict") from None
+                    finally:
+                        log = evidence_path.parent / f"{sha}-{name}-{fixture}-{time.time_ns()}.log"
+                        log.write_bytes(raw); os.chmod(log, 0o600)
+                    if proc.returncode:
+                        raise CheckCandidateError("installed contract command failed: " + name + "; original private log retained")
+                    _verify_go_contract_log(raw.decode(), set(row["tests"]))
+                    check = {"name": name, "status": "passed", "log": str(log), "log_sha256": _file_sha256(log),
+                        "test_source_sha": fixture, "test_source_tree": _tree(repo, fixture),
+                        "test_names": row["tests"], "result_format": "go-test-json"}
+                    same_tests[group] = check
+                    executed.append(name)
+                results[name] = check
+                atomic_json(evidence_path.parent / f"{sha}-partial-{name}.json", {
+                    "source_sha": sha, "installation_digest": installation_digest,
+                    "binary_digest": binary_digest, "check": check})
+        _verify_stage_app(app["sha"], app["manifest_sha256"])
+        if _file_sha256(binary) != binary_digest:
+            raise ReleaseError("installed binary changed during contracts")
+        path = evidence_path
+        evidence = {"schema_version": flight.get("stage_evidence_schema", 1), "status": "passed",
+            "source_sha": sha, "source_tree": tree, "manifest_sha256": app["manifest_sha256"],
+            "stage_receipt_sha256": hashlib.sha256(json.dumps(installation, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "verified_at_utc": _utc_now(), "installed_app_sha": app["sha"],
+            "installed_binary_sha256": binary_digest, "host_source_sha": host_source,
+            "executed_this_attempt": executed,
+            "checks": [results[name] for name in sorted(results)]}
+        atomic_json(path, evidence)
+        _read_stage_evidence(config, flight)
+        return {"status": "passed", "source_sha": sha, "installed_app_sha": app["sha"],
+                "checks": sorted(names), "test_source_sha": fixture, "stage_evidence": str(path)}
+
+
+def _integrate_stale_candidate(config, state_path, state, item, current) -> bool:
+    """One locked, deterministic merge; never edit or move the original ref."""
+    repo = Path(config["repo"])
+    if item["base_sha"] == current:
+        return False
+    if not config.get("work_root"):
+        return False  # No protected integration workspace, no source mutation.
+    _safe_directory(Path(config["work_root"]))
+    if state.get("in_flight") is not None or state.get("status") == "outcome_unknown":
+        raise ReleaseError("cannot integrate an unresolved attempt")
+    if (state.get("batch") or {}).get("stage_policy_version", 2) != 2:
+        return False  # Old batch policy and approval digests remain unchanged.
+    original = {key: item[key] for key in ("ref", "head_sha", "base_sha", "candidate_id")}
+    if _resolve_ref(repo, original["ref"]) != original["head_sha"]:
+        return False
+    if not _is_ancestor(repo, original["base_sha"], current):
+        return False
+    _first_parent_chain(repo, original["base_sha"], original["head_sha"])
+    merge = _run(["git", f"--git-dir={repo}", "merge-tree", "--write-tree", "--name-only",
+                  current, original["head_sha"]], check=False)
+    lines = merge.stdout.splitlines()
+    if not lines or not SHA.fullmatch(lines[0]) or merge.returncode not in (0, 1):
+        raise CheckEnvironmentError("Git merge-tree could not evaluate the candidate")
+    conflicts = set()
+    if merge.returncode:
+        for line in lines[1:]:
+            if not line:
+                break
+            conflicts.add(line)
+        if not conflicts or not conflicts <= {"docs/release-checks.json"}:
+            item["integration_conflicts"] = sorted(conflicts)
+            return False
+    stamp = _git(repo, "show", "-s", "--format=%ct", original["head_sha"])
+    env = dict(os.environ, GIT_AUTHOR_NAME="CRM release workbench", GIT_AUTHOR_EMAIL="release@localhost",
+               GIT_COMMITTER_NAME="CRM release workbench", GIT_COMMITTER_EMAIL="release@localhost",
+               GIT_AUTHOR_DATE=stamp + " +0000", GIT_COMMITTER_DATE=stamp + " +0000")
+    def execute(*args, raw=None):
+        result = subprocess.run(["git", "-c", "commit.gpgsign=false", f"--git-dir={repo}", *args],
+            env=env, input=raw, text=True, capture_output=True, check=False)
+        if result.returncode:
+            raise ReleaseError("integration_git_operation_failed:" + args[0])
+        return result.stdout.strip()
+    with tempfile.TemporaryDirectory(prefix="integration-index-", dir=config["work_root"]) as temporary:
+        env["GIT_INDEX_FILE"] = str(Path(temporary) / "index")
+        execute("read-tree", lines[0])
+        def overlay(path, value):
+            encoded = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
+            oid = execute("hash-object", "-w", "--stdin", raw=encoded)
+            execute("update-index", "--add", "--cacheinfo", "100644," + oid + "," + path)
+        try:
+            manifest = json.loads(_source_blob(repo, original["head_sha"], "docs/release-checks.json"))
+        except (ValueError, ReleaseError):
+            return False
+        manifest["baseline_sha"] = current
+        overlay("docs/release-checks.json", manifest)
+        merged_tree = execute("write-tree")
+        merged = execute("commit-tree", merged_tree, "-p", current, "-p", original["head_sha"],
+                         raw="Integrate original candidate " + original["head_sha"] + " onto " + current + "\n")
+        # Only current V4 canonical metadata is prepared. Frozen content is
+        # never rewritten, and API business bytes are the actual merge tree.
+        index_path, lock_path = "web/donor-sources/source-index.json", "web/donor-sources/source-lock.json"
+        try:
+            index = json.loads(_source_blob(repo, merged, index_path))
+            libraries = {r["id"]: r for r in index["libraries"]}
+            updated = False
+            for content in index["contents"]:
+                library = libraries[content["library_id"]]
+                if library.get("authority_kind") != "active_v3_contract":
+                    continue
+                if library.get("source_repository") != "https://github.com/qianlan33333-png/AI-CRM-v4.git":
+                    raise ReleaseError("integration active source is not V4")
+                raw = _source_blob(repo, merged, content["canonical_path"])
+                digest = hashlib.sha256(raw).hexdigest()
+                if content["content_sha256"] != digest or content["bytes"] != len(raw):
+                    content.update(content_sha256=digest, bytes=len(raw),
+                                   source_git_blob_sha=_git(repo, "rev-parse", merged + ":" + content["canonical_path"]))
+                    library["source_commit"] = merged
+                    updated = True
+            if updated:
+                contents = {r["id"]: r for r in index["contents"]}
+                for binding in index["bindings"]:
+                    content = contents[binding["content_id"]]
+                    library = libraries[content["library_id"]]
+                    if library.get("authority_kind") == "active_v3_contract":
+                        binding.update(source_commit=library["source_commit"], source_git_blob_sha=content["source_git_blob_sha"])
+                lock = {"schema_version": 1, "entries": sorted([
+                    {**{k: row[k] for k in ("id", "library_id", "canonical_path", "source_path", "source_git_blob_sha", "content_sha256", "bytes", "mode")},
+                     "source_repository": libraries[row["library_id"]]["source_repository"],
+                     "source_commit": libraries[row["library_id"]]["source_commit"]} for row in index["contents"]], key=lambda r: r["id"])}
+                overlay(index_path, index); overlay(lock_path, lock)
+                interim_tree = execute("write-tree")
+                interim = execute("commit-tree", interim_tree, "-p", merged, raw="Prepare integrated current V4 source binding\n")
+                ledger_path = "docs/engineering/dedup/p5-authority-change-approvals.json"
+                ledger = json.loads(_source_blob(repo, interim, ledger_path))
+                paths = sorted({index_path, lock_path, *(r["canonical_path"] for r in index["contents"])})
+                changes = []
+                for path in paths:
+                    before = hashlib.sha256(_source_blob(repo, current, path)).hexdigest()
+                    after = hashlib.sha256(_source_blob(repo, interim, path)).hexdigest()
+                    if before != after:
+                        changes.append({"path": path, "base_sha256": before, "head_sha256": after})
+                ledger["approvals"] = [r for r in ledger["approvals"] if r["base_commit"] != current]
+                ledger["approvals"].append({"base_commit": current, "changes": changes,
+                    "reason": "Mechanical binding for the original authorized candidate integration",
+                    "review_reference": original["ref"] + "@" + original["head_sha"] + "; production authorization not inherited"})
+                overlay(ledger_path, ledger)
+                merged = execute("commit-tree", execute("write-tree"), "-p", merged,
+                                 raw="Bind integrated V4 canonical contract\n")
+        except (KeyError, ValueError) as exc:
+            raise ReleaseError("integration source metadata is invalid") from exc
+    _sha(merged, "integrated source SHA")
+    if _resolve_ref(repo, original["ref"]) != original["head_sha"] or _batch_tip(state) != current:
+        raise ReleaseError("original candidate or cumulative tip changed during integration")
+    ref = "refs/heads/codex/integration-" + original["head_sha"][:12] + "-" + current[:12]
+    exists = _run(["git", f"--git-dir={repo}", "rev-parse", "--verify", ref], check=False)
+    if exists.returncode == 0 and exists.stdout.strip() != merged:
+        raise ReleaseError("integration ref already binds a different source")
+    _git(repo, "update-ref", ref, merged, exists.stdout.strip() if exists.returncode == 0 else ZERO_SHA)
+    item.setdefault("integration_history", []).append({**original, "onto_sha": current,
+        "integrated_sha": merged, "integrated_tree": _tree(repo, merged), "integrated_ref": ref,
+        "production_authorization_inherited": False})
+    item.update(candidate_id=merged, ref=ref, head_sha=merged, base_sha=current, status="pending")
+    for key in ("check_receipt", "stage_receipt", "stage_journey_receipt", "source_bundle", "failure"):
+        item.pop(key, None)
+    state["controller_maintenance"] = None
+    _update_state(state_path, state)
+    return True
+
+
 def _accept_prepared_member(config, state_path, state, item, check, bundle, tree, controller):
     """Advance the existing batch's source only; no application build/install."""
     if check.get("status") != "passed":
@@ -3925,6 +4292,7 @@ def _accept_prepared_member(config, state_path, state, item, check, bundle, tree
     batch = state.get("batch")
     if batch is None:
         batch = state["batch"] = {"status": "open", "mode": "source-accumulated",
+            "stage_policy_version": 2, "stage_history": [], "final_stage_member_count": 0,
             "base_sha": state["main"]["sha"], "base_tree": state["main"]["tree"],
             "installed_app": dict(state["installed_app"]), "members": [],
             "controller_source_sha": state["main"]["sha"], "opened_at_utc": _utc_now()}
@@ -3967,9 +4335,13 @@ def _prepared_batch_checks(repo, state):
             raise ReleaseError("prepared member source ref changed")
         receipts.append(receipt)
     result = dict(receipts[-1])
+    offset = int(batch.get("final_stage_member_count", 0)) if batch.get("stage_policy_version") == 2 else 0
+    selected = receipts[offset:]
+    scope_base = batch.get("final_stage_head", batch["base_sha"]) if offset else batch["base_sha"]
     result.update(baseline_sha=batch["base_sha"], baseline_tree=batch["base_tree"],
                   changed_paths=_git(repo, "diff", "--name-only", "--no-renames", batch["base_sha"], batch["head_sha"]).splitlines(),
-                  installed_checks=sorted({name for r in receipts for name in _installed_check_names(r.get("installed_checks", []))}),
+                  installed_checks=sorted({name for r in selected for name in _installed_check_names(r.get("installed_checks", []))}),
+                  stage_check_base_sha=scope_base,
                   check_scope="selected-member-checks; final application build and installed journeys",
                   member_check_receipts=[m["check_receipt_sha256"] for m in batch["members"]])
     return result
@@ -4010,11 +4382,18 @@ def _accept_final_batch_stage(config, state_path, state, item, evidence):
     if inflight.get("head_sha") != batch["head_sha"] or inflight.get("base_sha") != batch["base_sha"]:
         raise ReleaseError("final installed attempt differs from accumulated source")
     _verify_staged_member(config, Path(config["repo"]), inflight, evidence)
-    required = {name for member in batch["members"] for name in member.get("stage_check_names", [])}
+    offset = int(batch.get("final_stage_member_count", 0)) if batch.get("stage_policy_version") == 2 else 0
+    required = {name for member in batch["members"][offset:] for name in member.get("stage_check_names", [])}
     if not required.issubset({check["name"] for check in evidence["checks"]}):
         raise ReleaseError("final installed evidence omits an AI-selected member journey")
     batch.update(installed_app=dict(inflight["installed_app"]), stage_receipt=dict(inflight["stage_receipt"]),
                  final_stage_head=inflight["head_sha"])
+    if batch.get("stage_policy_version") == 2:
+        batch.setdefault("stage_history", []).append({
+            key: copy.deepcopy(inflight[key]) for key in (
+                "head_sha", "head_tree", "release_manifest_sha256", "stage_receipt", "check_receipt")})
+        batch["stage_history"][-1]["stage_evidence_schema"] = 2
+        batch["final_stage_member_count"] = len(batch["members"])
     item.update(status="staged", stage_receipt=inflight["stage_receipt"], stage_journey_receipt=evidence)
     state["in_flight"] = None
     _update_state(state_path, state, status="ready")
@@ -4029,6 +4408,8 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
         raise ReleaseError("domestic main differs from the durable release ledger")
     final_batch = bool(config.get("_final_batch_stage"))
     old_main_sha = state["batch"]["base_sha"] if final_batch else _batch_tip(state)
+    if item["base_sha"] != old_main_sha and not final_batch:
+        _integrate_stale_candidate(config, state_path, state, item, old_main_sha)
     if item["base_sha"] != old_main_sha and not final_batch:
         item["status"] = "stale_base"
         item["failure"] = {"phase": "base-check", "expected_base": old_main_sha,
@@ -4113,6 +4494,7 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
                                              base_release, validation_scope_base=old_main_sha)
             if metadata.get("source_tree") != head_tree:
                 raise ReleaseError("builder returned a package for a different source tree")
+            _require_runtime_config_contract(metadata, batch)
             if item.get("head_sha") != item["candidate_id"]:
                 raise ReleaseError("candidate identity changed while the package was building")
             phase = "stage-install"
@@ -4162,6 +4544,8 @@ def process_candidate(config: dict[str, Any], state_path: Path, state: dict[str,
                                        "bundle_meta": bundle_meta,
                                        "production_install_started": False,
                                        "commit_started": False, "final_batch_stage": final_batch})
+            if (state.get("batch") or {}).get("stage_policy_version") == 2:
+                state["in_flight"]["stage_evidence_schema"] = 2
             item["status"] = "stage_validation_pending"
             _update_state(state_path, state, status="blocked")
             return {"status": "stage_validation_pending", "candidate_sha": item["head_sha"],
@@ -4264,7 +4648,7 @@ def _read_stage_evidence(config: dict[str, Any], inflight: dict[str, Any]) -> di
     stage_digest = hashlib.sha256(json.dumps(
         stage_receipt, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     expected = {
-        "schema_version": 1, "status": "passed", "source_sha": sha,
+        "schema_version": inflight.get("stage_evidence_schema", 1), "status": "passed", "source_sha": sha,
         "source_tree": inflight["head_tree"],
         "manifest_sha256": inflight["release_manifest_sha256"],
         "stage_receipt_sha256": stage_digest,
@@ -4300,6 +4684,28 @@ def _read_stage_evidence(config: dict[str, Any], inflight: dict[str, Any]) -> di
             raise ReleaseError("stage journey log is not protected")
         if _file_sha256(log) != _digest(check.get("log_sha256"), "stage journey log digest"):
             raise ReleaseError("stage journey log differs from its receipt")
+        if receipt["schema_version"] == 2:
+            fixture = _sha(check.get("test_source_sha"), "stage test source")
+            repo = Path(config["repo"])
+            if _tree(repo, fixture) != _sha(check.get("test_source_tree"), "stage test tree"):
+                raise ReleaseError("stage test source tree changed")
+            if fixture != sha:
+                _first_parent_chain(repo, sha, fixture)
+                if _classify_candidate(repo, sha, fixture)["runtime_changed"]:
+                    raise ReleaseError("stage fixture repair changes application payload")
+            registered = _stage_contracts(repo, fixture, {name})[name]
+            if (check.get("result_format") != "go-test-json"
+                    or check.get("test_names") != registered["tests"]):
+                raise ReleaseError("stage result is not the registered named execution")
+            _verify_go_contract_log(log.read_text(), set(registered["tests"]))
+    if receipt["schema_version"] == 2:
+        if receipt.get("installed_app_sha") != sha:
+            raise ReleaseError("stage result binds a foreign installed application")
+        binary_digest = _digest(receipt.get("installed_binary_sha256"), "installed binary digest")
+        config_check = stage_receipt.get("runtime_config_check", {})
+        if config_check.get("result") != "passed" or config_check.get("binary_sha256") != binary_digest:
+            raise ReleaseError("stage result differs from the pre-switch binary configuration check")
+        _sha(receipt.get("host_source_sha"), "installed Host source")
     selected = _installed_check_names((inflight.get("check_receipt") or {}).get("installed_checks", []))
     if not selected.issubset(names):
         raise ReleaseError("stage receipt omits an AI-selected installed journey")
@@ -4466,11 +4872,27 @@ def _batch_final_evidence(config: dict[str, Any], batch: dict[str, Any]) -> dict
         "head_sha": staged_sha, "head_tree": staged_tree,
         "release_manifest_sha256": app["manifest_sha256"],
         "stage_receipt": batch["stage_receipt"],
+        "stage_evidence_schema": 2 if batch.get("stage_policy_version") == 2 else 1,
     })
     if evidence is None:
         return None
     required = {name for member in batch["members"] for name in member["stage_check_names"]}
     observed = {check["name"] for check in evidence["checks"]}
+    if batch.get("stage_policy_version") == 2:
+        retained = []
+        for snapshot in batch.get("stage_history", []):
+            _first_parent_chain(Path(config["repo"]), snapshot["head_sha"], batch["head_sha"])
+            earlier = _read_stage_evidence(config, snapshot)
+            if earlier is None:
+                raise ReleaseError("previous passed stage evidence disappeared")
+            observed.update(row["name"] for row in earlier["checks"])
+            retained.append({"source_sha": earlier["source_sha"],
+                "installed_app_sha": earlier["installed_app_sha"],
+                "manifest_sha256": earlier["manifest_sha256"],
+                "checks": [row["name"] for row in earlier["checks"]],
+                "evidence_sha256": hashlib.sha256(json.dumps(earlier, sort_keys=True, separators=(",", ":")).encode()).hexdigest()})
+        evidence = {**evidence, "retained_stage_evidence": retained,
+                    "check_scope": "delta since previous accepted stage; prior results retain their original artifact"}
     if not required <= observed:
         raise ReleaseError("final cumulative staging journeys omit an earlier member check")
     return evidence
@@ -5233,6 +5655,12 @@ def poll(config: dict[str, Any], *, expected_candidate_sha: str | None = None) -
             return _approval_wait_result(inflight, None)
         if state["status"] == "outcome_unknown":
             raise ReleaseError("production outcome is unknown; use reconcile, never reinstall blindly")
+        if (state["status"] == "blocked" and state.get("in_flight") is None
+                and (_active_queue_item(state) or {}).get("status") == "stale_base"
+                and (state.get("batch") or {}).get("stage_policy_version", 2) == 2):
+            # A stale baseline is a source merge opportunity, never a reason
+            # to retry an unknown install or skip a failed business verdict.
+            state["status"] = "ready"
         if state["status"] == "blocked":
             raise ReleaseError("domestic release queue is blocked; inspect or resubmit its head candidate")
         if expected_candidate_sha is not None:
@@ -5275,6 +5703,10 @@ def poll(config: dict[str, Any], *, expected_candidate_sha: str | None = None) -
         if next_item is None:
             return result
         if next_item.get("base_sha") != state["main"]["sha"]:
+            if (state.get("batch") or {}).get("stage_policy_version", 2) == 2:
+                result["queue_status"] = "pending"
+                result["next_candidate_sha"] = next_item["head_sha"]
+                return result
             next_item["status"] = "stale_base"
             next_item["failure"] = {"phase": "base-check", "expected_base": state["main"]["sha"],
                                     "candidate_base": next_item.get("base_sha"), "recorded_at_utc": _utc_now()}
@@ -5426,6 +5858,7 @@ def _promote_batch(config: dict[str, Any], state_path: Path, state: dict[str, An
             or _file_sha256(metadata_path) != batch["production_metadata_sha256"]):
         raise ReleaseError("approved production transfer metadata changed")
     metadata = json.loads(metadata_path.read_text())
+    _require_runtime_config_contract(metadata, batch)
     if metadata.get("source_sha") != app["sha"] or metadata.get("release_files_sha256") != app["manifest_sha256"]:
         raise ReleaseError("approved metadata does not describe the final staged package")
     out = Path(config["work_root"]) / "builds" / app["sha"]
@@ -6626,7 +7059,7 @@ def restricted_ssh() -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check", "batch-open", "batch-stage", "batch-seal", "batch-reopen", "batch-tool-repair",
+    parser.add_argument("action", choices=("bootstrap", "recover-partial-bootstrap", "prepare-baseline", "resume-baseline", "activate", "verify", "submit", "release", "submit-stdin", "ack-stage-reset", "maintenance-check", "batch-open", "batch-stage", "stage-check", "batch-seal", "batch-reopen", "batch-tool-repair",
                                             "ack-production-rollback",
                                             "poll", "status", "promote", "promote-authorized", "reconcile", "archive-ack", "archive-ack-stdin", "restricted-ssh", "hook-pre-receive"))
     parser.add_argument("--config", type=Path, default=Path(DEFAULT_CONFIG))
@@ -6644,6 +7077,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--calibrate-check-capacity", action="store_true",
                         help="maintenance-only measurement before setting same-host disk/cache budgets")
     parser.add_argument("--tree")
+    parser.add_argument("--test-source-sha", help="source-only fixture repair; existing installed app remains explicit")
     parser.add_argument("--proof", type=Path, help="fresh root-owned known-production-rollback proof")
     parser.add_argument("--installed-app-sha")
     parser.add_argument("--candidate-sha", help="exact PR #46 head for the one-time baseline helper overlay")
@@ -6718,6 +7152,8 @@ def main(argv: list[str] | None = None) -> int:
             result = batch_open(config, controller_sha=args.sha, controller_ref=args.ref)
         elif args.action == "batch-stage":
             result = batch_stage(config)
+        elif args.action == "stage-check":
+            result = stage_check(config, test_source_sha=args.test_source_sha)
         elif args.action == "batch-seal":
             result = batch_seal(config)
         elif args.action == "batch-reopen":

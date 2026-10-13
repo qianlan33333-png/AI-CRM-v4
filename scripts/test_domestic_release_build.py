@@ -17,6 +17,14 @@ import domestic_release_build as builder
 
 
 class DomesticReleaseBuildTests(unittest.TestCase):
+    def test_retention_payload_overlays_do_not_rebuild_unchanged_host_or_binaries(self):
+        result = builder.classify_paths(sorted(builder.DEPLOY_OVERLAY_FILES))
+        self.assertTrue(result.runtime_changed)
+        self.assertFalse(result.frontend_changed)
+        self.assertIsNone(result.full_build_reason)
+        self.assertEqual(result.package_overlays, ["deploy"])
+        self.assertEqual(result.graph_paths, [])
+
     def test_access_recovery_stays_source_only_until_application_uses_it(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repo = Path(temporary)

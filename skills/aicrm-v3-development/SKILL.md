@@ -1,161 +1,42 @@
 ---
 name: aicrm-v3-development
-description: Plan, implement, migrate, or review AI-CRM-v4 capabilities with an explicit first-pass decision on OneID, persistence, durable jobs, and External Effects. The v3 path name remains for tooling compatibility.
+description: Implement or repair AI-CRM-v4 with deliberate identity, transaction and external effect boundaries, mechanical preparation, direct-consumer checks and exact candidate delivery. The v3 name is retained for compatibility.
 ---
 
-# AI-CRM-v4 Development Decision Manual
+# V4 开发
 
-## Completion contract
+读当前 `AGENTS.md` 和 [开发入口](../../docs/development-before-start.md)。复用已授权父 brief；一项能力只准备一次业务判断流程、参考和 PRD。一个候选交付完整可观察行为及其相关测试，按行为拆分，不按文件/行数拆分。
 
-Before editing, classify the business judgment, acceptance journey, OneID,
-Persistence, and External Effects boundaries. Completion requires a clean,
-committed worktree and test evidence bound to its exact head/tree. Candidate
-checks, staging build/install, production technical health, and real business
-acceptance are separate facts. A compile, mock, HTTP 200, synthetic fixture,
-or queued Provider effect is not completed business acceptance.
+## 开始判断
 
-Use this skill after reading the repository `AGENTS.md`. Its purpose is to make OneID and durable execution deliberate shared foundations without turning them into universal dependencies.
-
-## Small-step delivery
-
-Follow `skills/aicrm-v3-development-frontdoor/SKILL.md`: keep the parent brief in one Codex task, deliver one independently releasable behavior or defect with its tests in each candidate, and use Product Design before UI implementation. Split by behavior, without line-count quotas. An authorized parent brief carries into child candidates; request a new decision only for material scope or contract changes. The routed release workbench owns publication; the original developer fixes code or baseline failures. Use a separate agent only when explicitly requested by the user or applicable instructions; other tasks are not restricted to a model.
-
-
-每个候选固定说明对外合同、业务机制、关联模块、页面影响和验证证据，按 [开发入口五项判断](../aicrm-v3-development-frontdoor/SKILL.md#五项影响判断) 简短说明；本地 AI 根据准确 diff 和直接消费者选择包/用例。高风险加强本次相关断言，未知或共享文件不自动全量。
-
-## Start With a Two-Axis Classification
-
-Before editing code, record a short decision in the implementation plan or PR:
+留下简短结论；不涉及时写原因，不制造依赖：
 
 ```text
-OneID: not involved | reads canonical customer | resolves identity | provisions customer | links/merges identity
-Persistence: stateless | local transaction | internal durable job | Provider read | Provider write/external effect
+OneID: 不涉及 | 读取客户 | 解析身份 | 显式建客 | 关联身份
+执行: 无状态 | 本地事务 | 内部持久任务 | Provider 读取 | Provider 写入
 ```
 
-If an axis is not involved, state why and continue without adding a dependency. Revisit the classification when scope changes.
+- 客户主键只有 `customers.id`。身份用 `internal/identity/port`；OpenID/UnionID scope 和可信来源不能省略，HTTP 不能自报 verified，Resolve 不隐式建客，证据不足保持 pending/conflict。
+- 同一业务命令的状态、幂等、审计、Outbox/外部意图接受若需原子性，确认共享 PostgreSQL Unit of Work；不同事务不等价。
+- 可恢复内部执行用 `internal/platform/jobqueue`；Provider 读走归属 connector；企微业务写只经 outbound 与 externaleffects Port。复用原幂等键、attempt、lease/fence、回调和对账，不再造队列、匹配器或重试状态机。
+- 稳定 Port/版本化事件协调领域。每表一个 Owner，不跨领域表写或 import app/store/http/worker/provider。
+- accepted、queued、executed、delivered 是不同结果。outcome_unknown 保留原键只读对账。支付/退款重放、身份错归属、鉴权绕过、泄密和数据丢失是停止条件。
 
 ## 限制必要性判断（奥卡姆剃刀原则）
 
-本规则仅约束今后新开发中新增的限制，不要求审计或批量修改既有限制。权限、字符长度、格式、数量、超时、重试和额外审批步骤都适用。
+假设没有拟新增的限制：业务正确性、安全和实际资源需求仍成立，就不加；否则先复用现有边界，采用足够的最小约束。数量、格式、长度、重试、超时和权限必须有具体业务/Provider/数据库/资源依据，不凭习惯设固定数字。私有凭据权限不能机械套到公开不可变源码与 CSS。简短记录“对象、具体后果、依据、作用范围”；没有新增限制写不涉及即可。
 
-> 每增加一个限制，先假设没有它，判断业务正确性、安全边界和资源承载是否仍然成立。成立则不增加；不成立则采用有明确依据、足以解决问题的最小约束。
+## 实现与验证
 
-```mermaid
-flowchart TD
-    A[准备新增限制] --> B[假设不增加该限制]
-    B --> C{是否仍满足业务、安全和资源要求}
-    C -->|是| D[不增加限制]
-    C -->|否，有具体依据| E[优先复用已有边界]
-    E --> F[选择足够且最少的约束]
-    F --> G[验证正常业务可完成，目标风险被阻止]
-    C -->|依据不明确| H[核实合同或风险，不凭猜测设置阈值]
-```
+- UI 先用 [Product Design 路由](../aicrm-v3-frontend-consistency/SKILL.md)，复用已批准参考和组件；不为相关修复重做全套设计。
+- 自动准备源码索引、消费视图、CLI 目录及发布程序声明；展示机械差异，提交后从干净准确 checkout 核对。准备修改改变了 head，旧收据不升级成新 head 的结果。
+- AI 读取准确 diff、改动函数直接调用方与字段直接消费者，在 `docs/release-checks.json` 给出包/具名用例/简短原因。小包整包，大包具名；共享/未知改动补最近合同，不自动全量或全仓 vet/race。
+- 字段或操作能力覆盖用户动作→保存/任务→持久化→重新读取。新增题型不只测展示；刷新目录不只测昵称。后端改动也看实际页面消费者。
+- 身份、权限、支付幂等、事务、迁移只加强本次相关拒绝、重放、并发、数据保留；不让正常流程为了过测试增加注册或提示。
+- 纯单元有效结果和有效缓存可复用；Linux/PG/浏览器在适用环境执行一次。空匹配、skip、缺环境和超时为未完成。修复只重跑失败与直接影响检查。
 
-- **业务和输入限制**：阈值来自已确认业务规则、数据库或 Provider 合同、具体资源预算；不凭习惯设置 100、255、1000 等数值。已有边界足够时，不新增更严的重复限制。
-- **权限**：按实际操作授予最少权限，并保证完整操作链能够执行。受保护资源仍须进行授权判断并默认拒绝未授权访问；参照 [OWASP 最小权限和默认拒绝原则](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html)。不得以“最少限制”为由绕过身份、事务、外部效果或凭据保护红线。
-- **作用范围**：限制施加于需要保护的对象和环节，避免把服务、凭据的私有权限要求机械套到源码快照、CSS 等不同用途的文件上。
-- **限制反馈**：必要限制被触发时，明确说明原因和可行修正方式；字符超限不得静默截断。
+## 交付
 
-在 PRD 或 PR 中简短记录新增限制：
+五项影响简短说明：对外合同、业务机制、直接关联模块、页面、验证证据。用开发入口的 handoff 命令生成准确 base/head/tree/ref、原任务 ID、范围授权、结果和未验证项；实际推送后重读 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json` 并向其 thread_id 投递。父范围授权继承；无关新增另列。批次内已获开发授权、实际交付候选的原任务可按用户授权通知；其他对话或外部消息不因此获准。
 
-`限制对象｜不限制的具体后果｜依据｜最小约束及作用范围`
-
-没有新增限制时，写一句“不涉及新增限制”即可；无需逐个参数创建台账。核实依据后，结论应明确为“不加”“复用已有边界”或“增加最小必要约束”。
-
-### 示例
-
-- **临时源码快照**：根据读取者和文件用途确定权限，验证创建、读取和检查的完整链路；不修改发布服务或凭据权限，也不预设所有快照必须全局可读。检查器应判断所需权限是否满足，不能仅因文件权限与某个无依据的固定值不同而拒绝正确的 CSS。
-- **自由文本长度**：没有业务或技术依据时不添加额外字段长度限制；确有下游上限时，说明按字节、字符或其他单位计量、阈值来源和错误反馈，并验证边界内正常输入与超限反馈。已有请求大小或资源保护仍按其自身依据生效。
-
-## OneID Decision
-
-OneID is involved when a capability reads or assigns a customer, accepts an external identity, correlates channels, or changes identity ownership.
-
-When involved:
-
-- Use `customers.id` as the channel-neutral customer key.
-- Resolve external identities through `internal/identity/port`; do not query identity tables or reproduce matching rules.
-- Preserve identity `kind`, `scope`, `value`, `assurance`, and `source`. OpenID and UnionID must retain their required scopes.
-- Treat Provider verification as an internal Adapter fact. HTTP payloads cannot declare themselves verified.
-- `Resolve` does not create a customer. Provision only through the explicit verified-identity use case.
-- Keep uncertain evidence pending or conflict. Do not guess, silently merge, or bind to the nearest customer.
-- Cross-root identity evidence creates an auditable merge candidate unless a separately approved workflow permits more.
-
-OneID is normally not involved in local configuration, content definitions, product rules, diagnostics, or other records that do not identify a customer. Do not add `customer_id` merely for uniformity.
-
-## Persistence and Execution Decision
-
-Classify work by observable side effect:
-
-### Stateless or local transaction
-
-- Keep durable business state in PostgreSQL 16 under one table Owner.
-- Commit business state, idempotency receipt, audit, and Outbox in one Unit of Work when they belong to one command.
-- Use locks, CAS, or versions for concurrent changes.
-
-### Internal durable job
-
-Use `internal/platform/jobqueue` for restart-safe internal work such as scheduled evaluation, snapshot preparation, or directory refresh. An internal job is not automatically an External Effect.
-
-Do not introduce an in-process ticker, a domain-specific worker framework, or another retry table.
-
-### Provider read
-
-Use the owning connector read Adapter, such as `wecom` for trusted directory facts. Record safe audit facts and failure stages, but do not label a read as an executed outbound effect.
-
-### Provider write or other external effect
-
-- The business domain freezes an immutable intent; it does not call the Provider.
-- WeCom business writes go through the sole `outbound` owner.
-- Submit the opaque intent through `internal/externaleffects/port`; reuse its queue, generation, lease/fence, attempts, receipts, retry classification, and reconciliation.
-- Use stable source, target, payload, and policy digests plus a stable idempotency key. Retrying the same logical operation must not mint a new key.
-- Keep raw customer IDs, `external_userid`, openid, phone numbers, message bodies, tokens, and Provider responses out of External Effects tables and structured logs.
-- Store the `effect_id` binding in the owning business domain, then consume effect status through a stable read Port or versioned event. Never query another domain's tables.
-- `accepted` or `queued` is not Provider success. `executed` is not delivery proof. `outcome_unknown` permits only original-key lookup, trusted callback, explicit reconciliation, or Provider-authorized idempotent retry.
-
-Payment and refund effects must reuse these reliability semantics through an explicitly versioned payment contract. Never disguise them as outbound messages.
-
-## Coordination Check Before Implementation
-
-When OneID or External Effects is involved, confirm:
-
-1. Which domain owns the business record and table?
-2. Which stable Port or versioned event is used?
-3. Does the command require one PostgreSQL Unit of Work?
-4. What is the deterministic idempotency scope?
-5. For an external effect, what are its kind and four immutable digests?
-6. Where is the business record to `effect_id` relationship stored?
-7. Who owns Provider reads, Provider writes, callbacks, and reconciliation?
-8. How are restart, replay, concurrent execution, and `outcome_unknown` tested?
-9. Has the implementation avoided a second customer identity system, queue, Worker, retry loop, or effect state machine?
-
-Do not assume the current adapter participates in the caller's Unit of Work. Verify it. If effect acceptance opens an independent transaction while the business command requires atomicity, treat that as an architecture gap and fix the shared Port/adapter rather than compensating in the business module.
-
-## Completion Evidence
-
-默认采用 [日常国内发布](../../docs/operations/domestic-main-release.md)：准确候选与相关测试 → 国内构建一次 → 预发安装和受影响合成旅程 → 已有部署命令则内部绑定准确候选、构件及预发收据 → 同包生产 → 版本、完整摘要、服务及健康读回 → 唯一工作台完成源码基线对齐。尚无生产授权时等待用户部署命令；已有授权不重复询问。
-
-国内准确候选 ref 实际推送后，读取 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json`，通过 `send_message_to_thread` 将原任务 ID、base/head/tree/ref、五项影响、测试收据、未验证项和授权范围实际交付其 `thread_id`。开发任务不安装共享预发或生产；工作台开始、恢复及发布写操作前核对路由，不指向自己即停止写操作。更换对话继续使用原队列、锁、attempt 和收据，具体交接见发布文档，不在本 skill 固定对话 ID。
-
-开发交付只需准确 base/head/tree、相关测试结果、简短影响说明和未验证项。发布者保留各步骤的既有收据；没有 GitHub PR、merge-preview、freshness attestation、四级 handoff 或 ACK 前置。文档/skill 在本地校验后生效，不要求应用构建、预发安装或生产发布。
-
-真实支付、扫码及官方 Provider 结果在技术安装后另行记录；尚未验收不阻塞下一次技术发布，也不宣称业务成功。虚拟合同只证明确定性逻辑，不证明真实外部效果。`outcome_unknown` 时保留原 attempt，只读对账，不盲目重装。GitHub 只由用户人工择机归档。
-
-The candidate description should contain a compact section like:
-
-```text
-OneID decision: involved/not involved, with reason and Port used
-Persistence decision: classification and transaction boundary
-External Effects decision: involved/not involved, kind/idempotency/reconciliation when applicable
-No-duplication evidence: no new identity matcher, Provider writer, queue, Worker, retry, or reconciliation kernel
-```
-
-These are review prompts, not universal feature gates. Apply only the relevant tests and contracts, but never omit the initial classification.
-
-## Stop Conditions
-
-Stop and report instead of improvising when the design would cause identity misattribution, implicit customer creation, cross-domain table writes, independent commits that can split one required transaction, duplicate Provider effects, blind retry of `outcome_unknown`, or a second execution/identity kernel.
-
-## 2026-10-03 极简发布
-
-遵循唯一 [发布流程](../../docs/operations/domestic-main-release.md) 和 [获批 PRD](../../docs/prd/2026-10-03-extreme-release.md)。本地 AI 列相关包及具名用例；取消日常全量回退和重复准备，源码先累计，最终构建/预发各一次，已有授权同包生产并独立读回。失败只修复并重跑受影响检查；安装不明停止写入对账。沿用现有队列/锁/attempt，不增加审批或新发布通道。
+[发布 skill](../aicrm-v4-release/SKILL.md) 管原队列和同包晋级。源码检查、安装包预发、生产技术读回、真实认证/Provider 业务事实分别汇报；局部检查不称完整回归。

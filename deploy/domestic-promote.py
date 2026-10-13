@@ -21,6 +21,7 @@ import pwd
 import re
 import shutil
 import signal
+import shlex
 import socket
 import stat
 import subprocess
@@ -46,6 +47,8 @@ READY = "http://127.0.0.1:8080/readyz"
 HOST_ROLE_DIRECTORY = Path("/etc/aicrm")
 HOST_ROLES = {"staging", "production"}
 HOST_CONTRACT_PATH = "/usr/bin:/bin"
+ROOT_UID = 0
+ROOT_GID = 0
 SMOKE_SOURCE_REPOSITORY = Path("/opt/aicrm/source")
 DOMESTIC_SOURCE_REPOSITORY = ROOT / "domestic/source.git"
 SMOKE_SNAPSHOT_ROOT = ROOT / "domestic-smoke-sources"
@@ -576,7 +579,7 @@ def _require_protected_runtime_environment(path: Path) -> None:
     mode = stat.S_IMODE(info.st_mode)
     if (
         not stat.S_ISREG(info.st_mode)
-        or info.st_uid != 0
+        or info.st_uid != ROOT_UID
         or not mode & 0o400
         or mode & 0o022
         or mode & 0o111
@@ -590,6 +593,152 @@ def _require_protected_runtime_environment(path: Path) -> None:
             raise RuntimeError("host runtime environment is missing or unsafe") from exc
         if info.st_gid != service_group:
             raise RuntimeError("host runtime environment is missing or unsafe")
+
+
+def _read_protected_runtime_environment(path: Path) -> tuple[dict[str, str], os.stat_result]:
+    """Read the configured EnvironmentFile without following or changing it."""
+    _require_protected_runtime_environment(path)
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise RuntimeError("host runtime environment is missing or unsafe") from exc
+    try:
+        before = os.fstat(descriptor)
+        after_path = path.lstat()
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_uid != ROOT_UID
+                or (before.st_dev, before.st_ino) != (after_path.st_dev, after_path.st_ino)
+                or before.st_size > 1048576):
+            raise RuntimeError("host runtime environment is missing or unsafe")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            raw = stream.read(1048577)
+        after = os.fstat(descriptor)
+        if len(raw) != before.st_size or len(raw) > 1048576 or (
+            before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns
+        ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+            raise RuntimeError("host runtime environment changed while being read")
+    except OSError as exc:
+        raise RuntimeError("host runtime environment is unavailable") from exc
+    finally:
+        os.close(descriptor)
+
+    values: dict[str, str] = {}
+    try:
+        text = raw.decode("utf-8")
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith(("#", ";")):
+                continue
+            key, separator, encoded_value = line.partition("=")
+            if (not separator or key != key.strip() or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", key)
+                    or "\x00" in line or key in values):
+                raise ValueError
+            encoded_value = encoded_value.strip()
+            if not encoded_value:
+                value = ""
+            else:
+                parts = shlex.split(encoded_value, comments=False, posix=True)
+                if len(parts) != 1 or "\x00" in parts[0]:
+                    raise ValueError
+                value = parts[0]
+            values[key] = value
+    except (UnicodeError, ValueError):
+        raise RuntimeError("host runtime environment syntax is unsupported") from None
+    return values, before
+
+
+def check_candidate_runtime_config(release: Path, sha: str, metadata: dict) -> dict:
+    """Validate api and worker environment through the candidate's normal cfg.Load path."""
+    if "runtime_config_check_supported" not in metadata:
+        # Sealed v1 batches predate this contract. Keep their original install
+        # path, but record that no runtime-config check was available.
+        return {
+            "contract": "aicrm-check-runtime-config-v1",
+            "result": "not_available_legacy_metadata",
+            "reason": "metadata_field_absent_from_legacy_package",
+            "release_sha": sha,
+        }
+    if metadata["runtime_config_check_supported"] is not True:
+        raise RuntimeError("candidate_runtime_config_check_not_declared")
+    binary = release / "bin/aicrm"
+    try:
+        info = binary.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != ROOT_UID or info.st_gid != ROOT_GID
+                or info.st_mode & 0o022 or info.st_mode & 0o111 == 0):
+            raise RuntimeError("candidate_runtime_config_binary_untrusted")
+        environment, environment_stat = _read_protected_runtime_environment(ENV)
+    except OSError as exc:
+        raise RuntimeError("candidate_runtime_config_inputs_unavailable") from exc
+
+    binary_digest = digest(binary)
+    checks = []
+    for role in ("api", "worker", "effects-worker"):
+        role_environment = dict(environment)
+        role_environment.update({
+            "PATH": "/usr/bin:/bin",
+            "AICRM_ROLE": role,
+            "AICRM_RELEASE_SHA": sha,
+        })
+        try:
+            result = subprocess.run(
+                [str(binary), "--check-runtime-config"], env=role_environment,
+                capture_output=True, text=True, timeout=15, check=False,
+            )
+        except Exception:
+            raise RuntimeError(f"candidate_runtime_config_check_unavailable:{role}") from None
+        if (result.returncode != 0 or result.stderr != ""
+                or result.stdout != '{"ok":true,"code":"runtime_config_valid"}\n'):
+            raise RuntimeError(f"candidate_runtime_config_check_failed:{role}")
+        checks.append({"role": role, "result": "passed"})
+
+    try:
+        final_environment_stat = ENV.lstat()
+    except OSError as exc:
+        raise RuntimeError("host runtime environment changed during candidate checks") from exc
+    if (environment_stat.st_dev, environment_stat.st_ino, environment_stat.st_size, environment_stat.st_mtime_ns) != (
+        final_environment_stat.st_dev, final_environment_stat.st_ino,
+        final_environment_stat.st_size, final_environment_stat.st_mtime_ns,
+    ):
+        raise RuntimeError("host runtime environment changed during candidate checks")
+    return {
+        "contract": "aicrm-check-runtime-config-v1",
+        "binary_sha256": binary_digest,
+        "environment_source": str(ENV),
+        "environment_device": environment_stat.st_dev,
+        "environment_inode": environment_stat.st_ino,
+        "environment_size": environment_stat.st_size,
+        "roles": checks,
+        "result": "passed",
+    }
+
+
+def _prepare_install_receipts(directory: Path) -> None:
+    if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+        raise RuntimeError("release receipt directory is unsafe")
+    directory.mkdir(mode=0o700, exist_ok=True)
+    info = directory.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != ROOT_UID or info.st_gid != ROOT_GID:
+        raise RuntimeError("release receipt directory is unsafe")
+    directory.chmod(0o700)
+
+
+def _write_private_install_receipt(path: Path, temporary: Path, receipt: dict) -> None:
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchown(descriptor, ROOT_UID, ROOT_GID)
+        with os.fdopen(descriptor, "w", encoding="utf-8", closefd=False) as stream:
+            stream.write(json.dumps(receipt, sort_keys=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        os.close(descriptor)
+        temporary.unlink(missing_ok=True)
 
 
 def _has_required_systemd_environment_file(value: str, path: Path) -> bool:
@@ -1441,6 +1590,7 @@ def install(
             verify_payload_without_release_env(release, metadata)
             verify_root_owned_release(release)
             reject_unclassified_migration_changes(metadata, release, old_path)
+            runtime_config_evidence = check_candidate_runtime_config(release, sha, metadata)
             readiness(old_sha)
             make_release_directories_traversable(release)
         else:
@@ -1450,8 +1600,9 @@ def install(
             reject_unclassified_migration_changes(metadata, incoming, old_path)
             if release.is_symlink() or release.exists():
                 raise RuntimeError("target release already exists; inspect before retry")
-            # Validate before move and then seal; the receiving account loses
-            # write access before the live symlink can point at this directory.
+            # First move and seal the untrusted upload. The runtime checker
+            # accepts only a root-owned candidate, and still runs before any
+            # backup, migration, or live switch.
             shutil.move(str(incoming), str(release))
             run("chown", "-R", "root:root", str(release))
             (release / "release.env").write_text(f"AICRM_RELEASE_SHA={sha}\n")
@@ -1459,6 +1610,8 @@ def install(
             verify_payload_without_release_env(release, metadata)
             verify_root_owned_release(release)
             make_release_directories_traversable(release)
+            runtime_config_evidence = check_candidate_runtime_config(release, sha, metadata)
+        _prepare_install_receipts(RECEIPTS)
         units = changed_units(metadata)
         if bootstrap:
             units = sorted({path.name for path in (release / "deploy").glob("aicrm*.service") if path.name not in {"aicrm-domestic-release.service", "aicrm-domestic-main-release.service"}} | {path.name for path in (release / "deploy").glob("aicrm*.timer") if path.name not in {"aicrm-domestic-release.timer", "aicrm-domestic-main-release.timer"}})
@@ -1469,22 +1622,37 @@ def install(
         if needs_migration and host_role == "production":
             backup = backup_database(sha)
         switched = False
+        migration_attempted = False
+        migration_completed = False
         try:
             switch_to(release)
             switched = True
             if units:
                 install_units(release, units)
             if needs_migration:
-                try:
-                    run("systemctl", "start", "aicrm-migrate.service")
-                except Exception as exc:
-                    if needs_migration and host_role == "staging":
-                        raise RuntimeError(
-                            "staging migration failed; candidate stopped and live runtime returned to the previous release where one existed. "
-                            "Rebuild the disposable synthetic database from the current migration set "
-                            "and synthetic fixtures before creating a fresh candidate; do not restore a dump."
-                        ) from exc
-                    raise
+                migration_attempted = True
+                migration_receipt = {
+                    "schema_version": 1,
+                    "source_sha": sha,
+                    "source_tree": metadata.get("source_tree"),
+                    "manifest_sha256": metadata["release_files_sha256"],
+                    "previous_sha": old_sha,
+                    "database_backup": str(backup) if backup else None,
+                    "technical_status": "migration_in_progress",
+                    "database_state": "unknown_migration_may_be_partial",
+                    "database_restore_attempted": False,
+                    "runtime_config_check": runtime_config_evidence,
+                    "observed_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+                _write_private_install_receipt(receipt_path, temp_receipt, migration_receipt)
+                run("systemctl", "start", "aicrm-migrate.service")
+                migration_completed = True
+                migration_receipt.update(
+                    technical_status="migration_completed_activation_pending",
+                    database_state="migrations_applied",
+                    observed_at_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                )
+                _write_private_install_receipt(receipt_path, temp_receipt, migration_receipt)
             restart_services(extra_active)
             for unit in units:
                 if unit not in {"aicrm.service", "aicrm-effects-worker.service", "aicrm-migrate.service", *extra_active}:
@@ -1493,6 +1661,49 @@ def install(
             verify_payload_without_release_env(release, metadata)
         except Exception:
             if switched:
+                if migration_attempted:
+                    stopped = []
+                    stop_units = ("aicrm.service", "aicrm-effects-worker.service", *extra_active)
+                    for unit in stop_units:
+                        try:
+                            result = run("systemctl", "stop", unit, check=False)
+                            if result.returncode == 0:
+                                stopped.append(unit)
+                        except Exception:
+                            pass
+                    status = "migration_completed_activation_failed" if migration_completed else "migration_failed_database_state_unknown"
+                    database_state = "migrations_applied" if migration_completed else "unknown_migration_may_be_partial"
+                    failure_receipt = {
+                        "schema_version": 1,
+                        "source_sha": sha,
+                        "source_tree": metadata.get("source_tree"),
+                        "manifest_sha256": metadata["release_files_sha256"],
+                        "previous_sha": old_sha,
+                        "database_backup": str(backup) if backup else None,
+                        "technical_status": status,
+                        "database_state": database_state,
+                        "database_restore_attempted": False,
+                        "current_release_sha": sha,
+                        "application_services_stop_confirmed": stopped,
+                        "runtime_config_check": runtime_config_evidence,
+                        "observed_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    }
+                    try:
+                        _write_private_install_receipt(receipt_path, temp_receipt, failure_receipt)
+                    except Exception:
+                        pass
+                    if migration_completed:
+                        raise RuntimeError(
+                            "database migrations completed but candidate activation failed; "
+                            f"current release remains {sha}; API and worker stop was requested; no database restore was attempted"
+                        ) from None
+                    detail = "database may be partially migrated"
+                    if host_role == "staging":
+                        detail += "; rebuild the disposable synthetic database from the current migration set and fixtures"
+                    raise RuntimeError(
+                        f"release migration failed; {detail}; current release remains {sha}; "
+                        "API and worker stop was requested; no database restore was attempted"
+                    ) from None
                 if old_path:
                     switch_to(old_path)
                     try:
@@ -1509,14 +1720,10 @@ def install(
                     if units:
                         restore_units(unit_snapshot)
             raise
-        receipt = {"schema_version": 1, "source_sha": sha, "source_tree": metadata.get("source_tree"), "manifest_sha256": metadata["release_files_sha256"], "previous_sha": old_sha, "database_backup": str(backup) if backup else None, "technical_status": "installed_healthy", "installed_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-        RECEIPTS.mkdir(mode=0o700, exist_ok=True)
-        RECEIPTS.chmod(0o700)
-        if temp_receipt.exists() or temp_receipt.is_symlink() or receipt_path.exists() or receipt_path.is_symlink():
+        receipt = {"schema_version": 1, "source_sha": sha, "source_tree": metadata.get("source_tree"), "manifest_sha256": metadata["release_files_sha256"], "previous_sha": old_sha, "database_backup": str(backup) if backup else None, "technical_status": "installed_healthy", "runtime_config_check": runtime_config_evidence, "installed_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        if temp_receipt.exists() or temp_receipt.is_symlink() or (receipt_path.exists() and not needs_migration) or receipt_path.is_symlink():
             raise RuntimeError("receipt path changed during installation")
-        temp_receipt.write_text(json.dumps(receipt, sort_keys=True) + "\n")
-        os.chmod(temp_receipt, 0o600)
-        os.replace(temp_receipt, receipt_path)
+        _write_private_install_receipt(receipt_path, temp_receipt, receipt)
         return receipt
 
 
@@ -2340,9 +2547,9 @@ def _release_retention_helpers(current: str):
 def reclaim_obsolete_releases() -> dict:
     """Reuse verified retention under the original production install lock.
 
-    Current, previous and live references remain protected. Two real successful,
-    schema-compatible rollback packages are selected by the existing cleanup
-    owner; an unavailable proof never permits the old current/previous-only GC.
+    Current, the latest fully observed successful rollback, and live references
+    remain protected. Missing a second rollback never blocks unrelated verified
+    unreferenced package cleanup.
     """
     require_host_role("production")
     with _production_release_lock():
@@ -2353,9 +2560,6 @@ def reclaim_obsolete_releases() -> dict:
             raise RuntimeError("cleanup current differs from verified cursor")
         readiness(current)
         protected = {current}
-        previous = receipt.get("previous_sha")
-        if isinstance(previous, str) and SHA.fullmatch(previous):
-            protected.add(previous)
         cleanup, schema_reader = _release_retention_helpers(current)
         with tempfile.TemporaryDirectory(prefix=".domestic-retention-", dir=ROOT) as temporary:
             schema = Path(temporary) / "schema.json"
@@ -2369,15 +2573,19 @@ def reclaim_obsolete_releases() -> dict:
                 return {"status": "maintenance-pending", "reason": "release_retention_evidence_unavailable",
                         "removed": [], "protected": sorted(protected)}
             if plan["blockers"]:
-                return {"status": "maintenance-pending", "reason": "two_verified_schema_compatible_rollbacks_missing",
+                return {"status": "maintenance-pending", "reason": "release_cleanup_blocked_by_evidence",
                         "removed": [], "protected": sorted(protected),
-                        "rollback_releases": plan["rollback_releases"]}
+                        "rollback_releases": plan["rollback_releases"],
+                        "latest_complete_previous_release": plan["latest_complete_previous_release"],
+                        "blockers": plan["blockers"]}
             result = cleanup.apply_plan(ROOT, schema, plan, sorted(protected))
         protected.update(entry["name"] for entry in plan["entries"]
-                         if entry["action"] == "protect" and entry["reason"] == "referenced_or_rollback")
+                         if entry["action"] == "protect" and entry.get("retained_for"))
         return {"status": "completed", "protected": sorted(protected),
                 "removed": [entry["name"] for entry in result["deleted"]],
-                "rollback_releases": result["rollback_releases"], "deleted_bytes": result["deleted_bytes"],
+                "rollback_releases": result["rollback_releases"],
+                "latest_complete_previous_release": result["latest_complete_previous_release"],
+                "deleted_bytes": result["deleted_bytes"],
                 "policy": "existing_verified_release_retention"}
 
 

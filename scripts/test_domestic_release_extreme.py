@@ -61,7 +61,7 @@ class ExtremeRelease(unittest.TestCase):
             first, second = self.item(B, A), self.item(C, B)
             refs[first['ref']], refs[second['ref']] = B, C
             state['queue'] = [first]
-            metadata = {'source_tree': TREE, 'release_files_sha256': DIGEST}
+            metadata = {'source_tree': TREE, 'release_files_sha256': DIGEST, 'runtime_config_check_supported': True}
             with ExitStack() as stack:
                 stack.enter_context(patch.object(m, '_resolve_ref', side_effect=lambda repo, ref: refs[ref]))
                 stack.enter_context(patch.object(m, '_first_parent_chain', return_value=[B]))

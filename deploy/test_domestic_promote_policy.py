@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from contextlib import ExitStack
 from pathlib import Path
 import stat
@@ -43,6 +44,7 @@ def metadata_package(incoming: Path, sha: str, *, migration: bool) -> tuple[byte
         "release_files_sha256": installer.digest(manifest),
         "migrations_changed": migration,
         "changed_paths": ["migrations/0208_contract.sql"] if migration else ["web/src/page.tsx"],
+        "runtime_config_check_supported": True,
     }
     content = json.dumps(value, sort_keys=True).encode()
     return content, hashlib.sha256(content).hexdigest()
@@ -211,6 +213,78 @@ class HostEnvironmentContractTests(unittest.TestCase):
         self.assertFalse(installer._has_required_systemd_environment_file("\n".join(wrong_path["EnvironmentFiles"]), required))
 
 
+class CandidateRuntimeConfigTests(unittest.TestCase):
+    def test_candidate_is_checked_as_api_and_worker_without_changing_protected_env(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            release = root / ("b" * 40)
+            (release / "bin").mkdir(parents=True)
+            marker = root / "checked-roles.txt"
+            binary = release / "bin/aicrm"
+            binary.write_text(
+                "#!/bin/sh\n"
+                f"printf '%s\\n' \"$AICRM_ROLE\" >> {str(marker)!r}\n"
+                "printf '{\"ok\":true,\"code\":\"runtime_config_valid\"}\\n'\n"
+            )
+            binary.chmod(0o755)
+            env_file = root / "aicrm.env"
+            original = 'AICRM_DATABASE_URL="postgres://user:secret@127.0.0.1:1/app?connect_timeout=1"\n# immutable input\n'
+            env_file.write_text(original)
+            env_file.chmod(0o600)
+
+            with mock.patch.object(installer, "ROOT_UID", os.getuid()), \
+                 mock.patch.object(installer, "ROOT_GID", os.getgid()), \
+                 mock.patch.object(installer, "ENV", env_file):
+                evidence = installer.check_candidate_runtime_config(
+                    release, "b" * 40, {"runtime_config_check_supported": True}
+                )
+
+            self.assertEqual(marker.read_text(), "api\nworker\neffects-worker\n")
+            self.assertEqual(env_file.read_text(), original)
+            self.assertEqual(evidence["result"], "passed")
+            self.assertEqual([item["role"] for item in evidence["roles"]], ["api", "worker", "effects-worker"])
+            self.assertEqual(evidence["binary_sha256"], installer.digest(binary))
+            self.assertNotIn("secret", json.dumps(evidence))
+
+    def test_missing_support_declaration_is_explicit_legacy_gap_and_bad_values_are_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            release = root / ("c" * 40)
+            (release / "bin").mkdir(parents=True)
+            binary = release / "bin/aicrm"
+            binary.write_text("#!/bin/sh\nprintf '{}\\n'\n")
+            binary.chmod(0o755)
+            env_file = root / "aicrm.env"
+            env_file.write_text("AICRM_DATABASE_URL=postgres://user:secret@127.0.0.1:1/app\n")
+            env_file.chmod(0o600)
+
+            with mock.patch.object(installer, "ROOT_UID", os.getuid()), \
+                 mock.patch.object(installer, "ROOT_GID", os.getgid()), \
+                 mock.patch.object(installer, "ENV", env_file), \
+                 mock.patch.object(installer.subprocess, "run") as execute:
+                evidence = installer.check_candidate_runtime_config(release, "c" * 40, {})
+                self.assertEqual(evidence["result"], "not_available_legacy_metadata")
+                self.assertEqual(evidence["release_sha"], "c" * 40)
+                execute.assert_not_called()
+
+                for value in (False, None, "true", 1):
+                    with self.subTest(value=value), self.assertRaisesRegex(RuntimeError, "not_declared"):
+                        installer.check_candidate_runtime_config(
+                            release, "c" * 40, {"runtime_config_check_supported": value}
+                        )
+                execute.assert_not_called()
+
+            alias = root / "aicrm-env-alias"
+            os.link(env_file, alias)
+            with mock.patch.object(installer, "ROOT_UID", os.getuid()), \
+                 mock.patch.object(installer, "ROOT_GID", os.getgid()), \
+                 mock.patch.object(installer, "ENV", env_file):
+                with self.assertRaisesRegex(RuntimeError, "environment is missing or unsafe"):
+                    installer.check_candidate_runtime_config(
+                        release, "c" * 40, {"runtime_config_check_supported": True}
+                    )
+
+
 class InstallBackupPolicyTests(unittest.TestCase):
     def install_fixture(self, root: Path, *, role: str, migration: bool):
         releases = root / "releases"
@@ -234,10 +308,12 @@ class InstallBackupPolicyTests(unittest.TestCase):
             "LOCK": root / "install-release.lock",
             "RECEIPTS": root / "receipts",
             "ENV": env,
+            "ROOT_UID": os.getuid(),
+            "ROOT_GID": os.getgid(),
         }
         return paths, incoming, old_sha, new_sha, content, content_hash
 
-    def install(self, root: Path, role: str, migration: bool, *, run_side_effect=None, backup_side_effect=None):
+    def install(self, root: Path, role: str, migration: bool, *, run_side_effect=None, backup_side_effect=None, config_check_side_effect=None, order=None):
         paths, incoming, old_sha, new_sha, content, content_hash = self.install_fixture(root, role=role, migration=migration)
         run_calls = []
 
@@ -253,12 +329,28 @@ class InstallBackupPolicyTests(unittest.TestCase):
                 stack.enter_context(patcher)
             stack.enter_context(mock.patch.object(installer, "require_host_role", return_value=role))
             stack.enter_context(mock.patch.object(installer.shutil, "which", return_value="/usr/bin/systemctl"))
-            stack.enter_context(mock.patch.object(installer, "verify_root_owned_release"))
-            stack.enter_context(mock.patch.object(installer, "switch_to"))
+            stack.enter_context(mock.patch.object(
+                installer, "verify_root_owned_release",
+                side_effect=lambda _release: order.append("sealed") if order is not None else None,
+            ))
+            stack.enter_context(mock.patch.object(
+                installer, "switch_to",
+                side_effect=lambda _release: order.append("switch") if order is not None else None,
+            ))
             stack.enter_context(mock.patch.object(installer, "restart_services"))
             stack.enter_context(mock.patch.object(installer, "readiness"))
             stack.enter_context(mock.patch.object(installer, "run", side_effect=fake_run))
-            backup = stack.enter_context(mock.patch.object(installer, "backup_database", side_effect=backup_side_effect))
+            evidence = {"contract": "aicrm-check-runtime-config-v1", "binary_sha256": "e" * 64, "roles": [{"role": "api", "result": "passed"}, {"role": "worker", "result": "passed"}], "result": "passed"}
+            def check_config(*args):
+                if order is not None:
+                    order.append("runtime-config")
+                return config_check_side_effect(*args) if config_check_side_effect is not None else evidence
+            def make_backup(*args):
+                if order is not None:
+                    order.append("backup")
+                return backup_side_effect(*args) if backup_side_effect is not None else None
+            stack.enter_context(mock.patch.object(installer, "check_candidate_runtime_config", side_effect=check_config))
+            backup = stack.enter_context(mock.patch.object(installer, "backup_database", side_effect=make_backup))
             outcome = installer.install(
                 incoming,
                 content,
@@ -278,11 +370,56 @@ class InstallBackupPolicyTests(unittest.TestCase):
     def test_production_migration_requires_backup_before_switch(self):
         with tempfile.TemporaryDirectory() as temporary:
             backup_path = Path(temporary) / "backup.dump"
+            order = []
+
+            def check_config(*_args):
+                order.append("runtime-config")
+                return {"result": "passed"}
+
+            def make_backup(_sha):
+                return backup_path
+
             outcome, backup, _run_calls, _paths, new_sha = self.install(
-                Path(temporary), "production", True, backup_side_effect=lambda _sha: backup_path
+                Path(temporary), "production", True, backup_side_effect=make_backup,
+                config_check_side_effect=check_config, order=order,
             )
             backup.assert_called_once_with(new_sha)
             self.assertEqual(outcome["database_backup"], str(backup_path))
+            self.assertLess(order.index("sealed"), order.index("runtime-config"))
+            self.assertLess(order.index("runtime-config"), order.index("backup"))
+            self.assertLess(order.index("backup"), order.index("switch"))
+
+    def test_failed_candidate_config_check_keeps_current_and_never_backs_up_or_switches(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paths, incoming, old_sha, new_sha, content, content_hash = self.install_fixture(
+                root, role="production", migration=True
+            )
+            events = []
+            def reject_config(release, sha, metadata):
+                events.append("runtime-config")
+                self.assertEqual(release, paths["RELEASES"] / new_sha)
+                self.assertFalse(incoming.exists())
+                self.assertTrue((release / "release.env").is_file())
+                raise RuntimeError("candidate_runtime_config_check_failed:api")
+            with ExitStack() as stack:
+                for key, value in paths.items():
+                    stack.enter_context(mock.patch.object(installer, key, value))
+                stack.enter_context(mock.patch.object(installer, "require_host_role", return_value="production"))
+                stack.enter_context(mock.patch.object(installer.shutil, "which", return_value="/usr/bin/systemctl"))
+                stack.enter_context(mock.patch.object(installer, "verify_root_owned_release", side_effect=lambda _path: events.append("sealed")))
+                stack.enter_context(mock.patch.object(installer, "make_release_directories_traversable", side_effect=lambda _path: events.append("traversable")))
+                stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(returncode=0, stdout="", stderr="")))
+                switch = stack.enter_context(mock.patch.object(installer, "switch_to"))
+                backup = stack.enter_context(mock.patch.object(installer, "backup_database"))
+                stack.enter_context(mock.patch.object(installer, "check_candidate_runtime_config", side_effect=reject_config))
+                with self.assertRaisesRegex(RuntimeError, "candidate_runtime_config_check_failed:api"):
+                    installer.install(incoming, content, old_sha, expected_sha=new_sha, metadata_sha256=content_hash)
+            self.assertEqual(events, ["sealed", "traversable", "runtime-config"])
+            backup.assert_not_called()
+            switch.assert_not_called()
+            self.assertEqual(paths["CURRENT"].resolve(), (paths["RELEASES"] / old_sha).resolve())
+            self.assertTrue((paths["RELEASES"] / new_sha).is_dir())
 
     def test_page_or_program_change_never_dumps_or_runs_migrations_on_either_role(self):
         for role in ("staging", "production"):
@@ -310,7 +447,7 @@ class InstallBackupPolicyTests(unittest.TestCase):
                     installer.install(incoming, content, old_sha, expected_sha=new_sha, metadata_sha256=content_hash)
                 switch.assert_not_called()
 
-    def test_staging_migration_failure_stops_candidate_and_names_safe_synthetic_rebuild(self):
+    def test_staging_migration_failure_keeps_candidate_state_explicit_without_database_restore(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             paths, incoming, old_sha, new_sha, content, content_hash = self.install_fixture(root, role="staging", migration=True)
@@ -326,16 +463,22 @@ class InstallBackupPolicyTests(unittest.TestCase):
                 stack.enter_context(mock.patch.object(installer, "require_host_role", return_value="staging"))
                 stack.enter_context(mock.patch.object(installer.shutil, "which", return_value="/usr/bin/systemctl"))
                 stack.enter_context(mock.patch.object(installer, "verify_root_owned_release"))
+                stack.enter_context(mock.patch.object(installer, "check_candidate_runtime_config", return_value={"result": "passed"}))
                 switch = stack.enter_context(mock.patch.object(installer, "switch_to"))
                 stack.enter_context(mock.patch.object(installer, "restart_services"))
                 stack.enter_context(mock.patch.object(installer, "readiness"))
                 stack.enter_context(mock.patch.object(installer, "run", side_effect=failed_migration))
                 backup = stack.enter_context(mock.patch.object(installer, "backup_database"))
-                with self.assertRaisesRegex(RuntimeError, "disposable synthetic database.*do not restore a dump"):
+                with self.assertRaisesRegex(RuntimeError, "database may be partially migrated.*no database restore was attempted"):
                     installer.install(incoming, content, old_sha, expected_sha=new_sha, metadata_sha256=content_hash)
                 backup.assert_not_called()
-                self.assertFalse((paths["RECEIPTS"] / f"{new_sha}.json").exists())
-                self.assertEqual(switch.call_count, 2)  # attempted candidate switch, then prior runtime rollback
+                self.assertEqual(switch.call_count, 1)
+                receipt = json.loads((paths["RECEIPTS"] / f"{new_sha}.json").read_text())
+                self.assertEqual(receipt["technical_status"], "migration_failed_database_state_unknown")
+                self.assertEqual(receipt["current_release_sha"], new_sha)
+                self.assertFalse(receipt["database_restore_attempted"])
+                self.assertIn("aicrm.service", receipt["application_services_stop_confirmed"])
+                self.assertIn("aicrm-effects-worker.service", receipt["application_services_stop_confirmed"])
 
     def test_production_health_failure_restores_previous_runtime_release(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -350,6 +493,7 @@ class InstallBackupPolicyTests(unittest.TestCase):
                 stack.enter_context(mock.patch.object(installer, "require_host_role", return_value="production"))
                 stack.enter_context(mock.patch.object(installer.shutil, "which", return_value="/usr/bin/systemctl"))
                 stack.enter_context(mock.patch.object(installer, "verify_root_owned_release"))
+                stack.enter_context(mock.patch.object(installer, "check_candidate_runtime_config", return_value={"result": "passed"}))
                 stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(returncode=0, stdout="", stderr="")))
                 stack.enter_context(mock.patch.object(installer, "restart_services"))
                 readiness = stack.enter_context(
@@ -372,6 +516,7 @@ class InstallBackupPolicyTests(unittest.TestCase):
                 stack.enter_context(mock.patch.object(installer, "require_host_role", return_value="production"))
                 stack.enter_context(mock.patch.object(installer.shutil, "which", return_value="/usr/bin/systemctl"))
                 stack.enter_context(mock.patch.object(installer, "verify_root_owned_release"))
+                stack.enter_context(mock.patch.object(installer, "check_candidate_runtime_config", return_value={"result": "passed"}))
                 switch = stack.enter_context(mock.patch.object(installer, "switch_to"))
                 stack.enter_context(mock.patch.object(installer, "run", return_value=SimpleNamespace(returncode=0, stdout="", stderr="")))
                 stack.enter_context(mock.patch.object(installer, "backup_database", side_effect=RuntimeError("pg_dump failed")))

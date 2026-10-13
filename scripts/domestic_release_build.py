@@ -52,6 +52,7 @@ CI_ONLY_FILES = {
     "internal/product/http/member_grid_host/member_grid_journey.mjs",
     "internal/product/http/service_period_public_journey.mjs",
     "scripts/dev_preflight.py",
+    "scripts/development_prepare.py",
     "scripts/run-installed-periodic-contact.sh",
     "scripts/run-installed-audience.sh",
     "scripts/run-installed-survey-recovery.sh",
@@ -82,6 +83,13 @@ DEPLOY_SAMPLE_CONFIGS = {
     "deploy/domestic-release.example.json",
     "deploy/domestic-release-role.production.example",
     "deploy/domestic-release-role.staging.example",
+}
+
+# These package-owned retention helpers change no units, Go dependencies or
+# Host inputs. Overlay their complete deploy payload without rebuilding UI.
+DEPLOY_OVERLAY_FILES = {
+    "deploy/cleanup-releases.py", "deploy/post-release-retention.py",
+    "deploy/record-release-success.py",
 }
 
 DOC_SUFFIXES = {".md", ".mdx", ".rst", ".adoc"}
@@ -319,6 +327,9 @@ def classify_paths(paths: Iterable[str]) -> Classification:
             continue
 
         if normalized.startswith("deploy/"):
+            if normalized in DEPLOY_OVERLAY_FILES:
+                package_overlays.add("deploy")
+                continue
             # Except for the fixed installer helper and example config above,
             # deploy files can change host units or install behavior. Require
             # the full package path so the installer applies and verifies them.
@@ -392,6 +403,13 @@ def classify_paths(paths: Iterable[str]) -> Classification:
 def _git_file(repo: Path, target_sha: str, path: str) -> str:
     result = _run(["git", "-C", str(repo), "show", f"{target_sha}:{path}"], capture=True)
     return result.stdout or ""
+
+
+def runtime_config_check_supported(repo: Path, target_sha: str) -> bool:
+    try:
+        return "--check-runtime-config" in _git_file(repo, target_sha, "cmd/aicrm/main.go")
+    except BuildError:
+        return False  # Legacy/minimal builder fixtures have no such capability.
 
 
 def _release_commands(repo: Path, target_sha: str) -> list[ReleaseCommand]:
@@ -1024,6 +1042,7 @@ def build(repo_path: str | Path, base_value: str, target_value: str,
                 "controller_files": plan_value.get("controller_files", []),
                 "package_overlays": plan_value.get("package_overlays", []),
                 "release_files_sha256": release_files_sha,
+                "runtime_config_check_supported": runtime_config_check_supported(repo, target_sha),
                 "release_path": RELEASE_DIR_NAME,
                 "phase_timings_seconds": {"build": round(time.monotonic() - build_started, 1)},
             }

@@ -17,7 +17,7 @@ description: Keep AI-CRM-v4 admin, WeCom sidebar, H5, and public frontend work c
 
 每项本 Skill 范围内的工作都必须从会话 Skills catalog 发现 `product-design:index` 或用户点名的 focused skill，并读取实际资源；不得硬编码插件 cache 路径或沿用过时工具 API。遵循该次可用流程和必要 preflight；插件不可用时明确记录该环节未完成，按实际能力继续独立已授权检查，不假装用过，也不自动安装、发布或保存插件记忆。
 
-路由选择：体验审查用 `product-design:audit`；已有选定视觉目标的匹配实现用 `product-design:image-to-code`；确需视觉探索才用 `product-design:ideate`；`product-design:url-to-code` 只授权原型克隆，不能替换生产项目。普通开发仍在本仓架构和组件约束中执行。已有代码和页面是视觉目标，不要求每次生成三个新方案或重设计。
+路由选择：体验审查用 `product-design:audit`；已有选定视觉目标的匹配实现用 `product-design:image-to-code`；确需视觉探索才用 `product-design:ideate`；`product-design:url-to-code` 只授权原型克隆，不能替换生产项目。普通开发仍在本仓架构和组件约束中执行。已有代码和页面是视觉目标，不要求每次生成三个新方案或重设计。已授权同一父 brief 的后续修复复用参考与组件选择，只说明本次视觉/交互差异。
 
 ## 复用与装配
 
@@ -36,7 +36,7 @@ description: Keep AI-CRM-v4 admin, WeCom sidebar, H5, and public frontend work c
 
 ## 验证
 
-验证复用或公共组件在实际挂载终端的关键交互、加载、空态、失败、无权限和真实 HTTP 回读，并在同一视口与参考页面对照。按 AI 清单运行相关 adapter/组件或页面旅程，类型检查和资源完整编译归入一次最终构建；仅文档改动不要求业务测试。不要用 Mock、静态成功提示或截图替代业务结果。
+验证复用或公共组件在实际挂载终端的关键交互、加载、空态、失败、无权限和真实 HTTP 回读，并在同一视口与参考页面对照。字段和操作变化需覆盖动作→保存/任务→持久化→重新读取，不能只验证标题、昵称或本地成功态。按 AI 清单运行直接 adapter/组件或页面旅程，类型检查和资源完整编译归入一次最终构建；仅文档改动不要求业务测试。不要用 Mock、静态成功提示或截图替代业务结果。
 
 ## 交付记录
 

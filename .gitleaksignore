@@ -1,3 +1,47 @@
 # Confirmed synthetic fixture key in this historical commit; the smoke now derives a fresh key at runtime.
 # Keep this exception bound to the single reported commit, file, rule, and line.
 96bb5e8ee062447a4c25d85a5259907d5434ad92:cmd/aicrm/domestic_release_installed_smoke_test.go:generic-api-key:344
+
+# Verified synthetic test values and source/artifact digests; 2026-10-14 archive.
+606534e2a2698b139d115122556b881fd105c7c0:cmd/aicrm/commerce_funds_http_integration_test.go:generic-api-key:1135
+606534e2a2698b139d115122556b881fd105c7c0:cmd/aicrm/commerce_funds_http_integration_test.go:generic-api-key:1180
+0b2d5967975f40ae51b92a39dc198a14cdbb3af9:internal/survey/store/postgres_integration_test.go:generic-api-key:1241
+a018e6858eaf75ecfcf37435c9953eb8065d1770:cmd/aicrm/payment_refund_role_postgres_test.go:generic-api-key:20
+a018e6858eaf75ecfcf37435c9953eb8065d1770:cmd/aicrm/payment_refund_role_test.go:generic-api-key:36
+a018e6858eaf75ecfcf37435c9953eb8065d1770:internal/platform/config/payment_refund_test.go:generic-api-key:8
+16091c5be141d4fbddef1ee2f0340bb91a6fc685:cmd/aicrm/referral_financial_installed_environment_test.go:generic-api-key:61
+bcafcf4cc252a8c12d4e664a154d83d7f2bb6f42:cmd/aicrm/referral_financial_installed_environment_test.go:generic-api-key:58
+8588af9b4e79376d025aaf5c8a74b91c5d84d756:integrations/context-center/sidebar/build_candidate.py:generic-api-key:11
+8588af9b4e79376d025aaf5c8a74b91c5d84d756:integrations/context-center/sidebar/candidate-stage-receipt.json:generic-api-key:4
+8588af9b4e79376d025aaf5c8a74b91c5d84d756:integrations/context-center/sidebar/candidate-stage-receipt.json:generic-api-key:9
+8588af9b4e79376d025aaf5c8a74b91c5d84d756:integrations/context-center/sidebar/candidate-stage-receipt-historical-20261010.json:generic-api-key:13
+8588af9b4e79376d025aaf5c8a74b91c5d84d756:integrations/context-center/sidebar/candidate-stage-receipt-historical-20261010.json:generic-api-key:18
+69be2904e53ad4901949e07c23104667ccaced63:integrations/context-center/sidebar/build_candidate.py:generic-api-key:11
+69be2904e53ad4901949e07c23104667ccaced63:integrations/context-center/sidebar/candidate-stage-receipt.json:generic-api-key:13
+69be2904e53ad4901949e07c23104667ccaced63:integrations/context-center/sidebar/candidate-stage-receipt.json:generic-api-key:18
+8588af9b4e79376d025aaf5c8a74b91c5d84d756:integrations/context-center/sidebar/candidate-stage-receipt.json:generic-api-key:46
+8588af9b4e79376d025aaf5c8a74b91c5d84d756:integrations/context-center/sidebar/candidate-stage-receipt.json:generic-api-key:51
+328841cc700cbe8b378a672ff98f9a042bdb53c6:cmd/aicrm/invoice_distribution_authorization_installed_test.go:generic-api-key:93
+b9234588b657e3795bb5c618858d742a3243b6c1:cmd/aicrm/invoice_settings_installed_test.go:generic-api-key:56
+21b06f7b47ae88d7bf800b7761db7398edd921da:cmd/aicrm/invoice_callback_installed_test.go:generic-api-key:356
+21b06f7b47ae88d7bf800b7761db7398edd921da:cmd/aicrm/invoice_callback_installed_test.go:generic-api-key:412
+f373a8ac6baf1aace5b5f1882dd182268ee9a19a:cmd/aicrm/invoice_callback_installed_test.go:generic-api-key:50
+86b14e3e2aa3a581f11cdb0226219e11e1e988f9:internal/coupon/app/fixed_claim_availability_test.go:generic-api-key:96
+97993f205ab32b88bb42797a5ceacbddcdd1dc72:internal/coupon/http/public_slug_legacy_routes_test.go:generic-api-key:24
+9a573744119f778a5b8bf4377006a39edde958e5:cmd/aicrm/distribution_sol61_adversary_postgres_test.go:generic-api-key:378
+9a573744119f778a5b8bf4377006a39edde958e5:cmd/aicrm/distribution_sol61_adversary_postgres_test.go:generic-api-key:430
+9a573744119f778a5b8bf4377006a39edde958e5:cmd/aicrm/distribution_sol61_adversary_postgres_test.go:generic-api-key:467
+e2a24c6dce7a1f14d3e0b49a0b6a61b4c08d4dca:cmd/aicrm/orders_h5_oauth_postgres_integration_test.go:generic-api-key:106
+e2a24c6dce7a1f14d3e0b49a0b6a61b4c08d4dca:cmd/aicrm/orders_h5_oauth_postgres_integration_test.go:generic-api-key:137
+9a573744119f778a5b8bf4377006a39edde958e5:cmd/aicrm/referral_sol61_oneid_postgres_test.go:generic-api-key:116
+9a573744119f778a5b8bf4377006a39edde958e5:cmd/aicrm/referral_sol61_oneid_postgres_test.go:generic-api-key:125
+9a573744119f778a5b8bf4377006a39edde958e5:cmd/aicrm/referral_sol61_oneid_postgres_test.go:generic-api-key:128
+9a573744119f778a5b8bf4377006a39edde958e5:cmd/aicrm/referral_sol61_oneid_postgres_test.go:generic-api-key:190
+9a573744119f778a5b8bf4377006a39edde958e5:cmd/aicrm/referral_sol61_oneid_postgres_test.go:generic-api-key:269
+9a573744119f778a5b8bf4377006a39edde958e5:cmd/aicrm/referral_sol61_oneid_postgres_test.go:generic-api-key:275
+9a573744119f778a5b8bf4377006a39edde958e5:cmd/aicrm/referral_sol61_oneid_postgres_test.go:generic-api-key:308
+9a573744119f778a5b8bf4377006a39edde958e5:cmd/aicrm/referral_sol61_oneid_postgres_test.go:generic-api-key:311
+9a573744119f778a5b8bf4377006a39edde958e5:internal/survey/store/postgres_integration_test.go:generic-api-key:1241
+c334b5b9b404e93df9fa53727a56c8df1c4bdc71:cmd/aicrm/audience_direct_push_core_postgres_test.go:generic-api-key:204
+f86640671f006fb9770aa74aa16b1e593bf5ebad:cmd/aicrm/distribution_self_read_phase2_postgres_integration_test.go:generic-api-key:63
+be05afe336de674ac45f5604ed1202b0f8d5f631:cmd/aicrm/periodic_contact_collection_journey_test.go:generic-api-key:179

@@ -7,4 +7,7 @@
 5. 执行清单；空匹配、skip、缺环境和超时不算通过。身份/权限/支付/数据变动加强相关断言，普通远处回归允许漏测风险。失败修复只重跑受影响检查。
 6. 推送国内候选后重读 `/Users/qianlan/Downloads/新CRM/release-control/workstation.json`，向其工作台投递原任务 ID、base/head/tree/ref、简短五项影响、清单、结果、未验证项及已有授权范围。开发任务不安装共享预发/生产。
 
-五项影响是对外合同、业务机制、直接关联模块、页面、验证证据，短说明即可。下一批次成员从累计源码 HEAD 出发，无须等前一成员安装。最终统一构建、预发、相关旅程，已有当前范围生产授权直接同包晋级和读回，详见 [唯一发布文档](operations/domestic-main-release.md)。文档/测试/无载荷工具只推进源码。普通发布不备份数据库；真实 Provider 与技术结果分开。
+五项影响是对外合同、业务机制、直接关联模块、页面、验证证据，短说明即可。下一批次成员从累计源码 HEAD 出发，无须等前一成员安装。完成成员可先进入预发，新构件各构建/安装一次、检查新增影响；集中上线时齐备后同包晋级和读回，详见 [唯一发布文档](operations/domestic-main-release.md)。文档/测试/无载荷工具只推进源码。普通发布不备份数据库；真实 Provider 与技术结果分开。
+
+
+使用 [开发核心 skill](../skills/aicrm-v3-development/SKILL.md) 与 [发布 skill](../skills/aicrm-v4-release/SKILL.md)。业务改动提交后 `dev_preflight.py prepare` 自动同步机械依赖，提交其差异后用干净 checkout `prepare --verify`；准确推送后 `handoff` 生成五项影响/收据/授权与当前路由，再实际投递。详细参数见唯一发布文档。UI 用已批准 Product Design 参考及直接页面消费者，不重做无关设计或全页面回归。
