@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "c97ddb05a2038c04264201b8eb476592d107fb04",
+  "baseline_sha": "501ef2b32865e5028ad734e08d4dd7df54f028f4",
   "checks": [
     {
       "lane": "backend",
