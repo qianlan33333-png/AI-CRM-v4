@@ -1210,6 +1210,26 @@ body:has(#referral-root) {
 .referral-info-title { padding: 23px 18px 8px; color: #fff; }
 .referral-info-back { border: 0; padding: 4px 0; background: transparent; color: #fff; font-size: 14px; cursor: pointer; }
 .referral-info-title h1 { margin: 8px 0; font-size: 25px; }
+.referral-invitation-count { flex: 0 0 auto; white-space: nowrap; }
+#referral-root.referral-mobile-detail > .referral-invitations,
+#referral-root.referral-mobile-detail > .referral-rules { margin: 14px 12px; padding: 20px 16px; }
+#referral-root.referral-mobile-detail .referral-card-title .referral-invitation-count { color: #737985; font-size: 14px; }
+#referral-root.referral-mobile-detail .referral-invitation-list { gap: 0; margin-top: 0; }
+#referral-root.referral-mobile-detail .referral-invitation-list > div {
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid #f0efef;
+}
+#referral-root.referral-mobile-detail .referral-invitation-list > div:last-child { border-bottom: 0; padding-bottom: 0; }
+#referral-root.referral-mobile-detail .referral-invitation-list strong { font-size: 16px; color: #202731; }
+#referral-root.referral-mobile-detail .referral-invitation-list small { font-size: 12px; line-height: 1.5; margin-top: 4px; }
+#referral-root.referral-mobile-detail .referral-invitation-list > div > span:last-child { white-space: nowrap; font-size: 14px; }
+#referral-root.referral-mobile-detail .referral-invitation-list [data-status="reversed"],
+#referral-root.referral-mobile-detail .referral-invitation-list [data-status="revoked"] { color: #737985; }
+.referral-invitation-more { display: block; margin: 18px auto 0; }
+.referral-invitation-error { margin-top: 12px !important; color: #b42318 !important; }
+.referral-rules p { margin-top: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .referral-poster-dialog { width: min(480px,calc(100vw - 24px)); }
 .referral-poster-selectors { display: flex; gap: 8px; }
 .referral-poster-choice { flex: 1; min-height: 38px; border: 1px solid #f2c7b6; border-radius: 9px; background: #fff7f2; color: #9e4a32; cursor: pointer; }
@@ -1248,3 +1268,13 @@ body:has(#referral-root) {
 
 .referral-poster-actions { display: flex; gap: 10px; }
 .referral-poster-actions > button { flex: 1 1 0; min-width: 0; min-height: 46px; }
+
+#referral-root.referral-information { padding-bottom: calc(24px + env(safe-area-inset-bottom)); background: linear-gradient(180deg, #fa4c25 0 260px, #ff9076 390px, #fff3ed 580px); }
+#referral-root.referral-information .referral-info-title { padding: 12px 18px 0; }
+#referral-root.referral-information .referral-info-back { padding: 0; line-height: 20px; }
+#referral-root.referral-information > .referral-invitations { margin-top: 8px; }
+#referral-root.referral-information .referral-invitations .referral-card-title { margin-bottom: 0; }
+#referral-root.referral-information .referral-card h2 { font-family: "PingFang SC", sans-serif; font-size: 21px; font-weight: 750; line-height: 1.4; }
+
+#referral-root.referral-information > .referral-rules { padding-bottom: 16px; }
+#referral-root.referral-information .referral-rules p { margin-top: 8px; line-height: 1.5; }

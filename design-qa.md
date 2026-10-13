@@ -1,24 +1,25 @@
-# 问卷图片控件设计 QA
-
-Source visual truth：`/Users/qianlan/.codex/generated_images/01a12dad-c7da-72a0-9173-293fab637ed2/exec-a7279460-97c9-4802-a350-f9c3beb74578.png`；用户已选择第一款并要求去掉两处说明。
-
-Implementation：`/Users/qianlan/Documents/Codex/2026-10-13/survey-image-preview/iab-selected.jpg`；空态 `iab-empty.jpg`。Codex IAB本机当前V4资源与H5Controller，CSS viewport390×844、DPR1、visualViewport scale1；已选态单图片、圆叉删除与已选择图片。source853×1844归一390×844；implementation390×844无需缩放。
-
-Full-view evidence：`/Users/qianlan/Documents/Codex/2026-10-13/survey-image-preview/full-comparison.png`；focused picker evidence：`/Users/qianlan/Documents/Codex/2026-10-13/survey-image-preview/picker-comparison.png`，两个实际区域同输入对照，已打开核对。
-
-Findings：无待修复P0/P1/P2。
-- 字体：原H5中文sans-serif、标题与必答层级沿用；状态14px/22px，格式提示与既有问卷一致。
-- 布局：保留原H5进度/问题/底部导航，只改变附件区域；112px左对齐方框、16px状态间距、12px圆角，格式提示和图之间有可读留白。概念图的额外顶部标题不新增为第二导航，真实微信原页面框架保留，属本次范围边界。
-- 色彩：沿用Survey蓝色tokens与浅灰画布、白色题目卡；蓝色勾。圆叉有白圈，背景采用较深灰而非概念图浅灰，结合44px触控满足用户“更醒目、大一点”的意图。
-- 图像：输入内容为用户这次截图，照片内容允许随所选文件变化，不作为产品固定资产；实际自然像素96×96，112px显示中心裁切，明显是小预览，未展示原图长串文件名。官方Heroicons三枚MIT图标，未手绘替代图标或添加网络图标源。
-- 文案：保留“已选择图片”，去掉“刷新后需重新选择”和“提交问卷时上传”日常提示；空态加号、图片本身可重新选择、叉号accessible name为删除图片。
-
-Interaction evidence：IAB实际选图、删除后回到加号、重新选择，read-only DOM自然宽度96、页面两处文案消失、status已选择图片；console errors/warnings为空。设计预览使用本机只读定义fixture、POST明确拒绝，不冒称真实提交；真实PG/Chromium两模式另有答卷/图片/核销1/1/1、自然图像加载、替换删除与拒绝保留、后台安全读取证据。
-
-Comparison history：本次第一次比对无需要修改的P0/P1/P2。有意差异是圆叉对比度/触控面积、原框架与用户输入图片内容，已按本次用户意图和现有H5约束确认。
-
-Implementation checklist：本地cropped96pxdata预览；原File提交；异步替换/删除/版本竞态拒绝；错误保留；既有CSP不扩大；真实两模式提交与安装包旅程。
-
-Follow-up polish：无新增页面、图片中心或资源上传；正式Linux/最终安装包和生产手机微信读回由唯一工作台形成独立证据。
+# 裂变活动信息页视觉核对
 
 final result: passed
+
+源图：/Users/qianlan/.codex/generated_images/01a134b5-8a61-7183-a315-fa6b129e2b24/exec-15a9fcff-dafe-498a-8383-8dfaf7b545a7.png
+
+实现：/Users/qianlan/.codex/visualizations/2026/10/13/01a134b5-8a61-7183-a315-fa6b129e2b24/referral-implementation-final.jpg
+
+并排证据：/Users/qianlan/.codex/visualizations/2026/10/13/01a134b5-8a61-7183-a315-fa6b129e2b24/referral-visual-comparison-final.jpg
+
+源图实际 899x1750 像素。390x760 CSS 视口，3 人信息页、规则内容“测试奖励说明”。实现截图实际 390x760 像素；源图按宽度等比缩为 390px，仅裁去约 80px 浏览器/系统条，未将设备 chrome 编码进页面。并排截图实际 1280x814 像素，两个应用内容区各 390px，已同时打开比较。
+
+初次发现 P2：顶部留白过大，规则标题沿用宋体，人数被既有高优先级样式压为 12px 棕色。已修正顶部空间、统一无衬线标题、人数 14px 灰色、规则卡片垂直节奏；最终新截图复核，无未解决 P0/P1/P2。
+
+字体：复用 PingFang SC/sans-serif，21px 标题、16px 姓名、12px 时间、14px 状态/人数；长名允许换行。
+间距：46px 头像列与 12px 间距，标题和人数同一行；删去重复标题/状态卡，首屏名单紧随返回入口。圆角与白卡复用原页面。
+颜色：保留橙红至浅桃色背景及绿色有效状态，失效状态灰色。与图稿轻微色彩/字体渲染差异为 P3。
+图片：Provider 头像仍由真实接口提供。隔离视觉数据没有头像 URL，使用仓内既有缺图回退；这是数据状态差异，未将该回退冒称为源图中的真人图片。
+内容：只显示邀请明细/完整人数/姓名时间状态与人工奖励说明；无预设规则、查看明细按钮、参加卡、重复大标题或 AI-CRM 后缀。
+
+焦点区：同时比较标题/人数、三个头像文字行和规则标题；全图中可清晰阅读这些区域，无须另生成局部裁切。IAB 实测头像右边界始终小于文字左边界。
+
+响应式与交互：320/375/390/430px 实际窗口宽度均确认，无横向溢出和重叠。百人名单先 20 行但人数 100，320px 续读到 100 行且加载更多消失；控制台无错误/警告。详细数据见同目录会话产物 referral-responsive-results.json。
+
+边界：IAB 为准确前端代码加合成 HTTP 数据，真实 PG 另有独立用例。本记录不代表真实微信设备、Provider 或预发/生产安装验收。

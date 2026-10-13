@@ -38,6 +38,7 @@ type CampaignCloseEnqueuer interface {
 }
 
 type serviceStore interface {
+	ReadInviteStreamWithin(context.Context, referralstore.InviteStreamQuery) (referralstore.InviteStreamPage, error)
 	LockOperationReceiptWithin(context.Context, string, string, string) error
 	ReadOperationReceiptWithin(context.Context, string, string, string) (referralstore.OperationReceipt, bool, error)
 	AppendOperationReceiptWithin(context.Context, string, string, string, [sha256.Size]byte, string, int64, time.Time) error
@@ -803,24 +804,19 @@ func (s *Service) ListMyInvites(ctx context.Context, actor referralport.TrustedS
 	if s == nil || !actor.Valid() || campaignID < 1 || limit < 1 || limit > 100 {
 		return referralport.InvitePage{}, referralport.ErrConflict
 	}
-	offset, err := referralstore.OffsetCursor(cursor)
+	position, err := s.readInviteStreamCursor(cursor, actor.CustomerID, campaignID)
 	if err != nil {
 		return referralport.InvitePage{}, err
 	}
-	var values []referralport.InviteItem
+	result := referralport.InvitePage{Items: []referralport.InviteItem{}}
 	err = s.identityReportingUnitOfWork().Within(ctx, func(tx context.Context) error {
 		lineage, err := s.actorLineageWithin(tx, actor, false)
 		if err != nil {
 			return err
 		}
-		// The actor has already been authenticated by the shared verified
-		// browser session. A missing participation means this customer has no
-		// invitation details yet; it is not a failed login. Read the campaign
-		// first so an unknown campaign remains a real not-found result, and do
-		// not hide store failures behind an authorization error.
-		campaign, readErr := s.store.ReadCampaignWithin(tx, campaignID, false)
-		if readErr != nil {
-			return readErr
+		campaign, err := s.store.ReadCampaignWithin(tx, campaignID, false)
+		if err != nil {
+			return err
 		}
 		participation, err := s.ownParticipationWithin(tx, campaignID, lineage, false)
 		if err != nil {
@@ -829,23 +825,37 @@ func (s *Service) ListMyInvites(ctx context.Context, actor referralport.TrustedS
 			}
 			return err
 		}
-		actor.CustomerID = participation.CustomerID
-		if campaign.Config().QualificationMode == referraldomain.QualificationProductPurchase {
-			values, err = s.store.ListPaidInviteItemsWithin(tx, campaignID, actor.CustomerID, offset, limit+1)
-		} else {
-			values, err = s.store.ListInviteItemsWithin(tx, campaignID, actor.CustomerID, offset, limit+1)
+		query := referralstore.InviteStreamQuery{CampaignID: campaignID, InviterID: participation.CustomerID, Paid: campaign.Config().QualificationMode == referraldomain.QualificationProductPurchase, Limit: limit + 1}
+		if position != nil {
+			query.Watermark = position.Watermark
+			query.After = &referralstore.InviteStreamPosition{At: position.At, ID: position.ID}
 		}
-		return err
+		stream, err := s.store.ReadInviteStreamWithin(tx, query)
+		if err != nil {
+			return err
+		}
+		result.Items = stream.Items
+		result.TotalCount = stream.TotalCount
+		if position != nil {
+			result.TotalCount = position.Total
+		}
+		if int32(len(result.Items)) > limit {
+			result.Items = result.Items[:limit]
+			last := result.Items[len(result.Items)-1]
+			result.NextCursor, err = s.writeInviteStreamCursor(inviteStreamCursor{Watermark: stream.Watermark, Total: result.TotalCount, At: last.Participation.JoinedAt, ID: last.EntryID}, actor.CustomerID, campaignID)
+			if err != nil {
+				return err
+			}
+		}
+		for index := range result.Items {
+			result.Items[index].EntryKey = s.inviteEntryKey(actor.CustomerID, campaignID, result.Items[index].EntryID)
+		}
+		return nil
 	})
 	if err != nil {
 		return referralport.InvitePage{}, err
 	}
-	page := referralport.InvitePage{Items: values}
-	if int32(len(values)) > limit {
-		page.Items = values[:limit]
-		page.NextCursor = referralstore.NextOffsetCursor(offset, int(limit), limit)
-	}
-	return page, nil
+	return result, nil
 }
 
 func (s *Service) Leaderboard(ctx context.Context, query referralport.LeaderboardQuery) (referralport.LeaderboardPage, error) {

@@ -179,12 +179,15 @@ type MyCampaign struct {
 }
 
 type InviteItem struct {
+	EntryID       int64
+	EntryKey      string
 	Participation domain.Participation
 	ScoreState    string
 	ScoreDelta    int64
 }
 
 type InvitePage struct {
+	TotalCount int64
 	Items      []InviteItem
 	NextCursor string
 }

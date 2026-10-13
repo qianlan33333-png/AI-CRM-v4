@@ -100,9 +100,15 @@ let infoOpen = false;
 let leaderboardError = "";
 let invite: { qrPayload: string } | undefined;
 let invitationRows:
-  | Array<{ name: string; avatarURL: string; joinedAt: string; status: string }>
+  | Array<{ key: string; name: string; avatarURL: string; joinedAt: string; status: string }>
   | undefined;
 let invitationCursor = "";
+let invitationTotal: number | undefined;
+let invitationBusy = false;
+let invitationError = "";
+let invitationRetryAppend = false;
+let invitationVersion = 0;
+let invitationAbort: AbortController | undefined;
 let invitationPreview: { inviterName: string; teamName: string } | undefined;
 let loadVersion = 0;
 let bridgeTried = false;
@@ -480,20 +486,22 @@ function metric(label: string, value: string): HTMLElement {
 }
 function render(): void {
   if (!campaign) {
-    host.classList.remove("referral-mobile-detail");
+    host.classList.remove("referral-mobile-detail", "referral-information");
     renderCampaignList();
     return;
   }
   if (campaign.teamMode === "individual") board = "personal";
   host.classList.add("referral-mobile-detail");
+  host.classList.toggle("referral-information", infoOpen);
   host.replaceChildren();
   if (infoOpen) {
     const title = element("header");
     title.className = "referral-info-title";
-    const back = button("‹ 返回榜单", () => { infoOpen = false; render(); }, "referral-info-back");
+    const back = button("‹ 返回榜单", () => { infoOpen = false; invitationAbort?.abort(); invitationVersion++; invitationBusy = false; render(); }, "referral-info-back");
     back.dataset.testid = "referral-activity-info";
-    title.append(back, element("h1", campaign.name));
-    host.append(title, homeCard(), detailCard(), rulesCard());
+    title.append(back);
+    host.append(title, detailCard());
+    if (campaign.reward.trim()) host.append(rulesCard());
     const message = element("p");
     message.className = "referral-message";
     message.dataset.referralMessage = "";
@@ -545,95 +553,7 @@ function render(): void {
   footer.append(timer,inviteButton);
   host.append(footer);
 }
-function homeCard(): HTMLElement {
-  const section = element("section");
-  section.className = "referral-card referral-home";
-  const title = element("div");
-  title.className = "referral-card-title";
-  title.append(
-    element("h2", campaign?.teamMode === "team" ? "我的战队" : "我的活动"),
-    element("span", campaign ? remaining(campaign) : ""),
-  );
-  section.append(title);
-  if (me?.participant) {
-    section.append(
-      element("strong", campaign?.teamMode === "team" && me.participant.teamID ? me.participant.teamName : "已参加活动"),
-      element(
-        "p",
-        campaign?.qualificationMode === "product_purchase"
-          ? `支付确认后已于 ${dateText(me.participant.joinedAt)} 参加。成绩随有效付款及退款调整。`
-          : `已于 ${dateText(me.participant.joinedAt)} 加入。本活动的战队和邀请成绩已锁定。`,
-      ),
-    );
-  } else {
-    const inviteToken = new URL(location.href).searchParams.get("invite");
-    if (me?.isCaptain && me.captainTeam) {
-      section.append(
-        element("strong", me.captainTeam.name),
-        element(
-          "p",
-          inviteToken
-            ? "你已被管理员指定为这支战队的队长。请先加入自己的战队；本次不会接受其他人的邀请或改变你的归属。"
-            : "你已被管理员指定为这支战队的队长。确认参加活动后，即可获得自己的邀请入口。",
-        ),
-      );
-      const join = button(
-        "作为队长加入战队",
-        () => void confirmJoin(me!.captainTeam!.id, true),
-        "referral-primary",
-      );
-      join.dataset.testid = "referral-join-captain-team";
-      section.append(join);
-    } else if (inviteToken) {
-      const inviter = invitationPreview?.inviterName || "邀请人";
-      section.append(
-        element(
-          "p",
-          `${inviter} 邀请你参加活动。确认后将自动加入对方所在战队。`,
-        ),
-      );
-      const accept = button(
-        "接受邀请并参加",
-        () => void confirmJoin(),
-        "referral-primary",
-      );
-      accept.dataset.testid = "referral-join-team";
-      section.append(accept);
-    } else if (campaign?.qualificationMode === "product_purchase") {
-      section.append(element("p", "支付确认后自动参加；支付待确认时暂不计入榜单。"));
-      if (campaign.productURL) {
-        const purchase = button("继续购买指定商品", () => void beginParticipation(), "referral-quiet");
-        section.append(purchase);
-      }
-    } else if (campaign?.teamMode === "individual") {
-      section.append(element("p", "确认参加活动后即可获得自己的邀请入口。"));
-      const join = button("确认参加活动", () => void beginParticipation(), "referral-primary");
-      join.dataset.testid = "referral-join-individual";
-      section.append(join);
-    } else {
-      section.append(
-        element("p", "选择战队并确认参加后，即可获得自己的邀请入口。"),
-      );
-      const chooser = element("div");
-      chooser.className = "referral-team-chooser";
-      chooser.dataset.testid = "referral-team-chooser";
-      for (const team of campaign?.teams || []) {
-        const item = button(
-          `${team.name}${team.captainName ? ` · 队长 ${team.captainName}` : ""}`,
-          () => void confirmJoin(team.id),
-          "referral-team-choice",
-        );
-        item.dataset.testid = "referral-join-team";
-        item.append(avatar(team.logoURL, team.name));
-        chooser.append(item);
-      }
-      if (!campaign?.teams.length)
-        chooser.append(element("p", "管理员尚未配置可选战队。"));
-      section.append(chooser);
-    }
-  }
-  return section;
-}
+
 function leaderCard(): HTMLElement {
   const section = element("section");
   section.className = "referral-card";
@@ -641,7 +561,7 @@ function leaderCard(): HTMLElement {
   heading.className = "referral-card-title";
   const actions = element("div");
   actions.className = "referral-heading-actions";
-  const info = button("···", () => { infoOpen = true; render(); }, "referral-info-trigger");
+  const info = button("···", () => { infoOpen = true; render(); if (window.scrollY) window.scrollTo(0, 0); void openInvitations(); }, "referral-info-trigger");
   info.setAttribute("aria-label", "活动信息");
   info.title = "活动信息";
   info.dataset.testid = "referral-activity-info";
@@ -725,69 +645,38 @@ function leaderCard(): HTMLElement {
 }
 function detailCard(): HTMLElement {
   const section = element("section");
-  section.className = "referral-card";
-  const title = element("div");
-  title.className = "referral-card-title";
-  const details = button(
-    me?.participant ? "查看明细" : "参加后查看",
-    () => void (me?.participant ? openInvitations() : beginParticipation()),
-    "referral-quiet",
-  );
-  title.append(element("h2", "邀请明细"), details);
-  section.append(title);
-  if (!me?.participant) {
-    section.append(element("p", campaign?.qualificationMode === "product_purchase" ? "支付确认后可查看本活动中的有效好友。" : "确认参加活动后，可在这里查看你直接邀请的好友。"));
-    return section;
-  }
-  if (!invitationRows) section.append(element("p", campaign?.qualificationMode === "product_purchase" ? `当前有 ${me.invitations} 位有效好友，点击“查看明细”查看付款与退款状态。` : `当前有 ${me.invitations} 位有效好友，点击“查看明细”查看邀请状态。`));
+  section.className = "referral-card referral-invitations";
+  const title = element("div"); title.className = "referral-card-title";
+  const count = element("span", invitationTotal === undefined ? "" : `共 ${invitationTotal} 人`);
+  count.className = "referral-invitation-count"; count.dataset.testid = "referral-invitation-count";
+  title.append(element("h2", "邀请明细"), count); section.append(title);
+  if (!me?.participant) { section.append(element("p", "参加活动后可查看邀请记录。")); return section; }
   if (invitationRows) {
-    const list = element("div");
-    list.className = "referral-invitation-list";
+    const list = element("div"); list.className = "referral-invitation-list";
     for (const item of invitationRows) {
-      const row = element("div");
-      row.append(avatar(item.avatarURL, item.name));
-      const content = element("div");
-      content.append(
-        element("strong", item.name),
-        element("small", dateText(item.joinedAt)),
-      );
-      row.append(
-        content,
-        element(
-          "span",
-          item.status === "revoked" || item.status === "reversed"
-            ? "已撤销"
-            : "有效",
-        ),
-      );
-      list.append(row);
+      const row = element("div"); row.dataset.invitationKey = item.key;
+      const image = avatar(item.avatarURL, item.name); image.setAttribute("loading", "lazy"); image.setAttribute("decoding", "async");
+      const content = element("div"); content.append(element("strong", item.name), element("small", dateText(item.joinedAt)));
+      const status = element("span", item.status === "revoked" || item.status === "reversed" ? "已撤销" : item.status === "valid" ? "有效" : "状态待确认");
+      status.dataset.status = item.status;
+      row.append(image, content, status); list.append(row);
     }
     section.append(list);
-    if (invitationCursor)
-      section.append(
-        button("加载更多", () => void openInvitations(true), "referral-quiet"),
-      );
+    if (!invitationRows.length && !invitationBusy && !invitationError) section.append(element("p", "暂无邀请记录"));
+  } else if (invitationBusy) { const loading = element("p", "正在加载邀请记录…"); loading.setAttribute("role", "status"); section.append(loading); }
+  if (invitationError) { const error = element("p", invitationError); error.className = "referral-invitation-error"; error.setAttribute("role", "alert"); section.append(error); }
+  if (invitationCursor || invitationError) {
+    const more = button(invitationBusy ? "加载中…" : invitationError ? "重试" : "加载更多", () => void openInvitations(invitationError ? invitationRetryAppend : Boolean(invitationCursor)), "referral-quiet referral-invitation-more");
+    more.dataset.testid = "referral-invitation-more"; more.disabled = invitationBusy; section.append(more);
   }
   return section;
 }
 function rulesCard(): HTMLElement {
-  const section = element("section");
-  section.className = "referral-card referral-rules";
-  section.append(element("h2", "活动规则与奖励"));
-  const reward = element("p", campaign?.reward || "奖励规则以活动公告为准。");
-  const rules = element("ul");
-  for (const value of (campaign?.qualificationMode === "product_purchase" ? [
-    "购买指定商品并完成支付确认后自动参加活动；支付待确认时不计成绩。",
-    "销售金额按已确认退款调整，日榜归入原订单的北京时间付款日期。",
-    "每位实际付款且仍有有效金额的被邀请人计一次有效邀请。",
-  ] : [
-    "可信微信登录后确认参加活动。",
-    "每位好友在同一活动只计一次，重复参加不会换队或重复计分。",
-  ]))
-    rules.append(element("li", value));
-  section.append(reward, rules);
+  const section = element("section"); section.className = "referral-card referral-rules";
+  section.append(element("h2", "活动规则与奖励"), element("p", campaign?.reward || ""));
   return section;
 }
+
 function empty(text: string): HTMLElement {
   const node = element("li", text);
   node.className = "referral-empty";
@@ -1144,42 +1033,41 @@ async function renderInviteDialog(): Promise<void> {
   void show(0);
 }
 async function openInvitations(append = false): Promise<void> {
-  if (!campaign) return;
-  if (append && !invitationCursor) return;
-  if (!me?.participant) {
-    invitationRows = [];
-    invitationCursor = "";
-    render();
-    setMessage(campaign.qualificationMode === "product_purchase" ? "支付确认后，可查看本活动中的有效好友。" : "确认参加活动后，可查看你直接邀请的好友。");
-    return;
-  }
+  if (!campaign || invitationBusy || (append && !invitationCursor)) return;
+  if (!me?.participant) { invitationRows = []; invitationTotal = 0; invitationCursor = ""; render(); return; }
+  const currentCampaign = campaign.id;
+  const currentLoad = loadVersion;
+  const currentVersion = ++invitationVersion;
+  const cursor = append ? invitationCursor : "";
+  const controller = new AbortController(); invitationAbort = controller;
+  invitationBusy = true; invitationError = ""; invitationRetryAppend = append;
+  if (!append) { invitationRows = undefined; invitationTotal = undefined; invitationCursor = ""; }
+  const refresh = () => { const y = window.scrollY; render(); if (window.scrollY !== y) window.scrollTo(0, y); };
+  refresh();
   try {
-    const query = new URLSearchParams({ limit: "50" });
-    if (append) query.set("cursor", invitationCursor);
-    const raw = obj(
-      await api(`/campaigns/${campaign.id}/invitations?${query}`),
-    );
-    const items = Array.isArray(raw.items)
-      ? raw.items.map((item) => {
-          const row = obj(item);
-          return {
-            name: str(row.display_name, "匿名用户"),
-            avatarURL: str(row.avatar_url),
-            joinedAt: str(row.joined_at),
-            status: str(row.status),
-          };
-        })
-      : [];
-    invitationRows = append ? (invitationRows || []).concat(items) : items;
-    invitationCursor = str(raw.next_cursor);
-    render();
+    const query = new URLSearchParams({ limit: "20" }); if (cursor) query.set("cursor", cursor);
+    const raw = obj(await api(`/campaigns/${currentCampaign}/invitations?${query}`, { signal: controller.signal }));
+    if (currentVersion !== invitationVersion || currentLoad !== loadVersion || currentCampaign !== campaign?.id || !infoOpen) return;
+    const total = num(raw.total_count, -1);
+    if (!Array.isArray(raw.items) || total < 0) throw new Error("邀请明细数据暂不可用，请重试。");
+    const items = raw.items.map((item) => {
+      const row = obj(item); const key = str(row.entry_key);
+      if (!key) throw new Error("邀请明细记录暂不可用，请重试。");
+      return { key, name: str(row.display_name, "匿名用户"), avatarURL: str(row.avatar_url), joinedAt: str(row.joined_at), status: str(row.status) };
+    });
+    const next = str(raw.next_cursor);
+    if (cursor && next === cursor) throw new Error("邀请记录加载未能继续，请重试。");
+    const combined = append ? [...(invitationRows || []), ...items] : items;
+    invitationRows = [...new Map(combined.map((item) => [item.key, item])).values()];
+    invitationTotal = total; invitationCursor = next;
   } catch (error) {
-    setMessage(
-      error instanceof Error ? error.message : "邀请明细读取失败。",
-      true,
-    );
+    if (currentVersion !== invitationVersion || currentLoad !== loadVersion || controller.signal.aborted) return;
+    invitationError = error instanceof Error ? error.message : "邀请明细读取失败，请重试。";
+  } finally {
+    if (currentVersion === invitationVersion && currentLoad === loadVersion) { invitationBusy = false; invitationAbort = undefined; if (infoOpen) refresh(); }
   }
 }
+
 async function loadLeaderboard(): Promise<void> {
   if (!campaign) return;
   const params = new URLSearchParams({ kind: board, period, limit: "30" });
@@ -1216,6 +1104,7 @@ async function recoverSession(): Promise<boolean> {
   }
 }
 async function reload(): Promise<void> {
+  invitationAbort?.abort(); invitationVersion++; invitationBusy = false; invitationRows = undefined; invitationCursor = ""; invitationTotal = undefined; invitationError = "";
   const version = ++loadVersion;
   try {
     if (!campaignID) {
@@ -1236,6 +1125,7 @@ async function reload(): Promise<void> {
     const response = await Promise.all(reads);
     if (version !== loadVersion) return;
     campaign = parseCampaign(response[0]);
+    document.title = campaign.name;
     me = parseMe(response[1]);
     if (me.participant) sessionStorage.removeItem(`referral-checkout:${campaign.id}`);
     if (response[2]) {

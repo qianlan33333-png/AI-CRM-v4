@@ -1,84 +1,72 @@
 {
   "schema": 1,
-  "baseline_sha": "aa2585c63939c9eff88099750c94326051f69703",
+  "baseline_sha": "1a37107b0641e66f64705543c0469f7d3ee2826e",
   "checks": [
     {
       "lane": "backend",
-      "path": "internal/order/app/export_financial_test.go",
-      "test": "TestExportFinancialReconciliationStates"
+      "package": "./internal/referral/store"
     },
     {
       "lane": "backend",
-      "path": "internal/order/app/export_financial_test.go",
-      "test": "TestExportFinancialColumnsCountEachOrderOnceAndKeepSignedNumbers"
+      "package": "./internal/referral/http"
     },
     {
       "lane": "backend",
-      "path": "internal/order/app/export_test.go",
-      "test": "TestExportXLSXPreservesFullFactsBlankContactsAndEveryItem"
+      "package": "./internal/referral/app",
+      "test": "TestInviteStreamCursorRejectsCrossIdentityCampaignAndTampering"
     },
     {
       "lane": "backend",
-      "path": "internal/order/app/export_test.go",
-      "test": "TestExportFailsClosedForReadDecryptAndEnrichmentFailures"
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLInviteStreamCountsRetainsAndPagesConcurrentJoins",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/order/app/export_test.go",
-      "test": "TestExportEmptyWorkbookAndExistingLimits"
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLInviteStreamPaidCountsReversalsAndCanonicalAliases",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/order/app/export_test.go",
-      "test": "TestExportCSVByteLimitRejectsWithoutReceipt"
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLInviteStreamFreeCountsCanonicalAliases",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/order/app/export_test.go",
-      "test": "TestExportUsesFrozenCouponPriceAndConfirmedRefund"
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLMyInvitesCanonicalBatchesShareIdentitySnapshot",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/order/app/service_test.go",
-      "test": "TestExportCSVIsReceiptBackedReplayAndEscapesFormulas"
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLReferralUnjoinedCaptainHasNoInvitationDetailsUntilExplicitJoin",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/order/http/handler_test.go",
-      "test": "TestExportRequiresAdminCSRFAndRejectsUnresolvedIdentityFilters"
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLReferralAcceptsAndFreezesActivityFacts",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "path": "internal/order/http/handler_test.go",
-      "test": "TestExportReturnsReceiptBackedCSV"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/order/http/handler_test.go",
-      "test": "TestExportSharesIdentityResolutionAndXLSXDefault"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/order/http/handler_test.go",
-      "test": "TestWechatExportCompatibilityStaysScopedAndSharesFormats"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/order_export_adapter_test.go",
-      "test": "TestOrderExportCommissionUsesCurrentPayableAndRecordedRecovery"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/order_export_postgres_integration_test.go",
-      "test": "TestPostgreSQLUnifiedOrderExportHTTPAndCLI",
+      "package": "./internal/referral/app",
+      "test": "TestPostgreSQLCanonicalPaidRankingsMatchModelAcrossBatches",
       "postgres": true
     },
     {
       "lane": "frontend",
-      "path": "web/v3/orderAdapter.test.mjs"
+      "path": "web/v3/referralCenter.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralInvitations.test.mjs"
     }
   ],
   "installed_checks": [
-    "order-export-sharing"
+    "referral-poster"
   ]
 }

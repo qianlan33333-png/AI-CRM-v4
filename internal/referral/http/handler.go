@@ -503,9 +503,9 @@ func (h *Handler) myInvites(w http.ResponseWriter, r *http.Request, campaignID i
 	items := make([]any, 0, len(value.Items))
 	for _, item := range value.Items {
 		profile := profiles[customerdomain.CustomerID(item.Participation.CustomerID)]
-		items = append(items, map[string]any{"display_name": profile.DisplayName, "avatar_url": profile.AvatarURL, "joined_at": item.Participation.JoinedAt.UTC(), "status": item.ScoreState, "score_delta": item.ScoreDelta})
+		items = append(items, map[string]any{"entry_key": item.EntryKey, "display_name": profile.DisplayName, "avatar_url": profile.AvatarURL, "joined_at": item.Participation.JoinedAt.UTC(), "status": item.ScoreState, "score_delta": item.ScoreDelta})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": value.NextCursor})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": value.NextCursor, "total_count": value.TotalCount})
 }
 func (h *Handler) leaderboard(w http.ResponseWriter, r *http.Request, campaignID int64) {
 	if r.Method != http.MethodGet {

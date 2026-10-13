@@ -562,7 +562,7 @@ const referralCenter = manifest.entries.referralCenter;
 const referralAdmin = manifest.entries.referralAdmin;
 const referralStyles = manifest.entries.referralStyles;
 if (typeof referralCenter !== 'string' || typeof referralAdmin !== 'string' || typeof referralStyles !== 'string') throw new Error('referral frontend entries are absent from manifest');
-const referralPublicHTML = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>裂变活动 · AI-CRM</title><link rel="stylesheet" href="../${referralStyles}"></head><body data-ui-surface="referral"><main id="referral-root" aria-live="polite"></main><script type="module" src="../${referralCenter}"></script></body></html>\n`;
+const referralPublicHTML = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>裂变活动</title><link rel="stylesheet" href="../${referralStyles}"></head><body data-ui-surface="referral"><main id="referral-root" aria-live="polite"></main><script type="module" src="../${referralCenter}"></script></body></html>\n`;
 fs.mkdirSync(path.join(dist, 'referral'), { recursive: true });
 fs.writeFileSync(path.join(dist, 'referral', 'index.html'), referralPublicHTML);
 manifest.release_files['referral/index.html'] = metadataFor(Buffer.from(referralPublicHTML));

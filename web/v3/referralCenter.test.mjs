@@ -33,7 +33,8 @@ assert.equal(avatars[0].src, 'https://wx.qlogo.cn/avatar/0', 'provider HTTP avat
 assert.equal(avatars[0].referrerPolicy, 'no-referrer');
 assert.match(avatars[1].src, /^data:image\/svg\+xml,/, 'missing avatar still uses the existing fallback');
 dom.window.document.querySelector('[data-testid="referral-activity-info"]').click();
-await waitFor(() => dom.window.document.body.textContent.includes('林晓'), `invite preview must render the safe inviter display name: ${dom.window.document.body.textContent}`);
+await waitFor(() => dom.window.document.body.textContent.includes('参加活动后可查看邀请记录'), 'information page must show only invitation availability and configured rules');
+assert.equal(dom.window.document.querySelector('.referral-home'), null, 'removed participation card must not be rendered');
 dom.window.document.querySelector('[data-testid="referral-activity-info"]').click();
 assert.doesNotMatch(dom.window.document.body.textContent, /customer_id|OpenID|手机号/i, 'public campaign must not expose identity identifiers');
 const board = dom.window.document.querySelector('[data-testid="referral-leaderboard-board"]'); board.value = 'personal'; board.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
