@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "e81257ad14bf5e00f1477d776e9b94f4323c3350",
+  "baseline_sha": "2e627d53078844449ff0b3a1d44a773c8d88da58",
   "checks": [
     {
       "lane": "preflight",
@@ -39,6 +39,11 @@
       "package": "./internal/crmcli",
       "test": "TestCLIExecutionReceiptsReadJourney",
       "reason": "目录与本批管理回执实际读取合同"
+    },
+    {
+      "lane": "preflight",
+      "path": "scripts/test_release_optimization.py",
+      "reason": "安装 runner 路径与原收据/增量结果保护"
     }
   ],
   "installed_checks": [

@@ -4053,7 +4053,7 @@ def stage_check(config: dict[str, Any], *, test_source_sha: str | None = None) -
         names = _installed_check_names(flight["check_receipt"].get("installed_checks", []))
         contracts = _stage_contracts(repo, fixture, names)
         tests = {t for row in contracts.values() for t in row["tests"]}
-        package = Path(config["stage_releases"]) / app["sha"]
+        package = Path(config.get("stage_releases", "/opt/aicrm/releases")) / app["sha"]
         binary, dist = package / "bin/aicrm", package / "web/dist"
         if binary.is_symlink() or not binary.is_file() or not os.access(binary, os.X_OK):
             raise ReleaseError("installed binary is missing or unsafe")
