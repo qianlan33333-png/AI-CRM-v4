@@ -68,3 +68,23 @@ func TestSubmissionReplayAfterSplitCannotReturnOtherRootReceipt(t *testing.T) {
 		t.Fatalf("split replay wrote audit/outbox: count=%d", store.auditOutbox)
 	}
 }
+
+func TestSubmissionReceiptSubjectIsPrivateAndIndependentOfHistoricalRoot(t *testing.T) {
+	root, detached := customerdomain.CustomerID(7), customerdomain.CustomerID(8)
+	stored := surveyport.Submission{Identity: surveyport.SubmissionIdentity{State: surveyport.IdentityResolved, CustomerID: &root, ProviderIdentityID: 42}}
+	identity := surveyport.SubmissionIdentity{State: surveyport.IdentityResolved, CustomerID: &detached, ProviderIdentityID: 42}
+	if !submissionReceiptAuthorized(stored, identity, []customerdomain.CustomerID{detached}) {
+		t.Fatal("same currently verified subject must recover its exact receipt after detach")
+	}
+	identity.ProviderIdentityID = 43
+	if submissionReceiptAuthorized(stored, identity, []customerdomain.CustomerID{root, detached}) {
+		t.Fatal("another active subject must not borrow the receipt even within the same lineage")
+	}
+	stored.Identity.ProviderIdentityID = 0
+	if submissionReceiptAuthorized(stored, identity, []customerdomain.CustomerID{detached}) {
+		t.Fatal("legacy row without a trustworthy handle must remain fail closed after detach")
+	}
+	if !submissionReceiptAuthorized(stored, identity, []customerdomain.CustomerID{root, detached}) {
+		t.Fatal("legacy row must retain its existing merged-lineage contract")
+	}
+}

@@ -32,3 +32,4 @@ v3 从新的 Schema 基线开始，不复制 production 或 V2 的完整 migrati
 
 - `0182_media_group_management.sql`：Media 独立分组、稳定归属 ID；回填三类素材旧 category，兼容写投影同事务同步，空组可保留。删除分组归零素材而不删除内容或引用。
 - `0234_customer_verified_wechat_nickname.sql`：Customer 独立保存可信 WeChat OAuth userinfo 昵称，不回填混合来源的 `display_name`；仅 `ProviderProfileWriter` 的可信 WeChat 来源可更新，侧栏编辑和企微目录同步不改此列。forward-only。
+- `0244_survey_submission_subject.sql`：Survey 答卷保存可信 Identity handle 供精确成功键恢复；历史 customer/答案/收据不改写，旧行 NULL 不猜测回填，结果内容授权仍按当前客户 lineage。forward-only。

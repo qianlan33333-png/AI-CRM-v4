@@ -77,6 +77,21 @@ func (m *ModuleRegistration) Readiness(ctx context.Context, pool *pgxpool.Pool) 
 	if !identitySubjectColumnReady {
 		return errors.New("survey identity session subject schema is not ready: survey_identity_sessions.provider_identity_id")
 	}
+	var submissionSubjectColumnReady bool
+	err = pool.QueryRow(ctx, `SELECT EXISTS(
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema=current_schema()
+		  AND table_name='survey_submissions'
+		  AND column_name='provider_identity_id'
+		  AND data_type='bigint'
+		  AND is_nullable='YES'
+	)`).Scan(&submissionSubjectColumnReady)
+	if err != nil {
+		return err
+	}
+	if !submissionSubjectColumnReady {
+		return errors.New("survey submission receipt subject schema is not ready: survey_submissions.provider_identity_id")
+	}
 	var redirectConstraintReady bool
 	err = pool.QueryRow(ctx, `SELECT EXISTS(
 		SELECT 1

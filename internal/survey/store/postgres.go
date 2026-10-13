@@ -585,7 +585,11 @@ func (r *Repository) CreateSubmission(ctx context.Context, input surveyapp.Persi
 	}
 	resultRaw, _ := json.Marshal(input.Result)
 	var submissionID int64
-	err = t.QueryRow(ctx, `INSERT INTO survey_submissions(questionnaire_id,definition_version_id,definition_version_number,customer_id,identity_state,identity_reason,evidence_digest,submission_key_digest,payload_digest,questionnaire_slug_snapshot,title_snapshot,mode_snapshot,total_score,result_snapshot,source_channel,campaign_id,staff_id,submitted_at,created_at) VALUES($1,$2,$3,$4,$5,'',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'',$16,$16) RETURNING id`, input.Questionnaire.ID, definitionID, input.Questionnaire.DefinitionVersion, input.Command.Identity.CustomerID, input.Command.Identity.State, decodeEvidence(input.Command.Identity.EvidenceDigest), input.SubmissionKeyDigest[:], input.PayloadDigest[:], input.Questionnaire.Slug, input.Questionnaire.Title, input.Questionnaire.Mode, input.TotalScore, resultRaw, input.Command.SourceChannel, input.Command.CampaignID, input.Now).Scan(&submissionID)
+	var providerIdentityID any
+	if input.Command.Identity.ProviderIdentityID > 0 {
+		providerIdentityID = input.Command.Identity.ProviderIdentityID
+	}
+	err = t.QueryRow(ctx, `INSERT INTO survey_submissions(questionnaire_id,definition_version_id,definition_version_number,customer_id,identity_state,identity_reason,evidence_digest,submission_key_digest,payload_digest,questionnaire_slug_snapshot,title_snapshot,mode_snapshot,total_score,result_snapshot,source_channel,campaign_id,staff_id,submitted_at,created_at,provider_identity_id) VALUES($1,$2,$3,$4,$5,'',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'',$16,$16,$17) RETURNING id`, input.Questionnaire.ID, definitionID, input.Questionnaire.DefinitionVersion, input.Command.Identity.CustomerID, input.Command.Identity.State, decodeEvidence(input.Command.Identity.EvidenceDigest), input.SubmissionKeyDigest[:], input.PayloadDigest[:], input.Questionnaire.Slug, input.Questionnaire.Title, input.Questionnaire.Mode, input.TotalScore, resultRaw, input.Command.SourceChannel, input.Command.CampaignID, input.Now, providerIdentityID).Scan(&submissionID)
 	if err != nil {
 		return surveyport.Submission{}, false, mapError(err)
 	}
@@ -701,7 +705,7 @@ func (r *Repository) loadSubmission(ctx context.Context, t pgx.Tx, id surveyport
 	var customer *int64
 	var evidence []byte
 	var resultRaw []byte
-	err := t.QueryRow(ctx, `SELECT id,questionnaire_id,definition_version_number,customer_id,identity_state,evidence_digest,questionnaire_slug_snapshot,title_snapshot,mode_snapshot,total_score,result_snapshot,source_channel,campaign_id,staff_id,submitted_at FROM survey_submissions WHERE id=$1`, id).Scan(&s.ID, &s.QuestionnaireID, &s.DefinitionVersion, &customer, &s.Identity.State, &evidence, &s.QuestionnaireSlug, &s.QuestionnaireTitle, &s.Mode, &s.TotalScore, &resultRaw, &s.SourceChannel, &s.CampaignID, &s.StaffID, &s.SubmittedAt)
+	err := t.QueryRow(ctx, `SELECT id,questionnaire_id,definition_version_number,customer_id,identity_state,evidence_digest,questionnaire_slug_snapshot,title_snapshot,mode_snapshot,total_score,result_snapshot,source_channel,campaign_id,staff_id,submitted_at,COALESCE(provider_identity_id,0) FROM survey_submissions WHERE id=$1`, id).Scan(&s.ID, &s.QuestionnaireID, &s.DefinitionVersion, &customer, &s.Identity.State, &evidence, &s.QuestionnaireSlug, &s.QuestionnaireTitle, &s.Mode, &s.TotalScore, &resultRaw, &s.SourceChannel, &s.CampaignID, &s.StaffID, &s.SubmittedAt, &s.Identity.ProviderIdentityID)
 	if err != nil {
 		return s, mapError(err)
 	}

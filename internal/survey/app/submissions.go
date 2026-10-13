@@ -399,7 +399,7 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 			return e
 		}
 		if found {
-			if !submissionInLineage(stored, ids) {
+			if !submissionReceiptAuthorized(stored, command.Identity, ids) {
 				return surveyport.ErrConflict
 			}
 			completionConfiguration, e = s.store.GetOperationConfiguration(tx, questionnaire.ID)
@@ -419,7 +419,7 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 			if e != nil {
 				return e
 			}
-			if found && !submissionInLineage(stored, ids) {
+			if found && !submissionReceiptAuthorized(stored, command.Identity, ids) {
 				return surveyport.ErrConflict
 			}
 			completionConfiguration, e = s.store.GetOperationConfiguration(tx, questionnaire.ID)
@@ -482,7 +482,7 @@ func (s *SubmissionService) Submit(ctx context.Context, command surveyport.Submi
 			return e
 		}
 		if !created {
-			if !submissionInLineage(stored, ids) {
+			if !submissionReceiptAuthorized(stored, command.Identity, ids) {
 				return surveyport.ErrConflict
 			}
 			completionConfiguration, e = s.store.GetOperationConfiguration(tx, questionnaire.ID)
@@ -747,9 +747,22 @@ func (s *SubmissionService) QueryResultForIdentity(ctx context.Context, token st
 	return result, classifySubjectError(err)
 }
 
-// A retained submission key is not an ownership credential. Preserve receipts
-// across merges only while their recorded customer remains in this subject's
-// current locked lineage; reversal must not return another root's success.
+// This is only called after exact key/payload lookup and current, write-locked
+// subject verification. Recover that subject's own accepted receipt without
+// rewriting the customer root frozen at submission. Legacy rows without a
+// subject handle retain their narrower current-lineage boundary.
+func submissionReceiptAuthorized(submission surveyport.Submission, identity surveyport.SubmissionIdentity, ids []customerdomain.CustomerID) bool {
+	if submission.Identity.State != surveyport.IdentityResolved || submission.Identity.CustomerID == nil {
+		return false
+	}
+	if submission.Identity.ProviderIdentityID > 0 {
+		return submission.Identity.ProviderIdentityID == identity.ProviderIdentityID
+	}
+	return submissionInLineage(submission, ids)
+}
+
+// Result contents remain authorized by the current customer lineage. Receipt
+// recovery does not grant access to another root's retained answer snapshot.
 func submissionInLineage(submission surveyport.Submission, ids []customerdomain.CustomerID) bool {
 	if submission.Identity.State != surveyport.IdentityResolved || submission.Identity.CustomerID == nil {
 		return false

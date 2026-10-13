@@ -67,6 +67,47 @@ func TestPostgreSQLSurveyReadinessRequiresIdentitySubjectColumn(t *testing.T) {
 	assertReadinessStatus(t, handler, http.StatusOK)
 }
 
+func TestPostgreSQLSurveySubmissionSubjectReadiness(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	pool, cleanup := readinessIntegrationPool(t, ctx)
+	defer cleanup()
+	applyAllReadinessMigrations(t, ctx, pool)
+	module := survey.NewModuleRegistration()
+	if err := module.Readiness(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE survey_submissions DROP COLUMN provider_identity_id`); err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Readiness(ctx, pool); err == nil || !strings.Contains(err.Error(), "survey_submissions.provider_identity_id") {
+		t.Fatalf("missing receipt subject column was ready: %v", err)
+	}
+	_, file, _, _ := runtime.Caller(0)
+	contents, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "migrations", "0244_survey_submission_subject.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, string(contents)); err != nil {
+		t.Fatal(err)
+	}
+	if err = module.Readiness(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	for _, config := range []platformconfig.Runtime{{}, readinessEnabledConfig()} {
+		if !containsMigration(requiredCurrentReleaseMigrations(config), "0244") {
+			t.Fatal("receipt subject migration omitted from the runtime-required ledger")
+		}
+		if _, err = pool.Exec(ctx, `DELETE FROM platform_schema_migrations WHERE version='0244'`); err != nil {
+			t.Fatal(err)
+		}
+		if err = checkCurrentReleaseSchema(ctx, pool, config); err == nil || !strings.Contains(err.Error(), "0244") {
+			t.Fatalf("missing receipt subject migration ledger accepted: %v", err)
+		}
+		insertReadinessMigration(t, ctx, pool, "0244")
+	}
+}
+
 func TestPostgreSQLReleaseReadinessRequiresSurveyIdentitySubjectMigration(t *testing.T) {
 	for _, scenario := range []struct {
 		name   string

@@ -1,11 +1,166 @@
 {
   "schema": 1,
-  "baseline_sha": "cfff2374bb2d5fef20bd3ca43e1044fb0b9e6802",
+  "baseline_sha": "c97ddb05a2038c04264201b8eb476592d107fb04",
   "checks": [
     {
-      "lane": "preflight",
-      "path": "deploy/test_domestic_promote_gc.py"
+      "lane": "backend",
+      "package": "./internal/survey/app",
+      "test": "TestSubmissionReplayAfterSplitCannotReturnOtherRootReceipt"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/app",
+      "test": "TestSubmissionReceiptSubjectIsPrivateAndIndependentOfHistoricalRoot"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/app",
+      "test": "TestPublicSubmissionStatusUsesPostCutoverClaimAndResolvesAfterCommit"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/app",
+      "test": "TestSubmissionAlreadySubmittedReturnsSafeCompletionActionAfterRollbackBoundary"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/app",
+      "test": "TestSubmissionAcceptsAndBindsConfiguredCompletionOnce"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/app",
+      "test": "TestSubmissionRetainsReceiptAndClaimBeforeMutablePublicValidation"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/app",
+      "test": "TestPublicSubmissionStatusRetainsClaimAfterQuestionnaireStops"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLAttachmentAtomicReplayAndScope",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLAttachmentSizeRemainsSeparateFromManualImageLimit",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/http",
+      "test": "TestSubmissionRejectsSimpleJSONContentTypes"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/http",
+      "test": "TestSubmissionMalformedJSONKeepsClientFailureStatus"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/http",
+      "test": "TestPublicSubmissionSuccessEmitsCompletionActionAndLegacyResultTokenAtTopLevel"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/http",
+      "test": "TestRedemptionAdministrationRequiresOperatorAndCSRF"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLAttachmentRollbackAndConcurrentCode",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLAttachmentRejectsInvalidFilesAndFields",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLAttachmentWithoutCodeAndOptionalJSON",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLAttachmentCompletionFailureRollsBackAudit",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLSubmissionClaimsAreAtomicPerCustomerAndQuestionnaire",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLRedemptionConcurrentConsumeReplayAndImport",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLRedemptionRollbackAndQuestionnaireIsolation",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLSubmissionClaimConcurrentReceiptReplay",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLSubmissionReceiptOwnershipAfterMergeReverse",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLSubmissionSubjectMigrationPreservesLegacyFacts",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/survey/store",
+      "test": "TestPostgreSQLSubmissionRejectsDefinitionSwitchedAfterValidation",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLSurveyReadinessRequiresIdentitySubjectColumn",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLSurveySubmissionSubjectReadiness",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLReleaseReadinessRequiresSurveyIdentitySubjectMigration",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLSurveySuccessfulKeyAuthorizationClosure",
+      "postgres": true
     }
   ],
-  "installed_checks": []
+  "installed_checks": [
+    "survey-successful-key-recovery"
+  ]
 }

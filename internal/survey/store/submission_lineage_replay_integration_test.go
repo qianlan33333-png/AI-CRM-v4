@@ -125,12 +125,33 @@ func TestPostgreSQLSubmissionReceiptOwnershipAfterMergeReverse(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if replay, e := service.Submit(ctx, command); !errors.Is(e, surveyport.ErrConflict) || replay.SubmissionID != 0 || replay.ResultToken != "" {
-		t.Fatalf("split reused other customer's receipt=%+v err=%v", replay, e)
+	if replay, e := service.Submit(ctx, command); e != nil || replay != first {
+		t.Fatalf("same active original subject lost its exact receipt after split=%+v err=%v", replay, e)
 	}
 	if _, e := service.QueryResultForIdentity(ctx, first.ResultToken, command.Identity); !errors.Is(e, surveyport.ErrResultForbidden) {
 		t.Fatalf("split result authorization err=%v", e)
 	}
+	var frozenOwner, frozenHandle int64
+	if err = native.QueryRow(ctx, `SELECT customer_id,provider_identity_id FROM survey_submissions WHERE id=$1`, first.SubmissionID).Scan(&frozenOwner, &frozenHandle); err != nil || frozenOwner != int64(survivor.CustomerID) || frozenHandle != formerAlias.IdentityID {
+		t.Fatalf("receipt recovery rewrote historical owner or subject: owner_matches=%t handle_matches=%t err=%v", frozenOwner == int64(survivor.CustomerID), frozenHandle == formerAlias.IdentityID, err)
+	}
+	t.Run("legacy_snapshot_without_handle_keeps_lineage_boundary", func(t *testing.T) {
+		// Fixture-only simulation of a pre-0244 row. The runtime must neither
+		// infer its actor from evidence nor backfill it during receipt lookup.
+		if _, e := native.Exec(ctx, `UPDATE survey_submissions SET provider_identity_id=NULL WHERE id=$1`, first.SubmissionID); e != nil {
+			t.Fatal(e)
+		}
+		if got, e := service.Submit(ctx, command); !errors.Is(e, surveyport.ErrConflict) || got.SubmissionID != 0 || got.ResultToken != "" {
+			t.Fatalf("legacy detached receipt escaped current lineage: receipt_empty=%t err=%v", got.SubmissionID == 0 && got.ResultToken == "", e)
+		}
+		var remainsNull bool
+		if e := native.QueryRow(ctx, `SELECT provider_identity_id IS NULL FROM survey_submissions WHERE id=$1`, first.SubmissionID).Scan(&remainsNull); e != nil || !remainsNull {
+			t.Fatalf("runtime guessed a legacy actor: null=%t err=%v", remainsNull, e)
+		}
+		if _, e := native.Exec(ctx, `UPDATE survey_submissions SET provider_identity_id=$2 WHERE id=$1`, first.SubmissionID, frozenHandle); e != nil {
+			t.Fatal(e)
+		}
+	})
 	command.SubmissionKey = strings.Repeat("d", 43)
 	second, err := service.Submit(ctx, command)
 	if err != nil || second.SubmissionID == first.SubmissionID {

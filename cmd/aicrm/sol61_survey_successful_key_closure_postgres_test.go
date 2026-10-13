@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -90,6 +91,7 @@ func TestPostgreSQLSurveySuccessfulKeyAuthorizationClosure(t *testing.T) {
 	loserFact := evidenceMergeFact(t, identitydomain.KindUnionID, "wechat-open-platform:survey-key-closure", "synthetic-original-subject")
 	survivorFact := evidenceMergeFact(t, identitydomain.KindWeComExternalUserID, "wecom-corp:survey-key-closure", "synthetic-survivor")
 	var loserID, survivorID customerdomain.CustomerID
+	var survivorHandle int64
 	if err = uow.Within(ctx, func(tx context.Context) error {
 		loser, e := oneID.ProvisionCustomerFromVerifiedIdentity(tx, loserFact)
 		if e != nil {
@@ -97,6 +99,7 @@ func TestPostgreSQLSurveySuccessfulKeyAuthorizationClosure(t *testing.T) {
 		}
 		survivor, e := oneID.ProvisionCustomerFromVerifiedIdentity(tx, survivorFact)
 		loserID, survivorID = loser.CustomerID, survivor.CustomerID
+		survivorHandle = survivor.IdentityID
 		return e
 	}); err != nil {
 		t.Fatal(err)
@@ -154,6 +157,17 @@ func TestPostgreSQLSurveySuccessfulKeyAuthorizationClosure(t *testing.T) {
 		assertSurveyClosureOwner(t, ctx, native, beforeMerge.ID, initialReceipt.SubmissionID, loserID)
 		assertSurveyClosureFactsUnchanged(t, ctx, native, beforeMerge.ID, initialReceipt.SubmissionID, initialFacts)
 	})
+	t.Run("another_active_subject_in_same_lineage_cannot_replay", func(t *testing.T) {
+		forged := initialCommand
+		forged.Identity.ProviderIdentityID = survivorHandle
+		forged.Identity.CustomerID = &survivorID
+		// Keep even the original payload evidence: a cached or forged caller
+		// must not substitute another currently valid handle for the actor.
+		if got, e := submissions.Submit(ctx, forged); !errors.Is(e, surveyport.ErrConflict) || got.SubmissionID != 0 || got.ResultToken != "" {
+			t.Fatalf("different active subject exposed receipt: receipt_empty=%t error=%v", got.SubmissionID == 0 && got.ResultToken == "", e)
+		}
+		assertSurveyClosureFactsUnchanged(t, ctx, native, beforeMerge.ID, initialReceipt.SubmissionID, initialFacts)
+	})
 	mergedSession, mergedIdentity := issueSession(duringMerge.Slug, survivorID)
 	if mergedIdentity.ProviderIdentityID != initialIdentity.ProviderIdentityID {
 		t.Fatal("actual merge must retain the immutable OAuth subject handle")
@@ -184,6 +198,32 @@ func TestPostgreSQLSurveySuccessfulKeyAuthorizationClosure(t *testing.T) {
 		assertSurveyClosureOwner(t, ctx, native, beforeMerge.ID, initialReceipt.SubmissionID, loserID)
 		assertSurveyClosureOwner(t, ctx, native, duringMerge.ID, mergedReceipt.SubmissionID, survivorID)
 		assertSurveyClosureFactsUnchanged(t, ctx, native, beforeMerge.ID, initialReceipt.SubmissionID, initialFacts)
+		assertSurveyClosureFactsUnchanged(t, ctx, native, duringMerge.ID, mergedReceipt.SubmissionID, mergedFacts)
+	})
+	t.Run("concurrent_original_key_replays_preserve_all_facts", func(t *testing.T) {
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := 0; i < 6; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				got, e := submissions.Submit(ctx, mergedCommand)
+				if e != nil || !reflect.DeepEqual(got, mergedReceipt) {
+					t.Errorf("concurrent receipt recovery: exact_receipt=%t error=%v", reflect.DeepEqual(got, mergedReceipt), e)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		assertSurveyClosureFactsUnchanged(t, ctx, native, duringMerge.ID, mergedReceipt.SubmissionID, mergedFacts)
+	})
+	t.Run("payload_drift_after_detach_cannot_replay", func(t *testing.T) {
+		drifted := mergedCommand
+		drifted.Answers = []surveyport.SubmissionAnswer{{QuestionID: duringMerge.Questions[0].ID, TextValue: "different content"}}
+		if got, e := submissions.Submit(ctx, drifted); !errors.Is(e, surveyport.ErrConflict) || got.SubmissionID != 0 {
+			t.Fatalf("changed payload recovered receipt: receipt_empty=%t error=%v", got.SubmissionID == 0, e)
+		}
 		assertSurveyClosureFactsUnchanged(t, ctx, native, duringMerge.ID, mergedReceipt.SubmissionID, mergedFacts)
 	})
 	handler, err := surveyhttp.NewHandler(definitions, submissions, surveyJourneySecurity{actorID: actorID}, oauth)
