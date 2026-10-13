@@ -67,13 +67,24 @@ class CleanupTests(unittest.TestCase):
         path.write_text(json.dumps(value)); path.chmod(0o600)
         return path
 
+    def make_incompatible_success(self, name, sequence):
+        package = self.root / "releases" / name
+        migration = package / "migrations/0001_example.sql"
+        migration.write_bytes(b"CREATE TABLE incompatible(id text);\n")
+        manifest = package / "release-files.sha256"
+        lines = []
+        for relative in ("bin/aicrm", "migrations/0001_example.sql"):
+            lines.append(cleanup.digest_file(package / relative) + "  ./" + relative + "\n")
+        manifest.write_text("".join(lines))
+        return self.receipt(name, sequence)
+
     def test_same_schema_without_observed_success_cannot_supply_rollbacks(self):
         for path in (self.root / cleanup.SUCCESS_DIRECTORY).iterdir():
             path.unlink()
         plan = self.plan()
         self.assertEqual(plan["rollback_releases"], [])
-        self.assertEqual(plan["candidate_count"], 0)
-        self.assertTrue(plan["blockers"])
+        self.assertEqual(plan["candidate_count"], len(self.names) - 1)
+        self.assertEqual(plan["blockers"], [])
 
     def test_success_sequence_not_package_mtime_selects_rollbacks(self):
         self.receipt(self.names[0], 10)
@@ -81,8 +92,8 @@ class CleanupTests(unittest.TestCase):
         for file in (self.root / "releases" / self.names[1]).rglob("*"):
             os.utime(file, None)
         plan = self.plan()
-        self.assertEqual(plan["rollback_releases"], [self.names[0], self.names[2]])
-        self.assertEqual([e["name"] for e in plan["entries"] if e["action"] == "delete"], [self.names[1]])
+        self.assertEqual(plan["rollback_releases"], [self.names[0]])
+        self.assertEqual({e["name"] for e in plan["entries"] if e["action"] == "delete"}, {self.names[1], self.names[2]})
 
     def test_success_receipt_is_bound_to_all_hashes_and_release(self):
         name = self.names[2]
@@ -152,7 +163,9 @@ class CleanupTests(unittest.TestCase):
     def test_writable_success_directory_and_duplicate_sequence_fail_closed(self):
         directory = self.root / cleanup.SUCCESS_DIRECTORY
         directory.chmod(0o777)
-        self.assertEqual(self.plan()["candidate_count"], 0)
+        plan = self.plan()
+        self.assertEqual(plan["candidate_count"], 3)
+        self.assertEqual(plan["rollback_releases"], [])
         directory.chmod(0o700)
         self.receipt(self.names[0], 3)
         with self.assertRaisesRegex(cleanup.Refuse, "duplicate"): self.plan()
@@ -167,30 +180,33 @@ class CleanupTests(unittest.TestCase):
 
     def test_only_verified_unreferenced_releases_delete_and_replay_is_noop(self):
         plan = self.plan()
-        self.assertEqual(plan["candidate_count"], 1)
-        self.assertEqual(set(plan["rollback_releases"]), set(self.names[1:3]))
+        self.assertEqual(plan["candidate_count"], 2)
+        self.assertEqual(plan["rollback_releases"], [self.names[2]])
         before = {n: cleanup.verified_package(self.root / "releases" / n) for n in self.names[1:]}
         result = cleanup.apply_plan(self.root, self.schema, plan, [])
-        self.assertEqual([v["name"] for v in result["deleted"]], self.names[:1])
+        self.assertEqual([v["name"] for v in result["deleted"]], self.names[:2])
         self.assertFalse((self.root / "releases" / self.names[0]).exists())
+        self.assertFalse((self.root / "releases" / self.names[1]).exists())
         self.assertTrue((self.root / cleanup.SUCCESS_DIRECTORY / (self.names[0] + ".json")).is_file())
         for name, value in before.items():
+            if name in self.names[:2]:
+                continue
             self.assertEqual(cleanup.verified_package(self.root / "releases" / name), value)
         replay = cleanup.apply_plan(self.root, self.schema, plan, [])
         self.assertEqual(replay["deleted"], [])
-        self.assertEqual(replay["already_absent"], self.names[:1])
+        self.assertEqual(replay["already_absent"], self.names[:2])
         audit = [json.loads(line) for line in (self.root / "release-cleanup-audit.jsonl").read_text().splitlines()]
-        self.assertEqual([item["event"] for item in audit], ["delete_started", "delete_completed"])
-        self.assertEqual({item["name"] for item in audit}, {self.names[0]})
+        self.assertEqual([item["event"] for item in audit], ["delete_started", "delete_completed"] * 2)
+        self.assertEqual({item["name"] for item in audit}, set(self.names[:2]))
 
     def test_interrupted_cleanup_preserves_completed_receipt_and_reports_partial(self):
         other = f"{5:040x}"
         self.package(other, -1)
         plan = self.plan()
-        self.assertEqual(plan["candidate_count"], 2)
+        self.assertEqual(plan["candidate_count"], 3)
         original = cleanup.shutil.rmtree
         def remove(path):
-            if path.name == other:
+            if path.name == self.names[1]:
                 raise OSError("simulated write failure")
             original(path)
         remove.avoids_symlink_attacks = True
@@ -201,6 +217,7 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in failure.exception.deleted], self.names[:1])
         audit = [json.loads(line) for line in (self.root / "release-cleanup-audit.jsonl").read_text().splitlines()]
         self.assertEqual([item["event"] for item in audit], ["delete_started", "delete_completed", "delete_started"])
+        self.assertTrue((self.root / "releases" / self.names[1]).exists())
         self.assertTrue((self.root / "releases" / other).exists())
 
     def test_new_reference_or_file_change_refuses_before_any_delete(self):
@@ -218,8 +235,8 @@ class CleanupTests(unittest.TestCase):
         (bad / "customer-export.csv").write_bytes(b"business data")
         (self.root / "releases" / "manual-backup").mkdir()
         plan = self.plan()
-        self.assertEqual(plan["candidate_count"], 0)
-        self.assertTrue(all(item["action"] == "protect" for item in plan["entries"]))
+        self.assertEqual(plan["candidate_count"], 1)
+        self.assertEqual(plan["blockers"], [])
         (bad / "customer-export.csv").unlink()
         (bad / "bin/secret.pem").write_bytes(b"never inspect this content")
         with self.assertRaises(cleanup.Refuse):
@@ -229,14 +246,64 @@ class CleanupTests(unittest.TestCase):
         with self.assertRaises(cleanup.Refuse):
             cleanup.verified_package(bad)
 
-    def test_missing_two_compatible_rollbacks_blocks_all_cleanup(self):
-        (self.root / "releases" / self.names[1] / "bin/aicrm").write_bytes(b"corrupt")
-        (self.root / "releases" / self.names[0] / "migrations/0001_example.sql").write_bytes(b"old schema")
+    def test_missing_second_compatible_rollback_does_not_block_other_deletions(self):
+        for name in self.names[:2]:
+            (self.root / cleanup.SUCCESS_DIRECTORY / (name + ".json")).unlink()
         plan = self.plan()
-        self.assertTrue(plan["blockers"])
-        self.assertEqual(plan["candidate_count"], 0)
-        with self.assertRaises(cleanup.Refuse):
-            cleanup.apply_plan(self.root, self.schema, plan, [])
+        self.assertEqual(plan["blockers"], [])
+        self.assertEqual(plan["rollback_releases"], [self.names[2]])
+        self.assertEqual(plan["candidate_count"], 2)
+        result = cleanup.apply_plan(self.root, self.schema, plan, [])
+        self.assertEqual([item["name"] for item in result["deleted"]], self.names[:2])
+        self.assertTrue((self.root / "releases" / self.names[2]).is_dir())
+        self.assertTrue((self.root / "releases" / self.names[-1]).is_dir())
+
+    def test_latest_complete_incompatible_predecessor_is_retained_without_rollback_blocker(self):
+        for name in self.names[:2]:
+            (self.root / cleanup.SUCCESS_DIRECTORY / (name + ".json")).unlink()
+        self.make_incompatible_success(self.names[2], 10)
+        plan = self.plan()
+        self.assertEqual(plan["blockers"], [])
+        self.assertEqual(plan["rollback_releases"], [])
+        self.assertEqual(plan["latest_complete_previous_release"], self.names[2])
+        self.assertEqual(plan["candidate_count"], 2)
+        predecessor = next(item for item in plan["entries"] if item["name"] == self.names[2])
+        self.assertEqual(predecessor["action"], "protect")
+        self.assertEqual(predecessor["reason"], "latest_complete_previous")
+        result = cleanup.apply_plan(self.root, self.schema, plan, [])
+        self.assertEqual([item["name"] for item in result["deleted"]], self.names[:2])
+        self.assertEqual(result["latest_complete_previous_release"], self.names[2])
+        self.assertTrue((self.root / "releases" / self.names[2]).is_dir())
+        self.assertTrue((self.root / "releases" / self.names[-1]).is_dir())
+
+    def test_immutable_public_hardlinks_inside_release_root_are_verifiable(self):
+        package = self.root / "releases" / self.names[1]
+        original = package / "bin/aicrm"
+        alias = package / "bin/aicrm-shared"
+        os.link(original, alias)
+        original.chmod(0o444)
+        manifest = package / "release-files.sha256"
+        manifest.write_text(manifest.read_text() + cleanup.digest_file(alias) + "  bin/aicrm-shared\n")
+        link_inventory = cleanup.public_package_link_inventory(self.root / "releases")
+        verified = cleanup.verified_package(package, link_inventory)
+        cleanup.require_sealed_package(package, link_inventory)
+        self.assertEqual(verified["name"], self.names[1])
+
+    def test_external_or_writable_package_hardlinks_are_rejected(self):
+        package = self.root / "releases" / self.names[1]
+        binary = package / "bin/aicrm"
+        external = self.root / "external-alias"
+        os.link(binary, external)
+        with self.assertRaisesRegex(cleanup.Refuse, "external_alias"):
+            cleanup.verified_package(package)
+        external.unlink()
+
+        alias = package / "bin/aicrm-shared"
+        os.link(binary, alias)
+        manifest = package / "release-files.sha256"
+        manifest.write_text(manifest.read_text() + cleanup.digest_file(alias) + "  bin/aicrm-shared\n")
+        with self.assertRaisesRegex(cleanup.Refuse, "writable_or_unreadable"):
+            cleanup.verified_package(package)
 
     def test_schema_evidence_and_current_must_match(self):
         value = json.loads(self.schema.read_text())

@@ -73,7 +73,7 @@ def snapshot(sha, environment):
 
 
 def run(sha):
-    report={"version":1,"release_sha":sha,"state":"gap","reason":"cleanup_not_attempted","deleted_count":None,"deleted_bytes":None,"observed_at":dt.datetime.now(dt.timezone.utc).isoformat(),"space_observations":[]}
+    report={"version":1,"release_sha":sha,"state":"gap","reason":"cleanup_not_attempted","deleted_count":None,"deleted_bytes":None,"latest_complete_previous_release":None,"observed_at":dt.datetime.now(dt.timezone.utc).isoformat(),"space_observations":[]}
     observer = load_helper("maintenance_result", "runtime-maintenance.py")
     resources = {"release_storage": ROOT / "releases"}
     space_before = observer.sample_space(resources)
@@ -92,13 +92,15 @@ def run(sha):
             schema=Path(temporary)/"schema.json"
             schema.write_text(json.dumps(snapshot(sha,database_environment(Path("/etc/aicrm/aicrm.env")))))
             plan=cleanup.inventory(ROOT,schema,[])
+            report["latest_complete_previous_release"] = plan["latest_complete_previous_release"]
             if plan["blockers"]:
-                report["reason"]="two_verified_schema_compatible_rollbacks_missing"
+                report["reason"]="release_cleanup_blocked_by_evidence"
                 report.update(deleted_count=0,deleted_bytes=0)
                 report["rollback_count"]=len(plan["rollback_releases"])
+                report["blockers"]=plan["blockers"]
             else:
                 result=cleanup.apply_plan(ROOT,schema,plan,[])
-                report.update(state="completed",reason="verified_cleanup_completed",deleted_count=len(result["deleted"]),deleted_bytes=result["deleted_bytes"],rollback_count=len(result["rollback_releases"]))
+                report.update(state="completed",reason="verified_cleanup_completed",deleted_count=len(result["deleted"]),deleted_bytes=result["deleted_bytes"],rollback_count=len(result["rollback_releases"]),latest_complete_previous_release=result["latest_complete_previous_release"])
     except Exception as failure:
         # Detailed stable per-release evidence remains in cleanup's root-owned
         # audit; do not leak config, psql errors or paths through release logs.

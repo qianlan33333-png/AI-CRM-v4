@@ -59,11 +59,55 @@ def canonical_digest(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def require_regular(path: Path):
+def require_regular(path: Path, *, allow_shared=False):
     info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+    if not stat.S_ISREG(info.st_mode) or (info.st_nlink != 1 and not allow_shared):
         raise Refuse("non_regular_or_shared_file")
     return info
+
+
+def public_package_link_inventory(releases: Path):
+    """Index regular paths under releases so package hard links cannot escape."""
+    links = {}
+
+    def failed(_error):
+        raise Refuse("release_file_inventory_incomplete")
+
+    for directory, dirs, files in os.walk(releases, followlinks=False, onerror=failed):
+        dirs[:] = [name for name in dirs if not (Path(directory) / name).is_symlink()]
+        for name in files:
+            path = Path(directory) / name
+            try:
+                info = path.lstat()
+            except OSError:
+                raise Refuse("release_file_inventory_incomplete") from None
+            if stat.S_ISREG(info.st_mode):
+                links.setdefault((info.st_dev, info.st_ino), []).append((path, info))
+    return links
+
+
+def require_safe_public_package_link(info, releases: Path, link_inventory):
+    if info.st_nlink == 1:
+        return
+    aliases = link_inventory.get((info.st_dev, info.st_ino), [])
+    if len(aliases) != info.st_nlink:
+        raise Refuse("package_hardlink_has_external_alias")
+    for alias, alias_info in aliases:
+        try:
+            relative = alias.relative_to(releases)
+        except ValueError:
+            raise Refuse("package_hardlink_outside_release_root") from None
+        if (len(relative.parts) < 3 or not SHA.fullmatch(relative.parts[0])
+                or relative.parts[1] not in PACKAGE_ROOTS
+                or relative.parts[2] in {"release.env", "release-files.sha256"}
+                or any(part.lower() in PROTECTED_PARTS for part in relative.parts[1:])
+                or Path(relative.as_posix()).suffix.lower() in PROTECTED_SUFFIXES
+                or alias.name == ".env"):
+            raise Refuse("package_hardlink_alias_is_not_public_content")
+        if (alias_info.st_uid != ROOT_UID or alias_info.st_gid != ROOT_GID
+                or stat.S_IMODE(alias_info.st_mode) & 0o222
+                or stat.S_IMODE(alias_info.st_mode) & 0o444 == 0):
+            raise Refuse("package_hardlink_is_writable_or_unreadable")
 
 
 def require_control_directory(path: Path, private=False):
@@ -150,29 +194,34 @@ def read_pending_success(root: Path, filename=SUCCESS_PENDING) -> dict:
     return value
 
 
-def verified_success(root: Path, package: dict) -> dict:
+def verified_success(root: Path, package: dict, link_inventory=None) -> dict:
     if os.path.lexists(root / SUCCESS_DIRECTORY / SUCCESS_PENDING):
         raise Refuse("release_success_publication_incomplete")
     require_control_directory(root / "releases")
-    require_sealed_package(root / "releases" / package["name"])
+    require_sealed_package(root / "releases" / package["name"], link_inventory)
     value = read_success_receipt(root, package["name"])
     if any(value[key] != package[key] for key in ("manifest_sha256", "package_digest", "binary_sha256", "schema_digest")):
         raise Refuse("release_success_package_mismatch")
     return value
 
 
-def require_sealed_package(path: Path):
+def require_sealed_package(path: Path, link_inventory=None):
     require_control_directory(path)
+    releases = path.parent
+    if link_inventory is None:
+        link_inventory = public_package_link_inventory(releases)
     for directory, dirs, files in os.walk(path, followlinks=False):
         for name in dirs:
             require_control_directory(Path(directory) / name)
         for name in files:
-            info = require_regular(Path(directory) / name)
+            info = require_regular(Path(directory) / name, allow_shared=True)
             if info.st_uid != ROOT_UID or info.st_gid != ROOT_GID or stat.S_IMODE(info.st_mode) & 0o022:
                 raise Refuse("unsealed_release_package")
+            if info.st_nlink != 1:
+                require_safe_public_package_link(info, releases, link_inventory)
 
 
-def verified_package(path: Path) -> dict:
+def verified_package(path: Path, link_inventory=None) -> dict:
     if not SHA.fullmatch(path.name) or path.is_symlink() or not path.is_dir():
         raise Refuse("unknown_release_directory")
     root_stat = path.stat()
@@ -211,9 +260,13 @@ def verified_package(path: Path) -> dict:
         for name in files:
             child = Path(directory) / name
             relative = str(child.relative_to(path))
-            before = require_regular(child)
+            before = require_regular(child, allow_shared=True)
             if before.st_dev != root_stat.st_dev:
                 raise Refuse("mounted_package_file")
+            if before.st_nlink != 1:
+                if link_inventory is None:
+                    link_inventory = public_package_link_inventory(path.parent)
+                require_safe_public_package_link(before, path.parent, link_inventory)
             bytes_total += before.st_size
             newest_file_ns = max(newest_file_ns, before.st_mtime_ns)
             if relative == "release-files.sha256":
@@ -444,14 +497,23 @@ def inventory(root: Path, schema_file: Path, explicit_protected: list[str]) -> d
     schema, installed_digest = schema_snapshot(schema_file, current)
     check_ready(current)
     names = {path.name for path in releases.iterdir() if SHA.fullmatch(path.name)}
-    protected = live_references(root, names) | set(explicit_protected) | {current}
+    link_inventory = public_package_link_inventory(releases)
+    live = live_references(root, names)
+    explicit = set(explicit_protected)
+    retained_for = {name: set() for name in names}
+    retained_for[current].add("current_release")
+    for name in live:
+        retained_for[name].add("live_reference")
+    for name in explicit:
+        if name in retained_for:
+            retained_for[name].add("explicit_protection")
     entries, verified = [], {}
     for path in sorted(releases.iterdir()):
         if not SHA.fullmatch(path.name):
             entries.append({"name": path.name, "action": "protect", "reason": "unknown_directory"})
             continue
         try:
-            value = verified_package(path)
+            value = verified_package(path, link_inventory)
             verified[path.name] = value
         except (OSError, ValueError, Refuse) as exc:
             reason = str(exc) if isinstance(exc, Refuse) else "package_verification_failed"
@@ -459,30 +521,50 @@ def inventory(root: Path, schema_file: Path, explicit_protected: list[str]) -> d
     if current not in verified or verified[current]["schema_digest"] != installed_digest:
         raise Refuse("current_package_or_installed_schema_unverified")
     successful = {}
+    compatible_successful = {}
     for name, package in verified.items():
-        if name == current or package["schema_digest"] != installed_digest:
+        if name == current:
             continue
         try:
-            successful[name] = verified_success(root, package)
+            receipt = verified_success(root, package, link_inventory)
+            successful[name] = receipt
+            if schema_is_compatible(package, schema):
+                compatible_successful[name] = receipt
         except (OSError, ValueError, Refuse):
-            pass  # No historical success evidence means no rollback claim.
+            pass  # No historical success evidence means no predecessor claim.
     # A duplicate monotonic sequence cannot be produced by the locked writer.
     sequences = [value["sequence"] for value in successful.values()]
     if len(sequences) != len(set(sequences)):
         raise Refuse("duplicate_release_success_sequence")
-    rollback = [verified[name] for name in sorted(successful, key=lambda name: successful[name]["sequence"], reverse=True)[:2]]
+    latest_complete_previous = None
+    if successful:
+        latest_complete_previous = max(successful, key=lambda name: successful[name]["sequence"])
+        retained_for[latest_complete_previous].add("latest_complete_previous")
+    rollback = [verified[name] for name in sorted(
+        compatible_successful,
+        key=lambda name: compatible_successful[name]["sequence"],
+        reverse=True,
+    )[:1]]
     blockers = []
-    if len(rollback) != 2:
-        blockers.append("two_successful_schema_compatible_verified_rollback_releases_required")
-    protected |= {v["name"] for v in rollback}
+    for value in rollback:
+        retained_for[value["name"]].add("compatible_rollback")
     for name, value in sorted(verified.items()):
         value = dict(value)
-        value.update(action="protect" if name in protected or blockers else "delete", reason="referenced_or_rollback" if name in protected else "missing_rollback_evidence" if blockers else "verified_unreferenced_release")
+        roles = sorted(retained_for.get(name, set()))
+        reason = (
+            "latest_complete_previous" if roles == ["latest_complete_previous"]
+            else "referenced_or_rollback" if roles
+            else "missing_rollback_evidence" if blockers
+            else "verified_unreferenced_release"
+        )
+        value.update(action="protect" if roles or blockers else "delete", reason=reason, retained_for=roles)
         entries.append(value)
     candidates = [entry for entry in entries if entry["action"] == "delete"]
     return {"version": 1, "mode": "inventory", "root": str(root), "current_sha": current,
             "schema_digest": installed_digest, "captured_at": utcnow().isoformat(),
-            "rollback_releases": [v["name"] for v in rollback], "blockers": blockers,
+            "rollback_releases": [v["name"] for v in rollback],
+            "latest_complete_previous_release": latest_complete_previous,
+            "blockers": blockers,
             "candidate_count": len(candidates), "candidate_bytes": sum(v["bytes"] for v in candidates),
             "entries": sorted(entries, key=lambda v: v["name"])}
 
@@ -517,7 +599,8 @@ def apply_plan(root: Path, schema_file: Path, plan: dict, explicit_protected: li
             if name in live_references(root, selected):
                 raise Refuse("candidate_became_referenced")
             path = root / "releases" / name
-            value = verified_package(path)
+            link_inventory = public_package_link_inventory(root / "releases")
+            value = verified_package(path, link_inventory)
             if any(value[key] != eligible[name][key] for key in ("manifest_sha256", "inode", "device", "bytes")):
                 raise Refuse("candidate_changed_before_delete")
             if not shutil.rmtree.avoids_symlink_attacks:
@@ -531,7 +614,8 @@ def apply_plan(root: Path, schema_file: Path, plan: dict, explicit_protected: li
             reason = str(exc) if isinstance(exc, Refuse) else "release_cleanup_io_failed"
             raise Refuse(reason, deleted=deleted) from None
     return {"version": 1, "mode": "apply", "current_sha": fresh["current_sha"], "schema_digest": fresh["schema_digest"],
-            "rollback_releases": fresh["rollback_releases"], "deleted": deleted,
+            "rollback_releases": fresh["rollback_releases"],
+            "latest_complete_previous_release": fresh["latest_complete_previous_release"], "deleted": deleted,
             "already_absent": absent, "deleted_bytes": sum(item["bytes"] for item in deleted), "completed_at": utcnow().isoformat()}
 
 

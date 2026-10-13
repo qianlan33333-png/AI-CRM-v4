@@ -16,6 +16,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		if len(os.Args) == 2 && os.Args[1] == "--check-runtime-config" {
+			os.Exit(checkRuntimeConfig(os.Stdout))
+		}
+		writeRuntimeConfigCheckResult(os.Stdout, false, "invalid_arguments")
+		os.Exit(2)
+	}
 	if err := run(); err != nil {
 		slog.Error("aicrm stopped", "error", err)
 		os.Exit(1)

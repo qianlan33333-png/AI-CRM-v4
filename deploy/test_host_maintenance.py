@@ -65,9 +65,9 @@ class HostMaintenanceTests(unittest.TestCase):
                 with (root/"other").open("w+") as wrong:
                     with self.assertRaises(ValueError):post.require_lock(root,wrong.fileno())
 
-    def test_post_release_missing_rollbacks_is_explicit_gap_and_never_applies(self):
+    def test_post_release_inventory_blocker_is_explicit_gap_and_never_applies(self):
         saved=[]
-        owner=SimpleNamespace(inventory=lambda *args:{"blockers":["missing"],"rollback_releases":[]},apply_plan=lambda *args:self.fail("must not clean blocked inventory"))
+        owner=SimpleNamespace(inventory=lambda *args:{"blockers":["missing"],"rollback_releases":[],"latest_complete_previous_release":None},apply_plan=lambda *args:self.fail("must not clean blocked inventory"))
         writer=SimpleNamespace(write_result=lambda path,value:saved.append(copy.deepcopy(value)), sample_space=maintenance.sample_space, space_observations=maintenance.space_observations)
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary).resolve();sha="a"*40
@@ -81,7 +81,7 @@ class HostMaintenanceTests(unittest.TestCase):
             with patch.object(post,"ROOT",root),patch.object(post,"WORK",work),patch.object(post.os,"geteuid",return_value=0),patch.object(post,"require_lock"),patch.object(post,"database_environment",return_value={}),patch.object(post,"snapshot",return_value={}),patch.object(post,"load_helper",side_effect=[writer,owner]),patch.object(Path,"lstat",file_stat),contextlib.redirect_stdout(io.StringIO()):
                 status=post.run(sha)
         self.assertEqual(status,1)
-        self.assertEqual(saved[-1]["reason"],"two_verified_schema_compatible_rollbacks_missing")
+        self.assertEqual(saved[-1]["reason"],"release_cleanup_blocked_by_evidence")
         self.assertEqual(saved[-1]["deleted_count"],0)
         self.assertEqual(saved[-1]["space_observations"][0]["state"],"sampled")
 

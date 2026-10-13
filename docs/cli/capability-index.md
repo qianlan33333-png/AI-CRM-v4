@@ -35,6 +35,7 @@
 | admin.listOneIDMergeCandidates | aicrm-cli identity one-idmerge-candidates list | human | identity | source_contract_only |
 | admin.listOneIDSourceConflicts | aicrm-cli identity one-idsource-conflicts list | human | identity | source_contract_only |
 | admin.resolveOneID | aicrm-cli identity one-id resolve | human | identity | source_contract_only |
+| admin.revealCustomerContact | aicrm-cli customers reveal-customer-contact invoke | human | customer | source_contract_only |
 | admin.revealCustomerPhone | aicrm-cli customers reveal-customer-phone invoke | human | customer | source_contract_only |
 | admin.reverseOneIDMerge | aicrm-cli identity reverse-one-idmerge invoke | human | identity | source_contract_only |
 | customer.activities.list | aicrm-cli customers customer-activities list | machine | customers | source_contract_only |
@@ -406,9 +407,11 @@
 | admin.deleteLocalWechatPayProduct | aicrm-cli products local-wechat-pay-product delete | human | product | source_contract_only |
 | admin.disableLocalWechatPayProduct | aicrm-cli products local-wechat-pay-product disable | human | product | source_contract_only |
 | admin.enableLocalWechatPayProduct | aicrm-cli products local-wechat-pay-product enable | human | product | source_contract_only |
+| admin.getWeChatShopProductRefreshStatus | aicrm-cli products we-chat-shop-product-refresh-status get | human | product | source_contract_only |
 | admin.getWechatPayProductExternalPush | aicrm-cli products wechat-pay-product-external-push get | human | product | source_contract_only |
 | admin.previewWechatPayProductExternalPush | aicrm-cli products wechat-pay-product-external-push preview | human | product | source_contract_only |
 | admin.queueWechatPayProductExternalPushTest | aicrm-cli products queue-wechat-pay-product-external-push-test invoke | human | product | source_contract_only |
+| admin.refreshWeChatShopProducts | aicrm-cli products we-chat-shop-products refresh | human | product | source_contract_only |
 | admin.saveWechatPayProductExternalPush | aicrm-cli products wechat-pay-product-external-push save | human | product | source_contract_only |
 | admin.shareLocalWechatPayProduct | aicrm-cli products share-local-wechat-pay-product invoke | human | product | source_contract_only |
 
@@ -516,6 +519,7 @@
 | admin.createSurveySubmissionExternalPush | aicrm-cli questionnaires survey-submission-external-push create | human | survey | source_contract_only |
 | admin.disablePublicSurveyDefinition | aicrm-cli questionnaires public-survey-definition disable | human | survey | source_contract_only |
 | admin.disableSurveyQuestionnaire | aicrm-cli questionnaires survey-questionnaire disable | human | survey | source_contract_only |
+| admin.downloadSurveyRedemptionTemplate | aicrm-cli questionnaires survey-redemption-template download | human | survey | source_contract_only |
 | admin.duplicateSurveyQuestionnaire | aicrm-cli questionnaires duplicate-survey-questionnaire invoke | human | survey | source_contract_only |
 | admin.enableSurveyQuestionnaire | aicrm-cli questionnaires survey-questionnaire enable | human | survey | source_contract_only |
 | admin.exportSurveySubmissions | aicrm-cli questionnaires survey-submissions export | human | survey | source_contract_only |
@@ -528,12 +532,15 @@
 | admin.getSurveySubmission | aicrm-cli questionnaires survey-submission get | human | survey | source_contract_only |
 | admin.getSurveySubmissionExternalPush | aicrm-cli questionnaires survey-submission-external-push get | human | survey | source_contract_only |
 | admin.getSurveyUnresolvedHistory | aicrm-cli questionnaires survey-unresolved-history get | human | survey | source_contract_only |
+| admin.importSurveyRedemptionCodes | aicrm-cli questionnaires survey-redemption-codes import | human | survey | source_contract_only |
 | admin.listSurveyQuestionnaires | aicrm-cli questionnaires survey-questionnaires list | human | survey | source_contract_only |
+| admin.listSurveyRedemptionCodes | aicrm-cli questionnaires survey-redemption-codes list | human | survey | source_contract_only |
 | admin.listSurveySubmissions | aicrm-cli questionnaires survey-submissions list | human | survey | source_contract_only |
 | admin.listSurveyUnresolvedAnswers | aicrm-cli questionnaires survey-unresolved-answers list | human | survey | source_contract_only |
 | admin.listSurveyUnresolvedHistory | aicrm-cli questionnaires survey-unresolved-history list | human | survey | source_contract_only |
 | admin.previewSurveyExport | aicrm-cli questionnaires survey-export preview | human | survey | source_contract_only |
 | admin.publishSurveyDefinition | aicrm-cli questionnaires survey-definition publish | human | survey | source_contract_only |
+| admin.readSurveyAnswerAttachment | aicrm-cli questionnaires read-survey-answer-attachment invoke | human | survey | source_contract_only |
 | admin.reconcileSurveySubmissionExternalPush | aicrm-cli questionnaires survey-submission-external-push reconcile | human | survey | source_contract_only |
 | admin.replaceSurveyQuestionnaire | aicrm-cli questionnaires replace-survey-questionnaire invoke | human | survey | source_contract_only |
 | admin.saveSurveyCompletionOperation | aicrm-cli questionnaires survey-completion-operation save | human | survey | source_contract_only |
@@ -675,6 +682,7 @@
 | admin.enableOpenPlatformClient | aicrm-cli access open-platform-client enable | human | access | source_contract_only |
 | admin.getConfigCategory | aicrm-cli config config-category get | human | config | source_contract_only |
 | admin.getConfiguredAIModel | aicrm-cli config configured-aimodel get | human | config | source_contract_only |
+| admin.getInvoiceCardConfiguration | aicrm-cli config invoice-card-configuration get | human | config | source_contract_only |
 | admin.getLegacyAppSettings | aicrm-cli config legacy-app-settings get | human | config | source_contract_only |
 | admin.getOpenPlatformClient | aicrm-cli access open-platform-client get | human | access | source_contract_only |
 | admin.getRuntimeConfigRelease | aicrm-cli config runtime-config-release get | human | config | source_contract_only |
@@ -695,6 +703,7 @@
 | admin.prepareLegacyRuntimeConfigRecovery | aicrm-cli config prepare-legacy-runtime-config-recovery invoke | human | config | source_contract_only |
 | admin.provisionAccessEnterpriseEmployee | aicrm-cli access access-enterprise-employee provision | human | access | source_contract_only |
 | admin.publishRuntimeConfigRelease | aicrm-cli config runtime-config-release publish | human | config | source_contract_only |
+| admin.refreshAccessStaffDirectory | aicrm-cli access access-staff-directory refresh | human | access | source_contract_only |
 | admin.refreshAccessStaffNames | aicrm-cli access access-staff-names refresh | human | access | source_contract_only |
 | admin.resetAccessUserPassword | aicrm-cli access access-user-password reset | human | access | source_contract_only |
 | admin.resetAccessUserPasswordCompatibility | aicrm-cli access access-user-password-compatibility reset | human | access | source_contract_only |
@@ -709,6 +718,8 @@
 | admin.setAccessUserRole | aicrm-cli access access-user-role set | human | access | source_contract_only |
 | admin.setAccessUserRoleCompatibility | aicrm-cli access access-user-role-compatibility set | human | access | source_contract_only |
 | admin.setConfigCategoryEnabled | aicrm-cli config config-category-enabled set | human | config | source_contract_only |
+| admin.stageInvoiceAPIv3Key | aicrm-cli config stage-invoice-apiv3-key invoke | human | config | source_contract_only |
+| admin.submitInvoiceCardConfiguration | aicrm-cli config submit-invoice-card-configuration invoke | human | config | source_contract_only |
 | admin.transferAccessSuperAdmin | aicrm-cli access transfer-access-super-admin invoke | human | access | source_contract_only |
 | admin.validateRuntimeConfigRelease | aicrm-cli config runtime-config-release validate | human | config | source_contract_only |
 

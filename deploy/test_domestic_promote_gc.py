@@ -32,7 +32,7 @@ class PackageGC(unittest.TestCase):
         self.root = self.fixture.root
         self.names = self.fixture.names
         self.current = self.names[-1]
-        cursor = {'installed_app_sha': self.current}
+        cursor = {'main_sha': 'f' * 40, 'installed_app_sha': self.current}
         schema_reader = SimpleNamespace(snapshot=lambda *args: json.loads(self.fixture.schema.read_text()),
                                         database_environment=lambda *args: {})
         for context in (
@@ -53,32 +53,33 @@ class PackageGC(unittest.TestCase):
         (releases / 'linked').symlink_to(self.root)
         result = m.reclaim_obsolete_releases()
         self.assertEqual(result['status'], 'completed')
-        self.assertEqual(result['rollback_releases'], [self.names[-2], self.names[-3]])
-        self.assertEqual(result['removed'], [self.names[0]])
-        for name in self.names[1:]:
+        self.assertEqual(result['rollback_releases'], [self.names[-2]])
+        self.assertEqual(result['removed'], self.names[:2])
+        for name in self.names[2:]:
             self.assertTrue((releases / name).is_dir())
         self.assertTrue(unknown.is_dir())
         self.assertTrue((releases / 'linked').is_symlink())
         self.assertTrue((self.root / 'release-cleanup-audit.jsonl').is_file())
 
-    def test_one_successful_rollback_never_deletes_any_package(self):
+    def test_one_successful_rollback_still_allows_other_verified_deletions(self):
         for name in self.names[:2]:
             (self.root / cleanup.SUCCESS_DIRECTORY / (name + '.json')).unlink()
         result = m.reclaim_obsolete_releases()
-        self.assertEqual(result['status'], 'maintenance-pending')
+        self.assertEqual(result['status'], 'completed')
         self.assertEqual(result['rollback_releases'], [self.names[-2]])
-        self.assertEqual(result['removed'], [])
-        self.assertTrue(all((self.root / 'releases' / n).is_dir() for n in self.names))
+        self.assertEqual(result['removed'], self.names[:2])
+        self.assertTrue((self.root / 'releases' / self.names[-2]).is_dir())
+        self.assertTrue((self.root / 'releases' / self.names[-1]).is_dir())
 
-    def test_changed_receipt_cannot_count_as_second_rollback(self):
+    def test_changed_receipt_cannot_count_as_rollback_and_other_package_is_deleted(self):
         (self.root / cleanup.SUCCESS_DIRECTORY / (self.names[0] + '.json')).unlink()
         receipt = self.root / cleanup.SUCCESS_DIRECTORY / (self.names[1] + '.json')
         value = json.loads(receipt.read_text()); value['binary_sha256'] = '0' * 64
         receipt.write_text(json.dumps(value))
         result = m.reclaim_obsolete_releases()
-        self.assertEqual(result['status'], 'maintenance-pending')
+        self.assertEqual(result['status'], 'completed')
         self.assertEqual(result['rollback_releases'], [self.names[-2]])
-        self.assertEqual(result['removed'], [])
+        self.assertEqual(result['removed'], self.names[:2])
 
     def test_successful_incompatible_schema_cannot_count_as_rollback(self):
         (self.root / cleanup.SUCCESS_DIRECTORY / (self.names[0] + '.json')).unlink()
@@ -90,15 +91,27 @@ class PackageGC(unittest.TestCase):
         manifest.write_text(manifest.read_text().replace(old, cleanup.digest_file(migration)))
         self.fixture.receipt(self.names[1], 2)
         result = m.reclaim_obsolete_releases()
-        self.assertEqual(result['status'], 'maintenance-pending')
+        self.assertEqual(result['status'], 'completed')
         self.assertEqual(result['rollback_releases'], [self.names[-2]])
-        self.assertEqual(result['removed'], [])
+        self.assertEqual(result['removed'], self.names[:2])
+
+    def test_latest_complete_incompatible_package_is_protected_without_blocking_gc(self):
+        for name in self.names[:2]:
+            (self.root / cleanup.SUCCESS_DIRECTORY / (name + '.json')).unlink()
+        self.fixture.make_incompatible_success(self.names[2], 10)
+        result = m.reclaim_obsolete_releases()
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(result['rollback_releases'], [])
+        self.assertEqual(result['latest_complete_previous_release'], self.names[2])
+        self.assertEqual(result['removed'], self.names[:2])
+        self.assertIn(self.names[2], result['protected'])
+        self.assertTrue((self.root / 'releases' / self.names[2]).is_dir())
 
     def test_live_reference_is_protected_beyond_two_rollbacks(self):
         with patch.object(cleanup, 'live_references', return_value={self.names[0]}):
             result = m.reclaim_obsolete_releases()
         self.assertEqual(result['status'], 'completed')
-        self.assertEqual(result['removed'], [])
+        self.assertEqual(result['removed'], [self.names[1]])
         self.assertIn(self.names[0], result['protected'])
         self.assertTrue((self.root / 'releases' / self.names[0]).is_dir())
 
@@ -128,6 +141,12 @@ class PackageGC(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'differs'):
                 m.reclaim_obsolete_releases()
             helpers.assert_not_called()
+
+    def test_source_main_sha_can_differ_from_installed_application_sha(self):
+        self.assertNotEqual('f' * 40, self.current)
+        result = m.reclaim_obsolete_releases()
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual((self.root / 'current').resolve().name, self.current)
 
 
 if __name__ == '__main__':

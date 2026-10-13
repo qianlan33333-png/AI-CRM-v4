@@ -1,53 +1,50 @@
 {
   "schema": 1,
-  "baseline_sha": "2f3c1283f33de55ee601ed7ecb7a361a35795157",
+  "baseline_sha": "e81257ad14bf5e00f1477d776e9b94f4323c3350",
   "checks": [
     {
       "lane": "preflight",
-      "path": "scripts/test_release_optimization.py",
-      "reason": "衔接、增量、可信终态与摘要边界"
+      "path": "deploy/test_cleanup_releases.py",
+      "reason": "完整前驱、活跃引用及硬链边界"
     },
     {
       "lane": "preflight",
-      "path": "scripts/test_development_prepare.py",
-      "reason": "源码索引准备、准确交接和干净来源"
+      "path": "deploy/test_domestic_promote_gc.py",
+      "reason": "固定安装器与包内清理消费者"
     },
     {
       "lane": "preflight",
-      "path": "scripts/test_domestic_release_extreme.py",
-      "reason": "原批次累计与一次构建合同"
+      "path": "deploy/test_host_maintenance.py",
+      "reason": "原锁内完成清理与明确 warning"
     },
     {
-      "lane": "preflight",
-      "path": "scripts/test_domestic_source_only_seal.py",
-      "reason": "旧收据和源码/应用分离"
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestRuntimeConfigCheckUsesStartupValidation",
+      "reason": "实际启动 Load 与无副作用校验同合同"
     },
     {
-      "lane": "preflight",
-      "path": "scripts/test_domestic_release_build.py",
-      "reason": "构件分类及安装配置能力声明"
+      "lane": "backend",
+      "package": "./cmd/generate-cli-catalog",
+      "reason": "机械目录生成的身份协议"
     },
     {
-      "lane": "preflight",
-      "path": "scripts/test_domestic_release_controller.py",
-      "reason": "原队列/锁、准入、审批和断线对账"
+      "lane": "backend",
+      "package": "./internal/crmcli",
+      "test": "TestCatalogRetainsV1AndCoversSidebarWithoutExecutableGaps",
+      "reason": "新增机械目录的直接 CLI 消费者"
     },
     {
-      "lane": "preflight",
-      "path": "deploy/test_domestic_promote_policy.py",
-      "reason": "安装前配置、迁移失败、旧元数据兼容"
-    },
-    {
-      "lane": "preflight",
-      "path": "scripts/ci/test_ai_check_plan.py",
-      "reason": "直接消费者选择与具名用例校验"
-    },
-    {
-      "lane": "frontend",
-      "path": "scripts/openapi-source-binding.test.mjs",
-      "reason": "当前 V4 OpenAPI 绑定与 fresh clone 漂移拒绝"
+      "lane": "backend",
+      "package": "./internal/crmcli",
+      "test": "TestCLIExecutionReceiptsReadJourney",
+      "reason": "目录与本批管理回执实际读取合同"
     }
   ],
-  "installed_checks": [],
-  "build_commands": []
+  "installed_checks": [
+    "release-runtime-config"
+  ],
+  "build_commands": [
+    "./cmd/aicrm-cli"
+  ]
 }
