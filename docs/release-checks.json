@@ -1,25 +1,29 @@
 {
   "schema": 1,
-  "baseline_sha": "43ffc30bebc78053c7cd5dda35e59f8fb5837843",
+  "baseline_sha": "e1341d2a4c950c8f316503df8014a5108176ea61",
   "checks": [
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLAdminOverviewCanonicalPayersScaleWithinSectionBudget",
-      "postgres": true
+      "test": "TestInstalledSurveyPackageProvenanceAllowsOnlyUnchangedHost",
+      "postgres": false
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLAdminOverviewCanonicalPayersFollowCurrentMerge",
-      "postgres": true
+      "test": "TestInstalledSurveyWebTreeVerifiesActualGitObjects",
+      "postgres": false
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLAdminOverviewCanonicalPayersKeepOneSnapshotAcrossConcurrentMerge",
-      "postgres": true
+      "package": "./internal/platform/config/tests",
+      "test": "TestInstalledProductLayerSelectionRequiresPackageOrExplicitRequest"
     }
   ],
-  "installed_checks": []
+  "installed_checks": [
+    "invoice-callback-bootstrap-installed",
+    "invoice-bill-entry-installed",
+    "invoice-review-installed",
+    "invoice-settings-installed"
+  ]
 }

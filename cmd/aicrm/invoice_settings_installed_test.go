@@ -36,6 +36,9 @@ import (
 // Fixture setup/readback is isolated PostgreSQL. All business/configuration HTTP
 // executes the supplied installed bytes, with no source Host or worker process.
 func TestInvoicePostgreSQLSettingsInstalled(t *testing.T) {
+	if !testconfig.InstalledProductContractsRequested() {
+		t.Skip("installed-only invoice contract: unverified in source/PG layer; require exact package inputs")
+	}
 	installed := testconfig.InstalledProduct()
 	if installed.Binary == "" || os.Getenv("AICRM_DATABASE_URL") == "" {
 		t.Fatal("installed settings contract requires exact package and isolated PostgreSQL")

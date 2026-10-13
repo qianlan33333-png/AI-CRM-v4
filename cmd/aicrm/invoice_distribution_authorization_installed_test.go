@@ -30,6 +30,9 @@ import (
 // installed binary. The API-only role starts no query/effects workers; all
 // remote traffic is blocked and the only accepted HTTP requests are loopback.
 func TestInvoiceDistributionInstalledAuthorizationBoundaries(t *testing.T) {
+	if !testconfig.InstalledProductContractsRequested() {
+		t.Skip("installed-only invoice contract: unverified in source/PG layer; require exact package inputs")
+	}
 	installed := testconfig.InstalledProduct()
 	if installed.Binary == "" || os.Getenv("AICRM_DATABASE_URL") == "" {
 		t.Fatal("installed authorization contract requires the exact package and an isolated PostgreSQL database")

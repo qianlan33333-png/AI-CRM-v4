@@ -152,3 +152,9 @@ invoice-recover 对选定 issuing 原单先检查私密 official_response 是否
 ### 全商品默认开票配置
 
 税务map中的 `*` 是财务明确设置的全商品默认，本次已获用户授权使用3040203000000000000、rate100（1%）、服务费。新商品缺少专属配置时自动继承，存在专属配置时以专属为准。保留原两项专属配置，不需要再补113322单独项；配置保存及运行时加载须独立读回。不为所有历史订单批量开票；仍须本人已确认微信付款、无退款、主体一致和单位抬头等原资格。
+
+## 测试层及准确构件输入
+
+普通 source/PG 检查不选择安装包合同，结果明确为未验证（SKIP），不能记 PASS。安装入口设置 `AICRM_REQUIRE_INSTALLED_PRODUCT_CONTRACTS=1`；缺输入、部分输入、错误摘要或失败必须停止该合同。四个安装用例分别是 CallbackBootstrapInstalled、BillEntryInstalled、DistributionInstalledAuthorizationBoundaries 和 SettingsInstalled。
+
+`run-installed-invoice-callback.sh` 可在原四对参数后传入 `--host-source-sha SHA --host-manifest-sha256 SHA256 --source-repository /absolute/current-v4-repository`。复用 Host 时必须提交这些准确来源；验收比较 App 与 Host 的实际 Git web tree 并校验安装资源字节。独立运行授权合同使用同样的 `AICRM_INSTALLED_PRODUCT_*` 输入。不得通过关闭摘要或资源验证来修复夹具。

@@ -42,6 +42,9 @@ func TestInvoicePostgreSQLCallbackBootstrapInstalled(t *testing.T) {
 }
 func TestInvoicePostgreSQLBillEntryInstalled(t *testing.T) { invoiceCallbackInstalled(t, true) }
 func invoiceCallbackInstalled(t *testing.T, bill bool) {
+	if !testconfig.InstalledProductContractsRequested() {
+		t.Skip("installed-only invoice contract: unverified in source/PG layer; require exact package inputs")
+	}
 	installed := testconfig.InstalledProduct()
 	if installed.Binary == "" || os.Getenv("AICRM_DATABASE_URL") == "" {
 		t.Fatal("installed callback contract requires exact package inputs and isolated PostgreSQL")

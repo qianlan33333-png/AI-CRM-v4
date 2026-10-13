@@ -342,6 +342,9 @@ func TestPostgreSQLOrdersH5OAuthStartAndCompleteRoundTrip(t *testing.T) {
 
 func validateOrdersOAuthInstalledProduct(t *testing.T, input testconfig.InstalledSurveyInputs) {
 	t.Helper()
+	if _, err := validateInstalledSurveyPackage(input, installedSurveyWebTree); err != nil {
+		t.Fatalf("installed Product provenance: %v", err)
+	}
 	if !filepath.IsAbs(input.Binary) || !filepath.IsAbs(input.Root) || !validDomesticReleaseSHA(input.SHA) || len(input.BinarySHA256) != 64 {
 		t.Fatal("invalid installed OAuth package inputs")
 	}
