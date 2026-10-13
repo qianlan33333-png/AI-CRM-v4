@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "4814bef4a1130e63e9f62b585abdeee7b998b450",
+  "baseline_sha": "06e8b838b659b82b3e11c2d586c127bcfaef5c85",
   "checks": [
     {
       "lane": "backend",
@@ -92,6 +92,18 @@
     {
       "lane": "frontend",
       "path": "scripts/check-openapi-route-parity.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/shared/ui/formLabels.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/productAdapter.field_mapping.test.mjs"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/productAdapter.save_recovery.test.mjs"
     },
     {
       "lane": "frontend",

@@ -43,6 +43,16 @@ for (const periodic of [false, true]) {
   const d = dom.window.document;
   await waitFor(() => d.querySelector('[data-product-purchase-action]') && d.querySelector('[data-product-parity-push]')).catch((error) => { console.log(JSON.stringify(calls), d.querySelector('#stage')?.textContent, d.querySelector('#stage')?.innerHTML?.slice(0, 1200)); throw error; });
   await waitFor(() => !d.getElementById(periodic ? 'spfStock' : 'pfStock'));
+  const prefix = periodic ? 'spf' : 'pf';
+  for (const suffix of ['Name', 'Price', 'BuyButtonText', 'Code', 'Currency', 'Description']) {
+    const input = d.getElementById(prefix + suffix);
+    if (!input) continue; // Periodic source contracts omit ordinary-only fields.
+    assert.equal(input.labels.length, 1, `${input.id} must retain its visible accessible label`);
+    let activations = 0;
+    input.addEventListener('click', () => { activations++; }, { once: true });
+    input.labels[0].click();
+    assert.equal(activations, 1, `${input.id} label does not activate its field`);
+  }
   assert.doesNotMatch(d.body.textContent, /库存/, 'the frozen stock form field is removed from the mounted Product editor');
   assert.equal(d.querySelector('[data-product-parity-push-save]').disabled, true, 'external-push controls remain locked until their read finishes');
   d.querySelector('[data-product-parity-push-save]').click();

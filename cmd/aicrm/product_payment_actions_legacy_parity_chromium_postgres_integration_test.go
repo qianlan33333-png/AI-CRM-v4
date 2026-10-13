@@ -9,8 +9,10 @@ import (
 	goruntime "runtime"
 	"strings"
 	"testing"
+	"time"
 
 	platformconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config"
+	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
 )
 
 // TestPostgreSQLProductPaymentActionsLegacyParityChromiumJourney drives the
@@ -28,7 +30,13 @@ func TestPostgreSQLProductPaymentActionsLegacyParityChromiumJourney(t *testing.T
 		t.Skip("set AICRM_REQUIRE_CHROMIUM_JOURNEY=1 to run the required Chromium journey")
 	}
 
-	fixture := newProductExternalPushChromiumFixture(t)
+	var fixture *productExternalPushChromiumFixture
+	if testconfig.InstalledProduct().Binary != "" {
+		fixture = newProductExternalPushChromiumFixtureWithOptions(t, 220*time.Second, productExternalPushChromiumFixtureOptions{enableAlipay: true, deferEffectsWorker: true})
+		useInstalledPeriodicContactFixtureWithEnvironment(t, fixture, []string{"AICRM_EFFECTS_PROVIDER_ENABLED=false", "AICRM_GROUP_OPS_PROVIDER_ENABLED=false"})
+	} else {
+		fixture = newProductExternalPushChromiumFixture(t)
+	}
 	screenshots, err := os.MkdirTemp("", "aicrm-payment-actions-legacy-parity-")
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +58,9 @@ func TestPostgreSQLProductPaymentActionsLegacyParityChromiumJourney(t *testing.T
 	}
 	if !strings.Contains(string(output), "product_payment_actions_legacy_parity: PASS") {
 		t.Fatalf("payment-action legacy parity Chromium journey did not report success: %q", output)
+	}
+	if !strings.Contains(string(output), "health_product_accessibility: PASS") {
+		t.Fatal("product label/navigation contract did not execute")
 	}
 	for _, name := range []string{
 		"ordinary-after-redirect-1440x1100.png",

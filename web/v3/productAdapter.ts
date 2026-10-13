@@ -22,6 +22,7 @@ import { renderMaterialThumbnail } from './shared/ui/materialThumbnailPresentati
 import { imageUploadSizeError, imageUploadSizeMessage } from './shared/ui/imageUploadPolicy';
 import { openChannelPicker, type ChannelPickerPage, type ChannelPickerRecord } from './shared/ui/channelPickerAdapter';
 import { installShopRefresh, presentShopEditor } from './wechatShopProducts';
+import { associateVisibleFieldLabels } from './shared/ui/formLabels';
 
 type RecordValue = Record<string, unknown>;
 type ProductProjection = Product & { resourceId: number };
@@ -1651,6 +1652,11 @@ function mountContactCollectionPanel(): void {
 
 const productStandardObserver = observeProductDocument(mountProductTagPicker);
 mountProductTagPicker();
+const mountProductFormLabels = (): void => {
+  if (productPrefix()) associateVisibleFieldLabels(document.getElementById('stage'));
+};
+const productFormLabelsObserver = observeProductDocument(mountProductFormLabels);
+mountProductFormLabels();
 const productStockRetirementObserver = observeProductDocument(retireProductStockControls);
 retireProductStockControls();
 const contactCollectionObserver = observeProductDocument(mountContactCollectionPanel);

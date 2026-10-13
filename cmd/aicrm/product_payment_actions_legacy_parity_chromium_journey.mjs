@@ -65,6 +65,28 @@ async function evaluate(cdp, expression) {
   return result.result?.value;
 }
 
+async function assertProductFormSemantics(cdp, prefix) {
+  await waitFor(cdp, `['Name','Price','Description'].every(suffix => document.getElementById(${JSON.stringify(prefix)} + suffix)?.labels?.length === 1)`, 'product fields have no visible accessible labels');
+  const fields = await evaluate(cdp, `(() => {
+    const prefix = ${JSON.stringify(prefix)};
+    const sale = document.querySelector(prefix === 'pf' ? 'a[href="#product-sale"]' : 'a[href="#sp-sale"]');
+    sale?.click();
+    return ['Name','Price','BuyButtonText','Code','Currency','Description'].filter(suffix => document.getElementById(prefix + suffix)).every(suffix => {
+      const input = document.getElementById(prefix + suffix);
+      if (input.labels.length !== 1 || !input.labels[0].textContent.trim()) return false;
+      input.labels[0].click(); return document.activeElement === input;
+    });
+  })()`);
+  if (!fields) throw new Error('product visible labels do not focus their exact fields');
+  const original = await evaluate(cdp, `(() => { const input = document.getElementById(${JSON.stringify(prefix + 'Name')}); input.labels[0].click(); input.select(); return input.value; })()`);
+  await cdp.call('Input.insertText', { text: '标签键盘验收' });
+  if (!await evaluate(cdp, `document.getElementById(${JSON.stringify(prefix + 'Name')}).value === '标签键盘验收'`)) throw new Error('label keyboard input failed');
+  await evaluate(cdp, `(() => { const input = document.getElementById(${JSON.stringify(prefix + 'Name')}); input.value=${JSON.stringify(original)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`);
+  await waitFor(cdp, "document.querySelectorAll('.admin-nav-icon').length === 24 && [...document.querySelectorAll('.admin-nav-icon')].every(image => image.complete && image.naturalWidth > 0)", 'installed menu contains unloaded icons');
+  const resources = await evaluate(cdp, "Promise.all([...document.querySelectorAll('.admin-nav-icon')].map(async image => { const response = await fetch(image.src,{credentials:'same-origin'}); return response.ok && response.headers.get('Content-Type')?.startsWith('image/svg+xml'); })).then(results => results.every(Boolean))");
+  if (!resources) throw new Error('installed navigation icon resource is not an SVG');
+}
+
 async function waitFor(cdp, expression, message) {
   for (let attempt = 0; attempt < 180; attempt += 1) {
     if (await evaluate(cdp, expression)) return;
@@ -181,6 +203,7 @@ try {
   await evaluate(cdp, `(() => { document.querySelector('input[name="username"]').value = ${JSON.stringify(username)}; document.querySelector('input[name="password"]').value = ${JSON.stringify(password)}; document.querySelector('form[action="/login"]').requestSubmit(); return true; })()`);
   await waitFor(cdp, "location.pathname === '/admin/wechat-pay/productForm.html'", 'login did not reach ordinary product page');
   await waitFor(cdp, actionReadyExpression(), 'ordinary legacy parity panels did not mount');
+  await assertProductFormSemantics(cdp, 'pf');
   await configureH5Action(cdp, ordinaryPath, `/api/v1/products/${productID}`);
   await configurePush(cdp, `/api/admin/wechat-pay/products/${productID}/external-push`, 'ordinary');
   await cdp.call('Page.navigate', { url: baseURL + ordinaryPath });
@@ -191,11 +214,13 @@ try {
   await cdp.call('Page.navigate', { url: baseURL + servicePath });
   await waitFor(cdp, "location.pathname === '/admin/wechat-pay/spProductForm.html'", 'navigation did not reach service-period product page');
   await waitFor(cdp, actionReadyExpression(), 'service-period legacy parity panels did not mount');
+  await assertProductFormSemantics(cdp, 'spf');
   await configureURLLinkAction(cdp, servicePath, `/api/admin/service-period-products/${serviceProductID}`);
   await configurePush(cdp, `/api/admin/service-period-products/${serviceProductID}/external-push`, 'service');
   await cdp.call('Page.navigate', { url: baseURL + servicePath });
   await waitFor(cdp, actionReadyExpression(), 'service-period push panel did not remount after reload');
   await assertPushReadback(cdp, 'service');
+  console.log('health_product_accessibility: PASS ordinary/service labels, native focus/keyboard and 24 installed navigation SVGs');
   console.log(`product_payment_actions_legacy_parity: PASS screenshots=${screenshotDirectory}`);
 } finally {
   if (cdp) cdp.close();

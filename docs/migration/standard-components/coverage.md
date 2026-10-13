@@ -1,4 +1,6 @@
 # V3 标准选择组件覆盖账本
+
+2026-10-13 体检修复补记：共享 `web/v3/shared/ui/formLabels.ts` 只关联已有可见标签及唯一原生字段，不改变布局、领域回调或权限。普通及周期商品通过现有 Product Host 挂载；隐藏字段、重复 ID、多字段歧义和既有标签关联不猜测、不覆盖。相关合同：`formLabels.test.mjs`、`productAdapter.field_mapping.test.mjs`、`productAdapter.save_recovery.test.mjs`；浏览器聚焦/键盘和安装后证据分别记入本批结果报告。
 当前 main：`09f6d7243228f6415cf550dc8711e28b4003889f`；本账本只记录共享组件和调用方边界，不把 main 合入、Mock、Node、截图或静态 donor 当作生产页面完成。
 
 分类结论：OneID 不参与选择控件；读取目录属于受权限约束的 Provider/本地目录读取。商品配置在商品 Owner 的单一事务保存；客户打标签仍经既有 Customer TagCommand/External Effects 边界，组件不新增 Provider 写入、身份匹配或队列。
