@@ -1036,10 +1036,13 @@ modules:
     owner: crm-platform
     source: internal/openplatform
     entrypoints:
+      - internal/openplatform/app/operation_status.go
       - internal/openplatform/http/handler.go
     dependencies:
       - access
+      - aiassistant
       - clicatalog
+      - customer
       - platform
     owned_tables:
       - openplatform_customer_window_items
@@ -1047,6 +1050,7 @@ modules:
     validation_contracts:
       - internal/openplatform/http/cli_test.go
       - internal/openplatform/http/core_supervision_test.go
+      - internal/openplatform/app/operation_status_test.go
     status: implemented
     kind: module
     data_registry: docs/governance/retention-registry.json#tables

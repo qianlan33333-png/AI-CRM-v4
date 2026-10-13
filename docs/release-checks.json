@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "8a5ce1036688a328dee156ab9dcca2f0865ca56f",
+  "baseline_sha": "7f04dfdafed54acb5717e77b7be3dde0becc218d",
   "checks": [
     {
       "lane": "backend",
@@ -131,11 +131,79 @@
       "test": "TestRenderProductsKeepsPR10AsTheOnlyAdminShell"
     },
     {
+      "lane": "backend",
+      "package": "./internal/openplatform/app"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/app",
+      "test": "TestStablePortCommandFailuresRetainExistingSentinelIdentity"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestV1AICreateAndStatusUseMachineActorAndAtomicAudit",
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestOpenPlatformOperationSnapshotPostgreSQLConcurrentCompletionAndScope",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestAdminShellRedirectsWithoutSessionAndServesWithSession",
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestApplicationRouterKeepsOwnershipAndProtectsAdminShell",
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/port",
+      "test": "TestMachineActorRequiresCanonicalAuthenticatedReference",
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/port",
+      "test": "TestMachineCreatePlanCommandRejectsUntrustedSubject",
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/store",
+      "test": "TestPostgreSQLMachinePlanActorScopesReceiptsFactsAndStatus",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/store",
+      "test": "TestPostgreSQLMachinePlanSameClientRaceReplaysOneReceipt",
+      "race": true,
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/store",
+      "test": "TestDimensionPostgreSQLMachineStatusCannotMixCompletionSnapshots",
+      "race": true,
+      "postgres": true
+    },
+    {
       "lane": "frontend",
       "path": "scripts/openapi-source-binding.test.mjs"
     }
   ],
   "installed_checks": [
-    "operation-status-snapshot"
+    "operation-status-snapshot",
+    "health-product-ui"
   ]
 }

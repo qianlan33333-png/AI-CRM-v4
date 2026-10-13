@@ -37,4 +37,6 @@ flowchart TD
 
 前端复用记录：当前 `/admin/productForm.html` → Product adapter → `webshell.RenderProducts` → `admin_base`/Product Host → 当前 V4 模板绑定。2026-10-13 Product Design audit 已运行保存上下文 preflight、检查实际只读回环页面并保存/重新打开修复前截图；DOM 复现六字段缺 labels 及三导航图标加载失败。沿用原页面版式，扩展共享 formLabels 并显式绑定既有导航资源。截图只证明界面与语义，不替代真实授权保存、Provider 或安装证据。
 
+R11 的闭合职责确定为开放平台操作状态读取：同一现有只读 UoW 内读取 AI snapshot、调用既有客户范围校验 Port 并生成安全 wire projection，移至 `internal/openplatform/app/operation_status.go`。装配层保留协议 JSON 解码及依赖连接；AI command 错误迁至稳定 Port，app 保留同一 sentinel 的别名，不改变现有调用者 errors.Is、错误码或文本。未移动 OneID 解析/建客、数据表 Owner、外部效果、队列或事务实现。验证非规范标识、错误机器、跨客户范围、部分结果丢弃、未知结果/accepted 与 delivered 区分、真实 PG 并发快照；更广泛的装配和 Host 整理仍按具体职责另行治理。
+
 每项缺陷一个完整提交，相关测试同提交。更新准确 diff 的 release-checks 清单，执行具名相关检查和拒绝合同；skip、缺环境、无匹配不算通过。源代码/工具登记与应用安装分列。全部完成后交工作台统一预发布，本任务不自行安装共享环境。R12 目标机器容量、真实 Provider、真实支付和自然业务观察独立未验；本批不新增生产授权。

@@ -3,22 +3,21 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strconv"
 	"strings"
 	"time"
 
 	accessdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/access/domain"
-	aiassistantapp "github.com/qianlan33333-png/AI-CRM-v3/internal/aiassistant/app"
 	aiassistantport "github.com/qianlan33333-png/AI-CRM-v3/internal/aiassistant/port"
 	customerdomain "github.com/qianlan33333-png/AI-CRM-v3/internal/customer/domain"
 	effectport "github.com/qianlan33333-png/AI-CRM-v3/internal/externaleffects/port"
 	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
+	openplatformapp "github.com/qianlan33333-png/AI-CRM-v3/internal/openplatform/app"
 	openplatformport "github.com/qianlan33333-png/AI-CRM-v3/internal/openplatform/port"
 )
 
-const v1AIReviewPlanOperationPrefix = "ai_review_plan:"
+const v1AIReviewPlanOperationPrefix = openplatformport.AIReviewPlanOperationPrefix
 
 type v1AIReviewPlanInput struct {
 	Name         string                                  `json:"name"`
@@ -254,75 +253,17 @@ func (executor *openPlatformExecutor) v1OperationStatus(ctx context.Context, pri
 	if err := decodeV1JSON(raw, &input); err != nil {
 		return openplatformport.Result{}, openplatformport.NewError(openplatformport.ErrorValidation, "invalid operation identifier")
 	}
-	id, err := parseV1AIReviewPlanOperationID(input.OperationID)
-	if err != nil {
-		return openplatformport.Result{}, openplatformport.NewError(openplatformport.ErrorNotFound, "operation was not found")
-	}
-	actor, err := aiassistantport.MachineActorFromClientID(principal.ClientID)
-	if err != nil {
-		return openplatformport.Result{}, openplatformport.NewError(openplatformport.ErrorAuthentication, "machine subject is invalid")
-	}
-	var status aiassistantport.MachineOperationStatus
-	results := make([]map[string]any, 0)
-	err = executor.aiReadUOW.Within(ctx, func(tx context.Context) error {
-		aggregate, readErr := executor.aiMachineReader.GetMachineOperationWithin(tx, actor, id)
-		if readErr != nil {
-			return v1AIError(readErr)
-		}
-		status = aggregate.Status
-		items := aggregate.Recipients
-		for _, item := range items {
-			if scopeErr := executor.ensureCustomerScope(tx, principal, customerdomain.CustomerID(item.CustomerID), nil); scopeErr != nil {
-				return openplatformport.NewError(openplatformport.ErrorPermission, "operation owner scope changed")
-			}
-			results = append(results, map[string]any{"recipient_id": item.RecipientID, "safe_user_ref": customerdomain.CanonicalOneIDLabel(customerdomain.CustomerID(item.CustomerID)), "review_state": item.ReviewState, "execution_state": item.ExecutionState, "provider_accepted": item.ProviderAccepted, "delivery_proven": item.DeliveryProven, "effect_id": item.EffectID, "updated_at": item.UpdatedAt.UTC()})
-		}
-		return nil
-	})
+	service, err := openplatformapp.NewOperationStatus(executor.aiMachineReader, executor.aiReadUOW, operationCustomerScopeAdapter{executor})
 	if err != nil {
 		return openplatformport.Result{}, err
 	}
-	return openplatformport.Result{Data: map[string]any{
-		"operation_id":          input.OperationID,
-		"review_state":          status.ReviewState,
-		"operation_state":       status.OperationState,
-		"outcome_unknown_count": status.OutcomeUnknownCount,
-		"created_at":            status.CreatedAt.UTC(),
-		"updated_at":            status.UpdatedAt.UTC(),
-		"recipients":            results,
-	}}, nil
+	return service.Read(ctx, principal, input.OperationID)
 }
 
-func parseV1AIReviewPlanOperationID(value string) (aiassistantport.PlanID, error) {
-	if !strings.HasPrefix(value, v1AIReviewPlanOperationPrefix) {
-		return 0, errors.New("operation kind is invalid")
-	}
-	id, err := strconv.ParseInt(strings.TrimPrefix(value, v1AIReviewPlanOperationPrefix), 10, 64)
-	if err != nil || id < 1 || strconv.FormatInt(id, 10) != strings.TrimPrefix(value, v1AIReviewPlanOperationPrefix) {
-		return 0, errors.New("operation id is invalid")
-	}
-	return aiassistantport.PlanID(id), nil
+type operationCustomerScopeAdapter struct{ executor *openPlatformExecutor }
+
+func (adapter operationCustomerScopeAdapter) AuthorizeOperationCustomer(ctx context.Context, principal accessdomain.MachinePrincipal, id customerdomain.CustomerID) error {
+	return adapter.executor.ensureCustomerScope(ctx, principal, id, nil)
 }
 
-func v1AIError(err error) error {
-	var operationError *openplatformport.OperationError
-	if errors.As(err, &operationError) {
-		return err
-	}
-	// AI's stable Port intentionally exposes only errors, not its app package.
-	// Invalid or conflicting machine commands are never treated as an accepted
-	// operation; unavailable ownership/read failures remain retryable at the
-	// protocol level without disclosing plan details.
-	switch {
-	case errors.Is(err, aiassistantport.ErrInvalidMachineActor):
-		return openplatformport.NewError(openplatformport.ErrorAuthentication, "machine subject is invalid")
-	case errors.Is(err, aiassistantapp.ErrInvalid):
-		return openplatformport.NewError(openplatformport.ErrorValidation, "AI review plan input is invalid")
-	case errors.Is(err, aiassistantapp.ErrConflict), errors.Is(err, aiassistantapp.ErrIdempotencyConflict):
-		return openplatformport.NewError(openplatformport.ErrorConflict, "AI review plan conflicts with the idempotency receipt")
-	case errors.Is(err, aiassistantapp.ErrNotFound):
-		return openplatformport.NewError(openplatformport.ErrorNotFound, "operation was not found")
-	default:
-		return openplatformport.NewError(openplatformport.ErrorDependencyUnavailable, "AI review plan is unavailable")
-	}
-}
+func v1AIError(err error) error { return openplatformapp.MachineAIError(err) }

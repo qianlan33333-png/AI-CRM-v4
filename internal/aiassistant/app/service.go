@@ -27,13 +27,13 @@ import (
 const MaximumPageSize = 50
 
 var (
-	ErrInvalid  = errors.New("invalid AI Assistant command")
-	ErrNotFound = errors.New("AI Assistant record not found")
-	ErrConflict = errors.New("AI Assistant command conflict")
+	ErrInvalid  = aiassistantport.ErrInvalid
+	ErrNotFound = aiassistantport.ErrNotFound
+	ErrConflict = aiassistantport.ErrConflict
 	// ErrIdempotencyConflict means a caller reused a key with a different
 	// business command. It remains distinct at the HTTP edge from a stale
 	// version or duplicate file.
-	ErrIdempotencyConflict = errors.New("AI Assistant idempotency key conflict")
+	ErrIdempotencyConflict = aiassistantport.ErrIdempotencyConflict
 	ErrUnavailable         = errors.New("AI Assistant dependency unavailable")
 	ErrNoRecipients        = errors.New("AI Assistant plan has no resolvable recipients")
 	ErrMaterialDrift       = errors.New("AI Assistant material changed or unavailable")
