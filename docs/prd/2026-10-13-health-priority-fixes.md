@@ -53,3 +53,7 @@ Persistence：R01/R02 为领域本地 PostgreSQL UoW；业务、原收据、审�
 工作台确认本批 backend_incremental 合法复用未变 Host，web tree 与 e94e983 完全相同（57c33483f0787140ef258220e9e64cf096849da6）。原夹具错误要求 Host manifest SHA 等于业务应用 SHA。追加仅测试输入/夹具修正：保留准确 binary SHA256，独立 Host SHA 与 manifest SHA256，实际读取两个准确 Git commit 的 web tree 并比较，逐条核验 release_files 的原字节大小/摘要，输出完整 Host asset 摘要。不改 manifest、不伪造来源、不 skip、不本机重建包。
 
 独立 Host 需要既有测试输入加 AICRM_INSTALLED_SURVEY_HOST_SOURCE_SHA、AICRM_INSTALLED_SURVEY_HOST_MANIFEST_SHA256、AICRM_INSTALLED_SURVEY_SOURCE_REPOSITORY（当前 V4 准确 Git checkout 或国内裸仓）。完整同 SHA 包保持原输入兼容。夹具新增两个具名对抗用例，包括实际 Git 对象、来源缺失、错误 binary/manifest、不同 web tree、资源漂移/缺失和目录逃逸；最终业务三项仍只在云端同一包执行。业务机制/页面/Provider 不变，生产授权仍为 false。
+
+## 同包发送人员夹具治理修正
+
+18a0e34 的实际安装包已通过 Host 来源与问卷收据断言；员工合成夹具直接 INSERT 未同时赋予唯一角色，触发现有 Access 延迟治理约束。仅测试修正为一个 UoW 插入员工及 viewer 唯一角色，login_enabled=false，保留原 super-admin 控制。新增真实 PG 用例证明治理约束不放宽、发送资格有效、原管理员不变。业务/迁移/页面/Provider 不变；使用准确修复测试源码验证已安装同一原包，记录 test source head/tree 与 app/manifest 各自来源，保留原失败日志及安装 attempt，不重建重装、不晋升生产。

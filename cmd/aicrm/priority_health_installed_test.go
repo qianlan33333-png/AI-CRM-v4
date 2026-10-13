@@ -133,10 +133,7 @@ func TestPriorityHealthInstalledContracts(t *testing.T) {
 	}
 	t.Log("survey-successful-key-recovery: PASS exact_receipt historical_owner_retained current_result_forbidden payload_drift_rejected")
 
-	var staffID int64
-	if err = f.native.QueryRow(f.ctx, `INSERT INTO admin_users(username,password_hash,display_name,wecom_userid,is_active,login_enabled) VALUES('installed-health-sender','$argon2id$test','Synthetic sender','synthetic-installed-health-sender',TRUE,FALSE) RETURNING id`).Scan(&staffID); err != nil {
-		t.Fatal(err)
-	}
+	staffID := newPriorityHealthSenderFixture(t, f.ctx, uow)
 	created := call(http.MethodPost, "/api/admin/ai-audience/packages", map[string]string{"name": "Installed sender replay", "template_key": "active_contacts"}, f.adminCookies, "installed-health-package-001", 201)
 	var pkg struct {
 		Package segmentdomain.Package `json:"package"`
@@ -188,4 +185,27 @@ func TestPriorityHealthInstalledContracts(t *testing.T) {
 		t.Fatal("read-only installed coverage checks changed questionnaire business facts")
 	}
 	t.Log("retention-business-protection: PASS 18_tables_and_private_material_protected arbitrary_policy_and_unauthenticated_denied")
+}
+
+// Employee and its sole governed role must commit together. The fixture
+// grants no login access, never modifies the existing super-administrator,
+// and preserves the production deferred Access governance constraints.
+func newPriorityHealthSenderFixture(t *testing.T, ctx context.Context, uow *platformpostgres.UnitOfWork) int64 {
+	t.Helper()
+	var id int64
+	err := uow.Within(ctx, func(tx context.Context) error {
+		db, e := platformpostgres.RequireTransaction(tx)
+		if e != nil {
+			return e
+		}
+		if e = db.QueryRow(tx, `INSERT INTO admin_users(username,password_hash,display_name,wecom_userid,is_active,login_enabled) VALUES('installed-health-sender','$argon2id$test','Synthetic sender','synthetic-installed-health-sender',TRUE,FALSE) RETURNING id`).Scan(&id); e != nil {
+			return e
+		}
+		_, e = db.Exec(tx, `INSERT INTO admin_user_roles(admin_user_id,role_code) VALUES($1,'viewer')`, id)
+		return e
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
