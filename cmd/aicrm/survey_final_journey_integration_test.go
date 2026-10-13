@@ -475,6 +475,20 @@ func TestSurveyOAuthSubmissionResultJourneyPostgreSQL(t *testing.T) {
 	if legacyStaffRejected.Code != http.StatusBadRequest || legacyStaffError.Code != "invalid_public_input" || submissionsAfterLegacyRequest != submissionsBeforeLegacyRequest {
 		t.Fatalf("legacy staff_id request status=%d code=%q submissions before=%d after=%d body=%s", legacyStaffRejected.Code, legacyStaffError.Code, submissionsBeforeLegacyRequest, submissionsAfterLegacyRequest, legacyStaffRejected.Body.String())
 	}
+	// The ordinary helper supplies JSON MIME. A missing MIME must remain a
+	// separate negative control, not masquerade as unknown-field rejection.
+	missingMIME := httptest.NewRequest(http.MethodPost, "/api/public/questionnaires/oauth-journey/submissions", bytes.NewReader(submitBody))
+	for _, cookie := range cookies {
+		missingMIME.AddCookie(cookie)
+	}
+	mimeRejected := httptest.NewRecorder()
+	handler.ServeHTTP(mimeRejected, missingMIME)
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM survey_submissions WHERE questionnaire_id=$1`, publishResult.Questionnaire.ID).Scan(&submissionsAfterLegacyRequest); err != nil {
+		t.Fatal(err)
+	}
+	if mimeRejected.Code != http.StatusBadRequest || submissionsAfterLegacyRequest != submissionsBeforeLegacyRequest {
+		t.Fatalf("missing MIME status=%d changed submissions=%d", mimeRejected.Code, submissionsAfterLegacyRequest)
+	}
 	concurrentSubmissions := surveyJourneyConcurrentSubmit(handler, "/api/public/questionnaires/oauth-journey/submissions", submitBody, cookies)
 	for _, submitted := range concurrentSubmissions {
 		if submitted.Code != http.StatusCreated {
@@ -593,7 +607,7 @@ func TestSurveyOAuthSubmissionResultJourneyPostgreSQL(t *testing.T) {
 		t.Fatalf("export status=%d content_type=%q body=%s", export.Code, export.Header().Get("Content-Type"), export.Body.String())
 	}
 	csvRows, err := csv.NewReader(bytes.NewReader(export.Body.Bytes())).ReadAll()
-	if err != nil || len(csvRows) != 2 || len(csvRows[1]) != 5 || csvRows[1][0] != fmt.Sprint(submissionResult.Receipt.SubmissionID) || csvRows[1][2] != "已关联客户" || csvRows[1][3] == "" || csvRows[1][4] != "0" {
+	if err != nil || len(csvRows) != 2 || len(csvRows[1]) != 6 || csvRows[1][0] != fmt.Sprint(submissionResult.Receipt.SubmissionID) || csvRows[1][2] != "已关联客户" || csvRows[1][3] == "" || csvRows[1][4] != "0" || csvRows[1][5] != "[]" || strings.Join(csvRows[0], ",") != "submission_id,submitted_at,identity_state,customer_id,total_score,attachments" {
 		t.Fatalf("export rows=%q err=%v", csvRows, err)
 	}
 
@@ -919,6 +933,9 @@ func surveyJourneyIdentityCookies(t *testing.T, response *httptest.ResponseRecor
 func surveyJourneyServe(t *testing.T, handler http.Handler, method, path string, body []byte, key string, cookies []*http.Cookie, userAgent string) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(method, path, bytes.NewReader(body))
+	if len(body) > 0 {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	if key != "" {
 		request.Header.Set("Idempotency-Key", key)
 	}
@@ -940,6 +957,7 @@ func surveyJourneyConcurrentSubmit(handler http.Handler, path string, body []byt
 		go func() {
 			<-start
 			request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
 			for _, cookie := range cookies {
 				request.AddCookie(cookie)
 			}

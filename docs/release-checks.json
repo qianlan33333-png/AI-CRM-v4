@@ -1,25 +1,30 @@
 {
   "schema": 1,
-  "baseline_sha": "606534e2a2698b139d115122556b881fd105c7c0",
+  "baseline_sha": "9b9d5ba2c5305a0da4301ace404bb10438091ce5",
   "checks": [
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestChannelWelcomeProviderRejectionCompletionRollsBackAtomically",
-      "postgres": false
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestChannelWelcomeProviderRejectionCodeConstraintPostgreSQL",
+      "test": "TestSurveyOAuthSubmissionResultJourneyPostgreSQL",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestChannelWelcomeProviderRejectionCompletionRollsBackAtomically",
-      "postgres": true,
-      "race": true
+      "test": "TestSurveyOAuthJourneyDefinitionFixtureIsAcceptedByApplication",
+      "postgres": false
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestSurveyOAuthRedirectConstraintReadinessPostgreSQL",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestSurveyAssessmentBusinessKeyConstraintReadinessPostgreSQL",
+      "postgres": true
     }
   ],
   "installed_checks": []
