@@ -2215,6 +2215,28 @@
       ],
       "reason": "Review the already-authorized sidebar AI public summary/manual generation routes against the current domestic V4 baseline; preserve frozen sources and all existing active API contracts. Exact contract binding only; no runtime, credential or production activation authorization.",
       "review_reference": "docs/prd/2026-10-09-sidebar-ai-operations.md; internal/sidebar/handler.go and ai_operations.go route/schema review; restored execution for original task 01a12136-1d2f-7186-9b90-62a976bc40bd; exact V4 API source commit 2aafe8ce328802ae7e2c040cafa5e44c8957b3f5"
+    },
+    {
+      "base_commit": "2fedbb425f7e679ee35e6c4abc1645e8eddd41a5",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "498315ffd606ad2c545afe0c7ba956a1baf2d9d5125c1525d0e6d1163eef8344",
+          "head_sha256": "a94804bd06f00eb08ae78bb6d4f71daf302a11d4719233b50c38f647199e3eea"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "e14fd205600c344d1d0fbaf81e9f96e2fe5e79561694af892c6c6233f1db55f6",
+          "head_sha256": "c85da5694d54f5f9c39ec926ab3a8fc3348d4daf3cbd5c3402b004d4a3b35ce2"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "716c3d6673893dffa8935000bc3f6d8867b527ea4a2d6b33d068efc87bc9f8d1",
+          "head_sha256": "20cc38d57880260f58a87595237c851ff9652377b272ac0191d6b3685dfeeb5b"
+        }
+      ],
+      "reason": "User-authorized managed AI plan execution receipt read and CLI entry; synchronize the same active V4 OpenAPI contract and generated embed binding only. Preserve all frozen sources and unique super-administrator; no deployment approval.",
+      "review_reference": "docs/prd/2026-10-13-aiassistant-execution-receipts.md; original task 01a135c5-384a-7b10-ae2e-3d31c1501bbe human choice to preserve Qianlan and add receipt reads for HuangYouCan; API/CLI contract, Access authorization and read-only fixture review; exact V4 API source commit 808ae957c7e20706b15a26645dabce63f1d200ea"
     }
   ]
 }
