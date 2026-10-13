@@ -18,6 +18,8 @@ type StaffEligibility struct {
 
 // AutomationOpsStaffReader resolves a submitted Provider member reference to
 // an internal Staff ID and exposes only the local eligibility projection.
+// ResolveAutomationSender participates in an existing caller UoW when present;
+// it must not perform Provider network I/O to recover or accept a command.
 type AutomationOpsStaffReader interface {
 	ResolveAutomationSender(context.Context, string) (StaffEligibility, bool, error)
 	AutomationSender(context.Context, StaffID) (StaffEligibility, bool, error)

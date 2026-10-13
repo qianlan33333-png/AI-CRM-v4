@@ -59,6 +59,9 @@ func (s executionStoreStub) SetCurrentSenderSet(_ context.Context, packageID, _s
 func (s executionStoreStub) Reserve(context.Context, segmentstore.Reservation) (segmentstore.Receipt, bool, error) {
 	return segmentstore.Receipt{ID: 1}, true, nil
 }
+func (s executionStoreStub) FindReceipt(context.Context, string, string, [32]byte) (segmentstore.Receipt, bool, error) {
+	return segmentstore.Receipt{}, false, nil
+}
 func (s executionStoreStub) Complete(_ context.Context, id int64, result json.RawMessage, now time.Time) (segmentstore.Receipt, error) {
 	return segmentstore.Receipt{ID: id, ResultSnapshot: result, CompletedAt: &now}, nil
 }
@@ -189,7 +192,7 @@ func TestSendersRejectDuplicateInternalStaffAndPrecheckReportsProviderDisabled(t
 	now := time.Now().UTC()
 	staff := staffReaderStub{accessport.StaffEligibility{StaffID: 9, Active: true, Eligible: true, EligibilityVersion: 2, RefreshedAt: now}}
 	agent := automationport.PublishedAgent{AgentID: 3, PublishedVersion: 2, AutomationType: automationport.AutomationTypeFixedScript, Status: automationport.AgentStatusActive}
-	store := executionStoreStub{pkg: segmentdomain.Package{ID: 1, Lifecycle: segmentdomain.Paused}, config: segmentdomain.ConfigurationVersion{ID: 2}, binding: segmentdomain.AutomationBinding{AgentID: 3, AutomationType: agent.AutomationType, AgentPublishedVersion: 2}, senders: segmentdomain.SenderSet{Version: 1, Members: []segmentdomain.Sender{{StaffID: 9, EligibilityVersion: 2, EligibilityRefreshedAt: now}}}, snapshot: segmentport.Snapshot{ID: 4}}
+	store := executionStoreStub{pkg: segmentdomain.Package{ID: 1, Version: 1, Lifecycle: segmentdomain.Paused}, config: segmentdomain.ConfigurationVersion{ID: 2}, binding: segmentdomain.AutomationBinding{AgentID: 3, AutomationType: agent.AutomationType, AgentPublishedVersion: 2}, senders: segmentdomain.SenderSet{Version: 1, Members: []segmentdomain.Sender{{StaffID: 9, EligibilityVersion: 2, EligibilityRefreshedAt: now}}}, snapshot: segmentport.Snapshot{ID: 4}}
 	service, _ := NewExecutionService(directUOW{}, store, publishedAgentStub{agent, true}, staff, false)
 	_, err := service.ReplaceSenders(context.Background(), SendersCommand{PackageID: 1, ExpectedPackageVersion: 1, ProviderMemberIDs: []string{"one", "two"}, Actor: 1, IdempotencyKey: "senders-command-01"})
 	if err != ErrConflict {

@@ -89,6 +89,16 @@ func (r *Repository) Reserve(ctx context.Context, in Reservation) (Receipt, bool
 	return receipt, false, nil
 }
 
+// FindReceipt reads an immutable, actor-scoped result in the caller's UoW.
+// It never creates a reservation or changes historical payloads.
+func (r *Repository) FindReceipt(ctx context.Context, operation, actorScope string, keyDigest [32]byte) (Receipt, bool, error) {
+	out, err := r.receipt(ctx, operation, actorScope, keyDigest)
+	if errors.Is(err, ErrNotFound) {
+		return Receipt{}, false, nil
+	}
+	return out, err == nil, err
+}
+
 func (r *Repository) receipt(ctx context.Context, operation, actorScope string, keyDigest [32]byte) (Receipt, error) {
 	t, err := tx(ctx)
 	if err != nil {

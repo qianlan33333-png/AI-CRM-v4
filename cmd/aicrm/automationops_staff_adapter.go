@@ -24,11 +24,19 @@ func (a automationOpsStaffAdapter) ResolveAutomationSender(ctx context.Context, 
 		return accessport.StaffEligibility{}, false, errors.New("staff projection unavailable")
 	}
 	var user accessdomain.User
-	err := a.uow.Within(ctx, func(tx context.Context) error {
+	read := func(tx context.Context) error {
 		var e error
 		user, e = a.users.UserByWeComUserID(tx, providerMember, false)
 		return e
-	})
+	}
+	var err error
+	// Segment freezes new sender eligibility in its own transaction. This is
+	// a local Access projection read, never a Provider request or nested UoW.
+	if _, txErr := platformpostgres.RequireTransaction(ctx); txErr == nil {
+		err = read(ctx)
+	} else {
+		err = a.uow.Within(ctx, read)
+	}
 	if errors.Is(err, accessdomain.ErrNotFound) {
 		return accessport.StaffEligibility{}, false, nil
 	}

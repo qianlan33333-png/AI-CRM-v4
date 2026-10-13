@@ -29,6 +29,7 @@ type ExecutionStore interface {
 	CreateSenderSet(context.Context, segmentdomain.SenderSet) (segmentdomain.SenderSet, error)
 	SetCurrentSenderSet(context.Context, int64, int64, int64, int64, time.Time) (segmentdomain.Package, error)
 	Reserve(context.Context, segmentstore.Reservation) (segmentstore.Receipt, bool, error)
+	FindReceipt(context.Context, string, string, [32]byte) (segmentstore.Receipt, bool, error)
 	Complete(context.Context, int64, json.RawMessage, time.Time) (segmentstore.Receipt, error)
 	AppendMutationFacts(context.Context, segmentstore.MutationFact) (int64, error)
 	PublishedSnapshot(context.Context, segmentport.PackageID) (segmentport.Snapshot, bool, error)
@@ -166,39 +167,46 @@ func (s *ExecutionService) ReplaceSenders(ctx context.Context, command SendersCo
 	if err != nil || !validExecutionMutation(command.PackageID, command.ExpectedPackageVersion, actor, command.IdempotencyKey) || len(command.ProviderMemberIDs) < 1 || len(command.ProviderMemberIDs) > 5 {
 		return segmentdomain.SenderSet{}, ErrInvalid
 	}
-	members := make([]segmentdomain.Sender, 0, len(command.ProviderMemberIDs))
-	seen := map[accessport.StaffID]struct{}{}
 	for _, providerID := range command.ProviderMemberIDs {
 		if providerID == "" || strings.TrimSpace(providerID) != providerID {
 			return segmentdomain.SenderSet{}, ErrInvalid
 		}
-		eligibility, found, resolveErr := s.staff.ResolveAutomationSender(ctx, providerID)
-		if resolveErr != nil {
-			return segmentdomain.SenderSet{}, ErrUnavailable
-		}
-		if !found || !eligibility.Active || !eligibility.Eligible || eligibility.EligibilityVersion < 1 || eligibility.RefreshedAt.IsZero() {
-			return segmentdomain.SenderSet{}, ErrNotReady
-		}
-		if _, exists := seen[eligibility.StaffID]; exists {
-			return segmentdomain.SenderSet{}, ErrConflict
-		}
-		seen[eligibility.StaffID] = struct{}{}
-		members = append(members, segmentdomain.Sender{StaffID: eligibility.StaffID, EligibilityVersion: eligibility.EligibilityVersion, EligibilityRefreshedAt: eligibility.RefreshedAt})
 	}
 	now := s.now().UTC()
 	payload := mutationCommandPayload(actor, struct {
-		PackageID int64
-		Expected  int64
-		StaffIDs  []segmentdomain.Sender
-	}{command.PackageID, command.ExpectedPackageVersion, members})
+		PackageID         int64
+		Expected          int64
+		ProviderMemberIDs []string
+	}{command.PackageID, command.ExpectedPackageVersion, command.ProviderMemberIDs})
+	payloadDigest := sha256.Sum256(payload)
+	keyDigest := sha256.Sum256([]byte(command.IdempotencyKey))
 	var output segmentdomain.SenderSet
 	err = s.uow.Within(ctx, func(tx context.Context) error {
-		receipt, owned, e := s.store.Reserve(tx, segmentstore.Reservation{Operation: "replace_senders", ActorScope: actorScope(actor), ActorKind: string(actor.Kind), ActorRef: actor.Reference, KeyDigest: sha256.Sum256([]byte(command.IdempotencyKey)), PayloadDigest: sha256.Sum256(payload), CreatedAt: now})
+		// Recover the accepted command before mutable directory eligibility or
+		// package CAS. HTTP still authorizes the current caller on every retry.
+		receipt, found, e := s.store.FindReceipt(tx, "replace_senders", actorScope(actor), keyDigest)
+		if e != nil {
+			return e
+		}
+		if found {
+			output, e = s.replaySenderReplacement(tx, command, actor, receipt, payloadDigest)
+			return e
+		}
+		receipt, owned, e := s.store.Reserve(tx, segmentstore.Reservation{Operation: "replace_senders", ActorScope: actorScope(actor), ActorKind: string(actor.Kind), ActorRef: actor.Reference, KeyDigest: keyDigest, PayloadDigest: payloadDigest, CreatedAt: now})
+		if errors.Is(e, segmentstore.ErrConflict) {
+			// A retained legacy command may commit between lookup and reserve.
+			// Use its original frozen snapshot instead of minting another key.
+			if retained, ok, lookupErr := s.store.FindReceipt(tx, "replace_senders", actorScope(actor), keyDigest); lookupErr == nil && ok {
+				output, e = s.replaySenderReplacement(tx, command, actor, retained, payloadDigest)
+			}
+			return e
+		}
 		if e != nil {
 			return e
 		}
 		if !owned {
-			return json.Unmarshal(receipt.ResultSnapshot, &output)
+			output, e = s.replaySenderReplacement(tx, command, actor, receipt, payloadDigest)
+			return e
 		}
 		pkg, e := s.store.LockPackage(tx, command.PackageID)
 		if e != nil {
@@ -206,6 +214,22 @@ func (s *ExecutionService) ReplaceSenders(ctx context.Context, command SendersCo
 		}
 		if pkg.Version != command.ExpectedPackageVersion || (pkg.Lifecycle != segmentdomain.Paused && pkg.Lifecycle != segmentdomain.Active) {
 			return ErrConflict
+		}
+		members := make([]segmentdomain.Sender, 0, len(command.ProviderMemberIDs))
+		seen := map[accessport.StaffID]struct{}{}
+		for _, providerID := range command.ProviderMemberIDs {
+			eligibility, found, resolveErr := s.staff.ResolveAutomationSender(tx, providerID)
+			if resolveErr != nil {
+				return ErrUnavailable
+			}
+			if !found || eligibility.StaffID < 1 || !eligibility.Active || !eligibility.Eligible || eligibility.EligibilityVersion < 1 || eligibility.RefreshedAt.IsZero() {
+				return ErrNotReady
+			}
+			if _, exists := seen[eligibility.StaffID]; exists {
+				return ErrConflict
+			}
+			seen[eligibility.StaffID] = struct{}{}
+			members = append(members, segmentdomain.Sender{StaffID: eligibility.StaffID, EligibilityVersion: eligibility.EligibilityVersion, EligibilityRefreshedAt: eligibility.RefreshedAt})
 		}
 		output, e = s.store.CreateSenderSet(tx, segmentdomain.SenderSet{PackageID: command.PackageID, Members: members, CreatedBy: actor.StaffID, CreatedActorKind: string(actor.Kind), CreatedActorRef: actor.Reference, CreatedAt: now})
 		if e != nil {
@@ -222,6 +246,46 @@ func (s *ExecutionService) ReplaceSenders(ctx context.Context, command SendersCo
 		return e
 	})
 	return output, classify(err)
+}
+
+func (s *ExecutionService) replaySenderReplacement(ctx context.Context, command SendersCommand, actor segmentport.MutationActor, receipt segmentstore.Receipt, payloadDigest [32]byte) (segmentdomain.SenderSet, error) {
+	var output segmentdomain.SenderSet
+	if receipt.State != "completed" || json.Unmarshal(receipt.ResultSnapshot, &output) != nil || output.ID < 1 || output.PackageID != command.PackageID || output.Version < 1 || len(output.Members) != len(command.ProviderMemberIDs) {
+		return segmentdomain.SenderSet{}, ErrConflict
+	}
+	createdActor, err := storedMutationActor(output.CreatedBy, output.CreatedActorKind, output.CreatedActorRef)
+	if err != nil || createdActor != actor {
+		return segmentdomain.SenderSet{}, ErrConflict
+	}
+	if receipt.PayloadDigest == payloadDigest {
+		return output, nil
+	}
+	// Older receipts hashed eligibility snapshots. Reconstruct only that exact
+	// historical serialization, then verify submitted references still resolve
+	// to the same internal employees, regardless of their current eligibility.
+	// An absent/reassigned reference fails closed; no receipt is rewritten.
+	members := append([]segmentdomain.Sender(nil), output.Members...)
+	for i := range members {
+		members[i].SortOrder = 0
+	}
+	legacyPayload := mutationCommandPayload(actor, struct {
+		PackageID int64
+		Expected  int64
+		StaffIDs  []segmentdomain.Sender
+	}{command.PackageID, command.ExpectedPackageVersion, members})
+	if receipt.PayloadDigest != sha256.Sum256(legacyPayload) {
+		return segmentdomain.SenderSet{}, ErrConflict
+	}
+	for i, providerID := range command.ProviderMemberIDs {
+		staff, found, resolveErr := s.staff.ResolveAutomationSender(ctx, providerID)
+		if resolveErr != nil {
+			return segmentdomain.SenderSet{}, ErrUnavailable
+		}
+		if !found || staff.StaffID < 1 || staff.StaffID != members[i].StaffID {
+			return segmentdomain.SenderSet{}, ErrConflict
+		}
+	}
+	return output, nil
 }
 func (s *ExecutionService) CurrentSenderSet(ctx context.Context, packageID int64) (segmentdomain.SenderSet, error) {
 	var out segmentdomain.SenderSet
