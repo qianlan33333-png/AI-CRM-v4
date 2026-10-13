@@ -47,3 +47,9 @@ Persistence：R01/R02 为领域本地 PostgreSQL UoW；业务、原收据、审�
 - 云端 Linux/安装包合成旅程和真实用户/Provider 观察分列。实际扫码、真实外部送达及生产业务验收不在本批完成范围。
 
 安装包最终验收使用 `TestPriorityHealthInstalledContracts`，继承现有 installed Survey 夹具的二进制/Host 摘要验证、隔离 PostgreSQL、真实认证和受控只读 Provider 边界。其三项具名收据为 survey-successful-key-recovery、sender-idempotency-replay、retention-business-protection。问卷合并/撤销及员工目录变化为合成数据准备，业务 HTTP 操作全部访问最终安装二进制。
+
+## 同批安装夹具来源修正
+
+工作台确认本批 backend_incremental 合法复用未变 Host，web tree 与 e94e983 完全相同（57c33483f0787140ef258220e9e64cf096849da6）。原夹具错误要求 Host manifest SHA 等于业务应用 SHA。追加仅测试输入/夹具修正：保留准确 binary SHA256，独立 Host SHA 与 manifest SHA256，实际读取两个准确 Git commit 的 web tree 并比较，逐条核验 release_files 的原字节大小/摘要，输出完整 Host asset 摘要。不改 manifest、不伪造来源、不 skip、不本机重建包。
+
+独立 Host 需要既有测试输入加 AICRM_INSTALLED_SURVEY_HOST_SOURCE_SHA、AICRM_INSTALLED_SURVEY_HOST_MANIFEST_SHA256、AICRM_INSTALLED_SURVEY_SOURCE_REPOSITORY（当前 V4 准确 Git checkout 或国内裸仓）。完整同 SHA 包保持原输入兼容。夹具新增两个具名对抗用例，包括实际 Git 对象、来源缺失、错误 binary/manifest、不同 web tree、资源漂移/缺失和目录逃逸；最终业务三项仍只在云端同一包执行。业务机制/页面/Provider 不变，生产授权仍为 false。

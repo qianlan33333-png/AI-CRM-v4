@@ -5,12 +5,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -47,21 +45,11 @@ func useInstalledPublicSurveyFixture(t *testing.T, fixture *publicSurveyPresenta
 	if !filepath.IsAbs(binary) || !filepath.IsAbs(root) || !validDomesticReleaseSHA(head) || len(digest) != 64 {
 		t.Fatal("invalid installed Survey inputs")
 	}
-	content, err := os.ReadFile(binary)
+	provenance, err := validateInstalledSurveyPackage(inputs, installedSurveyWebTree)
 	if err != nil {
-		t.Fatal("read installed Survey binary")
+		t.Fatal(err)
 	}
-	actual := sha256.Sum256(content)
-	if hex.EncodeToString(actual[:]) != digest {
-		t.Fatal("installed Survey binary digest mismatch")
-	}
-	manifestBytes, err := os.ReadFile(filepath.Join(root, "web", "dist", "asset-manifest.json"))
-	var manifest struct {
-		SourceSHA string `json:"source_sha"`
-	}
-	if err != nil || json.Unmarshal(manifestBytes, &manifest) != nil || manifest.SourceSHA != head {
-		t.Fatal("installed Host does not belong to the candidate")
-	}
+	t.Logf("installed_survey_provenance app_sha=%s binary_sha256=%s host_sha=%s host_manifest_sha256=%s host_asset_sha256=%s app_web_tree=%s host_web_tree=%s", head, digest, provenance.HostSHA, provenance.ManifestSHA256, provenance.AssetSHA256, provenance.AppWebTree, provenance.HostWebTree)
 	db, err := url.Parse(databaseURL)
 	if err != nil || db.Hostname() != "localhost" && db.Hostname() != "127.0.0.1" && db.Hostname() != "::1" {
 		t.Fatal("installed Survey requires isolated loopback PostgreSQL")

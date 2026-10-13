@@ -1,80 +1,17 @@
 {
   "schema": 1,
-  "baseline_sha": "1635e12052442392fe550b41f7bae69e50122c89",
+  "baseline_sha": "bc793877984f99555f83ccadf7e042fdfb651e05",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestPostgreSQLRetentionCountsOnlyChangedPayloadBytes",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestPostgreSQLRetentionSkipsConcurrentRunRefresh",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestPostgreSQLRetentionPartialReleaseEvidenceSurvivesReadAPI",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestRetentionPersistedJobHonorsDisabledExecutionGate"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestRetentionResourceCatalogBindsCanonicalRegistry"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestRetentionNewBusinessObjectsStayProtectedWithoutExecutablePolicies"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestRetentionCoveragePreservesGapsAndExactPolicyBindings"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestRetentionResourcesHTTPIsBoundedReadOnlyAndSuperAdmin"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestPostgreSQLRetentionAllowlistHealthNeverErasesCoverageGaps",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestPostgreSQLRetentionBoundaryAndDurableReportEvidence",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/adminops",
-      "test": "TestPostgreSQLRetentionRejectsWrongPolicyAndReportsStoppedCleaner",
-      "postgres": true
+      "package": "./cmd/aicrm",
+      "test": "TestInstalledSurveyPackageProvenanceAllowsOnlyUnchangedHost"
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLRetentionPreservesInvoiceReceiptsAndPrivateKey",
-      "postgres": true
-    },
-    {
-      "lane": "preflight",
-      "path": "scripts/test_retention_registry.py"
+      "test": "TestInstalledSurveyWebTreeVerifiesActualGitObjects"
     }
   ],
-  "installed_checks": [
-    "retention-business-protection"
-  ]
+  "installed_checks": []
 }
