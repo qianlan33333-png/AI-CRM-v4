@@ -1,13 +1,91 @@
 {
   "schema": 1,
-  "baseline_sha": "184140faed7a52645b99b9cbaf6c2e2bbdabf197",
+  "baseline_sha": "37330df426e4c5eec23c0c4e45de175002dd2af7",
   "checks": [
     {
+      "lane": "backend",
+      "path": "internal/payment/provider/wechatshop_buyer_test.go",
+      "test": "TestWeChatShopBuyerMetadataContract"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/provider/wechatshop_orders_test.go",
+      "test": "TestWeChatShopOrderContractUpdateWindowAndRefund"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/provider/wechatshop_orders_test.go",
+      "test": "TestWeChatShopPaidCallbackSignatureScopeAndExactID"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/payment/provider/wechatshop_orders_test.go",
+      "test": "TestWeChatShopDeferredOrNonPaymentNeverActivates"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/http/wechat_shop_buyer_test.go",
+      "test": "TestShopBuyerDisplayBeforeAndAfterCustomerLink"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/http/handler_test.go",
+      "test": "TestListUsesCanonicalCustomerDisplayName"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/order/app/service_test.go",
+      "test": "TestGetByReferenceForCustomerUsesCustomerBoundStoreQuery"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/identity/app/oauth_test.go",
+      "test": "TestOAuthSubjectPreservesRootsAndRejectsCrossRoot"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/identity/app/oneid_test.go",
+      "test": "TestResolveDoesNotProvisionCustomer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/identity/app/oneid_test.go",
+      "test": "TestProvisionRequiresOpaqueVerifiedFact"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/identity/app/oneid_test.go",
+      "test": "TestProvisionObservesOnlyNewCanonicalCustomer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/identity/app/oneid_test.go",
+      "test": "TestProvisionFailsWhenMinimumCustomerProjectionFails"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/wechat_shop_buyer_integration_test.go",
+      "test": "TestPostgreSQLShopBuyerOneIDOrdersAndLateContact",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/wechat_shop_orders_integration_test.go",
+      "test": "TestPostgreSQLShopOrdersReplayRefundMissingContactAndRecovery",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/wechat_shop_adversarial_postgres_test.go",
+      "test": "TestPostgreSQLShopStateMoneyIdentityAndImmutableSnapshot",
+      "postgres": true
+    },
+    {
       "lane": "frontend",
-      "path": "web/v3/productAdapter.field_mapping.test.mjs"
+      "path": "web/v3/orderAdapter.test.mjs"
     }
   ],
   "installed_checks": [
-    "health-product-ui"
+    "wechat-shop"
   ]
 }

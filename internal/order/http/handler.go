@@ -42,6 +42,15 @@ type Handler struct {
 	customerFilters orderport.CustomerFilterResolver
 	distribution    distributionport.OrderDistributionReader
 	contactReader   checkoutContactReader
+	shopBuyers      orderport.ShopBuyerDisplayReader
+}
+
+func (h *Handler) SetShopBuyerDisplayReader(reader orderport.ShopBuyerDisplayReader) error {
+	if h == nil || reader == nil {
+		return errors.New("shop buyer display reader is required")
+	}
+	h.shopBuyers = reader
+	return nil
 }
 
 type checkoutContactReader interface {
@@ -143,8 +152,14 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request, path string) {
 	items := make([]orderResponse, 0, len(page.Items))
 	names := h.payerDisplays(r.Context(), page.Items)
 	distribution, distributionState := h.distributionFor(r.Context(), page.Items)
+	shopBuyers, err := h.shopBuyerDisplays(r.Context(), page.Items)
+	if err != nil {
+		resultError(w, err)
+		return
+	}
 	for _, item := range page.Items {
 		response := responseFrom(item, names)
+		populateShopBuyer(shopBuyers[item.ID], &response)
 		response.DistributionReadState = distributionState
 		response.Distribution = orderDistributionJSON(distribution[item.ID])
 		items = append(items, response)
@@ -239,6 +254,12 @@ func (h *Handler) orderTail(w http.ResponseWriter, r *http.Request, tail string)
 			writeError(w, http.StatusServiceUnavailable, "order_detail_unavailable")
 			return
 		}
+		shopBuyers, err := h.shopBuyerDisplays(r.Context(), []domain.Snapshot{order})
+		if err != nil {
+			resultError(w, err)
+			return
+		}
+		populateShopBuyer(shopBuyers[order.ID], &response)
 		distribution, state := h.distributionFor(r.Context(), []domain.Snapshot{order})
 		response.DistributionReadState = state
 		response.Distribution = orderDistributionJSON(distribution[order.ID])

@@ -30,9 +30,10 @@ var ErrInvalidShopResponse = errors.New("invalid wechat shop response")
 var ErrShopRequestFailed = errors.New("wechat shop request failed")
 
 type ShopConfig struct {
-	Enabled          bool
-	AppID, AppSecret string
-	APIBaseURL       string
+	Enabled               bool
+	AppID, AppSecret      string
+	UnionIDOpenPlatformID string
+	APIBaseURL            string
 }
 
 func (ShopConfig) String() string   { return "WeChatShopConfig{credentials:[REDACTED]}" }

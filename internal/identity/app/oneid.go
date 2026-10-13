@@ -245,6 +245,14 @@ func (service OneIDService) AttachDeclaredIdentity(ctx context.Context, command 
 type OneIDService struct {
 	Store               Store
 	ProvisionedCustomer identityport.ProvisionedCustomerObserver
+	VerifiedIdentity    identityport.VerifiedIdentityObserver
+}
+
+func (service OneIDService) observeVerifiedIdentity(ctx context.Context, customer customerdomain.CustomerID, fact identitydomain.VerifiedFact) error {
+	if service.VerifiedIdentity == nil {
+		return nil
+	}
+	return service.VerifiedIdentity.ObserveVerifiedIdentityWithin(ctx, customer, fact)
 }
 
 func (service OneIDService) observeProvisionedCustomer(ctx context.Context, provisioned ProvisionedIdentity, source string) error {
@@ -289,6 +297,9 @@ func (service OneIDService) ProvisionCustomerFromVerifiedIdentity(ctx context.Co
 	if err = service.observeProvisionedCustomer(ctx, provisioned, fact.Reference().Source); err != nil {
 		return identityport.ProvisionResult{}, err
 	}
+	if err = service.observeVerifiedIdentity(ctx, provisioned.CustomerID, fact); err != nil {
+		return identityport.ProvisionResult{}, err
+	}
 	return identityport.ProvisionResult{
 		CustomerID: provisioned.CustomerID,
 		IdentityID: provisioned.IdentityID,
@@ -306,7 +317,16 @@ func (service OneIDService) LinkVerifiedIdentity(ctx context.Context, command Li
 	if command.SourceCustomerID < 1 || !command.Target.Valid() || command.Target.Reference().Kind == identitydomain.KindPhone || !command.Evidence.Valid() {
 		return LinkResult{}, ErrInvalidLinkCommand
 	}
-	return service.Store.Link(ctx, command)
+	result, err := service.Store.Link(ctx, command)
+	if err != nil {
+		return result, err
+	}
+	if result.Status == LinkAttached || result.Status == LinkAlreadyLinked {
+		if err = service.observeVerifiedIdentity(ctx, result.CustomerID, command.Target); err != nil {
+			return LinkResult{}, err
+		}
+	}
+	return result, nil
 }
 
 func (service OneIDService) LinkVerifiedIdentityToCustomer(ctx context.Context, command identityport.VerifiedLinkCommand) (identityport.VerifiedLinkResult, error) {

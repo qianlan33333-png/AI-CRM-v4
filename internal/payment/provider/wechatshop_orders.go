@@ -42,6 +42,7 @@ func (p *ShopProvider) ReadShopOrder(ctx context.Context, id string) (orderport.
 			Create    exactShopInteger   `json:"create_time"`
 			Update    exactShopInteger   `json:"update_time"`
 			OpenID    string             `json:"openid"`
+			UnionID   string             `json:"unionid"`
 			Giver     string             `json:"present_giver_openid"`
 			IsPresent bool               `json:"is_present"`
 			Detail    struct {
@@ -62,12 +63,18 @@ func (p *ShopProvider) ReadShopOrder(ctx context.Context, id string) (orderport.
 					Count   exactShopInteger   `json:"sku_cnt"`
 				} `json:"product_infos"`
 				Delivery struct {
+					Address struct {
+						VirtualPhone string `json:"virtual_order_tel_number"`
+					} `json:"address_info"`
 					Recharge struct {
 						Account, Type string
 						AccountNo     string `json:"account_no"`
 						AccountType   string `json:"account_type"`
 					} `json:"recharge_info"`
 				} `json:"delivery_info"`
+				Sources []struct {
+					Nickname string `json:"account_nickname"`
+				} `json:"source_infos"`
 			} `json:"order_detail"`
 			AfterSales struct {
 				List []struct {
@@ -120,6 +127,13 @@ func (p *ShopProvider) ReadShopOrder(ctx context.Context, id string) (orderport.
 		}
 		result.Buyer = fact
 	}
+	if o.UnionID != "" && p.config.UnionIDOpenPlatformID != "" && o.Giver == "" && !o.IsPresent {
+		fact, e := identitydomain.NewVerifiedFact(identitydomain.ProviderVerifiedIdentityInput{Kind: identitydomain.KindUnionID, Scope: "wechat-open-platform:" + p.config.UnionIDOpenPlatformID, Value: o.UnionID, Source: "wechat-shop.order-api"})
+		if e != nil {
+			return result, ErrInvalidShopResponse
+		}
+		result.BuyerUnion = fact
+	}
 	for _, v := range o.Detail.Products {
 		if !v.Product.set || !v.SKU.set || !v.Price.set || !v.Actual.set || !v.Count.set || v.Count.value < 1 || v.Count.value > math.MaxInt32 {
 			return result, ErrInvalidShopResponse
@@ -129,6 +143,15 @@ func (p *ShopProvider) ReadShopOrder(ctx context.Context, id string) (orderport.
 	result.Account = o.Detail.Delivery.Recharge.AccountNo
 	if o.Detail.Delivery.Recharge.AccountType == "phone_number" {
 		result.Phone = result.Account
+	}
+	if result.Phone == "" {
+		result.Phone = o.Detail.Delivery.Address.VirtualPhone
+	}
+	for _, source := range o.Detail.Sources {
+		if source.Nickname != "" {
+			result.Nickname = source.Nickname
+			break
+		}
 	}
 	seen := map[string]bool{}
 	for _, after := range o.AfterSales.List {

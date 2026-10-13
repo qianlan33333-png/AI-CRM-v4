@@ -139,6 +139,17 @@ type ProvisionedCustomerObserver interface {
 	ObserveProvisionedCustomer(context.Context, customerdomain.CustomerID, string) error
 }
 
+// VerifiedIdentityObserver is a composition bridge inside the existing UoW.
+// It observes an accepted Provider fact; it cannot provision or merge identities.
+type VerifiedIdentityObserver interface {
+	ObserveVerifiedIdentityWithin(context.Context, customerdomain.CustomerID, identitydomain.VerifiedFact) error
+}
+
+// Serializes a verified handle even before it has a Customer owner.
+type VerifiedIdentityKeyLocker interface {
+	LockVerifiedIdentityWithin(context.Context, identitydomain.VerifiedFact) error
+}
+
 // DeclaredAttachCommand deliberately contains an existing CustomerID and no
 // provisioning or merge instruction. SourceRowDigest is the non-PII replay
 // fingerprint retained by the one-time import ledger.

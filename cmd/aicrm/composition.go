@@ -314,7 +314,8 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		identityRepository = identitystore.NewPostgresStoreWithObservation(phoneVault, observationVault)
 	}
 	customerStore := customerstore.NewPostgreSQL()
-	oneID := identityapp.OneIDService{Store: identityRepository, ProvisionedCustomer: customerProvisionedDirectoryAdapter{writer: customerStore}}
+	shopBuyerBridge := &shopBuyerIdentityBridge{}
+	oneID := identityapp.OneIDService{Store: identityRepository, ProvisionedCustomer: customerProvisionedDirectoryAdapter{writer: customerStore}, VerifiedIdentity: shopBuyerBridge}
 	collectedPhones, err := customerapp.NewCollectedPhoneService(oneID, customerStore)
 	if err != nil {
 		return fail(err)
@@ -1727,7 +1728,13 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		}
 	}
 	shopLoader := paymentprovider.DBMaterialLoader{UOW: uow, Intents: paymentRepository}
-	wechatShopAdapter, err := paymentprovider.NewWeChatShop(paymentprovider.ShopConfig{Enabled: cfg.WeChatShop.Enabled, AppID: cfg.WeChatShop.AppID, AppSecret: cfg.WeChatShop.AppSecret, APIBaseURL: "https://api.weixin.qq.com"}, shopLoader, &http.Client{Timeout: 10 * time.Second})
+	// The user confirmed Shop and WeCom share this configured platform. Keep
+	// the App scope separate; an absent platform leaves UnionID unresolved.
+	shopOpenPlatformID := cfg.WeCom.UnionIDOpenPlatformID
+	if shopOpenPlatformID == "" {
+		shopOpenPlatformID = cfg.Survey.OAuthOpenPlatformID
+	}
+	wechatShopAdapter, err := paymentprovider.NewWeChatShop(paymentprovider.ShopConfig{Enabled: cfg.WeChatShop.Enabled, AppID: cfg.WeChatShop.AppID, AppSecret: cfg.WeChatShop.AppSecret, UnionIDOpenPlatformID: shopOpenPlatformID, APIBaseURL: "https://api.weixin.qq.com"}, shopLoader, &http.Client{Timeout: 10 * time.Second})
 	if err != nil {
 		return fail(err)
 	}
@@ -1739,7 +1746,15 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	}
 	shopSync := &wechatshop.Service{Pool: pool.Native(), UOW: uow, Client: effectClient, AppID: cfg.WeChatShop.AppID, Enabled: cfg.WeChatShop.Enabled, Products: productapp.ShopCatalog{Store: productRepository, Events: productEvents}, Reader: wechatShopAdapter}
 	shopProductWorker.Service = shopSync
-	shopOrders := orderapp.ShopOrders{Store: orderRepository, Products: shopSync.Products, Consumer: commercePushService, Cipher: commercePushCipher, Identity: oneID, Subjects: queries}
+	shopUnionScope := ""
+	if shopOpenPlatformID != "" {
+		shopUnionScope = "wechat-open-platform:" + shopOpenPlatformID
+	}
+	shopOrders := orderapp.ShopOrders{Store: orderRepository, Products: shopSync.Products, Consumer: commercePushService, Cipher: commercePushCipher, Identity: oneID, Subjects: queries, BuyerKeys: identityRepository, UnionScope: shopUnionScope}
+	shopBuyerBridge.Orders = shopOrders
+	if err = orderHandler.SetShopBuyerDisplayReader(shopOrders); err != nil {
+		return fail(err)
+	}
 	shopSync.Orders = shopOrders
 	shopSync.Pending = shopOrders
 	shopSync.OrderReader = wechatShopAdapter

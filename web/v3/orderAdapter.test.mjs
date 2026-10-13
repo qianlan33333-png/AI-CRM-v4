@@ -1213,6 +1213,18 @@ try{
 }finally{shopContractDom.window.close()}
 console.log('WeChat Shop exact list/detail DTO compatibility with canonical external API facts: PASS');
 
+for (const linked of [false,true]) {
+ const buyerDom=new JSDOM('<!doctype html><body data-page="orderDetail"><div><div><h2>订单详情</h2></div><div></div></div><div><div><h2>事件时间线</h2></div><div></div></div></body>',{
+  url:'https://test.invalid/admin/orderDetail.html?id=shop-contract&provider=wechat_shop',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:new VirtualConsole(),beforeParse(window){browserRuntime(window);window.fetch=async()=>new Response(JSON.stringify({...shopRaw,payer_name:'小店指定昵称',payer_id:linked?'customer:102':'',payer_customer_number:linked?'1023798':'',payer_phone_masked:'138****8000',shipping_mobile_masked:'138****8000',contact_collection_level:'mobile'}),{headers:{'Content-Type':'application/json'}})}}
+ );
+ try {
+  buyerDom.window.eval(host);await buyerDom.window.fetch('/api/admin/orders/shop-contract?provider=wechat_shop');await pause();
+  const body=buyerDom.window.document.body.textContent;
+  assert.match(body,/买家.*小店指定昵称/);assert.match(body,/手机号.*138\*\*\*\*8000/);assert.equal(body.includes('1023798'),linked,'customer number requires a real OneID association');assert.doesNotMatch(body,/13800138000/);
+ } finally {buyerDom.window.close()}
+}
+console.log('WeChat Shop nickname, masked contact and late OneID buyer display: PASS');
+
 {
  const calls=[];
  const freeDom=new JSDOM('<!doctype html><body data-page="orderDetail"><div><div><h2>订单详情</h2></div><div></div></div><div><div><h2>事件时间线</h2></div><div></div></div><div><div><h2>退款</h2></div><div></div></div></body>',{

@@ -49,7 +49,7 @@ func TestPostgreSQLShopInstalledAPI(t *testing.T) {
 		if e != nil {
 			return e
 		}
-		return f.application.shopSync.Orders.ImportShopOrderWithin(ctx, orderport.ShopOrder{AppID: "installed-shop", ID: "90071992547409931234", TransactionID: "installed-shop-tx", CreatedAt: now.Add(-time.Hour), PaidAt: now, UpdatedAt: now, PaidMinor: 85, RefundedMinor: 85, Lines: []orderport.ShopOrderLine{{ProductID: "parent", SKUID: "sku", Name: "Installed Shop", Quantity: 2, UnitMinor: 100, PaidMinor: 80}}}, now.Add(time.Second))
+		return f.application.shopSync.Orders.ImportShopOrderWithin(ctx, orderport.ShopOrder{AppID: "installed-shop", ID: "90071992547409931234", TransactionID: "installed-shop-tx", CreatedAt: now.Add(-time.Hour), PaidAt: now, UpdatedAt: now, PaidMinor: 85, RefundedMinor: 85, Phone: "13800138000", Nickname: "小店买家昵称", Lines: []orderport.ShopOrderLine{{ProductID: "parent", SKUID: "sku", Name: "Installed Shop", Quantity: 2, UnitMinor: 100, PaidMinor: 80}}}, now.Add(time.Second))
 	}); e != nil {
 		t.Fatal(e)
 	}
@@ -113,6 +113,21 @@ func TestPostgreSQLShopInstalledAPI(t *testing.T) {
 	}
 	if code, detail := call("GET", "/api/admin/orders/90071992547409931234?provider=wechat_shop", "", true); code != 200 || detail["record_origin"] != "external" || detail["refunded_minor"] != float64(85) {
 		t.Fatal("external refund fact unreadable")
+	}
+	if code, detail := call("GET", "/api/admin/orders/90071992547409931234?provider=wechat_shop", "", true); code != 200 || detail["payer_name"] != "小店买家昵称" || detail["payer_phone_masked"] != "138****8000" || detail["contact_collection_level"] != "mobile" {
+		t.Fatal("installed Shop buyer display contract missing")
+	}
+	if code, list := call("GET", "/api/admin/orders?provider=wechat_shop", "", true); code != 200 {
+		t.Fatal("installed Shop buyer list unavailable")
+	} else {
+		rows, ok := list["items"].([]any)
+		if !ok || len(rows) != 1 {
+			t.Fatal("installed Shop buyer list missing")
+		}
+		buyer, ok := rows[0].(map[string]any)
+		if !ok || buyer["payer_name"] != "小店买家昵称" || buyer["payer_phone_masked"] != "138****8000" {
+			t.Fatal("installed Shop buyer list display missing")
+		}
 	}
 	if code, product := call("GET", "/api/v1/products/"+strconv.FormatInt(int64(id), 10), "", true); code != 200 || product["source_kind"] != "wechat_shop" {
 		t.Fatalf("Shop source not exposed: status=%d source=%v", code, product["source_kind"])

@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	identitydomain "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/domain"
 	identityport "github.com/qianlan33333-png/AI-CRM-v3/internal/identity/port"
 	"github.com/qianlan33333-png/AI-CRM-v3/internal/order/domain"
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
@@ -19,14 +18,20 @@ type shopStore interface {
 	UpsertShopOrderWithin(context.Context, orderport.ShopOrder, domain.Snapshot, [32]byte, time.Time, []byte, int16) (orderport.ShopSaved, error)
 	MarkShopDispatchWithin(context.Context, int64) error
 	PendingShopOrdersWithin(context.Context, string, string, string) ([]string, error)
+	UpsertShopBuyerWithin(context.Context, int64, orderport.ShopBuyerMaterial) error
+	ReadShopBuyerCiphertexts(context.Context, []int64) ([]orderport.ShopBuyerCiphertext, error)
+	PendingShopBuyerCiphertextsWithin(context.Context, string, [32]byte) ([]orderport.ShopBuyerCiphertext, error)
+	AssociateShopBuyerWithin(context.Context, int64, int64, string, []int64) error
 }
 type ShopOrders struct {
-	Store    shopStore
-	Products productport.ShopCatalog
-	Consumer orderport.ShopPaidConsumer
-	Cipher   orderport.ShopContactCipher
-	Identity identityport.Resolver
-	Subjects identityport.WriteLockedVerifiedIdentitySubjectReader
+	Store      shopStore
+	Products   productport.ShopCatalog
+	Consumer   orderport.ShopPaidConsumer
+	Cipher     orderport.ShopContactCipher
+	Identity   identityport.Resolver
+	Subjects   identityport.WriteLockedVerifiedIdentitySubjectReader
+	BuyerKeys  identityport.VerifiedIdentityKeyLocker
+	UnionScope string
 }
 
 func (s ShopOrders) PendingShopOrdersWithin(ctx context.Context, app, product, sku string) ([]string, error) {
@@ -68,27 +73,11 @@ func (s ShopOrders) ImportShopOrderWithin(ctx context.Context, source orderport.
 	if snap.UpdatedAt.Before(snap.CreatedAt) {
 		snap.UpdatedAt = snap.CreatedAt
 	}
-	if source.Buyer.Valid() && s.Identity != nil && s.Subjects != nil {
-		ref := source.Buyer.Reference()
-		if ref.Scope != "wechat-app:"+source.AppID {
-			return orderport.ErrConflict
-		}
-		result, e := s.Identity.Resolve(ctx, identitydomain.Reference{Kind: ref.Kind, Scope: ref.Scope, Value: ref.NormalizedValue, Assurance: identitydomain.AssuranceVerified, Source: ref.Source})
-		if e != nil {
-			return e
-		}
-		if result.Status == identityport.ResolveFound {
-			subject, found, e := s.Subjects.WriteLockedVerifiedIdentitySubject(ctx, result.IdentityID)
-			if e != nil {
-				return e
-			}
-			if found && subject.CustomerID == result.CustomerID {
-				id := int64(subject.CustomerID)
-				snap.PayerCustomerID = &id
-				snap.BeneficiaryCustomerID = &id
-			}
-		}
+	buyerID, buyerState, buyerLineage, e := s.resolveShopBuyer(ctx, source)
+	if e != nil {
+		return e
 	}
+	snap.PayerCustomerID, snap.BeneficiaryCustomerID = buyerID, buyerID
 	for index, line := range source.Lines {
 		if strings.TrimSpace(line.Name) == "" || line.ProductID == "" || line.SKUID == "" {
 			return orderport.ErrConflict
@@ -117,6 +106,55 @@ func (s ShopOrders) ImportShopOrderWithin(ctx context.Context, source orderport.
 	saved, e := s.Store.UpsertShopOrderWithin(ctx, source, snap, digest, cutoff, encrypted, version)
 	if e != nil {
 		return e
+	}
+	if saved.Event.OrderID > 0 {
+		buyer := shopBuyerDetails{Phone: source.Phone, Nickname: source.Nickname}
+		if source.Buyer.Valid() {
+			buyer.OpenID = source.Buyer.Reference().NormalizedValue
+		}
+		material := orderport.ShopBuyerMaterial{CustomerID: buyerID, State: buyerState, CanonicalLineage: buyerLineage}
+		if source.BuyerUnion.Valid() {
+			ref := source.BuyerUnion.Reference()
+			buyer.UnionID, buyer.UnionScope = ref.NormalizedValue, ref.Scope
+			material.UnionScope, material.UnionDigest = ref.Scope, shopBuyerUnionDigest(ref)
+		}
+		// Later refund responses may omit optional contacts. Keep previously
+		// verified lookup material and display facts for this exact source.
+		previous, err := s.Store.ReadShopBuyerCiphertexts(ctx, []int64{saved.Event.OrderID})
+		if err != nil {
+			return err
+		}
+		if len(previous) != 0 {
+			prior, err := s.decodeShopBuyer(previous[0])
+			if err != nil {
+				return err
+			}
+			if buyer.Phone == "" {
+				buyer.Phone = prior.Phone
+			}
+			if buyer.Nickname == "" {
+				buyer.Nickname = prior.Nickname
+			}
+			if buyer.OpenID == "" {
+				buyer.OpenID = prior.OpenID
+			}
+			if buyer.UnionID == "" && prior.UnionScope != "" {
+				buyer.UnionID, buyer.UnionScope = prior.UnionID, prior.UnionScope
+				material.UnionScope = prior.UnionScope
+				material.UnionDigest = shopBuyerUnionDigest(identityReferenceForDigest(prior.UnionScope, prior.UnionID))
+			}
+		}
+		body, err := json.Marshal(buyer)
+		if err != nil {
+			return orderport.ErrUnavailable
+		}
+		material.Ciphertext, material.KeyVersion, err = s.Cipher.EncryptCommercePayload(body, shopBuyerAAD(source.AppID, source.ID))
+		if err != nil {
+			return orderport.ErrUnavailable
+		}
+		if err = s.Store.UpsertShopBuyerWithin(ctx, saved.Event.OrderID, material); err != nil {
+			return err
+		}
 	}
 	if !saved.Eligible || saved.Event.ID == 0 {
 		return nil
