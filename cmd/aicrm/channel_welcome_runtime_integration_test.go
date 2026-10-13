@@ -152,7 +152,8 @@ func TestChannelWelcomeProviderRejectionCompletionRollsBackAtomically(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = fixture.effects.SetCompletionSink(channelWelcomeCompletionRouter{welcome: completion, failAfter: true}); err != nil {
+	faultRouter := &channelWelcomeCompletionRouter{welcome: completion, failAfter: true}
+	if err = fixture.effects.SetCompletionSink(faultRouter); err != nil {
 		t.Fatal(err)
 	}
 	if err = fixture.effects.RunAttempt(fixture.ctx, effectIDNumber(t, effectRef), 1, jobID, provider); err == nil {
@@ -177,10 +178,18 @@ func TestChannelWelcomeProviderRejectionCompletionRollsBackAtomically(t *testing
 	if _, err = fixture.native.Exec(fixture.ctx, `UPDATE external_effects SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, effectIDNumber(t, effectRef)); err != nil {
 		t.Fatal(err)
 	}
+	// Recovery must still roll back atomically while the Owner sink is failing.
+	if err = fixture.effects.RunAttempt(fixture.ctx, effectIDNumber(t, effectRef), 1, jobID, provider); err == nil || writer.calls() != 1 {
+		t.Fatalf("persistent sink failure err=%v calls=%d", err, writer.calls())
+	}
+	if err = fixture.native.QueryRow(fixture.ctx, `SELECT e.state,i.state FROM channel_welcome_intents i JOIN external_effects e ON e.id=substring(i.effect_ref FROM 5)::bigint WHERE i.callback_id=$1`, input.CallbackKey).Scan(&effectState, &intentState); err != nil || effectState != "attempted" || intentState != "queued" {
+		t.Fatalf("recovery rollback effect=%s intent=%s err=%v", effectState, intentState, err)
+	}
+	faultRouter.failAfter = false
 	if err = fixture.effects.RunAttempt(fixture.ctx, effectIDNumber(t, effectRef), 1, jobID, provider); err != nil || writer.calls() != 1 {
 		t.Fatalf("expired recovery err=%v provider calls=%d", err, writer.calls())
 	}
-	if err = fixture.native.QueryRow(fixture.ctx, `SELECT e.state,i.state,i.provider_error_code FROM channel_welcome_intents i JOIN external_effects e ON e.id=substring(i.effect_ref FROM 5)::bigint WHERE i.callback_id=$1`, input.CallbackKey).Scan(&effectState, &intentState, &providerCode); err != nil || effectState != "outcome_unknown" || intentState != "queued" || providerCode != nil {
+	if err = fixture.native.QueryRow(fixture.ctx, `SELECT e.state,i.state,i.provider_error_code FROM channel_welcome_intents i JOIN external_effects e ON e.id=substring(i.effect_ref FROM 5)::bigint WHERE i.callback_id=$1`, input.CallbackKey).Scan(&effectState, &intentState, &providerCode); err != nil || effectState != "outcome_unknown" || intentState != "outcome_unknown" || providerCode != nil {
 		t.Fatalf("recovered effect=%q intent=%q code=%v err=%v", effectState, intentState, providerCode, err)
 	}
 }
