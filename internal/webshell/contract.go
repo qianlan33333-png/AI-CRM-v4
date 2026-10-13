@@ -10,6 +10,7 @@ package webshell
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"path"
@@ -45,6 +46,7 @@ type AdminRoute struct {
 // AdminNavItem is one link in the admin navigation.
 type AdminNavItem struct {
 	Key      string
+	IconKey  string
 	Label    string
 	Endpoint string
 	Href     string
@@ -139,6 +141,7 @@ type adminNavigationGroup struct {
 
 type adminNavigationItem struct {
 	Key                string   `json:"key"`
+	IconKey            string   `json:"icon_key,omitempty"`
 	Label              string   `json:"label"`
 	Endpoint           string   `json:"endpoint"`
 	Href               string   `json:"href"`
@@ -187,11 +190,34 @@ func loadAdminNavigationGroups() []AdminNavGroup {
 			}
 			keys[sourceItem.Key] = struct{}{}
 			endpoints[sourceItem.Endpoint] = struct{}{}
-			group.Items = append(group.Items, AdminNavItem{Key: sourceItem.Key, Label: sourceItem.Label, Endpoint: sourceItem.Endpoint})
+			icon, err := navigationIconKey(sourceItem.Key, sourceItem.IconKey)
+			if err != nil {
+				panic("webshell admin navigation icon is invalid")
+			}
+			group.Items = append(group.Items, AdminNavItem{Key: sourceItem.Key, IconKey: icon, Label: sourceItem.Label, Endpoint: sourceItem.Endpoint})
 		}
 		groups = append(groups, group)
 	}
 	return groups
+}
+
+func navigationIconKey(key, override string) (string, error) {
+	icon := override
+	if icon == "" {
+		icon = key
+	}
+	for _, char := range icon {
+		if (char < 'a' || char > 'z') && char != '_' {
+			return "", errors.New("invalid navigation icon")
+		}
+	}
+	if icon == "" {
+		return "", errors.New("missing navigation icon")
+	}
+	if _, err := embeddedWebAssets.ReadFile("static/admin_console/nav-icons/" + icon + ".svg"); err != nil {
+		return "", errors.New("unavailable navigation icon")
+	}
+	return icon, nil
 }
 
 // AdminNavGroups is the idiomatic Go alias for callers that do not need to

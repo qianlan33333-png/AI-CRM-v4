@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "06e8b838b659b82b3e11c2d586c127bcfaef5c85",
+  "baseline_sha": "8a5ce1036688a328dee156ab9dcca2f0865ca56f",
   "checks": [
     {
       "lane": "backend",
@@ -104,6 +104,31 @@
     {
       "lane": "frontend",
       "path": "web/v3/productAdapter.save_recovery.test.mjs"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/webshell",
+      "test": "TestNavigationEveryDirectIconIsAnEmbeddedLoadableSVG"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/webshell",
+      "test": "TestNavigationIconRejectsMissingForeignAndTraversalBindings"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/webshell",
+      "test": "TestAdminNavGroupsMirrorSourceMenu"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/webshell",
+      "test": "TestStaticAssetsUseBrowserApplicableContentType"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/webshell",
+      "test": "TestRenderProductsKeepsPR10AsTheOnlyAdminShell"
     },
     {
       "lane": "frontend",

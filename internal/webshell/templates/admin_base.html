@@ -239,7 +239,7 @@
           <div class="admin-nav-section-list">
             {{range .Items}}
             <a class="admin-nav-link{{if .Active}} is-active{{end}}" href="{{.Href}}" title="{{.Label}}">
-              <img class="admin-nav-icon" src="/static/admin_console/nav-icons/{{.Key}}.svg?v=static-mime2" alt="">
+              <img class="admin-nav-icon" src="/static/admin_console/nav-icons/{{.IconKey}}.svg?v=static-mime2" alt="">
               <span class="admin-nav-label">{{.Label}}</span>
             </a>
             {{end}}

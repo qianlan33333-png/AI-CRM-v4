@@ -105,6 +105,7 @@
         },
         {
           "key": "group_invitations",
+          "icon_key": "group_ops",
           "label": "群邀请",
           "endpoint": "api.admin_group_invitations",
           "href": "/admin/group-invitations",
@@ -210,6 +211,7 @@
         },
         {
           "key": "referral",
+          "icon_key": "distribution",
           "label": "裂变活动",
           "endpoint": "api.admin_referral_page",
           "href": "/admin/referral",
@@ -283,6 +285,7 @@
         },
         {
           "key": "ops_governance",
+          "icon_key": "config",
           "label": "运行治理",
           "endpoint": "api.admin_ops_governance",
           "href": "/admin/ops",
