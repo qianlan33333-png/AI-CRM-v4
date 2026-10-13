@@ -27,6 +27,7 @@ import (
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 	paymentport "github.com/qianlan33333-png/AI-CRM-v3/internal/payment/port"
 	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
+	platformpostgres "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/postgres"
 	radarport "github.com/qianlan33333-png/AI-CRM-v3/internal/radar/port"
 	surveyport "github.com/qianlan33333-png/AI-CRM-v3/internal/survey/port"
 	wecomport "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/port"
@@ -98,8 +99,9 @@ type openPlatformExecutor struct {
 	machineMutationAuth accessport.MachineMutationAuthorizer
 	machineMutationUOW  platformport.UnitOfWork
 	aiMachineIntake     aiassistantport.MachineTransactionalIntake
-	aiMachineReader     aiassistantport.MachineReader
+	aiMachineReader     aiassistantport.MachineTransactionalReader
 	aiUOW               platformport.UnitOfWork
+	aiReadUOW           platformport.UnitOfWork
 	workbenchUnions     identityport.VerifiedScopedUnionReader
 	v1Orders            orderport.ExternalReadQueryService
 	v1OrderTimeline     orderport.ExternalOrderTimelineReader
@@ -182,11 +184,11 @@ func newOpenPlatformExecutor(identity identityport.Resolver, orders orderport.Qu
 // BindV1AI installs the AI owner Ports for the two V1 AI operations. The
 // intake is transactional so the plan, its AI facts, and the machine operation
 // audit can commit or roll back together.
-func (executor *openPlatformExecutor) BindV1AI(intake aiassistantport.MachineTransactionalIntake, reader aiassistantport.MachineReader, uow platformport.UnitOfWork) error {
-	if executor == nil || intake == nil || reader == nil || uow == nil {
+func (executor *openPlatformExecutor) BindV1AI(intake aiassistantport.MachineTransactionalIntake, reader aiassistantport.MachineTransactionalReader, uow, readUOW platformport.UnitOfWork) error {
+	if executor == nil || intake == nil || reader == nil || uow == nil || readUOW == nil {
 		return errOpenPlatformRouteUnavailable
 	}
-	executor.aiMachineIntake, executor.aiMachineReader, executor.aiUOW = intake, reader, uow
+	executor.aiMachineIntake, executor.aiMachineReader, executor.aiUOW, executor.aiReadUOW = intake, reader, uow, readUOW
 	return nil
 }
 
@@ -1760,6 +1762,9 @@ type openPlatformOwnerAdapter struct {
 }
 
 func (adapter openPlatformOwnerAdapter) AudiencePrimaryOwners(ctx context.Context, customerIDs []customerdomain.CustomerID) ([]wecomport.AudiencePrimaryOwner, error) {
+	if _, err := platformpostgres.RequireTransaction(ctx); err == nil {
+		return adapter.reader.AudiencePrimaryOwners(ctx, customerIDs)
+	}
 	var owners []wecomport.AudiencePrimaryOwner
 	err := adapter.uow.Within(ctx, func(tx context.Context) error {
 		var err error

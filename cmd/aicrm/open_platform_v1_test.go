@@ -398,7 +398,7 @@ func TestV1AICreateAndStatusUseMachineActorAndAtomicAudit(t *testing.T) {
 	if err := executor.BindV1OperationAudit(audit, directUnitOfWork{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := executor.BindV1AI(ai, ai, directUnitOfWork{}); err != nil {
+	if err := executor.BindV1AI(ai, ai, directUnitOfWork{}, directUnitOfWork{}); err != nil {
 		t.Fatal(err)
 	}
 	authorizer := &openPlatformMachineMutationAuthorizerStub{}
@@ -425,4 +425,9 @@ func TestV1AICreateAndStatusUseMachineActorAndAtomicAudit(t *testing.T) {
 	if data := status.Data.(map[string]any); data["review_state"] != aiassistantport.ReviewApproved || data["operation_state"] != aiassistantport.MachineOperationApproved {
 		t.Fatalf("status=%#v", data)
 	}
+}
+
+func (stub *v1AIMachineStub) GetMachineOperationWithin(ctx context.Context, actor aiassistantport.MachineActor, id aiassistantport.PlanID) (aiassistantport.MachineOperationSnapshot, error) {
+	status, err := stub.GetMachineOperationStatus(ctx, actor, id)
+	return aiassistantport.MachineOperationSnapshot{Status: status}, err
 }

@@ -60,7 +60,7 @@ func TestV1WorkbenchPackageFreezesOnlyResolvedIDsAndRejectsPartial(t *testing.T)
 	verified := &workbenchUnionStub{verified: false}
 	executor.workbenchUnions = verified
 	ai := &v1AIMachineStub{create: aiassistantport.MachineCreatePlanResult{Plan: aiassistantport.MachinePlan{ID: 12, ReviewState: aiassistantport.ReviewPending}}}
-	if err := executor.BindV1AI(ai, ai, directUnitOfWork{}); err != nil {
+	if err := executor.BindV1AI(ai, ai, directUnitOfWork{}, directUnitOfWork{}); err != nil {
 		t.Fatal(err)
 	}
 	audit := &openPlatformMachineAuditStub{}

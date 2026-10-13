@@ -279,3 +279,37 @@ func machineOperationStatus(plan aiassistantport.Plan, summary aiassistantport.M
 var _ aiassistantport.MachineIntake = (*Service)(nil)
 var _ aiassistantport.MachineTransactionalIntake = (*Service)(nil)
 var _ aiassistantport.MachineReader = (*Service)(nil)
+
+// GetMachineOperationWithin participates in the composed read snapshot. A
+// read-only snapshot needs no row lock: every Owner fact is observed at the
+// same transaction snapshot, including concurrent completions.
+func (s *Service) GetMachineOperationWithin(ctx context.Context, actor aiassistantport.MachineActor, id aiassistantport.PlanID) (aiassistantport.MachineOperationSnapshot, error) {
+	if s == nil || !actor.Valid() || id < 1 {
+		return aiassistantport.MachineOperationSnapshot{}, ErrInvalid
+	}
+	if _, err := platformpostgres.RequireTransaction(ctx); err != nil {
+		return aiassistantport.MachineOperationSnapshot{}, err
+	}
+	store, ok := s.store.(machineStatusStore)
+	if !ok {
+		return aiassistantport.MachineOperationSnapshot{}, ErrUnavailable
+	}
+	plan, err := s.store.GetPlan(ctx, id, false)
+	if err != nil {
+		return aiassistantport.MachineOperationSnapshot{}, classify(err)
+	}
+	if plan.CreatedActorKind != aiassistantport.MachineActorKind || plan.CreatedActorRef != actor.Reference {
+		return aiassistantport.MachineOperationSnapshot{}, ErrNotFound
+	}
+	summary, err := store.MachineExecutionSummary(ctx, id)
+	if err != nil {
+		return aiassistantport.MachineOperationSnapshot{}, classify(err)
+	}
+	recipients, err := store.MachineRecipientResults(ctx, id)
+	if err != nil {
+		return aiassistantport.MachineOperationSnapshot{}, classify(err)
+	}
+	return aiassistantport.MachineOperationSnapshot{Status: machineOperationStatus(plan, summary), Recipients: recipients}, nil
+}
+
+var _ aiassistantport.MachineTransactionalReader = (*Service)(nil)

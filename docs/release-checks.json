@@ -1,13 +1,112 @@
 {
   "schema": 1,
-  "baseline_sha": "18a0e34ea2dd1c45a38812b7e428007dac9862b6",
+  "baseline_sha": "37330df426e4c5eec23c0c4e45de175002dd2af7",
   "checks": [
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLPriorityHealthSenderFixtureHonorsAccessGovernance",
+      "package": "./internal/aiassistant/port",
+      "test": "TestMachineActorRequiresCanonicalAuthenticatedReference"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/port",
+      "test": "TestMachineCreatePlanCommandRejectsUntrustedSubject"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/store",
+      "test": "TestDimensionPostgreSQLMachineStatusCannotMixCompletionSnapshots",
       "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/store",
+      "test": "TestPostgreSQLMachinePlanActorScopesReceiptsFactsAndStatus",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/store",
+      "test": "TestPostgreSQLMachinePlanSameClientRaceReplaysOneReceipt",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestCLIMachineCanIChecksTrustedResourceAndNeverExecutes"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestMessageArchivePostgreSQLExternalChatMachineProjectionJourney",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestOpenPlatformMachineManagementPostgreSQLJourney",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestOpenPlatformOperationSnapshotPostgreSQLConcurrentCompletionAndScope",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestOpenPlatformV1AIReviewPlanPostgreSQLJourney",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestAUTH02WorkbenchAIReplayRevalidatesAccessInOwnerUnitOfWorkPostgreSQL",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestV1MachineWriteOperationsRequireTheAccessMutationFence"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestV4MachineContactWindowPostgreSQL",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestV1OperationAuditMustBeComposedForMachinePrincipal"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestV1AICreateAndStatusUseMachineActorAndAtomicAudit"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestV1WorkbenchPackageFreezesOnlyResolvedIDsAndRejectsPartial"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestOpenPlatformOperationSnapshotPostgreSQLConcurrentCompletionAndScope",
+      "postgres": true,
+      "race": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/aiassistant/store",
+      "test": "TestDimensionPostgreSQLMachineStatusCannotMixCompletionSnapshots",
+      "postgres": true,
+      "race": true
     }
   ],
-  "installed_checks": []
+  "installed_checks": [
+    "operation-status-snapshot"
+  ]
 }

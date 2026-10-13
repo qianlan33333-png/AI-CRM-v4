@@ -33,7 +33,7 @@ func bindOpenPlatformTestMachineMutationFence(t *testing.T, executor *openPlatfo
 func TestV1MachineWriteOperationsRequireTheAccessMutationFence(t *testing.T) {
 	executor := v1ExecutorForTest(t, &openPlatformIdentityStub{}, &openPlatformProfileStub{})
 	ai := &v1AIMachineStub{}
-	if err := executor.BindV1AI(ai, ai, directUnitOfWork{}); err != nil {
+	if err := executor.BindV1AI(ai, ai, directUnitOfWork{}, directUnitOfWork{}); err != nil {
 		t.Fatal(err)
 	}
 	audit := &openPlatformMachineAuditStub{}

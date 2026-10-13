@@ -198,6 +198,18 @@ type MachineReader interface {
 	GetMachineRecipientResults(context.Context, MachineActor, PlanID) ([]MachineRecipientResult, error)
 }
 
+// MachineOperationSnapshot is one Owner observation of status and members.
+type MachineOperationSnapshot struct {
+	Status     MachineOperationStatus
+	Recipients []MachineRecipientResult
+}
+
+// MachineTransactionalReader reads the aggregate in the caller's existing
+// snapshot transaction, without opening a nested Unit of Work.
+type MachineTransactionalReader interface {
+	GetMachineOperationWithin(context.Context, MachineActor, PlanID) (MachineOperationSnapshot, error)
+}
+
 // MachineEvent is persisted through the same atomic audit/outbox boundary as
 // a human plan event, with the machine reference retained for attribution.
 type MachineEvent struct {

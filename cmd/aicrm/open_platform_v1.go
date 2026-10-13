@@ -59,7 +59,7 @@ func (executor *openPlatformExecutor) Available(_ context.Context, principal acc
 		// legacy compatibility readers are deliberately not a substitute.
 		openplatformport.OperationCustomerActivities:       executor.activities != nil,
 		openplatformport.OperationAIReviewPlanCreate:       executor.aiMachineIntake != nil && executor.aiMachineReader != nil && executor.aiUOW != nil && executor.machineMutationAuth != nil && executor.operationAudit != nil,
-		openplatformport.OperationGet:                      executor.aiMachineReader != nil,
+		openplatformport.OperationGet:                      executor.aiMachineReader != nil && executor.aiReadUOW != nil,
 		openplatformport.OperationOrderList:                executor.v1Orders != nil && executor.v1Refunds != nil,
 		openplatformport.OperationOrderGet:                 executor.v1Orders != nil && executor.v1Refunds != nil,
 		openplatformport.OperationIdentityGet:              executor.surveyAliases != nil,

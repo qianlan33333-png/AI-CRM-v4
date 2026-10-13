@@ -509,7 +509,7 @@ func TestAUTH02WorkbenchAIReplayRevalidatesAccessInOwnerUnitOfWorkPostgreSQL(t *
 	executor.contactStaff = workbenchStaffStub{}
 	executor.workbenchUnions = &workbenchUnionStub{verified: true}
 	ai := &v1AIMachineStub{create: aiassistantport.MachineCreatePlanResult{Plan: aiassistantport.MachinePlan{ID: 42, ReviewState: aiassistantport.ReviewPending}}}
-	if err = executor.BindV1AI(ai, ai, rig.uow); err != nil {
+	if err = executor.BindV1AI(ai, ai, rig.uow, rig.uow); err != nil {
 		t.Fatal(err)
 	}
 	if err = executor.BindV1OperationAudit(accessstore.NewPostgreSQL(), rig.uow); err != nil {

@@ -1472,7 +1472,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = openPlatformExecutor.BindV1MachineMutationFence(machineService, uow); err != nil {
 		return fail(err)
 	}
-	if err = openPlatformExecutor.BindV1AI(aiService, aiService, uow); err != nil {
+	if err = openPlatformExecutor.BindV1AI(aiService, aiService, uow, overviewReadUoW); err != nil {
 		return fail(err)
 	}
 	if err = openPlatformExecutor.BindV1WorkbenchUnions(queries); err != nil {

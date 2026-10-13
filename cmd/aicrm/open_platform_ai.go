@@ -247,7 +247,7 @@ func (executor *openPlatformExecutor) v1CreateWorkbenchPackage(ctx context.Conte
 }
 
 func (executor *openPlatformExecutor) v1OperationStatus(ctx context.Context, principal accessdomain.MachinePrincipal, raw json.RawMessage) (openplatformport.Result, error) {
-	if executor == nil || executor.aiMachineReader == nil {
+	if executor == nil || executor.aiMachineReader == nil || executor.aiReadUOW == nil {
 		return openplatformport.Result{}, openplatformport.NewError(openplatformport.ErrorDependencyUnavailable, "operation status is unavailable")
 	}
 	var input v1OperationInput
@@ -262,19 +262,15 @@ func (executor *openPlatformExecutor) v1OperationStatus(ctx context.Context, pri
 	if err != nil {
 		return openplatformport.Result{}, openplatformport.NewError(openplatformport.ErrorAuthentication, "machine subject is invalid")
 	}
-	status, err := executor.aiMachineReader.GetMachineOperationStatus(ctx, actor, id)
-	if err != nil {
-		return openplatformport.Result{}, v1AIError(err)
-	}
-	items, err := executor.aiMachineReader.GetMachineRecipientResults(ctx, actor, id)
-	if err != nil {
-		return openplatformport.Result{}, v1AIError(err)
-	}
-	results := make([]map[string]any, 0, len(items))
-	if executor.aiUOW == nil {
-		return openplatformport.Result{}, openplatformport.NewError(openplatformport.ErrorDependencyUnavailable, "operation scope is unavailable")
-	}
-	err = executor.aiUOW.Within(ctx, func(tx context.Context) error {
+	var status aiassistantport.MachineOperationStatus
+	results := make([]map[string]any, 0)
+	err = executor.aiReadUOW.Within(ctx, func(tx context.Context) error {
+		aggregate, readErr := executor.aiMachineReader.GetMachineOperationWithin(tx, actor, id)
+		if readErr != nil {
+			return v1AIError(readErr)
+		}
+		status = aggregate.Status
+		items := aggregate.Recipients
 		for _, item := range items {
 			if scopeErr := executor.ensureCustomerScope(tx, principal, customerdomain.CustomerID(item.CustomerID), nil); scopeErr != nil {
 				return openplatformport.NewError(openplatformport.ErrorPermission, "operation owner scope changed")

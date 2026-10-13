@@ -452,7 +452,15 @@ func newOpenPlatformV1AIHandlerWithUOWs(t *testing.T, native *pgxpool.Pool, owne
 	if err = executor.BindV1MachineMutationFence(machine, ownerUOW); err != nil {
 		t.Fatal(err)
 	}
-	if err = executor.BindV1AI(aiService, aiService, ownerUOW); err != nil {
+	readPool, err := platformpostgres.Wrap(native, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readUOW, err := platformpostgres.NewReadOnlyRepeatableReadUnitOfWork(readPool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = executor.BindV1AI(aiService, aiService, ownerUOW, readUOW); err != nil {
 		t.Fatal(err)
 	}
 	var operations openplatformport.OperationService = executor
