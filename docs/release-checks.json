@@ -1,12 +1,16 @@
 {
   "schema": 1,
-  "baseline_sha": "7716814f51fec833bf86fc11ff19319dda047935",
+  "baseline_sha": "a122976c06b7a9ef0a2c8266645dcd5eb6f6a4c8",
   "checks": [
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestHealthOperationStatusCompositionPostgreSQL",
-      "postgres": true
+      "package": "./internal/openplatform/http",
+      "test": "TestTrustedLoopbackProxyRequiresOriginalClientSource"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/openplatform/http",
+      "test": "TestTrustedProxyTakesRightmostUntrustedForwardedSource"
     },
     {
       "lane": "backend",

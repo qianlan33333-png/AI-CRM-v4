@@ -102,6 +102,11 @@ func runHealthOperationHTTPContract(t *testing.T, f healthOperationHTTPFixture, 
 		if bearer != "" {
 			r.Header.Set("Authorization", "Bearer "+bearer)
 		}
+		// The installed fixture's controlled loopback reverse proxy appends its
+		// real peer. Include a documentation-only original client so the chain
+		// contains an untrusted origin, not just trusted 127.0.0.1 proxy hops.
+		// Production's rightmost-untrusted-source rule stays unchanged.
+		r.Header.Set("X-Forwarded-For", "203.0.113.50")
 		res, e := f.server.Client().Do(r)
 		if e != nil {
 			t.Fatal(e)

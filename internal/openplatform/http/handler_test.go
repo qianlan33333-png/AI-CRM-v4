@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -259,6 +260,32 @@ func TestTrustedProxyTakesRightmostUntrustedForwardedSource(t *testing.T) {
 	source, err = handler.source(request)
 	if err != nil || source != netip.MustParseAddr("198.51.100.7") {
 		t.Fatalf("trusted intermediary source = %v, %v", source, err)
+	}
+}
+
+func TestTrustedLoopbackProxyRequiresOriginalClientSource(t *testing.T) {
+	handler, err := NewHandler(Config{MachineAuthentication: handlerMachineStub{}, RateLimiter: &handlerRateLimiterStub{}, AdminAuthentication: handlerAdminStub{}, Management: handlerManagementStub{}, Operations: &handlerOperationStub{}, SessionCookieName: "session", CSRFCookieName: "csrf", TrustedProxyCIDRs: []string{"127.0.0.1/32"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://fixture/open/v1/operations/ai_review_plan:12", nil)
+	request.RemoteAddr = "127.0.0.1:40000"
+	request.Header.Set("X-Forwarded-Proto", "https")
+	request.Header.Set("X-Forwarded-For", "127.0.0.1")
+	if _, err = handler.source(request); err == nil {
+		t.Fatal("all-proxy chain was accepted as a client")
+	}
+	request.Header.Set("X-Forwarded-For", "203.0.113.50, 127.0.0.1")
+	if source, e := handler.source(request); e != nil || source != netip.MustParseAddr("203.0.113.50") {
+		t.Fatalf("controlled proxy origin=%v err=%v", source, e)
+	}
+	request.Header.Set("X-Forwarded-For", "198.51.100.9, 203.0.113.50, 127.0.0.1")
+	if source, e := handler.source(request); e != nil || source != netip.MustParseAddr("203.0.113.50") {
+		t.Fatalf("prepended spoof selected source=%v err=%v", source, e)
+	}
+	request.RemoteAddr = "198.51.100.9:40000"
+	if _, err = handler.source(request); !errors.Is(err, errHTTPSRequired) {
+		t.Fatalf("untrusted peer could declare HTTPS err=%v", err)
 	}
 }
 
