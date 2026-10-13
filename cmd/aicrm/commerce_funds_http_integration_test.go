@@ -1107,7 +1107,32 @@ func TestPostgreSQLCommerceFundsHTTPJourney(t *testing.T) {
 	}
 
 	firstRefund := commerceFundsRequestRefund(t, handler, paymentID, 300, "commerce-funds-first-refund", "commerce-funds-first-refund-key", verifiedTransactionID)
-	firstRefundBody, firstRefundHeaders := commerceFundsSignedCallback(t, platformKey, apiKey, "commerce-funds-refund-1", "REFUND.SUCCESS", map[string]any{"appid": "app", "mchid": "mch", "out_refund_no": firstRefund, "refund_id": "provider-refund-1", "refund_status": "SUCCESS", "success_time": now.Add(2 * time.Second).Format(time.RFC3339Nano), "amount": map[string]any{"refund": 300, "total": 1000, "currency": "CNY"}})
+	// Validly signed missing/wrong transaction bindings must cause no money,
+	// order, entitlement, receipt, audit or outbox mutation.
+	protectedBefore := refundFixtureFacts(t, ctx, pool)
+	for _, caseName := range []string{"missing_order", "missing_transaction", "wrong_transaction", "wrong_order"} {
+		payload := map[string]any{"appid": "app", "mchid": "mch", "out_trade_no": merchant, "transaction_id": verifiedTransactionID, "out_refund_no": firstRefund, "refund_id": "provider-refund-negative", "refund_status": "SUCCESS", "success_time": now.Add(2 * time.Second).Format(time.RFC3339Nano), "amount": map[string]any{"refund": 300, "total": 1000, "currency": "CNY"}}
+		want := http.StatusConflict
+		switch caseName {
+		case "missing_order":
+			delete(payload, "out_trade_no")
+			want = http.StatusUnauthorized
+		case "missing_transaction":
+			delete(payload, "transaction_id")
+			want = http.StatusUnauthorized
+		case "wrong_transaction":
+			payload["transaction_id"] = "synthetic-wrong-transaction"
+		case "wrong_order":
+			payload["out_trade_no"] = "synthetic-wrong-order"
+		}
+		body, headers := commerceFundsSignedCallback(t, platformKey, apiKey, "commerce-funds-negative-"+caseName, "REFUND.SUCCESS", payload)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, commerceFundsCallbackRequest("/api/public/wechat-pay/callbacks/refund", body, headers))
+		if response.Code != want || refundFixtureFacts(t, ctx, pool) != protectedBefore {
+			t.Fatalf("refund binding %s status=%d want=%d or protected facts changed", caseName, response.Code, want)
+		}
+	}
+	firstRefundBody, firstRefundHeaders := commerceFundsSignedCallback(t, platformKey, apiKey, "commerce-funds-refund-1", "REFUND.SUCCESS", map[string]any{"appid": "app", "mchid": "mch", "out_trade_no": merchant, "transaction_id": verifiedTransactionID, "out_refund_no": firstRefund, "refund_id": "provider-refund-1", "refund_status": "SUCCESS", "success_time": now.Add(2 * time.Second).Format(time.RFC3339Nano), "amount": map[string]any{"refund": 300, "total": 1000, "currency": "CNY"}})
 	firstRefundResponse := httptest.NewRecorder()
 	handler.ServeHTTP(firstRefundResponse, commerceFundsCallbackRequest("/api/public/wechat-pay/callbacks/refund", firstRefundBody, firstRefundHeaders))
 	if firstRefundResponse.Code != http.StatusOK {
@@ -1152,7 +1177,7 @@ func TestPostgreSQLCommerceFundsHTTPJourney(t *testing.T) {
 	if accepted != 1 || conflicted != 1 || finalRefund == "" {
 		t.Fatalf("concurrent refunds accepted=%d conflicted=%d refund=%q", accepted, conflicted, finalRefund)
 	}
-	finalRefundBody, finalRefundHeaders := commerceFundsSignedCallback(t, platformKey, apiKey, "commerce-funds-refund-2", "REFUND.SUCCESS", map[string]any{"appid": "app", "mchid": "mch", "out_refund_no": finalRefund, "refund_id": "provider-refund-2", "refund_status": "SUCCESS", "success_time": now.Add(3 * time.Second).Format(time.RFC3339Nano), "amount": map[string]any{"refund": 700, "total": 1000, "currency": "CNY"}})
+	finalRefundBody, finalRefundHeaders := commerceFundsSignedCallback(t, platformKey, apiKey, "commerce-funds-refund-2", "REFUND.SUCCESS", map[string]any{"appid": "app", "mchid": "mch", "out_trade_no": merchant, "transaction_id": verifiedTransactionID, "out_refund_no": finalRefund, "refund_id": "provider-refund-2", "refund_status": "SUCCESS", "success_time": now.Add(3 * time.Second).Format(time.RFC3339Nano), "amount": map[string]any{"refund": 700, "total": 1000, "currency": "CNY"}})
 	finalRefundResponse := httptest.NewRecorder()
 	handler.ServeHTTP(finalRefundResponse, commerceFundsCallbackRequest("/api/public/wechat-pay/callbacks/refund", finalRefundBody, finalRefundHeaders))
 	if finalRefundResponse.Code != http.StatusOK {

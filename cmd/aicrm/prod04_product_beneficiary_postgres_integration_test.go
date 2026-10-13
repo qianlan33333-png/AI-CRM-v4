@@ -231,7 +231,7 @@ func TestPROD04PostgreSQLAdminAssistedBeneficiaryIsolation(t *testing.T) {
 	// A successful refund against B's order must not alter C's independent aggregate.
 	refundNo := commerceFundsRequestRefund(t, handler, periodPaymentB, serviceProduct.PriceMinor, "prod04-refund-b-0001", "prod04-refund-key-b-0001", "prod04-tx-b-0001")
 	refundAt := time.Now().UTC().Truncate(time.Microsecond)
-	refundBody, refundHeaders := commerceFundsSignedCallback(t, platformKey, apiKey, "prod04-event-refund-b-0001", "REFUND.SUCCESS", map[string]any{"appid": "prod04-app", "mchid": "prod04-merchant", "out_refund_no": refundNo, "refund_id": "prod04-provider-refund-b-0001", "refund_status": "SUCCESS", "success_time": refundAt.Format(time.RFC3339Nano), "amount": map[string]any{"refund": serviceProduct.PriceMinor, "total": serviceProduct.PriceMinor, "currency": "CNY"}})
+	refundBody, refundHeaders := commerceFundsSignedCallback(t, platformKey, apiKey, "prod04-event-refund-b-0001", "REFUND.SUCCESS", map[string]any{"appid": "prod04-app", "mchid": "prod04-merchant", "out_trade_no": merchantB, "transaction_id": "prod04-tx-b-0001", "out_refund_no": refundNo, "refund_id": "prod04-provider-refund-b-0001", "refund_status": "SUCCESS", "success_time": refundAt.Format(time.RFC3339Nano), "amount": map[string]any{"refund": serviceProduct.PriceMinor, "total": serviceProduct.PriceMinor, "currency": "CNY"}})
 	refundResponse := httptest.NewRecorder()
 	handler.ServeHTTP(refundResponse, commerceFundsCallbackRequest("/api/public/wechat-pay/callbacks/refund", refundBody, refundHeaders))
 	if refundResponse.Code != http.StatusOK {

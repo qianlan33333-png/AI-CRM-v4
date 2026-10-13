@@ -67,7 +67,7 @@ func TestPostgreSQLAlipayRefundCallbackUsesRefundTimestamp(t *testing.T) {
 	periodRefundNo := "pay02-period-refund-0001"
 	periodRefund := pay02RequestAlipayRefund(t, fixture, period.PaymentID, periodAmount, periodRefundNo, "pay02-period-refund-key-0001")
 	periodAcceptedAt := pay02SetSyntheticRefundAcceptedAt(t, fixture, periodRefund.ID, periodPaymentAt)
-	periodRefundAt := periodAcceptedAt.Add(time.Minute).Truncate(time.Second)
+	periodRefundAt := periodPaymentAt.Add(2 * time.Second).Truncate(time.Second)
 	refundForm := pay02SignedRefundForm(t, signer, "pay02-period-refund-notify-0001", period.MerchantOrder, periodTradeNo, periodRefundNo, periodAmount, periodAmount, &periodPaymentAt, periodRefundAt, periodRefundAt.Add(time.Minute))
 
 	// Signature failure must stop before Payment/Order/entitlement persistence.
@@ -82,13 +82,14 @@ func TestPostgreSQLAlipayRefundCallbackUsesRefundTimestamp(t *testing.T) {
 		t.Fatalf("invalid signature changed refund facts: status=%d body=%q SQL=%+v", invalidStatus, invalidBody, invalidFacts)
 	}
 
-	// gmt_refund itself is authoritative: a stale refund time remains a conflict
-	// even when notify_time is later and the original payment time is present.
-	staleForm := pay02SignedRefundForm(t, signer, "pay02-period-stale-refund-notify-0001", period.MerchantOrder, periodTradeNo, periodRefundNo, periodAmount, periodAmount, &periodPaymentAt, periodPaymentAt, periodRefundAt.Add(time.Minute))
+	// An occurrence strictly before creation is rejected, independent of later
+	// notification/processing. A valid occurrence may predate updated_at.
+	staleAt := periodRefund.CreatedAt.UTC().Truncate(time.Second).Add(-time.Second)
+	staleForm := pay02SignedRefundForm(t, signer, "pay02-period-stale-refund-notify-0001", period.MerchantOrder, periodTradeNo, periodRefundNo, periodAmount, periodAmount, &periodPaymentAt, staleAt, periodRefundAt.Add(time.Minute))
 	staleStatus, staleBody := pay02PostAlipayForm(t, callbackServer, staleForm)
 	staleDigest := sha256.Sum256([]byte(staleForm.Get("notify_id")))
-	staleFacts := pay02ReadAlipayRefundFacts(t, fixture, period.OrderID, periodRefund.ID, staleDigest[:], periodPaymentAt)
-	t.Logf("PAY02_OLD_REFUND_TIME status=%d body=%q payment_at=%s refund_at=%s notify_at=%s SQL=%+v", staleStatus, staleBody, periodPaymentAt.Format(time.RFC3339), periodPaymentAt.Format(time.RFC3339), periodRefundAt.Add(time.Minute).Format(time.RFC3339), staleFacts)
+	staleFacts := pay02ReadAlipayRefundFacts(t, fixture, period.OrderID, periodRefund.ID, staleDigest[:], staleAt)
+	t.Logf("PAY02_OLD_REFUND_TIME status=%d body=%q payment_at=%s refund_at=%s notify_at=%s SQL=%+v", staleStatus, staleBody, periodPaymentAt.Format(time.RFC3339), staleAt.Format(time.RFC3339), periodRefundAt.Add(time.Minute).Format(time.RFC3339), staleFacts)
 	if staleStatus != http.StatusConflict || staleFacts.RefundStatus != string(paymentdomain.RefundEffectAccepted) || !pay02NoSettlementWrites(staleFacts) {
 		t.Fatalf("stale gmt_refund did not reject without writes: status=%d body=%q SQL=%+v", staleStatus, staleBody, staleFacts)
 	}
@@ -99,20 +100,20 @@ func TestPostgreSQLAlipayRefundCallbackUsesRefundTimestamp(t *testing.T) {
 	refundDigest := sha256.Sum256([]byte(refundForm.Get("notify_id")))
 	refundFacts := pay02ReadAlipayRefundFacts(t, fixture, period.OrderID, periodRefund.ID, refundDigest[:], periodRefundAt)
 	t.Logf("PAY02_DUAL_TIMESTAMP status=%d body=%q gmt_payment=%s gmt_refund=%s accepted_at=%s SQL=%+v", refundStatus, refundBody, periodPaymentAt.Format(time.RFC3339), periodRefundAt.Format(time.RFC3339), periodAcceptedAt.Format(time.RFC3339Nano), refundFacts)
-	if refundStatus != http.StatusOK || refundBody != "success" || !pay02SettledAt(refundFacts, periodRefundAt, periodPaymentAt, periodAmount, "refunded", 1) {
+	if refundStatus != http.StatusOK || refundBody != "success" || !pay02SettledAt(refundFacts, periodRefundAt, periodPaymentAt, periodAcceptedAt, periodAmount, "refunded", 1) {
 		t.Fatalf("dual-timestamp callback did not settle at gmt_refund: status=%d body=%q SQL=%+v", refundStatus, refundBody, refundFacts)
 	}
-	pay02AssertServiceEntitlement(t, fixture, period.OrderID, "refunded", &periodRefundAt, periodAmount)
+	pay02AssertServiceEntitlement(t, fixture, period.OrderID, "refunded", &periodAcceptedAt, periodAmount)
 
 	// Replaying the same signed notification returns success without a second
 	// settlement, Order transition, or entitlement refund receipt.
 	replayStatus, replayBody := pay02PostAlipayForm(t, callbackServer, refundForm)
 	replayFacts := pay02ReadAlipayRefundFacts(t, fixture, period.OrderID, periodRefund.ID, refundDigest[:], periodRefundAt)
 	t.Logf("PAY02_REPLAY status=%d body=%q SQL=%+v", replayStatus, replayBody, replayFacts)
-	if replayStatus != http.StatusOK || replayBody != "success" || !pay02SettledAt(replayFacts, periodRefundAt, periodPaymentAt, periodAmount, "refunded", 1) {
+	if replayStatus != http.StatusOK || replayBody != "success" || !pay02SettledAt(replayFacts, periodRefundAt, periodPaymentAt, periodAcceptedAt, periodAmount, "refunded", 1) {
 		t.Fatalf("refund replay produced a second or inconsistent settlement: status=%d body=%q SQL=%+v", replayStatus, replayBody, replayFacts)
 	}
-	pay02AssertServiceEntitlement(t, fixture, period.OrderID, "refunded", &periodRefundAt, periodAmount)
+	pay02AssertServiceEntitlement(t, fixture, period.OrderID, "refunded", &periodAcceptedAt, periodAmount)
 
 	// Compatibility form without gmt_refund: use the signed notify_time, never
 	// the older gmt_payment. Unit-level signed normalization is also covered.
@@ -135,7 +136,7 @@ func TestPostgreSQLAlipayRefundCallbackUsesRefundTimestamp(t *testing.T) {
 	fallbackDigest := sha256.Sum256([]byte(fallbackForm.Get("notify_id")))
 	fallbackFacts := pay02ReadAlipayRefundFacts(t, fixture, fallback.OrderID, fallbackRefund.ID, fallbackDigest[:], fallbackAt)
 	t.Logf("PAY02_NOTIFY_TIME_FALLBACK status=%d body=%q gmt_payment=%s notify_time=%s SQL=%+v", fallbackStatus, fallbackBody, fallbackPaymentAt.Format(time.RFC3339), fallbackAt.Format(time.RFC3339), fallbackFacts)
-	if fallbackStatus != http.StatusOK || fallbackBody != "success" || !pay02SettledAt(fallbackFacts, fallbackAt, fallbackPaymentAt, 300, "partially_refunded", 1) {
+	if fallbackStatus != http.StatusOK || fallbackBody != "success" || !pay02SettledAt(fallbackFacts, fallbackAt, fallbackPaymentAt, fallbackAcceptedAt, 300, "partially_refunded", 1) {
 		t.Fatalf("refund callback without gmt_refund did not use notify_time: status=%d body=%q SQL=%+v", fallbackStatus, fallbackBody, fallbackFacts)
 	}
 
@@ -152,7 +153,6 @@ func TestPostgreSQLAlipayRefundCallbackUsesRefundTimestamp(t *testing.T) {
 	}
 	unknownRefundNo := "pay02-unknown-refund-0001"
 	unknownRefund := pay02RequestAlipayRefund(t, fixture, unknown.PaymentID, 400, unknownRefundNo, "pay02-unknown-refund-key-0001")
-	unknownAcceptedAt := pay02SetSyntheticRefundAcceptedAt(t, fixture, unknownRefund.ID, unknownPaymentAt)
 	unknownAdapter := &pay02UnknownAlipayRefundAdapter{}
 	if err := pay02RunUnknownAlipayRefundEffect(t, ctx, fixture, unknownRefund.ID, unknownAdapter); err != nil {
 		t.Fatalf("run synthetic outcome_unknown attempt: %v", err)
@@ -167,13 +167,14 @@ func TestPostgreSQLAlipayRefundCallbackUsesRefundTimestamp(t *testing.T) {
 	if unknownRefundState != string(paymentdomain.RefundOutcomeUnknown) || unknownEffectState != string(effectport.StateUnknown) {
 		t.Fatalf("synthetic unknown path states refund=%q effect=%q", unknownRefundState, unknownEffectState)
 	}
+	unknownAcceptedAt := pay02SetSyntheticRefundAcceptedAt(t, fixture, unknownRefund.ID, unknownPaymentAt)
 	unknownAt := unknownAcceptedAt.Add(3 * time.Minute).Truncate(time.Second)
 	unknownForm := pay02SignedRefundForm(t, signer, "pay02-unknown-refund-notify-0001", unknown.MerchantOrder, unknownTradeNo, unknownRefundNo, unknownAmount, 400, &unknownPaymentAt, unknownAt, unknownAt.Add(time.Minute))
 	unknownStatus, unknownBody := pay02PostAlipayForm(t, callbackServer, unknownForm)
 	unknownDigest := sha256.Sum256([]byte(unknownForm.Get("notify_id")))
 	unknownFacts := pay02ReadAlipayRefundFacts(t, fixture, unknown.OrderID, unknownRefund.ID, unknownDigest[:], unknownAt)
 	t.Logf("PAY02_OUTCOME_UNKNOWN_CALLBACK status=%d body=%q refund_accepted_at=%s refund_at=%s adapter_calls=%d real_external_call=%t SQL=%+v", unknownStatus, unknownBody, unknownAcceptedAt.Format(time.RFC3339Nano), unknownAt.Format(time.RFC3339), unknownAdapter.calls, unknownAdapter.realExternalCall, unknownFacts)
-	if unknownStatus != http.StatusOK || unknownBody != "success" || !pay02SettledAt(unknownFacts, unknownAt, unknownPaymentAt, 400, "partially_refunded", 1) {
+	if unknownStatus != http.StatusOK || unknownBody != "success" || !pay02SettledAt(unknownFacts, unknownAt, unknownPaymentAt, unknownAcceptedAt, 400, "partially_refunded", 1) {
 		t.Fatalf("verified callback did not settle outcome_unknown refund: status=%d body=%q SQL=%+v", unknownStatus, unknownBody, unknownFacts)
 	}
 	var finalEffectState string
@@ -288,12 +289,17 @@ func pay02NextPaymentTime(t *testing.T, fixture *productExternalPushChromiumFixt
 func pay02SetSyntheticRefundAcceptedAt(t *testing.T, fixture *productExternalPushChromiumFixture, refundID int64, paymentAt time.Time) time.Time {
 	t.Helper()
 	acceptedAt := paymentAt.Add(10 * time.Minute)
-	result, err := fixture.application.pool.Native().Exec(fixture.ctx, `UPDATE payment_refunds SET updated_at=$2 WHERE id=$1 AND status=$3`, refundID, acceptedAt, paymentdomain.RefundEffectAccepted)
+	result, err := fixture.application.pool.Native().Exec(fixture.ctx, `UPDATE payment_refunds SET updated_at=$2 WHERE id=$1 AND status IN ($3,$4)`, refundID, acceptedAt, paymentdomain.RefundEffectAccepted, paymentdomain.RefundOutcomeUnknown)
 	if err != nil {
 		t.Fatalf("set synthetic private-PG refund acceptance time: %v", err)
 	}
 	if rows := result.RowsAffected(); rows != 1 {
 		t.Fatalf("set synthetic private-PG refund acceptance time affected=%d", rows)
+	}
+	// Freeze the Order processing floor as well. Provider occurrence remains
+	// earlier; both state clocks must retain this exact non-regressing floor.
+	if _, err = fixture.application.pool.Native().Exec(fixture.ctx, `UPDATE orders SET updated_at=$2 WHERE id=(SELECT order_id FROM payments p JOIN payment_refunds r ON r.payment_id=p.id WHERE r.id=$1)`, refundID, acceptedAt); err != nil {
+		t.Fatal(err)
 	}
 	t.Logf("PAY02_SYNTHETIC_TIMELINE payment_at=%s refund_accepted_at=%s (private PG fixture timestamp only)", paymentAt.Format(time.RFC3339), acceptedAt.Format(time.RFC3339))
 	return acceptedAt
@@ -411,12 +417,12 @@ func pay02NoSettlementWrites(facts pay02AlipayRefundFacts) bool {
 	return facts.CallbackCount == 0 && facts.PaymentSettlementCount == 0 && !facts.PaymentAuditAt.Valid && !facts.PaymentOutboxAt.Valid && !facts.OperationReceiptAt.Valid && facts.OrderRefundCount == 0 && !facts.OrderRefundAt.Valid && !facts.OrderAuditAt.Valid && !facts.OrderOutboxAt.Valid
 }
 
-func pay02SettledAt(facts pay02AlipayRefundFacts, expectedAt, expectedPaymentAt time.Time, amount int64, orderStatus string, transitions int64) bool {
-	return facts.RefundStatus == string(paymentdomain.RefundCompleted) && facts.RefundAmount == amount && facts.RefundUpdatedAt.Equal(expectedAt) &&
+func pay02SettledAt(facts pay02AlipayRefundFacts, expectedAt, expectedPaymentAt, expectedProcessingAt time.Time, amount int64, orderStatus string, transitions int64) bool {
+	return facts.RefundStatus == string(paymentdomain.RefundCompleted) && facts.RefundAmount == amount && facts.RefundUpdatedAt.Equal(expectedProcessingAt) &&
 		facts.PaymentStatus == string(paymentdomain.StatusPaid) && facts.PaidConfirmedAt != nil && facts.PaidConfirmedAt.Equal(expectedPaymentAt) &&
-		facts.OrderStatus == orderStatus && facts.OrderRefundedMinor == amount && facts.OrderUpdatedAt.Equal(expectedAt) &&
+		facts.OrderStatus == orderStatus && facts.OrderRefundedMinor == amount && facts.OrderUpdatedAt.Equal(expectedProcessingAt) &&
 		facts.CallbackCount == 1 && facts.PaymentSettlementCount == 1 && facts.PaymentAuditAt.Valid && facts.PaymentAuditAt.Time.Equal(expectedAt) &&
-		facts.PaymentOutboxAt.Valid && facts.PaymentOutboxAt.Time.Equal(expectedAt) && facts.OperationReceiptAt.Valid && facts.OperationReceiptAt.Time.Equal(expectedAt) &&
+		facts.PaymentOutboxAt.Valid && facts.PaymentOutboxAt.Time.Equal(expectedAt) && facts.OperationReceiptAt.Valid && facts.OperationReceiptAt.Time.Equal(expectedProcessingAt) &&
 		facts.OrderRefundCount == transitions && facts.OrderRefundAt.Valid && facts.OrderRefundAt.Time.Equal(expectedAt) &&
 		facts.OrderAuditAt.Valid && facts.OrderAuditAt.Time.Equal(expectedAt) && facts.OrderOutboxAt.Valid && facts.OrderOutboxAt.Time.Equal(expectedAt)
 }

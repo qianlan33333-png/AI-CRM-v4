@@ -1,83 +1,29 @@
 {
   "schema": 1,
-  "baseline_sha": "1fce5ecede73cdbb6423d3a2c8d48c90fd5c5b87",
+  "baseline_sha": "aa3c7096e235d5743b976a09e8991a145b624e7d",
   "checks": [
     {
       "lane": "backend",
-      "package": "./cmd/migrate-commerce-history",
-      "test": "TestPostgreSQLCommerceHistoryCommandApplyReplayReconcile",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/migrate-commerce-history",
-      "test": "TestPostgreSQLHistoricalDeltaAtomicPaymentAndReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/migrate-v2-config-definitions",
-      "test": "TestCommercePreflightReusesMappingsAndReportsDrift",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/migrate-v2-config-definitions",
-      "test": "TestCommerceSafeApplyPreservesFactsAndReplays",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/migrate-v2-config-definitions",
-      "test": "TestCommerceAuditedCouponDeltaPreservesProductOperatorConfig",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLCommerceFundsHTTPJourney",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLDistributionProductPolicyCompositionUoW",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/migrate-v2-config-definitions",
-      "test": "TestCommerceExplicitReviewedCouponCASAndReplay",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/migrate-v2-config-definitions",
-      "test": "TestRunnerPostgresIntegrationApplyVerifyAndReplay",
+      "test": "TestPAY05PostgreSQLRefundUnknownAndDerivedReversal",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLPaymentConfirmationReconciliationRestoresOnlyVerifiedOrderFacts",
+      "test": "TestPROD04PostgreSQLAdminAssistedBeneficiaryIsolation",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLPaymentConfirmationReconciliationPreviewDoesNotWrite",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLPaymentConfirmationReconciliationRejectsExistingTransactionFactMismatch",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestOpenPlatformV1ReadPortsPostgreSQLJourney",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestAutomationAIAssistantAndGroupOpsShareRiverRuntime",
+      "test": "TestPostgreSQLAlipayRefundCallbackUsesRefundTimestamp",
       "postgres": true
     }
   ],

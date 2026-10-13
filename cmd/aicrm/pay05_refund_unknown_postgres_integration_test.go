@@ -66,9 +66,10 @@ func (pay05UnknownAdapter) Execute(_ context.Context, envelope effectport.Envelo
 }
 
 type pay05RefundQuery struct {
-	amount      int64
-	providerRef string
-	statuses    []string
+	amount                        int64
+	providerRef                   string
+	merchantOrder, transactionRef string
+	statuses                      []string
 }
 
 // pay05RefundReconciler returns only synthetic Provider-read facts. It has no
@@ -109,13 +110,15 @@ func (r *pay05RefundReconciler) QueryRefund(_ context.Context, refundNo string) 
 	r.calls[refundNo]++
 	call := r.calls[refundNo]
 	result := paymentport.WeChatPayRefundQuery{
-		RefundNo:       refundNo,
-		Currency:       "CNY",
-		Status:         status,
-		AmountMinor:    query.amount,
-		TotalMinor:     1000,
-		OccurredAt:     time.Now().UTC().Truncate(time.Microsecond),
-		EvidenceDigest: effectport.Hash("pay05.synthetic.refund-query", refundNo, status, strconv.Itoa(call)),
+		RefundNo:             refundNo,
+		MerchantOrderNo:      query.merchantOrder,
+		TransactionReference: query.transactionRef,
+		Currency:             "CNY",
+		Status:               status,
+		AmountMinor:          query.amount,
+		TotalMinor:           1000,
+		OccurredAt:           time.Now().UTC().Truncate(time.Microsecond),
+		EvidenceDigest:       effectport.Hash("pay05.synthetic.refund-query", refundNo, status, strconv.Itoa(call)),
 	}
 	if status == "SUCCESS" {
 		result.RefundDigest = effectport.Hash("wechatpay.refund", query.providerRef)
@@ -353,7 +356,7 @@ func TestPAY05PostgreSQLRefundUnknownAndDerivedReversal(t *testing.T) {
 	unknownEffectWorker := effects.NewWorker(effectRepository, pay05UnknownAdapter{})
 	failedRefund := pay05RequestRefund(t, ctx, payments, paymentID, 300, "pay05-refund-failed", "pay05-refund-key-failed")
 	t.Logf("PAY05 refund case=closed refund_id=%d refund_no=%s requested_minor=300", failedRefund.ID, failedRefund.RefundNo)
-	reconciler.queries[failedRefund.RefundNo] = &pay05RefundQuery{amount: 300, providerRef: "pay05-provider-failed", statuses: []string{"CLOSED"}}
+	reconciler.queries[failedRefund.RefundNo] = &pay05RefundQuery{merchantOrder: merchant, transactionRef: "pay05-provider-payment", amount: 300, providerRef: "pay05-provider-failed", statuses: []string{"CLOSED"}}
 	if err = pay05RunUnknownEffect(t, ctx, pool, unknownEffectWorker, failedRefund.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +375,7 @@ func TestPAY05PostgreSQLRefundUnknownAndDerivedReversal(t *testing.T) {
 
 	refundA := pay05RequestRefund(t, ctx, payments, paymentID, 300, "pay05-refund-a", "pay05-refund-key-a")
 	t.Logf("PAY05 refund case=query_success_then_late_callback refund_id=%d refund_no=%s requested_minor=300", refundA.ID, refundA.RefundNo)
-	reconciler.queries[refundA.RefundNo] = &pay05RefundQuery{amount: 300, providerRef: "pay05-provider-refund-a", statuses: []string{"PROCESSING", "SUCCESS"}}
+	reconciler.queries[refundA.RefundNo] = &pay05RefundQuery{merchantOrder: merchant, transactionRef: "pay05-provider-payment", amount: 300, providerRef: "pay05-provider-refund-a", statuses: []string{"PROCESSING", "SUCCESS"}}
 	if err = pay05RunUnknownEffect(t, ctx, pool, unknownEffectWorker, refundA.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +402,7 @@ func TestPAY05PostgreSQLRefundUnknownAndDerivedReversal(t *testing.T) {
 	firstEnd, firstUpdated := pay05AssertPartialRefund(t, ctx, pool, orderID, paymentID, claim.ClaimID, merchant, commissionID)
 	lateRefundA := httptest.NewRecorder()
 	refundABody, refundAHeaders := commerceFundsSignedCallback(t, platformKey, apiKey, "pay05-refund-a-callback", "REFUND.SUCCESS", map[string]any{
-		"appid": "pay05-app", "mchid": "pay05-mch", "out_refund_no": refundA.RefundNo, "refund_id": "pay05-provider-refund-a",
+		"appid": "pay05-app", "mchid": "pay05-mch", "out_trade_no": merchant, "transaction_id": "pay05-provider-payment", "out_refund_no": refundA.RefundNo, "refund_id": "pay05-provider-refund-a",
 		"refund_status": "SUCCESS", "success_time": time.Now().UTC().Format(time.RFC3339Nano),
 		"amount": map[string]any{"refund": 300, "total": 1000, "currency": "CNY"},
 	})
@@ -411,7 +414,7 @@ func TestPAY05PostgreSQLRefundUnknownAndDerivedReversal(t *testing.T) {
 
 	refundB := pay05RequestRefund(t, ctx, payments, paymentID, 700, "pay05-refund-b", "pay05-refund-key-b")
 	t.Logf("PAY05 refund case=processing_then_signed_callback refund_id=%d refund_no=%s requested_minor=700", refundB.ID, refundB.RefundNo)
-	reconciler.queries[refundB.RefundNo] = &pay05RefundQuery{amount: 700, providerRef: "pay05-provider-refund-b", statuses: []string{"PROCESSING"}}
+	reconciler.queries[refundB.RefundNo] = &pay05RefundQuery{merchantOrder: merchant, transactionRef: "pay05-provider-payment", amount: 700, providerRef: "pay05-provider-refund-b", statuses: []string{"PROCESSING"}}
 	if err = pay05RunUnknownEffect(t, ctx, pool, unknownEffectWorker, refundB.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +426,7 @@ func TestPAY05PostgreSQLRefundUnknownAndDerivedReversal(t *testing.T) {
 	}
 	pay05AssertCommerce(t, ctx, pool, orderID, paymentID, claim.ClaimID, merchant, "partially_refunded", 300, "refunded", "consumed", "redeemed", "held", 300, 140, commissionID)
 	refundBBody, refundBHeaders := commerceFundsSignedCallback(t, platformKey, apiKey, "pay05-refund-b-callback", "REFUND.SUCCESS", map[string]any{
-		"appid": "pay05-app", "mchid": "pay05-mch", "out_refund_no": refundB.RefundNo, "refund_id": "pay05-provider-refund-b",
+		"appid": "pay05-app", "mchid": "pay05-mch", "out_trade_no": merchant, "transaction_id": "pay05-provider-payment", "out_refund_no": refundB.RefundNo, "refund_id": "pay05-provider-refund-b",
 		"refund_status": "SUCCESS", "success_time": time.Now().UTC().Format(time.RFC3339Nano),
 		"amount": map[string]any{"refund": 700, "total": 1000, "currency": "CNY"},
 	})
