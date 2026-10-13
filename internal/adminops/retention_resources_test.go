@@ -104,6 +104,29 @@ func TestRetentionResourceCatalogBindsCanonicalRegistry(t *testing.T) {
 	}
 }
 
+func TestRetentionNewBusinessObjectsStayProtectedWithoutExecutablePolicies(t *testing.T) {
+	service := &RetentionService{enabled: true}
+	bindCoverageOwners(t, service)
+	_, items := coverageByName(t, service)
+	for name, owner := range map[string]string{
+		"customer_contact_profiles": "customer", "invoice_applications": "invoice", "invoice_audit_events": "invoice", "invoice_callback_receipts": "invoice", "invoice_card_setup_intents": "invoice", "invoice_operation_receipts": "invoice",
+		"media_private_images": "media", "order_external_history_facts": "order", "order_wechat_shop_facts": "order", "order_wechat_shop_lines": "order", "product_variants": "product", "product_wechat_shop_skus": "product",
+		"survey_redemption_codes": "survey", "survey_submission_attachments": "survey", "wechat_shop_callback_receipts": "wechatshop", "wechat_shop_order_progress": "wechatshop", "wechat_shop_product_refresh_items": "wechatshop", "wechat_shop_product_refreshes": "wechatshop",
+	} {
+		item, found := items["table:"+name]
+		if !found || item.Owner != owner || item.Policy != "permanent" || item.CoverageStatus != "protected" || item.PolicyID != "" || item.CleanupEntrypoint != "" {
+			t.Fatalf("registered business object became executable cleanup input: %s %+v", name, item)
+		}
+		if validRetentionPolicy(name) {
+			t.Fatalf("business table accepted as a runtime prune policy: %s", name)
+		}
+	}
+	key := items["filesystem_prefix:/var/lib/aicrm/invoice-materials"]
+	if key.Owner != "config" || key.Policy != "never_delete_by_retention" || key.CoverageStatus != "protected" || key.PolicyID != "" || key.CleanupEntrypoint != "" {
+		t.Fatalf("Invoice private material lost Config protection: %+v", key)
+	}
+}
+
 func TestRetentionCoveragePreservesGapsAndExactPolicyBindings(t *testing.T) {
 	service := &RetentionService{enabled: true}
 	bindCoverageOwners(t, service)

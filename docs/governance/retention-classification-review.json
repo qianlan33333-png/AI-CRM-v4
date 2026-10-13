@@ -8,7 +8,7 @@
   "counts": {
     "operational_detail_30d": 2,
     "owner_projection": 8,
-    "permanent": 350,
+    "permanent": 369,
     "protected_mixed_payload": 19,
     "protected_unclassified": 1,
     "runtime_coordination": 7,
@@ -15402,7 +15402,574 @@
         "consumed_at",
         "consumer_effect_ref"
       ]
+    },
+    "customer_contact_profiles": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "customer",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "客户本人提供并供订单与问卷复用的联系方式和邮寄地址，不是目录缓存；通用保留清理不得删除，领域授权更新按原生命周期处理。",
+      "source": "migrations/0243_customer_contact_profiles.sql",
+      "evidence": {
+        "ddl_line": 3,
+        "owner_access": [
+          {
+            "path": "internal/customer/store/contact.go",
+            "line": 17,
+            "statement": "if _, err = tx.Exec(ctx, `INSERT INTO customer_contact_profiles(customer_id) VALUES($1) ON CONFLICT DO NOTHING`, c.CustomerID); err != nil {"
+          },
+          {
+            "path": "internal/customer/store/contact.go",
+            "line": 21,
+            "statement": "if err = tx.QueryRow(ctx, `SELECT customer_id FROM customer_contact_profiles WHERE customer_id=$1 FOR UPDATE`, c.CustomerID).Scan(&locked); err != nil {"
+          },
+          {
+            "path": "internal/customer/store/contact.go",
+            "line": 24,
+            "statement": "_, err = tx.Exec(ctx, `UPDATE customer_contact_profiles SET"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "invoice_applications": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "invoice",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "订单开票申请、买方抬头、金额快照、蓝红票号及既有效果绑定是财务业务事实；历史查询、冲红和对账依赖原记录。",
+      "source": "migrations/0224_invoice.sql",
+      "evidence": {
+        "ddl_line": 31,
+        "owner_access": [
+          {
+            "path": "internal/invoice/preflight.go",
+            "line": 19,
+            "statement": "return t.QueryRow(tx, `SELECT id FROM invoice_applications WHERE issue_effect=$1 OR reverse_effect=$1`, ref).Scan(&id)"
+          },
+          {
+            "path": "internal/invoice/service.go",
+            "line": 377,
+            "statement": "_, e = t.Exec(ctx, `INSERT INTO invoice_applications(id,order_id,customer_id,identity_id,invoice_id,state,snapshot)VALUES($1,$2,$3,$4,$5,'awaiting_title',$6)`, a.ID, a.OrderID, a.C"
+          },
+          {
+            "path": "internal/invoice/service.go",
+            "line": 770,
+            "statement": "return t.QueryRow(tx, `SELECT id FROM invoice_applications WHERE issue_effect=$1 OR reverse_effect=$1`, effectID).Scan(&id)"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "invoice_audit_events": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "invoice",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "开票与冲红动作及其证据摘要是可追溯财务审计，不是短期运行日志。",
+      "source": "migrations/0224_invoice.sql",
+      "evidence": {
+        "ddl_line": 49,
+        "owner_access": [
+          {
+            "path": "internal/invoice/store.go",
+            "line": 21,
+            "statement": "e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM invoice_audit_events WHERE application_id=$1 AND event_type='buyer_corrected' AND material->>'invoice_id'=$2)`, a.ID, a.InvoiceID)"
+          },
+          {
+            "path": "internal/invoice/store.go",
+            "line": 32,
+            "statement": "e = tx.QueryRow(ctx, `SELECT material,evidence_digest FROM invoice_audit_events WHERE application_id=$1 AND event_type='official_response' AND id>(SELECT max(id) FROM invoice_audit"
+          },
+          {
+            "path": "internal/invoice/store.go",
+            "line": 66,
+            "statement": "_, e = tx.Exec(ctx, `UPDATE invoice_audit_events SET material=$3 WHERE application_id=$1 AND event_type='buyer_corrected' AND evidence_digest=$2`, a.ID, string(evidence), material)"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "invoice_callback_receipts": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "invoice",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "可信开票回调的事件和正文摘要防止重复处理及内容漂移；清理会破坏原回调重放边界。",
+      "source": "migrations/0224_invoice.sql",
+      "evidence": {
+        "ddl_line": 46,
+        "owner_access": [
+          {
+            "path": "internal/invoice/notification.go",
+            "line": 56,
+            "statement": "e = t.QueryRow(tx, `INSERT INTO invoice_callback_receipts(event_digest,body_digest,application_id)VALUES($1,$2,$3)ON CONFLICT DO NOTHING RETURNING body_digest`, id, n.BodyDigest, a"
+          },
+          {
+            "path": "internal/invoice/notification.go",
+            "line": 59,
+            "statement": "e = t.QueryRow(tx, `SELECT body_digest FROM invoice_callback_receipts WHERE event_digest=$1`, id).Scan(&prior)"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "invoice_card_setup_intents": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "invoice",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "已接受开票卡配置的冻结材料、效果引用、摘要和最终 card_id 支撑重放与对账；不是可丢弃作业详情。",
+      "source": "migrations/0230_invoice_card_configuration.sql",
+      "evidence": {
+        "ddl_line": 52,
+        "owner_access": [
+          {
+            "path": "internal/invoice/card_setup.go",
+            "line": 28,
+            "statement": "e = tx.QueryRow(ctx, `SELECT effect_id,card_id,failure_code,material->>'logo_url' FROM invoice_card_setup_intents WHERE merchant_id=$1 ORDER BY id DESC LIMIT 1`, s.Config.MerchantI"
+          },
+          {
+            "path": "internal/invoice/card_setup.go",
+            "line": 75,
+            "statement": "if err = tx.QueryRow(ctx, `SELECT payload_digest FROM invoice_card_setup_intents WHERE effect_id=$1`, current.EffectID).Scan(&priorDigest); err != nil {"
+          },
+          {
+            "path": "internal/invoice/card_setup.go",
+            "line": 97,
+            "statement": "if _, err = tx.Exec(ctx, `INSERT INTO invoice_card_setup_intents(merchant_id,effect_id,payload_digest,material,actor_id) VALUES($1,$2,$3,$4,$5)`, s.Config.MerchantID, projection.ID"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "invoice_operation_receipts": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "invoice",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "客户、幂等键、订单与原申请绑定保证一次申请和原结果恢复；通用 TTL 不得遗忘原受理事实。",
+      "source": "migrations/0224_invoice.sql",
+      "evidence": {
+        "ddl_line": 42,
+        "owner_access": [
+          {
+            "path": "internal/invoice/service.go",
+            "line": 281,
+            "statement": "e = t.QueryRow(tx, `SELECT order_id,application_id FROM invoice_operation_receipts WHERE customer_id=ANY($1) AND key_digest=$2`, ids, digest).Scan(&priorOrder, &priorID)"
+          },
+          {
+            "path": "internal/invoice/service.go",
+            "line": 309,
+            "statement": "_, e = t.Exec(tx, `INSERT INTO invoice_operation_receipts(customer_id,key_digest,order_id,application_id)VALUES($1,$2,$3,$4)`, a.CustomerID, digest, orderID, a.ID)"
+          },
+          {
+            "path": "internal/invoice/service.go",
+            "line": 339,
+            "statement": "_, e = t.Exec(tx, `INSERT INTO invoice_operation_receipts(customer_id,key_digest,order_id,application_id)VALUES($1,$2,$3,$4)`, a.CustomerID, digest, orderID, a.ID)"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "media_private_images": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "media",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "私有问卷原图与正式 Blob 的关联、大小、类型和文件名供受权读取；不是临时分片或可重建 Provider 缓存。",
+      "source": "migrations/0239_survey_private_image_answers.sql",
+      "evidence": {
+        "ddl_line": 2,
+        "owner_access": [
+          {
+            "path": "internal/media/module.go",
+            "line": 71,
+            "statement": "err := pool.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM unnest(ARRAY['media_blobs','media_private_images','media_images','media_attachments','media_miniprograms','media_group_i"
+          },
+          {
+            "path": "internal/media/store/private_image.go",
+            "line": 48,
+            "statement": "_, e = tx.Exec(ctx, `INSERT INTO media_private_images(ref,blob_digest,file_name,mime_type,byte_size,width,height) VALUES($1,$2,$3,$4,$5,$6,$7)`, expected.Ref, digest, expected.File"
+          },
+          {
+            "path": "internal/media/store/private_image.go",
+            "line": 61,
+            "statement": "e = tx.QueryRow(ctx, `SELECT image.ref,image.file_name,image.mime_type,image.byte_size,image.width,image.height,blob.digest,blob.content FROM media_private_images image JOIN media_"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "order_external_history_facts": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "order",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "历史订单的原支付时间、导入时间、来源状态和售后事实由不可变触发器保护，不能按导入年龄删除。",
+      "source": "migrations/0221_external_order_history.sql",
+      "evidence": {
+        "ddl_line": 5,
+        "owner_access": [
+          {
+            "path": "internal/order/store/external_history.go",
+            "line": 15,
+            "statement": "err := tx.QueryRow(ctx, `SELECT source_paid_at,imported_at,source_status,source_after_sales FROM order_external_history_facts WHERE order_id=$1`, s.ID).Scan(&f.SourcePaidAt, &f.Imp"
+          },
+          {
+            "path": "internal/order/store/postgres.go",
+            "line": 161,
+            "statement": "if _, err = tx.Exec(ctx, `INSERT INTO order_external_history_facts(order_id,source_paid_at,imported_at,source_status,source_after_sales) VALUES($1,$2,$3,$4,$5)`, snapshot.ID, f.Sou"
+          },
+          {
+            "path": "internal/order/store/postgres.go",
+            "line": 364,
+            "statement": "add(`(CASE WHEN provider='external_history' THEN (SELECT source_paid_at FROM order_external_history_facts f WHERE f.order_id=orders.id) ELSE created_at END)>=?`, filter.CreatedFrom"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "order_wechat_shop_facts": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "order",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "微信小店已付款金额快照、加密联系方式、激活资格、原时间和分发进度是订单/权益对账事实。",
+      "source": "migrations/0236_wechat_shop_orders.sql",
+      "evidence": {
+        "ddl_line": 18,
+        "owner_access": [
+          {
+            "path": "internal/order/store/wechat_shop.go",
+            "line": 55,
+            "statement": "_, e = tx.Exec(ctx, `INSERT INTO order_wechat_shop_facts(order_id,app_id,paid_snapshot,paid_at,activation_eligible,contact_ciphertext,contact_key_version,source_updated_at,immutabl"
+          },
+          {
+            "path": "internal/order/store/wechat_shop.go",
+            "line": 78,
+            "statement": "if e = tx.QueryRow(ctx, `SELECT immutable_digest,app_id,source_updated_at FROM order_wechat_shop_facts WHERE order_id=$1 FOR UPDATE`, id).Scan(&prior, &app, &updated); e != nil {"
+          },
+          {
+            "path": "internal/order/store/wechat_shop.go",
+            "line": 105,
+            "statement": "if _, e = tx.Exec(ctx, `UPDATE order_wechat_shop_facts SET source_updated_at=$2 WHERE order_id=$1`, id, source.UpdatedAt); e != nil {"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "order_wechat_shop_lines": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "order",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "原小店商品/SKU 与订单行的映射支撑激活、补偿唤醒和售后归属，不是同步过程缓存。",
+      "source": "migrations/0236_wechat_shop_orders.sql",
+      "evidence": {
+        "ddl_line": 30,
+        "owner_access": [
+          {
+            "path": "internal/order/store/wechat_shop.go",
+            "line": 50,
+            "statement": "if _, e = tx.Exec(ctx, `INSERT INTO order_wechat_shop_lines VALUES($1,$2,$3,$4)`, id, item.LineNo, line.ProductID, line.SKUID); e != nil {"
+          },
+          {
+            "path": "internal/order/store/wechat_shop.go",
+            "line": 127,
+            "statement": "rows, e := tx.Query(ctx, `SELECT source_product_id,source_sku_id FROM order_wechat_shop_lines WHERE order_id=$1 ORDER BY line_no`, id)"
+          },
+          {
+            "path": "internal/order/store/wechat_shop.go",
+            "line": 154,
+            "statement": "rows, e := tx.Query(ctx, `SELECT DISTINCT o.source_key FROM orders o JOIN order_wechat_shop_facts f ON f.order_id=o.id JOIN order_wechat_shop_lines l ON l.order_id=o.id WHERE f.app"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "product_variants": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "product",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "商品规格定义、价格、属性和软移除版本属于正式商品生命周期；不以创建年龄执行通用删除。",
+      "source": "migrations/0241_product_variants.sql",
+      "evidence": {
+        "ddl_line": 3,
+        "owner_access": [
+          {
+            "path": "internal/product/store/postgres.go",
+            "line": 60,
+            "statement": "const productColumns = `id,product_code,name,description,price_minor,currency,images,created_by,created_at,updated_at,version,legacy_admin_projection,source_kind,variants_enabled,C"
+          },
+          {
+            "path": "internal/product/store/postgres.go",
+            "line": 251,
+            "statement": "rows, err := tx.Query(ctx, `SELECT id,product_code,name,CASE WHEN variants_enabled THEN COALESCE((SELECT min(price_minor) FROM product_variants v WHERE v.product_id=products.id AND"
+          },
+          {
+            "path": "internal/product/store/variants.go",
+            "line": 34,
+            "statement": "err = tx.QueryRow(ctx, `INSERT INTO product_variants(product_id,name,description,attributes,price_minor,position) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, id, v.Name, v.Description"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "product_wechat_shop_skus": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "product",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "按 App/原商品/原 SKU 唯一绑定 CRM 商品，保证重复同步命中原商品并供订单激活读取；删除会遗忘导入归属。",
+      "source": "migrations/0235_wechat_shop_products.sql",
+      "evidence": {
+        "ddl_line": 3,
+        "owner_access": [
+          {
+            "path": "internal/product/store/wechat_shop.go",
+            "line": 21,
+            "statement": "err = tx.QueryRow(ctx, `SELECT product_id FROM product_wechat_shop_skus WHERE app_id=$1 AND source_product_id=$2 AND source_sku_id=$3`, app, product, sku).Scan(&id)"
+          },
+          {
+            "path": "internal/product/store/wechat_shop.go",
+            "line": 52,
+            "statement": "_, err = tx.Exec(ctx, `INSERT INTO product_wechat_shop_skus VALUES($1,$2,$3,$4,$5)`, sku.AppID, sku.ProductID, sku.SKUID, id, at)"
+          },
+          {
+            "path": "internal/product/store/wechat_shop.go",
+            "line": 67,
+            "statement": "e = tx.QueryRow(ctx, `SELECT app_id,source_product_id,source_sku_id FROM product_wechat_shop_skus WHERE product_id=$1`, id).Scan(&v.AppID, &v.ProductID, &v.SKUID)"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "survey_redemption_codes": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "survey",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "兑换码库存、使用答卷和消费时间是一次消费及原成功键恢复依据；不是可按年龄清理的临时凭证。",
+      "source": "migrations/0237_survey_redemption_codes.sql",
+      "evidence": {
+        "ddl_line": 11,
+        "owner_access": [
+          {
+            "path": "internal/survey/module.go",
+            "line": 60,
+            "statement": "if err = pool.QueryRow(ctx, `SELECT to_regclass(current_schema() || '.survey_redemption_codes') IS NOT NULL`).Scan(&redemptionReady); err != nil {"
+          },
+          {
+            "path": "internal/survey/store/redemption.go",
+            "line": 35,
+            "statement": "tag, e := t.Exec(ctx, `INSERT INTO survey_redemption_codes(questionnaire_id,code_digest,code_ciphertext,created_by,created_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(questionnaire_id,c"
+          },
+          {
+            "path": "internal/survey/store/redemption.go",
+            "line": 44,
+            "statement": "e = t.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE used_submission_id IS NULL),count(*) FILTER(WHERE used_submission_id IS NOT NULL) FROM survey_redemption_codes WHERE ques"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "survey_submission_attachments": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "survey",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "正式答卷与 Media 私有原件、答案 ID、摘要和文件名的关系；必须与答卷历史一同保留，不归临时上传清理。",
+      "source": "migrations/0239_survey_private_image_answers.sql",
+      "evidence": {
+        "ddl_line": 18,
+        "owner_access": [
+          {
+            "path": "internal/survey/module.go",
+            "line": 51,
+            "statement": "err := pool.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM unnest(ARRAY['survey_questionnaires','survey_definition_versions','survey_definition_questions','survey_definition_option"
+          },
+          {
+            "path": "internal/survey/store/attachments.go",
+            "line": 14,
+            "statement": "tag, err := tx.Exec(ctx, `INSERT INTO survey_submission_attachments(answer_id,private_ref,file_name,mime_type,byte_size) SELECT id,$3,$4,$5,$6 FROM survey_submission_answers WHERE "
+          },
+          {
+            "path": "internal/survey/store/attachments.go",
+            "line": 29,
+            "statement": "err = tx.QueryRow(ctx, `SELECT att.private_ref,att.file_name,att.mime_type,att.byte_size FROM survey_submission_attachments att JOIN survey_submission_answers a ON a.id=att.answer_"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "wechat_shop_callback_receipts": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "wechatshop",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "小店事件/正文摘要的受理收据保证回调重放防重和漂移拒绝；不是普通同步日志。",
+      "source": "migrations/0236_wechat_shop_orders.sql",
+      "evidence": {
+        "ddl_line": 43,
+        "owner_access": [
+          {
+            "path": "internal/wechatshop/orders.go",
+            "line": 223,
+            "statement": "inserted, e := tx.Exec(ctx, `INSERT INTO wechat_shop_callback_receipts(app_id,event_digest,body_digest) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, s.AppID, callback.EventDigest[:], "
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "wechat_shop_order_progress": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "wechatshop",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "激活截止时间决定哪些历史支付可创建权益，成功读取水位保证兜底同步连续；删除并重建会改变业务资格或丢失同步覆盖。",
+      "source": "migrations/0236_wechat_shop_orders.sql",
+      "evidence": {
+        "ddl_line": 38,
+        "owner_access": [
+          {
+            "path": "internal/wechatshop/orders.go",
+            "line": 28,
+            "statement": "_, e = tx.Exec(ctx, `INSERT INTO wechat_shop_order_progress(app_id,activated_at,completed_until) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, s.AppID, now, (DailyAt{3, 0}).Previous(no"
+          },
+          {
+            "path": "internal/wechatshop/orders.go",
+            "line": 58,
+            "statement": "if e = tx.QueryRow(ctx, `SELECT activated_at FROM wechat_shop_order_progress WHERE app_id=$1`, s.AppID).Scan(&cutoff); e != nil {"
+          },
+          {
+            "path": "internal/wechatshop/orders.go",
+            "line": 113,
+            "statement": "if e := s.Pool.QueryRow(ctx, `SELECT completed_until FROM wechat_shop_order_progress WHERE app_id=$1`, s.AppID).Scan(&from); e != nil {"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "wechat_shop_product_refresh_items": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "wechatshop",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "run/正式商品唯一键是已导入 SKU 的受理事实和原 added/existing 计数，重试必须复用；不能重新猜测当时是否新增。",
+      "source": "migrations/0235_wechat_shop_products.sql",
+      "evidence": {
+        "ddl_line": 21,
+        "owner_access": [
+          {
+            "path": "internal/wechatshop/products.go",
+            "line": 84,
+            "statement": "err := s.Pool.QueryRow(ctx, `SELECT r.id,r.state,r.created_at,r.failed_count,(SELECT count(*) FROM wechat_shop_product_refresh_items WHERE run_id=r.id AND added),(SELECT count(*) F"
+          },
+          {
+            "path": "internal/wechatshop/products.go",
+            "line": 142,
+            "statement": "if _, e = tx.Exec(ctx, `INSERT INTO wechat_shop_product_refresh_items VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, run, id, added); e != nil {"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
+    },
+    "wechat_shop_product_refreshes": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "wechatshop",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "产品同步请求的 run 身份、未完成唯一约束和最后成功时间供恢复、重放与状态展示；River 拥有执行重试，整行不能作为通用日志删除。",
+      "source": "migrations/0235_wechat_shop_products.sql",
+      "evidence": {
+        "ddl_line": 12,
+        "owner_access": [
+          {
+            "path": "internal/wechatshop/products.go",
+            "line": 60,
+            "statement": "err = tx.QueryRow(ctx, `SELECT id,state FROM wechat_shop_product_refreshes WHERE app_id=$1 AND state<>'succeeded'`, s.AppID).Scan(&id, &state)"
+          },
+          {
+            "path": "internal/wechatshop/products.go",
+            "line": 62,
+            "statement": "err = tx.QueryRow(ctx, `INSERT INTO wechat_shop_product_refreshes(app_id,state) VALUES($1,'queued') RETURNING id`, s.AppID).Scan(&id)"
+          },
+          {
+            "path": "internal/wechatshop/products.go",
+            "line": 84,
+            "statement": "err := s.Pool.QueryRow(ctx, `SELECT r.id,r.state,r.created_at,r.failed_count,(SELECT count(*) FROM wechat_shop_product_refresh_items WHERE run_id=r.id AND added),(SELECT count(*) F"
+          }
+        ],
+        "retention_semantics": "Excluded from generic retention; existing Owner lifecycle unchanged. No deletion executor enabled."
+      }
     }
   },
-  "integration": "Only replace entries whose current policy is protected_unclassified, or add the explicitly reviewed Referral names. Preserve all other current registry resources and enabled Owner policies. This evidence file is not consumed by a deletion executor."
+  "integration": "Only replace entries whose current policy is protected_unclassified, or add the explicitly reviewed Referral names. Preserve all other current registry resources and enabled Owner policies. This evidence file is not consumed by a deletion executor.",
+  "filesystem_prefixes": {
+    "/var/lib/aicrm/invoice-materials": {
+      "previous_policy": "unregistered",
+      "reviewed_at": "2026-10-13",
+      "owner": "config",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Config 通过 InvoiceKeyFiles 保存不可变开票 API v3 私有密钥文件，Invoice 仅按已保存引用消费；受权配置保存和轮换沿用 Owner 生命周期，禁止进程年龄或通用保留清理。",
+      "evidence": {
+        "paths": [
+          "cmd/aicrm/runtime_config_apply.go",
+          "internal/config/app/invoice_keys.go"
+        ],
+        "generic_cleanup_allowed": false
+      }
+    }
+  },
+  "additional_reviews": [
+    {
+      "reviewed_at": "2026-10-13",
+      "source_base": "c97ddb05a2038c04264201b8eb476592d107fb04",
+      "tables": [
+        "customer_contact_profiles",
+        "invoice_applications",
+        "invoice_audit_events",
+        "invoice_callback_receipts",
+        "invoice_card_setup_intents",
+        "invoice_operation_receipts",
+        "media_private_images",
+        "order_external_history_facts",
+        "order_wechat_shop_facts",
+        "order_wechat_shop_lines",
+        "product_variants",
+        "product_wechat_shop_skus",
+        "survey_redemption_codes",
+        "survey_submission_attachments",
+        "wechat_shop_callback_receipts",
+        "wechat_shop_order_progress",
+        "wechat_shop_product_refresh_items",
+        "wechat_shop_product_refreshes"
+      ],
+      "filesystem_prefixes": [
+        "/var/lib/aicrm/invoice-materials"
+      ],
+      "scope": "R03 classification of 18 previously unregistered business resources and one Invoice material root; no runtime deletion or timer enabled."
+    }
+  ]
 }

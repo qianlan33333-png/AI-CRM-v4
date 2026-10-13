@@ -1,111 +1,80 @@
 {
   "schema": 1,
-  "baseline_sha": "cfc48a1909b75c8b2ff1c946bcc52673c621eaa7",
+  "baseline_sha": "1635e12052442392fe550b41f7bae69e50122c89",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/segment/app",
-      "test": "TestPrecheckReportsMissingSetupWithoutTurningItIntoAReadFailure"
+      "package": "./internal/adminops",
+      "test": "TestPostgreSQLRetentionCountsOnlyChangedPayloadBytes",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/segment/app",
-      "test": "TestPrecheckReportsMissingConfigurationAsReadinessReason"
+      "package": "./internal/adminops",
+      "test": "TestPostgreSQLRetentionSkipsConcurrentRunRefresh",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/segment/app",
-      "test": "TestPrecheckRejectsRetiredSurveyDefinitionFrozenInPublishedSnapshot"
+      "package": "./internal/adminops",
+      "test": "TestPostgreSQLRetentionPartialReleaseEvidenceSurvivesReadAPI",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/segment/app",
-      "test": "TestBindingRejectsPublishedVersionDriftBeforeWriting"
+      "package": "./internal/adminops",
+      "test": "TestRetentionPersistedJobHonorsDisabledExecutionGate"
     },
     {
       "lane": "backend",
-      "package": "./internal/segment/app",
-      "test": "TestSendersRejectDuplicateInternalStaffAndPrecheckReportsProviderDisabled"
+      "package": "./internal/adminops",
+      "test": "TestRetentionResourceCatalogBindsCanonicalRegistry"
     },
     {
       "lane": "backend",
-      "package": "./internal/segment/app",
-      "test": "TestSendersCanReplaceWhitelistForActivePackage"
+      "package": "./internal/adminops",
+      "test": "TestRetentionNewBusinessObjectsStayProtectedWithoutExecutablePolicies"
     },
     {
       "lane": "backend",
-      "package": "./internal/segment/app",
-      "test": "TestPrecheckAllowsPublishedDynamicAgentForManualRun"
+      "package": "./internal/adminops",
+      "test": "TestRetentionCoveragePreservesGapsAndExactPolicyBindings"
     },
     {
       "lane": "backend",
-      "package": "./internal/segment/http",
-      "test": "TestHandlerAuthRBACCSRFAndClosedTemplates"
+      "package": "./internal/adminops",
+      "test": "TestRetentionResourcesHTTPIsBoundedReadOnlyAndSuperAdmin"
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestAudienceDirectPushUsesFrozenMiniProgramFields"
+      "package": "./internal/adminops",
+      "test": "TestPostgreSQLRetentionAllowlistHealthNeverErasesCoverageGaps",
+      "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestAudienceDirectPushCoreSignedReplayBudgetAndOneIDMergePostgreSQL",
+      "package": "./internal/adminops",
+      "test": "TestPostgreSQLRetentionBoundaryAndDurableReportEvidence",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/adminops",
+      "test": "TestPostgreSQLRetentionRejectsWrongPolicyAndReportsStoppedCleaner",
       "postgres": true
     },
     {
       "lane": "backend",
       "package": "./cmd/aicrm",
-      "test": "TestAudienceDirectPushAuthenticatorChecksSignatureAndBody"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestStaffDisplayProfilesPreserveAccessEligibilityAndBinding"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestStaffDisplayProfilesFailuresAndAmbiguityDoNotInventNames"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/segment/http",
-      "test": "TestSenderReceiptReplayStillRequiresCurrentAuthenticationRBACAndCSRF"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/segment/app",
-      "test": "TestPostgreSQLSenderReplayIgnoresMutableDirectoryButNewCommandsValidate",
+      "test": "TestPostgreSQLRetentionPreservesInvoiceReceiptsAndPrivateKey",
       "postgres": true
     },
     {
-      "lane": "backend",
-      "package": "./internal/segment/app",
-      "test": "TestPostgreSQLLegacySenderReceiptRecoversOnlyProvenStaffMapping",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/segment/app",
-      "test": "TestPostgreSQLSenderConcurrentCommandsKeepReceiptAndCASAtomic",
-      "postgres": true,
-      "race": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/segment/app",
-      "test": "TestPostgreSQLSenderFailedCompletionRollsBackAllFactsAndAllowsOriginalKey",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestPostgreSQLAutomationSenderProjectionSharesCallerTransaction",
-      "postgres": true
+      "lane": "preflight",
+      "path": "scripts/test_retention_registry.py"
     }
   ],
   "installed_checks": [
-    "sender-idempotency-replay"
+    "retention-business-protection"
   ]
 }

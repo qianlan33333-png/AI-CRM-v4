@@ -36,7 +36,7 @@ flowchart TD
 
 OneID：R01 使用 `VerifiedIdentitySubjectReader`/写锁 Port；不匹配外部身份、不建客、不合并。R02 只用 Access 员工主键，不涉及客户 OneID。R03 不改身份，只登记已有身份相关事实的保留。
 
-Persistence：R01/R02 为领域本地 PostgreSQL UoW；业务、原收据、审计及 Outbox 原子提交。R03 为元数据和嵌入只读目录。External Effects：保留既有受理边界，重放不创建新意图，不调用真实 Provider。没有新队列、Worker、lease、重试或对账状态机。不涉及新增限制，复用现有权限和输入边界。
+Persistence：R01/R02 为领域本地 PostgreSQL UoW；业务、原收据、审计及 Outbox 原子提交。R03 为元数据和嵌入只读目录。External Effects：保留既有受理边界，重放不创建新意图，不调用真实 Provider。没有新队列、Worker、lease、重试或对账状态机。不新增业务、资格、长度或数量限制，复用现有权限和输入边界。保留登记增加最小一致性校验：永久/禁止通用删除的政策不得同时启用删除 executor；相反声明会掩盖误删授权，依据既有 deny-delete 政策，仅作用于保留元数据。
 
 ## 验收、迁移和交付
 
@@ -45,3 +45,5 @@ Persistence：R01/R02 为领域本地 PostgreSQL UoW；业务、原收据、审�
 - 没有新增物理清理行为；原有保留历史及收据不可被此登记删除。
 - 国内准确候选推送后重新读取唯一路由，交付完整 base/head/tree/ref 与测试收据。工作台使用既有队列、锁和构建路径统一预部署并独立读回；本批授权只到预部署，不得继承其他任务的生产授权。
 - 云端 Linux/安装包合成旅程和真实用户/Provider 观察分列。实际扫码、真实外部送达及生产业务验收不在本批完成范围。
+
+安装包最终验收使用 `TestPriorityHealthInstalledContracts`，继承现有 installed Survey 夹具的二进制/Host 摘要验证、隔离 PostgreSQL、真实认证和受控只读 Provider 边界。其三项具名收据为 survey-successful-key-recovery、sender-idempotency-replay、retention-business-protection。问卷合并/撤销及员工目录变化为合成数据准备，业务 HTTP 操作全部访问最终安装二进制。

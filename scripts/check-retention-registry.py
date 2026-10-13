@@ -126,6 +126,8 @@ def validate_resources(root: Path, registry: dict, live_roots: list[str] | None 
             errors.append(f"invalid filesystem classification: {path}")
         if item.get("policy") == "30_days" and path not in {"/var/lib/aicrm/process-tmp", "/var/lib/aicrm/process-diagnostics"}:
             errors.append(f"unapproved filesystem deletion prefix: {path}")
+        if item.get("policy") in {"permanent", "never_delete_by_retention"} and (item.get("cleanup") == "enabled" or item.get("executor")):
+            errors.append(f"protected filesystem must deny cleanup: {path}")
     for path in sorted(source_resource_paths(root) | set(live_roots or [])):
         if not any(path == prefix or (item.get("scope") == "subtree" and path.startswith(prefix + "/")) for prefix, item in prefixes.items()):
             errors.append(f"unclassified filesystem resource: {path}")
@@ -175,6 +177,8 @@ def validate(root: Path, registry: dict, live_tables: list[str] | None = None, l
             errors.append(f"unapproved security TTL classification: {name}")
         if item.get("policy") in {"protected_unclassified", "protected_mixed_payload"} and item.get("cleanup") != "disabled":
             errors.append(f"{'unclassified' if item['policy'] == 'protected_unclassified' else 'mixed'} resource must deny cleanup: {name}")
+        if item.get("policy") == "permanent" and (item.get("cleanup", "disabled") != "disabled" or item.get("executor")):
+            errors.append(f"permanent resource must deny cleanup: {name}")
         if item.get("cleanup") == "enabled" and not item.get("executor"):
             errors.append(f"enabled cleanup requires an owner executor: {name}")
         if item.get("policy") == "operational_detail_30d" and name not in OPERATIONAL_DETAILS:

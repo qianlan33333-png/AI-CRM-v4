@@ -67,3 +67,21 @@ OneID：本次只读核验身份表的生命周期与引用，保留归属、来
 只对当前仍为 `protected_unclassified` 的同名条目合入这些明确分类；Referral 13项按白名单新增。保留主分支已启用 Owner 入口、AdminOps、manual commands 和所有资源前缀登记。checker 需显式接受 `protected_mixed_payload` 并强制其 cleanup disabled；过程、TTL、projection、coordination 白名单增量见 JSON。两个过程资源只有实际 Owner 实现及测试通过后才能在运行 registry 启用。
 
 本次验证：389表唯一且与审阅清单逐项相等；所有列举字段真实存在于 DDL；所有 Owner 引用片段与固定基线的对应文件行吻合；计数与策略逐项汇总一致；全部未授权删除；JSON 解析及 `git diff --check` 通过。本提交仅文档，没有新增运行代码，未声称完整回归、CI、部署或生产删除已执行。
+
+## 2026-10-13：体检 R03 漏登记对象
+
+从国内基线 c97ddb05a2038c04264201b8eb476592d107fb04 的实际 DDL、Owner 读写与消费合同复核 18 张表和一个文件目录。原复核与政策保留，新证据追加到 JSON 的 additional_reviews 和逐对象 evidence。
+
+| Owner | 新登记对象 | 判断依据 |
+| --- | --- | --- |
+| Customer | customer_contact_profiles | 用户提交、订单和问卷复用的正式联系方式/地址 |
+| Invoice | invoice_applications、invoice_operation_receipts、invoice_callback_receipts、invoice_audit_events、invoice_card_setup_intents | 财务申请、原键/回调防重、审计、冻结配置材料及效果绑定 |
+| Order | order_external_history_facts、order_wechat_shop_facts、order_wechat_shop_lines | 原支付/售后、金额和加密联系方式、激活资格及 SKU 关联 |
+| Product | product_variants、product_wechat_shop_skus | 正式规格/软移除生命周期、按原 App/商品/SKU 唯一导入归属 |
+| Survey / Media | survey_redemption_codes、survey_submission_attachments / media_private_images | 一次兑换码消费、正式答卷附件关联与受权私有原图 |
+| Wechatshop | wechat_shop_callback_receipts、wechat_shop_order_progress、wechat_shop_product_refreshes、wechat_shop_product_refresh_items | 回调防重、激活截止/读取水位、原 run/SKU 受理事实及不可重建的 added/existing 计数 |
+| Config | /var/lib/aicrm/invoice-materials | InvoiceKeyFiles 所属不可变私有凭据原件，Invoice 为按引用读取的消费者 |
+
+18 张表均为 permanent、cleanup=disabled；目录为 subtree/never_delete_by_retention。这表示不交给通用保留清理，既有 Owner 的更新/软删除/凭据轮换不改变。没有新增 TTL、DELETE、清理 Worker 或 timer。永久政策不能同时挂删除 executor，受保护目录不能扩大为进程年龄清理。
+
+生成只读运行覆盖目录后，注册表为 499 张表、61 个文件前缀、6 类资源。原 payment_shop_materials 的未分类保护及原混合载荷/物理 TTL 清理缺口继续保留，不用本轮登记冒称这些缺口已解决。

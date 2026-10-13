@@ -18,6 +18,47 @@ class RegistryTests(unittest.TestCase):
     def test_complete_baseline(self):
         self.assertEqual(registry.validate(ROOT, self.value), [])
 
+    def test_new_business_objects_are_reviewed_and_protected(self):
+        review = json.loads((ROOT / "docs/governance/retention-classification-review.json").read_text())
+        names = ["customer_contact_profiles", "invoice_applications", "invoice_audit_events", "invoice_callback_receipts", "invoice_card_setup_intents", "invoice_operation_receipts", "media_private_images", "order_external_history_facts", "order_wechat_shop_facts", "order_wechat_shop_lines", "product_variants", "product_wechat_shop_skus", "survey_redemption_codes", "survey_submission_attachments", "wechat_shop_callback_receipts", "wechat_shop_order_progress", "wechat_shop_product_refresh_items", "wechat_shop_product_refreshes"]
+        for name in names:
+            with self.subTest(table=name):
+                item = self.value["tables"][name]
+                proof = review["tables"][name]
+                self.assertEqual(item["policy"], "permanent")
+                self.assertEqual(item["cleanup"], "disabled")
+                self.assertNotIn("executor", item)
+                self.assertEqual(item["owner"], proof["owner"])
+                self.assertEqual(item["source"], proof["source"])
+                self.assertEqual(item["reason"], proof["reason"])
+                self.assertTrue(proof["evidence"]["owner_access"])
+                for ref in proof["evidence"]["owner_access"]:
+                    self.assertTrue((ROOT / ref["path"]).is_file())
+                for policy in ("security_ttl", "temporary_upload_parts_30d", "operational_detail_30d", "owner_projection", "runtime_coordination"):
+                    changed = copy.deepcopy(self.value)
+                    changed["tables"][name]["policy"] = policy
+                    self.assertTrue(registry.validate(ROOT, changed), name + " enabled " + policy)
+
+    def test_permanent_objects_cannot_install_a_deletion_executor(self):
+        for name in ("invoice_callback_receipts", "survey_redemption_codes", "media_private_images", "order_wechat_shop_facts", "wechat_shop_product_refresh_items"):
+            for cleanup in ("disabled", "enabled"):
+                with self.subTest(table=name, cleanup=cleanup):
+                    changed = copy.deepcopy(self.value)
+                    changed["tables"][name].update(cleanup=cleanup, executor="malicious-cleaner")
+                    self.assertIn("permanent resource must deny cleanup: " + name, registry.validate(ROOT, changed))
+
+    def test_invoice_key_root_protects_children_without_covering_siblings(self):
+        path = "/var/lib/aicrm/invoice-materials"
+        item = self.value["filesystem_prefixes"][path]
+        self.assertEqual(item["owner"], "config")
+        self.assertEqual(item["policy"], "never_delete_by_retention")
+        self.assertEqual(registry.validate_resources(ROOT, self.value, [path + "/synthetic-key"]), [])
+        self.assertIn("unclassified filesystem resource: " + path + "-unreviewed", registry.validate_resources(ROOT, self.value, [path + "-unreviewed"]))
+        item.update(cleanup="enabled", executor="malicious-cleaner")
+        self.assertIn("protected filesystem must deny cleanup: " + path, registry.validate_resources(ROOT, self.value))
+        item["policy"] = "30_days"
+        self.assertIn("unapproved filesystem deletion prefix: " + path, registry.validate_resources(ROOT, self.value))
+
     def test_unknown_live_table_even_cache_named_refuses(self):
         errors = registry.validate(ROOT, self.value, ["new_important_cache"])
         self.assertIn("unclassified live table: new_important_cache", errors)

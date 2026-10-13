@@ -533,6 +533,12 @@
       "scope": "exact",
       "policy": "never_delete_by_retention",
       "reason": "Single release queue state is required to prevent concurrent production promotion."
+    },
+    "/var/lib/aicrm/invoice-materials": {
+      "owner": "config",
+      "scope": "subtree",
+      "policy": "never_delete_by_retention",
+      "reason": "Config 通过 InvoiceKeyFiles 保存不可变开票 API v3 私有密钥文件，Invoice 仅按已保存引用消费；受权配置保存和轮换沿用 Owner 生命周期，禁止进程年龄或通用保留清理。"
     }
   },
   "tables": {
@@ -1554,6 +1560,14 @@
       "source": "migrations/0011_coupon_rules.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/coupon_rules"
     },
+    "customer_contact_profiles": {
+      "owner": "customer",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "客户本人提供并供订单与问卷复用的联系方式和邮寄地址，不是目录缓存；通用保留清理不得删除，领域授权更新按原生命周期处理。",
+      "source": "migrations/0243_customer_contact_profiles.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/customer_contact_profiles"
+    },
     "customer_directory_projection": {
       "owner": "customer",
       "policy": "owner_projection",
@@ -2266,6 +2280,46 @@
       "source": "migrations/0063_identity_hxc_source_observations.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/identity_source_subjects"
     },
+    "invoice_applications": {
+      "owner": "invoice",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "订单开票申请、买方抬头、金额快照、蓝红票号及既有效果绑定是财务业务事实；历史查询、冲红和对账依赖原记录。",
+      "source": "migrations/0224_invoice.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/invoice_applications"
+    },
+    "invoice_audit_events": {
+      "owner": "invoice",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "开票与冲红动作及其证据摘要是可追溯财务审计，不是短期运行日志。",
+      "source": "migrations/0224_invoice.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/invoice_audit_events"
+    },
+    "invoice_callback_receipts": {
+      "owner": "invoice",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "可信开票回调的事件和正文摘要防止重复处理及内容漂移；清理会破坏原回调重放边界。",
+      "source": "migrations/0224_invoice.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/invoice_callback_receipts"
+    },
+    "invoice_card_setup_intents": {
+      "owner": "invoice",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "已接受开票卡配置的冻结材料、效果引用、摘要和最终 card_id 支撑重放与对账；不是可丢弃作业详情。",
+      "source": "migrations/0230_invoice_card_configuration.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/invoice_card_setup_intents"
+    },
+    "invoice_operation_receipts": {
+      "owner": "invoice",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "客户、幂等键、订单与原申请绑定保证一次申请和原结果恢复；通用 TTL 不得遗忘原受理事实。",
+      "source": "migrations/0224_invoice.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/invoice_operation_receipts"
+    },
     "media_attachment_upload_parts": {
       "owner": "media",
       "policy": "temporary_upload_parts_30d",
@@ -2452,6 +2506,14 @@
       "reason": "保存领域业务对象、成员/归属关系、内容或来源凭据，Owner 读取/写入及引用关系持续使用；年龄本身不能使该业务事实失效。 核验字段：aggregate_id, event_type, aggregate_kind, payload, published_at。",
       "source": "migrations/0007_media.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/media_outbox"
+    },
+    "media_private_images": {
+      "owner": "media",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "私有问卷原图与正式 Blob 的关联、大小、类型和文件名供受权读取；不是临时分片或可重建 Provider 缓存。",
+      "source": "migrations/0239_survey_private_image_answers.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/media_private_images"
     },
     "media_references": {
       "owner": "media",
@@ -2737,6 +2799,14 @@
       "source": "migrations/0020_order.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/order_export_receipts"
     },
+    "order_external_history_facts": {
+      "owner": "order",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "历史订单的原支付时间、导入时间、来源状态和售后事实由不可变触发器保护，不能按导入年龄删除。",
+      "source": "migrations/0221_external_order_history.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/order_external_history_facts"
+    },
     "order_history_attribution_receipts": {
       "owner": "order",
       "policy": "permanent",
@@ -2838,6 +2908,22 @@
       "reason": "保存领域业务对象、成员/归属关系、内容或来源凭据，Owner 读取/写入及引用关系持续使用；年龄本身不能使该业务事实失效。 核验字段：order_id, from_status, to_status, order_version, refunded_minor, actor_scope, occurred_at。",
       "source": "migrations/0020_order.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/order_status_history"
+    },
+    "order_wechat_shop_facts": {
+      "owner": "order",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "微信小店已付款金额快照、加密联系方式、激活资格、原时间和分发进度是订单/权益对账事实。",
+      "source": "migrations/0236_wechat_shop_orders.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/order_wechat_shop_facts"
+    },
+    "order_wechat_shop_lines": {
+      "owner": "order",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "原小店商品/SKU 与订单行的映射支撑激活、补偿唤醒和售后归属，不是同步过程缓存。",
+      "source": "migrations/0236_wechat_shop_orders.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/order_wechat_shop_lines"
     },
     "orders": {
       "owner": "order",
@@ -3325,6 +3411,22 @@
       "reason": "保存可被业务操作引用的配置/定义/结果版本或当前选择，Owner 读取依赖其稳定含义；历史效果不能由后续版本覆盖。 核验字段：product_id, config_json, version, name, position, is_default, created_by, updated_by。",
       "source": "migrations/0079_service_period_member_grid.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/product_service_period_member_views"
+    },
+    "product_variants": {
+      "owner": "product",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "商品规格定义、价格、属性和软移除版本属于正式商品生命周期；不以创建年龄执行通用删除。",
+      "source": "migrations/0241_product_variants.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/product_variants"
+    },
+    "product_wechat_shop_skus": {
+      "owner": "product",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "按 App/原商品/原 SKU 唯一绑定 CRM 商品，保证重复同步命中原商品并供订单激活读取；删除会遗忘导入归属。",
+      "source": "migrations/0235_wechat_shop_products.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/product_wechat_shop_skus"
     },
     "products": {
       "owner": "product",
@@ -4004,6 +4106,14 @@
       "source": "migrations/0018_survey.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/survey_questionnaires"
     },
+    "survey_redemption_codes": {
+      "owner": "survey",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "兑换码库存、使用答卷和消费时间是一次消费及原成功键恢复依据；不是可按年龄清理的临时凭证。",
+      "source": "migrations/0237_survey_redemption_codes.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/survey_redemption_codes"
+    },
     "survey_result_tokens": {
       "owner": "survey",
       "policy": "security_ttl",
@@ -4027,6 +4137,14 @@
       "reason": "保存提交时问题/选项/评分快照及加密答案，防问卷后续修改覆盖原作答效果；属于永久业务内容。",
       "source": "migrations/0018_survey.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/survey_submission_answers"
+    },
+    "survey_submission_attachments": {
+      "owner": "survey",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "正式答卷与 Media 私有原件、答案 ID、摘要和文件名的关系；必须与答卷历史一同保留，不归临时上传清理。",
+      "source": "migrations/0239_survey_private_image_answers.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/survey_submission_attachments"
     },
     "survey_submission_claims": {
       "owner": "survey",
@@ -4139,6 +4257,38 @@
       "reason": "回调持久接受与去重行被渠道/企微业务收据引用；原 payload 可能同时承载输入证据，需 Owner 保留最小收据后清30天详情，不能直接删行。",
       "source": "migrations/0001_platform.sql",
       "classification_evidence": "docs/governance/retention-classification-review.json#tables/webhook_inbox"
+    },
+    "wechat_shop_callback_receipts": {
+      "owner": "wechatshop",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "小店事件/正文摘要的受理收据保证回调重放防重和漂移拒绝；不是普通同步日志。",
+      "source": "migrations/0236_wechat_shop_orders.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/wechat_shop_callback_receipts"
+    },
+    "wechat_shop_order_progress": {
+      "owner": "wechatshop",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "激活截止时间决定哪些历史支付可创建权益，成功读取水位保证兜底同步连续；删除并重建会改变业务资格或丢失同步覆盖。",
+      "source": "migrations/0236_wechat_shop_orders.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/wechat_shop_order_progress"
+    },
+    "wechat_shop_product_refresh_items": {
+      "owner": "wechatshop",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "run/正式商品唯一键是已导入 SKU 的受理事实和原 added/existing 计数，重试必须复用；不能重新猜测当时是否新增。",
+      "source": "migrations/0235_wechat_shop_products.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/wechat_shop_product_refresh_items"
+    },
+    "wechat_shop_product_refreshes": {
+      "owner": "wechatshop",
+      "policy": "permanent",
+      "cleanup": "disabled",
+      "reason": "产品同步请求的 run 身份、未完成唯一约束和最后成功时间供恢复、重放与状态展示；River 拥有执行重试，整行不能作为通用日志删除。",
+      "source": "migrations/0235_wechat_shop_products.sql",
+      "classification_evidence": "docs/governance/retention-classification-review.json#tables/wechat_shop_product_refreshes"
     },
     "wecom_callback_receipts": {
       "owner": "wecom",
