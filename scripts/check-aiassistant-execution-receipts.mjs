@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import SwaggerParser from '@apidevtools/swagger-parser';
+
+const spec = await SwaggerParser.validate('api/openapi.yaml');
+const path = '/api/admin/ai-assistant/plans/{plan_id}/execution-receipts';
+const operation = spec.paths[path].get;
+assert.deepEqual(Object.keys(spec.paths[path]), ['get']);
+assert.equal(operation.operationId, 'listAIAssistantExecutionReceipts');
+assert.deepEqual(operation.security, [{ adminSession: [] }]);
+assert.equal(operation.parameters.find(p => p.name === 'live').schema.type, 'boolean');
+const receipt = operation.responses['200'].content['application/json'].schema.properties.items.items.properties.receipt.properties;
+for (const field of ['msgid', 'sender_userid', 'creation_errcode', 'creation_errcode_evidence', 'query_errcode', 'query_http_status', 'query_state', 'provider_delivery_status', 'provider_sent_at']) assert.ok(field in receipt, field);
+assert.equal(receipt.creation_errcode.nullable, true);
+assert.equal(receipt.query_errcode.nullable, true);
+for (const field of ['external_userid', 'unionid', 'access_token', 'secret']) assert.ok(!(field in receipt));
+const catalog = JSON.parse(fs.readFileSync('internal/clicatalog/port/catalog.json', 'utf8'));
+const cli = catalog.operations.find(o => o.id === 'admin.listAIAssistantExecutionReceipts');
+assert.equal(cli.binding.auth, 'human');
+assert.equal(cli.binding.method, 'GET');
+assert.equal(cli.binding.path, path);
+console.log('AI Assistant managed receipt OpenAPI and CLI read contract passed');

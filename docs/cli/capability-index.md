@@ -355,6 +355,7 @@
 | admin.getAIAssistantPlan | aicrm-cli ai aiassistant-plan get | human | aiplan | source_contract_only |
 | admin.getAIAssistantRecipient | aicrm-cli ai aiassistant-recipient get | human | aiplan | source_contract_only |
 | admin.listAIAssistantEffects | aicrm-cli ai aiassistant-effects list | human | aiplan | source_contract_only |
+| admin.listAIAssistantExecutionReceipts | aicrm-cli ai aiassistant-execution-receipts list | human | aiplan | source_contract_only |
 | admin.listAIAssistantPlans | aicrm-cli ai aiassistant-plans list | human | aiplan | source_contract_only |
 | admin.listAIAssistantRecipients | aicrm-cli ai aiassistant-recipients list | human | aiplan | source_contract_only |
 | admin.previewAIAssistantPlanApproval | aicrm-cli ai aiassistant-plan-approval preview | human | aiplan | source_contract_only |

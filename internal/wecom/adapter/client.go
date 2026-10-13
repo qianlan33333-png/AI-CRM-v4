@@ -2461,9 +2461,28 @@ func (client *Client) GetPrivateMessageSendResult(ctx context.Context, messageID
 		return page, err
 	}
 	body, _ := json.Marshal(map[string]any{"msgid": messageID, "userid": sender, "cursor": cursor, "limit": 100})
-	payload, err := client.requestJSON(ctx, http.MethodPost, "/cgi-bin/externalcontact/get_groupmsg_send_result", url.Values{"access_token": {token}}, body)
+	raw, err := client.requestRawJSON(ctx, http.MethodPost, "/cgi-bin/externalcontact/get_groupmsg_send_result", url.Values{"access_token": {token}}, body)
 	if err != nil {
+		var failure *providerResponseError
+		if errors.As(err, &failure) {
+			page.HTTPStatusCode = failure.statusCode
+			if failure.errCode != 0 {
+				code := failure.errCode
+				page.ProviderErrorCode = &code
+			}
+		}
 		return page, err
+	}
+	page.HTTPStatusCode = raw.statusCode
+	var payload response
+	if json.Unmarshal(raw.body, &payload) != nil {
+		return page, ErrResponse
+	}
+	if code, valid := strictJSONInt(payload.ErrCode); valid {
+		page.ProviderErrorCode = &code
+	}
+	if !successErrCode(payload.ErrCode) {
+		return page, &providerResponseError{statusCode: raw.statusCode, errCode: providerErrCode(payload.ErrCode)}
 	}
 	page.NextCursor = payload.NextCursor
 	for _, item := range payload.SendList {

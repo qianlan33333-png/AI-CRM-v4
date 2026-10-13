@@ -13838,6 +13838,204 @@
       }
     },
     {
+      "id": "admin.listAIAssistantExecutionReceipts",
+      "group": "ai",
+      "module": "ai",
+      "command": "aiassistant-execution-receipts list",
+      "summary": "Read managed original WeCom task receipts and optional live delivery evidence",
+      "owner": "aiplan",
+      "execution": "read",
+      "implementation": "admin_contract",
+      "evidence": "source_contract_only",
+      "version": 1,
+      "responses": {
+        "200": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "chat_type": {
+                    "type": "string"
+                  },
+                  "items": {
+                    "items": {
+                      "properties": {
+                        "customer_id": {
+                          "type": "integer"
+                        },
+                        "customer_name": {
+                          "type": "string"
+                        },
+                        "effect": {
+                          "$ref": "#/components/schemas/AIAssistantEffect"
+                        },
+                        "local_execution_state": {
+                          "type": "string"
+                        },
+                        "receipt": {
+                          "properties": {
+                            "creation_errcode": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "creation_errcode_evidence": {
+                              "type": "string"
+                            },
+                            "failure_reason": {
+                              "type": "string"
+                            },
+                            "local_delivery_status": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "local_observed_at": {
+                              "format": "date-time",
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "local_sent_at": {
+                              "format": "date-time",
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "msgid": {
+                              "type": "string"
+                            },
+                            "provider_delivery_status": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "provider_observed_at": {
+                              "format": "date-time",
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "provider_sent_at": {
+                              "format": "date-time",
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "query_errcode": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "query_failure": {
+                              "type": "string"
+                            },
+                            "query_http_status": {
+                              "type": "integer"
+                            },
+                            "query_state": {
+                              "type": "string"
+                            },
+                            "receipt_found": {
+                              "type": "boolean"
+                            },
+                            "sender_userid": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "recipient_id": {
+                          "type": "integer"
+                        },
+                        "staff_display_name": {
+                          "type": "string"
+                        },
+                        "staff_id": {
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "next_cursor": {
+                    "type": "string"
+                  },
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "plan_id": {
+                    "type": "integer"
+                  },
+                  "query_interface": {
+                    "type": "string"
+                  },
+                  "read_only": {
+                    "type": "boolean"
+                  },
+                  "send_interface": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "description": "Local evidence and independently classified Provider read result"
+        },
+        "401": {
+          "$ref": "#/components/responses/Error"
+        },
+        "403": {
+          "$ref": "#/components/responses/Error"
+        },
+        "404": {
+          "$ref": "#/components/responses/Error"
+        },
+        "503": {
+          "$ref": "#/components/responses/Unavailable"
+        }
+      },
+      "prerequisites": [
+        "current human session",
+        "owner route authorization and business conditions"
+      ],
+      "binding": {
+        "method": "GET",
+        "path": "/api/admin/ai-assistant/plans/{plan_id}/execution-receipts",
+        "auth": "human",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PositiveID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "live",
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "idempotency_required": false,
+        "body_required": false
+      }
+    },
+    {
       "id": "admin.listAIAssistantPlans",
       "group": "ai",
       "module": "ai",
@@ -43954,7 +44152,7 @@
         },
         "path": {
           "description": "Only this daily-lesson path form has automatic cover resolution.",
-          "pattern": "^pages/article/article\\\\?lesson_id=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\u0026from=learn$",
+          "pattern": "^pages/article/article\\\\?lesson_id=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}&from=learn$",
           "type": "string"
         },
         "title": {

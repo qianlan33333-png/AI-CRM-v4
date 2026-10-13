@@ -1,72 +1,63 @@
 {
   "schema": 1,
-  "baseline_sha": "1a37107b0641e66f64705543c0469f7d3ee2826e",
+  "baseline_sha": "2fedbb425f7e679ee35e6c4abc1645e8eddd41a5",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/referral/store"
+      "package": "./internal/aiassistant/http"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/http"
+      "package": "./internal/access/app",
+      "test": "TestAIAssistantAuthorizationMatrix"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestInviteStreamCursorRejectsCrossIdentityCampaignAndTampering"
+      "package": "./internal/wecom/adapter"
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLInviteStreamCountsRetainsAndPagesConcurrentJoins",
+      "package": "./internal/outbound/port"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/crmcli"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/generate-cli-catalog"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestAIExecutionReceiptReadPreservesCreationEvidenceAndMatchesAllPages"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestAIExecutionReceiptReadRejectsDuplicateAndProviderFailure"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestAIAssistantSignedHTTPRiverWeComJourney",
       "postgres": true
     },
     {
       "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLInviteStreamPaidCountsReversalsAndCanonicalAliases",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLInviteStreamFreeCountsCanonicalAliases",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLMyInvitesCanonicalBatchesShareIdentitySnapshot",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralUnjoinedCaptainHasNoInvitationDetailsUntilExplicitJoin",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLReferralAcceptsAndFreezesActivityFacts",
-      "postgres": true
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "test": "TestPostgreSQLCanonicalPaidRankingsMatchModelAcrossBatches",
+      "package": "./cmd/aicrm",
+      "test": "TestPostgreSQLAIExecutionReceiptsHTTP",
       "postgres": true
     },
     {
       "lane": "frontend",
-      "path": "web/v3/referralCenter.test.mjs"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/referralInvitations.test.mjs"
+      "path": "scripts/check-aiassistant-execution-receipts.mjs"
     }
   ],
   "installed_checks": [
-    "referral-poster"
+    "aiassistant-execution-receipts"
+  ],
+  "build_commands": [
+    "./cmd/aicrm-cli"
   ]
 }

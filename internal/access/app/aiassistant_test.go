@@ -14,6 +14,14 @@ func TestAIAssistantAuthorizationMatrix(t *testing.T) {
 	viewer := domain.Principal{Kind: domain.KindAdmin, InternalID: 1, Roles: []domain.Role{domain.RoleViewer}}
 	admin := domain.Principal{Kind: domain.KindAdmin, InternalID: 2, Roles: []domain.Role{domain.RoleAdmin}}
 	super := domain.Principal{Kind: domain.KindAdmin, InternalID: 3, Roles: []domain.Role{domain.RoleSuperAdmin}}
+	if err := a.AuthorizeAIAssistant(context.Background(), viewer, accessport.AIAssistantReceiptRead); !errors.Is(err, domain.ErrPermissionDenied) {
+		t.Fatalf("viewer receipt=%v", err)
+	}
+	for _, p := range []domain.Principal{admin, super} {
+		if err := a.AuthorizeAIAssistant(context.Background(), p, accessport.AIAssistantReceiptRead); err != nil {
+			t.Fatalf("receipt read=%v", err)
+		}
+	}
 	if err := a.AuthorizeAIAssistant(context.Background(), viewer, accessport.AIAssistantRead); err != nil {
 		t.Fatal(err)
 	}

@@ -4810,6 +4810,24 @@ paths:
       parameters: [{$ref: "#/components/parameters/AIAssistantPlanID"}, {$ref: "#/components/parameters/RequiredIdempotencyKey"}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/AIAssistantRejectRequest"}}}}
       responses: {"200": {description: Plan rejected without accepting effects, content: {application/json: {schema: {$ref: "#/components/schemas/AIAssistantPlanEnvelope"}}}}, "401": {$ref: "#/components/responses/Error"}, "403": {$ref: "#/components/responses/Error"}, "404": {$ref: "#/components/responses/Error"}, "409": {$ref: "#/components/responses/Error"}}
+  /api/admin/ai-assistant/plans/{plan_id}/execution-receipts:
+    get:
+      operationId: listAIAssistantExecutionReceipts
+      summary: Read managed original WeCom task receipts and optional live delivery evidence
+      description: Administrator-only read. Does not send, retry, reconcile or persist observations. Missing historical errcode remains null. Provider identities and credentials are excluded.
+      tags: [AIAssistant]
+      security: [{adminSession: []}]
+      parameters:
+        - {$ref: '#/components/parameters/AIAssistantPlanID'}
+        - {in: query, name: live, schema: {type: boolean, default: false}}
+        - {in: query, name: cursor, schema: {type: string}}
+        - {in: query, name: limit, schema: {type: integer, minimum: 1, maximum: 50}}
+      responses:
+        '200': {description: Local evidence and independently classified Provider read result, content: {application/json: {schema: {type: object, properties: {ok: {type: boolean}, plan_id: {type: integer}, read_only: {type: boolean}, send_interface: {type: string}, chat_type: {type: string}, query_interface: {type: string}, next_cursor: {type: string}, items: {type: array, items: {type: object, properties: {recipient_id: {type: integer}, customer_id: {type: integer}, customer_name: {type: string}, staff_id: {type: integer}, staff_display_name: {type: string}, local_execution_state: {type: string}, effect: {$ref: '#/components/schemas/AIAssistantEffect'}, receipt: {type: object, properties: {receipt_found: {type: boolean}, msgid: {type: string}, sender_userid: {type: string}, failure_reason: {type: string}, creation_errcode: {type: integer, nullable: true}, creation_errcode_evidence: {type: string}, local_delivery_status: {type: integer, nullable: true}, local_sent_at: {type: string, format: date-time, nullable: true}, local_observed_at: {type: string, format: date-time, nullable: true}, query_state: {type: string}, query_http_status: {type: integer}, query_errcode: {type: integer, nullable: true}, query_failure: {type: string}, provider_delivery_status: {type: integer, nullable: true}, provider_sent_at: {type: string, format: date-time, nullable: true}, provider_observed_at: {type: string, format: date-time, nullable: true}}}}}}}}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Unavailable'}
   /api/admin/ai-assistant/plans/{plan_id}/effects:
     get:
       operationId: listAIAssistantEffects

@@ -122,8 +122,10 @@ type PrivateMessageDeliveryStore interface {
 	SavePrivateMessageDelivery(context.Context, string, PrivateMessageDelivery) error
 }
 type PrivateMessageDeliveryPage struct {
-	Items      []PrivateMessageDelivery
-	NextCursor string
+	Items             []PrivateMessageDelivery
+	NextCursor        string
+	HTTPStatusCode    int
+	ProviderErrorCode *int64
 }
 type PrivateMessageDeliveryReader interface {
 	GetPrivateMessageSendResult(context.Context, string, string, string) (PrivateMessageDeliveryPage, error)

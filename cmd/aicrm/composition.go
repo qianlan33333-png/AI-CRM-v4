@@ -711,7 +711,8 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err = aiService.BindReconciler(effectRepository); err != nil {
 		return fail(err)
 	}
-	aiHandler, err := aiassistanthttp.NewHandler(aiassistanthttp.Config{Application: aiService, Security: requestSecurity, Authorizer: accessapp.AIAssistantAuthorizer{}, Integration: aiassistanthttp.IntegrationConfig{Enabled: cfg.AIAssistant.IntakeEnabled, Key: cfg.AIAssistant.IntegrationKey, Secret: cfg.AIAssistant.IntegrationSecret, ActorID: cfg.AIAssistant.IntegrationActorID, WeComCorpID: cfg.WeCom.CorpID, OpenPlatformID: cfg.Survey.OAuthOpenPlatformID}, DispatchReady: cfg.AIAssistant.DispatchEnabled})
+	receiptAdapter := &aiExecutionReceiptAdapter{store: privateWriter}
+	aiHandler, err := aiassistanthttp.NewHandler(aiassistanthttp.Config{Application: aiService, Security: requestSecurity, ReceiptReader: receiptAdapter, Authorizer: accessapp.AIAssistantAuthorizer{}, Integration: aiassistanthttp.IntegrationConfig{Enabled: cfg.AIAssistant.IntakeEnabled, Key: cfg.AIAssistant.IntegrationKey, Secret: cfg.AIAssistant.IntegrationSecret, ActorID: cfg.AIAssistant.IntegrationActorID, WeComCorpID: cfg.WeCom.CorpID, OpenPlatformID: cfg.Survey.OAuthOpenPlatformID}, DispatchReady: cfg.AIAssistant.DispatchEnabled})
 	if err != nil {
 		return fail(err)
 	}
@@ -2087,6 +2088,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	if err != nil {
 		return fail(err)
 	}
+	receiptAdapter.provider = providerClient
 	if err = audienceDirectPush.BindObservation(
 		audienceDirectPushDeliveryAdapter{receipts: outboundMessages, provider: providerClient},
 		audienceDirectPushOpenAdapter{uow: uow, identities: queries, excel: excelClient, unionScope: audienceUnionScope},

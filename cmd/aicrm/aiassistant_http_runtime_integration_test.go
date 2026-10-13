@@ -75,6 +75,8 @@ func TestAIAssistantSignedHTTPRiverWeComJourney(t *testing.T) {
 		switch r.URL.Path {
 		case "/cgi-bin/gettoken":
 			_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "access_token": "journey-token", "expires_in": 7200})
+		case "/cgi-bin/externalcontact/get_groupmsg_send_result":
+			_ = json.NewEncoder(w).Encode(map[string]any{"errcode": 0, "send_list": []map[string]any{{"userid": "staff-1", "external_userid": "external-1", "status": 0}}})
 		case "/cgi-bin/externalcontact/add_msg_template":
 			providerCalls.Add(1)
 			var request map[string]any
@@ -152,7 +154,7 @@ func TestAIAssistantSignedHTTPRiverWeComJourney(t *testing.T) {
 	}
 
 	now := time.Date(2026, 9, 5, 8, 0, 0, 0, time.UTC)
-	handler, err := aiassistanthttp.NewHandler(aiassistanthttp.Config{Application: service, Security: journeyHTTPSecurity{}, Authorizer: accessapp.AIAssistantAuthorizer{}, Integration: aiassistanthttp.IntegrationConfig{Enabled: true, Key: "journey", Secret: "01234567890123456789012345678901", ActorID: 9, WeComCorpID: "corp-1", MaxSkew: 5 * time.Minute}, DispatchReady: true, Now: func() time.Time { return now }})
+	handler, err := aiassistanthttp.NewHandler(aiassistanthttp.Config{Application: service, Security: journeyHTTPSecurity{}, ReceiptReader: aiExecutionReceiptAdapter{store: privateWriter, provider: wecomClient}, Authorizer: accessapp.AIAssistantAuthorizer{}, Integration: aiassistanthttp.IntegrationConfig{Enabled: true, Key: "journey", Secret: "01234567890123456789012345678901", ActorID: 9, WeComCorpID: "corp-1", MaxSkew: 5 * time.Minute}, DispatchReady: true, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,6 +270,14 @@ func TestAIAssistantSignedHTTPRiverWeComJourney(t *testing.T) {
 	effectsResponse := journeyAdminJSON(t, routes, http.MethodGet, "/api/admin/ai-assistant/plans/"+itoa(createBody.Plan.ID)+"/effects", "", nil)
 	if !bytes.Contains(effectsResponse.Body.Bytes(), []byte(`"provider_accepted"`)) {
 		t.Fatalf("effect receipt=%s", effectsResponse.Body.String())
+	}
+	receiptsResponse := journeyAdminJSON(t, routes, http.MethodGet, "/api/admin/ai-assistant/plans/"+itoa(createBody.Plan.ID)+"/execution-receipts?live=true", "", nil)
+	if receiptsResponse.Code != http.StatusOK || !bytes.Contains(receiptsResponse.Body.Bytes(), []byte(`"msgid":"wecom-msg-journey-1"`)) || !bytes.Contains(receiptsResponse.Body.Bytes(), []byte(`"query_errcode":0`)) || !bytes.Contains(receiptsResponse.Body.Bytes(), []byte(`"provider_delivery_status":0`)) || bytes.Contains(receiptsResponse.Body.Bytes(), []byte("external-1")) || bytes.Contains(receiptsResponse.Body.Bytes(), []byte("journey-token")) || providerCalls.Load() != 1 {
+		t.Fatalf("managed receipts status=%d body=%s write_calls=%d", receiptsResponse.Code, receiptsResponse.Body.String(), providerCalls.Load())
+	}
+	var persistedObservations int
+	if err = native.QueryRow(context.Background(), `SELECT count(*) FROM outbound_private_message_receipts WHERE delivery_status IS NOT NULL`).Scan(&persistedObservations); err != nil || persistedObservations != 0 {
+		t.Fatalf("receipt read wrote observations: count=%d err=%v", persistedObservations, err)
 	}
 	approveReplay := journeyAdminJSON(t, routes, http.MethodPost, "/api/admin/ai-assistant/plans/"+itoa(createBody.Plan.ID)+"/approve", "approve-journey-0001", map[string]any{"expected_version": planBody.Plan.Version, "preview_digest": preview.PreviewDigest})
 	if approveReplay.Code != http.StatusOK || providerCalls.Load() != 1 {

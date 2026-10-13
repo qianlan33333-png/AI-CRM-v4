@@ -9,10 +9,11 @@ import (
 type AIAssistantAction string
 
 const (
-	AIAssistantRead      AIAssistantAction = "aiassistant.read"
-	AIAssistantReview    AIAssistantAction = "aiassistant.review"
-	AIAssistantApprove   AIAssistantAction = "aiassistant.approve"
-	AIAssistantReconcile AIAssistantAction = "aiassistant.reconcile"
+	AIAssistantRead        AIAssistantAction = "aiassistant.read"
+	AIAssistantReceiptRead AIAssistantAction = "aiassistant.receipt.read"
+	AIAssistantReview      AIAssistantAction = "aiassistant.review"
+	AIAssistantApprove     AIAssistantAction = "aiassistant.approve"
+	AIAssistantReconcile   AIAssistantAction = "aiassistant.reconcile"
 )
 
 // AIAssistantAuthorizer is the narrow Access-owned permission seam used by

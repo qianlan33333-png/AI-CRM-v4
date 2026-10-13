@@ -24,7 +24,7 @@ func (AIAssistantAuthorizer) AuthorizeAIAssistant(_ context.Context, principal d
 		}
 		return false
 	}
-	if action == accessport.AIAssistantReconcile {
+	if action == accessport.AIAssistantReconcile || action == accessport.AIAssistantReceiptRead {
 		if has(domain.RoleAdmin) || principal.IsSuperAdmin() {
 			return nil
 		}

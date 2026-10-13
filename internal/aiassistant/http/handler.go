@@ -62,6 +62,7 @@ type Config struct {
 	Authorizer    accessport.AIAssistantAuthorizer
 	Integration   IntegrationConfig
 	DispatchReady bool
+	ReceiptReader aiassistantport.ExecutionReceiptReader
 	Now           func() time.Time
 }
 
@@ -71,6 +72,7 @@ type Handler struct {
 	authorizer    accessport.AIAssistantAuthorizer
 	integration   IntegrationConfig
 	dispatchReady bool
+	receipts      aiassistantport.ExecutionReceiptReader
 	now           func() time.Time
 }
 
@@ -89,7 +91,7 @@ func NewHandler(config Config) (*Handler, error) {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
-	return &Handler{app: config.Application, security: config.Security, authorizer: config.Authorizer, integration: config.Integration, dispatchReady: config.DispatchReady, now: config.Now}, nil
+	return &Handler{app: config.Application, security: config.Security, authorizer: config.Authorizer, integration: config.Integration, dispatchReady: config.DispatchReady, receipts: config.ReceiptReader, now: config.Now}, nil
 }
 
 func (h *Handler) Routes() stdhttp.Handler {
@@ -105,6 +107,7 @@ func (h *Handler) Routes() stdhttp.Handler {
 	mux.HandleFunc("POST /api/admin/ai-assistant/plans/{plan_id}/preview-approval", h.previewApproval)
 	mux.HandleFunc("POST /api/admin/ai-assistant/plans/{plan_id}/approve", h.approvePlan)
 	mux.HandleFunc("GET /api/admin/ai-assistant/plans/{plan_id}/effects", h.listEffects)
+	mux.HandleFunc("GET /api/admin/ai-assistant/plans/{plan_id}/execution-receipts", h.executionReceipts)
 	mux.HandleFunc("POST /api/admin/ai-assistant/effects/{effect_id}/reconcile", h.reconcileEffect)
 	mux.HandleFunc("POST /api/integrations/ai-assistant/review-plans", h.integrationPlan)
 	// Frozen donor caller route. It shares the authenticated adapter and never

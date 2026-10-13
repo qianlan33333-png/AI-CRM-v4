@@ -79,6 +79,15 @@ go build -o /tmp/aicrm-cli ./cmd/aicrm-cli
 
 ## 结果、异常与退出码
 
+管理员可查询原 AI 计划的受管企微回执，黄小璨普通管理员账号可用，浅蓝的唯一超级管理员归属保持不变：
+
+```sh
+aicrm-cli ai aiassistant-execution-receipts list --param plan_id=5 --query live=true
+aicrm-cli ai aiassistant-execution-receipts list --param plan_id=6 --query live=true
+```
+
+本接口不发送、重试或修改状态。省略 `live` 只读本地回执；`live=true` 沿原 msgid、发送账号与目标查询完整企微结果。输出创建接口、msgid、sender_userid、本地状态及本次查询的 HTTP/errcode/发送状态；历史创建 errcode 未留存则返回 null 和 `not_recorded`，不可把当前查询的 0 当作历史响应。`provider_delivery_status=0` 为未发送，1 且有发送时间为已发送；`query_state=failed` 为查询未取得可信匹配，保留本地证据。输出不包含客户 Provider 身份、话术、令牌或密钥。新增命令需要使用包含该目录的新 CLI 和已安装的新服务；源码候选不等于生产生效。
+
 | 退出码 | 含义 |
 |---:|---|
 | 0 | 调用正常返回，或等待到该 Owner 的完成状态；仍须检查 Provider/员工/业务证据 |
