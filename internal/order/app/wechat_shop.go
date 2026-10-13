@@ -107,8 +107,9 @@ func (s ShopOrders) ImportShopOrderWithin(ctx context.Context, source orderport.
 	if e != nil {
 		return e
 	}
+	deliveryPhone, deliveryAccount := source.Phone, source.Account
 	if saved.Event.OrderID > 0 {
-		buyer := shopBuyerDetails{Phone: source.Phone, Nickname: source.Nickname}
+		buyer := shopBuyerDetails{Phone: source.Phone, Account: source.Account, Nickname: source.Nickname}
 		if source.Buyer.Valid() {
 			buyer.OpenID = source.Buyer.Reference().NormalizedValue
 		}
@@ -131,6 +132,9 @@ func (s ShopOrders) ImportShopOrderWithin(ctx context.Context, source orderport.
 			}
 			if buyer.Phone == "" {
 				buyer.Phone = prior.Phone
+			}
+			if buyer.Account == "" {
+				buyer.Account = prior.Account
 			}
 			if buyer.Nickname == "" {
 				buyer.Nickname = prior.Nickname
@@ -155,11 +159,15 @@ func (s ShopOrders) ImportShopOrderWithin(ctx context.Context, source orderport.
 		if err = s.Store.UpsertShopBuyerWithin(ctx, saved.Event.OrderID, material); err != nil {
 			return err
 		}
+		deliveryPhone, deliveryAccount = buyer.Phone, buyer.Account
 	}
 	if !saved.Eligible || saved.Event.ID == 0 {
 		return nil
 	}
-	// Reuse frozen paid/contact facts when recovery follows Product configuration.
+	// Paid facts remain frozen. Before the first intent is accepted, delivery
+	// uses the official detail just read (or previously read optional contacts),
+	// rather than perpetuating empty contacts from initial catalog/config waits.
+	// Outbound retains any already accepted intent's immutable body and key.
 	contact, e = s.Cipher.DecryptCommercePayload(saved.Ciphertext, saved.KeyVersion, aad)
 	if e != nil {
 		return orderport.ErrUnavailable
@@ -168,7 +176,14 @@ func (s ShopOrders) ImportShopOrderWithin(ctx context.Context, source orderport.
 	if json.Unmarshal(contact, &values) != nil {
 		return orderport.ErrUnavailable
 	}
-	saved.Event.ShopPhone, saved.Event.ShopAccount = values.Phone, values.Account
+	if deliveryPhone == "" {
+		deliveryPhone = values.Phone
+	}
+	if deliveryAccount == "" {
+		deliveryAccount = values.Account
+	}
+	saved.Event.ShopPhone, saved.Event.ShopAccount = deliveryPhone, deliveryAccount
+	saved.Event.Order.PayerCustomerID, saved.Event.Order.BeneficiaryCustomerID = buyerID, buyerID
 	for i, line := range saved.Lines {
 		if i >= len(saved.Event.Order.Items) {
 			return orderport.ErrConflict

@@ -4,6 +4,12 @@
   "checks": [
     {
       "lane": "backend",
+      "path": "internal/wechatshop/orders_test.go",
+      "test": "TestPostgreSQLShopDailyWindowFailureAndOutageRecovery",
+      "postgres": true
+    },
+    {
+      "lane": "backend",
       "path": "internal/payment/provider/wechatshop_buyer_test.go",
       "test": "TestWeChatShopBuyerMetadataContract"
     },

@@ -11,7 +11,7 @@ import (
 	orderport "github.com/qianlan33333-png/AI-CRM-v3/internal/order/port"
 )
 
-type shopBuyerDetails struct{ Phone, Nickname, OpenID, UnionID, UnionScope string }
+type shopBuyerDetails struct{ Phone, Account, Nickname, OpenID, UnionID, UnionScope string }
 
 func shopBuyerAAD(app, order string) []byte {
 	return []byte("order.shop.buyer.v1:" + app + ":" + order)

@@ -48,3 +48,23 @@ Product Design 已读取 index / audit / image-to-code、完成 user-context pre
 ## 当前串行发布边界
 
 工作台已有 R01 的 `0244_survey_submission_subject.sql` 在预发应用；本次使用独立前向迁移 `0245_wechat_shop_buyer_details.sql`，保留已应用迁移的名称和 checksum。当前祖先 R01/R02/R03 仅获预发授权，本次小店授权只覆盖相关缺陷，不覆盖祖先能力；工作台继续原队列分别保留授权范围，生产安装与目标补拉以其满足对应授权为准。
+
+## 首次外推的数据读取顺序补齐
+
+用户本轮明确要求先访问官方详情，基于已读取的资料外推。回调只持久化收据和订单读取任务；自动补拉和配置唤醒也复用 `readOrder`。官方读取失败、订单不匹配或支付事实无效时返回错误，不创建外推；读取成功但可选手机号/账号确实缺失时，保留已确认的置空发送规则。
+
+```mermaid
+flowchart TD
+ A[回调或每日补拉或配置唤醒] --> B[读取官方订单详情]
+ B -->|读取失败| C[原 River 任务重试]
+ B -->|成功| D[提取电话 账号 昵称及带 scope 的身份]
+ D --> E[同一事务保存订单及资料 解析 OneID]
+ E --> F[使用已读取联系资料及可信买家生成首个外推意图]
+ F --> G[事务提交后由现有 External Effects 发送]
+```
+
+代码审查发现原读取顺序正确，但配置后恢复仍从首次入库冻结的 contact/paid snapshot 取联系和买家字段；首次为空、后续详情有值时会继续发送空值。最小补丁使用本次详情的联系资料，缺省时保留本单此前官方读取的资料及原联系快照；加密买家资料同时保留账号。第一次生成意图使用当前可信 OneID 解析结果，付款金额、明细和支付时间继续使用原冻结事实。Outbound 仍在同事务查重，已生成意图（queued/accepted/unknown/terminal）的 body 和 key 不变，不重复提交。
+
+分类沿用父 brief：OneID 为可信解析；Persistence 为 Provider 读取后同一 PostgreSQL UoW；外部效果复用原意图接受和 Worker。没有新增限制、任务、迁移或 UI。参考沿用 WxJava，已再次核对其 `OrderAddressInfo.virtual_order_tel_number` 合同。
+
+验证新增未配置时首次空值、后续详情补齐再配置、随后详情省略可选字段及并发首推；接收测试接口实际断言电话/账号/付款金额。保留 queued/accepted/unknown 发送体不变和缺资料仍提交用例；读取失败不得调用 importer 的现有合同随本次执行。此补丁替代候选 dc7b417 的输入选择，仍不授权重发源单 3739797044778671872 / intent 300。

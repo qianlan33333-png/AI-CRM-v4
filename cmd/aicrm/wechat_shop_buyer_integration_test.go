@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,6 +26,7 @@ import (
 	productport "github.com/qianlan33333-png/AI-CRM-v3/internal/product/port"
 	productstore "github.com/qianlan33333-png/AI-CRM-v3/internal/product/store"
 	"github.com/riverqueue/river"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -72,11 +74,21 @@ func TestPostgreSQLShopBuyerOneIDOrdersAndLateContact(t *testing.T) {
 	oneID := identityapp.OneIDService{Store: identityStore, VerifiedIdentity: bridge}
 	queries := identityquery.NewPostgreSQL(vault)
 	sends := 0
-	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { sends++; w.WriteHeader(204) }))
+	var received [][]byte
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, e := io.ReadAll(r.Body)
+		if e != nil {
+			w.WriteHeader(400)
+			return
+		}
+		received = append(received, body)
+		sends++
+		w.WriteHeader(204)
+	}))
 	defer receiver.Close()
 	target := protocolRuntimeTarget(receiver.URL)
 	targets := &commerceFundsPushTargets{target: target}
-	push, err := outbound.NewCommercePushService(pool, uow, eer, commerceFundsProductConfigurationReader{repository: products}, commerceFundsPushIdentityReader{}, targets, cipher)
+	push, err := outbound.NewCommercePushService(pool, uow, eer, commerceFundsProductConfigurationReader{repository: products}, queries, targets, cipher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,6 +418,91 @@ func TestPostgreSQLShopBuyerOneIDOrdersAndLateContact(t *testing.T) {
 			if payer != int64(customer) || state != "linked" {
 				t.Fatal("contact/order race missed association")
 			}
+		}
+	})
+	t.Run("first send uses reread details and current verified buyer", func(t *testing.T) {
+		originalTarget := targets.target
+		defer func() { targets.target = originalTarget }()
+		targets.target.Reference = "unavailable-target"
+		v := source("reread-before-first-send", identitydomain.VerifiedFact{})
+		v.Phone, v.Account = "", ""
+		v.Buyer = identitydomain.VerifiedFact{}
+		if e := importOrder(v); e != nil {
+			t.Fatal(e)
+		}
+		frozenContact := func() []byte {
+			t.Helper()
+			var raw []byte
+			if e := pool.QueryRow(ctx, `SELECT f.paid_snapshot::text||':'||encode(f.contact_ciphertext,'hex') FROM orders o JOIN order_wechat_shop_facts f ON f.order_id=o.id WHERE o.merchant_order_no=$1`, v.ID).Scan(&raw); e != nil {
+				t.Fatal(e)
+			}
+			return raw
+		}
+		originalContact := frozenContact()
+		v.BuyerUnion = union("union-before-first-send")
+		customer := provision(v.BuyerUnion)
+		v.Phone, v.Account = "13900139000", "reread-account"
+		if e := importOrder(v); e != nil {
+			t.Fatal(e)
+		}
+		// A later official response can omit optional contacts. Previously read
+		// details survive, even when the original contact snapshot was empty.
+		v.Phone, v.Account = "", ""
+		targets.target = originalTarget
+		targets.target.BuyerUnionID.Scope = scope
+		var wg sync.WaitGroup
+		errs := make(chan error, 8)
+		for range 8 {
+			wg.Add(1)
+			go func() { defer wg.Done(); errs <- importOrder(v) }()
+		}
+		wg.Wait()
+		close(errs)
+		for e := range errs {
+			if e != nil {
+				t.Fatal(e)
+			}
+		}
+		payer, state, orderID := readBuyer(v.ID)
+		if payer != int64(customer) || state != "linked" || !bytes.Equal(originalContact, frozenContact()) {
+			t.Fatal("current attribution or immutable paid/contact facts changed incorrectly")
+		}
+		var count int
+		if e := pool.QueryRow(ctx, `SELECT count(*) FROM outbound_commerce_push_intents i JOIN order_paid_events p ON p.id=i.order_paid_event_id WHERE p.order_id=$1 AND i.effect_id IS NOT NULL`, orderID).Scan(&count); e != nil || count != 1 {
+			t.Fatal("concurrent first send not unique", e)
+		}
+		frozenIntent := readFrozen(v.ID)
+		// Once queued, a newer detail must not mutate the scheduled request.
+		v.Phone, v.Account = "13700137000", "changed-after-queue"
+		if e := importOrder(v); e != nil || !bytes.Equal(frozenIntent, readFrozen(v.ID)) {
+			t.Fatal("queued payload was rewritten", e)
+		}
+		var effect, generation, job int64
+		if e := pool.QueryRow(ctx, `SELECT e.id,e.generation,j.river_job_id FROM outbound_commerce_push_intents i JOIN order_paid_events p ON p.id=i.order_paid_event_id JOIN external_effects e ON i.effect_id='eer_'||e.id::text JOIN external_effect_jobs j ON j.effect_id=e.id AND j.generation=e.generation WHERE p.order_id=$1`, orderID).Scan(&effect, &generation, &job); e != nil {
+			t.Fatal(e)
+		}
+		beforeSends := sends
+		if e := eer.RunAttempt(ctx, effect, generation, job, provider); e != nil || sends != beforeSends+1 {
+			t.Fatal("first send did not reach receiver once", e)
+		}
+		var body struct {
+			Phone   string `json:"phone_number"`
+			Account string `json:"account"`
+			Buyer   struct {
+				UnionID string `json:"unionid"`
+			} `json:"buyer"`
+			Order struct {
+				Paid int64 `json:"paid_amount"`
+			} `json:"order"`
+		}
+		if e := json.Unmarshal(received[len(received)-1], &body); e != nil || body.Phone != "13900139000" || body.Account != "reread-account" || body.Buyer.UnionID != "union-before-first-send" || body.Order.Paid != 29900 {
+			t.Fatal("receiver did not receive details read before first send", e)
+		}
+		if e := importOrder(v); e != nil || !bytes.Equal(frozenIntent, readFrozen(v.ID)) {
+			t.Fatal("accepted payload changed", e)
+		}
+		if e := eer.RunAttempt(ctx, effect, generation, job, provider); e != nil || sends != beforeSends+1 {
+			t.Fatal("accepted effect resent", e)
 		}
 	})
 }

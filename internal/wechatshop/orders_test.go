@@ -62,6 +62,9 @@ func TestPostgreSQLShopDailyWindowFailureAndOutageRecovery(t *testing.T) {
 	if e := s.syncOrders(ctx, until); e == nil {
 		t.Fatal("detail failure passed")
 	}
+	if importer.calls != 0 {
+		t.Fatal("failed detail reached order import/dispatch")
+	}
 	var after time.Time
 	_ = s.Pool.QueryRow(ctx, `SELECT completed_until FROM wechat_shop_order_progress`).Scan(&after)
 	if !after.Equal(initial) {
