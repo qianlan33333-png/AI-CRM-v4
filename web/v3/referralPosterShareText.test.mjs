@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import qrcode from 'qrcode-generator';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { JSDOM } from 'jsdom';
@@ -94,7 +95,8 @@ async function publicFixture({ count = 3, deferredImage = false, failedImage = f
   assert.equal(doc.querySelector('[data-testid="referral-copy-share-text"]').hidden, false);
   await new Promise(r => setTimeout(r, 10)); dom.window.close();
 }
-for (const [layout, message] of [[{x:0,y:0,size:1},'二维码区域过小'],[{x:590,y:790,size:300},'二维码位置不可用']]) {
+const minimumQR = qrcode(0,'M');minimumQR.addData('https://crm.example/referral/invite/rfi_'+'A'.repeat(43),'Byte');minimumQR.make();
+for (const [layout, message] of [[{x:0,y:0,size:minimumQR.getModuleCount()+9},'二维码区域过小'],[{x:0,y:0,size:1},'二维码区域过小'],[{x:590,y:790,size:300},'二维码位置不可用']]) {
   const f = await publicFixture({ count:1, layout, expectCompositionError:true });
   await wait(()=>f.doc.querySelector('[data-testid="referral-poster-preview"]').textContent.includes(message));
   assert.equal(f.doc.querySelector('[data-testid="referral-download-poster"]'),null);

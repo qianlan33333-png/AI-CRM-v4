@@ -87,6 +87,7 @@ export async function composeReferralPoster(imageURL: string, payload: string, l
   if (cell < 1) throw new Error("二维码区域过小，请联系管理员调整。");
   const quiet = Math.ceil(4 * cell);
   const symbol = box.size - 2 * quiet;
+  if (symbol < modules) throw new Error("二维码区域过小，请联系管理员调整。");
   const edge = (index: number) => quiet + Math.round(index * symbol / modules);
   ctx.drawImage(source, 0, 0);
   ctx.fillStyle = "#fff";

@@ -16,7 +16,7 @@ const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const campaign = {
   id: 7, name: '队长确认赛', state: 'active', effective_state: 'active',
-  starts_at: '2026-09-01T00:00:00Z', ends_at: '2026-10-01T00:00:00Z',
+  starts_at: '2026-09-01T00:00:00Z', ends_at: '2099-10-01T00:00:00Z',
   participant_count: 0, invitation_count: 0, team_count: 1,
   teams: [{ id: 9, name: '测试', logo_url: '', captain_name: '队长阿青' }],
 };
@@ -56,28 +56,9 @@ const dom = new JSDOM('<!doctype html><main id="referral-root"></main>', {
 dom.window.eval(bundle);
 await waitFor(() => dom.window.document.querySelector('[data-testid="referral-activity-info"]'), 'activity info entry missing');
 dom.window.document.querySelector('[data-testid="referral-activity-info"]').click();
-await waitFor(
-  () => dom.window.document.querySelector('[data-testid="referral-join-captain-team"]'),
-  'unjoined trusted captain must be directed to their assigned team',
-);
-const details = [...dom.window.document.querySelectorAll('button')].find((button) => button.textContent === '参加后查看');
-assert.ok(details, 'unjoined member detail action must explain the participation requirement');
-details.click();
-await waitFor(
-  () => dom.window.document.querySelector('[data-testid="referral-accept-dialog"]'),
-  'detail action must direct the unjoined captain to explicit participation',
-);
-[...dom.window.document.querySelectorAll('dialog button')].find((button) => button.textContent === '暂不参加').click();
-assert.equal(
-  calls.filter((call) => call.path.endsWith('/invitations')).length,
-  0,
-  'unjoined member details must not make an invitation request that can become a false 401',
-);
-assert.match(
-  dom.window.document.body.textContent,
-  /确认参加活动后，可在这里查看你直接邀请的好友/,
-  'unjoined member sees an invitation-detail empty state',
-);
+await waitFor(() => dom.window.document.querySelector('[data-testid="referral-invitation-count"]')?.textContent === '共 0 人', 'unjoined captain detail must show no invitations');
+assert.equal(calls.filter((call) => call.path.endsWith('/invitations')).length, 0, 'unjoined member details must not issue an unauthorized invitation lookup');
+assert.match(dom.window.document.body.textContent, /参加活动后可查看邀请记录/, 'unjoined member sees the current invitation-detail empty state');
 dom.window.document.querySelector('[data-testid="referral-activity-info"]').click();
 const cta = dom.window.document.querySelector('[data-testid="referral-invite"]');
 assert.equal(cta?.textContent, '加入战队并邀请');

@@ -7,7 +7,7 @@ const bundle = await buildTestBrowserBundle(fileURLToPath(new URL('./referralCen
 const delay = (ms = 8) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitFor(check, description) { for (let index = 0; index < 150; index++) { if (check()) return; await delay(); } throw new Error(description); }
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-const campaign = { id: 7, name: '秋日组队赛', state: 'active', effective_state: 'active', qualification_mode: 'free_signup', activity_url: '/referral?campaign=7', starts_at: '2026-09-01T00:00:00Z', ends_at: '2026-10-01T00:00:00Z', description: '邀请好友，一起冲榜。', reward_rules: '奖励以总榜为准。', participant_count: 12, invitation_count: 10, team_count: 1, teams: [{ id: 9, name: '向阳队', logo_url: '' }] };
+const campaign = { id: 7, name: '秋日组队赛', state: 'active', effective_state: 'active', qualification_mode: 'free_signup', activity_url: '/referral?campaign=7', starts_at: '2026-09-01T00:00:00Z', ends_at: '2099-10-01T00:00:00Z', description: '邀请好友，一起冲榜。', reward_rules: '奖励以总榜为准。', participant_count: 12, invitation_count: 10, team_count: 1, teams: [{ id: 9, name: '向阳队', logo_url: '' }] };
 const calls = [];
 let joined = false;
 const dom = new JSDOM('<!doctype html><main id="referral-root"></main>', { url: 'https://crm.example/referral?campaign=7&invite=rfi_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefg', runScripts: 'outside-only', pretendToBeVisual: true, beforeParse(window) {
