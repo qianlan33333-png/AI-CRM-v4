@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -142,5 +143,38 @@ func TestWebhookRuntimePreservesAutomaticCoverFailureClass(t *testing.T) {
 				t.Fatalf("err=%v resolver_calls=%d", err, resolver.calls)
 			}
 		})
+	}
+}
+
+func TestWebhookBatchFreezesElevenGroupsInOneDraft(t *testing.T) {
+	service := &RuntimeService{senders: webhookSenderStub{}}
+	targets := []string{}
+	for i := 10; i >= 0; i-- {
+		targets = append(targets, fmt.Sprintf("chat-%02d", i))
+	}
+	now := time.Now().UTC()
+	drafts, err := service.buildWebhookDrafts(context.Background(), groupopsport.Detail{}, groupopsport.Run{ID: 7, PlanID: 12, PlanRevision: 8}, targets, groupopsport.MaterialPlan{}, json.RawMessage(`{"schema_version":2,"kind":"webhook_message","message_text":"资料已整理好","attachment_order":[]}`), now)
+	if err != nil || len(drafts) != 1 || drafts[0].SenderUserID != "owner" {
+		t.Fatal(drafts, err)
+	}
+	frozen, err := groupopsport.FrozenExecutionTargets(drafts[0].ContentSnapshot, drafts[0].TargetReference)
+	if err != nil || len(frozen) != 11 || frozen[0] != "chat-00" || frozen[10] != "chat-10" {
+		t.Fatal(frozen, err)
+	}
+	if drafts[0].ContentDigest != string(effectport.Hash("group-ops.content.snapshot.v1", string(drafts[0].ContentSnapshot))) {
+		t.Fatal("batch scope not digest-bound")
+	}
+}
+
+type mixedBatchSender struct{}
+
+func (mixedBatchSender) ResolveExecutionSender(_ context.Context, target string) (string, bool, error) {
+	return target, true, nil
+}
+func TestWebhookBatchRejectsMixedSenderBeforeEffects(t *testing.T) {
+	service := &RuntimeService{senders: mixedBatchSender{}}
+	_, err := service.buildWebhookDrafts(context.Background(), groupopsport.Detail{}, groupopsport.Run{ID: 7, PlanID: 12, PlanRevision: 8}, []string{"chat-a", "chat-b"}, groupopsport.MaterialPlan{}, json.RawMessage(`{"schema_version":2,"kind":"webhook_message","message_text":"资料"}`), time.Now().UTC())
+	if !errors.Is(err, ErrStateConflict) {
+		t.Fatal(err)
 	}
 }

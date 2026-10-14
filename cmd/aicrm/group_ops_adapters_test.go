@@ -164,7 +164,7 @@ func (provider *groupOpsDirectoryProvider) GetGroupChat(ctx context.Context, cha
 }
 
 func TestGroupOpsDispatchReaderRejectsChangedSenderBeforeProviderCall(t *testing.T) {
-	value := groupopsport.DispatchExecution{ExecutionID: 9, ExternalEffectID: "eer_9", State: groupopsport.ExecutionAccepted, TargetReference: "chat-9", SenderUserID: "owner-9"}
+	value := groupopsport.DispatchExecution{ExecutionID: 9, ExternalEffectID: "eer_9", State: groupopsport.ExecutionAccepted, TargetReference: "chat-9", SenderUserID: "owner-9", ContentSnapshot: json.RawMessage(`{"schema_version":1,"kind":"message"}`)}
 	reader := groupOpsDispatchReader{uow: preparationUOWStub{}, execution: dispatchExecutionStub{value: value}, senders: dispatchSenderStub{sender: "owner-9", found: true}}
 	loaded, err := reader.LoadDispatchExecution(context.Background(), "eer_9")
 	if err != nil || loaded.ExecutionID != 9 {
@@ -451,4 +451,69 @@ type materialFreezerStub struct {
 
 func (stub materialFreezerStub) FreezeGroupOpsMaterial(ctx context.Context, source mediaport.GroupOpsMaterialSourceSnapshot, requiredThrough time.Time) (mediaport.GroupOpsMaterialSnapshot, error) {
 	return stub.freeze(ctx, source, requiredThrough)
+}
+
+type batchReceiptReaderStub struct {
+	groupopsport.GroupMessageReceiptReader
+	receipt groupopsport.GroupMessageReceipt
+}
+
+func (s batchReceiptReaderStub) FindGroupMessageReceipt(context.Context, groupopsport.ReconciliationEvidence) (groupopsport.GroupMessageReceipt, bool, error) {
+	return s.receipt, true, nil
+}
+
+type batchResultReaderStub struct {
+	pages map[string]wecomport.GroupMessageSendResultPage
+	calls int
+}
+
+func (s *batchResultReaderStub) GetGroupMessageSendResult(_ context.Context, msgid, sender, cursor string, _ int) (wecomport.GroupMessageSendResultPage, error) {
+	s.calls++
+	if msgid != "one-task" || sender != "owner" {
+		return wecomport.GroupMessageSendResultPage{}, errors.New("wrong frozen task")
+	}
+	return s.pages[cursor], nil
+}
+func TestGroupOpsBatchDeliveryRequiresEveryFrozenGroupAcrossPages(t *testing.T) {
+	reader := &batchResultReaderStub{pages: map[string]wecomport.GroupMessageSendResultPage{"": {Items: []wecomport.GroupMessageSendResult{{SenderUserID: "owner", ChatID: "chat-a", Status: 1}}, NextCursor: "page-2"}, "page-2": {Items: []wecomport.GroupMessageSendResult{{SenderUserID: "owner", ChatID: "chat-b", Status: 0}, {SenderUserID: "other-owner", ChatID: "chat-c", Status: 1}, {SenderUserID: "owner", ChatID: "outside", Status: 1}}}}}
+	receipt := groupopsport.GroupMessageReceipt{ExecutionID: 1, ExternalEffectID: "eer_1", MessageID: "one-task", SenderUserID: "owner", ChatID: "chat-a", ChatIDs: []string{"chat-a", "chat-b", "chat-c"}}
+	adapter := wecomGroupOpsEvidence{uow: preparationUOWStub{}, receipts: batchReceiptReaderStub{receipt: receipt}, reader: reader}
+	result, found, err := adapter.ReadProviderDelivery(context.Background(), groupopsport.ReconciliationEvidence{ExecutionID: 1, ExternalEffectID: "eer_1"})
+	if err != nil || !found || reader.calls != 2 || *result.DeliveryStatus == 1 || len(result.GroupDeliveries) != 3 || result.GroupDeliveries[2].Status != nil {
+		t.Fatal(result, found, err, reader.calls)
+	}
+	reader.pages["page-2"] = wecomport.GroupMessageSendResultPage{Items: []wecomport.GroupMessageSendResult{{SenderUserID: "owner", ChatID: "chat-b", Status: 1}, {SenderUserID: "owner", ChatID: "chat-c", Status: 1}}}
+	result, found, err = adapter.ReadProviderDelivery(context.Background(), groupopsport.ReconciliationEvidence{ExecutionID: 1, ExternalEffectID: "eer_1"})
+	if err != nil || !found || *result.DeliveryStatus != 1 {
+		t.Fatal(result, found, err)
+	}
+	verified, err := adapter.VerifyReconciliationEvidence(context.Background(), groupopsport.ReconciliationEvidence{ExecutionID: 1, ExternalEffectID: "eer_1", EvidenceDigest: result.DeliveryEvidenceDigest})
+	if err != nil || !verified.DeliveryProven {
+		t.Fatal(verified, err)
+	}
+	reader.pages["page-2"] = wecomport.GroupMessageSendResultPage{NextCursor: "page-2"}
+	if _, _, err = adapter.ReadProviderDelivery(context.Background(), groupopsport.ReconciliationEvidence{ExecutionID: 1, ExternalEffectID: "eer_1"}); err == nil {
+		t.Fatal("repeated cursor accepted")
+	}
+}
+
+type batchDispatchSenderStub struct{ changed string }
+
+func (s batchDispatchSenderStub) ResolveExecutionSender(_ context.Context, target string) (string, bool, error) {
+	if target == s.changed {
+		return "replacement-owner", true, nil
+	}
+	return "owner", true, nil
+}
+func TestGroupOpsBatchDispatchRechecksEveryGroupSender(t *testing.T) {
+	snapshot := json.RawMessage(`{"schema_version":3,"kind":"webhook_message","target_chat_references":["chat-a","chat-b"]}`)
+	execution := groupopsport.DispatchExecution{ExecutionID: 1, ExternalEffectID: "eer_1", TargetReference: "chat-a", SenderUserID: "owner", ContentSnapshot: snapshot}
+	reader := groupOpsDispatchReader{uow: preparationUOWStub{}, execution: dispatchExecutionStub{value: execution}, senders: batchDispatchSenderStub{}}
+	if _, err := reader.LoadDispatchExecution(context.Background(), "eer_1"); err != nil {
+		t.Fatal(err)
+	}
+	reader.senders = batchDispatchSenderStub{changed: "chat-b"}
+	if _, err := reader.LoadDispatchExecution(context.Background(), "eer_1"); err == nil {
+		t.Fatal("non-anchor group sender changed without rejection")
+	}
 }

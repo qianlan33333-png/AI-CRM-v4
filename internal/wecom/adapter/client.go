@@ -1841,13 +1841,17 @@ func (e privateSendError) Retryable() bool {
 // rejection, never a partial success. Transport ambiguity is surfaced as
 // outcome_unknown so External Effects keeps the original idempotency key.
 func (client *Client) SendGroupMessage(ctx context.Context, request wecomport.GroupMessageRequest) (wecomport.GroupMessageReceipt, bool, error) {
-	if !client.DirectoryReady() || invalid(request.SenderUserID) || len(request.ChatIDs) != 1 || (strings.TrimSpace(request.Text) == "" && len(request.Attachments) == 0) || len(request.Attachments) > 9 {
+	if !client.DirectoryReady() || invalid(request.SenderUserID) || len(request.ChatIDs) == 0 || len(request.ChatIDs) > 2000 || (strings.TrimSpace(request.Text) == "" && len(request.Attachments) == 0) || len(request.Attachments) > 9 {
 		return wecomport.GroupMessageReceipt{}, false, privateSendError{}
 	}
-	chatID := strings.TrimSpace(request.ChatIDs[0])
-	if invalid(chatID) {
-		return wecomport.GroupMessageReceipt{}, false, privateSendError{}
+	seen := map[string]bool{}
+	for _, chatID := range request.ChatIDs {
+		if invalid(chatID) || strings.TrimSpace(chatID) != chatID || seen[chatID] {
+			return wecomport.GroupMessageReceipt{}, false, privateSendError{}
+		}
+		seen[chatID] = true
 	}
+
 	token, err := client.contactAccessToken(ctx)
 	if err != nil {
 		return wecomport.GroupMessageReceipt{}, false, privateSendError{}
@@ -1859,7 +1863,7 @@ func (client *Client) SendGroupMessage(ctx context.Context, request wecomport.Gr
 	body := map[string]any{
 		"chat_type":    "group",
 		"sender":       request.SenderUserID,
-		"chat_id_list": []string{chatID},
+		"chat_id_list": request.ChatIDs,
 		"allow_select": false,
 	}
 	if text := strings.TrimSpace(request.Text); text != "" {

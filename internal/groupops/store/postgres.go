@@ -591,6 +591,25 @@ WHERE e.external_effect_id=$1
 	if err != nil {
 		return groupopsport.DispatchExecution{}, err
 	}
+	targets, targetErr := groupopsport.FrozenExecutionTargets(item.ContentSnapshot, item.TargetReference)
+	if targetErr != nil {
+		return groupopsport.DispatchExecution{}, ErrInvalid
+	}
+	// Every frozen group remains bound to this exact active revision and
+	// belongs to the same sender. Never widen a batch from a live directory.
+	if len(targets) > 1 {
+		for _, target := range targets {
+			var valid bool
+			if targetErr = tx.QueryRow(ctx, `SELECT EXISTS(
+ SELECT 1 FROM group_ops_executions e
+ JOIN group_ops_plan_group_assets a ON a.plan_id=e.plan_id AND a.asset_reference=$2
+ JOIN group_ops_directory_groups g ON g.chat_reference=a.asset_reference
+ WHERE e.id=$1
+ )`, item.ExecutionID, target).Scan(&valid); targetErr != nil || !valid {
+				return groupopsport.DispatchExecution{}, ErrConflict
+			}
+		}
+	}
 	item.ExternalEffectID = effectRef
 	item.SourceRefDigest = string(effectport.Hash("group-ops.run", strconv.FormatInt(runID, 10)))
 	item.PayloadDigest = string(effectport.Hash("group-ops.payload", item.ContentDigest, item.MaterialDigest, item.SenderUserID))
@@ -603,12 +622,21 @@ func (r *Repository) getExecution(ctx context.Context, tx pgx.Tx, id int64) (gro
 	var effectID int64
 	var receipt, evidence *string
 	var deliveryStatus pgtype.Int4
-	err := tx.QueryRow(ctx, `SELECT e.id,e.run_id,e.plan_id,e.plan_revision,COALESCE(e.node_id,0),e.node_position,e.target_reference,e.target_digest,e.content_digest,e.material_digest,e.external_effect_id,e.state,e.provider_accepted,e.delivery_proven,e.provider_receipt_digest,e.reconciliation_evidence_digest,e.attempt_count,e.scheduled_for,e.created_at,e.updated_at,t.delivery_status FROM group_ops_executions e LEFT JOIN group_ops_group_message_tasks t ON t.execution_id=e.id WHERE e.id=$1`, id).Scan(&e.ID, &e.RunID, &e.PlanID, &e.PlanRevision, &e.NodeID, &e.NodePosition, &e.TargetReference, &e.TargetDigest, &e.ContentDigest, &e.MaterialDigest, &effectID, &e.State, &e.ProviderAccepted, &e.DeliveryProven, &receipt, &evidence, &e.AttemptCount, &e.ScheduledFor, &e.CreatedAt, &e.UpdatedAt, &deliveryStatus)
+	var contentSnapshot, targetJSON, observations []byte
+	err := tx.QueryRow(ctx, `SELECT e.id,e.run_id,e.plan_id,e.plan_revision,COALESCE(e.node_id,0),e.node_position,e.target_reference,e.target_digest,e.content_digest,e.material_digest,e.external_effect_id,e.state,e.provider_accepted,e.delivery_proven,e.provider_receipt_digest,e.reconciliation_evidence_digest,e.attempt_count,e.scheduled_for,e.created_at,e.updated_at,t.delivery_status,e.content_snapshot,t.target_chat_references,t.delivery_observations FROM group_ops_executions e LEFT JOIN group_ops_group_message_tasks t ON t.execution_id=e.id WHERE e.id=$1`, id).Scan(&e.ID, &e.RunID, &e.PlanID, &e.PlanRevision, &e.NodeID, &e.NodePosition, &e.TargetReference, &e.TargetDigest, &e.ContentDigest, &e.MaterialDigest, &effectID, &e.State, &e.ProviderAccepted, &e.DeliveryProven, &receipt, &evidence, &e.AttemptCount, &e.ScheduledFor, &e.CreatedAt, &e.UpdatedAt, &deliveryStatus, &contentSnapshot, &targetJSON, &observations)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return groupopsport.Execution{}, ErrNotFound
 	}
 	if err != nil {
 		return groupopsport.Execution{}, err
+	}
+	targets, targetErr := groupopsport.FrozenExecutionTargets(contentSnapshot, e.TargetReference)
+	if targetErr != nil {
+		return groupopsport.Execution{}, ErrInvalid
+	}
+	e.TargetReferences = targets
+	if len(targets) > 1 {
+		e.GroupDeliveries = groupDeliveryStatuses(targets, observations)
 	}
 	e.ExternalEffectID = "eer_" + strconv.FormatInt(effectID, 10)
 	e.ProviderReceiptPresent = receipt != nil && *receipt != ""
@@ -1069,14 +1097,27 @@ func (r *Repository) RecordGroupMessageTask(ctx context.Context, task groupopspo
 	}
 	var storedExecution, storedEffect int64
 	var sender, chat string
-	err = tx.QueryRow(ctx, `SELECT id,external_effect_id,sender_userid_snapshot,target_reference FROM group_ops_executions WHERE id=$1 FOR UPDATE`, task.ExecutionID).Scan(&storedExecution, &storedEffect, &sender, &chat)
+	var contentSnapshot []byte
+	err = tx.QueryRow(ctx, `SELECT id,external_effect_id,sender_userid_snapshot,target_reference,content_snapshot FROM group_ops_executions WHERE id=$1 FOR UPDATE`, task.ExecutionID).Scan(&storedExecution, &storedEffect, &sender, &chat, &contentSnapshot)
 	if err != nil {
 		return err
 	}
 	if storedExecution != task.ExecutionID || storedEffect != effectID || sender != task.SenderUserID || chat != task.ChatID {
 		return ErrConflict
 	}
-	result, err := tx.Exec(ctx, `INSERT INTO group_ops_group_message_tasks(execution_id,external_effect_id,msgid,sender_userid_snapshot,chat_reference,task_evidence_digest,accepted_at) VALUES($1,$2,$3,$4,$5,$6,clock_timestamp()) ON CONFLICT(external_effect_id) DO UPDATE SET msgid=EXCLUDED.msgid,sender_userid_snapshot=EXCLUDED.sender_userid_snapshot,chat_reference=EXCLUDED.chat_reference,task_evidence_digest=EXCLUDED.task_evidence_digest WHERE group_ops_group_message_tasks.execution_id=EXCLUDED.execution_id AND group_ops_group_message_tasks.msgid=EXCLUDED.msgid AND group_ops_group_message_tasks.sender_userid_snapshot=EXCLUDED.sender_userid_snapshot AND group_ops_group_message_tasks.chat_reference=EXCLUDED.chat_reference AND group_ops_group_message_tasks.task_evidence_digest=EXCLUDED.task_evidence_digest`, task.ExecutionID, effectID, task.MessageID, task.SenderUserID, task.ChatID, task.TaskEvidenceDigest)
+	targets, targetErr := groupopsport.FrozenExecutionTargets(contentSnapshot, chat)
+	if targetErr != nil {
+		return ErrInvalid
+	}
+	provided := task.ChatIDs
+	if len(provided) == 0 {
+		provided = []string{task.ChatID}
+	}
+	if !sameBatchTargets(targets, provided) {
+		return ErrConflict
+	}
+	targetJSON, _ := json.Marshal(targets)
+	result, err := tx.Exec(ctx, `INSERT INTO group_ops_group_message_tasks(execution_id,external_effect_id,msgid,sender_userid_snapshot,chat_reference,task_evidence_digest,target_chat_references,accepted_at) VALUES($1,$2,$3,$4,$5,$6,$7,clock_timestamp()) ON CONFLICT(external_effect_id) DO UPDATE SET msgid=EXCLUDED.msgid,sender_userid_snapshot=EXCLUDED.sender_userid_snapshot,chat_reference=EXCLUDED.chat_reference,task_evidence_digest=EXCLUDED.task_evidence_digest,target_chat_references=EXCLUDED.target_chat_references WHERE group_ops_group_message_tasks.execution_id=EXCLUDED.execution_id AND group_ops_group_message_tasks.msgid=EXCLUDED.msgid AND group_ops_group_message_tasks.sender_userid_snapshot=EXCLUDED.sender_userid_snapshot AND group_ops_group_message_tasks.chat_reference=EXCLUDED.chat_reference AND group_ops_group_message_tasks.task_evidence_digest=EXCLUDED.task_evidence_digest AND COALESCE(group_ops_group_message_tasks.target_chat_references,jsonb_build_array(group_ops_group_message_tasks.chat_reference))=EXCLUDED.target_chat_references`, task.ExecutionID, effectID, task.MessageID, task.SenderUserID, task.ChatID, task.TaskEvidenceDigest, targetJSON)
 	if err != nil {
 		return err
 	}
@@ -1104,13 +1145,23 @@ func (r *Repository) FindGroupMessageReceipt(ctx context.Context, evidence group
 	}
 	var task groupopsport.GroupMessageReceipt
 	var status pgtype.Int4
+	var targetsJSON, observations []byte
 	var deliveryDigest pgtype.Text
-	err = tx.QueryRow(ctx, `SELECT execution_id,external_effect_id,msgid,sender_userid_snapshot,chat_reference,task_evidence_digest,delivery_status,delivery_evidence_digest FROM group_ops_group_message_tasks WHERE execution_id=$1 AND external_effect_id=$2`, evidence.ExecutionID, effectID).Scan(&task.ExecutionID, new(int64), &task.MessageID, &task.SenderUserID, &task.ChatID, &task.TaskEvidenceDigest, &status, &deliveryDigest)
+	err = tx.QueryRow(ctx, `SELECT execution_id,external_effect_id,msgid,sender_userid_snapshot,chat_reference,task_evidence_digest,delivery_status,delivery_evidence_digest,target_chat_references,delivery_observations FROM group_ops_group_message_tasks WHERE execution_id=$1 AND external_effect_id=$2`, evidence.ExecutionID, effectID).Scan(&task.ExecutionID, new(int64), &task.MessageID, &task.SenderUserID, &task.ChatID, &task.TaskEvidenceDigest, &status, &deliveryDigest, &targetsJSON, &observations)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return groupopsport.GroupMessageReceipt{}, false, nil
 	}
 	if err != nil {
 		return groupopsport.GroupMessageReceipt{}, false, err
+	}
+	if len(targetsJSON) > 0 && json.Unmarshal(targetsJSON, &task.ChatIDs) != nil {
+		return groupopsport.GroupMessageReceipt{}, false, ErrInvalid
+	}
+	if len(task.ChatIDs) == 0 {
+		task.ChatIDs = []string{task.ChatID}
+	}
+	if len(task.ChatIDs) > 1 {
+		task.GroupDeliveries = groupDeliveryStatuses(task.ChatIDs, observations)
 	}
 	task.ExternalEffectID = evidence.ExternalEffectID
 	if status.Valid {
@@ -1134,6 +1185,17 @@ func (r *Repository) RecordGroupMessageDelivery(ctx context.Context, task groupo
 	effectID, err := parseEffectID(task.ExternalEffectID)
 	if err != nil {
 		return err
+	}
+	var targetsJSON []byte
+	if err = tx.QueryRow(ctx, `SELECT target_chat_references FROM group_ops_group_message_tasks WHERE execution_id=$1 AND external_effect_id=$2`, task.ExecutionID, effectID).Scan(&targetsJSON); err != nil {
+		return err
+	}
+	var targets []string
+	if len(targetsJSON) > 0 && json.Unmarshal(targetsJSON, &targets) != nil {
+		return ErrInvalid
+	}
+	if len(targets) > 1 {
+		return recordBatchGroupDelivery(ctx, tx, task, evidenceDigest, targets, effectID)
 	}
 	// A delivered task is immutable as a fact: an older status page can refresh
 	// its observation time but cannot overwrite status=1 or its evidence.

@@ -88,7 +88,7 @@ func ValidateMaterialPlan(value groupopsport.MaterialPlan) error {
 // of HTTP while preserving the provider capability we actually have: one
 // optional leading text block and up to nine ordered attachments.
 func ValidateWebhookInbound(value groupopsport.WebhookInboundCommand) error {
-	if !ValidOpaque(value.WebhookReference) || len(value.TargetChatReferences) == 0 || len(value.Messages) == 0 || len(value.Messages) > MaxMaterials+1 {
+	if !ValidOpaque(value.WebhookReference) || len(value.TargetChatReferences) == 0 || len(value.TargetChatReferences) > groupopsport.MaxBatchTargetCount || len(value.Messages) == 0 || len(value.Messages) > MaxMaterials+1 {
 		return ErrInvalidWebhook
 	}
 	targets := make(map[string]struct{}, len(value.TargetChatReferences))

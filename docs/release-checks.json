@@ -1,24 +1,72 @@
 {
   "schema": 1,
-  "baseline_sha": "c52c738e0c68de928a48d87bfaceb39f354c0290",
+  "baseline_sha": "19748dcc4919108aea45ebc4181166cc6928efe9",
   "checks": [
     {
       "lane": "backend",
-      "path": "cmd/aicrm/group_ops_owner_binding_installed_test.go",
-      "test": "TestGroupOpsOwnerBindingFixtureStaffGovernance",
-      "postgres": true,
-      "reason": "最终源码-only夹具准备/浏览器解析；安装合同读取真实river kind/queue前后基线并断言零ExternalEffects/群运行/群发送/业务outbound"
+      "package": "./internal/groupops/app",
+      "reason": "Webhook batch acceptance, replay and mixed-owner rejection"
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/group_ops_owner_binding_installed_test.go",
-      "test": "TestGroupOpsBindingFixtureNoDispatchJobsPolicy",
+      "package": "./internal/groupops/domain",
+      "reason": "inbound target count and existing message shapes"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/groupops/port",
+      "reason": "frozen target contract"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/outbound",
+      "test": "TestGroupMessage",
+      "reason": "one Provider write, artifact and material ordering"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/wecom/adapter",
+      "test": "TestClientGroupMessage",
+      "reason": "exact chat_id_list and Provider receipt classification"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestGroupOpsWebhookPostgreSQLJourney",
+      "postgres": true,
+      "reason": "batch UoW, delivery and sender boundaries"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestGroupOpsBatchDeliveryRequiresEveryFrozenGroupAcrossPages",
       "postgres": false,
-      "reason": "验证 fixture 只允许完全不变的基线素材刷新任务，拒绝新 outbound、外部效果、未知任务及基线任务变化或消失"
+      "reason": "batch UoW, delivery and sender boundaries"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestGroupOpsBatchDispatchRechecksEveryGroupSender",
+      "postgres": false,
+      "reason": "batch UoW, delivery and sender boundaries"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestGroupOpsDispatchReaderRejectsChangedSenderBeforeProviderCall",
+      "postgres": false,
+      "reason": "batch UoW, delivery and sender boundaries"
+    },
+    {
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "test": "TestGroupOpsSharedRiverRuntimeJourney",
+      "postgres": true,
+      "reason": "direct legacy consumer retains one-group node continuation and unknown/no-resend behavior"
     }
   ],
   "installed_checks": [
-    "group-ops-owner-binding"
+    "group-ops-one-batch"
   ],
   "build_commands": []
 }

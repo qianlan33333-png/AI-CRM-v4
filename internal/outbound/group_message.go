@@ -254,12 +254,13 @@ func (p *GroupMessageProvider) Execute(ctx context.Context, envelope effectport.
 		return effectport.AdapterResult{Completion: effectport.StateFinalFailed, ReceiptDigest: effectport.Hash(string(base), "provider-rejected")}, nil
 	}
 	artifactPayload, artifactErr := json.Marshal(struct {
-		ExecutionID string `json:"execution_id"`
-		EffectID    string `json:"effect_id"`
-		MessageID   string `json:"msgid"`
-		Sender      string `json:"sender"`
-		ChatID      string `json:"chat_id"`
-	}{strconv.FormatInt(execution.ExecutionID, 10), attempt.EffectID, receipt.MessageID, request.SenderUserID, request.ChatIDs[0]})
+		ExecutionID string   `json:"execution_id"`
+		EffectID    string   `json:"effect_id"`
+		MessageID   string   `json:"msgid"`
+		Sender      string   `json:"sender"`
+		ChatID      string   `json:"chat_id"`
+		ChatIDs     []string `json:"chat_ids,omitempty"`
+	}{strconv.FormatInt(execution.ExecutionID, 10), attempt.EffectID, receipt.MessageID, request.SenderUserID, request.ChatIDs[0], request.ChatIDs})
 	if artifactErr != nil {
 		return effectport.AdapterResult{Completion: effectport.StateUnknown, ReceiptDigest: effectport.Hash(string(base), "receipt-artifact-unavailable"), CallAttempted: true, RealExternalCallExecuted: true}, nil
 	}
@@ -336,7 +337,7 @@ func groupMessageRequestWithPreparedMedia(execution groupopsport.DispatchExecuti
 		MessageText     string                                `json:"message_text"`
 		AttachmentOrder []mediaport.GroupOpsMaterialReference `json:"attachment_order"`
 	}
-	if json.Unmarshal(execution.ContentSnapshot, &content) != nil || ((content.SchemaVersion != 1 || content.Kind != "message") && (content.SchemaVersion != 2 || content.Kind != "webhook_message")) || strings.TrimSpace(content.MessageText) != content.MessageText {
+	if json.Unmarshal(execution.ContentSnapshot, &content) != nil || ((content.SchemaVersion != 1 || content.Kind != "message") && ((content.SchemaVersion != 2 && content.SchemaVersion != 3) || content.Kind != "webhook_message")) || strings.TrimSpace(content.MessageText) != content.MessageText {
 		return wecomport.GroupMessageRequest{}, errors.New("invalid Group Ops content snapshot")
 	}
 	if content.SchemaVersion == 1 && content.AttachmentOrder != nil {
@@ -352,7 +353,7 @@ func groupMessageRequestWithPreparedMedia(execution groupopsport.DispatchExecuti
 	}
 	attachments := []wecomport.GroupMessageAttachment{}
 	var webhookSources mediaport.GroupOpsMaterialSourceSnapshot
-	if content.SchemaVersion == 2 && len(content.AttachmentOrder) > 0 {
+	if content.SchemaVersion >= 2 && len(content.AttachmentOrder) > 0 {
 		var sourceErr error
 		webhookSources, sourceErr = groupMessageMaterialSources(execution.MaterialSourceSnapshot)
 		if sourceErr != nil || !webhookAttachmentOrderMatches(content.AttachmentOrder, webhookSources) {
@@ -389,13 +390,17 @@ func groupMessageRequestWithPreparedMedia(execution groupopsport.DispatchExecuti
 			attachments[index] = wecomport.GroupMessageAttachment{MsgType: attachment.MsgType, MediaID: mediaID, AppID: attachment.AppID, PagePath: attachment.PagePath, Title: attachment.Title, URL: attachment.URL, Description: attachment.Description, PicURL: attachment.PicURL}
 		}
 	}
-	if content.SchemaVersion == 2 && len(content.AttachmentOrder) != len(attachments) {
+	if content.SchemaVersion >= 2 && len(content.AttachmentOrder) != len(attachments) {
 		return wecomport.GroupMessageRequest{}, errors.New("Group Ops webhook attachment count mismatch")
 	}
 	if content.MessageText == "" && len(attachments) == 0 {
 		return wecomport.GroupMessageRequest{}, errors.New("Group Ops message is empty")
 	}
-	return wecomport.GroupMessageRequest{SenderUserID: execution.SenderUserID, ChatIDs: []string{execution.TargetReference}, Text: content.MessageText, Attachments: attachments}, nil
+	targets, targetErr := groupopsport.FrozenExecutionTargets(execution.ContentSnapshot, execution.TargetReference)
+	if targetErr != nil {
+		return wecomport.GroupMessageRequest{}, targetErr
+	}
+	return wecomport.GroupMessageRequest{SenderUserID: execution.SenderUserID, ChatIDs: targets, Text: content.MessageText, Attachments: attachments}, nil
 }
 
 func webhookAttachmentOrderMatches(order []mediaport.GroupOpsMaterialReference, sources mediaport.GroupOpsMaterialSourceSnapshot) bool {
@@ -482,11 +487,12 @@ func (s *GroupMessageCompletionSink) CompleteEffect(ctx context.Context, effectR
 			return errors.New("Group Ops task receipt writer is required")
 		}
 		var artifact struct {
-			ExecutionID string `json:"execution_id"`
-			EffectID    string `json:"effect_id"`
-			MessageID   string `json:"msgid"`
-			Sender      string `json:"sender"`
-			ChatID      string `json:"chat_id"`
+			ExecutionID string   `json:"execution_id"`
+			EffectID    string   `json:"effect_id"`
+			MessageID   string   `json:"msgid"`
+			Sender      string   `json:"sender"`
+			ChatID      string   `json:"chat_id"`
+			ChatIDs     []string `json:"chat_ids,omitempty"`
 		}
 		if result.Artifact.Kind != "group-ops.wecom-task.v1" || !result.Artifact.Valid() || json.Unmarshal(result.Artifact.Payload, &artifact) != nil || artifact.EffectID != effectRef || artifact.MessageID == "" || artifact.Sender == "" || artifact.ChatID == "" {
 			return errors.New("invalid Group Ops task receipt artifact")
@@ -495,7 +501,7 @@ func (s *GroupMessageCompletionSink) CompleteEffect(ctx context.Context, effectR
 		if parseErr != nil || executionID < 1 {
 			return errors.New("invalid Group Ops task receipt execution")
 		}
-		if err := s.receipts.RecordGroupMessageTask(ctx, groupopsport.GroupMessageReceipt{ExecutionID: executionID, ExternalEffectID: effectRef, MessageID: artifact.MessageID, SenderUserID: artifact.Sender, ChatID: artifact.ChatID, TaskEvidenceDigest: string(result.Artifact.Digest)}); err != nil {
+		if err := s.receipts.RecordGroupMessageTask(ctx, groupopsport.GroupMessageReceipt{ExecutionID: executionID, ExternalEffectID: effectRef, MessageID: artifact.MessageID, SenderUserID: artifact.Sender, ChatID: artifact.ChatID, ChatIDs: artifact.ChatIDs, TaskEvidenceDigest: string(result.Artifact.Digest)}); err != nil {
 			return err
 		}
 	}

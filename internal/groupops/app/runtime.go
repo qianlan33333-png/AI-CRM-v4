@@ -502,21 +502,41 @@ func (s *RuntimeService) buildWebhookDrafts(tx context.Context, detail groupopsp
 	}
 	materialDigest := string(effectport.Hash("group-ops.material.snapshot.v1", string(materialRaw)))
 	contentDigest := string(effectport.Hash("group-ops.content.snapshot.v1", string(contentRaw)))
-	drafts := make([]groupopsport.ExecutionDraft, 0, len(targets))
-	for _, target := range targets {
-		sender, found, senderErr := s.senders.ResolveExecutionSender(tx, target)
-		if senderErr != nil {
-			return nil, ErrUnavailable
-		}
-		if !found || sender == "" {
-			return nil, ErrUnavailable
-		}
-		keyDigest := sha256.Sum256([]byte(strings.Join([]string{"group-ops.webhook.execution.v1", strconv.FormatInt(run.ID, 10), target}, "\x00")))
-		drafts = append(drafts, groupopsport.ExecutionDraft{RunID: run.ID, PlanID: run.PlanID, PlanRevision: run.PlanRevision, NodePosition: 1, TargetReference: target, SenderUserID: sender, TargetDigest: string(effectport.Hash("group-ops.target", target)), ContentSnapshot: contentRaw, ContentDigest: contentDigest, MaterialSnapshot: materialRaw, MaterialDigest: materialDigest, MaterialSourceSnapshot: materialSourceRaw, MaterialSourceDigest: materialSourceDigest, ExecutionKeyDigest: keyDigest, ScheduledFor: now, CreatedAt: now})
-	}
-	if len(drafts) == 0 {
+	ordered := append([]string(nil), targets...)
+	sort.Strings(ordered)
+	if len(ordered) == 0 || len(ordered) > groupopsport.MaxBatchTargetCount {
 		return nil, ErrStateConflict
 	}
+	batchSender := ""
+	for _, target := range ordered {
+		sender, found, senderErr := s.senders.ResolveExecutionSender(tx, target)
+		if senderErr != nil || !found || sender == "" {
+			return nil, ErrUnavailable
+		}
+		if batchSender != "" && sender != batchSender {
+			return nil, ErrStateConflict
+		}
+		batchSender = sender
+	}
+	var content map[string]any
+	if json.Unmarshal(contentRaw, &content) != nil {
+		return nil, ErrRuntimeInvalid
+	}
+	content["schema_version"] = 3
+	content["target_chat_references"] = ordered
+	batchRaw, marshalErr := json.Marshal(content)
+	if marshalErr != nil {
+		return nil, ErrRuntimeInvalid
+	}
+	contentRaw, marshalErr = canonicalRuntimeJSON(batchRaw)
+	if marshalErr != nil {
+		return nil, ErrRuntimeInvalid
+	}
+	contentDigest = string(effectport.Hash("group-ops.content.snapshot.v1", string(contentRaw)))
+	anchor := ordered[0]
+	keyDigest := sha256.Sum256([]byte(strings.Join([]string{"group-ops.webhook.batch.v1", strconv.FormatInt(run.ID, 10), contentDigest}, "\x00")))
+	drafts := []groupopsport.ExecutionDraft{{RunID: run.ID, PlanID: run.PlanID, PlanRevision: run.PlanRevision, NodePosition: 1, TargetReference: anchor, SenderUserID: batchSender, TargetDigest: string(effectport.Hash("group-ops.target", anchor)), ContentSnapshot: contentRaw, ContentDigest: contentDigest, MaterialSnapshot: materialRaw, MaterialDigest: materialDigest, MaterialSourceSnapshot: materialSourceRaw, MaterialSourceDigest: materialSourceDigest, ExecutionKeyDigest: keyDigest, ScheduledFor: now, CreatedAt: now}}
+
 	return drafts, nil
 }
 

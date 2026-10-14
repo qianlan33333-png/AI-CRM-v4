@@ -181,7 +181,7 @@ func TestGroupOpsWebhookPostgreSQLJourney(t *testing.T) {
 	runtimeService.SetDispatchEnabled(true)
 	inbound := groupopsport.WebhookInboundCommand{WebhookReference: "groupops-webhook-pg", TargetChatReferences: []string{"webhook-pg-chat-a", "webhook-pg-chat-b"}, Messages: []groupopsport.WebhookMessage{{Type: "text", Text: "动态 PostgreSQL 话术"}}}
 	first, err := runtimeService.AcceptWebhook(ctx, "groupops-webhook-pg", "webhook-event-pg-0001", inbound)
-	if err != nil || first.Run.ID < 1 || first.Accepted != 2 || len(first.Executions) != 2 || first.RealExternalCallExecuted {
+	if err != nil || first.Run.ID < 1 || first.Accepted != 1 || len(first.Executions) != 1 || first.RealExternalCallExecuted {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
 	for _, execution := range first.Executions {
@@ -191,14 +191,72 @@ func TestGroupOpsWebhookPostgreSQLJourney(t *testing.T) {
 	}
 	var nullExecutionCount, nullIntentCount int
 	var payloadDigest string
-	if err = native.QueryRow(ctx, `SELECT count(*) FROM group_ops_executions WHERE run_id=$1 AND node_id IS NULL`, first.Run.ID).Scan(&nullExecutionCount); err != nil || nullExecutionCount != 2 {
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM group_ops_executions WHERE run_id=$1 AND node_id IS NULL`, first.Run.ID).Scan(&nullExecutionCount); err != nil || nullExecutionCount != 1 {
 		t.Fatalf("node-less executions=%d err=%v", nullExecutionCount, err)
 	}
-	if err = native.QueryRow(ctx, `SELECT count(*) FROM group_ops_execution_intents WHERE run_id=$1 AND node_id IS NULL`, first.Run.ID).Scan(&nullIntentCount); err != nil || nullIntentCount != 2 {
+	if err = native.QueryRow(ctx, `SELECT count(*) FROM group_ops_execution_intents WHERE run_id=$1 AND node_id IS NULL`, first.Run.ID).Scan(&nullIntentCount); err != nil || nullIntentCount != 1 {
 		t.Fatalf("node-less intents=%d err=%v", nullIntentCount, err)
 	}
 	if err = native.QueryRow(ctx, `SELECT webhook_payload_digest FROM group_ops_runs WHERE id=$1`, first.Run.ID).Scan(&payloadDigest); err != nil || !effectport.ValidDigest(effectport.Digest(payloadDigest)) {
 		t.Fatalf("frozen webhook payload digest=%q err=%v", payloadDigest, err)
+	}
+
+	// One batch execution owns one EER and one msgid; target-specific delivery
+	// facts remain monotonic when a later observation page is stale.
+	batchExecution := first.Executions[0]
+	if len(batchExecution.TargetReferences) != 2 {
+		t.Fatal("batch targets missing", batchExecution)
+	}
+	err = uow.Within(ctx, func(tx context.Context) error {
+		if e := groupStore.CompleteEffect(tx, batchExecution.ExternalEffectID, groupopsport.ExecutionProviderAccepted, true, false, string(effectport.Hash("batch-test", batchExecution.ExternalEffectID)), 1, time.Now().UTC()); e != nil {
+			return e
+		}
+		return groupStore.RecordGroupMessageTask(tx, groupopsport.GroupMessageReceipt{ExecutionID: batchExecution.ID, ExternalEffectID: batchExecution.ExternalEffectID, MessageID: "one-msgid-two-groups", SenderUserID: "journey-sender", ChatID: batchExecution.TargetReference, ChatIDs: batchExecution.TargetReferences, TaskEvidenceDigest: string(effectport.Hash("batch-artifact", batchExecution.ExternalEffectID))})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observe := func(aStatus, bStatus int) groupopsport.Execution {
+		t.Helper()
+		var execution groupopsport.Execution
+		err = uow.Within(ctx, func(tx context.Context) error {
+			task, found, e := groupStore.FindGroupMessageReceipt(tx, groupopsport.ReconciliationEvidence{ExecutionID: batchExecution.ID, ExternalEffectID: batchExecution.ExternalEffectID})
+			if e != nil || !found {
+				return fmt.Errorf("batch receipt missing: %w", e)
+			}
+			status := 0
+			task.DeliveryStatus = &status
+			task.GroupDeliveries = nil
+			for i, target := range task.ChatIDs {
+				value := aStatus
+				if i == 1 {
+					value = bStatus
+				}
+				digest := string(effectport.Hash("group-ops.wecom-delivery.v1", task.MessageID, task.SenderUserID, target, strconv.Itoa(value)))
+				task.GroupDeliveries = append(task.GroupDeliveries, groupopsport.GroupDeliveryStatus{TargetReference: target, Status: &value, EvidenceDigest: digest})
+			}
+			if e = groupStore.RecordGroupMessageDelivery(tx, task, string(effectport.Hash("batch-observation", strconv.Itoa(aStatus), strconv.Itoa(bStatus)))); e != nil {
+				return e
+			}
+			execution, e = groupStore.GetExecution(tx, batchExecution.ID)
+			return e
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return execution
+	}
+	partial := observe(1, 0)
+	if partial.DeliveryProven || len(partial.GroupDeliveries) != 2 || !partial.GroupDeliveries[0].DeliveryProven || partial.GroupDeliveries[1].DeliveryProven {
+		t.Fatal("partial delivery treated as full", partial)
+	}
+	complete := observe(0, 1)
+	if !complete.DeliveryProven || !complete.GroupDeliveries[0].DeliveryProven || !complete.GroupDeliveries[1].DeliveryProven {
+		t.Fatal("delivered groups regressed", complete)
+	}
+	stale := observe(0, 0)
+	if !stale.DeliveryProven || *stale.DeliveryStatus != 1 {
+		t.Fatal("stale page erased delivery", stale)
 	}
 
 	// The automatic daily-lesson branch must freeze a locally materialized
@@ -312,7 +370,7 @@ func TestGroupOpsWebhookPostgreSQLJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	replayed, err := runtimeService.AcceptWebhook(ctx, "groupops-webhook-pg", "webhook-event-pg-0001", inbound)
-	if err != nil || replayed.Run.ID != first.Run.ID || len(replayed.Executions) != 2 {
+	if err != nil || replayed.Run.ID != first.Run.ID || len(replayed.Executions) != 1 {
 		t.Fatalf("revision replay=%+v err=%v", replayed, err)
 	}
 	changed := inbound
@@ -2093,7 +2151,7 @@ func groupOpsIntegrationPool(t *testing.T) (*pgxpool.Pool, func()) {
 	if !ok {
 		t.Fatal("locate Group Ops Journey test")
 	}
-	for _, migration := range []string{"0003_access.sql", "0005_external_effects.sql", "0007_media.sql", "0012_group_ops.sql", "0016_media_content_packages.sql", "0036_ai_assistant_review.sql", "0078_group_ops_provider_tasks.sql", "0081_group_ops_webhook_unconfigured_reference.sql", "0101_group_ops_ui_metadata.sql", "0116_group_ops_operation_member_directory.sql", "0119_group_ops_unnamed_groups.sql", "0120_excel_batches.sql", "0124_operation_excel_batch_lifecycle.sql", "0125_outbound_material_preparation.sql", "0126_media_material_source_snapshots.sql", "0155_group_ops_webhook_dynamic_executions.sql", "0194_group_invitation_catalog.sql"} {
+	for _, migration := range []string{"0003_access.sql", "0005_external_effects.sql", "0007_media.sql", "0012_group_ops.sql", "0016_media_content_packages.sql", "0036_ai_assistant_review.sql", "0078_group_ops_provider_tasks.sql", "0081_group_ops_webhook_unconfigured_reference.sql", "0101_group_ops_ui_metadata.sql", "0116_group_ops_operation_member_directory.sql", "0119_group_ops_unnamed_groups.sql", "0120_excel_batches.sql", "0124_operation_excel_batch_lifecycle.sql", "0125_outbound_material_preparation.sql", "0126_media_material_source_snapshots.sql", "0155_group_ops_webhook_dynamic_executions.sql", "0194_group_invitation_catalog.sql", "0247_group_ops_batch_task_deliveries.sql"} {
 		sql, readErr := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "migrations", migration))
 		if readErr != nil {
 			native.Close()

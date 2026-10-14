@@ -199,3 +199,10 @@ curl --fail-with-body -X POST \
 | 503 | `protocol_auth_unavailable` / `group_ops_unavailable` | 签名验收依赖或 Group Ops 运行时不可用；不要把它当成已接受或已群发。恢复后只能用原事件和完全相同 JSON 重试。|
 
 202 只证明本地 run/EER 意图已原子接受。企微素材准备、实际 Provider 调用和群内送达是后续独立状态，不能由 202 推断为已群发。
+
+
+## 2026-10-15 单任务多群修正
+
+新版动态 Webhook 把同一批内容和全部已绑定目标冻结为 schema_version=3 的单个执行/意图/EER；企微只调用一次 `add_msg_template`，`chat_id_list` 包含全部冻结群，返回一个 msgid。目标必须有同一可信发送成员，最多 2000；发送前检查每个绑定和成员，不能临时扩大范围。旧事件只读回原记录，不把历史逐群任务重新组合或再次发送。
+
+`GroupOpsExecution.target_references` 返回完整范围，`target_reference` 保留首群兼容锚点。逐群状态见 `group_deliveries`；缺失结果保持未知，只有全部目标已送达才可标记整体 `delivery_proven=true`。任务的全群目标和逐群结果由 Group Ops 自有回执保存，已送达事实单调不回退。企微 task accepted 与成员确认/最终送达继续区分。修正需要对应服务器版本安装，CLI 同一数组请求无需更改。

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1700,5 +1701,42 @@ func TestBatchDirectoryMissingListOrFollowFieldCannotMeanDeletion(t *testing.T) 
 				t.Fatalf("missing-field contract: contacts=%d err=%v", len(page.Contacts), err)
 			}
 		})
+	}
+}
+
+func TestClientGroupMessageCreatesOneTaskForElevenGroups(t *testing.T) {
+	targets := []string{}
+	for i := 0; i < 11; i++ {
+		targets = append(targets, fmt.Sprintf("chat-%02d", i))
+	}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/cgi-bin/gettoken" {
+			io.WriteString(w, `{"errcode":0,"access_token":"synthetic-token","expires_in":7200}`)
+			return
+		}
+		if r.URL.Path != "/cgi-bin/externalcontact/add_msg_template" {
+			t.Error(r.URL.Path)
+			w.WriteHeader(404)
+			return
+		}
+		calls++
+		var body struct {
+			ChatIDs     []string `json:"chat_id_list"`
+			AllowSelect bool     `json:"allow_select"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || !reflect.DeepEqual(body.ChatIDs, targets) || body.AllowSelect {
+			t.Error(body)
+		}
+		io.WriteString(w, `{"errcode":0,"msgid":"one-task-for-eleven-groups"}`)
+	}))
+	defer server.Close()
+	client, _ := NewDirectory(Config{Enabled: true, CorpID: "corp", ContactSecret: "synthetic-secret", APIBase: server.URL, HTTPClient: server.Client()})
+	result, attempted, err := client.SendGroupMessage(context.Background(), wecomport.GroupMessageRequest{SenderUserID: "owner", ChatIDs: targets, Text: "日课资料"})
+	if err != nil || !attempted || calls != 1 || result.MessageID != "one-task-for-eleven-groups" {
+		t.Fatal(result, attempted, err, calls)
+	}
+	if _, attempted, err = client.SendGroupMessage(context.Background(), wecomport.GroupMessageRequest{SenderUserID: "owner", ChatIDs: []string{"chat-00", "chat-00"}, Text: "资料"}); err == nil || attempted || calls != 1 {
+		t.Fatal("duplicate targets reached Provider", err, calls)
 	}
 }

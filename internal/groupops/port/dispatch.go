@@ -97,6 +97,8 @@ type GroupMessageReceipt struct {
 	MessageID              string
 	SenderUserID           string
 	ChatID                 string
+	ChatIDs                []string
+	GroupDeliveries        []GroupDeliveryStatus
 	UserID                 string
 	TaskEvidenceDigest     string
 	DeliveryStatus         *int

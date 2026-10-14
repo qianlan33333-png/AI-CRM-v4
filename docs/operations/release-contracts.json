@@ -160,6 +160,16 @@
       "postgres": true,
       "browser": true,
       "installed": true
+    },
+    "group-ops-one-batch": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/group_ops_batch_installed_test.go",
+      "tests": [
+        "TestGroupOpsBatchInstalled"
+      ],
+      "postgres": true,
+      "browser": false,
+      "installed": true
     }
   }
 }

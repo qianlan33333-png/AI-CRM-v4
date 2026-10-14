@@ -67,27 +67,29 @@ type Run struct {
 }
 
 type Execution struct {
-	ID                            int64          `json:"execution_id,string"`
-	RunID                         int64          `json:"run_id,string"`
-	PlanID                        int64          `json:"plan_id,string"`
-	PlanRevision                  int64          `json:"plan_revision"`
-	NodeID                        int64          `json:"node_id,string"`
-	NodePosition                  int32          `json:"node_position"`
-	TargetReference               string         `json:"target_reference"`
-	TargetDigest                  string         `json:"target_digest"`
-	ContentDigest                 string         `json:"content_digest"`
-	MaterialDigest                string         `json:"material_digest"`
-	ExternalEffectID              string         `json:"external_effect_id"`
-	State                         ExecutionState `json:"state"`
-	ProviderAccepted              bool           `json:"provider_accepted"`
-	DeliveryProven                bool           `json:"delivery_proven"`
-	DeliveryStatus                *int           `json:"delivery_status,omitempty"`
-	AttemptCount                  int32          `json:"attempt_count"`
-	ProviderReceiptPresent        bool           `json:"provider_receipt_present"`
-	ReconciliationEvidencePresent bool           `json:"reconciliation_evidence_present"`
-	ScheduledFor                  time.Time      `json:"scheduled_for"`
-	CreatedAt                     time.Time      `json:"created_at"`
-	UpdatedAt                     time.Time      `json:"updated_at"`
+	ID                            int64                 `json:"execution_id,string"`
+	RunID                         int64                 `json:"run_id,string"`
+	PlanID                        int64                 `json:"plan_id,string"`
+	PlanRevision                  int64                 `json:"plan_revision"`
+	NodeID                        int64                 `json:"node_id,string"`
+	NodePosition                  int32                 `json:"node_position"`
+	TargetReference               string                `json:"target_reference"`
+	TargetReferences              []string              `json:"target_references,omitempty"`
+	GroupDeliveries               []GroupDeliveryStatus `json:"group_deliveries,omitempty"`
+	TargetDigest                  string                `json:"target_digest"`
+	ContentDigest                 string                `json:"content_digest"`
+	MaterialDigest                string                `json:"material_digest"`
+	ExternalEffectID              string                `json:"external_effect_id"`
+	State                         ExecutionState        `json:"state"`
+	ProviderAccepted              bool                  `json:"provider_accepted"`
+	DeliveryProven                bool                  `json:"delivery_proven"`
+	DeliveryStatus                *int                  `json:"delivery_status,omitempty"`
+	AttemptCount                  int32                 `json:"attempt_count"`
+	ProviderReceiptPresent        bool                  `json:"provider_receipt_present"`
+	ReconciliationEvidencePresent bool                  `json:"reconciliation_evidence_present"`
+	ScheduledFor                  time.Time             `json:"scheduled_for"`
+	CreatedAt                     time.Time             `json:"created_at"`
+	UpdatedAt                     time.Time             `json:"updated_at"`
 }
 
 // ProviderDeliveryReadCommand contains no Provider identifiers. The Group

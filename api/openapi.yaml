@@ -7870,6 +7870,23 @@ components:
         node_id: {type: string, pattern: "^(0|[1-9][0-9]{0,18})$", description: "`0` is the API sentinel for a dynamic Webhook execution, whose database node_id is NULL; positive values identify standard-plan nodes."}
         node_position: {type: integer, minimum: 1}
         target_reference: {type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._:-]{1,128}$"}
+        target_references:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          uniqueItems: true
+          items: {type: string, pattern: "^[A-Za-z0-9._:-]{1,128}$"}
+          description: Complete frozen group list; target_reference is its compatibility anchor.
+        group_deliveries:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [target_reference, delivery_proven]
+            properties:
+              target_reference: {type: string, pattern: "^[A-Za-z0-9._:-]{1,128}$"}
+              status: {type: integer, minimum: 0}
+              delivery_proven: {type: boolean}
         target_digest: {type: string, pattern: "^sha256:[0-9a-f]{64}$"}
         content_digest: {type: string, pattern: "^sha256:[0-9a-f]{64}$"}
         material_digest: {type: string, pattern: "^sha256:[0-9a-f]{64}$"}
@@ -8030,7 +8047,7 @@ components:
       required: [webhook_reference, target_chat_references, messages]
       properties:
         webhook_reference: {type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._:-]{1,128}$", description: "Must equal the final opaque segment in the signed request URL."}
-        target_chat_references: {type: array, minItems: 1, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._:-]{1,128}$"}}
+        target_chat_references: {type: array, minItems: 1, maxItems: 2000, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._:-]{1,128}$"}}
         messages: {type: array, minItems: 1, maxItems: 10, items: {$ref: "#/components/schemas/GroupOpsWebhookMessage"}}
     GroupOpsWebhookMessage:
       oneOf:

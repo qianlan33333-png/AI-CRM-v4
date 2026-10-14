@@ -1,9 +1,12 @@
 package outbound
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -457,5 +460,32 @@ func TestGroupMessagePreflightAllowsTerminalPreparationToFinalizeLocally(t *test
 	result, err := provider.Execute(context.Background(), envelope, effect.Attempt{EffectID: "eer_8", Number: 1, Generation: 1, Fence: 1})
 	if err != nil || result.Completion != effect.StateFinalFailed || sender.calls != 0 {
 		t.Fatalf("result=%+v calls=%d err=%v", result, sender.calls, err)
+	}
+}
+
+func TestGroupMessageBatchUsesOneProviderCallAndCompleteFrozenArray(t *testing.T) {
+	targets := []string{}
+	for i := 0; i < 11; i++ {
+		targets = append(targets, fmt.Sprintf("chat-%02d", i))
+	}
+	content, _ := json.Marshal(map[string]any{"schema_version": 3, "kind": "webhook_message", "message_text": "资料已整理", "attachment_order": []any{}, "target_chat_references": targets})
+	material, _ := canonicalGroupMessageJSON([]byte(`{"schema_version":1,"references":[]}`))
+	envelope := groupMessageEnvelope()
+	execution := groupopsport.DispatchExecution{ExecutionID: 90, ExternalEffectID: "eer_90", State: groupopsport.ExecutionAccepted, TargetReference: targets[0], SenderUserID: "owner", ContentSnapshot: content, ContentDigest: string(effect.Hash("group-ops.content.snapshot.v1", string(content))), MaterialSnapshot: material, MaterialDigest: string(effect.Hash("group-ops.material.snapshot.v1", string(material))), SourceRefDigest: string(envelope.SourceRefDigest), TargetRefDigest: string(envelope.TargetRefDigest), PayloadDigest: string(envelope.PayloadDigest), PolicyVersionHash: string(envelope.PolicyVersionHash)}
+	sender := &groupMessageSenderStub{attempted: true, receipt: wecomport.GroupMessageReceipt{MessageID: "one-batch-msgid"}}
+	provider, _ := NewGroupMessageProvider(GroupMessageProviderConfig{Enabled: true, Executions: groupDispatchReaderStub{value: execution}, Materials: materialReadinessStub{}, Writer: sender})
+	result, err := provider.Execute(context.Background(), envelope, effect.Attempt{EffectID: "eer_90", Number: 1, Generation: 1, Fence: 1})
+	if err != nil || result.Completion != effect.StateExecuted || sender.calls != 1 || !reflect.DeepEqual(sender.request.ChatIDs, targets) {
+		t.Fatal(result, err, sender)
+	}
+	writer := &groupMessageReceiptWriterStub{}
+	sink, _ := NewGroupMessageCompletionSink(&groupMessageProjectionStub{}, writer)
+	if err = sink.CompleteEffect(context.Background(), "eer_90", envelope, effect.Attempt{Number: 1}, result); err != nil || !reflect.DeepEqual(writer.task.ChatIDs, targets) {
+		t.Fatal(writer.task, err)
+	}
+	execution.ContentSnapshot = bytes.ReplaceAll(execution.ContentSnapshot, []byte("chat-10"), []byte("chat-09"))
+	execution.ContentDigest = string(effect.Hash("group-ops.content.snapshot.v1", string(execution.ContentSnapshot)))
+	if _, err = groupMessageRequest(execution); err == nil {
+		t.Fatal("duplicate frozen targets accepted")
 	}
 }

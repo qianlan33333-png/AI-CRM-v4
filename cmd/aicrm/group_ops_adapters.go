@@ -46,6 +46,71 @@ func (providerDisabledGroupOpsEvidence) VerifyReconciliationEvidence(context.Con
 }
 
 var _ groupopsport.GroupDirectorySource = providerDisabledGroupOpsDirectory{}
+
+// A multi-group msgid is complete only when every exact frozen group reports
+// status=1. Missing groups remain unknown; pagination never creates a task.
+func (adapter wecomGroupOpsEvidence) readBatchDelivery(ctx context.Context, receipt groupopsport.GroupMessageReceipt) (groupopsport.GroupMessageReceipt, bool, error) {
+	allowed := map[string]bool{}
+	for _, target := range receipt.ChatIDs {
+		if allowed[target] || target == "" {
+			return groupopsport.GroupMessageReceipt{}, false, groupopsapp.ErrConflict
+		}
+		allowed[target] = true
+	}
+	observed := map[string]groupopsport.GroupDeliveryStatus{}
+	cursor := ""
+	seen := map[string]bool{}
+	for {
+		page, err := adapter.reader.GetGroupMessageSendResult(ctx, receipt.MessageID, receipt.SenderUserID, cursor, 100)
+		if err != nil {
+			return groupopsport.GroupMessageReceipt{}, false, err
+		}
+		for _, item := range page.Items {
+			if item.SenderUserID != receipt.SenderUserID || !allowed[item.ChatID] {
+				continue
+			}
+			if _, exists := observed[item.ChatID]; exists {
+				return groupopsport.GroupMessageReceipt{}, false, groupopsapp.ErrConflict
+			}
+			status := item.Status
+			observed[item.ChatID] = groupopsport.GroupDeliveryStatus{TargetReference: item.ChatID, Status: &status, DeliveryProven: status == 1, EvidenceDigest: string(effectport.Hash("group-ops.wecom-delivery.v1", receipt.MessageID, item.SenderUserID, item.ChatID, strconv.Itoa(status)))}
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		if seen[page.NextCursor] {
+			return groupopsport.GroupMessageReceipt{}, false, groupopsapp.ErrConflict
+		}
+		seen[page.NextCursor] = true
+		cursor = page.NextCursor
+	}
+	if len(observed) == 0 {
+		return groupopsport.GroupMessageReceipt{}, false, nil
+	}
+	receipt.GroupDeliveries = make([]groupopsport.GroupDeliveryStatus, 0, len(receipt.ChatIDs))
+	parts := []string{receipt.MessageID, receipt.SenderUserID}
+	all := true
+	for _, target := range receipt.ChatIDs {
+		item, ok := observed[target]
+		if !ok {
+			item = groupopsport.GroupDeliveryStatus{TargetReference: target}
+			all = false
+			parts = append(parts, target, "missing")
+		} else {
+			all = all && item.DeliveryProven
+			parts = append(parts, target, strconv.Itoa(*item.Status))
+		}
+		receipt.GroupDeliveries = append(receipt.GroupDeliveries, item)
+	}
+	status := 0
+	if all {
+		status = 1
+	}
+	receipt.DeliveryStatus = &status
+	receipt.DeliveryEvidenceDigest = string(effectport.Hash(append([]string{"group-ops.wecom-batch-delivery.v1"}, parts...)...))
+	return receipt, true, nil
+}
+
 var _ groupopsport.ReconciliationEvidenceVerifier = providerDisabledGroupOpsEvidence{}
 
 // wecomGroupOpsEvidence performs its provider pagination outside every UoW,
@@ -75,6 +140,16 @@ func (adapter wecomGroupOpsEvidence) VerifyReconciliationEvidence(ctx context.Co
 			return groupopsport.ReconciliationEvidenceResult{}, err
 		}
 		return groupopsport.ReconciliationEvidenceResult{}, groupopsapp.ErrProviderDisabled
+	}
+	if len(receipt.ChatIDs) > 1 {
+		batch, exists, readErr := adapter.readBatchDelivery(ctx, receipt)
+		if readErr != nil {
+			return groupopsport.ReconciliationEvidenceResult{}, readErr
+		}
+		if !exists || batch.DeliveryEvidenceDigest != input.EvidenceDigest {
+			return groupopsport.ReconciliationEvidenceResult{}, groupopsapp.ErrConflict
+		}
+		return groupopsport.ReconciliationEvidenceResult{DeliveryProven: batch.DeliveryStatus != nil && *batch.DeliveryStatus == 1, EvidenceDigest: batch.DeliveryEvidenceDigest}, nil
 	}
 	cursor := ""
 	seen := map[string]struct{}{}
@@ -117,6 +192,9 @@ func (adapter wecomGroupOpsEvidence) ReadProviderDelivery(ctx context.Context, i
 		return err
 	}); err != nil || !found {
 		return groupopsport.GroupMessageReceipt{}, false, err
+	}
+	if len(receipt.ChatIDs) > 1 {
+		return adapter.readBatchDelivery(ctx, receipt)
 	}
 	cursor, seen := "", map[string]struct{}{}
 	for {
@@ -356,9 +434,15 @@ func (adapter groupOpsDispatchReader) LoadDispatchExecution(ctx context.Context,
 		if loadErr != nil {
 			return loadErr
 		}
-		sender, found, senderErr := adapter.senders.ResolveExecutionSender(tx, value.TargetReference)
-		if senderErr != nil || !found || sender != value.SenderUserID {
-			return errors.New("Group Ops sender eligibility changed")
+		targets, targetErr := groupopsport.FrozenExecutionTargets(value.ContentSnapshot, value.TargetReference)
+		if targetErr != nil {
+			return targetErr
+		}
+		for _, target := range targets {
+			sender, found, senderErr := adapter.senders.ResolveExecutionSender(tx, target)
+			if senderErr != nil || !found || sender != value.SenderUserID {
+				return errors.New("Group Ops sender eligibility changed")
+			}
 		}
 		execution = value
 		return nil
