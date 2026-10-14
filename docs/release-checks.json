@@ -1,76 +1,42 @@
 {
   "schema": 1,
-  "baseline_sha": "a401b5dd90c0d3a3a853654cbdfff62c5be1d0b7",
+  "baseline_sha": "097afc6c2adf2e1785b005875a1e3184d408aefa",
   "checks": [
     {
       "lane": "backend",
       "package": "./internal/referral/http",
-      "reason": "签发昵称可选响应、可信根及原鉴权/CSRF拒绝"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/port",
-      "reason": "新模板码框及兼容尺寸"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "path": "cmd/aicrm/referral_sol61_oneid_postgres_test.go",
-      "test": "TestPostgreSQLReferralSol61MergedCustomerCannotJoinTwice",
-      "postgres": true,
-      "reason": "真实OneID合并及旧签发重放保持原token并返回当前根"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "path": "internal/referral/app/poster_layouts_integration_test.go",
-      "test": "TestPostgreSQLPosterLayoutsAtomicRuntimeUpdate",
-      "postgres": true,
-      "reason": "当前布局写入/幂等/读回及保留其他海报"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/referral/app",
-      "path": "internal/referral/app/posters_integration_test.go",
-      "test": "TestPostgreSQLCampaignPostersPublishSnapshotAndIdempotentRetry",
-      "postgres": true,
-      "reason": "新默认及已有快照发布兼容"
+      "reason": "新增管理端H5公共链接、可信配置域名、多活动及鉴权拒绝；公开接口兼容"
     },
     {
       "lane": "frontend",
-      "path": "web/v3/referralPosterPerformance.test.mjs",
-      "reason": "当前页面或海报直接消费者"
+      "path": "web/v3/referralCampaignShare.test.mjs",
+      "reason": "一级列表分享、最新读取、状态、失败重试、迟到响应及焦点隔离"
     },
     {
       "lane": "frontend",
-      "path": "web/v3/referralPosterPublic.test.mjs",
-      "reason": "当前页面或海报直接消费者"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/referralPosterShareText.test.mjs",
-      "reason": "当前页面或海报直接消费者"
+      "path": "web/v3/referralAdmin.test.mjs",
+      "reason": "原列表、详情、配置创建保存及直接调用方兼容"
     },
     {
       "lane": "frontend",
       "path": "web/v3/referralCenter.test.mjs",
-      "reason": "当前页面或海报直接消费者"
+      "reason": "公共活动接口和既有H5生成溯源码直接消费者"
     },
     {
       "lane": "frontend",
       "path": "web/v3/referralCenter.anonymous.test.mjs",
-      "reason": "当前页面或海报直接消费者"
+      "reason": "首次活动入口与登录按钮兼容"
     },
     {
       "lane": "frontend",
-      "path": "web/v3/referralCenter.captainJourney.test.mjs",
-      "reason": "当前页面或海报直接消费者"
+      "path": "web/v3/referralPosterShareText.test.mjs",
+      "reason": "既有海报话术保持"
     },
     {
       "lane": "browser",
       "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
       "test": "TestPostgreSQLReferralChromiumJourney",
-      "reason": "实际API/PG/Canvas导出、默认与旧布局、375/430及话术互动"
+      "reason": "真实API/PG/Chromium、一级列表分享/复制/PNG下载/无写入/未参加入口与登录返回/375/430及既有海报"
     }
   ],
   "installed_checks": [

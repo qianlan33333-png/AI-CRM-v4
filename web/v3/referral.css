@@ -1278,3 +1278,8 @@ body:has(#referral-root) {
 
 #referral-root.referral-information > .referral-rules { padding-bottom: 16px; }
 #referral-root.referral-information .referral-rules p { margin-top: 8px; line-height: 1.5; }
+/* Operator sharing reuses the CRM dialog and controls, on the list only. */
+.referral-campaign-share p { margin: 0; line-height: 1.5; }
+.referral-campaign-share .shared-qr-dialog__actions a { box-sizing: border-box; text-decoration: none; text-align: center; }
+.referral-campaign-share-feedback:empty { display: none; }
+.referral-campaign-share-feedback[role="alert"] { color: var(--danger, #b42318); }

@@ -1,5 +1,6 @@
 // Referral administration is deliberately a separate browser host. It works
 // with safe read-model projections and never exposes customer IDs in the UI.
+import { openCampaignShareDialog } from "./referralCampaignShare";
 import { downloadQr } from "../src/admin/sections/qr";
 import { openShareQrDialog } from "./shared/ui/shareQrDialog";
 import { parsePosterQRLayout, referencePosterTemplate, type PosterQRLayout } from "./shared/posterLayout";
@@ -401,6 +402,13 @@ function campaignPanel(): HTMLElement {
         tab = "overview";
         history.pushState({}, "", `/admin/referral?campaign=${item.id}`);
         void reloadRecords();
+      }),
+      action("分享", () => {
+        openCampaignShareDialog({
+          campaignID: item.id,
+          campaignName: item.name,
+          read: (signal) => api(`/campaigns/${item.id}`, { signal }),
+        });
       }),
     );
     card.append(actions);

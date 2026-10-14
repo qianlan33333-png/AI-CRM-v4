@@ -245,6 +245,68 @@ try {
   await wait(`location.pathname === '/admin/referral' && [...document.querySelectorAll('#referral-admin-root .referral-admin-campaign')].some(card=>card.textContent.includes(${JSON.stringify(first.c.name)}))`);
   assert.equal(await evaluate("document.querySelectorAll('main').length"),1,'one CRM main');
   const image=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,'admin-1440.png'),Buffer.from(image.data,'base64'));
+  // Operator entry belongs to the first-level list; it is a read-only generic
+  // campaign URL, not an invitation issued for the staff account.
+  const shareWriteStart=networkMethods.length;
+  const shareBefore=await api(`/api/admin/referral/campaigns/${first.c.id}`);
+  const sharingURLs=[];
+  for(const index of [0,1]){
+    const campaign=campaigns[index].c;
+    await evaluate(`(()=>{const card=[...document.querySelectorAll('.referral-admin-campaign')].find(v=>v.querySelector('h3')?.textContent===${JSON.stringify(campaign.name)});const buttons=[...card.querySelectorAll('button')];if(buttons[0].textContent!=='查看活动详情'||buttons[1].textContent!=='分享')throw new Error('list share placement');buttons[1].focus();buttons[1].click();})()`);
+    await wait("document.querySelector('dialog[data-referral-campaign-share] input')");
+    const url=await evaluate("document.querySelector('dialog[data-referral-campaign-share] input').value");
+    assert.equal(url,`${base}/referral?campaign=${campaign.id}`,'public share has only campaign scope');
+    assert.equal(await evaluate("document.querySelector('dialog[data-referral-campaign-share] a').href"),url);
+    sharingURLs.push(url);
+    for(const width of [1440,375,430]){
+      await call('Emulation.setDeviceMetricsOverride',{width,height:850,deviceScaleFactor:1,mobile:width<500});
+      const box=await evaluate("(()=>{const d=document.querySelector('dialog[data-referral-campaign-share]'),r=d.getBoundingClientRect();return{left:r.left,right:r.right,width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth};})()");
+      assert.ok(!box.overflow&&box.left>=0&&box.right<=box.width,'share dialog fits viewport');
+      const shot=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,`operator-share-${index}-${width}.png`),Buffer.from(shot.data,'base64'));
+    }
+    const copyPoint=await evaluate("(()=>{const b=[...document.querySelectorAll('dialog[data-referral-campaign-share] button')].find(b=>b.textContent==='复制链接');b.scrollIntoView({block:'center'});const r=b.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()");
+    await call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...copyPoint});
+    await call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...copyPoint});
+    await wait("document.querySelector('dialog[data-referral-campaign-share]').textContent.includes('活动链接已复制')");
+    assert.equal(await evaluate("navigator.clipboard.readText()"),url,'actual clipboard contains this campaign');
+    if(index===0){
+      await evaluate("(()=>{const click=HTMLAnchorElement.prototype.click;window.__shareQr=null;window.__restoreShareQr=()=>{HTMLAnchorElement.prototype.click=click;};HTMLAnchorElement.prototype.click=function(...args){if(this.download.endsWith('-二维码.png'))window.__shareQr={url:this.href,suggestedFilename:this.download};return Reflect.apply(click,this,args);};[...document.querySelectorAll('dialog[data-referral-campaign-share] button')].find(b=>b.textContent==='下载二维码').click();})()");
+      await wait("window.__shareQr?.url.startsWith('blob:')");
+      const anchor=await evaluate("window.__restoreShareQr();window.__shareQr");
+      assert.equal(anchor.suggestedFilename,`裂变活动-${campaign.id}-二维码.png`);
+      const download=await csvDownloads.waitFor(anchor);
+      const bytes=await fs.readFile(download.path);assert.equal(bytes.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+      await fs.writeFile(path.join(screenshots,'operator-entry-qr.png'),bytes);
+      await fs.writeFile(path.join(screenshots,'operator-entry-qr.json'),JSON.stringify({expectedURL:url,downloadCompleted:download.state==='completed'}));
+    }
+    await evaluate("document.querySelector('dialog[data-referral-campaign-share]').close()");
+    assert.equal(await evaluate("document.activeElement.textContent"),'分享','closing returns focus to its list share action');
+  }
+  assert.notEqual(sharingURLs[0],sharingURLs[1],'each campaign owns its public URL');
+  assert.equal(networkMethods.slice(shareWriteStart).every(r=>r.method==='GET'),true,'sharing sends no business writes');
+  const shareAfter=await api(`/api/admin/referral/campaigns/${first.c.id}`);
+  assert.deepEqual([shareAfter.participant_count,shareAfter.invitation_count,shareAfter.version],[shareBefore.participant_count,shareBefore.invitation_count,shareBefore.version],'sharing does not change participation or configuration');
+  // Follow the copied public entry as a guest, then as a trusted synthetic
+  // customer who has never joined this campaign. No personal invite is needed.
+  await call('Network.deleteCookies',{name:'aicrm_distribution_session',url:base});
+  await call('Page.navigate',{url:sharingURLs[1]});
+  await wait("[...document.querySelectorAll('a')].some(a=>a.textContent==='使用微信登录')");
+  const loginReturn=await evaluate("[...document.querySelectorAll('a')].find(a=>a.textContent==='使用微信登录').getAttribute('href')");
+  assert.equal(new URL(loginReturn,base).searchParams.get('return_url'),`/referral?campaign=${campaigns[1].c.id}`,'guest login retains the selected campaign');
+  const fresh=await api(`/api/v1/referral/campaigns/${campaigns[1].c.id}/me`,undefined,actors[3]);
+  assert.ok(fresh.participation == null,'first entry fixture is not already a member');
+  await cookie('aicrm_distribution_session',actors[3].session);await cookie('aicrm_distribution_csrf','referral-fixture-csrf');
+  await call('Page.navigate',{url:sharingURLs[1]});
+  await wait("document.querySelector('[data-testid=referral-invite]')?.textContent==='参加活动'");
+  assert.equal(await evaluate("document.body.textContent.includes('活动链接与二维码')"),false,'public page has no operator share entry');
+  await evaluate("document.querySelector('[data-testid=referral-invite]').click()");
+  await wait("document.querySelector('[data-testid=referral-accept-dialog]')");
+  const initialEntry=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,'operator-first-entry-430.png'),Buffer.from(initialEntry.data,'base64'));
+  await evaluate("document.querySelector('[data-testid=referral-accept-dialog]').close()");
+  await cookie('aicrm_distribution_session',actors[2].session);
+  await call('Page.navigate',{url:base+'/admin/referral'});
+  await wait(`location.pathname==='/admin/referral'&&[...document.querySelectorAll('.referral-admin-campaign')].some(c=>c.querySelector('h3')?.textContent===${JSON.stringify(first.c.name)})`);
+  await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
   // Open an activity before using its second-level operational controls.
   await evaluate(`(()=>{const card=[...document.querySelectorAll('.referral-admin-campaign')].find(v=>v.textContent.includes(${JSON.stringify(first.c.name)}));const button=card&&[...card.querySelectorAll('button')].find(b=>b.textContent==='查看活动详情');if(!button)throw new Error('first campaign detail action missing');button.click();})()`);
   await wait("document.body.textContent.includes('活动核心数据') && document.querySelector('[aria-busy=false]')");

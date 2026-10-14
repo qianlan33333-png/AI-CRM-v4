@@ -56,27 +56,30 @@ type RequestSecurity interface {
 }
 
 type Config struct {
-	ActivityHandoffKey string
-	ProductOptions     productport.ProductOptionReader
-	ProductTargets     productport.ProductTargetReader
-	Public             referralport.PublicApplication
-	Promotion          PromotionIssuer
-	Admin              referralport.AdminApplication
-	Posters            CampaignPosters
-	Sessions           SessionResolver
-	Bridge             PaymentSessionBridge
-	Names              customerport.DirectoryDisplayNameReader
-	Profiles           customerport.DirectoryPublicProfileReader
-	Nicknames          customerport.WeChatNicknameReader
-	Security           RequestSecurity
-	CookieSecure       bool
-	AllowedOrigins     []string
-	SessionCookieName  string
-	CSRFCookieName     string
-	CSRFHeader         string
+	// PublicActivityOrigin is the configured H5 origin, independent of staff Host.
+	PublicActivityOrigin string
+	ActivityHandoffKey   string
+	ProductOptions       productport.ProductOptionReader
+	ProductTargets       productport.ProductTargetReader
+	Public               referralport.PublicApplication
+	Promotion            PromotionIssuer
+	Admin                referralport.AdminApplication
+	Posters              CampaignPosters
+	Sessions             SessionResolver
+	Bridge               PaymentSessionBridge
+	Names                customerport.DirectoryDisplayNameReader
+	Profiles             customerport.DirectoryPublicProfileReader
+	Nicknames            customerport.WeChatNicknameReader
+	Security             RequestSecurity
+	CookieSecure         bool
+	AllowedOrigins       []string
+	SessionCookieName    string
+	CSRFCookieName       string
+	CSRFHeader           string
 }
 
 type Handler struct {
+	publicActivityOrigin                          string
 	activityHandoffKey                            []byte
 	productOptions                                productport.ProductOptionReader
 	productTargets                                productport.ProductTargetReader
@@ -112,7 +115,18 @@ func NewHandler(config Config) (*Handler, error) {
 	if len(allowed) == 0 {
 		return nil, referralport.ErrUnavailable
 	}
-	return &Handler{activityHandoffKey: []byte(config.ActivityHandoffKey), productOptions: config.ProductOptions, productTargets: config.ProductTargets, public: config.Public, promotion: config.Promotion, admin: config.Admin, posters: config.Posters, sessions: config.Sessions, bridge: config.Bridge, names: config.Names, profiles: config.Profiles, nicknames: config.Nicknames, security: config.Security, cookieSecure: config.CookieSecure, allowedOrigins: allowed, sessionCookieName: config.SessionCookieName, csrfCookieName: config.CSRFCookieName, csrfHeader: config.CSRFHeader}, nil
+	origin := config.PublicActivityOrigin
+	if origin == "" {
+		origin = config.AllowedOrigins[0]
+	} // Existing constructor callers retain their configured origin.
+	publicOrigin, valid := canonicalOrigin(origin)
+	if !valid {
+		return nil, referralport.ErrUnavailable
+	}
+	if _, ok := allowed[publicOrigin]; !ok {
+		return nil, referralport.ErrUnavailable
+	}
+	return &Handler{publicActivityOrigin: publicOrigin, activityHandoffKey: []byte(config.ActivityHandoffKey), productOptions: config.ProductOptions, productTargets: config.ProductTargets, public: config.Public, promotion: config.Promotion, admin: config.Admin, posters: config.Posters, sessions: config.Sessions, bridge: config.Bridge, names: config.Names, profiles: config.Profiles, nicknames: config.Nicknames, security: config.Security, cookieSecure: config.CookieSecure, allowedOrigins: allowed, sessionCookieName: config.SessionCookieName, csrfCookieName: config.CSRFCookieName, csrfHeader: config.CSRFHeader}, nil
 }
 
 // SetPromotionApplication wires Distribution after both domains have been
@@ -668,7 +682,9 @@ func (h *Handler) listAdminCampaigns(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]any, 0, len(page.Items))
 	for _, item := range page.Items {
-		items = append(items, campaignSummary(item))
+		response := campaignSummary(item)
+		h.addAdminActivityLink(response, item.Campaign.ID)
+		items = append(items, response)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": page.NextCursor})
 }
@@ -688,6 +704,7 @@ func (h *Handler) readAdminCampaign(w http.ResponseWriter, r *http.Request, raw 
 		return
 	}
 	response := campaignView(view)
+	h.addAdminActivityLink(response, campaignID)
 	if h.posters != nil {
 		posters, err := h.posters.ListCampaignPosters(r.Context(), campaignID, true)
 		if err != nil {
@@ -1220,6 +1237,13 @@ func campaignSummary(value referralport.CampaignSummary) map[string]any {
 	response["invitation_count"] = value.InvitationCount
 	response["team_count"] = value.TeamCount
 	return response
+}
+
+// Public entry has no inviter, customer, staff session or campaign-secret context.
+func (h *Handler) addAdminActivityLink(response map[string]any, campaignID int64) {
+	if response != nil && campaignID > 0 {
+		response["activity_url"] = h.publicActivityOrigin + "/referral?campaign=" + strconv.FormatInt(campaignID, 10)
+	}
 }
 
 func (h *Handler) addPublicCampaignLinks(ctx context.Context, response map[string]any, campaign referraldomain.Campaign) {
