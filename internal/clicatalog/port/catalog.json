@@ -8399,6 +8399,108 @@
       }
     },
     {
+      "id": "admin.getAIAssistantRecipientControl",
+      "group": "ai",
+      "module": "ai",
+      "command": "aiassistant-recipient-control get",
+      "summary": "",
+      "owner": "aiplan",
+      "execution": "read",
+      "implementation": "admin_contract",
+      "evidence": "source_contract_only",
+      "version": 1,
+      "responses": {
+        "200": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "control": {
+                    "$ref": "#/components/schemas/AIAssistantPrivateMessageControl"
+                  },
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "plan_id": {
+                    "type": "integer"
+                  },
+                  "read_only": {
+                    "type": "boolean"
+                  },
+                  "recipient_id": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "description": "Safe control lifecycle and actual delivery or stop evidence"
+        },
+        "400": {
+          "$ref": "#/components/responses/Error"
+        },
+        "401": {
+          "$ref": "#/components/responses/Error"
+        },
+        "403": {
+          "$ref": "#/components/responses/Error"
+        },
+        "404": {
+          "$ref": "#/components/responses/Error"
+        }
+      },
+      "prerequisites": [
+        "current human session",
+        "owner route authorization and business conditions"
+      ],
+      "binding": {
+        "method": "GET",
+        "path": "/api/admin/ai-assistant/plans/{plan_id}/recipients/{recipient_id}/control",
+        "auth": "human",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PositiveID"
+            }
+          },
+          {
+            "in": "path",
+            "name": "recipient_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PositiveID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "schema": {
+              "default": "stop",
+              "enum": [
+                "stop",
+                "reconcile"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "effect_id",
+            "schema": {
+              "pattern": "^eer_[1-9][0-9]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "idempotency_required": false,
+        "body_required": false
+      }
+    },
+    {
       "id": "admin.getAIAudienceAutomationBinding",
       "group": "audience",
       "module": "audience",
@@ -24748,6 +24850,117 @@
       }
     },
     {
+      "id": "admin.reconcileAIAssistantRecipientDelivery",
+      "group": "ai",
+      "module": "ai",
+      "command": "aiassistant-recipient-delivery reconcile",
+      "summary": "",
+      "owner": "aiplan",
+      "execution": "owner_contract",
+      "implementation": "admin_contract",
+      "evidence": "source_contract_only",
+      "version": 1,
+      "responses": {
+        "202": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "control": {
+                    "$ref": "#/components/schemas/AIAssistantPrivateMessageControl"
+                  },
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "send_triggered": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "description": "Original-task delivery reconciliation accepted"
+        },
+        "400": {
+          "$ref": "#/components/responses/Error"
+        },
+        "401": {
+          "$ref": "#/components/responses/Error"
+        },
+        "403": {
+          "$ref": "#/components/responses/Error"
+        },
+        "404": {
+          "$ref": "#/components/responses/Error"
+        },
+        "409": {
+          "$ref": "#/components/responses/Error"
+        },
+        "503": {
+          "$ref": "#/components/responses/Unavailable"
+        }
+      },
+      "prerequisites": [
+        "current human session",
+        "owner route authorization and business conditions"
+      ],
+      "binding": {
+        "method": "POST",
+        "path": "/api/admin/ai-assistant/plans/{plan_id}/recipients/{recipient_id}/reconcile-delivery",
+        "auth": "human",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PositiveID"
+            }
+          },
+          {
+            "in": "path",
+            "name": "recipient_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PositiveID"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 8,
+              "type": "string"
+            }
+          }
+        ],
+        "body": {
+          "additionalProperties": false,
+          "properties": {
+            "expected_version": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "reason": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected_version",
+            "reason"
+          ],
+          "type": "object"
+        },
+        "content_type": "application/json",
+        "idempotency_required": true,
+        "body_required": true
+      }
+    },
+    {
       "id": "admin.reconcileAutomationRunEffect",
       "group": "automation",
       "module": "automation",
@@ -29562,6 +29775,122 @@
         },
         "content_type": "application/json",
         "idempotency_required": false,
+        "body_required": true
+      }
+    },
+    {
+      "id": "admin.stopAIAssistantRecipient",
+      "group": "ai",
+      "module": "ai",
+      "command": "aiassistant-recipient stop",
+      "summary": "",
+      "owner": "aiplan",
+      "execution": "owner_contract",
+      "implementation": "admin_contract",
+      "evidence": "source_contract_only",
+      "version": 1,
+      "responses": {
+        "202": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "control": {
+                    "$ref": "#/components/schemas/AIAssistantPrivateMessageControl"
+                  },
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "send_triggered": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "ok",
+                  "control",
+                  "send_triggered"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "description": "Original-task stop accepted; inspect the control result"
+        },
+        "400": {
+          "$ref": "#/components/responses/Error"
+        },
+        "401": {
+          "$ref": "#/components/responses/Error"
+        },
+        "403": {
+          "$ref": "#/components/responses/Error"
+        },
+        "404": {
+          "$ref": "#/components/responses/Error"
+        },
+        "409": {
+          "$ref": "#/components/responses/Error"
+        },
+        "503": {
+          "$ref": "#/components/responses/Unavailable"
+        }
+      },
+      "prerequisites": [
+        "current human session",
+        "owner route authorization and business conditions"
+      ],
+      "binding": {
+        "method": "POST",
+        "path": "/api/admin/ai-assistant/plans/{plan_id}/recipients/{recipient_id}/stop",
+        "auth": "human",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PositiveID"
+            }
+          },
+          {
+            "in": "path",
+            "name": "recipient_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PositiveID"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 8,
+              "type": "string"
+            }
+          }
+        ],
+        "body": {
+          "additionalProperties": false,
+          "properties": {
+            "expected_version": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "reason": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected_version",
+            "reason"
+          ],
+          "type": "object"
+        },
+        "content_type": "application/json",
+        "idempotency_required": true,
         "body_required": true
       }
     },
@@ -36217,6 +36546,64 @@
         "customer_id",
         "staff_id",
         "content"
+      ],
+      "type": "object"
+    },
+    "AIAssistantPrivateMessageControl": {
+      "properties": {
+        "action": {
+          "enum": [
+            "stop",
+            "reconcile"
+          ],
+          "type": "string"
+        },
+        "effect_id": {
+          "pattern": "^eer_[1-9][0-9]*$",
+          "type": "string"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "receipt_digest": {
+          "type": "string"
+        },
+        "replayed": {
+          "type": "boolean"
+        },
+        "sent_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "accepted",
+            "queued",
+            "attempted",
+            "executed",
+            "outcome_unknown",
+            "retryable_failed",
+            "final_failed",
+            "cancelled",
+            "reconciled",
+            "stopped",
+            "delivered",
+            "pending"
+          ],
+          "type": "string"
+        },
+        "stopped_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "effect_id",
+        "action",
+        "state",
+        "receipt_digest",
+        "replayed"
       ],
       "type": "object"
     },

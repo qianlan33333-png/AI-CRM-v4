@@ -80,7 +80,7 @@ func safeReceiptFailure(reason string) string {
 		}
 	}
 	switch reason {
-	case "", "target_unavailable", "payload_unavailable", "provider_rejected", "outcome_unknown", "final_failed", "retryable_failed", "unionid_not_unique", "unionid_unverified", "wecom_identity_unavailable", "title_missing", "cover_missing":
+	case "", "provider_stopped", "target_unavailable", "payload_unavailable", "provider_rejected", "outcome_unknown", "final_failed", "retryable_failed", "unionid_not_unique", "unionid_unverified", "wecom_identity_unavailable", "title_missing", "cover_missing":
 		return reason
 	}
 	return "unclassified_failure"

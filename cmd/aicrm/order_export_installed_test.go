@@ -33,7 +33,7 @@ func TestPostgreSQLOrderExportSharingInstalled(t *testing.T) {
 	testUnifiedOrderExportHTTPAndCLI(t, true)
 }
 
-func useInstalledOrderExportFixture(t *testing.T, server *httptest.Server, databaseURL, key string) *domesticSmokeProcess {
+func useInstalledOrderExportFixture(t *testing.T, server *httptest.Server, databaseURL, key string, overrides ...string) *domesticSmokeProcess {
 	t.Helper()
 	if !postgresurltestutil.IsLocalTestDatabaseURL(databaseURL) {
 		t.Fatal("installed export requires the existing isolated loopback test database")
@@ -46,7 +46,7 @@ func useInstalledOrderExportFixture(t *testing.T, server *httptest.Server, datab
 	address := listener.Addr().String()
 	_ = listener.Close()
 	origin := "https://" + server.Listener.Addr().String()
-	process := startPeriodicContactInstalledProcess(t, input.Binary, input.Root, []string{
+	environment := []string{
 		"AICRM_DATABASE_URL=" + databaseURL, "AICRM_ROLE=api", "AICRM_LISTEN_ADDR=" + address, "AICRM_RELEASE_SHA=" + input.SHA,
 		"AICRM_PUBLIC_ORIGIN=" + origin, "AICRM_H5_PUBLIC_ORIGIN=" + origin,
 		"AICRM_SURVEY_DATA_KEY=" + key, "AICRM_IDENTITY_PHONE_DATA_KEY=" + key, "AICRM_ORDER_CONTACT_DATA_KEY=" + key,
@@ -54,7 +54,21 @@ func useInstalledOrderExportFixture(t *testing.T, server *httptest.Server, datab
 		"AICRM_OUTBOUND_PROVIDER_ENABLED=false", "AICRM_COMMERCE_PUSH_PROVIDER_ENABLED=false", "AICRM_GROUP_OPS_PROVIDER_ENABLED=false",
 		"AICRM_WECHAT_PAY_PROVIDER_ENABLED=false", "AICRM_ALIPAY_PROVIDER_ENABLED=false", "AICRM_WECHAT_SHOP_PROVIDER_ENABLED=false", "AICRM_INVOICE_PROVIDER_ENABLED=false",
 		"HTTP_PROXY=http://127.0.0.1:9", "HTTPS_PROXY=http://127.0.0.1:9", "NO_PROXY=127.0.0.1,localhost,::1",
-	})
+	}
+	for _, override := range overrides {
+		name, _, ok := strings.Cut(override, "=")
+		if !ok {
+			t.Fatal("invalid installed fixture environment override")
+		}
+		filtered := environment[:0]
+		for _, entry := range environment {
+			if !strings.HasPrefix(entry, name+"=") {
+				filtered = append(filtered, entry)
+			}
+		}
+		environment = append(filtered, override)
+	}
+	process := startPeriodicContactInstalledProcess(t, input.Binary, input.Root, environment)
 	endpoint := "http://" + address
 	waitInstalledSurveyReady(t, process, endpoint, input.SHA)
 	target, _ := url.Parse(endpoint)

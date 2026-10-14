@@ -121,6 +121,14 @@
       "browser": true,
       "installed": true
     },
+    "private-message-control": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/private_message_control_postgres_test.go",
+      "tests": ["TestPostgreSQLPrivateMessageControlInstalled"],
+      "postgres": true,
+      "browser": false,
+      "installed": true
+    },
     "aiassistant-execution-receipts": {
       "package": "./cmd/aicrm",
       "path": "cmd/aicrm/aiassistant_receipts_postgres_test.go",

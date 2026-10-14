@@ -11,6 +11,7 @@ type AIAssistantAction string
 const (
 	AIAssistantRead        AIAssistantAction = "aiassistant.read"
 	AIAssistantReceiptRead AIAssistantAction = "aiassistant.receipt.read"
+	AIAssistantStop        AIAssistantAction = "aiassistant.task.stop"
 	AIAssistantReview      AIAssistantAction = "aiassistant.review"
 	AIAssistantApprove     AIAssistantAction = "aiassistant.approve"
 	AIAssistantReconcile   AIAssistantAction = "aiassistant.reconcile"

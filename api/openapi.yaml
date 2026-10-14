@@ -4828,6 +4828,31 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '503': {$ref: '#/components/responses/Unavailable'}
+  /api/admin/ai-assistant/plans/{plan_id}/recipients/{recipient_id}/stop:
+    post:
+      operationId: stopAIAssistantRecipient
+      tags: [AIAssistant]
+      description: Accept an immutable original-task stop intent. Queued or executed is not delivery evidence; query the control result. Already delivered messages retain the original sent time. No new message is sent.
+      security: [{adminSession: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/AIAssistantPlanID'}, {$ref: '#/components/parameters/AIAssistantRecipientID'}, {$ref: '#/components/parameters/RequiredIdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_version, reason], properties: {expected_version: {type: integer, minimum: 1}, reason: {type: string, minLength: 1}}}}}}
+      responses: {'202': {description: Original-task stop accepted; inspect the control result, content: {application/json: {schema: {type: object, required: [ok, control, send_triggered], properties: {ok: {type: boolean}, send_triggered: {type: boolean}, control: {$ref: '#/components/schemas/AIAssistantPrivateMessageControl'}}}}}}, '400': {$ref: '#/components/responses/Error'}, '401': {$ref: '#/components/responses/Error'}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/admin/ai-assistant/plans/{plan_id}/recipients/{recipient_id}/reconcile-delivery:
+    post:
+      operationId: reconcileAIAssistantRecipientDelivery
+      tags: [AIAssistant]
+      description: Queue a Provider read against the frozen original task and atomically retain its observed delivery facts. Does not send or stop messages.
+      security: [{adminSession: [], csrfHeader: []}]
+      parameters: [{$ref: '#/components/parameters/AIAssistantPlanID'}, {$ref: '#/components/parameters/AIAssistantRecipientID'}, {$ref: '#/components/parameters/RequiredIdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_version, reason], properties: {expected_version: {type: integer, minimum: 1}, reason: {type: string, minLength: 1}}}}}}
+      responses: {'202': {description: Original-task delivery reconciliation accepted, content: {application/json: {schema: {type: object, properties: {ok: {type: boolean}, control: {$ref: '#/components/schemas/AIAssistantPrivateMessageControl'}, send_triggered: {type: boolean}}}}}}, '400': {$ref: '#/components/responses/Error'}, '401': {$ref: '#/components/responses/Error'}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/admin/ai-assistant/plans/{plan_id}/recipients/{recipient_id}/control:
+    get:
+      operationId: getAIAssistantRecipientControl
+      tags: [AIAssistant]
+      security: [{adminSession: []}]
+      parameters: [{$ref: '#/components/parameters/AIAssistantPlanID'}, {$ref: '#/components/parameters/AIAssistantRecipientID'}, {in: query, name: action, schema: {type: string, enum: [stop, reconcile], default: stop}}, {in: query, name: effect_id, schema: {type: string, pattern: '^eer_[1-9][0-9]*$'}}]
+      responses: {'200': {description: Safe control lifecycle and actual delivery or stop evidence, content: {application/json: {schema: {type: object, properties: {ok: {type: boolean}, plan_id: {type: integer}, recipient_id: {type: integer}, read_only: {type: boolean}, control: {$ref: '#/components/schemas/AIAssistantPrivateMessageControl'}}}}}}, '400': {$ref: '#/components/responses/Error'}, '401': {$ref: '#/components/responses/Error'}, '403': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}}
   /api/admin/ai-assistant/plans/{plan_id}/effects:
     get:
       operationId: listAIAssistantEffects
@@ -6246,6 +6271,18 @@ components:
         source_kind: {type: string, minLength: 1, maxLength: 80}
         source_digest: {$ref: "#/components/schemas/AIAssistantDigest"}
         recipients: {type: array, minItems: 1, maxItems: 5000, items: {$ref: "#/components/schemas/AIAssistantPlanTarget"}}
+    AIAssistantPrivateMessageControl:
+      type: object
+      required: [effect_id, action, state, receipt_digest, replayed]
+      properties:
+        effect_id: {type: string, pattern: '^eer_[1-9][0-9]*$'}
+        action: {type: string, enum: [stop, reconcile]}
+        state: {type: string, enum: [accepted, queued, attempted, executed, outcome_unknown, retryable_failed, final_failed, cancelled, reconciled, stopped, delivered, pending]}
+        receipt_digest: {type: string}
+        sent_at: {type: string, format: date-time}
+        stopped_at: {type: string, format: date-time}
+        observed_at: {type: string, format: date-time}
+        replayed: {type: boolean}
     AIAssistantPlan:
       type: object
       additionalProperties: false

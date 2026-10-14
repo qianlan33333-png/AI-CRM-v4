@@ -1010,6 +1010,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	outboundCompletionSink.WithCustomerTag(customerTagCompletionSink)
 	outboundCompletionSink.WithTagCatalogMutation(tagMutationCompletionSink)
 	outboundCompletionSink.WithPrivateMessage(privateCompletionSink)
+	outboundCompletionSink.WithPrivateMessageControl(privateWriter)
 	outboundCompletionSink.WithAutomationMessage(outboundMessages)
 	outboundCompletionSink.WithInvitationCode(outbound.InvitationCodeCompletionSink{Store: mediaRepository})
 	sidebarExpiry := outbound.SidebarJSSDKExpiry{}
@@ -2091,6 +2092,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		return fail(err)
 	}
 	receiptAdapter.provider = providerClient
+	privateControlProvider := &outbound.PrivateMessageControlProvider{Enabled: cfg.AIAssistant.DispatchEnabled, Store: privateWriter, Reader: providerClient, Stopper: providerClient}
 	if err = audienceDirectPush.BindObservation(
 		audienceDirectPushDeliveryAdapter{receipts: outboundMessages, provider: providerClient},
 		audienceDirectPushOpenAdapter{uow: uow, identities: queries, excel: excelClient, unionScope: audienceUnionScope},
@@ -2327,7 +2329,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 		}
 	}
 	materialProviderMux := outbound.MaterialEffectMux{GenericProvider: materialProvider, LegacyProvider: sidebarMediaProvider}
-	providerRouter := outbound.NewProviderRouterWithGroupMessageAndChannels(tagCatalogProvider, groupOpsProvider, channelAssetProvider, channelEntrantProvider, channelLinkProvider).WithTagCatalogMutation(tagCatalogMutationProvider).WithContactDescription(contactDescriptionProvider).WithCustomerTag(customerTagProvider).WithPrivateMessage(privateProvider).WithAutomationMessage(messageProvider).WithSidebarJSSDK(sidebarExpiry).WithSidebarMedia(materialProviderMux).WithSurveyCompletion(surveyCompletionProvider).WithCommercePush(commercePushProvider).WithCustomerOwnerHandoff(ownerHandoffProvider).WithInvitationCode(&outbound.InvitationCodeProvider{Store: mediaRepository, Provider: providerClient, Enabled: invitationService.WriteEnabled})
+	providerRouter := outbound.NewProviderRouterWithGroupMessageAndChannels(tagCatalogProvider, groupOpsProvider, channelAssetProvider, channelEntrantProvider, channelLinkProvider).WithTagCatalogMutation(tagCatalogMutationProvider).WithContactDescription(contactDescriptionProvider).WithCustomerTag(customerTagProvider).WithPrivateMessage(privateProvider).WithPrivateMessageControl(privateControlProvider).WithAutomationMessage(messageProvider).WithSidebarJSSDK(sidebarExpiry).WithSidebarMedia(materialProviderMux).WithSurveyCompletion(surveyCompletionProvider).WithCommercePush(commercePushProvider).WithCustomerOwnerHandoff(ownerHandoffProvider).WithInvitationCode(&outbound.InvitationCodeProvider{Store: mediaRepository, Provider: providerClient, Enabled: invitationService.WriteEnabled})
 	if err = effectsModule.SetProviderAdapter(composedProviderRouter{invoice: invoiceService.ProviderAdapter(), adminops: opsProvider, outbound: providerRouter, payment: paymentAdapter, automation: generationProvider, segment: coreRecommendationProvider}); err != nil {
 		return fail(err)
 	}

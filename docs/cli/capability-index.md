@@ -355,14 +355,17 @@
 | admin.createLegacyAIAssistantReviewPlan | aicrm-cli ai legacy-aiassistant-review-plan create | 不可执行：route requires an independent authentication protocol; human sessions cannot execute it; use the independently authorized machine V1 ai.review_plan.create operation | aiplan | source_contract_only |
 | admin.getAIAssistantPlan | aicrm-cli ai aiassistant-plan get | human | aiplan | source_contract_only |
 | admin.getAIAssistantRecipient | aicrm-cli ai aiassistant-recipient get | human | aiplan | source_contract_only |
+| admin.getAIAssistantRecipientControl | aicrm-cli ai aiassistant-recipient-control get | human | aiplan | source_contract_only |
 | admin.listAIAssistantEffects | aicrm-cli ai aiassistant-effects list | human | aiplan | source_contract_only |
 | admin.listAIAssistantExecutionReceipts | aicrm-cli ai aiassistant-execution-receipts list | human | aiplan | source_contract_only |
 | admin.listAIAssistantPlans | aicrm-cli ai aiassistant-plans list | human | aiplan | source_contract_only |
 | admin.listAIAssistantRecipients | aicrm-cli ai aiassistant-recipients list | human | aiplan | source_contract_only |
 | admin.previewAIAssistantPlanApproval | aicrm-cli ai aiassistant-plan-approval preview | human | aiplan | source_contract_only |
 | admin.reconcileAIAssistantEffect | aicrm-cli ai aiassistant-effect reconcile | human | aiplan | source_contract_only |
+| admin.reconcileAIAssistantRecipientDelivery | aicrm-cli ai aiassistant-recipient-delivery reconcile | human | aiplan | source_contract_only |
 | admin.rejectAIAssistantPlan | aicrm-cli ai reject-aiassistant-plan invoke | human | aiplan | source_contract_only |
 | admin.reviewAIAssistantRecipient | aicrm-cli ai review-aiassistant-recipient invoke | human | aiplan | source_contract_only |
+| admin.stopAIAssistantRecipient | aicrm-cli ai aiassistant-recipient stop | human | aiplan | source_contract_only |
 | admin.updateAIAssistantRecipientContent | aicrm-cli ai aiassistant-recipient-content update | human | aiplan | source_contract_only |
 | ai.review_plan.create | aicrm-cli ai ai-review-plan create | machine | ai | source_contract_only |
 

@@ -798,6 +798,12 @@ func (r *Repository) RunAttempt(ctx context.Context, id, generation, riverJobID 
 				next = StateFinalFailed
 			}
 			receipt = Hash("provider-invalid", strconv.FormatInt(id, 10), strconv.Itoa(int(attempts)))
+		} else if result.Completion == StateExecuted && envelope.Kind == port.KindPrivateMessageControl && !result.CallAttempted && !result.RealExternalCallExecuted && result.Artifact.Kind == "outbound.private-control.v1" && result.Artifact.Valid() {
+			// A stop/reconcile control can adopt an existing server-owned sent or
+			// stopped receipt. Its completion sink validates that prior fact in
+			// this UOW; settling this observation does not invent a Provider call.
+			next = StateExecuted
+			receipt = result.ReceiptDigest
 		} else if result.Completion == StateExecuted && result.CallAttempted && result.RealExternalCallExecuted {
 			next = StateExecuted
 			receipt = result.ReceiptDigest
@@ -829,7 +835,7 @@ func (r *Repository) RunAttempt(ctx context.Context, id, generation, riverJobID 
 			receipt = Hash("provider-invalid", strconv.FormatInt(id, 10), strconv.Itoa(int(attempts)))
 		}
 	}
-	if next == StateExecuted && (envelope.Kind == KindOutboundMedia || envelope.Kind == KindWeComTagCatalog || envelope.Kind == KindWeComTagCatalogMutation || envelope.Kind == KindChannelAsset || envelope.Kind == KindChannelLink || envelope.Kind == KindCustomerOwnerHandoff || (envelope.Kind == KindAIAgentGenerate || envelope.Kind == KindAIRecommend)) && (r.sink == nil || !adapterResult.Artifact.Valid()) {
+	if next == StateExecuted && (envelope.Kind == port.KindPrivateMessageControl || envelope.Kind == KindOutboundMedia || envelope.Kind == KindWeComTagCatalog || envelope.Kind == KindWeComTagCatalogMutation || envelope.Kind == KindChannelAsset || envelope.Kind == KindChannelLink || envelope.Kind == KindCustomerOwnerHandoff || (envelope.Kind == KindAIAgentGenerate || envelope.Kind == KindAIRecommend)) && (r.sink == nil || !adapterResult.Artifact.Valid()) {
 		next, receipt = StateUnknown, Hash("provider-artifact-invalid", strconv.FormatInt(id, 10), strconv.Itoa(int(attempts)))
 	}
 	autoRetryLane := (envelope.Kind == KindOutboundMedia && deliveryQueue == platformjobqueue.OutboundMediaQueue) ||
@@ -858,7 +864,7 @@ func (r *Repository) RunAttempt(ctx context.Context, id, generation, riverJobID 
 		return ErrTransition
 	}
 	terminal := next == StateExecuted || next == StateUnknown || next == StateRetryable || next == StateFinalFailed
-	shouldComplete := r.sink != nil && terminal && (envelope.Kind == KindOutboundMedia || envelope.Kind == KindGroupMessage || envelope.Kind == KindWeComTagCatalog || envelope.Kind == KindWeComTagCatalogMutation || envelope.Kind == KindWeComContactDescription || envelope.Kind == KindChannelAsset || envelope.Kind == KindChannelWelcome || envelope.Kind == KindChannelEntryTag || envelope.Kind == KindCustomerTagCommand || envelope.Kind == KindCustomerOwnerHandoff || envelope.Kind == KindCommerceProductPush || envelope.Kind == KindInvitationCode || envelope.Kind == KindChannelLink || envelope.Kind == KindOutboundMessage || envelope.Kind == KindAutomationMessage || envelope.Kind == port.KindSidebarJSSDKSend || envelope.Kind == KindSurveyCompletion || envelope.Kind == KindAIAgentGenerate || envelope.Kind == KindAIRecommend || envelope.Owner == OwnerPayment || envelope.Owner == port.OwnerInvoice || envelope.Kind == KindFeishuOpsNotification)
+	shouldComplete := r.sink != nil && terminal && (envelope.Kind == port.KindPrivateMessageControl || envelope.Kind == KindOutboundMedia || envelope.Kind == KindGroupMessage || envelope.Kind == KindWeComTagCatalog || envelope.Kind == KindWeComTagCatalogMutation || envelope.Kind == KindWeComContactDescription || envelope.Kind == KindChannelAsset || envelope.Kind == KindChannelWelcome || envelope.Kind == KindChannelEntryTag || envelope.Kind == KindCustomerTagCommand || envelope.Kind == KindCustomerOwnerHandoff || envelope.Kind == KindCommerceProductPush || envelope.Kind == KindInvitationCode || envelope.Kind == KindChannelLink || envelope.Kind == KindOutboundMessage || envelope.Kind == KindAutomationMessage || envelope.Kind == port.KindSidebarJSSDKSend || envelope.Kind == KindSurveyCompletion || envelope.Kind == KindAIAgentGenerate || envelope.Kind == KindAIRecommend || envelope.Owner == OwnerPayment || envelope.Owner == port.OwnerInvoice || envelope.Kind == KindFeishuOpsNotification)
 	if shouldComplete {
 		completionResult := adapterResult
 		completionResult.Completion = persistedState
@@ -917,7 +923,7 @@ func (r *Repository) QueuedEnvelope(ctx context.Context, id, generation, riverJo
 
 func projectsStaleAttempt(kind Kind) bool {
 	switch kind {
-	case KindFeishuOpsNotification, KindInvitationCode, KindOutboundMedia, KindWeComTagCatalog, KindWeComTagCatalogMutation, KindWeComContactDescription, KindGroupMessage, KindChannelAsset, KindChannelWelcome, KindChannelEntryTag, KindChannelLink, KindOutboundMessage, KindAutomationMessage, KindSurveyCompletion, KindCustomerTagCommand, KindCustomerOwnerHandoff, KindCommerceProductPush, KindAIAgentGenerate, KindAIRecommend, port.KindSidebarJSSDKSend, port.KindInvoiceIssue, port.KindInvoiceReverse, port.KindInvoiceCardConfigure:
+	case port.KindPrivateMessageControl, KindFeishuOpsNotification, KindInvitationCode, KindOutboundMedia, KindWeComTagCatalog, KindWeComTagCatalogMutation, KindWeComContactDescription, KindGroupMessage, KindChannelAsset, KindChannelWelcome, KindChannelEntryTag, KindChannelLink, KindOutboundMessage, KindAutomationMessage, KindSurveyCompletion, KindCustomerTagCommand, KindCustomerOwnerHandoff, KindCommerceProductPush, KindAIAgentGenerate, KindAIRecommend, port.KindSidebarJSSDKSend, port.KindInvoiceIssue, port.KindInvoiceReverse, port.KindInvoiceCardConfigure:
 		return true
 	default:
 		return false

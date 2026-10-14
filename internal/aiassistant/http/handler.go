@@ -108,6 +108,12 @@ func (h *Handler) Routes() stdhttp.Handler {
 	mux.HandleFunc("POST /api/admin/ai-assistant/plans/{plan_id}/approve", h.approvePlan)
 	mux.HandleFunc("GET /api/admin/ai-assistant/plans/{plan_id}/effects", h.listEffects)
 	mux.HandleFunc("GET /api/admin/ai-assistant/plans/{plan_id}/execution-receipts", h.executionReceipts)
+	mux.HandleFunc("POST /api/admin/ai-assistant/plans/{plan_id}/recipients/{recipient_id}/stop", h.privateMessageControl)
+	mux.HandleFunc("POST /api/admin/ai-assistant/plans/{plan_id}/recipients/{recipient_id}/reconcile-delivery", func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		r.SetPathValue("action", "reconcile")
+		h.privateMessageControl(w, r)
+	})
+	mux.HandleFunc("GET /api/admin/ai-assistant/plans/{plan_id}/recipients/{recipient_id}/control", h.privateMessageControlResult)
 	mux.HandleFunc("POST /api/admin/ai-assistant/effects/{effect_id}/reconcile", h.reconcileEffect)
 	mux.HandleFunc("POST /api/integrations/ai-assistant/review-plans", h.integrationPlan)
 	// Frozen donor caller route. It shares the authenticated adapter and never

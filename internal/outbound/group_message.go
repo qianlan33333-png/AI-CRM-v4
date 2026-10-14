@@ -520,6 +520,7 @@ type CompletionRouter struct {
 	entrant            *ChannelEntrantCompletionSink
 	link               *ChannelLinkCompletionSink
 	private            *PrivateMessageCompletionSink
+	privateControl     effectport.CompletionSink
 	automation         effectport.CompletionSink
 	sidebar            effectport.CompletionSink
 	survey             effectport.CompletionSink
@@ -599,6 +600,13 @@ func NewCompletionRouterWithPrivate(tag *TagCatalogCompletionSink, group *GroupM
 func (r *CompletionRouter) WithPrivateMessage(private *PrivateMessageCompletionSink) *CompletionRouter {
 	if r != nil {
 		r.private = private
+	}
+	return r
+}
+
+func (r *CompletionRouter) WithPrivateMessageControl(sink effectport.CompletionSink) *CompletionRouter {
+	if r != nil {
+		r.privateControl = sink
 	}
 	return r
 }
@@ -734,6 +742,11 @@ func (r *CompletionRouter) CompleteEffect(ctx context.Context, effectRef string,
 			return errors.New("private message completion sink is unavailable")
 		}
 		return r.private.CompleteEffect(ctx, effectRef, envelope, attempt, result)
+	case effectport.KindPrivateMessageControl:
+		if r.privateControl == nil {
+			return errors.New("private message control completion unavailable")
+		}
+		return r.privateControl.CompleteEffect(ctx, effectRef, envelope, attempt, result)
 	case effectport.KindOutboundMedia:
 		if r.sidebarMedia == nil {
 			return errors.New("sidebar media completion sink unavailable")

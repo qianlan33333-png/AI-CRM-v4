@@ -1,46 +1,107 @@
 {
   "schema": 1,
-  "baseline_sha": "097afc6c2adf2e1785b005875a1e3184d408aefa",
+  "baseline_sha": "631034f2040d0b56304dd35497909481831a7dba",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/referral/http",
-      "reason": "新增管理端H5公共链接、可信配置域名、多活动及鉴权拒绝；公开接口兼容"
+      "path": "internal/externaleffects/runtime_test.go",
+      "test": "TestStaleAttemptCompletionProjectionKinds",
+      "reason": "新控制类型的过期恢复与封闭信封"
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/referralCampaignShare.test.mjs",
-      "reason": "一级列表分享、最新读取、状态、失败重试、迟到响应及焦点隔离"
+      "lane": "backend",
+      "path": "internal/externaleffects/runtime_test.go",
+      "test": "TestClosedDigestOnlyEnvelopeAndStates",
+      "reason": "新控制类型的过期恢复与封闭信封"
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/referralAdmin.test.mjs",
-      "reason": "原列表、详情、配置创建保存及直接调用方兼容"
+      "lane": "backend",
+      "path": "internal/externaleffects/store_integration_test.go",
+      "test": "TestPostgreSQLEffectReplayUnknownAndStaleWorker",
+      "postgres": true,
+      "reason": "EER完成分支的原消费者及原子投影"
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/referralCenter.test.mjs",
-      "reason": "公共活动接口和既有H5生成溯源码直接消费者"
+      "lane": "backend",
+      "path": "internal/externaleffects/store_integration_test.go",
+      "test": "TestPostgreSQLTagCompletionSinkIsAtomic",
+      "postgres": true,
+      "reason": "EER完成分支的原消费者及原子投影"
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/referralCenter.anonymous.test.mjs",
-      "reason": "首次活动入口与登录按钮兼容"
+      "lane": "backend",
+      "path": "internal/externaleffects/store_integration_test.go",
+      "test": "TestPostgreSQLContactDescriptionNoopCompletionIsTerminal",
+      "postgres": true,
+      "reason": "EER完成分支的原消费者及原子投影"
     },
     {
-      "lane": "frontend",
-      "path": "web/v3/referralPosterShareText.test.mjs",
-      "reason": "既有海报话术保持"
+      "lane": "backend",
+      "path": "internal/outbound/private_message_control_test.go",
+      "test": "TestPrivateMessageControlRejectsSharedOrMismatchedTask",
+      "reason": "目标隔离和已发送时间保留"
     },
     {
-      "lane": "browser",
-      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
-      "test": "TestPostgreSQLReferralChromiumJourney",
-      "reason": "真实API/PG/Chromium、一级列表分享/复制/PNG下载/无写入/未参加入口与登录返回/375/430及既有海报"
+      "lane": "backend",
+      "path": "internal/outbound/private_message_control_test.go",
+      "test": "TestPrivateMessageControlReadsAllPagesAndPreservesSentTime",
+      "reason": "目标隔离和已发送时间保留"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/wecom/adapter/private_message_stop_test.go",
+      "test": "TestPrivateMessageStopProtocolAndUnknown",
+      "reason": "真实停止协议和未知响应"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/access/app/aiassistant_stop_test.go",
+      "test": "TestAIAssistantStopKeepsAdministratorBoundary",
+      "reason": "管理员允许 viewer拒绝"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/crmcli/private_message_control_test.go",
+      "test": "TestCLIPrivateMessageStopAndResult",
+      "reason": "CLI原键 CSRF和安全结果"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/private_message_control_postgres_test.go",
+      "test": "TestPostgreSQLPrivateMessageControlHTTPAndLifecycle",
+      "postgres": true,
+      "reason": "HTTP/PG并发 回滚和迟到回执"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/message_routing_test.go",
+      "test": "TestAutomationAndPrivateMessageKindsAreRoutedIndependently",
+      "reason": "原消息路由消费者"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/aiassistant/http/execution_receipts_test.go",
+      "test": "TestExecutionReceiptsAdministratorReadAndIsolation",
+      "reason": "原只读回执和权限消费者"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/aiassistant/http/execution_receipts_test.go",
+      "test": "TestExecutionReceiptsRejectsViewerAndUnauthenticatedBeforeReading",
+      "reason": "原只读回执和权限消费者"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/aiassistant/http/execution_receipts_test.go",
+      "test": "TestExecutionReceiptsInvalidLiveDoesNotRead",
+      "reason": "原只读回执和权限消费者"
     }
   ],
   "installed_checks": [
-    "referral-poster"
+    "private-message-control",
+    "aiassistant-execution-receipts"
   ],
-  "build_commands": []
+  "build_commands": [
+    "./cmd/aicrm-cli"
+  ]
 }

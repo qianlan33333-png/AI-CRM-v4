@@ -49,7 +49,7 @@ func TestClosedDigestOnlyEnvelopeAndStates(t *testing.T) {
 }
 
 func TestStaleAttemptCompletionProjectionKinds(t *testing.T) {
-	for _, kind := range []Kind{KindOutboundMedia, KindWeComTagCatalog, KindWeComTagCatalogMutation, KindWeComContactDescription, KindGroupMessage, KindChannelAsset, KindChannelWelcome, KindChannelEntryTag, KindChannelLink, KindOutboundMessage, KindAutomationMessage, KindCommerceProductPush, KindAIAgentGenerate, port.KindSidebarJSSDKSend, port.KindInvoiceIssue, port.KindInvoiceReverse, port.KindInvoiceCardConfigure} {
+	for _, kind := range []Kind{port.KindPrivateMessageControl, KindOutboundMedia, KindWeComTagCatalog, KindWeComTagCatalogMutation, KindWeComContactDescription, KindGroupMessage, KindChannelAsset, KindChannelWelcome, KindChannelEntryTag, KindChannelLink, KindOutboundMessage, KindAutomationMessage, KindCommerceProductPush, KindAIAgentGenerate, port.KindSidebarJSSDKSend, port.KindInvoiceIssue, port.KindInvoiceReverse, port.KindInvoiceCardConfigure} {
 		if !projectsStaleAttempt(kind) {
 			t.Fatalf("stale attempted effect kind %q must project outcome_unknown to its owner", kind)
 		}
