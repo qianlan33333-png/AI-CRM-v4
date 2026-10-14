@@ -8,6 +8,13 @@
       "test": "TestGroupOpsOwnerBindingFixtureStaffGovernance",
       "postgres": true,
       "reason": "最终源码-only夹具准备/浏览器解析；安装合同读取真实river kind/queue前后基线并断言零ExternalEffects/群运行/群发送/业务outbound"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/group_ops_owner_binding_installed_test.go",
+      "test": "TestGroupOpsBindingFixtureNoDispatchJobsPolicy",
+      "postgres": false,
+      "reason": "验证 fixture 只允许完全不变的基线素材刷新任务，拒绝新 outbound、外部效果、未知任务及基线任务变化或消失"
     }
   ],
   "installed_checks": [

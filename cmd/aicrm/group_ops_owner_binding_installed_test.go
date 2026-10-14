@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	p "github.com/qianlan33333-png/AI-CRM-v3/internal/groupops/port"
 	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
@@ -226,24 +228,75 @@ func groupOpsBindingFixtureJobs(t *testing.T, ctx context.Context, pool *pgxpool
 }
 func groupOpsBindingFixtureNoDispatchJobs(t *testing.T, before, after []groupOpsBindingJob) {
 	t.Helper()
+	if err := validateGroupOpsBindingFixtureJobs(before, after); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func validateGroupOpsBindingFixtureJobs(before, after []groupOpsBindingJob) error {
 	baseline := map[int64]groupOpsBindingJob{}
 	for _, job := range before {
 		baseline[job.ID] = job
 	}
 	for _, job := range after {
-		if strings.HasPrefix(job.Queue, "outbound") || job.Kind == "external_effect.execute.v1" {
-			t.Fatalf("forbidden business outbound job: %+v", job)
-		}
 		if old, ok := baseline[job.ID]; ok {
 			if old != job {
-				t.Fatalf("fixture baseline job changed: old=%+v after=%+v", old, job)
+				return fmt.Errorf("fixture baseline job changed: old=%+v after=%+v", old, job)
+			}
+			isBaselineMaterialRefresh := job.Kind == "outbound.material-refresh.v1" && job.Queue == "outbound_media"
+			if job.Kind == "external_effect.execute.v1" || (strings.HasPrefix(job.Queue, "outbound") && !isBaselineMaterialRefresh) {
+				return fmt.Errorf("forbidden baseline business effect job: %+v", job)
 			}
 			continue
+		}
+		if strings.HasPrefix(job.Queue, "outbound") || job.Kind == "external_effect.execute.v1" {
+			return fmt.Errorf("forbidden new business outbound job: %+v", job)
 		}
 		// These existing GroupOps workers perform directory reads, never messages.
 		if job.Queue == "group-catalog" && (job.Kind == "groupops.catalog.v1" || job.Kind == "groupops.catalog-detail.v1" || job.Kind == "groupops.catalog-schedule.v1") {
 			continue
 		}
-		t.Fatalf("unexplained job outside fixture baseline: %+v", job)
+		return fmt.Errorf("unexplained job outside fixture baseline: %+v", job)
+	}
+	for id, old := range baseline {
+		found := false
+		for _, job := range after {
+			if job.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("fixture baseline job disappeared: %+v", old)
+		}
+	}
+	return nil
+}
+
+func TestGroupOpsBindingFixtureNoDispatchJobsPolicy(t *testing.T) {
+	materialRefresh := groupOpsBindingJob{ID: 41, Kind: "outbound.material-refresh.v1", Queue: "outbound_media"}
+	catalogRead := groupOpsBindingJob{ID: 42, Kind: "groupops.catalog.v1", Queue: "group-catalog"}
+	tests := []struct {
+		name          string
+		before, after []groupOpsBindingJob
+		wantErr       bool
+	}{
+		{name: "preserves exact baseline material refresh and permits catalog read", before: []groupOpsBindingJob{materialRefresh}, after: []groupOpsBindingJob{materialRefresh, catalogRead}},
+		{name: "rejects changed baseline material refresh", before: []groupOpsBindingJob{materialRefresh}, after: []groupOpsBindingJob{{ID: 41, Kind: "outbound.material-refresh.v1", Queue: "outbound"}}, wantErr: true},
+		{name: "rejects newly created material refresh", before: []groupOpsBindingJob{materialRefresh}, after: []groupOpsBindingJob{materialRefresh, {ID: 43, Kind: "outbound.material-refresh.v1", Queue: "outbound_media"}}, wantErr: true},
+		{name: "rejects other unchanged baseline outbound", before: []groupOpsBindingJob{{ID: 47, Kind: "outbound.group-send.v1", Queue: "outbound_group"}}, after: []groupOpsBindingJob{{ID: 47, Kind: "outbound.group-send.v1", Queue: "outbound_group"}}, wantErr: true},
+		{name: "rejects unchanged baseline external effect executor", before: []groupOpsBindingJob{{ID: 48, Kind: "external_effect.execute.v1", Queue: "external_effects"}}, after: []groupOpsBindingJob{{ID: 48, Kind: "external_effect.execute.v1", Queue: "external_effects"}}, wantErr: true},
+		{name: "rejects new group outbound", after: []groupOpsBindingJob{{ID: 44, Kind: "outbound.group-send.v1", Queue: "outbound_group"}}, wantErr: true},
+		{name: "rejects external effect executor", after: []groupOpsBindingJob{{ID: 45, Kind: "external_effect.execute.v1", Queue: "external_effects"}}, wantErr: true},
+		{name: "rejects unknown new job", after: []groupOpsBindingJob{{ID: 46, Kind: "unknown.v1", Queue: "unknown"}}, wantErr: true},
+		{name: "rejects missing baseline job", before: []groupOpsBindingJob{materialRefresh}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateGroupOpsBindingFixtureJobs(tt.before, tt.after)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validate jobs error=%v, wantErr=%t", err, tt.wantErr)
+			}
+		})
 	}
 }
