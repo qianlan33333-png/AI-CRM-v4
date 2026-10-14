@@ -1912,6 +1912,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 				Bridge:             trustedPaymentSessionBridge,
 				Names:              orderCustomerDisplayNameAdapter{uow: uow, reader: customerStore},
 				Profiles:           referralCustomerProfileAdapter{uow: uow, reader: customerStore},
+				Nicknames:          referralWeChatNicknameAdapter{uow: uow, reader: customerStore},
 				Security:           requestSecurity,
 				CookieSecure:       true,
 				AllowedOrigins:     []string{cfg.PublicOrigin, h5PublicOrigin(cfg)},

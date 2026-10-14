@@ -20,7 +20,39 @@ function readPosterBlob(blob: Blob, signal?: AbortSignal): Promise<string> {
   });
 }
 
-export async function composeReferralPoster(imageURL: string, payload: string, layout?: PosterQRLayout, expectedWidth = 0, expectedHeight = 0, signal?: AbortSignal): Promise<HTMLCanvasElement> {
+type GraphemeSegmenter = { segment(value: string): Iterable<{ segment: string }> };
+
+function drawPosterNickname(ctx: CanvasRenderingContext2D, value: string, width: number): void {
+  const nickname = value.replace(/\s+/gu, " ").trim();
+  if (!nickname) return;
+  const scale = width / 1250;
+  ctx.save();
+  try {
+    ctx.font = `400 ${30 * scale}px system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "top";
+    const maxWidth = width * .24;
+    let text = nickname;
+    if (ctx.measureText(text).width > maxWidth) {
+      const Segmenter = (Intl as unknown as { Segmenter?: new (locale: string, options: { granularity: string }) => GraphemeSegmenter }).Segmenter;
+      // Older browsers may show short names; never split an emoji sequence
+      // just to fit a long name when grapheme segmentation is unavailable.
+      if (!Segmenter) return;
+      const segments = Array.from(new Segmenter("zh-CN", { granularity: "grapheme" }).segment(text), item => item.segment);
+      while (segments.length && ctx.measureText(segments.join("") + "…").width > maxWidth) segments.pop();
+      text = segments.join("") + "…";
+    }
+    ctx.fillStyle = "#F7F0DF";
+    ctx.shadowColor = "rgba(114, 84, 60, .35)";
+    ctx.shadowBlur = 2 * scale;
+    ctx.shadowOffsetY = scale;
+    ctx.fillText(text, width - 48 * scale, 48 * scale);
+  } finally {
+    ctx.restore();
+  }
+}
+
+export async function composeReferralPoster(imageURL: string, payload: string, layout?: PosterQRLayout, expectedWidth = 0, expectedHeight = 0, signal?: AbortSignal, nickname = ""): Promise<HTMLCanvasElement> {
   let response: Response;
   try { response = await fetch(imageURL, { credentials: "same-origin", signal }); }
   catch { checkCancelled(signal); throw new Error("海报加载失败，请稍后重试。"); }
@@ -49,19 +81,23 @@ export async function composeReferralPoster(imageURL: string, payload: string, l
   qr.addData(payload, "Byte");
   qr.make();
   const modules = qr.getModuleCount();
-  // Four blank modules on each side; integer cells avoid fractional blur.
-  const cell = Math.floor(box.size / (modules + 8));
+  // Reserve four modules, then distribute integer pixel boundaries across the
+  // full symbol. Flooring every cell separately used to waste white space.
+  const cell = box.size / (modules + 8);
   if (cell < 1) throw new Error("二维码区域过小，请联系管理员调整。");
-  const quiet = Math.floor((box.size - modules * cell) / 2);
+  const quiet = Math.ceil(4 * cell);
+  const symbol = box.size - 2 * quiet;
+  const edge = (index: number) => quiet + Math.round(index * symbol / modules);
   ctx.drawImage(source, 0, 0);
   ctx.fillStyle = "#fff";
   ctx.fillRect(box.x, box.y, box.size, box.size);
   ctx.fillStyle = "#1b1b1b";
   for (let row = 0; row < modules; row++) {
     for (let col = 0; col < modules; col++) {
-      if (qr.isDark(row, col)) ctx.fillRect(box.x + quiet + col * cell, box.y + quiet + row * cell, cell, cell);
+      if (qr.isDark(row, col)) ctx.fillRect(box.x + edge(col), box.y + edge(row), edge(col + 1) - edge(col), edge(row + 1) - edge(row));
     }
   }
+  drawPosterNickname(ctx, nickname, canvas.width);
   outputTypes.set(canvas, blob.type.split(";", 1)[0].trim() === "image/jpeg" ? "image/jpeg" : "image/png");
   return canvas;
 }

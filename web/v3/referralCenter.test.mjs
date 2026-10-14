@@ -53,7 +53,7 @@ await waitFor(() => calls.filter((call) => call.path.endsWith('/participations')
 const join = calls.find((call) => call.path.endsWith('/participations'));
 assert.deepEqual(JSON.parse(join.body), { invitation_token: 'rfi_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefg' }, 'invite acceptance must not send a user-selected team');
 assert.ok(join.key.length >= 16, 'acceptance needs an idempotency key');
-await waitFor(() => dom.window.document.querySelector('[data-testid="referral-invite"]')?.textContent === '邀请好友', 'successful participation must enable the invitation entry');
+await waitFor(() => dom.window.document.querySelector('[data-testid="referral-invite"]')?.textContent === '生成溯源码', 'successful participation must enable the invitation entry');
 dom.window.document.querySelector('[data-testid="referral-invite"]').click();
 await waitFor(() => dom.window.document.querySelector('[data-testid="referral-invite-dialog"]'), `invite dialog did not render: ${dom.window.document.body.textContent} calls=${JSON.stringify(calls)}`);
 assert.equal(dom.window.document.querySelector('[data-testid="referral-download-poster"]'), null, 'download action is removed');

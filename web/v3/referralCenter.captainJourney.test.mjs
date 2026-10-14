@@ -102,7 +102,7 @@ await waitFor(
 );
 assert.equal(
   dom.window.document.querySelector('[data-testid="referral-invite"]')?.textContent,
-  '邀请好友',
+  '生成溯源码',
   'invite action becomes available only after participation succeeds',
 );
 dom.window.close();

@@ -1,23 +1,82 @@
 {
   "schema": 1,
-  "baseline_sha": "e4ca82306044cf719fc451fd14a97648592ceb28",
+  "baseline_sha": "a401b5dd90c0d3a3a853654cbdfff62c5be1d0b7",
   "checks": [
     {
-      "lane": "preflight",
-      "path": "deploy/test_domestic_promote_gc.py",
-      "reason": "预发及生产原锁/真实收据/零候选"
+      "lane": "backend",
+      "package": "./internal/referral/http",
+      "reason": "签发昵称可选响应、可信根及原鉴权/CSRF拒绝"
     },
     {
-      "lane": "preflight",
-      "path": "deploy/test_domestic_promote_policy.py",
-      "reason": "应用切换后已启用辅助服务重启及安装失败边界"
+      "lane": "backend",
+      "package": "./internal/referral/port",
+      "reason": "新模板码框及兼容尺寸"
     },
     {
-      "lane": "preflight",
-      "path": "scripts/test_domestic_release_retention_finish.py",
-      "reason": "两台清理终态验证、失败停止后续清理、确认成功不被改写"
+      "lane": "backend",
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/referral_sol61_oneid_postgres_test.go",
+      "test": "TestPostgreSQLReferralSol61MergedCustomerCannotJoinTwice",
+      "postgres": true,
+      "reason": "真实OneID合并及旧签发重放保持原token并返回当前根"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "path": "internal/referral/app/poster_layouts_integration_test.go",
+      "test": "TestPostgreSQLPosterLayoutsAtomicRuntimeUpdate",
+      "postgres": true,
+      "reason": "当前布局写入/幂等/读回及保留其他海报"
+    },
+    {
+      "lane": "backend",
+      "package": "./internal/referral/app",
+      "path": "internal/referral/app/posters_integration_test.go",
+      "test": "TestPostgreSQLCampaignPostersPublishSnapshotAndIdempotentRetry",
+      "postgres": true,
+      "reason": "新默认及已有快照发布兼容"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralPosterPerformance.test.mjs",
+      "reason": "当前页面或海报直接消费者"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralPosterPublic.test.mjs",
+      "reason": "当前页面或海报直接消费者"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralPosterShareText.test.mjs",
+      "reason": "当前页面或海报直接消费者"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralCenter.test.mjs",
+      "reason": "当前页面或海报直接消费者"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralCenter.anonymous.test.mjs",
+      "reason": "当前页面或海报直接消费者"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/referralCenter.captainJourney.test.mjs",
+      "reason": "当前页面或海报直接消费者"
+    },
+    {
+      "lane": "browser",
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
+      "test": "TestPostgreSQLReferralChromiumJourney",
+      "postgres": true,
+      "reason": "实际API/PG/Canvas导出、默认与旧布局、375/430及话术互动"
     }
   ],
-  "installed_checks": [],
+  "installed_checks": [
+    "referral-poster"
+  ],
   "build_commands": []
 }

@@ -98,7 +98,7 @@ let board: "team" | "personal" = "personal";
 let period: "total" | "day" = "total";
 let infoOpen = false;
 let leaderboardError = "";
-let invite: { qrPayload: string } | undefined;
+let invite: { qrPayload: string; nickname: string } | undefined;
 let invitationRows:
   | Array<{ key: string; name: string; avatarURL: string; joinedAt: string; status: string }>
   | undefined;
@@ -544,7 +544,7 @@ function render(): void {
   timer.append(element("small", "活动剩余时间"),element("strong",remaining(campaign)));
   const paid = campaign.qualificationMode === "product_purchase";
   const pending = paid && !me?.participant && checkoutPending(campaign.id);
-  const inviteButton = button(me?.participant ? "邀请好友" : paid ? pending ? "资格确认中" : "购买并参与" : me?.isCaptain && me.captainTeam ? "加入战队并邀请" : "参加活动", () => void (me?.participant ? openInvite() : beginParticipation()), "referral-invite-fab");
+  const inviteButton = button(me?.participant ? "生成溯源码" : paid ? pending ? "资格确认中" : "购买并参与" : me?.isCaptain && me.captainTeam ? "加入战队并邀请" : "参加活动", () => void (me?.participant ? openInvite() : beginParticipation()), "referral-invite-fab");
   inviteButton.dataset.testid = "referral-invite";
   inviteButton.disabled =
     campaign.status !== "active" ||
@@ -863,7 +863,7 @@ async function openInvite(): Promise<void> {
     const latest = parseCampaign(results[1].value);
     if (campaign !== currentCampaign || latest.id !== currentCampaign.id) return;
     currentCampaign.posters = latest.posters;
-    invite = { qrPayload: parsed.toString() };
+    invite = { qrPayload: parsed.toString(), nickname: str(raw.poster_nickname) };
     renderInviteDialog();
   } catch (error) {
     if (campaign !== currentCampaign) return;
@@ -879,6 +879,7 @@ async function renderInviteDialog(): Promise<void> {
   if (!invite || !campaign) return;
   if (document.querySelector('dialog[data-testid="referral-invite-dialog"][open]')) return;
   const qrPayload = invite.qrPayload;
+  const nickname = invite.nickname;
   const dialog = document.createElement("dialog");
   dialog.className = "referral-dialog referral-poster-dialog";
   dialog.dataset.testid = "referral-invite-dialog";
@@ -975,10 +976,10 @@ async function renderInviteDialog(): Promise<void> {
     position.textContent = `${index + 1} / ${posters.length}`;
     selectors.querySelectorAll("button").forEach((node, buttonIndex) => node.setAttribute("aria-pressed", String(buttonIndex === index)));
     try {
-      const key = JSON.stringify([poster.imageURL, poster.width, poster.height, poster.qrLayout, qrPayload]);
+      const key = JSON.stringify([poster.imageURL, poster.width, poster.height, poster.qrLayout, qrPayload, nickname]);
       let encoded = composed.get(key);
       if (!encoded) {
-        const canvas = await composeReferralPoster(poster.imageURL, qrPayload, poster.qrLayout, poster.width, poster.height, controller.signal);
+        const canvas = await composeReferralPoster(poster.imageURL, qrPayload, poster.qrLayout, poster.width, poster.height, controller.signal, nickname);
         encoded = await exportReferralPoster(canvas, controller.signal);
         if (current !== selection || !dialog.open) return;
         composed.set(key, encoded);

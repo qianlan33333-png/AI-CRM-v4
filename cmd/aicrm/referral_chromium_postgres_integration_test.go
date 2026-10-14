@@ -67,9 +67,10 @@ func TestPostgreSQLReferralChromiumJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	type fixtureActor struct {
-		ID      int64  `json:"id"`
-		Name    string `json:"name"`
-		Session string `json:"session"`
+		ID             int64  `json:"id"`
+		Name           string `json:"name"`
+		Session        string `json:"session"`
+		PosterNickname string `json:"poster_nickname"`
 	}
 	actors := []fixtureActor{}
 	now := time.Now().UTC()
@@ -83,11 +84,14 @@ func TestPostgreSQLReferralChromiumJourney(t *testing.T) {
 			name = "超长昵称的活动参与者用于手机页面换行验证"
 		}
 		actor := fixtureActor{Name: name, Session: fmt.Sprintf("dist_%043d", i)}
+		if i < 2 {
+			actor.PosterNickname = "微信" + name
+		}
 		var identityID int64
 		if err = application.pool.Native().QueryRow(ctx, "INSERT INTO customers DEFAULT VALUES RETURNING id").Scan(&actor.ID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = application.pool.Native().Exec(ctx, `INSERT INTO customer_directory_projection(customer_id,customer_status,display_name,source,updated_at) VALUES($1,'active',$2,'referral-browser',$3)`, actor.ID, name, now); err != nil {
+		if _, err = application.pool.Native().Exec(ctx, `INSERT INTO customer_directory_projection(customer_id,customer_status,display_name,wechat_nickname,source,updated_at) VALUES($1,'active',$2,$3,'referral-browser',$4)`, actor.ID, name, actor.PosterNickname, now); err != nil {
 			t.Fatal(err)
 		}
 		if err = application.pool.Native().QueryRow(ctx, `INSERT INTO customer_identities(customer_id,kind,scope_key,normalized_value,assurance,source,normalizer_version,verified_at) VALUES($1,'mp_openid','wechat-app:referral-fixture',$2,'verified','referral-browser',1,$3) RETURNING id`, actor.ID, fmt.Sprintf("referral-fixture-%d", i), now).Scan(&identityID); err != nil {

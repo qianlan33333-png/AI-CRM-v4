@@ -73,6 +73,7 @@ try {
   // manufacturing Referral facts. They join directly, so this does not change
   // the independent invitation-credit assertions below.
   for(const actor of actors.slice(3)) await api(`/api/v1/referral/campaigns/${campaigns[0].c.id}/participations`,{team_id:campaigns[0].team.id},actor);
+  const missingNickname=await api(`/api/v1/referral/campaigns/${campaigns[0].c.id}/invite`,{},actors[3]);assert.equal('poster_nickname' in missingNickname,false,'missing trusted nickname never falls back to directory name');
   // A verified, assigned captain can inspect their empty invitation details
   // without a false 401, then must explicitly accept rules before the invite
   // panel becomes available. This is deliberately browser-driven rather than
@@ -96,7 +97,7 @@ try {
     await evaluate("document.querySelector('[data-testid=referral-invite]').click()");
     await wait("document.querySelector('[data-testid=referral-confirm-join]')");
     await evaluate("document.querySelector('#referral-rule-check').click(); document.querySelector('[data-testid=referral-confirm-join]').click()");
-    await wait("document.querySelector('[data-testid=referral-invite-dialog]') && document.querySelector('[data-testid=referral-invite]')?.textContent==='邀请好友'");
+    await wait("document.querySelector('[data-testid=referral-invite-dialog]') && document.querySelector('[data-testid=referral-invite]')?.textContent==='生成溯源码'");
     const captainURL=(await api(`/api/v1/referral/campaigns/${first.c.id}/invite`,{},captain)).url;
     assert.match(captainURL,/^https:\/\/127\.0\.0\.1:\d+\/referral\/invite\/rfi_[A-Za-z0-9_-]{43}$/);
     first.link={url:captainURL};
@@ -116,10 +117,10 @@ try {
   const shareTexts = ['  一起参加 🎉\n第二行保持空格  ', '<b>第二张纯文本</b>\n🙂', ''];
   for(const {c} of campaigns) {
     const current = await api(`/api/admin/referral/campaigns/${c.id}`);
-    await api(`/api/admin/referral/campaigns/${c.id}/posters`, { expected_version: current.version, posters: shareTexts.map((share_text,i)=>({ image_id: uploaded.item.id, description: `海报${i+1}`, share_text })) }, undefined, 'PUT');
+    await api(`/api/admin/referral/campaigns/${c.id}/posters`, { expected_version: current.version, posters: shareTexts.map((share_text,i)=>({ image_id: uploaded.item.id, description: `海报${i+1}`, share_text, ...(i===0?{qr_layout:{x:830,y:1952,size:330}}:{}) })) }, undefined, 'PUT');
     const readback = await api(`/api/admin/referral/campaigns/${c.id}`);
     assert.deepEqual(readback.posters.map(p=>p.share_text), shareTexts, 'published text readback');
-    assert.deepEqual(readback.posters.map(p=>p.qr_layout),Array(3).fill({x:830,y:1952,size:330}),'fixed reference layout');
+    assert.deepEqual(readback.posters.map(p=>p.qr_layout),[{x:830,y:1952,size:330},{x:810,y:1932,size:370},{x:810,y:1932,size:370}],'explicit legacy layout survives new defaults');
     assert.ok(readback.posters.every(p=>p.image_width===1250&&p.image_height===2426));
     const imageURL=readback.posters[0].image_url;
     assert.match(imageURL,/\?v=[a-f0-9]{64}$/);
@@ -149,7 +150,7 @@ try {
     await wait("document.querySelector('[data-testid=referral-invitation-count]')?.textContent.includes('共 ')");
     assert.equal(await evaluate("!!document.querySelector('.referral-home') || !!document.querySelector('.referral-info-title h1')"),false);
     await evaluate("document.querySelector('[data-testid=referral-activity-info]').click()");
-    await wait("document.querySelector('[data-testid=referral-invite]')?.textContent==='邀请好友'");
+    await wait("document.querySelector('[data-testid=referral-invite]')?.textContent==='生成溯源码'");
     const pageImage=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,`campaign-${index?430:375}.png`),Buffer.from(pageImage.data,'base64'));
   for(const period of ['day','total']) {
       await evaluate(`(()=>{const el=document.querySelector('[data-testid=referral-leaderboard-period]');el.value='${period}';el.dispatchEvent(new Event('change'));})()`);
@@ -174,7 +175,7 @@ try {
     await fs.writeFile(path.join(screenshots,`composed-${index?430:375}.jpg`),Buffer.from(composedPNG.split(',')[1],'base64'));
     await fs.writeFile(path.join(screenshots,`composed-${index?430:375}.json`),JSON.stringify({expected_url:invitationURL}));
     const compareArtwork = async layout => {
-      const differences = await evaluate(`(async()=>{const current=document.querySelector('[data-testid=referral-poster-image]');const source=new Image();source.src=${JSON.stringify(base+`/api/v1/referral/campaigns/${campaigns[index].c.id}/posters/1`)};await source.decode();const canvas=document.createElement('canvas');canvas.width=1250;canvas.height=2426;const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(source,0,0);const before=ctx.getImageData(0,0,1250,2426).data;ctx.clearRect(0,0,1250,2426);ctx.drawImage(current,0,0);const after=ctx.getImageData(0,0,1250,2426).data;const box=${JSON.stringify(layout)};let squares=0,samples=0,changedInside=0;for(let y=0;y<2426;y++)for(let x=0;x<1250;x++){const i=(y*1250+x)*4;if(x>=box.x&&x<box.x+box.size&&y>=box.y&&y<box.y+box.size){if(before[i]!==after[i]||before[i+1]!==after[i+1]||before[i+2]!==after[i+2])changedInside++;continue;}if(x>=box.x-8&&x<box.x+box.size+8&&y>=box.y-8&&y<box.y+box.size+8)continue;for(let c=0;c<3;c++){const d=before[i+c]-after[i+c];squares+=d*d;samples++;}}return{rmse:Math.sqrt(squares/samples),changedInside};})()`);
+      const differences = await evaluate(`(async()=>{const current=document.querySelector('[data-testid=referral-poster-image]');const source=new Image();source.src=${JSON.stringify(base+`/api/v1/referral/campaigns/${campaigns[index].c.id}/posters/1`)};await source.decode();const canvas=document.createElement('canvas');canvas.width=1250;canvas.height=2426;const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(source,0,0);const before=ctx.getImageData(0,0,1250,2426).data;ctx.clearRect(0,0,1250,2426);ctx.drawImage(current,0,0);const after=ctx.getImageData(0,0,1250,2426).data;const box=${JSON.stringify(layout)};let squares=0,samples=0,changedInside=0;for(let y=0;y<2426;y++)for(let x=0;x<1250;x++){const i=(y*1250+x)*4;if(x>=902&&y>=40&&y<90)continue;if(x>=box.x&&x<box.x+box.size&&y>=box.y&&y<box.y+box.size){if(before[i]!==after[i]||before[i+1]!==after[i+1]||before[i+2]!==after[i+2])changedInside++;continue;}if(x>=box.x-8&&x<box.x+box.size+8&&y>=box.y-8&&y<box.y+box.size+8)continue;for(let c=0;c<3;c++){const d=before[i+c]-after[i+c];squares+=d*d;samples++;}}return{rmse:Math.sqrt(squares/samples),changedInside};})()`);
       // JPEG is lossy. Exclude its 8px QR boundary blocks, then require low
       // background error rather than the old PNG-only byte/pixel equality.
       assert.ok(differences.rmse<=8,`JPEG artwork error ${differences.rmse}`);
@@ -213,7 +214,7 @@ try {
     const reread=await api(`/api/admin/referral/campaigns/${campaigns[index].c.id}`);
     assert.equal(reread.version,updated.version);
     assert.deepEqual(reread.posters[0].qr_layout,adjusted);
-    assert.deepEqual(reread.posters[1].qr_layout,{x:830,y:1952,size:330},'partial update preserves other posters');
+    assert.deepEqual(reread.posters[1].qr_layout,{x:810,y:1932,size:370},'partial update preserves new default of other posters');
     await evaluate("document.querySelector('[data-testid=referral-invite]').click()");
     await wait("document.querySelector('[data-testid=referral-poster-image]')?.naturalWidth===1250");
     assert.equal(await evaluate("document.querySelector('[data-testid=referral-poster-share-text]').textContent"),shareTexts[0]);
@@ -221,9 +222,11 @@ try {
     const adjustedPNG=await evaluate("document.querySelector('[data-testid=referral-poster-image]').src");
     assert.notEqual(adjustedPNG,composedPNG,'reopen uses changed runtime coordinates');
     const freshInviteResponse=networkResponses.findLast(response=>response.url===`${base}/api/v1/referral/campaigns/${campaigns[index].c.id}/invite`);
-    const freshURL=JSON.parse((await call('Network.getResponseBody',{requestId:freshInviteResponse.id})).body).url;
+    const freshBody=JSON.parse((await call('Network.getResponseBody',{requestId:freshInviteResponse.id})).body);assert.equal(freshBody.poster_nickname,actors[index].poster_nickname);assert.deepEqual(Object.keys(freshBody).sort(),['expires_at','poster_nickname','url']);const freshURL=freshBody.url;
     await fs.writeFile(path.join(screenshots,`adjusted-${index?430:375}.jpg`),Buffer.from(adjustedPNG.split(',')[1],'base64'));
     await fs.writeFile(path.join(screenshots,`adjusted-${index?430:375}.json`),JSON.stringify({expected_url:freshURL,qr_layout:adjusted}));
+    const traceImage=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,`trace-poster-${index?430:375}.png`),Buffer.from(traceImage.data,'base64'));
+    const widthCheck=await evaluate("(()=>{const image=document.querySelector('[data-testid=referral-poster-image]');return{image:image.getBoundingClientRect().width,preview:image.parentElement.getBoundingClientRect().width,overflow:document.documentElement.scrollWidth>innerWidth}})()");assert.ok(Math.abs(widthCheck.image-widthCheck.preview)<1,'poster fills preview width');assert.equal(widthCheck.overflow,false);
     await fs.writeFile(path.join(screenshots,`pixels-${index?430:375}.json`),JSON.stringify({fixed:fixedPixels,adjusted:adjustedPixels}));
     await evaluate("document.querySelector('[data-testid=referral-invite-dialog]').close()");
     assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'),true,'mobile does not horizontally overflow');

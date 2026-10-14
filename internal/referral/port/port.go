@@ -158,6 +158,9 @@ type InvitationPreview struct {
 type InvitationLink struct {
 	URL       string
 	ExpiresAt time.Time
+	// InviterCanonicalCustomerID is presentation-only server evidence. Never
+	// serialize it into the public invitation response or accept it from HTTP.
+	InviterCanonicalCustomerID int64 `json:"-"`
 }
 
 type MyCampaign struct {

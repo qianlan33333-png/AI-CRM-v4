@@ -629,11 +629,13 @@ func (s *Service) IssueInvitation(ctx context.Context, command referralport.Issu
 	payload := issuePayload(command.CampaignID)
 	var token string
 	var expiresAt time.Time
+	var canonicalCustomerID int64
 	err := s.uow.Within(ctx, func(tx context.Context) error {
 		lineage, err := s.actorLineageWithin(tx, command.Actor, true)
 		if err != nil {
 			return err
 		}
+		canonicalCustomerID = lineage[0]
 		receipt, actorScope, found, err := s.actorReceiptWithin(tx, "issue_invitation", lineage, command.IdempotencyKey, payload)
 		if err != nil {
 			return err
@@ -700,7 +702,7 @@ func (s *Service) IssueInvitation(ctx context.Context, command referralport.Issu
 	if err != nil {
 		return referralport.InvitationLink{}, err
 	}
-	return referralport.InvitationLink{URL: s.origin + "/referral/invite/" + token, ExpiresAt: expiresAt}, nil
+	return referralport.InvitationLink{URL: s.origin + "/referral/invite/" + token, ExpiresAt: expiresAt, InviterCanonicalCustomerID: canonicalCustomerID}, nil
 }
 
 func (s *Service) MyCampaign(ctx context.Context, actor referralport.TrustedSessionActor, campaignID int64) (referralport.MyCampaign, error) {

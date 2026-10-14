@@ -217,6 +217,9 @@ func TestPostgreSQLReferralSol61MergedCustomerCannotJoinTwice(t *testing.T) {
 		if e != nil || issued.URL != oldInvitation.URL || !issued.ExpiresAt.Equal(oldInvitation.ExpiresAt) {
 			t.Fatalf("historical invitation replay changed token: %+v err=%v", issued, e)
 		}
+		if issued.InviterCanonicalCustomerID != int64(survivor.CustomerID) {
+			t.Fatalf("poster presentation used historical alias after merge: %d", issued.InviterCanonicalCustomerID)
+		}
 		changed := firstCommand
 		changed.TeamID = 1
 		if _, e = service.JoinCampaign(ctx, changed); !errors.Is(e, referralport.ErrConflict) {
@@ -260,6 +263,9 @@ func TestPostgreSQLReferralSol61MergedCustomerCannotJoinTwice(t *testing.T) {
 		issued, e := service.IssueInvitation(ctx, referralport.IssueInvitationCommand{Actor: mergedActor, CampaignID: campaign.ID, IdempotencyKey: "sol61-merge-new-invitation"})
 		if e != nil {
 			t.Fatal(e)
+		}
+		if issued.InviterCanonicalCustomerID != int64(survivor.CustomerID) {
+			t.Fatalf("new poster presentation used historical alias: %d", issued.InviterCanonicalCustomerID)
 		}
 		preview, e := service.PreviewInvitation(ctx, issued.URL[strings.LastIndex(issued.URL, "/")+1:])
 		if e != nil || preview.InviterCustomerID != first.Participation.CustomerID {

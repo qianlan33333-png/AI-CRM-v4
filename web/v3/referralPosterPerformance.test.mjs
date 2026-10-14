@@ -6,9 +6,9 @@ const bundle = await buildTestBrowserBundle(fileURLToPath(new URL('./referralCen
 const json = value => new Response(JSON.stringify(value));
 const wait = async test => { for(let i=0;i<200;i++){if(test())return;await new Promise(r=>setTimeout(r,5));}throw new Error('poster did not settle'); };
 const deferred = () => { let release;const promise=new Promise(r=>{release=r});return {promise,release}; };
-async function fixture({delayInvite=false,delayDecode=false,delayExport=false,url,status=200,transparent=false,failConfiguration=false}={}) {
+async function fixture({delayInvite=false,delayDecode=false,delayExport=false,url,status=200,transparent=false,failConfiguration=false,nickname=""}={}) {
  const pending=deferred(), decode=deferred(), encode=deferred();
- const calls=[],draws=[],exports=[],canvases=[];
+ const calls=[],draws=[],exports=[],canvases=[],names=[];
  let revision='v1',layout={x:830,y:1952,size:330},user='A',copy='first copy',failStatus=status;
  const dom=new JSDOM('<main id="referral-root"></main>',{url:'https://crm.example/referral?campaign=8',runScripts:'outside-only',pretendToBeVisual:true,beforeParse(w){
   w.Headers=Headers;w.Response=Response;w.Blob=Blob;
@@ -16,14 +16,14 @@ async function fixture({delayInvite=false,delayDecode=false,delayExport=false,ur
   w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new w.Event('close'))};
   w.FileReader=class{readAsDataURL(blob){blob.arrayBuffer().then(b=>{this.result='data:'+blob.type+';base64,'+Buffer.from(b).toString('base64');this.onload?.()})}abort(){}};
   w.Image=function(){const img=w.document.createElement('img');Object.defineProperties(img,{naturalWidth:{value:1250},naturalHeight:{value:2426}});img.decode=()=>delayDecode&&Buffer.from(img.src.split(',')[1],'base64').toString().includes('/1?')?decode.promise:Promise.resolve();return img};
-  w.HTMLCanvasElement.prototype.getContext=function(){canvases.push(this);return{drawImage:img=>{this.source=Buffer.from(img.src.split(',')[1],'base64').toString();draws.push(this.source)},fillRect(){},set fillStyle(v){}}};
+  w.HTMLCanvasElement.prototype.getContext=function(){canvases.push(this);return{drawImage:img=>{this.source=Buffer.from(img.src.split(',')[1],'base64').toString();draws.push(this.source)},fillRect(){},save(){},restore(){},measureText(text){return {width:Array.from(text).length*30}},fillText(text,x,y){names.push({text,x,y,font:this.font,align:this.textAlign,color:this.fillStyle})}}};
   w.HTMLCanvasElement.prototype.toDataURL=()=>{throw new Error('sync export forbidden')};
   w.HTMLCanvasElement.prototype.toBlob=function(cb,type,quality){exports.push({source:this.source,type,quality});const finish=()=>cb(new Blob([this.source],{type}));if(delayExport)encode.promise.then(finish);else queueMicrotask(finish)};
   w.fetch=async(input,init={})=>{const path=String(input);calls.push({path,method:init.method||'GET'});
    if(path.endsWith('/campaigns/8') && failConfiguration && calls.filter(c=>c.path.endsWith('/campaigns/8')).length>1)return new Response('{}',{status:503});
    if(path.endsWith('/campaigns/8'))return json({id:8,name:'测试',state:'active',effective_state:'active',team_mode:'individual',qualification_mode:'free_signup',starts_at:'2026-01-01T00:00:00Z',ends_at:'2099-01-01T00:00:00Z',posters:[1,2].map(slot=>({slot,image_url:`/api/v1/referral/campaigns/8/posters/${slot}?v=${revision}`,image_width:1250,image_height:2426,qr_layout:layout,share_text:copy+slot}))});
    if(path.endsWith('/me'))return json({participation:{joined_at:'2026-01-01T00:00:00Z'},invitation_available:true});
-   if(path.endsWith('/invite')){if(delayInvite)await pending.promise;return json({url:url||'https://crm.example/referral/invite/rfi_'+user.repeat(43)})}
+   if(path.endsWith('/invite')){if(delayInvite)await pending.promise;return json({url:url||'https://crm.example/referral/invite/rfi_'+user.repeat(43),poster_nickname:nickname})}
    if(path.includes('/posters/') && failStatus===0)throw new TypeError('Failed to fetch');
    if(path.includes('/posters/'))return new Response(new Blob([path],{type:transparent?'image/png':'image/jpeg'}),{status:failStatus});
    return json({items:[]});
@@ -32,7 +32,7 @@ async function fixture({delayInvite=false,delayDecode=false,delayExport=false,ur
  await wait(()=>doc.querySelector('[data-testid="referral-invite"]')?.disabled===false);
  const click=id=>doc.querySelector(`[data-testid="${id}"]`).click();
  const image=()=>doc.querySelector('[data-testid="referral-poster-image"]');
- return {dom,doc,calls,draws,exports,canvases,click,image,pending,decode,encode,setRevision:v=>revision=v,setLayout:v=>layout=v,setUser:v=>user=v,setCopy:v=>copy=v,setStatus:v=>failStatus=v};
+ return {dom,doc,calls,draws,exports,canvases,names,click,image,pending,decode,encode,setRevision:v=>revision=v,setLayout:v=>layout=v,setUser:v=>user=v,setNickname:v=>nickname=v,setCopy:v=>copy=v,setStatus:v=>failStatus=v};
 }
 {
  const f=await fixture({delayInvite:true});for(let i=0;i<3;i++)f.click('referral-invite');
@@ -82,3 +82,25 @@ for(const url of ['https://evil.example/referral/invite/rfi_'+'A'.repeat(43),'ht
  const f=await fixture({transparent:true});f.click('referral-invite');await wait(f.image);assert.equal(f.exports[0].type,'image/png','PNG fallback preserves alpha');f.click('referral-close-poster');f.dom.window.close();
 }
 console.log('poster performance: pending dedup/parallel reads, dialog-only reuse, version/layout/user reopen, pre-draw cancellation, export cancellation, error/manual retry, invite validation, JPEG95/PNG fallback passed');
+
+{
+ const f=await fixture({nickname:'微信用户 👩‍💻'});
+ assert.equal(f.doc.querySelector('[data-testid="referral-invite"]').textContent,'生成溯源码');
+ f.click('referral-invite');await wait(f.image);
+ assert.deepEqual(f.names.map(n=>n.text),['微信用户 👩‍💻']);
+ assert.equal(f.names[0].x,1202);assert.equal(f.names[0].y,48);
+ assert.equal(f.names[0].align,'right');assert.equal(f.names[0].color,'#F7F0DF');
+ f.click('referral-poster-next');await wait(f.image);f.click('referral-poster-previous');await wait(f.image);
+ assert.equal(f.names.length,2,'cached poster does not redraw decoration');
+ f.click('referral-close-poster');f.setNickname('另一用户');f.click('referral-invite');await wait(f.image);
+ assert.equal(f.names.at(-1).text,'另一用户','reopen refreshes nickname even when QR payload is unchanged');
+ f.click('referral-close-poster');f.setNickname('');f.click('referral-invite');await wait(f.image);
+ assert.equal(f.names.length,3,'missing nickname never prints a fallback');
+ f.click('referral-close-poster');f.dom.window.close();
+}
+{
+ const family='👨‍👩‍👧‍👦';const f=await fixture({nickname:'浅蓝'+family+'超长昵称用于验证完整字符截断'});
+ f.click('referral-invite');await wait(f.image);
+ assert.equal(f.names[0].text,'浅蓝'+family+'…','truncation keeps complete emoji grapheme');
+ f.click('referral-close-poster');f.dom.window.close();
+}

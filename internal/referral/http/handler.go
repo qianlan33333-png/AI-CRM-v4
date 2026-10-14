@@ -67,6 +67,7 @@ type Config struct {
 	Bridge             PaymentSessionBridge
 	Names              customerport.DirectoryDisplayNameReader
 	Profiles           customerport.DirectoryPublicProfileReader
+	Nicknames          customerport.WeChatNicknameReader
 	Security           RequestSecurity
 	CookieSecure       bool
 	AllowedOrigins     []string
@@ -89,6 +90,7 @@ type Handler struct {
 	bridge                                        PaymentSessionBridge
 	names                                         customerport.DirectoryDisplayNameReader
 	profiles                                      customerport.DirectoryPublicProfileReader
+	nicknames                                     customerport.WeChatNicknameReader
 	security                                      RequestSecurity
 	cookieSecure                                  bool
 	allowedOrigins                                map[string]struct{}
@@ -110,7 +112,7 @@ func NewHandler(config Config) (*Handler, error) {
 	if len(allowed) == 0 {
 		return nil, referralport.ErrUnavailable
 	}
-	return &Handler{activityHandoffKey: []byte(config.ActivityHandoffKey), productOptions: config.ProductOptions, productTargets: config.ProductTargets, public: config.Public, promotion: config.Promotion, admin: config.Admin, posters: config.Posters, sessions: config.Sessions, bridge: config.Bridge, names: config.Names, profiles: config.Profiles, security: config.Security, cookieSecure: config.CookieSecure, allowedOrigins: allowed, sessionCookieName: config.SessionCookieName, csrfCookieName: config.CSRFCookieName, csrfHeader: config.CSRFHeader}, nil
+	return &Handler{activityHandoffKey: []byte(config.ActivityHandoffKey), productOptions: config.ProductOptions, productTargets: config.ProductTargets, public: config.Public, promotion: config.Promotion, admin: config.Admin, posters: config.Posters, sessions: config.Sessions, bridge: config.Bridge, names: config.Names, profiles: config.Profiles, nicknames: config.Nicknames, security: config.Security, cookieSecure: config.CookieSecure, allowedOrigins: allowed, sessionCookieName: config.SessionCookieName, csrfCookieName: config.CSRFCookieName, csrfHeader: config.CSRFHeader}, nil
 }
 
 // SetPromotionApplication wires Distribution after both domains have been
@@ -586,7 +588,15 @@ func (h *Handler) issueInvitation(w http.ResponseWriter, r *http.Request, campai
 		resultError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"url": value.URL, "expires_at": value.ExpiresAt.UTC()})
+	response := map[string]any{"url": value.URL, "expires_at": value.ExpiresAt.UTC()}
+	// Decoration is optional: a projection failure must not discard an already
+	// issued invitation, nor fall back to the mixed-source directory name.
+	if h.nicknames != nil && value.InviterCanonicalCustomerID > 0 {
+		if nickname, err := h.nicknames.ReadWeChatNickname(r.Context(), customerdomain.CustomerID(value.InviterCanonicalCustomerID)); err == nil && strings.TrimSpace(nickname) != "" {
+			response["poster_nickname"] = nickname
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 func (h *Handler) joinCampaign(w http.ResponseWriter, r *http.Request, campaignID int64) {
 	if r.Method != http.MethodPost {
