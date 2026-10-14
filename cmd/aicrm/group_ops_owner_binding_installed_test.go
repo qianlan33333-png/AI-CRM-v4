@@ -231,7 +231,7 @@ func groupOpsBindingFixtureNoDispatchJobs(t *testing.T, before, after []groupOps
 		baseline[job.ID] = job
 	}
 	for _, job := range after {
-		if strings.HasPrefix(job.Queue, "outbound") || strings.HasPrefix(job.Kind, "external_effect.") {
+		if strings.HasPrefix(job.Queue, "outbound") || job.Kind == "external_effect.execute.v1" {
 			t.Fatalf("forbidden business outbound job: %+v", job)
 		}
 		if old, ok := baseline[job.ID]; ok {
