@@ -1336,17 +1336,18 @@ class DomesticMainReleaseTests(unittest.TestCase):
                  mock.patch.object(release, "_pending_archive_count", return_value=0), \
                  mock.patch.object(release, "_update_state", side_effect=update), \
                  mock.patch.object(release, "_reclaim_completed_build_copies", side_effect=cleanup_effect), \
-                 mock.patch.object(release, "_production_ssh", return_value="remote-cleanup-completed") as remote_cleanup:
+                 mock.patch.object(release.legacy, "command", return_value='{"status":"completed","remaining_candidate_count":0}'), \
+                 mock.patch.object(release, "_production_ssh", return_value='{"status":"completed","remaining_candidate_count":0}') as remote_cleanup:
                 if fail_terminal_write:
                     with self.assertRaises(OSError):
                         release._finalize_success(
-                            {"repo": str(repo), "prod_helper": "/helper"}, root / "state.json", state,
+                            {"repo": str(repo), "prod_helper": "/helper", "stage_helper": "/helper"}, root / "state.json", state,
                             item, {"bundle_sha256": "b" * 64}, base,
                             {"sha": candidate, "manifest_sha256": "c" * 64},
                             {"status": "passed"}, None, None, 1.0)
                     return state, state_writes, remote_cleanup
                 result = release._finalize_success(
-                    {"repo": str(repo), "prod_helper": "/helper"}, root / "state.json", state,
+                    {"repo": str(repo), "prod_helper": "/helper", "stage_helper": "/helper"}, root / "state.json", state,
                     item, {"bundle_sha256": "b" * 64}, base,
                     {"sha": candidate, "manifest_sha256": "c" * 64},
                     {"status": "passed"}, None, None, 1.0)
@@ -1361,9 +1362,10 @@ class DomesticMainReleaseTests(unittest.TestCase):
             self.assertEqual(result["cleanup"]["status"], "completed")
             self.assertEqual(state["queue"][0]["status"], "completed")
             self.assertEqual(state["last_release"]["build_copy_cleanup"]["status"], "cleanup_warning")
-            self.assertEqual(state["last_release"]["package_cleanup"], "remote-cleanup-completed")
+            self.assertEqual(json.loads(state["last_release"]["package_cleanup"])["status"], "completed")
+            self.assertEqual(state["last_release"]["stage_package_cleanup"]["remaining_candidate_count"], 0)
             self.assertEqual(remote.call_count, 1)
-            self.assertEqual(len(writes), 3)
+            self.assertEqual(len(writes), 4)
 
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

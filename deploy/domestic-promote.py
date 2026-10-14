@@ -1616,7 +1616,9 @@ def install(
         if bootstrap:
             units = sorted({path.name for path in (release / "deploy").glob("aicrm*.service") if path.name not in {"aicrm-domestic-release.service", "aicrm-domestic-main-release.service"}} | {path.name for path in (release / "deploy").glob("aicrm*.timer") if path.name not in {"aicrm-domestic-release.timer", "aicrm-domestic-main-release.timer"}})
         unit_snapshot = {name: (Path("/etc/systemd/system") / name).read_bytes() if (Path("/etc/systemd/system") / name).is_file() else None for name in units}
-        extra_active = tuple(unit for unit in ("aicrm-excel-batches.service",) if unit in units and run("systemctl", "is-active", "--quiet", unit, check=False).returncode == 0)
+        # Active auxiliary processes use current as their WorkingDirectory.
+        # Reopen that directory on every app switch, even with unchanged bytes.
+        extra_active = tuple(unit for unit in ("aicrm-excel-batches.service",) if run("systemctl", "is-active", "--quiet", unit, check=False).returncode == 0)
         backup = None
         needs_migration = metadata["migrations_changed"] or bootstrap
         if needs_migration and host_role == "production":
@@ -1717,6 +1719,8 @@ def install(
                     CURRENT.unlink(missing_ok=True)
                     run("systemctl", "stop", "aicrm.service", check=False)
                     run("systemctl", "stop", "aicrm-effects-worker.service", check=False)
+                    for unit in extra_active:
+                        run("systemctl", "stop", unit, check=False)
                     if units:
                         restore_units(unit_snapshot)
             raise
@@ -2690,13 +2694,20 @@ def reclaim_obsolete_releases() -> dict:
     remain protected. Missing a second rollback never blocks unrelated verified
     unreferenced package cleanup.
     """
-    require_host_role("production")
+    role = require_host_role()
+    if role not in {"production", "staging"}:
+        raise RuntimeError("unsupported release cleanup host role")
     with _production_release_lock() as descriptor:
-        cursor = _read_main_state()
-        _, receipt = _reverify_main_cursor(cursor)
         current = current_sha()
-        if current != cursor["installed_app_sha"]:
-            raise RuntimeError("cleanup current differs from verified cursor")
+        if role == "production":
+            cursor = _read_main_state()
+            _, receipt = _reverify_main_cursor(cursor)
+            if current != cursor["installed_app_sha"]:
+                raise RuntimeError("cleanup current differs from verified cursor")
+        else:
+            current = _valid_sha(current, "staging current release")
+            receipt, _, receipt_digest = _read_install_receipt(current)
+            _verify_installed_app(current, receipt['source_tree'], receipt['manifest_sha256'], receipt_digest)
         readiness(current)
         reaped_observer_work = _reap_observer_scratch()
         protected = {current}

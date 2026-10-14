@@ -3811,7 +3811,8 @@ def _finalize_success(config: dict[str, Any], state_path: Path, state: dict[str,
                              "status": "ready", "completed_at_utc": item["completed_at_utc"],
                              "duration_seconds": item["duration_seconds"],
                              "build_copy_cleanup": {"status": "pending"},
-                             "package_cleanup": {"status": "pending"}}
+                             "package_cleanup": {"status": "pending"},
+                             "stage_package_cleanup": {"status": "pending"}}
     if batch_heads is not None:
         state["last_release"]["batch_member_heads"] = batch_heads
     cleanup_result = {"status": "pending"}
@@ -3855,17 +3856,41 @@ def _finish_success_cleanup(config: dict[str, Any], state_path: Path, state: dic
         last["build_copy_cleanup"] = pending
         return {"status": "readback_required", "error_type": type(exc).__name__}
     try:
+        stage_output = legacy.command("sudo", "-n", config["stage_helper"],
+                                      "--reclaim-obsolete-releases", timeout=120)
+        stage_cleanup = json.loads(stage_output.splitlines()[-1])
+        stage_complete = (isinstance(stage_cleanup, dict) and stage_cleanup.get("status") == "completed"
+                          and type(stage_cleanup.get("remaining_candidate_count")) is int
+                          and stage_cleanup["remaining_candidate_count"] == 0)
+    except Exception as exc:
+        stage_cleanup = {"status": "maintenance-pending", "error_type": type(exc).__name__}
+        stage_complete = False
+    last["stage_package_cleanup"] = stage_cleanup
+    try:
+        _update_state(state_path, state, status="ready")
+    except Exception as exc:
+        last["stage_package_cleanup"] = pending
+        return {"status": "readback_required", "error_type": type(exc).__name__}
+    if not stage_complete:
+        return {"status": "readback_required", "stage_package_cleanup": stage_cleanup}
+    try:
         package_cleanup = _production_ssh(config, "sudo", "-n", config["prod_helper"],
                                           "--reclaim-obsolete-releases", timeout=120)
+        value = json.loads(package_cleanup.splitlines()[-1])
+        production_complete = (isinstance(value, dict) and value.get("status") == "completed"
+                               and type(value.get("remaining_candidate_count")) is int
+                               and value["remaining_candidate_count"] == 0)
     except Exception as exc:
         package_cleanup = {"status": "maintenance-pending", "error_type": type(exc).__name__}
+        production_complete = False
     last["package_cleanup"] = package_cleanup
     try:
         _update_state(state_path, state, status="ready")
     except Exception as exc:
         last["package_cleanup"] = pending
         return {"status": "readback_required", "error_type": type(exc).__name__}
-    return {"status": "completed", "build_copy_cleanup": build_cleanup,
+    return {"status": "completed" if production_complete else "readback_required",
+            "build_copy_cleanup": build_cleanup, "stage_package_cleanup": stage_cleanup,
             "package_cleanup": package_cleanup}
 
 
@@ -6044,7 +6069,8 @@ def reconcile(config: dict[str, Any]) -> dict[str, Any]:
                                  "github_pending_first_parent_count": _pending_archive_count(repo, (state.get("archive_ack") or {}).get("sha"), sha) if state.get("archive_ack") else "unknown",
                                  "status": "ready", "reconciled_at_utc": _utc_now(),
                                  "build_copy_cleanup": {"status": "pending"},
-                                 "package_cleanup": {"status": "pending"}}
+                                 "package_cleanup": {"status": "pending"},
+                             "stage_package_cleanup": {"status": "pending"}}
         if isinstance(batch, dict):
             state["last_release"]["batch_member_heads"] = inflight["batch_member_heads"]
         try:

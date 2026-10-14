@@ -1,35 +1,23 @@
 {
   "schema": 1,
-  "baseline_sha": "b6d380f249b2e0ceb6dc675bc4e14287498886d5",
+  "baseline_sha": "e4ca82306044cf719fc451fd14a97648592ceb28",
   "checks": [
     {
       "lane": "preflight",
-      "path": "deploy/test_cleanup_releases.py",
-      "reason": "公开别名的实际写权限和旧包保留边界"
-    },
-    {
-      "lane": "preflight",
       "path": "deploy/test_domestic_promote_gc.py",
-      "reason": "原控制器清理与重复零候选"
+      "reason": "预发及生产原锁/真实收据/零候选"
     },
     {
       "lane": "preflight",
-      "path": "deploy/test_domestic_retention_observer.py",
-      "reason": "FD9 原锁 原子独立副本 真实成功观察"
+      "path": "deploy/test_domestic_promote_policy.py",
+      "reason": "应用切换后已启用辅助服务重启及安装失败边界"
     },
     {
       "lane": "preflight",
-      "path": "deploy/test_release_success.py",
-      "reason": "原成功观察器及原收据生命周期"
-    },
-    {
-      "lane": "preflight",
-      "path": "deploy/test_host_maintenance.py",
-      "reason": "完成后清理调用消费者"
+      "path": "scripts/test_domestic_release_retention_finish.py",
+      "reason": "两台清理终态验证、失败停止后续清理、确认成功不被改写"
     }
   ],
-  "installed_checks": [
-    "release-runtime-config"
-  ],
+  "installed_checks": [],
   "build_commands": []
 }

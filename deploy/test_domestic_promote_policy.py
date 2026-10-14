@@ -313,7 +313,7 @@ class InstallBackupPolicyTests(unittest.TestCase):
         }
         return paths, incoming, old_sha, new_sha, content, content_hash
 
-    def install(self, root: Path, role: str, migration: bool, *, run_side_effect=None, backup_side_effect=None, config_check_side_effect=None, order=None):
+    def install(self, root: Path, role: str, migration: bool, *, run_side_effect=None, backup_side_effect=None, config_check_side_effect=None, order=None, expected_auxiliary=None):
         paths, incoming, old_sha, new_sha, content, content_hash = self.install_fixture(root, role=role, migration=migration)
         run_calls = []
 
@@ -337,8 +337,8 @@ class InstallBackupPolicyTests(unittest.TestCase):
                 installer, "switch_to",
                 side_effect=lambda _release: order.append("switch") if order is not None else None,
             ))
-            stack.enter_context(mock.patch.object(installer, "restart_services"))
-            stack.enter_context(mock.patch.object(installer, "readiness"))
+            restarts = stack.enter_context(mock.patch.object(installer, "restart_services"))
+            health = stack.enter_context(mock.patch.object(installer, "readiness"))
             stack.enter_context(mock.patch.object(installer, "run", side_effect=fake_run))
             evidence = {"contract": "aicrm-check-runtime-config-v1", "binary_sha256": "e" * 64, "roles": [{"role": "api", "result": "passed"}, {"role": "worker", "result": "passed"}], "result": "passed"}
             def check_config(*args):
@@ -358,7 +358,46 @@ class InstallBackupPolicyTests(unittest.TestCase):
                 expected_sha=new_sha,
                 metadata_sha256=content_hash,
             )
+            if expected_auxiliary is not None:
+                expected = ("aicrm-excel-batches.service",) if expected_auxiliary else ()
+                restarts.assert_called_once_with(expected)
+                health.assert_any_call(new_sha,expected)
             return outcome, backup, run_calls, paths, new_sha
+
+    def test_unchanged_active_auxiliary_is_restarted_and_observed_on_app_switch(self):
+        for active in (True,False):
+            with self.subTest(active=active), tempfile.TemporaryDirectory() as temporary:
+                def systemctl(args,_kwargs):
+                    return SimpleNamespace(returncode=0 if active or args != ("systemctl","is-active","--quiet","aicrm-excel-batches.service") else 3,stdout="",stderr="")
+                self.install(Path(temporary),"production",False,run_side_effect=systemctl,expected_auxiliary=active)
+
+    def test_bootstrap_unit_install_failure_stops_active_auxiliary_before_unverified_release_survives(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            paths,incoming,old_sha,new_sha,content,content_hash=self.install_fixture(root,role="staging",migration=False)
+            paths["CURRENT"].unlink()
+            deploy=incoming/"deploy";deploy.mkdir();(deploy/"aicrm.service").write_text("synthetic unit")
+            manifest=incoming/"release-files.sha256"
+            manifest.write_text("".join(installer.digest(path)+"  "+str(path.relative_to(incoming))+"\n" for path in sorted(incoming.rglob("*")) if path.is_file() and path!=manifest))
+            metadata=json.loads(content);metadata["release_files_sha256"]=installer.digest(manifest)
+            content=json.dumps(metadata).encode();content_hash=hashlib.sha256(content).hexdigest()
+            calls=[]
+            def command(*args,**kwargs):
+                calls.append(args);return SimpleNamespace(returncode=0,stdout="",stderr="")
+            with ExitStack() as stack:
+                for key,value in paths.items(): stack.enter_context(mock.patch.object(installer,key,value))
+                stack.enter_context(mock.patch.object(installer,"require_host_role",return_value="staging"))
+                stack.enter_context(mock.patch.object(installer.shutil,"which",return_value="/usr/bin/systemctl"))
+                stack.enter_context(mock.patch.object(installer,"verify_root_owned_release"))
+                stack.enter_context(mock.patch.object(installer,"check_candidate_runtime_config",return_value={"result":"passed"}))
+                stack.enter_context(mock.patch.object(installer,"run",side_effect=command))
+                stack.enter_context(mock.patch.object(installer,"install_units",side_effect=RuntimeError("synthetic unit install failed")))
+                stack.enter_context(mock.patch.object(installer,"restore_units"))
+                with self.assertRaisesRegex(RuntimeError,"unit install failed"):
+                    installer.install(incoming,content,None,expected_sha=new_sha,metadata_sha256=content_hash)
+            self.assertIn(("systemctl","stop","aicrm-excel-batches.service"),calls)
+            self.assertFalse(paths["CURRENT"].exists())
+            self.assertFalse((paths["RECEIPTS"]/(new_sha+".json")).exists())
 
     def test_staging_migration_never_dumps_database(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -503,7 +542,7 @@ class InstallBackupPolicyTests(unittest.TestCase):
                     installer.install(incoming, content, old_sha, expected_sha=new_sha, metadata_sha256=content_hash)
 
             self.assertEqual(current.resolve(), (paths["RELEASES"] / old_sha).resolve())
-            readiness.assert_has_calls([mock.call(new_sha, ()), mock.call(old_sha, ())])
+            readiness.assert_has_calls([mock.call(new_sha, ("aicrm-excel-batches.service",)), mock.call(old_sha, ("aicrm-excel-batches.service",))])
             self.assertFalse((paths["RECEIPTS"] / f"{new_sha}.json").exists())
 
     def test_production_backup_failure_prevents_runtime_switch(self):

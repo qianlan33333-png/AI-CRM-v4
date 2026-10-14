@@ -113,3 +113,5 @@ sudo /usr/local/libexec/aicrm/domestic-promote.py --read-domestic-main
 清理保留当前包、完整 native 前驱、已有兼容回滚和活跃引用；前驱来自已验证收据 previous_sha，不从源码 SHA 猜测、不补造旧 success fact。调用原 inventory/apply_plan 后再次 inventory，零候选且无 blocker 才记 completed。每次原 release/promote 的成功收尾自动执行；不新增 timer。异常保留原证据，不能把拒绝或未完成记为清理通过。
 
 `releases/.domestic-observer-*` 是安装器专属的 root 私有生成目录，仅允许三份 observer 副本；在原排他安装锁内回收关闭的工作目录。中断副本允许不完整，不能放业务文件、凭据或其他任务输出；未知文件、符号链接及跨设备挂载拒绝清理。
+
+自动收尾同时覆盖预发与生产；预发用真实 native 安装收据和当前包校验，不访问生产源码 cursor。两台都回报 completed 且零候选才记收尾完成，失败或状态不明停止后续清理写入。已启用的 Excel 辅助服务随应用切换重启并进入 readiness，释放其旧工作目录；不启用原本停用的服务。本次存量进程经代码一致性核实后定点重启。

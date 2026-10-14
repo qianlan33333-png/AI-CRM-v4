@@ -37,7 +37,7 @@ class PackageGC(unittest.TestCase):
                                         database_environment=lambda *args: {})
         for context in (
             patch.object(m, 'ROOT', self.root), patch.object(m, 'RELEASES', self.root / 'releases'),
-            patch.object(m, 'require_host_role'), patch.object(m, '_production_release_lock', return_value=nullcontext()),
+            patch.object(m, 'require_host_role', return_value='production'), patch.object(m, '_production_release_lock', return_value=nullcontext()),
             patch.object(m, '_read_main_state', return_value=cursor),
             patch.object(m, '_reverify_main_cursor', return_value=(cursor, {'previous_sha': self.names[-2]})),
             patch.object(m, 'current_sha', return_value=self.current), patch.object(m, 'readiness'),
@@ -195,6 +195,23 @@ class PackageGC(unittest.TestCase):
         result = m.reclaim_obsolete_releases()
         self.assertIn(self.names[0], result['removed'])
         self.assertEqual(before, (current.stat().st_ino, current.stat().st_mode, current.read_bytes()))
+
+    def test_staging_verifies_native_current_without_production_cursor(self):
+        receipt = {'source_tree':'e'*40,'manifest_sha256':'a'*64,'previous_sha':None}
+        with patch.object(m,'require_host_role',return_value='staging'), patch.object(m,'_read_main_state',side_effect=AssertionError('not a production cursor')), patch.object(m,'_read_install_receipt',return_value=(receipt,b'','b'*64)), patch.object(m,'_verify_installed_app') as verify:
+            result=m.reclaim_obsolete_releases()
+        verify.assert_called_once_with(self.current,receipt['source_tree'],receipt['manifest_sha256'],'b'*64)
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(result['remaining_candidate_count'],0)
+
+    def test_untrusted_staging_receipt_and_unknown_host_never_delete(self):
+        with patch.object(m,'require_host_role',return_value='staging'), patch.object(m,'_read_install_receipt',side_effect=RuntimeError('untrusted native receipt')), patch.object(cleanup,'apply_plan') as apply:
+            with self.assertRaisesRegex(RuntimeError,'untrusted'): m.reclaim_obsolete_releases()
+            apply.assert_not_called()
+        with patch.object(m,'require_host_role',return_value='unknown'), patch.object(m,'_production_release_lock') as lock:
+            with self.assertRaisesRegex(RuntimeError,'unsupported'): m.reclaim_obsolete_releases()
+            lock.assert_not_called()
+        self.assertTrue(all((self.root/'releases'/n).is_dir() for n in self.names))
 
     def test_closed_observer_copy_is_reaped_but_unknown_contents_refused(self):
         work = self.root / 'releases/.domestic-observer-closed'; work.mkdir(mode=0o700)
