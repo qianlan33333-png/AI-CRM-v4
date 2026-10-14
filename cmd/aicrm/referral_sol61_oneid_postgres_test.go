@@ -306,7 +306,7 @@ func TestPostgreSQLReferralSol61MergedCustomerCannotJoinTwice(t *testing.T) {
 				t.Fatalf("canonical free own summary=%+v err=%v", mine, e)
 			}
 			items, e := service.ListMyInvites(ctx, sessionActor, campaign.ID, "", 10)
-			if e != nil || len(items.Items) != 1 || items.Items[0].Participation.InviterCustomerID != int64(survivor.CustomerID) {
+			if e != nil || len(items.Items) != 1 || items.Items[0].EntryKey == "" || items.Items[0].Participation.CustomerID != int64(extra.CustomerID) || items.Items[0].ScoreState != "valid" || items.Items[0].ScoreDelta != 1 {
 				t.Fatalf("canonical free detail=%+v err=%v", items, e)
 			}
 		}

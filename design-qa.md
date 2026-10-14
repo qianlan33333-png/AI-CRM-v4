@@ -1,25 +1,27 @@
-# 裂变活动信息页视觉核对
+# 裂变海报 Product Design QA
 
 final result: passed
 
-源图：/Users/qianlan/.codex/generated_images/01a134b5-8a61-7183-a315-fa6b129e2b24/exec-15a9fcff-dafe-498a-8383-8dfaf7b545a7.png
+## 视觉证据与范围
 
-实现：/Users/qianlan/.codex/visualizations/2026/10/13/01a134b5-8a61-7183-a315-fa6b129e2b24/referral-implementation-final.jpg
+Source visual truth: /var/folders/dq/56xlfzsx05zc7vqhbl7lgv6c0000gn/T/codex-clipboard-f95b9840-9bb1-4a84-bf76-1b346126280d.png（844×1400像素，设备密度未提供）。当前活动原图1250×2426，保存于 /private/tmp/aicrm-referral-poster-evidence/source-poster.jpg。
 
-并排证据：/Users/qianlan/.codex/visualizations/2026/10/13/01a134b5-8a61-7183-a315-fa6b129e2b24/referral-visual-comparison-final.jpg
+Implementation screenshots: /private/tmp/aicrm-referral-poster-evidence/visual-375.png（375×850 CSS px）、visual-430.png（430×850）、visual-430-actions.png、visual-422.png（422×700）。浏览器截图密度1。均由Codex in-app Browser捕获真实构建前端，使用当前公开原图和合成昵称/邀请链接；此视觉fixture不冒充真实业务身份。真实API/可信会话/PG链路另见 browser-oneid.jsonl。
 
-源图实际 899x1750 像素。390x760 CSS 视口，3 人信息页、规则内容“测试奖励说明”。实现截图实际 390x760 像素；源图按宽度等比缩为 390px，仅裁去约 80px 浏览器/系统条，未将设备 chrome 编码进页面。并排截图实际 1280x814 像素，两个应用内容区各 390px，已同时打开比较。
+Full-view comparison: comparison-full.png 将源截图按375px宽归一，与375px实现同宽并列；源设备密度未知，所以不声称外层框架1:1匹配，垂直居中和背景数据差异不计为设计漂移。Focused comparisons: comparison-qr.png、comparison-nickname.png；从源截图提取实际海报内容并归一到1250×2426，与实际导出的同尺寸图片比较，检查二维码净空及新昵称，源截图缩放导致的模糊不当作原图质量问题。
 
-初次发现 P2：顶部留白过大，规则标题沿用宋体，人数被既有高优先级样式压为 12px 棕色。已修正顶部空间、统一无衬线标题、人数 14px 灰色、规则卡片垂直节奏；最终新截图复核，无未解决 P0/P1/P2。
+## 必检表面
 
-字体：复用 PingFang SC/sans-serif，21px 标题、16px 姓名、12px 时间、14px 状态/人数；长名允许换行。
-间距：46px 头像列与 12px 间距，标题和人数同一行；删去重复标题/状态卡，首屏名单紧随返回入口。圆角与白卡复用原页面。
-颜色：保留橙红至浅桃色背景及绿色有效状态，失效状态灰色。与图稿轻微色彩/字体渲染差异为 P3。
-图片：Provider 头像仍由真实接口提供。隔离视觉数据没有头像 URL，使用仓内既有缺图回退；这是数据状态差异，未将该回退冒称为源图中的真人图片。
-内容：只显示邀请明细/完整人数/姓名时间状态与人工奖励说明；无预设规则、查看明细按钮、参加卡、重复大标题或 AI-CRM 后缀。
+- Typography: 海报原图文字/品牌/讲师保持；昵称为常规30px/1250宽、右对齐、完整字素省略，无额外标签框；米白色及轻微棕色阴影呈低调压印效果。按钮为“生成溯源码”，保留原字号与资格状态文案。
+- Spacing/layout: 375视口实际图像与预览同为297px宽，无左右浅色余量；430也填满宽度，图像比例完整，原生纵向滚动可到复制/关闭。默认及目标码框370px，中心与原330框一致。
+- Colors: 复用原橙色按钮、浅色次按钮和既有页面token；昵称#F7F0DF加轻微棕色阴影，不与主标题争夺注意。
+- Image quality: 原图1250×2426，保存图同尺寸JPEG95；二维码整数像素边界，缩小额外白边、保留四模块净空。五张实际导出由zxing-cpp独立解码为唯一且准确的期待链接。
+- Copy/content: 邀请入口更名，话术原文、原生保存提示、复制/关闭保留；没有新增页面、解释性技术文案或新素材。
 
-焦点区：同时比较标题/人数、三个头像文字行和规则标题；全图中可清晰阅读这些区域，无须另生成局部裁切。IAB 实测头像右边界始终小于文字左边界。
+## 交互与限制
 
-响应式与交互：320/375/390/430px 实际窗口宽度均确认，无横向溢出和重叠。百人名单先 20 行但人数 100，320px 续读到 100 行且加载更多消失；控制台无错误/警告。详细数据见同目录会话产物 referral-responsive-results.json。
+IAB验证375/430生成、复制成功反馈、关闭重开、430滚动到达动作区；console error/warn为空。PG Chromium旅程验证多张切换、话术emoji与空文本、三次点击仅一次签发、当前配置读回、两用户/活动昵称隔离及真实导出。独立扫码证明技术导出，不证明真实微信归因。
 
-边界：IAB 为准确前端代码加合成 HTTP 数据，真实 PG 另有独立用例。本记录不代表真实微信设备、Provider 或预发/生产安装验收。
+Comparison history: 首次有效全图及二维码/昵称局部比较，无P0/P1/P2视觉问题；未因此修改视觉代码。早先npm缓存、沙箱Chrome启动和旧邀请明细测试断言修正属于环境/合同对齐，不算视觉QA迭代。
+
+Follow-up P3: 昵称按批准的30px原图规格在小屏非常低调；保持当前设计。真实微信iOS/Android长按保存和扫码归因尚未执行；截图不宣称完整无障碍合规。

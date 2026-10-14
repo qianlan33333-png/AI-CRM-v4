@@ -114,6 +114,7 @@ try {
   const upload = await fetch(base+'/api/admin/image-library/upload', { method: 'POST', headers: { Cookie: staffCookies.join('; '), Origin: base, 'X-CSRF-Token': adminCSRF, 'Idempotency-Key': 'referral-poster-browser-upload' }, body: form });
   const uploaded = await upload.json();
   assert.ok(upload.ok && uploaded.item?.id, `poster upload: ${JSON.stringify(uploaded)}`);
+  for(let i=0;i<2;i++){const d=await api(`/api/v1/referral/campaigns/${campaigns[i].c.id}/invite`,{},actors[i]);assert.equal(d.poster_nickname,actors[i].poster_nickname);assert.notEqual(d.poster_nickname,actors[i].name);}
   const shareTexts = ['  一起参加 🎉\n第二行保持空格  ', '<b>第二张纯文本</b>\n🙂', ''];
   for(const {c} of campaigns) {
     const current = await api(`/api/admin/referral/campaigns/${c.id}`);
@@ -222,7 +223,7 @@ try {
     const adjustedPNG=await evaluate("document.querySelector('[data-testid=referral-poster-image]').src");
     assert.notEqual(adjustedPNG,composedPNG,'reopen uses changed runtime coordinates');
     const freshInviteResponse=networkResponses.findLast(response=>response.url===`${base}/api/v1/referral/campaigns/${campaigns[index].c.id}/invite`);
-    const freshBody=JSON.parse((await call('Network.getResponseBody',{requestId:freshInviteResponse.id})).body);assert.equal(freshBody.poster_nickname,actors[index].poster_nickname);assert.deepEqual(Object.keys(freshBody).sort(),['expires_at','poster_nickname','url']);const freshURL=freshBody.url;
+    const freshBody=JSON.parse((await call('Network.getResponseBody',{requestId:freshInviteResponse.id})).body);assert.equal(freshBody.poster_nickname,actors[2].poster_nickname);assert.deepEqual(Object.keys(freshBody).sort(),['expires_at','poster_nickname','url']);const freshURL=freshBody.url;
     await fs.writeFile(path.join(screenshots,`adjusted-${index?430:375}.jpg`),Buffer.from(adjustedPNG.split(',')[1],'base64'));
     await fs.writeFile(path.join(screenshots,`adjusted-${index?430:375}.json`),JSON.stringify({expected_url:freshURL,qr_layout:adjusted}));
     const traceImage=await call('Page.captureScreenshot',{format:'png'});await fs.writeFile(path.join(screenshots,`trace-poster-${index?430:375}.png`),Buffer.from(traceImage.data,'base64'));

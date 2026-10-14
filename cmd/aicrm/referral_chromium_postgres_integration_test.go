@@ -84,7 +84,7 @@ func TestPostgreSQLReferralChromiumJourney(t *testing.T) {
 			name = "超长昵称的活动参与者用于手机页面换行验证"
 		}
 		actor := fixtureActor{Name: name, Session: fmt.Sprintf("dist_%043d", i)}
-		if i < 2 {
+		if i < 3 {
 			actor.PosterNickname = "微信" + name
 		}
 		var identityID int64
