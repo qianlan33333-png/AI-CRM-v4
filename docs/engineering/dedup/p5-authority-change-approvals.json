@@ -2237,6 +2237,28 @@
       ],
       "reason": "User-authorized managed AI plan execution receipt read and CLI entry; synchronize the same active V4 OpenAPI contract and generated embed binding only. Preserve all frozen sources and unique super-administrator; no deployment approval.",
       "review_reference": "docs/prd/2026-10-13-aiassistant-execution-receipts.md; original task 01a135c5-384a-7b10-ae2e-3d31c1501bbe human choice to preserve Qianlan and add receipt reads for HuangYouCan; API/CLI contract, Access authorization and read-only fixture review; exact V4 API source commit 808ae957c7e20706b15a26645dabce63f1d200ea"
+    },
+    {
+      "base_commit": "631034f2040d0b56304dd35497909481831a7dba",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "a94804bd06f00eb08ae78bb6d4f71daf302a11d4719233b50c38f647199e3eea",
+          "head_sha256": "8e38343e09cee5d70c7d663b04c75e1f5e1c3d3effc8fae8e645266807885047"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "c85da5694d54f5f9c39ec926ab3a8fc3348d4daf3cbd5c3402b004d4a3b35ce2",
+          "head_sha256": "0df249fc5b2595857b368b7c67ee1343cbe697132310a02e65b5a94e14a228c4"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "20cc38d57880260f58a87595237c851ff9652377b272ac0191d6b3685dfeeb5b",
+          "head_sha256": "06d24bc29310e0ae2cf2462828d6ab476b745a986e3de751d25f538e2f0fda95"
+        }
+      ],
+      "reason": "Mechanical binding of the already authorized current V4 contract",
+      "review_reference": "user:01a138df-c2b3-7361-b984-1420d4d7f355:private-message-control"
     }
   ]
 }
