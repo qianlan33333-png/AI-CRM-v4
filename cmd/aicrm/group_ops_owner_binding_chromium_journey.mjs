@@ -44,14 +44,28 @@ const removeProfile = async (profile) => {
 };
 const profile=await fs.mkdtemp(path.join(os.tmpdir(),"groupops-binding-installed-"));
 let browser,cdp,failed;
-const responses=[];let searched=false;
+const responses=[];const deniedResponses=new Map();let searched=false;
 try {
-  browser=spawn(resolveChromiumBinary(),["--headless=new","--no-sandbox","--remote-debugging-port=0",`--user-data-dir=${profile}`,"--no-first-run","--disable-background-networking","--ignore-certificate-errors","about:blank"],{stdio:"ignore"});
+  browser=spawn(resolveChromiumBinary(),["--headless=new","--no-sandbox","--remote-debugging-port=0",`--user-data-dir=${profile}`,"--no-first-run","--disable-background-networking","--ignore-certificate-errors","--no-proxy-server","--host-resolver-rules=MAP example.com 127.0.0.1","about:blank"],{stdio:"ignore"});
   const address=await waitForPort(profile);
   const target=await(await fetch(`${address}/json/new?about:blank`,{method:"PUT"})).json();
   const socket=new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve,reject)=>{socket.addEventListener("open",resolve,{once:true});socket.addEventListener("error",reject,{once:true});});
-  socket.addEventListener("message",event=>{const message=JSON.parse(String(event.data));if(message.method==="Network.responseReceived"){const response=message.params.response;const url=new URL(response.url);if(url.pathname.startsWith('/api/admin/')){responses.push({path:url.pathname,status:response.status});if(url.pathname.endsWith('/group-ops/groups') && url.searchParams.get('q')==='真实群名' && response.status===200) searched=true;}}});
+  socket.addEventListener("message",async event=>{
+    const message=JSON.parse(String(event.data));
+    if(message.method==="Network.responseReceived"){
+      const response=message.params.response;const url=new URL(response.url);
+      if(url.pathname.startsWith('/api/admin/')){
+        const row={path:url.pathname,status:response.status};responses.push(row);
+        if(response.status===403)deniedResponses.set(message.params.requestId,row);
+        if(url.pathname.endsWith('/group-ops/groups') && url.searchParams.get('q')==='真实群名' && response.status===200)searched=true;
+      }
+    }
+    if(message.method==="Network.loadingFinished" && deniedResponses.has(message.params.requestId)){
+      const row=deniedResponses.get(message.params.requestId);deniedResponses.delete(message.params.requestId);
+      try{const body=await cdp.call('Network.getResponseBody',{requestId:message.params.requestId});const payload=JSON.parse(body.body);const code=typeof payload.error==='string'?payload.error:payload.error?.code;if(typeof code==='string' && /^[a-z0-9_]+$/.test(code))row.error_code=code;}catch{}
+    }
+  });
   cdp=new CDP(socket);await cdp.call("Page.enable");await cdp.call("Runtime.enable");await cdp.call("Network.enable");
   await cdp.call("Emulation.setDeviceMetricsOverride",{width:1622,height:1007,deviceScaleFactor:1,mobile:false});
   const planPath=`/admin/automation-conversion/group-ops/plans/${planID}`;
@@ -85,7 +99,7 @@ try {
 } catch(error) {
   failed=error;
   if(cdp)try{
-    const state=await evaluate(cdp,`(()=>({modal:!!document.querySelector('[data-v3-selection-session="group"]'),selected:document.querySelectorAll('[data-v3-group-remove]').length,rowDisabled:document.querySelector('[data-v3-group-key$="binding-owned"]')?.disabled,confirmDisabled:document.querySelector('[data-v3-group-confirm]')?.disabled,pickerStatus:document.querySelector('[data-v3-group-status]')?.textContent,notice:document.querySelector('.group-ops__notice')?.textContent,boundNames:Array.from(document.querySelectorAll('.group-ops__group-name')).map(row=>row.textContent)}))()`);
+    const state=await evaluate(cdp,`(()=>({origin:location.origin,csrfPresent:document.cookie.split(';').some(item=>item.trim().startsWith('aicrm_admin_csrf=')),modal:!!document.querySelector('[data-v3-selection-session="group"]'),selected:document.querySelectorAll('[data-v3-group-remove]').length,rowDisabled:document.querySelector('[data-v3-group-key$="binding-owned"]')?.disabled,confirmDisabled:document.querySelector('[data-v3-group-confirm]')?.disabled,pickerStatus:document.querySelector('[data-v3-group-status]')?.textContent,notice:document.querySelector('.group-ops__notice')?.textContent,boundNames:Array.from(document.querySelectorAll('.group-ops__group-name')).map(row=>row.textContent)}))()`);
     console.error(JSON.stringify({fixture_dom:state,api_responses:responses.slice(-15)}));
     await fs.mkdir(screenshotDir,{recursive:true});const shot=await cdp.call('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});await fs.writeFile(path.join(screenshotDir,'group-binding-failure.png'),Buffer.from(shot.data,'base64'));
   }catch(diagnosticError){console.error('fixture diagnostic unavailable');}

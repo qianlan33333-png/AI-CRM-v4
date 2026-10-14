@@ -48,7 +48,7 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 	}
 
 	path := "/api/admin/automation-conversion/group-ops/plans/" + strconv.FormatInt(planID, 10)
-	call := func(method, path string, body any, key string, want int) []byte {
+	call := func(method, path string, body any, key string, want int, origins ...string) []byte {
 		t.Helper()
 		raw, _ := json.Marshal(body)
 		if body == nil {
@@ -60,6 +60,11 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
+		origin := f.browserURL
+		if len(origins) > 0 {
+			origin = origins[0]
+		}
+		req.Header.Set("Origin", origin)
 		req.Header.Set("Idempotency-Key", key)
 		for _, cookie := range f.adminCookies {
 			req.AddCookie(cookie)
@@ -79,7 +84,10 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 		return out
 	}
 	command := map[string]any{"expected_revision": 1, "asset_reference": "binding-owned"}
-	first := call("POST", path+"/group-assets", command, "installed-binding-add", 200)
+	if rejected := call("POST", path+"/groups", command, "installed-binding-cross-origin", 403, f.server.URL); !bytes.Contains(rejected, []byte("cross_site_request")) {
+		t.Fatalf("wrong browser origin reason=%s", rejected)
+	}
+	first := call("POST", path+"/groups", command, "installed-binding-add", 200)
 	var d p.Detail
 	if err = json.Unmarshal(first, &d); err != nil || len(d.GroupAssets) != 1 || d.Plan.Status != p.PlanPaused || d.Plan.Revision != 2 {
 		t.Fatalf("first=%s err=%v", first, err)
@@ -88,11 +96,11 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 	if err = json.Unmarshal(readback, &d); err != nil || len(d.GroupAssets) != 1 || d.GroupAssets[0].DisplayName != "真实群名" || d.GroupAssets[0].OwnerStaffID != owner || d.GroupAssets[0].MemberCount == nil || *d.GroupAssets[0].MemberCount != 12 || d.Plan.Status != p.PlanPaused {
 		t.Fatalf("decorated readback=%s err=%v", readback, err)
 	}
-	if replay := call("POST", path+"/group-assets", command, "installed-binding-add", 200); !bytes.Equal(first, replay) {
+	if replay := call("POST", path+"/groups", command, "installed-binding-add", 200); !bytes.Equal(first, replay) {
 		t.Fatal("replay changed result")
 	}
-	call("POST", path+"/group-assets", command, "installed-binding-stale", 409)
-	call("POST", path+"/group-assets", map[string]any{"expected_revision": 2, "asset_reference": "binding-other"}, "installed-binding-other", 400)
+	call("POST", path+"/groups", command, "installed-binding-stale", 409)
+	call("POST", path+"/groups", map[string]any{"expected_revision": 2, "asset_reference": "binding-other"}, "installed-binding-other", 400)
 	if raw := call("GET", "/api/admin/automation-conversion/group-ops/groups?owner_userid="+strconv.FormatInt(owner, 10), nil, "", 200); !bytes.Contains(raw, []byte("真实群名")) || bytes.Contains(raw, []byte("他人群")) {
 		t.Fatalf("owner directory=%s", raw)
 	}
@@ -102,7 +110,7 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 	if raw := call("GET", path, nil, "", 200); !bytes.Contains(raw, []byte("binding-owned")) {
 		t.Fatal("missing directory erased binding")
 	}
-	call("DELETE", path+"/group-assets/binding-owned", map[string]any{"expected_revision": 2}, "installed-binding-remove", 200)
+	call("DELETE", path+"/groups/binding-owned", map[string]any{"expected_revision": 2}, "installed-binding-remove", 200)
 	raw := call("GET", path, nil, "", 200)
 	if err = json.Unmarshal(raw, &d); err != nil || len(d.GroupAssets) != 0 || d.Plan.Revision != 3 || d.Plan.Status != p.PlanPaused {
 		t.Fatalf("readback=%s err=%v", raw, err)
@@ -111,7 +119,7 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 		t.Fatal(err)
 	}
 	commandBrowser := exec.CommandContext(f.ctx, "node", filepath.Join("cmd", "aicrm", "group_ops_owner_binding_chromium_journey.mjs"))
-	commandBrowser.Env = append(os.Environ(), "AICRM_GROUPOPS_TEST_URL="+f.server.URL, "AICRM_GROUPOPS_TEST_PLAN_ID="+strconv.FormatInt(planID, 10), "AICRM_GROUPOPS_SCREENSHOT_DIR="+f.screenshots)
+	commandBrowser.Env = append(os.Environ(), "AICRM_GROUPOPS_TEST_URL="+f.browserURL, "AICRM_GROUPOPS_TEST_PLAN_ID="+strconv.FormatInt(planID, 10), "AICRM_GROUPOPS_SCREENSHOT_DIR="+f.screenshots)
 	if out, e := commandBrowser.CombinedOutput(); e != nil {
 		t.Fatalf("installed binding Chromium: %v\n%s", e, out)
 	} else {

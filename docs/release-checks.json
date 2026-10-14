@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "baseline_sha": "d65d4eb2b6123a5b02880ea2c4a24ec68765d59f",
+  "baseline_sha": "d13a8598c2d2fcdb1c72f4ee20b0f22bf09b013f",
   "checks": [
     {
       "lane": "backend",
       "path": "cmd/aicrm/group_ops_owner_binding_installed_test.go",
       "test": "TestGroupOpsOwnerBindingFixtureStaffGovernance",
       "postgres": true,
-      "reason": "源码-only隔离完整schema夹具准备及新实际浏览器脚本语法；stage-check原包重跑保存/重开/移除强断言"
+      "reason": "隔离完整schema员工准备+实际浏览器脚本语法；原安装合同加入错误Origin403原因及正确Origin/CSRF实际页面保存"
     }
   ],
   "installed_checks": [
