@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -109,7 +110,7 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 	if _, err = f.native.Exec(f.ctx, `INSERT INTO group_ops_directory_groups(chat_reference,owner_staff_id,display_name,member_count,external_member_count,source_digest,refreshed_at) VALUES('binding-owned',$1,'真实群名',12,8,'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',now())`, owner); err != nil {
 		t.Fatal(err)
 	}
-	commandBrowser := exec.CommandContext(f.ctx, "node", filepath.Join("cmd", "aicrm", "group_ops_owner_binding_journey.mjs"))
+	commandBrowser := exec.CommandContext(f.ctx, "node", filepath.Join("cmd", "aicrm", "group_ops_owner_binding_chromium_journey.mjs"))
 	commandBrowser.Env = append(os.Environ(), "AICRM_GROUPOPS_TEST_URL="+f.server.URL, "AICRM_GROUPOPS_TEST_PLAN_ID="+strconv.FormatInt(planID, 10), "AICRM_GROUPOPS_SCREENSHOT_DIR="+f.screenshots)
 	if out, e := commandBrowser.CombinedOutput(); e != nil {
 		t.Fatalf("installed binding Chromium: %v\n%s", e, out)
@@ -145,6 +146,14 @@ func groupOpsBindingFixtureStaff(t *testing.T, ctx context.Context, pool *pgxpoo
 func TestGroupOpsOwnerBindingFixtureStaffGovernance(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate browser fixture")
+	}
+	if out, err := exec.CommandContext(ctx, "node", "--check", filepath.Join(filepath.Dir(source), "group_ops_owner_binding_chromium_journey.mjs")).CombinedOutput(); err != nil {
+		t.Fatalf("browser fixture syntax: %v\n%s", err, out)
+	}
+
 	databaseURL, cleanup := adminAccessCompositionDatabase(t, ctx)
 	defer cleanup()
 	pool, err := pgxpool.New(ctx, databaseURL)

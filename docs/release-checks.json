@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "baseline_sha": "c52c738e0c68de928a48d87bfaceb39f354c0290",
+  "baseline_sha": "d65d4eb2b6123a5b02880ea2c4a24ec68765d59f",
   "checks": [
     {
       "lane": "backend",
       "path": "cmd/aicrm/group_ops_owner_binding_installed_test.go",
       "test": "TestGroupOpsOwnerBindingFixtureStaffGovernance",
       "postgres": true,
-      "reason": "源码-only夹具修复：员工与唯一viewer角色同一事务且不授予登录；实际包合同由原stage-check重跑"
+      "reason": "源码-only隔离完整schema夹具准备及新实际浏览器脚本语法；stage-check原包重跑保存/重开/移除强断言"
     }
   ],
   "installed_checks": [
