@@ -1,107 +1,31 @@
 {
   "schema": 1,
-  "baseline_sha": "631034f2040d0b56304dd35497909481831a7dba",
+  "baseline_sha": "361be23bfad91e024dfebf4f8c93c77a3b26a909",
   "checks": [
     {
-      "lane": "backend",
-      "path": "internal/externaleffects/runtime_test.go",
-      "test": "TestStaleAttemptCompletionProjectionKinds",
-      "reason": "新控制类型的过期恢复与封闭信封"
+      "lane": "preflight",
+      "path": "scripts/test_domestic_host_input_equivalence.py",
+      "reason": "控制器真实Git输入等价、特殊路径/模式/对象形状拒绝及源码-only分类"
     },
     {
       "lane": "backend",
-      "path": "internal/externaleffects/runtime_test.go",
-      "test": "TestClosedDigestOnlyEnvelopeAndStates",
-      "reason": "新控制类型的过期恢复与封闭信封"
+      "path": "cmd/aicrm/installed_survey_provenance_test.go",
+      "test": "TestInstalledSurveyPackageProvenanceAllowsOnlyUnchangedHost",
+      "reason": "安装夹具输入证明与controller/builder一致；二进制/manifest/资源漂移拒绝"
     },
     {
       "lane": "backend",
-      "path": "internal/externaleffects/store_integration_test.go",
-      "test": "TestPostgreSQLEffectReplayUnknownAndStaleWorker",
-      "postgres": true,
-      "reason": "EER完成分支的原消费者及原子投影"
+      "path": "cmd/aicrm/installed_survey_provenance_test.go",
+      "test": "TestInstalledSurveyWebTreeVerifiesActualGitObjects",
+      "reason": "安装夹具输入证明与controller/builder一致；二进制/manifest/资源漂移拒绝"
     },
     {
       "lane": "backend",
-      "path": "internal/externaleffects/store_integration_test.go",
-      "test": "TestPostgreSQLTagCompletionSinkIsAtomic",
-      "postgres": true,
-      "reason": "EER完成分支的原消费者及原子投影"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/externaleffects/store_integration_test.go",
-      "test": "TestPostgreSQLContactDescriptionNoopCompletionIsTerminal",
-      "postgres": true,
-      "reason": "EER完成分支的原消费者及原子投影"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/outbound/private_message_control_test.go",
-      "test": "TestPrivateMessageControlRejectsSharedOrMismatchedTask",
-      "reason": "目标隔离和已发送时间保留"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/outbound/private_message_control_test.go",
-      "test": "TestPrivateMessageControlReadsAllPagesAndPreservesSentTime",
-      "reason": "目标隔离和已发送时间保留"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/wecom/adapter/private_message_stop_test.go",
-      "test": "TestPrivateMessageStopProtocolAndUnknown",
-      "reason": "真实停止协议和未知响应"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/access/app/aiassistant_stop_test.go",
-      "test": "TestAIAssistantStopKeepsAdministratorBoundary",
-      "reason": "管理员允许 viewer拒绝"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/crmcli/private_message_control_test.go",
-      "test": "TestCLIPrivateMessageStopAndResult",
-      "reason": "CLI原键 CSRF和安全结果"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/private_message_control_postgres_test.go",
-      "test": "TestPostgreSQLPrivateMessageControlHTTPAndLifecycle",
-      "postgres": true,
-      "reason": "HTTP/PG并发 回滚和迟到回执"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/outbound/message_routing_test.go",
-      "test": "TestAutomationAndPrivateMessageKindsAreRoutedIndependently",
-      "reason": "原消息路由消费者"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/aiassistant/http/execution_receipts_test.go",
-      "test": "TestExecutionReceiptsAdministratorReadAndIsolation",
-      "reason": "原只读回执和权限消费者"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/aiassistant/http/execution_receipts_test.go",
-      "test": "TestExecutionReceiptsRejectsViewerAndUnauthenticatedBeforeReading",
-      "reason": "原只读回执和权限消费者"
-    },
-    {
-      "lane": "backend",
-      "path": "internal/aiassistant/http/execution_receipts_test.go",
-      "test": "TestExecutionReceiptsInvalidLiveDoesNotRead",
-      "reason": "原只读回执和权限消费者"
+      "path": "cmd/aicrm/installed_survey_provenance_test.go",
+      "test": "TestInstalledFrontendRegistryPolicyMatchesBuilder",
+      "reason": "安装夹具输入证明与controller/builder一致；二进制/manifest/资源漂移拒绝"
     }
   ],
-  "installed_checks": [
-    "private-message-control",
-    "aiassistant-execution-receipts"
-  ],
-  "build_commands": [
-    "./cmd/aicrm-cli"
-  ]
+  "installed_checks": [],
+  "build_commands": []
 }

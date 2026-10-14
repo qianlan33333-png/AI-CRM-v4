@@ -49,7 +49,7 @@ func useInstalledPublicSurveyFixture(t *testing.T, fixture *publicSurveyPresenta
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("installed_survey_provenance app_sha=%s binary_sha256=%s host_sha=%s host_manifest_sha256=%s host_asset_sha256=%s app_web_tree=%s host_web_tree=%s", head, digest, provenance.HostSHA, provenance.ManifestSHA256, provenance.AssetSHA256, provenance.AppWebTree, provenance.HostWebTree)
+	t.Logf("installed_survey_provenance app_sha=%s binary_sha256=%s host_sha=%s host_manifest_sha256=%s host_asset_sha256=%s app_frontend_inputs_sha256=%s host_frontend_inputs_sha256=%s", head, digest, provenance.HostSHA, provenance.ManifestSHA256, provenance.AssetSHA256, provenance.AppFrontendInputs, provenance.HostFrontendInputs)
 	db, err := url.Parse(databaseURL)
 	if err != nil || db.Hostname() != "localhost" && db.Hostname() != "127.0.0.1" && db.Hostname() != "::1" {
 		t.Fatal("installed Survey requires isolated loopback PostgreSQL")

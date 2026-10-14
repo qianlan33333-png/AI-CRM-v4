@@ -4049,6 +4049,31 @@ def _stage_partial(config, sha, fixture, name, row, installation_digest, binary_
     return check
 
 
+def _host_frontend_inputs(repo: Path, source: str) -> str:
+    source = _sha(source, "frontend source")
+    if _git(repo, "cat-file", "-t", source + ":web").strip() != "tree":
+        raise ReleaseError("installed Host web source is not a Git tree")
+    # NUL framing preserves Chinese, quote, tab and newline path bytes. Hash
+    # real type/mode/blob/path records; never normalize away a changed input.
+    raw = _git(repo, "ls-tree", "-r", "-z", "--full-tree", source, "--", "web")
+    digest = hashlib.sha256(b"aicrm.frontend-inputs.v1\0")
+    for entry in raw.split("\0"):
+        if not entry:
+            continue
+        _, separator, path = entry.partition("\t")
+        if not separator:
+            raise ReleaseError("invalid installed Host Git input inventory")
+        if path in builder.APPLICATION_SOURCE_REGISTRIES:
+            continue
+        digest.update(entry.encode("utf-8", "surrogateescape") + b"\0")
+    return digest.hexdigest()
+
+
+def _verify_host_frontend_inputs(repo: Path, host_source: str, app_source: str) -> None:
+    if _host_frontend_inputs(repo, host_source) != _host_frontend_inputs(repo, app_source):
+        raise ReleaseError("installed Host frontend inputs differ from application source")
+
+
 def stage_check(config: dict[str, Any], *, test_source_sha: str | None = None) -> dict[str, Any]:
     """Execute registered contracts against the existing package, under its lock."""
     if os.geteuid() != 0:
@@ -4085,8 +4110,7 @@ def stage_check(config: dict[str, Any], *, test_source_sha: str | None = None) -
         binary_digest = _file_sha256(binary)
         host = json.loads((dist / "asset-manifest.json").read_text())
         host_source = _sha(host.get("source_sha"), "installed Host source")
-        if _git(repo, "rev-parse", host_source + ":web") != _git(repo, "rev-parse", sha + ":web"):
-            raise ReleaseError("installed Host tree differs from application source")
+        _verify_host_frontend_inputs(repo, host_source, sha)
         report = Path(legacy.BUILD_ROOT) / "domestic-main-checks" / f"{fixture}-installed-{time.time_ns()}"
         _build_command(config, ["/usr/bin/mkdir", "-m", "0700", "-p", str(report)], cwd=Path("/"), timeout=30)
         config = dict(config, _check_process_guard=True)

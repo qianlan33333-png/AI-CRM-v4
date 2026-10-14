@@ -4,6 +4,18 @@
 
 机械衔接修复：原候选 c6b74c42a1b6b20ea9cc50d102c81acb11ab2c98 及原 ref/收据保留；新线性候选从工作台已验收累计基线 631034f2040d0b56304dd35497909481831a7dba 继续。只移入本轮私信控制差异和机械绑定，既有分享能力保持，新增业务范围为空；OneID 与执行分类沿用本 brief，不重复真实停止或发送。
 
+预发合同修复：应用 361be23 已安装，Host 合法复用 631034f；构建器已排除两份 APPLICATION_SOURCE_REGISTRIES，但控制器与 Go 安装夹具误比较整个 web tree。两处改为真实 Git type/mode/blob/path 的 NUL 记录摘要，仅排除这两份登记，web 根必须仍是 tree。二进制、Host/App 各自 SHA、manifest 与全部资源摘要继续验证。分类为源码-only 控制器/夹具修复，不涉及新身份、业务持久化或 Provider 调用，不改已安装包。原锁/原 in_flight 下使用已检查候选的 stage_check 和准确 test_source_sha 运行注册合同，原 poll 接受具名 JSON 终态；工具安装另按原维护入口处理，不新增恢复状态机。
+
+```mermaid
+flowchart LR
+  P[原安装包和独立 App/Host 身份] --> V[二进制 Manifest 与资源摘要]
+  V --> G[真实 Git 输入 仅排除两份登记]
+  G -->|相同| T[原锁执行注册安装合同]
+  G -->|漂移或对象缺失| B[拒绝验收]
+  T --> R[保留原安装和新测试源码身份]
+  R --> O[原 poll 核验真实具名终态]
+```
+
 ```mermaid
 flowchart TD
   A[CLI 选择准确计划和接收人] --> B[Access 管理员授权 CSRF 幂等和版本检查]
