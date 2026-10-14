@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +27,8 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 		t.Fatal("exact installed package and isolated PostgreSQL required")
 	}
 	f := newPublicSurveyPresentationChromiumFixture(t)
+	baselineJobs := groupOpsBindingFixtureJobs(t, f.ctx, f.native)
+	t.Logf("fixture baseline jobs=%+v", baselineJobs)
 	owner := groupOpsBindingFixtureStaff(t, f.ctx, f.native, "binding-owner", "运营者")
 	other := groupOpsBindingFixtureStaff(t, f.ctx, f.native, "binding-other", "其他群主")
 	var planID int64
@@ -130,12 +133,22 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 		t.Fatalf("browser readback=%s err=%v", raw, err)
 	}
 
-	for _, table := range []string{"external_effects", "river_job"} {
+	for _, table := range []string{"external_effects", "group_ops_group_message_tasks"} {
 		var count int
 		if err = f.native.QueryRow(f.ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s=%d err=%v", table, count, err)
 		}
 	}
+	for _, table := range []string{"group_ops_runs", "group_ops_executions", "group_ops_execution_intents"} {
+		var count int
+		if err = f.native.QueryRow(f.ctx, "SELECT count(*) FROM "+table+" WHERE plan_id=$1", planID).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("plan-scoped %s=%d err=%v", table, count, err)
+		}
+	}
+	afterJobs := groupOpsBindingFixtureJobs(t, f.ctx, f.native)
+	t.Logf("fixture after jobs=%+v", afterJobs)
+	groupOpsBindingFixtureNoDispatchJobs(t, baselineJobs, afterJobs)
+
 	t.Log("installed group binding: names, owner scope/rejection, paused save, CAS, replay, removal, readback; zero outbound writes")
 }
 
@@ -183,4 +196,54 @@ func TestGroupOpsOwnerBindingFixtureStaffGovernance(t *testing.T) {
 		t.Fatalf("sole fixture super administrator changed: %v", err)
 	}
 
+}
+
+// Only stable non-PII job metadata is read. Never log args or credentials.
+type groupOpsBindingJob struct {
+	ID          int64
+	Kind, Queue string
+}
+
+func groupOpsBindingFixtureJobs(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []groupOpsBindingJob {
+	t.Helper()
+	rows, err := pool.Query(ctx, `SELECT id,kind,queue FROM river_job ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	jobs := []groupOpsBindingJob{}
+	for rows.Next() {
+		var job groupOpsBindingJob
+		if err = rows.Scan(&job.ID, &job.Kind, &job.Queue); err != nil {
+			t.Fatal(err)
+		}
+		jobs = append(jobs, job)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return jobs
+}
+func groupOpsBindingFixtureNoDispatchJobs(t *testing.T, before, after []groupOpsBindingJob) {
+	t.Helper()
+	baseline := map[int64]groupOpsBindingJob{}
+	for _, job := range before {
+		baseline[job.ID] = job
+	}
+	for _, job := range after {
+		if strings.HasPrefix(job.Queue, "outbound") || strings.HasPrefix(job.Kind, "external_effect.") {
+			t.Fatalf("forbidden business outbound job: %+v", job)
+		}
+		if old, ok := baseline[job.ID]; ok {
+			if old != job {
+				t.Fatalf("fixture baseline job changed: old=%+v after=%+v", old, job)
+			}
+			continue
+		}
+		// These existing GroupOps workers perform directory reads, never messages.
+		if job.Queue == "group-catalog" && (job.Kind == "groupops.catalog.v1" || job.Kind == "groupops.catalog-detail.v1" || job.Kind == "groupops.catalog-schedule.v1") {
+			continue
+		}
+		t.Fatalf("unexplained job outside fixture baseline: %+v", job)
+	}
 }

@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "baseline_sha": "d13a8598c2d2fcdb1c72f4ee20b0f22bf09b013f",
+  "baseline_sha": "c52c738e0c68de928a48d87bfaceb39f354c0290",
   "checks": [
     {
       "lane": "backend",
       "path": "cmd/aicrm/group_ops_owner_binding_installed_test.go",
       "test": "TestGroupOpsOwnerBindingFixtureStaffGovernance",
       "postgres": true,
-      "reason": "隔离完整schema员工准备+实际浏览器脚本语法；原安装合同加入错误Origin403原因及正确Origin/CSRF实际页面保存"
+      "reason": "最终源码-only夹具准备/浏览器解析；安装合同读取真实river kind/queue前后基线并断言零ExternalEffects/群运行/群发送/业务outbound"
     }
   ],
   "installed_checks": [
