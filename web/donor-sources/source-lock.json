@@ -906,12 +906,12 @@
       "library_id": "v4-api-808ae957c7e20706b15a26645dabce63f1d200ea",
       "canonical_path": "api/openapi.yaml",
       "source_path": "api/openapi.yaml",
-      "source_git_blob_sha": "68db0c694e9347d3d8805f479bbe9309e5410633",
-      "content_sha256": "8e38343e09cee5d70c7d663b04c75e1f5e1c3d3effc8fae8e645266807885047",
-      "bytes": 821906,
+      "source_git_blob_sha": "e1416d164c1d107bee1c2b412785c7b61ae0ae64",
+      "content_sha256": "2d4808acc03e175252cb539ae4a195774d96dc89bf0c30c495f27ad60ac45389",
+      "bytes": 822115,
       "mode": "100644",
       "source_repository": "https://github.com/qianlan33333-png/AI-CRM-v4.git",
-      "source_commit": "884b93c52c1865df9de7e52cd7f549e45cb8836a"
+      "source_commit": "fe70e901adaf2e28296de23eaa9c44a5b10b260f"
     }
   ]
 }

@@ -1481,23 +1481,18 @@ try {
   pick(ownerRaceMembers[2]);
   await waitFor(() => ownerGroupQueries.at(-1) === "9", "new owner-nine group projection did not request its current owner directory");
   ownerGroupsRaceWindow.document.querySelector('[data-action="switch-detail-panel"][data-panel="groups"]').click();
-  ownerGroupsRaceWindow.document.querySelector('[data-action="open-group-picker"]').click();
-  await waitFor(
-    () => ownerGroupsRaceWindow.document.body.textContent.includes("负责人九群"),
-    () => `new owner-nine group projection did not render in the dependent group picker; queries=${JSON.stringify(ownerGroupQueries)} body=${ownerGroupsRaceWindow.document.body.textContent}`,
-  );
+  assert.equal(ownerGroupsRaceWindow.document.querySelector('[data-action="open-group-picker"]').disabled, true, "unsaved owner must be saved before selecting groups");
+  assert.match(ownerGroupsRaceWindow.document.body.textContent, /请先保存基础配置/, "owner draft explains the required save");
   staleOwnerGroupReads.shift()();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(ownerGroupsRaceWindow.document.querySelector('[name="owner_userid"]')?.value, "9", "late owner-seven read must not replace the newer local owner field");
   assert.equal(ownerGroupsRaceWindow.document.body.textContent.includes("迟到的负责人七群"), false, "late owner-seven group rows must not repaint owner-nine detail");
-  ownerGroupsRaceWindow.document.querySelector('[data-action="close-group-picker"]').click();
 
   pick(ownerRaceMembers[1]);
   await waitFor(() => staleOwnerGroupReads.length === 1, "second slow owner-seven group read did not begin");
   ownerGroupsRaceWindow.dispatchEvent(new ownerGroupsRaceWindow.CustomEvent("aicrm:groupops-detail-refresh", { detail: { planId: 93 } }));
   await waitFor(() => ownerGroupQueries.at(-1) === "6", "authoritative detail reread did not request its own owner directory before stale owner response");
-  ownerGroupsRaceWindow.document.querySelector('[data-action="open-group-picker"]').click();
-  await waitFor(() => ownerGroupsRaceWindow.document.body.textContent.includes("负责人六群"), "authoritative detail reread did not render before stale owner response");
+  assert.equal(ownerGroupsRaceWindow.document.querySelector('[data-action="open-group-picker"]').disabled, true, "authoritative reread preserves the unsaved owner draft without enabling group writes");
   staleOwnerGroupReads.shift()();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(ownerGroupsRaceWindow.document.body.textContent.includes("迟到的负责人七群"), false, "an owner response that outlives the detail generation must not repaint the reread plan");

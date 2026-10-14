@@ -2259,6 +2259,28 @@
       ],
       "reason": "Mechanical binding of the already authorized current V4 contract",
       "review_reference": "user:01a138df-c2b3-7361-b984-1420d4d7f355:private-message-control"
+    },
+    {
+      "base_commit": "ab8c76e436d1648451180a2c7d102424fee7f246",
+      "changes": [
+        {
+          "path": "api/openapi.yaml",
+          "base_sha256": "8e38343e09cee5d70c7d663b04c75e1f5e1c3d3effc8fae8e645266807885047",
+          "head_sha256": "2d4808acc03e175252cb539ae4a195774d96dc89bf0c30c495f27ad60ac45389"
+        },
+        {
+          "path": "web/donor-sources/source-index.json",
+          "base_sha256": "0df249fc5b2595857b368b7c67ee1343cbe697132310a02e65b5a94e14a228c4",
+          "head_sha256": "457d6f9ad97db53d66a6ab0c3e45cccf36e622237bbb7fe472b4d2535059af17"
+        },
+        {
+          "path": "web/donor-sources/source-lock.json",
+          "base_sha256": "06d24bc29310e0ae2cf2462828d6ab476b745a986e3de751d25f538e2f0fda95",
+          "head_sha256": "62ea5cecff83e43f5083b96d39da7aafab426ea0b198c0c641cd84767ff3b9b1"
+        }
+      ],
+      "reason": "Mechanical binding of the already authorized current V4 contract",
+      "review_reference": "user-20261014-groupops-production-repair"
     }
   ]
 }

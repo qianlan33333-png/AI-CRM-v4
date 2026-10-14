@@ -40,5 +40,7 @@
   "installed_checks": [
     "group-ops-owner-binding"
   ],
-  "build_commands": []
+  "build_commands": [
+    "./cmd/aicrm-cli"
+  ]
 }

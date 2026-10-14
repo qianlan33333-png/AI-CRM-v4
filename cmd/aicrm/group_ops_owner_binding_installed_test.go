@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -95,6 +97,21 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 	if err = json.Unmarshal(raw, &d); err != nil || len(d.GroupAssets) != 0 || d.Plan.Revision != 3 || d.Plan.Status != p.PlanPaused {
 		t.Fatalf("readback=%s err=%v", raw, err)
 	}
+	if _, err = f.native.Exec(f.ctx, `INSERT INTO group_ops_directory_groups(chat_reference,owner_staff_id,display_name,member_count,external_member_count,source_digest,refreshed_at) VALUES('binding-owned',$1,'真实群名',12,8,'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',now())`, owner); err != nil {
+		t.Fatal(err)
+	}
+	commandBrowser := exec.CommandContext(f.ctx, "node", filepath.Join("cmd", "aicrm", "group_ops_owner_binding_journey.mjs"))
+	commandBrowser.Env = append(os.Environ(), "AICRM_GROUPOPS_TEST_URL="+f.server.URL, "AICRM_GROUPOPS_TEST_PLAN_ID="+strconv.FormatInt(planID, 10), "AICRM_GROUPOPS_SCREENSHOT_DIR="+f.screenshots)
+	if out, e := commandBrowser.CombinedOutput(); e != nil {
+		t.Fatalf("installed binding Chromium: %v\n%s", e, out)
+	} else {
+		t.Log(string(out))
+	}
+	raw = call("GET", path, nil, "", 200)
+	if err = json.Unmarshal(raw, &d); err != nil || len(d.GroupAssets) != 0 || d.Plan.Revision != 5 || d.Plan.Status != p.PlanPaused {
+		t.Fatalf("browser readback=%s err=%v", raw, err)
+	}
+
 	for _, table := range []string{"external_effects", "river_job"} {
 		var count int
 		if err = f.native.QueryRow(f.ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil || count != 0 {
