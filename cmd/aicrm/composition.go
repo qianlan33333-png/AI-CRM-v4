@@ -971,6 +971,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	invitationWorker.Service = invitationService
 	invitationHandler := mediahttp.InvitationHandler{Service: invitationService, Security: requestSecurity}
 	groupOpsStaff := groupOpsStaffAdapter{access: accessRepository, owners: groupOpsRepository}
+	catalogService.Owner = (groupOpsCatalogOwnerAdapter{uow: uow, access: accessRepository}).ResolveOwner
 	audienceDirectory := audienceOperationMemberDirectory{uow: uow, directory: groupOpsStaff}
 	// Directory reads have their own explicitly published capability gate. A
 	// dispatch grant cannot silently authorize a new provider-read path.

@@ -162,7 +162,7 @@ func (r *Repository) get(ctx context.Context, id int64, lock bool) (groupopsport
 	// Application validation compares opaque references using Go's bytewise
 	// string order. Database locale collation can place lower-case references
 	// before upper-case ones, so force the same deterministic order here.
-	assetRows, err := tx.Query(ctx, `SELECT a.id,a.asset_reference,CASE WHEN g.chat_reference IS NULL THEN '' ELSE COALESCE(NULLIF(g.display_name,''),'未命名群') END,COALESCE(g.owner_staff_id,0),g.member_count,g.external_member_count FROM group_ops_plan_group_assets a LEFT JOIN group_ops_directory_groups g ON g.chat_reference=a.asset_reference WHERE a.plan_id=$1 ORDER BY a.asset_reference COLLATE "C",a.id`, id)
+	assetRows, err := tx.Query(ctx, `SELECT a.id,a.asset_reference,CASE WHEN g.chat_reference IS NULL THEN '' ELSE COALESCE(NULLIF(g.display_name,''),'未命名群') END,COALESCE(g.owner_staff_id,(SELECT staff_id FROM group_ops_operation_member_directory WHERE sender_userid=g.owner_user_id AND active),0),g.member_count,g.external_member_count FROM group_ops_plan_group_assets a LEFT JOIN group_ops_directory_groups g ON g.chat_reference=a.asset_reference WHERE a.plan_id=$1 ORDER BY a.asset_reference COLLATE "C",a.id`, id)
 	if err != nil {
 		return groupopsport.Detail{}, err
 	}
@@ -460,7 +460,7 @@ func (r *Repository) ResolveExecutionOwner(ctx context.Context, target string) (
 		return 0, false, err
 	}
 	var owner int64
-	err = tx.QueryRow(ctx, `SELECT COALESCE(owner_staff_id,0) FROM group_ops_directory_groups WHERE chat_reference=$1`, target).Scan(&owner)
+	err = tx.QueryRow(ctx, `SELECT COALESCE(g.owner_staff_id,(SELECT staff_id FROM group_ops_operation_member_directory WHERE sender_userid=g.owner_user_id AND active),0) FROM group_ops_directory_groups g WHERE g.chat_reference=$1`, target).Scan(&owner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -790,7 +790,7 @@ func (r *Repository) ListDirectoryGroups(ctx context.Context, owner int64, query
 		return nil, 0, err
 	}
 	pageArgs := append(args, limit, offset)
-	rows, err := tx.Query(ctx, `SELECT chat_reference,COALESCE(owner_staff_id,0),display_name,member_count,refreshed_at,external_member_count FROM group_ops_directory_groups`+where+` ORDER BY refreshed_at DESC,chat_reference LIMIT $`+strconv.Itoa(len(args)+1)+` OFFSET $`+strconv.Itoa(len(args)+2), pageArgs...)
+	rows, err := tx.Query(ctx, `SELECT chat_reference,COALESCE(owner_staff_id,(SELECT staff_id FROM group_ops_operation_member_directory WHERE sender_userid=group_ops_directory_groups.owner_user_id AND active),0),display_name,member_count,refreshed_at,external_member_count FROM group_ops_directory_groups`+where+` ORDER BY refreshed_at DESC,chat_reference LIMIT $`+strconv.Itoa(len(args)+1)+` OFFSET $`+strconv.Itoa(len(args)+2), pageArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -811,7 +811,7 @@ func directoryGroupFilter(owner int64, query string) (string, []any) {
 	args := make([]any, 0, 2)
 	if owner > 0 {
 		args = append(args, owner)
-		clauses = append(clauses, `owner_staff_id=$`+strconv.Itoa(len(args)))
+		clauses = append(clauses, `(owner_staff_id=$`+strconv.Itoa(len(args))+` OR (owner_staff_id IS NULL AND owner_user_id IN (SELECT sender_userid FROM group_ops_operation_member_directory WHERE staff_id=$`+strconv.Itoa(len(args))+` AND active)))`)
 	}
 	if query != "" {
 		// Query text is literal user input, not a SQL pattern. Escaping % and _

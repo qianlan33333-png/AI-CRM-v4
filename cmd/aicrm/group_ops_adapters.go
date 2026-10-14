@@ -18,6 +18,7 @@ import (
 	groupopsmaterial "github.com/qianlan33333-png/AI-CRM-v3/internal/media/groupopsmaterial"
 	mediaport "github.com/qianlan33333-png/AI-CRM-v3/internal/media/port"
 	outboundport "github.com/qianlan33333-png/AI-CRM-v3/internal/outbound/port"
+	platformport "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/port"
 	wecomport "github.com/qianlan33333-png/AI-CRM-v3/internal/wecom/port"
 )
 
@@ -744,6 +745,34 @@ var _ groupopsmaterial.PreparedPlanReader = mediaPreparedPlanReader{}
 type groupOpsStaffAdapter struct {
 	access accessport.Repository
 	owners groupopsport.ExecutionTargetOwnerResolver
+}
+
+// Catalog Provider reads finish before this short Access read transaction.
+// Unknown/inactive employee IDs stay unmapped; catalog refresh never provisions.
+type groupOpsCatalogOwnerAdapter struct {
+	uow    platformport.UnitOfWork
+	access accessport.Repository
+}
+
+func (a groupOpsCatalogOwnerAdapter) ResolveOwner(ctx context.Context, userID string) (int64, error) {
+	if a.uow == nil || a.access == nil || !validGroupOpsSenderID(userID) {
+		return 0, errors.New("Group Ops catalog owner lookup unavailable")
+	}
+	var owner int64
+	err := a.uow.Within(ctx, func(tx context.Context) error {
+		user, err := a.access.UserByWeComUserID(tx, userID, false)
+		if errors.Is(err, accessdomain.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if user.Active {
+			owner = user.ID
+		}
+		return nil
+	})
+	return owner, err
 }
 
 func (adapter groupOpsStaffAdapter) IsActiveStaff(ctx context.Context, staffID int64) (bool, error) {

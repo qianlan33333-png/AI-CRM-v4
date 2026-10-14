@@ -41,6 +41,13 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 	if _, err = f.native.Exec(f.ctx, `INSERT INTO group_ops_directory_groups(chat_reference,owner_staff_id,display_name,member_count,external_member_count,source_digest,refreshed_at) VALUES('binding-owned',$1,'真实群名',12,8,'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',now()),('binding-other',$2,'他人群',10,6,'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',now())`, owner, other); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = f.native.Exec(f.ctx, `INSERT INTO group_ops_operation_member_directory(staff_id,sender_userid,display_name,name_source,profile_read_state,source_digest,active,refreshed_at) VALUES($1,'binding-owner','运营者','local_fallback','unavailable','sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',true,now())`, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.native.Exec(f.ctx, `UPDATE group_ops_directory_groups SET owner_staff_id=NULL,owner_user_id='binding-owner' WHERE chat_reference='binding-owned'`); err != nil {
+		t.Fatal(err)
+	}
+
 	path := "/api/admin/automation-conversion/group-ops/plans/" + strconv.FormatInt(planID, 10)
 	call := func(method, path string, body any, key string, want int) []byte {
 		t.Helper()
@@ -75,7 +82,7 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 	command := map[string]any{"expected_revision": 1, "asset_reference": "binding-owned"}
 	first := call("POST", path+"/group-assets", command, "installed-binding-add", 200)
 	var d p.Detail
-	if err = json.Unmarshal(first, &d); err != nil || len(d.GroupAssets) != 1 || d.GroupAssets[0].DisplayName != "真实群名" || d.GroupAssets[0].MemberCount == nil || *d.GroupAssets[0].MemberCount != 12 || d.Plan.Status != p.PlanPaused {
+	if err = json.Unmarshal(first, &d); err != nil || len(d.GroupAssets) != 1 || d.GroupAssets[0].DisplayName != "真实群名" || d.GroupAssets[0].OwnerStaffID != owner || d.GroupAssets[0].MemberCount == nil || *d.GroupAssets[0].MemberCount != 12 || d.Plan.Status != p.PlanPaused {
 		t.Fatalf("first=%s err=%v", first, err)
 	}
 	if replay := call("POST", path+"/group-assets", command, "installed-binding-add", 200); !bytes.Equal(first, replay) {

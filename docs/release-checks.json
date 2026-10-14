@@ -35,6 +35,13 @@
       "lane": "frontend",
       "path": "web/v3/shared/ui/groupPickerAdapter.test.mjs",
       "reason": "共享选择器scope总数/搜索/分页/错误草稿保留"
+    },
+    {
+      "lane": "backend",
+      "path": "cmd/aicrm/group_ops_catalog_owner_test.go",
+      "test": "TestGroupOpsPostgreSQLCatalogOwnerMapsOnlyExistingActiveStaff",
+      "postgres": true,
+      "reason": "同步群主到已有活跃员工映射；未知/停用拒绝且不建客或账号"
     }
   ],
   "installed_checks": [
