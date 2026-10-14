@@ -152,6 +152,7 @@ func TestGroupOpsOwnerBindingFixtureStaffGovernance(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
+	superAdmin := surveyJourneyGovernedActor(t, ctx, pool, "binding-fixture-super", "Synthetic super administrator")
 	owner := groupOpsBindingFixtureStaff(t, ctx, pool, "binding-governed-fixture", "运营者")
 	var roles int
 	var role string
@@ -160,4 +161,9 @@ func TestGroupOpsOwnerBindingFixtureStaffGovernance(t *testing.T) {
 	if err != nil || roles != 1 || role != "viewer" || login || !active {
 		t.Fatalf("fixture roles=%d role=%s login=%t active=%t err=%v", roles, role, login, active, err)
 	}
+	var preserved int64
+	if err = pool.QueryRow(ctx, `SELECT admin_user_id FROM access_super_admin_control WHERE singleton`).Scan(&preserved); err != nil || preserved != superAdmin {
+		t.Fatalf("sole fixture super administrator changed: %v", err)
+	}
+
 }
