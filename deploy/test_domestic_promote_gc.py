@@ -183,6 +183,19 @@ class PackageGC(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'identity_invalid'):
             m._verified_native_previous({'previous_sha': '../unexpected'})
 
+    def test_cross_sha_root_writable_alias_deleted_without_changing_current_inode(self):
+        current = self.root / 'releases' / self.current / 'bin/aicrm'
+        old = self.root / 'releases' / self.names[0] / 'bin/aicrm'
+        old.unlink(); os.link(current, old)
+        manifest = old.parent.parent / 'release-files.sha256'
+        # Replace only this fixture's binary checksum, keeping all other files.
+        lines = manifest.read_text().splitlines()
+        manifest.write_text('\n'.join(cleanup.digest_file(current)+'  ./bin/aicrm' if line.endswith('  ./bin/aicrm') else line for line in lines)+'\n')
+        before = (current.stat().st_ino, current.stat().st_mode, current.read_bytes())
+        result = m.reclaim_obsolete_releases()
+        self.assertIn(self.names[0], result['removed'])
+        self.assertEqual(before, (current.stat().st_ino, current.stat().st_mode, current.read_bytes()))
+
     def test_closed_observer_copy_is_reaped_but_unknown_contents_refused(self):
         work = self.root / 'releases/.domestic-observer-closed'; work.mkdir(mode=0o700)
         (work / 'cleanup-releases.py').write_text('interrupted copy')

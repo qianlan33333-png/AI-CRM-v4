@@ -289,7 +289,7 @@ class CleanupTests(unittest.TestCase):
         cleanup.require_sealed_package(package, link_inventory)
         self.assertEqual(verified["name"], self.names[1])
 
-    def test_external_or_writable_package_hardlinks_are_rejected(self):
+    def test_external_or_non_root_writable_package_hardlinks_are_rejected(self):
         package = self.root / "releases" / self.names[1]
         binary = package / "bin/aicrm"
         external = self.root / "external-alias"
@@ -302,7 +302,29 @@ class CleanupTests(unittest.TestCase):
         os.link(binary, alias)
         manifest = package / "release-files.sha256"
         manifest.write_text(manifest.read_text() + cleanup.digest_file(alias) + "  bin/aicrm-shared\n")
+        binary.chmod(0o666)
         with self.assertRaisesRegex(cleanup.Refuse, "writable_or_unreadable"):
+            cleanup.verified_package(package)
+
+    def test_root_owned_owner_writable_public_aliases_keep_hashes_and_modes(self):
+        package = self.root / 'releases' / self.names[1]
+        binary = package / 'bin/aicrm'
+        alias = package / 'bin/aicrm-shared'
+        os.link(binary, alias)
+        manifest = package / 'release-files.sha256'
+        manifest.write_text(manifest.read_text() + cleanup.digest_file(alias) + '  bin/aicrm-shared\n')
+        before = (binary.stat().st_ino, binary.stat().st_mode, cleanup.digest_file(binary))
+        self.assertEqual(cleanup.verified_package(package)['name'], package.name)
+        self.assertEqual(before, (binary.stat().st_ino, binary.stat().st_mode, cleanup.digest_file(binary)))
+        alias.parent.chmod(0o777)
+        with self.assertRaisesRegex(cleanup.Refuse, 'control_directory'):
+            cleanup.verified_package(package)
+
+    def test_root_owner_write_does_not_admit_a_private_alias(self):
+        package = self.root / 'releases' / self.names[1]
+        (package / 'deploy').mkdir()
+        os.link(package / 'bin/aicrm', package / 'deploy/aicrm.env')
+        with self.assertRaisesRegex(cleanup.Refuse, 'not_public_content'):
             cleanup.verified_package(package)
 
     def test_schema_evidence_and_current_must_match(self):

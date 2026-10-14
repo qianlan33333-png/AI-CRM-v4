@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "baseline_sha": "9642d831c2538d51c78372858f28ab84cbbf1b9b",
+  "baseline_sha": "b6d380f249b2e0ceb6dc675bc4e14287498886d5",
   "checks": [
     {
       "lane": "preflight",
@@ -28,6 +28,8 @@
       "reason": "完成后清理调用消费者"
     }
   ],
-  "installed_checks": [],
+  "installed_checks": [
+    "release-runtime-config"
+  ],
   "build_commands": []
 }

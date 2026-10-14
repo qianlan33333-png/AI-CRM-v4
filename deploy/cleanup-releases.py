@@ -26,7 +26,7 @@ SHA = re.compile(r"[0-9a-f]{40}\Z")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 PACKAGE_ROOTS = {"bin", "web", "migrations", "deploy", "components"}
 PROTECTED_PARTS = {"backup", "backups", "secret", "secrets", "uploads", "exports", "business", "pgdata", "data", ".git"}
-PROTECTED_SUFFIXES = {".pem", ".key", ".dump", ".backup", ".p12", ".pfx"}
+PROTECTED_SUFFIXES = {".pem", ".key", ".dump", ".backup", ".p12", ".pfx", ".env"}
 ROOT_UID = 0
 ROOT_GID = 0
 SUCCESS_DIRECTORY = "release-success"
@@ -105,9 +105,15 @@ def require_safe_public_package_link(info, releases: Path, link_inventory):
                 or alias.name == ".env"):
             raise Refuse("package_hardlink_alias_is_not_public_content")
         if (alias_info.st_uid != ROOT_UID or alias_info.st_gid != ROOT_GID
-                or stat.S_IMODE(alias_info.st_mode) & 0o222
+                or stat.S_IMODE(alias_info.st_mode) & 0o022
                 or stat.S_IMODE(alias_info.st_mode) & 0o444 == 0):
             raise Refuse("package_hardlink_is_writable_or_unreadable")
+        # Root can already chmod any root-owned file. Owner-write does not
+        # grant another writer; every parent must enforce that same boundary.
+        parent = alias.parent
+        while parent != releases.parent:
+            require_control_directory(parent)
+            parent = parent.parent
 
 
 def require_control_directory(path: Path, private=False):
