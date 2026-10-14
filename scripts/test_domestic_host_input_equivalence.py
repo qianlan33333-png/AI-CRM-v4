@@ -1,8 +1,11 @@
 import subprocess
+import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 import domestic_main_release as controller
@@ -90,6 +93,68 @@ class HostInputEquivalence(unittest.TestCase):
         self.assertFalse(result.runtime_changed)
         self.assertEqual(result.build_mode, "controller_only")
         self.assertEqual(result.controller_files, ["scripts/domestic_main_release.py"])
+
+
+class CleanupAnchor(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="cleanup-anchor-fixture-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.prep = self.root / "prep"; self.prep.mkdir()
+        self.binary = self.root / "bin"; self.binary.mkdir()
+        self.log = self.root / "calls.jsonl"
+        self.clone = "aicrm_test_clone_" + "a" * 16 + "_acceptance_test"
+        self.config = {"check_database_url": "postgresql://fixture:synthetic@127.0.0.1:5432/aicrm_ci?sslmode=disable",
+            "_check_attempt_database": self.clone,
+            "build_path": str(self.binary) + ":/opt/aicrm/toolchain/npm/bin:/usr/bin:/bin"}
+        self.registry = self.prep / ("database-" + self.clone + ".json")
+        self.registry.write_text(json.dumps({"database": self.clone}))
+        psql = self.binary / "psql"
+        psql.write_text("#!" + sys.executable + "\n" + '''import os,sys,json
+from pathlib import Path
+sql=sys.argv[-1]
+with Path(os.environ['FAKE_PSQL_LOG']).open('a') as f:
+ f.write(json.dumps({'database':os.environ['PGDATABASE'],'role':os.environ['PGUSER'],'host':os.environ['PGHOST'],'sslmode':os.environ['PGSSLMODE'],'sql':sql})+'\\n')
+if sql.startswith('SELECT'):print('f' if os.environ.get('FAKE_WRONG_OWNER') else 't')
+elif os.environ.get('FAKE_DROP_FAILURE') or os.environ['PGDATABASE'] in sql:sys.exit(1)
+''')
+        psql.chmod(0o755)
+
+    def run_cleanup(self, **flags):
+        original = dict(self.config)
+        def execute(config, command, **kwargs):
+            environment = controller._check_env(config)
+            self.assertEqual(environment['AICRM_DATABASE_URL'], original['check_database_url'])
+            environment.update(FAKE_PSQL_LOG=str(self.log), **flags)
+            return subprocess.run([sys.executable, *command[1:]], env=environment,
+                capture_output=True, text=True, timeout=10)
+        with patch.object(controller, '_require_cleanup_lock'), patch.object(controller, '_build_command', side_effect=execute):
+            try: controller._cleanup_attempt_databases(self.config, self.prep)
+            finally: self.assertEqual(self.config, original)
+
+    def test_deleting_execution_clone_uses_anchor_and_preserves_connection_identity(self):
+        self.run_cleanup()
+        calls=[json.loads(x) for x in self.log.read_text().splitlines()]
+        self.assertEqual(len(calls),2)
+        self.assertTrue(all(c['database']=='aicrm_ci' and c['role']=='fixture' and c['host']=='127.0.0.1' and c['sslmode']=='disable' for c in calls))
+        self.assertTrue(calls[-1]['sql'].startswith('DROP DATABASE'))
+        self.assertIn(self.clone,calls[-1]['sql'])
+        self.assertFalse(self.registry.exists())
+
+    def test_wrong_owner_preserves_inventory_without_drop(self):
+        with self.assertRaises(controller.CheckEnvironmentError):self.run_cleanup(FAKE_WRONG_OWNER='1')
+        self.assertTrue(self.registry.exists())
+        self.assertNotIn('DROP DATABASE',self.log.read_text())
+
+    def test_drop_failure_preserves_inventory(self):
+        with self.assertRaises(controller.CheckEnvironmentError):self.run_cleanup(FAKE_DROP_FAILURE='1')
+        self.assertTrue(self.registry.exists())
+
+    def test_unregistered_database_is_never_dropped(self):
+        self.registry.unlink(); invalid=self.prep/'database-production.json'
+        invalid.write_text(json.dumps({'database':'production'}))
+        with self.assertRaises(controller.CheckEnvironmentError):self.run_cleanup()
+        self.assertTrue(invalid.exists());self.assertFalse(self.log.exists())
 
 
 if __name__ == "__main__":

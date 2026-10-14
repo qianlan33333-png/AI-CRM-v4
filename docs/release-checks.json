@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "baseline_sha": "361be23bfad91e024dfebf4f8c93c77a3b26a909",
+  "baseline_sha": "a2662f055b1305e22f838e6012f6da056ebcc5b9",
   "checks": [
     {
       "lane": "preflight",
       "path": "scripts/test_domestic_host_input_equivalence.py",
-      "reason": "控制器真实Git输入等价、特殊路径/模式/对象形状拒绝及源码-only分类"
+      "reason": "Host真实Git等价拒绝与清理从锚库连接、owner/库存/drop失败保护"
     },
     {
       "lane": "backend",

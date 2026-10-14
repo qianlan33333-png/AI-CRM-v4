@@ -2252,7 +2252,12 @@ for f in sorted(Path(sys.argv[1]).glob('database-*.json')):
   if result.returncode: raise SystemExit(25)
  f.unlink()
 """
-    result = _build_command(config,["/usr/bin/python3","-c",code,str(prep)],cwd=Path("/"),timeout=120,check=False)
+    # DROP must connect to the original synthetic anchor, never the disposable
+    # execution clone it is deleting. Keep host/role/auth/options and the
+    # caller's configuration unchanged; inventory and ownership checks remain.
+    cleanup_config = dict(config)
+    cleanup_config.pop("_check_attempt_database", None)
+    result = _build_command(cleanup_config,["/usr/bin/python3","-c",code,str(prep)],cwd=Path("/"),timeout=120,check=False)
     if result.returncode:
         raise CheckEnvironmentError("synthetic database cleanup failed; retained attempt inventory")
 

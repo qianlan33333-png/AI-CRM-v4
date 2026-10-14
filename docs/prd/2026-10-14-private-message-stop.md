@@ -6,6 +6,8 @@
 
 预发合同修复：应用 361be23 已安装，Host 合法复用 631034f；构建器已排除两份 APPLICATION_SOURCE_REGISTRIES，但控制器与 Go 安装夹具误比较整个 web tree。两处改为真实 Git type/mode/blob/path 的 NUL 记录摘要，仅排除这两份登记，web 根必须仍是 tree。二进制、Host/App 各自 SHA、manifest 与全部资源摘要继续验证。分类为源码-only 控制器/夹具修复，不涉及新身份、业务持久化或 Provider 调用，不改已安装包。原锁/原 in_flight 下使用已检查候选的 stage_check 和准确 test_source_sha 运行注册合同，原 poll 接受具名 JSON 终态；工具安装另按原维护入口处理，不新增恢复状态机。
 
+同一安装合同的收尾故障已定位：清理子程序继承执行 clone 覆盖，连接到待删除库后 DROP 自身失败。清理用配置副本仅移除执行库覆盖，连接原测试锚库；主机、角色、认证和选项保持，原配置不改。原登记库名、归属、路径与失败保留断言继续执行，不强删不明库。已通过的 a266 测试源码与原安装身份保留，业务合同不因修复清理再次执行。
+
 ```mermaid
 flowchart LR
   P[原安装包和独立 App/Host 身份] --> V[二进制 Manifest 与资源摘要]
