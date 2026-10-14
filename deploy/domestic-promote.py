@@ -2212,7 +2212,7 @@ def _production_release_lock():
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise RuntimeError("production release is currently locked") from exc
-        yield
+        yield descriptor
     finally:
         os.close(descriptor)
 
@@ -2544,6 +2544,145 @@ def _release_retention_helpers(current: str):
     return tuple(modules)
 
 
+def _detach_observer_files(current: str, scratch: Path) -> int:
+    """Keep the observer's existing single-inode code contract, without
+    chmod/chown of a shared inode or replacing an executing application image.
+    The caller has verified the entire current package and holds install lock.
+    """
+    copied = 0
+    directory = RELEASES / current / 'deploy'
+    _assert_root_directory(directory)
+    if scratch.stat().st_dev != directory.stat().st_dev:
+        raise RuntimeError('observer_copy_scratch_not_on_package_filesystem')
+    for name in ('record-release-success.py', 'cleanup-releases.py', 'post-release-retention.py'):
+        source = directory / name
+        before = _assert_root_file(source)
+        if before.st_nlink == 1:
+            continue
+        expected = digest(source)
+        temporary = scratch / name
+        opened = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            info = os.fstat(opened)
+            identity = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_uid, s.st_gid, s.st_mode)
+            if identity(info) != identity(before):
+                raise RuntimeError('observer_file_changed_before_copy')
+            output = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(os.dup(opened), 'rb') as original, os.fdopen(output, 'wb') as target:
+                shutil.copyfileobj(original, target)
+                os.fchown(target.fileno(), before.st_uid, before.st_gid)
+                os.fchmod(target.fileno(), stat.S_IMODE(before.st_mode))
+                target.flush(); os.fsync(target.fileno())
+            os.utime(temporary, ns=(before.st_atime_ns, before.st_mtime_ns))
+            if digest(temporary) != expected or identity(source.lstat()) != identity(before):
+                raise RuntimeError('observer_copy_identity_or_hash_changed')
+            os.replace(temporary, source)
+            parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try: os.fsync(parent)
+            finally: os.close(parent)
+            if _assert_root_file(source).st_nlink != 1 or digest(source) != expected:
+                raise RuntimeError('observer_copy_not_independent')
+            copied += 1
+        finally:
+            os.close(opened)
+            temporary.unlink(missing_ok=True)
+    return copied
+
+
+@contextmanager
+def _observer_install_lock(descriptor: int):
+    """FD9 is a duplicate of the SAME open lock description, not a new lock."""
+    if type(descriptor) is not int:
+        raise RuntimeError('observer_install_lock_not_held')
+    current, expected = os.fstat(descriptor), LOCK.lstat()
+    if (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino):
+        raise RuntimeError('observer_install_lock_identity_mismatch')
+    if descriptor == 9:
+        yield
+        return
+    try: saved = os.dup(9)
+    except OSError as exc:
+        if exc.errno != 9: raise
+        saved = None
+    os.dup2(descriptor, 9, inheritable=False)
+    try: yield
+    finally:
+        if saved is None: os.close(9)
+        else:
+            os.dup2(saved, 9, inheritable=False)
+            os.close(saved)
+
+
+def _load_success_observer(current: str):
+    path = RELEASES / current / 'deploy/record-release-success.py'
+    spec = importlib.util.spec_from_file_location('domestic_success_observer', path)
+    observer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(observer)
+    return observer
+
+
+def _reap_observer_scratch() -> int:
+    """Closed copy work is identified by its fixed private producer namespace.
+    The original exclusive install lock excludes another active copy writer.
+    """
+    allowed = {'record-release-success.py', 'cleanup-releases.py', 'post-release-retention.py'}
+    removed = 0
+    _assert_root_directory(RELEASES)
+    for directory in RELEASES.glob('.domestic-observer-*'):
+        _assert_root_directory(directory, private=True)
+        if directory.stat().st_dev != RELEASES.stat().st_dev:
+            raise RuntimeError('observer_copy_work_is_mounted')
+        for item in directory.iterdir():
+            info = _assert_root_file(item)
+            if item.name not in allowed or info.st_nlink != 1 or info.st_dev != directory.stat().st_dev:
+                raise RuntimeError('observer_copy_work_content_unclassified')
+        shutil.rmtree(directory)
+        removed += 1
+    return removed
+
+
+def _ensure_current_success(current: str, cleanup, descriptor: int, scratch: Path) -> dict:
+    package = cleanup.verified_package(RELEASES / current)
+    fact = ROOT / cleanup.SUCCESS_DIRECTORY / (current + '.json')
+    if fact.exists() or fact.is_symlink():
+        cleanup.verified_success(ROOT, package)
+        return {'status': 'verified_existing', 'detached_observer_files': 0}
+    # Use a sibling outside the SHA package, on its own filesystem. A killed
+    # copy leaves classified private work, never invalidates package inventory.
+    with tempfile.TemporaryDirectory(prefix='.domestic-observer-', dir=RELEASES) as copied_work:
+        copied = _detach_observer_files(current, Path(copied_work))
+    # Hashes, schema, current pointer and both process images are checked by
+    # the original installed observer, not inferred from a 200 response.
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        observer = _load_success_observer(current)
+        with _observer_install_lock(descriptor):
+            value = observer.record(current)
+    finally:
+        sys.dont_write_bytecode = previous
+    cleanup.verified_success(ROOT, cleanup.verified_package(RELEASES / current))
+    return {'status': 'observed_current', 'sequence': value['sequence'],
+            'detached_observer_files': copied}
+
+
+def _verified_native_previous(receipt: dict) -> str | None:
+    """Keep a complete immediate predecessor without inventing old observer
+    facts or treating a missing legacy fact as compatible rollback evidence.
+    """
+    previous = receipt.get('previous_sha')
+    if previous is None:
+        return None
+    if not isinstance(previous, str) or not SHA.fullmatch(previous):
+        raise RuntimeError('native_previous_receipt_identity_invalid')
+    if not (RELEASES / previous).exists() or not (RECEIPTS / (previous + '.json')).exists():
+        return None
+    earlier, _, receipt_digest = _read_install_receipt(previous)
+    _verify_installed_app(previous, earlier['source_tree'], earlier['manifest_sha256'],
+                          receipt_digest, require_current=False)
+    return previous
+
+
 def reclaim_obsolete_releases() -> dict:
     """Reuse verified retention under the original production install lock.
 
@@ -2552,19 +2691,24 @@ def reclaim_obsolete_releases() -> dict:
     unreferenced package cleanup.
     """
     require_host_role("production")
-    with _production_release_lock():
+    with _production_release_lock() as descriptor:
         cursor = _read_main_state()
         _, receipt = _reverify_main_cursor(cursor)
         current = current_sha()
         if current != cursor["installed_app_sha"]:
             raise RuntimeError("cleanup current differs from verified cursor")
         readiness(current)
+        reaped_observer_work = _reap_observer_scratch()
         protected = {current}
+        previous = _verified_native_previous(receipt)
+        if previous:
+            protected.add(previous)
         cleanup, schema_reader = _release_retention_helpers(current)
         with tempfile.TemporaryDirectory(prefix=".domestic-retention-", dir=ROOT) as temporary:
             schema = Path(temporary) / "schema.json"
             schema.write_text(json.dumps(schema_reader.snapshot(current, schema_reader.database_environment(ENV))))
             try:
+                observation = _ensure_current_success(current, cleanup, descriptor, Path(temporary))
                 plan = cleanup.inventory(ROOT, schema, sorted(protected))
             except cleanup.Refuse:
                 # The normal success observer materializes immutable rsync
@@ -2579,12 +2723,19 @@ def reclaim_obsolete_releases() -> dict:
                         "latest_complete_previous_release": plan["latest_complete_previous_release"],
                         "blockers": plan["blockers"]}
             result = cleanup.apply_plan(ROOT, schema, plan, sorted(protected))
+            remaining = cleanup.inventory(ROOT, schema, sorted(protected))
+            if remaining['blockers'] or remaining['candidate_count']:
+                raise RuntimeError('release_cleanup_has_remaining_candidates')
         protected.update(entry["name"] for entry in plan["entries"]
                          if entry["action"] == "protect" and entry.get("retained_for"))
         return {"status": "completed", "protected": sorted(protected),
                 "removed": [entry["name"] for entry in result["deleted"]],
                 "rollback_releases": result["rollback_releases"],
-                "latest_complete_previous_release": result["latest_complete_previous_release"],
+                "latest_complete_previous_release": previous or result["latest_complete_previous_release"],
+                "legacy_observed_previous_release": result["latest_complete_previous_release"],
+                "current_observation": observation,
+                "closed_observer_work_removed": reaped_observer_work,
+                "remaining_candidate_count": remaining['candidate_count'],
                 "deleted_bytes": result["deleted_bytes"],
                 "policy": "existing_verified_release_retention"}
 

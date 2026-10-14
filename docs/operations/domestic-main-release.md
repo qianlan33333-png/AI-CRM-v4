@@ -105,3 +105,11 @@ sudo /usr/local/libexec/aicrm/domestic-promote.py --read-domestic-main
 ```
 
 依据原 attempt、原进程与安装收据明确结果后，才按已授权原恢复入口推进。不可把一次 SSH 断开当作安装失败或重新安装许可。
+
+### 国内发布自动收尾
+
+国内安装器在原安装锁内复用当前包成功观察器，准确事实已存在则复用；缺事实时先把仍共享的三份 observer 代码原子复制为独立 inode（内容与权限不变），观察真实 schema/API/worker/current 后记录。公开构件允许 root owner-write，与普通未共享包一致；所有硬链接别名和父链须受 root 管理、无组/其他用户写入，私密及外部别名继续拒绝，不对共享 inode chmod/chown。
+
+清理保留当前包、完整 native 前驱、已有兼容回滚和活跃引用；前驱来自已验证收据 previous_sha，不从源码 SHA 猜测、不补造旧 success fact。调用原 inventory/apply_plan 后再次 inventory，零候选且无 blocker 才记 completed。每次原 release/promote 的成功收尾自动执行；不新增 timer。异常保留原证据，不能把拒绝或未完成记为清理通过。
+
+`releases/.domestic-observer-*` 是安装器专属的 root 私有生成目录，仅允许三份 observer 副本；在原排他安装锁内回收关闭的工作目录。中断副本允许不完整，不能放业务文件、凭据或其他任务输出；未知文件、符号链接及跨设备挂载拒绝清理。

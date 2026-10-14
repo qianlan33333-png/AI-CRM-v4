@@ -42,6 +42,7 @@ class PackageGC(unittest.TestCase):
             patch.object(m, '_reverify_main_cursor', return_value=(cursor, {'previous_sha': self.names[-2]})),
             patch.object(m, 'current_sha', return_value=self.current), patch.object(m, 'readiness'),
             patch.object(m, '_release_retention_helpers', return_value=(cleanup, schema_reader)),
+            patch.object(m, '_assert_root_directory', side_effect=lambda p, **kw: cleanup.require_control_directory(p, private=kw.get('private', False))),
         ):
             context.start()
             self.addCleanup(context.stop)
@@ -147,6 +148,51 @@ class PackageGC(unittest.TestCase):
         result = m.reclaim_obsolete_releases()
         self.assertEqual(result['status'], 'completed')
         self.assertEqual((self.root / 'current').resolve().name, self.current)
+
+    def test_repeat_cleanup_has_zero_remaining_candidates_and_reuses_success(self):
+        first = m.reclaim_obsolete_releases()
+        second = m.reclaim_obsolete_releases()
+        self.assertEqual(first['current_observation']['status'], 'verified_existing')
+        self.assertEqual(second['removed'], [])
+        self.assertEqual(second['remaining_candidate_count'], 0)
+        self.assertTrue((self.root / 'releases' / self.current).is_dir())
+
+    def test_observation_failure_never_deletes_a_package(self):
+        with patch.object(m, '_ensure_current_success', side_effect=RuntimeError('synthetic failed observation')), patch.object(cleanup, 'apply_plan') as apply:
+            with self.assertRaisesRegex(RuntimeError, 'failed observation'):
+                m.reclaim_obsolete_releases()
+            apply.assert_not_called()
+        self.assertTrue(all((self.root / 'releases' / name).is_dir() for name in self.names))
+
+    def test_verified_native_previous_is_retained_without_fake_legacy_fact(self):
+        (self.root / cleanup.SUCCESS_DIRECTORY / (self.names[0] + '.json')).unlink()
+        with patch.object(m, '_verified_native_previous', return_value=self.names[0]):
+            result = m.reclaim_obsolete_releases()
+        self.assertIn(self.names[0], result['protected'])
+        self.assertEqual(result['latest_complete_previous_release'], self.names[0])
+        self.assertFalse((self.root / cleanup.SUCCESS_DIRECTORY / (self.names[0] + '.json')).exists())
+
+    def test_native_previous_uses_install_receipt_not_source_main(self):
+        previous = self.names[0]
+        receipts = self.root / 'domestic-receipts'; receipts.mkdir()
+        (receipts / (previous + '.json')).write_text('{}')
+        fact = {'source_tree': 'e' * 40, 'manifest_sha256': 'a' * 64}
+        with patch.object(m, 'RECEIPTS', receipts), patch.object(m, '_read_install_receipt', return_value=(fact, b'', 'b' * 64)), patch.object(m, '_verify_installed_app') as verify:
+            self.assertEqual(m._verified_native_previous({'previous_sha': previous, 'main_sha': 'f' * 40}), previous)
+            verify.assert_called_once_with(previous, fact['source_tree'], fact['manifest_sha256'], 'b' * 64, require_current=False)
+        with self.assertRaisesRegex(RuntimeError, 'identity_invalid'):
+            m._verified_native_previous({'previous_sha': '../unexpected'})
+
+    def test_closed_observer_copy_is_reaped_but_unknown_contents_refused(self):
+        work = self.root / 'releases/.domestic-observer-closed'; work.mkdir(mode=0o700)
+        (work / 'cleanup-releases.py').write_text('interrupted copy')
+        with patch.object(m, '_assert_root_file', side_effect=lambda p: p.lstat()):
+            result = m.reclaim_obsolete_releases()
+            self.assertEqual(result['closed_observer_work_removed'], 1)
+            self.assertFalse(work.exists())
+            work.mkdir(mode=0o700); (work / 'unknown.env').write_text('synthetic protected data')
+            with self.assertRaisesRegex(RuntimeError, 'unclassified'): m.reclaim_obsolete_releases()
+            self.assertTrue(work.exists())
 
 
 if __name__ == '__main__':

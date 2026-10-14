@@ -1,55 +1,33 @@
 {
   "schema": 1,
-  "baseline_sha": "2e627d53078844449ff0b3a1d44a773c8d88da58",
+  "baseline_sha": "9642d831c2538d51c78372858f28ab84cbbf1b9b",
   "checks": [
     {
       "lane": "preflight",
       "path": "deploy/test_cleanup_releases.py",
-      "reason": "完整前驱、活跃引用及硬链边界"
+      "reason": "公开别名的实际写权限和旧包保留边界"
     },
     {
       "lane": "preflight",
       "path": "deploy/test_domestic_promote_gc.py",
-      "reason": "固定安装器与包内清理消费者"
+      "reason": "原控制器清理与重复零候选"
+    },
+    {
+      "lane": "preflight",
+      "path": "deploy/test_domestic_retention_observer.py",
+      "reason": "FD9 原锁 原子独立副本 真实成功观察"
+    },
+    {
+      "lane": "preflight",
+      "path": "deploy/test_release_success.py",
+      "reason": "原成功观察器及原收据生命周期"
     },
     {
       "lane": "preflight",
       "path": "deploy/test_host_maintenance.py",
-      "reason": "原锁内完成清理与明确 warning"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/aicrm",
-      "test": "TestRuntimeConfigCheckUsesStartupValidation",
-      "reason": "实际启动 Load 与无副作用校验同合同"
-    },
-    {
-      "lane": "backend",
-      "package": "./cmd/generate-cli-catalog",
-      "reason": "机械目录生成的身份协议"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/crmcli",
-      "test": "TestCatalogRetainsV1AndCoversSidebarWithoutExecutableGaps",
-      "reason": "新增机械目录的直接 CLI 消费者"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/crmcli",
-      "test": "TestCLIExecutionReceiptsReadJourney",
-      "reason": "目录与本批管理回执实际读取合同"
-    },
-    {
-      "lane": "preflight",
-      "path": "scripts/test_release_optimization.py",
-      "reason": "安装 runner 路径与原收据/增量结果保护"
+      "reason": "完成后清理调用消费者"
     }
   ],
-  "installed_checks": [
-    "release-runtime-config"
-  ],
-  "build_commands": [
-    "./cmd/aicrm-cli"
-  ]
+  "installed_checks": [],
+  "build_commands": []
 }
