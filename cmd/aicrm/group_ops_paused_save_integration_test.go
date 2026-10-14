@@ -153,8 +153,8 @@ func TestGroupOpsPostgreSQLActivePlanRequiresExplicitPauseBeforeConfiguration(t 
 	if err != nil || saved.Plan.Status != groupopsport.PlanPaused || saved.Plan.Revision != paused.Plan.Revision+1 {
 		t.Fatalf("paused save=%+v err=%v", saved, err)
 	}
-	if _, err = service.AddGroupAsset(ctx, groupopsport.GroupAssetCommand{PlanID: saved.Plan.ID, ExpectedRevision: saved.Plan.Revision, AssetRef: "must-remain-draft-only", Actor: actor, IdempotencyKey: "active-pause-reject-group"}); !errors.Is(err, groupopsapp.ErrStateConflict) {
-		t.Fatalf("paused group mutation=%v", err)
+	if added, addErr := service.AddGroupAsset(ctx, groupopsport.GroupAssetCommand{PlanID: saved.Plan.ID, ExpectedRevision: saved.Plan.Revision, AssetRef: "paused-edit-group", Actor: actor, IdempotencyKey: "active-pause-edit-group"}); addErr != nil || added.Plan.Status != groupopsport.PlanPaused || len(added.GroupAssets) != 2 {
+		t.Fatalf("paused group mutation=%+v err=%v", added, addErr)
 	}
 	for table, want := range map[string]int{"external_effects": 0, "river_job": 0} {
 		var count int

@@ -68,15 +68,20 @@ type Store interface {
 }
 
 type Service struct {
-	uow    platformport.UnitOfWork
-	store  Store
-	staff  groupopsport.ActiveStaffReader
-	events groupopsport.EventAppender
-	now    func() time.Time
+	uow         platformport.UnitOfWork
+	store       Store
+	staff       groupopsport.ActiveStaffReader
+	events      groupopsport.EventAppender
+	groupOwners groupopsport.ExecutionTargetOwnerResolver
+	now         func() time.Time
 }
 
-func NewService(uow platformport.UnitOfWork, store Store, staff groupopsport.ActiveStaffReader, events groupopsport.EventAppender) *Service {
-	return &Service{uow: uow, store: store, staff: staff, events: events, now: time.Now}
+func NewService(uow platformport.UnitOfWork, store Store, staff groupopsport.ActiveStaffReader, events groupopsport.EventAppender, owners ...groupopsport.ExecutionTargetOwnerResolver) *Service {
+	s := &Service{uow: uow, store: store, staff: staff, events: events, now: time.Now}
+	if len(owners) > 0 {
+		s.groupOwners = owners[0]
+	}
+	return s
 }
 
 func (s *Service) List(ctx context.Context, limit, offset int32) (groupopsport.PlanPage, error) {
@@ -272,7 +277,23 @@ func (s *Service) AddGroupAsset(ctx context.Context, command groupopsport.GroupA
 	if !ready(s) || !validAssetCommand(command) {
 		return groupopsport.Detail{}, invalidOrUnavailable(s)
 	}
-	return s.mutate(ctx, "group_asset_add", command.PlanID, command.ExpectedRevision, command.Actor, command.IdempotencyKey, command, func(_ context.Context, detail *groupopsport.Detail, _ time.Time) error {
+	return s.mutate(ctx, "group_asset_add", command.PlanID, command.ExpectedRevision, command.Actor, command.IdempotencyKey, command, func(tx context.Context, detail *groupopsport.Detail, _ time.Time) error {
+		if s.groupOwners != nil {
+			owner, found, err := s.groupOwners.ResolveExecutionOwner(tx, command.AssetRef)
+			if err != nil {
+				return ErrUnavailable
+			}
+			if !found || len(detail.Members) != 1 || owner != detail.Members[0].StaffID {
+				return ErrInvalid
+			}
+			active, err := s.staff.IsActiveStaff(tx, owner)
+			if err != nil {
+				return ErrUnavailable
+			}
+			if !active {
+				return ErrInvalid
+			}
+		}
 		for _, asset := range detail.GroupAssets {
 			if asset.AssetRef == command.AssetRef {
 				return ErrConflict
@@ -416,9 +437,9 @@ func (s *Service) mutate(ctx context.Context, operation string, planID, expected
 			return groupopsport.Detail{}, ErrConflict
 		}
 		// A paused plan can repair its basic definition without activating it.
-		// Keep other configuration mutations draft-only and retain revision fences
+		// Permit group binding repair too; keep node mutations draft-only and revision fences
 		// so previously accepted executions cannot use the changed definition.
-		if detail.Plan.Status != groupopsport.PlanDraft && operation != "plan_pause" && operation != "plan_archive" && !((operation == "plan_activate" || operation == "plan_update" || operation == "webhook_descriptor_put") && detail.Plan.Status == groupopsport.PlanPaused) {
+		if detail.Plan.Status != groupopsport.PlanDraft && operation != "plan_pause" && operation != "plan_archive" && !((operation == "plan_activate" || operation == "plan_update" || operation == "webhook_descriptor_put" || operation == "group_asset_add" || operation == "group_asset_remove") && detail.Plan.Status == groupopsport.PlanPaused) {
 			return groupopsport.Detail{}, ErrStateConflict
 		}
 		if err := change(tx, &detail, now); err != nil {

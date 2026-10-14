@@ -976,7 +976,7 @@ func composeWithWeComClientFactoryAndSurveyCompletionHTTPClient(ctx context.Cont
 	// dispatch grant cannot silently authorize a new provider-read path.
 	groupOpsDirectory := &wecomGroupOpsDirectory{uow: uow, enabled: cfg.GroupOps.ProviderReadEnabled, staff: groupOpsStaff}
 	groupOpsEvidence := groupopsport.ReconciliationEvidenceVerifier(providerDisabledGroupOpsEvidence{})
-	groupOpsService := groupopsapp.NewService(uow, groupOpsRepository, groupOpsStaff, groupOpsRepository)
+	groupOpsService := groupopsapp.NewService(uow, groupOpsRepository, groupOpsStaff, groupOpsRepository, groupOpsRepository)
 	groupOpsHistory := groupopsapp.NewHistoryService(uow, groupOpsRepository)
 	groupOpsRuntime := groupopsapp.NewRuntimeService(uow, groupOpsRepository, groupOpsRepository, effectRepository, groupOpsStaff, groupOpsDirectory, groupOpsStaff, groupOpsEvidence, groupOpsExternalReconciler{repository: effectRepository}, groupOpsMaterials)
 	groupOpsRuntime.SetDispatchEnabled(cfg.GroupOps.ProviderEnabled)

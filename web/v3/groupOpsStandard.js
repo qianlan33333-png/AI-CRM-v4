@@ -18,6 +18,7 @@
     plan: null,
     planGroups: [],
     groupSummary: null,
+    ownerGroupTotal: null,
     nodes: [],
     webhook: null,
     ownerOptions: [],
@@ -245,6 +246,10 @@
     return Boolean(plan && plan.status === "draft");
   }
 
+  function planAllowsGroupConfiguration(plan) {
+    return planAllowsBasicConfiguration(plan);
+  }
+
   function planReadbackPending() {
     return Boolean(state.planReadbackPending);
   }
@@ -272,7 +277,7 @@
   }
 
   function draftOnlyLockMessage() {
-    return "绑定群和标准编排只可在草稿计划中调整。停用后，基础配置和 Webhook 可编辑；绑定群和标准编排保持只读。";
+    return "标准编排只可在草稿计划中调整。停用后，基础配置和 Webhook 可编辑；绑定群和标准编排保持只读。";
   }
 
   function setPlanReadbackPending(planID, mode) {
@@ -801,7 +806,7 @@
       return renderDetail();
     }
     const activeWriteActions = new Set([
-      "save-plan", "save-active-detail-panel", "refresh-owner-groups", "pick-plan-owner",
+      "save-plan", "save-active-detail-panel", "pick-plan-owner",
       "bind-group", "open-group-picker", "confirm-group-picker", "remove-group",
       "open-node-modal", "edit-node", "configure-node-content", "save-node", "delete-node", "save-webhook",
     ]);
@@ -813,7 +818,6 @@
       return renderDetail();
     }
     const draftOnlyActions = new Set([
-      "bind-group", "open-group-picker", "confirm-group-picker", "remove-group",
       "open-node-modal", "edit-node", "configure-node-content", "save-node", "delete-node",
     ]);
     if (!planAllowsDraftConfiguration(state.plan) && draftOnlyActions.has(action)) {
@@ -837,6 +841,7 @@
       return renderDetail();
     }
     if (action === "refresh-owner-groups") return refreshOwnerGroups();
+    if (action === "reload-owner-groups") return reloadOwnerGroups();
     if (action === "enable-plan") return enablePlan(listActionFromElement(event.currentTarget));
     if (action === "disable-plan") return disablePlan(listActionFromElement(event.currentTarget));
     if (action === "delete-plan") return deletePlan(listActionFromElement(event.currentTarget));
@@ -876,8 +881,7 @@
       value: currentFormValue("owner_userid") || (state.plan || {}).owner_userid,
       onPicked: (member) => {
         if (state.plan) {
-          state.plan.owner_userid = memberStaffId(member);
-          state.plan.owner_name = member.display_name || member.name || member.user_id || "";
+          state.planDraft = { ...planDraft(), owner_userid: memberStaffId(member) };
         }
         void loadOwnerGroups(memberStaffId(member));
       },
@@ -885,7 +889,7 @@
     }
     if (action === "pick-group-filter-owner") return openMemberPicker({
       fieldName: "owner_userid",
-      title: "选择群主/管理员",
+      title: "选择群主",
       value: currentFormValue("owner_userid"),
       allowEmpty: true,
       onPicked: (member) => {
@@ -1445,7 +1449,7 @@
       renderDetail();
       return;
     }
-    if (!window.confirm("停用后将停止接收新的计划执行。本次不会直接改动现有计划内容；停用后仅可编辑基础配置和 Webhook，绑定群与标准编排仍保持只读。确认停用？")) return;
+    if (!window.confirm("停用后将停止接收新的计划执行。本次不会直接改动现有计划内容；停用后可编辑基础配置、绑定群和 Webhook。保存绑定群后需手动重新启用。确认停用？")) return;
     state.pausingPlan = true;
     const generation = ++detailReadGeneration;
     state.notice = "停用中";
@@ -1509,14 +1513,14 @@
   }
 
   async function bindGroup(chatId) {
-    if (!state.plan || !chatId || planMutationLocked() || !planAllowsDraftConfiguration(state.plan)) return;
+    if (!state.plan || !chatId || planMutationLocked() || !planAllowsGroupConfiguration(state.plan)) return;
     await requestJson(routes.apiPlanGroups(state.plan.id), { method: "POST", body: { chat_id: chatId, operator: "admin_ui" } });
     state.notice = "已添加";
     loadDetailPage(state.plan.id);
   }
 
   function openGroupPicker() {
-    if (planMutationLocked() || !planAllowsDraftConfiguration(state.plan)) return;
+    if (planMutationLocked() || !planAllowsGroupConfiguration(state.plan)) return;
     state.showGroupPicker = true;
     state.groupPickerSearch = "";
     state.groupPickerNotice = "";
@@ -1532,7 +1536,7 @@
   }
 
   async function confirmGroupPicker() {
-    if (!state.plan || !state.plan.id || state.bindingGroups || planMutationLocked() || !planAllowsDraftConfiguration(state.plan)) return;
+    if (!state.plan || !state.plan.id || state.bindingGroups || planMutationLocked() || !planAllowsGroupConfiguration(state.plan)) return;
     const selected = Array.from(app.querySelectorAll("[data-group-choice]:checked")).map((item) => item.value).filter(Boolean);
     if (!selected.length) {
       state.groupPickerNotice = "请选择群";
@@ -1561,7 +1565,7 @@
   }
 
   async function removeGroup(chatId) {
-    if (!state.plan || !chatId || planMutationLocked() || !planAllowsDraftConfiguration(state.plan)) return;
+    if (!state.plan || !chatId || planMutationLocked() || !planAllowsGroupConfiguration(state.plan)) return;
     await requestJson(routes.apiPlanGroup(state.plan.id, chatId), { method: "DELETE" });
     state.notice = "已移除";
     loadDetailPage(state.plan.id);
@@ -1572,7 +1576,7 @@
       && detailGeneration === detailReadGeneration
       && state.mode === "detail"
       && Number(state.plan?.id) === planId
-      && currentFormValue("owner_userid") === ownerStaffId;
+      && (currentFormValue("owner_userid") || String(state.plan?.owner_userid || "")) === ownerStaffId;
   }
 
   function invalidateOwnerGroupsRefresh() {
@@ -1602,6 +1606,7 @@
       const payload = await requestJson(`${routes.apiGroups}?owner_userid=${encodeURIComponent(owner)}`);
       if (!isCurrent()) return;
       state.groups = normalizeItems(payload);
+      state.ownerGroupTotal = Number.isSafeInteger(payload.total) ? payload.total : null;
       renderDetail();
     } catch (error) {
       if (!isCurrent()) return;
@@ -1611,8 +1616,26 @@
     }
   }
 
+  async function reloadOwnerGroups() {
+    if (!state.plan || planMutationLocked() || state.refreshingOwnerGroups) return;
+    const planID = Number(state.plan.id);
+    const generation = ++detailReadGeneration;
+    try {
+      const detail = await readDetailPage(planID);
+      if (!applyDetailPage(detail, planID, generation)) return;
+      state.notice = "已重新读取群列表";
+      state.noticeIsError = false;
+      renderDetail();
+    } catch (error) {
+      if (generation !== detailReadGeneration) return;
+      state.notice = requestErrorMessage(error, "群列表读取失败，原绑定已保留");
+      state.noticeIsError = true;
+      renderDetail();
+    }
+  }
+
   async function refreshOwnerGroups() {
-    if (!state.plan || planMutationLocked() || !planAllowsBasicConfiguration(state.plan)) return;
+    if (!state.plan || planMutationLocked() || planIsArchived(state.plan)) return;
     const owner = currentFormValue("owner_userid") || state.plan.owner_userid || "";
     if (!owner) {
       state.notice = "请选择运营成员";
@@ -1641,7 +1664,10 @@
       const payload = await requestJson(`${routes.apiGroups}?owner_userid=${encodeURIComponent(owner)}`);
       if (!isCurrent()) return;
       state.groups = normalizeItems(payload);
-      state.notice = `已刷新：新增 ${formatNumber(synced.new_count || 0)} 个，更新 ${formatNumber(synced.updated_count || 0)} 个`;
+      state.ownerGroupTotal = Number.isSafeInteger(payload.total) ? payload.total : null;
+      state.notice = synced.catalog_sync
+        ? "群资料同步已受理；任务完成后点击“重新读取群列表”查看最新名称和可选群。"
+        : `已刷新运营者名下 ${formatNumber(state.ownerGroupTotal)} 个群`;
       state.noticeIsError = false;
     } catch (error) {
       if (!isCurrent()) return;
@@ -1977,6 +2003,7 @@
       planGroups: normalizeItems(groupPayload),
       groupSummary: groupPayload.summary || null,
       groups: normalizeItems(allGroupsPayload),
+      ownerGroupTotal: Number.isSafeInteger(allGroupsPayload.total) ? allGroupsPayload.total : null,
       ownerOptions: normalizeOwners(ownersPayload, plan),
       nodes: isWebhook ? [] : normalizeItems(typePayload),
       webhook: isWebhook ? typePayload : null,
@@ -1989,6 +2016,7 @@
     state.planGroups = detail.planGroups;
     state.groupSummary = detail.groupSummary;
     state.groups = detail.groups;
+    state.ownerGroupTotal = detail.ownerGroupTotal;
     state.ownerOptions = detail.ownerOptions;
     state.nodes = detail.nodes;
     state.webhook = detail.webhook;
@@ -2033,12 +2061,12 @@
   function groupManageableBy(group, userid) {
     const member = String(userid || "").trim();
     if (!member) return false;
-    return group.owner_userid === member || groupAdminUserids(group).includes(member);
+    return group.owner_userid === member;
   }
 
   function renderBoundGroups() {
     if (!state.planGroups.length) return '<div class="group-ops__empty">暂无绑定群</div>';
-    const editable = planAllowsDraftConfiguration(state.plan);
+    const editable = planAllowsGroupConfiguration(state.plan);
     const locked = planMutationLocked();
     return state.planGroups
       .map(
@@ -2082,7 +2110,7 @@
   }
 
   function renderGroupPickerModal() {
-    if (!state.showGroupPicker || !planAllowsDraftConfiguration(state.plan)) return "";
+    if (!state.showGroupPicker || !planAllowsGroupConfiguration(state.plan)) return "";
     return `
       <div class="group-ops__modal-mask" role="dialog" aria-modal="true">
         <div class="group-ops__modal group-ops__modal--groups">
@@ -2109,7 +2137,7 @@
 
   function renderRefreshOwnerGroupsButton() {
     const owner = currentFormValue("owner_userid") || (state.plan && state.plan.owner_userid) || "";
-    const disabled = !owner || state.refreshingOwnerGroups || !planAllowsBasicConfiguration(state.plan) || planMutationLocked();
+    const disabled = !owner || state.refreshingOwnerGroups || planIsArchived(state.plan) || planMutationLocked();
     return `<button class="group-ops__button" type="button" data-action="refresh-owner-groups"${disabled ? " disabled" : ""}>${
       state.refreshingOwnerGroups ? "刷新中" : "刷新名下群聊"
     }</button>`;
@@ -2408,18 +2436,23 @@
   }
 
   function renderGroupsPanel() {
-    const editable = planAllowsDraftConfiguration(state.plan);
+    const editable = planAllowsGroupConfiguration(state.plan);
+    const owner = state.plan.owner_name || "未配置运营者";
+    const active = planIsActive(state.plan);
     return `
       <section class="group-ops__panel${state.activeDetailPanel === "groups" ? " is-active" : ""}" id="panel-groups">
         <div class="group-ops__panel-title-row">
           <h3>绑定群</h3>
-          ${editable ? actionButton("选择群", "open-group-picker", "group-ops__button--primary", planMutationLocked()) : '<span class="group-ops__chip group-ops__chip--neutral">只读</span>'}
+          ${editable ? actionButton("选择群", "open-group-picker", "group-ops__button--primary", planMutationLocked() || !state.plan.owner_userid || Boolean(state.planDraft)) : active ? actionButton("停用后编辑绑定群", "pause-detail-plan", "group-ops__button--primary", planMutationLocked()) : '<span class="group-ops__chip group-ops__chip--neutral">只读</span>'}
         </div>
-        ${editable ? "" : `<div class="group-ops__notice">${escapeHtml(planIsActive(state.plan) ? activePlanLockMessage() : draftOnlyLockMessage())}</div>`}
-        <div class="group-ops__group-list">${renderBoundGroups()}</div>
+        <p class="group-ops__group-meta">运营者：${escapeHtml(owner)} · 名下群 ${formatNumber(state.ownerGroupTotal)} 个 · 已绑定 ${formatNumber(state.planGroups.length)} 个。仅可选择该运营者担任群主的群。</p>
+        ${state.planDraft ? '<div class="group-ops__notice">请先保存基础配置，再按已保存的运营者选择群。</div>' : ""}
+        ${active ? '<div class="group-ops__notice">群资料可直接刷新。修改绑定前请停用计划，保存后再手动启用。</div>' : ""}
         <div class="group-ops__panel-actions">
-          ${planAllowsBasicConfiguration(state.plan) ? renderRefreshOwnerGroupsButton() : ""}
+          ${!planIsArchived(state.plan) ? renderRefreshOwnerGroupsButton() : ""}
+          ${actionButton("重新读取群列表", "reload-owner-groups", "", state.refreshingOwnerGroups || planMutationLocked())}
         </div>
+        <div class="group-ops__group-list">${renderBoundGroups()}</div>
       </section>
     `;
   }
@@ -2565,7 +2598,7 @@
       <section class="group-ops__card">
         <div class="group-ops__filters">
           <label class="group-ops__field group-ops__field--wide"><span>群名 / 群 ID</span><input name="keyword" data-filter value="${escapeHtml(state.groupKeywordDraft)}"></label>
-          <label class="group-ops__field"><span>群主/管理员</span>${renderMemberField("owner_userid", memberStaffId(state.groupFilterOwner), "pick-group-filter-owner", state.groupFilterOwner ? "更换成员" : "选择成员")}</label>
+          <label class="group-ops__field"><span>群主</span>${renderMemberField("owner_userid", memberStaffId(state.groupFilterOwner), "pick-group-filter-owner", state.groupFilterOwner ? "更换成员" : "选择成员")}</label>
           <div class="group-ops__row-actions">${actionButton("清除成员", "clear-group-filter-owner")}</div>
           <label class="group-ops__field"><span>所属计划</span><select name="plan_id" data-filter><option value="">全部</option>${renderPlanFilter()}</select></label>
           <label class="group-ops__field"><span>已绑定 / 未绑定</span><select name="bind_status" data-filter><option value=""${state.groupBindStatus === "" ? " selected" : ""}>全部</option><option value="bound"${state.groupBindStatus === "bound" ? " selected" : ""}>已绑定</option><option value="unbound"${state.groupBindStatus === "unbound" ? " selected" : ""}>未绑定</option></select></label>

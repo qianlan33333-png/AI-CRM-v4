@@ -736,7 +736,7 @@ try {
     assert.equal(fullWindow.document.querySelector('.group-ops__notice--error')?.getAttribute('role'), 'alert', "save failure must remain an accessible alert");
     assert.equal(fullWindow.document.querySelector('[name="owner_userid"]').value, "9");
     assert.equal(state.plan.name, "一次提交", "failed save must not pretend the server changed");
-    assert.equal(fullWindow.document.body.textContent.includes("已保存"), false);
+    assert.equal(fullWindow.document.querySelector('.group-ops__notice--error').textContent.includes("已保存"), false);
   }
   saveFailure = "";
   assert.equal(fullWindow.document.querySelector('[name="status"]').value, "disabled", "paused server state must remain stopped in the frozen form");
@@ -970,7 +970,7 @@ try {
   fullWindow.document.querySelector('[data-action="switch-detail-panel"][data-panel="groups"]').click();
   const writesBeforeRefresh = calls.filter(item => item.method !== "GET" && !item.path.endsWith("/sync")).length;
   fullWindow.document.querySelector('[data-action="refresh-owner-groups"]').click();
-  await waitFor(() => fullWindow.document.body.textContent.includes("已刷新 3 个群聊"), "snapshot total notice missing");
+  await waitFor(() => fullWindow.document.body.textContent.includes("已刷新运营者名下"), "snapshot total notice missing");
   assert(fullWindow.document.querySelector('.group-ops__group-name').textContent.includes("同步群名1"), "bound group name must refresh without a page reload");
   assert(fullWindow.document.body.textContent.includes("other-concurrent"), "readback must retain another actor's concurrent binding");
   assert.equal(fullWindow.document.body.textContent.includes("231"), false, "an unknown concurrent binding must not fabricate an aggregate external count");
@@ -1037,7 +1037,7 @@ activeLifecycleWindow.document.cookie = "aicrm_admin_csrf=test-csrf";
 activeLifecycleWindow.confirm = () => true;
 const activeLifecycleCalls = [];
 const activeLifecyclePlan = { plan_id: 12, name: "Webhook 十群计划", revision: 12, status: "active", plan_type: "webhook" };
-const activeLifecycleAssets = Array.from({ length: 10 }, (_, index) => ({ asset_reference: `group-${index + 1}` }));
+const activeLifecycleAssets = Array.from({ length: 10 }, (_, index) => ({ asset_reference: `group-${index + 1}`, display_name: `真实群名${index + 1}`, owner_staff_id: 7, member_count: 12, external_member_count: 8 }));
 const activeLifecycleDetail = () => ({ plan: clone(activeLifecyclePlan), members: [{ staff_id: 7 }], group_assets: clone(activeLifecycleAssets), nodes: [] });
 activeLifecycleWindow.fetch = async (input, init = {}) => {
   const url = new URL(String(input), activeLifecycleWindow.location.href);
@@ -1049,6 +1049,7 @@ activeLifecycleWindow.fetch = async (input, init = {}) => {
   if (url.pathname === "/api/admin/automation-conversion/group-ops/plans/12/groups" && method === "GET") return response({ items: clone(activeLifecycleAssets), summary: { bound_group_count: 10 } });
   if (url.pathname === "/api/admin/automation-conversion/group-ops/groups" && method === "GET") return response({ items: [], total: 0, limit: 200, offset: 0, has_more: false });
   if (url.pathname === "/api/admin/automation-conversion/group-ops/plans/12/webhook-descriptor" && method === "GET") return response({ configured: true, reference: "webhook-twelve", path: "/api/automation/group-ops/webhooks/webhook-twelve", signature_algorithm: "HMAC-SHA256" });
+  if (url.pathname === "/api/admin/automation-conversion/group-ops/groups/sync" && method === "POST") return response({ items: [], total: 0, catalog_sync: { enabled: true, run: { id: 1, state: "running" } } }, 202);
   if (url.pathname === "/api/admin/automation-conversion/group-ops/plans/12/disable" && method === "POST") {
     assert.equal(body.expected_revision, 12, "detail pause must use the revision the user saw");
     activeLifecyclePlan.status = "paused";
@@ -1070,13 +1071,19 @@ try {
   assert.equal(activeLifecycleWindow.document.querySelector('[data-action="pause-detail-plan"]')?.__dcBound, true, "explicit lifecycle action must declare shared-feedback ownership");
   assert.equal(activeLifecycleWindow.document.querySelector('[data-action="pause-detail-plan"]')?.dataset.capabilityState, "real", "real lifecycle action must not be marked backend-blocked");
   assert.equal(activeLifecycleCalls.some((call) => call.method === "PUT" || /\/(groups|nodes|webhook-descriptor)$/.test(call.path) && call.method !== "GET"), false, "active detail hydration must issue zero configuration writes");
+  assert.match(activeLifecycleWindow.document.body.textContent, /真实群名1/, "first hydration uses backend group directory facts without opening a picker");
+  assert.ok(activeLifecycleWindow.document.querySelector('[data-action="refresh-owner-groups"]:not([disabled])'), "active plan may refresh metadata");
+  activeLifecycleWindow.document.querySelector('[data-action="refresh-owner-groups"]').click();
+  await waitFor(() => activeLifecycleWindow.document.body.textContent.includes("群资料同步已受理"), "active metadata refresh must settle and distinguish queued from completed");
+  assert.equal(activeLifecyclePlan.revision, 12, "refresh never mutates plan revision");
+  assert.ok(activeLifecycleWindow.document.querySelector('[data-action="refresh-owner-groups"]:not([disabled])'), "active refresh lock is released");
   activeLifecycleWindow.document.querySelector('[data-action="pause-detail-plan"]').click();
   await waitFor(() => activeLifecyclePlan.status === "paused" && activeLifecycleWindow.document.querySelector('[data-action="save-plan"]'), "confirmed pause did not complete the authoritative detail readback");
   assert.equal(activeLifecycleCalls.filter((call) => call.path.endsWith("/disable") && call.method === "POST").length, 1, "one explicit click sends one pause command");
   assert.equal(activeLifecycleCalls.filter((call) => call.method === "PUT").length, 0, "pause must not be preceded by a basic configuration PUT");
   assert.equal(activeLifecycleWindow.document.querySelector('[name="plan_name"]')?.disabled, false, "paused plan may edit its basic configuration after readback");
-  assert.equal(activeLifecycleWindow.document.querySelector('[data-action="open-group-picker"]'), null, "paused plan must not expose draft-only group writes");
-  assert.match(activeLifecycleWindow.document.body.textContent, /绑定群和标准编排只可在草稿计划中调整/, "paused plan must explain its remaining draft-only boundary");
+  assert.ok(activeLifecycleWindow.document.querySelector('[data-action="open-group-picker"]'), "paused plan exposes group selection");
+  assert.match(activeLifecycleWindow.document.body.textContent, /仅可选择该运营者担任群主的群/, "paused group selection explains owner scope");
   if (activeLifecycleErrors.length) throw new Error(`active lifecycle DOM errors: ${JSON.stringify(activeLifecycleErrors)}`);
   console.log("groupops-active-plan-lifecycle-dom: PASS");
 } finally {

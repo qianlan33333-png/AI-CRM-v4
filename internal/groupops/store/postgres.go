@@ -162,14 +162,14 @@ func (r *Repository) get(ctx context.Context, id int64, lock bool) (groupopsport
 	// Application validation compares opaque references using Go's bytewise
 	// string order. Database locale collation can place lower-case references
 	// before upper-case ones, so force the same deterministic order here.
-	assetRows, err := tx.Query(ctx, `SELECT id,asset_reference FROM group_ops_plan_group_assets WHERE plan_id=$1 ORDER BY asset_reference COLLATE "C",id`, id)
+	assetRows, err := tx.Query(ctx, `SELECT a.id,a.asset_reference,CASE WHEN g.chat_reference IS NULL THEN '' ELSE COALESCE(NULLIF(g.display_name,''),'未命名群') END,COALESCE(g.owner_staff_id,0),g.member_count,g.external_member_count FROM group_ops_plan_group_assets a LEFT JOIN group_ops_directory_groups g ON g.chat_reference=a.asset_reference WHERE a.plan_id=$1 ORDER BY a.asset_reference COLLATE "C",a.id`, id)
 	if err != nil {
 		return groupopsport.Detail{}, err
 	}
 	detail.GroupAssets = make([]groupopsport.GroupAsset, 0)
 	for assetRows.Next() {
 		var item groupopsport.GroupAsset
-		if err = assetRows.Scan(&item.ID, &item.AssetRef); err != nil {
+		if err = assetRows.Scan(&item.ID, &item.AssetRef, &item.DisplayName, &item.OwnerStaffID, &item.MemberCount, &item.ExternalMemberCount); err != nil {
 			assetRows.Close()
 			return groupopsport.Detail{}, err
 		}
@@ -460,11 +460,11 @@ func (r *Repository) ResolveExecutionOwner(ctx context.Context, target string) (
 		return 0, false, err
 	}
 	var owner int64
-	err = tx.QueryRow(ctx, `SELECT owner_staff_id FROM group_ops_directory_groups WHERE chat_reference=$1`, target).Scan(&owner)
+	err = tx.QueryRow(ctx, `SELECT COALESCE(owner_staff_id,0) FROM group_ops_directory_groups WHERE chat_reference=$1`, target).Scan(&owner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}
-	return owner, err == nil, err
+	return owner, err == nil && owner > 0, err
 }
 
 func (r *Repository) ListExecutionKeys(ctx context.Context, planID, revision int64) ([]groupopsport.ExecutionKey, error) {

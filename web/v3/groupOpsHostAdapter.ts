@@ -443,14 +443,14 @@ async function revision(id: number): Promise<number> {
   return revisions.get(id) || 0;
 }
 function groupView(asset: Json, directoryItem?: GroupPickerRecord): Json {
-  const external = directoryItem?.external_member_count;
-  const total = directoryItem?.member_count;
+  const external = asset.external_member_count ?? directoryItem?.external_member_count;
+  const total = asset.member_count ?? directoryItem?.member_count;
   const knownExternal = external !== null && external !== undefined && Number.isFinite(Number(external));
   const knownTotal = total !== null && total !== undefined && Number.isFinite(Number(total));
   return {
     chat_id: String(asset.asset_reference || asset.chat_reference || ''),
-    group_name: String(directoryItem?.display_name || asset.display_name || '群名称待同步'),
-    owner_userid: directoryItem?.owner_staff_id ? String(directoryItem.owner_staff_id) : '',
+    group_name: String(asset.display_name || directoryItem?.display_name || '群名称待同步'),
+    owner_userid: String(asset.owner_staff_id || directoryItem?.owner_staff_id || ''),
     internal_member_count_snapshot: knownTotal && knownExternal ? Number(total) - Number(external) : null,
     external_member_count_snapshot: knownExternal ? Number(external) : null,
   };
@@ -459,7 +459,7 @@ async function groupsForPlan(id: number, source?: Pick<InitialDetailReadEpoch, '
   const value = await (source?.detail || detail(id));
   const known = planGroupDirectoryViews.get(id) || new Map<string, GroupPickerRecord>();
   // Group bindings are Owner facts. This read only decorates them with a
-  // scoped picker page already authorised for this plan; it never starts a
+  // bound-directory projection or an authorised picker page; it never starts a
   // whole-directory crawl while the detail or node form is loading.
   return (value.group_assets || []).map((asset: Json) => groupView(asset, known.get(String(asset.asset_reference || ''))));
 }
@@ -1389,8 +1389,9 @@ function installSaveFailureFeedback(): void {
   }) as typeof app.querySelectorAll;
 }
 function groupRecord(asset: Json, directoryItem?: Json): GroupPickerRecord {
+  directoryItem = directoryItem || (asset.display_name ? asset : undefined);
   const reference = String(asset.asset_reference || asset.chat_reference || "").trim();
-  const displayName = String(directoryItem?.display_name || asset.display_name || "群名称待同步").trim() || "群名称待同步";
+  const displayName = String(asset.display_name || directoryItem?.display_name || "群名称待同步").trim() || "群名称待同步";
   return {
     chat_reference: reference,
     display_name: displayName,
@@ -1607,11 +1608,13 @@ function installGroupPickerBridge(): void {
         openGroupPicker({
           source: `groupops-plan-${planID}`,
           scope: "group_ops.plan_group_assets",
+          directoryHint: "仅可选择已保存运营者担任群主的群。",
           selectedRecords: initial.records,
-          readonlyReason: initial.status === "draft" ? undefined : initial.status === "archived"
+          readonlyReason: ["draft", "paused"].includes(initial.status) ? undefined : initial.status === "archived"
             ? "计划已归档，不能修改群聊。"
-            : "当前计划状态不允许修改群聊；仅草稿计划可编辑。",
+            : "请先停用计划，再修改绑定群。",
           loadPage: async ({ query, cursor, signal }) => {
+            if (!initial.ownerStaffID) return { items: [], total: 0 };
             const offset = Number(cursor || "0");
             if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("群目录分页标记无效，请重新打开选择器。");
             const params = new URLSearchParams({ limit: "50", offset: String(offset) });
@@ -1637,6 +1640,7 @@ function installGroupPickerBridge(): void {
             });
             return {
               items: records,
+              total: Number.isSafeInteger(page.total) ? page.total : undefined,
               nextCursor: page.has_more === true && items.length ? String(offset + items.length) : undefined,
             };
           },

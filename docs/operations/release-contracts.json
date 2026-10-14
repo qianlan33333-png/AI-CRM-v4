@@ -124,7 +124,9 @@
     "private-message-control": {
       "package": "./cmd/aicrm",
       "path": "cmd/aicrm/private_message_control_postgres_test.go",
-      "tests": ["TestPostgreSQLPrivateMessageControlInstalled"],
+      "tests": [
+        "TestPostgreSQLPrivateMessageControlInstalled"
+      ],
       "postgres": true,
       "browser": false,
       "installed": true
@@ -147,6 +149,16 @@
       ],
       "postgres": false,
       "browser": false,
+      "installed": true
+    },
+    "group-ops-owner-binding": {
+      "package": "./cmd/aicrm",
+      "path": "cmd/aicrm/group_ops_owner_binding_installed_test.go",
+      "tests": [
+        "TestGroupOpsOwnerBindingInstalled"
+      ],
+      "postgres": true,
+      "browser": true,
       "installed": true
     }
   }

@@ -1,31 +1,44 @@
 {
   "schema": 1,
-  "baseline_sha": "a2662f055b1305e22f838e6012f6da056ebcc5b9",
+  "baseline_sha": "ab8c76e436d1648451180a2c7d102424fee7f246",
   "checks": [
     {
-      "lane": "preflight",
-      "path": "scripts/test_domestic_host_input_equivalence.py",
-      "reason": "Host真实Git等价拒绝与清理从锚库连接、owner/库存/drop失败保护"
+      "lane": "backend",
+      "package": "./internal/groupops/app",
+      "reason": "停用绑定群所有权拒绝、幂等重放和CAS；现有Webhook/执行合同"
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/installed_survey_provenance_test.go",
-      "test": "TestInstalledSurveyPackageProvenanceAllowsOnlyUnchangedHost",
-      "reason": "安装夹具输入证明与controller/builder一致；二进制/manifest/资源漂移拒绝"
+      "package": "./internal/groupops/http",
+      "reason": "群目录与命令授权/CSRF合同"
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/installed_survey_provenance_test.go",
-      "test": "TestInstalledSurveyWebTreeVerifiesActualGitObjects",
-      "reason": "安装夹具输入证明与controller/builder一致；二进制/manifest/资源漂移拒绝"
+      "path": "cmd/aicrm/group_ops_paused_save_integration_test.go",
+      "test": "TestGroupOpsPostgreSQLActivePlanRequiresExplicitPauseBeforeConfiguration",
+      "postgres": true,
+      "reason": "实际PG保存/回读停用绑定且无外部效果"
     },
     {
       "lane": "backend",
-      "path": "cmd/aicrm/installed_survey_provenance_test.go",
-      "test": "TestInstalledFrontendRegistryPolicyMatchesBuilder",
-      "reason": "安装夹具输入证明与controller/builder一致；二进制/manifest/资源漂移拒绝"
+      "path": "cmd/aicrm/group_ops_paused_save_integration_test.go",
+      "test": "TestGroupOpsPostgreSQLPausedBasicSave",
+      "postgres": true,
+      "reason": "直接消费者：先保存运营者与停用基础配置"
+    },
+    {
+      "lane": "frontend",
+      "path": "scripts/groupops-host-adapter-e2e.mjs",
+      "reason": "初次群名、启用刷新、停用增减、搜索scope、取消、并发读回"
+    },
+    {
+      "lane": "frontend",
+      "path": "web/v3/shared/ui/groupPickerAdapter.test.mjs",
+      "reason": "共享选择器scope总数/搜索/分页/错误草稿保留"
     }
   ],
-  "installed_checks": [],
+  "installed_checks": [
+    "group-ops-owner-binding"
+  ],
   "build_commands": []
 }

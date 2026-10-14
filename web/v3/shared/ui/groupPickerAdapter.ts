@@ -18,7 +18,8 @@ export type GroupPickerOptions = {
   limit?: number;
   readonly?: boolean;
   readonlyReason?: string;
-  loadPage(request: { query: string; cursor?: string; signal: AbortSignal }): Promise<{ items: GroupPickerRecord[]; nextCursor?: string }>;
+  directoryHint?: string;
+  loadPage(request: { query: string; cursor?: string; signal: AbortSignal }): Promise<{ items: GroupPickerRecord[]; nextCursor?: string; total?: number }>;
   onCommit(result: { selected: GroupPickerRecord[]; added: GroupPickerRecord[]; removed: GroupPickerRecord[] }): Promise<void> | void;
   /** Reports whether this dialog attempted a save before it was cancelled. */
   onCancel?(state: { saveAttempted: boolean }): void;
@@ -67,6 +68,7 @@ export function openGroupPicker(options: GroupPickerOptions): void {
   mask.dataset.selectionScope = options.scope;
   mask.innerHTML = `<div class="group-ops__modal group-ops__modal--groups" role="dialog" aria-modal="true" aria-labelledby="aicrm-v3-group-picker-title">
     <div class="group-ops__modal-head"><h3 id="aicrm-v3-group-picker-title">选择群聊</h3><button class="group-ops__button" type="button" data-v3-group-cancel>取消</button></div>
+    ${options.directoryHint ? `<p class="group-ops__group-meta">${escape(options.directoryHint)}</p>` : ''}
     <label class="group-ops__field"><span>群名 / 群引用</span><input data-v3-picker-search-input aria-label="搜索群聊"></label>
     <div class="group-ops__modal-footer"><button class="group-ops__button group-ops__button--primary" type="button" data-v3-group-search>搜索</button><button class="group-ops__button" type="button" data-v3-group-reload>刷新</button></div>
     <p class="group-ops__modal-notice" data-v3-group-status role="status"></p>
@@ -88,12 +90,14 @@ export function openGroupPicker(options: GroupPickerOptions): void {
   let saving = false;
   let saveAttempted = false;
   let saveFailure: string | undefined;
+  let directoryTotal: number | undefined;
   let restoreRemovedFocus: string | undefined;
   let dialogControl!: SelectionDialogController;
 
   const loader: SelectionLoader<GroupPickerRecord> = async (request) => {
     const page = await options.loadPage(request);
     if (request.signal.aborted) throw new DOMException('群目录读取已替换', 'AbortError');
+    directoryTotal = Number.isSafeInteger(page.total) && Number(page.total) >= 0 ? page.total : undefined;
     return {
       items: (page.items || [])
         .filter((record) => record && record.chat_reference)
@@ -129,7 +133,7 @@ export function openGroupPicker(options: GroupPickerOptions): void {
           : undefined)
         || snapshot.error
         || snapshot.notice
-        || (snapshot.loading ? '正在读取群目录…' : `已暂选 ${snapshot.draft.length} 个群`);
+        || (snapshot.loading ? '正在读取群目录…' : `${directoryTotal === undefined ? '' : `符合筛选 ${directoryTotal} 个群 · `}已暂选 ${snapshot.draft.length} 个群`);
     selected.innerHTML = snapshot.draft.map((record) => {
       const key = selectionKey(record.kind, record.source, record.id);
       return `<button class="group-ops__group-item" type="button" data-v3-group-remove="${escape(key)}"${saving || snapshot.readonlyReason ? ' disabled' : ''}><strong>${escape(record.value.display_name || '未命名群')}</strong><code>${escape(record.value.chat_reference)}</code><span>${record.disabledReason ? `${escape(record.disabledReason)} · ` : ''}移除</span></button>`;

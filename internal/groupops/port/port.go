@@ -77,6 +77,11 @@ type Member struct {
 type GroupAsset struct {
 	ID       int64  `json:"group_asset_id,string"`
 	AssetRef string `json:"asset_reference"`
+	// Directory facts decorate a persisted binding; absence never removes it.
+	DisplayName         string `json:"display_name,omitempty"`
+	OwnerStaffID        int64  `json:"owner_staff_id,omitempty"`
+	MemberCount         *int32 `json:"member_count"`
+	ExternalMemberCount *int32 `json:"external_member_count"`
 }
 
 type Node struct {
