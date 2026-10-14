@@ -43769,6 +43769,30 @@
           "pattern": "^eer_[1-9][0-9]*$",
           "type": "string"
         },
+        "group_deliveries": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "delivery_proven": {
+                "type": "boolean"
+              },
+              "status": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "target_reference": {
+                "pattern": "^[A-Za-z0-9._:-]{1,128}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "target_reference",
+              "delivery_proven"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "material_digest": {
           "pattern": "^sha256:[0-9a-f]{64}$",
           "type": "string"
@@ -43819,6 +43843,17 @@
           "minLength": 1,
           "pattern": "^[A-Za-z0-9._:-]{1,128}$",
           "type": "string"
+        },
+        "target_references": {
+          "description": "Complete frozen group list; target_reference is its compatibility anchor.",
+          "items": {
+            "pattern": "^[A-Za-z0-9._:-]{1,128}$",
+            "type": "string"
+          },
+          "maxItems": 2000,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
         },
         "updated_at": {
           "format": "date-time",
@@ -45649,6 +45684,7 @@
             "pattern": "^[A-Za-z0-9._:-]{1,128}$",
             "type": "string"
           },
+          "maxItems": 2000,
           "minItems": 1,
           "type": "array",
           "uniqueItems": true

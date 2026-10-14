@@ -19,18 +19,6 @@
     },
     {
       "lane": "backend",
-      "package": "./internal/outbound",
-      "test": "TestGroupMessage",
-      "reason": "one Provider write, artifact and material ordering"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/wecom/adapter",
-      "test": "TestClientGroupMessage",
-      "reason": "exact chat_id_list and Provider receipt classification"
-    },
-    {
-      "lane": "backend",
       "package": "./cmd/aicrm",
       "test": "TestGroupOpsWebhookPostgreSQLJourney",
       "postgres": true,
@@ -63,10 +51,102 @@
       "test": "TestGroupOpsSharedRiverRuntimeJourney",
       "postgres": true,
       "reason": "direct legacy consumer retains one-group node continuation and unknown/no-resend behavior"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessageProviderKeepsPreparationWriteDisabled",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessageProviderDoesNotCallProviderWhenMaterialReadinessFails",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessageProviderUsesEffectBoundSnapshotAndExactChat",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessageProviderSendsPureTextWebhookSnapshot",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessageRequestCanonicalizesJSONBSnapshotsWithoutWeakeningDigestChecks",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessageRequestAcceptsWebhookTextThenFrozenAttachmentOrder",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessageCompletionSinkProjectsTerminalAndUnknownStates",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessageCompletionSinkPersistsOnlyValidatedTaskArtifact",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessageProviderPreflightsUnifiedMediaAndExecuteUsesFreshID",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessageProviderPreflightSnoozesPendingUnifiedMedia",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessagePreparedRequestRejectsReorderedMaterialSources",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessagePreflightAllowsTerminalPreparationToFinalizeLocally",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/outbound/group_message_test.go",
+      "test": "TestGroupMessageBatchUsesOneProviderCallAndCompleteFrozenArray",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/wecom/adapter/client_test.go",
+      "test": "TestClientGroupMessageUsesExactChatIDListAndRejectsPartialReceipt",
+      "reason": "direct batch Provider transport, artifact and material consumer"
+    },
+    {
+      "lane": "backend",
+      "path": "internal/wecom/adapter/client_test.go",
+      "test": "TestClientGroupMessageCreatesOneTaskForElevenGroups",
+      "reason": "direct batch Provider transport, artifact and material consumer"
     }
   ],
   "installed_checks": [
     "group-ops-one-batch"
   ],
-  "build_commands": []
+  "build_commands": [
+    "./cmd/aicrm-cli"
+  ]
 }
