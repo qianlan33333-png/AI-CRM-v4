@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"io"
 	"net/http"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	p "github.com/qianlan33333-png/AI-CRM-v3/internal/groupops/port"
 	testconfig "github.com/qianlan33333-png/AI-CRM-v3/internal/platform/config/tests"
@@ -22,15 +25,10 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 		t.Fatal("exact installed package and isolated PostgreSQL required")
 	}
 	f := newPublicSurveyPresentationChromiumFixture(t)
-	var owner, other, planID int64
-	err := f.native.QueryRow(f.ctx, `INSERT INTO admin_users(username,password_hash,display_name,wecom_userid,is_active,login_enabled) VALUES('binding-owner','$argon2id$test','运营者','binding-owner',true,false) RETURNING id`).Scan(&owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = f.native.QueryRow(f.ctx, `INSERT INTO admin_users(username,password_hash,display_name,wecom_userid,is_active,login_enabled) VALUES('binding-other','$argon2id$test','其他群主','binding-other',true,false) RETURNING id`).Scan(&other)
-	if err != nil {
-		t.Fatal(err)
-	}
+	owner := groupOpsBindingFixtureStaff(t, f.ctx, f.native, "binding-owner", "运营者")
+	other := groupOpsBindingFixtureStaff(t, f.ctx, f.native, "binding-other", "其他群主")
+	var planID int64
+	var err error
 	err = f.native.QueryRow(f.ctx, `INSERT INTO group_ops_plans(name,status,revision,created_by,updated_by,created_at,updated_at,plan_type) VALUES('绑定群安装合同','paused',1,$1,$1,now(),now(),'webhook') RETURNING id`, owner).Scan(&planID)
 	if err != nil {
 		t.Fatal(err)
@@ -82,8 +80,12 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 	command := map[string]any{"expected_revision": 1, "asset_reference": "binding-owned"}
 	first := call("POST", path+"/group-assets", command, "installed-binding-add", 200)
 	var d p.Detail
-	if err = json.Unmarshal(first, &d); err != nil || len(d.GroupAssets) != 1 || d.GroupAssets[0].DisplayName != "真实群名" || d.GroupAssets[0].OwnerStaffID != owner || d.GroupAssets[0].MemberCount == nil || *d.GroupAssets[0].MemberCount != 12 || d.Plan.Status != p.PlanPaused {
+	if err = json.Unmarshal(first, &d); err != nil || len(d.GroupAssets) != 1 || d.Plan.Status != p.PlanPaused || d.Plan.Revision != 2 {
 		t.Fatalf("first=%s err=%v", first, err)
+	}
+	readback := call("GET", path, nil, "", 200)
+	if err = json.Unmarshal(readback, &d); err != nil || len(d.GroupAssets) != 1 || d.GroupAssets[0].DisplayName != "真实群名" || d.GroupAssets[0].OwnerStaffID != owner || d.GroupAssets[0].MemberCount == nil || *d.GroupAssets[0].MemberCount != 12 || d.Plan.Status != p.PlanPaused {
+		t.Fatalf("decorated readback=%s err=%v", readback, err)
 	}
 	if replay := call("POST", path+"/group-assets", command, "installed-binding-add", 200); !bytes.Equal(first, replay) {
 		t.Fatal("replay changed result")
@@ -126,4 +128,36 @@ func TestGroupOpsOwnerBindingInstalled(t *testing.T) {
 		}
 	}
 	t.Log("installed group binding: names, owner scope/rejection, paused save, CAS, replay, removal, readback; zero outbound writes")
+}
+
+// Employees are seeded with exactly one role in the same SQL transaction;
+// they remain unable to log in, and the fixture grants no real user access.
+func groupOpsBindingFixtureStaff(t *testing.T, ctx context.Context, pool *pgxpool.Pool, username, displayName string) int64 {
+	t.Helper()
+	var id int64
+	err := pool.QueryRow(ctx, `WITH staff AS (INSERT INTO admin_users(username,password_hash,display_name,wecom_userid,is_active,login_enabled) VALUES($1,'$argon2id$test',$2,$1,true,false) RETURNING id), role AS (INSERT INTO admin_user_roles(admin_user_id,role_code) SELECT id,'viewer' FROM staff) SELECT id FROM staff`, username, displayName).Scan(&id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestGroupOpsOwnerBindingFixtureStaffGovernance(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	databaseURL, cleanup := adminAccessCompositionDatabase(t, ctx)
+	defer cleanup()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	owner := groupOpsBindingFixtureStaff(t, ctx, pool, "binding-governed-fixture", "运营者")
+	var roles int
+	var role string
+	var login, active bool
+	err = pool.QueryRow(ctx, `SELECT count(r.*),min(r.role_code),u.login_enabled,u.is_active FROM admin_users u JOIN admin_user_roles r ON r.admin_user_id=u.id WHERE u.id=$1 GROUP BY u.login_enabled,u.is_active`, owner).Scan(&roles, &role, &login, &active)
+	if err != nil || roles != 1 || role != "viewer" || login || !active {
+		t.Fatalf("fixture roles=%d role=%s login=%t active=%t err=%v", roles, role, login, active, err)
+	}
 }

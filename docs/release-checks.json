@@ -1,53 +1,17 @@
 {
   "schema": 1,
-  "baseline_sha": "ab8c76e436d1648451180a2c7d102424fee7f246",
+  "baseline_sha": "c52c738e0c68de928a48d87bfaceb39f354c0290",
   "checks": [
     {
       "lane": "backend",
-      "package": "./internal/groupops/app",
-      "reason": "停用绑定群所有权拒绝、幂等重放和CAS；现有Webhook/执行合同"
-    },
-    {
-      "lane": "backend",
-      "package": "./internal/groupops/http",
-      "reason": "群目录与命令授权/CSRF合同"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/group_ops_paused_save_integration_test.go",
-      "test": "TestGroupOpsPostgreSQLActivePlanRequiresExplicitPauseBeforeConfiguration",
+      "path": "cmd/aicrm/group_ops_owner_binding_installed_test.go",
+      "test": "TestGroupOpsOwnerBindingFixtureStaffGovernance",
       "postgres": true,
-      "reason": "实际PG保存/回读停用绑定且无外部效果"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/group_ops_paused_save_integration_test.go",
-      "test": "TestGroupOpsPostgreSQLPausedBasicSave",
-      "postgres": true,
-      "reason": "直接消费者：先保存运营者与停用基础配置"
-    },
-    {
-      "lane": "frontend",
-      "path": "scripts/groupops-host-adapter-e2e.mjs",
-      "reason": "初次群名、启用刷新、停用增减、搜索scope、取消、并发读回"
-    },
-    {
-      "lane": "frontend",
-      "path": "web/v3/shared/ui/groupPickerAdapter.test.mjs",
-      "reason": "共享选择器scope总数/搜索/分页/错误草稿保留"
-    },
-    {
-      "lane": "backend",
-      "path": "cmd/aicrm/group_ops_catalog_owner_test.go",
-      "test": "TestGroupOpsPostgreSQLCatalogOwnerMapsOnlyExistingActiveStaff",
-      "postgres": true,
-      "reason": "同步群主到已有活跃员工映射；未知/停用拒绝且不建客或账号"
+      "reason": "源码-only夹具修复：员工与唯一viewer角色同一事务且不授予登录；实际包合同由原stage-check重跑"
     }
   ],
   "installed_checks": [
     "group-ops-owner-binding"
   ],
-  "build_commands": [
-    "./cmd/aicrm-cli"
-  ]
+  "build_commands": []
 }
