@@ -68,10 +68,8 @@
     },
     {
       "lane": "browser",
-      "package": "./cmd/aicrm",
       "path": "cmd/aicrm/referral_chromium_postgres_integration_test.go",
       "test": "TestPostgreSQLReferralChromiumJourney",
-      "postgres": true,
       "reason": "实际API/PG/Canvas导出、默认与旧布局、375/430及话术互动"
     }
   ],
